@@ -17,3 +17,6 @@ web/*.local
 *.json
 **/*.pyc
 .venv
+.idea
+*.egg-info
+uv.lock
