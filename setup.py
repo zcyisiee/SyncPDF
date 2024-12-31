@@ -14,8 +14,8 @@ from typing import cast
 from pybind11.setup_helpers import ParallelCompile, Pybind11Extension, build_ext
 from setuptools import Extension, setup
 
-extra_includes = []
-extra_library_dirs = ["/usr/local/lib"]
+extra_includes = ['/opt/homebrew/include']
+extra_library_dirs = ["/usr/local/lib", '/opt/homebrew/lib']
 
 # Use cast because mypy has trouble seeing Pybind11Extension is a subclass of
 # Extension.
