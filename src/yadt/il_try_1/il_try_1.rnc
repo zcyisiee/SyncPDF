@@ -1,0 +1,20 @@
+start = Document
+Document =
+  element document {
+    Page+,
+    attribute totalPages { xsd:int }
+  }
+Page =
+  element page {
+    element mediabox { Box },
+    element cropbox { Box },
+    attribute pageNumber { xsd:int }
+  }
+Box =
+  element box {
+    # from (x,y) to (x2,y2)
+    attribute x { xsd:float },
+    attribute y { xsd:float },
+    attribute x2 { xsd:float },
+    attribute y2 { xsd:float }
+  }

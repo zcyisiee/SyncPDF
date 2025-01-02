@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document totalPages="4">
+  <page pageNumber="0">
+    <mediabox>
+      <box x="0.0" y="0.0" x2="595.2" y2="841.92"/>
+    </mediabox>
+    <cropbox>
+      <box x="0.0" y="0.0" x2="595.2" y2="841.92"/>
+    </cropbox>
+  </page>
+  <page pageNumber="1">
+    <mediabox>
+      <box x="0.0" y="0.0" x2="595.2" y2="841.92"/>
+    </mediabox>
+    <cropbox>
+      <box x="0.0" y="0.0" x2="595.2" y2="841.92"/>
+    </cropbox>
+  </page>
+  <page pageNumber="2">
+    <mediabox>
+      <box x="0.0" y="0.0" x2="595.2" y2="841.92"/>
+    </mediabox>
+    <cropbox>
+      <box x="0.0" y="0.0" x2="595.2" y2="841.92"/>
+    </cropbox>
+  </page>
+  <page pageNumber="3">
+    <mediabox>
+      <box x="0.0" y="0.0" x2="595.2" y2="841.92"/>
+    </mediabox>
+    <cropbox>
+      <box x="0.0" y="0.0" x2="595.2" y2="841.92"/>
+    </cropbox>
+  </page>
+</document>

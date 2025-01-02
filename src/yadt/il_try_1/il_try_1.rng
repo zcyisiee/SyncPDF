@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<grammar xmlns="http://relaxng.org/ns/structure/1.0" datatypeLibrary="http://www.w3.org/2001/XMLSchema-datatypes">
+  <start>
+    <ref name="Document"/>
+  </start>
+  <define name="Document">
+    <element name="document">
+      <oneOrMore>
+        <ref name="Page"/>
+      </oneOrMore>
+      <attribute name="totalPages">
+        <data type="int"/>
+      </attribute>
+    </element>
+  </define>
+  <define name="Page">
+    <element name="page">
+      <element name="mediabox">
+        <ref name="Box"/>
+      </element>
+      <element name="cropbox">
+        <ref name="Box"/>
+      </element>
+      <attribute name="pageNumber">
+        <data type="int"/>
+      </attribute>
+    </element>
+  </define>
+  <define name="Box">
+    <element name="box">
+      <!-- from (x,y) to (x2,y2) -->
+      <attribute name="x">
+        <data type="float"/>
+      </attribute>
+      <attribute name="y">
+        <data type="float"/>
+      </attribute>
+      <attribute name="x2">
+        <data type="float"/>
+      </attribute>
+      <attribute name="y2">
+        <data type="float"/>
+      </attribute>
+    </element>
+  </define>
+</grammar>

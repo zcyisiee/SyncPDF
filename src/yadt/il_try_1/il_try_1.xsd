@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:element name="document">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element maxOccurs="unbounded" ref="page"/>
+      </xs:sequence>
+      <xs:attribute name="totalPages" use="required" type="xs:int"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="page">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="mediabox"/>
+        <xs:element ref="cropbox"/>
+      </xs:sequence>
+      <xs:attribute name="pageNumber" use="required" type="xs:int"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="mediabox" type="Box"/>
+  <xs:element name="cropbox" type="Box"/>
+  <xs:complexType name="Box">
+    <xs:sequence>
+      <xs:element ref="box"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="box">
+    <xs:complexType>
+      <xs:attribute name="x" use="required" type="xs:float"/>
+      <xs:attribute name="y" use="required" type="xs:float"/>
+      <xs:attribute name="x2" use="required" type="xs:float"/>
+      <xs:attribute name="y2" use="required" type="xs:float"/>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

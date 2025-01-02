@@ -13,6 +13,17 @@ description = "Yet Another Document Translator"
 readme = "README.md"
 requires-python = ">=3.9"
 keywords = ["PDF"]
+dependencies = [
+    "huggingface-hub>=0.27.0",
+    "numpy>=2.0.2",
+    "onnx>=1.17.0",
+    "onnxruntime>=1.20.1",
+    "opencv-python>=4.10.0.84",
+    "pdfminer-six>=20240706",
+    "pymupdf>=1.25.1",
+    "tqdm>=4.67.1",
+    "xsdata[cli,lxml,soap]>=24.12",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
