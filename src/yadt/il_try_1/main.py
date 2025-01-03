@@ -75,7 +75,7 @@ def translate_patch(
     else:
         total_pages = doc_zh.page_count
 
-    il_creater.onTotalPages(total_pages)
+    il_creater.on_total_pages(total_pages)
 
     parser = PDFParser(inf)
     doc = PDFDocument(parser)
@@ -91,11 +91,13 @@ def translate_patch(
             image = np.fromstring(pix.samples, np.uint8).reshape(
                 pix.height, pix.width, 3
             )[:, :, ::-1]
-            page_layout = model.predict(image, imgsz=int(pix.height / 32) * 32)[0]
+            page_layout = model.predict(
+                image, imgsz=int(pix.height / 32) * 32)[0]
             # kdtree 是不可能 kdtree 的，不如直接渲染成图片，用空间换时间
             box = np.ones((pix.height, pix.width))
             h, w = box.shape
-            vcls = ["abandon", "figure", "table", "isolate_formula", "formula_caption"]
+            vcls = ["abandon", "figure", "table",
+                    "isolate_formula", "formula_caption"]
             for i, d in enumerate(page_layout.boxes):
                 if page_layout.names[int(d.cls)] not in vcls:
                     x0, y0, x1, y1 = d.xyxy.squeeze()
@@ -123,7 +125,7 @@ def translate_patch(
             doc_zh.update_stream(page.page_xref, b"")
             doc_zh[page.pageno].set_contents(page.page_xref)
             ops_base = interpreter.process_page(page)
-            il_creater.onPageBaseOperation(ops_base)
+            il_creater.on_page_base_operation(ops_base)
 
     device.close()
     return obj_patch
@@ -167,7 +169,7 @@ def main():
 
     doc_zh.save("../../../examples/pdf/il_try_1/测试写入1.pdf")
 
-    docs = il_creater.CreateIL()
+    docs = il_creater.create_il()
 
     xml_converter = XMLConverter()
 

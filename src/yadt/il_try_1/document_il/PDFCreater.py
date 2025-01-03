@@ -1,5 +1,3 @@
-import base64
-
 import pymupdf
 from bitstring import Bits, BitStream
 
@@ -26,11 +24,13 @@ class PDFCreater:
             )
         if graphic_state.ncolor is not None:
             draw_op.append(
-                f'{' '.join((str(x) for x in graphic_state.ncolor))} sc \n'.encode()
+                f'{' '.join((str(x) for x in graphic_state.ncolor))
+                   } sc \n'.encode()
             )
         if graphic_state.scolor is not None:
             draw_op.append(
-                f'{' '.join((str(x) for x in graphic_state.ncolor))} SC \n'.encode()
+                f'{' '.join((str(x) for x in graphic_state.ncolor))
+                   } SC \n'.encode()
             )
 
     def write(self, out_file: str):
@@ -42,7 +42,8 @@ class PDFCreater:
             draw_op.append(page.base_operations.value.encode())
             draw_op.append(b' Q ')
             draw_op.append(
-                f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode()
+                f"q Q 1 0 0 1 {page.cropbox.box.x} {
+                    page.cropbox.box.y} cm \n".encode()
             )
             # draw_op.append(b'q ')
             for char in page.pdf_character:
@@ -50,7 +51,8 @@ class PDFCreater:
                 draw_op.append(b"q ")
                 self.render_graphic_state(draw_op, char.graphic_state)
                 draw_op.append(
-                    f"BT /{char.pdf_font_id} {char_size:f} Tf 1 0 0 1 {char.box.x:f} {char.box.y:f} Tm (".encode()
+                    f"BT /{char.pdf_font_id} {char_size:f} Tf 1 0 0 1 {
+                        char.box.x:f} {char.box.y:f} Tm (".encode()
                 )
                 if char.pdf_character_id in (
                     ord("["),
@@ -72,4 +74,3 @@ class PDFCreater:
             pdf[page.page_number].set_contents(op_container)
         pdf.save(out_file, expand=True, pretty=True)
         pdf.save(out_file + '.compressed.pdf', garbage=3, deflate=True)
-

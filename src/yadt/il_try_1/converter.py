@@ -38,10 +38,10 @@ class PDFConverterEx(PDFConverter):
         (x0, y0) = apply_matrix_pt(ctm, (x0, y0))
         (x1, y1) = apply_matrix_pt(ctm, (x1, y1))
         mediabox = (0, 0, abs(x0 - x1), abs(y0 - y1))
-        self.il_creater.onPageMediaBox(
+        self.il_creater.on_page_media_box(
             mediabox[0], mediabox[1], mediabox[2], mediabox[3]
         )
-        self.il_creater.onPageNumber(page.pageno)
+        self.il_creater.on_page_number(page.pageno)
         self.cur_item = LTPage(page.pageno, mediabox)
 
     def end_page(self, page):
@@ -193,7 +193,7 @@ class TranslateConverter(PDFConverterEx):
         # A. 原文档解析
         for child in ltpage:
             if isinstance(child, LTChar):
-                self.il_creater.onLTChar(child)
+                self.il_creater.on_lt_char(child)
                 cur_v = False
                 layout = self.layout[ltpage.pageid]
                 # ltpage.height 可能是 fig 里面的高度，这里统一用 layout.shape

@@ -103,7 +103,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                         objid = spec.objid
                     spec = dict_value(spec)
                     font = self.rsrcmgr.get_font(objid, spec)
-                    self.il_creater.onPageResourceFont(font, objid, fontid)
+                    self.il_creater.on_page_resource_font(font, objid, fontid)
                     self.fontmap[fontid] = font
                     self.fontmap[fontid].descent = 0  # hack fix descent
                     self.fontid[self.fontmap[fontid]] = fontid
@@ -149,7 +149,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
         Introduced in PDF 1.1
         """
         try:
-            self.il_creater.onCS(literal_name(name))
+            self.il_creater.on_stroking_color_space(literal_name(name))
             self.scs = self.csmap[literal_name(name)]
         except KeyError:
             if settings.STRICT:
@@ -159,7 +159,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
     def do_cs(self, name: PDFStackT) -> None:
         """Set color space for nonstroking operations"""
         try:
-            self.il_creater.oncs(literal_name(name))
+            self.il_creater.on_non_stroking_color_space(literal_name(name))
             self.ncs = self.csmap[literal_name(name)]
         except KeyError:
             if settings.STRICT:
@@ -295,8 +295,8 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             ctm = (0, 1, -1, 0, y1, -x0)
         else:
             ctm = (1, 0, 0, 1, -x0, -y0)
-        self.il_creater.onPageStart()
-        self.il_creater.onPageCropBox(x0, y0, x1, y1)
+        self.il_creater.on_page_start()
+        self.il_creater.on_page_crop_box(x0, y0, x1, y1)
         self.device.begin_page(page, ctm)
         ops_base = self.render_contents(page.resources, page.contents, ctm=ctm)
         self.device.fontid = self.fontid
