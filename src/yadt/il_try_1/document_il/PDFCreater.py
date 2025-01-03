@@ -49,13 +49,6 @@ class PDFCreater:
                 char_size = char.size
                 draw_op.append(b"q ")
                 self.render_graphic_state(draw_op, char.graphic_state)
-                if (
-                    char.graphic_state is not None
-                    and char.graphic_state.ncolor is not None
-                ):
-                    draw_op.append(
-                        f'{' '.join((str(x) for x in char.graphic_state.ncolor))} sc \n'.encode()
-                    )
                 draw_op.append(
                     f"BT /{char.pdf_font_id} {char_size:f} Tf 1 0 0 1 {char.box.x:f} {char.box.y:f} Tm (".encode()
                 )
@@ -78,3 +71,5 @@ class PDFCreater:
             pdf.update_stream(op_container, draw_op.tobytes())
             pdf[page.page_number].set_contents(op_container)
         pdf.save(out_file, expand=True, pretty=True)
+        pdf.save(out_file + '.compressed.pdf', garbage=3, deflate=True)
+
