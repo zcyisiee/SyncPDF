@@ -16,11 +16,13 @@ class PDFCreater:
             return
         if graphic_state.stroking_color_space_name:
             draw_op.append(
-                f"/{graphic_state.stroking_color_space_name} CS \n".encode()
+                f"/{graphic_state.stroking_color_space_name}"
+                f" CS \n".encode()
             )
         if graphic_state.non_stroking_color_space_name:
             draw_op.append(
-                f"/{graphic_state.non_stroking_color_space_name} cs \n".encode()
+                f"/{graphic_state.non_stroking_color_space_name}"
+                f" cs \n".encode()
             )
         if graphic_state.ncolor is not None:
             draw_op.append(
@@ -68,7 +70,8 @@ class PDFCreater:
             # draw_op.append(b'Q ')
 
             op_container = pdf.get_new_xref()
-            # Since this is a draw instruction container, no additional information is needed
+            # Since this is a draw instruction container, 
+            # no additional information is needed
             pdf.update_object(op_container, "<<>>")
             pdf.update_stream(op_container, draw_op.tobytes())
             pdf[page.page_number].set_contents(op_container)

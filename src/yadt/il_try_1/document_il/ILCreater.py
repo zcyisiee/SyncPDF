@@ -90,7 +90,9 @@ class ILCreater:
                 continue
             raise NotImplementedError
 
-        graphic_state.stroking_color_space_name = self.stroking_color_space_name
+        graphic_state.stroking_color_space_name = (
+            self.stroking_color_space_name
+        )
         graphic_state.non_stroking_color_space_name = (
             self.non_stroking_color_space_name
         )
