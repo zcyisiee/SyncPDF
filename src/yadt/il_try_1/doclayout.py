@@ -82,7 +82,7 @@ class OnnxModel(DocLayoutModel):
             model_dir = snapshot_download(repo_mapping[repo_id])
             pth = os.path.join(model_dir, filename)
         else:
-            pth = hf_hub_download(repo_id=repo_id, filename=filename, etag_timeout=1)
+            pth = hf_hub_download(repo_id=repo_id, filename=filename, etag_timeout=1, local_files_only=True)
         return OnnxModel(pth)
 
     @property

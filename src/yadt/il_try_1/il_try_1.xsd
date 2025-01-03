@@ -13,6 +13,9 @@
       <xs:sequence>
         <xs:element ref="mediabox"/>
         <xs:element ref="cropbox"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pageLayout"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfFont"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfCharacter"/>
       </xs:sequence>
       <xs:attribute name="pageNumber" use="required" type="xs:int"/>
     </xs:complexType>
@@ -30,6 +33,38 @@
       <xs:attribute name="y" use="required" type="xs:float"/>
       <xs:attribute name="x2" use="required" type="xs:float"/>
       <xs:attribute name="y2" use="required" type="xs:float"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:simpleType name="PDFXrefId">
+    <xs:restriction base="xs:int"/>
+  </xs:simpleType>
+  <xs:element name="pdfFont">
+    <xs:complexType>
+      <xs:attribute name="name" use="required" type="xs:string"/>
+      <xs:attribute name="fontId" use="required" type="xs:string"/>
+      <xs:attribute name="xrefId" use="required" type="PDFXrefId"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pdfCharacter">
+    <xs:complexType>
+      <xs:complexContent>
+        <xs:extension base="Box">
+          <xs:attribute name="pdfFontId" use="required" type="xs:string"/>
+          <xs:attribute name="pdfCharacterId" use="required" type="xs:int"/>
+          <xs:attribute name="char_unicode" use="required" type="xs:string"/>
+          <xs:attribute name="advance" use="required" type="xs:float"/>
+        </xs:extension>
+      </xs:complexContent>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pageLayout">
+    <xs:complexType>
+      <xs:complexContent>
+        <xs:extension base="Box">
+          <xs:attribute name="conf" use="required" type="xs:float"/>
+          <xs:attribute name="class_name" use="required" type="xs:string"/>
+        </xs:extension>
+      </xs:complexContent>
     </xs:complexType>
   </xs:element>
 </xs:schema>

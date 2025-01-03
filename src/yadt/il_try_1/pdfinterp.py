@@ -102,7 +102,9 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                     if isinstance(spec, PDFObjRef):
                         objid = spec.objid
                     spec = dict_value(spec)
-                    self.fontmap[fontid] = self.rsrcmgr.get_font(objid, spec)
+                    font = self.rsrcmgr.get_font(objid, spec)
+                    self.il_creater.onPageResourceFont(font, objid, fontid)
+                    self.fontmap[fontid] = font
                     self.fontmap[fontid].descent = 0  # hack fix descent
                     self.fontid[self.fontmap[fontid]] = fontid
             elif k == "ColorSpace":

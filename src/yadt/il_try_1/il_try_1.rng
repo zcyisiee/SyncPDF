@@ -21,6 +21,15 @@
       <element name="cropbox">
         <ref name="Box"/>
       </element>
+      <zeroOrMore>
+        <ref name="PageLayout"/>
+      </zeroOrMore>
+      <zeroOrMore>
+        <ref name="PDFFont"/>
+      </zeroOrMore>
+      <zeroOrMore>
+        <ref name="PDFCharacter"/>
+      </zeroOrMore>
       <attribute name="pageNumber">
         <data type="int"/>
       </attribute>
@@ -41,6 +50,50 @@
       <attribute name="y2">
         <data type="float"/>
       </attribute>
+    </element>
+  </define>
+  <define name="PDFXrefId">
+    <data type="int"/>
+  </define>
+  <define name="PDFFont">
+    <element name="pdfFont">
+      <attribute name="name">
+        <data type="string"/>
+      </attribute>
+      <attribute name="fontId">
+        <data type="string"/>
+      </attribute>
+      <attribute name="xrefId">
+        <ref name="PDFXrefId"/>
+      </attribute>
+    </element>
+  </define>
+  <define name="PDFCharacter">
+    <element name="pdfCharacter">
+      <attribute name="pdfFontId">
+        <data type="string"/>
+      </attribute>
+      <attribute name="pdfCharacterId">
+        <data type="int"/>
+      </attribute>
+      <attribute name="char_unicode">
+        <data type="string"/>
+      </attribute>
+      <attribute name="advance">
+        <data type="float"/>
+      </attribute>
+      <ref name="Box"/>
+    </element>
+  </define>
+  <define name="PageLayout">
+    <element name="pageLayout">
+      <attribute name="conf">
+        <data type="float"/>
+      </attribute>
+      <attribute name="class_name">
+        <data type="string"/>
+      </attribute>
+      <ref name="Box"/>
     </element>
   </define>
 </grammar>

@@ -5,6 +5,9 @@ from src.yadt.il_try_1.document_il.il_try_1 import (
     Document,
     Mediabox,
     Page,
+    PageLayout,
+    PdfCharacter,
+    PdfFont,
 )
 
 __all__ = [
@@ -14,4 +17,7 @@ __all__ = [
     "Document",
     "Mediabox",
     "Page",
+    "PageLayout",
+    "PdfCharacter",
+    "PdfFont",
 ]

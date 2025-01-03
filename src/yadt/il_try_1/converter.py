@@ -193,6 +193,7 @@ class TranslateConverter(PDFConverterEx):
         # A. 原文档解析
         for child in ltpage:
             if isinstance(child, LTChar):
+                self.il_creater.onLTChar(child)
                 cur_v = False
                 layout = self.layout[ltpage.pageid]
                 # ltpage.height 可能是 fig 里面的高度，这里统一用 layout.shape

@@ -8,6 +8,9 @@ Page =
   element page {
     element mediabox { Box },
     element cropbox { Box },
+    PageLayout*,
+    PDFFont*,
+    PDFCharacter*,
     attribute pageNumber { xsd:int }
   }
 Box =
@@ -17,4 +20,25 @@ Box =
     attribute y { xsd:float },
     attribute x2 { xsd:float },
     attribute y2 { xsd:float }
+  }
+PDFXrefId = xsd:int
+PDFFont =
+  element pdfFont {
+    attribute name { xsd:string },
+    attribute fontId { xsd:string },
+    attribute xrefId { PDFXrefId }
+  }
+PDFCharacter =
+  element pdfCharacter {
+    attribute pdfFontId { xsd:string },
+    attribute pdfCharacterId { xsd:int },
+    attribute char_unicode { xsd:string },
+    attribute advance { xsd:float },
+    Box
+  }
+PageLayout =
+  element pageLayout {
+    attribute conf { xsd:float },
+    attribute class_name { xsd:string },
+    Box
   }

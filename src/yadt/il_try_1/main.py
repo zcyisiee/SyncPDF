@@ -128,6 +128,7 @@ def translate_patch(
     return obj_patch
 
 
+
 def main():
     resfont = "china-ss"
     print(os.getcwd())
@@ -151,6 +152,7 @@ def main():
 
     il_creater = ILCreater()
 
+    il_creater.mupdf = doc_en
     translate_patch(fp, doc_zh=doc_zh, resfont=resfont, il_creater=il_creater)
 
     docs = il_creater.CreateIL()

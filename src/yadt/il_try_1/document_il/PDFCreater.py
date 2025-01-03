@@ -1,3 +1,5 @@
+import base64
+
 import pymupdf
 
 from yadt.il_try_1.document_il import il_try_1
