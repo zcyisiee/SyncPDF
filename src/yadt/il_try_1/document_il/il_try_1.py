@@ -332,6 +332,14 @@ class Page:
             "required": True,
         },
     )
+    unit: Optional[str] = field(
+        default=None,
+        metadata={
+            "name": "Unit",
+            "type": "Attribute",
+            "required": True,
+        },
+    )
 
 
 @dataclass

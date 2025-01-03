@@ -26,7 +26,12 @@ class ILCreater:
 
     def on_page_start(self):
         self.current_page = il_try_1.Page(
-            pdf_font=[], pdf_character=[], page_layout=[]
+            pdf_font=[],
+            pdf_character=[],
+            page_layout=[],
+            # currently don't support UserUnit page parameter
+            # pdf32000 page 79
+            unit='point',
         )
         self.current_page_font_name_id_map = {}
         self.docs.page.append(self.current_page)

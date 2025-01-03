@@ -33,6 +33,9 @@
       <attribute name="pageNumber">
         <data type="int"/>
       </attribute>
+      <attribute name="Unit">
+        <data type="string"/>
+      </attribute>
       <element name="baseOperations">
         <data type="string"/>
       </element>

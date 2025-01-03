@@ -12,6 +12,7 @@ Page =
     PDFFont*,
     PDFCharacter*,
     attribute pageNumber { xsd:int },
+    attribute Unit { xsd:string },
     element baseOperations { xsd:string }
   }
 Box =

@@ -19,6 +19,7 @@
         <xs:element ref="baseOperations"/>
       </xs:sequence>
       <xs:attribute name="pageNumber" use="required" type="xs:int"/>
+      <xs:attribute name="Unit" use="required" type="xs:string"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="mediabox">

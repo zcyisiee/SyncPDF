@@ -40,9 +40,9 @@ class PDFCreater:
         for page in self.docs.page:
             draw_op = BitStream()
             # q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}
-            draw_op.append(b'q ')
+            draw_op.append(b"q ")
             draw_op.append(page.base_operations.value.encode())
-            draw_op.append(b' Q ')
+            draw_op.append(b" Q ")
             draw_op.append(
                 f"q Q 1 0 0 1 {page.cropbox.box.x} {
                     page.cropbox.box.y} cm \n".encode()
@@ -70,10 +70,10 @@ class PDFCreater:
             # draw_op.append(b'Q ')
 
             op_container = pdf.get_new_xref()
-            # Since this is a draw instruction container, 
+            # Since this is a draw instruction container,
             # no additional information is needed
             pdf.update_object(op_container, "<<>>")
             pdf.update_stream(op_container, draw_op.tobytes())
             pdf[page.page_number].set_contents(op_container)
         pdf.save(out_file, expand=True, pretty=True)
-        pdf.save(out_file + '.compressed.pdf', garbage=3, deflate=True)
+        pdf.save(out_file + ".compressed.pdf", garbage=3, deflate=True)
