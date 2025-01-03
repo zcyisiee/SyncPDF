@@ -14,6 +14,11 @@ web/*.local
 
 **/*.so
 *.pdf
+*.docx
 *.json
 **/*.pyc
 .venv
+.idea
+*.egg-info
+uv.lock
+.DS_Store

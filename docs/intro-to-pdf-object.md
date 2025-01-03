@@ -138,3 +138,7 @@ PDF objects share similarities with data structures found in JSON, YAML, and mod
 
 ## 3. PDF Object Definitions In dpml
 
+
+## 4. Useful Information
+
+- [PDF32000_2008](https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/PDF32000_2008.pdf) page 111: Table 51 - Operator Categories

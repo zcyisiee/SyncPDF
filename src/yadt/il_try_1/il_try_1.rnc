@@ -1,0 +1,68 @@
+start = Document
+Document =
+  element document {
+    Page+,
+    attribute totalPages { xsd:int }
+  }
+Page =
+  element page {
+    element mediabox { Box },
+    element cropbox { Box },
+    PageLayout*,
+    PDFFont*,
+    PDFCharacter*,
+    attribute pageNumber { xsd:int },
+    attribute Unit { xsd:string },
+    element baseOperations { xsd:string }
+  }
+Box =
+  element box {
+    # from (x,y) to (x2,y2)
+    attribute x { xsd:float },
+    attribute y { xsd:float },
+    attribute x2 { xsd:float },
+    attribute y2 { xsd:float }
+  }
+PDFXrefId = xsd:int
+PDFFont =
+  element pdfFont {
+    attribute name { xsd:string },
+    attribute fontId { xsd:string },
+    attribute xrefId { PDFXrefId }
+  }
+PDFCharacter =
+  element pdfCharacter {
+    attribute pdfFontId { xsd:string },
+    attribute pdfCharacterId { xsd:int },
+    attribute char_unicode { xsd:string },
+    attribute advance { xsd:float },
+    attribute size { xsd:float },
+    GraphicState,
+    Box
+  }
+PageLayout =
+  element pageLayout {
+    attribute conf { xsd:float },
+    attribute class_name { xsd:string },
+    Box
+  }
+GraphicState =
+  element graphicState {
+    attribute linewidth { xsd:float }?,
+    attribute dash {
+      list { xsd:float+ }
+    }?,
+    attribute flatness { xsd:float }?,
+    attribute intent { xsd:string }?,
+    attribute linecap { xsd:int }?,
+    attribute linejoin { xsd:int }?,
+    attribute miterlimit { xsd:float }?,
+    attribute ncolor {
+      list { xsd:float+ }
+    }?,
+    attribute scolor {
+      list { xsd:float+ }
+    }?,
+    attribute strokingColorSpaceName { xsd:string }?,
+    attribute nonStrokingColorSpaceName { xsd:string }?
+  }
