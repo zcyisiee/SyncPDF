@@ -1,8 +1,9 @@
 from src.yadt.il_try_1.document_il.il_try_1 import (
+    BaseOperations,
     Box,
-    Box1,
     Cropbox,
     Document,
+    GraphicState,
     Mediabox,
     Page,
     PageLayout,
@@ -11,10 +12,11 @@ from src.yadt.il_try_1.document_il.il_try_1 import (
 )
 
 __all__ = [
-    "Box1",
+    "BaseOperations",
     "Box",
     "Cropbox",
     "Document",
+    "GraphicState",
     "Mediabox",
     "Page",
     "PageLayout",

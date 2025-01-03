@@ -16,17 +16,26 @@
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pageLayout"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfFont"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfCharacter"/>
+        <xs:element ref="baseOperations"/>
       </xs:sequence>
       <xs:attribute name="pageNumber" use="required" type="xs:int"/>
     </xs:complexType>
   </xs:element>
-  <xs:element name="mediabox" type="Box"/>
-  <xs:element name="cropbox" type="Box"/>
-  <xs:complexType name="Box">
-    <xs:sequence>
-      <xs:element ref="box"/>
-    </xs:sequence>
-  </xs:complexType>
+  <xs:element name="mediabox">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="box"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="cropbox">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="box"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="baseOperations" type="xs:string"/>
   <xs:element name="box">
     <xs:complexType>
       <xs:attribute name="x" use="required" type="xs:float"/>
@@ -47,24 +56,66 @@
   </xs:element>
   <xs:element name="pdfCharacter">
     <xs:complexType>
-      <xs:complexContent>
-        <xs:extension base="Box">
-          <xs:attribute name="pdfFontId" use="required" type="xs:string"/>
-          <xs:attribute name="pdfCharacterId" use="required" type="xs:int"/>
-          <xs:attribute name="char_unicode" use="required" type="xs:string"/>
-          <xs:attribute name="advance" use="required" type="xs:float"/>
-        </xs:extension>
-      </xs:complexContent>
+      <xs:sequence>
+        <xs:element ref="graphicState"/>
+        <xs:element ref="box"/>
+      </xs:sequence>
+      <xs:attribute name="pdfFontId" use="required" type="xs:string"/>
+      <xs:attribute name="pdfCharacterId" use="required" type="xs:int"/>
+      <xs:attribute name="char_unicode" use="required" type="xs:string"/>
+      <xs:attribute name="advance" use="required" type="xs:float"/>
+      <xs:attribute name="size" use="required" type="xs:float"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pageLayout">
     <xs:complexType>
-      <xs:complexContent>
-        <xs:extension base="Box">
-          <xs:attribute name="conf" use="required" type="xs:float"/>
-          <xs:attribute name="class_name" use="required" type="xs:string"/>
-        </xs:extension>
-      </xs:complexContent>
+      <xs:sequence>
+        <xs:element ref="box"/>
+      </xs:sequence>
+      <xs:attribute name="conf" use="required" type="xs:float"/>
+      <xs:attribute name="class_name" use="required" type="xs:string"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="graphicState">
+    <xs:complexType>
+      <xs:attribute name="linewidth" type="xs:float"/>
+      <xs:attribute name="dash">
+        <xs:simpleType>
+          <xs:restriction>
+            <xs:simpleType>
+              <xs:list itemType="xs:float"/>
+            </xs:simpleType>
+            <xs:minLength value="1"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:attribute>
+      <xs:attribute name="flatness" type="xs:float"/>
+      <xs:attribute name="intent" type="xs:string"/>
+      <xs:attribute name="linecap" type="xs:int"/>
+      <xs:attribute name="linejoin" type="xs:int"/>
+      <xs:attribute name="miterlimit" type="xs:float"/>
+      <xs:attribute name="ncolor">
+        <xs:simpleType>
+          <xs:restriction>
+            <xs:simpleType>
+              <xs:list itemType="xs:float"/>
+            </xs:simpleType>
+            <xs:minLength value="1"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:attribute>
+      <xs:attribute name="scolor">
+        <xs:simpleType>
+          <xs:restriction>
+            <xs:simpleType>
+              <xs:list itemType="xs:float"/>
+            </xs:simpleType>
+            <xs:minLength value="1"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:attribute>
+      <xs:attribute name="strokingColorSpaceName" type="xs:string"/>
+      <xs:attribute name="nonStrokingColorSpaceName" type="xs:string"/>
     </xs:complexType>
   </xs:element>
 </xs:schema>

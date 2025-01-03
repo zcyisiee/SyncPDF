@@ -21,3 +21,4 @@ web/*.local
 .idea
 *.egg-info
 uv.lock
+.DS_Store

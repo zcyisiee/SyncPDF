@@ -3,6 +3,19 @@ from typing import Optional
 
 
 @dataclass
+class BaseOperations:
+    class Meta:
+        name = "baseOperations"
+
+    value: str = field(
+        default="",
+        metadata={
+            "required": True,
+        },
+    )
+
+
+@dataclass
 class Box:
     class Meta:
         name = "box"
@@ -38,6 +51,87 @@ class Box:
 
 
 @dataclass
+class GraphicState:
+    class Meta:
+        name = "graphicState"
+
+    linewidth: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    dash: list[float] = field(
+        default_factory=list,
+        metadata={
+            "type": "Attribute",
+            "min_length": 1,
+            "tokens": True,
+        },
+    )
+    flatness: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    intent: Optional[str] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    linecap: Optional[int] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    linejoin: Optional[int] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    miterlimit: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    ncolor: list[float] = field(
+        default_factory=list,
+        metadata={
+            "type": "Attribute",
+            "min_length": 1,
+            "tokens": True,
+        },
+    )
+    scolor: list[float] = field(
+        default_factory=list,
+        metadata={
+            "type": "Attribute",
+            "min_length": 1,
+            "tokens": True,
+        },
+    )
+    stroking_color_space_name: Optional[str] = field(
+        default=None,
+        metadata={
+            "name": "strokingColorSpaceName",
+            "type": "Attribute",
+        },
+    )
+    non_stroking_color_space_name: Optional[str] = field(
+        default=None,
+        metadata={
+            "name": "nonStrokingColorSpaceName",
+            "type": "Attribute",
+        },
+    )
+
+
+@dataclass
 class PdfFont:
     class Meta:
         name = "pdfFont"
@@ -68,9 +162,9 @@ class PdfFont:
 
 
 @dataclass
-class Box1:
+class Cropbox:
     class Meta:
-        name = "Box"
+        name = "cropbox"
 
     box: Optional[Box] = field(
         default=None,
@@ -82,22 +176,31 @@ class Box1:
 
 
 @dataclass
-class Cropbox(Box1):
-    class Meta:
-        name = "cropbox"
-
-
-@dataclass
-class Mediabox(Box1):
+class Mediabox:
     class Meta:
         name = "mediabox"
 
+    box: Optional[Box] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+
 
 @dataclass
-class PageLayout(Box1):
+class PageLayout:
     class Meta:
         name = "pageLayout"
 
+    box: Optional[Box] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
     conf: Optional[float] = field(
         default=None,
         metadata={
@@ -115,10 +218,25 @@ class PageLayout(Box1):
 
 
 @dataclass
-class PdfCharacter(Box1):
+class PdfCharacter:
     class Meta:
         name = "pdfCharacter"
 
+    graphic_state: Optional[GraphicState] = field(
+        default=None,
+        metadata={
+            "name": "graphicState",
+            "type": "Element",
+            "required": True,
+        },
+    )
+    box: Optional[Box] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
     pdf_font_id: Optional[str] = field(
         default=None,
         metadata={
@@ -143,6 +261,13 @@ class PdfCharacter(Box1):
         },
     )
     advance: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    size: Optional[float] = field(
         default=None,
         metadata={
             "type": "Attribute",
@@ -189,6 +314,14 @@ class Page:
         metadata={
             "name": "pdfCharacter",
             "type": "Element",
+        },
+    )
+    base_operations: Optional[BaseOperations] = field(
+        default=None,
+        metadata={
+            "name": "baseOperations",
+            "type": "Element",
+            "required": True,
         },
     )
     page_number: Optional[int] = field(

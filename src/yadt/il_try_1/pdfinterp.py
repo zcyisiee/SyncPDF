@@ -143,6 +143,29 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
         else:
             self.curpath = []
 
+    def do_CS(self, name: PDFStackT) -> None:
+        """Set color space for stroking operations
+
+        Introduced in PDF 1.1
+        """
+        try:
+            self.il_creater.onCS(literal_name(name))
+            self.scs = self.csmap[literal_name(name)]
+        except KeyError:
+            if settings.STRICT:
+                raise PDFInterpreterError("Undefined ColorSpace: %r" % name)
+        return
+
+    def do_cs(self, name: PDFStackT) -> None:
+        """Set color space for nonstroking operations"""
+        try:
+            self.il_creater.oncs(literal_name(name))
+            self.ncs = self.csmap[literal_name(name)]
+        except KeyError:
+            if settings.STRICT:
+                raise PDFInterpreterError("Undefined ColorSpace: %r" % name)
+        return
+
     ############################################################
     # 重载过滤非公式线条（F/B）
     def do_f(self) -> None:
@@ -281,10 +304,12 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
         ops_new = self.device.end_page(page)
         # 上面渲染的时候会根据 cropbox 减掉页面偏移得到真实坐标，这里输出的时候需要用 cm 把页面偏移加回来
         self.obj_patch[page.page_xref] = (
-            f"q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}"  # ops_base 里可能有图，需要让 ops_new 里的文字覆盖在上面，使用 q/Q 重置位置矩阵
+            # f"q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}"  # ops_base 里可能有图，需要让 ops_new 里的文字覆盖在上面，使用 q/Q 重置位置矩阵
+            ""
         )
         for obj in page.contents:
             self.obj_patch[obj.objid] = ""
+        return ops_base
 
     def render_contents(
         self,

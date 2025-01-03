@@ -33,6 +33,9 @@
       <attribute name="pageNumber">
         <data type="int"/>
       </attribute>
+      <element name="baseOperations">
+        <data type="string"/>
+      </element>
     </element>
   </define>
   <define name="Box">
@@ -82,6 +85,10 @@
       <attribute name="advance">
         <data type="float"/>
       </attribute>
+      <attribute name="size">
+        <data type="float"/>
+      </attribute>
+      <ref name="GraphicState"/>
       <ref name="Box"/>
     </element>
   </define>
@@ -94,6 +101,77 @@
         <data type="string"/>
       </attribute>
       <ref name="Box"/>
+    </element>
+  </define>
+  <define name="GraphicState">
+    <element name="graphicState">
+      <optional>
+        <attribute name="linewidth">
+          <data type="float"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dash">
+          <list>
+            <oneOrMore>
+              <data type="float"/>
+            </oneOrMore>
+          </list>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="flatness">
+          <data type="float"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="intent">
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="linecap">
+          <data type="int"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="linejoin">
+          <data type="int"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="miterlimit">
+          <data type="float"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="ncolor">
+          <list>
+            <oneOrMore>
+              <data type="float"/>
+            </oneOrMore>
+          </list>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="scolor">
+          <list>
+            <oneOrMore>
+              <data type="float"/>
+            </oneOrMore>
+          </list>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="strokingColorSpaceName">
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="nonStrokingColorSpaceName">
+          <data type="string"/>
+        </attribute>
+      </optional>
     </element>
   </define>
 </grammar>

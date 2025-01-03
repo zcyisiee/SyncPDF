@@ -122,18 +122,19 @@ def translate_patch(
             doc_zh.update_object(page.page_xref, "<<>>")
             doc_zh.update_stream(page.page_xref, b"")
             doc_zh[page.pageno].set_contents(page.page_xref)
-            interpreter.process_page(page)
+            ops_base = interpreter.process_page(page)
+            il_creater.onPageBaseOperation(ops_base)
 
     device.close()
     return obj_patch
 
 
-
 def main():
     resfont = "china-ss"
     print(os.getcwd())
-    print(os.path.abspath("../../../examples/pdf/il_try_1/这是一个测试文件.pdf"))
-    with open("../../../examples/pdf/il_try_1/这是一个测试文件.pdf", "rb") as f:
+    original_pdf_path = "../../../examples/pdf/il_try_1/这是一个测试文件.pdf"
+    print(os.path.abspath(original_pdf_path))
+    with open(original_pdf_path, "rb") as f:
         raw = f.read()
     doc_en = Document(stream=raw)
 
@@ -153,7 +154,18 @@ def main():
     il_creater = ILCreater()
 
     il_creater.mupdf = doc_en
-    translate_patch(fp, doc_zh=doc_zh, resfont=resfont, il_creater=il_creater)
+    obj_patch = translate_patch(
+        fp, doc_zh=doc_zh, resfont=resfont, il_creater=il_creater
+    )
+
+    for obj_id, ops_new in obj_patch.items():
+        # ops_old=doc_en.xref_stream(obj_id)
+        # print(obj_id)
+        # print(ops_old)
+        # print(ops_new.encode())
+        doc_zh.update_stream(obj_id, ops_new.encode())
+
+    doc_zh.save("../../../examples/pdf/il_try_1/测试写入1.pdf")
 
     docs = il_creater.CreateIL()
 
@@ -168,7 +180,7 @@ def main():
         xml = f.read()
     docs2 = xml_converter.from_xml(xml)
 
-    pdf_creater = PDFCreater(docs2)
+    pdf_creater = PDFCreater(original_pdf_path, docs2)
 
     pdf_creater.write("../../../examples/pdf/il_try_1/测试还原.pdf")
 

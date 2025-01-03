@@ -11,7 +11,8 @@ Page =
     PageLayout*,
     PDFFont*,
     PDFCharacter*,
-    attribute pageNumber { xsd:int }
+    attribute pageNumber { xsd:int },
+    element baseOperations { xsd:string }
   }
 Box =
   element box {
@@ -34,6 +35,8 @@ PDFCharacter =
     attribute pdfCharacterId { xsd:int },
     attribute char_unicode { xsd:string },
     attribute advance { xsd:float },
+    attribute size { xsd:float },
+    GraphicState,
     Box
   }
 PageLayout =
@@ -41,4 +44,24 @@ PageLayout =
     attribute conf { xsd:float },
     attribute class_name { xsd:string },
     Box
+  }
+GraphicState =
+  element graphicState {
+    attribute linewidth { xsd:float }?,
+    attribute dash {
+      list { xsd:float+ }
+    }?,
+    attribute flatness { xsd:float }?,
+    attribute intent { xsd:string }?,
+    attribute linecap { xsd:int }?,
+    attribute linejoin { xsd:int }?,
+    attribute miterlimit { xsd:float }?,
+    attribute ncolor {
+      list { xsd:float+ }
+    }?,
+    attribute scolor {
+      list { xsd:float+ }
+    }?,
+    attribute strokingColorSpaceName { xsd:string }?,
+    attribute nonStrokingColorSpaceName { xsd:string }?
   }
