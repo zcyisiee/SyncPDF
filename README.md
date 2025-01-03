@@ -25,3 +25,17 @@ And you know, a pdf or word document is not a good for reading in mobile devices
 
 We offer a intermediate representation of the results from parser and can be rendered into a new pdf or other format. The pipeline is also a plugin-based system which everybody can add their new model, ocr, renderer, etc.
 
+## Roadmap
+
+Our fisrt 1.0 version goal is to finish a translation from [PDF Reference, Version 1.7](https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/pdfreference1.7old.pdf) to the following language version:
+
+- Simplified Chinese
+- Traditional Chinese
+- Japanese
+- Spanish
+
+And meet the following requirements:
+- layout error less than 1%
+- content loss less than 1%
+
+
