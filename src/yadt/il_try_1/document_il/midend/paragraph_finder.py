@@ -58,9 +58,12 @@ class ParagraphFinder:
                 continue
 
             page.pdf_character.remove(char)
-            
+
             # 检查是否需要开始新行
-            if current_line_chars and Layout.is_newline(current_line_chars[-1], char):
+            if (
+                    current_line_chars
+                    and Layout.is_newline(current_line_chars[-1], char)
+            ):
                 # 创建新行
                 if current_line_chars:
                     line = self.create_line(current_line_chars)
@@ -120,7 +123,7 @@ class ParagraphFinder:
         for line in paragraph.pdf_line:
             if not line.unicode.strip():  # 跳过完全空白的行
                 continue
-                
+
             # 处理行内字符的尾随空格
             processed_chars = []
             for char in line.pdf_character:
@@ -128,33 +131,38 @@ class ParagraphFinder:
                     processed_chars = processed_chars + [char]
                 elif processed_chars:  # 只有在有非空格字符后才考虑保留空格
                     processed_chars.append(char)
-            
+
             # 移除尾随空格
-            while processed_chars and processed_chars[-1].char_unicode.isspace():
+            while (
+                processed_chars
+                and processed_chars[-1].char_unicode.isspace()
+            ):
                 processed_chars.pop()
-                
+
             if processed_chars:  # 如果行内还有字符
                 line.pdf_character = processed_chars
-                line.unicode = "".join(char.char_unicode for char in processed_chars)
-                
+                line.unicode = "".join(
+                    char.char_unicode for char in processed_chars)
+
                 # 更新行的边界框和相关属性
                 min_x = min(char.box.x for char in processed_chars)
                 min_y = min(char.box.y for char in processed_chars)
                 max_x = max(char.box.x2 for char in processed_chars)
                 max_y = max(char.box.y2 for char in processed_chars)
                 line.box = Box(min_x, min_y, max_x, max_y)
-                
+
                 processed_lines.append(line)
-        
+
         paragraph.pdf_line = processed_lines
 
     def update_paragraph_data(self, paragraph: PdfParagraph):
         if not paragraph.pdf_line:
             return
-            
+
         # 更新unicode（合并所有行的文本）
-        paragraph.unicode = " ".join(line.unicode for line in paragraph.pdf_line)
-        
+        paragraph.unicode = " ".join(
+            line.unicode for line in paragraph.pdf_line)
+
         # 更新边界框
         min_x = min(line.box.x for line in paragraph.pdf_line)
         min_y = min(line.box.y for line in paragraph.pdf_line)
@@ -225,17 +233,17 @@ class ParagraphFinder:
     def create_line(self, chars: list[PdfCharacter]) -> PdfLine:
         if not chars:
             return None
-        
+
         # 计算行的边界框
         min_x = min(char.box.x for char in chars)
         min_y = min(char.box.y for char in chars)
         max_x = max(char.box.x2 for char in chars)
         max_y = max(char.box.y2 for char in chars)
         box = Box(min_x, min_y, max_x, max_y)
-        
+
         # 使用第一个字符的图形状态作为行的图形状态
         graphic_state = chars[0].graphic_state
-        
+
         # 创建行对象
         line = PdfLine(
             box=box,
