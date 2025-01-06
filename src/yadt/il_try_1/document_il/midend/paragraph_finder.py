@@ -80,7 +80,6 @@ class ParagraphFinder:
                             graphic_state=line.graphic_state,
                             pdf_line=[line],
                             unicode=line.unicode,
-                            advance=line.advance,
                             size=line.size
                         )
                         paragraphs.append(current_paragraph)
@@ -111,7 +110,6 @@ class ParagraphFinder:
                     graphic_state=line.graphic_state,
                     pdf_line=[line],
                     unicode=line.unicode,
-                    advance=line.advance,
                     size=line.size
                 )
                 paragraphs.append(current_paragraph)
@@ -257,7 +255,6 @@ class ParagraphFinder:
             graphic_state=graphic_state,
             pdf_character=chars,
             unicode="".join(char.char_unicode for char in chars),
-            advance=max_x - min_x,  # 使用行的宽度作为advance
             size=max_y - min_y,     # 使用行的高度作为size
         )
         return line
@@ -301,8 +298,7 @@ class ParagraphFinder:
                         graphic_state=paragraph.pdf_line[j].graphic_state,
                         pdf_line=paragraph.pdf_line[j:],
                         unicode="",
-                        advance=0,
-                        size=0
+                        size=paragraph.pdf_line[j].size
                     )
                     # 更新原段落
                     paragraph.pdf_line = paragraph.pdf_line[:j]
@@ -323,8 +319,7 @@ class ParagraphFinder:
                         graphic_state=paragraph.pdf_line[j].graphic_state,
                         pdf_line=paragraph.pdf_line[j:],
                         unicode="",
-                        advance=0,
-                        size=0
+                        size=paragraph.pdf_line[j].size
                     )
                     # 更新原段落
                     paragraph.pdf_line = paragraph.pdf_line[:j]

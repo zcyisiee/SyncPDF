@@ -14,7 +14,9 @@ from pdfminer.pdfparser import PDFParser
 from pymupdf import Document, Font
 from yadt.il_try_1.converter import TranslateConverter
 from yadt.il_try_1.doclayout import DocLayoutModel
+from yadt.il_try_1.document_il.midend.il_translator import ILTranslator
 from yadt.il_try_1.document_il.midend.paragraph_finder import ParagraphFinder
+from yadt.il_try_1.document_il.translator.translator import OpenAITranslator, set_translate_rate_limiter
 from yadt.il_try_1.document_il.xml_converter import XMLConverter
 from yadt.il_try_1.pdfinterp import PDFPageInterpreterEx
 
@@ -173,6 +175,10 @@ def main():
 
     docs = il_creater.create_il()
     ParagraphFinder().process(docs)
+
+    set_translate_rate_limiter(50)
+    translate_engine = OpenAITranslator('zh_cn','en-us', 'Qwen/Qwen2.5-7B-Instruct')
+    ILTranslator(translate_engine).translate(docs)
 
     xml_converter = XMLConverter()
 
