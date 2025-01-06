@@ -16,8 +16,8 @@ from yadt.il_try_1.doclayout import DocLayoutModel
 from yadt.il_try_1.document_il.XMLConverter import XMLConverter
 from yadt.il_try_1.pdfinterp import PDFPageInterpreterEx
 
-from yadt.il_try_1.document_il.ILCreater import ILCreater
-from yadt.il_try_1.document_il.PDFCreater import PDFCreater
+from yadt.il_try_1.document_il.frontend.ILCreater import ILCreater
+from yadt.il_try_1.document_il.backend.PDFCreater import PDFCreater
 
 model = DocLayoutModel.load_available()
 resfont_map = {
