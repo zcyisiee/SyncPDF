@@ -296,9 +296,9 @@ class PdfFigure:
 
 
 @dataclass
-class PdfParagraph:
+class PdfLine:
     class Meta:
-        name = "pdfParagraph"
+        name = "pdfLine"
 
     box: Optional[Box] = field(
         default=None,
@@ -319,6 +319,56 @@ class PdfParagraph:
         default_factory=list,
         metadata={
             "name": "pdfCharacter",
+            "type": "Element",
+        },
+    )
+    unicode: Optional[str] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    advance: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    size: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+
+
+@dataclass
+class PdfParagraph:
+    class Meta:
+        name = "pdfParagraph"
+
+    box: Optional[Box] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+    graphic_state: Optional[GraphicState] = field(
+        default=None,
+        metadata={
+            "name": "graphicState",
+            "type": "Element",
+            "required": True,
+        },
+    )
+    pdf_line: list[PdfLine] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfLine",
             "type": "Element",
         },
     )

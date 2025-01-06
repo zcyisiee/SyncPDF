@@ -37,10 +37,11 @@ class PDFCreater:
 
     def render_paragraph_to_char(
         self, paragraph: il_try_1.PdfParagraph
-    ) -> [il_try_1.PdfCharacter]:
-        if paragraph.pdf_character:
-            return paragraph.pdf_character
-        raise NotImplementedError
+    ) -> list[il_try_1.PdfCharacter]:
+        chars = []
+        for line in paragraph.pdf_line:
+            chars.extend(line.pdf_character)
+        return chars
 
     def write(self, out_file: str):
         pdf = pymupdf.open(self.original_pdf_path)
@@ -54,11 +55,17 @@ class PDFCreater:
                 f"q Q 1 0 0 1 {page.cropbox.box.x} {
                     page.cropbox.box.y} cm \n".encode()
             )
-            # draw_op.append(b'q ')
-            chars = page.pdf_character
+            
+            # 收集所有字符
+            chars = []
+            # 首先添加页面级别的字符
+            if page.pdf_character:
+                chars.extend(page.pdf_character)
+            # 然后添加段落中的字符
             for paragraph in page.pdf_paragraph:
-                chars.extend(paragraph.pdf_character)
+                chars.extend(self.render_paragraph_to_char(paragraph))
 
+            # 渲染所有字符
             for char in chars:
                 if char.char_unicode == "\n":
                     continue
@@ -72,8 +79,6 @@ class PDFCreater:
                 # pdf 32000 2008: 15
                 # 7.3.4.2 Literal Strings
                 if char.pdf_character_id in (
-                    # ord("["),
-                    # ord("]"),
                     ord("\\"),
                     ord("("),
                     ord(")"),
@@ -92,8 +97,6 @@ class PDFCreater:
                 )
 
                 draw_op.append(b") Tj ET Q \n")
-
-            # draw_op.append(b'Q ')
 
             op_container = pdf.get_new_xref()
             # Since this is a draw instruction container,

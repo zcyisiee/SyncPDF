@@ -10,6 +10,7 @@ from src.yadt.il_try_1.document_il.il_try_1 import (
     PdfCharacter,
     PdfFigure,
     PdfFont,
+    PdfLine,
     PdfParagraph,
 )
 
@@ -25,5 +26,6 @@ __all__ = [
     "PdfCharacter",
     "PdfFigure",
     "PdfFont",
+    "PdfLine",
     "PdfParagraph",
 ]

@@ -76,6 +76,15 @@ PDFParagraph =
     attribute size { xsd:float },
     Box,
     GraphicState,
+    PDFLine*
+  }
+PDFLine =
+  element pdfLine {
+    attribute unicode { xsd:string },
+    attribute advance { xsd:float },
+    attribute size { xsd:float },
+    Box,
+    GraphicState,
     PDFCharacter*
   }
 PDFFigure = element pdfFigure { Box }

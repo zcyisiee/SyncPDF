@@ -204,6 +204,24 @@
       <ref name="Box"/>
       <ref name="GraphicState"/>
       <zeroOrMore>
+        <ref name="PDFLine"/>
+      </zeroOrMore>
+    </element>
+  </define>
+  <define name="PDFLine">
+    <element name="pdfLine">
+      <attribute name="unicode">
+        <data type="string"/>
+      </attribute>
+      <attribute name="advance">
+        <data type="float"/>
+      </attribute>
+      <attribute name="size">
+        <data type="float"/>
+      </attribute>
+      <ref name="Box"/>
+      <ref name="GraphicState"/>
+      <zeroOrMore>
         <ref name="PDFCharacter"/>
       </zeroOrMore>
     </element>
