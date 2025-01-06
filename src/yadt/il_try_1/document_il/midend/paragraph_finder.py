@@ -6,6 +6,7 @@ from yadt.il_try_1.document_il.il_try_1 import (
     PdfLine,
     GraphicState,
 )
+import re
 
 
 class Layout:
@@ -44,6 +45,12 @@ class ParagraphFinder:
         for paragraph in paragraphs:
             self.process_paragraph_spacing(paragraph)
             self.update_paragraph_data(paragraph)
+
+        # 第三步：计算所有行宽度的中位数
+        median_width = self.calculate_median_line_width(paragraphs)
+
+        # 第四步：处理独立段落
+        self.process_independent_paragraphs(paragraphs, median_width)
 
     def create_paragraphs(self, page: Page) -> list[PdfParagraph]:
         paragraphs: list[PdfParagraph] = []
@@ -254,3 +261,80 @@ class ParagraphFinder:
             size=max_y - min_y,     # 使用行的高度作为size
         )
         return line
+
+    def calculate_median_line_width(self, paragraphs: list[PdfParagraph]) -> float:
+        # 收集所有行的宽度
+        line_widths = []
+        for paragraph in paragraphs:
+            for line in paragraph.pdf_line:
+                line_widths.append(line.box.x2 - line.box.x)
+        
+        if not line_widths:
+            return 0.0
+        
+        # 计算中位数
+        line_widths.sort()
+        mid = len(line_widths) // 2
+        if len(line_widths) % 2 == 0:
+            return (line_widths[mid - 1] + line_widths[mid]) / 2
+        return line_widths[mid]
+
+    def process_independent_paragraphs(self, paragraphs: list[PdfParagraph], median_width: float):
+        i = 0
+        while i < len(paragraphs):
+            paragraph = paragraphs[i]
+            if len(paragraph.pdf_line) <= 1:  # 跳过只有一行的段落
+                i += 1
+                continue
+
+            j = 1
+            while j < len(paragraph.pdf_line):
+                prev_line = paragraph.pdf_line[j - 1]
+                prev_width = prev_line.box.x2 - prev_line.box.x
+                prev_text = prev_line.unicode
+
+                # 检查是否包含连续的点（至少20个）
+                if re.search(r'\.{20,}', prev_text):
+                    # 创建新的段落
+                    new_paragraph = PdfParagraph(
+                        box=Box(0, 0, 0, 0),  # 临时边界框
+                        graphic_state=paragraph.pdf_line[j].graphic_state,
+                        pdf_line=paragraph.pdf_line[j:],
+                        unicode="",
+                        advance=0,
+                        size=0
+                    )
+                    # 更新原段落
+                    paragraph.pdf_line = paragraph.pdf_line[:j]
+                    
+                    # 更新两个段落的数据
+                    self.update_paragraph_data(paragraph)
+                    self.update_paragraph_data(new_paragraph)
+                    
+                    # 在原段落后插入新段落
+                    paragraphs.insert(i + 1, new_paragraph)
+                    break
+
+                # 如果前一行宽度小于中位数的一半，将当前行及后续行分割成新段落
+                if prev_width < median_width * 0.8:
+                    # 创建新的段落
+                    new_paragraph = PdfParagraph(
+                        box=Box(0, 0, 0, 0),  # 临时边界框
+                        graphic_state=paragraph.pdf_line[j].graphic_state,
+                        pdf_line=paragraph.pdf_line[j:],
+                        unicode="",
+                        advance=0,
+                        size=0
+                    )
+                    # 更新原段落
+                    paragraph.pdf_line = paragraph.pdf_line[:j]
+                    
+                    # 更新两个段落的数据
+                    self.update_paragraph_data(paragraph)
+                    self.update_paragraph_data(new_paragraph)
+                    
+                    # 在原段落后插入新段落
+                    paragraphs.insert(i + 1, new_paragraph)
+                    break
+                j += 1
+            i += 1
