@@ -13,11 +13,11 @@ from pdfminer.pdfparser import PDFParser
 from pymupdf import Document, Font
 from yadt.il_try_1.converter import TranslateConverter
 from yadt.il_try_1.doclayout import DocLayoutModel
-from yadt.il_try_1.document_il.XMLConverter import XMLConverter
+from yadt.il_try_1.document_il.xml_converter import XMLConverter
 from yadt.il_try_1.pdfinterp import PDFPageInterpreterEx
 
-from yadt.il_try_1.document_il.frontend.ILCreater import ILCreater
-from yadt.il_try_1.document_il.backend.PDFCreater import PDFCreater
+from yadt.il_try_1.document_il.frontend.il_creater import ILCreater
+from yadt.il_try_1.document_il.backend.pdf_creater import PDFCreater
 
 model = DocLayoutModel.load_available()
 resfont_map = {

@@ -18,7 +18,7 @@ import numpy as np
 import unicodedata
 from pymupdf import Font
 
-from yadt.il_try_1.document_il.frontend.ILCreater import ILCreater
+from yadt.il_try_1.document_il.frontend.il_creater import ILCreater
 
 log = logging.getLogger(__name__)
 

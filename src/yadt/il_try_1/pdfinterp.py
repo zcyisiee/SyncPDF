@@ -38,7 +38,7 @@ from pdfminer.utils import (
     apply_matrix_pt,
 )
 
-from yadt.il_try_1.document_il.frontend.ILCreater import ILCreater
+from yadt.il_try_1.document_il.frontend.il_creater import ILCreater
 
 log = logging.getLogger(__name__)
 
