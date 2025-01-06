@@ -620,7 +620,7 @@
         <box x="504.79992" y="750.72" x2="507.82488" y2="761.76"/>
       </pdfCharacter>
     </pdfParagraph>
-    <pdfParagraph unicode="⼆级标题 .................................................................................................................................... 3 三级标题 ............................................................................................................................................................. 3 2x2普通表格 ............................................................................................................................ 3 ">
+    <pdfParagraph unicode="⼆级标题 .................................................................................................................................... 3三级标题 ............................................................................................................................................................. 32x2普通表格 ............................................................................................................................ 3 ">
       <box x="100.99999199999999" y="678.24" x2="507.82488" y2="731.52"/>
       <pdfCharacter pdfFontId="TT10" pdfCharacterId="33" char_unicode="⼆" advance="1.0" size="11.039999999999964">
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
@@ -1177,10 +1177,6 @@
       <pdfCharacter pdfFontId="TT10" pdfCharacterId="39" char_unicode="3" advance="0.555" size="11.039999999999964">
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
         <box x="498.69311999999996" y="720.48" x2="504.82032" y2="731.52"/>
-      </pdfCharacter>
-      <pdfCharacter pdfFontId="TT6" pdfCharacterId="33" char_unicode=" " advance="0.274" size="11.039999999999964">
-        <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
-        <box x="504.79992" y="720.48" x2="507.82488" y2="731.52"/>
       </pdfCharacter>
       <pdfCharacter pdfFontId="TT12" pdfCharacterId="33" char_unicode="三" advance="1.0" size="10.080000000000041">
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
@@ -1837,10 +1833,6 @@
       <pdfCharacter pdfFontId="TT12" pdfCharacterId="39" char_unicode="3" advance="0.527" size="10.080000000000041">
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
         <box x="499.53144" y="702.72" x2="504.8436" y2="712.8000000000001"/>
-      </pdfCharacter>
-      <pdfCharacter pdfFontId="TT6" pdfCharacterId="33" char_unicode=" " advance="0.274" size="11.039999999999964">
-        <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
-        <box x="504.79992" y="702.72" x2="507.82488" y2="713.76"/>
       </pdfCharacter>
       <pdfCharacter pdfFontId="TT10" pdfCharacterId="40" char_unicode="2" advance="0.555" size="11.039999999999964">
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
@@ -3104,7 +3096,7 @@
         <box x="137.99880000000002" y="627.12" x2="154.0788" y2="643.2"/>
       </pdfCharacter>
     </pdfParagraph>
-    <pdfParagraph unicode="三级标题后的正⽂ 三级标题后的第⼆段正⽂ ">
+    <pdfParagraph unicode="三级标题后的正⽂三级标题后的第⼆段正⽂ ">
       <box x="90.0" y="573.84" x2="214.02496799999997" y2="611.04"/>
       <pdfCharacter pdfFontId="TT6" pdfCharacterId="43" char_unicode="三" advance="1.0" size="11.039999999999964">
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
@@ -3137,10 +3129,6 @@
       <pdfCharacter pdfFontId="TT6" pdfCharacterId="41" char_unicode="⽂" advance="1.0" size="11.039999999999964">
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
         <box x="167.00179200000002" y="600.0" x2="178.04179200000002" y2="611.04"/>
-      </pdfCharacter>
-      <pdfCharacter pdfFontId="TT6" pdfCharacterId="33" char_unicode=" " advance="0.274" size="11.039999999999964">
-        <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
-        <box x="178.00000799999998" y="600.0" x2="181.02496799999997" y2="611.04"/>
       </pdfCharacter>
       <pdfCharacter pdfFontId="TT6" pdfCharacterId="43" char_unicode="三" advance="1.0" size="11.039999999999964">
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>

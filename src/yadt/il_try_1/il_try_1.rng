@@ -85,15 +85,19 @@
       <attribute name="pdfFontId">
         <data type="string"/>
       </attribute>
-      <attribute name="pdfCharacterId">
-        <data type="int"/>
-      </attribute>
+      <optional>
+        <attribute name="pdfCharacterId">
+          <data type="int"/>
+        </attribute>
+      </optional>
       <attribute name="char_unicode">
         <data type="string"/>
       </attribute>
-      <attribute name="advance">
-        <data type="float"/>
-      </attribute>
+      <optional>
+        <attribute name="advance">
+          <data type="float"/>
+        </attribute>
+      </optional>
       <attribute name="size">
         <data type="float"/>
       </attribute>

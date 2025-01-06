@@ -35,9 +35,9 @@ PDFFont =
 PDFCharacter =
   element pdfCharacter {
     attribute pdfFontId { xsd:string },
-    attribute pdfCharacterId { xsd:int },
+    attribute pdfCharacterId { xsd:int }?,
     attribute char_unicode { xsd:string },
-    attribute advance { xsd:float },
+    attribute advance { xsd:float }?,
     attribute size { xsd:float },
     GraphicState,
     Box

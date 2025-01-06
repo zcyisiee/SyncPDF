@@ -257,7 +257,6 @@ class PdfCharacter:
         metadata={
             "name": "pdfCharacterId",
             "type": "Attribute",
-            "required": True,
         },
     )
     char_unicode: Optional[str] = field(
@@ -271,7 +270,6 @@ class PdfCharacter:
         default=None,
         metadata={
             "type": "Attribute",
-            "required": True,
         },
     )
     size: Optional[float] = field(

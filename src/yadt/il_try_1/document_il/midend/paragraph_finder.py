@@ -11,6 +11,21 @@ class Layout:
         self.id = id
         self.name = name
 
+    @staticmethod
+    def is_newline(prev_char: PdfCharacter, curr_char: PdfCharacter) -> bool:
+        # 如果没有前一个字符，不是换行
+        if prev_char is None:
+            return False
+
+        # 获取两个字符的中心y坐标
+        prev_y = (prev_char.box.y + prev_char.box.y2) / 2
+        curr_y = (curr_char.box.y + curr_char.box.y2) / 2
+
+        # 如果当前字符的y坐标明显低于前一个字符，说明换行了
+        # 这里使用字符高度的一半作为阈值
+        char_height = curr_char.box.y2 - curr_char.box.y
+        return curr_y < prev_y - char_height / 2
+
 
 class ParagraphFinder:
     def process(self, document):
@@ -18,11 +33,22 @@ class ParagraphFinder:
             self.process_page(page)
 
     def process_page(self, page: Page):
-        paragraphs: [PdfParagraph] = []
+        # 第一步：根据layout创建paragraphs
+        # 在这一步中，page.pdf_character中的字符会被移除
+        paragraphs = self.create_paragraphs(page)
         page.pdf_paragraph = paragraphs
+        
+        # 第二步：处理段落中的空格和换行符
+        for paragraph in paragraphs:
+            self.process_paragraph_spacing(paragraph)
+            self.update_paragraph_data(paragraph)
+
+    def create_paragraphs(self, page: Page) -> list[PdfParagraph]:
+        paragraphs: list[PdfParagraph] = []
         current_paragraph: PdfParagraph | None = None
         current_layout: Layout | None = None
         chars = page.pdf_character.copy()
+        
         for char in chars:
             char_layout = self.get_layout(char, page)
             if not self.is_text_layout(char_layout):
@@ -42,8 +68,29 @@ class ParagraphFinder:
                     paragraphs.append(current_paragraph)
 
             self.update_paragraph_box(current_paragraph)
-        for paragraph in paragraphs:
-            self.update_paragraph_data(paragraph)
+            
+        return paragraphs
+
+    def process_paragraph_spacing(self, paragraph: PdfParagraph):
+        if not paragraph.pdf_character:
+            return
+
+        processed_chars = []
+        for i in range(len(paragraph.pdf_character) - 1):
+            current_char = paragraph.pdf_character[i]
+            next_char = paragraph.pdf_character[i + 1]
+
+            # 检查当前字符是否是换行
+            if Layout.is_newline(current_char, next_char):
+                # 如果当前字符是空格，跳过它
+                if not current_char.char_unicode.isspace():
+                    processed_chars.append(current_char)
+            else:
+                processed_chars.append(current_char)
+
+        # 添加最后一个字符
+        processed_chars.append(paragraph.pdf_character[-1])
+        paragraph.pdf_character = processed_chars
 
     def update_paragraph_data(self, paragraph: PdfParagraph):
         paragraph.unicode = "".join(

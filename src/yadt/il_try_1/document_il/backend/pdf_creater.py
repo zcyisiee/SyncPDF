@@ -16,11 +16,13 @@ class PDFCreater:
             return
         if graphic_state.stroking_color_space_name:
             draw_op.append(
-                f"/{graphic_state.stroking_color_space_name}" f" CS \n".encode()
+                f"/{graphic_state.stroking_color_space_name}"
+                f" CS \n".encode()
             )
         if graphic_state.non_stroking_color_space_name:
             draw_op.append(
-                f"/{graphic_state.non_stroking_color_space_name}" f" cs \n".encode()
+                f"/{graphic_state.non_stroking_color_space_name}"
+                f" cs \n".encode()
             )
         if graphic_state.ncolor is not None:
             draw_op.append(
@@ -58,6 +60,8 @@ class PDFCreater:
                 chars.extend(paragraph.pdf_character)
 
             for char in chars:
+                if char.char_unicode == "\n":
+                    continue
                 char_size = char.size
                 draw_op.append(b"q ")
                 self.render_graphic_state(draw_op, char.graphic_state)
@@ -82,7 +86,9 @@ class PDFCreater:
                     char_bit_length = 16
 
                 draw_op.append(
-                    Bits(uint=char.pdf_character_id, length=char_bit_length).tobytes()
+                    Bits(
+                        uint=char.pdf_character_id, length=char_bit_length
+                    ).tobytes()
                 )
 
                 draw_op.append(b") Tj ET Q \n")

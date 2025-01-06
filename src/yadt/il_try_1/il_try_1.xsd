@@ -64,9 +64,9 @@
         <xs:element ref="box"/>
       </xs:sequence>
       <xs:attribute name="pdfFontId" use="required" type="xs:string"/>
-      <xs:attribute name="pdfCharacterId" use="required" type="xs:int"/>
+      <xs:attribute name="pdfCharacterId" type="xs:int"/>
       <xs:attribute name="char_unicode" use="required" type="xs:string"/>
-      <xs:attribute name="advance" use="required" type="xs:float"/>
+      <xs:attribute name="advance" type="xs:float"/>
       <xs:attribute name="size" use="required" type="xs:float"/>
     </xs:complexType>
   </xs:element>
