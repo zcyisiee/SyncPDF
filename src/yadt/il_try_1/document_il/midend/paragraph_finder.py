@@ -136,6 +136,14 @@ class ParagraphFinder:
             if processed_chars:  # 如果行内还有字符
                 line.pdf_character = processed_chars
                 line.unicode = "".join(char.char_unicode for char in processed_chars)
+                
+                # 更新行的边界框和相关属性
+                min_x = min(char.box.x for char in processed_chars)
+                min_y = min(char.box.y for char in processed_chars)
+                max_x = max(char.box.x2 for char in processed_chars)
+                max_y = max(char.box.y2 for char in processed_chars)
+                line.box = Box(min_x, min_y, max_x, max_y)
+                
                 processed_lines.append(line)
         
         paragraph.pdf_line = processed_lines
@@ -153,10 +161,6 @@ class ParagraphFinder:
         max_x = max(line.box.x2 for line in paragraph.pdf_line)
         max_y = max(line.box.y2 for line in paragraph.pdf_line)
         paragraph.box = Box(min_x, min_y, max_x, max_y)
-        
-        # 更新advance和size
-        paragraph.advance = max_x - min_x
-        paragraph.size = max_y - min_y
 
     def is_text_layout(self, layout: Layout):
         return layout is not None and layout.name in [

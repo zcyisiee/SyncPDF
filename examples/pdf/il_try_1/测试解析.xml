@@ -18,10 +18,10 @@
     <pdfFont name="AAAAAG+DengXian" fontId="TT6" xrefId="11"/>
     <pdfFont name="Song" fontId="china-ss" xrefId="90"/>
     <pdfParagraph unicode="这是⼀个测试⽂件" advance="223.69394400000002" size="28.08000000000004">
-      <box x="189.64989599999998" y="738.24" x2="413.34384" y2="766.32"/>
+      <box x="189.64989599999998" y="738.24" x2="406.722336" y2="766.32"/>
       <graphicState linewidth="0.0" ncolor="0 0 0" nonStrokingColorSpaceName="Cs1"/>
       <pdfLine unicode="这是⼀个测试⽂件" advance="223.69394400000002" size="28.08000000000004">
-        <box x="189.64989599999998" y="738.24" x2="413.34384" y2="766.32"/>
+        <box x="189.64989599999998" y="738.24" x2="406.722336" y2="766.32"/>
         <graphicState linewidth="0.0" ncolor="0 0 0" nonStrokingColorSpaceName="Cs1"/>
         <pdfCharacter pdfFontId="TT2" pdfCharacterId="33" char_unicode="这" advance="1.0" size="28.08000000000004">
           <graphicState linewidth="0.0" ncolor="0 0 0" nonStrokingColorSpaceName="Cs1"/>
@@ -622,11 +622,11 @@
         </pdfCharacter>
       </pdfLine>
     </pdfParagraph>
-    <pdfParagraph unicode="⼆级标题 .................................................................................................................................... 3 三级标题 ............................................................................................................................................................. 3 2x2普通表格 ............................................................................................................................ 3" advance="406.824888" size="53.27999999999997">
-      <box x="100.99999199999999" y="678.24" x2="507.82488" y2="731.52"/>
+    <pdfParagraph unicode="⼆级标题 .................................................................................................................................... 3 三级标题 ............................................................................................................................................................. 3 2x2普通表格 ............................................................................................................................ 3" advance="406.824888" size="11.039999999999964">
+      <box x="100.99999199999999" y="678.24" x2="504.8436" y2="731.52"/>
       <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
       <pdfLine unicode="⼆级标题 .................................................................................................................................... 3" advance="406.824888" size="11.039999999999964">
-        <box x="100.99999199999999" y="720.48" x2="507.82488" y2="731.52"/>
+        <box x="100.99999199999999" y="720.48" x2="504.82032" y2="731.52"/>
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
         <pdfCharacter pdfFontId="TT10" pdfCharacterId="33" char_unicode="⼆" advance="1.0" size="11.039999999999964">
           <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
@@ -1186,7 +1186,7 @@
         </pdfCharacter>
       </pdfLine>
       <pdfLine unicode="三级标题 ............................................................................................................................................................. 3" advance="395.824872" size="11.039999999999964">
-        <box x="112.000008" y="702.72" x2="507.82488" y2="713.76"/>
+        <box x="112.000008" y="702.72" x2="504.8436" y2="712.8000000000001"/>
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
         <pdfCharacter pdfFontId="TT12" pdfCharacterId="33" char_unicode="三" advance="1.0" size="10.080000000000041">
           <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
@@ -1846,7 +1846,7 @@
         </pdfCharacter>
       </pdfLine>
       <pdfLine unicode="2x2普通表格 ............................................................................................................................ 3" advance="406.824888" size="11.039999999999964">
-        <box x="100.99999199999999" y="678.24" x2="507.82488" y2="689.28"/>
+        <box x="100.99999199999999" y="678.24" x2="504.82032" y2="689.28"/>
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
         <pdfCharacter pdfFontId="TT10" pdfCharacterId="40" char_unicode="2" advance="0.555" size="11.039999999999964">
           <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
@@ -2387,10 +2387,10 @@
       </pdfLine>
     </pdfParagraph>
     <pdfParagraph unicode="3x3合并单元格表格 ................................................................................................................ 4" advance="406.824888" size="11.039999999999964">
-      <box x="100.99999199999999" y="654.24" x2="507.82488" y2="665.28"/>
+      <box x="100.99999199999999" y="654.24" x2="504.82032" y2="665.28"/>
       <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
       <pdfLine unicode="3x3合并单元格表格 ................................................................................................................ 4" advance="406.824888" size="11.039999999999964">
-        <box x="100.99999199999999" y="654.24" x2="507.82488" y2="665.28"/>
+        <box x="100.99999199999999" y="654.24" x2="504.82032" y2="665.28"/>
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
         <pdfCharacter pdfFontId="TT10" pdfCharacterId="39" char_unicode="3" advance="0.555" size="11.039999999999964">
           <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
@@ -2998,10 +2998,10 @@
       </pdfLine>
     </pdfParagraph>
     <pdfParagraph unicode="⼀级标题后的正⽂" advance="91.02496799999997" size="11.039999999999964">
-      <box x="90.0" y="722.4000000000001" x2="181.02496799999997" y2="733.44"/>
+      <box x="90.0" y="722.4000000000001" x2="178.04179200000002" y2="733.44"/>
       <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
       <pdfLine unicode="⼀级标题后的正⽂" advance="91.02496799999997" size="11.039999999999964">
-        <box x="90.0" y="722.4000000000001" x2="181.02496799999997" y2="733.44"/>
+        <box x="90.0" y="722.4000000000001" x2="178.04179200000002" y2="733.44"/>
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
         <pdfCharacter pdfFontId="TT6" pdfCharacterId="34" char_unicode="⼀" advance="1.0" size="11.039999999999964">
           <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
@@ -3062,10 +3062,10 @@
       </pdfLine>
     </pdfParagraph>
     <pdfParagraph unicode="⼆级标题后的正⽂" advance="91.02496799999997" size="11.039999999999964">
-      <box x="90.0" y="661.2" x2="181.02496799999997" y2="672.24"/>
+      <box x="90.0" y="661.2" x2="178.04179200000002" y2="672.24"/>
       <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
       <pdfLine unicode="⼆级标题后的正⽂" advance="91.02496799999997" size="11.039999999999964">
-        <box x="90.0" y="661.2" x2="181.02496799999997" y2="672.24"/>
+        <box x="90.0" y="661.2" x2="178.04179200000002" y2="672.24"/>
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
         <pdfCharacter pdfFontId="TT6" pdfCharacterId="42" char_unicode="⼆" advance="1.0" size="11.039999999999964">
           <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
@@ -3125,11 +3125,11 @@
         </pdfCharacter>
       </pdfLine>
     </pdfParagraph>
-    <pdfParagraph unicode="三级标题后的正⽂ 三级标题后的第⼆段正⽂" advance="124.02496799999997" size="37.19999999999993">
-      <box x="90.0" y="573.84" x2="214.02496799999997" y2="611.04"/>
+    <pdfParagraph unicode="三级标题后的正⽂ 三级标题后的第⼆段正⽂" advance="91.02496799999997" size="11.039999999999964">
+      <box x="90.0" y="573.84" x2="211.04256" y2="611.04"/>
       <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
       <pdfLine unicode="三级标题后的正⽂" advance="91.02496799999997" size="11.039999999999964">
-        <box x="90.0" y="600.0" x2="181.02496799999997" y2="611.04"/>
+        <box x="90.0" y="600.0" x2="178.04179200000002" y2="611.04"/>
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
         <pdfCharacter pdfFontId="TT6" pdfCharacterId="43" char_unicode="三" advance="1.0" size="11.039999999999964">
           <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
@@ -3165,7 +3165,7 @@
         </pdfCharacter>
       </pdfLine>
       <pdfLine unicode="三级标题后的第⼆段正⽂" advance="124.02496799999997" size="11.039999999999964">
-        <box x="90.0" y="573.84" x2="214.02496799999997" y2="584.88"/>
+        <box x="90.0" y="573.84" x2="211.04256" y2="584.88"/>
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
         <pdfCharacter pdfFontId="TT6" pdfCharacterId="43" char_unicode="三" advance="1.0" size="11.039999999999964">
           <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
@@ -3289,7 +3289,7 @@
         </pdfCharacter>
       </pdfLine>
     </pdfParagraph>
-    <pdfParagraph unicode="⼈⼯智能的未来充满了⽆限的可能性和挑战。随着技术的不断进步，AI将更加深⼊地 融⼊我们的⽇常⽣活，改变⼯作⽅式、医疗健康、教育、交通等各个领域。未来的AI 将不仅仅是执⾏预设任务的⼯具，⽽是具备更强的⾃主学习、推理和决策能⼒，能够 处理复杂的、⾮结构化的信息，甚⾄在某些领域超越⼈类的智能⽔平。" advance="408.5076" size="65.28000000000003">
+    <pdfParagraph unicode="⼈⼯智能的未来充满了⽆限的可能性和挑战。随着技术的不断进步，AI将更加深⼊地 融⼊我们的⽇常⽣活，改变⼯作⽅式、医疗健康、教育、交通等各个领域。未来的AI 将不仅仅是执⾏预设任务的⼯具，⽽是具备更强的⾃主学习、推理和决策能⼒，能够 处理复杂的、⾮结构化的信息，甚⾄在某些领域超越⼈类的智能⽔平。" advance="408.5076" size="11.04000000000002">
       <box x="90.0" y="406.32000000000005" x2="498.5076" y2="471.6000000000001"/>
       <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
       <pdfLine unicode="⼈⼯智能的未来充满了⽆限的可能性和挑战。随着技术的不断进步，AI将更加深⼊地" advance="408.5076" size="11.04000000000002">
@@ -3757,7 +3757,7 @@
         </pdfCharacter>
       </pdfLine>
       <pdfLine unicode="处理复杂的、⾮结构化的信息，甚⾄在某些领域超越⼈类的智能⽔平。" advance="344.02488000000005" size="11.04000000000002">
-        <box x="90.0" y="406.32000000000005" x2="434.02488000000005" y2="417.36000000000007"/>
+        <box x="90.0" y="406.32000000000005" x2="431.0476800000002" y2="417.36000000000007"/>
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
         <pdfCharacter pdfFontId="TT6" pdfCharacterId="130" char_unicode="处" advance="1.0" size="11.04000000000002">
           <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
@@ -3885,7 +3885,7 @@
         </pdfCharacter>
       </pdfLine>
     </pdfParagraph>
-    <pdfParagraph unicode="在医疗领域，AI可能会帮助医⽣更早地诊断疾病，提供个性化的治疗⽅案，甚⾄参与 ⼿术操作。在教育⽅⾯，AI可以根据学⽣的学习进度和兴趣，定制个性化的学习计 划，提升教育效率。在交通领域，⾃动驾驶技术将彻底改变我们的出⾏⽅式，减少交 通事故，提⾼交通效率。" advance="408.51372000000015" size="65.27999999999997">
+    <pdfParagraph unicode="在医疗领域，AI可能会帮助医⽣更早地诊断疾病，提供个性化的治疗⽅案，甚⾄参与 ⼿术操作。在教育⽅⾯，AI可以根据学⽣的学习进度和兴趣，定制个性化的学习计 划，提升教育效率。在交通领域，⾃动驾驶技术将彻底改变我们的出⾏⽅式，减少交 通事故，提⾼交通效率。" advance="408.51372000000015" size="11.04000000000002">
       <box x="90.0" y="325.9200000000001" x2="498.51372000000015" y2="391.20000000000005"/>
       <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
       <pdfLine unicode="在医疗领域，AI可能会帮助医⽣更早地诊断疾病，提供个性化的治疗⽅案，甚⾄参与" advance="408.51372000000015" size="11.04000000000002">
@@ -4349,7 +4349,7 @@
         </pdfCharacter>
       </pdfLine>
       <pdfLine unicode="通事故，提⾼交通效率。" advance="124.02496799999997" size="11.04000000000002">
-        <box x="90.0" y="325.9200000000001" x2="214.02496799999997" y2="336.9600000000001"/>
+        <box x="90.0" y="325.9200000000001" x2="211.04256" y2="336.9600000000001"/>
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
         <pdfCharacter pdfFontId="TT6" pdfCharacterId="103" char_unicode="通" advance="1.0" size="11.04000000000002">
           <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
@@ -4397,7 +4397,7 @@
         </pdfCharacter>
       </pdfLine>
     </pdfParagraph>
-    <pdfParagraph unicode="然⽽，AI的快速发展也带来了伦理和社会问题。如何确保AI的决策是公平、透明的？ 如何防⽌AI被滥⽤？如何应对AI带来的就业结构变化？这些问题都需要我们在技术 发展的同时，进⾏深⼊的思考和探讨。" advance="412.72512000000006" size="47.28000000000003">
+    <pdfParagraph unicode="然⽽，AI的快速发展也带来了伦理和社会问题。如何确保AI的决策是公平、透明的？ 如何防⽌AI被滥⽤？如何应对AI带来的就业结构变化？这些问题都需要我们在技术 发展的同时，进⾏深⼊的思考和探讨。" advance="412.72512000000006" size="11.04000000000002">
       <box x="90.0" y="263.76000000000005" x2="502.72512000000006" y2="311.0400000000001"/>
       <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
       <pdfLine unicode="然⽽，AI的快速发展也带来了伦理和社会问题。如何确保AI的决策是公平、透明的？" advance="412.72512000000006" size="11.04000000000002">
@@ -4717,7 +4717,7 @@
         </pdfCharacter>
       </pdfLine>
       <pdfLine unicode="发展的同时，进⾏深⼊的思考和探讨。" advance="190.02504" size="11.04000000000002">
-        <box x="90.0" y="263.76000000000005" x2="280.02504" y2="274.80000000000007"/>
+        <box x="90.0" y="263.76000000000005" x2="277.04409599999997" y2="274.80000000000007"/>
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
         <pdfCharacter pdfFontId="TT6" pdfCharacterId="192" char_unicode="发" advance="1.0" size="11.04000000000002">
           <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
@@ -4789,7 +4789,7 @@
         </pdfCharacter>
       </pdfLine>
     </pdfParagraph>
-    <pdfParagraph unicode="总的来说，⼈⼯智能的未来将是机遇与挑战并存的。通过合理的规范和引导，AI有望 成为推动社会进步的重要⼒量，帮助我们解决许多全球性难题，创造更加美好的未 来。" advance="408.50649599999997" size="47.03999999999999">
+    <pdfParagraph unicode="总的来说，⼈⼯智能的未来将是机遇与挑战并存的。通过合理的规范和引导，AI有望 成为推动社会进步的重要⼒量，帮助我们解决许多全球性难题，创造更加美好的未 来。" advance="408.50649599999997" size="11.039999999999992">
       <box x="90.0" y="201.60000000000008" x2="498.50649599999997" y2="248.64000000000007"/>
       <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
       <pdfLine unicode="总的来说，⼈⼯智能的未来将是机遇与挑战并存的。通过合理的规范和引导，AI有望" advance="408.50649599999997" size="11.039999999999992">
@@ -5097,7 +5097,7 @@
         </pdfCharacter>
       </pdfLine>
       <pdfLine unicode="来。" advance="25.024968" size="11.039999999999992">
-        <box x="90.0" y="201.60000000000008" x2="115.024968" y2="212.64000000000007"/>
+        <box x="90.0" y="201.60000000000008" x2="112.040256" y2="212.64000000000007"/>
         <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
         <pdfCharacter pdfFontId="TT6" pdfCharacterId="54" char_unicode="来" advance="1.0" size="11.039999999999992">
           <graphicState linewidth="0.0" ncolor="0 0 0" strokingColorSpaceName="Cs1" nonStrokingColorSpaceName="Cs1"/>
