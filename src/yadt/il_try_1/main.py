@@ -5,6 +5,7 @@ from asyncio import CancelledError
 from typing import Any, BinaryIO, Optional
 
 import numpy as np
+import pymupdf
 import tqdm
 from pdfminer.pdfdocument import PDFDocument
 from pdfminer.pdfinterp import PDFResourceManager
@@ -13,6 +14,7 @@ from pdfminer.pdfparser import PDFParser
 from pymupdf import Document, Font
 from yadt.il_try_1.converter import TranslateConverter
 from yadt.il_try_1.doclayout import DocLayoutModel
+from yadt.il_try_1.document_il.midend.paragraph_finder import ParagraphFinder
 from yadt.il_try_1.document_il.xml_converter import XMLConverter
 from yadt.il_try_1.pdfinterp import PDFPageInterpreterEx
 
@@ -170,6 +172,7 @@ def main():
     doc_zh.save("../../../examples/pdf/il_try_1/测试写入1.pdf")
 
     docs = il_creater.create_il()
+    ParagraphFinder().process(docs)
 
     xml_converter = XMLConverter()
 
@@ -188,4 +191,9 @@ def main():
 
 
 if __name__ == "__main__":
+    pymupdf.open(r'/Users/aw/code/python/yadt/examples/pdf/il_try_1/这是一个测试文件.pdf').save(
+        r'/Users/aw/code/python/yadt/examples/pdf/il_try_1/这是一个测试文件.pdf.unzip.pdf',
+        expand=True,
+        pretty=True,
+    )
     main()

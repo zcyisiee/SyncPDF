@@ -117,6 +117,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             elif k == "XObject":
                 for xobjid, xobjstrm in dict_value(v).items():
                     self.xobjmap[xobjid] = xobjstrm
+        pass
 
     def do_S(self) -> None:
         # 重载过滤非公式线条

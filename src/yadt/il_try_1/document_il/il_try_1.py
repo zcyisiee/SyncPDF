@@ -201,6 +201,13 @@ class PageLayout:
             "required": True,
         },
     )
+    id: Optional[int] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
     conf: Optional[float] = field(
         default=None,
         metadata={
@@ -277,6 +284,70 @@ class PdfCharacter:
 
 
 @dataclass
+class PdfFigure:
+    class Meta:
+        name = "pdfFigure"
+
+    box: Optional[Box] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+
+
+@dataclass
+class PdfParagraph:
+    class Meta:
+        name = "pdfParagraph"
+
+    box: Optional[Box] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+    graphic_state: Optional[GraphicState] = field(
+        default=None,
+        metadata={
+            "name": "graphicState",
+            "type": "Element",
+            "required": True,
+        },
+    )
+    pdf_character: list[PdfCharacter] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfCharacter",
+            "type": "Element",
+        },
+    )
+    unicode: Optional[str] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    advance: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    size: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+
+
+@dataclass
 class Page:
     class Meta:
         name = "page"
@@ -306,6 +377,20 @@ class Page:
         default_factory=list,
         metadata={
             "name": "pdfFont",
+            "type": "Element",
+        },
+    )
+    pdf_paragraph: list[PdfParagraph] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfParagraph",
+            "type": "Element",
+        },
+    )
+    pdf_figure: list[PdfFigure] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfFigure",
             "type": "Element",
         },
     )

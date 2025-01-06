@@ -28,6 +28,12 @@
         <ref name="PDFFont"/>
       </zeroOrMore>
       <zeroOrMore>
+        <ref name="PDFParagraph"/>
+      </zeroOrMore>
+      <zeroOrMore>
+        <ref name="PDFFigure"/>
+      </zeroOrMore>
+      <zeroOrMore>
         <ref name="PDFCharacter"/>
       </zeroOrMore>
       <attribute name="pageNumber">
@@ -97,6 +103,9 @@
   </define>
   <define name="PageLayout">
     <element name="pageLayout">
+      <attribute name="id">
+        <data type="int"/>
+      </attribute>
       <attribute name="conf">
         <data type="float"/>
       </attribute>
@@ -175,6 +184,29 @@
           <data type="string"/>
         </attribute>
       </optional>
+    </element>
+  </define>
+  <define name="PDFParagraph">
+    <element name="pdfParagraph">
+      <attribute name="unicode">
+        <data type="string"/>
+      </attribute>
+      <attribute name="advance">
+        <data type="float"/>
+      </attribute>
+      <attribute name="size">
+        <data type="float"/>
+      </attribute>
+      <ref name="Box"/>
+      <ref name="GraphicState"/>
+      <zeroOrMore>
+        <ref name="PDFCharacter"/>
+      </zeroOrMore>
+    </element>
+  </define>
+  <define name="PDFFigure">
+    <element name="pdfFigure">
+      <ref name="Box"/>
     </element>
   </define>
 </grammar>

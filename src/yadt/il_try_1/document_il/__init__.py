@@ -8,7 +8,9 @@ from src.yadt.il_try_1.document_il.il_try_1 import (
     Page,
     PageLayout,
     PdfCharacter,
+    PdfFigure,
     PdfFont,
+    PdfParagraph,
 )
 
 __all__ = [
@@ -21,5 +23,7 @@ __all__ = [
     "Page",
     "PageLayout",
     "PdfCharacter",
+    "PdfFigure",
     "PdfFont",
+    "PdfParagraph",
 ]

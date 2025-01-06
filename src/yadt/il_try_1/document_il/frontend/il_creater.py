@@ -1,7 +1,7 @@
 import numpy as np
 import pdfminer.pdfinterp
 import pymupdf
-from pdfminer.layout import LTChar
+from pdfminer.layout import LTChar, LTFigure
 from pdfminer.pdffont import PDFFont
 
 from yadt.il_try_1.doclayout import DocLayoutModel
@@ -31,7 +31,7 @@ class ILCreater:
             page_layout=[],
             # currently don't support UserUnit page parameter
             # pdf32000 page 79
-            unit='point',
+            unit="point",
         )
         self.current_page_font_name_id_map = {}
         self.docs.page.append(self.current_page)
@@ -129,15 +129,22 @@ class ILCreater:
         image = np.fromstring(pix.samples, np.uint8).reshape(
             pix.height, pix.width, 3
         )[:, :, ::-1]
+        h, w = pix.height, pix.width
         layouts = self.model.predict(image, imgsz=int(pix.height / 32) * 32)[0]
+        id = 0
         for layout in layouts.boxes:
+            id += 1
+            # Convert the coordinate system from the picture coordinate system to the il coordinate system
+            x0, y0, x1, y1 = layout.xyxy
+            x0, y0, x1, y1 = (
+                np.clip(int(x0 - 1), 0, w - 1),
+                np.clip(int(h - y1 - 1), 0, h - 1),
+                np.clip(int(x1 + 1), 0, w - 1),
+                np.clip(int(h - y0 + 1), 0, h - 1),
+            )
             page_layout = il_try_1.PageLayout(
-                box=il_try_1.Box(
-                    layout.xyxy[0].item(),
-                    layout.xyxy[1].item(),
-                    layout.xyxy[2].item(),
-                    layout.xyxy[3].item(),
-                ),
+                id=id,
+                box=il_try_1.Box(x0.item(), y0.item(), x1.item(), y1.item()),
                 conf=layout.conf.item(),
                 class_name=layouts.names[layout.cls],
             )
@@ -150,3 +157,9 @@ class ILCreater:
         assert isinstance(total_pages, int)
         assert total_pages > 0
         self.docs.total_pages = total_pages
+
+    def on_pdf_figure(self, figure: LTFigure):
+        box = il_try_1.Box(
+            figure.bbox[0], figure.bbox[1], figure.bbox[2], figure.bbox[3]
+        )
+        self.current_page.pdf_figure.append(il_try_1.PdfFigure(box=box))

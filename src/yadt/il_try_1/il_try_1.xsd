@@ -15,6 +15,8 @@
         <xs:element ref="cropbox"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pageLayout"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfFont"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfParagraph"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfFigure"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfCharacter"/>
         <xs:element ref="baseOperations"/>
       </xs:sequence>
@@ -73,6 +75,7 @@
       <xs:sequence>
         <xs:element ref="box"/>
       </xs:sequence>
+      <xs:attribute name="id" use="required" type="xs:int"/>
       <xs:attribute name="conf" use="required" type="xs:float"/>
       <xs:attribute name="class_name" use="required" type="xs:string"/>
     </xs:complexType>
@@ -117,6 +120,25 @@
       </xs:attribute>
       <xs:attribute name="strokingColorSpaceName" type="xs:string"/>
       <xs:attribute name="nonStrokingColorSpaceName" type="xs:string"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pdfParagraph">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="box"/>
+        <xs:element ref="graphicState"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfCharacter"/>
+      </xs:sequence>
+      <xs:attribute name="unicode" use="required" type="xs:string"/>
+      <xs:attribute name="advance" use="required" type="xs:float"/>
+      <xs:attribute name="size" use="required" type="xs:float"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pdfFigure">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="box"/>
+      </xs:sequence>
     </xs:complexType>
   </xs:element>
 </xs:schema>

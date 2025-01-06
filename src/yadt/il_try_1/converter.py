@@ -278,7 +278,9 @@ class TranslateConverter(PDFConverterEx):
                 # 更新上一个字符
                 xt = child
                 xt_cls = cls
-            elif isinstance(child, LTFigure):   # 图表
+            elif isinstance(child, LTFigure):
+                # 图表
+                self.il_creater.on_pdf_figure(child)
                 pass
             elif isinstance(child, LTLine):     # 线条
                 layout = self.layout[ltpage.pageid]
