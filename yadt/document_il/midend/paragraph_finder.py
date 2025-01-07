@@ -1,6 +1,6 @@
 import re
 
-from yadt.il_try_1.document_il.il_try_1 import (
+from yadt.document_il import (
     Box,
     GraphicState,
     Page,

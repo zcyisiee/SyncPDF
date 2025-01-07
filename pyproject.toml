@@ -1,17 +1,14 @@
-[build-system]
-requires = [
-  "setuptools >= 61",
-  "setuptools < 72; python_implementation == 'PyPy'", # https://github.com/pypa/distutils/issues/283
-  "pybind11 >= 2.12.0",
-]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "yadt"
 version = "0.0.1"
 description = "Yet Another Document Translator"
+license = "AGPL-3.0"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.13"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
 keywords = ["PDF"]
 dependencies = [
     "bitstring>=4.3.0",
@@ -28,7 +25,12 @@ dependencies = [
     "xsdata[cli,lxml,soap]>=24.12",
 ]
 
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["yadt", "yadt.*"]
-namespaces = false
+[project.urls]
+Homepage = "https://github.com/funstory-ai/yadt"
+
+[project.scripts]
+yadt = "yadt.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

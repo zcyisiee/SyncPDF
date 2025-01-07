@@ -15,16 +15,16 @@ from pdfminer.pdftypes import (
     stream_value,
 )
 
-from yadt.il_try_1.document_il import il_try_1
+from yadt.document_il import il_version_1
 
 
 class PDFCreater:
-    def __init__(self, original_pdf_path: str, document: il_try_1.Document):
+    def __init__(self, original_pdf_path: str, document: il_version_1.Document):
         self.original_pdf_path = original_pdf_path
         self.docs = document
 
     def render_graphic_state(
-        self, draw_op: BitStream, graphic_state: il_try_1.GraphicState
+        self, draw_op: BitStream, graphic_state: il_version_1.GraphicState
     ):
         if graphic_state is None:
             return
@@ -50,8 +50,8 @@ class PDFCreater:
             )
 
     def render_paragraph_to_char(
-        self, paragraph: il_try_1.PdfParagraph
-    ) -> list[il_try_1.PdfCharacter]:
+        self, paragraph: il_version_1.PdfParagraph
+    ) -> list[il_version_1.PdfCharacter]:
         chars = []
         for line in paragraph.pdf_line:
             chars.extend(line.pdf_character)
@@ -61,7 +61,7 @@ class PDFCreater:
             )
         return chars
 
-    def add_font(self, doc_zh: pymupdf.Document, il: il_try_1.Document):
+    def add_font(self, doc_zh: pymupdf.Document, il: il_version_1.Document):
         noto_path = r"/Users/aw/Downloads/GoNotoKurrent-Regular.ttf"
         font_list = [
             ("noto", noto_path),
@@ -106,7 +106,7 @@ class PDFCreater:
         #             font = rsrcmgr.get_font(objid, spec)
         #             if fontid == "noto":
         #                 return font
-        pdf_font_il = il_try_1.PdfFont(
+        pdf_font_il = il_version_1.PdfFont(
             name="noto",
             xref_id=font_id["noto"],
             font_id="noto",

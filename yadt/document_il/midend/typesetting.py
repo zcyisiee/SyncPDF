@@ -1,6 +1,6 @@
 import pymupdf
 
-from yadt.il_try_1.document_il import Box, PdfCharacter, PdfLine, il_try_1
+from yadt.document_il import Box, PdfCharacter, PdfLine, il_version_1
 
 noto_path = r"/Users/aw/Downloads/GoNotoKurrent-Regular.ttf"
 noto = pymupdf.Font(fontfile=noto_path)
@@ -84,7 +84,7 @@ class Typesetting:
         self,
         scale: float,
         noto_font: pymupdf.Font,
-        paragraph: il_try_1.PdfParagraph,
+        paragraph: il_version_1.PdfParagraph,
     ):
         text = paragraph.unicode
         current_font_size = paragraph.size * scale
@@ -116,7 +116,7 @@ class Typesetting:
                 if current_y < box.y or current_y + current_font_size > box.y2:
                     return None
 
-            char_box = il_try_1.Box(
+            char_box = il_version_1.Box(
                 x=current_x,
                 y=current_y,
                 x2=current_x + char_width,
@@ -124,7 +124,7 @@ class Typesetting:
             )
 
             chars.append(
-                il_try_1.PdfCharacter(
+                il_version_1.PdfCharacter(
                     pdf_font_id="noto",
                     pdf_character_id=noto_font.has_glyph(ord(char)),
                     char_unicode=char,
@@ -139,7 +139,7 @@ class Typesetting:
 
         return chars
 
-    def typsetting_document(self, document: il_try_1.Document):
+    def typsetting_document(self, document: il_version_1.Document):
         for page in document.page:
             for paragraph in page.pdf_paragraph:
                 self.create_line(
@@ -147,7 +147,7 @@ class Typesetting:
                 )
 
     def render_paragraph_unicode_to_char(
-        self, paragraph: il_try_1.PdfParagraph, noto_font: pymupdf.Font
+        self, paragraph: il_version_1.PdfParagraph, noto_font: pymupdf.Font
     ):
         scale = 1.0
         # 尝试排版，如果失败则逐步缩小字号

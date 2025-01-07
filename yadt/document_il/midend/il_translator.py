@@ -2,8 +2,8 @@ import concurrent.futures
 
 from tqdm import tqdm
 
-from yadt.il_try_1.document_il.il_try_1 import Document, Page, PdfParagraph
-from yadt.il_try_1.document_il.translator.translator import BaseTranslator
+from yadt.document_il import Document, Page, PdfParagraph
+from yadt.document_il.translator.translator import BaseTranslator
 
 
 class ILTranslator:

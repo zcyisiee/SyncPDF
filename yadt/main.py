@@ -12,20 +12,20 @@ from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
 from pymupdf import Document, Font
-from yadt.il_try_1.converter import TranslateConverter
-from yadt.il_try_1.doclayout import DocLayoutModel
-from yadt.il_try_1.document_il.midend.il_translator import ILTranslator
-from yadt.il_try_1.document_il.midend.paragraph_finder import ParagraphFinder
-from yadt.il_try_1.document_il.midend.typesetting import Typesetting
-from yadt.il_try_1.document_il.translator.translator import (
+from yadt.converter import TranslateConverter
+from yadt.doclayout import DocLayoutModel
+from yadt.document_il.midend.il_translator import ILTranslator
+from yadt.document_il.midend.paragraph_finder import ParagraphFinder
+from yadt.document_il.midend.typesetting import Typesetting
+from yadt.document_il.translator.translator import (
     OpenAITranslator,
     set_translate_rate_limiter,
 )
-from yadt.il_try_1.document_il.xml_converter import XMLConverter
-from yadt.il_try_1.pdfinterp import PDFPageInterpreterEx
+from yadt.document_il.xml_converter import XMLConverter
+from yadt.pdfinterp import PDFPageInterpreterEx
 
-from yadt.il_try_1.document_il.frontend.il_creater import ILCreater
-from yadt.il_try_1.document_il.backend.pdf_creater import PDFCreater
+from yadt.document_il.frontend.il_creater import ILCreater
+from yadt.document_il.backend.pdf_creater import PDFCreater
 
 model = DocLayoutModel.load_available()
 resfont_map = {
@@ -140,7 +140,7 @@ def translate_patch(
 def main():
     resfont = "china-ss"
     print(os.getcwd())
-    original_pdf_path = "../../../examples/pdf/il_try_1/这是一个测试文件.pdf"
+    original_pdf_path = "../examples/pdf/il_try_1/这是一个测试文件.pdf"
     print(os.path.abspath(original_pdf_path))
     with open(original_pdf_path, "rb") as f:
         raw = f.read()
@@ -173,7 +173,7 @@ def main():
         # print(ops_new.encode())
         doc_zh.update_stream(obj_id, ops_new.encode())
 
-    doc_zh.save("../../../examples/pdf/il_try_1/测试写入1.pdf")
+    doc_zh.save("../examples/pdf/il_try_1/测试写入1.pdf")
 
     docs = il_creater.create_il()
     ParagraphFinder().process(docs)
@@ -188,16 +188,16 @@ def main():
 
     xml = xml_converter.to_xml(docs)
 
-    with open("../../../examples/pdf/il_try_1/测试解析.xml", "w") as f:
+    with open("../examples/pdf/il_try_1/测试解析.xml", "w") as f:
         f.write(xml)
 
-    with open("../../../examples/pdf/il_try_1/测试解析.xml", "r") as f:
+    with open("../examples/pdf/il_try_1/测试解析.xml", "r") as f:
         xml = f.read()
     docs2 = xml_converter.from_xml(xml)
 
     pdf_creater = PDFCreater(original_pdf_path, docs2)
 
-    pdf_creater.write("../../../examples/pdf/il_try_1/测试还原.pdf")
+    pdf_creater.write("../examples/pdf/il_try_1/测试还原.pdf")
 
 
 if __name__ == "__main__":

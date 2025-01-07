@@ -9,7 +9,7 @@ from copy import copy
 import openai
 import requests
 
-from yadt.il_try_1.document_il.translator.cache import TranslationCache
+from yadt.document_il.translator.cache import TranslationCache
 
 
 def remove_control_characters(s):
