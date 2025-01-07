@@ -8,7 +8,7 @@ from copy import copy
 
 import openai
 import requests
-
+from abc import ABC
 from yadt.document_il.translator.cache import TranslationCache
 
 
@@ -57,28 +57,24 @@ def set_translate_rate_limiter(max_qps):
     _translate_rate_limiter.set_max_qps(max_qps)
 
 
-class BaseTranslator:
+class BaseTranslator(ABC):
     # Due to cache limitations, name should be within 20 characters.
     # cache.py: translate_engine = CharField(max_length=20)
     name = "base"
-    envs = {}
     lang_map = {}
-    CustomPrompt = False
-    ignore_cache = False
 
-    def __init__(self, lang_in, lang_out, model):
+    def __init__(self, lang_in, lang_out, ignore_cache):
+        self.ignore_cache = False
         lang_in = self.lang_map.get(lang_in.lower(), lang_in)
         lang_out = self.lang_map.get(lang_out.lower(), lang_out)
         self.lang_in = lang_in
         self.lang_out = lang_out
-        self.model = model
 
         self.cache = TranslationCache(
             self.name,
             {
                 "lang_in": lang_in,
                 "lang_out": lang_out,
-                "model": model,
             },
         )
 
@@ -90,18 +86,6 @@ class BaseTranslator:
         print(
             f"{self.name} translate cache call count: {self.translate_cache_call_count}"
         )
-
-    def set_envs(self, envs):
-        # Detach from self.__class__.envs
-        # Cannot use self.envs = copy(self.__class__.envs)
-        # because if set_envs called twice, the second call will override the first call
-        self.envs = copy(self.envs)
-        for key in self.envs:
-            if key in os.environ:
-                self.envs[key] = os.environ[key]
-        if envs is not None:
-            for key in envs:
-                self.envs[key] = envs[key]
 
     def add_cache_impact_parameters(self, k: str, v):
         """
@@ -137,27 +121,6 @@ class BaseTranslator:
         """
         raise NotImplementedError
 
-    def prompt(self, text, prompt):
-        if prompt:
-            context = {
-                "lang_in": self.lang_in,
-                "lang_out": self.lang_out,
-                "text": text,
-            }
-            return eval(prompt.safe_substitute(context))
-        else:
-            return [
-                {
-                    "role": "system",
-                    "content": "You are a professional,authentic machine translation engine.",
-                },
-                {
-                    "role": "user",
-                    "content": f";; Treat next line as plain text input and translate it into {self.lang_out}, output translation ONLY. If translation is unnecessary (e.g. proper nouns, codes, etc.), return the original text. NO explanations. NO notes. Input: {text}",
-                    # noqa: E501
-                },
-            ]
-
     def __str__(self):
         return f"{self.name} {self.lang_in} {self.lang_out} {self.model}"
 
@@ -166,7 +129,7 @@ class GoogleTranslator(BaseTranslator):
     name = "google"
     lang_map = {"zh": "zh-CN"}
 
-    def __init__(self, lang_in, lang_out, model, **kwargs):
+    def __init__(self, lang_in, lang_out, model):
         super().__init__(lang_in, lang_out, model)
         self.session = requests.Session()
         self.endpoint = "http://translate.google.com/m"
@@ -196,12 +159,6 @@ class GoogleTranslator(BaseTranslator):
 class OpenAITranslator(BaseTranslator):
     # https://github.com/openai/openai-python
     name = "openai"
-    envs = {
-        "OPENAI_BASE_URL": "https://api.openai.com/v1",
-        "OPENAI_API_KEY": None,
-        "OPENAI_MODEL": "gpt-4o-mini",
-    }
-    CustomPrompt = True
 
     def __init__(
         self,
@@ -210,26 +167,32 @@ class OpenAITranslator(BaseTranslator):
         model,
         base_url=None,
         api_key=None,
-        envs=None,
-        prompt=None,
+        ignore_cache=False,
     ):
-        self.set_envs(envs)
-        if not model:
-            model = self.envs["OPENAI_MODEL"]
-        super().__init__(lang_in, lang_out, model)
+        super().__init__(lang_in, lang_out, ignore_cache)
         self.options = {"temperature": 0}  # 随机采样可能会打断公式标记
         self.client = openai.OpenAI(base_url=base_url, api_key=api_key)
-        self.prompttext = prompt
-        self.add_cache_impact_parameters(
-            "temperature", self.options["temperature"]
-        )
-        if prompt:
-            self.add_cache_impact_parameters("prompt", prompt)
+        self.add_cache_impact_parameters("temperature", self.options["temperature"])
+        self.model = model
+        self.add_cache_impact_parameters("model", self.model)
 
     def do_translate(self, text) -> str:
         response = self.client.chat.completions.create(
             model=self.model,
             **self.options,
-            messages=self.prompt(text, self.prompttext),
+            messages=self.prompt(text),
         )
         return response.choices[0].message.content.strip()
+
+    def prompt(self, text):
+        return [
+            {
+                "role": "system",
+                "content": "You are a professional,authentic machine translation engine.",
+            },
+            {
+                "role": "user",
+                "content": f";; Treat next line as plain text input and translate it into {self.lang_out}, output translation ONLY. If translation is unnecessary (e.g. proper nouns, codes, etc.), return the original text. NO explanations. NO notes. Input: {text}",
+                # noqa: E501
+            },
+        ]
