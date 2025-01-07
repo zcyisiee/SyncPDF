@@ -28,13 +28,58 @@ class Typesetting:
             graphic_state=graphic_state,
             pdf_character=chars,
             unicode="".join(char.char_unicode for char in chars),
-            size=max_y - min_y,  # 使用行的高度作为size
+            size=max_y - min_y,  # 使用行的高度作为 size
             scale=chars[0].scale,
         )
         return line
 
+    def process_toc_dots(
+        self,
+        text: str,
+        noto_font: pymupdf.Font,
+        current_font_size: float,
+        max_width: float,
+    ) -> str | None:
+        """处理目录条目的点号
+        
+        Args:
+            text: 原始文本
+            noto_font: 字体
+            current_font_size: 当前字体大小
+            max_width: 最大可用宽度
+            
+        Returns:
+            处理后的文本，如果点号数量不足则返回None
+        """
+        # 分割文本为标题和页码部分
+        parts = text.rsplit(' ', 1)
+        if len(parts) != 2:
+            return None
+            
+        title, page_num = parts
+        # 计算页码的宽度
+        page_num_width = sum(noto_font.char_lengths(c, current_font_size)[0] for c in page_num)
+        # 计算点号的宽度
+        dot_width = noto_font.char_lengths('.', current_font_size)[0]
+        # 计算标题部分的宽度
+        title_width = sum(noto_font.char_lengths(c, current_font_size)[0] for c in title)
+        
+        # 计算需要的点号数量
+        dots_needed = max(1, int((max_width - title_width - page_num_width) / dot_width))
+        
+        # 如果点号数量太少，返回None
+        if dots_needed < 5:
+            return None
+            
+        dots = '.' * dots_needed
+        # 重新组合文本
+        return f"{title}{dots}{page_num}"
+
     def try_typeset(
-        self, scale: float, noto_font: pymupdf.Font, paragraph: il_try_1.PdfParagraph
+        self,
+        scale: float,
+        noto_font: pymupdf.Font,
+        paragraph: il_try_1.PdfParagraph,
     ):
         text = paragraph.unicode
         current_font_size = paragraph.size * scale
@@ -42,6 +87,16 @@ class Typesetting:
         current_x = box.x
         current_y = box.y2 - current_font_size
         chars = []
+
+        # 检查是否为目录条目，通过计算点号的数量
+        dot_count = text.count('.')
+        if dot_count >= 20:  # 如果包含至少20个点号，认为是目录条目
+            # 计算每行可容纳的最大字符数
+            max_width = box.x2 - box.x
+            processed_text = self.process_toc_dots(text, noto_font, current_font_size, max_width)
+            if processed_text is None:
+                return None
+            text = processed_text
 
         for char in text:
             char_width = noto_font.char_lengths(char, current_font_size)[0]
@@ -100,5 +155,5 @@ class Typesetting:
             else:
                 scale -= 0.01
         raise ValueError(
-            f"无法在保持最小缩放比0.4的情况下排版文本。当前文本：{paragraph.unicode}"
+            f"无法在保持最小缩放比 0.4 的情况下排版文本。当前文本：{paragraph.unicode}"
         )
