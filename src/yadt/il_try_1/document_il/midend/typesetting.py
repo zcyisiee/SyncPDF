@@ -10,9 +10,8 @@ class Typesetting:
     def __init__(self):
         pass
 
-    def create_line(self, chars: list[PdfCharacter]) -> PdfLine:
-        if not chars:
-            return None
+    def create_line(self, chars: list[PdfCharacter]) -> PdfLine | None:
+        assert chars
 
         # 计算行的边界框
         min_x = min(char.box.x for char in chars)
