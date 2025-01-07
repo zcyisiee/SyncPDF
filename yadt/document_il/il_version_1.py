@@ -159,6 +159,14 @@ class PdfFont:
             "required": True,
         },
     )
+    encoding_length: Optional[int] = field(
+        default=None,
+        metadata={
+            "name": "encodingLength",
+            "type": "Attribute",
+            "required": True,
+        },
+    )
 
 
 @dataclass
@@ -201,6 +209,13 @@ class PageLayout:
             "required": True,
         },
     )
+    id: Optional[int] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
     conf: Optional[float] = field(
         default=None,
         metadata={
@@ -237,6 +252,12 @@ class PdfCharacter:
             "required": True,
         },
     )
+    scale: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
     pdf_font_id: Optional[str] = field(
         default=None,
         metadata={
@@ -250,7 +271,6 @@ class PdfCharacter:
         metadata={
             "name": "pdfCharacterId",
             "type": "Attribute",
-            "required": True,
         },
     )
     char_unicode: Optional[str] = field(
@@ -264,7 +284,6 @@ class PdfCharacter:
         default=None,
         metadata={
             "type": "Attribute",
-            "required": True,
         },
     )
     size: Optional[float] = field(
@@ -272,6 +291,118 @@ class PdfCharacter:
         metadata={
             "type": "Attribute",
             "required": True,
+        },
+    )
+
+
+@dataclass
+class PdfFigure:
+    class Meta:
+        name = "pdfFigure"
+
+    box: Optional[Box] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+
+
+@dataclass
+class PdfLine:
+    class Meta:
+        name = "pdfLine"
+
+    box: Optional[Box] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+    graphic_state: Optional[GraphicState] = field(
+        default=None,
+        metadata={
+            "name": "graphicState",
+            "type": "Element",
+            "required": True,
+        },
+    )
+    pdf_character: list[PdfCharacter] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfCharacter",
+            "type": "Element",
+        },
+    )
+    size: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    unicode: Optional[str] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    scale: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+
+
+@dataclass
+class PdfParagraph:
+    class Meta:
+        name = "pdfParagraph"
+
+    box: Optional[Box] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+    graphic_state: Optional[GraphicState] = field(
+        default=None,
+        metadata={
+            "name": "graphicState",
+            "type": "Element",
+            "required": True,
+        },
+    )
+    pdf_line: list[PdfLine] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfLine",
+            "type": "Element",
+        },
+    )
+    size: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    unicode: Optional[str] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    scale: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
         },
     )
 
@@ -306,6 +437,20 @@ class Page:
         default_factory=list,
         metadata={
             "name": "pdfFont",
+            "type": "Element",
+        },
+    )
+    pdf_paragraph: list[PdfParagraph] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfParagraph",
+            "type": "Element",
+        },
+    )
+    pdf_figure: list[PdfFigure] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfFigure",
             "type": "Element",
         },
     )

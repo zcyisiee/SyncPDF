@@ -1,4 +1,4 @@
-from src.yadt.il_try_1.document_il.il_try_1 import (
+from yadt.document_il.il_version_1 import (
     BaseOperations,
     Box,
     Cropbox,
@@ -8,7 +8,10 @@ from src.yadt.il_try_1.document_il.il_try_1 import (
     Page,
     PageLayout,
     PdfCharacter,
+    PdfFigure,
     PdfFont,
+    PdfLine,
+    PdfParagraph,
 )
 
 __all__ = [
@@ -21,5 +24,8 @@ __all__ = [
     "Page",
     "PageLayout",
     "PdfCharacter",
+    "PdfFigure",
     "PdfFont",
+    "PdfLine",
+    "PdfParagraph",
 ]

@@ -28,6 +28,12 @@
         <ref name="PDFFont"/>
       </zeroOrMore>
       <zeroOrMore>
+        <ref name="PDFParagraph"/>
+      </zeroOrMore>
+      <zeroOrMore>
+        <ref name="PDFFigure"/>
+      </zeroOrMore>
+      <zeroOrMore>
         <ref name="PDFCharacter"/>
       </zeroOrMore>
       <attribute name="pageNumber">
@@ -72,22 +78,34 @@
       <attribute name="xrefId">
         <ref name="PDFXrefId"/>
       </attribute>
+      <attribute name="encodingLength">
+        <data type="int"/>
+      </attribute>
     </element>
   </define>
   <define name="PDFCharacter">
     <element name="pdfCharacter">
+      <optional>
+        <attribute name="scale">
+          <data type="float"/>
+        </attribute>
+      </optional>
       <attribute name="pdfFontId">
         <data type="string"/>
       </attribute>
-      <attribute name="pdfCharacterId">
-        <data type="int"/>
-      </attribute>
+      <optional>
+        <attribute name="pdfCharacterId">
+          <data type="int"/>
+        </attribute>
+      </optional>
       <attribute name="char_unicode">
         <data type="string"/>
       </attribute>
-      <attribute name="advance">
-        <data type="float"/>
-      </attribute>
+      <optional>
+        <attribute name="advance">
+          <data type="float"/>
+        </attribute>
+      </optional>
       <attribute name="size">
         <data type="float"/>
       </attribute>
@@ -97,6 +115,9 @@
   </define>
   <define name="PageLayout">
     <element name="pageLayout">
+      <attribute name="id">
+        <data type="int"/>
+      </attribute>
       <attribute name="conf">
         <data type="float"/>
       </attribute>
@@ -175,6 +196,51 @@
           <data type="string"/>
         </attribute>
       </optional>
+    </element>
+  </define>
+  <define name="PDFParagraph">
+    <element name="pdfParagraph">
+      <attribute name="size">
+        <data type="float"/>
+      </attribute>
+      <attribute name="unicode">
+        <data type="string"/>
+      </attribute>
+      <optional>
+        <attribute name="scale">
+          <data type="float"/>
+        </attribute>
+      </optional>
+      <ref name="Box"/>
+      <ref name="GraphicState"/>
+      <zeroOrMore>
+        <ref name="PDFLine"/>
+      </zeroOrMore>
+    </element>
+  </define>
+  <define name="PDFLine">
+    <element name="pdfLine">
+      <attribute name="size">
+        <data type="float"/>
+      </attribute>
+      <attribute name="unicode">
+        <data type="string"/>
+      </attribute>
+      <optional>
+        <attribute name="scale">
+          <data type="float"/>
+        </attribute>
+      </optional>
+      <ref name="Box"/>
+      <ref name="GraphicState"/>
+      <zeroOrMore>
+        <ref name="PDFCharacter"/>
+      </zeroOrMore>
+    </element>
+  </define>
+  <define name="PDFFigure">
+    <element name="pdfFigure">
+      <ref name="Box"/>
     </element>
   </define>
 </grammar>

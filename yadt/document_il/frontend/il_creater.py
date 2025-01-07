@@ -1,19 +1,19 @@
 import numpy as np
 import pdfminer.pdfinterp
 import pymupdf
-from pdfminer.layout import LTChar
-from pdfminer.pdffont import PDFFont
+from pdfminer.layout import LTChar, LTFigure
+from pdfminer.pdffont import PDFCIDFont, PDFFont
 
-from yadt.il_try_1.doclayout import DocLayoutModel
-from yadt.il_try_1.document_il import il_try_1
+from yadt.doclayout import DocLayoutModel
+from yadt.document_il import il_version_1
 
 
 class ILCreater:
     def __init__(self):
-        self.current_page: il_try_1.Page = None
+        self.current_page: il_version_1.Page = None
         self.mupdf: pymupdf.Document = None
         self.model = DocLayoutModel.load_available()
-        self.docs = il_try_1.Document(page=[])
+        self.docs = il_version_1.Document(page=[])
         self.stroking_color_space_name = None
         self.non_stroking_color_space_name = None
 
@@ -25,13 +25,13 @@ class ILCreater:
         self.non_stroking_color_space_name = color_space_name
 
     def on_page_start(self):
-        self.current_page = il_try_1.Page(
+        self.current_page = il_version_1.Page(
             pdf_font=[],
             pdf_character=[],
             page_layout=[],
             # currently don't support UserUnit page parameter
             # pdf32000 page 79
-            unit='point',
+            unit="point",
         )
         self.current_page_font_name_id_map = {}
         self.docs.page.append(self.current_page)
@@ -43,10 +43,10 @@ class ILCreater:
         x1: float | int,
         y1: float | int,
     ):
-        box = il_try_1.Box(
+        box = il_version_1.Box(
             x=float(x0), y=float(y0), x2=float(x1), y2=float(y1)
         )
-        self.current_page.cropbox = il_try_1.Cropbox(box=box)
+        self.current_page.cropbox = il_version_1.Cropbox(box=box)
 
     def on_page_media_box(
         self,
@@ -55,10 +55,10 @@ class ILCreater:
         x1: float | int,
         y1: float | int,
     ):
-        box = il_try_1.Box(
+        box = il_version_1.Box(
             x=float(x0), y=float(y0), x2=float(x1), y2=float(y1)
         )
-        self.current_page.mediabox = il_try_1.Mediabox(box=box)
+        self.current_page.mediabox = il_version_1.Mediabox(box=box)
 
     def on_page_number(self, page_number: int):
         assert isinstance(page_number, int)
@@ -68,7 +68,7 @@ class ILCreater:
         self.on_page_layout(page_number)
 
     def on_page_base_operation(self, operation: str):
-        self.current_page.base_operations = il_try_1.BaseOperations(
+        self.current_page.base_operations = il_version_1.BaseOperations(
             value=operation
         )
 
@@ -76,14 +76,20 @@ class ILCreater:
         font_name = font.fontname
         if isinstance(font.fontname, bytes):
             font_name = font.fontname.decode("utf-8")
-        il_font_metadata = il_try_1.PdfFont(
-            name=font_name, xref_id=xref_id, font_id=font_id
+        encoding_length = 1
+        if isinstance(font, PDFCIDFont):
+            encoding_length = 2
+        il_font_metadata = il_version_1.PdfFont(
+            name=font_name,
+            xref_id=xref_id,
+            font_id=font_id,
+            encoding_length=encoding_length,
         )
         self.current_page_font_name_id_map[font_name] = font_id
         self.current_page.pdf_font.append(il_font_metadata)
 
     def create_graphic_state(self, gs: pdfminer.pdfinterp.PDFGraphicState):
-        graphic_state = il_try_1.GraphicState()
+        graphic_state = il_version_1.GraphicState()
         for k, v in gs.__dict__.items():
             if v is None:
                 continue
@@ -105,7 +111,7 @@ class ILCreater:
 
     def on_lt_char(self, char: LTChar):
         gs = self.create_graphic_state(char.graphicstate)
-        bbox = il_try_1.Box(
+        bbox = il_version_1.Box(
             char.bbox[0], char.bbox[1], char.bbox[2], char.bbox[3]
         )
 
@@ -113,7 +119,7 @@ class ILCreater:
         char_id = char.cid
         char_unicode = char.get_text()
         advance = char.adv
-        pdf_char = il_try_1.PdfCharacter(
+        pdf_char = il_version_1.PdfCharacter(
             box=bbox,
             pdf_font_id=font_id,
             pdf_character_id=char_id,
@@ -129,14 +135,23 @@ class ILCreater:
         image = np.fromstring(pix.samples, np.uint8).reshape(
             pix.height, pix.width, 3
         )[:, :, ::-1]
+        h, w = pix.height, pix.width
         layouts = self.model.predict(image, imgsz=int(pix.height / 32) * 32)[0]
+        id = 0
         for layout in layouts.boxes:
-            page_layout = il_try_1.PageLayout(
-                box=il_try_1.Box(
-                    layout.xyxy[0].item(),
-                    layout.xyxy[1].item(),
-                    layout.xyxy[2].item(),
-                    layout.xyxy[3].item(),
+            id += 1
+            # Convert the coordinate system from the picture coordinate system to the il coordinate system
+            x0, y0, x1, y1 = layout.xyxy
+            x0, y0, x1, y1 = (
+                np.clip(int(x0 - 1), 0, w - 1),
+                np.clip(int(h - y1 - 1), 0, h - 1),
+                np.clip(int(x1 + 1), 0, w - 1),
+                np.clip(int(h - y0 + 1), 0, h - 1),
+            )
+            page_layout = il_version_1.PageLayout(
+                id=id,
+                box=il_version_1.Box(
+                    x0.item(), y0.item(), x1.item(), y1.item()
                 ),
                 conf=layout.conf.item(),
                 class_name=layouts.names[layout.cls],
@@ -150,3 +165,9 @@ class ILCreater:
         assert isinstance(total_pages, int)
         assert total_pages > 0
         self.docs.total_pages = total_pages
+
+    def on_pdf_figure(self, figure: LTFigure):
+        box = il_version_1.Box(
+            figure.bbox[0], figure.bbox[1], figure.bbox[2], figure.bbox[3]
+        )
+        self.current_page.pdf_figure.append(il_version_1.PdfFigure(box=box))

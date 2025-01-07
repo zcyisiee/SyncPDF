@@ -5,19 +5,27 @@ from asyncio import CancelledError
 from typing import Any, BinaryIO, Optional
 
 import numpy as np
+import pymupdf
 import tqdm
 from pdfminer.pdfdocument import PDFDocument
 from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
 from pymupdf import Document, Font
-from yadt.il_try_1.converter import TranslateConverter
-from yadt.il_try_1.doclayout import DocLayoutModel
-from yadt.il_try_1.document_il.XMLConverter import XMLConverter
-from yadt.il_try_1.pdfinterp import PDFPageInterpreterEx
+from yadt.converter import TranslateConverter
+from yadt.doclayout import DocLayoutModel
+from yadt.document_il.midend.il_translator import ILTranslator
+from yadt.document_il.midend.paragraph_finder import ParagraphFinder
+from yadt.document_il.midend.typesetting import Typesetting
+from yadt.document_il.translator.translator import (
+    OpenAITranslator,
+    set_translate_rate_limiter,
+)
+from yadt.document_il.xml_converter import XMLConverter
+from yadt.pdfinterp import PDFPageInterpreterEx
 
-from yadt.il_try_1.document_il.ILCreater import ILCreater
-from yadt.il_try_1.document_il.PDFCreater import PDFCreater
+from yadt.document_il.frontend.il_creater import ILCreater
+from yadt.document_il.backend.pdf_creater import PDFCreater
 
 model = DocLayoutModel.load_available()
 resfont_map = {
@@ -31,7 +39,7 @@ resfont_map = {
 }
 
 
-def translate_patch(
+def start_parse_il(
     inf: BinaryIO,
     pages: Optional[list[int]] = None,
     vfont: str = "",
@@ -79,7 +87,7 @@ def translate_patch(
 
     parser = PDFParser(inf)
     doc = PDFDocument(parser)
-    with tqdm.tqdm(total=total_pages) as progress:
+    with tqdm.tqdm(total=total_pages, desc="parse pdf to il") as progress:
         for pageno, page in enumerate(PDFPage.create_pages(doc)):
             if cancellation_event and cancellation_event.is_set():
                 raise CancelledError("task cancelled")
@@ -91,13 +99,11 @@ def translate_patch(
             image = np.fromstring(pix.samples, np.uint8).reshape(
                 pix.height, pix.width, 3
             )[:, :, ::-1]
-            page_layout = model.predict(
-                image, imgsz=int(pix.height / 32) * 32)[0]
+            page_layout = model.predict(image, imgsz=int(pix.height / 32) * 32)[0]
             # kdtree 是不可能 kdtree 的，不如直接渲染成图片，用空间换时间
             box = np.ones((pix.height, pix.width))
             h, w = box.shape
-            vcls = ["abandon", "figure", "table",
-                    "isolate_formula", "formula_caption"]
+            vcls = ["abandon", "figure", "table", "isolate_formula", "formula_caption"]
             for i, d in enumerate(page_layout.boxes):
                 if page_layout.names[int(d.cls)] not in vcls:
                     x0, y0, x1, y1 = d.xyxy.squeeze()
@@ -128,13 +134,12 @@ def translate_patch(
             il_creater.on_page_base_operation(ops_base)
 
     device.close()
-    return obj_patch
 
 
-def main():
+def translate():
     resfont = "china-ss"
     print(os.getcwd())
-    original_pdf_path = "../../../examples/pdf/il_try_1/这是一个测试文件.pdf"
+    original_pdf_path = "../examples/pdf/il_try_1/这是一个测试文件.pdf"
     print(os.path.abspath(original_pdf_path))
     with open(original_pdf_path, "rb") as f:
         raw = f.read()
@@ -156,36 +161,28 @@ def main():
     il_creater = ILCreater()
 
     il_creater.mupdf = doc_en
-    obj_patch = translate_patch(
-        fp, doc_zh=doc_zh, resfont=resfont, il_creater=il_creater
-    )
-
-    for obj_id, ops_new in obj_patch.items():
-        # ops_old=doc_en.xref_stream(obj_id)
-        # print(obj_id)
-        # print(ops_old)
-        # print(ops_new.encode())
-        doc_zh.update_stream(obj_id, ops_new.encode())
-
-    doc_zh.save("../../../examples/pdf/il_try_1/测试写入1.pdf")
+    start_parse_il(fp, doc_zh=doc_zh, resfont=resfont, il_creater=il_creater)
 
     docs = il_creater.create_il()
+    ParagraphFinder().process(docs)
 
+    set_translate_rate_limiter(50)
+    translate_engine = OpenAITranslator("zh_cn", "en-us", "Qwen/Qwen2.5-72B-Instruct")
+    # translate_engine.ignore_cache = True
+    ILTranslator(translate_engine).translate(docs)
+
+    Typesetting().typsetting_document(docs)
     xml_converter = XMLConverter()
 
     xml = xml_converter.to_xml(docs)
 
-    with open("../../../examples/pdf/il_try_1/测试解析.xml", "w") as f:
+    with open("../examples/pdf/il_try_1/测试解析.xml", "w") as f:
         f.write(xml)
 
-    with open("../../../examples/pdf/il_try_1/测试解析.xml", "r") as f:
+    with open("../examples/pdf/il_try_1/测试解析.xml", "r") as f:
         xml = f.read()
     docs2 = xml_converter.from_xml(xml)
 
     pdf_creater = PDFCreater(original_pdf_path, docs2)
 
-    pdf_creater.write("../../../examples/pdf/il_try_1/测试还原.pdf")
-
-
-if __name__ == "__main__":
-    main()
+    pdf_creater.write("../examples/pdf/il_try_1/测试还原.pdf")

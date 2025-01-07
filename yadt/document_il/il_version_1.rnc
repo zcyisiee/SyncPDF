@@ -10,6 +10,8 @@ Page =
     element cropbox { Box },
     PageLayout*,
     PDFFont*,
+    PDFParagraph*,
+    PDFFigure*,
     PDFCharacter*,
     attribute pageNumber { xsd:int },
     attribute Unit { xsd:string },
@@ -28,20 +30,23 @@ PDFFont =
   element pdfFont {
     attribute name { xsd:string },
     attribute fontId { xsd:string },
-    attribute xrefId { PDFXrefId }
+    attribute xrefId { PDFXrefId },
+    attribute encodingLength { xsd:int }
   }
 PDFCharacter =
   element pdfCharacter {
+    attribute scale { xsd:float }?,
     attribute pdfFontId { xsd:string },
-    attribute pdfCharacterId { xsd:int },
+    attribute pdfCharacterId { xsd:int }?,
     attribute char_unicode { xsd:string },
-    attribute advance { xsd:float },
+    attribute advance { xsd:float }?,
     attribute size { xsd:float },
     GraphicState,
     Box
   }
 PageLayout =
   element pageLayout {
+    attribute id { xsd:int },
     attribute conf { xsd:float },
     attribute class_name { xsd:string },
     Box
@@ -66,3 +71,22 @@ GraphicState =
     attribute strokingColorSpaceName { xsd:string }?,
     attribute nonStrokingColorSpaceName { xsd:string }?
   }
+PDFParagraph =
+  element pdfParagraph {
+    attribute size { xsd:float },
+    attribute unicode { xsd:string },
+    attribute scale { xsd:float }?,
+    Box,
+    GraphicState,
+    PDFLine*
+  }
+PDFLine =
+  element pdfLine {
+    attribute size { xsd:float },
+    attribute unicode { xsd:string },
+    attribute scale { xsd:float }?,
+    Box,
+    GraphicState,
+    PDFCharacter*
+  }
+PDFFigure = element pdfFigure { Box }
