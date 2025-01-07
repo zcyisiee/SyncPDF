@@ -29,9 +29,53 @@ class Typesetting:
             pdf_character=chars,
             unicode="".join(char.char_unicode for char in chars),
             size=max_y - min_y,  # 使用行的高度作为size
-            scale=chars[0].scale
+            scale=chars[0].scale,
         )
         return line
+
+    def try_typeset(
+        self, scale: float, noto_font: pymupdf.Font, paragraph: il_try_1.PdfParagraph
+    ):
+        text = paragraph.unicode
+        current_font_size = paragraph.size * scale
+        box = paragraph.box
+        current_x = box.x
+        current_y = box.y2 - current_font_size
+        chars = []
+
+        for char in text:
+            char_width = noto_font.char_lengths(char, current_font_size)[0]
+
+            if current_x + char_width > box.x2:
+                current_x = box.x
+                current_y -= current_font_size * 1.4
+
+                # 检查是否超出底部边界
+                if current_y < box.y or current_y + current_font_size > box.y2:
+                    return None
+
+            char_box = il_try_1.Box(
+                x=current_x,
+                y=current_y,
+                x2=current_x + char_width,
+                y2=current_y + current_font_size,
+            )
+
+            chars.append(
+                il_try_1.PdfCharacter(
+                    pdf_font_id="noto",
+                    pdf_character_id=noto_font.has_glyph(ord(char)),
+                    char_unicode=char,
+                    box=char_box,
+                    size=current_font_size,
+                    graphic_state=paragraph.graphic_state,
+                    scale=scale,
+                )
+            )
+
+            current_x += char_width
+
+        return chars
 
     def typsetting_document(self, document: il_try_1.Document):
         for page in document.page:
@@ -43,66 +87,18 @@ class Typesetting:
     def render_paragraph_unicode_to_char(
         self, paragraph: il_try_1.PdfParagraph, noto_font: pymupdf.Font
     ):
-        text = paragraph.unicode
-        original_font_size = paragraph.size
-        box = paragraph.box
-
-        def try_typeset(text, current_font_size):
-            current_x = box.x
-            current_y = box.y2 - current_font_size
-            chars = []
-
-            for char in text:
-                char_width = noto_font.char_lengths(char, current_font_size)[0]
-
-                if current_x + char_width > box.x2:
-                    current_x = box.x
-                    current_y -= current_font_size * 1.4
-
-                    # 检查是否超出底部边界
-                    if (
-                        current_y < box.y
-                        or current_y + current_font_size > box.y2
-                    ):
-                        return
-
-                char_box = il_try_1.Box(
-                    x=current_x,
-                    y=current_y,
-                    x2=current_x + char_width,
-                    y2=current_y + current_font_size,
-                )
-
-                chars.append(
-                    il_try_1.PdfCharacter(
-                        pdf_font_id="noto",
-                        pdf_character_id=noto_font.has_glyph(ord(char)),
-                        char_unicode=char,
-                        box=char_box,
-                        size=current_font_size,
-                        graphic_state=paragraph.graphic_state,
-                        scale=scale,
-                    )
-                )
-
-                current_x += char_width
-
-            return chars
-
         scale = 1.0
         # 尝试排版，如果失败则逐步缩小字号
         while scale >= 0.4:
-            font_size = original_font_size * scale
-            result = try_typeset(text, font_size)
+            result = self.try_typeset(scale, noto_font, paragraph)
             if result is not None:
                 paragraph.pdf_line = [self.create_line(result)]
                 paragraph.scale = scale
-                return
+                return result
             if scale == 1.0:
                 scale = 0.8
             else:
-                scale -= 0.01  # 每次缩小5%
-
+                scale -= 0.01
         raise ValueError(
-            f"无法在保持最小缩放比0.4的情况下排版文本。当前文本：{text}"
+            f"无法在保持最小缩放比0.4的情况下排版文本。当前文本：{paragraph.unicode}"
         )
