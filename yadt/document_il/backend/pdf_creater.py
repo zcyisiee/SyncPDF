@@ -19,7 +19,9 @@ from yadt.document_il import il_version_1
 
 
 class PDFCreater:
-    def __init__(self, original_pdf_path: str, document: il_version_1.Document):
+    def __init__(
+        self, original_pdf_path: str, document: il_version_1.Document
+    ):
         self.original_pdf_path = original_pdf_path
         self.docs = document
 

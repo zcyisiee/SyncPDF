@@ -22,5 +22,7 @@ class XMLConverter:
             il_version_1.Document,
         )
 
-    def deepcopy(self, document: il_version_1.Document) -> il_version_1.Document:
+    def deepcopy(
+        self, document: il_version_1.Document
+    ) -> il_version_1.Document:
         return self.from_xml(self.to_xml(document))

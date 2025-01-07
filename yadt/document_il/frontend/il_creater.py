@@ -150,7 +150,9 @@ class ILCreater:
             )
             page_layout = il_version_1.PageLayout(
                 id=id,
-                box=il_version_1.Box(x0.item(), y0.item(), x1.item(), y1.item()),
+                box=il_version_1.Box(
+                    x0.item(), y0.item(), x1.item(), y1.item()
+                ),
                 conf=layout.conf.item(),
                 class_name=layouts.names[layout.cls],
             )
