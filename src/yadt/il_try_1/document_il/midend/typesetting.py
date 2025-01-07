@@ -10,7 +10,7 @@ class Typesetting:
     def __init__(self):
         pass
 
-    def create_line(self, chars: list[PdfCharacter]) -> PdfLine | None:
+    def create_line(self, chars: list[PdfCharacter]) -> PdfLine:
         assert chars
 
         # 计算行的边界框
@@ -40,37 +40,43 @@ class Typesetting:
         max_width: float,
     ) -> str | None:
         """处理目录条目的点号
-        
+
         Args:
             text: 原始文本
             noto_font: 字体
             current_font_size: 当前字体大小
             max_width: 最大可用宽度
-            
+
         Returns:
             处理后的文本，如果点号数量不足则返回None
         """
         # 分割文本为标题和页码部分
-        parts = text.rsplit(' ', 1)
+        parts = text.rsplit(" ", 1)
         if len(parts) != 2:
             return None
-            
+
         title, page_num = parts
         # 计算页码的宽度
-        page_num_width = sum(noto_font.char_lengths(c, current_font_size)[0] for c in page_num)
+        page_num_width = sum(
+            noto_font.char_lengths(c, current_font_size)[0] for c in page_num
+        )
         # 计算点号的宽度
-        dot_width = noto_font.char_lengths('.', current_font_size)[0]
+        dot_width = noto_font.char_lengths(".", current_font_size)[0]
         # 计算标题部分的宽度
-        title_width = sum(noto_font.char_lengths(c, current_font_size)[0] for c in title)
-        
+        title_width = sum(
+            noto_font.char_lengths(c, current_font_size)[0] for c in title
+        )
+
         # 计算需要的点号数量
-        dots_needed = max(1, int((max_width - title_width - page_num_width) / dot_width))
-        
+        dots_needed = max(
+            1, int((max_width - title_width - page_num_width) / dot_width)
+        )
+
         # 如果点号数量太少，返回None
         if dots_needed < 5:
             return None
-            
-        dots = '.' * dots_needed
+
+        dots = "." * dots_needed
         # 重新组合文本
         return f"{title}{dots}{page_num}"
 
@@ -88,11 +94,13 @@ class Typesetting:
         chars = []
 
         # 检查是否为目录条目，通过计算点号的数量
-        dot_count = text.count('.')
+        dot_count = text.count(".")
         if dot_count >= 20:  # 如果包含至少20个点号，认为是目录条目
             # 计算每行可容纳的最大字符数
             max_width = box.x2 - box.x
-            processed_text = self.process_toc_dots(text, noto_font, current_font_size, max_width)
+            processed_text = self.process_toc_dots(
+                text, noto_font, current_font_size, max_width
+            )
             if processed_text is None:
                 return None
             text = processed_text
