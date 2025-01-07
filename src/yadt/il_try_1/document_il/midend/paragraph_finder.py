@@ -296,6 +296,7 @@ class ParagraphFinder:
                 prev_text = prev_line.unicode
 
                 # 检查是否包含连续的点（至少20个）
+                # 如果有至少连续20个点，则代表这是目录条目
                 if re.search(r"\.{20,}", prev_text):
                     # 创建新的段落
                     new_paragraph = PdfParagraph(
