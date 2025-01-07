@@ -34,6 +34,12 @@ def create_parser():
         description="Used during translation",
     )
     translation_params.add_argument(
+        '--font',
+        type=str,
+        default=None,
+        help='The font to use for pdf output. If not set, use the default font.'
+    )
+    translation_params.add_argument(
         "--pages",
         "-p",
         type=str,
