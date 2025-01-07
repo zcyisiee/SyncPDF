@@ -11,10 +11,12 @@ class ILTranslator:
         self.translate_engine = translate_engine
 
     def translate(self, docs: Document):
-        pbar = tqdm(total=0, desc="translate")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            for page in docs.page:
-                self.process_page(page, executor)
+        # count total paragraph
+        total = sum(len(page.pdf_paragraph) for page in docs.page)
+        with tqdm(total=total, desc="translate") as pbar:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                for page in docs.page:
+                    self.process_page(page, executor, pbar)
 
     def process_page(
         self,
@@ -23,8 +25,6 @@ class ILTranslator:
         pbar: tqdm | None = None,
     ):
         for paragraph in page.pdf_paragraph:
-            if pbar:
-                pbar.total += 1
             executor.submit(self.translate_paragraph, paragraph, pbar)
 
     def translate_paragraph(
