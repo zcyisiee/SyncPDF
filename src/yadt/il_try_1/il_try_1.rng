@@ -85,6 +85,11 @@
   </define>
   <define name="PDFCharacter">
     <element name="pdfCharacter">
+      <optional>
+        <attribute name="scale">
+          <data type="float"/>
+        </attribute>
+      </optional>
       <attribute name="pdfFontId">
         <data type="string"/>
       </attribute>
@@ -195,12 +200,17 @@
   </define>
   <define name="PDFParagraph">
     <element name="pdfParagraph">
-      <attribute name="unicode">
-        <data type="string"/>
-      </attribute>
       <attribute name="size">
         <data type="float"/>
       </attribute>
+      <attribute name="unicode">
+        <data type="string"/>
+      </attribute>
+      <optional>
+        <attribute name="scale">
+          <data type="float"/>
+        </attribute>
+      </optional>
       <ref name="Box"/>
       <ref name="GraphicState"/>
       <zeroOrMore>
@@ -210,12 +220,17 @@
   </define>
   <define name="PDFLine">
     <element name="pdfLine">
-      <attribute name="unicode">
-        <data type="string"/>
-      </attribute>
       <attribute name="size">
         <data type="float"/>
       </attribute>
+      <attribute name="unicode">
+        <data type="string"/>
+      </attribute>
+      <optional>
+        <attribute name="scale">
+          <data type="float"/>
+        </attribute>
+      </optional>
       <ref name="Box"/>
       <ref name="GraphicState"/>
       <zeroOrMore>

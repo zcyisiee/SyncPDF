@@ -252,6 +252,12 @@ class PdfCharacter:
             "required": True,
         },
     )
+    scale: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
     pdf_font_id: Optional[str] = field(
         default=None,
         metadata={
@@ -330,6 +336,13 @@ class PdfLine:
             "type": "Element",
         },
     )
+    size: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
     unicode: Optional[str] = field(
         default=None,
         metadata={
@@ -337,11 +350,10 @@ class PdfLine:
             "required": True,
         },
     )
-    size: Optional[float] = field(
+    scale: Optional[float] = field(
         default=None,
         metadata={
             "type": "Attribute",
-            "required": True,
         },
     )
 
@@ -373,6 +385,13 @@ class PdfParagraph:
             "type": "Element",
         },
     )
+    size: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
     unicode: Optional[str] = field(
         default=None,
         metadata={
@@ -380,11 +399,10 @@ class PdfParagraph:
             "required": True,
         },
     )
-    size: Optional[float] = field(
+    scale: Optional[float] = field(
         default=None,
         metadata={
             "type": "Attribute",
-            "required": True,
         },
     )
 

@@ -64,6 +64,7 @@
         <xs:element ref="graphicState"/>
         <xs:element ref="box"/>
       </xs:sequence>
+      <xs:attribute name="scale" type="xs:float"/>
       <xs:attribute name="pdfFontId" use="required" type="xs:string"/>
       <xs:attribute name="pdfCharacterId" type="xs:int"/>
       <xs:attribute name="char_unicode" use="required" type="xs:string"/>
@@ -130,8 +131,9 @@
         <xs:element ref="graphicState"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfLine"/>
       </xs:sequence>
-      <xs:attribute name="unicode" use="required" type="xs:string"/>
       <xs:attribute name="size" use="required" type="xs:float"/>
+      <xs:attribute name="unicode" use="required" type="xs:string"/>
+      <xs:attribute name="scale" type="xs:float"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfLine">
@@ -141,8 +143,9 @@
         <xs:element ref="graphicState"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfCharacter"/>
       </xs:sequence>
-      <xs:attribute name="unicode" use="required" type="xs:string"/>
       <xs:attribute name="size" use="required" type="xs:float"/>
+      <xs:attribute name="unicode" use="required" type="xs:string"/>
+      <xs:attribute name="scale" type="xs:float"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfFigure">

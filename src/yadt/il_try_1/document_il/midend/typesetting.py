@@ -29,62 +29,80 @@ class Typesetting:
             pdf_character=chars,
             unicode="".join(char.char_unicode for char in chars),
             size=max_y - min_y,  # 使用行的高度作为size
+            scale=chars[0].scale
         )
         return line
 
     def typsetting_document(self, document: il_try_1.Document):
         for page in document.page:
             for paragraph in page.pdf_paragraph:
-                paragraph.pdf_line = [
                     self.create_line(
                         self.render_paragraph_unicode_to_char(paragraph, noto),
                     )
-                ]
 
-    def render_paragraph_unicode_to_char(self, paragraph: il_try_1.PdfParagraph, noto_font: pymupdf.Font) -> list[il_try_1.PdfCharacter]:
+
+    def render_paragraph_unicode_to_char(
+        self, paragraph: il_try_1.PdfParagraph, noto_font: pymupdf.Font
+    ):
         text = paragraph.unicode
-        font_size = paragraph.size * 0.6
+        original_font_size = paragraph.size
         box = paragraph.box
+        def try_typeset(text, current_font_size):
+            current_x = box.x
+            current_y = box.y2 - current_font_size
+            chars = []
 
-        # 初始化结果列表和当前坐标
-        chars = []
-        current_x = box.x
-        current_y = box.y
-        line_width = box.x2 - box.x  # 计算可用行宽
+            for char in text:
+                char_width = noto_font.char_lengths(char, current_font_size)[0]
 
-        # 遍历文本中的每个字符
-        for i, char in enumerate(text):
-            # 获取字符的宽度
-            char_width = noto_font.char_lengths(char, font_size)[0]
+                if current_x + char_width > box.x2:
+                    current_x = box.x
+                    current_y -= current_font_size * 1.4
 
-            # 检查是否需要换行
-            if current_x + char_width > box.x2:
-                # 换行：重置x坐标，增加y坐标
-                current_x = box.x
-                current_y -= font_size * 1.2  # 使用1.2倍行距
+                    # 检查是否超出底部边界
+                    if (
+                        current_y < box.y
+                        or current_y + current_font_size > box.y2
+                    ):
+                        return
 
-            # 创建字符的边界框
-            char_box = il_try_1.Box(
-                x=current_x,
-                y=current_y,
-                x2=current_x + char_width,
-                y2=current_y + font_size,
-            )
+                char_box = il_try_1.Box(
+                    x=current_x,
+                    y=current_y,
+                    x2=current_x + char_width,
+                    y2=current_y + current_font_size,
+                )
 
-            # 创建PdfCharacter对象
-            pdf_char = il_try_1.PdfCharacter(
-                pdf_font_id="noto",
-                pdf_character_id=noto_font.has_glyph(ord(char)),
-                char_unicode=char,
-                box=char_box,
-                size=font_size,
-                graphic_state=paragraph.graphic_state,
-            )
+                chars.append(
+                    il_try_1.PdfCharacter(
+                        pdf_font_id="noto",
+                        pdf_character_id=noto_font.has_glyph(ord(char)),
+                        char_unicode=char,
+                        box=char_box,
+                        size=current_font_size,
+                        graphic_state=paragraph.graphic_state,
+                        scale=scale,
+                    )
+                )
 
-            # 添加到结果列表
-            chars.append(pdf_char)
+                current_x += char_width
 
-            # 更新下一个字符的起始x坐标
-            current_x += char_width
+            return chars
 
-        return chars
+        scale = 1.0
+        # 尝试排版，如果失败则逐步缩小字号
+        while scale >= 0.4:
+            font_size = original_font_size * scale
+            result = try_typeset(text, font_size)
+            if result is not None:
+                paragraph.pdf_line = [self.create_line(result)]
+                paragraph.scale = scale
+                return
+            if scale == 1.0:
+                scale = 0.8
+            else:
+                scale -= 0.01  # 每次缩小5%
+
+        raise ValueError(
+            f"无法在保持最小缩放比0.4的情况下排版文本。当前文本：{text}"
+        )
