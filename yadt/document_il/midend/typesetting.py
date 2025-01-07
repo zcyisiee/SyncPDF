@@ -139,19 +139,71 @@ class Typesetting:
 
         return chars
 
+    def get_max_right_space(self, current_box: Box, page) -> float:
+        """获取段落右侧最大可用空间
+        
+        Args:
+            current_box: 当前段落的边界框
+            page: 当前页面
+            
+        Returns:
+            可以扩展到的最大x坐标
+        """
+        # 获取页面的裁剪框作为初始最大限制
+        max_x = page.cropbox.box.x2
+        
+        # 检查所有可能的阻挡元素
+        for para in page.pdf_paragraph:
+            if para.box == current_box:  # 跳过当前段落
+                continue
+            # 只考虑在当前段落右侧且有垂直重叠的元素
+            if (para.box.x > current_box.x and 
+                not (para.box.y >= current_box.y2 or para.box.y2 <= current_box.y)):
+                max_x = min(max_x, para.box.x)
+        
+        # 检查图形
+        for figure in page.pdf_figure:
+            if (figure.box.x > current_box.x and 
+                not (figure.box.y >= current_box.y2 or figure.box.y2 <= current_box.y)):
+                max_x = min(max_x, figure.box.x)
+        
+        return max_x
+
     def typsetting_document(self, document: il_version_1.Document):
         for page in document.page:
+            # 开始实际的渲染过程
             for paragraph in page.pdf_paragraph:
-                self.create_line(
-                    self.render_paragraph_unicode_to_char(paragraph, noto),
-                )
+                try:
+                    self.create_line(
+                        self.render_paragraph_unicode_to_char(paragraph, noto, 0.6),
+                    )
+                except ValueError:
+                    # 获取段落当前的边界框
+                    current_box = paragraph.box
+                    # 获取右侧最大可用空间
+                    max_x = self.get_max_right_space(current_box, page)
+                    # 只有当有额外空间时才扩展
+                    if max_x > current_box.x2:
+                        expanded_box = Box(
+                            x=current_box.x,
+                            y=current_box.y,
+                            x2=max_x,  # 直接扩展到最大可用位置
+                            y2=current_box.y2
+                        )
+                        # 更新段落的边界框
+                        paragraph.box = expanded_box
+
+                        # 重新渲染
+                        self.create_line(
+                            self.render_paragraph_unicode_to_char(paragraph, noto, 0.4),
+                        )
 
     def render_paragraph_unicode_to_char(
-        self, paragraph: il_version_1.PdfParagraph, noto_font: pymupdf.Font
+        self, paragraph: il_version_1.PdfParagraph, noto_font: pymupdf.Font, scale_threshold
     ):
         scale = 1.0
         # 尝试排版，如果失败则逐步缩小字号
-        while scale >= 0.4:
+        while scale >= scale_threshold:
             result = self.try_typeset(scale, noto_font, paragraph)
             if result is not None:
                 paragraph.pdf_line = [self.create_line(result)]
@@ -162,5 +214,5 @@ class Typesetting:
             else:
                 scale -= 0.01
         raise ValueError(
-            f"无法在保持最小缩放比 0.4 的情况下排版文本。当前文本：{paragraph.unicode}"
+            f"无法在保持最小缩放比 {scale_threshold} 的情况下排版文本。当前文本：{paragraph.unicode}"
         )

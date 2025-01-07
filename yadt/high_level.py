@@ -186,3 +186,7 @@ def translate():
     pdf_creater = PDFCreater(original_pdf_path, docs2)
 
     pdf_creater.write("../examples/pdf/il_try_1/测试还原.pdf")
+
+
+if __name__ == "__main__":
+    translate()
