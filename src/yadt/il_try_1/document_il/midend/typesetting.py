@@ -36,10 +36,9 @@ class Typesetting:
     def typsetting_document(self, document: il_try_1.Document):
         for page in document.page:
             for paragraph in page.pdf_paragraph:
-                    self.create_line(
-                        self.render_paragraph_unicode_to_char(paragraph, noto),
-                    )
-
+                self.create_line(
+                    self.render_paragraph_unicode_to_char(paragraph, noto),
+                )
 
     def render_paragraph_unicode_to_char(
         self, paragraph: il_try_1.PdfParagraph, noto_font: pymupdf.Font
@@ -47,6 +46,7 @@ class Typesetting:
         text = paragraph.unicode
         original_font_size = paragraph.size
         box = paragraph.box
+
         def try_typeset(text, current_font_size):
             current_x = box.x
             current_y = box.y2 - current_font_size
