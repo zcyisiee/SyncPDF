@@ -30,7 +30,8 @@ PDFFont =
   element pdfFont {
     attribute name { xsd:string },
     attribute fontId { xsd:string },
-    attribute xrefId { PDFXrefId }
+    attribute xrefId { PDFXrefId },
+    attribute encodingLength { xsd:int }
   }
 PDFCharacter =
   element pdfCharacter {
@@ -72,7 +73,6 @@ GraphicState =
 PDFParagraph =
   element pdfParagraph {
     attribute unicode { xsd:string },
-    attribute advance { xsd:float },
     attribute size { xsd:float },
     Box,
     GraphicState,
@@ -81,7 +81,6 @@ PDFParagraph =
 PDFLine =
   element pdfLine {
     attribute unicode { xsd:string },
-    attribute advance { xsd:float },
     attribute size { xsd:float },
     Box,
     GraphicState,

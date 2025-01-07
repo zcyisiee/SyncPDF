@@ -159,6 +159,14 @@ class PdfFont:
             "required": True,
         },
     )
+    encoding_length: Optional[int] = field(
+        default=None,
+        metadata={
+            "name": "encodingLength",
+            "type": "Attribute",
+            "required": True,
+        },
+    )
 
 
 @dataclass
@@ -329,13 +337,6 @@ class PdfLine:
             "required": True,
         },
     )
-    advance: Optional[float] = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-            "required": True,
-        },
-    )
     size: Optional[float] = field(
         default=None,
         metadata={
@@ -373,13 +374,6 @@ class PdfParagraph:
         },
     )
     unicode: Optional[str] = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-            "required": True,
-        },
-    )
-    advance: Optional[float] = field(
         default=None,
         metadata={
             "type": "Attribute",

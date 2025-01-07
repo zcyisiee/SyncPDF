@@ -55,6 +55,7 @@
       <xs:attribute name="name" use="required" type="xs:string"/>
       <xs:attribute name="fontId" use="required" type="xs:string"/>
       <xs:attribute name="xrefId" use="required" type="PDFXrefId"/>
+      <xs:attribute name="encodingLength" use="required" type="xs:int"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfCharacter">
@@ -130,7 +131,6 @@
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfLine"/>
       </xs:sequence>
       <xs:attribute name="unicode" use="required" type="xs:string"/>
-      <xs:attribute name="advance" use="required" type="xs:float"/>
       <xs:attribute name="size" use="required" type="xs:float"/>
     </xs:complexType>
   </xs:element>
@@ -142,7 +142,6 @@
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfCharacter"/>
       </xs:sequence>
       <xs:attribute name="unicode" use="required" type="xs:string"/>
-      <xs:attribute name="advance" use="required" type="xs:float"/>
       <xs:attribute name="size" use="required" type="xs:float"/>
     </xs:complexType>
   </xs:element>

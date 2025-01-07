@@ -16,7 +16,11 @@ from yadt.il_try_1.converter import TranslateConverter
 from yadt.il_try_1.doclayout import DocLayoutModel
 from yadt.il_try_1.document_il.midend.il_translator import ILTranslator
 from yadt.il_try_1.document_il.midend.paragraph_finder import ParagraphFinder
-from yadt.il_try_1.document_il.translator.translator import OpenAITranslator, set_translate_rate_limiter
+from yadt.il_try_1.document_il.midend.typesetting import Typesetting
+from yadt.il_try_1.document_il.translator.translator import (
+    OpenAITranslator,
+    set_translate_rate_limiter,
+)
 from yadt.il_try_1.document_il.xml_converter import XMLConverter
 from yadt.il_try_1.pdfinterp import PDFPageInterpreterEx
 
@@ -95,13 +99,11 @@ def translate_patch(
             image = np.fromstring(pix.samples, np.uint8).reshape(
                 pix.height, pix.width, 3
             )[:, :, ::-1]
-            page_layout = model.predict(
-                image, imgsz=int(pix.height / 32) * 32)[0]
+            page_layout = model.predict(image, imgsz=int(pix.height / 32) * 32)[0]
             # kdtree 是不可能 kdtree 的，不如直接渲染成图片，用空间换时间
             box = np.ones((pix.height, pix.width))
             h, w = box.shape
-            vcls = ["abandon", "figure", "table",
-                    "isolate_formula", "formula_caption"]
+            vcls = ["abandon", "figure", "table", "isolate_formula", "formula_caption"]
             for i, d in enumerate(page_layout.boxes):
                 if page_layout.names[int(d.cls)] not in vcls:
                     x0, y0, x1, y1 = d.xyxy.squeeze()
@@ -177,9 +179,11 @@ def main():
     ParagraphFinder().process(docs)
 
     set_translate_rate_limiter(50)
-    translate_engine = OpenAITranslator('zh_cn','en-us', 'Qwen/Qwen2.5-7B-Instruct')
+    translate_engine = OpenAITranslator("zh_cn", "en-us", "Qwen/Qwen2.5-72B-Instruct")
+    # translate_engine.ignore_cache = True
     ILTranslator(translate_engine).translate(docs)
 
+    Typesetting().typsetting_document(docs)
     xml_converter = XMLConverter()
 
     xml = xml_converter.to_xml(docs)
@@ -197,8 +201,10 @@ def main():
 
 
 if __name__ == "__main__":
-    pymupdf.open(r'/Users/aw/code/python/yadt/examples/pdf/il_try_1/这是一个测试文件.pdf').save(
-        r'/Users/aw/code/python/yadt/examples/pdf/il_try_1/这是一个测试文件.pdf.unzip.pdf',
+    pymupdf.open(
+        r"/Users/aw/code/python/yadt/examples/pdf/il_try_1/这是一个测试文件.pdf"
+    ).save(
+        r"/Users/aw/code/python/yadt/examples/pdf/il_try_1/这是一个测试文件.pdf.unzip.pdf",
         expand=True,
         pretty=True,
     )

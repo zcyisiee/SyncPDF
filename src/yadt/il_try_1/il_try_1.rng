@@ -78,6 +78,9 @@
       <attribute name="xrefId">
         <ref name="PDFXrefId"/>
       </attribute>
+      <attribute name="encodingLength">
+        <data type="int"/>
+      </attribute>
     </element>
   </define>
   <define name="PDFCharacter">
@@ -195,9 +198,6 @@
       <attribute name="unicode">
         <data type="string"/>
       </attribute>
-      <attribute name="advance">
-        <data type="float"/>
-      </attribute>
       <attribute name="size">
         <data type="float"/>
       </attribute>
@@ -212,9 +212,6 @@
     <element name="pdfLine">
       <attribute name="unicode">
         <data type="string"/>
-      </attribute>
-      <attribute name="advance">
-        <data type="float"/>
       </attribute>
       <attribute name="size">
         <data type="float"/>

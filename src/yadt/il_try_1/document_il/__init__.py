@@ -1,4 +1,4 @@
-from src.yadt.il_try_1.document_il.il_try_1 import (
+from yadt.il_try_1.document_il.il_try_1 import (
     BaseOperations,
     Box,
     Cropbox,

@@ -2,7 +2,7 @@ import numpy as np
 import pdfminer.pdfinterp
 import pymupdf
 from pdfminer.layout import LTChar, LTFigure
-from pdfminer.pdffont import PDFFont
+from pdfminer.pdffont import PDFCIDFont, PDFFont
 
 from yadt.il_try_1.doclayout import DocLayoutModel
 from yadt.il_try_1.document_il import il_try_1
@@ -76,8 +76,14 @@ class ILCreater:
         font_name = font.fontname
         if isinstance(font.fontname, bytes):
             font_name = font.fontname.decode("utf-8")
+        encoding_length = 1
+        if isinstance(font, PDFCIDFont):
+            encoding_length = 2
         il_font_metadata = il_try_1.PdfFont(
-            name=font_name, xref_id=xref_id, font_id=font_id
+            name=font_name,
+            xref_id=xref_id,
+            font_id=font_id,
+            encoding_length=encoding_length,
         )
         self.current_page_font_name_id_map[font_name] = font_id
         self.current_page.pdf_font.append(il_font_metadata)

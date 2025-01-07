@@ -1,12 +1,13 @@
+import re
+
 from yadt.il_try_1.document_il.il_try_1 import (
     Box,
+    GraphicState,
     Page,
     PdfCharacter,
-    PdfParagraph,
     PdfLine,
-    GraphicState,
+    PdfParagraph,
 )
-import re
 
 
 class Layout:
@@ -67,9 +68,8 @@ class ParagraphFinder:
             page.pdf_character.remove(char)
 
             # 检查是否需要开始新行
-            if (
-                    current_line_chars
-                    and Layout.is_newline(current_line_chars[-1], char)
+            if current_line_chars and Layout.is_newline(
+                current_line_chars[-1], char
             ):
                 # 创建新行
                 if current_line_chars:
@@ -80,7 +80,7 @@ class ParagraphFinder:
                             graphic_state=line.graphic_state,
                             pdf_line=[line],
                             unicode=line.unicode,
-                            size=line.size
+                            size=line.size,
                         )
                         paragraphs.append(current_paragraph)
                     else:
@@ -110,7 +110,7 @@ class ParagraphFinder:
                     graphic_state=line.graphic_state,
                     pdf_line=[line],
                     unicode=line.unicode,
-                    size=line.size
+                    size=line.size,
                 )
                 paragraphs.append(current_paragraph)
             else:
@@ -139,15 +139,15 @@ class ParagraphFinder:
 
             # 移除尾随空格
             while (
-                processed_chars
-                and processed_chars[-1].char_unicode.isspace()
+                processed_chars and processed_chars[-1].char_unicode.isspace()
             ):
                 processed_chars.pop()
 
             if processed_chars:  # 如果行内还有字符
                 line.pdf_character = processed_chars
                 line.unicode = "".join(
-                    char.char_unicode for char in processed_chars)
+                    char.char_unicode for char in processed_chars
+                )
 
                 # 更新行的边界框和相关属性
                 min_x = min(char.box.x for char in processed_chars)
@@ -166,7 +166,8 @@ class ParagraphFinder:
 
         # 更新unicode（合并所有行的文本）
         paragraph.unicode = " ".join(
-            line.unicode for line in paragraph.pdf_line)
+            line.unicode for line in paragraph.pdf_line
+        )
 
         # 更新边界框
         min_x = min(line.box.x for line in paragraph.pdf_line)
@@ -255,20 +256,22 @@ class ParagraphFinder:
             graphic_state=graphic_state,
             pdf_character=chars,
             unicode="".join(char.char_unicode for char in chars),
-            size=max_y - min_y,     # 使用行的高度作为size
+            size=max_y - min_y,  # 使用行的高度作为size
         )
         return line
 
-    def calculate_median_line_width(self, paragraphs: list[PdfParagraph]) -> float:
+    def calculate_median_line_width(
+        self, paragraphs: list[PdfParagraph]
+    ) -> float:
         # 收集所有行的宽度
         line_widths = []
         for paragraph in paragraphs:
             for line in paragraph.pdf_line:
                 line_widths.append(line.box.x2 - line.box.x)
-        
+
         if not line_widths:
             return 0.0
-        
+
         # 计算中位数
         line_widths.sort()
         mid = len(line_widths) // 2
@@ -276,7 +279,9 @@ class ParagraphFinder:
             return (line_widths[mid - 1] + line_widths[mid]) / 2
         return line_widths[mid]
 
-    def process_independent_paragraphs(self, paragraphs: list[PdfParagraph], median_width: float):
+    def process_independent_paragraphs(
+        self, paragraphs: list[PdfParagraph], median_width: float
+    ):
         i = 0
         while i < len(paragraphs):
             paragraph = paragraphs[i]
@@ -291,22 +296,22 @@ class ParagraphFinder:
                 prev_text = prev_line.unicode
 
                 # 检查是否包含连续的点（至少20个）
-                if re.search(r'\.{20,}', prev_text):
+                if re.search(r"\.{20,}", prev_text):
                     # 创建新的段落
                     new_paragraph = PdfParagraph(
                         box=Box(0, 0, 0, 0),  # 临时边界框
                         graphic_state=paragraph.pdf_line[j].graphic_state,
                         pdf_line=paragraph.pdf_line[j:],
                         unicode="",
-                        size=paragraph.pdf_line[j].size
+                        size=paragraph.pdf_line[j].size,
                     )
                     # 更新原段落
                     paragraph.pdf_line = paragraph.pdf_line[:j]
-                    
+
                     # 更新两个段落的数据
                     self.update_paragraph_data(paragraph)
                     self.update_paragraph_data(new_paragraph)
-                    
+
                     # 在原段落后插入新段落
                     paragraphs.insert(i + 1, new_paragraph)
                     break
@@ -319,15 +324,15 @@ class ParagraphFinder:
                         graphic_state=paragraph.pdf_line[j].graphic_state,
                         pdf_line=paragraph.pdf_line[j:],
                         unicode="",
-                        size=paragraph.pdf_line[j].size
+                        size=paragraph.pdf_line[j].size,
                     )
                     # 更新原段落
                     paragraph.pdf_line = paragraph.pdf_line[:j]
-                    
+
                     # 更新两个段落的数据
                     self.update_paragraph_data(paragraph)
                     self.update_paragraph_data(new_paragraph)
-                    
+
                     # 在原段落后插入新段落
                     paragraphs.insert(i + 1, new_paragraph)
                     break

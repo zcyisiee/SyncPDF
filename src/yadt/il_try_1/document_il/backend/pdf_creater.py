@@ -3,12 +3,10 @@ import io
 import pdfminer.pdfdocument
 import pymupdf
 from bitstring import Bits, BitStream
-
-from yadt.il_try_1.document_il import il_try_1
-from pdfminer.pdfparser import PDFParser
-from pdfminer.pdfpage import PDFPage
+from pdfminer.pdffont import PDFFont
 from pdfminer.pdfinterp import PDFResourceManager
-
+from pdfminer.pdfpage import PDFPage
+from pdfminer.pdfparser import PDFParser
 from pdfminer.pdftypes import (
     PDFObjRef,
     dict_value,
@@ -16,7 +14,8 @@ from pdfminer.pdftypes import (
     resolve1,
     stream_value,
 )
-from pdfminer.pdffont import PDFFont
+
+from yadt.il_try_1.document_il import il_try_1
 
 
 class PDFCreater:
@@ -31,11 +30,13 @@ class PDFCreater:
             return
         if graphic_state.stroking_color_space_name:
             draw_op.append(
-                f"/{graphic_state.stroking_color_space_name}" f" CS \n".encode()
+                f"/{graphic_state.stroking_color_space_name}"
+                f" CS \n".encode()
             )
         if graphic_state.non_stroking_color_space_name:
             draw_op.append(
-                f"/{graphic_state.non_stroking_color_space_name}" f" cs \n".encode()
+                f"/{graphic_state.non_stroking_color_space_name}"
+                f" cs \n".encode()
             )
         if graphic_state.ncolor is not None:
             draw_op.append(
@@ -48,67 +49,19 @@ class PDFCreater:
                    } SC \n".encode()
             )
 
-    def render_paragraph_unicode_to_char(
-        self, paragraph: il_try_1.PdfParagraph, noto_font: pymupdf.Font
-    ) -> list[il_try_1.PdfCharacter]:
-        text = paragraph.unicode
-        font_size = paragraph.size * 0.6
-        box = paragraph.box
-        
-        # 初始化结果列表和当前坐标
-        chars = []
-        current_x = box.x
-        current_y = box.y
-        line_width = box.x2 - box.x  # 计算可用行宽
-        
-        # 遍历文本中的每个字符
-        for i, char in enumerate(text):
-            # 获取字符的宽度
-            char_width = noto_font.char_lengths(char, font_size)[0]
-            
-            # 检查是否需要换行
-            if current_x + char_width > box.x2:
-                # 换行：重置x坐标，增加y坐标
-                current_x = box.x
-                current_y += font_size * 1.2  # 使用1.2倍行距
-            
-            # 创建字符的边界框
-            char_box = il_try_1.Box(
-                x=current_x,
-                y=current_y,
-                x2=current_x + char_width,
-                y2=current_y + font_size
-            )
-            
-            # 创建PdfCharacter对象
-            pdf_char = il_try_1.PdfCharacter(
-                pdf_font_id='noto',
-                pdf_character_id=noto_font.has_glyph(ord(char)),
-                char_unicode=char,
-                box=char_box,
-                size=font_size,
-                graphic_state=paragraph.graphic_state
-            )
-            
-            # 添加到结果列表
-            chars.append(pdf_char)
-            
-            # 更新下一个字符的起始x坐标
-            current_x += char_width
-        
-        return chars
-
     def render_paragraph_to_char(
-        self, paragraph: il_try_1.PdfParagraph, noto_font: pymupdf.Font
+        self, paragraph: il_try_1.PdfParagraph
     ) -> list[il_try_1.PdfCharacter]:
         chars = []
         for line in paragraph.pdf_line:
             chars.extend(line.pdf_character)
-        if not chars:
-            return self.render_paragraph_unicode_to_char(paragraph, noto_font)
+        if not chars and paragraph.unicode:
+            raise Exception(
+                "Unable to export paragraphs that have not yet been formatted"
+            )
         return chars
 
-    def add_font(self, doc_zh: pymupdf.Document):
+    def add_font(self, doc_zh: pymupdf.Document, il: il_try_1.Document):
         noto_path = r"/Users/aw/Downloads/GoNotoKurrent-Regular.ttf"
         font_list = [
             ("noto", noto_path),
@@ -153,13 +106,22 @@ class PDFCreater:
         #             font = rsrcmgr.get_font(objid, spec)
         #             if fontid == "noto":
         #                 return font
-        mu_noto = pymupdf.Font(fontfile=noto_path)
-        return mu_noto
+        pdf_font_il = il_try_1.PdfFont(
+            name="noto",
+            xref_id=font_id["noto"],
+            font_id="noto",
+            encoding_length=2,
+        )
+        for page in il.page:
+            page.pdf_font.append(pdf_font_il)
 
     def write(self, out_file: str):
         pdf = pymupdf.open(self.original_pdf_path)
-        noto_font = self.add_font(pdf)
+        self.add_font(pdf, self.docs)
         for page in self.docs.page:
+            encoding_length_map = {
+                f.font_id: f.encoding_length for f in page.pdf_font
+            }
             draw_op = BitStream()
             # q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}
             draw_op.append(b"q ")
@@ -177,7 +139,7 @@ class PDFCreater:
                 chars.extend(page.pdf_character)
             # 然后添加段落中的字符
             for paragraph in page.pdf_paragraph:
-                chars.extend(self.render_paragraph_to_char(paragraph, noto_font))
+                chars.extend(self.render_paragraph_to_char(paragraph))
 
             # 渲染所有字符
             for char in chars:
@@ -188,27 +150,18 @@ class PDFCreater:
                 self.render_graphic_state(draw_op, char.graphic_state)
                 draw_op.append(
                     f"BT /{char.pdf_font_id} {char_size:f} Tf 1 0 0 1 {
-                        char.box.x:f} {char.box.y:f} Tm (".encode()
-                )
-                # pdf 32000 2008: 15
-                # 7.3.4.2 Literal Strings
-                if char.pdf_character_id in (
-                    ord("\\"),
-                    ord("("),
-                    ord(")"),
-                ):
-                    draw_op.append(b"\\")
-                char_bit_length = 8
-                if char.pdf_character_id >= 2**16:
-                    char_bit_length = 32
-                elif char.pdf_character_id >= 2**8:
-                    char_bit_length = 16
-                char_bit_length=16
-                draw_op.append(
-                    Bits(uint=char.pdf_character_id, length=char_bit_length).tobytes()
+                        char.box.x:f} {char.box.y:f} Tm ".encode()
                 )
 
-                draw_op.append(b") Tj ET Q \n")
+                encoding_length = encoding_length_map[char.pdf_font_id]
+                # pdf32000-2008 page14:
+                # As hexadecimal data enclosed in angle brackets < >
+                # see 7.3.4.3, "Hexadecimal Strings."
+                draw_op.append(
+                    f"<{char.pdf_character_id:0{encoding_length*2}x}>".encode()
+                )
+
+                draw_op.append(b" Tj ET Q \n")
 
             op_container = pdf.get_new_xref()
             # Since this is a draw instruction container,

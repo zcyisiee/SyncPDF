@@ -1,8 +1,9 @@
 import concurrent.futures
 
+from tqdm import tqdm
+
 from yadt.il_try_1.document_il.il_try_1 import Document, Page, PdfParagraph
 from yadt.il_try_1.document_il.translator.translator import BaseTranslator
-from tqdm import tqdm
 
 
 class ILTranslator:
@@ -26,7 +27,9 @@ class ILTranslator:
                 pbar.total += 1
             executor.submit(self.translate_paragraph, paragraph, pbar)
 
-    def translate_paragraph(self, paragraph: PdfParagraph, pbar: tqdm | None = None):
+    def translate_paragraph(
+        self, paragraph: PdfParagraph, pbar: tqdm | None = None
+    ):
         text = paragraph.unicode
         translated_text = self.translate_engine.translate(text)
         if pbar:
