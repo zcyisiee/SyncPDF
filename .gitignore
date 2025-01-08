@@ -23,3 +23,5 @@ web/*.local
 uv.lock
 .DS_Store
 .vscode
+__pycache__
+.ruff_cache
