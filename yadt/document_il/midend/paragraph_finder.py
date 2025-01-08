@@ -238,6 +238,7 @@ class ParagraphFinder:
         max_y = max(char.box.y2 for char in chars)
         box = Box(min_x, min_y, max_x, max_y)
 
+        # 有些 PDF 文件没有明确包含空格字符，而是通过字符之间的间距来隐式表示。
         # 计算字符间距的中位数
         distances = []
         for i in range(len(chars) - 1):
@@ -253,7 +254,7 @@ class ParagraphFinder:
             unicode_chars.append(chars[i].char_unicode)
             if i < len(chars) - 1:
                 distance = chars[i + 1].box.x - chars[i].box.x2
-                if distance > median_distance:  # 如果间距超过中位数的1.5倍，插入空格
+                if distance > median_distance:
                     unicode_chars.append(" ")
 
         # 使用第一个字符的图形状态作为行的图形状态
