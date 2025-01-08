@@ -182,19 +182,20 @@ class PDFCreater:
             pdf.update_object(op_container, "<<>>")
             pdf.update_stream(op_container, draw_op.tobytes())
             pdf[page.page_number].set_contents(op_container)
-        pdf.save(mono_out_path, garbage=3, deflate=True)
-        if translation_config.debug:
-            pdf.save(f"{mono_out_path}.decompressed.pdf", expand=True, pretty=True)
-
-        dual_out_path = translation_config.get_output_file_path(
-            f"{translation_config.input_file.rsplit('.', 1)[0]}."
-            f"{translation_config.lang_out}.dual.pdf"
-        )
-        dual = pymupdf.open(self.original_pdf_path)
-        dual.insert_file(pdf)
-        page_count = pdf.page_count
-        for id in range(page_count):
-            dual.move_page(page_count + id, id * 2 + 1)
-        dual.save(dual_out_path, garbage=3, deflate=True)
-        if translation_config.debug:
-            dual.save(f"{dual_out_path}.decompressed.pdf", expand=True, pretty=True)
+        if not translation_config.no_mono:
+            pdf.save(mono_out_path, garbage=3, deflate=True)
+            if translation_config.debug:
+                pdf.save(f"{mono_out_path}.decompressed.pdf", expand=True, pretty=True)
+        if not translation_config.no_dual:
+            dual_out_path = translation_config.get_output_file_path(
+                f"{translation_config.input_file.rsplit('.', 1)[0]}."
+                f"{translation_config.lang_out}.dual.pdf"
+            )
+            dual = pymupdf.open(self.original_pdf_path)
+            dual.insert_file(pdf)
+            page_count = pdf.page_count
+            for id in range(page_count):
+                dual.move_page(page_count + id, id * 2 + 1)
+            dual.save(dual_out_path, garbage=3, deflate=True)
+            if translation_config.debug:
+                dual.save(f"{dual_out_path}.decompressed.pdf", expand=True, pretty=True)
