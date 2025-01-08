@@ -156,6 +156,12 @@ def download_font_assets():
 def main():
     logging.basicConfig(level=logging.INFO)
 
+    for v in logging.Logger.manager.loggerDict.values():
+        if getattr(v, "name", None) is None:
+            continue
+        if v.name.startswith('pdfminer') or v.name.startswith('peewee'):
+            v.disabled = True
+
     parser = create_parser()
     args = parser.parse_args()
 
