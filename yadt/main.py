@@ -50,7 +50,16 @@ def create_parser():
         "--pages",
         "-p",
         type=str,
-        help="The list of page numbers to parse.",
+        help="要翻译的页码范围，支持以下格式（用逗号分隔多个范围）：\n"
+             "  - 单页：'5' 表示只翻译第5页\n"
+             "  - 连续范围：'1-3' 表示翻译第1到3页\n"
+             "  - 开始到结束：'2-' 表示从第2页翻译到最后\n"
+             "  - 开始到指定：'-3' 表示从第1页翻译到第3页\n"
+             "示例：\n"
+             "  --pages '1-3,5,7-' 翻译1-3页、第5页和从第7页到最后\n"
+             "  --pages '1,3,5' 只翻译第1、3、5页\n"
+             "  --pages '-5' 翻译前5页\n"
+             "不指定此参数时默认翻译所有页面",
     )
     translation_params.add_argument(
         "--lang-in",

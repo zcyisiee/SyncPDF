@@ -6,16 +6,18 @@ from pdfminer.pdffont import PDFCIDFont, PDFFont
 
 from yadt.doclayout import DocLayoutModel
 from yadt.document_il import il_version_1
+from yadt.translation_config import TranslationConfig
 
 
 class ILCreater:
-    def __init__(self):
+    def __init__(self, translation_config: TranslationConfig):
         self.current_page: il_version_1.Page = None
         self.mupdf: pymupdf.Document = None
         self.model = DocLayoutModel.load_available()
         self.docs = il_version_1.Document(page=[])
         self.stroking_color_space_name = None
         self.non_stroking_color_space_name = None
+        self.translation_config = translation_config
 
     # pdf32000 page 171
     def on_stroking_color_space(self, color_space_name):
@@ -131,6 +133,8 @@ class ILCreater:
         self.current_page.pdf_character.append(pdf_char)
 
     def on_page_layout(self, page_number):
+        if self.translation_config.should_translate_page(page_number + 1) is False:
+            return
         pix = self.mupdf[page_number].get_pixmap()
         image = np.fromstring(pix.samples, np.uint8).reshape(
             pix.height, pix.width, 3
@@ -159,6 +163,13 @@ class ILCreater:
             self.docs.page[page_number].page_layout.append(page_layout)
 
     def create_il(self):
+        pages = [
+            page
+            for page in self.docs.page
+            if self.
+            translation_config.should_translate_page(page.page_number + 1)
+        ]
+        self.docs.page = pages
         return self.docs
 
     def on_total_pages(self, total_pages: int):

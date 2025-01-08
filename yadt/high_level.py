@@ -97,6 +97,10 @@ def start_parse_il(
                 continue
             progress.update()
             page.pageno = pageno
+            # The current program no longer relies on
+            # the following layout recognition results,
+            # but in order to facilitate the migration of pdf2zh,
+            # the relevant code is temporarily retained.
             pix = doc_zh[page.pageno].get_pixmap()
             image = np.fromstring(pix.samples, np.uint8).reshape(
                 pix.height, pix.width, 3
@@ -160,7 +164,7 @@ def translate(translation_config: TranslationConfig):
         page.insert_font(resfont, None)
     doc_pdf2zh.save(temp_pdf_path)
 
-    il_creater = ILCreater()
+    il_creater = ILCreater(translation_config)
     il_creater.mupdf = doc_input
 
     xml_converter = XMLConverter()
@@ -178,6 +182,7 @@ def translate(translation_config: TranslationConfig):
         "create_il.xml"))
 
     ParagraphFinder().process(docs)
+    logger.debug(f'finish paragraph finder from {temp_pdf_path}')
     xml_converter.write_xml(docs, translation_config.get_working_file_path(
         "paragraph_finder.xml"))
 
@@ -185,10 +190,12 @@ def translate(translation_config: TranslationConfig):
     translate_engine = translation_config.translator
     # translate_engine.ignore_cache = True
     ILTranslator(translate_engine).translate(docs)
+    logger.debug(f'finish ILTranslator from {temp_pdf_path}')
     xml_converter.write_xml(docs, translation_config.get_working_file_path(
         "il_translated.xml"))
 
     Typesetting(font_path=translation_config.font).typsetting_document(docs)
+    logger.debug(f'finish typsetting from {temp_pdf_path}')
     xml_converter.write_xml(docs, translation_config.get_working_file_path(
         "typsetting.xml"))
 
