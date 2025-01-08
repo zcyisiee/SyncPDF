@@ -54,7 +54,8 @@ def start_parse_il(
     resfont: str = "",
     noto: Font = None,
     cancellation_event: asyncio.Event = None,
-    il_creater=None,
+    il_creater: ILCreater = None,
+    translation_config: TranslationConfig = None,
     **kwarg: Any,
 ) -> None:
     rsrcmgr = PDFResourceManager()
@@ -76,8 +77,8 @@ def start_parse_il(
     )
 
     assert device is not None
-    if il_creater is None:
-        il_creater = ILCreater()
+    assert il_creater is not None
+    assert translation_config is not None
     obj_patch = {}
     interpreter = PDFPageInterpreterEx(rsrcmgr, device, obj_patch, il_creater)
     if pages:
@@ -97,6 +98,8 @@ def start_parse_il(
                 continue
             progress.update()
             page.pageno = pageno
+            if not translation_config.should_translate_page(pageno + 1):
+                continue
             # The current program no longer relies on
             # the following layout recognition results,
             # but in order to facilitate the migration of pdf2zh,
@@ -105,13 +108,11 @@ def start_parse_il(
             image = np.fromstring(pix.samples, np.uint8).reshape(
                 pix.height, pix.width, 3
             )[:, :, ::-1]
-            page_layout = model.predict(
-                image, imgsz=int(pix.height / 32) * 32)[0]
+            page_layout = model.predict(image, imgsz=int(pix.height / 32) * 32)[0]
             # kdtree 是不可能 kdtree 的，不如直接渲染成图片，用空间换时间
             box = np.ones((pix.height, pix.width))
             h, w = box.shape
-            vcls = ["abandon", "figure", "table",
-                    "isolate_formula", "formula_caption"]
+            vcls = ["abandon", "figure", "table", "isolate_formula", "formula_caption"]
             for i, d in enumerate(page_layout.boxes):
                 if page_layout.names[int(d.cls)] not in vcls:
                     x0, y0, x1, y1 = d.xyxy.squeeze()
@@ -151,8 +152,7 @@ def translate(translation_config: TranslationConfig):
     doc_input = Document(original_pdf_path)
     if translation_config.debug:
         logger.debug("debug mode, save decompressed input pdf")
-        output_path = translation_config.get_working_file_path(
-            "input.decompressed.pdf")
+        output_path = translation_config.get_working_file_path("input.decompressed.pdf")
         doc_input.save(output_path, expand=True, pretty=True)
 
     # Continue with original processing
@@ -169,35 +169,44 @@ def translate(translation_config: TranslationConfig):
 
     xml_converter = XMLConverter()
 
-    logger.debug(f'start parse il from {temp_pdf_path}')
+    logger.debug(f"start parse il from {temp_pdf_path}")
     with open(temp_pdf_path, "rb") as f:
-        start_parse_il(f, doc_zh=doc_pdf2zh,
-                       resfont=resfont, il_creater=il_creater)
-    logger.debug(f'finish parse il from {temp_pdf_path}')
+        start_parse_il(
+            f,
+            doc_zh=doc_pdf2zh,
+            resfont=resfont,
+            il_creater=il_creater,
+            translation_config=translation_config,
+        )
+    logger.debug(f"finish parse il from {temp_pdf_path}")
 
     docs = il_creater.create_il()
-    logger.debug(f'finish create il from {temp_pdf_path}')
+    logger.debug(f"finish create il from {temp_pdf_path}")
 
-    xml_converter.write_xml(docs, translation_config.get_working_file_path(
-        "create_il.xml"))
+    xml_converter.write_xml(
+        docs, translation_config.get_working_file_path("create_il.xml")
+    )
 
     ParagraphFinder().process(docs)
-    logger.debug(f'finish paragraph finder from {temp_pdf_path}')
-    xml_converter.write_xml(docs, translation_config.get_working_file_path(
-        "paragraph_finder.xml"))
+    logger.debug(f"finish paragraph finder from {temp_pdf_path}")
+    xml_converter.write_xml(
+        docs, translation_config.get_working_file_path("paragraph_finder.xml")
+    )
 
     set_translate_rate_limiter(50)
     translate_engine = translation_config.translator
     # translate_engine.ignore_cache = True
     ILTranslator(translate_engine).translate(docs)
-    logger.debug(f'finish ILTranslator from {temp_pdf_path}')
-    xml_converter.write_xml(docs, translation_config.get_working_file_path(
-        "il_translated.xml"))
+    logger.debug(f"finish ILTranslator from {temp_pdf_path}")
+    xml_converter.write_xml(
+        docs, translation_config.get_working_file_path("il_translated.xml")
+    )
 
     Typesetting(font_path=translation_config.font).typsetting_document(docs)
-    logger.debug(f'finish typsetting from {temp_pdf_path}')
-    xml_converter.write_xml(docs, translation_config.get_working_file_path(
-        "typsetting.xml"))
+    logger.debug(f"finish typsetting from {temp_pdf_path}")
+    xml_converter.write_xml(
+        docs, translation_config.get_working_file_path("typsetting.xml")
+    )
 
     # deepcopy
     docs2 = xml_converter.from_xml(xml_converter.to_xml(docs))
