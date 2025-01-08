@@ -182,6 +182,7 @@ class PDFCreater:
             pdf.update_object(op_container, "<<>>")
             pdf.update_stream(op_container, draw_op.tobytes())
             pdf[page.page_number].set_contents(op_container)
+        pdf.subset_fonts(fallback=False)
         if not translation_config.no_mono:
             pdf.save(mono_out_path, garbage=3, deflate=True)
             if translation_config.debug:
