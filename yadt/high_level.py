@@ -188,7 +188,7 @@ def translate(translation_config: TranslationConfig):
     xml_converter.write_xml(docs, translation_config.get_working_file_path(
         "il_translated.xml"))
 
-    Typesetting().typsetting_document(docs)
+    Typesetting(font_path=translation_config.font).typsetting_document(docs)
     xml_converter.write_xml(docs, translation_config.get_working_file_path(
         "typsetting.xml"))
 
