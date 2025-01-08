@@ -16,6 +16,7 @@ from yadt.converter import TranslateConverter
 from yadt.doclayout import DocLayoutModel
 from yadt.document_il.midend.il_translator import ILTranslator
 from yadt.document_il.midend.paragraph_finder import ParagraphFinder
+from yadt.document_il.midend.styles_and_formulas import StylesAndFormulas
 from yadt.document_il.midend.typesetting import Typesetting
 from yadt.document_il.translator.translator import set_translate_rate_limiter
 from yadt.document_il.xml_converter import XMLConverter
@@ -108,11 +109,13 @@ def start_parse_il(
             image = np.fromstring(pix.samples, np.uint8).reshape(
                 pix.height, pix.width, 3
             )[:, :, ::-1]
-            page_layout = model.predict(image, imgsz=int(pix.height / 32) * 32)[0]
+            page_layout = model.predict(
+                image, imgsz=int(pix.height / 32) * 32)[0]
             # kdtree 是不可能 kdtree 的，不如直接渲染成图片，用空间换时间
             box = np.ones((pix.height, pix.width))
             h, w = box.shape
-            vcls = ["abandon", "figure", "table", "isolate_formula", "formula_caption"]
+            vcls = ["abandon", "figure", "table",
+                    "isolate_formula", "formula_caption"]
             for i, d in enumerate(page_layout.boxes):
                 if page_layout.names[int(d.cls)] not in vcls:
                     x0, y0, x1, y1 = d.xyxy.squeeze()
@@ -152,7 +155,8 @@ def translate(translation_config: TranslationConfig):
     doc_input = Document(original_pdf_path)
     if translation_config.debug:
         logger.debug("debug mode, save decompressed input pdf")
-        output_path = translation_config.get_working_file_path("input.decompressed.pdf")
+        output_path = translation_config.get_working_file_path(
+            "input.decompressed.pdf")
         doc_input.save(output_path, expand=True, pretty=True)
 
     # Continue with original processing
@@ -191,6 +195,13 @@ def translate(translation_config: TranslationConfig):
     logger.debug(f"finish paragraph finder from {temp_pdf_path}")
     xml_converter.write_xml(
         docs, translation_config.get_working_file_path("paragraph_finder.xml")
+    )
+
+    StylesAndFormulas().process(docs)
+    logger.debug(f"finish styles and formulas from {temp_pdf_path}")
+    xml_converter.write_xml(
+        docs, translation_config.get_working_file_path(
+            "styles_and_formulas.xml")
     )
 
     set_translate_rate_limiter(50)
