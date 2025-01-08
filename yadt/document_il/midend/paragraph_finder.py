@@ -95,6 +95,16 @@ class ParagraphFinder:
                     if current_paragraph is not None:
                         current_paragraph.pdf_line.append(line)
                         self.update_paragraph_data(current_paragraph)
+                    else:
+                        current_paragraph = PdfParagraph(
+                            box=line.box,
+                            graphic_state=line.graphic_state,
+                            pdf_line=[line],
+                            unicode=line.unicode,
+                            size=line.size,
+                        )
+                        self.update_paragraph_data(current_paragraph)
+                        paragraphs.append(current_paragraph)
                     current_line_chars = []
                 current_paragraph = None
                 current_layout = char_layout
