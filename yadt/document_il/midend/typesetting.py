@@ -141,32 +141,33 @@ class Typesetting:
 
     def get_max_right_space(self, current_box: Box, page) -> float:
         """获取段落右侧最大可用空间
-        
+
         Args:
             current_box: 当前段落的边界框
             page: 当前页面
-            
+
         Returns:
             可以扩展到的最大x坐标
         """
+        # TODO: try to find right margin of page
         # 获取页面的裁剪框作为初始最大限制
-        max_x = page.cropbox.box.x2
-        
+        max_x = page.cropbox.box.x2 * 0.9
+
         # 检查所有可能的阻挡元素
         for para in page.pdf_paragraph:
             if para.box == current_box:  # 跳过当前段落
                 continue
             # 只考虑在当前段落右侧且有垂直重叠的元素
-            if (para.box.x > current_box.x and 
-                not (para.box.y >= current_box.y2 or para.box.y2 <= current_box.y)):
+            if (para.box.x > current_box.x and
+                    not (para.box.y >= current_box.y2 or para.box.y2 <= current_box.y)):
                 max_x = min(max_x, para.box.x)
-        
+
         # 检查图形
         for figure in page.pdf_figure:
-            if (figure.box.x > current_box.x and 
-                not (figure.box.y >= current_box.y2 or figure.box.y2 <= current_box.y)):
+            if (figure.box.x > current_box.x and
+                    not (figure.box.y >= current_box.y2 or figure.box.y2 <= current_box.y)):
                 max_x = min(max_x, figure.box.x)
-        
+
         return max_x
 
     def typsetting_document(self, document: il_version_1.Document):
@@ -175,7 +176,8 @@ class Typesetting:
             for paragraph in page.pdf_paragraph:
                 try:
                     self.create_line(
-                        self.render_paragraph_unicode_to_char(paragraph, noto, 0.6),
+                        self.render_paragraph_unicode_to_char(
+                            paragraph, noto, 0.6),
                     )
                 except ValueError:
                     # 获取段落当前的边界框
@@ -195,7 +197,8 @@ class Typesetting:
 
                         # 重新渲染
                         self.create_line(
-                            self.render_paragraph_unicode_to_char(paragraph, noto, 0.4),
+                            self.render_paragraph_unicode_to_char(
+                                paragraph, noto, 0.1),
                         )
 
     def render_paragraph_unicode_to_char(
