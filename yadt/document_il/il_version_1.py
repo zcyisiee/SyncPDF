@@ -252,6 +252,12 @@ class PdfCharacter:
             "required": True,
         },
     )
+    vertical: Optional[bool] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
     scale: Optional[float] = field(
         default=None,
         metadata={
@@ -356,6 +362,12 @@ class PdfLine:
             "type": "Attribute",
         },
     )
+    vertical: Optional[bool] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass
@@ -400,6 +412,12 @@ class PdfParagraph:
         },
     )
     scale: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    vertical: Optional[bool] = field(
         default=None,
         metadata={
             "type": "Attribute",

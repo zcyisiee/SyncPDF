@@ -86,6 +86,11 @@
   <define name="PDFCharacter">
     <element name="pdfCharacter">
       <optional>
+        <attribute name="vertical">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="scale">
           <data type="float"/>
         </attribute>
@@ -211,6 +216,11 @@
           <data type="float"/>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="vertical">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
       <ref name="Box"/>
       <ref name="GraphicState"/>
       <zeroOrMore>
@@ -229,6 +239,11 @@
       <optional>
         <attribute name="scale">
           <data type="float"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="vertical">
+          <data type="boolean"/>
         </attribute>
       </optional>
       <ref name="Box"/>

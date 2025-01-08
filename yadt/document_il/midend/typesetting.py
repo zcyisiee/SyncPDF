@@ -155,14 +155,17 @@ class Typesetting:
             if para.box == current_box:  # 跳过当前段落
                 continue
             # 只考虑在当前段落右侧且有垂直重叠的元素
-            if (para.box.x > current_box.x and
-                    not (para.box.y >= current_box.y2 or para.box.y2 <= current_box.y)):
+            if para.box.x > current_box.x and not (
+                para.box.y >= current_box.y2 or para.box.y2 <= current_box.y
+            ):
                 max_x = min(max_x, para.box.x)
 
         # 检查图形
         for figure in page.pdf_figure:
-            if (figure.box.x > current_box.x and
-                    not (figure.box.y >= current_box.y2 or figure.box.y2 <= current_box.y)):
+            if figure.box.x > current_box.x and not (
+                figure.box.y >= current_box.y2
+                or figure.box.y2 <= current_box.y
+            ):
                 max_x = min(max_x, figure.box.x)
 
         return max_x
@@ -172,10 +175,8 @@ class Typesetting:
             # 开始实际的渲染过程
             for paragraph in page.pdf_paragraph:
                 try:
-                    self.create_line(
-                        self.render_paragraph_unicode_to_char(
-                            paragraph, self.font, 0.67),
-                    )
+                    self.render_paragraph_unicode_to_char(
+                        paragraph, self.font, 0.67)
                 except ValueError:
                     # 获取段落当前的边界框
                     current_box = paragraph.box
@@ -187,20 +188,23 @@ class Typesetting:
                             x=current_box.x,
                             y=current_box.y,
                             x2=max_x,  # 直接扩展到最大可用位置
-                            y2=current_box.y2
+                            y2=current_box.y2,
                         )
                         # 更新段落的边界框
                         paragraph.box = expanded_box
 
                         # 重新渲染
-                        self.create_line(
-                            self.render_paragraph_unicode_to_char(
-                                paragraph, self.font, 0.1),
-                        )
+                        self.render_paragraph_unicode_to_char(
+                            paragraph, self.font, 0.1)
 
     def render_paragraph_unicode_to_char(
-        self, paragraph: il_version_1.PdfParagraph, noto_font: pymupdf.Font, scale_threshold
+        self,
+        paragraph: il_version_1.PdfParagraph,
+        noto_font: pymupdf.Font,
+        scale_threshold,
     ):
+        if paragraph.pdf_line:
+            return
         scale = 1.0
         # 尝试排版，如果失败则逐步缩小字号
         while scale >= scale_threshold:
@@ -208,7 +212,7 @@ class Typesetting:
             if result is not None:
                 paragraph.pdf_line = [self.create_line(result)]
                 paragraph.scale = scale
-                return result
+                return
             if scale == 1.0:
                 scale = 0.8
             else:

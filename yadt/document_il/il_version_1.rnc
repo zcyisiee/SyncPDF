@@ -35,6 +35,7 @@ PDFFont =
   }
 PDFCharacter =
   element pdfCharacter {
+    attribute vertical { xsd:boolean }?,
     attribute scale { xsd:float }?,
     attribute pdfFontId { xsd:string },
     attribute pdfCharacterId { xsd:int }?,
@@ -76,6 +77,7 @@ PDFParagraph =
     attribute size { xsd:float },
     attribute unicode { xsd:string },
     attribute scale { xsd:float }?,
+    attribute vertical { xsd:boolean }?,
     Box,
     GraphicState,
     PDFLine*
@@ -85,6 +87,7 @@ PDFLine =
     attribute size { xsd:float },
     attribute unicode { xsd:string },
     attribute scale { xsd:float }?,
+    attribute vertical { xsd:boolean }?,
     Box,
     GraphicState,
     PDFCharacter*

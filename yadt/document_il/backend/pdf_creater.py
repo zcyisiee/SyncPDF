@@ -21,8 +21,10 @@ from yadt.translation_config import TranslationConfig
 
 class PDFCreater:
     def __init__(
-        self, original_pdf_path: str, document: il_version_1.Document,
-        font_path: str
+        self,
+        original_pdf_path: str,
+        document: il_version_1.Document,
+        font_path: str,
     ):
         self.original_pdf_path = original_pdf_path
         self.docs = document
@@ -157,10 +159,16 @@ class PDFCreater:
                 char_size = char.size
                 draw_op.append(b"q ")
                 self.render_graphic_state(draw_op, char.graphic_state)
-                draw_op.append(
-                    f"BT /{char.pdf_font_id} {char_size:f} Tf 1 0 0 1 {
-                        char.box.x:f} {char.box.y:f} Tm ".encode()
-                )
+                if char.vertical:
+                    draw_op.append(
+                        f"BT /{char.pdf_font_id} {char_size:f} Tf 0 1 -1 0 {
+                            char.box.x2:f} {char.box.y:f} Tm ".encode()
+                    )
+                else:
+                    draw_op.append(
+                        f"BT /{char.pdf_font_id} {char_size:f} Tf 1 0 0 1 {
+                            char.box.x:f} {char.box.y:f} Tm ".encode()
+                    )
 
                 encoding_length = encoding_length_map[char.pdf_font_id]
                 # pdf32000-2008 page14:
@@ -180,5 +188,6 @@ class PDFCreater:
             pdf[page.page_number].set_contents(op_container)
         pdf.save(mono_out_path, garbage=3, deflate=True)
         if translation_config.debug:
-            pdf.save(f"{mono_out_path}.decompressed.pdf",
-                     expand=True, pretty=True)
+            pdf.save(
+                f"{mono_out_path}.decompressed.pdf", expand=True, pretty=True
+            )
