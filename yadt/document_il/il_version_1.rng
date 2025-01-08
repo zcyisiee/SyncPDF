@@ -222,35 +222,57 @@
         </attribute>
       </optional>
       <ref name="Box"/>
-      <ref name="GraphicState"/>
+      <element name="baseGraphicState">
+        <ref name="GraphicState"/>
+      </element>
       <zeroOrMore>
-        <ref name="PDFLine"/>
+        <ref name="PDFParagraphComposition"/>
       </zeroOrMore>
+    </element>
+  </define>
+  <define name="PDFParagraphComposition">
+    <element name="pdfParagraphComposition">
+      <choice>
+        <ref name="PDFLine"/>
+        <ref name="PDFFormula"/>
+        <ref name="PDFSameStyleCharacters"/>
+        <ref name="PDFCharacter"/>
+        <ref name="PDFSameStyleUnicodeCharacters"/>
+      </choice>
     </element>
   </define>
   <define name="PDFLine">
     <element name="pdfLine">
-      <attribute name="size">
-        <data type="float"/>
-      </attribute>
-      <attribute name="unicode">
-        <data type="string"/>
-      </attribute>
-      <optional>
-        <attribute name="scale">
-          <data type="float"/>
-        </attribute>
-      </optional>
-      <optional>
-        <attribute name="vertical">
-          <data type="boolean"/>
-        </attribute>
-      </optional>
+      <ref name="Box"/>
+      <oneOrMore>
+        <ref name="PDFCharacter"/>
+      </oneOrMore>
+    </element>
+  </define>
+  <define name="PDFSameStyleCharacters">
+    <element name="pdfSameStyleCharacters">
       <ref name="Box"/>
       <ref name="GraphicState"/>
-      <zeroOrMore>
+      <oneOrMore>
         <ref name="PDFCharacter"/>
-      </zeroOrMore>
+      </oneOrMore>
+    </element>
+  </define>
+  <define name="PDFSameStyleUnicodeCharacters">
+    <element name="pdfSameStyleUnicodeCharacters">
+      <ref name="Box"/>
+      <ref name="GraphicState"/>
+      <oneOrMore>
+        <ref name="PDFCharacter"/>
+      </oneOrMore>
+    </element>
+  </define>
+  <define name="PDFFormula">
+    <element name="pdfFormula">
+      <ref name="Box"/>
+      <oneOrMore>
+        <ref name="PDFCharacter"/>
+      </oneOrMore>
     </element>
   </define>
   <define name="PDFFigure">

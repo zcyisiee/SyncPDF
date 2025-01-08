@@ -7,6 +7,7 @@ from yadt.document_il import (
     PdfCharacter,
     PdfLine,
     PdfParagraph,
+    PdfParagraphComposition,
 )
 
 
@@ -21,24 +22,96 @@ class Layout:
         if prev_char is None:
             return False
 
-        # 获取两个字符的中心y坐标
+        # 获取两个字符的中心 y 坐标
         prev_y = (prev_char.box.y + prev_char.box.y2) / 2
         curr_y = (curr_char.box.y + curr_char.box.y2) / 2
 
-        # 如果当前字符的y坐标明显低于前一个字符，说明换行了
+        # 如果当前字符的 y 坐标明显低于前一个字符，说明换行了
         # 这里使用字符高度的一半作为阈值
         char_height = curr_char.box.y2 - curr_char.box.y
         return curr_y < prev_y - char_height / 2
 
 
 class ParagraphFinder:
+    def update_paragraph_data(self, paragraph: PdfParagraph):
+        if not paragraph.pdf_paragraph_composition:
+            return
+
+        chars = []
+        for composition in paragraph.pdf_paragraph_composition:
+            if composition.pdf_line:
+                chars.extend(composition.pdf_line.pdf_character)
+            elif composition.pdf_formula:
+                chars.extend(composition.pdf_formula.pdf_character)
+            elif composition.pdf_character:
+                raise Exception(
+                    "Unexpected PdfCharacter type "
+                    "in PdfParagraphComposition. "
+                    "This type only appears in the IL "
+                    "after the translation is completed."
+                )
+            elif composition.pdf_same_style_unicode_characters:
+                raise Exception(
+                    "Unexpected PdfSameStyleUnicodeCharacters type"
+                    " in PdfParagraphComposition. "
+                    "This type only appears in the IL "
+                    "after the translation is completed."
+                )
+
+        # 有些 PDF 文件没有明确包含空格字符，而是通过字符之间的间距来隐式表示。
+        # 计算字符间距的中位数
+        distances = []
+        for i in range(len(chars) - 1):
+            distance = chars[i + 1].box.x - chars[i].box.x2
+            if distance > 1:  # 只考虑正向距离
+                distances.append(distance)
+        distinct_distances = sorted(set(distances))
+        if not distinct_distances:
+            median_distance = 1
+        elif len(distinct_distances) == 1:
+            median_distance = distinct_distances[0]
+        else:
+            median_distance = distinct_distances[1]
+
+        # 构建 unicode 字符串，根据间距插入空格
+        unicode_chars = []
+        for i in range(len(chars)):
+            unicode_chars.append(chars[i].char_unicode)
+            if chars[i].char_unicode == " ":
+                continue
+            if i < len(chars) - 1:
+                distance = chars[i + 1].box.x - chars[i].box.x2
+                if distance >= median_distance or Layout.is_newline(
+                    chars[i], chars[i + 1]
+                ):
+                    unicode_chars.append(" ")
+
+        # 更新 unicode（合并所有行的文本）
+        # 这个位置的 unicode 主要用途是导出 xml 文件后人类阅读
+        paragraph.unicode = "".join(unicode_chars)
+
+        # 更新边界框
+        min_x = min(char.box.x for char in chars)
+        min_y = min(char.box.y for char in chars)
+        max_x = max(char.box.x2 for char in chars)
+        max_y = max(char.box.y2 for char in chars)
+        paragraph.box = Box(min_x, min_y, max_x, max_y)
+        paragraph.vertical = chars[0].vertical
+
+    def update_line_data(self, line: PdfLine):
+        min_x = min(char.box.x for char in line.pdf_character)
+        min_y = min(char.box.y for char in line.pdf_character)
+        max_x = max(char.box.x2 for char in line.pdf_character)
+        max_y = max(char.box.y2 for char in line.pdf_character)
+        line.box = Box(min_x, min_y, max_x, max_y)
+
     def process(self, document):
         for page in document.page:
             self.process_page(page)
 
     def process_page(self, page: Page):
-        # 第一步：根据layout创建paragraphs
-        # 在这一步中，page.pdf_character中的字符会被移除
+        # 第一步：根据 layout 创建 paragraphs
+        # 在这一步中，page.pdf_character 中的字符会被移除
         paragraphs = self.create_paragraphs(page)
         page.pdf_paragraph = paragraphs
 
@@ -68,23 +141,17 @@ class ParagraphFinder:
             page.pdf_character.remove(char)
 
             # 检查是否需要开始新行
-            if current_line_chars and Layout.is_newline(
-                current_line_chars[-1], char
-            ):
+            if current_line_chars and Layout.is_newline(current_line_chars[-1], char):
                 # 创建新行
                 if current_line_chars:
                     line = self.create_line(current_line_chars)
                     if current_paragraph is None:
                         current_paragraph = PdfParagraph(
-                            box=line.box,
-                            graphic_state=line.graphic_state,
-                            pdf_line=[line],
-                            unicode=line.unicode,
-                            size=line.size,
+                            pdf_paragraph_composition=[line],
                         )
                         paragraphs.append(current_paragraph)
                     else:
-                        current_paragraph.pdf_line.append(line)
+                        current_paragraph.pdf_paragraph_composition.append(line)
                         self.update_paragraph_data(current_paragraph)
                 current_line_chars = []
 
@@ -93,15 +160,11 @@ class ParagraphFinder:
                 if current_line_chars:
                     line = self.create_line(current_line_chars)
                     if current_paragraph is not None:
-                        current_paragraph.pdf_line.append(line)
+                        current_paragraph.pdf_paragraph_composition.append(line)
                         self.update_paragraph_data(current_paragraph)
                     else:
                         current_paragraph = PdfParagraph(
-                            box=line.box,
-                            graphic_state=line.graphic_state,
-                            pdf_line=[line],
-                            unicode=line.unicode,
-                            size=line.size,
+                            pdf_paragraph_composition=[line],
                         )
                         self.update_paragraph_data(current_paragraph)
                         paragraphs.append(current_paragraph)
@@ -116,27 +179,29 @@ class ParagraphFinder:
             line = self.create_line(current_line_chars)
             if current_paragraph is None:
                 current_paragraph = PdfParagraph(
-                    box=line.box,
-                    graphic_state=line.graphic_state,
-                    pdf_line=[line],
-                    unicode=line.unicode,
-                    size=line.size,
+                    pdf_paragraph_composition=[line],
                 )
                 paragraphs.append(current_paragraph)
             else:
-                current_paragraph.pdf_line.append(line)
+                current_paragraph.pdf_paragraph_composition.append(line)
                 self.update_paragraph_data(current_paragraph)
 
         return paragraphs
 
     def process_paragraph_spacing(self, paragraph: PdfParagraph):
-        if not paragraph.pdf_line:
+        if not paragraph.pdf_paragraph_composition:
             return
 
         # 处理行级别的空格
         processed_lines = []
-        for line in paragraph.pdf_line:
-            if not line.unicode.strip():  # 跳过完全空白的行
+        for composition in paragraph.pdf_paragraph_composition:
+            if not composition.pdf_line:
+                continue
+
+            line = composition.pdf_line
+            if not "".join(
+                (x.char_unicode for x in line.pdf_character)
+            ).strip():  # 跳过完全空白的行
                 continue
 
             # 处理行内字符的尾随空格
@@ -148,34 +213,15 @@ class ParagraphFinder:
                     processed_chars.append(char)
 
             # 移除尾随空格
-            while (
-                processed_chars and processed_chars[-1].char_unicode.isspace()
-            ):
+            while processed_chars and processed_chars[-1].char_unicode.isspace():
                 processed_chars.pop()
 
             if processed_chars:  # 如果行内还有字符
                 line = self.create_line(processed_chars)
                 processed_lines.append(line)
 
-        paragraph.pdf_line = processed_lines
+        paragraph.pdf_paragraph_composition = processed_lines
         self.update_paragraph_data(paragraph)
-
-    def update_paragraph_data(self, paragraph: PdfParagraph):
-        if not paragraph.pdf_line:
-            return
-
-        # 更新unicode（合并所有行的文本）
-        paragraph.unicode = " ".join(
-            line.unicode for line in paragraph.pdf_line
-        )
-
-        # 更新边界框
-        min_x = min(line.box.x for line in paragraph.pdf_line)
-        min_y = min(line.box.y for line in paragraph.pdf_line)
-        max_x = max(line.box.x2 for line in paragraph.pdf_line)
-        max_y = max(line.box.y2 for line in paragraph.pdf_line)
-        paragraph.box = Box(min_x, min_y, max_x, max_y)
-        paragraph.vertical = paragraph.pdf_line[0].vertical
 
     def is_text_layout(self, layout: Layout):
         return layout is not None and layout.name in [
@@ -237,58 +283,21 @@ class ParagraphFinder:
 
         return None
 
-    def create_line(self, chars: list[PdfCharacter]) -> PdfLine:
-        if not chars:
-            return None
+    def create_line(self, chars: list[PdfCharacter]) -> PdfParagraphComposition:
+        assert chars
 
-        # 计算行的边界框
-        min_x = min(char.box.x for char in chars)
-        min_y = min(char.box.y for char in chars)
-        max_x = max(char.box.x2 for char in chars)
-        max_y = max(char.box.y2 for char in chars)
-        box = Box(min_x, min_y, max_x, max_y)
+        line = PdfLine(pdf_character=chars)
+        self.update_line_data(line)
+        return PdfParagraphComposition(pdf_line=line)
 
-        # 有些 PDF 文件没有明确包含空格字符，而是通过字符之间的间距来隐式表示。
-        # 计算字符间距的中位数
-        distances = []
-        for i in range(len(chars) - 1):
-            distance = chars[i + 1].box.x - chars[i].box.x2
-            if distance > 0:  # 只考虑正向距离
-                distances.append(distance)
-        
-        median_distance = sorted(distances)[len(distances)//3] if distances else 0
-        
-        # 构建unicode字符串，根据间距插入空格
-        unicode_chars = []
-        for i in range(len(chars)):
-            unicode_chars.append(chars[i].char_unicode)
-            if i < len(chars) - 1:
-                distance = chars[i + 1].box.x - chars[i].box.x2
-                if distance > median_distance:
-                    unicode_chars.append(" ")
-
-        # 使用第一个字符的图形状态作为行的图形状态
-        graphic_state = chars[0].graphic_state
-
-        # 创建行对象
-        line = PdfLine(
-            box=box,
-            graphic_state=graphic_state,
-            pdf_character=chars,
-            unicode="".join(unicode_chars),
-            size=max_y - min_y,  # 使用行的高度作为size
-            vertical=chars[0].vertical,
-        )
-        return line
-
-    def calculate_median_line_width(
-        self, paragraphs: list[PdfParagraph]
-    ) -> float:
+    def calculate_median_line_width(self, paragraphs: list[PdfParagraph]) -> float:
         # 收集所有行的宽度
         line_widths = []
         for paragraph in paragraphs:
-            for line in paragraph.pdf_line:
-                line_widths.append(line.box.x2 - line.box.x)
+            for composition in paragraph.pdf_paragraph_composition:
+                if composition.pdf_line:
+                    line = composition.pdf_line
+                    line_widths.append(line.box.x2 - line.box.x)
 
         if not line_widths:
             return 0.0
@@ -306,29 +315,36 @@ class ParagraphFinder:
         i = 0
         while i < len(paragraphs):
             paragraph = paragraphs[i]
-            if len(paragraph.pdf_line) <= 1:  # 跳过只有一行的段落
+            if len(paragraph.pdf_paragraph_composition) <= 1:  # 跳过只有一行的段落
                 i += 1
                 continue
 
             j = 1
-            while j < len(paragraph.pdf_line):
-                prev_line = paragraph.pdf_line[j - 1]
-                prev_width = prev_line.box.x2 - prev_line.box.x
-                prev_text = prev_line.unicode
+            while j < len(paragraph.pdf_paragraph_composition):
+                prev_composition = paragraph.pdf_paragraph_composition[j - 1]
+                if not prev_composition.pdf_line:
+                    j += 1
+                    continue
 
-                # 检查是否包含连续的点（至少20个）
-                # 如果有至少连续20个点，则代表这是目录条目
+                prev_line = prev_composition.pdf_line
+                prev_width = prev_line.box.x2 - prev_line.box.x
+                prev_text = "".join([c.char_unicode for c in prev_line.pdf_character])
+
+                # 检查是否包含连续的点（至少 20 个）
+                # 如果有至少连续 20 个点，则代表这是目录条目
                 if re.search(r"\.{20,}", prev_text):
                     # 创建新的段落
                     new_paragraph = PdfParagraph(
                         box=Box(0, 0, 0, 0),  # 临时边界框
-                        graphic_state=paragraph.pdf_line[j].graphic_state,
-                        pdf_line=paragraph.pdf_line[j:],
+                        pdf_paragraph_composition=paragraph.pdf_paragraph_composition[
+                            j:
+                        ],
                         unicode="",
-                        size=paragraph.pdf_line[j].size,
                     )
                     # 更新原段落
-                    paragraph.pdf_line = paragraph.pdf_line[:j]
+                    paragraph.pdf_paragraph_composition = (
+                        paragraph.pdf_paragraph_composition[:j]
+                    )
 
                     # 更新两个段落的数据
                     self.update_paragraph_data(paragraph)
@@ -343,13 +359,15 @@ class ParagraphFinder:
                     # 创建新的段落
                     new_paragraph = PdfParagraph(
                         box=Box(0, 0, 0, 0),  # 临时边界框
-                        graphic_state=paragraph.pdf_line[j].graphic_state,
-                        pdf_line=paragraph.pdf_line[j:],
+                        pdf_paragraph_composition=paragraph.pdf_paragraph_composition[
+                            j:
+                        ],
                         unicode="",
-                        size=paragraph.pdf_line[j].size,
                     )
                     # 更新原段落
-                    paragraph.pdf_line = paragraph.pdf_line[:j]
+                    paragraph.pdf_paragraph_composition = (
+                        paragraph.pdf_paragraph_composition[:j]
+                    )
 
                     # 更新两个段落的数据
                     self.update_paragraph_data(paragraph)

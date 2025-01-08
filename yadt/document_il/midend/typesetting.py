@@ -176,7 +176,8 @@ class Typesetting:
             for paragraph in page.pdf_paragraph:
                 try:
                     self.render_paragraph_unicode_to_char(
-                        paragraph, self.font, 0.67)
+                        paragraph, self.font, 0.67
+                    )
                 except ValueError:
                     # 获取段落当前的边界框
                     current_box = paragraph.box
@@ -195,7 +196,8 @@ class Typesetting:
 
                         # 重新渲染
                         self.render_paragraph_unicode_to_char(
-                            paragraph, self.font, 0.1)
+                            paragraph, self.font, 0.1
+                        )
 
     def render_paragraph_unicode_to_char(
         self,
