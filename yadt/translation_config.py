@@ -17,6 +17,8 @@ class TranslationConfig:
         debug: bool = False,
         working_dir: str | None = None,
         output_dir: str | None = None,
+        no_dual: bool = False,
+        no_mono: bool = False,
     ):
         self.input_file = input_file
         self.translator = translator
@@ -27,6 +29,8 @@ class TranslationConfig:
         self.debug = debug
         self.lang_in = lang_in
         self.lang_out = lang_out
+        self.no_dual = no_dual
+        self.no_mono = no_mono
 
         if working_dir is None:
             working_dir = os.path.join(

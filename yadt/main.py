@@ -89,6 +89,18 @@ def create_parser():
         action="store_true",
         help="Ignore translation cache.",
     )
+    translation_params.add_argument(
+        "--no-dual",
+        default=False,
+        action="store_true",
+        help="Do not output bilingual PDF files",
+    )
+    translation_params.add_argument(
+        "--no-mono",
+        default=False,
+        action="store_true",
+        help="Do not output monolingual PDF files",
+    )
     service_params = translation_params.add_mutually_exclusive_group()
     service_params.add_argument(
         "--openai",
@@ -242,6 +254,8 @@ def main():
             debug=args.debug,
             lang_in=args.lang_in,
             lang_out=args.lang_out,
+            no_dual=args.no_dual,
+            no_mono=args.no_mono,
         )
 
         # 开始翻译
