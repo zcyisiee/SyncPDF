@@ -14,7 +14,9 @@ class ILTranslator:
         # count total paragraph
         total = sum(len(page.pdf_paragraph) for page in docs.page)
         with tqdm(total=total, desc="translate") as pbar:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=1
+            ) as executor:
                 for page in docs.page:
                     self.process_page(page, executor, pbar)
 
@@ -30,6 +32,10 @@ class ILTranslator:
     def translate_paragraph(
         self, paragraph: PdfParagraph, pbar: tqdm | None = None
     ):
+        if paragraph.vertical:
+            if pbar:
+                pbar.update(1)
+            return
         text = paragraph.unicode
         translated_text = self.translate_engine.translate(text)
         if pbar:

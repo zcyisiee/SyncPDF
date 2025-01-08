@@ -176,6 +176,7 @@ class ParagraphFinder:
         max_x = max(line.box.x2 for line in paragraph.pdf_line)
         max_y = max(line.box.y2 for line in paragraph.pdf_line)
         paragraph.box = Box(min_x, min_y, max_x, max_y)
+        paragraph.vertical = paragraph.pdf_line[0].vertical
 
     def is_text_layout(self, layout: Layout):
         return layout is not None and layout.name in [
@@ -258,6 +259,7 @@ class ParagraphFinder:
             pdf_character=chars,
             unicode="".join(char.char_unicode for char in chars),
             size=max_y - min_y,  # 使用行的高度作为size
+            vertical=chars[0].vertical,
         )
         return line
 

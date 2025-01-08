@@ -96,7 +96,11 @@ class ILCreater:
             if v is None:
                 continue
             if k in ["scolor", "ncolor"]:
-                setattr(graphic_state, k, list(v))
+                if isinstance(v, tuple):
+                    v = list(v)
+                else:
+                    v = [v]
+                setattr(graphic_state, k, v)
                 continue
             if k == "linewidth":
                 graphic_state.linewidth = float(v)
@@ -121,6 +125,10 @@ class ILCreater:
         char_id = char.cid
         char_unicode = char.get_text()
         advance = char.adv
+        if char.matrix[0] == 0 and char.matrix[3] == 0:
+            vertical = True
+        else:
+            vertical = False
         pdf_char = il_version_1.PdfCharacter(
             box=bbox,
             pdf_font_id=font_id,
@@ -129,11 +137,15 @@ class ILCreater:
             char_unicode=char_unicode,
             size=char.size,
             graphic_state=gs,
+            vertical=vertical,
         )
         self.current_page.pdf_character.append(pdf_char)
 
     def on_page_layout(self, page_number):
-        if self.translation_config.should_translate_page(page_number + 1) is False:
+        if (
+            self.translation_config.should_translate_page(page_number + 1)
+            is False
+        ):
             return
         pix = self.mupdf[page_number].get_pixmap()
         image = np.fromstring(pix.samples, np.uint8).reshape(
@@ -166,8 +178,9 @@ class ILCreater:
         pages = [
             page
             for page in self.docs.page
-            if self.
-            translation_config.should_translate_page(page.page_number + 1)
+            if self.translation_config.should_translate_page(
+                page.page_number + 1
+            )
         ]
         self.docs.page = pages
         return self.docs
