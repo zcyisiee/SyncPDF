@@ -144,18 +144,7 @@ class ParagraphFinder:
                 processed_chars.pop()
 
             if processed_chars:  # 如果行内还有字符
-                line.pdf_character = processed_chars
-                line.unicode = "".join(
-                    char.char_unicode for char in processed_chars
-                )
-
-                # 更新行的边界框和相关属性
-                min_x = min(char.box.x for char in processed_chars)
-                min_y = min(char.box.y for char in processed_chars)
-                max_x = max(char.box.x2 for char in processed_chars)
-                max_y = max(char.box.y2 for char in processed_chars)
-                line.box = Box(min_x, min_y, max_x, max_y)
-
+                line = self.create_line(processed_chars)
                 processed_lines.append(line)
 
         paragraph.pdf_line = processed_lines
@@ -166,7 +155,7 @@ class ParagraphFinder:
             return
 
         # 更新unicode（合并所有行的文本）
-        paragraph.unicode = "".join(
+        paragraph.unicode = " ".join(
             line.unicode for line in paragraph.pdf_line
         )
 
@@ -249,6 +238,24 @@ class ParagraphFinder:
         max_y = max(char.box.y2 for char in chars)
         box = Box(min_x, min_y, max_x, max_y)
 
+        # 计算字符间距的中位数
+        distances = []
+        for i in range(len(chars) - 1):
+            distance = chars[i + 1].box.x - chars[i].box.x2
+            if distance > 0:  # 只考虑正向距离
+                distances.append(distance)
+        
+        median_distance = sorted(distances)[len(distances)//3] if distances else 0
+        
+        # 构建unicode字符串，根据间距插入空格
+        unicode_chars = []
+        for i in range(len(chars)):
+            unicode_chars.append(chars[i].char_unicode)
+            if i < len(chars) - 1:
+                distance = chars[i + 1].box.x - chars[i].box.x2
+                if distance > median_distance:  # 如果间距超过中位数的1.5倍，插入空格
+                    unicode_chars.append(" ")
+
         # 使用第一个字符的图形状态作为行的图形状态
         graphic_state = chars[0].graphic_state
 
@@ -257,7 +264,7 @@ class ParagraphFinder:
             box=box,
             graphic_state=graphic_state,
             pdf_character=chars,
-            unicode="".join(char.char_unicode for char in chars),
+            unicode="".join(unicode_chars),
             size=max_y - min_y,  # 使用行的高度作为size
             vertical=chars[0].vertical,
         )
