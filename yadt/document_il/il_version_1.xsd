@@ -129,8 +129,8 @@
     <xs:complexType>
       <xs:sequence>
         <xs:element ref="box"/>
-        <xs:element ref="graphicState"/>
-        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfLine"/>
+        <xs:element ref="baseGraphicState"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfParagraphComposition"/>
       </xs:sequence>
       <xs:attribute name="size" use="required" type="xs:float"/>
       <xs:attribute name="unicode" use="required" type="xs:string"/>
@@ -138,17 +138,56 @@
       <xs:attribute name="vertical" type="xs:boolean"/>
     </xs:complexType>
   </xs:element>
+  <xs:element name="baseGraphicState">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="graphicState"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pdfParagraphComposition">
+    <xs:complexType>
+      <xs:choice>
+        <xs:element ref="pdfLine"/>
+        <xs:element ref="pdfFormula"/>
+        <xs:element ref="pdfSameStyleCharacters"/>
+        <xs:element ref="pdfCharacter"/>
+        <xs:element ref="pdfSameStyleUnicodeCharacters"/>
+      </xs:choice>
+    </xs:complexType>
+  </xs:element>
   <xs:element name="pdfLine">
     <xs:complexType>
       <xs:sequence>
         <xs:element ref="box"/>
-        <xs:element ref="graphicState"/>
-        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfCharacter"/>
+        <xs:element maxOccurs="unbounded" ref="pdfCharacter"/>
       </xs:sequence>
-      <xs:attribute name="size" use="required" type="xs:float"/>
-      <xs:attribute name="unicode" use="required" type="xs:string"/>
-      <xs:attribute name="scale" type="xs:float"/>
-      <xs:attribute name="vertical" type="xs:boolean"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pdfSameStyleCharacters">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="box"/>
+        <xs:element ref="graphicState"/>
+        <xs:element maxOccurs="unbounded" ref="pdfCharacter"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pdfSameStyleUnicodeCharacters">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="box"/>
+        <xs:element ref="graphicState"/>
+        <xs:element maxOccurs="unbounded" ref="pdfCharacter"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pdfFormula">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="box"/>
+        <xs:element maxOccurs="unbounded" ref="pdfCharacter"/>
+      </xs:sequence>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfFigure">

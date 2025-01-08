@@ -37,11 +37,13 @@ class PDFCreater:
             return
         if graphic_state.stroking_color_space_name:
             draw_op.append(
-                f"/{graphic_state.stroking_color_space_name}" f" CS \n".encode()
+                f"/{graphic_state.stroking_color_space_name}"
+                f" CS \n".encode()
             )
         if graphic_state.non_stroking_color_space_name:
             draw_op.append(
-                f"/{graphic_state.non_stroking_color_space_name}" f" cs \n".encode()
+                f"/{graphic_state.non_stroking_color_space_name}"
+                f" cs \n".encode()
             )
         if graphic_state.ncolor is not None:
             if len(graphic_state.ncolor) == 1:
@@ -135,7 +137,8 @@ class PDFCreater:
         self.add_font(pdf, self.docs)
         for page in self.docs.page:
             encoding_length_map = {
-                f.font_id: f.encoding_length for f in page.pdf_font}
+                f.font_id: f.encoding_length for f in page.pdf_font
+            }
             draw_op = BitStream()
             # q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}
             draw_op.append(b"q ")
@@ -193,8 +196,11 @@ class PDFCreater:
         if not translation_config.no_mono:
             pdf.save(mono_out_path, garbage=3, deflate=True)
             if translation_config.debug:
-                pdf.save(f"{mono_out_path}.decompressed.pdf",
-                         expand=True, pretty=True)
+                pdf.save(
+                    f"{mono_out_path}.decompressed.pdf",
+                    expand=True,
+                    pretty=True,
+                )
         if not translation_config.no_dual:
             dual_out_path = translation_config.get_output_file_path(
                 f"{translation_config.input_file.rsplit('.', 1)[0]}."
@@ -207,5 +213,8 @@ class PDFCreater:
                 dual.move_page(page_count + id, id * 2 + 1)
             dual.save(dual_out_path, garbage=3, deflate=True)
             if translation_config.debug:
-                dual.save(f"{dual_out_path}.decompressed.pdf",
-                          expand=True, pretty=True)
+                dual.save(
+                    f"{dual_out_path}.decompressed.pdf",
+                    expand=True,
+                    pretty=True,
+                )

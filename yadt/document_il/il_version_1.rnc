@@ -79,17 +79,23 @@ PDFParagraph =
     attribute scale { xsd:float }?,
     attribute vertical { xsd:boolean }?,
     Box,
-    GraphicState,
-    PDFLine*
+    element baseGraphicState { GraphicState },
+    PDFParagraphComposition*
   }
-PDFLine =
-  element pdfLine {
-    attribute size { xsd:float },
-    attribute unicode { xsd:string },
-    attribute scale { xsd:float }?,
-    attribute vertical { xsd:boolean }?,
-    Box,
-    GraphicState,
-    PDFCharacter*
+PDFParagraphComposition =
+  element pdfParagraphComposition {
+    PDFLine
+    | PDFFormula
+    | PDFSameStyleCharacters
+    | PDFCharacter
+    | PDFSameStyleUnicodeCharacters
   }
+PDFLine = element pdfLine { Box, PDFCharacter+ }
+PDFSameStyleCharacters =
+  element pdfSameStyleCharacters { Box, GraphicState, PDFCharacter+ }
+PDFSameStyleUnicodeCharacters =
+  element pdfSameStyleUnicodeCharacters {
+    Box, GraphicState, PDFCharacter+
+  }
+PDFFormula = element pdfFormula { Box, PDFCharacter+ }
 PDFFigure = element pdfFigure { Box }

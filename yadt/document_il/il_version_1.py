@@ -170,6 +170,21 @@ class PdfFont:
 
 
 @dataclass
+class BaseGraphicState:
+    class Meta:
+        name = "baseGraphicState"
+
+    graphic_state: Optional[GraphicState] = field(
+        default=None,
+        metadata={
+            "name": "graphicState",
+            "type": "Element",
+            "required": True,
+        },
+    )
+
+
+@dataclass
 class Cropbox:
     class Meta:
         name = "cropbox"
@@ -316,9 +331,53 @@ class PdfFigure:
 
 
 @dataclass
+class PdfFormula:
+    class Meta:
+        name = "pdfFormula"
+
+    box: Optional[Box] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+    pdf_character: list[PdfCharacter] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfCharacter",
+            "type": "Element",
+            "min_occurs": 1,
+        },
+    )
+
+
+@dataclass
 class PdfLine:
     class Meta:
         name = "pdfLine"
+
+    box: Optional[Box] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+    pdf_character: list[PdfCharacter] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfCharacter",
+            "type": "Element",
+            "min_occurs": 1,
+        },
+    )
+
+
+@dataclass
+class PdfSameStyleCharacters:
+    class Meta:
+        name = "pdfSameStyleCharacters"
 
     box: Optional[Box] = field(
         default=None,
@@ -340,40 +399,15 @@ class PdfLine:
         metadata={
             "name": "pdfCharacter",
             "type": "Element",
-        },
-    )
-    size: Optional[float] = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-            "required": True,
-        },
-    )
-    unicode: Optional[str] = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-            "required": True,
-        },
-    )
-    scale: Optional[float] = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-        },
-    )
-    vertical: Optional[bool] = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
+            "min_occurs": 1,
         },
     )
 
 
 @dataclass
-class PdfParagraph:
+class PdfSameStyleUnicodeCharacters:
     class Meta:
-        name = "pdfParagraph"
+        name = "pdfSameStyleUnicodeCharacters"
 
     box: Optional[Box] = field(
         default=None,
@@ -390,10 +424,84 @@ class PdfParagraph:
             "required": True,
         },
     )
-    pdf_line: list[PdfLine] = field(
+    pdf_character: list[PdfCharacter] = field(
         default_factory=list,
         metadata={
+            "name": "pdfCharacter",
+            "type": "Element",
+            "min_occurs": 1,
+        },
+    )
+
+
+@dataclass
+class PdfParagraphComposition:
+    class Meta:
+        name = "pdfParagraphComposition"
+
+    pdf_line: Optional[PdfLine] = field(
+        default=None,
+        metadata={
             "name": "pdfLine",
+            "type": "Element",
+        },
+    )
+    pdf_formula: Optional[PdfFormula] = field(
+        default=None,
+        metadata={
+            "name": "pdfFormula",
+            "type": "Element",
+        },
+    )
+    pdf_same_style_characters: Optional[PdfSameStyleCharacters] = field(
+        default=None,
+        metadata={
+            "name": "pdfSameStyleCharacters",
+            "type": "Element",
+        },
+    )
+    pdf_character: Optional[PdfCharacter] = field(
+        default=None,
+        metadata={
+            "name": "pdfCharacter",
+            "type": "Element",
+        },
+    )
+    pdf_same_style_unicode_characters: Optional[
+        PdfSameStyleUnicodeCharacters
+    ] = field(
+        default=None,
+        metadata={
+            "name": "pdfSameStyleUnicodeCharacters",
+            "type": "Element",
+        },
+    )
+
+
+@dataclass
+class PdfParagraph:
+    class Meta:
+        name = "pdfParagraph"
+
+    box: Optional[Box] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+    base_graphic_state: Optional[BaseGraphicState] = field(
+        default=None,
+        metadata={
+            "name": "baseGraphicState",
+            "type": "Element",
+            "required": True,
+        },
+    )
+    pdf_paragraph_composition: list[PdfParagraphComposition] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfParagraphComposition",
             "type": "Element",
         },
     )

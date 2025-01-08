@@ -1,4 +1,5 @@
 from yadt.document_il.il_version_1 import (
+    BaseGraphicState,
     BaseOperations,
     Box,
     Cropbox,
@@ -10,11 +11,16 @@ from yadt.document_il.il_version_1 import (
     PdfCharacter,
     PdfFigure,
     PdfFont,
+    PdfFormula,
     PdfLine,
     PdfParagraph,
+    PdfParagraphComposition,
+    PdfSameStyleCharacters,
+    PdfSameStyleUnicodeCharacters,
 )
 
 __all__ = [
+    "BaseGraphicState",
     "BaseOperations",
     "Box",
     "Cropbox",
@@ -26,6 +32,10 @@ __all__ = [
     "PdfCharacter",
     "PdfFigure",
     "PdfFont",
+    "PdfFormula",
     "PdfLine",
     "PdfParagraph",
+    "PdfParagraphComposition",
+    "PdfSameStyleCharacters",
+    "PdfSameStyleUnicodeCharacters",
 ]
