@@ -129,8 +129,8 @@ class GoogleTranslator(BaseTranslator):
     name = "google"
     lang_map = {"zh": "zh-CN"}
 
-    def __init__(self, lang_in, lang_out, model):
-        super().__init__(lang_in, lang_out, model)
+    def __init__(self, lang_in, lang_out, ignore_cache=False):
+        super().__init__(lang_in, lang_out, ignore_cache)
         self.session = requests.Session()
         self.endpoint = "http://translate.google.com/m"
         self.headers = {

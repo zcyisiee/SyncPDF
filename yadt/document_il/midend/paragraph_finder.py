@@ -159,13 +159,14 @@ class ParagraphFinder:
                 processed_lines.append(line)
 
         paragraph.pdf_line = processed_lines
+        self.update_paragraph_data(paragraph)
 
     def update_paragraph_data(self, paragraph: PdfParagraph):
         if not paragraph.pdf_line:
             return
 
         # 更新unicode（合并所有行的文本）
-        paragraph.unicode = " ".join(
+        paragraph.unicode = "".join(
             line.unicode for line in paragraph.pdf_line
         )
 

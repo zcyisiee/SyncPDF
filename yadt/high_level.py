@@ -17,15 +17,17 @@ from yadt.doclayout import DocLayoutModel
 from yadt.document_il.midend.il_translator import ILTranslator
 from yadt.document_il.midend.paragraph_finder import ParagraphFinder
 from yadt.document_il.midend.typesetting import Typesetting
-from yadt.document_il.translator.translator import (
-    OpenAITranslator,
-    set_translate_rate_limiter,
-)
+from yadt.document_il.translator.translator import set_translate_rate_limiter
 from yadt.document_il.xml_converter import XMLConverter
 from yadt.pdfinterp import PDFPageInterpreterEx
 
 from yadt.document_il.frontend.il_creater import ILCreater
 from yadt.document_il.backend.pdf_creater import PDFCreater
+from yadt.translation_config import TranslationConfig
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 model = DocLayoutModel.load_available()
 resfont_map = {
@@ -99,11 +101,13 @@ def start_parse_il(
             image = np.fromstring(pix.samples, np.uint8).reshape(
                 pix.height, pix.width, 3
             )[:, :, ::-1]
-            page_layout = model.predict(image, imgsz=int(pix.height / 32) * 32)[0]
+            page_layout = model.predict(
+                image, imgsz=int(pix.height / 32) * 32)[0]
             # kdtree 是不可能 kdtree 的，不如直接渲染成图片，用空间换时间
             box = np.ones((pix.height, pix.width))
             h, w = box.shape
-            vcls = ["abandon", "figure", "table", "isolate_formula", "formula_caption"]
+            vcls = ["abandon", "figure", "table",
+                    "isolate_formula", "formula_caption"]
             for i, d in enumerate(page_layout.boxes):
                 if page_layout.names[int(d.cls)] not in vcls:
                     x0, y0, x1, y1 = d.xyxy.squeeze()
@@ -136,57 +140,61 @@ def start_parse_il(
     device.close()
 
 
-def translate():
-    resfont = "china-ss"
-    print(os.getcwd())
-    original_pdf_path = "../examples/pdf/il_try_1/这是一个测试文件.pdf"
-    print(os.path.abspath(original_pdf_path))
-    with open(original_pdf_path, "rb") as f:
-        raw = f.read()
-    doc_en = Document(stream=raw)
+def translate(translation_config: TranslationConfig):
+    original_pdf_path = translation_config.input_file
+    logger.info(f"start to translate: {original_pdf_path}")
 
-    # output_path = "../../../examples/pdf/il_try_1/这是一个测试文件.解压缩.pdf"
-    # with open(output_path, "wb") as out_f:
-    #     doc_en.save(out_f, expand=True, pretty=True)
+    doc_input = Document(original_pdf_path)
+    if translation_config.debug:
+        logger.debug("debug mode, save decompressed input pdf")
+        output_path = translation_config.get_working_file_path(
+            "input.decompressed.pdf")
+        doc_input.save(output_path, expand=True, pretty=True)
 
     # Continue with original processing
-    stream = io.BytesIO()
-    doc_en.save(stream)
-    doc_zh = Document(stream=stream)
-    for page in doc_zh:
+    temp_pdf_path = translation_config.get_working_file_path("input.pdf")
+
+    doc_pdf2zh = Document(original_pdf_path)
+    resfont = "china-ss"
+    for page in doc_pdf2zh:
         page.insert_font(resfont, None)
-    fp = io.BytesIO()
-    doc_zh.save(fp)
+    doc_pdf2zh.save(temp_pdf_path)
 
     il_creater = ILCreater()
+    il_creater.mupdf = doc_input
 
-    il_creater.mupdf = doc_en
-    start_parse_il(fp, doc_zh=doc_zh, resfont=resfont, il_creater=il_creater)
-
-    docs = il_creater.create_il()
-    ParagraphFinder().process(docs)
-
-    set_translate_rate_limiter(50)
-    translate_engine = OpenAITranslator("zh_cn", "en-us", "Qwen/Qwen2.5-72B-Instruct")
-    # translate_engine.ignore_cache = True
-    ILTranslator(translate_engine).translate(docs)
-
-    Typesetting().typsetting_document(docs)
     xml_converter = XMLConverter()
 
-    xml = xml_converter.to_xml(docs)
+    logger.debug(f'start parse il from {temp_pdf_path}')
+    with open(temp_pdf_path, "rb") as f:
+        start_parse_il(f, doc_zh=doc_pdf2zh,
+                       resfont=resfont, il_creater=il_creater)
+    logger.debug(f'finish parse il from {temp_pdf_path}')
 
-    with open("../examples/pdf/il_try_1/测试解析.xml", "w") as f:
-        f.write(xml)
+    docs = il_creater.create_il()
+    logger.debug(f'finish create il from {temp_pdf_path}')
 
-    with open("../examples/pdf/il_try_1/测试解析.xml", "r") as f:
-        xml = f.read()
-    docs2 = xml_converter.from_xml(xml)
+    xml_converter.write_xml(docs, translation_config.get_working_file_path(
+        "create_il.xml"))
 
-    pdf_creater = PDFCreater(original_pdf_path, docs2)
+    ParagraphFinder().process(docs)
+    xml_converter.write_xml(docs, translation_config.get_working_file_path(
+        "paragraph_finder.xml"))
 
-    pdf_creater.write("../examples/pdf/il_try_1/测试还原.pdf")
+    set_translate_rate_limiter(50)
+    translate_engine = translation_config.translator
+    # translate_engine.ignore_cache = True
+    ILTranslator(translate_engine).translate(docs)
+    xml_converter.write_xml(docs, translation_config.get_working_file_path(
+        "il_translated.xml"))
 
+    Typesetting().typsetting_document(docs)
+    xml_converter.write_xml(docs, translation_config.get_working_file_path(
+        "typsetting.xml"))
 
-if __name__ == "__main__":
-    translate()
+    # deepcopy
+    docs2 = xml_converter.from_xml(xml_converter.to_xml(docs))
+
+    pdf_creater = PDFCreater(original_pdf_path, docs2, translation_config.font)
+
+    pdf_creater.write(translation_config)

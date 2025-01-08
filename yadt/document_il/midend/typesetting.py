@@ -2,13 +2,10 @@ import pymupdf
 
 from yadt.document_il import Box, PdfCharacter, PdfLine, il_version_1
 
-noto_path = r"/Users/aw/Downloads/GoNotoKurrent-Regular.ttf"
-noto = pymupdf.Font(fontfile=noto_path)
-
 
 class Typesetting:
-    def __init__(self):
-        pass
+    def __init__(self, font_path: str):
+        self.font = pymupdf.Font(fontfile=font_path)
 
     def create_line(self, chars: list[PdfCharacter]) -> PdfLine:
         assert chars
@@ -177,7 +174,7 @@ class Typesetting:
                 try:
                     self.create_line(
                         self.render_paragraph_unicode_to_char(
-                            paragraph, noto, 0.6),
+                            paragraph, self.font, 0.67),
                     )
                 except ValueError:
                     # 获取段落当前的边界框
@@ -198,7 +195,7 @@ class Typesetting:
                         # 重新渲染
                         self.create_line(
                             self.render_paragraph_unicode_to_char(
-                                paragraph, noto, 0.1),
+                                paragraph, self.font, 0.1),
                         )
 
     def render_paragraph_unicode_to_char(

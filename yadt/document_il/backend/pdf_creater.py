@@ -16,14 +16,17 @@ from pdfminer.pdftypes import (
 )
 
 from yadt.document_il import il_version_1
+from yadt.translation_config import TranslationConfig
 
 
 class PDFCreater:
     def __init__(
-        self, original_pdf_path: str, document: il_version_1.Document
+        self, original_pdf_path: str, document: il_version_1.Document,
+        font_path: str
     ):
         self.original_pdf_path = original_pdf_path
         self.docs = document
+        self.font_path = font_path
 
     def render_graphic_state(
         self, draw_op: BitStream, graphic_state: il_version_1.GraphicState
@@ -64,7 +67,7 @@ class PDFCreater:
         return chars
 
     def add_font(self, doc_zh: pymupdf.Document, il: il_version_1.Document):
-        noto_path = r"/Users/aw/Downloads/GoNotoKurrent-Regular.ttf"
+        noto_path = self.font_path
         font_list = [
             ("noto", noto_path),
         ]
@@ -117,7 +120,11 @@ class PDFCreater:
         for page in il.page:
             page.pdf_font.append(pdf_font_il)
 
-    def write(self, out_file: str):
+    def write(self, translation_config: TranslationConfig):
+        mono_out_path = translation_config.get_output_file_path(
+            f"{translation_config.input_file.rsplit('.', 1)[0]}."
+            f"{translation_config.lang_out}.mono.pdf"
+        )
         pdf = pymupdf.open(self.original_pdf_path)
         self.add_font(pdf, self.docs)
         for page in self.docs.page:
@@ -171,5 +178,7 @@ class PDFCreater:
             pdf.update_object(op_container, "<<>>")
             pdf.update_stream(op_container, draw_op.tobytes())
             pdf[page.page_number].set_contents(op_container)
-        pdf.save(out_file, expand=True, pretty=True)
-        pdf.save(out_file + ".compressed.pdf", garbage=3, deflate=True)
+        pdf.save(mono_out_path, garbage=3, deflate=True)
+        if translation_config.debug:
+            pdf.save(f"{mono_out_path}.decompressed.pdf",
+                     expand=True, pretty=True)
