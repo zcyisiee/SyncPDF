@@ -1,16 +1,20 @@
-from typing import Dict, List
+from typing import Dict, List, Union, Tuple, Optional
 
 from pdfminer.pdfinterp import PDFGraphicState, PDFResourceManager
 from pdfminer.pdffont import PDFCIDFont
 from pdfminer.converter import PDFConverter
 from pdfminer.pdffont import PDFUnicodeNotDefined
-from pdfminer.utils import apply_matrix_pt, mult_matrix
+from pdfminer.utils import apply_matrix_pt, mult_matrix, matrix2str, bbox2str
 from pdfminer.layout import (
     LTChar,
     LTFigure,
     LTLine,
-    LTPage,
+    LTPage, LTComponent, LTText,
 )
+from pdfminer.utils import Matrix
+from pdfminer.pdffont import PDFFont
+from pdfminer.pdfcolor import PDFColorSpace
+
 import logging
 import re
 import concurrent.futures
@@ -81,7 +85,7 @@ class PDFConverterEx(PDFConverter):
             text = self.handle_undefined_char(font, cid)
         textwidth = font.char_width(cid)
         textdisp = font.char_disp(cid)
-        item = LTChar(
+        item = AWLTChar(
             matrix,
             font,
             fontsize,
@@ -97,6 +101,75 @@ class PDFConverterEx(PDFConverter):
         item.cid = cid  # hack 插入原字符编码
         item.font = font  # hack 插入原字符字体
         return item.adv
+
+
+class AWLTChar(LTChar):
+    """Actual letter in the text as a Unicode string."""
+
+    def __init__(
+            self,
+            matrix: Matrix,
+            font: PDFFont,
+            fontsize: float,
+            scaling: float,
+            rise: float,
+            text: str,
+            textwidth: float,
+            textdisp: Union[float, Tuple[Optional[float], float]],
+            ncs: PDFColorSpace,
+            graphicstate: PDFGraphicState,
+    ) -> None:
+        LTText.__init__(self)
+        self._text = text
+        self.matrix = matrix
+        self.fontname = font.fontname
+        self.ncs = ncs
+        self.graphicstate = graphicstate
+        self.adv = textwidth * fontsize * scaling
+        # compute the boundary rectangle.
+        if font.is_vertical():
+            # vertical
+            assert isinstance(textdisp, tuple)
+            (vx, vy) = textdisp
+            if vx is None:
+                vx = fontsize * 0.5
+            else:
+                vx = vx * fontsize * 0.001
+            vy = (1000 - vy) * fontsize * 0.001
+            bbox_lower_left = (-vx, vy + rise + self.adv)
+            bbox_upper_right = (-vx + fontsize, vy + rise)
+        else:
+            # horizontal
+            descent = font.get_descent() * fontsize
+            bbox_lower_left = (0, descent + rise)
+            bbox_upper_right = (self.adv, descent + rise + fontsize)
+        (a, b, c, d, e, f) = self.matrix
+        self.upright = 0 < a * d * scaling and b * c <= 0
+        (x0, y0) = apply_matrix_pt(self.matrix, bbox_lower_left)
+        (x1, y1) = apply_matrix_pt(self.matrix, bbox_upper_right)
+        if x1 < x0:
+            (x0, x1) = (x1, x0)
+        if y1 < y0:
+            (y0, y1) = (y1, y0)
+        LTComponent.__init__(self, (x0, y0, x1, y1))
+        if font.is_vertical() or matrix[0] == 0:
+            self.size = self.width
+        else:
+            self.size = self.height
+        return
+
+    def __repr__(self) -> str:
+        return "<{} {} matrix={} font={!r} adv={} text={!r}>".format(
+            self.__class__.__name__,
+            bbox2str(self.bbox),
+            matrix2str(self.matrix),
+            self.fontname,
+            self.adv,
+            self.get_text(),
+        )
+
+    def get_text(self) -> str:
+        return self._text
 
 
 class Paragraph:

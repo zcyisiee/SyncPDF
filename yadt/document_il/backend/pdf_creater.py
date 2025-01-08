@@ -44,15 +44,21 @@ class PDFCreater:
                 f"/{graphic_state.non_stroking_color_space_name}" f" cs \n".encode()
             )
         if graphic_state.ncolor is not None:
-            draw_op.append(
-                f"{' '.join((str(x) for x in graphic_state.ncolor))
-                   } sc \n".encode()
-            )
+            if len(graphic_state.ncolor) == 1:
+                draw_op.append(f"{graphic_state.ncolor[0]} g \n".encode())
+            else:
+                draw_op.append(
+                    f"{' '.join((str(x)
+                                for x in graphic_state.ncolor))} sc \n".encode()
+                )
         if graphic_state.scolor is not None:
-            draw_op.append(
-                f"{' '.join((str(x) for x in graphic_state.ncolor))
-                   } SC \n".encode()
-            )
+            if len(graphic_state.scolor) == 1:
+                draw_op.append(f"{graphic_state.scolor[0]} G \n".encode())
+            else:
+                draw_op.append(
+                    f"{' '.join((str(x)
+                                for x in graphic_state.scolor))} SC \n".encode()
+                )
 
     def render_paragraph_to_char(
         self, paragraph: il_version_1.PdfParagraph
