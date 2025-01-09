@@ -212,9 +212,6 @@ def translate(translation_config: TranslationConfig):
         docs, translation_config.get_working_file_path("il_translated.xml")
     )
 
-    # TODO: Development Temporary use
-    exit(1)
-
     Typesetting(font_path=translation_config.font).typsetting_document(docs)
     logger.debug(f"finish typsetting from {temp_pdf_path}")
     xml_converter.write_xml(
