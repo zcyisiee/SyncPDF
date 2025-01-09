@@ -82,7 +82,7 @@ PDFParagraph =
     attribute scale { xsd:float }?,
     attribute vertical { xsd:boolean }?,
     Box,
-    element baseStyle { PDFStyle },
+    PDFStyle,
     PDFParagraphComposition*
   }
 PDFParagraphComposition =
@@ -97,7 +97,10 @@ PDFLine = element pdfLine { Box, PDFCharacter+ }
 PDFSameStyleCharacters =
   element pdfSameStyleCharacters { Box, PDFStyle, PDFCharacter+ }
 PDFSameStyleUnicodeCharacters =
-  element pdfSameStyleUnicodeCharacters { Box, PDFStyle, PDFCharacter+ }
+  element pdfSameStyleUnicodeCharacters {
+    PDFStyle?,
+    attribute unicode { xsd:string }
+  }
 PDFFormula =
   element pdfFormula {
     Box,

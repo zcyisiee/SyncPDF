@@ -224,9 +224,7 @@
         </attribute>
       </optional>
       <ref name="Box"/>
-      <element name="baseStyle">
-        <ref name="PDFStyle"/>
-      </element>
+      <ref name="PDFStyle"/>
       <zeroOrMore>
         <ref name="PDFParagraphComposition"/>
       </zeroOrMore>
@@ -262,11 +260,12 @@
   </define>
   <define name="PDFSameStyleUnicodeCharacters">
     <element name="pdfSameStyleUnicodeCharacters">
-      <ref name="Box"/>
-      <ref name="PDFStyle"/>
-      <oneOrMore>
-        <ref name="PDFCharacter"/>
-      </oneOrMore>
+      <optional>
+        <ref name="PDFStyle"/>
+      </optional>
+      <attribute name="unicode">
+        <data type="string"/>
+      </attribute>
     </element>
   </define>
   <define name="PDFFormula">

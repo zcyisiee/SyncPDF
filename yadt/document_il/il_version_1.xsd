@@ -142,19 +142,12 @@
     <xs:complexType>
       <xs:sequence>
         <xs:element ref="box"/>
-        <xs:element ref="baseStyle"/>
+        <xs:element ref="pdfStyle"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfParagraphComposition"/>
       </xs:sequence>
       <xs:attribute name="unicode" use="required" type="xs:string"/>
       <xs:attribute name="scale" type="xs:float"/>
       <xs:attribute name="vertical" type="xs:boolean"/>
-    </xs:complexType>
-  </xs:element>
-  <xs:element name="baseStyle">
-    <xs:complexType>
-      <xs:sequence>
-        <xs:element ref="pdfStyle"/>
-      </xs:sequence>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfParagraphComposition">
@@ -188,10 +181,9 @@
   <xs:element name="pdfSameStyleUnicodeCharacters">
     <xs:complexType>
       <xs:sequence>
-        <xs:element ref="box"/>
-        <xs:element ref="pdfStyle"/>
-        <xs:element maxOccurs="unbounded" ref="pdfCharacter"/>
+        <xs:element minOccurs="0" ref="pdfStyle"/>
       </xs:sequence>
+      <xs:attribute name="unicode" use="required" type="xs:string"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfFormula">
