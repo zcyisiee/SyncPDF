@@ -273,6 +273,12 @@
       <oneOrMore>
         <ref name="PDFCharacter"/>
       </oneOrMore>
+      <attribute name="x_offset">
+        <data type="float"/>
+      </attribute>
+      <attribute name="y_offset">
+        <data type="float"/>
+      </attribute>
     </element>
   </define>
   <define name="PDFFigure">

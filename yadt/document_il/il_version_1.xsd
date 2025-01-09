@@ -188,6 +188,8 @@
         <xs:element ref="box"/>
         <xs:element maxOccurs="unbounded" ref="pdfCharacter"/>
       </xs:sequence>
+      <xs:attribute name="x_offset" use="required" type="xs:float"/>
+      <xs:attribute name="y_offset" use="required" type="xs:float"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfFigure">
