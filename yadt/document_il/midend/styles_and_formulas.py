@@ -23,6 +23,11 @@ class StylesAndFormulas:
         for page in document.page:
             self.process_page(page)
 
+    def process_page(self, page: Page):
+        """处理页面，包括公式识别和偏移量计算"""
+        self.process_page_formulas(page)
+        self.process_page_offsets(page)
+
     def update_line_data(self, line: PdfLine):
         min_x = min(char.box.x for char in line.pdf_character)
         min_y = min(char.box.y for char in line.pdf_character)
@@ -53,7 +58,8 @@ class StylesAndFormulas:
                     if current_chars:
                         # 处理剩余字符
                         new_compositions.append(
-                            self.create_composition(current_chars, is_current_formula)
+                            self.create_composition(
+                                current_chars, is_current_formula)
                         )
                         current_chars = []
                     new_compositions.append(composition)
@@ -76,7 +82,8 @@ class StylesAndFormulas:
                     if is_formula != is_current_formula and current_chars:
                         # 字符类型发生切换，处理之前的字符
                         new_compositions.append(
-                            self.create_composition(current_chars, is_current_formula)
+                            self.create_composition(
+                                current_chars, is_current_formula)
                         )
                         current_chars = []
                     is_current_formula = is_formula
@@ -86,7 +93,8 @@ class StylesAndFormulas:
                 # 处理行末的字符
                 if current_chars:
                     new_compositions.append(
-                        self.create_composition(current_chars, is_current_formula)
+                        self.create_composition(
+                            current_chars, is_current_formula)
                     )
                     current_chars = []
 
@@ -178,11 +186,6 @@ class StylesAndFormulas:
         # 使用中位数来避免异常值的影响
         median_spacing = sorted(line_spacings)[len(line_spacings) // 2]
         return median_spacing
-
-    def process_page(self, page: Page):
-        """处理页面，包括公式识别和偏移量计算"""
-        self.process_page_formulas(page)
-        self.process_page_offsets(page)
 
     def create_composition(
         self, chars: list[PdfCharacter], is_formula: bool
