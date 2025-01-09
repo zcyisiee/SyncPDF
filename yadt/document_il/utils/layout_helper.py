@@ -3,7 +3,75 @@ from typing import List, Union
 
 from yadt.document_il.il_version_1 import PdfCharacter
 from yadt.document_il.utils.layout import Layout
+from yadt.document_il.il_version_1 import PdfParagraph
+from pymupdf import Font
 
+
+def get_paragraph_length_except(
+    paragraph: PdfParagraph,
+    except_chars: str,
+    font: Font
+) -> int:
+    length = 0
+    for composition in paragraph.pdf_paragraph_composition:
+        if composition.pdf_character:
+            length += composition.pdf_character[0].box.x2 - \
+                composition.pdf_character[0].box.x
+        elif composition.pdf_same_style_characters:
+            for pdf_char in (composition
+                             .pdf_same_style_characters
+                             .pdf_character):
+                if pdf_char.char_unicode in except_chars:
+                    continue
+                length += pdf_char.box.x2 - pdf_char.box.x
+        elif composition.pdf_same_style_unicode_characters:
+            for char_unicode in (composition
+                                 .pdf_same_style_unicode_characters
+                                 .unicode):
+                if char_unicode in except_chars:
+                    continue
+                length += font.char_lengths(char_unicode,
+                                            composition
+                                            .pdf_same_style_unicode_characters
+                                            .pdf_style
+                                            .font_size)[0]
+        elif composition.pdf_line:
+            for pdf_char in composition.pdf_line.pdf_character:
+                if pdf_char.char_unicode in except_chars:
+                    continue
+                length += pdf_char.box.x2 - pdf_char.box.x
+        elif composition.pdf_formula:
+            length += composition.pdf_formula.box.x2 - \
+                composition.pdf_formula.box.x
+        else:
+            raise ValueError(
+                f"Unknown composition type. "
+                f"Composition: {composition}. "
+                f"Paragraph: {paragraph}. "
+            )
+    return length
+
+
+def get_paragraph_unicode(paragraph: PdfParagraph) -> str:
+    chars = []
+    for composition in paragraph.pdf_paragraph_composition:
+        if composition.pdf_line:
+            chars.extend(composition.pdf_line.pdf_character)
+        elif composition.pdf_same_style_characters:
+            chars.extend(composition.pdf_same_style_characters.pdf_character)
+        elif composition.pdf_same_style_unicode_characters:
+            chars.extend(composition.pdf_same_style_unicode_characters.unicode)
+        elif composition.pdf_formula:
+            chars.extend(composition.pdf_formula.pdf_character)
+        elif composition.pdf_character:
+            chars.append(composition.pdf_character)
+        else:
+            raise ValueError(
+                f"Unknown composition type. "
+                f"Composition: {composition}. "
+                f"Paragraph: {paragraph}. "
+            )
+    return get_char_unicode_string(chars)
 
 def get_char_unicode_string(chars: List[Union[PdfCharacter, str]]) -> str:
     """
@@ -30,7 +98,7 @@ def get_char_unicode_string(chars: List[Union[PdfCharacter, str]]) -> str:
 
     # 去重后的距离
     distinct_distances = sorted(set(distances))
-    
+
     if not distinct_distances:
         median_distance = 1
     elif len(distinct_distances) == 1:
