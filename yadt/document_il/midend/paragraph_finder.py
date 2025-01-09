@@ -10,7 +10,7 @@ from yadt.document_il import (
 )
 from yadt.document_il.utils.layout_helper import (
     Layout,
-    get_char_unicode_string,
+    get_char_unicode_string, add_space_dummy_chars,
 )
 
 
@@ -61,6 +61,7 @@ class ParagraphFinder:
 
         # 第二步：处理段落中的空格和换行符
         for paragraph in paragraphs:
+            add_space_dummy_chars(paragraph)
             self.process_paragraph_spacing(paragraph)
             self.update_paragraph_data(paragraph)
 
