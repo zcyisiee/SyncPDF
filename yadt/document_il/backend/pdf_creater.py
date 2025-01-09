@@ -66,8 +66,19 @@ class PDFCreater:
         self, paragraph: il_version_1.PdfParagraph
     ) -> list[il_version_1.PdfCharacter]:
         chars = []
-        for line in paragraph.pdf_line:
-            chars.extend(line.pdf_character)
+        for composition in paragraph.pdf_paragraph_composition:
+            if not isinstance(
+                composition.pdf_character, il_version_1.PdfCharacter
+            ):
+                raise Exception(
+                    f"Unknown composition type. "
+                    f"This type only appears in the IL "
+                    f"after the translation is completed."
+                    f"During pdf rendering, this type is not supported."
+                    f"Composition: {composition}. "
+                    f"Paragraph: {paragraph}. "
+                )
+            chars.append(composition.pdf_character)
         if not chars and paragraph.unicode:
             raise Exception(
                 "Unable to export paragraphs that have not yet been formatted"
@@ -162,21 +173,23 @@ class PDFCreater:
             for char in chars:
                 if char.char_unicode == "\n":
                     continue
-                char_size = char.size
+                char_size = char.pdf_style.font_size
                 draw_op.append(b"q ")
-                self.render_graphic_state(draw_op, char.graphic_state)
+                self.render_graphic_state(
+                    draw_op, char.pdf_style.graphic_state
+                )
                 if char.vertical:
                     draw_op.append(
-                        f"BT /{char.pdf_font_id} {char_size:f} Tf 0 1 -1 0 {
+                        f"BT /{char.pdf_style.font_id} {char_size:f} Tf 0 1 -1 0 {
                             char.box.x2:f} {char.box.y:f} Tm ".encode()
                     )
                 else:
                     draw_op.append(
-                        f"BT /{char.pdf_font_id} {char_size:f} Tf 1 0 0 1 {
+                        f"BT /{char.pdf_style.font_id} {char_size:f} Tf 1 0 0 1 {
                             char.box.x:f} {char.box.y:f} Tm ".encode()
                     )
 
-                encoding_length = encoding_length_map[char.pdf_font_id]
+                encoding_length = encoding_length_map[char.pdf_style.font_id]
                 # pdf32000-2008 page14:
                 # As hexadecimal data enclosed in angle brackets < >
                 # see 7.3.4.3, "Hexadecimal Strings."

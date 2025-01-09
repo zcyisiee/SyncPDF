@@ -1,48 +1,68 @@
 import math
 from typing import List, Union
 
-from yadt.document_il.il_version_1 import PdfCharacter
-from yadt.document_il.utils.layout import Layout
-from yadt.document_il.il_version_1 import PdfParagraph
 from pymupdf import Font
+
+from yadt.document_il.il_version_1 import PdfCharacter, PdfParagraph
+
+
+class Layout:
+    def __init__(self, id, name):
+        self.id = id
+        self.name = name
+
+    @staticmethod
+    def is_newline(prev_char: PdfCharacter, curr_char: PdfCharacter) -> bool:
+        # 如果没有前一个字符，不是换行
+        if prev_char is None:
+            return False
+
+        # 获取两个字符的中心 y 坐标
+        prev_y = (prev_char.box.y + prev_char.box.y2) / 2
+        curr_y = (curr_char.box.y + curr_char.box.y2) / 2
+
+        # 如果当前字符的 y 坐标明显低于前一个字符，说明换行了
+        # 这里使用字符高度的一半作为阈值
+        char_height = curr_char.box.y2 - curr_char.box.y
+        return curr_y < prev_y - char_height / 2
 
 
 def get_paragraph_length_except(
-    paragraph: PdfParagraph,
-    except_chars: str,
-    font: Font
+    paragraph: PdfParagraph, except_chars: str, font: Font
 ) -> int:
     length = 0
     for composition in paragraph.pdf_paragraph_composition:
         if composition.pdf_character:
-            length += composition.pdf_character[0].box.x2 - \
-                composition.pdf_character[0].box.x
+            length += (
+                composition.pdf_character[0].box.x2
+                - composition.pdf_character[0].box.x
+            )
         elif composition.pdf_same_style_characters:
-            for pdf_char in (composition
-                             .pdf_same_style_characters
-                             .pdf_character):
+            for (
+                pdf_char
+            ) in composition.pdf_same_style_characters.pdf_character:
                 if pdf_char.char_unicode in except_chars:
                     continue
                 length += pdf_char.box.x2 - pdf_char.box.x
         elif composition.pdf_same_style_unicode_characters:
-            for char_unicode in (composition
-                                 .pdf_same_style_unicode_characters
-                                 .unicode):
+            for (
+                char_unicode
+            ) in composition.pdf_same_style_unicode_characters.unicode:
                 if char_unicode in except_chars:
                     continue
-                length += font.char_lengths(char_unicode,
-                                            composition
-                                            .pdf_same_style_unicode_characters
-                                            .pdf_style
-                                            .font_size)[0]
+                length += font.char_lengths(
+                    char_unicode,
+                    composition.pdf_same_style_unicode_characters.pdf_style.font_size,
+                )[0]
         elif composition.pdf_line:
             for pdf_char in composition.pdf_line.pdf_character:
                 if pdf_char.char_unicode in except_chars:
                     continue
                 length += pdf_char.box.x2 - pdf_char.box.x
         elif composition.pdf_formula:
-            length += composition.pdf_formula.box.x2 - \
-                composition.pdf_formula.box.x
+            length += (
+                composition.pdf_formula.box.x2 - composition.pdf_formula.box.x
+            )
         else:
             raise ValueError(
                 f"Unknown composition type. "
@@ -72,6 +92,7 @@ def get_paragraph_unicode(paragraph: PdfParagraph) -> str:
                 f"Paragraph: {paragraph}. "
             )
     return get_char_unicode_string(chars)
+
 
 def get_char_unicode_string(chars: List[Union[PdfCharacter, str]]) -> str:
     """
@@ -123,12 +144,58 @@ def get_char_unicode_string(chars: List[Union[PdfCharacter, str]]) -> str:
         if i < len(chars) - 1 and isinstance(chars[i + 1], PdfCharacter):
             distance = chars[i + 1].box.x - chars[i].box.x2
             if (
-                distance >= median_distance                     # 间距大于中位数
-                or Layout.is_newline(chars[i], chars[i + 1])    # 换行
+                distance >= median_distance  # 间距大于中位数
+                or Layout.is_newline(chars[i], chars[i + 1])  # 换行
             ):
-                unicode_chars.append(" ")                       # 添加空格
+                unicode_chars.append(" ")  # 添加空格
 
     return "".join(unicode_chars)
+
+
+def get_paragraph_max_height(paragraph: PdfParagraph) -> float:
+    """
+    获取段落中最高的排版单元高度。
+
+    Args:
+        paragraph: PDF段落对象
+
+    Returns:
+        float: 最大高度值
+    """
+    max_height = 0.0
+    for composition in paragraph.pdf_paragraph_composition:
+        if composition.pdf_character:
+            char_height = (
+                composition.pdf_character[0].box.y2
+                - composition.pdf_character[0].box.y
+            )
+            max_height = max(max_height, char_height)
+        elif composition.pdf_same_style_characters:
+            for (
+                pdf_char
+            ) in composition.pdf_same_style_characters.pdf_character:
+                char_height = pdf_char.box.y2 - pdf_char.box.y
+                max_height = max(max_height, char_height)
+        elif composition.pdf_same_style_unicode_characters:
+            # 对于纯Unicode字符，我们使用其样式中的字体大小作为高度估计
+            font_size = composition.pdf_same_style_unicode_characters.pdf_style.font_size
+            max_height = max(max_height, font_size)
+        elif composition.pdf_line:
+            for pdf_char in composition.pdf_line.pdf_character:
+                char_height = pdf_char.box.y2 - pdf_char.box.y
+                max_height = max(max_height, char_height)
+        elif composition.pdf_formula:
+            formula_height = (
+                composition.pdf_formula.box.y2 - composition.pdf_formula.box.y
+            )
+            max_height = max(max_height, formula_height)
+        else:
+            raise ValueError(
+                f"Unknown composition type. "
+                f"Composition: {composition}. "
+                f"Paragraph: {paragraph}. "
+            )
+    return max_height
 
 
 def is_same_style(style1, style2) -> bool:

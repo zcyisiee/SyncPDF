@@ -69,6 +69,7 @@
       <xs:attribute name="pdfCharacterId" type="xs:int"/>
       <xs:attribute name="char_unicode" use="required" type="xs:string"/>
       <xs:attribute name="advance" type="xs:float"/>
+      <xs:attribute name="x_offset" type="xs:float"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pageLayout">

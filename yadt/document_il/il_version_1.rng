@@ -108,6 +108,11 @@
           <data type="float"/>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="x_offset">
+          <data type="float"/>
+        </attribute>
+      </optional>
       <ref name="PDFStyle"/>
       <ref name="Box"/>
     </element>

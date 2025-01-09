@@ -12,8 +12,10 @@ from yadt.document_il import (
     PdfSameStyleUnicodeCharacters,
 )
 from yadt.document_il.translator.translator import BaseTranslator
-from yadt.document_il.utils.layout_helper import is_same_style
-from yadt.document_il.utils.layout_helper import get_char_unicode_string
+from yadt.document_il.utils.layout_helper import (
+    get_char_unicode_string,
+    is_same_style,
+)
 from yadt.translation_config import TranslationConfig
 
 
@@ -75,9 +77,8 @@ class ILTranslator:
         pbar: tqdm | None = None,
     ):
         for paragraph in page.pdf_paragraph:
-            # self.translate_paragraph(paragraph, pbar)
-
-            executor.submit(self.translate_paragraph, paragraph, pbar)
+            self.translate_paragraph(paragraph, pbar)
+            # executor.submit(self.translate_paragraph, paragraph, pbar)
 
     class TranslateInput:
         def __init__(
@@ -103,10 +104,12 @@ class ILTranslator:
         id: int,
         paragraph: PdfParagraph,
     ):
-        left_placeholder = self.translate_engine.get_rich_text_left_placeholder(
-            id)
-        right_placeholder = self.translate_engine.get_rich_text_right_placeholder(
-            id)
+        left_placeholder = (
+            self.translate_engine.get_rich_text_left_placeholder(id)
+        )
+        right_placeholder = (
+            self.translate_engine.get_rich_text_right_placeholder(id)
+        )
         if (
             left_placeholder in paragraph.unicode
             or right_placeholder in paragraph.unicode
@@ -165,10 +168,11 @@ class ILTranslator:
             elif composition.pdf_same_style_characters:
                 if is_same_style(
                     composition.pdf_same_style_characters.pdf_style,
-                    paragraph.base_style,
+                    paragraph.pdf_style,
                 ):
                     chars.extend(
-                        composition.pdf_same_style_characters.pdf_character)
+                        composition.pdf_same_style_characters.pdf_character
+                    )
                     continue
                 placeholder = self.create_rich_text_placeholder(
                     composition.pdf_same_style_characters,
@@ -180,7 +184,8 @@ class ILTranslator:
                 placeholder_id = placeholder.id + 2
                 chars.append(placeholder.left_placeholder)
                 chars.extend(
-                    composition.pdf_same_style_characters.pdf_character)
+                    composition.pdf_same_style_characters.pdf_character
+                )
                 chars.append(placeholder.right_placeholder)
             else:
                 raise Exception(
@@ -215,7 +220,8 @@ class ILTranslator:
                 else:
                     # 检查富文本占位符
                     left_pos = output.find(
-                        placeholder.left_placeholder, current_pos)
+                        placeholder.left_placeholder, current_pos
+                    )
                     if left_pos == current_pos:
                         right_pos = output.find(
                             placeholder.right_placeholder,
@@ -224,7 +230,7 @@ class ILTranslator:
                         if right_pos != -1:
                             placeholder_match = placeholder
                             matched_text = output[
-                                current_pos: right_pos
+                                current_pos : right_pos
                                 + len(placeholder.right_placeholder)
                             ]
                             break
@@ -239,15 +245,17 @@ class ILTranslator:
                     current_pos += len(matched_text)
                 else:
                     # 添加富文本
-                    text_start = current_pos + \
-                        len(placeholder_match.left_placeholder)
+                    text_start = current_pos + len(
+                        placeholder_match.left_placeholder
+                    )
                     text_end = output.find(
                         placeholder_match.right_placeholder, text_start
                     )
                     if text_end != -1:
                         text = output[text_start:text_end]
                         if isinstance(
-                            placeholder_match.composition, PdfSameStyleCharacters
+                            placeholder_match.composition,
+                            PdfSameStyleCharacters,
                         ) and text.replace(" ", "") == (
                             "".join(
                                 [
@@ -286,7 +294,8 @@ class ILTranslator:
                             next_pos = pos
                     else:
                         pos = output.find(
-                            placeholder.left_placeholder, current_pos)
+                            placeholder.left_placeholder, current_pos
+                        )
                         if pos != -1 and pos < next_pos:
                             next_pos = pos
 
@@ -302,7 +311,9 @@ class ILTranslator:
 
         return result
 
-    def translate_paragraph(self, paragraph: PdfParagraph, pbar: tqdm | None = None):
+    def translate_paragraph(
+        self, paragraph: PdfParagraph, pbar: tqdm | None = None
+    ):
         with PbarContext(pbar):
             if paragraph.vertical:
                 return
@@ -320,3 +331,12 @@ class ILTranslator:
             paragraph.pdf_paragraph_composition = self.parse_translate_output(
                 translate_input, translated_text
             )
+            for composition in paragraph.pdf_paragraph_composition:
+                if (
+                    composition.pdf_same_style_unicode_characters
+                    and composition.pdf_same_style_unicode_characters.pdf_style
+                    is None
+                ):
+                    composition.pdf_same_style_unicode_characters.pdf_style = (
+                        paragraph.pdf_style
+                    )
