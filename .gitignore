@@ -22,3 +22,6 @@ web/*.local
 *.egg-info
 uv.lock
 .DS_Store
+.vscode
+__pycache__
+.ruff_cache

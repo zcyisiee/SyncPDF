@@ -1,18 +1,24 @@
 import os
 
+from yadt.const import get_cache_file_path, CACHE_FOLDER
 import yadt.high_level
 import logging
 import argparse
+import httpx
+from yadt.document_il.translator.translator import OpenAITranslator, GoogleTranslator
+from yadt.document_il.translator.translator import set_translate_rate_limiter
+from yadt.translation_config import TranslationConfig  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
+
 def create_cache_folder():
     try:
-        cache_folder = os.path.join(os.path.expanduser("~"), ".cache", "yadt")
-        os.makedirs(cache_folder, exist_ok=True)
-    except Exception as e:
-        logger.critical(f'Failed to create cache folder at "~/.cache/yadt"', exc_info=True)
+        os.makedirs(CACHE_FOLDER, exist_ok=True)
+    except OSError:
+        logger.critical(f"Failed to create cache folder at {CACHE_FOLDER}", exc_info=True)
         exit(1)
+
 
 def create_parser():
     parser = argparse.ArgumentParser()
@@ -34,16 +40,19 @@ def create_parser():
         description="Used during translation",
     )
     translation_params.add_argument(
-        '--font',
+        "--font",
         type=str,
         default=None,
-        help='The font to use for pdf output. If not set, use the default font.'
+        help="The font to use for pdf output. "
+        "If not set, use the default font.",
     )
     translation_params.add_argument(
         "--pages",
         "-p",
         type=str,
-        help="The list of page numbers to parse.",
+        help="Pages to translate. "
+        "If not set, translate all pages. "
+        "like: 1,2,1-,-3,3-5",
     )
     translation_params.add_argument(
         "--lang-in",
@@ -73,30 +82,164 @@ def create_parser():
         default=4,
         help="QPS limit of translation service",
     )
+    translation_params.add_argument(
+        "--ignore-cache",
+        "-ic",
+        default=False,
+        action="store_true",
+        help="Ignore translation cache.",
+    )
     service_params = translation_params.add_mutually_exclusive_group()
     service_params.add_argument(
-        '--openai', '-oai', default=False, action='store_true', help='Use OpenAI translator.'
+        "--openai",
+        "-oai",
+        default=False,
+        action="store_true",
+        help="Use OpenAI translator.",
     )
     service_params.add_argument(
-        '--google', '-g', default=False, action='store_true', help='Use Google translator.'
+        "--google",
+        "-g",
+        default=False,
+        action="store_true",
+        help="Use Google translator.",
     )
-    openai_params = parser.add_argument_group('Translation - OpenAI Options', description='OpenAI specific options')
-    openai_params.add_argument('--model', '-m', type=str, default='gpt-4o-mini', help='The OpenAI model to use for translation.')
-    openai_params.add_argument('--base-url', '-b', type=str, default=None, help='The base URL for the OpenAI API.')
-    openai_params.add_argument('--api-key', '-k', type=str, default=None, help='The API key for the OpenAI API.')
+    openai_params = parser.add_argument_group(
+        "Translation - OpenAI Options", description="OpenAI specific options"
+    )
+    openai_params.add_argument(
+        "--openai-model",
+        "-m",
+        type=str,
+        default="gpt-4o-mini",
+        help="The OpenAI model to use for translation.",
+    )
+    openai_params.add_argument(
+        "--openai-base-url",
+        "-b",
+        type=str,
+        default=None,
+        help="The base URL for the OpenAI API.",
+    )
+    openai_params.add_argument(
+        "--openai-api-key",
+        "-k",
+        type=str,
+        default=None,
+        help="The API key for the OpenAI API.",
+    )
 
     return parser
+
+
+def download_font_assets():
+    assets = [
+        (
+            "noto.ttf",
+            "https://github.com/satbyy/"
+            "go-noto-universal/releases/download/v7.0/"
+            "GoNotoKurrent-Regular.ttf",
+        )
+    ]
+    for name, url in assets:
+        save_path = get_cache_file_path(name)
+        if os.path.exists(save_path):
+            continue
+        r = httpx.get(url, follow_redirects=True)
+        if not r.is_success:
+            logger.critical("cannot download noto font", exc_info=True)
+            exit(1)
+        with open(save_path, "wb") as f:
+            f.write(r.content)
+
 
 def main():
     logging.basicConfig(level=logging.INFO)
 
     parser = create_parser()
-    parsed_args = parser.parse_args()
+    args = parser.parse_args()
+
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
 
     create_cache_folder()
-    if parsed_args.debug:
-        logger.setLevel(logging.DEBUG)
-    yadt.high_level.translate()
+
+    # 验证翻译服务选择
+    if not (args.openai or args.google):
+        parser.error("必须选择一个翻译服务：--openai 或 --google")
+
+    # 验证 OpenAI 参数
+    if args.openai and not args.openai_api_key:
+        parser.error("使用 OpenAI 服务时必须提供 API key")
+
+    # 实例化翻译器
+    if args.openai:
+        translator = OpenAITranslator(
+            lang_in=args.lang_in,
+            lang_out=args.lang_out,
+            model=args.openai_model,
+            base_url=args.openai_base_url,
+            api_key=args.openai_api_key,
+            ignore_cache=args.ignore_cache,
+        )
+    else:
+        translator = GoogleTranslator(
+            lang_in=args.lang_in,
+            lang_out=args.lang_out,
+            ignore_cache=args.ignore_cache,
+        )
+
+    # 设置翻译速率限制
+    set_translate_rate_limiter(args.qps)
+
+    for file in args.files:
+        if not os.path.exists(file):
+            logger.error(f"文件不存在：{file}")
+            exit(1)
+        if not file.endswith(".pdf"):
+            logger.error(f"文件不是 PDF 文件：{file}")
+            exit(1)
+
+    font_path = args.font
+    if not font_path:
+        font_path = get_cache_file_path("noto.ttf")
+        download_font_assets()
+
+    # 验证字体
+    if font_path:
+        if not os.path.exists(font_path):
+            logger.error(f"字体文件不存在：{font_path}")
+            exit(1)
+        if not font_path.endswith(".ttf"):
+            logger.error(f"字体文件不是 TTF 文件：{font_path}")
+            exit(1)
+
+    if args.output:
+        if not os.path.exists(args.output):
+            logger.info(f"输出目录不存在，创建：{args.output}")
+            try:
+                os.makedirs(args.output, exist_ok=True)
+            except OSError:
+                logger.critical(f"Failed to create output folder at {args.output}", exc_info=True)
+                exit(1)
+    else:
+        args.output = None
+
+    for file in args.files:
+        # 创建配置对象
+        config = TranslationConfig(
+            input_file=file,
+            font=font_path,
+            pages=args.pages,
+            output=args.output,
+            translator=translator,
+            debug=args.debug,
+            lang_in=args.lang_in,
+            lang_out=args.lang_out,
+        )
+
+        # 开始翻译
+        yadt.high_level.translate(config)
 
 
 if __name__ == "__main__":

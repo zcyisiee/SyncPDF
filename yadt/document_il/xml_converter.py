@@ -13,6 +13,14 @@ class XMLConverter:
         context = XmlContext()
         self.serializer = XmlSerializer(context=context, config=config)
 
+    def write_xml(self, document: il_version_1.Document, path: str):
+        with open(path, "w") as f:
+            f.write(self.to_xml(document))
+
+    def read_xml(self, path: str) -> il_version_1.Document:
+        with open(path, "r") as f:
+            return self.from_xml(f.read())
+
     def to_xml(self, document: il_version_1.Document) -> str:
         return self.serializer.render(document)
 
