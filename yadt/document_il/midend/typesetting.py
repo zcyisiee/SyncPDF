@@ -48,7 +48,7 @@ class Typesetting:
         current_x: float,
         current_y: float,
         scale: float,
-    ) -> tuple[il_version_1.PdfCharacter, float]:
+    ) -> tuple[None, float] | tuple[PdfCharacter, float | None]:
         """排版一个已有的 PdfCharacter
 
         Args:
@@ -58,7 +58,8 @@ class Typesetting:
         Returns:
             新的 PdfCharacter 和新的 x 坐标
         """
-
+        if char.char_unicode == ' ' and char.pdf_character_id is None:
+            return None, current_x + (char.box.x2 - char.box.x) * scale
         new_char = il_version_1.PdfCharacter(
             pdf_character_id=char.pdf_character_id,
             char_unicode=char.char_unicode,
@@ -152,6 +153,8 @@ class Typesetting:
 
         # 对每个字符进行缩放和位置调整
         for char in formula.pdf_character:
+            if char.pdf_character_id is None:
+                continue
             # 计算字符相对于公式左下角的偏移量
             relative_x = char.box.x - min_x
             relative_y = char.box.y - min_y  # PDF坐标系中y轴从下往上
@@ -159,8 +162,8 @@ class Typesetting:
             relative_height = char.box.y2 - char.box.y
 
             # 计算缩放后的新位置和大小
-            new_x = x + relative_x * scale
-            new_y = y + relative_y * scale
+            new_x = x + relative_x * scale + formula.x_offset
+            new_y = y + relative_y * scale + formula.y_offset
             new_width = relative_width * scale
             new_height = relative_height * scale
 
@@ -241,7 +244,8 @@ class Typesetting:
                 new_char, current_x = self._typeset_pdf_character(
                     char, current_x, paragraph.box.y, scale
                 )
-                result_chars.append(new_char)
+                if new_char:
+                    result_chars.append(new_char)
             elif comp.pdf_same_style_characters:
                 should_break = False
                 for char in comp.pdf_same_style_characters.pdf_character:
@@ -251,7 +255,8 @@ class Typesetting:
                     new_char, current_x = self._typeset_pdf_character(
                         char, current_x, paragraph.box.y, scale
                     )
-                    result_chars.append(new_char)
+                    if new_char:
+                        result_chars.append(new_char)
                 if should_break:
                     break
             elif comp.pdf_same_style_unicode_characters:
@@ -280,7 +285,8 @@ class Typesetting:
                     new_char, current_x = self._typeset_pdf_character(
                         char, current_x, paragraph.box.y, scale
                     )
-                    result_chars.append(new_char)
+                    if new_char:
+                        result_chars.append(new_char)
             elif comp.pdf_formula:
                 chars, current_x = self._typeset_formula(
                     comp.pdf_formula,
@@ -367,7 +373,8 @@ class Typesetting:
                 new_char, current_x = self._typeset_pdf_character(
                     char, current_x, current_y, scale
                 )
-                result_chars.append(new_char)
+                if new_char:
+                    result_chars.append(new_char)
             elif comp.pdf_same_style_characters:
                 for char in comp.pdf_same_style_characters.pdf_character:
                     char_width = char.box.x2 - char.box.x
@@ -379,7 +386,8 @@ class Typesetting:
                     new_char, current_x = self._typeset_pdf_character(
                         char, current_x, current_y, scale
                     )
-                    result_chars.append(new_char)
+                    if new_char:
+                        result_chars.append(new_char)
             elif comp.pdf_same_style_unicode_characters:
                 for (
                     char_unicode
@@ -416,7 +424,8 @@ class Typesetting:
                     new_char, current_x = self._typeset_pdf_character(
                         char, current_x, current_y, scale
                     )
-                    result_chars.append(new_char)
+                    if new_char:
+                        result_chars.append(new_char)
             elif comp.pdf_formula:
                 # 计算公式宽度
                 formula_width = (
