@@ -197,7 +197,7 @@ def translate(translation_config: TranslationConfig):
         docs, translation_config.get_working_file_path("paragraph_finder.xml")
     )
 
-    StylesAndFormulas().process(docs)
+    StylesAndFormulas(translation_config).process(docs)
     logger.debug(f"finish styles and formulas from {temp_pdf_path}")
     xml_converter.write_xml(
         docs, translation_config.get_working_file_path(
