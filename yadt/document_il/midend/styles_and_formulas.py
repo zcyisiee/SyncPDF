@@ -136,6 +136,8 @@ class StylesAndFormulas:
                     formula.x_offset = formula.box.x - left_line.box.x2
                 else:
                     formula.x_offset = 0  # 如果左边没有文字，x_offset应该为0
+                if abs(formula.x_offset) < 0.1:
+                    formula.x_offset = 0
 
                 # 计算y偏移量
                 if left_line:
@@ -144,6 +146,9 @@ class StylesAndFormulas:
                 elif right_line:
                     formula.y_offset = formula.box.y - right_line.box.y
                 else:
+                    formula.y_offset = 0
+
+                if abs(formula.y_offset) < 0.1:
                     formula.y_offset = 0
 
     def calculate_line_spacing(self, paragraph) -> float:
