@@ -95,9 +95,6 @@
           <data type="float"/>
         </attribute>
       </optional>
-      <attribute name="pdfFontId">
-        <data type="string"/>
-      </attribute>
       <optional>
         <attribute name="pdfCharacterId">
           <data type="int"/>
@@ -111,10 +108,7 @@
           <data type="float"/>
         </attribute>
       </optional>
-      <attribute name="size">
-        <data type="float"/>
-      </attribute>
-      <ref name="GraphicState"/>
+      <ref name="PDFStyle"/>
       <ref name="Box"/>
     </element>
   </define>
@@ -203,11 +197,19 @@
       </optional>
     </element>
   </define>
-  <define name="PDFParagraph">
-    <element name="pdfParagraph">
-      <attribute name="size">
+  <define name="PDFStyle">
+    <element name="pdfStyle">
+      <attribute name="font_id">
+        <data type="string"/>
+      </attribute>
+      <attribute name="font_size">
         <data type="float"/>
       </attribute>
+      <ref name="GraphicState"/>
+    </element>
+  </define>
+  <define name="PDFParagraph">
+    <element name="pdfParagraph">
       <attribute name="unicode">
         <data type="string"/>
       </attribute>
@@ -222,8 +224,8 @@
         </attribute>
       </optional>
       <ref name="Box"/>
-      <element name="baseGraphicState">
-        <ref name="GraphicState"/>
+      <element name="baseStyle">
+        <ref name="PDFStyle"/>
       </element>
       <zeroOrMore>
         <ref name="PDFParagraphComposition"/>
@@ -252,7 +254,7 @@
   <define name="PDFSameStyleCharacters">
     <element name="pdfSameStyleCharacters">
       <ref name="Box"/>
-      <ref name="GraphicState"/>
+      <ref name="PDFStyle"/>
       <oneOrMore>
         <ref name="PDFCharacter"/>
       </oneOrMore>
@@ -261,7 +263,7 @@
   <define name="PDFSameStyleUnicodeCharacters">
     <element name="pdfSameStyleUnicodeCharacters">
       <ref name="Box"/>
-      <ref name="GraphicState"/>
+      <ref name="PDFStyle"/>
       <oneOrMore>
         <ref name="PDFCharacter"/>
       </oneOrMore>

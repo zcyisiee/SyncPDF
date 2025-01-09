@@ -5,11 +5,14 @@ import unicodedata
 from yadt.document_il.il_version_1 import (
     Box,
     Document,
+    GraphicState,
     Page,
     PdfCharacter,
     PdfFormula,
     PdfLine,
     PdfParagraphComposition,
+    PdfSameStyleCharacters,
+    PdfStyle
 )
 from yadt.document_il.utils.layout_helper import get_char_unicode_string
 from yadt.translation_config import TranslationConfig
@@ -27,6 +30,7 @@ class StylesAndFormulas:
         """处理页面，包括公式识别和偏移量计算"""
         self.process_page_formulas(page)
         self.process_page_offsets(page)
+        self.process_page_styles(page)
 
     def update_line_data(self, line: PdfLine):
         min_x = min(char.box.x for char in line.pdf_character)
@@ -59,7 +63,8 @@ class StylesAndFormulas:
                         # 处理剩余字符
                         new_compositions.append(
                             self.create_composition(
-                                current_chars, is_current_formula)
+                                current_chars, is_current_formula
+                            )
                         )
                         current_chars = []
                     new_compositions.append(composition)
@@ -69,13 +74,15 @@ class StylesAndFormulas:
                 for char in line.pdf_character:
                     is_formula = (
                         self.is_formulas_char(char.char_unicode)  # 公式字符
-                        or char.pdf_font_id in formula_font_ids  # 公式字体
+                        or char.pdf_style.font_id in formula_font_ids  # 公式字体
                         or char.vertical  # 垂直字体
                         or (
                             len(current_chars) > 0
-                            and not get_char_unicode_string(current_chars).isspace()
+                            and not get_char_unicode_string(
+                                current_chars
+                            ).isspace()
                             # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
-                            and char.size < current_chars[-1].size * 0.79
+                            and char.pdf_style.font_size < current_chars[-1].pdf_style.font_size * 0.79
                         )
                     )
 
@@ -83,7 +90,8 @@ class StylesAndFormulas:
                         # 字符类型发生切换，处理之前的字符
                         new_compositions.append(
                             self.create_composition(
-                                current_chars, is_current_formula)
+                                current_chars, is_current_formula
+                            )
                         )
                         current_chars = []
                     is_current_formula = is_formula
@@ -94,11 +102,186 @@ class StylesAndFormulas:
                 if current_chars:
                     new_compositions.append(
                         self.create_composition(
-                            current_chars, is_current_formula)
+                            current_chars, is_current_formula
+                        )
                     )
                     current_chars = []
 
             paragraph.pdf_paragraph_composition = new_compositions
+
+    def process_page_styles(self, page: Page):
+        """处理页面中的文本样式，识别相同样式的文本"""
+        if not page.pdf_paragraph:
+            return
+
+        for paragraph in page.pdf_paragraph:
+            if not paragraph.pdf_paragraph_composition:
+                continue
+
+            # 计算基准样式（除公式外所有文字样式的交集）
+            base_style = self._calculate_base_style(paragraph)
+            paragraph.base_graphic_state = base_style
+
+            # 重新组织段落中的文本，将相同样式的文本组合在一起
+            new_compositions = []
+            current_chars = []
+            current_style = None
+
+            for comp in paragraph.pdf_paragraph_composition:
+                if comp.pdf_formula is not None:
+                    if current_chars:
+                        new_comp = self._create_same_style_composition(
+                            current_chars, current_style
+                        )
+                        new_compositions.append(new_comp)
+                        current_chars = []
+                    new_compositions.append(comp)
+                    continue
+
+                if not comp.pdf_line:
+                    continue
+
+                for char in comp.pdf_line.pdf_character:
+                    char_style = char.pdf_style
+                    if current_style is None:
+                        current_style = char_style
+                        current_chars.append(char)
+                    elif self._is_same_style(char_style, current_style):
+                        current_chars.append(char)
+                    else:
+                        new_comp = self._create_same_style_composition(
+                            current_chars, current_style
+                        )
+                        new_compositions.append(new_comp)
+                        current_chars = [char]
+                        current_style = char_style
+
+            if current_chars:
+                new_comp = self._create_same_style_composition(
+                    current_chars, current_style
+                )
+                new_compositions.append(new_comp)
+
+            paragraph.pdf_paragraph_composition = new_compositions
+
+    def _calculate_base_style(self, paragraph) -> PdfStyle:
+        """计算段落的基准样式（除公式外所有文字样式的交集）"""
+        styles = []
+        for comp in paragraph.pdf_paragraph_composition:
+            if isinstance(comp, PdfFormula):
+                continue
+            if not comp.pdf_line:
+                continue
+            for char in comp.pdf_line.pdf_character:
+                styles.append(char.pdf_style)
+
+        if not styles:
+            return None
+
+        # 返回所有样式的交集
+        base_style = styles[0]
+        for style in styles[1:]:
+            # 更新基准样式为所有样式的交集
+            base_style = self._merge_styles(base_style, style)
+        return base_style
+
+    def _is_same_style(self, style1, style2) -> bool:
+        """判断两个样式是否相同"""
+        if style1 is None or style2 is None:
+            return style1 is style2
+
+        return (
+            style1.font_id == style2.font_id
+            and style1.font_size == style2.font_size
+            and self._is_same_graphic_state(style1.graphic_state, style2.graphic_state)
+        )
+
+    def _is_same_graphic_state(self, state1, state2) -> bool:
+        """判断两个GraphicState是否相同"""
+        if state1 is None or state2 is None:
+            return state1 is state2
+
+        return (
+            state1.linewidth == state2.linewidth
+            and state1.dash == state2.dash
+            and state1.flatness == state2.flatness
+            and state1.intent == state2.intent
+            and state1.linecap == state2.linecap
+            and state1.linejoin == state2.linejoin
+            and state1.miterlimit == state2.miterlimit
+            and state1.ncolor == state2.ncolor
+            and state1.scolor == state2.scolor
+            and state1.stroking_color_space_name == state2.stroking_color_space_name
+            and state1.non_stroking_color_space_name == state2.non_stroking_color_space_name
+        )
+
+    def _merge_styles(self, style1, style2):
+        """合并两个样式，返回它们的交集"""
+        if style1 is None:
+            return style2
+        if style2 is None:
+            return style1
+
+        return PdfStyle(
+            font_id=style1.font_id if style1.font_id == style2.font_id else None,
+            font_size=style1.font_size if style1.font_size == style2.font_size else None,
+            graphic_state=self._merge_graphic_states(
+                style1.graphic_state, style2.graphic_state
+            ),
+        )
+
+    def _merge_graphic_states(self, state1, state2):
+        """合并两个GraphicState，返回它们的交集"""
+        if state1 is None:
+            return state2
+        if state2 is None:
+            return state1
+
+        return GraphicState(
+            linewidth=state1.linewidth
+            if state1.linewidth == state2.linewidth
+            else None,
+            dash=state1.dash if state1.dash == state2.dash else None,
+            flatness=state1.flatness
+            if state1.flatness == state2.flatness
+            else None,
+            intent=state1.intent if state1.intent == state2.intent else None,
+            linecap=state1.linecap if state1.linecap == state2.linecap else None,
+            linejoin=state1.linejoin
+            if state1.linejoin == state2.linejoin
+            else None,
+            miterlimit=state1.miterlimit
+            if state1.miterlimit == state2.miterlimit
+            else None,
+            ncolor=state1.ncolor if state1.ncolor == state2.ncolor else None,
+            scolor=state1.scolor if state1.scolor == state2.scolor else None,
+            stroking_color_space_name=state1.stroking_color_space_name
+            if state1.stroking_color_space_name == state2.stroking_color_space_name
+            else None,
+            non_stroking_color_space_name=state1.non_stroking_color_space_name
+            if state1.non_stroking_color_space_name == state2.non_stroking_color_space_name
+            else None,
+        )
+
+    def _create_same_style_composition(
+        self, chars: list[PdfCharacter], style
+    ) -> PdfParagraphComposition:
+        """创建具有相同样式的文本组合"""
+        if not chars:
+            return None
+
+        # 计算边界框
+        min_x = min(char.box.x for char in chars)
+        min_y = min(char.box.y for char in chars)
+        max_x = max(char.box.x2 for char in chars)
+        max_y = max(char.box.y2 for char in chars)
+        box = Box(min_x, min_y, max_x, max_y)
+
+        return PdfParagraphComposition(pdf_same_style_characters=PdfSameStyleCharacters(
+            box=box,
+            pdf_style=style,
+            pdf_character=chars,
+        ))
 
     def process_page_offsets(self, page: Page):
         """计算公式的x和y偏移量"""
@@ -113,7 +296,9 @@ class StylesAndFormulas:
             line_spacing = self.calculate_line_spacing(paragraph)
             y_tolerance = line_spacing * 0.8
 
-            for i, composition in enumerate(paragraph.pdf_paragraph_composition):
+            for i, composition in enumerate(
+                paragraph.pdf_paragraph_composition
+            ):
                 if not composition.pdf_formula:
                     continue
 
@@ -126,16 +311,24 @@ class StylesAndFormulas:
                     comp = paragraph.pdf_paragraph_composition[j]
                     if comp.pdf_line:
                         # 检查y坐标是否接近，判断是否在同一行
-                        if abs(comp.pdf_line.box.y - formula.box.y) <= y_tolerance:
+                        if (
+                            abs(comp.pdf_line.box.y - formula.box.y)
+                            <= y_tolerance
+                        ):
                             left_line = comp.pdf_line
                             break
 
                 # 查找右边最近的同一行的文本
-                for j in range(i + 1, len(paragraph.pdf_paragraph_composition)):
+                for j in range(
+                    i + 1, len(paragraph.pdf_paragraph_composition)
+                ):
                     comp = paragraph.pdf_paragraph_composition[j]
                     if comp.pdf_line:
                         # 检查y坐标是否接近，判断是否在同一行
-                        if abs(comp.pdf_line.box.y - formula.box.y) <= y_tolerance:
+                        if (
+                            abs(comp.pdf_line.box.y - formula.box.y)
+                            <= y_tolerance
+                        ):
                             right_line = comp.pdf_line
                             break
 

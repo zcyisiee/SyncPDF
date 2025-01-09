@@ -136,15 +136,18 @@ class ILCreater:
             vertical = True
         else:
             vertical = False
+        pdf_style = il_version_1.PdfStyle(
+            font_id=font_id,
+            font_size=char.size,
+            graphic_state=gs,
+        )
         pdf_char = il_version_1.PdfCharacter(
             box=bbox,
-            pdf_font_id=font_id,
             pdf_character_id=char_id,
             advance=advance,
             char_unicode=char_unicode,
-            size=char.size,
-            graphic_state=gs,
             vertical=vertical,
+            pdf_style=pdf_style,
         )
         self.current_page.pdf_character.append(pdf_char)
 

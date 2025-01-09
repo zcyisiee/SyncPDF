@@ -170,9 +170,9 @@ class PdfFont:
 
 
 @dataclass
-class BaseGraphicState:
+class GraphicState1:
     class Meta:
-        name = "baseGraphicState"
+        name = "GraphicState"
 
     graphic_state: Optional[GraphicState] = field(
         default=None,
@@ -248,14 +248,64 @@ class PageLayout:
 
 
 @dataclass
+class PdfFigure:
+    class Meta:
+        name = "pdfFigure"
+
+    box: Optional[Box] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+
+
+@dataclass
+class PdfStyle(GraphicState1):
+    class Meta:
+        name = "pdfStyle"
+
+    font_id: Optional[str] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    font_size: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+
+
+@dataclass
+class BaseStyle:
+    class Meta:
+        name = "baseStyle"
+
+    pdf_style: Optional[PdfStyle] = field(
+        default=None,
+        metadata={
+            "name": "pdfStyle",
+            "type": "Element",
+            "required": True,
+        },
+    )
+
+
+@dataclass
 class PdfCharacter:
     class Meta:
         name = "pdfCharacter"
 
-    graphic_state: Optional[GraphicState] = field(
+    pdf_style: Optional[PdfStyle] = field(
         default=None,
         metadata={
-            "name": "graphicState",
+            "name": "pdfStyle",
             "type": "Element",
             "required": True,
         },
@@ -279,14 +329,6 @@ class PdfCharacter:
             "type": "Attribute",
         },
     )
-    pdf_font_id: Optional[str] = field(
-        default=None,
-        metadata={
-            "name": "pdfFontId",
-            "type": "Attribute",
-            "required": True,
-        },
-    )
     pdf_character_id: Optional[int] = field(
         default=None,
         metadata={
@@ -305,27 +347,6 @@ class PdfCharacter:
         default=None,
         metadata={
             "type": "Attribute",
-        },
-    )
-    size: Optional[float] = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-            "required": True,
-        },
-    )
-
-
-@dataclass
-class PdfFigure:
-    class Meta:
-        name = "pdfFigure"
-
-    box: Optional[Box] = field(
-        default=None,
-        metadata={
-            "type": "Element",
-            "required": True,
         },
     )
 
@@ -400,10 +421,10 @@ class PdfSameStyleCharacters:
             "required": True,
         },
     )
-    graphic_state: Optional[GraphicState] = field(
+    pdf_style: Optional[PdfStyle] = field(
         default=None,
         metadata={
-            "name": "graphicState",
+            "name": "pdfStyle",
             "type": "Element",
             "required": True,
         },
@@ -430,10 +451,10 @@ class PdfSameStyleUnicodeCharacters:
             "required": True,
         },
     )
-    graphic_state: Optional[GraphicState] = field(
+    pdf_style: Optional[PdfStyle] = field(
         default=None,
         metadata={
-            "name": "graphicState",
+            "name": "pdfStyle",
             "type": "Element",
             "required": True,
         },
@@ -504,10 +525,10 @@ class PdfParagraph:
             "required": True,
         },
     )
-    base_graphic_state: Optional[BaseGraphicState] = field(
+    base_style: Optional[BaseStyle] = field(
         default=None,
         metadata={
-            "name": "baseGraphicState",
+            "name": "baseStyle",
             "type": "Element",
             "required": True,
         },
@@ -517,13 +538,6 @@ class PdfParagraph:
         metadata={
             "name": "pdfParagraphComposition",
             "type": "Element",
-        },
-    )
-    size: Optional[float] = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-            "required": True,
         },
     )
     unicode: Optional[str] = field(

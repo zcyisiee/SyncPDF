@@ -37,12 +37,10 @@ PDFCharacter =
   element pdfCharacter {
     attribute vertical { xsd:boolean }?,
     attribute scale { xsd:float }?,
-    attribute pdfFontId { xsd:string },
     attribute pdfCharacterId { xsd:int }?,
     attribute char_unicode { xsd:string },
     attribute advance { xsd:float }?,
-    attribute size { xsd:float },
-    GraphicState,
+    PDFStyle,
     Box
   }
 PageLayout =
@@ -72,14 +70,19 @@ GraphicState =
     attribute strokingColorSpaceName { xsd:string }?,
     attribute nonStrokingColorSpaceName { xsd:string }?
   }
+PDFStyle =
+  element pdfStyle {
+    attribute font_id { xsd:string },
+    attribute font_size { xsd:float },
+    GraphicState
+  }
 PDFParagraph =
   element pdfParagraph {
-    attribute size { xsd:float },
     attribute unicode { xsd:string },
     attribute scale { xsd:float }?,
     attribute vertical { xsd:boolean }?,
     Box,
-    element baseGraphicState { GraphicState },
+    element baseStyle { PDFStyle },
     PDFParagraphComposition*
   }
 PDFParagraphComposition =
@@ -92,11 +95,9 @@ PDFParagraphComposition =
   }
 PDFLine = element pdfLine { Box, PDFCharacter+ }
 PDFSameStyleCharacters =
-  element pdfSameStyleCharacters { Box, GraphicState, PDFCharacter+ }
+  element pdfSameStyleCharacters { Box, PDFStyle, PDFCharacter+ }
 PDFSameStyleUnicodeCharacters =
-  element pdfSameStyleUnicodeCharacters {
-    Box, GraphicState, PDFCharacter+
-  }
+  element pdfSameStyleUnicodeCharacters { Box, PDFStyle, PDFCharacter+ }
 PDFFormula =
   element pdfFormula {
     Box,
