@@ -8,28 +8,10 @@ from yadt.document_il import (
     PdfParagraph,
     PdfParagraphComposition,
 )
-from yadt.document_il.utils.layout_helper import get_char_unicode_string
-
-
-class Layout:
-    def __init__(self, id, name):
-        self.id = id
-        self.name = name
-
-    @staticmethod
-    def is_newline(prev_char: PdfCharacter, curr_char: PdfCharacter) -> bool:
-        # 如果没有前一个字符，不是换行
-        if prev_char is None:
-            return False
-
-        # 获取两个字符的中心 y 坐标
-        prev_y = (prev_char.box.y + prev_char.box.y2) / 2
-        curr_y = (curr_char.box.y + curr_char.box.y2) / 2
-
-        # 如果当前字符的 y 坐标明显低于前一个字符，说明换行了
-        # 这里使用字符高度的一半作为阈值
-        char_height = curr_char.box.y2 - curr_char.box.y
-        return curr_y < prev_y - char_height / 2
+from yadt.document_il.utils.layout_helper import (
+    Layout,
+    get_char_unicode_string,
+)
 
 
 class ParagraphFinder:

@@ -334,6 +334,12 @@ class PdfCharacter:
             "type": "Attribute",
         },
     )
+    x_offset: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass

@@ -126,7 +126,7 @@ class StylesAndFormulas:
 
             # 计算基准样式（除公式外所有文字样式的交集）
             base_style = self._calculate_base_style(paragraph)
-            paragraph.base_style = base_style
+            paragraph.pdf_style = base_style
 
             # 重新组织段落中的文本，将相同样式的文本组合在一起
             new_compositions = []
