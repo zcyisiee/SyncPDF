@@ -19,6 +19,8 @@ class TranslationConfig:
         output_dir: str | None = None,
         no_dual: bool = False,
         no_mono: bool = False,
+        formular_font_pattern: str | None = None,
+        formular_char_pattern: str | None = None,
     ):
         self.input_file = input_file
         self.translator = translator
@@ -31,11 +33,12 @@ class TranslationConfig:
         self.lang_out = lang_out
         self.no_dual = no_dual
         self.no_mono = no_mono
+        self.formular_font_pattern = formular_font_pattern
+        self.formular_char_pattern = formular_char_pattern
 
         if working_dir is None:
             working_dir = os.path.join(
-                CACHE_FOLDER, 'working', os.path.basename(
-                    input_file).split(".")[0]
+                CACHE_FOLDER, "working", os.path.basename(input_file).split(".")[0]
             )
         self.working_dir = working_dir
 
@@ -66,10 +69,10 @@ class TranslationConfig:
             return None
 
         ranges = []
-        for part in pages_str.split(','):
+        for part in pages_str.split(","):
             part = part.strip()
-            if '-' in part:
-                start, end = part.split('-')
+            if "-" in part:
+                start, end = part.split("-")
                 start = int(start) if start else 1
                 end = int(end) if end else -1
                 ranges.append((start, end))
