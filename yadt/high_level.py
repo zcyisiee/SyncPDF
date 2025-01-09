@@ -203,6 +203,8 @@ def translate(translation_config: TranslationConfig):
         docs, translation_config.get_working_file_path(
             "styles_and_formulas.xml")
     )
+    # TODO: Development Temporary use
+    exit(1)
 
     set_translate_rate_limiter(50)
     translate_engine = translation_config.translator
