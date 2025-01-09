@@ -350,6 +350,20 @@ class PdfFormula:
             "min_occurs": 1,
         },
     )
+    x_offset: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    y_offset: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
 
 
 @dataclass

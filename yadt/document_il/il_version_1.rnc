@@ -97,5 +97,11 @@ PDFSameStyleUnicodeCharacters =
   element pdfSameStyleUnicodeCharacters {
     Box, GraphicState, PDFCharacter+
   }
-PDFFormula = element pdfFormula { Box, PDFCharacter+ }
+PDFFormula =
+  element pdfFormula {
+    Box,
+    PDFCharacter+,
+    attribute x_offset { xsd:float },
+    attribute y_offset { xsd:float }
+  }
 PDFFigure = element pdfFigure { Box }
