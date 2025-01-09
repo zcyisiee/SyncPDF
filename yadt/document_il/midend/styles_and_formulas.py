@@ -66,7 +66,7 @@ class StylesAndFormulas:
                         or char.pdf_font_id in formula_font_ids  # 公式字体
                         or char.vertical  # 垂直字体
                         or (
-                            current_chars
+                            len(current_chars) > 0
                             and not get_char_unicode_string(current_chars).isspace()
                             # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
                             and char.size < current_chars[-1].size * 0.79
@@ -79,7 +79,7 @@ class StylesAndFormulas:
                             self.create_composition(current_chars, is_current_formula)
                         )
                         current_chars = []
-                        is_current_formula = is_formula
+                    is_current_formula = is_formula
 
                     current_chars.append(char)
 
