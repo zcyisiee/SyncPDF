@@ -1,10 +1,66 @@
 import math
+from typing import List, Union
 
 from yadt.document_il.il_version_1 import PdfCharacter
+from yadt.document_il.utils.layout import Layout
 
 
-def get_char_unicode_string(char: [PdfCharacter]) -> str:
-    return "".join(char.char_unicode for char in char)
+def get_char_unicode_string(chars: List[Union[PdfCharacter, str]]) -> str:
+    """
+    将字符列表转换为 Unicode 字符串，根据字符间距自动插入空格。
+    有些 PDF 不会显式编码空格，这时需要根据间距自动插入空格。
+
+    Args:
+        chars: 字符列表，可以是 PdfCharacter 对象或字符串
+
+    Returns:
+        str: 处理后的 Unicode 字符串
+    """
+    # 计算字符间距的中位数
+    distances = []
+    for i in range(len(chars) - 1):
+        if not (
+            isinstance(chars[i], PdfCharacter)
+            and isinstance(chars[i + 1], PdfCharacter)
+        ):
+            continue
+        distance = chars[i + 1].box.x - chars[i].box.x2
+        if distance > 1:  # 只考虑正向距离
+            distances.append(distance)
+
+    # 去重后的距离
+    distinct_distances = sorted(set(distances))
+    
+    if not distinct_distances:
+        median_distance = 1
+    elif len(distinct_distances) == 1:
+        median_distance = distinct_distances[0]
+    else:
+        median_distance = distinct_distances[1]
+
+    # 构建 unicode 字符串，根据间距插入空格
+    unicode_chars = []
+    for i in range(len(chars)):
+        # 如果不是字符对象，直接添加，一般来说这个时候 chars[i] 是字符串
+        if not isinstance(chars[i], PdfCharacter):
+            unicode_chars.append(chars[i])
+            continue
+        unicode_chars.append(chars[i].char_unicode)
+
+        # 如果是空格，跳过
+        if chars[i].char_unicode == " ":
+            continue
+
+        # 如果两个字符都是 PdfCharacter，检查间距
+        if i < len(chars) - 1 and isinstance(chars[i + 1], PdfCharacter):
+            distance = chars[i + 1].box.x - chars[i].box.x2
+            if (
+                distance >= median_distance                     # 间距大于中位数
+                or Layout.is_newline(chars[i], chars[i + 1])    # 换行
+            ):
+                unicode_chars.append(" ")                       # 添加空格
+
+    return "".join(unicode_chars)
 
 
 def is_same_style(style1, style2) -> bool:
@@ -20,7 +76,7 @@ def is_same_style(style1, style2) -> bool:
 
 
 def is_same_graphic_state(state1, state2) -> bool:
-    """判断两个GraphicState是否相同"""
+    """判断两个 GraphicState 是否相同"""
     if state1 is None or state2 is None:
         return state1 is state2
 

@@ -1,6 +1,12 @@
 import pymupdf
 
-from yadt.document_il import Box, PdfCharacter, PdfLine, il_version_1
+from yadt.document_il import (
+    Box,
+    PdfCharacter,
+    PdfLine,
+    il_version_1,
+    PdfParagraphComposition,
+)
 
 
 class Typesetting:
@@ -163,8 +169,7 @@ class Typesetting:
         # 检查图形
         for figure in page.pdf_figure:
             if figure.box.x > current_box.x and not (
-                figure.box.y >= current_box.y2
-                or figure.box.y2 <= current_box.y
+                figure.box.y >= current_box.y2 or figure.box.y2 <= current_box.y
             ):
                 max_x = min(max_x, figure.box.x)
 
@@ -175,9 +180,7 @@ class Typesetting:
             # 开始实际的渲染过程
             for paragraph in page.pdf_paragraph:
                 try:
-                    self.render_paragraph_unicode_to_char(
-                        paragraph, self.font, 0.67
-                    )
+                    self.render_paragraph_unicode_to_char(paragraph, self.font, 0.67)
                 except ValueError:
                     # 获取段落当前的边界框
                     current_box = paragraph.box
@@ -195,9 +198,7 @@ class Typesetting:
                         paragraph.box = expanded_box
 
                         # 重新渲染
-                        self.render_paragraph_unicode_to_char(
-                            paragraph, self.font, 0.1
-                        )
+                        self.render_paragraph_unicode_to_char(paragraph, self.font, 0.1)
 
     def render_paragraph_unicode_to_char(
         self,
@@ -205,14 +206,16 @@ class Typesetting:
         noto_font: pymupdf.Font,
         scale_threshold,
     ):
-        if paragraph.pdf_line:
+        if paragraph.pdf_paragraph_composition:
             return
         scale = 1.0
         # 尝试排版，如果失败则逐步缩小字号
         while scale >= scale_threshold:
             result = self.try_typeset(scale, noto_font, paragraph)
             if result is not None:
-                paragraph.pdf_line = [self.create_line(result)]
+                paragraph.pdf_paragraph_composition = [
+                    PdfParagraphComposition(pdf_character=result)
+                ]
                 paragraph.scale = scale
                 return
             if scale == 1.0:
