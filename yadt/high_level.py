@@ -203,17 +203,17 @@ def translate(translation_config: TranslationConfig):
         docs, translation_config.get_working_file_path(
             "styles_and_formulas.xml")
     )
-    # TODO: Development Temporary use
-    exit(1)
 
-    set_translate_rate_limiter(50)
     translate_engine = translation_config.translator
     # translate_engine.ignore_cache = True
-    ILTranslator(translate_engine).translate(docs)
+    ILTranslator(translate_engine, translation_config).translate(docs)
     logger.debug(f"finish ILTranslator from {temp_pdf_path}")
     xml_converter.write_xml(
         docs, translation_config.get_working_file_path("il_translated.xml")
     )
+
+    # TODO: Development Temporary use
+    exit(1)
 
     Typesetting(font_path=translation_config.font).typsetting_document(docs)
     logger.debug(f"finish typsetting from {temp_pdf_path}")

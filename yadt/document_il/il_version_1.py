@@ -283,21 +283,6 @@ class PdfStyle(GraphicState1):
 
 
 @dataclass
-class BaseStyle:
-    class Meta:
-        name = "baseStyle"
-
-    pdf_style: Optional[PdfStyle] = field(
-        default=None,
-        metadata={
-            "name": "pdfStyle",
-            "type": "Element",
-            "required": True,
-        },
-    )
-
-
-@dataclass
 class PdfCharacter:
     class Meta:
         name = "pdfCharacter"
@@ -347,6 +332,27 @@ class PdfCharacter:
         default=None,
         metadata={
             "type": "Attribute",
+        },
+    )
+
+
+@dataclass
+class PdfSameStyleUnicodeCharacters:
+    class Meta:
+        name = "pdfSameStyleUnicodeCharacters"
+
+    pdf_style: Optional[PdfStyle] = field(
+        default=None,
+        metadata={
+            "name": "pdfStyle",
+            "type": "Element",
+        },
+    )
+    unicode: Optional[str] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
         },
     )
 
@@ -440,36 +446,6 @@ class PdfSameStyleCharacters:
 
 
 @dataclass
-class PdfSameStyleUnicodeCharacters:
-    class Meta:
-        name = "pdfSameStyleUnicodeCharacters"
-
-    box: Optional[Box] = field(
-        default=None,
-        metadata={
-            "type": "Element",
-            "required": True,
-        },
-    )
-    pdf_style: Optional[PdfStyle] = field(
-        default=None,
-        metadata={
-            "name": "pdfStyle",
-            "type": "Element",
-            "required": True,
-        },
-    )
-    pdf_character: list[PdfCharacter] = field(
-        default_factory=list,
-        metadata={
-            "name": "pdfCharacter",
-            "type": "Element",
-            "min_occurs": 1,
-        },
-    )
-
-
-@dataclass
 class PdfParagraphComposition:
     class Meta:
         name = "pdfParagraphComposition"
@@ -525,10 +501,10 @@ class PdfParagraph:
             "required": True,
         },
     )
-    base_style: Optional[BaseStyle] = field(
+    pdf_style: Optional[PdfStyle] = field(
         default=None,
         metadata={
-            "name": "baseStyle",
+            "name": "pdfStyle",
             "type": "Element",
             "required": True,
         },

@@ -1,6 +1,5 @@
 from yadt.document_il.il_version_1 import (
     BaseOperations,
-    BaseStyle,
     Box,
     Cropbox,
     Document,
@@ -24,7 +23,6 @@ from yadt.document_il.il_version_1 import (
 __all__ = [
     "GraphicState1",
     "BaseOperations",
-    "BaseStyle",
     "Box",
     "Cropbox",
     "Document",

@@ -21,6 +21,7 @@ class TranslationConfig:
         no_mono: bool = False,
         formular_font_pattern: str | None = None,
         formular_char_pattern: str | None = None,
+        qps: int = 1,
     ):
         self.input_file = input_file
         self.translator = translator
@@ -35,6 +36,7 @@ class TranslationConfig:
         self.no_mono = no_mono
         self.formular_font_pattern = formular_font_pattern
         self.formular_char_pattern = formular_char_pattern
+        self.qps = qps
 
         if working_dir is None:
             working_dir = os.path.join(

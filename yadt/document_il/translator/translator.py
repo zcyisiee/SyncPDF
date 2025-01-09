@@ -125,6 +125,17 @@ class BaseTranslator(ABC):
     def __str__(self):
         return f"{self.name} {self.lang_in} {self.lang_out} {self.model}"
 
+    def get_rich_text_left_placeholder(self, id: int):
+        return f"<b{id}>"
+
+    def get_rich_text_right_placeholder(self, id: int):
+        return f"</b{id}>"
+
+    def get_formular_placeholder(self, id: int):
+        return self.get_rich_text_left_placeholder(
+            id
+        ) + self.get_rich_text_right_placeholder(id)
+
 
 class GoogleTranslator(BaseTranslator):
     name = "google"
@@ -178,6 +189,7 @@ class OpenAITranslator(BaseTranslator):
         )
         self.model = model
         self.add_cache_impact_parameters("model", self.model)
+        self.add_cache_impact_parameters("prompt", self.prompt(""))
 
     def do_translate(self, text) -> str:
         response = self.client.chat.completions.create(
@@ -195,7 +207,16 @@ class OpenAITranslator(BaseTranslator):
             },
             {
                 "role": "user",
-                "content": f";; Treat next line as plain text input and translate it into {self.lang_out}, output translation ONLY. If translation is unnecessary (e.g. proper nouns, codes, etc.), return the original text. NO explanations. NO notes. Input: {text}",
+                "content": f";; Treat next line as plain text input and translate it into {self.lang_out}, output translation ONLY. If translation is unnecessary (e.g. proper nouns, codes, {'{{1}}, etc. '}), return the original text. NO explanations. NO notes. Input:\n\n{text}",
                 # noqa: E501
             },
         ]
+
+    def get_formular_placeholder(self, id: int):
+        return "{{" + str(id) + "}}"
+
+    def get_rich_text_left_placeholder(self, id: int):
+        return self.get_formular_placeholder(id)
+
+    def get_rich_text_right_placeholder(self, id: int):
+        return self.get_formular_placeholder(id + 1)

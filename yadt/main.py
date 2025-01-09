@@ -256,6 +256,7 @@ def main():
             lang_out=args.lang_out,
             no_dual=args.no_dual,
             no_mono=args.no_mono,
+            qps=args.qps,
         )
 
         # 开始翻译
