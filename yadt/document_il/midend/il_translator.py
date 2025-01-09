@@ -11,9 +11,9 @@ from yadt.document_il import (
     PdfSameStyleCharacters,
     PdfSameStyleUnicodeCharacters,
 )
-from yadt.document_il.midend.paragraph_finder import Layout
 from yadt.document_il.translator.translator import BaseTranslator
 from yadt.document_il.utils.layout_helper import is_same_style
+from yadt.document_il.utils.layout_helper import get_char_unicode_string
 from yadt.translation_config import TranslationConfig
 
 
@@ -51,7 +51,9 @@ class PbarContext:
 
 class ILTranslator:
     def __init__(
-        self, translate_engine: BaseTranslator, translation_config: TranslationConfig
+        self,
+        translate_engine: BaseTranslator,
+        translation_config: TranslationConfig,
     ):
         self.translate_engine = translate_engine
         self.translation_config = translation_config
@@ -101,36 +103,49 @@ class ILTranslator:
         id: int,
         paragraph: PdfParagraph,
     ):
-        left_placeholder = self.translate_engine.get_rich_text_left_placeholder(id)
-        right_placeholder = self.translate_engine.get_rich_text_right_placeholder(id)
+        left_placeholder = self.translate_engine.get_rich_text_left_placeholder(
+            id)
+        right_placeholder = self.translate_engine.get_rich_text_right_placeholder(
+            id)
         if (
             left_placeholder in paragraph.unicode
             or right_placeholder in paragraph.unicode
         ):
-            return self.create_rich_text_placeholder(composition, id + 1, paragraph)
+            return self.create_rich_text_placeholder(
+                composition,
+                id + 1,
+                paragraph,
+            )
 
-        return RichTextPlaceholder(id, composition, left_placeholder, right_placeholder)
+        return RichTextPlaceholder(
+            id,
+            composition,
+            left_placeholder,
+            right_placeholder,
+        )
 
     def get_translate_input(self, paragraph: PdfParagraph):
         if not paragraph.pdf_paragraph_composition:
             return
         if len(paragraph.pdf_paragraph_composition) == 1:
+            # 如果整个段落只有一个组成部分，那么直接返回，不需要套占位符等
             composition = paragraph.pdf_paragraph_composition[0]
-            if composition.pdf_line:
+            if (
+                composition.pdf_line
+                or composition.pdf_same_style_characters
+                or composition.pdf_character
+            ):
                 return self.TranslateInput(paragraph.unicode, [])
             elif composition.pdf_formula:
+                # 不需要翻译纯公式
                 return None
-            elif composition.pdf_same_style_characters:
-                return self.TranslateInput(paragraph.unicode, [])
-            elif composition.pdf_character:
-                return self.TranslateInput(paragraph.unicode, [])
             else:
-                raise Exception(
-                    "Unexpected PdfParagraphComposition type "
-                    "in PdfParagraph during translation. "
+                raise ValueError(
+                    f"Unknown composition type. "
                     f"Composition: {composition}. "
                     f"Paragraph: {paragraph}. "
                 )
+
         placeholder_id = 1
         placeholders = []
         chars = []
@@ -142,6 +157,7 @@ class ILTranslator:
                     composition.pdf_formula, placeholder_id, paragraph
                 )
                 placeholders.append(formula_placeholder)
+                # 公式只需要一个占位符，所以 id+1
                 placeholder_id = formula_placeholder.id + 1
                 chars.extend(formula_placeholder.placeholder)
             elif composition.pdf_character:
@@ -151,7 +167,8 @@ class ILTranslator:
                     composition.pdf_same_style_characters.pdf_style,
                     paragraph.base_style,
                 ):
-                    chars.extend(composition.pdf_same_style_characters.pdf_character)
+                    chars.extend(
+                        composition.pdf_same_style_characters.pdf_character)
                     continue
                 placeholder = self.create_rich_text_placeholder(
                     composition.pdf_same_style_characters,
@@ -159,9 +176,11 @@ class ILTranslator:
                     paragraph,
                 )
                 placeholders.append(placeholder)
+                # 样式需要一左一右两个占位符，所以 id+2
                 placeholder_id = placeholder.id + 2
                 chars.append(placeholder.left_placeholder)
-                chars.extend(composition.pdf_same_style_characters.pdf_character)
+                chars.extend(
+                    composition.pdf_same_style_characters.pdf_character)
                 chars.append(placeholder.right_placeholder)
             else:
                 raise Exception(
@@ -171,42 +190,7 @@ class ILTranslator:
                     f"Paragraph: {paragraph}. "
                 )
 
-        # 有些 PDF 文件没有明确包含空格字符，而是通过字符之间的间距来隐式表示。
-        # 计算字符间距的中位数
-        distances = []
-        for i in range(len(chars) - 1):
-            if isinstance(chars[i], str) or isinstance(chars[i + 1], str):
-                continue
-            distance = chars[i + 1].box.x - chars[i].box.x2
-            if distance > 1:  # 只考虑正向距离
-                distances.append(distance)
-        distinct_distances = sorted(set(distances))
-        if not distinct_distances:
-            median_distance = 1
-        elif len(distinct_distances) == 1:
-            median_distance = distinct_distances[0]
-        else:
-            median_distance = distinct_distances[1]
-
-        # 构建 unicode 字符串，根据间距插入空格
-        unicode_chars = []
-        for i in range(len(chars)):
-            if isinstance(chars[i], str):
-                unicode_chars.append(chars[i])
-                continue
-            unicode_chars.append(chars[i].char_unicode)
-            if chars[i].char_unicode == " ":
-                continue
-            if i < len(chars) - 1 and not isinstance(chars[i + 1], str):
-                distance = chars[i + 1].box.x - chars[i].box.x2
-                if distance >= median_distance or Layout.is_newline(
-                    chars[i], chars[i + 1]
-                ):
-                    unicode_chars.append(" ")
-
-        # 更新 unicode（合并所有行的文本）
-        # 这个位置的 unicode 主要用途是导出 xml 文件后人类阅读
-        text = "".join(unicode_chars)
+        text = get_char_unicode_string(chars)
         return self.TranslateInput(text, placeholders)
 
     def parse_translate_output(
@@ -230,7 +214,8 @@ class ILTranslator:
                         break
                 else:
                     # 检查富文本占位符
-                    left_pos = output.find(placeholder.left_placeholder, current_pos)
+                    left_pos = output.find(
+                        placeholder.left_placeholder, current_pos)
                     if left_pos == current_pos:
                         right_pos = output.find(
                             placeholder.right_placeholder,
@@ -239,7 +224,7 @@ class ILTranslator:
                         if right_pos != -1:
                             placeholder_match = placeholder
                             matched_text = output[
-                                current_pos : right_pos
+                                current_pos: right_pos
                                 + len(placeholder.right_placeholder)
                             ]
                             break
@@ -254,7 +239,8 @@ class ILTranslator:
                     current_pos += len(matched_text)
                 else:
                     # 添加富文本
-                    text_start = current_pos + len(placeholder_match.left_placeholder)
+                    text_start = current_pos + \
+                        len(placeholder_match.left_placeholder)
                     text_end = output.find(
                         placeholder_match.right_placeholder, text_start
                     )
@@ -299,7 +285,8 @@ class ILTranslator:
                         if pos != -1 and pos < next_pos:
                             next_pos = pos
                     else:
-                        pos = output.find(placeholder.left_placeholder, current_pos)
+                        pos = output.find(
+                            placeholder.left_placeholder, current_pos)
                         if pos != -1 and pos < next_pos:
                             next_pos = pos
 

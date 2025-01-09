@@ -2,13 +2,13 @@ import re
 
 from yadt.document_il import (
     Box,
-    GraphicState,
     Page,
     PdfCharacter,
     PdfLine,
     PdfParagraph,
     PdfParagraphComposition,
 )
+from yadt.document_il.utils.layout_helper import get_char_unicode_string
 
 
 class Layout:
@@ -43,53 +43,15 @@ class ParagraphFinder:
                 chars.extend(composition.pdf_line.pdf_character)
             elif composition.pdf_formula:
                 chars.extend(composition.pdf_formula.pdf_character)
-            elif composition.pdf_character:
+            else:
                 raise Exception(
-                    "Unexpected PdfCharacter type "
-                    "in PdfParagraphComposition. "
-                    "This type only appears in the IL "
-                    "after the translation is completed."
-                )
-            elif composition.pdf_same_style_unicode_characters:
-                raise Exception(
-                    "Unexpected PdfSameStyleUnicodeCharacters type"
+                    "Unexpected composition type"
                     " in PdfParagraphComposition. "
                     "This type only appears in the IL "
                     "after the translation is completed."
                 )
 
-        # 有些 PDF 文件没有明确包含空格字符，而是通过字符之间的间距来隐式表示。
-        # 计算字符间距的中位数
-        distances = []
-        for i in range(len(chars) - 1):
-            distance = chars[i + 1].box.x - chars[i].box.x2
-            if distance > 1:  # 只考虑正向距离
-                distances.append(distance)
-        distinct_distances = sorted(set(distances))
-        if not distinct_distances:
-            median_distance = 1
-        elif len(distinct_distances) == 1:
-            median_distance = distinct_distances[0]
-        else:
-            median_distance = distinct_distances[1]
-
-        # 构建 unicode 字符串，根据间距插入空格
-        unicode_chars = []
-        for i in range(len(chars)):
-            unicode_chars.append(chars[i].char_unicode)
-            if chars[i].char_unicode == " ":
-                continue
-            if i < len(chars) - 1:
-                distance = chars[i + 1].box.x - chars[i].box.x2
-                if distance >= median_distance or Layout.is_newline(
-                    chars[i], chars[i + 1]
-                ):
-                    unicode_chars.append(" ")
-
-        # 更新 unicode（合并所有行的文本）
-        # 这个位置的 unicode 主要用途是导出 xml 文件后人类阅读
-        paragraph.unicode = "".join(unicode_chars)
-
+        paragraph.unicode = get_char_unicode_string(chars)
         # 更新边界框
         min_x = min(char.box.x for char in chars)
         min_y = min(char.box.y for char in chars)
@@ -352,9 +314,9 @@ class ParagraphFinder:
                     # 创建新的段落
                     new_paragraph = PdfParagraph(
                         box=Box(0, 0, 0, 0),  # 临时边界框
-                        pdf_paragraph_composition=paragraph.pdf_paragraph_composition[
-                            j:
-                        ],
+                        pdf_paragraph_composition=(
+                            paragraph.pdf_paragraph_composition[j:]
+                        ),
                         unicode="",
                     )
                     # 更新原段落
@@ -375,9 +337,9 @@ class ParagraphFinder:
                     # 创建新的段落
                     new_paragraph = PdfParagraph(
                         box=Box(0, 0, 0, 0),  # 临时边界框
-                        pdf_paragraph_composition=paragraph.pdf_paragraph_composition[
-                            j:
-                        ],
+                        pdf_paragraph_composition=(
+                            paragraph.pdf_paragraph_composition[j:]
+                        ),
                         unicode="",
                     )
                     # 更新原段落
