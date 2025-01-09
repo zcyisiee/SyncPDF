@@ -9,13 +9,35 @@ const isCJK = (text) => {
 };
 
 const splitText = (text) => {
-  if (isCJK(text)) {
-      // Split CJK text by character
-      return text.split('');
-  } else {
-      // Split other text by words
-      return text.split(' ');
+  const result = [];
+  let current = '';
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    
+    if (isCJK(char)) {
+      if (current) {
+        result.push(current);
+        current = '';
+      }
+      result.push(char);
+    } else {
+      if (char === ' ') {
+        if (current) {
+          result.push(current);
+          current = '';
+        }
+      } else {
+        current += char;
+      }
+    }
   }
+
+  if (current) {
+    result.push(current);
+  }
+
+  return result;
 };
 
 /**
@@ -53,7 +75,7 @@ export const renderBoxes = async (ctx, boxes, debug) => {
       const { data: { text } } = await Tesseract.recognize(canvas);
       return {
         ...box,
-        originalText: text.trim()
+        originalText: text.trim().replace(/\s+/g, ' ')
       };
     } catch(err) {
       console.error('OCR failed:', err);
@@ -170,66 +192,83 @@ export const renderBoxes = async (ctx, boxes, debug) => {
 
     // Draw translated text if available
     if (box.translatedText) {
-    // Calculate initial font size based on box dimensions and text length
-    const MIN_FONT_SIZE = 12;
-    const MAX_FONT_SIZE = 48;
-    const AREA_PER_CHAR = 400; // baseline pixels^2 per character
-    
-    const boxArea = width * height;
-    const charCount = box.translatedText.length;
-    const areaPerChar = boxArea / charCount;
-    
-    // Initial font size calculation:
-    // - Starts with square root of area per character
-    // - Scaled down by a factor to account for padding and line spacing
-    let fontSize = Math.sqrt(areaPerChar) * 1;
-    
-    // Clamp to min/max bounds
-    fontSize = Math.max(MIN_FONT_SIZE, Math.min(fontSize, MAX_FONT_SIZE));
-    fontSize = Math.min(fontSize, height / 2); // Never larger than half box height
-    
-    ctx.font = `${fontSize}px Arial`;
-    const lineHeight = fontSize * 1.2;
-    
-    // Continue with line breaking logic...
-    const maxWidth = width - 8; // Added more padding
+      // Calculate initial font size based on box dimensions and text length
+      const MIN_FONT_SIZE = 12;
+      const MAX_FONT_SIZE = 256;
+      const FONT_STEP = 2;
+      const PADDING = 8;
 
-    const segments = splitText(box.translatedText);
-    const lines = [];
-    let currentLine = '';
-    
-    segments.forEach(segment => {
-        const testLine = currentLine + (isCJK(segment) ? '' : ' ') + segment;
-        const metrics = ctx.measureText(testLine);
-        if (metrics.width > maxWidth && currentLine !== '') {
+      const AREA_PER_CHAR = 400; // baseline pixels^2 per character
+      
+      const boxArea = width * height;
+      const charCount = box.translatedText.length;
+      const areaPerChar = boxArea / charCount;
+      
+      // Initial font size calculation:
+      // - Starts with square root of area per character
+      // - Scaled down by a factor to account for padding and line spacing
+      let fontSize = Math.sqrt(areaPerChar) * 0.7;
+      
+      // Clamp to min/max bounds
+      fontSize = Math.max(MIN_FONT_SIZE, Math.min(fontSize, MAX_FONT_SIZE));
+      fontSize = Math.min(fontSize, height / 2); // Never larger than half box height
+
+      while (fontSize < MAX_FONT_SIZE) {
+        ctx.font = `${fontSize}px Arial`;
+        const lineHeight = fontSize * 1.2;
+        
+        // Continue with line breaking logic...
+        const maxWidth = width - PADDING; // Added more padding
+
+        const segments = splitText(box.translatedText);
+        const lines = [];
+        let currentLine = '';
+        let last = '';
+        let split = false;
+        
+        segments.forEach(segment => {
+            split = currentLine !== '' && !isCJK(last) && !isCJK(segment);
+            const testLine = currentLine + (split ? ' ' : '') + segment;
+            last = segment;
+            const metrics = ctx.measureText(testLine);
+            if (metrics.width > maxWidth && currentLine !== '') {
+                lines.push(currentLine);
+                currentLine = segment;
+            } else {
+                currentLine = testLine;
+            }
+        });
+        
+        if (currentLine) {
             lines.push(currentLine);
-            currentLine = segment;
-        } else {
-            currentLine = testLine;
         }
-    });
-    
-    if (currentLine) {
-        lines.push(currentLine);
-    }
 
-      // Draw text background and text
-      const totalHeight = lines.length * lineHeight;
-      const startY = y1 + (height - totalHeight) / 2;
+        // Draw text background and text
+        const totalHeight = lines.length * lineHeight;
+        const startY = y1 + (height - totalHeight) / 2;
 
 
-      ctx.fillStyle = box.dominantColors.primary || '#000000';
-      ctx.fillRect(x1, y1, width, height);
+        ctx.fillStyle = box.dominantColors.primary || '#000000';
+        ctx.fillRect(x1, y1, width, height);
 
-      lines.forEach((line, i) => {
-        const textWidth = ctx.measureText(line).width;
-        const textX = x1 + (width - textWidth) / 2;
-        const textY = startY + i * lineHeight;
+        lines.forEach((line, i) => {
+          const textWidth = ctx.measureText(line).width;
+          const textX = x1 + (width - textWidth) / 2;
+          const textY = startY + i * lineHeight;
 
-        // Draw text
-        ctx.fillStyle = box.dominantColors.secondary || '#ffffff';
-        ctx.fillText(line, textX, textY);
-      });
+          // Draw text
+          ctx.fillStyle = box.dominantColors.secondary || '#ffffff';
+          ctx.fillText(line, textX, textY);
+        });
+
+        if (totalHeight >= height - PADDING) {
+          break;
+        }
+
+        fontSize += FONT_STEP;
+
+      }
+      
     }
   });
 
