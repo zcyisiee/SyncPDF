@@ -40,7 +40,6 @@ PDFCharacter =
     attribute pdfCharacterId { xsd:int }?,
     attribute char_unicode { xsd:string },
     attribute advance { xsd:float }?,
-    attribute x_offset { xsd:float }?,
     PDFStyle,
     Box
   }
