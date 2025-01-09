@@ -65,7 +65,7 @@ class BaseTranslator(ABC):
     lang_map = {}
 
     def __init__(self, lang_in, lang_out, ignore_cache):
-        self.ignore_cache = False
+        self.ignore_cache = ignore_cache
         lang_in = self.lang_map.get(lang_in.lower(), lang_in)
         lang_out = self.lang_map.get(lang_out.lower(), lang_out)
         self.lang_in = lang_in
