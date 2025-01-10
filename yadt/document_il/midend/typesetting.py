@@ -196,7 +196,8 @@ class Typesetting:
         page_num = page_num.strip()
 
         # 计算除了点号以外的内容长度
-        length_except_dots = get_paragraph_length_except(paragraph, ".", noto_font)
+        length_except_dots = get_paragraph_length_except(
+            paragraph, ".", noto_font)
 
         # 计算点号的宽度
         dot_width = noto_font.char_lengths(".", current_font_size)[0]
@@ -301,6 +302,7 @@ class Typesetting:
         noto_font: pymupdf.Font,
         box: il_version_1.Box,
         scale: float,
+        line_height: float,
     ) -> list[il_version_1.PdfCharacter] | None:
         """尝试对段落进行排版
 
@@ -317,7 +319,7 @@ class Typesetting:
         result_chars = []
         current_x = box.x
         current_y = box.y2 - paragraph_max_height  # 从顶部开始排版
-        line_height = paragraph_max_height * 1.4  # 行高为字体大小的1.4倍
+        line_height = paragraph_max_height * line_height  # 行高为字体大小的1.4倍
 
         # 遍历段落中的所有组成部分
         for comp in paragraph.pdf_paragraph_composition:
@@ -357,7 +359,8 @@ class Typesetting:
                         comp.pdf_same_style_unicode_characters.pdf_style.font_size
                         * scale
                     )
-                    char_width = noto_font.char_lengths(char_unicode, font_size)[0]
+                    char_width = noto_font.char_lengths(
+                        char_unicode, font_size)[0]
                     if current_x + char_width * scale > box.x2:
                         current_x = box.x
                         current_y -= line_height
@@ -448,7 +451,8 @@ class Typesetting:
             # 开始实际的渲染过程
             for paragraph in page.pdf_paragraph:
                 try:
-                    self.render_paragraph_unicode_to_char(paragraph, self.font, 0.67)
+                    self.render_paragraph_unicode_to_char(
+                        paragraph, self.font, 0.67)
                 except ValueError:
                     # 获取段落当前的边界框
                     current_box = paragraph.box
@@ -466,7 +470,8 @@ class Typesetting:
                         paragraph.box = expanded_box
 
                         # 重新渲染
-                        self.render_paragraph_unicode_to_char(paragraph, self.font, 0.1)
+                        self.render_paragraph_unicode_to_char(
+                            paragraph, self.font, 0.1)
 
     def render_paragraph_unicode_to_char(
         self,
@@ -479,13 +484,15 @@ class Typesetting:
         scale = 1.0
         # 尝试排版，如果失败则逐步缩小字号
         while scale >= scale_threshold:
-            result = self.try_typeset(paragraph, noto_font, paragraph.box, scale)
-            if result is not None:
-                paragraph.pdf_paragraph_composition = [
-                    PdfParagraphComposition(pdf_character=char) for char in result
-                ]
-                paragraph.scale = scale
-                return
+            for line_hight in [1.7, 1.6, 1.5, 1.4, 1.3, 1.2, 1.1]:
+                result = self.try_typeset(
+                    paragraph, noto_font, paragraph.box, scale, line_hight)
+                if result is not None:
+                    paragraph.pdf_paragraph_composition = [
+                        PdfParagraphComposition(pdf_character=char) for char in result
+                    ]
+                    paragraph.scale = scale
+                    return
             if scale == 1.0:
                 scale = 0.8
             else:
