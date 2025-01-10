@@ -164,6 +164,8 @@ def get_paragraph_max_height(paragraph: PdfParagraph) -> float:
     """
     max_height = 0.0
     for composition in paragraph.pdf_paragraph_composition:
+        if composition is None:
+            continue
         if composition.pdf_character:
             char_height = (
                 composition.pdf_character[0].box.y2

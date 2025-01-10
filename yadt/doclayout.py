@@ -59,6 +59,12 @@ class YoloBox:
         self.cls = data[-1]
 
 
+providers = [
+    ('CoreMLExecutionProvider', {
+        "ModelFormat": "MLProgram", "MLComputeUnits": "ALL",
+        "RequireStaticInputShapes": "0", "EnableOnSubgraphs": "0"
+    }),
+]
 class OnnxModel(DocLayoutModel):
     def __init__(self, model_path: str):
         self.model_path = model_path
@@ -68,7 +74,7 @@ class OnnxModel(DocLayoutModel):
         self._stride = ast.literal_eval(metadata["stride"])
         self._names = ast.literal_eval(metadata["names"])
 
-        self.model = onnxruntime.InferenceSession(model.SerializeToString())
+        self.model = onnxruntime.InferenceSession(model.SerializeToString(), providers=providers)
 
     @staticmethod
     def from_pretrained(repo_id: str, filename: str):

@@ -321,6 +321,8 @@ class Typesetting:
 
         # 遍历段落中的所有组成部分
         for comp in paragraph.pdf_paragraph_composition:
+            if comp is None:
+                continue
             if comp.pdf_character:
                 char = comp.pdf_character
                 char_width = char.box.x2 - char.box.x
