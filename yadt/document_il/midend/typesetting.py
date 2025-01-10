@@ -20,28 +20,6 @@ class Typesetting:
     def __init__(self, font_path: str):
         self.font = pymupdf.Font(fontfile=font_path)
 
-    def create_line(self, chars: list[PdfCharacter]) -> PdfLine:
-        assert chars
-
-        # 计算行的边界框
-        min_x = min(char.box.x for char in chars)
-        min_y = min(char.box.y for char in chars)
-        max_x = max(char.box.x2 for char in chars)
-        max_y = max(char.box.y2 for char in chars)
-        box = Box(min_x, min_y, max_x, max_y)
-
-        graphic_state = chars[0].graphic_state
-        # 创建行对象
-        line = PdfLine(
-            box=box,
-            graphic_state=graphic_state,
-            pdf_character=chars,
-            unicode="".join(char.char_unicode for char in chars),
-            size=max_y - min_y,  # 使用行的高度作为 size
-            scale=chars[0].scale,
-        )
-        return line
-
     def _typeset_pdf_character(
         self,
         char: il_version_1.PdfCharacter,
@@ -58,7 +36,7 @@ class Typesetting:
         Returns:
             新的 PdfCharacter 和新的 x 坐标
         """
-        if char.char_unicode == ' ' and char.pdf_character_id is None:
+        if char.char_unicode == " " and char.pdf_character_id is None:
             return None, current_x + (char.box.x2 - char.box.x) * scale
         new_char = il_version_1.PdfCharacter(
             pdf_character_id=char.pdf_character_id,
@@ -218,9 +196,7 @@ class Typesetting:
         page_num = page_num.strip()
 
         # 计算除了点号以外的内容长度
-        length_except_dots = get_paragraph_length_except(
-            paragraph, ".", noto_font
-        )
+        length_except_dots = get_paragraph_length_except(paragraph, ".", noto_font)
 
         # 计算点号的宽度
         dot_width = noto_font.char_lengths(".", current_font_size)[0]
@@ -238,7 +214,7 @@ class Typesetting:
         # 复制标题部分的 PdfCharacter，遇到点号就停止
         for comp in paragraph.pdf_paragraph_composition:
             if comp.pdf_character:
-                char = comp.pdf_character[0]
+                char = comp.pdf_character
                 if char.char_unicode == ".":
                     break
                 new_char, current_x = self._typeset_pdf_character(
@@ -261,9 +237,7 @@ class Typesetting:
                     break
             elif comp.pdf_same_style_unicode_characters:
                 should_break = False
-                for (
-                    char_unicode
-                ) in comp.pdf_same_style_unicode_characters.unicode:
+                for char_unicode in comp.pdf_same_style_unicode_characters.unicode:
                     if char_unicode == ".":
                         should_break = True
                         break
@@ -291,7 +265,6 @@ class Typesetting:
                 chars, current_x = self._typeset_formula(
                     comp.pdf_formula,
                     noto_font,
-                    current_font_size,
                     current_x,
                     paragraph.box.y,
                     scale,
@@ -308,13 +281,7 @@ class Typesetting:
         # 添加点号
         for _ in range(dots_needed):
             new_char, current_x = self._typeset_unicode_char(
-                ".",
-                current_x,
-                current_font_size,
-                noto_font,
-                paragraph.graphic_state,
-                result_chars[0].box.y if result_chars else 0,
-                result_chars[0].box.y2 if result_chars else current_font_size,
+                ".", current_x, paragraph.box.y, current_font_size, noto_font, scale
             )
             result_chars.append(new_char)
 
@@ -322,13 +289,7 @@ class Typesetting:
         # 添加页码
         for char in page_num:
             new_char, current_x = self._typeset_unicode_char(
-                char,
-                current_x,
-                current_font_size,
-                noto_font,
-                paragraph.graphic_state,
-                result_chars[0].box.y if result_chars else 0,
-                result_chars[0].box.y2 if result_chars else current_font_size,
+                char, current_x, paragraph.box.y, current_font_size, noto_font, scale
             )
             result_chars.append(new_char)
 
@@ -389,16 +350,12 @@ class Typesetting:
                     if new_char:
                         result_chars.append(new_char)
             elif comp.pdf_same_style_unicode_characters:
-                for (
-                    char_unicode
-                ) in comp.pdf_same_style_unicode_characters.unicode:
+                for char_unicode in comp.pdf_same_style_unicode_characters.unicode:
                     font_size = (
                         comp.pdf_same_style_unicode_characters.pdf_style.font_size
                         * scale
                     )
-                    char_width = noto_font.char_lengths(
-                        char_unicode, font_size
-                    )[0]
+                    char_width = noto_font.char_lengths(char_unicode, font_size)[0]
                     if current_x + char_width * scale > box.x2:
                         current_x = box.x
                         current_y -= line_height
@@ -478,8 +435,7 @@ class Typesetting:
         # 检查图形
         for figure in page.pdf_figure:
             if figure.box.x > current_box.x and not (
-                figure.box.y >= current_box.y2
-                or figure.box.y2 <= current_box.y
+                figure.box.y >= current_box.y2 or figure.box.y2 <= current_box.y
             ):
                 max_x = min(max_x, figure.box.x)
 
@@ -490,9 +446,7 @@ class Typesetting:
             # 开始实际的渲染过程
             for paragraph in page.pdf_paragraph:
                 try:
-                    self.render_paragraph_unicode_to_char(
-                        paragraph, self.font, 0.67
-                    )
+                    self.render_paragraph_unicode_to_char(paragraph, self.font, 0.67)
                 except ValueError:
                     # 获取段落当前的边界框
                     current_box = paragraph.box
@@ -510,9 +464,7 @@ class Typesetting:
                         paragraph.box = expanded_box
 
                         # 重新渲染
-                        self.render_paragraph_unicode_to_char(
-                            paragraph, self.font, 0.1
-                        )
+                        self.render_paragraph_unicode_to_char(paragraph, self.font, 0.1)
 
     def render_paragraph_unicode_to_char(
         self,
@@ -525,13 +477,10 @@ class Typesetting:
         scale = 1.0
         # 尝试排版，如果失败则逐步缩小字号
         while scale >= scale_threshold:
-            result = self.try_typeset(
-                paragraph, noto_font, paragraph.box, scale
-            )
+            result = self.try_typeset(paragraph, noto_font, paragraph.box, scale)
             if result is not None:
                 paragraph.pdf_paragraph_composition = [
-                    PdfParagraphComposition(pdf_character=char)
-                    for char in result
+                    PdfParagraphComposition(pdf_character=char) for char in result
                 ]
                 paragraph.scale = scale
                 return
