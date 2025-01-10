@@ -48,7 +48,7 @@ class PDFCreater:
         if graphic_state.ncolor is not None:
             if len(graphic_state.ncolor) == 1:
                 draw_op.append(f"{graphic_state.ncolor[0]} g \n".encode())
-            else:
+            elif len(graphic_state.ncolor) == 3:
                 draw_op.append(
                     f"{' '.join((str(x)
                                 for x in graphic_state.ncolor))} sc \n".encode()
@@ -56,7 +56,7 @@ class PDFCreater:
         if graphic_state.scolor is not None:
             if len(graphic_state.scolor) == 1:
                 draw_op.append(f"{graphic_state.scolor[0]} G \n".encode())
-            else:
+            elif len(graphic_state.scolor) == 3:
                 draw_op.append(
                     f"{' '.join((str(x)
                                 for x in graphic_state.scolor))} SC \n".encode()
