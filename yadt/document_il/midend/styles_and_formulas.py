@@ -193,9 +193,9 @@ class StylesAndFormulas:
 
     def _merge_styles(self, style1, style2):
         """合并两个样式，返回它们的交集"""
-        if style1 is None:
+        if style1 is None or style1.font_size is None:
             return style2
-        if style2 is None:
+        if style2 is None or style2.font_size is None:
             return style1
 
         return PdfStyle(
