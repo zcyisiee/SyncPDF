@@ -77,8 +77,8 @@ class ILTranslator:
         pbar: tqdm | None = None,
     ):
         for paragraph in page.pdf_paragraph:
-            self.translate_paragraph(paragraph, pbar)
-            # executor.submit(self.translate_paragraph, paragraph, pbar)
+            # self.translate_paragraph(paragraph, pbar)
+            executor.submit(self.translate_paragraph, paragraph, pbar)
 
     class TranslateInput:
         def __init__(
