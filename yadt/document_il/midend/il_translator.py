@@ -201,114 +201,83 @@ class ILTranslator:
     def parse_translate_output(
         self, input: TranslateInput, output: str
     ) -> [PdfParagraphComposition]:
+        import re
         result = []
-        current_pos = 0
-
-        # 按顺序处理所有占位符
-        while current_pos < len(output):
-            # 检查是否有匹配的占位符
-            placeholder_match = None
-
-            for placeholder in input.placeholders:
-                if isinstance(placeholder, FormulaPlaceholder):
-                    # 检查公式占位符
-                    pos = output.find(placeholder.placeholder, current_pos)
-                    if pos == current_pos:
-                        placeholder_match = placeholder
-                        matched_text = placeholder.placeholder
-                        break
-                else:
-                    # 检查富文本占位符
-                    left_pos = output.find(
-                        placeholder.left_placeholder, current_pos
-                    )
-                    if left_pos == current_pos:
-                        right_pos = output.find(
-                            placeholder.right_placeholder,
-                            left_pos + len(placeholder.left_placeholder),
-                        )
-                        if right_pos != -1:
-                            placeholder_match = placeholder
-                            matched_text = output[
-                                current_pos : right_pos
-                                + len(placeholder.right_placeholder)
-                            ]
-                            break
-
-            if placeholder_match:
-                # 处理占位符
-                if isinstance(placeholder_match, FormulaPlaceholder):
-                    # 添加公式
-                    comp = PdfParagraphComposition()
-                    comp.pdf_formula = placeholder_match.formula
-                    result.append(comp)
-                    current_pos += len(matched_text)
-                else:
-                    # 添加富文本
-                    text_start = current_pos + len(
-                        placeholder_match.left_placeholder
-                    )
-                    text_end = output.find(
-                        placeholder_match.right_placeholder, text_start
-                    )
-                    if text_end != -1:
-                        text = output[text_start:text_end]
-                        if isinstance(
-                            placeholder_match.composition,
-                            PdfSameStyleCharacters,
-                        ) and text.replace(" ", "") == (
-                            "".join(
-                                [
-                                    x.char_unicode
-                                    for x in placeholder_match.composition.pdf_character
-                                ]
-                            ).replace(" ", "")
-                        ):
-                            comp = PdfParagraphComposition(
-                                pdf_same_style_characters=placeholder_match.composition
-                            )
-                            result.append(comp)
-                            current_pos = text_end + len(
-                                placeholder_match.right_placeholder
-                            )
-                            continue
-                        comp = PdfParagraphComposition()
-                        comp.pdf_same_style_unicode_characters = (
-                            PdfSameStyleUnicodeCharacters()
-                        )
-                        comp.pdf_same_style_unicode_characters.pdf_style = (
-                            placeholder_match.composition.pdf_style
-                        )
-                        comp.pdf_same_style_unicode_characters.unicode = text
-                        result.append(comp)
-                        current_pos = text_end + len(
-                            placeholder_match.right_placeholder
-                        )
+        
+        # 构建正则表达式模式
+        patterns = []
+        placeholder_map = {}
+        
+        for placeholder in input.placeholders:
+            if isinstance(placeholder, FormulaPlaceholder):
+                # 转义特殊字符
+                pattern = re.escape(placeholder.placeholder)
+                patterns.append(f"({pattern})")
+                placeholder_map[placeholder.placeholder] = placeholder
             else:
-                # 处理普通文本直到下一个占位符
-                next_pos = len(output)
-                for placeholder in input.placeholders:
-                    if isinstance(placeholder, FormulaPlaceholder):
-                        pos = output.find(placeholder.placeholder, current_pos)
-                        if pos != -1 and pos < next_pos:
-                            next_pos = pos
-                    else:
-                        pos = output.find(
-                            placeholder.left_placeholder, current_pos
-                        )
-                        if pos != -1 and pos < next_pos:
-                            next_pos = pos
-
-                text = output[current_pos:next_pos]
+                left = re.escape(placeholder.left_placeholder)
+                right = re.escape(placeholder.right_placeholder)
+                patterns.append(f"({left}.*?{right})")
+                placeholder_map[placeholder.left_placeholder] = placeholder
+        
+        # 合并所有模式
+        combined_pattern = "|".join(patterns)
+        
+        # 找到所有匹配
+        last_end = 0
+        for match in re.finditer(combined_pattern, output):
+            # 处理匹配之前的普通文本
+            if match.start() > last_end:
+                text = output[last_end:match.start()]
                 if text:
                     comp = PdfParagraphComposition()
-                    comp.pdf_same_style_unicode_characters = (
-                        PdfSameStyleUnicodeCharacters()
-                    )
+                    comp.pdf_same_style_unicode_characters = PdfSameStyleUnicodeCharacters()
                     comp.pdf_same_style_unicode_characters.unicode = text
                     result.append(comp)
-                current_pos = next_pos
-
+            
+            matched_text = match.group(0)
+            
+            # 处理占位符
+            if any(isinstance(p, FormulaPlaceholder) and matched_text == p.placeholder 
+                  for p in input.placeholders):
+                # 处理公式占位符
+                placeholder = next(p for p in input.placeholders 
+                                if isinstance(p, FormulaPlaceholder) and 
+                                matched_text == p.placeholder)
+                comp = PdfParagraphComposition()
+                comp.pdf_formula = placeholder.formula
+                result.append(comp)
+            else:
+                # 处理富文本占位符
+                placeholder = next(p for p in input.placeholders 
+                                if not isinstance(p, FormulaPlaceholder) and 
+                                matched_text.startswith(p.left_placeholder))
+                text = matched_text[len(placeholder.left_placeholder):-len(placeholder.right_placeholder)]
+                
+                if isinstance(placeholder.composition, PdfSameStyleCharacters) and \
+                   text.replace(" ", "") == "".join(x.char_unicode for x in 
+                   placeholder.composition.pdf_character).replace(" ", ""):
+                    comp = PdfParagraphComposition(
+                        pdf_same_style_characters=placeholder.composition
+                    )
+                else:
+                    comp = PdfParagraphComposition()
+                    comp.pdf_same_style_unicode_characters = PdfSameStyleUnicodeCharacters()
+                    comp.pdf_same_style_unicode_characters.pdf_style = placeholder.composition.pdf_style
+                    comp.pdf_same_style_unicode_characters.unicode = text
+                result.append(comp)
+            
+            last_end = match.end()
+        
+        # 处理最后的普通文本
+        if last_end < len(output):
+            text = output[last_end:]
+            if text:
+                comp = PdfParagraphComposition()
+                comp.pdf_same_style_unicode_characters = PdfSameStyleUnicodeCharacters()
+                comp.pdf_same_style_unicode_characters.unicode = text
+                result.append(comp)
+        
         return result
 
     def translate_paragraph(
