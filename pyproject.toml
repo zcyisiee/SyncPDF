@@ -35,3 +35,7 @@ yadt = "yadt.main:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.flake8]
+ignore = ["E203", "E261", "E501", "W503", "E741"]
+max-line-length = 88

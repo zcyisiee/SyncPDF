@@ -247,61 +247,84 @@ class Typesetting:
                   typesetting_units: list[TypesettingUnit]):
         box = paragraph.box
         scale = 1.0
+        line_spacing = 1.7  # 初始行距为1.7
+        min_scale = 0.1  # 最小缩放因子
+        min_line_spacing = 1.1  # 最小行距
 
-        # 计算平均行高
-        avg_height = (sum(unit.height * scale for unit in typesetting_units)
-                      / len(typesetting_units) if typesetting_units else 0)
+        while scale >= min_scale:
+            # 计算平均行高
+            avg_height = (sum(unit.height * scale for unit in typesetting_units)
+                          / len(typesetting_units) if typesetting_units else 0)
 
-        # 初始化位置为右上角，并减去一个平均行高
-        current_x = box.x
-        current_y = box.y2 - avg_height
-        line_height = 0
+            # 初始化位置为右上角，并减去一个平均行高
+            current_x = box.x
+            current_y = box.y2 - avg_height
+            line_height = 0
 
-        # 存储已排版的单元
-        typeset_units = []
+            # 存储已排版的单元
+            typeset_units = []
+            all_units_fit = True
 
-        # 遍历所有排版单元
-        for unit in typesetting_units:
-            # 计算当前单元在当前缩放下的尺寸
-            unit_width = unit.width * scale
-            unit_height = unit.height * scale
+            # 遍历所有排版单元
+            for unit in typesetting_units:
+                # 计算当前单元在当前缩放下的尺寸
+                unit_width = unit.width * scale
+                unit_height = unit.height * scale
 
-            # 如果当前行放不下这个元素，换行
-            if current_x + unit_width > box.x2:
-                # 换行
-                current_x = box.x
-                current_y -= line_height
-                line_height = 0
+                # 如果当前行放不下这个元素，换行
+                if current_x + unit_width > box.x2:
+                    # 换行
+                    current_x = box.x
+                    current_y -= line_height * line_spacing  # 使用行距
+                    line_height = 0
 
-                # 检查是否超出底部边界
-                if current_y - unit_height < box.y:
-                    # 超出边界，暂时不处理（后续算法 2 和 3 会处理这种情况）
-                    break
+                    # 检查是否超出底部边界
+                    if current_y - unit_height < box.y:
+                        all_units_fit = False
+                        break
 
-            # 更新当前行的最大高度
-            line_height = max(line_height, unit_height)
+                # 更新当前行的最大高度
+                line_height = max(line_height, unit_height)
 
-            # 放置当前单元
-            relocated_unit = unit.relocate(current_x, current_y, scale)
-            typeset_units.append(relocated_unit)
+                # 放置当前单元
+                relocated_unit = unit.relocate(current_x, current_y, scale)
+                typeset_units.append(relocated_unit)
 
-            # 更新 x 坐标
-            current_x += unit_width
+                # 更新 x 坐标
+                current_x += unit_width
 
-        # 将排版后的单元转换为段落组合
-        paragraph.scale = scale
-        paragraph.pdf_paragraph_composition = []
-        for unit in typeset_units:
-            for char in unit.render():
-                paragraph.pdf_paragraph_composition.append(
-                    PdfParagraphComposition(pdf_character=char)
-                )
+            # 如果所有单元都放得下，就完成排版
+            if all_units_fit:
+                # 将排版后的单元转换为段落组合
+                paragraph.scale = scale
+                paragraph.pdf_paragraph_composition = []
+                for unit in typeset_units:
+                    for char in unit.render():
+                        paragraph.pdf_paragraph_composition.append(
+                            PdfParagraphComposition(pdf_character=char)
+                        )
+                return
+
+            # 如果放不下，先尝试减小行距
+            if line_spacing > min_line_spacing:
+                line_spacing -= 0.1
+            else:
+                # 如果行距已经最小，则减小缩放因子
+                line_spacing = 1.7  # 重置行距
+                scale -= 0.01
+
+        # 如果缩放到最小都放不下，抛出异常
+        raise ValueError("Cannot fit all units in the paragraph box")
 
     def create_typesetting_units(self,
                                  paragraph: il_version_1.PdfParagraph
                                  ) -> list[TypesettingUnit]:
+        if not paragraph.pdf_paragraph_composition:
+            return []
         result = []
         for composition in paragraph.pdf_paragraph_composition:
+            if composition is None:
+                continue
             if composition.pdf_line:
                 result.extend([
                     TypesettingUnit(char=char)
