@@ -48,6 +48,33 @@ class TypesettingUnit:
             self.font_size = font_size
             self.style = style
 
+    @property
+    def is_hung_punctuation(self):
+        if self.formular:
+            return False
+        unicode = None
+        if self.char and self.char.char_unicode:
+            unicode = self.char.char_unicode
+
+        if self.unicode:
+            unicode = self.unicode
+
+        if unicode:
+            return unicode in [
+                ",",
+                ".",
+                ":",
+                ";",
+                "?",
+                "!",
+                "，",
+                "。",
+                "：",
+                "？",
+                "！",
+                ]
+        return False
+
     def passthrough(self) -> [PdfCharacter]:
         if self.char:
             return [self.char]
@@ -281,7 +308,8 @@ class Typesetting:
             unit_height = unit.height * scale
 
             # 如果当前行放不下这个元素，换行
-            if current_x + unit_width > box.x2:
+            if current_x + unit_width > box.x2 \
+                    and not unit.is_hung_punctuation:
                 # 换行
                 current_x = box.x
                 current_y -= line_height * line_spacing
