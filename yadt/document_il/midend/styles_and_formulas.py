@@ -155,10 +155,11 @@ class StylesAndFormulas:
                     elif is_same_style(char_style, current_style):
                         current_chars.append(char)
                     else:
-                        new_comp = self._create_same_style_composition(
-                            current_chars, current_style
-                        )
-                        new_compositions.append(new_comp)
+                        if current_chars:
+                            new_comp = self._create_same_style_composition(
+                                current_chars, current_style
+                            )
+                            new_compositions.append(new_comp)
                         current_chars = [char]
                         current_style = char_style
 
