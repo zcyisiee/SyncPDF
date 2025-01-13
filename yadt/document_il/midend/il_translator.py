@@ -204,6 +204,13 @@ class ILTranslator:
         import re
         result = []
         
+        # 如果没有占位符，直接返回整个文本
+        if not input.placeholders:
+            comp = PdfParagraphComposition()
+            comp.pdf_same_style_unicode_characters = PdfSameStyleUnicodeCharacters()
+            comp.pdf_same_style_unicode_characters.unicode = output
+            return [comp]
+            
         # 构建正则表达式模式
         patterns = []
         placeholder_map = {}
