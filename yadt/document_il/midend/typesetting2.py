@@ -1,3 +1,5 @@
+from typing import Optional
+
 import pymupdf
 
 from yadt.document_il import (
@@ -15,6 +17,8 @@ from yadt.document_il.utils.layout_helper import (
     get_paragraph_max_height,
     get_paragraph_unicode,
 )
+import unicodedata
+import statistics
 
 
 class TypesettingUnit:
@@ -49,6 +53,21 @@ class TypesettingUnit:
             self.style = style
 
     @property
+    def is_chinese_char(self):
+        if self.formular:
+            return False
+        unicode = None
+        if self.char and self.char.char_unicode:
+            unicode = self.char.char_unicode
+
+        if self.unicode:
+            unicode = self.unicode
+
+        if unicode:
+            return 'CJK UNIFIED IDEOGRAPH' in unicodedata.name(unicode)
+        return False
+
+    @property
     def is_hung_punctuation(self):
         if self.formular:
             return False
@@ -72,7 +91,7 @@ class TypesettingUnit:
                 "：",
                 "？",
                 "！",
-                ]
+            ]
         return False
 
     def passthrough(self) -> [PdfCharacter]:
@@ -288,6 +307,15 @@ class Typesetting:
         Returns:
             tuple[list[TypesettingUnit], bool]: (已布局的排版单元列表, 是否所有单元都放得下)
         """
+        # 计算字号众数
+        font_sizes = []
+        for unit in typesetting_units:
+            if getattr(unit, "font_size", None):
+                font_sizes.append(unit.font_size)
+            if getattr(unit, 'char', None):
+                font_sizes.append(unit.char.pdf_style.font_size)
+        font_sizes.sort()
+        font_size = statistics.mode(font_sizes)
         # 计算平均行高
         avg_height = (sum(unit.height * scale for unit in typesetting_units)
                       / len(typesetting_units) if typesetting_units else 0)
@@ -300,12 +328,18 @@ class Typesetting:
         # 存储已排版的单元
         typeset_units = []
         all_units_fit = True
+        last_unit: Optional[TypesettingUnit] = None
 
         # 遍历所有排版单元
         for unit in typesetting_units:
             # 计算当前单元在当前缩放下的尺寸
             unit_width = unit.width * scale
             unit_height = unit.height * scale
+
+            if (last_unit
+                    and last_unit.is_chinese_char ^ unit.is_chinese_char):
+                space_width = self.font.char_lengths(" ", font_size * scale)[0]
+                current_x += space_width * 0.5
 
             # 如果当前行放不下这个元素，换行
             if current_x + unit_width > box.x2 \
@@ -322,13 +356,15 @@ class Typesetting:
 
             # 更新当前行的最大高度
             line_height = max(line_height, unit_height)
-
+            
             # 放置当前单元
             relocated_unit = unit.relocate(current_x, current_y, scale)
             typeset_units.append(relocated_unit)
 
             # 更新 x 坐标
             current_x += unit_width
+            
+            last_unit = unit
 
         return typeset_units, all_units_fit
 
