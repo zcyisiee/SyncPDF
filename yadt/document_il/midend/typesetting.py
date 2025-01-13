@@ -8,12 +8,56 @@ from yadt.document_il import (
     PdfParagraphComposition,
     PdfStyle,
     il_version_1,
+    PdfFormula,
 )
 from yadt.document_il.utils.layout_helper import (
     get_paragraph_length_except,
     get_paragraph_max_height,
     get_paragraph_unicode,
 )
+
+
+class TypesettingUnit:
+    def __init__(
+        self,
+        char: PdfCharacter = None,
+        formular: PdfFormula = None,
+        unicode: str = None,
+        font: pymupdf.Font = None,
+        font_size: float = None,
+    ):
+        assert (
+            sum((x is None for x in [char, formular, unicode])) == 1
+        ), "Only one of chars and formular can be not None"
+        self.char = char
+        self.formular = formular
+        self.unicode = unicode
+
+        if unicode:
+            assert font_size, "Font size must be provided when unicode is provided"
+            assert font, "Font must be provided when unicode is provided"
+            assert len(unicode) == 1, "Unicode must be a single character"
+
+            self.font = font
+            self.font_size = font_size
+
+    @property
+    def box(self):
+        if self.char:
+            return self.char.box
+        elif self.formular:
+            return self.formular.box
+        elif self.unicode:
+            char_width = self.font.char_lengths(self.unicode, self.font_size)[0]
+            return Box(0, 0, char_width, self.font_size)
+
+    @property
+    def width(self):
+        return self.box.x2 - self.box.x
+
+    @property
+    def height(self):
+        return self.box.y2 - self.box.y
 
 
 class Typesetting:
@@ -196,8 +240,7 @@ class Typesetting:
         page_num = page_num.strip()
 
         # 计算除了点号以外的内容长度
-        length_except_dots = get_paragraph_length_except(
-            paragraph, ".", noto_font)
+        length_except_dots = get_paragraph_length_except(paragraph, ".", noto_font)
 
         # 计算点号的宽度
         dot_width = noto_font.char_lengths(".", current_font_size)[0]
@@ -359,8 +402,7 @@ class Typesetting:
                         comp.pdf_same_style_unicode_characters.pdf_style.font_size
                         * scale
                     )
-                    char_width = noto_font.char_lengths(
-                        char_unicode, font_size)[0]
+                    char_width = noto_font.char_lengths(char_unicode, font_size)[0]
                     if current_x + char_width * scale > box.x2:
                         current_x = box.x
                         current_y -= line_height
@@ -451,8 +493,7 @@ class Typesetting:
             # 开始实际的渲染过程
             for paragraph in page.pdf_paragraph:
                 try:
-                    self.render_paragraph_unicode_to_char(
-                        paragraph, self.font, 0.67)
+                    self.render_paragraph_unicode_to_char(paragraph, self.font, 0.67)
                 except ValueError:
                     # 获取段落当前的边界框
                     current_box = paragraph.box
@@ -470,8 +511,7 @@ class Typesetting:
                         paragraph.box = expanded_box
 
                         # 重新渲染
-                        self.render_paragraph_unicode_to_char(
-                            paragraph, self.font, 0.1)
+                        self.render_paragraph_unicode_to_char(paragraph, self.font, 0.1)
 
     def render_paragraph_unicode_to_char(
         self,
@@ -486,7 +526,8 @@ class Typesetting:
         while scale >= scale_threshold:
             for line_hight in [1.7, 1.6, 1.5, 1.4, 1.3, 1.2, 1.1]:
                 result = self.try_typeset(
-                    paragraph, noto_font, paragraph.box, scale, line_hight)
+                    paragraph, noto_font, paragraph.box, scale, line_hight
+                )
                 if result is not None:
                     paragraph.pdf_paragraph_composition = [
                         PdfParagraphComposition(pdf_character=char) for char in result
