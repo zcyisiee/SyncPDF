@@ -80,6 +80,8 @@ class PDFCreater:
                 )
             chars.append(composition.pdf_character)
         if not chars and paragraph.unicode:
+            # 开发用途：临时禁用此警告
+            return chars
             raise Exception(
                 "Unable to export paragraphs that have not yet been formatted"
             )
@@ -172,6 +174,9 @@ class PDFCreater:
             # 渲染所有字符
             for char in chars:
                 if char.char_unicode == "\n":
+                    continue
+                if char.pdf_character_id is None:
+                    # dummy char
                     continue
                 char_size = char.pdf_style.font_size
                 draw_op.append(b"q ")
