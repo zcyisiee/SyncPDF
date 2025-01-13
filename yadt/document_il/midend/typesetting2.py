@@ -228,9 +228,10 @@ class Typesetting:
     def render_page(self, page: il_version_1.Page):
         # 开始实际的渲染过程
         for paragraph in page.pdf_paragraph:
-            self.render_paragraph(paragraph)
+            self.render_paragraph(paragraph, page)
 
-    def render_paragraph(self, paragraph: il_version_1.PdfParagraph):
+    def render_paragraph(self, paragraph: il_version_1.PdfParagraph,
+                         page: il_version_1.Page):
         typesetting_units = self.create_typesetting_units(paragraph)
         # 如果所有单元都可以直接传递，则直接传递
         if all(unit.can_passthrough for unit in typesetting_units):
@@ -241,57 +242,82 @@ class Typesetting:
 
         # 如果有单元无法直接传递，则进行重排版
         paragraph.pdf_paragraph_composition = []
-        self.retypeset(paragraph, typesetting_units)
+        self.retypeset(paragraph, page, typesetting_units)
+
+    def _layout_typesetting_units(self,
+                                  typesetting_units: list[TypesettingUnit],
+                                  box: Box,
+                                  scale: float,
+                                  line_spacing: float
+                                  ) -> tuple[list[TypesettingUnit], bool]:
+        """布局排版单元。
+
+        Args:
+            typesetting_units: 要布局的排版单元列表
+            box: 布局边界框
+            scale: 缩放因子
+            line_spacing: 行间距
+
+        Returns:
+            tuple[list[TypesettingUnit], bool]: (已布局的排版单元列表, 是否所有单元都放得下)
+        """
+        # 计算平均行高
+        avg_height = (sum(unit.height * scale for unit in typesetting_units)
+                      / len(typesetting_units) if typesetting_units else 0)
+
+        # 初始化位置为右上角，并减去一个平均行高
+        current_x = box.x
+        current_y = box.y2 - avg_height
+        line_height = 0
+
+        # 存储已排版的单元
+        typeset_units = []
+        all_units_fit = True
+
+        # 遍历所有排版单元
+        for unit in typesetting_units:
+            # 计算当前单元在当前缩放下的尺寸
+            unit_width = unit.width * scale
+            unit_height = unit.height * scale
+
+            # 如果当前行放不下这个元素，换行
+            if current_x + unit_width > box.x2:
+                # 换行
+                current_x = box.x
+                current_y -= line_height * line_spacing
+                line_height = 0
+
+                # 检查是否超出底部边界
+                if current_y - unit_height < box.y:
+                    all_units_fit = False
+                    break
+
+            # 更新当前行的最大高度
+            line_height = max(line_height, unit_height)
+
+            # 放置当前单元
+            relocated_unit = unit.relocate(current_x, current_y, scale)
+            typeset_units.append(relocated_unit)
+
+            # 更新 x 坐标
+            current_x += unit_width
+
+        return typeset_units, all_units_fit
 
     def retypeset(self, paragraph: il_version_1.PdfParagraph,
+                  page: il_version_1.Page,
                   typesetting_units: list[TypesettingUnit]):
         box = paragraph.box
         scale = 1.0
         line_spacing = 1.7  # 初始行距为1.7
         min_scale = 0.1  # 最小缩放因子
         min_line_spacing = 1.1  # 最小行距
+        expand_space_flag = False
 
         while scale >= min_scale:
-            # 计算平均行高
-            avg_height = (sum(unit.height * scale for unit in typesetting_units)
-                          / len(typesetting_units) if typesetting_units else 0)
-
-            # 初始化位置为右上角，并减去一个平均行高
-            current_x = box.x
-            current_y = box.y2 - avg_height
-            line_height = 0
-
-            # 存储已排版的单元
-            typeset_units = []
-            all_units_fit = True
-
-            # 遍历所有排版单元
-            for unit in typesetting_units:
-                # 计算当前单元在当前缩放下的尺寸
-                unit_width = unit.width * scale
-                unit_height = unit.height * scale
-
-                # 如果当前行放不下这个元素，换行
-                if current_x + unit_width > box.x2:
-                    # 换行
-                    current_x = box.x
-                    current_y -= line_height * line_spacing  # 使用行距
-                    line_height = 0
-
-                    # 检查是否超出底部边界
-                    if current_y - unit_height < box.y:
-                        all_units_fit = False
-                        break
-
-                # 更新当前行的最大高度
-                line_height = max(line_height, unit_height)
-
-                # 放置当前单元
-                relocated_unit = unit.relocate(current_x, current_y, scale)
-                typeset_units.append(relocated_unit)
-
-                # 更新 x 坐标
-                current_x += unit_width
+            # 尝试布局排版单元
+            typeset_units, all_units_fit = self._layout_typesetting_units(
+                typesetting_units, box, scale, line_spacing)
 
             # 如果所有单元都放得下，就完成排版
             if all_units_fit:
@@ -305,16 +331,29 @@ class Typesetting:
                         )
                 return
 
-            # 如果放不下，先尝试减小行距
+            if not expand_space_flag:
+                # 如果尚未扩展空格，进行扩展
+                max_x = self.get_max_right_space(box, page)
+                # 只有当有额外空间时才扩展
+                if max_x > box.x2:
+                    expanded_box = Box(
+                        x=box.x,
+                        y=box.y,
+                        x2=max_x,  # 直接扩展到最大可用位置
+                        y2=box.y2,
+                    )
+                    # 更新段落的边界框
+                    paragraph.box = expanded_box
+                expand_space_flag = True
+                continue
+
+            # 如果当前行距大于最小行距，先减小行距
             if line_spacing > min_line_spacing:
                 line_spacing -= 0.1
             else:
-                # 如果行距已经最小，则减小缩放因子
+                # 行距已经最小，减小缩放因子
+                scale -= 0.1
                 line_spacing = 1.7  # 重置行距
-                scale -= 0.01
-
-        # 如果缩放到最小都放不下，抛出异常
-        raise ValueError("Cannot fit all units in the paragraph box")
 
     def create_typesetting_units(self,
                                  paragraph: il_version_1.PdfParagraph
@@ -384,3 +423,36 @@ class Typesetting:
                 for char in unit.passthrough()
             ])
         return composition
+
+    def get_max_right_space(self, current_box: Box, page) -> float:
+        """获取段落右侧最大可用空间
+
+        Args:
+            current_box: 当前段落的边界框
+            page: 当前页面
+
+        Returns:
+            可以扩展到的最大 x 坐标
+        """
+        # TODO: try to find right margin of page
+        # 获取页面的裁剪框作为初始最大限制
+        max_x = page.cropbox.box.x2 * 0.9
+
+        # 检查所有可能的阻挡元素
+        for para in page.pdf_paragraph:
+            if para.box == current_box:  # 跳过当前段落
+                continue
+            # 只考虑在当前段落右侧且有垂直重叠的元素
+            if para.box.x > current_box.x and not (
+                para.box.y >= current_box.y2 or para.box.y2 <= current_box.y
+            ):
+                max_x = min(max_x, para.box.x)
+
+        # 检查图形
+        for figure in page.pdf_figure:
+            if figure.box.x > current_box.x and not (
+                figure.box.y >= current_box.y2 or figure.box.y2 <= current_box.y
+            ):
+                max_x = min(max_x, figure.box.x)
+
+        return max_x
