@@ -17,7 +17,7 @@ from yadt.doclayout import DocLayoutModel
 from yadt.document_il.midend.il_translator import ILTranslator
 from yadt.document_il.midend.paragraph_finder import ParagraphFinder
 from yadt.document_il.midend.styles_and_formulas import StylesAndFormulas
-from yadt.document_il.midend.typesetting import Typesetting
+from yadt.document_il.midend.typesetting2 import Typesetting
 from yadt.document_il.translator.translator import set_translate_rate_limiter
 from yadt.document_il.xml_converter import XMLConverter
 from yadt.pdfinterp import PDFPageInterpreterEx
