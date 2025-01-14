@@ -211,6 +211,8 @@ def main():
     set_translate_rate_limiter(args.qps)
 
     for file in args.files:
+        # 清理文件路径，去除两端的引号
+        file = file.strip('"\'')
         if not os.path.exists(file):
             logger.error(f"文件不存在：{file}")
             exit(1)
@@ -244,6 +246,8 @@ def main():
         args.output = None
 
     for file in args.files:
+        # 清理文件路径，去除两端的引号
+        file = file.strip('"\'')
         # 创建配置对象
         config = TranslationConfig(
             input_file=file,
