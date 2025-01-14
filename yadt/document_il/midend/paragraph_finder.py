@@ -76,14 +76,13 @@ class ParagraphFinder:
         current_paragraph: PdfParagraph | None = None
         current_layout: Layout | None = None
         current_line_chars: list[PdfCharacter] = []
-        chars = page.pdf_character.copy()
+        skip_chars = []
 
-        for char in chars:
+        for char in page.pdf_character:
             char_layout = self.get_layout(char, page)
             if not self.is_text_layout(char_layout):
+                skip_chars.append(char)
                 continue
-
-            page.pdf_character.remove(char)
 
             # 检查是否需要开始新行
             if current_line_chars and Layout.is_newline(
@@ -136,6 +135,8 @@ class ParagraphFinder:
             else:
                 current_paragraph.pdf_paragraph_composition.append(line)
                 self.update_paragraph_data(current_paragraph)
+
+        page.pdf_character = skip_chars
 
         return paragraphs
 
