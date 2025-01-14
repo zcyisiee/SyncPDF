@@ -187,39 +187,38 @@ def translate(translation_config: TranslationConfig):
     docs = il_creater.create_il()
     logger.debug(f"finish create il from {temp_pdf_path}")
 
-    xml_converter.write_xml(
-        docs, translation_config.get_working_file_path("create_il.xml")
+    xml_converter.write_json(
+        docs, translation_config.get_working_file_path("create_il.json")
     )
-
     ParagraphFinder().process(docs)
     logger.debug(f"finish paragraph finder from {temp_pdf_path}")
-    xml_converter.write_xml(
-        docs, translation_config.get_working_file_path("paragraph_finder.xml")
+    xml_converter.write_json(
+        docs, translation_config.get_working_file_path("paragraph_finder.json")
     )
 
     StylesAndFormulas(translation_config).process(docs)
     logger.debug(f"finish styles and formulas from {temp_pdf_path}")
-    xml_converter.write_xml(
+    xml_converter.write_json(
         docs, translation_config.get_working_file_path(
-            "styles_and_formulas.xml")
+            "styles_and_formulas.json")
     )
 
     translate_engine = translation_config.translator
     # translate_engine.ignore_cache = True
     ILTranslator(translate_engine, translation_config).translate(docs)
     logger.debug(f"finish ILTranslator from {temp_pdf_path}")
-    xml_converter.write_xml(
-        docs, translation_config.get_working_file_path("il_translated.xml")
+    xml_converter.write_json(
+        docs, translation_config.get_working_file_path("il_translated.json")
     )
 
     Typesetting(font_path=translation_config.font).typsetting_document(docs)
     logger.debug(f"finish typsetting from {temp_pdf_path}")
-    xml_converter.write_xml(
-        docs, translation_config.get_working_file_path("typsetting.xml")
+    xml_converter.write_json(
+        docs, translation_config.get_working_file_path("typsetting.json")
     )
 
     # deepcopy
-    docs2 = xml_converter.from_xml(xml_converter.to_xml(docs))
+    docs2 = xml_converter.deepcopy(docs)
 
     pdf_creater = PDFCreater(original_pdf_path, docs2, translation_config.font)
 
