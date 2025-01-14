@@ -62,7 +62,9 @@ class TypesettingUnit:
 
         if self.unicode:
             unicode = self.unicode
-
+        if '(cid' in unicode:
+            return False
+        assert len(unicode) == 1, "Unicode must be a single character"
         if unicode:
             return 'CJK UNIFIED IDEOGRAPH' in unicodedata.name(unicode)
         return False
