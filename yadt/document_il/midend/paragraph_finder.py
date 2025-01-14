@@ -15,7 +15,7 @@ from yadt.document_il.utils.layout_helper import (
 
 
 class ParagraphFinder:
-    def update_paragraph_data(self, paragraph: PdfParagraph):
+    def update_paragraph_data(self, paragraph: PdfParagraph, update_unicode=False):
         if not paragraph.pdf_paragraph_composition:
             return
 
@@ -33,7 +33,8 @@ class ParagraphFinder:
                     "after the translation is completed."
                 )
 
-        paragraph.unicode = get_char_unicode_string(chars)
+        if update_unicode:
+            paragraph.unicode = get_char_unicode_string(chars)
         # 更新边界框
         min_x = min(char.box.x for char in chars)
         min_y = min(char.box.y for char in chars)
@@ -70,6 +71,9 @@ class ParagraphFinder:
 
         # 第四步：处理独立段落
         self.process_independent_paragraphs(paragraphs, median_width)
+
+        for paragraph in paragraphs:
+            self.update_paragraph_data(paragraph, update_unicode=True)
 
     def create_paragraphs(self, page: Page) -> list[PdfParagraph]:
         paragraphs: list[PdfParagraph] = []
