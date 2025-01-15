@@ -64,6 +64,7 @@ providers = [
         "ModelFormat": "MLProgram", "MLComputeUnits": "ALL",
         "RequireStaticInputShapes": "0", "EnableOnSubgraphs": "0"
     }),
+    'CPUExecutionProvider'
 ]
 class OnnxModel(DocLayoutModel):
     def __init__(self, model_path: str):
