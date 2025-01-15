@@ -91,7 +91,7 @@ class StylesAndFormulas:
                             < current_chars[-1].pdf_style.font_size * 0.79
                         )
                     )
-                    
+
                     if char.char_unicode == ' ':
                         is_formula = is_current_formula
 
