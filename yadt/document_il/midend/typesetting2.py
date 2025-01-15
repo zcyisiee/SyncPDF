@@ -68,7 +68,10 @@ class TypesettingUnit:
             return False
         assert len(unicode) == 1, "Unicode must be a single character"
         if unicode:
-            return 'CJK UNIFIED IDEOGRAPH' in unicodedata.name(unicode)
+            try:
+                return 'CJK UNIFIED IDEOGRAPH' in unicodedata.name(unicode)
+            except ValueError:
+                return False
         return False
 
     @property
