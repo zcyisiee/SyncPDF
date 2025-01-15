@@ -84,3 +84,8 @@ And meet the following requirements:
 
 - layout error less than 1%
 - content loss less than 1%
+
+
+### How to Contribute
+
+This project is not yet ready to accept community contributions. Please be patient. Thank you for your support! Community contributions will be open in the future.
