@@ -238,4 +238,5 @@ def translate(translation_config: TranslationConfig):
 
     finish_time = time.time()
 
-    logger.info(f"finish translate: {original_pdf_path}, cost: {finish_time - start_time} s")
+    logger.info(f"finish translate: {original_pdf_path}, cost: {
+                finish_time - start_time} s")
