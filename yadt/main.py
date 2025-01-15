@@ -5,7 +5,7 @@ import yadt.high_level
 import logging
 import argparse
 import httpx
-from yadt.document_il.translator.translator import OpenAITranslator, GoogleTranslator
+from yadt.document_il.translator.translator import OpenAITranslator, GoogleTranslator, BingTranslator
 from yadt.document_il.translator.translator import set_translate_rate_limiter
 from yadt.translation_config import TranslationConfig  # noqa: E402
 
@@ -105,17 +105,21 @@ def create_parser():
     service_params = translation_params.add_mutually_exclusive_group()
     service_params.add_argument(
         "--openai",
-        "-oai",
         default=False,
         action="store_true",
         help="Use OpenAI translator.",
     )
     service_params.add_argument(
         "--google",
-        "-g",
         default=False,
         action="store_true",
         help="Use Google translator.",
+    )
+    service_params.add_argument(
+        "--bing",
+        default=False,
+        action="store_true",
+        help="Use Bing translator.",
     )
     openai_params = parser.add_argument_group(
         "Translation - OpenAI Options", description="OpenAI specific options"
@@ -188,8 +192,8 @@ def main():
     create_cache_folder()
 
     # 验证翻译服务选择
-    if not (args.openai or args.google):
-        parser.error("必须选择一个翻译服务：--openai 或 --google")
+    if not (args.openai or args.google or args.bing):
+        parser.error("必须选择一个翻译服务：--openai、--google 或 --bing")
 
     # 验证 OpenAI 参数
     if args.openai and not args.openai_api_key:
@@ -203,6 +207,12 @@ def main():
             model=args.openai_model,
             base_url=args.openai_base_url,
             api_key=args.openai_api_key,
+            ignore_cache=args.ignore_cache,
+        )
+    elif args.bing:
+        translator = BingTranslator(
+            lang_in=args.lang_in,
+            lang_out=args.lang_out,
             ignore_cache=args.ignore_cache,
         )
     else:
