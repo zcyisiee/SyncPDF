@@ -3,7 +3,7 @@ import os
 from yadt.const import get_cache_file_path, CACHE_FOLDER
 import yadt.high_level
 import logging
-import argparse
+import configargparse
 import httpx
 from yadt.document_il.translator.translator import OpenAITranslator, GoogleTranslator, BingTranslator
 from yadt.document_il.translator.translator import set_translate_rate_limiter
@@ -23,7 +23,8 @@ def create_cache_folder():
 
 
 def create_parser():
-    parser = argparse.ArgumentParser()
+    parser = configargparse.ArgParser()
+    parser.add_argument('-c', '--my-config', required=False, is_config_file=True, help='config file path')
     parser.add_argument(
         "files",
         type=str,
@@ -231,15 +232,19 @@ def main():
     # 设置翻译速率限制
     set_translate_rate_limiter(args.qps)
 
+    pending_files = []
     for file in args.files:
         # 清理文件路径，去除两端的引号
-        file = file.strip("\"'")
+        if file.startswith('--files='):
+            file = file.lstrip('--files=')
+        file = file.lstrip('-').strip("\"'")
         if not os.path.exists(file):
             logger.error(f"文件不存在：{file}")
             exit(1)
         if not file.endswith(".pdf"):
             logger.error(f"文件不是 PDF 文件：{file}")
             exit(1)
+        pending_files.append(file)
 
     font_path = args.font
     if not font_path:
@@ -268,7 +273,7 @@ def main():
     else:
         args.output = None
 
-    for file in args.files:
+    for file in pending_files:
         # 清理文件路径，去除两端的引号
         file = file.strip("\"'")
         # 创建配置对象

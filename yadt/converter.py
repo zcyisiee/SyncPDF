@@ -461,7 +461,7 @@ class TranslateConverter(PDFConverterEx):
                         fix = varf[vid]
                     for vch in var[vid]:  # 排版公式字符
                         vc = chr(vch.cid)
-                        ops += f"/{self.fontid[vch.font]} {vch.size:f} Tf 1 0 0 1 {x + vch.x0 - var[vid][0].x0:f} {fix + y + vch.y0 - var[vid][0].y0:f} Tm [<{raw_string(self.fontid[vch.font], vc)}>] TJ "
+                        ops += f"/{self.fontid[vch.font]} {vch.size:f} Tf 1 0 0 1 {x + vch.x0 - var[vid][0].x0:f} {fix + y + vch.y0 - var[vid][0].y0:f} Tm <{raw_string(self.fontid[vch.font], vc)}> TJ "
                         if log.isEnabledFor(logging.DEBUG):
                             lstk.append(LTLine(0.1, (_x, _y), (x + vch.x0 - var[vid][0].x0, fix + y + vch.y0 - var[vid][0].y0)))
                             _x, _y = x + vch.x0 - var[vid][0].x0, fix + y + vch.y0 - var[vid][0].y0
@@ -485,7 +485,7 @@ class TranslateConverter(PDFConverterEx):
                     _x, _y = x, y
             # 处理结尾
             if cstk:
-                ops += f"/{fcur} {size:f} Tf 1 0 0 1 {tx:f} {y:f} Tm [<{raw_string(fcur, cstk)}>] TJ "
+                ops += f"/{fcur} {size:f} Tf 1 0 0 1 {tx:f} {y:f} Tm <{raw_string(fcur, cstk)}> TJ "
         for l in lstk:  # 排版全局线条
             if l.linewidth < 5:  # hack 有的文档会用粗线条当图片背景
                 ops += f"ET q 1 0 0 1 {l.pts[0][0]:f} {l.pts[0][1]:f} cm [] 0 d 0 J {l.linewidth:f} w 0 0 m {l.pts[1][0] - l.pts[0][0]:f} {l.pts[1][1] - l.pts[0][1]:f} l S Q BT "

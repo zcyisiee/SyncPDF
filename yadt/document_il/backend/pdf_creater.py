@@ -1,5 +1,6 @@
 import io
 import os
+import re
 
 import pdfminer.pdfdocument
 import pymupdf
@@ -142,6 +143,14 @@ class PDFCreater:
         for page in il.page:
             page.pdf_font.append(pdf_font_il)
 
+    def get_available_font_list(self, pdf,page):
+        page_xref_id = pdf[page.page_number].xref
+        _, r_id = pdf.xref_get_key(288, 'Resources')
+        r_id = int(r_id.split(' ')[0])
+        _, font_dict = pdf.xref_get_key(r_id, 'Font')
+        fonts = re.findall('/([^ ]+?) ', font_dict)
+        return set(fonts)
+
     def write(self, translation_config: TranslationConfig):
         mono_out_path = translation_config.get_output_file_path(
             f"{os.path.basename(translation_config.input_file.rsplit('.', 1)[0])}."
@@ -150,6 +159,7 @@ class PDFCreater:
         pdf = pymupdf.open(self.original_pdf_path)
         self.add_font(pdf, self.docs)
         for page in self.docs.page:
+            available_font_list = self.get_available_font_list(pdf,page)
             encoding_length_map = {
                 f.font_id: f.encoding_length for f in page.pdf_font
             }
@@ -180,27 +190,30 @@ class PDFCreater:
                     # dummy char
                     continue
                 char_size = char.pdf_style.font_size
+                font_id = char.pdf_style.font_id
+                if font_id not in available_font_list:
+                    continue
                 draw_op.append(b"q ")
                 self.render_graphic_state(
                     draw_op, char.pdf_style.graphic_state
                 )
                 if char.vertical:
                     draw_op.append(
-                        f"BT /{char.pdf_style.font_id} {char_size:f} Tf 0 1 -1 0 {
+                        f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {
                             char.box.x2:f} {char.box.y:f} Tm ".encode()
                     )
                 else:
                     draw_op.append(
-                        f"BT /{char.pdf_style.font_id} {char_size:f} Tf 1 0 0 1 {
+                        f"BT /{font_id} {char_size:f} Tf 1 0 0 1 {
                             char.box.x:f} {char.box.y:f} Tm ".encode()
                     )
 
-                encoding_length = encoding_length_map[char.pdf_style.font_id]
+                encoding_length = encoding_length_map[font_id]
                 # pdf32000-2008 page14:
                 # As hexadecimal data enclosed in angle brackets < >
                 # see 7.3.4.3, "Hexadecimal Strings."
                 draw_op.append(
-                    f"<{char.pdf_character_id:0{encoding_length*2}x}>".encode()
+                    f"<{char.pdf_character_id:0{encoding_length*2}x}>".upper().encode()
                 )
 
                 draw_op.append(b" Tj ET Q \n")
