@@ -8,9 +8,17 @@ We recommend using the Tool feature of [uv](https://github.com/astral-sh/uv) to 
 
 1. First, you need to refer to [uv installation](https://github.com/astral-sh/uv#installation) to install uv and set up the `PATH` environment variable as prompted.
 
-2. Use the command `uv tool install --python 3.12 yadt` to install yadt.
+2. Use the following command to install yadt:
+```bash
+uv tool install --python 3.12 yadt
 
-3. Use the `yadt` command. For example: `yadt --bing example.pdf`
+yadt --help
+```
+
+3. Use the `yadt` command. For example:
+```bash
+yadt --bing example.pdf
+```
 
 ### Install from Source
 
@@ -18,13 +26,25 @@ We still recommend using [uv](https://github.com/astral-sh/uv) to manage virtual
 
 1. First, you need to refer to [uv installation](https://github.com/astral-sh/uv#installation) to install uv and set up the `PATH` environment variable as prompted.
 
-2. Clone the project: `git clone https://github.com/funstory-ai/yadt`
+2. Use the following command to install yadt:
+```bash
+# clone the project
+git clone https://github.com/funstory-ai/yadt
 
-3. Enter the project directory: `cd yadt`
+# enter the project directory
+cd yadt
 
-4. Use the `uv sync` command to create a virtual environment and install dependencies.
+# install dependencies
+uv sync
 
-5. Use the `uv run yadt` command. For example: `uv run yadt --bing examples/pdf/il_try_1/这是一个测试文件.pdf`
+# run yadt
+uv run yadt --help
+```
+
+3. Use the `uv run yadt` command. For example:
+```bash
+uv run yadt --bing examples/pdf/il_try_1/这是一个测试文件.pdf
+```
 
 ## Background
 
