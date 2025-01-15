@@ -16,7 +16,9 @@ def create_cache_folder():
     try:
         os.makedirs(CACHE_FOLDER, exist_ok=True)
     except OSError:
-        logger.critical(f"Failed to create cache folder at {CACHE_FOLDER}", exc_info=True)
+        logger.critical(
+            f"Failed to create cache folder at {CACHE_FOLDER}", exc_info=True
+        )
         exit(1)
 
 
@@ -43,8 +45,7 @@ def create_parser():
         "--font",
         type=str,
         default=None,
-        help="The font to use for pdf output. "
-        "If not set, use the default font.",
+        help="The font to use for pdf output. " "If not set, use the default font.",
     )
     translation_params.add_argument(
         "--pages",
@@ -171,7 +172,11 @@ def main():
     for v in logging.Logger.manager.loggerDict.values():
         if getattr(v, "name", None) is None:
             continue
-        if v.name.startswith('pdfminer') or v.name.startswith('peewee'):
+        if (
+            v.name.startswith("pdfminer")
+            or v.name.startswith("peewee")
+            or v.name.startswith("httpx")
+        ):
             v.disabled = True
 
     parser = create_parser()
@@ -212,7 +217,7 @@ def main():
 
     for file in args.files:
         # 清理文件路径，去除两端的引号
-        file = file.strip('"\'')
+        file = file.strip("\"'")
         if not os.path.exists(file):
             logger.error(f"文件不存在：{file}")
             exit(1)
@@ -240,20 +245,22 @@ def main():
             try:
                 os.makedirs(args.output, exist_ok=True)
             except OSError:
-                logger.critical(f"Failed to create output folder at {args.output}", exc_info=True)
+                logger.critical(
+                    f"Failed to create output folder at {args.output}", exc_info=True
+                )
                 exit(1)
     else:
         args.output = None
 
     for file in args.files:
         # 清理文件路径，去除两端的引号
-        file = file.strip('"\'')
+        file = file.strip("\"'")
         # 创建配置对象
         config = TranslationConfig(
             input_file=file,
             font=font_path,
             pages=args.pages,
-            output=args.output,
+            output_dir=args.output,
             translator=translator,
             debug=args.debug,
             lang_in=args.lang_in,

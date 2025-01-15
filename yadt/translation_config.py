@@ -13,10 +13,9 @@ class TranslationConfig:
         lang_out: str,
         font: str | None = None,
         pages: str | None = None,
-        output: str | None = None,
+            output_dir: str | None = None,
         debug: bool = False,
         working_dir: str | None = None,
-        output_dir: str | None = None,
         no_dual: bool = False,
         no_mono: bool = False,
         formular_font_pattern: str | None = None,
@@ -28,7 +27,6 @@ class TranslationConfig:
         self.font = font
         self.pages = pages
         self.page_ranges = self._parse_pages(pages) if pages else None
-        self.output = output
         self.debug = debug
         self.lang_in = lang_in
         self.lang_out = lang_out

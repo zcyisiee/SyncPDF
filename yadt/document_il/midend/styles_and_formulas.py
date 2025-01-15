@@ -91,6 +91,9 @@ class StylesAndFormulas:
                             < current_chars[-1].pdf_style.font_size * 0.79
                         )
                     )
+                    
+                    if char.char_unicode == ' ':
+                        is_formula = is_current_formula
 
                     if is_formula != is_current_formula and current_chars:
                         # 字符类型发生切换，处理之前的字符
@@ -190,7 +193,25 @@ class StylesAndFormulas:
         for style in styles[1:]:
             # 更新基准样式为所有样式的交集
             base_style = self._merge_styles(base_style, style)
+
+        # 如果font_id或font_size为None，则使用众数
+        if base_style.font_id is None:
+            base_style.font_id = self._get_mode_value(
+                [s.font_id for s in styles])
+        if base_style.font_size is None:
+            base_style.font_size = self._get_mode_value(
+                [s.font_size for s in styles]
+            )
+
         return base_style
+
+    def _get_mode_value(self, values):
+        """计算列表中的众数"""
+        if not values:
+            return None
+        from collections import Counter
+        counter = Counter(values)
+        return counter.most_common(1)[0][0]
 
     def _merge_styles(self, style1, style2):
         """合并两个样式，返回它们的交集"""

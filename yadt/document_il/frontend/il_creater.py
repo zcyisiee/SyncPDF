@@ -112,6 +112,7 @@ class ILCreater:
             if k == "linewidth":
                 graphic_state.linewidth = float(v)
                 continue
+            continue
             raise NotImplementedError
 
         graphic_state.stroking_color_space_name = (

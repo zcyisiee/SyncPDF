@@ -1,4 +1,5 @@
 import io
+import os
 
 import pdfminer.pdfdocument
 import pymupdf
@@ -143,7 +144,7 @@ class PDFCreater:
 
     def write(self, translation_config: TranslationConfig):
         mono_out_path = translation_config.get_output_file_path(
-            f"{translation_config.input_file.rsplit('.', 1)[0]}."
+            f"{os.path.basename(translation_config.input_file.rsplit('.', 1)[0])}."
             f"{translation_config.lang_out}.mono.pdf"
         )
         pdf = pymupdf.open(self.original_pdf_path)
@@ -221,7 +222,7 @@ class PDFCreater:
                 )
         if not translation_config.no_dual:
             dual_out_path = translation_config.get_output_file_path(
-                f"{translation_config.input_file.rsplit('.', 1)[0]}."
+                f"{os.path.basename(translation_config.input_file.rsplit('.', 1)[0])}."
                 f"{translation_config.lang_out}.dual.pdf"
             )
             dual = pymupdf.open(self.original_pdf_path)

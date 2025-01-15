@@ -64,6 +64,8 @@ class TypesettingUnit:
             unicode = self.unicode
         if '(cid' in unicode:
             return False
+        if len(unicode) > 1:
+            return False
         assert len(unicode) == 1, "Unicode must be a single character"
         if unicode:
             return 'CJK UNIFIED IDEOGRAPH' in unicodedata.name(unicode)
@@ -506,7 +508,7 @@ class Typesetting:
 
         # 检查所有可能的阻挡元素
         for para in page.pdf_paragraph:
-            if para.box == current_box:  # 跳过当前段落
+            if para.box == current_box or para.box is None:  # 跳过当前段落
                 continue
             # 只考虑在当前段落右侧且有垂直重叠的元素
             if para.box.x > current_box.x and not (
