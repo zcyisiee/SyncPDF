@@ -86,6 +86,6 @@ And meet the following requirements:
 - content loss less than 1%
 
 
-### How to Contribute
+## How to Contribute
 
 This project is not yet ready to accept community contributions. Please be patient. Thank you for your support! Community contributions will be open in the future.
