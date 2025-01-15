@@ -183,7 +183,7 @@ class ILCreater:
                 conf=layout.conf.item(),
                 class_name=layouts.names[layout.cls],
             )
-            self.docs.page[page_number].page_layout.append(page_layout)
+            self.current_page.page_layout.append(page_layout)
 
     def create_il(self):
         pages = [
