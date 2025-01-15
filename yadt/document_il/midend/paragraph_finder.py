@@ -186,6 +186,8 @@ class ParagraphFinder:
             "plain text",
             "title",
             "abandon",
+            "figure_caption",
+            "table_caption",
         ]
 
     def get_layout(
@@ -210,10 +212,10 @@ class ParagraphFinder:
             "formula_caption",
             "isolate_formula",
             "table_footnote",
-            "table_caption",
             "table",
-            "figure_caption",
             "figure",
+            "table_caption",
+            "figure_caption",
             "abandon",
             "plain text",
             "title",
