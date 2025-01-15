@@ -30,7 +30,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-model = DocLayoutModel.load_available()
 resfont_map = {
     "zh-cn": "china-ss",
     "zh-tw": "china-ts",
@@ -76,6 +75,7 @@ def start_parse_il(
         kwarg.get("prompt", []),
         il_creater=il_creater,
     )
+    # model = DocLayoutModel.load_available()
 
     assert device is not None
     assert il_creater is not None
@@ -105,38 +105,38 @@ def start_parse_il(
             # the following layout recognition results,
             # but in order to facilitate the migration of pdf2zh,
             # the relevant code is temporarily retained.
-            pix = doc_zh[page.pageno].get_pixmap()
-            image = np.fromstring(pix.samples, np.uint8).reshape(
-                pix.height, pix.width, 3
-            )[:, :, ::-1]
-            page_layout = model.predict(
-                image, imgsz=int(pix.height / 32) * 32)[0]
-            # kdtree 是不可能 kdtree 的，不如直接渲染成图片，用空间换时间
-            box = np.ones((pix.height, pix.width))
-            h, w = box.shape
-            vcls = ["abandon", "figure", "table",
-                    "isolate_formula", "formula_caption"]
-            for i, d in enumerate(page_layout.boxes):
-                if page_layout.names[int(d.cls)] not in vcls:
-                    x0, y0, x1, y1 = d.xyxy.squeeze()
-                    x0, y0, x1, y1 = (
-                        np.clip(int(x0 - 1), 0, w - 1),
-                        np.clip(int(h - y1 - 1), 0, h - 1),
-                        np.clip(int(x1 + 1), 0, w - 1),
-                        np.clip(int(h - y0 + 1), 0, h - 1),
-                    )
-                    box[y0:y1, x0:x1] = i + 2
-            for i, d in enumerate(page_layout.boxes):
-                if page_layout.names[int(d.cls)] in vcls:
-                    x0, y0, x1, y1 = d.xyxy.squeeze()
-                    x0, y0, x1, y1 = (
-                        np.clip(int(x0 - 1), 0, w - 1),
-                        np.clip(int(h - y1 - 1), 0, h - 1),
-                        np.clip(int(x1 + 1), 0, w - 1),
-                        np.clip(int(h - y0 + 1), 0, h - 1),
-                    )
-                    box[y0:y1, x0:x1] = 0
-            layout[page.pageno] = box
+            # pix = doc_zh[page.pageno].get_pixmap()
+            # image = np.fromstring(pix.samples, np.uint8).reshape(
+            #     pix.height, pix.width, 3
+            # )[:, :, ::-1]
+            # page_layout = model.predict(
+            #     image, imgsz=int(pix.height / 32) * 32)[0]
+            # # kdtree 是不可能 kdtree 的，不如直接渲染成图片，用空间换时间
+            # box = np.ones((pix.height, pix.width))
+            # h, w = box.shape
+            # vcls = ["abandon", "figure", "table",
+            #         "isolate_formula", "formula_caption"]
+            # for i, d in enumerate(page_layout.boxes):
+            #     if page_layout.names[int(d.cls)] not in vcls:
+            #         x0, y0, x1, y1 = d.xyxy.squeeze()
+            #         x0, y0, x1, y1 = (
+            #             np.clip(int(x0 - 1), 0, w - 1),
+            #             np.clip(int(h - y1 - 1), 0, h - 1),
+            #             np.clip(int(x1 + 1), 0, w - 1),
+            #             np.clip(int(h - y0 + 1), 0, h - 1),
+            #         )
+            #         box[y0:y1, x0:x1] = i + 2
+            # for i, d in enumerate(page_layout.boxes):
+            #     if page_layout.names[int(d.cls)] in vcls:
+            #         x0, y0, x1, y1 = d.xyxy.squeeze()
+            #         x0, y0, x1, y1 = (
+            #             np.clip(int(x0 - 1), 0, w - 1),
+            #             np.clip(int(h - y1 - 1), 0, h - 1),
+            #             np.clip(int(x1 + 1), 0, w - 1),
+            #             np.clip(int(h - y0 + 1), 0, h - 1),
+            #         )
+            #         box[y0:y1, x0:x1] = 0
+            # layout[page.pageno] = box
             # 新建一个 xref 存放新指令流
             page.page_xref = doc_zh.get_new_xref()  # hack 插入页面的新 xref
             doc_zh.update_object(page.page_xref, "<<>>")

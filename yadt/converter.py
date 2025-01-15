@@ -267,6 +267,7 @@ class TranslateConverter(PDFConverterEx):
         for child in ltpage:
             if isinstance(child, LTChar):
                 self.il_creater.on_lt_char(child)
+                continue
                 cur_v = False
                 layout = self.layout[ltpage.pageid]
                 # ltpage.height 可能是 fig 里面的高度，这里统一用 layout.shape
@@ -356,6 +357,7 @@ class TranslateConverter(PDFConverterEx):
                 self.il_creater.on_pdf_figure(child)
                 pass
             elif isinstance(child, LTLine):     # 线条
+                continue
                 layout = self.layout[ltpage.pageid]
                 # ltpage.height 可能是 fig 里面的高度，这里统一用 layout.shape
                 h, w = layout.shape
@@ -368,6 +370,7 @@ class TranslateConverter(PDFConverterEx):
                     lstk.append(child)
             else:
                 pass
+        return
         # 处理结尾
         if vstk:    # 公式出栈
             sstk[-1] += f"{{v{len(var)}}}"
