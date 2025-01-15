@@ -156,7 +156,12 @@ def download_font_assets():
             "https://github.com/satbyy/"
             "go-noto-universal/releases/download/v7.0/"
             "GoNotoKurrent-Regular.ttf",
-        )
+        ),
+        (
+            "source-han-serif-cn.ttf",
+            "https://github.com/junmer/source-han-serif-ttf"
+            "/raw/refs/heads/master/SubsetTTF/CN/SourceHanSerifCN-Regular.ttf",
+        ),
     ]
     for name, url in assets:
         save_path = get_cache_file_path(name)
@@ -180,6 +185,7 @@ def main():
             v.name.startswith("pdfminer")
             or v.name.startswith("peewee")
             or v.name.startswith("httpx")
+            or "httpcore" in v.name
         ):
             v.disabled = True
 
@@ -237,7 +243,7 @@ def main():
 
     font_path = args.font
     if not font_path:
-        font_path = get_cache_file_path("noto.ttf")
+        font_path = get_cache_file_path("source-han-serif-cn.ttf")
         download_font_assets()
 
     # 验证字体
