@@ -19,6 +19,9 @@ from yadt.document_il.utils.layout_helper import (
     is_same_style,
 )
 from yadt.translation_config import TranslationConfig
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class RichTextPlaceholder:
@@ -123,10 +126,13 @@ class ILTranslator:
                 for page in docs.page:
                     self.process_page(page, executor, pbar, tracker.new_page())
 
-        path = self.translation_config.get_working_file_path("translate_tracking.json")
+        path = self.translation_config.get_working_file_path(
+            "translate_tracking.json")
 
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(tracker.to_json())
+        if self.translation_config.debug:
+            logger.debug(f"save translate tracking to {path}")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(tracker.to_json())
 
     def process_page(
         self,
@@ -167,8 +173,10 @@ class ILTranslator:
         id: int,
         paragraph: PdfParagraph,
     ):
-        left_placeholder = self.translate_engine.get_rich_text_left_placeholder(id)
-        right_placeholder = self.translate_engine.get_rich_text_right_placeholder(id)
+        left_placeholder = self.translate_engine.get_rich_text_left_placeholder(
+            id)
+        right_placeholder = self.translate_engine.get_rich_text_right_placeholder(
+            id)
         if (
             left_placeholder in paragraph.unicode
             or right_placeholder in paragraph.unicode
@@ -229,7 +237,8 @@ class ILTranslator:
                     composition.pdf_same_style_characters.pdf_style,
                     paragraph.pdf_style,
                 ):
-                    chars.extend(composition.pdf_same_style_characters.pdf_character)
+                    chars.extend(
+                        composition.pdf_same_style_characters.pdf_character)
                     continue
                 placeholder = self.create_rich_text_placeholder(
                     composition.pdf_same_style_characters,
@@ -240,7 +249,8 @@ class ILTranslator:
                 # 样式需要一左一右两个占位符，所以 id+2
                 placeholder_id = placeholder.id + 2
                 chars.append(placeholder.left_placeholder)
-                chars.extend(composition.pdf_same_style_characters.pdf_character)
+                chars.extend(
+                    composition.pdf_same_style_characters.pdf_character)
                 chars.append(placeholder.right_placeholder)
             else:
                 raise Exception(
@@ -292,7 +302,7 @@ class ILTranslator:
         for match in re.finditer(combined_pattern, output):
             # 处理匹配之前的普通文本
             if match.start() > last_end:
-                text = output[last_end : match.start()]
+                text = output[last_end: match.start()]
                 if text:
                     comp = PdfParagraphComposition()
                     comp.pdf_same_style_unicode_characters = (
@@ -306,7 +316,8 @@ class ILTranslator:
 
             # 处理占位符
             if any(
-                isinstance(p, FormulaPlaceholder) and matched_text == p.placeholder
+                isinstance(
+                    p, FormulaPlaceholder) and matched_text == p.placeholder
                 for p in input.placeholders
             ):
                 # 处理公式占位符
@@ -328,7 +339,7 @@ class ILTranslator:
                     and matched_text.startswith(p.left_placeholder)
                 )
                 text = matched_text[
-                    len(placeholder.left_placeholder) : -len(
+                    len(placeholder.left_placeholder): -len(
                         placeholder.right_placeholder
                     )
                 ]
