@@ -382,7 +382,7 @@ class Typesetting:
         scale = 1.0
         line_spacing = 1.7  # 初始行距为1.7
         min_scale = 0.1  # 最小缩放因子
-        min_line_spacing = 1.1  # 最小行距
+        min_line_spacing = 1.4  # 最小行距
         expand_space_flag = False
 
         while scale >= min_scale:
@@ -425,6 +425,11 @@ class Typesetting:
                 # 行距已经最小，减小缩放因子
                 scale -= 0.1
                 line_spacing = 1.7  # 重置行距
+
+            if scale < 0.7 and min_line_spacing > 1.1:
+                min_line_spacing = 1.1
+                scale = 1.0
+                line_spacing = 1.7
 
     def create_typesetting_units(self,
                                  paragraph: il_version_1.PdfParagraph
