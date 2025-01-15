@@ -1,6 +1,7 @@
 import asyncio
 import io
 import os
+import time
 from asyncio import CancelledError
 from typing import Any, BinaryIO, Optional
 
@@ -151,6 +152,7 @@ def start_parse_il(
 def translate(translation_config: TranslationConfig):
     original_pdf_path = translation_config.input_file
     logger.info(f"start to translate: {original_pdf_path}")
+    start_time = time.time()
 
     doc_input = Document(original_pdf_path)
     if translation_config.debug:
@@ -233,3 +235,7 @@ def translate(translation_config: TranslationConfig):
     pdf_creater = PDFCreater(original_pdf_path, docs2, translation_config.font)
 
     pdf_creater.write(translation_config)
+
+    finish_time = time.time()
+
+    logger.info(f"finish translate: {original_pdf_path}, cost: {finish_time - start_time} s")
