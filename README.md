@@ -1,20 +1,49 @@
-Yet Another Document Translator
-===
+# Yet Another Document Translator
+
+## Get Started
+
+### Install from PyPI
+
+We recommend using the Tool feature of [uv](https://github.com/astral-sh/uv) to install yadt.
+
+1. First, you need to refer to [uv installation](https://github.com/astral-sh/uv#installation) to install uv and set up the `PATH` environment variable as prompted.
+
+2. Use the command `uv tool install --python 3.12 yadt` to install yadt.
+
+3. Use the `yadt` command. For example: `yadt --bing example.pdf`
+
+### Install from Source
+
+We still recommend using [uv](https://github.com/astral-sh/uv) to manage virtual environments.
+
+1. First, you need to refer to [uv installation](https://github.com/astral-sh/uv#installation) to install uv and set up the `PATH` environment variable as prompted.
+
+2. Clone the project: `git clone https://github.com/funstory-ai/yadt`
+
+3. Enter the project directory: `cd yadt`
+
+4. Use the `uv sync` command to create a virtual environment and install dependencies.
+
+5. Use the `uv run yadt` command. For example: `uv run yadt --bing examples/pdf/il_try_1/这是一个测试文件.pdf`
 
 ## Background
+
 There a lot projects and teams working on to make document editing and tranlslating easier like:
+
 - [mathpix](https://mathpix.com/)
 - [Doc2X](https://doc2x.noedgeai.com/)
 - [minerU](https://github.com/opendatalab/MinerU)
 - [PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate)
 
 There are also some solutions to solve specific parts of the problem like:
+
 - [layoutreader](https://github.com/microsoft/unilm/tree/master/layoutreader): the read order of the text block in a pdf
 - [Surya](https://github.com/surya-is/surya): the structure of the pdf
 
-This project hope to promote a standard pipeline and interface to solve the problem. 
+This project hope to promote a standard pipeline and interface to solve the problem.
 
 In fact, there are two mainy stage of a PDF parser or translator:
+
 - **Parsing**: A stage of parsing means to get the structure of the pdf such as text blocks, images, tables, etc.
 - **Rendering**: A stage of rendering means to render the structure into a new pdf or other format.
 
@@ -35,7 +64,6 @@ Our fisrt 1.0 version goal is to finish a translation from [PDF Reference, Versi
 - Spanish
 
 And meet the following requirements:
+
 - layout error less than 1%
 - content loss less than 1%
-
-
