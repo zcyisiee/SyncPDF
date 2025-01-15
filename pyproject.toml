@@ -1,10 +1,10 @@
 [project]
 name = "yadt"
-version = "0.0.1a11"
+version = "0.0.1a12"
 description = "Yet Another Document Translator"
 license = "AGPL-3.0"
 readme = "README.md"
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.12,<3.13"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
