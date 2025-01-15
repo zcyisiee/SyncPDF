@@ -34,10 +34,7 @@ git clone https://github.com/funstory-ai/yadt
 # enter the project directory
 cd yadt
 
-# install dependencies
-uv sync
-
-# run yadt
+# install dependencies and run yadt
 uv run yadt --help
 ```
 
