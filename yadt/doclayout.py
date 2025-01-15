@@ -1,5 +1,6 @@
 import abc
 import os.path
+import platform
 
 import cv2
 import numpy as np
@@ -59,13 +60,26 @@ class YoloBox:
         self.cls = data[-1]
 
 
-providers = [
-    ('CoreMLExecutionProvider', {
-        "ModelFormat": "MLProgram", "MLComputeUnits": "ALL",
-        "RequireStaticInputShapes": "0", "EnableOnSubgraphs": "0"
-    }),
-    'CPUExecutionProvider'
-]
+# 检测操作系统类型
+os_name = platform.system()
+
+providers = []
+
+if os_name == "Darwin":  # Darwin 是macOS在platform.system中的标识
+    providers.append(
+        (
+            "CoreMLExecutionProvider",
+            {
+                "ModelFormat": "MLProgram",
+                "MLComputeUnits": "ALL",
+                "RequireStaticInputShapes": "0",
+                "EnableOnSubgraphs": "0",
+            },
+        )
+    )
+providers.append("CPUExecutionProvider")  # CPU执行提供者作为通用后备选项
+
+
 class OnnxModel(DocLayoutModel):
     def __init__(self, model_path: str):
         self.model_path = model_path
@@ -75,7 +89,9 @@ class OnnxModel(DocLayoutModel):
         self._stride = ast.literal_eval(metadata["stride"])
         self._names = ast.literal_eval(metadata["names"])
 
-        self.model = onnxruntime.InferenceSession(model.SerializeToString(), providers=providers)
+        self.model = onnxruntime.InferenceSession(
+            model.SerializeToString(), providers=providers
+        )
 
     @staticmethod
     def from_pretrained(repo_id: str, filename: str):
