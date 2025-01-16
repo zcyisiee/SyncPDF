@@ -1,6 +1,6 @@
 # Yet Another Document Translator
 
-## Get Started
+## Getting Started
 
 ### Install from PyPI
 
