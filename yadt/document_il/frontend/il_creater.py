@@ -86,7 +86,7 @@ class ILCreater:
                     int(to_unicode_id.split(" ")[0])
                 )
                 range = re.search(
-                    b"begincodespacerange\n?.*<(\d+?)>.*", to_unicode_bytes
+                    b"begincodespacerange\n?.*<(\\d+?)>.*", to_unicode_bytes
                 ).group(1)
                 encoding_length = len(range) // 2
             except:
