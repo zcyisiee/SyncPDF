@@ -127,6 +127,7 @@ class TypesettingUnit:
             return False
         unicode = self.try_get_unicode()
         return unicode == " "
+
     @property
     def is_hung_punctuation(self):
         if self.formular:
@@ -418,19 +419,19 @@ class Typesetting:
                 continue
 
             if (
-                last_unit
+                last_unit  # 有上一个单元
                 and last_unit.is_chinese_char ^ unit.is_chinese_char  # 中英文交界处
                 and (
                     (
                         last_unit.box
                         and last_unit.box.y
-                        and abs(last_unit.box.y - current_y) < 0.1
+                        and current_y < last_unit.box.y2 < current_y + line_height
                     )
                     or (last_unit.y and abs(last_unit.y - current_y) < 0.1)
                 )  # 在同一行
                 and not last_unit.mixed_character_blacklist  # 不是混排空格黑名单字符
                 and not unit.mixed_character_blacklist  # 同上
-                and current_x > box.x
+                and current_x > box.x  # 不是行首
             ):
                 current_x += space_width * 0.5
 
