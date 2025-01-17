@@ -442,6 +442,8 @@ class StylesAndFormulas:
         return False
 
     def is_formulas_char(self, char: str) -> bool:
+        if '(cid:' in char:
+            return True
         if self.translation_config.formular_char_pattern:
             pattern = self.translation_config.formular_char_pattern
             if re.match(pattern, char):

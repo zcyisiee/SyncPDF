@@ -18,13 +18,16 @@ class Layout:
             return False
 
         # 获取两个字符的中心 y 坐标
-        prev_y = (prev_char.box.y + prev_char.box.y2) / 2
-        curr_y = (curr_char.box.y + curr_char.box.y2) / 2
+        # prev_y = (prev_char.box.y + prev_char.box.y2) / 2
+        # curr_y = (curr_char.box.y + curr_char.box.y2) / 2
 
         # 如果当前字符的 y 坐标明显低于前一个字符，说明换行了
         # 这里使用字符高度的一半作为阈值
         char_height = curr_char.box.y2 - curr_char.box.y
-        return curr_y < prev_y - char_height / 2
+        should_new_line = curr_char.box.y2 < prev_char.box.y
+        if should_new_line:
+            pass
+        return should_new_line
 
 
 def get_paragraph_length_except(
