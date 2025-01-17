@@ -1,3 +1,5 @@
+import copy
+
 import orjson
 from xsdata.formats.dataclass.context import XmlContext
 from xsdata.formats.dataclass.parsers import XmlParser
@@ -5,7 +7,7 @@ from xsdata.formats.dataclass.serializers import XmlSerializer
 from xsdata.formats.dataclass.serializers.config import SerializerConfig
 
 from yadt.document_il import il_version_1
-import copy
+
 
 class XMLConverter:
     def __init__(self):
@@ -31,7 +33,9 @@ class XMLConverter:
             il_version_1.Document,
         )
 
-    def deepcopy(self, document: il_version_1.Document) -> il_version_1.Document:
+    def deepcopy(
+        self, document: il_version_1.Document
+    ) -> il_version_1.Document:
         return copy.deepcopy(document)
         # return self.from_xml(self.to_xml(document))
 
@@ -46,4 +50,3 @@ class XMLConverter:
     def write_json(self, document: il_version_1.Document, path: str):
         with open(path, "w", encoding="utf-8") as f:
             f.write(self.to_json(document))
-

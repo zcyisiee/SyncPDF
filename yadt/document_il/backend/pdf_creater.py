@@ -18,6 +18,7 @@ from pdfminer.pdftypes import (
 )
 
 from yadt.document_il import il_version_1
+from yadt.document_il.utils.fontmap import FontMapper
 from yadt.translation_config import TranslationConfig
 
 
@@ -26,11 +27,12 @@ class PDFCreater:
         self,
         original_pdf_path: str,
         document: il_version_1.Document,
-        font_path: str,
+        translation_config: TranslationConfig,
     ):
         self.original_pdf_path = original_pdf_path
         self.docs = document
-        self.font_path = font_path
+        self.font_path = translation_config.font
+        self.font_mapper = FontMapper(translation_config)
 
     def render_graphic_state(
         self, draw_op: BitStream, graphic_state: il_version_1.GraphicState
@@ -39,13 +41,11 @@ class PDFCreater:
             return
         if graphic_state.stroking_color_space_name:
             draw_op.append(
-                f"/{graphic_state.stroking_color_space_name}"
-                f" CS \n".encode()
+                f"/{graphic_state.stroking_color_space_name}" f" CS \n".encode()
             )
         if graphic_state.non_stroking_color_space_name:
             draw_op.append(
-                f"/{graphic_state.non_stroking_color_space_name}"
-                f" cs \n".encode()
+                f"/{graphic_state.non_stroking_color_space_name}" f" cs \n".encode()
             )
         if graphic_state.ncolor is not None:
             if len(graphic_state.ncolor) == 1:
@@ -69,9 +69,7 @@ class PDFCreater:
     ) -> list[il_version_1.PdfCharacter]:
         chars = []
         for composition in paragraph.pdf_paragraph_composition:
-            if not isinstance(
-                composition.pdf_character, il_version_1.PdfCharacter
-            ):
+            if not isinstance(composition.pdf_character, il_version_1.PdfCharacter):
                 raise Exception(
                     f"Unknown composition type. "
                     f"This type only appears in the IL "
@@ -143,15 +141,15 @@ class PDFCreater:
         for page in il.page:
             page.pdf_font.append(pdf_font_il)
 
-    def get_available_font_list(self, pdf,page):
+    def get_available_font_list(self, pdf, page):
         page_xref_id = pdf[page.page_number].xref
-        resources_type, r_id = pdf.xref_get_key(page_xref_id, 'Resources')
-        if resources_type == 'dict':
-            font_dict = re.search('/Font<<(.+?)>>', r_id).group(1)
+        resources_type, r_id = pdf.xref_get_key(page_xref_id, "Resources")
+        if resources_type == "dict":
+            font_dict = re.search("/Font<<(.+?)>>", r_id).group(1)
         else:
-            r_id = int(r_id.split(' ')[0])
-            _, font_dict = pdf.xref_get_key(r_id, 'Font')
-        fonts = re.findall('/([^ ]+?) ', font_dict)
+            r_id = int(r_id.split(" ")[0])
+            _, font_dict = pdf.xref_get_key(r_id, "Font")
+        fonts = re.findall("/([^ ]+?) ", font_dict)
         return set(fonts)
 
     def write(self, translation_config: TranslationConfig):
@@ -160,12 +158,11 @@ class PDFCreater:
             f"{translation_config.lang_out}.mono.pdf"
         )
         pdf = pymupdf.open(self.original_pdf_path)
-        self.add_font(pdf, self.docs)
+        self.font_mapper.add_font(pdf, self.docs)
+        # self.add_font(pdf, self.docs)
         for page in self.docs.page:
-            available_font_list = self.get_available_font_list(pdf,page)
-            encoding_length_map = {
-                f.font_id: f.encoding_length for f in page.pdf_font
-            }
+            available_font_list = self.get_available_font_list(pdf, page)
+            encoding_length_map = {f.font_id: f.encoding_length for f in page.pdf_font}
             draw_op = BitStream()
             # q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}
             draw_op.append(b"q ")
@@ -197,9 +194,7 @@ class PDFCreater:
                 if font_id not in available_font_list:
                     continue
                 draw_op.append(b"q ")
-                self.render_graphic_state(
-                    draw_op, char.pdf_style.graphic_state
-                )
+                self.render_graphic_state(draw_op, char.pdf_style.graphic_state)
                 if char.vertical:
                     draw_op.append(
                         f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {

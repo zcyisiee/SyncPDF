@@ -31,7 +31,11 @@ PDFFont =
     attribute name { xsd:string },
     attribute fontId { xsd:string },
     attribute xrefId { PDFXrefId },
-    attribute encodingLength { xsd:int }
+    attribute encodingLength { xsd:int },
+    attribute bold { xsd:boolean }?,
+    attribute italic { xsd:boolean }?,
+    attribute monospace { xsd:boolean }?,
+    attribute serif { xsd:boolean }?
   }
 PDFCharacter =
   element pdfCharacter {

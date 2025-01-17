@@ -1,4 +1,6 @@
 import math
+import statistics
+import unicodedata
 from typing import Optional
 
 import pymupdf
@@ -6,20 +8,20 @@ import pymupdf
 from yadt.document_il import (
     Box,
     PdfCharacter,
+    PdfFormula,
     PdfLine,
     PdfParagraph,
     PdfParagraphComposition,
     PdfStyle,
     il_version_1,
-    PdfFormula,
 )
+from yadt.document_il.utils.fontmap import FontMapper
 from yadt.document_il.utils.layout_helper import (
     get_paragraph_length_except,
     get_paragraph_max_height,
     get_paragraph_unicode,
 )
-import unicodedata
-import statistics
+from yadt.translation_config import TranslationConfig
 
 
 class TypesettingUnit:
@@ -52,6 +54,7 @@ class TypesettingUnit:
             assert len(unicode) == 1, "Unicode must be a single character"
 
             self.font = font
+            self.font_id = font.font_id
             self.font_size = font_size
             self.style = style
 
@@ -217,7 +220,6 @@ class TypesettingUnit:
                 scale=scale,
                 vertical=self.char.vertical,
                 advance=self.char.advance * scale if self.char.advance else None,
-                x_offset=self.char.x_offset * scale if self.char.x_offset else None,
             )
             return TypesettingUnit(char=new_char)
 
@@ -254,7 +256,6 @@ class TypesettingUnit:
                     scale=scale,
                     vertical=char.vertical,
                     advance=char.advance * scale if char.advance else None,
-                    x_offset=char.x_offset * scale if char.x_offset else None,
                 )
                 new_chars.append(new_char)
 
@@ -321,7 +322,7 @@ class TypesettingUnit:
                     y2=self.y + self.font_size,
                 ),
                 pdf_style=PdfStyle(
-                    font_id="noto",
+                    font_id=self.font_id,
                     font_size=self.font_size,
                     graphic_state=self.style.graphic_state,
                 ),
@@ -335,22 +336,26 @@ class TypesettingUnit:
 
 
 class Typesetting:
-    def __init__(self, font_path: str):
-        self.font = pymupdf.Font(fontfile=font_path)
+    def __init__(self, translation_config: TranslationConfig):
+        self.font_mapper = FontMapper(translation_config)
 
     def typsetting_document(self, document: il_version_1.Document):
         for page in document.page:
             self.render_page(page)
 
     def render_page(self, page: il_version_1.Page):
+        fonts = {f.font_id: f for f in page.pdf_font}
         # 开始实际的渲染过程
         for paragraph in page.pdf_paragraph:
-            self.render_paragraph(paragraph, page)
+            self.render_paragraph(paragraph, page, fonts)
 
     def render_paragraph(
-        self, paragraph: il_version_1.PdfParagraph, page: il_version_1.Page
+        self,
+        paragraph: il_version_1.PdfParagraph,
+        page: il_version_1.Page,
+        fonts: dict[str, il_version_1.PdfFont],
     ):
-        typesetting_units = self.create_typesetting_units(paragraph)
+        typesetting_units = self.create_typesetting_units(paragraph, fonts)
         # 如果所有单元都可以直接传递，则直接传递
         if all(unit.can_passthrough for unit in typesetting_units):
             paragraph.scale = 1.0
@@ -391,7 +396,7 @@ class Typesetting:
         font_sizes.sort()
         font_size = statistics.mode(font_sizes)
 
-        space_width = self.font.char_lengths(" ", font_size * scale)[0]
+        space_width = self.font_mapper.base_font.char_lengths(" ", font_size * scale)[0]
 
         # 计算平均行高
         avg_height = (
@@ -530,7 +535,9 @@ class Typesetting:
                 line_spacing = 1.7
 
     def create_typesetting_units(
-        self, paragraph: il_version_1.PdfParagraph
+        self,
+        paragraph: il_version_1.PdfParagraph,
+        fonts: dict[str, il_version_1.PdfFont],
     ) -> list[TypesettingUnit]:
         if not paragraph.pdf_paragraph_composition:
             return []
@@ -559,7 +566,7 @@ class Typesetting:
                     [
                         TypesettingUnit(
                             unicode=char_unicode,
-                            font=self.font,
+                            font=self.font_mapper.map(fonts[composition.pdf_same_style_unicode_characters.pdf_style.font_id], char_unicode),
                             font_size=composition.pdf_same_style_unicode_characters.pdf_style.font_size,
                             style=composition.pdf_same_style_unicode_characters.pdf_style,
                         )

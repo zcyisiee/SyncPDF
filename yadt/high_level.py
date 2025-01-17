@@ -157,8 +157,7 @@ def translate(translation_config: TranslationConfig):
     doc_input = Document(original_pdf_path)
     if translation_config.debug:
         logger.debug("debug mode, save decompressed input pdf")
-        output_path = translation_config.get_working_file_path(
-            "input.decompressed.pdf")
+        output_path = translation_config.get_working_file_path("input.decompressed.pdf")
         doc_input.save(output_path, expand=True, pretty=True)
 
     # Continue with original processing
@@ -191,24 +190,21 @@ def translate(translation_config: TranslationConfig):
 
     if translation_config.debug:
         xml_converter.write_json(
-            docs, translation_config.get_working_file_path(
-                "create_il.debug.json")
+            docs, translation_config.get_working_file_path("create_il.debug.json")
         )
 
     ParagraphFinder().process(docs)
     logger.debug(f"finish paragraph finder from {temp_pdf_path}")
     if translation_config.debug:
         xml_converter.write_json(
-            docs, translation_config.get_working_file_path(
-                "paragraph_finder.json")
+            docs, translation_config.get_working_file_path("paragraph_finder.json")
         )
 
     StylesAndFormulas(translation_config).process(docs)
     logger.debug(f"finish styles and formulas from {temp_pdf_path}")
     if translation_config.debug:
         xml_converter.write_json(
-            docs, translation_config.get_working_file_path(
-                "styles_and_formulas.json")
+            docs, translation_config.get_working_file_path("styles_and_formulas.json")
         )
 
     translate_engine = translation_config.translator
@@ -217,26 +213,28 @@ def translate(translation_config: TranslationConfig):
     logger.debug(f"finish ILTranslator from {temp_pdf_path}")
     if translation_config.debug:
         xml_converter.write_json(
-            docs, translation_config.get_working_file_path(
-                "il_translated.json")
+            docs, translation_config.get_working_file_path("il_translated.json")
         )
 
-    Typesetting(font_path=translation_config.font).typsetting_document(docs)
+    Typesetting(translation_config).typsetting_document(docs)
     logger.debug(f"finish typsetting from {temp_pdf_path}")
     if translation_config.debug:
         xml_converter.write_json(
-            docs, translation_config.get_working_file_path(
-                "typsetting.json")
+            docs, translation_config.get_working_file_path("typsetting.json")
         )
 
     # deepcopy
     docs2 = xml_converter.deepcopy(docs)
 
-    pdf_creater = PDFCreater(original_pdf_path, docs2, translation_config.font)
+    pdf_creater = PDFCreater(
+        original_pdf_path, docs2, translation_config
+    )
 
     pdf_creater.write(translation_config)
 
     finish_time = time.time()
 
-    logger.info(f"finish translate: {original_pdf_path}, cost: {
-                finish_time - start_time} s")
+    logger.info(
+        f"finish translate: {original_pdf_path}, cost: {
+                finish_time - start_time} s"
+    )

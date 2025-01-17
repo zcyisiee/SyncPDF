@@ -92,7 +92,7 @@ class StylesAndFormulas:
                         )
                     )
 
-                    if char.char_unicode == ' ':
+                    if char.char_unicode == " ":
                         is_formula = is_current_formula
 
                     if is_formula != is_current_formula and current_chars:
@@ -197,7 +197,8 @@ class StylesAndFormulas:
         # 如果font_id或font_size为None，则使用众数
         if base_style.font_id is None:
             base_style.font_id = self._get_mode_value(
-                [s.font_id for s in styles])
+                [s.font_id for s in styles]
+            )
         if base_style.font_size is None:
             base_style.font_size = self._get_mode_value(
                 [s.font_size for s in styles]
@@ -210,6 +211,7 @@ class StylesAndFormulas:
         if not values:
             return None
         from collections import Counter
+
         counter = Counter(values)
         return counter.most_common(1)[0][0]
 
@@ -444,7 +446,7 @@ class StylesAndFormulas:
         return False
 
     def is_formulas_char(self, char: str) -> bool:
-        if '(cid:' in char:
+        if "(cid:" in char:
             return True
         if self.translation_config.formular_char_pattern:
             pattern = self.translation_config.formular_char_pattern

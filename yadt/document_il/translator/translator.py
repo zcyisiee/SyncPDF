@@ -190,7 +190,7 @@ class BingTranslator(BaseTranslator):
         iid = re.findall(r"data-iid=\"(.*?)\"", response.text)[-1]
         key, token = re.findall(
             r"params_AbusePreventionHelper\s=\s\[(.*?),\"(.*?)\",",
-            response.text
+            response.text,
         )[0]
         return url, ig, iid, key, token
 

@@ -56,6 +56,10 @@
       <xs:attribute name="fontId" use="required" type="xs:string"/>
       <xs:attribute name="xrefId" use="required" type="PDFXrefId"/>
       <xs:attribute name="encodingLength" use="required" type="xs:int"/>
+      <xs:attribute name="bold" type="xs:boolean"/>
+      <xs:attribute name="italic" type="xs:boolean"/>
+      <xs:attribute name="monospace" type="xs:boolean"/>
+      <xs:attribute name="serif" type="xs:boolean"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfCharacter">
@@ -69,7 +73,6 @@
       <xs:attribute name="pdfCharacterId" type="xs:int"/>
       <xs:attribute name="char_unicode" use="required" type="xs:string"/>
       <xs:attribute name="advance" type="xs:float"/>
-      <xs:attribute name="x_offset" type="xs:float"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pageLayout">

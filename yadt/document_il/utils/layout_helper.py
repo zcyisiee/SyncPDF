@@ -1,9 +1,14 @@
 import math
-from typing import List, Union, Optional
+from typing import List, Optional, Union
 
 from pymupdf import Font
 
-from yadt.document_il.il_version_1 import PdfCharacter, PdfParagraph, PdfParagraphComposition, Box
+from yadt.document_il.il_version_1 import (
+    Box,
+    PdfCharacter,
+    PdfParagraph,
+    PdfParagraphComposition,
+)
 
 
 class Layout:
@@ -260,22 +265,22 @@ def add_space_dummy_chars(paragraph: PdfParagraph) -> None:
         elif composition.pdf_formula:
             chars = composition.pdf_formula.pdf_character
             _add_space_dummy_chars_to_list(chars)
-    
+
     # 然后处理组成部分之间的空格
     for i in range(len(paragraph.pdf_paragraph_composition) - 1):
         curr_comp = paragraph.pdf_paragraph_composition[i]
         next_comp = paragraph.pdf_paragraph_composition[i + 1]
-        
+
         # 获取当前组成部分的最后一个字符
         curr_last_char = _get_last_char_from_composition(curr_comp)
         if not curr_last_char:
             continue
-            
+
         # 获取下一个组成部分的第一个字符
         next_first_char = _get_first_char_from_composition(next_comp)
         if not next_first_char:
             continue
-            
+
         # 检查两个组成部分之间是否需要添加空格
         distance = next_first_char.box.x - curr_last_char.box.x2
         if distance > 1:  # 只考虑正向距离
@@ -284,31 +289,38 @@ def add_space_dummy_chars(paragraph: PdfParagraph) -> None:
                 x=curr_last_char.box.x2,
                 y=curr_last_char.box.y,
                 x2=curr_last_char.box.x2 + distance,
-                y2=curr_last_char.box.y2
+                y2=curr_last_char.box.y2,
             )
-            
+
             space_char = PdfCharacter(
                 pdf_style=curr_last_char.pdf_style,
                 box=space_box,
                 char_unicode=" ",
                 scale=curr_last_char.scale,
-                advance=space_box.x2 - space_box.x
+                advance=space_box.x2 - space_box.x,
             )
-            
+
             # 将空格添加到当前组成部分的末尾
             if curr_comp.pdf_line:
                 curr_comp.pdf_line.pdf_character.append(space_char)
             elif curr_comp.pdf_same_style_characters:
-                curr_comp.pdf_same_style_characters.pdf_character.append(space_char)
+                curr_comp.pdf_same_style_characters.pdf_character.append(
+                    space_char
+                )
             elif curr_comp.pdf_formula:
                 curr_comp.pdf_formula.pdf_character.append(space_char)
 
 
-def _get_first_char_from_composition(comp: PdfParagraphComposition) -> Optional[PdfCharacter]:
+def _get_first_char_from_composition(
+    comp: PdfParagraphComposition,
+) -> Optional[PdfCharacter]:
     """获取组成部分的第一个字符"""
     if comp.pdf_line and comp.pdf_line.pdf_character:
         return comp.pdf_line.pdf_character[0]
-    elif comp.pdf_same_style_characters and comp.pdf_same_style_characters.pdf_character:
+    elif (
+        comp.pdf_same_style_characters
+        and comp.pdf_same_style_characters.pdf_character
+    ):
         return comp.pdf_same_style_characters.pdf_character[0]
     elif comp.pdf_formula and comp.pdf_formula.pdf_character:
         return comp.pdf_formula.pdf_character[0]
@@ -317,11 +329,16 @@ def _get_first_char_from_composition(comp: PdfParagraphComposition) -> Optional[
     return None
 
 
-def _get_last_char_from_composition(comp: PdfParagraphComposition) -> Optional[PdfCharacter]:
+def _get_last_char_from_composition(
+    comp: PdfParagraphComposition,
+) -> Optional[PdfCharacter]:
     """获取组成部分的最后一个字符"""
     if comp.pdf_line and comp.pdf_line.pdf_character:
         return comp.pdf_line.pdf_character[-1]
-    elif comp.pdf_same_style_characters and comp.pdf_same_style_characters.pdf_character:
+    elif (
+        comp.pdf_same_style_characters
+        and comp.pdf_same_style_characters.pdf_character
+    ):
         return comp.pdf_same_style_characters.pdf_character[-1]
     elif comp.pdf_formula and comp.pdf_formula.pdf_character:
         return comp.pdf_formula.pdf_character[-1]
@@ -362,25 +379,27 @@ def _add_space_dummy_chars_to_list(chars: List[PdfCharacter]) -> None:
     while i < len(chars) - 1:
         curr_char = chars[i]
         next_char = chars[i + 1]
-        
+
         distance = next_char.box.x - curr_char.box.x2
-        if distance >= median_distance or Layout.is_newline(curr_char, next_char):
+        if distance >= median_distance or Layout.is_newline(
+            curr_char, next_char
+        ):
             # 创建一个dummy字符作为空格
             space_box = Box(
                 x=curr_char.box.x2,
                 y=curr_char.box.y,
                 x2=curr_char.box.x2 + min(distance, median_distance),
-                y2=curr_char.box.y2
+                y2=curr_char.box.y2,
             )
-            
+
             space_char = PdfCharacter(
                 pdf_style=curr_char.pdf_style,
                 box=space_box,
                 char_unicode=" ",
                 scale=curr_char.scale,
-                advance=space_box.x2 - space_box.x
+                advance=space_box.x2 - space_box.x,
             )
-            
+
             # 在当前位置后插入空格字符
             chars.insert(i + 1, space_char)
             i += 2  # 跳过刚插入的空格

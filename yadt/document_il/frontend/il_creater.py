@@ -48,7 +48,9 @@ class ILCreater:
         x1: float | int,
         y1: float | int,
     ):
-        box = il_version_1.Box(x=float(x0), y=float(y0), x2=float(x1), y2=float(y1))
+        box = il_version_1.Box(
+            x=float(x0), y=float(y0), x2=float(x1), y2=float(y1)
+        )
         self.current_page.cropbox = il_version_1.Cropbox(box=box)
 
     def on_page_media_box(
@@ -58,7 +60,9 @@ class ILCreater:
         x1: float | int,
         y1: float | int,
     ):
-        box = il_version_1.Box(x=float(x0), y=float(y0), x2=float(x1), y2=float(y1))
+        box = il_version_1.Box(
+            x=float(x0), y=float(y0), x2=float(x1), y2=float(y1)
+        )
         self.current_page.mediabox = il_version_1.Mediabox(box=box)
 
     def on_page_number(self, page_number: int):
@@ -69,7 +73,9 @@ class ILCreater:
         self.on_page_layout(page_number)
 
     def on_page_base_operation(self, operation: str):
-        self.current_page.base_operations = il_version_1.BaseOperations(value=operation)
+        self.current_page.base_operations = il_version_1.BaseOperations(
+            value=operation
+        )
 
     def on_page_resource_font(self, font: PDFFont, xref_id: int, font_id: str):
         font_name = font.fontname
@@ -77,11 +83,15 @@ class ILCreater:
             try:
                 font_name = font.fontname.decode("utf-8")
             except UnicodeDecodeError:
-                font_name = "BASE64:" + base64.b64encode(font_name).decode("utf-8")
+                font_name = "BASE64:" + base64.b64encode(font_name).decode(
+                    "utf-8"
+                )
         encoding_length = 1
         if isinstance(font, PDFCIDFont):
             try:
-                _, to_unicode_id = self.mupdf.xref_get_key(xref_id, "ToUnicode")
+                _, to_unicode_id = self.mupdf.xref_get_key(
+                    xref_id, "ToUnicode"
+                )
                 to_unicode_bytes = self.mupdf.xref_stream(
                     int(to_unicode_id.split(" ")[0])
                 )
@@ -94,11 +104,28 @@ class ILCreater:
                     encoding_length = 2
                 else:
                     encoding_length = 1
+        try:
+            mupdf_font = pymupdf.Font(
+                fontbuffer=self.mupdf.extract_font(xref_id)[3]
+            )
+            bold = mupdf_font.is_bold
+            italic = mupdf_font.is_italic
+            monospaced = mupdf_font.is_monospaced
+            serif = mupdf_font.is_serif
+        except:
+            bold = None
+            italic = None
+            monospaced = None
+            serif = None
         il_font_metadata = il_version_1.PdfFont(
             name=font_name,
             xref_id=xref_id,
             font_id=font_id,
             encoding_length=encoding_length,
+            bold=bold,
+            italic=italic,
+            monospace=monospaced,
+            serif=serif,
         )
         self.current_page_font_name_id_map[font_name] = font_id
         self.current_page.pdf_font.append(il_font_metadata)
@@ -121,13 +148,19 @@ class ILCreater:
             continue
             raise NotImplementedError
 
-        graphic_state.stroking_color_space_name = self.stroking_color_space_name
-        graphic_state.non_stroking_color_space_name = self.non_stroking_color_space_name
+        graphic_state.stroking_color_space_name = (
+            self.stroking_color_space_name
+        )
+        graphic_state.non_stroking_color_space_name = (
+            self.non_stroking_color_space_name
+        )
         return graphic_state
 
     def on_lt_char(self, char: LTChar):
         gs = self.create_graphic_state(char.graphicstate)
-        bbox = il_version_1.Box(char.bbox[0], char.bbox[1], char.bbox[2], char.bbox[3])
+        bbox = il_version_1.Box(
+            char.bbox[0], char.bbox[1], char.bbox[2], char.bbox[3]
+        )
 
         font_id = self.current_page_font_name_id_map[char.font.fontname]
         char_id = char.cid
@@ -153,12 +186,15 @@ class ILCreater:
         self.current_page.pdf_character.append(pdf_char)
 
     def on_page_layout(self, page_number):
-        if self.translation_config.should_translate_page(page_number + 1) is False:
+        if (
+            self.translation_config.should_translate_page(page_number + 1)
+            is False
+        ):
             return
         pix = self.mupdf[page_number].get_pixmap()
-        image = np.fromstring(pix.samples, np.uint8).reshape(pix.height, pix.width, 3)[
-            :, :, ::-1
-        ]
+        image = np.fromstring(pix.samples, np.uint8).reshape(
+            pix.height, pix.width, 3
+        )[:, :, ::-1]
         h, w = pix.height, pix.width
         layouts = self.model.predict(image, imgsz=int(pix.height / 32) * 32)[0]
         id = 0
@@ -174,7 +210,9 @@ class ILCreater:
             )
             page_layout = il_version_1.PageLayout(
                 id=id,
-                box=il_version_1.Box(x0.item(), y0.item(), x1.item(), y1.item()),
+                box=il_version_1.Box(
+                    x0.item(), y0.item(), x1.item(), y1.item()
+                ),
                 conf=layout.conf.item(),
                 class_name=layouts.names[layout.cls],
             )
@@ -184,7 +222,9 @@ class ILCreater:
         pages = [
             page
             for page in self.docs.page
-            if self.translation_config.should_translate_page(page.page_number + 1)
+            if self.translation_config.should_translate_page(
+                page.page_number + 1
+            )
         ]
         self.docs.page = pages
         return self.docs

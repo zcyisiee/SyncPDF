@@ -166,6 +166,21 @@ def download_font_assets():
             "https://github.com/junmer/source-han-serif-ttf"
             "/raw/refs/heads/master/SubsetTTF/CN/SourceHanSerifCN-Regular.ttf",
         ),
+        (
+            "source-han-serif-cn-bold.ttf",
+            "https://github.com/junmer/source-han-serif-ttf"
+            "/raw/refs/heads/master/SubsetTTF/CN/SourceHanSerifCN-Bold.ttf",
+        ),
+        (
+            "SourceHanSansSC-Regular.ttf",
+            "https://github.com/iizyd/SourceHanSansCN-TTF-Min"
+            "/raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Regular.ttf"
+        ),
+        (
+            "SourceHanSansSC-Bold.ttf",
+            "https://github.com/iizyd/SourceHanSansCN-TTF-Min"
+            "/raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Bold.ttf"
+        )
     ]
     for name, url in assets:
         save_path = get_cache_file_path(name)

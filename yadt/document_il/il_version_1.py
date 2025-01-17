@@ -167,6 +167,30 @@ class PdfFont:
             "required": True,
         },
     )
+    bold: Optional[bool] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    italic: Optional[bool] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    monospace: Optional[bool] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    serif: Optional[bool] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass
@@ -329,12 +353,6 @@ class PdfCharacter:
         },
     )
     advance: Optional[float] = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-        },
-    )
-    x_offset: Optional[float] = field(
         default=None,
         metadata={
             "type": "Attribute",

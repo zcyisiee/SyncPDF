@@ -81,6 +81,26 @@
       <attribute name="encodingLength">
         <data type="int"/>
       </attribute>
+      <optional>
+        <attribute name="bold">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="italic">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="monospace">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="serif">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
     </element>
   </define>
   <define name="PDFCharacter">
@@ -105,11 +125,6 @@
       </attribute>
       <optional>
         <attribute name="advance">
-          <data type="float"/>
-        </attribute>
-      </optional>
-      <optional>
-        <attribute name="x_offset">
           <data type="float"/>
         </attribute>
       </optional>

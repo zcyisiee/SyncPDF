@@ -10,12 +10,15 @@ from yadt.document_il import (
 )
 from yadt.document_il.utils.layout_helper import (
     Layout,
-    get_char_unicode_string, add_space_dummy_chars,
+    add_space_dummy_chars,
+    get_char_unicode_string,
 )
 
 
 class ParagraphFinder:
-    def update_paragraph_data(self, paragraph: PdfParagraph, update_unicode=False):
+    def update_paragraph_data(
+        self, paragraph: PdfParagraph, update_unicode=False
+    ):
         if not paragraph.pdf_paragraph_composition:
             return
 
