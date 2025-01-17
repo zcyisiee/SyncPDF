@@ -224,7 +224,7 @@ class PDFCreater:
             pdf[page.page_number].set_contents(op_container)
         pdf.subset_fonts(fallback=False)
         if not translation_config.no_mono:
-            pdf.save(mono_out_path, garbage=3, deflate=True)
+            pdf.save(mono_out_path, garbage=3, deflate=True, clean=True, deflate_fonts=True, linear=True)
             if translation_config.debug:
                 pdf.save(
                     f"{mono_out_path}.decompressed.pdf",
@@ -241,7 +241,7 @@ class PDFCreater:
             page_count = pdf.page_count
             for id in range(page_count):
                 dual.move_page(page_count + id, id * 2 + 1)
-            dual.save(dual_out_path, garbage=3, deflate=True)
+            dual.save(dual_out_path, garbage=3, deflate=True, clean=True, deflate_fonts=True, linear=True)
             if translation_config.debug:
                 dual.save(
                     f"{dual_out_path}.decompressed.pdf",
