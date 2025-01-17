@@ -122,6 +122,12 @@ class TypesettingUnit:
         return False
 
     @property
+    def is_space(self):
+        if self.formular:
+            return False
+        unicode = self.try_get_unicode()
+        return unicode == " "
+    @property
     def is_hung_punctuation(self):
         if self.formular:
             return False
@@ -140,6 +146,8 @@ class TypesettingUnit:
                 "：",
                 "？",
                 "！",
+                "]",
+                "}",
             ]
         return False
 
@@ -399,6 +407,10 @@ class Typesetting:
             unit_width = unit.width * scale
             unit_height = unit.height * scale
 
+            # 跳过行首的空格
+            if current_x == box.x and unit.is_space:
+                continue
+
             if (
                 last_unit
                 and last_unit.is_chinese_char ^ unit.is_chinese_char  # 中英文交界处
@@ -412,6 +424,7 @@ class Typesetting:
                 )  # 在同一行
                 and not last_unit.mixed_character_blacklist  # 不是混排空格黑名单字符
                 and not unit.mixed_character_blacklist  # 同上
+                and current_x > box.x
             ):
                 current_x += space_width * 0.5
 
@@ -420,12 +433,16 @@ class Typesetting:
                 # 换行
                 current_x = box.x
                 current_y -= line_height * line_spacing
-                line_height = 0
+                line_height = 0.0
 
                 # 检查是否超出底部边界
                 if current_y - unit_height < box.y:
                     all_units_fit = False
                     break
+
+                if unit.is_space:
+                    line_height = max(line_height, unit_height)
+                    continue
 
             # 更新当前行的最大高度
             line_height = max(line_height, unit_height)
