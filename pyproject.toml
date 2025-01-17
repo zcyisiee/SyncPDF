@@ -24,6 +24,7 @@ dependencies = [
     "pdfminer-six>=20240706",
     "peewee>=3.17.8",
     "pymupdf>=1.25.1",
+    "toml>=0.10.2",
     "tqdm>=4.67.1",
     "xsdata[cli,lxml,soap]>=24.12",
 ]
