@@ -1,6 +1,6 @@
 [project]
 name = "yadt"
-version = "0.0.1a15"
+version = "0.0.1a16"
 description = "Yet Another Document Translator"
 license = "AGPL-3.0"
 readme = "README.md"
