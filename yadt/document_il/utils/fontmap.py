@@ -26,11 +26,17 @@ class FontMapper:
         self.base_font = pymupdf.Font(fontfile=self.base_font_path)
         self.fallback_font = pymupdf.Font(fontfile=self.fallback_font_path)
 
+        self.kai_font_path = get_cache_file_path("LXGWWenKai-Regular.ttf")
+        self.kai_font = pymupdf.Font(fontfile=self.kai_font_path)
+
         self.base_font.font_id = "base"
         self.fallback_font.font_id = "fallback"
+        self.kai_font.font_id = "kai"
 
     def map(self, original_font: PdfFont, char_unicode: str):
         char_unicode = ord(char_unicode)
+        if original_font.italic and self.kai_font.has_glyph(char_unicode):
+            return self.kai_font
         for k, font in self.fonts.items():
             if not font.has_glyph(char_unicode):
                 continue
@@ -51,6 +57,7 @@ class FontMapper:
         font_list = [
             ("base", self.base_font_path),
             ("fallback", self.fallback_font_path),
+            ("kai", self.kai_font_path),
         ]
         font_list.extend(
             [

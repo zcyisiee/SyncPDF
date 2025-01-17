@@ -180,6 +180,11 @@ def download_font_assets():
             "SourceHanSansSC-Bold.ttf",
             "https://github.com/iizyd/SourceHanSansCN-TTF-Min"
             "/raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Bold.ttf"
+        ),
+        (
+            'LXGWWenKai-Regular.ttf',
+            'https://github.com/lxgw/LxgwWenKai'
+            '/raw/refs/heads/main/fonts/TTF/LXGWWenKai-Regular.ttf'
         )
     ]
     for name, url in assets:
