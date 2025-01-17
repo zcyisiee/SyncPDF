@@ -155,6 +155,13 @@ class TypesettingUnit:
                 "！",
                 "]",
                 "}",
+                "）",
+                "〕",
+                "〉",
+                "】",
+                "〗",
+                "」",
+                "』",
             ]
         return False
 
