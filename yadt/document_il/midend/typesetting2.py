@@ -42,8 +42,7 @@ class TypesettingUnit:
         self.scale = None
 
         if unicode:
-            assert font_size, \
-                "Font size must be provided when unicode is provided"
+            assert font_size, "Font size must be provided when unicode is provided"
             assert font, "Font must be provided when unicode is provided"
             assert style, "Style must be provided when unicode is provided"
             assert len(unicode) == 1, "Unicode must be a single character"
@@ -62,14 +61,14 @@ class TypesettingUnit:
 
         if self.unicode:
             unicode = self.unicode
-        if '(cid' in unicode:
+        if "(cid" in unicode:
             return False
         if len(unicode) > 1:
             return False
         assert len(unicode) == 1, "Unicode must be a single character"
         if unicode:
             try:
-                return 'CJK UNIFIED IDEOGRAPH' in unicodedata.name(unicode)
+                return "CJK UNIFIED IDEOGRAPH" in unicodedata.name(unicode)
             except ValueError:
                 return False
         return False
@@ -120,8 +119,7 @@ class TypesettingUnit:
         elif self.formular:
             return self.formular.box
         elif self.unicode:
-            char_width = self.font.char_lengths(
-                self.unicode, self.font_size)[0]
+            char_width = self.font.char_lengths(self.unicode, self.font_size)[0]
             return Box(0, 0, char_width, self.font_size)
 
     @property
@@ -132,7 +130,7 @@ class TypesettingUnit:
     def height(self):
         return self.box.y2 - self.box.y
 
-    def relocate(self, x: float, y: float, scale: float) -> 'TypesettingUnit':
+    def relocate(self, x: float, y: float, scale: float) -> "TypesettingUnit":
         """重定位并缩放排版单元
 
         Args:
@@ -184,12 +182,14 @@ class TypesettingUnit:
                     box=Box(
                         x=x + rel_x * scale + self.formular.x_offset,
                         y=y + rel_y * scale + self.formular.y_offset,
-                        x2=x + rel_x * scale +
-                        (char.box.x2 - char.box.x) *
-                        scale + self.formular.x_offset,
-                        y2=y + rel_y * scale +
-                        (char.box.y2 - char.box.y) *
-                        scale + self.formular.y_offset,
+                        x2=x
+                        + rel_x * scale
+                        + (char.box.x2 - char.box.x) * scale
+                        + self.formular.x_offset,
+                        y2=y
+                        + rel_y * scale
+                        + (char.box.y2 - char.box.y) * scale
+                        + self.formular.y_offset,
                     ),
                     pdf_style=PdfStyle(
                         font_id=char.pdf_style.font_id,
@@ -238,12 +238,15 @@ class TypesettingUnit:
         if self.can_passthrough:
             return self.passthrough()
         elif self.unicode:
-            assert self.x is not None, \
-                "x position must be set, should be set by `relocate`"
-            assert self.y is not None, \
-                "y position must be set, should be set by `relocate`"
-            assert self.scale is not None, \
-                "scale must be set, should be set by `relocate`"
+            assert (
+                self.x is not None
+            ), "x position must be set, should be set by `relocate`"
+            assert (
+                self.y is not None
+            ), "y position must be set, should be set by `relocate`"
+            assert (
+                self.scale is not None
+            ), "scale must be set, should be set by `relocate`"
             # 计算字符宽度
             char_width = self.width
 
@@ -257,7 +260,7 @@ class TypesettingUnit:
                     y2=self.y + self.font_size,
                 ),
                 pdf_style=PdfStyle(
-                    font_id='noto',
+                    font_id="noto",
                     font_size=self.font_size,
                     graphic_state=self.style.graphic_state,
                 ),
@@ -283,26 +286,29 @@ class Typesetting:
         for paragraph in page.pdf_paragraph:
             self.render_paragraph(paragraph, page)
 
-    def render_paragraph(self, paragraph: il_version_1.PdfParagraph,
-                         page: il_version_1.Page):
+    def render_paragraph(
+        self, paragraph: il_version_1.PdfParagraph, page: il_version_1.Page
+    ):
         typesetting_units = self.create_typesetting_units(paragraph)
         # 如果所有单元都可以直接传递，则直接传递
         if all(unit.can_passthrough for unit in typesetting_units):
             paragraph.scale = 1.0
-            paragraph.pdf_paragraph_composition = (
-                self.create_passthrough_composition(typesetting_units))
+            paragraph.pdf_paragraph_composition = self.create_passthrough_composition(
+                typesetting_units
+            )
             return
 
         # 如果有单元无法直接传递，则进行重排版
         paragraph.pdf_paragraph_composition = []
         self.retypeset(paragraph, page, typesetting_units)
 
-    def _layout_typesetting_units(self,
-                                  typesetting_units: list[TypesettingUnit],
-                                  box: Box,
-                                  scale: float,
-                                  line_spacing: float
-                                  ) -> tuple[list[TypesettingUnit], bool]:
+    def _layout_typesetting_units(
+        self,
+        typesetting_units: list[TypesettingUnit],
+        box: Box,
+        scale: float,
+        line_spacing: float,
+    ) -> tuple[list[TypesettingUnit], bool]:
         """布局排版单元。
 
         Args:
@@ -319,13 +325,17 @@ class Typesetting:
         for unit in typesetting_units:
             if getattr(unit, "font_size", None):
                 font_sizes.append(unit.font_size)
-            if getattr(unit, 'char', None):
+            if getattr(unit, "char", None):
                 font_sizes.append(unit.char.pdf_style.font_size)
         font_sizes.sort()
         font_size = statistics.mode(font_sizes)
         # 计算平均行高
-        avg_height = (sum(unit.height * scale for unit in typesetting_units)
-                      / len(typesetting_units) if typesetting_units else 0)
+        avg_height = (
+            sum(unit.height * scale for unit in typesetting_units)
+            / len(typesetting_units)
+            if typesetting_units
+            else 0
+        )
 
         # 初始化位置为右上角，并减去一个平均行高
         current_x = box.x
@@ -343,14 +353,16 @@ class Typesetting:
             unit_width = unit.width * scale
             unit_height = unit.height * scale
 
-            if (last_unit
-                    and last_unit.is_chinese_char ^ unit.is_chinese_char):
+            if (
+                last_unit
+                and last_unit.is_chinese_char ^ unit.is_chinese_char
+                and last_unit.y == unit.y
+            ):
                 space_width = self.font.char_lengths(" ", font_size * scale)[0]
                 current_x += space_width * 0.5
 
             # 如果当前行放不下这个元素，换行
-            if current_x + unit_width > box.x2 \
-                    and not unit.is_hung_punctuation:
+            if current_x + unit_width > box.x2 and not unit.is_hung_punctuation:
                 # 换行
                 current_x = box.x
                 current_y -= line_height * line_spacing
@@ -363,21 +375,24 @@ class Typesetting:
 
             # 更新当前行的最大高度
             line_height = max(line_height, unit_height)
-            
+
             # 放置当前单元
             relocated_unit = unit.relocate(current_x, current_y, scale)
             typeset_units.append(relocated_unit)
 
             # 更新 x 坐标
             current_x += unit_width
-            
+
             last_unit = unit
 
         return typeset_units, all_units_fit
 
-    def retypeset(self, paragraph: il_version_1.PdfParagraph,
-                  page: il_version_1.Page,
-                  typesetting_units: list[TypesettingUnit]):
+    def retypeset(
+        self,
+        paragraph: il_version_1.PdfParagraph,
+        page: il_version_1.Page,
+        typesetting_units: list[TypesettingUnit],
+    ):
         box = paragraph.box
         scale = 1.0
         line_spacing = 1.7  # 初始行距为1.7
@@ -388,7 +403,8 @@ class Typesetting:
         while scale >= min_scale:
             # 尝试布局排版单元
             typeset_units, all_units_fit = self._layout_typesetting_units(
-                typesetting_units, box, scale, line_spacing)
+                typesetting_units, box, scale, line_spacing
+            )
 
             # 如果所有单元都放得下，就完成排版
             if all_units_fit:
@@ -431,9 +447,9 @@ class Typesetting:
                 scale = 1.0
                 line_spacing = 1.7
 
-    def create_typesetting_units(self,
-                                 paragraph: il_version_1.PdfParagraph
-                                 ) -> list[TypesettingUnit]:
+    def create_typesetting_units(
+        self, paragraph: il_version_1.PdfParagraph
+    ) -> list[TypesettingUnit]:
         if not paragraph.pdf_paragraph_composition:
             return []
         result = []
@@ -441,37 +457,35 @@ class Typesetting:
             if composition is None:
                 continue
             if composition.pdf_line:
-                result.extend([
-                    TypesettingUnit(char=char)
-                    for char in composition.pdf_line.pdf_character
-                ])
-            elif composition.pdf_character:
-                result.append(
-                    TypesettingUnit(char=composition.pdf_character)
+                result.extend(
+                    [
+                        TypesettingUnit(char=char)
+                        for char in composition.pdf_line.pdf_character
+                    ]
                 )
+            elif composition.pdf_character:
+                result.append(TypesettingUnit(char=composition.pdf_character))
             elif composition.pdf_same_style_characters:
-                result.extend([
-                    TypesettingUnit(char=char)
-                    for char in composition
-                    .pdf_same_style_characters.pdf_character
-                ])
+                result.extend(
+                    [
+                        TypesettingUnit(char=char)
+                        for char in composition.pdf_same_style_characters.pdf_character
+                    ]
+                )
             elif composition.pdf_same_style_unicode_characters:
-                result.extend([
-                    TypesettingUnit(
-                        unicode=char_unicode,
-                        font=self.font,
-                        font_size=composition
-                        .pdf_same_style_unicode_characters.pdf_style.font_size,
-                        style=composition
-                        .pdf_same_style_unicode_characters.pdf_style
-                    )
-                    for char_unicode in composition
-                    .pdf_same_style_unicode_characters.unicode
-                ])
+                result.extend(
+                    [
+                        TypesettingUnit(
+                            unicode=char_unicode,
+                            font=self.font,
+                            font_size=composition.pdf_same_style_unicode_characters.pdf_style.font_size,
+                            style=composition.pdf_same_style_unicode_characters.pdf_style,
+                        )
+                        for char_unicode in composition.pdf_same_style_unicode_characters.unicode
+                    ]
+                )
             elif composition.pdf_formula:
-                result.extend([
-                    TypesettingUnit(formular=composition.pdf_formula)
-                ])
+                result.extend([TypesettingUnit(formular=composition.pdf_formula)])
             else:
                 raise ValueError(
                     f"Unknown composition type. "
@@ -481,9 +495,9 @@ class Typesetting:
 
         return result
 
-    def create_passthrough_composition(self,
-                                       typesetting_units: list[TypesettingUnit]
-                                       ) -> list[PdfParagraphComposition]:
+    def create_passthrough_composition(
+        self, typesetting_units: list[TypesettingUnit]
+    ) -> list[PdfParagraphComposition]:
         """从排版单元创建直接传递的段落组合。
 
         Args:
@@ -494,10 +508,12 @@ class Typesetting:
         """
         composition = []
         for unit in typesetting_units:
-            composition.extend([
-                PdfParagraphComposition(pdf_character=char)
-                for char in unit.passthrough()
-            ])
+            composition.extend(
+                [
+                    PdfParagraphComposition(pdf_character=char)
+                    for char in unit.passthrough()
+                ]
+            )
         return composition
 
     def get_max_right_space(self, current_box: Box, page) -> float:
