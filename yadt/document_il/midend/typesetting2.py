@@ -1,3 +1,4 @@
+import math
 from typing import Optional
 
 import pymupdf
@@ -51,24 +52,71 @@ class TypesettingUnit:
             self.font_size = font_size
             self.style = style
 
+    def try_get_unicode(self) -> Optional[str]:
+        if self.char:
+            return self.char.char_unicode
+        elif self.formular:
+            return None
+        elif self.unicode:
+            return self.unicode
+
+    @property
+    def mixed_character_blacklist(self):
+        unicode = self.try_get_unicode()
+        if unicode:
+            return unicode in [
+                "。",
+                "，",
+                "：",
+                "？",
+                "！",
+            ]
+        return False
+
     @property
     def is_chinese_char(self):
         if self.formular:
             return False
-        unicode = None
-        if self.char and self.char.char_unicode:
-            unicode = self.char.char_unicode
-
-        if self.unicode:
-            unicode = self.unicode
+        unicode = self.try_get_unicode()
+        if not unicode:
+            return False
         if "(cid" in unicode:
             return False
         if len(unicode) > 1:
             return False
         assert len(unicode) == 1, "Unicode must be a single character"
+        if unicode in [
+            "（",
+            "）",
+            "【",
+            "】",
+            "《",
+            "》",
+            "〔",
+            "〕",
+            "〈",
+            "〉",
+            "〖",
+            "〗",
+            "「",
+            "」",
+            "『",
+            "』",
+            "、",
+            "。",
+            "：",
+            "？",
+            "！",
+            "，",
+        ]:
+            return True
         if unicode:
             try:
-                return "CJK UNIFIED IDEOGRAPH" in unicodedata.name(unicode)
+                unicodedata_name = unicodedata.name(unicode)
+                return (
+                    "CJK UNIFIED IDEOGRAPH" in unicodedata_name
+                    or "FULLWIDTH" in unicodedata_name
+                )
             except ValueError:
                 return False
         return False
@@ -77,12 +125,7 @@ class TypesettingUnit:
     def is_hung_punctuation(self):
         if self.formular:
             return False
-        unicode = None
-        if self.char and self.char.char_unicode:
-            unicode = self.char.char_unicode
-
-        if self.unicode:
-            unicode = self.unicode
+        unicode = self.try_get_unicode()
 
         if unicode:
             return unicode in [
@@ -329,6 +372,9 @@ class Typesetting:
                 font_sizes.append(unit.char.pdf_style.font_size)
         font_sizes.sort()
         font_size = statistics.mode(font_sizes)
+
+        space_width = self.font.char_lengths(" ", font_size * scale)[0]
+
         # 计算平均行高
         avg_height = (
             sum(unit.height * scale for unit in typesetting_units)
@@ -355,10 +401,16 @@ class Typesetting:
 
             if (
                 last_unit
-                and last_unit.is_chinese_char ^ unit.is_chinese_char
-                and last_unit.y == unit.y
+                and last_unit.is_chinese_char ^ unit.is_chinese_char  # 中英文交界处
+                and (
+                    last_unit.box and last_unit.box.y
+                    and abs(last_unit.box.y - current_y) < 0.1
+                    or last_unit.y
+                    and abs(last_unit.y - current_y) < 0.1
+                )  # 在同一行
+                and not last_unit.mixed_character_blacklist  # 不是混排空格黑名单字符
+                and not unit.mixed_character_blacklist  # 同上
             ):
-                space_width = self.font.char_lengths(" ", font_size * scale)[0]
                 current_x += space_width * 0.5
 
             # 如果当前行放不下这个元素，换行
@@ -383,7 +435,7 @@ class Typesetting:
             # 更新 x 坐标
             current_x += unit_width
 
-            last_unit = unit
+            last_unit = relocated_unit
 
         return typeset_units, all_units_fit
 
