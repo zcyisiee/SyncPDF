@@ -254,12 +254,18 @@ class TypesettingUnit:
                 )
                 new_chars.append(new_char)
 
+            # Calculate bounding box from new_chars
+            min_x = min(char.box.x for char in new_chars)
+            min_y = min(char.box.y for char in new_chars)
+            max_x = max(char.box.x2 for char in new_chars)
+            max_y = max(char.box.y2 for char in new_chars)
+
             new_formula = PdfFormula(
                 box=Box(
-                    x=x + self.formular.x_offset * scale,
-                    y=y + self.formular.y_offset * scale,
-                    x2=x + (self.formular.x_offset + self.width) * scale,
-                    y2=y + (self.formular.y_offset + self.height) * scale,
+                    x=min_x,
+                    y=min_y,
+                    x2=max_x,
+                    y2=max_y,
                 ),
                 pdf_character=new_chars,
                 x_offset=self.formular.x_offset * scale,
