@@ -145,9 +145,12 @@ class PDFCreater:
 
     def get_available_font_list(self, pdf,page):
         page_xref_id = pdf[page.page_number].xref
-        _, r_id = pdf.xref_get_key(page_xref_id, 'Resources')
-        r_id = int(r_id.split(' ')[0])
-        _, font_dict = pdf.xref_get_key(r_id, 'Font')
+        resources_type, r_id = pdf.xref_get_key(page_xref_id, 'Resources')
+        if resources_type == 'dict':
+            font_dict = re.search('/Font<<(.+?)>>', r_id).group(1)
+        else:
+            r_id = int(r_id.split(' ')[0])
+            _, font_dict = pdf.xref_get_key(r_id, 'Font')
         fonts = re.findall('/([^ ]+?) ', font_dict)
         return set(fonts)
 
