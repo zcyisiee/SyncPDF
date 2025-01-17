@@ -374,6 +374,7 @@ class Typesetting:
         box: Box,
         scale: float,
         line_spacing: float,
+        paragraph: il_version_1.PdfParagraph,
     ) -> tuple[list[TypesettingUnit], bool]:
         """布局排版单元。
 
@@ -396,7 +397,7 @@ class Typesetting:
         font_sizes.sort()
         font_size = statistics.mode(font_sizes)
 
-        space_width = self.font_mapper.base_font.char_lengths(" ", font_size * scale)[0]
+        space_width = self.font_mapper.base_font.char_lengths("你", font_size * scale)[0] * 0.5
 
         # 计算平均行高
         avg_height = (
@@ -416,6 +417,8 @@ class Typesetting:
         all_units_fit = True
         last_unit: Optional[TypesettingUnit] = None
 
+        if paragraph.first_line_indent:
+            current_x += space_width * 4
         # 遍历所有排版单元
         for unit in typesetting_units:
             # 计算当前单元在当前缩放下的尺寸
@@ -490,7 +493,7 @@ class Typesetting:
         while scale >= min_scale:
             # 尝试布局排版单元
             typeset_units, all_units_fit = self._layout_typesetting_units(
-                typesetting_units, box, scale, line_spacing
+                typesetting_units, box, scale, line_spacing, paragraph
             )
 
             # 如果所有单元都放得下，就完成排版
@@ -566,7 +569,12 @@ class Typesetting:
                     [
                         TypesettingUnit(
                             unicode=char_unicode,
-                            font=self.font_mapper.map(fonts[composition.pdf_same_style_unicode_characters.pdf_style.font_id], char_unicode),
+                            font=self.font_mapper.map(
+                                fonts[
+                                    composition.pdf_same_style_unicode_characters.pdf_style.font_id
+                                ],
+                                char_unicode,
+                            ),
                             font_size=composition.pdf_same_style_unicode_characters.pdf_style.font_size,
                             style=composition.pdf_same_style_unicode_characters.pdf_style,
                         )

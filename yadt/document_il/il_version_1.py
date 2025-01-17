@@ -559,6 +559,13 @@ class PdfParagraph:
             "type": "Attribute",
         },
     )
+    first_line_indent: Optional[bool] = field(
+        default=None,
+        metadata={
+            "name": "FirstLineIndent",
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass

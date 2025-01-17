@@ -85,6 +85,7 @@ PDFParagraph =
     attribute unicode { xsd:string },
     attribute scale { xsd:float }?,
     attribute vertical { xsd:boolean }?,
+    attribute FirstLineIndent { xsd:boolean }?,
     Box,
     PDFStyle,
     PDFParagraphComposition*

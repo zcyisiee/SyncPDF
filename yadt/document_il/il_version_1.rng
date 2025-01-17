@@ -243,6 +243,11 @@
           <data type="boolean"/>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="FirstLineIndent">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
       <ref name="Box"/>
       <ref name="PDFStyle"/>
       <zeroOrMore>
