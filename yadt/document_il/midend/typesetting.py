@@ -1,3 +1,6 @@
+import math
+from typing import Optional
+
 import pymupdf
 
 from yadt.document_il import (
@@ -15,9 +18,14 @@ from yadt.document_il.utils.layout_helper import (
     get_paragraph_max_height,
     get_paragraph_unicode,
 )
+import unicodedata
+import statistics
 
 
 class TypesettingUnit:
+    def __str__(self):
+        return self.try_get_unicode()
+
     def __init__(
         self,
         char: PdfCharacter = None,
@@ -25,21 +33,139 @@ class TypesettingUnit:
         unicode: str = None,
         font: pymupdf.Font = None,
         font_size: float = None,
+        style: PdfStyle = None,
     ):
         assert (
-            sum((x is None for x in [char, formular, unicode])) == 1
+            sum((x is not None for x in [char, formular, unicode])) == 1
         ), "Only one of chars and formular can be not None"
         self.char = char
         self.formular = formular
         self.unicode = unicode
+        self.x = None
+        self.y = None
+        self.scale = None
 
         if unicode:
             assert font_size, "Font size must be provided when unicode is provided"
             assert font, "Font must be provided when unicode is provided"
+            assert style, "Style must be provided when unicode is provided"
             assert len(unicode) == 1, "Unicode must be a single character"
 
             self.font = font
             self.font_size = font_size
+            self.style = style
+
+    def try_get_unicode(self) -> Optional[str]:
+        if self.char:
+            return self.char.char_unicode
+        elif self.formular:
+            return None
+        elif self.unicode:
+            return self.unicode
+
+    @property
+    def mixed_character_blacklist(self):
+        unicode = self.try_get_unicode()
+        if unicode:
+            return unicode in [
+                "。",
+                "，",
+                "：",
+                "？",
+                "！",
+            ]
+        return False
+
+    @property
+    def is_chinese_char(self):
+        if self.formular:
+            return False
+        unicode = self.try_get_unicode()
+        if not unicode:
+            return False
+        if "(cid" in unicode:
+            return False
+        if len(unicode) > 1:
+            return False
+        assert len(unicode) == 1, "Unicode must be a single character"
+        if unicode in [
+            "（",
+            "）",
+            "【",
+            "】",
+            "《",
+            "》",
+            "〔",
+            "〕",
+            "〈",
+            "〉",
+            "〖",
+            "〗",
+            "「",
+            "」",
+            "『",
+            "』",
+            "、",
+            "。",
+            "：",
+            "？",
+            "！",
+            "，",
+        ]:
+            return True
+        if unicode:
+            try:
+                unicodedata_name = unicodedata.name(unicode)
+                return (
+                    "CJK UNIFIED IDEOGRAPH" in unicodedata_name
+                    or "FULLWIDTH" in unicodedata_name
+                )
+            except ValueError:
+                return False
+        return False
+
+    @property
+    def is_space(self):
+        if self.formular:
+            return False
+        unicode = self.try_get_unicode()
+        return unicode == " "
+
+    @property
+    def is_hung_punctuation(self):
+        if self.formular:
+            return False
+        unicode = self.try_get_unicode()
+
+        if unicode:
+            return unicode in [
+                ",",
+                ".",
+                ":",
+                ";",
+                "?",
+                "!",
+                "，",
+                "。",
+                "：",
+                "？",
+                "！",
+                "]",
+                "}",
+            ]
+        return False
+
+    def passthrough(self) -> [PdfCharacter]:
+        if self.char:
+            return [self.char]
+        elif self.formular:
+            return self.formular.pdf_character
+        elif self.unicode:
+            raise ValueError("Cannot passthrough unicode")
+
+    @property
+    def can_passthrough(self):
+        return self.unicode is None
 
     @property
     def box(self):
@@ -49,7 +175,9 @@ class TypesettingUnit:
             return self.formular.box
         elif self.unicode:
             char_width = self.font.char_lengths(self.unicode, self.font_size)[0]
-            return Box(0, 0, char_width, self.font_size)
+            if self.x is None or self.y is None or self.scale is None:
+                return Box(0, 0, char_width, self.font_size)
+            return Box(self.x, self.y, self.x + char_width, self.y + self.font_size)
 
     @property
     def width(self):
@@ -59,401 +187,416 @@ class TypesettingUnit:
     def height(self):
         return self.box.y2 - self.box.y
 
+    def relocate(self, x: float, y: float, scale: float) -> "TypesettingUnit":
+        """重定位并缩放排版单元
+
+        Args:
+            x: 新的 x 坐标
+            y: 新的 y 坐标
+            scale: 缩放因子
+
+        Returns:
+            新的排版单元
+        """
+        if self.char:
+            # 创建新的字符对象
+            new_char = PdfCharacter(
+                pdf_character_id=self.char.pdf_character_id,
+                char_unicode=self.char.char_unicode,
+                box=Box(
+                    x=x,
+                    y=y,
+                    x2=x + self.width * scale,
+                    y2=y + self.height * scale,
+                ),
+                pdf_style=PdfStyle(
+                    font_id=self.char.pdf_style.font_id,
+                    font_size=self.char.pdf_style.font_size * scale,
+                    graphic_state=self.char.pdf_style.graphic_state,
+                ),
+                scale=scale,
+                vertical=self.char.vertical,
+                advance=self.char.advance * scale if self.char.advance else None,
+                x_offset=self.char.x_offset * scale if self.char.x_offset else None,
+            )
+            return TypesettingUnit(char=new_char)
+
+        elif self.formular:
+            # 创建新的公式对象，保持内部字符的相对位置
+            new_chars = []
+            min_x = min(char.box.x for char in self.formular.pdf_character)
+            min_y = min(char.box.y for char in self.formular.pdf_character)
+
+            for char in self.formular.pdf_character:
+                # 计算相对位置
+                rel_x = char.box.x - min_x
+                rel_y = char.box.y - min_y
+
+                # 创建新的字符对象
+                new_char = PdfCharacter(
+                    pdf_character_id=char.pdf_character_id,
+                    char_unicode=char.char_unicode,
+                    box=Box(
+                        x=x + (rel_x + self.formular.x_offset) * scale,
+                        y=y + (rel_y + self.formular.y_offset) * scale,
+                        x2=x
+                        + (rel_x + (char.box.x2 - char.box.x) + self.formular.x_offset)
+                        * scale,
+                        y2=y
+                        + (rel_y + (char.box.y2 - char.box.y) + self.formular.y_offset)
+                        * scale,
+                    ),
+                    pdf_style=PdfStyle(
+                        font_id=char.pdf_style.font_id,
+                        font_size=char.pdf_style.font_size * scale,
+                        graphic_state=char.pdf_style.graphic_state,
+                    ),
+                    scale=scale,
+                    vertical=char.vertical,
+                    advance=char.advance * scale if char.advance else None,
+                    x_offset=char.x_offset * scale if char.x_offset else None,
+                )
+                new_chars.append(new_char)
+
+            # Calculate bounding box from new_chars
+            min_x = min(char.box.x for char in new_chars)
+            min_y = min(char.box.y for char in new_chars)
+            max_x = max(char.box.x2 for char in new_chars)
+            max_y = max(char.box.y2 for char in new_chars)
+
+            new_formula = PdfFormula(
+                box=Box(
+                    x=min_x,
+                    y=min_y,
+                    x2=max_x,
+                    y2=max_y,
+                ),
+                pdf_character=new_chars,
+                x_offset=self.formular.x_offset * scale,
+                y_offset=self.formular.y_offset * scale,
+            )
+            return TypesettingUnit(formular=new_formula)
+
+        elif self.unicode:
+            # 对于 Unicode 字符，我们存储新的位置信息
+            new_unit = TypesettingUnit(
+                unicode=self.unicode,
+                font=self.font,
+                font_size=self.font_size * scale,
+                style=self.style,
+            )
+            new_unit.x = x
+            new_unit.y = y
+            new_unit.scale = scale
+            return new_unit
+
+    def render(self) -> [PdfCharacter]:
+        """渲染排版单元为 PdfCharacter 列表
+
+        Returns:
+            PdfCharacter 列表
+        """
+        if self.can_passthrough:
+            return self.passthrough()
+        elif self.unicode:
+            assert (
+                self.x is not None
+            ), "x position must be set, should be set by `relocate`"
+            assert (
+                self.y is not None
+            ), "y position must be set, should be set by `relocate`"
+            assert (
+                self.scale is not None
+            ), "scale must be set, should be set by `relocate`"
+            # 计算字符宽度
+            char_width = self.width
+
+            new_char = PdfCharacter(
+                pdf_character_id=self.font.has_glyph(ord(self.unicode)),
+                char_unicode=self.unicode,
+                box=Box(
+                    x=self.x,  # 使用存储的位置
+                    y=self.y,
+                    x2=self.x + char_width,
+                    y2=self.y + self.font_size,
+                ),
+                pdf_style=PdfStyle(
+                    font_id="noto",
+                    font_size=self.font_size,
+                    graphic_state=self.style.graphic_state,
+                ),
+                scale=self.scale,
+                vertical=False,
+                advance=char_width,
+            )
+            return [new_char]
+        else:
+            raise ValueError("Unknown typesetting unit")
+
 
 class Typesetting:
     def __init__(self, font_path: str):
         self.font = pymupdf.Font(fontfile=font_path)
 
-    def _typeset_pdf_character(
+    def typsetting_document(self, document: il_version_1.Document):
+        for page in document.page:
+            self.render_page(page)
+
+    def render_page(self, page: il_version_1.Page):
+        # 开始实际的渲染过程
+        for paragraph in page.pdf_paragraph:
+            self.render_paragraph(paragraph, page)
+
+    def render_paragraph(
+        self, paragraph: il_version_1.PdfParagraph, page: il_version_1.Page
+    ):
+        typesetting_units = self.create_typesetting_units(paragraph)
+        # 如果所有单元都可以直接传递，则直接传递
+        if all(unit.can_passthrough for unit in typesetting_units):
+            paragraph.scale = 1.0
+            paragraph.pdf_paragraph_composition = self.create_passthrough_composition(
+                typesetting_units
+            )
+            return
+
+        # 如果有单元无法直接传递，则进行重排版
+        paragraph.pdf_paragraph_composition = []
+        self.retypeset(paragraph, page, typesetting_units)
+
+    def _layout_typesetting_units(
         self,
-        char: il_version_1.PdfCharacter,
-        current_x: float,
-        current_y: float,
+        typesetting_units: list[TypesettingUnit],
+        box: Box,
         scale: float,
-    ) -> tuple[None, float] | tuple[PdfCharacter, float | None]:
-        """排版一个已有的 PdfCharacter
+        line_spacing: float,
+    ) -> tuple[list[TypesettingUnit], bool]:
+        """布局排版单元。
 
         Args:
-            char: 原始字符
-            current_x: 当前 x 坐标
+            typesetting_units: 要布局的排版单元列表
+            box: 布局边界框
+            scale: 缩放因子
+            line_spacing: 行间距
 
         Returns:
-            新的 PdfCharacter 和新的 x 坐标
+            tuple[list[TypesettingUnit], bool]: (已布局的排版单元列表, 是否所有单元都放得下)
         """
-        if char.char_unicode == " " and char.pdf_character_id is None:
-            return None, current_x + (char.box.x2 - char.box.x) * scale
-        new_char = il_version_1.PdfCharacter(
-            pdf_character_id=char.pdf_character_id,
-            char_unicode=char.char_unicode,
-            box=il_version_1.Box(
-                x=current_x,
-                y=current_y,
-                x2=current_x + (char.box.x2 - char.box.x) * scale,
-                y2=current_y + (char.box.y2 - char.box.y) * scale,
-            ),
-            pdf_style=PdfStyle(
-                font_id=char.pdf_style.font_id,
-                font_size=char.pdf_style.font_size * scale,
-                graphic_state=char.pdf_style.graphic_state,
-            ),
-            scale=scale,
-            vertical=char.vertical,
-            advance=char.advance * scale,
+        # 计算字号众数
+        font_sizes = []
+        for unit in typesetting_units:
+            if getattr(unit, "font_size", None):
+                font_sizes.append(unit.font_size)
+            if getattr(unit, "char", None):
+                font_sizes.append(unit.char.pdf_style.font_size)
+        font_sizes.sort()
+        font_size = statistics.mode(font_sizes)
+
+        space_width = self.font.char_lengths(" ", font_size * scale)[0]
+
+        # 计算平均行高
+        avg_height = (
+            sum(unit.height * scale for unit in typesetting_units)
+            / len(typesetting_units)
+            if typesetting_units
+            else 0
         )
-        return new_char, new_char.box.x2
 
-    def _typeset_unicode_char(
-        self,
-        char_unicode: str,
-        x: float,
-        y: float,
-        font_size: float,
-        font: pymupdf.Font,
-        scale: float,
-    ) -> tuple[il_version_1.PdfCharacter, float]:
-        """排版一个 Unicode 字符
+        # 初始化位置为右上角，并减去一个平均行高
+        current_x = box.x
+        current_y = box.y2 - avg_height
+        line_height = 0
 
-        Args:
-            char_unicode: Unicode 字符
-            x: x 坐标
-            y: y 坐标
-            font_size: 缩放前的字体大小
-            font: 字体
-            scale: 缩放比例
-            style: 图形状态
+        # 存储已排版的单元
+        typeset_units = []
+        all_units_fit = True
+        last_unit: Optional[TypesettingUnit] = None
 
-        Returns:
-            新的 PdfCharacter 和新的 x 坐标
-        """
-        font_size = font_size * scale
-        char_width = font.char_lengths(char_unicode, font_size)[0]
-        new_char = il_version_1.PdfCharacter(
-            pdf_character_id=font.has_glyph(ord(char_unicode)),
-            char_unicode=char_unicode,
-            box=il_version_1.Box(
-                x=x,
-                y=y,
-                x2=x + char_width,
-                y2=y + font_size,
-            ),
-            pdf_style=PdfStyle(
-                font_id="noto",
-                font_size=font_size,
-            ),
-            scale=scale,
-            vertical=False,
-            advance=char_width,
-        )
-        return new_char, new_char.box.x2
+        # 遍历所有排版单元
+        for unit in typesetting_units:
+            # 计算当前单元在当前缩放下的尺寸
+            unit_width = unit.width * scale
+            unit_height = unit.height * scale
 
-    def _typeset_formula(
-        self,
-        formula: il_version_1.PdfFormula,
-        noto_font: pymupdf.Font,
-        x: float,
-        y: float,
-        scale: float,
-    ) -> tuple[list[il_version_1.PdfCharacter], float]:
-        """处理公式，保持公式内部字符的相对位置关系，整体缩放后放置到新位置
-
-        Args:
-            formula: 原始公式
-            noto_font: 字体
-            current_font_size: 当前字体大小
-            x: 目标位置左下角x坐标
-            y: 目标位置左下角y坐标
-            scale: 缩放比例
-
-        Returns:
-            处理后的 PdfCharacter 列表
-        """
-        result_chars = []
-
-        # 计算原始公式的边界框
-        min_x = min(char.box.x for char in formula.pdf_character)
-        min_y = min(char.box.y for char in formula.pdf_character)
-
-        # 对每个字符进行缩放和位置调整
-        for char in formula.pdf_character:
-            if char.pdf_character_id is None:
+            # 跳过行首的空格
+            if current_x == box.x and unit.is_space:
                 continue
-            # 计算字符相对于公式左下角的偏移量
-            relative_x = char.box.x - min_x
-            relative_y = char.box.y - min_y  # PDF坐标系中y轴从下往上
-            relative_width = char.box.x2 - char.box.x
-            relative_height = char.box.y2 - char.box.y
 
-            # 计算缩放后的新位置和大小
-            new_x = x + relative_x * scale + formula.x_offset
-            new_y = y + relative_y * scale + formula.y_offset
-            new_width = relative_width * scale
-            new_height = relative_height * scale
+            if (
+                last_unit  # 有上一个单元
+                and last_unit.is_chinese_char ^ unit.is_chinese_char  # 中英文交界处
+                and (
+                    last_unit.box
+                    and last_unit.box.y
+                    and current_y - 0.1
+                    <= last_unit.box.y2
+                    <= current_y + line_height + 0.1
+                )  # 在同一行，且有垂直重叠
+                and not last_unit.mixed_character_blacklist  # 不是混排空格黑名单字符
+                and not unit.mixed_character_blacklist  # 同上
+                and current_x > box.x  # 不是行首
+            ):
+                current_x += space_width * 0.5
 
-            # 创建新的字符对象
-            new_char = il_version_1.PdfCharacter(
-                char_unicode=char.char_unicode,
-                box=il_version_1.Box(
-                    x=new_x,
-                    y=new_y,
-                    x2=new_x + new_width,
-                    y2=new_y + new_height,
-                ),
-                pdf_style=char.pdf_style,
-                vertical=char.vertical,
-                scale=scale,
-                advance=char.advance,
-                pdf_character_id=char.pdf_character_id,
-            )
-            result_chars.append(new_char)
+            # 如果当前行放不下这个元素，换行
+            if current_x + unit_width > box.x2 and not unit.is_hung_punctuation:
+                # 换行
+                current_x = box.x
+                current_y -= line_height * line_spacing
+                line_height = 0.0
 
-        return result_chars, result_chars[-1].box.x2
-
-    def process_toc_dots(
-        self,
-        paragraph: PdfParagraph,
-        noto_font: pymupdf.Font,
-        current_font_size: float,
-        max_width: float,
-        scale: float,
-    ) -> list[il_version_1.PdfCharacter] | None:
-        """处理目录条目的点号
-
-        Args:
-            paragraph: 原始段落
-            noto_font: 字体
-            current_font_size: 当前字体大小
-            max_width: 最大可用宽度
-
-        Returns:
-            处理后的 PdfCharacter 列表，如果点号数量不足则返回 None
-        """
-        # 分割文本为标题和页码部分
-        text = get_paragraph_unicode(paragraph)
-        import re
-
-        match = re.match(r"^(.*?)\s*\.+\s*(\d+)\s*$", text.strip())
-        if not match:
-            return None
-
-        title, page_num = match.groups()
-        title = title.strip()
-        page_num = page_num.strip()
-
-        # 计算除了点号以外的内容长度
-        length_except_dots = get_paragraph_length_except(paragraph, ".", noto_font)
-
-        # 计算点号的宽度
-        dot_width = noto_font.char_lengths(".", current_font_size)[0]
-
-        # 计算需要的点号数量
-        dots_needed = max(1, int((max_width - length_except_dots) / dot_width))
-
-        # 如果点号数量太少，返回 None
-        if dots_needed < 5:
-            return None
-
-        result_chars = []
-        current_x = 0
-
-        # 复制标题部分的 PdfCharacter，遇到点号就停止
-        for comp in paragraph.pdf_paragraph_composition:
-            if comp.pdf_character:
-                char = comp.pdf_character
-                if char.char_unicode == ".":
+                # 检查是否超出底部边界
+                if current_y - unit_height < box.y:
+                    all_units_fit = False
                     break
-                new_char, current_x = self._typeset_pdf_character(
-                    char, current_x, paragraph.box.y, scale
-                )
-                if new_char:
-                    result_chars.append(new_char)
-            elif comp.pdf_same_style_characters:
-                should_break = False
-                for char in comp.pdf_same_style_characters.pdf_character:
-                    if char.char_unicode == ".":
-                        should_break = True
-                        break
-                    new_char, current_x = self._typeset_pdf_character(
-                        char, current_x, paragraph.box.y, scale
-                    )
-                    if new_char:
-                        result_chars.append(new_char)
-                if should_break:
-                    break
-            elif comp.pdf_same_style_unicode_characters:
-                should_break = False
-                for char_unicode in comp.pdf_same_style_unicode_characters.unicode:
-                    if char_unicode == ".":
-                        should_break = True
-                        break
-                    new_char, current_x = self._typeset_unicode_char(
-                        char_unicode,
-                        current_x,
-                        paragraph.box.y,
-                        current_font_size,
-                        noto_font,
-                        scale,
-                    )
-                    result_chars.append(new_char)
-                if should_break:
-                    break
-            elif comp.pdf_line:
-                for char in comp.pdf_line.pdf_character:
-                    if char.char_unicode == ".":
-                        break
-                    new_char, current_x = self._typeset_pdf_character(
-                        char, current_x, paragraph.box.y, scale
-                    )
-                    if new_char:
-                        result_chars.append(new_char)
-            elif comp.pdf_formula:
-                chars, current_x = self._typeset_formula(
-                    comp.pdf_formula,
-                    noto_font,
-                    current_x,
-                    paragraph.box.y,
-                    scale,
-                )
-                result_chars.extend(chars)
-            else:
-                raise Exception(
-                    "Unexpected composition type"
-                    " in PdfParagraphComposition. "
-                    "This type only appears in the IL "
-                    "after the translation is completed."
-                )
 
-        # 添加点号
-        for _ in range(dots_needed):
-            new_char, current_x = self._typeset_unicode_char(
-                ".", current_x, paragraph.box.y, current_font_size, noto_font, scale
-            )
-            result_chars.append(new_char)
+                if unit.is_space:
+                    line_height = max(line_height, unit_height)
+                    continue
 
-        # TODO:想办法也透明传输页码？
-        # 添加页码
-        for char in page_num:
-            new_char, current_x = self._typeset_unicode_char(
-                char, current_x, paragraph.box.y, current_font_size, noto_font, scale
-            )
-            result_chars.append(new_char)
+            # 放置当前单元
+            relocated_unit = unit.relocate(current_x, current_y, scale)
+            typeset_units.append(relocated_unit)
 
-        return result_chars
+            # workaround: 超长行距暂时没找到具体原因，有待进一步修复。这里的1.2是魔法数字！
+            # 更新当前行的最大高度
+            if line_height == 0 or line_height * 1.2 > unit_height > line_height:
+                line_height = unit_height
 
-    def try_typeset(
+            # 更新 x 坐标
+            current_x = relocated_unit.box.x2
+
+            last_unit = relocated_unit
+
+        return typeset_units, all_units_fit
+
+    def retypeset(
         self,
         paragraph: il_version_1.PdfParagraph,
-        noto_font: pymupdf.Font,
-        box: il_version_1.Box,
-        scale: float,
-        line_height: float,
-    ) -> list[il_version_1.PdfCharacter] | None:
-        """尝试对段落进行排版
+        page: il_version_1.Page,
+        typesetting_units: list[TypesettingUnit],
+    ):
+        box = paragraph.box
+        scale = 1.0
+        line_spacing = 1.7  # 初始行距为1.7
+        min_scale = 0.1  # 最小缩放因子
+        min_line_spacing = 1.4  # 最小行距
+        expand_space_flag = False
+
+        while scale >= min_scale:
+            # 尝试布局排版单元
+            typeset_units, all_units_fit = self._layout_typesetting_units(
+                typesetting_units, box, scale, line_spacing
+            )
+
+            # 如果所有单元都放得下，就完成排版
+            if all_units_fit:
+                # 将排版后的单元转换为段落组合
+                paragraph.scale = scale
+                paragraph.pdf_paragraph_composition = []
+                for unit in typeset_units:
+                    for char in unit.render():
+                        paragraph.pdf_paragraph_composition.append(
+                            PdfParagraphComposition(pdf_character=char)
+                        )
+                return
+
+            if not expand_space_flag:
+                # 如果尚未扩展空格，进行扩展
+                max_x = self.get_max_right_space(box, page)
+                # 只有当有额外空间时才扩展
+                if max_x > box.x2:
+                    expanded_box = Box(
+                        x=box.x,
+                        y=box.y,
+                        x2=max_x,  # 直接扩展到最大可用位置
+                        y2=box.y2,
+                    )
+                    # 更新段落的边界框
+                    paragraph.box = expanded_box
+                expand_space_flag = True
+                continue
+
+            # 如果当前行距大于最小行距，先减小行距
+            if line_spacing > min_line_spacing:
+                line_spacing -= 0.1
+            else:
+                # 行距已经最小，减小缩放因子
+                scale -= 0.1
+                line_spacing = 1.7  # 重置行距
+
+            if scale < 0.7 and min_line_spacing > 1.1:
+                min_line_spacing = 1.1
+                scale = 1.0
+                line_spacing = 1.7
+
+    def create_typesetting_units(
+        self, paragraph: il_version_1.PdfParagraph
+    ) -> list[TypesettingUnit]:
+        if not paragraph.pdf_paragraph_composition:
+            return []
+        result = []
+        for composition in paragraph.pdf_paragraph_composition:
+            if composition is None:
+                continue
+            if composition.pdf_line:
+                result.extend(
+                    [
+                        TypesettingUnit(char=char)
+                        for char in composition.pdf_line.pdf_character
+                    ]
+                )
+            elif composition.pdf_character:
+                result.append(TypesettingUnit(char=composition.pdf_character))
+            elif composition.pdf_same_style_characters:
+                result.extend(
+                    [
+                        TypesettingUnit(char=char)
+                        for char in composition.pdf_same_style_characters.pdf_character
+                    ]
+                )
+            elif composition.pdf_same_style_unicode_characters:
+                result.extend(
+                    [
+                        TypesettingUnit(
+                            unicode=char_unicode,
+                            font=self.font,
+                            font_size=composition.pdf_same_style_unicode_characters.pdf_style.font_size,
+                            style=composition.pdf_same_style_unicode_characters.pdf_style,
+                        )
+                        for char_unicode in composition.pdf_same_style_unicode_characters.unicode
+                    ]
+                )
+            elif composition.pdf_formula:
+                result.extend([TypesettingUnit(formular=composition.pdf_formula)])
+            else:
+                raise ValueError(
+                    f"Unknown composition type. "
+                    f"Composition: {composition}. "
+                    f"Paragraph: {paragraph}. "
+                )
+
+        return result
+
+    def create_passthrough_composition(
+        self, typesetting_units: list[TypesettingUnit]
+    ) -> list[PdfParagraphComposition]:
+        """从排版单元创建直接传递的段落组合。
 
         Args:
-            paragraph: 要排版的段落
-            noto_font: 字体
-            box: 可用区域
-            scale: 缩放比例
+            typesetting_units: 排版单元列表
 
         Returns:
-            排版后的字符列表，如果无法排版则返回 None
+            段落组合列表
         """
-        paragraph_max_height = get_paragraph_max_height(paragraph)
-        result_chars = []
-        current_x = box.x
-        current_y = box.y2 - paragraph_max_height  # 从顶部开始排版
-        line_height = paragraph_max_height * line_height  # 行高为字体大小的1.4倍
-
-        # 遍历段落中的所有组成部分
-        for comp in paragraph.pdf_paragraph_composition:
-            if comp is None:
-                continue
-            if comp.pdf_character:
-                char = comp.pdf_character
-                char_width = char.box.x2 - char.box.x
-                # 检查是否需要换行
-                if current_x + char_width * scale > box.x2:
-                    current_x = box.x
-                    current_y -= line_height
-                    # 检查是否超出底部边界
-                    if current_y < box.y:
-                        return None
-                new_char, current_x = self._typeset_pdf_character(
-                    char, current_x, current_y, scale
-                )
-                if new_char:
-                    result_chars.append(new_char)
-            elif comp.pdf_same_style_characters:
-                for char in comp.pdf_same_style_characters.pdf_character:
-                    char_width = char.box.x2 - char.box.x
-                    if current_x + char_width * scale > box.x2:
-                        current_x = box.x
-                        current_y -= line_height
-                        if current_y < box.y:
-                            return None
-                    new_char, current_x = self._typeset_pdf_character(
-                        char, current_x, current_y, scale
-                    )
-                    if new_char:
-                        result_chars.append(new_char)
-            elif comp.pdf_same_style_unicode_characters:
-                for char_unicode in comp.pdf_same_style_unicode_characters.unicode:
-                    font_size = (
-                        comp.pdf_same_style_unicode_characters.pdf_style.font_size
-                        * scale
-                    )
-                    char_width = noto_font.char_lengths(char_unicode, font_size)[0]
-                    if current_x + char_width * scale > box.x2:
-                        current_x = box.x
-                        current_y -= line_height
-                        if current_y < box.y:
-                            return None
-                    new_char, current_x = self._typeset_unicode_char(
-                        char_unicode,
-                        current_x,
-                        current_y,
-                        font_size,
-                        noto_font,
-                        scale,
-                    )
-                    result_chars.append(new_char)
-            elif comp.pdf_line:
-                for char in comp.pdf_line.pdf_character:
-                    char_width = char.box.x2 - char.box.x
-                    if current_x + char_width * scale > box.x2:
-                        current_x = box.x
-                        current_y -= line_height
-                        if current_y < box.y:
-                            return None
-                    new_char, current_x = self._typeset_pdf_character(
-                        char, current_x, current_y, scale
-                    )
-                    if new_char:
-                        result_chars.append(new_char)
-            elif comp.pdf_formula:
-                # 计算公式宽度
-                formula_width = (
-                    comp.pdf_formula.box.x2 - comp.pdf_formula.box.x
-                ) * scale
-                # 如果公式太宽，换到下一行
-                if current_x + formula_width > box.x2:
-                    current_x = box.x
-                    current_y -= line_height
-                    if current_y < box.y:
-                        return None
-                chars, current_x = self._typeset_formula(
-                    comp.pdf_formula, noto_font, current_x, current_y, scale
-                )
-                result_chars.extend(chars)
-            else:
-                raise Exception(
-                    "Unexpected composition type"
-                    " in PdfParagraphComposition. "
-                    "This type only appears in the IL "
-                    "after the translation is completed."
-                )
-
-        return result_chars
+        composition = []
+        for unit in typesetting_units:
+            composition.extend(
+                [
+                    PdfParagraphComposition(pdf_character=char)
+                    for char in unit.passthrough()
+                ]
+            )
+        return composition
 
     def get_max_right_space(self, current_box: Box, page) -> float:
         """获取段落右侧最大可用空间
@@ -471,7 +614,7 @@ class Typesetting:
 
         # 检查所有可能的阻挡元素
         for para in page.pdf_paragraph:
-            if para.box == current_box:  # 跳过当前段落
+            if para.box == current_box or para.box is None:  # 跳过当前段落
                 continue
             # 只考虑在当前段落右侧且有垂直重叠的元素
             if para.box.x > current_box.x and not (
@@ -487,57 +630,3 @@ class Typesetting:
                 max_x = min(max_x, figure.box.x)
 
         return max_x
-
-    def typsetting_document(self, document: il_version_1.Document):
-        for page in document.page:
-            # 开始实际的渲染过程
-            for paragraph in page.pdf_paragraph:
-                try:
-                    self.render_paragraph_unicode_to_char(paragraph, self.font, 0.67)
-                except ValueError:
-                    # 获取段落当前的边界框
-                    current_box = paragraph.box
-                    # 获取右侧最大可用空间
-                    max_x = self.get_max_right_space(current_box, page)
-                    # 只有当有额外空间时才扩展
-                    if max_x > current_box.x2:
-                        expanded_box = Box(
-                            x=current_box.x,
-                            y=current_box.y,
-                            x2=max_x,  # 直接扩展到最大可用位置
-                            y2=current_box.y2,
-                        )
-                        # 更新段落的边界框
-                        paragraph.box = expanded_box
-
-                        # 重新渲染
-                        self.render_paragraph_unicode_to_char(paragraph, self.font, 0.1)
-
-    def render_paragraph_unicode_to_char(
-        self,
-        paragraph: il_version_1.PdfParagraph,
-        noto_font: pymupdf.Font,
-        scale_threshold,
-    ):
-        if not paragraph.pdf_paragraph_composition:
-            return
-        scale = 1.0
-        # 尝试排版，如果失败则逐步缩小字号
-        while scale >= scale_threshold:
-            for line_hight in [1.7, 1.6, 1.5, 1.4, 1.3, 1.2, 1.1]:
-                result = self.try_typeset(
-                    paragraph, noto_font, paragraph.box, scale, line_hight
-                )
-                if result is not None:
-                    paragraph.pdf_paragraph_composition = [
-                        PdfParagraphComposition(pdf_character=char) for char in result
-                    ]
-                    paragraph.scale = scale
-                    return
-            if scale == 1.0:
-                scale = 0.8
-            else:
-                scale -= 0.01
-        raise ValueError(
-            f"无法在保持最小缩放比 {scale_threshold} 的情况下排版文本。当前文本：{paragraph.unicode}"
-        )

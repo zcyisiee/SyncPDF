@@ -189,7 +189,7 @@ def main():
             v.name.startswith("pdfminer")
             or v.name.startswith("peewee")
             or v.name.startswith("httpx")
-            or "httpcore" in v.name
+            or "http11" in v.name
         ):
             v.disabled = True
 
