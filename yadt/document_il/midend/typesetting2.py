@@ -23,6 +23,9 @@ import statistics
 
 
 class TypesettingUnit:
+    def __str__(self):
+        return self.try_get_unicode()
+
     def __init__(
         self,
         char: PdfCharacter = None,
@@ -422,13 +425,12 @@ class Typesetting:
                 last_unit  # 有上一个单元
                 and last_unit.is_chinese_char ^ unit.is_chinese_char  # 中英文交界处
                 and (
-                    (
-                        last_unit.box
-                        and last_unit.box.y
-                        and current_y < last_unit.box.y2 < current_y + line_height
-                    )
-                    or (last_unit.y and abs(last_unit.y - current_y) < 0.1)
-                )  # 在同一行
+                    last_unit.box
+                    and last_unit.box.y
+                    and current_y - 0.1
+                    <= last_unit.box.y2
+                    <= current_y + line_height + 0.1
+                )  # 在同一行，且有垂直重叠
                 and not last_unit.mixed_character_blacklist  # 不是混排空格黑名单字符
                 and not unit.mixed_character_blacklist  # 同上
                 and current_x > box.x  # 不是行首
@@ -451,12 +453,14 @@ class Typesetting:
                     line_height = max(line_height, unit_height)
                     continue
 
-            # 更新当前行的最大高度
-            line_height = max(line_height, unit_height)
-
             # 放置当前单元
             relocated_unit = unit.relocate(current_x, current_y, scale)
             typeset_units.append(relocated_unit)
+
+            # workaround: 超长行距暂时没找到具体原因，有待进一步修复。这里的1.2是魔法数字！
+            # 更新当前行的最大高度
+            if line_height == 0 or line_height * 1.2 > unit_height > line_height:
+                line_height = unit_height
 
             # 更新 x 坐标
             current_x = relocated_unit.box.x2
