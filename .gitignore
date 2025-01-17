@@ -25,4 +25,4 @@ uv.lock
 .vscode
 __pycache__
 .ruff_cache
-yadt.config
+yadt.toml
