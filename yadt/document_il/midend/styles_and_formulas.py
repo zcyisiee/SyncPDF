@@ -347,6 +347,8 @@ class StylesAndFormulas:
                     formula.x_offset = 0  # 如果左边没有文字，x_offset应该为0
                 if abs(formula.x_offset) < 0.1:
                     formula.x_offset = 0
+                if formula.x_offset > 0:
+                    formula.x_offset = 0
 
                 # 计算y偏移量
                 if left_line:

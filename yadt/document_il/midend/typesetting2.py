@@ -163,7 +163,9 @@ class TypesettingUnit:
             return self.formular.box
         elif self.unicode:
             char_width = self.font.char_lengths(self.unicode, self.font_size)[0]
-            return Box(0, 0, char_width, self.font_size)
+            if self.x is None or self.y is None or self.scale is None:
+                return Box(0, 0, char_width, self.font_size)
+            return Box(self.x, self.y, self.x + char_width, self.y + self.font_size)
 
     @property
     def width(self):
@@ -223,16 +225,14 @@ class TypesettingUnit:
                     pdf_character_id=char.pdf_character_id,
                     char_unicode=char.char_unicode,
                     box=Box(
-                        x=x + rel_x * scale + self.formular.x_offset,
-                        y=y + rel_y * scale + self.formular.y_offset,
+                        x=x + (rel_x + self.formular.x_offset) * scale,
+                        y=y + (rel_y + self.formular.y_offset) * scale,
                         x2=x
-                        + rel_x * scale
-                        + (char.box.x2 - char.box.x) * scale
-                        + self.formular.x_offset,
+                        + (rel_x + (char.box.x2 - char.box.x) + self.formular.x_offset)
+                        * scale,
                         y2=y
-                        + rel_y * scale
-                        + (char.box.y2 - char.box.y) * scale
-                        + self.formular.y_offset,
+                        + (rel_y + (char.box.y2 - char.box.y) + self.formular.y_offset)
+                        * scale,
                     ),
                     pdf_style=PdfStyle(
                         font_id=char.pdf_style.font_id,
@@ -248,10 +248,10 @@ class TypesettingUnit:
 
             new_formula = PdfFormula(
                 box=Box(
-                    x=x,
-                    y=y,
-                    x2=x + self.width * scale,
-                    y2=y + self.height * scale,
+                    x=x + self.formular.x_offset * scale,
+                    y=y + self.formular.y_offset * scale,
+                    x2=x + (self.formular.x_offset + self.width) * scale,
+                    y2=y + (self.formular.y_offset + self.height) * scale,
                 ),
                 pdf_character=new_chars,
                 x_offset=self.formular.x_offset * scale,
@@ -403,10 +403,12 @@ class Typesetting:
                 last_unit
                 and last_unit.is_chinese_char ^ unit.is_chinese_char  # 中英文交界处
                 and (
-                    last_unit.box and last_unit.box.y
-                    and abs(last_unit.box.y - current_y) < 0.1
-                    or last_unit.y
-                    and abs(last_unit.y - current_y) < 0.1
+                    (
+                        last_unit.box
+                        and last_unit.box.y
+                        and abs(last_unit.box.y - current_y) < 0.1
+                    )
+                    or (last_unit.y and abs(last_unit.y - current_y) < 0.1)
                 )  # 在同一行
                 and not last_unit.mixed_character_blacklist  # 不是混排空格黑名单字符
                 and not unit.mixed_character_blacklist  # 同上
@@ -433,7 +435,7 @@ class Typesetting:
             typeset_units.append(relocated_unit)
 
             # 更新 x 坐标
-            current_x += unit_width
+            current_x = relocated_unit.box.x2
 
             last_unit = relocated_unit
 
