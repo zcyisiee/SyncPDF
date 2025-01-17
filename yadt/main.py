@@ -23,12 +23,15 @@ def create_cache_folder():
 
 
 def create_parser():
-    parser = configargparse.ArgParser()
+    parser = configargparse.ArgParser(
+        config_file_parser_class=configargparse.TomlConfigParser(['yadt']),
+    )
     parser.add_argument('-c', '--my-config', required=False, is_config_file=True, help='config file path')
     parser.add_argument(
-        "files",
+        "--files",
         type=str,
-        nargs="+",
+        # nargs="*",
+        action='append',
         help="One or more paths to PDF files.",
     )
     parser.add_argument(
