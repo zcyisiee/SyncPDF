@@ -36,24 +36,24 @@ class FontMapper:
         self.kai_font.font_id = "kai"
 
     def map(self, original_font: PdfFont, char_unicode: str):
-        char_unicode = ord(char_unicode)
-        if original_font.italic and self.kai_font.has_glyph(char_unicode):
+        current_char = ord(char_unicode)
+        if original_font.italic and self.kai_font.has_glyph(current_char):
             return self.kai_font
         for k, font in self.fonts.items():
-            if not font.has_glyph(char_unicode):
+            if not font.has_glyph(current_char):
                 continue
             if original_font.bold != font.is_bold:
                 continue
             if original_font.serif != font.is_serif:
                 continue
             return font
-        if self.base_font.has_glyph(char_unicode):
+        if self.base_font.has_glyph(current_char):
             return self.base_font
 
-        if self.fallback_font.has_glyph(char_unicode):
+        if self.fallback_font.has_glyph(current_char):
             return self.fallback_font
 
-        raise Exception(f"Can't find font for {char_unicode}")
+        raise Exception(f"Can't find font for {current_char}")
 
     def add_font(self, doc_zh: pymupdf.Document, il: il_version_1.Document):
         font_list = [

@@ -585,7 +585,7 @@ class Typesetting:
                             font_size=composition.pdf_same_style_unicode_characters.pdf_style.font_size,
                             style=composition.pdf_same_style_unicode_characters.pdf_style,
                         )
-                        for char_unicode in composition.pdf_same_style_unicode_characters.unicode
+                        for char_unicode in composition.pdf_same_style_unicode_characters.unicode if char_unicode not in ('\n', )
                     ]
                 )
             elif composition.pdf_formula:
