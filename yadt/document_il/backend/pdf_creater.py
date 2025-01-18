@@ -54,16 +54,14 @@ class PDFCreater:
                 draw_op.append(f"{graphic_state.ncolor[0]} g \n".encode())
             elif len(graphic_state.ncolor) == 3:
                 draw_op.append(
-                    f"{' '.join((str(x)
-                                for x in graphic_state.ncolor))} sc \n".encode()
+                    f"{' '.join((str(x) for x in graphic_state.ncolor))} sc \n".encode()
                 )
         if graphic_state.scolor is not None:
             if len(graphic_state.scolor) == 1:
                 draw_op.append(f"{graphic_state.scolor[0]} G \n".encode())
             elif len(graphic_state.scolor) == 3:
                 draw_op.append(
-                    f"{' '.join((str(x)
-                                for x in graphic_state.scolor))} SC \n".encode()
+                    f"{' '.join((str(x) for x in graphic_state.scolor))} SC \n".encode()
                 )
 
     def render_paragraph_to_char(
@@ -175,8 +173,7 @@ class PDFCreater:
             draw_op.append(page.base_operations.value.encode())
             draw_op.append(b" Q ")
             draw_op.append(
-                f"q Q 1 0 0 1 {page.cropbox.box.x} {
-                    page.cropbox.box.y} cm \n".encode()
+                f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode()
             )
 
             # 收集所有字符
@@ -205,13 +202,11 @@ class PDFCreater:
                 )
                 if char.vertical:
                     draw_op.append(
-                        f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {
-                            char.box.x2:f} {char.box.y:f} Tm ".encode()
+                        f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode()
                     )
                 else:
                     draw_op.append(
-                        f"BT /{font_id} {char_size:f} Tf 1 0 0 1 {
-                            char.box.x:f} {char.box.y:f} Tm ".encode()
+                        f"BT /{font_id} {char_size:f} Tf 1 0 0 1 {char.box.x:f} {char.box.y:f} Tm ".encode()
                     )
 
                 encoding_length = encoding_length_map[font_id]

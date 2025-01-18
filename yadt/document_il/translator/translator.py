@@ -85,8 +85,7 @@ class BaseTranslator(ABC):
     def __del__(self):
         print(f"{self.name} translate call count: {self.translate_call_count}")
         print(
-            f"{self.name} translate cache call count: {
-                self.translate_cache_call_count}"
+            f"{self.name} translate cache call count: {self.translate_cache_call_count}"
         )
 
     def add_cache_impact_parameters(self, k: str, v):
