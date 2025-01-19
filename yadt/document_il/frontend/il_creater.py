@@ -79,9 +79,9 @@ class ILCreater:
 
     def on_page_resource_font(self, font: PDFFont, xref_id: int, font_id: str):
         font_name = font.fontname
-        if isinstance(font.fontname, bytes):
+        if isinstance(font_name, bytes):
             try:
-                font_name = font.fontname.decode("utf-8")
+                font_name = font_name.decode("utf-8")
             except UnicodeDecodeError:
                 font_name = "BASE64:" + base64.b64encode(font_name).decode(
                     "utf-8"
@@ -162,7 +162,15 @@ class ILCreater:
             char.bbox[0], char.bbox[1], char.bbox[2], char.bbox[3]
         )
 
-        font_id = self.current_page_font_name_id_map[char.font.fontname]
+        font_name = char.font.fontname
+        if isinstance(font_name, bytes):
+            try:
+                font_name = font_name.decode("utf-8")
+            except UnicodeDecodeError:
+                font_name = "BASE64:" + base64.b64encode(font_name).decode(
+                    "utf-8"
+                )
+        font_id = self.current_page_font_name_id_map[font_name]
         char_id = char.cid
         char_unicode = char.get_text()
         advance = char.adv
