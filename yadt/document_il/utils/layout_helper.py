@@ -261,8 +261,9 @@ def add_space_dummy_chars(paragraph: PdfParagraph) -> None:
             chars = composition.pdf_same_style_characters.pdf_character
             _add_space_dummy_chars_to_list(chars)
         elif composition.pdf_same_style_unicode_characters:
-            # 对于unicode字符，我们需要创建新的PdfCharacter
-            pass  # TODO: 处理unicode字符的情况
+            # 对于unicode字符，不需要处理。
+            # 这种类型只会出现在翻译好的结果中
+            continue
         elif composition.pdf_formula:
             chars = composition.pdf_formula.pdf_character
             _add_space_dummy_chars_to_list(chars)
