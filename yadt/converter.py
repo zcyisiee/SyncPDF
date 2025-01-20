@@ -9,7 +9,9 @@ from pdfminer.layout import (
     LTChar,
     LTFigure,
     LTLine,
-    LTPage, LTComponent, LTText,
+    LTPage,
+    LTComponent,
+    LTText,
 )
 from pdfminer.utils import Matrix
 from pdfminer.pdffont import PDFFont
@@ -107,17 +109,17 @@ class AWLTChar(LTChar):
     """Actual letter in the text as a Unicode string."""
 
     def __init__(
-            self,
-            matrix: Matrix,
-            font: PDFFont,
-            fontsize: float,
-            scaling: float,
-            rise: float,
-            text: str,
-            textwidth: float,
-            textdisp: Union[float, Tuple[Optional[float], float]],
-            ncs: PDFColorSpace,
-            graphicstate: PDFGraphicState,
+        self,
+        matrix: Matrix,
+        font: PDFFont,
+        fontsize: float,
+        scaling: float,
+        rise: float,
+        text: str,
+        textwidth: float,
+        textdisp: Union[float, Tuple[Optional[float], float]],
+        ncs: PDFColorSpace,
+        graphicstate: PDFGraphicState,
     ) -> None:
         LTText.__init__(self)
         self._text = text

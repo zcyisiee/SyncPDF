@@ -69,7 +69,9 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
         self.il_creater = il_creater
 
     def dup(self) -> "PDFPageInterpreterEx":
-        return self.__class__(self.rsrcmgr, self.device, self.obj_patch, self.il_creater)
+        return self.__class__(
+            self.rsrcmgr, self.device, self.obj_patch, self.il_creater
+        )
 
     def init_resources(self, resources: Dict[object, object]) -> None:
         # 重载设置 fontid 和 descent

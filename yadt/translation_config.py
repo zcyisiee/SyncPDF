@@ -13,7 +13,7 @@ class TranslationConfig:
         lang_out: str,
         font: str | None = None,
         pages: str | None = None,
-            output_dir: str | None = None,
+        output_dir: str | None = None,
         debug: bool = False,
         working_dir: str | None = None,
         no_dual: bool = False,

@@ -66,9 +66,7 @@ class StylesAndFormulas:
                     if current_chars:
                         # 处理剩余字符
                         new_compositions.append(
-                            self.create_composition(
-                                current_chars, is_current_formula
-                            )
+                            self.create_composition(current_chars, is_current_formula)
                         )
                         current_chars = []
                     new_compositions.append(composition)
@@ -78,14 +76,11 @@ class StylesAndFormulas:
                 for char in line.pdf_character:
                     is_formula = (
                         self.is_formulas_char(char.char_unicode)  # 公式字符
-                        or char.pdf_style.font_id
-                        in formula_font_ids  # 公式字体
+                        or char.pdf_style.font_id in formula_font_ids  # 公式字体
                         or char.vertical  # 垂直字体
                         or (
                             len(current_chars) > 0
-                            and not get_char_unicode_string(
-                                current_chars
-                            ).isspace()
+                            and not get_char_unicode_string(current_chars).isspace()
                             # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
                             and char.pdf_style.font_size
                             < current_chars[-1].pdf_style.font_size * 0.79
@@ -98,9 +93,7 @@ class StylesAndFormulas:
                     if is_formula != is_current_formula and current_chars:
                         # 字符类型发生切换，处理之前的字符
                         new_compositions.append(
-                            self.create_composition(
-                                current_chars, is_current_formula
-                            )
+                            self.create_composition(current_chars, is_current_formula)
                         )
                         current_chars = []
                     is_current_formula = is_formula
@@ -110,9 +103,7 @@ class StylesAndFormulas:
                 # 处理行末的字符
                 if current_chars:
                     new_compositions.append(
-                        self.create_composition(
-                            current_chars, is_current_formula
-                        )
+                        self.create_composition(current_chars, is_current_formula)
                     )
                     current_chars = []
 
@@ -196,13 +187,9 @@ class StylesAndFormulas:
 
         # 如果font_id或font_size为None，则使用众数
         if base_style.font_id is None:
-            base_style.font_id = self._get_mode_value(
-                [s.font_id for s in styles]
-            )
+            base_style.font_id = self._get_mode_value([s.font_id for s in styles])
         if base_style.font_size is None:
-            base_style.font_size = self._get_mode_value(
-                [s.font_size for s in styles]
-            )
+            base_style.font_size = self._get_mode_value([s.font_size for s in styles])
 
         return base_style
 
@@ -223,12 +210,12 @@ class StylesAndFormulas:
             return style1
 
         return PdfStyle(
-            font_id=style1.font_id
-            if style1.font_id == style2.font_id
-            else None,
-            font_size=style1.font_size
-            if math.fabs(style1.font_size - style2.font_size) < 0.02
-            else None,
+            font_id=style1.font_id if style1.font_id == style2.font_id else None,
+            font_size=(
+                style1.font_size
+                if math.fabs(style1.font_size - style2.font_size) < 0.02
+                else None
+            ),
             graphic_state=self._merge_graphic_states(
                 style1.graphic_state, style2.graphic_state
             ),
@@ -242,33 +229,30 @@ class StylesAndFormulas:
             return state1
 
         return GraphicState(
-            linewidth=state1.linewidth
-            if state1.linewidth == state2.linewidth
-            else None,
+            linewidth=(
+                state1.linewidth if state1.linewidth == state2.linewidth else None
+            ),
             dash=state1.dash if state1.dash == state2.dash else None,
-            flatness=state1.flatness
-            if state1.flatness == state2.flatness
-            else None,
+            flatness=state1.flatness if state1.flatness == state2.flatness else None,
             intent=state1.intent if state1.intent == state2.intent else None,
-            linecap=state1.linecap
-            if state1.linecap == state2.linecap
-            else None,
-            linejoin=state1.linejoin
-            if state1.linejoin == state2.linejoin
-            else None,
-            miterlimit=state1.miterlimit
-            if state1.miterlimit == state2.miterlimit
-            else None,
+            linecap=state1.linecap if state1.linecap == state2.linecap else None,
+            linejoin=state1.linejoin if state1.linejoin == state2.linejoin else None,
+            miterlimit=(
+                state1.miterlimit if state1.miterlimit == state2.miterlimit else None
+            ),
             ncolor=state1.ncolor if state1.ncolor == state2.ncolor else None,
             scolor=state1.scolor if state1.scolor == state2.scolor else None,
-            stroking_color_space_name=state1.stroking_color_space_name
-            if state1.stroking_color_space_name
-            == state2.stroking_color_space_name
-            else None,
-            non_stroking_color_space_name=state1.non_stroking_color_space_name
-            if state1.non_stroking_color_space_name
-            == state2.non_stroking_color_space_name
-            else None,
+            stroking_color_space_name=(
+                state1.stroking_color_space_name
+                if state1.stroking_color_space_name == state2.stroking_color_space_name
+                else None
+            ),
+            non_stroking_color_space_name=(
+                state1.non_stroking_color_space_name
+                if state1.non_stroking_color_space_name
+                == state2.non_stroking_color_space_name
+                else None
+            ),
         )
 
     def _create_same_style_composition(
@@ -306,9 +290,7 @@ class StylesAndFormulas:
             line_spacing = self.calculate_line_spacing(paragraph)
             y_tolerance = line_spacing * 0.8
 
-            for i, composition in enumerate(
-                paragraph.pdf_paragraph_composition
-            ):
+            for i, composition in enumerate(paragraph.pdf_paragraph_composition):
                 if not composition.pdf_formula:
                     continue
 
@@ -321,24 +303,16 @@ class StylesAndFormulas:
                     comp = paragraph.pdf_paragraph_composition[j]
                     if comp.pdf_line:
                         # 检查y坐标是否接近，判断是否在同一行
-                        if (
-                            abs(comp.pdf_line.box.y - formula.box.y)
-                            <= y_tolerance
-                        ):
+                        if abs(comp.pdf_line.box.y - formula.box.y) <= y_tolerance:
                             left_line = comp.pdf_line
                             break
 
                 # 查找右边最近的同一行的文本
-                for j in range(
-                    i + 1, len(paragraph.pdf_paragraph_composition)
-                ):
+                for j in range(i + 1, len(paragraph.pdf_paragraph_composition)):
                     comp = paragraph.pdf_paragraph_composition[j]
                     if comp.pdf_line:
                         # 检查y坐标是否接近，判断是否在同一行
-                        if (
-                            abs(comp.pdf_line.box.y - formula.box.y)
-                            <= y_tolerance
-                        ):
+                        if abs(comp.pdf_line.box.y - formula.box.y) <= y_tolerance:
                             right_line = comp.pdf_line
                             break
 

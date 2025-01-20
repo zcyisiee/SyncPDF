@@ -5,7 +5,11 @@ import yadt.high_level
 import logging
 import configargparse
 import httpx
-from yadt.document_il.translator.translator import OpenAITranslator, GoogleTranslator, BingTranslator
+from yadt.document_il.translator.translator import (
+    OpenAITranslator,
+    GoogleTranslator,
+    BingTranslator,
+)
 from yadt.document_il.translator.translator import set_translate_rate_limiter
 from yadt.translation_config import TranslationConfig  # noqa: E402
 
@@ -24,14 +28,20 @@ def create_cache_folder():
 
 def create_parser():
     parser = configargparse.ArgParser(
-        config_file_parser_class=configargparse.TomlConfigParser(['yadt']),
+        config_file_parser_class=configargparse.TomlConfigParser(["yadt"]),
     )
-    parser.add_argument('-c', '--my-config', required=False, is_config_file=True, help='config file path')
+    parser.add_argument(
+        "-c",
+        "--my-config",
+        required=False,
+        is_config_file=True,
+        help="config file path",
+    )
     parser.add_argument(
         "--files",
         type=str,
         # nargs="*",
-        action='append',
+        action="append",
         help="One or more paths to PDF files.",
     )
     parser.add_argument(
@@ -174,18 +184,18 @@ def download_font_assets():
         (
             "SourceHanSansSC-Regular.ttf",
             "https://github.com/iizyd/SourceHanSansCN-TTF-Min"
-            "/raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Regular.ttf"
+            "/raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Regular.ttf",
         ),
         (
             "SourceHanSansSC-Bold.ttf",
             "https://github.com/iizyd/SourceHanSansCN-TTF-Min"
-            "/raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Bold.ttf"
+            "/raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Bold.ttf",
         ),
         (
-            'LXGWWenKai-Regular.ttf',
-            'https://github.com/lxgw/LxgwWenKai'
-            '/raw/refs/heads/main/fonts/TTF/LXGWWenKai-Regular.ttf'
-        )
+            "LXGWWenKai-Regular.ttf",
+            "https://github.com/lxgw/LxgwWenKai"
+            "/raw/refs/heads/main/fonts/TTF/LXGWWenKai-Regular.ttf",
+        ),
     ]
     for name, url in assets:
         save_path = get_cache_file_path(name)
@@ -258,9 +268,9 @@ def main():
     pending_files = []
     for file in args.files:
         # 清理文件路径，去除两端的引号
-        if file.startswith('--files='):
-            file = file.lstrip('--files=')
-        file = file.lstrip('-').strip("\"'")
+        if file.startswith("--files="):
+            file = file.lstrip("--files=")
+        file = file.lstrip("-").strip("\"'")
         if not os.path.exists(file):
             logger.error(f"文件不存在：{file}")
             exit(1)

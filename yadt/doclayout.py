@@ -98,8 +98,7 @@ class OnnxModel(DocLayoutModel):
         if os.environ.get("USE_MODELSCOPE", "0") == "1":
             repo_mapping = {
                 # Edit here to add more models
-                "wybxc/DocLayout-YOLO-DocStructBench-onnx":
-                    "AI-ModelScope/DocLayout-YOLO-DocStructBench-onnx"
+                "wybxc/DocLayout-YOLO-DocStructBench-onnx": "AI-ModelScope/DocLayout-YOLO-DocStructBench-onnx"
             }
             from modelscope import snapshot_download
 
@@ -115,7 +114,8 @@ class OnnxModel(DocLayoutModel):
                 )
             except Exception:
                 pth = hf_hub_download(
-                    repo_id=repo_id, filename=filename, etag_timeout=1)
+                    repo_id=repo_id, filename=filename, etag_timeout=1
+                )
         return OnnxModel(pth)
 
     @property
@@ -157,8 +157,7 @@ class OnnxModel(DocLayoutModel):
 
         # Add padding
         image = cv2.copyMakeBorder(
-            image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(
-                114, 114, 114)
+            image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114)
         )
 
         return image
@@ -179,8 +178,7 @@ class OnnxModel(DocLayoutModel):
         """
 
         # Calculate scaling ratio
-        gain = min(img1_shape[0] / img0_shape[0],
-                   img1_shape[1] / img0_shape[1])
+        gain = min(img1_shape[0] / img0_shape[0], img1_shape[1] / img0_shape[1])
 
         # Calculate padding size
         pad_x = round((img1_shape[1] - img0_shape[1] * gain) / 2 - 0.1)

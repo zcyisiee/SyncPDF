@@ -227,9 +227,7 @@ class OpenAITranslator(BaseTranslator):
         super().__init__(lang_in, lang_out, ignore_cache)
         self.options = {"temperature": 0}  # 随机采样可能会打断公式标记
         self.client = openai.OpenAI(base_url=base_url, api_key=api_key)
-        self.add_cache_impact_parameters(
-            "temperature", self.options["temperature"]
-        )
+        self.add_cache_impact_parameters("temperature", self.options["temperature"])
         self.model = model
         self.add_cache_impact_parameters("model", self.model)
         self.add_cache_impact_parameters("prompt", self.prompt(""))

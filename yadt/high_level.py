@@ -226,9 +226,7 @@ def translate(translation_config: TranslationConfig):
     # deepcopy
     docs2 = xml_converter.deepcopy(docs)
 
-    pdf_creater = PDFCreater(
-        original_pdf_path, docs2, translation_config
-    )
+    pdf_creater = PDFCreater(original_pdf_path, docs2, translation_config)
 
     pdf_creater.write(translation_config)
 
@@ -236,4 +234,4 @@ def translate(translation_config: TranslationConfig):
 
     logger.info(
         f"finish translate: {original_pdf_path}, cost: {finish_time - start_time} s"
-        )
+    )

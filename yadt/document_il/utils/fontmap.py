@@ -16,9 +16,9 @@ class FontMapper:
             "SourceHanSansSC-Bold.ttf",
         ]
         self.fonts = {
-            os.path.basename(file_name).replace("-", "").lower(): pymupdf.Font(
-                fontfile=get_cache_file_path(file_name)
-            )
+            os.path.basename(file_name)
+            .replace("-", "")
+            .lower(): pymupdf.Font(fontfile=get_cache_file_path(file_name))
             for file_name in self.font_names
         }
         for k, v in self.fonts.items():

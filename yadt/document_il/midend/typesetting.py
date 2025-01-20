@@ -404,7 +404,9 @@ class Typesetting:
         font_sizes.sort()
         font_size = statistics.mode(font_sizes)
 
-        space_width = self.font_mapper.base_font.char_lengths("你", font_size * scale)[0] * 0.5
+        space_width = (
+            self.font_mapper.base_font.char_lengths("你", font_size * scale)[0] * 0.5
+        )
 
         # 计算平均行高
         avg_height = (
@@ -585,7 +587,8 @@ class Typesetting:
                             font_size=composition.pdf_same_style_unicode_characters.pdf_style.font_size,
                             style=composition.pdf_same_style_unicode_characters.pdf_style,
                         )
-                        for char_unicode in composition.pdf_same_style_unicode_characters.unicode if char_unicode not in ('\n', )
+                        for char_unicode in composition.pdf_same_style_unicode_characters.unicode
+                        if char_unicode not in ("\n",)
                     ]
                 )
             elif composition.pdf_formula:
