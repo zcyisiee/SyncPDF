@@ -81,7 +81,7 @@ class ParagraphFinder:
         median_width = self.calculate_median_line_width(paragraphs)
 
         # 第四步：处理独立段落
-        # self.process_independent_paragraphs(paragraphs, median_width)
+        self.process_independent_paragraphs(paragraphs, median_width)
 
         for paragraph in paragraphs:
             self.update_paragraph_data(paragraph, update_unicode=True)
@@ -331,26 +331,26 @@ class ParagraphFinder:
                     break
 
                 # 如果前一行宽度小于中位数的一半，将当前行及后续行分割成新段落
-                if prev_width < median_width * 0.8:
-                    # 创建新的段落
-                    new_paragraph = PdfParagraph(
-                        box=Box(0, 0, 0, 0),  # 临时边界框
-                        pdf_paragraph_composition=(
-                            paragraph.pdf_paragraph_composition[j:]
-                        ),
-                        unicode="",
-                    )
-                    # 更新原段落
-                    paragraph.pdf_paragraph_composition = (
-                        paragraph.pdf_paragraph_composition[:j]
-                    )
-
-                    # 更新两个段落的数据
-                    self.update_paragraph_data(paragraph)
-                    self.update_paragraph_data(new_paragraph)
-
-                    # 在原段落后插入新段落
-                    paragraphs.insert(i + 1, new_paragraph)
-                    break
+                # if prev_width < median_width * 0.8:
+                #     # 创建新的段落
+                #     new_paragraph = PdfParagraph(
+                #         box=Box(0, 0, 0, 0),  # 临时边界框
+                #         pdf_paragraph_composition=(
+                #             paragraph.pdf_paragraph_composition[j:]
+                #         ),
+                #         unicode="",
+                #     )
+                #     # 更新原段落
+                #     paragraph.pdf_paragraph_composition = (
+                #         paragraph.pdf_paragraph_composition[:j]
+                #     )
+                #
+                #     # 更新两个段落的数据
+                #     self.update_paragraph_data(paragraph)
+                #     self.update_paragraph_data(new_paragraph)
+                #
+                #     # 在原段落后插入新段落
+                #     paragraphs.insert(i + 1, new_paragraph)
+                #     break
                 j += 1
             i += 1
