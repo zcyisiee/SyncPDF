@@ -15,6 +15,7 @@ from yadt.document_il.utils.layout_helper import (
     get_char_unicode_string,
     HEIGHT_NOT_USFUL_CHAR_IN_CHAR,
 )
+from yadt.translation_config import TranslationConfig
 
 
 class ParagraphFinder:
