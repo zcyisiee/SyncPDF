@@ -212,6 +212,8 @@ def download_font_assets():
 def main():
     logging.basicConfig(level=logging.INFO)
 
+    logging.getLogger("httpx").setLevel("CRITICAL")
+    logging.getLogger("httpx").propagate = False
     for v in logging.Logger.manager.loggerDict.values():
         if getattr(v, "name", None) is None:
             continue
