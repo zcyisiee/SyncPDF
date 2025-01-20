@@ -530,11 +530,25 @@ class StylesAndFormulas:
 
         for char in formula.pdf_character:
             # 检查是否是左括号
-            if char.char_unicode in ["(cid:8)", "(", "(cid:16)", "{", "["]:
+            if char.char_unicode in [
+                "(cid:8)",
+                "(",
+                "(cid:16)",
+                "{",
+                "[",
+                "(cid:104)",
+            ]:
                 bracket_level += 1
                 current_chars.append(char)
             # 检查是否是右括号
-            elif char.char_unicode in ["(cid:9)", ")", "(cid:17)", "}", "]"]:
+            elif char.char_unicode in [
+                "(cid:9)",
+                ")",
+                "(cid:17)",
+                "}",
+                "]",
+                "(cid:105)",
+            ]:
                 bracket_level = max(0, bracket_level - 1)  # 防止括号不匹配的情况
                 current_chars.append(char)
             # 检查是否是逗号，且不在括号内

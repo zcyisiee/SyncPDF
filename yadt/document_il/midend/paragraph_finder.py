@@ -13,6 +13,7 @@ from yadt.document_il.utils.layout_helper import (
     Layout,
     add_space_dummy_chars,
     get_char_unicode_string,
+    HEIGHT_NOT_USFUL_CHAR_IN_CHAR,
 )
 
 
@@ -202,12 +203,7 @@ class ParagraphFinder:
         ] = "middle",
     ):
         # 这几个符号，解析出来的大小经常只有实际大小的一点点。
-        if xy_mode != 'bottomright' and char.char_unicode in [
-            "∑︁",
-        # 来源于 arXiv:2310.18608v2 第九页公式大括号
-            "(cid:17)",
-            "(cid:16)",
-        ]:
+        if xy_mode != "bottomright" and char.char_unicode in HEIGHT_NOT_USFUL_CHAR_IN_CHAR:
             return self.get_layout(char, page, "bottomright")
         # current layouts
         # {

@@ -10,13 +10,26 @@ from yadt.document_il.il_version_1 import (
     PdfParagraphComposition,
 )
 
+HEIGHT_NOT_USFUL_CHAR_IN_CHAR = (
+    "∑︁",
+    # 暂时假设cid:17和cid 16是特殊情况
+    # 来源于 arXiv:2310.18608v2 第九页公式大括号
+    "(cid:17)",
+    "(cid:16)",
+    # arXiv:2411.19509v2 第四页 []
+    "(cid:104)",
+    "(cid:105)",
+    "∑︁",
+)
 
 def formular_height_ignore_char(char: PdfCharacter):
     return char.pdf_character_id is None or char.char_unicode in (
-        # 暂时假设cid:17和cid 16是特殊情况
-        # 来源于 arXiv:2310.18608v2 第九页公式大括号
+
         "(cid:17)",
         "(cid:16)",
+        "(cid:104)",
+        "(cid:105)",
+        "∑︁",
     )
 
 
