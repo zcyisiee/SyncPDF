@@ -18,6 +18,8 @@ from yadt.document_il.translator.translator import BaseTranslator
 from yadt.document_il.utils.layout_helper import (
     get_char_unicode_string,
     is_same_style,
+    is_same_style_except_size,
+    is_same_style_except_font,
 )
 from yadt.translation_config import TranslationConfig
 
@@ -240,7 +242,10 @@ class ILTranslator:
                 if is_same_style(
                     composition.pdf_same_style_characters.pdf_style,
                     paragraph.pdf_style,
-                ):
+                ) or is_same_style_except_size(
+                    composition.pdf_same_style_characters.pdf_style,
+                    paragraph.pdf_style,
+                ) or len(composition.pdf_same_style_characters.pdf_character) == 1:
                     chars.extend(composition.pdf_same_style_characters.pdf_character)
                     continue
                 placeholder = self.create_rich_text_placeholder(

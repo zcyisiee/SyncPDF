@@ -242,6 +242,26 @@ def is_same_style(style1, style2) -> bool:
         and is_same_graphic_state(style1.graphic_state, style2.graphic_state)
     )
 
+def is_same_style_except_size(style1, style2) -> bool:
+    """判断两个样式是否相同"""
+    if style1 is None or style2 is None:
+        return style1 is style2
+
+    return (
+        style1.font_id == style2.font_id
+        and 0.7 < math.fabs(style1.font_size / style2.font_size) < 1.3
+        and is_same_graphic_state(style1.graphic_state, style2.graphic_state)
+    )
+
+def is_same_style_except_font(style1, style2) -> bool:
+    """判断两个样式是否相同"""
+    if style1 is None or style2 is None:
+        return style1 is style2
+
+    return (
+        math.fabs(style1.font_size - style2.font_size) < 0.02
+        and is_same_graphic_state(style1.graphic_state, style2.graphic_state)
+    )
 
 def is_same_graphic_state(state1, state2) -> bool:
     """判断两个 GraphicState 是否相同"""
