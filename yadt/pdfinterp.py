@@ -348,6 +348,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
         while True:
             try:
                 (_, obj) = parser.nextobject()
+                self.il_creater.on_new_stream()
             except PSEOF:
                 break
             if isinstance(obj, PSKeyword):

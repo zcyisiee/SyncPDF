@@ -29,6 +29,10 @@ class ILCreater:
     def on_non_stroking_color_space(self, color_space_name):
         self.non_stroking_color_space_name = color_space_name
 
+    def on_new_stream(self):
+        self.stroking_color_space_name = None
+        self.non_stroking_color_space_name = None
+
     def on_page_start(self):
         self.current_page = il_version_1.Page(
             pdf_font=[],
