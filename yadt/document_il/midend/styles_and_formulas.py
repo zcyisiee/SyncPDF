@@ -18,6 +18,7 @@ from yadt.document_il.il_version_1 import (
 from yadt.document_il.utils.layout_helper import (
     get_char_unicode_string,
     is_same_style,
+    formular_height_ignore_char,
 )
 from yadt.translation_config import TranslationConfig
 
@@ -380,9 +381,21 @@ class StylesAndFormulas:
 
     def update_formula_data(self, formula: PdfFormula):
         min_x = min(char.box.x for char in formula.pdf_character)
-        min_y = min(char.box.y for char in formula.pdf_character)
         max_x = max(char.box.x2 for char in formula.pdf_character)
-        max_y = max(char.box.y2 for char in formula.pdf_character)
+        if not all(map(formular_height_ignore_char, formula.pdf_character)):
+            min_y = min(
+                char.box.y
+                for char in formula.pdf_character
+                if not formular_height_ignore_char(char)
+            )
+            max_y = max(
+                char.box.y2
+                for char in formula.pdf_character
+                if not formular_height_ignore_char(char)
+            )
+        else:
+            min_y = min(char.box.y for char in formula.pdf_character)
+            max_y = max(char.box.y2 for char in formula.pdf_character)
         formula.box = Box(min_x, min_y, max_x, max_y)
 
     def is_formulas_font(self, font_name: str) -> bool:

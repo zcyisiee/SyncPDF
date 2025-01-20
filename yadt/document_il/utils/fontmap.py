@@ -16,13 +16,14 @@ class FontMapper:
             "SourceHanSansSC-Bold.ttf",
         ]
         self.fonts = {
-            os.path.basename(file_name)
+            os.path.basename(file_name).split(".")[0]
             .replace("-", "")
             .lower(): pymupdf.Font(fontfile=get_cache_file_path(file_name))
             for file_name in self.font_names
         }
         for k, v in self.fonts.items():
             v.font_id = k
+        self.translation_config = translation_config
         self.base_font_path = translation_config.font
         self.fallback_font_path = get_cache_file_path("noto.ttf")
         self.base_font = pymupdf.Font(fontfile=self.base_font_path)
@@ -64,14 +65,17 @@ class FontMapper:
         font_list.extend(
             [
                 (
-                    os.path.basename(file_name).replace("-", "").lower(),
+                    os.path.basename(file_name).split(".")[0]
+                    .replace("-", "").lower(),
                     get_cache_file_path(file_name),
                 )
                 for file_name in self.font_names
             ]
         )
         font_id = {}
-        for page in doc_zh:
+        for i, page in enumerate(doc_zh):
+            if not self.translation_config.should_translate_page(i + 1):
+                continue
             for font in font_list:
                 font_id[font[0]] = page.insert_font(font[0], font[1])
         xreflen = doc_zh.xref_length()

@@ -223,9 +223,9 @@ class PDFCreater:
                 mono_out_path,
                 garbage=3,
                 deflate=True,
-                clean=True,
+                clean=not translation_config.debug,
                 deflate_fonts=True,
-                linear=True,
+                linear=not translation_config.debug,
             )
             if translation_config.debug:
                 pdf.save(

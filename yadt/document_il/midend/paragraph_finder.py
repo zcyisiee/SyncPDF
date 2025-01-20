@@ -1,4 +1,5 @@
 import re
+from typing import Union, Literal
 
 from yadt.document_il import (
     Box,
@@ -196,6 +197,7 @@ class ParagraphFinder:
         self,
         char: PdfCharacter,
         page: Page,
+        xy_mode: Union[Literal["topleft"], Literal["bottomright"], Literal["middle"]] = 'middle',
     ):
         # current layouts
         # {
@@ -223,9 +225,17 @@ class ParagraphFinder:
             "title",
         ]
         char_box = char.box
-        char_x = (char_box.x + char_box.x2) / 2
-        char_y = (char_box.y + char_box.y2) / 2
-
+        if xy_mode == 'topleft':
+            char_x = char_box.x
+            char_y = char_box.y
+        elif xy_mode == 'bottomright':
+            char_x = char_box.x2
+            char_y = char_box.y2
+        elif xy_mode == 'middle':
+            char_x = (char_box.x + char_box.x2) / 2
+            char_y = (char_box.y + char_box.y2) / 2
+        else:
+            raise ValueError(f"Invalid xy_mode: {xy_mode}")
         # 按照优先级顺序检查每种布局
         matching_layouts = {}
         for layout in page.page_layout:
@@ -243,6 +253,10 @@ class ParagraphFinder:
             if layout_name in matching_layouts:
                 return matching_layouts[layout_name]
 
+        if xy_mode == 'middle':
+            return self.get_layout(char, page, 'topleft')
+        if xy_mode == 'topleft':
+            return self.get_layout(char, page, 'bottomright')
         return None
 
     def create_line(self, chars: list[PdfCharacter]) -> PdfParagraphComposition:

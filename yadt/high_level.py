@@ -224,9 +224,9 @@ def translate(translation_config: TranslationConfig):
         )
 
     # deepcopy
-    docs2 = xml_converter.deepcopy(docs)
+    # docs2 = xml_converter.deepcopy(docs)
 
-    pdf_creater = PDFCreater(original_pdf_path, docs2, translation_config)
+    pdf_creater = PDFCreater(original_pdf_path, docs, translation_config)
 
     pdf_creater.write(translation_config)
 
