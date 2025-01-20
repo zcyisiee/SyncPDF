@@ -429,13 +429,11 @@ class StylesAndFormulas:
         formula.box = Box(min_x, min_y, max_x, max_y)
 
     def is_translatable_formula(self, formula: PdfFormula) -> bool:
-        """判断公式是否只包含需要正常翻译的字符（数字和英文逗号）"""
+        """判断公式是否只包含需要正常翻译的字符（数字、空格和英文逗号）"""
         text = "".join(char.char_unicode for char in formula.pdf_character)
-        # 去除空格后用正则表达式检查是否只包含数字和英文逗号
-        text = text.replace(" ", "")
         if formula.y_offset > 0.1:
             return False
-        return bool(re.match(r"^[0-9,]+$", text))
+        return bool(re.match(r"^[0-9, ]+$", text))
 
     def is_formulas_font(self, font_name: str) -> bool:
         if self.translation_config.formular_font_pattern:
