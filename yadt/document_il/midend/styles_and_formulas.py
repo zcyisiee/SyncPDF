@@ -35,6 +35,8 @@ class StylesAndFormulas:
         """处理页面，包括公式识别和偏移量计算"""
         self.process_page_formulas(page)
         self.process_page_offsets(page)
+        self.process_comma_formulas(page)
+        self.process_page_offsets(page)
         self.process_translatable_formulas(page)
         self.process_page_styles(page)
 
@@ -512,3 +514,62 @@ class StylesAndFormulas:
 
         if re.match(",", char):
             return True
+
+    def should_split_formula(self, formula: PdfFormula) -> bool:
+        """判断公式是否需要按逗号拆分（包含逗号且有其他特殊符号）"""
+        text = "".join(char.char_unicode for char in formula.pdf_character)
+        # 必须包含逗号
+        if ',' not in text:
+            return False
+        # 检查是否包含除了数字和[]之外的其他符号
+        text_without_basic = re.sub(r'[0-9\[\],\s]', '', text)
+        return bool(text_without_basic)
+
+    def split_formula_by_comma(self, formula: PdfFormula) -> list[tuple[list[PdfCharacter], PdfCharacter]]:
+        """按逗号拆分公式字符，返回(字符组, 逗号字符)的列表，最后一组的逗号字符为None"""
+        result = []
+        current_chars = []
+        
+        for char in formula.pdf_character:
+            if char.char_unicode == ',':
+                if current_chars:
+                    result.append((current_chars, char))
+                    current_chars = []
+            else:
+                current_chars.append(char)
+        
+        if current_chars:
+            result.append((current_chars, None))  # 最后一组没有逗号
+        
+        return result
+
+    def process_comma_formulas(self, page: Page):
+        """处理包含逗号的复杂公式，将其按逗号拆分"""
+        if not page.pdf_paragraph:
+            return
+
+        for paragraph in page.pdf_paragraph:
+            if not paragraph.pdf_paragraph_composition:
+                continue
+
+            new_compositions = []
+            for composition in paragraph.pdf_paragraph_composition:
+                if (composition.pdf_formula is not None and 
+                    self.should_split_formula(composition.pdf_formula)):
+                    # 按逗号拆分公式
+                    char_groups = self.split_formula_by_comma(composition.pdf_formula)
+                    for chars, comma in char_groups:
+                        if chars:  # 忽略空组（连续的逗号）
+                            formula = PdfFormula(pdf_character=chars)
+                            self.update_formula_data(formula)
+                            new_compositions.append(PdfParagraphComposition(pdf_formula=formula))
+                            
+                            # 如果有逗号，添加为文本行
+                            if comma:
+                                comma_line = PdfLine(pdf_character=[comma])
+                                self.update_line_data(comma_line)
+                                new_compositions.append(PdfParagraphComposition(pdf_line=comma_line))
+                else:
+                    new_compositions.append(composition)
+            
+            paragraph.pdf_paragraph_composition = new_compositions
