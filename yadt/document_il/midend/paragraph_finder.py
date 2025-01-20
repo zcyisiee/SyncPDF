@@ -197,8 +197,18 @@ class ParagraphFinder:
         self,
         char: PdfCharacter,
         page: Page,
-        xy_mode: Union[Literal["topleft"], Literal["bottomright"], Literal["middle"]] = 'middle',
+        xy_mode: Union[
+            Literal["topleft"], Literal["bottomright"], Literal["middle"]
+        ] = "middle",
     ):
+        # 这几个符号，解析出来的大小经常只有实际大小的一点点。
+        if xy_mode != 'bottomright' and char.char_unicode in [
+            "∑︁",
+        # 来源于 arXiv:2310.18608v2 第九页公式大括号
+            "(cid:17)",
+            "(cid:16)",
+        ]:
+            return self.get_layout(char, page, "bottomright")
         # current layouts
         # {
         #     "title",
@@ -225,13 +235,13 @@ class ParagraphFinder:
             "title",
         ]
         char_box = char.box
-        if xy_mode == 'topleft':
+        if xy_mode == "topleft":
             char_x = char_box.x
-            char_y = char_box.y
-        elif xy_mode == 'bottomright':
-            char_x = char_box.x2
             char_y = char_box.y2
-        elif xy_mode == 'middle':
+        elif xy_mode == "bottomright":
+            char_x = char_box.x2
+            char_y = char_box.y
+        elif xy_mode == "middle":
             char_x = (char_box.x + char_box.x2) / 2
             char_y = (char_box.y + char_box.y2) / 2
         else:
@@ -253,10 +263,10 @@ class ParagraphFinder:
             if layout_name in matching_layouts:
                 return matching_layouts[layout_name]
 
-        if xy_mode == 'middle':
-            return self.get_layout(char, page, 'topleft')
-        if xy_mode == 'topleft':
-            return self.get_layout(char, page, 'bottomright')
+        if xy_mode == "middle":
+            return self.get_layout(char, page, "topleft")
+        if xy_mode == "topleft":
+            return self.get_layout(char, page, "bottomright")
         return None
 
     def create_line(self, chars: list[PdfCharacter]) -> PdfParagraphComposition:
