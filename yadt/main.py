@@ -222,8 +222,10 @@ def main():
             or v.name.startswith("peewee")
             or v.name.startswith("httpx")
             or "http11" in v.name
+            or 'openai' in v.name
         ):
             v.disabled = True
+            v.propagate = False
 
     parser = create_parser()
     args = parser.parse_args()
