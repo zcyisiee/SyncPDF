@@ -163,6 +163,8 @@ class TypesettingUnit:
                 "」",
                 "』",
                 "、",
+                "”",
+                '"',
             ]
         return False
 
