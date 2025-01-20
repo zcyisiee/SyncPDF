@@ -193,7 +193,7 @@ def translate(translation_config: TranslationConfig):
             docs, translation_config.get_working_file_path("create_il.debug.json")
         )
 
-    ParagraphFinder().process(docs)
+    ParagraphFinder(translation_config).process(docs)
     logger.debug(f"finish paragraph finder from {temp_pdf_path}")
     if translation_config.debug:
         xml_converter.write_json(

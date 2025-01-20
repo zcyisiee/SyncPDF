@@ -18,6 +18,9 @@ from yadt.document_il.utils.layout_helper import (
 
 
 class ParagraphFinder:
+    def __init__(self, translation_config: TranslationConfig):
+        self.translation_config = translation_config
+
     def update_paragraph_data(self, paragraph: PdfParagraph, update_unicode=False):
         if not paragraph.pdf_paragraph_composition:
             return
@@ -203,7 +206,10 @@ class ParagraphFinder:
         ] = "middle",
     ):
         # 这几个符号，解析出来的大小经常只有实际大小的一点点。
-        if xy_mode != "bottomright" and char.char_unicode in HEIGHT_NOT_USFUL_CHAR_IN_CHAR:
+        if (
+            xy_mode != "bottomright"
+            and char.char_unicode in HEIGHT_NOT_USFUL_CHAR_IN_CHAR
+        ):
             return self.get_layout(char, page, "bottomright")
         # current layouts
         # {
@@ -337,26 +343,30 @@ class ParagraphFinder:
                     break
 
                 # 如果前一行宽度小于中位数的一半，将当前行及后续行分割成新段落
-                # if prev_width < median_width * 0.8:
-                #     # 创建新的段落
-                #     new_paragraph = PdfParagraph(
-                #         box=Box(0, 0, 0, 0),  # 临时边界框
-                #         pdf_paragraph_composition=(
-                #             paragraph.pdf_paragraph_composition[j:]
-                #         ),
-                #         unicode="",
-                #     )
-                #     # 更新原段落
-                #     paragraph.pdf_paragraph_composition = (
-                #         paragraph.pdf_paragraph_composition[:j]
-                #     )
-                #
-                #     # 更新两个段落的数据
-                #     self.update_paragraph_data(paragraph)
-                #     self.update_paragraph_data(new_paragraph)
-                #
-                #     # 在原段落后插入新段落
-                #     paragraphs.insert(i + 1, new_paragraph)
-                #     break
+                if (
+                    self.translation_config.split_short_lines
+                    and prev_width
+                    < median_width * self.translation_config.short_line_split_factor
+                ):
+                    # 创建新的段落
+                    new_paragraph = PdfParagraph(
+                        box=Box(0, 0, 0, 0),  # 临时边界框
+                        pdf_paragraph_composition=(
+                            paragraph.pdf_paragraph_composition[j:]
+                        ),
+                        unicode="",
+                    )
+                    # 更新原段落
+                    paragraph.pdf_paragraph_composition = (
+                        paragraph.pdf_paragraph_composition[:j]
+                    )
+
+                    # 更新两个段落的数据
+                    self.update_paragraph_data(paragraph)
+                    self.update_paragraph_data(new_paragraph)
+
+                    # 在原段落后插入新段落
+                    paragraphs.insert(i + 1, new_paragraph)
+                    break
                 j += 1
             i += 1

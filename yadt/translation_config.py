@@ -21,6 +21,8 @@ class TranslationConfig:
         formular_font_pattern: str | None = None,
         formular_char_pattern: str | None = None,
         qps: int = 1,
+        split_short_lines: bool = False,  # 是否将比较短的行强制切分成不同段落，此功能可能会导致糟糕的排版&bug
+        short_line_split_factor: float = 0.8,   # 切分阈值系数。实际阈值为当前页所有行长度中位数*此系数
     ):
         self.input_file = input_file
         self.translator = translator
@@ -35,6 +37,8 @@ class TranslationConfig:
         self.formular_font_pattern = formular_font_pattern
         self.formular_char_pattern = formular_char_pattern
         self.qps = qps
+        self.split_short_lines = split_short_lines
+        self.short_line_split_factor = short_line_split_factor
 
         if working_dir is None:
             working_dir = os.path.join(
