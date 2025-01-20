@@ -43,3 +43,9 @@ build-backend = "hatchling.build"
 [tool.flake8]
 ignore = ["E203", "E261", "E501", "W503", "E741"]
 max-line-length = 88
+
+[dependency-groups]
+dev = [
+    "autopep8>=2.3.2",
+    "black>=24.10.0",
+]
