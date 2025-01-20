@@ -9,8 +9,11 @@ from copy import copy
 
 import openai
 import requests
+import logging
 
 from yadt.document_il.translator.cache import TranslationCache
+
+logger = logging.getLogger(__name__)
 
 
 def remove_control_characters(s):
@@ -83,9 +86,12 @@ class BaseTranslator(ABC):
         self.translate_cache_call_count = 0
 
     def __del__(self):
-        print(f"{self.name} translate call count: {self.translate_call_count}")
-        print(
-            f"{self.name} translate cache call count: {self.translate_cache_call_count}"
+        logger.info(
+            f"{self.name} translate call count: {self.translate_call_count}"
+        )
+        logger.info(
+            f"{self.name} translate cache call count"
+            f": {self.translate_cache_call_count}"
         )
 
     def add_cache_impact_parameters(self, k: str, v):
@@ -227,7 +233,8 @@ class OpenAITranslator(BaseTranslator):
         super().__init__(lang_in, lang_out, ignore_cache)
         self.options = {"temperature": 0}  # 随机采样可能会打断公式标记
         self.client = openai.OpenAI(base_url=base_url, api_key=api_key)
-        self.add_cache_impact_parameters("temperature", self.options["temperature"])
+        self.add_cache_impact_parameters(
+            "temperature", self.options["temperature"])
         self.model = model
         self.add_cache_impact_parameters("model", self.model)
         self.add_cache_impact_parameters("prompt", self.prompt(""))
