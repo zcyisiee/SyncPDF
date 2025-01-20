@@ -54,7 +54,7 @@ class FontMapper:
         if self.fallback_font.has_glyph(current_char):
             return self.fallback_font
 
-        raise Exception(f"Can't find font for {current_char}")
+        raise Exception(f"Can't find font for {char_unicode}({current_char})")
 
     def add_font(self, doc_zh: pymupdf.Document, il: il_version_1.Document):
         font_list = [
