@@ -216,6 +216,10 @@ def main():
     logging.getLogger("httpx").propagate = False
     logging.getLogger("openai").setLevel("CRITICAL")
     logging.getLogger("openai").propagate = False
+    logging.getLogger("httpcore").setLevel("CRITICAL")
+    logging.getLogger("httpcore").propagate = False
+    logging.getLogger("http11").setLevel("CRITICAL")
+    logging.getLogger("http11").propagate = False
     for v in logging.Logger.manager.loggerDict.values():
         if getattr(v, "name", None) is None:
             continue
