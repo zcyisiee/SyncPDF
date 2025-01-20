@@ -19,7 +19,10 @@ HEIGHT_NOT_USFUL_CHAR_IN_CHAR = (
     # arXiv:2411.19509v2 第四页 []
     "(cid:104)",
     "(cid:105)",
+    # arXiv:2411.19509v2 第四页 公式的|竖线
+    "(cid:13)",
     "∑︁",
+
 )
 
 def formular_height_ignore_char(char: PdfCharacter):
