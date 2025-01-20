@@ -457,5 +457,6 @@ class StylesAndFormulas:
             )
         ):
             return True
-
+        if re.match("[0-9\\[\\],]", char):
+            return True
         return False
