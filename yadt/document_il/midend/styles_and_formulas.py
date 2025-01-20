@@ -36,6 +36,7 @@ class StylesAndFormulas:
         self.process_page_formulas(page)
         self.process_page_offsets(page)
         self.process_comma_formulas(page)
+        self.merge_overlapping_formulas(page)
         self.process_page_offsets(page)
         self.process_translatable_formulas(page)
         self.process_page_styles(page)
@@ -519,28 +520,30 @@ class StylesAndFormulas:
         """判断公式是否需要按逗号拆分（包含逗号且有其他特殊符号）"""
         text = "".join(char.char_unicode for char in formula.pdf_character)
         # 必须包含逗号
-        if ',' not in text:
+        if "," not in text:
             return False
         # 检查是否包含除了数字和[]之外的其他符号
-        text_without_basic = re.sub(r'[0-9\[\],\s]', '', text)
+        text_without_basic = re.sub(r"[0-9\[\],\s]", "", text)
         return bool(text_without_basic)
 
-    def split_formula_by_comma(self, formula: PdfFormula) -> list[tuple[list[PdfCharacter], PdfCharacter]]:
+    def split_formula_by_comma(
+        self, formula: PdfFormula
+    ) -> list[tuple[list[PdfCharacter], PdfCharacter]]:
         """按逗号拆分公式字符，返回(字符组, 逗号字符)的列表，最后一组的逗号字符为None"""
         result = []
         current_chars = []
-        
+
         for char in formula.pdf_character:
-            if char.char_unicode == ',':
+            if char.char_unicode == ",":
                 if current_chars:
                     result.append((current_chars, char))
                     current_chars = []
             else:
                 current_chars.append(char)
-        
+
         if current_chars:
             result.append((current_chars, None))  # 最后一组没有逗号
-        
+
         return result
 
     def process_comma_formulas(self, page: Page):
@@ -554,22 +557,88 @@ class StylesAndFormulas:
 
             new_compositions = []
             for composition in paragraph.pdf_paragraph_composition:
-                if (composition.pdf_formula is not None and 
-                    self.should_split_formula(composition.pdf_formula)):
+                if composition.pdf_formula is not None and self.should_split_formula(
+                    composition.pdf_formula
+                ):
                     # 按逗号拆分公式
                     char_groups = self.split_formula_by_comma(composition.pdf_formula)
                     for chars, comma in char_groups:
                         if chars:  # 忽略空组（连续的逗号）
                             formula = PdfFormula(pdf_character=chars)
                             self.update_formula_data(formula)
-                            new_compositions.append(PdfParagraphComposition(pdf_formula=formula))
-                            
+                            new_compositions.append(
+                                PdfParagraphComposition(pdf_formula=formula)
+                            )
+
                             # 如果有逗号，添加为文本行
                             if comma:
                                 comma_line = PdfLine(pdf_character=[comma])
                                 self.update_line_data(comma_line)
-                                new_compositions.append(PdfParagraphComposition(pdf_line=comma_line))
+                                new_compositions.append(
+                                    PdfParagraphComposition(pdf_line=comma_line)
+                                )
                 else:
                     new_compositions.append(composition)
-            
+
             paragraph.pdf_paragraph_composition = new_compositions
+
+    def is_x_axis_contained(self, box1: Box, box2: Box) -> bool:
+        """判断box1的x轴是否完全包含在box2的x轴内，或反之"""
+        return (box1.x >= box2.x and box1.x2 <= box2.x2) or (
+            box2.x >= box1.x and box2.x2 <= box1.x2
+        )
+
+    def has_y_intersection(self, box1: Box, box2: Box) -> bool:
+        """判断两个box的y轴是否有交集"""
+        return not (box1.y2 < box2.y or box2.y2 < box1.y)
+
+    def merge_formulas(self, formula1: PdfFormula, formula2: PdfFormula) -> PdfFormula:
+        """合并两个公式，保持字符的相对位置"""
+        # 合并所有字符
+        all_chars = formula1.pdf_character + formula2.pdf_character
+        # 按y坐标和x坐标排序，确保字符顺序正确
+        sorted_chars = sorted(all_chars, key=lambda c: (c.box.y, c.box.x))
+
+        merged_formula = PdfFormula(pdf_character=sorted_chars)
+        self.update_formula_data(merged_formula)
+        return merged_formula
+
+    def merge_overlapping_formulas(self, page: Page):
+        """
+        合并x轴重叠且y轴有交集的相邻公式
+        角标可能会被识别成单独的公式，需要合并
+        """
+        if not page.pdf_paragraph:
+            return
+
+        for paragraph in page.pdf_paragraph:
+            if not paragraph.pdf_paragraph_composition:
+                continue
+
+            i = 0
+            while i < len(paragraph.pdf_paragraph_composition) - 1:
+                comp1 = paragraph.pdf_paragraph_composition[i]
+                comp2 = paragraph.pdf_paragraph_composition[i + 1]
+
+                # 检查是否都是公式
+                if comp1.pdf_formula is None or comp2.pdf_formula is None:
+                    i += 1
+                    continue
+
+                formula1 = comp1.pdf_formula
+                formula2 = comp2.pdf_formula
+
+                # 检查x轴重叠和y轴交集
+                if self.is_x_axis_contained(
+                    formula1.box, formula2.box
+                ) and self.has_y_intersection(formula1.box, formula2.box):
+                    # 合并公式
+                    merged_formula = self.merge_formulas(formula1, formula2)
+                    paragraph.pdf_paragraph_composition[i] = PdfParagraphComposition(
+                        pdf_formula=merged_formula
+                    )
+                    # 删除第二个公式
+                    del paragraph.pdf_paragraph_composition[i + 1]
+                    # 不增加i，因为合并后的公式可能还需要和下一个公式合并
+                else:
+                    i += 1
