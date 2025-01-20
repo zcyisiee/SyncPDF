@@ -63,26 +63,17 @@ class StylesAndFormulas:
                 continue
 
             new_compositions = []
-            current_chars = []
-            is_current_formula = False  # 当前是否在处理公式字符
 
             for composition in paragraph.pdf_paragraph_composition:
-                if not composition.pdf_line:
-                    if current_chars:
-                        # 处理剩余字符
-                        new_compositions.append(
-                            self.create_composition(current_chars, is_current_formula)
-                        )
-                        current_chars = []
-                    new_compositions.append(composition)
-                    continue
+                current_chars = []
+                is_current_formula = False  # 当前是否在处理公式字符
 
                 line = composition.pdf_line
                 for char in line.pdf_character:
                     is_formula = (
                         (
                             (
-                                self.is_formulas_start_end_char(char.char_unicode)
+                                self.is_formulas_start_char(char.char_unicode)
                                 and not is_current_formula
                             )
                             or (
@@ -480,7 +471,7 @@ class StylesAndFormulas:
 
         return False
 
-    def is_formulas_start_end_char(self, char: str) -> bool:
+    def is_formulas_start_char(self, char: str) -> bool:
         if "(cid:" in char:
             return True
         if self.translation_config.formular_char_pattern:
@@ -505,12 +496,12 @@ class StylesAndFormulas:
             )
         ):
             return True
-        if re.match("[0-9\\[\\]]", char):
+        if re.match("[0-9\\[\\]•]", char):
             return True
         return False
 
     def is_formulas_middle_char(self, char: str) -> bool:
-        if self.is_formulas_start_end_char(char):
+        if self.is_formulas_start_char(char):
             return True
 
         if re.match(",", char):
