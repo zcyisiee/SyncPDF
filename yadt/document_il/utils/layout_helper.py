@@ -15,8 +15,8 @@ def formular_height_ignore_char(char: PdfCharacter):
     return char.pdf_character_id is None or char.char_unicode in (
         # 暂时假设cid:17和cid 16是特殊情况
         # 来源于 arXiv:2310.18608v2 第九页公式大括号
-        '(cid:17)',
-        '(cid:16)',
+        "(cid:17)",
+        "(cid:16)",
     )
 
 
@@ -37,11 +37,15 @@ class Layout:
 
         # 如果当前字符的 y 坐标明显低于前一个字符，说明换行了
         # 这里使用字符高度的一半作为阈值
-        char_height = curr_char.box.y2 - curr_char.box.y
-        should_new_line = curr_char.box.y2 < prev_char.box.y
+        char_height = max(curr_char.box.y2 - curr_char.box.y, prev_char.box.y2 - prev_char.box.y)
+        char_width = max(curr_char.box.x2 - curr_char.box.x, prev_char.box.x2 - prev_char.box.x)
+        should_new_line = (
+            curr_char.box.y2 < prev_char.box.y
+            or curr_char.box.x2 < prev_char.box.x - char_width * 10
+        )
         if should_new_line and (
-                formular_height_ignore_char(curr_char)
-                or formular_height_ignore_char(prev_char)
+            formular_height_ignore_char(curr_char)
+            or formular_height_ignore_char(prev_char)
         ):
             return False
         return should_new_line
