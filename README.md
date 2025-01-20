@@ -92,6 +92,11 @@ And meet the following requirements:
 - content loss less than 1%
 
 
+## Known Issues
+
+1. Parsing errors in the author and reference sections; they get merged into one paragraph after translation.
+2. Lines are not supported.
+
 ## How to Contribute
 
 This project is not yet ready to accept community contributions. Please be patient. Thank you for your support! Community contributions will be open in the future.
