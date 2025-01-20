@@ -105,5 +105,5 @@ This project is not yet ready to accept community contributions. Please be patie
 
 However, currently, the following two types of issue reports are especially accepted:
 
-1. Compatibility issues with pdf2zh [#20](https://github.com/funstory-ai/yadt/issues/20)
-2. Bad cases of this project found downstream [#23](https://github.com/funstory-ai/yadt/issues/23)
+1. Compatibility issues with pdf2zh: [#20](https://github.com/funstory-ai/yadt/issues/20)
+2. Bad cases of this project found downstream: [#23](https://github.com/funstory-ai/yadt/issues/23)
