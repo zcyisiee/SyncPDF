@@ -13,8 +13,6 @@ from yadt.document_il.il_version_1 import (
 
 def formular_height_ignore_char(char: PdfCharacter):
     return char.pdf_character_id is None or char.char_unicode in (
-        "(",
-        ")",
         # 暂时假设cid:17和cid 16是特殊情况
         # 来源于 arXiv:2310.18608v2 第九页公式大括号
         '(cid:17)',

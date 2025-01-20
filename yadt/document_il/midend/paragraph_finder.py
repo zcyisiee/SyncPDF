@@ -81,7 +81,7 @@ class ParagraphFinder:
         median_width = self.calculate_median_line_width(paragraphs)
 
         # 第四步：处理独立段落
-        self.process_independent_paragraphs(paragraphs, median_width)
+        # self.process_independent_paragraphs(paragraphs, median_width)
 
         for paragraph in paragraphs:
             self.update_paragraph_data(paragraph, update_unicode=True)

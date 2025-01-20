@@ -35,6 +35,7 @@ class StylesAndFormulas:
         """处理页面，包括公式识别和偏移量计算"""
         self.process_page_formulas(page)
         self.process_page_offsets(page)
+        self.process_translatable_formulas(page)
         self.process_page_styles(page)
 
     def update_line_data(self, line: PdfLine):
@@ -76,7 +77,16 @@ class StylesAndFormulas:
                 line = composition.pdf_line
                 for char in line.pdf_character:
                     is_formula = (
-                        self.is_formulas_char(char.char_unicode)  # 公式字符
+                        (
+                            (
+                                self.is_formulas_start_end_char(char.char_unicode)
+                                and not is_current_formula
+                            )
+                            or (
+                                self.is_formulas_middle_char(char.char_unicode)
+                                and is_current_formula
+                            )
+                        )  # 公式字符
                         or char.pdf_style.font_id in formula_font_ids  # 公式字体
                         or char.vertical  # 垂直字体
                         or (
@@ -107,6 +117,32 @@ class StylesAndFormulas:
                         self.create_composition(current_chars, is_current_formula)
                     )
                     current_chars = []
+
+            paragraph.pdf_paragraph_composition = new_compositions
+
+    def process_translatable_formulas(self, page: Page):
+        """将需要正常翻译的公式（如纯数字、数字加逗号等）转换为普通文本行"""
+        if not page.pdf_paragraph:
+            return
+
+        for paragraph in page.pdf_paragraph:
+            if not paragraph.pdf_paragraph_composition:
+                continue
+
+            new_compositions = []
+            for composition in paragraph.pdf_paragraph_composition:
+                if (
+                    composition.pdf_formula is not None
+                    and self.is_translatable_formula(composition.pdf_formula)
+                ):
+                    # 将可翻译公式转换为普通文本行
+                    new_line = PdfLine(
+                        pdf_character=composition.pdf_formula.pdf_character
+                    )
+                    self.update_line_data(new_line)
+                    new_compositions.append(PdfParagraphComposition(pdf_line=new_line))
+                else:
+                    new_compositions.append(composition)
 
             paragraph.pdf_paragraph_composition = new_compositions
 
@@ -398,6 +434,15 @@ class StylesAndFormulas:
             max_y = max(char.box.y2 for char in formula.pdf_character)
         formula.box = Box(min_x, min_y, max_x, max_y)
 
+    def is_translatable_formula(self, formula: PdfFormula) -> bool:
+        """判断公式是否只包含需要正常翻译的字符（数字和英文逗号）"""
+        text = "".join(char.char_unicode for char in formula.pdf_character)
+        # 去除空格后用正则表达式检查是否只包含数字和英文逗号
+        text = text.replace(" ", "")
+        if formula.y_offset > 0.1:
+            return False
+        return bool(re.match(r"^[0-9,]+$", text))
+
     def is_formulas_font(self, font_name: str) -> bool:
         if self.translation_config.formular_font_pattern:
             pattern = self.translation_config.formular_font_pattern
@@ -432,7 +477,7 @@ class StylesAndFormulas:
 
         return False
 
-    def is_formulas_char(self, char: str) -> bool:
+    def is_formulas_start_end_char(self, char: str) -> bool:
         if "(cid:" in char:
             return True
         if self.translation_config.formular_char_pattern:
@@ -457,6 +502,13 @@ class StylesAndFormulas:
             )
         ):
             return True
-        if re.match("[0-9\\[\\],]", char):
+        if re.match("[0-9\\[\\]]", char):
             return True
         return False
+
+    def is_formulas_middle_char(self, char: str) -> bool:
+        if self.is_formulas_start_end_char(char):
+            return True
+
+        if re.match(",", char):
+            return True
