@@ -1,6 +1,6 @@
 [project]
 name = "yadt"
-version = "0.0.1a20"
+version = "0.0.1a21"
 description = "Yet Another Document Translator"
 license = "AGPL-3.0"
 readme = "README.md"
@@ -17,7 +17,7 @@ dependencies = [
     "huggingface-hub>=0.27.0",
     "numpy>=2.0.2",
     "onnx>=1.17.0",
-    "onnxruntime>=1.20.1",
+    "onnxruntime>=1.16.1",
     "openai>=1.59.3",
     "opencv-python>=4.10.0.84",
     "orjson>=3.10.14",
