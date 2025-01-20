@@ -71,7 +71,7 @@ class StylesAndFormulas:
                 line = composition.pdf_line
                 for char in line.pdf_character:
                     is_formula = (
-                        (
+                        (  # 区分公式开头的字符&公式中间的字符。主要是逗号不能在公式开头，但是可以在中间。
                             (
                                 self.is_formulas_start_char(char.char_unicode)
                                 and not is_current_formula
@@ -89,6 +89,11 @@ class StylesAndFormulas:
                             # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
                             and char.pdf_style.font_size
                             < current_chars[-1].pdf_style.font_size * 0.79
+                        )
+                        or (
+                            #   如果是程序添加的dummy空格
+                            char.char_unicode is None
+                            and is_current_formula
                         )
                     )
 
