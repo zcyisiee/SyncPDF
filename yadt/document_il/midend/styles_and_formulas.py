@@ -71,7 +71,8 @@ class StylesAndFormulas:
 
             for composition in paragraph.pdf_paragraph_composition:
                 current_chars = []
-                is_current_formula = False  # 当前是否在处理公式字符
+                in_formula_state = False  # 当前是否在处理公式字符
+                in_corner_mark_state = False
 
                 line = composition.pdf_line
                 for char in line.pdf_character:
@@ -79,46 +80,59 @@ class StylesAndFormulas:
                         (  # 区分公式开头的字符&公式中间的字符。主要是逗号不能在公式开头，但是可以在中间。
                             (
                                 self.is_formulas_start_char(char.char_unicode)
-                                and not is_current_formula
+                                and not in_formula_state
                             )
                             or (
                                 self.is_formulas_middle_char(char.char_unicode)
-                                and is_current_formula
+                                and in_formula_state
                             )
                         )  # 公式字符
                         or char.pdf_style.font_id in formula_font_ids  # 公式字体
                         or char.vertical  # 垂直字体
                         or (
+                            #   如果是程序添加的dummy空格
+                            char.char_unicode is None
+                            and in_formula_state
+                        )
+                    )
+
+                    is_corner_mark =( (
                             len(current_chars) > 0
                             and not get_char_unicode_string(current_chars).isspace()
                             # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
                             and char.pdf_style.font_size
                             < current_chars[-1].pdf_style.font_size * 0.79
-                        )
-                        or (
-                            #   如果是程序添加的dummy空格
-                            char.char_unicode is None
-                            and is_current_formula
-                        )
-                    )
+                            and not in_corner_mark_state
+                        ) or (
+                            len(current_chars) > 0
+                            and not get_char_unicode_string(current_chars).isspace()
+                            # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
+                            and char.pdf_style.font_size
+                            < current_chars[-1].pdf_style.font_size * 1.1
+                            and in_corner_mark_state
+
+                    ))
+
+                    is_formula = is_formula or is_corner_mark
 
                     if char.char_unicode == " ":
-                        is_formula = is_current_formula
+                        is_formula = in_formula_state
 
-                    if is_formula != is_current_formula and current_chars:
+                    if is_formula != in_formula_state and current_chars:
                         # 字符类型发生切换，处理之前的字符
                         new_compositions.append(
-                            self.create_composition(current_chars, is_current_formula)
+                            self.create_composition(current_chars, in_formula_state)
                         )
                         current_chars = []
-                    is_current_formula = is_formula
+                    in_formula_state = is_formula
+                    in_corner_mark_state = is_corner_mark
 
                     current_chars.append(char)
 
                 # 处理行末的字符
                 if current_chars:
                     new_compositions.append(
-                        self.create_composition(current_chars, is_current_formula)
+                        self.create_composition(current_chars, in_formula_state)
                     )
                     current_chars = []
 
