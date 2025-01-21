@@ -112,7 +112,7 @@
         <xs:simpleType>
           <xs:restriction>
             <xs:simpleType>
-              <xs:list itemType="xs:string"/>
+              <xs:list itemType="xs:float"/>
             </xs:simpleType>
             <xs:minLength value="1"/>
           </xs:restriction>
@@ -122,7 +122,7 @@
         <xs:simpleType>
           <xs:restriction>
             <xs:simpleType>
-              <xs:list itemType="xs:string"/>
+              <xs:list itemType="xs:float"/>
             </xs:simpleType>
             <xs:minLength value="1"/>
           </xs:restriction>
@@ -130,6 +130,7 @@
       </xs:attribute>
       <xs:attribute name="strokingColorSpaceName" type="xs:string"/>
       <xs:attribute name="nonStrokingColorSpaceName" type="xs:string"/>
+      <xs:attribute name="passthroughPerCharInstruction" type="xs:string"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfStyle">

@@ -191,7 +191,7 @@
         <attribute name="ncolor">
           <list>
             <oneOrMore>
-              <data type="string"/>
+              <data type="float"/>
             </oneOrMore>
           </list>
         </attribute>
@@ -200,7 +200,7 @@
         <attribute name="scolor">
           <list>
             <oneOrMore>
-              <data type="string"/>
+              <data type="float"/>
             </oneOrMore>
           </list>
         </attribute>
@@ -212,6 +212,11 @@
       </optional>
       <optional>
         <attribute name="nonStrokingColorSpaceName">
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="passthroughPerCharInstruction">
           <data type="string"/>
         </attribute>
       </optional>

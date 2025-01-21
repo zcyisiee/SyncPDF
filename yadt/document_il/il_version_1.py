@@ -99,7 +99,7 @@ class GraphicState:
             "type": "Attribute",
         },
     )
-    ncolor: list[str] = field(
+    ncolor: list[float] = field(
         default_factory=list,
         metadata={
             "type": "Attribute",
@@ -107,7 +107,7 @@ class GraphicState:
             "tokens": True,
         },
     )
-    scolor: list[str] = field(
+    scolor: list[float] = field(
         default_factory=list,
         metadata={
             "type": "Attribute",
@@ -126,6 +126,13 @@ class GraphicState:
         default=None,
         metadata={
             "name": "nonStrokingColorSpaceName",
+            "type": "Attribute",
+        },
+    )
+    passthrough_per_char_instruction: Optional[str] = field(
+        default=None,
+        metadata={
+            "name": "passthroughPerCharInstruction",
             "type": "Attribute",
         },
     )
