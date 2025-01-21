@@ -281,7 +281,7 @@ class ILTranslator:
                             page_font_map[paragraph.pdf_style.font_id], "1"
                         ).font_id
                     )
-                    or len(composition.pdf_same_style_characters.pdf_character) == 1
+                    # or len(composition.pdf_same_style_characters.pdf_character) == 1
                 ):
                     chars.extend(composition.pdf_same_style_characters.pdf_character)
                     continue
