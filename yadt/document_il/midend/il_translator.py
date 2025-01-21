@@ -13,8 +13,10 @@ from yadt.document_il import (
     PdfSameStyleCharacters,
     PdfSameStyleUnicodeCharacters,
     PdfStyle,
+    PdfFont,
 )
 from yadt.document_il.translator.translator import BaseTranslator
+from yadt.document_il.utils.fontmap import FontMapper
 from yadt.document_il.utils.layout_helper import (
     get_char_unicode_string,
     is_same_style,
@@ -122,6 +124,7 @@ class ILTranslator:
     ):
         self.translate_engine = translate_engine
         self.translation_config = translation_config
+        self.font_mapper = FontMapper(translation_config)
 
     def translate(self, docs: Document):
         tracker = DocumentTranslateTracker()
@@ -151,12 +154,16 @@ class ILTranslator:
         tracker: PageTranslateTracker = None,
     ):
         for paragraph in page.pdf_paragraph:
+            page_font_map = {}
+            for font in page.pdf_font:
+                page_font_map[font.font_id] = font
             # self.translate_paragraph(paragraph, pbar)
             executor.submit(
                 self.translate_paragraph,
                 paragraph,
                 pbar,
                 tracker.new_paragraph(),
+                page_font_map,
             )
 
     class TranslateInput:
@@ -204,7 +211,11 @@ class ILTranslator:
             right_placeholder,
         )
 
-    def get_translate_input(self, paragraph: PdfParagraph):
+    def get_translate_input(
+        self,
+        paragraph: PdfParagraph,
+        page_font_map: dict[str, PdfFont] = None,
+    ):
         if not paragraph.pdf_paragraph_composition:
             return
         if len(paragraph.pdf_paragraph_composition) == 1:
@@ -244,13 +255,31 @@ class ILTranslator:
                 chars.append(composition.pdf_character)
             elif composition.pdf_same_style_characters:
                 if (
+                    # 样式和段落基准样式一致，无需占位符
                     is_same_style(
                         composition.pdf_same_style_characters.pdf_style,
                         paragraph.pdf_style,
                     )
+                    # 字号差异在0.7-1.3之间，可能是首字母变大效果，无需占位符
                     or is_same_style_except_size(
                         composition.pdf_same_style_characters.pdf_style,
                         paragraph.pdf_style,
+                    )
+                    or (
+                        # 除了字体以外样式都和基准一样，并且字体都映射到同一个字体。无需占位符
+                        is_same_style_except_font(
+                            composition.pdf_same_style_characters.pdf_style,
+                            paragraph.pdf_style,
+                        )
+                        and self.font_mapper.map(
+                            page_font_map[
+                                composition.pdf_same_style_characters.pdf_style.font_id
+                            ],
+                            "1",
+                        ).font_id
+                        == self.font_mapper.map(
+                            page_font_map[paragraph.pdf_style.font_id], "1"
+                        ).font_id
                     )
                     or len(composition.pdf_same_style_characters.pdf_character) == 1
                 ):
@@ -398,6 +427,7 @@ class ILTranslator:
         paragraph: PdfParagraph,
         pbar: tqdm | None = None,
         tracker: ParagraphTranslateTracker = None,
+        page_font_map: dict[str, PdfFont] = None,
     ):
         with PbarContext(pbar):
             if paragraph.vertical:
@@ -405,7 +435,7 @@ class ILTranslator:
 
             tracker.set_pdf_unicode(paragraph.unicode)
 
-            translate_input = self.get_translate_input(paragraph)
+            translate_input = self.get_translate_input(paragraph, page_font_map)
             if not translate_input:
                 return
 
