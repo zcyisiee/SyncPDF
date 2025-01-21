@@ -99,9 +99,7 @@ And meet the following requirements:
 
 1. Parsing errors in the author and reference sections; they get merged into one paragraph after translation.
 2. Lines are not supported.
-3. Poor support for capitalizing initial letters.
-4. Multi-letter corner mark
-5. Does not support drop caps.
+3. Does not support drop caps.
 
 ## How to Contribute
 
