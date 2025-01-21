@@ -363,8 +363,8 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
     # The Do_xxx method is the method for executing corresponding postscript instructions
     def execute(self, streams: Sequence[object]) -> None:
         ops = ""
-        self.il_creater.on_new_stream()
         for stream in streams:
+            self.il_creater.on_new_stream()
             # 重载返回指令流
             try:
                 parser = PDFContentParser([stream])

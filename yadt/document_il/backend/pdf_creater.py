@@ -41,15 +41,15 @@ class PDFCreater:
     ):
         if graphic_state is None:
             return
-        if graphic_state.stroking_color_space_name:
-            draw_op.append(
-                f"/{graphic_state.stroking_color_space_name} CS \n".encode()
-            )
-        if graphic_state.non_stroking_color_space_name:
-            draw_op.append(
-                f"/{graphic_state.non_stroking_color_space_name}"
-                f" cs \n".encode()
-            )
+        # if graphic_state.stroking_color_space_name:
+        #     draw_op.append(
+        #         f"/{graphic_state.stroking_color_space_name} CS \n".encode()
+        #     )
+        # if graphic_state.non_stroking_color_space_name:
+        #     draw_op.append(
+        #         f"/{graphic_state.non_stroking_color_space_name}"
+        #         f" cs \n".encode()
+        #     )
         # if graphic_state.ncolor is not None:
         #     if len(graphic_state.ncolor) == 1:
         #         draw_op.append(f"{graphic_state.ncolor[0]} g \n".encode())

@@ -116,6 +116,30 @@ def create_parser():
         action="store_true",
         help="Do not output monolingual PDF files",
     )
+    translation_params.add_argument(
+        "--formular-font-pattern",
+        type=str,
+        default=None,
+        help="Font pattern to identify formula text",
+    )
+    translation_params.add_argument(
+        "--formular-char-pattern",
+        type=str,
+        default=None,
+        help="Character pattern to identify formula text",
+    )
+    translation_params.add_argument(
+        "--split-short-lines",
+        default=False,
+        action="store_true",
+        help="Force split short lines into different paragraphs (may cause poor typesetting & bugs)",
+    )
+    translation_params.add_argument(
+        "--short-line-split-factor",
+        type=float,
+        default=0.8,
+        help="Split threshold factor. The actual threshold is the median length of all lines on the current page * this factor",
+    )
     service_params = translation_params.add_mutually_exclusive_group()
     service_params.add_argument(
         "--openai",
@@ -333,6 +357,10 @@ def main():
             no_dual=args.no_dual,
             no_mono=args.no_mono,
             qps=args.qps,
+            formular_font_pattern=args.formular_font_pattern,
+            formular_char_pattern=args.formular_char_pattern,
+            split_short_lines=args.split_short_lines,
+            short_line_split_factor=args.short_line_split_factor,
         )
 
         # 开始翻译
