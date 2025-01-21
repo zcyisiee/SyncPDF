@@ -27,7 +27,7 @@ from yadt.document_il.frontend.il_creater import ILCreater
 from yadt.document_il.backend.pdf_creater import PDFCreater
 from yadt.translation_config import TranslationConfig
 from yadt.progress_monitor import ProgressMonitor
-
+from yadt.document_il.utils.fontmap import FontMapper
 import logging
 
 logger = logging.getLogger(__name__)
@@ -159,6 +159,7 @@ def translate(translation_config: TranslationConfig):
             StylesAndFormulas.stage_name,
             ILTranslator.stage_name,
             Typesetting.stage_name,
+            FontMapper.stage_name,
             PDFCreater.stage_name,
         ],
     ) as pm:

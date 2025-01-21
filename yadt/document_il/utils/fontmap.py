@@ -8,6 +8,8 @@ from yadt.translation_config import TranslationConfig
 
 
 class FontMapper:
+    stage_name = "添加字体"
+
     def __init__(self, translation_config: TranslationConfig):
         self.font_names = [
             "source-han-serif-cn.ttf",
@@ -66,21 +68,23 @@ class FontMapper:
         font_list.extend(
             [
                 (
-                    os.path.basename(file_name)
-                    .split(".")[0]
-                    .replace("-", "")
-                    .lower(),
+                    os.path.basename(file_name).split(".")[0].replace("-", "").lower(),
                     get_cache_file_path(file_name),
                 )
                 for file_name in self.font_names
             ]
         )
         font_id = {}
-        for i, page in enumerate(doc_zh):
-            if not self.translation_config.should_translate_page(i + 1):
-                continue
-            for font in font_list:
-                font_id[font[0]] = page.insert_font(font[0], font[1])
+        with self.translation_config.progress_monitor.stage_start(
+            self.stage_name, len(doc_zh)
+        ) as pbar:
+            for i, page in enumerate(doc_zh):
+                if not self.translation_config.should_translate_page(i + 1):
+                    pbar.advance()
+                    continue
+                for font in font_list:
+                    font_id[font[0]] = page.insert_font(font[0], font[1])
+                pbar.advance()
         xreflen = doc_zh.xref_length()
         for xref in range(1, xreflen):
             for label in ["Resources/", ""]:  # 可能是基于 xobj 的 res
