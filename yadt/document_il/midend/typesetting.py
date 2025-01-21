@@ -362,12 +362,18 @@ class TypesettingUnit:
 
 
 class Typesetting:
+    stage_name = "排版"
     def __init__(self, translation_config: TranslationConfig):
         self.font_mapper = FontMapper(translation_config)
+        self.translation_config = translation_config
 
     def typsetting_document(self, document: il_version_1.Document):
-        for page in document.page:
-            self.render_page(page)
+        with self.translation_config.progress_monitor.stage_start(
+                self.stage_name, len(document.page)
+        ) as pbar:
+            for page in document.page:
+                self.render_page(page)
+                pbar.advance()
 
     def render_page(self, page: il_version_1.Page):
         fonts = {f.font_id: f for f in page.pdf_font}

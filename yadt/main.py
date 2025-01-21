@@ -210,7 +210,8 @@ def download_font_assets():
 
 
 def main():
-    logging.basicConfig(level=logging.INFO)
+    from rich.logging import RichHandler
+    logging.basicConfig(level=logging.INFO, handlers=[RichHandler()])
 
     logging.getLogger("httpx").setLevel("CRITICAL")
     logging.getLogger("httpx").propagate = False

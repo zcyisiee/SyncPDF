@@ -13,7 +13,10 @@ from yadt.translation_config import TranslationConfig
 
 
 class ILCreater:
+    stage_name = "解析PDF并创建中间表示"
+
     def __init__(self, translation_config: TranslationConfig):
+        self.progress = None
         self.current_page: il_version_1.Page = None
         self.mupdf: pymupdf.Document = None
         self.model = DocLayoutModel.load_available()
@@ -73,7 +76,8 @@ class ILCreater:
         )
         self.current_page_font_name_id_map = {}
         self.docs.page.append(self.current_page)
-
+    def on_page_end(self):
+        self.progress.advance(1)
     def on_page_crop_box(
         self,
         x0: float | int,
@@ -252,6 +256,14 @@ class ILCreater:
         assert isinstance(total_pages, int)
         assert total_pages > 0
         self.docs.total_pages = total_pages
+        total = 0
+        for page in range(total_pages):
+            if self.translation_config.should_translate_page(page + 1) is False:
+                continue
+            total += 1
+        self.progress = self.translation_config.progress_monitor.stage_start(
+            self.stage_name, total
+        )
 
     def on_pdf_figure(self, figure: LTFigure):
         box = il_version_1.Box(

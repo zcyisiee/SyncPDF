@@ -24,12 +24,17 @@ from yadt.translation_config import TranslationConfig
 
 
 class StylesAndFormulas:
+    stage_name = "解析公式与样式"
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config
 
     def process(self, document: Document):
-        for page in document.page:
-            self.process_page(page)
+        with self.translation_config.progress_monitor.stage_start(
+            self.stage_name, len(document.page)
+        ) as pbar:
+            for page in document.page:
+                self.process_page(page)
+                pbar.advance()
 
     def process_page(self, page: Page):
         """处理页面，包括公式识别和偏移量计算"""

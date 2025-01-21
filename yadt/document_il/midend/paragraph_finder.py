@@ -19,6 +19,7 @@ from yadt.translation_config import TranslationConfig
 
 
 class ParagraphFinder:
+    stage_name = "解析段落"
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config
 
@@ -71,8 +72,12 @@ class ParagraphFinder:
         line.box = Box(min_x, min_y, max_x, max_y)
 
     def process(self, document):
-        for page in document.page:
-            self.process_page(page)
+        with self.translation_config.progress_monitor.stage_start(
+            self.stage_name, len(document.page)
+        ) as pbar:
+            for page in document.page:
+                self.process_page(page)
+                pbar.advance()
 
     def process_page(self, page: Page):
         # 第一步：根据 layout 创建 paragraphs

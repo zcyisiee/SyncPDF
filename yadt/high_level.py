@@ -26,6 +26,7 @@ from yadt.pdfinterp import PDFPageInterpreterEx
 from yadt.document_il.frontend.il_creater import ILCreater
 from yadt.document_il.backend.pdf_creater import PDFCreater
 from yadt.translation_config import TranslationConfig
+from yadt.progress_monitor import ProgressMonitor
 
 import logging
 
@@ -92,146 +93,161 @@ def start_parse_il(
 
     parser = PDFParser(inf)
     doc = PDFDocument(parser)
-    with tqdm.tqdm(total=total_pages, desc="parse pdf to il") as progress:
-        for pageno, page in enumerate(PDFPage.create_pages(doc)):
-            if cancellation_event and cancellation_event.is_set():
-                raise CancelledError("task cancelled")
-            if pages and (pageno not in pages):
-                continue
-            progress.update()
-            page.pageno = pageno
-            if not translation_config.should_translate_page(pageno + 1):
-                continue
-            # The current program no longer relies on
-            # the following layout recognition results,
-            # but in order to facilitate the migration of pdf2zh,
-            # the relevant code is temporarily retained.
-            # pix = doc_zh[page.pageno].get_pixmap()
-            # image = np.fromstring(pix.samples, np.uint8).reshape(
-            #     pix.height, pix.width, 3
-            # )[:, :, ::-1]
-            # page_layout = model.predict(
-            #     image, imgsz=int(pix.height / 32) * 32)[0]
-            # # kdtree 是不可能 kdtree 的，不如直接渲染成图片，用空间换时间
-            # box = np.ones((pix.height, pix.width))
-            # h, w = box.shape
-            # vcls = ["abandon", "figure", "table",
-            #         "isolate_formula", "formula_caption"]
-            # for i, d in enumerate(page_layout.boxes):
-            #     if page_layout.names[int(d.cls)] not in vcls:
-            #         x0, y0, x1, y1 = d.xyxy.squeeze()
-            #         x0, y0, x1, y1 = (
-            #             np.clip(int(x0 - 1), 0, w - 1),
-            #             np.clip(int(h - y1 - 1), 0, h - 1),
-            #             np.clip(int(x1 + 1), 0, w - 1),
-            #             np.clip(int(h - y0 + 1), 0, h - 1),
-            #         )
-            #         box[y0:y1, x0:x1] = i + 2
-            # for i, d in enumerate(page_layout.boxes):
-            #     if page_layout.names[int(d.cls)] in vcls:
-            #         x0, y0, x1, y1 = d.xyxy.squeeze()
-            #         x0, y0, x1, y1 = (
-            #             np.clip(int(x0 - 1), 0, w - 1),
-            #             np.clip(int(h - y1 - 1), 0, h - 1),
-            #             np.clip(int(x1 + 1), 0, w - 1),
-            #             np.clip(int(h - y0 + 1), 0, h - 1),
-            #         )
-            #         box[y0:y1, x0:x1] = 0
-            # layout[page.pageno] = box
-            # 新建一个 xref 存放新指令流
-            page.page_xref = doc_zh.get_new_xref()  # hack 插入页面的新 xref
-            doc_zh.update_object(page.page_xref, "<<>>")
-            doc_zh.update_stream(page.page_xref, b"")
-            doc_zh[page.pageno].set_contents(page.page_xref)
-            ops_base = interpreter.process_page(page)
-            il_creater.on_page_base_operation(ops_base)
+
+    for pageno, page in enumerate(PDFPage.create_pages(doc)):
+        if cancellation_event and cancellation_event.is_set():
+            raise CancelledError("task cancelled")
+        if pages and (pageno not in pages):
+            continue
+        page.pageno = pageno
+        if not translation_config.should_translate_page(pageno + 1):
+            continue
+        # The current program no longer relies on
+        # the following layout recognition results,
+        # but in order to facilitate the migration of pdf2zh,
+        # the relevant code is temporarily retained.
+        # pix = doc_zh[page.pageno].get_pixmap()
+        # image = np.fromstring(pix.samples, np.uint8).reshape(
+        #     pix.height, pix.width, 3
+        # )[:, :, ::-1]
+        # page_layout = model.predict(
+        #     image, imgsz=int(pix.height / 32) * 32)[0]
+        # # kdtree 是不可能 kdtree 的，不如直接渲染成图片，用空间换时间
+        # box = np.ones((pix.height, pix.width))
+        # h, w = box.shape
+        # vcls = ["abandon", "figure", "table",
+        #         "isolate_formula", "formula_caption"]
+        # for i, d in enumerate(page_layout.boxes):
+        #     if page_layout.names[int(d.cls)] not in vcls:
+        #         x0, y0, x1, y1 = d.xyxy.squeeze()
+        #         x0, y0, x1, y1 = (
+        #             np.clip(int(x0 - 1), 0, w - 1),
+        #             np.clip(int(h - y1 - 1), 0, h - 1),
+        #             np.clip(int(x1 + 1), 0, w - 1),
+        #             np.clip(int(h - y0 + 1), 0, h - 1),
+        #         )
+        #         box[y0:y1, x0:x1] = i + 2
+        # for i, d in enumerate(page_layout.boxes):
+        #     if page_layout.names[int(d.cls)] in vcls:
+        #         x0, y0, x1, y1 = d.xyxy.squeeze()
+        #         x0, y0, x1, y1 = (
+        #             np.clip(int(x0 - 1), 0, w - 1),
+        #             np.clip(int(h - y1 - 1), 0, h - 1),
+        #             np.clip(int(x1 + 1), 0, w - 1),
+        #             np.clip(int(h - y0 + 1), 0, h - 1),
+        #         )
+        #         box[y0:y1, x0:x1] = 0
+        # layout[page.pageno] = box
+        # 新建一个 xref 存放新指令流
+        page.page_xref = doc_zh.get_new_xref()  # hack 插入页面的新 xref
+        doc_zh.update_object(page.page_xref, "<<>>")
+        doc_zh.update_stream(page.page_xref, b"")
+        doc_zh[page.pageno].set_contents(page.page_xref)
+        ops_base = interpreter.process_page(page)
+        il_creater.on_page_base_operation(ops_base)
+        il_creater.on_page_end()
 
     device.close()
 
 
 def translate(translation_config: TranslationConfig):
-    original_pdf_path = translation_config.input_file
-    logger.info(f"start to translate: {original_pdf_path}")
-    start_time = time.time()
+    with ProgressMonitor(
+        translation_config,
+        [
+            ILCreater.stage_name,
+            ParagraphFinder.stage_name,
+            StylesAndFormulas.stage_name,
+            ILTranslator.stage_name,
+            Typesetting.stage_name,
+            PDFCreater.stage_name,
+        ],
+    ) as pm:
+        translation_config.progress_monitor = pm
+        original_pdf_path = translation_config.input_file
+        logger.info(f"start to translate: {original_pdf_path}")
+        start_time = time.time()
 
-    doc_input = Document(original_pdf_path)
-    if translation_config.debug:
-        logger.debug("debug mode, save decompressed input pdf")
-        output_path = translation_config.get_working_file_path("input.decompressed.pdf")
-        doc_input.save(output_path, expand=True, pretty=True)
+        doc_input = Document(original_pdf_path)
+        if translation_config.debug:
+            logger.debug("debug mode, save decompressed input pdf")
+            output_path = translation_config.get_working_file_path(
+                "input.decompressed.pdf"
+            )
+            doc_input.save(output_path, expand=True, pretty=True)
 
-    # Continue with original processing
-    temp_pdf_path = translation_config.get_working_file_path("input.pdf")
+        # Continue with original processing
+        temp_pdf_path = translation_config.get_working_file_path("input.pdf")
 
-    doc_pdf2zh = Document(original_pdf_path)
-    resfont = "china-ss"
-    for page in doc_pdf2zh:
-        page.insert_font(resfont, None)
-    doc_pdf2zh.save(temp_pdf_path)
+        doc_pdf2zh = Document(original_pdf_path)
+        resfont = "china-ss"
+        for page in doc_pdf2zh:
+            page.insert_font(resfont, None)
+        doc_pdf2zh.save(temp_pdf_path)
 
-    il_creater = ILCreater(translation_config)
-    il_creater.mupdf = doc_input
+        il_creater = ILCreater(translation_config)
+        il_creater.mupdf = doc_input
 
-    xml_converter = XMLConverter()
+        xml_converter = XMLConverter()
 
-    logger.debug(f"start parse il from {temp_pdf_path}")
-    with open(temp_pdf_path, "rb") as f:
-        start_parse_il(
-            f,
-            doc_zh=doc_pdf2zh,
-            resfont=resfont,
-            il_creater=il_creater,
-            translation_config=translation_config,
+        logger.debug(f"start parse il from {temp_pdf_path}")
+        with open(temp_pdf_path, "rb") as f:
+            start_parse_il(
+                f,
+                doc_zh=doc_pdf2zh,
+                resfont=resfont,
+                il_creater=il_creater,
+                translation_config=translation_config,
+            )
+        logger.debug(f"finish parse il from {temp_pdf_path}")
+
+        docs = il_creater.create_il()
+        logger.debug(f"finish create il from {temp_pdf_path}")
+
+        if translation_config.debug:
+            xml_converter.write_json(
+                docs, translation_config.get_working_file_path("create_il.debug.json")
+            )
+
+        ParagraphFinder(translation_config).process(docs)
+        logger.debug(f"finish paragraph finder from {temp_pdf_path}")
+        if translation_config.debug:
+            xml_converter.write_json(
+                docs, translation_config.get_working_file_path("paragraph_finder.json")
+            )
+
+        StylesAndFormulas(translation_config).process(docs)
+        logger.debug(f"finish styles and formulas from {temp_pdf_path}")
+        if translation_config.debug:
+            xml_converter.write_json(
+                docs,
+                translation_config.get_working_file_path("styles_and_formulas.json"),
+            )
+
+        translate_engine = translation_config.translator
+        # translate_engine.ignore_cache = True
+        ILTranslator(translate_engine, translation_config).translate(docs)
+        logger.debug(f"finish ILTranslator from {temp_pdf_path}")
+        if translation_config.debug:
+            xml_converter.write_json(
+                docs, translation_config.get_working_file_path("il_translated.json")
+            )
+
+        Typesetting(translation_config).typsetting_document(docs)
+        logger.debug(f"finish typsetting from {temp_pdf_path}")
+        if translation_config.debug:
+            xml_converter.write_json(
+                docs, translation_config.get_working_file_path("typsetting.json")
+            )
+
+        # deepcopy
+        # docs2 = xml_converter.deepcopy(docs)
+
+        pdf_creater = PDFCreater(original_pdf_path, docs, translation_config)
+
+        pdf_creater.write(translation_config)
+
+        finish_time = time.time()
+
+        logger.info(
+            f"finish translate: {original_pdf_path}, cost: {finish_time - start_time} s"
         )
-    logger.debug(f"finish parse il from {temp_pdf_path}")
-
-    docs = il_creater.create_il()
-    logger.debug(f"finish create il from {temp_pdf_path}")
-
-    if translation_config.debug:
-        xml_converter.write_json(
-            docs, translation_config.get_working_file_path("create_il.debug.json")
-        )
-
-    ParagraphFinder(translation_config).process(docs)
-    logger.debug(f"finish paragraph finder from {temp_pdf_path}")
-    if translation_config.debug:
-        xml_converter.write_json(
-            docs, translation_config.get_working_file_path("paragraph_finder.json")
-        )
-
-    StylesAndFormulas(translation_config).process(docs)
-    logger.debug(f"finish styles and formulas from {temp_pdf_path}")
-    if translation_config.debug:
-        xml_converter.write_json(
-            docs, translation_config.get_working_file_path("styles_and_formulas.json")
-        )
-
-    translate_engine = translation_config.translator
-    # translate_engine.ignore_cache = True
-    ILTranslator(translate_engine, translation_config).translate(docs)
-    logger.debug(f"finish ILTranslator from {temp_pdf_path}")
-    if translation_config.debug:
-        xml_converter.write_json(
-            docs, translation_config.get_working_file_path("il_translated.json")
-        )
-
-    Typesetting(translation_config).typsetting_document(docs)
-    logger.debug(f"finish typsetting from {temp_pdf_path}")
-    if translation_config.debug:
-        xml_converter.write_json(
-            docs, translation_config.get_working_file_path("typsetting.json")
-        )
-
-    # deepcopy
-    # docs2 = xml_converter.deepcopy(docs)
-
-    pdf_creater = PDFCreater(original_pdf_path, docs, translation_config)
-
-    pdf_creater.write(translation_config)
-
-    finish_time = time.time()
-
-    logger.info(
-        f"finish translate: {original_pdf_path}, cost: {finish_time - start_time} s"
-    )
