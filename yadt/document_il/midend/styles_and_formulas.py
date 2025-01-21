@@ -466,6 +466,9 @@ class StylesAndFormulas:
         return bool(re.match(r"^[0-9, ]+$", text))
 
     def is_formulas_font(self, font_name: str) -> bool:
+        pattern2 = (
+            r'^(Cambria|Cambria-BoldItalic|Cambria-Bold|Cambria-Italic)$'
+        )
         if self.translation_config.formular_font_pattern:
             pattern = self.translation_config.formular_font_pattern
         else:
@@ -490,10 +493,13 @@ class StylesAndFormulas:
         if font_name.startswith("BASE64:"):
             font_name_bytes = base64.b64decode(font_name[7:])
             font = font_name_bytes.split(b"+")[-1]
+            pattern2 = pattern2.encode()
             pattern = pattern.encode()
         else:
             font = font_name.split("+")[-1]
 
+        if re.match(pattern2, font):
+            return False
         if re.match(pattern, font):
             return True
 
