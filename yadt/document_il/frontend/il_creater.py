@@ -20,7 +20,7 @@ class ILCreater:
         self.progress = None
         self.current_page: il_version_1.Page = None
         self.mupdf: pymupdf.Document = None
-        self.model = DocLayoutModel.load_available()
+        self.model = translation_config.doc_layout_model
         self.docs = il_version_1.Document(page=[])
         self.stroking_color_space_name = None
         self.non_stroking_color_space_name = None
@@ -42,8 +42,8 @@ class ILCreater:
         pass
 
     def parse_arg(self, arg: str):
-        if isinstance(arg,PSLiteral):
-            return f'/{arg.name}'
+        if isinstance(arg, PSLiteral):
+            return f"/{arg.name}"
         if not isinstance(arg, str):
             return str(arg)
         return arg
@@ -83,8 +83,10 @@ class ILCreater:
         )
         self.current_page_font_name_id_map = {}
         self.docs.page.append(self.current_page)
+
     def on_page_end(self):
         self.progress.advance(1)
+
     def on_page_crop_box(
         self,
         x0: float | int,

@@ -5,6 +5,7 @@ from yadt.const import (
 )
 import os
 
+from yadt.doclayout import DocLayoutModel
 from yadt.progress_monitor import ProgressMonitor
 
 
@@ -29,6 +30,7 @@ class TranslationConfig:
         short_line_split_factor: float = 0.8,  # 切分阈值系数。实际阈值为当前页所有行长度中位数*此系数
         use_rich_pbar: bool = True,  # 是否使用 rich 进度条
         progress_monitor: Optional[ProgressMonitor] = None,  # progress_monitor
+        doc_layout_model=None,
     ):
         self.input_file = input_file
         self.translator = translator
@@ -61,6 +63,10 @@ class TranslationConfig:
         self.output_dir = output_dir
 
         os.makedirs(output_dir, exist_ok=True)
+
+        if doc_layout_model is None:
+            doc_layout_model = DocLayoutModel.load_available()
+        self.doc_layout_model = doc_layout_model
 
     def get_output_file_path(self, filename):
         return os.path.join(self.output_dir, filename)
