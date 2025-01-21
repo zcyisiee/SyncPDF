@@ -22,12 +22,11 @@ HEIGHT_NOT_USFUL_CHAR_IN_CHAR = (
     # arXiv:2411.19509v2 第四页 公式的|竖线
     "(cid:13)",
     "∑︁",
-
 )
+
 
 def formular_height_ignore_char(char: PdfCharacter):
     return char.pdf_character_id is None or char.char_unicode in (
-
         "(cid:17)",
         "(cid:16)",
         "(cid:104)",
@@ -53,8 +52,12 @@ class Layout:
 
         # 如果当前字符的 y 坐标明显低于前一个字符，说明换行了
         # 这里使用字符高度的一半作为阈值
-        char_height = max(curr_char.box.y2 - curr_char.box.y, prev_char.box.y2 - prev_char.box.y)
-        char_width = max(curr_char.box.x2 - curr_char.box.x, prev_char.box.x2 - prev_char.box.x)
+        char_height = max(
+            curr_char.box.y2 - curr_char.box.y, prev_char.box.y2 - prev_char.box.y
+        )
+        char_width = max(
+            curr_char.box.x2 - curr_char.box.x, prev_char.box.x2 - prev_char.box.x
+        )
         should_new_line = (
             curr_char.box.y2 < prev_char.box.y
             or curr_char.box.x2 < prev_char.box.x - char_width * 10
@@ -242,6 +245,7 @@ def is_same_style(style1, style2) -> bool:
         and is_same_graphic_state(style1.graphic_state, style2.graphic_state)
     )
 
+
 def is_same_style_except_size(style1, style2) -> bool:
     """判断两个样式是否相同"""
     if style1 is None or style2 is None:
@@ -253,15 +257,16 @@ def is_same_style_except_size(style1, style2) -> bool:
         and is_same_graphic_state(style1.graphic_state, style2.graphic_state)
     )
 
+
 def is_same_style_except_font(style1, style2) -> bool:
     """判断两个样式是否相同"""
     if style1 is None or style2 is None:
         return style1 is style2
 
-    return (
-        math.fabs(style1.font_size - style2.font_size) < 0.02
-        and is_same_graphic_state(style1.graphic_state, style2.graphic_state)
-    )
+    return math.fabs(
+        style1.font_size - style2.font_size
+    ) < 0.02 and is_same_graphic_state(style1.graphic_state, style2.graphic_state)
+
 
 def is_same_graphic_state(state1, state2) -> bool:
     """判断两个 GraphicState 是否相同"""

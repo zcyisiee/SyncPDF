@@ -454,8 +454,8 @@ class Typesetting:
                 and not last_unit.mixed_character_blacklist  # 不是混排空格黑名单字符
                 and not unit.mixed_character_blacklist  # 同上
                 and current_x > box.x  # 不是行首
-                and unit.try_get_unicode() != " "           # 不是空格
-                and last_unit.try_get_unicode() != " "      # 不是空格
+                and unit.try_get_unicode() != " "  # 不是空格
+                and last_unit.try_get_unicode() != " "  # 不是空格
             ):
                 current_x += space_width * 0.5
 

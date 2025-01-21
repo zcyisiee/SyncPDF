@@ -239,13 +239,17 @@ class ILTranslator:
             elif composition.pdf_character:
                 chars.append(composition.pdf_character)
             elif composition.pdf_same_style_characters:
-                if is_same_style(
-                    composition.pdf_same_style_characters.pdf_style,
-                    paragraph.pdf_style,
-                ) or is_same_style_except_size(
-                    composition.pdf_same_style_characters.pdf_style,
-                    paragraph.pdf_style,
-                ) or len(composition.pdf_same_style_characters.pdf_character) == 1:
+                if (
+                    is_same_style(
+                        composition.pdf_same_style_characters.pdf_style,
+                        paragraph.pdf_style,
+                    )
+                    or is_same_style_except_size(
+                        composition.pdf_same_style_characters.pdf_style,
+                        paragraph.pdf_style,
+                    )
+                    or len(composition.pdf_same_style_characters.pdf_character) == 1
+                ):
                     chars.extend(composition.pdf_same_style_characters.pdf_character)
                     continue
                 placeholder = self.create_rich_text_placeholder(
