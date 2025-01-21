@@ -48,6 +48,9 @@ uv run yadt --bing --files examples/pdf/il_try_1/这是一个测试文件.pdf
 # multiple files
 uv run yadt --bing --files examples/pdf/il_try_1/这是一个测试文件.pdf --files example2.pdf
 ```
+## Tips
+
+1. It is recommended to use the absolute path.
 
 ## Background
 
