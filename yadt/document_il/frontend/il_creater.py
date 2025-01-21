@@ -6,6 +6,7 @@ import pdfminer.pdfinterp
 import pymupdf
 from pdfminer.layout import LTChar, LTFigure
 from pdfminer.pdffont import PDFCIDFont, PDFFont
+from pdfminer.psparser import PSLiteral
 
 from yadt.doclayout import DocLayoutModel
 from yadt.document_il import il_version_1
@@ -28,10 +29,10 @@ class ILCreater:
         self.passthrough_per_char_instruction_stack: list[list[tuple[str, str]]] = []
 
     def is_passthrough_per_char_operation(self, operator: str):
-        return re.match("^(sc|scn|g|rg|k|cs)$", operator, re.IGNORECASE)
+        return re.match("^(sc|scn|g|rg|k|cs|gs)$", operator, re.IGNORECASE)
 
     def on_passthrough_per_char(self, operator: str, args: list[str]):
-        args = [str(arg) for arg in args]
+        args = [self.parse_arg(arg) for arg in args]
         for i, value in enumerate(self.passthrough_per_char_instruction.copy()):
             op, arg = value
             if op == operator:
@@ -39,6 +40,13 @@ class ILCreater:
                 break
         self.passthrough_per_char_instruction.append((operator, " ".join(args)))
         pass
+
+    def parse_arg(self, arg: str):
+        if isinstance(arg,PSLiteral):
+            return f'/{arg.name}'
+        if not isinstance(arg, str):
+            return str(arg)
+        return arg
 
     def pop_passthrough_per_char_instruction(self):
         if self.passthrough_per_char_instruction_stack:
