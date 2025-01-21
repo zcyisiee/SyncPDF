@@ -6,6 +6,7 @@ from rich.progress import (
     TaskProgressColumn,
     TimeRemainingColumn,
     MofNCompleteColumn,
+TimeElapsedColumn,
 )
 
 
@@ -16,6 +17,7 @@ class ProgressMonitor:
                 TextColumn("[progress.description]{task.description}"),
                 BarColumn(),
                 MofNCompleteColumn(),
+                TimeElapsedColumn(),
                 TimeRemainingColumn(),
             )
             self.translate_task_id = self.rich_pbar.add_task("translate", total=100)
