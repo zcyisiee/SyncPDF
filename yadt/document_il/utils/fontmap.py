@@ -48,7 +48,10 @@ class FontMapper:
                 continue
             if original_font.bold != font.is_bold:
                 continue
-            if original_font.serif != font.is_serif:
+            # 不知道什么原因，思源黑体的 serif 属性为1，先workaround
+            if original_font.serif == 1 and 'serif' not in font.font_id:
+                continue
+            if original_font.serif == 0 and 'serif' in font.font_id:
                 continue
             return font
         if self.base_font.has_glyph(current_char):
