@@ -99,7 +99,7 @@ class GraphicState:
             "type": "Attribute",
         },
     )
-    ncolor: list[float] = field(
+    ncolor: list[str] = field(
         default_factory=list,
         metadata={
             "type": "Attribute",
@@ -107,7 +107,7 @@ class GraphicState:
             "tokens": True,
         },
     )
-    scolor: list[float] = field(
+    scolor: list[str] = field(
         default_factory=list,
         metadata={
             "type": "Attribute",
@@ -502,7 +502,9 @@ class PdfParagraphComposition:
             "type": "Element",
         },
     )
-    pdf_same_style_unicode_characters: Optional[PdfSameStyleUnicodeCharacters] = field(
+    pdf_same_style_unicode_characters: Optional[
+        PdfSameStyleUnicodeCharacters
+    ] = field(
         default=None,
         metadata={
             "name": "pdfSameStyleUnicodeCharacters",

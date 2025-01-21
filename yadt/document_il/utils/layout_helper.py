@@ -53,10 +53,12 @@ class Layout:
         # 如果当前字符的 y 坐标明显低于前一个字符，说明换行了
         # 这里使用字符高度的一半作为阈值
         char_height = max(
-            curr_char.box.y2 - curr_char.box.y, prev_char.box.y2 - prev_char.box.y
+            curr_char.box.y2 - curr_char.box.y,
+            prev_char.box.y2 - prev_char.box.y,
         )
         char_width = max(
-            curr_char.box.x2 - curr_char.box.x, prev_char.box.x2 - prev_char.box.x
+            curr_char.box.x2 - curr_char.box.x,
+            prev_char.box.x2 - prev_char.box.x,
         )
         should_new_line = (
             curr_char.box.y2 < prev_char.box.y
@@ -77,15 +79,20 @@ def get_paragraph_length_except(
     for composition in paragraph.pdf_paragraph_composition:
         if composition.pdf_character:
             length += (
-                composition.pdf_character[0].box.x2 - composition.pdf_character[0].box.x
+                composition.pdf_character[0].box.x2
+                - composition.pdf_character[0].box.x
             )
         elif composition.pdf_same_style_characters:
-            for pdf_char in composition.pdf_same_style_characters.pdf_character:
+            for (
+                pdf_char
+            ) in composition.pdf_same_style_characters.pdf_character:
                 if pdf_char.char_unicode in except_chars:
                     continue
                 length += pdf_char.box.x2 - pdf_char.box.x
         elif composition.pdf_same_style_unicode_characters:
-            for char_unicode in composition.pdf_same_style_unicode_characters.unicode:
+            for (
+                char_unicode
+            ) in composition.pdf_same_style_unicode_characters.unicode:
                 if char_unicode in except_chars:
                     continue
                 length += font.char_lengths(
@@ -98,7 +105,9 @@ def get_paragraph_length_except(
                     continue
                 length += pdf_char.box.x2 - pdf_char.box.x
         elif composition.pdf_formula:
-            length += composition.pdf_formula.box.x2 - composition.pdf_formula.box.x
+            length += (
+                composition.pdf_formula.box.x2 - composition.pdf_formula.box.x
+            )
         else:
             raise ValueError(
                 f"Unknown composition type. "
@@ -179,8 +188,11 @@ def get_char_unicode_string(chars: List[Union[PdfCharacter, str]]) -> str:
         # 如果两个字符都是 PdfCharacter，检查间距
         if i < len(chars) - 1 and isinstance(chars[i + 1], PdfCharacter):
             distance = chars[i + 1].box.x - chars[i].box.x2
-            if distance >= median_distance or Layout.is_newline(  # 间距大于中位数
-                chars[i], chars[i + 1]
+            if (
+                distance >= median_distance
+                or Layout.is_newline(  # 间距大于中位数
+                    chars[i], chars[i + 1]
+                )
             ):  # 换行
                 unicode_chars.append(" ")  # 添加空格
 
@@ -203,18 +215,19 @@ def get_paragraph_max_height(paragraph: PdfParagraph) -> float:
             continue
         if composition.pdf_character:
             char_height = (
-                composition.pdf_character[0].box.y2 - composition.pdf_character[0].box.y
+                composition.pdf_character[0].box.y2
+                - composition.pdf_character[0].box.y
             )
             max_height = max(max_height, char_height)
         elif composition.pdf_same_style_characters:
-            for pdf_char in composition.pdf_same_style_characters.pdf_character:
+            for (
+                pdf_char
+            ) in composition.pdf_same_style_characters.pdf_character:
                 char_height = pdf_char.box.y2 - pdf_char.box.y
                 max_height = max(max_height, char_height)
         elif composition.pdf_same_style_unicode_characters:
             # 对于纯Unicode字符，我们使用其样式中的字体大小作为高度估计
-            font_size = (
-                composition.pdf_same_style_unicode_characters.pdf_style.font_size
-            )
+            font_size = composition.pdf_same_style_unicode_characters.pdf_style.font_size
             max_height = max(max_height, font_size)
         elif composition.pdf_line:
             for pdf_char in composition.pdf_line.pdf_character:
@@ -265,7 +278,9 @@ def is_same_style_except_font(style1, style2) -> bool:
 
     return math.fabs(
         style1.font_size - style2.font_size
-    ) < 0.02 and is_same_graphic_state(style1.graphic_state, style2.graphic_state)
+    ) < 0.02 and is_same_graphic_state(
+        style1.graphic_state, style2.graphic_state
+    )
 
 
 def is_same_graphic_state(state1, state2) -> bool:
@@ -283,8 +298,10 @@ def is_same_graphic_state(state1, state2) -> bool:
         and state1.miterlimit == state2.miterlimit
         and state1.ncolor == state2.ncolor
         and state1.scolor == state2.scolor
-        and state1.stroking_color_space_name == state2.stroking_color_space_name
-        and state1.non_stroking_color_space_name == state2.non_stroking_color_space_name
+        and state1.stroking_color_space_name
+        == state2.stroking_color_space_name
+        and state1.non_stroking_color_space_name
+        == state2.non_stroking_color_space_name
     )
 
 
@@ -351,7 +368,9 @@ def add_space_dummy_chars(paragraph: PdfParagraph) -> None:
             if curr_comp.pdf_line:
                 curr_comp.pdf_line.pdf_character.append(space_char)
             elif curr_comp.pdf_same_style_characters:
-                curr_comp.pdf_same_style_characters.pdf_character.append(space_char)
+                curr_comp.pdf_same_style_characters.pdf_character.append(
+                    space_char
+                )
             elif curr_comp.pdf_formula:
                 curr_comp.pdf_formula.pdf_character.append(space_char)
 
@@ -363,7 +382,8 @@ def _get_first_char_from_composition(
     if comp.pdf_line and comp.pdf_line.pdf_character:
         return comp.pdf_line.pdf_character[0]
     elif (
-        comp.pdf_same_style_characters and comp.pdf_same_style_characters.pdf_character
+        comp.pdf_same_style_characters
+        and comp.pdf_same_style_characters.pdf_character
     ):
         return comp.pdf_same_style_characters.pdf_character[0]
     elif comp.pdf_formula and comp.pdf_formula.pdf_character:
@@ -380,7 +400,8 @@ def _get_last_char_from_composition(
     if comp.pdf_line and comp.pdf_line.pdf_character:
         return comp.pdf_line.pdf_character[-1]
     elif (
-        comp.pdf_same_style_characters and comp.pdf_same_style_characters.pdf_character
+        comp.pdf_same_style_characters
+        and comp.pdf_same_style_characters.pdf_character
     ):
         return comp.pdf_same_style_characters.pdf_character[-1]
     elif comp.pdf_formula and comp.pdf_formula.pdf_character:
@@ -424,7 +445,9 @@ def _add_space_dummy_chars_to_list(chars: List[PdfCharacter]) -> None:
         next_char = chars[i + 1]
 
         distance = next_char.box.x - curr_char.box.x2
-        if distance >= median_distance or Layout.is_newline(curr_char, next_char):
+        if distance >= median_distance or Layout.is_newline(
+            curr_char, next_char
+        ):
             # 创建一个dummy字符作为空格
             space_box = Box(
                 x=curr_char.box.x2,

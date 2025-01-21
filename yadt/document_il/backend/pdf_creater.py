@@ -41,11 +41,12 @@ class PDFCreater:
             return
         if graphic_state.stroking_color_space_name:
             draw_op.append(
-                f"/{graphic_state.stroking_color_space_name}" f" CS \n".encode()
+                f"/{graphic_state.stroking_color_space_name} CS \n".encode()
             )
         if graphic_state.non_stroking_color_space_name:
             draw_op.append(
-                f"/{graphic_state.non_stroking_color_space_name}" f" cs \n".encode()
+                f"/{graphic_state.non_stroking_color_space_name}"
+                f" cs \n".encode()
             )
         if graphic_state.ncolor is not None:
             if len(graphic_state.ncolor) == 1:
@@ -67,7 +68,9 @@ class PDFCreater:
     ) -> list[il_version_1.PdfCharacter]:
         chars = []
         for composition in paragraph.pdf_paragraph_composition:
-            if not isinstance(composition.pdf_character, il_version_1.PdfCharacter):
+            if not isinstance(
+                composition.pdf_character, il_version_1.PdfCharacter
+            ):
                 raise Exception(
                     f"Unknown composition type. "
                     f"This type only appears in the IL "
@@ -160,7 +163,9 @@ class PDFCreater:
         # self.add_font(pdf, self.docs)
         for page in self.docs.page:
             available_font_list = self.get_available_font_list(pdf, page)
-            encoding_length_map = {f.font_id: f.encoding_length for f in page.pdf_font}
+            encoding_length_map = {
+                f.font_id: f.encoding_length for f in page.pdf_font
+            }
             draw_op = BitStream()
             # q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}
             draw_op.append(b"q ")
@@ -191,7 +196,9 @@ class PDFCreater:
                 if font_id not in available_font_list:
                     continue
                 draw_op.append(b"q ")
-                self.render_graphic_state(draw_op, char.pdf_style.graphic_state)
+                self.render_graphic_state(
+                    draw_op, char.pdf_style.graphic_state
+                )
                 if char.vertical:
                     draw_op.append(
                         f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode()
@@ -206,7 +213,7 @@ class PDFCreater:
                 # As hexadecimal data enclosed in angle brackets < >
                 # see 7.3.4.3, "Hexadecimal Strings."
                 draw_op.append(
-                    f"<{char.pdf_character_id:0{encoding_length*2}x}>".upper().encode()
+                    f"<{char.pdf_character_id:0{encoding_length * 2}x}>".upper().encode()
                 )
 
                 draw_op.append(b" Tj ET Q \n")

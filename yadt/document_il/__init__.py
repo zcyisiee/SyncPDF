@@ -1,10 +1,10 @@
 from yadt.document_il.il_version_1 import (
-    GraphicState1,
     BaseOperations,
     Box,
     Cropbox,
     Document,
     GraphicState,
+    GraphicState1,
     Mediabox,
     Page,
     PageLayout,

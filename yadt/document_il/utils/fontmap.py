@@ -2,9 +2,9 @@ import os.path
 
 import pymupdf
 
+from yadt.const import get_cache_file_path
 from yadt.document_il import PdfFont, il_version_1
 from yadt.translation_config import TranslationConfig
-from yadt.const import get_cache_file_path
 
 
 class FontMapper:
@@ -66,7 +66,10 @@ class FontMapper:
         font_list.extend(
             [
                 (
-                    os.path.basename(file_name).split(".")[0].replace("-", "").lower(),
+                    os.path.basename(file_name)
+                    .split(".")[0]
+                    .replace("-", "")
+                    .lower(),
                     get_cache_file_path(file_name),
                 )
                 for file_name in self.font_names

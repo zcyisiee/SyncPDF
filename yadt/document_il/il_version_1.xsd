@@ -112,7 +112,7 @@
         <xs:simpleType>
           <xs:restriction>
             <xs:simpleType>
-              <xs:list itemType="xs:float"/>
+              <xs:list itemType="xs:string"/>
             </xs:simpleType>
             <xs:minLength value="1"/>
           </xs:restriction>
@@ -122,7 +122,7 @@
         <xs:simpleType>
           <xs:restriction>
             <xs:simpleType>
-              <xs:list itemType="xs:float"/>
+              <xs:list itemType="xs:string"/>
             </xs:simpleType>
             <xs:minLength value="1"/>
           </xs:restriction>

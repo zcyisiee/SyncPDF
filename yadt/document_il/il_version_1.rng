@@ -191,7 +191,7 @@
         <attribute name="ncolor">
           <list>
             <oneOrMore>
-              <data type="float"/>
+              <data type="string"/>
             </oneOrMore>
           </list>
         </attribute>
@@ -200,7 +200,7 @@
         <attribute name="scolor">
           <list>
             <oneOrMore>
-              <data type="float"/>
+              <data type="string"/>
             </oneOrMore>
           </list>
         </attribute>

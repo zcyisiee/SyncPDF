@@ -66,10 +66,10 @@ GraphicState =
     attribute linejoin { xsd:int }?,
     attribute miterlimit { xsd:float }?,
     attribute ncolor {
-      list { xsd:float+ }
+      list { xsd:string+ }
     }?,
     attribute scolor {
-      list { xsd:float+ }
+      list { xsd:string+ }
     }?,
     attribute strokingColorSpaceName { xsd:string }?,
     attribute nonStrokingColorSpaceName { xsd:string }?
