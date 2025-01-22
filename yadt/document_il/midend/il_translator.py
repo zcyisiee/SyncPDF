@@ -324,6 +324,7 @@ class ILTranslator:
 
         # 构建正则表达式模式
         patterns = []
+        placeholder_patterns = []
         placeholder_map = {}
 
         for placeholder in input.placeholders:
@@ -331,15 +332,22 @@ class ILTranslator:
                 # 转义特殊字符
                 pattern = re.escape(placeholder.placeholder)
                 patterns.append(f"({pattern})")
+                placeholder_patterns.append(f"({pattern})")
                 placeholder_map[placeholder.placeholder] = placeholder
             else:
                 left = re.escape(placeholder.left_placeholder)
                 right = re.escape(placeholder.right_placeholder)
                 patterns.append(f"({left}.*?{right})")
+                placeholder_patterns.append(f"({left})")
+                placeholder_patterns.append(f"({right})")
                 placeholder_map[placeholder.left_placeholder] = placeholder
 
         # 合并所有模式
         combined_pattern = "|".join(patterns)
+        combined_placeholder_pattern = "|".join(placeholder_patterns)
+
+        def remove_placeholder(text:str):
+            return re.sub(combined_placeholder_pattern, "", text)
 
         # 找到所有匹配
         last_end = 0
@@ -352,7 +360,7 @@ class ILTranslator:
                     comp.pdf_same_style_unicode_characters = (
                         PdfSameStyleUnicodeCharacters()
                     )
-                    comp.pdf_same_style_unicode_characters.unicode = text
+                    comp.pdf_same_style_unicode_characters.unicode = remove_placeholder(text)
                     comp.pdf_same_style_unicode_characters.pdf_style = input.base_style
                     result.append(comp)
 
@@ -405,7 +413,7 @@ class ILTranslator:
                     comp.pdf_same_style_unicode_characters.pdf_style = (
                         placeholder.composition.pdf_style
                     )
-                    comp.pdf_same_style_unicode_characters.unicode = text
+                    comp.pdf_same_style_unicode_characters.unicode = remove_placeholder(text)
                 result.append(comp)
 
             last_end = match.end()
@@ -416,7 +424,7 @@ class ILTranslator:
             if text:
                 comp = PdfParagraphComposition()
                 comp.pdf_same_style_unicode_characters = PdfSameStyleUnicodeCharacters()
-                comp.pdf_same_style_unicode_characters.unicode = text
+                comp.pdf_same_style_unicode_characters.unicode = remove_placeholder(text)
                 comp.pdf_same_style_unicode_characters.pdf_style = input.base_style
                 result.append(comp)
 
