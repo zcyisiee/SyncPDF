@@ -157,7 +157,7 @@ class ILTranslator:
             page_font_map = {}
             for font in page.pdf_font:
                 page_font_map[font.font_id] = font
-            # self.translate_paragraph(paragraph, pbar)
+            # self.translate_paragraph(paragraph, pbar,tracker.new_paragraph(), page_font_map)
             executor.submit(
                 self.translate_paragraph,
                 paragraph,
