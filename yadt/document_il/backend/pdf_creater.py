@@ -76,7 +76,9 @@ class PDFCreater:
     ) -> list[il_version_1.PdfCharacter]:
         chars = []
         for composition in paragraph.pdf_paragraph_composition:
-            if not isinstance(composition.pdf_character, il_version_1.PdfCharacter):
+            if not isinstance(
+                composition.pdf_character, il_version_1.PdfCharacter
+            ):
                 raise Exception(
                     f"Unknown composition type. "
                     f"This type only appears in the IL "
@@ -216,7 +218,9 @@ class PDFCreater:
                     if font_id not in available_font_list:
                         continue
                     draw_op.append(b"q ")
-                    self.render_graphic_state(draw_op, char.pdf_style.graphic_state)
+                    self.render_graphic_state(
+                        draw_op, char.pdf_style.graphic_state
+                    )
                     if char.vertical:
                         draw_op.append(
                             f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode()

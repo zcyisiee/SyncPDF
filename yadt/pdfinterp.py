@@ -254,6 +254,10 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                 resources = self.resources.copy()
             self.device.begin_figure(xobjid, bbox, matrix)
             ctm = mult_matrix(matrix, self.ctm)
+            (x,y,x2,y2) = bbox
+            (x,y) = apply_matrix_pt(ctm, (x,y))
+            (x2,y2) = apply_matrix_pt(ctm, (x2,y2))
+            self.il_creater.on_xobj_begin((x,y,x2,y2))
             ops_base = interpreter.render_contents(
                 resources,
                 [xobj],

@@ -304,9 +304,10 @@ class PdfXobject:
             "required": True,
         },
     )
-    xobj_nesting_depth: Optional[int] = field(
+    xobj_id: Optional[int] = field(
         default=None,
         metadata={
+            "name": "xobjId",
             "type": "Attribute",
             "required": True,
         },
@@ -386,9 +387,10 @@ class PdfCharacter:
             "type": "Attribute",
         },
     )
-    xobj_nesting_depth: Optional[int] = field(
+    xobj_id: Optional[int] = field(
         default=None,
         metadata={
+            "name": "xobjId",
             "type": "Attribute",
         },
     )
@@ -536,7 +538,9 @@ class PdfParagraphComposition:
             "type": "Element",
         },
     )
-    pdf_same_style_unicode_characters: Optional[PdfSameStyleUnicodeCharacters] = field(
+    pdf_same_style_unicode_characters: Optional[
+        PdfSameStyleUnicodeCharacters
+    ] = field(
         default=None,
         metadata={
             "name": "pdfSameStyleUnicodeCharacters",

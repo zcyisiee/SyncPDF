@@ -108,7 +108,7 @@
   </define>
   <define name="PDFXobject">
     <element name="pdfXobject">
-      <attribute name="xobj_nesting_depth">
+      <attribute name="xobjId">
         <data type="int"/>
       </attribute>
       <ref name="Box"/>
@@ -141,7 +141,7 @@
       </optional>
       <optional>
         <!-- xobject nesting depth -->
-        <attribute name="xobj_nesting_depth">
+        <attribute name="xobjId">
           <data type="int"/>
         </attribute>
       </optional>

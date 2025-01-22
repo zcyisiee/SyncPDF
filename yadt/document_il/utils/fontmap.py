@@ -88,7 +88,10 @@ class FontMapper:
         font_list.extend(
             [
                 (
-                    os.path.basename(file_name).split(".")[0].replace("-", "").lower(),
+                    os.path.basename(file_name)
+                    .split(".")[0]
+                    .replace("-", "")
+                    .lower(),
                     get_cache_file_path(file_name),
                 )
                 for file_name in self.font_names

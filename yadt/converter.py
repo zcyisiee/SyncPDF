@@ -98,6 +98,7 @@ class PDFConverterEx(PDFConverter):
             textdisp,
             ncs,
             graphicstate,
+            self.il_creater.xobj_id,
         )
         self.cur_item.add(item)
         item.cid = cid  # hack 插入原字符编码
@@ -120,6 +121,7 @@ class AWLTChar(LTChar):
         textdisp: Union[float, Tuple[Optional[float], float]],
         ncs: PDFColorSpace,
         graphicstate: PDFGraphicState,
+        xobj_id: int,
     ) -> None:
         LTText.__init__(self)
         self._text = text
@@ -127,6 +129,7 @@ class AWLTChar(LTChar):
         self.fontname = font.fontname
         self.ncs = ncs
         self.graphicstate = graphicstate
+        self.xobj_id = xobj_id
         self.adv = textwidth * fontsize * scaling
         # compute the boundary rectangle.
         if font.is_vertical():

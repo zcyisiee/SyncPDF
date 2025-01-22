@@ -40,7 +40,7 @@ PDFFont =
   }
 PDFXobject =
   element pdfXobject {
-    attribute xobj_nesting_depth { xsd:int },
+    attribute xobjId { xsd:int },
     Box
   }
 PDFCharacter =
@@ -51,7 +51,7 @@ PDFCharacter =
     attribute char_unicode { xsd:string },
     attribute advance { xsd:float }?,
     # xobject nesting depth
-    attribute xobj_nesting_depth { xsd:int }?,
+    attribute xobjId { xsd:int }?,
     PDFStyle,
     Box
   }
