@@ -581,13 +581,13 @@ class Typesetting:
                 line_spacing -= 0.1
             else:
                 # 行距已经最小，减小缩放因子
-                scale -= 0.1
+                scale -= 0.05
                 line_spacing = 1.7  # 重置行距
 
             if scale < 0.7 and min_line_spacing > 1.1:
                 min_line_spacing = 1.1
                 scale = 1.0
-                line_spacing = 1.7
+                line_spacing = 1.5
 
     def create_typesetting_units(
         self,
