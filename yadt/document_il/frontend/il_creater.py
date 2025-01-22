@@ -29,7 +29,7 @@ class ILCreater:
         self.passthrough_per_char_instruction_stack: list[list[tuple[str, str]]] = []
 
     def is_passthrough_per_char_operation(self, operator: str):
-        return re.match("^(sc|scn|g|rg|k|cs|gs)$", operator, re.IGNORECASE)
+        return re.match("^(sc|scn|g|rg|k|cs)$", operator, re.IGNORECASE)
 
     def on_passthrough_per_char(self, operator: str, args: list[str]):
         args = [self.parse_arg(arg) for arg in args]
