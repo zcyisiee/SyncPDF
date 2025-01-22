@@ -77,7 +77,7 @@ uv run yadt --bing --files examples/pdf/il_try_1/这是一个测试文件.pdf
 uv run yadt --bing --files examples/pdf/il_try_1/这是一个测试文件.pdf --files example2.pdf
 ```
 
-> [!NOTE]
+> [!TIP]
 > The absolute path is recommended.
 
 ## Background
