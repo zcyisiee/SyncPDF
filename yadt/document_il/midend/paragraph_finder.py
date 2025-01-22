@@ -88,25 +88,7 @@ class ParagraphFinder:
             and bbox1.y2 > bbox2.y
         )
 
-    def clean_xobject_char(self, page: Page) -> Page:
-        sorted_xobject = sorted(
-            page.pdf_xobject, key=lambda x: x.xobj_id, reverse=True
-        )
-        filtered_char = []
-
-        for char in page.pdf_character:
-            for xobj in sorted_xobject:
-                if (
-                    not self.bbox_overlap(char.box, xobj.box)
-                    and char.xobj_id == xobj.xobj_id
-                ):
-                    continue
-                filtered_char.append(char)
-        page.pdf_character = filtered_char
-        return page
-
     def process_page(self, page: Page):
-        page = self.clean_xobject_char(page)
         # 第一步：根据 layout 创建 paragraphs
         # 在这一步中，page.pdf_character 中的字符会被移除
         paragraphs = self.create_paragraphs(page)
