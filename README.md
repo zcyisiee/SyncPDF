@@ -1,5 +1,27 @@
 # Yet Another Document Translator
 
+<div align="center">
+
+English
+
+<img src="./docs/images/banner.png" width="320px"  alt="PDF2ZH"/>
+
+<h2 id="title">PDFMathTranslate</h2>
+
+<p>
+  <!-- PyPI -->
+  <a href="https://pypi.org/project/yadt/">
+    <img src="https://img.shields.io/pypi/v/yadt"></a>
+  <a href="https://pepy.tech/projects/yadt">
+    <img src="https://static.pepy.tech/badge/yadt"></a>
+  <!-- <a href="https://github.com/funstory-ai/yadt/pulls">
+    <img src="https://img.shields.io/badge/contributions-welcome-green"></a> -->
+  <!-- License -->
+  <a href="./LICENSE">
+    <img src="https://img.shields.io/github/license/funstory-ai/yadt"></a>
+</p>
+</div>
+
 ## Getting Started
 
 ### Install from PyPI
@@ -59,7 +81,7 @@ There a lot projects and teams working on to make document editing and tranlslat
 - [mathpix](https://mathpix.com/)
 - [Doc2X](https://doc2x.noedgeai.com/)
 - [minerU](https://github.com/opendatalab/MinerU)
-- [PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate)
+- [PDFMathTranslate](https://github.com/funstory-ai/yadt)
 
 There are also some solutions to solve specific parts of the problem like:
 
