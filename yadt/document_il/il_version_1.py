@@ -304,6 +304,14 @@ class PdfXobject:
             "required": True,
         },
     )
+    base_operations: Optional[BaseOperations] = field(
+        default=None,
+        metadata={
+            "name": "baseOperations",
+            "type": "Element",
+            "required": True,
+        },
+    )
     xobj_id: Optional[int] = field(
         default=None,
         metadata={

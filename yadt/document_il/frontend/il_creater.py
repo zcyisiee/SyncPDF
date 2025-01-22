@@ -92,6 +92,11 @@ class ILCreater:
                 xobj_id=self.xobj_id,
             )
         )
+        return self.xobj_id
+
+    def on_xobj_end(self, xobj_id, base_op):
+        pass
+
     def on_page_start(self):
         self.current_page = il_version_1.Page(
             pdf_font=[],

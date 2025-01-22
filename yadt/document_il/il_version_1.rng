@@ -112,6 +112,9 @@
         <data type="int"/>
       </attribute>
       <ref name="Box"/>
+      <element name="baseOperations">
+        <data type="string"/>
+      </element>
     </element>
   </define>
   <define name="PDFCharacter">

@@ -67,6 +67,7 @@
     <xs:complexType>
       <xs:sequence>
         <xs:element ref="box"/>
+        <xs:element ref="baseOperations"/>
       </xs:sequence>
       <xs:attribute name="xobjId" use="required" type="xs:int"/>
     </xs:complexType>
