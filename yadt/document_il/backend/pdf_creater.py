@@ -161,7 +161,7 @@ class PDFCreater:
                 xref_id = xref_id.group(1)
                 font_dict = pdf.xref_object(int(xref_id))
             else:
-                font_dict = re.search("/Font<<(.+?)>>", r_id).group(1)
+                font_dict = re.search("/Font *<<(.+?)>>", r_id.replace('\n', ' ')).group(1)
         else:
             r_id = int(r_id.split(" ")[0])
             _, font_dict = pdf.xref_get_key(r_id, "Font")
