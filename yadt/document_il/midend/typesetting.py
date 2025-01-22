@@ -389,7 +389,7 @@ class Typesetting:
                 pdf_paragraph_composition=[
                     il_version_1.PdfParagraphComposition(
                         pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
-                            unicode="本文档由funstory.ai的开源PDF翻译库（https://github.com/funstory-ai/yadt）翻译，本仓库正在积极的建设当中，欢迎star和关注。",
+                            unicode="本文档由funstory.ai的开源PDF翻译库(https://github.com/funstory-ai/yadt)翻译，本仓库正在积极的建设当中，欢迎star和关注。",
                             pdf_style=style,
                         )
                     )
