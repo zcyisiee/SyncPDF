@@ -293,6 +293,27 @@ class PdfFigure:
 
 
 @dataclass
+class PdfXobject:
+    class Meta:
+        name = "pdfXobject"
+
+    box: Optional[Box] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+    xobj_nesting_depth: Optional[int] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+
+
+@dataclass
 class PdfStyle(GraphicState1):
     class Meta:
         name = "pdfStyle"
@@ -360,6 +381,12 @@ class PdfCharacter:
         },
     )
     advance: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    xobj_nesting_depth: Optional[int] = field(
         default=None,
         metadata={
             "type": "Attribute",
@@ -509,9 +536,7 @@ class PdfParagraphComposition:
             "type": "Element",
         },
     )
-    pdf_same_style_unicode_characters: Optional[
-        PdfSameStyleUnicodeCharacters
-    ] = field(
+    pdf_same_style_unicode_characters: Optional[PdfSameStyleUnicodeCharacters] = field(
         default=None,
         metadata={
             "name": "pdfSameStyleUnicodeCharacters",
@@ -592,6 +617,13 @@ class Page:
         metadata={
             "type": "Element",
             "required": True,
+        },
+    )
+    pdf_xobject: list[PdfXobject] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfXobject",
+            "type": "Element",
         },
     )
     page_layout: list[PageLayout] = field(

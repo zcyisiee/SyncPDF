@@ -6,7 +6,7 @@ from rich.progress import (
     TaskProgressColumn,
     TimeRemainingColumn,
     MofNCompleteColumn,
-TimeElapsedColumn,
+    TimeElapsedColumn,
 )
 
 

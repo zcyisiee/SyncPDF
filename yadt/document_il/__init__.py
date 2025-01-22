@@ -18,6 +18,7 @@ from yadt.document_il.il_version_1 import (
     PdfSameStyleCharacters,
     PdfSameStyleUnicodeCharacters,
     PdfStyle,
+    PdfXobject,
 )
 
 __all__ = [
@@ -40,4 +41,5 @@ __all__ = [
     "PdfSameStyleCharacters",
     "PdfSameStyleUnicodeCharacters",
     "PdfStyle",
+    "PdfXobject",
 ]

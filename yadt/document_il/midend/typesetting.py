@@ -374,7 +374,11 @@ class Typesetting:
     def add_watermark(self, page: il_version_1.Page):
         page_width = page.cropbox.box.x2 - page.cropbox.box.x
         page_height = page.cropbox.box.y2 - page.cropbox.box.y
-        style = il_version_1.PdfStyle(font_id='base', font_size=6, graphic_state=il_version_1.GraphicState(), )
+        style = il_version_1.PdfStyle(
+            font_id="base",
+            font_size=6,
+            graphic_state=il_version_1.GraphicState(),
+        )
         page.pdf_paragraph.append(
             il_version_1.PdfParagraph(
                 first_line_indent=False,

@@ -22,6 +22,9 @@
         <ref name="Box"/>
       </element>
       <zeroOrMore>
+        <ref name="PDFXobject"/>
+      </zeroOrMore>
+      <zeroOrMore>
         <ref name="PageLayout"/>
       </zeroOrMore>
       <zeroOrMore>
@@ -103,6 +106,14 @@
       </optional>
     </element>
   </define>
+  <define name="PDFXobject">
+    <element name="pdfXobject">
+      <attribute name="xobj_nesting_depth">
+        <data type="int"/>
+      </attribute>
+      <ref name="Box"/>
+    </element>
+  </define>
   <define name="PDFCharacter">
     <element name="pdfCharacter">
       <optional>
@@ -126,6 +137,12 @@
       <optional>
         <attribute name="advance">
           <data type="float"/>
+        </attribute>
+      </optional>
+      <optional>
+        <!-- xobject nesting depth -->
+        <attribute name="xobj_nesting_depth">
+          <data type="int"/>
         </attribute>
       </optional>
       <ref name="PDFStyle"/>

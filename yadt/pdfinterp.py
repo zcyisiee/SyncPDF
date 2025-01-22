@@ -334,6 +334,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
         self.init_resources(resources)
         self.init_state(ctm)
         return self.execute(list_value(streams))
+
     def do_q(self) -> None:
         """Save graphics state"""
         self.gstack.append(self.get_current_state())
@@ -346,6 +347,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             self.set_current_state(self.gstack.pop())
         self.il_creater.pop_passthrough_per_char_instruction()
         return
+
     def do_TJ(self, seq: PDFStackT) -> None:
         """Show text, allowing individual glyph positioning"""
         if self.textstate.font is None:
@@ -354,11 +356,12 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             return
         assert self.ncs is not None
         gs = self.graphicstate.copy()
-        gs.passthrough_instruction = self.il_creater.passthrough_per_char_instruction.copy()
-        self.device.render_string(
-            self.textstate, cast(PDFTextSeq, seq), self.ncs, gs
+        gs.passthrough_instruction = (
+            self.il_creater.passthrough_per_char_instruction.copy()
         )
+        self.device.render_string(self.textstate, cast(PDFTextSeq, seq), self.ncs, gs)
         return
+
     # Run PostScript commands
     # The Do_xxx method is the method for executing corresponding postscript instructions
     def execute(self, streams: Sequence[object]) -> None:
@@ -378,7 +381,9 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                     break
                 if isinstance(obj, PSKeyword):
                     name = keyword_name(obj)
-                    method = "do_%s" % name.replace("*", "_a").replace('"', "_w").replace(
+                    method = "do_%s" % name.replace("*", "_a").replace(
+                        '"', "_w"
+                    ).replace(
                         "'",
                         "_q",
                     )
@@ -390,11 +395,14 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                             # log.debug("exec: %s %r", name, args)
                             if len(args) == nargs:
                                 func(*args)
-                                if self.il_creater.is_passthrough_per_char_operation(name):
+                                if self.il_creater.is_passthrough_per_char_operation(
+                                    name
+                                ):
                                     self.il_creater.on_passthrough_per_char(name, args)
                                 if not (
                                     name[0] == "T"
-                                    or name in ['"', "'", "EI", "MP", "DP", "BMC", "BDC"]
+                                    or name
+                                    in ['"', "'", "EI", "MP", "DP", "BMC", "BDC"]
                                 ):  # 过滤 T 系列文字指令，因为 EI 的参数是 obj 所以也需要过滤（只在少数文档中画横线时使用），过滤 marked 系列指令
                                     p = " ".join(
                                         [

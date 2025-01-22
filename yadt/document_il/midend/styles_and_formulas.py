@@ -16,11 +16,11 @@ from yadt.document_il.il_version_1 import (
     PdfStyle,
 )
 from yadt.document_il.utils.layout_helper import (
+    LEFT_BRACKET,
+    RIGHT_BRACKET,
     formular_height_ignore_char,
     get_char_unicode_string,
     is_same_style,
-    LEFT_BRACKET,
-    RIGHT_BRACKET,
 )
 from yadt.translation_config import TranslationConfig
 

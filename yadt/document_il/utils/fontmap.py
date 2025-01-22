@@ -39,9 +39,7 @@ class FontMapper:
         self.fallback_font.font_id = "fallback"
         self.kai_font.font_id = "kai"
 
-        self.fontid2font = {
-            f.font_id: f for f in self.fonts.values()
-        }
+        self.fontid2font = {f.font_id: f for f in self.fonts.values()}
         self.fontid2font["base"] = self.base_font
         self.fontid2font["fallback"] = self.fallback_font
         self.fontid2font["kai"] = self.kai_font
@@ -59,9 +57,7 @@ class FontMapper:
             monospaced = original_font.monospace
             serif = original_font.serif
         else:
-            raise Exception(
-                f"Unknown font type: {type(original_font)}"
-            )
+            raise Exception(f"Unknown font type: {type(original_font)}")
         if italic and self.kai_font.has_glyph(current_char):
             return self.kai_font
         for k, font in self.fonts.items():
@@ -70,9 +66,9 @@ class FontMapper:
             if bold != font.is_bold:
                 continue
             # 不知道什么原因，思源黑体的 serif 属性为1，先workaround
-            if serif == 1 and 'serif' not in font.font_id:
+            if serif == 1 and "serif" not in font.font_id:
                 continue
-            if serif == 0 and 'serif' in font.font_id:
+            if serif == 0 and "serif" in font.font_id:
                 continue
             return font
         if self.base_font.has_glyph(current_char):

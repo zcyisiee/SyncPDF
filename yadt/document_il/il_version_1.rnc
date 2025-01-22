@@ -8,6 +8,7 @@ Page =
   element page {
     element mediabox { Box },
     element cropbox { Box },
+    PDFXobject*,
     PageLayout*,
     PDFFont*,
     PDFParagraph*,
@@ -37,6 +38,11 @@ PDFFont =
     attribute monospace { xsd:boolean }?,
     attribute serif { xsd:boolean }?
   }
+PDFXobject =
+  element pdfXobject {
+    attribute xobj_nesting_depth { xsd:int },
+    Box
+  }
 PDFCharacter =
   element pdfCharacter {
     attribute vertical { xsd:boolean }?,
@@ -44,6 +50,8 @@ PDFCharacter =
     attribute pdfCharacterId { xsd:int }?,
     attribute char_unicode { xsd:string },
     attribute advance { xsd:float }?,
+    # xobject nesting depth
+    attribute xobj_nesting_depth { xsd:int }?,
     PDFStyle,
     Box
   }

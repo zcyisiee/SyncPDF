@@ -7,13 +7,13 @@ from tqdm import tqdm
 from yadt.document_il import (
     Document,
     Page,
+    PdfFont,
     PdfFormula,
     PdfParagraph,
     PdfParagraphComposition,
     PdfSameStyleCharacters,
     PdfSameStyleUnicodeCharacters,
     PdfStyle,
-    PdfFont,
 )
 from yadt.document_il.translator.translator import BaseTranslator
 from yadt.document_il.utils.fontmap import FontMapper
@@ -346,7 +346,7 @@ class ILTranslator:
         combined_pattern = "|".join(patterns)
         combined_placeholder_pattern = "|".join(placeholder_patterns)
 
-        def remove_placeholder(text:str):
+        def remove_placeholder(text: str):
             return re.sub(combined_placeholder_pattern, "", text)
 
         # 找到所有匹配
@@ -360,7 +360,9 @@ class ILTranslator:
                     comp.pdf_same_style_unicode_characters = (
                         PdfSameStyleUnicodeCharacters()
                     )
-                    comp.pdf_same_style_unicode_characters.unicode = remove_placeholder(text)
+                    comp.pdf_same_style_unicode_characters.unicode = remove_placeholder(
+                        text
+                    )
                     comp.pdf_same_style_unicode_characters.pdf_style = input.base_style
                     result.append(comp)
 
@@ -413,7 +415,9 @@ class ILTranslator:
                     comp.pdf_same_style_unicode_characters.pdf_style = (
                         placeholder.composition.pdf_style
                     )
-                    comp.pdf_same_style_unicode_characters.unicode = remove_placeholder(text)
+                    comp.pdf_same_style_unicode_characters.unicode = remove_placeholder(
+                        text
+                    )
                 result.append(comp)
 
             last_end = match.end()
@@ -424,7 +428,9 @@ class ILTranslator:
             if text:
                 comp = PdfParagraphComposition()
                 comp.pdf_same_style_unicode_characters = PdfSameStyleUnicodeCharacters()
-                comp.pdf_same_style_unicode_characters.unicode = remove_placeholder(text)
+                comp.pdf_same_style_unicode_characters.unicode = remove_placeholder(
+                    text
+                )
                 comp.pdf_same_style_unicode_characters.pdf_style = input.base_style
                 result.append(comp)
 

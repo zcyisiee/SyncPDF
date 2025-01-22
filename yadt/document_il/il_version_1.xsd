@@ -13,6 +13,7 @@
       <xs:sequence>
         <xs:element ref="mediabox"/>
         <xs:element ref="cropbox"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfXobject"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pageLayout"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfFont"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfParagraph"/>
@@ -62,6 +63,14 @@
       <xs:attribute name="serif" type="xs:boolean"/>
     </xs:complexType>
   </xs:element>
+  <xs:element name="pdfXobject">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="box"/>
+      </xs:sequence>
+      <xs:attribute name="xobj_nesting_depth" use="required" type="xs:int"/>
+    </xs:complexType>
+  </xs:element>
   <xs:element name="pdfCharacter">
     <xs:complexType>
       <xs:sequence>
@@ -73,6 +82,7 @@
       <xs:attribute name="pdfCharacterId" type="xs:int"/>
       <xs:attribute name="char_unicode" use="required" type="xs:string"/>
       <xs:attribute name="advance" type="xs:float"/>
+      <xs:attribute name="xobj_nesting_depth" type="xs:int"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pageLayout">
