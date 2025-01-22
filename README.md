@@ -22,6 +22,12 @@ English
 </p>
 </div>
 
+## Preview
+
+<div align="center">
+<img src="./docs/images/preview.gif" width="80%"/>
+</div>
+
 ## Getting Started
 
 ### Install from PyPI
@@ -70,9 +76,9 @@ uv run yadt --bing --files examples/pdf/il_try_1/这是一个测试文件.pdf
 # multiple files
 uv run yadt --bing --files examples/pdf/il_try_1/这是一个测试文件.pdf --files example2.pdf
 ```
-## Tips
 
-1. It is recommended to use the absolute path.
+> [!NOTE]
+> The absolute path is recommended.
 
 ## Background
 

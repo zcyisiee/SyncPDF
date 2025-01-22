@@ -27,3 +27,4 @@ __pycache__
 .ruff_cache
 yadt.toml
 examples/
+/make_gif.py
