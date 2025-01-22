@@ -19,12 +19,15 @@ from yadt.document_il.utils.layout_helper import (
     formular_height_ignore_char,
     get_char_unicode_string,
     is_same_style,
+    LEFT_BRACKET,
+    RIGHT_BRACKET,
 )
 from yadt.translation_config import TranslationConfig
 
 
 class StylesAndFormulas:
     stage_name = "解析公式与样式"
+
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config
 
@@ -96,22 +99,21 @@ class StylesAndFormulas:
                         )
                     )
 
-                    is_corner_mark =( (
-                            len(current_chars) > 0
-                            and not get_char_unicode_string(current_chars).isspace()
-                            # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
-                            and char.pdf_style.font_size
-                            < current_chars[-1].pdf_style.font_size * 0.79
-                            and not in_corner_mark_state
-                        ) or (
-                            len(current_chars) > 0
-                            and not get_char_unicode_string(current_chars).isspace()
-                            # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
-                            and char.pdf_style.font_size
-                            < current_chars[-1].pdf_style.font_size * 1.1
-                            and in_corner_mark_state
-
-                    ))
+                    is_corner_mark = (
+                        len(current_chars) > 0
+                        and not get_char_unicode_string(current_chars).isspace()
+                        # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
+                        and char.pdf_style.font_size
+                        < current_chars[-1].pdf_style.font_size * 0.79
+                        and not in_corner_mark_state
+                    ) or (
+                        len(current_chars) > 0
+                        and not get_char_unicode_string(current_chars).isspace()
+                        # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
+                        and char.pdf_style.font_size
+                        < current_chars[-1].pdf_style.font_size * 1.1
+                        and in_corner_mark_state
+                    )
 
                     is_formula = is_formula or is_corner_mark
 
@@ -466,9 +468,7 @@ class StylesAndFormulas:
         return bool(re.match(r"^[0-9, ]+$", text))
 
     def is_formulas_font(self, font_name: str) -> bool:
-        pattern2 = (
-            r'^(Cambria|Cambria-BoldItalic|Cambria-Bold|Cambria-Italic)$'
-        )
+        pattern2 = r"^(Cambria|Cambria-BoldItalic|Cambria-Bold|Cambria-Italic)$"
         if self.translation_config.formular_font_pattern:
             pattern = self.translation_config.formular_font_pattern
         else:
@@ -566,25 +566,11 @@ class StylesAndFormulas:
 
         for char in formula.pdf_character:
             # 检查是否是左括号
-            if char.char_unicode in [
-                "(cid:8)",
-                "(",
-                "(cid:16)",
-                "{",
-                "[",
-                "(cid:104)",
-            ]:
+            if char.char_unicode in LEFT_BRACKET:
                 bracket_level += 1
                 current_chars.append(char)
             # 检查是否是右括号
-            elif char.char_unicode in [
-                "(cid:9)",
-                ")",
-                "(cid:17)",
-                "}",
-                "]",
-                "(cid:105)",
-            ]:
+            elif char.char_unicode in RIGHT_BRACKET:
                 bracket_level = max(0, bracket_level - 1)  # 防止括号不匹配的情况
                 current_chars.append(char)
             # 检查是否是逗号，且不在括号内

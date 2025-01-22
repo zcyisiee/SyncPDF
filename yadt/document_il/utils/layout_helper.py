@@ -23,16 +23,26 @@ HEIGHT_NOT_USFUL_CHAR_IN_CHAR = (
     # arXiv:2411.19509v2 第四页 公式的|竖线
     "(cid:13)",
     "∑︁",
+    # arXiv:2412.05265 27页 累加号
+    "(cid:88)",
+    # arXiv:2412.05265 16页 累乘号
+    "(cid:89)",
+    # arXiv:2412.05265 27页 积分
+    "(cid:90)",
+    # arXiv:2412.05265 32页 公式左右的中括号
+    "(cid:2)",
+    "(cid:3)",
 )
 
 
+LEFT_BRACKET = ("(cid:8)", "(", "(cid:16)", "{", "[", "(cid:104)", "(cid:2)")
+RIGHT_BRACKET = ("(cid:9)", ")", "(cid:17)", "}", "]", "(cid:105)", "(cid:3)")
+
+
 def formular_height_ignore_char(char: PdfCharacter):
-    return char.pdf_character_id is None or char.char_unicode in (
-        "(cid:17)",
-        "(cid:16)",
-        "(cid:104)",
-        "(cid:105)",
-        "∑︁",
+    return (
+        char.pdf_character_id is None
+        or char.char_unicode in HEIGHT_NOT_USFUL_CHAR_IN_CHAR
     )
 
 

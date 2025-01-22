@@ -37,9 +37,9 @@ class TypesettingUnit:
         font_size: float = None,
         style: PdfStyle = None,
     ):
-        assert sum((x is not None for x in [char, formular, unicode])) == 1, (
-            "Only one of chars and formular can be not None"
-        )
+        assert (
+            sum((x is not None for x in [char, formular, unicode])) == 1
+        ), "Only one of chars and formular can be not None"
         self.char = char
         self.formular = formular
         self.unicode = unicode
@@ -48,9 +48,7 @@ class TypesettingUnit:
         self.scale = None
 
         if unicode:
-            assert font_size, (
-                "Font size must be provided when unicode is provided"
-            )
+            assert font_size, "Font size must be provided when unicode is provided"
             assert font, "Font must be provided when unicode is provided"
             assert style, "Style must be provided when unicode is provided"
             assert len(unicode) == 1, "Unicode must be a single character"
@@ -167,6 +165,7 @@ class TypesettingUnit:
                 "、",
                 "”",
                 '"',
+                "；",
             ]
         return False
 
@@ -189,14 +188,10 @@ class TypesettingUnit:
         elif self.formular:
             return self.formular.box
         elif self.unicode:
-            char_width = self.font.char_lengths(self.unicode, self.font_size)[
-                0
-            ]
+            char_width = self.font.char_lengths(self.unicode, self.font_size)[0]
             if self.x is None or self.y is None or self.scale is None:
                 return Box(0, 0, char_width, self.font_size)
-            return Box(
-                self.x, self.y, self.x + char_width, self.y + self.font_size
-            )
+            return Box(self.x, self.y, self.x + char_width, self.y + self.font_size)
 
     @property
     def width(self):
@@ -235,9 +230,7 @@ class TypesettingUnit:
                 ),
                 scale=scale,
                 vertical=self.char.vertical,
-                advance=self.char.advance * scale
-                if self.char.advance
-                else None,
+                advance=self.char.advance * scale if self.char.advance else None,
             )
             return TypesettingUnit(char=new_char)
 
@@ -260,18 +253,10 @@ class TypesettingUnit:
                         x=x + (rel_x + self.formular.x_offset) * scale,
                         y=y + (rel_y + self.formular.y_offset) * scale,
                         x2=x
-                        + (
-                            rel_x
-                            + (char.box.x2 - char.box.x)
-                            + self.formular.x_offset
-                        )
+                        + (rel_x + (char.box.x2 - char.box.x) + self.formular.x_offset)
                         * scale,
                         y2=y
-                        + (
-                            rel_y
-                            + (char.box.y2 - char.box.y)
-                            + self.formular.y_offset
-                        )
+                        + (rel_y + (char.box.y2 - char.box.y) + self.formular.y_offset)
                         * scale,
                     ),
                     pdf_style=PdfStyle(
@@ -326,15 +311,15 @@ class TypesettingUnit:
         if self.can_passthrough:
             return self.passthrough()
         elif self.unicode:
-            assert self.x is not None, (
-                "x position must be set, should be set by `relocate`"
-            )
-            assert self.y is not None, (
-                "y position must be set, should be set by `relocate`"
-            )
-            assert self.scale is not None, (
-                "scale must be set, should be set by `relocate`"
-            )
+            assert (
+                self.x is not None
+            ), "x position must be set, should be set by `relocate`"
+            assert (
+                self.y is not None
+            ), "y position must be set, should be set by `relocate`"
+            assert (
+                self.scale is not None
+            ), "scale must be set, should be set by `relocate`"
             # 计算字符宽度
             char_width = self.width
 
@@ -363,13 +348,14 @@ class TypesettingUnit:
 
 class Typesetting:
     stage_name = "排版"
+
     def __init__(self, translation_config: TranslationConfig):
         self.font_mapper = FontMapper(translation_config)
         self.translation_config = translation_config
 
     def typsetting_document(self, document: il_version_1.Document):
         with self.translation_config.progress_monitor.stage_start(
-                self.stage_name, len(document.page)
+            self.stage_name, len(document.page)
         ) as pbar:
             for page in document.page:
                 self.render_page(page)
@@ -377,9 +363,39 @@ class Typesetting:
 
     def render_page(self, page: il_version_1.Page):
         fonts = {f.font_id: f for f in page.pdf_font}
+        for k, v in self.font_mapper.fontid2font.items():
+            fonts[k] = v
+        if page.page_number == 0:
+            self.add_watermark(page)
         # 开始实际的渲染过程
         for paragraph in page.pdf_paragraph:
             self.render_paragraph(paragraph, page, fonts)
+
+    def add_watermark(self, page: il_version_1.Page):
+        page_width = page.cropbox.box.x2 - page.cropbox.box.x
+        page_height = page.cropbox.box.y2 - page.cropbox.box.y
+        style = il_version_1.PdfStyle(font_id='base', font_size=6, graphic_state=il_version_1.GraphicState(), )
+        page.pdf_paragraph.append(
+            il_version_1.PdfParagraph(
+                first_line_indent=False,
+                box=il_version_1.Box(
+                    x=page.cropbox.box.x + page_width * 0.05,
+                    y=page.cropbox.box.y,
+                    x2=page.cropbox.box.x2,
+                    y2=page.cropbox.box.y2 - page_height * 0.05,
+                ),
+                vertical=False,
+                pdf_style=style,
+                pdf_paragraph_composition=[
+                    il_version_1.PdfParagraphComposition(
+                        pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
+                            unicode="本文档由funstory.ai的开源PDF翻译库（https://github.com/funstory-ai/yadt）翻译，本仓库正在积极的建设当中，欢迎star和关注。",
+                            pdf_style=style,
+                        )
+                    )
+                ],
+            )
+        )
 
     def render_paragraph(
         self,
@@ -391,8 +407,8 @@ class Typesetting:
         # 如果所有单元都可以直接传递，则直接传递
         if all(unit.can_passthrough for unit in typesetting_units):
             paragraph.scale = 1.0
-            paragraph.pdf_paragraph_composition = (
-                self.create_passthrough_composition(typesetting_units)
+            paragraph.pdf_paragraph_composition = self.create_passthrough_composition(
+                typesetting_units
             )
             return
 
@@ -430,8 +446,7 @@ class Typesetting:
         font_size = statistics.mode(font_sizes)
 
         space_width = (
-            self.font_mapper.base_font.char_lengths("你", font_size * scale)[0]
-            * 0.5
+            self.font_mapper.base_font.char_lengths("你", font_size * scale)[0] * 0.5
         )
 
         # 计算平均行高
@@ -466,8 +481,7 @@ class Typesetting:
 
             if (
                 last_unit  # 有上一个单元
-                and last_unit.is_chinese_char
-                ^ unit.is_chinese_char  # 中英文交界处
+                and last_unit.is_chinese_char ^ unit.is_chinese_char  # 中英文交界处
                 and (
                     last_unit.box
                     and last_unit.box.y
@@ -484,10 +498,7 @@ class Typesetting:
                 current_x += space_width * 0.5
 
             # 如果当前行放不下这个元素，换行
-            if (
-                current_x + unit_width > box.x2
-                and not unit.is_hung_punctuation
-            ):
+            if current_x + unit_width > box.x2 and not unit.is_hung_punctuation:
                 # 换行
                 current_x = box.x
                 current_y -= line_height * line_spacing
@@ -508,10 +519,7 @@ class Typesetting:
 
             # workaround: 超长行距暂时没找到具体原因，有待进一步修复。这里的1.2是魔法数字！
             # 更新当前行的最大高度
-            if (
-                line_height == 0
-                or line_height * 1.2 > unit_height > line_height
-            ):
+            if line_height == 0 or line_height * 1.2 > unit_height > line_height:
                 line_height = unit_height
 
             # 更新 x 坐标
@@ -627,9 +635,7 @@ class Typesetting:
                     ]
                 )
             elif composition.pdf_formula:
-                result.extend(
-                    [TypesettingUnit(formular=composition.pdf_formula)]
-                )
+                result.extend([TypesettingUnit(formular=composition.pdf_formula)])
             else:
                 raise ValueError(
                     f"Unknown composition type. "
@@ -687,8 +693,7 @@ class Typesetting:
         # 检查图形
         for figure in page.pdf_figure:
             if figure.box.x > current_box.x and not (
-                figure.box.y >= current_box.y2
-                or figure.box.y2 <= current_box.y
+                figure.box.y >= current_box.y2 or figure.box.y2 <= current_box.y
             ):
                 max_x = min(max_x, figure.box.x)
 
