@@ -24,6 +24,7 @@ from yadt.translation_config import TranslationConfig
 
 class PDFCreater:
     stage_name = "创建PDF文件"
+
     def __init__(
         self,
         original_pdf_path: str,
@@ -75,9 +76,7 @@ class PDFCreater:
     ) -> list[il_version_1.PdfCharacter]:
         chars = []
         for composition in paragraph.pdf_paragraph_composition:
-            if not isinstance(
-                composition.pdf_character, il_version_1.PdfCharacter
-            ):
+            if not isinstance(composition.pdf_character, il_version_1.PdfCharacter):
                 raise Exception(
                     f"Unknown composition type. "
                     f"This type only appears in the IL "
@@ -152,8 +151,17 @@ class PDFCreater:
     def get_available_font_list(self, pdf, page):
         page_xref_id = pdf[page.page_number].xref
         resources_type, r_id = pdf.xref_get_key(page_xref_id, "Resources")
+        if resources_type == 'xref':
+            resource_xref_id = re.search("(\d+) 0 R", r_id).group(1)
+            r_id = pdf.xref_object(int(resource_xref_id))
+            resources_type = "dict"
         if resources_type == "dict":
-            font_dict = re.search("/Font<<(.+?)>>", r_id).group(1)
+            xref_id = re.search("/Font (\d+) 0 R", r_id)
+            if xref_id is not None:
+                xref_id = xref_id.group(1)
+                font_dict = pdf.xref_object(int(xref_id))
+            else:
+                font_dict = re.search("/Font<<(.+?)>>", r_id).group(1)
         else:
             r_id = int(r_id.split(" ")[0])
             _, font_dict = pdf.xref_get_key(r_id, "Font")
@@ -206,9 +214,7 @@ class PDFCreater:
                     if font_id not in available_font_list:
                         continue
                     draw_op.append(b"q ")
-                    self.render_graphic_state(
-                        draw_op, char.pdf_style.graphic_state
-                    )
+                    self.render_graphic_state(draw_op, char.pdf_style.graphic_state)
                     if char.vertical:
                         draw_op.append(
                             f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode()
