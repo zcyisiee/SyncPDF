@@ -281,7 +281,7 @@ class PDFCreater:
                     mono_out_path,
                     garbage=3,
                     deflate=True,
-                    clean=not not translation_config.debug,
+                    clean=not translation_config.debug,
                     deflate_fonts=True,
                     linear=not translation_config.debug,
                 )
