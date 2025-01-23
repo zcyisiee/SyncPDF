@@ -304,6 +304,13 @@ class PdfXobject:
             "required": True,
         },
     )
+    pdf_font: list[PdfFont] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfFont",
+            "type": "Element",
+        },
+    )
     base_operations: Optional[BaseOperations] = field(
         default=None,
         metadata={
@@ -316,6 +323,14 @@ class PdfXobject:
         default=None,
         metadata={
             "name": "xobjId",
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    xref_id: Optional[int] = field(
+        default=None,
+        metadata={
+            "name": "xrefId",
             "type": "Attribute",
             "required": True,
         },
@@ -582,6 +597,13 @@ class PdfParagraph:
         metadata={
             "name": "pdfParagraphComposition",
             "type": "Element",
+        },
+    )
+    xobj_id: Optional[int] = field(
+        default=None,
+        metadata={
+            "name": "xobjId",
+            "type": "Attribute",
         },
     )
     unicode: Optional[str] = field(

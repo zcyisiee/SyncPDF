@@ -1,3 +1,4 @@
+import base64
 from typing import Dict, List, Union, Tuple, Optional
 
 from pdfminer.pdfinterp import PDFGraphicState, PDFResourceManager
@@ -87,6 +88,17 @@ class PDFConverterEx(PDFConverter):
             text = self.handle_undefined_char(font, cid)
         textwidth = font.char_width(cid)
         textdisp = font.char_disp(cid)
+
+        font_name = font.fontname
+        if isinstance(font_name, bytes):
+            try:
+                font_name = font_name.decode("utf-8")
+            except UnicodeDecodeError:
+                font_name = "BASE64:" + base64.b64encode(font_name).decode(
+                    "utf-8"
+                )
+        font_id = self.il_creater.current_page_font_name_id_map[font_name]
+
         item = AWLTChar(
             matrix,
             font,
@@ -99,6 +111,7 @@ class PDFConverterEx(PDFConverter):
             ncs,
             graphicstate,
             self.il_creater.xobj_id,
+            font_id
         )
         self.cur_item.add(item)
         item.cid = cid  # hack 插入原字符编码
@@ -122,6 +135,7 @@ class AWLTChar(LTChar):
         ncs: PDFColorSpace,
         graphicstate: PDFGraphicState,
         xobj_id: int,
+        font_id: str,
     ) -> None:
         LTText.__init__(self)
         self._text = text
@@ -131,6 +145,7 @@ class AWLTChar(LTChar):
         self.graphicstate = graphicstate
         self.xobj_id = xobj_id
         self.adv = textwidth * fontsize * scaling
+        self.aw_font_id = font_id
         # compute the boundary rectangle.
         if font.is_vertical():
             # vertical

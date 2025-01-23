@@ -76,9 +76,7 @@ class PDFCreater:
     ) -> list[il_version_1.PdfCharacter]:
         chars = []
         for composition in paragraph.pdf_paragraph_composition:
-            if not isinstance(
-                composition.pdf_character, il_version_1.PdfCharacter
-            ):
+            if not isinstance(composition.pdf_character, il_version_1.PdfCharacter):
                 raise Exception(
                     f"Unknown composition type. "
                     f"This type only appears in the IL "
@@ -152,13 +150,16 @@ class PDFCreater:
 
     def get_available_font_list(self, pdf, page):
         page_xref_id = pdf[page.page_number].xref
+        return self.get_xobj_available_fonts(page_xref_id, pdf)
+
+    def get_xobj_available_fonts(self, page_xref_id, pdf):
         resources_type, r_id = pdf.xref_get_key(page_xref_id, "Resources")
         if resources_type == "xref":
-            resource_xref_id = re.search("(\d+) 0 R", r_id).group(1)
+            resource_xref_id = re.search("(\\d+) 0 R", r_id).group(1)
             r_id = pdf.xref_object(int(resource_xref_id))
             resources_type = "dict"
         if resources_type == "dict":
-            xref_id = re.search("/Font (\d+) 0 R", r_id)
+            xref_id = re.search("/Font (\\d+) 0 R", r_id)
             if xref_id is not None:
                 xref_id = xref_id.group(1)
                 font_dict = pdf.xref_object(int(xref_id))
@@ -184,19 +185,35 @@ class PDFCreater:
             self.stage_name, len(self.docs.page) + 2
         ) as pbar:
             for page in self.docs.page:
+                xobj_available_fonts = {}
+                xobj_draw_ops = {}
+                xobj_encoding_length_map = {}
                 available_font_list = self.get_available_font_list(pdf, page)
-                encoding_length_map = {
+
+                for xobj in page.pdf_xobject:
+                    try:
+                        xobj_available_fonts[xobj.xobj_id] = self.get_xobj_available_fonts(
+                            xobj.xref_id, pdf
+                        )
+                    except Exception:
+                        xobj_available_fonts[xobj.xobj_id] = available_font_list
+                    xobj_encoding_length_map[xobj.xobj_id] = {
+                        f.font_id: f.encoding_length for f in xobj.pdf_font
+                    }
+                    xobj_op = BitStream()
+                    xobj_op.append(xobj.base_operations.value.encode())
+                    xobj_draw_ops[xobj.xobj_id] = xobj_op
+                page_encoding_length_map = {
                     f.font_id: f.encoding_length for f in page.pdf_font
                 }
-                draw_op = BitStream()
+                page_op = BitStream()
                 # q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}
-                draw_op.append(b"q ")
-                draw_op.append(page.base_operations.value.encode())
-                draw_op.append(b" Q ")
-                draw_op.append(
+                page_op.append(b"q ")
+                page_op.append(page.base_operations.value.encode())
+                page_op.append(b" Q ")
+                page_op.append(
                     f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode()
                 )
-
                 # 收集所有字符
                 chars = []
                 # 首先添加页面级别的字符
@@ -215,12 +232,19 @@ class PDFCreater:
                         continue
                     char_size = char.pdf_style.font_size
                     font_id = char.pdf_style.font_id
-                    if font_id not in available_font_list:
-                        continue
+                    if char.xobj_id in xobj_available_fonts:
+                        if font_id not in xobj_available_fonts[char.xobj_id]:
+                            continue
+                        draw_op = xobj_draw_ops[char.xobj_id]
+                        encoding_length_map = xobj_encoding_length_map[char.xobj_id]
+                    else:
+                        if font_id not in available_font_list:
+                            continue
+                        draw_op = page_op
+                        encoding_length_map = page_encoding_length_map
+
                     draw_op.append(b"q ")
-                    self.render_graphic_state(
-                        draw_op, char.pdf_style.graphic_state
-                    )
+                    self.render_graphic_state(draw_op, char.pdf_style.graphic_state)
                     if char.vertical:
                         draw_op.append(
                             f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode()
@@ -239,7 +263,11 @@ class PDFCreater:
                     )
 
                     draw_op.append(b" Tj ET Q \n")
-
+                for xobj in page.pdf_xobject:
+                    draw_op = xobj_draw_ops[xobj.xobj_id]
+                    pdf.update_stream(xobj.xref_id, draw_op.tobytes())
+                    # pdf.update_stream(xobj.xref_id, b'')
+                draw_op = page_op
                 op_container = pdf.get_new_xref()
                 # Since this is a draw instruction container,
                 # no additional information is needed
@@ -253,7 +281,7 @@ class PDFCreater:
                     mono_out_path,
                     garbage=3,
                     deflate=True,
-                    clean=not translation_config.debug,
+                    clean=not not translation_config.debug,
                     deflate_fonts=True,
                     linear=not translation_config.debug,
                 )

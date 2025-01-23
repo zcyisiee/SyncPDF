@@ -67,9 +67,11 @@
     <xs:complexType>
       <xs:sequence>
         <xs:element ref="box"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfFont"/>
         <xs:element ref="baseOperations"/>
       </xs:sequence>
       <xs:attribute name="xobjId" use="required" type="xs:int"/>
+      <xs:attribute name="xrefId" use="required" type="PDFXrefId"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfCharacter">
@@ -161,6 +163,7 @@
         <xs:element ref="pdfStyle"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfParagraphComposition"/>
       </xs:sequence>
+      <xs:attribute name="xobjId" type="xs:int"/>
       <xs:attribute name="unicode" use="required" type="xs:string"/>
       <xs:attribute name="scale" type="xs:float"/>
       <xs:attribute name="vertical" type="xs:boolean"/>

@@ -53,6 +53,7 @@ class ParagraphFinder:
         max_y = max(char.box.y2 for char in chars)
         paragraph.box = Box(min_x, min_y, max_x, max_y)
         paragraph.vertical = chars[0].vertical
+        paragraph.xobj_id = chars[0].xobj_id
 
         paragraph.first_line_indent = False
         if (
@@ -142,7 +143,14 @@ class ParagraphFinder:
                 current_line_chars = []
 
             # 检查是否需要开始新段落
-            if current_layout is None or char_layout.id != current_layout.id:
+            if (
+                current_layout is None
+                or char_layout.id != current_layout.id
+                or (  # 不是同一个 xobject
+                    current_line_chars
+                    and current_line_chars[-1].xobj_id != char.xobj_id
+                )
+            ):
                 if current_line_chars:
                     line = self.create_line(current_line_chars)
                     if current_paragraph is not None:

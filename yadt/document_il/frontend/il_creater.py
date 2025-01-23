@@ -30,6 +30,8 @@ class ILCreater:
             list[tuple[str, str]]
         ] = []
         self.xobj_id = 0
+        self.xobj_map: dict[int, il_version_1.PdfXobject] = {}
+        self.xobj_stack = []
 
     def is_passthrough_per_char_operation(self, operator: str):
         return re.match("^(sc|scn|g|rg|k|cs)$", operator, re.IGNORECASE)
@@ -76,26 +78,41 @@ class ILCreater:
     def on_new_stream(self):
         self.stroking_color_space_name = None
         self.non_stroking_color_space_name = None
-        self.passthrough_per_char_instruction_stack = []
         self.passthrough_per_char_instruction = []
 
-    def on_xobj_begin(self, bbox):
-        self.xobj_id += 1
-        self.current_page.pdf_xobject.append(
-            il_version_1.PdfXobject(
-                box=il_version_1.Box(
-                    x=float(bbox[0]),
-                    y=float(bbox[1]),
-                    x2=float(bbox[2]),
-                    y2=float(bbox[3]),
-                ),
-                xobj_id=self.xobj_id,
-            )
+    def push_xobj(self):
+        self.xobj_stack.append(
+            self.current_page_font_name_id_map.copy()
         )
+        self.current_page_font_name_id_map = {}
+
+    def pop_xobj(self):
+        self.current_page_font_name_id_map = self.xobj_stack.pop()
+
+    def on_xobj_begin(self, bbox, xref_id):
+        self.push_passthrough_per_char_instruction()
+        self.push_xobj()
+        self.xobj_id += 1
+        xobject = il_version_1.PdfXobject(
+            box=il_version_1.Box(
+                x=float(bbox[0]),
+                y=float(bbox[1]),
+                x2=float(bbox[2]),
+                y2=float(bbox[3]),
+            ),
+            xobj_id=self.xobj_id,
+            xref_id=xref_id,
+        )
+        self.current_page.pdf_xobject.append(xobject)
+        self.xobj_map[self.xobj_id] = xobject
         return self.xobj_id
 
     def on_xobj_end(self, xobj_id, base_op):
-        pass
+        self.pop_passthrough_per_char_instruction()
+        self.pop_xobj()
+        xobj = self.xobj_map[xobj_id]
+        xobj.base_operations = il_version_1.BaseOperations(value=base_op)
+        self.xobj_id += 1
 
     def on_page_start(self):
         self.current_page = il_version_1.Page(
@@ -107,6 +124,8 @@ class ILCreater:
             unit="point",
         )
         self.current_page_font_name_id_map = {}
+        self.passthrough_per_char_instruction_stack = []
+        self.xobj_stack = []
         self.docs.page.append(self.current_page)
 
     def on_page_end(self):
@@ -199,7 +218,10 @@ class ILCreater:
             serif=serif,
         )
         self.current_page_font_name_id_map[font_name] = font_id
-        self.current_page.pdf_font.append(il_font_metadata)
+        if self.xobj_id in self.xobj_map:
+            self.xobj_map[self.xobj_id].pdf_font.append(il_font_metadata)
+        else:
+            self.current_page.pdf_font.append(il_font_metadata)
 
     def create_graphic_state(self, gs: pdfminer.pdfinterp.PDFGraphicState):
         graphic_state = il_version_1.GraphicState()
@@ -238,15 +260,6 @@ class ILCreater:
             char.bbox[0], char.bbox[1], char.bbox[2], char.bbox[3]
         )
 
-        font_name = char.font.fontname
-        if isinstance(font_name, bytes):
-            try:
-                font_name = font_name.decode("utf-8")
-            except UnicodeDecodeError:
-                font_name = "BASE64:" + base64.b64encode(font_name).decode(
-                    "utf-8"
-                )
-        font_id = self.current_page_font_name_id_map[font_name]
         char_id = char.cid
         char_unicode = char.get_text()
         advance = char.adv
@@ -255,7 +268,7 @@ class ILCreater:
         else:
             vertical = False
         pdf_style = il_version_1.PdfStyle(
-            font_id=font_id,
+            font_id=char.aw_font_id,
             font_size=char.size,
             graphic_state=gs,
         )

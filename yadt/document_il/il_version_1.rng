@@ -111,7 +111,13 @@
       <attribute name="xobjId">
         <data type="int"/>
       </attribute>
+      <attribute name="xrefId">
+        <ref name="PDFXrefId"/>
+      </attribute>
       <ref name="Box"/>
+      <zeroOrMore>
+        <ref name="PDFFont"/>
+      </zeroOrMore>
       <element name="baseOperations">
         <data type="string"/>
       </element>
@@ -255,6 +261,11 @@
   </define>
   <define name="PDFParagraph">
     <element name="pdfParagraph">
+      <optional>
+        <attribute name="xobjId">
+          <data type="int"/>
+        </attribute>
+      </optional>
       <attribute name="unicode">
         <data type="string"/>
       </attribute>

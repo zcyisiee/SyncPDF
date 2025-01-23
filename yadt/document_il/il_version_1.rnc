@@ -41,7 +41,9 @@ PDFFont =
 PDFXobject =
   element pdfXobject {
     attribute xobjId { xsd:int },
+    attribute xrefId { PDFXrefId },
     Box,
+    PDFFont*,
     element baseOperations { xsd:string }
   }
 PDFCharacter =
@@ -92,6 +94,7 @@ PDFStyle =
   }
 PDFParagraph =
   element pdfParagraph {
+    attribute xobjId { xsd:int }?,
     attribute unicode { xsd:string },
     attribute scale { xsd:float }?,
     attribute vertical { xsd:boolean }?,

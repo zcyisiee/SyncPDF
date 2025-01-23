@@ -142,3 +142,5 @@ class FontMapper:
                     serif=font.is_serif,
                 )
                 page.pdf_font.append(pdf_font_il)
+                for xobj in page.pdf_xobject:
+                    xobj.pdf_font.append(pdf_font_il)
