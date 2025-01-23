@@ -34,7 +34,7 @@ class ILCreater:
         self.xobj_stack = []
 
     def is_passthrough_per_char_operation(self, operator: str):
-        return re.match("^(sc|scn|g|rg|k|cs)$", operator, re.IGNORECASE)
+        return re.match("^(sc|scn|g|rg|k|cs|gs)$", operator, re.IGNORECASE)
 
     def on_passthrough_per_char(self, operator: str, args: list[str]):
         args = [self.parse_arg(arg) for arg in args]

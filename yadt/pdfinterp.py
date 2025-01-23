@@ -205,6 +205,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                 raise PDFInterpreterError("No colorspace specified!")
             n = 1
         args = self.pop(n)
+        self.il_creater.on_passthrough_per_char('SC', args)
         self.graphicstate.scolor = cast(Color, args)
         return args
 
@@ -217,6 +218,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                 raise PDFInterpreterError("No colorspace specified!")
             n = 1
         args = self.pop(n)
+        self.il_creater.on_passthrough_per_char('sc', args)
         self.graphicstate.ncolor = cast(Color, args)
         return args
 
