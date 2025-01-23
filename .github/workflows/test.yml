@@ -32,4 +32,4 @@ jobs:
       - name: Run tests
         run: |
           uv run yadt --help
-          uv run yadt --bing --files examples/pdf/il_try_1/这是一个测试文件.pdf
+          uv run yadt --bing --files examples/ci/test.pdf
