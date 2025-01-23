@@ -71,10 +71,10 @@ uv run yadt --help
 
 3. Use the `uv run yadt` command. For example:
 ```bash
-uv run yadt --bing --files examples/pdf/il_try_1/这是一个测试文件.pdf
+uv run yadt --bing --files example.pdf
 
 # multiple files
-uv run yadt --bing --files examples/pdf/il_try_1/这是一个测试文件.pdf --files example2.pdf
+uv run yadt --bing --files example.pdf --files example2.pdf
 ```
 
 > [!TIP]
