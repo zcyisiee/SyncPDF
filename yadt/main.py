@@ -309,10 +309,8 @@ def main():
             exit(1)
         pending_files.append(file)
 
-    font_path = args.font
-    if not font_path:
-        font_path = get_cache_file_path("source-han-serif-cn.ttf")
-        download_font_assets()
+    font_path = get_cache_file_path("source-han-serif-cn.ttf")
+    download_font_assets()
 
     # 验证字体
     if font_path:
