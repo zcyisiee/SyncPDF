@@ -24,6 +24,7 @@
 PDF scientific paper translation and bilingual comparison library.
 
 - Provides a simple [command line interface](#getting-started).
+- Provides a [Python API](#python-api).
 - Mainly designed to be embedded into other programs, but can also be used directly for simple translation tasks.
 
 ## Preview
@@ -152,6 +153,13 @@ openai-base-url = "https://example.example/v1"
 openai-api-key = "[KEY]"
 # All other options can also be set in the configuration file.
 ```
+
+## Python API
+
+您可以参考[main.py](https://github.com/funstory-ai/yadt/blob/main/yadt/main.py)的示例来使用YADT的Python API。
+需要注意的是：
+1. 确保 `download_font_assets` 中描述的字体文件都存在
+2. 当前 `TranslationConfig` 对输入参数的验证并不全，需要您保证输入参数的合法性
 
 ## Background
 
