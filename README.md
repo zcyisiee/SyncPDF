@@ -119,7 +119,7 @@ uv run yadt --bing --files example.pdf --files example2.pdf
 >
 > 1. You must specify one translation service among `--openai`, `--bing`, `--google`.
 > 2. It is recommended to use models with strong compatibility with OpenAI, such as: `glm-4-flash`, `deepseek-chat`, etc.
-> 3. Currently, it has not been optimized for traditional translation engines like Bing/Google, it is recommended to use OpenAI.
+> 3. Currently, it has not been optimized for traditional translation engines like Bing/Google, it is recommended to use LLMs.
 
 ### OpenAI Specific Options
 
