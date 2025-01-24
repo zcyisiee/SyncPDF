@@ -156,10 +156,13 @@ openai-api-key = "[KEY]"
 
 ## Python API
 
-您可以参考[main.py](https://github.com/funstory-ai/yadt/blob/main/yadt/main.py)的示例来使用YADT的Python API。
-需要注意的是：
-1. 确保 `download_font_assets` 中描述的字体文件都存在
-2. 当前 `TranslationConfig` 对输入参数的验证并不全，需要您保证输入参数的合法性
+You can refer to the example in [main.py](https://github.com/funstory-ai/yadt/blob/main/yadt/main.py) to use YADT's Python API.
+
+Please note:
+
+1. Make sure all font files described in `main.download_font_assets` exist
+
+2. The current `TranslationConfig` does not fully validate input parameters, so you need to ensure the validity of input parameters
 
 ## Background
 
