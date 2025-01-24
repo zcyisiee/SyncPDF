@@ -11,6 +11,7 @@
 - **Ensure the bug was not already reported** by searching on GitHub under [Issues](https://github.com/funstory-ai/yadt/issues).
 
 Please pay special attention to:
+
 1. Known compatibility issues with pdf2zh - see [#20](https://github.com/funstory-ai/yadt/issues/20) for details
 2. Reported edge cases and limitations from downstream applications - see [#23](https://github.com/funstory-ai/yadt/issues/23) for discussion
 
@@ -76,55 +77,60 @@ git commit -m "<semantic commit message>"
 - Use pep8-naming.
 - Comments should be in English.
 - Follow these specific Python coding style guidelines:
-  
+
   a. Naming Conventions:
-     - Class names should use CapWords (PascalCase): `class TranslatorConfig`
-     - Function and variable names should use snake_case: `def process_text()`, `word_count = 0`
-     - Constants should be UPPER_CASE: `MAX_RETRY_COUNT = 3`
-     - Private attributes should start with underscore: `_internal_state`
-  
+
+  - Class names should use CapWords (PascalCase): `class TranslatorConfig`
+  - Function and variable names should use snake_case: `def process_text()`, `word_count = 0`
+  - Constants should be UPPER_CASE: `MAX_RETRY_COUNT = 3`
+  - Private attributes should start with underscore: `_internal_state`
+
   b. Code Layout:
-     - Use 4 spaces for indentation (no tabs)
-     - Maximum line length is 88 characters (compatible with black formatter)
-     - Add 2 blank lines before top-level classes and functions
-     - Add 1 blank line before class methods
-     - No trailing whitespace
-  
+
+  - Use 4 spaces for indentation (no tabs)
+  - Maximum line length is 88 characters (compatible with black formatter)
+  - Add 2 blank lines before top-level classes and functions
+  - Add 1 blank line before class methods
+  - No trailing whitespace
+
   c. Imports:
-     - Imports should be on separate lines: `import os\nimport sys`
-     - Imports should be grouped in the following order:
-       1. Standard library imports
-       2. Related third party imports
-       3. Local application/library specific imports
-     - Use absolute imports over relative imports
-  
+
+  - Imports should be on separate lines: `import os\nimport sys`
+  - Imports should be grouped in the following order:
+    1.  Standard library imports
+    2.  Related third party imports
+    3.  Local application/library specific imports
+  - Use absolute imports over relative imports
+
   d. String Formatting:
-     - Prefer f-strings for string formatting: `f"Count: {count}"`
-     - Use double quotes for docstrings
-  
+
+  - Prefer f-strings for string formatting: `f"Count: {count}"`
+  - Use double quotes for docstrings
+
   e. Type Hints:
-     - Use type hints for function arguments and return values
-     - Example: `def translate_text(text: str) -> str:`
+
+  - Use type hints for function arguments and return values
+  - Example: `def translate_text(text: str) -> str:`
 
   f. Documentation:
-     - All public functions and classes must have docstrings
-     - Use Google style for docstrings
-     - Example:
-       ```python
-       def function_name(arg1: str, arg2: int) -> bool:
-           """Short description of function.
-           
-           Args:
-               arg1: Description of arg1
-               arg2: Description of arg2
-           
-           Returns:
-               Description of return value
-           
-           Raises:
-               ValueError: Description of when this error occurs
-           """
-       ```
 
+  - All public functions and classes must have docstrings
+  - Use Google style for docstrings
+  - Example:
+    ```python
+    def function_name(arg1: str, arg2: int) -> bool:
+        """Short description of function.
+
+        Args:
+            arg1: Description of arg1
+            arg2: Description of arg2
+
+        Returns:
+            Description of return value
+
+        Raises:
+            ValueError: Description of when this error occurs
+        """
+    ```
 
 The existing codebase does not comply with the above specifications in some aspects. Contributions for modifications are welcome.
