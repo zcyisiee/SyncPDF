@@ -224,3 +224,13 @@ And meet the following requirements:
 We encourage you to contribute to YADT! Please check out the [CONTRIBUTING](https://github.com/funstory-ai/yadt/blob/main/docs/CONTRIBUTING.md) guide.
 
 Everyone interacting in YADT and its sub-projects' codebases, issue trackers, chat rooms, and mailing lists is expected to follow the YADT [Code of Conduct](https://github.com/funstory-ai/yadt/blob/main/docs/CODE_OF_CONDUCT.md).
+
+<h2 id="star_hist">Star History</h2>
+
+<a href="https://star-history.com/#funstory-ai/yadt&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=funstory-ai/yadt&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=funstory-ai/yadt&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=funstory-ai/yadt&type=Date"/>
+ </picture>
+</a>
