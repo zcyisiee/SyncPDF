@@ -122,6 +122,7 @@ git commit -m "<semantic commit message>"
   - All public functions and classes must have docstrings
   - Use Google style for docstrings
   - Example:
+
     ```python
     def function_name(arg1: str, arg2: int) -> bool:
         """Short description of function.
@@ -139,3 +140,26 @@ git commit -m "<semantic commit message>"
     ```
 
 The existing codebase does not comply with the above specifications in some aspects. Contributions for modifications are welcome.
+
+#### How to modify the intermediate representation
+
+The intermediate representation is described by [il_version_1.rnc](https://github.com/funstory-ai/yadt/blob/main/yadt/document_il/il_version_1.rnc). Corresponding Python data classes are generated using [xsdata](https://xsdata.readthedocs.io/en/latest/). The files `il_version_1.rng`, `il_version_1.xsd`, and `il_version_1.py` are auto-generated and must not be manually modified.
+
+##### Format RNC file
+
+```bash
+trang yadt/document_il/il_version_1.rnc yadt/document_il/il_version_1.rnc
+```
+
+##### Generate RNG, XSD and Python classes
+
+```bash
+# Generate RNG from RNC
+trang yadt/document_il/il_version_1.rnc yadt/document_il/il_version_1.rng
+
+# Generate XSD from RNC
+trang yadt/document_il/il_version_1.rnc yadt/document_il/il_version_1.xsd
+
+# Generate Python classes from XSD
+xsdata generate yadt/document_il/il_version_1.xsd --package yadt.document_il
+```
