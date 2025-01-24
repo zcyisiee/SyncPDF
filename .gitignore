@@ -20,7 +20,6 @@ web/*.local
 .venv
 .idea
 *.egg-info
-uv.lock
 .DS_Store
 .vscode
 __pycache__
