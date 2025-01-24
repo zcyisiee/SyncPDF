@@ -43,7 +43,7 @@ jobs:
         run: |
           bumpver update --patch --tag=final &&
           version=$(cat pyproject.toml | grep "version = " | head -n 1 | awk -F'"' '{print $2}') &&
-          bumpver update --set-version $version.dev.$(date +%s)
+          bumpver update --set-version $version.dev$(date +%s)
 
       - name: Build package
         run: "uv build"
