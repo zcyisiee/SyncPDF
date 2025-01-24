@@ -10,8 +10,8 @@ permissions:
   id-token: write
 
 jobs:
-  release:
-    name: Release
+  build:
+    name: Build distribution 📦
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,9 +38,11 @@ jobs:
         with:
           version-command: |
             cat pyproject.toml | grep "version = " | head -n 1 | awk -F'"' '{print $2}'
+
       - name: Install Dependencies
         run: |
           uv sync
+
       - name: Bump version for developmental release
         if: "! steps.check-version.outputs.tag"
         run: |
@@ -56,17 +58,61 @@ jobs:
           name: python-package-distributions
           path: dist/
 
-      - name: Publish to PyPI
-        if: steps.check-version.outputs.tag
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://pypi.org/legacy/
+  publish-to-pypi:
+    name: Publish Python 🐍 distribution 📦 to PyPI
+    if: steps.check-version.outputs.tag
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/yadt
 
-      - name: Publish to TestPyPI
-        if: "! steps.check-version.outputs.tag"
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download all the dists
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish distribution 📦 to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-to-testpypi:
+    name: Publish Python 🐍 distribution 📦 to TestPyPI
+    if: "! steps.check-version.outputs.tag"
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/yadt
+
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download all the dists
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish distribution 📦 to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+
+  post-release:
+    name: Post Release Tasks
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Sign the dists with Sigstore
         uses: sigstore/gh-action-sigstore-python@v3.0.0
@@ -99,5 +145,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: >-
           gh release upload
-          "${{ steps.check-version.outputs.tag }}" dist/**
+          "${{ steps.check-version.outputs.tag }}"
+          ./dist/*.tar.gz.sig
+          ./dist/*.whl.sig
           --repo "$GITHUB_REPOSITORY"
