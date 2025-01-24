@@ -1,9 +1,6 @@
 <!-- # Yet Another Document Translator -->
 
 <div align="center">
-
-English
-
 <!-- <img src="./docs/images/banner.png" width="320px"  alt="PDF2ZH"/> -->
 
 <h2 id="title">Yet Another Document Translator</h2>
