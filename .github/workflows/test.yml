@@ -22,7 +22,6 @@ jobs:
       - name: Setup uv with Python ${{ matrix.python-version }}
         uses: astral-sh/setup-uv@v5
         with:
-          uv-venv: ".venv"
           python-version: ${{ matrix.python-version }}
           enable-cache: true
           cache-dependency-glob: "uv.lock"
