@@ -6,6 +6,9 @@ on:
       - main
       - master
 
+permissions:
+  id-token: write
+
 jobs:
   release:
     name: Release
