@@ -41,8 +41,7 @@ jobs:
       - name: Bump version for developmental release
         if: "! steps.check-version.outputs.tag"
         run: |
-          bumpver update --patch --tag=final &&
-          version=$(cat pyproject.toml | grep "version = " | head -n 1 | awk -F'"' '{print $2}') &&
+          version=$(bumpver update --patch --tag=final --dry 2>&1 | grep "New Version" | awk '{print $NF}') &&
           bumpver update --set-version $version.dev$(date +%s)
 
       - name: Build package
