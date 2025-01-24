@@ -43,7 +43,16 @@ class FontMapper:
         self.fontid2font["base"] = self.base_font
         self.fontid2font["fallback"] = self.fallback_font
         self.fontid2font["kai"] = self.kai_font
-
+    def has_char(self, char_unicode: str):
+        current_char = ord(char_unicode)
+        for font in self.fonts.values():
+            if font.has_glyph(current_char):
+                return True
+        if self.base_font.has_glyph(current_char):
+            return True
+        if self.fallback_font.has_glyph(current_char):
+            return True
+        return False
     def map(self, original_font: PdfFont, char_unicode: str):
         current_char = ord(char_unicode)
         if isinstance(original_font, pymupdf.Font):

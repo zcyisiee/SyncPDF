@@ -15,6 +15,7 @@ from yadt.document_il.il_version_1 import (
     PdfSameStyleCharacters,
     PdfStyle,
 )
+from yadt.document_il.utils.fontmap import FontMapper
 from yadt.document_il.utils.layout_helper import (
     LEFT_BRACKET,
     RIGHT_BRACKET,
@@ -30,6 +31,8 @@ class StylesAndFormulas:
 
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config
+        self.font_mapper = FontMapper(translation_config)
+
 
     def process(self, document: Document):
         with self.translation_config.progress_monitor.stage_start(
@@ -508,6 +511,8 @@ class StylesAndFormulas:
     def is_formulas_start_char(self, char: str) -> bool:
         if "(cid:" in char:
             return True
+        if not self.font_mapper.has_char(char):
+            return True
         if self.translation_config.formular_char_pattern:
             pattern = self.translation_config.formular_char_pattern
             if re.match(pattern, char):
@@ -526,6 +531,7 @@ class StylesAndFormulas:
                     "Zp",
                     "Zs",
                     "Co",  # private use character
+                    "So",  # symbol
                 ]  # 文字修饰符、数学符号、分隔符号
                 or ord(char[0]) in range(0x370, 0x400)  # 希腊字母
             )
