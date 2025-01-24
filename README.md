@@ -22,6 +22,11 @@ English
 </p>
 </div>
 
+PDF scientific paper translation and bilingual comparison library.
+
+- Provides a simple [command line interface](#getting-started).
+- Mainly designed to be embedded into other programs, but can also be used directly for simple translation tasks.
+
 ## Preview
 
 <div align="center">
@@ -37,6 +42,7 @@ We recommend using the Tool feature of [uv](https://github.com/astral-sh/uv) to 
 1. First, you need to refer to [uv installation](https://github.com/astral-sh/uv#installation) to install uv and set up the `PATH` environment variable as prompted.
 
 2. Use the following command to install yadt:
+
 ```bash
 uv tool install --python 3.12 yadt
 
@@ -44,6 +50,7 @@ yadt --help
 ```
 
 3. Use the `yadt` command. For example:
+
 ```bash
 yadt --bing  --files example.pdf
 
@@ -58,6 +65,7 @@ We still recommend using [uv](https://github.com/astral-sh/uv) to manage virtual
 1. First, you need to refer to [uv installation](https://github.com/astral-sh/uv#installation) to install uv and set up the `PATH` environment variable as prompted.
 
 2. Use the following command to install yadt:
+
 ```bash
 # clone the project
 git clone https://github.com/funstory-ai/yadt
@@ -70,6 +78,7 @@ uv run yadt --help
 ```
 
 3. Use the `uv run yadt` command. For example:
+
 ```bash
 uv run yadt --bing --files example.pdf
 
@@ -79,6 +88,68 @@ uv run yadt --bing --files example.pdf --files example2.pdf
 
 > [!TIP]
 > The absolute path is recommended.
+
+## Advanced Options
+
+### Language Options
+
+- `--lang-in`, `-li`: Source language code (default: en)
+- `--lang-out`, `-lo`: Target language code (default: zh)
+
+> [!TIP]
+> Currently, this project mainly focuses on English-to-Chinese translation, and other scenarios have not been tested yet.
+
+### PDF Processing Options
+
+- `--files`: One or more file paths to input PDF documents.
+- `--pages`, `-p`: Specify pages to translate (e.g., "1,2,1-,-3,3-5"). If not set, translate all pages
+- `--split-short-lines`: Force split short lines into different paragraphs (may cause poor typesetting & bugs)
+- `--short-line-split-factor`: Split threshold factor (default: 0.8). The actual threshold is the median length of all lines on the current page \* this factor
+
+### Translation Service Options
+
+- `--qps`: QPS (Queries Per Second) limit for translation service (default: 4)
+- `--ignore-cache`: Ignore translation cache and force retranslation
+- `--no-dual`: Do not output bilingual PDF files
+- `--no-mono`: Do not output monolingual PDF files
+- `--openai`: Use OpenAI for translation (default: False)
+- `--bing`: Use Bing for translation (default: False)
+- `--google`: Use Google Translate for translation (default: False)
+
+> [!TIP]
+> You must specify one translation service among `--openai`, `--bing`, `--google`.
+
+### OpenAI Specific Options
+
+- `--openai-model`: OpenAI model to use (default: gpt-4o-mini)
+- `--openai-base-url`: Base URL for OpenAI API
+- `--openai-api-key`: API key for OpenAI service
+
+### Output Control
+
+- `--output`, `-o`: Output directory for translated files. If not set, use same directory as input
+- `--debug`, `-d`: Enable debug logging level and export detailed intermediate results in `~/.cache/yadt/working`.
+
+### Configuration File
+
+- `--config`, `-c`: Configuration file path. Use the TOML format.
+
+Example Configuration:
+
+```toml
+[yadt]
+debug = true
+lang-in = "en-US"
+lang-out = "zh-CN"
+qps = 20
+# this is a comment
+# pages = 4
+openai = true
+openai-model = "SOME_ALSOME_MODEL"
+openai-base-url = "https://example.example/v1"
+openai-api-key = "[KEY]"
+# All other options can also be set in the configuration file.
+```
 
 ## Background
 
@@ -110,6 +181,13 @@ We offer a intermediate representation of the results from parser and can be ren
 
 ## Roadmap
 
+- [ ] Add line support
+- [ ] Add table support
+- [ ] Add cross-page/cross-column paragraph support
+- [ ] More advanced typesetting features
+- [ ] Outline support
+- [ ] ...
+
 Our fisrt 1.0 version goal is to finish a translation from [PDF Reference, Version 1.7](https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/pdfreference1.7old.pdf) to the following language version:
 
 - Simplified Chinese
@@ -121,7 +199,6 @@ And meet the following requirements:
 
 - layout error less than 1%
 - content loss less than 1%
-
 
 ## Known Issues
 
