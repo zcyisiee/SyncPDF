@@ -211,9 +211,6 @@ And meet the following requirements:
 
 ## How to Contribute
 
-This project is not yet ready to accept community contributions. Please be patient. Thank you for your support! Community contributions will be open in the future.
+We encourage you to contribute to YADT! Please check out the [CONTRIBUTING](https://github.com/funstory-ai/yadt/blob/main/docs/CONTRIBUTING.md) guide.
 
-However, currently, the following two types of issue reports are especially accepted:
-
-1. Compatibility issues with pdf2zh: [#20](https://github.com/funstory-ai/yadt/issues/20)
-2. Bad cases of this project found downstream: [#23](https://github.com/funstory-ai/yadt/issues/23)
+Everyone interacting in YADT and its sub-projects' codebases, issue trackers, chat rooms, and mailing lists is expected to follow the YADT [Code of Conduct](https://github.com/funstory-ai/yadt/blob/main/docs/CODE_OF_CONDUCT.md).
