@@ -14,7 +14,7 @@ from yadt.document_il.translator.translator import set_translate_rate_limiter
 from yadt.translation_config import TranslationConfig  # noqa: E402
 
 logger = logging.getLogger(__name__)
-
+__version__ = "0.0.2.dev1"
 
 def create_cache_folder():
     try:
@@ -36,6 +36,11 @@ def create_parser():
         required=False,
         is_config_file=True,
         help="config file path",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
         "--files",

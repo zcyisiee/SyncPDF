@@ -1,6 +1,6 @@
 [project]
 name = "yadt"
-version = "0.0.1a28"
+version = "0.0.2.dev1"
 description = "Yet Another Document Translator"
 license = "AGPL-3.0"
 readme = "README.md"
@@ -49,6 +49,23 @@ max-line-length = 88
 dev = [
     "autopep8>=2.3.2",
     "black>=24.10.0",
+    "bumpver>=2024.1130",
     "flake8>=7.1.1",
     "pep8-naming>=0.14.1",
+]
+
+[bumpver]
+current_version = "0.0.2.dev1"
+version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
+
+[bumpver.file_patterns]
+"pyproject.toml" = [
+    'current_version = "{version}"',
+    'version = "{version}"'
+]
+"yadt/__init__.py" = [
+    '__version__ = "{version}"'
+]
+"yadt/main.py" = [
+    '__version__ = "{version}"'
 ]
