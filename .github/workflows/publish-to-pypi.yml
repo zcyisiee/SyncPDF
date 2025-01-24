@@ -131,7 +131,7 @@ jobs:
       - publish-to-pypi
       - publish-to-testpypi
     if: |
-      needs.check-repository.outputs.is_main_repo == 'true' && 
+      always() && needs.check-repository.outputs.is_main_repo == 'true' && 
       (needs.publish-to-pypi.result == 'success' || needs.publish-to-testpypi.result == 'success')
     runs-on: ubuntu-latest
     permissions:
