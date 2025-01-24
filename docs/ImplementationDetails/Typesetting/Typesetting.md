@@ -1,60 +1,79 @@
-# 排版
+# Typography
 
-## 背景
+## Background
 
-对翻译后的文本，需要排版后才能放到 PDF 里。
+After translation, text needs to be typeset before placing into PDF.
 
-翻译后的段落可以包含以下几种类型的任意组合：
+Translated paragraphs can contain any combination of the following types:
 
-1. PDF 公式
-2. 单个 PDF 原始字符
-3. 同样式的 PDF 原始字符串
-4. 翻译出来的同样式 unicode 字符串
+1. PDF formulas
 
-接下来分情况讨论：
+2. Single PDF original character
 
-对于以下 3 种类型，可以直接透明传输到新位置。
+3. PDF original string with same style
 
-1. PDF 公式
-2. 单个 PDF 原始字符
-3. 同样式的 PDF 原始字符串
+4. Translated unicode string with same style
 
-只有`翻译出来的同样式 unicode 字符串` 需要执行重排版操作，因为这一步丢失了原有的排版信息。但是由于段落可以包含其他需要透明传输的组成部分，所以其他部分的位置也可能发生变更，也需要参与进排版来。
+Let's discuss different cases:
 
-## 目标
+For the following 3 types, they can be directly transmitted transparently to new positions:
 
-在段落原始包围框内想办法摆下所有的组成部分。如果实在摆不下，则尝试向书写方向扩展包围框。
+1. PDF formulas
 
-## 具体实现
+2. Single PDF original character
 
-首先进行重排判断，判断该段落是否需要重排。如果该段落所有元素均可透明传输，则无需重排。之后，如需重排，则执行具体重排算法 1：
+3. PDF original string with same style
 
-1. 将所有元素转换为排版单元类型，排版单元内记录了该元素的长度宽度信息。
-2. 从原始段落包围框的左上角开始开始，依次摆放各元素。
-3. 若当前行无法放下下一个元素，则换行。
-4. 重复 2~3，直到所有元素摆放完毕，或超出原始包围框。
+Only "translated unicode string with same style" needs typesetting operation, as this step loses original layout information. However, since paragraphs may contain other components that need transparent transmission, their positions may also change and need to participate in typesetting.
 
-在译文长度小于原文长度时，上述算法 1 可以正常使用。但是当译文长度大于原文长度时，需要增加一步算法 2：
+## Goal
 
-1. 初始化元素缩放系数为 1.0。
-2. 初始化行距为 1.7。
-3. 使用算法 1 尝试排版。
-4. 若无法放下所有元素，则首先以步长 0.1 缩小行距。若行距达到 1.1 后仍无法放下所有元素，则将元素缩放系数缩小 0.01，然后跳至第二步执行。
-5. 若元素缩放系数小于 0.1，则报错。
+Try to fit all components within the original paragraph bounding box. If impossible, try to expand the bounding box in writing direction.
 
-通过算法 2 即可在原始位置摆放下几乎所有语言的译文。
+## Specific Implementation
 
-但是对于某些特殊情况，例如 `图 1` 翻译成 `Figure 1` 等，即使 0.1 的元素缩放也摆不下，需要尝试向书写方向扩展包围框。所以引出算法 3：
+First perform reflow judgment to determine if the paragraph needs reflow. If all elements can be transmitted transparently, no reflow is needed. Then, if reflow is needed, execute Algorithm 1:
 
-1. 以最小缩放限制 0.8 尝试排版。
-2. 若无法放下所有元素，则通过页面信息计算该段落右侧空白空间。
-3. 根据空白空间，扩展段落包围框。
-4. 以最小缩放限制 0.1 尝试排版。
+1. Convert all elements to typesetting unit type, which records length and width information.
 
-## 局限性
+2. Start from top-left of original paragraph bounding box, place elements sequentially.
 
-1. 暂时只能处理从左向右书写的文字。
-2. 暂时无法处理目录条目根据点号对齐。
-3. 性能较差，需要优化。
-4. 没有考虑页面全局信息，文字忽大忽小。
-5. 没有实现高级排版功能，阅读体验较差。
+3. If current line cannot fit next element, wrap to next line.
+
+4. Repeat 2-3 until all elements are placed or exceed original bounding box.
+
+Algorithm 1 works normally when translated text is shorter than original. When translated text is longer, Algorithm 2 needs to be added:
+
+1. Initialize element scaling factor as 1.0.
+
+2. Initialize line spacing as 1.7.
+
+3. Try typesetting using Algorithm 1.
+
+4. If cannot fit all elements, first reduce line spacing by 0.1 step. If still cannot fit after reaching 1.1 spacing, reduce element scaling by 0.05 then jump to step 2.
+
+5. Report error if element scaling is less than 0.1.
+
+Algorithm 2 can fit translations of almost all languages in original position.
+
+However for special cases like "图 1" translated to "Figure 1", even 0.1 scaling cannot fit, need to try expanding bounding box in writing direction. So Algorithm 3:
+
+1. Try typesetting with minimum 0.8 scaling.
+
+2. If cannot fit all elements, calculate paragraph's right whitespace using page information.
+
+3. Expand paragraph bounding box based on whitespace.
+
+4. Try typesetting with minimum 0.1 scaling.
+
+## Limitations
+
+1. Currently only handles left-to-right writing.
+
+2. Cannot handle table of contents alignment by dots.
+
+3. Poor performance, needs optimization.
+
+4. No global page information consideration, inconsistent text sizes.
+
+5. No advanced typography features, poor reading experience.
