@@ -21,6 +21,11 @@ Please pay special attention to:
 
 - Suggest your change in the [Issues](https://github.com/funstory-ai/yadt/issues/new?template=feature_request.md) section.
 
+### **If you wish to add more translators**
+
+- This project is not intended for direct end-user use, and the supported translators are mainly for debugging purposes. Unless it clearly helps with development and debugging, PRs for directly adding translators will not be accepted.
+- You can directly use [PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate) to get support for more translators.
+
 ### **If you wish to contribute to YADT**
 
 1. Fork this repository and clone it locally.
