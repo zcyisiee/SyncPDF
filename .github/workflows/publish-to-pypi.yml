@@ -8,6 +8,8 @@ on:
 
 permissions:
   id-token: write
+  contents: write
+  pull-requests: write
 
 jobs:
   build:
@@ -113,6 +115,10 @@ jobs:
     needs:
       - build
     runs-on: ubuntu-latest
+    if: needs.build.outputs.is_release != ''
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
 
@@ -123,12 +129,3 @@ jobs:
           tag: ${{ needs.build.outputs.is_release }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create GitHub Release
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: >-
-          gh release create
-          "${{ needs.build.outputs.is_release }}"
-          --repo "$GITHUB_REPOSITORY"
-          --notes ""
