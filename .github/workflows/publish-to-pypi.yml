@@ -12,8 +12,18 @@ permissions:
   pull-requests: write
 
 jobs:
+  check-repository:
+    name: Check if running in main repository
+    runs-on: ubuntu-latest
+    outputs:
+      is_main_repo: ${{ github.repository == 'funstory-ai/yadt' }}
+    steps:
+      - run: echo "Running repository check"
+
   build:
     name: Build distribution 📦
+    needs: check-repository
+    if: needs.check-repository.outputs.is_main_repo == 'true'
     runs-on: ubuntu-latest
     outputs:
       is_release: ${{ steps.check-version.outputs.tag }}
@@ -67,6 +77,7 @@ jobs:
     name: Publish Python 🐍 distribution 📦 to PyPI
     if: needs.build.outputs.is_release != ''
     needs:
+      - check-repository
       - build
     runs-on: ubuntu-latest
     environment:
@@ -90,6 +101,7 @@ jobs:
     name: Publish Python 🐍 distribution 📦 to TestPyPI
     if: needs.build.outputs.is_release == ''
     needs:
+      - check-repository
       - build
     runs-on: ubuntu-latest
     environment:
@@ -114,7 +126,9 @@ jobs:
   post-release:
     name: Post Release Tasks
     needs:
+      - check-repository
       - build
+    if: needs.check-repository.outputs.is_main_repo == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
