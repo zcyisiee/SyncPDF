@@ -1,6 +1,6 @@
 [project]
 name = "yadt"
-version = "0.1.0.rc1"
+version = "0.1.0.rc2"
 description = "Yet Another Document Translator"
 license = "AGPL-3.0"
 readme = "README.md"
@@ -55,7 +55,7 @@ dev = [
 ]
 
 [bumpver]
-current_version = "0.1.0.rc1"
+current_version = "0.1.0.rc2"
 version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
 
 [bumpver.file_patterns]
