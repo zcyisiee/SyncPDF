@@ -35,7 +35,9 @@ jobs:
         with:
           version-command: |
             cat pyproject.toml | grep "version = " | head -n 1 | awk -F'"' '{print $2}'
-
+      - name: Install Dependencies
+        run: |
+          uv sync
       - name: Bump version for developmental release
         if: "! steps.check-version.outputs.tag"
         run: |
