@@ -51,7 +51,9 @@ def predict_layout(
     """
     try:
         # Prepare request data
-        image_data = encode_image(image)
+        if not isinstance(image, list):
+            image = [image]
+        image_data = [encode_image(image) for image in image]
         data = {
             "image": image_data,
             "imgsz": imgsz,
@@ -116,13 +118,13 @@ class RpcDocLayoutModel(DocLayoutModel):
             image = [image]
 
         results = []
-        for img in image:
-            preds = predict_layout(img, host=self.host, imgsz=imgsz)[0]
-            if len(preds) > 0:
-                boxes = [YoloBox(None, np.array(x['xyxy']), np.array(x['conf']), x['cls']) for x in preds["boxes"]]
-                results.append(YoloResult(boxes=boxes, names={int(k):v for k, v in preds['names'].items()}))
-            else:
-                results.append(YoloResult(boxes_data=np.array([]), names=[]))
+        preds = predict_layout(image, host=self.host, imgsz=imgsz)
+        if len(preds) > 0:
+            for pred in preds:
+                boxes = [YoloBox(None, np.array(x['xyxy']), np.array(x['conf']), x['cls']) for x in pred["boxes"]]
+                results.append(YoloResult(boxes=boxes, names={int(k):v for k, v in pred['names'].items()}))
+        else:
+            results.append(YoloResult(boxes_data=np.array([]), names=[]))
 
         return results
 
