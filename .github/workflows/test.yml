@@ -28,7 +28,7 @@ jobs:
           path: ~/.cache/huggingface/hub/models--wybxc--DocLayout-YOLO-DocStructBench-onnx
           key: ${{runner.os}}-huggingmodel-wybxc--DocLayout-YOLO-DocStructBench-onnx
       - name: Setup uv with Python ${{ matrix.python-version }}
-        uses: astral-sh/setup-uv@v5.0.0
+        uses: astral-sh/setup-uv@b5f58b2abc5763ade55e4e9d0fe52cd1ff7979ca # v5.2.1
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
