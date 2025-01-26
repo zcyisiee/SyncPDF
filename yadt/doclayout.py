@@ -65,7 +65,7 @@ os_name = platform.system()
 
 providers = []
 
-if os_name == "Darwin":  # Darwin 是macOS在platform.system中的标识
+if os_name == "Darwin":  # Temporarily disable CoreML due to batch inference issues
     providers.append(
         (
             "CoreMLExecutionProvider",
@@ -77,6 +77,10 @@ if os_name == "Darwin":  # Darwin 是macOS在platform.system中的标识
             },
         )
     )
+    # workaround for CoreML batch inference issues
+    max_batch_size = 1
+else:
+    max_batch_size = 1024
 providers.append("CPUExecutionProvider")  # CPU执行提供者作为通用后备选项
 
 
@@ -188,21 +192,63 @@ class OnnxModel(DocLayoutModel):
         boxes[..., :4] = (boxes[..., :4] - [pad_x, pad_y, pad_x, pad_y]) / gain
         return boxes
 
-    def predict(self, image, imgsz=1024, **kwargs):
-        # Preprocess input image
-        orig_h, orig_w = image.shape[:2]
-        pix = self.resize_and_pad_image(image, new_shape=imgsz)
-        pix = np.transpose(pix, (2, 0, 1))  # CHW
-        pix = np.expand_dims(pix, axis=0)  # BCHW
-        pix = pix.astype(np.float32) / 255.0  # Normalize to [0, 1]
-        new_h, new_w = pix.shape[2:]
+    def predict(self, image, imgsz=1024, batch_size=16, **kwargs):
+        """
+        Predict the layout of document pages.
 
-        # Run inference
-        preds = self.model.run(None, {"images": pix})[0]
+        Args:
+            image: A single image or a list of images of document pages.
+            imgsz: Resize the image to this size. Must be a multiple of the stride.
+            batch_size: Number of images to process in one batch.
+            **kwargs: Additional arguments.
 
-        # Postprocess predictions
-        preds = preds[preds[..., 4] > 0.25]
-        preds[..., :4] = self.scale_boxes(
-            (new_h, new_w), preds[..., :4], (orig_h, orig_w)
-        )
-        return [YoloResult(boxes=preds, names=self._names)]
+        Returns:
+            A list of YoloResult objects, one for each input image.
+        """
+        # Handle single image input
+        if isinstance(image, np.ndarray) and len(image.shape) == 3:
+            image = [image]
+        
+        total_images = len(image)
+        results = []
+        batch_size = min(batch_size, max_batch_size)
+        
+        # Process images in batches
+        for i in range(0, total_images, batch_size):
+            batch_images = image[i:i + batch_size]
+            batch_size_actual = len(batch_images)
+            
+            # Calculate target size based on the maximum height in the batch
+            max_height = max(img.shape[0] for img in batch_images)
+            target_imgsz = int(max_height / 32) * 32
+            
+            # Preprocess batch
+            processed_batch = []
+            orig_shapes = []
+            for img in batch_images:
+                orig_h, orig_w = img.shape[:2]
+                orig_shapes.append((orig_h, orig_w))
+                
+                pix = self.resize_and_pad_image(img, new_shape=target_imgsz)
+                pix = np.transpose(pix, (2, 0, 1))  # CHW
+                pix = pix.astype(np.float32) / 255.0  # Normalize to [0, 1]
+                processed_batch.append(pix)
+            
+            # Stack batch
+            batch_input = np.stack(processed_batch, axis=0)  # BCHW
+            new_h, new_w = batch_input.shape[2:]
+            
+            # Run inference
+            batch_preds = self.model.run(None, {"images": batch_input})[0]
+            
+            # Process each prediction in the batch
+            for j in range(batch_size_actual):
+                preds = batch_preds[j]
+                preds = preds[preds[..., 4] > 0.25]
+                if len(preds) > 0:
+                    preds[..., :4] = self.scale_boxes(
+                        (new_h, new_w), preds[..., :4], orig_shapes[j]
+                    )
+                results.append(YoloResult(boxes=preds, names=self._names))
+        
+        return results
