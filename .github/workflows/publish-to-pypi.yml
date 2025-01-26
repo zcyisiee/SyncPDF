@@ -59,7 +59,7 @@ jobs:
           uv sync
 
       - name: Bump version for developmental release
-        if: ! steps.check-version.outputs.tag
+        if: "! steps.check-version.outputs.tag"
         run: |
           version=$(bumpver update --patch --tag=final --dry 2>&1 | grep "New Version" | awk '{print $NF}') &&
           bumpver update --set-version $version.dev$(date +%s)
