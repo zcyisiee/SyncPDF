@@ -56,6 +56,12 @@ def create_parser():
         action="store_true",
         help="Use debug logging level.",
     )
+    parser.add_argument(
+        "--rpc-doclayout",
+        default=None,
+        help="RPC service host address for document layout analysis",
+        type=str,
+    )
     translation_params = parser.add_argument_group(
         "Translation",
         description="Used during translation",
@@ -300,6 +306,14 @@ def main():
     # 设置翻译速率限制
     set_translate_rate_limiter(args.qps)
 
+    # 初始化文档布局模型
+    if args.rpc_doclayout:
+        from yadt.docvision.rpc_doclayout import RpcDocLayoutModel
+        doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout)
+    else:
+        from yadt.docvision.doclayout import DocLayoutModel
+        doc_layout_model = DocLayoutModel.load_onnx()
+
     pending_files = []
     for file in args.files:
         # 清理文件路径，去除两端的引号
@@ -359,6 +373,7 @@ def main():
             formular_char_pattern=args.formular_char_pattern,
             split_short_lines=args.split_short_lines,
             short_line_split_factor=args.short_line_split_factor,
+            doc_layout_model=doc_layout_model,
         )
 
         # 开始翻译
