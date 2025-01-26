@@ -28,14 +28,14 @@ jobs:
     outputs:
       is_release: ${{ steps.check-version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.1.1
         with:
           persist-credentials: true
           fetch-depth: 2
           token: ${{ secrets.GITHUB_TOKEN }}
           
       - name: Setup uv with Python 3.12
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v5.0.0
         with:
           python-version: "3.12"
           enable-cache: true
@@ -68,7 +68,7 @@ jobs:
         run: "uv build"
 
       - name: Store the distribution packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.3.0
         with:
           name: python-package-distributions
           path: dist/
@@ -89,7 +89,7 @@ jobs:
 
     steps:
       - name: Download all the dists
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.1.0
         with:
           name: python-package-distributions
           path: dist/
@@ -113,7 +113,7 @@ jobs:
 
     steps:
       - name: Download all the dists
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.1.0
         with:
           name: python-package-distributions
           path: dist/
@@ -138,14 +138,14 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.1.1
         with:
           persist-credentials: true
           fetch-depth: 2
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish the release notes
-        uses: release-drafter/release-drafter@v5.23.0
+        uses: release-drafter/release-drafter@v5.25.0
         with:
           publish: ${{ needs.build.outputs.is_release != '' }}
           tag: ${{ needs.build.outputs.is_release }}
