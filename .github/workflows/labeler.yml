@@ -2,9 +2,15 @@ name: Labeler
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [main]
+    paths:
+      - .github/labels.yml
+      - .github/workflows/labeler.yml
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   labeler:

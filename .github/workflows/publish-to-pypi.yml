@@ -89,7 +89,7 @@ jobs:
 
     steps:
       - name: Download all the dists
-        uses: actions/download-artifact@v4.1.0
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
           name: python-package-distributions
           path: dist/
@@ -113,7 +113,7 @@ jobs:
 
     steps:
       - name: Download all the dists
-        uses: actions/download-artifact@v4.1.0
+        uses: actions/download-artifact@f44cd7b40bfd40b6aa1cc1b9b5b7bf65639a7c09 # v4.1.7
         with:
           name: python-package-distributions
           path: dist/
