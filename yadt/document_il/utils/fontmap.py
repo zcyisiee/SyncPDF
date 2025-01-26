@@ -44,6 +44,8 @@ class FontMapper:
         self.fontid2font["fallback"] = self.fallback_font
         self.fontid2font["kai"] = self.kai_font
     def has_char(self, char_unicode: str):
+        if len(char_unicode) != 1:
+            return False
         current_char = ord(char_unicode)
         for font in self.fonts.values():
             if font.has_glyph(current_char):
