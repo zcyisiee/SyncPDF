@@ -28,6 +28,7 @@ dependencies = [
     "toml>=0.10.2",
     "tqdm>=4.67.1",
     "xsdata[cli,lxml,soap]>=24.12",
+    "msgpack>=1.1.0",
 ]
 
 [project.urls]

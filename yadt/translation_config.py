@@ -5,7 +5,7 @@ from yadt.const import (
 )
 import os
 
-from yadt.doclayout import DocLayoutModel
+from yadt.docvision.doclayout import DocLayoutModel
 from yadt.progress_monitor import ProgressMonitor
 
 

@@ -45,8 +45,12 @@ class DocLayoutModel(abc.ABC):
 class YoloResult:
     """Helper class to store detection results from ONNX model."""
 
-    def __init__(self, boxes, names):
-        self.boxes = [YoloBox(data=d) for d in boxes]
+    def __init__(self, names, boxes=None, boxes_data=None):
+        if boxes is not None:
+            self.boxes = boxes
+        else:
+            assert boxes_data is not None
+            self.boxes = [YoloBox(data=d) for d in boxes_data]
         self.boxes.sort(key=lambda x: x.conf, reverse=True)
         self.names = names
 
@@ -54,10 +58,16 @@ class YoloResult:
 class YoloBox:
     """Helper class to store detection results from ONNX model."""
 
-    def __init__(self, data):
-        self.xyxy = data[:4]
-        self.conf = data[-2]
-        self.cls = data[-1]
+    def __init__(self, data=None, xyxy=None, conf=None, cls=None):
+        if data is not None:
+            self.xyxy = data[:4]
+            self.conf = data[-2]
+            self.cls = data[-1]
+            return
+        assert xyxy is not None and conf is not None and cls is not None
+        self.xyxy = xyxy
+        self.conf = conf
+        self.cls = cls
 
 
 # 检测操作系统类型
@@ -208,39 +218,39 @@ class OnnxModel(DocLayoutModel):
         # Handle single image input
         if isinstance(image, np.ndarray) and len(image.shape) == 3:
             image = [image]
-        
+
         total_images = len(image)
         results = []
         batch_size = min(batch_size, max_batch_size)
-        
+
         # Process images in batches
         for i in range(0, total_images, batch_size):
-            batch_images = image[i:i + batch_size]
+            batch_images = image[i : i + batch_size]
             batch_size_actual = len(batch_images)
-            
+
             # Calculate target size based on the maximum height in the batch
             max_height = max(img.shape[0] for img in batch_images)
             target_imgsz = int(max_height / 32) * 32
-            
+
             # Preprocess batch
             processed_batch = []
             orig_shapes = []
             for img in batch_images:
                 orig_h, orig_w = img.shape[:2]
                 orig_shapes.append((orig_h, orig_w))
-                
+
                 pix = self.resize_and_pad_image(img, new_shape=target_imgsz)
                 pix = np.transpose(pix, (2, 0, 1))  # CHW
                 pix = pix.astype(np.float32) / 255.0  # Normalize to [0, 1]
                 processed_batch.append(pix)
-            
+
             # Stack batch
             batch_input = np.stack(processed_batch, axis=0)  # BCHW
             new_h, new_w = batch_input.shape[2:]
-            
+
             # Run inference
             batch_preds = self.model.run(None, {"images": batch_input})[0]
-            
+
             # Process each prediction in the batch
             for j in range(batch_size_actual):
                 preds = batch_preds[j]
@@ -249,6 +259,6 @@ class OnnxModel(DocLayoutModel):
                     preds[..., :4] = self.scale_boxes(
                         (new_h, new_w), preds[..., :4], orig_shapes[j]
                     )
-                results.append(YoloResult(boxes=preds, names=self._names))
-        
+                results.append(YoloResult(boxes_data=preds, names=self._names))
+
         return results

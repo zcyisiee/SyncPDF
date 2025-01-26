@@ -1,14 +1,12 @@
 import base64
 import re
 
-import numpy as np
 import pdfminer.pdfinterp
 import pymupdf
 from pdfminer.layout import LTChar, LTFigure
 from pdfminer.pdffont import PDFCIDFont, PDFFont
 from pdfminer.psparser import PSLiteral
 
-from yadt.doclayout import DocLayoutModel
 from yadt.document_il import il_version_1
 from yadt.translation_config import TranslationConfig
 
