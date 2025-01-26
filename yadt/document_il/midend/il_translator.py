@@ -134,7 +134,7 @@ class ILTranslator:
             self.stage_name, total
         ) as pbar:
             with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self.translation_config.qps * 2
+                max_workers=min(self.translation_config.qps * 2, self.translation_config.qps + 5)
             ) as executor:
                 for page in docs.page:
                     self.process_page(page, executor, pbar, tracker.new_page())
