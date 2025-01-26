@@ -2,9 +2,15 @@ name: Labeler
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [main]
+    paths:
+      - .github/labels.yml
+      - .github/workflows/labeler.yml
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   labeler:
@@ -14,6 +20,6 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Run Labeler
-        uses: crazy-max/ghaction-github-labeler@v4.1.0
+        uses: crazy-max/ghaction-github-labeler@3de87da19416edc45c90cd89e7a4ea922a3aae5a # v4.1.0
         with:
           skip-delete: true
