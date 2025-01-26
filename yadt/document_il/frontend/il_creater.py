@@ -260,6 +260,8 @@ class ILCreater:
 
         char_id = char.cid
         char_unicode = char.get_text()
+        if '(cid:' not in char_unicode and len(char_unicode) > 1:
+            return
         advance = char.adv
         if char.matrix[0] == 0 and char.matrix[3] == 0:
             vertical = True
