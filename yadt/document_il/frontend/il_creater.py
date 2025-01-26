@@ -160,8 +160,6 @@ class ILCreater:
         assert page_number >= 0
         self.current_page.page_number = page_number
 
-        self.on_page_layout(page_number)
-
     def on_page_base_operation(self, operation: str):
         self.current_page.base_operations = il_version_1.BaseOperations(
             value=operation
@@ -282,39 +280,6 @@ class ILCreater:
             xobj_id=char.xobj_id,
         )
         self.current_page.pdf_character.append(pdf_char)
-
-    def on_page_layout(self, page_number):
-        if (
-            self.translation_config.should_translate_page(page_number + 1)
-            is False
-        ):
-            return
-        pix = self.mupdf[page_number].get_pixmap()
-        image = np.fromstring(pix.samples, np.uint8).reshape(
-            pix.height, pix.width, 3
-        )[:, :, ::-1]
-        h, w = pix.height, pix.width
-        layouts = self.model.predict(image, imgsz=int(pix.height / 32) * 32)[0]
-        id = 0
-        for layout in layouts.boxes:
-            id += 1
-            # Convert the coordinate system from the picture coordinate system to the il coordinate system
-            x0, y0, x1, y1 = layout.xyxy
-            x0, y0, x1, y1 = (
-                np.clip(int(x0 - 1), 0, w - 1),
-                np.clip(int(h - y1 - 1), 0, h - 1),
-                np.clip(int(x1 + 1), 0, w - 1),
-                np.clip(int(h - y0 + 1), 0, h - 1),
-            )
-            page_layout = il_version_1.PageLayout(
-                id=id,
-                box=il_version_1.Box(
-                    x0.item(), y0.item(), x1.item(), y1.item()
-                ),
-                conf=layout.conf.item(),
-                class_name=layouts.names[layout.cls],
-            )
-            self.current_page.page_layout.append(page_layout)
 
     def create_il(self):
         pages = [

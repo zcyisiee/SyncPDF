@@ -28,6 +28,7 @@ from yadt.document_il.backend.pdf_creater import PDFCreater
 from yadt.translation_config import TranslationConfig
 from yadt.progress_monitor import ProgressMonitor
 from yadt.document_il.utils.fontmap import FontMapper
+from yadt.document_il.midend.layout_parser import LayoutParser
 import logging
 
 logger = logging.getLogger(__name__)
@@ -155,6 +156,7 @@ def translate(translation_config: TranslationConfig):
         translation_config,
         [
             ILCreater.stage_name,
+            LayoutParser.stage_name,
             ParagraphFinder.stage_name,
             StylesAndFormulas.stage_name,
             ILTranslator.stage_name,
@@ -207,6 +209,16 @@ def translate(translation_config: TranslationConfig):
         if translation_config.debug:
             xml_converter.write_json(
                 docs, translation_config.get_working_file_path("create_il.debug.json")
+            )
+
+        # Generate layouts for all pages
+        logger.debug("start generating layouts")
+        docs = LayoutParser(translation_config).process(docs, doc_input)
+        logger.debug("finish generating layouts")
+
+        if translation_config.debug:
+            xml_converter.write_json(
+                docs, translation_config.get_working_file_path("layout_generator.json")
             )
 
         ParagraphFinder(translation_config).process(docs)
