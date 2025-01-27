@@ -1,7 +1,8 @@
 <!-- # Yet Another Document Translator -->
 
 <div align="center">
-<!-- <img src="./docs/images/banner.png" width="320px"  alt="PDF2ZH"/> -->
+<img src="./docs/images/banner.png" width="320px"  alt="YADT"/>
+
 
 <h2 id="title">Yet Another Document Translator</h2>
 
