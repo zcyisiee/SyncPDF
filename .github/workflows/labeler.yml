@@ -2,10 +2,15 @@ name: Labeler
 
 on:
   push:
-    branches: [main]
+    branches:
+      - 'main'
     paths:
-      - .github/labels.yml
-      - .github/workflows/labeler.yml
+      - '.github/labels.yml'
+      - '.github/workflows/labels.yml'
+  pull_request:
+    paths:
+      - '.github/labels.yml'
+      - '.github/workflows/labels.yml'
 
 permissions:
   contents: read
@@ -23,3 +28,9 @@ jobs:
         uses: crazy-max/ghaction-github-labeler@b54af0c25861143e7c8813d7cbbf46d2c341680c # v5.1.0
         with:
           skip-delete: true
+          dry-run: ${{ github.event_name == 'pull_request' }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          yaml-file: .github/labels.yml
+          exclude: |
+            help*
+            *issue
