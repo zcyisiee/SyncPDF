@@ -277,20 +277,20 @@ class PDFCreater:
                 pbar.advance()
             pdf.subset_fonts(fallback=False)
             if not translation_config.no_mono:
-                pdf.save(
-                    mono_out_path,
-                    garbage=3,
-                    deflate=True,
-                    clean=not translation_config.debug,
-                    deflate_fonts=True,
-                    linear=not translation_config.debug,
-                )
                 if translation_config.debug:
                     pdf.save(
                         f"{mono_out_path}.decompressed.pdf",
                         expand=True,
                         pretty=True,
                     )
+                pdf.save(
+                    mono_out_path,
+                    garbage=3,
+                    deflate=True,
+                    clean=True,
+                    deflate_fonts=True,
+                    linear=True,
+                )
             pbar.advance()
             if not translation_config.no_dual:
                 dual_out_path = translation_config.get_output_file_path(
