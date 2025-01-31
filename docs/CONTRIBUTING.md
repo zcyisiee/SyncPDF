@@ -28,6 +28,14 @@ Please pay special attention to:
 
 ### **If you wish to contribute to YADT**
 
+> [!TIP]
+>
+> If you have any questions about the source code or related matters, please contact the maintainer at aw@funstory.ai .
+> You can also raise questions in [Issues](https://github.com/funstory-ai/yadt/issues).
+> You can contact the maintainers in the pdf2zh discussion group.
+> We welcome pull requests and will review your contributions.
+
+
 1. Fork this repository and clone it locally.
 2. Create a new branch and make code changes on that branch. `git checkout -b feature/<feature-name>`
 3. Perform development and ensure the code meets the requirements.
