@@ -52,7 +52,8 @@ class TranslationConfig:
 
         if working_dir is None:
             working_dir = os.path.join(
-                CACHE_FOLDER, "working", os.path.basename(input_file).split(".")[0]
+                CACHE_FOLDER, "working", os.path.basename(
+                    input_file).split(".")[0]
             )
         self.working_dir = working_dir
 
@@ -115,3 +116,14 @@ class TranslationConfig:
             if start <= page_number and (end == -1 or page_number <= end):
                 return True
         return False
+
+
+class TranslateResult:
+    original_pdf_path: str
+    total_seconds: float
+    mono_pdf_path: Optional[str]
+    dual_pdf_path: Optional[str]
+
+    def __init__(self, mono_pdf_path: Optional[str], dual_pdf_path: Optional[str]):
+        self.mono_pdf_path = mono_pdf_path
+        self.dual_pdf_path = dual_pdf_path

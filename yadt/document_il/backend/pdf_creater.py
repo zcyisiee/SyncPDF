@@ -19,7 +19,7 @@ from pdfminer.pdftypes import (
 
 from yadt.document_il import il_version_1
 from yadt.document_il.utils.fontmap import FontMapper
-from yadt.translation_config import TranslationConfig
+from yadt.translation_config import TranslationConfig, TranslateResult
 
 
 class PDFCreater:
@@ -173,7 +173,7 @@ class PDFCreater:
         fonts = re.findall("/([^ ]+?) ", font_dict)
         return set(fonts)
 
-    def write(self, translation_config: TranslationConfig):
+    def write(self, translation_config: TranslationConfig) -> TranslateResult:
         mono_out_path = translation_config.get_output_file_path(
             f"{os.path.basename(translation_config.input_file.rsplit('.', 1)[0])}."
             f"{translation_config.lang_out}.mono.pdf"
@@ -292,6 +292,7 @@ class PDFCreater:
                     linear=True,
                 )
             pbar.advance()
+            dual_out_path = None
             if not translation_config.no_dual:
                 dual_out_path = translation_config.get_output_file_path(
                     f"{os.path.basename(translation_config.input_file.rsplit('.', 1)[0])}."
@@ -317,3 +318,4 @@ class PDFCreater:
                         pretty=True,
                     )
             pbar.advance()
+        return TranslateResult(mono_out_path, dual_out_path)
