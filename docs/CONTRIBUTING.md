@@ -31,8 +31,11 @@ Please pay special attention to:
 > [!TIP]
 >
 > If you have any questions about the source code or related matters, please contact the maintainer at aw@funstory.ai .
+> 
 > You can also raise questions in [Issues](https://github.com/funstory-ai/yadt/issues).
+> 
 > You can contact the maintainers in the pdf2zh discussion group.
+> 
 > We welcome pull requests and will review your contributions.
 
 
