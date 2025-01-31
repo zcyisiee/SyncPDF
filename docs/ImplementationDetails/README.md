@@ -10,37 +10,21 @@
 
 Main processing stages in order of actual execution and corresponding documentation:
 
-1. **PDF Parsing and Intermediate Layer Creation**
+1. [PDFParser.md](PDFParsing/PDFParsing.md): **PDF Parsing and Intermediate Layer Creation**
 
-[PDFParser.md](PDFParsing/PDFParsing.md) - Parse PDF documents and create intermediate layer representation
+2. [LayoutParser](https://github.com/funstory-ai/yadt/blob/main/yadt/document_il/midend/layout_parser.py): **Layout OCR**
 
-2. **Layout OCR**
+3. [ParagraphFinding.md](ParagraphFinding/ParagraphFinding.md): **Paragraph Recognition**
 
-See [LayoutParser](https://github.com/funstory-ai/yadt/blob/main/yadt/document_il/midend/layout_parser.py)
+4. [StylesAndFormulas.md](StylesAndFormulas/StylesAndFormulas.md): **Style and Formula Processing**
 
-3. **Paragraph Recognition**
+5. [ILTranslator.md](ILTranslator/ILTranslator.md): **Intermediate Layer Translation**
 
-[ParagraphFinding.md](ParagraphFinding/ParagraphFinding.md) - Recognize logical paragraphs from character stream
+6. [Typesetting.md](Typesetting/Typesetting.md): **Typesetting Processing**
 
-4. **Style and Formula Processing**
+7. [FontMapper](https://github.com/funstory-ai/yadt/blob/main/yadt/document_il/utils/fontmap.py): **Font Mapping**
 
-[StylesAndFormulas.md](StylesAndFormulas/StylesAndFormulas.md) - Recognize formulas and analyze text styles
-
-5. **Intermediate Layer Translation**
-
-[ILTranslator.md](ILTranslator/ILTranslator.md) - Format-preserving translation implementation
-
-6. **Typesetting Processing**
-
-[Typesetting.md](Typesetting/Typesetting.md) - Automatic typesetting of translated text
-
-7. **Font Mapping**
-
-See [FontMapper](https://github.com/funstory-ai/yadt/blob/main/yadt/document_il/utils/fontmap.py)
-
-8. **PDF Generation**
-
-[PDFCreation.md](PDFCreation/PDFCreation.md) - Final PDF document generation
+8. [PDFCreation.md](PDFCreation/PDFCreation.md): **PDF Generation**
 
 > [!TIP]
 >
