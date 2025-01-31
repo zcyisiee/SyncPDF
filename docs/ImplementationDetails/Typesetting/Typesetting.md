@@ -1,5 +1,11 @@
 # Typography
 
+> [!NOTE]
+> This documentation may contain AI-generated content. While we strive for accuracy, there might be inaccuracies. Please report any issues via:
+>
+> - [GitHub Issues](https://github.com/funstory-ai/yadt/issues)
+> - Community contribution (PRs welcome!)
+
 ## Background
 
 After translation, text needs to be typeset before placing into PDF.
@@ -12,7 +18,7 @@ Translated paragraphs can contain any combination of the following types:
 
 3. PDF original string with same style
 
-4. Translated unicode string with same style
+4. Translated Unicode string with same style
 
 Let's discuss different cases:
 
@@ -24,7 +30,7 @@ For the following 3 types, they can be directly transmitted transparently to new
 
 3. PDF original string with same style
 
-Only "translated unicode string with same style" needs typesetting operation, as this step loses original layout information. However, since paragraphs may contain other components that need transparent transmission, their positions may also change and need to participate in typesetting.
+Only "translated Unicode string with same style" needs typesetting operation, as this step loses original layout information. However, since paragraphs may contain other components that need transparent transmission, their positions may also change and need to participate in typesetting.
 
 ## Goal
 
@@ -50,25 +56,46 @@ Algorithm 1 works normally when translated text is shorter than original. When t
 
 3. Try typesetting using Algorithm 1.
 
-4. If cannot fit all elements, first reduce line spacing by 0.1 step. If still cannot fit after reaching 1.1 spacing, reduce element scaling by 0.05 then jump to step 2.
+4. If it cannot fit all elements:
+
+   - First try to reduce line spacing by 0.1 step until reaching minimum line spacing (1.4)
+   - If still cannot fit, reduce element scaling by 0.05 and reset line spacing to 1.7
+   - When scale becomes less than 0.7, adjust minimum line spacing to 1.1, reset scale to 1.0 and set line spacing to 1.5
 
 5. Report error if element scaling is less than 0.1.
 
 Algorithm 2 can fit translations of almost all languages in original position.
 
-However for special cases like "图 1" translated to "Figure 1", even 0.1 scaling cannot fit, need to try expanding bounding box in writing direction. So Algorithm 3:
+However, for special cases like "图 1" translated to "Figure 1", even with the above algorithms some text may still overflow. So Algorithm 3:
 
-1. Try typesetting with minimum 0.8 scaling.
+1. Before reducing scale, first try to expand the bounding box in writing direction.
 
-2. If cannot fit all elements, calculate paragraph's right whitespace using page information.
+2. Calculate paragraph's right whitespace by:
 
-3. Expand paragraph bounding box based on whitespace.
+   - Using 90% of page crop box width as maximum limit
+   - Checking for overlapping paragraphs on the right
+   - Checking for overlapping figures on the right
 
-4. Try typesetting with minimum 0.1 scaling.
+3. Expand paragraph bounding box based on available whitespace.
+
+4. If still cannot fit all elements, continue with scale reduction as in Algorithm 2.
+
+## Additional Features
+
+1. Mixed Chinese-English text handling:
+   - Adds 0.5 character width spacing between Chinese and English text transitions
+   - Excludes certain punctuation marks from this spacing rule
+2. First line indent:
+
+   - Adds 2 Chinese characters width indent for the first line when specified
+
+3. Hanging punctuation:
+   - Allows certain punctuation marks to extend beyond the right margin
+   - Helps maintain better visual alignment
 
 ## Limitations
 
-1. Currently only handles left-to-right writing.
+1. Currently, we use PDFPlumber for PDF analysis, this is only implemented for paragraphs, only handles left-to-right writing.
 
 2. Cannot handle table of contents alignment by dots.
 
