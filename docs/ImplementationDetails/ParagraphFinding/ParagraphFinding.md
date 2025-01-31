@@ -1,5 +1,11 @@
 # Paragraph Finding
 
+> [!NOTE]
+> This documentation may contain AI-generated content. While we strive for accuracy, there might be inaccuracies. Please report any issues via:
+>
+> - [GitHub Issues](https://github.com/funstory-ai/yadt/issues)
+> - Community contribution (PRs welcome!)
+
 ## Background
 
 After PDF analysis, we need to identify paragraphs from individual characters. This is a crucial step before translation and typesetting, as it helps maintain the logical structure of the document.
