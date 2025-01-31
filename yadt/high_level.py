@@ -18,7 +18,7 @@ from yadt.pdfinterp import PDFPageInterpreterEx
 
 from yadt.document_il.frontend.il_creater import ILCreater
 from yadt.document_il.backend.pdf_creater import PDFCreater
-from yadt.translation_config import TranslationConfig
+from yadt.translation_config import TranslationConfig, TranslateResult
 from yadt.progress_monitor import ProgressMonitor
 from yadt.document_il.utils.fontmap import FontMapper
 from yadt.document_il.midend.layout_parser import LayoutParser
@@ -144,7 +144,7 @@ def start_parse_il(
     device.close()
 
 
-def translate(translation_config: TranslationConfig):
+def translate(translation_config: TranslationConfig) -> TranslateResult:
     with ProgressMonitor(
         translation_config,
         [
@@ -250,10 +250,13 @@ def translate(translation_config: TranslationConfig):
 
         pdf_creater = PDFCreater(original_pdf_path, docs, translation_config)
 
-        pdf_creater.write(translation_config)
+        result = pdf_creater.write(translation_config)
 
         finish_time = time.time()
 
+        result.original_pdf_path = original_pdf_path
+        result.total_seconds = finish_time - start_time
         logger.info(
             f"finish translate: {original_pdf_path}, cost: {finish_time - start_time} s"
         )
+        return result
