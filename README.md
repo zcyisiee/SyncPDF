@@ -226,6 +226,13 @@ We encourage you to contribute to YADT! Please check out the [CONTRIBUTING](http
 
 Everyone interacting in YADT and its sub-projects' codebases, issue trackers, chat rooms, and mailing lists is expected to follow the YADT [Code of Conduct](https://github.com/funstory-ai/yadt/blob/main/docs/CODE_OF_CONDUCT.md).
 
+## Acknowledgements
+
+- [PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate)
+- [DocLayout-YOLO](https://github.com/opendatalab/DocLayout-YOLO)
+- [pdfminer](https://github.com/pdfminer/pdfminer.six)
+- [PyMuPDF](https://github.com/pymupdf/PyMuPDF)
+
 <h2 id="star_hist">Star History</h2>
 
 <a href="https://star-history.com/#funstory-ai/yadt&Date">
