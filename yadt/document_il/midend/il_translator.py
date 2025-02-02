@@ -159,13 +159,19 @@ class ILTranslator:
             page_font_map = {}
             for font in page.pdf_font:
                 page_font_map[font.font_id] = font
-            # self.translate_paragraph(paragraph, pbar,tracker.new_paragraph(), page_font_map)
+            page_xobj_font_map = {}
+            for xobj in page.pdf_xobject:
+                page_xobj_font_map[xobj.xobj_id] = {}
+                for font in xobj.pdf_font:
+                    page_xobj_font_map[xobj.xobj_id][font.font_id] = font
+            # self.translate_paragraph(paragraph, pbar,tracker.new_paragraph(), page_font_map, page_xobj_font_map)
             executor.submit(
                 self.translate_paragraph,
                 paragraph,
                 pbar,
                 tracker.new_paragraph(),
                 page_font_map,
+                page_xobj_font_map,
             )
 
     class TranslateInput:
@@ -462,13 +468,15 @@ class ILTranslator:
         pbar: tqdm | None = None,
         tracker: ParagraphTranslateTracker = None,
         page_font_map: dict[str, PdfFont] = None,
+            xobj_font_map: dict[int, dict[str, PdfFont]] = None
     ):
         with PbarContext(pbar):
             if paragraph.vertical:
                 return
 
             tracker.set_pdf_unicode(paragraph.unicode)
-
+            if paragraph.xobj_id in xobj_font_map:
+                page_font_map = xobj_font_map[paragraph.xobj_id]
             translate_input = self.get_translate_input(
                 paragraph, page_font_map
             )
