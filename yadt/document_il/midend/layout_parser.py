@@ -19,20 +19,20 @@ class LayoutParser:
         """Generate layouts for all pages that need to be translated."""
         # Get pages that need to be translated
         pages_to_translate = [
-            page for page in docs.page
-            if self.translation_config.should_translate_page(
-                page.page_number + 1
-            )
+            page
+            for page in docs.page
+            if self.translation_config.should_translate_page(page.page_number + 1)
         ]
         total = len(pages_to_translate)
         self.progress = self.translation_config.progress_monitor.stage_start(
-            self.stage_name, total)
+            self.stage_name, total
+        )
 
         # Process pages in batches
         batch_size = 48
         for i in range(0, total, batch_size):
-            batch_pages = pages_to_translate[i:i + batch_size]
-            
+            batch_pages = pages_to_translate[i : i + batch_size]
+
             # Prepare batch images
             batch_images = []
             for page in batch_pages:
@@ -41,9 +41,9 @@ class LayoutParser:
                     pix.height, pix.width, 3
                 )[:, :, ::-1]
                 batch_images.append(image)
-            
+
             # Get predictions for the batch
-            layouts_batch = self.model.predict(batch_images,batch_size=batch_size)
+            layouts_batch = self.model.predict(batch_images, batch_size=batch_size)
 
             # Process predictions for each page
             for page, layouts in zip(batch_pages, layouts_batch):

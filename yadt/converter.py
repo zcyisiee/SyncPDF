@@ -94,9 +94,7 @@ class PDFConverterEx(PDFConverter):
             try:
                 font_name = font_name.decode("utf-8")
             except UnicodeDecodeError:
-                font_name = "BASE64:" + base64.b64encode(font_name).decode(
-                    "utf-8"
-                )
+                font_name = "BASE64:" + base64.b64encode(font_name).decode("utf-8")
         font_id = self.il_creater.current_page_font_name_id_map[font_name]
 
         item = AWLTChar(
@@ -111,7 +109,7 @@ class PDFConverterEx(PDFConverter):
             ncs,
             graphicstate,
             self.il_creater.xobj_id,
-            font_id
+            font_id,
         )
         self.cur_item.add(item)
         item.cid = cid  # hack 插入原字符编码

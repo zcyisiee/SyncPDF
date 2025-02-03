@@ -205,7 +205,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                 raise PDFInterpreterError("No colorspace specified!")
             n = 1
         args = self.pop(n)
-        self.il_creater.on_passthrough_per_char('SC', args)
+        self.il_creater.on_passthrough_per_char("SC", args)
         self.graphicstate.scolor = cast(Color, args)
         return args
 
@@ -218,7 +218,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                 raise PDFInterpreterError("No colorspace specified!")
             n = 1
         args = self.pop(n)
-        self.il_creater.on_passthrough_per_char('sc', args)
+        self.il_creater.on_passthrough_per_char("sc", args)
         self.graphicstate.ncolor = cast(Color, args)
         return args
 
@@ -273,7 +273,9 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                 [xobj],
                 ctm=ctm,
             )
-            self.il_creater.on_xobj_end(x_id, f"q {ops_base}Q {a} {b} {c} {d} {e} {f} cm ")
+            self.il_creater.on_xobj_end(
+                x_id, f"q {ops_base}Q {a} {b} {c} {d} {e} {f} cm "
+            )
             try:  # 有的时候 form 字体加不上这里会烂掉
                 self.device.fontid = interpreter.fontid
                 self.device.fontmap = interpreter.fontmap

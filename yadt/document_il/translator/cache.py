@@ -41,14 +41,10 @@ class TranslationCache:
                 for v in [obj[k]]
             }
         elif isinstance(obj, list):
-            return [
-                TranslationCache._sort_dict_recursively(item) for item in obj
-            ]
+            return [TranslationCache._sort_dict_recursively(item) for item in obj]
         return obj
 
-    def __init__(
-        self, translate_engine: str, translate_engine_params: dict = None
-    ):
+    def __init__(self, translate_engine: str, translate_engine_params: dict = None):
         self.translate_engine = translate_engine
         self.replace_params(translate_engine_params)
 
@@ -114,7 +110,7 @@ def init_test_db():
     temp_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     cache_db_path = temp_file.name
     temp_file.close()
-    
+
     test_db = SqliteDatabase(
         cache_db_path,
         pragmas={

@@ -28,7 +28,7 @@ def encode_image(image) -> bytes:
         img = image
 
     # logger.debug(f"Image shape: {img.shape}")
-    encoded = cv2.imencode('.jpg', img)[1].tobytes()
+    encoded = cv2.imencode(".jpg", img)[1].tobytes()
     # logger.debug(f"Encoded image size: {len(encoded)} bytes")
     return encoded
 
@@ -70,9 +70,9 @@ def predict_layout(
             data=packed_data,
             headers={
                 "Content-Type": "application/msgpack",
-                "Accept": "application/msgpack"
+                "Accept": "application/msgpack",
             },
-            timeout=30
+            timeout=30,
         )
 
         logger.debug(f"Response status: {response.status_code}")
@@ -121,15 +121,22 @@ class RpcDocLayoutModel(DocLayoutModel):
         preds = predict_layout(image, host=self.host, imgsz=imgsz)
         if len(preds) > 0:
             for pred in preds:
-                boxes = [YoloBox(None, np.array(x['xyxy']), np.array(x['conf']), x['cls']) for x in pred["boxes"]]
-                results.append(YoloResult(boxes=boxes, names={int(k):v for k, v in pred['names'].items()}))
+                boxes = [
+                    YoloBox(None, np.array(x["xyxy"]), np.array(x["conf"]), x["cls"])
+                    for x in pred["boxes"]
+                ]
+                results.append(
+                    YoloResult(
+                        boxes=boxes, names={int(k): v for k, v in pred["names"].items()}
+                    )
+                )
         else:
             results.append(YoloResult(boxes_data=np.array([]), names=[]))
 
         return results
 
     @staticmethod
-    def from_host(host: str) -> 'RpcDocLayoutModel':
+    def from_host(host: str) -> "RpcDocLayoutModel":
         """Create RpcDocLayoutModel from host address."""
         return RpcDocLayoutModel(host=host)
 

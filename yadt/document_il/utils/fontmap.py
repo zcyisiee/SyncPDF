@@ -44,6 +44,7 @@ class FontMapper:
         self.fontid2font["base"] = self.base_font
         self.fontid2font["fallback"] = self.fallback_font
         self.fontid2font["kai"] = self.kai_font
+
     def has_char(self, char_unicode: str):
         if len(char_unicode) != 1:
             return False
@@ -56,6 +57,7 @@ class FontMapper:
         if self.fallback_font.has_glyph(current_char):
             return True
         return False
+
     def map(self, original_font: PdfFont, char_unicode: str):
         current_char = ord(char_unicode)
         if isinstance(original_font, pymupdf.Font):
@@ -100,10 +102,7 @@ class FontMapper:
         font_list.extend(
             [
                 (
-                    os.path.basename(file_name)
-                    .split(".")[0]
-                    .replace("-", "")
-                    .lower(),
+                    os.path.basename(file_name).split(".")[0].replace("-", "").lower(),
                     get_cache_file_path(file_name),
                 )
                 for file_name in self.font_names
@@ -122,14 +121,14 @@ class FontMapper:
                 for label in ["Resources/", ""]:  # 可能是基于 xobj 的 res
                     try:  # xref 读写可能出错
                         font_res = doc_zh.xref_get_key(xref, f"{label}Font")
-                        if font_res[0] == 'xref':
-                            resource_xref_id = re.search("(\\d+) 0 R", font_res[1]).group(1)
+                        if font_res[0] == "xref":
+                            resource_xref_id = re.search(
+                                "(\\d+) 0 R", font_res[1]
+                            ).group(1)
                             xref = int(resource_xref_id)
                             font_res = doc_zh.xref_object(xref)
                             for font in font_list:
-                                font_exist = doc_zh.xref_get_key(
-                                    xref, f"{font[0]}"
-                                )
+                                font_exist = doc_zh.xref_get_key(xref, f"{font[0]}")
                                 if font_exist[0] == "null":
                                     doc_zh.xref_set_key(
                                         xref,
