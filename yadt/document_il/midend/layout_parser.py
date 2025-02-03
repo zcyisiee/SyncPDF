@@ -29,7 +29,7 @@ class LayoutParser:
             self.stage_name, total)
 
         # Process pages in batches
-        batch_size = 32
+        batch_size = 48
         for i in range(0, total, batch_size):
             batch_pages = pages_to_translate[i:i + batch_size]
             
