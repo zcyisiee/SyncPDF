@@ -121,29 +121,20 @@ class FontMapper:
                 for label in ["Resources/", ""]:  # 可能是基于 xobj 的 res
                     try:  # xref 读写可能出错
                         font_res = doc_zh.xref_get_key(xref, f"{label}Font")
+                        target_key_prefix = f"{label}Font/"
                         if font_res[0] == "xref":
-                            resource_xref_id = re.search(
-                                "(\\d+) 0 R", font_res[1]
-                            ).group(1)
+                            resource_xref_id = re.search("(\\d+) 0 R", font_res[1]).group(1)
                             xref = int(resource_xref_id)
-                            font_res = doc_zh.xref_object(xref)
-                            for font in font_list:
-                                font_exist = doc_zh.xref_get_key(xref, f"{font[0]}")
-                                if font_exist[0] == "null":
-                                    doc_zh.xref_set_key(
-                                        xref,
-                                        f"{font[0]}",
-                                        f"{font_id[font[0]]} 0 R",
-                                    )
+                            font_res = ('dict', doc_zh.xref_object(xref))
+                            target_key_prefix = ""
                         if font_res[0] == "dict":
                             for font in font_list:
-                                font_exist = doc_zh.xref_get_key(
-                                    xref, f"{label}Font/{font[0]}"
-                                )
+                                target_key = f"{target_key_prefix}{font[0]}"
+                                font_exist = doc_zh.xref_get_key(xref, target_key)
                                 if font_exist[0] == "null":
                                     doc_zh.xref_set_key(
                                         xref,
-                                        f"{label}Font/{font[0]}",
+                                        target_key,
                                         f"{font_id[font[0]]} 0 R",
                                     )
                     except Exception:
