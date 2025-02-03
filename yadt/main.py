@@ -16,6 +16,7 @@ from yadt.translation_config import TranslationConfig  # noqa: E402
 logger = logging.getLogger(__name__)
 __version__ = "0.1.2"
 
+
 def create_cache_folder():
     try:
         os.makedirs(CACHE_FOLDER, exist_ok=True)
@@ -309,9 +310,11 @@ def main():
     # 初始化文档布局模型
     if args.rpc_doclayout:
         from yadt.docvision.rpc_doclayout import RpcDocLayoutModel
+
         doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout)
     else:
         from yadt.docvision.doclayout import DocLayoutModel
+
         doc_layout_model = DocLayoutModel.load_onnx()
 
     pending_files = []

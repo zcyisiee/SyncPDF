@@ -21,6 +21,7 @@ from pdfminer.pdftypes import (
 from yadt.document_il import il_version_1
 from yadt.document_il.utils.fontmap import FontMapper
 from yadt.translation_config import TranslationConfig, TranslateResult
+
 logger = logging.getLogger(__name__)
 
 
@@ -169,7 +170,9 @@ class PDFCreater:
                 search = re.search("/Font *<<(.+?)>>", r_id.replace("\n", " "))
                 if search is None:
                     # Have resources but no fonts
-                    logger.debug(f'xref: {page_xref_id} cannot find font, skip. r_id: {r_id}')
+                    logger.debug(
+                        f"xref: {page_xref_id} cannot find font, skip. r_id: {r_id}"
+                    )
                     return set()
                 font_dict = search.group(1)
         else:
@@ -198,9 +201,9 @@ class PDFCreater:
                 for xobj in page.pdf_xobject:
                     xobj_available_fonts[xobj.xobj_id] = available_font_list.copy()
                     try:
-                        xobj_available_fonts[xobj.xobj_id].update(self.get_xobj_available_fonts(
-                            xobj.xref_id, pdf
-                        ))
+                        xobj_available_fonts[xobj.xobj_id].update(
+                            self.get_xobj_available_fonts(xobj.xref_id, pdf)
+                        )
                     except Exception:
                         pass
                     xobj_encoding_length_map[xobj.xobj_id] = {

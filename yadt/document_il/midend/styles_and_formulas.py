@@ -33,7 +33,6 @@ class StylesAndFormulas:
         self.translation_config = translation_config
         self.font_mapper = FontMapper(translation_config)
 
-
     def process(self, document: Document):
         with self.translation_config.progress_monitor.stage_start(
             self.stage_name, len(document.page)

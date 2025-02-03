@@ -53,7 +53,9 @@ class TypesettingUnit:
             assert font, "Font must be provided when unicode is provided"
             assert style, "Style must be provided when unicode is provided"
             assert len(unicode) == 1, "Unicode must be a single character"
-            assert xobj_id is not None, "Xobj id must be provided when unicode is provided"
+            assert (
+                xobj_id is not None
+            ), "Xobj id must be provided when unicode is provided"
 
             self.font = font
             self.font_id = font.font_id

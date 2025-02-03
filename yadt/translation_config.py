@@ -52,8 +52,7 @@ class TranslationConfig:
 
         if working_dir is None:
             working_dir = os.path.join(
-                CACHE_FOLDER, "working", os.path.basename(
-                    input_file).split(".")[0]
+                CACHE_FOLDER, "working", os.path.basename(input_file).split(".")[0]
             )
         self.working_dir = working_dir
 
