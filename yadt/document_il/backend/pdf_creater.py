@@ -1,4 +1,5 @@
 import io
+import logging
 import os
 import re
 
@@ -20,6 +21,7 @@ from pdfminer.pdftypes import (
 from yadt.document_il import il_version_1
 from yadt.document_il.utils.fontmap import FontMapper
 from yadt.translation_config import TranslationConfig, TranslateResult
+logger = logging.getLogger(__name__)
 
 
 class PDFCreater:
@@ -164,9 +166,12 @@ class PDFCreater:
                 xref_id = xref_id.group(1)
                 font_dict = pdf.xref_object(int(xref_id))
             else:
-                font_dict = re.search(
-                    "/Font *<<(.+?)>>", r_id.replace("\n", " ")
-                ).group(1)
+                search = re.search("/Font *<<(.+?)>>", r_id.replace("\n", " "))
+                if search is None:
+                    # Have resources but no fonts
+                    logger.debug(f'xref: {page_xref_id} cannot find font, skip. r_id: {r_id}')
+                    return set()
+                font_dict = search.group(1)
         else:
             r_id = int(r_id.split(" ")[0])
             _, font_dict = pdf.xref_get_key(r_id, "Font")
@@ -191,12 +196,13 @@ class PDFCreater:
                 available_font_list = self.get_available_font_list(pdf, page)
 
                 for xobj in page.pdf_xobject:
+                    xobj_available_fonts[xobj.xobj_id] = available_font_list.copy()
                     try:
-                        xobj_available_fonts[xobj.xobj_id] = self.get_xobj_available_fonts(
+                        xobj_available_fonts[xobj.xobj_id].update(self.get_xobj_available_fonts(
                             xobj.xref_id, pdf
-                        )
+                        ))
                     except Exception:
-                        xobj_available_fonts[xobj.xobj_id] = available_font_list
+                        pass
                     xobj_encoding_length_map[xobj.xobj_id] = {
                         f.font_id: f.encoding_length for f in xobj.pdf_font
                     }
