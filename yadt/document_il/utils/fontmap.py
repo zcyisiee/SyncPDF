@@ -1,4 +1,5 @@
 import os.path
+import re
 
 import pymupdf
 
@@ -109,34 +110,45 @@ class FontMapper:
             ]
         )
         font_id = {}
-        with self.translation_config.progress_monitor.stage_start(
-            self.stage_name, len(doc_zh)
-        ) as pbar:
-            for i, page in enumerate(doc_zh):
-                if not self.translation_config.should_translate_page(i + 1):
-                    pbar.advance()
-                    continue
-                for font in font_list:
-                    font_id[font[0]] = page.insert_font(font[0], font[1])
-                pbar.advance()
+
+        for font in font_list:
+            font_id[font[0]] = doc_zh[0].insert_font(font[0], font[1])
         xreflen = doc_zh.xref_length()
-        for xref in range(1, xreflen):
-            for label in ["Resources/", ""]:  # 可能是基于 xobj 的 res
-                try:  # xref 读写可能出错
-                    font_res = doc_zh.xref_get_key(xref, f"{label}Font")
-                    if font_res[0] == "dict":
-                        for font in font_list:
-                            font_exist = doc_zh.xref_get_key(
-                                xref, f"{label}Font/{font[0]}"
-                            )
-                            if font_exist[0] == "null":
-                                doc_zh.xref_set_key(
-                                    xref,
-                                    f"{label}Font/{font[0]}",
-                                    f"{font_id[font[0]]} 0 R",
+        with self.translation_config.progress_monitor.stage_start(
+            self.stage_name, xreflen - 1
+        ) as pbar:
+            for xref in range(1, xreflen):
+                pbar.advance(1)
+                for label in ["Resources/", ""]:  # 可能是基于 xobj 的 res
+                    try:  # xref 读写可能出错
+                        font_res = doc_zh.xref_get_key(xref, f"{label}Font")
+                        if font_res[0] == 'xref':
+                            resource_xref_id = re.search("(\\d+) 0 R", font_res[1]).group(1)
+                            xref = int(resource_xref_id)
+                            font_res = doc_zh.xref_object(xref)
+                            for font in font_list:
+                                font_exist = doc_zh.xref_get_key(
+                                    xref, f"{font[0]}"
                                 )
-                except Exception:
-                    pass
+                                if font_exist[0] == "null":
+                                    doc_zh.xref_set_key(
+                                        xref,
+                                        f"{font[0]}",
+                                        f"{font_id[font[0]]} 0 R",
+                                    )
+                        if font_res[0] == "dict":
+                            for font in font_list:
+                                font_exist = doc_zh.xref_get_key(
+                                    xref, f"{label}Font/{font[0]}"
+                                )
+                                if font_exist[0] == "null":
+                                    doc_zh.xref_set_key(
+                                        xref,
+                                        f"{label}Font/{font[0]}",
+                                        f"{font_id[font[0]]} 0 R",
+                                    )
+                    except Exception:
+                        pass
 
         # Create PdfFont for each font
         for page in il.page:

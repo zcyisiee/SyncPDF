@@ -370,10 +370,11 @@ class Typesetting:
         fonts: dict[
             str | int, Union[il_version_1.PdfFont, dict[str, il_version_1.PdfFont]]
         ] = {f.font_id: f for f in page.pdf_font}
+        page_fonts = {f.font_id: f for f in page.pdf_font}
         for k, v in self.font_mapper.fontid2font.items():
             fonts[k] = v
         for xobj in page.pdf_xobject:
-            fonts[xobj.xobj_id] = {}
+            fonts[xobj.xobj_id] = page_fonts.copy()
             for font in xobj.pdf_font:
                 fonts[xobj.xobj_id][font.font_id] = font
         if page.page_number == 0:
