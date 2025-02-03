@@ -28,6 +28,7 @@ class ILCreater:
             list[tuple[str, str]]
         ] = []
         self.xobj_id = 0
+        self.xobj_inc = 0
         self.xobj_map: dict[int, il_version_1.PdfXobject] = {}
         self.xobj_stack = []
 
@@ -80,17 +81,18 @@ class ILCreater:
 
     def push_xobj(self):
         self.xobj_stack.append(
-            self.current_page_font_name_id_map.copy()
+            (self.current_page_font_name_id_map.copy(), self.xobj_id)
         )
         self.current_page_font_name_id_map = {}
 
     def pop_xobj(self):
-        self.current_page_font_name_id_map = self.xobj_stack.pop()
+        self.current_page_font_name_id_map, self.xobj_id = self.xobj_stack.pop()
 
     def on_xobj_begin(self, bbox, xref_id):
         self.push_passthrough_per_char_instruction()
         self.push_xobj()
-        self.xobj_id += 1
+        self.xobj_inc += 1
+        self.xobj_id = self.xobj_inc
         xobject = il_version_1.PdfXobject(
             box=il_version_1.Box(
                 x=float(bbox[0]),
@@ -110,7 +112,7 @@ class ILCreater:
         self.pop_xobj()
         xobj = self.xobj_map[xobj_id]
         xobj.base_operations = il_version_1.BaseOperations(value=base_op)
-        self.xobj_id += 1
+        self.xobj_inc += 1
 
     def on_page_start(self):
         self.current_page = il_version_1.Page(
