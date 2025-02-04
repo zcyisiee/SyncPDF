@@ -131,7 +131,7 @@ uv run yadt --bing --files example.pdf --files example2.pdf
 
 ### Output Control
 
-- `--output`, `-o`: Output directory for translated files. If not set, use same directory as input
+- `--output`, `-o`: Output directory for translated files. If not set, use current working directory.
 - `--debug`, `-d`: Enable debug logging level and export detailed intermediate results in `~/.cache/yadt/working`.
 
 ### Configuration File
