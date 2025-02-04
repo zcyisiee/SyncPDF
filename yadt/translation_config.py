@@ -59,7 +59,8 @@ class TranslationConfig:
         os.makedirs(working_dir, exist_ok=True)
 
         if output_dir is None:
-            output_dir = os.path.dirname(input_file)
+            # output_dir = os.path.dirname(input_file)
+            output_dir = os.getcwd()
         self.output_dir = output_dir
 
         os.makedirs(output_dir, exist_ok=True)
