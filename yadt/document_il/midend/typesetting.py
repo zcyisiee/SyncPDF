@@ -558,7 +558,7 @@ class Typesetting:
     ):
         box = paragraph.box
         scale = 1.0
-        line_spacing = 1.7  # 初始行距为1.7
+        line_spacing = 1.5  # 初始行距为1.7
         min_scale = 0.1  # 最小缩放因子
         min_line_spacing = 1.4  # 最小行距
         expand_space_flag = False
@@ -602,8 +602,11 @@ class Typesetting:
                 line_spacing -= 0.1
             else:
                 # 行距已经最小，减小缩放因子
-                scale -= 0.05
-                line_spacing = 1.7  # 重置行距
+                if scale > 0.6:
+                    scale -= 0.05
+                else:
+                    scale -= 0.1
+                line_spacing = 1.5  # 重置行距
 
             if scale < 0.7 and min_line_spacing > 1.1:
                 min_line_spacing = 1.1
