@@ -101,16 +101,19 @@ class StylesAndFormulas:
                         )
                     )
 
+                    # isspace = get_char_unicode_string(current_chars).isspace()
+                    isspace = all(
+                        (x.char_unicode.isspace() for x in current_chars))
                     is_corner_mark = (
                         len(current_chars) > 0
-                        and not get_char_unicode_string(current_chars).isspace()
+                        and not isspace
                         # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
                         and char.pdf_style.font_size
                         < current_chars[-1].pdf_style.font_size * 0.79
                         and not in_corner_mark_state
                     ) or (
                         len(current_chars) > 0
-                        and not get_char_unicode_string(current_chars).isspace()
+                        and not isspace
                         # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
                         and char.pdf_style.font_size
                         < current_chars[-1].pdf_style.font_size * 1.1
