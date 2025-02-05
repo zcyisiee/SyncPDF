@@ -115,12 +115,11 @@ class FontMapper:
         font_id = {}
         xreflen = doc_zh.xref_length()
         with self.translation_config.progress_monitor.stage_start(
-                self.stage_name, xreflen - 1 + len(font_list) * len(il.page) + len(font_list)
+                self.stage_name, xreflen - 1 + len(font_list) + len(il.page) + len(font_list)
         ) as pbar:
             for font in font_list:
                 font_id[font[0]] = doc_zh[0].insert_font(font[0], font[1])
                 pbar.advance(1)
-
             for xref in range(1, xreflen):
                 pbar.advance(1)
                 for label in ["Resources/", ""]:  # 可能是基于 xobj 的 res
@@ -146,21 +145,25 @@ class FontMapper:
                         pass
 
             # Create PdfFont for each font
+            # 预先创建所有字体对象
+            pdf_fonts = []
+            for font_name, font_path in font_list:
+                font = pymupdf.Font(fontfile=font_path)
+                pdf_fonts.append(il_version_1.PdfFont(
+                    name=font_name,
+                    xref_id=font_id[font_name],
+                    font_id=font_name,
+                    encoding_length=2,
+                    bold=font.is_bold,
+                    italic=font.is_italic,
+                    monospace=font.is_monospaced,
+                    serif=font.is_serif,
+                ))
+                pbar.advance(1)
+            
+            # 批量添加字体到页面和XObject
             for page in il.page:
-                for font_name, font_path in font_list:
-                    font = pymupdf.Font(fontfile=font_path)
-                    pdf_font_il = il_version_1.PdfFont(
-                        name=font_name,
-                        xref_id=font_id[font_name],
-                        font_id=font_name,
-                        encoding_length=2,
-                        bold=font.is_bold,
-                        italic=font.is_italic,
-                        monospace=font.is_monospaced,
-                        serif=font.is_serif,
-                    )
-                    page.pdf_font.append(pdf_font_il)
-                    for xobj in page.pdf_xobject:
-                        xobj.pdf_font.append(pdf_font_il)
-
-                    pbar.advance(1)
+                page.pdf_font.extend(pdf_fonts)
+                for xobj in page.pdf_xobject:
+                    xobj.pdf_font.extend(pdf_fonts)
+                pbar.advance(1)
