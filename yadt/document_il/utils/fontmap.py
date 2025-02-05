@@ -109,13 +109,14 @@ class FontMapper:
             ]
         )
         font_id = {}
-
-        for font in font_list:
-            font_id[font[0]] = doc_zh[0].insert_font(font[0], font[1])
         xreflen = doc_zh.xref_length()
         with self.translation_config.progress_monitor.stage_start(
-            self.stage_name, xreflen - 1 + len(font_list) * len(il.page)
+                self.stage_name, xreflen - 1 + len(font_list) * len(il.page) + len(font_list)
         ) as pbar:
+            for font in font_list:
+                font_id[font[0]] = doc_zh[0].insert_font(font[0], font[1])
+                pbar.advance(1)
+
             for xref in range(1, xreflen):
                 pbar.advance(1)
                 for label in ["Resources/", ""]:  # 可能是基于 xobj 的 res
