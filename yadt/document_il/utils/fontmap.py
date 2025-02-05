@@ -1,3 +1,4 @@
+import functools
 import os.path
 import re
 
@@ -44,6 +45,9 @@ class FontMapper:
         self.fontid2font["base"] = self.base_font
         self.fontid2font["fallback"] = self.fallback_font
         self.fontid2font["kai"] = self.kai_font
+
+        for font in self.fontid2font.values():
+            font.char_lengths = functools.lru_cache(maxsize=10240, typed=True)(font.char_lengths)
 
     def has_char(self, char_unicode: str):
         if len(char_unicode) != 1:
