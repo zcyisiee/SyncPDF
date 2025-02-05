@@ -561,7 +561,9 @@ class PdfParagraphComposition:
             "type": "Element",
         },
     )
-    pdf_same_style_unicode_characters: Optional[PdfSameStyleUnicodeCharacters] = field(
+    pdf_same_style_unicode_characters: Optional[
+        PdfSameStyleUnicodeCharacters
+    ] = field(
         default=None,
         metadata={
             "name": "pdfSameStyleUnicodeCharacters",

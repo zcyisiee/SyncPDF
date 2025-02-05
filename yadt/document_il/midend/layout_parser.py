@@ -1,8 +1,10 @@
+import logging
+
 import numpy as np
 from pymupdf import Document
+
 from yadt.document_il import il_version_1
 from yadt.translation_config import TranslationConfig
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,9 @@ class LayoutParser:
         pages_to_translate = [
             page
             for page in docs.page
-            if self.translation_config.should_translate_page(page.page_number + 1)
+            if self.translation_config.should_translate_page(
+                page.page_number + 1
+            )
         ]
         total = len(pages_to_translate)
         self.progress = self.translation_config.progress_monitor.stage_start(
@@ -43,7 +47,9 @@ class LayoutParser:
                 batch_images.append(image)
 
             # Get predictions for the batch
-            layouts_batch = self.model.predict(batch_images, batch_size=batch_size)
+            layouts_batch = self.model.predict(
+                batch_images, batch_size=batch_size
+            )
 
             # Process predictions for each page
             for page, layouts in zip(batch_pages, layouts_batch):
