@@ -47,7 +47,9 @@ class FontMapper:
         self.fontid2font["kai"] = self.kai_font
 
         for font in self.fontid2font.values():
-            font.char_lengths = functools.lru_cache(maxsize=10240, typed=True)(font.char_lengths)
+            font.char_lengths = functools.lru_cache(maxsize=10240, typed=True)(
+                font.char_lengths
+            )
 
     def has_char(self, char_unicode: str):
         if len(char_unicode) != 1:
@@ -125,6 +127,8 @@ class FontMapper:
                 for label in ["Resources/", ""]:  # 可能是基于 xobj 的 res
                     try:  # xref 读写可能出错
                         font_res = doc_zh.xref_get_key(xref, f"{label}Font")
+                        if font_res is None:
+                            continue
                         target_key_prefix = f"{label}Font/"
                         if font_res[0] == "xref":
                             resource_xref_id = re.search("(\\d+) 0 R", font_res[1]).group(1)
@@ -149,18 +153,20 @@ class FontMapper:
             pdf_fonts = []
             for font_name, font_path in font_list:
                 font = pymupdf.Font(fontfile=font_path)
-                pdf_fonts.append(il_version_1.PdfFont(
-                    name=font_name,
-                    xref_id=font_id[font_name],
-                    font_id=font_name,
-                    encoding_length=2,
-                    bold=font.is_bold,
-                    italic=font.is_italic,
-                    monospace=font.is_monospaced,
-                    serif=font.is_serif,
-                ))
+                pdf_fonts.append(
+                    il_version_1.PdfFont(
+                        name=font_name,
+                        xref_id=font_id[font_name],
+                        font_id=font_name,
+                        encoding_length=2,
+                        bold=font.is_bold,
+                        italic=font.is_italic,
+                        monospace=font.is_monospaced,
+                        serif=font.is_serif,
+                    )
+                )
                 pbar.advance(1)
-            
+
             # 批量添加字体到页面和XObject
             for page in il.page:
                 page.pdf_font.extend(pdf_fonts)

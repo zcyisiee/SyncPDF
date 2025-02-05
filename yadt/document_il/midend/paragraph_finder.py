@@ -24,7 +24,9 @@ class ParagraphFinder:
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config
 
-    def update_paragraph_data(self, paragraph: PdfParagraph, update_unicode=False):
+    def update_paragraph_data(
+        self, paragraph: PdfParagraph, update_unicode=False
+    ):
         if not paragraph.pdf_paragraph_composition:
             return
 
@@ -56,7 +58,9 @@ class ParagraphFinder:
         paragraph.first_line_indent = False
         if (
             paragraph.pdf_paragraph_composition[0].pdf_line
-            and paragraph.pdf_paragraph_composition[0].pdf_line.pdf_character[0].box.x
+            and paragraph.pdf_paragraph_composition[0]
+            .pdf_line.pdf_character[0]
+            .box.x
             - paragraph.box.x
             > 1
         ):
@@ -120,7 +124,9 @@ class ParagraphFinder:
                 continue
 
             # 检查是否需要开始新行
-            if current_line_chars and Layout.is_newline(current_line_chars[-1], char):
+            if current_line_chars and Layout.is_newline(
+                current_line_chars[-1], char
+            ):
                 # 创建新行
                 if current_line_chars:
                     line = self.create_line(current_line_chars)
@@ -130,7 +136,9 @@ class ParagraphFinder:
                         )
                         paragraphs.append(current_paragraph)
                     else:
-                        current_paragraph.pdf_paragraph_composition.append(line)
+                        current_paragraph.pdf_paragraph_composition.append(
+                            line
+                        )
                         self.update_paragraph_data(current_paragraph)
                 current_line_chars = []
 
@@ -146,7 +154,9 @@ class ParagraphFinder:
                 if current_line_chars:
                     line = self.create_line(current_line_chars)
                     if current_paragraph is not None:
-                        current_paragraph.pdf_paragraph_composition.append(line)
+                        current_paragraph.pdf_paragraph_composition.append(
+                            line
+                        )
                         self.update_paragraph_data(current_paragraph)
                     else:
                         current_paragraph = PdfParagraph(
@@ -201,7 +211,9 @@ class ParagraphFinder:
                     processed_chars.append(char)
 
             # 移除尾随空格
-            while processed_chars and processed_chars[-1].char_unicode.isspace():
+            while (
+                processed_chars and processed_chars[-1].char_unicode.isspace()
+            ):
                 processed_chars.pop()
 
             if processed_chars:  # 如果行内还有字符
@@ -294,14 +306,18 @@ class ParagraphFinder:
             return self.get_layout(char, page, "bottomright")
         return None
 
-    def create_line(self, chars: list[PdfCharacter]) -> PdfParagraphComposition:
+    def create_line(
+        self, chars: list[PdfCharacter]
+    ) -> PdfParagraphComposition:
         assert chars
 
         line = PdfLine(pdf_character=chars)
         self.update_line_data(line)
         return PdfParagraphComposition(pdf_line=line)
 
-    def calculate_median_line_width(self, paragraphs: list[PdfParagraph]) -> float:
+    def calculate_median_line_width(
+        self, paragraphs: list[PdfParagraph]
+    ) -> float:
         # 收集所有行的宽度
         line_widths = []
         for paragraph in paragraphs:
@@ -326,7 +342,9 @@ class ParagraphFinder:
         i = 0
         while i < len(paragraphs):
             paragraph = paragraphs[i]
-            if len(paragraph.pdf_paragraph_composition) <= 1:  # 跳过只有一行的段落
+            if (
+                len(paragraph.pdf_paragraph_composition) <= 1
+            ):  # 跳过只有一行的段落
                 i += 1
                 continue
 
@@ -339,7 +357,9 @@ class ParagraphFinder:
 
                 prev_line = prev_composition.pdf_line
                 prev_width = prev_line.box.x2 - prev_line.box.x
-                prev_text = "".join([c.char_unicode for c in prev_line.pdf_character])
+                prev_text = "".join(
+                    [c.char_unicode for c in prev_line.pdf_character]
+                )
 
                 # 检查是否包含连续的点（至少 20 个）
                 # 如果有至少连续 20 个点，则代表这是目录条目
@@ -369,7 +389,8 @@ class ParagraphFinder:
                 if (
                     self.translation_config.split_short_lines
                     and prev_width
-                    < median_width * self.translation_config.short_line_split_factor
+                    < median_width
+                    * self.translation_config.short_line_split_factor
                 ):
                     # 创建新的段落
                     new_paragraph = PdfParagraph(
