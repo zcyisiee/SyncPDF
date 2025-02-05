@@ -52,15 +52,18 @@ Algorithm 1 works normally when translated text is shorter than original. When t
 
 1. Initialize element scaling factor as 1.0.
 
-2. Initialize line spacing as 1.7.
+2. Initialize line spacing as 1.5.
 
 3. Try typesetting using Algorithm 1.
 
 4. If it cannot fit all elements:
 
    - First try to reduce line spacing by 0.1 step until reaching minimum line spacing (1.4)
-   - If still cannot fit, reduce element scaling by 0.05 and reset line spacing to 1.7
-   - When scale becomes less than 0.7, adjust minimum line spacing to 1.1, reset scale to 1.0 and set line spacing to 1.5
+   - If still cannot fit:
+     - When scale > 0.6, reduce element scaling by 0.05
+     - When scale <= 0.6, reduce element scaling by 0.1
+     - Reset line spacing to 1.5
+   - When scale becomes less than 0.7, adjust minimum line spacing to 1.1
 
 5. Report error if element scaling is less than 0.1.
 
