@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 
 class Args:
@@ -20,6 +21,7 @@ class AsyncCallback:
         # We have to use the threadsafe call so that it wakes up the event loop, in case it's sleeping:
         # https://stackoverflow.com/a/49912853/2148718
         self.loop.call_soon_threadsafe(self.queue.put_nowait, args)
+        time.sleep(0.01)
 
     def finished_callback(self, *args, **kwargs):
         # Whenever a finished is called, add to the queue as with step, but also set finished to True, so __anext__
