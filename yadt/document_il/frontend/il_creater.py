@@ -30,6 +30,9 @@ class ILCreater:
         self.xobj_map: dict[int, il_version_1.PdfXobject] = {}
         self.xobj_stack = []
 
+    def on_finish(self):
+        self.progress.__exit__(None, None, None)
+
     def is_passthrough_per_char_operation(self, operator: str):
         return re.match("^(sc|scn|g|rg|k|cs|gs)$", operator, re.IGNORECASE)
 

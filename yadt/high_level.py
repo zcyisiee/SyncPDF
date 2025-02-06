@@ -153,7 +153,7 @@ def start_parse_il(
         ops_base = interpreter.process_page(page)
         il_creater.on_page_base_operation(ops_base)
         il_creater.on_page_end()
-
+    il_creater.on_finish()
     device.close()
 
 
@@ -166,8 +166,20 @@ def translate(translation_config: TranslationConfig) -> TranslateResult:
 
 
 async def async_translate(translation_config: TranslationConfig):
+    """Asynchronously translate a PDF file with progress reporting.
+    
+    This function will emit progress events that can be used to update progress bars
+    or other UI elements. The events are dictionaries with the following structure:
+    
+    - progress_start: {"type": "progress_start", "stage": str, "progress": 0.0}
+    - progress: {"type": "progress", "stage": str, "progress": float}
+    - progress_end: {"type": "progress_end", "stage": str, "progress": 100.0}
+    - finish: {"type": "finish", "translate_result": TranslateResult}
+    - error: {"type": "error", "error": str}
+    """
     loop = asyncio.get_running_loop()
     callback = asynchronize.AsyncCallback()
+    
     with ProgressMonitor(
         translation_config,
         TRANSLATE_STAGES,
@@ -176,9 +188,9 @@ async def async_translate(translation_config: TranslationConfig):
     ) as pm:
         _ = loop.run_in_executor(None, do_translate, pm, translation_config)
 
-    async for event in callback:
-        event = event.kwargs
-        yield event
+        async for event in callback:
+            event = event.kwargs
+            yield event
 
 
 def do_translate(pm, translation_config):

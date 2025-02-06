@@ -13,6 +13,17 @@ from yadt.document_il.translator.translator import (
 )
 from yadt.document_il.translator.translator import set_translate_rate_limiter
 from yadt.translation_config import TranslationConfig  # noqa: E402
+from rich.progress import (
+    Progress,
+    TextColumn,
+    BarColumn,
+    MofNCompleteColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
+import tqdm
+from yadt.progress_monitor import ProgressMonitor
+from yadt import asynchronize
 
 logger = logging.getLogger(__name__)
 __version__ = "0.1.3"
@@ -240,6 +251,57 @@ def download_font_assets():
             f.write(r.content)
 
 
+def create_progress_handler(translation_config: TranslationConfig):
+    """Create a progress handler function based on the configuration.
+    
+    Args:
+        translation_config: The translation configuration.
+        
+    Returns:
+        A tuple of (progress_context, progress_handler), where progress_context is a context
+        manager that should be used to wrap the translation process, and progress_handler
+        is a function that will be called with progress events.
+    """
+    if translation_config.use_rich_pbar:
+        progress = Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+        )
+        translate_task_id = progress.add_task("translate", total=100)
+        stage_tasks = {}
+
+        def progress_handler(event):
+            if event["type"] == "progress_start":
+                stage_tasks[event["stage"]] = progress.add_task(
+                    event["stage"], total=100
+                )
+            elif event["type"] == "progress":
+                stage = event["stage"]
+                if stage in stage_tasks:
+                    progress.update(stage_tasks[stage], completed=event["progress"])
+                progress.update(translate_task_id, completed=event["progress"])
+            elif event["type"] == "progress_end":
+                stage = event["stage"]
+                if stage in stage_tasks:
+                    progress.update(stage_tasks[stage], completed=100)
+
+        return progress, progress_handler
+    else:
+        pbar = tqdm.tqdm(total=100, desc="translate")
+
+        def progress_handler(event):
+            if event["type"] == "progress":
+                pbar.update(event["progress"] - pbar.n)
+                pbar.set_description(event["stage"])
+            elif event["type"] == "progress_end":
+                pbar.set_description(event["stage"])
+
+        return pbar, progress_handler
+
+
 async def main():
     from rich.logging import RichHandler
 
@@ -380,19 +442,23 @@ async def main():
             doc_layout_model=doc_layout_model,
         )
 
+        # Create progress handler
+        progress_context, progress_handler = create_progress_handler(config)
+
         # 开始翻译
-        async for event in yadt.high_level.async_translate(config):
-            if config.debug:
-                logger.debug(event)
-            if event["type"] == "finish":
-                result = event["translate_result"]
-                # result = yadt.high_level.translate(config)
-                logger.info("Translation Result:")
-                logger.info(f"  Original PDF: {result.original_pdf_path}")
-                logger.info(f"  Time Cost: {result.total_seconds:.2f}s")
-                logger.info(f"  Mono PDF: {result.mono_pdf_path or 'None'}")
-                logger.info(f"  Dual PDF: {result.dual_pdf_path or 'None'}")
-                break
+        with progress_context:
+            async for event in yadt.high_level.async_translate(config):
+                progress_handler(event)
+                if config.debug:
+                    logger.debug(event)
+                if event["type"] == "finish":
+                    result = event["translate_result"]
+                    logger.info("Translation Result:")
+                    logger.info(f"  Original PDF: {result.original_pdf_path}")
+                    logger.info(f"  Time Cost: {result.total_seconds:.2f}s")
+                    logger.info(f"  Mono PDF: {result.mono_pdf_path or 'None'}")
+                    logger.info(f"  Dual PDF: {result.dual_pdf_path or 'None'}")
+                    break
 
 
 def cli():
