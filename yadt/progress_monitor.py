@@ -61,7 +61,8 @@ class ProgressMonitor:
 
     def stage_update(self, stage, n: int):
         relative_progress = n * 100 / (stage.total * len(self.stage))
-        self.progress_change_callback(stage.name, relative_progress)
+        if self.progress_change_callback:
+            self.progress_change_callback(stage.name, relative_progress)
         if self.use_rich_pbar:
             self.rich_pbar.update(stage.task_id, advance=n)
             self.rich_pbar.update(self.translate_task_id, advance=relative_progress)
