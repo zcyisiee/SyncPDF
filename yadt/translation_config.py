@@ -1,5 +1,7 @@
 import threading
 from typing import Optional
+import shutil
+import tempfile
 
 from yadt.const import (
     CACHE_FOLDER,
@@ -57,10 +59,17 @@ class TranslationConfig:
                 progress_monitor.finish_event = threading.Event()
 
         if working_dir is None:
-            working_dir = os.path.join(
-                CACHE_FOLDER, "working", os.path.basename(input_file).split(".")[0]
-            )
+            if debug:
+                working_dir = os.path.join(
+                    CACHE_FOLDER, 
+                    "working", 
+                    os.path.basename(input_file).split(".")[0]
+                )
+            else:
+                working_dir = tempfile.mkdtemp(prefix="yadt_")
         self.working_dir = working_dir
+        self._is_temp_dir = (not debug and 
+                            working_dir.startswith(tempfile.gettempdir()))
 
         os.makedirs(working_dir, exist_ok=True)
 
@@ -130,6 +139,15 @@ class TranslationConfig:
     def cancel_translation(self):
         if self.progress_monitor:
             self.progress_monitor.cancel()
+
+    def __del__(self):
+        """Clean up temporary directory if it was created."""
+        if hasattr(self, '_is_temp_dir') and self._is_temp_dir:
+            try:
+                shutil.rmtree(self.working_dir, ignore_errors=True)
+            except Exception:
+                pass
+
 
 class TranslateResult:
     original_pdf_path: str

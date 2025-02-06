@@ -290,7 +290,6 @@ async def async_translate(translation_config: TranslationConfig):
                 if event["type"] == "error":
                     break
         except CancelledError:
-            logger.info("Translation cancelled by user through CancelledError")
             cancel_event.set()
         except KeyboardInterrupt:
             logger.info("Translation cancelled by user through keyboard interrupt")
@@ -391,7 +390,7 @@ def do_translate(pm, translation_config):
     except Exception as e:
         logger.error(f"translate error: {e}", exc_info=True)
         pm.translate_error(e)
-        return
+        raise
     finally:
         logger.debug("do_translate finally")
         pm.on_finish()
