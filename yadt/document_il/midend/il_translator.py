@@ -156,6 +156,7 @@ class ILTranslator:
         pbar: tqdm | None = None,
         tracker: PageTranslateTracker = None,
     ):
+        self.translation_config.raise_if_cancelled()
         for paragraph in page.pdf_paragraph:
             page_font_map = {}
             for font in page.pdf_font:
@@ -453,6 +454,7 @@ class ILTranslator:
         page_font_map: dict[str, PdfFont] = None,
         xobj_font_map: dict[int, dict[str, PdfFont]] = None,
     ):
+        self.translation_config.raise_if_cancelled()
         with PbarContext(pbar):
             if paragraph.vertical:
                 return

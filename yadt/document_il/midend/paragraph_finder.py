@@ -74,6 +74,7 @@ class ParagraphFinder:
             self.stage_name, len(document.page)
         ) as pbar:
             for page in document.page:
+                self.translation_config.raise_if_cancelled()
                 self.process_page(page)
                 pbar.advance()
 

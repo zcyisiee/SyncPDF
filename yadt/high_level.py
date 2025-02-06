@@ -1,5 +1,6 @@
 import asyncio
 import os
+import threading
 import time
 import hashlib
 from asyncio import CancelledError
@@ -162,6 +163,7 @@ def start_parse_il(
         page.pageno = pageno
         if not translation_config.should_translate_page(pageno + 1):
             continue
+        translation_config.raise_if_cancelled()
         # The current program no longer relies on
         # the following layout recognition results,
         # but in order to facilitate the migration of pdf2zh,
@@ -233,17 +235,30 @@ async def async_translate(translation_config: TranslationConfig):
     loop = asyncio.get_running_loop()
     callback = asynchronize.AsyncCallback()
 
+    finish_event = asyncio.Event()
+    cancel_event = threading.Event()
     with ProgressMonitor(
         translation_config,
         TRANSLATE_STAGES,
         progress_change_callback=callback.step_callback,
         finish_callback=callback.finished_callback,
+        finish_event=finish_event,
+        cancel_event=cancel_event,
+        loop=loop,
     ) as pm:
-        _ = loop.run_in_executor(None, do_translate, pm, translation_config)
-
-        async for event in callback:
-            event = event.kwargs
-            yield event
+        future = loop.run_in_executor(None, do_translate, pm, translation_config)
+        try:
+            async for event in callback:
+                event = event.kwargs
+                yield event
+        except CancelledError:
+            cancel_event.set()
+        except KeyboardInterrupt:
+            cancel_event.set()
+    if cancel_event.is_set():
+        future.cancel()
+    await finish_event.wait()
+    future.result()
 
 
 def do_translate(pm, translation_config):

@@ -1,6 +1,10 @@
+import asyncio
+import threading
 import time
 from typing import Optional
+import logging
 
+logger = logging.getLogger(__name__)
 
 class ProgressMonitor:
     def __init__(
@@ -10,6 +14,9 @@ class ProgressMonitor:
         progress_change_callback: callable = None,
         finish_callback: callable = None,
         report_interval: float = 0.1,
+        finish_event: asyncio.Event = None,
+        cancel_event: threading.Event = None,
+            loop: Optional[asyncio.AbstractEventLoop] = None
     ):
         self.stage = {k: TranslationStage(k, 0, self) for k in stages}
         self.translation_config = translation_config
@@ -18,6 +25,11 @@ class ProgressMonitor:
         self.report_interval = report_interval
         self.last_report_time = 0
         self.finish_stage_count = 0
+        self.finish_event = finish_event
+        self.cancel_event = cancel_event
+        self.loop = loop
+        if finish_event and not loop:
+            raise ValueError("finish_event requires a loop")
 
     def stage_start(self, stage_name: str, total: int):
         stage = self.stage[stage_name]
@@ -36,7 +48,9 @@ class ProgressMonitor:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
+        logger.debug("ProgressMonitor __exit__")
+        if self.finish_event and self.loop:
+            self.loop.call_soon_threadsafe(self.finish_event.set)
 
     def stage_done(self, stage):
         self.last_report_time = 0
@@ -81,6 +95,10 @@ class ProgressMonitor:
         if self.finish_callback:
             self.finish_callback(type="error", error=str(error))
 
+    def raise_if_cancelled(self):
+        if self.cancel_event and self.cancel_event.is_set():
+            logger.info("Translation canceled")
+            raise asyncio.CancelledError
 
 class TranslationStage:
     def __init__(self, name: str, total: int, pm: ProgressMonitor):
