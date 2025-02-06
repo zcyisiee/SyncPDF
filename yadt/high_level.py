@@ -1,6 +1,7 @@
 import asyncio
 import os
 import time
+import hashlib
 from asyncio import CancelledError
 from typing import Any, BinaryIO, Optional
 
@@ -52,6 +53,47 @@ resfont_map = {
     "ko": "korea-s",
 }
 
+FONT_ASSETS = [
+    (
+        "noto.ttf",
+        "https://github.com/satbyy/go-noto-universal/releases/download/v7.0/GoNotoKurrent-Regular.ttf",
+        "2f2cee5fbb2403df352ca2005247f6c4faa70f3086ebd31b6c62308b5f2f9865",
+    ),
+    (
+        "source-han-serif-cn.ttf",
+        "https://github.com/junmer/source-han-serif-ttf/raw/refs/heads/master/SubsetTTF/CN/SourceHanSerifCN-Regular.ttf",
+        "1e60cc2eedfa25bf5e4ecaa794402f581ad770d4c8be46d338bf52064b307ec7",
+    ),
+    (
+        "source-han-serif-cn-bold.ttf",
+        "https://github.com/junmer/source-han-serif-ttf/raw/refs/heads/master/SubsetTTF/CN/SourceHanSerifCN-Bold.ttf",
+        "84c24723a47537fcf5057b788a51c41978ee6173931f19b8a9f5a4595b677dc9",
+    ),
+    (
+        "SourceHanSansSC-Regular.ttf",
+        "https://github.com/iizyd/SourceHanSansCN-TTF-Min/raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Regular.ttf",
+        "a878f16eed162dc5b211d888a4a29b1730b73f4cf632e720abca4eab7bd8a152",
+    ),
+    (
+        "SourceHanSansSC-Bold.ttf",
+        "https://github.com/iizyd/SourceHanSansCN-TTF-Min/raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Bold.ttf",
+        "485b27eb4f3603223e9c3c5ebfa317aee77772ea8f642f9330df7f030c8b7b43",
+    ),
+    (
+        "LXGWWenKai-Regular.ttf",
+        "https://github.com/lxgw/LxgwWenKai/raw/refs/heads/main/fonts/TTF/LXGWWenKai-Regular.ttf",
+        "ea47ec17d0f3d0ed1e6d9c51d6146402d4d1e2f0ff397a90765aaaa0ddd382fb",
+    ),
+]
+
+def verify_file_hash(file_path: str, expected_hash: str) -> bool:
+    """Verify the SHA256 hash of a file."""
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        # Read the file in chunks to handle large files efficiently
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+    return sha256_hash.hexdigest() == expected_hash
 
 def start_parse_il(
     inf: BinaryIO,
@@ -289,49 +331,34 @@ def do_translate(pm, translation_config):
 
 
 def download_font_assets():
-    assets = [
-        (
-            "noto.ttf",
-            "https://github.com/satbyy/"
-            "go-noto-universal/releases/download/v7.0/"
-            "GoNotoKurrent-Regular.ttf",
-        ),
-        (
-            "source-han-serif-cn.ttf",
-            "https://github.com/junmer/source-han-serif-ttf"
-            "/raw/refs/heads/master/SubsetTTF/CN/SourceHanSerifCN-Regular.ttf",
-        ),
-        (
-            "source-han-serif-cn-bold.ttf",
-            "https://github.com/junmer/source-han-serif-ttf"
-            "/raw/refs/heads/master/SubsetTTF/CN/SourceHanSerifCN-Bold.ttf",
-        ),
-        (
-            "SourceHanSansSC-Regular.ttf",
-            "https://github.com/iizyd/SourceHanSansCN-TTF-Min"
-            "/raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Regular.ttf",
-        ),
-        (
-            "SourceHanSansSC-Bold.ttf",
-            "https://github.com/iizyd/SourceHanSansCN-TTF-Min"
-            "/raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Bold.ttf",
-        ),
-        (
-            "LXGWWenKai-Regular.ttf",
-            "https://github.com/lxgw/LxgwWenKai"
-            "/raw/refs/heads/main/fonts/TTF/LXGWWenKai-Regular.ttf",
-        ),
-    ]
-    for name, url in assets:
+    """Download and verify font assets."""
+    for name, url, expected_hash in FONT_ASSETS:
         save_path = get_cache_file_path(name)
+        
+        # Check if file exists and has correct hash
         if os.path.exists(save_path):
-            continue
+            if verify_file_hash(save_path, expected_hash):
+                continue
+            else:
+                logger.warning(f"Hash mismatch for {name}, re-downloading...")
+                os.remove(save_path)
+        
+        # Download file
         r = httpx.get(url, follow_redirects=True)
         if not r.is_success:
             logger.critical("cannot download %s font", name, exc_info=True)
             exit(1)
+            
+        # Save and verify
         with open(save_path, "wb") as f:
             f.write(r.content)
+            
+        if not verify_file_hash(save_path, expected_hash):
+            logger.critical(f"Downloaded file {name} has incorrect hash!")
+            os.remove(save_path)
+            exit(1)
+        
+        logger.info(f"Successfully downloaded and verified {name}")
 
 
 def create_cache_folder():
