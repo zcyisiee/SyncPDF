@@ -158,12 +158,14 @@ def start_parse_il(
 def translate(translation_config: TranslationConfig) -> TranslateResult:
     with ProgressMonitor(
         translation_config,
-            TRANSLATE_STAGES,
+        TRANSLATE_STAGES,
     ) as pm:
         return do_translate(pm, translation_config)
 
+
 class TranslateException(Exception):
     pass
+
 
 class TranslateEvent:
     pass
@@ -171,9 +173,9 @@ class TranslateEvent:
     def to_dict(self):
         raise NotImplementedError
 
+
 async def async_translate(translation_config: TranslationConfig):
     loop = asyncio.get_running_loop()
-
 
 
 def do_translate(pm, translation_config):
@@ -184,9 +186,7 @@ def do_translate(pm, translation_config):
     doc_input = Document(original_pdf_path)
     if translation_config.debug:
         logger.debug("debug mode, save decompressed input pdf")
-        output_path = translation_config.get_working_file_path(
-            "input.decompressed.pdf"
-        )
+        output_path = translation_config.get_working_file_path("input.decompressed.pdf")
         doc_input.save(output_path, expand=True, pretty=True)
     # Continue with original processing
     temp_pdf_path = translation_config.get_working_file_path("input.pdf")

@@ -11,10 +11,12 @@ from rich.progress import (
 
 
 class ProgressMonitor:
-    def __init__(self,
-                 translation_config,
-                 stages: list[str],
-                 progress_change_callback: callable = None):
+    def __init__(
+        self,
+        translation_config,
+        stages: list[str],
+        progress_change_callback: callable = None,
+    ):
         if translation_config.use_rich_pbar:
             self.rich_pbar = Progress(
                 TextColumn("[progress.description]{task.description}"),
