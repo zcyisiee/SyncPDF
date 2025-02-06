@@ -29,16 +29,6 @@ logger = logging.getLogger(__name__)
 __version__ = "0.1.3"
 
 
-def create_cache_folder():
-    try:
-        os.makedirs(CACHE_FOLDER, exist_ok=True)
-    except OSError:
-        logger.critical(
-            f"Failed to create cache folder at {CACHE_FOLDER}", exc_info=True
-        )
-        exit(1)
-
-
 def create_parser():
     parser = configargparse.ArgParser(
         config_file_parser_class=configargparse.TomlConfigParser(["yadt"]),
@@ -205,52 +195,6 @@ def create_parser():
     return parser
 
 
-def download_font_assets():
-    assets = [
-        (
-            "noto.ttf",
-            "https://github.com/satbyy/"
-            "go-noto-universal/releases/download/v7.0/"
-            "GoNotoKurrent-Regular.ttf",
-        ),
-        (
-            "source-han-serif-cn.ttf",
-            "https://github.com/junmer/source-han-serif-ttf"
-            "/raw/refs/heads/master/SubsetTTF/CN/SourceHanSerifCN-Regular.ttf",
-        ),
-        (
-            "source-han-serif-cn-bold.ttf",
-            "https://github.com/junmer/source-han-serif-ttf"
-            "/raw/refs/heads/master/SubsetTTF/CN/SourceHanSerifCN-Bold.ttf",
-        ),
-        (
-            "SourceHanSansSC-Regular.ttf",
-            "https://github.com/iizyd/SourceHanSansCN-TTF-Min"
-            "/raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Regular.ttf",
-        ),
-        (
-            "SourceHanSansSC-Bold.ttf",
-            "https://github.com/iizyd/SourceHanSansCN-TTF-Min"
-            "/raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Bold.ttf",
-        ),
-        (
-            "LXGWWenKai-Regular.ttf",
-            "https://github.com/lxgw/LxgwWenKai"
-            "/raw/refs/heads/main/fonts/TTF/LXGWWenKai-Regular.ttf",
-        ),
-    ]
-    for name, url in assets:
-        save_path = get_cache_file_path(name)
-        if os.path.exists(save_path):
-            continue
-        r = httpx.get(url, follow_redirects=True)
-        if not r.is_success:
-            logger.critical("cannot download noto font", exc_info=True)
-            exit(1)
-        with open(save_path, "wb") as f:
-            f.write(r.content)
-
-
 def create_progress_handler(translation_config: TranslationConfig):
     """Create a progress handler function based on the configuration.
 
@@ -326,38 +270,11 @@ def create_progress_handler(translation_config: TranslationConfig):
 
 
 async def main():
-    from rich.logging import RichHandler
-
-    logging.basicConfig(level=logging.INFO, handlers=[RichHandler()])
-
-    logging.getLogger("httpx").setLevel("CRITICAL")
-    logging.getLogger("httpx").propagate = False
-    logging.getLogger("openai").setLevel("CRITICAL")
-    logging.getLogger("openai").propagate = False
-    logging.getLogger("httpcore").setLevel("CRITICAL")
-    logging.getLogger("httpcore").propagate = False
-    logging.getLogger("http11").setLevel("CRITICAL")
-    logging.getLogger("http11").propagate = False
-    for v in logging.Logger.manager.loggerDict.values():
-        if getattr(v, "name", None) is None:
-            continue
-        if (
-            v.name.startswith("pdfminer")
-            or v.name.startswith("peewee")
-            or v.name.startswith("httpx")
-            or "http11" in v.name
-            or "openai" in v.name
-        ):
-            v.disabled = True
-            v.propagate = False
-
     parser = create_parser()
     args = parser.parse_args()
 
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
-
-    create_cache_folder()
 
     # 验证翻译服务选择
     if not (args.openai or args.google or args.bing):
@@ -418,7 +335,6 @@ async def main():
         pending_files.append(file)
 
     font_path = get_cache_file_path("source-han-serif-cn.ttf")
-    download_font_assets()
 
     # 验证字体
     if font_path:
@@ -486,6 +402,32 @@ async def main():
 
 def cli():
     """Command line interface entry point."""
+    from rich.logging import RichHandler
+
+    logging.basicConfig(level=logging.INFO, handlers=[RichHandler()])
+
+    logging.getLogger("httpx").setLevel("CRITICAL")
+    logging.getLogger("httpx").propagate = False
+    logging.getLogger("openai").setLevel("CRITICAL")
+    logging.getLogger("openai").propagate = False
+    logging.getLogger("httpcore").setLevel("CRITICAL")
+    logging.getLogger("httpcore").propagate = False
+    logging.getLogger("http11").setLevel("CRITICAL")
+    logging.getLogger("http11").propagate = False
+    for v in logging.Logger.manager.loggerDict.values():
+        if getattr(v, "name", None) is None:
+            continue
+        if (
+            v.name.startswith("pdfminer")
+            or v.name.startswith("peewee")
+            or v.name.startswith("httpx")
+            or "http11" in v.name
+            or "openai" in v.name
+        ):
+            v.disabled = True
+            v.propagate = False
+
+    yadt.high_level.init()
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

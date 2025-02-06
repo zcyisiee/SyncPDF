@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from asyncio import CancelledError
 from typing import Any, BinaryIO, Optional
@@ -8,8 +9,10 @@ from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
 from pymupdf import Document, Font
+import httpx
 
 from yadt import asynchronize
+from yadt.const import get_cache_file_path, CACHE_FOLDER
 from yadt.converter import TranslateConverter
 from yadt.document_il.midend.il_translator import ILTranslator
 from yadt.document_il.midend.paragraph_finder import ParagraphFinder
@@ -283,3 +286,65 @@ def do_translate(pm, translation_config):
     except Exception as e:
         pm.translate_error(e)
         return
+
+
+def download_font_assets():
+    assets = [
+        (
+            "noto.ttf",
+            "https://github.com/satbyy/"
+            "go-noto-universal/releases/download/v7.0/"
+            "GoNotoKurrent-Regular.ttf",
+        ),
+        (
+            "source-han-serif-cn.ttf",
+            "https://github.com/junmer/source-han-serif-ttf"
+            "/raw/refs/heads/master/SubsetTTF/CN/SourceHanSerifCN-Regular.ttf",
+        ),
+        (
+            "source-han-serif-cn-bold.ttf",
+            "https://github.com/junmer/source-han-serif-ttf"
+            "/raw/refs/heads/master/SubsetTTF/CN/SourceHanSerifCN-Bold.ttf",
+        ),
+        (
+            "SourceHanSansSC-Regular.ttf",
+            "https://github.com/iizyd/SourceHanSansCN-TTF-Min"
+            "/raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Regular.ttf",
+        ),
+        (
+            "SourceHanSansSC-Bold.ttf",
+            "https://github.com/iizyd/SourceHanSansCN-TTF-Min"
+            "/raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Bold.ttf",
+        ),
+        (
+            "LXGWWenKai-Regular.ttf",
+            "https://github.com/lxgw/LxgwWenKai"
+            "/raw/refs/heads/main/fonts/TTF/LXGWWenKai-Regular.ttf",
+        ),
+    ]
+    for name, url in assets:
+        save_path = get_cache_file_path(name)
+        if os.path.exists(save_path):
+            continue
+        r = httpx.get(url, follow_redirects=True)
+        if not r.is_success:
+            logger.critical("cannot download %s font", name, exc_info=True)
+            exit(1)
+        with open(save_path, "wb") as f:
+            f.write(r.content)
+
+
+def create_cache_folder():
+    try:
+        logger.info(f"create cache folder at {CACHE_FOLDER}")
+        os.makedirs(CACHE_FOLDER, exist_ok=True)
+    except OSError:
+        logger.critical(
+            f"Failed to create cache folder at {CACHE_FOLDER}", exc_info=True
+        )
+        exit(1)
+
+
+def init():
+    create_cache_folder()
+    download_font_assets()
