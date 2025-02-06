@@ -50,6 +50,8 @@ class ProgressMonitor:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         logger.debug("ProgressMonitor __exit__")
+        if self.cancel_event:
+            self.cancel_event.set()
         if self.finish_event and self.loop:
             self.loop.call_soon_threadsafe(self.finish_event.set)
 
