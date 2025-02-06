@@ -276,17 +276,29 @@ def create_progress_handler(translation_config: TranslationConfig):
         def progress_handler(event):
             if event["type"] == "progress_start":
                 stage_tasks[event["stage"]] = progress.add_task(
-                    event["stage"], total=100
+                    f"{event['stage']}", total=event.get("stage_total", 100)
                 )
             elif event["type"] == "progress":
                 stage = event["stage"]
                 if stage in stage_tasks:
-                    progress.update(stage_tasks[stage], completed=event["progress"])
-                progress.update(translate_task_id, completed=event["progress"], refresh=True)
+                    progress.update(
+                        stage_tasks[stage],
+                        completed=event["stage_current"],
+                        total=event["stage_total"],
+                        description=f"{event['stage']} ({event['stage_current']}/{event['stage_total']})",
+                        refresh=True
+                    )
+                progress.update(translate_task_id, completed=event["overall_progress"], refresh=True)
             elif event["type"] == "progress_end":
                 stage = event["stage"]
                 if stage in stage_tasks:
-                    progress.update(stage_tasks[stage], completed=100, refresh=True)
+                    progress.update(
+                        stage_tasks[stage],
+                        completed=event["stage_total"],
+                        total=event["stage_total"],
+                        description=f"{event['stage']} (Complete)",
+                        refresh=True
+                    )
                     progress.update(translate_task_id, completed=event["overall_progress"], refresh=True)
                 progress.refresh()
 
