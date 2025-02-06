@@ -263,8 +263,8 @@ def do_translate(pm, translation_config):
         result.original_pdf_path = original_pdf_path
         result.total_seconds = finish_time - start_time
         logger.info(
-            f"finish translate: {original_pdf_path}, cost: {
-                finish_time - start_time} s"
+            f"finish translate: {original_pdf_path}, cost: "
+                f"{finish_time - start_time} s"
         )
         pm.translate_done(result)
         return result
