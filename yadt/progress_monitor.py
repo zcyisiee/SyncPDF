@@ -1,6 +1,7 @@
 import time
 from typing import Optional
 
+
 class ProgressMonitor:
     def __init__(
         self,
@@ -16,7 +17,6 @@ class ProgressMonitor:
         self.finish_callback = finish_callback
         self.report_interval = report_interval
         self.last_report_time = 0
-        self.current_progress = 0.0
         self.finish_stage_count = 0
 
     def stage_start(self, stage_name: str, total: int):
@@ -24,7 +24,11 @@ class ProgressMonitor:
         stage.total = total
         if self.progress_change_callback:
             self.progress_change_callback(
-                type="progress_start", stage=stage_name, progress=0.0
+                type="progress_start",
+                stage=stage_name,
+                stage_progress=0.0,
+                stage_current=0,
+                stage_total=total,
             )
         return stage
 
@@ -42,32 +46,30 @@ class ProgressMonitor:
             self.progress_change_callback(
                 type="progress_end",
                 stage=stage.name,
-                progress=100.0,
+                stage_progress=100.0,
                 stage_current=stage.total,
                 stage_total=stage.total,
-                overall_progress=self.calculate_current_progress()
+                overall_progress=self.calculate_current_progress(),
             )
-    
-    def calculate_current_progress(self, stage = None):
+
+    def calculate_current_progress(self, stage=None):
         progress = self.finish_stage_count * 100 / len(self.stage)
         if stage is not None:
             progress += stage.current * 100 / stage.total / len(self.stage)
         return progress
 
     def stage_update(self, stage, n: int):
-        relative_progress = n * 100 / (stage.total * len(self.stage))
-        self.current_progress += relative_progress
         if (
             self.progress_change_callback
             and time.time() - self.last_report_time > self.report_interval
         ):
             self.progress_change_callback(
-                type="progress",
+                type="progress_update",
                 stage=stage.name,
-                progress=self.current_progress,
+                stage_progress=stage.current * 100 / stage.total,
                 stage_current=stage.current,
                 stage_total=stage.total,
-                overall_progress=self.calculate_current_progress(stage)
+                overall_progress=self.calculate_current_progress(stage),
             )
             self.last_report_time = time.time()
 

@@ -253,10 +253,10 @@ def download_font_assets():
 
 def create_progress_handler(translation_config: TranslationConfig):
     """Create a progress handler function based on the configuration.
-    
+
     Args:
         translation_config: The translation configuration.
-        
+
     Returns:
         A tuple of (progress_context, progress_handler), where progress_context is a context
         manager that should be used to wrap the translation process, and progress_handler
@@ -278,7 +278,7 @@ def create_progress_handler(translation_config: TranslationConfig):
                 stage_tasks[event["stage"]] = progress.add_task(
                     f"{event['stage']}", total=event.get("stage_total", 100)
                 )
-            elif event["type"] == "progress":
+            elif event["type"] == "progress_update":
                 stage = event["stage"]
                 if stage in stage_tasks:
                     progress.update(
@@ -286,9 +286,11 @@ def create_progress_handler(translation_config: TranslationConfig):
                         completed=event["stage_current"],
                         total=event["stage_total"],
                         description=f"{event['stage']} ({event['stage_current']}/{event['stage_total']})",
-                        refresh=True
+                        refresh=True,
                     )
-                progress.update(translate_task_id, completed=event["overall_progress"], refresh=True)
+                progress.update(
+                    translate_task_id, completed=event["overall_progress"], refresh=True
+                )
             elif event["type"] == "progress_end":
                 stage = event["stage"]
                 if stage in stage_tasks:
@@ -297,9 +299,13 @@ def create_progress_handler(translation_config: TranslationConfig):
                         completed=event["stage_total"],
                         total=event["stage_total"],
                         description=f"{event['stage']} (Complete)",
-                        refresh=True
+                        refresh=True,
                     )
-                    progress.update(translate_task_id, completed=event["overall_progress"], refresh=True)
+                    progress.update(
+                        translate_task_id,
+                        completed=event["overall_progress"],
+                        refresh=True,
+                    )
                 progress.refresh()
 
         return progress, progress_handler
@@ -307,11 +313,12 @@ def create_progress_handler(translation_config: TranslationConfig):
         pbar = tqdm.tqdm(total=100, desc="translate")
 
         def progress_handler(event):
-            if event["type"] == "progress":
-                pbar.update(event["progress"] - pbar.n)
-                pbar.set_description(f"{event['stage']} ({event['stage_current']}/{event['stage_total']})")
+            if event["type"] == "progress_update":
+                pbar.update(event["overall_progress"] - pbar.n)
+                pbar.set_description(
+                    f"{event['stage']} ({event['stage_current']}/{event['stage_total']})"
+                )
             elif event["type"] == "progress_end":
-                pbar.update(100 - pbar.n)
                 pbar.set_description(f"{event['stage']} (Complete)")
                 pbar.refresh()
 
@@ -483,6 +490,7 @@ def cli():
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
+
 
 if __name__ == "__main__":
     cli()

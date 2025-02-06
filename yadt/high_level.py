@@ -167,10 +167,10 @@ def translate(translation_config: TranslationConfig) -> TranslateResult:
 
 async def async_translate(translation_config: TranslationConfig):
     """Asynchronously translate a PDF file with progress reporting.
-    
+
     This function will emit progress events that can be used to update progress bars
     or other UI elements. The events are dictionaries with the following structure:
-    
+
     - progress_start: {"type": "progress_start", "stage": str, "progress": 0.0}
     - progress: {"type": "progress", "stage": str, "progress": float}
     - progress_end: {"type": "progress_end", "stage": str, "progress": 100.0}
@@ -179,7 +179,7 @@ async def async_translate(translation_config: TranslationConfig):
     """
     loop = asyncio.get_running_loop()
     callback = asynchronize.AsyncCallback()
-    
+
     with ProgressMonitor(
         translation_config,
         TRANSLATE_STAGES,
@@ -276,7 +276,7 @@ def do_translate(pm, translation_config):
         result.total_seconds = finish_time - start_time
         logger.info(
             f"finish translate: {original_pdf_path}, cost: "
-                f"{finish_time - start_time} s"
+            f"{finish_time - start_time} s"
         )
         pm.translate_done(result)
         return result
