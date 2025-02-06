@@ -232,6 +232,7 @@ Everyone interacting in YADT and its sub-projects' codebases, issue trackers, ch
 - [DocLayout-YOLO](https://github.com/opendatalab/DocLayout-YOLO)
 - [pdfminer](https://github.com/pdfminer/pdfminer.six)
 - [PyMuPDF](https://github.com/pymupdf/PyMuPDF)
+- [Asynchronize](https://github.com/multimeric/Asynchronize/tree/master?tab=readme-ov-file)
 
 <h2 id="star_hist">Star History</h2>
 
