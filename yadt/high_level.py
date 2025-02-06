@@ -363,7 +363,7 @@ def download_font_assets():
 
 def create_cache_folder():
     try:
-        logger.info(f"create cache folder at {CACHE_FOLDER}")
+        logger.debug(f"create cache folder at {CACHE_FOLDER}")
         os.makedirs(CACHE_FOLDER, exist_ok=True)
     except OSError:
         logger.critical(

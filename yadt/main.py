@@ -60,6 +60,12 @@ def create_parser():
         help="Use debug logging level.",
     )
     parser.add_argument(
+        "--warmup",
+        default=False,
+        action="store_true",
+        help="Only download and verify required assets then exit.",
+    )
+    parser.add_argument(
         "--rpc-doclayout",
         default=None,
         help="RPC service host address for document layout analysis",
@@ -275,6 +281,10 @@ async def main():
 
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    if args.warmup:
+        logger.info("Warmup completed, exiting...")
+        return
 
     # 验证翻译服务选择
     if not (args.openai or args.google or args.bing):
