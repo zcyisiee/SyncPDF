@@ -6,6 +6,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class ProgressMonitor:
     def __init__(
         self,
@@ -16,7 +17,7 @@ class ProgressMonitor:
         report_interval: float = 0.1,
         finish_event: asyncio.Event = None,
         cancel_event: threading.Event = None,
-            loop: Optional[asyncio.AbstractEventLoop] = None
+        loop: Optional[asyncio.AbstractEventLoop] = None,
     ):
         self.stage = {k: TranslationStage(k, 0, self) for k in stages}
         self.translation_config = translation_config
@@ -99,6 +100,7 @@ class ProgressMonitor:
         if self.cancel_event and self.cancel_event.is_set():
             logger.info("Translation canceled")
             raise asyncio.CancelledError
+
 
 class TranslationStage:
     def __init__(self, name: str, total: int, pm: ProgressMonitor):
