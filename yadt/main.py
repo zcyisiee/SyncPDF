@@ -1,4 +1,5 @@
 import os
+import asyncio
 
 from yadt.const import get_cache_file_path, CACHE_FOLDER
 import yadt.high_level
@@ -394,7 +395,12 @@ async def main():
                 break
 
 
-if __name__ == "__main__":
-    import asyncio
+def cli():
+    """Command line interface entry point."""
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
 
-    asyncio.run(main())
+if __name__ == "__main__":
+    cli()
