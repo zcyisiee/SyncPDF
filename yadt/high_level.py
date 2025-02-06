@@ -221,16 +221,52 @@ def translate(translation_config: TranslationConfig) -> TranslateResult:
 
 
 async def async_translate(translation_config: TranslationConfig):
-    """Asynchronously translate a PDF file with progress reporting.
+    """Asynchronously translate a PDF file with real-time progress reporting.
 
-    This function will emit progress events that can be used to update progress bars
+    This function yields progress events that can be used to update progress bars
     or other UI elements. The events are dictionaries with the following structure:
 
-    - progress_start: {"type": "progress_start", "stage": str, "progress": 0.0}
-    - progress: {"type": "progress", "stage": str, "progress": float}
-    - progress_end: {"type": "progress_end", "stage": str, "progress": 100.0}
-    - finish: {"type": "finish", "translate_result": TranslateResult}
-    - error: {"type": "error", "error": str}
+    - progress_start: {
+        "type": "progress_start",
+        "stage": str,              # Stage name
+        "stage_progress": float,   # Always 0.0
+        "stage_current": int,      # Current count (0)
+        "stage_total": int         # Total items in stage
+    }
+    - progress_update: {
+        "type": "progress_update",
+        "stage": str,              # Stage name
+        "stage_progress": float,   # Stage progress (0-100)
+        "stage_current": int,      # Current items processed
+        "stage_total": int,        # Total items in stage
+        "overall_progress": float  # Overall progress (0-100)
+    }
+    - progress_end: {
+        "type": "progress_end",
+        "stage": str,              # Stage name
+        "stage_progress": float,   # Always 100.0
+        "stage_current": int,      # Equal to stage_total
+        "stage_total": int,        # Total items processed
+        "overall_progress": float  # Overall progress (0-100)
+    }
+    - finish: {
+        "type": "finish",
+        "translate_result": TranslateResult
+    }
+    - error: {
+        "type": "error",
+        "error": str
+    }
+
+    Args:
+        translation_config: Configuration for the translation process
+
+    Yields:
+        dict: Progress events during translation
+
+    Raises:
+        CancelledError: If the translation is cancelled
+        Exception: Any other errors during translation
     """
     loop = asyncio.get_running_loop()
     callback = asynchronize.AsyncCallback()

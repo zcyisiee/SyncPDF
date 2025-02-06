@@ -26,7 +26,7 @@ from yadt.progress_monitor import ProgressMonitor
 from yadt import asynchronize
 
 logger = logging.getLogger(__name__)
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 
 def create_parser():
