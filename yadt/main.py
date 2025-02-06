@@ -239,7 +239,7 @@ def download_font_assets():
             f.write(r.content)
 
 
-def main():
+async def main():
     from rich.logging import RichHandler
 
     logging.basicConfig(level=logging.INFO, handlers=[RichHandler()])
@@ -380,13 +380,21 @@ def main():
         )
 
         # 开始翻译
-        result = yadt.high_level.translate(config)
-        logger.info("Translation Result:")
-        logger.info(f"  Original PDF: {result.original_pdf_path}")
-        logger.info(f"  Time Cost: {result.total_seconds:.2f}s")
-        logger.info(f"  Mono PDF: {result.mono_pdf_path or 'None'}")
-        logger.info(f"  Dual PDF: {result.dual_pdf_path or 'None'}")
+        async for event in yadt.high_level.async_translate(config):
+            if config.debug:
+                logger.debug(event)
+            if event["type"] == "finish":
+                result = event["translate_result"]
+                # result = yadt.high_level.translate(config)
+                logger.info("Translation Result:")
+                logger.info(f"  Original PDF: {result.original_pdf_path}")
+                logger.info(f"  Time Cost: {result.total_seconds:.2f}s")
+                logger.info(f"  Mono PDF: {result.mono_pdf_path or 'None'}")
+                logger.info(f"  Dual PDF: {result.dual_pdf_path or 'None'}")
+                break
 
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+
+    asyncio.run(main())
