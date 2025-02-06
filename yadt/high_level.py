@@ -287,14 +287,18 @@ async def async_translate(translation_config: TranslationConfig):
             async for event in callback:
                 event = event.kwargs
                 yield event
+                if event["type"] == "error":
+                    break
         except CancelledError:
+            logger.info("Translation cancelled by user through CancelledError")
             cancel_event.set()
         except KeyboardInterrupt:
+            logger.info("Translation cancelled by user through keyboard interrupt")
             cancel_event.set()
     if cancel_event.is_set():
         future.cancel()
+    logger.info("Waiting for translation to finish...")
     await finish_event.wait()
-    future.result()
 
 
 def do_translate(pm, translation_config):
@@ -385,8 +389,12 @@ def do_translate(pm, translation_config):
         pm.translate_done(result)
         return result
     except Exception as e:
+        logger.error(f"translate error: {e}", exc_info=True)
         pm.translate_error(e)
         return
+    finally:
+        logger.debug("do_translate finally")
+        pm.on_finish()
 
 
 def download_font_assets():

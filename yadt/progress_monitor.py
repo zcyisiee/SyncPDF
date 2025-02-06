@@ -1,6 +1,7 @@
 import asyncio
 import threading
 import time
+from asyncio import CancelledError
 from typing import Optional
 import logging
 
@@ -50,13 +51,25 @@ class ProgressMonitor:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         logger.debug("ProgressMonitor __exit__")
+
+    def on_finish(self):
+        if self.cancel_event:
+            self.cancel_event.set()
         if self.finish_event and self.loop:
             self.loop.call_soon_threadsafe(self.finish_event.set)
+        if self.cancel_event and self.cancel_event.is_set():
+            self.finish_callback(type="error", error=CancelledError)
 
     def stage_done(self, stage):
         self.last_report_time = 0
         self.finish_stage_count += 1
-        assert stage.current == stage.total
+        if (stage.current != stage.total
+                and self.cancel_event is not None
+                and not self.cancel_event.is_set()):
+            logger.warning(
+                f"Stage {stage.name} completed with {stage.current}/{stage.total} items"
+            )
+            return
         if self.progress_change_callback:
             self.progress_change_callback(
                 type="progress_end",
@@ -94,13 +107,16 @@ class ProgressMonitor:
 
     def translate_error(self, error):
         if self.finish_callback:
-            self.finish_callback(type="error", error=str(error))
+            self.finish_callback(type="error", error=error)
 
     def raise_if_cancelled(self):
         if self.cancel_event and self.cancel_event.is_set():
             logger.info("Translation canceled")
             raise asyncio.CancelledError
 
+    def cancel(self):
+        if self.cancel_event:
+            self.cancel_event.set()
 
 class TranslationStage:
     def __init__(self, name: str, total: int, pm: ProgressMonitor):

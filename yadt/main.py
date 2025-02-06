@@ -26,7 +26,7 @@ from yadt.progress_monitor import ProgressMonitor
 from yadt import asynchronize
 
 logger = logging.getLogger(__name__)
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 
 
 def create_parser():
@@ -448,10 +448,7 @@ def cli():
             v.propagate = False
 
     yadt.high_level.init()
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
+    asyncio.run(main())
 
 
 if __name__ == "__main__":
