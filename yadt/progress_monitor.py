@@ -11,7 +11,10 @@ from rich.progress import (
 
 
 class ProgressMonitor:
-    def __init__(self, translation_config, stages: list[str]):
+    def __init__(self,
+                 translation_config,
+                 stages: list[str],
+                 progress_change_callback: callable = None):
         if translation_config.use_rich_pbar:
             self.rich_pbar = Progress(
                 TextColumn("[progress.description]{task.description}"),
@@ -26,6 +29,7 @@ class ProgressMonitor:
         self.stage = {k: TranslationStage(k, 0, self) for k in stages}
         self.translation_config = translation_config
         self.use_rich_pbar = translation_config.use_rich_pbar
+        self.progress_change_callback = progress_change_callback
 
     def stage_start(self, stage_name: str, total: int):
         stage = self.stage[stage_name]
@@ -57,6 +61,7 @@ class ProgressMonitor:
 
     def stage_update(self, stage, n: int):
         relative_progress = n * 100 / (stage.total * len(self.stage))
+        self.progress_change_callback(stage.name, relative_progress)
         if self.use_rich_pbar:
             self.rich_pbar.update(stage.task_id, advance=n)
             self.rich_pbar.update(self.translate_task_id, advance=relative_progress)
