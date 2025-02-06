@@ -235,7 +235,8 @@ def create_progress_handler(translation_config: TranslationConfig):
                         stage_tasks[stage],
                         completed=event["stage_current"],
                         total=event["stage_total"],
-                        description=f"{event['stage']} ({event['stage_current']}/{event['stage_total']})",
+                        description=f"{
+                            event['stage']} ({event['stage_current']}/{event['stage_total']})",
                         refresh=True,
                     )
                 progress.update(
@@ -266,7 +267,8 @@ def create_progress_handler(translation_config: TranslationConfig):
             if event["type"] == "progress_update":
                 pbar.update(event["overall_progress"] - pbar.n)
                 pbar.set_description(
-                    f"{event['stage']} ({event['stage_current']}/{event['stage_total']})"
+                    f"{event['stage']} ({event['stage_current']
+                                         }/{event['stage_total']})"
                 )
             elif event["type"] == "progress_end":
                 pbar.set_description(f"{event['stage']} (Complete)")
@@ -405,9 +407,22 @@ async def main():
                     logger.info("Translation Result:")
                     logger.info(f"  Original PDF: {result.original_pdf_path}")
                     logger.info(f"  Time Cost: {result.total_seconds:.2f}s")
-                    logger.info(f"  Mono PDF: {result.mono_pdf_path or 'None'}")
-                    logger.info(f"  Dual PDF: {result.dual_pdf_path or 'None'}")
+                    logger.info(
+                        f"  Mono PDF: {result.mono_pdf_path or 'None'}"
+                    )
+                    logger.info(
+                        f"  Dual PDF: {result.dual_pdf_path or 'None'}")
                     break
+
+
+# for backward compatibility
+def create_cache_folder():
+    return yadt.high_level.create_cache_folder()
+
+
+# for backward compatibility
+def download_font_assets():
+    return yadt.high_level.download_font_assets()
 
 
 def cli():
