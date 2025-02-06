@@ -290,7 +290,6 @@ async def async_translate(translation_config: TranslationConfig):
                 if event["type"] == "error":
                     break
         except CancelledError:
-            logger.info("Translation cancelled by user through CancelledError")
             cancel_event.set()
         except KeyboardInterrupt:
             logger.info("Translation cancelled by user through keyboard interrupt")
