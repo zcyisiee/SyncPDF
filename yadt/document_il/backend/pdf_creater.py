@@ -79,9 +79,7 @@ class PDFCreater:
     ) -> list[il_version_1.PdfCharacter]:
         chars = []
         for composition in paragraph.pdf_paragraph_composition:
-            if not isinstance(
-                composition.pdf_character, il_version_1.PdfCharacter
-            ):
+            if not isinstance(composition.pdf_character, il_version_1.PdfCharacter):
                 raise Exception(
                     f"Unknown composition type. "
                     f"This type only appears in the IL "
@@ -198,9 +196,7 @@ class PDFCreater:
                 available_font_list = self.get_available_font_list(pdf, page)
 
                 for xobj in page.pdf_xobject:
-                    xobj_available_fonts[xobj.xobj_id] = (
-                        available_font_list.copy()
-                    )
+                    xobj_available_fonts[xobj.xobj_id] = available_font_list.copy()
                     try:
                         xobj_available_fonts[xobj.xobj_id].update(
                             self.get_xobj_available_fonts(xobj.xref_id, pdf)
@@ -246,9 +242,7 @@ class PDFCreater:
                         if font_id not in xobj_available_fonts[char.xobj_id]:
                             continue
                         draw_op = xobj_draw_ops[char.xobj_id]
-                        encoding_length_map = xobj_encoding_length_map[
-                            char.xobj_id
-                        ]
+                        encoding_length_map = xobj_encoding_length_map[char.xobj_id]
                     else:
                         if font_id not in available_font_list:
                             continue
@@ -256,9 +250,7 @@ class PDFCreater:
                         encoding_length_map = page_encoding_length_map
 
                     draw_op.append(b"q ")
-                    self.render_graphic_state(
-                        draw_op, char.pdf_style.graphic_state
-                    )
+                    self.render_graphic_state(draw_op, char.pdf_style.graphic_state)
                     if char.vertical:
                         draw_op.append(
                             f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode()

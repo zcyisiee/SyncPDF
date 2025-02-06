@@ -117,7 +117,8 @@ class FontMapper:
         font_id = {}
         xreflen = doc_zh.xref_length()
         with self.translation_config.progress_monitor.stage_start(
-                self.stage_name, xreflen - 1 + len(font_list) + len(il.page) + len(font_list)
+            self.stage_name,
+            xreflen - 1 + len(font_list) + len(il.page) + len(font_list),
         ) as pbar:
             for font in font_list:
                 font_id[font[0]] = doc_zh[0].insert_font(font[0], font[1])
@@ -131,9 +132,11 @@ class FontMapper:
                             continue
                         target_key_prefix = f"{label}Font/"
                         if font_res[0] == "xref":
-                            resource_xref_id = re.search("(\\d+) 0 R", font_res[1]).group(1)
+                            resource_xref_id = re.search(
+                                "(\\d+) 0 R", font_res[1]
+                            ).group(1)
                             xref = int(resource_xref_id)
-                            font_res = ('dict', doc_zh.xref_object(xref))
+                            font_res = ("dict", doc_zh.xref_object(xref))
                             target_key_prefix = ""
                         if font_res[0] == "dict":
                             for font in font_list:
