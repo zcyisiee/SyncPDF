@@ -26,6 +26,10 @@ Main processing stages in order of actual execution and corresponding documentat
 
 8. [PDFCreation.md](PDFCreation/PDFCreation.md): **PDF Generation**
 
+## API
+
+1. [Async Translation API](AsyncTranslate/AsyncTranslate.md): **Async Translation API**
+
 > [!TIP]
 >
 > Click on document links to view detailed implementation principles and configuration options
