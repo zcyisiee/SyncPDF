@@ -28,6 +28,8 @@ class AsyncCallback:
     def finished_callback(self, *args, **kwargs):
         # Whenever a finished is called, add to the queue as with step, but also set finished to True, so __anext__
         # will terminate after processing the remaining items
+        if self.finished:
+            return
         self.step_callback(*args, **kwargs)
         self.finished = True
 

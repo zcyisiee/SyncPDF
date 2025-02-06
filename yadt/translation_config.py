@@ -1,3 +1,4 @@
+import threading
 from typing import Optional
 
 from yadt.const import (
@@ -49,6 +50,11 @@ class TranslationConfig:
         self.short_line_split_factor = short_line_split_factor
         self.use_rich_pbar = use_rich_pbar
         self.progress_monitor = progress_monitor
+        if progress_monitor:
+            if progress_monitor.cancel_event is None:
+                progress_monitor.cancel_event = threading.Event()
+            if progress_monitor.finish_event is None:
+                progress_monitor.finish_event = threading.Event()
 
         if working_dir is None:
             working_dir = os.path.join(
@@ -121,6 +127,9 @@ class TranslationConfig:
         if self.progress_monitor:
             self.progress_monitor.raise_if_cancelled()
 
+    def cancel_translation(self):
+        if self.progress_monitor:
+            self.progress_monitor.cancel()
 
 class TranslateResult:
     original_pdf_path: str

@@ -448,10 +448,7 @@ def cli():
             v.propagate = False
 
     yadt.high_level.init()
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass
+    asyncio.run(main())
 
 
 if __name__ == "__main__":
