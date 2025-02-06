@@ -1,5 +1,8 @@
 import asyncio
+import os
+import threading
 import time
+import hashlib
 from asyncio import CancelledError
 from typing import Any, BinaryIO, Optional
 
@@ -8,6 +11,10 @@ from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
 from pymupdf import Document, Font
+import httpx
+
+from yadt import asynchronize
+from yadt.const import get_cache_file_path, CACHE_FOLDER
 from yadt.converter import TranslateConverter
 from yadt.document_il.midend.il_translator import ILTranslator
 from yadt.document_il.midend.paragraph_finder import ParagraphFinder
@@ -26,6 +33,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+TRANSLATE_STAGES = [
+    ILCreater.stage_name,
+    LayoutParser.stage_name,
+    ParagraphFinder.stage_name,
+    StylesAndFormulas.stage_name,
+    ILTranslator.stage_name,
+    Typesetting.stage_name,
+    FontMapper.stage_name,
+    PDFCreater.stage_name,
+]
+
 resfont_map = {
     "zh-cn": "china-ss",
     "zh-tw": "china-ts",
@@ -35,6 +53,55 @@ resfont_map = {
     "ja": "japan-s",
     "ko": "korea-s",
 }
+
+FONT_ASSETS = [
+    (
+        "noto.ttf",
+        "https://github.com/satbyy/go-noto-universal"
+        "/releases/download/v7.0/GoNotoKurrent-Regular.ttf",
+        "2f2cee5fbb2403df352ca2005247f6c4faa70f3086ebd31b6c62308b5f2f9865",
+    ),
+    (
+        "source-han-serif-cn.ttf",
+        "https://github.com/junmer/source-han-serif-ttf/"
+        "raw/refs/heads/master/SubsetTTF/CN/SourceHanSerifCN-Regular.ttf",
+        "1e60cc2eedfa25bf5e4ecaa794402f581ad770d4c8be46d338bf52064b307ec7",
+    ),
+    (
+        "source-han-serif-cn-bold.ttf",
+        "https://github.com/junmer/source-han-serif-ttf/"
+        "raw/refs/heads/master/SubsetTTF/CN/SourceHanSerifCN-Bold.ttf",
+        "84c24723a47537fcf5057b788a51c41978ee6173931f19b8a9f5a4595b677dc9",
+    ),
+    (
+        "SourceHanSansSC-Regular.ttf",
+        "https://github.com/iizyd/SourceHanSansCN-TTF-Min/"
+        "raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Regular.ttf",
+        "a878f16eed162dc5b211d888a4a29b1730b73f4cf632e720abca4eab7bd8a152",
+    ),
+    (
+        "SourceHanSansSC-Bold.ttf",
+        "https://github.com/iizyd/SourceHanSansCN-TTF-Min/"
+        "raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Bold.ttf",
+        "485b27eb4f3603223e9c3c5ebfa317aee77772ea8f642f9330df7f030c8b7b43",
+    ),
+    (
+        "LXGWWenKai-Regular.ttf",
+        "https://github.com/lxgw/LxgwWenKai/"
+        "raw/refs/heads/main/fonts/TTF/LXGWWenKai-Regular.ttf",
+        "ea47ec17d0f3d0ed1e6d9c51d6146402d4d1e2f0ff397a90765aaaa0ddd382fb",
+    ),
+]
+
+
+def verify_file_hash(file_path: str, expected_hash: str) -> bool:
+    """Verify the SHA256 hash of a file."""
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        # Read the file in chunks to handle large files efficiently
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+    return sha256_hash.hexdigest() == expected_hash
 
 
 def start_parse_il(
@@ -96,6 +163,7 @@ def start_parse_il(
         page.pageno = pageno
         if not translation_config.should_translate_page(pageno + 1):
             continue
+        translation_config.raise_if_cancelled()
         # The current program no longer relies on
         # the following layout recognition results,
         # but in order to facilitate the migration of pdf2zh,
@@ -140,29 +208,65 @@ def start_parse_il(
         ops_base = interpreter.process_page(page)
         il_creater.on_page_base_operation(ops_base)
         il_creater.on_page_end()
-
+    il_creater.on_finish()
     device.close()
 
 
 def translate(translation_config: TranslationConfig) -> TranslateResult:
     with ProgressMonitor(
         translation_config,
-        [
-            ILCreater.stage_name,
-            LayoutParser.stage_name,
-            ParagraphFinder.stage_name,
-            StylesAndFormulas.stage_name,
-            ILTranslator.stage_name,
-            Typesetting.stage_name,
-            FontMapper.stage_name,
-            PDFCreater.stage_name,
-        ],
+        TRANSLATE_STAGES,
     ) as pm:
+        return do_translate(pm, translation_config)
+
+
+async def async_translate(translation_config: TranslationConfig):
+    """Asynchronously translate a PDF file with progress reporting.
+
+    This function will emit progress events that can be used to update progress bars
+    or other UI elements. The events are dictionaries with the following structure:
+
+    - progress_start: {"type": "progress_start", "stage": str, "progress": 0.0}
+    - progress: {"type": "progress", "stage": str, "progress": float}
+    - progress_end: {"type": "progress_end", "stage": str, "progress": 100.0}
+    - finish: {"type": "finish", "translate_result": TranslateResult}
+    - error: {"type": "error", "error": str}
+    """
+    loop = asyncio.get_running_loop()
+    callback = asynchronize.AsyncCallback()
+
+    finish_event = asyncio.Event()
+    cancel_event = threading.Event()
+    with ProgressMonitor(
+        translation_config,
+        TRANSLATE_STAGES,
+        progress_change_callback=callback.step_callback,
+        finish_callback=callback.finished_callback,
+        finish_event=finish_event,
+        cancel_event=cancel_event,
+        loop=loop,
+    ) as pm:
+        future = loop.run_in_executor(None, do_translate, pm, translation_config)
+        try:
+            async for event in callback:
+                event = event.kwargs
+                yield event
+        except CancelledError:
+            cancel_event.set()
+        except KeyboardInterrupt:
+            cancel_event.set()
+    if cancel_event.is_set():
+        future.cancel()
+    await finish_event.wait()
+    future.result()
+
+
+def do_translate(pm, translation_config):
+    try:
         translation_config.progress_monitor = pm
         original_pdf_path = translation_config.input_file
         logger.info(f"start to translate: {original_pdf_path}")
         start_time = time.time()
-
         doc_input = Document(original_pdf_path)
         if translation_config.debug:
             logger.debug("debug mode, save decompressed input pdf")
@@ -170,21 +274,16 @@ def translate(translation_config: TranslationConfig) -> TranslateResult:
                 "input.decompressed.pdf"
             )
             doc_input.save(output_path, expand=True, pretty=True)
-
         # Continue with original processing
         temp_pdf_path = translation_config.get_working_file_path("input.pdf")
-
         doc_pdf2zh = Document(original_pdf_path)
         resfont = "china-ss"
         for page in doc_pdf2zh:
             page.insert_font(resfont, None)
         doc_pdf2zh.save(temp_pdf_path)
-
         il_creater = ILCreater(translation_config)
         il_creater.mupdf = doc_input
-
         xml_converter = XMLConverter()
-
         logger.debug(f"start parse il from {temp_pdf_path}")
         with open(temp_pdf_path, "rb") as f:
             start_parse_il(
@@ -195,32 +294,26 @@ def translate(translation_config: TranslationConfig) -> TranslateResult:
                 translation_config=translation_config,
             )
         logger.debug(f"finish parse il from {temp_pdf_path}")
-
         docs = il_creater.create_il()
         logger.debug(f"finish create il from {temp_pdf_path}")
-
         if translation_config.debug:
             xml_converter.write_json(
                 docs, translation_config.get_working_file_path("create_il.debug.json")
             )
-
         # Generate layouts for all pages
         logger.debug("start generating layouts")
         docs = LayoutParser(translation_config).process(docs, doc_input)
         logger.debug("finish generating layouts")
-
         if translation_config.debug:
             xml_converter.write_json(
                 docs, translation_config.get_working_file_path("layout_generator.json")
             )
-
         ParagraphFinder(translation_config).process(docs)
         logger.debug(f"finish paragraph finder from {temp_pdf_path}")
         if translation_config.debug:
             xml_converter.write_json(
                 docs, translation_config.get_working_file_path("paragraph_finder.json")
             )
-
         StylesAndFormulas(translation_config).process(docs)
         logger.debug(f"finish styles and formulas from {temp_pdf_path}")
         if translation_config.debug:
@@ -228,7 +321,6 @@ def translate(translation_config: TranslationConfig) -> TranslateResult:
                 docs,
                 translation_config.get_working_file_path("styles_and_formulas.json"),
             )
-
         translate_engine = translation_config.translator
         # translate_engine.ignore_cache = True
         ILTranslator(translate_engine, translation_config).translate(docs)
@@ -237,26 +329,72 @@ def translate(translation_config: TranslationConfig) -> TranslateResult:
             xml_converter.write_json(
                 docs, translation_config.get_working_file_path("il_translated.json")
             )
-
         Typesetting(translation_config).typsetting_document(docs)
         logger.debug(f"finish typsetting from {temp_pdf_path}")
         if translation_config.debug:
             xml_converter.write_json(
                 docs, translation_config.get_working_file_path("typsetting.json")
             )
-
         # deepcopy
         # docs2 = xml_converter.deepcopy(docs)
-
         pdf_creater = PDFCreater(original_pdf_path, docs, translation_config)
-
         result = pdf_creater.write(translation_config)
-
         finish_time = time.time()
-
         result.original_pdf_path = original_pdf_path
         result.total_seconds = finish_time - start_time
         logger.info(
-            f"finish translate: {original_pdf_path}, cost: {finish_time - start_time} s"
+            f"finish translate: {original_pdf_path}, cost: "
+            f"{finish_time - start_time} s"
         )
+        pm.translate_done(result)
         return result
+    except Exception as e:
+        pm.translate_error(e)
+        return
+
+
+def download_font_assets():
+    """Download and verify font assets."""
+    for name, url, expected_hash in FONT_ASSETS:
+        save_path = get_cache_file_path(name)
+
+        # Check if file exists and has correct hash
+        if os.path.exists(save_path):
+            if verify_file_hash(save_path, expected_hash):
+                continue
+            else:
+                logger.warning(f"Hash mismatch for {name}, re-downloading...")
+                os.remove(save_path)
+
+        # Download file
+        r = httpx.get(url, follow_redirects=True)
+        if not r.is_success:
+            logger.critical("cannot download %s font", name, exc_info=True)
+            exit(1)
+
+        # Save and verify
+        with open(save_path, "wb") as f:
+            f.write(r.content)
+
+        if not verify_file_hash(save_path, expected_hash):
+            logger.critical(f"Downloaded file {name} has incorrect hash!")
+            os.remove(save_path)
+            exit(1)
+
+        logger.info(f"Successfully downloaded and verified {name}")
+
+
+def create_cache_folder():
+    try:
+        logger.debug(f"create cache folder at {CACHE_FOLDER}")
+        os.makedirs(CACHE_FOLDER, exist_ok=True)
+    except OSError:
+        logger.critical(
+            f"Failed to create cache folder at {CACHE_FOLDER}", exc_info=True
+        )
+        exit(1)
+
+
+def init():
+    create_cache_folder()
+    download_font_assets()

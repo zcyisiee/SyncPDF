@@ -1,4 +1,5 @@
 import os
+import asyncio
 
 from yadt.const import get_cache_file_path, CACHE_FOLDER
 import yadt.high_level
@@ -12,19 +13,20 @@ from yadt.document_il.translator.translator import (
 )
 from yadt.document_il.translator.translator import set_translate_rate_limiter
 from yadt.translation_config import TranslationConfig  # noqa: E402
+from rich.progress import (
+    Progress,
+    TextColumn,
+    BarColumn,
+    MofNCompleteColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
+import tqdm
+from yadt.progress_monitor import ProgressMonitor
+from yadt import asynchronize
 
 logger = logging.getLogger(__name__)
 __version__ = "0.1.3"
-
-
-def create_cache_folder():
-    try:
-        os.makedirs(CACHE_FOLDER, exist_ok=True)
-    except OSError:
-        logger.critical(
-            f"Failed to create cache folder at {CACHE_FOLDER}", exc_info=True
-        )
-        exit(1)
 
 
 def create_parser():
@@ -56,6 +58,12 @@ def create_parser():
         default=False,
         action="store_true",
         help="Use debug logging level.",
+    )
+    parser.add_argument(
+        "--warmup",
+        default=False,
+        action="store_true",
+        help="Only download and verify required assets then exit.",
     )
     parser.add_argument(
         "--rpc-doclayout",
@@ -193,85 +201,90 @@ def create_parser():
     return parser
 
 
-def download_font_assets():
-    assets = [
-        (
-            "noto.ttf",
-            "https://github.com/satbyy/"
-            "go-noto-universal/releases/download/v7.0/"
-            "GoNotoKurrent-Regular.ttf",
-        ),
-        (
-            "source-han-serif-cn.ttf",
-            "https://github.com/junmer/source-han-serif-ttf"
-            "/raw/refs/heads/master/SubsetTTF/CN/SourceHanSerifCN-Regular.ttf",
-        ),
-        (
-            "source-han-serif-cn-bold.ttf",
-            "https://github.com/junmer/source-han-serif-ttf"
-            "/raw/refs/heads/master/SubsetTTF/CN/SourceHanSerifCN-Bold.ttf",
-        ),
-        (
-            "SourceHanSansSC-Regular.ttf",
-            "https://github.com/iizyd/SourceHanSansCN-TTF-Min"
-            "/raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Regular.ttf",
-        ),
-        (
-            "SourceHanSansSC-Bold.ttf",
-            "https://github.com/iizyd/SourceHanSansCN-TTF-Min"
-            "/raw/refs/heads/main/source-file/ttf/SourceHanSansSC-Bold.ttf",
-        ),
-        (
-            "LXGWWenKai-Regular.ttf",
-            "https://github.com/lxgw/LxgwWenKai"
-            "/raw/refs/heads/main/fonts/TTF/LXGWWenKai-Regular.ttf",
-        ),
-    ]
-    for name, url in assets:
-        save_path = get_cache_file_path(name)
-        if os.path.exists(save_path):
-            continue
-        r = httpx.get(url, follow_redirects=True)
-        if not r.is_success:
-            logger.critical("cannot download noto font", exc_info=True)
-            exit(1)
-        with open(save_path, "wb") as f:
-            f.write(r.content)
+def create_progress_handler(translation_config: TranslationConfig):
+    """Create a progress handler function based on the configuration.
+
+    Args:
+        translation_config: The translation configuration.
+
+    Returns:
+        A tuple of (progress_context, progress_handler), where progress_context is a context
+        manager that should be used to wrap the translation process, and progress_handler
+        is a function that will be called with progress events.
+    """
+    if translation_config.use_rich_pbar:
+        progress = Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+        )
+        translate_task_id = progress.add_task("translate", total=100)
+        stage_tasks = {}
+
+        def progress_handler(event):
+            if event["type"] == "progress_start":
+                stage_tasks[event["stage"]] = progress.add_task(
+                    f"{event['stage']}", total=event.get("stage_total", 100)
+                )
+            elif event["type"] == "progress_update":
+                stage = event["stage"]
+                if stage in stage_tasks:
+                    progress.update(
+                        stage_tasks[stage],
+                        completed=event["stage_current"],
+                        total=event["stage_total"],
+                        description=f"{event['stage']} ({event['stage_current']}/{event['stage_total']})",
+                        refresh=True,
+                    )
+                progress.update(
+                    translate_task_id, completed=event["overall_progress"], refresh=True
+                )
+            elif event["type"] == "progress_end":
+                stage = event["stage"]
+                if stage in stage_tasks:
+                    progress.update(
+                        stage_tasks[stage],
+                        completed=event["stage_total"],
+                        total=event["stage_total"],
+                        description=f"{event['stage']} (Complete)",
+                        refresh=True,
+                    )
+                    progress.update(
+                        translate_task_id,
+                        completed=event["overall_progress"],
+                        refresh=True,
+                    )
+                progress.refresh()
+
+        return progress, progress_handler
+    else:
+        pbar = tqdm.tqdm(total=100, desc="translate")
+
+        def progress_handler(event):
+            if event["type"] == "progress_update":
+                pbar.update(event["overall_progress"] - pbar.n)
+                pbar.set_description(
+                    f"{event['stage']} ({event['stage_current']}/{event['stage_total']})"
+                )
+            elif event["type"] == "progress_end":
+                pbar.set_description(f"{event['stage']} (Complete)")
+                pbar.refresh()
+
+        return pbar, progress_handler
 
 
-def main():
-    from rich.logging import RichHandler
-
-    logging.basicConfig(level=logging.INFO, handlers=[RichHandler()])
-
-    logging.getLogger("httpx").setLevel("CRITICAL")
-    logging.getLogger("httpx").propagate = False
-    logging.getLogger("openai").setLevel("CRITICAL")
-    logging.getLogger("openai").propagate = False
-    logging.getLogger("httpcore").setLevel("CRITICAL")
-    logging.getLogger("httpcore").propagate = False
-    logging.getLogger("http11").setLevel("CRITICAL")
-    logging.getLogger("http11").propagate = False
-    for v in logging.Logger.manager.loggerDict.values():
-        if getattr(v, "name", None) is None:
-            continue
-        if (
-            v.name.startswith("pdfminer")
-            or v.name.startswith("peewee")
-            or v.name.startswith("httpx")
-            or "http11" in v.name
-            or "openai" in v.name
-        ):
-            v.disabled = True
-            v.propagate = False
-
+async def main():
     parser = create_parser()
     args = parser.parse_args()
 
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    create_cache_folder()
+    if args.warmup:
+        logger.info("Warmup completed, exiting...")
+        return
 
     # 验证翻译服务选择
     if not (args.openai or args.google or args.bing):
@@ -332,7 +345,6 @@ def main():
         pending_files.append(file)
 
     font_path = get_cache_file_path("source-han-serif-cn.ttf")
-    download_font_assets()
 
     # 验证字体
     if font_path:
@@ -379,14 +391,68 @@ def main():
             doc_layout_model=doc_layout_model,
         )
 
+        # Create progress handler
+        progress_context, progress_handler = create_progress_handler(config)
+
         # 开始翻译
-        result = yadt.high_level.translate(config)
-        logger.info("Translation Result:")
-        logger.info(f"  Original PDF: {result.original_pdf_path}")
-        logger.info(f"  Time Cost: {result.total_seconds:.2f}s")
-        logger.info(f"  Mono PDF: {result.mono_pdf_path or 'None'}")
-        logger.info(f"  Dual PDF: {result.dual_pdf_path or 'None'}")
+        with progress_context:
+            async for event in yadt.high_level.async_translate(config):
+                progress_handler(event)
+                if config.debug:
+                    logger.debug(event)
+                if event["type"] == "finish":
+                    result = event["translate_result"]
+                    logger.info("Translation Result:")
+                    logger.info(f"  Original PDF: {result.original_pdf_path}")
+                    logger.info(f"  Time Cost: {result.total_seconds:.2f}s")
+                    logger.info(f"  Mono PDF: {result.mono_pdf_path or 'None'}")
+                    logger.info(f"  Dual PDF: {result.dual_pdf_path or 'None'}")
+                    break
+
+
+# for backward compatibility
+def create_cache_folder():
+    return yadt.high_level.create_cache_folder()
+
+
+# for backward compatibility
+def download_font_assets():
+    return yadt.high_level.download_font_assets()
+
+
+def cli():
+    """Command line interface entry point."""
+    from rich.logging import RichHandler
+
+    logging.basicConfig(level=logging.INFO, handlers=[RichHandler()])
+
+    logging.getLogger("httpx").setLevel("CRITICAL")
+    logging.getLogger("httpx").propagate = False
+    logging.getLogger("openai").setLevel("CRITICAL")
+    logging.getLogger("openai").propagate = False
+    logging.getLogger("httpcore").setLevel("CRITICAL")
+    logging.getLogger("httpcore").propagate = False
+    logging.getLogger("http11").setLevel("CRITICAL")
+    logging.getLogger("http11").propagate = False
+    for v in logging.Logger.manager.loggerDict.values():
+        if getattr(v, "name", None) is None:
+            continue
+        if (
+            v.name.startswith("pdfminer")
+            or v.name.startswith("peewee")
+            or v.name.startswith("httpx")
+            or "http11" in v.name
+            or "openai" in v.name
+        ):
+            v.disabled = True
+            v.propagate = False
+
+    yadt.high_level.init()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":
-    main()
+    cli()

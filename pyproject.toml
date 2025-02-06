@@ -36,7 +36,7 @@ Homepage = "https://github.com/funstory-ai/yadt"
 Issues = "https://github.com/funstory-ai/yadt/issues"
 
 [project.scripts]
-yadt = "yadt.main:main"
+yadt = "yadt.main:cli"
 
 [build-system]
 requires = ["hatchling"]

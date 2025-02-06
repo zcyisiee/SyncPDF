@@ -89,8 +89,8 @@ def predict_layout(
             logger.error(f"Request failed with status {response.status_code}")
             logger.error(f"Response content: {response.content}")
             raise Exception(
-                f"Request failed with status {
-                    response.status_code}: {response.text}"
+                f"Request failed with status "
+                f"{response.status_code}: {response.text}"
             )
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")

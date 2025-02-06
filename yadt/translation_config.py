@@ -117,6 +117,10 @@ class TranslationConfig:
                 return True
         return False
 
+    def raise_if_cancelled(self):
+        if self.progress_monitor:
+            self.progress_monitor.raise_if_cancelled()
+
 
 class TranslateResult:
     original_pdf_path: str

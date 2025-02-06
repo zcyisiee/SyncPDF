@@ -24,29 +24,26 @@ class ILCreater:
         self.non_stroking_color_space_name = None
         self.passthrough_per_char_instruction: list[tuple[str, str]] = []
         self.translation_config = translation_config
-        self.passthrough_per_char_instruction_stack: list[
-            list[tuple[str, str]]
-        ] = []
+        self.passthrough_per_char_instruction_stack: list[list[tuple[str, str]]] = []
         self.xobj_id = 0
         self.xobj_inc = 0
         self.xobj_map: dict[int, il_version_1.PdfXobject] = {}
         self.xobj_stack = []
+
+    def on_finish(self):
+        self.progress.__exit__(None, None, None)
 
     def is_passthrough_per_char_operation(self, operator: str):
         return re.match("^(sc|scn|g|rg|k|cs|gs)$", operator, re.IGNORECASE)
 
     def on_passthrough_per_char(self, operator: str, args: list[str]):
         args = [self.parse_arg(arg) for arg in args]
-        for i, value in enumerate(
-            self.passthrough_per_char_instruction.copy()
-        ):
+        for i, value in enumerate(self.passthrough_per_char_instruction.copy()):
             op, arg = value
             if op == operator:
                 self.passthrough_per_char_instruction.remove(value)
                 break
-        self.passthrough_per_char_instruction.append(
-            (operator, " ".join(args))
-        )
+        self.passthrough_per_char_instruction.append((operator, " ".join(args)))
         pass
 
     def parse_arg(self, arg: str):
@@ -86,9 +83,7 @@ class ILCreater:
         self.current_page_font_name_id_map = {}
 
     def pop_xobj(self):
-        self.current_page_font_name_id_map, self.xobj_id = (
-            self.xobj_stack.pop()
-        )
+        self.current_page_font_name_id_map, self.xobj_id = self.xobj_stack.pop()
 
     def on_xobj_begin(self, bbox, xref_id):
         self.push_passthrough_per_char_instruction()
@@ -140,9 +135,7 @@ class ILCreater:
         x1: float | int,
         y1: float | int,
     ):
-        box = il_version_1.Box(
-            x=float(x0), y=float(y0), x2=float(x1), y2=float(y1)
-        )
+        box = il_version_1.Box(x=float(x0), y=float(y0), x2=float(x1), y2=float(y1))
         self.current_page.cropbox = il_version_1.Cropbox(box=box)
 
     def on_page_media_box(
@@ -152,9 +145,7 @@ class ILCreater:
         x1: float | int,
         y1: float | int,
     ):
-        box = il_version_1.Box(
-            x=float(x0), y=float(y0), x2=float(x1), y2=float(y1)
-        )
+        box = il_version_1.Box(x=float(x0), y=float(y0), x2=float(x1), y2=float(y1))
         self.current_page.mediabox = il_version_1.Mediabox(box=box)
 
     def on_page_number(self, page_number: int):
@@ -163,9 +154,7 @@ class ILCreater:
         self.current_page.page_number = page_number
 
     def on_page_base_operation(self, operation: str):
-        self.current_page.base_operations = il_version_1.BaseOperations(
-            value=operation
-        )
+        self.current_page.base_operations = il_version_1.BaseOperations(value=operation)
 
     def on_page_resource_font(self, font: PDFFont, xref_id: int, font_id: str):
         font_name = font.fontname
@@ -173,15 +162,11 @@ class ILCreater:
             try:
                 font_name = font_name.decode("utf-8")
             except UnicodeDecodeError:
-                font_name = "BASE64:" + base64.b64encode(font_name).decode(
-                    "utf-8"
-                )
+                font_name = "BASE64:" + base64.b64encode(font_name).decode("utf-8")
         encoding_length = 1
         if isinstance(font, PDFCIDFont):
             try:
-                _, to_unicode_id = self.mupdf.xref_get_key(
-                    xref_id, "ToUnicode"
-                )
+                _, to_unicode_id = self.mupdf.xref_get_key(xref_id, "ToUnicode")
                 to_unicode_bytes = self.mupdf.xref_stream(
                     int(to_unicode_id.split(" ")[0])
                 )
@@ -195,9 +180,7 @@ class ILCreater:
                 else:
                     encoding_length = 1
         try:
-            mupdf_font = pymupdf.Font(
-                fontbuffer=self.mupdf.extract_font(xref_id)[3]
-            )
+            mupdf_font = pymupdf.Font(fontbuffer=self.mupdf.extract_font(xref_id)[3])
             bold = mupdf_font.is_bold
             italic = mupdf_font.is_italic
             monospaced = mupdf_font.is_monospaced
@@ -241,12 +224,8 @@ class ILCreater:
             continue
             raise NotImplementedError
 
-        graphic_state.stroking_color_space_name = (
-            self.stroking_color_space_name
-        )
-        graphic_state.non_stroking_color_space_name = (
-            self.non_stroking_color_space_name
-        )
+        graphic_state.stroking_color_space_name = self.stroking_color_space_name
+        graphic_state.non_stroking_color_space_name = self.non_stroking_color_space_name
 
         graphic_state.passthrough_per_char_instruction = " ".join(
             f"{arg} {op}" for op, arg in gs.passthrough_instruction
@@ -256,9 +235,7 @@ class ILCreater:
 
     def on_lt_char(self, char: LTChar):
         gs = self.create_graphic_state(char.graphicstate)
-        bbox = il_version_1.Box(
-            char.bbox[0], char.bbox[1], char.bbox[2], char.bbox[3]
-        )
+        bbox = il_version_1.Box(char.bbox[0], char.bbox[1], char.bbox[2], char.bbox[3])
 
         char_id = char.cid
         char_unicode = char.get_text()
@@ -289,9 +266,7 @@ class ILCreater:
         pages = [
             page
             for page in self.docs.page
-            if self.translation_config.should_translate_page(
-                page.page_number + 1
-            )
+            if self.translation_config.should_translate_page(page.page_number + 1)
         ]
         self.docs.page = pages
         return self.docs
@@ -302,10 +277,7 @@ class ILCreater:
         self.docs.total_pages = total_pages
         total = 0
         for page in range(total_pages):
-            if (
-                self.translation_config.should_translate_page(page + 1)
-                is False
-            ):
+            if self.translation_config.should_translate_page(page + 1) is False:
                 continue
             total += 1
         self.progress = self.translation_config.progress_monitor.stage_start(
