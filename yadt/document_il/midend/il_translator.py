@@ -456,35 +456,44 @@ class ILTranslator:
     ):
         self.translation_config.raise_if_cancelled()
         with PbarContext(pbar):
-            if paragraph.vertical:
+            try:
+                if paragraph.vertical:
+                    return
+
+                tracker.set_pdf_unicode(paragraph.unicode)
+                if paragraph.xobj_id in xobj_font_map:
+                    page_font_map = xobj_font_map[paragraph.xobj_id]
+                translate_input = self.get_translate_input(paragraph, page_font_map)
+                if not translate_input:
+                    return
+
+                tracker.set_input(translate_input.unicode)
+
+                text = translate_input.unicode
+                translated_text = self.translate_engine.translate(text)
+
+                tracker.set_output(translated_text)
+
+                if translated_text == text:
+                    return
+
+                paragraph.unicode = translated_text
+                paragraph.pdf_paragraph_composition = self.parse_translate_output(
+                    translate_input, translated_text
+                )
+                for composition in paragraph.pdf_paragraph_composition:
+                    if (
+                        composition.pdf_same_style_unicode_characters
+                        and composition.pdf_same_style_unicode_characters.pdf_style is None
+                    ):
+                        composition.pdf_same_style_unicode_characters.pdf_style = (
+                            paragraph.pdf_style
+                        )
+            except Exception as e:
+                logger.exception(
+                    f"Error translating paragraph. "
+                    f"Paragraph: {paragraph}. "
+                    f"Error: {e}. "
+                )
+                # ignore error and continue
                 return
-
-            tracker.set_pdf_unicode(paragraph.unicode)
-            if paragraph.xobj_id in xobj_font_map:
-                page_font_map = xobj_font_map[paragraph.xobj_id]
-            translate_input = self.get_translate_input(paragraph, page_font_map)
-            if not translate_input:
-                return
-
-            tracker.set_input(translate_input.unicode)
-
-            text = translate_input.unicode
-            translated_text = self.translate_engine.translate(text)
-
-            tracker.set_output(translated_text)
-
-            if translated_text == text:
-                return
-
-            paragraph.unicode = translated_text
-            paragraph.pdf_paragraph_composition = self.parse_translate_output(
-                translate_input, translated_text
-            )
-            for composition in paragraph.pdf_paragraph_composition:
-                if (
-                    composition.pdf_same_style_unicode_characters
-                    and composition.pdf_same_style_unicode_characters.pdf_style is None
-                ):
-                    composition.pdf_same_style_unicode_characters.pdf_style = (
-                        paragraph.pdf_style
-                    )

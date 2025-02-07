@@ -83,7 +83,7 @@ def predict_layout(
                 result = msgpack.unpackb(response.content, raw=False)
                 return result
             except Exception as e:
-                logger.error(f"Failed to unpack response: {str(e)}")
+                logger.exception(f"Failed to unpack response: {str(e)}")
                 raise
         else:
             logger.error(f"Request failed with status {response.status_code}")
@@ -93,7 +93,7 @@ def predict_layout(
                 f"{response.status_code}: {response.text}"
             )
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
+        logger.exception(f"Unexpected error: {str(e)}")
         raise
 
 
