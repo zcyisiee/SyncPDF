@@ -80,7 +80,7 @@ class PDFCreater:
         chars = []
         for composition in paragraph.pdf_paragraph_composition:
             if not isinstance(composition.pdf_character, il_version_1.PdfCharacter):
-                raise Exception(
+                logger.error(
                     f"Unknown composition type. "
                     f"This type only appears in the IL "
                     f"after the translation is completed."
@@ -88,68 +88,15 @@ class PDFCreater:
                     f"Composition: {composition}. "
                     f"Paragraph: {paragraph}. "
                 )
+                continue
             chars.append(composition.pdf_character)
         if not chars and paragraph.unicode:
-            # 开发用途：临时禁用此警告
-            return chars
-            raise Exception(
-                "Unable to export paragraphs that have not yet been formatted"
+            logger.error(
+                f"Unable to export paragraphs that have "
+                f"not yet been formatted: {paragraph}"
             )
+            return chars
         return chars
-
-    def add_font(self, doc_zh: pymupdf.Document, il: il_version_1.Document):
-        noto_path = self.font_path
-        font_list = [
-            ("noto", noto_path),
-        ]
-        font_id = {}
-        for page in doc_zh:
-            for font in font_list:
-                font_id[font[0]] = page.insert_font(font[0], font[1])
-        xreflen = doc_zh.xref_length()
-        for xref in range(1, xreflen):
-            for label in ["Resources/", ""]:  # 可能是基于 xobj 的 res
-                try:  # xref 读写可能出错
-                    font_res = doc_zh.xref_get_key(xref, f"{label}Font")
-                    if font_res[0] == "dict":
-                        for font in font_list:
-                            font_exist = doc_zh.xref_get_key(
-                                xref, f"{label}Font/{font[0]}"
-                            )
-                            if font_exist[0] == "null":
-                                doc_zh.xref_set_key(
-                                    xref,
-                                    f"{label}Font/{font[0]}",
-                                    f"{font_id[font[0]]} 0 R",
-                                )
-                except Exception:
-                    pass
-        # buffer = io.BytesIO()
-        # doc_zh.save(buffer)
-        # parser = PDFParser(buffer)
-        # miner_doc = pdfminer.pdfdocument.PDFDocument(parser)
-        # first_page = next(PDFPage.create_pages(miner_doc))
-        # resources = first_page.resources
-        # rsrcmgr = PDFResourceManager()
-        # for k, v in dict_value(resources).items():
-        #     # log.debug("Resource: %r: %r", k, v)
-        #     if k == "Font":
-        #         for fontid, spec in dict_value(v).items():
-        #             objid = None
-        #             if isinstance(spec, PDFObjRef):
-        #                 objid = spec.objid
-        #             spec = dict_value(spec)
-        #             font = rsrcmgr.get_font(objid, spec)
-        #             if fontid == "noto":
-        #                 return font
-        pdf_font_il = il_version_1.PdfFont(
-            name="noto",
-            xref_id=font_id["noto"],
-            font_id="noto",
-            encoding_length=2,
-        )
-        for page in il.page:
-            page.pdf_font.append(pdf_font_il)
 
     def get_available_font_list(self, pdf, page):
         page_xref_id = pdf[page.page_number].xref
@@ -185,7 +132,6 @@ class PDFCreater:
         )
         pdf = pymupdf.open(self.original_pdf_path)
         self.font_mapper.add_font(pdf, self.docs)
-        # self.add_font(pdf, self.docs)
         with self.translation_config.progress_monitor.stage_start(
             self.stage_name, len(self.docs.page) + 2
         ) as pbar:
@@ -197,7 +143,8 @@ class PDFCreater:
                 available_font_list = self.get_available_font_list(pdf, page)
 
                 for xobj in page.pdf_xobject:
-                    xobj_available_fonts[xobj.xobj_id] = available_font_list.copy()
+                    xobj_available_fonts[xobj.xobj_id] = available_font_list.copy(
+                    )
                     try:
                         xobj_available_fonts[xobj.xobj_id].update(
                             self.get_xobj_available_fonts(xobj.xref_id, pdf)
@@ -219,7 +166,8 @@ class PDFCreater:
                 page_op.append(page.base_operations.value.encode())
                 page_op.append(b" Q ")
                 page_op.append(
-                    f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode()
+                    f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode(
+                    )
                 )
                 # 收集所有字符
                 chars = []
@@ -251,7 +199,8 @@ class PDFCreater:
                         encoding_length_map = page_encoding_length_map
 
                     draw_op.append(b"q ")
-                    self.render_graphic_state(draw_op, char.pdf_style.graphic_state)
+                    self.render_graphic_state(
+                        draw_op, char.pdf_style.graphic_state)
                     if char.vertical:
                         draw_op.append(
                             f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode()

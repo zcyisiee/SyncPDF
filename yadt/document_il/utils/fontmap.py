@@ -1,3 +1,4 @@
+import logging
 import functools
 import os.path
 import re
@@ -7,6 +8,8 @@ import pymupdf
 from yadt.const import get_cache_file_path
 from yadt.document_il import PdfFont, il_version_1
 from yadt.translation_config import TranslationConfig
+
+logger = logging.getLogger(__name__)
 
 
 class FontMapper:
@@ -77,7 +80,12 @@ class FontMapper:
             monospaced = original_font.monospace
             serif = original_font.serif
         else:
-            raise Exception(f"Unknown font type: {type(original_font)}")
+            logger.error(
+                f"Unknown font type: {type(original_font)}. "
+                f"Original font: {original_font}. "
+                f"Char unicode: {char_unicode}. "
+            )
+            return None
         if italic and self.kai_font.has_glyph(current_char):
             return self.kai_font
         for k, font in self.fonts.items():
@@ -97,7 +105,12 @@ class FontMapper:
         if self.fallback_font.has_glyph(current_char):
             return self.fallback_font
 
-        raise Exception(f"Can't find font for {char_unicode}({current_char})")
+        logger.error(
+            f"Can't find font for {char_unicode}({current_char}). "
+            f"Original font: {original_font}. "
+            f"Char unicode: {char_unicode}. "
+        )
+        return None
 
     def add_font(self, doc_zh: pymupdf.Document, il: il_version_1.Document):
         font_list = [
@@ -108,7 +121,8 @@ class FontMapper:
         font_list.extend(
             [
                 (
-                    os.path.basename(file_name).split(".")[0].replace("-", "").lower(),
+                    os.path.basename(file_name).split(
+                        ".")[0].replace("-", "").lower(),
                     get_cache_file_path(file_name),
                 )
                 for file_name in self.font_names
@@ -141,7 +155,8 @@ class FontMapper:
                         if font_res[0] == "dict":
                             for font in font_list:
                                 target_key = f"{target_key_prefix}{font[0]}"
-                                font_exist = doc_zh.xref_get_key(xref, target_key)
+                                font_exist = doc_zh.xref_get_key(
+                                    xref, target_key)
                                 if font_exist[0] == "null":
                                     doc_zh.xref_set_key(
                                         xref,

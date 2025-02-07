@@ -1,3 +1,4 @@
+import logging
 import re
 from typing import Literal, Union
 
@@ -17,6 +18,8 @@ from yadt.document_il.utils.layout_helper import (
 )
 from yadt.translation_config import TranslationConfig
 
+logger = logging.getLogger(__name__)
+
 
 class ParagraphFinder:
     stage_name = "解析段落"
@@ -35,12 +38,13 @@ class ParagraphFinder:
             elif composition.pdf_formula:
                 chars.extend(composition.pdf_formula.pdf_character)
             else:
-                raise Exception(
+                logger.error(
                     "Unexpected composition type"
                     " in PdfParagraphComposition. "
                     "This type only appears in the IL "
                     "after the translation is completed."
                 )
+                continue
 
         if update_unicode:
             paragraph.unicode = get_char_unicode_string(chars)
@@ -202,7 +206,8 @@ class ParagraphFinder:
                     processed_chars.append(char)
 
             # 移除尾随空格
-            while processed_chars and processed_chars[-1].char_unicode.isspace():
+            while (processed_chars
+                   and processed_chars[-1].char_unicode.isspace()):
                 processed_chars.pop()
 
             if processed_chars:  # 如果行内还有字符
@@ -271,7 +276,8 @@ class ParagraphFinder:
             char_x = (char_box.x + char_box.x2) / 2
             char_y = (char_box.y + char_box.y2) / 2
         else:
-            raise ValueError(f"Invalid xy_mode: {xy_mode}")
+            logger.error(f"Invalid xy_mode: {xy_mode}")
+            return self.get_layout(char, page, "middle")
         # 按照优先级顺序检查每种布局
         matching_layouts = {}
         for layout in page.page_layout:

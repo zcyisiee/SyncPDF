@@ -124,6 +124,11 @@ class BaseTranslator(ABC):
         :param text: text to translate
         :return: translated text
         """
+        logger.critical(
+            f"Do not call BaseTranslator.do_translate. "
+            f"Translator: {self}. "
+            f"Text: {text}. "
+        )
         raise NotImplementedError
 
     def __str__(self):

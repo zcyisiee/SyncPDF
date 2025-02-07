@@ -388,7 +388,7 @@ def do_translate(pm, translation_config):
         pm.translate_done(result)
         return result
     except Exception as e:
-        logger.error(f"translate error: {e}", exc_info=True)
+        logger.exception(f"translate error: {e}")
         pm.translate_error(e)
         raise
     finally:

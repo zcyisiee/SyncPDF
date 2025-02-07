@@ -241,11 +241,12 @@ class ILTranslator:
                 # 不需要翻译纯公式
                 return None
             else:
-                raise ValueError(
+                logger.error(
                     f"Unknown composition type. "
                     f"Composition: {composition}. "
                     f"Paragraph: {paragraph}. "
                 )
+                return None
 
         placeholder_id = 1
         placeholders = []
@@ -264,6 +265,9 @@ class ILTranslator:
             elif composition.pdf_character:
                 chars.append(composition.pdf_character)
             elif composition.pdf_same_style_characters:
+                fonta = self.font_mapper.map(
+                    page_font_map[composition.pdf_same_style_characters.pdf_style.font_id], "1", )
+                fontb = self.font_mapper.map(page_font_map[paragraph.pdf_style.font_id], "1")
                 if (
                     # 样式和段落基准样式一致，无需占位符
                     is_same_style(
@@ -281,15 +285,10 @@ class ILTranslator:
                             composition.pdf_same_style_characters.pdf_style,
                             paragraph.pdf_style,
                         )
-                        and self.font_mapper.map(
-                            page_font_map[
-                                composition.pdf_same_style_characters.pdf_style.font_id
-                            ],
-                            "1",
-                        ).font_id
-                        == self.font_mapper.map(
-                            page_font_map[paragraph.pdf_style.font_id], "1"
-                        ).font_id
+                        and fonta
+                        and fontb
+                        and fonta.font_id
+                        == fontb.font_id
                     )
                     # or len(composition.pdf_same_style_characters.pdf_character) == 1
                 ):
@@ -307,12 +306,13 @@ class ILTranslator:
                 chars.extend(composition.pdf_same_style_characters.pdf_character)
                 chars.append(placeholder.right_placeholder)
             else:
-                raise Exception(
+                logger.error(
                     "Unexpected PdfParagraphComposition type "
                     "in PdfParagraph during translation. "
                     f"Composition: {composition}. "
                     f"Paragraph: {paragraph}. "
                 )
+                return None
 
         text = get_char_unicode_string(chars)
         return self.TranslateInput(text, placeholders, paragraph.pdf_style)
@@ -456,35 +456,44 @@ class ILTranslator:
     ):
         self.translation_config.raise_if_cancelled()
         with PbarContext(pbar):
-            if paragraph.vertical:
+            try:
+                if paragraph.vertical:
+                    return
+
+                tracker.set_pdf_unicode(paragraph.unicode)
+                if paragraph.xobj_id in xobj_font_map:
+                    page_font_map = xobj_font_map[paragraph.xobj_id]
+                translate_input = self.get_translate_input(paragraph, page_font_map)
+                if not translate_input:
+                    return
+
+                tracker.set_input(translate_input.unicode)
+
+                text = translate_input.unicode
+                translated_text = self.translate_engine.translate(text)
+
+                tracker.set_output(translated_text)
+
+                if translated_text == text:
+                    return
+
+                paragraph.unicode = translated_text
+                paragraph.pdf_paragraph_composition = self.parse_translate_output(
+                    translate_input, translated_text
+                )
+                for composition in paragraph.pdf_paragraph_composition:
+                    if (
+                        composition.pdf_same_style_unicode_characters
+                        and composition.pdf_same_style_unicode_characters.pdf_style is None
+                    ):
+                        composition.pdf_same_style_unicode_characters.pdf_style = (
+                            paragraph.pdf_style
+                        )
+            except Exception as e:
+                logger.exception(
+                    f"Error translating paragraph. "
+                    f"Paragraph: {paragraph}. "
+                    f"Error: {e}. "
+                )
+                # ignore error and continue
                 return
-
-            tracker.set_pdf_unicode(paragraph.unicode)
-            if paragraph.xobj_id in xobj_font_map:
-                page_font_map = xobj_font_map[paragraph.xobj_id]
-            translate_input = self.get_translate_input(paragraph, page_font_map)
-            if not translate_input:
-                return
-
-            tracker.set_input(translate_input.unicode)
-
-            text = translate_input.unicode
-            translated_text = self.translate_engine.translate(text)
-
-            tracker.set_output(translated_text)
-
-            if translated_text == text:
-                return
-
-            paragraph.unicode = translated_text
-            paragraph.pdf_paragraph_composition = self.parse_translate_output(
-                translate_input, translated_text
-            )
-            for composition in paragraph.pdf_paragraph_composition:
-                if (
-                    composition.pdf_same_style_unicode_characters
-                    and composition.pdf_same_style_unicode_characters.pdf_style is None
-                ):
-                    composition.pdf_same_style_unicode_characters.pdf_style = (
-                        paragraph.pdf_style
-                    )
