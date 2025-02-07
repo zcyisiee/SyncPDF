@@ -143,7 +143,8 @@ class PDFCreater:
                 available_font_list = self.get_available_font_list(pdf, page)
 
                 for xobj in page.pdf_xobject:
-                    xobj_available_fonts[xobj.xobj_id] = available_font_list.copy()
+                    xobj_available_fonts[xobj.xobj_id] = available_font_list.copy(
+                    )
                     try:
                         xobj_available_fonts[xobj.xobj_id].update(
                             self.get_xobj_available_fonts(xobj.xref_id, pdf)
@@ -165,7 +166,8 @@ class PDFCreater:
                 page_op.append(page.base_operations.value.encode())
                 page_op.append(b" Q ")
                 page_op.append(
-                    f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode()
+                    f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode(
+                    )
                 )
                 # 收集所有字符
                 chars = []
@@ -197,7 +199,8 @@ class PDFCreater:
                         encoding_length_map = page_encoding_length_map
 
                     draw_op.append(b"q ")
-                    self.render_graphic_state(draw_op, char.pdf_style.graphic_state)
+                    self.render_graphic_state(
+                        draw_op, char.pdf_style.graphic_state)
                     if char.vertical:
                         draw_op.append(
                             f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode()
