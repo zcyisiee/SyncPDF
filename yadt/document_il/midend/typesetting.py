@@ -693,7 +693,7 @@ class Typesetting:
                     f"Paragraph: {paragraph}. "
                 )
                 continue
-
+        result = list(filter(lambda x: x.font is not None, result))
         return result
 
     def create_passthrough_composition(

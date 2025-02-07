@@ -1,3 +1,4 @@
+import logging
 import math
 from typing import List, Optional, Union
 
@@ -11,6 +12,7 @@ from yadt.document_il.il_version_1 import (
     PdfParagraphComposition,
 )
 
+logger = logging.getLogger(__name__)
 HEIGHT_NOT_USFUL_CHAR_IN_CHAR = (
     "∑︁",
     # 暂时假设cid:17和cid 16是特殊情况
@@ -113,11 +115,12 @@ def get_paragraph_length_except(
         elif composition.pdf_formula:
             length += composition.pdf_formula.box.x2 - composition.pdf_formula.box.x
         else:
-            raise ValueError(
+            logger.error(
                 f"Unknown composition type. "
                 f"Composition: {composition}. "
                 f"Paragraph: {paragraph}. "
             )
+            continue
     return length
 
 
@@ -135,11 +138,12 @@ def get_paragraph_unicode(paragraph: PdfParagraph) -> str:
         elif composition.pdf_character:
             chars.append(composition.pdf_character)
         else:
-            raise ValueError(
+            logger.error(
                 f"Unknown composition type. "
                 f"Composition: {composition}. "
                 f"Paragraph: {paragraph}. "
             )
+            continue
     return get_char_unicode_string(chars)
 
 
@@ -239,11 +243,12 @@ def get_paragraph_max_height(paragraph: PdfParagraph) -> float:
             )
             max_height = max(max_height, formula_height)
         else:
-            raise ValueError(
+            logger.error(
                 f"Unknown composition type. "
                 f"Composition: {composition}. "
                 f"Paragraph: {paragraph}. "
             )
+            continue
     return max_height
 
 
