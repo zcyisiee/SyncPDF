@@ -241,11 +241,12 @@ class ILTranslator:
                 # 不需要翻译纯公式
                 return None
             else:
-                raise ValueError(
+                logger.error(
                     f"Unknown composition type. "
                     f"Composition: {composition}. "
                     f"Paragraph: {paragraph}. "
                 )
+                return None
 
         placeholder_id = 1
         placeholders = []
