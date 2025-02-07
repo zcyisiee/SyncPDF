@@ -308,12 +308,13 @@ class ILTranslator:
                 chars.extend(composition.pdf_same_style_characters.pdf_character)
                 chars.append(placeholder.right_placeholder)
             else:
-                raise Exception(
+                logger.error(
                     "Unexpected PdfParagraphComposition type "
                     "in PdfParagraph during translation. "
                     f"Composition: {composition}. "
                     f"Paragraph: {paragraph}. "
                 )
+                return None
 
         text = get_char_unicode_string(chars)
         return self.TranslateInput(text, placeholders, paragraph.pdf_style)
