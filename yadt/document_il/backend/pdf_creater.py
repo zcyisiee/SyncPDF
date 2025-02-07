@@ -80,7 +80,7 @@ class PDFCreater:
         chars = []
         for composition in paragraph.pdf_paragraph_composition:
             if not isinstance(composition.pdf_character, il_version_1.PdfCharacter):
-                raise Exception(
+                logger.error(
                     f"Unknown composition type. "
                     f"This type only appears in the IL "
                     f"after the translation is completed."
@@ -88,13 +88,14 @@ class PDFCreater:
                     f"Composition: {composition}. "
                     f"Paragraph: {paragraph}. "
                 )
+                continue
             chars.append(composition.pdf_character)
         if not chars and paragraph.unicode:
-            # 开发用途：临时禁用此警告
-            return chars
-            raise Exception(
-                "Unable to export paragraphs that have not yet been formatted"
+            logger.error(
+                f"Unable to export paragraphs that have "
+                f"not yet been formatted: {paragraph}"
             )
+            return chars
         return chars
 
     def add_font(self, doc_zh: pymupdf.Document, il: il_version_1.Document):
