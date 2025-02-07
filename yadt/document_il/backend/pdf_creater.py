@@ -98,60 +98,6 @@ class PDFCreater:
             return chars
         return chars
 
-    def add_font(self, doc_zh: pymupdf.Document, il: il_version_1.Document):
-        noto_path = self.font_path
-        font_list = [
-            ("noto", noto_path),
-        ]
-        font_id = {}
-        for page in doc_zh:
-            for font in font_list:
-                font_id[font[0]] = page.insert_font(font[0], font[1])
-        xreflen = doc_zh.xref_length()
-        for xref in range(1, xreflen):
-            for label in ["Resources/", ""]:  # 可能是基于 xobj 的 res
-                try:  # xref 读写可能出错
-                    font_res = doc_zh.xref_get_key(xref, f"{label}Font")
-                    if font_res[0] == "dict":
-                        for font in font_list:
-                            font_exist = doc_zh.xref_get_key(
-                                xref, f"{label}Font/{font[0]}"
-                            )
-                            if font_exist[0] == "null":
-                                doc_zh.xref_set_key(
-                                    xref,
-                                    f"{label}Font/{font[0]}",
-                                    f"{font_id[font[0]]} 0 R",
-                                )
-                except Exception:
-                    pass
-        # buffer = io.BytesIO()
-        # doc_zh.save(buffer)
-        # parser = PDFParser(buffer)
-        # miner_doc = pdfminer.pdfdocument.PDFDocument(parser)
-        # first_page = next(PDFPage.create_pages(miner_doc))
-        # resources = first_page.resources
-        # rsrcmgr = PDFResourceManager()
-        # for k, v in dict_value(resources).items():
-        #     # log.debug("Resource: %r: %r", k, v)
-        #     if k == "Font":
-        #         for fontid, spec in dict_value(v).items():
-        #             objid = None
-        #             if isinstance(spec, PDFObjRef):
-        #                 objid = spec.objid
-        #             spec = dict_value(spec)
-        #             font = rsrcmgr.get_font(objid, spec)
-        #             if fontid == "noto":
-        #                 return font
-        pdf_font_il = il_version_1.PdfFont(
-            name="noto",
-            xref_id=font_id["noto"],
-            font_id="noto",
-            encoding_length=2,
-        )
-        for page in il.page:
-            page.pdf_font.append(pdf_font_il)
-
     def get_available_font_list(self, pdf, page):
         page_xref_id = pdf[page.page_number].xref
         return self.get_xobj_available_fonts(page_xref_id, pdf)
@@ -186,7 +132,6 @@ class PDFCreater:
         )
         pdf = pymupdf.open(self.original_pdf_path)
         self.font_mapper.add_font(pdf, self.docs)
-        # self.add_font(pdf, self.docs)
         with self.translation_config.progress_monitor.stage_start(
             self.stage_name, len(self.docs.page) + 2
         ) as pbar:
