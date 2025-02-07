@@ -36,7 +36,7 @@ class TypesettingUnit:
         char: PdfCharacter = None,
         formular: PdfFormula = None,
         unicode: str = None,
-        font: pymupdf.Font = None,
+        font: Optional[pymupdf.Font] = None,
         font_size: float = None,
         style: PdfStyle = None,
         xobj_id: int = None,
@@ -53,7 +53,6 @@ class TypesettingUnit:
 
         if unicode:
             assert font_size, "Font size must be provided when unicode is provided"
-            assert font, "Font must be provided when unicode is provided"
             assert style, "Style must be provided when unicode is provided"
             assert len(unicode) == 1, "Unicode must be a single character"
             assert (
@@ -693,7 +692,7 @@ class Typesetting:
                     f"Paragraph: {paragraph}. "
                 )
                 continue
-        result = list(filter(lambda x: x.font is not None, result))
+        result = list(filter(lambda x: getattr(x, 'unicode') is None or getattr(x,'font') is not None, result))
         return result
 
     def create_passthrough_composition(
