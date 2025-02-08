@@ -22,24 +22,28 @@ class LayoutParser:
         """Save debug image with drawn boxes if debug mode is enabled."""
         if not self.translation_config.debug:
             return
-            
+
         debug_dir = self.translation_config.get_working_file_path("ocr-box-image")
         os.makedirs(debug_dir, exist_ok=True)
-        
+
         # Draw boxes on the image
         debug_image = image.copy()
         for box in layout.boxes:
             x0, y0, x1, y1 = box.xyxy
             cv2.rectangle(
-                debug_image, (int(x0), int(y0)), (int(x1), int(y1)),
-                (0, 255, 0), 2
+                debug_image, (int(x0), int(y0)), (int(x1), int(y1)), (0, 255, 0), 2
             )
             # Add text label
             cv2.putText(
-                debug_image, layout.names[box.cls], (int(x0), int(y0)-5),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1
+                debug_image,
+                layout.names[box.cls],
+                (int(x0), int(y0) - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 0),
+                1,
             )
-        
+
         # Save the image
         output_path = os.path.join(debug_dir, f"{page_number}.jpg")
         cv2.imwrite(output_path, debug_image)
@@ -81,7 +85,7 @@ class LayoutParser:
                     self._save_debug_image(
                         batch_images[batch_pages.index(page)],
                         layouts,
-                        page.page_number + 1
+                        page.page_number + 1,
                     )
                     for layout in layouts.boxes:
                         # Convert coordinate system from picture to il

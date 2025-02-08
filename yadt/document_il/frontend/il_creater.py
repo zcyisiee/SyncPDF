@@ -13,6 +13,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class ILCreater:
     stage_name = "解析PDF并创建中间表示"
 
@@ -62,8 +63,10 @@ class ILCreater:
             )
         else:
             self.passthrough_per_char_instruction = []
-            logging.error("pop_passthrough_per_char_instruction error on page: %s",
-                          self.current_page.page_number)
+            logging.error(
+                "pop_passthrough_per_char_instruction error on page: %s",
+                self.current_page.page_number,
+            )
 
     def push_passthrough_per_char_instruction(self):
         self.passthrough_per_char_instruction_stack.append(

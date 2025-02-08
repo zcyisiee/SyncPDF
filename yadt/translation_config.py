@@ -35,7 +35,7 @@ class TranslationConfig:
         progress_monitor: Optional[ProgressMonitor] = None,  # progress_monitor
         doc_layout_model=None,
         skip_clean: bool = False,
-            dual_translate_first: bool = False
+        dual_translate_first: bool = False,
     ):
         self.input_file = input_file
         self.translator = translator
@@ -65,14 +65,12 @@ class TranslationConfig:
         if working_dir is None:
             if debug:
                 working_dir = os.path.join(
-                    CACHE_FOLDER, "working", os.path.basename(
-                        input_file).split(".")[0]
+                    CACHE_FOLDER, "working", os.path.basename(input_file).split(".")[0]
                 )
             else:
                 working_dir = tempfile.mkdtemp(prefix="yadt_")
         self.working_dir = working_dir
-        self._is_temp_dir = not debug and working_dir.startswith(
-            tempfile.gettempdir())
+        self._is_temp_dir = not debug and working_dir.startswith(tempfile.gettempdir())
 
         os.makedirs(working_dir, exist_ok=True)
 
