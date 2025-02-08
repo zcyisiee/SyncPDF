@@ -121,8 +121,7 @@ class FontMapper:
         font_list.extend(
             [
                 (
-                    os.path.basename(file_name).split(
-                        ".")[0].replace("-", "").lower(),
+                    os.path.basename(file_name).split(".")[0].replace("-", "").lower(),
                     get_cache_file_path(file_name),
                 )
                 for file_name in self.font_names
@@ -155,8 +154,7 @@ class FontMapper:
                         if font_res[0] == "dict":
                             for font in font_list:
                                 target_key = f"{target_key_prefix}{font[0]}"
-                                font_exist = doc_zh.xref_get_key(
-                                    xref, target_key)
+                                font_exist = doc_zh.xref_get_key(xref, target_key)
                                 if font_exist[0] == "null":
                                     doc_zh.xref_set_key(
                                         xref,

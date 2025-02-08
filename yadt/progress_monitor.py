@@ -63,9 +63,11 @@ class ProgressMonitor:
     def stage_done(self, stage):
         self.last_report_time = 0
         self.finish_stage_count += 1
-        if (stage.current != stage.total
-                and self.cancel_event is not None
-                and not self.cancel_event.is_set()):
+        if (
+            stage.current != stage.total
+            and self.cancel_event is not None
+            and not self.cancel_event.is_set()
+        ):
             logger.warning(
                 f"Stage {stage.name} completed with {stage.current}/{stage.total} items"
             )
@@ -117,6 +119,7 @@ class ProgressMonitor:
     def cancel(self):
         if self.cancel_event:
             self.cancel_event.set()
+
 
 class TranslationStage:
     def __init__(self, name: str, total: int, pm: ProgressMonitor):

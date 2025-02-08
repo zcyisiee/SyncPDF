@@ -266,8 +266,14 @@ class ILTranslator:
                 chars.append(composition.pdf_character)
             elif composition.pdf_same_style_characters:
                 fonta = self.font_mapper.map(
-                    page_font_map[composition.pdf_same_style_characters.pdf_style.font_id], "1", )
-                fontb = self.font_mapper.map(page_font_map[paragraph.pdf_style.font_id], "1")
+                    page_font_map[
+                        composition.pdf_same_style_characters.pdf_style.font_id
+                    ],
+                    "1",
+                )
+                fontb = self.font_mapper.map(
+                    page_font_map[paragraph.pdf_style.font_id], "1"
+                )
                 if (
                     # 样式和段落基准样式一致，无需占位符
                     is_same_style(
@@ -287,8 +293,7 @@ class ILTranslator:
                         )
                         and fonta
                         and fontb
-                        and fonta.font_id
-                        == fontb.font_id
+                        and fonta.font_id == fontb.font_id
                     )
                     # or len(composition.pdf_same_style_characters.pdf_character) == 1
                 ):
@@ -484,7 +489,8 @@ class ILTranslator:
                 for composition in paragraph.pdf_paragraph_composition:
                     if (
                         composition.pdf_same_style_unicode_characters
-                        and composition.pdf_same_style_unicode_characters.pdf_style is None
+                        and composition.pdf_same_style_unicode_characters.pdf_style
+                        is None
                     ):
                         composition.pdf_same_style_unicode_characters.pdf_style = (
                             paragraph.pdf_style
