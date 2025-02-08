@@ -9,7 +9,9 @@ from pdfminer.psparser import PSLiteral
 
 from yadt.document_il import il_version_1
 from yadt.translation_config import TranslationConfig
+import logging
 
+logger = logging.getLogger(__name__)
 
 class ILCreater:
     stage_name = "解析PDF并创建中间表示"
@@ -34,7 +36,7 @@ class ILCreater:
         self.progress.__exit__(None, None, None)
 
     def is_passthrough_per_char_operation(self, operator: str):
-        return re.match("^(sc|scn|g|rg|k|cs|gs)$", operator, re.IGNORECASE)
+        return re.match("^(sc|scn|g|rg|k|cs|gs|ri)$", operator, re.IGNORECASE)
 
     def on_passthrough_per_char(self, operator: str, args: list[str]):
         args = [self.parse_arg(arg) for arg in args]
@@ -58,6 +60,10 @@ class ILCreater:
             self.passthrough_per_char_instruction = (
                 self.passthrough_per_char_instruction_stack.pop()
             )
+        else:
+            self.passthrough_per_char_instruction = []
+            logging.error("pop_passthrough_per_char_instruction error on page: %s",
+                          self.current_page.page_number)
 
     def push_passthrough_per_char_instruction(self):
         self.passthrough_per_char_instruction_stack.append(
@@ -123,6 +129,8 @@ class ILCreater:
         self.current_page_font_name_id_map = {}
         self.passthrough_per_char_instruction_stack = []
         self.xobj_stack = []
+        self.non_stroking_color_space_name = None
+        self.stroking_color_space_name = None
         self.docs.page.append(self.current_page)
 
     def on_page_end(self):
