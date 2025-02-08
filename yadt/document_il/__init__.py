@@ -4,7 +4,6 @@ from yadt.document_il.il_version_1 import (
     Cropbox,
     Document,
     GraphicState,
-    GraphicState1,
     Mediabox,
     Page,
     PageLayout,
@@ -23,7 +22,6 @@ from yadt.document_il.il_version_1 import (
 )
 
 __all__ = [
-    "GraphicState1",
     "BaseOperations",
     "Box",
     "Cropbox",

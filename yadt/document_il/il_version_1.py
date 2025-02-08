@@ -201,21 +201,6 @@ class PdfFont:
 
 
 @dataclass
-class GraphicState1:
-    class Meta:
-        name = "GraphicState"
-
-    graphic_state: Optional[GraphicState] = field(
-        default=None,
-        metadata={
-            "name": "graphicState",
-            "type": "Element",
-            "required": True,
-        },
-    )
-
-
-@dataclass
 class Cropbox:
     class Meta:
         name = "cropbox"
@@ -304,6 +289,43 @@ class PdfRectangle:
             "required": True,
         },
     )
+    graphic_state: Optional[GraphicState] = field(
+        default=None,
+        metadata={
+            "name": "graphicState",
+            "type": "Element",
+            "required": True,
+        },
+    )
+
+
+@dataclass
+class PdfStyle:
+    class Meta:
+        name = "pdfStyle"
+
+    graphic_state: Optional[GraphicState] = field(
+        default=None,
+        metadata={
+            "name": "graphicState",
+            "type": "Element",
+            "required": True,
+        },
+    )
+    font_id: Optional[str] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    font_size: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
 
 
 @dataclass
@@ -345,27 +367,6 @@ class PdfXobject:
         default=None,
         metadata={
             "name": "xrefId",
-            "type": "Attribute",
-            "required": True,
-        },
-    )
-
-
-@dataclass
-class PdfStyle(GraphicState1):
-    class Meta:
-        name = "pdfStyle"
-
-    font_id: Optional[str] = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-            "required": True,
-        },
-    )
-    font_size: Optional[float] = field(
-        default=None,
-        metadata={
             "type": "Attribute",
             "required": True,
         },

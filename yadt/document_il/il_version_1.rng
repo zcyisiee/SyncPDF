@@ -354,6 +354,7 @@
   <define name="PDFRectangle">
     <element name="pdfRectangle">
       <ref name="Box"/>
+      <ref name="GraphicState"/>
     </element>
   </define>
 </grammar>

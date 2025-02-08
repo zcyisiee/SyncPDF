@@ -99,11 +99,6 @@
       <xs:attribute name="class_name" use="required" type="xs:string"/>
     </xs:complexType>
   </xs:element>
-  <xs:complexType name="GraphicState">
-    <xs:sequence>
-      <xs:element ref="graphicState"/>
-    </xs:sequence>
-  </xs:complexType>
   <xs:element name="graphicState">
     <xs:complexType>
       <xs:attribute name="linewidth" type="xs:float"/>
@@ -149,12 +144,11 @@
   </xs:element>
   <xs:element name="pdfStyle">
     <xs:complexType>
-      <xs:complexContent>
-        <xs:extension base="GraphicState">
-          <xs:attribute name="font_id" use="required" type="xs:string"/>
-          <xs:attribute name="font_size" use="required" type="xs:float"/>
-        </xs:extension>
-      </xs:complexContent>
+      <xs:sequence>
+        <xs:element ref="graphicState"/>
+      </xs:sequence>
+      <xs:attribute name="font_id" use="required" type="xs:string"/>
+      <xs:attribute name="font_size" use="required" type="xs:float"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfParagraph">
@@ -228,6 +222,7 @@
     <xs:complexType>
       <xs:sequence>
         <xs:element ref="box"/>
+        <xs:element ref="graphicState"/>
       </xs:sequence>
     </xs:complexType>
   </xs:element>

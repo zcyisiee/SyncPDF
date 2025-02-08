@@ -128,4 +128,4 @@ PDFFormula =
     attribute y_offset { xsd:float }
   }
 PDFFigure = element pdfFigure { Box }
-PDFRectangle = element pdfRectangle { Box }
+PDFRectangle = element pdfRectangle { Box, GraphicState }
