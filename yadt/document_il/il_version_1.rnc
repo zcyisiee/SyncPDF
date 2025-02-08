@@ -10,6 +10,7 @@ Page =
     element cropbox { Box },
     PDFXobject*,
     PageLayout*,
+    PDFRectangle*,
     PDFFont*,
     PDFParagraph*,
     PDFFigure*,
@@ -55,6 +56,7 @@ PDFCharacter =
     attribute advance { xsd:float }?,
     # xobject nesting depth
     attribute xobjId { xsd:int }?,
+    attribute debug_info { xsd:boolean }?,
     PDFStyle,
     Box
   }
@@ -117,7 +119,8 @@ PDFSameStyleCharacters =
 PDFSameStyleUnicodeCharacters =
   element pdfSameStyleUnicodeCharacters {
     PDFStyle?,
-    attribute unicode { xsd:string }
+    attribute unicode { xsd:string },
+    attribute debug_info { xsd:boolean }?
   }
 PDFFormula =
   element pdfFormula {
@@ -127,3 +130,9 @@ PDFFormula =
     attribute y_offset { xsd:float }
   }
 PDFFigure = element pdfFigure { Box }
+PDFRectangle =
+  element pdfRectangle {
+    Box,
+    GraphicState,
+    attribute debug_info { xsd:boolean }?
+  }

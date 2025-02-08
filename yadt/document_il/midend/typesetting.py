@@ -39,6 +39,7 @@ class TypesettingUnit:
         font_size: float = None,
         style: PdfStyle = None,
         xobj_id: int = None,
+        debug_info: bool = False,
     ):
         assert (
             sum((x is not None for x in [char, formular, unicode])) == 1
@@ -49,6 +50,7 @@ class TypesettingUnit:
         self.x = None
         self.y = None
         self.scale = None
+        self.debug_info = debug_info
 
         if unicode:
             assert font_size, "Font size must be provided when unicode is provided"
@@ -238,6 +240,7 @@ class TypesettingUnit:
                 scale=scale,
                 vertical=self.char.vertical,
                 advance=self.char.advance * scale if self.char.advance else None,
+                debug_info=self.debug_info,
             )
             return TypesettingUnit(char=new_char)
 
@@ -304,6 +307,7 @@ class TypesettingUnit:
                 font_size=self.font_size * scale,
                 style=self.style,
                 xobj_id=self.xobj_id,
+                debug_info=self.debug_info,
             )
             new_unit.x = x
             new_unit.y = y
@@ -349,6 +353,7 @@ class TypesettingUnit:
                 vertical=False,
                 advance=char_width,
                 xobj_id=self.xobj_id,
+                debug_info=self.debug_info,
             )
             return [new_char]
         else:
@@ -398,6 +403,9 @@ class Typesetting:
             font_size=6,
             graphic_state=il_version_1.GraphicState(),
         )
+        text = "本文档由funstory.ai的开源PDF翻译库yadt(http://yadt.io)翻译，本仓库正在积极的建设当中，欢迎star和关注。"
+        if self.translation_config.debug:
+            text += '\n 当前为DEBUG模式，将显示更多辅助信息。请注意，部分框的位置对应原文，但在译文中可能不正确。'
         page.pdf_paragraph.append(
             il_version_1.PdfParagraph(
                 first_line_indent=False,
@@ -412,7 +420,7 @@ class Typesetting:
                 pdf_paragraph_composition=[
                     il_version_1.PdfParagraphComposition(
                         pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
-                            unicode="本文档由funstory.ai的开源PDF翻译库yadt(http://yadt.io)翻译，本仓库正在积极的建设当中，欢迎star和关注。",
+                            unicode=text,
                             pdf_style=style,
                         )
                     )
@@ -638,7 +646,12 @@ class Typesetting:
                     ]
                 )
             elif composition.pdf_character:
-                result.append(TypesettingUnit(char=composition.pdf_character))
+                result.append(
+                    TypesettingUnit(
+                        char=composition.pdf_character,
+                        debug_info=paragraph.debug_info,
+                    )
+                )
             elif composition.pdf_same_style_characters:
                 result.extend(
                     [
@@ -666,6 +679,7 @@ class Typesetting:
                             font_size=composition.pdf_same_style_unicode_characters.pdf_style.font_size,
                             style=composition.pdf_same_style_unicode_characters.pdf_style,
                             xobj_id=paragraph.xobj_id,
+                            debug_info=composition.pdf_same_style_unicode_characters.debug_info,
                         )
                         for char_unicode in composition.pdf_same_style_unicode_characters.unicode
                         if char_unicode not in ("\n",)

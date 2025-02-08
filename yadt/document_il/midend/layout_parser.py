@@ -1,10 +1,13 @@
 import logging
+import os
 
 import numpy as np
+import cv2
 from pymupdf import Document
 
 from yadt.document_il import il_version_1
 from yadt.translation_config import TranslationConfig
+from yadt.document_il.utils.style_helper import *
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +18,90 @@ class LayoutParser:
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config
         self.model = translation_config.doc_layout_model
+
+    def _save_debug_image(self, image: np.ndarray, layout, page_number: int):
+        """Save debug image with drawn boxes if debug mode is enabled."""
+        if not self.translation_config.debug:
+            return
+
+        debug_dir = self.translation_config.get_working_file_path("ocr-box-image")
+        os.makedirs(debug_dir, exist_ok=True)
+
+        # Draw boxes on the image
+        debug_image = image.copy()
+        for box in layout.boxes:
+            x0, y0, x1, y1 = box.xyxy
+            cv2.rectangle(
+                debug_image, (int(x0), int(y0)), (int(x1), int(y1)), (0, 255, 0), 2
+            )
+            # Add text label
+            cv2.putText(
+                debug_image,
+                layout.names[box.cls],
+                (int(x0), int(y0) - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 0),
+                1,
+            )
+
+        # Save the image
+        output_path = os.path.join(debug_dir, f"{page_number}.jpg")
+        cv2.imwrite(output_path, debug_image)
+
+    def _save_debug_box_to_page(self, page: il_version_1.Page):
+        """Save debug boxes and text labels to the PDF page."""
+        if not self.translation_config.debug:
+            return
+
+        color = GREEN
+
+        for layout in page.page_layout:
+            # Create a rectangle box
+            rect = il_version_1.PdfRectangle(
+                box=il_version_1.Box(
+                    x=layout.box.x,
+                    y=layout.box.y,
+                    x2=layout.box.x2,
+                    y2=layout.box.y2
+                ),
+                graphic_state=color,
+                debug_info=True,
+            )
+            page.pdf_rectangle.append(rect)
+
+            # Create text label at top-left corner
+            # Note: PDF coordinates are from bottom-left,
+            # so we use y2 for top position
+            style = il_version_1.PdfStyle(
+                font_id="china-ss",
+                font_size=6,
+                graphic_state=color,
+            )
+            page.pdf_paragraph.append(
+                il_version_1.PdfParagraph(
+                    first_line_indent=False,
+                    box=il_version_1.Box(
+                        x=layout.box.x,
+                        y=layout.box.y2,
+                        x2=layout.box.x2,
+                        y2=layout.box.y2+7,
+                    ),
+                    vertical=False,
+                    pdf_style=style,
+                    unicode=layout.class_name,
+                    pdf_paragraph_composition=[
+                        il_version_1.PdfParagraphComposition(
+                            pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
+                                unicode=layout.class_name,
+                                pdf_style=style,
+                                debug_info=True,
+                            )
+                        )
+                    ],
+                    xobj_id=-1,
+                )
+            )
 
     def process(self, docs: il_version_1.Document, mupdf_doc: Document):
         """Generate layouts for all pages that need to be translated."""
@@ -38,7 +125,7 @@ class LayoutParser:
                 # Prepare batch images
                 batch_images = []
                 for page in batch_pages:
-                    pix = mupdf_doc[page.page_number].get_pixmap()
+                    pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
                     image = np.fromstring(pix.samples, np.uint8).reshape(
                         pix.height, pix.width, 3
                     )[:, :, ::-1]
@@ -50,8 +137,13 @@ class LayoutParser:
                 # Process predictions for each page
                 for page, layouts in zip(batch_pages, layouts_batch):
                     page_layouts = []
+                    self._save_debug_image(
+                        batch_images[batch_pages.index(page)],
+                        layouts,
+                        page.page_number + 1,
+                    )
                     for layout in layouts.boxes:
-                        # Convert the coordinate system from the picture coordinate
+                        # Convert coordinate system from picture to il
                         # system to the il coordinate system
                         x0, y0, x1, y1 = layout.xyxy
                         pix = mupdf_doc[page.page_number].get_pixmap()
@@ -73,6 +165,7 @@ class LayoutParser:
                         page_layouts.append(page_layout)
 
                     page.page_layout = page_layouts
+                    self._save_debug_box_to_page(page)
                     progress.advance(1)
 
             return docs

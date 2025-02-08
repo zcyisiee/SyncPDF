@@ -28,6 +28,9 @@
         <ref name="PageLayout"/>
       </zeroOrMore>
       <zeroOrMore>
+        <ref name="PDFRectangle"/>
+      </zeroOrMore>
+      <zeroOrMore>
         <ref name="PDFFont"/>
       </zeroOrMore>
       <zeroOrMore>
@@ -152,6 +155,11 @@
         <!-- xobject nesting depth -->
         <attribute name="xobjId">
           <data type="int"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="debug_info">
+          <data type="boolean"/>
         </attribute>
       </optional>
       <ref name="PDFStyle"/>
@@ -327,6 +335,11 @@
       <attribute name="unicode">
         <data type="string"/>
       </attribute>
+      <optional>
+        <attribute name="debug_info">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
     </element>
   </define>
   <define name="PDFFormula">
@@ -346,6 +359,17 @@
   <define name="PDFFigure">
     <element name="pdfFigure">
       <ref name="Box"/>
+    </element>
+  </define>
+  <define name="PDFRectangle">
+    <element name="pdfRectangle">
+      <ref name="Box"/>
+      <ref name="GraphicState"/>
+      <optional>
+        <attribute name="debug_info">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
     </element>
   </define>
 </grammar>

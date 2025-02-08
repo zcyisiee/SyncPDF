@@ -37,6 +37,8 @@ class ParagraphFinder:
                 chars.extend(composition.pdf_line.pdf_character)
             elif composition.pdf_formula:
                 chars.extend(composition.pdf_formula.pdf_character)
+            elif composition.pdf_same_style_unicode_characters:
+                continue
             else:
                 logger.error(
                     "Unexpected composition type"
@@ -46,8 +48,10 @@ class ParagraphFinder:
                 )
                 continue
 
-        if update_unicode:
+        if update_unicode and chars:
             paragraph.unicode = get_char_unicode_string(chars)
+        if not chars:
+            return
         # 更新边界框
         min_x = min(char.box.x for char in chars)
         min_y = min(char.box.y for char in chars)
@@ -113,6 +117,10 @@ class ParagraphFinder:
 
     def create_paragraphs(self, page: Page) -> list[PdfParagraph]:
         paragraphs: list[PdfParagraph] = []
+        if page.pdf_paragraph:
+            paragraphs.extend(page.pdf_paragraph)
+            page.pdf_paragraph = []
+
         current_paragraph: PdfParagraph | None = None
         current_layout: Layout | None = None
         current_line_chars: list[PdfCharacter] = []
@@ -189,6 +197,7 @@ class ParagraphFinder:
         processed_lines = []
         for composition in paragraph.pdf_paragraph_composition:
             if not composition.pdf_line:
+                processed_lines.append(composition)
                 continue
 
             line = composition.pdf_line

@@ -201,21 +201,6 @@ class PdfFont:
 
 
 @dataclass
-class GraphicState1:
-    class Meta:
-        name = "GraphicState"
-
-    graphic_state: Optional[GraphicState] = field(
-        default=None,
-        metadata={
-            "name": "graphicState",
-            "type": "Element",
-            "required": True,
-        },
-    )
-
-
-@dataclass
 class Cropbox:
     class Meta:
         name = "cropbox"
@@ -293,6 +278,63 @@ class PdfFigure:
 
 
 @dataclass
+class PdfRectangle:
+    class Meta:
+        name = "pdfRectangle"
+
+    box: Optional[Box] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+    graphic_state: Optional[GraphicState] = field(
+        default=None,
+        metadata={
+            "name": "graphicState",
+            "type": "Element",
+            "required": True,
+        },
+    )
+    debug_info: Optional[bool] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+
+
+@dataclass
+class PdfStyle:
+    class Meta:
+        name = "pdfStyle"
+
+    graphic_state: Optional[GraphicState] = field(
+        default=None,
+        metadata={
+            "name": "graphicState",
+            "type": "Element",
+            "required": True,
+        },
+    )
+    font_id: Optional[str] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    font_size: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+
+
+@dataclass
 class PdfXobject:
     class Meta:
         name = "pdfXobject"
@@ -331,27 +373,6 @@ class PdfXobject:
         default=None,
         metadata={
             "name": "xrefId",
-            "type": "Attribute",
-            "required": True,
-        },
-    )
-
-
-@dataclass
-class PdfStyle(GraphicState1):
-    class Meta:
-        name = "pdfStyle"
-
-    font_id: Optional[str] = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-            "required": True,
-        },
-    )
-    font_size: Optional[float] = field(
-        default=None,
-        metadata={
             "type": "Attribute",
             "required": True,
         },
@@ -417,6 +438,12 @@ class PdfCharacter:
             "type": "Attribute",
         },
     )
+    debug_info: Optional[bool] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass
@@ -436,6 +463,12 @@ class PdfSameStyleUnicodeCharacters:
         metadata={
             "type": "Attribute",
             "required": True,
+        },
+    )
+    debug_info: Optional[bool] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
         },
     )
 
@@ -662,6 +695,13 @@ class Page:
         default_factory=list,
         metadata={
             "name": "pageLayout",
+            "type": "Element",
+        },
+    )
+    pdf_rectangle: list[PdfRectangle] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfRectangle",
             "type": "Element",
         },
     )

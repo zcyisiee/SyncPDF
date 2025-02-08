@@ -4,7 +4,6 @@ from yadt.document_il.il_version_1 import (
     Cropbox,
     Document,
     GraphicState,
-    GraphicState1,
     Mediabox,
     Page,
     PageLayout,
@@ -15,6 +14,7 @@ from yadt.document_il.il_version_1 import (
     PdfLine,
     PdfParagraph,
     PdfParagraphComposition,
+    PdfRectangle,
     PdfSameStyleCharacters,
     PdfSameStyleUnicodeCharacters,
     PdfStyle,
@@ -22,7 +22,6 @@ from yadt.document_il.il_version_1 import (
 )
 
 __all__ = [
-    "GraphicState1",
     "BaseOperations",
     "Box",
     "Cropbox",
@@ -38,6 +37,7 @@ __all__ = [
     "PdfLine",
     "PdfParagraph",
     "PdfParagraphComposition",
+    "PdfRectangle",
     "PdfSameStyleCharacters",
     "PdfSameStyleUnicodeCharacters",
     "PdfStyle",
