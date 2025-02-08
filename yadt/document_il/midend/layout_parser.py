@@ -7,6 +7,7 @@ from pymupdf import Document
 
 from yadt.document_il import il_version_1
 from yadt.translation_config import TranslationConfig
+from yadt.document_il.utils.style_helper import *
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,8 @@ class LayoutParser:
         if not self.translation_config.debug:
             return
 
+        color = GREEN
+
         for layout in page.page_layout:
             # Create a rectangle box
             rect = il_version_1.PdfRectangle(
@@ -61,7 +64,8 @@ class LayoutParser:
                     y=layout.box.y,
                     x2=layout.box.x2,
                     y2=layout.box.y2
-                )
+                ),
+                graphic_state=color
             )
             page.pdf_rectangle.append(rect)
 
@@ -71,9 +75,7 @@ class LayoutParser:
             style = il_version_1.PdfStyle(
                 font_id="china-ss",
                 font_size=6,
-                graphic_state=il_version_1.GraphicState(
-                    passthrough_per_char_instruction='0.1882352941 0.8196078431 0.3450980392 rg'
-                ),
+                graphic_state=color,
             )
             page.pdf_paragraph.append(
                 il_version_1.PdfParagraph(

@@ -140,8 +140,8 @@ class PDFCreater:
         draw_op.append(b"q ")
         
         # Set green color for debug visibility
-        draw_op.append(b"0.1882352941 0.8196078431 0.3450980392 RG ")  # Green stroke
-        draw_op.append(b"0.5 w ")  # Line width
+        draw_op.append(rectangle.graphic_state.passthrough_per_char_instruction.encode())  # Green stroke
+        draw_op.append(b" 0.5 w ")  # Line width
         
         # Draw four lines manually
         # Bottom line
