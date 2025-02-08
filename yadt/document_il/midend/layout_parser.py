@@ -1,6 +1,8 @@
 import logging
+import os
 
 import numpy as np
+import cv2
 from pymupdf import Document
 
 from yadt.document_il import il_version_1
@@ -15,6 +17,32 @@ class LayoutParser:
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config
         self.model = translation_config.doc_layout_model
+
+    def _save_debug_image(self, image: np.ndarray, layout, page_number: int):
+        """Save debug image with drawn boxes if debug mode is enabled."""
+        if not self.translation_config.debug:
+            return
+            
+        debug_dir = self.translation_config.get_working_file_path("ocr-box-image")
+        os.makedirs(debug_dir, exist_ok=True)
+        
+        # Draw boxes on the image
+        debug_image = image.copy()
+        for box in layout.boxes:
+            x0, y0, x1, y1 = box.xyxy
+            cv2.rectangle(
+                debug_image, (int(x0), int(y0)), (int(x1), int(y1)),
+                (0, 255, 0), 2
+            )
+            # Add text label
+            cv2.putText(
+                debug_image, layout.names[box.cls], (int(x0), int(y0)-5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1
+            )
+        
+        # Save the image
+        output_path = os.path.join(debug_dir, f"{page_number}.jpg")
+        cv2.imwrite(output_path, debug_image)
 
     def process(self, docs: il_version_1.Document, mupdf_doc: Document):
         """Generate layouts for all pages that need to be translated."""
@@ -38,7 +66,7 @@ class LayoutParser:
                 # Prepare batch images
                 batch_images = []
                 for page in batch_pages:
-                    pix = mupdf_doc[page.page_number].get_pixmap()
+                    pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
                     image = np.fromstring(pix.samples, np.uint8).reshape(
                         pix.height, pix.width, 3
                     )[:, :, ::-1]
@@ -50,8 +78,13 @@ class LayoutParser:
                 # Process predictions for each page
                 for page, layouts in zip(batch_pages, layouts_batch):
                     page_layouts = []
+                    self._save_debug_image(
+                        batch_images[batch_pages.index(page)],
+                        layouts,
+                        page.page_number + 1
+                    )
                     for layout in layouts.boxes:
-                        # Convert the coordinate system from the picture coordinate
+                        # Convert coordinate system from picture to il
                         # system to the il coordinate system
                         x0, y0, x1, y1 = layout.xyxy
                         pix = mupdf_doc[page.page_number].get_pixmap()
