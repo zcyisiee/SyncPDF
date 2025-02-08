@@ -297,6 +297,12 @@ class PdfRectangle:
             "required": True,
         },
     )
+    debug_info: Optional[bool] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass
@@ -432,6 +438,12 @@ class PdfCharacter:
             "type": "Attribute",
         },
     )
+    debug_info: Optional[bool] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass
@@ -451,6 +463,12 @@ class PdfSameStyleUnicodeCharacters:
         metadata={
             "type": "Attribute",
             "required": True,
+        },
+    )
+    debug_info: Optional[bool] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
         },
     )
 

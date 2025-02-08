@@ -157,6 +157,11 @@
           <data type="int"/>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="debug_info">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
       <ref name="PDFStyle"/>
       <ref name="Box"/>
     </element>
@@ -330,6 +335,11 @@
       <attribute name="unicode">
         <data type="string"/>
       </attribute>
+      <optional>
+        <attribute name="debug_info">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
     </element>
   </define>
   <define name="PDFFormula">
@@ -355,6 +365,11 @@
     <element name="pdfRectangle">
       <ref name="Box"/>
       <ref name="GraphicState"/>
+      <optional>
+        <attribute name="debug_info">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
     </element>
   </define>
 </grammar>

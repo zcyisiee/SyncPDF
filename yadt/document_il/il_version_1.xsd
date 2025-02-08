@@ -87,6 +87,7 @@
       <xs:attribute name="char_unicode" use="required" type="xs:string"/>
       <xs:attribute name="advance" type="xs:float"/>
       <xs:attribute name="xobjId" type="xs:int"/>
+      <xs:attribute name="debug_info" type="xs:boolean"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pageLayout">
@@ -199,6 +200,7 @@
         <xs:element minOccurs="0" ref="pdfStyle"/>
       </xs:sequence>
       <xs:attribute name="unicode" use="required" type="xs:string"/>
+      <xs:attribute name="debug_info" type="xs:boolean"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfFormula">
@@ -224,6 +226,7 @@
         <xs:element ref="box"/>
         <xs:element ref="graphicState"/>
       </xs:sequence>
+      <xs:attribute name="debug_info" type="xs:boolean"/>
     </xs:complexType>
   </xs:element>
 </xs:schema>
