@@ -243,7 +243,7 @@ class PDFCreater:
                     mono_out_path,
                     garbage=3,
                     deflate=True,
-                    clean=True,
+                    clean=not translation_config.skip_clean,
                     deflate_fonts=True,
                     linear=True,
                 )
@@ -259,12 +259,15 @@ class PDFCreater:
                 dual.insert_file(pdf)
                 page_count = pdf.page_count
                 for id in range(page_count):
-                    dual.move_page(page_count + id, id * 2 + 1)
+                    if translation_config.dual_translate_first:
+                        dual.move_page(page_count + id, id * 2)
+                    else:
+                        dual.move_page(page_count + id, id * 2 + 1)
                 dual.save(
                     dual_out_path,
                     garbage=3,
                     deflate=True,
-                    clean=True,
+                    clean=not translation_config.skip_clean,
                     deflate_fonts=True,
                     linear=True,
                 )
