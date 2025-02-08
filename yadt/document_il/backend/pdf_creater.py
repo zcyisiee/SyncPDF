@@ -125,6 +125,45 @@ class PDFCreater:
         fonts = re.findall("/([^ ]+?) ", font_dict)
         return set(fonts)
 
+    def _debug_render_rectangle(self, draw_op: BitStream, rectangle: il_version_1.PdfRectangle):
+        """Draw a debug rectangle in PDF for visualization purposes.
+        
+        Args:
+            draw_op: BitStream to append PDF drawing operations
+            rectangle: Rectangle object containing position information
+        """
+        x1 = rectangle.box.x
+        y1 = rectangle.box.y
+        x2 = rectangle.box.x2
+        y2 = rectangle.box.y2
+        # Save graphics state
+        draw_op.append(b"q ")
+        
+        # Set green color for debug visibility
+        draw_op.append(b"0.1882352941 0.8196078431 0.3450980392 RG ")  # Green stroke
+        draw_op.append(b"0.5 w ")  # Line width
+        
+        # Draw four lines manually
+        # Bottom line
+        draw_op.append(
+            f"{x1} {y1} m {x2} {y1} l S ".encode()
+        )
+        # Right line
+        draw_op.append(
+            f"{x2} {y1} m {x2} {y2} l S ".encode()
+        )
+        # Top line
+        draw_op.append(
+            f"{x2} {y2} m {x1} {y2} l S ".encode()
+        )
+        # Left line
+        draw_op.append(
+            f"{x1} {y2} m {x1} {y1} l S ".encode()
+        )
+        
+        # Restore graphics state
+        draw_op.append(b"Q\n")
+
     def write(self, translation_config: TranslationConfig) -> TranslateResult:
         mono_out_path = translation_config.get_output_file_path(
             f"{os.path.basename(translation_config.input_file.rsplit('.', 1)[0])}."
@@ -167,6 +206,9 @@ class PDFCreater:
                 page_op.append(
                     f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode()
                 )
+                
+                for rect in page.pdf_rectangle:
+                    self._debug_render_rectangle(page_op, rect)
                 # 收集所有字符
                 chars = []
                 # 首先添加页面级别的字符

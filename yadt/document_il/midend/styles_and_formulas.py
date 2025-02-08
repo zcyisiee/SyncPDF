@@ -81,6 +81,9 @@ class StylesAndFormulas:
                 in_corner_mark_state = False
 
                 line = composition.pdf_line
+                if not line:
+                    new_compositions.append(composition)
+                    continue
                 for char in line.pdf_character:
                     is_formula = (
                         (  # 区分公式开头的字符&公式中间的字符。主要是逗号不能在公式开头，但是可以在中间。
@@ -201,6 +204,7 @@ class StylesAndFormulas:
                     continue
 
                 if not comp.pdf_line:
+                    new_compositions.append(comp)
                     continue
 
                 for char in comp.pdf_line.pdf_character:

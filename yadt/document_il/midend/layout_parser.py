@@ -48,6 +48,57 @@ class LayoutParser:
         output_path = os.path.join(debug_dir, f"{page_number}.jpg")
         cv2.imwrite(output_path, debug_image)
 
+    def _save_debug_box_to_page(self, page: il_version_1.Page):
+        """Save debug boxes and text labels to the PDF page."""
+        if not self.translation_config.debug:
+            return
+
+        for layout in page.page_layout:
+            # Create a rectangle box
+            rect = il_version_1.PdfRectangle(
+                box=il_version_1.Box(
+                    x=layout.box.x,
+                    y=layout.box.y,
+                    x2=layout.box.x2,
+                    y2=layout.box.y2
+                )
+            )
+            page.pdf_rectangle.append(rect)
+
+            # Create text label at top-left corner
+            # Note: PDF coordinates are from bottom-left,
+            # so we use y2 for top position
+            style = il_version_1.PdfStyle(
+                font_id="china-ss",
+                font_size=6,
+                graphic_state=il_version_1.GraphicState(
+                    passthrough_per_char_instruction='0.1882352941 0.8196078431 0.3450980392 rg'
+                ),
+            )
+            page.pdf_paragraph.append(
+                il_version_1.PdfParagraph(
+                    first_line_indent=False,
+                    box=il_version_1.Box(
+                        x=layout.box.x,
+                        y=layout.box.y2,
+                        x2=layout.box.x2,
+                        y2=layout.box.y2+7,
+                    ),
+                    vertical=False,
+                    pdf_style=style,
+                    unicode=layout.class_name,
+                    pdf_paragraph_composition=[
+                        il_version_1.PdfParagraphComposition(
+                            pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
+                                unicode=layout.class_name,
+                                pdf_style=style,
+                            )
+                        )
+                    ],
+                    xobj_id=-1,
+                )
+            )
+
     def process(self, docs: il_version_1.Document, mupdf_doc: Document):
         """Generate layouts for all pages that need to be translated."""
         # Get pages that need to be translated
@@ -110,6 +161,7 @@ class LayoutParser:
                         page_layouts.append(page_layout)
 
                     page.page_layout = page_layouts
+                    self._save_debug_box_to_page(page)
                     progress.advance(1)
 
             return docs

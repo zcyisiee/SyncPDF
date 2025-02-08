@@ -240,6 +240,9 @@ class ILTranslator:
             elif composition.pdf_formula:
                 # 不需要翻译纯公式
                 return None
+            elif composition.pdf_same_style_unicode_characters:
+                # DEBUG INSERT CHAR, NOT TRANSLATE
+                return None
             else:
                 logger.error(
                     f"Unknown composition type. "
