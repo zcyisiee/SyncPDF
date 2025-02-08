@@ -293,6 +293,20 @@ class PdfFigure:
 
 
 @dataclass
+class PdfRectangle:
+    class Meta:
+        name = "pdfRectangle"
+
+    box: Optional[Box] = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+
+
+@dataclass
 class PdfXobject:
     class Meta:
         name = "pdfXobject"
@@ -662,6 +676,13 @@ class Page:
         default_factory=list,
         metadata={
             "name": "pageLayout",
+            "type": "Element",
+        },
+    )
+    pdf_rectangle: list[PdfRectangle] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfRectangle",
             "type": "Element",
         },
     )

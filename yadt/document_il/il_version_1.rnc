@@ -10,6 +10,7 @@ Page =
     element cropbox { Box },
     PDFXobject*,
     PageLayout*,
+    PDFRectangle*,
     PDFFont*,
     PDFParagraph*,
     PDFFigure*,
@@ -127,3 +128,4 @@ PDFFormula =
     attribute y_offset { xsd:float }
   }
 PDFFigure = element pdfFigure { Box }
+PDFRectangle = element pdfRectangle { Box }

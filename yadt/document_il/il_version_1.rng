@@ -28,6 +28,9 @@
         <ref name="PageLayout"/>
       </zeroOrMore>
       <zeroOrMore>
+        <ref name="PDFRectangle"/>
+      </zeroOrMore>
+      <zeroOrMore>
         <ref name="PDFFont"/>
       </zeroOrMore>
       <zeroOrMore>
@@ -345,6 +348,11 @@
   </define>
   <define name="PDFFigure">
     <element name="pdfFigure">
+      <ref name="Box"/>
+    </element>
+  </define>
+  <define name="PDFRectangle">
+    <element name="pdfRectangle">
       <ref name="Box"/>
     </element>
   </define>

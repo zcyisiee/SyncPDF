@@ -15,6 +15,7 @@
         <xs:element ref="cropbox"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfXobject"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pageLayout"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfRectangle"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfFont"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfParagraph"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfFigure"/>
@@ -217,6 +218,13 @@
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfFigure">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="box"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pdfRectangle">
     <xs:complexType>
       <xs:sequence>
         <xs:element ref="box"/>
