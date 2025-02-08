@@ -166,14 +166,22 @@ class ILCreater:
         encoding_length = 1
         if isinstance(font, PDFCIDFont):
             try:
-                _, to_unicode_id = self.mupdf.xref_get_key(xref_id, "ToUnicode")
-                to_unicode_bytes = self.mupdf.xref_stream(
-                    int(to_unicode_id.split(" ")[0])
-                )
-                range = re.search(
-                    b"begincodespacerange\n?.*<(\\d+?)>.*", to_unicode_bytes
-                ).group(1)
-                encoding_length = len(range) // 2
+                # pdf 32000:2008 page 273
+                # Table 118 - Predefined CJK CMap names
+                _, encoding = self.mupdf.xref_get_key(xref_id, "Encoding")
+                if encoding == "/Identity-H":
+                    encoding_length = 2
+                elif encoding == "/Identity-V":
+                    encoding_length = 2
+                else:
+                    _, to_unicode_id = self.mupdf.xref_get_key(xref_id, "ToUnicode")
+                    to_unicode_bytes = self.mupdf.xref_stream(
+                        int(to_unicode_id.split(" ")[0])
+                    )
+                    range = re.search(
+                        b"begincodespacerange\n?.*<(\\d+?)>.*", to_unicode_bytes
+                    ).group(1)
+                    encoding_length = len(range) // 2
             except:
                 if max(font.unicode_map.cid2unichr.keys()) > 255:
                     encoding_length = 2
