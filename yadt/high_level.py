@@ -29,6 +29,7 @@ from yadt.translation_config import TranslationConfig, TranslateResult
 from yadt.progress_monitor import ProgressMonitor
 from yadt.document_il.utils.fontmap import FontMapper
 from yadt.document_il.midend.layout_parser import LayoutParser
+from yadt.document_il.midend.add_debug_information import AddDebugInformation
 import logging
 
 logger = logging.getLogger(__name__)
@@ -368,6 +369,13 @@ def do_translate(pm, translation_config):
             xml_converter.write_json(
                 docs, translation_config.get_working_file_path("il_translated.json")
             )
+
+        if translation_config.debug:
+            AddDebugInformation(translation_config).process(docs)
+            xml_converter.write_json(
+                docs, translation_config.get_working_file_path("add_debug_information.json")
+            )
+
         Typesetting(translation_config).typsetting_document(docs)
         logger.debug(f"finish typsetting from {temp_pdf_path}")
         if translation_config.debug:
