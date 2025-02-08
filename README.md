@@ -109,6 +109,10 @@ uv run yadt --bing --files example.pdf --files example2.pdf
 - `--skip-clean`: Skip PDF cleaning step
 - `--dual-translate-first`: Put translated pages first in dual PDF mode (default: original pages first)
 
+> [!TIP]
+> - Both `--skip-clean` and `--dual-translate-first` may help improve compatibility with some PDF readers
+> - However, using `--skip-clean` will result in larger file sizes
+
 ### Translation Service Options
 
 - `--qps`: QPS (Queries Per Second) limit for translation service (default: 4)
