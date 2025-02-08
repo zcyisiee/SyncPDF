@@ -163,6 +163,86 @@ class PDFCreater:
         
         # Restore graphics state
         draw_op.append(b"Q\n")
+    def write_debug_info(self, pdf: pymupdf.Document, translation_config: TranslationConfig):
+        self.font_mapper.add_font(pdf, self.docs)
+
+        for page in self.docs.page:
+            _, r_id = pdf.xref_get_key(pdf[page.page_number].xref, "Contents")
+            resource_xref_id = re.search("(\\d+) 0 R", r_id).group(1)
+            base_op = pdf.xref_stream(int(resource_xref_id))
+            translation_config.raise_if_cancelled()
+            xobj_available_fonts = {}
+            xobj_draw_ops = {}
+            xobj_encoding_length_map = {}
+            available_font_list = self.get_available_font_list(pdf, page)
+
+            page_encoding_length_map = {
+                f.font_id: f.encoding_length for f in page.pdf_font
+            }
+            page_op = BitStream()
+            # q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}
+            page_op.append(b"q ")
+            page_op.append(base_op)
+            page_op.append(b" Q ")
+            page_op.append(
+                f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode()
+            )
+            # 收集所有字符
+            chars = []
+            # 首先添加页面级别的字符
+            if page.pdf_character:
+                chars.extend(page.pdf_character)
+            # 然后添加段落中的字符
+            for paragraph in page.pdf_paragraph:
+                chars.extend(self.render_paragraph_to_char(paragraph))
+
+            # 渲染所有字符
+            for char in chars:
+                if not getattr(char, 'debug_info', False):
+                    continue
+                if char.char_unicode == "\n":
+                    continue
+                if char.pdf_character_id is None:
+                    # dummy char
+                    continue
+                char_size = char.pdf_style.font_size
+                font_id = char.pdf_style.font_id
+
+                if font_id not in available_font_list:
+                    continue
+                draw_op = page_op
+                encoding_length_map = page_encoding_length_map
+
+                draw_op.append(b"q ")
+                self.render_graphic_state(draw_op, char.pdf_style.graphic_state)
+                if char.vertical:
+                    draw_op.append(
+                        f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode()
+                    )
+                else:
+                    draw_op.append(
+                        f"BT /{font_id} {char_size:f} Tf 1 0 0 1 {char.box.x:f} {char.box.y:f} Tm ".encode()
+                    )
+
+                encoding_length = encoding_length_map[font_id]
+                # pdf32000-2008 page14:
+                # As hexadecimal data enclosed in angle brackets < >
+                # see 7.3.4.3, "Hexadecimal Strings."
+                draw_op.append(
+                    f"<{char.pdf_character_id:0{encoding_length * 2}x}>".upper().encode()
+                )
+
+                draw_op.append(b" Tj ET Q \n")
+            for rect in page.pdf_rectangle:
+                if not rect.debug_info:
+                    continue
+                self._debug_render_rectangle(page_op, rect)
+            draw_op = page_op
+            # Since this is a draw instruction container,
+            # no additional information is needed
+            pdf.update_stream(int(resource_xref_id), draw_op.tobytes())
+        translation_config.raise_if_cancelled()
+        pdf.subset_fonts(fallback=False)
 
     def write(self, translation_config: TranslationConfig) -> TranslateResult:
         mono_out_path = translation_config.get_output_file_path(
@@ -297,6 +377,9 @@ class PDFCreater:
                 )
                 translation_config.raise_if_cancelled()
                 dual = pymupdf.open(self.original_pdf_path)
+                if translation_config.debug:
+                    translation_config.raise_if_cancelled()
+                    self.write_debug_info(dual, translation_config)
                 dual.insert_file(pdf)
                 page_count = pdf.page_count
                 for id in range(page_count):

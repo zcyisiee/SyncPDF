@@ -1,6 +1,7 @@
 import logging
 
 import yadt.document_il.il_version_1 as il_version_1
+from yadt.document_il import GraphicState
 from yadt.document_il.utils.style_helper import BLUE, ORANGE
 from yadt.translation_config import TranslationConfig
 
@@ -21,14 +22,15 @@ class AddDebugInformation:
         for page in docs.page:
             self.process_page(page)
 
-    def _create_rectangle(self, box: il_version_1.Box, color: str):
+    def _create_rectangle(self, box: il_version_1.Box, color: GraphicState):
         rect = il_version_1.PdfRectangle(
             box=box,
-            graphic_state=color
+            graphic_state=color,
+            debug_info=True,
         )
         return rect
 
-    def _create_text(self, text: str, color: str, box: il_version_1.Box):
+    def _create_text(self, text: str, color: GraphicState, box: il_version_1.Box):
         style = il_version_1.PdfStyle(
             font_id="china-ss",
             font_size=6,
@@ -50,6 +52,7 @@ class AddDebugInformation:
                     pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
                         unicode=text,
                         pdf_style=style,
+                        debug_info=True,
                     )
                 )
             ],

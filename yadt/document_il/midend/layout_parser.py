@@ -65,7 +65,8 @@ class LayoutParser:
                     x2=layout.box.x2,
                     y2=layout.box.y2
                 ),
-                graphic_state=color
+                graphic_state=color,
+                debug_info=True,
             )
             page.pdf_rectangle.append(rect)
 
@@ -94,6 +95,7 @@ class LayoutParser:
                             pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
                                 unicode=layout.class_name,
                                 pdf_style=style,
+                                debug_info=True,
                             )
                         )
                     ],
