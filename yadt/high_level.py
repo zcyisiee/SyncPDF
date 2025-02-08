@@ -376,7 +376,7 @@ def do_translate(pm, translation_config):
             )
         # deepcopy
         # docs2 = xml_converter.deepcopy(docs)
-        pdf_creater = PDFCreater(original_pdf_path, docs, translation_config)
+        pdf_creater = PDFCreater(temp_pdf_path, docs, translation_config)
         result = pdf_creater.write(translation_config)
         finish_time = time.time()
         result.original_pdf_path = original_pdf_path

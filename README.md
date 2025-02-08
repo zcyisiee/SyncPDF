@@ -106,6 +106,12 @@ uv run yadt --bing --files example.pdf --files example2.pdf
 - `--pages`, `-p`: Specify pages to translate (e.g., "1,2,1-,-3,3-5"). If not set, translate all pages
 - `--split-short-lines`: Force split short lines into different paragraphs (may cause poor typesetting & bugs)
 - `--short-line-split-factor`: Split threshold factor (default: 0.8). The actual threshold is the median length of all lines on the current page \* this factor
+- `--skip-clean`: Skip PDF cleaning step
+- `--dual-translate-first`: Put translated pages first in dual PDF mode (default: original pages first)
+
+> [!TIP]
+> - Both `--skip-clean` and `--dual-translate-first` may help improve compatibility with some PDF readers
+> - However, using `--skip-clean` will result in larger file sizes
 
 ### Translation Service Options
 

@@ -9,7 +9,9 @@ from pdfminer.psparser import PSLiteral
 
 from yadt.document_il import il_version_1
 from yadt.translation_config import TranslationConfig
+import logging
 
+logger = logging.getLogger(__name__)
 
 class ILCreater:
     stage_name = "解析PDF并创建中间表示"
@@ -34,7 +36,7 @@ class ILCreater:
         self.progress.__exit__(None, None, None)
 
     def is_passthrough_per_char_operation(self, operator: str):
-        return re.match("^(sc|scn|g|rg|k|cs|gs)$", operator, re.IGNORECASE)
+        return re.match("^(sc|scn|g|rg|k|cs|gs|ri)$", operator, re.IGNORECASE)
 
     def on_passthrough_per_char(self, operator: str, args: list[str]):
         args = [self.parse_arg(arg) for arg in args]
@@ -58,6 +60,10 @@ class ILCreater:
             self.passthrough_per_char_instruction = (
                 self.passthrough_per_char_instruction_stack.pop()
             )
+        else:
+            self.passthrough_per_char_instruction = []
+            logging.error("pop_passthrough_per_char_instruction error on page: %s",
+                          self.current_page.page_number)
 
     def push_passthrough_per_char_instruction(self):
         self.passthrough_per_char_instruction_stack.append(
@@ -123,6 +129,8 @@ class ILCreater:
         self.current_page_font_name_id_map = {}
         self.passthrough_per_char_instruction_stack = []
         self.xobj_stack = []
+        self.non_stroking_color_space_name = None
+        self.stroking_color_space_name = None
         self.docs.page.append(self.current_page)
 
     def on_page_end(self):
@@ -166,14 +174,22 @@ class ILCreater:
         encoding_length = 1
         if isinstance(font, PDFCIDFont):
             try:
-                _, to_unicode_id = self.mupdf.xref_get_key(xref_id, "ToUnicode")
-                to_unicode_bytes = self.mupdf.xref_stream(
-                    int(to_unicode_id.split(" ")[0])
-                )
-                range = re.search(
-                    b"begincodespacerange\n?.*<(\\d+?)>.*", to_unicode_bytes
-                ).group(1)
-                encoding_length = len(range) // 2
+                # pdf 32000:2008 page 273
+                # Table 118 - Predefined CJK CMap names
+                _, encoding = self.mupdf.xref_get_key(xref_id, "Encoding")
+                if encoding == "/Identity-H":
+                    encoding_length = 2
+                elif encoding == "/Identity-V":
+                    encoding_length = 2
+                else:
+                    _, to_unicode_id = self.mupdf.xref_get_key(xref_id, "ToUnicode")
+                    to_unicode_bytes = self.mupdf.xref_stream(
+                        int(to_unicode_id.split(" ")[0])
+                    )
+                    range = re.search(
+                        b"begincodespacerange\n?.*<(\\d+?)>.*", to_unicode_bytes
+                    ).group(1)
+                    encoding_length = len(range) // 2
             except:
                 if max(font.unicode_map.cid2unichr.keys()) > 255:
                     encoding_length = 2

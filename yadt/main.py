@@ -154,6 +154,18 @@ def create_parser():
         default=0.8,
         help="Split threshold factor. The actual threshold is the median length of all lines on the current page * this factor",
     )
+    translation_params.add_argument(
+        "--skip-clean",
+        default=False,
+        action="store_true",
+        help="Skip PDF cleaning step",
+    )
+    translation_params.add_argument(
+        "--dual-translate-first",
+        default=False,
+        action="store_true",
+        help="Put translated pages first in dual PDF mode",
+    )
     service_params = translation_params.add_mutually_exclusive_group()
     service_params.add_argument(
         "--openai",
@@ -389,6 +401,8 @@ async def main():
             split_short_lines=args.split_short_lines,
             short_line_split_factor=args.short_line_split_factor,
             doc_layout_model=doc_layout_model,
+            skip_clean=args.skip_clean,
+            dual_translate_first=args.dual_translate_first,
         )
 
         # Create progress handler

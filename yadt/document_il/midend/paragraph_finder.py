@@ -206,8 +206,7 @@ class ParagraphFinder:
                     processed_chars.append(char)
 
             # 移除尾随空格
-            while (processed_chars
-                   and processed_chars[-1].char_unicode.isspace()):
+            while processed_chars and processed_chars[-1].char_unicode.isspace():
                 processed_chars.pop()
 
             if processed_chars:  # 如果行内还有字符
