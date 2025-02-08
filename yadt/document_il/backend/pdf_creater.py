@@ -206,9 +206,6 @@ class PDFCreater:
                 page_op.append(
                     f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode()
                 )
-                
-                for rect in page.pdf_rectangle:
-                    self._debug_render_rectangle(page_op, rect)
                 # 收集所有字符
                 chars = []
                 # 首先添加页面级别的字符
@@ -262,6 +259,8 @@ class PDFCreater:
                     draw_op = xobj_draw_ops[xobj.xobj_id]
                     pdf.update_stream(xobj.xref_id, draw_op.tobytes())
                     # pdf.update_stream(xobj.xref_id, b'')
+                for rect in page.pdf_rectangle:
+                    self._debug_render_rectangle(page_op, rect)
                 draw_op = page_op
                 op_container = pdf.get_new_xref()
                 # Since this is a draw instruction container,
