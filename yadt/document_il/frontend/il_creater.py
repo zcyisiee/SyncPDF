@@ -43,6 +43,7 @@ class ILCreater:
         if not self.is_passthrough_per_char_operation(operator):
             logger.error("Unknown passthrough_per_char operation: %s", operator)
             return
+        # logger.debug("xobj_id: %d, on_passthrough_per_char: %s ( %s )", self.xobj_id, operator, args)
         args = [self.parse_arg(arg) for arg in args]
         for i, value in enumerate(self.passthrough_per_char_instruction.copy()):
             op, arg = value
