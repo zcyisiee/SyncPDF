@@ -40,6 +40,9 @@ class ILCreater:
         return re.match("^(sc|scn|g|rg|k|cs|gs|ri)$", operator, re.IGNORECASE)
 
     def on_passthrough_per_char(self, operator: str, args: list[str]):
+        if not self.is_passthrough_per_char_operation(operator):
+            logger.error("Unknown passthrough_per_char operation: %s", operator)
+            return
         args = [self.parse_arg(arg) for arg in args]
         for i, value in enumerate(self.passthrough_per_char_instruction.copy()):
             op, arg = value
@@ -48,6 +51,10 @@ class ILCreater:
                 break
         self.passthrough_per_char_instruction.append((operator, " ".join(args)))
         pass
+
+    def remove_latest_passthrough_per_char_instruction(self):
+        if self.passthrough_per_char_instruction:
+            self.passthrough_per_char_instruction.pop()
 
     def parse_arg(self, arg: str):
         if isinstance(arg, PSLiteral):
