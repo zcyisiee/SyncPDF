@@ -435,9 +435,15 @@ def download_font_assets():
         logger.info(f"Successfully downloaded and verified {name}")
 
 
-# for backward compatibility
 def create_cache_folder():
-    return
+    try:
+        logger.debug(f"create cache folder at {CACHE_FOLDER}")
+        os.makedirs(CACHE_FOLDER, exist_ok=True)
+    except OSError:
+        logger.critical(
+            f"Failed to create cache folder at {CACHE_FOLDER}", exc_info=True
+        )
+        exit(1)
 
 
 def init():
