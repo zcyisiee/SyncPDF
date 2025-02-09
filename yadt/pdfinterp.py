@@ -279,6 +279,8 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                 [xobj],
                 ctm=ctm,
             )
+            self.ncs = interpreter.ncs
+            self.scs = interpreter.scs
             self.il_creater.on_xobj_end(
                 x_id, f"q {ops_base}Q {a} {b} {c} {d} {e} {f} cm "
             )
