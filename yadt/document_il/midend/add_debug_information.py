@@ -2,7 +2,7 @@ import logging
 
 import yadt.document_il.il_version_1 as il_version_1
 from yadt.document_il import GraphicState
-from yadt.document_il.utils.style_helper import BLUE, ORANGE
+from yadt.document_il.utils.style_helper import BLUE, ORANGE, YELLOW
 from yadt.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
@@ -91,5 +91,20 @@ class AddDebugInformation:
                             ORANGE,
                         )
                     )
+
+            for xobj in page.pdf_xobject:
+                new_paragraphs.append(
+                    self._create_text(
+                        'xobj',
+                        YELLOW,
+                        xobj.box,
+                    )
+                )
+                page.pdf_rectangle.append(
+                    self._create_rectangle(
+                        xobj.box,
+                        YELLOW,
+                    )
+                )
 
         page.pdf_paragraph.extend(new_paragraphs)

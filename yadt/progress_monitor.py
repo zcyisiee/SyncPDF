@@ -35,11 +35,15 @@ class ProgressMonitor:
 
     def stage_start(self, stage_name: str, total: int):
         stage = self.stage[stage_name]
+        stage.run_time += 1
+        stage.name = stage_name
+        stage.display_name = f'{stage_name} ({stage.run_time})' if stage.run_time > 1 else stage_name
+        stage.current = 0
         stage.total = total
         if self.progress_change_callback:
             self.progress_change_callback(
                 type="progress_start",
-                stage=stage_name,
+                stage=stage.display_name,
                 stage_progress=0.0,
                 stage_current=0,
                 stage_total=total,
@@ -75,7 +79,7 @@ class ProgressMonitor:
         if self.progress_change_callback:
             self.progress_change_callback(
                 type="progress_end",
-                stage=stage.name,
+                stage=stage.display_name,
                 stage_progress=100.0,
                 stage_current=stage.total,
                 stage_total=stage.total,
@@ -95,7 +99,7 @@ class ProgressMonitor:
         ):
             self.progress_change_callback(
                 type="progress_update",
-                stage=stage.name,
+                stage=stage.display_name,
                 stage_progress=stage.current * 100 / stage.total,
                 stage_current=stage.current,
                 stage_total=stage.total,
@@ -124,9 +128,11 @@ class ProgressMonitor:
 class TranslationStage:
     def __init__(self, name: str, total: int, pm: ProgressMonitor):
         self.name = name
+        self.display_name = name
         self.current = 0
         self.total = total
         self.pm = pm
+        self.run_time = 0
 
     def __enter__(self):
         return self

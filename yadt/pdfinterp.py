@@ -205,7 +205,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                 raise PDFInterpreterError("No colorspace specified!")
             n = 1
         args = self.pop(n)
-        self.il_creater.on_passthrough_per_char("SC", args)
+        self.il_creater.on_passthrough_per_char('SCN', args)
         self.graphicstate.scolor = cast(Color, args)
         return args
 
@@ -218,17 +218,23 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                 raise PDFInterpreterError("No colorspace specified!")
             n = 1
         args = self.pop(n)
-        self.il_creater.on_passthrough_per_char("sc", args)
+        self.il_creater.on_passthrough_per_char('scn', args)
         self.graphicstate.ncolor = cast(Color, args)
         return args
 
     def do_SC(self) -> None:
         """Set color for stroking operations"""
-        return self.do_SCN()
+        args = self.do_SCN()
+        self.il_creater.remove_latest_passthrough_per_char_instruction()
+        self.il_creater.on_passthrough_per_char('SC', args)
+        return args
 
     def do_sc(self) -> None:
         """Set color for nonstroking operations"""
-        return self.do_scn()
+        args = self.do_scn()
+        self.il_creater.remove_latest_passthrough_per_char_instruction()
+        self.il_creater.on_passthrough_per_char('sc', args)
+        return args
 
     def do_Do(self, xobjid_arg: PDFStackT) -> None:
         # 重载设置 xobj 的 obj_patch
@@ -273,6 +279,8 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                 [xobj],
                 ctm=ctm,
             )
+            self.ncs = interpreter.ncs
+            self.scs = interpreter.scs
             self.il_creater.on_xobj_end(
                 x_id, f"q {ops_base}Q {a} {b} {c} {d} {e} {f} cm "
             )

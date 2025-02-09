@@ -245,9 +245,10 @@ class PDFCreater:
         pdf.subset_fonts(fallback=False)
 
     def write(self, translation_config: TranslationConfig) -> TranslateResult:
+        basename = os.path.basename(translation_config.input_file.rsplit('.', 1)[0])
+        debug_suffix = ".debug" if translation_config.debug else ""
         mono_out_path = translation_config.get_output_file_path(
-            f"{os.path.basename(translation_config.input_file.rsplit('.', 1)[0])}."
-            f"{translation_config.lang_out}.mono.pdf"
+            f"{basename}{debug_suffix}.{translation_config.lang_out}.mono.pdf"
         )
         pdf = pymupdf.open(self.original_pdf_path)
         self.font_mapper.add_font(pdf, self.docs)
@@ -372,8 +373,7 @@ class PDFCreater:
             dual_out_path = None
             if not translation_config.no_dual:
                 dual_out_path = translation_config.get_output_file_path(
-                    f"{os.path.basename(translation_config.input_file.rsplit('.', 1)[0])}."
-                    f"{translation_config.lang_out}.dual.pdf"
+                    f"{basename}{debug_suffix}.{translation_config.lang_out}.dual.pdf"
                 )
                 translation_config.raise_if_cancelled()
                 dual = pymupdf.open(self.original_pdf_path)
