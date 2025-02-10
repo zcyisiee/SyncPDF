@@ -23,6 +23,7 @@ from yadt.document_il.midend.add_debug_information import AddDebugInformation
 from yadt.document_il.midend.il_translator import ILTranslator
 from yadt.document_il.midend.layout_parser import LayoutParser
 from yadt.document_il.midend.paragraph_finder import ParagraphFinder
+from yadt.document_il.midend.remove_descent import RemoveDescent
 from yadt.document_il.midend.styles_and_formulas import StylesAndFormulas
 from yadt.document_il.midend.typesetting import Typesetting
 from yadt.document_il.utils.fontmap import FontMapper
@@ -38,6 +39,7 @@ TRANSLATE_STAGES = [
     LayoutParser.stage_name,
     ParagraphFinder.stage_name,
     StylesAndFormulas.stage_name,
+    RemoveDescent.stage_name,
     ILTranslator.stage_name,
     Typesetting.stage_name,
     FontMapper.stage_name,
@@ -360,8 +362,14 @@ def do_translate(pm, translation_config):
                 docs,
                 translation_config.get_working_file_path("styles_and_formulas.json"),
             )
+        RemoveDescent(translation_config).process(docs)
+        logger.debug(f"finish remove descent from {temp_pdf_path}")
+        if translation_config.debug:
+            xml_converter.write_json(
+                docs,
+                translation_config.get_working_file_path("remove_descent.json"),
+            )
         translate_engine = translation_config.translator
-        # translate_engine.ignore_cache = True
         ILTranslator(translate_engine, translation_config).translate(docs)
         logger.debug(f"finish ILTranslator from {temp_pdf_path}")
         if translation_config.debug:

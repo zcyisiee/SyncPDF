@@ -163,7 +163,7 @@ class ILTranslator:
                 page_font_map[font.font_id] = font
             page_xobj_font_map = {}
             for xobj in page.pdf_xobject:
-                page_xobj_font_map[xobj.xobj_id] = {}
+                page_xobj_font_map[xobj.xobj_id] = page_font_map.copy()
                 for font in xobj.pdf_font:
                     page_xobj_font_map[xobj.xobj_id][font.font_id] = font
             # self.translate_paragraph(paragraph, pbar,tracker.new_paragraph(), page_font_map, page_xobj_font_map)

@@ -1,5 +1,6 @@
 import logging
 import statistics
+from functools import lru_cache
 import unicodedata
 from typing import Optional, Union
 
@@ -177,6 +178,7 @@ class TypesettingUnit:
             return self.formular.pdf_character
         elif self.unicode:
             logger.error(f"Cannot passthrough unicode. TypesettingUnit: {self}. ")
+            logger.error(f"Cannot passthrough unicode. TypesettingUnit: {self}. ")
             return []
 
     @property
@@ -350,6 +352,7 @@ class TypesettingUnit:
             )
             return [new_char]
         else:
+            logger.error(f"Unknown typesetting unit. TypesettingUnit: {self}. ")
             logger.error(f"Unknown typesetting unit. TypesettingUnit: {self}. ")
             return []
 
@@ -628,6 +631,15 @@ class Typesetting:
         if not paragraph.pdf_paragraph_composition:
             return []
         result = []
+
+        @lru_cache(maxsize=None)
+        def get_font(font_id: str, xobj_id: int):
+            if xobj_id in fonts:
+                font = fonts[xobj_id][font_id]
+            else:
+                font = fonts[font_id]
+            return font
+
         for composition in paragraph.pdf_paragraph_composition:
             if composition is None:
                 continue
@@ -656,11 +668,7 @@ class Typesetting:
                 font_id = (
                     composition.pdf_same_style_unicode_characters.pdf_style.font_id
                 )
-                xobj_id = paragraph.xobj_id
-                if xobj_id in fonts:
-                    font = fonts[xobj_id][font_id]
-                else:
-                    font = fonts[font_id]
+                font = get_font(font_id, paragraph.xobj_id)
                 result.extend(
                     [
                         TypesettingUnit(

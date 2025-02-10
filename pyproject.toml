@@ -43,7 +43,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.flake8]
-ignore = ["E203", "E261", "E501", "W503", "E741"]
+ignore = ["E203", "E261", "E501", "W503", "E741", "E501"]
 max-line-length = 88
 
 [tool.ruff]
@@ -52,7 +52,7 @@ src=["yadt"]
 target-version = "py310"
 show-fixes = true
 
-ignore = ["E203", "E261", "E501", "E741", "F841"]
+lint.ignore = ["E203", "E261", "E501", "E741", "F841"]
 
 [tool.ruff.format]
 # Enable reformatting of code snippets in docstrings.

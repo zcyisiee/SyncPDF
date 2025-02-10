@@ -198,6 +198,18 @@ class PdfFont:
             "type": "Attribute",
         },
     )
+    ascent: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    descent: Optional[float] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass
@@ -594,7 +606,9 @@ class PdfParagraphComposition:
             "type": "Element",
         },
     )
-    pdf_same_style_unicode_characters: Optional[PdfSameStyleUnicodeCharacters] = field(
+    pdf_same_style_unicode_characters: Optional[
+        PdfSameStyleUnicodeCharacters
+    ] = field(
         default=None,
         metadata={
             "name": "pdfSameStyleUnicodeCharacters",

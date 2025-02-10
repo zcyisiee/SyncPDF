@@ -226,6 +226,8 @@ class ILCreater:
             italic=italic,
             monospace=monospaced,
             serif=serif,
+            ascent=font.ascent,
+            descent=font.descent,
         )
         self.current_page_font_name_id_map[font_name] = font_id
         if self.xobj_id in self.xobj_map:
@@ -262,7 +264,17 @@ class ILCreater:
 
     def on_lt_char(self, char: LTChar):
         gs = self.create_graphic_state(char.graphicstate)
-        bbox = il_version_1.Box(char.bbox[0], char.bbox[1], char.bbox[2], char.bbox[3])
+        # Get font from current page or xobject
+        font = None
+        for pdf_font in self.xobj_map.get(self.xobj_id, self.current_page).pdf_font:
+            if pdf_font.font_id == char.aw_font_id:
+                font = pdf_font
+                break
+
+        # Get descent from font
+        descent = 0
+        if font and hasattr(font, "descent"):
+            descent = font.descent * char.size / 1000
 
         char_id = char.cid
         char_unicode = char.get_text()
@@ -271,8 +283,21 @@ class ILCreater:
         advance = char.adv
         if char.matrix[0] == 0 and char.matrix[3] == 0:
             vertical = True
+            bbox = il_version_1.Box(
+                x=char.bbox[0] - descent,
+                y=char.bbox[1],
+                x2=char.bbox[2] - descent,
+                y2=char.bbox[3],
+            )
         else:
             vertical = False
+            # Add descent to y coordinates
+            bbox = il_version_1.Box(
+                x=char.bbox[0],
+                y=char.bbox[1] + descent,
+                x2=char.bbox[2],
+                y2=char.bbox[3] + descent,
+            )
         pdf_style = il_version_1.PdfStyle(
             font_id=char.aw_font_id,
             font_size=char.size,

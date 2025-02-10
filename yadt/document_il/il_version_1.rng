@@ -107,6 +107,16 @@
           <data type="boolean"/>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="ascent">
+          <data type="float"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="descent">
+          <data type="float"/>
+        </attribute>
+      </optional>
     </element>
   </define>
   <define name="PDFXobject">
