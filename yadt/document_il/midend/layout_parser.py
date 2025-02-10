@@ -1,13 +1,12 @@
 import logging
 import os
 
-import numpy as np
 import cv2
+import numpy as np
 from pymupdf import Document
 
-from yadt.document_il import il_version_1
-from yadt.translation_config import TranslationConfig
 from yadt.document_il.utils.style_helper import *
+from yadt.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 
@@ -60,10 +59,7 @@ class LayoutParser:
             # Create a rectangle box
             rect = il_version_1.PdfRectangle(
                 box=il_version_1.Box(
-                    x=layout.box.x,
-                    y=layout.box.y,
-                    x2=layout.box.x2,
-                    y2=layout.box.y2
+                    x=layout.box.x, y=layout.box.y, x2=layout.box.x2, y2=layout.box.y2
                 ),
                 graphic_state=color,
                 debug_info=True,
@@ -85,7 +81,7 @@ class LayoutParser:
                         x=layout.box.x,
                         y=layout.box.y2,
                         x2=layout.box.x2,
-                        y2=layout.box.y2+7,
+                        y2=layout.box.y2 + 7,
                     ),
                     vertical=False,
                     pdf_style=style,

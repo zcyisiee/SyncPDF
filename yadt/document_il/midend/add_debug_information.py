@@ -42,7 +42,7 @@ class AddDebugInformation:
                 x=box.x,
                 y=box.y2,
                 x2=box.x2,
-                y2=box.y2+7,
+                y2=box.y2 + 7,
             ),
             vertical=False,
             pdf_style=style,
@@ -73,14 +73,13 @@ class AddDebugInformation:
             # Note: PDF coordinates are from bottom-left,
             # so we use y2 for top position
 
-            new_paragraphs.append(
-                self._create_text('paragraph', BLUE, paragraph.box))
+            new_paragraphs.append(self._create_text("paragraph", BLUE, paragraph.box))
 
             for composition in paragraph.pdf_paragraph_composition:
                 if composition.pdf_formula:
                     new_paragraphs.append(
                         self._create_text(
-                            'formula',
+                            "formula",
                             ORANGE,
                             composition.pdf_formula.box,
                         )
@@ -95,7 +94,7 @@ class AddDebugInformation:
             for xobj in page.pdf_xobject:
                 new_paragraphs.append(
                     self._create_text(
-                        'xobj',
+                        "xobj",
                         YELLOW,
                         xobj.box,
                     )

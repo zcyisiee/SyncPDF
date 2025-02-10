@@ -1,10 +1,12 @@
+import logging
+import os
+from typing import List
+
 import cv2
 import httpx
 import msgpack
-import os
 import numpy as np
-from typing import List, Dict
-import logging
+
 from yadt.docvision.doclayout import DocLayoutModel, YoloResult, YoloBox
 
 # 设置日志

@@ -1,22 +1,10 @@
-import io
+import logging
 import logging
 import os
 import re
 
-import pdfminer.pdfdocument
 import pymupdf
-from bitstring import Bits, BitStream
-from pdfminer.pdffont import PDFFont
-from pdfminer.pdfinterp import PDFResourceManager
-from pdfminer.pdfpage import PDFPage
-from pdfminer.pdfparser import PDFParser
-from pdfminer.pdftypes import (
-    PDFObjRef,
-    dict_value,
-    list_value,
-    resolve1,
-    stream_value,
-)
+from bitstring import BitStream
 
 from yadt.document_il import il_version_1
 from yadt.document_il.utils.fontmap import FontMapper
@@ -125,9 +113,11 @@ class PDFCreater:
         fonts = re.findall("/([^ ]+?) ", font_dict)
         return set(fonts)
 
-    def _debug_render_rectangle(self, draw_op: BitStream, rectangle: il_version_1.PdfRectangle):
+    def _debug_render_rectangle(
+        self, draw_op: BitStream, rectangle: il_version_1.PdfRectangle
+    ):
         """Draw a debug rectangle in PDF for visualization purposes.
-        
+
         Args:
             draw_op: BitStream to append PDF drawing operations
             rectangle: Rectangle object containing position information
@@ -138,32 +128,29 @@ class PDFCreater:
         y2 = rectangle.box.y2
         # Save graphics state
         draw_op.append(b"q ")
-        
+
         # Set green color for debug visibility
-        draw_op.append(rectangle.graphic_state.passthrough_per_char_instruction.encode())  # Green stroke
+        draw_op.append(
+            rectangle.graphic_state.passthrough_per_char_instruction.encode()
+        )  # Green stroke
         draw_op.append(b" 0.5 w ")  # Line width
-        
+
         # Draw four lines manually
         # Bottom line
-        draw_op.append(
-            f"{x1} {y1} m {x2} {y1} l S ".encode()
-        )
+        draw_op.append(f"{x1} {y1} m {x2} {y1} l S ".encode())
         # Right line
-        draw_op.append(
-            f"{x2} {y1} m {x2} {y2} l S ".encode()
-        )
+        draw_op.append(f"{x2} {y1} m {x2} {y2} l S ".encode())
         # Top line
-        draw_op.append(
-            f"{x2} {y2} m {x1} {y2} l S ".encode()
-        )
+        draw_op.append(f"{x2} {y2} m {x1} {y2} l S ".encode())
         # Left line
-        draw_op.append(
-            f"{x1} {y2} m {x1} {y1} l S ".encode()
-        )
-        
+        draw_op.append(f"{x1} {y2} m {x1} {y1} l S ".encode())
+
         # Restore graphics state
         draw_op.append(b"Q\n")
-    def write_debug_info(self, pdf: pymupdf.Document, translation_config: TranslationConfig):
+
+    def write_debug_info(
+        self, pdf: pymupdf.Document, translation_config: TranslationConfig
+    ):
         self.font_mapper.add_font(pdf, self.docs)
 
         for page in self.docs.page:
@@ -198,7 +185,7 @@ class PDFCreater:
 
             # 渲染所有字符
             for char in chars:
-                if not getattr(char, 'debug_info', False):
+                if not getattr(char, "debug_info", False):
                     continue
                 if char.char_unicode == "\n":
                     continue
@@ -245,7 +232,7 @@ class PDFCreater:
         pdf.subset_fonts(fallback=False)
 
     def write(self, translation_config: TranslationConfig) -> TranslateResult:
-        basename = os.path.basename(translation_config.input_file.rsplit('.', 1)[0])
+        basename = os.path.basename(translation_config.input_file.rsplit(".", 1)[0])
         debug_suffix = ".debug" if translation_config.debug else ""
         mono_out_path = translation_config.get_output_file_path(
             f"{basename}{debug_suffix}.{translation_config.lang_out}.mono.pdf"

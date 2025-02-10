@@ -1,18 +1,9 @@
-import os
 import asyncio
-
-from yadt.const import get_cache_file_path, CACHE_FOLDER
-import yadt.high_level
 import logging
+import os
+
 import configargparse
-import httpx
-from yadt.document_il.translator.translator import (
-    OpenAITranslator,
-    GoogleTranslator,
-    BingTranslator,
-)
-from yadt.document_il.translator.translator import set_translate_rate_limiter
-from yadt.translation_config import TranslationConfig  # noqa: E402
+import tqdm
 from rich.progress import (
     Progress,
     TextColumn,
@@ -21,9 +12,16 @@ from rich.progress import (
     TimeElapsedColumn,
     TimeRemainingColumn,
 )
-import tqdm
-from yadt.progress_monitor import ProgressMonitor
-from yadt import asynchronize
+
+import yadt.high_level
+from yadt.const import get_cache_file_path
+from yadt.document_il.translator.translator import (
+    OpenAITranslator,
+    GoogleTranslator,
+    BingTranslator,
+)
+from yadt.document_il.translator.translator import set_translate_rate_limiter
+from yadt.translation_config import TranslationConfig  # noqa: E402
 
 logger = logging.getLogger(__name__)
 __version__ = "0.1.5"

@@ -1,10 +1,10 @@
 import abc
+import ast
 import os.path
 import platform
 
 import cv2
 import numpy as np
-import ast
 import onnx
 import onnxruntime
 from huggingface_hub import hf_hub_download

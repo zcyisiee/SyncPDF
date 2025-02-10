@@ -1,6 +1,7 @@
 import base64
-import math
 import re
+
+import math
 import unicodedata
 
 from yadt.document_il.il_version_1 import (
@@ -20,7 +21,6 @@ from yadt.document_il.utils.layout_helper import (
     LEFT_BRACKET,
     RIGHT_BRACKET,
     formular_height_ignore_char,
-    get_char_unicode_string,
     is_same_style,
 )
 from yadt.translation_config import TranslationConfig

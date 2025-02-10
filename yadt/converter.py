@@ -1,11 +1,11 @@
 import base64
+import logging
+import re
 from typing import Dict, List, Union, Tuple, Optional
 
-from pdfminer.pdfinterp import PDFGraphicState, PDFResourceManager
-from pdfminer.pdffont import PDFCIDFont
+import numpy as np
+import unicodedata
 from pdfminer.converter import PDFConverter
-from pdfminer.pdffont import PDFUnicodeNotDefined
-from pdfminer.utils import apply_matrix_pt, mult_matrix, matrix2str, bbox2str
 from pdfminer.layout import (
     LTChar,
     LTFigure,
@@ -14,15 +14,13 @@ from pdfminer.layout import (
     LTComponent,
     LTText,
 )
-from pdfminer.utils import Matrix
-from pdfminer.pdffont import PDFFont
 from pdfminer.pdfcolor import PDFColorSpace
-
-import logging
-import re
-import concurrent.futures
-import numpy as np
-import unicodedata
+from pdfminer.pdffont import PDFCIDFont
+from pdfminer.pdffont import PDFFont
+from pdfminer.pdffont import PDFUnicodeNotDefined
+from pdfminer.pdfinterp import PDFGraphicState, PDFResourceManager
+from pdfminer.utils import Matrix
+from pdfminer.utils import apply_matrix_pt, mult_matrix, matrix2str, bbox2str
 from pymupdf import Font
 
 from yadt.document_il.frontend.il_creater import ILCreater
