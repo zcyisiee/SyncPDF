@@ -1,5 +1,6 @@
 import logging
 import statistics
+from functools import lru_cache
 from typing import Optional, Union
 
 import pymupdf
@@ -176,7 +177,8 @@ class TypesettingUnit:
         elif self.formular:
             return self.formular.pdf_character
         elif self.unicode:
-            logger.error("Cannot passthrough unicode. " f"TypesettingUnit: {self}. ")
+            logger.error(
+                "Cannot passthrough unicode. " f"TypesettingUnit: {self}. ")
             return []
 
     @property
@@ -190,7 +192,8 @@ class TypesettingUnit:
         elif self.formular:
             return self.formular.box
         elif self.unicode:
-            char_width = self.font.char_lengths(self.unicode, self.font_size)[0]
+            char_width = self.font.char_lengths(
+                self.unicode, self.font_size)[0]
             if self.x is None or self.y is None or self.scale is None:
                 return Box(0, 0, char_width, self.font_size)
             return Box(self.x, self.y, self.x + char_width, self.y + self.font_size)
@@ -256,10 +259,12 @@ class TypesettingUnit:
                         x=x + (rel_x + self.formular.x_offset) * scale,
                         y=y + (rel_y + self.formular.y_offset) * scale,
                         x2=x
-                        + (rel_x + (char.box.x2 - char.box.x) + self.formular.x_offset)
+                        + (rel_x + (char.box.x2 - char.box.x) +
+                           self.formular.x_offset)
                         * scale,
                         y2=y
-                        + (rel_y + (char.box.y2 - char.box.y) + self.formular.y_offset)
+                        + (rel_y + (char.box.y2 - char.box.y) +
+                           self.formular.y_offset)
                         * scale,
                     ),
                     pdf_style=PdfStyle(
@@ -350,7 +355,8 @@ class TypesettingUnit:
             )
             return [new_char]
         else:
-            logger.error("Unknown typesetting unit. " f"TypesettingUnit: {self}. ")
+            logger.error(
+                "Unknown typesetting unit. " f"TypesettingUnit: {self}. ")
             return []
 
 
@@ -474,7 +480,8 @@ class Typesetting:
         font_size = statistics.mode(font_sizes)
 
         space_width = (
-            self.font_mapper.base_font.char_lengths("你", font_size * scale)[0] * 0.5
+            self.font_mapper.base_font.char_lengths(
+                "你", font_size * scale)[0] * 0.5
         )
 
         # 计算平均行高
@@ -628,6 +635,14 @@ class Typesetting:
         if not paragraph.pdf_paragraph_composition:
             return []
         result = []
+
+        @lru_cache(maxsize=None)
+        def get_font(font_id: str, xobj_id: int):
+            if xobj_id in fonts:
+                font = fonts[xobj_id][font_id]
+            else:
+                font = fonts[font_id]
+            return font
         for composition in paragraph.pdf_paragraph_composition:
             if composition is None:
                 continue
@@ -656,11 +671,7 @@ class Typesetting:
                 font_id = (
                     composition.pdf_same_style_unicode_characters.pdf_style.font_id
                 )
-                xobj_id = paragraph.xobj_id
-                if xobj_id in fonts:
-                    font = fonts[xobj_id][font_id]
-                else:
-                    font = fonts[font_id]
+                font = get_font(font_id, paragraph.xobj_id)
                 result.extend(
                     [
                         TypesettingUnit(
@@ -679,7 +690,8 @@ class Typesetting:
                     ]
                 )
             elif composition.pdf_formula:
-                result.extend([TypesettingUnit(formular=composition.pdf_formula)])
+                result.extend(
+                    [TypesettingUnit(formular=composition.pdf_formula)])
             else:
                 logger.error(
                     f"Unknown composition type. "
