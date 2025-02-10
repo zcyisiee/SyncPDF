@@ -33,7 +33,7 @@ class AddDebugInformation:
     def _create_text(self, text: str, color: GraphicState, box: il_version_1.Box):
         style = il_version_1.PdfStyle(
             font_id="china-ss",
-            font_size=6,
+            font_size=4,
             graphic_state=color,
         )
         return il_version_1.PdfParagraph(
@@ -42,7 +42,7 @@ class AddDebugInformation:
                 x=box.x,
                 y=box.y2,
                 x2=box.x2,
-                y2=box.y2 + 7,
+                y2=box.y2 + 5,
             ),
             vertical=False,
             pdf_style=style,
