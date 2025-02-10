@@ -338,7 +338,8 @@ class PDFCreater:
                 pdf[page.page_number].set_contents(op_container)
                 pbar.advance()
             translation_config.raise_if_cancelled()
-            pdf.subset_fonts(fallback=False)
+            if not translation_config.skip_clean:
+                pdf.subset_fonts(fallback=False)
             if not translation_config.no_mono:
                 if translation_config.debug:
                     translation_config.raise_if_cancelled()
