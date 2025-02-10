@@ -37,7 +37,9 @@ PDFFont =
     attribute bold { xsd:boolean }?,
     attribute italic { xsd:boolean }?,
     attribute monospace { xsd:boolean }?,
-    attribute serif { xsd:boolean }?
+    attribute serif { xsd:boolean }?,
+    attribute ascent { xsd:float }?,
+    attribute descent { xsd:float }?
   }
 PDFXobject =
   element pdfXobject {
