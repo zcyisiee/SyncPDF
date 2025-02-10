@@ -1,9 +1,9 @@
 import logging
 import statistics
+import unicodedata
 from typing import Optional, Union
 
 import pymupdf
-import unicodedata
 
 from yadt.document_il import (
     Box,
@@ -34,9 +34,9 @@ class TypesettingUnit:
         xobj_id: int = None,
         debug_info: bool = False,
     ):
-        assert (
-            sum((x is not None for x in [char, formular, unicode])) == 1
-        ), "Only one of chars and formular can be not None"
+        assert sum((x is not None for x in [char, formular, unicode])) == 1, (
+            "Only one of chars and formular can be not None"
+        )
         self.char = char
         self.formular = formular
         self.unicode = unicode
@@ -49,9 +49,9 @@ class TypesettingUnit:
             assert font_size, "Font size must be provided when unicode is provided"
             assert style, "Style must be provided when unicode is provided"
             assert len(unicode) == 1, "Unicode must be a single character"
-            assert (
-                xobj_id is not None
-            ), "Xobj id must be provided when unicode is provided"
+            assert xobj_id is not None, (
+                "Xobj id must be provided when unicode is provided"
+            )
 
             self.font = font
             self.font_id = font.font_id
@@ -176,7 +176,7 @@ class TypesettingUnit:
         elif self.formular:
             return self.formular.pdf_character
         elif self.unicode:
-            logger.error("Cannot passthrough unicode. " f"TypesettingUnit: {self}. ")
+            logger.error(f"Cannot passthrough unicode. TypesettingUnit: {self}. ")
             return []
 
     @property
@@ -316,15 +316,15 @@ class TypesettingUnit:
         if self.can_passthrough:
             return self.passthrough()
         elif self.unicode:
-            assert (
-                self.x is not None
-            ), "x position must be set, should be set by `relocate`"
-            assert (
-                self.y is not None
-            ), "y position must be set, should be set by `relocate`"
-            assert (
-                self.scale is not None
-            ), "scale must be set, should be set by `relocate`"
+            assert self.x is not None, (
+                "x position must be set, should be set by `relocate`"
+            )
+            assert self.y is not None, (
+                "y position must be set, should be set by `relocate`"
+            )
+            assert self.scale is not None, (
+                "scale must be set, should be set by `relocate`"
+            )
             # 计算字符宽度
             char_width = self.width
 
@@ -350,7 +350,7 @@ class TypesettingUnit:
             )
             return [new_char]
         else:
-            logger.error("Unknown typesetting unit. " f"TypesettingUnit: {self}. ")
+            logger.error(f"Unknown typesetting unit. TypesettingUnit: {self}. ")
             return []
 
 

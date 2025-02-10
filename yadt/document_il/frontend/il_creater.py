@@ -201,7 +201,7 @@ class ILCreater:
                         b"begincodespacerange\n?.*<(\\d+?)>.*", to_unicode_bytes
                     ).group(1)
                     encoding_length = len(range) // 2
-            except:
+            except Exception:
                 if max(font.unicode_map.cid2unichr.keys()) > 255:
                     encoding_length = 2
                 else:
@@ -212,7 +212,7 @@ class ILCreater:
             italic = mupdf_font.is_italic
             monospaced = mupdf_font.is_monospaced
             serif = mupdf_font.is_serif
-        except:
+        except Exception:
             bold = None
             italic = None
             monospaced = None

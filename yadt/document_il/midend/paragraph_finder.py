@@ -1,7 +1,7 @@
 import logging
+import random
 import re
 from typing import Literal, Union
-import random
 
 from yadt.document_il import (
     Box,
@@ -22,11 +22,13 @@ from yadt.translation_config import TranslationConfig
 logger = logging.getLogger(__name__)
 
 # Base58 alphabet (Bitcoin style, without numbers 0, O, I, l)
-BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
 
 def generate_base58_id(length: int = 5) -> str:
     """Generate a random base58 ID of specified length."""
-    return ''.join(random.choice(BASE58_ALPHABET) for _ in range(length))
+    return "".join(random.choice(BASE58_ALPHABET) for _ in range(length))
+
 
 class ParagraphFinder:
     stage_name = "解析段落"

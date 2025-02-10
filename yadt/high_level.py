@@ -15,7 +15,7 @@ from pdfminer.pdfparser import PDFParser
 from pymupdf import Document, Font
 
 from yadt import asynchronize
-from yadt.const import get_cache_file_path, CACHE_FOLDER
+from yadt.const import CACHE_FOLDER, get_cache_file_path
 from yadt.converter import TranslateConverter
 from yadt.document_il.backend.pdf_creater import PDFCreater
 from yadt.document_il.frontend.il_creater import ILCreater
@@ -29,7 +29,7 @@ from yadt.document_il.utils.fontmap import FontMapper
 from yadt.document_il.xml_converter import XMLConverter
 from yadt.pdfinterp import PDFPageInterpreterEx
 from yadt.progress_monitor import ProgressMonitor
-from yadt.translation_config import TranslationConfig, TranslateResult
+from yadt.translation_config import TranslateResult, TranslationConfig
 
 logger = logging.getLogger(__name__)
 
@@ -390,8 +390,7 @@ def do_translate(pm, translation_config):
         result.original_pdf_path = original_pdf_path
         result.total_seconds = finish_time - start_time
         logger.info(
-            f"finish translate: {original_pdf_path}, cost: "
-            f"{finish_time - start_time} s"
+            f"finish translate: {original_pdf_path}, cost: {finish_time - start_time} s"
         )
         pm.translate_done(result)
         return result
