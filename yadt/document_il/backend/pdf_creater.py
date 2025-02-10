@@ -133,7 +133,7 @@ class PDFCreater:
         draw_op.append(
             rectangle.graphic_state.passthrough_per_char_instruction.encode()
         )  # Green stroke
-        draw_op.append(b" 0.5 w ")  # Line width
+        draw_op.append(b" 1 w ")  # Line width
 
         # Draw four lines manually
         # Bottom line
