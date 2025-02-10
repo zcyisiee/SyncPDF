@@ -292,6 +292,11 @@
           <data type="boolean"/>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="debug_id">
+          <data type="string"/>
+        </attribute>
+      </optional>
       <ref name="Box"/>
       <ref name="PDFStyle"/>
       <zeroOrMore>
