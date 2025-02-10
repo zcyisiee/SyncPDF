@@ -60,10 +60,28 @@ class AddDebugInformation:
         )
 
     def process_page(self, page: il_version_1.Page):
+        # Add page number text at top-left corner
+        page_width = page.cropbox.box.x2 - page.cropbox.box.x
+        page_height = page.cropbox.box.y2 - page.cropbox.box.y
+        page_number_text = f"pagenumber: {page.page_number}"
+        page_number_box = il_version_1.Box(
+            x=page.cropbox.box.x + page_width * 0.02,
+            y=page.cropbox.box.y,
+            x2=page.cropbox.box.x2,
+            y2=page.cropbox.box.y2 - page_height * 0.02,
+        )
+        page_number_paragraph = self._create_text(
+            page_number_text,
+            BLUE,
+            page_number_box
+        )
+        page.pdf_paragraph.append(page_number_paragraph)
 
         new_paragraphs = []
 
         for paragraph in page.pdf_paragraph:
+            if any((x.pdf_same_style_unicode_characters.debug_info for x in paragraph.pdf_paragraph_composition if x.pdf_same_style_unicode_characters)):
+                continue
             # Create a rectangle box
             rect = self._create_rectangle(paragraph.box, BLUE)
 
