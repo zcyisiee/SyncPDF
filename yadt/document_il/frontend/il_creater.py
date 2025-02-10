@@ -1,4 +1,5 @@
 import base64
+import logging
 import re
 
 import pdfminer.pdfinterp
@@ -9,7 +10,6 @@ from pdfminer.psparser import PSLiteral
 
 from yadt.document_il import il_version_1
 from yadt.translation_config import TranslationConfig
-import logging
 
 logger = logging.getLogger(__name__)
 

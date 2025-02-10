@@ -1,9 +1,9 @@
 import asyncio
+import logging
 import threading
 import time
 from asyncio import CancelledError
 from typing import Optional
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,9 @@ class ProgressMonitor:
         stage = self.stage[stage_name]
         stage.run_time += 1
         stage.name = stage_name
-        stage.display_name = f'{stage_name} ({stage.run_time})' if stage.run_time > 1 else stage_name
+        stage.display_name = (
+            f"{stage_name} ({stage.run_time})" if stage.run_time > 1 else stage_name
+        )
         stage.current = 0
         stage.total = total
         if self.progress_change_callback:

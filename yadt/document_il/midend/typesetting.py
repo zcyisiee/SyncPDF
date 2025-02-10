@@ -1,26 +1,19 @@
 import logging
 import statistics
-import unicodedata
 from typing import Optional, Union
 
 import pymupdf
+import unicodedata
 
 from yadt.document_il import (
     Box,
     PdfCharacter,
     PdfFormula,
-    PdfLine,
-    PdfParagraph,
     PdfParagraphComposition,
     PdfStyle,
     il_version_1,
 )
 from yadt.document_il.utils.fontmap import FontMapper
-from yadt.document_il.utils.layout_helper import (
-    get_paragraph_length_except,
-    get_paragraph_max_height,
-    get_paragraph_unicode,
-)
 from yadt.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
@@ -405,7 +398,7 @@ class Typesetting:
         )
         text = "本文档由funstory.ai的开源PDF翻译库yadt(http://yadt.io)翻译，本仓库正在积极的建设当中，欢迎star和关注。"
         if self.translation_config.debug:
-            text += '\n 当前为DEBUG模式，将显示更多辅助信息。请注意，部分框的位置对应原文，但在译文中可能不正确。'
+            text += "\n 当前为DEBUG模式，将显示更多辅助信息。请注意，部分框的位置对应原文，但在译文中可能不正确。"
         page.pdf_paragraph.append(
             il_version_1.PdfParagraph(
                 first_line_indent=False,

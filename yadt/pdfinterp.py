@@ -1,10 +1,11 @@
 import logging
 from typing import Any, Dict, Optional, Sequence, Tuple, cast
-import numpy as np
 
+import numpy as np
 from pdfminer import settings
 from pdfminer.pdfcolor import PREDEFINED_COLORSPACE, PDFColorSpace
 from pdfminer.pdfdevice import PDFDevice, PDFTextSeq
+from pdfminer.pdffont import PDFFont
 from pdfminer.pdfinterp import (
     PDFPageInterpreter,
     PDFResourceManager,
@@ -15,7 +16,6 @@ from pdfminer.pdfinterp import (
     LITERAL_FORM,
     LITERAL_IMAGE,
 )
-from pdfminer.pdffont import PDFFont
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdftypes import (
     PDFObjRef,
@@ -205,7 +205,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                 raise PDFInterpreterError("No colorspace specified!")
             n = 1
         args = self.pop(n)
-        self.il_creater.on_passthrough_per_char('SCN', args)
+        self.il_creater.on_passthrough_per_char("SCN", args)
         self.graphicstate.scolor = cast(Color, args)
         return args
 
@@ -218,7 +218,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                 raise PDFInterpreterError("No colorspace specified!")
             n = 1
         args = self.pop(n)
-        self.il_creater.on_passthrough_per_char('scn', args)
+        self.il_creater.on_passthrough_per_char("scn", args)
         self.graphicstate.ncolor = cast(Color, args)
         return args
 
@@ -226,14 +226,14 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
         """Set color for stroking operations"""
         args = self.do_SCN()
         self.il_creater.remove_latest_passthrough_per_char_instruction()
-        self.il_creater.on_passthrough_per_char('SC', args)
+        self.il_creater.on_passthrough_per_char("SC", args)
         return args
 
     def do_sc(self) -> None:
         """Set color for nonstroking operations"""
         args = self.do_scn()
         self.il_creater.remove_latest_passthrough_per_char_instruction()
-        self.il_creater.on_passthrough_per_char('sc', args)
+        self.il_creater.on_passthrough_per_char("sc", args)
         return args
 
     def do_Do(self, xobjid_arg: PDFStackT) -> None:

@@ -1,13 +1,12 @@
-import threading
-from typing import Optional
+import os
 import shutil
 import tempfile
+import threading
+from typing import Optional
 
 from yadt.const import (
     CACHE_FOLDER,
 )
-import os
-
 from yadt.docvision.doclayout import DocLayoutModel
 from yadt.progress_monitor import ProgressMonitor
 

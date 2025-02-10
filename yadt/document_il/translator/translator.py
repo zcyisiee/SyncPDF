@@ -1,15 +1,13 @@
 import html
 import logging
-import os
 import re
 import threading
 import time
-import unicodedata
 from abc import ABC
-from copy import copy
 
 import openai
 import requests
+import unicodedata
 
 from yadt.document_il.translator.cache import TranslationCache
 

@@ -1,36 +1,35 @@
 import asyncio
+import hashlib
+import logging
 import os
 import threading
 import time
-import hashlib
 from asyncio import CancelledError
 from typing import Any, BinaryIO, Optional
 
+import httpx
 from pdfminer.pdfdocument import PDFDocument
 from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
 from pymupdf import Document, Font
-import httpx
 
 from yadt import asynchronize
 from yadt.const import get_cache_file_path, CACHE_FOLDER
 from yadt.converter import TranslateConverter
+from yadt.document_il.backend.pdf_creater import PDFCreater
+from yadt.document_il.frontend.il_creater import ILCreater
+from yadt.document_il.midend.add_debug_information import AddDebugInformation
 from yadt.document_il.midend.il_translator import ILTranslator
+from yadt.document_il.midend.layout_parser import LayoutParser
 from yadt.document_il.midend.paragraph_finder import ParagraphFinder
 from yadt.document_il.midend.styles_and_formulas import StylesAndFormulas
 from yadt.document_il.midend.typesetting import Typesetting
+from yadt.document_il.utils.fontmap import FontMapper
 from yadt.document_il.xml_converter import XMLConverter
 from yadt.pdfinterp import PDFPageInterpreterEx
-
-from yadt.document_il.frontend.il_creater import ILCreater
-from yadt.document_il.backend.pdf_creater import PDFCreater
-from yadt.translation_config import TranslationConfig, TranslateResult
 from yadt.progress_monitor import ProgressMonitor
-from yadt.document_il.utils.fontmap import FontMapper
-from yadt.document_il.midend.layout_parser import LayoutParser
-from yadt.document_il.midend.add_debug_information import AddDebugInformation
-import logging
+from yadt.translation_config import TranslationConfig, TranslateResult
 
 logger = logging.getLogger(__name__)
 
@@ -373,7 +372,8 @@ def do_translate(pm, translation_config):
         if translation_config.debug:
             AddDebugInformation(translation_config).process(docs)
             xml_converter.write_json(
-                docs, translation_config.get_working_file_path("add_debug_information.json")
+                docs,
+                translation_config.get_working_file_path("add_debug_information.json"),
             )
 
         Typesetting(translation_config).typsetting_document(docs)
