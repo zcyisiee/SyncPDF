@@ -62,6 +62,8 @@
       <xs:attribute name="italic" type="xs:boolean"/>
       <xs:attribute name="monospace" type="xs:boolean"/>
       <xs:attribute name="serif" type="xs:boolean"/>
+      <xs:attribute name="ascent" type="xs:float"/>
+      <xs:attribute name="descent" type="xs:float"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfXobject">

@@ -43,7 +43,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.flake8]
-ignore = ["E203", "E261", "E501", "W503", "E741"]
+ignore = ["E203", "E261", "E501", "W503", "E741", "E501"]
 max-line-length = 88
 
 [dependency-groups]

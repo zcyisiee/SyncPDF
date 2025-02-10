@@ -133,7 +133,7 @@ class PDFCreater:
         draw_op.append(
             rectangle.graphic_state.passthrough_per_char_instruction.encode()
         )  # Green stroke
-        draw_op.append(b" 0.5 w ")  # Line width
+        draw_op.append(b" 1 w ")  # Line width
 
         # Draw four lines manually
         # Bottom line
@@ -338,7 +338,8 @@ class PDFCreater:
                 pdf[page.page_number].set_contents(op_container)
                 pbar.advance()
             translation_config.raise_if_cancelled()
-            pdf.subset_fonts(fallback=False)
+            if not translation_config.skip_clean:
+                pdf.subset_fonts(fallback=False)
             if not translation_config.no_mono:
                 if translation_config.debug:
                     translation_config.raise_if_cancelled()

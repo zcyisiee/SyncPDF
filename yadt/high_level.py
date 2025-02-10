@@ -23,6 +23,7 @@ from yadt.document_il.midend.add_debug_information import AddDebugInformation
 from yadt.document_il.midend.il_translator import ILTranslator
 from yadt.document_il.midend.layout_parser import LayoutParser
 from yadt.document_il.midend.paragraph_finder import ParagraphFinder
+from yadt.document_il.midend.remove_descent import RemoveDescent
 from yadt.document_il.midend.styles_and_formulas import StylesAndFormulas
 from yadt.document_il.midend.typesetting import Typesetting
 from yadt.document_il.utils.fontmap import FontMapper
@@ -38,6 +39,7 @@ TRANSLATE_STAGES = [
     LayoutParser.stage_name,
     ParagraphFinder.stage_name,
     StylesAndFormulas.stage_name,
+    RemoveDescent.stage_name,
     ILTranslator.stage_name,
     Typesetting.stage_name,
     FontMapper.stage_name,
@@ -282,7 +284,8 @@ async def async_translate(translation_config: TranslationConfig):
         cancel_event=cancel_event,
         loop=loop,
     ) as pm:
-        future = loop.run_in_executor(None, do_translate, pm, translation_config)
+        future = loop.run_in_executor(
+            None, do_translate, pm, translation_config)
         try:
             async for event in callback:
                 event = event.kwargs
@@ -292,7 +295,8 @@ async def async_translate(translation_config: TranslationConfig):
         except CancelledError:
             cancel_event.set()
         except KeyboardInterrupt:
-            logger.info("Translation cancelled by user through keyboard interrupt")
+            logger.info(
+                "Translation cancelled by user through keyboard interrupt")
             cancel_event.set()
     if cancel_event.is_set():
         future.cancel()
@@ -337,7 +341,8 @@ def do_translate(pm, translation_config):
         logger.debug(f"finish create il from {temp_pdf_path}")
         if translation_config.debug:
             xml_converter.write_json(
-                docs, translation_config.get_working_file_path("create_il.debug.json")
+                docs, translation_config.get_working_file_path(
+                    "create_il.debug.json")
             )
         # Generate layouts for all pages
         logger.debug("start generating layouts")
@@ -345,42 +350,55 @@ def do_translate(pm, translation_config):
         logger.debug("finish generating layouts")
         if translation_config.debug:
             xml_converter.write_json(
-                docs, translation_config.get_working_file_path("layout_generator.json")
+                docs, translation_config.get_working_file_path(
+                    "layout_generator.json")
             )
         ParagraphFinder(translation_config).process(docs)
         logger.debug(f"finish paragraph finder from {temp_pdf_path}")
         if translation_config.debug:
             xml_converter.write_json(
-                docs, translation_config.get_working_file_path("paragraph_finder.json")
+                docs, translation_config.get_working_file_path(
+                    "paragraph_finder.json")
             )
         StylesAndFormulas(translation_config).process(docs)
         logger.debug(f"finish styles and formulas from {temp_pdf_path}")
         if translation_config.debug:
             xml_converter.write_json(
                 docs,
-                translation_config.get_working_file_path("styles_and_formulas.json"),
+                translation_config.get_working_file_path(
+                    "styles_and_formulas.json"),
+            )
+        RemoveDescent(translation_config).process(docs)
+        logger.debug(f"finish remove descent from {temp_pdf_path}")
+        if translation_config.debug:
+            xml_converter.write_json(
+                docs,
+                translation_config.get_working_file_path(
+                    "remove_descent.json"),
             )
         translate_engine = translation_config.translator
-        # translate_engine.ignore_cache = True
         ILTranslator(translate_engine, translation_config).translate(docs)
         logger.debug(f"finish ILTranslator from {temp_pdf_path}")
         if translation_config.debug:
             xml_converter.write_json(
-                docs, translation_config.get_working_file_path("il_translated.json")
+                docs, translation_config.get_working_file_path(
+                    "il_translated.json")
             )
 
         if translation_config.debug:
             AddDebugInformation(translation_config).process(docs)
             xml_converter.write_json(
                 docs,
-                translation_config.get_working_file_path("add_debug_information.json"),
+                translation_config.get_working_file_path(
+                    "add_debug_information.json"),
             )
 
         Typesetting(translation_config).typsetting_document(docs)
         logger.debug(f"finish typsetting from {temp_pdf_path}")
         if translation_config.debug:
             xml_converter.write_json(
-                docs, translation_config.get_working_file_path("typsetting.json")
+                docs, translation_config.get_working_file_path(
+                    "typsetting.json")
             )
         # deepcopy
         # docs2 = xml_converter.deepcopy(docs)
