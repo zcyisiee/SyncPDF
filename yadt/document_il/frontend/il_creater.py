@@ -226,6 +226,8 @@ class ILCreater:
             italic=italic,
             monospace=monospaced,
             serif=serif,
+            ascent=font.ascent,
+            descent=font.descent,
         )
         self.current_page_font_name_id_map[font_name] = font_id
         if self.xobj_id in self.xobj_map:
