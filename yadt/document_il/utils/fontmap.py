@@ -44,10 +44,35 @@ class FontMapper:
         self.fallback_font.font_id = "fallback"
         self.kai_font.font_id = "kai"
 
+        # Set ascent and descent for base font
+        self.base_font.ascent_fontmap = 1151
+        self.base_font.descent_fontmap = -286
+
+        # Set ascent and descent for fallback font
+        self.fallback_font.ascent_fontmap = 1069
+        self.fallback_font.descent_fontmap = -293
+
+        # Set ascent and descent for kai font
+        self.kai_font.ascent_fontmap = 928
+        self.kai_font.descent_fontmap = -256
+
         self.fontid2font = {f.font_id: f for f in self.fonts.values()}
         self.fontid2font["base"] = self.base_font
         self.fontid2font["fallback"] = self.fallback_font
         self.fontid2font["kai"] = self.kai_font
+
+        # Set ascent and descent for other fonts
+        font_metrics = {
+            "sourcehanserifcn": (1151, 0),
+            "sourcehansansscregular": (1160, -288),
+            "sourcehanserifcnbold": (1151, -286),
+            "sourcehansansscbold": (1160, -288)
+        }
+
+        for font_id, (ascent, descent) in font_metrics.items():
+            if font_id in self.fontid2font:
+                self.fontid2font[font_id].ascent_fontmap = ascent
+                self.fontid2font[font_id].descent_fontmap = descent
 
         for font in self.fontid2font.values():
             font.char_lengths = functools.lru_cache(maxsize=10240, typed=True)(
@@ -121,7 +146,8 @@ class FontMapper:
         font_list.extend(
             [
                 (
-                    os.path.basename(file_name).split(".")[0].replace("-", "").lower(),
+                    os.path.basename(file_name).split(
+                        ".")[0].replace("-", "").lower(),
                     get_cache_file_path(file_name),
                 )
                 for file_name in self.font_names
@@ -154,7 +180,8 @@ class FontMapper:
                         if font_res[0] == "dict":
                             for font in font_list:
                                 target_key = f"{target_key_prefix}{font[0]}"
-                                font_exist = doc_zh.xref_get_key(xref, target_key)
+                                font_exist = doc_zh.xref_get_key(
+                                    xref, target_key)
                                 if font_exist[0] == "null":
                                     doc_zh.xref_set_key(
                                         xref,
@@ -169,6 +196,15 @@ class FontMapper:
             pdf_fonts = []
             for font_name, font_path in font_list:
                 font = pymupdf.Font(fontfile=font_path)
+                # Get descent_fontmap from fontid2font
+                descent_fontmap = None
+                if font_name in self.fontid2font:
+                    mupdf_font = self.fontid2font[font_name]
+                    if hasattr(mupdf_font, 'descent_fontmap'):
+                        descent_fontmap = mupdf_font.descent_fontmap
+                    if hasattr(mupdf_font, 'ascent_fontmap'):
+                        ascent_fontmap = mupdf_font.ascent_fontmap
+
                 pdf_fonts.append(
                     il_version_1.PdfFont(
                         name=font_name,
@@ -179,6 +215,8 @@ class FontMapper:
                         italic=font.is_italic,
                         monospace=font.is_monospaced,
                         serif=font.is_serif,
+                        descent=descent_fontmap,
+                        ascent=ascent_fontmap
                     )
                 )
                 pbar.advance(1)
