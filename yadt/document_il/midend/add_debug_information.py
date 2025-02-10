@@ -91,7 +91,10 @@ class AddDebugInformation:
             # Note: PDF coordinates are from bottom-left,
             # so we use y2 for top position
 
-            new_paragraphs.append(self._create_text("paragraph", BLUE, paragraph.box))
+            debug_text = "paragraph"
+            if hasattr(paragraph, "debug_id") and paragraph.debug_id:
+                debug_text = f"paragraph[{paragraph.debug_id}]"
+            new_paragraphs.append(self._create_text(debug_text, BLUE, paragraph.box))
 
             for composition in paragraph.pdf_paragraph_composition:
                 if composition.pdf_formula:
