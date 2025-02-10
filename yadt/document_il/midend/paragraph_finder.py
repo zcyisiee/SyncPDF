@@ -24,9 +24,11 @@ logger = logging.getLogger(__name__)
 # Base58 alphabet (Bitcoin style, without numbers 0, O, I, l)
 BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 
+
 def generate_base58_id(length: int = 5) -> str:
     """Generate a random base58 ID of specified length."""
     return ''.join(random.choice(BASE58_ALPHABET) for _ in range(length))
+
 
 class ParagraphFinder:
     stage_name = "解析段落"
@@ -151,7 +153,8 @@ class ParagraphFinder:
                         )
                         paragraphs.append(current_paragraph)
                     else:
-                        current_paragraph.pdf_paragraph_composition.append(line)
+                        current_paragraph.pdf_paragraph_composition.append(
+                            line)
                         self.update_paragraph_data(current_paragraph)
                     current_line_chars = []
 
@@ -167,7 +170,8 @@ class ParagraphFinder:
                 if current_line_chars:
                     line = self.create_line(current_line_chars)
                     if current_paragraph is not None:
-                        current_paragraph.pdf_paragraph_composition.append(line)
+                        current_paragraph.pdf_paragraph_composition.append(
+                            line)
                         self.update_paragraph_data(current_paragraph)
                     else:
                         current_paragraph = PdfParagraph(
@@ -245,14 +249,15 @@ class ParagraphFinder:
         ]
 
     def get_layout(
-            self,
-            char: PdfCharacter,
-            page: Page,
-            xy_mode: Union[
-                Literal["topleft"], Literal["bottomright"], Literal["middle"]
-            ] = "middle",
-        ):
-        tl, br, md = [self._get_layout(char, page, mode) for mode in ["topleft", "bottomright", "middle"]]
+        self,
+        char: PdfCharacter,
+        page: Page,
+        xy_mode: Union[
+            Literal["topleft"], Literal["bottomright"], Literal["middle"]
+        ] = "middle",
+    ):
+        tl, br, md = [self._get_layout(char, page, mode) for mode in [
+            "topleft", "bottomright", "middle"]]
         if tl is not None and tl.name == 'isolate_formula':
             return tl
         if br is not None and br.name == 'isolate_formula':
@@ -382,7 +387,8 @@ class ParagraphFinder:
 
                 prev_line = prev_composition.pdf_line
                 prev_width = prev_line.box.x2 - prev_line.box.x
-                prev_text = "".join([c.char_unicode for c in prev_line.pdf_character])
+                prev_text = "".join(
+                    [c.char_unicode for c in prev_line.pdf_character])
 
                 # 检查是否包含连续的点（至少 20 个）
                 # 如果有至少连续 20 个点，则代表这是目录条目
