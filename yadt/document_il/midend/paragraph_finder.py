@@ -123,6 +123,14 @@ class ParagraphFinder:
 
         for paragraph in paragraphs:
             self.update_paragraph_data(paragraph, update_unicode=True)
+    
+    def is_isolated_formula(self, char: PdfCharacter):
+        return char.char_unicode in (
+            '(cid:122)',
+            '(cid:123)',
+            '(cid:124)',
+            '(cid:125)',
+        )
 
     def create_paragraphs(self, page: Page) -> list[PdfParagraph]:
         paragraphs: list[PdfParagraph] = []
@@ -137,7 +145,10 @@ class ParagraphFinder:
 
         for char in page.pdf_character:
             char_layout = self.get_layout(char, page)
-            if not self.is_text_layout(char_layout):
+            if (
+                not self.is_text_layout(char_layout)
+                or self.is_isolated_formula(char)
+            ):
                 skip_chars.append(char)
                 continue
 
