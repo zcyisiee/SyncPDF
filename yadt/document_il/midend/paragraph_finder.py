@@ -1,6 +1,7 @@
 import logging
 import re
 from typing import Literal, Union
+import random
 
 from yadt.document_il import (
     Box,
@@ -20,6 +21,12 @@ from yadt.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 
+# Base58 alphabet (Bitcoin style, without numbers 0, O, I, l)
+BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+
+def generate_base58_id(length: int = 5) -> str:
+    """Generate a random base58 ID of specified length."""
+    return ''.join(random.choice(BASE58_ALPHABET) for _ in range(length))
 
 class ParagraphFinder:
     stage_name = "解析段落"
@@ -140,12 +147,13 @@ class ParagraphFinder:
                     if current_paragraph is None:
                         current_paragraph = PdfParagraph(
                             pdf_paragraph_composition=[line],
+                            debug_id=generate_base58_id(),
                         )
                         paragraphs.append(current_paragraph)
                     else:
                         current_paragraph.pdf_paragraph_composition.append(line)
                         self.update_paragraph_data(current_paragraph)
-                current_line_chars = []
+                    current_line_chars = []
 
             # 检查是否需要开始新段落
             if (
@@ -164,6 +172,7 @@ class ParagraphFinder:
                     else:
                         current_paragraph = PdfParagraph(
                             pdf_paragraph_composition=[line],
+                            debug_id=generate_base58_id(),
                         )
                         self.update_paragraph_data(current_paragraph)
                         paragraphs.append(current_paragraph)
@@ -179,6 +188,7 @@ class ParagraphFinder:
             if current_paragraph is None:
                 current_paragraph = PdfParagraph(
                     pdf_paragraph_composition=[line],
+                    debug_id=generate_base58_id(),
                 )
                 paragraphs.append(current_paragraph)
             else:
@@ -366,6 +376,7 @@ class ParagraphFinder:
                             paragraph.pdf_paragraph_composition[j:]
                         ),
                         unicode="",
+                        debug_id=generate_base58_id(),
                     )
                     # 更新原段落
                     paragraph.pdf_paragraph_composition = (
@@ -393,6 +404,7 @@ class ParagraphFinder:
                             paragraph.pdf_paragraph_composition[j:]
                         ),
                         unicode="",
+                        debug_id=generate_base58_id(),
                     )
                     # 更新原段落
                     paragraph.pdf_paragraph_composition = (

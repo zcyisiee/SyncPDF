@@ -33,7 +33,7 @@ class AddDebugInformation:
     def _create_text(self, text: str, color: GraphicState, box: il_version_1.Box):
         style = il_version_1.PdfStyle(
             font_id="china-ss",
-            font_size=6,
+            font_size=4,
             graphic_state=color,
         )
         return il_version_1.PdfParagraph(
@@ -42,7 +42,7 @@ class AddDebugInformation:
                 x=box.x,
                 y=box.y2,
                 x2=box.x2,
-                y2=box.y2 + 7,
+                y2=box.y2 + 5,
             ),
             vertical=False,
             pdf_style=style,
@@ -60,10 +60,28 @@ class AddDebugInformation:
         )
 
     def process_page(self, page: il_version_1.Page):
+        # Add page number text at top-left corner
+        page_width = page.cropbox.box.x2 - page.cropbox.box.x
+        page_height = page.cropbox.box.y2 - page.cropbox.box.y
+        page_number_text = f"pagenumber: {page.page_number}"
+        page_number_box = il_version_1.Box(
+            x=page.cropbox.box.x + page_width * 0.02,
+            y=page.cropbox.box.y,
+            x2=page.cropbox.box.x2,
+            y2=page.cropbox.box.y2 - page_height * 0.02,
+        )
+        page_number_paragraph = self._create_text(
+            page_number_text,
+            BLUE,
+            page_number_box
+        )
+        page.pdf_paragraph.append(page_number_paragraph)
 
         new_paragraphs = []
 
         for paragraph in page.pdf_paragraph:
+            if any((x.pdf_same_style_unicode_characters.debug_info for x in paragraph.pdf_paragraph_composition if x.pdf_same_style_unicode_characters)):
+                continue
             # Create a rectangle box
             rect = self._create_rectangle(paragraph.box, BLUE)
 
@@ -73,7 +91,10 @@ class AddDebugInformation:
             # Note: PDF coordinates are from bottom-left,
             # so we use y2 for top position
 
-            new_paragraphs.append(self._create_text("paragraph", BLUE, paragraph.box))
+            debug_text = "paragraph"
+            if hasattr(paragraph, "debug_id") and paragraph.debug_id:
+                debug_text = f"paragraph[{paragraph.debug_id}]"
+            new_paragraphs.append(self._create_text(debug_text, BLUE, paragraph.box))
 
             for composition in paragraph.pdf_paragraph_composition:
                 if composition.pdf_formula:

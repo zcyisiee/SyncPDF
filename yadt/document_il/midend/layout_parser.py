@@ -71,7 +71,7 @@ class LayoutParser:
             # so we use y2 for top position
             style = il_version_1.PdfStyle(
                 font_id="china-ss",
-                font_size=6,
+                font_size=4,
                 graphic_state=color,
             )
             page.pdf_paragraph.append(
@@ -81,7 +81,7 @@ class LayoutParser:
                         x=layout.box.x,
                         y=layout.box.y2,
                         x2=layout.box.x2,
-                        y2=layout.box.y2 + 7,
+                        y2=layout.box.y2 + 5,
                     ),
                     vertical=False,
                     pdf_style=style,

@@ -663,6 +663,12 @@ class PdfParagraph:
             "type": "Attribute",
         },
     )
+    debug_id: Optional[str] = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass
