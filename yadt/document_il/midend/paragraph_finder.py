@@ -245,6 +245,28 @@ class ParagraphFinder:
         ]
 
     def get_layout(
+            self,
+            char: PdfCharacter,
+            page: Page,
+            xy_mode: Union[
+                Literal["topleft"], Literal["bottomright"], Literal["middle"]
+            ] = "middle",
+        ):
+        tl, br, md = [self._get_layout(char, page, mode) for mode in ["topleft", "bottomright", "middle"]]
+        if tl is not None and tl.name == 'isolate_formula':
+            return tl
+        if br is not None and br.name == 'isolate_formula':
+            return br
+        if md is not None and md.name == 'isolate_formula':
+            return md
+
+        if md is not None:
+            return md
+        if tl is not None:
+            return tl
+        return br
+
+    def _get_layout(
         self,
         char: PdfCharacter,
         page: Page,
@@ -253,11 +275,11 @@ class ParagraphFinder:
         ] = "middle",
     ):
         # 这几个符号，解析出来的大小经常只有实际大小的一点点。
-        if (
-            xy_mode != "bottomright"
-            and char.char_unicode in HEIGHT_NOT_USFUL_CHAR_IN_CHAR
-        ):
-            return self.get_layout(char, page, "bottomright")
+        # if (
+        #     xy_mode != "bottomright"
+        #     and char.char_unicode in HEIGHT_NOT_USFUL_CHAR_IN_CHAR
+        # ):
+        #     return self.get_layout(char, page, "bottomright")
         # current layouts
         # {
         #     "title",
@@ -313,10 +335,6 @@ class ParagraphFinder:
             if layout_name in matching_layouts:
                 return matching_layouts[layout_name]
 
-        if xy_mode == "middle":
-            return self.get_layout(char, page, "topleft")
-        if xy_mode == "topleft":
-            return self.get_layout(char, page, "bottomright")
         return None
 
     def create_line(self, chars: list[PdfCharacter]) -> PdfParagraphComposition:
