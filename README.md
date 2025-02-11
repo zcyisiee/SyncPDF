@@ -135,6 +135,11 @@ uv run babeldoc --bing --files example.pdf --files example2.pdf
 - `--openai-base-url`: Base URL for OpenAI API
 - `--openai-api-key`: API key for OpenAI service
 
+> [!TIP]
+>
+> 1. This tool supports any OpenAI-compatible API endpoints. Just set the correct base URL and API key. (e.g. `https://xxx.custom.xxx/v1`)
+> 2. For local models like Ollama, you can use any value as the API key (e.g. `--openai-api-key a`).
+
 ### Output Control
 
 - `--output`, `-o`: Output directory for translated files. If not set, use current working directory.
