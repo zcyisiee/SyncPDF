@@ -47,16 +47,17 @@ ignore = ["E203", "E261", "E501", "W503", "E741", "E501"]
 max-line-length = 88
 
 [tool.ruff]
-
 src = ["yadt"]
 target-version = "py310"
 show-fixes = true
 
-lint.ignore = ["E203", "E261", "E501", "E741", "F841"]
-
 [tool.ruff.format]
 # Enable reformatting of code snippets in docstrings.
 docstring-code-format = true
+
+[tool.ruff.lint]
+ignore = ["E203", "E261", "E501", "E741", "F841"]
+select = ["E", "F", "N"]
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"
@@ -69,6 +70,9 @@ force-single-line = true
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"yadt/pdfinterp.py" = ["N"]
 
 [dependency-groups]
 dev = [
