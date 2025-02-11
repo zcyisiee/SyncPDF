@@ -397,7 +397,7 @@ class Typesetting:
             font_size=6,
             graphic_state=il_version_1.GraphicState(),
         )
-        text = "本文档由funstory.ai的开源PDF翻译库yadt(http://yadt.io)翻译，本仓库正在积极的建设当中，欢迎star和关注。"
+        text = "本文档由funstory.ai的开源PDF翻译库BabelDOC(http://yadt.io)翻译，本仓库正在积极的建设当中，欢迎star和关注。"
         if self.translation_config.debug:
             text += "\n 当前为DEBUG模式，将显示更多辅助信息。请注意，部分框的位置对应原文，但在译文中可能不正确。"
         page.pdf_paragraph.append(
