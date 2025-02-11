@@ -1,21 +1,17 @@
 import logging
 import random
 import re
-from typing import Literal, Union
+from typing import Literal
 
-from yadt.document_il import (
-    Box,
-    Page,
-    PdfCharacter,
-    PdfLine,
-    PdfParagraph,
-    PdfParagraphComposition,
-)
-from yadt.document_il.utils.layout_helper import (
-    Layout,
-    add_space_dummy_chars,
-    get_char_unicode_string,
-)
+from yadt.document_il import Box
+from yadt.document_il import Page
+from yadt.document_il import PdfCharacter
+from yadt.document_il import PdfLine
+from yadt.document_il import PdfParagraph
+from yadt.document_il import PdfParagraphComposition
+from yadt.document_il.utils.layout_helper import Layout
+from yadt.document_il.utils.layout_helper import add_space_dummy_chars
+from yadt.document_il.utils.layout_helper import get_char_unicode_string
 from yadt.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
@@ -52,7 +48,7 @@ class ParagraphFinder:
                     "Unexpected composition type"
                     " in PdfParagraphComposition. "
                     "This type only appears in the IL "
-                    "after the translation is completed."
+                    "after the translation is completed.",
                 )
                 continue
 
@@ -87,7 +83,8 @@ class ParagraphFinder:
 
     def process(self, document):
         with self.translation_config.progress_monitor.stage_start(
-            self.stage_name, len(document.page)
+            self.stage_name,
+            len(document.page),
         ) as pbar:
             for page in document.page:
                 self.translation_config.raise_if_cancelled()
@@ -221,7 +218,7 @@ class ParagraphFinder:
 
             line = composition.pdf_line
             if not "".join(
-                (x.char_unicode for x in line.pdf_character)
+                x.char_unicode for x in line.pdf_character
             ).strip():  # 跳过完全空白的行
                 continue
 
@@ -257,9 +254,9 @@ class ParagraphFinder:
         self,
         char: PdfCharacter,
         page: Page,
-        xy_mode: Union[
-            Literal["topleft"], Literal["bottomright"], Literal["middle"]
-        ] = "middle",
+        xy_mode: Literal["topleft"]
+        | Literal["bottomright"]
+        | Literal["middle"] = "middle",
     ):
         tl, br, md = [
             self._get_layout(char, page, mode)
@@ -282,9 +279,9 @@ class ParagraphFinder:
         self,
         char: PdfCharacter,
         page: Page,
-        xy_mode: Union[
-            Literal["topleft"], Literal["bottomright"], Literal["middle"]
-        ] = "middle",
+        xy_mode: Literal["topleft"]
+        | Literal["bottomright"]
+        | Literal["middle"] = "middle",
     ):
         # 这几个符号，解析出来的大小经常只有实际大小的一点点。
         # if (
@@ -339,7 +336,8 @@ class ParagraphFinder:
                 and layout_box.y <= char_y <= layout_box.y2
             ):
                 matching_layouts[layout.class_name] = Layout(
-                    layout.id, layout.class_name
+                    layout.id,
+                    layout.class_name,
                 )
 
         # 按照优先级返回最高优先级的布局
@@ -376,7 +374,9 @@ class ParagraphFinder:
         return line_widths[mid]
 
     def process_independent_paragraphs(
-        self, paragraphs: list[PdfParagraph], median_width: float
+        self,
+        paragraphs: list[PdfParagraph],
+        median_width: float,
     ):
         i = 0
         while i < len(paragraphs):

@@ -1,27 +1,23 @@
 import asyncio
 import logging
-import os
+from pathlib import Path
 
 import configargparse
 import tqdm
-from rich.progress import (
-    BarColumn,
-    MofNCompleteColumn,
-    Progress,
-    TextColumn,
-    TimeElapsedColumn,
-    TimeRemainingColumn,
-)
+from rich.progress import BarColumn
+from rich.progress import MofNCompleteColumn
+from rich.progress import Progress
+from rich.progress import TextColumn
+from rich.progress import TimeElapsedColumn
+from rich.progress import TimeRemainingColumn
 
 import yadt.high_level
 from yadt.const import get_cache_file_path
-from yadt.document_il.translator.translator import (
-    BingTranslator,
-    GoogleTranslator,
-    OpenAITranslator,
-    set_translate_rate_limiter,
-)
-from yadt.translation_config import TranslationConfig  # noqa: E402
+from yadt.document_il.translator.translator import BingTranslator
+from yadt.document_il.translator.translator import GoogleTranslator
+from yadt.document_il.translator.translator import OpenAITranslator
+from yadt.document_il.translator.translator import set_translate_rate_limiter
+from yadt.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 __version__ = "0.1.5"
@@ -182,7 +178,8 @@ def create_parser():
         help="Use Bing translator.",
     )
     openai_params = parser.add_argument_group(
-        "Translation - OpenAI Options", description="OpenAI specific options"
+        "Translation - OpenAI Options",
+        description="OpenAI specific options",
     )
     openai_params.add_argument(
         "--openai-model",
@@ -234,7 +231,8 @@ def create_progress_handler(translation_config: TranslationConfig):
         def progress_handler(event):
             if event["type"] == "progress_start":
                 stage_tasks[event["stage"]] = progress.add_task(
-                    f"{event['stage']}", total=event.get("stage_total", 100)
+                    f"{event['stage']}",
+                    total=event.get("stage_total", 100),
                 )
             elif event["type"] == "progress_update":
                 stage = event["stage"]
@@ -247,7 +245,9 @@ def create_progress_handler(translation_config: TranslationConfig):
                         refresh=True,
                     )
                 progress.update(
-                    translate_task_id, completed=event["overall_progress"], refresh=True
+                    translate_task_id,
+                    completed=event["overall_progress"],
+                    refresh=True,
                 )
             elif event["type"] == "progress_end":
                 stage = event["stage"]
@@ -274,7 +274,7 @@ def create_progress_handler(translation_config: TranslationConfig):
             if event["type"] == "progress_update":
                 pbar.update(event["overall_progress"] - pbar.n)
                 pbar.set_description(
-                    f"{event['stage']} ({event['stage_current']}/{event['stage_total']})"
+                    f"{event['stage']} ({event['stage_current']}/{event['stage_total']})",
                 )
             elif event["type"] == "progress_end":
                 pbar.set_description(f"{event['stage']} (Complete)")
@@ -342,9 +342,9 @@ async def main():
     for file in args.files:
         # 清理文件路径，去除两端的引号
         if file.startswith("--files="):
-            file = file.lstrip("--files=")
+            file = file[len("--files=") :]
         file = file.lstrip("-").strip("\"'")
-        if not os.path.exists(file):
+        if not Path(file).exists():
             logger.error(f"文件不存在：{file}")
             exit(1)
         if not file.endswith(".pdf"):
@@ -356,21 +356,22 @@ async def main():
 
     # 验证字体
     if font_path:
-        if not os.path.exists(font_path):
+        if not Path(font_path).exists():
             logger.error(f"字体文件不存在：{font_path}")
             exit(1)
-        if not font_path.endswith(".ttf"):
+        if not str(font_path).endswith(".ttf"):
             logger.error(f"字体文件不是 TTF 文件：{font_path}")
             exit(1)
 
     if args.output:
-        if not os.path.exists(args.output):
+        if not Path(args.output).exists():
             logger.info(f"输出目录不存在，创建：{args.output}")
             try:
-                os.makedirs(args.output, exist_ok=True)
+                Path(args.output).mkdir(parents=True, exist_ok=True)
             except OSError:
                 logger.critical(
-                    f"Failed to create output folder at {args.output}", exc_info=True
+                    f"Failed to create output folder at {args.output}",
+                    exc_info=True,
                 )
                 exit(1)
     else:

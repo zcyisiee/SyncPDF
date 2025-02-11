@@ -1,19 +1,16 @@
 import logging
 import statistics
-from functools import lru_cache
 import unicodedata
-from typing import Optional, Union
+from functools import cache
 
 import pymupdf
 
-from yadt.document_il import (
-    Box,
-    PdfCharacter,
-    PdfFormula,
-    PdfParagraphComposition,
-    PdfStyle,
-    il_version_1,
-)
+from yadt.document_il import Box
+from yadt.document_il import PdfCharacter
+from yadt.document_il import PdfFormula
+from yadt.document_il import PdfParagraphComposition
+from yadt.document_il import PdfStyle
+from yadt.document_il import il_version_1
 from yadt.document_il.utils.fontmap import FontMapper
 from yadt.translation_config import TranslationConfig
 
@@ -29,13 +26,13 @@ class TypesettingUnit:
         char: PdfCharacter = None,
         formular: PdfFormula = None,
         unicode: str = None,
-        font: Optional[pymupdf.Font] = None,
+        font: pymupdf.Font | None = None,
         font_size: float = None,
         style: PdfStyle = None,
         xobj_id: int = None,
         debug_info: bool = False,
     ):
-        assert sum((x is not None for x in [char, formular, unicode])) == 1, (
+        assert sum(x is not None for x in [char, formular, unicode]) == 1, (
             "Only one of chars and formular can be not None"
         )
         self.char = char
@@ -60,7 +57,7 @@ class TypesettingUnit:
             self.style = style
             self.xobj_id = xobj_id
 
-    def try_get_unicode(self) -> Optional[str]:
+    def try_get_unicode(self) -> str | None:
         if self.char:
             return self.char.char_unicode
         elif self.formular:
@@ -366,7 +363,8 @@ class Typesetting:
 
     def typsetting_document(self, document: il_version_1.Document):
         with self.translation_config.progress_monitor.stage_start(
-            self.stage_name, len(document.page)
+            self.stage_name,
+            len(document.page),
         ) as pbar:
             for page in document.page:
                 self.translation_config.raise_if_cancelled()
@@ -376,7 +374,7 @@ class Typesetting:
     def render_page(self, page: il_version_1.Page):
         fonts: dict[
             str | int,
-            Union[il_version_1.PdfFont, dict[str, il_version_1.PdfFont]],
+            il_version_1.PdfFont | dict[str, il_version_1.PdfFont],
         ] = {f.font_id: f for f in page.pdf_font}
         page_fonts = {f.font_id: f for f in page.pdf_font}
         for k, v in self.font_mapper.fontid2font.items():
@@ -418,11 +416,11 @@ class Typesetting:
                         pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
                             unicode=text,
                             pdf_style=style,
-                        )
-                    )
+                        ),
+                    ),
                 ],
                 xobj_id=-1,
-            )
+            ),
         )
 
     def render_paragraph(
@@ -431,7 +429,7 @@ class Typesetting:
         page: il_version_1.Page,
         fonts: dict[
             str | int,
-            Union[il_version_1.PdfFont, dict[str, il_version_1.PdfFont]],
+            il_version_1.PdfFont | dict[str, il_version_1.PdfFont],
         ],
     ):
         typesetting_units = self.create_typesetting_units(paragraph, fonts)
@@ -439,7 +437,7 @@ class Typesetting:
         if all(unit.can_passthrough for unit in typesetting_units):
             paragraph.scale = 1.0
             paragraph.pdf_paragraph_composition = self.create_passthrough_composition(
-                typesetting_units
+                typesetting_units,
             )
             return
 
@@ -496,7 +494,7 @@ class Typesetting:
         # 存储已排版的单元
         typeset_units = []
         all_units_fit = True
-        last_unit: Optional[TypesettingUnit] = None
+        last_unit: TypesettingUnit | None = None
 
         if paragraph.first_line_indent:
             current_x += space_width * 4
@@ -576,7 +574,11 @@ class Typesetting:
         while scale >= min_scale:
             # 尝试布局排版单元
             typeset_units, all_units_fit = self._layout_typesetting_units(
-                typesetting_units, box, scale, line_spacing, paragraph
+                typesetting_units,
+                box,
+                scale,
+                line_spacing,
+                paragraph,
             )
 
             # 如果所有单元都放得下，就完成排版
@@ -587,7 +589,7 @@ class Typesetting:
                 for unit in typeset_units:
                     for char in unit.render():
                         paragraph.pdf_paragraph_composition.append(
-                            PdfParagraphComposition(pdf_character=char)
+                            PdfParagraphComposition(pdf_character=char),
                         )
                 return
 
@@ -632,7 +634,7 @@ class Typesetting:
             return []
         result = []
 
-        @lru_cache(maxsize=None)
+        @cache
         def get_font(font_id: str, xobj_id: int):
             if xobj_id in fonts:
                 font = fonts[xobj_id][font_id]
@@ -648,21 +650,21 @@ class Typesetting:
                     [
                         TypesettingUnit(char=char)
                         for char in composition.pdf_line.pdf_character
-                    ]
+                    ],
                 )
             elif composition.pdf_character:
                 result.append(
                     TypesettingUnit(
                         char=composition.pdf_character,
                         debug_info=paragraph.debug_info,
-                    )
+                    ),
                 )
             elif composition.pdf_same_style_characters:
                 result.extend(
                     [
                         TypesettingUnit(char=char)
                         for char in composition.pdf_same_style_characters.pdf_character
-                    ]
+                    ],
                 )
             elif composition.pdf_same_style_unicode_characters:
                 font_id = (
@@ -684,7 +686,7 @@ class Typesetting:
                         )
                         for char_unicode in composition.pdf_same_style_unicode_characters.unicode
                         if char_unicode not in ("\n",)
-                    ]
+                    ],
                 )
             elif composition.pdf_formula:
                 result.extend([TypesettingUnit(formular=composition.pdf_formula)])
@@ -692,20 +694,20 @@ class Typesetting:
                 logger.error(
                     f"Unknown composition type. "
                     f"Composition: {composition}. "
-                    f"Paragraph: {paragraph}. "
+                    f"Paragraph: {paragraph}. ",
                 )
                 continue
         result = list(
             filter(
-                lambda x: getattr(x, "unicode") is None
-                or getattr(x, "font") is not None,
+                lambda x: x.unicode is None or x.font is not None,
                 result,
-            )
+            ),
         )
         return result
 
     def create_passthrough_composition(
-        self, typesetting_units: list[TypesettingUnit]
+        self,
+        typesetting_units: list[TypesettingUnit],
     ) -> list[PdfParagraphComposition]:
         """从排版单元创建直接传递的段落组合。
 
@@ -721,7 +723,7 @@ class Typesetting:
                 [
                     PdfParagraphComposition(pdf_character=char)
                     for char in unit.passthrough()
-                ]
+                ],
             )
         return composition
 

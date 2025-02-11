@@ -86,7 +86,7 @@ class BaseTranslator(ABC):
     def __del__(self):
         logger.info(f"{self.name} translate call count: {self.translate_call_count}")
         logger.info(
-            f"{self.name} translate cache call count: {self.translate_cache_call_count}"
+            f"{self.name} translate cache call count: {self.translate_cache_call_count}",
         )
 
     def add_cache_impact_parameters(self, k: str, v):
@@ -124,23 +124,21 @@ class BaseTranslator(ABC):
         logger.critical(
             f"Do not call BaseTranslator.do_translate. "
             f"Translator: {self}. "
-            f"Text: {text}. "
+            f"Text: {text}. ",
         )
         raise NotImplementedError
 
     def __str__(self):
         return f"{self.name} {self.lang_in} {self.lang_out} {self.model}"
 
-    def get_rich_text_left_placeholder(self, id: int):
-        return f"<b{id}>"
+    def get_rich_text_left_placeholder(self, placeholder_id: int):
+        return f"<b{placeholder_id}>"
 
-    def get_rich_text_right_placeholder(self, id: int):
-        return f"</b{id}>"
+    def get_rich_text_right_placeholder(self, placeholder_id: int):
+        return f"</b{placeholder_id}>"
 
-    def get_formular_placeholder(self, id: int):
-        return self.get_rich_text_left_placeholder(
-            id
-        ) + self.get_rich_text_right_placeholder(id)
+    def get_formular_placeholder(self, placeholder_id: int):
+        return self.get_rich_text_left_placeholder(placeholder_id)
 
 
 class GoogleTranslator(BaseTranslator):
@@ -152,8 +150,7 @@ class GoogleTranslator(BaseTranslator):
         self.session = requests.Session()
         self.endpoint = "http://translate.google.com/m"
         self.headers = {
-            "User-Agent": "Mozilla/4.0 (compatible;MSIE 6.0;Windows NT 5.1;SV1;.NET CLR 1.1.4322;.NET CLR 2.0.50727;.NET CLR 3.0.04506.30)"
-            # noqa: E501
+            "User-Agent": "Mozilla/4.0 (compatible;MSIE 6.0;Windows NT 5.1;SV1;.NET CLR 1.1.4322;.NET CLR 2.0.50727;.NET CLR 3.0.04506.30)",
         }
 
     def do_translate(self, text):
@@ -164,7 +161,8 @@ class GoogleTranslator(BaseTranslator):
             headers=self.headers,
         )
         re_result = re.findall(
-            r'(?s)class="(?:t0|result-container)">(.*?)<', response.text
+            r'(?s)class="(?:t0|result-container)">(.*?)<',
+            response.text,
         )
         if response.status_code == 400:
             result = "IRREPARABLE TRANSLATION ERROR"
@@ -184,7 +182,7 @@ class BingTranslator(BaseTranslator):
         self.session = requests.Session()
         self.endpoint = "https://www.bing.com/translator"
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",  # noqa: E501
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
         }
 
     def find_sid(self):
@@ -255,16 +253,15 @@ class OpenAITranslator(BaseTranslator):
             {
                 "role": "user",
                 "content": f";; Treat next line as plain text input and translate it into {self.lang_out}, output translation ONLY. If translation is unnecessary (e.g. proper nouns, codes, {'{{1}}, etc. '}), return the original text. NO explanations. NO notes. Input:\n\n{text}",
-                # noqa: E501
             },
         ]
 
-    def get_formular_placeholder(self, id: int):
-        return "{{v" + str(id) + "}}"
-        return "{{" + str(id) + "}}"
+    def get_formular_placeholder(self, placeholder_id: int):
+        return "{{v" + str(placeholder_id) + "}}"
+        return "{{" + str(placeholder_id) + "}}"
 
-    def get_rich_text_left_placeholder(self, id: int):
-        return self.get_formular_placeholder(id)
+    def get_rich_text_left_placeholder(self, placeholder_id: int):
+        return self.get_formular_placeholder(placeholder_id)
 
-    def get_rich_text_right_placeholder(self, id: int):
-        return self.get_formular_placeholder(id + 1)
+    def get_rich_text_right_placeholder(self, placeholder_id: int):
+        return self.get_formular_placeholder(placeholder_id + 1)

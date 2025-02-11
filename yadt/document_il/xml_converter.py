@@ -1,4 +1,5 @@
 import copy
+from pathlib import Path
 
 import orjson
 from xsdata.formats.dataclass.context import XmlContext
@@ -17,11 +18,11 @@ class XMLConverter:
         self.serializer = XmlSerializer(context=context, config=config)
 
     def write_xml(self, document: il_version_1.Document, path: str):
-        with open(path, "w", encoding="utf-8") as f:
+        with Path(path).open("w", encoding="utf-8") as f:
             f.write(self.to_xml(document))
 
     def read_xml(self, path: str) -> il_version_1.Document:
-        with open(path, "r", encoding="utf-8") as f:
+        with Path(path).open(encoding="utf-8") as f:
             return self.from_xml(f.read())
 
     def to_xml(self, document: il_version_1.Document) -> str:
@@ -46,5 +47,5 @@ class XMLConverter:
         ).decode()
 
     def write_json(self, document: il_version_1.Document, path: str):
-        with open(path, "w", encoding="utf-8") as f:
+        with Path(path).open("w", encoding="utf-8") as f:
             f.write(self.to_json(document))

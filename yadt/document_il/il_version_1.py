@@ -1,5 +1,5 @@
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
+from dataclasses import field
 
 
 @dataclass
@@ -20,28 +20,28 @@ class Box:
     class Meta:
         name = "box"
 
-    x: Optional[float] = field(
+    x: float | None = field(
         default=None,
         metadata={
             "type": "Attribute",
             "required": True,
         },
     )
-    y: Optional[float] = field(
+    y: float | None = field(
         default=None,
         metadata={
             "type": "Attribute",
             "required": True,
         },
     )
-    x2: Optional[float] = field(
+    x2: float | None = field(
         default=None,
         metadata={
             "type": "Attribute",
             "required": True,
         },
     )
-    y2: Optional[float] = field(
+    y2: float | None = field(
         default=None,
         metadata={
             "type": "Attribute",
@@ -55,7 +55,7 @@ class GraphicState:
     class Meta:
         name = "graphicState"
 
-    linewidth: Optional[float] = field(
+    linewidth: float | None = field(
         default=None,
         metadata={
             "type": "Attribute",
@@ -69,31 +69,31 @@ class GraphicState:
             "tokens": True,
         },
     )
-    flatness: Optional[float] = field(
+    flatness: float | None = field(
         default=None,
         metadata={
             "type": "Attribute",
         },
     )
-    intent: Optional[str] = field(
+    intent: str | None = field(
         default=None,
         metadata={
             "type": "Attribute",
         },
     )
-    linecap: Optional[int] = field(
+    linecap: int | None = field(
         default=None,
         metadata={
             "type": "Attribute",
         },
     )
-    linejoin: Optional[int] = field(
+    linejoin: int | None = field(
         default=None,
         metadata={
             "type": "Attribute",
         },
     )
-    miterlimit: Optional[float] = field(
+    miterlimit: float | None = field(
         default=None,
         metadata={
             "type": "Attribute",
@@ -115,21 +115,21 @@ class GraphicState:
             "tokens": True,
         },
     )
-    stroking_color_space_name: Optional[str] = field(
+    stroking_color_space_name: str | None = field(
         default=None,
         metadata={
             "name": "strokingColorSpaceName",
             "type": "Attribute",
         },
     )
-    non_stroking_color_space_name: Optional[str] = field(
+    non_stroking_color_space_name: str | None = field(
         default=None,
         metadata={
             "name": "nonStrokingColorSpaceName",
             "type": "Attribute",
         },
     )
-    passthrough_per_char_instruction: Optional[str] = field(
+    passthrough_per_char_instruction: str | None = field(
         default=None,
         metadata={
             "name": "passthroughPerCharInstruction",
@@ -143,14 +143,14 @@ class PdfFont:
     class Meta:
         name = "pdfFont"
 
-    name: Optional[str] = field(
+    name: str | None = field(
         default=None,
         metadata={
             "type": "Attribute",
             "required": True,
         },
     )
-    font_id: Optional[str] = field(
+    font_id: str | None = field(
         default=None,
         metadata={
             "name": "fontId",
@@ -158,7 +158,7 @@ class PdfFont:
             "required": True,
         },
     )
-    xref_id: Optional[int] = field(
+    xref_id: int | None = field(
         default=None,
         metadata={
             "name": "xrefId",
@@ -166,7 +166,7 @@ class PdfFont:
             "required": True,
         },
     )
-    encoding_length: Optional[int] = field(
+    encoding_length: int | None = field(
         default=None,
         metadata={
             "name": "encodingLength",
@@ -174,37 +174,37 @@ class PdfFont:
             "required": True,
         },
     )
-    bold: Optional[bool] = field(
+    bold: bool | None = field(
         default=None,
         metadata={
             "type": "Attribute",
         },
     )
-    italic: Optional[bool] = field(
+    italic: bool | None = field(
         default=None,
         metadata={
             "type": "Attribute",
         },
     )
-    monospace: Optional[bool] = field(
+    monospace: bool | None = field(
         default=None,
         metadata={
             "type": "Attribute",
         },
     )
-    serif: Optional[bool] = field(
+    serif: bool | None = field(
         default=None,
         metadata={
             "type": "Attribute",
         },
     )
-    ascent: Optional[float] = field(
+    ascent: float | None = field(
         default=None,
         metadata={
             "type": "Attribute",
         },
     )
-    descent: Optional[float] = field(
+    descent: float | None = field(
         default=None,
         metadata={
             "type": "Attribute",
@@ -217,7 +217,7 @@ class Cropbox:
     class Meta:
         name = "cropbox"
 
-    box: Optional[Box] = field(
+    box: Box | None = field(
         default=None,
         metadata={
             "type": "Element",
@@ -231,7 +231,7 @@ class Mediabox:
     class Meta:
         name = "mediabox"
 
-    box: Optional[Box] = field(
+    box: Box | None = field(
         default=None,
         metadata={
             "type": "Element",
@@ -245,28 +245,28 @@ class PageLayout:
     class Meta:
         name = "pageLayout"
 
-    box: Optional[Box] = field(
+    box: Box | None = field(
         default=None,
         metadata={
             "type": "Element",
             "required": True,
         },
     )
-    id: Optional[int] = field(
+    id: int | None = field(
         default=None,
         metadata={
             "type": "Attribute",
             "required": True,
         },
     )
-    conf: Optional[float] = field(
+    conf: float | None = field(
         default=None,
         metadata={
             "type": "Attribute",
             "required": True,
         },
     )
-    class_name: Optional[str] = field(
+    class_name: str | None = field(
         default=None,
         metadata={
             "type": "Attribute",
@@ -280,7 +280,7 @@ class PdfFigure:
     class Meta:
         name = "pdfFigure"
 
-    box: Optional[Box] = field(
+    box: Box | None = field(
         default=None,
         metadata={
             "type": "Element",
@@ -294,14 +294,14 @@ class PdfRectangle:
     class Meta:
         name = "pdfRectangle"
 
-    box: Optional[Box] = field(
+    box: Box | None = field(
         default=None,
         metadata={
             "type": "Element",
             "required": True,
         },
     )
-    graphic_state: Optional[GraphicState] = field(
+    graphic_state: GraphicState | None = field(
         default=None,
         metadata={
             "name": "graphicState",
@@ -309,7 +309,7 @@ class PdfRectangle:
             "required": True,
         },
     )
-    debug_info: Optional[bool] = field(
+    debug_info: bool | None = field(
         default=None,
         metadata={
             "type": "Attribute",
@@ -322,7 +322,7 @@ class PdfStyle:
     class Meta:
         name = "pdfStyle"
 
-    graphic_state: Optional[GraphicState] = field(
+    graphic_state: GraphicState | None = field(
         default=None,
         metadata={
             "name": "graphicState",
@@ -330,14 +330,14 @@ class PdfStyle:
             "required": True,
         },
     )
-    font_id: Optional[str] = field(
+    font_id: str | None = field(
         default=None,
         metadata={
             "type": "Attribute",
             "required": True,
         },
     )
-    font_size: Optional[float] = field(
+    font_size: float | None = field(
         default=None,
         metadata={
             "type": "Attribute",
@@ -351,7 +351,7 @@ class PdfXobject:
     class Meta:
         name = "pdfXobject"
 
-    box: Optional[Box] = field(
+    box: Box | None = field(
         default=None,
         metadata={
             "type": "Element",
@@ -365,7 +365,7 @@ class PdfXobject:
             "type": "Element",
         },
     )
-    base_operations: Optional[BaseOperations] = field(
+    base_operations: BaseOperations | None = field(
         default=None,
         metadata={
             "name": "baseOperations",
@@ -373,7 +373,7 @@ class PdfXobject:
             "required": True,
         },
     )
-    xobj_id: Optional[int] = field(
+    xobj_id: int | None = field(
         default=None,
         metadata={
             "name": "xobjId",
@@ -381,7 +381,7 @@ class PdfXobject:
             "required": True,
         },
     )
-    xref_id: Optional[int] = field(
+    xref_id: int | None = field(
         default=None,
         metadata={
             "name": "xrefId",
@@ -396,7 +396,7 @@ class PdfCharacter:
     class Meta:
         name = "pdfCharacter"
 
-    pdf_style: Optional[PdfStyle] = field(
+    pdf_style: PdfStyle | None = field(
         default=None,
         metadata={
             "name": "pdfStyle",
@@ -404,53 +404,53 @@ class PdfCharacter:
             "required": True,
         },
     )
-    box: Optional[Box] = field(
+    box: Box | None = field(
         default=None,
         metadata={
             "type": "Element",
             "required": True,
         },
     )
-    vertical: Optional[bool] = field(
+    vertical: bool | None = field(
         default=None,
         metadata={
             "type": "Attribute",
         },
     )
-    scale: Optional[float] = field(
+    scale: float | None = field(
         default=None,
         metadata={
             "type": "Attribute",
         },
     )
-    pdf_character_id: Optional[int] = field(
+    pdf_character_id: int | None = field(
         default=None,
         metadata={
             "name": "pdfCharacterId",
             "type": "Attribute",
         },
     )
-    char_unicode: Optional[str] = field(
+    char_unicode: str | None = field(
         default=None,
         metadata={
             "type": "Attribute",
             "required": True,
         },
     )
-    advance: Optional[float] = field(
+    advance: float | None = field(
         default=None,
         metadata={
             "type": "Attribute",
         },
     )
-    xobj_id: Optional[int] = field(
+    xobj_id: int | None = field(
         default=None,
         metadata={
             "name": "xobjId",
             "type": "Attribute",
         },
     )
-    debug_info: Optional[bool] = field(
+    debug_info: bool | None = field(
         default=None,
         metadata={
             "type": "Attribute",
@@ -463,21 +463,21 @@ class PdfSameStyleUnicodeCharacters:
     class Meta:
         name = "pdfSameStyleUnicodeCharacters"
 
-    pdf_style: Optional[PdfStyle] = field(
+    pdf_style: PdfStyle | None = field(
         default=None,
         metadata={
             "name": "pdfStyle",
             "type": "Element",
         },
     )
-    unicode: Optional[str] = field(
+    unicode: str | None = field(
         default=None,
         metadata={
             "type": "Attribute",
             "required": True,
         },
     )
-    debug_info: Optional[bool] = field(
+    debug_info: bool | None = field(
         default=None,
         metadata={
             "type": "Attribute",
@@ -490,7 +490,7 @@ class PdfFormula:
     class Meta:
         name = "pdfFormula"
 
-    box: Optional[Box] = field(
+    box: Box | None = field(
         default=None,
         metadata={
             "type": "Element",
@@ -505,14 +505,14 @@ class PdfFormula:
             "min_occurs": 1,
         },
     )
-    x_offset: Optional[float] = field(
+    x_offset: float | None = field(
         default=None,
         metadata={
             "type": "Attribute",
             "required": True,
         },
     )
-    y_offset: Optional[float] = field(
+    y_offset: float | None = field(
         default=None,
         metadata={
             "type": "Attribute",
@@ -526,7 +526,7 @@ class PdfLine:
     class Meta:
         name = "pdfLine"
 
-    box: Optional[Box] = field(
+    box: Box | None = field(
         default=None,
         metadata={
             "type": "Element",
@@ -548,14 +548,14 @@ class PdfSameStyleCharacters:
     class Meta:
         name = "pdfSameStyleCharacters"
 
-    box: Optional[Box] = field(
+    box: Box | None = field(
         default=None,
         metadata={
             "type": "Element",
             "required": True,
         },
     )
-    pdf_style: Optional[PdfStyle] = field(
+    pdf_style: PdfStyle | None = field(
         default=None,
         metadata={
             "name": "pdfStyle",
@@ -578,35 +578,35 @@ class PdfParagraphComposition:
     class Meta:
         name = "pdfParagraphComposition"
 
-    pdf_line: Optional[PdfLine] = field(
+    pdf_line: PdfLine | None = field(
         default=None,
         metadata={
             "name": "pdfLine",
             "type": "Element",
         },
     )
-    pdf_formula: Optional[PdfFormula] = field(
+    pdf_formula: PdfFormula | None = field(
         default=None,
         metadata={
             "name": "pdfFormula",
             "type": "Element",
         },
     )
-    pdf_same_style_characters: Optional[PdfSameStyleCharacters] = field(
+    pdf_same_style_characters: PdfSameStyleCharacters | None = field(
         default=None,
         metadata={
             "name": "pdfSameStyleCharacters",
             "type": "Element",
         },
     )
-    pdf_character: Optional[PdfCharacter] = field(
+    pdf_character: PdfCharacter | None = field(
         default=None,
         metadata={
             "name": "pdfCharacter",
             "type": "Element",
         },
     )
-    pdf_same_style_unicode_characters: Optional[PdfSameStyleUnicodeCharacters] = field(
+    pdf_same_style_unicode_characters: PdfSameStyleUnicodeCharacters | None = field(
         default=None,
         metadata={
             "name": "pdfSameStyleUnicodeCharacters",
@@ -620,14 +620,14 @@ class PdfParagraph:
     class Meta:
         name = "pdfParagraph"
 
-    box: Optional[Box] = field(
+    box: Box | None = field(
         default=None,
         metadata={
             "type": "Element",
             "required": True,
         },
     )
-    pdf_style: Optional[PdfStyle] = field(
+    pdf_style: PdfStyle | None = field(
         default=None,
         metadata={
             "name": "pdfStyle",
@@ -642,40 +642,40 @@ class PdfParagraph:
             "type": "Element",
         },
     )
-    xobj_id: Optional[int] = field(
+    xobj_id: int | None = field(
         default=None,
         metadata={
             "name": "xobjId",
             "type": "Attribute",
         },
     )
-    unicode: Optional[str] = field(
+    unicode: str | None = field(
         default=None,
         metadata={
             "type": "Attribute",
             "required": True,
         },
     )
-    scale: Optional[float] = field(
+    scale: float | None = field(
         default=None,
         metadata={
             "type": "Attribute",
         },
     )
-    vertical: Optional[bool] = field(
+    vertical: bool | None = field(
         default=None,
         metadata={
             "type": "Attribute",
         },
     )
-    first_line_indent: Optional[bool] = field(
+    first_line_indent: bool | None = field(
         default=None,
         metadata={
             "name": "FirstLineIndent",
             "type": "Attribute",
         },
     )
-    debug_id: Optional[str] = field(
+    debug_id: str | None = field(
         default=None,
         metadata={
             "type": "Attribute",
@@ -688,14 +688,14 @@ class Page:
     class Meta:
         name = "page"
 
-    mediabox: Optional[Mediabox] = field(
+    mediabox: Mediabox | None = field(
         default=None,
         metadata={
             "type": "Element",
             "required": True,
         },
     )
-    cropbox: Optional[Cropbox] = field(
+    cropbox: Cropbox | None = field(
         default=None,
         metadata={
             "type": "Element",
@@ -751,7 +751,7 @@ class Page:
             "type": "Element",
         },
     )
-    base_operations: Optional[BaseOperations] = field(
+    base_operations: BaseOperations | None = field(
         default=None,
         metadata={
             "name": "baseOperations",
@@ -759,7 +759,7 @@ class Page:
             "required": True,
         },
     )
-    page_number: Optional[int] = field(
+    page_number: int | None = field(
         default=None,
         metadata={
             "name": "pageNumber",
@@ -767,7 +767,7 @@ class Page:
             "required": True,
         },
     )
-    unit: Optional[str] = field(
+    unit: str | None = field(
         default=None,
         metadata={
             "name": "Unit",
@@ -789,7 +789,7 @@ class Document:
             "min_occurs": 1,
         },
     )
-    total_pages: Optional[int] = field(
+    total_pages: int | None = field(
         default=None,
         metadata={
             "name": "totalPages",

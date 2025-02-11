@@ -1,13 +1,14 @@
 import logging
-import os
-from typing import List
+from pathlib import Path
 
 import cv2
 import httpx
 import msgpack
 import numpy as np
 
-from yadt.docvision.doclayout import DocLayoutModel, YoloBox, YoloResult
+from yadt.docvision.doclayout import DocLayoutModel
+from yadt.docvision.doclayout import YoloBox
+from yadt.docvision.doclayout import YoloResult
 
 # 设置日志
 logging.basicConfig(level=logging.DEBUG)
@@ -21,7 +22,7 @@ def encode_image(image) -> bytes:
         image: Can be either a file path (str) or numpy array
     """
     if isinstance(image, str):
-        if not os.path.exists(image):
+        if not Path(image).exists():
             raise FileNotFoundError(f"Image file not found: {image}")
         img = cv2.imread(image)
         if img is None:
@@ -85,16 +86,16 @@ def predict_layout(
                 result = msgpack.unpackb(response.content, raw=False)
                 return result
             except Exception as e:
-                logger.exception(f"Failed to unpack response: {str(e)}")
+                logger.exception(f"Failed to unpack response: {e!s}")
                 raise
         else:
             logger.error(f"Request failed with status {response.status_code}")
             logger.error(f"Response content: {response.content}")
             raise Exception(
-                f"Request failed with status {response.status_code}: {response.text}"
+                f"Request failed with status {response.status_code}: {response.text}",
             )
     except Exception as e:
-        logger.exception(f"Unexpected error: {str(e)}")
+        logger.exception(f"Unexpected error: {e!s}")
         raise
 
 
@@ -112,7 +113,7 @@ class RpcDocLayoutModel(DocLayoutModel):
         """Stride of the model input."""
         return self._stride
 
-    def predict(self, image, imgsz=1024, **kwargs) -> List[YoloResult]:
+    def predict(self, image, imgsz=1024, **kwargs) -> list[YoloResult]:
         """Predict the layout of document pages using RPC service."""
         # Handle single image input
         if isinstance(image, np.ndarray) and len(image.shape) == 3:
@@ -128,8 +129,9 @@ class RpcDocLayoutModel(DocLayoutModel):
                 ]
                 results.append(
                     YoloResult(
-                        boxes=boxes, names={int(k): v for k, v in pred["names"].items()}
-                    )
+                        boxes=boxes,
+                        names={int(k): v for k, v in pred["names"].items()},
+                    ),
                 )
         else:
             results.append(YoloResult(boxes_data=np.array([]), names=[]))
@@ -147,7 +149,7 @@ if __name__ == "__main__":
     try:
         # Use a default test image if example/1.png doesn't exist
         image_path = "example/1.png"
-        if not os.path.exists(image_path):
+        if not Path(image_path).exists():
             print(f"Warning: {image_path} not found.")
             print("Please provide the path to a test image:")
             image_path = input("> ")
@@ -157,4 +159,4 @@ if __name__ == "__main__":
         print("Prediction results:")
         print(result)
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"Error: {e!s}")

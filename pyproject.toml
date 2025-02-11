@@ -47,16 +47,44 @@ ignore = ["E203", "E261", "E501", "W503", "E741", "E501"]
 max-line-length = 88
 
 [tool.ruff]
-
-src=["yadt"]
+src = ["yadt"]
 target-version = "py310"
 show-fixes = true
-
-lint.ignore = ["E203", "E261", "E501", "E741", "F841"]
 
 [tool.ruff.format]
 # Enable reformatting of code snippets in docstrings.
 docstring-code-format = true
+
+[tool.ruff.lint]
+ignore = [
+    "E203",  # 冒号前的空格
+    "E261",  # 注释前至少两个空格
+    "E501",  # 行太长
+    "E741",  # 变量名歧义
+    "F841",  # 未使用的变量
+    "C901",  # 太复杂的函数
+    "S101",  # use assert
+    "SIM",  # flake8-simplify
+    "ARG002", # unused argument
+    "S110", # `try`-`except`-`pass` detected, consider logging the exception
+    "B024", # abstract class without abstract methods
+    "S112", # `try`-`except`-`continue` detected, consider logging the exception
+
+]
+select = [
+    "E",    # pycodestyle 错误
+    "F",    # Pyflakes
+    "N",    # PEP8 命名
+    "B",    # flake8-bugbear
+    "I",    # isort
+    "C",    # mccabe
+    "UP",   # pyupgrade
+    "S",    # flake8-bandit
+    "A",    # flake8-builtins
+    "COM",  # flake8-commas
+    "ARG",  # flake8-unused-arguments
+    "PTH",  # 使用 pathlib
+]
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"
@@ -69,6 +97,17 @@ force-single-line = true
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+# 设置一些规则的特定配置
+[tool.ruff.lint.mccabe]
+max-complexity = 10  # 函数圈复杂度阈值
+
+[tool.ruff.lint.per-file-ignores]
+"yadt/pdfinterp.py" = ["N"]  # 忽略命名规范
+"tests/*" = ["S101"]  # 在测试文件中允许 assert
+"**/__init__.py" = ["F401"]  # 允许未使用的导入
+# 忽略 S311 警告，因为这是有意的
+"yadt/document_il/midend/paragraph_finder.py" = ["S311"]  
 
 [dependency-groups]
 dev = [

@@ -3,7 +3,6 @@ import logging
 import threading
 import time
 from asyncio import CancelledError
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +17,7 @@ class ProgressMonitor:
         report_interval: float = 0.1,
         finish_event: asyncio.Event = None,
         cancel_event: threading.Event = None,
-        loop: Optional[asyncio.AbstractEventLoop] = None,
+        loop: asyncio.AbstractEventLoop | None = None,
     ):
         self.stage = {k: TranslationStage(k, 0, self) for k in stages}
         self.translation_config = translation_config
@@ -75,7 +74,7 @@ class ProgressMonitor:
             and not self.cancel_event.is_set()
         ):
             logger.warning(
-                f"Stage {stage.name} completed with {stage.current}/{stage.total} items"
+                f"Stage {stage.name} completed with {stage.current}/{stage.total} items",
             )
             return
         if self.progress_change_callback:

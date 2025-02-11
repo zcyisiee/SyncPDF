@@ -1,33 +1,45 @@
 import logging
-from typing import Any, Dict, Optional, Sequence, Tuple, cast
+from collections.abc import Sequence
+from typing import Any
+from typing import cast
 
 import numpy as np
 from pdfminer import settings
-from pdfminer.pdfcolor import PREDEFINED_COLORSPACE, PDFColorSpace
-from pdfminer.pdfdevice import PDFDevice, PDFTextSeq
+from pdfminer.pdfcolor import PREDEFINED_COLORSPACE
+from pdfminer.pdfcolor import PDFColorSpace
+from pdfminer.pdfdevice import PDFDevice
+from pdfminer.pdfdevice import PDFTextSeq
 from pdfminer.pdffont import PDFFont
-from pdfminer.pdfinterp import (
-    LITERAL_FORM,
-    LITERAL_IMAGE,
-    Color,
-    PDFContentParser,
-    PDFInterpreterError,
-    PDFPageInterpreter,
-    PDFResourceManager,
-    PDFStackT,
-)
+from pdfminer.pdfinterp import LITERAL_FORM
+from pdfminer.pdfinterp import LITERAL_IMAGE
+from pdfminer.pdfinterp import Color
+from pdfminer.pdfinterp import PDFContentParser
+from pdfminer.pdfinterp import PDFInterpreterError
+from pdfminer.pdfinterp import PDFPageInterpreter
+from pdfminer.pdfinterp import PDFResourceManager
+from pdfminer.pdfinterp import PDFStackT
 from pdfminer.pdfpage import PDFPage
-from pdfminer.pdftypes import PDFObjRef, dict_value, list_value, resolve1, stream_value
+from pdfminer.pdftypes import PDFObjRef
+from pdfminer.pdftypes import dict_value
+from pdfminer.pdftypes import list_value
+from pdfminer.pdftypes import resolve1
+from pdfminer.pdftypes import stream_value
 from pdfminer.psexceptions import PSEOF
-from pdfminer.psparser import PSKeyword, keyword_name, literal_name
-from pdfminer.utils import MATRIX_IDENTITY, Matrix, Rect, apply_matrix_pt, mult_matrix
+from pdfminer.psparser import PSKeyword
+from pdfminer.psparser import keyword_name
+from pdfminer.psparser import literal_name
+from pdfminer.utils import MATRIX_IDENTITY
+from pdfminer.utils import Matrix
+from pdfminer.utils import Rect
+from pdfminer.utils import apply_matrix_pt
+from pdfminer.utils import mult_matrix
 
 from yadt.document_il.frontend.il_creater import ILCreater
 
 log = logging.getLogger(__name__)
 
 
-def safe_float(o: Any) -> Optional[float]:
+def safe_float(o: Any) -> float | None:
     try:
         return float(o)
     except (TypeError, ValueError):
@@ -54,21 +66,24 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
 
     def dup(self) -> "PDFPageInterpreterEx":
         return self.__class__(
-            self.rsrcmgr, self.device, self.obj_patch, self.il_creater
+            self.rsrcmgr,
+            self.device,
+            self.obj_patch,
+            self.il_creater,
         )
 
-    def init_resources(self, resources: Dict[object, object]) -> None:
+    def init_resources(self, resources: dict[object, object]) -> None:
         # 重载设置 fontid 和 descent
         """Prepare the fonts and XObjects listed in the Resource attribute."""
         self.resources = resources
-        self.fontmap: Dict[object, PDFFont] = {}
-        self.fontid: Dict[PDFFont, object] = {}
+        self.fontmap: dict[object, PDFFont] = {}
+        self.fontid: dict[PDFFont, object] = {}
         self.xobjmap = {}
-        self.csmap: Dict[str, PDFColorSpace] = PREDEFINED_COLORSPACE.copy()
+        self.csmap: dict[str, PDFColorSpace] = PREDEFINED_COLORSPACE.copy()
         if not resources:
             return
 
-        def get_colorspace(spec: object) -> Optional[PDFColorSpace]:
+        def get_colorspace(spec: object) -> PDFColorSpace | None:
             if isinstance(spec, list):
                 name = literal_name(spec[0])
             else:
@@ -110,7 +125,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
         """Stroke path"""
 
         def is_black(color: Color) -> bool:
-            if isinstance(color, Tuple):
+            if isinstance(color, tuple):
                 return sum(color) == 0
             else:
                 return color == 0
@@ -140,7 +155,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             self.scs = self.csmap[literal_name(name)]
         except KeyError:
             if settings.STRICT:
-                raise PDFInterpreterError("Undefined ColorSpace: %r" % name)
+                raise PDFInterpreterError(f"Undefined ColorSpace: {name!r}") from None
         return
 
     def do_cs(self, name: PDFStackT) -> None:
@@ -150,7 +165,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             self.ncs = self.csmap[literal_name(name)]
         except KeyError:
             if settings.STRICT:
-                raise PDFInterpreterError("Undefined ColorSpace: %r" % name)
+                raise PDFInterpreterError(f"Undefined ColorSpace: {name!r}") from None
         return
 
     ############################################################
@@ -228,7 +243,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             xobj = stream_value(self.xobjmap[xobjid])
         except KeyError:
             if settings.STRICT:
-                raise PDFInterpreterError("Undefined xobject id: %r" % xobjid)
+                raise PDFInterpreterError(f"Undefined xobject id: {xobjid!r}") from None
             return
         # log.debug("Processing xobj: %r", xobj)
         subtype = xobj.get("Subtype")
@@ -266,7 +281,8 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             self.ncs = interpreter.ncs
             self.scs = interpreter.scs
             self.il_creater.on_xobj_end(
-                x_id, f"q {ops_base}Q {a} {b} {c} {d} {e} {f} cm "
+                x_id,
+                f"q {ops_base}Q {a} {b} {c} {d} {e} {f} cm ",
             )
             try:  # 有的时候 form 字体加不上这里会烂掉
                 self.device.fontid = interpreter.fontid
@@ -325,7 +341,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
 
     def render_contents(
         self,
-        resources: Dict[object, object],
+        resources: dict[object, object],
         streams: Sequence[object],
         ctm: Matrix = MATRIX_IDENTITY,
     ) -> None:
@@ -390,12 +406,10 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                     break
                 if isinstance(obj, PSKeyword):
                     name = keyword_name(obj)
-                    method = "do_%s" % name.replace("*", "_a").replace(
-                        '"', "_w"
-                    ).replace(
-                        "'",
-                        "_q",
+                    act_name = (
+                        name.replace("*", "_a").replace('"', "_w").replace("'", "_q")
                     )
+                    method = f"do_{act_name}"
                     if hasattr(self, method):
                         func = getattr(self, method)
                         nargs = func.__code__.co_argcount - 1
@@ -405,7 +419,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                             if len(args) == nargs:
                                 func(*args)
                                 if self.il_creater.is_passthrough_per_char_operation(
-                                    name
+                                    name,
                                 ):
                                     self.il_creater.on_passthrough_per_char(name, args)
                                 if not (
@@ -421,7 +435,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                                                 else str(x).replace("'", "")
                                             )
                                             for x in args
-                                        ]
+                                        ],
                                     )
                                     ops += f"{p} {name} "
                         else:
@@ -438,11 +452,11 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                                             else str(x).replace("'", "")
                                         )
                                         for x in targs
-                                    ]
+                                    ],
                                 )
                                 ops += f"{p} {name} "
                     elif settings.STRICT:
-                        error_msg = "Unknown operator: %r" % name
+                        error_msg = f"Unknown operator: {name!r}"
                         raise PDFInterpreterError(error_msg)
                 else:
                     self.push(obj)

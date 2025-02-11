@@ -2,7 +2,9 @@ import logging
 
 import yadt.document_il.il_version_1 as il_version_1
 from yadt.document_il import GraphicState
-from yadt.document_il.utils.style_helper import BLUE, ORANGE, YELLOW
+from yadt.document_il.utils.style_helper import BLUE
+from yadt.document_il.utils.style_helper import ORANGE
+from yadt.document_il.utils.style_helper import YELLOW
 from yadt.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
@@ -53,8 +55,8 @@ class AddDebugInformation:
                         unicode=text,
                         pdf_style=style,
                         debug_info=True,
-                    )
-                )
+                    ),
+                ),
             ],
             xobj_id=-1,
         )
@@ -71,7 +73,9 @@ class AddDebugInformation:
             y2=page.cropbox.box.y2 - page_height * 0.02,
         )
         page_number_paragraph = self._create_text(
-            page_number_text, BLUE, page_number_box
+            page_number_text,
+            BLUE,
+            page_number_box,
         )
         page.pdf_paragraph.append(page_number_paragraph)
 
@@ -81,11 +85,9 @@ class AddDebugInformation:
             if not paragraph.pdf_paragraph_composition:
                 continue
             if any(
-                (
-                    x.pdf_same_style_unicode_characters.debug_info
-                    for x in paragraph.pdf_paragraph_composition
-                    if x.pdf_same_style_unicode_characters
-                )
+                x.pdf_same_style_unicode_characters.debug_info
+                for x in paragraph.pdf_paragraph_composition
+                if x.pdf_same_style_unicode_characters
             ):
                 continue
             # Create a rectangle box
@@ -109,13 +111,13 @@ class AddDebugInformation:
                             "formula",
                             ORANGE,
                             composition.pdf_formula.box,
-                        )
+                        ),
                     )
                     page.pdf_rectangle.append(
                         self._create_rectangle(
                             composition.pdf_formula.box,
                             ORANGE,
-                        )
+                        ),
                     )
 
             for xobj in page.pdf_xobject:
@@ -124,13 +126,13 @@ class AddDebugInformation:
                         "xobj",
                         YELLOW,
                         xobj.box,
-                    )
+                    ),
                 )
                 page.pdf_rectangle.append(
                     self._create_rectangle(
                         xobj.box,
                         YELLOW,
-                    )
+                    ),
                 )
 
         page.pdf_paragraph.extend(new_paragraphs)
