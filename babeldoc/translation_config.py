@@ -33,6 +33,7 @@ class TranslationConfig:
         doc_layout_model=None,
         skip_clean: bool = False,
         dual_translate_first: bool = False,
+        disable_rich_text_translate: bool = False,  # 是否禁用富文本翻译
     ):
         self.input_file = input_file
         self.translator = translator
@@ -53,6 +54,7 @@ class TranslationConfig:
         self.progress_monitor = progress_monitor
         self.skip_clean = skip_clean
         self.dual_translate_first = dual_translate_first
+        self.disable_rich_text_translate = disable_rich_text_translate
         if progress_monitor:
             if progress_monitor.cancel_event is None:
                 progress_monitor.cancel_event = threading.Event()

@@ -275,6 +275,11 @@ class ILTranslator:
             elif composition.pdf_character:
                 chars.append(composition.pdf_character)
             elif composition.pdf_same_style_characters:
+                if self.translation_config.disable_rich_text_translate:
+                    # 如果禁用富文本翻译，直接添加字符
+                    chars.extend(composition.pdf_same_style_characters.pdf_character)
+                    continue
+
                 fonta = self.font_mapper.map(
                     page_font_map[
                         composition.pdf_same_style_characters.pdf_style.font_id

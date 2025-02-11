@@ -158,6 +158,12 @@ def create_parser():
         action="store_true",
         help="Put translated pages first in dual PDF mode",
     )
+    translation_params.add_argument(
+        "--disable-rich-text-translate",
+        default=False,
+        action="store_true",
+        help="Disable rich text translation (may help improve compatibility with some PDFs)",
+    )
     service_params = translation_params.add_mutually_exclusive_group()
     service_params.add_argument(
         "--openai",
@@ -400,6 +406,7 @@ async def main():
             doc_layout_model=doc_layout_model,
             skip_clean=args.skip_clean,
             dual_translate_first=args.dual_translate_first,
+            disable_rich_text_translate=args.disable_rich_text_translate,
         )
 
         # Create progress handler
