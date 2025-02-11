@@ -230,6 +230,7 @@ class ILTranslator:
         self,
         paragraph: PdfParagraph,
         page_font_map: dict[str, PdfFont] = None,
+        disable_rich_text_translate: bool | None = None,
     ):
         if not paragraph.pdf_paragraph_composition:
             return
@@ -256,6 +257,12 @@ class ILTranslator:
                 )
                 return None
 
+        # 如果没有指定 disable_rich_text_translate，使用配置中的值
+        if disable_rich_text_translate is None:
+            disable_rich_text_translate = (
+                self.translation_config.disable_rich_text_translate
+            )
+
         placeholder_id = 1
         placeholders = []
         chars = []
@@ -275,7 +282,7 @@ class ILTranslator:
             elif composition.pdf_character:
                 chars.append(composition.pdf_character)
             elif composition.pdf_same_style_characters:
-                if self.translation_config.disable_rich_text_translate:
+                if disable_rich_text_translate:
                     # 如果禁用富文本翻译，直接添加字符
                     chars.extend(composition.pdf_same_style_characters.pdf_character)
                     continue
@@ -334,6 +341,14 @@ class ILTranslator:
                     f"Paragraph: {paragraph}. ",
                 )
                 return None
+
+        # 如果占位符数量超过50，且未禁用富文本翻译，则递归调用并禁用富文本翻译
+        if len(placeholders) > 50 and not disable_rich_text_translate:
+            logger.warning(
+                f"Too many placeholders ({len(placeholders)}) in paragraph[{paragraph.debug_id}], "
+                "disabling rich text translation for this paragraph",
+            )
+            return self.get_translate_input(paragraph, page_font_map, True)
 
         text = get_char_unicode_string(chars)
         return self.TranslateInput(text, placeholders, paragraph.pdf_style)
