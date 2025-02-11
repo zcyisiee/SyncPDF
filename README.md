@@ -109,10 +109,13 @@ uv run babeldoc --bing --files example.pdf --files example2.pdf
 - `--skip-clean`: Skip PDF cleaning step
 - `--dual-translate-first`: Put translated pages first in dual PDF mode (default: original pages first)
 - `--disable-rich-text-translate`: Disable rich text translation (may help improve compatibility with some PDFs)
+- `--enhance-compatibility`: Enable all compatibility enhancement options (equivalent to --skip-clean --dual-translate-first --disable-rich-text-translate)
 
 > [!TIP]
 > - Both `--skip-clean` and `--dual-translate-first` may help improve compatibility with some PDF readers
+> - `--disable-rich-text-translate` can also help with compatibility by simplifying translation input
 > - However, using `--skip-clean` will result in larger file sizes
+> - If you encounter any compatibility issues, try using `--enhance-compatibility` first
 
 ### Translation Service Options
 

@@ -164,6 +164,12 @@ def create_parser():
         action="store_true",
         help="Disable rich text translation (may help improve compatibility with some PDFs)",
     )
+    translation_params.add_argument(
+        "--enhance-compatibility",
+        default=False,
+        action="store_true",
+        help="Enable all compatibility enhancement options (equivalent to --skip-clean --dual-translate-first --disable-rich-text-translate)",
+    )
     service_params = translation_params.add_mutually_exclusive_group()
     service_params.add_argument(
         "--openai",
@@ -407,6 +413,7 @@ async def main():
             skip_clean=args.skip_clean,
             dual_translate_first=args.dual_translate_first,
             disable_rich_text_translate=args.disable_rich_text_translate,
+            enhance_compatibility=args.enhance_compatibility,
         )
 
         # Create progress handler

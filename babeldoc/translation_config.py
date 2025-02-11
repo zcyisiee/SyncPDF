@@ -34,6 +34,7 @@ class TranslationConfig:
         skip_clean: bool = False,
         dual_translate_first: bool = False,
         disable_rich_text_translate: bool = False,  # 是否禁用富文本翻译
+        enhance_compatibility: bool = False,  # 增强兼容性模式
     ):
         self.input_file = input_file
         self.translator = translator
@@ -52,9 +53,11 @@ class TranslationConfig:
         self.short_line_split_factor = short_line_split_factor
         self.use_rich_pbar = use_rich_pbar
         self.progress_monitor = progress_monitor
-        self.skip_clean = skip_clean
-        self.dual_translate_first = dual_translate_first
-        self.disable_rich_text_translate = disable_rich_text_translate
+        self.skip_clean = skip_clean or enhance_compatibility
+        self.dual_translate_first = dual_translate_first or enhance_compatibility
+        self.disable_rich_text_translate = (
+            disable_rich_text_translate or enhance_compatibility
+        )
         if progress_monitor:
             if progress_monitor.cancel_event is None:
                 progress_monitor.cancel_event = threading.Event()
