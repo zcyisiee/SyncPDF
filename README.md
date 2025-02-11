@@ -242,7 +242,7 @@ Everyone interacting in YADT and its sub-projects' codebases, issue trackers, ch
 
 <h2 id="star_hist">Star History</h2>
 
-<a href="https://star-history.com/#funstory-ai/yadt&Date">
+<a href="https://star-history.com/#funstory-ai/babeldoc&Date">
  <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=funstory-ai/yadt&type=Date&theme=dark" />
    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=funstory-ai/yadt&type=Date" />
