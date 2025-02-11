@@ -8,15 +8,15 @@
 
 <p>
   <!-- PyPI -->
-  <a href="https://pypi.org/project/yadt/">
-    <img src="https://img.shields.io/pypi/v/yadt"></a>
-  <a href="https://pepy.tech/projects/yadt">
-    <img src="https://static.pepy.tech/badge/yadt"></a>
-  <!-- <a href="https://github.com/funstory-ai/yadt/pulls">
+  <a href="https://pypi.org/project/babeldoc/">
+    <img src="https://img.shields.io/pypi/v/babeldoc"></a>
+  <a href="https://pepy.tech/projects/babeldoc">
+    <img src="https://static.pepy.tech/badge/babeldoc"></a>
+  <!-- <a href="https://github.com/funstory-ai/babeldoc/pulls">
     <img src="https://img.shields.io/badge/contributions-welcome-green"></a> -->
   <!-- License -->
   <a href="./LICENSE">
-    <img src="https://img.shields.io/github/license/funstory-ai/yadt"></a>
+    <img src="https://img.shields.io/github/license/funstory-ai/babeldoc"></a>
   <a href="https://t.me/+Z9_SgnxmsmA5NzBl">
     <img src="https://img.shields.io/badge/Telegram-2CA5E0?style=flat-squeare&logo=telegram&logoColor=white"></a>
 </p>
@@ -50,7 +50,7 @@ uv tool install --python 3.12 babeldoc
 babeldoc --help
 ```
 
-3. Use the `yadt` command. For example:
+3. Use the `babeldoc` command. For example:
 
 ```bash
 babeldoc --bing  --files example.pdf
@@ -78,7 +78,7 @@ cd babeldoc
 uv run babeldoc --help
 ```
 
-3. Use the `uv run yadt` command. For example:
+3. Use the `uv run babeldoc` command. For example:
 
 ```bash
 uv run babeldoc --bing --files example.pdf
@@ -147,7 +147,7 @@ uv run babeldoc --bing --files example.pdf --files example2.pdf
 Example Configuration:
 
 ```toml
-[yadt]
+[babeldoc]
 debug = true
 lang-in = "en-US"
 lang-out = "zh-CN"
@@ -163,11 +163,11 @@ openai-api-key = "[KEY]"
 
 ## Python API
 
-You can refer to the example in [main.py](https://github.com/funstory-ai/yadt/blob/main/yadt/main.py) to use YADT's Python API.
+You can refer to the example in [main.py](https://github.com/funstory-ai/yadt/blob/main/babeldoc/main.py) to use BabelDOC's Python API.
 
 Please note:
 
-1. Make sure all font files described in `main.download_font_assets` exist
+1. Make sure call `babeldoc.high_level.init()` before using the API
 
 2. The current `TranslationConfig` does not fully validate input parameters, so you need to ensure the validity of input parameters
 
