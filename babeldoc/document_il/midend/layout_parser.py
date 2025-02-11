@@ -5,9 +5,9 @@ import cv2
 import numpy as np
 from pymupdf import Document
 
-from yadt.document_il import il_version_1
-from yadt.document_il.utils.style_helper import GREEN
-from yadt.translation_config import TranslationConfig
+from babeldoc.document_il import il_version_1
+from babeldoc.document_il.utils.style_helper import GREEN
+from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 

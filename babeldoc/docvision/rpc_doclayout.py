@@ -6,9 +6,9 @@ import httpx
 import msgpack
 import numpy as np
 
-from yadt.docvision.doclayout import DocLayoutModel
-from yadt.docvision.doclayout import YoloBox
-from yadt.docvision.doclayout import YoloResult
+from babeldoc.docvision.doclayout import DocLayoutModel
+from babeldoc.docvision.doclayout import YoloBox
+from babeldoc.docvision.doclayout import YoloResult
 
 # 设置日志
 logging.basicConfig(level=logging.DEBUG)

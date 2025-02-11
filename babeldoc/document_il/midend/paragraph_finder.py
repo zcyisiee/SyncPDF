@@ -3,16 +3,16 @@ import random
 import re
 from typing import Literal
 
-from yadt.document_il import Box
-from yadt.document_il import Page
-from yadt.document_il import PdfCharacter
-from yadt.document_il import PdfLine
-from yadt.document_il import PdfParagraph
-from yadt.document_il import PdfParagraphComposition
-from yadt.document_il.utils.layout_helper import Layout
-from yadt.document_il.utils.layout_helper import add_space_dummy_chars
-from yadt.document_il.utils.layout_helper import get_char_unicode_string
-from yadt.translation_config import TranslationConfig
+from babeldoc.document_il import Box
+from babeldoc.document_il import Page
+from babeldoc.document_il import PdfCharacter
+from babeldoc.document_il import PdfLine
+from babeldoc.document_il import PdfParagraph
+from babeldoc.document_il import PdfParagraphComposition
+from babeldoc.document_il.utils.layout_helper import Layout
+from babeldoc.document_il.utils.layout_helper import add_space_dummy_chars
+from babeldoc.document_il.utils.layout_helper import get_char_unicode_string
+from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 

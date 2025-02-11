@@ -1,11 +1,11 @@
 import logging
 
-import yadt.document_il.il_version_1 as il_version_1
-from yadt.document_il import GraphicState
-from yadt.document_il.utils.style_helper import BLUE
-from yadt.document_il.utils.style_helper import ORANGE
-from yadt.document_il.utils.style_helper import YELLOW
-from yadt.translation_config import TranslationConfig
+import babeldoc.document_il.il_version_1 as il_version_1
+from babeldoc.document_il import GraphicState
+from babeldoc.document_il.utils.style_helper import BLUE
+from babeldoc.document_il.utils.style_helper import ORANGE
+from babeldoc.document_il.utils.style_helper import YELLOW
+from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 

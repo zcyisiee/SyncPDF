@@ -5,22 +5,22 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from yadt.document_il import Document
-from yadt.document_il import Page
-from yadt.document_il import PdfFont
-from yadt.document_il import PdfFormula
-from yadt.document_il import PdfParagraph
-from yadt.document_il import PdfParagraphComposition
-from yadt.document_il import PdfSameStyleCharacters
-from yadt.document_il import PdfSameStyleUnicodeCharacters
-from yadt.document_il import PdfStyle
-from yadt.document_il.translator.translator import BaseTranslator
-from yadt.document_il.utils.fontmap import FontMapper
-from yadt.document_il.utils.layout_helper import get_char_unicode_string
-from yadt.document_il.utils.layout_helper import is_same_style
-from yadt.document_il.utils.layout_helper import is_same_style_except_font
-from yadt.document_il.utils.layout_helper import is_same_style_except_size
-from yadt.translation_config import TranslationConfig
+from babeldoc.document_il import Document
+from babeldoc.document_il import Page
+from babeldoc.document_il import PdfFont
+from babeldoc.document_il import PdfFormula
+from babeldoc.document_il import PdfParagraph
+from babeldoc.document_il import PdfParagraphComposition
+from babeldoc.document_il import PdfSameStyleCharacters
+from babeldoc.document_il import PdfSameStyleUnicodeCharacters
+from babeldoc.document_il import PdfStyle
+from babeldoc.document_il.translator.translator import BaseTranslator
+from babeldoc.document_il.utils.fontmap import FontMapper
+from babeldoc.document_il.utils.layout_helper import get_char_unicode_string
+from babeldoc.document_il.utils.layout_helper import is_same_style
+from babeldoc.document_il.utils.layout_helper import is_same_style_except_font
+from babeldoc.document_il.utils.layout_helper import is_same_style_except_size
+from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 

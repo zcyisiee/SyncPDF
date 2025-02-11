@@ -5,10 +5,10 @@ from pathlib import Path
 import pymupdf
 from bitstring import BitStream
 
-from yadt.document_il import il_version_1
-from yadt.document_il.utils.fontmap import FontMapper
-from yadt.translation_config import TranslateResult
-from yadt.translation_config import TranslationConfig
+from babeldoc.document_il import il_version_1
+from babeldoc.document_il.utils.fontmap import FontMapper
+from babeldoc.translation_config import TranslateResult
+from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 

@@ -4,7 +4,7 @@
 <img src="./docs/images/banner.png" width="320px"  alt="YADT"/>
 
 
-<h2 id="title">Yet Another Document Translator</h2>
+<h2 id="title">BabelDOC</h2>
 
 <p>
   <!-- PyPI -->
@@ -45,18 +45,18 @@ We recommend using the Tool feature of [uv](https://github.com/astral-sh/uv) to 
 2. Use the following command to install yadt:
 
 ```bash
-uv tool install --python 3.12 yadt
+uv tool install --python 3.12 babeldoc
 
-yadt --help
+babeldoc --help
 ```
 
 3. Use the `yadt` command. For example:
 
 ```bash
-yadt --bing  --files example.pdf
+babeldoc --bing  --files example.pdf
 
 # multiple files
-yadt --bing  --files example1.pdf --files example2.pdf
+babeldoc --bing  --files example1.pdf --files example2.pdf
 ```
 
 ### Install from Source
@@ -72,19 +72,19 @@ We still recommend using [uv](https://github.com/astral-sh/uv) to manage virtual
 git clone https://github.com/funstory-ai/yadt
 
 # enter the project directory
-cd yadt
+cd babeldoc
 
-# install dependencies and run yadt
-uv run yadt --help
+# install dependencies and run babeldoc
+uv run babeldoc --help
 ```
 
 3. Use the `uv run yadt` command. For example:
 
 ```bash
-uv run yadt --bing --files example.pdf
+uv run babeldoc --bing --files example.pdf
 
 # multiple files
-uv run yadt --bing --files example.pdf --files example2.pdf
+uv run babeldoc --bing --files example.pdf --files example2.pdf
 ```
 
 > [!TIP]

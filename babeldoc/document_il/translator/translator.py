@@ -9,7 +9,7 @@ from abc import ABC
 import openai
 import requests
 
-from yadt.document_il.translator.cache import TranslationCache
+from babeldoc.document_il.translator.cache import TranslationCache
 
 logger = logging.getLogger(__name__)
 

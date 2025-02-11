@@ -11,13 +11,13 @@ from rich.progress import TextColumn
 from rich.progress import TimeElapsedColumn
 from rich.progress import TimeRemainingColumn
 
-import yadt.high_level
-from yadt.const import get_cache_file_path
-from yadt.document_il.translator.translator import BingTranslator
-from yadt.document_il.translator.translator import GoogleTranslator
-from yadt.document_il.translator.translator import OpenAITranslator
-from yadt.document_il.translator.translator import set_translate_rate_limiter
-from yadt.translation_config import TranslationConfig
+import babeldoc.high_level
+from babeldoc.const import get_cache_file_path
+from babeldoc.document_il.translator.translator import BingTranslator
+from babeldoc.document_il.translator.translator import GoogleTranslator
+from babeldoc.document_il.translator.translator import OpenAITranslator
+from babeldoc.document_il.translator.translator import set_translate_rate_limiter
+from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 __version__ = "0.1.5"
@@ -25,7 +25,7 @@ __version__ = "0.1.5"
 
 def create_parser():
     parser = configargparse.ArgParser(
-        config_file_parser_class=configargparse.TomlConfigParser(["yadt"]),
+        config_file_parser_class=configargparse.TomlConfigParser(["babeldoc"]),
     )
     parser.add_argument(
         "-c",
@@ -330,11 +330,11 @@ async def main():
 
     # 初始化文档布局模型
     if args.rpc_doclayout:
-        from yadt.docvision.rpc_doclayout import RpcDocLayoutModel
+        from babeldoc.docvision.rpc_doclayout import RpcDocLayoutModel
 
         doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout)
     else:
-        from yadt.docvision.doclayout import DocLayoutModel
+        from babeldoc.docvision.doclayout import DocLayoutModel
 
         doc_layout_model = DocLayoutModel.load_onnx()
 
@@ -407,7 +407,7 @@ async def main():
 
         # 开始翻译
         with progress_context:
-            async for event in yadt.high_level.async_translate(config):
+            async for event in babeldoc.high_level.async_translate(config):
                 progress_handler(event)
                 if config.debug:
                     logger.debug(event)
@@ -423,12 +423,12 @@ async def main():
 
 # for backward compatibility
 def create_cache_folder():
-    return yadt.high_level.create_cache_folder()
+    return babeldoc.high_level.create_cache_folder()
 
 
 # for backward compatibility
 def download_font_assets():
-    return yadt.high_level.download_font_assets()
+    return babeldoc.high_level.download_font_assets()
 
 
 def cli():
@@ -458,7 +458,7 @@ def cli():
             v.disabled = True
             v.propagate = False
 
-    yadt.high_level.init()
+    babeldoc.high_level.init()
     asyncio.run(main())
 
 
