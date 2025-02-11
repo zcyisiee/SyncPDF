@@ -8,15 +8,15 @@
 
 <p>
   <!-- PyPI -->
-  <a href="https://pypi.org/project/babeldoc/">
-    <img src="https://img.shields.io/pypi/v/babeldoc"></a>
-  <a href="https://pepy.tech/projects/babeldoc">
-    <img src="https://static.pepy.tech/badge/babeldoc"></a>
-  <!-- <a href="https://github.com/funstory-ai/babeldoc/pulls">
+  <a href="https://pypi.org/project/BabelDOC/">
+    <img src="https://img.shields.io/pypi/v/BabelDOC"></a>
+  <a href="https://pepy.tech/projects/BabelDOC">
+    <img src="https://static.pepy.tech/badge/BabelDOC"></a>
+  <!-- <a href="https://github.com/funstory-ai/BabelDOC/pulls">
     <img src="https://img.shields.io/badge/contributions-welcome-green"></a> -->
   <!-- License -->
   <a href="./LICENSE">
-    <img src="https://img.shields.io/github/license/funstory-ai/babeldoc"></a>
+    <img src="https://img.shields.io/github/license/funstory-ai/BabelDOC"></a>
   <a href="https://t.me/+Z9_SgnxmsmA5NzBl">
     <img src="https://img.shields.io/badge/Telegram-2CA5E0?style=flat-squeare&logo=telegram&logoColor=white"></a>
 </p>
@@ -45,7 +45,7 @@ We recommend using the Tool feature of [uv](https://github.com/astral-sh/uv) to 
 2. Use the following command to install yadt:
 
 ```bash
-uv tool install --python 3.12 babeldoc
+uv tool install --python 3.12 BabelDOC
 
 babeldoc --help
 ```
@@ -69,10 +69,10 @@ We still recommend using [uv](https://github.com/astral-sh/uv) to manage virtual
 
 ```bash
 # clone the project
-git clone https://github.com/funstory-ai/yadt
+git clone https://github.com/funstory-ai/BabelDOC
 
 # enter the project directory
-cd babeldoc
+cd BabelDOC
 
 # install dependencies and run babeldoc
 uv run babeldoc --help
