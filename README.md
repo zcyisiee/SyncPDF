@@ -244,8 +244,8 @@ Everyone interacting in YADT and its sub-projects' codebases, issue trackers, ch
 
 <a href="https://star-history.com/#funstory-ai/babeldoc&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=funstory-ai/yadt&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=funstory-ai/yadt&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=funstory-ai/yadt&type=Date"/>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=funstory-ai/babeldoc&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=funstory-ai/babeldoc&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=funstory-ai/babeldoc&type=Date"/>
  </picture>
 </a>
