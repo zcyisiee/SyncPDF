@@ -36,5 +36,5 @@ jobs:
 
       - name: Run tests
         run: |
-          uv run yadt --help
-          uv run yadt --bing --files examples/ci/test.pdf
+          uv run babeldoc --help
+          uv run babeldoc --bing --files examples/ci/test.pdf
