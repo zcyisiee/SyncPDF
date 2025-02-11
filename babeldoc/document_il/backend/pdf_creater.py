@@ -176,7 +176,8 @@ class PDFCreater:
             page_op = BitStream()
             # q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}
             page_op.append(b"q ")
-            page_op.append(base_op)
+            if base_op is not None:
+                page_op.append(base_op)
             page_op.append(b" Q ")
             page_op.append(
                 f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode(),
@@ -375,7 +376,13 @@ class PDFCreater:
                 dual = pymupdf.open(self.original_pdf_path)
                 if translation_config.debug:
                     translation_config.raise_if_cancelled()
-                    self.write_debug_info(dual, translation_config)
+                    try:
+                        self.write_debug_info(dual, translation_config)
+                    except Exception:
+                        logger.warning(
+                            "Failed to write debug info to dual PDF",
+                            exc_info=True,
+                        )
                 dual.insert_file(pdf)
                 page_count = pdf.page_count
                 for page_id in range(page_count):
