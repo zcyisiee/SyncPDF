@@ -20,7 +20,7 @@ from babeldoc.document_il.translator.translator import set_translate_rate_limite
 from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
-__version__ = "0.1.5"
+__version__ = "0.1.6.rc0"
 
 
 def create_parser():
