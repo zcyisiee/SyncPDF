@@ -5,14 +5,14 @@ from functools import cache
 
 import pymupdf
 
-from yadt.document_il import Box
-from yadt.document_il import PdfCharacter
-from yadt.document_il import PdfFormula
-from yadt.document_il import PdfParagraphComposition
-from yadt.document_il import PdfStyle
-from yadt.document_il import il_version_1
-from yadt.document_il.utils.fontmap import FontMapper
-from yadt.translation_config import TranslationConfig
+from babeldoc.document_il import Box
+from babeldoc.document_il import PdfCharacter
+from babeldoc.document_il import PdfFormula
+from babeldoc.document_il import PdfParagraphComposition
+from babeldoc.document_il import PdfStyle
+from babeldoc.document_il import il_version_1
+from babeldoc.document_il.utils.fontmap import FontMapper
+from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 

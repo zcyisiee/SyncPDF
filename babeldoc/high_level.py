@@ -16,25 +16,25 @@ from pdfminer.pdfparser import PDFParser
 from pymupdf import Document
 from pymupdf import Font
 
-from yadt import asynchronize
-from yadt.const import CACHE_FOLDER
-from yadt.const import get_cache_file_path
-from yadt.converter import TranslateConverter
-from yadt.document_il.backend.pdf_creater import PDFCreater
-from yadt.document_il.frontend.il_creater import ILCreater
-from yadt.document_il.midend.add_debug_information import AddDebugInformation
-from yadt.document_il.midend.il_translator import ILTranslator
-from yadt.document_il.midend.layout_parser import LayoutParser
-from yadt.document_il.midend.paragraph_finder import ParagraphFinder
-from yadt.document_il.midend.remove_descent import RemoveDescent
-from yadt.document_il.midend.styles_and_formulas import StylesAndFormulas
-from yadt.document_il.midend.typesetting import Typesetting
-from yadt.document_il.utils.fontmap import FontMapper
-from yadt.document_il.xml_converter import XMLConverter
-from yadt.pdfinterp import PDFPageInterpreterEx
-from yadt.progress_monitor import ProgressMonitor
-from yadt.translation_config import TranslateResult
-from yadt.translation_config import TranslationConfig
+from babeldoc import asynchronize
+from babeldoc.const import CACHE_FOLDER
+from babeldoc.const import get_cache_file_path
+from babeldoc.converter import TranslateConverter
+from babeldoc.document_il.backend.pdf_creater import PDFCreater
+from babeldoc.document_il.frontend.il_creater import ILCreater
+from babeldoc.document_il.midend.add_debug_information import AddDebugInformation
+from babeldoc.document_il.midend.il_translator import ILTranslator
+from babeldoc.document_il.midend.layout_parser import LayoutParser
+from babeldoc.document_il.midend.paragraph_finder import ParagraphFinder
+from babeldoc.document_il.midend.remove_descent import RemoveDescent
+from babeldoc.document_il.midend.styles_and_formulas import StylesAndFormulas
+from babeldoc.document_il.midend.typesetting import Typesetting
+from babeldoc.document_il.utils.fontmap import FontMapper
+from babeldoc.document_il.xml_converter import XMLConverter
+from babeldoc.pdfinterp import PDFPageInterpreterEx
+from babeldoc.progress_monitor import ProgressMonitor
+from babeldoc.translation_config import TranslateResult
+from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 

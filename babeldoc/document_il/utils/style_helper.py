@@ -1,4 +1,4 @@
-from yadt.document_il import il_version_1
+from babeldoc.document_il import il_version_1
 
 
 def create_pdf_style(r, g, b, font_id="china-ss", font_size=6):

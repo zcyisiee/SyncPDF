@@ -3,22 +3,22 @@ import math
 import re
 import unicodedata
 
-from yadt.document_il.il_version_1 import Box
-from yadt.document_il.il_version_1 import Document
-from yadt.document_il.il_version_1 import GraphicState
-from yadt.document_il.il_version_1 import Page
-from yadt.document_il.il_version_1 import PdfCharacter
-from yadt.document_il.il_version_1 import PdfFormula
-from yadt.document_il.il_version_1 import PdfLine
-from yadt.document_il.il_version_1 import PdfParagraphComposition
-from yadt.document_il.il_version_1 import PdfSameStyleCharacters
-from yadt.document_il.il_version_1 import PdfStyle
-from yadt.document_il.utils.fontmap import FontMapper
-from yadt.document_il.utils.layout_helper import LEFT_BRACKET
-from yadt.document_il.utils.layout_helper import RIGHT_BRACKET
-from yadt.document_il.utils.layout_helper import formular_height_ignore_char
-from yadt.document_il.utils.layout_helper import is_same_style
-from yadt.translation_config import TranslationConfig
+from babeldoc.document_il.il_version_1 import Box
+from babeldoc.document_il.il_version_1 import Document
+from babeldoc.document_il.il_version_1 import GraphicState
+from babeldoc.document_il.il_version_1 import Page
+from babeldoc.document_il.il_version_1 import PdfCharacter
+from babeldoc.document_il.il_version_1 import PdfFormula
+from babeldoc.document_il.il_version_1 import PdfLine
+from babeldoc.document_il.il_version_1 import PdfParagraphComposition
+from babeldoc.document_il.il_version_1 import PdfSameStyleCharacters
+from babeldoc.document_il.il_version_1 import PdfStyle
+from babeldoc.document_il.utils.fontmap import FontMapper
+from babeldoc.document_il.utils.layout_helper import LEFT_BRACKET
+from babeldoc.document_il.utils.layout_helper import RIGHT_BRACKET
+from babeldoc.document_il.utils.layout_helper import formular_height_ignore_char
+from babeldoc.document_il.utils.layout_helper import is_same_style
+from babeldoc.translation_config import TranslationConfig
 
 
 class StylesAndFormulas:

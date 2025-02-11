@@ -34,7 +34,7 @@ from pdfminer.utils import Rect
 from pdfminer.utils import apply_matrix_pt
 from pdfminer.utils import mult_matrix
 
-from yadt.document_il.frontend.il_creater import ILCreater
+from babeldoc.document_il.frontend.il_creater import ILCreater
 
 log = logging.getLogger(__name__)
 

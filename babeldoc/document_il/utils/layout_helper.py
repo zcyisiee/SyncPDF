@@ -1,12 +1,12 @@
 import logging
 import math
 
+from babeldoc.document_il import GraphicState
+from babeldoc.document_il.il_version_1 import Box
+from babeldoc.document_il.il_version_1 import PdfCharacter
+from babeldoc.document_il.il_version_1 import PdfParagraph
+from babeldoc.document_il.il_version_1 import PdfParagraphComposition
 from pymupdf import Font
-from yadt.document_il import GraphicState
-from yadt.document_il.il_version_1 import Box
-from yadt.document_il.il_version_1 import PdfCharacter
-from yadt.document_il.il_version_1 import PdfParagraph
-from yadt.document_il.il_version_1 import PdfParagraphComposition
 
 logger = logging.getLogger(__name__)
 HEIGHT_NOT_USFUL_CHAR_IN_CHAR = (

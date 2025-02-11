@@ -4,10 +4,10 @@ import re
 from pathlib import Path
 
 import pymupdf
-from yadt.const import get_cache_file_path
-from yadt.document_il import PdfFont
-from yadt.document_il import il_version_1
-from yadt.translation_config import TranslationConfig
+from babeldoc.const import get_cache_file_path
+from babeldoc.document_il import PdfFont
+from babeldoc.document_il import il_version_1
+from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 

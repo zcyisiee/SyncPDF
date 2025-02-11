@@ -37,6 +37,67 @@ wheels = [
 ]
 
 [[package]]
+name = "babeldoc"
+version = "0.1.5"
+source = { editable = "." }
+dependencies = [
+    { name = "bitstring" },
+    { name = "configargparse" },
+    { name = "httpx" },
+    { name = "huggingface-hub" },
+    { name = "msgpack" },
+    { name = "numpy" },
+    { name = "onnx" },
+    { name = "onnxruntime" },
+    { name = "openai" },
+    { name = "opencv-python" },
+    { name = "orjson" },
+    { name = "pdfminer-six" },
+    { name = "peewee" },
+    { name = "pymupdf" },
+    { name = "rich" },
+    { name = "toml" },
+    { name = "tqdm" },
+    { name = "xsdata", extra = ["cli", "lxml", "soap"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "bumpver" },
+    { name = "pre-commit" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "bitstring", specifier = ">=4.3.0" },
+    { name = "configargparse", specifier = ">=1.7" },
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "huggingface-hub", specifier = ">=0.27.0" },
+    { name = "msgpack", specifier = ">=1.1.0" },
+    { name = "numpy", specifier = ">=2.0.2" },
+    { name = "onnx", specifier = ">=1.17.0" },
+    { name = "onnxruntime", specifier = ">=1.16.1" },
+    { name = "openai", specifier = ">=1.59.3" },
+    { name = "opencv-python", specifier = ">=4.10.0.84" },
+    { name = "orjson", specifier = ">=3.10.14" },
+    { name = "pdfminer-six", specifier = ">=20240706" },
+    { name = "peewee", specifier = ">=3.17.8" },
+    { name = "pymupdf", specifier = ">=1.25.1" },
+    { name = "rich", specifier = ">=13.9.4" },
+    { name = "toml", specifier = ">=0.10.2" },
+    { name = "tqdm", specifier = ">=4.67.1" },
+    { name = "xsdata", extras = ["cli", "lxml", "soap"], specifier = ">=24.12" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "bumpver", specifier = ">=2024.1130" },
+    { name = "pre-commit", specifier = ">=4.1.0" },
+    { name = "ruff", specifier = ">=0.9.2" },
+]
+
+[[package]]
 name = "bitarray"
 version = "3.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1290,65 +1351,4 @@ lxml = [
 ]
 soap = [
     { name = "requests" },
-]
-
-[[package]]
-name = "yadt"
-version = "0.1.5"
-source = { editable = "." }
-dependencies = [
-    { name = "bitstring" },
-    { name = "configargparse" },
-    { name = "httpx" },
-    { name = "huggingface-hub" },
-    { name = "msgpack" },
-    { name = "numpy" },
-    { name = "onnx" },
-    { name = "onnxruntime" },
-    { name = "openai" },
-    { name = "opencv-python" },
-    { name = "orjson" },
-    { name = "pdfminer-six" },
-    { name = "peewee" },
-    { name = "pymupdf" },
-    { name = "rich" },
-    { name = "toml" },
-    { name = "tqdm" },
-    { name = "xsdata", extra = ["cli", "lxml", "soap"] },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "bumpver" },
-    { name = "pre-commit" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "bitstring", specifier = ">=4.3.0" },
-    { name = "configargparse", specifier = ">=1.7" },
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "huggingface-hub", specifier = ">=0.27.0" },
-    { name = "msgpack", specifier = ">=1.1.0" },
-    { name = "numpy", specifier = ">=2.0.2" },
-    { name = "onnx", specifier = ">=1.17.0" },
-    { name = "onnxruntime", specifier = ">=1.16.1" },
-    { name = "openai", specifier = ">=1.59.3" },
-    { name = "opencv-python", specifier = ">=4.10.0.84" },
-    { name = "orjson", specifier = ">=3.10.14" },
-    { name = "pdfminer-six", specifier = ">=20240706" },
-    { name = "peewee", specifier = ">=3.17.8" },
-    { name = "pymupdf", specifier = ">=1.25.1" },
-    { name = "rich", specifier = ">=13.9.4" },
-    { name = "toml", specifier = ">=0.10.2" },
-    { name = "tqdm", specifier = ">=4.67.1" },
-    { name = "xsdata", extras = ["cli", "lxml", "soap"], specifier = ">=24.12" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "bumpver", specifier = ">=2024.1130" },
-    { name = "pre-commit", specifier = ">=4.1.0" },
-    { name = "ruff", specifier = ">=0.9.2" },
 ]

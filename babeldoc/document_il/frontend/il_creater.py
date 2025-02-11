@@ -10,8 +10,8 @@ from pdfminer.pdffont import PDFCIDFont
 from pdfminer.pdffont import PDFFont
 from pdfminer.psparser import PSLiteral
 
-from yadt.document_il import il_version_1
-from yadt.translation_config import TranslationConfig
+from babeldoc.document_il import il_version_1
+from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 

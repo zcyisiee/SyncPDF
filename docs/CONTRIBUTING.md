@@ -160,18 +160,18 @@ The intermediate representation is described by [il_version_1.rnc](https://githu
 ##### Format RNC file
 
 ```bash
-trang yadt/document_il/il_version_1.rnc yadt/document_il/il_version_1.rnc
+trang babeldoc/document_il/il_version_1.rnc babeldoc/document_il/il_version_1.rnc
 ```
 
 ##### Generate RNG, XSD and Python classes
 
 ```bash
 # Generate RNG from RNC
-trang yadt/document_il/il_version_1.rnc yadt/document_il/il_version_1.rng
+trang babeldoc/document_il/il_version_1.rnc babeldoc/document_il/il_version_1.rng
 
 # Generate XSD from RNC
-trang yadt/document_il/il_version_1.rnc yadt/document_il/il_version_1.xsd
+trang babeldoc/document_il/il_version_1.rnc babeldoc/document_il/il_version_1.xsd
 
 # Generate Python classes from XSD
-xsdata generate yadt/document_il/il_version_1.xsd --package yadt.document_il
+xsdata generate babeldoc/document_il/il_version_1.xsd --package babeldoc.document_il
 ```

@@ -4,9 +4,9 @@ import tempfile
 import threading
 from pathlib import Path
 
-from yadt.const import CACHE_FOLDER
-from yadt.docvision.doclayout import DocLayoutModel
-from yadt.progress_monitor import ProgressMonitor
+from babeldoc.const import CACHE_FOLDER
+from babeldoc.docvision.doclayout import DocLayoutModel
+from babeldoc.progress_monitor import ProgressMonitor
 
 
 class TranslationConfig:

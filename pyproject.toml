@@ -1,5 +1,5 @@
 [project]
-name = "yadt"
+name = "BabelDOC"
 version = "0.1.5"
 description = "Yet Another Document Translator"
 license = "AGPL-3.0"
@@ -32,11 +32,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/funstory-ai/yadt"
-Issues = "https://github.com/funstory-ai/yadt/issues"
+Homepage = "https://github.com/funstory-ai/BabelDOC"
+Issues = "https://github.com/funstory-ai/BabelDOC/issues"
 
 [project.scripts]
-yadt = "yadt.main:cli"
+babeldoc = "babeldoc.main:cli"
 
 [build-system]
 requires = ["hatchling"]
@@ -47,7 +47,7 @@ ignore = ["E203", "E261", "E501", "W503", "E741", "E501"]
 max-line-length = 88
 
 [tool.ruff]
-src = ["yadt"]
+src = ["babeldoc"]
 target-version = "py310"
 show-fixes = true
 
@@ -103,11 +103,11 @@ convention = "google"
 max-complexity = 10  # 函数圈复杂度阈值
 
 [tool.ruff.lint.per-file-ignores]
-"yadt/pdfinterp.py" = ["N"]  # 忽略命名规范
+"babeldoc/pdfinterp.py" = ["N"]  # 忽略命名规范
 "tests/*" = ["S101"]  # 在测试文件中允许 assert
 "**/__init__.py" = ["F401"]  # 允许未使用的导入
 # 忽略 S311 警告，因为这是有意的
-"yadt/document_il/midend/paragraph_finder.py" = ["S311"]  
+"babeldoc/document_il/midend/paragraph_finder.py" = ["S311"]
 
 [dependency-groups]
 dev = [
@@ -125,9 +125,9 @@ version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
     'current_version = "{version}"',
     'version = "{version}"'
 ]
-"yadt/__init__.py" = [
+"babeldoc/__init__.py" = [
     '__version__ = "{version}"'
 ]
-"yadt/main.py" = [
+"babeldoc/main.py" = [
     '__version__ = "{version}"'
 ]
