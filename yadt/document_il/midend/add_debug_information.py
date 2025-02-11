@@ -78,6 +78,8 @@ class AddDebugInformation:
         new_paragraphs = []
 
         for paragraph in page.pdf_paragraph:
+            if not paragraph.pdf_paragraph_composition:
+                continue
             if any(
                 (
                     x.pdf_same_style_unicode_characters.debug_info

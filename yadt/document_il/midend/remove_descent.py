@@ -27,8 +27,13 @@ class RemoveDescent:
         Returns:
             The descent value if it was removed, None otherwise
         """
-        if (char.box and char.box.y is not None and char.box.y2 is not None
-                and font and hasattr(font, 'descent')):
+        if (
+            char.box
+            and char.box.y is not None
+            and char.box.y2 is not None
+            and font
+            and hasattr(font, "descent")
+        ):
             descent = font.descent * char.pdf_style.font_size / 1000
             if char.vertical:
                 # For vertical text, remove descent from x coordinates
@@ -67,7 +72,7 @@ class RemoveDescent:
             Union[il_version_1.PdfFont, dict[str, il_version_1.PdfFont]],
         ] = {f.font_id: f for f in page.pdf_font}
         page_fonts = {f.font_id: f for f in page.pdf_font}
-        
+
         # Add xobject fonts
         for xobj in page.pdf_xobject:
             fonts[xobj.xobj_id] = page_fonts.copy()
@@ -97,51 +102,42 @@ class RemoveDescent:
         for paragraph in page.pdf_paragraph:
             descent_values = []
             vertical_chars = []
-            
+
             # Process all characters in paragraph compositions
             for comp in paragraph.pdf_paragraph_composition:
                 # Handle direct characters
                 if comp.pdf_character:
                     font = get_font(
-                        comp.pdf_character.pdf_style.font_id,
-                        comp.pdf_character.xobj_id
+                        comp.pdf_character.pdf_style.font_id, comp.pdf_character.xobj_id
                     )
                     if font:
-                        descent = self._remove_char_descent(
-                            comp.pdf_character, font
-                        )
+                        descent = self._remove_char_descent(comp.pdf_character, font)
                         if descent is not None:
                             descent_values.append(descent)
                             vertical_chars.append(comp.pdf_character.vertical)
-                
+
                 # Handle characters in PdfLine
                 elif comp.pdf_line:
                     for char in comp.pdf_line.pdf_character:
-                        if font := get_font(
-                            char.pdf_style.font_id, char.xobj_id
-                        ):
+                        if font := get_font(char.pdf_style.font_id, char.xobj_id):
                             descent = self._remove_char_descent(char, font)
                             if descent is not None:
                                 descent_values.append(descent)
                                 vertical_chars.append(char.vertical)
-                
+
                 # Handle characters in PdfFormula
                 elif comp.pdf_formula:
                     for char in comp.pdf_formula.pdf_character:
-                        if font := get_font(
-                            char.pdf_style.font_id, char.xobj_id
-                        ):
+                        if font := get_font(char.pdf_style.font_id, char.xobj_id):
                             descent = self._remove_char_descent(char, font)
                             if descent is not None:
                                 descent_values.append(descent)
                                 vertical_chars.append(char.vertical)
-                
+
                 # Handle characters in PdfSameStyleCharacters
                 elif comp.pdf_same_style_characters:
                     for char in comp.pdf_same_style_characters.pdf_character:
-                        if font := get_font(
-                            char.pdf_style.font_id, char.xobj_id
-                        ):
+                        if font := get_font(char.pdf_style.font_id, char.xobj_id):
                             descent = self._remove_char_descent(char, font)
                             if descent is not None:
                                 descent_values.append(descent)
@@ -152,13 +148,12 @@ class RemoveDescent:
                 # Calculate mode of descent values
                 descent_counter = Counter(descent_values)
                 most_common_descent = descent_counter.most_common(1)[0][0]
-                
+
                 # Check if paragraph is vertical (all characters are vertical)
                 is_vertical = all(vertical_chars) if vertical_chars else False
-                
+
                 # Adjust paragraph box
-                if (paragraph.box.y is not None 
-                        and paragraph.box.y2 is not None):
+                if paragraph.box.y is not None and paragraph.box.y2 is not None:
                     if is_vertical:
                         # For vertical paragraphs, adjust x coordinates
                         paragraph.box.x += most_common_descent
@@ -166,4 +161,4 @@ class RemoveDescent:
                     else:
                         # For horizontal paragraphs, adjust y coordinates
                         paragraph.box.y -= most_common_descent
-                        paragraph.box.y2 -= most_common_descent 
+                        paragraph.box.y2 -= most_common_descent
