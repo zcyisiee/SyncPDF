@@ -3,25 +3,21 @@ import math
 import re
 import unicodedata
 
-from yadt.document_il.il_version_1 import (
-    Box,
-    Document,
-    GraphicState,
-    Page,
-    PdfCharacter,
-    PdfFormula,
-    PdfLine,
-    PdfParagraphComposition,
-    PdfSameStyleCharacters,
-    PdfStyle,
-)
+from yadt.document_il.il_version_1 import Box
+from yadt.document_il.il_version_1 import Document
+from yadt.document_il.il_version_1 import GraphicState
+from yadt.document_il.il_version_1 import Page
+from yadt.document_il.il_version_1 import PdfCharacter
+from yadt.document_il.il_version_1 import PdfFormula
+from yadt.document_il.il_version_1 import PdfLine
+from yadt.document_il.il_version_1 import PdfParagraphComposition
+from yadt.document_il.il_version_1 import PdfSameStyleCharacters
+from yadt.document_il.il_version_1 import PdfStyle
 from yadt.document_il.utils.fontmap import FontMapper
-from yadt.document_il.utils.layout_helper import (
-    LEFT_BRACKET,
-    RIGHT_BRACKET,
-    formular_height_ignore_char,
-    is_same_style,
-)
+from yadt.document_il.utils.layout_helper import LEFT_BRACKET
+from yadt.document_il.utils.layout_helper import RIGHT_BRACKET
+from yadt.document_il.utils.layout_helper import formular_height_ignore_char
+from yadt.document_il.utils.layout_helper import is_same_style
 from yadt.translation_config import TranslationConfig
 
 
@@ -34,7 +30,8 @@ class StylesAndFormulas:
 
     def process(self, document: Document):
         with self.translation_config.progress_monitor.stage_start(
-            self.stage_name, len(document.page)
+            self.stage_name,
+            len(document.page),
         ) as pbar:
             for page in document.page:
                 self.translation_config.raise_if_cancelled()
@@ -104,7 +101,7 @@ class StylesAndFormulas:
                     )
 
                     # isspace = get_char_unicode_string(current_chars).isspace()
-                    isspace = all((x.char_unicode.isspace() for x in current_chars))
+                    isspace = all(x.char_unicode.isspace() for x in current_chars)
                     is_corner_mark = (
                         len(current_chars) > 0
                         and not isspace
@@ -129,7 +126,7 @@ class StylesAndFormulas:
                     if is_formula != in_formula_state and current_chars:
                         # 字符类型发生切换，处理之前的字符
                         new_compositions.append(
-                            self.create_composition(current_chars, in_formula_state)
+                            self.create_composition(current_chars, in_formula_state),
                         )
                         current_chars = []
                     in_formula_state = is_formula
@@ -140,7 +137,7 @@ class StylesAndFormulas:
                 # 处理行末的字符
                 if current_chars:
                     new_compositions.append(
-                        self.create_composition(current_chars, in_formula_state)
+                        self.create_composition(current_chars, in_formula_state),
                     )
                     current_chars = []
 
@@ -158,11 +155,11 @@ class StylesAndFormulas:
             new_compositions = []
             for composition in paragraph.pdf_paragraph_composition:
                 if composition.pdf_formula is not None and self.is_translatable_formula(
-                    composition.pdf_formula
+                    composition.pdf_formula,
                 ):
                     # 将可翻译公式转换为普通文本行
                     new_line = PdfLine(
-                        pdf_character=composition.pdf_formula.pdf_character
+                        pdf_character=composition.pdf_formula.pdf_character,
                     )
                     self.update_line_data(new_line)
                     new_compositions.append(PdfParagraphComposition(pdf_line=new_line))
@@ -193,7 +190,8 @@ class StylesAndFormulas:
                 if comp.pdf_formula is not None:
                     if current_chars:
                         new_comp = self._create_same_style_composition(
-                            current_chars, current_style
+                            current_chars,
+                            current_style,
                         )
                         new_compositions.append(new_comp)
                         current_chars = []
@@ -214,7 +212,8 @@ class StylesAndFormulas:
                     else:
                         if current_chars:
                             new_comp = self._create_same_style_composition(
-                                current_chars, current_style
+                                current_chars,
+                                current_style,
                             )
                             new_compositions.append(new_comp)
                         current_chars = [char]
@@ -222,7 +221,8 @@ class StylesAndFormulas:
 
             if current_chars:
                 new_comp = self._create_same_style_composition(
-                    current_chars, current_style
+                    current_chars,
+                    current_style,
                 )
                 new_compositions.append(new_comp)
 
@@ -280,7 +280,8 @@ class StylesAndFormulas:
                 else None
             ),
             graphic_state=self._merge_graphic_states(
-                style1.graphic_state, style2.graphic_state
+                style1.graphic_state,
+                style2.graphic_state,
             ),
         )
 
@@ -325,7 +326,9 @@ class StylesAndFormulas:
         )
 
     def _create_same_style_composition(
-        self, chars: list[PdfCharacter], style
+        self,
+        chars: list[PdfCharacter],
+        style,
     ) -> PdfParagraphComposition:
         """创建具有相同样式的文本组合"""
         if not chars:
@@ -343,7 +346,7 @@ class StylesAndFormulas:
                 box=box,
                 pdf_style=style,
                 pdf_character=chars,
-            )
+            ),
         )
 
     def process_page_offsets(self, page: Page):
@@ -436,7 +439,9 @@ class StylesAndFormulas:
         return median_spacing
 
     def create_composition(
-        self, chars: list[PdfCharacter], is_formula: bool
+        self,
+        chars: list[PdfCharacter],
+        is_formula: bool,
     ) -> PdfParagraphComposition:
         if is_formula:
             formula = PdfFormula(pdf_character=chars)
@@ -562,7 +567,8 @@ class StylesAndFormulas:
         return bool(text_without_basic)
 
     def split_formula_by_comma(
-        self, formula: PdfFormula
+        self,
+        formula: PdfFormula,
     ) -> list[tuple[list[PdfCharacter], PdfCharacter]]:
         """按逗号拆分公式字符，返回(字符组, 逗号字符)的列表，最后一组的逗号字符为None。
         只有不在括号内的逗号才会被用作分隔符。支持的括号对包括：
@@ -634,12 +640,13 @@ class StylesAndFormulas:
 
                 # 检查x轴重叠和y轴交集
                 if self.is_x_axis_contained(
-                    formula1.box, formula2.box
+                    formula1.box,
+                    formula2.box,
                 ) and self.has_y_intersection(formula1.box, formula2.box):
                     # 合并公式
                     merged_formula = self.merge_formulas(formula1, formula2)
                     paragraph.pdf_paragraph_composition[i] = PdfParagraphComposition(
-                        pdf_formula=merged_formula
+                        pdf_formula=merged_formula,
                     )
                     # 删除第二个公式
                     del paragraph.pdf_paragraph_composition[i + 1]
@@ -669,7 +676,7 @@ class StylesAndFormulas:
             new_compositions = []
             for composition in paragraph.pdf_paragraph_composition:
                 if composition.pdf_formula is not None and self.should_split_formula(
-                    composition.pdf_formula
+                    composition.pdf_formula,
                 ):
                     # 按逗号拆分公式
                     char_groups = self.split_formula_by_comma(composition.pdf_formula)
@@ -678,7 +685,7 @@ class StylesAndFormulas:
                             formula = PdfFormula(pdf_character=chars)
                             self.update_formula_data(formula)
                             new_compositions.append(
-                                PdfParagraphComposition(pdf_formula=formula)
+                                PdfParagraphComposition(pdf_formula=formula),
                             )
 
                             # 如果有逗号，添加为文本行
@@ -686,7 +693,7 @@ class StylesAndFormulas:
                                 comma_line = PdfLine(pdf_character=[comma])
                                 self.update_line_data(comma_line)
                                 new_compositions.append(
-                                    PdfParagraphComposition(pdf_line=comma_line)
+                                    PdfParagraphComposition(pdf_line=comma_line),
                                 )
                 else:
                     new_compositions.append(composition)

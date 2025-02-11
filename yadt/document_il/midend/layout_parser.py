@@ -1,5 +1,5 @@
 import logging
-import os
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -24,15 +24,19 @@ class LayoutParser:
         if not self.translation_config.debug:
             return
 
-        debug_dir = self.translation_config.get_working_file_path("ocr-box-image")
-        os.makedirs(debug_dir, exist_ok=True)
+        debug_dir = Path(self.translation_config.get_working_file_path("ocr-box-image"))
+        debug_dir.mkdir(parents=True, exist_ok=True)
 
         # Draw boxes on the image
         debug_image = image.copy()
         for box in layout.boxes:
             x0, y0, x1, y1 = box.xyxy
             cv2.rectangle(
-                debug_image, (int(x0), int(y0)), (int(x1), int(y1)), (0, 255, 0), 2
+                debug_image,
+                (int(x0), int(y0)),
+                (int(x1), int(y1)),
+                (0, 255, 0),
+                2,
             )
             # Add text label
             cv2.putText(
@@ -46,8 +50,8 @@ class LayoutParser:
             )
 
         # Save the image
-        output_path = os.path.join(debug_dir, f"{page_number}.jpg")
-        cv2.imwrite(output_path, debug_image)
+        output_path = debug_dir / f"{page_number}.jpg"
+        cv2.imwrite(str(output_path), debug_image)
 
     def _save_debug_box_to_page(self, page: il_version_1.Page):
         """Save debug boxes and text labels to the PDF page."""
@@ -60,7 +64,10 @@ class LayoutParser:
             # Create a rectangle box
             rect = il_version_1.PdfRectangle(
                 box=il_version_1.Box(
-                    x=layout.box.x, y=layout.box.y, x2=layout.box.x2, y2=layout.box.y2
+                    x=layout.box.x,
+                    y=layout.box.y,
+                    x2=layout.box.x2,
+                    y2=layout.box.y2,
                 ),
                 graphic_state=color,
                 debug_info=True,
@@ -93,11 +100,11 @@ class LayoutParser:
                                 unicode=layout.class_name,
                                 pdf_style=style,
                                 debug_info=True,
-                            )
-                        )
+                            ),
+                        ),
                     ],
                     xobj_id=-1,
-                )
+                ),
             )
 
     def process(self, docs: il_version_1.Document, mupdf_doc: Document):
@@ -110,7 +117,8 @@ class LayoutParser:
         ]
         total = len(pages_to_translate)
         with self.translation_config.progress_monitor.stage_start(
-            self.stage_name, total
+            self.stage_name,
+            total,
         ) as progress:
             # Process pages in batches
             batch_size = 16
@@ -123,7 +131,9 @@ class LayoutParser:
                 for page in batch_pages:
                     pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
                     image = np.fromstring(pix.samples, np.uint8).reshape(
-                        pix.height, pix.width, 3
+                        pix.height,
+                        pix.width,
+                        3,
                     )[:, :, ::-1]
                     batch_images.append(image)
 
@@ -131,7 +141,7 @@ class LayoutParser:
                 layouts_batch = self.model.predict(batch_images, batch_size=batch_size)
 
                 # Process predictions for each page
-                for page, layouts in zip(batch_pages, layouts_batch):
+                for page, layouts in zip(batch_pages, layouts_batch, strict=False):
                     page_layouts = []
                     self._save_debug_image(
                         batch_images[batch_pages.index(page)],
@@ -153,7 +163,10 @@ class LayoutParser:
                         page_layout = il_version_1.PageLayout(
                             id=len(page_layouts) + 1,
                             box=il_version_1.Box(
-                                x0.item(), y0.item(), x1.item(), y1.item()
+                                x0.item(),
+                                y0.item(),
+                                x1.item(),
+                                y1.item(),
                             ),
                             conf=layout.conf.item(),
                             class_name=layouts.names[layout.cls],

@@ -2,15 +2,26 @@ import base64
 import logging
 import re
 import unicodedata
-from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from pdfminer.converter import PDFConverter
-from pdfminer.layout import LTChar, LTComponent, LTFigure, LTLine, LTPage, LTText
+from pdfminer.layout import LTChar
+from pdfminer.layout import LTComponent
+from pdfminer.layout import LTFigure
+from pdfminer.layout import LTLine
+from pdfminer.layout import LTPage
+from pdfminer.layout import LTText
 from pdfminer.pdfcolor import PDFColorSpace
-from pdfminer.pdffont import PDFCIDFont, PDFFont, PDFUnicodeNotDefined
-from pdfminer.pdfinterp import PDFGraphicState, PDFResourceManager
-from pdfminer.utils import Matrix, apply_matrix_pt, bbox2str, matrix2str, mult_matrix
+from pdfminer.pdffont import PDFCIDFont
+from pdfminer.pdffont import PDFFont
+from pdfminer.pdffont import PDFUnicodeNotDefined
+from pdfminer.pdfinterp import PDFGraphicState
+from pdfminer.pdfinterp import PDFResourceManager
+from pdfminer.utils import Matrix
+from pdfminer.utils import apply_matrix_pt
+from pdfminer.utils import bbox2str
+from pdfminer.utils import matrix2str
+from pdfminer.utils import mult_matrix
 from pymupdf import Font
 
 from yadt.document_il.frontend.il_creater import ILCreater
@@ -22,7 +33,7 @@ class PDFConverterEx(PDFConverter):
     def __init__(
         self,
         rsrcmgr: PDFResourceManager,
-        il_creater: ILCreater = None,
+        il_creater: ILCreater | None = None,
     ) -> None:
         PDFConverter.__init__(self, rsrcmgr, None, "utf-8", 1, None)
         self.il_creater = il_creater
@@ -34,12 +45,15 @@ class PDFConverterEx(PDFConverter):
         (x1, y1) = apply_matrix_pt(ctm, (x1, y1))
         mediabox = (0, 0, abs(x0 - x1), abs(y0 - y1))
         self.il_creater.on_page_media_box(
-            mediabox[0], mediabox[1], mediabox[2], mediabox[3]
+            mediabox[0],
+            mediabox[1],
+            mediabox[2],
+            mediabox[3],
         )
         self.il_creater.on_page_number(page.pageno)
         self.cur_item = LTPage(page.pageno, mediabox)
 
-    def end_page(self, page):
+    def end_page(self, _page) -> None:
         # 重载返回指令流
         return self.receive_layout(self.cur_item)
 
@@ -52,7 +66,8 @@ class PDFConverterEx(PDFConverter):
     def end_figure(self, _: str) -> None:
         # 重载返回指令流
         fig = self.cur_item
-        assert isinstance(self.cur_item, LTFigure), str(type(self.cur_item))
+        if not isinstance(self.cur_item, LTFigure):
+            raise ValueError(f"Unexpected item type: {type(self.cur_item)}")
         self.cur_item = self._stack.pop()
         self.cur_item.add(fig)
         return self.receive_layout(fig)
@@ -71,7 +86,8 @@ class PDFConverterEx(PDFConverter):
         # 重载设置 cid 和 font
         try:
             text = font.to_unichr(cid)
-            assert isinstance(text, str), str(type(text))
+            if not isinstance(text, str):
+                raise TypeError(f"Expected string, got {type(text)}")
         except PDFUnicodeNotDefined:
             text = self.handle_undefined_char(font, cid)
         textwidth = font.char_width(cid)
@@ -117,7 +133,7 @@ class AWLTChar(LTChar):
         rise: float,
         text: str,
         textwidth: float,
-        textdisp: Union[float, Tuple[Optional[float], float]],
+        textdisp: float | tuple[float | None, float],
         ncs: PDFColorSpace,
         graphicstate: PDFGraphicState,
         xobj_id: int,
@@ -150,7 +166,7 @@ class AWLTChar(LTChar):
             bbox_lower_left = (0, descent + rise)
             bbox_upper_right = (self.adv, descent + rise + fontsize)
         (a, b, c, d, e, f) = self.matrix
-        self.upright = 0 < a * d * scaling and b * c <= 0
+        self.upright = a * d * scaling > 0 and b * c <= 0
         (x0, y0) = apply_matrix_pt(self.matrix, bbox_lower_left)
         (x1, y1) = apply_matrix_pt(self.matrix, bbox_upper_right)
         if x1 < x0:
@@ -165,14 +181,7 @@ class AWLTChar(LTChar):
         return
 
     def __repr__(self) -> str:
-        return "<{} {} matrix={} font={!r} adv={} text={!r}>".format(
-            self.__class__.__name__,
-            bbox2str(self.bbox),
-            matrix2str(self.matrix),
-            self.fontname,
-            self.adv,
-            self.get_text(),
-        )
+        return f"<{self.__class__.__name__} {bbox2str(self.bbox)} matrix={matrix2str(self.matrix)} font={self.fontname!r} adv={self.adv} text={self.get_text()!r}>"
 
     def get_text(self) -> str:
         return self._text
@@ -193,19 +202,20 @@ class TranslateConverter(PDFConverterEx):
     def __init__(
         self,
         rsrcmgr,
-        vfont: str = None,
-        vchar: str = None,
+        vfont: str | None = None,
+        vchar: str | None = None,
         thread: int = 0,
-        layout={},
-        lang_in: str = "",
-        lang_out: str = "",
-        service: str = "",
+        layout: dict | None = None,
+        lang_in: str = "",  # 保留参数但添加未使用标记
+        _lang_out: str = "",  # 改为未使用参数
+        _service: str = "",  # 改为未使用参数
         resfont: str = "",
-        noto: Font = None,
-        envs: Dict = None,
-        prompt: List = None,
-        il_creater: ILCreater = None,
-    ) -> None:
+        noto: Font | None = None,
+        envs: dict | None = None,
+        _prompt: list | None = None,  # 改为未使用参数
+        il_creater: ILCreater | None = None,
+    ):
+        layout = layout or {}
         super().__init__(rsrcmgr, il_creater)
         self.vfont = vfont
         self.vchar = vchar
@@ -384,9 +394,9 @@ class TranslateConverter(PDFConverterEx):
             varl.append(vlstk)
             varf.append(vfix)
         log.debug("\n==========[VSTACK]==========\n")
-        for id, v in enumerate(var):  # 计算公式宽度
+        for var_id, v in enumerate(var):  # 计算公式宽度
             l = max([vch.x1 for vch in v]) - v[0].x0
-            log.debug(f'< {l:.1f} {v[0].x0:.1f} {v[0].y0:.1f} {v[0].cid} {v[0].fontname} {len(varl[id])} > v{id} = {"".join([ch.get_text() for ch in v])}')
+            log.debug(f'< {l:.1f} {v[0].x0:.1f} {v[0].y0:.1f} {v[0].cid} {v[0].fontname} {len(varl[var_id])} > v{var_id} = {"".join([ch.get_text() for ch in v])}')
             vlen.append(l)
 
         ############################################################
@@ -399,29 +409,29 @@ class TranslateConverter(PDFConverterEx):
         # C. 新文档排版
         def raw_string(fcur: str, cstk: str):  # 编码字符串
             if fcur == 'noto':
-                return "".join(["%04x" % self.noto.has_glyph(ord(c)) for c in cstk])
+                return "".join([f"{self.noto.has_glyph(ord(c)):04x}" for c in cstk])
             elif isinstance(self.fontmap[fcur], PDFCIDFont):  # 判断编码长度
-                return "".join(["%04x" % ord(c) for c in cstk])
+                return "".join([f"{ord(c):04x}" for c in cstk])
             else:
-                return "".join(["%02x" % ord(c) for c in cstk])
+                return "".join([f"{ord(c):02x}" for c in cstk])
 
         _x, _y = 0, 0
-        for id, new in enumerate(news):
-            x: float = pstk[id].x           # 段落初始横坐标
-            y: float = pstk[id].y           # 段落初始纵坐标
-            x0: float = pstk[id].x0         # 段落左边界
-            x1: float = pstk[id].x1         # 段落右边界
-            size: float = pstk[id].size     # 段落字体大小
-            brk: bool = pstk[id].brk        # 段落换行标记
+        for para_id, new in enumerate(news):
+            x: float = pstk[para_id].x           # 段落初始横坐标
+            y: float = pstk[para_id].y           # 段落初始纵坐标
+            x0: float = pstk[para_id].x0         # 段落左边界
+            x1: float = pstk[para_id].x1         # 段落右边界
+            size: float = pstk[para_id].size     # 段落字体大小
+            brk: bool = pstk[para_id].brk        # 段落换行标记
             cstk: str = ""                  # 当前文字栈
             fcur: str = None                # 当前字体 ID
             tx = x
             fcur_ = fcur
             ptr = 0
-            log.debug(f"< {y} {x} {x0} {x1} {size} {brk} > {sstk[id]} | {new}")
+            log.debug(f"< {y} {x} {x0} {x1} {size} {brk} > {sstk[para_id]} | {new}")
             while ptr < len(new):
                 vy_regex = re.match(
-                    r"\{\s*v([\d\s]+)\}", new[ptr:], re.IGNORECASE
+                    r"\{\s*v([\d\s]+)\}", new[ptr:], re.IGNORECASE,
                 )  # 匹配 {vn} 公式标记
                 mod = 0  # 文字修饰符
                 if vy_regex:  # 加载公式
@@ -429,7 +439,8 @@ class TranslateConverter(PDFConverterEx):
                     try:
                         vid = int(vy_regex.group(1).replace(" ", ""))
                         adv = vlen[vid]
-                    except Exception:
+                    except Exception as e:
+                        log.debug("Skipping formula placeholder due to: %s", e)
                         continue  # 翻译器可能会自动补个越界的公式标记
                     if var[vid][-1].get_text() and unicodedata.category(var[vid][-1].get_text()[0]) in ["Lm", "Mn", "Sk"]:  # 文字修饰符
                         mod = var[vid][-1].width

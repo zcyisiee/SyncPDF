@@ -4,8 +4,10 @@ import re
 
 import pdfminer.pdfinterp
 import pymupdf
-from pdfminer.layout import LTChar, LTFigure
-from pdfminer.pdffont import PDFCIDFont, PDFFont
+from pdfminer.layout import LTChar
+from pdfminer.layout import LTFigure
+from pdfminer.pdffont import PDFCIDFont
+from pdfminer.pdffont import PDFFont
 from pdfminer.psparser import PSLiteral
 
 from yadt.document_il import il_version_1
@@ -45,7 +47,7 @@ class ILCreater:
             return
         # logger.debug("xobj_id: %d, on_passthrough_per_char: %s ( %s )", self.xobj_id, operator, args)
         args = [self.parse_arg(arg) for arg in args]
-        for i, value in enumerate(self.passthrough_per_char_instruction.copy()):
+        for _i, value in enumerate(self.passthrough_per_char_instruction.copy()):
             op, arg = value
             if op == operator:
                 self.passthrough_per_char_instruction.remove(value)
@@ -78,7 +80,7 @@ class ILCreater:
 
     def push_passthrough_per_char_instruction(self):
         self.passthrough_per_char_instruction_stack.append(
-            self.passthrough_per_char_instruction.copy()
+            self.passthrough_per_char_instruction.copy(),
         )
 
     # pdf32000 page 171
@@ -95,7 +97,7 @@ class ILCreater:
 
     def push_xobj(self):
         self.xobj_stack.append(
-            (self.current_page_font_name_id_map.copy(), self.xobj_id)
+            (self.current_page_font_name_id_map.copy(), self.xobj_id),
         )
         self.current_page_font_name_id_map = {}
 
@@ -188,19 +190,18 @@ class ILCreater:
                 # pdf 32000:2008 page 273
                 # Table 118 - Predefined CJK CMap names
                 _, encoding = self.mupdf.xref_get_key(xref_id, "Encoding")
-                if encoding == "/Identity-H":
-                    encoding_length = 2
-                elif encoding == "/Identity-V":
+                if encoding == "/Identity-H" or encoding == "/Identity-V":
                     encoding_length = 2
                 else:
                     _, to_unicode_id = self.mupdf.xref_get_key(xref_id, "ToUnicode")
                     to_unicode_bytes = self.mupdf.xref_stream(
-                        int(to_unicode_id.split(" ")[0])
+                        int(to_unicode_id.split(" ")[0]),
                     )
-                    range = re.search(
-                        b"begincodespacerange\n?.*<(\\d+?)>.*", to_unicode_bytes
+                    code_range = re.search(
+                        b"begincodespacerange\n?.*<(\\d+?)>.*",
+                        to_unicode_bytes,
                     ).group(1)
-                    encoding_length = len(range) // 2
+                    encoding_length = len(code_range) // 2
             except Exception:
                 if max(font.unicode_map.cid2unichr.keys()) > 255:
                     encoding_length = 2
@@ -333,11 +334,15 @@ class ILCreater:
                 continue
             total += 1
         self.progress = self.translation_config.progress_monitor.stage_start(
-            self.stage_name, total
+            self.stage_name,
+            total,
         )
 
     def on_pdf_figure(self, figure: LTFigure):
         box = il_version_1.Box(
-            figure.bbox[0], figure.bbox[1], figure.bbox[2], figure.bbox[3]
+            figure.bbox[0],
+            figure.bbox[1],
+            figure.bbox[2],
+            figure.bbox[3],
         )
         self.current_page.pdf_figure.append(il_version_1.PdfFigure(box=box))

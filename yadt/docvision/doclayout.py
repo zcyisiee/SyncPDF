@@ -2,6 +2,7 @@ import abc
 import ast
 import os.path
 import platform
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -85,7 +86,7 @@ if os_name == "Darwin":  # Temporarily disable CoreML due to batch inference iss
                 "RequireStaticInputShapes": "0",
                 "EnableOnSubgraphs": "0",
             },
-        )
+        ),
     )
     # workaround for CoreML batch inference issues
     max_batch_size = 1
@@ -104,7 +105,8 @@ class OnnxModel(DocLayoutModel):
         self._names = ast.literal_eval(metadata["names"])
 
         self.model = onnxruntime.InferenceSession(
-            model.SerializeToString(), providers=providers
+            model.SerializeToString(),
+            providers=providers,
         )
 
     @staticmethod
@@ -112,12 +114,12 @@ class OnnxModel(DocLayoutModel):
         if os.environ.get("USE_MODELSCOPE", "0") == "1":
             repo_mapping = {
                 # Edit here to add more models
-                "wybxc/DocLayout-YOLO-DocStructBench-onnx": "AI-ModelScope/DocLayout-YOLO-DocStructBench-onnx"
+                "wybxc/DocLayout-YOLO-DocStructBench-onnx": "AI-ModelScope/DocLayout-YOLO-DocStructBench-onnx",
             }
             from modelscope import snapshot_download
 
             model_dir = snapshot_download(repo_mapping[repo_id])
-            pth = os.path.join(model_dir, filename)
+            pth = Path(model_dir) / filename
         else:
             try:
                 pth = hf_hub_download(
@@ -128,7 +130,9 @@ class OnnxModel(DocLayoutModel):
                 )
             except Exception:
                 pth = hf_hub_download(
-                    repo_id=repo_id, filename=filename, etag_timeout=1
+                    repo_id=repo_id,
+                    filename=filename,
+                    etag_timeout=1,
                 )
         return OnnxModel(pth)
 
@@ -160,7 +164,9 @@ class OnnxModel(DocLayoutModel):
 
         # Resize image
         image = cv2.resize(
-            image, (resized_w, resized_h), interpolation=cv2.INTER_LINEAR
+            image,
+            (resized_w, resized_h),
+            interpolation=cv2.INTER_LINEAR,
         )
 
         # Calculate padding size and align to stride multiple
@@ -171,7 +177,13 @@ class OnnxModel(DocLayoutModel):
 
         # Add padding
         image = cv2.copyMakeBorder(
-            image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114)
+            image,
+            top,
+            bottom,
+            left,
+            right,
+            cv2.BORDER_CONSTANT,
+            value=(114, 114, 114),
         )
 
         return image
@@ -257,7 +269,9 @@ class OnnxModel(DocLayoutModel):
                 preds = preds[preds[..., 4] > 0.25]
                 if len(preds) > 0:
                     preds[..., :4] = self.scale_boxes(
-                        (new_h, new_w), preds[..., :4], orig_shapes[j]
+                        (new_h, new_w),
+                        preds[..., :4],
+                        orig_shapes[j],
                     )
                 results.append(YoloResult(boxes_data=preds, names=self._names))
 

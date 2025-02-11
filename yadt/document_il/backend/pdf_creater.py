@@ -1,13 +1,14 @@
 import logging
-import os
 import re
+from pathlib import Path
 
 import pymupdf
 from bitstring import BitStream
 
 from yadt.document_il import il_version_1
 from yadt.document_il.utils.fontmap import FontMapper
-from yadt.translation_config import TranslateResult, TranslationConfig
+from yadt.translation_config import TranslateResult
+from yadt.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,9 @@ class PDFCreater:
         self.translation_config = translation_config
 
     def render_graphic_state(
-        self, draw_op: BitStream, graphic_state: il_version_1.GraphicState
+        self,
+        draw_op: BitStream,
+        graphic_state: il_version_1.GraphicState,
     ):
         if graphic_state is None:
             return
@@ -58,11 +61,12 @@ class PDFCreater:
 
         if graphic_state.passthrough_per_char_instruction:
             draw_op.append(
-                f"{graphic_state.passthrough_per_char_instruction} \n".encode()
+                f"{graphic_state.passthrough_per_char_instruction} \n".encode(),
             )
 
     def render_paragraph_to_char(
-        self, paragraph: il_version_1.PdfParagraph
+        self,
+        paragraph: il_version_1.PdfParagraph,
     ) -> list[il_version_1.PdfCharacter]:
         chars = []
         for composition in paragraph.pdf_paragraph_composition:
@@ -73,14 +77,14 @@ class PDFCreater:
                     f"after the translation is completed."
                     f"During pdf rendering, this type is not supported."
                     f"Composition: {composition}. "
-                    f"Paragraph: {paragraph}. "
+                    f"Paragraph: {paragraph}. ",
                 )
                 continue
             chars.append(composition.pdf_character)
         if not chars and paragraph.unicode:
             logger.error(
                 f"Unable to export paragraphs that have "
-                f"not yet been formatted: {paragraph}"
+                f"not yet been formatted: {paragraph}",
             )
             return chars
         return chars
@@ -113,7 +117,9 @@ class PDFCreater:
         return set(fonts)
 
     def _debug_render_rectangle(
-        self, draw_op: BitStream, rectangle: il_version_1.PdfRectangle
+        self,
+        draw_op: BitStream,
+        rectangle: il_version_1.PdfRectangle,
     ):
         """Draw a debug rectangle in PDF for visualization purposes.
 
@@ -130,7 +136,7 @@ class PDFCreater:
 
         # Set green color for debug visibility
         draw_op.append(
-            rectangle.graphic_state.passthrough_per_char_instruction.encode()
+            rectangle.graphic_state.passthrough_per_char_instruction.encode(),
         )  # Green stroke
         draw_op.append(b" 1 w ")  # Line width
 
@@ -148,7 +154,9 @@ class PDFCreater:
         draw_op.append(b"Q\n")
 
     def write_debug_info(
-        self, pdf: pymupdf.Document, translation_config: TranslationConfig
+        self,
+        pdf: pymupdf.Document,
+        translation_config: TranslationConfig,
     ):
         self.font_mapper.add_font(pdf, self.docs)
 
@@ -171,7 +179,7 @@ class PDFCreater:
             page_op.append(base_op)
             page_op.append(b" Q ")
             page_op.append(
-                f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode()
+                f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode(),
             )
             # 收集所有字符
             chars = []
@@ -203,11 +211,11 @@ class PDFCreater:
                 self.render_graphic_state(draw_op, char.pdf_style.graphic_state)
                 if char.vertical:
                     draw_op.append(
-                        f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode()
+                        f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode(),
                     )
                 else:
                     draw_op.append(
-                        f"BT /{font_id} {char_size:f} Tf 1 0 0 1 {char.box.x:f} {char.box.y:f} Tm ".encode()
+                        f"BT /{font_id} {char_size:f} Tf 1 0 0 1 {char.box.x:f} {char.box.y:f} Tm ".encode(),
                     )
 
                 encoding_length = encoding_length_map[font_id]
@@ -215,7 +223,7 @@ class PDFCreater:
                 # As hexadecimal data enclosed in angle brackets < >
                 # see 7.3.4.3, "Hexadecimal Strings."
                 draw_op.append(
-                    f"<{char.pdf_character_id:0{encoding_length * 2}x}>".upper().encode()
+                    f"<{char.pdf_character_id:0{encoding_length * 2}x}>".upper().encode(),
                 )
 
                 draw_op.append(b" Tj ET Q \n")
@@ -231,15 +239,16 @@ class PDFCreater:
         pdf.subset_fonts(fallback=False)
 
     def write(self, translation_config: TranslationConfig) -> TranslateResult:
-        basename = os.path.basename(translation_config.input_file.rsplit(".", 1)[0])
+        basename = Path(translation_config.input_file).stem
         debug_suffix = ".debug" if translation_config.debug else ""
         mono_out_path = translation_config.get_output_file_path(
-            f"{basename}{debug_suffix}.{translation_config.lang_out}.mono.pdf"
+            f"{basename}{debug_suffix}.{translation_config.lang_out}.mono.pdf",
         )
         pdf = pymupdf.open(self.original_pdf_path)
         self.font_mapper.add_font(pdf, self.docs)
         with self.translation_config.progress_monitor.stage_start(
-            self.stage_name, len(self.docs.page) + 2
+            self.stage_name,
+            len(self.docs.page) + 2,
         ) as pbar:
             for page in self.docs.page:
                 translation_config.raise_if_cancelled()
@@ -252,7 +261,7 @@ class PDFCreater:
                     xobj_available_fonts[xobj.xobj_id] = available_font_list.copy()
                     try:
                         xobj_available_fonts[xobj.xobj_id].update(
-                            self.get_xobj_available_fonts(xobj.xref_id, pdf)
+                            self.get_xobj_available_fonts(xobj.xref_id, pdf),
                         )
                     except Exception:
                         pass
@@ -271,7 +280,7 @@ class PDFCreater:
                 page_op.append(page.base_operations.value.encode())
                 page_op.append(b" Q ")
                 page_op.append(
-                    f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode()
+                    f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode(),
                 )
                 # 收集所有字符
                 chars = []
@@ -306,11 +315,11 @@ class PDFCreater:
                     self.render_graphic_state(draw_op, char.pdf_style.graphic_state)
                     if char.vertical:
                         draw_op.append(
-                            f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode()
+                            f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode(),
                         )
                     else:
                         draw_op.append(
-                            f"BT /{font_id} {char_size:f} Tf 1 0 0 1 {char.box.x:f} {char.box.y:f} Tm ".encode()
+                            f"BT /{font_id} {char_size:f} Tf 1 0 0 1 {char.box.x:f} {char.box.y:f} Tm ".encode(),
                         )
 
                     encoding_length = encoding_length_map[font_id]
@@ -318,7 +327,7 @@ class PDFCreater:
                     # As hexadecimal data enclosed in angle brackets < >
                     # see 7.3.4.3, "Hexadecimal Strings."
                     draw_op.append(
-                        f"<{char.pdf_character_id:0{encoding_length * 2}x}>".upper().encode()
+                        f"<{char.pdf_character_id:0{encoding_length * 2}x}>".upper().encode(),
                     )
 
                     draw_op.append(b" Tj ET Q \n")
@@ -360,7 +369,7 @@ class PDFCreater:
             dual_out_path = None
             if not translation_config.no_dual:
                 dual_out_path = translation_config.get_output_file_path(
-                    f"{basename}{debug_suffix}.{translation_config.lang_out}.dual.pdf"
+                    f"{basename}{debug_suffix}.{translation_config.lang_out}.dual.pdf",
                 )
                 translation_config.raise_if_cancelled()
                 dual = pymupdf.open(self.original_pdf_path)
@@ -369,11 +378,11 @@ class PDFCreater:
                     self.write_debug_info(dual, translation_config)
                 dual.insert_file(pdf)
                 page_count = pdf.page_count
-                for id in range(page_count):
+                for page_id in range(page_count):
                     if translation_config.dual_translate_first:
-                        dual.move_page(page_count + id, id * 2)
+                        dual.move_page(page_count + page_id, page_id * 2)
                     else:
-                        dual.move_page(page_count + id, id * 2 + 1)
+                        dual.move_page(page_count + page_id, page_id * 2 + 1)
                 dual.save(
                     dual_out_path,
                     garbage=3,

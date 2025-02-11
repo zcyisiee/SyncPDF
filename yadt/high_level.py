@@ -1,21 +1,24 @@
 import asyncio
 import hashlib
 import logging
-import os
 import threading
 import time
 from asyncio import CancelledError
-from typing import Any, BinaryIO, Optional
+from pathlib import Path
+from typing import Any
+from typing import BinaryIO
 
 import httpx
 from pdfminer.pdfdocument import PDFDocument
 from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
-from pymupdf import Document, Font
+from pymupdf import Document
+from pymupdf import Font
 
 from yadt import asynchronize
-from yadt.const import CACHE_FOLDER, get_cache_file_path
+from yadt.const import CACHE_FOLDER
+from yadt.const import get_cache_file_path
 from yadt.converter import TranslateConverter
 from yadt.document_il.backend.pdf_creater import PDFCreater
 from yadt.document_il.frontend.il_creater import ILCreater
@@ -30,7 +33,8 @@ from yadt.document_il.utils.fontmap import FontMapper
 from yadt.document_il.xml_converter import XMLConverter
 from yadt.pdfinterp import PDFPageInterpreterEx
 from yadt.progress_monitor import ProgressMonitor
-from yadt.translation_config import TranslateResult, TranslationConfig
+from yadt.translation_config import TranslateResult
+from yadt.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +103,7 @@ FONT_ASSETS = [
 def verify_file_hash(file_path: str, expected_hash: str) -> bool:
     """Verify the SHA256 hash of a file."""
     sha256_hash = hashlib.sha256()
-    with open(file_path, "rb") as f:
+    with Path(file_path).open("rb") as f:
         # Read the file in chunks to handle large files efficiently
         for byte_block in iter(lambda: f.read(4096), b""):
             sha256_hash.update(byte_block)
@@ -108,7 +112,7 @@ def verify_file_hash(file_path: str, expected_hash: str) -> bool:
 
 def start_parse_il(
     inf: BinaryIO,
-    pages: Optional[list[int]] = None,
+    pages: list[int] | None = None,
     vfont: str = "",
     vchar: str = "",
     thread: int = 0,
@@ -312,7 +316,7 @@ def do_translate(pm, translation_config):
         if translation_config.debug:
             logger.debug("debug mode, save decompressed input pdf")
             output_path = translation_config.get_working_file_path(
-                "input.decompressed.pdf"
+                "input.decompressed.pdf",
             )
             doc_input.save(output_path, expand=True, pretty=True)
         # Continue with original processing
@@ -326,7 +330,7 @@ def do_translate(pm, translation_config):
         il_creater.mupdf = doc_input
         xml_converter = XMLConverter()
         logger.debug(f"start parse il from {temp_pdf_path}")
-        with open(temp_pdf_path, "rb") as f:
+        with Path(temp_pdf_path).open("rb") as f:
             start_parse_il(
                 f,
                 doc_zh=doc_pdf2zh,
@@ -339,7 +343,8 @@ def do_translate(pm, translation_config):
         logger.debug(f"finish create il from {temp_pdf_path}")
         if translation_config.debug:
             xml_converter.write_json(
-                docs, translation_config.get_working_file_path("create_il.debug.json")
+                docs,
+                translation_config.get_working_file_path("create_il.debug.json"),
             )
         # Generate layouts for all pages
         logger.debug("start generating layouts")
@@ -347,13 +352,15 @@ def do_translate(pm, translation_config):
         logger.debug("finish generating layouts")
         if translation_config.debug:
             xml_converter.write_json(
-                docs, translation_config.get_working_file_path("layout_generator.json")
+                docs,
+                translation_config.get_working_file_path("layout_generator.json"),
             )
         ParagraphFinder(translation_config).process(docs)
         logger.debug(f"finish paragraph finder from {temp_pdf_path}")
         if translation_config.debug:
             xml_converter.write_json(
-                docs, translation_config.get_working_file_path("paragraph_finder.json")
+                docs,
+                translation_config.get_working_file_path("paragraph_finder.json"),
             )
         StylesAndFormulas(translation_config).process(docs)
         logger.debug(f"finish styles and formulas from {temp_pdf_path}")
@@ -374,7 +381,8 @@ def do_translate(pm, translation_config):
         logger.debug(f"finish ILTranslator from {temp_pdf_path}")
         if translation_config.debug:
             xml_converter.write_json(
-                docs, translation_config.get_working_file_path("il_translated.json")
+                docs,
+                translation_config.get_working_file_path("il_translated.json"),
             )
 
         if translation_config.debug:
@@ -388,7 +396,8 @@ def do_translate(pm, translation_config):
         logger.debug(f"finish typsetting from {temp_pdf_path}")
         if translation_config.debug:
             xml_converter.write_json(
-                docs, translation_config.get_working_file_path("typsetting.json")
+                docs,
+                translation_config.get_working_file_path("typsetting.json"),
             )
         # deepcopy
         # docs2 = xml_converter.deepcopy(docs)
@@ -398,7 +407,7 @@ def do_translate(pm, translation_config):
         result.original_pdf_path = original_pdf_path
         result.total_seconds = finish_time - start_time
         logger.info(
-            f"finish translate: {original_pdf_path}, cost: {finish_time - start_time} s"
+            f"finish translate: {original_pdf_path}, cost: {finish_time - start_time} s",
         )
         pm.translate_done(result)
         return result
@@ -417,12 +426,12 @@ def download_font_assets():
         save_path = get_cache_file_path(name)
 
         # Check if file exists and has correct hash
-        if os.path.exists(save_path):
+        if Path(save_path).exists():
             if verify_file_hash(save_path, expected_hash):
                 continue
             else:
                 logger.warning(f"Hash mismatch for {name}, re-downloading...")
-                os.remove(save_path)
+                Path(save_path).unlink()
 
         # Download file
         r = httpx.get(url, follow_redirects=True)
@@ -431,12 +440,12 @@ def download_font_assets():
             exit(1)
 
         # Save and verify
-        with open(save_path, "wb") as f:
+        with Path(save_path).open("wb") as f:
             f.write(r.content)
 
         if not verify_file_hash(save_path, expected_hash):
             logger.critical(f"Downloaded file {name} has incorrect hash!")
-            os.remove(save_path)
+            Path(save_path).unlink()
             exit(1)
 
         logger.info(f"Successfully downloaded and verified {name}")
@@ -445,10 +454,11 @@ def download_font_assets():
 def create_cache_folder():
     try:
         logger.debug(f"create cache folder at {CACHE_FOLDER}")
-        os.makedirs(CACHE_FOLDER, exist_ok=True)
+        Path(CACHE_FOLDER).mkdir(parents=True, exist_ok=True)
     except OSError:
         logger.critical(
-            f"Failed to create cache folder at {CACHE_FOLDER}", exc_info=True
+            f"Failed to create cache folder at {CACHE_FOLDER}",
+            exc_info=True,
         )
         exit(1)
 

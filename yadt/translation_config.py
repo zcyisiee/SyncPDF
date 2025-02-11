@@ -1,8 +1,8 @@
-import os
+import contextlib
 import shutil
 import tempfile
 import threading
-from typing import Optional
+from pathlib import Path
 
 from yadt.const import CACHE_FOLDER
 from yadt.docvision.doclayout import DocLayoutModel
@@ -29,7 +29,7 @@ class TranslationConfig:
         split_short_lines: bool = False,  # 是否将比较短的行强制切分成不同段落，此功能可能会导致糟糕的排版&bug
         short_line_split_factor: float = 0.8,  # 切分阈值系数。实际阈值为当前页所有行长度中位数*此系数
         use_rich_pbar: bool = True,  # 是否使用 rich 进度条
-        progress_monitor: Optional[ProgressMonitor] = None,  # progress_monitor
+        progress_monitor: ProgressMonitor | None = None,  # progress_monitor
         doc_layout_model=None,
         skip_clean: bool = False,
         dual_translate_first: bool = False,
@@ -61,32 +61,32 @@ class TranslationConfig:
 
         if working_dir is None:
             if debug:
-                working_dir = os.path.join(
-                    CACHE_FOLDER, "working", os.path.basename(input_file).split(".")[0]
+                working_dir = (
+                    Path(CACHE_FOLDER) / "working" / Path(input_file).name.split(".")[0]
                 )
             else:
-                working_dir = tempfile.mkdtemp(prefix="yadt_")
+                working_dir = tempfile.mkdtemp()
         self.working_dir = working_dir
         self._is_temp_dir = not debug and working_dir.startswith(tempfile.gettempdir())
 
-        os.makedirs(working_dir, exist_ok=True)
+        Path(working_dir).mkdir(parents=True, exist_ok=True)
 
         if output_dir is None:
             # output_dir = os.path.dirname(input_file)
-            output_dir = os.getcwd()
+            output_dir = Path.cwd()
         self.output_dir = output_dir
 
-        os.makedirs(output_dir, exist_ok=True)
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
 
         if doc_layout_model is None:
             doc_layout_model = DocLayoutModel.load_available()
         self.doc_layout_model = doc_layout_model
 
     def get_output_file_path(self, filename):
-        return os.path.join(self.output_dir, filename)
+        return Path(self.output_dir) / filename
 
     def get_working_file_path(self, filename):
-        return os.path.join(self.working_dir, filename)
+        return Path(self.working_dir) / filename
 
     def _parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
         """解析页码字符串，返回页码范围列表
@@ -95,7 +95,7 @@ class TranslationConfig:
             pages_str: 形如 "1-,2,-3,4" 的页码字符串
 
         Returns:
-            包含(start, end)元组的列表，其中-1表示无限制
+            包含 (start, end) 元组的列表，其中 -1 表示无限制
         """
         if not pages_str:
             return None
@@ -141,18 +141,16 @@ class TranslationConfig:
     def __del__(self):
         """Clean up temporary directory if it was created."""
         if hasattr(self, "_is_temp_dir") and self._is_temp_dir:
-            try:
+            with contextlib.suppress(Exception):
                 shutil.rmtree(self.working_dir, ignore_errors=True)
-            except Exception:
-                pass
 
 
 class TranslateResult:
     original_pdf_path: str
     total_seconds: float
-    mono_pdf_path: Optional[str]
-    dual_pdf_path: Optional[str]
+    mono_pdf_path: str | None
+    dual_pdf_path: str | None
 
-    def __init__(self, mono_pdf_path: Optional[str], dual_pdf_path: Optional[str]):
+    def __init__(self, mono_pdf_path: str | None, dual_pdf_path: str | None):
         self.mono_pdf_path = mono_pdf_path
         self.dual_pdf_path = dual_pdf_path

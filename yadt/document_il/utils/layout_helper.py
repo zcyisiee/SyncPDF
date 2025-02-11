@@ -1,16 +1,12 @@
 import logging
 import math
-from typing import List, Optional, Union
 
 from pymupdf import Font
-
 from yadt.document_il import GraphicState
-from yadt.document_il.il_version_1 import (
-    Box,
-    PdfCharacter,
-    PdfParagraph,
-    PdfParagraphComposition,
-)
+from yadt.document_il.il_version_1 import Box
+from yadt.document_il.il_version_1 import PdfCharacter
+from yadt.document_il.il_version_1 import PdfParagraph
+from yadt.document_il.il_version_1 import PdfParagraphComposition
 
 logger = logging.getLogger(__name__)
 HEIGHT_NOT_USFUL_CHAR_IN_CHAR = (
@@ -49,8 +45,8 @@ def formular_height_ignore_char(char: PdfCharacter):
 
 
 class Layout:
-    def __init__(self, id, name):
-        self.id = id
+    def __init__(self, layout_id, name):
+        self.id = layout_id
         self.name = name
 
     @staticmethod
@@ -86,7 +82,9 @@ class Layout:
 
 
 def get_paragraph_length_except(
-    paragraph: PdfParagraph, except_chars: str, font: Font
+    paragraph: PdfParagraph,
+    except_chars: str,
+    font: Font,
 ) -> int:
     length = 0
     for composition in paragraph.pdf_paragraph_composition:
@@ -118,7 +116,7 @@ def get_paragraph_length_except(
             logger.error(
                 f"Unknown composition type. "
                 f"Composition: {composition}. "
-                f"Paragraph: {paragraph}. "
+                f"Paragraph: {paragraph}. ",
             )
             continue
     return length
@@ -141,13 +139,13 @@ def get_paragraph_unicode(paragraph: PdfParagraph) -> str:
             logger.error(
                 f"Unknown composition type. "
                 f"Composition: {composition}. "
-                f"Paragraph: {paragraph}. "
+                f"Paragraph: {paragraph}. ",
             )
             continue
     return get_char_unicode_string(chars)
 
 
-def get_char_unicode_string(chars: List[Union[PdfCharacter, str]]) -> str:
+def get_char_unicode_string(chars: list[PdfCharacter | str]) -> str:
     """
     将字符列表转换为 Unicode 字符串，根据字符间距自动插入空格。
     有些 PDF 不会显式编码空格，这时需要根据间距自动插入空格。
@@ -197,7 +195,8 @@ def get_char_unicode_string(chars: List[Union[PdfCharacter, str]]) -> str:
         if i < len(chars) - 1 and isinstance(chars[i + 1], PdfCharacter):
             distance = chars[i + 1].box.x - chars[i].box.x2
             if distance >= median_distance or Layout.is_newline(  # 间距大于中位数
-                chars[i], chars[i + 1]
+                chars[i],
+                chars[i + 1],
             ):  # 换行
                 unicode_chars.append(" ")  # 添加空格
 
@@ -246,7 +245,7 @@ def get_paragraph_max_height(paragraph: PdfParagraph) -> float:
             logger.error(
                 f"Unknown composition type. "
                 f"Composition: {composition}. "
-                f"Paragraph: {paragraph}. "
+                f"Paragraph: {paragraph}. ",
             )
             continue
     return max_height
@@ -282,7 +281,7 @@ def is_same_style_except_font(style1, style2) -> bool:
         return style1 is style2
 
     return math.fabs(
-        style1.font_size - style2.font_size
+        style1.font_size - style2.font_size,
     ) < 0.02 and is_same_graphic_state(style1.graphic_state, style2.graphic_state)
 
 
@@ -378,7 +377,7 @@ def add_space_dummy_chars(paragraph: PdfParagraph) -> None:
 
 def _get_first_char_from_composition(
     comp: PdfParagraphComposition,
-) -> Optional[PdfCharacter]:
+) -> PdfCharacter | None:
     """获取组成部分的第一个字符"""
     if comp.pdf_line and comp.pdf_line.pdf_character:
         return comp.pdf_line.pdf_character[0]
@@ -395,7 +394,7 @@ def _get_first_char_from_composition(
 
 def _get_last_char_from_composition(
     comp: PdfParagraphComposition,
-) -> Optional[PdfCharacter]:
+) -> PdfCharacter | None:
     """获取组成部分的最后一个字符"""
     if comp.pdf_line and comp.pdf_line.pdf_character:
         return comp.pdf_line.pdf_character[-1]
@@ -410,7 +409,7 @@ def _get_last_char_from_composition(
     return None
 
 
-def _add_space_dummy_chars_to_list(chars: List[PdfCharacter]) -> None:
+def _add_space_dummy_chars_to_list(chars: list[PdfCharacter]) -> None:
     """
     在字符列表中的适当位置添加表示空格的dummy字符。
 

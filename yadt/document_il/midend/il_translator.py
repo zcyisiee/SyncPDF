@@ -1,28 +1,25 @@
 import concurrent.futures
 import json
 import logging
+from pathlib import Path
 
 from tqdm import tqdm
 
-from yadt.document_il import (
-    Document,
-    Page,
-    PdfFont,
-    PdfFormula,
-    PdfParagraph,
-    PdfParagraphComposition,
-    PdfSameStyleCharacters,
-    PdfSameStyleUnicodeCharacters,
-    PdfStyle,
-)
+from yadt.document_il import Document
+from yadt.document_il import Page
+from yadt.document_il import PdfFont
+from yadt.document_il import PdfFormula
+from yadt.document_il import PdfParagraph
+from yadt.document_il import PdfParagraphComposition
+from yadt.document_il import PdfSameStyleCharacters
+from yadt.document_il import PdfSameStyleUnicodeCharacters
+from yadt.document_il import PdfStyle
 from yadt.document_il.translator.translator import BaseTranslator
 from yadt.document_il.utils.fontmap import FontMapper
-from yadt.document_il.utils.layout_helper import (
-    get_char_unicode_string,
-    is_same_style,
-    is_same_style_except_font,
-    is_same_style_except_size,
-)
+from yadt.document_il.utils.layout_helper import get_char_unicode_string
+from yadt.document_il.utils.layout_helper import is_same_style
+from yadt.document_il.utils.layout_helper import is_same_style_except_font
+from yadt.document_il.utils.layout_helper import is_same_style_except_size
 from yadt.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
@@ -31,20 +28,20 @@ logger = logging.getLogger(__name__)
 class RichTextPlaceholder:
     def __init__(
         self,
-        id: int,
+        placeholder_id: int,
         composition: PdfSameStyleCharacters,
         left_placeholder: str,
         right_placeholder: str,
     ):
-        self.id = id
+        self.id = placeholder_id
         self.composition = composition
         self.left_placeholder = left_placeholder
         self.right_placeholder = right_placeholder
 
 
 class FormulaPlaceholder:
-    def __init__(self, id: int, formula: PdfFormula, placeholder: str):
-        self.id = id
+    def __init__(self, placeholder_id: int, formula: PdfFormula, placeholder: str):
+        self.id = placeholder_id
         self.formula = formula
         self.placeholder = placeholder
 
@@ -84,7 +81,7 @@ class DocumentTranslateTracker:
                         "input": i_str,
                         "output": o_str,
                         "pdf_unicode": pdf_unicode,
-                    }
+                    },
                 )
             pages.append({"paragraph": paragraphs})
         return json.dumps({"page": pages}, ensure_ascii=False, indent=2)
@@ -107,8 +104,8 @@ class ParagraphTranslateTracker:
     def set_pdf_unicode(self, unicode: str):
         self.pdf_unicode = unicode
 
-    def set_input(self, input: str):
-        self.input = input
+    def set_input(self, input_text: str):
+        self.input = input_text
 
     def set_output(self, output: str):
         self.output = output
@@ -131,13 +128,14 @@ class ILTranslator:
         # count total paragraph
         total = sum(len(page.pdf_paragraph) for page in docs.page)
         with self.translation_config.progress_monitor.stage_start(
-            self.stage_name, total
+            self.stage_name,
+            total,
         ) as pbar:
             with concurrent.futures.ThreadPoolExecutor(
                 max_workers=min(
                     self.translation_config.qps * 2,
                     self.translation_config.qps + 5,
-                )
+                ),
             ) as executor:
                 for page in docs.page:
                     self.process_page(page, executor, pbar, tracker.new_page())
@@ -146,7 +144,7 @@ class ILTranslator:
 
         if self.translation_config.debug:
             logger.debug(f"save translate tracking to {path}")
-            with open(path, "w", encoding="utf-8") as f:
+            with Path(path).open("w", encoding="utf-8") as f:
                 f.write(tracker.to_json())
 
     def process_page(
@@ -188,34 +186,41 @@ class ILTranslator:
             self.base_style = base_style
 
     def create_formula_placeholder(
-        self, formula: PdfFormula, id: int, paragraph: PdfParagraph
+        self,
+        formula: PdfFormula,
+        formula_id: int,
+        paragraph: PdfParagraph,
     ):
-        placeholder = self.translate_engine.get_formular_placeholder(id)
+        placeholder = self.translate_engine.get_formular_placeholder(formula_id)
         if placeholder in paragraph.unicode:
-            return self.create_formula_placeholder(formula, id + 1, paragraph)
+            return self.create_formula_placeholder(formula, formula_id + 1, paragraph)
 
-        return FormulaPlaceholder(id, formula, placeholder)
+        return FormulaPlaceholder(formula_id, formula, placeholder)
 
     def create_rich_text_placeholder(
         self,
         composition: PdfSameStyleCharacters,
-        id: int,
+        composition_id: int,
         paragraph: PdfParagraph,
     ):
-        left_placeholder = self.translate_engine.get_rich_text_left_placeholder(id)
-        right_placeholder = self.translate_engine.get_rich_text_right_placeholder(id)
+        left_placeholder = self.translate_engine.get_rich_text_left_placeholder(
+            composition_id,
+        )
+        right_placeholder = self.translate_engine.get_rich_text_right_placeholder(
+            composition_id,
+        )
         if (
             left_placeholder in paragraph.unicode
             or right_placeholder in paragraph.unicode
         ):
             return self.create_rich_text_placeholder(
                 composition,
-                id + 1,
+                composition_id + 1,
                 paragraph,
             )
 
         return RichTextPlaceholder(
-            id,
+            composition_id,
             composition,
             left_placeholder,
             right_placeholder,
@@ -247,7 +252,7 @@ class ILTranslator:
                 logger.error(
                     f"Unknown composition type. "
                     f"Composition: {composition}. "
-                    f"Paragraph: {paragraph}. "
+                    f"Paragraph: {paragraph}. ",
                 )
                 return None
 
@@ -259,7 +264,9 @@ class ILTranslator:
                 chars.extend(composition.pdf_line.pdf_character)
             elif composition.pdf_formula:
                 formula_placeholder = self.create_formula_placeholder(
-                    composition.pdf_formula, placeholder_id, paragraph
+                    composition.pdf_formula,
+                    placeholder_id,
+                    paragraph,
                 )
                 placeholders.append(formula_placeholder)
                 # 公式只需要一个占位符，所以 id+1
@@ -275,7 +282,8 @@ class ILTranslator:
                     "1",
                 )
                 fontb = self.font_mapper.map(
-                    page_font_map[paragraph.pdf_style.font_id], "1"
+                    page_font_map[paragraph.pdf_style.font_id],
+                    "1",
                 )
                 if (
                     # 样式和段落基准样式一致，无需占位符
@@ -318,26 +326,63 @@ class ILTranslator:
                     "Unexpected PdfParagraphComposition type "
                     "in PdfParagraph during translation. "
                     f"Composition: {composition}. "
-                    f"Paragraph: {paragraph}. "
+                    f"Paragraph: {paragraph}. ",
                 )
                 return None
 
         text = get_char_unicode_string(chars)
         return self.TranslateInput(text, placeholders, paragraph.pdf_style)
 
+    def process_formula(
+        self,
+        formula: PdfFormula,
+        formula_id: int,
+        paragraph: PdfParagraph,
+    ):
+        placeholder = self.create_formula_placeholder(formula, formula_id, paragraph)
+        if placeholder.placeholder in paragraph.unicode:
+            return self.process_formula(formula, formula_id + 1, paragraph)
+
+        return placeholder
+
+    def process_composition(
+        self,
+        composition: PdfSameStyleCharacters,
+        composition_id: int,
+        paragraph: PdfParagraph,
+    ):
+        placeholder = self.create_rich_text_placeholder(
+            composition,
+            composition_id,
+            paragraph,
+        )
+        if (
+            placeholder.left_placeholder in paragraph.unicode
+            or placeholder.right_placeholder in paragraph.unicode
+        ):
+            return self.process_composition(
+                composition,
+                composition_id + 1,
+                paragraph,
+            )
+
+        return placeholder
+
     def parse_translate_output(
-        self, input: TranslateInput, output: str
+        self,
+        input_text: TranslateInput,
+        output: str,
     ) -> [PdfParagraphComposition]:
         import re
 
         result = []
 
         # 如果没有占位符，直接返回整个文本
-        if not input.placeholders:
+        if not input_text.placeholders:
             comp = PdfParagraphComposition()
             comp.pdf_same_style_unicode_characters = PdfSameStyleUnicodeCharacters()
             comp.pdf_same_style_unicode_characters.unicode = output
-            comp.pdf_same_style_unicode_characters.pdf_style = input.base_style
+            comp.pdf_same_style_unicode_characters.pdf_style = input_text.base_style
             return [comp]
 
         # 构建正则表达式模式
@@ -345,7 +390,7 @@ class ILTranslator:
         placeholder_patterns = []
         placeholder_map = {}
 
-        for placeholder in input.placeholders:
+        for placeholder in input_text.placeholders:
             if isinstance(placeholder, FormulaPlaceholder):
                 # 转义特殊字符
                 pattern = re.escape(placeholder.placeholder)
@@ -379,9 +424,11 @@ class ILTranslator:
                         PdfSameStyleUnicodeCharacters()
                     )
                     comp.pdf_same_style_unicode_characters.unicode = remove_placeholder(
-                        text
+                        text,
                     )
-                    comp.pdf_same_style_unicode_characters.pdf_style = input.base_style
+                    comp.pdf_same_style_unicode_characters.pdf_style = (
+                        input_text.base_style
+                    )
                     result.append(comp)
 
             matched_text = match.group(0)
@@ -389,12 +436,12 @@ class ILTranslator:
             # 处理占位符
             if any(
                 isinstance(p, FormulaPlaceholder) and matched_text == p.placeholder
-                for p in input.placeholders
+                for p in input_text.placeholders
             ):
                 # 处理公式占位符
                 placeholder = next(
                     p
-                    for p in input.placeholders
+                    for p in input_text.placeholders
                     if isinstance(p, FormulaPlaceholder)
                     and matched_text == p.placeholder
                 )
@@ -405,23 +452,24 @@ class ILTranslator:
                 # 处理富文本占位符
                 placeholder = next(
                     p
-                    for p in input.placeholders
+                    for p in input_text.placeholders
                     if not isinstance(p, FormulaPlaceholder)
                     and matched_text.startswith(p.left_placeholder)
                 )
                 text = matched_text[
                     len(placeholder.left_placeholder) : -len(
-                        placeholder.right_placeholder
+                        placeholder.right_placeholder,
                     )
                 ]
 
                 if isinstance(
-                    placeholder.composition, PdfSameStyleCharacters
+                    placeholder.composition,
+                    PdfSameStyleCharacters,
                 ) and text.replace(" ", "") == "".join(
                     x.char_unicode for x in placeholder.composition.pdf_character
                 ).replace(" ", ""):
                     comp = PdfParagraphComposition(
-                        pdf_same_style_characters=placeholder.composition
+                        pdf_same_style_characters=placeholder.composition,
                     )
                 else:
                     comp = PdfParagraphComposition()
@@ -432,7 +480,7 @@ class ILTranslator:
                         placeholder.composition.pdf_style
                     )
                     comp.pdf_same_style_unicode_characters.unicode = remove_placeholder(
-                        text
+                        text,
                     )
                 result.append(comp)
 
@@ -445,9 +493,9 @@ class ILTranslator:
                 comp = PdfParagraphComposition()
                 comp.pdf_same_style_unicode_characters = PdfSameStyleUnicodeCharacters()
                 comp.pdf_same_style_unicode_characters.unicode = remove_placeholder(
-                    text
+                    text,
                 )
-                comp.pdf_same_style_unicode_characters.pdf_style = input.base_style
+                comp.pdf_same_style_unicode_characters.pdf_style = input_text.base_style
                 result.append(comp)
 
         return result
@@ -485,7 +533,8 @@ class ILTranslator:
 
                 paragraph.unicode = translated_text
                 paragraph.pdf_paragraph_composition = self.parse_translate_output(
-                    translate_input, translated_text
+                    translate_input,
+                    translated_text,
                 )
                 for composition in paragraph.pdf_paragraph_composition:
                     if (
@@ -498,7 +547,7 @@ class ILTranslator:
                         )
             except Exception as e:
                 logger.exception(
-                    f"Error translating paragraph. Paragraph: {paragraph}. Error: {e}. "
+                    f"Error translating paragraph. Paragraph: {paragraph}. Error: {e}. ",
                 )
                 # ignore error and continue
                 return

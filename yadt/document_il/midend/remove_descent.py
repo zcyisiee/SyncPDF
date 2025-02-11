@@ -1,7 +1,6 @@
 import logging
 from collections import Counter
-from functools import lru_cache
-from typing import Optional, Union
+from functools import cache
 
 from yadt.document_il import il_version_1
 from yadt.translation_config import TranslationConfig
@@ -16,8 +15,10 @@ class RemoveDescent:
         self.translation_config = translation_config
 
     def _remove_char_descent(
-        self, char: il_version_1.PdfCharacter, font: il_version_1.PdfFont
-    ) -> Optional[float]:
+        self,
+        char: il_version_1.PdfCharacter,
+        font: il_version_1.PdfFont,
+    ) -> float | None:
         """Remove descent from a single character and return the descent value.
 
         Args:
@@ -53,7 +54,8 @@ class RemoveDescent:
             document: The document to process
         """
         with self.translation_config.progress_monitor.stage_start(
-            self.stage_name, len(document.page)
+            self.stage_name,
+            len(document.page),
         ) as pbar:
             for page in document.page:
                 self.translation_config.raise_if_cancelled()
@@ -69,7 +71,7 @@ class RemoveDescent:
         # Build font map including xobjects
         fonts: dict[
             str | int,
-            Union[il_version_1.PdfFont, dict[str, il_version_1.PdfFont]],
+            il_version_1.PdfFont | dict[str, il_version_1.PdfFont],
         ] = {f.font_id: f for f in page.pdf_font}
         page_fonts = {f.font_id: f for f in page.pdf_font}
 
@@ -79,10 +81,11 @@ class RemoveDescent:
             for font in xobj.pdf_font:
                 fonts[xobj.xobj_id][font.font_id] = font
 
-        @lru_cache(maxsize=None)
+        @cache
         def get_font(
-            font_id: str, xobj_id: Optional[int] = None
-        ) -> Optional[il_version_1.PdfFont]:
+            font_id: str,
+            xobj_id: int | None = None,
+        ) -> il_version_1.PdfFont | None:
             if xobj_id is not None and xobj_id in fonts:
                 font_map = fonts[xobj_id]
                 if isinstance(font_map, dict) and font_id in font_map:
@@ -108,7 +111,8 @@ class RemoveDescent:
                 # Handle direct characters
                 if comp.pdf_character:
                     font = get_font(
-                        comp.pdf_character.pdf_style.font_id, comp.pdf_character.xobj_id
+                        comp.pdf_character.pdf_style.font_id,
+                        comp.pdf_character.xobj_id,
                     )
                     if font:
                         descent = self._remove_char_descent(comp.pdf_character, font)
