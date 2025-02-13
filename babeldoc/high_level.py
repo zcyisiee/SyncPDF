@@ -287,6 +287,7 @@ async def async_translate(translation_config: TranslationConfig):
         finish_event=finish_event,
         cancel_event=cancel_event,
         loop=loop,
+        report_interval=translation_config.report_interval,
     ) as pm:
         future = loop.run_in_executor(None, do_translate, pm, translation_config)
         try:
