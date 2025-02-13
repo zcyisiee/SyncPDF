@@ -40,7 +40,7 @@ Please pay special attention to:
 
 
 1. Fork this repository and clone it locally.
-2. Use `doc/deploy.sh` to set up the development  environment.
+2. Use `doc/deploy.sh` to set up the development environment.
 3. Create a new branch and make code changes on that branch. `git checkout -b feature/<feature-name>`
 4. Perform development and ensure the code meets the requirements.
 
@@ -71,6 +71,8 @@ git commit -m "<semantic commit message>"
 2. Development and Testing
 
 - Use the `uv run yadt` command for development and testing.
+
+- When you need print log, please use `log.debug()` to print info. **DO NOT USE `print()`**
 
 - Code formatting
 
