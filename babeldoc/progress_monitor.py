@@ -31,6 +31,17 @@ class ProgressMonitor:
         self.loop = loop
         if finish_event and not loop:
             raise ValueError("finish_event requires a loop")
+        if self.progress_change_callback:
+            self.progress_change_callback(
+                type="stage_summary",
+                stages=[
+                    {
+                        "name": name,
+                        "percent": 1.0 / len(stages),
+                    }
+                    for name in stages
+                ],
+            )
 
     def stage_start(self, stage_name: str, total: int):
         stage = self.stage[stage_name]

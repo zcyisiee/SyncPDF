@@ -112,7 +112,7 @@ class ParagraphTranslateTracker:
 
 
 class ILTranslator:
-    stage_name = "翻译段落"
+    stage_name = "Translate Paragraphs"
 
     def __init__(
         self,

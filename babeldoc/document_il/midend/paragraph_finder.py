@@ -26,7 +26,7 @@ def generate_base58_id(length: int = 5) -> str:
 
 
 class ParagraphFinder:
-    stage_name = "解析段落"
+    stage_name = "Parse Paragraphs"
 
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config

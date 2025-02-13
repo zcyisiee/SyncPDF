@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class LayoutParser:
-    stage_name = "解析页面布局"
+    stage_name = "Parse Page Layout"
 
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config
