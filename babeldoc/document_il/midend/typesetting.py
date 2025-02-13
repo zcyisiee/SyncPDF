@@ -355,7 +355,7 @@ class TypesettingUnit:
 
 
 class Typesetting:
-    stage_name = "排版"
+    stage_name = "Typesetting"
 
     def __init__(self, translation_config: TranslationConfig):
         self.font_mapper = FontMapper(translation_config)

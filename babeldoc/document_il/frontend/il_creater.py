@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class ILCreater:
-    stage_name = "解析PDF并创建中间表示"
+    stage_name = "Parse PDF and Create Intermediate Representation"
 
     def __init__(self, translation_config: TranslationConfig):
         self.progress = None

@@ -22,7 +22,7 @@ from babeldoc.translation_config import TranslationConfig
 
 
 class StylesAndFormulas:
-    stage_name = "解析公式与样式"
+    stage_name = "Parse Formulas and Styles"
 
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config

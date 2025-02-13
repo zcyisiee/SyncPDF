@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class FontMapper:
-    stage_name = "添加字体"
+    stage_name = "Add Fonts"
 
     def __init__(self, translation_config: TranslationConfig):
         self.font_names = [

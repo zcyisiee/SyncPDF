@@ -20,7 +20,7 @@ from babeldoc.document_il.translator.translator import set_translate_rate_limite
 from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
-__version__ = "0.1.6"
+__version__ = "0.1.7"
 
 
 def create_parser():
@@ -169,6 +169,12 @@ def create_parser():
         default=False,
         action="store_true",
         help="Enable all compatibility enhancement options (equivalent to --skip-clean --dual-translate-first --disable-rich-text-translate)",
+    )
+    translation_params.add_argument(
+        "--report-interval",
+        type=float,
+        default=0.1,
+        help="Progress report interval in seconds (default: 0.1)",
     )
     service_params = translation_params.add_mutually_exclusive_group()
     service_params.add_argument(
@@ -414,6 +420,7 @@ async def main():
             dual_translate_first=args.dual_translate_first,
             disable_rich_text_translate=args.disable_rich_text_translate,
             enhance_compatibility=args.enhance_compatibility,
+            report_interval=args.report_interval,
         )
 
         # Create progress handler

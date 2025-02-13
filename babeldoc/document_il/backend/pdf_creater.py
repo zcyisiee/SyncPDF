@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class PDFCreater:
-    stage_name = "创建PDF文件"
+    stage_name = "Create PDF file"
 
     def __init__(
         self,

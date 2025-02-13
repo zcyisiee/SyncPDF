@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class AddDebugInformation:
-    stage_name = "添加DEBUG信息"
+    stage_name = "Add Debug Information"
 
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config

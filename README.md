@@ -148,6 +148,7 @@ uv run babeldoc --bing --files example.pdf --files example2.pdf
 
 - `--output`, `-o`: Output directory for translated files. If not set, use current working directory.
 - `--debug`, `-d`: Enable debug logging level and export detailed intermediate results in `~/.cache/yadt/working`.
+- `--report-interval`: Progress report interval in seconds (default: 0.1).
 
 ### Configuration File
 

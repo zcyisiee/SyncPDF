@@ -24,6 +24,7 @@ class ProgressMonitor:
         self.progress_change_callback = progress_change_callback
         self.finish_callback = finish_callback
         self.report_interval = report_interval
+        logger.debug(f"report_interval: {self.report_interval}")
         self.last_report_time = 0
         self.finish_stage_count = 0
         self.finish_event = finish_event
@@ -31,6 +32,18 @@ class ProgressMonitor:
         self.loop = loop
         if finish_event and not loop:
             raise ValueError("finish_event requires a loop")
+        if self.progress_change_callback:
+            self.progress_change_callback(
+                type="stage_summary",
+                stages=[
+                    {
+                        "name": name,
+                        "percent": 1.0 / len(stages),
+                    }
+                    for name in stages
+                ],
+            )
+        self.lock = threading.Lock()
 
     def stage_start(self, stage_name: str, total: int):
         stage = self.stage[stage_name]
@@ -49,6 +62,7 @@ class ProgressMonitor:
                 stage_current=0,
                 stage_total=total,
             )
+        self.last_report_time = 0.0
         return stage
 
     def __enter__(self):
@@ -66,7 +80,7 @@ class ProgressMonitor:
             self.finish_callback(type="error", error=CancelledError)
 
     def stage_done(self, stage):
-        self.last_report_time = 0
+        self.last_report_time = 0.0
         self.finish_stage_count += 1
         if (
             stage.current != stage.total
@@ -94,19 +108,20 @@ class ProgressMonitor:
         return progress
 
     def stage_update(self, stage, n: int):
-        if (
-            self.progress_change_callback
-            and time.time() - self.last_report_time > self.report_interval
-        ):
-            self.progress_change_callback(
-                type="progress_update",
-                stage=stage.display_name,
-                stage_progress=stage.current * 100 / stage.total,
-                stage_current=stage.current,
-                stage_total=stage.total,
-                overall_progress=self.calculate_current_progress(stage),
-            )
-            self.last_report_time = time.time()
+        with self.lock:
+            report_time_delta = time.time() - self.last_report_time
+            if report_time_delta < self.report_interval:
+                return
+            if self.progress_change_callback:
+                self.progress_change_callback(
+                    type="progress_update",
+                    stage=stage.display_name,
+                    stage_progress=stage.current * 100 / stage.total,
+                    stage_current=stage.current,
+                    stage_total=stage.total,
+                    overall_progress=self.calculate_current_progress(stage),
+                )
+                self.last_report_time = time.time()
 
     def translate_done(self, translate_result):
         if self.finish_callback:

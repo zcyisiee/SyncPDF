@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class RemoveDescent:
-    stage_name = "移除字体下沉"
+    stage_name = "Remove Char Descent"
 
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config
