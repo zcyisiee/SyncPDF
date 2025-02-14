@@ -242,6 +242,8 @@ We encourage you to contribute to YADT! Please check out the [CONTRIBUTING](http
 
 Everyone interacting in YADT and its sub-projects' codebases, issue trackers, chat rooms, and mailing lists is expected to follow the YADT [Code of Conduct](https://github.com/funstory-ai/yadt/blob/main/docs/CODE_OF_CONDUCT.md).
 
+[Immersive Translation](https://immersivetranslate.com) sponsors monthly Pro membership redemption codes for active contributors to this project, see details at: [CONTRIBUTOR_REWARD.md](https://github.com/funstory-ai/BabelDOC/blob/main/docs/CONTRIBUTOR_REWARD.md)
+
 ## Acknowledgements
 
 - [PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate)
