@@ -75,7 +75,8 @@ def predict_layout(
                 "Content-Type": "application/msgpack",
                 "Accept": "application/msgpack",
             },
-            timeout=30,
+            timeout=300,
+            follow_redirects=True,
         )
 
         logger.debug(f"Response status: {response.status_code}")
