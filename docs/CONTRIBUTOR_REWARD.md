@@ -62,6 +62,8 @@
    - 规则如有更新，将提前 1 天在 [BabelDOC GitHub PR](https://github.com/funstory-ai/BabelDOC/pulls) 公告
    - 过期未使用的兑换码不予补发
    - 自 2025 年 2 月 1 日起的贡献可以申请兑换码
+   - 为了确认您是 Pull Request (PR) 的发起者，防止他人冒领，我们可能会要求您使用发起者账号在 PR 下方留言指定的随机数字。
+
 
 ---
 ### **常见问题解答（FAQ）**
