@@ -82,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/yadt
+      url: https://pypi.org/p/BabelDOC
 
     permissions:
       id-token: write
@@ -106,7 +106,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: testpypi
-      url: https://test.pypi.org/p/yadt
+      url: https://test.pypi.org/p/BabelDOC
 
     permissions:
       id-token: write
