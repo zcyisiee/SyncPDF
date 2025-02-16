@@ -2,6 +2,7 @@ import concurrent.futures
 import json
 import logging
 from pathlib import Path
+from typing import List, Union
 
 from tqdm import tqdm
 
@@ -178,7 +179,7 @@ class ILTranslator:
         def __init__(
             self,
             unicode: str,
-            placeholders: [RichTextPlaceholder | FormulaPlaceholder],
+            placeholders: List[Union[RichTextPlaceholder, FormulaPlaceholder]],
             base_style: PdfStyle = None,
         ):
             self.unicode = unicode
@@ -487,7 +488,9 @@ class ILTranslator:
                     PdfSameStyleCharacters,
                 ) and text.replace(" ", "") == "".join(
                     x.char_unicode for x in placeholder.composition.pdf_character
-                ).replace(" ", ""):
+                ).replace(
+                    " ", ""
+                ):
                     comp = PdfParagraphComposition(
                         pdf_same_style_characters=placeholder.composition,
                     )
