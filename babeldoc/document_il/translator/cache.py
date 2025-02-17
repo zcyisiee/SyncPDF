@@ -8,6 +8,8 @@ from peewee import Model
 from peewee import SqliteDatabase
 from peewee import TextField
 
+from babeldoc.const import CACHE_FOLDER as cache_folder
+
 # we don't init the database here
 db = SqliteDatabase(None)
 
@@ -92,7 +94,6 @@ class TranslationCache:
 
 
 def init_db(remove_exists=False):
-    cache_folder = Path.home() / ".cache" / "pdf2zh"
     cache_folder.mkdir(parents=True, exist_ok=True)
     # The current version does not support database migration, so add the version number to the file name.
     cache_db_path = cache_folder / "cache.v1.db"
