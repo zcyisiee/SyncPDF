@@ -36,6 +36,7 @@ class TranslationConfig:
         disable_rich_text_translate: bool = False,  # 是否禁用富文本翻译
         enhance_compatibility: bool = False,  # 增强兼容性模式
         report_interval: float = 0.1,  # Progress report interval in seconds
+        min_text_length: int = 5,  # Minimum text length to translate
     ):
         self.input_file = input_file
         self.translator = translator
@@ -60,6 +61,7 @@ class TranslationConfig:
             disable_rich_text_translate or enhance_compatibility
         )
         self.report_interval = report_interval
+        self.min_text_length = min_text_length
         if progress_monitor:
             if progress_monitor.cancel_event is None:
                 progress_monitor.cancel_event = threading.Event()

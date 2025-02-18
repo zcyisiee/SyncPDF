@@ -123,6 +123,7 @@ uv run babeldoc --bing --files example.pdf --files example2.pdf
 - `--ignore-cache`: Ignore translation cache and force retranslation
 - `--no-dual`: Do not output bilingual PDF files
 - `--no-mono`: Do not output monolingual PDF files
+- `--min-text-length`: Minimum text length to translate (default: 5)
 - `--openai`: Use OpenAI for translation (default: False)
 - `--bing`: Use Bing for translation (default: False)
 - `--google`: Use Google Translate for translation (default: False)

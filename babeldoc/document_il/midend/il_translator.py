@@ -2,7 +2,6 @@ import concurrent.futures
 import json
 import logging
 from pathlib import Path
-from typing import List, Union
 
 from tqdm import tqdm
 
@@ -179,7 +178,7 @@ class ILTranslator:
         def __init__(
             self,
             unicode: str,
-            placeholders: List[Union[RichTextPlaceholder, FormulaPlaceholder]],
+            placeholders: list[RichTextPlaceholder | FormulaPlaceholder],
             base_style: PdfStyle = None,
         ):
             self.unicode = unicode
@@ -489,7 +488,8 @@ class ILTranslator:
                 ) and text.replace(" ", "") == "".join(
                     x.char_unicode for x in placeholder.composition.pdf_character
                 ).replace(
-                    " ", ""
+                    " ",
+                    "",
                 ):
                     comp = PdfParagraphComposition(
                         pdf_same_style_characters=placeholder.composition,
@@ -547,6 +547,13 @@ class ILTranslator:
                 tracker.set_input(translate_input.unicode)
 
                 text = translate_input.unicode
+
+                if len(text) < self.translation_config.min_text_length:
+                    logger.debug(
+                        f"Text too short to translate, skip. Text: {text}. Paragraph id: {paragraph.debug_id}.",
+                    )
+                    return
+
                 translated_text = self.translate_engine.translate(text)
 
                 tracker.set_output(translated_text)
