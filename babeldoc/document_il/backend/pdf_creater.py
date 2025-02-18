@@ -12,9 +12,12 @@ from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 
+SUBSET_FONT_STAGE_NAME = "Subset font"
+SAVE_PDF_STAGE_NAME = "Save PDF"
+
 
 class PDFCreater:
-    stage_name = "Create PDF file"
+    stage_name = "Generate drawing instructions"
 
     def __init__(
         self,
@@ -249,7 +252,7 @@ class PDFCreater:
         self.font_mapper.add_font(pdf, self.docs)
         with self.translation_config.progress_monitor.stage_start(
             self.stage_name,
-            len(self.docs.page) + 2,
+            len(self.docs.page),
         ) as pbar:
             for page in self.docs.page:
                 translation_config.raise_if_cancelled()
@@ -346,9 +349,18 @@ class PDFCreater:
                 pdf.update_stream(op_container, draw_op.tobytes())
                 pdf[page.page_number].set_contents(op_container)
                 pbar.advance()
-            translation_config.raise_if_cancelled()
+        translation_config.raise_if_cancelled()
+        with self.translation_config.progress_monitor.stage_start(
+            SUBSET_FONT_STAGE_NAME,
+            1,
+        ) as pbar:
             if not translation_config.skip_clean:
                 pdf.subset_fonts(fallback=False)
+            pbar.advance()
+        with self.translation_config.progress_monitor.stage_start(
+            SAVE_PDF_STAGE_NAME,
+            2,
+        ) as pbar:
             if not translation_config.no_mono:
                 if translation_config.debug:
                     translation_config.raise_if_cancelled()
