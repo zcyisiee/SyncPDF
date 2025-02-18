@@ -61,6 +61,7 @@ class ProgressMonitor:
                 stage_progress=0.0,
                 stage_current=0,
                 stage_total=total,
+                overall_progress=self.calculate_current_progress(),
             )
         self.last_report_time = 0.0
         return stage
