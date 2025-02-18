@@ -76,6 +76,12 @@ def create_parser():
         help="Pages to translate. If not set, translate all pages. like: 1,2,1-,-3,3-5",
     )
     translation_params.add_argument(
+        "--min-text-length",
+        type=int,
+        default=5,
+        help="Minimum text length to translate (default: 5)",
+    )
+    translation_params.add_argument(
         "--lang-in",
         "-li",
         type=str,
@@ -421,6 +427,7 @@ async def main():
             disable_rich_text_translate=args.disable_rich_text_translate,
             enhance_compatibility=args.enhance_compatibility,
             report_interval=args.report_interval,
+            min_text_length=args.min_text_length,
         )
 
         # Create progress handler
