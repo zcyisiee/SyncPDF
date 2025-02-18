@@ -20,6 +20,8 @@ from babeldoc import asynchronize
 from babeldoc.const import CACHE_FOLDER
 from babeldoc.const import get_cache_file_path
 from babeldoc.converter import TranslateConverter
+from babeldoc.document_il.backend.pdf_creater import SAVE_PDF_STAGE_NAME
+from babeldoc.document_il.backend.pdf_creater import SUBSET_FONT_STAGE_NAME
 from babeldoc.document_il.backend.pdf_creater import PDFCreater
 from babeldoc.document_il.frontend.il_creater import ILCreater
 from babeldoc.document_il.midend.add_debug_information import AddDebugInformation
@@ -48,6 +50,8 @@ TRANSLATE_STAGES = [
     Typesetting.stage_name,
     FontMapper.stage_name,
     PDFCreater.stage_name,
+    SUBSET_FONT_STAGE_NAME,
+    SAVE_PDF_STAGE_NAME,
 ]
 
 resfont_map = {

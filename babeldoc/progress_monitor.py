@@ -111,7 +111,7 @@ class ProgressMonitor:
     def stage_update(self, stage, n: int):
         with self.lock:
             report_time_delta = time.time() - self.last_report_time
-            if report_time_delta < self.report_interval:
+            if report_time_delta < self.report_interval and stage.total > 3:
                 return
             if self.progress_change_callback:
                 self.progress_change_callback(
