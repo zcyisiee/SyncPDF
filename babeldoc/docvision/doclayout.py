@@ -76,7 +76,7 @@ os_name = platform.system()
 
 providers = []
 
-if os_name == "Darwin":  # Temporarily disable CoreML due to batch inference issues
+if os_name == "Darwin" and False:  # Temporarily disable CoreML due to some issues
     providers.append(
         (
             "CoreMLExecutionProvider",
