@@ -2,6 +2,7 @@
 ---
 end-before: <!-- github-only -->
 ---
+```
 
 ```{toctree}
 ---
@@ -19,9 +20,9 @@ caption: Development
 maxdepth: 1
 ---
 
-contributing
+CONTRIBUTING
 CONTRIBUTOR_REWARD
-Code of Conduct <codeofconduct>
-License <license>
+Code of Conduct <CODE_OF_CONDUCT>
+License <../LICENSE>
 Changelog <https://github.com/funstory-ai/BabelDOC/releases>
 ```
