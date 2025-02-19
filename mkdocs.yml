@@ -1,0 +1,153 @@
+# Copyright (c) 2016-2025 Martin Donath <martin.donath@squidfunk.com>
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+
+# Project information
+site_name: BabelDOC
+site_url: https://squidfunk.github.io/mkdocs-material/
+site_author: funstory.ai
+site_description: >-
+  Write your documentation in Markdown and create a professional static site in
+  minutes – searchable, customizable, in 60+ languages, for all devices
+
+# Repository
+repo_name: funstory-ai/BabelDOC
+repo_url: https://github.com/funstory-ai/BabelDOC
+edit_uri: edit/main/docs/
+
+# Copyright
+copyright: Copyright &copy; 2025 funstory.ai
+
+# Configuration
+theme:
+  name: material
+  # custom_dir: material/overrides
+  features:
+    - announce.dismiss
+    - content.action.edit
+    - content.action.view
+    - content.code.annotate
+    - content.code.copy
+    - content.code.select
+    # - content.footnote.tooltips
+    # - content.tabs.link
+    - content.tooltips
+    # - header.autohide
+    # - navigation.expand
+    - navigation.footer
+    - navigation.indexes
+    # - navigation.instant
+    # - navigation.instant.prefetch
+    # - navigation.instant.progress
+    # - navigation.prune
+    - navigation.sections
+    - navigation.tabs
+    # - navigation.tabs.sticky
+    - navigation.top
+    - navigation.tracking
+    - search.highlight
+    - search.share
+    - search.suggest
+    - toc.follow
+    # - toc.integrate
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: white
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+  font:
+    text: Roboto
+    code: Roboto Mono
+  favicon: assets/favicon.png
+  icon:
+    logo: logo
+
+# Plugins
+plugins:
+  - search:
+      separator: '[\s\u200b\-_,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+  - minify:
+      minify_html: true
+  - git-authors
+  - git-revision-date-localized:
+      enable_creation_date: true
+# Additional configuration
+extra:
+  status:
+    new: Recently added
+    deprecated: Deprecated
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/funstory-ai/BabelDOC
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/BabelDOC/
+
+# Extensions
+markdown_extensions:
+  - github-callouts
+  - markdown_include.include
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+      guess_lang: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - def_list
+  - pymdownx.tasklist:
+      custom_checkbox: true
+not_in_nav: |
+  /tutorials/**/*.md
+
+# Page tree
+nav:
+  - Home: index.md
+  - API:
+    - Async Translation API: ImplementationDetails/AsyncTranslate/AsyncTranslate.md
+  - Implementation Details:
+    - ImplementationDetails/README.md
+    - PDF Parsing: ImplementationDetails/PDFParsing/PDFParsing.md
+    - Layout Parser(.py): https://github.com/funstory-ai/BabelDOC/blob/main/babeldoc/document_il/midend/layout_parser.py
+    - Paragraph Finding: ImplementationDetails/ParagraphFinding/ParagraphFinding.md
+    - Styles and Formulas: ImplementationDetails/StylesAndFormulas/StylesAndFormulas.md
+    - IL Translator: ImplementationDetails/ILTranslator/ILTranslator.md
+    - Typesetting: ImplementationDetails/Typesetting/Typesetting.md
+    - Font Mapper(.py): https://github.com/funstory-ai/BabelDOC/blob/main/babeldoc/document_il/utils/fontmap.py
+    - PDF Creation: ImplementationDetails/PDFCreation/PDFCreation.md
+    - Intro To PDF Object: intro-to-pdf-object.md
+  - Community:
+    - Code of Conduct: CODE_OF_CONDUCT.md
+    - Contributing:
+      - Contributing: CONTRIBUTING.md
+      - Contributor Reward: CONTRIBUTOR_REWARD.md

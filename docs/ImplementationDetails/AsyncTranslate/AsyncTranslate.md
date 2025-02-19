@@ -12,7 +12,7 @@ The `yadt.high_level.async_translate` function provides an asynchronous interfac
 
 ## Usage
 
-```python
+```python linenums="1"
 async def translate_with_progress():
     config = TranslationConfig(
         input_file="example.pdf",
@@ -131,7 +131,7 @@ The translation process can be cancelled in several ways:
 
 Example of programmatic cancellation:
 
-```python
+```python linenums="1"
 async def translate_with_cancellation():
     config = TranslationConfig(
         input_file="example.pdf",
