@@ -27,4 +27,14 @@ myst_enable_extensions = [
     "strikethrough",
     "substitution",
     "tasklist",
+    "admonition",
 ]
+
+# Map GitHub-style alerts to Sphinx admonitions
+myst_admonition_aliases = {
+    "note": "note",
+    "tip": "tip",
+    "important": "important",
+    "caution": "caution",
+    "warning": "warning",
+}
