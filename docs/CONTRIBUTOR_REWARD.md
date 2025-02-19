@@ -32,7 +32,7 @@
    - 附件要求：
      - PR 页面完整截图（需包含合并状态、仓库名称及点击头像后弹出来的侧边栏，如下图所示）
 
-![附件示例](https://github.com/user-attachments/assets/6b2378db-c459-4300-9082-d6c1c3f744d6)
+![附件示例](https://s.immersivetranslate.com/assets/r2-uploads/images/babeldoc-contributor_reward_example.png)
 
 1. **奖励说明**
    - 奖励内容：[沉浸式翻译（Immersive Translate）](https://immersivetranslate.com/zh-Hans/pricing/)月度会员兑换码

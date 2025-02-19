@@ -1,7 +1,7 @@
 <!-- # Yet Another Document Translator -->
 
 <div align="center">
-<img src="https://github.com/user-attachments/assets/39a9bc89-a3db-42d6-bc09-061671a20786" width="320px"  alt="YADT"/>
+<img src="https://s.immersivetranslate.com/assets/r2-uploads/images/babeldoc-banner.png" width="320px"  alt="YADT"/>
 
 
 <h2 id="title">BabelDOC</h2>
@@ -31,7 +31,7 @@ PDF scientific paper translation and bilingual comparison library.
 ## Preview
 
 <div align="center">
-<img src="https://github.com/user-attachments/assets/480d9889-9196-4e4d-a39b-ae3805485040" width="80%"/>
+<img src="https://s.immersivetranslate.com/assets/r2-uploads/images/babeldoc-preview.png" width="80%"/>
 </div>
 
 ## Getting Started
