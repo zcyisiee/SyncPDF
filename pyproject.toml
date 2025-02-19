@@ -108,7 +108,7 @@ max-complexity = 10  # 函数圈复杂度阈值
 "**/__init__.py" = ["F401"]  # 允许未使用的导入
 # 忽略 S311 警告，因为这是有意的
 "babeldoc/document_il/midend/paragraph_finder.py" = ["S311"]
-
+"docs/*" = ["A001"]
 [dependency-groups]
 dev = [
     "bumpver>=2024.1130",
