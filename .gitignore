@@ -28,3 +28,4 @@ yadt.toml
 examples/
 /make_gif.py
 /dist
+.cache
