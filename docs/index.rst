@@ -1,22 +1,43 @@
-Welcome to BabelDOC's documentation!
-=====================================
+BabelDOC Documentation
+=====================
 
-BabelDOC is a powerful document translation tool that helps you translate PDF documents while preserving their original layout and formatting.
+.. image:: images/banner.png
+   :alt: BabelDOC Logo
+   :align: center
+   :width: 200px
+
+.. raw:: html
+
+   <p style="text-align: center; font-size: 1.2em; margin: 20px 0;">
+   A powerful document translation tool that preserves layout and formatting
+   </p>
+
+Key Features
+-----------
+
+* **Layout Preservation** - Maintains original document formatting
+* **Formula Support** - Accurate mathematical formula translation
+* **Multiple Languages** - Support for various language pairs
+* **High Performance** - Efficient processing of large documents
+* **Easy Integration** - Simple API for seamless integration
+
+Getting Started
+--------------
 
 .. toctree::
-   :maxdepth: 2
-   :caption: Contents:
+   :maxdepth: 1
+   :caption: User Guide
 
    README
-   intro-to-pdf-object
-   CONTRIBUTING
-   CONTRIBUTOR_REWARD
-   CODE_OF_CONDUCT
+
+Core Documentation
+----------------
 
 .. toctree::
    :maxdepth: 2
-   :caption: Implementation Details:
+   :caption: Implementation Details
 
+   intro-to-pdf-object
    ImplementationDetails/README
    ImplementationDetails/PDFParsing/PDFParsing
    ImplementationDetails/PDFCreation/PDFCreation
@@ -26,9 +47,21 @@ BabelDOC is a powerful document translation tool that helps you translate PDF do
    ImplementationDetails/StylesAndFormulas/StylesAndFormulas
    ImplementationDetails/Typesetting/Typesetting
 
-Indices and tables
-==================
+Community
+---------
 
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search` 
+.. toctree::
+   :maxdepth: 1
+   :caption: Contributing
+
+   CONTRIBUTING
+   CONTRIBUTOR_REWARD
+   CODE_OF_CONDUCT
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Reference
+
+   :ref:`genindex`
+   :ref:`modindex`
+   :ref:`search` 
