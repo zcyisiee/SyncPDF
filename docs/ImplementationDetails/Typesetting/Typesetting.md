@@ -107,3 +107,7 @@ However, for special cases like "图 1" translated to "Figure 1", even with the 
 4. No global page information consideration, inconsistent text sizes.
 
 5. No advanced typography features, poor reading experience.
+
+## Related Resources
+
+[UTR #59: East Asian Spacing](https://www.unicode.org/reports/tr59/) specifies which characters need spacing between them.
