@@ -120,7 +120,6 @@ markdown_extensions:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
-      guess_lang: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences
