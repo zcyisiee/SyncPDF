@@ -91,7 +91,7 @@ if os_name == "Darwin" and False:  # Temporarily disable CoreML due to some issu
     # workaround for CoreML batch inference issues
     max_batch_size = 1
 else:
-    max_batch_size = 1024
+    max_batch_size = 1
 providers.append("CPUExecutionProvider")  # CPU执行提供者作为通用后备选项
 
 
