@@ -385,7 +385,48 @@ class PDFCreater:
                     f"{basename}{debug_suffix}.{translation_config.lang_out}.dual.pdf",
                 )
                 translation_config.raise_if_cancelled()
-                dual = pymupdf.open(self.original_pdf_path)
+                original_pdf = pymupdf.open(self.original_pdf_path)
+                translated_pdf = pdf
+
+                # Create a new PDF for side-by-side pages
+                dual = pymupdf.open()
+                page_count = min(original_pdf.page_count, translated_pdf.page_count)
+
+                for page_id in range(page_count):
+                    # Get pages from both PDFs
+                    orig_page = original_pdf[page_id]
+                    trans_page = translated_pdf[page_id]
+
+                    # Calculate total width and use max height
+                    total_width = orig_page.rect.width + trans_page.rect.width
+                    max_height = max(orig_page.rect.height, trans_page.rect.height)
+
+                    # Create new page with combined width
+                    dual_page = dual.new_page(width=total_width, height=max_height)
+
+                    # Define rectangles for left and right sides
+                    rect_left = pymupdf.Rect(0, 0, orig_page.rect.width, max_height)
+                    rect_right = pymupdf.Rect(
+                        orig_page.rect.width,
+                        0,
+                        total_width,
+                        max_height,
+                    )
+
+                    # Show original page on left and translated on right
+                    dual_page.show_pdf_page(
+                        rect_left,
+                        original_pdf,
+                        page_id,
+                        keep_proportion=True,
+                    )
+                    dual_page.show_pdf_page(
+                        rect_right,
+                        translated_pdf,
+                        page_id,
+                        keep_proportion=True,
+                    )
+
                 if translation_config.debug:
                     translation_config.raise_if_cancelled()
                     try:
@@ -395,13 +436,7 @@ class PDFCreater:
                             "Failed to write debug info to dual PDF",
                             exc_info=True,
                         )
-                dual.insert_file(pdf)
-                page_count = pdf.page_count
-                for page_id in range(page_count):
-                    if translation_config.dual_translate_first:
-                        dual.move_page(page_count + page_id, page_id * 2)
-                    else:
-                        dual.move_page(page_count + page_id, page_id * 2 + 1)
+
                 dual.save(
                     dual_out_path,
                     garbage=3,
