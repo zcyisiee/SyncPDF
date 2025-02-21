@@ -405,15 +405,20 @@ class PDFCreater:
                     dual_page = dual.new_page(width=total_width, height=max_height)
 
                     # Define rectangles for left and right sides
-                    rect_left = pymupdf.Rect(0, 0, orig_page.rect.width, max_height)
-                    rect_right = pymupdf.Rect(
-                        orig_page.rect.width,
-                        0,
-                        total_width,
-                        max_height,
+                    left_width = (
+                        orig_page.rect.width
+                        if not translation_config.dual_translate_first
+                        else trans_page.rect.width
                     )
+                    rect_left = pymupdf.Rect(0, 0, left_width, max_height)
+                    rect_right = pymupdf.Rect(left_width, 0, total_width, max_height)
 
-                    # Show original page on left and translated on right
+                    # Show pages according to dual_translate_first setting
+                    if translation_config.dual_translate_first:
+                        # Show translated page on left and original on right
+                        rect_left, rect_right = rect_right, rect_left
+
+                    # Show original page on left and translated on right (default)
                     dual_page.show_pdf_page(
                         rect_left,
                         original_pdf,
