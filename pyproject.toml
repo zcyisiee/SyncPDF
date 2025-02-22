@@ -138,3 +138,6 @@ version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
 "babeldoc/main.py" = [
     '__version__ = "{version}"'
 ]
+"babeldoc/const.py" = [
+    '__version__ = "{version}"'
+]
