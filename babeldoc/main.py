@@ -177,6 +177,18 @@ def create_parser():
         help="Enable all compatibility enhancement options (equivalent to --skip-clean --dual-translate-first --disable-rich-text-translate)",
     )
     translation_params.add_argument(
+        "--use-side-by-side-dual",
+        default=True,
+        action="store_true",
+        help="Use side-by-side mode for dual PDF (default). When enabled, original and translated pages are shown side by side.",
+    )
+    translation_params.add_argument(
+        "--use-alternating-pages-dual",
+        dest="use_side_by_side_dual",
+        action="store_false",
+        help="Use alternating pages mode for dual PDF. When enabled, original and translated pages are arranged in alternate order.",
+    )
+    translation_params.add_argument(
         "--report-interval",
         type=float,
         default=0.1,
@@ -426,6 +438,7 @@ async def main():
             dual_translate_first=args.dual_translate_first,
             disable_rich_text_translate=args.disable_rich_text_translate,
             enhance_compatibility=args.enhance_compatibility,
+            use_side_by_side_dual=args.use_side_by_side_dual,
             report_interval=args.report_interval,
             min_text_length=args.min_text_length,
         )
