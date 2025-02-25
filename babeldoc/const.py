@@ -2,7 +2,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-__version__ = "0.1.12"
+__version__ = "0.1.13"
 
 CACHE_FOLDER = Path.home() / ".cache" / "babeldoc"
 
@@ -24,5 +24,5 @@ try:
         .strip()
         .decode()
     )
-except (OSError, FileNotFoundError):
+except (OSError, FileNotFoundError, subprocess.CalledProcessError):
     WATERMARK_VERSION = f"v{__version__}"
