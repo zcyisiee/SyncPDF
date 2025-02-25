@@ -70,6 +70,7 @@ ignore = [
     "S110",   # `try`-`except`-`pass` detected, consider logging the exception
     "B024",   # abstract class without abstract methods
     "S112",   # `try`-`except`-`continue` detected, consider logging the exception
+    "COM812", # missing-trailing-comma
 
 ]
 select = [

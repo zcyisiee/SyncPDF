@@ -28,10 +28,9 @@ class DocLayoutModel(abc.ABC):
     @abc.abstractmethod
     def stride(self) -> int:
         """Stride of the model input."""
-        pass
 
     @abc.abstractmethod
-    def predict(self, image, imgsz=1024, **kwargs) -> list:
+    def predict(self, image: bytes, imgsz: int = 1024, **kwargs) -> list[int]:
         """
         Predict the layout of a document page.
 
@@ -40,7 +39,6 @@ class DocLayoutModel(abc.ABC):
             imgsz: Resize the image to this size. Must be a multiple of the stride.
             **kwargs: Additional arguments.
         """
-        pass
 
 
 class YoloResult:
