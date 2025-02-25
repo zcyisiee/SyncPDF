@@ -203,21 +203,37 @@ class PDFCreater:
             if translation_config.dual_translate_first:
                 # Show translated page on left and original on right
                 rect_left, rect_right = rect_right, rect_left
-
-            # Show original page on left and translated on right (default)
-            dual_page.show_pdf_page(
-                rect_left,
-                original_pdf,
-                page_id,
-                keep_proportion=True,
-            )
-            dual_page.show_pdf_page(
-                rect_right,
-                translated_pdf,
-                page_id,
-                keep_proportion=True,
-            )
-
+            try:
+                # Show original page on left and translated on right (default)
+                dual_page.show_pdf_page(
+                    rect_left,
+                    original_pdf,
+                    page_id,
+                    keep_proportion=True,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to show original page on left and translated on right (default). "
+                    f"Page ID: {page_id}. "
+                    f"Original PDF: {self.original_pdf_path}. "
+                    f"Translated PDF: {translation_config.input_file}. ",
+                    exc_info=e,
+                )
+            try:
+                dual_page.show_pdf_page(
+                    rect_right,
+                    translated_pdf,
+                    page_id,
+                    keep_proportion=True,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to show translated page on left and original on right. "
+                    f"Page ID: {page_id}. "
+                    f"Original PDF: {self.original_pdf_path}. "
+                    f"Translated PDF: {translation_config.input_file}. ",
+                    exc_info=e,
+                )
         return dual
 
     def create_alternating_pages_dual_pdf(
