@@ -3,6 +3,7 @@ import logging
 import threading
 import time
 from asyncio import CancelledError
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -10,17 +11,15 @@ logger = logging.getLogger(__name__)
 class ProgressMonitor:
     def __init__(
         self,
-        translation_config,
         stages: list[str],
-        progress_change_callback: callable = None,
-        finish_callback: callable = None,
+        progress_change_callback: Callable | None = None,
+        finish_callback: Callable | None = None,
         report_interval: float = 0.1,
-        finish_event: asyncio.Event = None,
-        cancel_event: threading.Event = None,
+        finish_event: asyncio.Event | None = None,
+        cancel_event: threading.Event | None = None,
         loop: asyncio.AbstractEventLoop | None = None,
     ):
         self.stage = {k: TranslationStage(k, 0, self) for k in stages}
-        self.translation_config = translation_config
         self.progress_change_callback = progress_change_callback
         self.finish_callback = finish_callback
         self.report_interval = report_interval
