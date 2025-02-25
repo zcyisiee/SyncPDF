@@ -482,27 +482,23 @@ class PDFCreater:
                 original_pdf = pymupdf.open(self.original_pdf_path)
                 translated_pdf = pdf
 
-                # Choose between side-by-side and alternating pages format
+                # Choose between alternating pages and side-by-side format
                 # Default to side-by-side if not specified
-                use_side_by_side = getattr(
-                    translation_config,
-                    "use_side_by_side_dual",
-                    True,
-                )
+                use_alternating_pages = translation_config.use_alternating_pages_dual
 
-                if use_side_by_side:
+                if use_alternating_pages:
+                    # Create a dual PDF with alternating pages (original and translation)
+                    dual = self.create_alternating_pages_dual_pdf(
+                        self.original_pdf_path,
+                        translated_pdf,
+                        translation_config,
+                    )
+                else:
                     # Create a dual PDF with side-by-side pages (original and translation)
                     dual = self.create_side_by_side_dual_pdf(
                         original_pdf,
                         translated_pdf,
                         dual_out_path,
-                        translation_config,
-                    )
-                else:
-                    # Create a dual PDF with alternating pages (original and translation)
-                    dual = self.create_alternating_pages_dual_pdf(
-                        self.original_pdf_path,
-                        translated_pdf,
                         translation_config,
                     )
 

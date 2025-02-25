@@ -37,7 +37,7 @@ class TranslationConfig:
         enhance_compatibility: bool = False,  # 增强兼容性模式
         report_interval: float = 0.1,  # Progress report interval in seconds
         min_text_length: int = 5,  # Minimum text length to translate
-        use_side_by_side_dual: bool = True,  # 是否使用拼版式双语 PDF（并排显示原文和译文）
+        use_alternating_pages_dual: bool = False,  # 是否使用交替页式双语 PDF（交替显示原文和译文）
     ):
         self.input_file = input_file
         self.translator = translator
@@ -63,7 +63,7 @@ class TranslationConfig:
         )
         self.report_interval = report_interval
         self.min_text_length = min_text_length
-        self.use_side_by_side_dual = use_side_by_side_dual
+        self.use_alternating_pages_dual = use_alternating_pages_dual
         if progress_monitor:
             if progress_monitor.cancel_event is None:
                 progress_monitor.cancel_event = threading.Event()
