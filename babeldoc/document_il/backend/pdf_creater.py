@@ -156,6 +156,100 @@ class PDFCreater:
         # Restore graphics state
         draw_op.append(b"Q\n")
 
+    def create_side_by_side_dual_pdf(
+        self,
+        original_pdf: pymupdf.Document,
+        translated_pdf: pymupdf.Document,
+        dual_out_path: str,
+        translation_config: TranslationConfig,
+    ) -> pymupdf.Document:
+        """Create a dual PDF with side-by-side pages (original and translation).
+
+        Args:
+            original_pdf: Original PDF document
+            translated_pdf: Translated PDF document
+            dual_out_path: Output path for the dual PDF
+            translation_config: Translation configuration
+
+        Returns:
+            The created dual PDF document
+        """
+        # Create a new PDF for side-by-side pages
+        dual = pymupdf.open()
+        page_count = min(original_pdf.page_count, translated_pdf.page_count)
+
+        for page_id in range(page_count):
+            # Get pages from both PDFs
+            orig_page = original_pdf[page_id]
+            trans_page = translated_pdf[page_id]
+
+            # Calculate total width and use max height
+            total_width = orig_page.rect.width + trans_page.rect.width
+            max_height = max(orig_page.rect.height, trans_page.rect.height)
+
+            # Create new page with combined width
+            dual_page = dual.new_page(width=total_width, height=max_height)
+
+            # Define rectangles for left and right sides
+            left_width = (
+                orig_page.rect.width
+                if not translation_config.dual_translate_first
+                else trans_page.rect.width
+            )
+            rect_left = pymupdf.Rect(0, 0, left_width, max_height)
+            rect_right = pymupdf.Rect(left_width, 0, total_width, max_height)
+
+            # Show pages according to dual_translate_first setting
+            if translation_config.dual_translate_first:
+                # Show translated page on left and original on right
+                rect_left, rect_right = rect_right, rect_left
+
+            # Show original page on left and translated on right (default)
+            dual_page.show_pdf_page(
+                rect_left,
+                original_pdf,
+                page_id,
+                keep_proportion=True,
+            )
+            dual_page.show_pdf_page(
+                rect_right,
+                translated_pdf,
+                page_id,
+                keep_proportion=True,
+            )
+
+        return dual
+
+    def create_alternating_pages_dual_pdf(
+        self,
+        original_pdf_path: str,
+        translated_pdf: pymupdf.Document,
+        translation_config: TranslationConfig,
+    ) -> pymupdf.Document:
+        """Create a dual PDF with alternating pages (original and translation).
+
+        Args:
+            original_pdf_path: Path to the original PDF
+            translated_pdf: Translated PDF document
+            translation_config: Translation configuration
+
+        Returns:
+            The created dual PDF document
+        """
+        # Open the original PDF and insert translated PDF
+        dual = pymupdf.open(original_pdf_path)
+        dual.insert_file(translated_pdf)
+
+        # Rearrange pages to alternate between original and translated
+        page_count = translated_pdf.page_count
+        for page_id in range(page_count):
+            if translation_config.dual_translate_first:
+                dual.move_page(page_count + page_id, page_id * 2)
+            else:
+                dual.move_page(page_count + page_id, page_id * 2 + 1)
+
+        return dual
+
     def write_debug_info(
         self,
         pdf: pymupdf.Document,
@@ -388,48 +482,28 @@ class PDFCreater:
                 original_pdf = pymupdf.open(self.original_pdf_path)
                 translated_pdf = pdf
 
-                # Create a new PDF for side-by-side pages
-                dual = pymupdf.open()
-                page_count = min(original_pdf.page_count, translated_pdf.page_count)
+                # Choose between side-by-side and alternating pages format
+                # Default to side-by-side if not specified
+                use_side_by_side = getattr(
+                    translation_config,
+                    "use_side_by_side_dual",
+                    True,
+                )
 
-                for page_id in range(page_count):
-                    # Get pages from both PDFs
-                    orig_page = original_pdf[page_id]
-                    trans_page = translated_pdf[page_id]
-
-                    # Calculate total width and use max height
-                    total_width = orig_page.rect.width + trans_page.rect.width
-                    max_height = max(orig_page.rect.height, trans_page.rect.height)
-
-                    # Create new page with combined width
-                    dual_page = dual.new_page(width=total_width, height=max_height)
-
-                    # Define rectangles for left and right sides
-                    left_width = (
-                        orig_page.rect.width
-                        if not translation_config.dual_translate_first
-                        else trans_page.rect.width
-                    )
-                    rect_left = pymupdf.Rect(0, 0, left_width, max_height)
-                    rect_right = pymupdf.Rect(left_width, 0, total_width, max_height)
-
-                    # Show pages according to dual_translate_first setting
-                    if translation_config.dual_translate_first:
-                        # Show translated page on left and original on right
-                        rect_left, rect_right = rect_right, rect_left
-
-                    # Show original page on left and translated on right (default)
-                    dual_page.show_pdf_page(
-                        rect_left,
+                if use_side_by_side:
+                    # Create a dual PDF with side-by-side pages (original and translation)
+                    dual = self.create_side_by_side_dual_pdf(
                         original_pdf,
-                        page_id,
-                        keep_proportion=True,
-                    )
-                    dual_page.show_pdf_page(
-                        rect_right,
                         translated_pdf,
-                        page_id,
-                        keep_proportion=True,
+                        dual_out_path,
+                        translation_config,
+                    )
+                else:
+                    # Create a dual PDF with alternating pages (original and translation)
+                    dual = self.create_alternating_pages_dual_pdf(
+                        self.original_pdf_path,
+                        translated_pdf,
+                        translation_config,
                     )
 
                 if translation_config.debug:

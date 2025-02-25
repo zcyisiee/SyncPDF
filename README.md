@@ -110,6 +110,8 @@ uv run babeldoc --bing --files example.pdf --files example2.pdf
 - `--dual-translate-first`: Put translated pages first in dual PDF mode (default: original pages first)
 - `--disable-rich-text-translate`: Disable rich text translation (may help improve compatibility with some PDFs)
 - `--enhance-compatibility`: Enable all compatibility enhancement options (equivalent to --skip-clean --dual-translate-first --disable-rich-text-translate)
+- `--use-side-by-side-dual`: Use side-by-side mode for dual PDF (default). Original and translated pages are shown side by side on the same page.
+- `--use-alternating-pages-dual`: Use alternating pages mode for dual PDF. Original and translated pages are arranged in alternate order.
 
 > [!TIP]
 > - Both `--skip-clean` and `--dual-translate-first` may help improve compatibility with some PDF readers
