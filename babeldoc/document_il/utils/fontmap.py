@@ -117,7 +117,7 @@ class FontMapper:
                 continue
             if bold != font.is_bold:
                 continue
-            # 不知道什么原因，思源黑体的 serif 属性为1，先workaround
+            # 不知道什么原因，思源黑体的 serif 属性为 1，先 workaround
             if serif == 1 and "serif" not in font.font_id:
                 continue
             if serif == 0 and "serif" in font.font_id:
@@ -219,7 +219,7 @@ class FontMapper:
                 )
                 pbar.advance(1)
 
-            # 批量添加字体到页面和XObject
+            # 批量添加字体到页面和 XObject
             for page in il.page:
                 page.pdf_font.extend(pdf_fonts)
                 for xobj in page.pdf_xobject:

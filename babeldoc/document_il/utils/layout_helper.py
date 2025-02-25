@@ -11,23 +11,23 @@ from pymupdf import Font
 logger = logging.getLogger(__name__)
 HEIGHT_NOT_USFUL_CHAR_IN_CHAR = (
     "∑︁",
-    # 暂时假设cid:17和cid 16是特殊情况
+    # 暂时假设 cid:17 和 cid 16 是特殊情况
     # 来源于 arXiv:2310.18608v2 第九页公式大括号
     "(cid:17)",
     "(cid:16)",
     # arXiv:2411.19509v2 第四页 []
     "(cid:104)",
     "(cid:105)",
-    # arXiv:2411.19509v2 第四页 公式的|竖线
+    # arXiv:2411.19509v2 第四页 公式的 | 竖线
     "(cid:13)",
     "∑︁",
-    # arXiv:2412.05265 27页 累加号
+    # arXiv:2412.05265 27 页 累加号
     "(cid:88)",
-    # arXiv:2412.05265 16页 累乘号
+    # arXiv:2412.05265 16 页 累乘号
     "(cid:89)",
-    # arXiv:2412.05265 27页 积分
+    # arXiv:2412.05265 27 页 积分
     "(cid:90)",
-    # arXiv:2412.05265 32页 公式左右的中括号
+    # arXiv:2412.05265 32 页 公式左右的中括号
     "(cid:2)",
     "(cid:3)",
 )
@@ -208,7 +208,7 @@ def get_paragraph_max_height(paragraph: PdfParagraph) -> float:
     获取段落中最高的排版单元高度。
 
     Args:
-        paragraph: PDF段落对象
+        paragraph: PDF 段落对象
 
     Returns:
         float: 最大高度值
@@ -227,7 +227,7 @@ def get_paragraph_max_height(paragraph: PdfParagraph) -> float:
                 char_height = pdf_char.box.y2 - pdf_char.box.y
                 max_height = max(max_height, char_height)
         elif composition.pdf_same_style_unicode_characters:
-            # 对于纯Unicode字符，我们使用其样式中的字体大小作为高度估计
+            # 对于纯 Unicode 字符，我们使用其样式中的字体大小作为高度估计
             font_size = (
                 composition.pdf_same_style_unicode_characters.pdf_style.font_size
             )
@@ -309,12 +309,12 @@ def is_same_graphic_state(state1: GraphicState, state2: GraphicState) -> bool:
 
 def add_space_dummy_chars(paragraph: PdfParagraph) -> None:
     """
-    在PDF段落中添加表示空格的dummy字符。
-    这个函数会直接修改传入的paragraph对象，在需要空格的地方添加dummy字符。
+    在 PDF 段落中添加表示空格的 dummy 字符。
+    这个函数会直接修改传入的 paragraph 对象，在需要空格的地方添加 dummy 字符。
     同时也会处理不同组成部分之间的空格。
 
     Args:
-        paragraph: 需要处理的PDF段落对象
+        paragraph: 需要处理的 PDF 段落对象
     """
     # 首先处理每个组成部分内部的空格
     for composition in paragraph.pdf_paragraph_composition:
@@ -325,7 +325,7 @@ def add_space_dummy_chars(paragraph: PdfParagraph) -> None:
             chars = composition.pdf_same_style_characters.pdf_character
             _add_space_dummy_chars_to_list(chars)
         elif composition.pdf_same_style_unicode_characters:
-            # 对于unicode字符，不需要处理。
+            # 对于 unicode 字符，不需要处理。
             # 这种类型只会出现在翻译好的结果中
             continue
         elif composition.pdf_formula:
@@ -350,7 +350,7 @@ def add_space_dummy_chars(paragraph: PdfParagraph) -> None:
         # 检查两个组成部分之间是否需要添加空格
         distance = next_first_char.box.x - curr_last_char.box.x2
         if distance > 1:  # 只考虑正向距离
-            # 创建一个dummy字符作为空格
+            # 创建一个 dummy 字符作为空格
             space_box = Box(
                 x=curr_last_char.box.x2,
                 y=curr_last_char.box.y,
@@ -411,10 +411,10 @@ def _get_last_char_from_composition(
 
 def _add_space_dummy_chars_to_list(chars: list[PdfCharacter]) -> None:
     """
-    在字符列表中的适当位置添加表示空格的dummy字符。
+    在字符列表中的适当位置添加表示空格的 dummy 字符。
 
     Args:
-        chars: PdfCharacter对象列表
+        chars: PdfCharacter 对象列表
     """
     if not chars:
         return
@@ -444,7 +444,7 @@ def _add_space_dummy_chars_to_list(chars: list[PdfCharacter]) -> None:
 
         distance = next_char.box.x - curr_char.box.x2
         if distance >= median_distance or Layout.is_newline(curr_char, next_char):
-            # 创建一个dummy字符作为空格
+            # 创建一个 dummy 字符作为空格
             space_box = Box(
                 x=curr_char.box.x2,
                 y=curr_char.box.y,

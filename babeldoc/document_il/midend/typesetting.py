@@ -398,9 +398,9 @@ class Typesetting:
             font_size=6,
             graphic_state=il_version_1.GraphicState(),
         )
-        text = f"本文档由funstory.ai的开源PDF翻译库BabelDOC {WATERMARK_VERSION} (http://yadt.io)翻译，本仓库正在积极的建设当中，欢迎star和关注。"
+        text = f"本文档由 funstory.ai 的开源 PDF 翻译库 BabelDOC {WATERMARK_VERSION} (http://yadt.io) 翻译，本仓库正在积极的建设当中，欢迎 star 和关注。"
         if self.translation_config.debug:
-            text += "\n 当前为DEBUG模式，将显示更多辅助信息。请注意，部分框的位置对应原文，但在译文中可能不正确。"
+            text += "\n 当前为 DEBUG 模式，将显示更多辅助信息。请注意，部分框的位置对应原文，但在译文中可能不正确。"
         page.pdf_paragraph.append(
             il_version_1.PdfParagraph(
                 first_line_indent=False,
@@ -463,7 +463,7 @@ class Typesetting:
             line_spacing: 行间距
 
         Returns:
-            tuple[list[TypesettingUnit], bool]: (已布局的排版单元列表, 是否所有单元都放得下)
+            tuple[list[TypesettingUnit], bool]: (已布局的排版单元列表，是否所有单元都放得下)
         """
         # 计算字号众数
         font_sizes = []
@@ -547,7 +547,7 @@ class Typesetting:
             relocated_unit = unit.relocate(current_x, current_y, scale)
             typeset_units.append(relocated_unit)
 
-            # workaround: 超长行距暂时没找到具体原因，有待进一步修复。这里的1.2是魔法数字！
+            # workaround: 超长行距暂时没找到具体原因，有待进一步修复。这里的 1.2 是魔法数字！
             # 更新当前行的最大高度
             if line_height == 0 or line_height * 1.2 > unit_height > line_height:
                 line_height = unit_height
@@ -567,7 +567,7 @@ class Typesetting:
     ):
         box = paragraph.box
         scale = 1.0
-        line_spacing = 1.5  # 初始行距为1.7
+        line_spacing = 1.5  # 初始行距为 1.7
         min_scale = 0.1  # 最小缩放因子
         min_line_spacing = 1.4  # 最小行距
         expand_space_flag = False
