@@ -29,3 +29,7 @@ examples/
 /make_gif.py
 /dist
 .cache
+.cursor/rules/_*.mdc
+/.cursor
+/xnotes
+/docs/workflow-rules.md
