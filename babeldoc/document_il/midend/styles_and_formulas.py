@@ -59,7 +59,7 @@ class StylesAndFormulas:
         if not page.pdf_paragraph:
             return
 
-        # 收集该页所有的公式字体ID
+        # 收集该页所有的公式字体 ID
         formula_font_ids = set()
         for font in page.pdf_font:
             if self.is_formulas_font(font.name):
@@ -95,7 +95,7 @@ class StylesAndFormulas:
                         or char.pdf_style.font_id in formula_font_ids  # 公式字体
                         or char.vertical  # 垂直字体
                         or (
-                            #   如果是程序添加的dummy空格
+                            #   如果是程序添加的 dummy 空格
                             char.char_unicode is None and in_formula_state
                         )
                     )
@@ -248,7 +248,7 @@ class StylesAndFormulas:
             # 更新基准样式为所有样式的交集
             base_style = self._merge_styles(base_style, style)
 
-        # 如果font_id或font_size为None，则使用众数
+        # 如果 font_id 或 font_size 为 None，则使用众数
         if base_style.font_id is None:
             base_style.font_id = self._get_mode_value([s.font_id for s in styles])
         if base_style.font_size is None:
@@ -286,7 +286,7 @@ class StylesAndFormulas:
         )
 
     def _merge_graphic_states(self, state1, state2):
-        """合并两个GraphicState，返回它们的交集"""
+        """合并两个 GraphicState，返回它们的交集"""
         if state1 is None:
             return state2
         if state2 is None:
@@ -350,7 +350,7 @@ class StylesAndFormulas:
         )
 
     def process_page_offsets(self, page: Page):
-        """计算公式的x和y偏移量"""
+        """计算公式的 x 和 y 偏移量"""
         if not page.pdf_paragraph:
             return
 
@@ -358,7 +358,7 @@ class StylesAndFormulas:
             if not paragraph.pdf_paragraph_composition:
                 continue
 
-            # 计算该段落的行间距，用其80%作为容差
+            # 计算该段落的行间距，用其 80% 作为容差
             line_spacing = self.calculate_line_spacing(paragraph)
             y_tolerance = line_spacing * 0.8
 
@@ -374,7 +374,7 @@ class StylesAndFormulas:
                 for j in range(i - 1, -1, -1):
                     comp = paragraph.pdf_paragraph_composition[j]
                     if comp.pdf_line:
-                        # 检查y坐标是否接近，判断是否在同一行
+                        # 检查 y 坐标是否接近，判断是否在同一行
                         if abs(comp.pdf_line.box.y - formula.box.y) <= y_tolerance:
                             left_line = comp.pdf_line
                             break
@@ -383,22 +383,22 @@ class StylesAndFormulas:
                 for j in range(i + 1, len(paragraph.pdf_paragraph_composition)):
                     comp = paragraph.pdf_paragraph_composition[j]
                     if comp.pdf_line:
-                        # 检查y坐标是否接近，判断是否在同一行
+                        # 检查 y 坐标是否接近，判断是否在同一行
                         if abs(comp.pdf_line.box.y - formula.box.y) <= y_tolerance:
                             right_line = comp.pdf_line
                             break
 
-                # 计算x偏移量（相对于左边文本）
+                # 计算 x 偏移量（相对于左边文本）
                 if left_line:
                     formula.x_offset = formula.box.x - left_line.box.x2
                 else:
-                    formula.x_offset = 0  # 如果左边没有文字，x_offset应该为0
+                    formula.x_offset = 0  # 如果左边没有文字，x_offset 应该为 0
                 if abs(formula.x_offset) < 0.1:
                     formula.x_offset = 0
                 if formula.x_offset > 0:
                     formula.x_offset = 0
 
-                # 计算y偏移量
+                # 计算 y 偏移量
                 if left_line:
                     # 使用底部坐标计算偏移量
                     formula.y_offset = formula.box.y - left_line.box.y
@@ -415,7 +415,7 @@ class StylesAndFormulas:
         if not paragraph.pdf_paragraph_composition:
             return 0.0
 
-        # 收集所有文本行的y坐标
+        # 收集所有文本行的 y 坐标
         line_y_positions = []
         for comp in paragraph.pdf_paragraph_composition:
             if comp.pdf_line:
@@ -424,7 +424,7 @@ class StylesAndFormulas:
         if len(line_y_positions) < 2:
             return 10.0  # 如果只有一行或没有行，返回一个默认值
 
-        # 计算相邻行之间的y差值
+        # 计算相邻行之间的 y 差值
         line_spacings = []
         for i in range(len(line_y_positions) - 1):
             spacing = abs(line_y_positions[i] - line_y_positions[i + 1])
@@ -562,7 +562,7 @@ class StylesAndFormulas:
         # 必须包含逗号
         if "," not in text:
             return False
-        # 检查是否包含除了数字和[]之外的其他符号
+        # 检查是否包含除了数字和 [] 之外的其他符号
         text_without_basic = re.sub(r"[0-9\[\],\s]", "", text)
         return bool(text_without_basic)
 
@@ -570,7 +570,7 @@ class StylesAndFormulas:
         self,
         formula: PdfFormula,
     ) -> list[tuple[list[PdfCharacter], PdfCharacter]]:
-        """按逗号拆分公式字符，返回(字符组, 逗号字符)的列表，最后一组的逗号字符为None。
+        """按逗号拆分公式字符，返回 (字符组，逗号字符) 的列表，最后一组的逗号字符为 None。
         只有不在括号内的逗号才会被用作分隔符。支持的括号对包括：
         - (cid:8) 和 (cid:9)
         - ( 和 )
@@ -606,7 +606,7 @@ class StylesAndFormulas:
         """合并两个公式，保持字符的相对位置"""
         # 合并所有字符
         all_chars = formula1.pdf_character + formula2.pdf_character
-        # 按y坐标和x坐标排序，确保字符顺序正确
+        # 按 y 坐标和 x 坐标排序，确保字符顺序正确
         sorted_chars = sorted(all_chars, key=lambda c: (c.box.y, c.box.x))
 
         merged_formula = PdfFormula(pdf_character=sorted_chars)
@@ -615,7 +615,7 @@ class StylesAndFormulas:
 
     def merge_overlapping_formulas(self, page: Page):
         """
-        合并x轴重叠且y轴有交集的相邻公式
+        合并 x 轴重叠且 y 轴有交集的相邻公式
         角标可能会被识别成单独的公式，需要合并
         """
         if not page.pdf_paragraph:
@@ -638,7 +638,7 @@ class StylesAndFormulas:
                 formula1 = comp1.pdf_formula
                 formula2 = comp2.pdf_formula
 
-                # 检查x轴重叠和y轴交集
+                # 检查 x 轴重叠和 y 轴交集
                 if self.is_x_axis_contained(
                     formula1.box,
                     formula2.box,
@@ -650,18 +650,18 @@ class StylesAndFormulas:
                     )
                     # 删除第二个公式
                     del paragraph.pdf_paragraph_composition[i + 1]
-                    # 不增加i，因为合并后的公式可能还需要和下一个公式合并
+                    # 不增加 i，因为合并后的公式可能还需要和下一个公式合并
                 else:
                     i += 1
 
     def is_x_axis_contained(self, box1: Box, box2: Box) -> bool:
-        """判断box1的x轴是否完全包含在box2的x轴内，或反之"""
+        """判断 box1 的 x 轴是否完全包含在 box2 的 x 轴内，或反之"""
         return (box1.x >= box2.x and box1.x2 <= box2.x2) or (
             box2.x >= box1.x and box2.x2 <= box1.x2
         )
 
     def has_y_intersection(self, box1: Box, box2: Box) -> bool:
-        """判断两个box的y轴是否有交集"""
+        """判断两个 box 的 y 轴是否有交集"""
         return not (box1.y2 < box2.y or box2.y2 < box1.y)
 
     def process_comma_formulas(self, page: Page):
