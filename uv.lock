@@ -83,10 +83,8 @@ dev = [
     { name = "mkdocs-material", extra = ["recommended"] },
     { name = "pre-commit" },
     { name = "pygments" },
-    { name = "ruff" },
-]
-test = [
     { name = "pytest" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -123,9 +121,9 @@ dev = [
     { name = "mkdocs-material", extras = ["recommended"], specifier = ">=9.6.4" },
     { name = "pre-commit", specifier = ">=4.1.0" },
     { name = "pygments", specifier = ">=2.19.1" },
+    { name = "pytest", specifier = ">=8.3.4" },
     { name = "ruff", specifier = ">=0.9.2" },
 ]
-test = [{ name = "pytest", specifier = ">=8.3.4" }]
 
 [[package]]
 name = "bitarray"
