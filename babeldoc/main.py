@@ -155,11 +155,6 @@ def create_parser():
         help="Enable all compatibility enhancement options (equivalent to --skip-clean --dual-translate-first --disable-rich-text-translate)",
     )
     translation_group.add_argument(
-        "--use-side-by-side-dual",
-        action="store_true",
-        help="Use side-by-side mode for dual PDF (default). When enabled, original and translated pages are shown side by side.",
-    )
-    translation_group.add_argument(
         "--use-alternating-pages-dual",
         action="store_true",
         help="Use alternating pages mode for dual PDF. When enabled, original and translated pages are arranged in alternate order.",
