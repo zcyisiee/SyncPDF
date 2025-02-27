@@ -53,7 +53,11 @@ class TypesettingUnit:
             )
 
             self.font = font
-            self.font_id = font.font_id
+            if font is not None:
+                self.font_id = font.font_id
+            else:
+                self.font_id = "base"
+                self.unicode = " "
             self.font_size = font_size
             self.style = style
             self.xobj_id = xobj_id

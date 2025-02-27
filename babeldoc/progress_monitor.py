@@ -133,11 +133,11 @@ class ProgressMonitor:
 
     def raise_if_cancelled(self):
         if self.cancel_event and self.cancel_event.is_set():
-            logger.info("Translation canceled")
             raise asyncio.CancelledError
 
     def cancel(self):
         if self.cancel_event:
+            logger.info("Translation canceled")
             self.cancel_event.set()
 
 

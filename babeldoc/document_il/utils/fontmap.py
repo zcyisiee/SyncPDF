@@ -129,7 +129,7 @@ class FontMapper:
         if self.fallback_font.has_glyph(current_char):
             return self.fallback_font
 
-        logger.error(
+        logger.warning(
             f"Can't find font for {char_unicode}({current_char}). "
             f"Original font: {original_font}. "
             f"Char unicode: {char_unicode}. ",
