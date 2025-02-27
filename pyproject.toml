@@ -1,6 +1,6 @@
 [project]
 name = "BabelDOC"
-version = "0.1.14"
+version = "0.1.15"
 description = "Yet Another Document Translator"
 license = "AGPL-3.0"
 readme = "README.md"
@@ -30,6 +30,7 @@ dependencies = [
     "xsdata[cli,lxml,soap]>=24.12",
     "msgpack>=1.1.0",
     "pydantic>=2.10.6",
+    "tenacity>=9.0.0",
 ]
 
 [project.urls]
@@ -131,7 +132,7 @@ pythonpath = [".", "src"]
 testpaths = ["tests"]
 
 [bumpver]
-current_version = "0.1.14"
+current_version = "0.1.15"
 version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
 
 [bumpver.file_patterns]
