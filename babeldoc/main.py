@@ -250,9 +250,10 @@ async def main():
     set_translate_rate_limiter(args.qps)
 
     # 初始化文档布局模型
-    doc_layout_model = DocLayoutModel.load_onnx()
     if args.rpc_doclayout:
         doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout)
+    else:
+        doc_layout_model = DocLayoutModel.load_onnx()
 
     pending_files = []
     for file in args.files:
