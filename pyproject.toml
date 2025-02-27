@@ -30,6 +30,7 @@ dependencies = [
     "xsdata[cli,lxml,soap]>=24.12",
     "msgpack>=1.1.0",
     "pydantic>=2.10.6",
+    "tenacity>=9.0.0",
 ]
 
 [project.urls]
