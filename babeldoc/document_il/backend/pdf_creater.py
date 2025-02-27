@@ -1,5 +1,8 @@
 import logging
+import os
 import re
+import time
+from multiprocessing import Process
 from pathlib import Path
 
 import pymupdf
@@ -14,6 +17,25 @@ logger = logging.getLogger(__name__)
 
 SUBSET_FONT_STAGE_NAME = "Subset font"
 SAVE_PDF_STAGE_NAME = "Save PDF"
+
+
+def _subset_fonts_process(pdf_path, output_path):
+    """Function to run in subprocess for font subsetting.
+
+    Args:
+        pdf_path: Path to the PDF file to subset
+        output_path: Path where to save the result
+    """
+    try:
+        pdf = pymupdf.open(pdf_path)
+        pdf.subset_fonts(fallback=False)
+        pdf.save(output_path)
+        # 返回0表示成功
+        os._exit(0)
+    except Exception as e:
+        logger.error(f"Error in font subsetting subprocess: {e}")
+        # 返回1表示失败
+        os._exit(1)
 
 
 class PDFCreater:
@@ -350,7 +372,83 @@ class PDFCreater:
             # no additional information is needed
             pdf.update_stream(int(resource_xref_id), draw_op.tobytes())
         translation_config.raise_if_cancelled()
-        pdf.subset_fonts(fallback=False)
+
+        # 使用子进程进行字体子集化
+        if not translation_config.skip_clean:
+            pdf = self.subset_fonts_in_subprocess(pdf, translation_config)
+        return pdf
+
+    def subset_fonts_in_subprocess(
+        self, pdf: pymupdf.Document, translation_config: TranslationConfig
+    ) -> pymupdf.Document:
+        """Run font subsetting in a subprocess with timeout.
+
+        Args:
+            pdf: The PDF document object
+            translation_config: Translation configuration
+
+        Returns:
+            Path to the PDF with subsetted fonts, or original path if subsetting failed or timed out
+        """
+        original_pdf = pdf
+        # Create temporary file paths
+        temp_input = str(
+            translation_config.get_working_file_path(
+                f"temp_subset_input_{int(time.time())}.pdf"
+            )
+        )
+        temp_output = str(
+            translation_config.get_working_file_path(
+                f"temp_subset_output_{int(time.time())}.pdf"
+            )
+        )
+
+        # Save PDF to temporary file without subsetting
+        pdf.save(temp_input)
+
+        # Create and start subprocess
+        process = Process(target=_subset_fonts_process, args=(temp_input, temp_output))
+        process.start()
+
+        # Wait for subprocess with timeout (1 minute)
+        timeout = 60  # 1 minutes in seconds
+        start_time = time.time()
+
+        while process.is_alive():
+            if time.time() - start_time > timeout:
+                logger.warning(
+                    f"Font subsetting timeout after {timeout} seconds, terminating subprocess"
+                )
+                process.terminate()
+                try:
+                    process.join(5)  # Give it 5 seconds to clean up
+                    if process.is_alive():
+                        logger.warning("Subprocess did not terminate, killing it")
+                        process.kill()
+                except Exception as e:
+                    logger.error(f"Error terminating font subsetting process: {e}")
+
+                return original_pdf
+
+            time.sleep(0.5)  # Check every half second
+
+        # Process completed, check exit code
+        exit_code = process.exitcode
+        success = exit_code == 0
+
+        # Check if subsetting was successful
+        if (
+            success
+            and Path(temp_output).exists()
+            and Path(temp_output).stat().st_size > 0
+        ):
+            logger.info("Font subsetting completed successfully")
+            return pymupdf.open(temp_output)
+        else:
+            logger.warning(
+                f"Font subsetting failed with exit code {exit_code} or produced empty file"
+            )
+            return original_pdf
 
     def write(self, translation_config: TranslationConfig) -> TranslateResult:
         basename = Path(translation_config.input_file).stem
@@ -465,7 +563,8 @@ class PDFCreater:
             1,
         ) as pbar:
             if not translation_config.skip_clean:
-                pdf.subset_fonts(fallback=False)
+                pdf = self.subset_fonts_in_subprocess(pdf, translation_config)
+
             pbar.advance()
         with self.translation_config.progress_monitor.stage_start(
             SAVE_PDF_STAGE_NAME,
@@ -521,7 +620,7 @@ class PDFCreater:
                 if translation_config.debug:
                     translation_config.raise_if_cancelled()
                     try:
-                        self.write_debug_info(dual, translation_config)
+                        dual = self.write_debug_info(dual, translation_config)
                     except Exception:
                         logger.warning(
                             "Failed to write debug info to dual PDF",
