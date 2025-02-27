@@ -482,11 +482,11 @@ class PDFCreater:
                 translation_config.raise_if_cancelled()
                 pdf.save(
                     mono_out_path,
-                    garbage=3,
+                    garbage=1,
                     deflate=True,
                     clean=not translation_config.skip_clean,
                     deflate_fonts=True,
-                    linear=True,
+                    linear=False,
                 )
             pbar.advance()
             dual_out_path = None
@@ -530,11 +530,11 @@ class PDFCreater:
 
                 dual.save(
                     dual_out_path,
-                    garbage=3,
+                    garbage=1,
                     deflate=True,
                     clean=not translation_config.skip_clean,
                     deflate_fonts=True,
-                    linear=True,
+                    linear=False,
                 )
                 if translation_config.debug:
                     translation_config.raise_if_cancelled()
