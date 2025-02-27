@@ -23,7 +23,7 @@ from babeldoc.docvision.rpc_doclayout import RpcDocLayoutModel
 from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
-__version__ = "0.1.15"
+__version__ = "0.1.16"
 
 
 def create_parser():
