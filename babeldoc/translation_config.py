@@ -274,22 +274,22 @@ class TranslationConfig:
 
     # FIXME: due to compatibility issues, `_create_folders()` is not used for the time being
     def _create_folders(self):
-        self.config.working_dir.mkdir(parents=True, exist_ok=True)
-        self.config.output_dir.mkdir(parents=True, exist_ok=True)
+        self.working_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def get_output_file_path(self, filename: str) -> Path:
-        return Path(self.config.output_dir) / filename
+        return Path(self.output_dir) / filename
 
     def get_working_file_path(self, filename: str) -> Path:
-        return Path(self.config.working_dir) / filename
+        return Path(self.working_dir) / filename
 
     def raise_if_cancelled(self):
-        if self.config.progress_monitor is not None:
-            self.config.progress_monitor.raise_if_cancelled()
+        if self.progress_monitor is not None:
+            self.progress_monitor.raise_if_cancelled()
 
     def cancel_translation(self):
-        if self.config.progress_monitor is not None:
-            self.config.progress_monitor.cancel()
+        if self.progress_monitor is not None:
+            self.progress_monitor.cancel()
 
 
 class TranslateResult:
