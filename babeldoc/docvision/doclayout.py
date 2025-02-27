@@ -1,5 +1,6 @@
 import abc
 import ast
+import logging
 import os.path
 import platform
 from pathlib import Path
@@ -10,10 +11,13 @@ import onnx
 import onnxruntime
 from huggingface_hub import hf_hub_download
 
+logger = logging.getLogger(__name__)
+
 
 class DocLayoutModel(abc.ABC):
     @staticmethod
     def load_onnx():
+        logger.debug("Loading ONNX model...")
         model = OnnxModel.from_pretrained(
             repo_id="wybxc/DocLayout-YOLO-DocStructBench-onnx",
             filename="doclayout_yolo_docstructbench_imgsz1024.onnx",

@@ -10,8 +10,6 @@ from babeldoc.docvision.doclayout import DocLayoutModel
 from babeldoc.docvision.doclayout import YoloBox
 from babeldoc.docvision.doclayout import YoloResult
 
-# 设置日志
-logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
@@ -146,6 +144,7 @@ class RpcDocLayoutModel(DocLayoutModel):
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
     # Test the service
     try:
         # Use a default test image if example/1.png doesn't exist
