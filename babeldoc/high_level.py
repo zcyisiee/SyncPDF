@@ -223,10 +223,7 @@ def start_parse_il(
 
 
 def translate(translation_config: TranslationConfig) -> TranslateResult:
-    with ProgressMonitor(
-        translation_config,
-        TRANSLATE_STAGES,
-    ) as pm:
+    with ProgressMonitor(TRANSLATE_STAGES) as pm:
         return do_translate(pm, translation_config)
 
 
@@ -284,7 +281,6 @@ async def async_translate(translation_config: TranslationConfig):
     finish_event = asyncio.Event()
     cancel_event = threading.Event()
     with ProgressMonitor(
-        translation_config,
         TRANSLATE_STAGES,
         progress_change_callback=callback.step_callback,
         finish_callback=callback.finished_callback,

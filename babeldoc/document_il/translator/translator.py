@@ -5,6 +5,7 @@ import threading
 import time
 import unicodedata
 from abc import ABC
+from abc import abstractmethod
 
 import openai
 import requests
@@ -115,6 +116,7 @@ class BaseTranslator(ABC):
             self.cache.set(text, translation)
         return translation
 
+    @abstractmethod
     def do_translate(self, text):
         """
         Actual translate text, override this method

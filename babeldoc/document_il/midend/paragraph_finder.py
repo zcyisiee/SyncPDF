@@ -254,9 +254,9 @@ class ParagraphFinder:
         self,
         char: PdfCharacter,
         page: Page,
-        xy_mode: Literal["topleft"]
-        | Literal["bottomright"]
-        | Literal["middle"] = "middle",
+        xy_mode: (
+            Literal["topleft"] | Literal["bottomright"] | Literal["middle"]
+        ) = "middle",
     ):
         tl, br, md = [
             self._get_layout(char, page, mode)
@@ -279,9 +279,9 @@ class ParagraphFinder:
         self,
         char: PdfCharacter,
         page: Page,
-        xy_mode: Literal["topleft"]
-        | Literal["bottomright"]
-        | Literal["middle"] = "middle",
+        xy_mode: (
+            Literal["topleft"] | Literal["bottomright"] | Literal["middle"]
+        ) = "middle",
     ):
         # 这几个符号，解析出来的大小经常只有实际大小的一点点。
         # if (

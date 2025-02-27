@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from pathlib import Path
+from typing import Any
 
 import configargparse
 import tqdm
@@ -17,6 +18,8 @@ from babeldoc.document_il.translator.translator import BingTranslator
 from babeldoc.document_il.translator.translator import GoogleTranslator
 from babeldoc.document_il.translator.translator import OpenAITranslator
 from babeldoc.document_il.translator.translator import set_translate_rate_limiter
+from babeldoc.docvision.doclayout import DocLayoutModel
+from babeldoc.docvision.rpc_doclayout import RpcDocLayoutModel
 from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
@@ -29,8 +32,7 @@ def create_parser():
     )
     parser.add_argument(
         "-c",
-        "--my-config",
-        required=False,
+        "--config",
         is_config_file=True,
         help="config file path",
     )
@@ -41,281 +43,170 @@ def create_parser():
     )
     parser.add_argument(
         "--files",
-        type=str,
-        # nargs="*",
         action="append",
         help="One or more paths to PDF files.",
     )
     parser.add_argument(
         "--debug",
-        "-d",
-        default=False,
         action="store_true",
         help="Use debug logging level.",
     )
     parser.add_argument(
         "--warmup",
-        default=False,
         action="store_true",
         help="Only download and verify required assets then exit.",
     )
     parser.add_argument(
         "--rpc-doclayout",
-        default=None,
         help="RPC service host address for document layout analysis",
-        type=str,
     )
-    translation_params = parser.add_argument_group(
+    # translation option argument group
+    translation_group = parser.add_argument_group(
         "Translation",
         description="Used during translation",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--pages",
         "-p",
-        type=str,
         help="Pages to translate. If not set, translate all pages. like: 1,2,1-,-3,3-5",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--min-text-length",
         type=int,
         default=5,
         help="Minimum text length to translate (default: 5)",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--lang-in",
         "-li",
-        type=str,
         default="en",
         help="The code of source language.",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--lang-out",
         "-lo",
-        type=str,
         default="zh",
         help="The code of target language.",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--output",
         "-o",
-        type=str,
-        default=None,
         help="Output directory for files. if not set, use same as input.",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--qps",
         "-q",
         type=int,
         default=4,
         help="QPS limit of translation service",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--ignore-cache",
-        "-ic",
-        default=False,
         action="store_true",
         help="Ignore translation cache.",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--no-dual",
-        default=False,
         action="store_true",
         help="Do not output bilingual PDF files",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--no-mono",
-        default=False,
         action="store_true",
         help="Do not output monolingual PDF files",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--formular-font-pattern",
-        type=str,
-        default=None,
         help="Font pattern to identify formula text",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--formular-char-pattern",
-        type=str,
-        default=None,
         help="Character pattern to identify formula text",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--split-short-lines",
-        default=False,
         action="store_true",
         help="Force split short lines into different paragraphs (may cause poor typesetting & bugs)",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--short-line-split-factor",
         type=float,
         default=0.8,
         help="Split threshold factor. The actual threshold is the median length of all lines on the current page * this factor",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--skip-clean",
-        default=False,
         action="store_true",
         help="Skip PDF cleaning step",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--dual-translate-first",
-        default=False,
         action="store_true",
         help="Put translated pages first in dual PDF mode",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--disable-rich-text-translate",
-        default=False,
         action="store_true",
         help="Disable rich text translation (may help improve compatibility with some PDFs)",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--enhance-compatibility",
-        default=False,
         action="store_true",
         help="Enable all compatibility enhancement options (equivalent to --skip-clean --dual-translate-first --disable-rich-text-translate)",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--use-alternating-pages-dual",
-        default=False,
         action="store_true",
         help="Use alternating pages mode for dual PDF. When enabled, original and translated pages are arranged in alternate order.",
     )
-    translation_params.add_argument(
+    translation_group.add_argument(
         "--report-interval",
         type=float,
         default=0.1,
         help="Progress report interval in seconds (default: 0.1)",
     )
-    service_params = translation_params.add_mutually_exclusive_group()
-    service_params.add_argument(
+    # service option argument group
+    service_group = translation_group.add_mutually_exclusive_group()
+    service_group.add_argument(
         "--openai",
-        default=False,
         action="store_true",
         help="Use OpenAI translator.",
     )
-    service_params.add_argument(
+    service_group.add_argument(
         "--google",
-        default=False,
         action="store_true",
         help="Use Google translator.",
     )
-    service_params.add_argument(
+    service_group.add_argument(
         "--bing",
-        default=False,
         action="store_true",
         help="Use Bing translator.",
     )
-    openai_params = parser.add_argument_group(
+    service_group = parser.add_argument_group(
         "Translation - OpenAI Options",
         description="OpenAI specific options",
     )
-    openai_params.add_argument(
+    service_group.add_argument(
         "--openai-model",
-        "-m",
-        type=str,
         default="gpt-4o-mini",
         help="The OpenAI model to use for translation.",
     )
-    openai_params.add_argument(
+    service_group.add_argument(
         "--openai-base-url",
-        "-b",
-        type=str,
-        default=None,
         help="The base URL for the OpenAI API.",
     )
-    openai_params.add_argument(
+    service_group.add_argument(
         "--openai-api-key",
         "-k",
-        type=str,
-        default=None,
         help="The API key for the OpenAI API.",
     )
 
     return parser
 
 
-def create_progress_handler(translation_config: TranslationConfig):
-    """Create a progress handler function based on the configuration.
-
-    Args:
-        translation_config: The translation configuration.
-
-    Returns:
-        A tuple of (progress_context, progress_handler), where progress_context is a context
-        manager that should be used to wrap the translation process, and progress_handler
-        is a function that will be called with progress events.
-    """
-    if translation_config.use_rich_pbar:
-        progress = Progress(
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            MofNCompleteColumn(),
-            TimeElapsedColumn(),
-            TimeRemainingColumn(),
-        )
-        translate_task_id = progress.add_task("translate", total=100)
-        stage_tasks = {}
-
-        def progress_handler(event):
-            if event["type"] == "progress_start":
-                stage_tasks[event["stage"]] = progress.add_task(
-                    f"{event['stage']}",
-                    total=event.get("stage_total", 100),
-                )
-            elif event["type"] == "progress_update":
-                stage = event["stage"]
-                if stage in stage_tasks:
-                    progress.update(
-                        stage_tasks[stage],
-                        completed=event["stage_current"],
-                        total=event["stage_total"],
-                        description=f"{event['stage']} ({event['stage_current']}/{event['stage_total']})",
-                        refresh=True,
-                    )
-                progress.update(
-                    translate_task_id,
-                    completed=event["overall_progress"],
-                    refresh=True,
-                )
-            elif event["type"] == "progress_end":
-                stage = event["stage"]
-                if stage in stage_tasks:
-                    progress.update(
-                        stage_tasks[stage],
-                        completed=event["stage_total"],
-                        total=event["stage_total"],
-                        description=f"{event['stage']} (Complete)",
-                        refresh=True,
-                    )
-                    progress.update(
-                        translate_task_id,
-                        completed=event["overall_progress"],
-                        refresh=True,
-                    )
-                progress.refresh()
-
-        return progress, progress_handler
-    else:
-        pbar = tqdm.tqdm(total=100, desc="translate")
-
-        def progress_handler(event):
-            if event["type"] == "progress_update":
-                pbar.update(event["overall_progress"] - pbar.n)
-                pbar.set_description(
-                    f"{event['stage']} ({event['stage_current']}/{event['stage_total']})",
-                )
-            elif event["type"] == "progress_end":
-                pbar.set_description(f"{event['stage']} (Complete)")
-                pbar.refresh()
-
-        return pbar, progress_handler
-
-
 async def main():
     parser = create_parser()
-    args = parser.parse_args()
+    args: Any = parser.parse_args()
 
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -360,12 +251,8 @@ async def main():
 
     # 初始化文档布局模型
     if args.rpc_doclayout:
-        from babeldoc.docvision.rpc_doclayout import RpcDocLayoutModel
-
         doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout)
     else:
-        from babeldoc.docvision.doclayout import DocLayoutModel
-
         doc_layout_model = DocLayoutModel.load_onnx()
 
     pending_files = []
@@ -454,6 +341,83 @@ async def main():
                     logger.info(f"  Mono PDF: {result.mono_pdf_path or 'None'}")
                     logger.info(f"  Dual PDF: {result.dual_pdf_path or 'None'}")
                     break
+
+
+def create_progress_handler(translation_config: TranslationConfig):
+    """Create a progress handler function based on the configuration.
+
+    Args:
+        translation_config: The translation configuration.
+
+    Returns:
+        A tuple of (progress_context, progress_handler), where progress_context is a context
+        manager that should be used to wrap the translation process, and progress_handler
+        is a function that will be called with progress events.
+    """
+    if translation_config.use_rich_pbar:
+        progress = Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+        )
+        translate_task_id = progress.add_task("translate", total=100)
+        stage_tasks = {}
+
+        def progress_handler(event):
+            if event["type"] == "progress_start":
+                stage_tasks[event["stage"]] = progress.add_task(
+                    f"{event['stage']}",
+                    total=event.get("stage_total", 100),
+                )
+            elif event["type"] == "progress_update":
+                stage = event["stage"]
+                if stage in stage_tasks:
+                    progress.update(
+                        stage_tasks[stage],
+                        completed=event["stage_current"],
+                        total=event["stage_total"],
+                        description=f"{event['stage']} ({event['stage_current']}/{event['stage_total']})",
+                        refresh=True,
+                    )
+                progress.update(
+                    translate_task_id,
+                    completed=event["overall_progress"],
+                    refresh=True,
+                )
+            elif event["type"] == "progress_end":
+                stage = event["stage"]
+                if stage in stage_tasks:
+                    progress.update(
+                        stage_tasks[stage],
+                        completed=event["stage_total"],
+                        total=event["stage_total"],
+                        description=f"{event['stage']} (Complete)",
+                        refresh=True,
+                    )
+                    progress.update(
+                        translate_task_id,
+                        completed=event["overall_progress"],
+                        refresh=True,
+                    )
+                progress.refresh()
+
+        return progress, progress_handler
+    else:
+        pbar = tqdm.tqdm(total=100, desc="translate")
+
+        def progress_handler(event):
+            if event["type"] == "progress_update":
+                pbar.update(event["overall_progress"] - pbar.n)
+                pbar.set_description(
+                    f"{event['stage']} ({event['stage_current']}/{event['stage_total']})",
+                )
+            elif event["type"] == "progress_end":
+                pbar.set_description(f"{event['stage']} (Complete)")
+                pbar.refresh()
+
+        return pbar, progress_handler
 
 
 # for backward compatibility

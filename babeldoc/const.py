@@ -7,7 +7,7 @@ __version__ = "0.1.13"
 CACHE_FOLDER = Path.home() / ".cache" / "babeldoc"
 
 
-def get_cache_file_path(filename):
+def get_cache_file_path(filename: str) -> Path:
     return CACHE_FOLDER / filename
 
 
