@@ -24,6 +24,7 @@
 
 PDF scientific paper translation and bilingual comparison library.
 
+- Beta version launched [Immersive Translate - BabelDOC](https://app.immersivetranslate.com/babel-doc/) 1000 free pages per month.
 - Provides a simple [command line interface](#getting-started).
 - Provides a [Python API](#python-api).
 - Mainly designed to be embedded into other programs, but can also be used directly for simple translation tasks.
