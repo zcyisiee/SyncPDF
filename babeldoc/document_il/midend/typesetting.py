@@ -156,32 +156,84 @@ class TypesettingUnit:
 
         if unicode:
             return unicode in [
+                # 英文标点
                 ",",
                 ".",
                 ":",
                 ";",
                 "?",
                 "!",
-                "，",
-                "。",
-                "：",
-                "？",
-                "！",
-                "]",
-                "}",
-                "）",
-                "〕",
-                "〉",
-                "】",
-                "〗",
-                "」",
-                "』",
-                "、",
-                "”",
-                '"',
-                "；",
+                # 中文点号
+                "，",  # 逗号
+                "。",  # 句号
+                "．",  # 全角句号
+                "、",  # 顿号
+                "：",  # 冒号
+                "；",  # 分号
+                "！",  # 叹号
+                "‼",  # 双叹号
+                "？",  # 问号
+                "⁇",  # 双问号
+                # 结束引号
+                "”",  # 右双引号
+                "’",  # 右单引号
+                "」",  # 右直角单引号
+                "』",  # 右直角双引号
+                # 结束括号
+                ")",  # 右圆括号
+                "]",  # 右方括号
+                "}",  # 右花括号
+                "）",  # 右圆括号
+                "〕",  # 右龟甲括号
+                "〉",  # 右单书名号
+                "】",  # 右黑色方头括号
+                "〗",  # 右空白方头括号
+                "］",  # 全角右方括号
+                "｝",  # 全角右花括号
+                # 结束双书名号
+                "》",  # 右双书名号
+                # 连接号
+                "～",  # 全角波浪号
+                "-",  # 连字符减号
+                "–",  # 短破折号(EN DASH)
+                "—",  # 长破折号(EM DASH)
+                # 间隔号
+                "·",  # 中间点
+                "・",  # 片假名中间点
+                "‧",  # 连字点
+                # 分隔号
+                "/",  # 斜杠
+                "／",  # 全角斜杠
+                "⁄",  # 分数斜杠
             ]
         return False
+
+    @property
+    def is_cannot_appear_in_line_end_punctuation(self):
+        if self.formular:
+            return False
+        unicode = self.try_get_unicode()
+        if not unicode:
+            return False
+        return unicode in [
+            # 开始引号
+            "“",  # 左双引号
+            "‘",  # 左单引号
+            "「",  # 左直角单引号
+            "『",  # 左直角双引号
+            # 开始括号
+            "(",  # 左圆括号
+            "[",  # 左方括号
+            "{",  # 左花括号
+            "（",  # 左圆括号
+            "〔",  # 左龟甲括号
+            "〈",  # 左单书名号
+            "《",  # 左双书名号
+            # 开始单双书名号
+            "〖",  # 左空白方头括号
+            "〘",  # 左黑色方头括号
+            "〚",  # 左单书名号
+        ]
 
     def passthrough(self) -> [PdfCharacter]:
         if self.char:
@@ -554,6 +606,15 @@ class Typesetting:
                 and current_x > box.x  # 不是行首
                 and unit.try_get_unicode() != " "  # 不是空格
                 and last_unit.try_get_unicode() != " "  # 不是空格
+                and last_unit.try_get_unicode()
+                not in [
+                    "。",
+                    "！",
+                    "？",
+                    "；",
+                    "：",
+                    "，",
+                ]
             ):
                 current_x += space_width * 0.5
             if use_english_line_break:
@@ -564,9 +625,16 @@ class Typesetting:
                 width_before_next_break_point = 0
 
             # 如果当前行放不下这个元素，换行
-            if (current_x + unit_width > box.x2 and not unit.is_hung_punctuation) or (
-                use_english_line_break
-                and current_x + unit_width + width_before_next_break_point > box.x2
+            if not unit.is_hung_punctuation and (
+                (current_x + unit_width > box.x2)
+                or (
+                    use_english_line_break
+                    and current_x + unit_width + width_before_next_break_point > box.x2
+                )
+                or (
+                    unit.is_cannot_appear_in_line_end_punctuation
+                    and current_x + unit_width * 2 > box.x2
+                )
             ):
                 # 换行
                 current_x = box.x
