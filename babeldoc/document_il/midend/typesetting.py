@@ -1,4 +1,5 @@
 import logging
+import re
 import statistics
 import unicodedata
 from functools import cache
@@ -82,6 +83,15 @@ class TypesettingUnit:
                 "！",
             ]
         return False
+
+    @property
+    def can_break_line(self):
+        unicode = self.try_get_unicode()
+        if not unicode:
+            return True
+        if re.match(r"^[a-zA-Z0-9]+$", unicode):
+            return False
+        return True
 
     @property
     def is_chinese_char(self):
@@ -450,6 +460,21 @@ class Typesetting:
         paragraph.pdf_paragraph_composition = []
         self.retypeset(paragraph, page, typesetting_units)
 
+    def _get_width_before_next_break_point(
+        self, typesetting_units: list[TypesettingUnit], scale: float
+    ) -> float:
+        if not typesetting_units:
+            return 0
+        if typesetting_units[0].can_break_line:
+            return 0
+
+        total_width = 0
+        for unit in typesetting_units:
+            if unit.can_break_line:
+                return total_width * scale
+            total_width += unit.width
+        return total_width * scale
+
     def _layout_typesetting_units(
         self,
         typesetting_units: list[TypesettingUnit],
@@ -457,6 +482,7 @@ class Typesetting:
         scale: float,
         line_spacing: float,
         paragraph: il_version_1.PdfParagraph,
+        use_english_line_break: bool = True,
     ) -> tuple[list[TypesettingUnit], bool]:
         """布局排版单元。
 
@@ -504,7 +530,7 @@ class Typesetting:
         if paragraph.first_line_indent:
             current_x += space_width * 4
         # 遍历所有排版单元
-        for unit in typesetting_units:
+        for i, unit in enumerate(typesetting_units):
             # 计算当前单元在当前缩放下的尺寸
             unit_width = unit.width * scale
             unit_height = unit.height * scale
@@ -530,9 +556,18 @@ class Typesetting:
                 and last_unit.try_get_unicode() != " "  # 不是空格
             ):
                 current_x += space_width * 0.5
+            if use_english_line_break:
+                width_before_next_break_point = self._get_width_before_next_break_point(
+                    typesetting_units[i + 1 :], scale
+                )
+            else:
+                width_before_next_break_point = 0
 
             # 如果当前行放不下这个元素，换行
-            if current_x + unit_width > box.x2 and not unit.is_hung_punctuation:
+            if (current_x + unit_width > box.x2 and not unit.is_hung_punctuation) or (
+                use_english_line_break
+                and current_x + unit_width + width_before_next_break_point > box.x2
+            ):
                 # 换行
                 current_x = box.x
                 current_y -= line_height * line_spacing
@@ -568,6 +603,7 @@ class Typesetting:
         paragraph: il_version_1.PdfParagraph,
         page: il_version_1.Page,
         typesetting_units: list[TypesettingUnit],
+        use_english_line_break: bool = True,
     ):
         box = paragraph.box
         scale = 1.0
@@ -584,6 +620,7 @@ class Typesetting:
                 scale,
                 line_spacing,
                 paragraph,
+                use_english_line_break,
             )
 
             # 如果所有单元都放得下，就完成排版
@@ -629,6 +666,11 @@ class Typesetting:
                 min_line_spacing = 1.1
                 scale = 1.0
                 line_spacing = 1.5
+        # 如果仍然放不下，则尝试去除英文换行限制
+        if use_english_line_break:
+            self.retypeset(
+                paragraph, page, typesetting_units, use_english_line_break=False
+            )
 
     def create_typesetting_units(
         self,
