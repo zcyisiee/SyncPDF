@@ -419,6 +419,7 @@ def do_translate(pm, translation_config):
     finally:
         logger.debug("do_translate finally")
         pm.on_finish()
+        translation_config.cleanup_temp_files()
 
 
 def download_font_assets():

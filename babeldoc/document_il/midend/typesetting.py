@@ -1,4 +1,5 @@
 import logging
+import re
 import statistics
 import unicodedata
 from functools import cache
@@ -84,6 +85,15 @@ class TypesettingUnit:
         return False
 
     @property
+    def can_break_line(self):
+        unicode = self.try_get_unicode()
+        if not unicode:
+            return True
+        if re.match(r"^[a-zA-Z0-9]+$", unicode):
+            return False
+        return True
+
+    @property
     def is_chinese_char(self):
         if self.formular:
             return False
@@ -146,32 +156,84 @@ class TypesettingUnit:
 
         if unicode:
             return unicode in [
+                # 英文标点
                 ",",
                 ".",
                 ":",
                 ";",
                 "?",
                 "!",
-                "，",
-                "。",
-                "：",
-                "？",
-                "！",
-                "]",
-                "}",
-                "）",
-                "〕",
-                "〉",
-                "】",
-                "〗",
-                "」",
-                "』",
-                "、",
-                "”",
-                '"',
-                "；",
+                # 中文点号
+                "，",  # 逗号
+                "。",  # 句号
+                "．",  # 全角句号
+                "、",  # 顿号
+                "：",  # 冒号
+                "；",  # 分号
+                "！",  # 叹号
+                "‼",  # 双叹号
+                "？",  # 问号
+                "⁇",  # 双问号
+                # 结束引号
+                "”",  # 右双引号
+                "’",  # 右单引号
+                "」",  # 右直角单引号
+                "』",  # 右直角双引号
+                # 结束括号
+                ")",  # 右圆括号
+                "]",  # 右方括号
+                "}",  # 右花括号
+                "）",  # 右圆括号
+                "〕",  # 右龟甲括号
+                "〉",  # 右单书名号
+                "】",  # 右黑色方头括号
+                "〗",  # 右空白方头括号
+                "］",  # 全角右方括号
+                "｝",  # 全角右花括号
+                # 结束双书名号
+                "》",  # 右双书名号
+                # 连接号
+                "～",  # 全角波浪号
+                "-",  # 连字符减号
+                "–",  # 短破折号(EN DASH)
+                "—",  # 长破折号(EM DASH)
+                # 间隔号
+                "·",  # 中间点
+                "・",  # 片假名中间点
+                "‧",  # 连字点
+                # 分隔号
+                "/",  # 斜杠
+                "／",  # 全角斜杠
+                "⁄",  # 分数斜杠
             ]
         return False
+
+    @property
+    def is_cannot_appear_in_line_end_punctuation(self):
+        if self.formular:
+            return False
+        unicode = self.try_get_unicode()
+        if not unicode:
+            return False
+        return unicode in [
+            # 开始引号
+            "“",  # 左双引号
+            "‘",  # 左单引号
+            "「",  # 左直角单引号
+            "『",  # 左直角双引号
+            # 开始括号
+            "(",  # 左圆括号
+            "[",  # 左方括号
+            "{",  # 左花括号
+            "（",  # 左圆括号
+            "〔",  # 左龟甲括号
+            "〈",  # 左单书名号
+            "《",  # 左双书名号
+            # 开始单双书名号
+            "〖",  # 左空白方头括号
+            "〘",  # 左黑色方头括号
+            "〚",  # 左单书名号
+        ]
 
     def passthrough(self) -> [PdfCharacter]:
         if self.char:
@@ -450,6 +512,21 @@ class Typesetting:
         paragraph.pdf_paragraph_composition = []
         self.retypeset(paragraph, page, typesetting_units)
 
+    def _get_width_before_next_break_point(
+        self, typesetting_units: list[TypesettingUnit], scale: float
+    ) -> float:
+        if not typesetting_units:
+            return 0
+        if typesetting_units[0].can_break_line:
+            return 0
+
+        total_width = 0
+        for unit in typesetting_units:
+            if unit.can_break_line:
+                return total_width * scale
+            total_width += unit.width
+        return total_width * scale
+
     def _layout_typesetting_units(
         self,
         typesetting_units: list[TypesettingUnit],
@@ -457,6 +534,7 @@ class Typesetting:
         scale: float,
         line_spacing: float,
         paragraph: il_version_1.PdfParagraph,
+        use_english_line_break: bool = True,
     ) -> tuple[list[TypesettingUnit], bool]:
         """布局排版单元。
 
@@ -504,7 +582,7 @@ class Typesetting:
         if paragraph.first_line_indent:
             current_x += space_width * 4
         # 遍历所有排版单元
-        for unit in typesetting_units:
+        for i, unit in enumerate(typesetting_units):
             # 计算当前单元在当前缩放下的尺寸
             unit_width = unit.width * scale
             unit_height = unit.height * scale
@@ -528,11 +606,36 @@ class Typesetting:
                 and current_x > box.x  # 不是行首
                 and unit.try_get_unicode() != " "  # 不是空格
                 and last_unit.try_get_unicode() != " "  # 不是空格
+                and last_unit.try_get_unicode()
+                not in [
+                    "。",
+                    "！",
+                    "？",
+                    "；",
+                    "：",
+                    "，",
+                ]
             ):
                 current_x += space_width * 0.5
+            if use_english_line_break:
+                width_before_next_break_point = self._get_width_before_next_break_point(
+                    typesetting_units[i + 1 :], scale
+                )
+            else:
+                width_before_next_break_point = 0
 
             # 如果当前行放不下这个元素，换行
-            if current_x + unit_width > box.x2 and not unit.is_hung_punctuation:
+            if not unit.is_hung_punctuation and (
+                (current_x + unit_width > box.x2)
+                or (
+                    use_english_line_break
+                    and current_x + unit_width + width_before_next_break_point > box.x2
+                )
+                or (
+                    unit.is_cannot_appear_in_line_end_punctuation
+                    and current_x + unit_width * 2 > box.x2
+                )
+            ):
                 # 换行
                 current_x = box.x
                 current_y -= line_height * line_spacing
@@ -568,6 +671,7 @@ class Typesetting:
         paragraph: il_version_1.PdfParagraph,
         page: il_version_1.Page,
         typesetting_units: list[TypesettingUnit],
+        use_english_line_break: bool = True,
     ):
         box = paragraph.box
         scale = 1.0
@@ -584,6 +688,7 @@ class Typesetting:
                 scale,
                 line_spacing,
                 paragraph,
+                use_english_line_break,
             )
 
             # 如果所有单元都放得下，就完成排版
@@ -629,6 +734,11 @@ class Typesetting:
                 min_line_spacing = 1.1
                 scale = 1.0
                 line_spacing = 1.5
+        # 如果仍然放不下，则尝试去除英文换行限制
+        if use_english_line_break:
+            self.retypeset(
+                paragraph, page, typesetting_units, use_english_line_break=False
+            )
 
     def create_typesetting_units(
         self,
