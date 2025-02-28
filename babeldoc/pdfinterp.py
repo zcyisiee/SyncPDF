@@ -422,7 +422,11 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                                     name,
                                 ):
                                     self.il_creater.on_passthrough_per_char(name, args)
-                                if not (
+                                if name == "d":
+                                    arg0 = f"[{' '.join(f'{arg}' for arg in args[0])}]"
+                                    arg1 = args[1]
+                                    ops += f"{arg0} {arg1} {name} "
+                                elif not (
                                     name[0] == "T"
                                     or name
                                     in ['"', "'", "EI", "MP", "DP", "BMC", "BDC"]
