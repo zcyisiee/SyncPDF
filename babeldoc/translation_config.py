@@ -1,3 +1,5 @@
+import logging
+import shutil
 import tempfile
 import threading
 from pathlib import Path
@@ -6,6 +8,8 @@ from babeldoc.const import CACHE_FOLDER
 from babeldoc.document_il.translator.translator import BaseTranslator
 from babeldoc.docvision.doclayout import DocLayoutModel
 from babeldoc.progress_monitor import ProgressMonitor
+
+logger = logging.getLogger(__name__)
 
 
 class TranslationConfig:
@@ -157,6 +161,11 @@ class TranslationConfig:
     def cancel_translation(self):
         if self.progress_monitor is not None:
             self.progress_monitor.cancel()
+
+    def cleanup_temp_files(self):
+        if self._is_temp_dir:
+            logger.info(f"cleanup temp files: {self.working_dir}")
+            shutil.rmtree(self.working_dir)
 
 
 class TranslateResult:
