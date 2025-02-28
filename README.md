@@ -102,6 +102,8 @@ uv run babeldoc --bing --files example.pdf --files example2.pdf
 > Currently, this project mainly focuses on English-to-Chinese translation, and other scenarios have not been tested yet.
 > 
 > (2025.3.1 update): Basic English target language support has been added, primarily to minimize line breaks within words([0-9A-Za-z]+).
+> 
+> [HELP WANTED: Collecting word regular expressions for more languages](https://github.com/funstory-ai/BabelDOC/issues/129)
 
 ### PDF Processing Options
 
