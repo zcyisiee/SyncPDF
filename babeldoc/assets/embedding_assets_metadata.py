@@ -10,6 +10,13 @@ FONT_METADATA_URL = {
     "modelscope": "https://www.modelscope.cn/datasets/awwaawwa/BabelDOCAssets/resolve/master/font_metadata.json",
 }
 
+FONT_URL_BY_UPSTREAM = {
+    "github": lambda name: f"https://raw.githubusercontent.com/funstory-ai/BabelDOC-Assets/refs/heads/main/fonts/{name}",
+    "huggingface": lambda name: f"https://huggingface.co/datasets/awwaawwa/BabelDOC-Assets/resolve/main/fonts/{name}?download=true",
+    "hf-mirror": lambda name: f"https://hf-mirror.com/datasets/awwaawwa/BabelDOC-Assets/resolve/main/fonts/{name}?download=true",
+    "modelscope": lambda name: f"https://www.modelscope.cn/datasets/awwaawwa/BabelDOCAssets/resolve/master/fonts/{name}",
+}
+
 DOC_LAYOUT_ONNX_MODEL_URL = {
     "huggingface": "https://huggingface.co/wybxc/DocLayout-YOLO-DocStructBench-onnx/resolve/main/doclayout_yolo_docstructbench_imgsz1024.onnx?download=true",
     "hf-mirror": "https://hf-mirror.com/wybxc/DocLayout-YOLO-DocStructBench-onnx/resolve/main/doclayout_yolo_docstructbench_imgsz1024.onnx?download=true",
@@ -348,7 +355,9 @@ EMBEDDING_FONT_METADATA = {
 
 CN_FONT_FAMILY = {
     # 手写体
-    "script": "LXGWWenKaiGB-Regular.ttf",
+    "script": [
+        "LXGWWenKaiGB-Regular.ttf",
+    ],
     # 正文字体
     "normal": [
         "SourceHanSerifCN-Bold.ttf",
@@ -364,12 +373,16 @@ CN_FONT_FAMILY = {
 }
 
 HK_FONT_FAMILY = {
-    "script": "LXGWWenKaiTC-Regular.ttf",
+    "script": ["LXGWWenKaiTC-Regular.ttf", "LXGWWenKaiGB-Regular.ttf"],
     "normal": [
         "SourceHanSerifHK-Bold.ttf",
         "SourceHanSerifHK-Regular.ttf",
         "SourceHanSansHK-Bold.ttf",
         "SourceHanSansHK-Regular.ttf",
+        "SourceHanSerifCN-Bold.ttf",
+        "SourceHanSerifCN-Regular.ttf",
+        "SourceHanSansCN-Bold.ttf",
+        "SourceHanSansCN-Regular.ttf",
     ],
     "fallback": [
         "GoNotoKurrent-Regular.ttf",
@@ -378,12 +391,16 @@ HK_FONT_FAMILY = {
 }
 
 TW_FONT_FAMILY = {
-    "script": "LXGWWenKaiTC-Regular.ttf",
+    "script": ["LXGWWenKaiTC-Regular.ttf", "LXGWWenKaiGB-Regular.ttf"],
     "normal": [
         "SourceHanSerifTW-Bold.ttf",
         "SourceHanSerifTW-Regular.ttf",
         "SourceHanSansTW-Bold.ttf",
         "SourceHanSansTW-Regular.ttf",
+        "SourceHanSerifCN-Bold.ttf",
+        "SourceHanSerifCN-Regular.ttf",
+        "SourceHanSansCN-Bold.ttf",
+        "SourceHanSansCN-Regular.ttf",
     ],
     "fallback": [
         "GoNotoKurrent-Regular.ttf",
@@ -414,15 +431,11 @@ def verify_font_family(font_family: str | dict):
     if isinstance(font_family, str):
         font_family = ALL_FONT_FAMILY[font_family]
     for k in font_family:
-        if k not in ["script", "normal", "fallback", "base"]:
+        if k not in ["script", "normal", "fallback"]:
             raise ValueError(f"Invalid font family: {font_family}")
-        if k in ["script", "base"]:
-            if font_family[k] not in EMBEDDING_FONT_METADATA:
-                raise ValueError(f"Invalid script font: {font_family[k]}")
-        else:
-            for font_file_name in font_family[k]:
-                if font_file_name not in EMBEDDING_FONT_METADATA:
-                    raise ValueError(f"Invalid font file: {font_file_name}")
+        for font_file_name in font_family[k]:
+            if font_file_name not in EMBEDDING_FONT_METADATA:
+                raise ValueError(f"Invalid font file: {font_file_name}")
 
 
 if __name__ == "__main__":
