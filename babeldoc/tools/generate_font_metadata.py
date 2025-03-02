@@ -65,11 +65,9 @@ def main():
     metadatas = {}
     for font_path in list((repo_path / "fonts").glob("**/*.ttf")):
         logger.info(f"Getting font metadata for {font_path}")
-        sha256_hash = hashlib.sha256()
         with Path(font_path).open("rb") as f:
             # Read the file in chunks to handle large files efficiently
-            for byte_block in iter(lambda: f.read(4096), b""):
-                sha256_hash.update(byte_block)
+            hash_ = hashlib.file_digest(f, "sha3_256")
         extracted_metadata = get_font_metadata(font_path)
         metadata = {
             "file_name": font_path.name,
@@ -81,7 +79,8 @@ def main():
             "serif": extracted_metadata.serif,
             "ascent": extracted_metadata.ascent,
             "descent": extracted_metadata.descent,
-            "sha256": sha256_hash.hexdigest(),
+            "sha3_256": hash_.hexdigest(),
+            "size": font_path.stat().st_size,
         }
         metadatas[font_path.name] = metadata
     metadatas = orjson.dumps(
