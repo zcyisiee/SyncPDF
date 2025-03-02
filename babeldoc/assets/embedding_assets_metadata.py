@@ -351,10 +351,10 @@ CN_FONT_FAMILY = {
     "script": "LXGWWenKaiGB-Regular.ttf",
     # 正文字体
     "normal": [
-        "SourceHanSansCN-Bold.ttf",
-        "SourceHanSansCN-Regular.ttf",
         "SourceHanSerifCN-Bold.ttf",
         "SourceHanSerifCN-Regular.ttf",
+        "SourceHanSansCN-Bold.ttf",
+        "SourceHanSansCN-Regular.ttf",
     ],
     # 备用字体
     "fallback": [
@@ -366,10 +366,10 @@ CN_FONT_FAMILY = {
 HK_FONT_FAMILY = {
     "script": "LXGWWenKaiTC-Regular.ttf",
     "normal": [
-        "SourceHanSansHK-Bold.ttf",
-        "SourceHanSansHK-Regular.ttf",
         "SourceHanSerifHK-Bold.ttf",
         "SourceHanSerifHK-Regular.ttf",
+        "SourceHanSansHK-Bold.ttf",
+        "SourceHanSansHK-Regular.ttf",
     ],
     "fallback": [
         "GoNotoKurrent-Regular.ttf",
@@ -380,10 +380,10 @@ HK_FONT_FAMILY = {
 TW_FONT_FAMILY = {
     "script": "LXGWWenKaiTC-Regular.ttf",
     "normal": [
-        "SourceHanSansTW-Bold.ttf",
-        "SourceHanSansTW-Regular.ttf",
         "SourceHanSerifTW-Bold.ttf",
         "SourceHanSerifTW-Regular.ttf",
+        "SourceHanSansTW-Bold.ttf",
+        "SourceHanSansTW-Regular.ttf",
     ],
     "fallback": [
         "GoNotoKurrent-Regular.ttf",
