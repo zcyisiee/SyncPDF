@@ -349,17 +349,18 @@ EMBEDDING_FONT_METADATA = {
 CN_FONT_FAMILY = {
     # 手写体
     "script": "LXGWWenKaiGB-Regular.ttf",
+    # 正文字体
     "normal": [
         "SourceHanSansCN-Bold.ttf",
         "SourceHanSansCN-Regular.ttf",
         "SourceHanSerifCN-Bold.ttf",
         "SourceHanSerifCN-Regular.ttf",
     ],
+    # 备用字体
     "fallback": [
         "GoNotoKurrent-Regular.ttf",
         "GoNotoKurrent-Bold.ttf",
     ],
-    "base": "SourceHanSerifCN-Regular.ttf",
 }
 
 HK_FONT_FAMILY = {
@@ -374,7 +375,6 @@ HK_FONT_FAMILY = {
         "GoNotoKurrent-Regular.ttf",
         "GoNotoKurrent-Bold.ttf",
     ],
-    "base": "SourceHanSerifHK-Regular.ttf",
 }
 
 TW_FONT_FAMILY = {
@@ -389,7 +389,6 @@ TW_FONT_FAMILY = {
         "GoNotoKurrent-Regular.ttf",
         "GoNotoKurrent-Bold.ttf",
     ],
-    "base": "SourceHanSerifTW-Regular.ttf",
 }
 
 ALL_FONT_FAMILY = {
