@@ -280,6 +280,7 @@ async def download_all_fonts_async(client: httpx.AsyncClient | None = None):
     if fastest_upstream is None:
         logger.error("Failed to get fastest upstream")
         exit(1)
+    logger.info(f"Downloading fonts from {fastest_upstream}")
 
     font_tasks = [
         asyncio.create_task(
