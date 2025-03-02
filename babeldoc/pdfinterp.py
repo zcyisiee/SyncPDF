@@ -249,7 +249,13 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
         subtype = xobj.get("Subtype")
         if subtype is LITERAL_FORM and "BBox" in xobj:
             interpreter = self.dup()
-            bbox = cast(Rect, list_value(xobj["BBox"]))
+
+            # In extremely rare cases, a none might be mixed in the bbox, for example
+            # /BBox [ 0 3.052 null 274.9 157.3 ]
+            bbox = list(
+                filter(lambda x: x is not None, cast(Rect, list_value(xobj["BBox"])))
+            )
+
             matrix = cast(Matrix, list_value(xobj.get("Matrix", MATRIX_IDENTITY)))
             # According to PDF reference 1.7 section 4.9.1, XObjects in
             # earlier PDFs (prior to v1.2) use the page's Resources entry

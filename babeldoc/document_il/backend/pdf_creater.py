@@ -413,11 +413,11 @@ class PDFCreater:
 
         # 使用子进程进行字体子集化
         if not translation_config.skip_clean:
-            pdf = self.subset_fonts_in_subprocess(pdf, translation_config)
+            pdf = self.subset_fonts_in_subprocess(pdf, translation_config, tag="debug")
         return pdf
 
     def subset_fonts_in_subprocess(
-        self, pdf: pymupdf.Document, translation_config: TranslationConfig
+        self, pdf: pymupdf.Document, translation_config: TranslationConfig, tag: str
     ) -> pymupdf.Document:
         """Run font subsetting in a subprocess with timeout.
 
@@ -431,14 +431,10 @@ class PDFCreater:
         original_pdf = pdf
         # Create temporary file paths
         temp_input = str(
-            translation_config.get_working_file_path(
-                f"temp_subset_input_{int(time.time())}.pdf"
-            )
+            translation_config.get_working_file_path(f"temp_subset_input_{tag}.pdf")
         )
         temp_output = str(
-            translation_config.get_working_file_path(
-                f"temp_subset_output_{int(time.time())}.pdf"
-            )
+            translation_config.get_working_file_path(f"temp_subset_output_{tag}.pdf")
         )
 
         # Save PDF to temporary file without subsetting
@@ -504,6 +500,7 @@ class PDFCreater:
         deflate_fonts: bool = True,
         linear: bool = False,
         timeout: int = 120,
+        tag: str = "",
     ) -> bool:
         """Save a PDF document with a timeout for the clean=True operation.
 
@@ -523,14 +520,10 @@ class PDFCreater:
         """
         # Create temporary file paths
         temp_input = str(
-            translation_config.get_working_file_path(
-                f"temp_save_input_{int(time.time())}.pdf"
-            )
+            translation_config.get_working_file_path(f"temp_save_input_{tag}.pdf")
         )
         temp_output = str(
-            translation_config.get_working_file_path(
-                f"temp_save_output_{int(time.time())}.pdf"
-            )
+            translation_config.get_working_file_path(f"temp_save_output_{tag}.pdf")
         )
 
         # Save PDF to temporary file first
@@ -614,6 +607,9 @@ class PDFCreater:
                 logger.error(f"Error copying saved PDF: {e}")
                 pdf.save(output_path)  # Fallback to direct save
                 return False
+            finally:
+                Path(temp_input).unlink()
+                Path(temp_output).unlink()
         else:
             logger.warning(
                 f"PDF save with clean=True failed with exit code {exit_code} or produced empty file"
@@ -748,7 +744,9 @@ class PDFCreater:
             1,
         ) as pbar:
             if not translation_config.skip_clean:
-                pdf = self.subset_fonts_in_subprocess(pdf, translation_config)
+                pdf = self.subset_fonts_in_subprocess(
+                    pdf, translation_config, tag="mono"
+                )
 
             pbar.advance()
         with self.translation_config.progress_monitor.stage_start(
@@ -773,6 +771,7 @@ class PDFCreater:
                     clean=not translation_config.skip_clean,
                     deflate_fonts=True,
                     linear=False,
+                    tag="mono",
                 )
             pbar.advance()
             dual_out_path = None
@@ -823,6 +822,7 @@ class PDFCreater:
                     clean=not translation_config.skip_clean,
                     deflate_fonts=True,
                     linear=False,
+                    tag="dual",
                 )
                 if translation_config.debug:
                     translation_config.raise_if_cancelled()
