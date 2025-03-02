@@ -70,8 +70,13 @@ def _retry_if_not_cancelled_and_failed(retry_state):
 def verify_file(path: Path, sha3_256: str):
     if not path.exists():
         return False
+    hash_ = hashlib.sha3_256()
     with path.open("rb") as f:
-        hash_ = hashlib.file_digest(f, "sha3_256")
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            hash_.update(chunk)
     return hash_.hexdigest() == sha3_256
 
 
