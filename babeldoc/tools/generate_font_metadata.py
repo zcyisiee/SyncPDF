@@ -23,7 +23,7 @@ def get_font_metadata(font_path) -> PdfFont:
     page = doc.new_page(width=1000, height=1000)
     page.insert_font("test_font", font_path)
     translation_config = babeldoc.translation_config.TranslationConfig(
-        *[None for _ in range(5)]
+        *[None for _ in range(4)], doc_layout_model=1
     )
     translation_config.progress_monitor = babeldoc.high_level.ProgressMonitor(
         babeldoc.high_level.TRANSLATE_STAGES
@@ -67,7 +67,12 @@ def main():
         logger.info(f"Getting font metadata for {font_path}")
         with Path(font_path).open("rb") as f:
             # Read the file in chunks to handle large files efficiently
-            hash_ = hashlib.file_digest(f, "sha3_256")
+            hash_ = hashlib.sha3_256()
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                hash_.update(chunk)
         extracted_metadata = get_font_metadata(font_path)
         metadata = {
             "file_name": font_path.name,
