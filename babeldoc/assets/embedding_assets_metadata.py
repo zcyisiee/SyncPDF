@@ -399,6 +399,16 @@ ALL_FONT_FAMILY = {
 }
 
 
+def get_font_family(lang_code: str):
+    lang_code = lang_code.upper()
+    if "HK" in lang_code:
+        return HK_FONT_FAMILY
+    elif "TW" in lang_code:
+        return TW_FONT_FAMILY
+    else:
+        return CN_FONT_FAMILY
+
+
 def verify_font_family(font_family: str):
     if font_family not in ALL_FONT_FAMILY:
         raise ValueError(f"Invalid font family: {font_family}")
