@@ -334,6 +334,7 @@ async def generate_offline_assets_package_async(output_directory: Path | None = 
             f"offline_assets_{offline_assets_tag}.zip", "assets"
         )
     else:
+        output_directory.mkdir(parents=True, exist_ok=True)
         output_path = output_directory / f"offline_assets_{offline_assets_tag}.zip"
     with zipfile.ZipFile(
         output_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
