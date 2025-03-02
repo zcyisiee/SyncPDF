@@ -21,20 +21,34 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Cached models
-        id: cache-mods
+      - name: Cached Assets
+        id: cache-assets
         uses: actions/cache@v4.2.0
         with:
-          path: ~/.cache/huggingface/hub/models--wybxc--DocLayout-YOLO-DocStructBench-onnx
-          key: ${{runner.os}}-huggingmodel-wybxc--DocLayout-YOLO-DocStructBench-onnx
+          path: ~/.cache/babeldoc
+          key: babeldoc-assets-${{ hashFiles('babeldoc/assets/embedding_assets_metadata.py') }}
       - name: Setup uv with Python ${{ matrix.python-version }}
         uses: astral-sh/setup-uv@1edb52594c857e2b5b13128931090f0640537287 # v5.3.0
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
           cache-dependency-glob: "uv.lock"
-
+      - name: Warm up cache
+        run: |
+          uv run babeldoc --warmup
       - name: Run tests
         run: |
           uv run babeldoc --help
           uv run babeldoc --bing --files examples/ci/test.pdf
+      - name: Generate offline assets package
+        run: |
+          uv run babeldoc --generate-offline-assets /tmp/offline_assets
+      - name: Restore offline assets package
+        run: |
+          rm -rf ~/.cache/babeldoc
+          uv run babeldoc --restore-offline-assets /tmp/offline_assets
+      - name: Clean up
+        run: |
+          rm -rf /tmp/offline_assets
+          rm -rf ~/.cache/babeldoc/cache.v1.db
+          rm -rf ~/.cache/babeldoc/working

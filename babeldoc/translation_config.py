@@ -20,6 +20,7 @@ class TranslationConfig:
         lang_in: str,
         lang_out: str,
         doc_layout_model: DocLayoutModel,
+        # for backward compatibility
         font: str | Path | None = None,
         pages: str | None = None,
         output_dir: str | Path | None = None,
@@ -48,7 +49,8 @@ class TranslationConfig:
         self.input_file = input_file
         self.lang_in = lang_in
         self.lang_out = lang_out
-        self.font = font
+        # just ignore font
+        self.font = None
 
         self.pages = pages
         self.page_ranges = self._parse_pages(pages) if pages else None

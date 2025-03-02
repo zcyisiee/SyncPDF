@@ -1,15 +1,16 @@
 import abc
 import ast
 import logging
-import os.path
 import platform
-from pathlib import Path
 
 import cv2
 import numpy as np
 import onnx
 import onnxruntime
-from huggingface_hub import hf_hub_download
+
+from babeldoc.assets.assets import get_doclayout_onnx_model_path
+
+# from huggingface_hub import hf_hub_download
 
 logger = logging.getLogger(__name__)
 
@@ -17,11 +18,8 @@ logger = logging.getLogger(__name__)
 class DocLayoutModel(abc.ABC):
     @staticmethod
     def load_onnx():
-        logger.debug("Loading ONNX model...")
-        model = OnnxModel.from_pretrained(
-            repo_id="wybxc/DocLayout-YOLO-DocStructBench-onnx",
-            filename="doclayout_yolo_docstructbench_imgsz1024.onnx",
-        )
+        logger.info("Loading ONNX model...")
+        model = OnnxModel.from_pretrained()
         return model
 
     @staticmethod
@@ -112,30 +110,8 @@ class OnnxModel(DocLayoutModel):
         )
 
     @staticmethod
-    def from_pretrained(repo_id: str, filename: str):
-        if os.environ.get("USE_MODELSCOPE", "0") == "1":
-            repo_mapping = {
-                # Edit here to add more models
-                "wybxc/DocLayout-YOLO-DocStructBench-onnx": "AI-ModelScope/DocLayout-YOLO-DocStructBench-onnx",
-            }
-            from modelscope import snapshot_download
-
-            model_dir = snapshot_download(repo_mapping[repo_id])
-            pth = Path(model_dir) / filename
-        else:
-            try:
-                pth = hf_hub_download(
-                    repo_id=repo_id,
-                    filename=filename,
-                    etag_timeout=1,
-                    local_files_only=True,
-                )
-            except Exception:
-                pth = hf_hub_download(
-                    repo_id=repo_id,
-                    filename=filename,
-                    etag_timeout=1,
-                )
+    def from_pretrained():
+        pth = get_doclayout_onnx_model_path()
         return OnnxModel(pth)
 
     @property
