@@ -341,7 +341,7 @@ async def generate_offline_assets_package_async(output_directory: Path | None = 
         output_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
     ) as zipf:
         for file_type, file_descs in file_list.items():
-            zipf.mkdir(file_type)
+            # zipf.mkdir(file_type)
             for file_desc in file_descs:
                 file_name = file_desc["name"]
                 sha3_256 = file_desc["sha3_256"]
