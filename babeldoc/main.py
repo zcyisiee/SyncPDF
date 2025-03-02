@@ -12,6 +12,7 @@ from rich.progress import TextColumn
 from rich.progress import TimeElapsedColumn
 from rich.progress import TimeRemainingColumn
 
+import babeldoc.assets.assets
 import babeldoc.high_level
 from babeldoc.document_il.translator.translator import BingTranslator
 from babeldoc.document_il.translator.translator import GoogleTranslator
@@ -211,6 +212,7 @@ async def main():
         logging.getLogger().setLevel(logging.DEBUG)
 
     if args.warmup:
+        babeldoc.assets.assets.warmup()
         logger.info("Warmup completed, exiting...")
         return
 

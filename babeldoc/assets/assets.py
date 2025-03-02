@@ -178,21 +178,6 @@ async def get_fastest_upstream(client: httpx.AsyncClient | None = None):
     return online_font_metadata, fastest_upstream_for_font, fastest_upstream_for_model
 
 
-async def async_warmup():
-    logger.info("Warming up...")
-    async with httpx.AsyncClient() as client:
-        await get_doclayout_onnx_model_path_async(client)
-
-
-def warmup():
-    try:
-        asyncio.run(async_warmup())
-    except RuntimeError:
-        loop = asyncio.get_running_loop()
-        future = asyncio.run_coroutine_threadsafe(async_warmup(), loop)
-        future.result()
-
-
 async def get_doclayout_onnx_model_path_async(client: httpx.AsyncClient | None = None):
     onnx_path = get_cache_file_path(
         "doclayout_yolo_docstructbench_imgsz1024.onnx", "model"
@@ -228,7 +213,10 @@ def get_font_url_by_name_and_upstream(font_file_name: str, upstream: str):
 
 
 async def get_font_and_metadata_async(
-    font_file_name: str, client: httpx.AsyncClient | None = None
+    font_file_name: str,
+    client: httpx.AsyncClient | None = None,
+    fastest_upstream: str | None = None,
+    font_metadata: dict | None = None,
 ):
     cache_file_path = get_cache_file_path(font_file_name, "fonts")
     if font_file_name in EMBEDDING_FONT_METADATA and verify_file(
@@ -236,20 +224,26 @@ async def get_font_and_metadata_async(
     ):
         return cache_file_path, EMBEDDING_FONT_METADATA[font_file_name]
 
-    logger.info(f"Font {font_file_name} not found or corrupted, downloading...")
-    fastest_upstream, font_metadata = await get_fastest_upstream_for_font(client)
+    logger.info(f"Font {cache_file_path} not found or corrupted, downloading...")
     if fastest_upstream is None:
-        logger.critical("Failed to get fastest upstream")
-        exit(1)
+        fastest_upstream, font_metadata = await get_fastest_upstream_for_font(client)
+        if fastest_upstream is None:
+            logger.critical("Failed to get fastest upstream")
+            exit(1)
 
-    if font_file_name not in font_metadata:
-        logger.critical(f"Font {font_file_name} not found in {font_metadata}")
-        exit(1)
+        if font_file_name not in font_metadata:
+            logger.critical(f"Font {font_file_name} not found in {font_metadata}")
+            exit(1)
 
-    if verify_file(cache_file_path, font_metadata[font_file_name]["sha3_256"]):
-        return cache_file_path, font_metadata[font_file_name]
+        if verify_file(cache_file_path, font_metadata[font_file_name]["sha3_256"]):
+            return cache_file_path, font_metadata[font_file_name]
+
+    assert font_metadata is not None
 
     url = get_font_url_by_name_and_upstream(font_file_name, fastest_upstream)
+    if "sha3_256" not in font_metadata[font_file_name]:
+        logger.critical(f"Font {font_file_name} not found in {font_metadata}")
+        exit(1)
     await download_file(
         client, url, cache_file_path, font_metadata[font_file_name]["sha3_256"]
     )
@@ -263,6 +257,35 @@ def get_font_and_metadata(font_file_name: str):
 def get_font_family(lang_code: str):
     font_family = embedding_assets_metadata.get_font_family(lang_code)
     return font_family
+
+
+async def download_all_fonts_async(client: httpx.AsyncClient | None = None):
+    fastest_upstream, font_metadata = await get_fastest_upstream_for_font(client)
+    if fastest_upstream is None:
+        logger.error("Failed to get fastest upstream")
+        exit(1)
+
+    font_tasks = [
+        asyncio.create_task(
+            get_font_and_metadata_async(
+                font_file_name, client, fastest_upstream, font_metadata
+            )
+        )
+        for font_file_name in EMBEDDING_FONT_METADATA
+    ]
+    await asyncio.gather(*font_tasks)
+
+
+async def async_warmup():
+    logger.info("Warming up...")
+    async with httpx.AsyncClient() as client:
+        onnx_task = asyncio.create_task(get_doclayout_onnx_model_path_async(client))
+        font_tasks = asyncio.create_task(download_all_fonts_async(client))
+        await asyncio.gather(onnx_task, font_tasks)
+
+
+def warmup():
+    run_coro(async_warmup())
 
 
 if __name__ == "__main__":
