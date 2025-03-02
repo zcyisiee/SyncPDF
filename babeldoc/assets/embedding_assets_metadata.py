@@ -402,26 +402,26 @@ ALL_FONT_FAMILY = {
 def get_font_family(lang_code: str):
     lang_code = lang_code.upper()
     if "HK" in lang_code:
-        return HK_FONT_FAMILY
+        font_family = HK_FONT_FAMILY
     elif "TW" in lang_code:
-        return TW_FONT_FAMILY
+        font_family = TW_FONT_FAMILY
     else:
-        return CN_FONT_FAMILY
+        font_family = CN_FONT_FAMILY
+    verify_font_family(font_family)
+    return font_family
 
 
-def verify_font_family(font_family: str):
-    if font_family not in ALL_FONT_FAMILY:
-        raise ValueError(f"Invalid font family: {font_family}")
-    for k in ALL_FONT_FAMILY[font_family]:
+def verify_font_family(font_family: str | dict):
+    if isinstance(font_family, str):
+        font_family = ALL_FONT_FAMILY[font_family]
+    for k in font_family:
         if k not in ["script", "normal", "fallback", "base"]:
             raise ValueError(f"Invalid font family: {font_family}")
         if k in ["script", "base"]:
-            if ALL_FONT_FAMILY[font_family][k] not in EMBEDDING_FONT_METADATA:
-                raise ValueError(
-                    f"Invalid script font: {ALL_FONT_FAMILY[font_family][k]}"
-                )
+            if font_family[k] not in EMBEDDING_FONT_METADATA:
+                raise ValueError(f"Invalid script font: {font_family[k]}")
         else:
-            for font_file_name in ALL_FONT_FAMILY[font_family][k]:
+            for font_file_name in font_family[k]:
                 if font_file_name not in EMBEDDING_FONT_METADATA:
                     raise ValueError(f"Invalid font file: {font_file_name}")
 
