@@ -288,7 +288,7 @@ async def download_all_fonts_async(client: httpx.AsyncClient | None = None):
 
 
 async def async_warmup():
-    logger.info("Warming up...")
+    logger.info("Downloading all assets...")
     async with httpx.AsyncClient() as client:
         onnx_task = asyncio.create_task(get_doclayout_onnx_model_path_async(client))
         font_tasks = asyncio.create_task(download_all_fonts_async(client))
@@ -319,14 +319,17 @@ def generate_all_assets_file_list():
     return result
 
 
-async def generate_offline_assets_package_async(output_path: Path | None = None):
+async def generate_offline_assets_package_async(output_directory: Path | None = None):
     await async_warmup()
+    logger.info("Generating offline assets package...")
     file_list = generate_all_assets_file_list()
     offline_assets_tag = get_offline_assets_tag(file_list)
-    if output_path is None:
+    if output_directory is None:
         output_path = get_cache_file_path(
             f"offline_assets_{offline_assets_tag}.zip", "assets"
         )
+    else:
+        output_path = output_directory / f"offline_assets_{offline_assets_tag}.zip"
     with zipfile.ZipFile(
         output_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
     ) as zipf:
@@ -402,11 +405,11 @@ def get_offline_assets_tag(file_list: dict | None = None):
     return offline_assets_tag
 
 
-def generate_offline_assets_package(output_path: Path | None = None):
-    return run_coro(generate_offline_assets_package_async(output_path))
+def generate_offline_assets_package(output_directory: Path | None = None):
+    return run_coro(generate_offline_assets_package_async(output_directory))
 
 
-def restore_offline_assets_package(input_path: Path):
+def restore_offline_assets_package(input_path: Path | None = None):
     return run_coro(restore_offline_assets_package_async(input_path))
 
 

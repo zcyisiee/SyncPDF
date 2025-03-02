@@ -157,6 +157,18 @@ uv run babeldoc --bing --files example.pdf --files example2.pdf
 - `--debug`, `-d`: Enable debug logging level and export detailed intermediate results in `~/.cache/yadt/working`.
 - `--report-interval`: Progress report interval in seconds (default: 0.1).
 
+### Offline Assets Management
+
+- `--generate-offline-assets`: Generate an offline assets package in the specified directory. This creates a zip file containing all required models and fonts.
+- `--restore-offline-assets`: Restore an offline assets package from the specified file. This extracts models and fonts from a previously generated package.
+
+> [!TIP]
+> 
+> 1. Offline assets packages are useful for environments without internet access or to speed up installation on multiple machines.
+> 2. Generate a package once with `babeldoc --generate-offline-assets /path/to/output/dir` and then distribute it.
+> 3. Restore the package on target machines with `babeldoc --restore-offline-assets /path/to/offline_assets_*.zip`.
+> 4. The offline assets package name cannot be modified because the file list hash is encoded in the name.
+
 ### Configuration File
 
 - `--config`, `-c`: Configuration file path. Use the TOML format.
@@ -175,6 +187,9 @@ openai = true
 openai-model = "SOME_ALSOME_MODEL"
 openai-base-url = "https://example.example/v1"
 openai-api-key = "[KEY]"
+# Offline assets management
+# generate-offline-assets = "/path/to/output/dir"
+# restore-offline-assets = "/path/to/offline_assets_package.zip"
 # All other options can also be set in the configuration file.
 ```
 
@@ -187,6 +202,25 @@ Please note:
 1. Make sure call `babeldoc.high_level.init()` before using the API
 
 2. The current `TranslationConfig` does not fully validate input parameters, so you need to ensure the validity of input parameters
+
+3. For offline assets management, you can use the following functions:
+   ```python
+   # Generate an offline assets package
+   from pathlib import Path
+   import babeldoc.assets.assets
+   
+   # Generate package to a specific directory
+   # path is optional, default is ~/.cache/babeldoc/assets/offline_assets_{hash}.zip
+   babeldoc.assets.assets.generate_offline_assets_package(Path("/path/to/output/dir"))
+   
+   # Restore from a package file
+   # path is optional, default is ~/.cache/babeldoc/assets/offline_assets_{hash}.zip
+   babeldoc.assets.assets.restore_offline_assets_package(Path("/path/to/offline_assets_package.zip"))
+   ```
+
+> [!TIP]
+> 
+> 1. The offline assets package name cannot be modified because the file list hash is encoded in the name.
 
 ## Background
 

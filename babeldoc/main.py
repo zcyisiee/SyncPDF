@@ -60,6 +60,16 @@ def create_parser():
         "--rpc-doclayout",
         help="RPC service host address for document layout analysis",
     )
+    parser.add_argument(
+        "--generate-offline-assets",
+        default=None,
+        help="Generate offline assets package in the specified directory",
+    )
+    parser.add_argument(
+        "--restore-offline-assets",
+        default=None,
+        help="Restore offline assets package from the specified file",
+    )
     # translation option argument group
     translation_group = parser.add_argument_group(
         "Translation",
@@ -210,6 +220,19 @@ async def main():
 
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    if args.generate_offline_assets:
+        babeldoc.assets.assets.generate_offline_assets_package(
+            Path(args.generate_offline_assets)
+        )
+        logger.info("Offline assets package generated, exiting...")
+        return
+
+    if args.restore_offline_assets:
+        babeldoc.assets.assets.restore_offline_assets_package(
+            Path(args.restore_offline_assets)
+        )
+        logger.info("Offline assets package restored")
 
     if args.warmup:
         babeldoc.assets.assets.warmup()
