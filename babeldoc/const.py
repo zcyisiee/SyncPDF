@@ -7,7 +7,12 @@ __version__ = "0.1.19"
 CACHE_FOLDER = Path.home() / ".cache" / "babeldoc"
 
 
-def get_cache_file_path(filename: str) -> Path:
+def get_cache_file_path(filename: str, sub_folder: str | None = None) -> Path:
+    if sub_folder is not None:
+        sub_folder = sub_folder.strip("/")
+        sub_folder_path = CACHE_FOLDER / sub_folder
+        sub_folder_path.mkdir(parents=True, exist_ok=True)
+        return sub_folder_path / filename
     return CACHE_FOLDER / filename
 
 

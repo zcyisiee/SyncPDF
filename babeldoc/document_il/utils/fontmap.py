@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 import pymupdf
-from babeldoc.const import get_cache_file_path
+from babeldoc.assets import assets
 from babeldoc.document_il import PdfFont
 from babeldoc.document_il import il_version_1
 from babeldoc.translation_config import TranslationConfig
@@ -16,67 +16,70 @@ class FontMapper:
     stage_name = "Add Fonts"
 
     def __init__(self, translation_config: TranslationConfig):
-        self.font_names = [
-            "source-han-serif-cn.ttf",
-            "SourceHanSansSC-Regular.ttf",
-            "source-han-serif-cn-bold.ttf",
-            "SourceHanSansSC-Bold.ttf",
-        ]
-        self.fonts = {
-            Path(file_name).name.split(".")[0].replace("-", "").lower(): pymupdf.Font(
-                fontfile=str(get_cache_file_path(file_name)),
-            )
-            for file_name in self.font_names
-        }
-        for k, v in self.fonts.items():
-            v.font_id = k
         self.translation_config = translation_config
-        self.base_font_path = translation_config.font
-        self.fallback_font_path = get_cache_file_path("noto.ttf")
-        self.base_font = pymupdf.Font(fontfile=str(self.base_font_path))
-        self.fallback_font = pymupdf.Font(fontfile=str(self.fallback_font_path))
+        font_family = assets.get_font_family(translation_config.lang_out)
+        self.font_file_names = []
+        for k in (
+            "normal",
+            "script",
+            "fallback",
+        ):
+            self.font_file_names.extend(font_family[k])
 
-        self.kai_font_path = get_cache_file_path("LXGWWenKai-Regular.ttf")
-        self.kai_font = pymupdf.Font(fontfile=str(self.kai_font_path))
+        self.fonts: dict[str, pymupdf.Font] = {}
+        self.fontid2fontpath: dict[str, Path] = {}
+        for font_file_name in self.font_file_names:
+            if font_file_name in self.fontid2fontpath:
+                continue
+            font_path, font_metadata = assets.get_font_and_metadata(font_file_name)
+            self.fonts[font_file_name] = pymupdf.Font(fontfile=str(font_path))
+            self.fontid2fontpath[font_file_name] = font_path
+            self.fonts[font_file_name].font_id = font_file_name
+            self.fonts[font_file_name].ascent_fontmap = font_metadata["ascent"]
+            self.fonts[font_file_name].descent_fontmap = font_metadata["descent"]
+            self.fonts[font_file_name].encoding_length = font_metadata[
+                "encoding_length"
+            ]
 
-        self.base_font.font_id = "base"
-        self.fallback_font.font_id = "fallback"
-        self.kai_font.font_id = "kai"
+        self.normal_font_ids: list[str] = font_family["normal"]
+        self.script_font_ids: list[str] = font_family["script"]
+        self.fallback_font_ids: list[str] = font_family["fallback"]
 
-        # Set ascent and descent for base font
-        self.base_font.ascent_fontmap = 1151
-        self.base_font.descent_fontmap = -286
+        self.fontid2fontpath["base"] = self.fontid2fontpath[self.normal_font_ids[0]]
 
-        # Set ascent and descent for fallback font
-        self.fallback_font.ascent_fontmap = 1069
-        self.fallback_font.descent_fontmap = -293
-
-        # Set ascent and descent for kai font
-        self.kai_font.ascent_fontmap = 928
-        self.kai_font.descent_fontmap = -256
-
-        self.fontid2font = {f.font_id: f for f in self.fonts.values()}
-        self.fontid2font["base"] = self.base_font
-        self.fontid2font["fallback"] = self.fallback_font
-        self.fontid2font["kai"] = self.kai_font
-
-        # Set ascent and descent for other fonts
-        font_metrics = {
-            "sourcehanserifcn": (1151, 0),
-            "sourcehansansscregular": (1160, -288),
-            "sourcehanserifcnbold": (1151, -286),
-            "sourcehansansscbold": (1160, -288),
+        self.fontid2font: dict[str, pymupdf.Font] = {
+            f.font_id: f for f in self.fonts.values()
         }
-
-        for font_id, (ascent, descent) in font_metrics.items():
-            if font_id in self.fontid2font:
-                self.fontid2font[font_id].ascent_fontmap = ascent
-                self.fontid2font[font_id].descent_fontmap = descent
 
         for font in self.fontid2font.values():
             font.char_lengths = functools.lru_cache(maxsize=10240, typed=True)(
                 font.char_lengths,
             )
+
+        self.fontid2font["base"] = self.fontid2font[self.normal_font_ids[0]]
+
+        self.normal_fonts: list[pymupdf.Font] = [
+            self.fontid2font[font_id] for font_id in self.normal_font_ids
+        ]
+        self.script_fonts: list[pymupdf.Font] = [
+            self.fontid2font[font_id] for font_id in self.script_font_ids
+        ]
+        self.fallback_fonts: list[pymupdf.Font] = [
+            self.fontid2font[font_id] for font_id in self.fallback_font_ids
+        ]
+
+        self.base_font = self.normal_fonts[0]
+
+        self.type2font: dict[str, list[pymupdf.Font]] = {
+            "normal": self.normal_fonts,
+            "script": self.script_fonts,
+            "fallback": self.fallback_fonts,
+        }
+
+        self.has_char = functools.lru_cache(maxsize=10240, typed=True)(self.has_char)
+        self.map_in_type = functools.lru_cache(maxsize=10240, typed=True)(
+            self.map_in_type
+        )
 
     def has_char(self, char_unicode: str):
         if len(char_unicode) != 1:
@@ -85,11 +88,31 @@ class FontMapper:
         for font in self.fonts.values():
             if font.has_glyph(current_char):
                 return True
-        if self.base_font.has_glyph(current_char):
-            return True
-        if self.fallback_font.has_glyph(current_char):
-            return True
         return False
+
+    def map_in_type(
+        self,
+        bold: bool,
+        italic: bool,
+        monospaced: bool,
+        serif: bool,
+        char_unicode: str,
+        font_type: str,
+    ):
+        current_char = ord(char_unicode)
+        for font in self.type2font[font_type]:
+            if not font.has_glyph(current_char):
+                continue
+            if bold != font.is_bold:
+                continue
+            # 不知道什么原因，思源黑体的 serif 属性为 1，先 workaround
+            if serif == 1 and "serif" not in font.font_id.lower():
+                continue
+            if serif == 0 and "serif" in font.font_id.lower():
+                continue
+            return font
+
+        return None
 
     def map(self, original_font: PdfFont, char_unicode: str):
         current_char = ord(char_unicode)
@@ -110,24 +133,22 @@ class FontMapper:
                 f"Char unicode: {char_unicode}. ",
             )
             return None
-        if italic and self.kai_font.has_glyph(current_char):
-            return self.kai_font
-        for _k, font in self.fonts.items():
-            if not font.has_glyph(current_char):
-                continue
-            if bold != font.is_bold:
-                continue
-            # 不知道什么原因，思源黑体的 serif 属性为 1，先 workaround
-            if serif == 1 and "serif" not in font.font_id:
-                continue
-            if serif == 0 and "serif" in font.font_id:
-                continue
-            return font
-        if self.base_font.has_glyph(current_char):
-            return self.base_font
 
-        if self.fallback_font.has_glyph(current_char):
-            return self.fallback_font
+        for script_font in self.script_fonts:
+            if italic and script_font.has_glyph(current_char):
+                return script_font
+
+        normal_font_map_result = self.map_in_type(
+            bold, italic, monospaced, serif, char_unicode, "normal"
+        )
+        if normal_font_map_result is not None:
+            return normal_font_map_result
+
+        fallback_font_map_result = self.map_in_type(
+            bold, italic, monospaced, serif, char_unicode, "fallback"
+        )
+        if fallback_font_map_result is not None:
+            return fallback_font_map_result
 
         logger.warning(
             f"Can't find font for {char_unicode}({current_char}). "
@@ -137,20 +158,8 @@ class FontMapper:
         return None
 
     def add_font(self, doc_zh: pymupdf.Document, il: il_version_1.Document):
-        font_list = [
-            ("base", self.base_font_path),
-            ("fallback", self.fallback_font_path),
-            ("kai", self.kai_font_path),
-        ]
-        font_list.extend(
-            [
-                (
-                    Path(file_name).name.split(".")[0].replace("-", "").lower(),
-                    get_cache_file_path(file_name),
-                )
-                for file_name in self.font_names
-            ],
-        )
+        font_list = [(k, v) for k, v in self.fontid2fontpath.items()]
+
         font_id = {}
         xreflen = doc_zh.xref_length()
         with self.translation_config.progress_monitor.stage_start(
@@ -192,27 +201,24 @@ class FontMapper:
             # Create PdfFont for each font
             # 预先创建所有字体对象
             pdf_fonts = []
-            for font_name, font_path in font_list:
-                font = pymupdf.Font(fontfile=str(font_path))
+            for font_name, _ in font_list:
                 # Get descent_fontmap from fontid2font
-                descent_fontmap = None
-                if font_name in self.fontid2font:
-                    mupdf_font = self.fontid2font[font_name]
-                    if hasattr(mupdf_font, "descent_fontmap"):
-                        descent_fontmap = mupdf_font.descent_fontmap
-                    if hasattr(mupdf_font, "ascent_fontmap"):
-                        ascent_fontmap = mupdf_font.ascent_fontmap
+                assert font_name in self.fontid2font, f"Font {font_name} not found"
+                mupdf_font = self.fontid2font[font_name]
+                descent_fontmap = mupdf_font.descent_fontmap
+                ascent_fontmap = mupdf_font.ascent_fontmap
+                encoding_length = mupdf_font.encoding_length
 
                 pdf_fonts.append(
                     il_version_1.PdfFont(
                         name=font_name,
                         xref_id=font_id[font_name],
                         font_id=font_name,
-                        encoding_length=2,
-                        bold=font.is_bold,
-                        italic=font.is_italic,
-                        monospace=font.is_monospaced,
-                        serif=font.is_serif,
+                        encoding_length=encoding_length,
+                        bold=mupdf_font.is_bold,
+                        italic=mupdf_font.is_italic,
+                        monospace=mupdf_font.is_monospaced,
+                        serif=mupdf_font.is_serif,
                         descent=descent_fontmap,
                         ascent=ascent_fontmap,
                     ),

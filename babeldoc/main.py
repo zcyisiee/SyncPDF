@@ -13,7 +13,6 @@ from rich.progress import TimeElapsedColumn
 from rich.progress import TimeRemainingColumn
 
 import babeldoc.high_level
-from babeldoc.const import get_cache_file_path
 from babeldoc.document_il.translator.translator import BingTranslator
 from babeldoc.document_il.translator.translator import GoogleTranslator
 from babeldoc.document_il.translator.translator import OpenAITranslator
@@ -269,17 +268,6 @@ async def main():
             exit(1)
         pending_files.append(file)
 
-    font_path = get_cache_file_path("source-han-serif-cn.ttf")
-
-    # 验证字体
-    if font_path:
-        if not Path(font_path).exists():
-            logger.error(f"字体文件不存在：{font_path}")
-            exit(1)
-        if not str(font_path).endswith(".ttf"):
-            logger.error(f"字体文件不是 TTF 文件：{font_path}")
-            exit(1)
-
     if args.output:
         if not Path(args.output).exists():
             logger.info(f"输出目录不存在，创建：{args.output}")
@@ -300,7 +288,7 @@ async def main():
         # 创建配置对象
         config = TranslationConfig(
             input_file=file,
-            font=font_path,
+            font=None,
             pages=args.pages,
             output_dir=args.output,
             translator=translator,

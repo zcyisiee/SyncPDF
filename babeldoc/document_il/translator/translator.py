@@ -1,3 +1,4 @@
+import contextlib
 import html
 import logging
 import re
@@ -85,10 +86,13 @@ class BaseTranslator(ABC):
         self.translate_cache_call_count = 0
 
     def __del__(self):
-        logger.info(f"{self.name} translate call count: {self.translate_call_count}")
-        logger.info(
-            f"{self.name} translate cache call count: {self.translate_cache_call_count}",
-        )
+        with contextlib.suppress(Exception):
+            logger.info(
+                f"{self.name} translate call count: {self.translate_call_count}"
+            )
+            logger.info(
+                f"{self.name} translate cache call count: {self.translate_cache_call_count}",
+            )
 
     def add_cache_impact_parameters(self, k: str, v):
         """
