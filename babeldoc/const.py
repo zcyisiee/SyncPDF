@@ -20,9 +20,12 @@ try:
     git_path = shutil.which("git")
     if git_path is None:
         raise FileNotFoundError("git executable not found")
-    print(__file__)
-    if not (Path(__file__).resolve().parent / "babeldoc" / "const.py").exists():
-        raise FileNotFoundError("babeldoc/const.py not found")
+    print(Path(__file__).resolve().parent.parent)
+    md_ = Path(__file__).resolve().parent.parent / "docs" / "README.md"
+    print(md_, md_.exists())
+    if not md_.exists():
+        print("not in git repo")
+        raise FileNotFoundError("not in git repo")
     WATERMARK_VERSION = (
         subprocess.check_output(  # noqa: S603
             [git_path, "describe", "--always"],
