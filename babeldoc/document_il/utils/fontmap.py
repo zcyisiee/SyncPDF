@@ -23,6 +23,7 @@ class FontMapper:
             "normal",
             "script",
             "fallback",
+            "base",
         ):
             self.font_file_names.extend(font_family[k])
 
@@ -35,6 +36,7 @@ class FontMapper:
             self.fonts[font_file_name] = pymupdf.Font(fontfile=str(font_path))
             self.fontid2fontpath[font_file_name] = font_path
             self.fonts[font_file_name].font_id = font_file_name
+            self.fonts[font_file_name].font_path = font_path
             self.fonts[font_file_name].ascent_fontmap = font_metadata["ascent"]
             self.fonts[font_file_name].descent_fontmap = font_metadata["descent"]
             self.fonts[font_file_name].encoding_length = font_metadata[
@@ -44,8 +46,8 @@ class FontMapper:
         self.normal_font_ids: list[str] = font_family["normal"]
         self.script_font_ids: list[str] = font_family["script"]
         self.fallback_font_ids: list[str] = font_family["fallback"]
-
-        self.fontid2fontpath["base"] = self.fontid2fontpath[self.normal_font_ids[0]]
+        self.base_font_ids: list[str] = font_family["base"]
+        self.fontid2fontpath["base"] = self.fontid2fontpath[font_family["base"][0]]
 
         self.fontid2font: dict[str, pymupdf.Font] = {
             f.font_id: f for f in self.fonts.values()
@@ -56,7 +58,7 @@ class FontMapper:
                 font.char_lengths,
             )
 
-        self.fontid2font["base"] = self.fontid2font[self.normal_font_ids[0]]
+        self.fontid2font["base"] = self.fontid2font[self.base_font_ids[0]]
 
         self.normal_fonts: list[pymupdf.Font] = [
             self.fontid2font[font_id] for font_id in self.normal_font_ids
@@ -68,12 +70,13 @@ class FontMapper:
             self.fontid2font[font_id] for font_id in self.fallback_font_ids
         ]
 
-        self.base_font = self.normal_fonts[0]
+        self.base_font = self.fontid2font["base"]
 
         self.type2font: dict[str, list[pymupdf.Font]] = {
             "normal": self.normal_fonts,
             "script": self.script_fonts,
             "fallback": self.fallback_fonts,
+            "base": [self.base_font],
         }
 
         self.has_char = functools.lru_cache(maxsize=10240, typed=True)(self.has_char)
@@ -167,6 +170,8 @@ class FontMapper:
             xreflen - 1 + len(font_list) + len(il.page) + len(font_list),
         ) as pbar:
             for font in font_list:
+                if font[0] in font_id:
+                    continue
                 font_id[font[0]] = doc_zh[0].insert_font(font[0], font[1])
                 pbar.advance(1)
             for xref in range(1, xreflen):
