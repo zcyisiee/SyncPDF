@@ -38,3 +38,9 @@ jobs:
         run: |
           uv run babeldoc --help
           uv run babeldoc --bing --files examples/ci/test.pdf
+      - name: Generate offline assets package
+        run: |
+          uv run babeldoc --generate-offline-assets /tmp/offline_assets
+      - name: Restore offline assets package
+        run: |
+          uv run babeldoc --restore-offline-assets /tmp/offline_assets.zip

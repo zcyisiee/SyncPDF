@@ -356,6 +356,12 @@ async def restore_offline_assets_package_async(input_path: Path | None = None):
             f"offline_assets_{offline_assets_tag}.zip", "assets"
         )
     else:
+        if input_path.exists() and input_path.is_dir():
+            input_path = input_path / f"offline_assets_{offline_assets_tag}.zip"
+        if not input_path.exists():
+            logger.critical(f"Offline assets package not found: {input_path}")
+            exit(1)
+
         import re
 
         offline_assets_tag_from_input_path = re.match(
