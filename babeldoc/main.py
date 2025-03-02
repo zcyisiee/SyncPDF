@@ -232,7 +232,8 @@ async def main():
         babeldoc.assets.assets.restore_offline_assets_package(
             Path(args.restore_offline_assets)
         )
-        logger.info("Offline assets package restored")
+        logger.info("Offline assets package restored, exiting...")
+        return
 
     if args.warmup:
         babeldoc.assets.assets.warmup()
