@@ -43,10 +43,7 @@ def run_in_another_thread(coro):
 
 
 def run_coro(coro):
-    try:
-        return asyncio.run(coro)
-    except RuntimeError:
-        return run_in_another_thread(coro)
+    return run_in_another_thread(coro)
 
 
 def _retry_if_not_cancelled_and_failed(retry_state):
