@@ -20,10 +20,9 @@ try:
     git_path = shutil.which("git")
     if git_path is None:
         raise FileNotFoundError("git executable not found")
-    print(Path(__file__).resolve().parent.parent)
-    md_ = Path(__file__).resolve().parent.parent / "docs" / "README.md"
-    print(md_, md_.exists())
-    if not md_.exists():
+    two_parent = Path(__file__).resolve().parent.parent
+    md_ = two_parent / "docs" / "README.md"
+    if two_parent.name == "site-packages" or not md_.exists():
         print("not in git repo")
         raise FileNotFoundError("not in git repo")
     WATERMARK_VERSION = (
