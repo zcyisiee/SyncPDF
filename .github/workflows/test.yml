@@ -43,4 +43,5 @@ jobs:
           uv run babeldoc --generate-offline-assets /tmp/offline_assets
       - name: Restore offline assets package
         run: |
-          uv run babeldoc --restore-offline-assets /tmp/offline_assets.zip
+          rm -rf ~/.cache/babeldoc
+          uv run babeldoc --restore-offline-assets /tmp/offline_assets
