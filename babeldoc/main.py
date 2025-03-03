@@ -392,7 +392,7 @@ def create_progress_handler(translation_config: TranslationConfig):
                         stage_tasks[stage],
                         completed=event["stage_current"],
                         total=event["stage_total"],
-                        description=f"{event['stage']} ({event['stage_current']}/{event['stage_total']})",
+                        description=f"{event['stage']}",
                         refresh=True,
                     )
                 progress.update(
@@ -407,7 +407,7 @@ def create_progress_handler(translation_config: TranslationConfig):
                         stage_tasks[stage],
                         completed=event["stage_total"],
                         total=event["stage_total"],
-                        description=f"{event['stage']} (Complete)",
+                        description=f"{event['stage']}",
                         refresh=True,
                     )
                     progress.update(
