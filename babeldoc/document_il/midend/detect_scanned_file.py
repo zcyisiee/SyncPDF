@@ -75,13 +75,23 @@ class DetectScannedFile:
         threshold = 0.8 * total
         threshold = max(threshold, 1)
         scanned = 0
+        non_scanned = 0
+        non_scanned_threshold = total - threshold
         with self.translation_config.progress_monitor.stage_start(
             self.stage_name,
             total,
         ) as progress:
             for page in pages_to_translate:
-                if scanned < threshold:
-                    scanned += 1 if self.detect_page_is_scanned(page, mupdf) else 0
+                if scanned < threshold and non_scanned < non_scanned_threshold:
+                    # Only continue detection if both counts are below thresholds
+                    is_scanned = self.detect_page_is_scanned(page, mupdf)
+                    if is_scanned:
+                        scanned += 1
+                    else:
+                        non_scanned += 1
+                else:
+                    # We have enough information to determine document type
+                    non_scanned += 1
                 progress.advance(1)
 
         if scanned > threshold:
