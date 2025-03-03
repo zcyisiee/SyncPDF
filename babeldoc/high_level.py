@@ -41,18 +41,18 @@ from babeldoc.translation_config import TranslationConfig
 logger = logging.getLogger(__name__)
 
 TRANSLATE_STAGES = [
-    ILCreater.stage_name,
-    DetectScannedFile.stage_name,
-    LayoutParser.stage_name,
-    ParagraphFinder.stage_name,
-    StylesAndFormulas.stage_name,
-    RemoveDescent.stage_name,
-    ILTranslator.stage_name,
-    Typesetting.stage_name,
-    FontMapper.stage_name,
-    PDFCreater.stage_name,
-    SUBSET_FONT_STAGE_NAME,
-    SAVE_PDF_STAGE_NAME,
+    (ILCreater.stage_name, 5.35),  # Parse PDF and Create IR
+    (DetectScannedFile.stage_name, 0.5),  # No historical data, estimated
+    (LayoutParser.stage_name, 6.42),  # Parse Page Layout
+    (ParagraphFinder.stage_name, 2.14),  # Parse Paragraphs
+    (StylesAndFormulas.stage_name, 1.12),  # Parse Formulas and Styles
+    (RemoveDescent.stage_name, 0.15),  # Remove Char Descent
+    (ILTranslator.stage_name, 75.16),  # Translate Paragraphs
+    (Typesetting.stage_name, 3.84),  # Typesetting
+    (FontMapper.stage_name, 0.65),  # Add Fonts
+    (PDFCreater.stage_name, 1.41),  # Generate drawing instructions
+    (SUBSET_FONT_STAGE_NAME, 1.29),  # Subset font
+    (SAVE_PDF_STAGE_NAME, 2.45),  # Save PDF
 ]
 
 resfont_map = {

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 class ProgressMonitor:
     def __init__(
         self,
-        stages: list[str],
+        stages: list[tuple[str, float]],
         progress_change_callback: Callable | None = None,
         finish_callback: Callable | None = None,
         report_interval: float = 0.1,
@@ -19,7 +19,13 @@ class ProgressMonitor:
         cancel_event: threading.Event | None = None,
         loop: asyncio.AbstractEventLoop | None = None,
     ):
-        self.stage = {k: TranslationStage(k, 0, self) for k in stages}
+        # Convert stages list to dict with name and weight
+        self.stage = {}
+        total_weight = sum(weight for _, weight in stages)
+        for name, weight in stages:
+            normalized_weight = weight / total_weight
+            self.stage[name] = TranslationStage(name, 0, self, normalized_weight)
+
         self.progress_change_callback = progress_change_callback
         self.finish_callback = finish_callback
         self.report_interval = report_interval
@@ -37,9 +43,9 @@ class ProgressMonitor:
                 stages=[
                     {
                         "name": name,
-                        "percent": 1.0 / len(stages),
+                        "percent": self.stage[name].weight,
                     }
-                    for name in stages
+                    for name, _ in stages
                 ],
             )
         self.lock = threading.Lock()
@@ -102,9 +108,23 @@ class ProgressMonitor:
             )
 
     def calculate_current_progress(self, stage=None):
-        progress = self.finish_stage_count * 100 / len(self.stage)
-        if stage is not None:
-            progress += stage.current * 100 / stage.total / len(self.stage)
+        # Count completed stages
+        completed_stages = sum(
+            1 for s in self.stage.values() if s.run_time > 0 and s.current == s.total
+        )
+
+        # If all stages are complete, return exactly 100
+        if completed_stages == len(self.stage):
+            return 100
+
+        # Calculate progress based on weights
+        progress = sum(
+            s.weight * 100
+            for s in self.stage.values()
+            if s.run_time > 0 and s.current == s.total
+        )
+        if stage is not None and stage.total > 0:
+            progress += stage.weight * stage.current * 100 / stage.total
         return progress
 
     def stage_update(self, stage, n: int):
@@ -142,13 +162,14 @@ class ProgressMonitor:
 
 
 class TranslationStage:
-    def __init__(self, name: str, total: int, pm: ProgressMonitor):
+    def __init__(self, name: str, total: int, pm: ProgressMonitor, weight: float):
         self.name = name
         self.display_name = name
         self.current = 0
         self.total = total
         self.pm = pm
         self.run_time = 0
+        self.weight = weight
 
     def __enter__(self):
         return self
