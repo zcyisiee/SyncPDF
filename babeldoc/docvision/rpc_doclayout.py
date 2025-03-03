@@ -130,21 +130,24 @@ class RpcDocLayoutModel(DocLayoutModel):
             image = [image]
 
         results = []
-        preds = predict_layout(image, host=self.host, imgsz=imgsz)
-        if len(preds) > 0:
-            for pred in preds:
-                boxes = [
-                    YoloBox(None, np.array(x["xyxy"]), np.array(x["conf"]), x["cls"])
-                    for x in pred["boxes"]
-                ]
-                results.append(
-                    YoloResult(
-                        boxes=boxes,
-                        names={int(k): v for k, v in pred["names"].items()},
-                    ),
-                )
-        else:
-            results.append(YoloResult(boxes_data=np.array([]), names=[]))
+        for img in image:
+            preds = predict_layout([img], host=self.host, imgsz=imgsz)
+            if len(preds) > 0:
+                for pred in preds:
+                    boxes = [
+                        YoloBox(
+                            None, np.array(x["xyxy"]), np.array(x["conf"]), x["cls"]
+                        )
+                        for x in pred["boxes"]
+                    ]
+                    results.append(
+                        YoloResult(
+                            boxes=boxes,
+                            names={int(k): v for k, v in pred["names"].items()},
+                        ),
+                    )
+            else:
+                results.append(YoloResult(boxes_data=np.array([]), names=[]))
 
         return results
 
