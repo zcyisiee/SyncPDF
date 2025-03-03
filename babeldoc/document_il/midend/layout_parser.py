@@ -121,7 +121,7 @@ class LayoutParser:
             total,
         ) as progress:
             # Process pages in batches
-            batch_size = 16
+            batch_size = 1
             for i in range(0, total, batch_size):
                 self.translation_config.raise_if_cancelled()
                 batch_pages = pages_to_translate[i : i + batch_size]
