@@ -33,7 +33,14 @@ class FontMapper:
             if font_file_name in self.fontid2fontpath:
                 continue
             font_path, font_metadata = assets.get_font_and_metadata(font_file_name)
-            self.fonts[font_file_name] = pymupdf.Font(fontfile=str(font_path))
+            pymupdf_font = pymupdf.Font(fontfile=str(font_path))
+            pymupdf_font.has_glyph = functools.lru_cache(maxsize=10240, typed=True)(
+                pymupdf_font.has_glyph,
+            )
+            pymupdf_font.char_lengths = functools.lru_cache(maxsize=10240, typed=True)(
+                pymupdf_font.char_lengths,
+            )
+            self.fonts[font_file_name] = pymupdf_font
             self.fontid2fontpath[font_file_name] = font_path
             self.fonts[font_file_name].font_id = font_file_name
             self.fonts[font_file_name].font_path = font_path
