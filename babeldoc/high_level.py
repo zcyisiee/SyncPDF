@@ -24,6 +24,7 @@ from babeldoc.document_il.backend.pdf_creater import SUBSET_FONT_STAGE_NAME
 from babeldoc.document_il.backend.pdf_creater import PDFCreater
 from babeldoc.document_il.frontend.il_creater import ILCreater
 from babeldoc.document_il.midend.add_debug_information import AddDebugInformation
+from babeldoc.document_il.midend.detect_scanned_file import DetectScannedFile
 from babeldoc.document_il.midend.il_translator import ILTranslator
 from babeldoc.document_il.midend.layout_parser import LayoutParser
 from babeldoc.document_il.midend.paragraph_finder import ParagraphFinder
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 TRANSLATE_STAGES = [
     ILCreater.stage_name,
+    DetectScannedFile.stage_name,
     LayoutParser.stage_name,
     ParagraphFinder.stage_name,
     StylesAndFormulas.stage_name,
@@ -307,6 +309,17 @@ def do_translate(pm, translation_config):
                 docs,
                 translation_config.get_working_file_path("create_il.debug.json"),
             )
+
+        # 检测是否为扫描文件
+        logger.debug("start detect scanned file")
+        DetectScannedFile(translation_config).process(docs)
+        logger.debug("finish detect scanned file")
+        if translation_config.debug:
+            xml_converter.write_json(
+                docs,
+                translation_config.get_working_file_path("detect_scanned_file.json"),
+            )
+
         # Generate layouts for all pages
         logger.debug("start generating layouts")
         docs = LayoutParser(translation_config).process(docs, doc_input)
