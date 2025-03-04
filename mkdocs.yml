@@ -88,9 +88,9 @@ theme:
   font:
     text: Roboto
     code: Roboto Mono
-  favicon: assets/favicon.png
-  icon:
-    logo: logo
+  # favicon: assets/favicon.png
+  favicon: images/babeldoc-small-logo-with-transparent-background.png
+  logo: images/babeldoc-small-logo-with-transparent-background.png
 
 # Plugins
 plugins:

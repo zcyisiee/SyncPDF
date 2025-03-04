@@ -1,10 +1,11 @@
 <!-- # Yet Another Document Translator -->
 
 <div align="center">
-<img src="https://s.immersivetranslate.com/assets/r2-uploads/images/babeldoc-banner.png" width="320px"  alt="YADT"/>
+<!-- <img src="https://s.immersivetranslate.com/assets/r2-uploads/images/babeldoc-banner.png" width="320px"  alt="YADT"/> -->
 
-
-<h2 id="title">BabelDOC</h2>
+<br/>
+<img src="https://s.immersivetranslate.com/assets/r2-uploads/babeldoc-big-logo-with-transparent-background-RRDPD4ovAIh0pi9H.png" width="320px" alt="BabelDOC"/>
+<!-- <h2 id="title">BabelDOC</h2> -->
 
 <p>
   <!-- PyPI -->
