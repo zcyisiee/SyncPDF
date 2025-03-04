@@ -43,6 +43,7 @@ class TranslationConfig:
         min_text_length: int = 5,
         use_side_by_side_dual: bool = True,  # Deprecated: 是否使用拼版式双语 PDF（并排显示原文和译文） 向下兼容选项，已停用。
         use_alternating_pages_dual: bool = False,
+        no_watermark: bool = False,
     ):
         self.translator = translator
 
@@ -55,6 +56,7 @@ class TranslationConfig:
         self.pages = pages
         self.page_ranges = self._parse_pages(pages) if pages else None
         self.debug = debug
+        self.no_watermark = no_watermark
 
         self.output_dir = output_dir
         self.working_dir = working_dir

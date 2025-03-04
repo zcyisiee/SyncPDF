@@ -170,6 +170,11 @@ def create_parser():
         help="Use alternating pages mode for dual PDF. When enabled, original and translated pages are arranged in alternate order.",
     )
     translation_group.add_argument(
+        "--no-watermark",
+        action="store_true",
+        help="Do not add watermark to the translated PDF.",
+    )
+    translation_group.add_argument(
         "--report-interval",
         type=float,
         default=0.1,
@@ -336,6 +341,7 @@ async def main():
             use_alternating_pages_dual=args.use_alternating_pages_dual,
             report_interval=args.report_interval,
             min_text_length=args.min_text_length,
+            no_watermark=args.no_watermark,
         )
 
         # Create progress handler
