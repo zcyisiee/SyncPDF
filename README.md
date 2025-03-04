@@ -4,7 +4,9 @@
 <!-- <img src="https://s.immersivetranslate.com/assets/r2-uploads/images/babeldoc-banner.png" width="320px"  alt="YADT"/> -->
 
 <br/>
-<img src="https://s.immersivetranslate.com/assets/r2-uploads/babeldoc-big-logo-with-transparent-background-RRDPD4ovAIh0pi9H.png" width="320px" alt="BabelDOC"/>
+
+<img src="https://s.immersivetranslate.com/assets/r2-uploads/babeldoc-big-logo-darkmode-with-transparent-background.png#only-dark" width="320px" alt="BabelDOC"/>
+<img src="https://s.immersivetranslate.com/assets/r2-uploads/babeldoc-big-logo-with-transparent-background.png#only-light" width="320px" alt="BabelDOC"/>
 <!-- <h2 id="title">BabelDOC</h2> -->
 
 <p>
