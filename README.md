@@ -6,8 +6,8 @@
 <br/>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://s.immersivetranslate.com/assets/r2-uploads/babeldoc-big-logo-darkmode-with-transparent-background.png" width="320px" alt="BabelDOC"/>
-  <img src="https://s.immersivetranslate.com/assets/r2-uploads/babeldoc-big-logo-with-transparent-background.png" width="320px" alt="BabelDOC"/>
+  <source media="(prefers-color-scheme: dark)" srcset="https://s.immersivetranslate.com/assets/uploads/babeldoc-big-logo-darkmode-with-transparent-background-IKuNO1.svg" width="320px" alt="BabelDOC"/>
+  <img src="https://s.immersivetranslate.com/assets/uploads/babeldoc-big-logo-with-transparent-background-2xweBr.svg" width="320px" alt="BabelDOC"/>
 </picture>
 
 <!-- <h2 id="title">BabelDOC</h2> -->
