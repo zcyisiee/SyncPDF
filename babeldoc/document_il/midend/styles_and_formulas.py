@@ -479,7 +479,9 @@ class StylesAndFormulas:
         return bool(re.match(r"^[0-9, ]+$", text))
 
     def is_formulas_font(self, font_name: str) -> bool:
-        pattern2 = r"^(Cambria|Cambria-BoldItalic|Cambria-Bold|Cambria-Italic)$"
+        pattern2 = (
+            r"^(Cambria|Cambria-BoldItalic|Cambria-Bold|Cambria-Italic｜EUAlbertina.+)$"
+        )
         if self.translation_config.formular_font_pattern:
             pattern = self.translation_config.formular_font_pattern
         else:
