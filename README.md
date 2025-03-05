@@ -122,7 +122,8 @@ uv run babeldoc --bing --files example.pdf --files example2.pdf
 - `--disable-rich-text-translate`: Disable rich text translation (may help improve compatibility with some PDFs)
 - `--enhance-compatibility`: Enable all compatibility enhancement options (equivalent to --skip-clean --dual-translate-first --disable-rich-text-translate)
 - `--use-alternating-pages-dual`: Use alternating pages mode for dual PDF. When enabled, original and translated pages are arranged in alternate order. When disabled (default), original and translated pages are shown side by side on the same page.
-- `--no-watermark`: Do not add watermark to the translated PDF.
+- `--watermark-output-mode`: Control watermark output mode: 'watermarked' (default) adds watermark to translated PDF, 'no_watermark' doesn't add watermark, 'both' outputs both versions.
+- `--no-watermark`: [DEPRECATED] Use --watermark-output-mode=no_watermark instead.
 
 > [!TIP]
 > - Both `--skip-clean` and `--dual-translate-first` may help improve compatibility with some PDF readers
@@ -228,7 +229,8 @@ skip-clean = false
 dual-translate-first = false
 disable-rich-text-translate = false
 use-alternating-pages-dual = false
-no-watermark = false
+watermark-output-mode = "watermarked"  # Choices: "watermarked", "no_watermark", "both"
+# no-watermark = false  # DEPRECATED: Use watermark-output-mode instead
 
 # Output control
 no-dual = false

@@ -1,6 +1,9 @@
 import asyncio
+import copy
 import hashlib
+import io
 import logging
+import pathlib
 import threading
 import time
 from asyncio import CancelledError
@@ -19,6 +22,7 @@ from babeldoc import asynchronize
 from babeldoc.assets.assets import warmup
 from babeldoc.const import CACHE_FOLDER
 from babeldoc.converter import TranslateConverter
+from babeldoc.document_il import il_version_1
 from babeldoc.document_il.backend.pdf_creater import SAVE_PDF_STAGE_NAME
 from babeldoc.document_il.backend.pdf_creater import SUBSET_FONT_STAGE_NAME
 from babeldoc.document_il.backend.pdf_creater import PDFCreater
@@ -37,6 +41,7 @@ from babeldoc.pdfinterp import PDFPageInterpreterEx
 from babeldoc.progress_monitor import ProgressMonitor
 from babeldoc.translation_config import TranslateResult
 from babeldoc.translation_config import TranslationConfig
+from babeldoc.translation_config import WatermarkOutputMode
 
 logger = logging.getLogger(__name__)
 
@@ -365,6 +370,13 @@ def do_translate(pm, translation_config):
                 docs,
                 translation_config.get_working_file_path("add_debug_information.json"),
             )
+        mono_watermark_first_page_doc_bytes = None
+        dual_watermark_first_page_doc_bytes = None
+
+        if translation_config.watermark_output_mode == WatermarkOutputMode.Both:
+            mono_watermark_first_page_doc_bytes, dual_watermark_first_page_doc_bytes = (
+                generate_first_page_with_watermark(doc_input, translation_config, docs)
+            )
 
         Typesetting(translation_config).typsetting_document(docs)
         logger.debug(f"finish typsetting from {temp_pdf_path}")
@@ -377,6 +389,22 @@ def do_translate(pm, translation_config):
         # docs2 = xml_converter.deepcopy(docs)
         pdf_creater = PDFCreater(temp_pdf_path, docs, translation_config)
         result = pdf_creater.write(translation_config)
+
+        if mono_watermark_first_page_doc_bytes:
+            mono_watermark_pdf = merge_watermark_doc(
+                result.mono_pdf_path,
+                mono_watermark_first_page_doc_bytes,
+                translation_config,
+            )
+            result.mono_pdf_path = mono_watermark_pdf
+        if dual_watermark_first_page_doc_bytes:
+            dual_watermark_pdf = merge_watermark_doc(
+                result.dual_pdf_path,
+                dual_watermark_first_page_doc_bytes,
+                translation_config,
+            )
+            result.dual_pdf_path = dual_watermark_pdf
+
         finish_time = time.time()
         result.original_pdf_path = original_pdf_path
         result.total_seconds = finish_time - start_time
@@ -393,6 +421,85 @@ def do_translate(pm, translation_config):
         logger.debug("do_translate finally")
         pm.on_finish()
         translation_config.cleanup_temp_files()
+
+
+def generate_first_page_with_watermark(
+    mupdf: Document,
+    translation_config: TranslationConfig,
+    doc_il: il_version_1.Document,
+) -> (io.BytesIO, io.BytesIO):
+    first_page_doc = Document()
+    first_page_doc.insert_pdf(mupdf, from_page=0, to_page=0)
+
+    il_only_first_page_doc = il_version_1.Document()
+    il_only_first_page_doc.total_pages = 1
+    il_only_first_page_doc.page = [copy.deepcopy(doc_il.page[0])]
+
+    watermarked_config = copy.copy(translation_config)
+    watermarked_config.watermark_output_mode = WatermarkOutputMode.Watermarked
+    watermarked_config.progress_monitor.disable = True
+    watermarked_temp_pdf_path = watermarked_config.get_working_file_path(
+        "watermarked_temp_input.pdf"
+    )
+    first_page_doc.save(watermarked_temp_pdf_path)
+
+    Typesetting(watermarked_config).typsetting_document(il_only_first_page_doc)
+    pdf_creater = PDFCreater(
+        watermarked_temp_pdf_path.as_posix(), il_only_first_page_doc, watermarked_config
+    )
+    result = pdf_creater.write(watermarked_config)
+    watermarked_config.progress_monitor.disable = False
+    mono_pdf_bytes = None
+    dual_pdf_bytes = None
+    if result.mono_pdf_path:
+        mono_pdf_bytes = io.BytesIO()
+        with Path(result.mono_pdf_path).open("rb") as f:
+            mono_pdf_bytes.write(f.read())
+        result.mono_pdf_path.unlink()
+        mono_pdf_bytes.seek(0)
+
+    if result.dual_pdf_path:
+        dual_pdf_bytes = io.BytesIO()
+        with Path(result.dual_pdf_path).open("rb") as f:
+            dual_pdf_bytes.write(f.read())
+        result.dual_pdf_path.unlink()
+        dual_pdf_bytes.seek(0)
+
+    return mono_pdf_bytes, dual_pdf_bytes
+
+
+def merge_watermark_doc(
+    no_watermark_pdf_path: pathlib.PosixPath,
+    watermark_first_page_pdf_bytes: io.BytesIO,
+    translation_config: TranslationConfig,
+) -> pathlib.PosixPath:
+    if not no_watermark_pdf_path.exists():
+        raise FileNotFoundError(
+            f"no_watermark_pdf_path not found: {no_watermark_pdf_path}"
+        )
+    if not watermark_first_page_pdf_bytes:
+        raise FileNotFoundError(
+            f"watermark_first_page_pdf_bytes not found: {watermark_first_page_pdf_bytes}"
+        )
+
+    no_watermark_pdf = Document(no_watermark_pdf_path.as_posix())
+    no_watermark_pdf.delete_page(0)
+
+    watermark_first_page_pdf = Document("pdf", watermark_first_page_pdf_bytes)
+    no_watermark_pdf.insert_pdf(
+        watermark_first_page_pdf, from_page=0, to_page=0, start_at=0
+    )
+
+    new_save_path = no_watermark_pdf_path.with_name(
+        no_watermark_pdf_path.name.replace(".no_watermark", "")
+    )
+
+    PDFCreater.save_pdf_with_timeout(
+        no_watermark_pdf,
+        new_save_path.as_posix(),
+        translation_config=translation_config,
+    )
+    return new_save_path
 
 
 def download_font_assets():

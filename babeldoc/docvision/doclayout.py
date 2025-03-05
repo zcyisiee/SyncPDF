@@ -192,7 +192,7 @@ class OnnxModel(DocLayoutModel):
         boxes[..., :4] = (boxes[..., :4] - [pad_x, pad_y, pad_x, pad_y]) / gain
         return boxes
 
-    def predict(self, image, imgsz=1024, batch_size=16, **kwargs):
+    def predict(self, image, imgsz=800, batch_size=16, **kwargs):
         """
         Predict the layout of document pages.
 

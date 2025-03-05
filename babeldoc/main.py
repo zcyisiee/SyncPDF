@@ -21,9 +21,10 @@ from babeldoc.document_il.translator.translator import set_translate_rate_limite
 from babeldoc.docvision.doclayout import DocLayoutModel
 from babeldoc.docvision.rpc_doclayout import RpcDocLayoutModel
 from babeldoc.translation_config import TranslationConfig
+from babeldoc.translation_config import WatermarkOutputMode
 
 logger = logging.getLogger(__name__)
-__version__ = "0.1.25"
+__version__ = "0.1.26"
 
 
 def create_parser():
@@ -170,9 +171,16 @@ def create_parser():
         help="Use alternating pages mode for dual PDF. When enabled, original and translated pages are arranged in alternate order.",
     )
     translation_group.add_argument(
+        "--watermark-output-mode",
+        type=str,
+        choices=["watermarked", "no_watermark", "both"],
+        default="watermarked",
+        help="Control watermark output mode: 'watermarked' (default) adds watermark to translated PDF, 'no_watermark' doesn't add watermark, 'both' outputs both versions.",
+    )
+    translation_group.add_argument(
         "--no-watermark",
         action="store_true",
-        help="Do not add watermark to the translated PDF.",
+        help="[DEPRECATED] Use --watermark-output-mode=no_watermark instead. Do not add watermark to the translated PDF.",
     )
     translation_group.add_argument(
         "--report-interval",
@@ -341,7 +349,11 @@ async def main():
             use_alternating_pages_dual=args.use_alternating_pages_dual,
             report_interval=args.report_interval,
             min_text_length=args.min_text_length,
-            no_watermark=args.no_watermark,
+            watermark_output_mode=(
+                WatermarkOutputMode.NoWatermark
+                if args.no_watermark
+                else getattr(WatermarkOutputMode, args.watermark_output_mode.title())
+            ),
         )
 
         # Create progress handler
@@ -355,11 +367,7 @@ async def main():
                     logger.debug(event)
                 if event["type"] == "finish":
                     result = event["translate_result"]
-                    logger.info("Translation Result:")
-                    logger.info(f"  Original PDF: {result.original_pdf_path}")
-                    logger.info(f"  Time Cost: {result.total_seconds:.2f}s")
-                    logger.info(f"  Mono PDF: {result.mono_pdf_path or 'None'}")
-                    logger.info(f"  Dual PDF: {result.dual_pdf_path or 'None'}")
+                    logger.info(str(result))
                     break
 
 
