@@ -35,6 +35,7 @@ class ProgressMonitor:
         self.finish_event = finish_event
         self.cancel_event = cancel_event
         self.loop = loop
+        self.disable = False
         if finish_event and not loop:
             raise ValueError("finish_event requires a loop")
         if self.progress_change_callback:
@@ -51,6 +52,8 @@ class ProgressMonitor:
         self.lock = threading.Lock()
 
     def stage_start(self, stage_name: str, total: int):
+        if self.disable:
+            return DummyTranslationStage(stage_name, total, self, 0)
         stage = self.stage[stage_name]
         stage.run_time += 1
         stage.name = stage_name
@@ -78,6 +81,8 @@ class ProgressMonitor:
         logger.debug("ProgressMonitor __exit__")
 
     def on_finish(self):
+        if self.disable:
+            return
         if self.cancel_event:
             self.cancel_event.set()
         if self.finish_event and self.loop:
@@ -86,6 +91,8 @@ class ProgressMonitor:
             self.finish_callback(type="error", error=CancelledError)
 
     def stage_done(self, stage):
+        if self.disable:
+            return
         self.last_report_time = 0.0
         self.finish_stage_count += 1
         if (
@@ -128,6 +135,8 @@ class ProgressMonitor:
         return progress
 
     def stage_update(self, stage, n: int):
+        if self.disable:
+            return
         with self.lock:
             report_time_delta = time.time() - self.last_report_time
             if report_time_delta < self.report_interval and stage.total > 3:
@@ -144,10 +153,14 @@ class ProgressMonitor:
                 self.last_report_time = time.time()
 
     def translate_done(self, translate_result):
+        if self.disable:
+            return
         if self.finish_callback:
             self.finish_callback(type="finish", translate_result=translate_result)
 
     def translate_error(self, error):
+        if self.disable:
+            return
         if self.finish_callback:
             self.finish_callback(type="error", error=error)
 
@@ -156,6 +169,8 @@ class ProgressMonitor:
             raise asyncio.CancelledError
 
     def cancel(self):
+        if self.disable:
+            return
         if self.cancel_event:
             logger.info("Translation canceled")
             self.cancel_event.set()
@@ -180,3 +195,21 @@ class TranslationStage:
     def advance(self, n: int = 1):
         self.current += n
         self.pm.stage_update(self, n)
+
+
+class DummyTranslationStage:
+    def __init__(self, name: str, total: int, pm: ProgressMonitor, weight: float):
+        self.name = name
+        self.display_name = name
+        self.current = 0
+        self.total = total
+        self.pm = pm
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    def advance(self, n: int = 1):
+        pass

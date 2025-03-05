@@ -367,11 +367,7 @@ async def main():
                     logger.debug(event)
                 if event["type"] == "finish":
                     result = event["translate_result"]
-                    logger.info("Translation Result:")
-                    logger.info(f"  Original PDF: {result.original_pdf_path}")
-                    logger.info(f"  Time Cost: {result.total_seconds:.2f}s")
-                    logger.info(f"  Mono PDF: {result.mono_pdf_path or 'None'}")
-                    logger.info(f"  Dual PDF: {result.dual_pdf_path or 'None'}")
+                    logger.info(str(result))
                     break
 
 

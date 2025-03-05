@@ -195,3 +195,41 @@ class TranslateResult:
         # the values of mono_pdf_path and no_watermark_mono_pdf_path are the same.
         self.no_watermark_mono_pdf_path = mono_pdf_path
         self.no_watermark_dual_pdf_path = dual_pdf_path
+
+    def __str__(self):
+        """Return a human-readable string representation of the translation result."""
+        result = []
+        if hasattr(self, "original_pdf_path") and self.original_pdf_path:
+            result.append(f"\tOriginal PDF: {self.original_pdf_path}")
+
+        if hasattr(self, "total_seconds") and self.total_seconds:
+            result.append(f"\tTotal time: {self.total_seconds:.2f} seconds")
+
+        if self.mono_pdf_path:
+            result.append(f"\tMonolingual PDF: {self.mono_pdf_path}")
+
+        if self.dual_pdf_path:
+            result.append(f"\tDual-language PDF: {self.dual_pdf_path}")
+
+        if (
+            hasattr(self, "no_watermark_mono_pdf_path")
+            and self.no_watermark_mono_pdf_path
+            and self.no_watermark_mono_pdf_path != self.mono_pdf_path
+        ):
+            result.append(
+                f"\tNo-watermark Monolingual PDF: {self.no_watermark_mono_pdf_path}"
+            )
+
+        if (
+            hasattr(self, "no_watermark_dual_pdf_path")
+            and self.no_watermark_dual_pdf_path
+            and self.no_watermark_dual_pdf_path != self.dual_pdf_path
+        ):
+            result.append(
+                f"\tNo-watermark Dual-language PDF: {self.no_watermark_dual_pdf_path}"
+            )
+
+        if result:
+            result.insert(0, "Translation results:")
+
+        return "\n".join(result) if result else "No translation results available"

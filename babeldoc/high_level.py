@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import hashlib
+import io
 import logging
 import pathlib
 import threading
@@ -369,11 +370,11 @@ def do_translate(pm, translation_config):
                 docs,
                 translation_config.get_working_file_path("add_debug_information.json"),
             )
-        mono_watermark_first_page_doc_path = None
-        dual_watermark_first_page_doc_path = None
+        mono_watermark_first_page_doc_bytes = None
+        dual_watermark_first_page_doc_bytes = None
 
         if translation_config.watermark_output_mode == WatermarkOutputMode.Both:
-            mono_watermark_first_page_doc_path, dual_watermark_first_page_doc_path = (
+            mono_watermark_first_page_doc_bytes, dual_watermark_first_page_doc_bytes = (
                 generate_first_page_with_watermark(doc_input, translation_config, docs)
             )
 
@@ -389,17 +390,17 @@ def do_translate(pm, translation_config):
         pdf_creater = PDFCreater(temp_pdf_path, docs, translation_config)
         result = pdf_creater.write(translation_config)
 
-        if mono_watermark_first_page_doc_path:
+        if mono_watermark_first_page_doc_bytes:
             mono_watermark_pdf = merge_watermark_doc(
                 result.mono_pdf_path,
-                mono_watermark_first_page_doc_path,
+                mono_watermark_first_page_doc_bytes,
                 translation_config,
             )
             result.mono_pdf_path = mono_watermark_pdf
-        if dual_watermark_first_page_doc_path:
+        if dual_watermark_first_page_doc_bytes:
             dual_watermark_pdf = merge_watermark_doc(
                 result.dual_pdf_path,
-                dual_watermark_first_page_doc_path,
+                dual_watermark_first_page_doc_bytes,
                 translation_config,
             )
             result.dual_pdf_path = dual_watermark_pdf
@@ -426,7 +427,7 @@ def generate_first_page_with_watermark(
     mupdf: Document,
     translation_config: TranslationConfig,
     doc_il: il_version_1.Document,
-) -> (pathlib.PosixPath, pathlib.PosixPath):
+) -> (io.BytesIO, io.BytesIO):
     first_page_doc = Document()
     first_page_doc.insert_pdf(mupdf, from_page=0, to_page=0)
 
@@ -436,7 +437,7 @@ def generate_first_page_with_watermark(
 
     watermarked_config = copy.copy(translation_config)
     watermarked_config.watermark_output_mode = WatermarkOutputMode.Watermarked
-
+    watermarked_config.progress_monitor.disable = True
     watermarked_temp_pdf_path = watermarked_config.get_working_file_path(
         "watermarked_temp_input.pdf"
     )
@@ -447,27 +448,44 @@ def generate_first_page_with_watermark(
         watermarked_temp_pdf_path.as_posix(), il_only_first_page_doc, watermarked_config
     )
     result = pdf_creater.write(watermarked_config)
-    return result.mono_pdf_path, result.dual_pdf_path
+    watermarked_config.progress_monitor.disable = False
+    mono_pdf_bytes = None
+    dual_pdf_bytes = None
+    if result.mono_pdf_path:
+        mono_pdf_bytes = io.BytesIO()
+        with Path(result.mono_pdf_path).open("rb") as f:
+            mono_pdf_bytes.write(f.read())
+        result.mono_pdf_path.unlink()
+        mono_pdf_bytes.seek(0)
+
+    if result.dual_pdf_path:
+        dual_pdf_bytes = io.BytesIO()
+        with Path(result.dual_pdf_path).open("rb") as f:
+            dual_pdf_bytes.write(f.read())
+        result.dual_pdf_path.unlink()
+        dual_pdf_bytes.seek(0)
+
+    return mono_pdf_bytes, dual_pdf_bytes
 
 
 def merge_watermark_doc(
     no_watermark_pdf_path: pathlib.PosixPath,
-    watermark_first_page_pdf_path: pathlib.PosixPath,
+    watermark_first_page_pdf_bytes: io.BytesIO,
     translation_config: TranslationConfig,
 ) -> pathlib.PosixPath:
     if not no_watermark_pdf_path.exists():
         raise FileNotFoundError(
             f"no_watermark_pdf_path not found: {no_watermark_pdf_path}"
         )
-    if not watermark_first_page_pdf_path.exists():
+    if not watermark_first_page_pdf_bytes:
         raise FileNotFoundError(
-            f"watermark_first_page_pdf_path not found: {watermark_first_page_pdf_path}"
+            f"watermark_first_page_pdf_bytes not found: {watermark_first_page_pdf_bytes}"
         )
 
     no_watermark_pdf = Document(no_watermark_pdf_path.as_posix())
     no_watermark_pdf.delete_page(0)
 
-    watermark_first_page_pdf = Document(watermark_first_page_pdf_path.as_posix())
+    watermark_first_page_pdf = Document("pdf", watermark_first_page_pdf_bytes)
     no_watermark_pdf.insert_pdf(
         watermark_first_page_pdf, from_page=0, to_page=0, start_at=0
     )
