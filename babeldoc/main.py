@@ -171,9 +171,16 @@ def create_parser():
         help="Use alternating pages mode for dual PDF. When enabled, original and translated pages are arranged in alternate order.",
     )
     translation_group.add_argument(
+        "--watermark-output-mode",
+        type=str,
+        choices=["watermarked", "no_watermark", "both"],
+        default="watermarked",
+        help="Control watermark output mode: 'watermarked' (default) adds watermark to translated PDF, 'no_watermark' doesn't add watermark, 'both' outputs both versions.",
+    )
+    translation_group.add_argument(
         "--no-watermark",
         action="store_true",
-        help="Do not add watermark to the translated PDF.",
+        help="[DEPRECATED] Use --watermark-output-mode=no_watermark instead. Do not add watermark to the translated PDF.",
     )
     translation_group.add_argument(
         "--report-interval",
@@ -343,9 +350,9 @@ async def main():
             report_interval=args.report_interval,
             min_text_length=args.min_text_length,
             watermark_output_mode=(
-                WatermarkOutputMode.Both
+                WatermarkOutputMode.NoWatermark
                 if args.no_watermark
-                else WatermarkOutputMode.Watermarked
+                else getattr(WatermarkOutputMode, args.watermark_output_mode.title())
             ),
         )
 
