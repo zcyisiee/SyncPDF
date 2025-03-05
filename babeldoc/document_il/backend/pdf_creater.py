@@ -12,6 +12,7 @@ from babeldoc.document_il import il_version_1
 from babeldoc.document_il.utils.fontmap import FontMapper
 from babeldoc.translation_config import TranslateResult
 from babeldoc.translation_config import TranslationConfig
+from babeldoc.translation_config import WatermarkOutputMode
 
 logger = logging.getLogger(__name__)
 
@@ -416,8 +417,9 @@ class PDFCreater:
             pdf = self.subset_fonts_in_subprocess(pdf, translation_config, tag="debug")
         return pdf
 
+    @staticmethod
     def subset_fonts_in_subprocess(
-        self, pdf: pymupdf.Document, translation_config: TranslationConfig, tag: str
+        pdf: pymupdf.Document, translation_config: TranslationConfig, tag: str
     ) -> pymupdf.Document:
         """Run font subsetting in a subprocess with timeout.
 
@@ -489,8 +491,8 @@ class PDFCreater:
             )
             return original_pdf
 
+    @staticmethod
     def save_pdf_with_timeout(
-        self,
         pdf: pymupdf.Document,
         output_path: str,
         translation_config: TranslationConfig,
@@ -634,6 +636,8 @@ class PDFCreater:
     def write(self, translation_config: TranslationConfig) -> TranslateResult:
         basename = Path(translation_config.input_file).stem
         debug_suffix = ".debug" if translation_config.debug else ""
+        if translation_config.watermark_output_mode != WatermarkOutputMode.Watermarked:
+            debug_suffix += ".no_watermark"
         mono_out_path = translation_config.get_output_file_path(
             f"{basename}{debug_suffix}.{translation_config.lang_out}.mono.pdf",
         )

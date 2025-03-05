@@ -15,6 +15,7 @@ from babeldoc.document_il import PdfStyle
 from babeldoc.document_il import il_version_1
 from babeldoc.document_il.utils.fontmap import FontMapper
 from babeldoc.translation_config import TranslationConfig
+from babeldoc.translation_config import WatermarkOutputMode
 
 logger = logging.getLogger(__name__)
 
@@ -450,7 +451,11 @@ class Typesetting:
             fonts[xobj.xobj_id] = page_fonts.copy()
             for font in xobj.pdf_font:
                 fonts[xobj.xobj_id][font.font_id] = font
-        if page.page_number == 0 and not self.translation_config.no_watermark:
+        if (
+            page.page_number == 0
+            and self.translation_config.watermark_output_mode
+            == WatermarkOutputMode.Watermarked
+        ):
             self.add_watermark(page)
         # 开始实际的渲染过程
         for paragraph in page.pdf_paragraph:

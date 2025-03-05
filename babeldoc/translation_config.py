@@ -1,3 +1,4 @@
+import enum
 import logging
 import shutil
 import tempfile
@@ -10,6 +11,12 @@ from babeldoc.docvision.doclayout import DocLayoutModel
 from babeldoc.progress_monitor import ProgressMonitor
 
 logger = logging.getLogger(__name__)
+
+
+class WatermarkOutputMode(enum.Enum):
+    Watermarked = "watermarked"
+    NoWatermark = "no_watermark"
+    Both = "both"
 
 
 class TranslationConfig:
@@ -43,7 +50,7 @@ class TranslationConfig:
         min_text_length: int = 5,
         use_side_by_side_dual: bool = True,  # Deprecated: 是否使用拼版式双语 PDF（并排显示原文和译文） 向下兼容选项，已停用。
         use_alternating_pages_dual: bool = False,
-        no_watermark: bool = False,
+        watermark_output_mode: WatermarkOutputMode = WatermarkOutputMode.Watermarked,
     ):
         self.translator = translator
 
@@ -56,7 +63,7 @@ class TranslationConfig:
         self.pages = pages
         self.page_ranges = self._parse_pages(pages) if pages else None
         self.debug = debug
-        self.no_watermark = no_watermark
+        self.watermark_output_mode = watermark_output_mode
 
         self.output_dir = output_dir
         self.working_dir = working_dir
@@ -177,7 +184,14 @@ class TranslateResult:
     total_seconds: float
     mono_pdf_path: str | None
     dual_pdf_path: str | None
+    no_watermark_mono_pdf_path: str | None
+    no_watermark_dual_pdf_path: str | None
 
     def __init__(self, mono_pdf_path: str | None, dual_pdf_path: str | None):
         self.mono_pdf_path = mono_pdf_path
         self.dual_pdf_path = dual_pdf_path
+
+        # For compatibility considerations, if only a non-watermarked PDF is generated,
+        # the values of mono_pdf_path and no_watermark_mono_pdf_path are the same.
+        self.no_watermark_mono_pdf_path = mono_pdf_path
+        self.no_watermark_dual_pdf_path = dual_pdf_path

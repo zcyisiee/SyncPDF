@@ -21,6 +21,7 @@ from babeldoc.document_il.translator.translator import set_translate_rate_limite
 from babeldoc.docvision.doclayout import DocLayoutModel
 from babeldoc.docvision.rpc_doclayout import RpcDocLayoutModel
 from babeldoc.translation_config import TranslationConfig
+from babeldoc.translation_config import WatermarkOutputMode
 
 logger = logging.getLogger(__name__)
 __version__ = "0.1.25"
@@ -341,7 +342,11 @@ async def main():
             use_alternating_pages_dual=args.use_alternating_pages_dual,
             report_interval=args.report_interval,
             min_text_length=args.min_text_length,
-            no_watermark=args.no_watermark,
+            watermark_output_mode=(
+                WatermarkOutputMode.Both
+                if args.no_watermark
+                else WatermarkOutputMode.Watermarked
+            ),
         )
 
         # Create progress handler
