@@ -1,7 +1,9 @@
 import abc
 import ast
 import logging
+import pathlib
 import platform
+from collections.abc import Generator
 
 import cv2
 import numpy as np
@@ -10,11 +12,23 @@ import onnxruntime
 import pymupdf
 
 import babeldoc.document_il.il_version_1
-from babeldoc.assets.assets import get_doclayout_onnx_model_path
 
 # from huggingface_hub import hf_hub_download
 
 logger = logging.getLogger(__name__)
+
+
+class YoloResult:
+    """Helper class to store detection results from ONNX model."""
+
+    def __init__(self, names, boxes=None, boxes_data=None):
+        if boxes is not None:
+            self.boxes = boxes
+        else:
+            assert boxes_data is not None
+            self.boxes = [YoloBox(data=d) for d in boxes_data]
+        self.boxes.sort(key=lambda x: x.conf, reverse=True)
+        self.names = names
 
 
 class DocLayoutModel(abc.ABC):
@@ -44,18 +58,19 @@ class DocLayoutModel(abc.ABC):
             **kwargs: Additional arguments.
         """
 
-
-class YoloResult:
-    """Helper class to store detection results from ONNX model."""
-
-    def __init__(self, names, boxes=None, boxes_data=None):
-        if boxes is not None:
-            self.boxes = boxes
-        else:
-            assert boxes_data is not None
-            self.boxes = [YoloBox(data=d) for d in boxes_data]
-        self.boxes.sort(key=lambda x: x.conf, reverse=True)
-        self.names = names
+    @abc.abstractmethod
+    def handle_document(
+        self,
+        pages: list[babeldoc.document_il.il_version_1.Page],
+        mupdf_doc: pymupdf.Document,
+        translate_config,
+        save_debug_image,
+    ) -> Generator[
+        tuple[babeldoc.document_il.il_version_1.Page, YoloResult], None, None
+    ]:
+        """
+        Handle a document.
+        """
 
 
 class YoloBox:
@@ -113,7 +128,8 @@ class OnnxModel(DocLayoutModel):
 
     @staticmethod
     def from_pretrained():
-        pth = get_doclayout_onnx_model_path()
+        # pth = get_doclayout_onnx_model_path()
+        pth = pathlib.Path("/Users/aw/Downloads/best.onnx")
         return OnnxModel(pth)
 
     @property
@@ -263,7 +279,9 @@ class OnnxModel(DocLayoutModel):
         mupdf_doc: pymupdf.Document,
         translate_config,
         save_debug_image,
-    ):
+    ) -> Generator[
+        tuple[babeldoc.document_il.il_version_1.Page, YoloResult], None, None
+    ]:
         for page in pages:
             translate_config.raise_if_cancelled()
             pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
