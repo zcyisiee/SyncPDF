@@ -1,7 +1,6 @@
 import abc
 import ast
 import logging
-import pathlib
 import platform
 from collections.abc import Generator
 
@@ -12,6 +11,7 @@ import onnxruntime
 import pymupdf
 
 import babeldoc.document_il.il_version_1
+from babeldoc.assets.assets import get_doclayout_onnx_model_path
 
 # from huggingface_hub import hf_hub_download
 
@@ -128,8 +128,7 @@ class OnnxModel(DocLayoutModel):
 
     @staticmethod
     def from_pretrained():
-        # pth = get_doclayout_onnx_model_path()
-        pth = pathlib.Path("/Users/aw/Downloads/best.onnx")
+        pth = get_doclayout_onnx_model_path()
         return OnnxModel(pth)
 
     @property
