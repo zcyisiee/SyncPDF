@@ -342,6 +342,16 @@ async def main():
     else:
         args.output = None
 
+    watermark_output_mode = WatermarkOutputMode.Watermarked
+    if args.no_watermark:
+        watermark_output_mode = WatermarkOutputMode.NoWatermark
+    elif args.watermark_output_mode == "both":
+        watermark_output_mode = WatermarkOutputMode.Both
+    elif args.watermark_output_mode == "watermarked":
+        watermark_output_mode = WatermarkOutputMode.Watermarked
+    elif args.watermark_output_mode == "no_watermark":
+        watermark_output_mode = WatermarkOutputMode.NoWatermark
+
     for file in pending_files:
         # 清理文件路径，去除两端的引号
         file = file.strip("\"'")
@@ -370,11 +380,7 @@ async def main():
             use_alternating_pages_dual=args.use_alternating_pages_dual,
             report_interval=args.report_interval,
             min_text_length=args.min_text_length,
-            watermark_output_mode=(
-                WatermarkOutputMode.NoWatermark
-                if args.no_watermark
-                else getattr(WatermarkOutputMode, args.watermark_output_mode.title())
-            ),
+            watermark_output_mode=watermark_output_mode,
         )
 
         # Create progress handler
