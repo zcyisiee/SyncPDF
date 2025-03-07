@@ -110,71 +110,43 @@ class LayoutParser:
     def process(self, docs: il_version_1.Document, mupdf_doc: Document):
         """Generate layouts for all pages that need to be translated."""
         # Get pages that need to be translated
-        pages_to_translate = [
-            page
-            for page in docs.page
-            if self.translation_config.should_translate_page(page.page_number + 1)
-        ]
-        total = len(pages_to_translate)
+        total = len(docs.page)
         with self.translation_config.progress_monitor.stage_start(
             self.stage_name,
             total,
         ) as progress:
-            # Process pages in batches
-            batch_size = 1
-            for i in range(0, total, batch_size):
-                self.translation_config.raise_if_cancelled()
-                batch_pages = pages_to_translate[i : i + batch_size]
-
-                # Prepare batch images
-                batch_images = []
-                for page in batch_pages:
-                    pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
-                    image = np.fromstring(pix.samples, np.uint8).reshape(
-                        pix.height,
-                        pix.width,
-                        3,
-                    )[:, :, ::-1]
-                    batch_images.append(image)
-
-                # Get predictions for the batch
-                layouts_batch = self.model.predict(batch_images, batch_size=batch_size)
-
-                # Process predictions for each page
-                for page, layouts in zip(batch_pages, layouts_batch, strict=False):
-                    page_layouts = []
-                    self._save_debug_image(
-                        batch_images[batch_pages.index(page)],
-                        layouts,
-                        page.page_number + 1,
+            # Process predictions for each page
+            for page, layouts in self.model.handle_document(
+                docs.page, mupdf_doc, self.translation_config, self._save_debug_image
+            ):
+                page_layouts = []
+                for layout in layouts.boxes:
+                    # Convert coordinate system from picture to il
+                    # system to the il coordinate system
+                    x0, y0, x1, y1 = layout.xyxy
+                    pix = mupdf_doc[page.page_number].get_pixmap()
+                    h, w = pix.height, pix.width
+                    x0, y0, x1, y1 = (
+                        np.clip(int(x0 - 1), 0, w - 1),
+                        np.clip(int(h - y1 - 1), 0, h - 1),
+                        np.clip(int(x1 + 1), 0, w - 1),
+                        np.clip(int(h - y0 + 1), 0, h - 1),
                     )
-                    for layout in layouts.boxes:
-                        # Convert coordinate system from picture to il
-                        # system to the il coordinate system
-                        x0, y0, x1, y1 = layout.xyxy
-                        pix = mupdf_doc[page.page_number].get_pixmap()
-                        h, w = pix.height, pix.width
-                        x0, y0, x1, y1 = (
-                            np.clip(int(x0 - 1), 0, w - 1),
-                            np.clip(int(h - y1 - 1), 0, h - 1),
-                            np.clip(int(x1 + 1), 0, w - 1),
-                            np.clip(int(h - y0 + 1), 0, h - 1),
-                        )
-                        page_layout = il_version_1.PageLayout(
-                            id=len(page_layouts) + 1,
-                            box=il_version_1.Box(
-                                x0.item(),
-                                y0.item(),
-                                x1.item(),
-                                y1.item(),
-                            ),
-                            conf=layout.conf.item(),
-                            class_name=layouts.names[layout.cls],
-                        )
-                        page_layouts.append(page_layout)
+                    page_layout = il_version_1.PageLayout(
+                        id=len(page_layouts) + 1,
+                        box=il_version_1.Box(
+                            x0.item(),
+                            y0.item(),
+                            x1.item(),
+                            y1.item(),
+                        ),
+                        conf=layout.conf.item(),
+                        class_name=layouts.names[layout.cls],
+                    )
+                    page_layouts.append(page_layout)
 
-                    page.page_layout = page_layouts
-                    self._save_debug_box_to_page(page)
-                    progress.advance(1)
+                page.page_layout = page_layouts
+                self._save_debug_box_to_page(page)
+                progress.advance(1)
 
-            return docs
+        return docs

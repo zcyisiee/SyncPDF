@@ -7,7 +7,9 @@ import cv2
 import numpy as np
 import onnx
 import onnxruntime
+import pymupdf
 
+import babeldoc.document_il.il_version_1
 from babeldoc.assets.assets import get_doclayout_onnx_model_path
 
 # from huggingface_hub import hf_hub_download
@@ -254,3 +256,26 @@ class OnnxModel(DocLayoutModel):
                 results.append(YoloResult(boxes_data=preds, names=self._names))
 
         return results
+
+    def handle_document(
+        self,
+        pages: list[babeldoc.document_il.il_version_1.Page],
+        mupdf_doc: pymupdf.Document,
+        translate_config,
+        save_debug_image,
+    ):
+        for page in pages:
+            translate_config.raise_if_cancelled()
+            pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
+            image = np.fromstring(pix.samples, np.uint8).reshape(
+                pix.height,
+                pix.width,
+                3,
+            )[:, :, ::-1]
+            predict_result = self.predict(image)[0]
+            save_debug_image(
+                image,
+                predict_result,
+                page.page_number + 1,
+            )
+            yield page, predict_result
