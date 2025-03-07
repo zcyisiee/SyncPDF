@@ -244,6 +244,7 @@ class ParagraphFinder:
     def is_text_layout(self, layout: Layout):
         return layout is not None and layout.name in [
             "plain text",
+            "tiny text",
             "title",
             "abandon",
             "figure_caption",
@@ -312,6 +313,7 @@ class ParagraphFinder:
             "figure_caption",
             "abandon",
             "plain text",
+            "tiny text",
             "title",
         ]
         char_box = char.box

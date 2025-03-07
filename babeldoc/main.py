@@ -17,6 +17,7 @@ import babeldoc.high_level
 from babeldoc.document_il.translator.translator import BingTranslator
 from babeldoc.document_il.translator.translator import GoogleTranslator
 from babeldoc.document_il.translator.translator import OpenAITranslator
+from babeldoc.document_il.translator.translator import TranslateTranslator
 from babeldoc.document_il.translator.translator import set_translate_rate_limiter
 from babeldoc.docvision.doclayout import DocLayoutModel
 from babeldoc.docvision.rpc_doclayout import RpcDocLayoutModel
@@ -24,7 +25,7 @@ from babeldoc.translation_config import TranslationConfig
 from babeldoc.translation_config import WatermarkOutputMode
 
 logger = logging.getLogger(__name__)
-__version__ = "0.1.26"
+__version__ = "0.1.27"
 
 
 def create_parser():
@@ -201,6 +202,11 @@ def create_parser():
         help="Use Google translator.",
     )
     service_group.add_argument(
+        "--translate",
+        action="store_true",
+        help="Use translate translator.",
+    )
+    service_group.add_argument(
         "--bing",
         action="store_true",
         help="Use Bing translator.",
@@ -222,6 +228,14 @@ def create_parser():
         "--openai-api-key",
         "-k",
         help="The API key for the OpenAI API.",
+    )
+    service_group = parser.add_argument_group(
+        "Translation - Translate Options",
+        description="Translate specific options",
+    )
+    service_group.add_argument(
+        "--translate-url",
+        help="The base URL for the Translation API.",
     )
 
     return parser
@@ -254,8 +268,8 @@ async def main():
         return
 
     # 验证翻译服务选择
-    if not (args.openai or args.google or args.bing):
-        parser.error("必须选择一个翻译服务：--openai、--google 或 --bing")
+    if not (args.openai or args.google or args.bing or args.translate):
+        parser.error("必须选择一个翻译服务：--openai、--google、--bing 或 --translate")
 
     # 验证 OpenAI 参数
     if args.openai and not args.openai_api_key:
@@ -276,6 +290,13 @@ async def main():
             lang_in=args.lang_in,
             lang_out=args.lang_out,
             ignore_cache=args.ignore_cache,
+        )
+    elif args.translate:
+        translator = TranslateTranslator(
+            lang_in=args.lang_in,
+            lang_out=args.lang_out,
+            ignore_cache=args.ignore_cache,
+            url=args.translate_url,
         )
     else:
         translator = GoogleTranslator(
@@ -321,6 +342,16 @@ async def main():
     else:
         args.output = None
 
+    watermark_output_mode = WatermarkOutputMode.Watermarked
+    if args.no_watermark:
+        watermark_output_mode = WatermarkOutputMode.NoWatermark
+    elif args.watermark_output_mode == "both":
+        watermark_output_mode = WatermarkOutputMode.Both
+    elif args.watermark_output_mode == "watermarked":
+        watermark_output_mode = WatermarkOutputMode.Watermarked
+    elif args.watermark_output_mode == "no_watermark":
+        watermark_output_mode = WatermarkOutputMode.NoWatermark
+
     for file in pending_files:
         # 清理文件路径，去除两端的引号
         file = file.strip("\"'")
@@ -349,11 +380,7 @@ async def main():
             use_alternating_pages_dual=args.use_alternating_pages_dual,
             report_interval=args.report_interval,
             min_text_length=args.min_text_length,
-            watermark_output_mode=(
-                WatermarkOutputMode.NoWatermark
-                if args.no_watermark
-                else getattr(WatermarkOutputMode, args.watermark_output_mode.title())
-            ),
+            watermark_output_mode=watermark_output_mode,
         )
 
         # Create progress handler

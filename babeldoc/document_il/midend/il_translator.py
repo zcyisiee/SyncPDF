@@ -1,6 +1,7 @@
 import concurrent.futures
 import json
 import logging
+import re
 from pathlib import Path
 
 from tqdm import tqdm
@@ -555,6 +556,7 @@ class ILTranslator:
                     return
 
                 translated_text = self.translate_engine.translate(text)
+                translated_text = re.sub(r"[. 。…]{20,}", ".", translated_text)
 
                 tracker.set_output(translated_text)
 
