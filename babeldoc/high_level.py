@@ -138,8 +138,18 @@ def start_parse_il(
         if pages and (pageno not in pages):
             continue
         page.pageno = pageno
+
         if not translation_config.should_translate_page(pageno + 1):
             continue
+
+        height, width = (
+            page.cropbox[3] - page.cropbox[1],
+            page.cropbox[2] - page.cropbox[0],
+        )
+        if height > 1200 or width > 2000:
+            logger.warning(f"page {pageno + 1} is too large, skip")
+            continue
+
         translation_config.raise_if_cancelled()
         # The current program no longer relies on
         # the following layout recognition results,
