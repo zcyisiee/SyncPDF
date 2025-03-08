@@ -334,6 +334,7 @@ And meet the following requirements:
 1. Parsing errors in the author and reference sections; they get merged into one paragraph after translation.
 2. Lines are not supported.
 3. Does not support drop caps.
+4. Large pages will be skipped.
 
 ## How to Contribute
 
