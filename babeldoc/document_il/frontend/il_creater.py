@@ -313,6 +313,12 @@ class ILCreater:
             pdf_style=pdf_style,
             xobj_id=char.xobj_id,
         )
+        if pdf_style.font_size == 0.0:
+            logger.warning(
+                "Font size is 0.0 for character %s. Skip it.",
+                char_unicode,
+            )
+            return
         self.current_page.pdf_character.append(pdf_char)
 
     def create_il(self):
