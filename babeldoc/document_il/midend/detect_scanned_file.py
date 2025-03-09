@@ -113,6 +113,10 @@ class DetectScannedFile:
         pdf.update_object(new_xref, "<<>>")
         pdf.update_stream(new_xref, page.base_operations.value.encode("utf-8"))
         pdf[page.page_number].set_contents(new_xref)
+
+        for xobj in page.pdf_xobject:
+            pdf.update_stream(xobj.xref_id, xobj.base_operations.value.encode("utf-8"))
+
         after_page_image = pdf[page.page_number].get_pixmap()
         after_page_image = np.frombuffer(after_page_image.samples, np.uint8).reshape(
             after_page_image.height,
