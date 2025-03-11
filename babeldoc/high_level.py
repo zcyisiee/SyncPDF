@@ -32,7 +32,6 @@ from babeldoc.document_il.midend.detect_scanned_file import DetectScannedFile
 from babeldoc.document_il.midend.il_translator import ILTranslator
 from babeldoc.document_il.midend.layout_parser import LayoutParser
 from babeldoc.document_il.midend.paragraph_finder import ParagraphFinder
-from babeldoc.document_il.midend.remove_descent import RemoveDescent
 from babeldoc.document_il.midend.styles_and_formulas import StylesAndFormulas
 from babeldoc.document_il.midend.typesetting import Typesetting
 from babeldoc.document_il.utils.fontmap import FontMapper
@@ -51,7 +50,7 @@ TRANSLATE_STAGES = [
     (LayoutParser.stage_name, 6.42),  # Parse Page Layout
     (ParagraphFinder.stage_name, 2.14),  # Parse Paragraphs
     (StylesAndFormulas.stage_name, 1.12),  # Parse Formulas and Styles
-    (RemoveDescent.stage_name, 0.15),  # Remove Char Descent
+    # (RemoveDescent.stage_name, 0.15),  # Remove Char Descent
     (ILTranslator.stage_name, 75.16),  # Translate Paragraphs
     (Typesetting.stage_name, 3.84),  # Typesetting
     (FontMapper.stage_name, 0.65),  # Add Fonts
@@ -358,13 +357,13 @@ def do_translate(pm, translation_config):
                 docs,
                 translation_config.get_working_file_path("styles_and_formulas.json"),
             )
-        RemoveDescent(translation_config).process(docs)
-        logger.debug(f"finish remove descent from {temp_pdf_path}")
-        if translation_config.debug:
-            xml_converter.write_json(
-                docs,
-                translation_config.get_working_file_path("remove_descent.json"),
-            )
+        # RemoveDescent(translation_config).process(docs)
+        # logger.debug(f"finish remove descent from {temp_pdf_path}")
+        # if translation_config.debug:
+        #     xml_converter.write_json(
+        #         docs,
+        #         translation_config.get_working_file_path("remove_descent.json"),
+        #     )
         translate_engine = translation_config.translator
         ILTranslator(translate_engine, translation_config).translate(docs)
         logger.debug(f"finish ILTranslator from {temp_pdf_path}")
