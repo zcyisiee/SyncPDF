@@ -302,6 +302,7 @@ def do_translate(pm, translation_config):
         resfont = "china-ss"
         for page in doc_pdf2zh:
             page.insert_font(resfont, None)
+        resfont = None
         doc_pdf2zh.save(temp_pdf_path)
         il_creater = ILCreater(translation_config)
         il_creater.mupdf = doc_input

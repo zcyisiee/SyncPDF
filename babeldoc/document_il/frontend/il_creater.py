@@ -1,7 +1,10 @@
 import base64
 import logging
 import re
+from io import BytesIO
+from itertools import islice
 
+import freetype
 import pdfminer.pdfinterp
 import pymupdf
 from pdfminer.layout import LTChar
@@ -13,7 +16,123 @@ from pdfminer.psparser import PSLiteral
 from babeldoc.document_il import il_version_1
 from babeldoc.translation_config import TranslationConfig
 
+
+def batched(iterable, n, *, strict=False):
+    # batched('ABCDEFG', 3) → ABC DEF G
+    if n < 1:
+        raise ValueError("n must be at least one")
+    iterator = iter(iterable)
+    while batch := tuple(islice(iterator, n)):
+        if strict and len(batch) != n:
+            raise ValueError("batched(): incomplete batch")
+        yield batch
+
+
 logger = logging.getLogger(__name__)
+
+
+def indirect(obj):
+    if isinstance(obj, tuple) and obj[0] == "xref":
+        return int(obj[1].split(" ")[0])
+
+
+def get_glyph_cbox(face, g):
+    face.load_glyph(g, freetype.FT_LOAD_NO_SCALE)
+    cbox = face.glyph.outline.get_bbox()
+    return cbox.xMin, cbox.yMin, cbox.xMax, cbox.yMax
+
+
+def get_char_cbox(face, idx):
+    g = face.get_char_index(idx)
+    return get_glyph_cbox(face, g)
+
+
+def get_name_cbox(face, name):
+    g = face.get_name_index(name)
+    return get_glyph_cbox(face, g)
+
+
+def parse_font_file(doc, idx, encoding):
+    bbox_list = []
+    data = doc.xref_stream(idx)
+    face = freetype.Face(BytesIO(data))
+    for charmap in face.charmaps:
+        if charmap.encoding_name == "FT_ENCODING_ADOBE_CUSTOM":
+            face.select_charmap(freetype.FT_ENCODING_ADOBE_CUSTOM)
+            break
+    bbox_list = [get_char_cbox(face, x) for x in range(0, 256)]
+    if encoding:
+        for code, name in encoding:
+            bbox_list[code] = get_name_cbox(face, name.encode("U8"))
+    return bbox_list
+
+
+def parse_encoding(obj_str):
+    delta = []
+    current = 0
+    for x in re.finditer(
+        r"(?P<p>[\[\]])|(?P<c>\d+)|(?P<n>/[a-zA-Z0-9]+)|(?P<s>.)", obj_str
+    ):
+        key = x.lastgroup
+        val = x.group()
+        if key == "c":
+            current = int(val)
+        if key == "n":
+            delta.append((current, val[1:]))
+            current += 1
+    return delta
+
+
+def parse_mapping(text):
+    mapping = []
+    for x in re.finditer(r"<(?P<num>[a-fA-F0-9]+)>", text):
+        mapping.append(int(x.group("num"), 16))
+    return mapping
+
+
+def update_cmap_pair(cmap, data):
+    for start, stop, value in batched(data, 3):
+        for code in range(start, stop + 1):
+            cmap[code] = value
+
+
+def update_cmap_code(cmap, data):
+    for code, value in batched(data, 2):
+        cmap[code] = value
+
+
+def parse_cmap(cmap_str):
+    cmap = {}
+    for x in re.finditer(
+        r"\s+beginbfrange\s*(?P<r>(<[0-9a-fA-F]+>\s*)+)endbfrange\s+", cmap_str
+    ):
+        update_cmap_pair(cmap, parse_mapping(x.group("r")))
+    for x in re.finditer(
+        r"\s+beginbfchar\s*(?P<c>(<[0-9a-fA-F]+>\s*)+)endbfchar", cmap_str
+    ):
+        update_cmap_code(cmap, parse_mapping(x.group("c")))
+    return cmap
+
+
+def get_code(cmap, c):
+    for k, v in cmap.items():
+        if v == c:
+            return k
+    return -1
+
+
+def get_bbox(bbox, size, c, x, y):
+    x_min, y_min, x_max, y_max = bbox[c]
+    factor = 1 / 1000 * size
+    x_min = x_min * factor
+    y_min = -y_min * factor
+    x_max = x_max * factor
+    y_max = -y_max * factor
+    ll = (x + x_min, y + y_min)
+    lr = (x + x_max, y + y_min)
+    ul = (x + x_min, y + y_max)
+    ur = (x + x_max, y + y_max)
+    return pymupdf.Quad(ll, lr, ul, ur)
 
 
 class ILCreater:
@@ -34,6 +153,7 @@ class ILCreater:
         self.xobj_inc = 0
         self.xobj_map: dict[int, il_version_1.PdfXobject] = {}
         self.xobj_stack = []
+        self.current_page_font_name_id_map = {}
 
     def on_finish(self):
         self.progress.__exit__(None, None, None)
@@ -230,11 +350,31 @@ class ILCreater:
             ascent=font.ascent,
             descent=font.descent,
         )
+        try:
+            bbox_list, cmap = self.parse_font_xobj_id(xref_id)
+        except Exception:
+            logger.warning("Failed to parse font %s", font_name)
+            pass
         self.current_page_font_name_id_map[font_name] = font_id
         if self.xobj_id in self.xobj_map:
             self.xobj_map[self.xobj_id].pdf_font.append(il_font_metadata)
         else:
             self.current_page.pdf_font.append(il_font_metadata)
+
+    def parse_font_xobj_id(self, xobj_id: int):
+        encoding = []
+        font_encoding = self.mupdf.xref_get_key(xobj_id, "Encoding/Differences")
+        if font_encoding:
+            encoding = parse_encoding(font_encoding[1])
+        bbox_list = []
+        font_file = self.mupdf.xref_get_key(xobj_id, "FontDescriptor/FontFile")
+        if file_idx := indirect(font_file):
+            bbox_list = parse_font_file(self.mupdf, file_idx, encoding)
+        cmap = {}
+        to_unicode = self.mupdf.xref_get_key(xobj_id, "ToUnicode")
+        if to_unicode_idx := indirect(to_unicode):
+            cmap = parse_cmap(self.mupdf.xref_stream(to_unicode_idx).decode("U8"))
+        return bbox_list, cmap
 
     def create_graphic_state(self, gs: pdfminer.pdfinterp.PDFGraphicState):
         graphic_state = il_version_1.GraphicState()
