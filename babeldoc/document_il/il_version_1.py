@@ -139,75 +139,43 @@ class GraphicState:
 
 
 @dataclass
-class PdfFont:
+class PdfFontCharBoundingBox:
     class Meta:
-        name = "pdfFont"
+        name = "pdfFontCharBoundingBox"
 
-    name: str | None = field(
+    x: float | None = field(
         default=None,
         metadata={
             "type": "Attribute",
             "required": True,
         },
     )
-    font_id: str | None = field(
+    y: float | None = field(
         default=None,
         metadata={
-            "name": "fontId",
             "type": "Attribute",
             "required": True,
         },
     )
-    xref_id: int | None = field(
+    x2: float | None = field(
         default=None,
         metadata={
-            "name": "xrefId",
             "type": "Attribute",
             "required": True,
         },
     )
-    encoding_length: int | None = field(
+    y2: float | None = field(
         default=None,
         metadata={
-            "name": "encodingLength",
             "type": "Attribute",
             "required": True,
         },
     )
-    bold: bool | None = field(
+    char_id: int | None = field(
         default=None,
         metadata={
             "type": "Attribute",
-        },
-    )
-    italic: bool | None = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-        },
-    )
-    monospace: bool | None = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-        },
-    )
-    serif: bool | None = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-        },
-    )
-    ascent: float | None = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-        },
-    )
-    descent: float | None = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
+            "required": True,
         },
     )
 
@@ -290,6 +258,87 @@ class PdfFigure:
 
 
 @dataclass
+class PdfFont:
+    class Meta:
+        name = "pdfFont"
+
+    pdf_font_char_bounding_box: list[PdfFontCharBoundingBox] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfFontCharBoundingBox",
+            "type": "Element",
+        },
+    )
+    name: str | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    font_id: str | None = field(
+        default=None,
+        metadata={
+            "name": "fontId",
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    xref_id: int | None = field(
+        default=None,
+        metadata={
+            "name": "xrefId",
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    encoding_length: int | None = field(
+        default=None,
+        metadata={
+            "name": "encodingLength",
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    bold: bool | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    italic: bool | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    monospace: bool | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    serif: bool | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    ascent: float | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    descent: float | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+
+
+@dataclass
 class PdfRectangle:
     class Meta:
         name = "pdfRectangle"
@@ -340,51 +389,6 @@ class PdfStyle:
     font_size: float | None = field(
         default=None,
         metadata={
-            "type": "Attribute",
-            "required": True,
-        },
-    )
-
-
-@dataclass
-class PdfXobject:
-    class Meta:
-        name = "pdfXobject"
-
-    box: Box | None = field(
-        default=None,
-        metadata={
-            "type": "Element",
-            "required": True,
-        },
-    )
-    pdf_font: list[PdfFont] = field(
-        default_factory=list,
-        metadata={
-            "name": "pdfFont",
-            "type": "Element",
-        },
-    )
-    base_operations: BaseOperations | None = field(
-        default=None,
-        metadata={
-            "name": "baseOperations",
-            "type": "Element",
-            "required": True,
-        },
-    )
-    xobj_id: int | None = field(
-        default=None,
-        metadata={
-            "name": "xobjId",
-            "type": "Attribute",
-            "required": True,
-        },
-    )
-    xref_id: int | None = field(
-        default=None,
-        metadata={
-            "name": "xrefId",
             "type": "Attribute",
             "required": True,
         },
@@ -481,6 +485,51 @@ class PdfSameStyleUnicodeCharacters:
         default=None,
         metadata={
             "type": "Attribute",
+        },
+    )
+
+
+@dataclass
+class PdfXobject:
+    class Meta:
+        name = "pdfXobject"
+
+    box: Box | None = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+    pdf_font: list[PdfFont] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfFont",
+            "type": "Element",
+        },
+    )
+    base_operations: BaseOperations | None = field(
+        default=None,
+        metadata={
+            "name": "baseOperations",
+            "type": "Element",
+            "required": True,
+        },
+    )
+    xobj_id: int | None = field(
+        default=None,
+        metadata={
+            "name": "xobjId",
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    xref_id: int | None = field(
+        default=None,
+        metadata={
+            "name": "xrefId",
+            "type": "Attribute",
+            "required": True,
         },
     )
 

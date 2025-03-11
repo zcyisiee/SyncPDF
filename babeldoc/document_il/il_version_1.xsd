@@ -54,6 +54,9 @@
   </xs:simpleType>
   <xs:element name="pdfFont">
     <xs:complexType>
+      <xs:sequence>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfFontCharBoundingBox"/>
+      </xs:sequence>
       <xs:attribute name="name" use="required" type="xs:string"/>
       <xs:attribute name="fontId" use="required" type="xs:string"/>
       <xs:attribute name="xrefId" use="required" type="PDFXrefId"/>
@@ -64,6 +67,15 @@
       <xs:attribute name="serif" type="xs:boolean"/>
       <xs:attribute name="ascent" type="xs:float"/>
       <xs:attribute name="descent" type="xs:float"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pdfFontCharBoundingBox">
+    <xs:complexType>
+      <xs:attribute name="x" use="required" type="xs:float"/>
+      <xs:attribute name="y" use="required" type="xs:float"/>
+      <xs:attribute name="x2" use="required" type="xs:float"/>
+      <xs:attribute name="y2" use="required" type="xs:float"/>
+      <xs:attribute name="char_id" use="required" type="xs:int"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfXobject">

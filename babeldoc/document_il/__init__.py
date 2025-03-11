@@ -9,6 +9,7 @@ from babeldoc.document_il.il_version_1 import PageLayout
 from babeldoc.document_il.il_version_1 import PdfCharacter
 from babeldoc.document_il.il_version_1 import PdfFigure
 from babeldoc.document_il.il_version_1 import PdfFont
+from babeldoc.document_il.il_version_1 import PdfFontCharBoundingBox
 from babeldoc.document_il.il_version_1 import PdfFormula
 from babeldoc.document_il.il_version_1 import PdfLine
 from babeldoc.document_il.il_version_1 import PdfParagraph
@@ -31,6 +32,7 @@ __all__ = [
     "PdfCharacter",
     "PdfFigure",
     "PdfFont",
+    "PdfFontCharBoundingBox",
     "PdfFormula",
     "PdfLine",
     "PdfParagraph",
