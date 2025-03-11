@@ -39,6 +39,8 @@ Please pay special attention to:
 > You can contact the maintainers in the pdf2zh discussion group.
 > 
 > We welcome pull requests and will review your contributions.
+>
+> Sometimes we may not choose to accept your PR, but instead implement the related code ourselves. Please don't be offended if we implement the related code from scratch.
 
 
 1. Fork this repository and clone it locally.
