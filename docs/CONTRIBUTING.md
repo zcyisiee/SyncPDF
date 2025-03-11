@@ -1,6 +1,6 @@
-# Contributing to YADT
+# Contributing to BabelDOC
 
-## How to contribute to YADT
+## How to contribute to BabelDOC
 
 ### **About Language**
 
@@ -10,35 +10,37 @@
 
 ### **Did you find a bug?**
 
-- **Ensure the bug was not already reported** by searching on GitHub under [Issues](https://github.com/funstory-ai/yadt/issues).
+- **Ensure the bug was not already reported** by searching on GitHub under [Issues](https://github.com/funstory-ai/BabelDOC/issues).
 
 Please pay special attention to:
 
-1. Known compatibility issues with pdf2zh - see [#20](https://github.com/funstory-ai/yadt/issues/20) for details
-2. Reported edge cases and limitations from downstream applications - see [#23](https://github.com/funstory-ai/yadt/issues/23) for discussion
+1. Known compatibility issues with pdf2zh - see [#20](https://github.com/funstory-ai/BabelDOC/issues/20) for details
+2. Reported edge cases and limitations from downstream applications - see [#23](https://github.com/funstory-ai/BabelDOC/issues/23) for discussion
 
-- If you're unable to find an open issue addressing the problem, [open a new one](https://github.com/funstory-ai/yadt/issues/new?template=bug_report.md). Be sure to include a **title and clear description**, as much relevant information as possible.
+- If you're unable to find an open issue addressing the problem, [open a new one](https://github.com/funstory-ai/BabelDOC/issues/new?template=bug_report.md). Be sure to include a **title and clear description**, as much relevant information as possible.
 
 ### **If you wish to request changes or new features**
 
-- Suggest your change in the [Issues](https://github.com/funstory-ai/yadt/issues/new?template=feature_request.md) section.
+- Suggest your change in the [Issues](https://github.com/funstory-ai/BabelDOC/issues/new?template=feature_request.md) section.
 
 ### **If you wish to add more translators**
 
 - This project is not intended for direct end-user use, and the supported translators are mainly for debugging purposes. Unless it clearly helps with development and debugging, PRs for directly adding translators will not be accepted.
 - You can directly use [PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate) to get support for more translators.
 
-### **If you wish to contribute to YADT**
+### **If you wish to contribute to BabelDOC**
 
 > [!TIP]
 >
 > If you have any questions about the source code or related matters, please contact the maintainer at aw@funstory.ai .
 > 
-> You can also raise questions in [Issues](https://github.com/funstory-ai/yadt/issues).
+> You can also raise questions in [Issues](https://github.com/funstory-ai/BabelDOC/issues).
 > 
 > You can contact the maintainers in the pdf2zh discussion group.
 > 
 > We welcome pull requests and will review your contributions.
+>
+> Sometimes we may not choose to accept your PR, but instead implement the related code ourselves. Please don't be offended if we implement the related code from scratch.
 
 
 1. Fork this repository and clone it locally.
@@ -72,7 +74,7 @@ git commit -m "<semantic commit message>"
 
 2. Development and Testing
 
-- Use the `uv run yadt` command for development and testing.
+- Use the `uv run BabelDOC` command for development and testing.
 
 - When you need print log, please use `log.debug()` to print info. **DO NOT USE `print()`**
 
@@ -159,7 +161,7 @@ The existing codebase does not comply with the above specifications in some aspe
 
 #### How to modify the intermediate representation
 
-The intermediate representation is described by [il_version_1.rnc](https://github.com/funstory-ai/yadt/blob/main/yadt/document_il/il_version_1.rnc). Corresponding Python data classes are generated using [xsdata](https://xsdata.readthedocs.io/en/latest/). The files `il_version_1.rng`, `il_version_1.xsd`, and `il_version_1.py` are auto-generated and must not be manually modified.
+The intermediate representation is described by [il_version_1.rnc](https://github.com/funstory-ai/BabelDOC/blob/main/BabelDOC/document_il/il_version_1.rnc). Corresponding Python data classes are generated using [xsdata](https://xsdata.readthedocs.io/en/latest/). The files `il_version_1.rng`, `il_version_1.xsd`, and `il_version_1.py` are auto-generated and must not be manually modified.
 
 ##### Format RNC file
 
