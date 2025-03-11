@@ -349,11 +349,28 @@ class ILCreater:
             serif=serif,
             ascent=font.ascent,
             descent=font.descent,
+            pdf_font_char_bounding_box=[],
         )
         try:
             bbox_list, cmap = self.parse_font_xobj_id(xref_id)
+            for char_id in cmap:
+                if char_id < 0 or char_id >= len(bbox_list):
+                    continue
+                bbox = bbox_list[char_id]
+                x, y, x2, y2 = bbox
+                if x == 0 and y == 0 and x2 == 500 and y2 == 698:
+                    # ignore default bounding box
+                    continue
+                il_font_metadata.pdf_font_char_bounding_box.append(
+                    il_version_1.PdfFontCharBoundingBox(
+                        x=x,
+                        y=y,
+                        x2=x2,
+                        y2=y2,
+                        char_id=char_id,
+                    )
+                )
         except Exception:
-            logger.warning("Failed to parse font %s", font_name)
             pass
         self.current_page_font_name_id_map[font_name] = font_id
         if self.xobj_id in self.xobj_map:
