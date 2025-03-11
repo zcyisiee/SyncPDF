@@ -396,6 +396,20 @@ class PdfStyle:
 
 
 @dataclass
+class VisualBbox:
+    class Meta:
+        name = "visual_bbox"
+
+    box: Box | None = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+
+
+@dataclass
 class PdfCharacter:
     class Meta:
         name = "pdfCharacter"
@@ -413,6 +427,12 @@ class PdfCharacter:
         metadata={
             "type": "Element",
             "required": True,
+        },
+    )
+    visual_bbox: VisualBbox | None = field(
+        default=None,
+        metadata={
+            "type": "Element",
         },
     )
     vertical: bool | None = field(

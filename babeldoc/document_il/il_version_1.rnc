@@ -69,7 +69,8 @@ PDFCharacter =
     attribute xobjId { xsd:int }?,
     attribute debug_info { xsd:boolean }?,
     PDFStyle,
-    Box
+    Box,
+    element visual_bbox { Box }?
   }
 PageLayout =
   element pageLayout {

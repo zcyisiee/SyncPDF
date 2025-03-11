@@ -19,6 +19,7 @@ from babeldoc.document_il.il_version_1 import PdfSameStyleCharacters
 from babeldoc.document_il.il_version_1 import PdfSameStyleUnicodeCharacters
 from babeldoc.document_il.il_version_1 import PdfStyle
 from babeldoc.document_il.il_version_1 import PdfXobject
+from babeldoc.document_il.il_version_1 import VisualBbox
 
 __all__ = [
     "BaseOperations",
@@ -42,4 +43,5 @@ __all__ = [
     "PdfSameStyleUnicodeCharacters",
     "PdfStyle",
     "PdfXobject",
+    "VisualBbox",
 ]

@@ -196,6 +196,11 @@
       </optional>
       <ref name="PDFStyle"/>
       <ref name="Box"/>
+      <optional>
+        <element name="visual_bbox">
+          <ref name="Box"/>
+        </element>
+      </optional>
     </element>
   </define>
   <define name="PageLayout">
