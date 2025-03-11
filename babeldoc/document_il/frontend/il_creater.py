@@ -154,6 +154,7 @@ class ILCreater:
         self.xobj_map: dict[int, il_version_1.PdfXobject] = {}
         self.xobj_stack = []
         self.current_page_font_name_id_map = {}
+        self.current_page_font_char_bounding_box_map = {}
 
     def on_finish(self):
         self.progress.__exit__(None, None, None)
@@ -217,12 +218,21 @@ class ILCreater:
 
     def push_xobj(self):
         self.xobj_stack.append(
-            (self.current_page_font_name_id_map.copy(), self.xobj_id),
+            (
+                self.current_page_font_name_id_map.copy(),
+                self.current_page_font_char_bounding_box_map.copy(),
+                self.xobj_id,
+            ),
         )
         self.current_page_font_name_id_map = {}
+        self.current_page_font_char_bounding_box_map = {}
 
     def pop_xobj(self):
-        self.current_page_font_name_id_map, self.xobj_id = self.xobj_stack.pop()
+        (
+            self.current_page_font_name_id_map,
+            self.current_page_font_char_bounding_box_map,
+            self.xobj_id,
+        ) = self.xobj_stack.pop()
 
     def on_xobj_begin(self, bbox, xref_id):
         self.push_passthrough_per_char_instruction()
@@ -260,6 +270,7 @@ class ILCreater:
             unit="point",
         )
         self.current_page_font_name_id_map = {}
+        self.current_page_font_char_bounding_box_map = {}
         self.passthrough_per_char_instruction_stack = []
         self.xobj_stack = []
         self.non_stroking_color_space_name = None
@@ -353,6 +364,7 @@ class ILCreater:
         )
         try:
             bbox_list, cmap = self.parse_font_xobj_id(xref_id)
+            font_char_bounding_box_map = {}
             for char_id in cmap:
                 if char_id < 0 or char_id >= len(bbox_list):
                     continue
@@ -370,6 +382,10 @@ class ILCreater:
                         char_id=char_id,
                     )
                 )
+                font_char_bounding_box_map[char_id] = bbox
+            self.current_page_font_char_bounding_box_map[font_id] = (
+                font_char_bounding_box_map
+            )
         except Exception:
             pass
         self.current_page_font_name_id_map[font_name] = font_id
