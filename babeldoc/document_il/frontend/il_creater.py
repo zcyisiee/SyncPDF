@@ -1,6 +1,7 @@
 import base64
 import logging
 import re
+from functools import wraps
 
 import pdfminer.pdfinterp
 import pymupdf
@@ -8,12 +9,35 @@ from pdfminer.layout import LTChar
 from pdfminer.layout import LTFigure
 from pdfminer.pdffont import PDFCIDFont
 from pdfminer.pdffont import PDFFont
+from pdfminer.pdfpage import PDFPage as PDFMinerPDFPage
+from pdfminer.pdftypes import PDFObjRef as PDFMinerPDFObjRef
+from pdfminer.pdftypes import resolve1 as pdftypes_resolve1
 from pdfminer.psparser import PSLiteral
 
 from babeldoc.document_il import il_version_1
 from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
+
+
+def create_hook(func, hook):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        hook(*args, **kwargs)
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+def hook_pdfminer_pdf_page_init(*args):
+    attrs = args[3]
+    while isinstance(attrs["MediaBox"], PDFMinerPDFObjRef):
+        attrs["MediaBox"] = pdftypes_resolve1(attrs["MediaBox"])
+
+
+PDFMinerPDFPage.__init__ = create_hook(
+    PDFMinerPDFPage.__init__, hook_pdfminer_pdf_page_init
+)
 
 
 class ILCreater:
