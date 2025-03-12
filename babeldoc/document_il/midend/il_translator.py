@@ -556,7 +556,7 @@ class ILTranslator:
                     return
 
                 translated_text = self.translate_engine.translate(text)
-                translated_text = re.sub(r"[. 。…]{20,}", ".", translated_text)
+                translated_text = re.sub(r"[. 。…，]{20,}", ".", translated_text)
 
                 tracker.set_output(translated_text)
 
