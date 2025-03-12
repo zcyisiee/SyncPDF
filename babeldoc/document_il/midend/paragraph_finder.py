@@ -59,10 +59,10 @@ class ParagraphFinder:
         if not chars:
             return
         # 更新边界框
-        min_x = min(char.box.x for char in chars)
-        min_y = min(char.box.y for char in chars)
-        max_x = max(char.box.x2 for char in chars)
-        max_y = max(char.box.y2 for char in chars)
+        min_x = min(char.visual_bbox.box.x for char in chars)
+        min_y = min(char.visual_bbox.box.y for char in chars)
+        max_x = max(char.visual_bbox.box.x2 for char in chars)
+        max_y = max(char.visual_bbox.box.y2 for char in chars)
         paragraph.box = Box(min_x, min_y, max_x, max_y)
         paragraph.vertical = chars[0].vertical
         paragraph.xobj_id = chars[0].xobj_id
@@ -70,17 +70,19 @@ class ParagraphFinder:
         paragraph.first_line_indent = False
         if (
             paragraph.pdf_paragraph_composition[0].pdf_line
-            and paragraph.pdf_paragraph_composition[0].pdf_line.pdf_character[0].box.x
+            and paragraph.pdf_paragraph_composition[0]
+            .pdf_line.pdf_character[0]
+            .visual_bbox.box.x
             - paragraph.box.x
             > 1
         ):
             paragraph.first_line_indent = True
 
     def update_line_data(self, line: PdfLine):
-        min_x = min(char.box.x for char in line.pdf_character)
-        min_y = min(char.box.y for char in line.pdf_character)
-        max_x = max(char.box.x2 for char in line.pdf_character)
-        max_y = max(char.box.y2 for char in line.pdf_character)
+        min_x = min(char.visual_bbox.box.x for char in line.pdf_character)
+        min_y = min(char.visual_bbox.box.y for char in line.pdf_character)
+        max_x = max(char.visual_bbox.box.x2 for char in line.pdf_character)
+        max_y = max(char.visual_bbox.box.y2 for char in line.pdf_character)
         line.box = Box(min_x, min_y, max_x, max_y)
 
     def process(self, document):
