@@ -407,9 +407,16 @@ class ILCreater:
                     )
                 )
                 font_char_bounding_box_map[char_id] = bbox
-            self.current_page_font_char_bounding_box_map[font_id] = (
-                font_char_bounding_box_map
-            )
+            if self.xobj_id in self.xobj_map:
+                if self.xobj_id not in self.current_page_font_char_bounding_box_map:
+                    self.current_page_font_char_bounding_box_map[self.xobj_id] = {}
+                self.current_page_font_char_bounding_box_map[self.xobj_id][font_id] = (
+                    font_char_bounding_box_map
+                )
+            else:
+                self.current_page_font_char_bounding_box_map[font_id] = (
+                    font_char_bounding_box_map
+                )
         except Exception:
             pass
         self.current_page_font_name_id_map[font_name] = font_id
@@ -475,13 +482,27 @@ class ILCreater:
             descent = font.descent * char.size / 1000
 
         char_id = char.cid
+
+        if font_bounding_box_map := self.current_page_font_char_bounding_box_map.get(
+            self.xobj_id, self.current_page_font_char_bounding_box_map
+        ).get(font.font_id):
+            char_bounding_box = font_bounding_box_map.get(char_id, None)
+        else:
+            char_bounding_box = None
+
         char_unicode = char.get_text()
         if "(cid:" not in char_unicode and len(char_unicode) > 1:
             return
         advance = char.adv
+        bbox = il_version_1.Box(
+            x=char.bbox[0],
+            y=char.bbox[1],
+            x2=char.bbox[2],
+            y2=char.bbox[3],
+        )
         if char.matrix[0] == 0 and char.matrix[3] == 0:
             vertical = True
-            bbox = il_version_1.Box(
+            visual_bbox = il_version_1.Box(
                 x=char.bbox[0] - descent,
                 y=char.bbox[1],
                 x2=char.bbox[2] - descent,
@@ -490,7 +511,7 @@ class ILCreater:
         else:
             vertical = False
             # Add descent to y coordinates
-            bbox = il_version_1.Box(
+            visual_bbox = il_version_1.Box(
                 x=char.bbox[0],
                 y=char.bbox[1] + descent,
                 x2=char.bbox[2],
@@ -509,6 +530,7 @@ class ILCreater:
             vertical=vertical,
             pdf_style=pdf_style,
             xobj_id=char.xobj_id,
+            visual_bbox=visual_bbox,
         )
         if pdf_style.font_size == 0.0:
             logger.warning(
@@ -516,6 +538,20 @@ class ILCreater:
                 char_unicode,
             )
             return
+
+        if char_bounding_box:
+            x_min, y_min, x_max, y_max = char_bounding_box
+            factor = 1 / 1000 * pdf_style.font_size
+            x_min = x_min * factor
+            y_min = -y_min * factor
+            x_max = x_max * factor
+            y_max = -y_max * factor
+            ll = (char.bbox[0] + x_min, char.bbox[1] + y_min)
+            ur = (char.bbox[2] + x_max, char.bbox[3] + y_max)
+            pdf_char.visual_bbox = il_version_1.VisualBbox(
+                il_version_1.Box(ll[0], ll[1], ur[0], ur[1])
+            )
+
         self.current_page.pdf_character.append(pdf_char)
 
     def create_il(self):
