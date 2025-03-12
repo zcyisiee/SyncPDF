@@ -925,7 +925,11 @@ class Typesetting:
                 para.box.y >= current_box.y2 or para.box.y2 <= current_box.y
             ):
                 max_x = min(max_x, para.box.x)
-
+        for char in page.pdf_character:
+            if char.box.x > current_box.x and not (
+                char.box.y >= current_box.y2 or char.box.y2 <= current_box.y
+            ):
+                max_x = min(max_x, char.box.x)
         # 检查图形
         for figure in page.pdf_figure:
             if figure.box.x > current_box.x and not (
@@ -935,7 +939,7 @@ class Typesetting:
 
         return max_x
 
-    def get_max_bottom_space(self, current_box: Box, page) -> float:
+    def get_max_bottom_space(self, current_box: Box, page: il_version_1.Page) -> float:
         """获取段落下方最大可用空间
 
         Args:
@@ -957,7 +961,11 @@ class Typesetting:
                 para.box.x >= current_box.x2 or para.box.x2 <= current_box.x
             ):
                 min_y = max(min_y, para.box.y2)
-
+        for char in page.pdf_character:
+            if char.box.y2 < current_box.y and not (
+                char.box.x >= current_box.x2 or char.box.x2 <= current_box.x
+            ):
+                min_y = max(min_y, char.box.y2)
         # 检查图形
         for figure in page.pdf_figure:
             if figure.box.y2 < current_box.y and not (
