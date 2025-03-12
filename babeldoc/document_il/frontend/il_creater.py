@@ -394,7 +394,16 @@ class ILCreater:
                     continue
                 bbox = bbox_list[char_id]
                 x, y, x2, y2 = bbox
-                if x == 0 and y == 0 and x2 == 500 and y2 == 698:
+                if (
+                    x == 0
+                    and y == 0
+                    and x2 == 500
+                    and y2 == 698
+                    or x == 0
+                    and y == 0
+                    and x2 == 0
+                    and y2 == 0
+                ):
                     # ignore default bounding box
                     continue
                 il_font_metadata.pdf_font_char_bounding_box.append(
@@ -544,14 +553,16 @@ class ILCreater:
             x_min, y_min, x_max, y_max = char_bounding_box
             factor = 1 / 1000 * pdf_style.font_size
             x_min = x_min * factor
-            y_min = -y_min * factor
+            y_min = y_min * factor
             x_max = x_max * factor
-            y_max = -y_max * factor
+            y_max = y_max * factor
             ll = (char.bbox[0] + x_min, char.bbox[1] + y_min)
-            ur = (char.bbox[2] + x_max, char.bbox[3] + y_max)
+            ur = (char.bbox[0] + x_max, char.bbox[1] + y_max)
             pdf_char.visual_bbox = il_version_1.VisualBbox(
                 il_version_1.Box(ll[0], ll[1], ur[0], ur[1])
             )
+            if char_unicode == "√":
+                print()
 
         self.current_page.pdf_character.append(pdf_char)
 
