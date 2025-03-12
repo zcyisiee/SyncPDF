@@ -501,7 +501,7 @@ class StylesAndFormulas:
             r"|EUAlbertina.+"
             r"|NimbusRomNo9L.+"
             r"|GlosaMath.+"
-            r"|LMMono10.+"
+            r"|URWPalladioL.+"
             r")$"
         )
         if self.translation_config.formular_font_pattern:
