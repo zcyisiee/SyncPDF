@@ -419,7 +419,7 @@ class StylesAndFormulas:
                     formula.y_offset = 0
 
                 if max(abs(formula.y_offset), abs(formula.x_offset)) > 2:
-                    logging.warning(
+                    logging.debug(
                         f"公式 {formula.box} 的偏移量过大：{formula.x_offset}, {formula.y_offset}"
                     )
 
