@@ -89,10 +89,10 @@ uv run babeldoc --help
 3. Use the `uv run babeldoc` command. For example:
 
 ```bash
-uv run babeldoc --bing --files example.pdf
+uv run babeldoc --files example.pdf --openai --openai-model "gpt-4o-mini" --openai-base-url "https://api.openai.com/v1" --openai-api-key "your-api-key-here"
 
 # multiple files
-uv run babeldoc --bing --files example.pdf --files example2.pdf
+uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model "gpt-4o-mini" --openai-base-url "https://api.openai.com/v1" --openai-api-key "your-api-key-here"
 ```
 
 > [!TIP]
@@ -140,12 +140,10 @@ uv run babeldoc --bing --files example.pdf --files example2.pdf
 - `--no-mono`: Do not output monolingual PDF files
 - `--min-text-length`: Minimum text length to translate (default: 5)
 - `--openai`: Use OpenAI for translation (default: False)
-- `--bing`: Use Bing for translation (default: False)
-- `--google`: Use Google Translate for translation (default: False)
 
 > [!TIP]
 >
-> 1. You must specify one translation service among `--openai`, `--bing`, `--google`.
+> 1. You must specify one translation service among `--openai`.
 > 2. It is recommended to use models with strong compatibility with OpenAI, such as: `glm-4-flash`, `deepseek-chat`, etc.
 > 3. Currently, it has not been optimized for traditional translation engines like Bing/Google, it is recommended to use LLMs.
 

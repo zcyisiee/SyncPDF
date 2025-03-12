@@ -39,7 +39,16 @@ PDFFont =
     attribute monospace { xsd:boolean }?,
     attribute serif { xsd:boolean }?,
     attribute ascent { xsd:float }?,
-    attribute descent { xsd:float }?
+    attribute descent { xsd:float }?,
+    PDFFontCharBoundingBox*
+  }
+PDFFontCharBoundingBox =
+  element pdfFontCharBoundingBox {
+    attribute x { xsd:float },
+    attribute y { xsd:float },
+    attribute x2 { xsd:float },
+    attribute y2 { xsd:float },
+    attribute char_id { xsd:int }
   }
 PDFXobject =
   element pdfXobject {
@@ -60,7 +69,8 @@ PDFCharacter =
     attribute xobjId { xsd:int }?,
     attribute debug_info { xsd:boolean }?,
     PDFStyle,
-    Box
+    Box,
+    element visual_bbox { Box }?
   }
 PageLayout =
   element pageLayout {

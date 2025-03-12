@@ -9,6 +9,7 @@ from babeldoc.document_il.il_version_1 import PageLayout
 from babeldoc.document_il.il_version_1 import PdfCharacter
 from babeldoc.document_il.il_version_1 import PdfFigure
 from babeldoc.document_il.il_version_1 import PdfFont
+from babeldoc.document_il.il_version_1 import PdfFontCharBoundingBox
 from babeldoc.document_il.il_version_1 import PdfFormula
 from babeldoc.document_il.il_version_1 import PdfLine
 from babeldoc.document_il.il_version_1 import PdfParagraph
@@ -18,6 +19,7 @@ from babeldoc.document_il.il_version_1 import PdfSameStyleCharacters
 from babeldoc.document_il.il_version_1 import PdfSameStyleUnicodeCharacters
 from babeldoc.document_il.il_version_1 import PdfStyle
 from babeldoc.document_il.il_version_1 import PdfXobject
+from babeldoc.document_il.il_version_1 import VisualBbox
 
 __all__ = [
     "BaseOperations",
@@ -31,6 +33,7 @@ __all__ = [
     "PdfCharacter",
     "PdfFigure",
     "PdfFont",
+    "PdfFontCharBoundingBox",
     "PdfFormula",
     "PdfLine",
     "PdfParagraph",
@@ -40,4 +43,5 @@ __all__ = [
     "PdfSameStyleUnicodeCharacters",
     "PdfStyle",
     "PdfXobject",
+    "VisualBbox",
 ]

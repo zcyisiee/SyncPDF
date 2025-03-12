@@ -117,6 +117,28 @@
           <data type="float"/>
         </attribute>
       </optional>
+      <zeroOrMore>
+        <ref name="PDFFontCharBoundingBox"/>
+      </zeroOrMore>
+    </element>
+  </define>
+  <define name="PDFFontCharBoundingBox">
+    <element name="pdfFontCharBoundingBox">
+      <attribute name="x">
+        <data type="float"/>
+      </attribute>
+      <attribute name="y">
+        <data type="float"/>
+      </attribute>
+      <attribute name="x2">
+        <data type="float"/>
+      </attribute>
+      <attribute name="y2">
+        <data type="float"/>
+      </attribute>
+      <attribute name="char_id">
+        <data type="int"/>
+      </attribute>
     </element>
   </define>
   <define name="PDFXobject">
@@ -174,6 +196,11 @@
       </optional>
       <ref name="PDFStyle"/>
       <ref name="Box"/>
+      <optional>
+        <element name="visual_bbox">
+          <ref name="Box"/>
+        </element>
+      </optional>
     </element>
   </define>
   <define name="PageLayout">

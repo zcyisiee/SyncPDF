@@ -1,4 +1,5 @@
 import base64
+import logging
 import math
 import re
 import unicodedata
@@ -97,6 +98,13 @@ class StylesAndFormulas:
                         or (
                             #   如果是程序添加的 dummy 空格
                             char.char_unicode is None and in_formula_state
+                        )
+                        or (
+                            # 如果字符的视觉框和实际框不一致，则认为是公式字符
+                            char.box.x > char.visual_bbox.box.x2
+                            or char.box.x2 < char.visual_bbox.box.x
+                            or char.box.y > char.visual_bbox.box.y2
+                            or char.box.y2 < char.visual_bbox.box.y
                         )
                     )
 
@@ -388,6 +396,32 @@ class StylesAndFormulas:
                             right_line = comp.pdf_line
                             break
 
+                # 计算与左右文本的y轴交集
+                left_intersection = 0
+                right_intersection = 0
+
+                if left_line:
+                    # 计算与左边文本的交集
+                    intersection_start = max(formula.box.y, left_line.box.y)
+                    intersection_end = min(formula.box.y2, left_line.box.y2)
+                    if intersection_end > intersection_start:
+                        left_intersection = intersection_end - intersection_start
+
+                if right_line:
+                    # 计算与右边文本的交集
+                    intersection_start = max(formula.box.y, right_line.box.y)
+                    intersection_end = min(formula.box.y2, right_line.box.y2)
+                    if intersection_end > intersection_start:
+                        right_intersection = intersection_end - intersection_start
+
+                # 如果有两个文本段落，将交集较小的设为none
+                if left_line and right_line:
+                    if left_intersection < right_intersection:
+                        left_line = None
+                    elif right_intersection < left_intersection:
+                        right_line = None
+                    # 如果交集相等，保留两者
+
                 # 计算 x 偏移量（相对于左边文本）
                 if left_line:
                     formula.x_offset = formula.box.x - left_line.box.x2
@@ -395,8 +429,8 @@ class StylesAndFormulas:
                     formula.x_offset = 0  # 如果左边没有文字，x_offset 应该为 0
                 if abs(formula.x_offset) < 0.1:
                     formula.x_offset = 0
-                if formula.x_offset > 0:
-                    formula.x_offset = 0
+                # if formula.x_offset > 0:
+                #     formula.x_offset = 0
 
                 # 计算 y 偏移量
                 if left_line:
@@ -409,6 +443,11 @@ class StylesAndFormulas:
 
                 if abs(formula.y_offset) < 0.1:
                     formula.y_offset = 0
+
+                if max(abs(formula.y_offset), abs(formula.x_offset)) > 2:
+                    logging.debug(
+                        f"公式 {formula.box} 的偏移量过大：{formula.x_offset}, {formula.y_offset}"
+                    )
 
     def calculate_line_spacing(self, paragraph) -> float:
         """计算段落中的平均行间距"""
@@ -453,22 +492,22 @@ class StylesAndFormulas:
             return PdfParagraphComposition(pdf_line=new_line)
 
     def update_formula_data(self, formula: PdfFormula):
-        min_x = min(char.box.x for char in formula.pdf_character)
-        max_x = max(char.box.x2 for char in formula.pdf_character)
+        min_x = min(char.visual_bbox.box.x for char in formula.pdf_character)
+        max_x = max(char.visual_bbox.box.x2 for char in formula.pdf_character)
         if not all(map(formular_height_ignore_char, formula.pdf_character)):
             min_y = min(
-                char.box.y
+                char.visual_bbox.box.y
                 for char in formula.pdf_character
                 if not formular_height_ignore_char(char)
             )
             max_y = max(
-                char.box.y2
+                char.visual_bbox.box.y2
                 for char in formula.pdf_character
                 if not formular_height_ignore_char(char)
             )
         else:
-            min_y = min(char.box.y for char in formula.pdf_character)
-            max_y = max(char.box.y2 for char in formula.pdf_character)
+            min_y = min(char.visual_bbox.box.y for char in formula.pdf_character)
+            max_y = max(char.visual_bbox.box.y2 for char in formula.pdf_character)
         formula.box = Box(min_x, min_y, max_x, max_y)
 
     def is_translatable_formula(self, formula: PdfFormula) -> bool:
@@ -479,7 +518,18 @@ class StylesAndFormulas:
         return bool(re.match(r"^[0-9, ]+$", text))
 
     def is_formulas_font(self, font_name: str) -> bool:
-        pattern2 = r"^(Cambria|Cambria-BoldItalic|Cambria-Bold|Cambria-Italic|EUAlbertina.+|NimbusRomNo9L.+|GlosaMath.+)$"
+        pattern2 = (
+            r"^("
+            r"Cambria"
+            r"|Cambria-BoldItalic"
+            r"|Cambria-Bold"
+            r"|Cambria-Italic"
+            r"|EUAlbertina.+"
+            r"|NimbusRomNo9L.+"
+            r"|GlosaMath.+"
+            r"|URWPalladioL.+"
+            r")$"
+        )
         if self.translation_config.formular_font_pattern:
             pattern = self.translation_config.formular_font_pattern
         else:
@@ -498,6 +548,9 @@ class StylesAndFormulas:
                 r"|.*Ital"
                 r"|.*Sym"
                 r"|.*Math"
+                r"|AdvP4C4E74"
+                r"|AdvPSSym"
+                r"|AdvP4C4E59"
                 r")"
             )
 

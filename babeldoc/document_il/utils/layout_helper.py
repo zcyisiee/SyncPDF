@@ -2,6 +2,7 @@ import logging
 import math
 
 from babeldoc.document_il import GraphicState
+from babeldoc.document_il import il_version_1
 from babeldoc.document_il.il_version_1 import Box
 from babeldoc.document_il.il_version_1 import PdfCharacter
 from babeldoc.document_il.il_version_1 import PdfParagraph
@@ -364,6 +365,7 @@ def add_space_dummy_chars(paragraph: PdfParagraph) -> None:
                 char_unicode=" ",
                 scale=curr_last_char.scale,
                 advance=space_box.x2 - space_box.x,
+                visual_bbox=il_version_1.VisualBbox(box=space_box),
             )
 
             # 将空格添加到当前组成部分的末尾
@@ -458,6 +460,7 @@ def _add_space_dummy_chars_to_list(chars: list[PdfCharacter]) -> None:
                 char_unicode=" ",
                 scale=curr_char.scale,
                 advance=space_box.x2 - space_box.x,
+                visual_bbox=il_version_1.VisualBbox(box=space_box),
             )
 
             # 在当前位置后插入空格字符

@@ -343,13 +343,13 @@ class ILTranslator:
                 )
                 return None
 
-        # 如果占位符数量超过 50，且未禁用富文本翻译，则递归调用并禁用富文本翻译
-        if len(placeholders) > 50 and not disable_rich_text_translate:
-            logger.warning(
-                f"Too many placeholders ({len(placeholders)}) in paragraph[{paragraph.debug_id}], "
-                "disabling rich text translation for this paragraph",
-            )
-            return self.get_translate_input(paragraph, page_font_map, True)
+            # 如果占位符数量超过阈值，且未禁用富文本翻译，则递归调用并禁用富文本翻译
+            if len(placeholders) > 40 and not disable_rich_text_translate:
+                logger.warning(
+                    f"Too many placeholders ({len(placeholders)}) in paragraph[{paragraph.debug_id}], "
+                    "disabling rich text translation for this paragraph",
+                )
+                return self.get_translate_input(paragraph, page_font_map, True)
 
         text = get_char_unicode_string(chars)
         return self.TranslateInput(text, placeholders, paragraph.pdf_style)
@@ -556,7 +556,7 @@ class ILTranslator:
                     return
 
                 translated_text = self.translate_engine.translate(text)
-                translated_text = re.sub(r"[. 。…]{20,}", ".", translated_text)
+                translated_text = re.sub(r"[. 。…，]{20,}", ".", translated_text)
 
                 tracker.set_output(translated_text)
 
