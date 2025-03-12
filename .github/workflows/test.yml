@@ -37,9 +37,13 @@ jobs:
         run: |
           uv run babeldoc --warmup
       - name: Run tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAIAPIKEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAIAPIURL }}
+          OPENAI_MODEL: ${{ secrets.OPENAIMODEL }}
         run: |
           uv run babeldoc --help
-          uv run babeldoc --bing --files examples/ci/test.pdf
+          uv run babeldoc --openai --files examples/ci/test.pdf --openai-api-key ${{ env.OPENAI_API_KEY }} --openai-base-url ${{ env.OPENAI_BASE_URL }} --openai-model ${{ env.OPENAI_MODEL }}
       - name: Generate offline assets package
         run: |
           uv run babeldoc --generate-offline-assets /tmp/offline_assets
