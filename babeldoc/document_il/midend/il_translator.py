@@ -343,8 +343,8 @@ class ILTranslator:
                 )
                 return None
 
-            # 如果占位符数量超过 25，且未禁用富文本翻译，则递归调用并禁用富文本翻译
-            if len(placeholders) > 25 and not disable_rich_text_translate:
+            # 如果占位符数量超过阈值，且未禁用富文本翻译，则递归调用并禁用富文本翻译
+            if len(placeholders) > 40 and not disable_rich_text_translate:
                 logger.warning(
                     f"Too many placeholders ({len(placeholders)}) in paragraph[{paragraph.debug_id}], "
                     "disabling rich text translation for this paragraph",
