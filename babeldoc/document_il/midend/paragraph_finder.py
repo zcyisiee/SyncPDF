@@ -28,7 +28,9 @@ class ParagraphFinder:
     stage_name = "Parse Paragraphs"
 
     # 定义项目符号的正则表达式模式
-    BULLET_POINT_PATTERN = re.compile(r"[•⚫⬤◆◇○●◦‣⁃▪▫]")
+    BULLET_POINT_PATTERN = re.compile(
+        r"[•⚫⬤◆◇○●◦‣⁃▪▫∗†‡¹²³⁴⁵⁶⁷⁸⁹⁰₁₂₃₄₅₆₇₈₉₀ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖᵍʳˢᵗᵘᵛʷˣʸᶻ†‡§¶※⁑⁂⁕⁎⁜⁑❧☙⁋‖‽]"
+    )
 
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config

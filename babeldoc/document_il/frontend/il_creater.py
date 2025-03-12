@@ -389,6 +389,8 @@ class ILCreater:
         try:
             bbox_list, cmap = self.parse_font_xobj_id(xref_id)
             font_char_bounding_box_map = {}
+            if not cmap:
+                cmap = {x: x for x in range(257)}
             for char_id in cmap:
                 if char_id < 0 or char_id >= len(bbox_list):
                     continue
@@ -561,8 +563,6 @@ class ILCreater:
             pdf_char.visual_bbox = il_version_1.VisualBbox(
                 il_version_1.Box(ll[0], ll[1], ur[0], ur[1])
             )
-            if char_unicode == "√":
-                print()
 
         self.current_page.pdf_character.append(pdf_char)
 
