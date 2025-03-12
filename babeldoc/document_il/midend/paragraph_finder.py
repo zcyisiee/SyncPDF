@@ -1,7 +1,6 @@
 import logging
 import random
 import re
-from typing import Literal
 
 from babeldoc.document_il import Box
 from babeldoc.document_il import Page
@@ -137,6 +136,23 @@ class ParagraphFinder:
             paragraphs.extend(page.pdf_paragraph)
             page.pdf_paragraph = []
 
+        # Calculate median character area
+        char_areas = []
+        for char in page.pdf_character:
+            char_box = char.box
+            area = (char_box.x2 - char_box.x) * (char_box.y2 - char_box.y)
+            char_areas.append(area)
+
+        median_char_area = 0.0
+        if char_areas:
+            char_areas.sort()
+            mid = len(char_areas) // 2
+            median_char_area = (
+                char_areas[mid]
+                if len(char_areas) % 2 == 1
+                else (char_areas[mid - 1] + char_areas[mid]) / 2
+            )
+
         current_paragraph: PdfParagraph | None = None
         current_layout: Layout | None = None
         current_line_chars: list[PdfCharacter] = []
@@ -164,8 +180,14 @@ class ParagraphFinder:
                         self.update_paragraph_data(current_paragraph)
                     current_line_chars = []
 
+            # Calculate current character area
+            char_box = char.visual_bbox.box
+            char_area = (char_box.x2 - char_box.x) * (char_box.y2 - char_box.y)
+            is_small_char = char_area < median_char_area * 0.1
+
             # 检查是否需要开始新段落
-            if (
+            # 如果字符面积小于中位数面积的10%且当前段落已有字符，则跳过新段落检测
+            if not (is_small_char and current_line_chars) and (
                 current_layout is None
                 or char_layout.id != current_layout.id
                 or (  # 不是同一个 xobject
@@ -262,41 +284,7 @@ class ParagraphFinder:
         self,
         char: PdfCharacter,
         page: Page,
-        xy_mode: (
-            Literal["topleft"] | Literal["bottomright"] | Literal["middle"]
-        ) = "middle",
     ):
-        tl, br, md = [
-            self._get_layout(char, page, mode)
-            for mode in ["topleft", "bottomright", "middle"]
-        ]
-        if tl is not None and tl.name == "isolate_formula":
-            return tl
-        if br is not None and br.name == "isolate_formula":
-            return br
-        if md is not None and md.name == "isolate_formula":
-            return md
-
-        if md is not None:
-            return md
-        if tl is not None:
-            return tl
-        return br
-
-    def _get_layout(
-        self,
-        char: PdfCharacter,
-        page: Page,
-        xy_mode: (
-            Literal["topleft"] | Literal["bottomright"] | Literal["middle"]
-        ) = "middle",
-    ):
-        # 这几个符号，解析出来的大小经常只有实际大小的一点点。
-        # if (
-        #     xy_mode != "bottomright"
-        #     and char.char_unicode in HEIGHT_NOT_USFUL_CHAR_IN_CHAR
-        # ):
-        #     return self.get_layout(char, page, "bottomright")
         # current layouts
         # {
         #     "title",
@@ -324,37 +312,41 @@ class ParagraphFinder:
             "title",
         ]
         char_box = char.visual_bbox.box
-        if xy_mode == "topleft":
-            char_x = char_box.x
-            char_y = char_box.y2
-        elif xy_mode == "bottomright":
-            char_x = char_box.x2
-            char_y = char_box.y
-        elif xy_mode == "middle":
-            char_x = (char_box.x + char_box.x2) / 2
-            char_y = (char_box.y + char_box.y2) / 2
-        else:
-            logger.error(f"Invalid xy_mode: {xy_mode}")
-            return self.get_layout(char, page, "middle")
-        # 按照优先级顺序检查每种布局
-        matching_layouts = {}
+
+        def calculate_intersection_area(char_box: Box, layout_box: Box) -> float:
+            """Calculate the intersection area between a character box and a layout box."""
+            x_left = max(char_box.x, layout_box.x)
+            y_bottom = max(char_box.y, layout_box.y)
+            x_right = min(char_box.x2, layout_box.x2)
+            y_top = min(char_box.y2, layout_box.y2)
+
+            if x_right <= x_left or y_top <= y_bottom:
+                return 0.0
+
+            return (x_right - x_left) * (y_top - y_bottom)
+
+        # 收集所有相交的布局及其相交面积
+        matching_layouts = []
         for layout in page.page_layout:
-            layout_box = layout.box
-            if (
-                layout_box.x <= char_x <= layout_box.x2
-                and layout_box.y <= char_y <= layout_box.y2
-            ):
-                matching_layouts[layout.class_name] = Layout(
-                    layout.id,
-                    layout.class_name,
+            intersection_area = calculate_intersection_area(char_box, layout.box)
+            if intersection_area > 0:
+                matching_layouts.append(
+                    {
+                        "layout": Layout(layout.id, layout.class_name),
+                        "priority": layout_priority.index(layout.class_name)
+                        if layout.class_name in layout_priority
+                        else len(layout_priority),
+                        "area": intersection_area,
+                    }
                 )
 
-        # 按照优先级返回最高优先级的布局
-        for layout_name in layout_priority:
-            if layout_name in matching_layouts:
-                return matching_layouts[layout_name]
+        if not matching_layouts:
+            return None
 
-        return None
+        # 按优先级（升序）和相交面积（降序）排序
+        matching_layouts.sort(key=lambda x: (x["priority"], -x["area"]))
+
+        return matching_layouts[0]["layout"]
 
     def create_line(self, chars: list[PdfCharacter]) -> PdfParagraphComposition:
         assert chars
