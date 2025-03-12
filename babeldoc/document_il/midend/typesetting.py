@@ -735,7 +735,7 @@ class Typesetting:
         line_spacing = 1.7  # 初始行距为 1.7
         min_scale = 0.1  # 最小缩放因子
         min_line_spacing = 1.4  # 最小行距
-        expand_space_flag = False
+        expand_space_flag = 0  # 0: 未扩展, 1: 已向下扩展, 2: 已向右扩展
 
         while scale >= min_scale:
             # 尝试布局排版单元
@@ -760,25 +760,6 @@ class Typesetting:
                         )
                 return
 
-            if not expand_space_flag:
-                # 尝试扩展空间（右侧和下方）
-                max_x = self.get_max_right_space(box, page)
-                min_y = self.get_max_bottom_space(box, page)
-
-                # 只有当有额外空间时才扩展
-                if max_x > box.x2 or min_y < box.y:
-                    expanded_box = Box(
-                        x=box.x,
-                        y=min_y if min_y < box.y else box.y,
-                        x2=max_x if max_x > box.x2 else box.x2,
-                        y2=box.y2,
-                    )
-                    # 更新段落的边界框
-                    paragraph.box = expanded_box
-                    box = expanded_box
-                expand_space_flag = True
-                continue
-
             # 如果当前行距大于最小行距，先减小行距
             if line_spacing > min_line_spacing:
                 line_spacing -= 0.1
@@ -791,6 +772,37 @@ class Typesetting:
                 line_spacing = 1.7  # 重置行距
 
             if scale < 0.7 and min_line_spacing > 1.1:
+                if expand_space_flag == 0:
+                    # 先尝试向下扩展
+                    min_y = self.get_max_bottom_space(box, page)
+                    if min_y < box.y:
+                        expanded_box = Box(
+                            x=box.x,
+                            y=min_y,
+                            x2=box.x2,
+                            y2=box.y2,
+                        )
+                        # 更新段落的边界框
+                        paragraph.box = expanded_box
+                        box = expanded_box
+                    expand_space_flag = 1
+                    continue
+                elif expand_space_flag == 1:
+                    # 如果向下扩展后还不够，再尝试向右扩展
+                    max_x = self.get_max_right_space(box, page)
+                    if max_x > box.x2:
+                        expanded_box = Box(
+                            x=box.x,
+                            y=box.y,
+                            x2=max_x,
+                            y2=box.y2,
+                        )
+                        # 更新段落的边界框
+                        paragraph.box = expanded_box
+                        box = expanded_box
+                    expand_space_flag = 2
+                    continue
+
                 min_line_spacing = 1.1
                 scale = 1.0
                 line_spacing = 1.7
