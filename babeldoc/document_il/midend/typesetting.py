@@ -424,7 +424,7 @@ class TypesettingUnit:
             )
             x = self.x
             y = self.y
-            # if self.original_font and self.font:
+            # if self.original_font and self.font and hasattr(self.original_font, "descent") and hasattr(self.font, "descent_fontmap"):
             #     original_descent = self.original_font.descent
             #     new_descent = self.font.descent_fontmap
             #     y -= (original_descent - new_descent) * self.font_size / 1000
