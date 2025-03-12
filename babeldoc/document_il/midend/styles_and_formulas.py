@@ -1,4 +1,5 @@
 import base64
+import logging
 import math
 import re
 import unicodedata
@@ -97,6 +98,13 @@ class StylesAndFormulas:
                         or (
                             #   如果是程序添加的 dummy 空格
                             char.char_unicode is None and in_formula_state
+                        )
+                        or (
+                            # 如果字符的视觉框和实际框不一致，则认为是公式字符
+                            char.box.x > char.visual_bbox.box.x2
+                            or char.box.x2 < char.visual_bbox.box.x
+                            or char.box.y > char.visual_bbox.box.y2
+                            or char.box.y2 < char.visual_bbox.box.y
                         )
                     )
 
@@ -395,8 +403,8 @@ class StylesAndFormulas:
                     formula.x_offset = 0  # 如果左边没有文字，x_offset 应该为 0
                 if abs(formula.x_offset) < 0.1:
                     formula.x_offset = 0
-                if formula.x_offset > 0:
-                    formula.x_offset = 0
+                # if formula.x_offset > 0:
+                #     formula.x_offset = 0
 
                 # 计算 y 偏移量
                 if left_line:
@@ -409,6 +417,11 @@ class StylesAndFormulas:
 
                 if abs(formula.y_offset) < 0.1:
                     formula.y_offset = 0
+
+                if max(abs(formula.y_offset), abs(formula.x_offset)) > 2:
+                    logging.warning(
+                        f"公式 {formula.box} 的偏移量过大：{formula.x_offset}, {formula.y_offset}"
+                    )
 
     def calculate_line_spacing(self, paragraph) -> float:
         """计算段落中的平均行间距"""

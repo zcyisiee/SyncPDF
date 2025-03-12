@@ -578,6 +578,7 @@ class Typesetting:
         current_x = box.x
         current_y = box.y2 - avg_height
         line_height = 0
+        current_line_heights = []  # 存储当前行所有元素的高度
 
         # 存储已排版的单元
         typeset_units = []
@@ -643,8 +644,13 @@ class Typesetting:
             ):
                 # 换行
                 current_x = box.x
-                current_y -= line_height * line_spacing
+                if not current_line_heights:
+                    return [], False
+                max_height = max(current_line_heights)
+
+                current_y -= max(line_height * line_spacing, max_height * 1.05)
                 line_height = 0.0
+                current_line_heights = []  # 清空当前行高度列表
 
                 # 检查是否超出底部边界
                 if current_y - unit_height < box.y:
@@ -659,15 +665,24 @@ class Typesetting:
             relocated_unit = unit.relocate(current_x, current_y, scale)
             typeset_units.append(relocated_unit)
 
-            # workaround: 超长行距暂时没找到具体原因，有待进一步修复。这里的 1.2 是魔法数字！
-            # 更新当前行的最大高度
-            if line_height == 0 or line_height * 1.2 > unit_height > line_height:
-                line_height = unit_height
+            # 添加当前单元的高度到当前行高度列表
+            current_line_heights.append(unit_height)
+
+            # 计算当前行的行高
+            if current_line_heights:
+                mode_height = statistics.mode(current_line_heights)
+                line_height = mode_height
 
             # 更新 x 坐标
             current_x = relocated_unit.box.x2
 
             last_unit = relocated_unit
+
+        # 处理最后一行的行高
+        if current_line_heights:
+            mode_height = statistics.mode(current_line_heights)
+            max_height = max(current_line_heights)
+            line_height = max(mode_height, max_height)
 
         return typeset_units, all_units_fit
 
