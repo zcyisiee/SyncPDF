@@ -732,7 +732,7 @@ class Typesetting:
     ):
         box = paragraph.box
         scale = 1.0
-        line_spacing = 1.5  # 初始行距为 1.7
+        line_spacing = 1.7  # 初始行距为 1.7
         min_scale = 0.1  # 最小缩放因子
         min_line_spacing = 1.4  # 最小行距
         expand_space_flag = False
@@ -785,12 +785,12 @@ class Typesetting:
                     scale -= 0.05
                 else:
                     scale -= 0.1
-                line_spacing = 1.5  # 重置行距
+                line_spacing = 1.7  # 重置行距
 
             if scale < 0.7 and min_line_spacing > 1.1:
                 min_line_spacing = 1.1
                 scale = 1.0
-                line_spacing = 1.5
+                line_spacing = 1.7
         # 如果仍然放不下，则尝试去除英文换行限制
         if use_english_line_break:
             self.retypeset(
