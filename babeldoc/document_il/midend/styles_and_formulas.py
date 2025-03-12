@@ -396,6 +396,32 @@ class StylesAndFormulas:
                             right_line = comp.pdf_line
                             break
 
+                # 计算与左右文本的y轴交集
+                left_intersection = 0
+                right_intersection = 0
+
+                if left_line:
+                    # 计算与左边文本的交集
+                    intersection_start = max(formula.box.y, left_line.box.y)
+                    intersection_end = min(formula.box.y2, left_line.box.y2)
+                    if intersection_end > intersection_start:
+                        left_intersection = intersection_end - intersection_start
+
+                if right_line:
+                    # 计算与右边文本的交集
+                    intersection_start = max(formula.box.y, right_line.box.y)
+                    intersection_end = min(formula.box.y2, right_line.box.y2)
+                    if intersection_end > intersection_start:
+                        right_intersection = intersection_end - intersection_start
+
+                # 如果有两个文本段落，将交集较小的设为none
+                if left_line and right_line:
+                    if left_intersection < right_intersection:
+                        left_line = None
+                    elif right_intersection < left_intersection:
+                        right_line = None
+                    # 如果交集相等，保留两者
+
                 # 计算 x 偏移量（相对于左边文本）
                 if left_line:
                     formula.x_offset = formula.box.x - left_line.box.x2
