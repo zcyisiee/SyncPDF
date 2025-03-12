@@ -761,18 +761,21 @@ class Typesetting:
                 return
 
             if not expand_space_flag:
-                # 如果尚未扩展空格，进行扩展
+                # 尝试扩展空间（右侧和下方）
                 max_x = self.get_max_right_space(box, page)
+                min_y = self.get_max_bottom_space(box, page)
+
                 # 只有当有额外空间时才扩展
-                if max_x > box.x2:
+                if max_x > box.x2 or min_y < box.y:
                     expanded_box = Box(
                         x=box.x,
-                        y=box.y,
-                        x2=max_x,  # 直接扩展到最大可用位置
+                        y=min_y if min_y < box.y else box.y,
+                        x2=max_x if max_x > box.x2 else box.x2,
                         y2=box.y2,
                     )
                     # 更新段落的边界框
                     paragraph.box = expanded_box
+                    box = expanded_box
                 expand_space_flag = True
                 continue
 
@@ -910,7 +913,6 @@ class Typesetting:
         Returns:
             可以扩展到的最大 x 坐标
         """
-        # TODO: try to find right margin of page
         # 获取页面的裁剪框作为初始最大限制
         max_x = page.cropbox.box.x2 * 0.9
 
@@ -932,3 +934,35 @@ class Typesetting:
                 max_x = min(max_x, figure.box.x)
 
         return max_x
+
+    def get_max_bottom_space(self, current_box: Box, page) -> float:
+        """获取段落下方最大可用空间
+
+        Args:
+            current_box: 当前段落的边界框
+            page: 当前页面
+
+        Returns:
+            可以扩展到的最小 y 坐标
+        """
+        # 获取页面的裁剪框作为初始最小限制
+        min_y = page.cropbox.box.y * 1.1
+
+        # 检查所有可能的阻挡元素
+        for para in page.pdf_paragraph:
+            if para.box == current_box or para.box is None:  # 跳过当前段落
+                continue
+            # 只考虑在当前段落下方且有水平重叠的元素
+            if para.box.y2 < current_box.y and not (
+                para.box.x >= current_box.x2 or para.box.x2 <= current_box.x
+            ):
+                min_y = max(min_y, para.box.y2)
+
+        # 检查图形
+        for figure in page.pdf_figure:
+            if figure.box.y2 < current_box.y and not (
+                figure.box.x >= current_box.x2 or figure.box.x2 <= current_box.x
+            ):
+                min_y = max(min_y, figure.box.y2)
+
+        return min_y
