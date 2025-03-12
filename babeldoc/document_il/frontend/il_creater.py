@@ -517,6 +517,7 @@ class ILCreater:
                 x2=char.bbox[2],
                 y2=char.bbox[3] + descent,
             )
+        visual_bbox = il_version_1.VisualBbox(box=visual_bbox)
         pdf_style = il_version_1.PdfStyle(
             font_id=char.aw_font_id,
             font_size=char.size,

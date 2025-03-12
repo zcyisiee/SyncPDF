@@ -316,7 +316,7 @@ class ParagraphFinder:
             "tiny text",
             "title",
         ]
-        char_box = char.box
+        char_box = char.visual_bbox.box
         if xy_mode == "topleft":
             char_x = char_box.x
             char_y = char_box.y2
