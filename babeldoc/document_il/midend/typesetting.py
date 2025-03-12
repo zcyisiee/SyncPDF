@@ -30,6 +30,7 @@ class TypesettingUnit:
         formular: PdfFormula = None,
         unicode: str = None,
         font: pymupdf.Font | None = None,
+        original_font: il_version_1.PdfFont | None = None,
         font_size: float = None,
         style: PdfStyle = None,
         xobj_id: int = None,
@@ -60,6 +61,11 @@ class TypesettingUnit:
             else:
                 self.font_id = "base"
                 self.unicode = " "
+            if original_font:
+                self.original_font = original_font
+            else:
+                self.original_font = None
+
             self.font_size = font_size
             self.style = style
             self.xobj_id = xobj_id
@@ -307,13 +313,16 @@ class TypesettingUnit:
         elif self.formular:
             # 创建新的公式对象，保持内部字符的相对位置
             new_chars = []
-            min_x = min(char.box.x for char in self.formular.pdf_character)
-            min_y = min(char.box.y for char in self.formular.pdf_character)
+            min_x = min(char.visual_bbox.box.x for char in self.formular.pdf_character)
+            min_y = min(char.visual_bbox.box.y for char in self.formular.pdf_character)
 
             for char in self.formular.pdf_character:
                 # 计算相对位置
                 rel_x = char.box.x - min_x
                 rel_y = char.box.y - min_y
+
+                visual_rel_x = char.visual_bbox.box.x - min_x
+                visual_rel_y = char.visual_bbox.box.y - min_y
 
                 # 创建新的字符对象
                 new_char = PdfCharacter(
@@ -329,6 +338,26 @@ class TypesettingUnit:
                         + (rel_y + (char.box.y2 - char.box.y) + self.formular.y_offset)
                         * scale,
                     ),
+                    visual_bbox=il_version_1.VisualBbox(
+                        box=Box(
+                            x=x + visual_rel_x * scale,
+                            y=y + visual_rel_y * scale,
+                            x2=x
+                            + (
+                                visual_rel_x
+                                + (char.visual_bbox.box.x2 - char.visual_bbox.box.x)
+                                + self.formular.x_offset
+                            )
+                            * scale,
+                            y2=y
+                            + (
+                                visual_rel_y
+                                + (char.visual_bbox.box.y2 - char.visual_bbox.box.y)
+                                + self.formular.y_offset
+                            )
+                            * scale,
+                        ),
+                    ),
                     pdf_style=PdfStyle(
                         font_id=char.pdf_style.font_id,
                         font_size=char.pdf_style.font_size * scale,
@@ -341,10 +370,10 @@ class TypesettingUnit:
                 new_chars.append(new_char)
 
             # Calculate bounding box from new_chars
-            min_x = min(char.box.x for char in new_chars)
-            min_y = min(char.box.y for char in new_chars)
-            max_x = max(char.box.x2 for char in new_chars)
-            max_y = max(char.box.y2 for char in new_chars)
+            min_x = min(char.visual_bbox.box.x for char in new_chars)
+            min_y = min(char.visual_bbox.box.y for char in new_chars)
+            max_x = max(char.visual_bbox.box.x2 for char in new_chars)
+            max_y = max(char.visual_bbox.box.y2 for char in new_chars)
 
             new_formula = PdfFormula(
                 box=Box(
@@ -364,6 +393,7 @@ class TypesettingUnit:
             new_unit = TypesettingUnit(
                 unicode=self.unicode,
                 font=self.font,
+                original_font=self.original_font,
                 font_size=self.font_size * scale,
                 style=self.style,
                 xobj_id=self.xobj_id,
@@ -392,6 +422,13 @@ class TypesettingUnit:
             assert self.scale is not None, (
                 "scale must be set, should be set by `relocate`"
             )
+            x = self.x
+            y = self.y
+            # if self.original_font and self.font:
+            #     original_descent = self.original_font.descent
+            #     new_descent = self.font.descent_fontmap
+            #     y -= (original_descent - new_descent) * self.font_size / 1000
+
             # 计算字符宽度
             char_width = self.width
 
@@ -399,10 +436,10 @@ class TypesettingUnit:
                 pdf_character_id=self.font.has_glyph(ord(self.unicode)),
                 char_unicode=self.unicode,
                 box=Box(
-                    x=self.x,  # 使用存储的位置
-                    y=self.y,
-                    x2=self.x + char_width,
-                    y2=self.y + self.font_size,
+                    x=x,  # 使用存储的位置
+                    y=y,
+                    x2=x + char_width,
+                    y2=y + self.font_size,
                 ),
                 pdf_style=PdfStyle(
                     font_id=self.font_id,
@@ -814,6 +851,7 @@ class Typesetting:
                                 font,
                                 char_unicode,
                             ),
+                            original_font=font,
                             font_size=composition.pdf_same_style_unicode_characters.pdf_style.font_size,
                             style=composition.pdf_same_style_unicode_characters.pdf_style,
                             xobj_id=paragraph.xobj_id,
