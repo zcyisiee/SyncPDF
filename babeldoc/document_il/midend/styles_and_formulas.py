@@ -522,6 +522,9 @@ class StylesAndFormulas:
                 r"|.*Ital"
                 r"|.*Sym"
                 r"|.*Math"
+                r"|AdvP4C4E74"
+                r"|AdvPSSym"
+                r"|AdvP4C4E59"
                 r")"
             )
 
