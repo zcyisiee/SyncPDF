@@ -28,6 +28,9 @@ def generate_base58_id(length: int = 5) -> str:
 class ParagraphFinder:
     stage_name = "Parse Paragraphs"
 
+    # 定义项目符号的正则表达式模式
+    BULLET_POINT_PATTERN = re.compile(r"[•⚫⬤◆◇○●◦‣⁃▪▫]")
+
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config
 
@@ -168,6 +171,10 @@ class ParagraphFinder:
                 or (  # 不是同一个 xobject
                     current_line_chars
                     and current_line_chars[-1].xobj_id != char.xobj_id
+                )
+                or (
+                    self.is_bullet_point(char)  # 如果是项目符号，开启新段落
+                    and not current_line_chars
                 )
             ):
                 if current_line_chars:
@@ -452,3 +459,15 @@ class ParagraphFinder:
                     break
                 j += 1
             i += 1
+
+    def is_bullet_point(self, char: PdfCharacter) -> bool:
+        """Check if the character is a bullet point.
+
+        Args:
+            char: The character to check
+
+        Returns:
+            bool: True if the character is a bullet point
+        """
+        is_bullet = bool(self.BULLET_POINT_PATTERN.match(char.char_unicode))
+        return is_bullet
