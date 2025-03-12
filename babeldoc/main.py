@@ -14,8 +14,6 @@ from rich.progress import TimeRemainingColumn
 
 import babeldoc.assets.assets
 import babeldoc.high_level
-from babeldoc.document_il.translator.translator import BingTranslator
-from babeldoc.document_il.translator.translator import GoogleTranslator
 from babeldoc.document_il.translator.translator import OpenAITranslator
 from babeldoc.document_il.translator.translator import TranslateTranslator
 from babeldoc.document_il.translator.translator import set_translate_rate_limiter
@@ -197,19 +195,9 @@ def create_parser():
         help="Use OpenAI translator.",
     )
     service_group.add_argument(
-        "--google",
-        action="store_true",
-        help="Use Google translator.",
-    )
-    service_group.add_argument(
         "--translate",
         action="store_true",
         help="Use translate translator.",
-    )
-    service_group.add_argument(
-        "--bing",
-        action="store_true",
-        help="Use Bing translator.",
     )
     service_group = parser.add_argument_group(
         "Translation - OpenAI Options",
@@ -268,8 +256,8 @@ async def main():
         return
 
     # 验证翻译服务选择
-    if not (args.openai or args.google or args.bing or args.translate):
-        parser.error("必须选择一个翻译服务：--openai、--google、--bing 或 --translate")
+    if not (args.openai or args.translate):
+        parser.error("必须选择一个翻译服务：--openai 或 --translate")
 
     # 验证 OpenAI 参数
     if args.openai and not args.openai_api_key:
@@ -285,12 +273,6 @@ async def main():
             api_key=args.openai_api_key,
             ignore_cache=args.ignore_cache,
         )
-    elif args.bing:
-        translator = BingTranslator(
-            lang_in=args.lang_in,
-            lang_out=args.lang_out,
-            ignore_cache=args.ignore_cache,
-        )
     elif args.translate:
         translator = TranslateTranslator(
             lang_in=args.lang_in,
@@ -299,11 +281,7 @@ async def main():
             url=args.translate_url,
         )
     else:
-        translator = GoogleTranslator(
-            lang_in=args.lang_in,
-            lang_out=args.lang_out,
-            ignore_cache=args.ignore_cache,
-        )
+        raise ValueError("Invalid translator type")
 
     # 设置翻译速率限制
     set_translate_rate_limiter(args.qps)
