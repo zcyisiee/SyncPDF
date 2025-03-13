@@ -4,6 +4,7 @@ import logging
 import re
 from pathlib import Path
 
+import yaml
 from tqdm import tqdm
 
 from babeldoc.document_il import Document
@@ -646,21 +647,70 @@ class ILTranslatorLLMOnly:
     ):
         """Translate a paragraph using pre and post processing functions."""
         self.translation_config.raise_if_cancelled()
+
+        inputs = []
+
         for i in range(len(batch_paragraph.paragraphs)):
+            paragraph = batch_paragraph.paragraphs[i]
+            tracker = batch_paragraph.trackers[i]
+            text, translate_input = self._pre_translate_paragraph(
+                paragraph, tracker, page_font_map, xobj_font_map
+            )
+            if text is None:
+                continue
+            inputs.append((text, translate_input))
+
+        self.translation_config.raise_if_cancelled()
+
+        llm_input = []
+        yaml_format_input = []
+
+        for id_, input_text in enumerate(inputs):
+            yaml_format_input.append(
+                f"""
+                - id: {id_}
+                  input: {input_text[0]}
+                """
+            )
+        yaml_format_input = yaml.dump(yaml_format_input)
+        llm_input.append(
+            """You will be given a YAML formatted input containing entries with "id" and "{{imt_source_field}}" fields. Here is the input:
+
+<yaml>"""
+            + yaml_format_input
+            + """</yaml>
+
+For each entry in the YAML, translate the contents of the "input" field into """
+            + self.translation_config.lang_out
+            + """, Write the translation back into the "output" field for that entry.
+
+Here is an example of the expected format:
+
+<example>
+Input:
+  - id: 1
+    input: Source
+Output:
+  - id: 1
+    output: Translation
+</example>
+
+Please return the translated YAML directly without wrapping <yaml> tag or include any additional information.
+            """
+        )
+
+        llm_output = self.translate_engine.llm_translate("\n".join(llm_input))
+        llm_output = llm_output.strip()
+        if llm_output.startswith("<yaml>"):
+            llm_output = llm_output[6:]
+        if llm_output.endswith("</yaml>"):
+            llm_output = llm_output[:-7]
+        llm_output = yaml.safe_load(llm_output)
+
+        for id_, output in llm_output.items():
             try:
-                paragraph = batch_paragraph.paragraphs[i]
-                tracker = batch_paragraph.trackers[i]
-                # Pre-translation processing
-                text, translate_input = self._pre_translate_paragraph(
-                    paragraph, tracker, page_font_map, xobj_font_map
-                )
-                if text is None:
-                    continue
-
-                # Perform translation
-                translated_text = self.translate_engine.translate(text)
-                translated_text = re.sub(r"[. 。…，]{20,}", ".", translated_text)
-
+                translated_text = re.sub(r"[. 。…，]{20,}", ".", output)
+                translate_input = inputs[id_][1]
                 # Post-translation processing
                 self._post_translate_paragraph(
                     paragraph, tracker, translate_input, translated_text
