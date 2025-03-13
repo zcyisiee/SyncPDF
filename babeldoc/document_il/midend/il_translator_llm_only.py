@@ -161,10 +161,7 @@ class ILTranslatorLLMOnly:
             total,
         ) as pbar:
             with concurrent.futures.ThreadPoolExecutor(
-                max_workers=min(
-                    self.translation_config.qps * 2,
-                    self.translation_config.qps + 5,
-                ),
+                max_workers=self.translation_config.qps,
             ) as executor:
                 for page in docs.page:
                     self.process_page(
@@ -658,11 +655,10 @@ class ILTranslatorLLMOnly:
             )
             if text is None:
                 continue
-            inputs.append((text, translate_input))
+            inputs.append((text, translate_input, paragraph.layout_label))
 
         self.translation_config.raise_if_cancelled()
 
-        llm_input = []
         yaml_format_input = []
 
         for id_, input_text in enumerate(inputs):
@@ -670,19 +666,37 @@ class ILTranslatorLLMOnly:
                 {
                     "id": id_,
                     "input": input_text[0],
+                    "layout_label": input_text[2],
                 }
             )
-        yaml_format_input = yaml.dump(yaml_format_input)
-        llm_input.append(
-            """You will be given a YAML formatted input containing entries with "id" and "input" fields. Here is the input:
+        yaml_format_input = yaml.dump(
+            yaml_format_input,
+            default_style='"',  # 使用双引号包裹所有标量
+            width=float("inf"),  # 防止长字符串被折行
+        )
+        llm_input = ["You are a professional, authentic machine translation engine."]
 
-```yaml"""
-            + yaml_format_input
-            + """```
+        if title_paragraph:
+            llm_input.append(
+                f"The first title in the full text: {title_paragraph.unicode}"
+            )
+        if (
+            local_title_paragraph
+            and local_title_paragraph.debug_id != title_paragraph.debug_id
+        ):
+            llm_input.append(
+                f"The most similar title in the full text: {local_title_paragraph.unicode}"
+            )
+        # Create a structured prompt template for LLM translation
+        prompt_template = f"""
+You will be given a YAML formatted input containing entries with "id" and "input" fields. Here is the input:
 
-For each entry in the YAML, translate the contents of the "input" field into """
-            + self.translation_config.lang_out
-            + """, Write the translation back into the "output" field for that entry.
+```yaml
+{yaml_format_input}
+```
+
+For each entry in the YAML, translate the contents of the "input" field into {self.translation_config.lang_out}.
+Write the translation back into the "output" field for that entry.
 
 Here is an example of the expected format:
 
@@ -690,23 +704,71 @@ Here is an example of the expected format:
 ```yaml
 Input:
   - id: 1
-    input: Source
+    input: "Source"
+    layout_label: "plain text"
 ```
 Output:
 ```yaml
   - id: 1
-    output: Translation
+    output: "Translation"
 ```
 </example>
 
 Please return the translated YAML directly without wrapping <yaml> tag or include any additional information.
-            """
-        )
+"""
+        llm_input.append(prompt_template)
 
-        llm_output = self.translate_engine.llm_translate("\n".join(llm_input))
+        final_input = "\n".join(llm_input).strip()
+        llm_output = self.translate_engine.llm_translate(final_input)
         llm_output = llm_output.strip()
 
-        # 处理各种可能的YAML标记
+        # Clean up YAML output by removing common wrapper tags
+        llm_output = self._clean_yaml_output(llm_output)
+
+        try:
+            # Parse the YAML output
+            parsed_output = yaml.safe_load(llm_output)
+
+            # Convert parsed output to a standardized format {id: output_text}
+            translation_results = self._standardize_yaml_output(parsed_output)
+        except Exception as e:
+            logger.warning(
+                f"Failed to parse YAML output: {e}. Falling back to regex parsing."
+            )
+            # Use regex as fallback to extract id and output pairs
+            translation_results = self._extract_translations_with_regex(llm_output)
+
+        for id_, output in translation_results.items():
+            try:
+                id_ = int(id_)  # Ensure id is an integer
+                if id_ >= len(inputs):
+                    logger.warning(f"Invalid id {id_}, skipping")
+                    continue
+
+                # Clean up any excessive punctuation in the translated text
+                translated_text = re.sub(r"[. 。…，]{20,}", ".", output)
+
+                # Get the original input for this translation
+                translate_input = inputs[id_][1]
+
+                # Apply the translation to the paragraph
+                self._post_translate_paragraph(
+                    batch_paragraph.paragraphs[id_],
+                    batch_paragraph.trackers[id_],
+                    translate_input,
+                    translated_text,
+                )
+            except Exception as e:
+                logger.exception(f"Error translating paragraph. Error: {e}.")
+                # Ignore error and continue
+                continue
+            finally:
+                if pbar:
+                    pbar.advance(1)
+
+    def _clean_yaml_output(self, llm_output: str) -> str:
+        # Clean up YAML output by removing common wrapper tags
+        llm_output = llm_output.strip()
         if llm_output.startswith("<yaml>"):
             llm_output = llm_output[6:]
         if llm_output.endswith("</yaml>"):
@@ -717,58 +779,33 @@ Please return the translated YAML directly without wrapping <yaml> tag or includ
             llm_output = llm_output[3:]
         if llm_output.endswith("```"):
             llm_output = llm_output[:-3]
-        llm_output = llm_output.strip()
-        try:
-            parsed_output = yaml.safe_load(llm_output)
+        return llm_output.strip()
 
-            # 处理不同的输出格式
-            if isinstance(parsed_output, list):
-                # 如果是列表格式，转换为字典
-                llm_output = {}
-                for item in parsed_output:
-                    if isinstance(item, dict) and "id" in item and "output" in item:
-                        llm_output[item["id"]] = item["output"]
-            elif isinstance(parsed_output, dict) and "Output" in parsed_output:
-                # 如果是包含Output键的字典
+    def _standardize_yaml_output(self, parsed_output) -> dict:
+        """Convert parsed output to a standardized format {id: output_text}."""
+        result = {}
+
+        if isinstance(parsed_output, list):
+            # If it's a list format, convert to dictionary
+            for item in parsed_output:
+                if isinstance(item, dict) and "id" in item and "output" in item:
+                    result[item["id"]] = item["output"]
+        elif isinstance(parsed_output, dict):
+            if "Output" in parsed_output:
+                # If it contains an Output key
                 output_items = parsed_output.get("Output", [])
-                llm_output = {}
                 if isinstance(output_items, list):
                     for item in output_items:
                         if isinstance(item, dict) and "id" in item and "output" in item:
-                            llm_output[item["id"]] = item["output"]
+                            result[item["id"]] = item["output"]
             else:
-                # 直接使用解析结果
-                llm_output = parsed_output
-        except Exception as e:
-            logger.warning(
-                f"Failed to parse YAML output: {e}. Falling back to regex parsing."
-            )
-            # 使用正则表达式提取id和output
-            pattern = r"id:\s*(\d+).*?output:\s*(.*?)(?=\n\s*-|\Z)"
-            matches = re.findall(pattern, llm_output, re.DOTALL)
-            llm_output = {int(id_): output.strip() for id_, output in matches}
+                # Use parsed result directly
+                result = parsed_output
 
-        for id_, output in llm_output.items():
-            try:
-                id_ = int(id_)  # 确保id是整数
-                if id_ >= len(inputs):
-                    logger.warning(f"Invalid id {id_}, skipping")
-                    continue
+        return result
 
-                translated_text = re.sub(r"[. 。…，]{20,}", ".", output)
-                translate_input = inputs[id_][1]
-                # Post-translation processing
-                self._post_translate_paragraph(
-                    batch_paragraph.paragraphs[id_],
-                    batch_paragraph.trackers[id_],
-                    translate_input,
-                    translated_text,
-                )
-            except Exception as e:
-                logger.exception(
-                    f"Error translating paragraph. Paragraph: {paragraph}. Error: {e}. ",
-                )
-                # ignore error and continue
-                continue
-            finally:
-                pbar.advance(1)
+    def _extract_translations_with_regex(self, llm_output: str) -> dict:
+        # Use regex as fallback to extract id and output pairs
+        pattern = r"id:\s*(\d+).*?output:\s*(.*?)(?=\n\s*-|\Z)"
+        matches = re.findall(pattern, llm_output, re.DOTALL)
+        return {id_: output.strip() for id_, output in matches}
