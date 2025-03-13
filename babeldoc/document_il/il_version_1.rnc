@@ -114,6 +114,7 @@ PDFParagraph =
     attribute vertical { xsd:boolean }?,
     attribute FirstLineIndent { xsd:boolean }?,
     attribute debug_id { xsd:string }?,
+    attribute layout_label { xsd:string }?,
     Box,
     PDFStyle,
     PDFParagraphComposition*
