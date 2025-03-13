@@ -112,7 +112,7 @@ class ParagraphTranslateTracker:
         self.output = output
 
 
-class ILTranslator:
+class ILTranslatorLLMOnly:
     stage_name = "Translate Paragraphs"
 
     def __init__(
@@ -123,6 +123,11 @@ class ILTranslator:
         self.translate_engine = translate_engine
         self.translation_config = translation_config
         self.font_mapper = FontMapper(translation_config)
+
+        try:
+            self.translate_engine.do_llm_translate(None)
+        except NotImplementedError as e:
+            raise ValueError("LLM translator not supported") from e
 
     def translate(self, docs: Document):
         tracker = DocumentTranslateTracker()
