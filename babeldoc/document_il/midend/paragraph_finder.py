@@ -417,7 +417,7 @@ class ParagraphFinder:
                         ),
                         unicode="",
                         debug_id=generate_base58_id(),
-                        layout_label=prev_composition.layout_label,
+                        layout_label=paragraph.layout_label,
                     )
                     # 更新原段落
                     paragraph.pdf_paragraph_composition = (
@@ -446,7 +446,7 @@ class ParagraphFinder:
                         ),
                         unicode="",
                         debug_id=generate_base58_id(),
-                        layout_label=prev_composition.layout_label,
+                        layout_label=paragraph.layout_label,
                     )
                     # 更新原段落
                     paragraph.pdf_paragraph_composition = (
