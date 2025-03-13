@@ -334,6 +334,11 @@
           <data type="string"/>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="layout_label">
+          <data type="string"/>
+        </attribute>
+      </optional>
       <ref name="Box"/>
       <ref name="PDFStyle"/>
       <zeroOrMore>

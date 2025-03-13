@@ -79,10 +79,10 @@ def predict_layout(
 
     # Pack data using msgpack
     packed_data = msgpack.packb(data, use_bin_type=True)
-    logger.debug(f"Packed data size: {len(packed_data)} bytes")
+    # logger.debug(f"Packed data size: {len(packed_data)} bytes")
 
     # Send request
-    logger.debug(f"Sending request to {host}/inference")
+    # logger.debug(f"Sending request to {host}/inference")
     response = httpx.post(
         f"{host}/inference",
         data=packed_data,
@@ -94,8 +94,8 @@ def predict_layout(
         follow_redirects=True,
     )
 
-    logger.debug(f"Response status: {response.status_code}")
-    logger.debug(f"Response headers: {response.headers}")
+    # logger.debug(f"Response status: {response.status_code}")
+    # logger.debug(f"Response headers: {response.headers}")
 
     if response.status_code == 200:
         try:

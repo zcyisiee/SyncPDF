@@ -30,6 +30,7 @@ from babeldoc.document_il.frontend.il_creater import ILCreater
 from babeldoc.document_il.midend.add_debug_information import AddDebugInformation
 from babeldoc.document_il.midend.detect_scanned_file import DetectScannedFile
 from babeldoc.document_il.midend.il_translator import ILTranslator
+from babeldoc.document_il.midend.il_translator_llm_only import ILTranslatorLLMOnly
 from babeldoc.document_il.midend.layout_parser import LayoutParser
 from babeldoc.document_il.midend.paragraph_finder import ParagraphFinder
 from babeldoc.document_il.midend.styles_and_formulas import StylesAndFormulas
@@ -373,7 +374,21 @@ def do_translate(pm, translation_config):
         #         translation_config.get_working_file_path("remove_descent.json"),
         #     )
         translate_engine = translation_config.translator
-        ILTranslator(translate_engine, translation_config).translate(docs)
+
+        support_llm_translate = False
+        try:
+            if translate_engine and hasattr(translate_engine, "do_llm_translate"):
+                translate_engine.do_llm_translate(None)
+                support_llm_translate = True
+        except NotImplementedError:
+            support_llm_translate = False
+        il_translator = None
+        if support_llm_translate:
+            il_translator = ILTranslatorLLMOnly(translate_engine, translation_config)
+        else:
+            il_translator = ILTranslator(translate_engine, translation_config)
+
+        il_translator.translate(docs)
         logger.debug(f"finish ILTranslator from {temp_pdf_path}")
         if translation_config.debug:
             xml_converter.write_json(

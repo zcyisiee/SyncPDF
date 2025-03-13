@@ -187,6 +187,7 @@
       <xs:attribute name="vertical" type="xs:boolean"/>
       <xs:attribute name="FirstLineIndent" type="xs:boolean"/>
       <xs:attribute name="debug_id" type="xs:string"/>
+      <xs:attribute name="layout_label" type="xs:string"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfParagraphComposition">

@@ -750,6 +750,12 @@ class PdfParagraph:
             "type": "Attribute",
         },
     )
+    layout_label: str | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass

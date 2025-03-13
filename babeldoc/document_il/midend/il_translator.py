@@ -524,6 +524,56 @@ class ILTranslator:
 
         return result
 
+    def pre_translate_paragraph(
+        self,
+        paragraph: PdfParagraph,
+        tracker: ParagraphTranslateTracker,
+        page_font_map: dict[str, PdfFont],
+        xobj_font_map: dict[int, dict[str, PdfFont]],
+    ):
+        """Pre-translation processing: prepare text for translation."""
+        if paragraph.vertical:
+            return None, None
+        tracker.set_pdf_unicode(paragraph.unicode)
+        if paragraph.xobj_id in xobj_font_map:
+            page_font_map = xobj_font_map[paragraph.xobj_id]
+        translate_input = self.get_translate_input(paragraph, page_font_map)
+        if not translate_input:
+            return None, None
+        tracker.set_input(translate_input.unicode)
+        text = translate_input.unicode
+        if len(text) < self.translation_config.min_text_length:
+            logger.debug(
+                f"Text too short to translate, skip. Text: {text}. Paragraph id: {paragraph.debug_id}."
+            )
+            return None, None
+        return text, translate_input
+
+    def post_translate_paragraph(
+        self,
+        paragraph: PdfParagraph,
+        tracker: ParagraphTranslateTracker,
+        translate_input,
+        translated_text: str,
+    ):
+        """Post-translation processing: update paragraph with translated text."""
+        tracker.set_output(translated_text)
+        if translated_text == translate_input.unicode:
+            return False
+        paragraph.unicode = translated_text
+        paragraph.pdf_paragraph_composition = self.parse_translate_output(
+            translate_input, translated_text
+        )
+        for composition in paragraph.pdf_paragraph_composition:
+            if (
+                composition.pdf_same_style_unicode_characters
+                and composition.pdf_same_style_unicode_characters.pdf_style is None
+            ):
+                composition.pdf_same_style_unicode_characters.pdf_style = (
+                    paragraph.pdf_style
+                )
+        return True
+
     def translate_paragraph(
         self,
         paragraph: PdfParagraph,
@@ -532,51 +582,25 @@ class ILTranslator:
         page_font_map: dict[str, PdfFont] = None,
         xobj_font_map: dict[int, dict[str, PdfFont]] = None,
     ):
+        """Translate a paragraph using pre and post processing functions."""
         self.translation_config.raise_if_cancelled()
         with PbarContext(pbar):
             try:
-                if paragraph.vertical:
+                # Pre-translation processing
+                text, translate_input = self.pre_translate_paragraph(
+                    paragraph, tracker, page_font_map, xobj_font_map
+                )
+                if text is None:
                     return
 
-                tracker.set_pdf_unicode(paragraph.unicode)
-                if paragraph.xobj_id in xobj_font_map:
-                    page_font_map = xobj_font_map[paragraph.xobj_id]
-                translate_input = self.get_translate_input(paragraph, page_font_map)
-                if not translate_input:
-                    return
-
-                tracker.set_input(translate_input.unicode)
-
-                text = translate_input.unicode
-
-                if len(text) < self.translation_config.min_text_length:
-                    logger.debug(
-                        f"Text too short to translate, skip. Text: {text}. Paragraph id: {paragraph.debug_id}.",
-                    )
-                    return
-
+                # Perform translation
                 translated_text = self.translate_engine.translate(text)
                 translated_text = re.sub(r"[. 。…，]{20,}", ".", translated_text)
 
-                tracker.set_output(translated_text)
-
-                if translated_text == text:
-                    return
-
-                paragraph.unicode = translated_text
-                paragraph.pdf_paragraph_composition = self.parse_translate_output(
-                    translate_input,
-                    translated_text,
+                # Post-translation processing
+                self.post_translate_paragraph(
+                    paragraph, tracker, translate_input, translated_text
                 )
-                for composition in paragraph.pdf_paragraph_composition:
-                    if (
-                        composition.pdf_same_style_unicode_characters
-                        and composition.pdf_same_style_unicode_characters.pdf_style
-                        is None
-                    ):
-                        composition.pdf_same_style_unicode_characters.pdf_style = (
-                            paragraph.pdf_style
-                        )
             except Exception as e:
                 logger.exception(
                     f"Error translating paragraph. Paragraph: {paragraph}. Error: {e}. ",

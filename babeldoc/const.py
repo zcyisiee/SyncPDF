@@ -1,8 +1,9 @@
+import os
 import shutil
 import subprocess
 from pathlib import Path
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 CACHE_FOLDER = Path.home() / ".cache" / "babeldoc"
 
@@ -35,3 +36,7 @@ try:
     )
 except (OSError, FileNotFoundError, subprocess.CalledProcessError):
     WATERMARK_VERSION = f"v{__version__}"
+
+TIKTOKEN_CACHE_FOLDER = CACHE_FOLDER / "tiktoken"
+TIKTOKEN_CACHE_FOLDER.mkdir(parents=True, exist_ok=True)
+os.environ["TIKTOKEN_CACHE_DIR"] = str(TIKTOKEN_CACHE_FOLDER)

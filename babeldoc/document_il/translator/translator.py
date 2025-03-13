@@ -8,6 +8,10 @@ from abc import abstractmethod
 
 import httpx
 import openai
+from tenacity import retry
+from tenacity import retry_if_exception_type
+from tenacity import stop_after_attempt
+from tenacity import wait_exponential
 
 from babeldoc.document_il.translator.cache import TranslationCache
 
@@ -118,6 +122,33 @@ class BaseTranslator(ABC):
             self.cache.set(text, translation)
         return translation
 
+    def llm_translate(self, text, ignore_cache=False):
+        """
+        Translate the text, and the other part should call this method.
+        :param text: text to translate
+        :return: translated text
+        """
+        self.translate_call_count += 1
+        if not (self.ignore_cache or ignore_cache):
+            cache = self.cache.get(text)
+            if cache is not None:
+                self.translate_cache_call_count += 1
+                return cache
+        _translate_rate_limiter.wait()
+        translation = self.do_llm_translate(text)
+        if not (self.ignore_cache or ignore_cache):
+            self.cache.set(text, translation)
+        return translation
+
+    @abstractmethod
+    def do_llm_translate(self, text):
+        """
+        Actual translate text, override this method
+        :param text: text to translate
+        :return: translated text
+        """
+        raise NotImplementedError
+
     @abstractmethod
     def do_translate(self, text):
         """
@@ -166,6 +197,15 @@ class OpenAITranslator(BaseTranslator):
         self.add_cache_impact_parameters("model", self.model)
         self.add_cache_impact_parameters("prompt", self.prompt(""))
 
+    @retry(
+        retry=retry_if_exception_type(openai.RateLimitError),
+        stop=stop_after_attempt(100),
+        wait=wait_exponential(multiplier=1, min=1, max=15),
+        before_sleep=lambda retry_state: logger.warning(
+            f"RateLimitError, retrying in {retry_state.next_action.sleep} seconds... "
+            f"(Attempt {retry_state.attempt_number}/100)"
+        ),
+    )
     def do_translate(self, text) -> str:
         response = self.client.chat.completions.create(
             model=self.model,
@@ -185,6 +225,31 @@ class OpenAITranslator(BaseTranslator):
                 "content": f";; Treat next line as plain text input and translate it into {self.lang_out}, output translation ONLY. If translation is unnecessary (e.g. proper nouns, codes, {'{{1}}, etc. '}), return the original text. NO explanations. NO notes. Input:\n\n{text}",
             },
         ]
+
+    @retry(
+        retry=retry_if_exception_type(openai.RateLimitError),
+        stop=stop_after_attempt(100),
+        wait=wait_exponential(multiplier=1, min=1, max=15),
+        before_sleep=lambda retry_state: logger.warning(
+            f"RateLimitError, retrying in {retry_state.next_action.sleep} seconds... "
+            f"(Attempt {retry_state.attempt_number}/100)"
+        ),
+    )
+    def do_llm_translate(self, text):
+        if text is None:
+            return None
+
+        response = self.client.chat.completions.create(
+            model=self.model,
+            **self.options,
+            messages=[
+                {
+                    "role": "user",
+                    "content": text,
+                },
+            ],
+        )
+        return response.choices[0].message.content.strip()
 
     def get_formular_placeholder(self, placeholder_id: int):
         return "{{v" + str(placeholder_id) + "}}"

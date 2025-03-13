@@ -14,6 +14,7 @@ from babeldoc.assets.embedding_assets_metadata import (
 from babeldoc.assets.embedding_assets_metadata import EMBEDDING_FONT_METADATA
 from babeldoc.assets.embedding_assets_metadata import FONT_METADATA_URL
 from babeldoc.assets.embedding_assets_metadata import FONT_URL_BY_UPSTREAM
+from babeldoc.assets.embedding_assets_metadata import TIKTOKEN_CACHES
 from babeldoc.const import get_cache_file_path
 from tenacity import retry
 from tenacity import stop_after_attempt
@@ -292,6 +293,9 @@ async def download_all_fonts_async(client: httpx.AsyncClient | None = None):
 
 async def async_warmup():
     logger.info("Downloading all assets...")
+    from tiktoken import encoding_for_model
+
+    _ = encoding_for_model("gpt-4o")
     async with httpx.AsyncClient() as client:
         onnx_task = asyncio.create_task(get_doclayout_onnx_model_path_async(client))
         font_tasks = asyncio.create_task(download_all_fonts_async(client))
@@ -306,11 +310,19 @@ def generate_all_assets_file_list():
     result = {}
     result["fonts"] = []
     result["models"] = []
+    result["tiktoken"] = []
     for font_file_name in EMBEDDING_FONT_METADATA:
         result["fonts"].append(
             {
                 "name": font_file_name,
                 "sha3_256": EMBEDDING_FONT_METADATA[font_file_name]["sha3_256"],
+            }
+        )
+    for tiktoken_file, sha3_256 in TIKTOKEN_CACHES.items():
+        result["tiktoken"].append(
+            {
+                "name": tiktoken_file,
+                "sha3_256": sha3_256,
             }
         )
     result["models"].append(
