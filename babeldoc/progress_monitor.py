@@ -20,11 +20,19 @@ class ProgressMonitor:
         loop: asyncio.AbstractEventLoop | None = None,
     ):
         # Convert stages list to dict with name and weight
+        self.lock = threading.Lock()
+
         self.stage = {}
         total_weight = sum(weight for _, weight in stages)
         for name, weight in stages:
             normalized_weight = weight / total_weight
-            self.stage[name] = TranslationStage(name, 0, self, normalized_weight)
+            self.stage[name] = TranslationStage(
+                name,
+                0,
+                self,
+                normalized_weight,
+                self.lock,
+            )
 
         self.progress_change_callback = progress_change_callback
         self.finish_callback = finish_callback
@@ -49,7 +57,6 @@ class ProgressMonitor:
                     for name, _ in stages
                 ],
             )
-        self.lock = threading.Lock()
 
     def stage_start(self, stage_name: str, total: int):
         if self.disable:
@@ -137,20 +144,19 @@ class ProgressMonitor:
     def stage_update(self, stage, n: int):
         if self.disable:
             return
-        with self.lock:
-            report_time_delta = time.time() - self.last_report_time
-            if report_time_delta < self.report_interval and stage.total > 3:
-                return
-            if self.progress_change_callback:
-                self.progress_change_callback(
-                    type="progress_update",
-                    stage=stage.display_name,
-                    stage_progress=stage.current * 100 / stage.total,
-                    stage_current=stage.current,
-                    stage_total=stage.total,
-                    overall_progress=self.calculate_current_progress(stage),
-                )
-                self.last_report_time = time.time()
+        report_time_delta = time.time() - self.last_report_time
+        if report_time_delta < self.report_interval and stage.total > 3:
+            return
+        if self.progress_change_callback:
+            self.progress_change_callback(
+                type="progress_update",
+                stage=stage.display_name,
+                stage_progress=stage.current * 100 / stage.total,
+                stage_current=stage.current,
+                stage_total=stage.total,
+                overall_progress=self.calculate_current_progress(stage),
+            )
+            self.last_report_time = time.time()
 
     def translate_done(self, translate_result):
         if self.disable:
@@ -177,7 +183,14 @@ class ProgressMonitor:
 
 
 class TranslationStage:
-    def __init__(self, name: str, total: int, pm: ProgressMonitor, weight: float):
+    def __init__(
+        self,
+        name: str,
+        total: int,
+        pm: ProgressMonitor,
+        weight: float,
+        lock: threading.Lock,
+    ):
         self.name = name
         self.display_name = name
         self.current = 0
@@ -185,16 +198,26 @@ class TranslationStage:
         self.pm = pm
         self.run_time = 0
         self.weight = weight
+        self.lock = lock
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.pm.stage_done(self)
+        with self.lock:
+            diff = self.total - self.current
+            if diff > 0:
+                logger.info(
+                    f"Stage {self.name} completed with {self.current}/{self.total} items"
+                )
+            self.pm.stage_update(self, diff)
+            self.current = self.total
+            self.pm.stage_done(self)
 
     def advance(self, n: int = 1):
-        self.current += n
-        self.pm.stage_update(self, n)
+        with self.lock:
+            self.current += n
+            self.pm.stage_update(self, n)
 
 
 class DummyTranslationStage:
