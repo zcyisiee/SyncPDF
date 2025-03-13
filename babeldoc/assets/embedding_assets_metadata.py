@@ -2,6 +2,9 @@ DOCLAYOUT_YOLO_DOCSTRUCTBENCH_IMGSZ1024ONNX_SHA3_256 = (
     "60be061226930524958b5465c8c04af3d7c03bcb0beb66454f5da9f792e3cf2a"
 )
 
+TIKTOKEN_CACHES = {
+    "fb374d419588a4632f3f557e76b4b70aebbca790": "cb04bcda5782cfbbe77f2f991d92c0ea785d9496ef1137c91dfc3c8c324528d6"
+}
 
 FONT_METADATA_URL = {
     "github": "https://raw.githubusercontent.com/funstory-ai/BabelDOC-Assets/refs/heads/main/font_metadata.json",

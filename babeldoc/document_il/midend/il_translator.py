@@ -524,7 +524,7 @@ class ILTranslator:
 
         return result
 
-    def _pre_translate_paragraph(
+    def pre_translate_paragraph(
         self,
         paragraph: PdfParagraph,
         tracker: ParagraphTranslateTracker,
@@ -549,7 +549,7 @@ class ILTranslator:
             return None, None
         return text, translate_input
 
-    def _post_translate_paragraph(
+    def post_translate_paragraph(
         self,
         paragraph: PdfParagraph,
         tracker: ParagraphTranslateTracker,
