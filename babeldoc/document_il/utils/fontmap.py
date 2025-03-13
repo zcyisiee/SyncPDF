@@ -162,7 +162,7 @@ class FontMapper:
 
         logger.warning(
             f"Can't find font for {char_unicode}({current_char}). "
-            f"Original font: {original_font}. "
+            f"Original font: {original_font.name}[{original_font.font_id}]. "
             f"Char unicode: {char_unicode}. ",
         )
         return None
