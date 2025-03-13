@@ -79,7 +79,13 @@ class ILTranslatorLLMOnly:
         # count total paragraph
         total = sum(
             [
-                len([p for p in page.pdf_paragraph if p.debug_id is not None])
+                len(
+                    [
+                        p
+                        for p in page.pdf_paragraph
+                        if p.debug_id is not None and p.unicode is not None
+                    ]
+                )
                 for page in docs.page
             ]
         )
