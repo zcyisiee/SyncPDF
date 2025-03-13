@@ -667,18 +667,18 @@ class ILTranslatorLLMOnly:
 
         for id_, input_text in enumerate(inputs):
             yaml_format_input.append(
-                f"""
-                - id: {id_}
-                  input: {input_text[0]}
-                """
+                {
+                    "id": id_,
+                    "input": input_text[0],
+                }
             )
         yaml_format_input = yaml.dump(yaml_format_input)
         llm_input.append(
-            """You will be given a YAML formatted input containing entries with "id" and "{{imt_source_field}}" fields. Here is the input:
+            """You will be given a YAML formatted input containing entries with "id" and "input" fields. Here is the input:
 
-<yaml>"""
+```yaml"""
             + yaml_format_input
-            + """</yaml>
+            + """```
 
 For each entry in the YAML, translate the contents of the "input" field into """
             + self.translation_config.lang_out
@@ -687,12 +687,16 @@ For each entry in the YAML, translate the contents of the "input" field into """
 Here is an example of the expected format:
 
 <example>
+```yaml
 Input:
   - id: 1
     input: Source
+```
 Output:
+```yaml
   - id: 1
     output: Translation
+```
 </example>
 
 Please return the translated YAML directly without wrapping <yaml> tag or include any additional information.
@@ -701,19 +705,64 @@ Please return the translated YAML directly without wrapping <yaml> tag or includ
 
         llm_output = self.translate_engine.llm_translate("\n".join(llm_input))
         llm_output = llm_output.strip()
+
+        # 处理各种可能的YAML标记
         if llm_output.startswith("<yaml>"):
             llm_output = llm_output[6:]
         if llm_output.endswith("</yaml>"):
             llm_output = llm_output[:-7]
-        llm_output = yaml.safe_load(llm_output)
+        if llm_output.startswith("```yaml"):
+            llm_output = llm_output[7:]
+        if llm_output.startswith("```"):
+            llm_output = llm_output[3:]
+        if llm_output.endswith("```"):
+            llm_output = llm_output[:-3]
+        llm_output = llm_output.strip()
+        try:
+            parsed_output = yaml.safe_load(llm_output)
+
+            # 处理不同的输出格式
+            if isinstance(parsed_output, list):
+                # 如果是列表格式，转换为字典
+                llm_output = {}
+                for item in parsed_output:
+                    if isinstance(item, dict) and "id" in item and "output" in item:
+                        llm_output[item["id"]] = item["output"]
+            elif isinstance(parsed_output, dict) and "Output" in parsed_output:
+                # 如果是包含Output键的字典
+                output_items = parsed_output.get("Output", [])
+                llm_output = {}
+                if isinstance(output_items, list):
+                    for item in output_items:
+                        if isinstance(item, dict) and "id" in item and "output" in item:
+                            llm_output[item["id"]] = item["output"]
+            else:
+                # 直接使用解析结果
+                llm_output = parsed_output
+        except Exception as e:
+            logger.warning(
+                f"Failed to parse YAML output: {e}. Falling back to regex parsing."
+            )
+            # 使用正则表达式提取id和output
+            pattern = r"id:\s*(\d+).*?output:\s*(.*?)(?=\n\s*-|\Z)"
+            matches = re.findall(pattern, llm_output, re.DOTALL)
+            llm_output = {int(id_): output.strip() for id_, output in matches}
 
         for id_, output in llm_output.items():
             try:
+                id_ = int(id_)  # 确保id是整数
+                if id_ >= len(inputs):
+                    logger.warning(f"Invalid id {id_}, skipping")
+                    continue
+
                 translated_text = re.sub(r"[. 。…，]{20,}", ".", output)
                 translate_input = inputs[id_][1]
                 # Post-translation processing
                 self._post_translate_paragraph(
-                    paragraph, tracker, translate_input, translated_text
+                    batch_paragraph.paragraphs[id_],
+                    batch_paragraph.trackers[id_],
+                    translate_input,
+                    translated_text,
                 )
             except Exception as e:
                 logger.exception(
