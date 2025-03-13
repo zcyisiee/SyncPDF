@@ -4,7 +4,6 @@ import logging
 import re
 from pathlib import Path
 
-import yaml
 from tqdm import tqdm
 
 from babeldoc.document_il import Document
@@ -16,6 +15,7 @@ from babeldoc.document_il import PdfParagraphComposition
 from babeldoc.document_il import PdfSameStyleCharacters
 from babeldoc.document_il import PdfSameStyleUnicodeCharacters
 from babeldoc.document_il import PdfStyle
+from babeldoc.document_il.midend.il_translator import ILTranslator
 from babeldoc.document_il.translator.translator import BaseTranslator
 from babeldoc.document_il.utils.fontmap import FontMapper
 from babeldoc.document_il.utils.layout_helper import get_char_unicode_string
@@ -25,14 +25,6 @@ from babeldoc.document_il.utils.layout_helper import is_same_style_except_size
 from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
-
-
-# define a custom representer for strings
-def quoted_presenter(dumper, data):
-    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='"')
-
-
-yaml.add_representer(str, quoted_presenter)
 
 
 class RichTextPlaceholder:
@@ -129,6 +121,11 @@ class ILTranslatorLLMOnly:
         self.translate_engine = translate_engine
         self.translation_config = translation_config
         self.font_mapper = FontMapper(translation_config)
+
+        self.il_translator = ILTranslator(
+            translate_engine=translate_engine,
+            translation_config=translation_config,
+        )
 
         try:
             self.translate_engine.do_llm_translate(None)
@@ -227,6 +224,7 @@ class ILTranslatorLLMOnly:
                     page_xobj_font_map,
                     title_paragraph,
                     local_title_paragraph,
+                    executor,
                 )
                 paragraphs = []
                 total_unicode_counts = 0
@@ -240,6 +238,7 @@ class ILTranslatorLLMOnly:
                 page_xobj_font_map,
                 title_paragraph,
                 local_title_paragraph,
+                executor,
             )
 
     class TranslateInput:
@@ -649,183 +648,162 @@ class ILTranslatorLLMOnly:
         xobj_font_map: dict[int, dict[str, PdfFont]] = None,
         title_paragraph: PdfParagraph | None = None,
         local_title_paragraph: PdfParagraph | None = None,
+        executor=None,
     ):
         """Translate a paragraph using pre and post processing functions."""
         self.translation_config.raise_if_cancelled()
-
-        inputs = []
-
-        for i in range(len(batch_paragraph.paragraphs)):
-            paragraph = batch_paragraph.paragraphs[i]
-            tracker = batch_paragraph.trackers[i]
-            text, translate_input = self._pre_translate_paragraph(
-                paragraph, tracker, page_font_map, xobj_font_map
-            )
-            if text is None:
-                continue
-            inputs.append((text, translate_input, paragraph.layout_label))
-
-        self.translation_config.raise_if_cancelled()
-
-        yaml_format_input = []
-
-        for id_, input_text in enumerate(inputs):
-            yaml_format_input.append(
-                {
-                    "id": id_,
-                    "input": input_text[0],
-                    "layout_label": input_text[2],
-                }
-            )
-        yaml_format_input = yaml.dump(
-            yaml_format_input,
-            default_flow_style=False,
-            width=float("inf"),  # 防止长字符串被折行
-        )
-        llm_input = ["You are a professional, authentic machine translation engine."]
-
-        if title_paragraph:
-            llm_input.append(
-                f"The first title in the full text: {title_paragraph.unicode}"
-            )
-        if (
-            local_title_paragraph
-            and local_title_paragraph.debug_id != title_paragraph.debug_id
-        ):
-            llm_input.append(
-                f"The most similar title in the full text: {local_title_paragraph.unicode}"
-            )
-        # Create a structured prompt template for LLM translation
-        prompt_template = f"""
-You will be given a YAML formatted input containing entries with "id" and "input" fields. Here is the input:
-
-```yaml
-{yaml_format_input}
-```
-
-For each entry in the YAML, translate the contents of the "input" field into {self.translation_config.lang_out}.
-Write the translation back into the "output" field for that entry.
-
-Here is an example of the expected format:
-
-<example>
-```yaml
-Input:
-  - "id": 1
-    "input": "Source"
-    "layout_label": "plain text"
-```
-Output:
-```yaml
-  - "id": 1
-    "output": "Translation"
-```
-</example>
-
-Please return the translated YAML directly without wrapping <yaml> tag or include any additional information.
-"""
-        llm_input.append(prompt_template)
-
-        final_input = "\n".join(llm_input).strip()
-        llm_output = self.translate_engine.llm_translate(final_input)
-        llm_output = llm_output.strip()
-
-        # Clean up YAML output by removing common wrapper tags
-        llm_output = self._clean_yaml_output(llm_output)
-
         try:
-            # Parse the YAML output
-            parsed_output = yaml.safe_load(llm_output)
+            inputs = []
 
-            # Convert parsed output to a standardized format {id: output_text}
-            translation_results = self._standardize_yaml_output(parsed_output)
-        except Exception as e:
-            logger.warning(
-                f"Failed to parse YAML output: {e}. Falling back to regex parsing."
-            )
-            # Use regex as fallback to extract id and output pairs
-            translation_results = self._extract_translations_with_regex(llm_output)
-
-        if len(translation_results) != len(inputs):
-            logger.warning(
-                f"Translation results length mismatch. Expected: {len(inputs)}, Got: {len(translation_results)}"
-            )
-            return
-
-        for id_, output in translation_results.items():
-            try:
-                id_ = int(id_)  # Ensure id is an integer
-                if id_ >= len(inputs):
-                    logger.warning(f"Invalid id {id_}, skipping")
-                    continue
-
-                # Clean up any excessive punctuation in the translated text
-                translated_text = re.sub(r"[. 。…，]{20,}", ".", output)
-
-                # Get the original input for this translation
-                translate_input = inputs[id_][1]
-
-                # Apply the translation to the paragraph
-                self._post_translate_paragraph(
-                    batch_paragraph.paragraphs[id_],
-                    batch_paragraph.trackers[id_],
-                    translate_input,
-                    translated_text,
+            for i in range(len(batch_paragraph.paragraphs)):
+                paragraph = batch_paragraph.paragraphs[i]
+                tracker = batch_paragraph.trackers[i]
+                text, translate_input = self._pre_translate_paragraph(
+                    paragraph, tracker, page_font_map, xobj_font_map
                 )
-            except Exception as e:
-                logger.exception(f"Error translating paragraph. Error: {e}.")
-                # Ignore error and continue
-                continue
-            finally:
-                if pbar:
+                if text is None:
                     pbar.advance(1)
+                    continue
+                inputs.append((text, translate_input, paragraph, tracker))
 
-    def _clean_yaml_output(self, llm_output: str) -> str:
-        # Clean up YAML output by removing common wrapper tags
+            self.translation_config.raise_if_cancelled()
+
+            json_format_input = []
+
+            for id_, input_text in enumerate(inputs):
+                json_format_input.append(
+                    {
+                        "id": id_,
+                        "input": input_text[0],
+                        "layout_label": input_text[2].layout_label,
+                    }
+                )
+            json_format_input = json.dumps(
+                json_format_input, ensure_ascii=False, indent=2
+            )
+            llm_input = [
+                "You are a professional, authentic machine translation engine."
+            ]
+
+            if title_paragraph:
+                llm_input.append(
+                    f"The first title in the full text: {title_paragraph.unicode}"
+                )
+            if (
+                local_title_paragraph
+                and local_title_paragraph.debug_id != title_paragraph.debug_id
+            ):
+                llm_input.append(
+                    f"The most similar title in the full text: {local_title_paragraph.unicode}"
+                )
+            # Create a structured prompt template for LLM translation
+            prompt_template = (
+                f"""
+    You will be given a JSON formatted input containing entries with "id" and "input" fields. Here is the input:
+    
+    ```json
+    {json_format_input}
+    ```
+    
+    For each entry in the JSON, translate the contents of the "input" field into {self.translation_config.lang_out}.
+    Write the translation back into the "output" field for that entry.
+    
+    """
+                + """
+    Here is an example of the expected format:
+    
+    <example>
+    ```json
+    Input:
+    {
+        "id": 1,
+        "input": "Source",
+        "layout_label": "plain text"
+    }
+    ```
+    Output:
+    ```json
+    {
+        "id": 1,
+        "output": "Translation"
+    }
+    ```
+    </example>
+    
+    Please return the translated json directly without wrapping ```json``` tag or include any additional information.
+    """
+            )
+            llm_input.append(prompt_template)
+
+            final_input = "\n".join(llm_input).strip()
+            llm_output = self.translate_engine.llm_translate(final_input)
+            llm_output = llm_output.strip()
+
+            llm_output = self._clean_json_output(llm_output)
+
+            parsed_output = json.loads(llm_output)
+
+            translation_results = {item["id"]: item["output"] for item in parsed_output}
+
+            if len(translation_results) != len(inputs):
+                raise Exception(
+                    f"Translation results length mismatch. Expected: {len(inputs)}, Got: {len(translation_results)}"
+                )
+
+            for id_, output in translation_results.items():
+                try:
+                    id_ = int(id_)  # Ensure id is an integer
+                    if id_ >= len(inputs):
+                        logger.warning(f"Invalid id {id_}, skipping")
+                        continue
+
+                    # Clean up any excessive punctuation in the translated text
+                    translated_text = re.sub(r"[. 。…，]{20,}", ".", output)
+
+                    # Get the original input for this translation
+                    translate_input = inputs[id_][1]
+
+                    # Apply the translation to the paragraph
+                    self._post_translate_paragraph(
+                        inputs[id_][2],
+                        inputs[id_][3],
+                        translate_input,
+                        translated_text,
+                    )
+                except Exception as e:
+                    logger.exception(f"Error translating paragraph. Error: {e}.")
+                    # Ignore error and continue
+                    continue
+                finally:
+                    if pbar:
+                        pbar.advance(1)
+        except Exception as e:
+            logger.exception("Error during translation. try fallback")
+            for i in range(len(batch_paragraph.paragraphs)):
+                paragraph = batch_paragraph.paragraphs[i]
+                tracker = batch_paragraph.trackers[i]
+                if paragraph.debug_id is None:
+                    continue
+                executor.submit(
+                    self.il_translator.translate_paragraph,
+                    paragraph,
+                    pbar,
+                    tracker.new_paragraph(),
+                    page_font_map,
+                    xobj_font_map,
+                )
+
+    def _clean_json_output(self, llm_output: str) -> str:
+        # Clean up JSON output by removing common wrapper tags
         llm_output = llm_output.strip()
-        if llm_output.startswith("<yaml>"):
+        if llm_output.startswith("<json>"):
             llm_output = llm_output[6:]
-        if llm_output.endswith("</yaml>"):
+        if llm_output.endswith("</json>"):
             llm_output = llm_output[:-7]
-        if llm_output.startswith("```yaml"):
+        if llm_output.startswith("```json"):
             llm_output = llm_output[7:]
         if llm_output.startswith("```"):
             llm_output = llm_output[3:]
         if llm_output.endswith("```"):
             llm_output = llm_output[:-3]
         return llm_output.strip()
-
-    def _standardize_yaml_output(self, parsed_output) -> dict:
-        """Convert parsed output to a standardized format {id: output_text}."""
-        result = {}
-
-        if isinstance(parsed_output, list):
-            # If it's a list format, convert to dictionary
-            for item in parsed_output:
-                if isinstance(item, dict) and "id" in item and "output" in item:
-                    result[item["id"]] = item["output"]
-                elif isinstance(item, dict) and "id" in item and "input" in item:
-                    result[item["id"]] = item["input"]
-        elif isinstance(parsed_output, dict):
-            if "Output" in parsed_output:
-                # If it contains an Output key
-                output_items = parsed_output.get("Output", [])
-                if isinstance(output_items, list):
-                    for item in output_items:
-                        if isinstance(item, dict) and "id" in item and "output" in item:
-                            result[item["id"]] = item["output"]
-                        elif (
-                            isinstance(item, dict) and "id" in item and "input" in item
-                        ):
-                            result[item["id"]] = item["input"]
-            else:
-                # Use parsed result directly
-                result = parsed_output
-
-        return result
-
-    def _extract_translations_with_regex(self, llm_output: str) -> dict:
-        # Use regex as fallback to extract id and output pairs
-        pattern = r"id:\s*(\d+).*?output:\s*(.*?)(?=\n\s*-|\Z)"
-        matches = re.findall(pattern, llm_output, re.DOTALL)
-        return {id_: output.strip() for id_, output in matches}
