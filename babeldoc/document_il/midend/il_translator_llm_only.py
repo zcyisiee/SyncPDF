@@ -331,7 +331,7 @@ class ILTranslatorLLMOnly:
                 finally:
                     if should_fallback:
                         logger.warning(
-                            f"Fallback to original translation. paragraph id: {inputs[id_][2].debug_id}"
+                            f"Fallback to simple translation. paragraph id: {inputs[id_][2].debug_id}"
                         )
                         executor.submit(
                             self.il_translator.translate_paragraph,
