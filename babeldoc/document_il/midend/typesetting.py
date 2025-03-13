@@ -854,9 +854,15 @@ class Typesetting:
                     ],
                 )
             elif composition.pdf_same_style_unicode_characters:
-                font_id = (
-                    composition.pdf_same_style_unicode_characters.pdf_style.font_id
-                )
+                style = composition.pdf_same_style_unicode_characters.pdf_style
+                if style is None:
+                    logger.warning(
+                        f"Style is None. "
+                        f"Composition: {composition}. "
+                        f"Paragraph: {paragraph}. ",
+                    )
+                    continue
+                font_id = style.font_id
                 font = get_font(font_id, paragraph.xobj_id)
                 result.extend(
                     [
@@ -867,8 +873,8 @@ class Typesetting:
                                 char_unicode,
                             ),
                             original_font=font,
-                            font_size=composition.pdf_same_style_unicode_characters.pdf_style.font_size,
-                            style=composition.pdf_same_style_unicode_characters.pdf_style,
+                            font_size=style.font_size,
+                            style=style,
                             xobj_id=paragraph.xobj_id,
                             debug_info=composition.pdf_same_style_unicode_characters.debug_info,
                         )

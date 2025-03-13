@@ -304,8 +304,11 @@ def do_translate(pm, translation_config):
 
         # 修复 pdf 文件中 xref 为 null 的情况
         for i in range(1, doc_pdf2zh.xref_length()):
-            if doc_pdf2zh.xref_object(i) == "null":
-                doc_pdf2zh.update_object(i, "null")
+            try:
+                if doc_pdf2zh.xref_object(i) == "null":
+                    doc_pdf2zh.update_object(i, "null")
+            except Exception:
+                logger.warning(f"try fix xref {i} fail, continue")
 
         for page in doc_pdf2zh:
             page.insert_font(resfont, None)
