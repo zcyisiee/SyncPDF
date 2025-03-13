@@ -4,6 +4,7 @@ import logging
 import re
 from pathlib import Path
 
+import Levenshtein
 import tiktoken
 from tqdm import tqdm
 
@@ -88,15 +89,19 @@ class ILTranslatorLLMOnly:
         ) as pbar:
             with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.translation_config.qps,
-            ) as executor:
-                for page in docs.page:
-                    self.process_page(
-                        page,
-                        executor,
-                        pbar,
-                        tracker.new_page(),
-                        title_paragraph,
-                    )
+            ) as executor2:
+                with concurrent.futures.ThreadPoolExecutor(
+                    max_workers=self.translation_config.qps,
+                ) as executor:
+                    for page in docs.page:
+                        self.process_page(
+                            page,
+                            executor,
+                            pbar,
+                            tracker.new_page(),
+                            title_paragraph,
+                            executor2,
+                        )
 
         path = self.translation_config.get_working_file_path("translate_tracking.json")
 
@@ -112,6 +117,7 @@ class ILTranslatorLLMOnly:
         pbar: tqdm | None = None,
         tracker: PageTranslateTracker = None,
         title_paragraph: PdfParagraph | None = None,
+        executor2: concurrent.futures.ThreadPoolExecutor | None = None,
     ):
         self.translation_config.raise_if_cancelled()
         page_font_map = {}
@@ -145,7 +151,7 @@ class ILTranslatorLLMOnly:
                     page_xobj_font_map,
                     title_paragraph,
                     local_title_paragraph,
-                    executor,
+                    executor2,
                 )
                 paragraphs = []
                 total_unicode_counts = 0
@@ -159,7 +165,7 @@ class ILTranslatorLLMOnly:
                 page_xobj_font_map,
                 title_paragraph,
                 local_title_paragraph,
-                executor,
+                executor2,
             )
 
     def translate_paragraph(
@@ -273,7 +279,14 @@ class ILTranslatorLLMOnly:
                 )
 
             for id_, output in translation_results.items():
+                should_fallback = True
                 try:
+                    if not isinstance(output, str):
+                        logger.warning(
+                            f"Translation result is not a string. Output: {output}"
+                        )
+                        continue
+
                     id_ = int(id_)  # Ensure id is an integer
                     if id_ >= len(inputs):
                         logger.warning(f"Invalid id {id_}, skipping")
@@ -292,10 +305,17 @@ class ILTranslatorLLMOnly:
                     output_token_count = len(enc.encode(output_unicode))
 
                     if not (0.3 < output_token_count / input_token_count < 3):
-                        raise Exception(
+                        logger.warning(
                             f"Translation result is too long or too short. Input: {input_token_count}, Output: {output_token_count}"
                         )
+                        continue
 
+                    edit_distance = Levenshtein.distance(input_unicode, output_unicode)
+                    if edit_distance < 5 and input_token_count > 20:
+                        logger.warning(
+                            f"Translation result edit distance is too small. distance: {edit_distance}, input: {input_unicode}, output: {output_unicode}"
+                        )
+                        continue
                     # Apply the translation to the paragraph
                     self.il_translator.post_translate_paragraph(
                         inputs[id_][2],
@@ -303,13 +323,27 @@ class ILTranslatorLLMOnly:
                         translate_input,
                         translated_text,
                     )
+                    if pbar:
+                        pbar.advance(1)
+                    should_fallback = False
                 except Exception as e:
                     logger.exception(f"Error translating paragraph. Error: {e}.")
                     # Ignore error and continue
                     continue
                 finally:
-                    if pbar:
-                        pbar.advance(1)
+                    if should_fallback:
+                        logger.warning(
+                            f"Fallback to original translation. paragraph id: {inputs[id_][2].debug_id}"
+                        )
+                        executor.submit(
+                            self.il_translator.translate_paragraph,
+                            inputs[id_][2],
+                            pbar,
+                            inputs[id_][3],
+                            page_font_map,
+                            xobj_font_map,
+                        )
+
         except Exception as e:
             logger.exception("Error during translation. try fallback")
             for i in range(len(batch_paragraph.paragraphs)):

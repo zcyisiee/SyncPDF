@@ -1,5 +1,4 @@
 import base64
-import logging
 import math
 import re
 import unicodedata
@@ -445,9 +444,10 @@ class StylesAndFormulas:
                     formula.y_offset = 0
 
                 if max(abs(formula.y_offset), abs(formula.x_offset)) > 2:
-                    logging.debug(
-                        f"公式 {formula.box} 的偏移量过大：{formula.x_offset}, {formula.y_offset}"
-                    )
+                    pass
+                    # logging.debug(
+                    #     f"公式 {formula.box} 的偏移量过大：{formula.x_offset}, {formula.y_offset}"
+                    # )
 
     def calculate_line_spacing(self, paragraph) -> float:
         """计算段落中的平均行间距"""

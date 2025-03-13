@@ -587,7 +587,7 @@ class ILTranslator:
         with PbarContext(pbar):
             try:
                 # Pre-translation processing
-                text, translate_input = self._pre_translate_paragraph(
+                text, translate_input = self.pre_translate_paragraph(
                     paragraph, tracker, page_font_map, xobj_font_map
                 )
                 if text is None:
@@ -598,7 +598,7 @@ class ILTranslator:
                 translated_text = re.sub(r"[. 。…，]{20,}", ".", translated_text)
 
                 # Post-translation processing
-                self._post_translate_paragraph(
+                self.post_translate_paragraph(
                     paragraph, tracker, translate_input, translated_text
                 )
             except Exception as e:
