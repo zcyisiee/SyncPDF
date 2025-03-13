@@ -300,8 +300,15 @@ def do_translate(pm, translation_config):
         temp_pdf_path = translation_config.get_working_file_path("input.pdf")
         doc_pdf2zh = Document(original_pdf_path)
         resfont = "china-ss"
+
+        # 修复 pdf 文件中 xref 为 null 的情况
+        for i in range(1, doc_pdf2zh.xref_length()):
+            if doc_pdf2zh.xref_object(i) == "null":
+                doc_pdf2zh.update_object(i, "null")
+
         for page in doc_pdf2zh:
             page.insert_font(resfont, None)
+
         resfont = None
         doc_pdf2zh.save(temp_pdf_path)
         il_creater = ILCreater(translation_config)
