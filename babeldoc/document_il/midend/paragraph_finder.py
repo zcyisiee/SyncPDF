@@ -177,6 +177,7 @@ class ParagraphFinder:
                         current_paragraph = PdfParagraph(
                             pdf_paragraph_composition=[line],
                             debug_id=generate_base58_id(),
+                            layout_label=char_layout.name,
                         )
                         paragraphs.append(current_paragraph)
                     else:
@@ -212,6 +213,7 @@ class ParagraphFinder:
                         current_paragraph = PdfParagraph(
                             pdf_paragraph_composition=[line],
                             debug_id=generate_base58_id(),
+                            layout_label=char_layout.name,
                         )
                         self.update_paragraph_data(current_paragraph)
                         paragraphs.append(current_paragraph)
@@ -228,6 +230,7 @@ class ParagraphFinder:
                 current_paragraph = PdfParagraph(
                     pdf_paragraph_composition=[line],
                     debug_id=generate_base58_id(),
+                    layout_label=char_layout.name,
                 )
                 paragraphs.append(current_paragraph)
             else:
@@ -412,6 +415,7 @@ class ParagraphFinder:
                         ),
                         unicode="",
                         debug_id=generate_base58_id(),
+                        layout_label=prev_composition.layout_label,
                     )
                     # 更新原段落
                     paragraph.pdf_paragraph_composition = (
@@ -440,6 +444,7 @@ class ParagraphFinder:
                         ),
                         unicode="",
                         debug_id=generate_base58_id(),
+                        layout_label=prev_composition.layout_label,
                     )
                     # 更新原段落
                     paragraph.pdf_paragraph_composition = (
