@@ -100,6 +100,14 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 
 ## Advanced Options
 
+> [!NOTE]
+> This CLI is mainly for debugging purposes. Although end users can use this CLI to translate files, we do not provide any technical support for this purpose.
+>
+> End users should directly use **Online Service**: Beta version launched [Immersive Translate - BabelDOC](https://app.immersivetranslate.com/babel-doc/) 1000 free pages per month.
+>
+> End users who need self-deployment should use [PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate)
+
+
 ### Language Options
 
 - `--lang-in`, `-li`: Source language code (default: en)
