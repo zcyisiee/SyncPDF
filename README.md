@@ -106,6 +106,8 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 > End users should directly use **Online Service**: Beta version launched [Immersive Translate - BabelDOC](https://app.immersivetranslate.com/babel-doc/) 1000 free pages per month.
 >
 > End users who need self-deployment should use [PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate)
+> 
+> If you find that an option is not listed below, it means that this option is a debugging option for maintainers. Please do not use these options.
 
 
 ### Language Options
