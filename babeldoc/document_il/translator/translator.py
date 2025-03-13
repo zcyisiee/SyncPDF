@@ -6,7 +6,6 @@ import unicodedata
 from abc import ABC
 from abc import abstractmethod
 
-import httpx
 import openai
 from tenacity import retry
 from tenacity import retry_if_exception_type
@@ -250,55 +249,6 @@ class OpenAITranslator(BaseTranslator):
             ],
         )
         return response.choices[0].message.content.strip()
-
-    def get_formular_placeholder(self, placeholder_id: int):
-        return "{{v" + str(placeholder_id) + "}}"
-        return "{{" + str(placeholder_id) + "}}"
-
-    def get_rich_text_left_placeholder(self, placeholder_id: int):
-        return self.get_formular_placeholder(placeholder_id)
-
-    def get_rich_text_right_placeholder(self, placeholder_id: int):
-        return self.get_formular_placeholder(placeholder_id + 1)
-
-
-class TranslateTranslator(BaseTranslator):
-    # https://github.com/openai/openai-python
-    name = "openai"
-
-    def __init__(
-        self,
-        lang_in,
-        lang_out,
-        url=None,
-        ignore_cache=False,
-    ):
-        super().__init__(lang_in, lang_out, ignore_cache)
-        self.client = httpx.Client()
-        self.url = url
-
-    def do_translate(self, text) -> str:
-        response = self.client.post(
-            self.url,
-            json={
-                "text": [text],
-                "src": "Englih",
-                "tgt": "Simplifed Chinese",
-            },
-        )
-        return response.json()["text"][0]
-
-    def prompt(self, text):
-        return [
-            {
-                "role": "system",
-                "content": "You are a professional,authentic machine translation engine.",
-            },
-            {
-                "role": "user",
-                "content": f";; Treat next line as plain text input and translate it into {self.lang_out}, output translation ONLY. If translation is unnecessary (e.g. proper nouns, codes, {'{{1}}, etc. '}), return the original text. NO explanations. NO notes. Input:\n\n{text}",
-            },
-        ]
 
     def get_formular_placeholder(self, placeholder_id: int):
         return "{{v" + str(placeholder_id) + "}}"

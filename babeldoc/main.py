@@ -15,7 +15,6 @@ from rich.progress import TimeRemainingColumn
 import babeldoc.assets.assets
 import babeldoc.high_level
 from babeldoc.document_il.translator.translator import OpenAITranslator
-from babeldoc.document_il.translator.translator import TranslateTranslator
 from babeldoc.document_il.translator.translator import set_translate_rate_limiter
 from babeldoc.docvision.doclayout import DocLayoutModel
 from babeldoc.docvision.rpc_doclayout import RpcDocLayoutModel
@@ -194,11 +193,6 @@ def create_parser():
         action="store_true",
         help="Use OpenAI translator.",
     )
-    service_group.add_argument(
-        "--translate",
-        action="store_true",
-        help="Use translate translator.",
-    )
     service_group = parser.add_argument_group(
         "Translation - OpenAI Options",
         description="OpenAI specific options",
@@ -216,14 +210,6 @@ def create_parser():
         "--openai-api-key",
         "-k",
         help="The API key for the OpenAI API.",
-    )
-    service_group = parser.add_argument_group(
-        "Translation - Translate Options",
-        description="Translate specific options",
-    )
-    service_group.add_argument(
-        "--translate-url",
-        help="The base URL for the Translation API.",
     )
 
     return parser
@@ -272,13 +258,6 @@ async def main():
             base_url=args.openai_base_url,
             api_key=args.openai_api_key,
             ignore_cache=args.ignore_cache,
-        )
-    elif args.translate:
-        translator = TranslateTranslator(
-            lang_in=args.lang_in,
-            lang_out=args.lang_out,
-            ignore_cache=args.ignore_cache,
-            url=args.translate_url,
         )
     else:
         raise ValueError("Invalid translator type")
