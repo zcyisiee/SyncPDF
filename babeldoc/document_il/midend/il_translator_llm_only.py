@@ -112,6 +112,14 @@ class ParagraphTranslateTracker:
         self.output = output
 
 
+class BatchParagraph:
+    def __init__(
+        self, paragraphs: list[PdfParagraph], page_tracker: PageTranslateTracker
+    ):
+        self.paragraphs = paragraphs
+        self.trackers = [page_tracker.new_paragraph() for _ in paragraphs]
+
+
 class ILTranslatorLLMOnly:
     stage_name = "Translate Paragraphs"
 
@@ -161,21 +169,38 @@ class ILTranslatorLLMOnly:
         tracker: PageTranslateTracker = None,
     ):
         self.translation_config.raise_if_cancelled()
+        page_font_map = {}
+        for font in page.pdf_font:
+            page_font_map[font.font_id] = font
+        page_xobj_font_map = {}
+        for xobj in page.pdf_xobject:
+            page_xobj_font_map[xobj.xobj_id] = page_font_map.copy()
+            for font in xobj.pdf_font:
+                page_xobj_font_map[xobj.xobj_id][font.font_id] = font
+
+        paragraphs = []
+
+        total_unicode_counts = 0
         for paragraph in page.pdf_paragraph:
-            page_font_map = {}
-            for font in page.pdf_font:
-                page_font_map[font.font_id] = font
-            page_xobj_font_map = {}
-            for xobj in page.pdf_xobject:
-                page_xobj_font_map[xobj.xobj_id] = page_font_map.copy()
-                for font in xobj.pdf_font:
-                    page_xobj_font_map[xobj.xobj_id][font.font_id] = font
             # self.translate_paragraph(paragraph, pbar,tracker.new_paragraph(), page_font_map, page_xobj_font_map)
+            total_unicode_counts += len(paragraph.unicode)
+            paragraphs.append(paragraph)
+            if total_unicode_counts > 1200 or len(paragraphs) > 4:
+                executor.submit(
+                    self.translate_paragraph,
+                    BatchParagraph(paragraphs, tracker),
+                    pbar,
+                    page_font_map,
+                    page_xobj_font_map,
+                )
+                paragraphs = []
+                total_unicode_counts = 0
+
+        if paragraphs:
             executor.submit(
                 self.translate_paragraph,
-                paragraph,
+                BatchParagraph(paragraphs, tracker),
                 pbar,
-                tracker.new_paragraph(),
                 page_font_map,
                 page_xobj_font_map,
             )
@@ -581,34 +606,36 @@ class ILTranslatorLLMOnly:
 
     def translate_paragraph(
         self,
-        paragraph: PdfParagraph,
+        batch_paragraph: BatchParagraph,
         pbar: tqdm | None = None,
-        tracker: ParagraphTranslateTracker = None,
         page_font_map: dict[str, PdfFont] = None,
         xobj_font_map: dict[int, dict[str, PdfFont]] = None,
     ):
         """Translate a paragraph using pre and post processing functions."""
         self.translation_config.raise_if_cancelled()
-        with PbarContext(pbar):
-            try:
-                # Pre-translation processing
-                text, translate_input = self._pre_translate_paragraph(
-                    paragraph, tracker, page_font_map, xobj_font_map
-                )
-                if text is None:
+        for paragraph, tracker in zip(
+            batch_paragraph.paragraphs, batch_paragraph.trackers, strict=True
+        ):
+            with PbarContext(pbar):
+                try:
+                    # Pre-translation processing
+                    text, translate_input = self._pre_translate_paragraph(
+                        paragraph, tracker, page_font_map, xobj_font_map
+                    )
+                    if text is None:
+                        return
+
+                    # Perform translation
+                    translated_text = self.translate_engine.translate(text)
+                    translated_text = re.sub(r"[. 。…，]{20,}", ".", translated_text)
+
+                    # Post-translation processing
+                    self._post_translate_paragraph(
+                        paragraph, tracker, translate_input, translated_text
+                    )
+                except Exception as e:
+                    logger.exception(
+                        f"Error translating paragraph. Paragraph: {paragraph}. Error: {e}. ",
+                    )
+                    # ignore error and continue
                     return
-
-                # Perform translation
-                translated_text = self.translate_engine.translate(text)
-                translated_text = re.sub(r"[. 。…，]{20,}", ".", translated_text)
-
-                # Post-translation processing
-                self._post_translate_paragraph(
-                    paragraph, tracker, translate_input, translated_text
-                )
-            except Exception as e:
-                logger.exception(
-                    f"Error translating paragraph. Paragraph: {paragraph}. Error: {e}. ",
-                )
-                # ignore error and continue
-                return
