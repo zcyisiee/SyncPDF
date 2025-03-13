@@ -134,7 +134,7 @@ class ILTranslatorLLMOnly:
 
         total_unicode_counts = 0
         for paragraph in page.pdf_paragraph:
-            if paragraph.debug_id is None:
+            if paragraph.debug_id is None or paragraph.unicode is None:
                 continue
             # self.translate_paragraph(paragraph, pbar,tracker.new_paragraph(), page_font_map, page_xobj_font_map)
             total_unicode_counts += len(paragraph.unicode)
