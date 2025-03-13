@@ -193,7 +193,8 @@ class ILTranslatorLLMOnly:
                     pbar.advance(1)
                     continue
                 inputs.append((text, translate_input, paragraph, tracker))
-
+            if not inputs:
+                return
             json_format_input = []
 
             for id_, input_text in enumerate(inputs):
@@ -343,7 +344,7 @@ class ILTranslatorLLMOnly:
                         )
 
         except Exception as e:
-            logger.exception("Error during translation. try fallback")
+            logger.warning(f"Error {e} during translation. try fallback")
             for i in range(len(batch_paragraph.paragraphs)):
                 paragraph = batch_paragraph.paragraphs[i]
                 tracker = batch_paragraph.trackers[i]
