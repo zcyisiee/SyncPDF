@@ -47,17 +47,6 @@ class FormulaPlaceholder:
         self.placeholder = placeholder
 
 
-class PbarContext:
-    def __init__(self, pbar):
-        self.pbar = pbar
-
-    def __enter__(self):
-        return self.pbar
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.pbar.advance()
-
-
 class DocumentTranslateTracker:
     def __init__(self):
         self.page = []
@@ -160,7 +149,12 @@ class ILTranslatorLLMOnly:
         title_paragraph = self.find_title_paragraph(docs)
 
         # count total paragraph
-        total = sum(len(page.pdf_paragraph) for page in docs.page)
+        total = sum(
+            [
+                len([p for p in page.pdf_paragraph if p.debug_id is not None])
+                for page in docs.page
+            ]
+        )
         with self.translation_config.progress_monitor.stage_start(
             self.stage_name,
             total,
@@ -210,10 +204,11 @@ class ILTranslatorLLMOnly:
 
         total_unicode_counts = 0
         for paragraph in page.pdf_paragraph:
+            if paragraph.debug_id is None:
+                continue
             # self.translate_paragraph(paragraph, pbar,tracker.new_paragraph(), page_font_map, page_xobj_font_map)
             total_unicode_counts += len(paragraph.unicode)
             paragraphs.append(paragraph)
-
             if paragraph.layout_label == "title":
                 local_title_paragraph = paragraph
 
@@ -651,29 +646,30 @@ class ILTranslatorLLMOnly:
     ):
         """Translate a paragraph using pre and post processing functions."""
         self.translation_config.raise_if_cancelled()
-        for paragraph, tracker in zip(
-            batch_paragraph.paragraphs, batch_paragraph.trackers, strict=True
-        ):
-            with PbarContext(pbar):
-                try:
-                    # Pre-translation processing
-                    text, translate_input = self._pre_translate_paragraph(
-                        paragraph, tracker, page_font_map, xobj_font_map
-                    )
-                    if text is None:
-                        return
+        for i in range(len(batch_paragraph.paragraphs)):
+            try:
+                paragraph = batch_paragraph.paragraphs[i]
+                tracker = batch_paragraph.trackers[i]
+                # Pre-translation processing
+                text, translate_input = self._pre_translate_paragraph(
+                    paragraph, tracker, page_font_map, xobj_font_map
+                )
+                if text is None:
+                    continue
 
-                    # Perform translation
-                    translated_text = self.translate_engine.translate(text)
-                    translated_text = re.sub(r"[. 。…，]{20,}", ".", translated_text)
+                # Perform translation
+                translated_text = self.translate_engine.translate(text)
+                translated_text = re.sub(r"[. 。…，]{20,}", ".", translated_text)
 
-                    # Post-translation processing
-                    self._post_translate_paragraph(
-                        paragraph, tracker, translate_input, translated_text
-                    )
-                except Exception as e:
-                    logger.exception(
-                        f"Error translating paragraph. Paragraph: {paragraph}. Error: {e}. ",
-                    )
-                    # ignore error and continue
-                    return
+                # Post-translation processing
+                self._post_translate_paragraph(
+                    paragraph, tracker, translate_input, translated_text
+                )
+            except Exception as e:
+                logger.exception(
+                    f"Error translating paragraph. Paragraph: {paragraph}. Error: {e}. ",
+                )
+                # ignore error and continue
+                continue
+            finally:
+                pbar.advance(1)
