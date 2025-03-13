@@ -27,6 +27,14 @@ from babeldoc.translation_config import TranslationConfig
 logger = logging.getLogger(__name__)
 
 
+# define a custom representer for strings
+def quoted_presenter(dumper, data):
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='"')
+
+
+yaml.add_representer(str, quoted_presenter)
+
+
 class RichTextPlaceholder:
     def __init__(
         self,
@@ -671,7 +679,7 @@ class ILTranslatorLLMOnly:
             )
         yaml_format_input = yaml.dump(
             yaml_format_input,
-            default_style='"',  # 使用双引号包裹所有标量
+            default_flow_style=False,
             width=float("inf"),  # 防止长字符串被折行
         )
         llm_input = ["You are a professional, authentic machine translation engine."]
@@ -703,14 +711,14 @@ Here is an example of the expected format:
 <example>
 ```yaml
 Input:
-  - id: 1
-    input: "Source"
-    layout_label: "plain text"
+  - "id": 1
+    "input": "Source"
+    "layout_label": "plain text"
 ```
 Output:
 ```yaml
-  - id: 1
-    output: "Translation"
+  - "id": 1
+    "output": "Translation"
 ```
 </example>
 
@@ -737,6 +745,12 @@ Please return the translated YAML directly without wrapping <yaml> tag or includ
             )
             # Use regex as fallback to extract id and output pairs
             translation_results = self._extract_translations_with_regex(llm_output)
+
+        if len(translation_results) != len(inputs):
+            logger.warning(
+                f"Translation results length mismatch. Expected: {len(inputs)}, Got: {len(translation_results)}"
+            )
+            return
 
         for id_, output in translation_results.items():
             try:
@@ -790,6 +804,8 @@ Please return the translated YAML directly without wrapping <yaml> tag or includ
             for item in parsed_output:
                 if isinstance(item, dict) and "id" in item and "output" in item:
                     result[item["id"]] = item["output"]
+                elif isinstance(item, dict) and "id" in item and "input" in item:
+                    result[item["id"]] = item["input"]
         elif isinstance(parsed_output, dict):
             if "Output" in parsed_output:
                 # If it contains an Output key
@@ -798,6 +814,10 @@ Please return the translated YAML directly without wrapping <yaml> tag or includ
                     for item in output_items:
                         if isinstance(item, dict) and "id" in item and "output" in item:
                             result[item["id"]] = item["output"]
+                        elif (
+                            isinstance(item, dict) and "id" in item and "input" in item
+                        ):
+                            result[item["id"]] = item["input"]
             else:
                 # Use parsed result directly
                 result = parsed_output
