@@ -137,8 +137,28 @@ class ILTranslatorLLMOnly:
         except NotImplementedError as e:
             raise ValueError("LLM translator not supported") from e
 
-    def translate(self, docs: Document):
+    def find_title_paragraph(self, docs: Document) -> PdfParagraph | None:
+        """Find the first paragraph with layout_label 'title' in the document.
+
+        Args:
+            docs: The document to search in
+
+        Returns:
+            The first title paragraph found, or None if no title paragraph exists
+        """
+        for page in docs.page:
+            for paragraph in page.pdf_paragraph:
+                if paragraph.layout_label == "title":
+                    logger.info(f"Found title paragraph: {paragraph.unicode}")
+                    return paragraph
+        return None
+
+    def translate(self, docs: Document) -> None:
         tracker = DocumentTranslateTracker()
+
+        # Try to find the first title paragraph
+        title_paragraph = self.find_title_paragraph(docs)
+
         # count total paragraph
         total = sum(len(page.pdf_paragraph) for page in docs.page)
         with self.translation_config.progress_monitor.stage_start(
@@ -152,7 +172,13 @@ class ILTranslatorLLMOnly:
                 ),
             ) as executor:
                 for page in docs.page:
-                    self.process_page(page, executor, pbar, tracker.new_page())
+                    self.process_page(
+                        page,
+                        executor,
+                        pbar,
+                        tracker.new_page(),
+                        title_paragraph,
+                    )
 
         path = self.translation_config.get_working_file_path("translate_tracking.json")
 
@@ -167,6 +193,7 @@ class ILTranslatorLLMOnly:
         executor: concurrent.futures.ThreadPoolExecutor,
         pbar: tqdm | None = None,
         tracker: PageTranslateTracker = None,
+        title_paragraph: PdfParagraph | None = None,
     ):
         self.translation_config.raise_if_cancelled()
         page_font_map = {}
@@ -179,12 +206,17 @@ class ILTranslatorLLMOnly:
                 page_xobj_font_map[xobj.xobj_id][font.font_id] = font
 
         paragraphs = []
+        local_title_paragraph = None
 
         total_unicode_counts = 0
         for paragraph in page.pdf_paragraph:
             # self.translate_paragraph(paragraph, pbar,tracker.new_paragraph(), page_font_map, page_xobj_font_map)
             total_unicode_counts += len(paragraph.unicode)
             paragraphs.append(paragraph)
+
+            if paragraph.layout_label == "title":
+                local_title_paragraph = paragraph
+
             if total_unicode_counts > 1200 or len(paragraphs) > 4:
                 executor.submit(
                     self.translate_paragraph,
@@ -192,6 +224,8 @@ class ILTranslatorLLMOnly:
                     pbar,
                     page_font_map,
                     page_xobj_font_map,
+                    title_paragraph,
+                    local_title_paragraph,
                 )
                 paragraphs = []
                 total_unicode_counts = 0
@@ -203,6 +237,8 @@ class ILTranslatorLLMOnly:
                 pbar,
                 page_font_map,
                 page_xobj_font_map,
+                title_paragraph,
+                local_title_paragraph,
             )
 
     class TranslateInput:
@@ -610,6 +646,8 @@ class ILTranslatorLLMOnly:
         pbar: tqdm | None = None,
         page_font_map: dict[str, PdfFont] = None,
         xobj_font_map: dict[int, dict[str, PdfFont]] = None,
+        title_paragraph: PdfParagraph | None = None,
+        local_title_paragraph: PdfParagraph | None = None,
     ):
         """Translate a paragraph using pre and post processing functions."""
         self.translation_config.raise_if_cancelled()
