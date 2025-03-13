@@ -194,8 +194,6 @@ class ILTranslatorLLMOnly:
                     continue
                 inputs.append((text, translate_input, paragraph, tracker))
 
-            self.translation_config.raise_if_cancelled()
-
             json_format_input = []
 
             for id_, input_text in enumerate(inputs):
@@ -355,7 +353,7 @@ class ILTranslatorLLMOnly:
                     self.il_translator.translate_paragraph,
                     paragraph,
                     pbar,
-                    tracker.new_paragraph(),
+                    tracker,
                     page_font_map,
                     xobj_font_map,
                 )
