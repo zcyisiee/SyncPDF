@@ -148,10 +148,14 @@ class ProgressMonitor:
         if report_time_delta < self.report_interval and stage.total > 3:
             return
         if self.progress_change_callback:
+            if stage.total != 0:
+                stage_progress = stage.current * 100 / stage.total
+            else:
+                stage_progress = 100
             self.progress_change_callback(
                 type="progress_update",
                 stage=stage.display_name,
-                stage_progress=stage.current * 100 / stage.total,
+                stage_progress=stage_progress,
                 stage_current=stage.current,
                 stage_total=stage.total,
                 overall_progress=self.calculate_current_progress(stage),
