@@ -203,6 +203,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             if settings.STRICT:
                 raise PDFInterpreterError("No colorspace specified!")
             n = 1
+        n = len(self.argstack)
         args = self.pop(n)
         self.il_creater.on_passthrough_per_char("SCN", args)
         self.graphicstate.scolor = cast(Color, args)
@@ -216,6 +217,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             if settings.STRICT:
                 raise PDFInterpreterError("No colorspace specified!")
             n = 1
+        n = len(self.argstack)
         args = self.pop(n)
         self.il_creater.on_passthrough_per_char("scn", args)
         self.graphicstate.ncolor = cast(Color, args)
