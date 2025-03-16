@@ -479,6 +479,8 @@ class ILCreater:
         return graphic_state
 
     def on_lt_char(self, char: LTChar):
+        if char.aw_font_id is None:
+            return
         gs = self.create_graphic_state(char.graphicstate)
         # Get font from current page or xobject
         font = None
