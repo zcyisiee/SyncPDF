@@ -62,6 +62,31 @@ def set_translate_rate_limiter(max_qps):
     _translate_rate_limiter.set_max_qps(max_qps)
 
 
+class AtomicInteger:
+    def __init__(self, value=0):
+        self._value = int(value)
+        self._lock = threading.Lock()
+
+    def inc(self, d=1):
+        with self._lock:
+            self._value += int(d)
+            return self._value
+
+    def dec(self, d=1):
+        return self.inc(-d)
+
+    @property
+    def value(self):
+        with self._lock:
+            return self._value
+
+    @value.setter
+    def value(self, v):
+        with self._lock:
+            self._value = int(v)
+            return self._value
+
+
 class BaseTranslator(ABC):
     # Due to cache limitations, name should be within 20 characters.
     # cache.py: translate_engine = CharField(max_length=20)
@@ -195,6 +220,9 @@ class OpenAITranslator(BaseTranslator):
         self.model = model
         self.add_cache_impact_parameters("model", self.model)
         self.add_cache_impact_parameters("prompt", self.prompt(""))
+        self.token_count = AtomicInteger()
+        self.prompt_token_count = AtomicInteger()
+        self.completion_token_count = AtomicInteger()
 
     @retry(
         retry=retry_if_exception_type(openai.RateLimitError),
@@ -211,6 +239,9 @@ class OpenAITranslator(BaseTranslator):
             **self.options,
             messages=self.prompt(text),
         )
+        self.token_count.inc(response.usage.total_tokens)
+        self.prompt_token_count.inc(response.usage.prompt_tokens)
+        self.completion_token_count.inc(response.usage.completion_tokens)
         return response.choices[0].message.content.strip()
 
     def prompt(self, text):
@@ -248,6 +279,9 @@ class OpenAITranslator(BaseTranslator):
                 },
             ],
         )
+        self.token_count.inc(response.usage.total_tokens)
+        self.prompt_token_count.inc(response.usage.prompt_tokens)
+        self.completion_token_count.inc(response.usage.completion_tokens)
         return response.choices[0].message.content.strip()
 
     def get_formular_placeholder(self, placeholder_id: int):

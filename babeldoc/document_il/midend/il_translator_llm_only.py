@@ -328,9 +328,9 @@ class ILTranslatorLLMOnly:
                         translate_input,
                         translated_text,
                     )
+                    should_fallback = False
                     if pbar:
                         pbar.advance(1)
-                    should_fallback = False
                 except Exception as e:
                     logger.exception(f"Error translating paragraph. Error: {e}.")
                     # Ignore error and continue
