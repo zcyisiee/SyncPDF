@@ -19,6 +19,12 @@ class WatermarkOutputMode(enum.Enum):
     Both = "both"
 
 
+class SharedContextCrossSplitPart:
+    def __init__(self):
+        self.first_paragraph = None
+        self.recent_title_paragraph = None
+
+
 class TranslationConfig:
     def __init__(
         self,
@@ -118,6 +124,8 @@ class TranslationConfig:
         if not doc_layout_model:
             doc_layout_model = DocLayoutModel.load_available()
         self.doc_layout_model = doc_layout_model
+
+        self.shared_context_cross_split_part = SharedContextCrossSplitPart()
 
     def _parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
         """解析页码字符串，返回页码范围列表
