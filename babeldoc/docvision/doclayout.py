@@ -6,8 +6,17 @@ from collections.abc import Generator
 
 import cv2
 import numpy as np
-import onnx
-import onnxruntime
+
+try:
+    import onnx
+    import onnxruntime
+except ImportError as e:
+    if "DLL load failed" in str(e):
+        raise OSError(
+            "Microsoft Visual C++ Redistributable is not installed. "
+            "Download it at https://aka.ms/vs/17/release/vc_redist.x64.exe"
+        ) from e
+    raise
 import pymupdf
 
 import babeldoc.document_il.il_version_1

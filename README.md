@@ -255,6 +255,12 @@ report-interval = 0.5
 
 ## Python API
 
+> [!TIP]
+>
+> 1. Before pdf2zh 2.0 is released, you can temporarily use BabelDOC's Python API. However, after pdf2zh 2.0 is released, please directly use pdf2zh's Python API.
+>
+> 2. This project's Python API does not guarantee any compatibility. However, the Python API from pdf2zh will guarantee a certain level of compatibility.
+
 You can refer to the example in [main.py](https://github.com/funstory-ai/yadt/blob/main/babeldoc/main.py) to use BabelDOC's Python API.
 
 Please note:
