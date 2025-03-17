@@ -603,7 +603,7 @@ class ILTranslator:
                 )
             except Exception as e:
                 logger.exception(
-                    f"Error translating paragraph. Paragraph: {paragraph}. Error: {e}. ",
+                    f"Error translating paragraph. Paragraph: {paragraph.debug_id} ({paragraph.unicode}). Error: {e}. ",
                 )
                 # ignore error and continue
                 return
