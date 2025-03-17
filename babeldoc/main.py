@@ -353,6 +353,9 @@ async def main():
                     result = event["translate_result"]
                     logger.info(str(result))
                     break
+    logger.info(f"Total tokens: {translator.token_count.value}")
+    logger.info(f"Prompt tokens: {translator.prompt_token_count.value}")
+    logger.info(f"Completion tokens: {translator.completion_token_count.value}")
 
 
 def create_progress_handler(translation_config: TranslationConfig):
