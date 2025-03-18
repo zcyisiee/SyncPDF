@@ -306,7 +306,7 @@ def do_translate(pm, translation_config):
         for i in range(1, doc_pdf2zh.xref_length()):
             try:
                 if doc_pdf2zh.xref_object(i) == "null":
-                    doc_pdf2zh.update_object(i, "null")
+                    doc_pdf2zh.update_object(i, "[]")
             except Exception:
                 logger.warning(f"try fix xref {i} fail, continue")
 
