@@ -2,6 +2,7 @@ import abc
 import ast
 import logging
 import platform
+import re
 from collections.abc import Generator
 
 import cv2
@@ -100,8 +101,6 @@ class YoloBox:
 # 检测操作系统类型
 os_name = platform.system()
 
-providers = []
-
 
 class OnnxModel(DocLayoutModel):
     def __init__(self, model_path: str):
@@ -111,10 +110,16 @@ class OnnxModel(DocLayoutModel):
         metadata = {d.key: d.value for d in model.metadata_props}
         self._stride = ast.literal_eval(metadata["stride"])
         self._names = ast.literal_eval(metadata["names"])
+        providers = []
 
+        available_providers = onnxruntime.get_available_providers()
+        for provider in available_providers:
+            if re.match(r"DirectML|cuda|coreml|cpu", provider, re.IGNORECASE):
+                logger.info(f"Available Provider: {provider}")
+                providers.append(provider)
         self.model = onnxruntime.InferenceSession(
             model.SerializeToString(),
-            providers=onnxruntime.get_available_providers(),
+            providers=providers,
         )
 
     @staticmethod
