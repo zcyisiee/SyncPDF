@@ -2,6 +2,7 @@ import abc
 import ast
 import logging
 import platform
+import re
 from collections.abc import Generator
 
 import cv2
@@ -100,26 +101,6 @@ class YoloBox:
 # 检测操作系统类型
 os_name = platform.system()
 
-providers = []
-
-if os_name == "Darwin" and False:  # Temporarily disable CoreML due to some issues
-    providers.append(
-        (
-            "CoreMLExecutionProvider",
-            {
-                "ModelFormat": "MLProgram",
-                "MLComputeUnits": "ALL",
-                "RequireStaticInputShapes": "0",
-                "EnableOnSubgraphs": "0",
-            },
-        ),
-    )
-    # workaround for CoreML batch inference issues
-    max_batch_size = 1
-else:
-    max_batch_size = 1
-providers.append("CPUExecutionProvider")  # CPU 执行提供者作为通用后备选项
-
 
 class OnnxModel(DocLayoutModel):
     def __init__(self, model_path: str):
@@ -129,7 +110,13 @@ class OnnxModel(DocLayoutModel):
         metadata = {d.key: d.value for d in model.metadata_props}
         self._stride = ast.literal_eval(metadata["stride"])
         self._names = ast.literal_eval(metadata["names"])
+        providers = []
 
+        available_providers = onnxruntime.get_available_providers()
+        for provider in available_providers:
+            if re.match(r"dml|cuda|coreml|cpu", provider, re.IGNORECASE):
+                logger.info(f"Available Provider: {provider}")
+                providers.append(provider)
         self.model = onnxruntime.InferenceSession(
             model.SerializeToString(),
             providers=providers,
@@ -237,7 +224,7 @@ class OnnxModel(DocLayoutModel):
 
         total_images = len(image)
         results = []
-        batch_size = min(batch_size, max_batch_size)
+        batch_size = 1
 
         # Process images in batches
         for i in range(0, total_images, batch_size):
@@ -246,7 +233,7 @@ class OnnxModel(DocLayoutModel):
 
             # Calculate target size based on the maximum height in the batch
             max_height = max(img.shape[0] for img in batch_images)
-            target_imgsz = int(max_height / 32) * 32
+            target_imgsz = 1024
 
             # Preprocess batch
             processed_batch = []

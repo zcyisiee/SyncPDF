@@ -44,6 +44,10 @@ dependencies = [
     "opencv-python-headless>=4.10.0.84",
 ]
 
+[project.optional-dependencies]
+directml = ["onnxruntime-directml>=1.16.1"]
+cuda = ["onnxruntime-gpu>=1.16.1"]
+
 [project.urls]
 Homepage = "https://github.com/funstory-ai/BabelDOC"
 Issues = "https://github.com/funstory-ai/BabelDOC/issues"
