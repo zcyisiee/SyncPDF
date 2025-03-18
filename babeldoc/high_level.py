@@ -39,6 +39,8 @@ from babeldoc.document_il.utils.fontmap import FontMapper
 from babeldoc.document_il.xml_converter import XMLConverter
 from babeldoc.pdfinterp import PDFPageInterpreterEx
 from babeldoc.progress_monitor import ProgressMonitor
+from babeldoc.result_merger import ResultMerger
+from babeldoc.split_manager import SplitManager
 from babeldoc.translation_config import TranslateResult
 from babeldoc.translation_config import TranslationConfig
 from babeldoc.translation_config import WatermarkOutputMode
@@ -284,170 +286,106 @@ async def async_translate(translation_config: TranslationConfig):
     await finish_event.wait()
 
 
-def do_translate(pm, translation_config):
+def do_translate(
+    pm: ProgressMonitor, translation_config: TranslationConfig
+) -> TranslateResult:
     try:
         translation_config.progress_monitor = pm
         original_pdf_path = translation_config.input_file
         logger.info(f"start to translate: {original_pdf_path}")
         start_time = time.time()
-        doc_input = Document(original_pdf_path)
-        if translation_config.debug:
-            logger.debug("debug mode, save decompressed input pdf")
-            output_path = translation_config.get_working_file_path(
-                "input.decompressed.pdf",
-            )
-            doc_input.save(output_path, expand=True, pretty=True)
-        # Continue with original processing
-        temp_pdf_path = translation_config.get_working_file_path("input.pdf")
-        doc_pdf2zh = Document(original_pdf_path)
-        resfont = "china-ss"
 
-        # 修复 pdf 文件中 xref 为 null 的情况
-        for i in range(1, doc_pdf2zh.xref_length()):
+        # Check if split translation is enabled
+        if not translation_config.enable_split:
+            return _do_translate_single(pm, translation_config)
+
+        # Initialize split manager and determine split points
+        split_manager = SplitManager(translation_config)
+        split_points = split_manager.determine_split_points(translation_config)
+
+        if not split_points:
+            logger.warning(
+                "No split points determined, falling back to single translation"
+            )
+            return _do_translate_single(pm, translation_config)
+
+        logger.info(f"Split points determined: {len(split_points)} parts")
+        pm.total_parts = len(split_points)
+
+        # Process parts serially
+        results: dict[int, TranslateResult] = {}
+        original_watermark_mode = translation_config.watermark_output_mode
+        original_doc = Document(original_pdf_path)
+        for i, split_point in enumerate(split_points):
             try:
-                if doc_pdf2zh.xref_object(i) == "null":
-                    doc_pdf2zh.update_object(i, "null")
-            except Exception:
-                logger.warning(f"try fix xref {i} fail, continue")
+                # Create a copy of config for this part
+                part_config = copy.copy(translation_config)
+                should_translate_pages = []
+                for page in range(split_point.start_page, split_point.end_page + 1):
+                    if translation_config.should_translate_page(page + 1):
+                        should_translate_pages.append(page - split_point.start_page + 1)
+                part_config.pages = None
+                part_config.page_ranges = [(x, x) for x in should_translate_pages]
 
-        for page in doc_pdf2zh:
-            page.insert_font(resfont, None)
+                part_config.working_dir = translation_config.get_part_working_dir(i)
+                part_config.output_dir = translation_config.get_part_output_dir(i)
 
-        resfont = None
-        doc_pdf2zh.save(temp_pdf_path)
-        il_creater = ILCreater(translation_config)
-        il_creater.mupdf = doc_input
-        xml_converter = XMLConverter()
-        logger.debug(f"start parse il from {temp_pdf_path}")
-        with Path(temp_pdf_path).open("rb") as f:
-            start_parse_il(
-                f,
-                doc_zh=doc_pdf2zh,
-                resfont=resfont,
-                il_creater=il_creater,
-                translation_config=translation_config,
-            )
-        logger.debug(f"finish parse il from {temp_pdf_path}")
-        docs = il_creater.create_il()
-        logger.debug(f"finish create il from {temp_pdf_path}")
-        if translation_config.debug:
-            xml_converter.write_json(
-                docs,
-                translation_config.get_working_file_path("create_il.debug.json"),
-            )
+                part_temp_input_path = part_config.get_working_file_path(
+                    f"input.part{i}.pdf"
+                )
+                part_config.input_file = part_temp_input_path
 
-        # 检测是否为扫描文件
-        logger.debug("start detect scanned file")
-        DetectScannedFile(translation_config).process(docs)
-        logger.debug("finish detect scanned file")
-        if translation_config.debug:
-            xml_converter.write_json(
-                docs,
-                translation_config.get_working_file_path("detect_scanned_file.json"),
-            )
+                temp_doc = Document()
+                temp_doc.insert_pdf(
+                    original_doc,
+                    from_page=split_point.start_page,
+                    to_page=split_point.end_page,
+                )
+                temp_doc.save(part_temp_input_path)
 
-        # Generate layouts for all pages
-        logger.debug("start generating layouts")
-        docs = LayoutParser(translation_config).process(docs, doc_input)
-        logger.debug("finish generating layouts")
-        if translation_config.debug:
-            xml_converter.write_json(
-                docs,
-                translation_config.get_working_file_path("layout_generator.json"),
-            )
-        ParagraphFinder(translation_config).process(docs)
-        logger.debug(f"finish paragraph finder from {temp_pdf_path}")
-        if translation_config.debug:
-            xml_converter.write_json(
-                docs,
-                translation_config.get_working_file_path("paragraph_finder.json"),
-            )
-        StylesAndFormulas(translation_config).process(docs)
-        logger.debug(f"finish styles and formulas from {temp_pdf_path}")
-        if translation_config.debug:
-            xml_converter.write_json(
-                docs,
-                translation_config.get_working_file_path("styles_and_formulas.json"),
-            )
-        # RemoveDescent(translation_config).process(docs)
-        # logger.debug(f"finish remove descent from {temp_pdf_path}")
-        # if translation_config.debug:
-        #     xml_converter.write_json(
-        #         docs,
-        #         translation_config.get_working_file_path("remove_descent.json"),
-        #     )
-        translate_engine = translation_config.translator
+                assert (
+                    temp_doc.page_count
+                    == split_point.end_page - split_point.start_page + 1
+                )
 
-        support_llm_translate = False
-        try:
-            if translate_engine and hasattr(translate_engine, "do_llm_translate"):
-                translate_engine.do_llm_translate(None)
-                support_llm_translate = True
-        except NotImplementedError:
-            support_llm_translate = False
-        il_translator = None
-        if support_llm_translate:
-            il_translator = ILTranslatorLLMOnly(translate_engine, translation_config)
-        else:
-            il_translator = ILTranslator(translate_engine, translation_config)
+                # Only first part should have watermark
+                if i > 0:
+                    part_config.watermark_output_mode = WatermarkOutputMode.NoWatermark
 
-        il_translator.translate(docs)
-        logger.debug(f"finish ILTranslator from {temp_pdf_path}")
-        if translation_config.debug:
-            xml_converter.write_json(
-                docs,
-                translation_config.get_working_file_path("il_translated.json"),
-            )
+                # Create progress monitor for this part
+                part_monitor = pm.create_part_monitor(i, len(split_points))
 
-        if translation_config.debug:
-            AddDebugInformation(translation_config).process(docs)
-            xml_converter.write_json(
-                docs,
-                translation_config.get_working_file_path("add_debug_information.json"),
-            )
-        mono_watermark_first_page_doc_bytes = None
-        dual_watermark_first_page_doc_bytes = None
+                # Process this part
+                result = _do_translate_single(
+                    part_monitor,
+                    part_config,
+                )
+                results[i] = result
 
-        if translation_config.watermark_output_mode == WatermarkOutputMode.Both:
-            mono_watermark_first_page_doc_bytes, dual_watermark_first_page_doc_bytes = (
-                generate_first_page_with_watermark(doc_input, translation_config, docs)
-            )
+            except Exception as e:
+                logger.error(f"Error in part {i}: {e}")
+                pm.translate_error(e)
+                raise
+            finally:
+                # Clean up part working directory
+                translation_config.cleanup_part_working_dir(i)
 
-        Typesetting(translation_config).typsetting_document(docs)
-        logger.debug(f"finish typsetting from {temp_pdf_path}")
-        if translation_config.debug:
-            xml_converter.write_json(
-                docs,
-                translation_config.get_working_file_path("typsetting.json"),
-            )
-        # deepcopy
-        # docs2 = xml_converter.deepcopy(docs)
-        pdf_creater = PDFCreater(temp_pdf_path, docs, translation_config)
-        result = pdf_creater.write(translation_config)
+        # Restore original watermark mode
+        translation_config.watermark_output_mode = original_watermark_mode
 
-        if mono_watermark_first_page_doc_bytes:
-            mono_watermark_pdf = merge_watermark_doc(
-                result.mono_pdf_path,
-                mono_watermark_first_page_doc_bytes,
-                translation_config,
-            )
-            result.mono_pdf_path = mono_watermark_pdf
-        if dual_watermark_first_page_doc_bytes:
-            dual_watermark_pdf = merge_watermark_doc(
-                result.dual_pdf_path,
-                dual_watermark_first_page_doc_bytes,
-                translation_config,
-            )
-            result.dual_pdf_path = dual_watermark_pdf
+        # Merge results
+        merger = ResultMerger(translation_config)
+        merged_result = merger.merge_results(results)
 
         finish_time = time.time()
-        result.original_pdf_path = original_pdf_path
-        result.total_seconds = finish_time - start_time
+        merged_result.total_seconds = finish_time - start_time
+
         logger.info(
             f"finish translate: {original_pdf_path}, cost: {finish_time - start_time} s",
         )
-        pm.translate_done(result)
-        return result
+        pm.translate_done(merged_result)
+        return merged_result
+
     except Exception as e:
         logger.exception(f"translate error: {e}")
         pm.translate_error(e)
@@ -456,6 +394,163 @@ def do_translate(pm, translation_config):
         logger.debug("do_translate finally")
         pm.on_finish()
         translation_config.cleanup_temp_files()
+
+
+def _do_translate_single(
+    pm: ProgressMonitor,
+    translation_config: TranslationConfig,
+) -> TranslateResult:
+    """Original translation logic for a single document or part"""
+    translation_config.progress_monitor = pm
+    original_pdf_path = translation_config.input_file
+    doc_input = Document(original_pdf_path)
+    if translation_config.debug:
+        logger.debug("debug mode, save decompressed input pdf")
+        output_path = translation_config.get_working_file_path(
+            "input.decompressed.pdf",
+        )
+        doc_input.save(output_path, expand=True, pretty=True)
+
+    # Continue with original processing
+    temp_pdf_path = translation_config.get_working_file_path("input.pdf")
+    doc_pdf2zh = Document(original_pdf_path)
+    resfont = "china-ss"
+
+    # Fix null xref in PDF file
+    for i in range(1, doc_pdf2zh.xref_length()):
+        try:
+            if doc_pdf2zh.xref_object(i) == "null":
+                doc_pdf2zh.update_object(i, "null")
+        except Exception:
+            logger.warning(f"try fix xref {i} fail, continue")
+
+    for page in doc_pdf2zh:
+        page.insert_font(resfont, None)
+
+    resfont = None
+    doc_pdf2zh.save(temp_pdf_path)
+    il_creater = ILCreater(translation_config)
+    il_creater.mupdf = doc_input
+    xml_converter = XMLConverter()
+    logger.debug(f"start parse il from {temp_pdf_path}")
+    with Path(temp_pdf_path).open("rb") as f:
+        start_parse_il(
+            f,
+            doc_zh=doc_pdf2zh,
+            resfont=resfont,
+            il_creater=il_creater,
+            translation_config=translation_config,
+        )
+    logger.debug(f"finish parse il from {temp_pdf_path}")
+    docs = il_creater.create_il()
+    logger.debug(f"finish create il from {temp_pdf_path}")
+    if translation_config.debug:
+        xml_converter.write_json(
+            docs,
+            translation_config.get_working_file_path("create_il.debug.json"),
+        )
+
+    # Rest of the original translation logic...
+    # [Previous implementation of do_translate continues here]
+
+    # 检测是否为扫描文件
+    logger.debug("start detect scanned file")
+    DetectScannedFile(translation_config).process(docs)
+    logger.debug("finish detect scanned file")
+    if translation_config.debug:
+        xml_converter.write_json(
+            docs,
+            translation_config.get_working_file_path("detect_scanned_file.json"),
+        )
+
+    # Generate layouts for all pages
+    logger.debug("start generating layouts")
+    docs = LayoutParser(translation_config).process(docs, doc_input)
+    logger.debug("finish generating layouts")
+    if translation_config.debug:
+        xml_converter.write_json(
+            docs,
+            translation_config.get_working_file_path("layout_generator.json"),
+        )
+    ParagraphFinder(translation_config).process(docs)
+    logger.debug(f"finish paragraph finder from {temp_pdf_path}")
+    if translation_config.debug:
+        xml_converter.write_json(
+            docs,
+            translation_config.get_working_file_path("paragraph_finder.json"),
+        )
+    StylesAndFormulas(translation_config).process(docs)
+    logger.debug(f"finish styles and formulas from {temp_pdf_path}")
+    if translation_config.debug:
+        xml_converter.write_json(
+            docs,
+            translation_config.get_working_file_path("styles_and_formulas.json"),
+        )
+
+    translate_engine = translation_config.translator
+
+    support_llm_translate = False
+    try:
+        if translate_engine and hasattr(translate_engine, "do_llm_translate"):
+            translate_engine.do_llm_translate(None)
+            support_llm_translate = True
+    except NotImplementedError:
+        support_llm_translate = False
+    il_translator = None
+    if support_llm_translate:
+        il_translator = ILTranslatorLLMOnly(translate_engine, translation_config)
+    else:
+        il_translator = ILTranslator(translate_engine, translation_config)
+
+    il_translator.translate(docs)
+    logger.debug(f"finish ILTranslator from {temp_pdf_path}")
+    if translation_config.debug:
+        xml_converter.write_json(
+            docs,
+            translation_config.get_working_file_path("il_translated.json"),
+        )
+
+    if translation_config.debug:
+        AddDebugInformation(translation_config).process(docs)
+        xml_converter.write_json(
+            docs,
+            translation_config.get_working_file_path("add_debug_information.json"),
+        )
+    mono_watermark_first_page_doc_bytes = None
+    dual_watermark_first_page_doc_bytes = None
+
+    if translation_config.watermark_output_mode == WatermarkOutputMode.Both:
+        mono_watermark_first_page_doc_bytes, dual_watermark_first_page_doc_bytes = (
+            generate_first_page_with_watermark(doc_input, translation_config, docs)
+        )
+
+    Typesetting(translation_config).typsetting_document(docs)
+    logger.debug(f"finish typsetting from {temp_pdf_path}")
+    if translation_config.debug:
+        xml_converter.write_json(
+            docs,
+            translation_config.get_working_file_path("typsetting.json"),
+        )
+
+    pdf_creater = PDFCreater(temp_pdf_path, docs, translation_config)
+    result = pdf_creater.write(translation_config)
+
+    if mono_watermark_first_page_doc_bytes:
+        mono_watermark_pdf = merge_watermark_doc(
+            result.mono_pdf_path,
+            mono_watermark_first_page_doc_bytes,
+            translation_config,
+        )
+        result.mono_pdf_path = mono_watermark_pdf
+    if dual_watermark_first_page_doc_bytes:
+        dual_watermark_pdf = merge_watermark_doc(
+            result.dual_pdf_path,
+            dual_watermark_first_page_doc_bytes,
+            translation_config,
+        )
+        result.dual_pdf_path = dual_watermark_pdf
+
+    return result
 
 
 def generate_first_page_with_watermark(

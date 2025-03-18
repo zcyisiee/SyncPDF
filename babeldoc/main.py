@@ -382,10 +382,11 @@ def create_progress_handler(translation_config: TranslationConfig):
 
         def progress_handler(event):
             if event["type"] == "progress_start":
-                stage_tasks[event["stage"]] = progress.add_task(
-                    f"{event['stage']}",
-                    total=event.get("stage_total", 100),
-                )
+                if event["stage"] not in stage_tasks:
+                    stage_tasks[event["stage"]] = progress.add_task(
+                        f"{event['stage']}",
+                        total=event.get("stage_total", 100),
+                    )
             elif event["type"] == "progress_update":
                 stage = event["stage"]
                 if stage in stage_tasks:
