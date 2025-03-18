@@ -528,6 +528,7 @@ class StylesAndFormulas:
             r"|NimbusRomNo9L.+"
             r"|GlosaMath.+"
             r"|URWPalladioL.+"
+            r"|CMSS.+"
             r")$"
         )
         if self.translation_config.formular_font_pattern:
