@@ -62,9 +62,9 @@ class ResultMerger:
                 tag="merged_dual",
             )
 
-        if all(
+        if any(
             r.dual_pdf_path != r.no_watermark_dual_pdf_path
-            and r.mono_pdf_path != r.no_watermark_mono_pdf_path
+            or r.mono_pdf_path != r.no_watermark_mono_pdf_path
             for r in results.values()
         ):
             # Merge no-watermark PDFs if they exist
