@@ -246,7 +246,7 @@ class OnnxModel(DocLayoutModel):
 
             # Calculate target size based on the maximum height in the batch
             max_height = max(img.shape[0] for img in batch_images)
-            target_imgsz = int(max_height / 32) * 32
+            target_imgsz = 1024
 
             # Preprocess batch
             processed_batch = []
