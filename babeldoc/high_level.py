@@ -286,6 +286,73 @@ async def async_translate(translation_config: TranslationConfig):
     await finish_event.wait()
 
 
+class MemoryMonitor:
+    """Monitor memory usage of current process and all child processes."""
+
+    def __init__(self, interval=0.1):
+        """Initialize memory monitor.
+
+        Args:
+            interval: Monitoring interval in seconds, defaults to 0.1s (100ms)
+        """
+        self.interval = interval
+        self.peak_memory_usage = 0
+        self.monitor_thread = None
+        self.stop_event = None
+
+        try:
+            import psutil
+
+            self.psutil = psutil
+        except ImportError:
+            logger.warning("psutil not installed, memory monitoring disabled")
+            self.psutil = None
+
+    def __enter__(self):
+        """Start memory monitoring."""
+        if not self.psutil:
+            return self
+
+        self.stop_event = threading.Event()
+        self.monitor_thread = threading.Thread(
+            target=self._monitor_memory_usage, daemon=True
+        )
+        self.monitor_thread.start()
+        logger.debug("Memory monitoring started")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Stop monitoring and log peak memory usage."""
+        if not self.psutil or not self.monitor_thread:
+            return
+
+        self.stop_event.set()
+        self.monitor_thread.join(timeout=2.0)
+        logger.info(f"Peak memory usage: {self.peak_memory_usage:.2f} MB")
+
+    def _monitor_memory_usage(self):
+        """Background thread that periodically checks memory usage."""
+        while not self.stop_event.is_set():
+            try:
+                current_process = self.psutil.Process()
+                # Get memory usage of current process and all children
+                total_memory = current_process.memory_info().rss
+                for child in current_process.children(recursive=True):
+                    try:
+                        total_memory += child.memory_info().rss
+                    except (self.psutil.NoSuchProcess, self.psutil.AccessDenied):
+                        pass
+
+                # Convert to MB for better readability
+                total_memory_mb = total_memory / (1024 * 1024)
+                if total_memory_mb > self.peak_memory_usage:
+                    self.peak_memory_usage = total_memory_mb
+            except Exception as e:
+                logger.warning(f"Error monitoring memory: {e}")
+
+            time.sleep(self.interval)
+
+
 def do_translate(
     pm: ProgressMonitor, translation_config: TranslationConfig
 ) -> TranslateResult:
@@ -295,107 +362,133 @@ def do_translate(
         logger.info(f"start to translate: {original_pdf_path}")
         start_time = time.time()
 
-        # Check if split translation is enabled
-        if not translation_config.split_strategy:
-            return _do_translate_single(pm, translation_config)
+        with MemoryMonitor() as memory_monitor:
+            # Check if split translation is enabled
+            if not translation_config.split_strategy:
+                result = _do_translate_single(pm, translation_config)
+            else:
+                # Initialize split manager and determine split points
+                split_manager = SplitManager(translation_config)
+                split_points = split_manager.determine_split_points(translation_config)
 
-        # Initialize split manager and determine split points
-        split_manager = SplitManager(translation_config)
-        split_points = split_manager.determine_split_points(translation_config)
+                if not split_points:
+                    logger.warning(
+                        "No split points determined, falling back to single translation"
+                    )
+                    result = _do_translate_single(pm, translation_config)
+                else:
+                    logger.info(f"Split points determined: {len(split_points)} parts")
 
-        if not split_points:
-            logger.warning(
-                "No split points determined, falling back to single translation"
-            )
-            return _do_translate_single(pm, translation_config)
+                    if len(split_points) == 1:
+                        logger.info("Only one part, use single translation")
+                        result = _do_translate_single(pm, translation_config)
+                    else:
+                        pm.total_parts = len(split_points)
 
-        logger.info(f"Split points determined: {len(split_points)} parts")
+                        # Process parts serially
+                        results: dict[int, TranslateResult] = {}
+                        original_watermark_mode = (
+                            translation_config.watermark_output_mode
+                        )
+                        original_doc = Document(original_pdf_path)
+                        for i, split_point in enumerate(split_points):
+                            try:
+                                # Create a copy of config for this part
+                                part_config = copy.copy(translation_config)
+                                part_config.skip_clean = True
+                                should_translate_pages = []
+                                for page in range(
+                                    split_point.start_page, split_point.end_page + 1
+                                ):
+                                    if translation_config.should_translate_page(
+                                        page + 1
+                                    ):
+                                        should_translate_pages.append(
+                                            page - split_point.start_page + 1
+                                        )
+                                part_config.pages = None
+                                part_config.page_ranges = [
+                                    (x, x) for x in should_translate_pages
+                                ]
 
-        if len(split_points) == 1:
-            logger.info("Only one part, use single translation")
-            return _do_translate_single(pm, translation_config)
-        pm.total_parts = len(split_points)
+                                part_config.working_dir = (
+                                    translation_config.get_part_working_dir(i)
+                                )
+                                part_config.output_dir = (
+                                    translation_config.get_part_output_dir(i)
+                                )
 
-        # Process parts serially
-        results: dict[int, TranslateResult] = {}
-        original_watermark_mode = translation_config.watermark_output_mode
-        original_doc = Document(original_pdf_path)
-        for i, split_point in enumerate(split_points):
-            try:
-                # Create a copy of config for this part
-                part_config = copy.copy(translation_config)
-                part_config.skip_clean = True
-                should_translate_pages = []
-                for page in range(split_point.start_page, split_point.end_page + 1):
-                    if translation_config.should_translate_page(page + 1):
-                        should_translate_pages.append(page - split_point.start_page + 1)
-                part_config.pages = None
-                part_config.page_ranges = [(x, x) for x in should_translate_pages]
+                                assert id(
+                                    part_config.shared_context_cross_split_part
+                                ) == id(
+                                    translation_config.shared_context_cross_split_part
+                                ), "shared_context_cross_split_part must be the same"
 
-                part_config.working_dir = translation_config.get_part_working_dir(i)
-                part_config.output_dir = translation_config.get_part_output_dir(i)
+                                part_temp_input_path = (
+                                    part_config.get_working_file_path(
+                                        f"input.part{i}.pdf"
+                                    )
+                                )
+                                part_config.input_file = part_temp_input_path
 
-                assert id(part_config.shared_context_cross_split_part) == id(
-                    translation_config.shared_context_cross_split_part
-                ), "shared_context_cross_split_part must be the same"
+                                temp_doc = Document()
+                                temp_doc.insert_pdf(
+                                    original_doc,
+                                    from_page=split_point.start_page,
+                                    to_page=split_point.end_page,
+                                )
+                                temp_doc.save(part_temp_input_path)
 
-                part_temp_input_path = part_config.get_working_file_path(
-                    f"input.part{i}.pdf"
-                )
-                part_config.input_file = part_temp_input_path
+                                assert (
+                                    temp_doc.page_count
+                                    == split_point.end_page - split_point.start_page + 1
+                                )
 
-                temp_doc = Document()
-                temp_doc.insert_pdf(
-                    original_doc,
-                    from_page=split_point.start_page,
-                    to_page=split_point.end_page,
-                )
-                temp_doc.save(part_temp_input_path)
+                                # Only first part should have watermark
+                                if i > 0:
+                                    part_config.watermark_output_mode = (
+                                        WatermarkOutputMode.NoWatermark
+                                    )
 
-                assert (
-                    temp_doc.page_count
-                    == split_point.end_page - split_point.start_page + 1
-                )
+                                # Create progress monitor for this part
+                                part_monitor = pm.create_part_monitor(
+                                    i, len(split_points)
+                                )
 
-                # Only first part should have watermark
-                if i > 0:
-                    part_config.watermark_output_mode = WatermarkOutputMode.NoWatermark
+                                # Process this part
+                                result = _do_translate_single(
+                                    part_monitor,
+                                    part_config,
+                                )
+                                results[i] = result
 
-                # Create progress monitor for this part
-                part_monitor = pm.create_part_monitor(i, len(split_points))
+                            except Exception as e:
+                                logger.error(f"Error in part {i}: {e}")
+                                pm.translate_error(e)
+                                raise
+                            finally:
+                                # Clean up part working directory
+                                translation_config.cleanup_part_working_dir(i)
 
-                # Process this part
-                result = _do_translate_single(
-                    part_monitor,
-                    part_config,
-                )
-                results[i] = result
+                        # Restore original watermark mode
+                        translation_config.watermark_output_mode = (
+                            original_watermark_mode
+                        )
 
-            except Exception as e:
-                logger.error(f"Error in part {i}: {e}")
-                pm.translate_error(e)
-                raise
-            finally:
-                # Clean up part working directory
-                translation_config.cleanup_part_working_dir(i)
-
-        # Restore original watermark mode
-        translation_config.watermark_output_mode = original_watermark_mode
-
-        # Merge results
-        merger = ResultMerger(translation_config)
-        logger.info("start merge results")
-        merged_result = merger.merge_results(results)
-        logger.info("finish merge results")
+                        # Merge results
+                        merger = ResultMerger(translation_config)
+                        logger.info("start merge results")
+                        result = merger.merge_results(results)
+                        logger.info("finish merge results")
 
         finish_time = time.time()
-        merged_result.total_seconds = finish_time - start_time
+        result.total_seconds = finish_time - start_time
 
         logger.info(
             f"finish translate: {original_pdf_path}, cost: {finish_time - start_time} s",
         )
-        pm.translate_done(merged_result)
-        return merged_result
+        pm.translate_done(result)
+        return result
 
     except Exception as e:
         logger.exception(f"translate error: {e}")
