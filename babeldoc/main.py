@@ -176,6 +176,11 @@ def create_parser():
         help="Control watermark output mode: 'watermarked' (default) adds watermark to translated PDF, 'no_watermark' doesn't add watermark, 'both' outputs both versions.",
     )
     translation_group.add_argument(
+        "--max-pages-per-part",
+        type=int,
+        help="Maximum number of pages per part for split translation. If not set, no splitting will be performed.",
+    )
+    translation_group.add_argument(
         "--no-watermark",
         action="store_true",
         help="[DEPRECATED] Use --watermark-output-mode=no_watermark instead. Do not add watermark to the translated PDF.",
@@ -309,6 +314,12 @@ async def main():
     elif args.watermark_output_mode == "no_watermark":
         watermark_output_mode = WatermarkOutputMode.NoWatermark
 
+    split_strategy = None
+    if args.max_pages_per_part:
+        split_strategy = TranslationConfig.create_max_pages_per_part_split_strategy(
+            args.max_pages_per_part
+        )
+
     for file in pending_files:
         # 清理文件路径，去除两端的引号
         file = file.strip("\"'")
@@ -338,6 +349,7 @@ async def main():
             report_interval=args.report_interval,
             min_text_length=args.min_text_length,
             watermark_output_mode=watermark_output_mode,
+            split_strategy=split_strategy,
         )
 
         # Create progress handler
@@ -384,7 +396,7 @@ def create_progress_handler(translation_config: TranslationConfig):
             if event["type"] == "progress_start":
                 if event["stage"] not in stage_tasks:
                     stage_tasks[event["stage"]] = progress.add_task(
-                        f"{event['stage']}",
+                        f"{event['stage']} ({event['part_index']}/{event['total_parts']})",
                         total=event.get("stage_total", 100),
                     )
             elif event["type"] == "progress_update":
@@ -394,7 +406,7 @@ def create_progress_handler(translation_config: TranslationConfig):
                         stage_tasks[stage],
                         completed=event["stage_current"],
                         total=event["stage_total"],
-                        description=f"{event['stage']}",
+                        description=f"{event['stage']} ({event['part_index']}/{event['total_parts']})",
                         refresh=True,
                     )
                 progress.update(
@@ -409,7 +421,7 @@ def create_progress_handler(translation_config: TranslationConfig):
                         stage_tasks[stage],
                         completed=event["stage_total"],
                         total=event["stage_total"],
-                        description=f"{event['stage']}",
+                        description=f"{event['stage']} ({event['part_index']}/{event['total_parts']})",
                         refresh=True,
                     )
                     progress.update(

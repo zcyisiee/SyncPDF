@@ -120,6 +120,8 @@ class ProgressMonitor:
                 stage_current=0,
                 stage_total=total,
                 overall_progress=self.calculate_current_progress(),
+                part_index=self.part_index + 1,
+                total_parts=self.total_parts,
             )
         self.last_report_time = 0.0
         return stage
@@ -162,6 +164,8 @@ class ProgressMonitor:
                 stage_current=stage.total,
                 stage_total=stage.total,
                 overall_progress=self.calculate_current_progress(),
+                part_index=self.part_index + 1,
+                total_parts=self.total_parts,
             )
 
     def calculate_current_progress(self, stage=None):
@@ -221,6 +225,8 @@ class ProgressMonitor:
                 stage_current=stage.current,
                 stage_total=stage.total,
                 overall_progress=self.calculate_current_progress(stage),
+                part_index=self.part_index + 1,
+                total_parts=self.total_parts,
             )
             self.last_report_time = time.time()
 

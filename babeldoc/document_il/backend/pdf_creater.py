@@ -552,7 +552,7 @@ class PDFCreater:
         while process.is_alive():
             if time.time() - start_time > timeout:
                 logger.warning(
-                    f"PDF save with clean=True timeout after {timeout} seconds, terminating subprocess"
+                    f"PDF save with clean={clean} timeout after {timeout} seconds, terminating subprocess"
                 )
                 process.terminate()
                 try:
@@ -569,7 +569,7 @@ class PDFCreater:
                     logger.error(f"Error terminating PDF save process: {e}")
 
                 # Fallback to save without clean parameter
-                logger.info("Falling back to save without clean=True")
+                logger.info("Falling back to save with clean=False")
                 try:
                     pdf.save(
                         output_path,
@@ -598,7 +598,7 @@ class PDFCreater:
             and Path(temp_output).exists()
             and Path(temp_output).stat().st_size > 0
         ):
-            logger.info("PDF save with clean=True completed successfully")
+            logger.info(f"PDF save with clean={clean} completed successfully")
             # Copy the successfully created file to the target path
             try:
                 import shutil
@@ -614,7 +614,7 @@ class PDFCreater:
                 Path(temp_output).unlink()
         else:
             logger.warning(
-                f"PDF save with clean=True failed with exit code {exit_code} or produced empty file"
+                f"PDF save with clean={clean} failed with exit code {exit_code} or produced empty file"
             )
             # Fallback to save without clean parameter
             try:

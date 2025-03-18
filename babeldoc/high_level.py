@@ -296,7 +296,7 @@ def do_translate(
         start_time = time.time()
 
         # Check if split translation is enabled
-        if not translation_config.enable_split:
+        if not translation_config.split_strategy:
             return _do_translate_single(pm, translation_config)
 
         # Initialize split manager and determine split points
@@ -320,6 +320,7 @@ def do_translate(
             try:
                 # Create a copy of config for this part
                 part_config = copy.copy(translation_config)
+                part_config.skip_clean = True
                 should_translate_pages = []
                 for page in range(split_point.start_page, split_point.end_page + 1):
                     if translation_config.should_translate_page(page + 1):
@@ -329,6 +330,10 @@ def do_translate(
 
                 part_config.working_dir = translation_config.get_part_working_dir(i)
                 part_config.output_dir = translation_config.get_part_output_dir(i)
+
+                assert id(part_config.shared_context_cross_split_part) == id(
+                    translation_config.shared_context_cross_split_part
+                ), "shared_context_cross_split_part must be the same"
 
                 part_temp_input_path = part_config.get_working_file_path(
                     f"input.part{i}.pdf"

@@ -172,10 +172,14 @@ class FontMapper:
 
         font_id = {}
         xreflen = doc_zh.xref_length()
+        total = xreflen - 1 + len(font_list) + len(il.page) + len(font_list)
         with self.translation_config.progress_monitor.stage_start(
             self.stage_name,
-            xreflen - 1 + len(font_list) + len(il.page) + len(font_list),
+            total,
         ) as pbar:
+            if not il.page:
+                pbar.advance(total)
+                return
             for font in font_list:
                 if font[0] in font_id:
                     continue

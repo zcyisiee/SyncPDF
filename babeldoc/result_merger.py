@@ -21,6 +21,21 @@ class ResultMerger:
         if not results:
             raise ValueError("No results to merge")
 
+        basename = Path(self.config.input_file).stem
+        debug_suffix = ".debug" if self.config.debug else ""
+
+        mono_file_name = f"{basename}{debug_suffix}.{self.config.lang_out}.mono.pdf"
+        dual_file_name = f"{basename}{debug_suffix}.{self.config.lang_out}.dual.pdf"
+
+        debug_suffix += ".no_watermark"
+
+        mono_file_name_no_watermark = (
+            f"{basename}{debug_suffix}.{self.config.lang_out}.mono.pdf"
+        )
+        dual_file_name_no_watermark = (
+            f"{basename}{debug_suffix}.{self.config.lang_out}.dual.pdf"
+        )
+
         # Sort results by part index
         sorted_results = dict(sorted(results.items()))
         first_result = next(iter(sorted_results.values()))
@@ -35,36 +50,45 @@ class ResultMerger:
         if any(r.mono_pdf_path for r in results.values()):
             merged_mono_path = self._merge_pdfs(
                 [r.mono_pdf_path for r in sorted_results.values() if r.mono_pdf_path],
-                "merged_mono.pdf",
+                mono_file_name,
+                tag="merged_mono",
             )
 
         # Merge dual-language PDFs if they exist
         if any(r.dual_pdf_path for r in results.values()):
             merged_dual_path = self._merge_pdfs(
                 [r.dual_pdf_path for r in sorted_results.values() if r.dual_pdf_path],
-                "merged_dual.pdf",
+                dual_file_name,
+                tag="merged_dual",
             )
 
-        # Merge no-watermark PDFs if they exist
-        if any(r.no_watermark_mono_pdf_path for r in results.values()):
-            merged_no_watermark_mono_path = self._merge_pdfs(
-                [
-                    r.no_watermark_mono_pdf_path
-                    for r in sorted_results.values()
-                    if r.no_watermark_mono_pdf_path
-                ],
-                "merged_no_watermark_mono.pdf",
-            )
+        if all(
+            r.dual_pdf_path != r.no_watermark_dual_pdf_path
+            and r.mono_pdf_path != r.no_watermark_mono_pdf_path
+            for r in results.values()
+        ):
+            # Merge no-watermark PDFs if they exist
+            if any(r.no_watermark_mono_pdf_path for r in results.values()):
+                merged_no_watermark_mono_path = self._merge_pdfs(
+                    [
+                        r.no_watermark_mono_pdf_path
+                        for r in sorted_results.values()
+                        if r.no_watermark_mono_pdf_path
+                    ],
+                    mono_file_name_no_watermark,
+                    tag="merged_no_watermark_mono",
+                )
 
-        if any(r.no_watermark_dual_pdf_path for r in results.values()):
-            merged_no_watermark_dual_path = self._merge_pdfs(
-                [
-                    r.no_watermark_dual_pdf_path
-                    for r in sorted_results.values()
-                    if r.no_watermark_dual_pdf_path
-                ],
-                "merged_no_watermark_dual.pdf",
-            )
+            if any(r.no_watermark_dual_pdf_path for r in results.values()):
+                merged_no_watermark_dual_path = self._merge_pdfs(
+                    [
+                        r.no_watermark_dual_pdf_path
+                        for r in sorted_results.values()
+                        if r.no_watermark_dual_pdf_path
+                    ],
+                    "merged_no_watermark_dual.pdf",
+                    tag="merged_no_watermark_dual",
+                )
 
         # Create merged result
         merged_result = TranslateResult(
@@ -82,7 +106,9 @@ class ResultMerger:
 
         return merged_result
 
-    def _merge_pdfs(self, pdf_paths: list[str | Path], output_name: str) -> Path:
+    def _merge_pdfs(
+        self, pdf_paths: list[str | Path], output_name: str, tag: str
+    ) -> Path:
         """Merge multiple PDFs into one"""
         if not pdf_paths:
             return None
@@ -94,6 +120,9 @@ class ResultMerger:
             doc = Document(str(pdf_path))
             merged_doc.insert_pdf(doc)
 
+        merged_doc = PDFCreater.subset_fonts_in_subprocess(
+            merged_doc, self.config, tag=tag
+        )
         PDFCreater.save_pdf_with_timeout(
             merged_doc, str(output_path), translation_config=self.config
         )

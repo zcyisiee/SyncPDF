@@ -28,6 +28,10 @@ class SharedContextCrossSplitPart:
 
 
 class TranslationConfig:
+    @staticmethod
+    def create_max_pages_per_part_split_strategy(max_pages_per_part: int):
+        return PageCountStrategy(max_pages_per_part)
+
     def __init__(
         self,
         translator: BaseTranslator,
@@ -60,9 +64,7 @@ class TranslationConfig:
         use_alternating_pages_dual: bool = False,
         watermark_output_mode: WatermarkOutputMode = WatermarkOutputMode.Watermarked,
         # Add split-related parameters
-        enable_split: bool = True,
         split_strategy: BaseSplitStrategy | None = None,
-        max_pages_per_part: int = 5,
     ):
         self.translator = translator
 
@@ -134,8 +136,7 @@ class TranslationConfig:
         self.shared_context_cross_split_part = SharedContextCrossSplitPart()
 
         # Initialize split-related attributes
-        self.enable_split = enable_split
-        self.split_strategy = split_strategy or PageCountStrategy(max_pages_per_part)
+        self.split_strategy = split_strategy
 
         # Create a unique working directory for each part
         self._part_working_dirs: dict[int, Path] = {}
