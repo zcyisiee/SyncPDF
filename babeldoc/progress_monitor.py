@@ -168,11 +168,12 @@ class ProgressMonitor:
         if self.disable:
             return 100
         part_weight = 1 / self.total_parts
-        if self.part_results:
-            part_offset = len(self.part_results) * part_weight
-        else:
+        if self.parent_monitor:
             part_offset = self.part_index * part_weight
-        return self._calculate_current_progress(stage) * part_weight + part_offset
+        else:
+            part_offset = len(self.part_results) * part_weight
+        progress = self._calculate_current_progress(stage) * part_weight + part_offset
+        return progress
 
     def _calculate_current_progress(self, stage=None):
         """Calculate overall progress including part progress"""

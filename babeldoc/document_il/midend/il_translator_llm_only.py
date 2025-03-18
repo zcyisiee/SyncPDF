@@ -83,7 +83,8 @@ class ILTranslatorLLMOnly:
                 title_paragraph
             )
             self.translation_config.shared_context_cross_split_part.recent_title_paragraph = title_paragraph
-            logger.info(f"Found first title paragraph: {title_paragraph.unicode}")
+            if title_paragraph:
+                logger.info(f"Found first title paragraph: {title_paragraph.unicode}")
 
         # count total paragraph
         total = sum(
