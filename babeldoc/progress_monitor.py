@@ -172,6 +172,7 @@ class ProgressMonitor:
             part_offset = self.part_index * part_weight
         else:
             part_offset = len(self.part_results) * part_weight
+        part_offset *= 100
         progress = self._calculate_current_progress(stage) * part_weight + part_offset
         return progress
 
