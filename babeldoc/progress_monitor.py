@@ -95,6 +95,10 @@ class ProgressMonitor:
 
     def _handle_part_finish(self, **kwargs):
         """Handle completion of a part translation"""
+        if kwargs["type"] == "error":
+            logger.info(f"progress_monitor handle_part_finish: {kwargs['error']}")
+            self.finish_callback(type="error", error=kwargs["error"])
+            return
         if "translate_result" in kwargs:
             part_index = kwargs.get("part_index")
             if part_index is not None:
@@ -240,6 +244,7 @@ class ProgressMonitor:
         if self.disable:
             return
         if self.finish_callback:
+            logger.info(f"progress_monitor handle translate_error: {error}")
             self.finish_callback(type="error", error=error)
 
     def raise_if_cancelled(self):

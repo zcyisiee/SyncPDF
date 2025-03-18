@@ -671,35 +671,39 @@ def generate_first_page_with_watermark(
 
     watermarked_config = copy.copy(translation_config)
     watermarked_config.watermark_output_mode = WatermarkOutputMode.Watermarked
-    watermarked_config.progress_monitor.disable = True
-    watermarked_temp_pdf_path = watermarked_config.get_working_file_path(
-        "watermarked_temp_input.pdf"
-    )
-    first_page_doc.save(watermarked_temp_pdf_path)
+    try:
+        watermarked_config.progress_monitor.disable = True
+        watermarked_temp_pdf_path = watermarked_config.get_working_file_path(
+            "watermarked_temp_input.pdf"
+        )
+        first_page_doc.save(watermarked_temp_pdf_path)
 
-    Typesetting(watermarked_config).typsetting_document(il_only_first_page_doc)
-    pdf_creater = PDFCreater(
-        watermarked_temp_pdf_path.as_posix(), il_only_first_page_doc, watermarked_config
-    )
-    result = pdf_creater.write(watermarked_config)
-    watermarked_config.progress_monitor.disable = False
-    mono_pdf_bytes = None
-    dual_pdf_bytes = None
-    if result.mono_pdf_path:
-        mono_pdf_bytes = io.BytesIO()
-        with Path(result.mono_pdf_path).open("rb") as f:
-            mono_pdf_bytes.write(f.read())
-        result.mono_pdf_path.unlink()
-        mono_pdf_bytes.seek(0)
+        Typesetting(watermarked_config).typsetting_document(il_only_first_page_doc)
+        pdf_creater = PDFCreater(
+            watermarked_temp_pdf_path.as_posix(),
+            il_only_first_page_doc,
+            watermarked_config,
+        )
+        result = pdf_creater.write(watermarked_config)
+        mono_pdf_bytes = None
+        dual_pdf_bytes = None
+        if result.mono_pdf_path:
+            mono_pdf_bytes = io.BytesIO()
+            with Path(result.mono_pdf_path).open("rb") as f:
+                mono_pdf_bytes.write(f.read())
+            result.mono_pdf_path.unlink()
+            mono_pdf_bytes.seek(0)
 
-    if result.dual_pdf_path:
-        dual_pdf_bytes = io.BytesIO()
-        with Path(result.dual_pdf_path).open("rb") as f:
-            dual_pdf_bytes.write(f.read())
-        result.dual_pdf_path.unlink()
-        dual_pdf_bytes.seek(0)
+        if result.dual_pdf_path:
+            dual_pdf_bytes = io.BytesIO()
+            with Path(result.dual_pdf_path).open("rb") as f:
+                dual_pdf_bytes.write(f.read())
+            result.dual_pdf_path.unlink()
+            dual_pdf_bytes.seek(0)
 
-    return mono_pdf_bytes, dual_pdf_bytes
+        return mono_pdf_bytes, dual_pdf_bytes
+    finally:
+        watermarked_config.progress_monitor.disable = False
 
 
 def merge_watermark_doc(
