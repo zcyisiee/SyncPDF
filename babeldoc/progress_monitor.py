@@ -58,6 +58,9 @@ class ProgressMonitor:
                 ],
             )
 
+        self.total_part_count = 1
+        self.finish_part_count = 0
+
     def stage_start(self, stage_name: str, total: int):
         if self.disable:
             return DummyTranslationStage(stage_name, total, self, 0)
