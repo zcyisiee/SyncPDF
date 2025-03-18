@@ -9,6 +9,8 @@ from babeldoc.const import CACHE_FOLDER
 from babeldoc.document_il.translator.translator import BaseTranslator
 from babeldoc.docvision.doclayout import DocLayoutModel
 from babeldoc.progress_monitor import ProgressMonitor
+from babeldoc.split_manager import BaseSplitStrategy
+from babeldoc.split_manager import PageCountStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +21,17 @@ class WatermarkOutputMode(enum.Enum):
     Both = "both"
 
 
+class SharedContextCrossSplitPart:
+    def __init__(self):
+        self.first_paragraph = None
+        self.recent_title_paragraph = None
+
+
 class TranslationConfig:
+    @staticmethod
+    def create_max_pages_per_part_split_strategy(max_pages_per_part: int):
+        return PageCountStrategy(max_pages_per_part)
+
     def __init__(
         self,
         translator: BaseTranslator,
@@ -51,6 +63,8 @@ class TranslationConfig:
         use_side_by_side_dual: bool = True,  # Deprecated: 是否使用拼版式双语 PDF（并排显示原文和译文） 向下兼容选项，已停用。
         use_alternating_pages_dual: bool = False,
         watermark_output_mode: WatermarkOutputMode = WatermarkOutputMode.Watermarked,
+        # Add split-related parameters
+        split_strategy: BaseSplitStrategy | None = None,
     ):
         self.translator = translator
 
@@ -61,7 +75,7 @@ class TranslationConfig:
         self.font = None
 
         self.pages = pages
-        self.page_ranges = self._parse_pages(pages) if pages else None
+        self.page_ranges = self.parse_pages(pages) if pages else None
         self.debug = debug
         self.watermark_output_mode = watermark_output_mode
 
@@ -119,7 +133,16 @@ class TranslationConfig:
             doc_layout_model = DocLayoutModel.load_available()
         self.doc_layout_model = doc_layout_model
 
-    def _parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
+        self.shared_context_cross_split_part = SharedContextCrossSplitPart()
+
+        # Initialize split-related attributes
+        self.split_strategy = split_strategy
+
+        # Create a unique working directory for each part
+        self._part_working_dirs: dict[int, Path] = {}
+        self._part_output_dirs: dict[int, Path] = {}
+
+    def parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
         """解析页码字符串，返回页码范围列表
 
         Args:
@@ -151,6 +174,8 @@ class TranslationConfig:
         Returns:
             是否需要翻译该页
         """
+        if isinstance(self.page_ranges, list) and len(self.page_ranges) == 0:
+            return False
         if not self.page_ranges:
             return True
 
@@ -165,6 +190,49 @@ class TranslationConfig:
     def get_working_file_path(self, filename: str) -> Path:
         return Path(self.working_dir) / filename
 
+    def get_part_working_dir(self, part_index: int) -> Path:
+        """Get working directory for a specific part"""
+        if part_index not in self._part_working_dirs:
+            if self.working_dir:
+                part_dir = Path(self.working_dir) / f"part_{part_index}"
+            else:
+                part_dir = Path(tempfile.mkdtemp()) / f"part_{part_index}"
+            part_dir.mkdir(parents=True, exist_ok=True)
+            self._part_working_dirs[part_index] = part_dir
+        return self._part_working_dirs[part_index]
+
+    def get_part_output_dir(self, part_index: int) -> Path:
+        """Get output directory for a specific part"""
+        if part_index not in self._part_output_dirs:
+            part_dir = Path(self.working_dir) / f"part_{part_index}_output"
+            part_dir.mkdir(parents=True, exist_ok=True)
+            self._part_output_dirs[part_index] = part_dir
+        return self._part_output_dirs[part_index]
+
+    def cleanup_part_output_dir(self, part_index: int):
+        """Clean up output directory for a specific part"""
+        if part_index in self._part_output_dirs:
+            part_dir = self._part_output_dirs[part_index]
+            if part_dir.exists():
+                shutil.rmtree(part_dir)
+            del self._part_output_dirs[part_index]
+
+    def cleanup_part_working_dir(self, part_index: int):
+        """Clean up working directory for a specific part"""
+        if part_index in self._part_working_dirs:
+            part_dir = self._part_working_dirs[part_index]
+            if part_dir.exists():
+                shutil.rmtree(part_dir)
+            del self._part_working_dirs[part_index]
+
+    def cleanup_temp_files(self):
+        """Clean up all temporary files including part working directories"""
+        for part_index in list(self._part_working_dirs.keys()):
+            self.cleanup_part_working_dir(part_index)
+        if self._is_temp_dir:
+            logger.info(f"cleanup temp files: {self.working_dir}")
+            shutil.rmtree(self.working_dir)
+
     def raise_if_cancelled(self):
         if self.progress_monitor is not None:
             self.progress_monitor.raise_if_cancelled()
@@ -172,11 +240,6 @@ class TranslationConfig:
     def cancel_translation(self):
         if self.progress_monitor is not None:
             self.progress_monitor.cancel()
-
-    def cleanup_temp_files(self):
-        if self._is_temp_dir:
-            logger.info(f"cleanup temp files: {self.working_dir}")
-            shutil.rmtree(self.working_dir)
 
 
 class TranslateResult:

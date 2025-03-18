@@ -134,6 +134,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 - `--enhance-compatibility`: Enable all compatibility enhancement options (equivalent to --skip-clean --dual-translate-first --disable-rich-text-translate)
 - `--use-alternating-pages-dual`: Use alternating pages mode for dual PDF. When enabled, original and translated pages are arranged in alternate order. When disabled (default), original and translated pages are shown side by side on the same page.
 - `--watermark-output-mode`: Control watermark output mode: 'watermarked' (default) adds watermark to translated PDF, 'no_watermark' doesn't add watermark, 'both' outputs both versions.
+- `--max-pages-per-part`: Maximum number of pages per part for split translation. If not set, no splitting will be performed.
 - `--no-watermark`: [DEPRECATED] Use --watermark-output-mode=no_watermark instead.
 
 > [!TIP]
@@ -141,6 +142,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 > - `--disable-rich-text-translate` can also help with compatibility by simplifying translation input
 > - However, using `--skip-clean` will result in larger file sizes
 > - If you encounter any compatibility issues, try using `--enhance-compatibility` first
+> - Use `--max-pages-per-part` for large documents to split them into smaller parts for translation and automatically merge them back.
 
 ### Translation Service Options
 
@@ -198,38 +200,12 @@ Example Configuration:
 
 ```toml
 [babeldoc]
-debug = true
-lang-in = "en-US"
-lang-out = "zh-CN"
-qps = 20
-# this is a comment
-# pages = 4
-openai = true
-openai-model = "SOME_ALSOME_MODEL"
-openai-base-url = "https://example.example/v1"
-openai-api-key = "[KEY]"
-# Offline assets management
-# generate-offline-assets = "/path/to/output/dir"
-# restore-offline-assets = "/path/to/offline_assets_package.zip"
-# All other options can also be set in the configuration file.
-```
-
-For a more comprehensive configuration example with offline assets management:
-
-```toml
-[babeldoc]
 # Basic settings
 debug = true
 lang-in = "en-US"
 lang-out = "zh-CN"
 qps = 10
 output = "/path/to/output/dir"
-
-# Translation service
-openai = true
-openai-model = "gpt-4o-mini"
-openai-base-url = "https://api.openai.com/v1"
-openai-api-key = "your-api-key-here"
 
 # PDF processing options
 split-short-lines = false
@@ -239,7 +215,14 @@ dual-translate-first = false
 disable-rich-text-translate = false
 use-alternating-pages-dual = false
 watermark-output-mode = "watermarked"  # Choices: "watermarked", "no_watermark", "both"
+max-pages-per-part = 50  # Automatically split the document for translation and merge it back.
 # no-watermark = false  # DEPRECATED: Use watermark-output-mode instead
+
+# Translation service
+openai = true
+openai-model = "gpt-4o-mini"
+openai-base-url = "https://api.openai.com/v1"
+openai-api-key = "your-api-key-here"
 
 # Output control
 no-dual = false

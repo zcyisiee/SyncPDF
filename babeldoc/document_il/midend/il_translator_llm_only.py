@@ -43,6 +43,9 @@ class ILTranslatorLLMOnly:
         self.translate_engine = translate_engine
         self.translation_config = translation_config
         self.font_mapper = FontMapper(translation_config)
+        self.shared_context_cross_split_part = (
+            translation_config.shared_context_cross_split_part
+        )
 
         self.il_translator = ILTranslator(
             translate_engine=translate_engine,
@@ -73,8 +76,15 @@ class ILTranslatorLLMOnly:
     def translate(self, docs: Document) -> None:
         tracker = DocumentTranslateTracker()
 
-        # Try to find the first title paragraph
-        title_paragraph = self.find_title_paragraph(docs)
+        if not self.translation_config.shared_context_cross_split_part.first_paragraph:
+            # Try to find the first title paragraph
+            title_paragraph = self.find_title_paragraph(docs)
+            self.translation_config.shared_context_cross_split_part.first_paragraph = (
+                title_paragraph
+            )
+            self.translation_config.shared_context_cross_split_part.recent_title_paragraph = title_paragraph
+            if title_paragraph:
+                logger.info(f"Found first title paragraph: {title_paragraph.unicode}")
 
         # count total paragraph
         total = sum(
@@ -105,7 +115,6 @@ class ILTranslatorLLMOnly:
                             executor,
                             pbar,
                             tracker.new_page(),
-                            title_paragraph,
                             executor2,
                         )
 
@@ -122,7 +131,6 @@ class ILTranslatorLLMOnly:
         executor: concurrent.futures.ThreadPoolExecutor,
         pbar: tqdm | None = None,
         tracker: PageTranslateTracker = None,
-        title_paragraph: PdfParagraph | None = None,
         executor2: concurrent.futures.ThreadPoolExecutor | None = None,
     ):
         self.translation_config.raise_if_cancelled()
@@ -136,7 +144,6 @@ class ILTranslatorLLMOnly:
                 page_xobj_font_map[xobj.xobj_id][font.font_id] = font
 
         paragraphs = []
-        local_title_paragraph = None
 
         total_unicode_counts = 0
         for paragraph in page.pdf_paragraph:
@@ -146,7 +153,7 @@ class ILTranslatorLLMOnly:
             total_unicode_counts += len(paragraph.unicode)
             paragraphs.append(paragraph)
             if paragraph.layout_label == "title":
-                local_title_paragraph = paragraph
+                self.shared_context_cross_split_part.recent_title_paragraph = paragraph
 
             if total_unicode_counts > 1200 or len(paragraphs) > 4:
                 executor.submit(
@@ -155,8 +162,8 @@ class ILTranslatorLLMOnly:
                     pbar,
                     page_font_map,
                     page_xobj_font_map,
-                    title_paragraph,
-                    local_title_paragraph,
+                    self.translation_config.shared_context_cross_split_part.first_paragraph,
+                    self.translation_config.shared_context_cross_split_part.recent_title_paragraph,
                     executor2,
                 )
                 paragraphs = []
@@ -169,8 +176,8 @@ class ILTranslatorLLMOnly:
                 pbar,
                 page_font_map,
                 page_xobj_font_map,
-                title_paragraph,
-                local_title_paragraph,
+                self.translation_config.shared_context_cross_split_part.first_paragraph,
+                self.translation_config.shared_context_cross_split_part.recent_title_paragraph,
                 executor2,
             )
 
