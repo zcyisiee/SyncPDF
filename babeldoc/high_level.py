@@ -310,6 +310,10 @@ def do_translate(
             return _do_translate_single(pm, translation_config)
 
         logger.info(f"Split points determined: {len(split_points)} parts")
+
+        if len(split_points) == 1:
+            logger.info("Only one part, use single translation")
+            return _do_translate_single(pm, translation_config)
         pm.total_parts = len(split_points)
 
         # Process parts serially
@@ -380,7 +384,9 @@ def do_translate(
 
         # Merge results
         merger = ResultMerger(translation_config)
+        logger.info("start merge results")
         merged_result = merger.merge_results(results)
+        logger.info("finish merge results")
 
         finish_time = time.time()
         merged_result.total_seconds = finish_time - start_time
