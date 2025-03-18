@@ -102,24 +102,6 @@ os_name = platform.system()
 
 providers = []
 
-if os_name == "Darwin" and False:  # Temporarily disable CoreML due to some issues
-    providers.append(
-        (
-            "CoreMLExecutionProvider",
-            {
-                "ModelFormat": "MLProgram",
-                "MLComputeUnits": "ALL",
-                "RequireStaticInputShapes": "0",
-                "EnableOnSubgraphs": "0",
-            },
-        ),
-    )
-    # workaround for CoreML batch inference issues
-    max_batch_size = 1
-else:
-    max_batch_size = 1
-providers.append("CPUExecutionProvider")  # CPU 执行提供者作为通用后备选项
-
 
 class OnnxModel(DocLayoutModel):
     def __init__(self, model_path: str):
@@ -132,7 +114,7 @@ class OnnxModel(DocLayoutModel):
 
         self.model = onnxruntime.InferenceSession(
             model.SerializeToString(),
-            providers=providers,
+            providers=onnxruntime.get_available_providers(),
         )
 
     @staticmethod
@@ -237,7 +219,7 @@ class OnnxModel(DocLayoutModel):
 
         total_images = len(image)
         results = []
-        batch_size = min(batch_size, max_batch_size)
+        batch_size = 1
 
         # Process images in batches
         for i in range(0, total_images, batch_size):
