@@ -43,6 +43,7 @@ dependencies = [
     "python-levenshtein>=0.27.1",
     "opencv-python-headless>=4.10.0.84",
 ]
+
 [project.optional-dependencies]
 directml = ["onnxruntime-directml>=1.16.1"]
 cuda = ["onnxruntime-gpu>=1.16.1"]
