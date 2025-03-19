@@ -190,10 +190,10 @@ def start_parse_il(
         #         box[y0:y1, x0:x1] = 0
         # layout[page.pageno] = box
         # 新建一个 xref 存放新指令流
-        page.page_xref = doc_zh.get_new_xref()  # hack 插入页面的新 xref
-        doc_zh.update_object(page.page_xref, "<<>>")
-        doc_zh.update_stream(page.page_xref, b"")
-        doc_zh[page.pageno].set_contents(page.page_xref)
+        # page.page_xref = doc_zh.get_new_xref()  # hack 插入页面的新 xref
+        # doc_zh.update_object(page.page_xref, "<<>>")
+        # doc_zh.update_stream(page.page_xref, b"")
+        # doc_zh[page.pageno].set_contents(page.page_xref)
         ops_base = interpreter.process_page(page)
         il_creater.on_page_base_operation(ops_base)
         il_creater.on_page_end()
@@ -353,6 +353,21 @@ class MemoryMonitor:
             time.sleep(self.interval)
 
 
+def fix_null_xref(doc: Document) -> None:
+    """Fix null xref in PDF file by replacing them with empty arrays.
+
+    Args:
+        doc: PyMuPDF Document object to fix
+    """
+    for i in range(1, doc.xref_length()):
+        try:
+            obj = doc.xref_object(i)
+            if obj == "null":
+                doc.update_object(i, "[]")
+        except Exception:
+            doc.update_object(i, "[]")
+
+
 def do_translate(
     pm: ProgressMonitor, translation_config: TranslationConfig
 ) -> TranslateResult:
@@ -507,12 +522,14 @@ def _do_translate_single(
     """Original translation logic for a single document or part"""
     translation_config.progress_monitor = pm
     original_pdf_path = translation_config.input_file
-    doc_input = Document(original_pdf_path)
     if translation_config.debug:
+        doc_input = Document(original_pdf_path)
         logger.debug("debug mode, save decompressed input pdf")
         output_path = translation_config.get_working_file_path(
             "input.decompressed.pdf",
         )
+        # Fix null xref in PDF file
+        fix_null_xref(doc_input)
         doc_input.save(output_path, expand=True, pretty=True)
 
     # Continue with original processing
@@ -521,21 +538,7 @@ def _do_translate_single(
     resfont = "china-ss"
 
     # Fix null xref in PDF file
-    for i in range(1, doc_pdf2zh.xref_length()):
-        try:
-            obj = doc_pdf2zh.xref_object(i)
-            if obj == "null":
-                ret = doc_pdf2zh.update_object(i, "[]")
-                if ret != 0:
-                    logger.warning(f"try fix1 xref {i} fail, continue")
-                else:
-                    logger.info(f"try fix1 xref {i} success")
-        except Exception:
-            ret = doc_pdf2zh.update_object(i, "[]")
-            if ret != 0:
-                logger.warning(f"try fix2 xref {i} fail, continue")
-            else:
-                logger.info(f"try fix2 xref {i} success")
+    fix_null_xref(doc_pdf2zh)
 
     for page in doc_pdf2zh:
         page.insert_font(resfont, None)
@@ -543,7 +546,7 @@ def _do_translate_single(
     resfont = None
     doc_pdf2zh.save(temp_pdf_path)
     il_creater = ILCreater(translation_config)
-    il_creater.mupdf = doc_input
+    il_creater.mupdf = doc_pdf2zh
     xml_converter = XMLConverter()
     logger.debug(f"start parse il from {temp_pdf_path}")
     with Path(temp_pdf_path).open("rb") as f:
@@ -578,7 +581,7 @@ def _do_translate_single(
 
     # Generate layouts for all pages
     logger.debug("start generating layouts")
-    docs = LayoutParser(translation_config).process(docs, doc_input)
+    docs = LayoutParser(translation_config).process(docs, doc_pdf2zh)
     logger.debug("finish generating layouts")
     if translation_config.debug:
         xml_converter.write_json(
@@ -634,7 +637,7 @@ def _do_translate_single(
 
     if translation_config.watermark_output_mode == WatermarkOutputMode.Both:
         mono_watermark_first_page_doc_bytes, dual_watermark_first_page_doc_bytes = (
-            generate_first_page_with_watermark(doc_input, translation_config, docs)
+            generate_first_page_with_watermark(doc_pdf2zh, translation_config, docs)
         )
 
     Typesetting(translation_config).typsetting_document(docs)
