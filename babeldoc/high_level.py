@@ -523,10 +523,19 @@ def _do_translate_single(
     # Fix null xref in PDF file
     for i in range(1, doc_pdf2zh.xref_length()):
         try:
-            if doc_pdf2zh.xref_object(i) == "null":
-                doc_pdf2zh.update_object(i, "[]")
+            obj = doc_pdf2zh.xref_object(i)
+            if obj == "null":
+                ret = doc_pdf2zh.update_object(i, "[]")
+                if ret != 0:
+                    logger.warning(f"try fix1 xref {i} fail, continue")
+                else:
+                    logger.info(f"try fix1 xref {i} success")
         except Exception:
-            logger.warning(f"try fix xref {i} fail, continue")
+            ret = doc_pdf2zh.update_object(i, "[]")
+            if ret != 0:
+                logger.warning(f"try fix2 xref {i} fail, continue")
+            else:
+                logger.info(f"try fix2 xref {i} success")
 
     for page in doc_pdf2zh:
         page.insert_font(resfont, None)
