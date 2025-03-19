@@ -730,7 +730,12 @@ class PDFCreater:
                     draw_op.append(b" Tj ET Q \n")
                 for xobj in page.pdf_xobject:
                     draw_op = xobj_draw_ops[xobj.xobj_id]
-                    pdf.update_stream(xobj.xref_id, draw_op.tobytes())
+                    try:
+                        pdf.update_stream(xobj.xref_id, draw_op.tobytes())
+                    except Exception:
+                        logger.warning(
+                            f"update xref {xobj.xref_id} stream fail, continue"
+                        )
                     # pdf.update_stream(xobj.xref_id, b'')
                 for rect in page.pdf_rectangle:
                     self._debug_render_rectangle(page_op, rect)
