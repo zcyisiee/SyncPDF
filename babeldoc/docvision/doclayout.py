@@ -114,7 +114,7 @@ class OnnxModel(DocLayoutModel):
 
         available_providers = onnxruntime.get_available_providers()
         for provider in available_providers:
-            if re.match(r"dml|cuda|coreml|cpu", provider, re.IGNORECASE):
+            if re.match(r"dml|cuda|cpu", provider, re.IGNORECASE):
                 logger.info(f"Available Provider: {provider}")
                 providers.append(provider)
         self.model = onnxruntime.InferenceSession(
