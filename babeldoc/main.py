@@ -192,6 +192,12 @@ def create_parser():
         default=0.1,
         help="Progress report interval in seconds (default: 0.1)",
     )
+    translation_group.add_argument(
+        "--translate-table-text",
+        action="store_true",
+        default=False,
+        help="Translate table text (experimental)",
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -277,7 +283,10 @@ async def main():
     else:
         doc_layout_model = DocLayoutModel.load_onnx()
 
-    table_model = RapidOCRModel()
+    if args.translate_table_text:
+        table_model = RapidOCRModel()
+    else:
+        table_model = None
 
     pending_files = []
     for file in args.files:
