@@ -115,16 +115,14 @@ class TableParser:
     def process(self, docs: il_version_1.Document, mupdf_doc: Document):
         """Generate layouts for all pages that need to be translated."""
         # Get pages that need to be translated
-        total = 0
         have_table_pages = {}
         for page in docs.page:
             for layout in page.page_layout:
                 if layout.class_name == "table":
-                    total += 1
                     have_table_pages[page.page_number] = page
         with self.translation_config.progress_monitor.stage_start(
             self.stage_name,
-            total,
+            len(have_table_pages),
         ) as progress:
             # Process predictions for each page
             for page, layouts in self.model.handle_document(

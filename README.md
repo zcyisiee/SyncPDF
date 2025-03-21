@@ -136,6 +136,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 - `--watermark-output-mode`: Control watermark output mode: 'watermarked' (default) adds watermark to translated PDF, 'no_watermark' doesn't add watermark, 'both' outputs both versions.
 - `--max-pages-per-part`: Maximum number of pages per part for split translation. If not set, no splitting will be performed.
 - `--no-watermark`: [DEPRECATED] Use --watermark-output-mode=no_watermark instead.
+- `--translate-table-text`: Translate table text (experimental, default: False)
 
 > [!TIP]
 > - Both `--skip-clean` and `--dual-translate-first` may help improve compatibility with some PDF readers
