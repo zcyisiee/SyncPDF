@@ -233,12 +233,19 @@ class RapidOCRModel:
                 pix.width,
                 3,
             )[:, :, ::-1]
-            predict_result = self.predict(image)
-            # Convert the predict_result to YoloResult format
-            yolo_result = predict_result
+
+            page_table_layouts = []
+
+            for layout in page.page_layout:
+                if layout.class_name == "table":
+                    predict_result = self.predict(image)
+                    # Convert the predict_result to YoloResult format
+                    yolo_result = predict_result
+                    page_table_layouts.append(yolo_result)
+                    yield page, yolo_result
+
             save_debug_image(
                 image,
-                yolo_result,
+                page_table_layouts,
                 page.page_number + 1,
             )
-            yield page, yolo_result

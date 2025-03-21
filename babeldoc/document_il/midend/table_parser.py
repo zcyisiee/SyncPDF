@@ -19,11 +19,13 @@ class TableParser:
         self.translation_config = translation_config
         self.model = translation_config.table_model
 
-    def _save_debug_image(self, image: np.ndarray, layout, page_number: int):
+    def _save_debug_image(self, image: np.ndarray, layouts, page_number: int):
         """Save debug image with drawn boxes if debug mode is enabled."""
         if not self.translation_config.debug:
             return
 
+        if not isinstance(layouts, list):
+            layouts = [layouts]
         debug_dir = Path(
             self.translation_config.get_working_file_path("table-ocr-box-image")
         )
@@ -31,25 +33,26 @@ class TableParser:
 
         # Draw boxes on the image
         debug_image = image.copy()
-        for box in layout.boxes:
-            x0, y0, x1, y1 = box.xyxy
-            cv2.rectangle(
-                debug_image,
-                (int(x0), int(y0)),
-                (int(x1), int(y1)),
-                (0, 255, 0),
-                2,
-            )
-            # Add text label
-            cv2.putText(
-                debug_image,
-                layout.names[box.cls],
-                (int(x0), int(y0) - 5),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 255, 0),
-                1,
-            )
+        for layout in layouts:
+            for box in layout.boxes:
+                x0, y0, x1, y1 = box.xyxy
+                cv2.rectangle(
+                    debug_image,
+                    (int(x0), int(y0)),
+                    (int(x1), int(y1)),
+                    (0, 255, 0),
+                    2,
+                )
+                # Add text label
+                cv2.putText(
+                    debug_image,
+                    layout.names[box.cls],
+                    (int(x0), int(y0) - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 0),
+                    1,
+                )
 
         # Save the image
         output_path = debug_dir / f"{page_number}.jpg"
@@ -112,14 +115,23 @@ class TableParser:
     def process(self, docs: il_version_1.Document, mupdf_doc: Document):
         """Generate layouts for all pages that need to be translated."""
         # Get pages that need to be translated
-        total = len(docs.page)
+        total = 0
+        have_table_pages = {}
+        for page in docs.page:
+            for layout in page.page_layout:
+                if layout.class_name == "table":
+                    total += 1
+                    have_table_pages[page.page_number] = page
         with self.translation_config.progress_monitor.stage_start(
             self.stage_name,
             total,
         ) as progress:
             # Process predictions for each page
             for page, layouts in self.model.handle_document(
-                docs.page, mupdf_doc, self.translation_config, self._save_debug_image
+                have_table_pages.values(),
+                mupdf_doc,
+                self.translation_config,
+                self._save_debug_image,
             ):
                 page_layouts = []
                 for layout in layouts.boxes:
