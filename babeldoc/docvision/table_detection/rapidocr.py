@@ -4,6 +4,7 @@ from collections.abc import Generator
 
 import cv2
 import numpy as np
+from babeldoc.assets.assets import get_table_detection_rapidocr_model_path
 from babeldoc.docvision.doclayout import YoloBox
 from babeldoc.docvision.doclayout import YoloResult
 from rapidocr_onnxruntime import RapidOCR
@@ -90,7 +91,11 @@ class RapidOCRModel:
             elif re.match(r"cuda", provider, re.IGNORECASE):
                 self.use_cuda = True
 
-        self.model = RapidOCR()
+        self.model = RapidOCR(
+            det_model_path=get_table_detection_rapidocr_model_path(),
+            det_use_cuda=self.use_cuda,
+            det_use_dml=self.use_dml,
+        )
         self.names = {0: "table_text"}
 
     @property
