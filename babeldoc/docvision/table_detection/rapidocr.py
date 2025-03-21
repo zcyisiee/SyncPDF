@@ -60,7 +60,7 @@ def convert_to_yolo_result(predictions):
     return YoloResult(names=["text"], boxes=boxes)
 
 
-def create_yolo_result_from_nested_coords(nested_coords: np.ndarray):
+def create_yolo_result_from_nested_coords(nested_coords: np.ndarray, names: dict):
     boxes = []
 
     for quad in nested_coords.tolist():
@@ -76,7 +76,7 @@ def create_yolo_result_from_nested_coords(nested_coords: np.ndarray):
         )
         boxes.append(box)
 
-    return YoloResult(names={0: "text"}, boxes=boxes)
+    return YoloResult(names=names, boxes=boxes)
 
 
 class RapidOCRModel:
@@ -91,6 +91,7 @@ class RapidOCRModel:
                 self.use_cuda = True
 
         self.model = RapidOCR()
+        self.names = {0: "table_text"}
 
     @property
     def stride(self):
@@ -211,10 +212,10 @@ class RapidOCRModel:
             )
 
             # Convert predictions to YoloResult format
-            return create_yolo_result_from_nested_coords(preds_np)
+            return create_yolo_result_from_nested_coords(preds_np, self.names)
         else:
             # Return empty YoloResult if no predictions
-            return YoloResult(names=["text"], boxes=[])
+            return YoloResult(names=self.names, boxes=[])
 
     def handle_document(
         self,
@@ -234,18 +235,77 @@ class RapidOCRModel:
                 3,
             )[:, :, ::-1]
 
-            page_table_layouts = []
-
+            table_boxes = []
             for layout in page.page_layout:
                 if layout.class_name == "table":
-                    predict_result = self.predict(image)
-                    # Convert the predict_result to YoloResult format
-                    yolo_result = predict_result
-                    page_table_layouts.append(yolo_result)
-                    yield page, yolo_result
+                    table_boxes.append(layout.box)
 
+            predict_result = self.predict(image)
+
+            ok_boxes = []
+            for box in predict_result.boxes:
+                # Convert the box coordinates to float for proper comparison
+                box_xyxy = [float(coord) for coord in box.xyxy]
+
+                # Check if this box is inside any of the table boxes
+                for table_box in table_boxes:
+                    # Determine if box is inside or overlapping with table_box with image dimensions
+                    if self._is_box_in_table(
+                        box_xyxy, table_box, page, image.shape[1], image.shape[0]
+                    ):
+                        ok_boxes.append(box)
+                        break
+
+            yolo_result = YoloResult(names=self.names, boxes=ok_boxes)
             save_debug_image(
                 image,
-                page_table_layouts,
+                yolo_result,
                 page.page_number + 1,
             )
+            yield page, yolo_result
+
+    def _is_box_in_table(self, box_xyxy, table_box, page, img_width, img_height):
+        """
+        Check if a box from image coordinates is inside a table box from PDF coordinates.
+
+        Args:
+            box_xyxy (list): Box coordinates in image coordinate system [x1, y1, x2, y2]
+            table_box (Box): Table box in PDF coordinate system
+            page: The page object containing information for coordinate conversion
+            img_width: Width of the image
+            img_height: Height of the image
+
+        Returns:
+            bool: True if the box is inside or significantly overlapping with the table box
+        """
+
+        # Get table box coordinates in PDF coordinate system
+        table_pdf_x1 = table_box.x
+        table_pdf_y1 = table_box.y
+        table_pdf_x2 = table_box.x2
+        table_pdf_y2 = table_box.y2
+
+        # Convert table box to image coordinates
+        table_img_x1 = table_pdf_x1
+        table_img_y1 = img_height - table_pdf_y2
+        table_img_x2 = table_pdf_x2
+        table_img_y2 = img_height - table_pdf_y1
+
+        # Now check for overlap between the boxes
+        # Calculate the area of overlap
+        x_overlap = max(
+            0, min(box_xyxy[2], table_img_x2) - max(box_xyxy[0], table_img_x1)
+        )
+        y_overlap = max(
+            0, min(box_xyxy[3], table_img_y2) - max(box_xyxy[1], table_img_y1)
+        )
+        overlap_area = x_overlap * y_overlap
+
+        # Calculate area of the detected box
+        box_area = (box_xyxy[2] - box_xyxy[0]) * (box_xyxy[3] - box_xyxy[1])
+
+        # If overlap area is significant relative to the box area, consider it inside
+        if box_area > 0 and overlap_area / box_area > 0.5:
+            return True
+
+        return False

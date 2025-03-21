@@ -287,6 +287,7 @@ class ParagraphFinder:
             "abandon",
             "figure_caption",
             "table_caption",
+            "table_text",
         ]
 
     def get_layout(
@@ -313,6 +314,7 @@ class ParagraphFinder:
             "table_footnote",
             "table_caption",
             "figure_caption",
+            "table_text",
             "table",
             "figure",
             "abandon",
