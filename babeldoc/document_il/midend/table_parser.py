@@ -159,7 +159,7 @@ class TableParser:
                     )
                     page_layouts.append(page_layout)
 
-                page.page_layout = page_layouts
+                page.page_layout.extend(page_layouts)
                 self._save_debug_box_to_page(page)
                 progress.advance(1)
 
