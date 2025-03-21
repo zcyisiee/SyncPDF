@@ -42,6 +42,10 @@ PDF scientific paper translation and bilingual comparison library.
 <img src="https://s.immersivetranslate.com/assets/r2-uploads/images/babeldoc-preview.png" width="80%"/>
 </div>
 
+## We are hiring
+
+See details: [EN](https://github.com/funstory-ai/jobs) | [ZH](https://github.com/funstory-ai/jobs/blob/main/README_ZH.md)
+
 ## Getting Started
 
 ### Install from PyPI
