@@ -759,6 +759,7 @@ def merge_watermark_doc(
         no_watermark_pdf,
         new_save_path.as_posix(),
         translation_config=translation_config,
+        clean=not translation_config.skip_clean,
     )
     return new_save_path
 
