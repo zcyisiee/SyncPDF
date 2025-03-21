@@ -65,6 +65,7 @@ class TranslationConfig:
         watermark_output_mode: WatermarkOutputMode = WatermarkOutputMode.Watermarked,
         # Add split-related parameters
         split_strategy: BaseSplitStrategy | None = None,
+        table_model=None,
     ):
         self.translator = translator
 
@@ -141,6 +142,8 @@ class TranslationConfig:
         # Create a unique working directory for each part
         self._part_working_dirs: dict[int, Path] = {}
         self._part_output_dirs: dict[int, Path] = {}
+
+        self.table_model = table_model
 
     def parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
         """解析页码字符串，返回页码范围列表

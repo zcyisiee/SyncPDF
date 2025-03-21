@@ -18,6 +18,7 @@ from babeldoc.document_il.translator.translator import OpenAITranslator
 from babeldoc.document_il.translator.translator import set_translate_rate_limiter
 from babeldoc.docvision.doclayout import DocLayoutModel
 from babeldoc.docvision.rpc_doclayout import RpcDocLayoutModel
+from babeldoc.docvision.table_detection.rapidocr import RapidOCRModel
 from babeldoc.translation_config import TranslationConfig
 from babeldoc.translation_config import WatermarkOutputMode
 
@@ -276,6 +277,8 @@ async def main():
     else:
         doc_layout_model = DocLayoutModel.load_onnx()
 
+    table_model = RapidOCRModel()
+
     pending_files = []
     for file in args.files:
         # 清理文件路径，去除两端的引号
@@ -350,6 +353,7 @@ async def main():
             min_text_length=args.min_text_length,
             watermark_output_mode=watermark_output_mode,
             split_strategy=split_strategy,
+            table_model=table_model,
         )
 
         # Create progress handler
