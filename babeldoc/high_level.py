@@ -151,8 +151,8 @@ def start_parse_il(
             page.cropbox[2] - page.cropbox[0],
         )
         if height > 1200 or width > 2000:
-            logger.warning(f"page {pageno + 1} is too large, skip")
-            continue
+            logger.warning(f"page {pageno + 1} is too large, maybe unable to translate")
+            # continue
 
         translation_config.raise_if_cancelled()
         # The current program no longer relies on
