@@ -546,7 +546,7 @@ class StylesAndFormulas:
                 r"|stmary"
                 r"|.*Mono"
                 r"|.*Code"
-                r"|.*Ital"
+                # r"|.*Ital"
                 r"|.*Sym"
                 r"|.*Math"
                 r"|AdvP4C4E74"
