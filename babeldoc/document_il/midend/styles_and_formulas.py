@@ -428,6 +428,8 @@ class StylesAndFormulas:
                     formula.x_offset = 0  # 如果左边没有文字，x_offset 应该为 0
                 if abs(formula.x_offset) < 0.1:
                     formula.x_offset = 0
+                if formula.x_offset > 10:
+                    formula.x_offset = 0
                 # if formula.x_offset > 0:
                 #     formula.x_offset = 0
 
@@ -443,7 +445,7 @@ class StylesAndFormulas:
                 if abs(formula.y_offset) < 0.1:
                     formula.y_offset = 0
 
-                if max(abs(formula.y_offset), abs(formula.x_offset)) > 2:
+                if max(abs(formula.y_offset), abs(formula.x_offset)) > 10:
                     pass
                     # logging.debug(
                     #     f"公式 {formula.box} 的偏移量过大：{formula.x_offset}, {formula.y_offset}"
