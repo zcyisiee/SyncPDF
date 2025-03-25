@@ -1,3 +1,4 @@
+import copy
 import logging
 import re
 import statistics
@@ -603,17 +604,26 @@ class Typesetting:
             self.font_mapper.base_font.char_lengths("你", font_size * scale)[0] * 0.5
         )
 
-        # 计算平均行高
-        avg_height = (
-            sum(unit.height * scale for unit in typesetting_units)
-            / len(typesetting_units)
-            if typesetting_units
-            else 0
+        # 计算行高（使用众数）
+        unit_heights = (
+            [unit.height for unit in typesetting_units] if typesetting_units else []
         )
+        if not unit_heights:
+            avg_height = 0
+        elif len(unit_heights) == 1:
+            avg_height = unit_heights[0] * scale
+        else:
+            try:
+                avg_height = statistics.mode(unit_heights) * scale
+            except statistics.StatisticsError:
+                # 如果没有众数（所有值都出现相同次数），则使用平均值
+                avg_height = sum(unit_heights) / len(unit_heights) * scale
 
         # 初始化位置为右上角，并减去一个平均行高
         current_x = box.x
         current_y = box.y2 - avg_height
+        box = copy.deepcopy(box)
+        box.y -= avg_height * (line_spacing - 1)
         line_height = 0
         current_line_heights = []  # 存储当前行所有元素的高度
 
