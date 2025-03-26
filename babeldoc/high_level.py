@@ -661,21 +661,26 @@ def _do_translate_single(
 
     pdf_creater = PDFCreater(temp_pdf_path, docs, translation_config)
     result = pdf_creater.write(translation_config)
-
-    if mono_watermark_first_page_doc_bytes:
-        mono_watermark_pdf = merge_watermark_doc(
-            result.mono_pdf_path,
-            mono_watermark_first_page_doc_bytes,
-            translation_config,
-        )
-        result.mono_pdf_path = mono_watermark_pdf
-    if dual_watermark_first_page_doc_bytes:
-        dual_watermark_pdf = merge_watermark_doc(
-            result.dual_pdf_path,
-            dual_watermark_first_page_doc_bytes,
-            translation_config,
-        )
-        result.dual_pdf_path = dual_watermark_pdf
+    try:
+        if mono_watermark_first_page_doc_bytes:
+            mono_watermark_pdf = merge_watermark_doc(
+                result.mono_pdf_path,
+                mono_watermark_first_page_doc_bytes,
+                translation_config,
+            )
+            result.mono_pdf_path = mono_watermark_pdf
+    except Exception:
+        result.mono_pdf_path = result.no_watermark_mono_pdf_path
+    try:
+        if dual_watermark_first_page_doc_bytes:
+            dual_watermark_pdf = merge_watermark_doc(
+                result.dual_pdf_path,
+                dual_watermark_first_page_doc_bytes,
+                translation_config,
+            )
+            result.dual_pdf_path = dual_watermark_pdf
+    except Exception:
+        result.dual_pdf_path = result.no_watermark_dual_pdf_path
 
     return result
 
