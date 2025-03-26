@@ -66,6 +66,7 @@ class TranslationConfig:
         # Add split-related parameters
         split_strategy: BaseSplitStrategy | None = None,
         table_model=None,
+        show_char_box: bool = False,
     ):
         self.translator = translator
 
@@ -144,6 +145,7 @@ class TranslationConfig:
         self._part_output_dirs: dict[int, Path] = {}
 
         self.table_model = table_model
+        self.show_char_box = show_char_box
 
     def parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
         """解析页码字符串，返回页码范围列表

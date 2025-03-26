@@ -198,6 +198,12 @@ def create_parser():
         default=False,
         help="Translate table text (experimental)",
     )
+    translation_group.add_argument(
+        "--show-char-box",
+        action="store_true",
+        default=False,
+        help="Show character box (debug only)",
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -363,6 +369,7 @@ async def main():
             watermark_output_mode=watermark_output_mode,
             split_strategy=split_strategy,
             table_model=table_model,
+            show_char_box=args.show_char_box,
         )
 
         # Create progress handler
