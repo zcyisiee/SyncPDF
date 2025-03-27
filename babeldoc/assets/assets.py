@@ -360,6 +360,8 @@ def generate_all_assets_file_list():
             "name": "doclayout_yolo_docstructbench_imgsz1024.onnx",
             "sha3_256": DOCLAYOUT_YOLO_DOCSTRUCTBENCH_IMGSZ1024ONNX_SHA3_256,
         },
+    )
+    result["models"].append(
         {
             "name": "ch_PP-OCRv4_det_infer.onnx",
             "sha3_256": TABLE_DETECTION_RAPIDOCR_MODEL_SHA3_256,
