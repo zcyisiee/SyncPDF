@@ -328,8 +328,11 @@ async def async_warmup():
     _ = encoding_for_model("gpt-4o")
     async with httpx.AsyncClient() as client:
         onnx_task = asyncio.create_task(get_doclayout_onnx_model_path_async(client))
+        onnx_task2 = asyncio.create_task(
+            get_table_detection_rapidocr_model_path_async(client)
+        )
         font_tasks = asyncio.create_task(download_all_fonts_async(client))
-        await asyncio.gather(onnx_task, font_tasks)
+        await asyncio.gather(onnx_task, onnx_task2, font_tasks)
 
 
 def warmup():
@@ -360,6 +363,8 @@ def generate_all_assets_file_list():
             "name": "doclayout_yolo_docstructbench_imgsz1024.onnx",
             "sha3_256": DOCLAYOUT_YOLO_DOCSTRUCTBENCH_IMGSZ1024ONNX_SHA3_256,
         },
+    )
+    result["models"].append(
         {
             "name": "ch_PP-OCRv4_det_infer.onnx",
             "sha3_256": TABLE_DETECTION_RAPIDOCR_MODEL_SHA3_256,

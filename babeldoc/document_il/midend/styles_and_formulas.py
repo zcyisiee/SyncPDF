@@ -531,6 +531,8 @@ class StylesAndFormulas:
             r"|GlosaMath.+"
             r"|URWPalladioL.+"
             r"|CMSS.+"
+            r"|Arial.*"
+            r"|TimesNewRoman.*"
             r")$"
         )
         if self.translation_config.formular_font_pattern:

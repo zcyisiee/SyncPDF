@@ -18,6 +18,7 @@ from pdfminer.pdftypes import resolve1 as pdftypes_resolve1
 from pdfminer.psparser import PSLiteral
 
 from babeldoc.document_il import il_version_1
+from babeldoc.document_il.utils.style_helper import YELLOW
 from babeldoc.translation_config import TranslationConfig
 
 
@@ -567,6 +568,15 @@ class ILCreater:
             )
 
         self.current_page.pdf_character.append(pdf_char)
+
+        if self.translation_config.show_char_box:
+            self.current_page.pdf_rectangle.append(
+                il_version_1.PdfRectangle(
+                    box=pdf_char.visual_bbox.box,
+                    graphic_state=YELLOW,
+                    debug_info=True,
+                )
+            )
 
     def create_il(self):
         pages = [
