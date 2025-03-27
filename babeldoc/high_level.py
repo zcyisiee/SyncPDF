@@ -504,6 +504,7 @@ def do_translate(
         logger.info(
             f"finish translate: {original_pdf_path}, cost: {finish_time - start_time} s",
         )
+        result.original_pdf_path = translation_config.input_file
         pm.translate_done(result)
         return result
 
@@ -681,6 +682,8 @@ def _do_translate_single(
             result.dual_pdf_path = dual_watermark_pdf
     except Exception:
         result.dual_pdf_path = result.no_watermark_dual_pdf_path
+
+    result.original_pdf_path = translation_config.input_file
 
     return result
 
