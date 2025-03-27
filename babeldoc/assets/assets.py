@@ -328,8 +328,11 @@ async def async_warmup():
     _ = encoding_for_model("gpt-4o")
     async with httpx.AsyncClient() as client:
         onnx_task = asyncio.create_task(get_doclayout_onnx_model_path_async(client))
+        onnx_task2 = asyncio.create_task(
+            get_table_detection_rapidocr_model_path_async(client)
+        )
         font_tasks = asyncio.create_task(download_all_fonts_async(client))
-        await asyncio.gather(onnx_task, font_tasks)
+        await asyncio.gather(onnx_task, onnx_task2, font_tasks)
 
 
 def warmup():
