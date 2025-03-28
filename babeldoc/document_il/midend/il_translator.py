@@ -4,6 +4,7 @@ import logging
 import re
 from pathlib import Path
 
+import tiktoken
 from tqdm import tqdm
 
 from babeldoc.document_il import Document
@@ -119,10 +120,19 @@ class ILTranslator:
         self,
         translate_engine: BaseTranslator,
         translation_config: TranslationConfig,
+        tokenizer=None,
     ):
         self.translate_engine = translate_engine
         self.translation_config = translation_config
         self.font_mapper = FontMapper(translation_config)
+
+        if tokenizer is None:
+            self.tokenizer = tiktoken.encoding_for_model("gpt-4o")
+        else:
+            self.tokenizer = tokenizer
+
+    def calc_token_count(self, text: str) -> int:
+        return len(self.tokenizer.encode(text))
 
     def translate(self, docs: Document):
         tracker = DocumentTranslateTracker()
@@ -173,6 +183,7 @@ class ILTranslator:
                 tracker.new_paragraph(),
                 page_font_map,
                 page_xobj_font_map,
+                priority=1048576 - self.calc_token_count(paragraph.unicode),
             )
 
     class TranslateInput:

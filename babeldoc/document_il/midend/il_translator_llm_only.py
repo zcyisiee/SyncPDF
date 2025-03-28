@@ -1,4 +1,3 @@
-import concurrent.futures
 import json
 import logging
 import re
@@ -17,9 +16,10 @@ from babeldoc.document_il.midend.il_translator import ILTranslator
 from babeldoc.document_il.midend.il_translator import PageTranslateTracker
 from babeldoc.document_il.translator.translator import BaseTranslator
 from babeldoc.document_il.utils.fontmap import FontMapper
+from babeldoc.document_il.utils.priority_thread_pool_executor import (
+    PriorityThreadPoolExecutor,
+)
 from babeldoc.translation_config import TranslationConfig
-
-enc = tiktoken.encoding_for_model("gpt-4o")
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,7 @@ class ILTranslatorLLMOnly:
         self,
         translate_engine: BaseTranslator,
         translation_config: TranslationConfig,
+        tokenizer=None,
     ):
         self.translate_engine = translate_engine
         self.translation_config = translation_config
@@ -47,15 +48,24 @@ class ILTranslatorLLMOnly:
             translation_config.shared_context_cross_split_part
         )
 
+        if tokenizer is None:
+            self.tokenizer = tiktoken.encoding_for_model("gpt-4o")
+        else:
+            self.tokenizer = tokenizer
+
         self.il_translator = ILTranslator(
             translate_engine=translate_engine,
             translation_config=translation_config,
+            tokenizer=self.tokenizer,
         )
 
         try:
             self.translate_engine.do_llm_translate(None)
         except NotImplementedError as e:
             raise ValueError("LLM translator not supported") from e
+
+    def calc_token_count(self, text: str) -> int:
+        return len(self.tokenizer.encode(text))
 
     def find_title_paragraph(self, docs: Document) -> PdfParagraph | None:
         """Find the first paragraph with layout_label 'title' in the document.
@@ -103,10 +113,10 @@ class ILTranslatorLLMOnly:
             self.stage_name,
             total,
         ) as pbar:
-            with concurrent.futures.ThreadPoolExecutor(
+            with PriorityThreadPoolExecutor(
                 max_workers=self.translation_config.qps,
             ) as executor2:
-                with concurrent.futures.ThreadPoolExecutor(
+                with PriorityThreadPoolExecutor(
                     max_workers=self.translation_config.qps,
                 ) as executor:
                     for page in docs.page:
@@ -128,10 +138,10 @@ class ILTranslatorLLMOnly:
     def process_page(
         self,
         page: Page,
-        executor: concurrent.futures.ThreadPoolExecutor,
+        executor: PriorityThreadPoolExecutor,
         pbar: tqdm | None = None,
         tracker: PageTranslateTracker = None,
-        executor2: concurrent.futures.ThreadPoolExecutor | None = None,
+        executor2: PriorityThreadPoolExecutor | None = None,
     ):
         self.translation_config.raise_if_cancelled()
         page_font_map = {}
@@ -145,17 +155,17 @@ class ILTranslatorLLMOnly:
 
         paragraphs = []
 
-        total_unicode_counts = 0
+        total_token_count = 0
         for paragraph in page.pdf_paragraph:
             if paragraph.debug_id is None or paragraph.unicode is None:
                 continue
             # self.translate_paragraph(paragraph, pbar,tracker.new_paragraph(), page_font_map, page_xobj_font_map)
-            total_unicode_counts += len(paragraph.unicode)
+            total_token_count += self.calc_token_count(paragraph.unicode)
             paragraphs.append(paragraph)
             if paragraph.layout_label == "title":
                 self.shared_context_cross_split_part.recent_title_paragraph = paragraph
 
-            if total_unicode_counts > 1200 or len(paragraphs) > 4:
+            if total_token_count > 800 or len(paragraphs) > 5:
                 executor.submit(
                     self.translate_paragraph,
                     BatchParagraph(paragraphs, tracker),
@@ -165,9 +175,10 @@ class ILTranslatorLLMOnly:
                     self.translation_config.shared_context_cross_split_part.first_paragraph,
                     self.translation_config.shared_context_cross_split_part.recent_title_paragraph,
                     executor2,
+                    priority=1048576 - total_token_count,
                 )
                 paragraphs = []
-                total_unicode_counts = 0
+                total_token_count = 0
 
         if paragraphs:
             executor.submit(
@@ -179,6 +190,7 @@ class ILTranslatorLLMOnly:
                 self.translation_config.shared_context_cross_split_part.first_paragraph,
                 self.translation_config.shared_context_cross_split_part.recent_title_paragraph,
                 executor2,
+                priority=1048576 - total_token_count,
             )
 
     def translate_paragraph(
@@ -189,12 +201,13 @@ class ILTranslatorLLMOnly:
         xobj_font_map: dict[int, dict[str, PdfFont]] = None,
         title_paragraph: PdfParagraph | None = None,
         local_title_paragraph: PdfParagraph | None = None,
-        executor=None,
+        executor: PriorityThreadPoolExecutor | None = None,
     ):
         """Translate a paragraph using pre and post processing functions."""
         self.translation_config.raise_if_cancelled()
         try:
             inputs = []
+            should_translate_paragraph = []
 
             for i in range(len(batch_paragraph.paragraphs)):
                 paragraph = batch_paragraph.paragraphs[i]
@@ -205,9 +218,11 @@ class ILTranslatorLLMOnly:
                 if text is None:
                     pbar.advance(1)
                     continue
+                should_translate_paragraph.append(paragraph)
                 inputs.append((text, translate_input, paragraph, tracker))
             if not inputs:
                 return
+            batch_paragraph = should_translate_paragraph
             json_format_input = []
 
             for id_, input_text in enumerate(inputs):
@@ -313,8 +328,8 @@ class ILTranslatorLLMOnly:
                     input_unicode = inputs[id_][2].unicode
                     output_unicode = translated_text
 
-                    input_token_count = len(enc.encode(input_unicode))
-                    output_token_count = len(enc.encode(output_unicode))
+                    input_token_count = self.calc_token_count(input_unicode)
+                    output_token_count = self.calc_token_count(output_unicode)
 
                     if not (0.3 < output_token_count / input_token_count < 3):
                         logger.warning(
@@ -354,6 +369,7 @@ class ILTranslatorLLMOnly:
                             inputs[id_][3],
                             page_font_map,
                             xobj_font_map,
+                            priority=1048576 - self.calc_token_count(paragraph.unicode),
                         )
 
         except Exception as e:
@@ -370,6 +386,7 @@ class ILTranslatorLLMOnly:
                     tracker,
                     page_font_map,
                     xobj_font_map,
+                    priority=1048576 - self.calc_token_count(paragraph.unicode),
                 )
 
     def _clean_json_output(self, llm_output: str) -> str:

@@ -13,6 +13,7 @@ from tenacity import stop_after_attempt
 from tenacity import wait_exponential
 
 from babeldoc.document_il.translator.cache import TranslationCache
+from babeldoc.document_il.utils.atomic_integer import AtomicInteger
 
 logger = logging.getLogger(__name__)
 
@@ -60,31 +61,6 @@ _translate_rate_limiter = RateLimiter(5)
 
 def set_translate_rate_limiter(max_qps):
     _translate_rate_limiter.set_max_qps(max_qps)
-
-
-class AtomicInteger:
-    def __init__(self, value=0):
-        self._value = int(value)
-        self._lock = threading.Lock()
-
-    def inc(self, d=1):
-        with self._lock:
-            self._value += int(d)
-            return self._value
-
-    def dec(self, d=1):
-        return self.inc(-d)
-
-    @property
-    def value(self):
-        with self._lock:
-            return self._value
-
-    @value.setter
-    def value(self, v):
-        with self._lock:
-            self._value = int(v)
-            return self._value
 
 
 class BaseTranslator(ABC):
