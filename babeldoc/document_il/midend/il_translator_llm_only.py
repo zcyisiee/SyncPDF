@@ -207,6 +207,7 @@ class ILTranslatorLLMOnly:
         self.translation_config.raise_if_cancelled()
         try:
             inputs = []
+            should_translate_paragraph = []
 
             for i in range(len(batch_paragraph.paragraphs)):
                 paragraph = batch_paragraph.paragraphs[i]
@@ -217,9 +218,11 @@ class ILTranslatorLLMOnly:
                 if text is None:
                     pbar.advance(1)
                     continue
+                should_translate_paragraph.append(paragraph)
                 inputs.append((text, translate_input, paragraph, tracker))
             if not inputs:
                 return
+            batch_paragraph = should_translate_paragraph
             json_format_input = []
 
             for id_, input_text in enumerate(inputs):
