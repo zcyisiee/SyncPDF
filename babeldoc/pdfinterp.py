@@ -290,7 +290,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             self.scs = interpreter.scs
             self.il_creater.on_xobj_end(
                 x_id,
-                f"q {ops_base}Q {a} {b} {c} {d} {e} {f} cm ",
+                f"q {ops_base} Q {a} {b} {c} {d} {e} {f} cm ",
             )
             try:  # 有的时候 form 字体加不上这里会烂掉
                 self.device.fontid = interpreter.fontid
@@ -345,7 +345,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
         # )
         # for obj in page.contents:
         #     self.obj_patch[obj.objid] = ""
-        return ops_base
+        return f"q {ops_base} Q 1 0 0 1 {x0} {y0} cm"
 
     def render_contents(
         self,

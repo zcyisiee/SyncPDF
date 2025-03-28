@@ -673,12 +673,12 @@ class PDFCreater:
                 }
                 page_op = BitStream()
                 # q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}
-                page_op.append(b"q ")
+                # page_op.append(b"q ")
                 page_op.append(page.base_operations.value.encode())
-                page_op.append(b" Q ")
-                page_op.append(
-                    f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode(),
-                )
+                # page_op.append(b" Q ")
+                # page_op.append(
+                #     f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode(),
+                # )
                 # 收集所有字符
                 chars = []
                 # 首先添加页面级别的字符
