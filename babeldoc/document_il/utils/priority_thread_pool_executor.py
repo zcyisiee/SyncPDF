@@ -4,6 +4,7 @@
 
 import atexit
 import itertools
+import logging
 import queue
 import random
 import sys
@@ -17,6 +18,8 @@ from concurrent.futures.thread import _threads_queues
 from concurrent.futures.thread import _WorkItem
 from heapq import heappop
 from heapq import heappush
+
+logger = logging.getLogger(__name__)
 
 ########################################################################################################################
 #                                                Global variables                                                      #
@@ -111,32 +114,35 @@ def _worker(executor_reference, work_queue, initializer, initargs):
     try:
         while True:
             work_item = work_queue.get(block=True)
-            if work_item[2] is not None:
-                work_item[2].run()
-                # Delete references to object. See issue16284
-                del work_item
+            try:
+                if work_item[2] is not None:
+                    work_item[2].run()
+                    # Delete references to object. See issue16284
+                    del work_item
 
-                # attempt to increment idle count
+                    # attempt to increment idle count
+                    executor = executor_reference()
+                    if executor is not None:
+                        executor._idle_semaphore.release()
+                    del executor
+                    continue
+
                 executor = executor_reference()
-                if executor is not None:
-                    executor._idle_semaphore.release()
+                # Exit if:
+                #   - The interpreter is shutting down OR
+                #   - The executor that owns the worker has been collected OR
+                #   - The executor that owns the worker has been shutdown.
+                if _shutdown or executor is None or executor._shutdown:
+                    # Flag the executor as shutting down as early as possible if it
+                    # is not gc-ed yet.
+                    if executor is not None:
+                        executor._shutdown = True
+                    # Notice other workers
+                    work_queue.put(None)
+                    return
                 del executor
-                continue
-
-            executor = executor_reference()
-            # Exit if:
-            #   - The interpreter is shutting down OR
-            #   - The executor that owns the worker has been collected OR
-            #   - The executor that owns the worker has been shutdown.
-            if _shutdown or executor is None or executor._shutdown:
-                # Flag the executor as shutting down as early as possible if it
-                # is not gc-ed yet.
-                if executor is not None:
-                    executor._shutdown = True
-                # Notice other workers
-                work_queue.put(None)
-                return
-            del executor
+            finally:
+                work_queue.task_done()
     except BaseException:
         _base.LOGGER.critical("Exception in worker", exc_info=True)
 
@@ -217,3 +223,37 @@ class PriorityThreadPoolExecutor(ThreadPoolExecutor):
             t.start()
             self._threads.add(t)
             _threads_queues[t] = self._work_queue
+
+    def shutdown(self, wait=True, *, cancel_futures=False):
+        logger.info("Shutting down executor %s", self._thread_name_prefix or self)
+        if wait:
+            logger.info(
+                "Waiting for all tasks done %s", self._thread_name_prefix or self
+            )
+            self._work_queue.join()
+            logger.info("All tasks done %s", self._thread_name_prefix or self)
+
+        with self._shutdown_lock:
+            self._shutdown = True
+            if cancel_futures:
+                # Drain all work items from the queue, and then cancel their
+                # associated futures.
+                while True:
+                    try:
+                        work_item = self._work_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    if work_item is not None:
+                        work_item.future.cancel()
+
+            # Send a wake-up to prevent threads calling
+            # _work_queue.get(block=True) from permanently blocking.
+            self._work_queue.put(None)
+        if wait:
+            logger.info(
+                "Waiting for all thread done %s", self._thread_name_prefix or self
+            )
+            for t in self._threads:
+                self._work_queue.put(None)
+                t.join()
+        logger.info("shutdown finish %s", self._thread_name_prefix or self)
