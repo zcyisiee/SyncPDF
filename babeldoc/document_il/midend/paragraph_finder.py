@@ -29,7 +29,7 @@ class ParagraphFinder:
 
     # 定义项目符号的正则表达式模式
     BULLET_POINT_PATTERN = re.compile(
-        r"[■•⚫⬤◆◇○●◦‣⁃▪▫∗†‡¹²³⁴⁵⁶⁷⁸⁹⁰₁₂₃₄₅₆₇₈₉₀ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖᵍʳˢᵗᵘᵛʷˣʸᶻ†‡§¶※⁑⁂⁕⁎⁜⁑❧☙⁋‖‽]"
+        r"[■•⚫⬤◆◇○●◦‣⁃▪▫∗†‡¹²³⁴⁵⁶⁷⁸⁹⁰₁₂₃₄₅₆₇₈₉₀ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖᵍʳˢᵗᵘᵛʷˣʸᶻ†‡§¶※⁑⁂⁕⁎⁜⁑❧☙⁋‖‽]"
     )
 
     def __init__(self, translation_config: TranslationConfig):
