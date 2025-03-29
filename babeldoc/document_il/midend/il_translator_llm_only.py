@@ -205,9 +205,9 @@ class ILTranslatorLLMOnly:
     ):
         """Translate a paragraph using pre and post processing functions."""
         self.translation_config.raise_if_cancelled()
+        should_translate_paragraph = []
         try:
             inputs = []
-            should_translate_paragraph = []
 
             for i in range(len(batch_paragraph.paragraphs)):
                 paragraph = batch_paragraph.paragraphs[i]
@@ -218,11 +218,10 @@ class ILTranslatorLLMOnly:
                 if text is None:
                     pbar.advance(1)
                     continue
-                should_translate_paragraph.append(paragraph)
+                should_translate_paragraph.append(i)
                 inputs.append((text, translate_input, paragraph, tracker))
             if not inputs:
                 return
-            batch_paragraph = should_translate_paragraph
             json_format_input = []
 
             for id_, input_text in enumerate(inputs):
@@ -374,7 +373,11 @@ class ILTranslatorLLMOnly:
 
         except Exception as e:
             logger.warning(f"Error {e} during translation. try fallback")
-            for i in range(len(batch_paragraph.paragraphs)):
+            if not should_translate_paragraph:
+                should_translate_paragraph = list(
+                    range(len(batch_paragraph.paragraphs))
+                )
+            for i in should_translate_paragraph:
                 paragraph = batch_paragraph.paragraphs[i]
                 tracker = batch_paragraph.trackers[i]
                 if paragraph.debug_id is None:
