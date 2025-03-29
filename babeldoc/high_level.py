@@ -646,11 +646,18 @@ def _do_translate_single(
         )
     mono_watermark_first_page_doc_bytes = None
     dual_watermark_first_page_doc_bytes = None
-
-    if translation_config.watermark_output_mode == WatermarkOutputMode.Both:
-        mono_watermark_first_page_doc_bytes, dual_watermark_first_page_doc_bytes = (
-            generate_first_page_with_watermark(doc_pdf2zh, translation_config, docs)
+    try:
+        if translation_config.watermark_output_mode == WatermarkOutputMode.Both:
+            mono_watermark_first_page_doc_bytes, dual_watermark_first_page_doc_bytes = (
+                generate_first_page_with_watermark(doc_pdf2zh, translation_config, docs)
+            )
+    except Exception:
+        logger.warning(
+            "Failed to generate watermark for first page, using no watermark"
         )
+        translation_config.watermark_output_mode = WatermarkOutputMode.NoWatermark
+        mono_watermark_first_page_doc_bytes = None
+        dual_watermark_first_page_doc_bytes = None
 
     Typesetting(translation_config).typsetting_document(docs)
     logger.debug(f"finish typsetting from {temp_pdf_path}")
