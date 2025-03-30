@@ -508,10 +508,9 @@ class ILCreater:
             else:
                 char_bounding_box = None
         except Exception:
-            logger.warning(
-                "Failed to get font bounding box for char %s, font_id %s",
+            logger.debug(
+                "Failed to get font bounding box for char %s",
                 char.get_text(),
-                font.font_id,
             )
             char_bounding_box = None
 

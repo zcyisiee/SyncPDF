@@ -732,7 +732,12 @@ class PDFCreater:
                                 f"BT /{font_id} {char_size:f} Tf 1 0 0 1 {char.box.x:f} {char.box.y:f} Tm ".encode(),
                             )
 
-                        encoding_length = encoding_length_map[font_id]
+                        encoding_length = encoding_length_map.get(font_id, None)
+                        if encoding_length is None:
+                            logger.debug(
+                                f"Font {font_id} not found in encoding length map for page {page.page_number}"
+                            )
+                            continue
                         # pdf32000-2008 page14:
                         # As hexadecimal data enclosed in angle brackets < >
                         # see 7.3.4.3, "Hexadecimal Strings."
