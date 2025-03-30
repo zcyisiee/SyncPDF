@@ -282,7 +282,12 @@ class TranslateConverter(PDFConverterEx):
         # A. 原文档解析
         for child in ltpage:
             if isinstance(child, LTChar):
-                self.il_creater.on_lt_char(child)
+                try:
+                    self.il_creater.on_lt_char(child)
+                except Exception:
+                    log.exception(
+                        'Error processing LTChar',
+                    )
                 continue
                 cur_v = False
                 layout = self.layout[ltpage.pageid]
