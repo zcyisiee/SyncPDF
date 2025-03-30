@@ -187,6 +187,11 @@ class FontMapper:
                 pbar.advance(1)
             for xref in range(1, xreflen):
                 pbar.advance(1)
+                # xref_type = doc_zh.xref_get_key(xref, "Type")
+                # if xref_type[1] == "/Page":
+                #     resources_xref = doc_zh.xref_get_key(xref, "Resources")
+                #     if resources_xref[0] == 'null':
+                #         doc_zh.xref_set_key(xref, "Resources", f"<</Font<<>>>>")
                 for label in ["Resources/", ""]:  # 可能是基于 xobj 的 res
                     try:  # xref 读写可能出错
                         font_res = doc_zh.xref_get_key(xref, f"{label}Font")

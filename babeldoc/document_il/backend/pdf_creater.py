@@ -158,27 +158,30 @@ class PDFCreater:
         return self.get_xobj_available_fonts(page_xref_id, pdf)
 
     def get_xobj_available_fonts(self, page_xref_id, pdf):
-        resources_type, r_id = pdf.xref_get_key(page_xref_id, "Resources")
-        if resources_type == "xref":
-            resource_xref_id = re.search("(\\d+) 0 R", r_id).group(1)
-            r_id = pdf.xref_object(int(resource_xref_id))
-            resources_type = "dict"
-        if resources_type == "dict":
-            xref_id = re.search("/Font (\\d+) 0 R", r_id)
-            if xref_id is not None:
-                xref_id = xref_id.group(1)
-                font_dict = pdf.xref_object(int(xref_id))
+        try:
+            resources_type, r_id = pdf.xref_get_key(page_xref_id, "Resources")
+            if resources_type == "xref":
+                resource_xref_id = re.search("(\\d+) 0 R", r_id).group(1)
+                r_id = pdf.xref_object(int(resource_xref_id))
+                resources_type = "dict"
+            if resources_type == "dict":
+                xref_id = re.search("/Font (\\d+) 0 R", r_id)
+                if xref_id is not None:
+                    xref_id = xref_id.group(1)
+                    font_dict = pdf.xref_object(int(xref_id))
+                else:
+                    search = re.search("/Font *<<(.+?)>>", r_id.replace("\n", " "))
+                    if search is None:
+                        # Have resources but no fonts
+                        return set()
+                    font_dict = search.group(1)
             else:
-                search = re.search("/Font *<<(.+?)>>", r_id.replace("\n", " "))
-                if search is None:
-                    # Have resources but no fonts
-                    return set()
-                font_dict = search.group(1)
-        else:
-            r_id = int(r_id.split(" ")[0])
-            _, font_dict = pdf.xref_get_key(r_id, "Font")
-        fonts = re.findall("/([^ ]+?) ", font_dict)
-        return set(fonts)
+                r_id = int(r_id.split(" ")[0])
+                _, font_dict = pdf.xref_get_key(r_id, "Font")
+            fonts = re.findall("/([^ ]+?) ", font_dict)
+            return set(fonts)
+        except Exception:
+            return set()
 
     def _debug_render_rectangle(
         self,
@@ -633,213 +636,230 @@ class PDFCreater:
 
             return False
 
-    def write(self, translation_config: TranslationConfig) -> TranslateResult:
-        basename = Path(translation_config.input_file).stem
-        debug_suffix = ".debug" if translation_config.debug else ""
-        if translation_config.watermark_output_mode != WatermarkOutputMode.Watermarked:
-            debug_suffix += ".no_watermark"
-        mono_out_path = translation_config.get_output_file_path(
-            f"{basename}{debug_suffix}.{translation_config.lang_out}.mono.pdf",
-        )
-        pdf = pymupdf.open(self.original_pdf_path)
-        self.font_mapper.add_font(pdf, self.docs)
-        with self.translation_config.progress_monitor.stage_start(
-            self.stage_name,
-            len(self.docs.page),
-        ) as pbar:
-            for page in self.docs.page:
-                translation_config.raise_if_cancelled()
-                xobj_available_fonts = {}
-                xobj_draw_ops = {}
-                xobj_encoding_length_map = {}
-                available_font_list = self.get_available_font_list(pdf, page)
-
-                for xobj in page.pdf_xobject:
-                    xobj_available_fonts[xobj.xobj_id] = available_font_list.copy()
-                    try:
-                        xobj_available_fonts[xobj.xobj_id].update(
-                            self.get_xobj_available_fonts(xobj.xref_id, pdf),
-                        )
-                    except Exception:
-                        pass
-                    xobj_encoding_length_map[xobj.xobj_id] = {
-                        f.font_id: f.encoding_length for f in xobj.pdf_font
-                    }
-                    xobj_op = BitStream()
-                    xobj_op.append(xobj.base_operations.value.encode())
-                    xobj_draw_ops[xobj.xobj_id] = xobj_op
-                page_encoding_length_map = {
-                    f.font_id: f.encoding_length for f in page.pdf_font
-                }
-                page_op = BitStream()
-                # q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}
-                # page_op.append(b"q ")
-                page_op.append(page.base_operations.value.encode())
-                page_op.append(b" \n")
-                # page_op.append(b" Q ")
-                # page_op.append(
-                #     f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode(),
-                # )
-                # 收集所有字符
-                chars = []
-                # 首先添加页面级别的字符
-                if page.pdf_character:
-                    chars.extend(page.pdf_character)
-                # 然后添加段落中的字符
-                for paragraph in page.pdf_paragraph:
-                    chars.extend(self.render_paragraph_to_char(paragraph))
-
-                # 渲染所有字符
-                for char in chars:
-                    if char.char_unicode == "\n":
-                        continue
-                    if char.pdf_character_id is None:
-                        # dummy char
-                        continue
-                    char_size = char.pdf_style.font_size
-                    font_id = char.pdf_style.font_id
-                    if char.xobj_id in xobj_available_fonts:
-                        if font_id not in xobj_available_fonts[char.xobj_id]:
-                            continue
-                        draw_op = xobj_draw_ops[char.xobj_id]
-                        encoding_length_map = xobj_encoding_length_map[char.xobj_id]
-                    else:
-                        if font_id not in available_font_list:
-                            continue
-                        draw_op = page_op
-                        encoding_length_map = page_encoding_length_map
-
-                    draw_op.append(b"q ")
-                    self.render_graphic_state(draw_op, char.pdf_style.graphic_state)
-                    if char.vertical:
-                        draw_op.append(
-                            f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode(),
-                        )
-                    else:
-                        draw_op.append(
-                            f"BT /{font_id} {char_size:f} Tf 1 0 0 1 {char.box.x:f} {char.box.y:f} Tm ".encode(),
-                        )
-
-                    encoding_length = encoding_length_map[font_id]
-                    # pdf32000-2008 page14:
-                    # As hexadecimal data enclosed in angle brackets < >
-                    # see 7.3.4.3, "Hexadecimal Strings."
-                    draw_op.append(
-                        f"<{char.pdf_character_id:0{encoding_length * 2}x}>".upper().encode(),
-                    )
-
-                    draw_op.append(b" Tj ET Q \n")
-                for xobj in page.pdf_xobject:
-                    draw_op = xobj_draw_ops[xobj.xobj_id]
-                    try:
-                        pdf.update_stream(xobj.xref_id, draw_op.tobytes())
-                    except Exception:
-                        logger.warning(
-                            f"update xref {xobj.xref_id} stream fail, continue"
-                        )
-                    # pdf.update_stream(xobj.xref_id, b'')
-                for rect in page.pdf_rectangle:
-                    self._debug_render_rectangle(page_op, rect)
-                draw_op = page_op
-                op_container = pdf.get_new_xref()
-                # Since this is a draw instruction container,
-                # no additional information is needed
-                pdf.update_object(op_container, "<<>>")
-                pdf.update_stream(op_container, draw_op.tobytes())
-                pdf[page.page_number].set_contents(op_container)
-                pbar.advance()
-        translation_config.raise_if_cancelled()
-        with self.translation_config.progress_monitor.stage_start(
-            SUBSET_FONT_STAGE_NAME,
-            1,
-        ) as pbar:
-            if not translation_config.skip_clean:
-                pdf = self.subset_fonts_in_subprocess(
-                    pdf, translation_config, tag="mono"
-                )
-
-            pbar.advance()
-        with self.translation_config.progress_monitor.stage_start(
-            SAVE_PDF_STAGE_NAME,
-            2,
-        ) as pbar:
-            if not translation_config.no_mono:
-                if translation_config.debug:
+    def write(
+        self, translation_config: TranslationConfig, check_font_exists: bool = False
+    ) -> TranslateResult:
+        try:
+            basename = Path(translation_config.input_file).stem
+            debug_suffix = ".debug" if translation_config.debug else ""
+            if (
+                translation_config.watermark_output_mode
+                != WatermarkOutputMode.Watermarked
+            ):
+                debug_suffix += ".no_watermark"
+            mono_out_path = translation_config.get_output_file_path(
+                f"{basename}{debug_suffix}.{translation_config.lang_out}.mono.pdf",
+            )
+            pdf = pymupdf.open(self.original_pdf_path)
+            self.font_mapper.add_font(pdf, self.docs)
+            with self.translation_config.progress_monitor.stage_start(
+                self.stage_name,
+                len(self.docs.page),
+            ) as pbar:
+                for page in self.docs.page:
                     translation_config.raise_if_cancelled()
-                    pdf.save(
-                        f"{mono_out_path}.decompressed.pdf",
-                        expand=True,
-                        pretty=True,
+                    xobj_available_fonts = {}
+                    xobj_draw_ops = {}
+                    xobj_encoding_length_map = {}
+                    available_font_list = self.get_available_font_list(pdf, page)
+
+                    for xobj in page.pdf_xobject:
+                        xobj_available_fonts[xobj.xobj_id] = available_font_list.copy()
+                        try:
+                            xobj_available_fonts[xobj.xobj_id].update(
+                                self.get_xobj_available_fonts(xobj.xref_id, pdf),
+                            )
+                        except Exception:
+                            pass
+                        xobj_encoding_length_map[xobj.xobj_id] = {
+                            f.font_id: f.encoding_length for f in xobj.pdf_font
+                        }
+                        xobj_op = BitStream()
+                        xobj_op.append(xobj.base_operations.value.encode())
+                        xobj_draw_ops[xobj.xobj_id] = xobj_op
+                    page_encoding_length_map = {
+                        f.font_id: f.encoding_length for f in page.pdf_font
+                    }
+                    page_op = BitStream()
+                    # q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}
+                    # page_op.append(b"q ")
+                    page_op.append(page.base_operations.value.encode())
+                    page_op.append(b" \n")
+                    # page_op.append(b" Q ")
+                    # page_op.append(
+                    #     f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode(),
+                    # )
+                    # 收集所有字符
+                    chars = []
+                    # 首先添加页面级别的字符
+                    if page.pdf_character:
+                        chars.extend(page.pdf_character)
+                    # 然后添加段落中的字符
+                    for paragraph in page.pdf_paragraph:
+                        chars.extend(self.render_paragraph_to_char(paragraph))
+
+                    # 渲染所有字符
+                    for char in chars:
+                        if char.char_unicode == "\n":
+                            continue
+                        if char.pdf_character_id is None:
+                            # dummy char
+                            continue
+                        char_size = char.pdf_style.font_size
+                        font_id = char.pdf_style.font_id
+                        if char.xobj_id in xobj_available_fonts:
+                            if (
+                                check_font_exists
+                                and font_id not in xobj_available_fonts[char.xobj_id]
+                            ):
+                                continue
+                            draw_op = xobj_draw_ops[char.xobj_id]
+                            encoding_length_map = xobj_encoding_length_map[char.xobj_id]
+                        else:
+                            if check_font_exists and font_id not in available_font_list:
+                                continue
+                            draw_op = page_op
+                            encoding_length_map = page_encoding_length_map
+
+                        draw_op.append(b"q ")
+                        self.render_graphic_state(draw_op, char.pdf_style.graphic_state)
+                        if char.vertical:
+                            draw_op.append(
+                                f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode(),
+                            )
+                        else:
+                            draw_op.append(
+                                f"BT /{font_id} {char_size:f} Tf 1 0 0 1 {char.box.x:f} {char.box.y:f} Tm ".encode(),
+                            )
+
+                        encoding_length = encoding_length_map[font_id]
+                        # pdf32000-2008 page14:
+                        # As hexadecimal data enclosed in angle brackets < >
+                        # see 7.3.4.3, "Hexadecimal Strings."
+                        draw_op.append(
+                            f"<{char.pdf_character_id:0{encoding_length * 2}x}>".upper().encode(),
+                        )
+
+                        draw_op.append(b" Tj ET Q \n")
+                    for xobj in page.pdf_xobject:
+                        draw_op = xobj_draw_ops[xobj.xobj_id]
+                        try:
+                            pdf.update_stream(xobj.xref_id, draw_op.tobytes())
+                        except Exception:
+                            logger.warning(
+                                f"update xref {xobj.xref_id} stream fail, continue"
+                            )
+                        # pdf.update_stream(xobj.xref_id, b'')
+                    for rect in page.pdf_rectangle:
+                        self._debug_render_rectangle(page_op, rect)
+                    draw_op = page_op
+                    op_container = pdf.get_new_xref()
+                    # Since this is a draw instruction container,
+                    # no additional information is needed
+                    pdf.update_object(op_container, "<<>>")
+                    pdf.update_stream(op_container, draw_op.tobytes())
+                    pdf[page.page_number].set_contents(op_container)
+                    pbar.advance()
+            translation_config.raise_if_cancelled()
+            with self.translation_config.progress_monitor.stage_start(
+                SUBSET_FONT_STAGE_NAME,
+                1,
+            ) as pbar:
+                if not translation_config.skip_clean:
+                    pdf = self.subset_fonts_in_subprocess(
+                        pdf, translation_config, tag="mono"
                     )
-                translation_config.raise_if_cancelled()
-                self.save_pdf_with_timeout(
-                    pdf,
-                    mono_out_path,
-                    translation_config,
-                    garbage=1,
-                    deflate=True,
-                    clean=not translation_config.skip_clean,
-                    deflate_fonts=True,
-                    linear=False,
-                    tag="mono",
-                )
-            pbar.advance()
-            dual_out_path = None
-            if not translation_config.no_dual:
-                dual_out_path = translation_config.get_output_file_path(
-                    f"{basename}{debug_suffix}.{translation_config.lang_out}.dual.pdf",
-                )
-                translation_config.raise_if_cancelled()
-                original_pdf = pymupdf.open(self.original_pdf_path)
-                translated_pdf = pdf
 
-                # Choose between alternating pages and side-by-side format
-                # Default to side-by-side if not specified
-                use_alternating_pages = translation_config.use_alternating_pages_dual
-
-                if use_alternating_pages:
-                    # Create a dual PDF with alternating pages (original and translation)
-                    dual = self.create_alternating_pages_dual_pdf(
-                        self.original_pdf_path,
-                        translated_pdf,
+                pbar.advance()
+            with self.translation_config.progress_monitor.stage_start(
+                SAVE_PDF_STAGE_NAME,
+                2,
+            ) as pbar:
+                if not translation_config.no_mono:
+                    if translation_config.debug:
+                        translation_config.raise_if_cancelled()
+                        pdf.save(
+                            f"{mono_out_path}.decompressed.pdf",
+                            expand=True,
+                            pretty=True,
+                        )
+                    translation_config.raise_if_cancelled()
+                    self.save_pdf_with_timeout(
+                        pdf,
+                        mono_out_path,
                         translation_config,
+                        garbage=1,
+                        deflate=True,
+                        clean=not translation_config.skip_clean,
+                        deflate_fonts=True,
+                        linear=False,
+                        tag="mono",
                     )
-                else:
-                    # Create a dual PDF with side-by-side pages (original and translation)
-                    dual = self.create_side_by_side_dual_pdf(
-                        original_pdf,
-                        translated_pdf,
+                pbar.advance()
+                dual_out_path = None
+                if not translation_config.no_dual:
+                    dual_out_path = translation_config.get_output_file_path(
+                        f"{basename}{debug_suffix}.{translation_config.lang_out}.dual.pdf",
+                    )
+                    translation_config.raise_if_cancelled()
+                    original_pdf = pymupdf.open(self.original_pdf_path)
+                    translated_pdf = pdf
+
+                    # Choose between alternating pages and side-by-side format
+                    # Default to side-by-side if not specified
+                    use_alternating_pages = (
+                        translation_config.use_alternating_pages_dual
+                    )
+
+                    if use_alternating_pages:
+                        # Create a dual PDF with alternating pages (original and translation)
+                        dual = self.create_alternating_pages_dual_pdf(
+                            self.original_pdf_path,
+                            translated_pdf,
+                            translation_config,
+                        )
+                    else:
+                        # Create a dual PDF with side-by-side pages (original and translation)
+                        dual = self.create_side_by_side_dual_pdf(
+                            original_pdf,
+                            translated_pdf,
+                            dual_out_path,
+                            translation_config,
+                        )
+
+                    if translation_config.debug:
+                        translation_config.raise_if_cancelled()
+                        try:
+                            dual = self.write_debug_info(dual, translation_config)
+                        except Exception:
+                            logger.warning(
+                                "Failed to write debug info to dual PDF",
+                                exc_info=True,
+                            )
+
+                    self.save_pdf_with_timeout(
+                        dual,
                         dual_out_path,
                         translation_config,
+                        garbage=1,
+                        deflate=True,
+                        clean=not translation_config.skip_clean,
+                        deflate_fonts=True,
+                        linear=False,
+                        tag="dual",
                     )
-
-                if translation_config.debug:
-                    translation_config.raise_if_cancelled()
-                    try:
-                        dual = self.write_debug_info(dual, translation_config)
-                    except Exception:
-                        logger.warning(
-                            "Failed to write debug info to dual PDF",
-                            exc_info=True,
+                    if translation_config.debug:
+                        translation_config.raise_if_cancelled()
+                        dual.save(
+                            f"{dual_out_path}.decompressed.pdf",
+                            expand=True,
+                            pretty=True,
                         )
-
-                self.save_pdf_with_timeout(
-                    dual,
-                    dual_out_path,
-                    translation_config,
-                    garbage=1,
-                    deflate=True,
-                    clean=not translation_config.skip_clean,
-                    deflate_fonts=True,
-                    linear=False,
-                    tag="dual",
-                )
-                if translation_config.debug:
-                    translation_config.raise_if_cancelled()
-                    dual.save(
-                        f"{dual_out_path}.decompressed.pdf",
-                        expand=True,
-                        pretty=True,
-                    )
-            pbar.advance()
-        return TranslateResult(mono_out_path, dual_out_path)
+                pbar.advance()
+            return TranslateResult(mono_out_path, dual_out_path)
+        except Exception:
+            logger.exception(
+                "Failed to create PDF: %s",
+                translation_config.input_file,
+            )
+            return self.write(translation_config, True)
