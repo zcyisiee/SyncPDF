@@ -497,11 +497,21 @@ class ILCreater:
 
         char_id = char.cid
 
-        if font_bounding_box_map := self.current_page_font_char_bounding_box_map.get(
-            self.xobj_id, self.current_page_font_char_bounding_box_map
-        ).get(font.font_id):
-            char_bounding_box = font_bounding_box_map.get(char_id, None)
-        else:
+        try:
+            if (
+                font_bounding_box_map
+                := self.current_page_font_char_bounding_box_map.get(
+                    self.xobj_id, self.current_page_font_char_bounding_box_map
+                ).get(font.font_id)
+            ):
+                char_bounding_box = font_bounding_box_map.get(char_id, None)
+            else:
+                char_bounding_box = None
+        except Exception:
+            logger.debug(
+                "Failed to get font bounding box for char %s",
+                char.get_text(),
+            )
             char_bounding_box = None
 
         char_unicode = char.get_text()
