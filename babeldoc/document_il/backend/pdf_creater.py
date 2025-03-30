@@ -158,27 +158,30 @@ class PDFCreater:
         return self.get_xobj_available_fonts(page_xref_id, pdf)
 
     def get_xobj_available_fonts(self, page_xref_id, pdf):
-        resources_type, r_id = pdf.xref_get_key(page_xref_id, "Resources")
-        if resources_type == "xref":
-            resource_xref_id = re.search("(\\d+) 0 R", r_id).group(1)
-            r_id = pdf.xref_object(int(resource_xref_id))
-            resources_type = "dict"
-        if resources_type == "dict":
-            xref_id = re.search("/Font (\\d+) 0 R", r_id)
-            if xref_id is not None:
-                xref_id = xref_id.group(1)
-                font_dict = pdf.xref_object(int(xref_id))
+        try:
+            resources_type, r_id = pdf.xref_get_key(page_xref_id, "Resources")
+            if resources_type == "xref":
+                resource_xref_id = re.search("(\\d+) 0 R", r_id).group(1)
+                r_id = pdf.xref_object(int(resource_xref_id))
+                resources_type = "dict"
+            if resources_type == "dict":
+                xref_id = re.search("/Font (\\d+) 0 R", r_id)
+                if xref_id is not None:
+                    xref_id = xref_id.group(1)
+                    font_dict = pdf.xref_object(int(xref_id))
+                else:
+                    search = re.search("/Font *<<(.+?)>>", r_id.replace("\n", " "))
+                    if search is None:
+                        # Have resources but no fonts
+                        return set()
+                    font_dict = search.group(1)
             else:
-                search = re.search("/Font *<<(.+?)>>", r_id.replace("\n", " "))
-                if search is None:
-                    # Have resources but no fonts
-                    return set()
-                font_dict = search.group(1)
-        else:
-            r_id = int(r_id.split(" ")[0])
-            _, font_dict = pdf.xref_get_key(r_id, "Font")
-        fonts = re.findall("/([^ ]+?) ", font_dict)
-        return set(fonts)
+                r_id = int(r_id.split(" ")[0])
+                _, font_dict = pdf.xref_get_key(r_id, "Font")
+            fonts = re.findall("/([^ ]+?) ", font_dict)
+            return set(fonts)
+        except Exception:
+            return set()
 
     def _debug_render_rectangle(
         self,
@@ -699,13 +702,13 @@ class PDFCreater:
                     char_size = char.pdf_style.font_size
                     font_id = char.pdf_style.font_id
                     if char.xobj_id in xobj_available_fonts:
-                        if font_id not in xobj_available_fonts[char.xobj_id]:
-                            continue
+                        # if font_id not in xobj_available_fonts[char.xobj_id]:
+                        #     continue
                         draw_op = xobj_draw_ops[char.xobj_id]
                         encoding_length_map = xobj_encoding_length_map[char.xobj_id]
                     else:
-                        if font_id not in available_font_list:
-                            continue
+                        # if font_id not in available_font_list:
+                        #     continue
                         draw_op = page_op
                         encoding_length_map = page_encoding_length_map
 
