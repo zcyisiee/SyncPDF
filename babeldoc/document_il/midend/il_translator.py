@@ -132,7 +132,7 @@ class ILTranslator:
             self.tokenizer = tokenizer
 
     def calc_token_count(self, text: str) -> int:
-        return len(self.tokenizer.encode(text))
+        return len(self.tokenizer.encode(text, disallowed_special=()))
 
     def translate(self, docs: Document):
         tracker = DocumentTranslateTracker()
