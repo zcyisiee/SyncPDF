@@ -225,13 +225,13 @@ class PriorityThreadPoolExecutor(ThreadPoolExecutor):
             _threads_queues[t] = self._work_queue
 
     def shutdown(self, wait=True, *, cancel_futures=False):
-        logger.info("Shutting down executor %s", self._thread_name_prefix or self)
+        logger.debug("Shutting down executor %s", self._thread_name_prefix or self)
         if wait:
-            logger.info(
+            logger.debug(
                 "Waiting for all tasks done %s", self._thread_name_prefix or self
             )
             self._work_queue.join()
-            logger.info("All tasks done %s", self._thread_name_prefix or self)
+            logger.debug("All tasks done %s", self._thread_name_prefix or self)
 
         with self._shutdown_lock:
             self._shutdown = True
@@ -250,10 +250,10 @@ class PriorityThreadPoolExecutor(ThreadPoolExecutor):
             # _work_queue.get(block=True) from permanently blocking.
             self._work_queue.put(None)
         if wait:
-            logger.info(
+            logger.debug(
                 "Waiting for all thread done %s", self._thread_name_prefix or self
             )
             for t in self._threads:
                 self._work_queue.put(None)
                 t.join()
-        logger.info("shutdown finish %s", self._thread_name_prefix or self)
+        logger.debug("shutdown finish %s", self._thread_name_prefix or self)
