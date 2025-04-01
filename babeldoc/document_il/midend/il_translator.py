@@ -1,4 +1,3 @@
-import concurrent.futures
 import json
 import logging
 import re
@@ -22,6 +21,9 @@ from babeldoc.document_il.utils.layout_helper import get_char_unicode_string
 from babeldoc.document_il.utils.layout_helper import is_same_style
 from babeldoc.document_il.utils.layout_helper import is_same_style_except_font
 from babeldoc.document_il.utils.layout_helper import is_same_style_except_size
+from babeldoc.document_il.utils.priority_thread_pool_executor import (
+    PriorityThreadPoolExecutor,
+)
 from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
@@ -142,7 +144,7 @@ class ILTranslator:
             self.stage_name,
             total,
         ) as pbar:
-            with concurrent.futures.ThreadPoolExecutor(
+            with PriorityThreadPoolExecutor(
                 max_workers=min(
                     self.translation_config.qps * 2,
                     self.translation_config.qps + 5,
@@ -161,7 +163,7 @@ class ILTranslator:
     def process_page(
         self,
         page: Page,
-        executor: concurrent.futures.ThreadPoolExecutor,
+        executor: PriorityThreadPoolExecutor,
         pbar: tqdm | None = None,
         tracker: PageTranslateTracker = None,
     ):
