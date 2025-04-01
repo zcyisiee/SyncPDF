@@ -533,6 +533,7 @@ class StylesAndFormulas:
             r"|CMSS.+"
             r"|Arial.*"
             r"|TimesNewRoman.*"
+            r"|SegoeUI.*"
             r")$"
         )
         if self.translation_config.formular_font_pattern:
