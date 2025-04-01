@@ -168,7 +168,7 @@ class ILTranslatorLLMOnly:
             if paragraph.layout_label == "title":
                 self.shared_context_cross_split_part.recent_title_paragraph = paragraph
 
-            if total_token_count > 800 or len(paragraphs) > 5:
+            if total_token_count > 400 or len(paragraphs) > 5:
                 executor.submit(
                     self.translate_paragraph,
                     BatchParagraph(paragraphs, tracker),
