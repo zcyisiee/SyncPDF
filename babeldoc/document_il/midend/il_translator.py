@@ -134,7 +134,10 @@ class ILTranslator:
             self.tokenizer = tokenizer
 
     def calc_token_count(self, text: str) -> int:
-        return len(self.tokenizer.encode(text, disallowed_special=()))
+        try:
+            return len(self.tokenizer.encode(text, disallowed_special=()))
+        except Exception:
+            return 0
 
     def translate(self, docs: Document):
         tracker = DocumentTranslateTracker()
