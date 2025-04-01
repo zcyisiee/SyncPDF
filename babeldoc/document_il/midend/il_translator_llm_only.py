@@ -65,7 +65,10 @@ class ILTranslatorLLMOnly:
             raise ValueError("LLM translator not supported") from e
 
     def calc_token_count(self, text: str) -> int:
-        return len(self.tokenizer.encode(text, disallowed_special=()))
+        try:
+            return len(self.tokenizer.encode(text, disallowed_special=()))
+        except Exception:
+            return 0
 
     def find_title_paragraph(self, docs: Document) -> PdfParagraph | None:
         """Find the first paragraph with layout_label 'title' in the document.
