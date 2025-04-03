@@ -49,19 +49,19 @@ from babeldoc.translation_config import WatermarkOutputMode
 logger = logging.getLogger(__name__)
 
 TRANSLATE_STAGES = [
-    (ILCreater.stage_name, 5.35),  # Parse PDF and Create IR
-    (DetectScannedFile.stage_name, 0.5),  # No historical data, estimated
-    (LayoutParser.stage_name, 6.42),  # Parse Page Layout
-    (TableParser.stage_name, 0.5),  # Parse Table
-    (ParagraphFinder.stage_name, 2.14),  # Parse Paragraphs
-    (StylesAndFormulas.stage_name, 1.12),  # Parse Formulas and Styles
+    (ILCreater.stage_name, 14.12),  # Parse PDF and Create IR
+    (DetectScannedFile.stage_name, 2.45),  # DetectScannedFile
+    (LayoutParser.stage_name, 14.03),  # Parse Page Layout
+    (TableParser.stage_name, 1.0),  # Parse Table
+    (ParagraphFinder.stage_name, 6.26),  # Parse Paragraphs
+    (StylesAndFormulas.stage_name, 1.66),  # Parse Formulas and Styles
     # (RemoveDescent.stage_name, 0.15),  # Remove Char Descent
-    (ILTranslator.stage_name, 75.16),  # Translate Paragraphs
-    (Typesetting.stage_name, 3.84),  # Typesetting
-    (FontMapper.stage_name, 0.65),  # Add Fonts
-    (PDFCreater.stage_name, 1.41),  # Generate drawing instructions
-    (SUBSET_FONT_STAGE_NAME, 1.29),  # Subset font
-    (SAVE_PDF_STAGE_NAME, 2.45),  # Save PDF
+    (ILTranslator.stage_name, 46.96),  # Translate Paragraphs
+    (Typesetting.stage_name, 4.71),  # Typesetting
+    (FontMapper.stage_name, 0.61),  # Add Fonts
+    (PDFCreater.stage_name, 1.96),  # Generate drawing instructions
+    (SUBSET_FONT_STAGE_NAME, 0.92),  # Subset font
+    (SAVE_PDF_STAGE_NAME, 6.34),  # Save PDF
 ]
 
 resfont_map = {
