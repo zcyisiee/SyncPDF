@@ -538,6 +538,9 @@ class StylesAndFormulas:
             r"|CMSL10.*"
             r"|CMTI10.*"
             r"|CMTT10.*"
+            r"|Times-Italic.*"
+            r"|MeridienLTStd.*"
+            r"|Calibri.*"
             r")$"
         )
         if self.translation_config.formular_font_pattern:
