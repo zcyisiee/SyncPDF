@@ -179,6 +179,7 @@ class ILTranslatorLLMOnly:
                     self.translation_config.shared_context_cross_split_part.recent_title_paragraph,
                     executor2,
                     priority=1048576 - total_token_count,
+                    paragraph_token_count=total_token_count,
                 )
                 paragraphs = []
                 total_token_count = 0
@@ -194,6 +195,7 @@ class ILTranslatorLLMOnly:
                 self.translation_config.shared_context_cross_split_part.recent_title_paragraph,
                 executor2,
                 priority=1048576 - total_token_count,
+                paragraph_token_count=total_token_count,
             )
 
     def translate_paragraph(
@@ -205,6 +207,7 @@ class ILTranslatorLLMOnly:
         title_paragraph: PdfParagraph | None = None,
         local_title_paragraph: PdfParagraph | None = None,
         executor: PriorityThreadPoolExecutor | None = None,
+        paragraph_token_count: int = 0,
     ):
         """Translate a paragraph using pre and post processing functions."""
         self.translation_config.raise_if_cancelled()
@@ -293,7 +296,10 @@ class ILTranslatorLLMOnly:
             llm_input.append(prompt_template)
 
             final_input = "\n".join(llm_input).strip()
-            llm_output = self.translate_engine.llm_translate(final_input)
+            llm_output = self.translate_engine.llm_translate(
+                final_input,
+                rate_limit_params={"paragraph_token_count": paragraph_token_count},
+            )
             llm_output = llm_output.strip()
 
             llm_output = self._clean_json_output(llm_output)
@@ -364,6 +370,9 @@ class ILTranslatorLLMOnly:
                         logger.warning(
                             f"Fallback to simple translation. paragraph id: {inputs[id_][2].debug_id}"
                         )
+                        paragraph_token_count = self.calc_token_count(
+                            inputs[id_][2].unicode
+                        )
                         executor.submit(
                             self.il_translator.translate_paragraph,
                             inputs[id_][2],
@@ -371,7 +380,8 @@ class ILTranslatorLLMOnly:
                             inputs[id_][3],
                             page_font_map,
                             xobj_font_map,
-                            priority=1048576 - self.calc_token_count(paragraph.unicode),
+                            priority=1048576 - paragraph_token_count,
+                            paragraph_token_count=paragraph_token_count,
                         )
 
         except Exception as e:
@@ -385,6 +395,7 @@ class ILTranslatorLLMOnly:
                 tracker = batch_paragraph.trackers[i]
                 if paragraph.debug_id is None:
                     continue
+                paragraph_token_count = self.calc_token_count(paragraph.unicode)
                 executor.submit(
                     self.il_translator.translate_paragraph,
                     paragraph,
@@ -392,7 +403,8 @@ class ILTranslatorLLMOnly:
                     tracker,
                     page_font_map,
                     xobj_font_map,
-                    priority=1048576 - self.calc_token_count(paragraph.unicode),
+                    priority=1048576 - paragraph_token_count,
+                    paragraph_token_count=paragraph_token_count,
                 )
 
     def _clean_json_output(self, llm_output: str) -> str:

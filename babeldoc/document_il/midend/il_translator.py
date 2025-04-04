@@ -181,6 +181,7 @@ class ILTranslator:
                 for font in xobj.pdf_font:
                     page_xobj_font_map[xobj.xobj_id][font.font_id] = font
             # self.translate_paragraph(paragraph, pbar,tracker.new_paragraph(), page_font_map, page_xobj_font_map)
+            paragraph_token_count = self.calc_token_count(paragraph.unicode)
             executor.submit(
                 self.translate_paragraph,
                 paragraph,
@@ -188,7 +189,8 @@ class ILTranslator:
                 tracker.new_paragraph(),
                 page_font_map,
                 page_xobj_font_map,
-                priority=1048576 - self.calc_token_count(paragraph.unicode),
+                priority=1048576 - paragraph_token_count,
+                paragraph_token_count=paragraph_token_count,
             )
 
     class TranslateInput:
@@ -597,6 +599,7 @@ class ILTranslator:
         tracker: ParagraphTranslateTracker = None,
         page_font_map: dict[str, PdfFont] = None,
         xobj_font_map: dict[int, dict[str, PdfFont]] = None,
+        paragraph_token_count: int = 0,
     ):
         """Translate a paragraph using pre and post processing functions."""
         self.translation_config.raise_if_cancelled()
@@ -610,7 +613,10 @@ class ILTranslator:
                     return
 
                 # Perform translation
-                translated_text = self.translate_engine.translate(text)
+                translated_text = self.translate_engine.translate(
+                    text,
+                    rate_limit_params={"paragraph_token_count": paragraph_token_count},
+                )
                 translated_text = re.sub(r"[. 。…，]{20,}", ".", translated_text)
 
                 # Post-translation processing
