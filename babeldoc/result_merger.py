@@ -98,6 +98,16 @@ class ResultMerger:
         merged_result.no_watermark_mono_pdf_path = merged_no_watermark_mono_path
         merged_result.no_watermark_dual_pdf_path = merged_no_watermark_dual_path
 
+        if merged_result.no_watermark_mono_pdf_path is None:
+            merged_result.no_watermark_mono_pdf_path = merged_mono_path
+        elif merged_result.mono_pdf_path is None:
+            merged_result.mono_pdf_path = merged_no_watermark_mono_path
+
+        if merged_result.no_watermark_dual_pdf_path is None:
+            merged_result.no_watermark_dual_pdf_path = merged_dual_path
+        elif merged_result.dual_pdf_path is None:
+            merged_result.dual_pdf_path = merged_no_watermark_dual_path
+
         # Calculate total time
         total_time = sum(
             r.total_seconds for r in results.values() if hasattr(r, "total_seconds")
