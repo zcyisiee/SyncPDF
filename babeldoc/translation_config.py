@@ -67,6 +67,7 @@ class TranslationConfig:
         split_strategy: BaseSplitStrategy | None = None,
         table_model=None,
         show_char_box: bool = False,
+        skip_scanned_detection: bool = False,
     ):
         self.translator = translator
 
@@ -97,6 +98,7 @@ class TranslationConfig:
         self.doc_layout_model = doc_layout_model
 
         self.skip_clean = skip_clean or enhance_compatibility
+        self.skip_scanned_detection = skip_scanned_detection
 
         self.dual_translate_first = dual_translate_first or enhance_compatibility
         self.disable_rich_text_translate = (

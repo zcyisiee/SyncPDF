@@ -431,6 +431,10 @@ def do_translate(
                                     (x, x) for x in should_translate_pages
                                 ]
 
+                                # Only first part should do scanned detection if enabled
+                                if i > 0:
+                                    part_config.skip_scanned_detection = True
+
                                 part_config.working_dir = (
                                     translation_config.get_part_working_dir(i)
                                 )
@@ -576,14 +580,17 @@ def _do_translate_single(
     # [Previous implementation of do_translate continues here]
 
     # 检测是否为扫描文件
-    logger.debug("start detect scanned file")
-    DetectScannedFile(translation_config).process(docs)
-    logger.debug("finish detect scanned file")
-    if translation_config.debug:
-        xml_converter.write_json(
-            docs,
-            translation_config.get_working_file_path("detect_scanned_file.json"),
-        )
+    if translation_config.skip_scanned_detection:
+        logger.debug("skipping scanned file detection")
+    else:
+        logger.debug("start detect scanned file")
+        DetectScannedFile(translation_config).process(docs)
+        logger.debug("finish detect scanned file")
+        if translation_config.debug:
+            xml_converter.write_json(
+                docs,
+                translation_config.get_working_file_path("detect_scanned_file.json"),
+            )
 
     # Generate layouts for all pages
     logger.debug("start generating layouts")

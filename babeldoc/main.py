@@ -23,7 +23,7 @@ from babeldoc.translation_config import TranslationConfig
 from babeldoc.translation_config import WatermarkOutputMode
 
 logger = logging.getLogger(__name__)
-__version__ = "0.2.32"
+__version__ = "0.2.33"
 
 
 def create_parser():
@@ -204,6 +204,12 @@ def create_parser():
         default=False,
         help="Show character box (debug only)",
     )
+    translation_group.add_argument(
+        "--skip-scanned-detection",
+        action="store_true",
+        default=False,
+        help="Skip scanned document detection (speeds up processing for non-scanned documents)",
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -370,6 +376,7 @@ async def main():
             split_strategy=split_strategy,
             table_model=table_model,
             show_char_box=args.show_char_box,
+            skip_scanned_detection=args.skip_scanned_detection,
         )
 
         # Create progress handler
