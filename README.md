@@ -141,6 +141,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 - `--max-pages-per-part`: Maximum number of pages per part for split translation. If not set, no splitting will be performed.
 - `--no-watermark`: [DEPRECATED] Use --watermark-output-mode=no_watermark instead.
 - `--translate-table-text`: Translate table text (experimental, default: False)
+- `--skip-scanned-detection`: Skip scanned document detection (default: False). When using split translation, only the first part performs detection if not skipped.
 
 > [!TIP]
 > - Both `--skip-clean` and `--dual-translate-first` may help improve compatibility with some PDF readers
@@ -148,6 +149,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 > - However, using `--skip-clean` will result in larger file sizes
 > - If you encounter any compatibility issues, try using `--enhance-compatibility` first
 > - Use `--max-pages-per-part` for large documents to split them into smaller parts for translation and automatically merge them back.
+> - Use `--skip-scanned-detection` to speed up processing when you know your document is not a scanned PDF.
 
 ### Translation Service Options
 
@@ -222,6 +224,7 @@ use-alternating-pages-dual = false
 watermark-output-mode = "watermarked"  # Choices: "watermarked", "no_watermark", "both"
 max-pages-per-part = 50  # Automatically split the document for translation and merge it back.
 # no-watermark = false  # DEPRECATED: Use watermark-output-mode instead
+skip-scanned-detection = false  # Skip scanned document detection for faster processing
 
 # Translation service
 openai = true
