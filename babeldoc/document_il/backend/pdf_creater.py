@@ -85,12 +85,14 @@ class PDFCreater:
         original_pdf_path: str,
         document: il_version_1.Document,
         translation_config: TranslationConfig,
+        mediabox_data: dict,
     ):
         self.original_pdf_path = original_pdf_path
         self.docs = document
         self.font_path = translation_config.font
         self.font_mapper = FontMapper(translation_config)
         self.translation_config = translation_config
+        self.mediabox_data = mediabox_data
 
     def render_graphic_state(
         self,
@@ -636,6 +638,10 @@ class PDFCreater:
 
             return False
 
+    def restore_media_box(self, doc: pymupdf.Document, mediabox_data: dict) -> None:
+        for pageno, mediabox in mediabox_data.items():
+            doc.xref_set_key(doc[pageno].xref, "MediaBox", mediabox[1])
+
     def write(
         self, translation_config: TranslationConfig, check_font_exists: bool = False
     ) -> TranslateResult:
@@ -776,6 +782,7 @@ class PDFCreater:
                     )
 
                 pbar.advance()
+            self.restore_media_box(pdf, self.mediabox_data)
             with self.translation_config.progress_monitor.stage_start(
                 SAVE_PDF_STAGE_NAME,
                 2,

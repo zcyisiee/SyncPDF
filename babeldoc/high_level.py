@@ -525,6 +525,17 @@ def do_translate(
         translation_config.cleanup_temp_files()
 
 
+def fix_media_box(doc: Document) -> None:
+    mediabox_data = {}
+    for page in doc:
+        if page.mediabox.x0 != 0 or page.mediabox.y0 != 0:
+            x1 = page.mediabox.x1
+            y1 = page.mediabox.y1
+            mediabox_data[page.number] = doc.xref_get_key(page.xref, "MediaBox")
+            doc.xref_set_key(page.xref, "MediaBox", f"[0 0 {x1} {y1}]")
+    return mediabox_data
+
+
 def _do_translate_single(
     pm: ProgressMonitor,
     translation_config: TranslationConfig,
@@ -541,6 +552,7 @@ def _do_translate_single(
         # Fix null xref in PDF file
         fix_null_xref(doc_input)
         doc_input.save(output_path, expand=True, pretty=True)
+        del doc_input
 
     # Continue with original processing
     temp_pdf_path = translation_config.get_working_file_path("input.pdf")
@@ -549,6 +561,8 @@ def _do_translate_single(
 
     # Fix null xref in PDF file
     fix_null_xref(doc_pdf2zh)
+
+    mediabox_data = fix_media_box(doc_pdf2zh)
 
     for page in doc_pdf2zh:
         page.insert_font(resfont, None)
@@ -677,7 +691,7 @@ def _do_translate_single(
             translation_config.get_working_file_path("typsetting.json"),
         )
 
-    pdf_creater = PDFCreater(temp_pdf_path, docs, translation_config)
+    pdf_creater = PDFCreater(temp_pdf_path, docs, translation_config, mediabox_data)
     result = pdf_creater.write(translation_config)
     try:
         if mono_watermark_first_page_doc_bytes:
