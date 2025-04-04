@@ -104,7 +104,7 @@ class BaseTranslator(ABC):
         """
         self.cache.add_params(k, v)
 
-    def translate(self, text, ignore_cache=False):
+    def translate(self, text, ignore_cache=False, rate_limit_params: dict = None):
         """
         Translate the text, and the other part should call this method.
         :param text: text to translate
@@ -117,12 +117,12 @@ class BaseTranslator(ABC):
                 self.translate_cache_call_count += 1
                 return cache
         _translate_rate_limiter.wait()
-        translation = self.do_translate(text)
+        translation = self.do_translate(text, rate_limit_params)
         if not (self.ignore_cache or ignore_cache):
             self.cache.set(text, translation)
         return translation
 
-    def llm_translate(self, text, ignore_cache=False):
+    def llm_translate(self, text, ignore_cache=False, rate_limit_params: dict = None):
         """
         Translate the text, and the other part should call this method.
         :param text: text to translate
@@ -135,13 +135,13 @@ class BaseTranslator(ABC):
                 self.translate_cache_call_count += 1
                 return cache
         _translate_rate_limiter.wait()
-        translation = self.do_llm_translate(text)
+        translation = self.do_llm_translate(text, rate_limit_params)
         if not (self.ignore_cache or ignore_cache):
             self.cache.set(text, translation)
         return translation
 
     @abstractmethod
-    def do_llm_translate(self, text):
+    def do_llm_translate(self, text, rate_limit_params: dict = None):
         """
         Actual translate text, override this method
         :param text: text to translate
@@ -150,7 +150,7 @@ class BaseTranslator(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def do_translate(self, text):
+    def do_translate(self, text, rate_limit_params: dict = None):
         """
         Actual translate text, override this method
         :param text: text to translate
@@ -209,7 +209,7 @@ class OpenAITranslator(BaseTranslator):
             f"(Attempt {retry_state.attempt_number}/100)"
         ),
     )
-    def do_translate(self, text) -> str:
+    def do_translate(self, text, rate_limit_params: dict = None) -> str:
         response = self.client.chat.completions.create(
             model=self.model,
             **self.options,
@@ -241,7 +241,7 @@ class OpenAITranslator(BaseTranslator):
             f"(Attempt {retry_state.attempt_number}/100)"
         ),
     )
-    def do_llm_translate(self, text):
+    def do_llm_translate(self, text, rate_limit_params: dict = None):
         if text is None:
             return None
 
