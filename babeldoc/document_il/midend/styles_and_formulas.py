@@ -543,6 +543,9 @@ class StylesAndFormulas:
             r"|Calibri.*"
             r"|STIXMathJax_Main-Regular.*"
             r"|STIXMathJax_Main-Italic.*"
+            r"|.*NewBaskerville.*"
+            r"|.*FranklinGothic.*"
+            r"|.*AGaramondPro.*"
             r")$"
         )
         if self.translation_config.formular_font_pattern:
