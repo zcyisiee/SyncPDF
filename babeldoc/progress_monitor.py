@@ -108,7 +108,7 @@ class ProgressMonitor:
         #     self.finish_callback(**kwargs)
 
     def stage_start(self, stage_name: str, total: int):
-        if self.disable:
+        if self.disable or self.parent_monitor and self.parent_monitor.disable:
             return DummyTranslationStage(stage_name, total, self, 0)
         stage = self.stage[stage_name]
         stage.run_time += 1
@@ -137,7 +137,7 @@ class ProgressMonitor:
         logger.debug("ProgressMonitor __exit__")
 
     def on_finish(self):
-        if self.disable:
+        if self.disable or self.parent_monitor and self.parent_monitor.disable:
             return
         if self.cancel_event:
             self.cancel_event.set()
@@ -147,7 +147,7 @@ class ProgressMonitor:
             self.finish_callback(type="error", error=CancelledError)
 
     def stage_done(self, stage):
-        if self.disable:
+        if self.disable or self.parent_monitor and self.parent_monitor.disable:
             return
         self.last_report_time = 0.0
         self.finish_stage_count += 1
@@ -173,7 +173,7 @@ class ProgressMonitor:
             )
 
     def calculate_current_progress(self, stage=None):
-        if self.disable:
+        if self.disable or self.parent_monitor and self.parent_monitor.disable:
             return 100
         part_weight = 1 / self.total_parts
         if self.parent_monitor:
@@ -201,7 +201,7 @@ class ProgressMonitor:
             for s in self.stage.values()
             if s.run_time > 0 and s.current == s.total
         )
-        if stage is not None and stage.total > 0:
+        if stage is not None and 0 < stage.total != stage.current:
             progress += stage.weight * stage.current * 100 / stage.total
 
         # If this is a part monitor (has parent_monitor), return the progress as is
@@ -212,7 +212,7 @@ class ProgressMonitor:
         return progress
 
     def stage_update(self, stage, n: int):
-        if self.disable:
+        if self.disable or self.parent_monitor and self.parent_monitor.disable:
             return
         report_time_delta = time.time() - self.last_report_time
         if report_time_delta < self.report_interval and stage.total > 3:
@@ -235,13 +235,13 @@ class ProgressMonitor:
             self.last_report_time = time.time()
 
     def translate_done(self, translate_result):
-        if self.disable:
+        if self.disable or self.parent_monitor and self.parent_monitor.disable:
             return
         if self.finish_callback:
             self.finish_callback(type="finish", translate_result=translate_result)
 
     def translate_error(self, error):
-        if self.disable:
+        if self.disable or self.parent_monitor and self.parent_monitor.disable:
             return
         if self.finish_callback:
             logger.info(f"progress_monitor handle translate_error: {error}")
@@ -252,7 +252,7 @@ class ProgressMonitor:
             raise asyncio.CancelledError
 
     def cancel(self):
-        if self.disable:
+        if self.disable or self.parent_monitor and self.parent_monitor.disable:
             return
         if self.cancel_event:
             logger.info("Translation canceled")
