@@ -546,6 +546,7 @@ class StylesAndFormulas:
             r"|.*NewBaskerville.*"
             r"|.*FranklinGothic.*"
             r"|.*AGaramondPro.*"
+            r"|.*PalatinoItalCOR.*"
             r")$"
         )
         if self.translation_config.formular_font_pattern:
