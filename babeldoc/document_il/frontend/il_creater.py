@@ -1,4 +1,5 @@
 import base64
+import functools
 import logging
 import re
 from functools import wraps
@@ -180,6 +181,7 @@ class ILCreater:
         self.xobj_stack = []
         self.current_page_font_name_id_map = {}
         self.current_page_font_char_bounding_box_map = {}
+        self.mupdf_font_map: dict[int, pymupdf.Font] = {}
 
     def on_finish(self):
         self.progress.__exit__(None, None, None)
@@ -364,11 +366,20 @@ class ILCreater:
                 else:
                     encoding_length = 1
         try:
-            mupdf_font = pymupdf.Font(fontbuffer=self.mupdf.extract_font(xref_id)[3])
+            if xref_id in self.mupdf_font_map:
+                mupdf_font = self.mupdf_font_map[xref_id]
+            else:
+                mupdf_font = pymupdf.Font(
+                    fontbuffer=self.mupdf.extract_font(xref_id)[3]
+                )
+                mupdf_font.has_glyph = functools.lru_cache(maxsize=10240, typed=True)(
+                    mupdf_font.has_glyph,
+                )
             bold = mupdf_font.is_bold
             italic = mupdf_font.is_italic
             monospaced = mupdf_font.is_monospaced
             serif = mupdf_font.is_serif
+            self.mupdf_font_map[xref_id] = mupdf_font
         except Exception:
             bold = None
             italic = None
@@ -547,6 +558,14 @@ class ILCreater:
             font_size=char.size,
             graphic_state=gs,
         )
+
+        if font:
+            font_xref_id = font.xref_id
+            if font_xref_id in self.mupdf_font_map:
+                mupdf_font = self.mupdf_font_map[font_xref_id]
+                if "(cid:" not in char_unicode:
+                    char_id = mupdf_font.has_glyph(ord(char_unicode))
+
         pdf_char = il_version_1.PdfCharacter(
             box=bbox,
             pdf_character_id=char_id,
