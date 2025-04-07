@@ -563,9 +563,9 @@ class ILCreater:
             font_xref_id = font.xref_id
             if font_xref_id in self.mupdf_font_map:
                 mupdf_font = self.mupdf_font_map[font_xref_id]
-                if "(cid:" not in char_unicode:
-                    if mupdf_cid := mupdf_font.has_glyph(ord(char_unicode)):
-                        char_id = mupdf_cid
+                # if "(cid:" not in char_unicode:
+                #     if mupdf_cid := mupdf_font.has_glyph(ord(char_unicode)):
+                #         char_id = mupdf_cid
 
         pdf_char = il_version_1.PdfCharacter(
             box=bbox,
