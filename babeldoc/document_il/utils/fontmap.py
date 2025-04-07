@@ -60,11 +60,6 @@ class FontMapper:
             f.font_id: f for f in self.fonts.values()
         }
 
-        for font in self.fontid2font.values():
-            font.char_lengths = functools.lru_cache(maxsize=10240, typed=True)(
-                font.char_lengths,
-            )
-
         self.fontid2font["base"] = self.fontid2font[self.base_font_ids[0]]
 
         self.normal_fonts: list[pymupdf.Font] = [

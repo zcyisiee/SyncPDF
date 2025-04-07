@@ -449,11 +449,11 @@ class ILTranslator:
         combined_placeholder_pattern = "|".join(placeholder_patterns)
 
         def remove_placeholder(text: str):
-            return re.sub(combined_placeholder_pattern, "", text)
+            return re.sub(combined_placeholder_pattern, "", text, flags=re.IGNORECASE)
 
         # 找到所有匹配
         last_end = 0
-        for match in re.finditer(combined_pattern, output):
+        for match in re.finditer(combined_pattern, output, flags=re.IGNORECASE):
             # 处理匹配之前的普通文本
             if match.start() > last_end:
                 text = output[last_end : match.start()]
