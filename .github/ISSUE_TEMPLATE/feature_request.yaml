@@ -1,33 +1,41 @@
-name: Feature request
-description: Suggest an idea for this project
+name: "✨ Feature Request"
+description: Suggest a new idea or improvement for BabelDOC
 labels: ['enhancement']
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve **BabelDOC**! Please fill out the form below to suggest a feature.
+
   - type: textarea
     id: describe
     attributes:
       label: Is your feature request related to a problem?
-      description: A clear and concise description of what the problem is
+      description: If applicable, describe what problem this feature would solve.
       placeholder: Ex. I'm always frustrated when ...
     validations:
       required: false
+
   - type: textarea
     id: solution
     attributes:
       label: Describe the solution you'd like
-      description: A clear and concise description of what you want to happen
+      description: What would you like to see happen?
     validations:
-      required: false
+      required: true
+
   - type: textarea
-    id: 
+    id: alternatives
     attributes:
       label: Describe alternatives you've considered
-      description: A clear and concise description of any alternative solutions or features you've considered.
+      description: Have you thought of other ways to solve this?
     validations:
       required: false
+
   - type: textarea
     id: additional
     attributes:
       label: Additional context
-      description: Add any other projects about the feature request here.
+      description: Any other context, examples, or screenshots?
     validations:
       required: false
