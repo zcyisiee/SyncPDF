@@ -60,6 +60,7 @@ body:
         - label: I’ve updated relevant documentation (if applicable)
         - label: I’ve added necessary tests (if applicable)
         - label: All new and existing tests passed locally
+        - label: I understand that due to limited maintainer resources, only small pull requests are accepted. Suggestions with proof-of-concept patches are appreciated, and my patch may be rewritten if necessary.
 
   - type: textarea
     id: testing
