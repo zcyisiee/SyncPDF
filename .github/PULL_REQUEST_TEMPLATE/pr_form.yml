@@ -1,5 +1,5 @@
 name: Pull Request
-description: Submit a pull request to contribute to babelDoc
+description: Submit a pull request to contribute to BabelDOC
 title: "[PR] <Your concise title here>"
 labels:
   - needs triage
@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        ## 👋 Thanks for contributing to **babelDoc**!
+        ## 👋 Thanks for contributing to **BabelDOC**!
 
         Please fill out this form to help us review your pull request effectively.
 
