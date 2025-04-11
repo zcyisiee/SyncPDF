@@ -381,7 +381,7 @@ def do_translate(
         original_pdf_path = translation_config.input_file
         logger.info(f"start to translate: {original_pdf_path}")
         start_time = time.time()
-
+        peak_memory_usage = 0
         with MemoryMonitor() as memory_monitor:
             # Check if split translation is enabled
             if not translation_config.split_strategy:
@@ -504,6 +504,7 @@ def do_translate(
                         logger.info("start merge results")
                         result = merger.merge_results(results)
                         logger.info("finish merge results")
+            peak_memory_usage = memory_monitor.peak_memory_usage
 
         finish_time = time.time()
         result.total_seconds = finish_time - start_time
@@ -512,6 +513,7 @@ def do_translate(
             f"finish translate: {original_pdf_path}, cost: {finish_time - start_time} s",
         )
         result.original_pdf_path = translation_config.input_file
+        result.peak_memory_usage = peak_memory_usage
         pm.translate_done(result)
         return result
 
