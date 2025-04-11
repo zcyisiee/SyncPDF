@@ -97,7 +97,23 @@ class TypesettingUnit:
         unicode = self.try_get_unicode()
         if not unicode:
             return True
-        if re.match(r"^[a-zA-Z0-9]+$", unicode):
+        if re.match(
+            r"^["
+            r"a-z"
+            r"A-Z"
+            r"0-9"
+            r"\u00C0-\u00FF"  # Latin-1 Supplement
+            r"\u0100-\u017F"  # Latin Extended A
+            r"\u0180-\u024F"  # Latin Extended B
+            r"\u1E00-\u1EFF"  # Latin Extended Additional
+            r"\u2C60-\u2C7F"  # Latin Extended C
+            r"\uA720-\uA7FF"  # Latin Extended D
+            r"\uAB30-\uAB6F"  # Latin Extended E
+            r"\u0250-\u02A0"  # IPA Extensions
+            r"\u0400-\u04FF"  # Cyrillic
+            r"]+$",
+            unicode,
+        ):
             return False
         return True
 
