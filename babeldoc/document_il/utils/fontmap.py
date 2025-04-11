@@ -104,6 +104,8 @@ class FontMapper:
         char_unicode: str,
         font_type: str,
     ):
+        if font_type == "script" and not italic:
+            return None
         current_char = ord(char_unicode)
         for font in self.type2font[font_type]:
             if not font.has_glyph(current_char):
@@ -139,6 +141,12 @@ class FontMapper:
             )
             return None
 
+        script_font_map_result = self.map_in_type(
+            bold, italic, monospaced, serif, char_unicode, "script"
+        )
+        if script_font_map_result:
+            return script_font_map_result
+
         for script_font in self.script_fonts:
             if italic and script_font.has_glyph(current_char):
                 return script_font
@@ -154,6 +162,10 @@ class FontMapper:
         )
         if fallback_font_map_result is not None:
             return fallback_font_map_result
+
+        for font in self.fallback_fonts:
+            if font.has_glyph(current_char):
+                return font
 
         logger.warning(
             f"Can't find font for {char_unicode}({current_char}). "

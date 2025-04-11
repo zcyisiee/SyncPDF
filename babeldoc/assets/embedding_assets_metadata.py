@@ -64,6 +64,19 @@ EMBEDDING_FONT_METADATA = {
         "sha3_256": "4324a60d507c691e6efc97420647f4d2c2d86d9de35009d1c769861b76074ae6",
         "size": 15515760,
     },
+    "KleeOne-Regular.ttf": {
+        "ascent": 1160,
+        "bold": 0,
+        "descent": -288,
+        "encoding_length": 2,
+        "file_name": "KleeOne-Regular.ttf",
+        "font_name": "Klee One Regular",
+        "italic": 0,
+        "monospace": 0,
+        "serif": 1,
+        "sha3_256": "8585c29f89b322d937f83739f61ede5d84297873e1465cad9a120a208ac55ce0",
+        "size": 8724704,
+    },
     "LXGWWenKaiGB-Regular.ttf": {
         "ascent": 928,
         "bold": 0,
@@ -102,6 +115,123 @@ EMBEDDING_FONT_METADATA = {
         "serif": 1,
         "sha3_256": "66ccd0ffe8e56cd585dabde8d1292c3f551b390d8ed85f81d7a844825f9c2379",
         "size": 13100328,
+    },
+    "MaruBuri-Regular.ttf": {
+        "ascent": 800,
+        "bold": 0,
+        "descent": -200,
+        "encoding_length": 2,
+        "file_name": "MaruBuri-Regular.ttf",
+        "font_name": "MaruBuri Regular",
+        "italic": 0,
+        "monospace": 0,
+        "serif": 1,
+        "sha3_256": "abb672dde7b89e06914ce27c59159b7a2933f26207bfcc47981c67c11c41e6d1",
+        "size": 3268988,
+    },
+    "NotoSans-Bold.ttf": {
+        "ascent": 1069,
+        "bold": 1,
+        "descent": -293,
+        "encoding_length": 2,
+        "file_name": "NotoSans-Bold.ttf",
+        "font_name": "Noto Sans Bold",
+        "italic": 0,
+        "monospace": 0,
+        "serif": 1,
+        "sha3_256": "ecd38d472c1cad07d8a5dffd2b5a0f72edcd40fff2b4e68d770da8f2ef343a82",
+        "size": 630964,
+    },
+    "NotoSans-BoldItalic.ttf": {
+        "ascent": 1069,
+        "bold": 1,
+        "descent": -293,
+        "encoding_length": 2,
+        "file_name": "NotoSans-BoldItalic.ttf",
+        "font_name": "Noto Sans Bold Italic",
+        "italic": 1,
+        "monospace": 0,
+        "serif": 1,
+        "sha3_256": "0b6c690a4a6b7d605b2ecbde00c7ac1a23e60feb17fa30d8b972d61ec3ff732b",
+        "size": 644340,
+    },
+    "NotoSans-Italic.ttf": {
+        "ascent": 1069,
+        "bold": 0,
+        "descent": -293,
+        "encoding_length": 2,
+        "file_name": "NotoSans-Italic.ttf",
+        "font_name": "Noto Sans Italic",
+        "italic": 1,
+        "monospace": 0,
+        "serif": 1,
+        "sha3_256": "830652f61724c017e5a29a96225b484a2ccbd25f69a1b3f47e5f466a2dbed1ad",
+        "size": 642344,
+    },
+    "NotoSans-Regular.ttf": {
+        "ascent": 1069,
+        "bold": 0,
+        "descent": -293,
+        "encoding_length": 2,
+        "file_name": "NotoSans-Regular.ttf",
+        "font_name": "Noto Sans Regular",
+        "italic": 0,
+        "monospace": 0,
+        "serif": 1,
+        "sha3_256": "7dfe2bbf97dc04c852d1223b220b63430e6ad03b0dbb28ebe6328a20a2d45eb8",
+        "size": 629024,
+    },
+    "NotoSerif-Bold.ttf": {
+        "ascent": 1069,
+        "bold": 1,
+        "descent": -293,
+        "encoding_length": 2,
+        "file_name": "NotoSerif-Bold.ttf",
+        "font_name": "Noto Serif Bold",
+        "italic": 0,
+        "monospace": 0,
+        "serif": 1,
+        "sha3_256": "28d88d924285eadb9f9ce49f2d2b95473f89a307b226c5f6ebed87a654898312",
+        "size": 506864,
+    },
+    "NotoSerif-BoldItalic.ttf": {
+        "ascent": 1069,
+        "bold": 1,
+        "descent": -293,
+        "encoding_length": 2,
+        "file_name": "NotoSerif-BoldItalic.ttf",
+        "font_name": "Noto Serif Bold Italic",
+        "italic": 1,
+        "monospace": 0,
+        "serif": 1,
+        "sha3_256": "b69ee56af6351b2fb4fbce623f8e1c1f9fb19170686a9e5db2cf260b8cf24ac7",
+        "size": 535724,
+    },
+    "NotoSerif-Italic.ttf": {
+        "ascent": 1069,
+        "bold": 0,
+        "descent": -293,
+        "encoding_length": 2,
+        "file_name": "NotoSerif-Italic.ttf",
+        "font_name": "Noto Serif Italic",
+        "italic": 1,
+        "monospace": 0,
+        "serif": 1,
+        "sha3_256": "9b7773c24ab8a29e3c1c03efa4ab652d051e4c209134431953463aa946d62868",
+        "size": 535340,
+    },
+    "NotoSerif-Regular.ttf": {
+        "ascent": 1069,
+        "bold": 0,
+        "descent": -293,
+        "encoding_length": 2,
+        "file_name": "NotoSerif-Regular.ttf",
+        "font_name": "Noto Serif Regular",
+        "italic": 0,
+        "monospace": 0,
+        "serif": 1,
+        "sha3_256": "c2bbe984e65bafd3bcd38b3cb1e1344f3b7b79d6beffc7a3d883b57f8358559d",
+        "size": 504932,
     },
     "SourceHanSansCN-Bold.ttf": {
         "ascent": 1160,
@@ -424,21 +554,96 @@ TW_FONT_FAMILY = {
     "base": ["SourceHanSansCN-Regular.ttf"],
 }
 
+KR_FONT_FAMILY = {
+    "script": ["MaruBuri-Regular.ttf"],
+    "normal": [
+        "SourceHanSerifKR-Bold.ttf",
+        "SourceHanSerifKR-Regular.ttf",
+        "SourceHanSansKR-Bold.ttf",
+        "SourceHanSansKR-Regular.ttf",
+        "SourceHanSerifCN-Bold.ttf",
+        "SourceHanSerifCN-Regular.ttf",
+        "SourceHanSansCN-Bold.ttf",
+        "SourceHanSansCN-Regular.ttf",
+    ],
+    "fallback": [
+        "GoNotoKurrent-Regular.ttf",
+        "GoNotoKurrent-Bold.ttf",
+    ],
+    "base": ["SourceHanSansCN-Regular.ttf"],
+}
+
+JP_FONT_FAMILY = {
+    "script": ["KleeOne-Regular.ttf"],
+    "normal": [
+        "SourceHanSerifJP-Bold.ttf",
+        "SourceHanSerifJP-Regular.ttf",
+        "SourceHanSansJP-Bold.ttf",
+        "SourceHanSansJP-Regular.ttf",
+        "SourceHanSerifCN-Bold.ttf",
+        "SourceHanSerifCN-Regular.ttf",
+        "SourceHanSansCN-Bold.ttf",
+        "SourceHanSansCN-Regular.ttf",
+    ],
+    "fallback": [
+        "GoNotoKurrent-Regular.ttf",
+        "GoNotoKurrent-Bold.ttf",
+    ],
+    "base": ["SourceHanSansCN-Regular.ttf"],
+}
+
+EN_FONT_FAMILY = {
+    "script": [
+        "NotoSans-Italic.ttf",
+        "NotoSans-BoldItalic.ttf",
+        "NotoSerif-Italic.ttf",
+        "NotoSerif-BoldItalic.ttf",
+    ],
+    "normal": [
+        "NotoSerif-Regular.ttf",
+        "NotoSerif-Bold.ttf",
+        "NotoSans-Regular.ttf",
+        "NotoSans-Bold.ttf",
+        "SourceHanSerifCN-Bold.ttf",
+        "SourceHanSerifCN-Regular.ttf",
+        "SourceHanSansCN-Bold.ttf",
+        "SourceHanSansCN-Regular.ttf",
+    ],
+    "fallback": [
+        "GoNotoKurrent-Regular.ttf",
+        "GoNotoKurrent-Bold.ttf",
+    ],
+    "base": [
+        "NotoSans-Regular.ttf",
+    ],
+}
+
 ALL_FONT_FAMILY = {
     "CN": CN_FONT_FAMILY,
     "HK": HK_FONT_FAMILY,
     "TW": TW_FONT_FAMILY,
+    "KR": KR_FONT_FAMILY,
+    "JP": JP_FONT_FAMILY,
+    "EN": EN_FONT_FAMILY,
 }
 
 
 def get_font_family(lang_code: str):
     lang_code = lang_code.upper()
-    if "HK" in lang_code:
+    if "KR" in lang_code:
+        font_family = KR_FONT_FAMILY
+    elif "JP" in lang_code:
+        font_family = JP_FONT_FAMILY
+    elif "HK" in lang_code:
         font_family = HK_FONT_FAMILY
     elif "TW" in lang_code:
         font_family = TW_FONT_FAMILY
-    else:
+    elif "EN" in lang_code:
+        font_family = EN_FONT_FAMILY
+    elif "CN" in lang_code:
         font_family = CN_FONT_FAMILY
+    else:
+        font_family = EN_FONT_FAMILY
     verify_font_family(font_family)
     return font_family
 
