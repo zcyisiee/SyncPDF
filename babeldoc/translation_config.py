@@ -256,6 +256,7 @@ class TranslateResult:
     dual_pdf_path: str | None
     no_watermark_mono_pdf_path: str | None
     no_watermark_dual_pdf_path: str | None
+    peak_memory_usage: int | None
 
     def __init__(self, mono_pdf_path: str | None, dual_pdf_path: str | None):
         self.mono_pdf_path = mono_pdf_path
@@ -298,6 +299,9 @@ class TranslateResult:
             result.append(
                 f"\tNo-watermark Dual-language PDF: {self.no_watermark_dual_pdf_path}"
             )
+
+        if hasattr(self, "peak_memory_usage") and self.peak_memory_usage:
+            result.append(f"\tPeak memory usage: {self.peak_memory_usage} MB")
 
         if result:
             result.insert(0, "Translation results:")
