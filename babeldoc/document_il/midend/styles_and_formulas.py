@@ -548,6 +548,7 @@ class StylesAndFormulas:
             r"|.*AGaramondPro.*"
             r"|.*PalatinoItalCOR.*"
             r"|.*ITCSymbolStd.*"
+            r"|.*PlantinStd.*"
             r")$"
         )
         if self.translation_config.formular_font_pattern:
