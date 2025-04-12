@@ -538,6 +538,8 @@ class StylesAndFormulas:
             r"|CMSL10.*"
             r"|CMTI10.*"
             r"|CMTT10.*"
+            r"|CMTI12.*"
+            r"|CMR12.*"
             r"|Times-Italic.*"
             r"|MeridienLTStd.*"
             r"|Calibri.*"
@@ -549,6 +551,9 @@ class StylesAndFormulas:
             r"|.*PalatinoItalCOR.*"
             r"|.*ITCSymbolStd.*"
             r"|.*PlantinStd.*"
+            r"|.*DJ5EscrowCond.*"
+            r"|.*ExchangeBook.*"
+            r"|.*DJ5Exchange.*"
             r")$"
         )
         if self.translation_config.formular_font_pattern:
