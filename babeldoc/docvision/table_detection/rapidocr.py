@@ -18,7 +18,7 @@ except ImportError as e:
             "Download it at https://aka.ms/vs/17/release/vc_redist.x64.exe"
         ) from e
     raise
-import babeldoc.document_il.il_version_1
+import babeldoc.foramt.pdf.document_il.il_version_1
 import pymupdf
 
 logger = logging.getLogger(__name__)
@@ -224,12 +224,12 @@ class RapidOCRModel:
 
     def handle_document(
         self,
-        pages: list[babeldoc.document_il.il_version_1.Page],
+        pages: list[babeldoc.foramt.pdf.document_il.il_version_1.Page],
         mupdf_doc: pymupdf.Document,
         translate_config,
         save_debug_image,
     ) -> Generator[
-        tuple[babeldoc.document_il.il_version_1.Page, YoloResult], None, None
+        tuple[babeldoc.foramt.pdf.document_il.il_version_1.Page, YoloResult], None, None
     ]:
         for page in pages:
             translate_config.raise_if_cancelled()

@@ -12,7 +12,7 @@ from tenacity import retry_if_exception_type
 from tenacity import stop_after_attempt
 from tenacity import wait_exponential
 
-import babeldoc
+import babeldoc.foramt.pdf.document_il
 from babeldoc.docvision.doclayout import DocLayoutModel
 from babeldoc.docvision.doclayout import YoloBox
 from babeldoc.docvision.doclayout import YoloResult
@@ -265,7 +265,7 @@ class RpcDocLayoutModel(DocLayoutModel):
 
     def handle_document(
         self,
-        pages: list[babeldoc.document_il.il_version_1.Page],
+        pages: list[babeldoc.foramt.pdf.document_il.il_version_1.Page],
         mupdf_doc: pymupdf.Document,
         translate_config,
         save_debug_image,

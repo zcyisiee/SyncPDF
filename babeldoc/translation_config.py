@@ -6,11 +6,11 @@ import threading
 from pathlib import Path
 
 from babeldoc.const import CACHE_FOLDER
-from babeldoc.document_il.translator.translator import BaseTranslator
 from babeldoc.docvision.doclayout import DocLayoutModel
+from babeldoc.foramt.pdf.split_manager import BaseSplitStrategy
+from babeldoc.foramt.pdf.split_manager import PageCountStrategy
 from babeldoc.progress_monitor import ProgressMonitor
-from babeldoc.split_manager import BaseSplitStrategy
-from babeldoc.split_manager import PageCountStrategy
+from babeldoc.translator.translator import BaseTranslator
 
 logger = logging.getLogger(__name__)
 

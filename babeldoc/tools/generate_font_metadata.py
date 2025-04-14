@@ -8,11 +8,11 @@ import io
 import logging
 from pathlib import Path
 
-import babeldoc.high_level
+import babeldoc.foramt.pdf.high_level
 import babeldoc.translation_config
 import orjson
 import pymupdf
-from babeldoc.document_il import PdfFont
+from babeldoc.foramt.pdf.document_il import PdfFont
 from rich.logging import RichHandler
 
 logger = logging.getLogger(__name__)
@@ -25,15 +25,17 @@ def get_font_metadata(font_path) -> PdfFont:
     translation_config = babeldoc.translation_config.TranslationConfig(
         *[None for _ in range(4)], doc_layout_model=1
     )
-    translation_config.progress_monitor = babeldoc.high_level.ProgressMonitor(
-        babeldoc.high_level.TRANSLATE_STAGES
+    translation_config.progress_monitor = (
+        babeldoc.foramt.pdf.high_level.ProgressMonitor(
+            babeldoc.foramt.pdf.high_level.TRANSLATE_STAGES
+        )
     )
     translation_config.font = font_path
-    il_creater = babeldoc.high_level.ILCreater(translation_config)
+    il_creater = babeldoc.foramt.pdf.high_level.ILCreater(translation_config)
     il_creater.mupdf = doc
     buffer = io.BytesIO()
     doc.save(buffer)
-    babeldoc.high_level.start_parse_il(
+    babeldoc.foramt.pdf.high_level.start_parse_il(
         buffer,
         doc_zh=doc,
         resfont="test_font",
