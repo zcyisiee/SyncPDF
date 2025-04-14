@@ -1,0 +1,92 @@
+name: Pull Request
+description: Submit a pull request to contribute to BabelDOC
+title: "[PR] <Your concise title here>"
+labels:
+  - needs triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 👋 Thanks for contributing to **BabelDOC**!
+
+        Please fill out this form to help us review your pull request effectively.
+
+  - type: input
+    id: issue
+    attributes:
+      label: Related Issue(s)
+      description: If this pull request closes or is related to one or more issues, list them here (e.g., #37)
+      placeholder: "#37"
+    validations:
+      required: false
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Description
+      description: Describe the purpose of this pull request and what was changed.
+      placeholder: |
+        - What does this PR introduce or fix?
+        - What is the motivation behind it?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: pr_type
+    attributes:
+      label: PR Type
+      description: What kind of change is this?
+      multiple: true
+      options:
+        - enhancement
+        - bug
+        - documentation
+        - refactor
+        - test
+        - chore
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Contributor Checklist
+      options:
+        - label: I’ve read the **CONTRIBUTING.md** guide
+          required: true
+        - label: My changes follow the project’s code style and guidelines
+          required: true
+        - label: I’ve linked the related issue(s) in the description above
+        - label: I’ve updated relevant documentation (if applicable)
+        - label: I’ve added necessary tests (if applicable)
+        - label: All new and existing tests passed locally
+        - label: I understand that due to limited maintainer resources, only small pull requests are accepted. Suggestions with proof-of-concept patches are appreciated, and my patch may be rewritten if necessary.
+
+  - type: textarea
+    id: testing
+    attributes:
+      label: Testing Instructions
+      description: Provide step-by-step instructions on how to test your changes
+      placeholder: |
+        1. Run `...`
+        2. Visit `...`
+        3. Click `...`
+        4. Verify `...`
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots (if applicable)
+      description: If UI changes were made, please attach before/after screenshots.
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional Notes
+      description: Anything else the reviewer should know?
+    validations:
+      required: false
