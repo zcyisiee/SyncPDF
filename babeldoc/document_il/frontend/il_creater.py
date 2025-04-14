@@ -350,6 +350,8 @@ class ILCreater:
                 _, encoding = self.mupdf.xref_get_key(xref_id, "Encoding")
                 if encoding == "/Identity-H" or encoding == "/Identity-V":
                     encoding_length = 2
+                if encoding == "/WinAnsiEncoding":
+                    encoding_length = 1
                 else:
                     _, to_unicode_id = self.mupdf.xref_get_key(xref_id, "ToUnicode")
                     to_unicode_bytes = self.mupdf.xref_stream(
@@ -442,7 +444,7 @@ class ILCreater:
                 )
         except Exception:
             pass
-        self.current_page_font_name_id_map[font_name] = font_id
+        self.current_page_font_name_id_map[xref_id] = font_id
         if self.xobj_id in self.xobj_map:
             self.xobj_map[self.xobj_id].pdf_font.append(il_font_metadata)
         else:
