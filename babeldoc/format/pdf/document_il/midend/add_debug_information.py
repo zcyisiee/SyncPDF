@@ -1,10 +1,10 @@
 import logging
 
-import babeldoc.foramt.pdf.document_il.il_version_1 as il_version_1
-from babeldoc.foramt.pdf.document_il import GraphicState
-from babeldoc.foramt.pdf.document_il.utils.style_helper import BLUE
-from babeldoc.foramt.pdf.document_il.utils.style_helper import ORANGE
-from babeldoc.foramt.pdf.document_il.utils.style_helper import YELLOW
+import babeldoc.format.pdf.document_il.il_version_1 as il_version_1
+from babeldoc.format.pdf.document_il import GraphicState
+from babeldoc.format.pdf.document_il.utils.style_helper import BLUE
+from babeldoc.format.pdf.document_il.utils.style_helper import ORANGE
+from babeldoc.format.pdf.document_il.utils.style_helper import YELLOW
 from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)

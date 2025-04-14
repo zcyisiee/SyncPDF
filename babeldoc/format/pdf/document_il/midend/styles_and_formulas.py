@@ -3,23 +3,23 @@ import math
 import re
 import unicodedata
 
-from babeldoc.foramt.pdf.document_il.il_version_1 import Box
-from babeldoc.foramt.pdf.document_il.il_version_1 import Document
-from babeldoc.foramt.pdf.document_il.il_version_1 import GraphicState
-from babeldoc.foramt.pdf.document_il.il_version_1 import Page
-from babeldoc.foramt.pdf.document_il.il_version_1 import PdfCharacter
-from babeldoc.foramt.pdf.document_il.il_version_1 import PdfFormula
-from babeldoc.foramt.pdf.document_il.il_version_1 import PdfLine
-from babeldoc.foramt.pdf.document_il.il_version_1 import PdfParagraphComposition
-from babeldoc.foramt.pdf.document_il.il_version_1 import PdfSameStyleCharacters
-from babeldoc.foramt.pdf.document_il.il_version_1 import PdfStyle
-from babeldoc.foramt.pdf.document_il.utils.fontmap import FontMapper
-from babeldoc.foramt.pdf.document_il.utils.layout_helper import LEFT_BRACKET
-from babeldoc.foramt.pdf.document_il.utils.layout_helper import RIGHT_BRACKET
-from babeldoc.foramt.pdf.document_il.utils.layout_helper import (
+from babeldoc.format.pdf.document_il.il_version_1 import Box
+from babeldoc.format.pdf.document_il.il_version_1 import Document
+from babeldoc.format.pdf.document_il.il_version_1 import GraphicState
+from babeldoc.format.pdf.document_il.il_version_1 import Page
+from babeldoc.format.pdf.document_il.il_version_1 import PdfCharacter
+from babeldoc.format.pdf.document_il.il_version_1 import PdfFormula
+from babeldoc.format.pdf.document_il.il_version_1 import PdfLine
+from babeldoc.format.pdf.document_il.il_version_1 import PdfParagraphComposition
+from babeldoc.format.pdf.document_il.il_version_1 import PdfSameStyleCharacters
+from babeldoc.format.pdf.document_il.il_version_1 import PdfStyle
+from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il.utils.layout_helper import LEFT_BRACKET
+from babeldoc.format.pdf.document_il.utils.layout_helper import RIGHT_BRACKET
+from babeldoc.format.pdf.document_il.utils.layout_helper import (
     formular_height_ignore_char,
 )
-from babeldoc.foramt.pdf.document_il.utils.layout_helper import is_same_style
+from babeldoc.format.pdf.document_il.utils.layout_helper import is_same_style
 from babeldoc.translation_config import TranslationConfig
 
 

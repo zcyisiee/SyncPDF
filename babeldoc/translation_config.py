@@ -7,8 +7,8 @@ from pathlib import Path
 
 from babeldoc.const import CACHE_FOLDER
 from babeldoc.docvision.doclayout import DocLayoutModel
-from babeldoc.foramt.pdf.split_manager import BaseSplitStrategy
-from babeldoc.foramt.pdf.split_manager import PageCountStrategy
+from babeldoc.format.pdf.split_manager import BaseSplitStrategy
+from babeldoc.format.pdf.split_manager import PageCountStrategy
 from babeldoc.progress_monitor import ProgressMonitor
 from babeldoc.translator.translator import BaseTranslator
 

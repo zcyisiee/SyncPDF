@@ -6,8 +6,8 @@ from pathlib import Path
 import pymupdf
 
 from babeldoc.assets import assets
-from babeldoc.foramt.pdf.document_il import PdfFont
-from babeldoc.foramt.pdf.document_il import il_version_1
+from babeldoc.format.pdf.document_il import PdfFont
+from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)

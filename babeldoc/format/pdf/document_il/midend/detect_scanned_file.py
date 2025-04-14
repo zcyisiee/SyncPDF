@@ -6,8 +6,8 @@ import pymupdf
 from skimage.metrics import structural_similarity
 
 from babeldoc.babeldoc_exception.BabelDOCException import ScannedPDFError
-from babeldoc.foramt.pdf.document_il import il_version_1
-from babeldoc.foramt.pdf.document_il.utils.style_helper import GREEN
+from babeldoc.format.pdf.document_il import il_version_1
+from babeldoc.format.pdf.document_il.utils.style_helper import GREEN
 from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)

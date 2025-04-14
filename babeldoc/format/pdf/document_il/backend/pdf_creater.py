@@ -8,8 +8,8 @@ from pathlib import Path
 import pymupdf
 from bitstring import BitStream
 
-from babeldoc.foramt.pdf.document_il import il_version_1
-from babeldoc.foramt.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il import il_version_1
+from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
 from babeldoc.translation_config import TranslateResult
 from babeldoc.translation_config import TranslationConfig
 from babeldoc.translation_config import WatermarkOutputMode

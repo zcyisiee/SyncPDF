@@ -2,15 +2,15 @@ import logging
 import random
 import re
 
-from babeldoc.foramt.pdf.document_il import Box
-from babeldoc.foramt.pdf.document_il import Page
-from babeldoc.foramt.pdf.document_il import PdfCharacter
-from babeldoc.foramt.pdf.document_il import PdfLine
-from babeldoc.foramt.pdf.document_il import PdfParagraph
-from babeldoc.foramt.pdf.document_il import PdfParagraphComposition
-from babeldoc.foramt.pdf.document_il.utils.layout_helper import Layout
-from babeldoc.foramt.pdf.document_il.utils.layout_helper import add_space_dummy_chars
-from babeldoc.foramt.pdf.document_il.utils.layout_helper import get_char_unicode_string
+from babeldoc.format.pdf.document_il import Box
+from babeldoc.format.pdf.document_il import Page
+from babeldoc.format.pdf.document_il import PdfCharacter
+from babeldoc.format.pdf.document_il import PdfLine
+from babeldoc.format.pdf.document_il import PdfParagraph
+from babeldoc.format.pdf.document_il import PdfParagraphComposition
+from babeldoc.format.pdf.document_il.utils.layout_helper import Layout
+from babeldoc.format.pdf.document_il.utils.layout_helper import add_space_dummy_chars
+from babeldoc.format.pdf.document_il.utils.layout_helper import get_char_unicode_string
 from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)

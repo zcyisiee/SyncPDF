@@ -8,13 +8,13 @@ from functools import cache
 import pymupdf
 
 from babeldoc.const import WATERMARK_VERSION
-from babeldoc.foramt.pdf.document_il import Box
-from babeldoc.foramt.pdf.document_il import PdfCharacter
-from babeldoc.foramt.pdf.document_il import PdfFormula
-from babeldoc.foramt.pdf.document_il import PdfParagraphComposition
-from babeldoc.foramt.pdf.document_il import PdfStyle
-from babeldoc.foramt.pdf.document_il import il_version_1
-from babeldoc.foramt.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il import Box
+from babeldoc.format.pdf.document_il import PdfCharacter
+from babeldoc.format.pdf.document_il import PdfFormula
+from babeldoc.format.pdf.document_il import PdfParagraphComposition
+from babeldoc.format.pdf.document_il import PdfStyle
+from babeldoc.format.pdf.document_il import il_version_1
+from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
 from babeldoc.translation_config import TranslationConfig
 from babeldoc.translation_config import WatermarkOutputMode
 

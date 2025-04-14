@@ -3,12 +3,12 @@ import math
 
 from pymupdf import Font
 
-from babeldoc.foramt.pdf.document_il import GraphicState
-from babeldoc.foramt.pdf.document_il import il_version_1
-from babeldoc.foramt.pdf.document_il.il_version_1 import Box
-from babeldoc.foramt.pdf.document_il.il_version_1 import PdfCharacter
-from babeldoc.foramt.pdf.document_il.il_version_1 import PdfParagraph
-from babeldoc.foramt.pdf.document_il.il_version_1 import PdfParagraphComposition
+from babeldoc.format.pdf.document_il import GraphicState
+from babeldoc.format.pdf.document_il import il_version_1
+from babeldoc.format.pdf.document_il.il_version_1 import Box
+from babeldoc.format.pdf.document_il.il_version_1 import PdfCharacter
+from babeldoc.format.pdf.document_il.il_version_1 import PdfParagraph
+from babeldoc.format.pdf.document_il.il_version_1 import PdfParagraphComposition
 
 logger = logging.getLogger(__name__)
 HEIGHT_NOT_USFUL_CHAR_IN_CHAR = (

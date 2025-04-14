@@ -6,22 +6,22 @@ from pathlib import Path
 import tiktoken
 from tqdm import tqdm
 
-from babeldoc.foramt.pdf.document_il import Document
-from babeldoc.foramt.pdf.document_il import Page
-from babeldoc.foramt.pdf.document_il import PdfFont
-from babeldoc.foramt.pdf.document_il import PdfFormula
-from babeldoc.foramt.pdf.document_il import PdfParagraph
-from babeldoc.foramt.pdf.document_il import PdfParagraphComposition
-from babeldoc.foramt.pdf.document_il import PdfSameStyleCharacters
-from babeldoc.foramt.pdf.document_il import PdfSameStyleUnicodeCharacters
-from babeldoc.foramt.pdf.document_il import PdfStyle
-from babeldoc.foramt.pdf.document_il.utils.fontmap import FontMapper
-from babeldoc.foramt.pdf.document_il.utils.layout_helper import get_char_unicode_string
-from babeldoc.foramt.pdf.document_il.utils.layout_helper import is_same_style
-from babeldoc.foramt.pdf.document_il.utils.layout_helper import (
+from babeldoc.format.pdf.document_il import Document
+from babeldoc.format.pdf.document_il import Page
+from babeldoc.format.pdf.document_il import PdfFont
+from babeldoc.format.pdf.document_il import PdfFormula
+from babeldoc.format.pdf.document_il import PdfParagraph
+from babeldoc.format.pdf.document_il import PdfParagraphComposition
+from babeldoc.format.pdf.document_il import PdfSameStyleCharacters
+from babeldoc.format.pdf.document_il import PdfSameStyleUnicodeCharacters
+from babeldoc.format.pdf.document_il import PdfStyle
+from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il.utils.layout_helper import get_char_unicode_string
+from babeldoc.format.pdf.document_il.utils.layout_helper import is_same_style
+from babeldoc.format.pdf.document_il.utils.layout_helper import (
     is_same_style_except_font,
 )
-from babeldoc.foramt.pdf.document_il.utils.layout_helper import (
+from babeldoc.format.pdf.document_il.utils.layout_helper import (
     is_same_style_except_size,
 )
 from babeldoc.translation_config import TranslationConfig

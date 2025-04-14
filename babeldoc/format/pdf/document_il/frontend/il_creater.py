@@ -18,8 +18,8 @@ from pdfminer.pdftypes import PDFObjRef as PDFMinerPDFObjRef
 from pdfminer.pdftypes import resolve1 as pdftypes_resolve1
 from pdfminer.psparser import PSLiteral
 
-from babeldoc.foramt.pdf.document_il import il_version_1
-from babeldoc.foramt.pdf.document_il.utils.style_helper import YELLOW
+from babeldoc.format.pdf.document_il import il_version_1
+from babeldoc.format.pdf.document_il.utils.style_helper import YELLOW
 from babeldoc.translation_config import TranslationConfig
 
 

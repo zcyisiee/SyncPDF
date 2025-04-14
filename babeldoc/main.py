@@ -13,7 +13,7 @@ from rich.progress import TimeElapsedColumn
 from rich.progress import TimeRemainingColumn
 
 import babeldoc.assets.assets
-import babeldoc.foramt.pdf.high_level
+import babeldoc.format.pdf.high_level
 from babeldoc.docvision.doclayout import DocLayoutModel
 from babeldoc.docvision.rpc_doclayout import RpcDocLayoutModel
 from babeldoc.docvision.table_detection.rapidocr import RapidOCRModel
@@ -384,7 +384,7 @@ async def main():
 
         # 开始翻译
         with progress_context:
-            async for event in babeldoc.foramt.pdf.high_level.async_translate(config):
+            async for event in babeldoc.format.pdf.high_level.async_translate(config):
                 progress_handler(event)
                 if config.debug:
                     logger.debug(event)
@@ -477,12 +477,12 @@ def create_progress_handler(translation_config: TranslationConfig):
 
 # for backward compatibility
 def create_cache_folder():
-    return babeldoc.foramt.pdf.high_level.create_cache_folder()
+    return babeldoc.format.pdf.high_level.create_cache_folder()
 
 
 # for backward compatibility
 def download_font_assets():
-    return babeldoc.foramt.pdf.high_level.download_font_assets()
+    return babeldoc.format.pdf.high_level.download_font_assets()
 
 
 def cli():
@@ -512,7 +512,7 @@ def cli():
             v.disabled = True
             v.propagate = False
 
-    babeldoc.foramt.pdf.high_level.init()
+    babeldoc.format.pdf.high_level.init()
     asyncio.run(main())
 
 

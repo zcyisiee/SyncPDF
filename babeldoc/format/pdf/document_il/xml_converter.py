@@ -7,7 +7,7 @@ from xsdata.formats.dataclass.parsers import XmlParser
 from xsdata.formats.dataclass.serializers import XmlSerializer
 from xsdata.formats.dataclass.serializers.config import SerializerConfig
 
-from babeldoc.foramt.pdf.document_il import il_version_1
+from babeldoc.format.pdf.document_il import il_version_1
 
 
 class XMLConverter:

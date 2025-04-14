@@ -20,7 +20,7 @@ except ImportError as e:
     raise
 import pymupdf
 
-import babeldoc.foramt.pdf.document_il.il_version_1
+import babeldoc.format.pdf.document_il.il_version_1
 from babeldoc.assets.assets import get_doclayout_onnx_model_path
 
 # from huggingface_hub import hf_hub_download
@@ -71,12 +71,12 @@ class DocLayoutModel(abc.ABC):
     @abc.abstractmethod
     def handle_document(
         self,
-        pages: list[babeldoc.foramt.pdf.document_il.il_version_1.Page],
+        pages: list[babeldoc.format.pdf.document_il.il_version_1.Page],
         mupdf_doc: pymupdf.Document,
         translate_config,
         save_debug_image,
     ) -> Generator[
-        tuple[babeldoc.foramt.pdf.document_il.il_version_1.Page, YoloResult], None, None
+        tuple[babeldoc.format.pdf.document_il.il_version_1.Page, YoloResult], None, None
     ]:
         """
         Handle a document.
@@ -270,12 +270,12 @@ class OnnxModel(DocLayoutModel):
 
     def handle_document(
         self,
-        pages: list[babeldoc.foramt.pdf.document_il.il_version_1.Page],
+        pages: list[babeldoc.format.pdf.document_il.il_version_1.Page],
         mupdf_doc: pymupdf.Document,
         translate_config,
         save_debug_image,
     ) -> Generator[
-        tuple[babeldoc.foramt.pdf.document_il.il_version_1.Page, YoloResult], None, None
+        tuple[babeldoc.format.pdf.document_il.il_version_1.Page, YoloResult], None, None
     ]:
         for page in pages:
             translate_config.raise_if_cancelled()

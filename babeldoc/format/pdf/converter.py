@@ -24,7 +24,7 @@ from pdfminer.utils import matrix2str
 from pdfminer.utils import mult_matrix
 from pymupdf import Font
 
-from babeldoc.foramt.pdf.document_il.frontend.il_creater import ILCreater
+from babeldoc.format.pdf.document_il.frontend.il_creater import ILCreater
 
 log = logging.getLogger(__name__)
 

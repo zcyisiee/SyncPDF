@@ -3,7 +3,7 @@ from pathlib import Path
 
 from pymupdf import Document
 
-from babeldoc.foramt.pdf.document_il.backend.pdf_creater import PDFCreater
+from babeldoc.format.pdf.document_il.backend.pdf_creater import PDFCreater
 from babeldoc.translation_config import TranslateResult
 from babeldoc.translation_config import TranslationConfig
 

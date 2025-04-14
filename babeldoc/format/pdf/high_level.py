@@ -21,30 +21,30 @@ from pymupdf import Font
 from babeldoc import asynchronize
 from babeldoc.assets.assets import warmup
 from babeldoc.const import CACHE_FOLDER
-from babeldoc.foramt.pdf.converter import TranslateConverter
-from babeldoc.foramt.pdf.document_il import il_version_1
-from babeldoc.foramt.pdf.document_il.backend.pdf_creater import SAVE_PDF_STAGE_NAME
-from babeldoc.foramt.pdf.document_il.backend.pdf_creater import SUBSET_FONT_STAGE_NAME
-from babeldoc.foramt.pdf.document_il.backend.pdf_creater import PDFCreater
-from babeldoc.foramt.pdf.document_il.frontend.il_creater import ILCreater
-from babeldoc.foramt.pdf.document_il.midend.add_debug_information import (
+from babeldoc.format.pdf.converter import TranslateConverter
+from babeldoc.format.pdf.document_il import il_version_1
+from babeldoc.format.pdf.document_il.backend.pdf_creater import SAVE_PDF_STAGE_NAME
+from babeldoc.format.pdf.document_il.backend.pdf_creater import SUBSET_FONT_STAGE_NAME
+from babeldoc.format.pdf.document_il.backend.pdf_creater import PDFCreater
+from babeldoc.format.pdf.document_il.frontend.il_creater import ILCreater
+from babeldoc.format.pdf.document_il.midend.add_debug_information import (
     AddDebugInformation,
 )
-from babeldoc.foramt.pdf.document_il.midend.detect_scanned_file import DetectScannedFile
-from babeldoc.foramt.pdf.document_il.midend.il_translator import ILTranslator
-from babeldoc.foramt.pdf.document_il.midend.il_translator_llm_only import (
+from babeldoc.format.pdf.document_il.midend.detect_scanned_file import DetectScannedFile
+from babeldoc.format.pdf.document_il.midend.il_translator import ILTranslator
+from babeldoc.format.pdf.document_il.midend.il_translator_llm_only import (
     ILTranslatorLLMOnly,
 )
-from babeldoc.foramt.pdf.document_il.midend.layout_parser import LayoutParser
-from babeldoc.foramt.pdf.document_il.midend.paragraph_finder import ParagraphFinder
-from babeldoc.foramt.pdf.document_il.midend.styles_and_formulas import StylesAndFormulas
-from babeldoc.foramt.pdf.document_il.midend.table_parser import TableParser
-from babeldoc.foramt.pdf.document_il.midend.typesetting import Typesetting
-from babeldoc.foramt.pdf.document_il.utils.fontmap import FontMapper
-from babeldoc.foramt.pdf.document_il.xml_converter import XMLConverter
-from babeldoc.foramt.pdf.pdfinterp import PDFPageInterpreterEx
-from babeldoc.foramt.pdf.result_merger import ResultMerger
-from babeldoc.foramt.pdf.split_manager import SplitManager
+from babeldoc.format.pdf.document_il.midend.layout_parser import LayoutParser
+from babeldoc.format.pdf.document_il.midend.paragraph_finder import ParagraphFinder
+from babeldoc.format.pdf.document_il.midend.styles_and_formulas import StylesAndFormulas
+from babeldoc.format.pdf.document_il.midend.table_parser import TableParser
+from babeldoc.format.pdf.document_il.midend.typesetting import Typesetting
+from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il.xml_converter import XMLConverter
+from babeldoc.format.pdf.pdfinterp import PDFPageInterpreterEx
+from babeldoc.format.pdf.result_merger import ResultMerger
+from babeldoc.format.pdf.split_manager import SplitManager
 from babeldoc.progress_monitor import ProgressMonitor
 from babeldoc.translation_config import TranslateResult
 from babeldoc.translation_config import TranslationConfig

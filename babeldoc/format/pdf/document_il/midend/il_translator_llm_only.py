@@ -7,16 +7,16 @@ import Levenshtein
 import tiktoken
 from tqdm import tqdm
 
-from babeldoc.foramt.pdf.document_il import Document
-from babeldoc.foramt.pdf.document_il import Page
-from babeldoc.foramt.pdf.document_il import PdfFont
-from babeldoc.foramt.pdf.document_il import PdfParagraph
-from babeldoc.foramt.pdf.document_il.midend.il_translator import (
+from babeldoc.format.pdf.document_il import Document
+from babeldoc.format.pdf.document_il import Page
+from babeldoc.format.pdf.document_il import PdfFont
+from babeldoc.format.pdf.document_il import PdfParagraph
+from babeldoc.format.pdf.document_il.midend.il_translator import (
     DocumentTranslateTracker,
 )
-from babeldoc.foramt.pdf.document_il.midend.il_translator import ILTranslator
-from babeldoc.foramt.pdf.document_il.midend.il_translator import PageTranslateTracker
-from babeldoc.foramt.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il.midend.il_translator import ILTranslator
+from babeldoc.format.pdf.document_il.midend.il_translator import PageTranslateTracker
+from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
 from babeldoc.translation_config import TranslationConfig
 from babeldoc.translator.translator import BaseTranslator
 from babeldoc.utils.priority_thread_pool_executor import PriorityThreadPoolExecutor
