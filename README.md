@@ -340,7 +340,7 @@ And meet the following requirements:
 
 ## Version Number Explanation
 
-This project uses a combination of [semantic versioning](https://semver.org/) and [Pride Versioning](https://pridever.org/). The version number format is: "0.MAJOR.MINOR".
+This project uses a combination of [Semantic Versioning](https://semver.org/) and [Pride Versioning](https://pridever.org/). The version number format is: "0.MAJOR.MINOR".
 
 - MAJOR: Incremented by 1 when API incompatible changes are made or when proud improvements are implemented.
 
