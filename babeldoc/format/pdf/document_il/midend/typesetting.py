@@ -111,6 +111,7 @@ class TypesettingUnit:
             r"\uAB30-\uAB6F"  # Latin Extended E
             r"\u0250-\u02A0"  # IPA Extensions
             r"\u0400-\u04FF"  # Cyrillic
+            r"'"
             r"]+$",
             unicode,
         ):

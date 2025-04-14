@@ -104,6 +104,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                         objid = spec.objid
                     spec = dict_value(spec)
                     font = self.rsrcmgr.get_font(objid, spec)
+                    font.xobj_id = objid
                     self.il_creater.on_page_resource_font(font, objid, fontid)
                     self.fontmap[fontid] = font
                     self.fontmap[fontid].descent = 0  # hack fix descent
