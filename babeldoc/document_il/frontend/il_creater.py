@@ -530,6 +530,8 @@ class ILCreater:
         char_unicode = char.get_text()
         if "(cid:" not in char_unicode and len(char_unicode) > 1:
             return
+        if char_unicode == "\t":
+            char_unicode = " "
         advance = char.adv
         bbox = il_version_1.Box(
             x=char.bbox[0],
