@@ -1,4 +1,3 @@
-import base64
 import logging
 import re
 import unicodedata
@@ -93,13 +92,7 @@ class PDFConverterEx(PDFConverter):
         textwidth = font.char_width(cid)
         textdisp = font.char_disp(cid)
 
-        font_name = font.fontname
-        if isinstance(font_name, bytes):
-            try:
-                font_name = font_name.decode("utf-8")
-            except UnicodeDecodeError:
-                font_name = "BASE64:" + base64.b64encode(font_name).decode("utf-8")
-        font_id = self.il_creater.current_page_font_name_id_map.get(font_name, None)
+        font_id = self.il_creater.current_page_font_name_id_map.get(font.xobj_id, None)
 
         item = AWLTChar(
             matrix,
