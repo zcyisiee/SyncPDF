@@ -12,7 +12,7 @@ class DummyTranslator(Translator):
         return self.translate_batch([text], [style_hint])[0]
 
     def translate_batch(
-        self, texts: list[str], style_hints: list[str] = []
+        self, texts: list[str], style_hints: list[str] | None = None
     ) -> list[str]:
         """
         A dummy translator that returns predefined translations based on the example data.
@@ -25,6 +25,9 @@ class DummyTranslator(Translator):
         Returns:
             List of translated strings
         """
+        if style_hints is None:
+            style_hints = []
+            
         # If the input is empty, return an empty list
         if os.environ.get("USE_DUMMY_SAME", "false") == "true":
             return ["t_" + i for i in texts]
@@ -35,7 +38,7 @@ class DummyTranslator(Translator):
             if (
                 i == ""
                 or (isinstance(i, str) and i.isdigit())
-                or isinstance(i, (int, float))
+                or isinstance(i, int | float)
             ):
                 rtn.append(i)
             else:

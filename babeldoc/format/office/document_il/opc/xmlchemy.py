@@ -50,8 +50,8 @@ class InvalidXmlError(XmlchemyError):
 class NamespacePrefixedTag(str):
     """Value object that knows the semantics of an XML tag having a namespace prefix."""
 
-    def __new__(cls, nstag: str, *args: Any):
-        return super(NamespacePrefixedTag, cls).__new__(cls, nstag)
+    def __new__(cls, nstag: str):
+        return super().__new__(cls, nstag)
 
     def __init__(self, nstag: str):
         self._pfx, self._local_part = nstag.split(":")
@@ -59,12 +59,12 @@ class NamespacePrefixedTag(str):
 
     @property
     def clark_name(self) -> str:
-        return "{%s}%s" % (self._ns_uri, self._local_part)
+        return f"{{{self._ns_uri}}}{self._local_part}"
 
     @classmethod
     def from_clark_name(cls, clark_name: str) -> NamespacePrefixedTag:
         nsuri, local_name = clark_name[1:].split("}")
-        nstag = "%s:%s" % (pfxmap[nsuri], local_name)
+        nstag = f"{pfxmap[nsuri]}:{local_name}"
         return cls(nstag)
 
     @property
@@ -107,7 +107,7 @@ def nsdecls(*prefixes: str) -> str:
 
     Handy for adding required namespace declarations to a tree root element.
     """
-    return " ".join(['xmlns:%s="%s"' % (pfx, nsmap[pfx]) for pfx in prefixes])
+    return " ".join([f'xmlns:{pfx}="{nsmap[pfx]}"' for pfx in prefixes])
 
 
 def nspfxmap(*nspfxs: str) -> dict[str, str]:
@@ -127,7 +127,7 @@ def qn(tag: str) -> str:
     """
     prefix, tagroot = tag.split(":")
     uri = nsmap[prefix]
-    return "{%s}%s" % (uri, tagroot)
+    return f"{{{uri}}}{tagroot}"
 
 
 if TYPE_CHECKING:
@@ -235,7 +235,7 @@ class BaseAttribute:
     def __init__(
         self, attr_name: str, simple_type: type[BaseXmlEnum] | type[BaseSimpleType]
     ):
-        super(BaseAttribute, self).__init__()
+        super().__init__()
         self._attr_name = attr_name
         self._simple_type = simple_type
 
@@ -287,7 +287,7 @@ class OptionalAttribute(BaseAttribute):
         simple_type: type[BaseXmlEnum] | type[BaseSimpleType],
         default: BaseXmlEnum | BaseSimpleType | str | bool | None = None,
     ):
-        super(OptionalAttribute, self).__init__(attr_name, simple_type)
+        super().__init__(attr_name, simple_type)
         self._default = default
 
     @property
@@ -350,10 +350,7 @@ class RequiredAttribute(BaseAttribute):
     def _docstring(self):
         """Return the string to use as the ``__doc__`` attribute of the property for
         this attribute."""
-        return "%s type-converted value of ``%s`` attribute." % (
-            self._simple_type.__name__,
-            self._attr_name,
-        )
+        return f"{self._simple_type.__name__} type-converted value of ``{self._attr_name}`` attribute."
 
     @property
     def _getter(self) -> Callable[[BaseOxmlElement], Any]:
@@ -363,8 +360,7 @@ class RequiredAttribute(BaseAttribute):
             attr_str_value = obj.get(self._clark_name)
             if attr_str_value is None:
                 raise InvalidXmlError(
-                    "required '%s' attribute not present on element %s"
-                    % (self._attr_name, obj.tag)
+                    f"required '{self._attr_name}' attribute not present on element {obj.tag}"
                 )
             return self._simple_type.from_xml(attr_str_value)
 
@@ -392,7 +388,7 @@ class _BaseChildElement:
     """
 
     def __init__(self, nsptagname: str, successors: tuple[str, ...] = ()):
-        super(_BaseChildElement, self).__init__()
+        super().__init__()
         self._nsptagname = nsptagname
         self._successors = successors
 
@@ -416,8 +412,7 @@ class _BaseChildElement:
             return child
 
         _add_child.__doc__ = (
-            "Add a new ``<%s>`` child element unconditionally, inserted in t"
-            "he correct sequence." % self._nsptagname
+            f"Add a new ``<{self._nsptagname}>`` child element unconditionally, inserted in the correct sequence."
         )
         self._add_to_class(self._add_method_name, _add_child)
 
@@ -426,8 +421,7 @@ class _BaseChildElement:
         empty element of the correct type, having no attributes."""
         creator = self._creator
         creator.__doc__ = (
-            'Return a "loose", newly created ``<%s>`` element having no attri'
-            "butes, text, or children." % self._nsptagname
+            f'Return a "loose", newly created ``<{self._nsptagname}>`` element having no attributes, text, or children.'
         )
         self._add_to_class(self._new_method_name, creator)
 
@@ -446,21 +440,20 @@ class _BaseChildElement:
             return child
 
         _insert_child.__doc__ = (
-            "Return the passed ``<%s>`` element after inserting it as a chil"
-            "d in the correct sequence." % self._nsptagname
+            f"Return the passed ``<{self._nsptagname}>`` element after inserting it as a child in the correct sequence."
         )
         self._add_to_class(self._insert_method_name, _insert_child)
 
     def _add_list_getter(self):
         """Add a read-only ``{prop_name}_lst`` property to the element class to retrieve
         a list of child elements matching this type."""
-        prop_name = "%s_lst" % self._prop_name
+        prop_name = f"{self._prop_name}_lst"
         property_ = property(self._list_getter, None, None)
         setattr(self._element_cls, prop_name, property_)
 
     @lazyproperty
     def _add_method_name(self):
-        return "_add_%s" % self._prop_name
+        return f"_add_{self._prop_name}"
 
     def _add_public_adder(self):
         """Add a public ``add_x()`` method to the parent element class."""
@@ -471,8 +464,7 @@ class _BaseChildElement:
             return child
 
         add_child.__doc__ = (
-            "Add a new ``<%s>`` child element unconditionally, inserted in t"
-            "he correct sequence." % self._nsptagname
+            f"Add a new ``<{self._nsptagname}>`` child element unconditionally, inserted in the correct sequence."
         )
         self._add_to_class(self._public_add_method_name, add_child)
 
@@ -488,7 +480,7 @@ class _BaseChildElement:
         """Callable that creates an empty element of the right type, with no attrs."""
         from docx.oxml.parser import OxmlElement
 
-        def new_child_element(obj: BaseOxmlElement):
+        def new_child_element(_):
             return OxmlElement(self._nsptagname)
 
         return new_child_element
@@ -506,13 +498,13 @@ class _BaseChildElement:
             return obj.find(qn(self._nsptagname))
 
         get_child_element.__doc__ = (
-            "``<%s>`` child element or |None| if not present." % self._nsptagname
+            f"``<{self._nsptagname}>`` child element or |None| if not present."
         )
         return get_child_element
 
     @lazyproperty
     def _insert_method_name(self):
-        return "_insert_%s" % self._prop_name
+        return f"_insert_{self._prop_name}"
 
     @property
     def _list_getter(self):
@@ -523,8 +515,7 @@ class _BaseChildElement:
             return obj.findall(qn(self._nsptagname))
 
         get_child_element_list.__doc__ = (
-            "A list containing each of the ``<%s>`` child elements, in the o"
-            "rder they appear." % self._nsptagname
+            f"A list containing each of the ``<{self._nsptagname}>`` child elements, in the order they appear."
         )
         return get_child_element_list
 
@@ -536,15 +527,15 @@ class _BaseChildElement:
         May be overridden to provide a friendlier API to clients having domain
         appropriate parameter names for required attributes.
         """
-        return "add_%s" % self._prop_name
+        return f"add_{self._prop_name}"
 
     @lazyproperty
     def _remove_method_name(self):
-        return "_remove_%s" % self._prop_name
+        return f"_remove_{self._prop_name}"
 
     @lazyproperty
     def _new_method_name(self):
-        return "_new_%s" % self._prop_name
+        return f"_new_{self._prop_name}"
 
 
 class Choice(_BaseChildElement):
@@ -587,8 +578,8 @@ class Choice(_BaseChildElement):
             return child
 
         get_or_change_to_child.__doc__ = (
-            "Return the ``<%s>`` child, replacing any other group element if found."
-        ) % self._nsptagname
+            f"Return the ``<{self._nsptagname}>`` child, replacing any other group element if found."
+        )
         self._add_to_class(self._get_or_change_to_method_name, get_or_change_to_child)
 
     @property
@@ -599,24 +590,24 @@ class Choice(_BaseChildElement):
 
     @lazyproperty
     def _get_or_change_to_method_name(self):
-        return "get_or_change_to_%s" % self._prop_name
+        return f"get_or_change_to_{self._prop_name}"
 
     @lazyproperty
     def _remove_group_method_name(self):
-        return "_remove_%s" % self._group_prop_name
+        return f"_remove_{self._group_prop_name}"
 
 
 class OneAndOnlyOne(_BaseChildElement):
     """Defines a required child element for MetaOxmlElement."""
 
     def __init__(self, nsptagname: str):
-        super(OneAndOnlyOne, self).__init__(nsptagname, ())
+        super().__init__(nsptagname, ())
 
     def populate_class_members(
         self, element_cls: MetaOxmlElement, prop_name: str
     ) -> None:
         """Add the appropriate methods to `element_cls`."""
-        super(OneAndOnlyOne, self).populate_class_members(element_cls, prop_name)
+        super().populate_class_members(element_cls, prop_name)
         self._add_getter()
 
     @property
@@ -628,12 +619,12 @@ class OneAndOnlyOne(_BaseChildElement):
             child = obj.find(qn(self._nsptagname))
             if child is None:
                 raise InvalidXmlError(
-                    "required ``<%s>`` child element not present" % self._nsptagname
+                    f"required ``<{self._nsptagname}>`` child element not present"
                 )
             return child
 
         get_child_element.__doc__ = (
-            "Required ``<%s>`` child element." % self._nsptagname
+            f"Required ``<{self._nsptagname}>`` child element."
         )
         return get_child_element
 
@@ -646,7 +637,7 @@ class OneOrMore(_BaseChildElement):
         self, element_cls: MetaOxmlElement, prop_name: str
     ) -> None:
         """Add the appropriate methods to `element_cls`."""
-        super(OneOrMore, self).populate_class_members(element_cls, prop_name)
+        super().populate_class_members(element_cls, prop_name)
         self._add_list_getter()
         self._add_creator()
         self._add_inserter()
@@ -662,7 +653,7 @@ class ZeroOrMore(_BaseChildElement):
         self, element_cls: MetaOxmlElement, prop_name: str
     ) -> None:
         """Add the appropriate methods to `element_cls`."""
-        super(ZeroOrMore, self).populate_class_members(element_cls, prop_name)
+        super().populate_class_members(element_cls, prop_name)
         self._add_list_getter()
         self._add_creator()
         self._add_inserter()
@@ -678,7 +669,7 @@ class ZeroOrOne(_BaseChildElement):
         self, element_cls: MetaOxmlElement, prop_name: str
     ) -> None:
         """Add the appropriate methods to `element_cls`."""
-        super(ZeroOrOne, self).populate_class_members(element_cls, prop_name)
+        super().populate_class_members(element_cls, prop_name)
         self._add_getter()
         self._add_creator()
         self._add_inserter()
@@ -698,8 +689,8 @@ class ZeroOrOne(_BaseChildElement):
             return child
 
         get_or_add_child.__doc__ = (
-            "Return the ``<%s>`` child element, newly added if not present."
-        ) % self._nsptagname
+            f"Return the ``<{self._nsptagname}>`` child element, newly added if not present."
+        )
         self._add_to_class(self._get_or_add_method_name, get_or_add_child)
 
     def _add_remover(self):
@@ -709,13 +700,13 @@ class ZeroOrOne(_BaseChildElement):
             obj.remove_all(self._nsptagname)
 
         _remove_child.__doc__ = (
-            "Remove all ``<%s>`` child elements."
-        ) % self._nsptagname
+            f"Remove all ``<{self._nsptagname}>`` child elements."
+        )
         self._add_to_class(self._remove_method_name, _remove_child)
 
     @lazyproperty
     def _get_or_add_method_name(self):
-        return "get_or_add_%s" % self._prop_name
+        return f"get_or_add_{self._prop_name}"
 
 
 class ZeroOrOneChoice(_BaseChildElement):
@@ -730,7 +721,7 @@ class ZeroOrOneChoice(_BaseChildElement):
         self, element_cls: MetaOxmlElement, prop_name: str
     ) -> None:
         """Add the appropriate methods to `element_cls`."""
-        super(ZeroOrOneChoice, self).populate_class_members(element_cls, prop_name)
+        super().populate_class_members(element_cls, prop_name)
         self._add_choice_getter()
         for choice in self._choices:
             choice.populate_class_members(
@@ -780,7 +771,7 @@ class ZeroOrOneChoice(_BaseChildElement):
 
     @lazyproperty
     def _remove_choice_group_method_name(self):
-        return "_remove_%s" % self._prop_name
+        return f"_remove_{self._prop_name}"
 
 
 # -- lxml typing isn't quite right here, just ignore this error on _Element --
@@ -791,11 +782,7 @@ class BaseOxmlElement(etree.ElementBase, metaclass=MetaOxmlElement):
     """
 
     def __repr__(self):
-        return "<%s '<%s>' at 0x%0x>" % (
-            self.__class__.__name__,
-            self._nsptag,
-            id(self),
-        )
+        return f"<{self.__class__.__name__} '<{self._nsptag}>' at 0x{id(self):0x}>"
 
     def first_child_found_in(self, *tagnames: str) -> _Element | None:
         """First child with tag in `tagnames`, or None if not found."""

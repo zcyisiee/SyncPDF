@@ -34,7 +34,7 @@ class Part:
         blob: bytes | None = None,
         package: OpcPackage | None = None,
     ):
-        super(Part, self).__init__()
+        super().__init__()
         self._partname = partname
         self._content_type = content_type
         self._blob = blob
@@ -74,14 +74,14 @@ class Part:
         """Content type of this part."""
         return self._content_type
 
-    def drop_rel(self, rId: str):
-        """Remove the relationship identified by `rId` if its reference count is less
+    def drop_rel(self, rid: str):
+        """Remove the relationship identified by `rid` if its reference count is less
         than 2.
 
         Relationships with a reference count of 0 are implicit relationships.
         """
-        if self._rel_ref_count(rId) < 2:
-            del self.rels[rId]
+        if self._rel_ref_count(rid) < 2:
+            del self.rels[rid]
 
     @classmethod
     def load(
@@ -90,17 +90,17 @@ class Part:
         return cls(partname, content_type, blob, package)
 
     def load_rel(
-        self, reltype: str, target: Part | str, rId: str, is_external: bool = False
+        self, reltype: str, target: Part | str, rid: str, is_external: bool = False
     ):
         """Return newly added |_Relationship| instance of `reltype`.
 
-        The new relationship relates the `target` part to this part with key `rId`.
+        The new relationship relates the `target` part to this part with key `rid`.
 
         Target mode is set to ``RTM.EXTERNAL`` if `is_external` is |True|. Intended for
-        use during load from a serialized package, where the rId is well-known. Other
+        use during load from a serialized package, where the rid is well-known. Other
         methods exist for adding a new relationship to a part when manipulating a part.
         """
-        return self.rels.add_relationship(reltype, target, rId, is_external)
+        return self.rels.add_relationship(reltype, target, rid, is_external)
 
     @property
     def package(self):
@@ -116,8 +116,8 @@ class Part:
     @partname.setter
     def partname(self, partname: str):
         if not isinstance(partname, PackURI):
-            tmpl = "partname must be instance of PackURI, got '%s'"
-            raise TypeError(tmpl % type(partname).__name__)
+            tmpl = f"partname must be instance of PackURI, got '{type(partname).__name__}'"
+            raise TypeError(tmpl)
         self._partname = partname
 
     def part_related_by(self, reltype: str) -> Part:
@@ -132,20 +132,20 @@ class Part:
     def relate_to(
         self, target: Part | str, reltype: str, is_external: bool = False
     ) -> str:
-        """Return rId key of relationship of `reltype` to `target`.
+        """Return rid key of relationship of `reltype` to `target`.
 
-        The returned `rId` is from an existing relationship if there is one, otherwise a
+        The returned `rid` is from an existing relationship if there is one, otherwise a
         new relationship is created.
         """
         if is_external:
             return self.rels.get_or_add_ext_rel(reltype, cast(str, target))
         else:
             rel = self.rels.get_or_add(reltype, cast(Part, target))
-            return rel.rId
+            return rel.rid
 
     @property
     def related_parts(self):
-        """Dictionary mapping related parts by rId, so child objects can resolve
+        """Dictionary mapping related parts by rid, so child objects can resolve
         explicit relationships present in the part XML, e.g. sldIdLst to a specific
         |Slide| instance."""
         return self.rels.related_parts
@@ -157,13 +157,13 @@ class Part:
         self._rels = Relationships(self._partname.baseURI, self._partname)
         return self._rels
 
-    def target_ref(self, rId: str) -> str:
-        """Return URL contained in target ref of relationship identified by `rId`."""
-        rel = self.rels[rId]
+    def target_ref(self, rid: str) -> str:
+        """Return URL contained in target ref of relationship identified by `rid`."""
+        rel = self.rels[rid]
         return rel.target_ref
 
-    def _rel_ref_count(self, rId: str) -> int:
-        """Return the count of references in this part to the relationship identified by `rId`.
+    def _rel_ref_count(self, rid: str) -> int:
+        """Return the count of references in this part to the relationship identified by `rid`.
 
         Only an XML part can contain references, so this is 0 for `Part`.
         """
@@ -195,13 +195,13 @@ class PartFactory:
         blob: bytes,
         package: OpcPackage,
     ):
-        PartClass: type[Part] | None = None
+        part_class: type[Part] | None = None
         if cls.part_class_selector is not None:
             part_class_selector = cls_method_fn(cls, "part_class_selector")
-            PartClass = part_class_selector(content_type, reltype)
-        if PartClass is None:
-            PartClass = cls._part_cls_for(content_type)
-        return PartClass.load(partname, content_type, blob, package)
+            part_class = part_class_selector(content_type, reltype)
+        if part_class is None:
+            part_class = cls._part_cls_for(content_type)
+        return part_class.load(partname, content_type, blob, package)
 
     @classmethod
     def _part_cls_for(cls, content_type: str):
@@ -213,6 +213,19 @@ class PartFactory:
 
 
 def part_class_selector(content_type: str, reltype: str) -> type[Part] | None:
+    """Select a part class based on content type and relationship type.
+    
+    This function is assigned to PartFactory.part_class_selector and is called
+    for each part in the package. By default it returns None, causing the 
+    selection to fall back to the content type map.
+    
+    Args:
+        content_type: The content type of the part
+        reltype: The relationship type of the part
+        
+    Returns:
+        A Part subclass or None if no specific class is selected
+    """
     return None
 
 
@@ -233,7 +246,7 @@ class XmlPart(Part):
         element: BaseOxmlElement,
         package: OpcPackage,
     ):
-        super(XmlPart, self).__init__(partname, content_type, package=package)
+        super().__init__(partname, content_type, package=package)
         self._element = element
 
     @property
@@ -254,15 +267,16 @@ class XmlPart(Part):
 
     @property
     def part(self):
-        """Part of the parent protocol, "children" of the document will not know the
-        part that contains them so must ask their parent object.
+        """Return |Part| subclass instance containing this XML element.
 
-        That chain of delegation ends here for child objects.
+        This is a circular reference in the case where this XML element is the root
+        element of the part, as it is in all current use cases. This is nonetheless
+        a useful and reliable way to get the part from an XML element.
         """
         return self
 
-    def _rel_ref_count(self, rId: str) -> int:
+    def _rel_ref_count(self, rid: str) -> int:
         """Return the count of references in this part's XML to the relationship
-        identified by `rId`."""
-        rIds = cast("list[str]", self._element.xpath("//@r:id"))
-        return len([_rId for _rId in rIds if _rId == rId])
+        identified by `rid`."""
+        rids = cast("list[str]", self._element.xpath("//@r:id"))
+        return len([_rid for _rid in rids if _rid == rid])

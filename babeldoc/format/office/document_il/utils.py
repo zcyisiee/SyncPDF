@@ -4,12 +4,13 @@ import hashlib
 import threading
 import time
 from string import ascii_uppercase
+from typing import Union
 
 from babeldoc.format.office.document_il.opc.constants import CONTENT_TYPE as CT
 from babeldoc.format.office.document_il.opc.part import Part
 from babeldoc.format.office.document_il.types import ILDataPart
 
-type PartLike = Part | ILDataPart
+PartLike = Union[Part, ILDataPart]
 
 
 def get_main_part(parts: dict[str, PartLike] | list[PartLike]) -> PartLike:
@@ -40,7 +41,7 @@ def _make_hashable(obj):
     """
     if isinstance(obj, dict):
         return frozenset((k, _make_hashable(v)) for k, v in obj.items())
-    elif isinstance(obj, (list, tuple)):
+    elif isinstance(obj, list | tuple):
         return tuple(_make_hashable(v) for v in obj)
     elif isinstance(obj, set):
         return frozenset(_make_hashable(v) for v in obj)
@@ -48,7 +49,7 @@ def _make_hashable(obj):
         return base64.b64encode(obj).decode()  # 转成 base64 方便哈希
     elif isinstance(obj, datetime.datetime):
         return obj.isoformat()  # 统一格式
-    elif isinstance(obj, (int, float, str, bool, type(None))):
+    elif isinstance(obj, int | float | str | bool | type(None)):
         return obj  # 基本数据类型直接返回
     else:
         return str(obj)  # 兜底处理，防止崩溃

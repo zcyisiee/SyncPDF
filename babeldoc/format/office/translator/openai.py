@@ -161,7 +161,7 @@ Text Array: {json.dumps(text)}"""
         except requests.exceptions.RequestException as e:
             if response:
                 logger.debug(f"Response: {response.json()}")
-            raise Exception(f"API request failed: {str(e)}")
+            raise Exception(f"API request failed: {str(e)}") from e
 
     def _extract_translation(self, response: dict[str, Any]) -> list[str]:
         """
@@ -180,7 +180,7 @@ Text Array: {json.dumps(text)}"""
         except (KeyError, IndexError, json.JSONDecodeError) as e:
             raise Exception(
                 f"Failed to extract translation from response {str(e)}\nResponse: {response}"
-            )
+            ) from e
 
     def translate(
         self,
