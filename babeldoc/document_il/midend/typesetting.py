@@ -327,6 +327,7 @@ class TypesettingUnit:
                 vertical=self.char.vertical,
                 advance=self.char.advance * scale if self.char.advance else None,
                 debug_info=self.debug_info,
+                xobj_id=self.char.xobj_id,
             )
             return TypesettingUnit(char=new_char)
 
@@ -386,6 +387,7 @@ class TypesettingUnit:
                     scale=scale,
                     vertical=char.vertical,
                     advance=char.advance * scale if char.advance else None,
+                    xobj_id=char.xobj_id,
                 )
                 new_chars.append(new_char)
 
