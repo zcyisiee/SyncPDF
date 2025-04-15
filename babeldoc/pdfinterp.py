@@ -393,6 +393,8 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
         gs.passthrough_instruction = (
             self.il_creater.passthrough_per_char_instruction.copy()
         )
+        if isinstance(seq, int) or isinstance(seq, float):
+            seq = [seq]
         self.device.render_string(self.textstate, cast(PDFTextSeq, seq), self.ncs, gs)
         return
 
