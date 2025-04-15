@@ -668,6 +668,10 @@ class PDFCreater:
                     xobj_draw_ops = {}
                     xobj_encoding_length_map = {}
                     available_font_list = self.get_available_font_list(pdf, page)
+                    page_encoding_length_map = {
+                        f.font_id: f.encoding_length for f in page.pdf_font
+                    }
+                    all_encoding_length_map = page_encoding_length_map.copy()
 
                     for xobj in page.pdf_xobject:
                         xobj_available_fonts[xobj.xobj_id] = available_font_list.copy()
@@ -680,12 +684,16 @@ class PDFCreater:
                         xobj_encoding_length_map[xobj.xobj_id] = {
                             f.font_id: f.encoding_length for f in xobj.pdf_font
                         }
+                        all_encoding_length_map.update(
+                            xobj_encoding_length_map[xobj.xobj_id]
+                        )
+                        xobj_encoding_length_map[xobj.xobj_id].update(
+                            page_encoding_length_map
+                        )
                         xobj_op = BitStream()
                         xobj_op.append(xobj.base_operations.value.encode())
                         xobj_draw_ops[xobj.xobj_id] = xobj_op
-                    page_encoding_length_map = {
-                        f.font_id: f.encoding_length for f in page.pdf_font
-                    }
+
                     page_op = BitStream()
                     # q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}
                     # page_op.append(b"q ")
@@ -740,10 +748,13 @@ class PDFCreater:
 
                         encoding_length = encoding_length_map.get(font_id, None)
                         if encoding_length is None:
-                            logger.debug(
-                                f"Font {font_id} not found in encoding length map for page {page.page_number}"
-                            )
-                            continue
+                            if font_id in all_encoding_length_map:
+                                encoding_length = all_encoding_length_map[font_id]
+                            else:
+                                logger.debug(
+                                    f"Font {font_id} not found in encoding length map for page {page.page_number}"
+                                )
+                                continue
                         # pdf32000-2008 page14:
                         # As hexadecimal data enclosed in angle brackets < >
                         # see 7.3.4.3, "Hexadecimal Strings."
