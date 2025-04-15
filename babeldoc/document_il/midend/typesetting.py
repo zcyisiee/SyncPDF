@@ -277,6 +277,8 @@ class TypesettingUnit:
     @property
     def box(self):
         if self.char:
+            if self.char.visual_bbox and self.char.visual_bbox.box:
+                return self.char.visual_bbox.box
             return self.char.box
         elif self.formular:
             return self.formular.box
