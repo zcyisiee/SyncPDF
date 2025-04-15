@@ -618,7 +618,7 @@ class StylesAndFormulas:
                     "Zp",
                     "Zs",
                     "Co",  # private use character
-                    "So",  # symbol
+                    # "So",  # symbol
                 ]  # 文字修饰符、数学符号、分隔符号
                 or ord(char[0]) in range(0x370, 0x400)  # 希腊字母
             )
