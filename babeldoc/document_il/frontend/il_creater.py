@@ -354,16 +354,21 @@ class ILCreater:
                     encoding_length = 1
                 else:
                     _, to_unicode_id = self.mupdf.xref_get_key(xref_id, "ToUnicode")
-                    to_unicode_bytes = self.mupdf.xref_stream(
-                        int(to_unicode_id.split(" ")[0]),
-                    )
-                    code_range = re.search(
-                        b"begincodespacerange\n?.*<(\\d+?)>.*",
-                        to_unicode_bytes,
-                    ).group(1)
-                    encoding_length = len(code_range) // 2
+                    if to_unicode_id is not None:
+                        to_unicode_bytes = self.mupdf.xref_stream(
+                            int(to_unicode_id.split(" ")[0]),
+                        )
+                        code_range = re.search(
+                            b"begincodespacerange\n?.*<(\\d+?)>.*",
+                            to_unicode_bytes,
+                        ).group(1)
+                        encoding_length = len(code_range) // 2
             except Exception:
-                if max(font.unicode_map.cid2unichr.keys()) > 255:
+                if (
+                    font.unicode_map
+                    and font.unicode_map.cid2unichr
+                    and max(font.unicode_map.cid2unichr.keys()) > 255
+                ):
                     encoding_length = 2
                 else:
                     encoding_length = 1
