@@ -266,8 +266,8 @@ async def main():
         return
 
     # 验证翻译服务选择
-    if not (args.openai or args.translate):
-        parser.error("必须选择一个翻译服务：--openai 或 --translate")
+    if not args.openai:
+        parser.error("必须选择一个翻译服务：--openai")
 
     # 验证 OpenAI 参数
     if args.openai and not args.openai_api_key:
