@@ -426,6 +426,37 @@ def get_bbox(bbox, size, c, x, y):
     return pymupdf.Quad(ll, lr, ul, ur)
 
 
+# 常见 Unicode 空格字符的代码点
+unicode_spaces = [
+    "\u0020",  # 半角空格
+    "\u00a0",  # 不间断空格
+    "\u1680",  # Ogham 空格标记
+    "\u2000",  # En Quad
+    "\u2001",  # Em Quad
+    "\u2002",  # En Space
+    "\u2003",  # Em Space
+    "\u2004",  # 三分之一 Em 空格
+    "\u2005",  # 四分之一 Em 空格
+    "\u2006",  # 六分之一 Em 空格
+    "\u2007",  # 数样间距
+    "\u2008",  # 行首前导空格
+    "\u2009",  # 瘦弱空格
+    "\u200a",  # hair space
+    "\u202f",  # 窄不间断空格
+    "\u205f",  # 数学中等空格
+    "\u3000",  # 全角空格
+    "\u200b",  # 零宽度空格
+    "\u2060",  # 零宽度非断空格
+    "\t",  # 水平制表符
+]
+
+# 构建正则表达式
+pattern = "^[" + "".join(unicode_spaces) + "]+$"
+
+# 编译正则
+space_regex = re.compile(pattern)
+
+
 class ILCreater:
     stage_name = "Parse PDF and Create Intermediate Representation"
 
@@ -805,7 +836,7 @@ class ILCreater:
         char_unicode = char.get_text()
         if "(cid:" not in char_unicode and len(char_unicode) > 1:
             return
-        if char_unicode == "\t":
+        if space_regex.match(char_unicode):
             char_unicode = " "
         advance = char.adv
         bbox = il_version_1.Box(
