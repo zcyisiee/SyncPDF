@@ -1,4 +1,5 @@
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -125,6 +126,7 @@ class RpcDocLayoutModel(DocLayoutModel):
         self.host = host
         self._stride = 32  # Default stride value
         self._names = ["text", "title", "list", "table", "figure"]
+        self.lock = threading.Lock()
 
     @property
     def stride(self) -> int:
@@ -253,7 +255,8 @@ class RpcDocLayoutModel(DocLayoutModel):
         self, page, mupdf_doc: pymupdf.Document, translate_config, save_debug_image
     ):
         translate_config.raise_if_cancelled()
-        pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
+        with self.lock:
+            pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
         image = np.fromstring(pix.samples, np.uint8).reshape(
             pix.height,
             pix.width,
