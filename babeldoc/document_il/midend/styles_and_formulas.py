@@ -554,6 +554,8 @@ class StylesAndFormulas:
             r"|.*DJ5EscrowCond.*"
             r"|.*ExchangeBook.*"
             r"|.*DJ5Exchange.*"
+            r"|.*Times-Italic.*"
+            r"|.*Times-BoldItalic.*"
             r")$"
         )
         if self.translation_config.formular_font_pattern:
