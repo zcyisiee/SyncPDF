@@ -3,6 +3,7 @@ import ast
 import logging
 import platform
 import re
+import threading
 from collections.abc import Generator
 
 import cv2
@@ -121,6 +122,7 @@ class OnnxModel(DocLayoutModel):
             model.SerializeToString(),
             providers=providers,
         )
+        self.lock = threading.Lock()
 
     @staticmethod
     def from_pretrained():
@@ -279,7 +281,8 @@ class OnnxModel(DocLayoutModel):
     ]:
         for page in pages:
             translate_config.raise_if_cancelled()
-            pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
+            with self.lock:
+                pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
             image = np.fromstring(pix.samples, np.uint8).reshape(
                 pix.height,
                 pix.width,
