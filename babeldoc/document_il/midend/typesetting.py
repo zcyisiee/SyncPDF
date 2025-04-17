@@ -112,6 +112,7 @@ class TypesettingUnit:
             r"\u0250-\u02A0"  # IPA Extensions
             r"\u0400-\u04FF"  # Cyrillic
             r"'"
+            r"-"  # Hyphen
             r"]+$",
             unicode,
         ):
