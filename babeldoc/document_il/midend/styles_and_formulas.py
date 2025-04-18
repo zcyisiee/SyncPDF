@@ -556,6 +556,9 @@ class StylesAndFormulas:
             r"|.*DJ5Exchange.*"
             r"|.*Times-Italic.*"
             r"|.*Times-BoldItalic.*"
+            r"|.*CronosPro.*"
+            r"|.*ACaslon.*"
+            r"|.*Frutiger.*"
             r")$"
         )
         if self.translation_config.formular_font_pattern:
