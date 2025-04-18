@@ -185,21 +185,25 @@ class PDFCreater:
         except Exception:
             return set()
 
-    def _debug_render_rectangle(
+    def _render_rectangle(
         self,
         draw_op: BitStream,
         rectangle: il_version_1.PdfRectangle,
+        line_width: float = 1,
     ):
-        """Draw a debug rectangle in PDF for visualization purposes.
+        """Draw a rectangle in PDF for visualization purposes.
 
         Args:
             draw_op: BitStream to append PDF drawing operations
             rectangle: Rectangle object containing position information
+            line_width: Line width
         """
         x1 = rectangle.box.x
         y1 = rectangle.box.y
         x2 = rectangle.box.x2
         y2 = rectangle.box.y2
+        width = x2 - x1
+        height = y2 - y1
         # Save graphics state
         draw_op.append(b"q ")
 
@@ -207,17 +211,13 @@ class PDFCreater:
         draw_op.append(
             rectangle.graphic_state.passthrough_per_char_instruction.encode(),
         )  # Green stroke
-        draw_op.append(b" 1 w ")  # Line width
-
-        # Draw four lines manually
-        # Bottom line
-        draw_op.append(f"{x1} {y1} m {x2} {y1} l S ".encode())
-        # Right line
-        draw_op.append(f"{x2} {y1} m {x2} {y2} l S ".encode())
-        # Top line
-        draw_op.append(f"{x2} {y2} m {x1} {y2} l S ".encode())
-        # Left line
-        draw_op.append(f"{x1} {y2} m {x1} {y1} l S ".encode())
+        if line_width > 0:
+            draw_op.append(f" {line_width} w ".encode())  # Line width
+        draw_op.append(f"{x1} {y1} {width} {height} re ".encode())
+        if rectangle.fill_background:
+            draw_op.append(b" f ")
+        else:
+            draw_op.append(b" S ")
 
         # Restore graphics state
         draw_op.append(b"Q\n")
@@ -410,7 +410,7 @@ class PDFCreater:
             for rect in page.pdf_rectangle:
                 if not rect.debug_info:
                     continue
-                self._debug_render_rectangle(page_op, rect)
+                self._render_rectangle(page_op, rect)
             draw_op = page_op
             # Since this is a draw instruction container,
             # no additional information is needed
@@ -711,7 +711,17 @@ class PDFCreater:
                     # 然后添加段落中的字符
                     for paragraph in page.pdf_paragraph:
                         chars.extend(self.render_paragraph_to_char(paragraph))
-
+                    for rect in page.pdf_rectangle:
+                        if (
+                            translation_config.ocr_workaround
+                            and not rect.debug_info
+                            and rect.fill_background
+                        ):
+                            if rect.xobj_id in xobj_available_fonts:
+                                draw_op = xobj_draw_ops[rect.xobj_id]
+                            else:
+                                draw_op = page_op
+                            self._render_rectangle(draw_op, rect, line_width=0.1)
                     # 渲染所有字符
                     for char in chars:
                         if char.char_unicode == "\n":
@@ -773,7 +783,9 @@ class PDFCreater:
                             )
                         # pdf.update_stream(xobj.xref_id, b'')
                     for rect in page.pdf_rectangle:
-                        self._debug_render_rectangle(page_op, rect)
+                        if translation_config.debug and rect.debug_info:
+                            self._render_rectangle(page_op, rect)
+
                     draw_op = page_op
                     op_container = pdf.get_new_xref()
                     # Since this is a draw instruction container,
@@ -783,6 +795,9 @@ class PDFCreater:
                     pdf[page.page_number].set_contents(op_container)
                     pbar.advance()
             translation_config.raise_if_cancelled()
+            gc_level = 1
+            if self.translation_config.ocr_workaround:
+                gc_level = 4
             with self.translation_config.progress_monitor.stage_start(
                 SUBSET_FONT_STAGE_NAME,
                 1,
@@ -811,7 +826,7 @@ class PDFCreater:
                         pdf,
                         mono_out_path,
                         translation_config,
-                        garbage=1,
+                        garbage=gc_level,
                         deflate=True,
                         clean=not translation_config.skip_clean,
                         deflate_fonts=True,
@@ -864,7 +879,7 @@ class PDFCreater:
                         dual,
                         dual_out_path,
                         translation_config,
-                        garbage=1,
+                        garbage=gc_level,
                         deflate=True,
                         clean=not translation_config.skip_clean,
                         deflate_fonts=True,

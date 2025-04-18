@@ -68,6 +68,7 @@ class TranslationConfig:
         table_model=None,
         show_char_box: bool = False,
         skip_scanned_detection: bool = False,
+        ocr_workaround: bool = False,
     ):
         self.translator = translator
 
@@ -108,6 +109,10 @@ class TranslationConfig:
         self.report_interval = report_interval
         self.min_text_length = min_text_length
         self.use_alternating_pages_dual = use_alternating_pages_dual
+        self.ocr_workaround = ocr_workaround
+
+        if self.ocr_workaround:
+            self.skip_scanned_detection = True
 
         # for backward compatibility
         if use_side_by_side_dual is False and use_alternating_pages_dual is False:
@@ -234,11 +239,14 @@ class TranslationConfig:
 
     def cleanup_temp_files(self):
         """Clean up all temporary files including part working directories"""
-        for part_index in list(self._part_working_dirs.keys()):
-            self.cleanup_part_working_dir(part_index)
-        if self._is_temp_dir:
-            logger.info(f"cleanup temp files: {self.working_dir}")
-            shutil.rmtree(self.working_dir)
+        try:
+            for part_index in list(self._part_working_dirs.keys()):
+                self.cleanup_part_working_dir(part_index)
+            if self._is_temp_dir:
+                logger.info(f"cleanup temp files: {self.working_dir}")
+                shutil.rmtree(self.working_dir)
+        except Exception:
+            logger.exception("Error cleaning up temporary files")
 
     def raise_if_cancelled(self):
         if self.progress_monitor is not None:

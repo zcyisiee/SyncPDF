@@ -19,6 +19,7 @@ from pdfminer.pdftypes import resolve1 as pdftypes_resolve1
 from pdfminer.psparser import PSLiteral
 
 from babeldoc.document_il import il_version_1
+from babeldoc.document_il.utils.style_helper import BLACK
 from babeldoc.document_il.utils.style_helper import YELLOW
 from babeldoc.translation_config import TranslationConfig
 
@@ -887,6 +888,8 @@ class ILCreater:
             xobj_id=char.xobj_id,
             visual_bbox=visual_bbox,
         )
+        if self.translation_config.ocr_workaround:
+            pdf_char.pdf_style.graphic_state = BLACK
         if pdf_style.font_size == 0.0:
             logger.warning(
                 "Font size is 0.0 for character %s. Skip it.",
