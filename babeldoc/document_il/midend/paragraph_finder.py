@@ -237,7 +237,7 @@ class ParagraphFinder:
             is_small_char = char_area < median_char_area * 0.1
 
             # 检查是否需要开始新段落
-            # 如果字符面积小于中位数面积的10%且当前段落已有字符，则跳过新段落检测
+            # 如果字符面积小于中位数面积的 10% 且当前段落已有字符，则跳过新段落检测
             if not (is_small_char and current_line_chars) and (
                 current_layout is None
                 or char_layout.id != current_layout.id

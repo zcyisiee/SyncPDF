@@ -395,7 +395,7 @@ class StylesAndFormulas:
                             right_line = comp.pdf_line
                             break
 
-                # 计算与左右文本的y轴交集
+                # 计算与左右文本的 y 轴交集
                 left_intersection = 0
                 right_intersection = 0
 
@@ -413,7 +413,7 @@ class StylesAndFormulas:
                     if intersection_end > intersection_start:
                         right_intersection = intersection_end - intersection_start
 
-                # 如果有两个文本段落，将交集较小的设为none
+                # 如果有两个文本段落，将交集较小的设为 none
                 if left_line and right_line:
                     if left_intersection < right_intersection:
                         left_line = None
