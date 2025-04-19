@@ -12,6 +12,7 @@ web/dist
 web/dist-ssr
 web/*.local
 
+memray*
 **/*.so
 *.pdf
 *.docx
