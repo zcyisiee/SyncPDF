@@ -43,10 +43,10 @@ def encode_image(image) -> bytes:
 
 
 @retry(
-    stop=stop_after_attempt(3),  # 最多重试3次
+    stop=stop_after_attempt(3),  # 最多重试 3 次
     wait=wait_exponential(
         multiplier=1, min=1, max=10
-    ),  # 指数退避策略，初始1秒，最大10秒
+    ),  # 指数退避策略，初始 1 秒，最大 10 秒
     retry=retry_if_exception_type((httpx.HTTPError, Exception)),  # 针对哪些异常重试
     before_sleep=lambda retry_state: logger.warning(
         f"Request failed, retrying in {retry_state.next_action.sleep} seconds... "

@@ -221,8 +221,8 @@ class TypesettingUnit:
                 # 连接号
                 "～",  # 全角波浪号
                 "-",  # 连字符减号
-                "–",  # 短破折号(EN DASH)
-                "—",  # 长破折号(EM DASH)
+                "–",  # 短破折号 (EN DASH)
+                "—",  # 长破折号 (EM DASH)
                 # 间隔号
                 "·",  # 中间点
                 "・",  # 片假名中间点
@@ -767,7 +767,7 @@ class Typesetting:
         line_spacing = 1.7  # 初始行距为 1.7
         min_scale = 0.1  # 最小缩放因子
         min_line_spacing = 1.4  # 最小行距
-        expand_space_flag = 0  # 0: 未扩展, 1: 已向下扩展, 2: 已向右扩展
+        expand_space_flag = 0  # 0: 未扩展，1: 已向下扩展，2: 已向右扩展
 
         while scale >= min_scale:
             # 尝试布局排版单元

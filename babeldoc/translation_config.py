@@ -60,7 +60,7 @@ class TranslationConfig:
         enhance_compatibility: bool = False,
         report_interval: float = 0.1,
         min_text_length: int = 5,
-        use_side_by_side_dual: bool = True,  # Deprecated: 是否使用拼版式双语 PDF（并排显示原文和译文） 向下兼容选项，已停用。
+        use_side_by_side_dual: bool = True,  # Deprecated: 是否使用拼版式双语 PDF（并排显示原文和译文）向下兼容选项，已停用。
         use_alternating_pages_dual: bool = False,
         watermark_output_mode: WatermarkOutputMode = WatermarkOutputMode.Watermarked,
         # Add split-related parameters

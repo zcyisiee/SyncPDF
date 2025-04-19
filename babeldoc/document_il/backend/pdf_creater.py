@@ -31,11 +31,11 @@ def _subset_fonts_process(pdf_path, output_path):
         pdf = pymupdf.open(pdf_path)
         pdf.subset_fonts(fallback=False)
         pdf.save(output_path)
-        # 返回0表示成功
+        # 返回 0 表示成功
         os._exit(0)
     except Exception as e:
         logger.error(f"Error in font subsetting subprocess: {e}")
-        # 返回1表示失败
+        # 返回 1 表示失败
         os._exit(1)
 
 
@@ -69,11 +69,11 @@ def _save_pdf_clean_process(
             deflate_fonts=deflate_fonts,
             linear=linear,
         )
-        # 返回0表示成功
+        # 返回 0 表示成功
         os._exit(0)
     except Exception as e:
         logger.error(f"Error in save PDF with clean=True subprocess: {e}")
-        # 返回1表示失败
+        # 返回 1 表示失败
         os._exit(1)
 
 
