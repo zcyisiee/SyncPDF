@@ -479,6 +479,7 @@ class ILCreater:
         self.current_page_font_name_id_map = {}
         self.current_page_font_char_bounding_box_map = {}
         self.mupdf_font_map: dict[int, pymupdf.Font] = {}
+        self.graphic_state_pool = {}
 
     def on_finish(self):
         self.progress.__exit__(None, None, None)
@@ -796,6 +797,21 @@ class ILCreater:
         graphic_state.passthrough_per_char_instruction = " ".join(
             f"{arg} {op}" for op, arg in gs.passthrough_instruction
         )
+
+        # 可能会影响部分 graphic state 准确度。不过 BabelDOC 仅使用 passthrough_per_char_instruction
+        # 所以应该是没啥影响
+        # 但是池化 graphic state 后可以减少内存占用
+        if (
+            graphic_state.passthrough_per_char_instruction
+            not in self.graphic_state_pool
+        ):
+            self.graphic_state_pool[graphic_state.passthrough_per_char_instruction] = (
+                graphic_state
+            )
+        else:
+            graphic_state = self.graphic_state_pool[
+                graphic_state.passthrough_per_char_instruction
+            ]
 
         return graphic_state
 
