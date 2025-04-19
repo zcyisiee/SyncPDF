@@ -1,6 +1,6 @@
 name: Lint Code and Review Dog Report
 
-on: [push, pull_request]
+on: [pull_request]
 permissions:
   contents: read
   pull-requests: write
