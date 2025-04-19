@@ -586,6 +586,7 @@ def _do_translate_single(
     logger.debug(f"finish parse il from {temp_pdf_path}")
     docs = il_creater.create_il()
     logger.debug(f"finish create il from {temp_pdf_path}")
+    del il_creater
     if translation_config.debug:
         xml_converter.write_json(
             docs,
@@ -657,6 +658,7 @@ def _do_translate_single(
         il_translator = ILTranslator(translate_engine, translation_config)
 
     il_translator.translate(docs)
+    del il_translator
     logger.debug(f"finish ILTranslator from {temp_pdf_path}")
     if translation_config.debug:
         xml_converter.write_json(
