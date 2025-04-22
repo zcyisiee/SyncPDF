@@ -181,3 +181,9 @@ trang babeldoc/document_il/il_version_1.rnc babeldoc/document_il/il_version_1.xs
 # Generate Python classes from XSD
 xsdata generate babeldoc/document_il/il_version_1.xsd --package babeldoc.document_il
 ```
+
+##### Profile memory usage
+
+```bash
+uv run memray run --native --aggregate babeldoc/main.py -c yadt.toml
+```

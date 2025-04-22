@@ -8,9 +8,11 @@ from babeldoc.document_il import PdfCharacter
 from babeldoc.document_il import PdfLine
 from babeldoc.document_il import PdfParagraph
 from babeldoc.document_il import PdfParagraphComposition
+from babeldoc.document_il import PdfRectangle
 from babeldoc.document_il.utils.layout_helper import Layout
 from babeldoc.document_il.utils.layout_helper import add_space_dummy_chars
 from babeldoc.document_il.utils.layout_helper import get_char_unicode_string
+from babeldoc.document_il.utils.style_helper import WHITE
 from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
@@ -34,6 +36,41 @@ class ParagraphFinder:
 
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config
+
+    def add_text_fill_background(self, page: Page):
+        layout_map = {layout.id: layout for layout in page.page_layout}
+        for paragraph in page.pdf_paragraph:
+            layout_id = paragraph.layout_id
+            if layout_id is None:
+                continue
+            layout = layout_map[layout_id]
+            if paragraph.box is None:
+                continue
+            x1, y1, x2, y2 = (
+                paragraph.box.x,
+                paragraph.box.y,
+                paragraph.box.x2,
+                paragraph.box.y2,
+            )
+            layout_box = layout.box
+            if layout_box.x < x1:
+                x1 = layout_box.x
+            if layout_box.y < y1:
+                y1 = layout_box.y
+            if layout_box.x2 > x2:
+                x2 = layout_box.x2
+            if layout_box.y2 > y2:
+                y2 = layout_box.y2
+            assert x2 > x1 and y2 > y1
+            page.pdf_rectangle.append(
+                PdfRectangle(
+                    box=Box(x1, y1, x2, y2),
+                    fill_background=True,
+                    graphic_state=WHITE,
+                    debug_info=False,
+                    xobj_id=paragraph.xobj_id,
+                )
+            )
 
     def update_paragraph_data(self, paragraph: PdfParagraph, update_unicode=False):
         if not paragraph.pdf_paragraph_composition:
@@ -126,6 +163,12 @@ class ParagraphFinder:
         for paragraph in paragraphs:
             self.update_paragraph_data(paragraph, update_unicode=True)
 
+        if self.translation_config.ocr_workaround:
+            self.add_text_fill_background(page)
+            # since this is ocr file,
+            # image characters are not needed
+            page.pdf_character = []
+
     def is_isolated_formula(self, char: PdfCharacter):
         return char.char_unicode in (
             "(cid:122)",
@@ -176,6 +219,7 @@ class ParagraphFinder:
                     if current_paragraph is None:
                         current_paragraph = PdfParagraph(
                             pdf_paragraph_composition=[line],
+                            layout_id=char_layout.id,
                             debug_id=generate_base58_id(),
                             layout_label=char_layout.name
                             if not current_layout
@@ -193,7 +237,7 @@ class ParagraphFinder:
             is_small_char = char_area < median_char_area * 0.1
 
             # 检查是否需要开始新段落
-            # 如果字符面积小于中位数面积的10%且当前段落已有字符，则跳过新段落检测
+            # 如果字符面积小于中位数面积的 10% 且当前段落已有字符，则跳过新段落检测
             if not (is_small_char and current_line_chars) and (
                 current_layout is None
                 or char_layout.id != current_layout.id
@@ -214,6 +258,7 @@ class ParagraphFinder:
                     else:
                         current_paragraph = PdfParagraph(
                             pdf_paragraph_composition=[line],
+                            layout_id=current_layout.id,
                             debug_id=generate_base58_id(),
                             layout_label=current_layout.name,
                         )
@@ -231,6 +276,7 @@ class ParagraphFinder:
             if current_paragraph is None:
                 current_paragraph = PdfParagraph(
                     pdf_paragraph_composition=[line],
+                    layout_id=current_layout.id,
                     debug_id=generate_base58_id(),
                     layout_label=current_layout.name,
                 )
@@ -420,6 +466,7 @@ class ParagraphFinder:
                         unicode="",
                         debug_id=generate_base58_id(),
                         layout_label=paragraph.layout_label,
+                        layout_id=paragraph.layout_id,
                     )
                     # 更新原段落
                     paragraph.pdf_paragraph_composition = (
@@ -449,6 +496,7 @@ class ParagraphFinder:
                         unicode="",
                         debug_id=generate_base58_id(),
                         layout_label=paragraph.layout_label,
+                        layout_id=paragraph.layout_id,
                     )
                     # 更新原段落
                     paragraph.pdf_paragraph_composition = (

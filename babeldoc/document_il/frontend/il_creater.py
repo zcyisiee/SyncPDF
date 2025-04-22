@@ -19,6 +19,7 @@ from pdfminer.pdftypes import resolve1 as pdftypes_resolve1
 from pdfminer.psparser import PSLiteral
 
 from babeldoc.document_il import il_version_1
+from babeldoc.document_il.utils.style_helper import BLACK
 from babeldoc.document_il.utils.style_helper import YELLOW
 from babeldoc.translation_config import TranslationConfig
 
@@ -478,6 +479,7 @@ class ILCreater:
         self.current_page_font_name_id_map = {}
         self.current_page_font_char_bounding_box_map = {}
         self.mupdf_font_map: dict[int, pymupdf.Font] = {}
+        self.graphic_state_pool = {}
 
     def on_finish(self):
         self.progress.__exit__(None, None, None)
@@ -796,6 +798,21 @@ class ILCreater:
             f"{arg} {op}" for op, arg in gs.passthrough_instruction
         )
 
+        # 可能会影响部分 graphic state 准确度。不过 BabelDOC 仅使用 passthrough_per_char_instruction
+        # 所以应该是没啥影响
+        # 但是池化 graphic state 后可以减少内存占用
+        if (
+            graphic_state.passthrough_per_char_instruction
+            not in self.graphic_state_pool
+        ):
+            self.graphic_state_pool[graphic_state.passthrough_per_char_instruction] = (
+                graphic_state
+            )
+        else:
+            graphic_state = self.graphic_state_pool[
+                graphic_state.passthrough_per_char_instruction
+            ]
+
         return graphic_state
 
     def on_lt_char(self, char: LTChar):
@@ -887,6 +904,8 @@ class ILCreater:
             xobj_id=char.xobj_id,
             visual_bbox=visual_bbox,
         )
+        if self.translation_config.ocr_workaround:
+            pdf_char.pdf_style.graphic_state = BLACK
         if pdf_style.font_size == 0.0:
             logger.warning(
                 "Font size is 0.0 for character %s. Skip it.",
