@@ -49,8 +49,11 @@ def create_hook(func, hook):
 
 def hook_pdfminer_pdf_page_init(*args):
     attrs = args[3]
-    while isinstance(attrs["MediaBox"], PDFMinerPDFObjRef):
-        attrs["MediaBox"] = pdftypes_resolve1(attrs["MediaBox"])
+    try:
+        while isinstance(attrs["MediaBox"], PDFMinerPDFObjRef):
+            attrs["MediaBox"] = pdftypes_resolve1(attrs["MediaBox"])
+    except Exception:
+        logger.exception(f"try to fix mediabox failed: {attrs}")
 
 
 PDFMinerPDFPage.__init__ = create_hook(
