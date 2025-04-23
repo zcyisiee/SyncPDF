@@ -48,6 +48,7 @@ dependencies = [
 [project.optional-dependencies]
 directml = ["onnxruntime-directml>=1.16.1"]
 cuda = ["onnxruntime-gpu>=1.16.1"]
+memray = ["memray>=1.17.1"]
 
 [project.urls]
 Homepage = "https://github.com/funstory-ai/BabelDOC"
@@ -141,7 +142,6 @@ dev = [
     "pygments>=2.19.1",
     "ruff>=0.9.2",
     "pytest>=8.3.4",
-    "memray>=1.17.1",
 ]
 
 [tool.pytest.ini_options]
