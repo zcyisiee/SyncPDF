@@ -72,8 +72,14 @@ for each_font in fonts:
             font_name,
             "[bold red]Formula Font[/bold red]",
         )
-    # else:
-    #     table.add_row(str(page_index), font_name, "[bold blue]Non-Formula Font[/bold blue]")
+    else:
+        table.add_row(
+            str(page_index), 
+            str(paragraph_index), 
+            str(font_debug_id),
+            font_name,
+            "[bold blue]Non-Formula Font[/bold blue]"
+        )
 
 # Print table
 console.print(table)
