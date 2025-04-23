@@ -684,11 +684,10 @@ class StylesAndFormulas:
 
         if re.match(precise_formula_font_pattern, font):
             return True
-        else:
-            if re.match(pattern_text, font):
-                return False
-            if re.match(broad_formula_font_pattern, font):
-                return True
+        elif re.match(pattern_text, font):
+            return False
+        elif re.match(broad_formula_font_pattern, font):
+            return True
 
         return False
 
