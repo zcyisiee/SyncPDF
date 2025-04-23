@@ -582,7 +582,7 @@ class StylesAndFormulas:
             r"|.*CharisSIL.*"
             r")$"
         )
-        pattern_formula_font = (
+        precise_formula_font_pattern = (
             r"^("
             r"|.*CambriaMath.*"
             r"|.*Cambria Math.*"
@@ -651,9 +651,9 @@ class StylesAndFormulas:
             r")$"
         )
         if self.translation_config.formular_font_pattern:
-            pattern_formula = self.translation_config.formular_font_pattern
+            broad_formula_font_pattern = self.translation_config.formular_font_pattern
         else:
-            pattern_formula = (
+            broad_formula_font_pattern = (
                 r"(CM[^RB]"
                 r"|(MS|XY|MT|BL|RM|EU|LA|RS)[A-Z]"
                 r"|LINE"
@@ -678,16 +678,16 @@ class StylesAndFormulas:
             font_name_bytes = base64.b64decode(font_name[7:])
             font = font_name_bytes.split(b"+")[-1]
             pattern_text = pattern_text.encode()
-            pattern_formula = pattern_formula.encode()
+            broad_formula_font_pattern = pattern_formula.encode()
         else:
             font = font_name.split("+")[-1]
 
-        if re.match(pattern_formula_font, font):
+        if re.match(precise_formula_font_pattern, font):
             return True
         else:
             if re.match(pattern_text, font):
                 return False
-            if re.match(pattern_formula, font):
+            if re.match(broad_formula_font_pattern, font):
                 return True
 
         return False
