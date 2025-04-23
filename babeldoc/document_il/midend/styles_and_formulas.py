@@ -520,7 +520,7 @@ class StylesAndFormulas:
         return bool(re.match(r"^[0-9, ]+$", text))
 
     def is_formulas_font(self, font_name: str) -> bool:
-        pattern2 = (
+        pattern_text = (
             r"^("
             r"|Cambria.*"
             r"|EUAlbertina.+"
@@ -570,12 +570,90 @@ class StylesAndFormulas:
             r"|.*CronosPro.*"
             r"|.*ACaslon.*"
             r"|.*Frutiger.*"
+            r"|.*BrandonGrotesque.*"
+            r"|.*FairfieldLH.*"
+            r"|.*CaeciliaLTStd.*"
+            r"|.*Whitney.*"
+            r"|.*Mercury.*"
+            r"|.*SabonLTStd.*"
+            r"|.*AnonymousPro.*"
+            r"|.*SabonLTPro.*"
+            r"|.*ArnoPro.*"
+            r"|.*CharisSIL.*"
+            r")$"
+        )
+        pattern_formula_font = (
+            r"^("
+            r"|.*CambriaMath.*"
+            r"|.*Cambria Math.*"
+            r"|.*Asana.*"
+            r"|.*MiriamMonoCLM-BookOblique.*"
+            r"|.*Miriam Mono CLM.*"
+            r"|.*Logix.*"
+            r"|.*AeBonum.*"
+            r"|.*AeMRoman.*"
+            r"|.*AePagella.*"
+            r"|.*AeSchola.*"
+            r"|.*Concrete.*"
+            r"|.*LatinModernMathCompanion.*"
+            r"|.*Latin Modern Math Companion.*"
+            r"|.*RalphSmithsFormalScriptCompanion.*"
+            r"|.*Ralph Smiths Formal Script Companion.*"
+            r"|.*TeXGyreBonumMathCompanion.*"
+            r"|.*TeX Gyre Bonum Companion.*"
+            r"|.*TeXGyrePagellaMathCompanion.*"
+            r"|.*TeX Gyre Pagella Math Companion.*"
+            r"|.*TeXGyreTermesMathCompanion.*"
+            r"|.*TeX Gyre Termes Math Companion.*"
+            r"|.*XITSMathCompanion.*"
+            r"|.*XITS Math Companion.*"
+            r"|.*Erewhon.*"
+            r"|.*Euler-Math.*"
+            r"|.*Euler Math.*"
+            r"|.*FiraMath-Regular.*"
+            r"|.*Fira Math.*"
+            r"|.*Garamond-Math.*"
+            r"|.*GFSNeohellenicMath.*"
+            r"|.*KpMath.*"
+            r"|.*Lete Sans Math.*"
+            r"|.*LeteSansMath.*"
+            r"|.*LinLibertineO.*"
+            r"|.*Linux Libertine O.*"
+            r"|.*LibertinusMath-Regular.*"
+            r"|.*Libertinus Math.*"
+            r"|.*LatinModernMath-Regular.*"
+            r"|.*Latin Modern Math.*"
+            r"|.*Luciole.*"
+            r"|.*NewCM.*"
+            r"|.*NewComputerModern.*"
+            r"|.*OldStandard-Math.*"
+            r"|.*STIXMath-Regular.*"
+            r"|.*STIX Math.*"
+            r"|.*STIXTwoMath-Regular.*"
+            r"|.*STIX Two Math.*"
+            r"|.*TeXGyreBonumMath.*"
+            r"|.*TeX Gyre Bonum Math.*"
+            r"|.*TeXGyreDejaVuMath.*"
+            r"|.*TeX Gyre DejaVu Math.*"
+            r"|.*TeXGyrePagellaMath.*"
+            r"|.*TeX Gyre Pagella Math.*"
+            r"|.*TeXGyreScholaMath.*"
+            r"|.*TeX Gyre Schola Math.*"
+            r"|.*TeXGyreTermesMath.*"
+            r"|.*TeX Gyre Termes Math.*"
+            r"|.*XCharter-Math.*"
+            r"|.*XCharter Math.*"
+            r"|.*XITSMath-Bold.*"
+            r"|.*XITS Math.*"
+            r"|.*XITSMath.*"
+            r"|.*IBMPlexMath.*"
+            r"|.*IBM Plex Math.*"
             r")$"
         )
         if self.translation_config.formular_font_pattern:
-            pattern = self.translation_config.formular_font_pattern
+            pattern_formula = self.translation_config.formular_font_pattern
         else:
-            pattern = (
+            pattern_formula = (
                 r"(CM[^RB]"
                 r"|(MS|XY|MT|BL|RM|EU|LA|RS)[A-Z]"
                 r"|LINE"
@@ -599,15 +677,18 @@ class StylesAndFormulas:
         if font_name.startswith("BASE64:"):
             font_name_bytes = base64.b64decode(font_name[7:])
             font = font_name_bytes.split(b"+")[-1]
-            pattern2 = pattern2.encode()
-            pattern = pattern.encode()
+            pattern_text = pattern_text.encode()
+            pattern_formula = pattern_formula.encode()
         else:
             font = font_name.split("+")[-1]
 
-        if re.match(pattern2, font):
-            return False
-        if re.match(pattern, font):
+        if re.match(pattern_formula_font, font):
             return True
+        else:
+            if re.match(pattern_text, font):
+                return False
+            if re.match(pattern_formula, font):
+                return True
 
         return False
 
