@@ -112,6 +112,7 @@ class TypesettingUnit:
             r"\u0250-\u02A0"  # IPA Extensions
             r"\u0400-\u04FF"  # Cyrillic
             r"'"
+            r"-"  # Hyphen
             r"]+$",
             unicode,
         ):
@@ -220,8 +221,8 @@ class TypesettingUnit:
                 # 连接号
                 "～",  # 全角波浪号
                 "-",  # 连字符减号
-                "–",  # 短破折号(EN DASH)
-                "—",  # 长破折号(EM DASH)
+                "–",  # 短破折号 (EN DASH)
+                "—",  # 长破折号 (EM DASH)
                 # 间隔号
                 "·",  # 中间点
                 "・",  # 片假名中间点
@@ -277,6 +278,8 @@ class TypesettingUnit:
     @property
     def box(self):
         if self.char:
+            if self.char.visual_bbox and self.char.visual_bbox.box:
+                return self.char.visual_bbox.box
             return self.char.box
         elif self.formular:
             return self.formular.box
@@ -325,6 +328,7 @@ class TypesettingUnit:
                 vertical=self.char.vertical,
                 advance=self.char.advance * scale if self.char.advance else None,
                 debug_info=self.debug_info,
+                xobj_id=self.char.xobj_id,
             )
             return TypesettingUnit(char=new_char)
 
@@ -384,6 +388,7 @@ class TypesettingUnit:
                     scale=scale,
                     vertical=char.vertical,
                     advance=char.advance * scale if char.advance else None,
+                    xobj_id=char.xobj_id,
                 )
                 new_chars.append(new_char)
 
@@ -762,7 +767,7 @@ class Typesetting:
         line_spacing = 1.7  # 初始行距为 1.7
         min_scale = 0.1  # 最小缩放因子
         min_line_spacing = 1.4  # 最小行距
-        expand_space_flag = 0  # 0: 未扩展, 1: 已向下扩展, 2: 已向右扩展
+        expand_space_flag = 0  # 0: 未扩展，1: 已向下扩展，2: 已向右扩展
 
         while scale >= min_scale:
             # 尝试布局排版单元

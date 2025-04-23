@@ -145,6 +145,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 - `--no-watermark`: [DEPRECATED] Use --watermark-output-mode=no_watermark instead.
 - `--translate-table-text`: Translate table text (experimental, default: False)
 - `--skip-scanned-detection`: Skip scanned document detection (default: False). When using split translation, only the first part performs detection if not skipped.
+- `--ocr-workaround`: Use OCR workaround (default: False). When enabled, the tool will use OCR to detect text and fill background for scanned PDF.
 
 > [!TIP]
 > - Both `--skip-clean` and `--dual-translate-first` may help improve compatibility with some PDF readers
@@ -153,6 +154,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 > - If you encounter any compatibility issues, try using `--enhance-compatibility` first
 > - Use `--max-pages-per-part` for large documents to split them into smaller parts for translation and automatically merge them back.
 > - Use `--skip-scanned-detection` to speed up processing when you know your document is not a scanned PDF.
+> - Use `--ocr-workaround` to fill background for scanned PDF. (Current assumption: background is pure white, text is pure black, this option will also auto enable `--skip-scanned-detection`)
 
 ### Translation Service Options
 

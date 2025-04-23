@@ -397,7 +397,7 @@ class StylesAndFormulas:
                             right_line = comp.pdf_line
                             break
 
-                # 计算与左右文本的y轴交集
+                # 计算与左右文本的 y 轴交集
                 left_intersection = 0
                 right_intersection = 0
 
@@ -415,7 +415,7 @@ class StylesAndFormulas:
                     if intersection_end > intersection_start:
                         right_intersection = intersection_end - intersection_start
 
-                # 如果有两个文本段落，将交集较小的设为none
+                # 如果有两个文本段落，将交集较小的设为 none
                 if left_line and right_line:
                     if left_intersection < right_intersection:
                         left_line = None
@@ -524,10 +524,7 @@ class StylesAndFormulas:
     def is_formulas_font(self, font_name: str) -> bool:
         pattern2 = (
             r"^("
-            r"Cambria"
-            r"|Cambria-BoldItalic"
-            r"|Cambria-Bold"
-            r"|Cambria-Italic"
+            r"|Cambria.*"
             r"|EUAlbertina.+"
             r"|NimbusRomNo9L.+"
             r"|GlosaMath.+"
@@ -542,11 +539,9 @@ class StylesAndFormulas:
             r"|CMTT10.*"
             r"|CMTI12.*"
             r"|CMR12.*"
-            r"|Times-Italic.*"
             r"|MeridienLTStd.*"
             r"|Calibri.*"
-            r"|STIXMathJax_Main-Regular.*"
-            r"|STIXMathJax_Main-Italic.*"
+            r"|STIXMathJax_Main.*"
             r"|.*NewBaskerville.*"
             r"|.*FranklinGothic.*"
             r"|.*AGaramondPro.*"
@@ -556,6 +551,27 @@ class StylesAndFormulas:
             r"|.*DJ5EscrowCond.*"
             r"|.*ExchangeBook.*"
             r"|.*DJ5Exchange.*"
+            r"|.*Times.*"
+            r"|.*PalatinoLTStd.*"
+            r"|.*Times New Roman,Italic.*"
+            r"|.*EhrhardtMT.*"
+            r"|.*GillSansMTStd.*"
+            r"|.*MedicineSymbols3.*"
+            r"|.*HardingText.*"
+            r"|.*GraphikNaturel.*"
+            r"|.*HelveticaNeue.*"
+            r"|.*GoudyOldStyleT.*"
+            r"|.*Symbol.*"
+            r"|.*ScalaSansLF.*"
+            r"|.*ScalaLF.*"
+            r"|.*ScalaSansPro.*"
+            r"|.*PetersburgC.*"
+            r"|.*ColiseumC.*"
+            r"|.*Gantari.*"
+            r"|.*OptimaLTStd.*"
+            r"|.*CronosPro.*"
+            r"|.*ACaslon.*"
+            r"|.*Frutiger.*"
             r")$"
         )
         if self.translation_config.formular_font_pattern:
@@ -620,7 +636,7 @@ class StylesAndFormulas:
                     "Zp",
                     "Zs",
                     "Co",  # private use character
-                    "So",  # symbol
+                    # "So",  # symbol
                 ]  # 文字修饰符、数学符号、分隔符号
                 or ord(char[0]) in range(0x370, 0x400)  # 希腊字母
             )

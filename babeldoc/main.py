@@ -23,7 +23,7 @@ from babeldoc.translator.translator import OpenAITranslator
 from babeldoc.translator.translator import set_translate_rate_limiter
 
 logger = logging.getLogger(__name__)
-__version__ = "0.3.10"
+__version__ = "0.3.20"
 
 
 def create_parser():
@@ -210,6 +210,12 @@ def create_parser():
         default=False,
         help="Skip scanned document detection (speeds up processing for non-scanned documents)",
     )
+    translation_group.add_argument(
+        "--ocr-workaround",
+        action="store_true",
+        default=False,
+        help="Add text fill background (experimental)",
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -266,8 +272,8 @@ async def main():
         return
 
     # 验证翻译服务选择
-    if not (args.openai or args.translate):
-        parser.error("必须选择一个翻译服务：--openai 或 --translate")
+    if not args.openai:
+        parser.error("必须选择一个翻译服务：--openai")
 
     # 验证 OpenAI 参数
     if args.openai and not args.openai_api_key:
@@ -377,6 +383,7 @@ async def main():
             table_model=table_model,
             show_char_box=args.show_char_box,
             skip_scanned_detection=args.skip_scanned_detection,
+            ocr_workaround=args.ocr_workaround,
         )
 
         # Create progress handler

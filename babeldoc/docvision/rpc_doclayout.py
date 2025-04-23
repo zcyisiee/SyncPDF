@@ -1,4 +1,5 @@
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -42,10 +43,10 @@ def encode_image(image) -> bytes:
 
 
 @retry(
-    stop=stop_after_attempt(3),  # 最多重试3次
+    stop=stop_after_attempt(3),  # 最多重试 3 次
     wait=wait_exponential(
         multiplier=1, min=1, max=10
-    ),  # 指数退避策略，初始1秒，最大10秒
+    ),  # 指数退避策略，初始 1 秒，最大 10 秒
     retry=retry_if_exception_type((httpx.HTTPError, Exception)),  # 针对哪些异常重试
     before_sleep=lambda retry_state: logger.warning(
         f"Request failed, retrying in {retry_state.next_action.sleep} seconds... "
@@ -125,6 +126,7 @@ class RpcDocLayoutModel(DocLayoutModel):
         self.host = host
         self._stride = 32  # Default stride value
         self._names = ["text", "title", "list", "table", "figure"]
+        self.lock = threading.Lock()
 
     @property
     def stride(self) -> int:
@@ -253,7 +255,8 @@ class RpcDocLayoutModel(DocLayoutModel):
         self, page, mupdf_doc: pymupdf.Document, translate_config, save_debug_image
     ):
         translate_config.raise_if_cancelled()
-        pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
+        with self.lock:
+            pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
         image = np.fromstring(pix.samples, np.uint8).reshape(
             pix.height,
             pix.width,

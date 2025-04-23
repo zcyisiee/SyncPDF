@@ -3,7 +3,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-__version__ = "0.3.10"
+__version__ = "0.3.20"
 
 CACHE_FOLDER = Path.home() / ".cache" / "babeldoc"
 
@@ -24,7 +24,6 @@ try:
     two_parent = Path(__file__).resolve().parent.parent
     md_ = two_parent / "docs" / "README.md"
     if two_parent.name == "site-packages" or not md_.exists():
-        print("not in git repo")
         raise FileNotFoundError("not in git repo")
     WATERMARK_VERSION = (
         subprocess.check_output(  # noqa: S603

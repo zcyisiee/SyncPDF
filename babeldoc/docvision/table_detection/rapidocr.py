@@ -1,5 +1,6 @@
 import logging
 import re
+import threading
 from collections.abc import Generator
 
 import cv2
@@ -97,6 +98,7 @@ class RapidOCRModel:
             det_use_dml=self.use_dml,
         )
         self.names = {0: "table_text"}
+        self.lock = threading.Lock()
 
     @property
     def stride(self):
@@ -233,7 +235,8 @@ class RapidOCRModel:
     ]:
         for page in pages:
             translate_config.raise_if_cancelled()
-            pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
+            with self.lock:
+                pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
             image = np.fromstring(pix.samples, np.uint8).reshape(
                 pix.height,
                 pix.width,
