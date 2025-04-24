@@ -95,7 +95,7 @@ class RapidOCRModel:
         self.model = RapidOCR(
             det_model_path=get_table_detection_rapidocr_model_path(),
             det_use_cuda=self.use_cuda,
-            det_use_dml=self.use_dml,
+            det_use_dml=False,
         )
         self.names = {0: "table_text"}
         self.lock = threading.Lock()
