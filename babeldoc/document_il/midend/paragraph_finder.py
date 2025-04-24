@@ -12,6 +12,7 @@ from babeldoc.document_il import PdfRectangle
 from babeldoc.document_il.utils.layout_helper import Layout
 from babeldoc.document_il.utils.layout_helper import add_space_dummy_chars
 from babeldoc.document_il.utils.layout_helper import get_char_unicode_string
+from babeldoc.document_il.utils.layout_helper import is_bullet_point
 from babeldoc.document_il.utils.style_helper import WHITE
 from babeldoc.translation_config import TranslationConfig
 
@@ -30,9 +31,6 @@ class ParagraphFinder:
     stage_name = "Parse Paragraphs"
 
     # 定义项目符号的正则表达式模式
-    BULLET_POINT_PATTERN = re.compile(
-        r"[■•⚫⬤◆◇○●◦‣⁃▪▫∗†‡¹²³⁴⁵⁶⁷⁸⁹⁰₁₂₃₄₅₆₇₈₉₀ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖᵍʳˢᵗᵘᵛʷˣʸᶻ†‡§¶※⁑⁂⁕⁎⁜⁑❧☙⁋‖‽]"
-    )
 
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config
@@ -246,7 +244,7 @@ class ParagraphFinder:
                     and current_line_chars[-1].xobj_id != char.xobj_id
                 )
                 or (
-                    self.is_bullet_point(char)  # 如果是项目符号，开启新段落
+                    is_bullet_point(char)  # 如果是项目符号，开启新段落
                     and not current_line_chars
                 )
             ):
@@ -512,15 +510,3 @@ class ParagraphFinder:
                     break
                 j += 1
             i += 1
-
-    def is_bullet_point(self, char: PdfCharacter) -> bool:
-        """Check if the character is a bullet point.
-
-        Args:
-            char: The character to check
-
-        Returns:
-            bool: True if the character is a bullet point
-        """
-        is_bullet = bool(self.BULLET_POINT_PATTERN.match(char.char_unicode))
-        return is_bullet
