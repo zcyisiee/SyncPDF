@@ -48,7 +48,7 @@ wheels = [
 
 [[package]]
 name = "babeldoc"
-version = "0.3.17"
+version = "0.3.20"
 source = { editable = "." }
 dependencies = [
     { name = "bitstring" },
@@ -86,13 +86,15 @@ cuda = [
 directml = [
     { name = "onnxruntime-directml" },
 ]
+memray = [
+    { name = "memray" },
+]
 
 [package.dev-dependencies]
 dev = [
     { name = "bumpver" },
     { name = "markdown-callouts" },
     { name = "markdown-include" },
-    { name = "memray" },
     { name = "mkdocs-git-authors-plugin" },
     { name = "mkdocs-git-committers-plugin-2" },
     { name = "mkdocs-git-revision-date-localized-plugin" },
@@ -110,6 +112,7 @@ requires-dist = [
     { name = "freetype-py", specifier = ">=2.5.1" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.27.0" },
     { name = "huggingface-hub", specifier = ">=0.27.0" },
+    { name = "memray", marker = "extra == 'memray'", specifier = ">=1.17.1" },
     { name = "msgpack", specifier = ">=1.1.0" },
     { name = "numpy", specifier = ">=2.0.2" },
     { name = "onnx", specifier = ">=1.17.0" },
@@ -134,14 +137,13 @@ requires-dist = [
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "xsdata", extras = ["cli", "lxml", "soap"], specifier = ">=24.12" },
 ]
-provides-extras = ["directml", "cuda"]
+provides-extras = ["directml", "cuda", "memray"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "bumpver", specifier = ">=2024.1130" },
     { name = "markdown-callouts", specifier = ">=0.4.0" },
     { name = "markdown-include", specifier = ">=0.8.1" },
-    { name = "memray", specifier = ">=1.17.1" },
     { name = "mkdocs-git-authors-plugin", specifier = ">=0.9.2" },
     { name = "mkdocs-git-committers-plugin-2", specifier = ">=2.5.0" },
     { name = "mkdocs-git-revision-date-localized-plugin", specifier = ">=1.3.0" },

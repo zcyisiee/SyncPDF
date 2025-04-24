@@ -17,6 +17,7 @@ from babeldoc.document_il.utils.fontmap import FontMapper
 from babeldoc.document_il.utils.layout_helper import LEFT_BRACKET
 from babeldoc.document_il.utils.layout_helper import RIGHT_BRACKET
 from babeldoc.document_il.utils.layout_helper import formular_height_ignore_char
+from babeldoc.document_il.utils.layout_helper import is_bullet_point
 from babeldoc.document_il.utils.layout_helper import is_same_style
 from babeldoc.translation_config import TranslationConfig
 
@@ -70,6 +71,7 @@ class StylesAndFormulas:
                 continue
 
             new_compositions = []
+            first_is_bullet = False
 
             for composition in paragraph.pdf_paragraph_composition:
                 current_chars = []
@@ -81,6 +83,8 @@ class StylesAndFormulas:
                     new_compositions.append(composition)
                     continue
                 for char in line.pdf_character:
+                    if not current_chars and is_bullet_point(char):
+                        first_is_bullet = True
                     is_formula = (
                         (  # 区分公式开头的字符&公式中间的字符。主要是逗号不能在公式开头，但是可以在中间。
                             (
@@ -112,6 +116,7 @@ class StylesAndFormulas:
                     is_corner_mark = (
                         len(current_chars) > 0
                         and not isspace
+                        and not first_is_bullet
                         # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
                         and char.pdf_style.font_size
                         < current_chars[-1].pdf_style.font_size * 0.79
@@ -119,6 +124,7 @@ class StylesAndFormulas:
                     ) or (
                         len(current_chars) > 0
                         and not isspace
+                        and not first_is_bullet
                         # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
                         and char.pdf_style.font_size
                         < current_chars[-1].pdf_style.font_size * 1.1
@@ -678,7 +684,7 @@ class StylesAndFormulas:
             font_name_bytes = base64.b64decode(font_name[7:])
             font = font_name_bytes.split(b"+")[-1]
             pattern_text = pattern_text.encode()
-            broad_formula_font_pattern = pattern_formula.encode()
+            broad_formula_font_pattern = broad_formula_font_pattern.encode()
         else:
             font = font_name.split("+")[-1]
 
@@ -706,7 +712,7 @@ class StylesAndFormulas:
             and (
                 unicodedata.category(char[0])
                 in [
-                    "Lm",
+                    # "Lm",
                     "Mn",
                     "Sk",
                     "Sm",
