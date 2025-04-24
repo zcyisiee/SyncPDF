@@ -559,10 +559,16 @@ def do_translate(
 def fix_media_box(doc: Document) -> None:
     mediabox_data = {}
     for page in doc:
+        mediabox = doc.xref_get_key(page.xref, "MediaBox")
+
+        # Some PDF pages do not have a mediabox
+        if mediabox[0] == "null":
+            mediabox = ("array", "[0 0 612 792]")
+            doc.xref_set_key(page.xref, "MediaBox", mediabox[1])
         if page.mediabox.x0 != 0 or page.mediabox.y0 != 0:
             x1 = page.mediabox.x1
             y1 = page.mediabox.y1
-            mediabox_data[page.number] = doc.xref_get_key(page.xref, "MediaBox")
+            mediabox_data[page.number] = mediabox
             doc.xref_set_key(page.xref, "MediaBox", f"[0 0 {x1} {y1}]")
     return mediabox_data
 
