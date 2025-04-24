@@ -1,13 +1,18 @@
+import io
+import itertools
 import logging
 import os
 import re
 import time
+import unicodedata
 from multiprocessing import Process
 from pathlib import Path
 
+import freetype
 import pymupdf
 from bitstring import BitStream
 
+from babeldoc.assets.embedding_assets_metadata import FONT_NAMES
 from babeldoc.document_il import il_version_1
 from babeldoc.document_il.utils.fontmap import FontMapper
 from babeldoc.translation_config import TranslateResult
@@ -18,6 +23,138 @@ logger = logging.getLogger(__name__)
 
 SUBSET_FONT_STAGE_NAME = "Subset font"
 SAVE_PDF_STAGE_NAME = "Save PDF"
+
+
+def to_int(src):
+    return int(re.search(r"\d+", src).group(0))
+
+
+def parse_mapping(text):
+    mapping = []
+    for x in re.finditer(rb"<(?P<num>[a-fA-F0-9]+)>", text):
+        mapping.append(int(x.group("num"), 16))
+    return mapping
+
+
+def apply_normalization(cmap, gid, code):
+    need = False
+    if 0x2F00 <= code <= 0x2FD5:  # Kangxi Radicals
+        need = True
+    if 0xF900 <= code <= 0xFAFF:  # CJK Compatibility Ideographs
+        need = True
+    if need:
+        norm = unicodedata.normalize("NFD", chr(code))
+        cmap[gid] = ord(norm)
+    else:
+        cmap[gid] = code
+
+
+def batched(iterable, n, *, strict=False):
+    # batched('ABCDEFG', 3) → ABC DEF G
+    if n < 1:
+        raise ValueError("n must be at least one")
+    iterator = iter(iterable)
+    while batch := tuple(itertools.islice(iterator, n)):
+        if strict and len(batch) != n:
+            raise ValueError("batched(): incomplete batch")
+        yield batch
+
+
+def update_tounicode_cmap_pair(cmap, data):
+    for start, stop, value in batched(data, 3):
+        for gid in range(start, stop + 1):
+            code = value + gid - start
+            apply_normalization(cmap, gid, code)
+
+
+def update_tounicode_cmap_code(cmap, data):
+    for gid, code in batched(data, 2):
+        apply_normalization(cmap, gid, code)
+
+
+def parse_tounicode_cmap(data):
+    cmap = {}
+    for x in re.finditer(
+        rb"\s+beginbfrange\s*(?P<r>(<[0-9a-fA-F]+>\s*)+)endbfrange\s+", data
+    ):
+        update_tounicode_cmap_pair(cmap, parse_mapping(x.group("r")))
+    for x in re.finditer(
+        rb"\s+beginbfchar\s*(?P<c>(<[0-9a-fA-F]+>\s*)+)endbfchar", data
+    ):
+        update_tounicode_cmap_code(cmap, parse_mapping(x.group("c")))
+    return cmap
+
+
+def parse_truetype_data(data):
+    glyph_in_use = []
+    face = freetype.Face(io.BytesIO(data))
+    for i in range(face.num_glyphs):
+        face.load_glyph(i)
+        if face.glyph.outline.contours:
+            glyph_in_use.append(i)
+    return glyph_in_use
+
+
+TOUNICODE_HEAD = """\
+/CIDInit /ProcSet findresource begin
+12 dict begin
+/CIDSystemInfo <</Registry(Adobe)/Ordering(UCS)/Supplement 0>> def
+/CMapName /Adobe-Identity-UCS def
+/CMapType 2 def
+1 begincodespacerange
+<0000> <FFFF>
+endcodespacerange"""
+TOUNICODE_TAIL = """\
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end"""
+
+
+def make_tounicode(cmap, used):
+    short = []
+    for x in used:
+        if x in cmap:
+            short.append((x, cmap[x]))
+    line = [TOUNICODE_HEAD]
+    for block in batched(short, 100):
+        line.append(f"{len(block)} beginbfchar")
+        for glyph, code in block:
+            if code < 0x10000:
+                line.append(f"<{glyph:04x}><{code:04x}>")
+            else:
+                line.append(f"<{glyph:04x}><{code:08x}>")
+        line.append("endbfchar")
+    line.append(TOUNICODE_TAIL)
+    return "\n".join(line)
+
+
+def reproduce_one_font(doc, index):
+    m = doc.xref_get_key(index, "ToUnicode")
+    f = doc.xref_get_key(index, "DescendantFonts")
+    if m[0] == "xref" and f[0] == "array":
+        mi = to_int(m[1])
+        fi = to_int(f[1])
+        ff = doc.xref_get_key(fi, "FontDescriptor/FontFile2")
+        ms = doc.xref_stream(mi)
+        fs = doc.xref_stream(to_int(ff[1]))
+        cmap = parse_tounicode_cmap(ms)
+        used = parse_truetype_data(fs)
+        text = make_tounicode(cmap, used)
+        doc.update_stream(mi, bytes(text, "U8"))
+
+
+def reproduce_cmap(doc):
+    assert doc
+    font_set = set()
+    for page in doc:
+        font_list = page.get_fonts()
+        for font in font_list:
+            if font[1] == "ttf" and font[3] in FONT_NAMES and ".ttf" in font[4]:
+                font_set.add(font)
+    for font in font_set:
+        reproduce_one_font(doc, font[0])
+    return doc
 
 
 def _subset_fonts_process(pdf_path, output_path):
