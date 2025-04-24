@@ -215,9 +215,7 @@ class OpenAITranslator(BaseTranslator):
             **self.options,
             messages=self.prompt(text),
         )
-        self.token_count.inc(response.usage.total_tokens)
-        self.prompt_token_count.inc(response.usage.prompt_tokens)
-        self.completion_token_count.inc(response.usage.completion_tokens)
+        self.update_token_count(response)
         return response.choices[0].message.content.strip()
 
     def prompt(self, text):
@@ -255,10 +253,19 @@ class OpenAITranslator(BaseTranslator):
                 },
             ],
         )
-        self.token_count.inc(response.usage.total_tokens)
-        self.prompt_token_count.inc(response.usage.prompt_tokens)
-        self.completion_token_count.inc(response.usage.completion_tokens)
+        self.update_token_count(response)
         return response.choices[0].message.content.strip()
+
+    def update_token_count(self, response):
+        try:
+            if response.usage and response.usage.total_tokens:
+                self.token_count.inc(response.usage.total_tokens)
+            if response.usage and response.usage.prompt_tokens:
+                self.prompt_token_count.inc(response.usage.prompt_tokens)
+            if response.usage and response.usage.completion_tokens:
+                self.completion_token_count.inc(response.usage.completion_tokens)
+        except Exception as e:
+            logger.exception("Error updating token count")
 
     def get_formular_placeholder(self, placeholder_id: int):
         return "{{v" + str(placeholder_id) + "}}"

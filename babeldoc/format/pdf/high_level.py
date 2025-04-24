@@ -4,6 +4,7 @@ import hashlib
 import io
 import logging
 import pathlib
+import shutil
 import threading
 import time
 from asyncio import CancelledError
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from typing import BinaryIO
 
+import pymupdf
 from pdfminer.pdfdocument import PDFDocument
 from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.pdfpage import PDFPage
@@ -26,6 +28,7 @@ from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.backend.pdf_creater import SAVE_PDF_STAGE_NAME
 from babeldoc.format.pdf.document_il.backend.pdf_creater import SUBSET_FONT_STAGE_NAME
 from babeldoc.format.pdf.document_il.backend.pdf_creater import PDFCreater
+from babeldoc.format.pdf.document_il.backend.pdf_creater import reproduce_cmap
 from babeldoc.format.pdf.document_il.frontend.il_creater import ILCreater
 from babeldoc.format.pdf.document_il.midend.add_debug_information import (
     AddDebugInformation,
@@ -77,6 +80,26 @@ resfont_map = {
     "ja": "japan-s",
     "ko": "korea-s",
 }
+
+
+def fix_cmap(translate_result: TranslateResult, translate_config: TranslationConfig):
+    processed = []
+    for attr in (
+        "mono_pdf_path",
+        "dual_pdf_path",
+        "no_watermark_mono_pdf_path",
+        "no_watermark_dual_pdf_path",
+    ):
+        path = getattr(translate_result, attr)
+        if path in processed:
+            continue
+        processed.append(path)
+
+        temp_path = translate_config.get_working_file_path(f"{path.stem}.cmap.pdf")
+        pdf = pymupdf.open(path)
+        reproduce_cmap(pdf)
+        pdf.save(temp_path)
+        shutil.move(temp_path, path)
 
 
 def verify_file_hash(file_path: str, expected_hash: str) -> bool:
@@ -518,6 +541,12 @@ def do_translate(
         )
         result.original_pdf_path = translation_config.input_file
         result.peak_memory_usage = peak_memory_usage
+
+        # should fix macOS preview compatibility
+        # Although the issue of Windows Edge
+        # not being able to copy translated text can be fixed,
+        # the macOS preview is broken
+        # fix_cmap(result, translation_config)
         pm.translate_done(result)
         return result
 
@@ -534,10 +563,16 @@ def do_translate(
 def fix_media_box(doc: Document) -> None:
     mediabox_data = {}
     for page in doc:
+        mediabox = doc.xref_get_key(page.xref, "MediaBox")
+
+        # Some PDF pages do not have a mediabox
+        if mediabox[0] == "null":
+            mediabox = ("array", "[0 0 612 792]")
+            doc.xref_set_key(page.xref, "MediaBox", mediabox[1])
         if page.mediabox.x0 != 0 or page.mediabox.y0 != 0:
             x1 = page.mediabox.x1
             y1 = page.mediabox.y1
-            mediabox_data[page.number] = doc.xref_get_key(page.xref, "MediaBox")
+            mediabox_data[page.number] = mediabox
             doc.xref_set_key(page.xref, "MediaBox", f"[0 0 {x1} {y1}]")
     return mediabox_data
 
