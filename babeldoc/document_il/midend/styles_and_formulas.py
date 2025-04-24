@@ -678,7 +678,7 @@ class StylesAndFormulas:
             font_name_bytes = base64.b64decode(font_name[7:])
             font = font_name_bytes.split(b"+")[-1]
             pattern_text = pattern_text.encode()
-            broad_formula_font_pattern = pattern_formula.encode()
+            broad_formula_font_pattern = broad_formula_font_pattern.encode()
         else:
             font = font_name.split("+")[-1]
 
