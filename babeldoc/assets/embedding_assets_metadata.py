@@ -497,6 +497,7 @@ EMBEDDING_FONT_METADATA = {
     },
 }
 
+FONT_NAMES = {v["font_name"] for v in EMBEDDING_FONT_METADATA.values()}
 
 CN_FONT_FAMILY = {
     # 手写体
