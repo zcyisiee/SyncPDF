@@ -395,6 +395,9 @@ async def main():
                 progress_handler(event)
                 if config.debug:
                     logger.debug(event)
+                if event["type"] == "error":
+                    logger.error(f"Error: {event['error']}")
+                    break
                 if event["type"] == "finish":
                     result = event["translate_result"]
                     logger.info(str(result))
