@@ -1043,4 +1043,6 @@ class PDFCreater:
                 "Failed to create PDF: %s",
                 translation_config.input_file,
             )
-            return self.write(translation_config, True)
+            if not check_font_exists:
+                return self.write(translation_config, True)
+            raise
