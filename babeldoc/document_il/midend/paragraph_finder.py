@@ -167,6 +167,8 @@ class ParagraphFinder:
             # image characters are not needed
             page.pdf_character = []
 
+        self.fix_overlapping_paragraphs(page)
+
     def is_isolated_formula(self, char: PdfCharacter):
         return char.char_unicode in (
             "(cid:122)",
@@ -510,3 +512,105 @@ class ParagraphFinder:
                     break
                 j += 1
             i += 1
+
+    @staticmethod
+    def is_bbox_contain_in_vertical(bbox1: Box, bbox2: Box) -> bool:
+        """Check if one bounding box is completely contained within the other."""
+        # Check if bbox1 is contained in bbox2
+        bbox1_in_bbox2 = bbox1.y >= bbox2.y and bbox1.y2 <= bbox2.y2
+        # Check if bbox2 is contained in bbox1
+        bbox2_in_bbox1 = bbox2.y >= bbox1.y and bbox2.y2 <= bbox1.y2
+        return bbox1_in_bbox2 or bbox2_in_bbox1
+
+    def fix_overlapping_paragraphs(self, page: Page):
+        """
+        Adjusts the bounding boxes of paragraphs on a page to resolve vertical overlaps.
+
+        Iteratively checks pairs of paragraphs and adjusts their vertical boundaries
+        (y and y2) if they overlap, aiming to place the boundary at the midpoint
+        of the vertical overlap.
+        """
+        paragraphs = page.pdf_paragraph
+        if not paragraphs or len(paragraphs) < 2:
+            return
+
+        max_iterations = len(paragraphs) * len(paragraphs)  # Safety break
+        iterations = 0
+
+        while iterations < max_iterations:
+            iterations += 1
+            overlap_found_in_pass = False
+
+            for i in range(len(paragraphs)):
+                for j in range(i + 1, len(paragraphs)):
+                    para1 = paragraphs[i]
+                    para2 = paragraphs[j]
+
+                    if para1.box is None or para2.box is None:
+                        continue
+
+                    if para1.xobj_id != para2.xobj_id:
+                        continue
+
+                    # Check for overlap using the existing method
+                    if self.bbox_overlap(para1.box, para2.box):
+                        if self.is_bbox_contain_in_vertical(para1.box, para2.box):
+                            continue
+                        # Calculate vertical overlap details
+                        overlap_y_start = max(para1.box.y, para2.box.y)
+                        overlap_y_end = min(para1.box.y2, para2.box.y2)
+                        overlap_height = overlap_y_end - overlap_y_start
+
+                        # Calculate horizontal overlap details
+                        overlap_x_start = max(para1.box.x, para2.box.x)
+                        overlap_x_end = min(para1.box.x2, para2.box.x2)
+                        overlap_width = overlap_x_end - overlap_x_start
+
+                        # Ensure there's a real 2D overlap, focusing on vertical adjustment
+                        if overlap_height > 1e-6 and overlap_width > 1e-6:
+                            overlap_found_in_pass = True
+
+                            # Determine which paragraph is visually higher
+                            if para1.box.y2 > para2.box.y and para1.box.y < para2.box.y:
+                                lower_para = para1
+                                higher_para = para2
+                            # Handle cases where y values are identical (or very close)
+                            # Prefer the one with smaller y2 as the higher one, or break tie arbitrarily
+                            elif para1.box.y2 < para2.box.y2:
+                                lower_para = para1
+                                higher_para = para2
+                            else:
+                                lower_para = para2
+                                higher_para = para1
+
+                            # Calculate the midpoint of the vertical overlap
+                            mid_y = overlap_y_start + overlap_height / 2
+
+                            # Adjust boxes, ensuring they remain valid (y2 > y)
+                            if mid_y > higher_para.box.y and mid_y < lower_para.box.y2:
+                                higher_para.box.y = mid_y + 1
+                                lower_para.box.y2 = mid_y - 1
+                            else:
+                                # This might happen if one box is fully contained vertically
+                                # within another, or due to floating point issues.
+                                # Log a warning and skip adjustment for this pair in this iteration.
+                                # A more complex strategy might be needed for full containment.
+                                logger.warning(
+                                    "Could not resolve overlap between paragraphs"
+                                    f" {higher_para.debug_id} and {lower_para.debug_id}"
+                                    " using simple midpoint strategy."
+                                    f" Midpoint: {mid_y},"
+                                    f" Higher Box: {higher_para.box},"
+                                    f" Lower Box: {lower_para.box}"
+                                )
+
+            # If no overlaps were found and adjusted in this pass, we're done.
+            if not overlap_found_in_pass:
+                break
+
+        if iterations == max_iterations:
+            logger.warning(
+                f"Maximum iterations ({max_iterations}) reached in"
+                f" fix_overlapping_paragraphs for page {page.page_number}."
+                " Some overlaps might remain."
+            )
