@@ -548,6 +548,7 @@ def do_translate(
 
     except Exception as e:
         logger.exception(f"translate error: {e}")
+        pm.disable = False
         pm.translate_error(e)
         raise
     finally:
