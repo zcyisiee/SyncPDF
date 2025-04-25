@@ -547,7 +547,7 @@ def do_translate(
         return result
 
     except Exception as e:
-        logger.exception(f"translate error: {e}")
+        logger.error(f"translate error: {e}")
         pm.disable = False
         pm.translate_error(e)
         raise
@@ -713,7 +713,9 @@ def _do_translate_single(
     try:
         if translation_config.watermark_output_mode == WatermarkOutputMode.Both:
             mono_watermark_first_page_doc_bytes, dual_watermark_first_page_doc_bytes = (
-                generate_first_page_with_watermark(doc_pdf2zh, translation_config, docs)
+                generate_first_page_with_watermark(
+                    doc_pdf2zh, translation_config, docs, mediabox_data
+                )
             )
     except Exception:
         logger.warning(
@@ -763,6 +765,7 @@ def generate_first_page_with_watermark(
     mupdf: Document,
     translation_config: TranslationConfig,
     doc_il: il_version_1.Document,
+    mediabox_data: dict[int, Any] | None = None,
 ) -> (io.BytesIO, io.BytesIO):
     first_page_doc = Document()
     first_page_doc.insert_pdf(mupdf, from_page=0, to_page=0)
@@ -785,6 +788,7 @@ def generate_first_page_with_watermark(
             watermarked_temp_pdf_path.as_posix(),
             il_only_first_page_doc,
             watermarked_config,
+            mediabox_data,
         )
         result = pdf_creater.write(watermarked_config)
         mono_pdf_bytes = None
