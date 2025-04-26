@@ -268,7 +268,6 @@ class OpenAITranslator(BaseTranslator):
             logger.exception("Error updating token count")
 
     def get_formular_placeholder(self, placeholder_id: int):
-        return f"<formula id='{placeholder_id}' />"
         return "{{v" + str(placeholder_id) + "}}"
         return "{{" + str(placeholder_id) + "}}"
 
