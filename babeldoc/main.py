@@ -23,7 +23,7 @@ from babeldoc.translation_config import TranslationConfig
 from babeldoc.translation_config import WatermarkOutputMode
 
 logger = logging.getLogger(__name__)
-__version__ = "0.3.21"
+__version__ = "0.3.26"
 
 
 def create_parser():
@@ -395,6 +395,9 @@ async def main():
                 progress_handler(event)
                 if config.debug:
                     logger.debug(event)
+                if event["type"] == "error":
+                    logger.error(f"Error: {event['error']}")
+                    break
                 if event["type"] == "finish":
                     result = event["translate_result"]
                     logger.info(str(result))

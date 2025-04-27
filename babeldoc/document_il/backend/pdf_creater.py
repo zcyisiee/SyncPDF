@@ -777,7 +777,10 @@ class PDFCreater:
 
     def restore_media_box(self, doc: pymupdf.Document, mediabox_data: dict) -> None:
         for pageno, mediabox in mediabox_data.items():
-            doc.xref_set_key(doc[pageno].xref, "MediaBox", mediabox[1])
+            try:
+                doc.xref_set_key(doc[pageno].xref, "MediaBox", mediabox[1])
+            except Exception:
+                logger.exception(f"restore media box failed on page: {pageno}")
 
     def write(
         self, translation_config: TranslationConfig, check_font_exists: bool = False
@@ -945,7 +948,10 @@ class PDFCreater:
                     )
 
                 pbar.advance()
-            self.restore_media_box(pdf, self.mediabox_data)
+            try:
+                self.restore_media_box(pdf, self.mediabox_data)
+            except Exception:
+                logger.exception("restore media box failed")
             with self.translation_config.progress_monitor.stage_start(
                 SAVE_PDF_STAGE_NAME,
                 2,
@@ -1037,4 +1043,6 @@ class PDFCreater:
                 "Failed to create PDF: %s",
                 translation_config.input_file,
             )
-            return self.write(translation_config, True)
+            if not check_font_exists:
+                return self.write(translation_config, True)
+            raise

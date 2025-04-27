@@ -645,7 +645,7 @@ class Typesetting:
         current_x = box.x
         current_y = box.y2 - avg_height
         box = copy.deepcopy(box)
-        box.y -= avg_height * (line_spacing - 1)
+        # box.y -= avg_height * (line_spacing - 1.01)
         line_height = 0
         current_line_heights = []  # 存储当前行所有元素的高度
 
@@ -722,7 +722,8 @@ class Typesetting:
                 current_line_heights = []  # 清空当前行高度列表
 
                 # 检查是否超出底部边界
-                if current_y - unit_height < box.y:
+                # if current_y - unit_height < box.y:
+                if current_y < box.y:
                     all_units_fit = False
                     break
 
@@ -750,8 +751,9 @@ class Typesetting:
         # 处理最后一行的行高
         if current_line_heights:
             mode_height = statistics.mode(current_line_heights)
-            max_height = max(current_line_heights)
-            line_height = max(mode_height, max_height)
+            # max_height = max(current_line_heights)
+            # line_height = max(mode_height, max_height)
+            line_height = mode_height
 
         return typeset_units, all_units_fit
 

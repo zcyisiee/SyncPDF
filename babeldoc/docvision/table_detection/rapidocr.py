@@ -91,7 +91,7 @@ class RapidOCRModel:
                 self.use_dml = True
             elif re.match(r"cuda", provider, re.IGNORECASE):
                 self.use_cuda = True
-
+        self.use_dml = False  # force disable directml
         self.model = RapidOCR(
             det_model_path=get_table_detection_rapidocr_model_path(),
             det_use_cuda=self.use_cuda,

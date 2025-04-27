@@ -346,6 +346,7 @@ def parse_font_file(doc, idx, encoding, differences):
     bbox_list = []
     data = doc.xref_stream(idx)
     face = freetype.Face(BytesIO(data))
+    scale = 1000 / face.units_per_EM
     for charmap in face.charmaps:
         if charmap.encoding_name == "FT_ENCODING_ADOBE_CUSTOM":
             face.select_charmap(freetype.FT_ENCODING_ADOBE_CUSTOM)
@@ -354,7 +355,8 @@ def parse_font_file(doc, idx, encoding, differences):
     if differences:
         for code, name in differences:
             bbox_list[code] = get_name_cbox(face, name.encode("U8"))
-    return bbox_list
+    norm_bbox_list = [[v * scale for v in box] for box in bbox_list]
+    return norm_bbox_list
 
 
 def parse_encoding(obj_str):

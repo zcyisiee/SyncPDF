@@ -272,7 +272,7 @@ class OpenAITranslator(BaseTranslator):
         return "{{" + str(placeholder_id) + "}}"
 
     def get_rich_text_left_placeholder(self, placeholder_id: int):
-        return self.get_formular_placeholder(placeholder_id)
+        return f"<style id='{placeholder_id}'>"
 
     def get_rich_text_right_placeholder(self, placeholder_id: int):
-        return self.get_formular_placeholder(placeholder_id + 1)
+        return "</style>"
