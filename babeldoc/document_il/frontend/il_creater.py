@@ -19,6 +19,7 @@ from pdfminer.pdftypes import resolve1 as pdftypes_resolve1
 from pdfminer.psparser import PSLiteral
 
 from babeldoc.document_il import il_version_1
+from babeldoc.document_il.utils import zstd_helper
 from babeldoc.document_il.utils.style_helper import BLACK
 from babeldoc.document_il.utils.style_helper import YELLOW
 from babeldoc.translation_config import TranslationConfig
@@ -587,6 +588,7 @@ class ILCreater:
         self.pop_passthrough_per_char_instruction()
         self.pop_xobj()
         xobj = self.xobj_map[xobj_id]
+        base_op = zstd_helper.zstd_compress(base_op)
         xobj.base_operations = il_version_1.BaseOperations(value=base_op)
         self.xobj_inc += 1
 
@@ -636,6 +638,7 @@ class ILCreater:
         self.current_page.page_number = page_number
 
     def on_page_base_operation(self, operation: str):
+        operation = zstd_helper.zstd_compress(operation)
         self.current_page.base_operations = il_version_1.BaseOperations(value=operation)
 
     def on_page_resource_font(self, font: PDFFont, xref_id: int, font_id: str):
