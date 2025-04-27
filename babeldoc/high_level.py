@@ -479,13 +479,23 @@ def do_translate(
                                 part_config.input_file = part_temp_input_path
 
                                 temp_doc = Document()
+                                for x in range(
+                                    split_point.start_page, split_point.end_page + 1
+                                ):
+                                    xref = original_doc[x].xref
+                                    if (
+                                        original_doc.xref_get_key(xref, "Annots")[0]
+                                        != "null"
+                                    ):
+                                        original_doc.xref_set_key(
+                                            xref, "Annots", "null"
+                                        )
                                 temp_doc.insert_pdf(
                                     original_doc,
                                     from_page=split_point.start_page,
                                     to_page=split_point.end_page,
                                 )
                                 temp_doc.save(part_temp_input_path)
-
                                 assert (
                                     temp_doc.page_count
                                     == split_point.end_page - split_point.start_page + 1
