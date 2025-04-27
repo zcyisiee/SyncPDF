@@ -586,6 +586,7 @@ class StylesAndFormulas:
             r"|.*SabonLTPro.*"
             r"|.*ArnoPro.*"
             r"|.*CharisSIL.*"
+            r"|.*MSReference.*"
             r")$"
         )
         precise_formula_font_pattern = (
