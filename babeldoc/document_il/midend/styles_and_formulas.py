@@ -586,6 +586,7 @@ class StylesAndFormulas:
             r"|.*SabonLTPro.*"
             r"|.*ArnoPro.*"
             r"|.*CharisSIL.*"
+            r"|.*MSReference.*"
             r"|.*CMUSerif-Roman.*"
             r"|.*CourierNewPS.*"
             r"|.*XCharter.*"

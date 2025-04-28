@@ -479,13 +479,23 @@ def do_translate(
                                 part_config.input_file = part_temp_input_path
 
                                 temp_doc = Document()
+                                for x in range(
+                                    split_point.start_page, split_point.end_page + 1
+                                ):
+                                    xref = original_doc[x].xref
+                                    if (
+                                        original_doc.xref_get_key(xref, "Annots")[0]
+                                        != "null"
+                                    ):
+                                        original_doc.xref_set_key(
+                                            xref, "Annots", "null"
+                                        )
                                 temp_doc.insert_pdf(
                                     original_doc,
                                     from_page=split_point.start_page,
                                     to_page=split_point.end_page,
                                 )
                                 temp_doc.save(part_temp_input_path)
-
                                 assert (
                                     temp_doc.page_count
                                     == split_point.end_page - split_point.start_page + 1
@@ -547,7 +557,10 @@ def do_translate(
         return result
 
     except Exception as e:
-        logger.error(f"translate error: {e}")
+        if translation_config.debug:
+            logger.exception("translate error:")
+        else:
+            logger.error(f"translate error: {e}")
         pm.disable = False
         pm.translate_error(e)
         raise
@@ -560,17 +573,27 @@ def do_translate(
 def fix_media_box(doc: Document) -> None:
     mediabox_data = {}
     for page in doc:
+        page_box_data = {}
         mediabox = doc.xref_get_key(page.xref, "MediaBox")
-
-        # Some PDF pages do not have a mediabox
         if mediabox[0] == "null":
             mediabox = ("array", "[0 0 612 792]")
             doc.xref_set_key(page.xref, "MediaBox", mediabox[1])
         if page.mediabox.x0 != 0 or page.mediabox.y0 != 0:
+            x0 = page.mediabox.x0
+            y0 = page.mediabox.y0
             x1 = page.mediabox.x1
             y1 = page.mediabox.y1
-            mediabox_data[page.number] = mediabox
-            doc.xref_set_key(page.xref, "MediaBox", f"[0 0 {x1} {y1}]")
+            page_box_data["MediaBox"] = doc.xref_get_key(page.xref, "MediaBox")[1]
+            doc.xref_set_key(page.xref, "MediaBox", f"[0 0 {x1 - x0} {y1 - y0}]")
+        if page.cropbox.x0 != 0 or page.cropbox.y0 != 0:
+            x0 = page.cropbox.x0
+            y0 = page.cropbox.y0
+            x1 = page.cropbox.x1
+            y1 = page.cropbox.y1
+            page_box_data["CropBox"] = doc.xref_get_key(page.xref, "CropBox")[1]
+            doc.xref_set_key(page.xref, "CropBox", f"[0 0 {x1 - x0} {y1 - x0}]")
+        if page_box_data:
+            mediabox_data[page.number] = page_box_data
     return mediabox_data
 
 

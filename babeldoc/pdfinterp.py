@@ -26,6 +26,7 @@ from pdfminer.pdftypes import resolve1
 from pdfminer.pdftypes import stream_value
 from pdfminer.psexceptions import PSEOF
 from pdfminer.psparser import PSKeyword
+from pdfminer.psparser import PSLiteral
 from pdfminer.psparser import keyword_name
 from pdfminer.psparser import literal_name
 from pdfminer.utils import MATRIX_IDENTITY
@@ -387,6 +388,8 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
         if self.textstate.font is None:
             if settings.STRICT:
                 raise PDFInterpreterError("No font specified!")
+            return
+        if isinstance(seq, PSLiteral):
             return
         assert self.ncs is not None
         gs = self.graphicstate.copy()

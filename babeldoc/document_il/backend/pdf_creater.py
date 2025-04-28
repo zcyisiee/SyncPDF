@@ -15,6 +15,7 @@ from bitstring import BitStream
 from babeldoc.assets.embedding_assets_metadata import FONT_NAMES
 from babeldoc.document_il import il_version_1
 from babeldoc.document_il.utils.fontmap import FontMapper
+from babeldoc.document_il.utils.zstd_helper import zstd_decompress
 from babeldoc.translation_config import TranslateResult
 from babeldoc.translation_config import TranslationConfig
 from babeldoc.translation_config import WatermarkOutputMode
@@ -776,11 +777,12 @@ class PDFCreater:
             return False
 
     def restore_media_box(self, doc: pymupdf.Document, mediabox_data: dict) -> None:
-        for pageno, mediabox in mediabox_data.items():
-            try:
-                doc.xref_set_key(doc[pageno].xref, "MediaBox", mediabox[1])
-            except Exception:
-                logger.exception(f"restore media box failed on page: {pageno}")
+        for pageno, page_box_data in mediabox_data.items():
+            for name, box in page_box_data.items():
+                try:
+                    doc.xref_set_key(doc[pageno].xref, name, box)
+                except Exception:
+                    logger.error(f"Error restoring media box {name} from PDF")
 
     def write(
         self, translation_config: TranslationConfig, check_font_exists: bool = False
@@ -831,13 +833,17 @@ class PDFCreater:
                             page_encoding_length_map
                         )
                         xobj_op = BitStream()
-                        xobj_op.append(xobj.base_operations.value.encode())
+                        base_op = xobj.base_operations.value
+                        base_op = zstd_decompress(base_op)
+                        xobj_op.append(base_op.encode())
                         xobj_draw_ops[xobj.xobj_id] = xobj_op
 
                     page_op = BitStream()
                     # q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}
                     # page_op.append(b"q ")
-                    page_op.append(page.base_operations.value.encode())
+                    base_op = page.base_operations.value
+                    base_op = zstd_decompress(base_op)
+                    page_op.append(base_op.encode())
                     page_op.append(b" \n")
                     # page_op.append(b" Q ")
                     # page_op.append(
