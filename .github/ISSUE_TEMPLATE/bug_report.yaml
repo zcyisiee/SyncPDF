@@ -13,7 +13,7 @@ body:
           required: true
         - label: I confirmed this is not caused by a network issue
           required: true
-        - label: I have fully read and understood the [README](https://github.com/funstory-ai/yadt/blob/main/README.md)
+        - label: I have fully read and understood the [README](https://github.com/funstory-ai/BabelDOC/blob/main/README.md)
           required: true
         - label: I am certain that this issue is with BabelDOC itself and can be reproduced through the BabelDOC cli
           required: true
