@@ -111,8 +111,36 @@ class TypesettingUnit:
             r"\uAB30-\uAB6F"  # Latin Extended E
             r"\u0250-\u02A0"  # IPA Extensions
             r"\u0400-\u04FF"  # Cyrillic
+            r"\u0300-\u036F"  # Combining Diacritical Marks
+            r"\u0500-\u052F"  # Cyrillic Supplement
+            r"\u0370-\u03FF"  # Greek and Coptic
+            r"\u2DE0-\u2DFF"  # Cyrillic Extended-A
+            r"\uA650-\uA69F"  # Cyrillic Extended-B   
+            r"\u1200-\u137F"  # Ethiopic
+            r"\u1380-\u139F"  # Ethiopic Supplement
+            r"\u2D80-\u2DDF"  # Ethiopic Extended
+            r"\uAB00-\uAB2F"  # Ethiopic Extended-A
+            r"\U0001E7E0-\U0001E7FF"  # Ethiopic Extended-B
+            r"\u0E80-\u0EFF"  # Lao
+            r"\u0D00-\u0D7F"  # Malayalam
+            r"\u0A80-\u0AFF"  # Gujarati
+            r"\u0E00-\u0E7F"  # Thai
+            r"\u1000-\u109F"  # Myanmar
+            r"\uAA60-\uAA7F"  # Myanmar Extended-A
+            r"\uA9E0-\uA9FF"  # Myanmar Extended-B
+            r"\U000116D0-\U000116FF"  # Myanmar Extended-C
+            r"\u0B80-\u0BFF"  # Tamil
+            r"\u0C00-\u0C7F"  # Telugu
+            r"\u0B00-\u0B7F"  # Oriya
+            r"\u0530-\u058F"  # Armenian
+            r"\u10A0-\u10FF"  # Georgian
+            r"\u1C90-\u1CBF"  # Georgian Extended
+            r"\u2D00-\u2D2F"  # Georgian Supplement
+            r"\u1780-\u17FF"  # Khmer
+            r"\u19E0-\u19FF"  # Khmer Symbols
             r"'"
             r"-"  # Hyphen
+            r"·"  # Middle Dot (U+00B7) For Català
             r"]+$",
             unicode,
         ):
