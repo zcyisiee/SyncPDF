@@ -257,6 +257,10 @@ report-interval = 0.5
 > 1. Before pdf2zh 2.0 is released, you can temporarily use BabelDOC's Python API. However, after pdf2zh 2.0 is released, please directly use pdf2zh's Python API.
 >
 > 2. This project's Python API does not guarantee any compatibility. However, the Python API from pdf2zh will guarantee a certain level of compatibility.
+>
+> 3. We do not provide any technical support for the BabelDOC API.
+>
+> 4. When performing secondary development, please refer to [pdf2zh 2.0 high level](https://github.com/awwaawwa/PDFMathTranslate/blob/v2-rc/pdf2zh/high_level.py) and ensure that BabelDOC runs in a subprocess.
 
 You can refer to the example in [main.py](https://github.com/funstory-ai/yadt/blob/main/babeldoc/main.py) to use BabelDOC's Python API.
 
