@@ -39,6 +39,8 @@ Please pay special attention to:
 > You can contact the maintainers in the pdf2zh discussion group.
 > 
 > Due to the current high rate of code changes, this project only accepts small PRs. If you would like to suggest a change and you include a patch as a proof-of-concept, that would be great. However, please do not be offended if we rewrite your patch from scratch.
+>
+> Please discuss with the maintainers in the [Issue](https://github.com/funstory-ai/BabelDOC/issues) before sending a PR.
 
 [//]: # (> We welcome pull requests and will review your contributions.)
 
