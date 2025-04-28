@@ -605,6 +605,7 @@ class StylesAndFormulas:
             r"|.*Macmillan.*"
             r"|.*NimbusSan.*"
             r"|.*Mincho.*"
+            r"|.*Amerigo.*"
             r")$"
         )
         precise_formula_font_pattern = (
