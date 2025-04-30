@@ -115,7 +115,7 @@ class TypesettingUnit:
             r"\u0500-\u052F"  # Cyrillic Supplement
             r"\u0370-\u03FF"  # Greek and Coptic
             r"\u2DE0-\u2DFF"  # Cyrillic Extended-A
-            r"\uA650-\uA69F"  # Cyrillic Extended-B   
+            r"\uA650-\uA69F"  # Cyrillic Extended-B
             r"\u1200-\u137F"  # Ethiopic
             r"\u1380-\u139F"  # Ethiopic Supplement
             r"\u2D80-\u2DDF"  # Ethiopic Extended
@@ -157,7 +157,7 @@ class TypesettingUnit:
         return True
 
     @property
-    def is_chinese_char(self):
+    def is_cjk_char(self):
         if self.formular:
             return False
         unicode = self.try_get_unicode()
@@ -194,6 +194,30 @@ class TypesettingUnit:
         ]:
             return True
         if unicode:
+            if re.match(
+                r"^["
+                r"\u3000-\u303f"  # CJK Symbols and Punctuation
+                r"\u3040-\u309f"  # Hiragana
+                r"\u30a0-\u30ff"  # Katakana
+                r"\u3100-\u312f"  # Bopomofo
+                r"\uac00-\ud7af"  # Hangul Syllables
+                r"\u1100-\u11ff"  # Hangul Jamo
+                r"\u3130-\u318f"  # Hangul Compatibility Jamo
+                r"\ua960-\ua97f"  # Hangul Jamo Extended-A
+                r"\ud7b0-\ud7ff"  # Hangul Jamo Extended-B
+                r"\u3190-\u319f"  # Kanbun
+                r"\u3200-\u32ff"  # Enclosed CJK Letters and Months
+                r"\u3300-\u33ff"  # CJK Compatibility
+                r"\ufe30-\ufe4f"  # CJK Compatibility Forms
+                r"\u4e00-\u9fff"  # CJK Unified Ideographs
+                r"\u2e80-\u2eff"  # CJK Radicals Supplement
+                r"\u31c0-\u31ef"  # CJK Strokes
+                r"\u2f00-\u2fdf"  # Kangxi Radicals
+                r"\ufe10-\ufe1f"  # Vertical Forms
+                r"]+$",
+                unicode,
+            ):
+                return True
             try:
                 unicodedata_name = unicodedata.name(unicode)
                 return (
@@ -705,7 +729,7 @@ class Typesetting:
 
             if (
                 last_unit  # 有上一个单元
-                and last_unit.is_chinese_char ^ unit.is_chinese_char  # 中英文交界处
+                and last_unit.is_cjk_char ^ unit.is_cjk_char  # 中英文交界处
                 and (
                     last_unit.box
                     and last_unit.box.y
