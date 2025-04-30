@@ -138,9 +138,18 @@ class TypesettingUnit:
             r"\u2D00-\u2D2F"  # Georgian Supplement
             r"\u1780-\u17FF"  # Khmer
             r"\u19E0-\u19FF"  # Khmer Symbols
+            r"\U00010B00-\U00010B3F"  # Avestan
+            r"\u1D00-\u1D7F"  # Phonetic Extensions
+            r"\u1400-\u167F"  # Unified Canadian Aboriginal Syllabics
+            r"\u0B00-\u0B7F"  # Oriya
+            r"\u0780-\u07BF"  # Thaana
+            r"\U0001E900-\U0001E95F"  # Adlam
+            r"\u1C80-\u1C8F"  # Cyrillic Extended-C
+            r"\U0001E030-\U0001E08F"  # Cyrillic Extended-D
             r"'"
             r"-"  # Hyphen
             r"·"  # Middle Dot (U+00B7) For Català
+            r"ʻ"  # Spacing Modifier Letters U+02BB
             r"]+$",
             unicode,
         ):
