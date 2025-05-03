@@ -16,6 +16,7 @@ from babeldoc.document_il.midend.il_translator import ILTranslator
 from babeldoc.document_il.midend.il_translator import PageTranslateTracker
 from babeldoc.document_il.translator.translator import BaseTranslator
 from babeldoc.document_il.utils.fontmap import FontMapper
+from babeldoc.document_il.utils.paragraph_helper import is_cid_paragraph
 from babeldoc.document_il.utils.priority_thread_pool_executor import (
     PriorityThreadPoolExecutor,
 )
@@ -161,6 +162,8 @@ class ILTranslatorLLMOnly:
         total_token_count = 0
         for paragraph in page.pdf_paragraph:
             if paragraph.debug_id is None or paragraph.unicode is None:
+                continue
+            if is_cid_paragraph(paragraph):
                 continue
             # self.translate_paragraph(paragraph, pbar,tracker.new_paragraph(), page_font_map, page_xobj_font_map)
             total_token_count += self.calc_token_count(paragraph.unicode)

@@ -130,4 +130,4 @@ class DetectScannedFile:
         )[:, :, ::-1]
         before_page_image = cv2.cvtColor(before_page_image, cv2.COLOR_RGB2GRAY)
         after_page_image = cv2.cvtColor(after_page_image, cv2.COLOR_RGB2GRAY)
-        return structural_similarity(before_page_image, after_page_image) > 0.9
+        return structural_similarity(before_page_image, after_page_image) > 0.98

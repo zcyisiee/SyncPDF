@@ -3,16 +3,19 @@ import random
 import re
 
 from babeldoc.document_il import Box
+from babeldoc.document_il import Document
 from babeldoc.document_il import Page
 from babeldoc.document_il import PdfCharacter
 from babeldoc.document_il import PdfLine
 from babeldoc.document_il import PdfParagraph
 from babeldoc.document_il import PdfParagraphComposition
 from babeldoc.document_il import PdfRectangle
+from babeldoc.document_il.babeldoc_exception.BabelDOCException import ExtractTextError
 from babeldoc.document_il.utils.layout_helper import Layout
 from babeldoc.document_il.utils.layout_helper import add_space_dummy_chars
 from babeldoc.document_il.utils.layout_helper import get_char_unicode_string
 from babeldoc.document_il.utils.layout_helper import is_bullet_point
+from babeldoc.document_il.utils.paragraph_helper import is_cid_paragraph
 from babeldoc.document_il.utils.style_helper import WHITE
 from babeldoc.translation_config import TranslationConfig
 
@@ -131,6 +134,25 @@ class ParagraphFinder:
                 self.translation_config.raise_if_cancelled()
                 self.process_page(page)
                 pbar.advance()
+
+            if self.check_cid_paragraph(document):
+                raise ExtractTextError("The document contains too many CID paragraphs.")
+
+            total_paragraph_count = 0
+            for page in document.page:
+                total_paragraph_count += len(page.pdf_paragraph)
+            if total_paragraph_count == 0:
+                raise ExtractTextError("The document contains no paragraphs.")
+
+    def check_cid_paragraph(self, doc: Document):
+        cid_para_count = 0
+        para_total = 0
+        for page in doc.page:
+            para_total += len(page.pdf_paragraph)
+            for para in page.pdf_paragraph:
+                if is_cid_paragraph(para):
+                    cid_para_count += 1
+        return cid_para_count / para_total > 0.8
 
     def bbox_overlap(self, bbox1: Box, bbox2: Box) -> bool:
         return (
