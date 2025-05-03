@@ -39,6 +39,8 @@ PDF scientific paper translation and bilingual comparison library.
 - Provides a [Python API](#python-api).
 - Mainly designed to be embedded into other programs, but can also be used directly for simple translation tasks.
 
+[Supported Language](https://funstory-ai.github.io/BabelDOC/supported_languages/)
+
 ## Preview
 
 <div align="center">
