@@ -19,12 +19,15 @@ from pdfminer.pdfinterp import PDFPageInterpreter
 from pdfminer.pdfinterp import PDFResourceManager
 from pdfminer.pdfinterp import PDFStackT
 from pdfminer.pdfpage import PDFPage
+from pdfminer.pdftypes import LITERALS_ASCII85_DECODE
 from pdfminer.pdftypes import PDFObjRef
+from pdfminer.pdftypes import PDFStream
 from pdfminer.pdftypes import dict_value
 from pdfminer.pdftypes import list_value
 from pdfminer.pdftypes import resolve1
 from pdfminer.pdftypes import stream_value
 from pdfminer.psexceptions import PSEOF
+from pdfminer.psexceptions import PSTypeError
 from pdfminer.psparser import PSKeyword
 from pdfminer.psparser import PSLiteral
 from pdfminer.psparser import keyword_name
@@ -33,6 +36,7 @@ from pdfminer.utils import MATRIX_IDENTITY
 from pdfminer.utils import Matrix
 from pdfminer.utils import Rect
 from pdfminer.utils import apply_matrix_pt
+from pdfminer.utils import choplist
 from pdfminer.utils import mult_matrix
 
 from babeldoc.document_il.frontend.il_creater import ILCreater
@@ -45,6 +49,42 @@ def safe_float(o: Any) -> float | None:
         return float(o)
     except (TypeError, ValueError):
         return None
+
+
+class PDFContentParserEx(PDFContentParser):
+    def __init__(self, streams: Sequence[object]) -> None:
+        super().__init__(streams)
+
+    def do_keyword(self, pos: int, token: PSKeyword) -> None:
+        if token is self.KEYWORD_BI:
+            # inline image within a content stream
+            self.start_type(pos, "inline")
+        elif token is self.KEYWORD_ID:
+            try:
+                (_, objs) = self.end_type("inline")
+                if len(objs) % 2 != 0:
+                    error_msg = f"Invalid dictionary construct: {objs!r}"
+                    raise PSTypeError(error_msg)
+                d = {literal_name(k): resolve1(v) for (k, v) in choplist(2, objs)}
+                eos = b"EI"
+                filter_ = d.get("F", None)
+                if filter_:
+                    if isinstance(filter_, PSLiteral):
+                        filter_ = [filter_]
+                    if filter_[0] in LITERALS_ASCII85_DECODE:
+                        eos = b"~>"
+                (pos, data) = self.get_inline_data(pos + len(b"ID "), target=eos)
+                if eos != b"EI":  # it may be necessary for decoding
+                    data += eos
+                obj = PDFStream(d, data)
+                self.push((pos, obj))
+                if eos == b"EI":  # otherwise it is still in the stream
+                    self.push((pos, self.KEYWORD_EI))
+            except PSTypeError:
+                if settings.STRICT:
+                    raise
+        else:
+            self.push((pos, token))
 
 
 class PDFPageInterpreterEx(PDFPageInterpreter):
@@ -409,7 +449,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             self.il_creater.on_new_stream()
             # 重载返回指令流
             try:
-                parser = PDFContentParser([stream])
+                parser = PDFContentParserEx([stream])
             except PSEOF:
                 # empty page
                 return
