@@ -135,14 +135,14 @@ class ParagraphFinder:
                 self.process_page(page)
                 pbar.advance()
 
-            if self.check_cid_paragraph(document):
-                raise ExtractTextError("The document contains too many CID paragraphs.")
-
             total_paragraph_count = 0
             for page in document.page:
                 total_paragraph_count += len(page.pdf_paragraph)
             if total_paragraph_count == 0:
                 raise ExtractTextError("The document contains no paragraphs.")
+
+            if self.check_cid_paragraph(document):
+                raise ExtractTextError("The document contains too many CID paragraphs.")
 
     def check_cid_paragraph(self, doc: Document):
         cid_para_count = 0
