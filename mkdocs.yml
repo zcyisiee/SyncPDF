@@ -132,6 +132,7 @@ not_in_nav: |
 # Page tree
 nav:
   - Home: index.md
+  - Supported languages: supported_languages.md
   - API:
     - Async Translation API: ImplementationDetails/AsyncTranslate/AsyncTranslate.md
   - Implementation Details:
