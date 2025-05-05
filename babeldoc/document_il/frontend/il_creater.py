@@ -859,8 +859,8 @@ class ILCreater:
             char_bounding_box = None
 
         char_unicode = char.get_text()
-        if "(cid:" not in char_unicode and len(char_unicode) > 1:
-            return
+        # if "(cid:" not in char_unicode and len(char_unicode) > 1:
+        #     return
         if space_regex.match(char_unicode):
             char_unicode = " "
         advance = char.adv

@@ -262,11 +262,7 @@ class ILTranslatorLLMOnly:
             # Create a structured prompt template for LLM translation
             prompt_template = (
                 f"""
-    You will be given a JSON formatted input containing entries with "id" and "input" fields. Here is the input:
-    
-    ```json
-    {json_format_input}
-    ```
+    You will be given a JSON formatted input containing entries with "id" and "input" fields. 
     
     For each entry in the JSON, translate the contents of the "input" field into {self.translation_config.lang_out}.
     Write the translation back into the "output" field for that entry.
@@ -297,7 +293,20 @@ class ILTranslatorLLMOnly:
     """
             )
             llm_input.append(prompt_template)
+            llm_input.append(
+                f'Please do not translate style tags like "{self.translate_engine.get_rich_text_left_placeholder(1)}xxx{self.translate_engine.get_rich_text_right_placeholder(2)}"!'
+            )
 
+            llm_input.append(
+                f'Please do not translate formula placeholders like "{self.translate_engine.get_formular_placeholder(3)}"!'
+            )
+            llm_input.append(
+                f"""Here is the input:
+    
+    ```json
+    {json_format_input}
+    ```"""
+            )
             final_input = "\n".join(llm_input).strip()
             llm_output = self.translate_engine.llm_translate(
                 final_input,
@@ -385,6 +394,8 @@ class ILTranslatorLLMOnly:
                             xobj_font_map,
                             priority=1048576 - paragraph_token_count,
                             paragraph_token_count=paragraph_token_count,
+                            title_paragraph=title_paragraph,
+                            local_title_paragraph=local_title_paragraph,
                         )
 
         except Exception as e:
@@ -408,6 +419,8 @@ class ILTranslatorLLMOnly:
                     xobj_font_map,
                     priority=1048576 - paragraph_token_count,
                     paragraph_token_count=paragraph_token_count,
+                    title_paragraph=title_paragraph,
+                    local_title_paragraph=local_title_paragraph,
                 )
 
     def _clean_json_output(self, llm_output: str) -> str:
