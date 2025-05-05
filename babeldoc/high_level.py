@@ -723,7 +723,6 @@ def _do_translate_single(
             support_llm_translate = True
     except NotImplementedError:
         support_llm_translate = False
-    il_translator = None
     if support_llm_translate:
         il_translator = ILTranslatorLLMOnly(translate_engine, translation_config)
     else:
