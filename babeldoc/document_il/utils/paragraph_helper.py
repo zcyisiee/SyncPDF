@@ -14,7 +14,8 @@ def is_cid_paragraph(paragraph: il_version_1.PdfParagraph):
         elif composition.pdf_same_style_characters:
             chars.extend(composition.pdf_same_style_characters.pdf_character)
         elif composition.pdf_same_style_unicode_characters:
-            chars.extend(composition.pdf_same_style_unicode_characters.unicode)
+            continue
+        #     chars.extend(composition.pdf_same_style_unicode_characters.unicode)
         elif composition.pdf_formula:
             chars.extend(composition.pdf_formula.pdf_character)
         elif composition.pdf_character:
