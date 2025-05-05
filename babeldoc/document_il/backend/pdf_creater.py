@@ -782,7 +782,7 @@ class PDFCreater:
                 try:
                     doc.xref_set_key(doc[pageno].xref, name, box)
                 except Exception:
-                    logger.error(f"Error restoring media box {name} from PDF")
+                    logger.debug(f"Error restoring media box {name} from PDF")
 
     def write(
         self, translation_config: TranslationConfig, check_font_exists: bool = False
