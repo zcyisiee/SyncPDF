@@ -127,11 +127,21 @@ class ILTranslator:
         self.translate_engine = translate_engine
         self.translation_config = translation_config
         self.font_mapper = FontMapper(translation_config)
-
+        self.shared_context_cross_split_part = (
+            translation_config.shared_context_cross_split_part
+        )
         if tokenizer is None:
             self.tokenizer = tiktoken.encoding_for_model("gpt-4o")
         else:
             self.tokenizer = tokenizer
+
+        self.support_llm_translate = False
+        try:
+            if translate_engine and hasattr(translate_engine, "do_llm_translate"):
+                translate_engine.do_llm_translate(None)
+                self.support_llm_translate = True
+        except NotImplementedError:
+            self.support_llm_translate = False
 
     def calc_token_count(self, text: str) -> int:
         try:
@@ -141,6 +151,17 @@ class ILTranslator:
 
     def translate(self, docs: Document):
         tracker = DocumentTranslateTracker()
+
+        if not self.translation_config.shared_context_cross_split_part.first_paragraph:
+            # Try to find the first title paragraph
+            title_paragraph = self.find_title_paragraph(docs)
+            self.translation_config.shared_context_cross_split_part.first_paragraph = (
+                title_paragraph
+            )
+            self.translation_config.shared_context_cross_split_part.recent_title_paragraph = title_paragraph
+            if title_paragraph:
+                logger.info(f"Found first title paragraph: {title_paragraph.unicode}")
+
         # count total paragraph
         total = sum(len(page.pdf_paragraph) for page in docs.page)
         with self.translation_config.progress_monitor.stage_start(
@@ -163,6 +184,22 @@ class ILTranslator:
             with Path(path).open("w", encoding="utf-8") as f:
                 f.write(tracker.to_json())
 
+    def find_title_paragraph(self, docs: Document) -> PdfParagraph | None:
+        """Find the first paragraph with layout_label 'title' in the document.
+
+        Args:
+            docs: The document to search in
+
+        Returns:
+            The first title paragraph found, or None if no title paragraph exists
+        """
+        for page in docs.page:
+            for paragraph in page.pdf_paragraph:
+                if paragraph.layout_label == "title":
+                    logger.info(f"Found title paragraph: {paragraph.unicode}")
+                    return paragraph
+        return None
+
     def process_page(
         self,
         page: Page,
@@ -182,6 +219,8 @@ class ILTranslator:
                     page_xobj_font_map[xobj.xobj_id][font.font_id] = font
             # self.translate_paragraph(paragraph, pbar,tracker.new_paragraph(), page_font_map, page_xobj_font_map)
             paragraph_token_count = self.calc_token_count(paragraph.unicode)
+            if paragraph.layout_label == "title":
+                self.shared_context_cross_split_part.recent_title_paragraph = paragraph
             executor.submit(
                 self.translate_paragraph,
                 paragraph,
@@ -191,6 +230,8 @@ class ILTranslator:
                 page_xobj_font_map,
                 priority=1048576 - paragraph_token_count,
                 paragraph_token_count=paragraph_token_count,
+                title_paragraph=self.translation_config.shared_context_cross_split_part.first_paragraph,
+                local_title_paragraph=self.translation_config.shared_context_cross_split_part.recent_title_paragraph,
             )
 
     class TranslateInput:
@@ -555,7 +596,15 @@ class ILTranslator:
         tracker.set_pdf_unicode(paragraph.unicode)
         if paragraph.xobj_id in xobj_font_map:
             page_font_map = xobj_font_map[paragraph.xobj_id]
-        translate_input = self.get_translate_input(paragraph, page_font_map)
+        disable_rich_text_translate = (
+            self.translation_config.disable_rich_text_translate
+        )
+        if not self.support_llm_translate:
+            disable_rich_text_translate = True
+
+        translate_input = self.get_translate_input(
+            paragraph, page_font_map, disable_rich_text_translate
+        )
         if not translate_input:
             return None, None
         tracker.set_input(translate_input.unicode)
@@ -592,6 +641,43 @@ class ILTranslator:
                 )
         return True
 
+    def generate_prompt_for_llm(
+        self,
+        text: str,
+        title_paragraph: PdfParagraph | None = None,
+        local_title_paragraph: PdfParagraph | None = None,
+    ):
+        llm_input = ["You are a professional, authentic machine translation engine."]
+
+        if title_paragraph:
+            llm_input.append(
+                f"The first title in the full text: {title_paragraph.unicode}"
+            )
+        if (
+            local_title_paragraph
+            and local_title_paragraph.debug_id != title_paragraph.debug_id
+        ):
+            llm_input.append(
+                f"The most similar title in the full text: {local_title_paragraph.unicode}"
+            )
+        # Create a structured prompt template for LLM translation
+        llm_input.append(
+            f'Please do not translate style tags like "{self.translate_engine.get_rich_text_left_placeholder(1)}xxx{self.translate_engine.get_rich_text_right_placeholder(2)}"!'
+        )
+
+        llm_input.append(
+            f'Please do not translate formula placeholders like "{self.translate_engine.get_formular_placeholder(3)}"!'
+        )
+        prompt_template = f"""
+;; Treat next line as plain text input and translate it into {self.translation_config.lang_out}, output translation ONLY. If translation is unnecessary (e.g. proper nouns, codes, {"{{1}}, etc. "}), return the original text. NO explanations. NO notes. Input:\n\n{text}
+
+"""
+        llm_input.append(prompt_template)
+
+        final_input = "\n".join(llm_input).strip()
+
+        return final_input
+
     def translate_paragraph(
         self,
         paragraph: PdfParagraph,
@@ -600,6 +686,8 @@ class ILTranslator:
         page_font_map: dict[str, PdfFont] = None,
         xobj_font_map: dict[int, dict[str, PdfFont]] = None,
         paragraph_token_count: int = 0,
+        title_paragraph: PdfParagraph | None = None,
+        local_title_paragraph: PdfParagraph | None = None,
     ):
         """Translate a paragraph using pre and post processing functions."""
         self.translation_config.raise_if_cancelled()
@@ -613,10 +701,23 @@ class ILTranslator:
                     return
 
                 # Perform translation
-                translated_text = self.translate_engine.translate(
-                    text,
-                    rate_limit_params={"paragraph_token_count": paragraph_token_count},
-                )
+                if self.support_llm_translate:
+                    llm_prompt = self.generate_prompt_for_llm(
+                        text, title_paragraph, local_title_paragraph
+                    )
+                    translated_text = self.translate_engine.llm_translate(
+                        llm_prompt,
+                        rate_limit_params={
+                            "paragraph_token_count": paragraph_token_count
+                        },
+                    )
+                else:
+                    translated_text = self.translate_engine.translate(
+                        text,
+                        rate_limit_params={
+                            "paragraph_token_count": paragraph_token_count
+                        },
+                    )
                 translated_text = re.sub(r"[. 。…，]{20,}", ".", translated_text)
 
                 # Post-translation processing
