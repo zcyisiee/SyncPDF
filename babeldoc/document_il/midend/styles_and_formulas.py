@@ -721,6 +721,8 @@ class StylesAndFormulas:
         if "(cid:" in char:
             return True
         if not self.font_mapper.has_char(char):
+            if len(char) > 1 and all(self.font_mapper.has_char(x) for x in char):
+                return False
             return True
         if self.translation_config.formular_char_pattern:
             pattern = self.translation_config.formular_char_pattern
