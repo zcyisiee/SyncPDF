@@ -9,7 +9,7 @@ We are working hard to develop support for ligatures as soon as possible.
 | Simplified Chinese   | zh-CN         | None                |
 | Traditional Chinese  | zh-TW         | None                |
 | Japanese             | JA            | None                |
-| Korean               | KR            | None                |
+| Korean               | KO            | None                |
 | Polish               | PL            | Partial             |
 | Russian              | RU            | None                |
 | Spanish              | es            | None                |
@@ -20,7 +20,6 @@ We are working hard to develop support for ligatures as soon as possible.
 | Turkmen              | tk            | None                |
 | Filipino (Tagalog)   | tl            | None                |
 | Vietnamese           | vi            | None                |
-| Azerbaijani          | az            | None                |
 | Kazakh (Latin)       | kk            | None                |
 | Kazakh (Cyrillic)    | kk            | None                |
 | German               | de            | None                |
@@ -85,7 +84,6 @@ We are working hard to develop support for ligatures as soon as possible.
 | Akan                 | ak            | None                |
 | Aragonese            | an            | None                |
 | Avaric               | av            | None                |
-| Avestan              | ae            | None                |
 | Ewe                  | ee            | None                |
 | Aymara               | ay            | None                |
 | Ojibwa               | oj            | None                |
@@ -95,26 +93,22 @@ We are working hard to develop support for ligatures as soon as possible.
 | Pali                 | pi            | None                |
 | Bashkir              | ba            | None                |
 | Basque               | eu            | None                |
-| Bambara              | bm            | None                |
 | Breton               | br            | None                |
 | Chamorro             | ch            | None                |
 | Chechen              | ce            | None                |
 | Chuvash              | cv            | None                |
 | Tswana               | tn            | None                |
-| Divehi               | dv            | None                |
 | Ndebele, South       | nr            | None                |
 | Ndonga               | ng            | None                |
 | Faroese              | fo            | None                |
 | Fijian               | fj            | None                |
 | Frisian, Western     | fy            | None                |
-| Fulah                | ff            | None                |
 | Ganda                | lg            | None                |
 | Kongo                | kg            | None                |
 | Kalaallisut          | kl            | None                |
 | Church Slavic        | cu            | None                |
 | Guarani              | gn            | None                |
 | Interlingua          | ia            | None                |
-| Hausa                | ha            | None                |
 | Herero               | hz            | None                |
 | Kikuyu               | ki            | None                |
 | Rundi                | rn            | None                |
@@ -159,14 +153,11 @@ We are working hard to develop support for ligatures as soon as possible.
 | Welsh                | cy            | None                |
 | Venda                | ve            | None                |
 | Volapük              | vo            | None                |
-| Wolof                | wo            | None                |
 | Interlingue          | ie            | None                |
-| Hebrew               | he            | None                |
 | Hiri Motu            | ho            | None                |
 | Igbo                 | ig            | None                |
 | Ido                  | io            | None                |
 | Inuktitut            | iu            | None                |
-| Yiddish              | yi            | None                |
 | Inupiaq              | ik            | None                |
 | Sichuan Yi           | ii            | None                |
 | Yoruba               | yo            | None                |
