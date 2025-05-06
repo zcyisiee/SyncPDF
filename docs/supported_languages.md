@@ -84,7 +84,6 @@ We are working hard to develop support for ligatures as soon as possible.
 | Akan                 | ak            | None                |
 | Aragonese            | an            | None                |
 | Avaric               | av            | None                |
-| Avestan              | ae            | None                |
 | Ewe                  | ee            | None                |
 | Aymara               | ay            | None                |
 | Ojibwa               | oj            | None                |
@@ -94,7 +93,6 @@ We are working hard to develop support for ligatures as soon as possible.
 | Pali                 | pi            | None                |
 | Bashkir              | ba            | None                |
 | Basque               | eu            | None                |
-| Bambara              | bm            | None                |
 | Breton               | br            | None                |
 | Chamorro             | ch            | None                |
 | Chechen              | ce            | None                |
@@ -105,14 +103,12 @@ We are working hard to develop support for ligatures as soon as possible.
 | Faroese              | fo            | None                |
 | Fijian               | fj            | None                |
 | Frisian, Western     | fy            | None                |
-| Fulah                | ff            | None                |
 | Ganda                | lg            | None                |
 | Kongo                | kg            | None                |
 | Kalaallisut          | kl            | None                |
 | Church Slavic        | cu            | None                |
 | Guarani              | gn            | None                |
 | Interlingua          | ia            | None                |
-| Hausa                | ha            | None                |
 | Herero               | hz            | None                |
 | Kikuyu               | ki            | None                |
 | Rundi                | rn            | None                |
@@ -157,7 +153,6 @@ We are working hard to develop support for ligatures as soon as possible.
 | Welsh                | cy            | None                |
 | Venda                | ve            | None                |
 | Volapük              | vo            | None                |
-| Wolof                | wo            | None                |
 | Interlingue          | ie            | None                |
 | Hiri Motu            | ho            | None                |
 | Igbo                 | ig            | None                |
