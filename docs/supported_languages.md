@@ -3,6 +3,7 @@
 For languages in the table below that do not rely on ligature support, BabelDOC provides good support. For languages that partially rely on ligatures, BabelDOC's translation results can generally meet self-reading needs. For languages that completely rely on ligatures (such as some Indian languages), BabelDOC does not currently support them.
 
 We are working hard to develop support for ligatures as soon as possible.
+<!-- | Kazakh (Cyrillic)    | kk            | None                | -->
 
 | Language             | Language Code | Ligature Dependency |
 | :------------------- | :------------ | :------------------ |
@@ -23,7 +24,6 @@ We are working hard to develop support for ligatures as soon as possible.
 | Filipino (Tagalog)   | tl            | None                |
 | Vietnamese           | vi            | None                |
 | Kazakh (Latin)       | kk            | None                |
-<!-- | Kazakh (Cyrillic)    | kk            | None                | -->
 | German               | de            | None                |
 | Dutch                | nl            | None                |
 | Irish                | ga            | None                |
