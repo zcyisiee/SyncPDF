@@ -130,7 +130,11 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             else:
                 name = literal_name(spec)
             if name == "ICCBased" and isinstance(spec, list) and len(spec) >= 2:
-                return PDFColorSpace(name, stream_value(spec[1])["N"])
+                val = stream_value(spec[1])
+                if "N" in val:
+                    return PDFColorSpace(name, val["N"])
+                elif "Alternate" in val:
+                    return PREDEFINED_COLORSPACE[val["Alternate"].name]
             elif name == "DeviceN" and isinstance(spec, list) and len(spec) >= 2:
                 return PDFColorSpace(name, len(list_value(spec[1])))
             else:
