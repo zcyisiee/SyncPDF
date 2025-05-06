@@ -6,6 +6,7 @@ We are working hard to develop support for ligatures as soon as possible.
 
 | Language             | Language Code | Ligature Dependency |
 | :------------------- | :------------ | :------------------ |
+| English              | EN            | None                |
 | Simplified Chinese   | zh-CN         | None                |
 | Traditional Chinese  | zh-TW         | None                |
 | Japanese             | JA            | None                |
