@@ -8,7 +8,8 @@ We are working hard to develop support for ligatures as soon as possible.
 | :------------------- | :------------ | :------------------ |
 | English              | EN            | None                |
 | Simplified Chinese   | zh-CN         | None                |
-| Traditional Chinese  | zh-TW         | None                |
+| Traditional Chinese - Hong Kong| zh-HK | None |
+| Traditional Chinese - Taiwan  | zh-TW         | None                |
 | Japanese             | JA            | None                |
 | Korean               | KO            | None                |
 | Polish               | PL            | Partial             |
@@ -22,7 +23,7 @@ We are working hard to develop support for ligatures as soon as possible.
 | Filipino (Tagalog)   | tl            | None                |
 | Vietnamese           | vi            | None                |
 | Kazakh (Latin)       | kk            | None                |
-| Kazakh (Cyrillic)    | kk            | None                |
+<!-- | Kazakh (Cyrillic)    | kk            | None                | -->
 | German               | de            | None                |
 | Dutch                | nl            | None                |
 | Irish                | ga            | None                |
