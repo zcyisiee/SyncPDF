@@ -161,7 +161,6 @@ We are working hard to develop support for ligatures as soon as possible.
 | Volapük              | vo            | None                |
 | Wolof                | wo            | None                |
 | Interlingue          | ie            | None                |
-| Hebrew               | he            | None                |
 | Hiri Motu            | ho            | None                |
 | Igbo                 | ig            | None                |
 | Ido                  | io            | None                |
