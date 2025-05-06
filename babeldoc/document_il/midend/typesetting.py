@@ -755,7 +755,7 @@ class Typesetting:
                 current_x += space_width * 0.5
             if use_english_line_break:
                 width_before_next_break_point = self._get_width_before_next_break_point(
-                    typesetting_units[i + 1 :], scale
+                    typesetting_units[i:], scale
                 )
             else:
                 width_before_next_break_point = 0
