@@ -23,7 +23,7 @@ We are working hard to develop support for ligatures as soon as possible.
 | Filipino (Tagalog)   | tl            | None                |
 | Vietnamese           | vi            | None                |
 | Kazakh (Latin)       | kk            | None                |
-| Kazakh (Cyrillic)    | kk            | None                |
+<!-- | Kazakh (Cyrillic)    | kk            | None                | -->
 | German               | de            | None                |
 | Dutch                | nl            | None                |
 | Irish                | ga            | None                |
