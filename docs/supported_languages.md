@@ -20,7 +20,6 @@ We are working hard to develop support for ligatures as soon as possible.
 | Turkmen              | tk            | None                |
 | Filipino (Tagalog)   | tl            | None                |
 | Vietnamese           | vi            | None                |
-| Azerbaijani          | az            | None                |
 | Kazakh (Latin)       | kk            | None                |
 | Kazakh (Cyrillic)    | kk            | None                |
 | German               | de            | None                |
@@ -101,7 +100,6 @@ We are working hard to develop support for ligatures as soon as possible.
 | Chechen              | ce            | None                |
 | Chuvash              | cv            | None                |
 | Tswana               | tn            | None                |
-| Divehi               | dv            | None                |
 | Ndebele, South       | nr            | None                |
 | Ndonga               | ng            | None                |
 | Faroese              | fo            | None                |
