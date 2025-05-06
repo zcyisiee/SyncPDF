@@ -163,7 +163,6 @@ We are working hard to develop support for ligatures as soon as possible.
 | Igbo                 | ig            | None                |
 | Ido                  | io            | None                |
 | Inuktitut            | iu            | None                |
-| Yiddish              | yi            | None                |
 | Inupiaq              | ik            | None                |
 | Sichuan Yi           | ii            | None                |
 | Yoruba               | yo            | None                |
