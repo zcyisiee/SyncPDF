@@ -137,4 +137,39 @@ We are working hard to develop support for ligatures as soon as possible.
 | Malagasy             | mg            | None                |
 | Marshallese          | mh            | None                |
 | Maori                | mi            | None                |
-
+| Navajo               | nv            | None                |
+| Nauru                | na            | None                |
+| Nyanja               | ny            | None                |
+| Norwegian Nynorsk    | nn            | None                |
+| Sardinian            | sc            | None                |
+| Northern Sami        | se            | None                |
+| Samoan               | sm            | None                |
+| Sango                | sg            | None                |
+| Shona                | sn            | None                |
+| Esperanto            | eo            | None                |
+| Scottish Gaelic      | gd            | None                |
+| Somali               | so            | None                |
+| Southern Sotho       | st            | None                |
+| Tagalog              | tl            | None                |
+| Tatar                | tt            | None                |
+| Tahitian             | ty            | None                |
+| Tongan               | to            | None                |
+| Twi                  | tw            | None                |
+| Walloon              | wa            | None                |
+| Welsh                | cy            | None                |
+| Venda                | ve            | None                |
+| Volapük              | vo            | None                |
+| Wolof                | wo            | None                |
+| Interlingue          | ie            | None                |
+| Hebrew               | he            | None                |
+| Hiri Motu            | ho            | None                |
+| Igbo                 | ig            | None                |
+| Ido                  | io            | None                |
+| Inuktitut            | iu            | None                |
+| Yiddish              | yi            | None                |
+| Inupiaq              | ik            | None                |
+| Sichuan Yi           | ii            | None                |
+| Yoruba               | yo            | None                |
+| Zhuang               | za            | None                |
+| Tsonga               | ts            | None                |
+| Zulu                 | zu            | None                |

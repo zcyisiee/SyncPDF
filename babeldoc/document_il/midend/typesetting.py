@@ -146,6 +146,8 @@ class TypesettingUnit:
             r"\U0001E900-\U0001E95F"  # Adlam
             r"\u1C80-\u1C8F"  # Cyrillic Extended-C
             r"\U0001E030-\U0001E08F"  # Cyrillic Extended-D
+            r"\uA000-\uA48F"  # Yi Syllables
+            r"\uA490-\uA4CF"  # Yi Radicals
             r"'"
             r"-"  # Hyphen
             r"·"  # Middle Dot (U+00B7) For Català
