@@ -6,6 +6,7 @@ import unicodedata
 from abc import ABC
 from abc import abstractmethod
 
+import httpx
 import openai
 from tenacity import retry
 from tenacity import retry_if_exception_type
@@ -191,7 +192,15 @@ class OpenAITranslator(BaseTranslator):
     ):
         super().__init__(lang_in, lang_out, ignore_cache)
         self.options = {"temperature": 0}  # 随机采样可能会打断公式标记
-        self.client = openai.OpenAI(base_url=base_url, api_key=api_key)
+        self.client = openai.OpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            http_client=httpx.Client(
+                limits=httpx.Limits(
+                    max_connections=None, max_keepalive_connections=None
+                )
+            ),
+        )
         self.add_cache_impact_parameters("temperature", self.options["temperature"])
         self.model = model
         self.add_cache_impact_parameters("model", self.model)
