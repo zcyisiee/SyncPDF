@@ -8,7 +8,7 @@ We are working hard to develop support for ligatures as soon as possible.
 | :------------------- | :------------ | :------------------ |
 | Simplified Chinese   | zh-CN         | None                |
 | Traditional Chinese  | zh-TW         | None                |
-| Japanese             | JP            | None                |
+| Japanese             | JA            | None                |
 | Korean               | KR            | None                |
 | Polish               | PL            | Partial             |
 | Russian              | RU            | None                |
