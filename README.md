@@ -174,7 +174,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 > 2. It is recommended to use models with strong compatibility with OpenAI, such as: `glm-4-flash`, `deepseek-chat`, etc.
 > 3. Currently, it has not been optimized for traditional translation engines like Bing/Google, it is recommended to use LLMs.
 > 4. You can use [litellm](https://github.com/BerriAI/litellm) to access multiple models.
-> 5. `--custom-system-prompt`: 主要是用来在提示词中加入 Qwen 3 的 `/no_think` 指令。 比如：`--custom-system-prompt "/no_think You are a professional, authentic machine translation engine."`
+> 5. `--custom-system-prompt`: It is mainly used to add the `/no_think` instruction of Qwen 3 in the prompt. For example: `--custom-system-prompt "/no_think You are a professional, authentic machine translation engine."`
 
 ### OpenAI Specific Options
 
