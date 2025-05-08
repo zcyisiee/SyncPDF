@@ -23,7 +23,7 @@ from babeldoc.translation_config import TranslationConfig
 from babeldoc.translation_config import WatermarkOutputMode
 
 logger = logging.getLogger(__name__)
-__version__ = "0.3.38"
+__version__ = "0.3.39"
 
 
 def create_parser():
@@ -216,6 +216,11 @@ def create_parser():
         default=False,
         help="Add text fill background (experimental)",
     )
+    translation_group.add_argument(
+        "--custom-system-prompt",
+        help="Custom system prompt for translation.",
+        default=None,
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -384,6 +389,7 @@ async def main():
             show_char_box=args.show_char_box,
             skip_scanned_detection=args.skip_scanned_detection,
             ocr_workaround=args.ocr_workaround,
+            custom_system_prompt=args.custom_system_prompt,
         )
 
         # Create progress handler

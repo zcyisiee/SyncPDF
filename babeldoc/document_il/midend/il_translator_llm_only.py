@@ -244,9 +244,12 @@ class ILTranslatorLLMOnly:
             json_format_input = json.dumps(
                 json_format_input, ensure_ascii=False, indent=2
             )
-            llm_input = [
-                "You are a professional, authentic machine translation engine."
-            ]
+            if self.translation_config.custom_system_prompt:
+                llm_input = [self.translation_config.custom_system_prompt]
+            else:
+                llm_input = [
+                    "You are a professional, authentic machine translation engine."
+                ]
 
             if title_paragraph:
                 llm_input.append(

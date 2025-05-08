@@ -647,7 +647,12 @@ class ILTranslator:
         title_paragraph: PdfParagraph | None = None,
         local_title_paragraph: PdfParagraph | None = None,
     ):
-        llm_input = ["You are a professional, authentic machine translation engine."]
+        if self.translation_config.custom_system_prompt:
+            llm_input = [self.translation_config.custom_system_prompt]
+        else:
+            llm_input = [
+                "You are a professional, authentic machine translation engine."
+            ]
 
         if title_paragraph:
             llm_input.append(
