@@ -409,6 +409,17 @@ def fix_null_xref(doc: Document) -> None:
             doc.update_object(i, "[]")
 
 
+def fix_filter(doc):
+    page_contents = []
+    for page in doc:
+        page_contents.extend(page.get_contents())
+    for page_piece in page_contents:
+        f = doc.xref_get_key(page_piece, "Filter")
+        if f[0] == "xref":
+            data = doc.xref_stream(page_piece)
+            doc.update_stream(page_piece, data)
+
+
 def do_translate(
     pm: ProgressMonitor, translation_config: TranslationConfig
 ) -> TranslateResult:
@@ -624,6 +635,7 @@ def _do_translate_single(
             "input.decompressed.pdf",
         )
         # Fix null xref in PDF file
+        fix_filter(doc_input)
         fix_null_xref(doc_input)
         doc_input.save(output_path, expand=True, pretty=True)
         del doc_input
@@ -634,6 +646,7 @@ def _do_translate_single(
     resfont = "china-ss"
 
     # Fix null xref in PDF file
+    fix_filter(doc_pdf2zh)
     fix_null_xref(doc_pdf2zh)
 
     mediabox_data = fix_media_box(doc_pdf2zh)
