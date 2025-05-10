@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 import re
@@ -11,6 +12,7 @@ from babeldoc.document_il import Document
 from babeldoc.document_il import Page
 from babeldoc.document_il import PdfFont
 from babeldoc.document_il import PdfParagraph
+from babeldoc.document_il.midend import il_translator
 from babeldoc.document_il.midend.il_translator import DocumentTranslateTracker
 from babeldoc.document_il.midend.il_translator import ILTranslator
 from babeldoc.document_il.midend.il_translator import PageTranslateTracker
@@ -94,9 +96,11 @@ class ILTranslatorLLMOnly:
             # Try to find the first title paragraph
             title_paragraph = self.find_title_paragraph(docs)
             self.translation_config.shared_context_cross_split_part.first_paragraph = (
+                copy.deepcopy(title_paragraph)
+            )
+            self.translation_config.shared_context_cross_split_part.recent_title_paragraph = copy.deepcopy(
                 title_paragraph
             )
-            self.translation_config.shared_context_cross_split_part.recent_title_paragraph = title_paragraph
             if title_paragraph:
                 logger.info(f"Found first title paragraph: {title_paragraph.unicode}")
 
@@ -169,7 +173,9 @@ class ILTranslatorLLMOnly:
             total_token_count += self.calc_token_count(paragraph.unicode)
             paragraphs.append(paragraph)
             if paragraph.layout_label == "title":
-                self.shared_context_cross_split_part.recent_title_paragraph = paragraph
+                self.shared_context_cross_split_part.recent_title_paragraph = (
+                    copy.deepcopy(paragraph)
+                )
 
             if total_token_count > 400 or len(paragraphs) > 5:
                 executor.submit(
@@ -217,7 +223,7 @@ class ILTranslatorLLMOnly:
         should_translate_paragraph = []
         try:
             inputs = []
-
+            llm_translate_trackers = []
             for i in range(len(batch_paragraph.paragraphs)):
                 paragraph = batch_paragraph.paragraphs[i]
                 tracker = batch_paragraph.trackers[i]
@@ -227,20 +233,31 @@ class ILTranslatorLLMOnly:
                 if text is None:
                     pbar.advance(1)
                     continue
+                llm_translate_tracker = tracker.new_llm_translate_tracker()
                 should_translate_paragraph.append(i)
-                inputs.append((text, translate_input, paragraph, tracker))
+                llm_translate_trackers.append(llm_translate_tracker)
+                inputs.append(
+                    (text, translate_input, paragraph, tracker, llm_translate_tracker)
+                )
             if not inputs:
                 return
             json_format_input = []
 
             for id_, input_text in enumerate(inputs):
-                json_format_input.append(
-                    {
-                        "id": id_,
-                        "input": input_text[0],
-                        "layout_label": input_text[2].layout_label,
-                    }
-                )
+                ti: il_translator.ILTranslator.TranslateInput = input_text[1]
+                placeholders_hint = ti.get_placeholders_hint()
+                obj = {
+                    "id": id_,
+                    "input": input_text[0],
+                    "layout_label": input_text[2].layout_label,
+                }
+                if (
+                    placeholders_hint
+                    and self.translation_config.add_formula_placehold_hint
+                ):
+                    obj["formula_placeholders_hint"] = placeholders_hint
+                json_format_input.append(obj)
+
             json_format_input = json.dumps(
                 json_format_input, ensure_ascii=False, indent=2
             )
@@ -280,7 +297,12 @@ class ILTranslatorLLMOnly:
     {
         "id": 1,
         "input": "Source",
-        "layout_label": "plain text"
+        "layout_label": "plain text",
+        // this is optional
+        "formula_placeholders_hint": {
+            "placeholder1": "hint1",
+            "placeholder2": "hint2"
+        }
     }
     ```
     Output:
@@ -299,10 +321,13 @@ class ILTranslatorLLMOnly:
             llm_input.append(
                 f'Please do not translate style tags like "{self.translate_engine.get_rich_text_left_placeholder(1)}xxx{self.translate_engine.get_rich_text_right_placeholder(2)}"!'
             )
-
             llm_input.append(
                 f'Please do not translate formula placeholders like "{self.translate_engine.get_formular_placeholder(3)}"!'
             )
+            if self.translation_config.add_formula_placehold_hint:
+                llm_input.append(
+                    "The system will automatically replace placeholders with corresponding formulas, please do not translate the placeholders!"
+                )
             llm_input.append(
                 f"""Here is the input:
     
@@ -311,10 +336,14 @@ class ILTranslatorLLMOnly:
     ```"""
             )
             final_input = "\n".join(llm_input).strip()
+            for llm_translate_tracker in llm_translate_trackers:
+                llm_translate_tracker.set_input(final_input)
             llm_output = self.translate_engine.llm_translate(
                 final_input,
                 rate_limit_params={"paragraph_token_count": paragraph_token_count},
             )
+            for llm_translate_tracker in llm_translate_trackers:
+                llm_translate_tracker.set_output(llm_output)
             llm_output = llm_output.strip()
 
             llm_output = self._clean_json_output(llm_output)
@@ -347,6 +376,7 @@ class ILTranslatorLLMOnly:
 
                     # Get the original input for this translation
                     translate_input = inputs[id_][1]
+                    llm_translate_tracker = inputs[id_][4]
 
                     input_unicode = inputs[id_][2].unicode
                     output_unicode = translated_text
@@ -355,6 +385,9 @@ class ILTranslatorLLMOnly:
                     output_token_count = self.calc_token_count(output_unicode)
 
                     if not (0.3 < output_token_count / input_token_count < 3):
+                        llm_translate_tracker.set_error_message(
+                            f"Translation result is too long or too short. Input: {input_token_count}, Output: {output_token_count}"
+                        )
                         logger.warning(
                             f"Translation result is too long or too short. Input: {input_token_count}, Output: {output_token_count}"
                         )
@@ -362,6 +395,9 @@ class ILTranslatorLLMOnly:
 
                     edit_distance = Levenshtein.distance(input_unicode, output_unicode)
                     if edit_distance < 5 and input_token_count > 20:
+                        llm_translate_tracker.set_error_message(
+                            f"Translation result edit distance is too small. distance: {edit_distance}, input: {input_unicode}, output: {output_unicode}"
+                        )
                         logger.warning(
                             f"Translation result edit distance is too small. distance: {edit_distance}, input: {input_unicode}, output: {output_unicode}"
                         )
@@ -377,11 +413,15 @@ class ILTranslatorLLMOnly:
                     if pbar:
                         pbar.advance(1)
                 except Exception as e:
-                    logger.exception(f"Error translating paragraph. Error: {e}.")
+                    error_message = f"Error translating paragraph. Error: {e}."
+                    logger.exception(error_message)
                     # Ignore error and continue
+                    for llm_translate_tracker in llm_translate_trackers:
+                        llm_translate_tracker.set_error_message(error_message)
                     continue
                 finally:
                     if should_fallback:
+                        inputs[id_][4].set_fallback_to_translate()
                         logger.warning(
                             f"Fallback to simple translation. paragraph id: {inputs[id_][2].debug_id}"
                         )
@@ -402,7 +442,10 @@ class ILTranslatorLLMOnly:
                         )
 
         except Exception as e:
-            logger.warning(f"Error {e} during translation. try fallback")
+            error_message = f"Error {e} during translation. try fallback"
+            logger.warning(error_message)
+            for llm_translate_tracker in llm_translate_trackers:
+                llm_translate_tracker.set_error_message(error_message)
             if not should_translate_paragraph:
                 should_translate_paragraph = list(
                     range(len(batch_paragraph.paragraphs))

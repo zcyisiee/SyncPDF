@@ -70,6 +70,7 @@ class TranslationConfig:
         skip_scanned_detection: bool = False,
         ocr_workaround: bool = False,
         custom_system_prompt: str | None = None,
+        add_formula_placehold_hint: bool = False,
     ):
         self.translator = translator
 
@@ -155,6 +156,7 @@ class TranslationConfig:
         self.table_model = table_model
         self.show_char_box = show_char_box
         self.custom_system_prompt = custom_system_prompt
+        self.add_formula_placehold_hint = add_formula_placehold_hint
 
     def parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
         """解析页码字符串，返回页码范围列表

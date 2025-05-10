@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import copy
 import json
 import logging
 import re
@@ -78,6 +81,10 @@ class DocumentTranslateTracker:
                 i_str = getattr(para, "input", None)
                 o_str = getattr(para, "output", None)
                 pdf_unicode = getattr(para, "pdf_unicode", None)
+                llm_translate_trackers = getattr(para, "llm_translate_trackers", None)
+                llm_translate_trackers_json = []
+                for tracker in llm_translate_trackers:
+                    llm_translate_trackers_json.append(tracker.to_dict())
                 if pdf_unicode is None or i_str is None:
                     continue
                 paragraphs.append(
@@ -85,6 +92,7 @@ class DocumentTranslateTracker:
                         "input": i_str,
                         "output": o_str,
                         "pdf_unicode": pdf_unicode,
+                        "llm_translate_trackers": llm_translate_trackers_json,
                     },
                 )
             pages.append({"paragraph": paragraphs})
@@ -103,7 +111,7 @@ class PageTranslateTracker:
 
 class ParagraphTranslateTracker:
     def __init__(self):
-        pass
+        self.llm_translate_trackers = []
 
     def set_pdf_unicode(self, unicode: str):
         self.pdf_unicode = unicode
@@ -113,6 +121,52 @@ class ParagraphTranslateTracker:
 
     def set_output(self, output: str):
         self.output = output
+
+    def new_llm_translate_tracker(self) -> LLMTranslateTracker:
+        tracker = LLMTranslateTracker()
+        self.llm_translate_trackers.append(tracker)
+        return tracker
+
+    def last_llm_translate_tracker(self) -> LLMTranslateTracker | None:
+        if self.llm_translate_trackers:
+            return self.llm_translate_trackers[-1]
+        return None
+
+
+class LLMTranslateTracker:
+    def __init__(self):
+        self.input = ""
+        self.output = ""
+        self.has_error = False
+        self.error_message = ""
+        self.placeholder_full_match = False
+        self.fallback_to_translate = False
+
+    def set_input(self, input_text: str):
+        self.input = input_text
+
+    def set_output(self, output_text: str):
+        self.output = output_text
+
+    def set_error_message(self, error_message: str):
+        self.has_error = True
+        self.error_message = error_message
+
+    def set_placeholder_full_match(self):
+        self.placeholder_full_match = True
+
+    def set_fallback_to_translate(self):
+        self.fallback_to_translate = True
+
+    def to_dict(self):
+        return {
+            "input": self.input,
+            "output": self.output,
+            "has_error": self.has_error,
+            "error_message": self.error_message,
+            "placeholder_full_match": self.placeholder_full_match,
+            "fallback_to_translate": self.fallback_to_translate,
+        }
 
 
 class ILTranslator:
@@ -156,9 +210,11 @@ class ILTranslator:
             # Try to find the first title paragraph
             title_paragraph = self.find_title_paragraph(docs)
             self.translation_config.shared_context_cross_split_part.first_paragraph = (
+                copy.deepcopy(title_paragraph)
+            )
+            self.translation_config.shared_context_cross_split_part.recent_title_paragraph = copy.deepcopy(
                 title_paragraph
             )
-            self.translation_config.shared_context_cross_split_part.recent_title_paragraph = title_paragraph
             if title_paragraph:
                 logger.info(f"Found first title paragraph: {title_paragraph.unicode}")
 
@@ -220,7 +276,9 @@ class ILTranslator:
             # self.translate_paragraph(paragraph, pbar,tracker.new_paragraph(), page_font_map, page_xobj_font_map)
             paragraph_token_count = self.calc_token_count(paragraph.unicode)
             if paragraph.layout_label == "title":
-                self.shared_context_cross_split_part.recent_title_paragraph = paragraph
+                self.shared_context_cross_split_part.recent_title_paragraph = (
+                    copy.deepcopy(paragraph)
+                )
             executor.submit(
                 self.translate_paragraph,
                 paragraph,
@@ -244,6 +302,24 @@ class ILTranslator:
             self.unicode = unicode
             self.placeholders = placeholders
             self.base_style = base_style
+
+        def get_placeholders_hint(self) -> dict[str, str] | None:
+            hint = {}
+            for placeholder in self.placeholders:
+                if isinstance(placeholder, FormulaPlaceholder):
+                    cid_count = 0
+                    for char in placeholder.formula.pdf_character:
+                        if re.match(r"^\(cid:\d+\)$", char.char_unicode):
+                            cid_count += 1
+                    if cid_count > len(placeholder.formula.pdf_character) * 0.8:
+                        continue
+
+                    hint[placeholder.placeholder] = get_char_unicode_string(
+                        placeholder.formula.pdf_character
+                    )
+            if hint:
+                return hint
+            return None
 
     def create_formula_placeholder(
         self,
@@ -452,9 +528,8 @@ class ILTranslator:
         self,
         input_text: TranslateInput,
         output: str,
+        llm_translate_tracker: LLMTranslateTracker | None = None,
     ) -> [PdfParagraphComposition]:
-        import re
-
         result = []
 
         # 如果没有占位符，直接返回整个文本
@@ -463,6 +538,8 @@ class ILTranslator:
             comp.pdf_same_style_unicode_characters = PdfSameStyleUnicodeCharacters()
             comp.pdf_same_style_unicode_characters.unicode = output
             comp.pdf_same_style_unicode_characters.pdf_style = input_text.base_style
+            if llm_translate_tracker:
+                llm_translate_tracker.set_placeholder_full_match()
             return [comp]
 
         # 构建正则表达式模式
@@ -484,7 +561,14 @@ class ILTranslator:
                 placeholder_patterns.append(f"({left})")
                 placeholder_patterns.append(f"({right})")
                 placeholder_map[placeholder.left_placeholder] = placeholder
-
+        all_match = True
+        for pattern in patterns:
+            if not re.search(pattern, output, flags=re.IGNORECASE):
+                all_match = False
+                break
+        if all_match:
+            if llm_translate_tracker:
+                llm_translate_tracker.set_placeholder_full_match()
         # 合并所有模式
         combined_pattern = "|".join(patterns)
         combined_placeholder_pattern = "|".join(placeholder_patterns)
@@ -626,10 +710,12 @@ class ILTranslator:
         """Post-translation processing: update paragraph with translated text."""
         tracker.set_output(translated_text)
         if translated_text == translate_input.unicode:
+            if llm_translate_tracker := tracker.last_llm_translate_tracker():
+                llm_translate_tracker.set_placeholder_full_match()
             return False
         paragraph.unicode = translated_text
         paragraph.pdf_paragraph_composition = self.parse_translate_output(
-            translate_input, translated_text
+            translate_input, translated_text, tracker.last_llm_translate_tracker()
         )
         for composition in paragraph.pdf_paragraph_composition:
             if (
@@ -646,6 +732,7 @@ class ILTranslator:
         text: str,
         title_paragraph: PdfParagraph | None = None,
         local_title_paragraph: PdfParagraph | None = None,
+        translate_input: TranslateInput | None = None,
     ):
         if self.translation_config.custom_system_prompt:
             llm_input = [self.translation_config.custom_system_prompt]
@@ -673,6 +760,15 @@ class ILTranslator:
         llm_input.append(
             f'Please do not translate formula placeholders like "{self.translate_engine.get_formular_placeholder(3)}"!'
         )
+        if self.translation_config.add_formula_placehold_hint:
+            placeholders_hint = translate_input.get_placeholders_hint()
+            if placeholders_hint:
+                llm_input.append(
+                    f"This is the formula placeholder hint: \n{placeholders_hint}"
+                )
+                llm_input.append(
+                    "The system will automatically replace placeholders with corresponding formulas, please do not translate the placeholders!"
+                )
         prompt_template = f"""
 ;; Treat next line as plain text input and translate it into {self.translation_config.lang_out}, output translation ONLY. If translation is unnecessary (e.g. proper nouns, codes, {"{{1}}, etc. "}), return the original text. NO explanations. NO notes. Input:\n\n{text}
 
@@ -704,18 +800,20 @@ class ILTranslator:
                 )
                 if text is None:
                     return
-
+                llm_translate_tracker = tracker.new_llm_translate_tracker()
                 # Perform translation
                 if self.support_llm_translate:
                     llm_prompt = self.generate_prompt_for_llm(
-                        text, title_paragraph, local_title_paragraph
+                        text, title_paragraph, local_title_paragraph, translate_input
                     )
+                    llm_translate_tracker.set_input(llm_prompt)
                     translated_text = self.translate_engine.llm_translate(
                         llm_prompt,
                         rate_limit_params={
                             "paragraph_token_count": paragraph_token_count
                         },
                     )
+                    llm_translate_tracker.set_output(translated_text)
                 else:
                     translated_text = self.translate_engine.translate(
                         text,

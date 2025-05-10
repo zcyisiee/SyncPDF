@@ -651,8 +651,8 @@ def _do_translate_single(
 
     mediabox_data = fix_media_box(doc_pdf2zh)
 
-    for page in doc_pdf2zh:
-        page.insert_font(resfont, None)
+    # for page in doc_pdf2zh:
+    #     page.insert_font(resfont, None)
 
     resfont = None
     doc_pdf2zh.save(temp_pdf_path)
