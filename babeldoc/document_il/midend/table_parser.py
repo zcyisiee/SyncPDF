@@ -83,7 +83,7 @@ class TableParser:
             # Note: PDF coordinates are from bottom-left,
             # so we use y2 for top position
             style = il_version_1.PdfStyle(
-                font_id="china-ss",
+                font_id="base",
                 font_size=4,
                 graphic_state=color,
             )

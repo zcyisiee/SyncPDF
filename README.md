@@ -167,6 +167,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 - `--min-text-length`: Minimum text length to translate (default: 5)
 - `--openai`: Use OpenAI for translation (default: False)
 - `--custom-system-prompt`: Custom system prompt for translation.
+- `--add-formula-placehold-hint`: Add formula placeholder hint for translation. (Currently not recommended, it may affect translation quality, default: False)
 
 > [!TIP]
 >
