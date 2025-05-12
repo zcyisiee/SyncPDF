@@ -39,6 +39,14 @@ PDF scientific paper translation and bilingual comparison library.
 - Provides a [Python API](#python-api).
 - Mainly designed to be embedded into other programs, but can also be used directly for simple translation tasks.
 
+> [!TIP]
+>
+> How to use BabelDOC in Zotero
+>
+> 1. Immersive Translate Pro members can use the [immersive-translate/zotero-immersivetranslate](https://github.com/immersive-translate/zotero-immersivetranslate) plugin
+>
+> 2. PDFMathTranslate self-deployed users can use the [guaguastandup/zotero-pdf2zh](https://github.com/guaguastandup/zotero-pdf2zh) plugin
+
 [Supported Language](https://funstory-ai.github.io/BabelDOC/supported_languages/)
 
 ## Preview
