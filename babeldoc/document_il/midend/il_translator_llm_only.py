@@ -224,6 +224,7 @@ class ILTranslatorLLMOnly:
         try:
             inputs = []
             llm_translate_trackers = []
+            paragraph_unicodes = []
             for i in range(len(batch_paragraph.paragraphs)):
                 paragraph = batch_paragraph.paragraphs[i]
                 tracker = batch_paragraph.trackers[i]
@@ -237,8 +238,16 @@ class ILTranslatorLLMOnly:
                 should_translate_paragraph.append(i)
                 llm_translate_trackers.append(llm_translate_tracker)
                 inputs.append(
-                    (text, translate_input, paragraph, tracker, llm_translate_tracker)
+                    (
+                        text,
+                        translate_input,
+                        paragraph,
+                        tracker,
+                        llm_translate_tracker,
+                        paragraph_unicodes,
+                    )
                 )
+                paragraph_unicodes.append(paragraph.unicode)
             if not inputs:
                 return
             json_format_input = []
@@ -454,6 +463,8 @@ class ILTranslatorLLMOnly:
                         paragraph_token_count = self.calc_token_count(
                             inputs[id_][2].unicode
                         )
+                        paragraph_unicodes = inputs[id_][5]
+                        inputs[id_][2].unicode = paragraph_unicodes[id_]
                         executor.submit(
                             self.il_translator.translate_paragraph,
                             inputs[id_][2],
@@ -473,6 +484,8 @@ class ILTranslatorLLMOnly:
             for llm_translate_tracker in llm_translate_trackers:
                 llm_translate_tracker.set_error_message(error_message)
                 llm_translate_tracker.set_fallback_to_translate()
+            for input_ in inputs:
+                input_[2].unicode = input_[5]
             if not should_translate_paragraph:
                 should_translate_paragraph = list(
                     range(len(batch_paragraph.paragraphs))
