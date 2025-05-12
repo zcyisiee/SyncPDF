@@ -177,7 +177,7 @@ class ILTranslatorLLMOnly:
                     copy.deepcopy(paragraph)
                 )
 
-            if total_token_count > 200 or len(paragraphs) > 10:
+            if total_token_count > 200 or len(paragraphs) > 5:
                 executor.submit(
                     self.translate_paragraph,
                     BatchParagraph(paragraphs, tracker),
