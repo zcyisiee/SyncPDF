@@ -39,18 +39,29 @@ class RichTextPlaceholder:
         composition: PdfSameStyleCharacters,
         left_placeholder: str,
         right_placeholder: str,
+        left_regex_pattern: str = None,
+        right_regex_pattern: str = None,
     ):
         self.id = placeholder_id
         self.composition = composition
         self.left_placeholder = left_placeholder
         self.right_placeholder = right_placeholder
+        self.left_regex_pattern = left_regex_pattern
+        self.right_regex_pattern = right_regex_pattern
 
 
 class FormulaPlaceholder:
-    def __init__(self, placeholder_id: int, formula: PdfFormula, placeholder: str):
+    def __init__(
+        self,
+        placeholder_id: int,
+        formula: PdfFormula,
+        placeholder: str,
+        regex_pattern: str,
+    ):
         self.id = placeholder_id
         self.formula = formula
         self.placeholder = placeholder
+        self.regex_pattern = regex_pattern
 
 
 class PbarContext:
@@ -328,10 +339,14 @@ class ILTranslator:
         paragraph: PdfParagraph,
     ):
         placeholder = self.translate_engine.get_formular_placeholder(formula_id)
+        if isinstance(placeholder, tuple):
+            placeholder, regex_pattern = placeholder
+        else:
+            regex_pattern = re.escape(placeholder)
         if placeholder in paragraph.unicode:
             return self.create_formula_placeholder(formula, formula_id + 1, paragraph)
 
-        return FormulaPlaceholder(formula_id, formula, placeholder)
+        return FormulaPlaceholder(formula_id, formula, placeholder, regex_pattern)
 
     def create_rich_text_placeholder(
         self,
@@ -345,6 +360,14 @@ class ILTranslator:
         right_placeholder = self.translate_engine.get_rich_text_right_placeholder(
             composition_id,
         )
+        if isinstance(left_placeholder, tuple):
+            left_placeholder, left_placeholder_regex_pattern = left_placeholder
+        else:
+            left_placeholder_regex_pattern = re.escape(left_placeholder)
+        if isinstance(right_placeholder, tuple):
+            right_placeholder, right_placeholder_regex_pattern = right_placeholder
+        else:
+            right_placeholder_regex_pattern = re.escape(right_placeholder)
         if (
             left_placeholder in paragraph.unicode
             or right_placeholder in paragraph.unicode
@@ -360,6 +383,8 @@ class ILTranslator:
             composition,
             left_placeholder,
             right_placeholder,
+            left_placeholder_regex_pattern,
+            right_placeholder_regex_pattern,
         )
 
     def get_translate_input(
@@ -550,13 +575,14 @@ class ILTranslator:
         for placeholder in input_text.placeholders:
             if isinstance(placeholder, FormulaPlaceholder):
                 # 转义特殊字符
-                pattern = re.escape(placeholder.placeholder)
+                # pattern = re.escape(placeholder.placeholder)
+                pattern = placeholder.regex_pattern
                 patterns.append(f"({pattern})")
                 placeholder_patterns.append(f"({pattern})")
                 placeholder_map[placeholder.placeholder] = placeholder
             else:
-                left = re.escape(placeholder.left_placeholder)
-                right = re.escape(placeholder.right_placeholder)
+                left = placeholder.left_regex_pattern
+                right = placeholder.right_regex_pattern
                 patterns.append(f"({left}.*?{right})")
                 placeholder_patterns.append(f"({left})")
                 placeholder_patterns.append(f"({right})")
@@ -569,6 +595,8 @@ class ILTranslator:
         if all_match:
             if llm_translate_tracker:
                 llm_translate_tracker.set_placeholder_full_match()
+        else:
+            logger.debug(f"Failed to match all placeholder for {input_text.unicode}")
         # 合并所有模式
         combined_pattern = "|".join(patterns)
         combined_placeholder_pattern = "|".join(placeholder_patterns)
@@ -618,13 +646,12 @@ class ILTranslator:
                     p
                     for p in input_text.placeholders
                     if not isinstance(p, FormulaPlaceholder)
-                    and matched_text.startswith(p.left_placeholder)
+                    and re.match(f"^{p.left_regex_pattern}", matched_text)
                 )
-                text = matched_text[
-                    len(placeholder.left_placeholder) : -len(
-                        placeholder.right_placeholder,
-                    )
-                ]
+                text = re.match(
+                    f"^{placeholder.left_regex_pattern}(.+){placeholder.right_regex_pattern}$",
+                    matched_text,
+                ).group(1)
 
                 if isinstance(
                     placeholder.composition,
@@ -738,39 +765,69 @@ class ILTranslator:
             llm_input = [self.translation_config.custom_system_prompt]
         else:
             llm_input = [
-                "You are a professional, authentic machine translation engine."
+                f"You are a professional and reliable machine translation engine responsible for translating the input text into {self.translation_config.lang_out}."
             ]
+        llm_hint = []
 
         if title_paragraph:
-            llm_input.append(
+            llm_hint.append(
                 f"The first title in the full text: {title_paragraph.unicode}"
             )
         if (
             local_title_paragraph
             and local_title_paragraph.debug_id != title_paragraph.debug_id
         ):
-            llm_input.append(
+            llm_hint.append(
                 f"The most similar title in the full text: {local_title_paragraph.unicode}"
             )
-        # Create a structured prompt template for LLM translation
-        llm_input.append(
-            f'Please do not translate style tags like "{self.translate_engine.get_rich_text_left_placeholder(1)}xxx{self.translate_engine.get_rich_text_right_placeholder(2)}"!'
-        )
 
-        llm_input.append(
-            f'Please do not translate formula placeholders like "{self.translate_engine.get_formular_placeholder(3)}"!'
-        )
         if self.translation_config.add_formula_placehold_hint:
             placeholders_hint = translate_input.get_placeholders_hint()
             if placeholders_hint:
-                llm_input.append(
+                llm_hint.append(
                     f"This is the formula placeholder hint: \n{placeholders_hint}"
                 )
-                llm_input.append(
-                    "The system will automatically replace placeholders with corresponding formulas, please do not translate the placeholders!"
-                )
+
+        if llm_hint:
+            llm_input.append(
+                "When translating, please refer to the following information to improve translation quality:"
+            )
+            for i, line in enumerate(llm_hint):
+                llm_input.append(f"{i}. {line}")
+        llm_input.append("When translating, please follow the following rules:")
+
+        rich_text_left_placeholder = (
+            self.translate_engine.get_rich_text_left_placeholder(1)
+        )
+        if isinstance(rich_text_left_placeholder, tuple):
+            rich_text_left_placeholder = rich_text_left_placeholder[0]
+        rich_text_right_placeholder = (
+            self.translate_engine.get_rich_text_right_placeholder(2)
+        )
+        if isinstance(rich_text_right_placeholder, tuple):
+            rich_text_right_placeholder = rich_text_right_placeholder[0]
+
+        # Create a structured prompt template for LLM translation
+        llm_input.append(
+            f'1. Do not translate style tags, such as "{rich_text_left_placeholder}xxx{rich_text_right_placeholder}"!'
+        )
+
+        formula_placeholder = self.translate_engine.get_formular_placeholder(3)
+        if isinstance(formula_placeholder, tuple):
+            formula_placeholder = formula_placeholder[0]
+
+        llm_input.append(
+            f'2. Do not translate formula placeholders, such as "{formula_placeholder}". The system will automatically replace the placeholders with the corresponding formulas.'
+        )
+        llm_input.append(
+            "3. If there is no need to translate (such as proper nouns, codes, etc.), then return the original text."
+        )
+        llm_input.append(
+            "4. Only output the translation result without explanations and annotations."
+        )
+        llm_input.append(f"5. Translate text into {self.translation_config.lang_out}.")
         prompt_template = f"""
-;; Treat next line as plain text input and translate it into {self.translation_config.lang_out}, output translation ONLY. If translation is unnecessary (e.g. proper nouns, codes, {"{{1}}, etc. "}), return the original text. NO explanations. NO notes. Input:\n\n{text}
+Now, please carefully read the following text to be translated and directly output your translation.\n\n{text}
 
 """
         llm_input.append(prompt_template)
