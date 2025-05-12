@@ -177,7 +177,7 @@ class ILTranslatorLLMOnly:
                     copy.deepcopy(paragraph)
                 )
 
-            if total_token_count > 400 or len(paragraphs) > 5:
+            if total_token_count > 200 or len(paragraphs) > 10:
                 executor.submit(
                     self.translate_paragraph,
                     BatchParagraph(paragraphs, tracker),
@@ -265,24 +265,57 @@ class ILTranslatorLLMOnly:
                 llm_input = [self.translation_config.custom_system_prompt]
             else:
                 llm_input = [
-                    "You are a professional, authentic machine translation engine."
+                    f"You are a professional and reliable machine translation engine responsible for translating the input text into {self.translation_config.lang_out}."
                 ]
 
+            llm_hint = []
             if title_paragraph:
-                llm_input.append(
+                llm_hint.append(
                     f"The first title in the full text: {title_paragraph.unicode}"
                 )
             if (
                 local_title_paragraph
                 and local_title_paragraph.debug_id != title_paragraph.debug_id
             ):
-                llm_input.append(
+                llm_hint.append(
                     f"The most similar title in the full text: {local_title_paragraph.unicode}"
                 )
+
+            if llm_hint:
+                llm_input.append(
+                    "When translating, please refer to the following information to improve translation quality:"
+                )
+                for i, line in enumerate(llm_hint):
+                    llm_input.append(f"{i}. {line}")
+            llm_input.append("When translating, please follow the following rules:")
+            # Create a structured prompt template for LLM translation
+            rich_text_left_placeholder = (
+                self.translate_engine.get_rich_text_left_placeholder(1)
+            )
+            if isinstance(rich_text_left_placeholder, tuple):
+                rich_text_left_placeholder = rich_text_left_placeholder[0]
+            rich_text_right_placeholder = (
+                self.translate_engine.get_rich_text_right_placeholder(2)
+            )
+            if isinstance(rich_text_right_placeholder, tuple):
+                rich_text_right_placeholder = rich_text_right_placeholder[0]
+            llm_input.append(
+                f'1. Do not translate style tags, such as "{rich_text_left_placeholder}xxx{rich_text_right_placeholder}"!'
+            )
+
+            formula_placeholder = self.translate_engine.get_formular_placeholder(3)
+            if isinstance(formula_placeholder, tuple):
+                formula_placeholder = formula_placeholder[0]
+            llm_input.append(
+                f'2. Do not translate formula placeholders, such as "{formula_placeholder}". The system will automatically replace the placeholders with the corresponding formulas.'
+            )
+            llm_input.append(
+                "3. If there is no need to translate (such as proper nouns, codes, etc.), then return the original text."
+            )
             # Create a structured prompt template for LLM translation
             prompt_template = (
                 f"""
-    You will be given a JSON formatted input containing entries with "id" and "input" fields. 
+    4. You will be given a JSON formatted input containing entries with "id" and "input" fields. 
     
     For each entry in the JSON, translate the contents of the "input" field into {self.translation_config.lang_out}.
     Write the translation back into the "output" field for that entry.
@@ -319,16 +352,6 @@ class ILTranslatorLLMOnly:
             )
             llm_input.append(prompt_template)
             llm_input.append(
-                f'Please do not translate style tags like "{self.translate_engine.get_rich_text_left_placeholder(1)}xxx{self.translate_engine.get_rich_text_right_placeholder(2)}"!'
-            )
-            llm_input.append(
-                f'Please do not translate formula placeholders like "{self.translate_engine.get_formular_placeholder(3)}"!'
-            )
-            if self.translation_config.add_formula_placehold_hint:
-                llm_input.append(
-                    "The system will automatically replace placeholders with corresponding formulas, please do not translate the placeholders!"
-                )
-            llm_input.append(
                 f"""Here is the input:
     
     ```json
@@ -350,7 +373,10 @@ class ILTranslatorLLMOnly:
 
             parsed_output = json.loads(llm_output)
 
-            translation_results = {item["id"]: item["output"] for item in parsed_output}
+            translation_results = {
+                item["id"]: item.get("output", item.get("input"))
+                for item in parsed_output
+            }
 
             if len(translation_results) != len(inputs):
                 raise Exception(
@@ -446,6 +472,7 @@ class ILTranslatorLLMOnly:
             logger.warning(error_message)
             for llm_translate_tracker in llm_translate_trackers:
                 llm_translate_tracker.set_error_message(error_message)
+                llm_translate_tracker.set_fallback_to_translate()
             if not should_translate_paragraph:
                 should_translate_paragraph = list(
                     range(len(batch_paragraph.paragraphs))
