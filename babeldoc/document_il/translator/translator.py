@@ -255,6 +255,7 @@ class OpenAITranslator(BaseTranslator):
         response = self.client.chat.completions.create(
             model=self.model,
             **self.options,
+            max_tokens=2048,
             messages=[
                 {
                     "role": "user",

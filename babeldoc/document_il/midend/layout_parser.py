@@ -6,6 +6,7 @@ import numpy as np
 from pymupdf import Document
 
 from babeldoc.document_il import il_version_1
+from babeldoc.document_il.utils.mupdf_helper import get_no_rotation_img
 from babeldoc.document_il.utils.style_helper import GREEN
 from babeldoc.translation_config import TranslationConfig
 
@@ -124,7 +125,8 @@ class LayoutParser:
                     # Convert coordinate system from picture to il
                     # system to the il coordinate system
                     x0, y0, x1, y1 = layout.xyxy
-                    pix = mupdf_doc[page.page_number].get_pixmap()
+                    pix = get_no_rotation_img(mupdf_doc[page.page_number])
+                    # pix = mupdf_doc[page.page_number].get_pixmap()
                     h, w = pix.height, pix.width
                     x0, y0, x1, y1 = (
                         np.clip(int(x0 - 1), 0, w - 1),

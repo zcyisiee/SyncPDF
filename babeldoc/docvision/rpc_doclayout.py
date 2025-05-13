@@ -14,6 +14,7 @@ from tenacity import stop_after_attempt
 from tenacity import wait_exponential
 
 import babeldoc
+from babeldoc.document_il.utils.mupdf_helper import get_no_rotation_img
 from babeldoc.docvision.doclayout import DocLayoutModel
 from babeldoc.docvision.doclayout import YoloBox
 from babeldoc.docvision.doclayout import YoloResult
@@ -256,7 +257,8 @@ class RpcDocLayoutModel(DocLayoutModel):
     ):
         translate_config.raise_if_cancelled()
         with self.lock:
-            pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
+            # pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
+            pix = get_no_rotation_img(mupdf_doc[page.page_number])
         image = np.fromstring(pix.samples, np.uint8).reshape(
             pix.height,
             pix.width,
