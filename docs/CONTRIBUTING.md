@@ -28,6 +28,12 @@ Please pay special attention to:
 - This project is not intended for direct end-user use, and the supported translators are mainly for debugging purposes. Unless it clearly helps with development and debugging, PRs for directly adding translators will not be accepted.
 - You can directly use [PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate) to get support for more translators.
 
+### **If you want to add new accelerator support for the layout model**
+
+- This project only plans to support various accelerators through onnxruntime. Please submit your accelerator support directly to onnxruntime.
+
+- Additionally, [translation_config.py](https://github.com/funstory-ai/BabelDOC/blob/9e5be3a05c15ecae98024ba695e4a2db1412c062/babeldoc/translation_config.py#L41) shows that the layout model implementation actually used in this project is passed in from outside. You can implement a layout model class according to the relevant interface, and then pass it through this parameter at runtime.
+
 ### **If you wish to contribute to BabelDOC**
 
 > [!TIP]
@@ -40,7 +46,7 @@ Please pay special attention to:
 > 
 > Due to the current high rate of code changes, this project only accepts small PRs. If you would like to suggest a change and you include a patch as a proof-of-concept, that would be great. However, please do not be offended if we rewrite your patch from scratch.
 >
-> Please discuss with the maintainers in the [Issue](https://github.com/funstory-ai/BabelDOC/issues) before sending a PR.
+> **This project cannot accept all PRs. We recommend that you discuss with the maintainers via [Issue](https://github.com/funstory-ai/BabelDOC/issues) before submitting a PR.**
 
 [//]: # (> We welcome pull requests and will review your contributions.)
 

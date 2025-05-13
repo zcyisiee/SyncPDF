@@ -419,6 +419,14 @@ def fix_filter(doc):
             data = doc.xref_stream(page_piece)
             doc.update_stream(page_piece, data)
 
+    for page in doc:
+        contents = page.get_contents()
+        if len(contents) > 1:
+            page_streams = [doc.xref_stream(i) for i in contents]
+            head = contents[0]
+            doc.update_stream(head, b" ".join(page_streams))
+            doc.xref_set_key(page.xref, "Contents", f"{head} 0 R")
+
 
 def do_translate(
     pm: ProgressMonitor, translation_config: TranslationConfig

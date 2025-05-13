@@ -6,6 +6,7 @@ from collections.abc import Generator
 import cv2
 import numpy as np
 from babeldoc.assets.assets import get_table_detection_rapidocr_model_path
+from babeldoc.document_il.utils.mupdf_helper import get_no_rotation_img
 from babeldoc.docvision.doclayout import YoloBox
 from babeldoc.docvision.doclayout import YoloResult
 from rapidocr_onnxruntime import RapidOCR
@@ -236,7 +237,8 @@ class RapidOCRModel:
         for page in pages:
             translate_config.raise_if_cancelled()
             with self.lock:
-                pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
+                # pix = mupdf_doc[page.page_number].get_pixmap(dpi=72)
+                pix = get_no_rotation_img(mupdf_doc[page.page_number])
             image = np.fromstring(pix.samples, np.uint8).reshape(
                 pix.height,
                 pix.width,

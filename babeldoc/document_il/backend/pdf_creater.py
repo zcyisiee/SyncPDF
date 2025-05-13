@@ -386,20 +386,22 @@ class PDFCreater:
             # Get pages from both PDFs
             orig_page = original_pdf[page_id]
             trans_page = translated_pdf[page_id]
-
-            # Calculate total width and use max height
+            rotate_angle = orig_page.rotation
             total_width = orig_page.rect.width + trans_page.rect.width
             max_height = max(orig_page.rect.height, trans_page.rect.height)
-
-            # Create new page with combined width
-            dual_page = dual.new_page(width=total_width, height=max_height)
-
-            # Define rectangles for left and right sides
             left_width = (
                 orig_page.rect.width
                 if not translation_config.dual_translate_first
                 else trans_page.rect.width
             )
+
+            orig_page.set_rotation(0)
+            trans_page.set_rotation(0)
+
+            # Create new page with combined width
+            dual_page = dual.new_page(width=total_width, height=max_height)
+
+            # Define rectangles for left and right sides
             rect_left = pymupdf.Rect(0, 0, left_width, max_height)
             rect_right = pymupdf.Rect(left_width, 0, total_width, max_height)
 
@@ -414,6 +416,7 @@ class PDFCreater:
                     original_pdf,
                     page_id,
                     keep_proportion=True,
+                    rotate=-rotate_angle,
                 )
             except Exception as e:
                 logger.warning(
@@ -429,6 +432,7 @@ class PDFCreater:
                     translated_pdf,
                     page_id,
                     keep_proportion=True,
+                    rotate=-rotate_angle,
                 )
             except Exception as e:
                 logger.warning(
