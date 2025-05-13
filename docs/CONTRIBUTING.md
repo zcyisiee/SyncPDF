@@ -32,7 +32,7 @@ Please pay special attention to:
 
 - This project only plans to support various accelerators through onnxruntime. Please submit your accelerator support directly to onnxruntime.
 
-- Additionally, [translation_config.py](https://github.com/funstory-ai/BabelDOC/blob/9e5be3a05c15ecae98024ba695e4a2db1412c062/babeldoc/translation_config.py#L41) shows that the layout model implementation actually used in this project is passed in from outside. You can implement a translator class according to the relevant interface, and then pass it through this parameter at runtime.
+- Additionally, [translation_config.py](https://github.com/funstory-ai/BabelDOC/blob/9e5be3a05c15ecae98024ba695e4a2db1412c062/babeldoc/translation_config.py#L41) shows that the layout model implementation actually used in this project is passed in from outside. You can implement a layout model class according to the relevant interface, and then pass it through this parameter at runtime.
 
 ### **If you wish to contribute to BabelDOC**
 
