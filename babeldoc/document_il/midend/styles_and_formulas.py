@@ -607,6 +607,7 @@ class StylesAndFormulas:
             r"|.*Mincho.*"
             r"|.*Amerigo.*"
             r"|.*MSGloriolaIIStd.*"
+            r"|.*CMU.+"
             r")$"
         )
         precise_formula_font_pattern = (
