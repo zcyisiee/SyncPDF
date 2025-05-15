@@ -325,7 +325,7 @@ async def main():
         if not Path(file).exists():
             logger.error(f"文件不存在：{file}")
             exit(1)
-        if not file.endswith(".pdf"):
+        if not file.lower().endswith(".pdf"):
             logger.error(f"文件不是 PDF 文件：{file}")
             exit(1)
         pending_files.append(file)
