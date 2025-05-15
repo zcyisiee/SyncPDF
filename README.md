@@ -156,6 +156,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 - `--translate-table-text`: Translate table text (experimental, default: False)
 - `--skip-scanned-detection`: Skip scanned document detection (default: False). When using split translation, only the first part performs detection if not skipped.
 - `--ocr-workaround`: Use OCR workaround (default: False). When enabled, the tool will use OCR to detect text and fill background for scanned PDF.
+- `--working-dir`: Working directory for translation. If not set, use temp directory.
 
 > [!TIP]
 > - Both `--skip-clean` and `--dual-translate-first` may help improve compatibility with some PDF readers
