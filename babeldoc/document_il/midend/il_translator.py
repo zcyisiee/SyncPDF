@@ -649,7 +649,7 @@ class ILTranslator:
                     and re.match(f"^{p.left_regex_pattern}", matched_text)
                 )
                 text = re.match(
-                    f"^{placeholder.left_regex_pattern}(.+){placeholder.right_regex_pattern}$",
+                    f"^{placeholder.left_regex_pattern}(.*){placeholder.right_regex_pattern}$",
                     matched_text,
                 ).group(1)
 

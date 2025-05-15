@@ -130,6 +130,10 @@ class TranslationConfig:
             else:
                 working_dir = tempfile.mkdtemp()
                 self._is_temp_dir = True
+        else:
+            working_dir = Path(working_dir) / Path(input_file).stem
+            self._is_temp_dir = False
+
         self.working_dir = working_dir
 
         Path(working_dir).mkdir(parents=True, exist_ok=True)
