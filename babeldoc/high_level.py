@@ -423,9 +423,10 @@ def fix_filter(doc):
         contents = page.get_contents()
         if len(contents) > 1:
             page_streams = [doc.xref_stream(i) for i in contents]
-            head = contents[0]
-            doc.update_stream(head, b" ".join(page_streams))
-            doc.xref_set_key(page.xref, "Contents", f"{head} 0 R")
+            r = doc.get_new_xref()
+            doc.update_object(r, "<<>>")
+            doc.update_stream(r, b" ".join(page_streams))
+            doc.xref_set_key(page.xref, "Contents", f"{r} 0 R")
 
 
 def do_translate(
