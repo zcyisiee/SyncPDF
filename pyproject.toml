@@ -1,10 +1,10 @@
 [project]
 name = "BabelDOC"
-version = "0.3.49"
+version = "0.3.50"
 description = "Yet Another Document Translator"
 license = "AGPL-3.0"
 readme = "README.md"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.10,<3.14"
 authors = [
     { name = "awwaawwa", email = "aw@funstory.ai" }
 ]
@@ -22,7 +22,7 @@ dependencies = [
     "httpx[socks]>=0.27.0",
     "huggingface-hub>=0.27.0",
     "numpy>=2.0.2",
-    "onnx>=1.17.0",
+    "onnx>=1.18.0",
     "onnxruntime>=1.16.1",
     "openai>=1.59.3",
     "orjson>=3.10.14",
@@ -150,7 +150,7 @@ pythonpath = [".", "src"]
 testpaths = ["tests"]
 
 [bumpver]
-current_version = "0.3.49"
+current_version = "0.3.50"
 version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
 
 [bumpver.file_patterns]
