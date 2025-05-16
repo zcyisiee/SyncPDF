@@ -644,8 +644,11 @@ def _do_translate_single(
             "input.decompressed.pdf",
         )
         # Fix null xref in PDF file
-        fix_filter(doc_input)
-        fix_null_xref(doc_input)
+        try:
+            fix_filter(doc_input)
+            fix_null_xref(doc_input)
+        except Exception:
+            logger.exception("auto fix failed, please check the pdf file")
         doc_input.save(output_path, expand=True, pretty=True)
         del doc_input
 
@@ -655,8 +658,11 @@ def _do_translate_single(
     resfont = "china-ss"
 
     # Fix null xref in PDF file
-    fix_filter(doc_pdf2zh)
-    fix_null_xref(doc_pdf2zh)
+    try:
+        fix_filter(doc_pdf2zh)
+        fix_null_xref(doc_pdf2zh)
+    except Exception:
+        logger.exception("auto fix failed, please check the pdf file")
 
     mediabox_data = fix_media_box(doc_pdf2zh)
 

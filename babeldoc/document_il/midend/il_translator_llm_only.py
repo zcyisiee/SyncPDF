@@ -267,37 +267,25 @@ class ILTranslatorLLMOnly:
                     obj["formula_placeholders_hint"] = placeholders_hint
                 json_format_input.append(obj)
 
-            json_format_input = json.dumps(
+            json_format_input_str = json.dumps(
                 json_format_input, ensure_ascii=False, indent=2
             )
+
+            # Start building the new prompt
+            llm_prompt_parts = []
+
+            # 1. #role
+            llm_prompt_parts.append("#role")
             if self.translation_config.custom_system_prompt:
-                llm_input = [self.translation_config.custom_system_prompt]
+                llm_prompt_parts.append(self.translation_config.custom_system_prompt)
             else:
-                llm_input = [
+                llm_prompt_parts.append(
                     f"You are a professional and reliable machine translation engine responsible for translating the input text into {self.translation_config.lang_out}."
-                ]
-
-            llm_hint = []
-            if title_paragraph:
-                llm_hint.append(
-                    f"The first title in the full text: {title_paragraph.unicode}"
-                )
-            if (
-                local_title_paragraph
-                and local_title_paragraph.debug_id != title_paragraph.debug_id
-            ):
-                llm_hint.append(
-                    f"The most similar title in the full text: {local_title_paragraph.unicode}"
                 )
 
-            if llm_hint:
-                llm_input.append(
-                    "When translating, please refer to the following information to improve translation quality:"
-                )
-                for i, line in enumerate(llm_hint):
-                    llm_input.append(f"{i}. {line}")
-            llm_input.append("When translating, please follow the following rules:")
-            # Create a structured prompt template for LLM translation
+            # 2. ##rules
+            llm_prompt_parts.append("\n##rules")
+            # Dynamically get placeholder examples
             rich_text_left_placeholder = (
                 self.translate_engine.get_rich_text_left_placeholder(1)
             )
@@ -308,66 +296,102 @@ class ILTranslatorLLMOnly:
             )
             if isinstance(rich_text_right_placeholder, tuple):
                 rich_text_right_placeholder = rich_text_right_placeholder[0]
-            llm_input.append(
-                f'1. Do not translate style tags, such as "{rich_text_left_placeholder}xxx{rich_text_right_placeholder}"!'
-            )
-
             formula_placeholder = self.translate_engine.get_formular_placeholder(3)
             if isinstance(formula_placeholder, tuple):
                 formula_placeholder = formula_placeholder[0]
-            llm_input.append(
+
+            llm_prompt_parts.append(
+                f'1. Do not translate style tags, such as "{rich_text_left_placeholder}xxx{rich_text_right_placeholder}"'
+            )
+            llm_prompt_parts.append(
                 f'2. Do not translate formula placeholders, such as "{formula_placeholder}". The system will automatically replace the placeholders with the corresponding formulas.'
             )
-            llm_input.append(
+            llm_prompt_parts.append(
                 "3. If there is no need to translate (such as proper nouns, codes, etc.), then return the original text."
             )
-            # Create a structured prompt template for LLM translation
-            prompt_template = (
-                f"""
-    4. You will be given a JSON formatted input containing entries with "id" and "input" fields. 
-    
-    For each entry in the JSON, translate the contents of the "input" field into {self.translation_config.lang_out}.
-    Write the translation back into the "output" field for that entry.
-    
-    """
-                + """
-    Here is an example of the expected format:
-    
-    <example>
-    ```json
-    Input:
-    {
-        "id": 1,
-        "input": "Source",
-        "layout_label": "plain text",
-        // this is optional
-        "formula_placeholders_hint": {
-            "placeholder1": "hint1",
-            "placeholder2": "hint2"
-        }
-    }
-    ```
-    Output:
-    ```json
-    {
-        "id": 1,
-        "output": "Translation"
-    }
-    ```
-    </example>
-    
-    Please return the translated json directly without wrapping ```json``` tag or include any additional information.
-    """
+
+            # 3. ##Input
+            llm_prompt_parts.append("\n##Input")
+            llm_prompt_parts.append(
+                'You will be given a JSON formatted input containing entries with "id" and "input" fields.'
             )
-            llm_input.append(prompt_template)
-            llm_input.append(
-                f"""Here is the input:
-    
-    ```json
-    {json_format_input}
-    ```"""
+
+            # 4. ##Output
+            llm_prompt_parts.append("\n##Output")
+            llm_prompt_parts.append(
+                f'For each entry in the JSON, translate the contents of the "input" field into {self.translation_config.lang_out}.'
             )
-            final_input = "\n".join(llm_input).strip()
+            llm_prompt_parts.append(
+                'Write the translation back into the "output" field for that entry.'
+            )
+            llm_prompt_parts.append(
+                "Please return the translated json directly without wrapping ```json``` tag or include any additional information."
+            )
+
+            # 5. ##example
+            llm_prompt_parts.append("\n##example")
+            llm_prompt_parts.append("Here is an example of the expected format:")
+            llm_prompt_parts.append("")  # Blank line
+            llm_prompt_parts.append("<example>")
+            llm_prompt_parts.append("```json")
+            llm_prompt_parts.append("Input:")
+            llm_prompt_parts.append("{")
+            llm_prompt_parts.append('    "id": 1,')
+            llm_prompt_parts.append('    "input": "Source",')
+            llm_prompt_parts.append('    "layout_label": "plain text",')
+            llm_prompt_parts.append("    // this is optional")
+            llm_prompt_parts.append('    "formula_placeholders_hint": {')
+            llm_prompt_parts.append('        "placeholder1": "hint1",')
+            llm_prompt_parts.append('        "placeholder2": "hint2"')
+            llm_prompt_parts.append("    }")
+            llm_prompt_parts.append("}")
+            llm_prompt_parts.append("```")
+            llm_prompt_parts.append("Output:")
+            llm_prompt_parts.append("```json")
+            llm_prompt_parts.append("{")
+            llm_prompt_parts.append('    "id": 1,')
+            llm_prompt_parts.append('    "output": "Translation"')
+            llm_prompt_parts.append("}")
+            llm_prompt_parts.append("```")
+            llm_prompt_parts.append("</example>")
+
+            # 6. ##Others (contextual hints)
+            other_hints = []
+            hint_idx = 0
+            if title_paragraph:
+                other_hints.append(
+                    f"{hint_idx}. The first title in the full text: {title_paragraph.unicode}"
+                )
+                hint_idx += 1
+
+            if local_title_paragraph:
+                # Check if it's different from the global title_paragraph before adding
+                is_different_from_global = True
+                if title_paragraph:
+                    if local_title_paragraph.debug_id == title_paragraph.debug_id:
+                        is_different_from_global = False
+
+                if is_different_from_global:
+                    other_hints.append(
+                        f"{hint_idx}. The most similar title in the full text: {local_title_paragraph.unicode}"
+                    )
+                    hint_idx += 1
+
+            if other_hints:
+                llm_prompt_parts.append("\n##Others")
+                llm_prompt_parts.append(
+                    "When translating, please refer to the following information to improve translation quality:"
+                )
+                llm_prompt_parts.extend(other_hints)
+
+            llm_prompt_parts.append("\n## Actual Input")
+
+            # Combine all parts for the main prompt
+            main_prompt_content = "\n".join(llm_prompt_parts)
+
+            # Append the actual JSON input string at the end, without markdown fence
+            final_input = main_prompt_content + "\n\n" + json_format_input_str
+
             for llm_translate_tracker in llm_translate_trackers:
                 llm_translate_tracker.set_input(final_input)
             llm_output = self.translate_engine.llm_translate(
