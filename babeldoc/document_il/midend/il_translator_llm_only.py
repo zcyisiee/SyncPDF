@@ -382,6 +382,11 @@ class ILTranslatorLLMOnly:
 
             parsed_output = json.loads(llm_output)
 
+            if isinstance(parsed_output, dict) and parsed_output.get(
+                "output", parsed_output.get("input", False)
+            ):
+                parsed_output = [parsed_output]
+
             translation_results = {
                 item["id"]: item.get("output", item.get("input"))
                 for item in parsed_output
