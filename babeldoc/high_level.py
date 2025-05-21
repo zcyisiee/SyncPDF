@@ -405,6 +405,9 @@ def fix_null_xref(doc: Document) -> None:
             elif obj and "/ASCII85Decode" in obj:  # make pdfminer happy
                 data = doc.xref_stream(i)
                 doc.update_stream(i, data)
+            elif obj and "/LZWDecode" in obj:
+                data = doc.xref_stream(i)
+                doc.update_stream(i, data)
         except Exception:
             doc.update_object(i, "[]")
 
