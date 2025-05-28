@@ -21,6 +21,7 @@ from babeldoc.document_il import PdfStyle
 from babeldoc.document_il.translator.translator import BaseTranslator
 from babeldoc.document_il.utils.fontmap import FontMapper
 from babeldoc.document_il.utils.layout_helper import get_char_unicode_string
+from babeldoc.document_il.utils.layout_helper import get_paragraph_unicode
 from babeldoc.document_il.utils.layout_helper import is_same_style
 from babeldoc.document_il.utils.layout_helper import is_same_style_except_font
 from babeldoc.document_il.utils.layout_helper import is_same_style_except_size
@@ -207,6 +208,8 @@ class ILTranslator:
                 self.support_llm_translate = True
         except NotImplementedError:
             self.support_llm_translate = False
+
+        self.use_as_fallback = False
 
     def calc_token_count(self, text: str) -> int:
         try:
@@ -851,6 +854,9 @@ Now, please carefully read the following text to be translated and directly outp
         self.translation_config.raise_if_cancelled()
         with PbarContext(pbar):
             try:
+                if self.use_as_fallback:
+                    # il translator llm only modifies unicode in some situations
+                    paragraph.unicode = get_paragraph_unicode(paragraph)
                 # Pre-translation processing
                 text, translate_input = self.pre_translate_paragraph(
                     paragraph, tracker, page_font_map, xobj_font_map
