@@ -78,10 +78,10 @@ babeldoc --help
 3. Use the `babeldoc` command. For example:
 
 ```bash
-babeldoc --bing  --files example.pdf
+babeldoc --openai --openai-model "gpt-4o-mini" --openai-base-url "https://api.openai.com/v1" --openai-api-key "your-api-key-here"  --files example.pdf
 
 # multiple files
-babeldoc --bing  --files example1.pdf --files example2.pdf
+babeldoc --openai --openai-model "gpt-4o-mini" --openai-base-url "https://api.openai.com/v1" --openai-api-key "your-api-key-here"  --files example1.pdf --files example2.pdf
 ```
 
 ### Install from Source
