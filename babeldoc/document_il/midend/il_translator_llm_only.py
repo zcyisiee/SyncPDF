@@ -61,7 +61,7 @@ class ILTranslatorLLMOnly:
             translation_config=translation_config,
             tokenizer=self.tokenizer,
         )
-
+        self.il_translator.use_as_fallback = True
         try:
             self.translate_engine.do_llm_translate(None)
         except NotImplementedError as e:
@@ -122,10 +122,10 @@ class ILTranslatorLLMOnly:
             total,
         ) as pbar:
             with PriorityThreadPoolExecutor(
-                max_workers=self.translation_config.qps,
+                max_workers=self.translation_config.qps * 5,
             ) as executor2:
                 with PriorityThreadPoolExecutor(
-                    max_workers=self.translation_config.qps,
+                    max_workers=self.translation_config.qps * 5,
                 ) as executor:
                     for page in docs.page:
                         self.process_page(
@@ -281,55 +281,72 @@ class ILTranslatorLLMOnly:
             else:
                 llm_prompt_parts.append(
                     f"You are a professional and reliable machine translation engine responsible for translating the input text into {self.translation_config.lang_out}."
+                    "When translating, strictly follow the instructions below to ensure translation quality and preserve all formatting, tags, and placeholders:\n"
                 )
 
-            # 2. ##rules
-            llm_prompt_parts.append("\n##rules")
-            # Dynamically get placeholder examples
-            rich_text_left_placeholder = (
-                self.translate_engine.get_rich_text_left_placeholder(1)
-            )
-            if isinstance(rich_text_left_placeholder, tuple):
-                rich_text_left_placeholder = rich_text_left_placeholder[0]
-            rich_text_right_placeholder = (
-                self.translate_engine.get_rich_text_right_placeholder(2)
-            )
-            if isinstance(rich_text_right_placeholder, tuple):
-                rich_text_right_placeholder = rich_text_right_placeholder[0]
-            formula_placeholder = self.translate_engine.get_formular_placeholder(3)
-            if isinstance(formula_placeholder, tuple):
-                formula_placeholder = formula_placeholder[0]
+            # 2. ##Contextual Hints for Better Translation
+            other_hints = []
+            hint_idx = 1  # Start with 1 for 1-based indexing
+            if title_paragraph:
+                other_hints.append(
+                    f"{hint_idx}. First title in full text: {title_paragraph.unicode}"
+                )
+                hint_idx += 1
 
+            if local_title_paragraph:
+                is_different_from_global = True
+                if title_paragraph:
+                    if local_title_paragraph.debug_id == title_paragraph.debug_id:
+                        is_different_from_global = False
+
+                if is_different_from_global:
+                    other_hints.append(
+                        f"{hint_idx}. Most similar section title: {local_title_paragraph.unicode}"
+                    )
+                    # hint_idx += 1 # No increment needed if it's the last possible hint of this type
+
+            if other_hints:
+                llm_prompt_parts.append("\n## Contextual Hints for Better Translation")
+                llm_prompt_parts.extend(other_hints)
+
+            # 3. ## Strict Rules:
+            llm_prompt_parts.append("\n## Strict Rules:")
             llm_prompt_parts.append(
-                f'1. Do not translate style tags, such as "{rich_text_left_placeholder}xxx{rich_text_right_placeholder}"'
+                "1. Do NOT translate or alter any of the following elements:"
             )
             llm_prompt_parts.append(
-                f'2. Do not translate formula placeholders, such as "{formula_placeholder}". The system will automatically replace the placeholders with the corresponding formulas.'
+                "    Style or HTML-like tags: e.g., <style id='1'>...</style>, <b>...</b>, <i>...</i>, <code>...</code>, etc."
             )
             llm_prompt_parts.append(
-                "3. If there is no need to translate (such as proper nouns, codes, etc.), then return the original text."
+                "    Formula or variable placeholders enclosed in curly braces: e.g., {v3}, {equation_1}, {name}, etc."
+            )
+            llm_prompt_parts.append(
+                "    Any other placeholders like [[...]], %%...%%, %s, %d, etc."
+            )
+            llm_prompt_parts.append(
+                "2. Preserve the exact structure, position, and content of the above elements — do not modify spacing, punctuation, or formatting."
+            )
+            llm_prompt_parts.append(
+                "3. If the input contains:Proper nouns, code, or non-translatable technical terms, retain them in the original form."
             )
 
-            # 3. ##Input
-            llm_prompt_parts.append("\n##Input")
+            # 4. ## Input/Output Format:
+            llm_prompt_parts.append("\n## Input/Output Format:")
             llm_prompt_parts.append(
-                'You will be given a JSON formatted input containing entries with "id" and "input" fields.'
-            )
-
-            # 4. ##Output
-            llm_prompt_parts.append("\n##Output")
-            llm_prompt_parts.append(
-                f'For each entry in the JSON, translate the contents of the "input" field into {self.translation_config.lang_out}.'
+                '1. You will receive a JSON object with entries containing "id" and "input" fields.'
             )
             llm_prompt_parts.append(
-                'Write the translation back into the "output" field for that entry.'
+                '2. Your task is to translate the value of "input" into zh-CN, while applying the rules above.'
+            )
+            llm_prompt_parts.append(
+                '3. Return a new JSON object with the same "id" and the translated "output" field.'
             )
             llm_prompt_parts.append(
                 "Please return the translated json directly without wrapping ```json``` tag or include any additional information."
             )
 
-            # 5. ##example
-            llm_prompt_parts.append("\n##example")
+            # 5. ##example (Renumbered from 5 to 4)
+            llm_prompt_parts.append("\n## Example:")
             llm_prompt_parts.append("Here is an example of the expected format:")
             llm_prompt_parts.append("")  # Blank line
             llm_prompt_parts.append("<example>")
@@ -355,36 +372,8 @@ class ILTranslatorLLMOnly:
             llm_prompt_parts.append("```")
             llm_prompt_parts.append("</example>")
 
-            # 6. ##Others (contextual hints)
-            other_hints = []
-            hint_idx = 0
-            if title_paragraph:
-                other_hints.append(
-                    f"{hint_idx}. The first title in the full text: {title_paragraph.unicode}"
-                )
-                hint_idx += 1
-
-            if local_title_paragraph:
-                # Check if it's different from the global title_paragraph before adding
-                is_different_from_global = True
-                if title_paragraph:
-                    if local_title_paragraph.debug_id == title_paragraph.debug_id:
-                        is_different_from_global = False
-
-                if is_different_from_global:
-                    other_hints.append(
-                        f"{hint_idx}. The most similar title in the full text: {local_title_paragraph.unicode}"
-                    )
-                    hint_idx += 1
-
-            if other_hints:
-                llm_prompt_parts.append("\n##Others")
-                llm_prompt_parts.append(
-                    "When translating, please refer to the following information to improve translation quality:"
-                )
-                llm_prompt_parts.extend(other_hints)
-
-            llm_prompt_parts.append("\n## Actual Input")
+            # 6. ## Here is the input:
+            llm_prompt_parts.append("\n## Here is the input:")
 
             # Combine all parts for the main prompt
             main_prompt_content = "\n".join(llm_prompt_parts)

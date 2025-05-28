@@ -167,8 +167,19 @@ def main():
         "--json-path",
         help="Path to il_translated.json (if not provided, will use the latest file)",
     )
+    parser.add_argument(
+        "--working-folder",
+        help="Path to the working folder containing il_translated.json files",
+    )
 
     args = parser.parse_args()
+
+    if args.working_folder:
+        global WORKING_FOLDER
+        WORKING_FOLDER = Path(args.working_folder)
+        if not WORKING_FOLDER.exists():
+            print(f"Error: Working folder does not exist: {WORKING_FOLDER}")
+            return 1
 
     # Determine JSON file path
     json_path = None
