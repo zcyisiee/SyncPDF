@@ -226,6 +226,17 @@ def create_parser():
         help="Custom system prompt for translation.",
         default=None,
     )
+    translation_group.add_argument(
+        "--add-formula-placehold-hint",
+        action="store_true",
+        default=False,
+        help="Add formula placeholder hint for translation. (Currently not recommended, it may affect translation quality, default: False)",
+    )
+    translation_group.add_argument(
+        "--pool-max-workers",
+        type=int,
+        help="Maximum number of worker threads for internal task processing pools. If not specified, defaults to QPS value. This parameter directly sets the worker count, replacing previous QPS-based dynamic calculations.",
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -411,6 +422,8 @@ async def main():
             ocr_workaround=args.ocr_workaround,
             custom_system_prompt=args.custom_system_prompt,
             working_dir=working_dir,
+            add_formula_placehold_hint=args.add_formula_placehold_hint,
+            pool_max_workers=args.pool_max_workers,
         )
 
         # Create progress handler

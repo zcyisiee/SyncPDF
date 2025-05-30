@@ -27,6 +27,18 @@ class SharedContextCrossSplitPart:
         self.recent_title_paragraph = None
 
 
+class GlossaryEntry:
+    def __init__(self, name: str, terms: dict[str, str]):
+        self.name = name
+        self.terms = terms  # Dictionary of term: definition pairs
+
+    def __str__(self):
+        return f"glossary[{self.term}]: {self.definition}"
+
+    def __repr__(self):
+        return self.__str__()
+
+
 class TranslationConfig:
     @staticmethod
     def create_max_pages_per_part_split_strategy(max_pages_per_part: int):
@@ -71,6 +83,8 @@ class TranslationConfig:
         ocr_workaround: bool = False,
         custom_system_prompt: str | None = None,
         add_formula_placehold_hint: bool = False,
+        glossaries: list[str] | None = None,
+        pool_max_workers: int | None = None,
     ):
         self.translator = translator
 
@@ -93,6 +107,10 @@ class TranslationConfig:
         self.formular_font_pattern = formular_font_pattern
         self.formular_char_pattern = formular_char_pattern
         self.qps = qps
+        # Set pool_max_workers with default value from qps
+        self.pool_max_workers = (
+            pool_max_workers if pool_max_workers is not None else qps
+        )
         self.split_short_lines = split_short_lines
 
         self.short_line_split_factor = short_line_split_factor

@@ -239,10 +239,7 @@ class ILTranslator:
             total,
         ) as pbar:
             with PriorityThreadPoolExecutor(
-                max_workers=min(
-                    self.translation_config.qps * 2,
-                    self.translation_config.qps + 5,
-                ),
+                max_workers=self.translation_config.pool_max_workers,
             ) as executor:
                 for page in docs.page:
                     self.process_page(page, executor, pbar, tracker.new_page())

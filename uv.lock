@@ -48,7 +48,7 @@ wheels = [
 
 [[package]]
 name = "babeldoc"
-version = "0.3.52"
+version = "0.3.54"
 source = { editable = "." }
 dependencies = [
     { name = "bitstring" },
