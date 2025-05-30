@@ -33,6 +33,7 @@ from babeldoc.document_il.backend.pdf_creater import PDFCreater
 from babeldoc.document_il.backend.pdf_creater import reproduce_cmap
 from babeldoc.document_il.frontend.il_creater import ILCreater
 from babeldoc.document_il.midend.add_debug_information import AddDebugInformation
+from babeldoc.document_il.midend.automatic_term_extractor import AutomaticTermExtractor
 from babeldoc.document_il.midend.detect_scanned_file import DetectScannedFile
 from babeldoc.document_il.midend.il_translator import ILTranslator
 from babeldoc.document_il.midend.il_translator_llm_only import ILTranslatorLLMOnly
@@ -72,6 +73,7 @@ TRANSLATE_STAGES = [
     (ParagraphFinder.stage_name, 6.26),  # Parse Paragraphs
     (StylesAndFormulas.stage_name, 1.66),  # Parse Formulas and Styles
     # (RemoveDescent.stage_name, 0.15),  # Remove Char Descent
+    (AutomaticTermExtractor.stage_name, 30.0),  # Extract Terms
     (ILTranslator.stage_name, 46.96),  # Translate Paragraphs
     (Typesetting.stage_name, 4.71),  # Typesetting
     (FontMapper.stage_name, 0.61),  # Add Fonts
@@ -754,6 +756,10 @@ def _do_translate_single(
             support_llm_translate = True
     except NotImplementedError:
         support_llm_translate = False
+
+    if support_llm_translate:
+        AutomaticTermExtractor(translate_engine, translation_config).procress(docs)
+
     if support_llm_translate:
         il_translator = ILTranslatorLLMOnly(translate_engine, translation_config)
     else:

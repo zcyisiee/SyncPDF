@@ -3,12 +3,14 @@ import logging
 import shutil
 import tempfile
 import threading
+from collections import Counter
 from pathlib import Path
 
 from babeldoc.const import CACHE_FOLDER
 from babeldoc.document_il.translator.translator import BaseTranslator
 from babeldoc.docvision.doclayout import DocLayoutModel
 from babeldoc.glossary import Glossary
+from babeldoc.glossary import GlossaryEntry
 from babeldoc.progress_monitor import ProgressMonitor
 from babeldoc.split_manager import BaseSplitStrategy
 from babeldoc.split_manager import PageCountStrategy
@@ -26,6 +28,80 @@ class SharedContextCrossSplitPart:
     def __init__(self):
         self.first_paragraph = None
         self.recent_title_paragraph = None
+        self._lock = threading.Lock()
+        self.user_glossaries: list[Glossary] = []
+        self.auto_extracted_glossary: Glossary | None = None
+        self.raw_extracted_terms: list[tuple[str, str]] = []
+
+    def initialize_glossaries(self, initial_glossaries: list[Glossary] | None):
+        with self._lock:
+            self.user_glossaries = (
+                list(initial_glossaries) if initial_glossaries else []
+            )
+            self.auto_extracted_glossary = None
+            self.raw_extracted_terms = []
+            self.unique_name = self._generate_unique_auto_glossary_name()
+            self.norm_terms = set()
+            for g in self.user_glossaries:
+                for entity in g.normalized_lookup:
+                    self.norm_terms.add(entity)
+
+    def add_raw_extracted_term_pair(self, src: str, tgt: str):
+        with self._lock:
+            self.raw_extracted_terms.append((src, tgt))
+
+    def _generate_unique_auto_glossary_name(self) -> str:
+        base_name = "auto_extracted_glossary"
+        current_name = base_name
+        suffix = 0
+        existing_names = {g.name for g in self.user_glossaries}
+        if (
+            self.auto_extracted_glossary
+            and self.auto_extracted_glossary.name == current_name
+        ):
+            pass
+
+        while current_name in existing_names:
+            suffix += 1
+            current_name = f"{base_name}#{suffix}"
+        return current_name
+
+    def contains_term(self, term: str) -> bool:
+        pass
+
+    def finalize_auto_extracted_glossary(self):
+        with self._lock:
+            self.auto_extracted_glossary = None
+
+            if not self.raw_extracted_terms:
+                self.raw_extracted_terms = []
+                return
+
+            term_translations: dict[str, list[str]] = {}
+            for src, tgt in self.raw_extracted_terms:
+                term_translations.setdefault(src, []).append(tgt)
+
+            final_entries: list[GlossaryEntry] = []
+            for src, tgts in term_translations.items():
+                if not tgts:
+                    continue
+                src_norm = Glossary.normalize_source(src)
+                if src_norm in self.norm_terms:
+                    continue
+                most_common_tgt = Counter(tgts).most_common(1)[0][0]
+                final_entries.append(GlossaryEntry(src, most_common_tgt))
+
+            if final_entries:
+                self.auto_extracted_glossary = Glossary(
+                    name=self.unique_name, entries=final_entries
+                )
+
+    def get_glossaries(self) -> list[Glossary]:
+        with self._lock:
+            all_glossaries = list(self.user_glossaries)
+            if self.auto_extracted_glossary:
+                all_glossaries.append(self.auto_extracted_glossary)
+            return all_glossaries
 
 
 class TranslationConfig:
@@ -76,6 +152,7 @@ class TranslationConfig:
         pool_max_workers: int | None = None,
     ):
         self.translator = translator
+        initial_user_glossaries = list(glossaries) if glossaries else []
 
         self.input_file = input_file
         self.lang_in = lang_in
@@ -156,6 +233,9 @@ class TranslationConfig:
         self.doc_layout_model = doc_layout_model
 
         self.shared_context_cross_split_part = SharedContextCrossSplitPart()
+        self.shared_context_cross_split_part.initialize_glossaries(
+            initial_user_glossaries
+        )
 
         # Initialize split-related attributes
         self.split_strategy = split_strategy
@@ -168,8 +248,6 @@ class TranslationConfig:
         self.show_char_box = show_char_box
         self.custom_system_prompt = custom_system_prompt
         self.add_formula_placehold_hint = add_formula_placehold_hint
-
-        self.glossaries = glossaries if glossaries is not None else []
 
     def parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
         """解析页码字符串，返回页码范围列表

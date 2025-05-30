@@ -56,6 +56,9 @@ class ILTranslatorLLMOnly:
         else:
             self.tokenizer = tokenizer
 
+        # Cache glossaries at initialization
+        self._cached_glossaries = self.shared_context_cross_split_part.get_glossaries()
+
         self.il_translator = ILTranslator(
             translate_engine=translate_engine,
             translation_config=translation_config,
@@ -168,6 +171,7 @@ class ILTranslatorLLMOnly:
             if paragraph.debug_id is None or paragraph.unicode is None:
                 continue
             if is_cid_paragraph(paragraph):
+                pbar.advance(1)
                 continue
             # self.translate_paragraph(paragraph, pbar,tracker.new_paragraph(), page_font_map, page_xobj_font_map)
             total_token_count += self.calc_token_count(paragraph.unicode)
@@ -311,37 +315,29 @@ class ILTranslatorLLMOnly:
             )
 
             active_glossary_markdown_blocks: list[str] = []
-            if self.translation_config.glossaries:
-                for glossary in self.translation_config.glossaries:
-                    if glossary.source_terms_regex is None:
-                        continue
-
-                    matched_raw_fragments = glossary.source_terms_regex.findall(
+            # Use cached glossaries
+            if self._cached_glossaries:
+                for glossary in self._cached_glossaries:
+                    # Get active entries for the current batch_text_for_glossary_matching
+                    active_entries = glossary.get_active_entries_for_text(
                         batch_text_for_glossary_matching
                     )
-                    current_glossary_md_entries: list[str] = []
-                    unique_added_original_sources = set()
 
-                    for fragment in matched_raw_fragments:
-                        normalized_frag = glossary._normalize_source(fragment)
-                        if normalized_frag in glossary.normalized_lookup:
-                            original_source, target_text = glossary.normalized_lookup[
-                                normalized_frag
-                            ]
-                            if original_source not in unique_added_original_sources:
-                                current_glossary_md_entries.append(
-                                    f"| {original_source} | {target_text} |"
-                                )
-                                unique_added_original_sources.add(original_source)
+                    if active_entries:
+                        current_glossary_md_entries: list[str] = []
+                        for original_source, target_text in active_entries:
+                            current_glossary_md_entries.append(
+                                f"| {original_source} | {target_text} |"
+                            )
 
-                    if current_glossary_md_entries:
-                        glossary_table_md = (
-                            f"### Glossary: {glossary.name}\n\n"
-                            "| Source Term | Target Term |\n"
-                            "|-------------|-------------|\n"
-                            + "\n".join(current_glossary_md_entries)
-                        )
-                        active_glossary_markdown_blocks.append(glossary_table_md)
+                        if current_glossary_md_entries:
+                            glossary_table_md = (
+                                f"### Glossary: {glossary.name}\n\n"
+                                "| Source Term | Target Term |\n"
+                                "|-------------|-------------|\n"
+                                + "\n".join(current_glossary_md_entries)
+                            )
+                            active_glossary_markdown_blocks.append(glossary_table_md)
 
             if contextual_hints_section or active_glossary_markdown_blocks:
                 llm_prompt_parts.append("\n## Contextual Hints for Better Translation")
@@ -349,7 +345,7 @@ class ILTranslatorLLMOnly:
 
                 if active_glossary_markdown_blocks:
                     llm_prompt_parts.append(
-                        f"{hint_idx}. You MUST strictly adhere to the following glossaries. If a source term from a table appears in the text, use the corresponding target term in your translation:"
+                        f"{hint_idx}. You MUST strictly adhere to the following glossaries. auto_extracted_glossary has a lower priority; please give preference to other glossaries. If a source term from a table appears in the text, use the corresponding target term in your translation:"
                     )
                     # hint_idx += 1 # No need to increment if tables are part of this point
                     for md_block in active_glossary_markdown_blocks:

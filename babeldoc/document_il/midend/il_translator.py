@@ -201,6 +201,9 @@ class ILTranslator:
         else:
             self.tokenizer = tokenizer
 
+        # Cache glossaries at initialization
+        self._cached_glossaries = self.shared_context_cross_split_part.get_glossaries()
+
         self.support_llm_translate = False
         try:
             if translate_engine and hasattr(translate_engine, "do_llm_translate"):
@@ -791,36 +794,27 @@ class ILTranslator:
                 )
 
         active_glossary_markdown_blocks: list[str] = []
-        if self.translation_config.glossaries:
-            for glossary in self.translation_config.glossaries:
-                if glossary.source_terms_regex is None:
-                    continue
+        # Use cached glossaries
+        if self._cached_glossaries:
+            for glossary in self._cached_glossaries:
+                # Get active entries for the current text being processed (passed as 'text')
+                active_entries = glossary.get_active_entries_for_text(text)
 
-                matched_raw_fragments = glossary.source_terms_regex.findall(text)
+                if active_entries:
+                    current_glossary_md_entries: list[str] = []
+                    for original_source, target_text in active_entries:
+                        current_glossary_md_entries.append(
+                            f"| {original_source} | {target_text} |"
+                        )
 
-                current_glossary_md_entries: list[str] = []
-                unique_added_original_sources = set()
-
-                for fragment in matched_raw_fragments:
-                    normalized_frag = glossary._normalize_source(fragment)
-                    if normalized_frag in glossary.normalized_lookup:
-                        original_source, target_text = glossary.normalized_lookup[
-                            normalized_frag
-                        ]
-                        if original_source not in unique_added_original_sources:
-                            current_glossary_md_entries.append(
-                                f"| {original_source} | {target_text} |"
-                            )
-                            unique_added_original_sources.add(original_source)
-
-                if current_glossary_md_entries:
-                    glossary_table_md = (
-                        f"### Glossary: {glossary.name}\n\n"
-                        "| Source Term | Target Term |\n"
-                        "|-------------|-------------|\n"
-                        + "\n".join(current_glossary_md_entries)
-                    )
-                    active_glossary_markdown_blocks.append(glossary_table_md)
+                    if current_glossary_md_entries:
+                        glossary_table_md = (
+                            f"### Glossary: {glossary.name}\n\n"
+                            "| Source Term | Target Term |\n"
+                            "|-------------|-------------|\n"
+                            + "\n".join(current_glossary_md_entries)
+                        )
+                        active_glossary_markdown_blocks.append(glossary_table_md)
 
         if llm_context_hints or active_glossary_markdown_blocks:
             llm_input.append(
