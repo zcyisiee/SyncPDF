@@ -24,7 +24,7 @@ from babeldoc.translation_config import TranslationConfig
 from babeldoc.translation_config import WatermarkOutputMode
 
 logger = logging.getLogger(__name__)
-__version__ = "0.3.54"
+__version__ = "0.3.55"
 
 
 def create_parser():
