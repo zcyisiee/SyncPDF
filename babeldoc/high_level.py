@@ -255,6 +255,8 @@ def get_translation_stage(
         should_remove.append(TableParser.stage_name)
     if translation_config.skip_scanned_detection:
         should_remove.append(DetectScannedFile.stage_name)
+    if not translation_config.auto_extract_glossary:
+        should_remove.append(AutomaticTermExtractor.stage_name)
     result = [x for x in result if x[0] not in should_remove]
     return result
 
@@ -770,7 +772,7 @@ def _do_translate_single(
     except NotImplementedError:
         support_llm_translate = False
 
-    if support_llm_translate:
+    if support_llm_translate and translation_config.auto_extract_glossary:
         AutomaticTermExtractor(translate_engine, translation_config).procress(docs)
 
     if support_llm_translate:

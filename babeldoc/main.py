@@ -244,6 +244,13 @@ def create_parser():
         type=int,
         help="Maximum number of worker threads for internal task processing pools. If not specified, defaults to QPS value. This parameter directly sets the worker count, replacing previous QPS-based dynamic calculations.",
     )
+    translation_group.add_argument(
+        "--no-auto-extract-glossary",
+        action="store_false",
+        dest="auto_extract_glossary",
+        default=True,
+        help="Disable automatic term extraction. (Config file: set auto_extract_glossary = false)",
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -458,6 +465,7 @@ async def main():
             add_formula_placehold_hint=args.add_formula_placehold_hint,
             glossaries=loaded_glossaries,
             pool_max_workers=args.pool_max_workers,
+            auto_extract_glossary=args.auto_extract_glossary,
         )
 
         # Create progress handler

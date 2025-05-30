@@ -157,6 +157,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 - `--skip-scanned-detection`: Skip scanned document detection (default: False). When using split translation, only the first part performs detection if not skipped.
 - `--ocr-workaround`: Use OCR workaround (default: False). When enabled, the tool will use OCR to detect text and fill background for scanned PDF.
 - `--working-dir`: Working directory for translation. If not set, use temp directory.
+- `--no-auto-extract-glossary`: Disable automatic term extraction. If this flag is present, the step is skipped. Defaults to enabled.
 
 > [!TIP]
 > - Both `--skip-clean` and `--dual-translate-first` may help improve compatibility with some PDF readers
@@ -178,6 +179,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 - `--custom-system-prompt`: Custom system prompt for translation.
 - `--add-formula-placehold-hint`: Add formula placeholder hint for translation. (Currently not recommended, it may affect translation quality, default: False)
 - `--pool-max-workers`: Maximum number of worker threads for internal task processing pools. If not specified, defaults to QPS value. This parameter directly sets the worker count, replacing previous QPS-based dynamic calculations.
+- `--no-auto-extract-glossary`: Disable automatic term extraction. If this flag is present, the step is skipped. Defaults to enabled.
 
 > [!TIP]
 >
@@ -258,6 +260,7 @@ watermark-output-mode = "watermarked"  # Choices: "watermarked", "no_watermark",
 max-pages-per-part = 50  # Automatically split the document for translation and merge it back.
 # no-watermark = false  # DEPRECATED: Use watermark-output-mode instead
 skip-scanned-detection = false  # Skip scanned document detection for faster processing
+auto_extract_glossary = true # Set to false to disable automatic term extraction
 
 # Translation service
 openai = true

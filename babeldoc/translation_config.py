@@ -150,6 +150,7 @@ class TranslationConfig:
         add_formula_placehold_hint: bool = False,
         glossaries: list[Glossary] | None = None,
         pool_max_workers: int | None = None,
+        auto_extract_glossary: bool = True,
     ):
         self.translator = translator
         initial_user_glossaries = list(glossaries) if glossaries else []
@@ -248,6 +249,7 @@ class TranslationConfig:
         self.show_char_box = show_char_box
         self.custom_system_prompt = custom_system_prompt
         self.add_formula_placehold_hint = add_formula_placehold_hint
+        self.auto_extract_glossary = auto_extract_glossary
 
     def parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
         """解析页码字符串，返回页码范围列表
