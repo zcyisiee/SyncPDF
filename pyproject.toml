@@ -44,6 +44,7 @@ dependencies = [
     "opencv-python-headless>=4.10.0.84",
     "rapidocr-onnxruntime>=1.4.4",
     "pyzstd>=0.17.0",
+    "hyperscan>=0.7.13",
 ]
 
 [project.optional-dependencies]

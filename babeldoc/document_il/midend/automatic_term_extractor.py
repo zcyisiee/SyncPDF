@@ -227,7 +227,6 @@ class AutomaticTermExtractor:
             for u in inputs:
                 tracker.append_paragraph_unicode(u)
             if not inputs:
-                pbar.advance(len(paragraphs.paragraphs))
                 return
             prompt = LLM_PROMPT_TEMPLATE.format(
                 target_language=self.translation_config.lang_out,
@@ -256,6 +255,8 @@ class AutomaticTermExtractor:
         except Exception as e:
             logger.error(f"Error preparing LLM prompt for automatic terms extract: {e}")
             return
+        finally:
+            pbar.advance(len(paragraphs.paragraphs))
 
     def procress(self, doc_il: ILDocument):
         logger.info(f"{self.stage_name}: Starting term extraction for document.")
