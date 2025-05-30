@@ -1,6 +1,6 @@
 [project]
 name = "BabelDOC"
-version = "0.3.55"
+version = "0.3.56"
 description = "Yet Another Document Translator"
 license = "AGPL-3.0"
 readme = "README.md"
@@ -44,6 +44,7 @@ dependencies = [
     "opencv-python-headless>=4.10.0.84",
     "rapidocr-onnxruntime>=1.4.4",
     "pyzstd>=0.17.0",
+    "hyperscan>=0.7.13",
 ]
 
 [project.optional-dependencies]
@@ -150,7 +151,7 @@ pythonpath = [".", "src"]
 testpaths = ["tests"]
 
 [bumpver]
-current_version = "0.3.55"
+current_version = "0.3.56"
 version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
 
 [bumpver.file_patterns]

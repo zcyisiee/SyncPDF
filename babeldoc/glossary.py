@@ -1,7 +1,15 @@
 import csv
 import io
+import itertools
+import logging
 import re
+import time
 from pathlib import Path
+
+import hyperscan
+import regex
+
+logger = logging.getLogger(__name__)
 
 
 class GlossaryEntry:
@@ -14,58 +22,92 @@ class GlossaryEntry:
         return f"GlossaryEntry(source='{self.source}', target='{self.target}', target_language='{self.target_language}')"
 
 
+def batched(iterable, n, *, strict=False):
+    # batched('ABCDEFG', 3) → ABC DEF G
+    if n < 1:
+        raise ValueError("n must be at least one")
+    iterator = iter(iterable)
+    while batch := tuple(itertools.islice(iterator, n)):
+        if strict and len(batch) != n:
+            raise ValueError("batched(): incomplete batch")
+        yield batch
+
+
+TERM_NORM_PATTERN = re.compile(r"\s+", regex.UNICODE)
+
+
 class Glossary:
     def __init__(self, name: str, entries: list[GlossaryEntry]):
         self.name = name
         self.entries = entries
-        self.source_terms_regex: re.Pattern | None = None
         self.normalized_lookup: dict[str, tuple[str, str]] = {}
+        self.id_lookup: list[tuple[str, str]] = []
+        self.hs_dbs: list[hyperscan.Database] | None = None
         self._build_regex_and_lookup()
 
     @staticmethod
     def normalize_source(source_term: str) -> str:
         """Normalizes a source term by lowercasing and standardizing whitespace."""
         term = source_term.lower()
-        term = re.sub(
-            r"\s+", " ", term
+        term = TERM_NORM_PATTERN.sub(
+            " ", term
         )  # Replace multiple whitespace with single space
         return term.strip()
 
     def _build_regex_and_lookup(self):
+        logger.debug(
+            f"start build regex for glossary {self.name} with {len(self.entries)} entries"
+        )
         """
         Builds a combined regex for all source terms and a lookup dictionary
         from normalized source terms to (original_source, original_target).
         Regex patterns are sorted by length in descending order to prioritize longer matches.
         """
         self.normalized_lookup = {}
-        regex_patterns_for_or: list[str] = []
 
         if not self.entries:
             self.source_terms_regex = None
             return
 
-        for entry in self.entries:
+        self.hs_dbs = []
+        hs_pattern = []
+        start = time.time()
+        for idx, entry in enumerate(self.entries):
             normalized_key = self.normalize_source(entry.source)
             self.normalized_lookup[normalized_key] = (entry.source, entry.target)
+            self.id_lookup.append((entry.source, entry.target))
 
-            # Create a regex pattern for the source term, replacing spaces with \s+
-            # and escaping other special characters.
-            escaped_parts = [re.escape(part) for part in entry.source.split()]
-            if escaped_parts:  # Ensure there are parts to join
-                pattern_for_entry = r"\s+".join(escaped_parts)
-                regex_patterns_for_or.append(pattern_for_entry)
+            hs_pattern.append((re.escape(entry.source).encode("utf-8"), idx))
 
-        if regex_patterns_for_or:
-            # Sort patterns by length, longest first, to help with overlapping terms
-            regex_patterns_for_or.sort(key=len, reverse=True)
-            combined_regex_str = "|".join(
-                f"({pattern})" for pattern in regex_patterns_for_or
-            )  # Add capturing groups
-            self.source_terms_regex = re.compile(
-                combined_regex_str, flags=re.IGNORECASE
+        chunk_size = 20000
+        for i, pattern_chunk in enumerate(
+            batched(hs_pattern, chunk_size, strict=False)
+        ):
+            logger.debug(
+                f"building hs_db chunk {i + 1} / {len(self.entries) // chunk_size + 1}"
             )
-        else:
-            self.source_terms_regex = None
+            expressions, ids = zip(*pattern_chunk, strict=False)
+
+            hs_db = hyperscan.Database()
+            hs_db.compile(
+                expressions=expressions,
+                ids=ids,
+                elements=len(pattern_chunk),
+                flags=hyperscan.HS_FLAG_CASELESS | hyperscan.HS_FLAG_SINGLEMATCH,
+                # | hyperscan.HS_FLAG_UTF8
+                # | hyperscan.HS_FLAG_UCP,
+            )
+            self.hs_dbs.append(hs_db)
+
+        end = time.time()
+        logger.debug(
+            f"finished building regex for glossary {self.name} in {end - start:.2f} seconds"
+        )
+        logger.debug(
+            f"build hs database for glossary {self.name} with {len(self.entries)} entries, hs_info: {self.hs_dbs[0].info()}"
+        )
+        if not self.hs_dbs:
+            self.hs_dbs = None
 
     @classmethod
     def from_csv(cls, file_path: Path, target_lang_out: str) -> "Glossary":
@@ -136,24 +178,23 @@ class Glossary:
 
     def get_active_entries_for_text(self, text: str) -> list[tuple[str, str]]:
         """Returns a list of (original_source, target_text) tuples for terms found in the given text."""
-        if not self.source_terms_regex or not text:
+        if not self.hs_dbs or not text:
+            return []
+
+        text = TERM_NORM_PATTERN.sub(" ", text)  # Normalize whitespace in the text
+        if not text:
             return []
 
         active_entries = []
-        unique_added_original_sources = set()
 
-        # Find all non-overlapping matches for the combined regex
-        # The regex is constructed with capturing groups for each original pattern
-        # so findall will return tuples of all groups. We need to find which group matched.
-        # A simpler way with finditer:
-        for match in self.source_terms_regex.finditer(text):
-            # The matched text itself
-            matched_fragment = match.group(0)
-            normalized_frag = self.normalize_source(matched_fragment)
+        def on_match(
+            idx: int, _from: int, _to: int, _flags: int, _context=None
+        ) -> bool | None:
+            active_entries.append(self.id_lookup[idx])
+            return False
 
-            if normalized_frag in self.normalized_lookup:
-                original_source, target_text = self.normalized_lookup[normalized_frag]
-                if original_source not in unique_added_original_sources:
-                    active_entries.append((original_source, target_text))
-                    unique_added_original_sources.add(original_source)
+        for hs_db in self.hs_dbs:
+            # Scan the text with the hyperscan database
+            scratch = hyperscan.Scratch(hs_db)
+            hs_db.scan(text.encode("utf-8"), on_match, scratch=scratch)
         return active_entries
