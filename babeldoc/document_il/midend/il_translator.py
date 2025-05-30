@@ -201,6 +201,9 @@ class ILTranslator:
         else:
             self.tokenizer = tokenizer
 
+        # Cache glossaries at initialization
+        self._cached_glossaries = self.shared_context_cross_split_part.get_glossaries()
+
         self.support_llm_translate = False
         try:
             if translate_engine and hasattr(translate_engine, "do_llm_translate"):
@@ -239,10 +242,7 @@ class ILTranslator:
             total,
         ) as pbar:
             with PriorityThreadPoolExecutor(
-                max_workers=min(
-                    self.translation_config.qps * 2,
-                    self.translation_config.qps + 5,
-                ),
+                max_workers=self.translation_config.pool_max_workers,
             ) as executor:
                 for page in docs.page:
                     self.process_page(page, executor, pbar, tracker.new_page())
@@ -770,33 +770,69 @@ class ILTranslator:
             llm_input = [
                 f"You are a professional and reliable machine translation engine responsible for translating the input text into {self.translation_config.lang_out}."
             ]
-        llm_hint = []
+
+        llm_context_hints = []
 
         if title_paragraph:
-            llm_hint.append(
+            llm_context_hints.append(
                 f"The first title in the full text: {title_paragraph.unicode}"
             )
         if (
             local_title_paragraph
+            and title_paragraph
             and local_title_paragraph.debug_id != title_paragraph.debug_id
         ):
-            llm_hint.append(
+            llm_context_hints.append(
                 f"The most similar title in the full text: {local_title_paragraph.unicode}"
             )
 
-        if self.translation_config.add_formula_placehold_hint:
+        if translate_input and self.translation_config.add_formula_placehold_hint:
             placeholders_hint = translate_input.get_placeholders_hint()
             if placeholders_hint:
-                llm_hint.append(
+                llm_context_hints.append(
                     f"This is the formula placeholder hint: \n{placeholders_hint}"
                 )
 
-        if llm_hint:
+        active_glossary_markdown_blocks: list[str] = []
+        # Use cached glossaries
+        if self._cached_glossaries:
+            for glossary in self._cached_glossaries:
+                # Get active entries for the current text being processed (passed as 'text')
+                active_entries = glossary.get_active_entries_for_text(text)
+
+                if active_entries:
+                    current_glossary_md_entries: list[str] = []
+                    for original_source, target_text in active_entries:
+                        current_glossary_md_entries.append(
+                            f"| {original_source} | {target_text} |"
+                        )
+
+                    if current_glossary_md_entries:
+                        glossary_table_md = (
+                            f"### Glossary: {glossary.name}\n\n"
+                            "| Source Term | Target Term |\n"
+                            "|-------------|-------------|\n"
+                            + "\n".join(current_glossary_md_entries)
+                        )
+                        active_glossary_markdown_blocks.append(glossary_table_md)
+
+        if llm_context_hints or active_glossary_markdown_blocks:
             llm_input.append(
                 "When translating, please refer to the following information to improve translation quality:"
             )
-            for i, line in enumerate(llm_hint):
-                llm_input.append(f"{i}. {line}")
+            current_hint_index = 1
+            for hint_line in llm_context_hints:
+                llm_input.append(f"{current_hint_index}. {hint_line}")
+                current_hint_index += 1
+
+            if active_glossary_markdown_blocks:
+                llm_input.append(
+                    f"{current_hint_index}. You MUST strictly adhere to the following glossaries. If a source term from a table appears in the text, use the corresponding target term in your translation:"
+                )
+                current_hint_index += 1
+                for md_block in active_glossary_markdown_blocks:
+                    llm_input.append(f"\n{md_block}\n")
+
         llm_input.append("When translating, please follow the following rules:")
 
         rich_text_left_placeholder = (
