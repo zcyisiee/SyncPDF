@@ -242,8 +242,21 @@ def start_parse_il(
 
 
 def translate(translation_config: TranslationConfig) -> TranslateResult:
-    with ProgressMonitor(TRANSLATE_STAGES) as pm:
+    with ProgressMonitor(get_translation_stage(translation_config)) as pm:
         return do_translate(pm, translation_config)
+
+
+def get_translation_stage(
+    translation_config: TranslationConfig,
+) -> list[tuple[str, float]]:
+    result = copy.deepcopy(TRANSLATE_STAGES)
+    should_remove = []
+    if not translation_config.table_model:
+        should_remove.append(TableParser.stage_name)
+    if translation_config.skip_scanned_detection:
+        should_remove.append(DetectScannedFile.stage_name)
+    result = [x for x in result if x[0] not in should_remove]
+    return result
 
 
 async def async_translate(translation_config: TranslationConfig):
@@ -300,7 +313,7 @@ async def async_translate(translation_config: TranslationConfig):
     finish_event = asyncio.Event()
     cancel_event = threading.Event()
     with ProgressMonitor(
-        TRANSLATE_STAGES,
+        get_translation_stage(translation_config),
         progress_change_callback=callback.step_callback,
         finish_callback=callback.finished_callback,
         finish_event=finish_event,
