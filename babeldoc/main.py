@@ -19,6 +19,7 @@ from babeldoc.document_il.translator.translator import set_translate_rate_limite
 from babeldoc.docvision.doclayout import DocLayoutModel
 from babeldoc.docvision.rpc_doclayout import RpcDocLayoutModel
 from babeldoc.docvision.table_detection.rapidocr import RapidOCRModel
+from babeldoc.glossary import Glossary
 from babeldoc.translation_config import TranslationConfig
 from babeldoc.translation_config import WatermarkOutputMode
 
@@ -233,6 +234,12 @@ def create_parser():
         help="Add formula placeholder hint for translation. (Currently not recommended, it may affect translation quality, default: False)",
     )
     translation_group.add_argument(
+        "--glossary-files",
+        type=str,
+        default=None,
+        help="Comma-separated paths to glossary CSV files.",
+    )
+    translation_group.add_argument(
         "--pool-max-workers",
         type=int,
         help="Maximum number of worker threads for internal task processing pools. If not specified, defaults to QPS value. This parameter directly sets the worker count, replacing previous QPS-based dynamic calculations.",
@@ -326,6 +333,32 @@ async def main():
         table_model = RapidOCRModel()
     else:
         table_model = None
+
+    # Load glossaries
+    loaded_glossaries: list[Glossary] = []
+    if args.glossary_files:
+        paths_str = args.glossary_files.split(",")
+        for p_str in paths_str:
+            file_path = Path(p_str.strip())
+            if not file_path.exists():
+                logger.error(f"Glossary file not found: {file_path}")
+                continue
+            if not file_path.is_file():
+                logger.error(f"Glossary path is not a file: {file_path}")
+                continue
+            try:
+                glossary_obj = Glossary.from_csv(file_path, args.lang_out)
+                if glossary_obj.entries:
+                    loaded_glossaries.append(glossary_obj)
+                    logger.info(
+                        f"Loaded glossary '{glossary_obj.name}' with {len(glossary_obj.entries)} entries."
+                    )
+                else:
+                    logger.info(
+                        f"Glossary '{file_path.stem}' loaded with no applicable entries for lang_out '{args.lang_out}'."
+                    )
+            except Exception as e:
+                logger.error(f"Failed to load glossary from {file_path}: {e}")
 
     pending_files = []
     for file in args.files:
@@ -423,6 +456,7 @@ async def main():
             custom_system_prompt=args.custom_system_prompt,
             working_dir=working_dir,
             add_formula_placehold_hint=args.add_formula_placehold_hint,
+            glossaries=loaded_glossaries,
             pool_max_workers=args.pool_max_workers,
         )
 

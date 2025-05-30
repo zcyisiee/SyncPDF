@@ -8,6 +8,7 @@ from pathlib import Path
 from babeldoc.const import CACHE_FOLDER
 from babeldoc.document_il.translator.translator import BaseTranslator
 from babeldoc.docvision.doclayout import DocLayoutModel
+from babeldoc.glossary import Glossary
 from babeldoc.progress_monitor import ProgressMonitor
 from babeldoc.split_manager import BaseSplitStrategy
 from babeldoc.split_manager import PageCountStrategy
@@ -25,18 +26,6 @@ class SharedContextCrossSplitPart:
     def __init__(self):
         self.first_paragraph = None
         self.recent_title_paragraph = None
-
-
-class GlossaryEntry:
-    def __init__(self, name: str, terms: dict[str, str]):
-        self.name = name
-        self.terms = terms  # Dictionary of term: definition pairs
-
-    def __str__(self):
-        return f"glossary[{self.term}]: {self.definition}"
-
-    def __repr__(self):
-        return self.__str__()
 
 
 class TranslationConfig:
@@ -83,7 +72,7 @@ class TranslationConfig:
         ocr_workaround: bool = False,
         custom_system_prompt: str | None = None,
         add_formula_placehold_hint: bool = False,
-        glossaries: list[str] | None = None,
+        glossaries: list[Glossary] | None = None,
         pool_max_workers: int | None = None,
     ):
         self.translator = translator
@@ -179,6 +168,8 @@ class TranslationConfig:
         self.show_char_box = show_char_box
         self.custom_system_prompt = custom_system_prompt
         self.add_formula_placehold_hint = add_formula_placehold_hint
+
+        self.glossaries = glossaries if glossaries is not None else []
 
     def parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
         """解析页码字符串，返回页码范围列表

@@ -198,6 +198,18 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 > 1. This tool supports any OpenAI-compatible API endpoints. Just set the correct base URL and API key. (e.g. `https://xxx.custom.xxx/v1`)
 > 2. For local models like Ollama, you can use any value as the API key (e.g. `--openai-api-key a`).
 
+### Glossary Options
+
+- `--glossary-files`: Comma-separated paths to glossary CSV files.
+  - Each CSV file should have the columns: `source`, `target`, and an optional `tgt_lng`.
+  - The `source` column contains the term in the original language.
+  - The `target` column contains the term in the target language.
+  - The `tgt_lng` column (optional) specifies the target language for that specific entry (e.g., "zh-CN", "en-US").
+    - If `tgt_lng` is provided for an entry, that entry will only be loaded and used if its (normalized) `tgt_lng` matches the (normalized) overall target language specified by `--lang-out`. Normalization involves lowercasing and replacing hyphens (`-`) with underscores (`_`).
+    - If `tgt_lng` is omitted for an entry, that entry is considered applicable for any `--lang-out`.
+  - The name of each glossary (used in LLM prompts) is derived from its filename (without the .csv extension).
+  - During translation, the system will check the input text against the loaded glossaries. If terms from a glossary are found in the current text segment, that glossary (with the relevant terms) will be included in the prompt to the language model, along with an instruction to adhere to it.
+
 ### Output Control
 
 - `--output`, `-o`: Output directory for translated files. If not set, use current working directory.
@@ -253,6 +265,9 @@ openai-model = "gpt-4o-mini"
 openai-base-url = "https://api.openai.com/v1"
 openai-api-key = "your-api-key-here"
 pool-max-workers = 8  # Maximum worker threads for task processing (defaults to QPS value if not set)
+
+# Glossary Options (Optional)
+# glossary-files = "/path/to/glossary1.csv,/path/to/glossary2.csv"
 
 # Output control
 no-dual = false

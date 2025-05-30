@@ -285,10 +285,10 @@ class ILTranslatorLLMOnly:
                 )
 
             # 2. ##Contextual Hints for Better Translation
-            other_hints = []
-            hint_idx = 1  # Start with 1 for 1-based indexing
+            contextual_hints_section: list[str] = []
+            hint_idx = 1
             if title_paragraph:
-                other_hints.append(
+                contextual_hints_section.append(
                     f"{hint_idx}. First title in full text: {title_paragraph.unicode}"
                 )
                 hint_idx += 1
@@ -300,14 +300,60 @@ class ILTranslatorLLMOnly:
                         is_different_from_global = False
 
                 if is_different_from_global:
-                    other_hints.append(
+                    contextual_hints_section.append(
                         f"{hint_idx}. Most similar section title: {local_title_paragraph.unicode}"
                     )
-                    # hint_idx += 1 # No increment needed if it's the last possible hint of this type
+                    hint_idx += 1
 
-            if other_hints:
+            # --- ADD GLOSSARY HINTS ---
+            batch_text_for_glossary_matching = "\n".join(
+                item.get("input", "") for item in json_format_input
+            )
+
+            active_glossary_markdown_blocks: list[str] = []
+            if self.translation_config.glossaries:
+                for glossary in self.translation_config.glossaries:
+                    if glossary.source_terms_regex is None:
+                        continue
+
+                    matched_raw_fragments = glossary.source_terms_regex.findall(
+                        batch_text_for_glossary_matching
+                    )
+                    current_glossary_md_entries: list[str] = []
+                    unique_added_original_sources = set()
+
+                    for fragment in matched_raw_fragments:
+                        normalized_frag = glossary._normalize_source(fragment)
+                        if normalized_frag in glossary.normalized_lookup:
+                            original_source, target_text = glossary.normalized_lookup[
+                                normalized_frag
+                            ]
+                            if original_source not in unique_added_original_sources:
+                                current_glossary_md_entries.append(
+                                    f"| {original_source} | {target_text} |"
+                                )
+                                unique_added_original_sources.add(original_source)
+
+                    if current_glossary_md_entries:
+                        glossary_table_md = (
+                            f"### Glossary: {glossary.name}\n\n"
+                            "| Source Term | Target Term |\n"
+                            "|-------------|-------------|\n"
+                            + "\n".join(current_glossary_md_entries)
+                        )
+                        active_glossary_markdown_blocks.append(glossary_table_md)
+
+            if contextual_hints_section or active_glossary_markdown_blocks:
                 llm_prompt_parts.append("\n## Contextual Hints for Better Translation")
-                llm_prompt_parts.extend(other_hints)
+                llm_prompt_parts.extend(contextual_hints_section)
+
+                if active_glossary_markdown_blocks:
+                    llm_prompt_parts.append(
+                        f"{hint_idx}. You MUST strictly adhere to the following glossaries. If a source term from a table appears in the text, use the corresponding target term in your translation:"
+                    )
+                    # hint_idx += 1 # No need to increment if tables are part of this point
+                    for md_block in active_glossary_markdown_blocks:
+                        llm_prompt_parts.append(f"\n{md_block}\n")
 
             # 3. ## Strict Rules:
             llm_prompt_parts.append("\n## Strict Rules:")
