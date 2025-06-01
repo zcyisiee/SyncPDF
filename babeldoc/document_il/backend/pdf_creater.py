@@ -781,10 +781,10 @@ class PDFCreater:
             return False
 
     def restore_media_box(self, doc: pymupdf.Document, mediabox_data: dict) -> None:
-        for pageno, page_box_data in mediabox_data.items():
+        for xref, page_box_data in mediabox_data.items():
             for name, box in page_box_data.items():
                 try:
-                    doc.xref_set_key(doc[pageno].xref, name, box)
+                    doc.xref_set_key(xref, name, box)
                 except Exception:
                     logger.debug(f"Error restoring media box {name} from PDF")
 

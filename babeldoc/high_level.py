@@ -425,6 +425,8 @@ def fix_null_xref(doc: Document) -> None:
             elif obj and "/LZWDecode" in obj:
                 data = doc.xref_stream(i)
                 doc.update_stream(i, data)
+            elif obj and "/Annots" in obj:
+                doc.xref_set_key(i, "Annots", "null")
         except Exception:
             doc.update_object(i, "[]")
 
@@ -625,28 +627,22 @@ def do_translate(
 
 def fix_media_box(doc: Document) -> None:
     mediabox_data = {}
-    for page in doc:
-        page_box_data = {}
-        mediabox = doc.xref_get_key(page.xref, "MediaBox")
-        if mediabox[0] == "null":
-            mediabox = ("array", "[0 0 612 792]")
-            doc.xref_set_key(page.xref, "MediaBox", mediabox[1])
-        if page.mediabox.x0 != 0 or page.mediabox.y0 != 0:
-            x0 = page.mediabox.x0
-            y0 = page.mediabox.y0
-            x1 = page.mediabox.x1
-            y1 = page.mediabox.y1
-            page_box_data["MediaBox"] = doc.xref_get_key(page.xref, "MediaBox")[1]
-            doc.xref_set_key(page.xref, "MediaBox", f"[0 0 {x1 - x0} {y1 - y0}]")
-        if page.cropbox.x0 != 0 or page.cropbox.y0 != 0:
-            x0 = page.cropbox.x0
-            y0 = page.cropbox.y0
-            x1 = page.cropbox.x1
-            y1 = page.cropbox.y1
-            page_box_data["CropBox"] = doc.xref_get_key(page.xref, "CropBox")[1]
-            doc.xref_set_key(page.xref, "CropBox", f"[0 0 {x1 - x0} {y1 - x0}]")
-        if page_box_data:
-            mediabox_data[page.number] = page_box_data
+    for x in range(1, doc.xref_length()):
+        t = doc.xref_get_key(x, "Type")
+        box_set = {}
+        if t[1] in ["/Pages", "/Page"]:
+            mediabox = doc.xref_get_key(x, "MediaBox")
+            if mediabox[0] != "null":
+                _, _, x1, y1 = mediabox[1].replace("[", "").replace("]", "").split(" ")
+                doc.xref_set_key(x, "MediaBox", f"[0 0 {x1} {y1}]")
+                box_set["MediaBox"] = mediabox[1]
+            for k in ["CropBox", "BleedBox", "TrimBox", "ArtBox"]:
+                box = doc.xref_get_key(x, k)
+                if box[0] != "null":
+                    box_set[k] = box[1]
+                    doc.xref_set_key(x, k, "null")
+        if box_set:
+            mediabox_data[x] = box_set
     return mediabox_data
 
 
