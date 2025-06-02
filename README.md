@@ -154,8 +154,12 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 - `--max-pages-per-part`: Maximum number of pages per part for split translation. If not set, no splitting will be performed.
 - `--no-watermark`: [DEPRECATED] Use --watermark-output-mode=no_watermark instead.
 - `--translate-table-text`: Translate table text (experimental, default: False)
+- `--formular-font-pattern`: Font pattern to identify formula text (default: None)
+- `--formular-char-pattern`: Character pattern to identify formula text (default: None)
+- `--show-char-box`: Show character bounding boxes (debug only, default: False)
 - `--skip-scanned-detection`: Skip scanned document detection (default: False). When using split translation, only the first part performs detection if not skipped.
 - `--ocr-workaround`: Use OCR workaround (default: False). When enabled, the tool will use OCR to detect text and fill background for scanned PDF.
+- `--rpc-doclayout`: RPC service host address for document layout analysis (default: None)
 - `--working-dir`: Working directory for translation. If not set, use temp directory.
 - `--no-auto-extract-glossary`: Disable automatic term extraction. If this flag is present, the step is skipped. Defaults to enabled.
 
@@ -215,8 +219,12 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 ### Output Control
 
 - `--output`, `-o`: Output directory for translated files. If not set, use current working directory.
-- `--debug`, `-d`: Enable debug logging level and export detailed intermediate results in `~/.cache/yadt/working`.
+- `--debug`: Enable debug logging level and export detailed intermediate results in `~/.cache/yadt/working`.
 - `--report-interval`: Progress report interval in seconds (default: 0.1).
+
+### General Options
+
+- `--warmup`: Only download and verify required assets then exit (default: False)
 
 ### Offline Assets Management
 
@@ -261,6 +269,12 @@ max-pages-per-part = 50  # Automatically split the document for translation and 
 # no-watermark = false  # DEPRECATED: Use watermark-output-mode instead
 skip-scanned-detection = false  # Skip scanned document detection for faster processing
 auto_extract_glossary = true # Set to false to disable automatic term extraction
+formular_font_pattern = "" # Font pattern for formula text
+formular_char_pattern = "" # Character pattern for formula text
+show_char_box = false # Show character bounding boxes (debug)
+ocr_workaround = false # Use OCR workaround for scanned PDFs
+rpc_doclayout = "" # RPC service host for document layout analysis
+working_dir = "" # Working directory for translation
 
 # Translation service
 openai = true
