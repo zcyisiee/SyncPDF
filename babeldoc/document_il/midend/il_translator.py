@@ -346,7 +346,7 @@ class ILTranslator:
             placeholder, regex_pattern = placeholder
         else:
             regex_pattern = re.escape(placeholder)
-        if placeholder in paragraph.unicode:
+        if re.match(regex_pattern, paragraph.unicode, re.IGNORECASE):
             return self.create_formula_placeholder(formula, formula_id + 1, paragraph)
 
         return FormulaPlaceholder(formula_id, formula, placeholder, regex_pattern)
@@ -371,9 +371,10 @@ class ILTranslator:
             right_placeholder, right_placeholder_regex_pattern = right_placeholder
         else:
             right_placeholder_regex_pattern = re.escape(right_placeholder)
-        if (
-            left_placeholder in paragraph.unicode
-            or right_placeholder in paragraph.unicode
+        if re.match(
+            f"{left_placeholder_regex_pattern}|{right_placeholder_regex_pattern}",
+            paragraph.unicode,
+            re.IGNORECASE,
         ):
             return self.create_rich_text_placeholder(
                 composition,
@@ -630,7 +631,8 @@ class ILTranslator:
 
             # 处理占位符
             if any(
-                isinstance(p, FormulaPlaceholder) and matched_text == p.placeholder
+                isinstance(p, FormulaPlaceholder)
+                and re.match(f"^{p.regex_pattern}$", matched_text, re.IGNORECASE)
                 for p in input_text.placeholders
             ):
                 # 处理公式占位符
@@ -638,7 +640,7 @@ class ILTranslator:
                     p
                     for p in input_text.placeholders
                     if isinstance(p, FormulaPlaceholder)
-                    and matched_text == p.placeholder
+                    and re.match(f"^{p.regex_pattern}$", matched_text, re.IGNORECASE)
                 )
                 comp = PdfParagraphComposition()
                 comp.pdf_formula = placeholder.formula
@@ -649,11 +651,14 @@ class ILTranslator:
                     p
                     for p in input_text.placeholders
                     if not isinstance(p, FormulaPlaceholder)
-                    and re.match(f"^{p.left_regex_pattern}", matched_text)
+                    and re.match(
+                        f"^{p.left_regex_pattern}", matched_text, re.IGNORECASE
+                    )
                 )
                 text = re.match(
                     f"^{placeholder.left_regex_pattern}(.*){placeholder.right_regex_pattern}$",
                     matched_text,
+                    re.IGNORECASE,
                 ).group(1)
 
                 if isinstance(
