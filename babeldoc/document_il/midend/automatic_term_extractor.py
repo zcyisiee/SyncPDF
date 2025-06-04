@@ -254,7 +254,7 @@ class AutomaticTermExtractor:
                         )
 
         except Exception as e:
-            logger.error(f"Error during automatic terms extract: {e}")
+            logger.warning(f"Error during automatic terms extract: {e}")
             return
         finally:
             pbar.advance(len(paragraphs.paragraphs))
