@@ -158,7 +158,9 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 - `--formular-char-pattern`: Character pattern to identify formula text (default: None)
 - `--show-char-box`: Show character bounding boxes (debug only, default: False)
 - `--skip-scanned-detection`: Skip scanned document detection (default: False). When using split translation, only the first part performs detection if not skipped.
-- `--ocr-workaround`: Use OCR workaround (default: False). When enabled, the tool will use OCR to detect text and fill background for scanned PDF.
+- `--ocr-workaround`: Use OCR workaround (default: False). Only suitable for documents with black text on white background. When enabled, white rectangular blocks will be added below the translation to cover the original text content, and all text will be forced to black color.
+
+
 - `--rpc-doclayout`: RPC service host address for document layout analysis (default: None)
 - `--working-dir`: Working directory for translation. If not set, use temp directory.
 - `--no-auto-extract-glossary`: Disable automatic term extraction. If this flag is present, the step is skipped. Defaults to enabled.

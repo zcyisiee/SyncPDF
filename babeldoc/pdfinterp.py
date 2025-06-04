@@ -319,7 +319,11 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             (x, y) = apply_matrix_pt(ctm, (x, y))
             (x2, y2) = apply_matrix_pt(ctm, (x2, y2))
             x_id = self.il_creater.on_xobj_begin((x, y, x2, y2), xobj.objid)
-            ctm_inv = np.linalg.inv(np.array(ctm[:4]).reshape(2, 2))
+            try:
+                ctm_inv = np.linalg.inv(np.array(ctm[:4]).reshape(2, 2))
+            except Exception:
+                self.il_creater.on_xobj_end(x_id, " ")
+                return
             np_version = np.__version__
             if np_version.split(".")[0] >= "2":
                 pos_inv = -np.asmatrix(ctm[4:]) * ctm_inv
