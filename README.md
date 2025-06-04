@@ -122,7 +122,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 >
 > End users should directly use **Online Service**: Beta version launched [Immersive Translate - BabelDOC](https://app.immersivetranslate.com/babel-doc/) 1000 free pages per month.
 >
-> End users who need self-deployment should use [PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate)
+> End users who need self-deployment should use [PDFMathTranslate 2.0](https://github.com/PDFMathTranslate/PDFMathTranslate-next)
 > 
 > If you find that an option is not listed below, it means that this option is a debugging option for maintainers. Please do not use these options.
 
@@ -189,7 +189,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 
 > [!TIP]
 >
-> 1. Currently, only OpenAI-compatible LLM is supported. For more translator support, please use [PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate).
+> 1. Currently, only OpenAI-compatible LLM is supported. For more translator support, please use [PDFMathTranslate 2.0](https://github.com/PDFMathTranslate/PDFMathTranslate-next).
 > 2. It is recommended to use models with strong compatibility with OpenAI, such as: `glm-4-flash`, `deepseek-chat`, etc.
 > 3. Currently, it has not been optimized for traditional translation engines like Bing/Google, it is recommended to use LLMs.
 > 4. You can use [litellm](https://github.com/BerriAI/litellm) to access multiple models.
@@ -310,7 +310,7 @@ report-interval = 0.5
 >
 > 3. We do not provide any technical support for the BabelDOC API.
 >
-> 4. When performing secondary development, please refer to [pdf2zh 2.0 high level](https://github.com/awwaawwa/PDFMathTranslate/blob/v2-rc/pdf2zh/high_level.py) and ensure that BabelDOC runs in a subprocess.
+> 4. When performing secondary development, please refer to [pdf2zh 2.0 high level](https://github.com/PDFMathTranslate/PDFMathTranslate-next/blob/main/pdf2zh_next/high_level.py) and ensure that BabelDOC runs in a subprocess.
 
 You can refer to the example in [main.py](https://github.com/funstory-ai/yadt/blob/main/babeldoc/main.py) to use BabelDOC's Python API.
 
