@@ -34,7 +34,7 @@
 PDF scientific paper translation and bilingual comparison library.
 
 - **Online Service**: Beta version launched [Immersive Translate - BabelDOC](https://app.immersivetranslate.com/babel-doc/) 1000 free pages per month.
-- **Self-deployment**: [PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate) 1.9.3+ Experimental support for BabelDOC, available for self-deployment + WebUI with more translation services.
+- **Self-deployment**: [PDFMathTranslate 2.0](https://github.com/PDFMathTranslate/PDFMathTranslate-next) support for BabelDOC, available for self-deployment + WebUI with more translation services.
 - Provides a simple [command line interface](#getting-started).
 - Provides a [Python API](#python-api).
 - Mainly designed to be embedded into other programs, but can also be used directly for simple translation tasks.
