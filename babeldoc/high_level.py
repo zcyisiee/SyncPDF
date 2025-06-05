@@ -5,7 +5,6 @@ import io
 import logging
 import pathlib
 import shutil
-import struct
 import threading
 import time
 from asyncio import CancelledError
@@ -14,11 +13,6 @@ from typing import Any
 from typing import BinaryIO
 
 import pymupdf
-from pdfminer.cmapdb import IdentityCMap
-from pdfminer.pdfdocument import PDFDocument
-from pdfminer.pdfinterp import PDFResourceManager
-from pdfminer.pdfpage import PDFPage
-from pdfminer.pdfparser import PDFParser
 from pymupdf import Document
 from pymupdf import Font
 
@@ -45,23 +39,16 @@ from babeldoc.document_il.midend.typesetting import Typesetting
 from babeldoc.document_il.utils.fontmap import FontMapper
 from babeldoc.document_il.xml_converter import XMLConverter
 from babeldoc.pdfinterp import PDFPageInterpreterEx
+from babeldoc.pdfminer.pdfdocument import PDFDocument
+from babeldoc.pdfminer.pdfinterp import PDFResourceManager
+from babeldoc.pdfminer.pdfpage import PDFPage
+from babeldoc.pdfminer.pdfparser import PDFParser
 from babeldoc.progress_monitor import ProgressMonitor
 from babeldoc.result_merger import ResultMerger
 from babeldoc.split_manager import SplitManager
 from babeldoc.translation_config import TranslateResult
 from babeldoc.translation_config import TranslationConfig
 from babeldoc.translation_config import WatermarkOutputMode
-
-
-def decode(_, code: bytes) -> tuple[int, ...]:
-    n = len(code) // 2
-    if n:
-        return struct.unpack_from(f">{n}H", code)
-    else:
-        return ()
-
-
-IdentityCMap.decode = decode
 
 logger = logging.getLogger(__name__)
 

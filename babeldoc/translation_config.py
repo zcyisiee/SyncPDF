@@ -8,7 +8,6 @@ from pathlib import Path
 
 from babeldoc.const import CACHE_FOLDER
 from babeldoc.document_il.translator.translator import BaseTranslator
-from babeldoc.docvision.doclayout import DocLayoutModel
 from babeldoc.glossary import Glossary
 from babeldoc.glossary import GlossaryEntry
 from babeldoc.progress_monitor import ProgressMonitor
@@ -115,7 +114,7 @@ class TranslationConfig:
         input_file: str | Path,
         lang_in: str,
         lang_out: str,
-        doc_layout_model: DocLayoutModel,
+        doc_layout_model,  # DocLayoutModel
         # for backward compatibility
         font: str | Path | None = None,
         pages: str | None = None,
@@ -230,6 +229,8 @@ class TranslationConfig:
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
         if not doc_layout_model:
+            from babeldoc.docvision.doclayout import DocLayoutModel
+
             doc_layout_model = DocLayoutModel.load_available()
         self.doc_layout_model = doc_layout_model
 
