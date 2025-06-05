@@ -602,6 +602,7 @@ def cli():
             or v.name.startswith("httpx")
             or "http11" in v.name
             or "openai" in v.name
+            or "pdfminer" in v.name
         ):
             v.disabled = True
             v.propagate = False
