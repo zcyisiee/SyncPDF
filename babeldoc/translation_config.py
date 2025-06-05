@@ -31,6 +31,7 @@ class SharedContextCrossSplitPart:
         self.user_glossaries: list[Glossary] = []
         self.auto_extracted_glossary: Glossary | None = None
         self.raw_extracted_terms: list[tuple[str, str]] = []
+        self.auto_enabled_ocr_workaround = False
 
     def initialize_glossaries(self, initial_glossaries: list[Glossary] | None):
         with self._lock:
@@ -150,6 +151,7 @@ class TranslationConfig:
         glossaries: list[Glossary] | None = None,
         pool_max_workers: int | None = None,
         auto_extract_glossary: bool = True,
+        auto_enable_ocr_workaround: bool = False,
     ):
         self.translator = translator
         initial_user_glossaries = list(glossaries) if glossaries else []
@@ -251,6 +253,11 @@ class TranslationConfig:
         self.custom_system_prompt = custom_system_prompt
         self.add_formula_placehold_hint = add_formula_placehold_hint
         self.auto_extract_glossary = auto_extract_glossary
+        self.auto_enable_ocr_workaround = auto_enable_ocr_workaround
+
+        if auto_enable_ocr_workaround:
+            self.ocr_workaround = False
+            self.skip_scanned_detection = False
 
     def parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
         """解析页码字符串，返回页码范围列表

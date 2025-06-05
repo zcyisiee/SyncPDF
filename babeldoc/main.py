@@ -248,6 +248,12 @@ def create_parser():
         default=True,
         help="Disable automatic term extraction. (Config file: set auto_extract_glossary = false)",
     )
+    translation_group.add_argument(
+        "--auto-enable-ocr-workaround",
+        action="store_true",
+        default=False,
+        help="Enable automatic OCR workaround. If a document is detected as heavily scanned, this will attempt to enable OCR processing and skip further scan detection. Note: This option interacts with `--ocr-workaround` and `--skip-scanned-detection`. See documentation for details. (default: False)",
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -468,6 +474,7 @@ async def main():
             glossaries=loaded_glossaries,
             pool_max_workers=args.pool_max_workers,
             auto_extract_glossary=args.auto_extract_glossary,
+            auto_enable_ocr_workaround=args.auto_enable_ocr_workaround,
         )
 
         # Create progress handler

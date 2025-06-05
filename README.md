@@ -159,6 +159,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 - `--show-char-box`: Show character bounding boxes (debug only, default: False)
 - `--skip-scanned-detection`: Skip scanned document detection (default: False). When using split translation, only the first part performs detection if not skipped.
 - `--ocr-workaround`: Use OCR workaround (default: False). Only suitable for documents with black text on white background. When enabled, white rectangular blocks will be added below the translation to cover the original text content, and all text will be forced to black color.
+- `--auto-enable-ocr-workaround`: Enable automatic OCR workaround (default: False). If a document is detected as heavily scanned, this will attempt to enable OCR processing and skip further scan detection. See "Important Interaction Note" below for crucial details on how this interacts with `--ocr-workaround` and `--skip-scanned-detection`.
 
 
 - `--rpc-doclayout`: RPC service host address for document layout analysis (default: None)
@@ -277,6 +278,7 @@ show_char_box = false # Show character bounding boxes (debug)
 ocr_workaround = false # Use OCR workaround for scanned PDFs
 rpc_doclayout = "" # RPC service host for document layout analysis
 working_dir = "" # Working directory for translation
+auto_enable_ocr_workaround = false # Enable automatic OCR workaround for scanned PDFs. See docs for interaction with ocr_workaround and skip_scanned_detection.
 
 # Translation service
 openai = true
@@ -427,3 +429,14 @@ Everyone interacting in YADT and its sub-projects' codebases, issue trackers, ch
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=funstory-ai/babeldoc&type=Date"/>
  </picture>
 </a>
+
+> [!WARNING]
+> **Important Interaction Note for `--auto-enable-ocr-workaround`:**
+>
+> When `--auto-enable-ocr-workaround` is set to `true` (either via command line or config file):
+>
+> 1.  During the initial setup, the values for `ocr_workaround` and `skip_scanned_detection` will be forced to `false` by `TranslationConfig`, regardless of whether you also set `--ocr-workaround` or `--skip-scanned-detection` flags.
+> 2.  Then, during the scanned document detection phase (`DetectScannedFile` stage):
+>     *   If the document is identified as heavily scanned (e.g., >80% scanned pages) AND `auto_enable_ocr_workaround` is `true` (i.e., `translation_config.auto_enable_ocr_workaround` is true), the system will then attempt to set both `ocr_workaround` to `true` and `skip_scanned_detection` to `true`.
+>
+> This means that `--auto-enable-ocr-workaround` effectively gives the system control to enable OCR processing for scanned documents, potentially overriding manual settings for `--ocr-workaround` and `--skip_scanned_detection` based on its detection results. If the document is *not* detected as heavily scanned, then the initial `false` values for `ocr_workaround` and `skip_scanned_detection` (forced by `--auto-enable-ocr-workaround` at the `TranslationConfig` initialization stage) will remain in effect unless changed by other logic.
