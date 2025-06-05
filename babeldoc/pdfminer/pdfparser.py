@@ -14,7 +14,7 @@ from babeldoc.pdfminer.psexceptions import PSEOF
 from babeldoc.pdfminer.psparser import KWD
 from babeldoc.pdfminer.psparser import PSKeyword
 from babeldoc.pdfminer.psparser import PSStackParser
-from pdfminer import settings
+from babeldoc.pdfminer import settings
 
 if TYPE_CHECKING:
     from babeldoc.pdfminer.pdfdocument import PDFDocument

@@ -16,7 +16,7 @@ from babeldoc.pdfminer.utils import Matrix
 from babeldoc.pdfminer.utils import PathSegment
 from babeldoc.pdfminer.utils import Point
 from babeldoc.pdfminer.utils import Rect
-from pdfminer import utils
+from babeldoc.pdfminer import utils
 
 if TYPE_CHECKING:
     from babeldoc.pdfminer.pdfinterp import PDFGraphicState

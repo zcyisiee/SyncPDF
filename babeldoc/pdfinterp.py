@@ -6,6 +6,7 @@ from typing import cast
 import numpy as np
 
 from babeldoc.document_il.frontend.il_creater import ILCreater
+from babeldoc.pdfminer import settings
 from babeldoc.pdfminer.pdfcolor import PREDEFINED_COLORSPACE
 from babeldoc.pdfminer.pdfcolor import PDFColorSpace
 from babeldoc.pdfminer.pdfdevice import PDFDevice
@@ -39,7 +40,6 @@ from babeldoc.pdfminer.utils import Rect
 from babeldoc.pdfminer.utils import apply_matrix_pt
 from babeldoc.pdfminer.utils import choplist
 from babeldoc.pdfminer.utils import mult_matrix
-from pdfminer import settings
 
 log = logging.getLogger(__name__)
 

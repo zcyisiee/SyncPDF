@@ -10,8 +10,8 @@ from typing import TypeVar
 from typing import Union
 
 from babeldoc.pdfminer.utils import choplist
-from pdfminer import psexceptions
-from pdfminer import settings
+from babeldoc.pdfminer import psexceptions
+from babeldoc.pdfminer import settings
 
 log = logging.getLogger(__name__)
 

@@ -47,7 +47,7 @@ from babeldoc.pdfminer.utils import bbox2str
 from babeldoc.pdfminer.utils import enc
 from babeldoc.pdfminer.utils import make_compat_str
 from babeldoc.pdfminer.utils import mult_matrix
-from pdfminer import utils
+from babeldoc.pdfminer import utils
 
 log = logging.getLogger(__name__)
 

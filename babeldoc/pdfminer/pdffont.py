@@ -45,7 +45,7 @@ from babeldoc.pdfminer.utils import Rect
 from babeldoc.pdfminer.utils import apply_matrix_norm
 from babeldoc.pdfminer.utils import choplist
 from babeldoc.pdfminer.utils import nunpack
-from pdfminer import settings
+from babeldoc.pdfminer import settings
 
 if TYPE_CHECKING:
     from babeldoc.pdfminer.pdfinterp import PDFResourceManager

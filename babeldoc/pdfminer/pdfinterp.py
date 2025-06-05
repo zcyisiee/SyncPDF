@@ -51,7 +51,7 @@ from babeldoc.pdfminer.utils import Point
 from babeldoc.pdfminer.utils import Rect
 from babeldoc.pdfminer.utils import choplist
 from babeldoc.pdfminer.utils import mult_matrix
-from pdfminer import settings
+from babeldoc.pdfminer import settings
 
 log = logging.getLogger(__name__)
 

@@ -6,7 +6,7 @@ from babeldoc.pdfminer.pdftypes import dict_value
 from babeldoc.pdfminer.pdftypes import int_value
 from babeldoc.pdfminer.pdftypes import list_value
 from babeldoc.pdfminer.utils import choplist
-from pdfminer import settings
+from babeldoc.pdfminer import settings
 
 
 class NumberTree:

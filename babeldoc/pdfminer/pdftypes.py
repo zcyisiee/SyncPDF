@@ -17,8 +17,8 @@ from babeldoc.pdfminer.psparser import LIT
 from babeldoc.pdfminer.psparser import PSObject
 from babeldoc.pdfminer.runlength import rldecode
 from babeldoc.pdfminer.utils import apply_png_predictor
-from pdfminer import pdfexceptions
-from pdfminer import settings
+from babeldoc.pdfminer import pdfexceptions
+from babeldoc.pdfminer import settings
 
 if TYPE_CHECKING:
     from babeldoc.pdfminer.pdfdocument import PDFDocument

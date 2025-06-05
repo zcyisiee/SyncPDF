@@ -18,7 +18,7 @@ from babeldoc.pdfminer.pdftypes import resolve1
 from babeldoc.pdfminer.psparser import LIT
 from babeldoc.pdfminer.utils import Rect
 from babeldoc.pdfminer.utils import parse_rect
-from pdfminer import settings
+from babeldoc.pdfminer import settings
 
 log = logging.getLogger(__name__)
 

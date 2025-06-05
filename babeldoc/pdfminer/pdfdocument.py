@@ -47,7 +47,7 @@ from babeldoc.pdfminer.utils import decode_text
 from babeldoc.pdfminer.utils import format_int_alpha
 from babeldoc.pdfminer.utils import format_int_roman
 from babeldoc.pdfminer.utils import nunpack
-from pdfminer import settings
+from babeldoc.pdfminer import settings
 
 log = logging.getLogger(__name__)
 
