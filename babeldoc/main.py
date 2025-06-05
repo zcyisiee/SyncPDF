@@ -16,9 +16,6 @@ import babeldoc.assets.assets
 import babeldoc.high_level
 from babeldoc.document_il.translator.translator import OpenAITranslator
 from babeldoc.document_il.translator.translator import set_translate_rate_limiter
-from babeldoc.docvision.doclayout import DocLayoutModel
-from babeldoc.docvision.rpc_doclayout import RpcDocLayoutModel
-from babeldoc.docvision.table_detection.rapidocr import RapidOCRModel
 from babeldoc.glossary import Glossary
 from babeldoc.translation_config import TranslationConfig
 from babeldoc.translation_config import WatermarkOutputMode
@@ -329,14 +326,19 @@ async def main():
 
     # 设置翻译速率限制
     set_translate_rate_limiter(args.qps)
-
     # 初始化文档布局模型
     if args.rpc_doclayout:
+        from babeldoc.docvision.rpc_doclayout import RpcDocLayoutModel
+
         doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout)
     else:
+        from babeldoc.docvision.doclayout import DocLayoutModel
+
         doc_layout_model = DocLayoutModel.load_onnx()
 
     if args.translate_table_text:
+        from babeldoc.docvision.table_detection.rapidocr import RapidOCRModel
+
         table_model = RapidOCRModel()
     else:
         table_model = None
