@@ -632,7 +632,7 @@ def fix_media_box(doc: Document) -> None:
         box_set = {}
         if t[1] in ["/Pages", "/Page"]:
             mediabox = doc.xref_get_key(x, "MediaBox")
-            if mediabox[0] != "null":
+            if mediabox[0] == "array":
                 _, _, x1, y1 = mediabox[1].replace("[", "").replace("]", "").split(" ")
                 doc.xref_set_key(x, "MediaBox", f"[0 0 {x1} {y1}]")
                 box_set["MediaBox"] = mediabox[1]
