@@ -152,6 +152,7 @@ class TranslationConfig:
         pool_max_workers: int | None = None,
         auto_extract_glossary: bool = True,
         auto_enable_ocr_workaround: bool = False,
+        primary_font_family: str | None = None,
     ):
         self.translator = translator
         initial_user_glossaries = list(glossaries) if glossaries else []
@@ -258,6 +259,14 @@ class TranslationConfig:
         if auto_enable_ocr_workaround:
             self.ocr_workaround = False
             self.skip_scanned_detection = False
+
+        assert primary_font_family in [
+            None,
+            "serif",
+            "sans-serif",
+            "script",
+        ]
+        self.primary_font_family = primary_font_family
 
     def parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
         """解析页码字符串，返回页码范围列表

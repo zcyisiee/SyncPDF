@@ -254,6 +254,13 @@ def create_parser():
         default=False,
         help="Enable automatic OCR workaround. If a document is detected as heavily scanned, this will attempt to enable OCR processing and skip further scan detection. Note: This option interacts with `--ocr-workaround` and `--skip-scanned-detection`. See documentation for details. (default: False)",
     )
+    translation_group.add_argument(
+        "--primary-font-family",
+        type=str,
+        choices=["serif", "sans-serif", "script"],
+        default=None,
+        help="Override primary font family for translated text. Choices: 'serif' for serif fonts, 'sans-serif' for sans-serif fonts, 'script' for script/italic fonts. If not specified, uses automatic font selection based on original text properties.",
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -475,6 +482,7 @@ async def main():
             pool_max_workers=args.pool_max_workers,
             auto_extract_glossary=args.auto_extract_glossary,
             auto_enable_ocr_workaround=args.auto_enable_ocr_workaround,
+            primary_font_family=args.primary_font_family,
         )
 
         # Create progress handler
