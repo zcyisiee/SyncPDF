@@ -595,6 +595,12 @@ def do_translate(
         # not being able to copy translated text can be fixed,
         # the macOS preview is broken
         # fix_cmap(result, translation_config)
+        try:
+            migrate_toc(translation_config, result)
+        except Exception as e:
+            logger.error(
+                f"Failed to migrate TOC from {translation_config.input_file}: {e}"
+            )
         pm.translate_done(result)
         return result
 
@@ -610,6 +616,51 @@ def do_translate(
         logger.debug("do_translate finally")
         pm.on_finish()
         translation_config.cleanup_temp_files()
+
+
+def migrate_toc(
+    translation_config: TranslationConfig, translate_result: TranslateResult
+):
+    old_doc = Document(translation_config.input_file)
+    if not old_doc:
+        return
+
+    try:
+        fix_filter(old_doc)
+        fix_null_xref(old_doc)
+    except Exception:
+        logger.exception("auto fix failed, please check the pdf file")
+
+    toc_data = old_doc.get_toc()
+
+    if not toc_data:
+        logger.info("No TOC found in the original PDF, skipping migration.")
+        return
+
+    files = {
+        translate_result.dual_pdf_path,
+        # translate_result.mono_pdf_path,
+        translate_result.no_watermark_dual_pdf_path,
+        # translate_result.no_watermark_mono_pdf_path
+    }
+
+    for f in files:
+        mig_toc_temp_input = translation_config.get_working_file_path(
+            "mig_toc_temp.pdf"
+        )
+        shutil.copy(f, mig_toc_temp_input)
+        new_doc = Document(mig_toc_temp_input.as_posix())
+        if not new_doc:
+            continue
+
+        new_doc.set_toc(toc_data)
+        PDFCreater.save_pdf_with_timeout(
+            new_doc,
+            f.as_posix(),
+            translation_config=translation_config,
+            clean=not translation_config.skip_clean,
+            tag="mig_toc",
+        )
 
 
 def fix_media_box(doc: Document) -> None:
