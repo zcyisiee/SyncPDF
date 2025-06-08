@@ -92,7 +92,7 @@ def fix_cmap(translate_result: TranslateResult, translate_config: TranslationCon
         "no_watermark_dual_pdf_path",
     ):
         path = getattr(translate_result, attr)
-        if path in processed:
+        if not path or path in processed:
             continue
         processed.append(path)
 
