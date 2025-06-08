@@ -188,7 +188,7 @@ def start_parse_il(
         # but in order to facilitate the migration of pdf2zh,
         # the relevant code is temporarily retained.
         # pix = doc_zh[page.pageno].get_pixmap()
-        # image = np.fromstring(pix.samples, np.uint8).reshape(
+        # image = np.frombuffer(pix.samples, np.uint8).reshape(
         #     pix.height, pix.width, 3
         # )[:, :, ::-1]
         # page_layout = model.predict(
