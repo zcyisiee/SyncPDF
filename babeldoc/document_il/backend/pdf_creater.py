@@ -99,6 +99,7 @@ def parse_truetype_data(data):
 TOUNICODE_HEAD = """\
 /CIDInit /ProcSet findresource begin
 12 dict begin
+begincmap
 /CIDSystemInfo <</Registry(Adobe)/Ordering(UCS)/Supplement 0>> def
 /CMapName /Adobe-Identity-UCS def
 /CMapType 2 def
@@ -124,7 +125,10 @@ def make_tounicode(cmap, used):
             if code < 0x10000:
                 line.append(f"<{glyph:04x}><{code:04x}>")
             else:
-                line.append(f"<{glyph:04x}><{code:08x}>")
+                code -= 0x10000
+                high = 0xD800 + (code >> 10)
+                low = 0xDC00 + (code & 0b1111111111)
+                line.append(f"<{glyph:04x}><{high:04x}{low:04x}>")
         line.append("endbfchar")
     line.append(TOUNICODE_TAIL)
     return "\n".join(line)

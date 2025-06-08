@@ -593,11 +593,7 @@ def do_translate(
         result.original_pdf_path = translation_config.input_file
         result.peak_memory_usage = peak_memory_usage
 
-        # should fix macOS preview compatibility
-        # Although the issue of Windows Edge
-        # not being able to copy translated text can be fixed,
-        # the macOS preview is broken
-        # fix_cmap(result, translation_config)
+        fix_cmap(result, translation_config)
         try:
             migrate_toc(translation_config, result)
         except Exception as e:
