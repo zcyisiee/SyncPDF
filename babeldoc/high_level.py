@@ -644,6 +644,8 @@ def migrate_toc(
     }
 
     for f in files:
+        if not f:
+            continue
         mig_toc_temp_input = translation_config.get_working_file_path(
             "mig_toc_temp.pdf"
         )
