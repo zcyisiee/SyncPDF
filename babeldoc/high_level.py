@@ -23,6 +23,7 @@ from babeldoc.const import CACHE_FOLDER
 from babeldoc.converter import TranslateConverter
 from babeldoc.document_il import il_version_1
 from babeldoc.document_il.babeldoc_exception.BabelDOCException import ExtractTextError
+from babeldoc.document_il.babeldoc_exception.BabelDOCException import ScannedPDFError
 from babeldoc.document_il.backend.pdf_creater import SAVE_PDF_STAGE_NAME
 from babeldoc.document_il.backend.pdf_creater import SUBSET_FONT_STAGE_NAME
 from babeldoc.document_il.backend.pdf_creater import PDFCreater
@@ -643,6 +644,8 @@ def migrate_toc(
     }
 
     for f in files:
+        if not f:
+            continue
         mig_toc_temp_input = translation_config.get_working_file_path(
             "mig_toc_temp.pdf"
         )
@@ -742,22 +745,21 @@ def _do_translate_single(
     resfont = None
     doc_pdf2zh.save(temp_pdf_path)
 
-    # May cause misjudgment, therefore disabled.
-    # if not translation_config.skip_scanned_detection and DetectScannedFile(
-    #     translation_config
-    # ).fast_check(doc_pdf2zh):
-    #     if translation_config.auto_enable_ocr_workaround:
-    #         logger.warning(
-    #             "Fast scanned check hit, Turning on OCR workaround.",
-    #         )
-    #         translation_config.shared_context_cross_split_part.auto_enabled_ocr_workaround = True
-    #         translation_config.ocr_workaround = True
-    #         translation_config.skip_scanned_detection = True
-    #     else:
-    #         logger.warning(
-    #             "Fast scanned check hit, Please check the input PDF file.",
-    #         )
-    #         raise ScannedPDFError("Scanned PDF detected.")
+    if not translation_config.skip_scanned_detection and DetectScannedFile(
+        translation_config
+    ).fast_check(doc_pdf2zh):
+        if translation_config.auto_enable_ocr_workaround:
+            logger.warning(
+                "Fast scanned check hit, Turning on OCR workaround.",
+            )
+            translation_config.shared_context_cross_split_part.auto_enabled_ocr_workaround = True
+            translation_config.ocr_workaround = True
+            translation_config.skip_scanned_detection = True
+        else:
+            logger.warning(
+                "Fast scanned check hit, Please check the input PDF file.",
+            )
+            raise ScannedPDFError("Scanned PDF detected.")
 
     il_creater = ILCreater(translation_config)
     il_creater.mupdf = doc_pdf2zh
