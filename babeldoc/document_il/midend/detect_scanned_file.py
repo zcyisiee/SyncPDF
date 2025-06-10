@@ -71,7 +71,7 @@ class DetectScannedFile:
                 contents_list = page.get_contents()
                 for index in contents_list:
                     contents = doc.xref_stream(index)
-                    if regex.search(rb"/Artifact(\s*\<\<|\s+BDC)", contents):
+                    if regex.search(rb"/Artifact(\s*\<\<\s*/MCID\s+|\s+BDC)", contents):
                         hit_list[page.number] += 1
                     if regex.search(rb"\s3\s+Tr\s", contents):
                         hit_list[page.number] += 1
