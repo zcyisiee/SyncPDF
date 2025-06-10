@@ -1051,6 +1051,10 @@ class PDFCreater:
                             pretty=True,
                         )
                 pbar.advance()
+            if self.translation_config.no_mono:
+                mono_out_path = None
+            if self.translation_config.no_dual:
+                dual_out_path = None
             return TranslateResult(mono_out_path, dual_out_path)
         except Exception:
             logger.exception(
