@@ -161,6 +161,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 - `--ocr-workaround`: Use OCR workaround (default: False). Only suitable for documents with black text on white background. When enabled, white rectangular blocks will be added below the translation to cover the original text content, and all text will be forced to black color.
 - `--auto-enable-ocr-workaround`: Enable automatic OCR workaround (default: False). If a document is detected as heavily scanned, this will attempt to enable OCR processing and skip further scan detection. See "Important Interaction Note" below for crucial details on how this interacts with `--ocr-workaround` and `--skip-scanned-detection`.
 - `--primary-font-family`: Override primary font family for translated text. Choices: 'serif' for serif fonts, 'sans-serif' for sans-serif fonts, 'script' for script/italic fonts. If not specified, uses automatic font selection based on original text properties.
+- `--only-include-translated-page`: Only include translated pages in the output PDF. This option is only effective when `--pages` is used. (default: False)
 
 - `--rpc-doclayout`: RPC service host address for document layout analysis (default: None)
 - `--working-dir`: Working directory for translation. If not set, use temp directory.
@@ -269,6 +270,7 @@ disable-rich-text-translate = false
 use-alternating-pages-dual = false
 watermark-output-mode = "watermarked"  # Choices: "watermarked", "no_watermark", "both"
 max-pages-per-part = 50  # Automatically split the document for translation and merge it back.
+only_include_translated_page = false # Only include translated pages in the output PDF. Effective only when `pages` is used.
 # no-watermark = false  # DEPRECATED: Use watermark-output-mode instead
 skip-scanned-detection = false  # Skip scanned document detection for faster processing
 auto_extract_glossary = true # Set to false to disable automatic term extraction
