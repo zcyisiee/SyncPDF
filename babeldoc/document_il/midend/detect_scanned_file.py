@@ -71,7 +71,9 @@ class DetectScannedFile:
                 contents_list = page.get_contents()
                 for index in contents_list:
                     contents = doc.xref_stream(index)
-                    if regex.search(rb"/Artifact(\s*\<\<\s*/MCID\s+|\s+BDC)", contents):
+                    if regex.search(
+                        rb"(/Artifact|/P)(\s*\<\<\s*/MCID\s+|\s+BDC)", contents
+                    ):
                         hit_list[page.number] += 1
                     if regex.search(rb"\s3\s+Tr\s", contents):
                         hit_list[page.number] += 1
@@ -112,7 +114,7 @@ class DetectScannedFile:
                     non_scanned += 1
                 progress.advance(1)
 
-        if scanned > threshold:
+        if scanned >= threshold:
             if self.translation_config.auto_enable_ocr_workaround:
                 logger.warning(
                     f"Detected {scanned} scanned pages, which is more than 80% of the total pages. "
@@ -156,4 +158,5 @@ class DetectScannedFile:
         )[:, :, ::-1]
         before_page_image = cv2.cvtColor(before_page_image, cv2.COLOR_RGB2GRAY)
         after_page_image = cv2.cvtColor(after_page_image, cv2.COLOR_RGB2GRAY)
-        return structural_similarity(before_page_image, after_page_image) > 0.97
+        similarity = structural_similarity(before_page_image, after_page_image)
+        return similarity > 0.95

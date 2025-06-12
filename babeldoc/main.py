@@ -261,6 +261,12 @@ def create_parser():
         default=None,
         help="Override primary font family for translated text. Choices: 'serif' for serif fonts, 'sans-serif' for sans-serif fonts, 'script' for script/italic fonts. If not specified, uses automatic font selection based on original text properties.",
     )
+    translation_group.add_argument(
+        "--only-include-translated-page",
+        action="store_true",
+        default=False,
+        help="Only include translated pages in the output PDF. Effective only when --pages is used.",
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -483,6 +489,7 @@ async def main():
             auto_extract_glossary=args.auto_extract_glossary,
             auto_enable_ocr_workaround=args.auto_enable_ocr_workaround,
             primary_font_family=args.primary_font_family,
+            only_include_translated_page=args.only_include_translated_page,
         )
 
         # Create progress handler
