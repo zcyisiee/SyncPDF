@@ -398,6 +398,18 @@ class MemoryMonitor:
             time.sleep(self.interval)
 
 
+def fix_null_page_content(doc: Document) -> list[int]:
+    invalid_page = []
+    for x in range(len(doc)):
+        xref = doc[x].xref
+        if doc.xref_object(xref) == "null":
+            invalid_page.append(x)
+    for x in invalid_page:
+        doc.delete_page(x)
+        doc.insert_page(x)
+    return invalid_page
+
+
 def fix_null_xref(doc: Document) -> None:
     """Fix null xref in PDF file by replacing them with empty arrays.
 
@@ -718,6 +730,7 @@ def _do_translate_single(
         )
         # Fix null xref in PDF file
         try:
+            _ = fix_null_page_content(doc_input)
             fix_filter(doc_input)
             fix_null_xref(doc_input)
         except Exception:
@@ -731,7 +744,9 @@ def _do_translate_single(
     resfont = "china-ss"
 
     # Fix null xref in PDF file
+    invalid_pages = []
     try:
+        invalid_pages = fix_null_page_content(doc_pdf2zh)
         fix_filter(doc_pdf2zh)
         fix_null_xref(doc_pdf2zh)
     except Exception:
