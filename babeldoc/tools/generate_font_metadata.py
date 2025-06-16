@@ -9,11 +9,11 @@ import logging
 import re
 from pathlib import Path
 
-import babeldoc.high_level
+import babeldoc.format.pdf.high_level
 import babeldoc.translation_config
 import orjson
 import pymupdf
-from babeldoc.document_il import PdfFont
+from babeldoc.format.pdf.document_il import PdfFont
 from rich.logging import RichHandler
 
 logger = logging.getLogger(__name__)

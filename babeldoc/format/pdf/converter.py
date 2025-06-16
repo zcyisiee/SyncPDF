@@ -5,7 +5,7 @@ import unicodedata
 import numpy as np
 from pymupdf import Font
 
-from babeldoc.document_il.frontend.il_creater import ILCreater
+from babeldoc.format.pdf.document_il.frontend.il_creater import ILCreater
 from babeldoc.pdfminer.converter import PDFConverter
 from babeldoc.pdfminer.layout import LTChar
 from babeldoc.pdfminer.layout import LTComponent

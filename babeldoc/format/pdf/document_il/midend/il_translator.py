@@ -9,26 +9,28 @@ from pathlib import Path
 import tiktoken
 from tqdm import tqdm
 
-from babeldoc.document_il import Document
-from babeldoc.document_il import Page
-from babeldoc.document_il import PdfFont
-from babeldoc.document_il import PdfFormula
-from babeldoc.document_il import PdfParagraph
-from babeldoc.document_il import PdfParagraphComposition
-from babeldoc.document_il import PdfSameStyleCharacters
-from babeldoc.document_il import PdfSameStyleUnicodeCharacters
-from babeldoc.document_il import PdfStyle
-from babeldoc.document_il.translator.translator import BaseTranslator
-from babeldoc.document_il.utils.fontmap import FontMapper
-from babeldoc.document_il.utils.layout_helper import get_char_unicode_string
-from babeldoc.document_il.utils.layout_helper import get_paragraph_unicode
-from babeldoc.document_il.utils.layout_helper import is_same_style
-from babeldoc.document_il.utils.layout_helper import is_same_style_except_font
-from babeldoc.document_il.utils.layout_helper import is_same_style_except_size
-from babeldoc.document_il.utils.priority_thread_pool_executor import (
-    PriorityThreadPoolExecutor,
+from babeldoc.format.pdf.document_il import Document
+from babeldoc.format.pdf.document_il import Page
+from babeldoc.format.pdf.document_il import PdfFont
+from babeldoc.format.pdf.document_il import PdfFormula
+from babeldoc.format.pdf.document_il import PdfParagraph
+from babeldoc.format.pdf.document_il import PdfParagraphComposition
+from babeldoc.format.pdf.document_il import PdfSameStyleCharacters
+from babeldoc.format.pdf.document_il import PdfSameStyleUnicodeCharacters
+from babeldoc.format.pdf.document_il import PdfStyle
+from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il.utils.layout_helper import get_char_unicode_string
+from babeldoc.format.pdf.document_il.utils.layout_helper import get_paragraph_unicode
+from babeldoc.format.pdf.document_il.utils.layout_helper import is_same_style
+from babeldoc.format.pdf.document_il.utils.layout_helper import (
+    is_same_style_except_font,
+)
+from babeldoc.format.pdf.document_il.utils.layout_helper import (
+    is_same_style_except_size,
 )
 from babeldoc.translation_config import TranslationConfig
+from babeldoc.translator.translator import BaseTranslator
+from babeldoc.utils.priority_thread_pool_executor import PriorityThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 

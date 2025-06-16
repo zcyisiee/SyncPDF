@@ -1,7 +1,7 @@
 import logging
 import re
 
-from babeldoc.document_il import il_version_1
+from babeldoc.format.pdf.document_il import il_version_1
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,7 @@ from typing import cast
 
 import numpy as np
 
-from babeldoc.document_il.frontend.il_creater import ILCreater
+from babeldoc.format.pdf.document_il.frontend.il_creater import ILCreater
 from babeldoc.pdfminer import settings
 from babeldoc.pdfminer.pdfcolor import PREDEFINED_COLORSPACE
 from babeldoc.pdfminer.pdfcolor import PDFColorSpace

@@ -8,21 +8,21 @@ import Levenshtein
 import tiktoken
 from tqdm import tqdm
 
-from babeldoc.document_il import Document
-from babeldoc.document_il import Page
-from babeldoc.document_il import PdfFont
-from babeldoc.document_il import PdfParagraph
-from babeldoc.document_il.midend import il_translator
-from babeldoc.document_il.midend.il_translator import DocumentTranslateTracker
-from babeldoc.document_il.midend.il_translator import ILTranslator
-from babeldoc.document_il.midend.il_translator import PageTranslateTracker
-from babeldoc.document_il.translator.translator import BaseTranslator
-from babeldoc.document_il.utils.fontmap import FontMapper
-from babeldoc.document_il.utils.paragraph_helper import is_cid_paragraph
-from babeldoc.document_il.utils.priority_thread_pool_executor import (
-    PriorityThreadPoolExecutor,
+from babeldoc.format.pdf.document_il import Document
+from babeldoc.format.pdf.document_il import Page
+from babeldoc.format.pdf.document_il import PdfFont
+from babeldoc.format.pdf.document_il import PdfParagraph
+from babeldoc.format.pdf.document_il.midend import il_translator
+from babeldoc.format.pdf.document_il.midend.il_translator import (
+    DocumentTranslateTracker,
 )
+from babeldoc.format.pdf.document_il.midend.il_translator import ILTranslator
+from babeldoc.format.pdf.document_il.midend.il_translator import PageTranslateTracker
+from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il.utils.paragraph_helper import is_cid_paragraph
 from babeldoc.translation_config import TranslationConfig
+from babeldoc.translator.translator import BaseTranslator
+from babeldoc.utils.priority_thread_pool_executor import PriorityThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 

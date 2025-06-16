@@ -9,10 +9,10 @@ import freetype
 import pymupdf
 
 import babeldoc.pdfminer.pdfinterp
-from babeldoc.document_il import il_version_1
-from babeldoc.document_il.utils import zstd_helper
-from babeldoc.document_il.utils.style_helper import BLACK
-from babeldoc.document_il.utils.style_helper import YELLOW
+from babeldoc.format.pdf.document_il import il_version_1
+from babeldoc.format.pdf.document_il.utils import zstd_helper
+from babeldoc.format.pdf.document_il.utils.style_helper import BLACK
+from babeldoc.format.pdf.document_il.utils.style_helper import YELLOW
 from babeldoc.pdfminer.layout import LTChar
 from babeldoc.pdfminer.layout import LTFigure
 from babeldoc.pdfminer.pdffont import PDFCIDFont

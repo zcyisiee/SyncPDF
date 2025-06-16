@@ -19,36 +19,42 @@ from pymupdf import Font
 
 from babeldoc import asynchronize
 from babeldoc.assets.assets import warmup
+from babeldoc.babeldoc_exception.BabelDOCException import ExtractTextError
+from babeldoc.babeldoc_exception.BabelDOCException import ScannedPDFError
 from babeldoc.const import CACHE_FOLDER
-from babeldoc.converter import TranslateConverter
-from babeldoc.document_il import il_version_1
-from babeldoc.document_il.babeldoc_exception.BabelDOCException import ExtractTextError
-from babeldoc.document_il.babeldoc_exception.BabelDOCException import ScannedPDFError
-from babeldoc.document_il.backend.pdf_creater import SAVE_PDF_STAGE_NAME
-from babeldoc.document_il.backend.pdf_creater import SUBSET_FONT_STAGE_NAME
-from babeldoc.document_il.backend.pdf_creater import PDFCreater
-from babeldoc.document_il.backend.pdf_creater import reproduce_cmap
-from babeldoc.document_il.frontend.il_creater import ILCreater
-from babeldoc.document_il.midend.add_debug_information import AddDebugInformation
-from babeldoc.document_il.midend.automatic_term_extractor import AutomaticTermExtractor
-from babeldoc.document_il.midend.detect_scanned_file import DetectScannedFile
-from babeldoc.document_il.midend.il_translator import ILTranslator
-from babeldoc.document_il.midend.il_translator_llm_only import ILTranslatorLLMOnly
-from babeldoc.document_il.midend.layout_parser import LayoutParser
-from babeldoc.document_il.midend.paragraph_finder import ParagraphFinder
-from babeldoc.document_il.midend.styles_and_formulas import StylesAndFormulas
-from babeldoc.document_il.midend.table_parser import TableParser
-from babeldoc.document_il.midend.typesetting import Typesetting
-from babeldoc.document_il.utils.fontmap import FontMapper
-from babeldoc.document_il.xml_converter import XMLConverter
-from babeldoc.pdfinterp import PDFPageInterpreterEx
+from babeldoc.format.pdf.converter import TranslateConverter
+from babeldoc.format.pdf.document_il import il_version_1
+from babeldoc.format.pdf.document_il.backend.pdf_creater import SAVE_PDF_STAGE_NAME
+from babeldoc.format.pdf.document_il.backend.pdf_creater import SUBSET_FONT_STAGE_NAME
+from babeldoc.format.pdf.document_il.backend.pdf_creater import PDFCreater
+from babeldoc.format.pdf.document_il.backend.pdf_creater import reproduce_cmap
+from babeldoc.format.pdf.document_il.frontend.il_creater import ILCreater
+from babeldoc.format.pdf.document_il.midend.add_debug_information import (
+    AddDebugInformation,
+)
+from babeldoc.format.pdf.document_il.midend.automatic_term_extractor import (
+    AutomaticTermExtractor,
+)
+from babeldoc.format.pdf.document_il.midend.detect_scanned_file import DetectScannedFile
+from babeldoc.format.pdf.document_il.midend.il_translator import ILTranslator
+from babeldoc.format.pdf.document_il.midend.il_translator_llm_only import (
+    ILTranslatorLLMOnly,
+)
+from babeldoc.format.pdf.document_il.midend.layout_parser import LayoutParser
+from babeldoc.format.pdf.document_il.midend.paragraph_finder import ParagraphFinder
+from babeldoc.format.pdf.document_il.midend.styles_and_formulas import StylesAndFormulas
+from babeldoc.format.pdf.document_il.midend.table_parser import TableParser
+from babeldoc.format.pdf.document_il.midend.typesetting import Typesetting
+from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il.xml_converter import XMLConverter
+from babeldoc.format.pdf.pdfinterp import PDFPageInterpreterEx
+from babeldoc.format.pdf.result_merger import ResultMerger
+from babeldoc.format.pdf.split_manager import SplitManager
 from babeldoc.pdfminer.pdfdocument import PDFDocument
 from babeldoc.pdfminer.pdfinterp import PDFResourceManager
 from babeldoc.pdfminer.pdfpage import PDFPage
 from babeldoc.pdfminer.pdfparser import PDFParser
 from babeldoc.progress_monitor import ProgressMonitor
-from babeldoc.result_merger import ResultMerger
-from babeldoc.split_manager import SplitManager
 from babeldoc.translation_config import TranslateResult
 from babeldoc.translation_config import TranslationConfig
 from babeldoc.translation_config import WatermarkOutputMode

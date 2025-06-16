@@ -7,12 +7,12 @@ from collections import Counter
 from pathlib import Path
 
 from babeldoc.const import CACHE_FOLDER
-from babeldoc.document_il.translator.translator import BaseTranslator
+from babeldoc.format.pdf.split_manager import BaseSplitStrategy
+from babeldoc.format.pdf.split_manager import PageCountStrategy
 from babeldoc.glossary import Glossary
 from babeldoc.glossary import GlossaryEntry
 from babeldoc.progress_monitor import ProgressMonitor
-from babeldoc.split_manager import BaseSplitStrategy
-from babeldoc.split_manager import PageCountStrategy
+from babeldoc.translator.translator import BaseTranslator
 
 logger = logging.getLogger(__name__)
 

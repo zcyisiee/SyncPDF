@@ -5,9 +5,9 @@ import cv2
 import numpy as np
 from pymupdf import Document
 
-from babeldoc.document_il import il_version_1
-from babeldoc.document_il.utils.mupdf_helper import get_no_rotation_img
-from babeldoc.document_il.utils.style_helper import GREEN
+from babeldoc.format.pdf.document_il import il_version_1
+from babeldoc.format.pdf.document_il.utils.mupdf_helper import get_no_rotation_img
+from babeldoc.format.pdf.document_il.utils.style_helper import GREEN
 from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)

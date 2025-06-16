@@ -6,10 +6,10 @@ import pymupdf
 import regex
 from skimage.metrics import structural_similarity
 
-from babeldoc.document_il import il_version_1
-from babeldoc.document_il.babeldoc_exception.BabelDOCException import ScannedPDFError
-from babeldoc.document_il.utils.style_helper import GREEN
-from babeldoc.document_il.utils.zstd_helper import zstd_decompress
+from babeldoc.babeldoc_exception.BabelDOCException import ScannedPDFError
+from babeldoc.format.pdf.document_il import il_version_1
+from babeldoc.format.pdf.document_il.utils.style_helper import GREEN
+from babeldoc.format.pdf.document_il.utils.zstd_helper import zstd_decompress
 from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)

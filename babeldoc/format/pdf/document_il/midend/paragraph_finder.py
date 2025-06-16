@@ -2,21 +2,21 @@ import logging
 import random
 import re
 
-from babeldoc.document_il import Box
-from babeldoc.document_il import Document
-from babeldoc.document_il import Page
-from babeldoc.document_il import PdfCharacter
-from babeldoc.document_il import PdfLine
-from babeldoc.document_il import PdfParagraph
-from babeldoc.document_il import PdfParagraphComposition
-from babeldoc.document_il import PdfRectangle
-from babeldoc.document_il.babeldoc_exception.BabelDOCException import ExtractTextError
-from babeldoc.document_il.utils.layout_helper import Layout
-from babeldoc.document_il.utils.layout_helper import add_space_dummy_chars
-from babeldoc.document_il.utils.layout_helper import get_char_unicode_string
-from babeldoc.document_il.utils.layout_helper import is_bullet_point
-from babeldoc.document_il.utils.paragraph_helper import is_cid_paragraph
-from babeldoc.document_il.utils.style_helper import WHITE
+from babeldoc.babeldoc_exception.BabelDOCException import ExtractTextError
+from babeldoc.format.pdf.document_il import Box
+from babeldoc.format.pdf.document_il import Document
+from babeldoc.format.pdf.document_il import Page
+from babeldoc.format.pdf.document_il import PdfCharacter
+from babeldoc.format.pdf.document_il import PdfLine
+from babeldoc.format.pdf.document_il import PdfParagraph
+from babeldoc.format.pdf.document_il import PdfParagraphComposition
+from babeldoc.format.pdf.document_il import PdfRectangle
+from babeldoc.format.pdf.document_il.utils.layout_helper import Layout
+from babeldoc.format.pdf.document_il.utils.layout_helper import add_space_dummy_chars
+from babeldoc.format.pdf.document_il.utils.layout_helper import get_char_unicode_string
+from babeldoc.format.pdf.document_il.utils.layout_helper import is_bullet_point
+from babeldoc.format.pdf.document_il.utils.paragraph_helper import is_cid_paragraph
+from babeldoc.format.pdf.document_il.utils.style_helper import WHITE
 from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)

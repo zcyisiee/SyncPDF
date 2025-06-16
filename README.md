@@ -320,7 +320,7 @@ You can refer to the example in [main.py](https://github.com/funstory-ai/yadt/bl
 
 Please note:
 
-1. Make sure call `babeldoc.high_level.init()` before using the API
+1. Make sure call `babeldoc.format.pdf.high_level.init()` before using the API
 
 2. The current `TranslationConfig` does not fully validate input parameters, so you need to ensure the validity of input parameters
 

@@ -8,17 +8,17 @@ from typing import TYPE_CHECKING
 import tiktoken
 from tqdm import tqdm
 
-from babeldoc.document_il import Document as ILDocument  # Renamed to avoid conflict
-from babeldoc.document_il import PdfParagraph  # Renamed to avoid conflict
-from babeldoc.document_il.midend.il_translator import Page
-from babeldoc.document_il.utils.paragraph_helper import is_cid_paragraph
-from babeldoc.document_il.utils.priority_thread_pool_executor import (
-    PriorityThreadPoolExecutor,
+from babeldoc.format.pdf.document_il import (
+    Document as ILDocument,  # Renamed to avoid conflict
 )
+from babeldoc.format.pdf.document_il import PdfParagraph  # Renamed to avoid conflict
+from babeldoc.format.pdf.document_il.midend.il_translator import Page
+from babeldoc.format.pdf.document_il.utils.paragraph_helper import is_cid_paragraph
+from babeldoc.utils.priority_thread_pool_executor import PriorityThreadPoolExecutor
 
 if TYPE_CHECKING:
-    from babeldoc.document_il.translator.translator import BaseTranslator
     from babeldoc.translation_config import TranslationConfig
+    from babeldoc.translator.translator import BaseTranslator
 
 logger = logging.getLogger(__name__)
 
