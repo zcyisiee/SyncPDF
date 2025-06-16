@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 from typing import Any
 from typing import cast
 
+from lxml import etree
+
 from babeldoc.format.office.document_il.opc.constants import NAMESPACE as NS
 from babeldoc.format.office.document_il.opc.constants import (
     RELATIONSHIP_TARGET_MODE as RTM,
@@ -24,7 +26,6 @@ from babeldoc.format.office.document_il.opc.xmlchemy import ZeroOrOne
 from babeldoc.format.office.document_il.opc.xmlchemy import nsdecls
 from babeldoc.format.office.document_il.opc.xmlchemy import qn
 from babeldoc.format.office.document_il.opc.xmlchemy import serialize_for_reading
-from lxml import etree
 
 # configure XML parser
 element_class_lookup = etree.ElementNamespaceClassLookup()

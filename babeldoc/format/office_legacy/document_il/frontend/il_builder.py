@@ -3,6 +3,9 @@ import json
 import os
 import sys
 
+from loguru import logger
+from lxml import etree
+
 from babeldoc.format.office.document_il.filetypes import TRANSLATABLE_PARTS_PROCESSOR
 from babeldoc.format.office.document_il.filetypes import TranslatablePartsProcessor
 from babeldoc.format.office.document_il.opc.constants import CONTENT_TYPE as CT
@@ -22,8 +25,6 @@ from babeldoc.format.office.document_il.types import ILDataRel
 from babeldoc.format.office.document_il.types import ILDocxData
 from babeldoc.format.office.document_il.types import ILPptxData
 from babeldoc.format.office.document_il.types import ILXlsxData
-from loguru import logger
-from lxml import etree
 
 
 class OfficeILCreator:

@@ -3,6 +3,8 @@ import json
 import os
 from pathlib import PosixPath
 
+from loguru import logger
+
 from babeldoc.format.office.document_il.filetypes import TRANSLATABLE_PARTS_PROCESSOR
 from babeldoc.format.office.document_il.opc.constants import CONTENT_TYPE as CT
 from babeldoc.format.office.document_il.opc.package import OpcPackage
@@ -15,7 +17,6 @@ from babeldoc.format.office.document_il.types import ILDocxData
 from babeldoc.format.office.document_il.types import ILPptxData
 from babeldoc.format.office.document_il.types import ILXlsxData
 from babeldoc.format.office.document_il.utils import get_main_part
-from loguru import logger
 
 
 class OfficeBuilder:

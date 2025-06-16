@@ -27,7 +27,7 @@ class DummyTranslator(Translator):
         """
         if style_hints is None:
             style_hints = []
-            
+
         # If the input is empty, return an empty list
         if os.environ.get("USE_DUMMY_SAME", "false") == "true":
             return ["t_" + i for i in texts]

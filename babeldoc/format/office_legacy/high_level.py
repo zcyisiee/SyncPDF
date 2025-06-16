@@ -2,6 +2,9 @@ import concurrent.futures
 import threading
 import time
 
+from loguru import logger
+from lxml import etree
+
 from babeldoc.format.office.context import Context
 from babeldoc.format.office.document_il.backend.document_builder import OfficeBuilder
 from babeldoc.format.office.document_il.frontend.il_builder import OfficeILCreator
@@ -9,8 +12,6 @@ from babeldoc.format.office.document_il.types import ILData
 from babeldoc.format.office.progress_monitor import ProgressMonitor
 from babeldoc.format.office.translation_config import TranslateResult
 from babeldoc.format.office.translator import Translator
-from loguru import logger
-from lxml import etree
 
 IL_PATH = "output.il.json"
 

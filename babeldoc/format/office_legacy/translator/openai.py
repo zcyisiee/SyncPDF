@@ -7,8 +7,9 @@ import json
 from typing import Any
 
 import requests
-from babeldoc.format.office.translator.translator import Translator
 from loguru import logger
+
+from babeldoc.format.office.translator.translator import Translator
 
 
 class OpenAITranslator(Translator):

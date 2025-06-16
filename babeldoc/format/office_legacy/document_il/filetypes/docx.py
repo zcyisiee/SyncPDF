@@ -1,5 +1,9 @@
 import base64
 
+from loguru import logger
+from lxml import etree
+from pydantic import BaseModel
+
 from babeldoc.format.office.context import Context
 from babeldoc.format.office.document_il.filetypes.base import TranslatablePartsProcessor
 from babeldoc.format.office.document_il.opc.packuri import PackURI
@@ -9,9 +13,6 @@ from babeldoc.format.office.document_il.types import ILDocxData
 from babeldoc.format.office.document_il.utils import get_main_part
 from babeldoc.format.office.document_il.utils import group_hashes
 from babeldoc.format.office.document_il.utils import hash_dict
-from loguru import logger
-from lxml import etree
-from pydantic import BaseModel
 
 
 class PHandlerRun(BaseModel):

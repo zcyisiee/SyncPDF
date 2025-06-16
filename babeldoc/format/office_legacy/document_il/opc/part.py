@@ -116,7 +116,9 @@ class Part:
     @partname.setter
     def partname(self, partname: str):
         if not isinstance(partname, PackURI):
-            tmpl = f"partname must be instance of PackURI, got '{type(partname).__name__}'"
+            tmpl = (
+                f"partname must be instance of PackURI, got '{type(partname).__name__}'"
+            )
             raise TypeError(tmpl)
         self._partname = partname
 
@@ -214,15 +216,15 @@ class PartFactory:
 
 def part_class_selector(content_type: str, reltype: str) -> type[Part] | None:
     """Select a part class based on content type and relationship type.
-    
+
     This function is assigned to PartFactory.part_class_selector and is called
-    for each part in the package. By default it returns None, causing the 
+    for each part in the package. By default it returns None, causing the
     selection to fall back to the content type map.
-    
+
     Args:
         content_type: The content type of the part
         reltype: The relationship type of the part
-        
+
     Returns:
         A Part subclass or None if no specific class is selected
     """

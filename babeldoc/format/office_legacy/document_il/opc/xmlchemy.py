@@ -11,10 +11,11 @@ from typing import TYPE_CHECKING
 from typing import Any
 from typing import TypeVar
 
-from babeldoc.format.office.document_il.opc.shared import lazyproperty
 from lxml import etree
 from lxml.etree import ElementBase  # pyright: ignore[reportPrivateUsage]
 from lxml.etree import _Element  # pyright: ignore[reportPrivateUsage]
+
+from babeldoc.format.office.document_il.opc.shared import lazyproperty
 
 nsmap = {
     "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
@@ -411,18 +412,14 @@ class _BaseChildElement:
             insert_method(child)
             return child
 
-        _add_child.__doc__ = (
-            f"Add a new ``<{self._nsptagname}>`` child element unconditionally, inserted in the correct sequence."
-        )
+        _add_child.__doc__ = f"Add a new ``<{self._nsptagname}>`` child element unconditionally, inserted in the correct sequence."
         self._add_to_class(self._add_method_name, _add_child)
 
     def _add_creator(self):
         """Add a ``_new_{prop_name}()`` method to the element class that creates a new,
         empty element of the correct type, having no attributes."""
         creator = self._creator
-        creator.__doc__ = (
-            f'Return a "loose", newly created ``<{self._nsptagname}>`` element having no attributes, text, or children.'
-        )
+        creator.__doc__ = f'Return a "loose", newly created ``<{self._nsptagname}>`` element having no attributes, text, or children.'
         self._add_to_class(self._new_method_name, creator)
 
     def _add_getter(self):
@@ -439,9 +436,7 @@ class _BaseChildElement:
             obj.insert_element_before(child, *self._successors)
             return child
 
-        _insert_child.__doc__ = (
-            f"Return the passed ``<{self._nsptagname}>`` element after inserting it as a child in the correct sequence."
-        )
+        _insert_child.__doc__ = f"Return the passed ``<{self._nsptagname}>`` element after inserting it as a child in the correct sequence."
         self._add_to_class(self._insert_method_name, _insert_child)
 
     def _add_list_getter(self):
@@ -463,9 +458,7 @@ class _BaseChildElement:
             child = private_add_method()
             return child
 
-        add_child.__doc__ = (
-            f"Add a new ``<{self._nsptagname}>`` child element unconditionally, inserted in the correct sequence."
-        )
+        add_child.__doc__ = f"Add a new ``<{self._nsptagname}>`` child element unconditionally, inserted in the correct sequence."
         self._add_to_class(self._public_add_method_name, add_child)
 
     def _add_to_class(self, name: str, method: Callable[..., Any]):
@@ -514,9 +507,7 @@ class _BaseChildElement:
         def get_child_element_list(obj: BaseOxmlElement):
             return obj.findall(qn(self._nsptagname))
 
-        get_child_element_list.__doc__ = (
-            f"A list containing each of the ``<{self._nsptagname}>`` child elements, in the order they appear."
-        )
+        get_child_element_list.__doc__ = f"A list containing each of the ``<{self._nsptagname}>`` child elements, in the order they appear."
         return get_child_element_list
 
     @lazyproperty
@@ -577,9 +568,7 @@ class Choice(_BaseChildElement):
             child = add_method()
             return child
 
-        get_or_change_to_child.__doc__ = (
-            f"Return the ``<{self._nsptagname}>`` child, replacing any other group element if found."
-        )
+        get_or_change_to_child.__doc__ = f"Return the ``<{self._nsptagname}>`` child, replacing any other group element if found."
         self._add_to_class(self._get_or_change_to_method_name, get_or_change_to_child)
 
     @property
@@ -623,9 +612,7 @@ class OneAndOnlyOne(_BaseChildElement):
                 )
             return child
 
-        get_child_element.__doc__ = (
-            f"Required ``<{self._nsptagname}>`` child element."
-        )
+        get_child_element.__doc__ = f"Required ``<{self._nsptagname}>`` child element."
         return get_child_element
 
 
@@ -688,9 +675,7 @@ class ZeroOrOne(_BaseChildElement):
                 child = add_method()
             return child
 
-        get_or_add_child.__doc__ = (
-            f"Return the ``<{self._nsptagname}>`` child element, newly added if not present."
-        )
+        get_or_add_child.__doc__ = f"Return the ``<{self._nsptagname}>`` child element, newly added if not present."
         self._add_to_class(self._get_or_add_method_name, get_or_add_child)
 
     def _add_remover(self):
@@ -699,9 +684,7 @@ class ZeroOrOne(_BaseChildElement):
         def _remove_child(obj: BaseOxmlElement):
             obj.remove_all(self._nsptagname)
 
-        _remove_child.__doc__ = (
-            f"Remove all ``<{self._nsptagname}>`` child elements."
-        )
+        _remove_child.__doc__ = f"Remove all ``<{self._nsptagname}>`` child elements."
         self._add_to_class(self._remove_method_name, _remove_child)
 
     @lazyproperty

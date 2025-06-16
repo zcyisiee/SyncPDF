@@ -3,6 +3,9 @@ import time
 import uuid
 from collections import defaultdict
 
+from loguru import logger
+from lxml import etree
+
 from babeldoc.format.office.context import Context
 from babeldoc.format.office.document_il.filetypes.base import TranslatablePartsProcessor
 from babeldoc.format.office.document_il.opc.packuri import PackURI
@@ -16,8 +19,6 @@ from babeldoc.format.office.document_il.types import SheetName
 from babeldoc.format.office.document_il.utils import QueueProcessor
 from babeldoc.format.office.document_il.utils import group_hashes
 from babeldoc.format.office.document_il.utils import hash_dict
-from loguru import logger
-from lxml import etree
 
 BATCH_SIZE = 20
 
@@ -126,7 +127,9 @@ def _process_shared_string_batch(
     il_data.shared_strings.extend(batch)
 
     # Update each element with its translation
-    for i, (shared_string, translated_text) in enumerate(zip(batch, translated_texts, strict=False)):
+    for i, (shared_string, translated_text) in enumerate(
+        zip(batch, translated_texts, strict=False)
+    ):
         # Update the shared string object
         shared_string.translated_text = translated_text
 
