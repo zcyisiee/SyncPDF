@@ -531,10 +531,10 @@ class StylesAndFormulas:
         pattern_text = (
             r"^("
             r"|Cambria.*"
-            r"|EUAlbertina.+"
-            r"|NimbusRomNo9L.+"
-            r"|GlosaMath.+"
-            r"|URWPalladioL.+"
+            r"|EUAlbertina.*"
+            r"|NimbusRomNo9L.*"
+            r"|GlosaMath.*"
+            r"|URWPalladioL.*"
             r"|CMSS.+"
             r"|Arial.*"
             r"|TimesNewRoman.*"
@@ -588,6 +588,30 @@ class StylesAndFormulas:
             r"|.*SabonLTPro.*"
             r"|.*ArnoPro.*"
             r"|.*CharisSIL.*"
+            r"|.*MSReference.*"
+            r"|.*CMUSerif-Roman.*"
+            r"|.*CourierNewPS.*"
+            r"|.*XCharter.*"
+            r"|.*GillSans.*"
+            r"|.*Perpetua.*"
+            r"|.*GEInspira.*"
+            r"|.*AGaramond.*"
+            r"|.*BMath.*"
+            r"|.*MSTT.*"
+            r"|.*Bookinsanity.*"
+            r"|.*ScalySans.*"
+            r"|.*Code2000.*"
+            r"|.*Minion.*"
+            r"|.*JansonTextLT.*"
+            r"|.*MathPack.*"
+            r"|.*Macmillan.*"
+            r"|.*NimbusSan.*"
+            r"|.*Mincho.*"
+            r"|.*Amerigo.*"
+            r"|.*MSGloriolaIIStd.*"
+            r"|.*CMU.+"
+            r"|.*LinLibertine.*"
+            r"|.*txsys.*"
             r")$"
         )
         precise_formula_font_pattern = (
@@ -625,7 +649,7 @@ class StylesAndFormulas:
             r"|.*KpMath.*"
             r"|.*Lete Sans Math.*"
             r"|.*LeteSansMath.*"
-            r"|.*LinLibertineO.*"
+            # r"|.*LinLibertineO.*"
             r"|.*Linux Libertine O.*"
             r"|.*LibertinusMath-Regular.*"
             r"|.*Libertinus Math.*"
@@ -673,7 +697,7 @@ class StylesAndFormulas:
                 r"|stmary"
                 r"|.*Mono"
                 r"|.*Code"
-                r"|.*Ital"
+                # r"|.*Ital"
                 r"|.*Sym"
                 r"|.*Math"
                 r"|AdvP4C4E74"
@@ -690,6 +714,9 @@ class StylesAndFormulas:
         else:
             font = font_name.split("+")[-1]
 
+        if not font:
+            return False
+
         if re.match(precise_formula_font_pattern, font):
             return True
         elif re.match(pattern_text, font):
@@ -703,6 +730,8 @@ class StylesAndFormulas:
         if "(cid:" in char:
             return True
         if not self.font_mapper.has_char(char):
+            if len(char) > 1 and all(self.font_mapper.has_char(x) for x in char):
+                return False
             return True
         if self.translation_config.formular_char_pattern:
             pattern = self.translation_config.formular_char_pattern

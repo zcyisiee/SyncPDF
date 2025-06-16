@@ -13,8 +13,9 @@ import pymupdf
 from bitstring import BitStream
 
 from babeldoc.assets.embedding_assets_metadata import FONT_NAMES
-from babeldoc.format.pdf.document_il import il_version_1
-from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.document_il import il_version_1
+from babeldoc.document_il.utils.fontmap import FontMapper
+from babeldoc.document_il.utils.zstd_helper import zstd_decompress
 from babeldoc.translation_config import TranslateResult
 from babeldoc.translation_config import TranslationConfig
 from babeldoc.translation_config import WatermarkOutputMode
@@ -98,6 +99,7 @@ def parse_truetype_data(data):
 TOUNICODE_HEAD = """\
 /CIDInit /ProcSet findresource begin
 12 dict begin
+begincmap
 /CIDSystemInfo <</Registry(Adobe)/Ordering(UCS)/Supplement 0>> def
 /CMapName /Adobe-Identity-UCS def
 /CMapType 2 def
@@ -123,7 +125,10 @@ def make_tounicode(cmap, used):
             if code < 0x10000:
                 line.append(f"<{glyph:04x}><{code:04x}>")
             else:
-                line.append(f"<{glyph:04x}><{code:08x}>")
+                code -= 0x10000
+                high = 0xD800 + (code >> 10)
+                low = 0xDC00 + (code & 0b1111111111)
+                line.append(f"<{glyph:04x}><{high:04x}{low:04x}>")
         line.append("endbfchar")
     line.append(TOUNICODE_TAIL)
     return "\n".join(line)
@@ -385,20 +390,22 @@ class PDFCreater:
             # Get pages from both PDFs
             orig_page = original_pdf[page_id]
             trans_page = translated_pdf[page_id]
-
-            # Calculate total width and use max height
+            rotate_angle = orig_page.rotation
             total_width = orig_page.rect.width + trans_page.rect.width
             max_height = max(orig_page.rect.height, trans_page.rect.height)
-
-            # Create new page with combined width
-            dual_page = dual.new_page(width=total_width, height=max_height)
-
-            # Define rectangles for left and right sides
             left_width = (
                 orig_page.rect.width
                 if not translation_config.dual_translate_first
                 else trans_page.rect.width
             )
+
+            orig_page.set_rotation(0)
+            trans_page.set_rotation(0)
+
+            # Create new page with combined width
+            dual_page = dual.new_page(width=total_width, height=max_height)
+
+            # Define rectangles for left and right sides
             rect_left = pymupdf.Rect(0, 0, left_width, max_height)
             rect_right = pymupdf.Rect(left_width, 0, total_width, max_height)
 
@@ -413,6 +420,7 @@ class PDFCreater:
                     original_pdf,
                     page_id,
                     keep_proportion=True,
+                    rotate=-rotate_angle,
                 )
             except Exception as e:
                 logger.warning(
@@ -428,6 +436,7 @@ class PDFCreater:
                     translated_pdf,
                     page_id,
                     keep_proportion=True,
+                    rotate=-rotate_angle,
                 )
             except Exception as e:
                 logger.warning(
@@ -776,8 +785,12 @@ class PDFCreater:
             return False
 
     def restore_media_box(self, doc: pymupdf.Document, mediabox_data: dict) -> None:
-        for pageno, mediabox in mediabox_data.items():
-            doc.xref_set_key(doc[pageno].xref, "MediaBox", mediabox[1])
+        for xref, page_box_data in mediabox_data.items():
+            for name, box in page_box_data.items():
+                try:
+                    doc.xref_set_key(xref, name, box)
+                except Exception:
+                    logger.debug(f"Error restoring media box {name} from PDF")
 
     def write(
         self, translation_config: TranslationConfig, check_font_exists: bool = False
@@ -828,13 +841,17 @@ class PDFCreater:
                             page_encoding_length_map
                         )
                         xobj_op = BitStream()
-                        xobj_op.append(xobj.base_operations.value.encode())
+                        base_op = xobj.base_operations.value
+                        base_op = zstd_decompress(base_op)
+                        xobj_op.append(base_op.encode())
                         xobj_draw_ops[xobj.xobj_id] = xobj_op
 
                     page_op = BitStream()
                     # q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}
                     # page_op.append(b"q ")
-                    page_op.append(page.base_operations.value.encode())
+                    base_op = page.base_operations.value
+                    base_op = zstd_decompress(base_op)
+                    page_op.append(base_op.encode())
                     page_op.append(b" \n")
                     # page_op.append(b" Q ")
                     # page_op.append(
@@ -945,7 +962,26 @@ class PDFCreater:
                     )
 
                 pbar.advance()
-            self.restore_media_box(pdf, self.mediabox_data)
+            try:
+                self.restore_media_box(pdf, self.mediabox_data)
+            except Exception:
+                logger.exception("restore media box failed")
+
+            if translation_config.only_include_translated_page:
+                total_page = set(range(0, len(pdf)))
+
+                pages_to_translate = {
+                    page.page_number
+                    for page in self.docs.page
+                    if self.translation_config.should_translate_page(
+                        page.page_number + 1
+                    )
+                }
+
+                should_removed_page = list(total_page - pages_to_translate)
+
+                pdf.delete_pages(should_removed_page)
+
             with self.translation_config.progress_monitor.stage_start(
                 SAVE_PDF_STAGE_NAME,
                 2,
@@ -978,6 +1014,11 @@ class PDFCreater:
                     )
                     translation_config.raise_if_cancelled()
                     original_pdf = pymupdf.open(self.original_pdf_path)
+                    if (
+                        self.translation_config.only_include_translated_page
+                        and should_removed_page
+                    ):
+                        original_pdf.delete_pages(should_removed_page)
                     translated_pdf = pdf
 
                     # Choose between alternating pages and side-by-side format
@@ -1031,10 +1072,16 @@ class PDFCreater:
                             pretty=True,
                         )
                 pbar.advance()
+            if self.translation_config.no_mono:
+                mono_out_path = None
+            if self.translation_config.no_dual:
+                dual_out_path = None
             return TranslateResult(mono_out_path, dual_out_path)
         except Exception:
             logger.exception(
                 "Failed to create PDF: %s",
                 translation_config.input_file,
             )
-            return self.write(translation_config, True)
+            if not check_font_exists:
+                return self.write(translation_config, True)
+            raise

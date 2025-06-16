@@ -52,7 +52,7 @@ body:
     attributes:
       label: Contributor Checklist
       options:
-        - label: I’ve read the **CONTRIBUTING.md** guide
+        - label: I’ve fully read and understood the **[CONTRIBUTING.md](https://funstory-ai.github.io/BabelDOC/CONTRIBUTING/)** guide
           required: true
         - label: My changes follow the project’s code style and guidelines
           required: true

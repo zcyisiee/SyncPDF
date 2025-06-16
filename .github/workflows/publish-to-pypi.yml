@@ -35,11 +35,12 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           
       - name: Setup uv with Python 3.12
-        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd731bb6ce540c5af426746bb # v6.1.0
         with:
           python-version: "3.12"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
+          activate-environment: true
 
       - name: Check if there is a parent commit
         id: check-parent-commit
@@ -61,8 +62,8 @@ jobs:
       - name: Bump version for developmental release
         if: "! steps.check-version.outputs.tag"
         run: |
-          version=$(bumpver update --patch --tag=final --dry 2>&1 | grep "New Version" | awk '{print $NF}') &&
-          bumpver update --set-version $version.dev$(date +%s)
+          version=$(uv run bumpver update --patch --tag=final --dry 2>&1 | grep "New Version" | awk '{print $NF}') &&
+          uv run bumpver update --set-version $version.dev$(date +%s)
 
       - name: Build package
         run: "uv build"
@@ -89,7 +90,7 @@ jobs:
 
     steps:
       - name: Download all the dists
-        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: python-package-distributions
           path: dist/
@@ -113,7 +114,7 @@ jobs:
 
     steps:
       - name: Download all the dists
-        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4.2.1
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: python-package-distributions
           path: dist/

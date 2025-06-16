@@ -6,7 +6,9 @@ import unicodedata
 from abc import ABC
 from abc import abstractmethod
 
+import httpx
 import openai
+from tenacity import before_sleep_log
 from tenacity import retry
 from tenacity import retry_if_exception_type
 from tenacity import stop_after_attempt
@@ -112,10 +114,13 @@ class BaseTranslator(ABC):
         """
         self.translate_call_count += 1
         if not (self.ignore_cache or ignore_cache):
-            cache = self.cache.get(text)
-            if cache is not None:
-                self.translate_cache_call_count += 1
-                return cache
+            try:
+                cache = self.cache.get(text)
+                if cache is not None:
+                    self.translate_cache_call_count += 1
+                    return cache
+            except Exception as e:
+                logger.debug(f"try get cache failed, ignore it: {e}")
         _translate_rate_limiter.wait()
         translation = self.do_translate(text, rate_limit_params)
         if not (self.ignore_cache or ignore_cache):
@@ -130,10 +135,13 @@ class BaseTranslator(ABC):
         """
         self.translate_call_count += 1
         if not (self.ignore_cache or ignore_cache):
-            cache = self.cache.get(text)
-            if cache is not None:
-                self.translate_cache_call_count += 1
-                return cache
+            try:
+                cache = self.cache.get(text)
+                if cache is not None:
+                    self.translate_cache_call_count += 1
+                    return cache
+            except Exception as e:
+                logger.debug(f"try get cache failed, ignore it: {e}")
         _translate_rate_limiter.wait()
         translation = self.do_llm_translate(text, rate_limit_params)
         if not (self.ignore_cache or ignore_cache):
@@ -191,7 +199,16 @@ class OpenAITranslator(BaseTranslator):
     ):
         super().__init__(lang_in, lang_out, ignore_cache)
         self.options = {"temperature": 0}  # 随机采样可能会打断公式标记
-        self.client = openai.OpenAI(base_url=base_url, api_key=api_key)
+        self.client = openai.OpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            http_client=httpx.Client(
+                limits=httpx.Limits(
+                    max_connections=None, max_keepalive_connections=None
+                ),
+                timeout=60,  # Set a reasonable timeout
+            ),
+        )
         self.add_cache_impact_parameters("temperature", self.options["temperature"])
         self.model = model
         self.add_cache_impact_parameters("model", self.model)
@@ -204,10 +221,7 @@ class OpenAITranslator(BaseTranslator):
         retry=retry_if_exception_type(openai.RateLimitError),
         stop=stop_after_attempt(100),
         wait=wait_exponential(multiplier=1, min=1, max=15),
-        before_sleep=lambda retry_state: logger.warning(
-            f"RateLimitError, retrying in {retry_state.next_action.sleep} seconds... "
-            f"(Attempt {retry_state.attempt_number}/100)"
-        ),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
     )
     def do_translate(self, text, rate_limit_params: dict = None) -> str:
         response = self.client.chat.completions.create(
@@ -234,10 +248,7 @@ class OpenAITranslator(BaseTranslator):
         retry=retry_if_exception_type(openai.RateLimitError),
         stop=stop_after_attempt(100),
         wait=wait_exponential(multiplier=1, min=1, max=15),
-        before_sleep=lambda retry_state: logger.warning(
-            f"RateLimitError, retrying in {retry_state.next_action.sleep} seconds... "
-            f"(Attempt {retry_state.attempt_number}/100)"
-        ),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
     )
     def do_llm_translate(self, text, rate_limit_params: dict = None):
         if text is None:
@@ -246,6 +257,7 @@ class OpenAITranslator(BaseTranslator):
         response = self.client.chat.completions.create(
             model=self.model,
             **self.options,
+            max_tokens=2048,
             messages=[
                 {
                     "role": "user",
@@ -268,11 +280,14 @@ class OpenAITranslator(BaseTranslator):
             logger.exception("Error updating token count")
 
     def get_formular_placeholder(self, placeholder_id: int):
-        return "{{v" + str(placeholder_id) + "}}"
+        return "{v" + str(placeholder_id) + "}", f"{{\\s*v\\s*{placeholder_id}\\s*}}"
         return "{{" + str(placeholder_id) + "}}"
 
     def get_rich_text_left_placeholder(self, placeholder_id: int):
-        return self.get_formular_placeholder(placeholder_id)
+        return (
+            f"<style id='{placeholder_id}'>",
+            f"<\\s*style\\s*id\\s*=\\s*'\\s*{placeholder_id}\\s*'\\s*>",
+        )
 
     def get_rich_text_right_placeholder(self, placeholder_id: int):
-        return self.get_formular_placeholder(placeholder_id + 1)
+        return "</style>", r"<\s*\/\s*style\s*>"

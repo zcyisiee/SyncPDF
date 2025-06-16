@@ -2,25 +2,26 @@ import base64
 import functools
 import logging
 import re
-from functools import wraps
 from io import BytesIO
 from itertools import islice
 
 import freetype
-import pdfminer.pdfinterp
 import pymupdf
-from pdfminer.layout import LTChar
-from pdfminer.layout import LTFigure
-from pdfminer.pdffont import PDFCIDFont
-from pdfminer.pdffont import PDFFont
-from pdfminer.pdfpage import PDFPage as PDFMinerPDFPage
-from pdfminer.pdftypes import PDFObjRef as PDFMinerPDFObjRef
-from pdfminer.pdftypes import resolve1 as pdftypes_resolve1
-from pdfminer.psparser import PSLiteral
 
-from babeldoc.format.pdf.document_il import il_version_1
-from babeldoc.format.pdf.document_il.utils.style_helper import BLACK
-from babeldoc.format.pdf.document_il.utils.style_helper import YELLOW
+import babeldoc.pdfminer.pdfinterp
+from babeldoc.document_il import il_version_1
+from babeldoc.document_il.utils import zstd_helper
+from babeldoc.document_il.utils.style_helper import BLACK
+from babeldoc.document_il.utils.style_helper import YELLOW
+from babeldoc.pdfminer.layout import LTChar
+from babeldoc.pdfminer.layout import LTFigure
+from babeldoc.pdfminer.pdffont import PDFCIDFont
+from babeldoc.pdfminer.pdffont import PDFFont
+
+# from babeldoc.pdfminer.pdfpage import PDFPage as PDFMinerPDFPage
+# from babeldoc.pdfminer.pdftypes import PDFObjRef as PDFMinerPDFObjRef
+# from babeldoc.pdfminer.pdftypes import resolve1 as pdftypes_resolve1
+from babeldoc.pdfminer.psparser import PSLiteral
 from babeldoc.translation_config import TranslationConfig
 
 
@@ -37,28 +38,28 @@ def batched(iterable, n, *, strict=False):
 
 logger = logging.getLogger(__name__)
 
-
-def create_hook(func, hook):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        hook(*args, **kwargs)
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
-def hook_pdfminer_pdf_page_init(*args):
-    attrs = args[3]
-    try:
-        while isinstance(attrs["MediaBox"], PDFMinerPDFObjRef):
-            attrs["MediaBox"] = pdftypes_resolve1(attrs["MediaBox"])
-    except Exception:
-        logger.exception(f"try to fix mediabox failed: {attrs}")
-
-
-PDFMinerPDFPage.__init__ = create_hook(
-    PDFMinerPDFPage.__init__, hook_pdfminer_pdf_page_init
-)
+#
+# def create_hook(func, hook):
+#     @wraps(func)
+#     def wrapper(*args, **kwargs):
+#         hook(*args, **kwargs)
+#         return func(*args, **kwargs)
+#
+#     return wrapper
+#
+#
+# def hook_pdfminer_pdf_page_init(*args):
+#     attrs = args[3]
+#     try:
+#         while isinstance(attrs["MediaBox"], PDFMinerPDFObjRef):
+#             attrs["MediaBox"] = pdftypes_resolve1(attrs["MediaBox"])
+#     except Exception:
+#         logger.exception(f"try to fix mediabox failed: {attrs}")
+#
+#
+# PDFMinerPDFPage.__init__ = create_hook(
+#     PDFMinerPDFPage.__init__, hook_pdfminer_pdf_page_init
+# )
 
 
 def indirect(obj):
@@ -587,6 +588,7 @@ class ILCreater:
         self.pop_passthrough_per_char_instruction()
         self.pop_xobj()
         xobj = self.xobj_map[xobj_id]
+        base_op = zstd_helper.zstd_compress(base_op)
         xobj.base_operations = il_version_1.BaseOperations(value=base_op)
         self.xobj_inc += 1
 
@@ -636,6 +638,7 @@ class ILCreater:
         self.current_page.page_number = page_number
 
     def on_page_base_operation(self, operation: str):
+        operation = zstd_helper.zstd_compress(operation)
         self.current_page.base_operations = il_version_1.BaseOperations(value=operation)
 
     def on_page_resource_font(self, font: PDFFont, xref_id: int, font_id: str):
@@ -778,7 +781,7 @@ class ILCreater:
             cmap = parse_cmap(self.mupdf.xref_stream(to_unicode_idx).decode("U8"))
         return bbox_list, cmap
 
-    def create_graphic_state(self, gs: pdfminer.pdfinterp.PDFGraphicState):
+    def create_graphic_state(self, gs: babeldoc.pdfminer.pdfinterp.PDFGraphicState):
         graphic_state = il_version_1.GraphicState()
         for k, v in gs.__dict__.items():
             if v is None:
@@ -856,8 +859,8 @@ class ILCreater:
             char_bounding_box = None
 
         char_unicode = char.get_text()
-        if "(cid:" not in char_unicode and len(char_unicode) > 1:
-            return
+        # if "(cid:" not in char_unicode and len(char_unicode) > 1:
+        #     return
         if space_regex.match(char_unicode):
             char_unicode = " "
         advance = char.adv

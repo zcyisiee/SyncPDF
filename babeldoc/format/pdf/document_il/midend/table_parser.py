@@ -5,8 +5,9 @@ import cv2
 import numpy as np
 from pymupdf import Document
 
-from babeldoc.format.pdf.document_il import il_version_1
-from babeldoc.format.pdf.document_il.utils.style_helper import GREEN
+from babeldoc.document_il import il_version_1
+from babeldoc.document_il.utils.mupdf_helper import get_no_rotation_img
+from babeldoc.document_il.utils.style_helper import GREEN
 from babeldoc.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,7 @@ class TableParser:
             # Note: PDF coordinates are from bottom-left,
             # so we use y2 for top position
             style = il_version_1.PdfStyle(
-                font_id="china-ss",
+                font_id="base",
                 font_size=4,
                 graphic_state=color,
             )
@@ -136,7 +137,8 @@ class TableParser:
                     # Convert coordinate system from picture to il
                     # system to the il coordinate system
                     x0, y0, x1, y1 = layout.xyxy
-                    pix = mupdf_doc[page.page_number].get_pixmap()
+                    # pix = mupdf_doc[page.page_number].get_pixmap()
+                    pix = get_no_rotation_img(mupdf_doc[page.page_number])
                     h, w = pix.height, pix.width
                     x0, y0, x1, y1 = (
                         np.clip(int(x0 - 1), 0, w - 1),
