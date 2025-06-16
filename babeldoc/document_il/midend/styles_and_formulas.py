@@ -712,6 +712,9 @@ class StylesAndFormulas:
         else:
             font = font_name.split("+")[-1]
 
+        if not font:
+            return False
+
         if re.match(precise_formula_font_pattern, font):
             return True
         elif re.match(pattern_text, font):
