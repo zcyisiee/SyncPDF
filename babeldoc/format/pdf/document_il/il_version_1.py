@@ -500,7 +500,7 @@ class PdfCharacter:
             "type": "Attribute",
         },
     )
-    is_formula_character: bool | None = field(
+    formula_layout_id: int | None = field(
         default=None,
         metadata={
             "type": "Attribute",

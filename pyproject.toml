@@ -48,6 +48,8 @@ dependencies = [
     "pyzstd>=0.17.0",
     "hyperscan>=0.7.13",
     "rtree>=1.4.0",
+    "hdbscan>=0.8.40",
+    "scikit-learn<1.8.0"
 ]
 
 [project.optional-dependencies]
@@ -149,6 +151,7 @@ dev = [
     "pygments>=2.19.1",
     "ruff>=0.9.2",
     "pytest>=8.3.4",
+    "pylance>=0.29.0",
 ]
 
 [tool.pytest.ini_options]
@@ -176,3 +179,7 @@ version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
 
 [tool.uv.sources]
 yadt = { path = ".", editable = true }
+
+[tool.pyright]
+pythonVersion = "3.10"
+typeCheckingMode = "off"

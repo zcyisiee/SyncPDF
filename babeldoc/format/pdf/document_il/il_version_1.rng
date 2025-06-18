@@ -195,7 +195,7 @@
         </attribute>
       </optional>
       <optional>
-        <attribute name="is_formula_character">
+        <attribute name="formula_layout_id">
           <data type="boolean"/>
         </attribute>
       </optional>

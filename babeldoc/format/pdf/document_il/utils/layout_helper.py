@@ -1,6 +1,7 @@
 import logging
 import math
 import re
+from typing import Literal
 
 from pymupdf import Font
 
@@ -34,6 +35,7 @@ HEIGHT_NOT_USFUL_CHAR_IN_CHAR = (
     "(cid:2)",
     "(cid:3)",
     "·",
+    "√",
 )
 
 
@@ -535,3 +537,190 @@ def _add_space_dummy_chars_to_list(chars: list[PdfCharacter]) -> None:
             i += 2  # 跳过刚插入的空格
         else:
             i += 1
+
+
+def build_layout_index(page):
+    """Builds an R-tree index for all layouts on the page."""
+    from rtree import index
+
+    layout_index = index.Index()
+    layout_map = {}
+    for i, layout in enumerate(page.page_layout):
+        layout_map[i] = layout
+        if layout.box:
+            layout_index.insert(i, box_to_tuple(layout.box))
+    page.layout_index = layout_index
+    page.layout_map = layout_map
+
+
+def calculate_iou_for_boxes(box1: Box, box2: Box) -> float:
+    """Calculate the intersection area divided by the first box area."""
+    x_left = max(box1.x, box2.x)
+    y_bottom = max(box1.y, box2.y)
+    x_right = min(box1.x2, box2.x2)
+    y_top = min(box1.y2, box2.y2)
+
+    if x_right <= x_left or y_top <= y_bottom:
+        return 0.0
+
+    # Calculate intersection area
+    intersection_area = (x_right - x_left) * (y_top - y_bottom)
+
+    # Calculate area of first box
+    first_box_area = (box1.x2 - box1.x) * (box1.y2 - box1.y)
+
+    # Return intersection divided by first box area, handle division by zero
+    if first_box_area <= 0:
+        return 0.0
+
+    return intersection_area / first_box_area
+
+
+def get_character_layout(
+    char,
+    page,
+    layout_priority=None,
+    bbox_mode: Literal["auto", "visual", "box"] = "auto",
+):
+    """Get the layout for a character based on priority and IoU."""
+    if layout_priority is None:
+        layout_priority = [
+            "image",
+            "number",
+            "reference",
+            "algorithm",
+            "formula_caption",
+            "isolate_formula",
+            "table_footnote",
+            "table_caption",
+            "figure_caption",
+            "table_text",
+            "table",
+            "figure",
+            "abandon",
+            "title",
+            "paragraph_title",
+            "abstract",
+            "content",
+            "figure_title",
+            "table_title",
+            "doc_title",
+            "footnote",
+            "header",
+            "footer",
+            "sealplain text",
+            "tiny text",
+            "text",
+            "formula",
+        ]
+
+    char_box = char.visual_bbox.box
+    char_box2 = char.box
+    if bbox_mode == "auto":
+        # Calculate IOU to decide which box to use
+        intersection_area = max(
+            0, min(char_box.x2, char_box2.x2) - max(char_box.x, char_box2.x)
+        ) * max(0, min(char_box.y2, char_box2.y2) - max(char_box.y, char_box2.y))
+        char_box_area = (char_box.x2 - char_box.x) * (char_box.y2 - char_box.y)
+
+        if char_box_area > 0:
+            iou = intersection_area / char_box_area
+            if iou < 0.2:
+                char_box = char_box2
+    elif bbox_mode == "box":
+        char_box = char_box2
+
+    # Check if page has layout_index and layout_map
+    if not hasattr(page, "layout_index") or not hasattr(page, "layout_map"):
+        return None
+
+    # Collect all intersecting layouts and their IoU values
+    matching_layouts = []
+    candidate_ids = list(page.layout_index.intersection(box_to_tuple(char_box)))
+    candidate_layouts = [page.layout_map[i] for i in candidate_ids]
+
+    for layout in candidate_layouts:
+        # Calculate IoU
+        intersection_area = max(
+            0, min(char_box.x2, layout.box.x2) - max(char_box.x, layout.box.x)
+        ) * max(0, min(char_box.y2, layout.box.y2) - max(char_box.y, layout.box.y))
+        char_area = (char_box.x2 - char_box.x) * (char_box.y2 - char_box.y)
+
+        if char_area > 0:
+            iou = intersection_area / char_area
+            if iou > 0:
+                matching_layouts.append(
+                    {
+                        "layout": Layout(layout.id, layout.class_name),
+                        "priority": layout_priority.index(layout.class_name)
+                        if layout.class_name in layout_priority
+                        else len(layout_priority),
+                        "iou": iou,
+                    }
+                )
+
+    if not matching_layouts:
+        return None
+
+    # Sort by priority (ascending) and IoU value (descending)
+    matching_layouts.sort(key=lambda x: (x["priority"], -x["iou"]))
+
+    return matching_layouts[0]["layout"]
+
+
+def is_text_layout(layout: Layout):
+    """Check if a layout is a text layout."""
+    return layout is not None and layout.name in [
+        "plain text",
+        "tiny text",
+        "title",
+        "abandon",
+        "figure_caption",
+        "table_caption",
+        "table_text",
+        "reference",
+        "title",
+        "paragraph_title",
+        "abstract",
+        "content",
+        "figure_title",
+        "table_title",
+        "doc_title",
+        "footnote",
+        "header",
+        "footer",
+        "seal",
+        "text",
+    ]
+
+
+def is_character_in_formula_layout(
+    char: il_version_1.PdfCharacter, page: il_version_1.Page
+) -> int | None:
+    """Check if character is contained within any formula-related layout."""
+    formula_layout_types = {"formula"}
+
+    char_box = char.visual_bbox.box
+    char_box2 = char.box
+
+    if calculate_iou_for_boxes(char_box, char_box2) < 0.2:
+        char_box = char_box2
+
+    # Check if page has layout_index and layout_map
+    if not hasattr(page, "layout_index") or not hasattr(page, "layout_map"):
+        return False
+
+    # Get all candidate layouts that intersect with the character
+    candidate_ids = list(page.layout_index.intersection(box_to_tuple(char_box)))
+    candidate_layouts: list[il_version_1.PageLayout] = [
+        page.layout_map[i] for i in candidate_ids
+    ]
+
+    # Check if any intersecting layout is a formula type
+    for layout in candidate_layouts:
+        if layout.class_name in formula_layout_types:
+            iou = calculate_iou_for_boxes(char_box, layout.box)
+            if iou > 0.4:  # Character has overlap with formula layout
+                return layout.id
+
+    return None

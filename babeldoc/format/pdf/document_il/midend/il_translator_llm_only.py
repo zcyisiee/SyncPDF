@@ -169,8 +169,12 @@ class ILTranslatorLLMOnly:
         total_token_count = 0
         for paragraph in page.pdf_paragraph:
             if paragraph.debug_id is None or paragraph.unicode is None:
+                pbar.advance(1)
                 continue
             if is_cid_paragraph(paragraph):
+                pbar.advance(1)
+                continue
+            if len(paragraph.unicode) < self.translation_config.min_text_length:
                 pbar.advance(1)
                 continue
             # self.translate_paragraph(paragraph, pbar,tracker.new_paragraph(), page_font_map, page_xobj_font_map)

@@ -190,9 +190,9 @@ class AutomaticTermExtractor:
             if is_cid_paragraph(paragraph):
                 pbar.advance(1)
                 continue
-            if len(paragraph.unicode) < self.translation_config.min_text_length:
-                pbar.advance(1)
-                continue
+            # if len(paragraph.unicode) < self.translation_config.min_text_length:
+            #     pbar.advance(1)
+            #     continue
             total_token_count += self.calc_token_count(paragraph.unicode)
             paragraphs.append(paragraph)
             if total_token_count > 600 or len(paragraphs) > 12:

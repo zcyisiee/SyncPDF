@@ -16,6 +16,7 @@ from babeldoc.format.pdf.document_il.il_version_1 import PdfStyle
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
 from babeldoc.format.pdf.document_il.utils.layout_helper import LEFT_BRACKET
 from babeldoc.format.pdf.document_il.utils.layout_helper import RIGHT_BRACKET
+from babeldoc.format.pdf.document_il.utils.layout_helper import build_layout_index
 from babeldoc.format.pdf.document_il.utils.layout_helper import (
     formular_height_ignore_char,
 )
@@ -43,6 +44,7 @@ class StylesAndFormulas:
 
     def process_page(self, page: Page):
         """处理页面，包括公式识别和偏移量计算"""
+        build_layout_index(page)
         self.process_page_formulas(page)
         self.process_page_offsets(page)
         self.process_comma_formulas(page)
@@ -50,6 +52,10 @@ class StylesAndFormulas:
         self.process_page_offsets(page)
         self.process_translatable_formulas(page)
         self.process_page_styles(page)
+
+        # clean up to save memory
+        del page.layout_index
+        del page.layout_map
 
     def update_line_data(self, line: PdfLine):
         min_x = min(char.box.x for char in line.pdf_character)
@@ -92,7 +98,7 @@ class StylesAndFormulas:
 
             is_formula = (
                 (  # 区分公式开头的字符&公式中间的字符。主要是逗号不能在公式开头，但是可以在中间。
-                    char.is_formula_character
+                    char.formula_layout_id
                     or (
                         self.is_formulas_start_char(char.char_unicode)
                         and not in_formula_state
@@ -852,6 +858,10 @@ class StylesAndFormulas:
 
     def should_split_formula(self, formula: PdfFormula) -> bool:
         """判断公式是否需要按逗号拆分（包含逗号且有其他特殊符号）"""
+
+        if all(x.formula_layout_id for x in formula.pdf_character):
+            return False
+
         text = "".join(char.char_unicode for char in formula.pdf_character)
         # 必须包含逗号
         if "," not in text:
@@ -915,7 +925,8 @@ class StylesAndFormulas:
 
     def has_y_intersection(self, box1: Box, box2: Box) -> bool:
         """判断两个 box 的 y 轴是否有交集"""
-        return not (box1.y2 < box2.y or box2.y2 < box1.y)
+        tolerance = 2.0
+        return not (box1.y2 < box2.y - tolerance or box2.y2 < box1.y - tolerance)
 
     def is_x_axis_adjacent(self, box1: Box, box2: Box, tolerance: float = 2.0) -> bool:
         """判断两个 box 在 x 轴上是否相邻或有交集"""
@@ -949,7 +960,8 @@ class StylesAndFormulas:
 
     def merge_overlapping_formulas(self, page: Page):
         """
-        合并 x 轴重叠且 y 轴有交集的相邻公式，或者 x 轴相邻且 y 轴 IOU > 0.5 的公式
+        合并 x 轴重叠且 y 轴有交集的相邻公式，或者 x 轴相邻且 y 轴 IOU > 0.5 的公式，
+        或者所有字符的 layout id 都相同的公式
         角标可能会被识别成单独的公式，需要合并
         """
         if not page.pdf_paragraph:
@@ -974,13 +986,18 @@ class StylesAndFormulas:
 
                 # 检查合并条件：
                 # 1. x 轴重叠且 y 轴有交集，或者
-                # 2. x 轴相邻且 y 轴 IOU > 0.5
+                # 2. x 轴相邻且 y 轴 IOU > 0.5，或者
+                # 3. 所有字符的 layout id 都相同
                 should_merge = (
-                    self.is_x_axis_contained(formula1.box, formula2.box)
-                    and self.has_y_intersection(formula1.box, formula2.box)
-                ) or (
-                    self.is_x_axis_adjacent(formula1.box, formula2.box)
-                    and self.calculate_y_iou(formula1.box, formula2.box) > 0.5
+                    (
+                        self.is_x_axis_contained(formula1.box, formula2.box)
+                        and self.has_y_intersection(formula1.box, formula2.box)
+                    )
+                    or (
+                        self.is_x_axis_adjacent(formula1.box, formula2.box)
+                        and self.calculate_y_iou(formula1.box, formula2.box) > 0.5
+                    )
+                    or (self._have_same_layout_ids(formula1, formula2, page))
                 )
 
                 if should_merge:
@@ -994,6 +1011,31 @@ class StylesAndFormulas:
                     # 不增加 i，因为合并后的公式可能还需要和下一个公式合并
                 else:
                     i += 1
+
+    def _have_same_layout_ids(
+        self, formula1: PdfFormula, formula2: PdfFormula, page: Page
+    ) -> bool:
+        """检查两个公式的所有字符是否具有相同的 layout id"""
+        # 获取 formula1 中所有字符的 layout id
+        formula1_layout_ids = set()
+        for char in formula1.pdf_character:
+            layout = char.formula_layout_id
+            if layout is not None:
+                formula1_layout_ids.add(layout)
+
+        # 获取 formula2 中所有字符的 layout id
+        formula2_layout_ids = set()
+        for char in formula2.pdf_character:
+            layout = char.formula_layout_id
+            if layout is not None:
+                formula2_layout_ids.add(layout)
+
+        # 如果任一公式没有有效的 layout id，则不合并
+        if not (len(formula1_layout_ids) == len(formula2_layout_ids) == 1):
+            return False
+
+        # 检查两个公式的 layout id 集合是否相同
+        return formula1_layout_ids == formula2_layout_ids
 
     def process_comma_formulas(self, page: Page):
         """处理包含逗号的复杂公式，将其按逗号拆分"""

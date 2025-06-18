@@ -68,7 +68,7 @@ PDFCharacter =
     # xobject nesting depth
     attribute xobjId { xsd:int }?,
     attribute debug_info { xsd:boolean }?,
-    attribute is_formula_character { xsd:boolean }?,
+    attribute formula_layout_id { xsd:int }?,
     PDFStyle,
     Box,
     element visual_bbox { Box }?
