@@ -313,6 +313,9 @@ class ParagraphFinder:
 
         for char in page.pdf_character:
             char_layout = self.get_layout(char, page)
+            # Check if character is in any formula layout and set is_formula_character
+            char.is_formula_character = self._is_character_in_formula_layout(char, page)
+
             if not self.is_text_layout(char_layout) or self.is_isolated_formula(char):
                 skip_chars.append(char)
                 continue
@@ -789,3 +792,26 @@ class ParagraphFinder:
         # Sort by y coordinate first (top to bottom), then x coordinate (left to right)
         # Note: In PDF coordinate system, y increases upward, so we negate y for top-to-bottom sorting
         return (box.x, -box.y)
+
+    def _is_character_in_formula_layout(self, char: PdfCharacter, page: Page) -> bool:
+        """Check if character is contained within any formula-related layout."""
+        formula_layout_types = {"formula"}
+
+        char_box = char.visual_bbox.box
+        char_box2 = char.box
+
+        if self._calculate_iou_for_boxes(char_box, char_box2) < 0.2:
+            char_box = char_box2
+
+        # Get all candidate layouts that intersect with the character
+        candidate_ids = list(page.layout_index.intersection(box_to_tuple(char_box)))
+        candidate_layouts = [page.layout_map[i] for i in candidate_ids]
+
+        # Check if any intersecting layout is a formula type
+        for layout in candidate_layouts:
+            if layout.class_name in formula_layout_types:
+                iou = self._calculate_iou_for_boxes(char_box, layout.box)
+                if iou > 0.4:  # Character has overlap with formula layout
+                    return True
+
+        return False

@@ -92,7 +92,8 @@ class StylesAndFormulas:
 
             is_formula = (
                 (  # 区分公式开头的字符&公式中间的字符。主要是逗号不能在公式开头，但是可以在中间。
-                    (
+                    char.is_formula_character
+                    or (
                         self.is_formulas_start_char(char.char_unicode)
                         and not in_formula_state
                     )
@@ -917,12 +918,16 @@ class StylesAndFormulas:
         return not (box1.y2 < box2.y or box2.y2 < box1.y)
 
     def is_x_axis_adjacent(self, box1: Box, box2: Box, tolerance: float = 2.0) -> bool:
-        """判断两个 box 在 x 轴上是否相邻（在容差范围内）"""
+        """判断两个 box 在 x 轴上是否相邻或有交集"""
+        # 检查是否有交集
+        has_intersection = not (box1.x2 < box2.x or box2.x2 < box1.x)
+
         # 检查 box1 是否在 box2 左边且相邻
         left_adjacent = abs(box1.x2 - box2.x) <= tolerance
         # 检查 box2 是否在 box1 左边且相邻
         right_adjacent = abs(box2.x2 - box1.x) <= tolerance
-        return left_adjacent or right_adjacent
+
+        return has_intersection or left_adjacent or right_adjacent
 
     def calculate_y_iou(self, box1: Box, box2: Box) -> float:
         """计算两个 box 在 y 轴上的 IOU (Intersection over Union)"""
