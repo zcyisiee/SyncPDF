@@ -142,7 +142,8 @@ PDFFormula =
     Box,
     PDFCharacter+,
     attribute x_offset { xsd:float },
-    attribute y_offset { xsd:float }
+    attribute y_offset { xsd:float },
+    attribute x_advance { xsd:float }?
   }
 PDFFigure = element pdfFigure { Box }
 PDFRectangle =

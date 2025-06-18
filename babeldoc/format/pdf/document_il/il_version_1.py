@@ -608,6 +608,12 @@ class PdfFormula:
             "required": True,
         },
     )
+    x_advance: float | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass

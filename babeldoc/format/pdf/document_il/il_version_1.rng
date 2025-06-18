@@ -406,6 +406,11 @@
       <attribute name="y_offset">
         <data type="float"/>
       </attribute>
+      <optional>
+        <attribute name="x_advance">
+          <data type="float"/>
+        </attribute>
+      </optional>
     </element>
   </define>
   <define name="PDFFigure">
