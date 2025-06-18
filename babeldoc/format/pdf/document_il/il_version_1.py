@@ -373,6 +373,14 @@ class PdfRectangle:
     xobj_id: int | None = field(
         default=None,
         metadata={
+            "name": "xobjId",
+            "type": "Attribute",
+        },
+    )
+    line_width: float | None = field(
+        default=None,
+        metadata={
+            "name": "lineWidth",
             "type": "Attribute",
         },
     )

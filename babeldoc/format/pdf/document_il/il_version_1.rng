@@ -339,6 +339,11 @@
           <data type="string"/>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="layout_id">
+          <data type="int"/>
+        </attribute>
+      </optional>
       <ref name="Box"/>
       <ref name="PDFStyle"/>
       <zeroOrMore>
@@ -415,6 +420,21 @@
       <optional>
         <attribute name="debug_info">
           <data type="boolean"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="fill_background">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="xobjId">
+          <data type="int"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="lineWidth">
+          <data type="float"/>
         </attribute>
       </optional>
     </element>

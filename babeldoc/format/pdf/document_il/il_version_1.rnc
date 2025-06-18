@@ -151,5 +151,6 @@ PDFRectangle =
     GraphicState,
     attribute debug_info { xsd:boolean }?,
     attribute fill_background { xsd:boolean }?,
-    attribute xobjId { xsd:int }?
+    attribute xobjId { xsd:int }?,
+    attribute lineWidth { xsd:float }?
   }

@@ -188,6 +188,7 @@
       <xs:attribute name="FirstLineIndent" type="xs:boolean"/>
       <xs:attribute name="debug_id" type="xs:string"/>
       <xs:attribute name="layout_label" type="xs:string"/>
+      <xs:attribute name="layout_id" type="xs:int"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfParagraphComposition">
@@ -251,6 +252,9 @@
         <xs:element ref="graphicState"/>
       </xs:sequence>
       <xs:attribute name="debug_info" type="xs:boolean"/>
+      <xs:attribute name="fill_background" type="xs:boolean"/>
+      <xs:attribute name="xobjId" type="xs:int"/>
+      <xs:attribute name="lineWidth" type="xs:float"/>
     </xs:complexType>
   </xs:element>
 </xs:schema>
