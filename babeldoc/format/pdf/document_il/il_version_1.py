@@ -500,6 +500,12 @@ class PdfCharacter:
             "type": "Attribute",
         },
     )
+    is_formula_character: bool | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass

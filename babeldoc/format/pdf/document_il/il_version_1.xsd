@@ -103,6 +103,7 @@
       <xs:attribute name="advance" type="xs:float"/>
       <xs:attribute name="xobjId" type="xs:int"/>
       <xs:attribute name="debug_info" type="xs:boolean"/>
+      <xs:attribute name="is_formula_character" type="xs:boolean"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="visual_bbox">

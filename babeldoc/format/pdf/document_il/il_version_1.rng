@@ -194,6 +194,11 @@
           <data type="boolean"/>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="is_formula_character">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
       <ref name="PDFStyle"/>
       <ref name="Box"/>
       <optional>
