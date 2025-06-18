@@ -25,11 +25,17 @@ class AddDebugInformation:
         for page in docs.page:
             self.process_page(page)
 
-    def _create_rectangle(self, box: il_version_1.Box, color: GraphicState):
+    def _create_rectangle(
+        self,
+        box: il_version_1.Box,
+        color: GraphicState,
+        line_width: float | None = None,
+    ):
         rect = il_version_1.PdfRectangle(
             box=box,
             graphic_state=color,
             debug_info=True,
+            line_width=line_width,
         )
         return rect
 
@@ -123,8 +129,7 @@ class AddDebugInformation:
                     for char in composition.pdf_formula.pdf_character:
                         page.pdf_rectangle.append(
                             self._create_rectangle(
-                                char.visual_bbox.box,
-                                TEAL,
+                                char.visual_bbox.box, TEAL, line_width=0.2
                             ),
                         )
 

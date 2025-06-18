@@ -331,7 +331,7 @@ class PDFCreater:
         self,
         draw_op: BitStream,
         rectangle: il_version_1.PdfRectangle,
-        line_width: float = 0.2,
+        line_width: float = 0.5,
     ):
         """Draw a rectangle in PDF for visualization purposes.
 
@@ -353,6 +353,8 @@ class PDFCreater:
         draw_op.append(
             rectangle.graphic_state.passthrough_per_char_instruction.encode(),
         )  # Green stroke
+        if rectangle.line_width is not None:
+            line_width = rectangle.line_width
         if line_width > 0:
             draw_op.append(f" {line_width} w ".encode())  # Line width
         draw_op.append(f"{x1} {y1} {width} {height} re ".encode())

@@ -942,6 +942,7 @@ class ILCreater:
                     box=pdf_char.visual_bbox.box,
                     graphic_state=YELLOW,
                     debug_info=True,
+                    line_width=0.2,
                 )
             )
 
