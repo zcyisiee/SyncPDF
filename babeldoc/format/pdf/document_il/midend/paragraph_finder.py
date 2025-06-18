@@ -272,6 +272,9 @@ class ParagraphFinder:
 
         self.fix_overlapping_paragraphs(page)
 
+        # 第六步：对每一行的字符进行排序
+        self._sort_characters_in_lines(page)
+
         # clean up to save memory
         del page.layout_index
         del page.layout_map
@@ -763,3 +766,26 @@ class ParagraphFinder:
                 f" fix_overlapping_paragraphs for page {page.page_number}."
                 " Some overlaps might remain."
             )
+
+    def _sort_characters_in_lines(self, page: Page):
+        """Sort characters in each line from left to right, top to bottom."""
+        for paragraph in page.pdf_paragraph:
+            for composition in paragraph.pdf_paragraph_composition:
+                if composition.pdf_line:
+                    line = composition.pdf_line
+                    line.pdf_character.sort(key=self._get_char_sort_key)
+
+    def _get_char_sort_key(self, char: PdfCharacter):
+        """Get sort key for character positioning (top to bottom, left to right)."""
+        visual_box = char.visual_bbox.box
+        pdf_box = char.box
+
+        # Use visual box if IoU with bbox is >= 0.1, otherwise use bbox
+        if self._calculate_iou_for_boxes(visual_box, pdf_box) >= 0.1:
+            box = visual_box
+        else:
+            box = pdf_box
+
+        # Sort by y coordinate first (top to bottom), then x coordinate (left to right)
+        # Note: In PDF coordinate system, y increases upward, so we negate y for top-to-bottom sorting
+        return (box.x, -box.y)
