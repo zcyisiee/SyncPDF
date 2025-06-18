@@ -17,7 +17,7 @@ from babeldoc.format.pdf.document_il.utils.paragraph_helper import is_cid_paragr
 from babeldoc.utils.priority_thread_pool_executor import PriorityThreadPoolExecutor
 
 if TYPE_CHECKING:
-    from babeldoc.translation_config import TranslationConfig
+    from babeldoc.format.pdf.translation_config import TranslationConfig
     from babeldoc.translator.translator import BaseTranslator
 
 logger = logging.getLogger(__name__)

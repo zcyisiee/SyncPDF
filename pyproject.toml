@@ -28,7 +28,7 @@ dependencies = [
     "orjson>=3.10.14",
     "charset-normalizer >= 2.0.0",
     "cryptography >= 36.0.0",
-#    "pdfminer-six==20250416",
+    #    "pdfminer-six==20250416",
     "peewee>=3.17.8",
     "psutil>=7.0.0",
     "pymupdf>=1.25.1",
@@ -47,6 +47,7 @@ dependencies = [
     "rapidocr-onnxruntime>=1.4.4",
     "pyzstd>=0.17.0",
     "hyperscan>=0.7.13",
+    "rtree>=1.4.0",
 ]
 
 [project.optional-dependencies]
@@ -172,3 +173,6 @@ version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
 "babeldoc/const.py" = [
     '__version__ = "{version}"'
 ]
+
+[tool.uv.sources]
+yadt = { path = ".", editable = true }

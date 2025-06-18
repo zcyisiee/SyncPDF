@@ -21,7 +21,7 @@ from babeldoc.format.pdf.document_il.utils.layout_helper import (
 )
 from babeldoc.format.pdf.document_il.utils.layout_helper import is_bullet_point
 from babeldoc.format.pdf.document_il.utils.layout_helper import is_same_style
-from babeldoc.translation_config import TranslationConfig
+from babeldoc.format.pdf.translation_config import TranslationConfig
 
 
 class StylesAndFormulas:
@@ -58,6 +58,132 @@ class StylesAndFormulas:
         max_y = max(char.box.y2 for char in line.pdf_character)
         line.box = Box(min_x, min_y, max_x, max_y)
 
+    def _classify_characters_in_composition(
+        self,
+        composition: PdfParagraphComposition,
+        formula_font_ids: set[int],
+        first_is_bullet_so_far: bool,
+    ) -> tuple[list[tuple[PdfCharacter, bool]], bool]:
+        """
+        Phase 1: Classify every character in a composition as either formula or text.
+        This preserves the original logic, including the sticky `first_is_bullet` flag.
+        """
+        tagged_chars = []
+        is_formula_tags = []
+
+        line = composition.pdf_line
+        if not line or not line.pdf_character:
+            return [], first_is_bullet_so_far
+
+        first_is_bullet = first_is_bullet_so_far
+        in_formula_state = False
+        in_corner_mark_state = False
+
+        # Determine the `is_formula` tag for each character
+        for i, char in enumerate(line.pdf_character):
+            # The original logic for `first_is_bullet`: it is set if any segment starts with a bullet.
+            # A "segment" started when `current_chars` was empty.
+            # We determine the start of a segment by looking at the previous char's tag.
+            is_start_of_segment = i == 0 or (
+                len(is_formula_tags) > 0 and is_formula_tags[-1] != in_formula_state
+            )
+            if not first_is_bullet and is_start_of_segment and is_bullet_point(char):
+                first_is_bullet = True
+
+            is_formula = (
+                (  # 区分公式开头的字符&公式中间的字符。主要是逗号不能在公式开头，但是可以在中间。
+                    (
+                        self.is_formulas_start_char(char.char_unicode)
+                        and not in_formula_state
+                    )
+                    or (
+                        self.is_formulas_middle_char(char.char_unicode)
+                        and in_formula_state
+                    )
+                )  # 公式字符
+                or char.pdf_style.font_id in formula_font_ids  # 公式字体
+                or char.vertical  # 垂直字体
+                or (
+                    #   如果是程序添加的 dummy 空格
+                    char.char_unicode is None and in_formula_state
+                )
+                or (
+                    # 如果字符的视觉框和实际框不一致，则认为是公式字符
+                    char.box.x > char.visual_bbox.box.x2
+                    or char.box.x2 < char.visual_bbox.box.x
+                    or char.box.y > char.visual_bbox.box.y2
+                    or char.box.y2 < char.visual_bbox.box.y
+                )
+            )
+
+            previous_char = line.pdf_character[i - 1] if i > 0 else None
+            isspace = char.char_unicode.isspace() if char.char_unicode else False
+
+            is_corner_mark = (
+                previous_char is not None
+                and not isspace
+                and not first_is_bullet
+                # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
+                and char.pdf_style.font_size < previous_char.pdf_style.font_size * 0.79
+                and not in_corner_mark_state
+            ) or (
+                previous_char is not None
+                and not isspace
+                and not first_is_bullet
+                # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
+                and char.pdf_style.font_size < previous_char.pdf_style.font_size * 1.1
+                and in_corner_mark_state
+            )
+
+            is_formula = is_formula or is_corner_mark
+
+            if char.char_unicode == " ":
+                is_formula = in_formula_state
+
+            # This simulates the state change for the next iteration
+            if is_formula != in_formula_state:
+                in_formula_state = is_formula
+
+            in_corner_mark_state = is_corner_mark
+            is_formula_tags.append(is_formula)
+
+        # Pair characters with their tags
+        for char, is_formula in zip(line.pdf_character, is_formula_tags, strict=False):
+            tagged_chars.append((char, is_formula))
+
+        return tagged_chars, first_is_bullet
+
+    def _group_classified_characters(
+        self,
+        tagged_chars: list[tuple[PdfCharacter, bool]],
+    ) -> list[PdfParagraphComposition]:
+        """
+        Phase 2: Group consecutive characters with the same tag into new compositions.
+        """
+        if not tagged_chars:
+            return []
+
+        new_compositions = []
+        current_chars = []
+        current_tag = tagged_chars[0][1]
+
+        for char, is_formula_tag in tagged_chars:
+            if is_formula_tag == current_tag:
+                current_chars.append(char)
+            else:
+                new_compositions.append(
+                    self.create_composition(current_chars, current_tag),
+                )
+                current_chars = [char]
+                current_tag = is_formula_tag
+
+        if current_chars:
+            new_compositions.append(
+                self.create_composition(current_chars, current_tag),
+            )
+
+        return new_compositions
+
     def process_page_formulas(self, page: Page):
         if not page.pdf_paragraph:
             return
@@ -72,91 +198,28 @@ class StylesAndFormulas:
             if not paragraph.pdf_paragraph_composition:
                 continue
 
-            new_compositions = []
+            new_paragraph_compositions = []
+            # This flag is carried through all compositions in a paragraph, as in the original implementation.
             first_is_bullet = False
 
             for composition in paragraph.pdf_paragraph_composition:
-                current_chars = []
-                in_formula_state = False  # 当前是否在处理公式字符
-                in_corner_mark_state = False
+                (
+                    tagged_chars,
+                    first_is_bullet,
+                ) = self._classify_characters_in_composition(
+                    composition,
+                    formula_font_ids,
+                    first_is_bullet,
+                )
 
-                line = composition.pdf_line
-                if not line:
-                    new_compositions.append(composition)
+                if not tagged_chars:
+                    new_paragraph_compositions.append(composition)
                     continue
-                for char in line.pdf_character:
-                    if not current_chars and is_bullet_point(char):
-                        first_is_bullet = True
-                    is_formula = (
-                        (  # 区分公式开头的字符&公式中间的字符。主要是逗号不能在公式开头，但是可以在中间。
-                            (
-                                self.is_formulas_start_char(char.char_unicode)
-                                and not in_formula_state
-                            )
-                            or (
-                                self.is_formulas_middle_char(char.char_unicode)
-                                and in_formula_state
-                            )
-                        )  # 公式字符
-                        or char.pdf_style.font_id in formula_font_ids  # 公式字体
-                        or char.vertical  # 垂直字体
-                        or (
-                            #   如果是程序添加的 dummy 空格
-                            char.char_unicode is None and in_formula_state
-                        )
-                        or (
-                            # 如果字符的视觉框和实际框不一致，则认为是公式字符
-                            char.box.x > char.visual_bbox.box.x2
-                            or char.box.x2 < char.visual_bbox.box.x
-                            or char.box.y > char.visual_bbox.box.y2
-                            or char.box.y2 < char.visual_bbox.box.y
-                        )
-                    )
 
-                    # isspace = get_char_unicode_string(current_chars).isspace()
-                    isspace = all(x.char_unicode.isspace() for x in current_chars)
-                    is_corner_mark = (
-                        len(current_chars) > 0
-                        and not isspace
-                        and not first_is_bullet
-                        # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
-                        and char.pdf_style.font_size
-                        < current_chars[-1].pdf_style.font_size * 0.79
-                        and not in_corner_mark_state
-                    ) or (
-                        len(current_chars) > 0
-                        and not isspace
-                        and not first_is_bullet
-                        # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
-                        and char.pdf_style.font_size
-                        < current_chars[-1].pdf_style.font_size * 1.1
-                        and in_corner_mark_state
-                    )
+                grouped_compositions = self._group_classified_characters(tagged_chars)
+                new_paragraph_compositions.extend(grouped_compositions)
 
-                    is_formula = is_formula or is_corner_mark
-
-                    if char.char_unicode == " ":
-                        is_formula = in_formula_state
-
-                    if is_formula != in_formula_state and current_chars:
-                        # 字符类型发生切换，处理之前的字符
-                        new_compositions.append(
-                            self.create_composition(current_chars, in_formula_state),
-                        )
-                        current_chars = []
-                    in_formula_state = is_formula
-                    in_corner_mark_state = is_corner_mark
-
-                    current_chars.append(char)
-
-                # 处理行末的字符
-                if current_chars:
-                    new_compositions.append(
-                        self.create_composition(current_chars, in_formula_state),
-                    )
-                    current_chars = []
-
-            paragraph.pdf_paragraph_composition = new_compositions
+            paragraph.pdf_paragraph_composition = new_paragraph_compositions
 
     def process_translatable_formulas(self, page: Page):
         """将需要正常翻译的公式（如纯数字、数字加逗号等）转换为普通文本行"""
@@ -403,31 +466,47 @@ class StylesAndFormulas:
                             right_line = comp.pdf_line
                             break
 
-                # 计算与左右文本的 y 轴交集
-                left_intersection = 0
-                right_intersection = 0
+                # Calculate IOU with left and right text on y-axis
+                left_iou = 0
+                right_iou = 0
 
                 if left_line:
-                    # 计算与左边文本的交集
+                    # Calculate IOU with left text
                     intersection_start = max(formula.box.y, left_line.box.y)
                     intersection_end = min(formula.box.y2, left_line.box.y2)
-                    if intersection_end > intersection_start:
-                        left_intersection = intersection_end - intersection_start
+                    intersection_length = max(0, intersection_end - intersection_start)
+
+                    formula_height = formula.box.y2 - formula.box.y
+                    left_line_height = left_line.box.y2 - left_line.box.y
+                    union_length = (
+                        formula_height + left_line_height - intersection_length
+                    )
+
+                    if union_length > 0:
+                        left_iou = intersection_length / union_length
 
                 if right_line:
-                    # 计算与右边文本的交集
+                    # Calculate IOU with right text
                     intersection_start = max(formula.box.y, right_line.box.y)
                     intersection_end = min(formula.box.y2, right_line.box.y2)
-                    if intersection_end > intersection_start:
-                        right_intersection = intersection_end - intersection_start
+                    intersection_length = max(0, intersection_end - intersection_start)
 
-                # 如果有两个文本段落，将交集较小的设为 none
+                    formula_height = formula.box.y2 - formula.box.y
+                    right_line_height = right_line.box.y2 - right_line.box.y
+                    union_length = (
+                        formula_height + right_line_height - intersection_length
+                    )
+
+                    if union_length > 0:
+                        right_iou = intersection_length / union_length
+
+                # If both text segments exist, keep the one with higher IOU
                 if left_line and right_line:
-                    if left_intersection < right_intersection:
+                    if left_iou < right_iou:
                         left_line = None
-                    elif right_intersection < left_intersection:
+                    elif right_iou < left_iou:
                         right_line = None
-                    # 如果交集相等，保留两者
+                    # If IOUs are equal, keep both
 
                 # 计算 x 偏移量（相对于左边文本）
                 if left_line:
@@ -440,6 +519,8 @@ class StylesAndFormulas:
                     formula.x_offset = 0
                 # if formula.x_offset > 0:
                 #     formula.x_offset = 0
+                if formula.x_offset < -5:
+                    formula.x_offset = 0
 
                 # 计算 y 偏移量
                 if left_line:
@@ -825,9 +906,45 @@ class StylesAndFormulas:
         self.update_formula_data(merged_formula)
         return merged_formula
 
+    def is_x_axis_contained(self, box1: Box, box2: Box) -> bool:
+        """判断 box1 的 x 轴是否完全包含在 box2 的 x 轴内，或反之"""
+        return (box1.x >= box2.x and box1.x2 <= box2.x2) or (
+            box2.x >= box1.x and box2.x2 <= box1.x2
+        )
+
+    def has_y_intersection(self, box1: Box, box2: Box) -> bool:
+        """判断两个 box 的 y 轴是否有交集"""
+        return not (box1.y2 < box2.y or box2.y2 < box1.y)
+
+    def is_x_axis_adjacent(self, box1: Box, box2: Box, tolerance: float = 2.0) -> bool:
+        """判断两个 box 在 x 轴上是否相邻（在容差范围内）"""
+        # 检查 box1 是否在 box2 左边且相邻
+        left_adjacent = abs(box1.x2 - box2.x) <= tolerance
+        # 检查 box2 是否在 box1 左边且相邻
+        right_adjacent = abs(box2.x2 - box1.x) <= tolerance
+        return left_adjacent or right_adjacent
+
+    def calculate_y_iou(self, box1: Box, box2: Box) -> float:
+        """计算两个 box 在 y 轴上的 IOU (Intersection over Union)"""
+        # 计算交集
+        intersection_start = max(box1.y, box2.y)
+        intersection_end = min(box1.y2, box2.y2)
+        intersection_length = max(0, intersection_end - intersection_start)
+
+        # 计算并集
+        box1_height = box1.y2 - box1.y
+        box2_height = box2.y2 - box2.y
+        union_length = box1_height + box2_height - intersection_length
+
+        # 避免除零错误
+        if union_length <= 0:
+            return 0.0
+
+        return intersection_length / union_length
+
     def merge_overlapping_formulas(self, page: Page):
         """
-        合并 x 轴重叠且 y 轴有交集的相邻公式
+        合并 x 轴重叠且 y 轴有交集的相邻公式，或者 x 轴相邻且 y 轴 IOU > 0.5 的公式
         角标可能会被识别成单独的公式，需要合并
         """
         if not page.pdf_paragraph:
@@ -850,11 +967,18 @@ class StylesAndFormulas:
                 formula1 = comp1.pdf_formula
                 formula2 = comp2.pdf_formula
 
-                # 检查 x 轴重叠和 y 轴交集
-                if self.is_x_axis_contained(
-                    formula1.box,
-                    formula2.box,
-                ) and self.has_y_intersection(formula1.box, formula2.box):
+                # 检查合并条件：
+                # 1. x 轴重叠且 y 轴有交集，或者
+                # 2. x 轴相邻且 y 轴 IOU > 0.5
+                should_merge = (
+                    self.is_x_axis_contained(formula1.box, formula2.box)
+                    and self.has_y_intersection(formula1.box, formula2.box)
+                ) or (
+                    self.is_x_axis_adjacent(formula1.box, formula2.box)
+                    and self.calculate_y_iou(formula1.box, formula2.box) > 0.5
+                )
+
+                if should_merge:
                     # 合并公式
                     merged_formula = self.merge_formulas(formula1, formula2)
                     paragraph.pdf_paragraph_composition[i] = PdfParagraphComposition(
@@ -865,16 +989,6 @@ class StylesAndFormulas:
                     # 不增加 i，因为合并后的公式可能还需要和下一个公式合并
                 else:
                     i += 1
-
-    def is_x_axis_contained(self, box1: Box, box2: Box) -> bool:
-        """判断 box1 的 x 轴是否完全包含在 box2 的 x 轴内，或反之"""
-        return (box1.x >= box2.x and box1.x2 <= box2.x2) or (
-            box2.x >= box1.x and box2.x2 <= box1.x2
-        )
-
-    def has_y_intersection(self, box1: Box, box2: Box) -> bool:
-        """判断两个 box 的 y 轴是否有交集"""
-        return not (box1.y2 < box2.y or box2.y2 < box1.y)
 
     def process_comma_formulas(self, page: Page):
         """处理包含逗号的复杂公式，将其按逗号拆分"""

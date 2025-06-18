@@ -20,7 +20,7 @@ from babeldoc.format.pdf.document_il.midend.il_translator import ILTranslator
 from babeldoc.format.pdf.document_il.midend.il_translator import PageTranslateTracker
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
 from babeldoc.format.pdf.document_il.utils.paragraph_helper import is_cid_paragraph
-from babeldoc.translation_config import TranslationConfig
+from babeldoc.format.pdf.translation_config import TranslationConfig
 from babeldoc.translator.translator import BaseTranslator
 from babeldoc.utils.priority_thread_pool_executor import PriorityThreadPoolExecutor
 
@@ -325,7 +325,7 @@ class ILTranslatorLLMOnly:
 
                     if active_entries:
                         current_glossary_md_entries: list[str] = []
-                        for original_source, target_text in active_entries:
+                        for original_source, target_text in sorted(active_entries):
                             current_glossary_md_entries.append(
                                 f"| {original_source} | {target_text} |"
                             )

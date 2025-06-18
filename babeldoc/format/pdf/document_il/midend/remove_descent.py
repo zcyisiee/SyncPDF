@@ -3,7 +3,7 @@ from collections import Counter
 from functools import cache
 
 from babeldoc.format.pdf.document_il import il_version_1
-from babeldoc.translation_config import TranslationConfig
+from babeldoc.format.pdf.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 

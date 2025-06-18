@@ -28,7 +28,7 @@ from babeldoc.format.pdf.document_il.utils.layout_helper import (
 from babeldoc.format.pdf.document_il.utils.layout_helper import (
     is_same_style_except_size,
 )
-from babeldoc.translation_config import TranslationConfig
+from babeldoc.format.pdf.translation_config import TranslationConfig
 from babeldoc.translator.translator import BaseTranslator
 from babeldoc.utils.priority_thread_pool_executor import PriorityThreadPoolExecutor
 
@@ -809,7 +809,7 @@ class ILTranslator:
 
                 if active_entries:
                     current_glossary_md_entries: list[str] = []
-                    for original_source, target_text in active_entries:
+                    for original_source, target_text in sorted(active_entries):
                         current_glossary_md_entries.append(
                             f"| {original_source} | {target_text} |"
                         )

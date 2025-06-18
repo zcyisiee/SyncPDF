@@ -50,14 +50,14 @@ from babeldoc.format.pdf.document_il.xml_converter import XMLConverter
 from babeldoc.format.pdf.pdfinterp import PDFPageInterpreterEx
 from babeldoc.format.pdf.result_merger import ResultMerger
 from babeldoc.format.pdf.split_manager import SplitManager
+from babeldoc.format.pdf.translation_config import TranslateResult
+from babeldoc.format.pdf.translation_config import TranslationConfig
+from babeldoc.format.pdf.translation_config import WatermarkOutputMode
 from babeldoc.pdfminer.pdfdocument import PDFDocument
 from babeldoc.pdfminer.pdfinterp import PDFResourceManager
 from babeldoc.pdfminer.pdfpage import PDFPage
 from babeldoc.pdfminer.pdfparser import PDFParser
 from babeldoc.progress_monitor import ProgressMonitor
-from babeldoc.translation_config import TranslateResult
-from babeldoc.translation_config import TranslationConfig
-from babeldoc.translation_config import WatermarkOutputMode
 
 logger = logging.getLogger(__name__)
 

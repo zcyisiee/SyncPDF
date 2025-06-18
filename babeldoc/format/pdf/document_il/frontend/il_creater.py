@@ -13,6 +13,7 @@ from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils import zstd_helper
 from babeldoc.format.pdf.document_il.utils.style_helper import BLACK
 from babeldoc.format.pdf.document_il.utils.style_helper import YELLOW
+from babeldoc.format.pdf.translation_config import TranslationConfig
 from babeldoc.pdfminer.layout import LTChar
 from babeldoc.pdfminer.layout import LTFigure
 from babeldoc.pdfminer.pdffont import PDFCIDFont
@@ -22,7 +23,6 @@ from babeldoc.pdfminer.pdffont import PDFFont
 # from babeldoc.pdfminer.pdftypes import PDFObjRef as PDFMinerPDFObjRef
 # from babeldoc.pdfminer.pdftypes import resolve1 as pdftypes_resolve1
 from babeldoc.pdfminer.psparser import PSLiteral
-from babeldoc.translation_config import TranslationConfig
 
 
 def batched(iterable, n, *, strict=False):

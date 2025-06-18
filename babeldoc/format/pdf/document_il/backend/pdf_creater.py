@@ -16,9 +16,9 @@ from babeldoc.assets.embedding_assets_metadata import FONT_NAMES
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
 from babeldoc.format.pdf.document_il.utils.zstd_helper import zstd_decompress
-from babeldoc.translation_config import TranslateResult
-from babeldoc.translation_config import TranslationConfig
-from babeldoc.translation_config import WatermarkOutputMode
+from babeldoc.format.pdf.translation_config import TranslateResult
+from babeldoc.format.pdf.translation_config import TranslationConfig
+from babeldoc.format.pdf.translation_config import WatermarkOutputMode
 
 logger = logging.getLogger(__name__)
 
@@ -331,7 +331,7 @@ class PDFCreater:
         self,
         draw_op: BitStream,
         rectangle: il_version_1.PdfRectangle,
-        line_width: float = 1,
+        line_width: float = 0.2,
     ):
         """Draw a rectangle in PDF for visualization purposes.
 
@@ -1014,6 +1014,19 @@ class PDFCreater:
                     )
                     translation_config.raise_if_cancelled()
                     original_pdf = pymupdf.open(self.original_pdf_path)
+
+                    if translation_config.debug:
+                        translation_config.raise_if_cancelled()
+                        try:
+                            original_pdf = self.write_debug_info(
+                                original_pdf, translation_config
+                            )
+                        except Exception:
+                            logger.warning(
+                                "Failed to write debug info to dual PDF",
+                                exc_info=True,
+                            )
+
                     if (
                         self.translation_config.only_include_translated_page
                         and should_removed_page
@@ -1042,16 +1055,6 @@ class PDFCreater:
                             dual_out_path,
                             translation_config,
                         )
-
-                    if translation_config.debug:
-                        translation_config.raise_if_cancelled()
-                        try:
-                            dual = self.write_debug_info(dual, translation_config)
-                        except Exception:
-                            logger.warning(
-                                "Failed to write debug info to dual PDF",
-                                exc_info=True,
-                            )
 
                     self.save_pdf_with_timeout(
                         dual,

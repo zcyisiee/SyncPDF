@@ -15,8 +15,8 @@ from babeldoc.format.pdf.document_il import PdfParagraphComposition
 from babeldoc.format.pdf.document_il import PdfStyle
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
-from babeldoc.translation_config import TranslationConfig
-from babeldoc.translation_config import WatermarkOutputMode
+from babeldoc.format.pdf.translation_config import TranslationConfig
+from babeldoc.format.pdf.translation_config import WatermarkOutputMode
 
 logger = logging.getLogger(__name__)
 

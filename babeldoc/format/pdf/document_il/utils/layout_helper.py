@@ -64,6 +64,13 @@ def formular_height_ignore_char(char: PdfCharacter):
     )
 
 
+def box_to_tuple(box: Box) -> tuple[float, float, float, float]:
+    """Converts a Box object to a tuple of its coordinates."""
+    if box is None:
+        return (0, 0, 0, 0)
+    return (box.x, box.y, box.x2, box.y2)
+
+
 class Layout:
     def __init__(self, layout_id, name):
         self.id = layout_id

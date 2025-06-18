@@ -4,8 +4,8 @@ from pathlib import Path
 from pymupdf import Document
 
 from babeldoc.format.pdf.document_il.backend.pdf_creater import PDFCreater
-from babeldoc.translation_config import TranslateResult
-from babeldoc.translation_config import TranslationConfig
+from babeldoc.format.pdf.translation_config import TranslateResult
+from babeldoc.format.pdf.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 

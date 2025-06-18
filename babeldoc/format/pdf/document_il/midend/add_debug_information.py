@@ -4,8 +4,9 @@ import babeldoc.format.pdf.document_il.il_version_1 as il_version_1
 from babeldoc.format.pdf.document_il import GraphicState
 from babeldoc.format.pdf.document_il.utils.style_helper import BLUE
 from babeldoc.format.pdf.document_il.utils.style_helper import ORANGE
+from babeldoc.format.pdf.document_il.utils.style_helper import TEAL
 from babeldoc.format.pdf.document_il.utils.style_helper import YELLOW
-from babeldoc.translation_config import TranslationConfig
+from babeldoc.format.pdf.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,13 @@ class AddDebugInformation:
                             ORANGE,
                         ),
                     )
+                    for char in composition.pdf_formula.pdf_character:
+                        page.pdf_rectangle.append(
+                            self._create_rectangle(
+                                char.visual_bbox.box,
+                                TEAL,
+                            ),
+                        )
 
             for xobj in page.pdf_xobject:
                 new_paragraphs.append(

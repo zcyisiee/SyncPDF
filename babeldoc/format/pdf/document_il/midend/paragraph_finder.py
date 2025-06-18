@@ -2,6 +2,8 @@ import logging
 import random
 import re
 
+from rtree import index
+
 from babeldoc.babeldoc_exception.BabelDOCException import ExtractTextError
 from babeldoc.format.pdf.document_il import Box
 from babeldoc.format.pdf.document_il import Document
@@ -13,11 +15,12 @@ from babeldoc.format.pdf.document_il import PdfParagraphComposition
 from babeldoc.format.pdf.document_il import PdfRectangle
 from babeldoc.format.pdf.document_il.utils.layout_helper import Layout
 from babeldoc.format.pdf.document_il.utils.layout_helper import add_space_dummy_chars
+from babeldoc.format.pdf.document_il.utils.layout_helper import box_to_tuple
 from babeldoc.format.pdf.document_il.utils.layout_helper import get_char_unicode_string
 from babeldoc.format.pdf.document_il.utils.layout_helper import is_bullet_point
 from babeldoc.format.pdf.document_il.utils.paragraph_helper import is_cid_paragraph
 from babeldoc.format.pdf.document_il.utils.style_helper import WHITE
-from babeldoc.translation_config import TranslationConfig
+from babeldoc.format.pdf.translation_config import TranslationConfig
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,58 @@ class ParagraphFinder:
 
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config
+
+    @staticmethod
+    def _calculate_iou_for_boxes(box1: Box, box2: Box) -> float:
+        """Calculate the intersection area divided by the first box (formula) area."""
+        x_left = max(box1.x, box2.x)
+        y_bottom = max(box1.y, box2.y)
+        x_right = min(box1.x2, box2.x2)
+        y_top = min(box1.y2, box2.y2)
+
+        if x_right <= x_left or y_top <= y_bottom:
+            return 0.0
+
+        # Calculate intersection area
+        intersection_area = (x_right - x_left) * (y_top - y_bottom)
+
+        # Calculate area of first box (formula area)
+        formula_area = (box1.x2 - box1.x) * (box1.y2 - box1.y)
+
+        # Return intersection divided by formula area, handle division by zero
+        if formula_area <= 0:
+            return 0.0
+
+        return intersection_area / formula_area
+
+    def _preprocess_formula_layouts(self, page: Page):
+        """
+        Identifies 'formula' layouts that do not significantly overlap with any text layouts
+        and re-labels them as 'isolate_formula'.
+        """
+        # Use a simplified Layout object for is_text_layout check
+        text_layouts = [
+            layout
+            for layout in page.page_layout
+            if self.is_text_layout(Layout(layout.id, layout.class_name))
+        ]
+        formula_layouts = [
+            layout for layout in page.page_layout if layout.class_name == "formula"
+        ]
+
+        if not text_layouts or not formula_layouts:
+            return
+
+        for formula_layout in formula_layouts:
+            is_isolated = True
+            for text_layout in text_layouts:
+                iou = self._calculate_iou_for_boxes(formula_layout.box, text_layout.box)
+                if iou >= 0.5:
+                    is_isolated = False
+                    break
+
+            if is_isolated:
+                formula_layout.class_name = "isolate_formula"
 
     def add_text_fill_background(self, page: Page):
         layout_map = {layout.id: layout for layout in page.page_layout}
@@ -83,6 +138,8 @@ class ParagraphFinder:
                 chars.extend(composition.pdf_line.pdf_character)
             elif composition.pdf_formula:
                 chars.extend(composition.pdf_formula.pdf_character)
+            elif composition.pdf_character:
+                chars.append(composition.pdf_character)
             elif composition.pdf_same_style_unicode_characters:
                 continue
             else:
@@ -109,7 +166,8 @@ class ParagraphFinder:
 
         paragraph.first_line_indent = False
         if (
-            paragraph.pdf_paragraph_composition[0].pdf_line
+            paragraph.pdf_paragraph_composition
+            and paragraph.pdf_paragraph_composition[0].pdf_line
             and paragraph.pdf_paragraph_composition[0]
             .pdf_line.pdf_character[0]
             .visual_bbox.box.x
@@ -164,22 +222,43 @@ class ParagraphFinder:
             and bbox1.y2 > bbox2.y
         )
 
+    def _build_layout_index(self, page: Page):
+        """Builds an R-tree index for all layouts on the page."""
+        layout_index = index.Index()
+        layout_map = {}
+        for i, layout in enumerate(page.page_layout):
+            layout_map[i] = layout
+            if layout.box:
+                layout_index.insert(i, box_to_tuple(layout.box))
+        page.layout_index = layout_index
+        page.layout_map = layout_map
+
     def process_page(self, page: Page):
+        # build layout index for fast query
+        self._build_layout_index(page)
+
+        # 预处理公式布局的标签
+        self._preprocess_formula_layouts(page)
+
         # 第一步：根据 layout 创建 paragraphs
         # 在这一步中，page.pdf_character 中的字符会被移除
-        paragraphs = self.create_paragraphs(page)
+        paragraphs = self._group_characters_into_paragraphs(page)
         page.pdf_paragraph = paragraphs
 
-        # 第二步：处理段落中的空格和换行符
+        # 第二步：将段落内的字符拆分为行
+        for paragraph in paragraphs:
+            self._split_paragraph_into_lines(paragraph)
+
+        # 第三步：处理段落中的空格
         for paragraph in paragraphs:
             add_space_dummy_chars(paragraph)
             self.process_paragraph_spacing(paragraph)
             self.update_paragraph_data(paragraph)
 
-        # 第三步：计算所有行宽度的中位数
+        # 第四步：计算所有行宽度的中位数
         median_width = self.calculate_median_line_width(paragraphs)
 
-        # 第四步：处理独立段落
+        # 第五步：处理独立段落
         self.process_independent_paragraphs(paragraphs, median_width)
 
         for paragraph in paragraphs:
@@ -193,6 +272,10 @@ class ParagraphFinder:
 
         self.fix_overlapping_paragraphs(page)
 
+        # clean up to save memory
+        del page.layout_index
+        del page.layout_map
+
     def is_isolated_formula(self, char: PdfCharacter):
         return char.char_unicode in (
             "(cid:122)",
@@ -201,19 +284,16 @@ class ParagraphFinder:
             "(cid:125)",
         )
 
-    def create_paragraphs(self, page: Page) -> list[PdfParagraph]:
+    def _group_characters_into_paragraphs(self, page: Page) -> list[PdfParagraph]:
         paragraphs: list[PdfParagraph] = []
         if page.pdf_paragraph:
             paragraphs.extend(page.pdf_paragraph)
             page.pdf_paragraph = []
 
-        # Calculate median character area
-        char_areas = []
-        for char in page.pdf_character:
-            char_box = char.box
-            area = (char_box.x2 - char_box.x) * (char_box.y2 - char_box.y)
-            char_areas.append(area)
-
+        char_areas = [
+            (char.box.x2 - char.box.x) * (char.box.y2 - char.box.y)
+            for char in page.pdf_character
+        ]
         median_char_area = 0.0
         if char_areas:
             char_areas.sort()
@@ -226,7 +306,6 @@ class ParagraphFinder:
 
         current_paragraph: PdfParagraph | None = None
         current_layout: Layout | None = None
-        current_line_chars: list[PdfCharacter] = []
         skip_chars = []
 
         for char in page.pdf_character:
@@ -235,83 +314,87 @@ class ParagraphFinder:
                 skip_chars.append(char)
                 continue
 
-            # 检查是否需要开始新行
-            if current_line_chars and Layout.is_newline(current_line_chars[-1], char):
-                # 创建新行
-                if current_line_chars:
-                    line = self.create_line(current_line_chars)
-                    if current_paragraph is None:
-                        current_paragraph = PdfParagraph(
-                            pdf_paragraph_composition=[line],
-                            layout_id=char_layout.id,
-                            debug_id=generate_base58_id(),
-                            layout_label=char_layout.name
-                            if not current_layout
-                            else current_layout.name,
-                        )
-                        paragraphs.append(current_paragraph)
-                    else:
-                        current_paragraph.pdf_paragraph_composition.append(line)
-                        self.update_paragraph_data(current_paragraph)
-                    current_line_chars = []
-
-            # Calculate current character area
             char_box = char.visual_bbox.box
+            char_pdf_box = char.box
+            if self._calculate_iou_for_boxes(char_box, char_pdf_box) < 0.2:
+                char_box = char_pdf_box
             char_area = (char_box.x2 - char_box.x) * (char_box.y2 - char_box.y)
-            is_small_char = char_area < median_char_area * 0.1
+            is_small_char = char_area < median_char_area * 0.05
 
-            # 检查是否需要开始新段落
-            # 如果字符面积小于中位数面积的 10% 且当前段落已有字符，则跳过新段落检测
-            if not (is_small_char and current_line_chars) and (
-                current_layout is None
-                or char_layout.id != current_layout.id
-                or (  # 不是同一个 xobject
-                    current_line_chars
-                    and current_line_chars[-1].xobj_id != char.xobj_id
-                )
-                or (
-                    is_bullet_point(char)  # 如果是项目符号，开启新段落
-                    and not current_line_chars
-                )
-            ):
-                if current_line_chars:
-                    line = self.create_line(current_line_chars)
-                    if current_paragraph is not None:
-                        current_paragraph.pdf_paragraph_composition.append(line)
-                        self.update_paragraph_data(current_paragraph)
-                    else:
-                        current_paragraph = PdfParagraph(
-                            pdf_paragraph_composition=[line],
-                            layout_id=current_layout.id,
-                            debug_id=generate_base58_id(),
-                            layout_label=current_layout.name,
-                        )
-                        self.update_paragraph_data(current_paragraph)
-                        paragraphs.append(current_paragraph)
-                    current_line_chars = []
-                current_paragraph = None
-                current_layout = char_layout
-
-            current_line_chars.append(char)
-
-        # 处理最后一行的字符
-        if current_line_chars:
-            line = self.create_line(current_line_chars)
+            is_new_paragraph = False
             if current_paragraph is None:
+                is_new_paragraph = True
+            elif not (
+                is_small_char
+                and current_paragraph.pdf_paragraph_composition
+                and char_layout.id == current_layout.id
+            ):
+                if (
+                    char_layout.id != current_layout.id
+                    or (  # not same xobject
+                        current_paragraph.pdf_paragraph_composition
+                        and current_paragraph.pdf_paragraph_composition[
+                            -1
+                        ].pdf_character.xobj_id
+                        != char.xobj_id
+                    )
+                    or (
+                        is_bullet_point(char)
+                        and not current_paragraph.pdf_paragraph_composition
+                    )
+                ):
+                    is_new_paragraph = True
+
+            if is_new_paragraph:
+                current_layout = char_layout
                 current_paragraph = PdfParagraph(
-                    pdf_paragraph_composition=[line],
+                    pdf_paragraph_composition=[],
                     layout_id=current_layout.id,
                     debug_id=generate_base58_id(),
                     layout_label=current_layout.name,
                 )
                 paragraphs.append(current_paragraph)
-            else:
-                current_paragraph.pdf_paragraph_composition.append(line)
-                self.update_paragraph_data(current_paragraph)
+
+            current_paragraph.pdf_paragraph_composition.append(
+                PdfParagraphComposition(pdf_character=char)
+            )
 
         page.pdf_character = skip_chars
-
+        for para in paragraphs:
+            self.update_paragraph_data(para)
         return paragraphs
+
+    def _split_paragraph_into_lines(self, paragraph: PdfParagraph):
+        if not paragraph.pdf_paragraph_composition:
+            return
+
+        new_compositions = []
+        current_line_chars = []
+
+        for composition in paragraph.pdf_paragraph_composition:
+            if not composition.pdf_character:
+                if current_line_chars:
+                    new_compositions.append(self.create_line(current_line_chars))
+                    current_line_chars = []
+                new_compositions.append(composition)
+                continue
+
+            char = composition.pdf_character
+            if (
+                current_line_chars
+                and self._calculate_iou_for_boxes(char.box, char.visual_bbox.box) > 0.1
+                and Layout.is_newline(current_line_chars[-1], char)
+            ):
+                new_compositions.append(self.create_line(current_line_chars))
+                current_line_chars = []
+
+            current_line_chars.append(char)
+
+        if current_line_chars:
+            new_compositions.append(self.create_line(current_line_chars))
+
+        paragraph.pdf_paragraph_composition = new_compositions
+        self.update_paragraph_data(paragraph)
 
     def process_paragraph_spacing(self, paragraph: PdfParagraph):
         if not paragraph.pdf_paragraph_composition:
@@ -441,39 +524,33 @@ class ParagraphFinder:
             "formula",
         ]
         char_box = char.visual_bbox.box
+        char_box2 = char.box
 
-        def calculate_intersection_area(char_box: Box, layout_box: Box) -> float:
-            """Calculate the intersection area between a character box and a layout box."""
-            x_left = max(char_box.x, layout_box.x)
-            y_bottom = max(char_box.y, layout_box.y)
-            x_right = min(char_box.x2, layout_box.x2)
-            y_top = min(char_box.y2, layout_box.y2)
+        if self._calculate_iou_for_boxes(char_box, char_box2) < 0.2:
+            char_box = char_box2
 
-            if x_right <= x_left or y_top <= y_bottom:
-                return 0.0
-
-            return (x_right - x_left) * (y_top - y_bottom)
-
-        # 收集所有相交的布局及其相交面积
+        # 收集所有相交的布局及其IoU值
         matching_layouts = []
-        for layout in page.page_layout:
-            intersection_area = calculate_intersection_area(char_box, layout.box)
-            if intersection_area > 0:
+        candidate_ids = list(page.layout_index.intersection(box_to_tuple(char_box)))
+        candidate_layouts = [page.layout_map[i] for i in candidate_ids]
+        for layout in candidate_layouts:
+            iou = self._calculate_iou_for_boxes(char_box, layout.box)
+            if iou > 0:
                 matching_layouts.append(
                     {
                         "layout": Layout(layout.id, layout.class_name),
                         "priority": layout_priority.index(layout.class_name)
                         if layout.class_name in layout_priority
                         else len(layout_priority),
-                        "area": intersection_area,
+                        "iou": iou,
                     }
                 )
 
         if not matching_layouts:
             return None
 
-        # 按优先级（升序）和相交面积（降序）排序
-        matching_layouts.sort(key=lambda x: (x["priority"], -x["area"]))
+        # 按优先级（升序）和IoU值（降序）排序
+        matching_layouts.sort(key=lambda x: (x["priority"], -x["iou"]))
 
         return matching_layouts[0]["layout"]
 

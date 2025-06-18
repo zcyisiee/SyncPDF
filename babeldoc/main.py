@@ -14,9 +14,9 @@ from rich.progress import TimeRemainingColumn
 
 import babeldoc.assets.assets
 import babeldoc.format.pdf.high_level
+from babeldoc.format.pdf.translation_config import TranslationConfig
+from babeldoc.format.pdf.translation_config import WatermarkOutputMode
 from babeldoc.glossary import Glossary
-from babeldoc.translation_config import TranslationConfig
-from babeldoc.translation_config import WatermarkOutputMode
 from babeldoc.translator.translator import OpenAITranslator
 from babeldoc.translator.translator import set_translate_rate_limiter
 
