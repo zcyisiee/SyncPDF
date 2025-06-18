@@ -3,6 +3,7 @@ import logging
 import babeldoc.format.pdf.document_il.il_version_1 as il_version_1
 from babeldoc.format.pdf.document_il import GraphicState
 from babeldoc.format.pdf.document_il.utils.style_helper import BLUE
+from babeldoc.format.pdf.document_il.utils.style_helper import CYAN
 from babeldoc.format.pdf.document_il.utils.style_helper import ORANGE
 from babeldoc.format.pdf.document_il.utils.style_helper import TEAL
 from babeldoc.format.pdf.document_il.utils.style_helper import YELLOW
@@ -131,6 +132,9 @@ class AddDebugInformation:
                             self._create_rectangle(
                                 char.visual_bbox.box, TEAL, line_width=0.2
                             ),
+                        )
+                        page.pdf_rectangle.append(
+                            self._create_rectangle(char.box, CYAN, line_width=0.2),
                         )
 
             for xobj in page.pdf_xobject:

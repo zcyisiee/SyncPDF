@@ -33,6 +33,7 @@ HEIGHT_NOT_USFUL_CHAR_IN_CHAR = (
     # arXiv:2412.05265 32 页 公式左右的中括号
     "(cid:2)",
     "(cid:3)",
+    "·",
 )
 
 
@@ -55,6 +56,46 @@ def is_bullet_point(char: PdfCharacter) -> bool:
     """
     is_bullet = bool(BULLET_POINT_PATTERN.match(char.char_unicode))
     return is_bullet
+
+
+def calculate_box_iou(box1: Box, box2: Box) -> float:
+    """Calculate the Intersection over Union (IOU) between two boxes.
+
+    Args:
+        box1: First box
+        box2: Second box
+
+    Returns:
+        float: IOU value between 0 and 1
+    """
+    if box1 is None or box2 is None:
+        return 0.0
+
+    # Calculate intersection
+    x_left = max(box1.x, box2.x)
+    y_top = max(box1.y, box2.y)
+    x_right = min(box1.x2, box2.x2)
+    y_bottom = min(box1.y2, box2.y2)
+
+    # Check if there's no intersection
+    if x_left >= x_right or y_top >= y_bottom:
+        return 0.0
+
+    # Calculate intersection area
+    intersection_area = (x_right - x_left) * (y_bottom - y_top)
+
+    # Calculate areas of both boxes
+    box1_area = (box1.x2 - box1.x) * (box1.y2 - box1.y)
+    box2_area = (box2.x2 - box2.x) * (box2.y2 - box2.y)
+
+    # Calculate union area
+    union_area = box1_area + box2_area - intersection_area
+
+    # Avoid division by zero
+    if union_area <= 0:
+        return 0.0
+
+    return intersection_area / union_area
 
 
 def formular_height_ignore_char(char: PdfCharacter):
