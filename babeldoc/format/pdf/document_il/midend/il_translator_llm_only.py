@@ -169,7 +169,6 @@ class ILTranslatorLLMOnly:
         total_token_count = 0
         for paragraph in page.pdf_paragraph:
             if paragraph.debug_id is None or paragraph.unicode is None:
-                pbar.advance(1)
                 continue
             if is_cid_paragraph(paragraph):
                 pbar.advance(1)

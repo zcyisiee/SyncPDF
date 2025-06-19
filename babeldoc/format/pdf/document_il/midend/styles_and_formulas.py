@@ -54,11 +54,12 @@ class StylesAndFormulas:
         """处理页面，包括公式识别和偏移量计算"""
         build_layout_index(page)
         self.process_page_formulas(page)
-        self.process_page_offsets(page)
+        # self.process_page_offsets(page)
         self.process_comma_formulas(page)
         self.merge_overlapping_formulas(page)
-        self.process_page_offsets(page)
+        # self.process_page_offsets(page)
         self.process_translatable_formulas(page)
+        self.process_page_offsets(page)
         self.process_page_styles(page)
 
         # clean up to save memory
@@ -66,10 +67,10 @@ class StylesAndFormulas:
         del page.layout_map
 
     def update_line_data(self, line: PdfLine):
-        min_x = min(char.box.x for char in line.pdf_character)
-        min_y = min(char.box.y for char in line.pdf_character)
-        max_x = max(char.box.x2 for char in line.pdf_character)
-        max_y = max(char.box.y2 for char in line.pdf_character)
+        min_x = min(char.visual_bbox.box.x for char in line.pdf_character)
+        min_y = min(char.visual_bbox.box.y for char in line.pdf_character)
+        max_x = max(char.visual_bbox.box.x2 for char in line.pdf_character)
+        max_y = max(char.visual_bbox.box.y2 for char in line.pdf_character)
         line.box = Box(min_x, min_y, max_x, max_y)
 
     def _classify_characters_in_composition(
@@ -447,10 +448,10 @@ class StylesAndFormulas:
             return None
 
         # 计算边界框
-        min_x = min(char.box.x for char in chars)
-        min_y = min(char.box.y for char in chars)
-        max_x = max(char.box.x2 for char in chars)
-        max_y = max(char.box.y2 for char in chars)
+        min_x = min(char.visual_bbox.box.x for char in chars)
+        min_y = min(char.visual_bbox.box.y for char in chars)
+        max_x = max(char.visual_bbox.box.x2 for char in chars)
+        max_y = max(char.visual_bbox.box.y2 for char in chars)
         box = Box(min_x, min_y, max_x, max_y)
 
         return PdfParagraphComposition(
@@ -676,9 +677,10 @@ class StylesAndFormulas:
         # 合并所有字符
         all_chars = formula1.pdf_character + formula2.pdf_character
         # 按 y 坐标和 x 坐标排序，确保字符顺序正确
-        sorted_chars = sorted(all_chars, key=lambda c: (c.box.y, c.box.x))
+        # sorted_chars = sorted(
+        #     all_chars, key=lambda c: (c.visual_bbox.box.y, c.visual_bbox.box.x))
 
-        merged_formula = PdfFormula(pdf_character=sorted_chars)
+        merged_formula = PdfFormula(pdf_character=all_chars)
         self.update_formula_data(merged_formula)
         return merged_formula
 
@@ -690,7 +692,7 @@ class StylesAndFormulas:
 
     def has_y_intersection(self, box1: Box, box2: Box) -> bool:
         """判断两个 box 的 y 轴是否有交集"""
-        tolerance = 2.0
+        tolerance = 1.0
         return not (box1.y2 < box2.y - tolerance or box2.y2 < box1.y - tolerance)
 
     def is_x_axis_adjacent(self, box1: Box, box2: Box, tolerance: float = 2.0) -> bool:

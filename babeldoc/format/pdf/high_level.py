@@ -20,7 +20,6 @@ from pymupdf import Font
 from babeldoc import asynchronize
 from babeldoc.assets.assets import warmup
 from babeldoc.babeldoc_exception.BabelDOCException import ExtractTextError
-from babeldoc.babeldoc_exception.BabelDOCException import ScannedPDFError
 from babeldoc.const import CACHE_FOLDER
 from babeldoc.format.pdf.converter import TranslateConverter
 from babeldoc.format.pdf.document_il import il_version_1
@@ -766,21 +765,21 @@ def _do_translate_single(
     resfont = None
     doc_pdf2zh.save(temp_pdf_path)
 
-    if not translation_config.skip_scanned_detection and DetectScannedFile(
-        translation_config
-    ).fast_check(doc_pdf2zh):
-        if translation_config.auto_enable_ocr_workaround:
-            logger.warning(
-                "Fast scanned check hit, Turning on OCR workaround.",
-            )
-            translation_config.shared_context_cross_split_part.auto_enabled_ocr_workaround = True
-            translation_config.ocr_workaround = True
-            translation_config.skip_scanned_detection = True
-        else:
-            logger.warning(
-                "Fast scanned check hit, Please check the input PDF file.",
-            )
-            raise ScannedPDFError("Scanned PDF detected.")
+    # if not translation_config.skip_scanned_detection and DetectScannedFile(
+    #     translation_config
+    # ).fast_check(doc_pdf2zh):
+    #     if translation_config.auto_enable_ocr_workaround:
+    #         logger.warning(
+    #             "Fast scanned check hit, Turning on OCR workaround.",
+    #         )
+    #         translation_config.shared_context_cross_split_part.auto_enabled_ocr_workaround = True
+    #         translation_config.ocr_workaround = True
+    #         translation_config.skip_scanned_detection = True
+    #     else:
+    #         logger.warning(
+    #             "Fast scanned check hit, Please check the input PDF file.",
+    #         )
+    #         raise ScannedPDFError("Scanned PDF detected.")
 
     il_creater = ILCreater(translation_config)
     il_creater.mupdf = doc_pdf2zh

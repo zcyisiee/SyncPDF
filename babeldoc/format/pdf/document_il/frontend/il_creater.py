@@ -387,7 +387,7 @@ def update_cmap_pair(cmap, data):
     for start_str, stop_str, value_str in batched(data, 3):
         start = int(start_str, 16)
         stop = int(stop_str, 16)
-        value = base64.b16decode(value_str).decode("UTF-16-BE")
+        value = base64.b16decode(value_str, True).decode("UTF-16-BE")
         for code in range(start, stop + 1):
             cmap[code] = value
 
@@ -395,7 +395,7 @@ def update_cmap_pair(cmap, data):
 def update_cmap_code(cmap, data):
     for code_str, value_str in batched(data, 2):
         code = int(code_str, 16)
-        value = base64.b16decode(value_str).decode("UTF-16-BE")
+        value = base64.b16decode(value_str, True).decode("UTF-16-BE")
         cmap[code] = value
 
 
