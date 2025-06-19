@@ -349,7 +349,11 @@ class TypesettingUnit:
 
             return box
         elif self.formular:
-            return self.formular.box
+            if self.formular.x_offset <= 0.5:
+                return self.formular.box
+            formular_box = copy.copy(self.formular.box)
+            formular_box.x2 += self.formular.x_advance
+            return formular_box
         elif self.unicode:
             char_width = self.font.char_lengths(self.unicode, self.font_size)[0]
             if self.x is None or self.y is None or self.scale is None:
@@ -475,6 +479,7 @@ class TypesettingUnit:
                 pdf_character=new_chars,
                 x_offset=self.formular.x_offset * scale,
                 y_offset=self.formular.y_offset * scale,
+                x_advance=self.formular.x_advance * scale,
             )
             return TypesettingUnit(formular=new_formula)
 
@@ -720,7 +725,7 @@ class Typesetting:
         typeset_units = []
         all_units_fit = True
         last_unit: TypesettingUnit | None = None
-
+        line_ys = [current_y]
         if paragraph.first_line_indent:
             current_x += space_width * 4
         # 遍历所有排版单元
@@ -785,6 +790,7 @@ class Typesetting:
                 max_height = max(current_line_heights)
 
                 current_y -= max(line_height * line_spacing, max_height * 1.05)
+                line_ys.append(current_y)
                 line_height = 0.0
                 current_line_heights = []  # 清空当前行高度列表
 
@@ -809,9 +815,11 @@ class Typesetting:
             if current_line_heights:
                 mode_height = statistics.mode(current_line_heights)
                 line_height = mode_height
-
+            prev_x = current_x
             # 更新 x 坐标
             current_x = relocated_unit.box.x2
+            if prev_x > current_x:
+                logger.warning(f"坐标回绕！！！ TypesettingUnit: {unit}, ")
 
             last_unit = relocated_unit
 
@@ -998,6 +1006,9 @@ class Typesetting:
                 result,
             ),
         )
+
+        if any(x.width < 0 for x in result):
+            logger.warning("有排版单元宽度小于 0，请检查字体映射是否正确。")
         return result
 
     def create_passthrough_composition(

@@ -23,6 +23,9 @@ from babeldoc.format.pdf.document_il.utils.layout_helper import LEFT_BRACKET
 from babeldoc.format.pdf.document_il.utils.layout_helper import RIGHT_BRACKET
 from babeldoc.format.pdf.document_il.utils.layout_helper import build_layout_index
 from babeldoc.format.pdf.document_il.utils.layout_helper import (
+    calculate_y_iou_for_boxes,
+)
+from babeldoc.format.pdf.document_il.utils.layout_helper import (
     formular_height_ignore_char,
 )
 from babeldoc.format.pdf.document_il.utils.layout_helper import is_bullet_point
@@ -468,80 +471,53 @@ class StylesAndFormulas:
                 continue
 
             # 计算该段落的行间距，用其 80% 作为容差
-            line_spacing = self.calculate_line_spacing(paragraph)
-            y_tolerance = line_spacing * 0.8
+            # line_spacing = self.calculate_line_spacing(paragraph)
+            # y_tolerance = line_spacing * 0.8
 
             for i, composition in enumerate(paragraph.pdf_paragraph_composition):
                 if not composition.pdf_formula:
                     continue
 
                 formula = composition.pdf_formula
-                left_line = None
-                right_line = None
+                left_char = None
+                right_char = None
+
+                left_iou = 0
+                right_iou = 0
 
                 # 查找左边最近的同一行的文本
                 for j in range(i - 1, -1, -1):
                     comp = paragraph.pdf_paragraph_composition[j]
                     if comp.pdf_line:
-                        # 检查 y 坐标是否接近，判断是否在同一行
-                        if abs(comp.pdf_line.box.y - formula.box.y) <= y_tolerance:
-                            left_line = comp.pdf_line
-                            break
+                        for char in reversed(comp.pdf_line.pdf_character):
+                            # 检查 y 坐标是否接近，判断是否在同一行
+                            left_iou = calculate_y_iou_for_boxes(char.box, formula.box)
+                            if left_iou > 0.6:
+                                left_char = char
+                                break
 
                 # 查找右边最近的同一行的文本
                 for j in range(i + 1, len(paragraph.pdf_paragraph_composition)):
                     comp = paragraph.pdf_paragraph_composition[j]
                     if comp.pdf_line:
-                        # 检查 y 坐标是否接近，判断是否在同一行
-                        if abs(comp.pdf_line.box.y - formula.box.y) <= y_tolerance:
-                            right_line = comp.pdf_line
-                            break
-
-                # Calculate IOU with left and right text on y-axis
-                left_iou = 0
-                right_iou = 0
-
-                if left_line:
-                    # Calculate IOU with left text
-                    intersection_start = max(formula.box.y, left_line.box.y)
-                    intersection_end = min(formula.box.y2, left_line.box.y2)
-                    intersection_length = max(0, intersection_end - intersection_start)
-
-                    formula_height = formula.box.y2 - formula.box.y
-                    left_line_height = left_line.box.y2 - left_line.box.y
-                    union_length = (
-                        formula_height + left_line_height - intersection_length
-                    )
-
-                    if union_length > 0:
-                        left_iou = intersection_length / union_length
-
-                if right_line:
-                    # Calculate IOU with right text
-                    intersection_start = max(formula.box.y, right_line.box.y)
-                    intersection_end = min(formula.box.y2, right_line.box.y2)
-                    intersection_length = max(0, intersection_end - intersection_start)
-
-                    formula_height = formula.box.y2 - formula.box.y
-                    right_line_height = right_line.box.y2 - right_line.box.y
-                    union_length = (
-                        formula_height + right_line_height - intersection_length
-                    )
-
-                    if union_length > 0:
-                        right_iou = intersection_length / union_length
+                        for char in comp.pdf_line.pdf_character:
+                            # 检查 y 坐标是否接近，判断是否在同一行
+                            right_iou = calculate_y_iou_for_boxes(char.box, formula.box)
+                            if right_iou > 0.6:
+                                right_char = char
+                                break
 
                 # If both text segments exist, keep the one with higher IOU
-                if left_line and right_line:
+                if left_char and right_char:
                     if left_iou < right_iou:
-                        left_line = None
+                        left_char = None
                     elif right_iou < left_iou:
-                        right_line = None
+                        right_char = None
                     # If IOUs are equal, keep both
 
                 # 计算 x 偏移量（相对于左边文本）
-                if left_line:
-                    formula.x_offset = formula.box.x - left_line.box.x2
+                if left_char:
+                    formula.x_offset = formula.box.x - left_char.box.x2
                 else:
                     formula.x_offset = 0  # 如果左边没有文字，x_offset 应该为 0
                 if abs(formula.x_offset) < 0.1:
@@ -554,11 +530,11 @@ class StylesAndFormulas:
                     formula.x_offset = 0
 
                 # 计算 y 偏移量
-                if left_line:
+                if left_char:
                     # 使用底部坐标计算偏移量
-                    formula.y_offset = formula.box.y - left_line.box.y
-                elif right_line:
-                    formula.y_offset = formula.box.y - right_line.box.y
+                    formula.y_offset = formula.box.y - left_char.box.y
+                elif right_char:
+                    formula.y_offset = formula.box.y - right_char.box.y
                 else:
                     formula.y_offset = 0
 
@@ -631,13 +607,19 @@ class StylesAndFormulas:
             min_y = min(char.visual_bbox.box.y for char in formula.pdf_character)
             max_y = max(char.visual_bbox.box.y2 for char in formula.pdf_character)
         formula.box = Box(min_x, min_y, max_x, max_y)
+        if not formula.y_offset:
+            formula.y_offset = 0
+        if not formula.x_offset:
+            formula.x_offset = 0
+        if not formula.x_advance:
+            formula.x_advance = 0
 
     def is_translatable_formula(self, formula: PdfFormula) -> bool:
         """判断公式是否只包含需要正常翻译的字符（数字、空格和英文逗号）"""
         text = "".join(char.char_unicode for char in formula.pdf_character)
         if formula.y_offset > 0.1:
             return False
-        return bool(re.match(r"^[0-9, ]+$", text))
+        return bool(re.match(r"^[0-9, .]+$", text))
 
     def should_split_formula(self, formula: PdfFormula) -> bool:
         """判断公式是否需要按逗号拆分（包含逗号且有其他特殊符号）"""

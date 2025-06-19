@@ -515,6 +515,8 @@ def _add_space_dummy_chars_to_list(chars: list[PdfCharacter]) -> None:
 
         distance = next_char.box.x - curr_char.box.x2
         if distance >= median_distance or Layout.is_newline(curr_char, next_char):
+            if distance < 0:
+                distance = -distance
             # 创建一个 dummy 字符作为空格
             space_box = Box(
                 x=curr_char.box.x2,

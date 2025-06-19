@@ -2,8 +2,6 @@ import logging
 import random
 import re
 
-import numpy as np
-
 from babeldoc.babeldoc_exception.BabelDOCException import ExtractTextError
 from babeldoc.format.pdf.document_il import Box
 from babeldoc.format.pdf.document_il import Document
@@ -248,19 +246,28 @@ class ParagraphFinder:
                 page, self.translation_config.formular_font_pattern
             )
         )
-
-        # 第二步：将段落内的字符拆分为行
-        for paragraph in paragraphs:
-            if (
-                paragraph.xobj_id
-                and paragraph.xobj_id in xobj_specific_formula_font_ids
-            ):
-                current_formula_font_ids = xobj_specific_formula_font_ids[
-                    paragraph.xobj_id
-                ]
-            else:
-                current_formula_font_ids = page_level_formula_font_ids
-            self._split_paragraph_into_lines(paragraph, current_formula_font_ids)
+        for para in paragraphs:
+            if not para.debug_id:
+                continue
+            new_line = PdfLine(
+                pdf_character=[x.pdf_character for x in para.pdf_paragraph_composition]
+            )
+            self.update_line_data(new_line)
+            para.pdf_paragraph_composition = [
+                PdfParagraphComposition(pdf_line=new_line)
+            ]
+        # # 第二步：将段落内的字符拆分为行
+        # for paragraph in paragraphs:
+        #     if (
+        #         paragraph.xobj_id
+        #         and paragraph.xobj_id in xobj_specific_formula_font_ids
+        #     ):
+        #         current_formula_font_ids = xobj_specific_formula_font_ids[
+        #             paragraph.xobj_id
+        #         ]
+        #     else:
+        #         current_formula_font_ids = page_level_formula_font_ids
+        #     self._split_paragraph_into_lines(paragraph, current_formula_font_ids)
 
         # 第三步：处理段落中的空格
         for paragraph in paragraphs:
@@ -286,7 +293,7 @@ class ParagraphFinder:
         self.fix_overlapping_paragraphs(page)
 
         # 第六步：对每一行的字符进行排序
-        self._sort_characters_in_lines(page)
+        # self._sort_characters_in_lines(page)
 
         self.add_debug_info(page)
         # clean up to save memory
@@ -386,228 +393,6 @@ class ParagraphFinder:
         for para in paragraphs:
             self.update_paragraph_data(para)
         return paragraphs
-
-    def _merge_overlapping_clusters(
-        self, lines: dict[int, list[PdfCharacter]], char_height_average: float
-    ) -> dict[int, list[PdfCharacter]]:
-        """
-        Merge clusters that have significant y-axis overlap.
-        If y_intersection / min_height > 0.5 or the distance between y-midlines is less than char_height_average, merge the two clusters.
-        """
-        if len(lines) <= 1:
-            return lines
-
-        # Calculate y-axis ranges for each cluster
-        cluster_ranges = {}
-        cluster_midlines = {}
-        for label, chars in lines.items():
-            y_values = [char.visual_bbox.box.y for char in chars] + [
-                char.visual_bbox.box.y2 for char in chars
-            ]
-            y_min, y_max = min(y_values), max(y_values)
-            cluster_ranges[label] = (y_min, y_max)
-            cluster_midlines[label] = (y_min + y_max) / 2
-
-        # Keep merging until no more merges are possible
-        changed = True
-        while changed:
-            changed = False
-            labels_to_check = list(lines.keys())
-
-            for i in range(len(labels_to_check)):
-                if not changed:  # Only continue if no merge happened in this iteration
-                    for j in range(i + 1, len(labels_to_check)):
-                        label1, label2 = labels_to_check[i], labels_to_check[j]
-
-                        # Skip if either label has been merged away
-                        if label1 not in lines or label2 not in lines:
-                            continue
-
-                        y1_min, y1_max = cluster_ranges[label1]
-                        y2_min, y2_max = cluster_ranges[label2]
-
-                        # Calculate intersection
-                        intersection_start = max(y1_min, y2_min)
-                        intersection_end = min(y1_max, y2_max)
-
-                        # Calculate midline distance
-                        midline_distance = abs(
-                            cluster_midlines[label1] - cluster_midlines[label2]
-                        )
-
-                        should_merge = False
-                        if (
-                            intersection_end > intersection_start
-                        ):  # There is intersection
-                            intersection_height = intersection_end - intersection_start
-                            height1 = y1_max - y1_min
-                            height2 = y2_max - y2_min
-                            min_height = min(height1, height2)
-
-                            # Check if intersection ratio exceeds threshold
-                            if (
-                                min_height > 0
-                                and intersection_height / min_height > 0.3
-                            ):
-                                should_merge = True
-
-                        # Check if midline distance is less than char_height_average
-                        if midline_distance < char_height_average:
-                            should_merge = True
-
-                        if should_merge:
-                            # Merge label2 into label1
-                            lines[label1].extend(lines[label2])
-                            del lines[label2]
-
-                            # Update cluster range and midline for the merged cluster
-                            new_y_min = min(y1_min, y2_min)
-                            new_y_max = max(y1_max, y2_max)
-                            cluster_ranges[label1] = (new_y_min, new_y_max)
-                            cluster_midlines[label1] = (new_y_min + new_y_max) / 2
-                            del cluster_ranges[label2]
-                            del cluster_midlines[label2]
-
-                            changed = True
-                            break
-
-        return lines
-
-    def _get_effective_y_bounds(self, char: PdfCharacter) -> tuple[float, float]:
-        """
-        Determines the effective vertical boundaries (y1, y2) for a character.
-
-        It prioritizes the visual bounding box if its Intersection over Union (IoU)
-        with the PDF bounding box is high (>= 0.5), otherwise, it falls back to the
-        PDF bounding box. This helps use more accurate layout information when available.
-        """
-        visual_box = char.visual_bbox.box
-        return visual_box.y, visual_box.y2
-        pdf_box = char.box
-        if calculate_iou_for_boxes(visual_box, pdf_box) >= 0.5:
-            return visual_box.y, visual_box.y2
-        return pdf_box.y, pdf_box.y2
-
-    def _split_paragraph_into_lines(
-        self, paragraph: PdfParagraph, formula_font_ids: set[str]
-    ):
-        """
-        Splits a paragraph into lines using a "line-threading" method.
-
-        This method works by scanning vertically across the paragraph's bounding
-        box and counting how many characters intersect with a horizontal line
-        at each y-coordinate. The regions with a low number of intersections
-        (less than 2) are identified as gaps between lines. The characters
-        are then partitioned into lines based on these identified gaps.
-        """
-        if not paragraph.pdf_paragraph_composition:
-            return
-
-        # 1. Extract all characters and other compositions from the paragraph.
-        all_chars: list[PdfCharacter] = []
-        other_compositions: list[PdfParagraphComposition] = []
-        for comp in paragraph.pdf_paragraph_composition:
-            if comp.pdf_character:
-                all_chars.append(comp.pdf_character)
-            else:
-                other_compositions.append(comp)
-
-        if not all_chars:
-            return
-
-        # 2. Determine effective y-bounds for each character and the paragraph's total vertical range.
-        char_y_bounds = [
-            {"char": char, "y1": y1, "y2": y2}
-            for char in all_chars
-            for y1, y2 in [self._get_effective_y_bounds(char)]
-        ]
-
-        if not char_y_bounds:
-            paragraph.pdf_paragraph_composition = other_compositions
-            self.update_paragraph_data(paragraph)
-            return
-
-        para_y_min = min(b["y1"] for b in char_y_bounds)
-        para_y_max = max(b["y2"] for b in char_y_bounds)
-
-        # If the paragraph is vertically flat, treat it as a single line.
-        if (para_y_max - para_y_min) < 5:  # Using a small threshold
-            all_chars.sort(key=lambda c: c.visual_bbox.box.x)
-            single_line_composition = self.create_line(all_chars)
-            paragraph.pdf_paragraph_composition = [
-                single_line_composition
-            ] + other_compositions
-            self.update_paragraph_data(paragraph)
-            return
-
-        # 3. Perform "threading" scan to create a collision histogram.
-        # Scan from top (max y) to bottom (min y) with a step of 0.5.
-        scan_y_min = para_y_min
-        scan_y_max = para_y_max
-        step = 0.5
-
-        y_coordinates = np.arange(scan_y_max, scan_y_min, -step)
-
-        collision_counts = []
-        for y in y_coordinates:
-            count = sum(1 for b in char_y_bounds if b["y1"] <= y < b["y2"])
-            collision_counts.append(count)
-
-        # 4. Find gaps (regions with low collision count) from the histogram.
-        gaps = []
-        in_gap = False
-        for i, count in enumerate(collision_counts):
-            if count < 3 and not in_gap:
-                in_gap = True
-                gap_start_index = i
-            elif count >= 3 and in_gap:
-                in_gap = False
-                gaps.append((gap_start_index, i - 1))
-        if in_gap:
-            gaps.append((gap_start_index, len(collision_counts) - 1))
-
-        # If no significant gaps are found, treat it as a single line.
-        if not gaps:
-            all_chars.sort(key=lambda c: c.visual_bbox.box.x)
-            single_line_composition = self.create_line(all_chars)
-            paragraph.pdf_paragraph_composition = [
-                single_line_composition
-            ] + other_compositions
-            self.update_paragraph_data(paragraph)
-            return
-
-        # 5. Assign characters to lines based on the identified gaps.
-        # Calculate separator y-coordinates from the midpoints of the gaps.
-        separator_y_coords = sorted(
-            [y_coordinates[start_idx] for start_idx, end_idx in gaps],
-            reverse=True,
-        )
-
-        lines: list[list[PdfCharacter]] = [
-            [] for _ in range(len(separator_y_coords) + 1)
-        ]
-
-        for b in char_y_bounds:
-            char_y_center = (b["y1"] + b["y2"]) / 2
-            line_idx = 0
-            # Find which line bucket the character belongs to.
-            for sep_y in separator_y_coords:
-                if char_y_center > sep_y:
-                    break
-                line_idx += 1
-            lines[line_idx].append(b["char"])
-
-        # 6. Rebuild the paragraph's composition list from the new lines.
-        new_line_compositions = []
-        for line_chars in lines:
-            if line_chars:
-                # Sort characters within each line by x-coordinate (left-to-right).
-                line_chars.sort(key=lambda c: c.visual_bbox.box.x)
-                new_line_compositions.append(self.create_line(line_chars))
-
-        # The lines are already sorted vertically due to the scanning process.
-        paragraph.pdf_paragraph_composition = new_line_compositions + other_compositions
-        self.update_paragraph_data(paragraph)
 
     def process_paragraph_spacing(self, paragraph: PdfParagraph):
         if not paragraph.pdf_paragraph_composition:

@@ -872,6 +872,13 @@ class ILCreater:
             x2=char.bbox[2],
             y2=char.bbox[3],
         )
+        if bbox.x2 < bbox.x or bbox.y2 < bbox.y:
+            logger.warning(
+                "Invalid bounding box for character %s: %s",
+                char_unicode,
+                bbox,
+            )
+
         if char.matrix[0] == 0 and char.matrix[3] == 0:
             vertical = True
             visual_bbox = il_version_1.Box(
