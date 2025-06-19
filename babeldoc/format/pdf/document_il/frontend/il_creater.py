@@ -716,6 +716,8 @@ class ILCreater:
             font_char_bounding_box_map = {}
             if not cmap:
                 cmap = {x: x for x in range(257)}
+            for char_id, char_bbox in enumerate(bbox_list):
+                font_char_bounding_box_map[char_id] = char_bbox
             for char_id in cmap:
                 if char_id < 0 or char_id >= len(bbox_list):
                     continue

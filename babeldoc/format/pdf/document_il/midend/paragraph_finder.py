@@ -14,6 +14,11 @@ from babeldoc.format.pdf.document_il import PdfLine
 from babeldoc.format.pdf.document_il import PdfParagraph
 from babeldoc.format.pdf.document_il import PdfParagraphComposition
 from babeldoc.format.pdf.document_il import PdfRectangle
+from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il.utils.formular_helper import (
+    collect_page_formula_font_ids,
+)
+from babeldoc.format.pdf.document_il.utils.formular_helper import is_formulas_start_char
 from babeldoc.format.pdf.document_il.utils.layout_helper import (
     HEIGHT_NOT_USFUL_CHAR_IN_CHAR,
 )
@@ -21,6 +26,9 @@ from babeldoc.format.pdf.document_il.utils.layout_helper import Layout
 from babeldoc.format.pdf.document_il.utils.layout_helper import add_space_dummy_chars
 from babeldoc.format.pdf.document_il.utils.layout_helper import build_layout_index
 from babeldoc.format.pdf.document_il.utils.layout_helper import calculate_iou_for_boxes
+from babeldoc.format.pdf.document_il.utils.layout_helper import (
+    calculate_y_iou_for_boxes,
+)
 from babeldoc.format.pdf.document_il.utils.layout_helper import get_char_unicode_string
 from babeldoc.format.pdf.document_il.utils.layout_helper import get_character_layout
 from babeldoc.format.pdf.document_il.utils.layout_helper import is_bullet_point
@@ -51,6 +59,7 @@ class ParagraphFinder:
 
     def __init__(self, translation_config: TranslationConfig):
         self.translation_config = translation_config
+        self.font_mapper = FontMapper(translation_config)
 
     def _preprocess_formula_layouts(self, page: Page):
         """
@@ -239,9 +248,24 @@ class ParagraphFinder:
         paragraphs = self._group_characters_into_paragraphs(page)
         page.pdf_paragraph = paragraphs
 
+        page_level_formula_font_ids, xobj_specific_formula_font_ids = (
+            collect_page_formula_font_ids(
+                page, self.translation_config.formular_font_pattern
+            )
+        )
+
         # 第二步：将段落内的字符拆分为行
         for paragraph in paragraphs:
-            self._split_paragraph_into_lines(paragraph)
+            if (
+                paragraph.xobj_id
+                and paragraph.xobj_id in xobj_specific_formula_font_ids
+            ):
+                current_formula_font_ids = xobj_specific_formula_font_ids[
+                    paragraph.xobj_id
+                ]
+            else:
+                current_formula_font_ids = page_level_formula_font_ids
+            self._split_paragraph_into_lines(paragraph, current_formula_font_ids)
 
         # 第三步：处理段落中的空格
         for paragraph in paragraphs:
@@ -369,22 +393,25 @@ class ParagraphFinder:
         return paragraphs
 
     def _merge_overlapping_clusters(
-        self, lines: dict[int, list[PdfCharacter]]
+        self, lines: dict[int, list[PdfCharacter]], char_height_average: float
     ) -> dict[int, list[PdfCharacter]]:
         """
         Merge clusters that have significant y-axis overlap.
-        If y_intersection / min_height > 0.5, merge the two clusters.
+        If y_intersection / min_height > 0.5 or the distance between y-midlines is less than char_height_average, merge the two clusters.
         """
         if len(lines) <= 1:
             return lines
 
         # Calculate y-axis ranges for each cluster
         cluster_ranges = {}
+        cluster_midlines = {}
         for label, chars in lines.items():
             y_values = [char.visual_bbox.box.y for char in chars] + [
                 char.visual_bbox.box.y2 for char in chars
             ]
-            cluster_ranges[label] = (min(y_values), max(y_values))
+            y_min, y_max = min(y_values), max(y_values)
+            cluster_ranges[label] = (y_min, y_max)
+            cluster_midlines[label] = (y_min + y_max) / 2
 
         # Keep merging until no more merges are possible
         changed = True
@@ -408,6 +435,12 @@ class ParagraphFinder:
                         intersection_start = max(y1_min, y2_min)
                         intersection_end = min(y1_max, y2_max)
 
+                        # Calculate midline distance
+                        midline_distance = abs(
+                            cluster_midlines[label1] - cluster_midlines[label2]
+                        )
+
+                        should_merge = False
                         if (
                             intersection_end > intersection_start
                         ):  # There is intersection
@@ -419,27 +452,41 @@ class ParagraphFinder:
                             # Check if intersection ratio exceeds threshold
                             if (
                                 min_height > 0
-                                and intersection_height / min_height > 0.5
+                                and intersection_height / min_height > 0.3
                             ):
-                                # Merge label2 into label1
-                                lines[label1].extend(lines[label2])
-                                del lines[label2]
+                                should_merge = True
 
-                                # Update cluster range for the merged cluster
-                                cluster_ranges[label1] = (
-                                    min(y1_min, y2_min),
-                                    max(y1_max, y2_max),
-                                )
-                                del cluster_ranges[label2]
+                        # Check if midline distance is less than char_height_average
+                        if midline_distance < char_height_average:
+                            should_merge = True
 
-                                changed = True
-                                break
+                        if should_merge:
+                            # Merge label2 into label1
+                            lines[label1].extend(lines[label2])
+                            del lines[label2]
+
+                            # Update cluster range and midline for the merged cluster
+                            new_y_min = min(y1_min, y2_min)
+                            new_y_max = max(y1_max, y2_max)
+                            cluster_ranges[label1] = (new_y_min, new_y_max)
+                            cluster_midlines[label1] = (new_y_min + new_y_max) / 2
+                            del cluster_ranges[label2]
+                            del cluster_midlines[label2]
+
+                            changed = True
+                            break
 
         return lines
 
-    def _split_paragraph_into_lines(self, paragraph: PdfParagraph):
+    def _split_paragraph_into_lines(
+        self, paragraph: PdfParagraph, formula_font_ids: set[str]
+    ):
+        if paragraph.debug_id is None:
+            return
         if not paragraph.pdf_paragraph_composition:
             return
+        if len(paragraph.pdf_paragraph_composition) == 87:
+            print()
 
         # 1. Extract all characters from the paragraph
         all_chars = []
@@ -474,21 +521,50 @@ class ParagraphFinder:
         else:
             char_height_average = 0
 
+        y_coords = []
         # Calculate paragraph height
         if all_chars:
-            y_coords = []
             y2_coords = []
+            prev_not_formula_char = None
             for char in all_chars:
                 visual_box = char.visual_bbox.box
                 pdf_box = char.box
+                char: PdfCharacter
+                current_is_formula = (
+                    char.formula_layout_id
+                    or char.pdf_style.font_id in formula_font_ids
+                    or is_formulas_start_char(
+                        char.char_unicode, self.font_mapper, self.translation_config
+                    )
+                )
 
-                # Use visual box if IoU with bbox is >= 0.3, otherwise use bbox
-                if calculate_iou_for_boxes(visual_box, pdf_box) >= 0.3:
-                    y_coords.append(visual_box.y)
-                    y2_coords.append(visual_box.y2)
+                if (
+                    current_is_formula
+                    and prev_not_formula_char
+                    and (
+                        calculate_y_iou_for_boxes(
+                            prev_not_formula_char.visual_bbox.box, char.visual_bbox.box
+                        )
+                        > 0.5
+                        or calculate_y_iou_for_boxes(
+                            prev_not_formula_char.box, char.box
+                        )
+                        > 0.5
+                    )
+                ):
+                    y_coords.append(prev_not_formula_char.box.y)
+                    y2_coords.append(prev_not_formula_char.box.y2)
                 else:
-                    y_coords.append(pdf_box.y)
-                    y2_coords.append(pdf_box.y2)
+                    # Use visual box if IoU with bbox is >= 0.3, otherwise use bbox
+                    if calculate_iou_for_boxes(visual_box, pdf_box) <= 0.3:
+                        y_coords.append(visual_box.y)
+                        y2_coords.append(visual_box.y2)
+                    else:
+                        y_coords.append(pdf_box.y)
+                        y2_coords.append(pdf_box.y2)
+
+                if not current_is_formula:
+                    prev_not_formula_char = char
 
             para_y_min = min(y_coords)
             para_y_max = max(y2_coords)
@@ -505,7 +581,7 @@ class ParagraphFinder:
                 pdf_box = char.box
 
                 # Use visual box if IoU with bbox is >= 0.3, otherwise use bbox
-                if calculate_iou_for_boxes(visual_box, pdf_box) >= 0.3:
+                if calculate_iou_for_boxes(visual_box, pdf_box) <= 0.4:
                     y_coords_for_avg.append(visual_box.y)
                 else:
                     y_coords_for_avg.append(pdf_box.y)
@@ -539,11 +615,14 @@ class ParagraphFinder:
                 return
 
         # 2. Cluster characters into lines using HDBSCAN on their y-centers
-        y_centers = np.array([char.box.y for char in all_chars]).reshape(-1, 1)
+        y_centers = np.array(y_coords).reshape(-1, 1)
 
         clusterer = hdbscan.HDBSCAN(min_cluster_size=5, gen_min_span_tree=True)
         clusterer.fit(y_centers)
         labels = clusterer.labels_
+
+        if np.all(labels == -1):
+            labels = np.ones_like(labels)
 
         lines: dict[int, list[PdfCharacter]] = {}
         outlier_indices: list[int] = []
@@ -554,7 +633,7 @@ class ParagraphFinder:
                 lines.setdefault(label, []).append(all_chars[i])
 
         # Post-process clusters: merge clusters with significant y-axis overlap
-        lines = self._merge_overlapping_clusters(lines)
+        lines = self._merge_overlapping_clusters(lines, char_height_average)
 
         # 3. Handle outliers by assigning them to the nearest line
         if lines and outlier_indices:

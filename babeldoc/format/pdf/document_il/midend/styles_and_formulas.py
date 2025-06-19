@@ -1,7 +1,5 @@
-import base64
 import math
 import re
-import unicodedata
 
 from babeldoc.format.pdf.document_il.il_version_1 import Box
 from babeldoc.format.pdf.document_il.il_version_1 import Document
@@ -14,6 +12,13 @@ from babeldoc.format.pdf.document_il.il_version_1 import PdfParagraphComposition
 from babeldoc.format.pdf.document_il.il_version_1 import PdfSameStyleCharacters
 from babeldoc.format.pdf.document_il.il_version_1 import PdfStyle
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il.utils.formular_helper import (
+    collect_page_formula_font_ids,
+)
+from babeldoc.format.pdf.document_il.utils.formular_helper import (
+    is_formulas_middle_char,
+)
+from babeldoc.format.pdf.document_il.utils.formular_helper import is_formulas_start_char
 from babeldoc.format.pdf.document_il.utils.layout_helper import LEFT_BRACKET
 from babeldoc.format.pdf.document_il.utils.layout_helper import RIGHT_BRACKET
 from babeldoc.format.pdf.document_il.utils.layout_helper import build_layout_index
@@ -100,11 +105,19 @@ class StylesAndFormulas:
                 (  # 区分公式开头的字符&公式中间的字符。主要是逗号不能在公式开头，但是可以在中间。
                     char.formula_layout_id
                     or (
-                        self.is_formulas_start_char(char.char_unicode)
+                        is_formulas_start_char(
+                            char.char_unicode,
+                            self.font_mapper,
+                            self.translation_config,
+                        )
                         and not in_formula_state
                     )
                     or (
-                        self.is_formulas_middle_char(char.char_unicode)
+                        is_formulas_middle_char(
+                            char.char_unicode,
+                            self.font_mapper,
+                            self.translation_config,
+                        )
                         and in_formula_state
                     )
                 )  # 公式字符
@@ -195,15 +208,26 @@ class StylesAndFormulas:
         if not page.pdf_paragraph:
             return
 
-        # 收集该页所有的公式字体 ID
-        formula_font_ids = set()
-        for font in page.pdf_font:
-            if self.is_formulas_font(font.name):
-                formula_font_ids.add(font.font_id)
+        page_level_formula_font_ids, xobj_specific_formula_font_ids = (
+            collect_page_formula_font_ids(
+                page, self.translation_config.formular_font_pattern
+            )
+        )
 
         for paragraph in page.pdf_paragraph:
             if not paragraph.pdf_paragraph_composition:
                 continue
+
+            current_formula_font_ids: set[int]
+            if (
+                paragraph.xobj_id
+                and paragraph.xobj_id in xobj_specific_formula_font_ids
+            ):
+                current_formula_font_ids = xobj_specific_formula_font_ids[
+                    paragraph.xobj_id
+                ]
+            else:
+                current_formula_font_ids = page_level_formula_font_ids
 
             new_paragraph_compositions = []
             # This flag is carried through all compositions in a paragraph, as in the original implementation.
@@ -215,7 +239,7 @@ class StylesAndFormulas:
                     first_is_bullet,
                 ) = self._classify_characters_in_composition(
                     composition,
-                    formula_font_ids,
+                    current_formula_font_ids,
                     first_is_bullet,
                 )
 
@@ -614,247 +638,6 @@ class StylesAndFormulas:
         if formula.y_offset > 0.1:
             return False
         return bool(re.match(r"^[0-9, ]+$", text))
-
-    def is_formulas_font(self, font_name: str) -> bool:
-        pattern_text = (
-            r"^("
-            r"|Cambria.*"
-            r"|EUAlbertina.*"
-            r"|NimbusRomNo9L.*"
-            r"|GlosaMath.*"
-            r"|URWPalladioL.*"
-            r"|CMSS.+"
-            r"|Arial.*"
-            r"|TimesNewRoman.*"
-            r"|SegoeUI.*"
-            r"|CMTT9.*"
-            r"|CMSL10.*"
-            r"|CMTI10.*"
-            r"|CMTT10.*"
-            r"|CMTI12.*"
-            r"|CMR12.*"
-            r"|MeridienLTStd.*"
-            r"|Calibri.*"
-            r"|STIXMathJax_Main.*"
-            r"|.*NewBaskerville.*"
-            r"|.*FranklinGothic.*"
-            r"|.*AGaramondPro.*"
-            r"|.*PalatinoItalCOR.*"
-            r"|.*ITCSymbolStd.*"
-            r"|.*PlantinStd.*"
-            r"|.*DJ5EscrowCond.*"
-            r"|.*ExchangeBook.*"
-            r"|.*DJ5Exchange.*"
-            r"|.*Times.*"
-            r"|.*PalatinoLTStd.*"
-            r"|.*Times New Roman,Italic.*"
-            r"|.*EhrhardtMT.*"
-            r"|.*GillSansMTStd.*"
-            r"|.*MedicineSymbols3.*"
-            r"|.*HardingText.*"
-            r"|.*GraphikNaturel.*"
-            r"|.*HelveticaNeue.*"
-            r"|.*GoudyOldStyleT.*"
-            r"|.*Symbol.*"
-            r"|.*ScalaSansLF.*"
-            r"|.*ScalaLF.*"
-            r"|.*ScalaSansPro.*"
-            r"|.*PetersburgC.*"
-            r"|.*ColiseumC.*"
-            r"|.*Gantari.*"
-            r"|.*OptimaLTStd.*"
-            r"|.*CronosPro.*"
-            r"|.*ACaslon.*"
-            r"|.*Frutiger.*"
-            r"|.*BrandonGrotesque.*"
-            r"|.*FairfieldLH.*"
-            r"|.*CaeciliaLTStd.*"
-            r"|.*Whitney.*"
-            r"|.*Mercury.*"
-            r"|.*SabonLTStd.*"
-            r"|.*AnonymousPro.*"
-            r"|.*SabonLTPro.*"
-            r"|.*ArnoPro.*"
-            r"|.*CharisSIL.*"
-            r"|.*MSReference.*"
-            r"|.*CMUSerif-Roman.*"
-            r"|.*CourierNewPS.*"
-            r"|.*XCharter.*"
-            r"|.*GillSans.*"
-            r"|.*Perpetua.*"
-            r"|.*GEInspira.*"
-            r"|.*AGaramond.*"
-            r"|.*BMath.*"
-            r"|.*MSTT.*"
-            r"|.*Bookinsanity.*"
-            r"|.*ScalySans.*"
-            r"|.*Code2000.*"
-            r"|.*Minion.*"
-            r"|.*JansonTextLT.*"
-            r"|.*MathPack.*"
-            r"|.*Macmillan.*"
-            r"|.*NimbusSan.*"
-            r"|.*Mincho.*"
-            r"|.*Amerigo.*"
-            r"|.*MSGloriolaIIStd.*"
-            r"|.*CMU.+"
-            r"|.*LinLibertine.*"
-            r"|.*txsys.*"
-            r")$"
-        )
-        precise_formula_font_pattern = (
-            r"^("
-            r"|.*CambriaMath.*"
-            r"|.*Cambria Math.*"
-            r"|.*Asana.*"
-            r"|.*MiriamMonoCLM-BookOblique.*"
-            r"|.*Miriam Mono CLM.*"
-            r"|.*Logix.*"
-            r"|.*AeBonum.*"
-            r"|.*AeMRoman.*"
-            r"|.*AePagella.*"
-            r"|.*AeSchola.*"
-            r"|.*Concrete.*"
-            r"|.*LatinModernMathCompanion.*"
-            r"|.*Latin Modern Math Companion.*"
-            r"|.*RalphSmithsFormalScriptCompanion.*"
-            r"|.*Ralph Smiths Formal Script Companion.*"
-            r"|.*TeXGyreBonumMathCompanion.*"
-            r"|.*TeX Gyre Bonum Companion.*"
-            r"|.*TeXGyrePagellaMathCompanion.*"
-            r"|.*TeX Gyre Pagella Math Companion.*"
-            r"|.*TeXGyreTermesMathCompanion.*"
-            r"|.*TeX Gyre Termes Math Companion.*"
-            r"|.*XITSMathCompanion.*"
-            r"|.*XITS Math Companion.*"
-            r"|.*Erewhon.*"
-            r"|.*Euler-Math.*"
-            r"|.*Euler Math.*"
-            r"|.*FiraMath-Regular.*"
-            r"|.*Fira Math.*"
-            r"|.*Garamond-Math.*"
-            r"|.*GFSNeohellenicMath.*"
-            r"|.*KpMath.*"
-            r"|.*Lete Sans Math.*"
-            r"|.*LeteSansMath.*"
-            # r"|.*LinLibertineO.*"
-            r"|.*Linux Libertine O.*"
-            r"|.*LibertinusMath-Regular.*"
-            r"|.*Libertinus Math.*"
-            r"|.*LatinModernMath-Regular.*"
-            r"|.*Latin Modern Math.*"
-            r"|.*Luciole.*"
-            r"|.*NewCM.*"
-            r"|.*NewComputerModern.*"
-            r"|.*OldStandard-Math.*"
-            r"|.*STIXMath-Regular.*"
-            r"|.*STIX Math.*"
-            r"|.*STIXTwoMath-Regular.*"
-            r"|.*STIX Two Math.*"
-            r"|.*TeXGyreBonumMath.*"
-            r"|.*TeX Gyre Bonum Math.*"
-            r"|.*TeXGyreDejaVuMath.*"
-            r"|.*TeX Gyre DejaVu Math.*"
-            r"|.*TeXGyrePagellaMath.*"
-            r"|.*TeX Gyre Pagella Math.*"
-            r"|.*TeXGyreScholaMath.*"
-            r"|.*TeX Gyre Schola Math.*"
-            r"|.*TeXGyreTermesMath.*"
-            r"|.*TeX Gyre Termes Math.*"
-            r"|.*XCharter-Math.*"
-            r"|.*XCharter Math.*"
-            r"|.*XITSMath-Bold.*"
-            r"|.*XITS Math.*"
-            r"|.*XITSMath.*"
-            r"|.*IBMPlexMath.*"
-            r"|.*IBM Plex Math.*"
-            r")$"
-        )
-        if self.translation_config.formular_font_pattern:
-            broad_formula_font_pattern = self.translation_config.formular_font_pattern
-        else:
-            broad_formula_font_pattern = (
-                r"(CM[^RB]"
-                r"|(MS|XY|MT|BL|RM|EU|LA|RS)[A-Z]"
-                r"|LINE"
-                r"|LCIRCLE"
-                r"|TeX-"
-                r"|rsfs"
-                r"|txsy"
-                r"|wasy"
-                r"|stmary"
-                r"|.*Mono"
-                r"|.*Code"
-                # r"|.*Ital"
-                r"|.*Sym"
-                r"|.*Math"
-                r"|AdvP4C4E74"
-                r"|AdvPSSym"
-                r"|AdvP4C4E59"
-                r")"
-            )
-
-        if font_name.startswith("BASE64:"):
-            font_name_bytes = base64.b64decode(font_name[7:])
-            font = font_name_bytes.split(b"+")[-1]
-            pattern_text = pattern_text.encode()
-            broad_formula_font_pattern = broad_formula_font_pattern.encode()
-        else:
-            font = font_name.split("+")[-1]
-
-        if not font:
-            return False
-
-        if re.match(precise_formula_font_pattern, font):
-            return True
-        elif re.match(pattern_text, font):
-            return False
-        elif re.match(broad_formula_font_pattern, font):
-            return True
-
-        return False
-
-    def is_formulas_start_char(self, char: str) -> bool:
-        if "(cid:" in char:
-            return True
-        if not self.font_mapper.has_char(char):
-            if len(char) > 1 and all(self.font_mapper.has_char(x) for x in char):
-                return False
-            return True
-        if self.translation_config.formular_char_pattern:
-            pattern = self.translation_config.formular_char_pattern
-            if re.match(pattern, char):
-                return True
-        if (
-            char
-            and char != " "  # 非空格
-            and (
-                unicodedata.category(char[0])
-                in [
-                    # "Lm",
-                    "Mn",
-                    "Sk",
-                    "Sm",
-                    "Zl",
-                    "Zp",
-                    "Zs",
-                    "Co",  # private use character
-                    # "So",  # symbol
-                ]  # 文字修饰符、数学符号、分隔符号
-                or ord(char[0]) in range(0x370, 0x400)  # 希腊字母
-            )
-        ):
-            return True
-        if re.match("[0-9\\[\\]•]", char):
-            return True
-        return False
-
-    def is_formulas_middle_char(self, char: str) -> bool:
-        if self.is_formulas_start_char(char):
-            return True
-
-        if re.match(",", char):
-            return True
 
     def should_split_formula(self, formula: PdfFormula) -> bool:
         """判断公式是否需要按逗号拆分（包含逗号且有其他特殊符号）"""
