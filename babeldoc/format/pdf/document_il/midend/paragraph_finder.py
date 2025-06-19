@@ -2,7 +2,6 @@ import logging
 import random
 import re
 
-import hdbscan
 import numpy as np
 
 from babeldoc.babeldoc_exception.BabelDOCException import ExtractTextError
@@ -18,7 +17,6 @@ from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
 from babeldoc.format.pdf.document_il.utils.formular_helper import (
     collect_page_formula_font_ids,
 )
-from babeldoc.format.pdf.document_il.utils.formular_helper import is_formulas_start_char
 from babeldoc.format.pdf.document_il.utils.layout_helper import (
     HEIGHT_NOT_USFUL_CHAR_IN_CHAR,
 )
@@ -26,9 +24,6 @@ from babeldoc.format.pdf.document_il.utils.layout_helper import Layout
 from babeldoc.format.pdf.document_il.utils.layout_helper import add_space_dummy_chars
 from babeldoc.format.pdf.document_il.utils.layout_helper import build_layout_index
 from babeldoc.format.pdf.document_il.utils.layout_helper import calculate_iou_for_boxes
-from babeldoc.format.pdf.document_il.utils.layout_helper import (
-    calculate_y_iou_for_boxes,
-)
 from babeldoc.format.pdf.document_il.utils.layout_helper import get_char_unicode_string
 from babeldoc.format.pdf.document_il.utils.layout_helper import get_character_layout
 from babeldoc.format.pdf.document_il.utils.layout_helper import is_bullet_point
@@ -478,19 +473,39 @@ class ParagraphFinder:
 
         return lines
 
+    def _get_effective_y_bounds(self, char: PdfCharacter) -> tuple[float, float]:
+        """
+        Determines the effective vertical boundaries (y1, y2) for a character.
+
+        It prioritizes the visual bounding box if its Intersection over Union (IoU)
+        with the PDF bounding box is high (>= 0.5), otherwise, it falls back to the
+        PDF bounding box. This helps use more accurate layout information when available.
+        """
+        visual_box = char.visual_bbox.box
+        return visual_box.y, visual_box.y2
+        pdf_box = char.box
+        if calculate_iou_for_boxes(visual_box, pdf_box) >= 0.5:
+            return visual_box.y, visual_box.y2
+        return pdf_box.y, pdf_box.y2
+
     def _split_paragraph_into_lines(
         self, paragraph: PdfParagraph, formula_font_ids: set[str]
     ):
-        if paragraph.debug_id is None:
-            return
+        """
+        Splits a paragraph into lines using a "line-threading" method.
+
+        This method works by scanning vertically across the paragraph's bounding
+        box and counting how many characters intersect with a horizontal line
+        at each y-coordinate. The regions with a low number of intersections
+        (less than 2) are identified as gaps between lines. The characters
+        are then partitioned into lines based on these identified gaps.
+        """
         if not paragraph.pdf_paragraph_composition:
             return
-        if len(paragraph.pdf_paragraph_composition) == 87:
-            print()
 
-        # 1. Extract all characters from the paragraph
-        all_chars = []
-        other_compositions = []
+        # 1. Extract all characters and other compositions from the paragraph.
+        all_chars: list[PdfCharacter] = []
+        other_compositions: list[PdfParagraphComposition] = []
         for comp in paragraph.pdf_paragraph_composition:
             if comp.pdf_character:
                 all_chars.append(comp.pdf_character)
@@ -498,188 +513,100 @@ class ParagraphFinder:
                 other_compositions.append(comp)
 
         if not all_chars:
-            # No characters to process, leave paragraph as is.
             return
 
-        # Calculate character height average and paragraph height
-        char_heights = []
-        for char in all_chars:
-            visual_box = char.visual_bbox.box
-            pdf_box = char.box
+        # 2. Determine effective y-bounds for each character and the paragraph's total vertical range.
+        char_y_bounds = [
+            {"char": char, "y1": y1, "y2": y2}
+            for char in all_chars
+            for y1, y2 in [self._get_effective_y_bounds(char)]
+        ]
 
-            # Use visual box if IoU with bbox is >= 0.5, otherwise use bbox
-            if calculate_iou_for_boxes(visual_box, pdf_box) >= 0.5:
-                char_height = visual_box.y2 - visual_box.y
-            else:
-                char_height = pdf_box.y2 - pdf_box.y
+        if not char_y_bounds:
+            paragraph.pdf_paragraph_composition = other_compositions
+            self.update_paragraph_data(paragraph)
+            return
 
-            char_heights.append(char_height)
+        para_y_min = min(b["y1"] for b in char_y_bounds)
+        para_y_max = max(b["y2"] for b in char_y_bounds)
 
-        # Calculate average of character heights
-        if char_heights:
-            char_height_average = sum(char_heights) / len(char_heights)
-        else:
-            char_height_average = 0
+        # If the paragraph is vertically flat, treat it as a single line.
+        if (para_y_max - para_y_min) < 5:  # Using a small threshold
+            all_chars.sort(key=lambda c: c.visual_bbox.box.x)
+            single_line_composition = self.create_line(all_chars)
+            paragraph.pdf_paragraph_composition = [
+                single_line_composition
+            ] + other_compositions
+            self.update_paragraph_data(paragraph)
+            return
 
-        y_coords = []
-        # Calculate paragraph height
-        if all_chars:
-            y2_coords = []
-            prev_not_formula_char = None
-            for char in all_chars:
-                visual_box = char.visual_bbox.box
-                pdf_box = char.box
-                char: PdfCharacter
-                current_is_formula = (
-                    char.formula_layout_id
-                    or char.pdf_style.font_id in formula_font_ids
-                    or is_formulas_start_char(
-                        char.char_unicode, self.font_mapper, self.translation_config
-                    )
-                )
+        # 3. Perform "threading" scan to create a collision histogram.
+        # Scan from top (max y) to bottom (min y) with a step of 0.5.
+        scan_y_min = para_y_min
+        scan_y_max = para_y_max
+        step = 0.5
 
-                if (
-                    current_is_formula
-                    and prev_not_formula_char
-                    and (
-                        calculate_y_iou_for_boxes(
-                            prev_not_formula_char.visual_bbox.box, char.visual_bbox.box
-                        )
-                        > 0.5
-                        or calculate_y_iou_for_boxes(
-                            prev_not_formula_char.box, char.box
-                        )
-                        > 0.5
-                    )
-                ):
-                    y_coords.append(prev_not_formula_char.box.y)
-                    y2_coords.append(prev_not_formula_char.box.y2)
-                else:
-                    # Use visual box if IoU with bbox is >= 0.3, otherwise use bbox
-                    if calculate_iou_for_boxes(visual_box, pdf_box) <= 0.3:
-                        y_coords.append(visual_box.y)
-                        y2_coords.append(visual_box.y2)
-                    else:
-                        y_coords.append(pdf_box.y)
-                        y2_coords.append(pdf_box.y2)
+        y_coordinates = np.arange(scan_y_max, scan_y_min, -step)
 
-                if not current_is_formula:
-                    prev_not_formula_char = char
+        collision_counts = []
+        for y in y_coordinates:
+            count = sum(1 for b in char_y_bounds if b["y1"] <= y < b["y2"])
+            collision_counts.append(count)
 
-            para_y_min = min(y_coords)
-            para_y_max = max(y2_coords)
-            paragraph_height = para_y_max - para_y_min
-        else:
-            paragraph_height = 0
+        # 4. Find gaps (regions with low collision count) from the histogram.
+        gaps = []
+        in_gap = False
+        for i, count in enumerate(collision_counts):
+            if count < 3 and not in_gap:
+                in_gap = True
+                gap_start_index = i
+            elif count >= 3 and in_gap:
+                in_gap = False
+                gaps.append((gap_start_index, i - 1))
+        if in_gap:
+            gaps.append((gap_start_index, len(collision_counts) - 1))
 
-        # If all characters' y coordinates are within character height average from y coordinate average, treat as single line
-        if all_chars:
-            # Calculate y coordinate average
-            y_coords_for_avg = []
-            for char in all_chars:
-                visual_box = char.visual_bbox.box
-                pdf_box = char.box
+        # If no significant gaps are found, treat it as a single line.
+        if not gaps:
+            all_chars.sort(key=lambda c: c.visual_bbox.box.x)
+            single_line_composition = self.create_line(all_chars)
+            paragraph.pdf_paragraph_composition = [
+                single_line_composition
+            ] + other_compositions
+            self.update_paragraph_data(paragraph)
+            return
 
-                # Use visual box if IoU with bbox is >= 0.3, otherwise use bbox
-                if calculate_iou_for_boxes(visual_box, pdf_box) <= 0.4:
-                    y_coords_for_avg.append(visual_box.y)
-                else:
-                    y_coords_for_avg.append(pdf_box.y)
+        # 5. Assign characters to lines based on the identified gaps.
+        # Calculate separator y-coordinates from the midpoints of the gaps.
+        separator_y_coords = sorted(
+            [y_coordinates[start_idx] for start_idx, end_idx in gaps],
+            reverse=True,
+        )
 
-            y_coordinate_average = sum(y_coords_for_avg) / len(y_coords_for_avg)
+        lines: list[list[PdfCharacter]] = [
+            [] for _ in range(len(separator_y_coords) + 1)
+        ]
 
-            # Check if all characters' y coordinates are within char_height_average from y_coordinate_average
-            all_chars_within_threshold = True
-            for char in all_chars:
-                visual_box = char.visual_bbox.box
-                pdf_box = char.box
-
-                # Use visual box if IoU with bbox is >= 0.3, otherwise use bbox
-                if calculate_iou_for_boxes(visual_box, pdf_box) >= 0.3:
-                    char_y = visual_box.y
-                else:
-                    char_y = pdf_box.y
-
-                if abs(char_y - y_coordinate_average) > char_height_average:
-                    all_chars_within_threshold = False
+        for b in char_y_bounds:
+            char_y_center = (b["y1"] + b["y2"]) / 2
+            line_idx = 0
+            # Find which line bucket the character belongs to.
+            for sep_y in separator_y_coords:
+                if char_y_center > sep_y:
                     break
+                line_idx += 1
+            lines[line_idx].append(b["char"])
 
-            if all_chars_within_threshold:
-                # Sort characters by x-coordinate and create a single line
-                all_chars.sort(key=lambda c: c.visual_bbox.box.x)
-                single_line_composition = self.create_line(all_chars)
-                paragraph.pdf_paragraph_composition = [
-                    single_line_composition
-                ] + other_compositions
-                self.update_paragraph_data(paragraph)
-                return
-
-        # 2. Cluster characters into lines using HDBSCAN on their y-centers
-        y_centers = np.array(y_coords).reshape(-1, 1)
-
-        clusterer = hdbscan.HDBSCAN(min_cluster_size=5, gen_min_span_tree=True)
-        clusterer.fit(y_centers)
-        labels = clusterer.labels_
-
-        if np.all(labels == -1):
-            labels = np.ones_like(labels)
-
-        lines: dict[int, list[PdfCharacter]] = {}
-        outlier_indices: list[int] = []
-        for i, label in enumerate(labels):
-            if label == -1:
-                outlier_indices.append(i)
-            else:
-                lines.setdefault(label, []).append(all_chars[i])
-
-        # Post-process clusters: merge clusters with significant y-axis overlap
-        lines = self._merge_overlapping_clusters(lines, char_height_average)
-
-        # 3. Handle outliers by assigning them to the nearest line
-        if lines and outlier_indices:
-            line_y_centers = {
-                label: np.mean(
-                    [
-                        (c.visual_bbox.box.y + c.visual_bbox.box.y2) / 2
-                        for c in line_chars
-                    ]
-                )
-                for label, line_chars in lines.items()
-            }
-            for i in outlier_indices:
-                outlier_char_y = y_centers[i][0]
-                closest_label = min(
-                    line_y_centers.keys(),
-                    key=lambda label: abs(line_y_centers[label] - outlier_char_y),
-                )
-                lines[closest_label].append(all_chars[i])
-        # If no initial clusters, treat each outlier as its own line
-        elif not lines and outlier_indices:
-            for i, idx in enumerate(outlier_indices):
-                lines[i] = [all_chars[idx]]
-
-        # 4. Rebuild the paragraph's composition list
+        # 6. Rebuild the paragraph's composition list from the new lines.
         new_line_compositions = []
-
-        # Sort characters within each line by x-coordinate (left-to-right)
-        for line_chars in lines.values():
-            line_chars.sort(key=lambda c: c.visual_bbox.box.x)
+        for line_chars in lines:
             if line_chars:
+                # Sort characters within each line by x-coordinate (left-to-right).
+                line_chars.sort(key=lambda c: c.visual_bbox.box.x)
                 new_line_compositions.append(self.create_line(line_chars))
 
-        # Combine with other non-character compositions and sort all vertically
-        all_new_compositions = new_line_compositions + other_compositions
-
-        def get_composition_y_sort_key(comp):
-            # In PDF coords, smaller Y is higher on the page.
-            if comp.pdf_line and comp.pdf_line.box:
-                return -comp.pdf_line.box.y
-            # Add other composition types here if they have a box
-            return float("inf")
-
-        all_new_compositions.sort(key=get_composition_y_sort_key)
-
-        paragraph.pdf_paragraph_composition = all_new_compositions
+        # The lines are already sorted vertically due to the scanning process.
+        paragraph.pdf_paragraph_composition = new_line_compositions + other_compositions
         self.update_paragraph_data(paragraph)
 
     def process_paragraph_spacing(self, paragraph: PdfParagraph):
