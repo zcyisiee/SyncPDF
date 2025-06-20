@@ -15,6 +15,7 @@ from babeldoc.format.pdf.document_il import PdfParagraphComposition
 from babeldoc.format.pdf.document_il import PdfStyle
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il.utils.formular_helper import update_formula_data
 from babeldoc.format.pdf.translation_config import TranslationConfig
 from babeldoc.format.pdf.translation_config import WatermarkOutputMode
 
@@ -481,6 +482,7 @@ class TypesettingUnit:
                 y_offset=self.formular.y_offset * scale,
                 x_advance=self.formular.x_advance * scale,
             )
+            update_formula_data(new_formula)
             return TypesettingUnit(formular=new_formula)
 
         elif self.unicode:
@@ -819,7 +821,7 @@ class Typesetting:
             # 更新 x 坐标
             current_x = relocated_unit.box.x2
             if prev_x > current_x:
-                logger.warning(f"坐标回绕！！！TypesettingUnit: {unit}, ")
+                logger.warning(f"坐标回绕！！！TypesettingUnit: {unit.box}, ")
 
             last_unit = relocated_unit
 

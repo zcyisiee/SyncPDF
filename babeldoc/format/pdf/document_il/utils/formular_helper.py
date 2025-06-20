@@ -3,8 +3,13 @@ import functools
 import re
 import unicodedata
 
+from babeldoc.format.pdf.document_il.il_version_1 import Box
 from babeldoc.format.pdf.document_il.il_version_1 import Page
+from babeldoc.format.pdf.document_il.il_version_1 import PdfFormula
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il.utils.layout_helper import (
+    formular_height_ignore_char,
+)
 from babeldoc.format.pdf.translation_config import TranslationConfig
 
 
@@ -301,3 +306,29 @@ def is_formulas_font(font_name: str, formular_font_pattern: str | None) -> bool:
         return True
 
     return False
+
+
+def update_formula_data(formula: PdfFormula):
+    min_x = min(char.visual_bbox.box.x for char in formula.pdf_character)
+    max_x = max(char.visual_bbox.box.x2 for char in formula.pdf_character)
+    if not all(map(formular_height_ignore_char, formula.pdf_character)):
+        min_y = min(
+            char.visual_bbox.box.y
+            for char in formula.pdf_character
+            if not formular_height_ignore_char(char)
+        )
+        max_y = max(
+            char.visual_bbox.box.y2
+            for char in formula.pdf_character
+            if not formular_height_ignore_char(char)
+        )
+    else:
+        min_y = min(char.visual_bbox.box.y for char in formula.pdf_character)
+        max_y = max(char.visual_bbox.box.y2 for char in formula.pdf_character)
+    formula.box = Box(min_x, min_y, max_x, max_y)
+    if not formula.y_offset:
+        formula.y_offset = 0
+    if not formula.x_offset:
+        formula.x_offset = 0
+    if not formula.x_advance:
+        formula.x_advance = 0
