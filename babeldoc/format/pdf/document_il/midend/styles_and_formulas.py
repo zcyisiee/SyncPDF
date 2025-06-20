@@ -23,6 +23,7 @@ from babeldoc.format.pdf.document_il.utils.formular_helper import update_formula
 from babeldoc.format.pdf.document_il.utils.layout_helper import LEFT_BRACKET
 from babeldoc.format.pdf.document_il.utils.layout_helper import RIGHT_BRACKET
 from babeldoc.format.pdf.document_il.utils.layout_helper import build_layout_index
+from babeldoc.format.pdf.document_il.utils.layout_helper import calculate_iou_for_boxes
 from babeldoc.format.pdf.document_il.utils.layout_helper import (
     calculate_y_iou_for_boxes,
 )
@@ -66,6 +67,7 @@ class StylesAndFormulas:
         self.merge_overlapping_formulas(page)
         # self.process_page_offsets(page)
         self.process_translatable_formulas(page)
+        self.update_all_formula_data(page)
         self.process_page_offsets(page)
         self.update_all_formula_data(page)
         self.process_page_styles(page)
@@ -476,6 +478,8 @@ class StylesAndFormulas:
             return
 
         for paragraph in page.pdf_paragraph:
+            if paragraph.debug_id is None:
+                continue
             if not paragraph.pdf_paragraph_composition:
                 continue
 
@@ -499,22 +503,28 @@ class StylesAndFormulas:
                     comp = paragraph.pdf_paragraph_composition[j]
                     if comp.pdf_line:
                         for char in reversed(comp.pdf_line.pdf_character):
+                            if not char.pdf_character_id:
+                                continue
                             # 检查 y 坐标是否接近，判断是否在同一行
                             left_iou = calculate_y_iou_for_boxes(char.box, formula.box)
                             if left_iou > 0.6:
                                 left_char = char
                                 break
+                    break
 
                 # 查找右边最近的同一行的文本
                 for j in range(i + 1, len(paragraph.pdf_paragraph_composition)):
                     comp = paragraph.pdf_paragraph_composition[j]
                     if comp.pdf_line:
                         for char in comp.pdf_line.pdf_character:
+                            if not char.pdf_character_id:
+                                continue
                             # 检查 y 坐标是否接近，判断是否在同一行
                             right_iou = calculate_y_iou_for_boxes(char.box, formula.box)
                             if right_iou > 0.6:
                                 right_char = char
                                 break
+                    break
 
                 # If both text segments exist, keep the one with higher IOU
                 if left_char and right_char:
@@ -600,6 +610,9 @@ class StylesAndFormulas:
 
     def is_translatable_formula(self, formula: PdfFormula) -> bool:
         """判断公式是否只包含需要正常翻译的字符（数字、空格和英文逗号）"""
+        if all(char.formula_layout_id for char in formula.pdf_character):
+            return False
+
         text = "".join(char.char_unicode for char in formula.pdf_character)
         if formula.y_offset > 0.1:
             return False
@@ -710,8 +723,11 @@ class StylesAndFormulas:
 
     def merge_overlapping_formulas(self, page: Page):
         """
-        合并 x 轴重叠且 y 轴有交集的相邻公式，或者 x 轴相邻且 y 轴 IOU > 0.5 的公式，
-        或者所有字符的 layout id 都相同的公式
+        合并符合以下条件的公式：
+        1. x 轴重叠且 y 轴有交集的相邻公式，或者
+        2. x 轴相邻且 y 轴 IOU > 0.5 的相邻公式，或者
+        3. 所有字符的 layout id 都相同的相邻公式，或者
+        4. 任意两个公式的 IOU > 0.8
         角标可能会被识别成单独的公式，需要合并
         """
         if not page.pdf_paragraph:
@@ -721,46 +737,76 @@ class StylesAndFormulas:
             if not paragraph.pdf_paragraph_composition:
                 continue
 
-            i = 0
-            while i < len(paragraph.pdf_paragraph_composition) - 1:
-                comp1 = paragraph.pdf_paragraph_composition[i]
-                comp2 = paragraph.pdf_paragraph_composition[i + 1]
+            # 重复执行合并过程，直到没有更多可以合并的公式
+            merged = True
+            while merged:
+                merged = False
+                for i in range(len(paragraph.pdf_paragraph_composition)):
+                    if merged:
+                        break
+                    comp1 = paragraph.pdf_paragraph_composition[i]
+                    if comp1.pdf_formula is None:
+                        continue
 
-                # 检查是否都是公式
-                if comp1.pdf_formula is None or comp2.pdf_formula is None:
-                    i += 1
-                    continue
+                    for j in range(i + 1, len(paragraph.pdf_paragraph_composition)):
+                        comp2 = paragraph.pdf_paragraph_composition[j]
+                        if comp2.pdf_formula is None:
+                            continue
 
-                formula1 = comp1.pdf_formula
-                formula2 = comp2.pdf_formula
+                        formula1 = comp1.pdf_formula
+                        formula2 = comp2.pdf_formula
 
-                # 检查合并条件：
-                # 1. x 轴重叠且 y 轴有交集，或者
-                # 2. x 轴相邻且 y 轴 IOU > 0.5，或者
-                # 3. 所有字符的 layout id 都相同
-                should_merge = (
-                    (
-                        self.is_x_axis_contained(formula1.box, formula2.box)
-                        and self.has_y_intersection(formula1.box, formula2.box)
-                    )
-                    or (
-                        self.is_x_axis_adjacent(formula1.box, formula2.box)
-                        and self.calculate_y_iou(formula1.box, formula2.box) > 0.5
-                    )
-                    or (self._have_same_layout_ids(formula1, formula2, page))
-                )
+                        # 检查合并条件：
+                        # 1. x 轴重叠且 y 轴有交集，或者
+                        # 2. x 轴相邻且 y 轴 IOU > 0.5，或者
+                        # 3. 所有字符的 layout id 都相同，或者
+                        # 4. 任意两个公式的 IOU > 0.8
+                        should_merge = (
+                            (
+                                j == i + 1
+                                and (
+                                    (
+                                        self.is_x_axis_contained(
+                                            formula1.box, formula2.box
+                                        )
+                                        and self.has_y_intersection(
+                                            formula1.box, formula2.box
+                                        )
+                                    )
+                                    or (
+                                        self.is_x_axis_adjacent(
+                                            formula1.box, formula2.box
+                                        )
+                                        and self.calculate_y_iou(
+                                            formula1.box, formula2.box
+                                        )
+                                        > 0.5
+                                    )
+                                )
+                            )
+                            or (self._have_same_layout_ids(formula1, formula2, page))
+                            or (
+                                calculate_iou_for_boxes(formula1.box, formula2.box)
+                                > 0.8
+                            )
+                            or (
+                                calculate_iou_for_boxes(formula2.box, formula1.box)
+                                > 0.8
+                            )
+                        )
 
-                if should_merge:
-                    # 合并公式
-                    merged_formula = self.merge_formulas(formula1, formula2)
-                    paragraph.pdf_paragraph_composition[i] = PdfParagraphComposition(
-                        pdf_formula=merged_formula,
-                    )
-                    # 删除第二个公式
-                    del paragraph.pdf_paragraph_composition[i + 1]
-                    # 不增加 i，因为合并后的公式可能还需要和下一个公式合并
-                else:
-                    i += 1
+                        if should_merge:
+                            # 合并公式
+                            merged_formula = self.merge_formulas(formula1, formula2)
+                            paragraph.pdf_paragraph_composition[i] = (
+                                PdfParagraphComposition(
+                                    pdf_formula=merged_formula,
+                                )
+                            )
+                            # 删除第二个公式
+                            del paragraph.pdf_paragraph_composition[j]
+                            merged = True
+                            break
 
     def _have_same_layout_ids(
         self, formula1: PdfFormula, formula2: PdfFormula, page: Page

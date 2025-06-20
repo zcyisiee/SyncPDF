@@ -350,11 +350,12 @@ class TypesettingUnit:
 
             return box
         elif self.formular:
-            if self.formular.x_offset <= 0.5:
-                return self.formular.box
-            formular_box = copy.copy(self.formular.box)
-            formular_box.x2 += self.formular.x_advance
-            return formular_box
+            return self.formular.box
+            # if self.formular.x_offset <= 0.5:
+            #     return self.formular.box
+            # formular_box = copy.copy(self.formular.box)
+            # formular_box.x2 += self.formular.x_advance
+            # return formular_box
         elif self.unicode:
             char_width = self.font.char_lengths(self.unicode, self.font_size)[0]
             if self.x is None or self.y is None or self.scale is None:
