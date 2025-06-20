@@ -819,7 +819,7 @@ class Typesetting:
             # 更新 x 坐标
             current_x = relocated_unit.box.x2
             if prev_x > current_x:
-                logger.warning(f"坐标回绕！！！ TypesettingUnit: {unit}, ")
+                logger.warning(f"坐标回绕！！！TypesettingUnit: {unit}, ")
 
             last_unit = relocated_unit
 
