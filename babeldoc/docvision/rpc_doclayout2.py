@@ -286,7 +286,7 @@ class RpcDocLayoutModel(DocLayoutModel):
         translate_config,
         save_debug_image,
     ):
-        with ThreadPoolExecutor(max_workers=64) as executor:
+        with ThreadPoolExecutor(max_workers=128) as executor:
             yield from executor.map(
                 self.predict_page,
                 pages,

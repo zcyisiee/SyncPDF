@@ -350,11 +350,12 @@ class TypesettingUnit:
 
             return box
         elif self.formular:
-            if self.formular.x_offset <= 0.5:
-                return self.formular.box
-            formular_box = copy.copy(self.formular.box)
-            formular_box.x2 += self.formular.x_advance
-            return formular_box
+            return self.formular.box
+            # if self.formular.x_offset <= 0.5:
+            #     return self.formular.box
+            # formular_box = copy.copy(self.formular.box)
+            # formular_box.x2 += self.formular.x_advance
+            # return formular_box
         elif self.unicode:
             char_width = self.font.char_lengths(self.unicode, self.font_size)[0]
             if self.x is None or self.y is None or self.scale is None:
@@ -407,8 +408,8 @@ class TypesettingUnit:
         elif self.formular:
             # 创建新的公式对象，保持内部字符的相对位置
             new_chars = []
-            min_x = min(char.visual_bbox.box.x for char in self.formular.pdf_character)
-            min_y = min(char.visual_bbox.box.y for char in self.formular.pdf_character)
+            min_x = self.formular.box.x
+            min_y = self.formular.box.y
 
             for char in self.formular.pdf_character:
                 # 计算相对位置

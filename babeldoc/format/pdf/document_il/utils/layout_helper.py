@@ -634,6 +634,7 @@ def get_character_layout(
             "abstract",
             "content",
             "figure_title",
+            "chart_title",
             "table_title",
             "doc_title",
             "footnote",
@@ -722,6 +723,7 @@ def is_text_layout(layout: Layout):
         "footer",
         "seal",
         "text",
+        "chart_title",
     ]
 
 

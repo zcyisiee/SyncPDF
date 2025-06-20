@@ -656,7 +656,7 @@ class ILCreater:
                 _, encoding = self.mupdf.xref_get_key(xref_id, "Encoding")
                 if encoding == "/Identity-H" or encoding == "/Identity-V":
                     encoding_length = 2
-                if encoding == "/WinAnsiEncoding":
+                elif encoding == "/WinAnsiEncoding":
                     encoding_length = 1
                 else:
                     _, to_unicode_id = self.mupdf.xref_get_key(xref_id, "ToUnicode")
