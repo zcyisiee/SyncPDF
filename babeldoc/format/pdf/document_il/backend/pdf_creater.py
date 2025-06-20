@@ -331,7 +331,7 @@ class PDFCreater:
         self,
         draw_op: BitStream,
         rectangle: il_version_1.PdfRectangle,
-        line_width: float = 0.5,
+        line_width: float = 0.4,
     ):
         """Draw a rectangle in PDF for visualization purposes.
 
