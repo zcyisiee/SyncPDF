@@ -408,8 +408,8 @@ class TypesettingUnit:
         elif self.formular:
             # 创建新的公式对象，保持内部字符的相对位置
             new_chars = []
-            min_x = min(char.visual_bbox.box.x for char in self.formular.pdf_character)
-            min_y = min(char.visual_bbox.box.y for char in self.formular.pdf_character)
+            min_x = self.formular.box.x
+            min_y = self.formular.box.y
 
             for char in self.formular.pdf_character:
                 # 计算相对位置
