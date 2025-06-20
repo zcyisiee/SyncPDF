@@ -19,14 +19,12 @@ from babeldoc.format.pdf.document_il.utils.formular_helper import (
     is_formulas_middle_char,
 )
 from babeldoc.format.pdf.document_il.utils.formular_helper import is_formulas_start_char
+from babeldoc.format.pdf.document_il.utils.formular_helper import update_formula_data
 from babeldoc.format.pdf.document_il.utils.layout_helper import LEFT_BRACKET
 from babeldoc.format.pdf.document_il.utils.layout_helper import RIGHT_BRACKET
 from babeldoc.format.pdf.document_il.utils.layout_helper import build_layout_index
 from babeldoc.format.pdf.document_il.utils.layout_helper import (
     calculate_y_iou_for_boxes,
-)
-from babeldoc.format.pdf.document_il.utils.layout_helper import (
-    formular_height_ignore_char,
 )
 from babeldoc.format.pdf.document_il.utils.layout_helper import is_bullet_point
 from babeldoc.format.pdf.document_il.utils.layout_helper import is_same_style
@@ -40,6 +38,9 @@ class StylesAndFormulas:
         self.translation_config = translation_config
         self.font_mapper = FontMapper(translation_config)
 
+    def update_formula_data(self, formula: PdfFormula):
+        update_formula_data(formula)
+
     def process(self, document: Document):
         with self.translation_config.progress_monitor.stage_start(
             self.stage_name,
@@ -49,6 +50,12 @@ class StylesAndFormulas:
                 self.translation_config.raise_if_cancelled()
                 self.process_page(page)
                 pbar.advance()
+
+    def update_all_formula_data(self, page: Page):
+        for para in page.pdf_paragraph:
+            for comp in para.pdf_paragraph_composition:
+                if comp.pdf_formula:
+                    self.update_formula_data(comp.pdf_formula)
 
     def process_page(self, page: Page):
         """处理页面，包括公式识别和偏移量计算"""
@@ -60,6 +67,7 @@ class StylesAndFormulas:
         # self.process_page_offsets(page)
         self.process_translatable_formulas(page)
         self.process_page_offsets(page)
+        self.update_all_formula_data(page)
         self.process_page_styles(page)
 
         # clean up to save memory
@@ -589,31 +597,6 @@ class StylesAndFormulas:
             new_line = PdfLine(pdf_character=chars)
             self.update_line_data(new_line)
             return PdfParagraphComposition(pdf_line=new_line)
-
-    def update_formula_data(self, formula: PdfFormula):
-        min_x = min(char.visual_bbox.box.x for char in formula.pdf_character)
-        max_x = max(char.visual_bbox.box.x2 for char in formula.pdf_character)
-        if not all(map(formular_height_ignore_char, formula.pdf_character)):
-            min_y = min(
-                char.visual_bbox.box.y
-                for char in formula.pdf_character
-                if not formular_height_ignore_char(char)
-            )
-            max_y = max(
-                char.visual_bbox.box.y2
-                for char in formula.pdf_character
-                if not formular_height_ignore_char(char)
-            )
-        else:
-            min_y = min(char.visual_bbox.box.y for char in formula.pdf_character)
-            max_y = max(char.visual_bbox.box.y2 for char in formula.pdf_character)
-        formula.box = Box(min_x, min_y, max_x, max_y)
-        if not formula.y_offset:
-            formula.y_offset = 0
-        if not formula.x_offset:
-            formula.x_offset = 0
-        if not formula.x_advance:
-            formula.x_advance = 0
 
     def is_translatable_formula(self, formula: PdfFormula) -> bool:
         """判断公式是否只包含需要正常翻译的字符（数字、空格和英文逗号）"""
