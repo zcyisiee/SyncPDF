@@ -1,6 +1,6 @@
 import re
 
-from babeldoc.translation_config import ConfigModel
+from babeldoc.format.pdf.translation_config import ConfigModel
 
 # Since it is necessary to test whether the functionality meets the expected requirements,
 # private functions and private methods are allowed to be called.

@@ -320,7 +320,7 @@ You can refer to the example in [main.py](https://github.com/funstory-ai/yadt/bl
 
 Please note:
 
-1. Make sure call `babeldoc.high_level.init()` before using the API
+1. Make sure call `babeldoc.format.pdf.high_level.init()` before using the API
 
 2. The current `TranslationConfig` does not fully validate input parameters, so you need to ensure the validity of input parameters
 
@@ -397,6 +397,14 @@ And meet the following requirements:
 
 - layout error less than 1%
 - content loss less than 1%
+
+## Version Number Explanation
+
+This project uses a combination of [Semantic Versioning](https://semver.org/) and [Pride Versioning](https://pridever.org/). The version number format is: "0.MAJOR.MINOR".
+
+- MAJOR: Incremented by 1 when API incompatible changes are made or when proud improvements are implemented.
+
+- MINOR: Incremented by 1 when any API compatible changes are made.
 
 ## Known Issues
 

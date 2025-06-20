@@ -125,7 +125,7 @@ class Glossary:
 
         try:
             with file_path.open("r", encoding="utf-8") as f:
-                reader = csv.DictReader(f, escapechar="\\")
+                reader = csv.DictReader(f, doublequote=True)
                 if not all(col in reader.fieldnames for col in ["source", "target"]):
                     raise ValueError(
                         f"CSV file {file_path} must contain 'source' and 'target' columns."
@@ -167,7 +167,7 @@ class Glossary:
         ]
         buffer = io.StringIO()
         dict_writer = csv.DictWriter(
-            buffer, fieldnames=["source", "target", "tgt_lng"], escapechar="\\"
+            buffer, fieldnames=["source", "target", "tgt_lng"], doublequote=True
         )
         dict_writer.writeheader()
         dict_writer.writerows(dict_data)

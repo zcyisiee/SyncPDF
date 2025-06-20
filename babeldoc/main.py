@@ -13,15 +13,15 @@ from rich.progress import TimeElapsedColumn
 from rich.progress import TimeRemainingColumn
 
 import babeldoc.assets.assets
-import babeldoc.high_level
-from babeldoc.document_il.translator.translator import OpenAITranslator
-from babeldoc.document_il.translator.translator import set_translate_rate_limiter
+import babeldoc.format.pdf.high_level
+from babeldoc.format.pdf.translation_config import TranslationConfig
+from babeldoc.format.pdf.translation_config import WatermarkOutputMode
 from babeldoc.glossary import Glossary
-from babeldoc.translation_config import TranslationConfig
-from babeldoc.translation_config import WatermarkOutputMode
+from babeldoc.translator.translator import OpenAITranslator
+from babeldoc.translator.translator import set_translate_rate_limiter
 
 logger = logging.getLogger(__name__)
-__version__ = "0.3.72"
+__version__ = "0.4.0"
 
 
 def create_parser():
@@ -56,6 +56,10 @@ def create_parser():
     )
     parser.add_argument(
         "--rpc-doclayout",
+        help="RPC service host address for document layout analysis",
+    )
+    parser.add_argument(
+        "--rpc-doclayout2",
         help="RPC service host address for document layout analysis",
     )
     parser.add_argument(
@@ -350,6 +354,10 @@ async def main():
         from babeldoc.docvision.rpc_doclayout import RpcDocLayoutModel
 
         doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout)
+    elif args.rpc_doclayout2:
+        from babeldoc.docvision.rpc_doclayout2 import RpcDocLayoutModel
+
+        doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout2)
     else:
         from babeldoc.docvision.doclayout import DocLayoutModel
 
@@ -497,7 +505,7 @@ async def main():
 
         # 开始翻译
         with progress_context:
-            async for event in babeldoc.high_level.async_translate(config):
+            async for event in babeldoc.format.pdf.high_level.async_translate(config):
                 progress_handler(event)
                 if config.debug:
                     logger.debug(event)
@@ -593,12 +601,12 @@ def create_progress_handler(translation_config: TranslationConfig):
 
 # for backward compatibility
 def create_cache_folder():
-    return babeldoc.high_level.create_cache_folder()
+    return babeldoc.format.pdf.high_level.create_cache_folder()
 
 
 # for backward compatibility
 def download_font_assets():
-    return babeldoc.high_level.download_font_assets()
+    return babeldoc.format.pdf.high_level.download_font_assets()
 
 
 def cli():
@@ -629,7 +637,7 @@ def cli():
             v.disabled = True
             v.propagate = False
 
-    babeldoc.high_level.init()
+    babeldoc.format.pdf.high_level.init()
     asyncio.run(main())
 
 

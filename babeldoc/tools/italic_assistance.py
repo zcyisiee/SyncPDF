@@ -5,8 +5,8 @@ from pathlib import Path
 
 import orjson
 from babeldoc.const import CACHE_FOLDER
-from babeldoc.document_il.midend.styles_and_formulas import StylesAndFormulas
-from babeldoc.translation_config import TranslationConfig
+from babeldoc.format.pdf.document_il.midend.styles_and_formulas import StylesAndFormulas
+from babeldoc.format.pdf.translation_config import TranslationConfig
 from rich.console import Console
 from rich.table import Table
 
