@@ -16,7 +16,9 @@ class ResultMerger:
     def __init__(self, translation_config: TranslationConfig):
         self.config = translation_config
 
-    def merge_results(self, results: dict[int, TranslateResult]) -> TranslateResult:
+    def merge_results(
+        self, results: dict[int, TranslateResult | None]
+    ) -> TranslateResult:
         """Merge multiple translation results into one"""
         if not results:
             raise ValueError("No results to merge")
@@ -35,7 +37,7 @@ class ResultMerger:
         dual_file_name_no_watermark = (
             f"{basename}{debug_suffix}.{self.config.lang_out}.dual.pdf"
         )
-
+        results = {k: v for k, v in results.items() if v is not None}
         # Sort results by part index
         sorted_results = dict(sorted(results.items()))
         first_result = next(iter(sorted_results.values()))

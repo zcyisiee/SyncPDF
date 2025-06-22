@@ -354,7 +354,7 @@ class TranslationConfig:
         if part_index in self._part_working_dirs:
             part_dir = self._part_working_dirs[part_index]
             if part_dir.exists():
-                shutil.rmtree(part_dir)
+                shutil.rmtree(part_dir, ignore_errors=True)
             del self._part_working_dirs[part_index]
 
     def cleanup_temp_files(self):
@@ -364,7 +364,7 @@ class TranslationConfig:
                 self.cleanup_part_working_dir(part_index)
             if self._is_temp_dir:
                 logger.info(f"cleanup temp files: {self.working_dir}")
-                shutil.rmtree(self.working_dir)
+                shutil.rmtree(self.working_dir, ignore_errors=True)
         except Exception:
             logger.exception("Error cleaning up temporary files")
 

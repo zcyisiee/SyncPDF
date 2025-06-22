@@ -491,7 +491,7 @@ def do_translate(
                         pm.total_parts = len(split_points)
 
                         # Process parts serially
-                        results: dict[int, TranslateResult] = {}
+                        results: dict[int, TranslateResult | None] = {}
                         original_watermark_mode = (
                             translation_config.watermark_output_mode
                         )
@@ -515,6 +515,12 @@ def do_translate(
                                 part_config.page_ranges = [
                                     (x, x) for x in should_translate_pages
                                 ]
+                                if (
+                                    translation_config.only_include_translated_page
+                                    and not should_translate_pages
+                                ):
+                                    results[i] = None
+                                    continue
 
                                 # Only first part should do scanned detection if enabled
                                 if i > 0:
@@ -805,6 +811,9 @@ def _do_translate_single(
     docs = il_creater.create_il()
     logger.debug(f"finish create il from {temp_pdf_path}")
     del il_creater
+    if translation_config.only_include_translated_page and not docs.page:
+        return None
+
     if translation_config.debug:
         xml_converter.write_json(
             docs,
