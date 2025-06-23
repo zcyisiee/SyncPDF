@@ -180,4 +180,8 @@ yadt = { path = ".", editable = true }
 
 [tool.pyright]
 pythonVersion = "3.10"
-typeCheckingMode = "off"
+# typeCheckingMode = "off"
+reportGeneralTypeIssues = false
+reportUnknownVariableType = false
+reportMissingParameterType = false
+reportUnknownParameterType = false
