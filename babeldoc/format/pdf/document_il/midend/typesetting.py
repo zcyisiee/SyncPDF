@@ -871,7 +871,8 @@ class Typesetting:
                             PdfParagraphComposition(pdf_character=char),
                         )
                 return
-
+            if not paragraph.debug_id:
+                return
             # 如果当前行距大于最小行距，先减小行距
             if line_spacing > min_line_spacing:
                 line_spacing -= 0.1

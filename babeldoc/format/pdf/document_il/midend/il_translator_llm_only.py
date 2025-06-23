@@ -479,8 +479,19 @@ class ILTranslatorLLMOnly:
                     input_unicode = inputs[id_][2].unicode
                     output_unicode = translated_text
 
+                    trimed_input = re.sub(r"[. 。…，]{20,}", ".", output)
+
                     input_token_count = self.calc_token_count(input_unicode)
                     output_token_count = self.calc_token_count(output_unicode)
+
+                    if trimed_input == output_unicode and input_token_count > 20:
+                        llm_translate_tracker.set_error_message(
+                            "Translation result is the same as input, fallback."
+                        )
+                        logger.warning(
+                            "Translation result is the same as input, fallback."
+                        )
+                        continue
 
                     if not (0.3 < output_token_count / input_token_count < 3):
                         llm_translate_tracker.set_error_message(

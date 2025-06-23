@@ -710,7 +710,7 @@ def is_text_layout(layout: Layout):
         "figure_caption",
         "table_caption",
         "table_text",
-        "reference",
+        # "reference",
         "title",
         "paragraph_title",
         "abstract",

@@ -348,11 +348,14 @@ def parse_font_file(doc, idx, encoding, differences):
     data = doc.xref_stream(idx)
     face = freetype.Face(BytesIO(data))
     scale = 1000 / face.units_per_EM
-    for charmap in face.charmaps:
-        if charmap.encoding_name == "FT_ENCODING_ADOBE_CUSTOM":
-            face.select_charmap(freetype.FT_ENCODING_ADOBE_CUSTOM)
-            break
-    bbox_list = [get_char_cbox(face, x) for x in encoding]
+    enc_name, enc_vector = encoding
+    if enc_name == "Custom":
+        for charmap in face.charmaps:
+            face.select_charmap(charmap.encoding)
+            if charmap.encoding_name == "FT_ENCODING_ADOBE_CUSTOM":
+                face.select_charmap(charmap.encoding)
+                break
+    bbox_list = [get_char_cbox(face, x) for x in enc_vector]
     if differences:
         for code, name in differences:
             bbox_list[code] = get_name_cbox(face, name.encode("U8"))
@@ -765,10 +768,13 @@ class ILCreater:
 
     def parse_font_xobj_id(self, xobj_id: int):
         bbox_list = []
-        encoding = list(range(256))
+        encoding = ("Custom", list(range(256)))
         font_encoding = self.mupdf.xref_get_key(xobj_id, "Encoding")
         if font_encoding[1] == "/WinAnsiEncoding":
-            encoding = WinAnsiEncoding
+            encoding = ("WinAnsi", WinAnsiEncoding)
+        base_encoding = self.mupdf.xref_get_key(xobj_id, "Encoding/BaseEncoding")
+        if base_encoding[1] == "/WinAnsiEncoding":
+            encoding = ("WinAnsi", WinAnsiEncoding)
         differences = []
         font_differences = self.mupdf.xref_get_key(xobj_id, "Encoding/Differences")
         if font_differences:

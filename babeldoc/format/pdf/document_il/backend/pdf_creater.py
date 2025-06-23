@@ -289,7 +289,7 @@ class PDFCreater:
                 )
                 continue
             chars.append(composition.pdf_character)
-        if not chars and paragraph.unicode:
+        if not chars and paragraph.unicode and paragraph.debug_id:
             logger.error(
                 f"Unable to export paragraphs that have "
                 f"not yet been formatted: {paragraph}",
