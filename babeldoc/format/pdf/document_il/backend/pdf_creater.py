@@ -1081,7 +1081,25 @@ class PDFCreater:
                 mono_out_path = None
             if self.translation_config.no_dual:
                 dual_out_path = None
-            return TranslateResult(mono_out_path, dual_out_path)
+            auto_extracted_glossary_path = None
+            if (
+                self.translation_config.save_auto_extracted_glossary
+                and self.translation_config.shared_context_cross_split_part.auto_extracted_glossary
+            ):
+                auto_extracted_glossary_path = self.translation_config.get_output_file_path(
+                    f"{basename}{debug_suffix}.{translation_config.lang_out}.glossary.csv"
+                )
+                with auto_extracted_glossary_path.open("w", encoding="utf-8") as f:
+                    logger.info(
+                        f"save auto extracted glossary to {auto_extracted_glossary_path}"
+                    )
+                    f.write(
+                        self.translation_config.shared_context_cross_split_part.auto_extracted_glossary.to_csv()
+                    )
+
+            return TranslateResult(
+                mono_out_path, dual_out_path, auto_extracted_glossary_path
+            )
         except Exception:
             logger.exception(
                 "Failed to create PDF: %s",
