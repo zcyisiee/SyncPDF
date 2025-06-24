@@ -47,7 +47,8 @@ dependencies = [
     "rapidocr-onnxruntime>=1.4.4",
     "pyzstd>=0.17.0",
     "hyperscan>=0.7.13",
-    "rtree>=1.4.0"
+    "rtree>=1.4.0",
+    "chardet>=5.2.0",
 ]
 
 [project.optional-dependencies]
