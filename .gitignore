@@ -35,3 +35,6 @@ examples/
 /xnotes
 /docs/workflow-rules.md
 babeldoc/format/txt
+
+# uv
+uv.lock
