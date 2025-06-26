@@ -607,7 +607,15 @@ class Typesetting:
                     logger.warning(f"预处理段落时出错: {e}")
                     self.document_scales.append(1.0)
         
-        # [标记]
+        # 获取缩放因子的众数
+        if self.document_scales:
+            mode_scale = statistics.mode(self.document_scales)
+            # 将所有大于众数的值修改为众数
+            for i in range(len(self.document_scales)):
+                if self.document_scales[i] > mode_scale:
+                    self.document_scales[i] = mode_scale
+        else:
+            logger.error("document_scales is empty, there seems no paragraph in this PDF")
 
     def _get_optimal_scale(
         self, 
