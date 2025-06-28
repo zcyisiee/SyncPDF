@@ -256,7 +256,7 @@ def get_char_unicode_string(chars: list[PdfCharacter | str]) -> str:
         if not isinstance(chars[i], PdfCharacter):
             unicode_chars.append(chars[i])
             continue
-        unicode_chars.append(unicodedata.normalize("NFKD", chars[i].char_unicode))
+        unicode_chars.append(unicodedata.normalize("NFKC", chars[i].char_unicode))
 
         # 如果是空格，跳过
         if chars[i].char_unicode == " ":
