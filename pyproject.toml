@@ -49,6 +49,7 @@ dependencies = [
     "hyperscan>=0.7.13",
     "rtree>=1.4.0",
     "chardet>=5.2.0",
+    "uharfbuzz>=0.50.2",
 ]
 
 [project.optional-dependencies]
