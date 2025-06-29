@@ -217,6 +217,9 @@ def get_paragraph_unicode(paragraph: PdfParagraph) -> str:
     return get_char_unicode_string(chars)
 
 
+SPACE_REGEX = regex.compile(r"\s+", regex.UNICODE)
+
+
 def get_char_unicode_string(chars: list[PdfCharacter | str]) -> str:
     """
     将字符列表转换为 Unicode 字符串，根据字符间距自动插入空格。
@@ -280,7 +283,11 @@ def get_char_unicode_string(chars: list[PdfCharacter | str]) -> str:
             ):  # 换行
                 unicode_chars.append(" ")  # 添加空格
 
-    return "".join(unicode_chars)
+    result = "".join(unicode_chars)
+    # use unicode regex to replace all space with " "
+    normalize = unicodedata.normalize("NFKC", result)
+    result = SPACE_REGEX.sub(" ", normalize).strip()
+    return result
 
 
 def get_paragraph_max_height(paragraph: PdfParagraph) -> float:

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import queue
 from pathlib import Path
 from typing import Any
 
@@ -616,6 +617,35 @@ def download_font_assets():
     return babeldoc.format.pdf.high_level.download_font_assets()
 
 
+class EvictQueue(queue.Queue):
+    def __init__(self, maxsize):
+        self.discarded = 0
+        super().__init__(maxsize)
+
+    def put(self, item, block=False, timeout=None):
+        while True:
+            try:
+                super().put(item, block=False)
+                break
+            except queue.Full:
+                try:
+                    self.get_nowait()
+                    self.discarded += 1
+                except queue.Empty:
+                    pass
+
+
+def speed_up_logs():
+    import logging.handlers
+
+    root_logger = logging.getLogger()
+    log_que = EvictQueue(1000)
+    queue_handler = logging.handlers.QueueHandler(log_que)
+    queue_listener = logging.handlers.QueueListener(log_que, *root_logger.handlers)
+    queue_listener.start()
+    root_logger.handlers = [queue_handler]
+
+
 def cli():
     """Command line interface entry point."""
     from rich.logging import RichHandler
@@ -644,6 +674,7 @@ def cli():
             v.disabled = True
             v.propagate = False
 
+    speed_up_logs()
     babeldoc.format.pdf.high_level.init()
     asyncio.run(main())
 

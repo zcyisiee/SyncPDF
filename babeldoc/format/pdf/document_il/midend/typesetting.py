@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copy
 import logging
 import re
@@ -6,6 +8,7 @@ import unicodedata
 from functools import cache
 
 import pymupdf
+import regex
 from rtree import index
 
 from babeldoc.const import WATERMARK_VERSION
@@ -22,6 +25,64 @@ from babeldoc.format.pdf.translation_config import TranslationConfig
 from babeldoc.format.pdf.translation_config import WatermarkOutputMode
 
 logger = logging.getLogger(__name__)
+
+LINE_BREAK_REGEX = regex.compile(
+    r"^["
+    r"a-z"
+    r"A-Z"
+    r"0-9"
+    r"\u00C0-\u00FF"  # Latin-1 Supplement
+    r"\u0100-\u017F"  # Latin Extended A
+    r"\u0180-\u024F"  # Latin Extended B
+    r"\u1E00-\u1EFF"  # Latin Extended Additional
+    r"\u2C60-\u2C7F"  # Latin Extended C
+    r"\uA720-\uA7FF"  # Latin Extended D
+    r"\uAB30-\uAB6F"  # Latin Extended E
+    r"\u0250-\u02A0"  # IPA Extensions
+    r"\u0400-\u04FF"  # Cyrillic
+    r"\u0300-\u036F"  # Combining Diacritical Marks
+    r"\u0500-\u052F"  # Cyrillic Supplement
+    r"\u0370-\u03FF"  # Greek and Coptic
+    r"\u2DE0-\u2DFF"  # Cyrillic Extended-A
+    r"\uA650-\uA69F"  # Cyrillic Extended-B
+    r"\u1200-\u137F"  # Ethiopic
+    r"\u1380-\u139F"  # Ethiopic Supplement
+    r"\u2D80-\u2DDF"  # Ethiopic Extended
+    r"\uAB00-\uAB2F"  # Ethiopic Extended-A
+    r"\U0001E7E0-\U0001E7FF"  # Ethiopic Extended-B
+    r"\u0E80-\u0EFF"  # Lao
+    r"\u0D00-\u0D7F"  # Malayalam
+    r"\u0A80-\u0AFF"  # Gujarati
+    r"\u0E00-\u0E7F"  # Thai
+    r"\u1000-\u109F"  # Myanmar
+    r"\uAA60-\uAA7F"  # Myanmar Extended-A
+    r"\uA9E0-\uA9FF"  # Myanmar Extended-B
+    r"\U000116D0-\U000116FF"  # Myanmar Extended-C
+    r"\u0B80-\u0BFF"  # Tamil
+    r"\u0C00-\u0C7F"  # Telugu
+    r"\u0B00-\u0B7F"  # Oriya
+    r"\u0530-\u058F"  # Armenian
+    r"\u10A0-\u10FF"  # Georgian
+    r"\u1C90-\u1CBF"  # Georgian Extended
+    r"\u2D00-\u2D2F"  # Georgian Supplement
+    r"\u1780-\u17FF"  # Khmer
+    r"\u19E0-\u19FF"  # Khmer Symbols
+    r"\U00010B00-\U00010B3F"  # Avestan
+    r"\u1D00-\u1D7F"  # Phonetic Extensions
+    r"\u1400-\u167F"  # Unified Canadian Aboriginal Syllabics
+    r"\u0B00-\u0B7F"  # Oriya
+    r"\u0780-\u07BF"  # Thaana
+    r"\U0001E900-\U0001E95F"  # Adlam
+    r"\u1C80-\u1C8F"  # Cyrillic Extended-C
+    r"\U0001E030-\U0001E08F"  # Cyrillic Extended-D
+    r"\uA000-\uA48F"  # Yi Syllables
+    r"\uA490-\uA4CF"  # Yi Radicals
+    r"'"
+    r"-"  # Hyphen
+    r"·"  # Middle Dot (U+00B7) For Català
+    r"ʻ"  # Spacing Modifier Letters U+02BB
+    r"]+$"
+)
 
 
 class TypesettingUnit:
@@ -40,9 +101,9 @@ class TypesettingUnit:
         xobj_id: int = None,
         debug_info: bool = False,
     ):
-        assert sum(x is not None for x in [char, formular, unicode]) == 1, (
-            "Only one of chars and formular can be not None"
-        )
+        assert (char is not None) + (formular is not None) + (
+            unicode is not None
+        ) == 1, "Only one of chars and formular can be not None"
         self.char = char
         self.formular = formular
         self.unicode = unicode
@@ -50,6 +111,20 @@ class TypesettingUnit:
         self.y = None
         self.scale = None
         self.debug_info = debug_info
+
+        # Cache variables
+        self.box_cache: Box | None = None
+        self.can_break_line_cache: bool | None = None
+        self.is_cjk_char_cache: bool | None = None
+        self.mixed_character_blacklist_cache: bool | None = None
+        self.is_space_cache: bool | None = None
+        self.is_hung_punctuation_cache: bool | None = None
+        self.is_cannot_appear_in_line_end_punctuation_cache: bool | None = None
+        self.can_passthrough_cache: bool | None = None
+        self.width_cache: float | None = None
+        self.height_cache: float | None = None
+
+        self.font_size = None
 
         if unicode:
             assert font_size, "Font size must be provided when unicode is provided"
@@ -74,6 +149,32 @@ class TypesettingUnit:
             self.style = style
             self.xobj_id = xobj_id
 
+    def try_resue_cache(self, old_tu: TypesettingUnit):
+        if old_tu.is_cjk_char_cache is not None:
+            self.is_cjk_char_cache = old_tu.is_cjk_char_cache
+
+        if old_tu.can_break_line_cache is not None:
+            self.can_break_line_cache = old_tu.can_break_line_cache
+
+        if old_tu.is_space_cache is not None:
+            self.is_space_cache = old_tu.is_space_cache
+
+        if old_tu.is_hung_punctuation_cache is not None:
+            self.is_hung_punctuation_cache = old_tu.is_hung_punctuation_cache
+
+        if old_tu.is_cannot_appear_in_line_end_punctuation_cache is not None:
+            self.is_cannot_appear_in_line_end_punctuation_cache = (
+                old_tu.is_cannot_appear_in_line_end_punctuation_cache
+            )
+
+        if old_tu.can_passthrough_cache is not None:
+            self.can_passthrough_cache = old_tu.can_passthrough_cache
+
+        if old_tu.mixed_character_blacklist_cache is not None:
+            self.mixed_character_blacklist_cache = (
+                old_tu.mixed_character_blacklist_cache
+            )
+
     def try_get_unicode(self) -> str | None:
         if self.char:
             return self.char.char_unicode
@@ -84,6 +185,12 @@ class TypesettingUnit:
 
     @property
     def mixed_character_blacklist(self):
+        if self.mixed_character_blacklist_cache is None:
+            self.mixed_character_blacklist_cache = self.calc_mixed_character_blacklist()
+
+        return self.mixed_character_blacklist_cache
+
+    def calc_mixed_character_blacklist(self):
         unicode = self.try_get_unicode()
         if unicode:
             return unicode in [
@@ -97,72 +204,27 @@ class TypesettingUnit:
 
     @property
     def can_break_line(self):
+        if self.can_break_line_cache is None:
+            self.can_break_line_cache = self.calc_can_break_line()
+
+        return self.can_break_line_cache
+
+    def calc_can_break_line(self):
         unicode = self.try_get_unicode()
         if not unicode:
             return True
-        if re.match(
-            r"^["
-            r"a-z"
-            r"A-Z"
-            r"0-9"
-            r"\u00C0-\u00FF"  # Latin-1 Supplement
-            r"\u0100-\u017F"  # Latin Extended A
-            r"\u0180-\u024F"  # Latin Extended B
-            r"\u1E00-\u1EFF"  # Latin Extended Additional
-            r"\u2C60-\u2C7F"  # Latin Extended C
-            r"\uA720-\uA7FF"  # Latin Extended D
-            r"\uAB30-\uAB6F"  # Latin Extended E
-            r"\u0250-\u02A0"  # IPA Extensions
-            r"\u0400-\u04FF"  # Cyrillic
-            r"\u0300-\u036F"  # Combining Diacritical Marks
-            r"\u0500-\u052F"  # Cyrillic Supplement
-            r"\u0370-\u03FF"  # Greek and Coptic
-            r"\u2DE0-\u2DFF"  # Cyrillic Extended-A
-            r"\uA650-\uA69F"  # Cyrillic Extended-B
-            r"\u1200-\u137F"  # Ethiopic
-            r"\u1380-\u139F"  # Ethiopic Supplement
-            r"\u2D80-\u2DDF"  # Ethiopic Extended
-            r"\uAB00-\uAB2F"  # Ethiopic Extended-A
-            r"\U0001E7E0-\U0001E7FF"  # Ethiopic Extended-B
-            r"\u0E80-\u0EFF"  # Lao
-            r"\u0D00-\u0D7F"  # Malayalam
-            r"\u0A80-\u0AFF"  # Gujarati
-            r"\u0E00-\u0E7F"  # Thai
-            r"\u1000-\u109F"  # Myanmar
-            r"\uAA60-\uAA7F"  # Myanmar Extended-A
-            r"\uA9E0-\uA9FF"  # Myanmar Extended-B
-            r"\U000116D0-\U000116FF"  # Myanmar Extended-C
-            r"\u0B80-\u0BFF"  # Tamil
-            r"\u0C00-\u0C7F"  # Telugu
-            r"\u0B00-\u0B7F"  # Oriya
-            r"\u0530-\u058F"  # Armenian
-            r"\u10A0-\u10FF"  # Georgian
-            r"\u1C90-\u1CBF"  # Georgian Extended
-            r"\u2D00-\u2D2F"  # Georgian Supplement
-            r"\u1780-\u17FF"  # Khmer
-            r"\u19E0-\u19FF"  # Khmer Symbols
-            r"\U00010B00-\U00010B3F"  # Avestan
-            r"\u1D00-\u1D7F"  # Phonetic Extensions
-            r"\u1400-\u167F"  # Unified Canadian Aboriginal Syllabics
-            r"\u0B00-\u0B7F"  # Oriya
-            r"\u0780-\u07BF"  # Thaana
-            r"\U0001E900-\U0001E95F"  # Adlam
-            r"\u1C80-\u1C8F"  # Cyrillic Extended-C
-            r"\U0001E030-\U0001E08F"  # Cyrillic Extended-D
-            r"\uA000-\uA48F"  # Yi Syllables
-            r"\uA490-\uA4CF"  # Yi Radicals
-            r"'"
-            r"-"  # Hyphen
-            r"·"  # Middle Dot (U+00B7) For Català
-            r"ʻ"  # Spacing Modifier Letters U+02BB
-            r"]+$",
-            unicode,
-        ):
+        if LINE_BREAK_REGEX.match(unicode):
             return False
         return True
 
     @property
     def is_cjk_char(self):
+        if self.is_cjk_char_cache is None:
+            self.is_cjk_char_cache = self.calc_is_cjk_char()
+
+        return self.is_cjk_char_cache
+
+    def calc_is_cjk_char(self):
         if self.formular:
             return False
         unicode = self.try_get_unicode()
@@ -235,6 +297,12 @@ class TypesettingUnit:
 
     @property
     def is_space(self):
+        if self.is_space_cache is None:
+            self.is_space_cache = self.calc_is_space()
+
+        return self.is_space_cache
+
+    def calc_is_space(self):
         if self.formular:
             return False
         unicode = self.try_get_unicode()
@@ -242,6 +310,12 @@ class TypesettingUnit:
 
     @property
     def is_hung_punctuation(self):
+        if self.is_hung_punctuation_cache is None:
+            self.is_hung_punctuation_cache = self.calc_is_hung_punctuation()
+
+        return self.is_hung_punctuation_cache
+
+    def calc_is_hung_punctuation(self):
         if self.formular:
             return False
         unicode = self.try_get_unicode()
@@ -302,6 +376,14 @@ class TypesettingUnit:
 
     @property
     def is_cannot_appear_in_line_end_punctuation(self):
+        if self.is_cannot_appear_in_line_end_punctuation_cache is None:
+            self.is_cannot_appear_in_line_end_punctuation_cache = (
+                self.calc_is_cannot_appear_in_line_end_punctuation()
+            )
+
+        return self.is_cannot_appear_in_line_end_punctuation_cache
+
+    def calc_is_cannot_appear_in_line_end_punctuation(self):
         if self.formular:
             return False
         unicode = self.try_get_unicode()
@@ -339,10 +421,15 @@ class TypesettingUnit:
 
     @property
     def can_passthrough(self):
+        if self.can_passthrough_cache is None:
+            self.can_passthrough_cache = self.calc_can_passthrough()
+
+        return self.can_passthrough_cache
+
+    def calc_can_passthrough(self):
         return self.unicode is None
 
-    @property
-    def box(self):
+    def calculate_box(self):
         if self.char:
             box = copy.deepcopy(self.char.box)
             if self.char.visual_bbox and self.char.visual_bbox.box:
@@ -365,14 +452,35 @@ class TypesettingUnit:
             return Box(self.x, self.y, self.x + char_width, self.y + self.font_size)
 
     @property
+    def box(self):
+        if not self.box_cache:
+            self.box_cache = self.calculate_box()
+
+        return self.box_cache
+
+    @property
     def width(self):
-        return self.box.x2 - self.box.x
+        if self.width_cache is None:
+            self.width_cache = self.calc_width()
+
+        return self.width_cache
+
+    def calc_width(self):
+        box = self.box
+        return box.x2 - box.x
 
     @property
     def height(self):
-        return self.box.y2 - self.box.y
+        if self.height_cache is None:
+            self.height_cache = self.calc_height()
 
-    def relocate(self, x: float, y: float, scale: float) -> "TypesettingUnit":
+        return self.height_cache
+
+    def calc_height(self):
+        box = self.box
+        return box.y2 - box.y
+
+    def relocate(self, x: float, y: float, scale: float) -> TypesettingUnit:
         """重定位并缩放排版单元
 
         Args:
@@ -405,7 +513,9 @@ class TypesettingUnit:
                 debug_info=self.debug_info,
                 xobj_id=self.char.xobj_id,
             )
-            return TypesettingUnit(char=new_char)
+            new_tu = TypesettingUnit(char=new_char)
+            new_tu.try_resue_cache(self)
+            return new_tu
 
         elif self.formular:
             # 创建新的公式对象，保持内部字符的相对位置
@@ -486,7 +596,9 @@ class TypesettingUnit:
                 x_advance=self.formular.x_advance * scale,
             )
             update_formula_data(new_formula)
-            return TypesettingUnit(formular=new_formula)
+            new_tu = TypesettingUnit(formular=new_formula)
+            new_tu.try_resue_cache(self)
+            return new_tu
 
         elif self.unicode:
             # 对于 Unicode 字符，我们存储新的位置信息
@@ -502,6 +614,7 @@ class TypesettingUnit:
             new_unit.x = x
             new_unit.y = y
             new_unit.scale = scale
+            new_unit.try_resue_cache(self)
             return new_unit
 
     def render(self) -> [PdfCharacter]:
@@ -1006,9 +1119,9 @@ class Typesetting:
         # 计算字号众数
         font_sizes = []
         for unit in typesetting_units:
-            if getattr(unit, "font_size", None):
+            if unit.font_size:
                 font_sizes.append(unit.font_size)
-            if getattr(unit, "char", None):
+            if unit.char and unit.char.pdf_style and unit.char.pdf_style.font_size:
                 font_sizes.append(unit.char.pdf_style.font_size)
         font_sizes.sort()
         font_size = statistics.mode(font_sizes)
@@ -1107,6 +1220,7 @@ class Typesetting:
                 if not current_line_heights:
                     return [], False
                 max_height = max(current_line_heights)
+                mode_height = statistics.mode(current_line_heights)
 
                 current_y -= max(line_height * line_skip, max_height * 1.05)
                 line_ys.append(current_y)
@@ -1130,10 +1244,6 @@ class Typesetting:
             # 添加当前单元的高度到当前行高度列表
             current_line_heights.append(unit_height)
 
-            # 计算当前行的行高
-            if current_line_heights:
-                mode_height = statistics.mode(current_line_heights)
-                line_height = mode_height
             prev_x = current_x
             # 更新 x 坐标
             current_x = relocated_unit.box.x2
@@ -1141,13 +1251,6 @@ class Typesetting:
                 logger.warning(f"坐标回绕！！！TypesettingUnit: {unit.box}, ")
 
             last_unit = relocated_unit
-
-        # 处理最后一行的行高
-        if current_line_heights:
-            mode_height = statistics.mode(current_line_heights)
-            # max_height = max(current_line_heights)
-            # line_height = max(mode_height, max_height)
-            line_height = mode_height
 
         return typeset_units, all_units_fit
 

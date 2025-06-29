@@ -35,6 +35,8 @@ examples/
 /xnotes
 /docs/workflow-rules.md
 babeldoc/format/txt
+/profile.svg
+
 
 # uv
 uv.lock
