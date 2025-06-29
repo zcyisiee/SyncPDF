@@ -651,6 +651,7 @@ class Typesetting:
             typesetting_units: 排版单元列表
             initial_scale: 初始缩放因子
             use_english_line_break: 是否使用英文换行规则
+            apply_layout: 是否应用布局到paragraph（True时执行实际排版）
 
         Returns:
             tuple[float, list[TypesettingUnit] | None]: (最终缩放因子, 排版后的单元列表或None)
