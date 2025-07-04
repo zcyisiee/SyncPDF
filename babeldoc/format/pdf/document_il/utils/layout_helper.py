@@ -261,7 +261,14 @@ def get_char_unicode_string(chars: list[PdfCharacter | str]) -> str:
             unicode_chars.append(chars[i])
             continue
 
-        unicode_chars.append(chars[i].char_unicode)
+        # use unicode regex to replace all space with " "
+        unicode_chars.append(
+            regex.sub(
+                r"\s+",
+                " ",
+                unicodedata.normalize("NFKC", chars[i].char_unicode),
+            )
+        )
 
         # 如果是空格，跳过
         if chars[i].char_unicode == " ":
@@ -621,7 +628,7 @@ def get_character_layout(
     char,
     page,
     layout_priority=None,
-    bbox_mode: Literal["auto", "visual", "box"] = "auto",
+    _bbox_mode: Literal["auto", "visual", "box"] = "auto",
 ):
     """Get the layout for a character based on priority and IoU."""
     if layout_priority is None:
@@ -653,24 +660,33 @@ def get_character_layout(
             "sealplain text",
             "tiny text",
             "text",
+            "paragraph",
+            "table_cell",
+            "figure_text",
+            "list_item",
+            "title",
+            "caption",
+            "footnote",
             "formula",
+            "page_header",
+            "page_footer",
         ]
 
     char_box = char.visual_bbox.box
-    char_box2 = char.box
-    if bbox_mode == "auto":
-        # Calculate IOU to decide which box to use
-        intersection_area = max(
-            0, min(char_box.x2, char_box2.x2) - max(char_box.x, char_box2.x)
-        ) * max(0, min(char_box.y2, char_box2.y2) - max(char_box.y, char_box2.y))
-        char_box_area = (char_box.x2 - char_box.x) * (char_box.y2 - char_box.y)
-
-        if char_box_area > 0:
-            iou = intersection_area / char_box_area
-            if iou < 0.2:
-                char_box = char_box2
-    elif bbox_mode == "box":
-        char_box = char_box2
+    # char_box2 = char.box
+    # if bbox_mode == "auto":
+    #     # Calculate IOU to decide which box to use
+    #     intersection_area = max(
+    #         0, min(char_box.x2, char_box2.x2) - max(char_box.x, char_box2.x)
+    #     ) * max(0, min(char_box.y2, char_box2.y2) - max(char_box.y, char_box2.y))
+    #     char_box_area = (char_box.x2 - char_box.x) * (char_box.y2 - char_box.y)
+    #
+    #     if char_box_area > 0:
+    #         iou = intersection_area / char_box_area
+    #         if iou < 0.2:
+    #             char_box = char_box2
+    # elif bbox_mode == "box":
+    #     char_box = char_box2
 
     # Check if page has layout_index and layout_map
     if not hasattr(page, "layout_index") or not hasattr(page, "layout_map"):
@@ -734,6 +750,15 @@ def is_text_layout(layout: Layout):
         "seal",
         "text",
         "chart_title",
+        "paragraph",
+        "table_cell",
+        "figure_text",
+        "list_item",
+        "title",
+        "caption",
+        "footnote",
+        "page_header",
+        "page_footer",
     ]
 
 
