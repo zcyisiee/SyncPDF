@@ -682,6 +682,7 @@ class Typesetting:
             # Why zh-CN/zh-HK/zh-TW here but not zh-Hans and so on?
             # See https://funstory-ai.github.io/BabelDOC/supported_languages/
             ("ZH" in self.lang_code)  # C
+            or ("JA" in self.lang_code)
             or ("JP" in self.lang_code)  # J
             or ("KR" in self.lang_code)  # K
             or ("CN" in self.lang_code)
