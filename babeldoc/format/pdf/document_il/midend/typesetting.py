@@ -87,18 +87,18 @@ LINE_BREAK_REGEX = regex.compile(
 
 class TypesettingUnit:
     def __str__(self):
-        return self.try_get_unicode()
+        return self.try_get_unicode() or ""
 
     def __init__(
         self,
-        char: PdfCharacter = None,
-        formular: PdfFormula = None,
-        unicode: str = None,
+        char: PdfCharacter | None = None,
+        formular: PdfFormula | None = None,
+        unicode: str | None = None,
         font: pymupdf.Font | None = None,
         original_font: il_version_1.PdfFont | None = None,
-        font_size: float = None,
-        style: PdfStyle = None,
-        xobj_id: int = None,
+        font_size: float | None = None,
+        style: PdfStyle | None = None,
+        xobj_id: int | None = None,
         debug_info: bool = False,
     ):
         assert (char is not None) + (formular is not None) + (
@@ -124,7 +124,7 @@ class TypesettingUnit:
         self.width_cache: float | None = None
         self.height_cache: float | None = None
 
-        self.font_size = None
+        self.font_size: float | None = None
 
         if unicode:
             assert font_size, "Font size must be provided when unicode is provided"
@@ -135,11 +135,10 @@ class TypesettingUnit:
             )
 
             self.font = font
-            if font is not None:
+            if font is not None and hasattr(font, "font_id"):
                 self.font_id = font.font_id
             else:
                 self.font_id = "base"
-                self.unicode = " "
             if original_font:
                 self.original_font = original_font
             else:
@@ -409,7 +408,7 @@ class TypesettingUnit:
             "〚",  # 左单书名号
         ]
 
-    def passthrough(self) -> [PdfCharacter]:
+    def passthrough(self) -> list[PdfCharacter]:
         if self.char:
             return [self.char]
         elif self.formular:
@@ -617,7 +616,7 @@ class TypesettingUnit:
             new_unit.try_resue_cache(self)
             return new_unit
 
-    def render(self) -> [PdfCharacter]:
+    def render(self) -> list[PdfCharacter]:
         """渲染排版单元为 PdfCharacter 列表
 
         Returns:
@@ -689,59 +688,72 @@ class Typesetting:
             or ("HK" in self.lang_code)
             or ("TW" in self.lang_code)
         )
-        # 添加用于存储文档所有段落缩放因子的列表
-        self.document_scales: list[float] = []
-        # 添加段落计数器，用于在实际排版时获取对应的 scale 值
-        self._current_paragraph_index: int = 0
 
     def preprocess_document(self, document: il_version_1.Document):
         """预处理文档，获取每个段落的最优缩放因子，不执行实际排版"""
-        self.document_scales = []
+        all_scales: list[float] = []
+        all_paragraphs: list[il_version_1.PdfParagraph] = []
 
         for page in document.page:
             # 准备字体信息（复制自 render_page 的逻辑）
             fonts: dict[
                 str | int,
                 il_version_1.PdfFont | dict[str, il_version_1.PdfFont],
-            ] = {f.font_id: f for f in page.pdf_font}
-            page_fonts = {f.font_id: f for f in page.pdf_font}
+            ] = {f.font_id: f for f in page.pdf_font if f.font_id}
+            page_fonts = {f.font_id: f for f in page.pdf_font if f.font_id}
             for k, v in self.font_mapper.fontid2font.items():
                 fonts[k] = v
             for xobj in page.pdf_xobject:
                 if xobj.xobj_id is not None:
                     fonts[xobj.xobj_id] = page_fonts.copy()
                     for font in xobj.pdf_font:
-                        if xobj.xobj_id in fonts and isinstance(
-                            fonts[xobj.xobj_id], dict
+                        if (
+                            xobj.xobj_id in fonts
+                            and isinstance(fonts[xobj.xobj_id], dict)
+                            and font.font_id
                         ):
                             fonts[xobj.xobj_id][font.font_id] = font
 
             # 处理每个段落
             for paragraph in page.pdf_paragraph:
+                all_paragraphs.append(paragraph)
                 try:
                     typesetting_units = self.create_typesetting_units(paragraph, fonts)
 
                     # 如果所有单元都可以直接传递，则 scale = 1.0
                     if all(unit.can_passthrough for unit in typesetting_units):
-                        self.document_scales.append(1.0)
+                        paragraph.optimal_scale = 1.0
                     else:
                         # 获取最优缩放因子
                         optimal_scale = self._get_optimal_scale(
                             paragraph, page, typesetting_units
                         )
-                        self.document_scales.append(optimal_scale)
+                        paragraph.optimal_scale = optimal_scale
                 except Exception as e:
                     # 如果预处理出错，默认使用 1.0 缩放因子
                     logger.warning(f"预处理段落时出错: {e}")
-                    self.document_scales.append(1.0)
+                    paragraph.optimal_scale = 1.0
+
+                if paragraph.optimal_scale is not None:
+                    all_scales.append(paragraph.optimal_scale)
 
         # 获取缩放因子的众数
-        if self.document_scales:
-            mode_scale = statistics.mode(self.document_scales)
+        if all_scales:
+            try:
+                modes = statistics.multimode(all_scales)
+                mode_scale = min(modes)
+            except statistics.StatisticsError:
+                logger.warning(
+                    "Could not find a mode for paragraph scales. Falling back to median."
+                )
+                mode_scale = statistics.median(all_scales)
             # 将所有大于众数的值修改为众数
-            for i in range(len(self.document_scales)):
-                if self.document_scales[i] > mode_scale:
-                    self.document_scales[i] = mode_scale
+            for paragraph in all_paragraphs:
+                if (
+                    paragraph.optimal_scale is not None
+                    and paragraph.optimal_scale > mode_scale
+                ):
+                    paragraph.optimal_scale = mode_scale
         else:
             logger.error(
                 "document_scales is empty, there seems no paragraph in this PDF"
@@ -919,35 +931,39 @@ class Typesetting:
             apply_layout=True,
         )
 
-    def typsetting_document(self, document: il_version_1.Document):
+    def typesetting_document(self, document: il_version_1.Document):
         # 预处理：获取所有段落的最优缩放因子
         self.preprocess_document(document)
 
-        # 重置段落计数器
-        self._current_paragraph_index = 0
-
         # 原有的排版逻辑
-        with self.translation_config.progress_monitor.stage_start(
-            self.stage_name,
-            len(document.page),
-        ) as pbar:
+        if self.translation_config.progress_monitor:
+            with self.translation_config.progress_monitor.stage_start(
+                self.stage_name,
+                len(document.page),
+            ) as pbar:
+                for page in document.page:
+                    self.translation_config.raise_if_cancelled()
+                    self.render_page(page)
+                    pbar.advance()
+        else:
             for page in document.page:
                 self.translation_config.raise_if_cancelled()
                 self.render_page(page)
-                pbar.advance()
 
     def render_page(self, page: il_version_1.Page):
         fonts: dict[
             str | int,
             il_version_1.PdfFont | dict[str, il_version_1.PdfFont],
-        ] = {f.font_id: f for f in page.pdf_font}
-        page_fonts = {f.font_id: f for f in page.pdf_font}
+        ] = {f.font_id: f for f in page.pdf_font if f.font_id}
+        page_fonts = {f.font_id: f for f in page.pdf_font if f.font_id}
         for k, v in self.font_mapper.fontid2font.items():
             fonts[k] = v
         for xobj in page.pdf_xobject:
-            fonts[xobj.xobj_id] = page_fonts.copy()
-            for font in xobj.pdf_font:
-                fonts[xobj.xobj_id][font.font_id] = font
+            if xobj.xobj_id is not None:
+                fonts[xobj.xobj_id] = page_fonts.copy()
+                for font in xobj.pdf_font:
+                    if font.font_id:
+                        fonts[xobj.xobj_id][font.font_id] = font
         if (
             page.page_number == 0
             and self.translation_config.watermark_output_mode
@@ -1066,21 +1082,15 @@ class Typesetting:
             )
         else:
             # 使用预计算的缩放因子进行重排版
-            if self._current_paragraph_index < len(self.document_scales):
-                precomputed_scale = self.document_scales[self._current_paragraph_index]
-            else:
-                # 如果索引超出范围，使用默认值
-                logger.warning("段落索引超出范围，使用默认缩放因子 1.0")
-                precomputed_scale = 1.0
+            precomputed_scale = (
+                paragraph.optimal_scale if paragraph.optimal_scale is not None else 1.0
+            )
 
             # 如果有单元无法直接传递，则进行重排版
             paragraph.pdf_paragraph_composition = []
             self.retypeset_with_precomputed_scale(
                 paragraph, page, typesetting_units, precomputed_scale
             )
-
-        # 递增段落计数器
-        self._current_paragraph_index += 1
 
     def _get_width_before_next_break_point(
         self, typesetting_units: list[TypesettingUnit], scale: float
@@ -1222,7 +1232,7 @@ class Typesetting:
                 max_height = max(current_line_heights)
                 mode_height = statistics.mode(current_line_heights)
 
-                current_y -= max(line_height * line_skip, max_height * 1.05)
+                current_y -= max(mode_height * line_skip, max_height * 1.05)
                 line_ys.append(current_y)
                 line_height = 0.0
                 current_line_heights = []  # 清空当前行高度列表
@@ -1242,7 +1252,8 @@ class Typesetting:
             typeset_units.append(relocated_unit)
 
             # 添加当前单元的高度到当前行高度列表
-            current_line_heights.append(unit_height)
+            if not unit.is_space:
+                current_line_heights.append(unit_height)
 
             prev_x = current_x
             # 更新 x 坐标
@@ -1264,7 +1275,7 @@ class Typesetting:
         result = []
 
         @cache
-        def get_font(font_id: str, xobj_id: int):
+        def get_font(font_id: str, xobj_id: int | None):
             if xobj_id in fonts:
                 font = fonts[xobj_id][font_id]
             else:
@@ -1305,25 +1316,34 @@ class Typesetting:
                     )
                     continue
                 font_id = style.font_id
+                if font_id is None:
+                    logger.warning(
+                        f"Font ID is None. "
+                        f"Composition: {composition}. "
+                        f"Paragraph: {paragraph}. ",
+                    )
+                    continue
                 font = get_font(font_id, paragraph.xobj_id)
-                result.extend(
-                    [
-                        TypesettingUnit(
-                            unicode=char_unicode,
-                            font=self.font_mapper.map(
-                                font,
-                                char_unicode,
-                            ),
-                            original_font=font,
-                            font_size=style.font_size,
-                            style=style,
-                            xobj_id=paragraph.xobj_id,
-                            debug_info=composition.pdf_same_style_unicode_characters.debug_info,
-                        )
-                        for char_unicode in composition.pdf_same_style_unicode_characters.unicode
-                        if char_unicode not in ("\n",)
-                    ],
-                )
+                if composition.pdf_same_style_unicode_characters.unicode:
+                    result.extend(
+                        [
+                            TypesettingUnit(
+                                unicode=char_unicode,
+                                font=self.font_mapper.map(
+                                    font,
+                                    char_unicode,
+                                ),
+                                original_font=font,
+                                font_size=style.font_size,
+                                style=style,
+                                xobj_id=paragraph.xobj_id,
+                                debug_info=composition.pdf_same_style_unicode_characters.debug_info
+                                or False,
+                            )
+                            for char_unicode in composition.pdf_same_style_unicode_characters.unicode
+                            if char_unicode not in ("\n",)
+                        ],
+                    )
             elif composition.pdf_formula:
                 result.extend([TypesettingUnit(formular=composition.pdf_formula)])
             else:
