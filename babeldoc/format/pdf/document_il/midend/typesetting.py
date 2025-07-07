@@ -690,12 +690,13 @@ class Typesetting:
             or ("TW" in self.lang_code)
         )
 
-    def preprocess_document(self, document: il_version_1.Document):
+    def preprocess_document(self, document: il_version_1.Document, pbar):
         """预处理文档，获取每个段落的最优缩放因子，不执行实际排版"""
         all_scales: list[float] = []
         all_paragraphs: list[il_version_1.PdfParagraph] = []
 
         for page in document.page:
+            pbar.advance()
             # 准备字体信息（复制自 render_page 的逻辑）
             fonts: dict[
                 str | int,
@@ -933,15 +934,15 @@ class Typesetting:
         )
 
     def typesetting_document(self, document: il_version_1.Document):
-        # 预处理：获取所有段落的最优缩放因子
-        self.preprocess_document(document)
-
         # 原有的排版逻辑
         if self.translation_config.progress_monitor:
             with self.translation_config.progress_monitor.stage_start(
                 self.stage_name,
-                len(document.page),
+                len(document.page) * 2,
             ) as pbar:
+                # 预处理：获取所有段落的最优缩放因子
+                self.preprocess_document(document, pbar)
+
                 for page in document.page:
                     self.translation_config.raise_if_cancelled()
                     self.render_page(page)
