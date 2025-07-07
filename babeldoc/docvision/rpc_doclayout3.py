@@ -82,12 +82,12 @@ def predict_layout(
     # Send request
     # logger.debug(f"Sending request to {host}/inference")
     response = httpx.post(
-        f"{host}/analyze?min_sim=0.7&early_stop=0.99&timeout=240",
+        f"{host}/analyze?min_sim=0.7&early_stop=0.99&timeout=480",
         files={"file": ("image.jpg", image_data, "image/jpeg")},
         headers={
             "Accept": "application/json",
         },
-        timeout=300,
+        timeout=480,
         follow_redirects=True,
     )
 
@@ -235,7 +235,7 @@ class RpcDocLayoutModel(DocLayoutModel):
         target_imgsz = (orig_h, orig_w)
         if image.shape[0] != target_imgsz[0] or image.shape[1] != target_imgsz[1]:
             image = self.resize_and_pad_image(image, new_shape=target_imgsz)
-        preds = predict_layout(image, host=self.host, imgsz=800)
+        preds = predict_layout(image, host=self.host)
         orig_h, orig_w = orig_h / DPI * 72, orig_w / DPI * 72
         if len(preds) > 0:
             for pred in preds:
