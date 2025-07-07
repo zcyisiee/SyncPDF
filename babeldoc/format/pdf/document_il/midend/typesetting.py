@@ -733,7 +733,7 @@ class Typesetting:
                         paragraph.optimal_scale = optimal_scale
                 except Exception as e:
                     # 如果预处理出错，默认使用 1.0 缩放因子
-                    logger.warning(f"预处理段落时出错: {e}")
+                    logger.warning(f"预处理段落时出错：{e}")
                     paragraph.optimal_scale = 1.0
 
                 if paragraph.optimal_scale is not None:
@@ -778,10 +778,10 @@ class Typesetting:
             typesetting_units: 排版单元列表
             initial_scale: 初始缩放因子
             use_english_line_break: 是否使用英文换行规则
-            apply_layout: 是否应用布局到paragraph（True时执行实际排版）
+            apply_layout: 是否应用布局到 paragraph（True 时执行实际排版）
 
         Returns:
-            tuple[float, list[TypesettingUnit] | None]: (最终缩放因子, 排版后的单元列表或None)
+            tuple[float, list[TypesettingUnit] | None]: (最终缩放因子，排版后的单元列表或 None)
         """
         if not paragraph.box:
             return initial_scale, None
@@ -850,7 +850,7 @@ class Typesetting:
                         pass
                     expand_space_flag = 1
 
-                    # 只有成功扩展空间时才continue，否则继续减小scale
+                    # 只有成功扩展空间时才 continue，否则继续减小 scale
                     if space_expanded:
                         continue
 
@@ -869,14 +869,14 @@ class Typesetting:
                         pass
                     expand_space_flag = 2
 
-                    # 只有成功扩展空间时才continue，否则继续减小scale
+                    # 只有成功扩展空间时才 continue，否则继续减小 scale
                     if space_expanded:
                         continue
 
-                # 只有在扩展尝试阶段(expand_space_flag < 2)且扩展失败时才重置scale
-                # 当expand_space_flag >= 2时，说明已经尝试过所有扩展，应该继续正常的scale减小
+                # 只有在扩展尝试阶段 (expand_space_flag < 2) 且扩展失败时才重置 scale
+                # 当 expand_space_flag >= 2 时，说明已经尝试过所有扩展，应该继续正常的 scale 减小
                 if expand_space_flag < 2:
-                    # 如果无法扩展空间，重置scale并继续循环
+                    # 如果无法扩展空间，重置 scale 并继续循环
                     scale = 1.0
 
         # 如果仍然放不下，尝试去除英文换行限制
@@ -1161,7 +1161,7 @@ class Typesetting:
         current_x = box.x
         current_y = box.y2 - avg_height
         box = copy.deepcopy(box)
-        # box.y -= avg_height * (line_spacing - 1.01) # line_spacing 已被替换为line_skip
+        # box.y -= avg_height * (line_spacing - 1.01) # line_spacing 已被替换为 line_skip
         line_height = 0
         current_line_heights = []  # 存储当前行所有元素的高度
 
