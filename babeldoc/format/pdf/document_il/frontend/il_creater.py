@@ -9,6 +9,7 @@ import freetype
 import pymupdf
 
 import babeldoc.pdfminer.pdfinterp
+from babeldoc.format.pdf.babelpdf.encoding import get_type1_encoding
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils import zstd_helper
 from babeldoc.format.pdf.document_il.utils.style_helper import BLACK
@@ -73,274 +74,27 @@ def get_glyph_cbox(face, g):
     return cbox.xMin, cbox.yMin, cbox.xMax, cbox.yMax
 
 
-def get_char_cbox(face, idx):
-    g = face.get_char_index(idx)
-    return get_glyph_cbox(face, g)
-
-
 def get_name_cbox(face, name):
-    g = face.get_name_index(name)
-    return get_glyph_cbox(face, g)
+    if name:
+        g = face.get_name_index(name)
+        return get_glyph_cbox(face, g)
+    return (0, 0, 0, 0)
 
 
-WinAnsiEncoding = [
-    0,
-    1,
-    2,
-    3,
-    4,
-    5,
-    6,
-    7,
-    8,
-    9,
-    10,
-    11,
-    12,
-    13,
-    14,
-    15,
-    16,
-    17,
-    18,
-    19,
-    20,
-    21,
-    22,
-    23,
-    24,
-    25,
-    26,
-    27,
-    28,
-    29,
-    30,
-    31,
-    32,
-    33,
-    34,
-    35,
-    36,
-    37,
-    38,
-    39,
-    40,
-    41,
-    42,
-    43,
-    44,
-    45,
-    46,
-    47,
-    48,
-    49,
-    50,
-    51,
-    52,
-    53,
-    54,
-    55,
-    56,
-    57,
-    58,
-    59,
-    60,
-    61,
-    62,
-    63,
-    64,
-    65,
-    66,
-    67,
-    68,
-    69,
-    70,
-    71,
-    72,
-    73,
-    74,
-    75,
-    76,
-    77,
-    78,
-    79,
-    80,
-    81,
-    82,
-    83,
-    84,
-    85,
-    86,
-    87,
-    88,
-    89,
-    90,
-    91,
-    92,
-    93,
-    94,
-    95,
-    96,
-    97,
-    98,
-    99,
-    100,
-    101,
-    102,
-    103,
-    104,
-    105,
-    106,
-    107,
-    108,
-    109,
-    110,
-    111,
-    112,
-    113,
-    114,
-    115,
-    116,
-    117,
-    118,
-    119,
-    120,
-    121,
-    122,
-    123,
-    124,
-    125,
-    126,
-    127,
-    8364,
-    0,
-    8218,
-    402,
-    8222,
-    8230,
-    8224,
-    8225,
-    710,
-    8240,
-    352,
-    8249,
-    338,
-    0,
-    381,
-    0,
-    0,
-    8216,
-    8217,
-    8220,
-    8221,
-    8226,
-    8211,
-    8212,
-    732,
-    8482,
-    353,
-    8250,
-    339,
-    0,
-    382,
-    376,
-    160,
-    161,
-    162,
-    163,
-    164,
-    165,
-    166,
-    167,
-    168,
-    169,
-    170,
-    171,
-    172,
-    173,
-    174,
-    175,
-    176,
-    177,
-    178,
-    179,
-    180,
-    181,
-    182,
-    183,
-    184,
-    185,
-    186,
-    187,
-    188,
-    189,
-    190,
-    191,
-    192,
-    193,
-    194,
-    195,
-    196,
-    197,
-    198,
-    199,
-    200,
-    201,
-    202,
-    203,
-    204,
-    205,
-    206,
-    207,
-    208,
-    209,
-    210,
-    211,
-    212,
-    213,
-    214,
-    215,
-    216,
-    217,
-    218,
-    219,
-    220,
-    221,
-    222,
-    223,
-    224,
-    225,
-    226,
-    227,
-    228,
-    229,
-    230,
-    231,
-    232,
-    233,
-    234,
-    235,
-    236,
-    237,
-    238,
-    239,
-    240,
-    241,
-    242,
-    243,
-    244,
-    245,
-    246,
-    247,
-    248,
-    249,
-    250,
-    251,
-    252,
-    253,
-    254,
-    255,
-]
+def font_encoding_lookup(doc, idx, key):
+    obj = doc.xref_get_key(doc, idx, key)
+    if obj[0] == "name":
+        enc_name = obj[1][1:]
+        if enc_vector := get_type1_encoding(enc_name):
+            return enc_name, enc_vector
+
+
+def parse_font_encoding(doc, idx):
+    if encoding := font_encoding_lookup(doc, idx, "Encoding/BaseEncoding"):
+        return encoding
+    if encoding := font_encoding_lookup(doc, idx, "Encoding"):
+        return encoding
+    return ("Custom", get_type1_encoding("StandardEncoding"))
 
 
 def parse_font_file(doc, idx, encoding, differences):
@@ -355,7 +109,7 @@ def parse_font_file(doc, idx, encoding, differences):
             if charmap.encoding_name == "FT_ENCODING_ADOBE_CUSTOM":
                 face.select_charmap(charmap.encoding)
                 break
-    bbox_list = [get_char_cbox(face, x) for x in enc_vector]
+    bbox_list = [get_name_cbox(face, x) for x in enc_vector]
     if differences:
         for code, name in differences:
             bbox_list[code] = get_name_cbox(face, name.encode("U8"))
@@ -768,13 +522,7 @@ class ILCreater:
 
     def parse_font_xobj_id(self, xobj_id: int):
         bbox_list = []
-        encoding = ("Custom", list(range(256)))
-        font_encoding = self.mupdf.xref_get_key(xobj_id, "Encoding")
-        if font_encoding[1] == "/WinAnsiEncoding":
-            encoding = ("WinAnsi", WinAnsiEncoding)
-        base_encoding = self.mupdf.xref_get_key(xobj_id, "Encoding/BaseEncoding")
-        if base_encoding[1] == "/WinAnsiEncoding":
-            encoding = ("WinAnsi", WinAnsiEncoding)
+        encoding = parse_font_encoding(self.mupdf, xobj_id)
         differences = []
         font_differences = self.mupdf.xref_get_key(xobj_id, "Encoding/Differences")
         if font_differences:
