@@ -643,6 +643,8 @@ def get_character_layout(
             "table_caption",
             "figure_caption",
             "table_text",
+            "wireless_table_cell",
+            "wired_table_cell",
             "table",
             "figure",
             "abandon",
@@ -759,6 +761,8 @@ def is_text_layout(layout: Layout):
         "footnote",
         "page_header",
         "page_footer",
+        "wired_table_cell",
+        "wireless_table_cell",
     ]
 
 
