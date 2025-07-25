@@ -17,6 +17,10 @@ body:
           required: true
         - label: I am certain that this issue is with BabelDOC itself and can be reproduced through the BabelDOC cli
           required: true
+        - label: I have uploaded the original file, or confirmed that this issue is unrelated to the original file
+          required: true
+        - label: I have uploaded the log.
+          required: true
 
   - type: markdown
     attributes:
@@ -77,7 +81,7 @@ body:
     id: pdf
     attributes:
       label: Original PDF File
-      description: Upload the input PDF if applicable.
+      description: Upload the input PDF if applicable. (Issues related to specific PDFs but without uploaded files will be closed directly.)
     validations:
       required: false
 
