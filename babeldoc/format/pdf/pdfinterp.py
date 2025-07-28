@@ -283,6 +283,8 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
         self.il_creater.on_passthrough_per_char("sc", args)
         return args
 
+    # Ensure bbox has four numbers, otherwise determine it as an illegal image
+    # For example, some Form's bbox is '[ null -.00487 1.00412 .99393 ]'
     def do_Do(self, xobjid_arg: PDFStackT) -> None:
         # 重载设置 xobj 的 obj_patch
         """Invoke named XObject"""
@@ -303,6 +305,8 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             bbox = list(
                 filter(lambda x: x is not None, cast(Rect, list_value(xobj["BBox"])))
             )
+            if len(bbox) < 4:
+                return
 
             matrix = cast(Matrix, list_value(xobj.get("Matrix", MATRIX_IDENTITY)))
             # According to PDF reference 1.7 section 4.9.1, XObjects in
