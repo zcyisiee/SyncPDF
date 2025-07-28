@@ -224,7 +224,7 @@ space_regex = re.compile(pattern)
 
 def get_rotation_angle(matrix):
     """
-    根据PDF的字符矩阵计算旋转角度（单位：度）
+    根据 PDF 的字符矩阵计算旋转角度（单位：度）
     matrix: tuple/list, 格式 (a, b, c, d, e, f)
     """
     a, b, c, d, e, f = matrix
