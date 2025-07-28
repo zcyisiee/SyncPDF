@@ -695,6 +695,7 @@ def migrate_toc(
         )
 
 
+# mediabox -> '[0 nul 792]'
 def fix_media_box(doc: Document) -> None:
     mediabox_data = {}
     for x in range(1, doc.xref_length()):
@@ -703,9 +704,16 @@ def fix_media_box(doc: Document) -> None:
         if t[1] in ["/Pages", "/Page"]:
             mediabox = doc.xref_get_key(x, "MediaBox")
             if mediabox[0] == "array":
-                _, _, x1, y1 = mediabox[1].replace("[", "").replace("]", "").split(" ")
-                doc.xref_set_key(x, "MediaBox", f"[0 0 {x1} {y1}]")
-                box_set["MediaBox"] = mediabox[1]
+                try:
+                    _, _, x1, y1 = (
+                        mediabox[1].replace("[", "").replace("]", "").split(" ")
+                    )
+                    doc.xref_set_key(x, "MediaBox", f"[0 0 {x1} {y1}]")
+                    box_set["MediaBox"] = mediabox[1]
+                except Exception:
+                    logger.warning(
+                        "Attempt to fix media box failed; some pages may not have been processed correctly."
+                    )
             for k in ["CropBox", "BleedBox", "TrimBox", "ArtBox"]:
                 box = doc.xref_get_key(x, k)
                 if box[0] != "null":
@@ -760,7 +768,12 @@ def _do_translate_single(
     # Continue with original processing
     temp_pdf_path = translation_config.get_working_file_path("input.pdf")
     doc_pdf2zh = Document(original_pdf_path)
-    resfont = "china-ss"
+    try:
+        # first try, saving without options
+        doc_pdf2zh.save(temp_pdf_path)
+    except Exception:
+        # second try, saving with 'garbage=3' for object missing
+        doc_pdf2zh.ez_save(temp_pdf_path)
 
     # Fix null xref in PDF file
     invalid_pages = []

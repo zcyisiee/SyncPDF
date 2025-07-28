@@ -1,6 +1,7 @@
 import base64
 import functools
 import logging
+import math
 import re
 from io import BytesIO
 from itertools import islice
@@ -219,6 +220,18 @@ pattern = "^[" + "".join(unicode_spaces) + "]+$"
 
 # 编译正则
 space_regex = re.compile(pattern)
+
+
+def get_rotation_angle(matrix):
+    """
+    根据PDF的字符矩阵计算旋转角度（单位：度）
+    matrix: tuple/list, 格式 (a, b, c, d, e, f)
+    """
+    a, b, c, d, e, f = matrix
+    # 旋转角度：arctan2(b, a)
+    angle_rad = math.atan2(b, a)
+    angle_deg = math.degrees(angle_rad)
+    return angle_deg
 
 
 class ILCreater:
@@ -582,6 +595,15 @@ class ILCreater:
     def on_lt_char(self, char: LTChar):
         if char.aw_font_id is None:
             return
+        try:
+            rotation_angle = get_rotation_angle(char.matrix)
+            if not (-0.1 <= rotation_angle <= 0.1 or 89.9 <= rotation_angle <= 90.1):
+                return
+        except Exception:
+            logger.warning(
+                "Failed to get rotation angle for char %s",
+                char.get_text(),
+            )
         gs = self.create_graphic_state(char.graphicstate)
         # Get font from current page or xobject
         font = None
