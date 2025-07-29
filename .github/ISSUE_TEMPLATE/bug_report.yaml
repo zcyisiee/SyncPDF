@@ -21,6 +21,8 @@ body:
           required: true
         - label: I have uploaded the log.
           required: true
+        - label: I confirm that the latest version of BabelDOC is being used.
+          required: true
 
   - type: markdown
     attributes:
