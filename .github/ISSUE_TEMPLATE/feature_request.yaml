@@ -7,6 +7,16 @@ body:
       value: |
         Thank you for helping improve **BabelDOC**! Please fill out the form below to suggest a feature.
 
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I have searched existing issues
+          required: true
+        - label: I have fully read and understood the [README](https://github.com/funstory-ai/BabelDOC/blob/main/README.md)
+          required: true
+
   - type: textarea
     id: describe
     attributes:
