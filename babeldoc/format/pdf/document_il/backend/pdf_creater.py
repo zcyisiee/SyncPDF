@@ -912,7 +912,7 @@ class PDFCreater:
                             self._render_rectangle(draw_op, rect, line_width=0.1)
                     for curve in page.pdf_curve:
                         if curve.debug_info or translation_config.debug:
-                            if rect.xobj_id in xobj_available_fonts:
+                            if curve.xobj_id in xobj_available_fonts:
                                 draw_op = xobj_draw_ops[rect.xobj_id]
                             else:
                                 draw_op = page_op
