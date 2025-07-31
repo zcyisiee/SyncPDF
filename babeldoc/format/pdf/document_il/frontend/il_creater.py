@@ -286,7 +286,7 @@ class ILCreater:
         self.progress.__exit__(None, None, None)
 
     def is_passthrough_per_char_operation(self, operator: str):
-        return re.match("^(sc|scn|g|rg|k|cs|gs|ri)$", operator, re.IGNORECASE)
+        return re.match("^(sc|scn|g|rg|k|cs|gs|ri|w)$", operator, re.IGNORECASE)
 
     def on_passthrough_per_char(self, operator: str, args: list[str]):
         if not self.is_passthrough_per_char_operation(operator):
@@ -392,6 +392,7 @@ class ILCreater:
             pdf_font=[],
             pdf_character=[],
             page_layout=[],
+            pdf_curve=[],
             # currently don't support UserUnit page parameter
             # pdf32000 page 79
             unit="point",
@@ -581,44 +582,22 @@ class ILCreater:
         return bbox_list, cmap
 
     def create_graphic_state(self, gs: babeldoc.pdfminer.pdfinterp.PDFGraphicState):
-        graphic_state = il_version_1.GraphicState()
-        for k, v in gs.__dict__.items():
-            if v is None:
-                continue
-            if k in ["scolor", "ncolor"]:
-                if isinstance(v, tuple):
-                    v = list(v)
-                else:
-                    v = [v]
-                setattr(graphic_state, k, v)
-                continue
-            if k == "linewidth":
-                graphic_state.linewidth = float(v)
-                continue
-            continue
-            raise NotImplementedError
+        passthrough_instruction = getattr(gs, "passthrough_instruction", gs)
 
-        graphic_state.stroking_color_space_name = self.stroking_color_space_name
-        graphic_state.non_stroking_color_space_name = self.non_stroking_color_space_name
-
-        graphic_state.passthrough_per_char_instruction = " ".join(
-            f"{arg} {op}" for op, arg in gs.passthrough_instruction
+        passthrough_per_char_instruction = " ".join(
+            f"{arg} {op}" for op, arg in passthrough_instruction
         )
 
         # 可能会影响部分 graphic state 准确度。不过 BabelDOC 仅使用 passthrough_per_char_instruction
         # 所以应该是没啥影响
         # 但是池化 graphic state 后可以减少内存占用
-        if (
-            graphic_state.passthrough_per_char_instruction
-            not in self.graphic_state_pool
-        ):
-            self.graphic_state_pool[graphic_state.passthrough_per_char_instruction] = (
-                graphic_state
+        if passthrough_per_char_instruction not in self.graphic_state_pool:
+            self.graphic_state_pool[passthrough_per_char_instruction] = (
+                il_version_1.GraphicState(
+                    passthrough_per_char_instruction=passthrough_per_char_instruction
+                )
             )
-        else:
-            graphic_state = self.graphic_state_pool[
-                graphic_state.passthrough_per_char_instruction
-            ]
+        graphic_state = self.graphic_state_pool[passthrough_per_char_instruction]
 
         return graphic_state
 
@@ -760,6 +739,40 @@ class ILCreater:
                     line_width=0.2,
                 )
             )
+
+    def on_lt_line(self, line: babeldoc.pdfminer.layout.LTLine):
+        bbox = il_version_1.Box(
+            x=line.bbox[0],
+            y=line.bbox[1],
+            x2=line.bbox[2],
+            y2=line.bbox[3],
+        )
+        gs = self.create_graphic_state(line.passthrough_instruction)
+        paths = []
+        for point in line.original_path:
+            paths.append(
+                il_version_1.PdfPath(
+                    op=point[0],
+                    x=point[1][0],
+                    y=point[1][1],
+                )
+            )
+
+        fill_background = line.fill
+        stroke_path = line.stroke
+        evenodd = line.evenodd
+        curve = il_version_1.PdfCurve(
+            box=bbox,
+            graphic_state=gs,
+            pdf_path=paths,
+            fill_background=fill_background,
+            stroke_path=stroke_path,
+            evenodd=evenodd,
+            debug_info="a",
+            xobj_id=line.xobj_id,
+        )
+        self.current_page.pdf_curve.append(curve)
+        pass
 
     def create_il(self):
         pages = [

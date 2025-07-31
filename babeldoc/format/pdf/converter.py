@@ -9,9 +9,11 @@ from babeldoc.format.pdf.document_il.frontend.il_creater import ILCreater
 from babeldoc.pdfminer.converter import PDFConverter
 from babeldoc.pdfminer.layout import LTChar
 from babeldoc.pdfminer.layout import LTComponent
+from babeldoc.pdfminer.layout import LTCurve
 from babeldoc.pdfminer.layout import LTFigure
 from babeldoc.pdfminer.layout import LTLine
 from babeldoc.pdfminer.layout import LTPage
+from babeldoc.pdfminer.layout import LTRect
 from babeldoc.pdfminer.layout import LTText
 from babeldoc.pdfminer.pdfcolor import PDFColorSpace
 from babeldoc.pdfminer.pdffont import PDFCIDFont
@@ -379,6 +381,7 @@ class TranslateConverter(PDFConverterEx):
                 self.il_creater.on_pdf_figure(child)
                 pass
             elif isinstance(child, LTLine):     # 线条
+                self.il_creater.on_lt_line(child)
                 continue
                 layout = self.layout[ltpage.pageid]
                 # ltpage.height 可能是 fig 里面的高度，这里统一用 layout.shape
@@ -390,6 +393,8 @@ class TranslateConverter(PDFConverterEx):
                     vlstk.append(child)
                 else:                           # 全局线条
                     lstk.append(child)
+            elif isinstance(child, LTRect) or isinstance(child, LTCurve):
+                pass
             else:
                 pass
         return

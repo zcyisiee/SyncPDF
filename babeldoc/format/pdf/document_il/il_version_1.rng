@@ -42,6 +42,9 @@
       <zeroOrMore>
         <ref name="PDFCharacter"/>
       </zeroOrMore>
+      <zeroOrMore>
+        <ref name="PDFCurve"/>
+      </zeroOrMore>
       <attribute name="pageNumber">
         <data type="int"/>
       </attribute>
@@ -452,6 +455,53 @@
           <data type="float"/>
         </attribute>
       </optional>
+    </element>
+  </define>
+  <define name="PDFCurve">
+    <element name="pdfCurve">
+      <ref name="Box"/>
+      <ref name="GraphicState"/>
+      <zeroOrMore>
+        <ref name="PDFPath"/>
+      </zeroOrMore>
+      <optional>
+        <attribute name="debug_info">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="fill_background">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="stroke_path">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="evenodd">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="xobjId">
+          <data type="int"/>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+  <define name="PDFPath">
+    <element name="pdfPath">
+      <attribute name="x">
+        <data type="float"/>
+      </attribute>
+      <attribute name="y">
+        <data type="float"/>
+      </attribute>
+      <attribute name="op">
+        <data type="string"/>
+      </attribute>
     </element>
   </define>
 </grammar>

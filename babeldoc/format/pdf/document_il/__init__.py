@@ -7,6 +7,7 @@ from babeldoc.format.pdf.document_il.il_version_1 import Mediabox
 from babeldoc.format.pdf.document_il.il_version_1 import Page
 from babeldoc.format.pdf.document_il.il_version_1 import PageLayout
 from babeldoc.format.pdf.document_il.il_version_1 import PdfCharacter
+from babeldoc.format.pdf.document_il.il_version_1 import PdfCurve
 from babeldoc.format.pdf.document_il.il_version_1 import PdfFigure
 from babeldoc.format.pdf.document_il.il_version_1 import PdfFont
 from babeldoc.format.pdf.document_il.il_version_1 import PdfFontCharBoundingBox
@@ -14,6 +15,7 @@ from babeldoc.format.pdf.document_il.il_version_1 import PdfFormula
 from babeldoc.format.pdf.document_il.il_version_1 import PdfLine
 from babeldoc.format.pdf.document_il.il_version_1 import PdfParagraph
 from babeldoc.format.pdf.document_il.il_version_1 import PdfParagraphComposition
+from babeldoc.format.pdf.document_il.il_version_1 import PdfPath
 from babeldoc.format.pdf.document_il.il_version_1 import PdfRectangle
 from babeldoc.format.pdf.document_il.il_version_1 import PdfSameStyleCharacters
 from babeldoc.format.pdf.document_il.il_version_1 import PdfSameStyleUnicodeCharacters
@@ -31,6 +33,7 @@ __all__ = [
     "Page",
     "PageLayout",
     "PdfCharacter",
+    "PdfCurve",
     "PdfFigure",
     "PdfFont",
     "PdfFontCharBoundingBox",
@@ -38,6 +41,7 @@ __all__ = [
     "PdfLine",
     "PdfParagraph",
     "PdfParagraphComposition",
+    "PdfPath",
     "PdfRectangle",
     "PdfSameStyleCharacters",
     "PdfSameStyleUnicodeCharacters",
