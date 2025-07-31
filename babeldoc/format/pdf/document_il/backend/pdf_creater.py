@@ -913,7 +913,7 @@ class PDFCreater:
                     for curve in page.pdf_curve:
                         if curve.debug_info or translation_config.debug:
                             if curve.xobj_id in xobj_available_fonts:
-                                draw_op = xobj_draw_ops[rect.xobj_id]
+                                draw_op = xobj_draw_ops[curve.xobj_id]
                             else:
                                 draw_op = page_op
                             self._render_pdf_curve(draw_op, curve)
