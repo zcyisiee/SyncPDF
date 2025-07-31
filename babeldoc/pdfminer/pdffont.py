@@ -949,7 +949,11 @@ class PDFType1Font(PDFSimpleFont):
             self.fontfile = stream_value(descriptor.get("FontFile"))
             length1 = int_value(self.fontfile["Length1"])
             data = self.fontfile.get_data()[:length1]
-            parser = Type1FontHeaderParser(BytesIO(data))
+            # awcm: quickfix for type 1 font which contains bad string literals
+            offset = 0
+            if enc_offset := data.index(b"/Encoding"):
+                offset = enc_offset
+            parser = Type1FontHeaderParser(BytesIO(data[offset:]))
             self.cid2unicode = parser.get_encoding()
 
     def __repr__(self) -> str:
