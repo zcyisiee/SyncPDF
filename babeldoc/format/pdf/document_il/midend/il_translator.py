@@ -752,7 +752,9 @@ class ILTranslator:
             return False
         paragraph.unicode = translated_text
         paragraph.pdf_paragraph_composition = self.parse_translate_output(
-            translate_input, translated_text, tracker.last_llm_translate_tracker()
+            translate_input,
+            translated_text,
+            tracker.last_llm_translate_tracker(),
         )
         for composition in paragraph.pdf_paragraph_composition:
             if (
@@ -910,7 +912,10 @@ Now, please carefully read the following text to be translated and directly outp
                 # Perform translation
                 if self.support_llm_translate:
                     llm_prompt = self.generate_prompt_for_llm(
-                        text, title_paragraph, local_title_paragraph, translate_input
+                        text,
+                        title_paragraph,
+                        local_title_paragraph,
+                        translate_input,
                     )
                     llm_translate_tracker.set_input(llm_prompt)
                     translated_text = self.translate_engine.llm_translate(

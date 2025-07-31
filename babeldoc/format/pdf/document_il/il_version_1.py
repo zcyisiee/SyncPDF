@@ -181,6 +181,34 @@ class PdfFontCharBoundingBox:
 
 
 @dataclass
+class PdfPath:
+    class Meta:
+        name = "pdfPath"
+
+    x: float | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    y: float | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    op: str | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+
+
+@dataclass
 class Cropbox:
     class Meta:
         name = "cropbox"
@@ -239,6 +267,66 @@ class PageLayout:
         metadata={
             "type": "Attribute",
             "required": True,
+        },
+    )
+
+
+@dataclass
+class PdfCurve:
+    class Meta:
+        name = "pdfCurve"
+
+    box: Box | None = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+    graphic_state: GraphicState | None = field(
+        default=None,
+        metadata={
+            "name": "graphicState",
+            "type": "Element",
+            "required": True,
+        },
+    )
+    pdf_path: list[PdfPath] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfPath",
+            "type": "Element",
+        },
+    )
+    debug_info: bool | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    fill_background: bool | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    stroke_path: bool | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    evenodd: bool | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    xobj_id: int | None = field(
+        default=None,
+        metadata={
+            "name": "xobjId",
+            "type": "Attribute",
         },
     )
 
@@ -867,6 +955,13 @@ class Page:
         default_factory=list,
         metadata={
             "name": "pdfCharacter",
+            "type": "Element",
+        },
+    )
+    pdf_curve: list[PdfCurve] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfCurve",
             "type": "Element",
         },
     )

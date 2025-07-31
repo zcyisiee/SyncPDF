@@ -20,6 +20,7 @@
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfParagraph"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfFigure"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfCharacter"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfCurve"/>
         <xs:element ref="baseOperations"/>
       </xs:sequence>
       <xs:attribute name="pageNumber" use="required" type="xs:int"/>
@@ -258,6 +259,27 @@
       <xs:attribute name="fill_background" type="xs:boolean"/>
       <xs:attribute name="xobjId" type="xs:int"/>
       <xs:attribute name="lineWidth" type="xs:float"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pdfCurve">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="box"/>
+        <xs:element ref="graphicState"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfPath"/>
+      </xs:sequence>
+      <xs:attribute name="debug_info" type="xs:boolean"/>
+      <xs:attribute name="fill_background" type="xs:boolean"/>
+      <xs:attribute name="stroke_path" type="xs:boolean"/>
+      <xs:attribute name="evenodd" type="xs:boolean"/>
+      <xs:attribute name="xobjId" type="xs:int"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pdfPath">
+    <xs:complexType>
+      <xs:attribute name="x" use="required" type="xs:float"/>
+      <xs:attribute name="y" use="required" type="xs:float"/>
+      <xs:attribute name="op" use="required" type="xs:string"/>
     </xs:complexType>
   </xs:element>
 </xs:schema>

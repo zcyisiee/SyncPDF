@@ -366,6 +366,36 @@ class PDFCreater:
         # Restore graphics state
         draw_op.append(b"Q\n")
 
+    def _render_pdf_curve(
+        self,
+        draw_op: BitStream,
+        curve: il_version_1.PdfCurve,
+    ):
+        # Save graphics state
+        draw_op.append(b"q ")
+
+        # Set green color for debug visibility
+        draw_op.append(
+            curve.graphic_state.passthrough_per_char_instruction.encode(),
+        )  # Green stroke
+        draw_op.append(b" ")
+        for path in curve.pdf_path:
+            draw_op.append(f"{path.x} {path.y} {path.op} ".encode())
+
+        final_op = b"h "
+        if curve.fill_background:
+            final_op = b" f"
+        if curve.evenodd:
+            final_op += b"* "
+        else:
+            final_op += b" "
+        if curve.stroke_path:
+            final_op += b"S "
+
+        draw_op.append(final_op)
+        # Restore graphics state
+        draw_op.append(b"Q\n")
+
     def create_side_by_side_dual_pdf(
         self,
         original_pdf: pymupdf.Document,
@@ -795,7 +825,9 @@ class PDFCreater:
                     logger.debug(f"Error restoring media box {name} from PDF")
 
     def write(
-        self, translation_config: TranslationConfig, check_font_exists: bool = False
+        self,
+        translation_config: TranslationConfig,
+        check_font_exists: bool = False,
     ) -> TranslateResult:
         try:
             basename = Path(translation_config.input_file).stem
@@ -878,6 +910,13 @@ class PDFCreater:
                             else:
                                 draw_op = page_op
                             self._render_rectangle(draw_op, rect, line_width=0.1)
+                    for curve in page.pdf_curve:
+                        if curve.debug_info or translation_config.debug:
+                            if rect.xobj_id in xobj_available_fonts:
+                                draw_op = xobj_draw_ops[rect.xobj_id]
+                            else:
+                                draw_op = page_op
+                            self._render_pdf_curve(draw_op, curve)
                     # 渲染所有字符
                     for char in chars:
                         if char.char_unicode == "\n":

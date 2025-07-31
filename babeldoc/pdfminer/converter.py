@@ -8,6 +8,7 @@ from typing import TextIO
 from typing import TypeVar
 from typing import cast
 
+from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.pdfminer.image import ImageWriter
 from babeldoc.pdfminer.layout import LAParams
 from babeldoc.pdfminer.layout import LTAnno
@@ -160,6 +161,10 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                 shape = shape[:-2] + "h"
                 pts.pop()
 
+            passthrough_instruction = (
+                self.il_creater.passthrough_per_char_instruction.copy()
+            )
+            xobj_id = self.il_creater.xobj_id
             if shape in {"mlh", "ml"}:
                 # single line segment
                 #
@@ -177,6 +182,8 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                     original_path=transformed_path,
                     dashing_style=gstate.dash,
                 )
+                line.passthrough_instruction = passthrough_instruction
+                line.xobj_id = xobj_id
                 self.cur_item.add(line)
 
             elif shape in {"mlllh", "mllll"}:
@@ -198,6 +205,8 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                         transformed_path,
                         gstate.dash,
                     )
+                    rect.passthrough_instruction = passthrough_instruction
+                    rect.xobj_id = xobj_id
                     self.cur_item.add(rect)
                 else:
                     curve = LTCurve(
@@ -211,6 +220,8 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                         transformed_path,
                         gstate.dash,
                     )
+                    curve.passthrough_instruction = passthrough_instruction
+                    curve.xobj_id = xobj_id
                     self.cur_item.add(curve)
             else:
                 curve = LTCurve(
@@ -224,6 +235,8 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                     transformed_path,
                     gstate.dash,
                 )
+                curve.passthrough_instruction = passthrough_instruction
+                curve.xobj_id = xobj_id
                 self.cur_item.add(curve)
 
     def render_char(

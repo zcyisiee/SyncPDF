@@ -15,6 +15,7 @@ Page =
     PDFParagraph*,
     PDFFigure*,
     PDFCharacter*,
+    PDFCurve*,
     attribute pageNumber { xsd:int },
     attribute Unit { xsd:string },
     element baseOperations { xsd:string }
@@ -156,4 +157,21 @@ PDFRectangle =
     attribute fill_background { xsd:boolean }?,
     attribute xobjId { xsd:int }?,
     attribute lineWidth { xsd:float }?
+  }
+PDFCurve =
+  element pdfCurve {
+    Box,
+    GraphicState,
+    PDFPath*,
+    attribute debug_info { xsd:boolean }?,
+    attribute fill_background { xsd:boolean }?,
+    attribute stroke_path { xsd:boolean }?,
+    attribute evenodd { xsd:boolean }?,
+    attribute xobjId { xsd:int }?
+  }
+PDFPath =
+  element pdfPath {
+    attribute x { xsd:float },
+    attribute y { xsd:float },
+    attribute op { xsd:string }
   }

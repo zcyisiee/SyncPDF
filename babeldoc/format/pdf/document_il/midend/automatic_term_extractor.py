@@ -46,7 +46,9 @@ Result:
 
 class BatchParagraph:
     def __init__(
-        self, paragraphs: list[PdfParagraph], page_tracker: PageTermExtractTracker
+        self,
+        paragraphs: list[PdfParagraph],
+        page_tracker: PageTermExtractTracker,
     ):
         self.paragraphs = paragraphs
         self.tracker = page_tracker.new_paragraph()
@@ -105,7 +107,9 @@ class AutomaticTermExtractor:
     stage_name = "Automatic Term Extraction"
 
     def __init__(
-        self, translate_engine: BaseTranslator, translation_config: TranslationConfig
+        self,
+        translate_engine: BaseTranslator,
+        translation_config: TranslationConfig,
     ):
         self.translate_engine = translate_engine
         self.translation_config = translation_config

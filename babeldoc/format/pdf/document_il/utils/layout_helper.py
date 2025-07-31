@@ -712,9 +712,11 @@ def get_character_layout(
                 matching_layouts.append(
                     {
                         "layout": Layout(layout.id, layout.class_name),
-                        "priority": layout_priority.index(layout.class_name)
-                        if layout.class_name in layout_priority
-                        else len(layout_priority),
+                        "priority": (
+                            layout_priority.index(layout.class_name)
+                            if layout.class_name in layout_priority
+                            else len(layout_priority)
+                        ),
                         "iou": iou,
                     }
                 )
