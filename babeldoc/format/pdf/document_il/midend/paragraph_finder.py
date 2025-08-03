@@ -500,6 +500,43 @@ class ParagraphFinder:
             return visual_box.y, visual_box.y2
         return pdf_box.y, pdf_box.y2
 
+    @staticmethod
+    def _compute_collision_counts_histogram(
+        y1_arr: np.ndarray,
+        y2_arr: np.ndarray,
+        para_y_min: float,
+        para_y_max: float,
+        step: float,
+    ) -> np.ndarray:
+        """Compute overlap counts at each scan line using a difference-array histogram.
+
+        Args:
+            y1_arr: 1-D array with lower y bounds of characters (inclusive).
+            y2_arr: 1-D array with upper y bounds of characters (exclusive).
+            para_y_min: Minimum y of the paragraph.
+            para_y_max: Maximum y of the paragraph.
+            step: Scan step size.
+
+        Returns:
+            1-D NumPy int32 array where index i corresponds to y = para_y_max - i × step.
+        """
+        # Number of scan positions
+        m = int(np.ceil((para_y_max - para_y_min) / step))
+        if m <= 0:
+            return np.array([], dtype=np.int32)
+
+        # Map character bounds to discrete indices (top inclusive, bottom exclusive)
+        starts = np.floor((para_y_max - y2_arr) / step).astype(np.int32)
+        ends = np.floor((para_y_max - y1_arr) / step).astype(np.int32) + 1
+        # Clip ends to the valid range [0, m]
+        np.clip(ends, 0, m, out=ends)
+
+        hist = np.zeros(m + 1, dtype=np.int32)
+        np.add.at(hist, starts, 1)
+        np.add.at(hist, ends, -1)
+
+        return np.cumsum(hist[:-1])
+
     def _split_paragraph_into_lines(
         self, paragraph: PdfParagraph, formula_font_ids: set[str]
     ):
@@ -560,10 +597,16 @@ class ParagraphFinder:
 
         y_coordinates = np.arange(scan_y_max, scan_y_min, -step)
 
-        collision_counts = []
-        for y in y_coordinates:
-            count = sum(1 for b in char_y_bounds if b["y1"] <= y < b["y2"])
-            collision_counts.append(count)
+        # Compute collision counts using NumPy histogram (O(m + n))
+        y1_arr = np.array([b["y1"] for b in char_y_bounds], dtype=np.float32)
+        y2_arr = np.array([b["y2"] for b in char_y_bounds], dtype=np.float32)
+        collision_counts = self._compute_collision_counts_histogram(
+            y1_arr,
+            y2_arr,
+            scan_y_min,
+            scan_y_max,
+            step,
+        )
 
         # 4. Find gaps (regions with low collision count) from the histogram.
         gaps = []
