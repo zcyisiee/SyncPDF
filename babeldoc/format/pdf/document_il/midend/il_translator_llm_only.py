@@ -29,7 +29,9 @@ logger = logging.getLogger(__name__)
 
 class BatchParagraph:
     def __init__(
-        self, paragraphs: list[PdfParagraph], page_tracker: PageTranslateTracker
+        self,
+        paragraphs: list[PdfParagraph],
+        page_tracker: PageTranslateTracker,
     ):
         self.paragraphs = paragraphs
         self.trackers = [page_tracker.new_paragraph() for _ in paragraphs]

@@ -83,7 +83,7 @@ def get_name_cbox(face, name):
 
 
 def font_encoding_lookup(doc, idx, key):
-    obj = doc.xref_get_key(doc, idx, key)
+    obj = doc.xref_get_key(idx, key)
     if obj[0] == "name":
         enc_name = obj[1][1:]
         if enc_vector := get_type1_encoding(enc_name):

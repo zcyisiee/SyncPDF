@@ -795,7 +795,9 @@ class PDFCreater:
                     logger.debug(f"Error restoring media box {name} from PDF")
 
     def write(
-        self, translation_config: TranslationConfig, check_font_exists: bool = False
+        self,
+        translation_config: TranslationConfig,
+        check_font_exists: bool = False,
     ) -> TranslateResult:
         try:
             basename = Path(translation_config.input_file).stem

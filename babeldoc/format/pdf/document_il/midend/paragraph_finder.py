@@ -232,15 +232,15 @@ class ParagraphFinder:
         )
 
     def process_page(self, page: Page):
-        # build layout index for fast query
-        build_layout_index(page)
-
+        layout_index, layout_map = build_layout_index(page)
         # 预处理公式布局的标签
         self._preprocess_formula_layouts(page)
 
         # 第一步：根据 layout 创建 paragraphs
         # 在这一步中，page.pdf_character 中的字符会被移除
-        paragraphs = self._group_characters_into_paragraphs(page)
+        paragraphs = self._group_characters_into_paragraphs(
+            page, layout_index, layout_map
+        )
         page.pdf_paragraph = paragraphs
 
         page_level_formula_font_ids, xobj_specific_formula_font_ids = (
@@ -300,9 +300,6 @@ class ParagraphFinder:
         # self._sort_characters_in_lines(page)
 
         self.add_debug_info(page)
-        # clean up to save memory
-        del page.layout_index
-        del page.layout_map
 
     def is_isolated_formula(self, char: PdfCharacter):
         return char.char_unicode in (
@@ -312,7 +309,9 @@ class ParagraphFinder:
             "(cid:125)",
         )
 
-    def _group_characters_into_paragraphs(self, page: Page) -> list[PdfParagraph]:
+    def _group_characters_into_paragraphs(
+        self, page: Page, layout_index, layout_map
+    ) -> list[PdfParagraph]:
         paragraphs: list[PdfParagraph] = []
         if page.pdf_paragraph:
             paragraphs.extend(page.pdf_paragraph)
@@ -338,7 +337,7 @@ class ParagraphFinder:
         skip_chars = []
 
         for char in page.pdf_character:
-            char_layout = get_character_layout(char, page)
+            char_layout = get_character_layout(char, layout_index, layout_map)
             # Check if character is in any formula layout and set formula_layout_id
             char.formula_layout_id = is_character_in_formula_layout(char, page)
 

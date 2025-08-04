@@ -22,7 +22,6 @@ from babeldoc.format.pdf.document_il.utils.formular_helper import is_formulas_st
 from babeldoc.format.pdf.document_il.utils.formular_helper import update_formula_data
 from babeldoc.format.pdf.document_il.utils.layout_helper import LEFT_BRACKET
 from babeldoc.format.pdf.document_il.utils.layout_helper import RIGHT_BRACKET
-from babeldoc.format.pdf.document_il.utils.layout_helper import build_layout_index
 from babeldoc.format.pdf.document_il.utils.layout_helper import calculate_iou_for_boxes
 from babeldoc.format.pdf.document_il.utils.layout_helper import (
     calculate_y_iou_for_boxes,
@@ -60,7 +59,6 @@ class StylesAndFormulas:
 
     def process_page(self, page: Page):
         """处理页面，包括公式识别和偏移量计算"""
-        build_layout_index(page)
         self.process_page_formulas(page)
         # self.process_page_offsets(page)
         self.process_comma_formulas(page)
@@ -71,10 +69,6 @@ class StylesAndFormulas:
         self.process_page_offsets(page)
         self.update_all_formula_data(page)
         self.process_page_styles(page)
-
-        # clean up to save memory
-        del page.layout_index
-        del page.layout_map
 
     def update_line_data(self, line: PdfLine):
         min_x = min(char.visual_bbox.box.x for char in line.pdf_character)

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from dataclasses import field
 
 
-@dataclass
+@dataclass(slots=True)
 class BaseOperations:
     class Meta:
         name = "baseOperations"
@@ -15,7 +15,7 @@ class BaseOperations:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class Box:
     class Meta:
         name = "box"
@@ -50,7 +50,7 @@ class Box:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class GraphicState:
     class Meta:
         name = "graphicState"
@@ -138,7 +138,7 @@ class GraphicState:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class PdfFontCharBoundingBox:
     class Meta:
         name = "pdfFontCharBoundingBox"
@@ -180,7 +180,7 @@ class PdfFontCharBoundingBox:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class Cropbox:
     class Meta:
         name = "cropbox"
@@ -194,7 +194,7 @@ class Cropbox:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class Mediabox:
     class Meta:
         name = "mediabox"
@@ -208,7 +208,7 @@ class Mediabox:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class PageLayout:
     class Meta:
         name = "pageLayout"
@@ -243,7 +243,7 @@ class PageLayout:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class PdfFigure:
     class Meta:
         name = "pdfFigure"
@@ -257,7 +257,7 @@ class PdfFigure:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class PdfFont:
     class Meta:
         name = "pdfFont"
@@ -338,7 +338,7 @@ class PdfFont:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class PdfRectangle:
     class Meta:
         name = "pdfRectangle"
@@ -386,7 +386,7 @@ class PdfRectangle:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class PdfStyle:
     class Meta:
         name = "pdfStyle"
@@ -415,7 +415,7 @@ class PdfStyle:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class VisualBbox:
     class Meta:
         name = "visual_bbox"
@@ -429,7 +429,7 @@ class VisualBbox:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class PdfCharacter:
     class Meta:
         name = "pdfCharacter"
@@ -508,7 +508,7 @@ class PdfCharacter:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class PdfSameStyleUnicodeCharacters:
     class Meta:
         name = "pdfSameStyleUnicodeCharacters"
@@ -535,7 +535,7 @@ class PdfSameStyleUnicodeCharacters:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class PdfXobject:
     class Meta:
         name = "pdfXobject"
@@ -580,7 +580,7 @@ class PdfXobject:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class PdfFormula:
     class Meta:
         name = "pdfFormula"
@@ -622,7 +622,7 @@ class PdfFormula:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class PdfLine:
     class Meta:
         name = "pdfLine"
@@ -644,7 +644,7 @@ class PdfLine:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class PdfSameStyleCharacters:
     class Meta:
         name = "pdfSameStyleCharacters"
@@ -674,7 +674,7 @@ class PdfSameStyleCharacters:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class PdfParagraphComposition:
     class Meta:
         name = "pdfParagraphComposition"
@@ -716,7 +716,7 @@ class PdfParagraphComposition:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class PdfParagraph:
     class Meta:
         name = "pdfParagraph"
@@ -802,7 +802,7 @@ class PdfParagraph:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class Page:
     class Meta:
         name = "page"
@@ -896,7 +896,7 @@ class Page:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class Document:
     class Meta:
         name = "document"
