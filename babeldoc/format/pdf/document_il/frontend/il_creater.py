@@ -1,6 +1,5 @@
 import base64
 import functools
-import itertools
 import logging
 import math
 import re
@@ -116,16 +115,15 @@ def parse_font_file(doc, idx, encoding, differences, legacy_encoding):
     if enc_name == "Custom":
         for charmap in face.charmaps:
             face.select_charmap(charmap.encoding)
-            if (
-                charmap.encoding_name == "FT_ENCODING_ADOBE_CUSTOM"
-                or charmap.encoding_name == "FT_ENCODING_ADOBE_STANDARD"
-            ):
+            if charmap.encoding_name == "FT_ENCODING_ADOBE_CUSTOM":
                 face.select_charmap(charmap.encoding)
                 break
     bbox_list = [get_name_cbox(face, x) for x in enc_vector]
-    if sum(itertools.chain(*bbox_list)) == 0:
-        _, legacy_vector = legacy_encoding
-        bbox_list = [get_char_cbox(face, x) for x in legacy_vector]
+    _, legacy_vector = legacy_encoding
+    legacy_bbox_list = [get_char_cbox(face, x) for x in legacy_vector]
+    for i, bbox in enumerate(bbox_list):
+        if sum(bbox) == 0:
+            bbox_list[i] = legacy_bbox_list[i]
     if differences:
         for code, name in differences:
             bbox_list[code] = get_name_cbox(face, name.encode("U8"))

@@ -649,8 +649,8 @@ def get_character_layout(
             "figure",
             "abandon",
             "title",
-            "paragraph_title",
             "abstract",
+            "paragraph_title",
             "content",
             "figure_title",
             "chart_title",
@@ -765,7 +765,7 @@ def is_text_layout(layout: Layout):
 
 
 def is_character_in_formula_layout(
-    char: il_version_1.PdfCharacter, page: il_version_1.Page
+    char: il_version_1.PdfCharacter, _page: il_version_1.Page, layout_index, layout_map
 ) -> int | None:
     """Check if character is contained within any formula-related layout."""
     formula_layout_types = {"formula"}
@@ -776,14 +776,10 @@ def is_character_in_formula_layout(
     if calculate_iou_for_boxes(char_box, char_box2) < 0.2:
         char_box = char_box2
 
-    # Check if page has layout_index and layout_map
-    if not hasattr(page, "layout_index") or not hasattr(page, "layout_map"):
-        return False
-
     # Get all candidate layouts that intersect with the character
-    candidate_ids = list(page.layout_index.intersection(box_to_tuple(char_box)))
+    candidate_ids = list(layout_index.intersection(box_to_tuple(char_box)))
     candidate_layouts: list[il_version_1.PageLayout] = [
-        page.layout_map[i] for i in candidate_ids
+        layout_map[i] for i in candidate_ids
     ]
 
     # Check if any intersecting layout is a formula type

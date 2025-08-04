@@ -809,15 +809,19 @@ class StylesAndFormulas:
         # 获取 formula1 中所有字符的 layout id
         formula1_layout_ids = set()
         for char in formula1.pdf_character:
+            if char.char_unicode == " ":
+                continue
             layout = char.formula_layout_id
-            if layout is not None:
+            if layout:
                 formula1_layout_ids.add(layout)
 
         # 获取 formula2 中所有字符的 layout id
         formula2_layout_ids = set()
         for char in formula2.pdf_character:
+            if char.char_unicode == " ":
+                continue
             layout = char.formula_layout_id
-            if layout is not None:
+            if layout:
                 formula2_layout_ids.add(layout)
 
         # 如果任一公式没有有效的 layout id，则不合并

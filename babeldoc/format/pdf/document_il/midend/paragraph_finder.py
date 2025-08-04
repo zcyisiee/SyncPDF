@@ -339,7 +339,9 @@ class ParagraphFinder:
         for char in page.pdf_character:
             char_layout = get_character_layout(char, layout_index, layout_map)
             # Check if character is in any formula layout and set formula_layout_id
-            char.formula_layout_id = is_character_in_formula_layout(char, page)
+            char.formula_layout_id = is_character_in_formula_layout(
+                char, page, layout_index, layout_map
+            )
 
             if not is_text_layout(char_layout) or self.is_isolated_formula(char):
                 skip_chars.append(char)
