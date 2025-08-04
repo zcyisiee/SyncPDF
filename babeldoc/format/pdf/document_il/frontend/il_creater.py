@@ -1,5 +1,6 @@
 import base64
 import functools
+import itertools
 import logging
 import math
 import re
@@ -10,6 +11,7 @@ import freetype
 import pymupdf
 
 import babeldoc.pdfminer.pdfinterp
+from babeldoc.format.pdf.babelpdf.encoding import WinAnsiEncoding
 from babeldoc.format.pdf.babelpdf.encoding import get_type1_encoding
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils import zstd_helper
@@ -75,8 +77,15 @@ def get_glyph_cbox(face, g):
     return cbox.xMin, cbox.yMin, cbox.xMax, cbox.yMax
 
 
+def get_char_cbox(face, idx):
+    g = face.get_char_index(idx)
+    return get_glyph_cbox(face, g)
+
+
 def get_name_cbox(face, name):
     if name:
+        if isinstance(name, str):
+            name = name.encode("utf-8")
         g = face.get_name_index(name)
         return get_glyph_cbox(face, g)
     return (0, 0, 0, 0)
@@ -98,7 +107,7 @@ def parse_font_encoding(doc, idx):
     return ("Custom", get_type1_encoding("StandardEncoding"))
 
 
-def parse_font_file(doc, idx, encoding, differences):
+def parse_font_file(doc, idx, encoding, differences, legacy_encoding):
     bbox_list = []
     data = doc.xref_stream(idx)
     face = freetype.Face(BytesIO(data))
@@ -107,10 +116,16 @@ def parse_font_file(doc, idx, encoding, differences):
     if enc_name == "Custom":
         for charmap in face.charmaps:
             face.select_charmap(charmap.encoding)
-            if charmap.encoding_name == "FT_ENCODING_ADOBE_CUSTOM":
+            if (
+                charmap.encoding_name == "FT_ENCODING_ADOBE_CUSTOM"
+                or charmap.encoding_name == "FT_ENCODING_ADOBE_STANDARD"
+            ):
                 face.select_charmap(charmap.encoding)
                 break
     bbox_list = [get_name_cbox(face, x) for x in enc_vector]
+    if sum(itertools.chain(*bbox_list)) == 0:
+        _, legacy_vector = legacy_encoding
+        bbox_list = [get_char_cbox(face, x) for x in legacy_vector]
     if differences:
         for code, name in differences:
             bbox_list[code] = get_name_cbox(face, name.encode("U8"))
@@ -525,13 +540,27 @@ class ILCreater:
                 self.current_page_font_char_bounding_box_map[font_id] = (
                     font_char_bounding_box_map
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("failed to parse font xobj id %d: %s", xref_id, e)
         self.current_page_font_name_id_map[xref_id] = font_id
         if self.xobj_id in self.xobj_map:
             self.xobj_map[self.xobj_id].pdf_font.append(il_font_metadata)
         else:
             self.current_page.pdf_font.append(il_font_metadata)
+
+    def get_legacy_encoding(self, xobj_id):
+        try:
+            encoding = ("Custom", list(range(256)))
+            font_encoding = self.mupdf.xref_get_key(xobj_id, "Encoding")
+            if font_encoding[1] == "/WinAnsiEncoding":
+                encoding = ("WinAnsi", WinAnsiEncoding)
+            base_encoding = self.mupdf.xref_get_key(xobj_id, "Encoding/BaseEncoding")
+            if base_encoding[1] == "/WinAnsiEncoding":
+                encoding = ("WinAnsi", WinAnsiEncoding)
+
+            return encoding
+        except Exception:
+            return ("Custom", list(range(256)))
 
     def parse_font_xobj_id(self, xobj_id: int):
         bbox_list = []
@@ -543,7 +572,13 @@ class ILCreater:
         for file_key in ["FontFile", "FontFile2", "FontFile3"]:
             font_file = self.mupdf.xref_get_key(xobj_id, f"FontDescriptor/{file_key}")
             if file_idx := indirect(font_file):
-                bbox_list = parse_font_file(self.mupdf, file_idx, encoding, differences)
+                bbox_list = parse_font_file(
+                    self.mupdf,
+                    file_idx,
+                    encoding,
+                    differences,
+                    self.get_legacy_encoding(xobj_id),
+                )
         cmap = {}
         to_unicode = self.mupdf.xref_get_key(xobj_id, "ToUnicode")
         if to_unicode_idx := indirect(to_unicode):
