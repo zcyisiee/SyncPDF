@@ -81,36 +81,53 @@ class PbarContext:
 class DocumentTranslateTracker:
     def __init__(self):
         self.page = []
+        self.cross_page = []
 
     def new_page(self):
         page = PageTranslateTracker()
         self.page.append(page)
         return page
 
+    def new_cross_page(self):
+        page = PageTranslateTracker()
+        self.cross_page.append(page)
+        return page
+
     def to_json(self):
         pages = []
         for page in self.page:
-            paragraphs = []
-            for para in page.paragraph:
-                i_str = getattr(para, "input", None)
-                o_str = getattr(para, "output", None)
-                pdf_unicode = getattr(para, "pdf_unicode", None)
-                llm_translate_trackers = getattr(para, "llm_translate_trackers", None)
-                llm_translate_trackers_json = []
-                for tracker in llm_translate_trackers:
-                    llm_translate_trackers_json.append(tracker.to_dict())
-                if pdf_unicode is None or i_str is None:
-                    continue
-                paragraphs.append(
-                    {
-                        "input": i_str,
-                        "output": o_str,
-                        "pdf_unicode": pdf_unicode,
-                        "llm_translate_trackers": llm_translate_trackers_json,
-                    },
-                )
+            paragraphs = self.convert_paragraph(page)
             pages.append({"paragraph": paragraphs})
-        return json.dumps({"page": pages}, ensure_ascii=False, indent=2)
+        cross_page = []
+        for page in self.cross_page:
+            paragraphs = self.convert_paragraph(page)
+            cross_page.append({"paragraph": paragraphs})
+        return json.dumps(
+            {"cross_page": cross_page, "page": pages}, ensure_ascii=False, indent=2
+        )
+
+    def convert_paragraph(self, page):
+        paragraphs = []
+        for para in page.paragraph:
+            i_str = getattr(para, "input", None)
+            o_str = getattr(para, "output", None)
+            pdf_unicode = getattr(para, "pdf_unicode", None)
+            llm_translate_trackers = getattr(para, "llm_translate_trackers", None)
+            llm_translate_trackers_json = []
+            for tracker in llm_translate_trackers:
+                llm_translate_trackers_json.append(tracker.to_dict())
+            if pdf_unicode is None or i_str is None:
+                continue
+            paragraph_json = {
+                "input": i_str,
+                "output": o_str,
+                "pdf_unicode": pdf_unicode,
+                "llm_translate_trackers": llm_translate_trackers_json,
+            }
+            paragraphs.append(
+                paragraph_json,
+            )
+        return paragraphs
 
 
 class PageTranslateTracker:
