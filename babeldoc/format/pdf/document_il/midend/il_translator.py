@@ -81,36 +81,67 @@ class PbarContext:
 class DocumentTranslateTracker:
     def __init__(self):
         self.page = []
+        self.cross_page = []
+        # Track paragraphs that are combined due to cross-column detection within the same page
+        self.cross_column = []
 
     def new_page(self):
         page = PageTranslateTracker()
         self.page.append(page)
         return page
 
+    def new_cross_page(self):
+        page = PageTranslateTracker()
+        self.cross_page.append(page)
+        return page
+
+    def new_cross_column(self):
+        """Create and return a new PageTranslateTracker dedicated to cross-column merging."""
+        page = PageTranslateTracker()
+        self.cross_column.append(page)
+        return page
+
     def to_json(self):
         pages = []
         for page in self.page:
-            paragraphs = []
-            for para in page.paragraph:
-                i_str = getattr(para, "input", None)
-                o_str = getattr(para, "output", None)
-                pdf_unicode = getattr(para, "pdf_unicode", None)
-                llm_translate_trackers = getattr(para, "llm_translate_trackers", None)
-                llm_translate_trackers_json = []
-                for tracker in llm_translate_trackers:
-                    llm_translate_trackers_json.append(tracker.to_dict())
-                if pdf_unicode is None or i_str is None:
-                    continue
-                paragraphs.append(
-                    {
-                        "input": i_str,
-                        "output": o_str,
-                        "pdf_unicode": pdf_unicode,
-                        "llm_translate_trackers": llm_translate_trackers_json,
-                    },
-                )
+            paragraphs = self.convert_paragraph(page)
             pages.append({"paragraph": paragraphs})
-        return json.dumps({"page": pages}, ensure_ascii=False, indent=2)
+        cross_page = []
+        for page in self.cross_page:
+            paragraphs = self.convert_paragraph(page)
+            cross_page.append({"paragraph": paragraphs})
+        cross_column = []
+        for page in self.cross_column:
+            paragraphs = self.convert_paragraph(page)
+            cross_column.append({"paragraph": paragraphs})
+        return json.dumps(
+            {"cross_page": cross_page, "cross_column": cross_column, "page": pages},
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    def convert_paragraph(self, page):
+        paragraphs = []
+        for para in page.paragraph:
+            i_str = getattr(para, "input", None)
+            o_str = getattr(para, "output", None)
+            pdf_unicode = getattr(para, "pdf_unicode", None)
+            llm_translate_trackers = getattr(para, "llm_translate_trackers", None)
+            llm_translate_trackers_json = []
+            for tracker in llm_translate_trackers:
+                llm_translate_trackers_json.append(tracker.to_dict())
+            if pdf_unicode is None or i_str is None:
+                continue
+            paragraph_json = {
+                "input": i_str,
+                "output": o_str,
+                "pdf_unicode": pdf_unicode,
+                "llm_translate_trackers": llm_translate_trackers_json,
+            }
+            paragraphs.append(
+                paragraph_json,
+            )
+        return paragraphs
 
 
 class PageTranslateTracker:
@@ -752,7 +783,9 @@ class ILTranslator:
             return False
         paragraph.unicode = translated_text
         paragraph.pdf_paragraph_composition = self.parse_translate_output(
-            translate_input, translated_text, tracker.last_llm_translate_tracker()
+            translate_input,
+            translated_text,
+            tracker.last_llm_translate_tracker(),
         )
         for composition in paragraph.pdf_paragraph_composition:
             if (
@@ -910,7 +943,10 @@ Now, please carefully read the following text to be translated and directly outp
                 # Perform translation
                 if self.support_llm_translate:
                     llm_prompt = self.generate_prompt_for_llm(
-                        text, title_paragraph, local_title_paragraph, translate_input
+                        text,
+                        title_paragraph,
+                        local_title_paragraph,
+                        translate_input,
                     )
                     llm_translate_tracker.set_input(llm_prompt)
                     translated_text = self.translate_engine.llm_translate(

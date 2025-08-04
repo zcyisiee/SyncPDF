@@ -232,15 +232,15 @@ class ParagraphFinder:
         )
 
     def process_page(self, page: Page):
-        # build layout index for fast query
-        build_layout_index(page)
-
+        layout_index, layout_map = build_layout_index(page)
         # 预处理公式布局的标签
         self._preprocess_formula_layouts(page)
 
         # 第一步：根据 layout 创建 paragraphs
         # 在这一步中，page.pdf_character 中的字符会被移除
-        paragraphs = self._group_characters_into_paragraphs(page)
+        paragraphs = self._group_characters_into_paragraphs(
+            page, layout_index, layout_map
+        )
         page.pdf_paragraph = paragraphs
 
         page_level_formula_font_ids, xobj_specific_formula_font_ids = (
@@ -300,9 +300,6 @@ class ParagraphFinder:
         # self._sort_characters_in_lines(page)
 
         self.add_debug_info(page)
-        # clean up to save memory
-        del page.layout_index
-        del page.layout_map
 
     def is_isolated_formula(self, char: PdfCharacter):
         return char.char_unicode in (
@@ -312,7 +309,9 @@ class ParagraphFinder:
             "(cid:125)",
         )
 
-    def _group_characters_into_paragraphs(self, page: Page) -> list[PdfParagraph]:
+    def _group_characters_into_paragraphs(
+        self, page: Page, layout_index, layout_map
+    ) -> list[PdfParagraph]:
         paragraphs: list[PdfParagraph] = []
         if page.pdf_paragraph:
             paragraphs.extend(page.pdf_paragraph)
@@ -338,9 +337,11 @@ class ParagraphFinder:
         skip_chars = []
 
         for char in page.pdf_character:
-            char_layout = get_character_layout(char, page)
+            char_layout = get_character_layout(char, layout_index, layout_map)
             # Check if character is in any formula layout and set formula_layout_id
-            char.formula_layout_id = is_character_in_formula_layout(char, page)
+            char.formula_layout_id = is_character_in_formula_layout(
+                char, page, layout_index, layout_map
+            )
 
             if not is_text_layout(char_layout) or self.is_isolated_formula(char):
                 skip_chars.append(char)
@@ -500,6 +501,43 @@ class ParagraphFinder:
             return visual_box.y, visual_box.y2
         return pdf_box.y, pdf_box.y2
 
+    @staticmethod
+    def _compute_collision_counts_histogram(
+        y1_arr: np.ndarray,
+        y2_arr: np.ndarray,
+        para_y_min: float,
+        para_y_max: float,
+        step: float,
+    ) -> np.ndarray:
+        """Compute overlap counts at each scan line using a difference-array histogram.
+
+        Args:
+            y1_arr: 1-D array with lower y bounds of characters (inclusive).
+            y2_arr: 1-D array with upper y bounds of characters (exclusive).
+            para_y_min: Minimum y of the paragraph.
+            para_y_max: Maximum y of the paragraph.
+            step: Scan step size.
+
+        Returns:
+            1-D NumPy int32 array where index i corresponds to y = para_y_max - i × step.
+        """
+        # Number of scan positions
+        m = int(np.ceil((para_y_max - para_y_min) / step))
+        if m <= 0:
+            return np.array([], dtype=np.int32)
+
+        # Map character bounds to discrete indices (top inclusive, bottom exclusive)
+        starts = np.floor((para_y_max - y2_arr) / step).astype(np.int32)
+        ends = np.floor((para_y_max - y1_arr) / step).astype(np.int32) + 1
+        # Clip ends to the valid range [0, m]
+        np.clip(ends, 0, m, out=ends)
+
+        hist = np.zeros(m + 1, dtype=np.int32)
+        np.add.at(hist, starts, 1)
+        np.add.at(hist, ends, -1)
+
+        return np.cumsum(hist[:-1])
+
     def _split_paragraph_into_lines(
         self, paragraph: PdfParagraph, formula_font_ids: set[str]
     ):
@@ -560,10 +598,16 @@ class ParagraphFinder:
 
         y_coordinates = np.arange(scan_y_max, scan_y_min, -step)
 
-        collision_counts = []
-        for y in y_coordinates:
-            count = sum(1 for b in char_y_bounds if b["y1"] <= y < b["y2"])
-            collision_counts.append(count)
+        # Compute collision counts using NumPy histogram (O(m + n))
+        y1_arr = np.array([b["y1"] for b in char_y_bounds], dtype=np.float32)
+        y2_arr = np.array([b["y2"] for b in char_y_bounds], dtype=np.float32)
+        collision_counts = self._compute_collision_counts_histogram(
+            y1_arr,
+            y2_arr,
+            scan_y_min,
+            scan_y_max,
+            step,
+        )
 
         # 4. Find gaps (regions with low collision count) from the histogram.
         gaps = []

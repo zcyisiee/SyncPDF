@@ -568,8 +568,7 @@ def build_layout_index(page):
         layout_map[i] = layout
         if layout.box:
             layout_index.insert(i, box_to_tuple(layout.box))
-    page.layout_index = layout_index
-    page.layout_map = layout_map
+    return layout_index, layout_map
 
 
 def calculate_iou_for_boxes(box1: Box, box2: Box) -> float:
@@ -626,7 +625,8 @@ def calculate_y_iou_for_boxes(box1: Box, box2: Box) -> float:
 
 def get_character_layout(
     char,
-    page,
+    layout_index,
+    layout_map,
     layout_priority=None,
     _bbox_mode: Literal["auto", "visual", "box"] = "auto",
 ):
@@ -649,8 +649,8 @@ def get_character_layout(
             "figure",
             "abandon",
             "title",
-            "paragraph_title",
             "abstract",
+            "paragraph_title",
             "content",
             "figure_title",
             "chart_title",
@@ -690,14 +690,10 @@ def get_character_layout(
     # elif bbox_mode == "box":
     #     char_box = char_box2
 
-    # Check if page has layout_index and layout_map
-    if not hasattr(page, "layout_index") or not hasattr(page, "layout_map"):
-        return None
-
     # Collect all intersecting layouts and their IoU values
     matching_layouts = []
-    candidate_ids = list(page.layout_index.intersection(box_to_tuple(char_box)))
-    candidate_layouts = [page.layout_map[i] for i in candidate_ids]
+    candidate_ids = list(layout_index.intersection(box_to_tuple(char_box)))
+    candidate_layouts = [layout_map[i] for i in candidate_ids]
 
     for layout in candidate_layouts:
         # Calculate IoU
@@ -712,9 +708,11 @@ def get_character_layout(
                 matching_layouts.append(
                     {
                         "layout": Layout(layout.id, layout.class_name),
-                        "priority": layout_priority.index(layout.class_name)
-                        if layout.class_name in layout_priority
-                        else len(layout_priority),
+                        "priority": (
+                            layout_priority.index(layout.class_name)
+                            if layout.class_name in layout_priority
+                            else len(layout_priority)
+                        ),
                         "iou": iou,
                     }
                 )
@@ -767,7 +765,7 @@ def is_text_layout(layout: Layout):
 
 
 def is_character_in_formula_layout(
-    char: il_version_1.PdfCharacter, page: il_version_1.Page
+    char: il_version_1.PdfCharacter, _page: il_version_1.Page, layout_index, layout_map
 ) -> int | None:
     """Check if character is contained within any formula-related layout."""
     formula_layout_types = {"formula"}
@@ -778,14 +776,10 @@ def is_character_in_formula_layout(
     if calculate_iou_for_boxes(char_box, char_box2) < 0.2:
         char_box = char_box2
 
-    # Check if page has layout_index and layout_map
-    if not hasattr(page, "layout_index") or not hasattr(page, "layout_map"):
-        return False
-
     # Get all candidate layouts that intersect with the character
-    candidate_ids = list(page.layout_index.intersection(box_to_tuple(char_box)))
+    candidate_ids = list(layout_index.intersection(box_to_tuple(char_box)))
     candidate_layouts: list[il_version_1.PageLayout] = [
-        page.layout_map[i] for i in candidate_ids
+        layout_map[i] for i in candidate_ids
     ]
 
     # Check if any intersecting layout is a formula type

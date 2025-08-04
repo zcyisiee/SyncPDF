@@ -118,7 +118,10 @@ class LayoutParser:
         ) as progress:
             # Process predictions for each page
             for page, layouts in self.model.handle_document(
-                docs.page, mupdf_doc, self.translation_config, self._save_debug_image
+                docs.page,
+                mupdf_doc,
+                self.translation_config,
+                self._save_debug_image,
             ):
                 page_layouts = []
                 for layout in layouts.boxes:

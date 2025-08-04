@@ -29,7 +29,9 @@ logger = logging.getLogger(__name__)
 
 class BatchParagraph:
     def __init__(
-        self, paragraphs: list[PdfParagraph], page_tracker: PageTranslateTracker
+        self,
+        paragraphs: list[PdfParagraph],
+        page_tracker: PageTranslateTracker,
     ):
         self.paragraphs = paragraphs
         self.trackers = [page_tracker.new_paragraph() for _ in paragraphs]
@@ -124,6 +126,7 @@ class ILTranslatorLLMOnly:
                 for page in docs.page
             ]
         )
+        translated_ids = set()
         with self.translation_config.progress_monitor.stage_start(
             self.stage_name,
             total,
@@ -134,6 +137,24 @@ class ILTranslatorLLMOnly:
                 with PriorityThreadPoolExecutor(
                     max_workers=self.translation_config.pool_max_workers,
                 ) as executor:
+                    self.process_cross_page_paragraph(
+                        docs,
+                        executor,
+                        pbar,
+                        tracker,
+                        executor2,
+                        translated_ids,
+                    )
+                    # Cross-column detection per page (after cross-page processing)
+                    for page in docs.page:
+                        self.process_cross_column_paragraph(
+                            page,
+                            executor,
+                            pbar,
+                            tracker,
+                            executor2,
+                            translated_ids,
+                        )
                     for page in docs.page:
                         self.process_page(
                             page,
@@ -141,6 +162,7 @@ class ILTranslatorLLMOnly:
                             pbar,
                             tracker.new_page(),
                             executor2,
+                            translated_ids,
                         )
 
         path = self.translation_config.get_working_file_path("translate_tracking.json")
@@ -153,6 +175,266 @@ class ILTranslatorLLMOnly:
             f"Translation completed. Total: {self.total_count}, Successful: {self.ok_count}, Fallback: {self.fallback_count}"
         )
 
+    def _is_body_text_paragraph(self, paragraph: PdfParagraph) -> bool:
+        """判断正文段落（当前仅 layout_label == 'text'）。
+
+        Args:
+            paragraph: PDF paragraph to check
+
+        Returns:
+            True if this is a body text paragraph, False otherwise
+        """
+        return paragraph.layout_label in ("text", "plain text")
+
+    def _should_translate_paragraph(
+        self,
+        paragraph: PdfParagraph,
+        translated_ids: set[int] | None = None,
+        require_body_text: bool = False,
+    ) -> bool:
+        """Check if a paragraph should be translated based on common filtering criteria.
+
+        Args:
+            paragraph: PDF paragraph to check
+            translated_ids: Set of already translated paragraph IDs
+            require_body_text: Whether to additionally check if paragraph is body text
+
+        Returns:
+            True if paragraph should be translated, False otherwise
+        """
+        # Basic validation checks
+        if paragraph.debug_id is None or paragraph.unicode is None:
+            return False
+
+        # Check if already translated
+        if translated_ids is not None and id(paragraph) in translated_ids:
+            return False
+
+        # CID paragraph check
+        if is_cid_paragraph(paragraph):
+            return False
+
+        # Minimum length check
+        if len(paragraph.unicode) < self.translation_config.min_text_length:
+            return False
+
+        # Body text check if requested
+        if require_body_text and not self._is_body_text_paragraph(paragraph):
+            return False
+
+        return True
+
+    def _filter_paragraphs(
+        self,
+        page: Page,
+        translated_ids: set[int] | None = None,
+        require_body_text: bool = False,
+    ) -> list[PdfParagraph]:
+        """Get list of paragraphs that should be translated from a page.
+
+        Args:
+            page: Page to get paragraphs from
+            translated_ids: Set of already translated paragraph IDs
+            require_body_text: Whether to filter for body text paragraphs only
+
+        Returns:
+            List of paragraphs that should be translated
+        """
+        return [
+            paragraph
+            for paragraph in page.pdf_paragraph
+            if self._should_translate_paragraph(
+                paragraph, translated_ids, require_body_text
+            )
+        ]
+
+    def _build_font_maps(
+        self, page: Page
+    ) -> tuple[dict[str, PdfFont], dict[int, dict[str, PdfFont]]]:
+        """Build font maps for a page.
+
+        Args:
+            page: The page to build font maps for
+
+        Returns:
+            Tuple of (page_font_map, page_xobj_font_map)
+        """
+        page_font_map = {}
+        for font in page.pdf_font:
+            page_font_map[font.font_id] = font
+
+        page_xobj_font_map = {}
+        for xobj in page.pdf_xobject:
+            page_xobj_font_map[xobj.xobj_id] = page_font_map.copy()
+            for font in xobj.pdf_font:
+                page_xobj_font_map[xobj.xobj_id][font.font_id] = font
+
+        return page_font_map, page_xobj_font_map
+
+    def process_cross_page_paragraph(
+        self,
+        docs: Document,
+        executor: PriorityThreadPoolExecutor,
+        pbar: tqdm | None = None,
+        tracker: DocumentTranslateTracker | None = None,
+        executor2: PriorityThreadPoolExecutor | None = None,
+        translated_ids: set[int] | None = None,
+    ):
+        """Process cross-page paragraphs by combining last body text paragraph of current page
+        with first body text paragraph of next page.
+
+        Args:
+            docs: Document containing pages to process
+            executor: Thread pool executor for translation tasks
+            pbar: Progress bar for tracking translation progress
+            tracker: Page translation tracker
+            executor2: Secondary executor for fallback translation
+            translated_ids: Set of already translated paragraph IDs
+        """
+        self.translation_config.raise_if_cancelled()
+
+        if tracker is None:
+            tracker = DocumentTranslateTracker()
+
+        if translated_ids is None:
+            translated_ids = set()
+
+        # Process adjacent page pairs
+        for i in range(len(docs.page) - 1):
+            page_curr = docs.page[i]
+            page_next = docs.page[i + 1]
+
+            # Find body text paragraphs in current page
+            curr_body_paragraphs = self._filter_paragraphs(
+                page_curr, translated_ids, require_body_text=True
+            )
+
+            # Find body text paragraphs in next page
+            next_body_paragraphs = self._filter_paragraphs(
+                page_next, translated_ids, require_body_text=True
+            )
+
+            # Get last paragraph from current page and first paragraph from next page
+            if not curr_body_paragraphs or not next_body_paragraphs:
+                continue
+
+            last_curr_paragraph = curr_body_paragraphs[-1]
+            first_next_paragraph = next_body_paragraphs[0]
+
+            # Skip if either paragraph is already translated
+            if (
+                id(last_curr_paragraph) in translated_ids
+                or id(first_next_paragraph) in translated_ids
+            ):
+                continue
+
+            # Build font maps for both pages
+            curr_font_map, curr_xobj_font_map = self._build_font_maps(page_curr)
+            next_font_map, next_xobj_font_map = self._build_font_maps(page_next)
+
+            # Merge font maps
+            merged_font_map = {**curr_font_map, **next_font_map}
+            merged_xobj_font_map = {**curr_xobj_font_map, **next_xobj_font_map}
+
+            # Calculate total token count
+            total_token_count = self.calc_token_count(
+                last_curr_paragraph.unicode
+            ) + self.calc_token_count(first_next_paragraph.unicode)
+
+            # Create batch with both paragraphs
+            cross_page_paragraphs = [last_curr_paragraph, first_next_paragraph]
+            batch_paragraph = BatchParagraph(
+                cross_page_paragraphs, tracker.new_cross_page()
+            )
+
+            # Submit translation task (force submit regardless of token count)
+            executor.submit(
+                self.translate_paragraph,
+                batch_paragraph,
+                pbar,
+                merged_font_map,
+                merged_xobj_font_map,
+                self.translation_config.shared_context_cross_split_part.first_paragraph,
+                self.translation_config.shared_context_cross_split_part.recent_title_paragraph,
+                executor2,
+                priority=1048576 - total_token_count,
+                paragraph_token_count=total_token_count,
+            )
+
+            # Mark paragraphs as translated
+            translated_ids.add(id(last_curr_paragraph))
+            translated_ids.add(id(first_next_paragraph))
+
+    def process_cross_column_paragraph(
+        self,
+        page: Page,
+        executor: PriorityThreadPoolExecutor,
+        pbar: tqdm | None = None,
+        tracker: DocumentTranslateTracker | None = None,
+        executor2: PriorityThreadPoolExecutor | None = None,
+        translated_ids: set[int] | None = None,
+    ):
+        """Process cross-column paragraphs within the same page.
+
+        If two adjacent body-text paragraphs have a gap in their y2 coordinate
+        greater than 20 units, they are considered split across columns and
+        will be translated together.
+        """
+        self.translation_config.raise_if_cancelled()
+
+        if tracker is None:
+            tracker = DocumentTranslateTracker()
+        if translated_ids is None:
+            translated_ids = set()
+
+        # Filter body-text paragraphs maintaining original order
+        body_paragraphs = self._filter_paragraphs(
+            page, translated_ids, require_body_text=True
+        )
+        if len(body_paragraphs) < 2:
+            return
+
+        # Build font maps once for the whole page
+        page_font_map, page_xobj_font_map = self._build_font_maps(page)
+
+        for idx in range(len(body_paragraphs) - 1):
+            p1 = body_paragraphs[idx]
+            p2 = body_paragraphs[idx + 1]
+
+            # Skip already translated
+            if id(p1) in translated_ids or id(p2) in translated_ids:
+                continue
+
+            # Safety checks for box information
+            if not (
+                p1.box and p2.box and p1.box.y2 is not None and p2.box.y2 is not None
+            ):
+                continue
+
+            if p2.box.y2 - p1.box.y2 <= 20:
+                continue
+
+            total_token_count = self.calc_token_count(
+                p1.unicode
+            ) + self.calc_token_count(p2.unicode)
+
+            batch = BatchParagraph([p1, p2], tracker.new_cross_column())
+            executor.submit(
+                self.translate_paragraph,
+                batch,
+                pbar,
+                page_font_map,
+                page_xobj_font_map,
+                self.translation_config.shared_context_cross_split_part.first_paragraph,
+                self.translation_config.shared_context_cross_split_part.recent_title_paragraph,
+                executor2,
+                priority=1048576 - total_token_count,
+                paragraph_token_count=total_token_count,
+            )
+
+            translated_ids.add(id(p1))
+            translated_ids.add(id(p2))
+
     def process_page(
         self,
         page: Page,
@@ -160,6 +442,7 @@ class ILTranslatorLLMOnly:
         pbar: tqdm | None = None,
         tracker: PageTranslateTracker = None,
         executor2: PriorityThreadPoolExecutor | None = None,
+        translated_ids: set | None = None,
     ):
         self.translation_config.raise_if_cancelled()
         page_font_map = {}
@@ -175,17 +458,30 @@ class ILTranslatorLLMOnly:
 
         total_token_count = 0
         for paragraph in page.pdf_paragraph:
+            # Check if already translated
+            if id(paragraph) in translated_ids:
+                continue
+
+            # Check basic validation
             if paragraph.debug_id is None or paragraph.unicode is None:
                 continue
+
+            # Check CID paragraph - advance progress bar if filtered out
             if is_cid_paragraph(paragraph):
-                pbar.advance(1)
+                if pbar:
+                    pbar.advance(1)
                 continue
+
+            # Check minimum length - advance progress bar if filtered out
             if len(paragraph.unicode) < self.translation_config.min_text_length:
-                pbar.advance(1)
+                if pbar:
+                    pbar.advance(1)
                 continue
+
             # self.translate_paragraph(paragraph, pbar,tracker.new_paragraph(), page_font_map, page_xobj_font_map)
             total_token_count += self.calc_token_count(paragraph.unicode)
             paragraphs.append(paragraph)
+            translated_ids.add(id(paragraph))
             if paragraph.layout_label == "title":
                 self.shared_context_cross_split_part.recent_title_paragraph = (
                     copy.deepcopy(paragraph)
@@ -380,6 +676,9 @@ class ILTranslatorLLMOnly:
             )
             llm_prompt_parts.append(
                 "3. If the input contains:Proper nouns, code, or non-translatable technical terms, retain them in the original form."
+            )
+            llm_prompt_parts.append(
+                "4. If adjacent paragraphs are semantically coherent, you may appropriately adjust the word order, but you must keep the number of paragraphs unchanged and must not move placeholders from one paragraph to another."
             )
 
             # 4. ## Input/Output Format:
