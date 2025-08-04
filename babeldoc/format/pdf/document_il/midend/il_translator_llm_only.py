@@ -145,6 +145,16 @@ class ILTranslatorLLMOnly:
                         executor2,
                         translated_ids,
                     )
+                    # Cross-column detection per page (after cross-page processing)
+                    for page in docs.page:
+                        self.process_cross_column_paragraph(
+                            page,
+                            executor,
+                            pbar,
+                            tracker,
+                            executor2,
+                            translated_ids,
+                        )
                     for page in docs.page:
                         self.process_page(
                             page,
@@ -174,7 +184,7 @@ class ILTranslatorLLMOnly:
         Returns:
             True if this is a body text paragraph, False otherwise
         """
-        return paragraph.layout_label == "text"
+        return paragraph.layout_label in ("text", "plain text")
 
     def _should_translate_paragraph(
         self,
@@ -354,6 +364,76 @@ class ILTranslatorLLMOnly:
             # Mark paragraphs as translated
             translated_ids.add(id(last_curr_paragraph))
             translated_ids.add(id(first_next_paragraph))
+
+    def process_cross_column_paragraph(
+        self,
+        page: Page,
+        executor: PriorityThreadPoolExecutor,
+        pbar: tqdm | None = None,
+        tracker: DocumentTranslateTracker | None = None,
+        executor2: PriorityThreadPoolExecutor | None = None,
+        translated_ids: set[int] | None = None,
+    ):
+        """Process cross-column paragraphs within the same page.
+
+        If two adjacent body-text paragraphs have a gap in their y2 coordinate
+        greater than 20 units, they are considered split across columns and
+        will be translated together.
+        """
+        self.translation_config.raise_if_cancelled()
+
+        if tracker is None:
+            tracker = DocumentTranslateTracker()
+        if translated_ids is None:
+            translated_ids = set()
+
+        # Filter body-text paragraphs maintaining original order
+        body_paragraphs = self._filter_paragraphs(
+            page, translated_ids, require_body_text=True
+        )
+        if len(body_paragraphs) < 2:
+            return
+
+        # Build font maps once for the whole page
+        page_font_map, page_xobj_font_map = self._build_font_maps(page)
+
+        for idx in range(len(body_paragraphs) - 1):
+            p1 = body_paragraphs[idx]
+            p2 = body_paragraphs[idx + 1]
+
+            # Skip already translated
+            if id(p1) in translated_ids or id(p2) in translated_ids:
+                continue
+
+            # Safety checks for box information
+            if not (
+                p1.box and p2.box and p1.box.y2 is not None and p2.box.y2 is not None
+            ):
+                continue
+
+            if p2.box.y2 - p1.box.y2 <= 20:
+                continue
+
+            total_token_count = self.calc_token_count(
+                p1.unicode
+            ) + self.calc_token_count(p2.unicode)
+
+            batch = BatchParagraph([p1, p2], tracker.new_cross_column())
+            executor.submit(
+                self.translate_paragraph,
+                batch,
+                pbar,
+                page_font_map,
+                page_xobj_font_map,
+                self.translation_config.shared_context_cross_split_part.first_paragraph,
+                self.translation_config.shared_context_cross_split_part.recent_title_paragraph,
+                executor2,
+                priority=1048576 - total_token_count,
+                paragraph_token_count=total_token_count,
+            )
+
+            translated_ids.add(id(p1))
+            translated_ids.add(id(p2))
 
     def process_page(
         self,

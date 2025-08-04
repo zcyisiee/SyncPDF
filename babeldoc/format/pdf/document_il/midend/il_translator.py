@@ -82,6 +82,8 @@ class DocumentTranslateTracker:
     def __init__(self):
         self.page = []
         self.cross_page = []
+        # Track paragraphs that are combined due to cross-column detection within the same page
+        self.cross_column = []
 
     def new_page(self):
         page = PageTranslateTracker()
@@ -93,6 +95,12 @@ class DocumentTranslateTracker:
         self.cross_page.append(page)
         return page
 
+    def new_cross_column(self):
+        """Create and return a new PageTranslateTracker dedicated to cross-column merging."""
+        page = PageTranslateTracker()
+        self.cross_column.append(page)
+        return page
+
     def to_json(self):
         pages = []
         for page in self.page:
@@ -102,8 +110,14 @@ class DocumentTranslateTracker:
         for page in self.cross_page:
             paragraphs = self.convert_paragraph(page)
             cross_page.append({"paragraph": paragraphs})
+        cross_column = []
+        for page in self.cross_column:
+            paragraphs = self.convert_paragraph(page)
+            cross_column.append({"paragraph": paragraphs})
         return json.dumps(
-            {"cross_page": cross_page, "page": pages}, ensure_ascii=False, indent=2
+            {"cross_page": cross_page, "cross_column": cross_column, "page": pages},
+            ensure_ascii=False,
+            indent=2,
         )
 
     def convert_paragraph(self, page):
