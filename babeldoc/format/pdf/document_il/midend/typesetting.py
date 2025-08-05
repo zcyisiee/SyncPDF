@@ -719,8 +719,13 @@ class Typesetting:
             # 处理每个段落
             for paragraph in page.pdf_paragraph:
                 all_paragraphs.append(paragraph)
+                unit_count = 0
                 try:
                     typesetting_units = self.create_typesetting_units(paragraph, fonts)
+                    unit_count = len(typesetting_units)
+                    for unit in typesetting_units:
+                        if unit.formular:
+                            unit_count += len(unit.formular.pdf_character) - 1
 
                     # 如果所有单元都可以直接传递，则 scale = 1.0
                     if all(unit.can_passthrough for unit in typesetting_units):
@@ -737,7 +742,7 @@ class Typesetting:
                     paragraph.optimal_scale = 1.0
 
                 if paragraph.optimal_scale is not None:
-                    all_scales.append(paragraph.optimal_scale)
+                    all_scales.extend([paragraph.optimal_scale] * unit_count)
 
         # 获取缩放因子的众数
         if all_scales:
