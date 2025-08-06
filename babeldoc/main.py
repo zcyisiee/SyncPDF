@@ -76,6 +76,10 @@ def create_parser():
         help="RPC service host address for document layout analysis",
     )
     parser.add_argument(
+        "--rpc-doclayout6",
+        help="RPC service host address for document layout analysis",
+    )
+    parser.add_argument(
         "--generate-offline-assets",
         default=None,
         help="Generate offline assets package in the specified directory",
@@ -389,6 +393,10 @@ async def main():
         from babeldoc.docvision.rpc_doclayout5 import RpcDocLayoutModel
 
         doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout5)
+    elif args.rpc_doclayout6:
+        from babeldoc.docvision.rpc_doclayout6 import RpcDocLayoutModel
+
+        doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout6)
     else:
         from babeldoc.docvision.doclayout import DocLayoutModel
 
