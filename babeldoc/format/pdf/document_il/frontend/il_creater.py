@@ -137,7 +137,7 @@ def parse_encoding(obj_str):
     delta = []
     current = 0
     for x in re.finditer(
-        r"(?P<p>[\[\]])|(?P<c>\d+)|(?P<n>/[a-zA-Z0-9]+)|(?P<s>.)", obj_str
+        r"(?P<p>[\[\]])|(?P<c>\d+)|(?P<n>/[^\s/\[\]()<>]+)|(?P<s>.)", obj_str
     ):
         key = x.lastgroup
         val = x.group()
