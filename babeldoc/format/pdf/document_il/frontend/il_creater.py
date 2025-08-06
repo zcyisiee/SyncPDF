@@ -10,7 +10,6 @@ import freetype
 import pymupdf
 
 import babeldoc.pdfminer.pdfinterp
-from babeldoc.format.pdf.babelpdf.encoding import WinAnsiEncoding
 from babeldoc.format.pdf.babelpdf.encoding import get_type1_encoding
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils import zstd_helper
@@ -106,10 +105,13 @@ def parse_font_encoding(doc, idx):
     return ("Custom", get_type1_encoding("StandardEncoding"))
 
 
-def parse_font_file(doc, idx, encoding, differences, legacy_encoding):
+def parse_font_file(doc, idx, encoding, differences):
     bbox_list = []
     data = doc.xref_stream(idx)
     face = freetype.Face(BytesIO(data))
+    glyph_name_set = set()
+    for x in range(0, face.num_glyphs):
+        glyph_name_set.add(face.get_glyph_name(x))
     scale = 1000 / face.units_per_EM
     enc_name, enc_vector = encoding
     if enc_name == "Custom":
@@ -118,12 +120,12 @@ def parse_font_file(doc, idx, encoding, differences, legacy_encoding):
             if charmap.encoding_name == "FT_ENCODING_ADOBE_CUSTOM":
                 face.select_charmap(charmap.encoding)
                 break
-    bbox_list = [get_name_cbox(face, x) for x in enc_vector]
-    _, legacy_vector = legacy_encoding
-    legacy_bbox_list = [get_char_cbox(face, x) for x in legacy_vector]
-    for i, bbox in enumerate(bbox_list):
-        if sum(bbox) == 0:
-            bbox_list[i] = legacy_bbox_list[i]
+    for i, x in enumerate(enc_vector):
+        if x in glyph_name_set:
+            v = get_name_cbox(face, x)
+        else:
+            v = get_char_cbox(face, i)
+        bbox_list.append(v)
     if differences:
         for code, name in differences:
             bbox_list[code] = get_name_cbox(face, name.encode("U8"))
@@ -135,7 +137,7 @@ def parse_encoding(obj_str):
     delta = []
     current = 0
     for x in re.finditer(
-        r"(?P<p>[\[\]])|(?P<c>\d+)|(?P<n>/[a-zA-Z0-9]+)|(?P<s>.)", obj_str
+        r"(?P<p>[\[\]])|(?P<c>\d+)|(?P<n>/[^\s/\[\]()<>]+)|(?P<s>.)", obj_str
     ):
         key = x.lastgroup
         val = x.group()
@@ -546,20 +548,6 @@ class ILCreater:
         else:
             self.current_page.pdf_font.append(il_font_metadata)
 
-    def get_legacy_encoding(self, xobj_id):
-        try:
-            encoding = ("Custom", list(range(256)))
-            font_encoding = self.mupdf.xref_get_key(xobj_id, "Encoding")
-            if font_encoding[1] == "/WinAnsiEncoding":
-                encoding = ("WinAnsi", WinAnsiEncoding)
-            base_encoding = self.mupdf.xref_get_key(xobj_id, "Encoding/BaseEncoding")
-            if base_encoding[1] == "/WinAnsiEncoding":
-                encoding = ("WinAnsi", WinAnsiEncoding)
-
-            return encoding
-        except Exception:
-            return ("Custom", list(range(256)))
-
     def parse_font_xobj_id(self, xobj_id: int):
         bbox_list = []
         encoding = parse_font_encoding(self.mupdf, xobj_id)
@@ -575,7 +563,6 @@ class ILCreater:
                     file_idx,
                     encoding,
                     differences,
-                    self.get_legacy_encoding(xobj_id),
                 )
         cmap = {}
         to_unicode = self.mupdf.xref_get_key(xobj_id, "ToUnicode")

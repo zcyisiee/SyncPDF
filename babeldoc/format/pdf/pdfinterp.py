@@ -5,6 +5,7 @@ from typing import cast
 
 import numpy as np
 
+from babeldoc.format.pdf.babelpdf.utils import guarded_bbox
 from babeldoc.format.pdf.document_il.frontend.il_creater import ILCreater
 from babeldoc.pdfminer import settings
 from babeldoc.pdfminer.pdfcolor import PREDEFINED_COLORSPACE
@@ -319,7 +320,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                 resources = self.resources.copy()
             self.device.begin_figure(xobjid, bbox, matrix)
             ctm = mult_matrix(matrix, self.ctm)
-            (x, y, x2, y2) = bbox
+            (x, y, x2, y2) = guarded_bbox(bbox)
             (x, y) = apply_matrix_pt(ctm, (x, y))
             (x2, y2) = apply_matrix_pt(ctm, (x2, y2))
             x_id = self.il_creater.on_xobj_begin((x, y, x2, y2), xobj.objid)
