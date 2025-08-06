@@ -111,7 +111,7 @@ def parse_font_file(doc, idx, encoding, differences):
     face = freetype.Face(BytesIO(data))
     glyph_name_set = set()
     for x in range(0, face.num_glyphs):
-        glyph_name_set.add(face.get_glyph_name(x))
+        glyph_name_set.add(face.get_glyph_name(x).decode("U8"))
     scale = 1000 / face.units_per_EM
     enc_name, enc_vector = encoding
     if enc_name == "Custom":
@@ -122,7 +122,7 @@ def parse_font_file(doc, idx, encoding, differences):
                 break
     for i, x in enumerate(enc_vector):
         if x in glyph_name_set:
-            v = get_name_cbox(face, x)
+            v = get_name_cbox(face, x.encode("U8"))
         else:
             v = get_char_cbox(face, i)
         bbox_list.append(v)
