@@ -51,6 +51,7 @@ dependencies = [
     "chardet>=5.2.0",
     "scipy>=1.15.3",
     "uharfbuzz>=0.50.2",
+    "scikit-learn>=1.7.1",
 ]
 
 [project.optional-dependencies]

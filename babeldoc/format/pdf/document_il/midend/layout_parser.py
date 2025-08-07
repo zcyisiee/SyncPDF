@@ -49,10 +49,11 @@ class LayoutParser:
                 (0, 255, 0),
                 1,
             )
+        img_bgr = cv2.cvtColor(debug_image, cv2.COLOR_RGB2BGR)
 
         # Save the image
         output_path = debug_dir / f"{page_number}.jpg"
-        cv2.imwrite(str(output_path), debug_image)
+        cv2.imwrite(str(output_path), img_bgr)
 
     def _save_debug_box_to_page(self, page: il_version_1.Page):
         """Save debug boxes and text labels to the PDF page."""
