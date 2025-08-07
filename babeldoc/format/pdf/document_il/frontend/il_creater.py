@@ -10,6 +10,7 @@ import freetype
 import pymupdf
 
 import babeldoc.pdfminer.pdfinterp
+from babeldoc.format.pdf.babelpdf.encoding import WinAnsiEncoding
 from babeldoc.format.pdf.babelpdf.encoding import get_type1_encoding
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils import zstd_helper
@@ -105,10 +106,19 @@ def parse_font_encoding(doc, idx):
     return ("Custom", get_type1_encoding("StandardEncoding"))
 
 
+def get_truetype_ansi_bbox_list(face):
+    scale = 1000 / face.units_per_EM
+    bbox_list = [get_char_cbox(face, code) for code in WinAnsiEncoding]
+    bbox_list = [[v * scale for v in bbox] for bbox in bbox_list]
+    return bbox_list
+
+
 def parse_font_file(doc, idx, encoding, differences):
     bbox_list = []
     data = doc.xref_stream(idx)
     face = freetype.Face(BytesIO(data))
+    if face.get_format() == b"TrueType" and encoding[0] == "WinAnsiEncoding":
+        return get_truetype_ansi_bbox_list(face)
     glyph_name_set = set()
     for x in range(0, face.num_glyphs):
         glyph_name_set.add(face.get_glyph_name(x).decode("U8"))
