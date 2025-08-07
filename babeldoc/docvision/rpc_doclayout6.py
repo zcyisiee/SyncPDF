@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import threading
@@ -18,6 +19,12 @@ import babeldoc
 from babeldoc.docvision.base_doclayout import DocLayoutModel
 from babeldoc.docvision.base_doclayout import YoloBox
 from babeldoc.docvision.base_doclayout import YoloResult
+from babeldoc.format.pdf.document_il.utils.extract_char import (
+    convert_page_to_char_boxes,
+)
+from babeldoc.format.pdf.document_il.utils.extract_char import (
+    process_page_chars_to_lines,
+)
 from babeldoc.format.pdf.document_il.utils.mupdf_helper import get_no_rotation_img
 
 logger = logging.getLogger(__name__)
@@ -61,40 +68,60 @@ def predict_layout(
     image,
     host: str = "http://localhost:8000",
     _imgsz: int = 1024,
+    lines=None,
 ):
-    """
-    Predict document layout using the MOSEC service
+    """Predict document layout using OCR line information (RPC service)."""
 
-    Args:
-        image: Can be either a file path (str) or numpy array
-        host: Service host URL
-        imgsz: Image size for model input
-
-    Returns:
-        List of predictions containing bounding boxes and classes
-    """
-    # Prepare request data
+    if lines is None:
+        lines = []
 
     image_data = encode_image(image)
 
-    # Pack data using msgpack
-    # packed_data = msgpack.packb(data, use_bin_type=True)
-    # logger.debug(f"Packed data size: {len(packed_data)} bytes")
+    def convert_line(line):
+        if not line.text:
+            return None
+        boxes = [c[0] for c in line.chars]
+        min_x = min(b.x for b in boxes)
+        max_x = max(b.x2 for b in boxes)
+        min_y = min(b.y for b in boxes)
+        max_y = max(b.y2 for b in boxes)
 
-    # Send request
-    # logger.debug(f"Sending request to {host}/inference")
+        # Transform to image pixel coordinates
+        min_x = min_x / 72 * DPI
+        max_x = max_x / 72 * DPI
+        min_y = min_y / 72 * DPI
+        max_y = max_y / 72 * DPI
+
+        image_height = image.shape[0]
+        min_y, max_y = image_height - max_y, image_height - min_y
+
+        box_volume = (max_x - min_x) * (max_y - min_y)
+        if box_volume < 1:
+            return None
+
+        return {"box": [min_x, min_y, max_x, max_y], "text": line.text}
+
+    formatted_results = [convert_line(l) for l in lines]
+    formatted_results = [r for r in formatted_results if r is not None]
+    if not formatted_results:
+        return None
+
+    image_b64 = base64.b64encode(image_data).decode("utf-8")
+
+    request_data = {
+        "image": image_b64,
+        "ocr_results": formatted_results,
+        "image_size": list(image.shape[:2])[::-1],  # (height, width)
+    }
+
     response = httpx.post(
-        f"{host}/analyze_hybrid?min_sim=0.7&early_stop=0.99&timeout=1800",
-        files={"file": ("image.jpg", image_data, "image/jpeg")},
-        headers={
-            "Accept": "application/json",
-        },
+        f"{host}/inference",
+        json=request_data,
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
         timeout=1800,
         follow_redirects=True,
     )
 
-    # logger.debug(f"Response status: {response.status_code}")
-    # logger.debug(f"Response headers: {response.headers}")
     idx = 0
     id_lookup = {}
     if response.status_code == 200:
@@ -333,6 +360,7 @@ class RpcDocLayoutModel(DocLayoutModel):
         self,
         image,
         imgsz: int = 1024,
+        lines=None,
     ) -> YoloResult:
         """Predict the layout of a single page and fuse results from two RPC services."""
 
@@ -346,11 +374,17 @@ class RpcDocLayoutModel(DocLayoutModel):
 
         # Parallel calls to both services; exceptions propagate if either fails
         with ThreadPoolExecutor(max_workers=2) as ex:
-            future1 = ex.submit(predict_layout, image_proc, self.host1)
-            future2 = ex.submit(predict_layout2, image_proc, self.host2)
+            if lines:
+                future1 = ex.submit(
+                    predict_layout, image_proc, self.host1, imgsz, lines
+                )
+            future2 = ex.submit(predict_layout2, image_proc, self.host2, imgsz)
 
             # .result() will re-raise any exception occurred in worker thread.
-            preds1 = future1.result()
+            if lines:
+                preds1 = future1.result()
+            else:
+                preds1 = None
             preds2 = future2.result()
 
         # Convert DPI to PDF points (72 dpi)
@@ -386,7 +420,8 @@ class RpcDocLayoutModel(DocLayoutModel):
                     )
 
         # service-1: +1000 id, add "_hybrid" suffix
-        _process_preds(preds1, 1000, "_hybrid")
+        if preds1:
+            _process_preds(preds1, 1000, "_hybrid")
 
         # service-2: +2000 id, label unchanged
         _process_preds(preds2, 2000, None)
@@ -422,7 +457,9 @@ class RpcDocLayoutModel(DocLayoutModel):
             pix.width,
             3,
         )[:, :, ::-1]
-        predict_result = self.predict_image(image, 800)
+        char_boxes = convert_page_to_char_boxes(page)
+        lines = process_page_chars_to_lines(char_boxes)
+        predict_result = self.predict_image(image, 800, lines)
         save_debug_image(image, predict_result, page.page_number + 1)
         return page, predict_result
 
@@ -433,7 +470,7 @@ class RpcDocLayoutModel(DocLayoutModel):
         translate_config,
         save_debug_image,
     ):
-        with ThreadPoolExecutor(max_workers=1) as executor:
+        with ThreadPoolExecutor(max_workers=32) as executor:
             yield from executor.map(
                 self.predict_page,
                 pages,

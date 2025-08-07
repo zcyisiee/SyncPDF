@@ -316,9 +316,9 @@ def _cluster_by_axis(chars: list[tuple[il_version_1.Box, str, bool]], orientatio
             > max_char_secondary_size * LINE_SPLIT_SIZE_RATIO_THRESHOLD
             and len(line.chars) > 1
         ):
-            logger.debug(
-                f"Splitting line '{line.text}' which seems to contain multiple lines."
-            )
+            # logger.debug(
+            #     f"Splitting line '{line.text}' which seems to contain multiple lines."
+            # )
 
             # Use DBSCAN on the secondary axis centers to split the line
             centers = np.array(
@@ -433,9 +433,9 @@ def _merge_lines_on_page(page_lines: list[Line]) -> list[Line]:
                 and (inter_area / area2) > MERGE_CONTAINMENT_IOU_THRESHOLD
             ):
                 # Case 1: Merge line2 (smaller) into line1 (larger) by containment
-                logger.debug(
-                    f"Merging line '{line2.text}' into '{line1.text}' (mostly contained)"
-                )
+                # logger.debug(
+                #     f"Merging line '{line2.text}' into '{line1.text}' (mostly contained)"
+                # )
                 line1.chars.extend(line2.chars)
                 lines_to_skip.add(j)
                 merged = True
@@ -452,9 +452,9 @@ def _merge_lines_on_page(page_lines: list[Line]) -> list[Line]:
                 and (inter_area / area1) > MERGE_CONTAINMENT_IOU_THRESHOLD
             ):
                 # Case 2: Merge line1 (smaller) into line2 (larger) by containment
-                logger.debug(
-                    f"Merging line '{line1.text}' into '{line2.text}' (mostly contained)"
-                )
+                # logger.debug(
+                #     f"Merging line '{line1.text}' into '{line2.text}' (mostly contained)"
+                # )
                 line2.chars.extend(line1.chars)
                 page_lines[i], page_lines[j] = page_lines[j], page_lines[i]
                 line1 = page_lines[i]
@@ -497,9 +497,9 @@ def _merge_lines_on_page(page_lines: list[Line]) -> list[Line]:
                                     and h_gap
                                     < avg_char_width * MERGE_ADJACENCY_GAP_MULTIPLIER
                                 ):
-                                    logger.debug(
-                                        f"Merging adjacent lines '{line1.text}' and '{line2.text}'"
-                                    )
+                                    # logger.debug(
+                                    #     f"Merging adjacent lines '{line1.text}' and '{line2.text}'"
+                                    # )
                                     line1.chars.extend(line2.chars)
                                     lines_to_skip.add(j)
                                     merged = True
@@ -536,9 +536,9 @@ def _merge_lines_on_page(page_lines: list[Line]) -> list[Line]:
                                     and v_gap
                                     < avg_char_height * MERGE_ADJACENCY_GAP_MULTIPLIER
                                 ):
-                                    logger.debug(
-                                        f"Merging adjacent vertical lines '{line1.text}' and '{line2.text}'"
-                                    )
+                                    # logger.debug(
+                                    #     f"Merging adjacent vertical lines '{line1.text}' and '{line2.text}'"
+                                    # )
                                     line1.chars.extend(line2.chars)
                                     lines_to_skip.add(j)
                                     merged = True
