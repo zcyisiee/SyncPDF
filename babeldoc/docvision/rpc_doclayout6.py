@@ -1,3 +1,5 @@
+import base64
+import json
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -17,6 +19,12 @@ import babeldoc
 from babeldoc.docvision.base_doclayout import DocLayoutModel
 from babeldoc.docvision.base_doclayout import YoloBox
 from babeldoc.docvision.base_doclayout import YoloResult
+from babeldoc.format.pdf.document_il.utils.extract_char import (
+    convert_page_to_char_boxes,
+)
+from babeldoc.format.pdf.document_il.utils.extract_char import (
+    process_page_chars_to_lines,
+)
 from babeldoc.format.pdf.document_il.utils.mupdf_helper import get_no_rotation_img
 
 logger = logging.getLogger(__name__)
@@ -57,6 +65,113 @@ def encode_image(image) -> bytes:
     ),
 )
 def predict_layout(
+    image,
+    host: str = "http://localhost:8000",
+    _imgsz: int = 1024,
+    lines=None,
+):
+    """Predict document layout using OCR line information (RPC service)."""
+
+    if lines is None:
+        lines = []
+
+    image_data = encode_image(image)
+
+    def convert_line(line):
+        if not line.text:
+            return None
+        boxes = [c[0] for c in line.chars]
+        min_x = min(b.x for b in boxes)
+        max_x = max(b.x2 for b in boxes)
+        min_y = min(b.y for b in boxes)
+        max_y = max(b.y2 for b in boxes)
+
+        # Transform to image pixel coordinates
+        min_x = min_x / 72 * DPI
+        max_x = max_x / 72 * DPI
+        min_y = min_y / 72 * DPI
+        max_y = max_y / 72 * DPI
+
+        image_height = image.shape[0]
+        min_y, max_y = image_height - max_y, image_height - min_y
+
+        box_volume = (max_x - min_x) * (max_y - min_y)
+        if box_volume < 1:
+            return None
+
+        return {"box": [min_x, min_y, max_x, max_y], "text": line.text}
+
+    formatted_results = [convert_line(l) for l in lines]
+    formatted_results = [r for r in formatted_results if r is not None]
+    if not formatted_results:
+        return None
+
+    image_b64 = base64.b64encode(image_data).decode("utf-8")
+
+    request_data = {
+        "image": image_b64,
+        "ocr_results": formatted_results,
+        "image_size": list(image.shape[:2])[::-1],  # (height, width)
+    }
+
+    response = httpx.post(
+        f"{host}/inference",
+        json=request_data,
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+        timeout=1800,
+        follow_redirects=True,
+    )
+
+    idx = 0
+    id_lookup = {}
+    if response.status_code == 200:
+        try:
+            result = json.loads(response.text)
+            useful_result = []
+            if isinstance(result, dict):
+                names = {}
+                clusters = result["clusters"]
+                for box in clusters:
+                    box["xyxy"] = box["box"]
+                    box["conf"] = 1
+                    if box["label"] not in names:
+                        idx += 1
+                        names[idx] = box["label"]
+                        box["cls_id"] = idx
+                        id_lookup[box["label"]] = idx
+                    else:
+                        box["cls_id"] = id_lookup[box["label"]]
+                    names[box["cls_id"]] = box["label"]
+                    box["cls"] = box["cls_id"]
+                    useful_result.append(box)
+                if "names" not in result:
+                    result["names"] = names
+                result["boxes"] = useful_result
+                result = [result]
+            return result
+        except Exception as e:
+            logger.exception(f"Failed to unpack response: {e!s}")
+            raise
+    else:
+        logger.error(f"Request failed with status {response.status_code}")
+        logger.error(f"Response content: {response.text}")
+        raise Exception(
+            f"Request failed with status {response.status_code}: {response.text}",
+        )
+
+
+@retry(
+    stop=stop_after_attempt(3),  # 最多重试 3 次
+    wait=wait_exponential(
+        multiplier=1, min=1, max=10
+    ),  # 指数退避策略，初始 1 秒，最大 10 秒
+    retry=retry_if_exception_type((httpx.HTTPError, Exception)),  # 针对哪些异常重试
+    before_sleep=lambda retry_state: logger.warning(
+        f"Request failed, retrying in {getattr(retry_state.next_action, 'sleep', 'unknown')} seconds... "
+        f"(Attempt {retry_state.attempt_number}/3)"
+    ),
+)
+def predict_layout2(
     image,
     host: str = "http://localhost:8000",
     _imgsz: int = 1024,
@@ -149,9 +264,22 @@ class ResultContainer:
 class RpcDocLayoutModel(DocLayoutModel):
     """DocLayoutModel implementation that uses RPC service."""
 
-    def __init__(self, host: str = "http://localhost:8000"):
-        """Initialize RPC model with host address."""
+    def __init__(self, host: str = "http://localhost:8000;http://localhost:8001"):
+        """Initialize RPC model with host address.
+
+        Args:
+            host: Two RPC service hosts separated by ';', e.g. "host1;host2".
+        """
+        if ";" not in host:
+            raise ValueError(
+                "RpcDocLayoutModel host must be two hosts separated by ';' (e.g. 'http://h1;http://h2')"
+            )
+
+        self.host1, self.host2 = [h.strip() for h in host.split(";", 1)]
+
+        # keep the raw host string for logging/debugging purposes
         self.host = host
+
         self._stride = 32  # Default stride value
         self._names = ["text", "title", "list", "table", "figure"]
         self.lock = threading.Lock()
@@ -231,54 +359,91 @@ class RpcDocLayoutModel(DocLayoutModel):
     def predict_image(
         self,
         image,
-        host: str | None = None,
-        result_container: ResultContainer | None = None,
         imgsz: int = 1024,
-    ) -> ResultContainer:
-        """Predict the layout of document pages using RPC service."""
-        if result_container is None:
-            result_container = ResultContainer()
-        target_imgsz = (800, 800)
+        lines=None,
+    ) -> YoloResult:
+        """Predict the layout of a single page and fuse results from two RPC services."""
+
+        # Resize/pad image if needed – use original size to avoid extra scaling artefacts
         orig_h, orig_w = image.shape[:2]
         target_imgsz = (orig_h, orig_w)
         if image.shape[0] != target_imgsz[0] or image.shape[1] != target_imgsz[1]:
-            image = self.resize_and_pad_image(image, new_shape=target_imgsz)
-        preds = predict_layout(image, host=self.host)
-        orig_h, orig_w = orig_h / DPI * 72, orig_w / DPI * 72
-        if len(preds) > 0:
-            for pred in preds:
-                boxes = [
-                    YoloBox(
-                        None,
-                        self.scale_boxes(
-                            target_imgsz, np.array(x["xyxy"]), (orig_h, orig_w)
-                        ),
-                        np.array(x["conf"]),
-                        x["cls"],
-                    )
-                    for x in pred["boxes"]
-                ]
-                result_container.result = YoloResult(
-                    boxes=boxes,
-                    names={int(k): v for k, v in pred["names"].items()},
-                )
-        return result_container.result
+            image_proc = self.resize_and_pad_image(image, new_shape=target_imgsz)
+        else:
+            image_proc = image
 
-    def predict(self, image, imgsz=1024, **kwargs) -> list[YoloResult]:
-        """Predict the layout of document pages using RPC service."""
-        # Handle single image input
+        # Parallel calls to both services; exceptions propagate if either fails
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            if lines:
+                future1 = ex.submit(
+                    predict_layout, image_proc, self.host1, imgsz, lines
+                )
+            future2 = ex.submit(predict_layout2, image_proc, self.host2, imgsz)
+
+            # .result() will re-raise any exception occurred in worker thread.
+            if lines:
+                preds1 = future1.result()
+            else:
+                preds1 = None
+            preds2 = future2.result()
+
+        # Convert DPI to PDF points (72 dpi)
+        pdf_h, pdf_w = orig_h / DPI * 72, orig_w / DPI * 72
+
+        merged_boxes: list[YoloBox] = []
+        names: dict[int, str] = {}
+
+        def _process_preds(preds, id_offset: int, label_suffix: str | None):
+            for pred in preds or []:
+                for box in pred["boxes"]:
+                    # scale coords back to PDF space
+                    scaled_xyxy = self.scale_boxes(
+                        target_imgsz, np.array(box["xyxy"]), (pdf_h, pdf_w)
+                    )
+
+                    new_cls_id = box["cls"] + id_offset
+
+                    # derive label – fall back gracefully if missing
+                    label = pred["names"].get(box["cls"], str(box["cls"]))
+                    if label_suffix:
+                        label = f"{label}{label_suffix}"
+
+                    names[new_cls_id] = label
+
+                    merged_boxes.append(
+                        YoloBox(
+                            None,
+                            scaled_xyxy,
+                            np.array(box.get("conf", box.get("score", 1.0))),
+                            new_cls_id,
+                        )
+                    )
+
+        # service-1: +1000 id, add "_hybrid" suffix
+        if preds1:
+            _process_preds(preds1, 1000, "_hybrid")
+
+        # service-2: +2000 id, label unchanged
+        _process_preds(preds2, 2000, None)
+
+        # Sort boxes by confidence desc (YoloResult expects sorted list)
+        merged_boxes.sort(key=lambda b: b.conf, reverse=True)
+
+        return YoloResult(boxes=merged_boxes, names=names)
+
+    def predict(self, image, imgsz=1024, **kwargs) -> list[YoloResult]:  # type: ignore[override]
+        """Predict the layout for one or multiple images."""
+
+        # Normalize to list
         if isinstance(image, np.ndarray) and len(image.shape) == 3:
             image = [image]
 
-        result_containers = [ResultContainer() for _ in image]
-        predict_thread = ThreadPoolExecutor(max_workers=len(image))
-        for img, result_container in zip(image, result_containers, strict=True):
-            predict_thread.submit(
-                self.predict_image, img, self.host, result_container, 800
-            )
-        predict_thread.shutdown(wait=True)
-        result = [result_container.result for result_container in result_containers]
-        return result
+        # Sequential processing is sufficient; keep simple
+        results: list[YoloResult] = []
+        for img in image:
+            results.append(self.predict_image(img, imgsz))
+
+        return results
 
     def predict_page(
         self, page, mupdf_doc: pymupdf.Document, translate_config, save_debug_image
@@ -292,18 +457,20 @@ class RpcDocLayoutModel(DocLayoutModel):
             pix.width,
             3,
         )[:, :, ::-1]
-        predict_result = self.predict_image(image, self.host, None, 800)
+        char_boxes = convert_page_to_char_boxes(page)
+        lines = process_page_chars_to_lines(char_boxes)
+        predict_result = self.predict_image(image, 800, lines)
         save_debug_image(image, predict_result, page.page_number + 1)
         return page, predict_result
 
-    def handle_document(
+    def handle_document(  # type: ignore[override]
         self,
-        pages: list[babeldoc.format.pdf.document_il.il_version_1.Page],
+        pages: list["babeldoc.format.pdf.document_il.il_version_1.Page"],
         mupdf_doc: pymupdf.Document,
         translate_config,
         save_debug_image,
     ):
-        with ThreadPoolExecutor(max_workers=16) as executor:
+        with ThreadPoolExecutor(max_workers=32) as executor:
             yield from executor.map(
                 self.predict_page,
                 pages,

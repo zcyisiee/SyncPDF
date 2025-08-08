@@ -633,35 +633,39 @@ def get_character_layout(
     """Get the layout for a character based on priority and IoU."""
     if layout_priority is None:
         layout_priority = [
-            "image",
             "number",
             "reference",
+            "reference_hybrid",
+            "reference_content",
             "algorithm",
             "formula_caption",
             "isolate_formula",
             "table_footnote",
             "table_caption",
             "figure_caption",
+            "figure_title",
+            "chart_title",
+            "table_title",
+            "table_cell_hybrid",
             "table_text",
             "wireless_table_cell",
             "wired_table_cell",
-            "table",
-            "figure",
             "abandon",
             "title",
             "abstract",
             "paragraph_title",
             "content",
-            "figure_title",
-            "chart_title",
-            "table_title",
             "doc_title",
             "footnote",
             "header",
             "footer",
-            "sealplain text",
+            "seal",
+            "plain text",
             "tiny text",
+            "author_info_hybrid",
+            "list_item_hybrid",
             "text",
+            "paragraph_hybrid",
             "paragraph",
             "table_cell",
             "figure_text",
@@ -672,6 +676,32 @@ def get_character_layout(
             "formula",
             "page_header",
             "page_footer",
+            # --- hybrid labels ---
+            "document_hybrid",
+            "academic_paper_hybrid",
+            "form_or_table_hybrid",
+            "presentation_slide_hybrid",
+            "webpage_screenshot_hybrid",
+            "manga_or_comic_hybrid",
+            "advertisement_hybrid",
+            "magazine_or_newspaper_hybrid",
+            "other_hybrid",
+            "table_cell_hybrid",
+            "figure_text_hybrid",
+            "title_hybrid",
+            "caption_hybrid",
+            "code_algo_hybrid",
+            "line_number_hybrid",
+            "footnote_hybrid",
+            "formula_hybrid",
+            "page_header_hybrid",
+            "page_footer_hybrid",
+            "page_number_hybrid",
+            "unknown_hybrid",
+            "fallback_line",
+            "table",
+            "figure",
+            "image",
         ]
 
     char_box = char.visual_bbox.box
@@ -723,6 +753,24 @@ def get_character_layout(
     # Sort by priority (ascending) and IoU value (descending)
     matching_layouts.sort(key=lambda x: (x["priority"], -x["iou"]))
 
+    # non_hybrid_table_label = None
+    # for layout in matching_layouts:
+    #     layout = layout["layout"]
+    #     label = layout.name
+    #     if is_text_layout(layout) and label not in (
+    #         "table_cell_hybrid",
+    #         "table_text",
+    #         "wireless_table_cell",
+    #         "wired_table_cell",
+    #         "fallback_line",
+    #         "unknown_hybrid",
+    #     ):
+    #         non_hybrid_table_label = layout
+    #         break
+    #
+    # if non_hybrid_table_label:
+    #     return non_hybrid_table_label
+
     return matching_layouts[0]["layout"]
 
 
@@ -736,6 +784,7 @@ def is_text_layout(layout: Layout):
         "figure_caption",
         "table_caption",
         "table_text",
+        "table_footnote",
         # "reference",
         "title",
         "paragraph_title",
@@ -761,6 +810,14 @@ def is_text_layout(layout: Layout):
         "page_footer",
         "wired_table_cell",
         "wireless_table_cell",
+        "paragraph_hybrid",
+        "table_cell_hybrid",
+        "caption_hybrid",
+        "unknown_hybrid",
+        "figure_text_hybrid",
+        "list_item_hybrid",
+        "title_hybrid",
+        "fallback_line",
     ]
 
 

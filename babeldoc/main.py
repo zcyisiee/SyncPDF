@@ -22,7 +22,7 @@ from babeldoc.translator.translator import OpenAITranslator
 from babeldoc.translator.translator import set_translate_rate_limiter
 
 logger = logging.getLogger(__name__)
-__version__ = "0.4.21"
+__version__ = "0.4.22"
 
 
 def create_parser():
@@ -69,6 +69,18 @@ def create_parser():
     )
     parser.add_argument(
         "--rpc-doclayout4",
+        help="RPC service host address for document layout analysis",
+    )
+    parser.add_argument(
+        "--rpc-doclayout5",
+        help="RPC service host address for document layout analysis",
+    )
+    parser.add_argument(
+        "--rpc-doclayout6",
+        help="RPC service host address for document layout analysis",
+    )
+    parser.add_argument(
+        "--rpc-doclayout7",
         help="RPC service host address for document layout analysis",
     )
     parser.add_argument(
@@ -381,6 +393,18 @@ async def main():
         from babeldoc.docvision.rpc_doclayout4 import RpcDocLayoutModel
 
         doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout4)
+    elif args.rpc_doclayout5:
+        from babeldoc.docvision.rpc_doclayout5 import RpcDocLayoutModel
+
+        doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout5)
+    elif args.rpc_doclayout6:
+        from babeldoc.docvision.rpc_doclayout6 import RpcDocLayoutModel
+
+        doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout6)
+    elif args.rpc_doclayout7:
+        from babeldoc.docvision.rpc_doclayout7 import RpcDocLayoutModel
+
+        doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout7)
     else:
         from babeldoc.docvision.doclayout import DocLayoutModel
 

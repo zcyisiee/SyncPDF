@@ -108,7 +108,9 @@ class AddDebugInformation:
 
             debug_text = "paragraph"
             if hasattr(paragraph, "debug_id") and paragraph.debug_id:
-                debug_text = f"paragraph[{paragraph.debug_id}]"
+                debug_text = (
+                    f"paragraph[{paragraph.debug_id}]-[{paragraph.layout_label}]"
+                )
             new_paragraphs.append(self._create_text(debug_text, BLUE, paragraph.box))
 
             for composition in paragraph.pdf_paragraph_composition:
