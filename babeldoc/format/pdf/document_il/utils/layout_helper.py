@@ -633,7 +633,6 @@ def get_character_layout(
     """Get the layout for a character based on priority and IoU."""
     if layout_priority is None:
         layout_priority = [
-            "image",
             "number",
             "reference",
             "reference_hybrid",
@@ -651,8 +650,6 @@ def get_character_layout(
             "table_text",
             "wireless_table_cell",
             "wired_table_cell",
-            "table",
-            "figure",
             "abandon",
             "title",
             "abstract",
@@ -702,6 +699,9 @@ def get_character_layout(
             "page_number_hybrid",
             "unknown_hybrid",
             "fallback_line",
+            "table",
+            "figure",
+            "image",
         ]
 
     char_box = char.visual_bbox.box
@@ -753,21 +753,23 @@ def get_character_layout(
     # Sort by priority (ascending) and IoU value (descending)
     matching_layouts.sort(key=lambda x: (x["priority"], -x["iou"]))
 
-    non_hybrid_table_label = None
-    for layout in matching_layouts:
-        layout = layout["layout"]
-        label = layout.name
-        if is_text_layout(layout) and label not in (
-            "table_cell_hybrid",
-            "table_text",
-            "wireless_table_cell",
-            "wired_table_cell",
-        ):
-            non_hybrid_table_label = layout
-            break
-
-    if non_hybrid_table_label:
-        return non_hybrid_table_label
+    # non_hybrid_table_label = None
+    # for layout in matching_layouts:
+    #     layout = layout["layout"]
+    #     label = layout.name
+    #     if is_text_layout(layout) and label not in (
+    #         "table_cell_hybrid",
+    #         "table_text",
+    #         "wireless_table_cell",
+    #         "wired_table_cell",
+    #         "fallback_line",
+    #         "unknown_hybrid",
+    #     ):
+    #         non_hybrid_table_label = layout
+    #         break
+    #
+    # if non_hybrid_table_label:
+    #     return non_hybrid_table_label
 
     return matching_layouts[0]["layout"]
 

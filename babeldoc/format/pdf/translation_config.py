@@ -277,6 +277,9 @@ class TranslationConfig:
 
         self.save_auto_extracted_glossary = save_auto_extracted_glossary
 
+        # force disable table translate until the new model is ready
+        self.table_model = None
+
     def parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
         """解析页码字符串，返回页码范围列表
 
