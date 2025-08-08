@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 from pymupdf import Document
 
+import babeldoc.format.pdf.document_il.utils.extract_char
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils.mupdf_helper import get_no_rotation_img
 from babeldoc.format.pdf.document_il.utils.style_helper import GREEN
@@ -64,6 +65,9 @@ class LayoutParser:
 
         for layout in page.page_layout:
             # Create a rectangle box
+            scale_factor = 1
+            if layout.class_name == "fallback_line":
+                scale_factor = 0.1
             rect = il_version_1.PdfRectangle(
                 box=il_version_1.Box(
                     x=layout.box.x,
@@ -73,6 +77,7 @@ class LayoutParser:
                 ),
                 graphic_state=color,
                 debug_info=True,
+                line_width=0.4 * scale_factor,
             )
             page.pdf_rectangle.append(rect)
 
@@ -81,7 +86,7 @@ class LayoutParser:
             # so we use y2 for top position
             style = il_version_1.PdfStyle(
                 font_id="base",
-                font_size=4,
+                font_size=4 * scale_factor,
                 graphic_state=color,
             )
             page.pdf_paragraph.append(
@@ -152,7 +157,39 @@ class LayoutParser:
                     page_layouts.append(page_layout)
 
                 page.page_layout = page_layouts
+                self.generate_fallback_line_layout_for_page(page)
                 self._save_debug_box_to_page(page)
                 progress.advance(1)
 
         return docs
+
+    def generate_fallback_line_layout_for_page(self, page: il_version_1.Page):
+        exists_page_layouts = page.page_layout
+        char_boxes = babeldoc.format.pdf.document_il.utils.extract_char.convert_page_to_char_boxes(
+            page
+        )
+        if not char_boxes:
+            return
+
+        clusters = babeldoc.format.pdf.document_il.utils.extract_char.process_page_chars_to_lines(
+            char_boxes
+        )
+        for cluster in clusters:
+            boxes = [c[0] for c in cluster.chars]
+            min_x = min(b.x for b in boxes)
+            max_x = max(b.x2 for b in boxes)
+            min_y = min(b.y for b in boxes)
+            max_y = max(b.y2 for b in boxes)
+            cluster.chars = il_version_1.Box(min_x, min_y, max_x, max_y)
+            page_layout = il_version_1.PageLayout(
+                id=len(exists_page_layouts) + 1,
+                box=il_version_1.Box(
+                    min_x,
+                    min_y,
+                    max_x,
+                    max_y,
+                ),
+                conf=1,
+                class_name="fallback_line",
+            )
+            exists_page_layouts.append(page_layout)

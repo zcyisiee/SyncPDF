@@ -662,7 +662,8 @@ def get_character_layout(
             "footnote",
             "header",
             "footer",
-            "sealplain text",
+            "seal",
+            "plain text",
             "tiny text",
             "author_info_hybrid",
             "list_item_hybrid",
@@ -700,6 +701,7 @@ def get_character_layout(
             "page_footer_hybrid",
             "page_number_hybrid",
             "unknown_hybrid",
+            "fallback_line",
         ]
 
     char_box = char.visual_bbox.box
@@ -813,6 +815,7 @@ def is_text_layout(layout: Layout):
         "figure_text_hybrid",
         "list_item_hybrid",
         "title_hybrid",
+        "fallback_line",
     ]
 
 
