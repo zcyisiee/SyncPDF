@@ -184,7 +184,11 @@ class ILTranslatorLLMOnly:
         Returns:
             True if this is a body text paragraph, False otherwise
         """
-        return paragraph.layout_label in ("text", "plain text", "paragraph_hybrid")
+        return paragraph.layout_label in (
+            "text",
+            "plain text",
+            "paragraph_hybrid",
+        )
 
     def _should_translate_paragraph(
         self,

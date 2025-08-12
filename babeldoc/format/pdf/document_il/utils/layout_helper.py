@@ -822,7 +822,10 @@ def is_text_layout(layout: Layout):
 
 
 def is_character_in_formula_layout(
-    char: il_version_1.PdfCharacter, _page: il_version_1.Page, layout_index, layout_map
+    char: il_version_1.PdfCharacter,
+    _page: il_version_1.Page,
+    layout_index,
+    layout_map,
 ) -> int | None:
     """Check if character is contained within any formula-related layout."""
     formula_layout_types = {"formula"}
