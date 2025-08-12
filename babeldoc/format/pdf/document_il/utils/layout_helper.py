@@ -674,6 +674,7 @@ def get_character_layout(
             "caption",
             "footnote",
             "formula",
+            "formula_hybrid",
             "page_header",
             "page_footer",
             # --- hybrid labels ---
@@ -693,7 +694,6 @@ def get_character_layout(
             "code_algo_hybrid",
             "line_number_hybrid",
             "footnote_hybrid",
-            "formula_hybrid",
             "page_header_hybrid",
             "page_footer_hybrid",
             "page_number_hybrid",
@@ -818,6 +818,10 @@ def is_text_layout(layout: Layout):
         "list_item_hybrid",
         "title_hybrid",
         "fallback_line",
+        "author_info_hybrid",
+        "page_header_hybrid",
+        "page_footer_hybrid",
+        "footnote_hybrid",
     ]
 
 
