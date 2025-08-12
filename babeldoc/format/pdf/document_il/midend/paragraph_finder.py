@@ -20,6 +20,7 @@ from babeldoc.format.pdf.document_il.utils.formular_helper import (
 from babeldoc.format.pdf.document_il.utils.layout_helper import (
     HEIGHT_NOT_USFUL_CHAR_IN_CHAR,
 )
+from babeldoc.format.pdf.document_il.utils.layout_helper import SPACE_REGEX
 from babeldoc.format.pdf.document_il.utils.layout_helper import Layout
 from babeldoc.format.pdf.document_il.utils.layout_helper import add_space_dummy_chars
 from babeldoc.format.pdf.document_il.utils.layout_helper import build_layout_index
@@ -366,7 +367,10 @@ class ParagraphFinder:
                 and char.char_unicode not in HEIGHT_NOT_USFUL_CHAR_IN_CHAR
             ):
                 if (
-                    char_layout.id != current_layout.id
+                    (
+                        char_layout.id != current_layout.id
+                        and not SPACE_REGEX.match(char.char_unicode)
+                    )
                     or (  # not same xobject
                         current_paragraph.pdf_paragraph_composition
                         and current_paragraph.pdf_paragraph_composition[
