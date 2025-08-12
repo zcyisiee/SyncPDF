@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 import threading
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -25,6 +26,8 @@ from babeldoc.format.pdf.document_il.utils.extract_char import (
 from babeldoc.format.pdf.document_il.utils.extract_char import (
     process_page_chars_to_lines,
 )
+from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il.utils.layout_helper import SPACE_REGEX
 from babeldoc.format.pdf.document_il.utils.mupdf_helper import get_no_rotation_img
 
 logger = logging.getLogger(__name__)
@@ -69,6 +72,7 @@ def predict_layout(
     host: str = "http://localhost:8000",
     _imgsz: int = 1024,
     lines=None,
+    font_mapper: FontMapper | None = None,
 ):
     """Predict document layout using OCR line information (RPC service)."""
 
@@ -99,7 +103,11 @@ def predict_layout(
         if box_volume < 1:
             return None
 
-        return {"box": [min_x, min_y, max_x, max_y], "text": line.text}
+        filtered_text = filter_text(line.text, font_mapper)
+        if not filtered_text:
+            return None
+
+        return {"box": [min_x, min_y, max_x, max_y], "text": filtered_text}
 
     formatted_results = [convert_line(l) for l in lines]
     formatted_results = [r for r in formatted_results if r is not None]
@@ -261,6 +269,17 @@ class ResultContainer:
         self.result = YoloResult(boxes_data=np.array([]), names=[])
 
 
+def filter_text(txt: str, font_mapper: FontMapper):
+    normalize = unicodedata.normalize("NFKC", txt)
+    unicodes = []
+    for c in normalize:
+        if font_mapper.has_char(c):
+            unicodes.append(c)
+    normalize = "".join(unicodes)
+    result = SPACE_REGEX.sub(" ", normalize).strip()
+    return result
+
+
 class RpcDocLayoutModel(DocLayoutModel):
     """DocLayoutModel implementation that uses RPC service."""
 
@@ -283,6 +302,10 @@ class RpcDocLayoutModel(DocLayoutModel):
         self._stride = 32  # Default stride value
         self._names = ["text", "title", "list", "table", "figure"]
         self.lock = threading.Lock()
+        self.font_mapper = None
+
+    def init_font_mapper(self, translation_config):
+        self.font_mapper = FontMapper(translation_config)
 
     @property
     def stride(self) -> int:
@@ -376,7 +399,12 @@ class RpcDocLayoutModel(DocLayoutModel):
         with ThreadPoolExecutor(max_workers=2) as ex:
             if lines:
                 future1 = ex.submit(
-                    predict_layout, image_proc, self.host1, imgsz, lines
+                    predict_layout,
+                    image_proc,
+                    self.host1,
+                    imgsz,
+                    lines,
+                    self.font_mapper,
                 )
             future2 = ex.submit(predict_layout2, image_proc, self.host2, imgsz)
 

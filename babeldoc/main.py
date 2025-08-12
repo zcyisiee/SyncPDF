@@ -548,6 +548,10 @@ async def main():
             save_auto_extracted_glossary=args.save_auto_extracted_glossary,
         )
 
+        def nop(_x):
+            pass
+
+        getattr(doc_layout_model, "init_font_mapper", nop)(config)
         # Create progress handler
         progress_context, progress_handler = create_progress_handler(config)
 
