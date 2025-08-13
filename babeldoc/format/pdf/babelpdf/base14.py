@@ -1,3 +1,5 @@
+from .encoding import win_ansi
+
 base14_bbox = {
     "Courier-BoldOblique": [
         (0, 0, 0, 0),
@@ -1965,6 +1967,15 @@ base14_name = {
 }
 
 
-def get_base14_bbox(family, name):
-    if family in base14_bbox and name in base14_name:
-        return base14_bbox[family][base14_name[name]]
+def get_base14_bbox(family):
+    bbox = []
+    if family in base14_bbox:
+        base = base14_bbox[family]
+        for name in win_ansi:
+            cur_bbox = (0, 0, 0, 0)
+            if name:
+                index = base14_name.get(name)
+                if index:
+                    cur_bbox = base[index]
+            bbox.append(cur_bbox)
+    return bbox
