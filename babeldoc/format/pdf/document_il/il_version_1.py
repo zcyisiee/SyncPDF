@@ -359,6 +359,13 @@ class PdfCurve:
             "type": "Attribute",
         },
     )
+    render_order: int | None = field(
+        default=None,
+        metadata={
+            "name": "renderOrder",
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass(slots=True)
@@ -523,6 +530,13 @@ class PdfRectangle:
             "type": "Attribute",
         },
     )
+    render_order: int | None = field(
+        default=None,
+        metadata={
+            "name": "renderOrder",
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass(slots=True)
@@ -642,6 +656,13 @@ class PdfCharacter:
     formula_layout_id: int | None = field(
         default=None,
         metadata={
+            "type": "Attribute",
+        },
+    )
+    render_order: int | None = field(
+        default=None,
+        metadata={
+            "name": "renderOrder",
             "type": "Attribute",
         },
     )
@@ -834,6 +855,13 @@ class PdfLine:
             "min_occurs": 1,
         },
     )
+    render_order: int | None = field(
+        default=None,
+        metadata={
+            "name": "renderOrder",
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass(slots=True)
@@ -989,6 +1017,13 @@ class PdfParagraph:
     layout_id: int | None = field(
         default=None,
         metadata={
+            "type": "Attribute",
+        },
+    )
+    render_order: int | None = field(
+        default=None,
+        metadata={
+            "name": "renderOrder",
             "type": "Attribute",
         },
     )

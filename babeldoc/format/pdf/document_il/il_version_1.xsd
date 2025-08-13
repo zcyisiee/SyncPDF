@@ -106,6 +106,7 @@
       <xs:attribute name="xobjId" type="xs:int"/>
       <xs:attribute name="debug_info" type="xs:boolean"/>
       <xs:attribute name="formula_layout_id" type="xs:int"/>
+      <xs:attribute name="renderOrder" type="xs:int"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="visual_bbox">
@@ -193,6 +194,7 @@
       <xs:attribute name="debug_id" type="xs:string"/>
       <xs:attribute name="layout_label" type="xs:string"/>
       <xs:attribute name="layout_id" type="xs:int"/>
+      <xs:attribute name="renderOrder" type="xs:int"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfParagraphComposition">
@@ -212,6 +214,7 @@
         <xs:element ref="box"/>
         <xs:element maxOccurs="unbounded" ref="pdfCharacter"/>
       </xs:sequence>
+      <xs:attribute name="renderOrder" type="xs:int"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfSameStyleCharacters">
@@ -260,6 +263,7 @@
       <xs:attribute name="fill_background" type="xs:boolean"/>
       <xs:attribute name="xobjId" type="xs:int"/>
       <xs:attribute name="lineWidth" type="xs:float"/>
+      <xs:attribute name="renderOrder" type="xs:int"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfCurve">
@@ -274,6 +278,7 @@
       <xs:attribute name="stroke_path" type="xs:boolean"/>
       <xs:attribute name="evenodd" type="xs:boolean"/>
       <xs:attribute name="xobjId" type="xs:int"/>
+      <xs:attribute name="renderOrder" type="xs:int"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfPath">

@@ -71,6 +71,7 @@ PDFCharacter =
     attribute xobjId { xsd:int }?,
     attribute debug_info { xsd:boolean }?,
     attribute formula_layout_id { xsd:int }?,
+    attribute renderOrder { xsd:int }?,
     PDFStyle,
     Box,
     element visual_bbox { Box }?
@@ -120,6 +121,7 @@ PDFParagraph =
     attribute debug_id { xsd:string }?,
     attribute layout_label { xsd:string }?,
     attribute layout_id { xsd:int }?,
+    attribute renderOrder { xsd:int }?,
     Box,
     PDFStyle,
     PDFParagraphComposition*
@@ -132,7 +134,12 @@ PDFParagraphComposition =
     | PDFCharacter
     | PDFSameStyleUnicodeCharacters
   }
-PDFLine = element pdfLine { Box, PDFCharacter+ }
+PDFLine =
+  element pdfLine {
+    Box,
+    PDFCharacter+,
+    attribute renderOrder { xsd:int }?
+  }
 PDFSameStyleCharacters =
   element pdfSameStyleCharacters { Box, PDFStyle, PDFCharacter+ }
 PDFSameStyleUnicodeCharacters =
@@ -157,7 +164,8 @@ PDFRectangle =
     attribute debug_info { xsd:boolean }?,
     attribute fill_background { xsd:boolean }?,
     attribute xobjId { xsd:int }?,
-    attribute lineWidth { xsd:float }?
+    attribute lineWidth { xsd:float }?,
+    attribute renderOrder { xsd:int }?
   }
 PDFCurve =
   element pdfCurve {
@@ -168,7 +176,8 @@ PDFCurve =
     attribute fill_background { xsd:boolean }?,
     attribute stroke_path { xsd:boolean }?,
     attribute evenodd { xsd:boolean }?,
-    attribute xobjId { xsd:int }?
+    attribute xobjId { xsd:int }?,
+    attribute renderOrder { xsd:int }?
   }
 PDFPath =
   element pdfPath {

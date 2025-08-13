@@ -205,6 +205,11 @@
           <data type="int"/>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="renderOrder">
+          <data type="int"/>
+        </attribute>
+      </optional>
       <ref name="PDFStyle"/>
       <ref name="Box"/>
       <optional>
@@ -360,6 +365,11 @@
           <data type="int"/>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="renderOrder">
+          <data type="int"/>
+        </attribute>
+      </optional>
       <ref name="Box"/>
       <ref name="PDFStyle"/>
       <zeroOrMore>
@@ -384,6 +394,11 @@
       <oneOrMore>
         <ref name="PDFCharacter"/>
       </oneOrMore>
+      <optional>
+        <attribute name="renderOrder">
+          <data type="int"/>
+        </attribute>
+      </optional>
     </element>
   </define>
   <define name="PDFSameStyleCharacters">
@@ -458,6 +473,11 @@
           <data type="float"/>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="renderOrder">
+          <data type="int"/>
+        </attribute>
+      </optional>
     </element>
   </define>
   <define name="PDFCurve">
@@ -489,6 +509,11 @@
       </optional>
       <optional>
         <attribute name="xobjId">
+          <data type="int"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="renderOrder">
           <data type="int"/>
         </attribute>
       </optional>
