@@ -156,6 +156,7 @@ class TranslationConfig:
         only_include_translated_page: bool | None = False,
         save_auto_extracted_glossary: bool = True,
         enable_graphic_element_process: bool = True,
+        merge_alternating_line_numbers: bool = True,
     ):
         self.translator = translator
         initial_user_glossaries = list(glossaries) if glossaries else []
@@ -202,6 +203,7 @@ class TranslationConfig:
         self.min_text_length = min_text_length
         self.use_alternating_pages_dual = use_alternating_pages_dual
         self.ocr_workaround = ocr_workaround
+        self.merge_alternating_line_numbers = merge_alternating_line_numbers
 
         if self.ocr_workaround:
             self.skip_scanned_detection = True

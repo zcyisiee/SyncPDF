@@ -304,6 +304,13 @@ def create_parser():
         default=False,
         help="Disable graphic element process. (default: False)",
     )
+    translation_group.add_argument(
+        "--no-merge-alternating-line-numbers",
+        action="store_false",
+        dest="merge_alternating_line_numbers",
+        default=True,
+        help="Disable post-processing that merges alternating line-number layouts (by default this feature is enabled).",
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -553,6 +560,7 @@ async def main():
             only_include_translated_page=args.only_include_translated_page,
             save_auto_extracted_glossary=args.save_auto_extracted_glossary,
             enable_graphic_element_process=not args.disable_graphic_element_process,
+            merge_alternating_line_numbers=args.merge_alternating_line_numbers,
         )
 
         def nop(_x):
