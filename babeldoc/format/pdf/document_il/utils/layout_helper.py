@@ -378,18 +378,7 @@ def is_same_graphic_state(state1: GraphicState, state2: GraphicState) -> bool:
         return state1 is state2
 
     return (
-        state1.linewidth == state2.linewidth
-        and state1.dash == state2.dash
-        and state1.flatness == state2.flatness
-        and state1.intent == state2.intent
-        and state1.linecap == state2.linecap
-        and state1.linejoin == state2.linejoin
-        and state1.miterlimit == state2.miterlimit
-        and state1.ncolor == state2.ncolor
-        and state1.scolor == state2.scolor
-        and state1.stroking_color_space_name == state2.stroking_color_space_name
-        and state1.non_stroking_color_space_name == state2.non_stroking_color_space_name
-        and state1.passthrough_per_char_instruction
+        state1.passthrough_per_char_instruction
         == state2.passthrough_per_char_instruction
     )
 

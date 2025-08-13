@@ -410,30 +410,6 @@ class StylesAndFormulas:
             return state1
 
         return GraphicState(
-            linewidth=(
-                state1.linewidth if state1.linewidth == state2.linewidth else None
-            ),
-            dash=state1.dash if state1.dash == state2.dash else None,
-            flatness=state1.flatness if state1.flatness == state2.flatness else None,
-            intent=state1.intent if state1.intent == state2.intent else None,
-            linecap=state1.linecap if state1.linecap == state2.linecap else None,
-            linejoin=state1.linejoin if state1.linejoin == state2.linejoin else None,
-            miterlimit=(
-                state1.miterlimit if state1.miterlimit == state2.miterlimit else None
-            ),
-            ncolor=state1.ncolor if state1.ncolor == state2.ncolor else None,
-            scolor=state1.scolor if state1.scolor == state2.scolor else None,
-            stroking_color_space_name=(
-                state1.stroking_color_space_name
-                if state1.stroking_color_space_name == state2.stroking_color_space_name
-                else None
-            ),
-            non_stroking_color_space_name=(
-                state1.non_stroking_color_space_name
-                if state1.non_stroking_color_space_name
-                == state2.non_stroking_color_space_name
-                else None
-            ),
             passthrough_per_char_instruction=(
                 state1.passthrough_per_char_instruction
                 if state1.passthrough_per_char_instruction

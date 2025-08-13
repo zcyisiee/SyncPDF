@@ -128,44 +128,6 @@
   </xs:element>
   <xs:element name="graphicState">
     <xs:complexType>
-      <xs:attribute name="linewidth" type="xs:float"/>
-      <xs:attribute name="dash">
-        <xs:simpleType>
-          <xs:restriction>
-            <xs:simpleType>
-              <xs:list itemType="xs:float"/>
-            </xs:simpleType>
-            <xs:minLength value="1"/>
-          </xs:restriction>
-        </xs:simpleType>
-      </xs:attribute>
-      <xs:attribute name="flatness" type="xs:float"/>
-      <xs:attribute name="intent" type="xs:string"/>
-      <xs:attribute name="linecap" type="xs:int"/>
-      <xs:attribute name="linejoin" type="xs:int"/>
-      <xs:attribute name="miterlimit" type="xs:float"/>
-      <xs:attribute name="ncolor">
-        <xs:simpleType>
-          <xs:restriction>
-            <xs:simpleType>
-              <xs:list itemType="xs:float"/>
-            </xs:simpleType>
-            <xs:minLength value="1"/>
-          </xs:restriction>
-        </xs:simpleType>
-      </xs:attribute>
-      <xs:attribute name="scolor">
-        <xs:simpleType>
-          <xs:restriction>
-            <xs:simpleType>
-              <xs:list itemType="xs:float"/>
-            </xs:simpleType>
-            <xs:minLength value="1"/>
-          </xs:restriction>
-        </xs:simpleType>
-      </xs:attribute>
-      <xs:attribute name="strokingColorSpaceName" type="xs:string"/>
-      <xs:attribute name="nonStrokingColorSpaceName" type="xs:string"/>
       <xs:attribute name="passthroughPerCharInstruction" type="xs:string"/>
     </xs:complexType>
   </xs:element>
