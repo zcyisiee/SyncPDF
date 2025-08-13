@@ -155,6 +155,7 @@ class TranslationConfig:
         primary_font_family: str | None = None,
         only_include_translated_page: bool | None = False,
         save_auto_extracted_glossary: bool = True,
+        enable_graphic_element_process: bool = True,
     ):
         self.translator = translator
         initial_user_glossaries = list(glossaries) if glossaries else []
@@ -279,6 +280,7 @@ class TranslationConfig:
 
         # force disable table translate until the new model is ready
         self.table_model = None
+        self.enable_graphic_element_process = enable_graphic_element_process
 
     def parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
         """解析页码字符串，返回页码范围列表

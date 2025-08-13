@@ -67,6 +67,15 @@ def encode_image(image) -> bytes:
         f"(Attempt {retry_state.attempt_number}/3)"
     ),
 )
+def clip_num(num: float, min_value: float, max_value: float) -> float:
+    """Clip a number to a specified range."""
+    if num < min_value:
+        return min_value
+    elif num > max_value:
+        return max_value
+    return num
+
+
 def predict_layout(
     image,
     host: str = "http://localhost:8000",
@@ -90,18 +99,24 @@ def predict_layout(
         min_y = min(b.y for b in boxes)
         max_y = max(b.y2 for b in boxes)
 
+        image_height, image_width = image.shape[:2]
+
         # Transform to image pixel coordinates
         min_x = min_x / 72 * DPI
         max_x = max_x / 72 * DPI
         min_y = min_y / 72 * DPI
         max_y = max_y / 72 * DPI
 
-        image_height = image.shape[0]
         min_y, max_y = image_height - max_y, image_height - min_y
 
         box_volume = (max_x - min_x) * (max_y - min_y)
         if box_volume < 1:
             return None
+
+        min_x = clip_num(min_x, 0, image_width - 1)
+        max_x = clip_num(max_x, 0, image_width - 1)
+        min_y = clip_num(min_y, 0, image_height - 1)
+        max_y = clip_num(max_y, 0, image_height - 1)
 
         filtered_text = filter_text(line.text, font_mapper)
         if not filtered_text:

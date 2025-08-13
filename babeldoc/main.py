@@ -298,6 +298,12 @@ def create_parser():
         default=False,
         help="Save automatically extracted glossary terms to a CSV file in the output directory.",
     )
+    translation_group.add_argument(
+        "--disable-graphic-element-process",
+        action="store_true",
+        default=False,
+        help="Disable graphic element process. (default: False)",
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -546,6 +552,7 @@ async def main():
             primary_font_family=args.primary_font_family,
             only_include_translated_page=args.only_include_translated_page,
             save_auto_extracted_glossary=args.save_auto_extracted_glossary,
+            enable_graphic_element_process=not args.disable_graphic_element_process,
         )
 
         def nop(_x):

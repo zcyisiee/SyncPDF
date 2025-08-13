@@ -170,16 +170,22 @@ def update_cmap_pair(cmap, data):
     for start_str, stop_str, value_str in batched(data, 3):
         start = int(start_str, 16)
         stop = int(stop_str, 16)
-        value = base64.b16decode(value_str, True).decode("UTF-16-BE")
-        for code in range(start, stop + 1):
-            cmap[code] = value
+        try:
+            value = base64.b16decode(value_str, True).decode("UTF-16-BE")
+            for code in range(start, stop + 1):
+                cmap[code] = value
+        except Exception:
+            pass  # to skip surrogate pairs (D800-DFFF)
 
 
 def update_cmap_code(cmap, data):
     for code_str, value_str in batched(data, 2):
         code = int(code_str, 16)
-        value = base64.b16decode(value_str, True).decode("UTF-16-BE")
-        cmap[code] = value
+        try:
+            value = base64.b16decode(value_str, True).decode("UTF-16-BE")
+            cmap[code] = value
+        except Exception:
+            pass  # to skip surrogate pairs (D800-DFFF)
 
 
 def parse_cmap(cmap_str):
@@ -281,9 +287,22 @@ class ILCreater:
         self.current_page_font_char_bounding_box_map = {}
         self.mupdf_font_map: dict[int, pymupdf.Font] = {}
         self.graphic_state_pool = {}
+        self.enable_graphic_element_process = (
+            translation_config.enable_graphic_element_process
+        )
 
     def on_finish(self):
         self.progress.__exit__(None, None, None)
+
+    def is_graphic_operation(self, operator: str):
+        if not self.enable_graphic_element_process:
+            return False
+
+        return re.match(
+            "^(m|l|c|v|y|re|h|S|s|f|f*|F|B|B*|b|b*|n)$",
+            operator,
+            re.IGNORECASE,
+        )
 
     def is_passthrough_per_char_operation(self, operator: str):
         return re.match("^(sc|scn|g|rg|k|cs|gs|ri|w)$", operator, re.IGNORECASE)
@@ -741,6 +760,9 @@ class ILCreater:
             )
 
     def on_lt_line(self, line: babeldoc.pdfminer.layout.LTLine):
+        if not self.enable_graphic_element_process:
+            return
+
         bbox = il_version_1.Box(
             x=line.bbox[0],
             y=line.bbox[1],
