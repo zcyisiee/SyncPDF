@@ -45,6 +45,9 @@
       <zeroOrMore>
         <ref name="PDFCurve"/>
       </zeroOrMore>
+      <zeroOrMore>
+        <ref name="PDFImage"/>
+      </zeroOrMore>
       <attribute name="pageNumber">
         <data type="int"/>
       </attribute>
@@ -501,6 +504,48 @@
       </attribute>
       <attribute name="op">
         <data type="string"/>
+      </attribute>
+    </element>
+  </define>
+  <define name="PDFImage">
+    <element name="pdfImage">
+      <attribute name="xobjId">
+        <data type="int"/>
+      </attribute>
+      <optional>
+        <attribute name="xrefId">
+          <ref name="PDFXrefId"/>
+        </attribute>
+      </optional>
+      <ref name="Box"/>
+      <attribute name="renderOrder">
+        <data type="int"/>
+      </attribute>
+      <attribute name="imageType">
+        <data type="string"/>
+      </attribute>
+      <ref name="PDFImageSubtype"/>
+    </element>
+  </define>
+  <define name="PDFImageSubtype">
+    <element name="pdfImageSubtype">
+      <choice>
+        <ref name="PDFInlineImage"/>
+        <ref name="PDFFromImage"/>
+      </choice>
+    </element>
+  </define>
+  <define name="PDFInlineImage">
+    <element name="pdfInlineImage">
+      <attribute name="imageData">
+        <data type="string"/>
+      </attribute>
+    </element>
+  </define>
+  <define name="PDFFromImage">
+    <element name="pdfFromImage">
+      <attribute name="xrefId">
+        <ref name="PDFXrefId"/>
       </attribute>
     </element>
   </define>

@@ -12,6 +12,10 @@ from babeldoc.format.pdf.document_il.il_version_1 import PdfFigure
 from babeldoc.format.pdf.document_il.il_version_1 import PdfFont
 from babeldoc.format.pdf.document_il.il_version_1 import PdfFontCharBoundingBox
 from babeldoc.format.pdf.document_il.il_version_1 import PdfFormula
+from babeldoc.format.pdf.document_il.il_version_1 import PdfFromImage
+from babeldoc.format.pdf.document_il.il_version_1 import PdfImage
+from babeldoc.format.pdf.document_il.il_version_1 import PdfImageSubtype
+from babeldoc.format.pdf.document_il.il_version_1 import PdfInlineImage
 from babeldoc.format.pdf.document_il.il_version_1 import PdfLine
 from babeldoc.format.pdf.document_il.il_version_1 import PdfParagraph
 from babeldoc.format.pdf.document_il.il_version_1 import PdfParagraphComposition
@@ -38,6 +42,10 @@ __all__ = [
     "PdfFont",
     "PdfFontCharBoundingBox",
     "PdfFormula",
+    "PdfFromImage",
+    "PdfImage",
+    "PdfImageSubtype",
+    "PdfInlineImage",
     "PdfLine",
     "PdfParagraph",
     "PdfParagraphComposition",

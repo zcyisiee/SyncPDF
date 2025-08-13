@@ -21,6 +21,7 @@
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfFigure"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfCharacter"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfCurve"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfImage"/>
         <xs:element ref="baseOperations"/>
       </xs:sequence>
       <xs:attribute name="pageNumber" use="required" type="xs:int"/>
@@ -280,6 +281,36 @@
       <xs:attribute name="x" use="required" type="xs:float"/>
       <xs:attribute name="y" use="required" type="xs:float"/>
       <xs:attribute name="op" use="required" type="xs:string"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pdfImage">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="box"/>
+        <xs:element ref="pdfImageSubtype"/>
+      </xs:sequence>
+      <xs:attribute name="xobjId" use="required" type="xs:int"/>
+      <xs:attribute name="xrefId" type="PDFXrefId"/>
+      <xs:attribute name="renderOrder" use="required" type="xs:int"/>
+      <xs:attribute name="imageType" use="required" type="xs:string"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pdfImageSubtype">
+    <xs:complexType>
+      <xs:choice>
+        <xs:element ref="pdfInlineImage"/>
+        <xs:element ref="pdfFromImage"/>
+      </xs:choice>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pdfInlineImage">
+    <xs:complexType>
+      <xs:attribute name="imageData" use="required" type="xs:string"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pdfFromImage">
+    <xs:complexType>
+      <xs:attribute name="xrefId" use="required" type="PDFXrefId"/>
     </xs:complexType>
   </xs:element>
 </xs:schema>

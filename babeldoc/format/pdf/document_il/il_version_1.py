@@ -181,6 +181,36 @@ class PdfFontCharBoundingBox:
 
 
 @dataclass(slots=True)
+class PdfFromImage:
+    class Meta:
+        name = "pdfFromImage"
+
+    xref_id: int | None = field(
+        default=None,
+        metadata={
+            "name": "xrefId",
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+
+
+@dataclass(slots=True)
+class PdfInlineImage:
+    class Meta:
+        name = "pdfInlineImage"
+
+    image_data: str | None = field(
+        default=None,
+        metadata={
+            "name": "imageData",
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+
+
+@dataclass(slots=True)
 class PdfPath:
     class Meta:
         name = "pdfPath"
@@ -427,6 +457,27 @@ class PdfFont:
 
 
 @dataclass(slots=True)
+class PdfImageSubtype:
+    class Meta:
+        name = "pdfImageSubtype"
+
+    pdf_inline_image: PdfInlineImage | None = field(
+        default=None,
+        metadata={
+            "name": "pdfInlineImage",
+            "type": "Element",
+        },
+    )
+    pdf_from_image: PdfFromImage | None = field(
+        default=None,
+        metadata={
+            "name": "pdfFromImage",
+            "type": "Element",
+        },
+    )
+
+
+@dataclass(slots=True)
 class PdfRectangle:
     class Meta:
         name = "pdfRectangle"
@@ -592,6 +643,59 @@ class PdfCharacter:
         default=None,
         metadata={
             "type": "Attribute",
+        },
+    )
+
+
+@dataclass(slots=True)
+class PdfImage:
+    class Meta:
+        name = "pdfImage"
+
+    box: Box | None = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+    pdf_image_subtype: PdfImageSubtype | None = field(
+        default=None,
+        metadata={
+            "name": "pdfImageSubtype",
+            "type": "Element",
+            "required": True,
+        },
+    )
+    xobj_id: int | None = field(
+        default=None,
+        metadata={
+            "name": "xobjId",
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    xref_id: int | None = field(
+        default=None,
+        metadata={
+            "name": "xrefId",
+            "type": "Attribute",
+        },
+    )
+    render_order: int | None = field(
+        default=None,
+        metadata={
+            "name": "renderOrder",
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    image_type: str | None = field(
+        default=None,
+        metadata={
+            "name": "imageType",
+            "type": "Attribute",
+            "required": True,
         },
     )
 
@@ -962,6 +1066,13 @@ class Page:
         default_factory=list,
         metadata={
             "name": "pdfCurve",
+            "type": "Element",
+        },
+    )
+    pdf_image: list[PdfImage] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfImage",
             "type": "Element",
         },
     )

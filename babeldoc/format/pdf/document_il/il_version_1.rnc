@@ -16,6 +16,7 @@ Page =
     PDFFigure*,
     PDFCharacter*,
     PDFCurve*,
+    PDFImage*,
     attribute pageNumber { xsd:int },
     attribute Unit { xsd:string },
     element baseOperations { xsd:string }
@@ -174,4 +175,23 @@ PDFPath =
     attribute x { xsd:float },
     attribute y { xsd:float },
     attribute op { xsd:string }
+  }
+PDFImage =
+  element pdfImage {
+    attribute xobjId { xsd:int },
+    attribute xrefId { PDFXrefId }?,
+    Box,
+    attribute renderOrder { xsd:int },
+    attribute imageType { xsd:string },
+    PDFImageSubtype
+  }
+PDFImageSubtype =
+  element pdfImageSubtype { PDFInlineImage | PDFFromImage }
+PDFInlineImage =
+  element pdfInlineImage {
+    attribute imageData { xsd:string }
+  }
+PDFFromImage =
+  element pdfFromImage {
+    attribute xrefId { PDFXrefId }
   }
