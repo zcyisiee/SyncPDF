@@ -13,7 +13,6 @@ from babeldoc.pdfminer.layout import LTCurve
 from babeldoc.pdfminer.layout import LTFigure
 from babeldoc.pdfminer.layout import LTLine
 from babeldoc.pdfminer.layout import LTPage
-from babeldoc.pdfminer.layout import LTRect
 from babeldoc.pdfminer.layout import LTText
 from babeldoc.pdfminer.pdfcolor import PDFColorSpace
 from babeldoc.pdfminer.pdffont import PDFCIDFont
@@ -380,20 +379,20 @@ class TranslateConverter(PDFConverterEx):
                 # 图表
                 self.il_creater.on_pdf_figure(child)
                 pass
-            elif isinstance(child, LTLine):     # 线条
-                self.il_creater.on_lt_line(child)
-                continue
-                layout = self.layout[ltpage.pageid]
-                # ltpage.height 可能是 fig 里面的高度，这里统一用 layout.shape
-                h, w = layout.shape
-                # 读取当前线条在 layout 中的类别
-                cx, cy = np.clip(int(child.x0), 0, w - 1), np.clip(int(child.y0), 0, h - 1)
-                cls = layout[cy, cx]
-                if vstk and cls == xt_cls:      # 公式线条
-                    vlstk.append(child)
-                else:                           # 全局线条
-                    lstk.append(child)
-            elif isinstance(child, LTRect) or isinstance(child, LTCurve):
+            # elif isinstance(child, LTLine):     # 线条
+            #     continue
+            #     layout = self.layout[ltpage.pageid]
+            #     # ltpage.height 可能是 fig 里面的高度，这里统一用 layout.shape
+            #     h, w = layout.shape
+            #     # 读取当前线条在 layout 中的类别
+            #     cx, cy = np.clip(int(child.x0), 0, w - 1), np.clip(int(child.y0), 0, h - 1)
+            #     cls = layout[cy, cx]
+            #     if vstk and cls == xt_cls:      # 公式线条
+            #         vlstk.append(child)
+            #     else:                           # 全局线条
+            #         lstk.append(child)
+            elif isinstance(child, LTCurve):
+                self.il_creater.on_lt_curve(child)
                 pass
             else:
                 pass

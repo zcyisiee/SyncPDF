@@ -21,7 +21,7 @@
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfFigure"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfCharacter"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfCurve"/>
-        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfImage"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfForm"/>
         <xs:element ref="baseOperations"/>
       </xs:sequence>
       <xs:attribute name="pageNumber" use="required" type="xs:int"/>
@@ -250,34 +250,57 @@
       <xs:attribute name="op" use="required" type="xs:string"/>
     </xs:complexType>
   </xs:element>
-  <xs:element name="pdfImage">
+  <xs:element name="pdfForm">
     <xs:complexType>
       <xs:sequence>
         <xs:element ref="box"/>
-        <xs:element ref="pdfImageSubtype"/>
+        <xs:element ref="pdfMatrix"/>
+        <xs:element ref="pdfAffineTransform"/>
+        <xs:element ref="pdfFormSubtype"/>
       </xs:sequence>
       <xs:attribute name="xobjId" use="required" type="xs:int"/>
-      <xs:attribute name="xrefId" type="PDFXrefId"/>
       <xs:attribute name="renderOrder" use="required" type="xs:int"/>
-      <xs:attribute name="imageType" use="required" type="xs:string"/>
+      <xs:attribute name="formType" use="required" type="xs:string"/>
     </xs:complexType>
   </xs:element>
-  <xs:element name="pdfImageSubtype">
+  <xs:element name="pdfFormSubtype">
     <xs:complexType>
       <xs:choice>
-        <xs:element ref="pdfInlineImage"/>
-        <xs:element ref="pdfFromImage"/>
+        <xs:element ref="pdfInlineForm"/>
+        <xs:element ref="pdfXobjForm"/>
       </xs:choice>
     </xs:complexType>
   </xs:element>
-  <xs:element name="pdfInlineImage">
+  <xs:element name="pdfInlineForm">
     <xs:complexType>
-      <xs:attribute name="imageData" use="required" type="xs:string"/>
+      <xs:attribute name="formData" use="required" type="xs:string"/>
     </xs:complexType>
   </xs:element>
-  <xs:element name="pdfFromImage">
+  <xs:element name="pdfXobjForm">
     <xs:complexType>
       <xs:attribute name="xrefId" use="required" type="PDFXrefId"/>
+      <xs:attribute name="doArgs" use="required" type="xs:string"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pdfMatrix">
+    <xs:complexType>
+      <xs:attribute name="a" use="required" type="xs:float"/>
+      <xs:attribute name="b" use="required" type="xs:float"/>
+      <xs:attribute name="c" use="required" type="xs:float"/>
+      <xs:attribute name="d" use="required" type="xs:float"/>
+      <xs:attribute name="e" use="required" type="xs:float"/>
+      <xs:attribute name="f" use="required" type="xs:float"/>
+    </xs:complexType>
+  </xs:element>
+  <!-- Decomposed transform parameters for a CTM -->
+  <xs:element name="pdfAffineTransform">
+    <xs:complexType>
+      <xs:attribute name="translation_x" use="required" type="xs:float"/>
+      <xs:attribute name="translation_y" use="required" type="xs:float"/>
+      <xs:attribute name="rotation" use="required" type="xs:float"/>
+      <xs:attribute name="scale_x" use="required" type="xs:float"/>
+      <xs:attribute name="scale_y" use="required" type="xs:float"/>
+      <xs:attribute name="shear" use="required" type="xs:float"/>
     </xs:complexType>
   </xs:element>
 </xs:schema>

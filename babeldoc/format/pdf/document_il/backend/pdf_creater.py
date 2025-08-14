@@ -15,6 +15,7 @@ from bitstring import BitStream
 from babeldoc.assets.embedding_assets_metadata import FONT_NAMES
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il.utils.matrix_helper import matrix_to_bytes
 from babeldoc.format.pdf.document_il.utils.zstd_helper import zstd_decompress
 from babeldoc.format.pdf.translation_config import TranslateResult
 from babeldoc.format.pdf.translation_config import TranslationConfig
@@ -395,6 +396,24 @@ class PDFCreater:
         draw_op.append(final_op)
         # Restore graphics state
         draw_op.append(b"Q\n")
+
+    def _render_pdf_form(
+        self,
+        draw_op: BitStream,
+        form: il_version_1.PdfForm,
+        page_ctm: bytes,
+    ):
+        draw_op.append(b"q ")
+        assert form.pdf_matrix is not None
+        draw_op.append(matrix_to_bytes(form.pdf_matrix))
+
+        assert form.pdf_form_subtype is not None
+        if form.pdf_form_subtype.pdf_xobj_form:
+            draw_op.append(
+                f"/{form.pdf_form_subtype.pdf_xobj_form.do_args} Do ".encode()
+            )
+        draw_op.append(page_ctm)
+        draw_op.append(b" Q\n")
 
     def create_side_by_side_dual_pdf(
         self,
@@ -847,6 +866,13 @@ class PDFCreater:
                 len(self.docs.page),
             ) as pbar:
                 for page in self.docs.page:
+                    assert page.cropbox is not None and page.cropbox.box is not None
+                    page_crop_box = page.cropbox.box
+                    ctm_for_ops = (1, 0, 0, 1, -page_crop_box.x, -page_crop_box.y)
+                    ctm_for_ops = (
+                        f" {' '.join(f'{x:f}' for x in ctm_for_ops)} cm ".encode()
+                    )
+
                     translation_config.raise_if_cancelled()
                     xobj_available_fonts = {}
                     xobj_draw_ops = {}
@@ -883,9 +909,11 @@ class PDFCreater:
                     page_op = BitStream()
                     # q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}
                     # page_op.append(b"q ")
-                    base_op = page.base_operations.value
-                    base_op = zstd_decompress(base_op)
-                    page_op.append(base_op.encode())
+                    # base_op = page.base_operations.value
+                    # base_op = zstd_decompress(base_op)
+                    # page_op.append(base_op.encode())
+                    # page_op.append(b" \n")
+                    page_op.append(ctm_for_ops)
                     page_op.append(b" \n")
                     # page_op.append(b" Q ")
                     # page_op.append(
@@ -899,6 +927,15 @@ class PDFCreater:
                     # 然后添加段落中的字符
                     for paragraph in page.pdf_paragraph:
                         chars.extend(self.render_paragraph_to_char(paragraph))
+
+                    for form in page.pdf_form:
+                        xobj_id = form.xobj_id
+                        if xobj_id in xobj_available_fonts:
+                            draw_op = xobj_draw_ops[xobj_id]
+                        else:
+                            draw_op = page_op
+                        self._render_pdf_form(draw_op, form, ctm_for_ops)
+
                     for rect in page.pdf_rectangle:
                         if (
                             translation_config.ocr_workaround

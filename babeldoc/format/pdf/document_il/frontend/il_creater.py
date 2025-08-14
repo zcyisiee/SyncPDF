@@ -5,6 +5,7 @@ import math
 import re
 from io import BytesIO
 from itertools import islice
+from typing import Literal
 
 import freetype
 import pymupdf
@@ -13,8 +14,10 @@ import babeldoc.pdfminer.pdfinterp
 from babeldoc.format.pdf.babelpdf.base14 import get_base14_bbox
 from babeldoc.format.pdf.babelpdf.encoding import WinAnsiEncoding
 from babeldoc.format.pdf.babelpdf.encoding import get_type1_encoding
+from babeldoc.format.pdf.babelpdf.utils import guarded_bbox
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils import zstd_helper
+from babeldoc.format.pdf.document_il.utils.matrix_helper import decompose_ctm
 from babeldoc.format.pdf.document_il.utils.style_helper import BLACK
 from babeldoc.format.pdf.document_il.utils.style_helper import YELLOW
 from babeldoc.format.pdf.translation_config import TranslationConfig
@@ -27,6 +30,9 @@ from babeldoc.pdfminer.pdffont import PDFFont
 # from babeldoc.pdfminer.pdftypes import PDFObjRef as PDFMinerPDFObjRef
 # from babeldoc.pdfminer.pdftypes import resolve1 as pdftypes_resolve1
 from babeldoc.pdfminer.psparser import PSLiteral
+from babeldoc.pdfminer.utils import apply_matrix_pt
+from babeldoc.pdfminer.utils import get_bound
+from babeldoc.pdfminer.utils import mult_matrix
 
 
 def batched(iterable, n, *, strict=False):
@@ -291,6 +297,14 @@ class ILCreater:
         self.enable_graphic_element_process = (
             translation_config.enable_graphic_element_process
         )
+        self.render_order = 0
+
+    def get_render_order_and_increase(self):
+        self.render_order += 1
+        return self.render_order
+
+    def get_render_order(self):
+        return self.render_order
 
     def on_finish(self):
         self.progress.__exit__(None, None, None)
@@ -300,7 +314,7 @@ class ILCreater:
             return False
 
         return re.match(
-            "^(m|l|c|v|y|re|h|S|s|f|f*|F|B|B*|b|b*|n)$",
+            "^(m|l|c|v|y|re|h|S|s|f|f*|F|B|B*|b|b*|n|Do)$",
             operator,
             re.IGNORECASE,
         )
@@ -309,7 +323,10 @@ class ILCreater:
         return re.match("^(sc|scn|g|rg|k|cs|gs|ri|w)$", operator, re.IGNORECASE)
 
     def on_passthrough_per_char(self, operator: str, args: list[str]):
-        if not self.is_passthrough_per_char_operation(operator):
+        if not self.is_passthrough_per_char_operation(operator) and operator not in (
+            "W",
+            "W*",
+        ):
             logger.error("Unknown passthrough_per_char operation: %s", operator)
             return
         # logger.debug("xobj_id: %d, on_passthrough_per_char: %s ( %s )", self.xobj_id, operator, args)
@@ -413,6 +430,7 @@ class ILCreater:
             pdf_character=[],
             page_layout=[],
             pdf_curve=[],
+            pdf_form=[],
             # currently don't support UserUnit page parameter
             # pdf32000 page 79
             unit="point",
@@ -764,19 +782,22 @@ class ILCreater:
                 )
             )
 
-    def on_lt_line(self, line: babeldoc.pdfminer.layout.LTLine):
+    def on_lt_curve(self, curve: babeldoc.pdfminer.layout.LTCurve):
         if not self.enable_graphic_element_process:
             return
 
         bbox = il_version_1.Box(
-            x=line.bbox[0],
-            y=line.bbox[1],
-            x2=line.bbox[2],
-            y2=line.bbox[3],
+            x=curve.bbox[0],
+            y=curve.bbox[1],
+            x2=curve.bbox[2],
+            y2=curve.bbox[3],
         )
-        gs = self.create_graphic_state(line.passthrough_instruction)
+        gs = self.create_graphic_state(curve.passthrough_instruction)
         paths = []
-        for point in line.original_path:
+        for point in curve.original_path:
+            op = point[0]
+            if op == "h":
+                continue
             paths.append(
                 il_version_1.PdfPath(
                     op=point[0],
@@ -785,9 +806,9 @@ class ILCreater:
                 )
             )
 
-        fill_background = line.fill
-        stroke_path = line.stroke
-        evenodd = line.evenodd
+        fill_background = curve.fill
+        stroke_path = curve.stroke
+        evenodd = curve.evenodd
         curve = il_version_1.PdfCurve(
             box=bbox,
             graphic_state=gs,
@@ -796,10 +817,69 @@ class ILCreater:
             stroke_path=stroke_path,
             evenodd=evenodd,
             debug_info="a",
-            xobj_id=line.xobj_id,
+            xobj_id=curve.xobj_id,
         )
         self.current_page.pdf_curve.append(curve)
         pass
+
+    def on_xobj_form(
+        self,
+        ctm: tuple[float, float, float, float, float, float],
+        xobj_id: int,
+        xref_id: int,
+        form_type: Literal["image", "form"],
+        do_args: str,
+        bbox: tuple[float, float, float, float],
+        matrix: tuple[float, float, float, float, float, float],
+    ):
+        matrix = mult_matrix(matrix, ctm)
+        (x, y, w, h) = guarded_bbox(bbox)
+        bounds = ((x, y), (x + w, y), (x, y + h), (x + w, y + h))
+        bbox = get_bound(apply_matrix_pt(matrix, (p, q)) for (p, q) in bounds)
+
+        figure_bbox = il_version_1.Box(
+            x=bbox[0],
+            y=bbox[1],
+            x2=bbox[2],
+            y2=bbox[3],
+        )
+        pdf_matrix = il_version_1.PdfMatrix(
+            a=ctm[0],
+            b=ctm[1],
+            c=ctm[2],
+            d=ctm[3],
+            e=ctm[4],
+            f=ctm[5],
+        )
+        affine_transform = decompose_ctm(ctm)
+        xobj_form = il_version_1.PdfXobjForm(
+            xref_id=xref_id,
+            do_args=do_args,
+        )
+        pdf_form_subtype = il_version_1.PdfFormSubtype(
+            pdf_xobj_form=xobj_form,
+        )
+        new_form = il_version_1.PdfForm(
+            xobj_id=xobj_id,
+            box=figure_bbox,
+            pdf_matrix=pdf_matrix,
+            pdf_affine_transform=affine_transform,
+            render_order=self.get_render_order_and_increase(),
+            form_type=form_type,
+            pdf_form_subtype=pdf_form_subtype,
+        )
+        self.current_page.pdf_form.append(new_form)
+
+    def on_pdf_clip_path(self, clip_path, evenodd: bool):
+        op = "W*" if evenodd else "W"
+        args = []
+        for p in clip_path:
+            if len(p) == 1:
+                args.append(p[0])
+            elif len(p) == 2:
+                args.append(f"{p[1][0]:F} {p[1][1]:F} {p[0]}")
+
+        self.on_passthrough_per_char(op, args)
 
     def create_il(self):
         pages = [

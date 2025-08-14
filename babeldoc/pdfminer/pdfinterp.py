@@ -44,7 +44,7 @@ from babeldoc.pdfminer.psparser import PSStackParser
 from babeldoc.pdfminer.psparser import PSStackType
 from babeldoc.pdfminer.psparser import keyword_name
 from babeldoc.pdfminer.psparser import literal_name
-from babeldoc.pdfminer.utils import MATRIX_IDENTITY
+from babeldoc.pdfminer.utils import MATRIX_IDENTITY, apply_matrix_pt
 from babeldoc.pdfminer.utils import Matrix
 from babeldoc.pdfminer.utils import PathSegment
 from babeldoc.pdfminer.utils import Point
@@ -682,9 +682,11 @@ class PDFPageInterpreter:
 
     def do_W(self) -> None:
         """Set clipping path using nonzero winding number rule"""
+        pass
 
     def do_W_a(self) -> None:
         """Set clipping path using even-odd rule"""
+        pass
 
     def do_CS(self, name: PDFStackT) -> None:
         """Set color space for stroking operations

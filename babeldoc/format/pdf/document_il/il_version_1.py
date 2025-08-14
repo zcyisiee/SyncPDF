@@ -65,6 +65,55 @@ class GraphicState:
 
 
 @dataclass(slots=True)
+class PdfAffineTransform:
+    class Meta:
+        name = "pdfAffineTransform"
+
+    translation_x: float | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    translation_y: float | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    rotation: float | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    scale_x: float | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    scale_y: float | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    shear: float | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+
+
+@dataclass(slots=True)
 class PdfFontCharBoundingBox:
     class Meta:
         name = "pdfFontCharBoundingBox"
@@ -107,14 +156,14 @@ class PdfFontCharBoundingBox:
 
 
 @dataclass(slots=True)
-class PdfFromImage:
+class PdfInlineForm:
     class Meta:
-        name = "pdfFromImage"
+        name = "pdfInlineForm"
 
-    xref_id: int | None = field(
+    form_data: str | None = field(
         default=None,
         metadata={
-            "name": "xrefId",
+            "name": "formData",
             "type": "Attribute",
             "required": True,
         },
@@ -122,14 +171,48 @@ class PdfFromImage:
 
 
 @dataclass(slots=True)
-class PdfInlineImage:
+class PdfMatrix:
     class Meta:
-        name = "pdfInlineImage"
+        name = "pdfMatrix"
 
-    image_data: str | None = field(
+    a: float | None = field(
         default=None,
         metadata={
-            "name": "imageData",
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    b: float | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    c: float | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    d: float | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    e: float | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    f: float | None = field(
+        default=None,
+        metadata={
             "type": "Attribute",
             "required": True,
         },
@@ -158,6 +241,29 @@ class PdfPath:
     op: str | None = field(
         default=None,
         metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+
+
+@dataclass(slots=True)
+class PdfXobjForm:
+    class Meta:
+        name = "pdfXobjForm"
+
+    xref_id: int | None = field(
+        default=None,
+        metadata={
+            "name": "xrefId",
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    do_args: str | None = field(
+        default=None,
+        metadata={
+            "name": "doArgs",
             "type": "Attribute",
             "required": True,
         },
@@ -390,21 +496,21 @@ class PdfFont:
 
 
 @dataclass(slots=True)
-class PdfImageSubtype:
+class PdfFormSubtype:
     class Meta:
-        name = "pdfImageSubtype"
+        name = "pdfFormSubtype"
 
-    pdf_inline_image: PdfInlineImage | None = field(
+    pdf_inline_form: PdfInlineForm | None = field(
         default=None,
         metadata={
-            "name": "pdfInlineImage",
+            "name": "pdfInlineForm",
             "type": "Element",
         },
     )
-    pdf_from_image: PdfFromImage | None = field(
+    pdf_xobj_form: PdfXobjForm | None = field(
         default=None,
         metadata={
-            "name": "pdfFromImage",
+            "name": "pdfXobjForm",
             "type": "Element",
         },
     )
@@ -595,9 +701,9 @@ class PdfCharacter:
 
 
 @dataclass(slots=True)
-class PdfImage:
+class PdfForm:
     class Meta:
-        name = "pdfImage"
+        name = "pdfForm"
 
     box: Box | None = field(
         default=None,
@@ -606,10 +712,26 @@ class PdfImage:
             "required": True,
         },
     )
-    pdf_image_subtype: PdfImageSubtype | None = field(
+    pdf_matrix: PdfMatrix | None = field(
         default=None,
         metadata={
-            "name": "pdfImageSubtype",
+            "name": "pdfMatrix",
+            "type": "Element",
+            "required": True,
+        },
+    )
+    pdf_affine_transform: PdfAffineTransform | None = field(
+        default=None,
+        metadata={
+            "name": "pdfAffineTransform",
+            "type": "Element",
+            "required": True,
+        },
+    )
+    pdf_form_subtype: PdfFormSubtype | None = field(
+        default=None,
+        metadata={
+            "name": "pdfFormSubtype",
             "type": "Element",
             "required": True,
         },
@@ -622,13 +744,6 @@ class PdfImage:
             "required": True,
         },
     )
-    xref_id: int | None = field(
-        default=None,
-        metadata={
-            "name": "xrefId",
-            "type": "Attribute",
-        },
-    )
     render_order: int | None = field(
         default=None,
         metadata={
@@ -637,10 +752,10 @@ class PdfImage:
             "required": True,
         },
     )
-    image_type: str | None = field(
+    form_type: str | None = field(
         default=None,
         metadata={
-            "name": "imageType",
+            "name": "formType",
             "type": "Attribute",
             "required": True,
         },
@@ -1030,10 +1145,10 @@ class Page:
             "type": "Element",
         },
     )
-    pdf_image: list[PdfImage] = field(
+    pdf_form: list[PdfForm] = field(
         default_factory=list,
         metadata={
-            "name": "pdfImage",
+            "name": "pdfForm",
             "type": "Element",
         },
     )

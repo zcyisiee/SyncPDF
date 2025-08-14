@@ -7,6 +7,7 @@ import numpy as np
 
 from babeldoc.format.pdf.babelpdf.utils import guarded_bbox
 from babeldoc.format.pdf.document_il.frontend.il_creater import ILCreater
+from babeldoc.format.pdf.document_il.utils.matrix_helper import Point
 from babeldoc.pdfminer import settings
 from babeldoc.pdfminer.pdfcolor import PREDEFINED_COLORSPACE
 from babeldoc.pdfminer.pdfcolor import PDFColorSpace
@@ -37,6 +38,7 @@ from babeldoc.pdfminer.psparser import keyword_name
 from babeldoc.pdfminer.psparser import literal_name
 from babeldoc.pdfminer.utils import MATRIX_IDENTITY
 from babeldoc.pdfminer.utils import Matrix
+from babeldoc.pdfminer.utils import PathSegment
 from babeldoc.pdfminer.utils import Rect
 from babeldoc.pdfminer.utils import apply_matrix_pt
 from babeldoc.pdfminer.utils import choplist
@@ -167,31 +169,6 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                     self.xobjmap[xobjid] = xobjstrm
         pass
 
-    def do_S(self) -> None:
-        # 重载过滤非公式线条
-        """Stroke path"""
-
-        def is_black(color: Color) -> bool:
-            if isinstance(color, tuple):
-                return sum(color) == 0
-            else:
-                return color == 0
-
-        if (
-            len(self.curpath) == 2
-            and self.curpath[0][0] == "m"
-            and self.curpath[1][0] == "l"
-            and apply_matrix_pt(self.ctm, self.curpath[0][-2:])[1]
-            == apply_matrix_pt(self.ctm, self.curpath[1][-2:])[1]
-            and is_black(self.graphicstate.scolor)
-        ):  # 独立直线，水平，黑色
-            # print(apply_matrix_pt(self.ctm,self.curpath[0][-2:]),apply_matrix_pt(self.ctm,self.curpath[1][-2:]),self.graphicstate.scolor)
-            self.device.paint_path(self.graphicstate, True, False, False, self.curpath)
-            self.curpath = []
-            return "n"
-        else:
-            self.curpath = []
-
     def do_CS(self, name: PDFStackT) -> None:
         """Set color space for stroking operations
 
@@ -214,31 +191,6 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             if settings.STRICT:
                 raise PDFInterpreterError(f"Undefined ColorSpace: {name!r}") from None
         return
-
-    ############################################################
-    # 重载过滤非公式线条（F/B）
-    def do_f(self) -> None:
-        """Fill path using nonzero winding number rule"""
-        # self.device.paint_path(self.graphicstate, False, True, False, self.curpath)
-        self.curpath = []
-
-    def do_F(self) -> None:
-        """Fill path using nonzero winding number rule (obsolete)"""
-
-    def do_f_a(self) -> None:
-        """Fill path using even-odd rule"""
-        # self.device.paint_path(self.graphicstate, False, True, True, self.curpath)
-        self.curpath = []
-
-    def do_B(self) -> None:
-        """Fill and stroke path using nonzero winding number rule"""
-        # self.device.paint_path(self.graphicstate, True, True, False, self.curpath)
-        self.curpath = []
-
-    def do_B_a(self) -> None:
-        """Fill and stroke path using even-odd rule"""
-        # self.device.paint_path(self.graphicstate, True, True, True, self.curpath)
-        self.curpath = []
 
     ############################################################
     # 重载返回调用参数（SCN）
@@ -318,6 +270,17 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                 resources = dict_value(xobjres)
             else:
                 resources = self.resources.copy()
+
+            self.il_creater.on_xobj_form(
+                self.ctm,
+                self.il_creater.xobj_id,
+                xobj.objid,
+                "form",
+                xobjid,
+                bbox,
+                matrix,
+            )
+
             self.device.begin_figure(xobjid, bbox, matrix)
             ctm = mult_matrix(matrix, self.ctm)
             (x, y, x2, y2) = guarded_bbox(bbox)
@@ -365,12 +328,50 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             except Exception:
                 pass
         elif subtype is LITERAL_IMAGE and "Width" in xobj and "Height" in xobj:
+            self.il_creater.on_xobj_form(
+                self.ctm,
+                self.il_creater.xobj_id,
+                xobj.objid,
+                "image",
+                xobjid,
+                (0, 0, 1, 1),
+                MATRIX_IDENTITY,
+            )
             self.device.begin_figure(xobjid, (0, 0, 1, 1), MATRIX_IDENTITY)
             self.device.render_image(xobjid, xobj)
             self.device.end_figure(xobjid)
         else:
             # unsupported xobject type.
             pass
+
+    def do_W(self) -> None:
+        """Set clipping path using nonzero winding number rule"""
+        self.handle_w(False)
+
+    def do_W_a(self) -> None:
+        """Set clipping path using even-odd rule"""
+        self.handle_w(True)
+
+    def handle_w(self, evenodd: bool):
+        path = self.curpath
+        raw_pts = [cast(Point, p[-2:] if p[0] != "h" else path[0][-2:]) for p in path]
+        pts = [apply_matrix_pt(self.ctm, pt) for pt in raw_pts]
+
+        operators = [str(operation[0]) for operation in path]
+        transformed_points = [
+            [
+                apply_matrix_pt(self.ctm, (float(operand1), float(operand2)))
+                for operand1, operand2 in zip(
+                    operation[1::2], operation[2::2], strict=False
+                )
+            ]
+            for operation in path
+        ]
+        transformed_path = [
+            cast(PathSegment, (o, *p))
+            for o, p in zip(operators, transformed_points, strict=False)
+        ]
+        self.il_creater.on_pdf_clip_path(transformed_path, evenodd)
 
     def process_page(self, page: PDFPage) -> None:
         # 重载设置 page 的 obj_patch
