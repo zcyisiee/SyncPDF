@@ -157,6 +157,7 @@ class TranslationConfig:
         save_auto_extracted_glossary: bool = True,
         enable_graphic_element_process: bool = True,
         merge_alternating_line_numbers: bool = True,
+        skip_translation: bool = False,
     ):
         self.translator = translator
         initial_user_glossaries = list(glossaries) if glossaries else []
@@ -260,6 +261,9 @@ class TranslationConfig:
         self.add_formula_placehold_hint = add_formula_placehold_hint
         self.auto_extract_glossary = auto_extract_glossary
         self.auto_enable_ocr_workaround = auto_enable_ocr_workaround
+        self.skip_translation = skip_translation
+        if self.skip_translation:
+            self.auto_extract_glossary = False
 
         if auto_enable_ocr_workaround:
             self.ocr_workaround = False

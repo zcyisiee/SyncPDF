@@ -261,6 +261,8 @@ def get_translation_stage(
         should_remove.append(DetectScannedFile.stage_name)
     if not translation_config.auto_extract_glossary:
         should_remove.append(AutomaticTermExtractor.stage_name)
+    if translation_config.skip_translation:
+        should_remove.append(ILTranslator.stage_name)
     result = [x for x in result if x[0] not in should_remove]
     return result
 
@@ -902,14 +904,18 @@ def _do_translate_single(
     if support_llm_translate and translation_config.auto_extract_glossary:
         AutomaticTermExtractor(translate_engine, translation_config).procress(docs)
 
-    if support_llm_translate:
-        il_translator = ILTranslatorLLMOnly(translate_engine, translation_config)
-    else:
-        il_translator = ILTranslator(translate_engine, translation_config)
+    if not translation_config.skip_translation:
+        if support_llm_translate:
+            il_translator = ILTranslatorLLMOnly(translate_engine, translation_config)
+        else:
+            il_translator = ILTranslator(translate_engine, translation_config)
 
-    il_translator.translate(docs)
-    del il_translator
-    logger.debug(f"finish ILTranslator from {temp_pdf_path}")
+        il_translator.translate(docs)
+        del il_translator
+        logger.debug(f"finish ILTranslator from {temp_pdf_path}")
+    else:
+        logger.info("skip ILTranslator")
+
     if translation_config.debug:
         xml_converter.write_json(
             docs,
