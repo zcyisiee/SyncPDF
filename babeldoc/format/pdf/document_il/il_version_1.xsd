@@ -254,6 +254,7 @@
     <xs:complexType>
       <xs:sequence>
         <xs:element ref="box"/>
+        <xs:element ref="graphicState"/>
         <xs:element ref="pdfMatrix"/>
         <xs:element ref="pdfAffineTransform"/>
         <xs:element ref="pdfFormSubtype"/>

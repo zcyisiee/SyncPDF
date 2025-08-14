@@ -172,6 +172,7 @@ PDFForm =
   element pdfForm {
     attribute xobjId { xsd:int },
     Box,
+    GraphicState,
     PDFMatrix,
     PDFAffineTransform,
     attribute renderOrder { xsd:int },

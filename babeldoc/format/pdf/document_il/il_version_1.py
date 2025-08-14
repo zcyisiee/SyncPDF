@@ -712,6 +712,14 @@ class PdfForm:
             "required": True,
         },
     )
+    graphic_state: GraphicState | None = field(
+        default=None,
+        metadata={
+            "name": "graphicState",
+            "type": "Element",
+            "required": True,
+        },
+    )
     pdf_matrix: PdfMatrix | None = field(
         default=None,
         metadata={

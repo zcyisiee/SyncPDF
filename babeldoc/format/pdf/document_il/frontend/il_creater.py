@@ -623,7 +623,9 @@ class ILCreater:
                 bbox_list = get_base14_bbox(obj_val[1:])
         return bbox_list, cmap
 
-    def create_graphic_state(self, gs: babeldoc.pdfminer.pdfinterp.PDFGraphicState):
+    def create_graphic_state(
+        self, gs: babeldoc.pdfminer.pdfinterp.PDFGraphicState | list[tuple[str, str]]
+    ):
         passthrough_instruction = getattr(gs, "passthrough_instruction", gs)
 
         passthrough_per_char_instruction = " ".join(
@@ -837,6 +839,8 @@ class ILCreater:
         bounds = ((x, y), (x + w, y), (x, y + h), (x + w, y + h))
         bbox = get_bound(apply_matrix_pt(matrix, (p, q)) for (p, q) in bounds)
 
+        gs = self.create_graphic_state(self.passthrough_per_char_instruction)
+
         figure_bbox = il_version_1.Box(
             x=bbox[0],
             y=bbox[1],
@@ -863,6 +867,7 @@ class ILCreater:
             xobj_id=xobj_id,
             box=figure_bbox,
             pdf_matrix=pdf_matrix,
+            graphic_state=gs,
             pdf_affine_transform=affine_transform,
             render_order=self.get_render_order_and_increase(),
             form_type=form_type,

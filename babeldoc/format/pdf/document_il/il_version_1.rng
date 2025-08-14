@@ -471,6 +471,7 @@
         <data type="int"/>
       </attribute>
       <ref name="Box"/>
+      <ref name="GraphicState"/>
       <ref name="PDFMatrix"/>
       <ref name="PDFAffineTransform"/>
       <attribute name="renderOrder">

@@ -375,15 +375,14 @@ class PDFCreater:
         # Save graphics state
         draw_op.append(b"q ")
 
-        # Set green color for debug visibility
         draw_op.append(
             curve.graphic_state.passthrough_per_char_instruction.encode(),
-        )  # Green stroke
+        )
         draw_op.append(b" ")
         for path in curve.pdf_path:
-            draw_op.append(f"{path.x} {path.y} {path.op} ".encode())
+            draw_op.append(f"{path.x:F} {path.y:F} {path.op} ".encode())
 
-        final_op = b"h "
+        final_op = b" h "
         if curve.fill_background:
             final_op = b" f"
         if curve.evenodd:
@@ -404,13 +403,19 @@ class PDFCreater:
         page_ctm: bytes,
     ):
         draw_op.append(b"q ")
+
+        draw_op.append(
+            form.graphic_state.passthrough_per_char_instruction.encode(),
+        )
+        draw_op.append(b" ")
+
         assert form.pdf_matrix is not None
         draw_op.append(matrix_to_bytes(form.pdf_matrix))
 
         assert form.pdf_form_subtype is not None
         if form.pdf_form_subtype.pdf_xobj_form:
             draw_op.append(
-                f"/{form.pdf_form_subtype.pdf_xobj_form.do_args} Do ".encode()
+                f" /{form.pdf_form_subtype.pdf_xobj_form.do_args} Do ".encode()
             )
         draw_op.append(page_ctm)
         draw_op.append(b" Q\n")
@@ -868,7 +873,14 @@ class PDFCreater:
                 for page in self.docs.page:
                     assert page.cropbox is not None and page.cropbox.box is not None
                     page_crop_box = page.cropbox.box
-                    ctm_for_ops = (1, 0, 0, 1, -page_crop_box.x, -page_crop_box.y)
+                    ctm_for_ops = (
+                        1,
+                        0,
+                        0,
+                        1,
+                        -page_crop_box.x,
+                        -page_crop_box.y,
+                    )
                     ctm_for_ops = (
                         f" {' '.join(f'{x:f}' for x in ctm_for_ops)} cm ".encode()
                     )
