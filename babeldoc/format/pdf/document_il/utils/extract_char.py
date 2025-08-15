@@ -23,7 +23,7 @@ BAND_CREATION_OVERLAP_THRESHOLD = 0.5
 
 # --- Line Clustering (within a band) ---
 # Epsilon for DBSCAN, as a multiplier of the average character width/height.
-LINE_CLUSTERING_EPS_MULTIPLIER = 4.0
+LINE_CLUSTERING_EPS_MULTIPLIER = 3.5
 
 # --- Line Splitting (for tall/wide lines) ---
 # A line is considered for splitting if its height/width is > X times the max char size.

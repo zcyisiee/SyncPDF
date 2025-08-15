@@ -890,7 +890,7 @@ class PDFCreater:
                     xobj_draw_ops = {}
                     xobj_encoding_length_map = {}
                     available_font_list = self.get_available_font_list(pdf, page)
-                    page_encoding_length_map = {
+                    page_encoding_length_map: dict[str | None, int | None] = {
                         f.font_id: f.encoding_length for f in page.pdf_font
                     }
                     all_encoding_length_map = page_encoding_length_map.copy()
