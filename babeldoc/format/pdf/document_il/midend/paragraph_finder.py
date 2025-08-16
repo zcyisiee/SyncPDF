@@ -306,6 +306,46 @@ class ParagraphFinder:
 
         self.add_debug_info(page)
 
+        # 新阶段：设置段落的renderorder为所有组成部分中renderorder最小的
+        self._set_paragraph_render_order(page)
+
+    def _set_paragraph_render_order(self, page: Page):
+        """
+        设置段落的renderorder为段落所有组成部分中renderorder最小的值
+        """
+        for paragraph in page.pdf_paragraph:
+            min_render_order = 9999999999999999
+
+            # 遍历段落的所有组成部分
+            for composition in paragraph.pdf_paragraph_composition:
+                # 检查PdfLine中的字符
+                if composition.pdf_line:
+                    for char in composition.pdf_line.pdf_character:
+                        if (
+                            hasattr(char, "render_order")
+                            and char.render_order is not None
+                        ):
+                            min_render_order = min(min_render_order, char.render_order)
+
+                # 检查单个字符
+                elif composition.pdf_character:
+                    char = composition.pdf_character
+                    if hasattr(char, "render_order") and char.render_order is not None:
+                        min_render_order = min(min_render_order, char.render_order)
+
+                # 检查公式中的字符
+                elif composition.pdf_formula:
+                    for char in composition.pdf_formula.pdf_character:
+                        if (
+                            hasattr(char, "render_order")
+                            and char.render_order is not None
+                        ):
+                            min_render_order = min(min_render_order, char.render_order)
+
+            # 如果找到了有效的renderorder，设置段落的renderorder
+            if min_render_order != 9999999999999999:
+                paragraph.render_order = min_render_order
+
     def is_isolated_formula(self, char: PdfCharacter):
         return char.char_unicode in (
             "(cid:122)",

@@ -1099,6 +1099,9 @@ class Typesetting:
                 paragraph, page, typesetting_units, precomputed_scale
             )
 
+            # 重排版后，重新设置段落各字符的render order
+            self._update_paragraph_render_order(paragraph)
+
     def _get_width_before_next_break_point(
         self, typesetting_units: list[TypesettingUnit], scale: float
     ) -> float:
@@ -1464,3 +1467,23 @@ class Typesetting:
                 min_y = max(min_y, figure.box.y2)
 
         return min_y
+
+    def _update_paragraph_render_order(self, paragraph: il_version_1.PdfParagraph):
+        """
+        重新设置段落各字符的render order
+        主render order等于paragraph的renderorder，sub render order从1开始自增
+        """
+        if not hasattr(paragraph, "render_order") or paragraph.render_order is None:
+            return
+
+        main_render_order = paragraph.render_order
+        sub_render_order = 1
+
+        # 遍历段落的所有组成部分
+        for composition in paragraph.pdf_paragraph_composition:
+            # 检查单个字符
+            if composition.pdf_character:
+                char = composition.pdf_character
+                char.render_order = main_render_order
+                char.sub_render_order = sub_render_order
+                sub_render_order += 1
