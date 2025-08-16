@@ -308,48 +308,10 @@ report-interval = 0.5
 
 ## Python API
 
-> [!TIP]
->
-> 1. Before pdf2zh 2.0 is released, you can temporarily use BabelDOC's Python API. However, after pdf2zh 2.0 is released, please directly use pdf2zh's Python API.
->
-> 2. This project's Python API does not guarantee any compatibility. However, the Python API from pdf2zh will guarantee a certain level of compatibility.
->
-> 3. We do not provide any technical support for the BabelDOC API.
->
-> 4. When performing secondary development, please refer to [pdf2zh 2.0 high level](https://github.com/PDFMathTranslate/PDFMathTranslate-next/blob/main/pdf2zh_next/high_level.py) and ensure that BabelDOC runs in a subprocess.
+The current recommended way to call BabelDOC in Python is to call the `high_level.do_translate_async_stream` function of [pdf2zh next](https://github.com/PDFMathTranslate/PDFMathTranslate-next).
 
-You can refer to the example in [main.py](https://github.com/funstory-ai/yadt/blob/main/babeldoc/main.py) to use BabelDOC's Python API.
-
-Please note:
-
-1. Make sure call `babeldoc.format.pdf.high_level.init()` before using the API
-
-2. The current `TranslationConfig` does not fully validate input parameters, so you need to ensure the validity of input parameters
-
-3. For offline assets management, you can use the following functions:
-   ```python
-   # Generate an offline assets package
-   from pathlib import Path
-   import babeldoc.assets.assets
-   
-   # Generate package to a specific directory
-   # path is optional, default is ~/.cache/babeldoc/assets/offline_assets_{hash}.zip
-   babeldoc.assets.assets.generate_offline_assets_package(Path("/path/to/output/dir"))
-   
-   # Restore from a package file
-   # path is optional, default is ~/.cache/babeldoc/assets/offline_assets_{hash}.zip
-   babeldoc.assets.assets.restore_offline_assets_package(Path("/path/to/offline_assets_package.zip"))
-   
-   # You can also restore from a directory containing the offline assets package
-   # The tool will automatically find the correct package file based on the hash
-   babeldoc.assets.assets.restore_offline_assets_package(Path("/path/to/directory"))
-   ```
-
-> [!TIP]
-> 
-> 1. The offline assets package name cannot be modified because the file list hash is encoded in the name.
-> 2. When using in production environments, it's recommended to pre-generate the assets package and include it with your application distribution.
-> 3. The package verification ensures that all required assets are intact and match their expected checksums.
+> [!WARNING]
+> **All APIs of BabelDOC should be considered as internal APIs, and any direct use of BabelDOC is not supported.**
 
 ## Background
 
@@ -403,6 +365,11 @@ And meet the following requirements:
 ## Version Number Explanation
 
 This project uses a combination of [Semantic Versioning](https://semver.org/) and [Pride Versioning](https://pridever.org/). The version number format is: "0.MAJOR.MINOR".
+
+> [!NOTE]
+>
+> The API compatibility here mainly refers to the compatibility with [pdf2zh_next](https://github.com/PDFMathTranslate/PDFMathTranslate-next).
+
 
 - MAJOR: Incremented by 1 when API incompatible changes are made or when proud improvements are implemented.
 
