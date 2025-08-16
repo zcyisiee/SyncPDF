@@ -107,6 +107,7 @@
       <xs:attribute name="debug_info" type="xs:boolean"/>
       <xs:attribute name="formula_layout_id" type="xs:int"/>
       <xs:attribute name="renderOrder" type="xs:int"/>
+      <xs:attribute name="subRenderOrder" type="xs:int"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="visual_bbox">

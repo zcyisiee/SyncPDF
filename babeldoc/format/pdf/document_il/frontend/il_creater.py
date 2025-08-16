@@ -624,7 +624,8 @@ class ILCreater:
         return bbox_list, cmap
 
     def create_graphic_state(
-        self, gs: babeldoc.pdfminer.pdfinterp.PDFGraphicState | list[tuple[str, str]]
+        self,
+        gs: babeldoc.pdfminer.pdfinterp.PDFGraphicState | list[tuple[str, str]],
     ):
         passthrough_instruction = getattr(gs, "passthrough_instruction", gs)
 
@@ -749,6 +750,8 @@ class ILCreater:
             pdf_style=pdf_style,
             xobj_id=char.xobj_id,
             visual_bbox=visual_bbox,
+            render_order=char.render_order,
+            sub_render_order=0,
         )
         if self.translation_config.ocr_workaround:
             pdf_char.pdf_style.graphic_state = BLACK
@@ -820,6 +823,7 @@ class ILCreater:
             evenodd=evenodd,
             debug_info="a",
             xobj_id=curve.xobj_id,
+            render_order=curve.render_order,
         )
         self.current_page.pdf_curve.append(curve)
         pass

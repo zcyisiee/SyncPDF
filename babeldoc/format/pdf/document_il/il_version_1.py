@@ -698,6 +698,13 @@ class PdfCharacter:
             "type": "Attribute",
         },
     )
+    sub_render_order: int | None = field(
+        default=None,
+        metadata={
+            "name": "subRenderOrder",
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass(slots=True)

@@ -72,6 +72,7 @@ PDFCharacter =
     attribute debug_info { xsd:boolean }?,
     attribute formula_layout_id { xsd:int }?,
     attribute renderOrder { xsd:int }?,
+    attribute subRenderOrder { xsd:int }?,
     PDFStyle,
     Box,
     element visual_bbox { Box }?

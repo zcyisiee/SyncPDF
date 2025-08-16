@@ -184,6 +184,7 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                 )
                 line.passthrough_instruction = passthrough_instruction
                 line.xobj_id = xobj_id
+                line.render_order = self.il_creater.get_render_order_and_increase()
                 self.cur_item.add(line)
 
             elif shape in {"mlllh", "mllll"}:
@@ -207,6 +208,7 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                     )
                     rect.passthrough_instruction = passthrough_instruction
                     rect.xobj_id = xobj_id
+                    rect.render_order = self.il_creater.get_render_order_and_increase()
                     self.cur_item.add(rect)
                 else:
                     curve = LTCurve(
@@ -222,6 +224,7 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                     )
                     curve.passthrough_instruction = passthrough_instruction
                     curve.xobj_id = xobj_id
+                    curve.render_order = self.il_creater.get_render_order_and_increase()
                     self.cur_item.add(curve)
             else:
                 curve = LTCurve(
@@ -237,6 +240,7 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                 )
                 curve.passthrough_instruction = passthrough_instruction
                 curve.xobj_id = xobj_id
+                curve.render_order = self.il_creater.get_render_order_and_increase()
                 self.cur_item.add(curve)
 
     def render_char(
