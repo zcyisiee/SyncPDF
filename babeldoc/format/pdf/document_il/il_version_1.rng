@@ -468,6 +468,11 @@
       <attribute name="op">
         <data type="string"/>
       </attribute>
+      <optional>
+        <attribute name="has_xy">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
     </element>
   </define>
   <define name="PDFForm">

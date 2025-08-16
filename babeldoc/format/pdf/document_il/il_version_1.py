@@ -245,6 +245,12 @@ class PdfPath:
             "required": True,
         },
     )
+    has_xy: bool | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass(slots=True)

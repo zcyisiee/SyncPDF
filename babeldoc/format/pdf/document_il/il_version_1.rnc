@@ -167,7 +167,8 @@ PDFPath =
   element pdfPath {
     attribute x { xsd:float },
     attribute y { xsd:float },
-    attribute op { xsd:string }
+    attribute op { xsd:string },
+    attribute has_xy { xsd:boolean }?
   }
 PDFForm =
   element pdfForm {

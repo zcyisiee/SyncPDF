@@ -316,16 +316,17 @@ class ILCreater:
         return re.match(
             "^(m|l|c|v|y|re|h|S|s|f|f*|F|B|B*|b|b*|n|Do)$",
             operator,
-            re.IGNORECASE,
         )
 
     def is_passthrough_per_char_operation(self, operator: str):
-        return re.match("^(sc|scn|g|rg|k|cs|gs|ri|w)$", operator, re.IGNORECASE)
+        return re.match(
+            "^(sc|SC|sh|scn|SCN|g|G|rg|RG|k|K|cs|CS|gs|ri|w|J|j|M|d|i)$", operator
+        )
 
     def on_passthrough_per_char(self, operator: str, args: list[str]):
         if not self.is_passthrough_per_char_operation(operator) and operator not in (
-            "W",
-            "W*",
+            "W n",
+            "W* n",
         ):
             logger.error("Unknown passthrough_per_char operation: %s", operator)
             return
@@ -790,7 +791,7 @@ class ILCreater:
     def on_lt_curve(self, curve: babeldoc.pdfminer.layout.LTCurve):
         if not self.enable_graphic_element_process:
             return
-
+        close_path = False
         bbox = il_version_1.Box(
             x=curve.bbox[0],
             y=curve.bbox[1],
@@ -801,13 +802,31 @@ class ILCreater:
         paths = []
         for point in curve.original_path:
             op = point[0]
-            if op == "h":
+            if len(point) == 1:
+                paths.append(
+                    il_version_1.PdfPath(
+                        op=op,
+                        x=None,
+                        y=None,
+                        has_xy=False,
+                    )
+                )
                 continue
+            for p in point[1:-1]:
+                paths.append(
+                    il_version_1.PdfPath(
+                        op="",
+                        x=p[0],
+                        y=p[1],
+                        has_xy=True,
+                    )
+                )
             paths.append(
                 il_version_1.PdfPath(
                     op=point[0],
-                    x=point[1][0],
-                    y=point[1][1],
+                    x=point[-1][0],
+                    y=point[-1][1],
+                    has_xy=True,
                 )
             )
 
@@ -880,7 +899,7 @@ class ILCreater:
         self.current_page.pdf_form.append(new_form)
 
     def on_pdf_clip_path(self, clip_path, evenodd: bool):
-        op = "W*" if evenodd else "W"
+        op = "W* n" if evenodd else "W n"
         args = []
         for p in clip_path:
             if len(p) == 1:

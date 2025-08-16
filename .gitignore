@@ -40,3 +40,6 @@ babeldoc/format/txt
 
 # uv
 uv.lock
+
+# Claude Code memory file
+CLAUDE.md

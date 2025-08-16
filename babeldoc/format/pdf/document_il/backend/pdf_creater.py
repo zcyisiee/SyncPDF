@@ -5,6 +5,8 @@ import os
 import re
 import time
 import unicodedata
+from abc import ABC
+from abc import abstractmethod
 from multiprocessing import Process
 from pathlib import Path
 
@@ -25,6 +27,244 @@ logger = logging.getLogger(__name__)
 
 SUBSET_FONT_STAGE_NAME = "Subset font"
 SAVE_PDF_STAGE_NAME = "Save PDF"
+
+
+class RenderUnit(ABC):
+    """Abstract base class for all renderable units."""
+
+    def __init__(
+        self,
+        render_order: int,
+        sub_render_order: int = 0,
+        xobj_id: str | None = None,
+    ):
+        self.render_order = render_order
+        self.sub_render_order = sub_render_order
+        self.xobj_id = xobj_id
+        if self.render_order is None:
+            self.render_order = 9999999999999999
+        if self.sub_render_order is None:
+            self.sub_render_order = 9999999999999999
+
+    @abstractmethod
+    def render(
+        self,
+        draw_op: BitStream,
+        context: "RenderContext",
+    ) -> None:
+        """Render this unit to the draw_op BitStream."""
+        pass
+
+    def get_sort_key(self) -> tuple[int, int]:
+        """Get the sort key for ordering render units."""
+        return (self.render_order, self.sub_render_order)
+
+
+class CharacterRenderUnit(RenderUnit):
+    """Render unit for PDF characters."""
+
+    def __init__(
+        self,
+        char: il_version_1.PdfCharacter,
+        render_order: int,
+        sub_render_order: int = 0,
+    ):
+        super().__init__(render_order, sub_render_order, char.xobj_id)
+        self.char = char
+
+    def render(self, draw_op: BitStream, context: "RenderContext") -> None:
+        char = self.char
+        if char.char_unicode == "\n":
+            return
+        if char.pdf_character_id is None:
+            return
+
+        char_size = char.pdf_style.font_size
+        font_id = char.pdf_style.font_id
+
+        # Get encoding length map based on xobj_id
+        if self.xobj_id in context.xobj_encoding_length_map:
+            encoding_length_map = context.xobj_encoding_length_map[self.xobj_id]
+        else:
+            encoding_length_map = context.page_encoding_length_map
+
+        # Check font exists if needed
+        if context.check_font_exists:
+            if self.xobj_id in context.xobj_available_fonts:
+                if font_id not in context.xobj_available_fonts[self.xobj_id]:
+                    return
+            elif font_id not in context.available_font_list:
+                return
+
+        draw_op.append(b"q ")
+        context.pdf_creator.render_graphic_state(draw_op, char.pdf_style.graphic_state)
+
+        if char.vertical:
+            draw_op.append(
+                f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode(),
+            )
+        else:
+            draw_op.append(
+                f"BT /{font_id} {char_size:f} Tf 1 0 0 1 {char.box.x:f} {char.box.y:f} Tm ".encode(),
+            )
+
+        encoding_length = encoding_length_map.get(font_id, None)
+        if encoding_length is None:
+            if font_id in context.all_encoding_length_map:
+                encoding_length = context.all_encoding_length_map[font_id]
+            else:
+                logger.debug(
+                    f"Font {font_id} not found in encoding length map for page {context.page.page_number}"
+                )
+                return
+
+        draw_op.append(
+            f"<{char.pdf_character_id:0{encoding_length * 2}x}>".upper().encode(),
+        )
+        draw_op.append(b" Tj ET Q \n")
+
+
+class FormRenderUnit(RenderUnit):
+    """Render unit for PDF forms."""
+
+    def __init__(
+        self,
+        form: il_version_1.PdfForm,
+        render_order: int,
+        sub_render_order: int = 0,
+    ):
+        super().__init__(render_order, sub_render_order, form.xobj_id)
+        self.form = form
+
+    def render(self, draw_op: BitStream, context: "RenderContext") -> None:
+        form = self.form
+        draw_op.append(b"q ")
+
+        draw_op.append(
+            form.graphic_state.passthrough_per_char_instruction.encode(),
+        )
+        draw_op.append(b" ")
+
+        assert form.pdf_matrix is not None
+        draw_op.append(matrix_to_bytes(form.pdf_matrix))
+
+        assert form.pdf_form_subtype is not None
+        if form.pdf_form_subtype.pdf_xobj_form:
+            draw_op.append(
+                f" /{form.pdf_form_subtype.pdf_xobj_form.do_args} Do ".encode()
+            )
+        draw_op.append(context.ctm_for_ops)
+        draw_op.append(b" Q\n")
+
+
+class RectangleRenderUnit(RenderUnit):
+    """Render unit for PDF rectangles."""
+
+    def __init__(
+        self,
+        rectangle: il_version_1.PdfRectangle,
+        render_order: int,
+        sub_render_order: int = 0,
+        line_width: float = 0.4,
+    ):
+        super().__init__(render_order, sub_render_order, rectangle.xobj_id)
+        self.rectangle = rectangle
+        self.line_width = line_width
+
+    def render(self, draw_op: BitStream, context: "RenderContext") -> None:
+        rectangle = self.rectangle
+        x1 = rectangle.box.x
+        y1 = rectangle.box.y
+        x2 = rectangle.box.x2
+        y2 = rectangle.box.y2
+        width = x2 - x1
+        height = y2 - y1
+
+        draw_op.append(b"q n ")
+        draw_op.append(
+            rectangle.graphic_state.passthrough_per_char_instruction.encode(),
+        )
+
+        line_width = self.line_width
+        if rectangle.line_width is not None:
+            line_width = rectangle.line_width
+        if line_width > 0:
+            draw_op.append(f" {line_width:.6f} w ".encode())
+
+        draw_op.append(f"{x1:.6f} {y1:.6f} {width:.6f} {height:.6f} re ".encode())
+        if rectangle.fill_background:
+            draw_op.append(b" f ")
+        else:
+            draw_op.append(b" S ")
+
+        draw_op.append(b"Q\n")
+
+
+class CurveRenderUnit(RenderUnit):
+    """Render unit for PDF curves."""
+
+    def __init__(
+        self,
+        curve: il_version_1.PdfCurve,
+        render_order: int,
+        sub_render_order: int = 0,
+    ):
+        super().__init__(render_order, sub_render_order, curve.xobj_id)
+        self.curve = curve
+
+    def render(self, draw_op: BitStream, context: "RenderContext") -> None:
+        curve = self.curve
+        draw_op.append(b"q n ")
+
+        draw_op.append(
+            curve.graphic_state.passthrough_per_char_instruction.encode(),
+        )
+        draw_op.append(b" ")
+
+        for path in curve.pdf_path:
+            if path.has_xy:
+                draw_op.append(f"{path.x:F} {path.y:F} {path.op} ".encode())
+            else:
+                draw_op.append(f"{path.op} ".encode())
+
+        final_op = b""
+        if curve.fill_background:
+            final_op = b" f"
+        if curve.evenodd:
+            final_op += b"* "
+        else:
+            final_op += b" "
+        if curve.stroke_path:
+            final_op += b"S "
+
+        draw_op.append(final_op)
+        draw_op.append(b" n Q\n")
+
+
+class RenderContext:
+    """Context object containing shared state for rendering."""
+
+    def __init__(
+        self,
+        pdf_creator: "PDFCreater",
+        page: il_version_1.Page,
+        available_font_list: set[str],
+        page_encoding_length_map: dict[str, int],
+        all_encoding_length_map: dict[str, int],
+        xobj_available_fonts: dict[str, set[str]],
+        xobj_encoding_length_map: dict[str, dict[str, int]],
+        ctm_for_ops: bytes,
+        check_font_exists: bool = False,
+    ):
+        self.pdf_creator = pdf_creator
+        self.page = page
+        self.available_font_list = available_font_list
+        self.page_encoding_length_map = page_encoding_length_map
+        self.all_encoding_length_map = all_encoding_length_map
+        self.xobj_available_fonts = xobj_available_fonts
+        self.xobj_encoding_length_map = xobj_encoding_length_map
+        self.ctm_for_ops = ctm_for_ops
+        self.check_font_exists = check_font_exists
 
 
 def to_int(src):
@@ -298,6 +538,89 @@ class PDFCreater:
             return chars
         return chars
 
+    def create_render_units_for_page(
+        self,
+        page: il_version_1.Page,
+        translation_config: TranslationConfig,
+    ) -> list[RenderUnit]:
+        """Convert all renderable objects in a page to render units."""
+        render_units = []
+
+        # Collect all characters (from page and paragraphs)
+        chars = []
+        if page.pdf_character:
+            chars.extend(page.pdf_character)
+        for paragraph in page.pdf_paragraph:
+            chars.extend(self.render_paragraph_to_char(paragraph))
+
+        # Convert characters to render units
+        for i, char in enumerate(chars):
+            render_order = getattr(char, "render_order", 100)  # Default render order
+            sub_render_order = getattr(char, "sub_render_order", i)
+            render_units.append(
+                CharacterRenderUnit(char, render_order, sub_render_order)
+            )
+
+        # Convert forms to render units
+        for i, form in enumerate(page.pdf_form):
+            render_order = getattr(
+                form, "render_order", 50
+            )  # Forms render before characters
+            sub_render_order = getattr(form, "sub_render_order", i)
+            render_units.append(FormRenderUnit(form, render_order, sub_render_order))
+
+        # Convert rectangles to render units (only for OCR workaround or debug)
+        for i, rect in enumerate(page.pdf_rectangle):
+            if (
+                translation_config.ocr_workaround
+                and not rect.debug_info
+                and rect.fill_background
+            ) or (translation_config.debug and rect.debug_info):
+                render_order = getattr(
+                    rect, "render_order", 10
+                )  # Rectangles render first
+                sub_render_order = getattr(rect, "sub_render_order", i)
+                line_width = 0.1 if translation_config.ocr_workaround else 0.4
+                render_units.append(
+                    RectangleRenderUnit(
+                        rect, render_order, sub_render_order, line_width
+                    )
+                )
+
+        # Convert curves to render units (only for debug)
+        for i, curve in enumerate(page.pdf_curve):
+            if curve.debug_info or translation_config.debug:
+                render_order = getattr(
+                    curve, "render_order", 20
+                )  # Curves render after rectangles
+                sub_render_order = getattr(curve, "sub_render_order", i)
+                render_units.append(
+                    CurveRenderUnit(curve, render_order, sub_render_order)
+                )
+
+        return render_units
+
+    def render_units_to_stream(
+        self,
+        render_units: list[RenderUnit],
+        context: RenderContext,
+        page_op: BitStream,
+        xobj_draw_ops: dict[str, BitStream],
+    ) -> None:
+        """Render sorted render units to appropriate draw streams."""
+        # Sort render units by (render_order, sub_render_order)
+        sorted_units = sorted(render_units, key=lambda unit: unit.get_sort_key())
+
+        for unit in sorted_units:
+            # Determine which draw_op to use based on xobj_id
+            if unit.xobj_id in xobj_draw_ops:
+                draw_op = xobj_draw_ops[unit.xobj_id]
+            else:
+                draw_op = page_op
+
+            # Render the unit
+            unit.render(draw_op, context)
+
     def get_available_font_list(self, pdf, page):
         page_xref_id = pdf[page.page_number].xref
         return self.get_xobj_available_fonts(page_xref_id, pdf)
@@ -357,15 +680,15 @@ class PDFCreater:
         if rectangle.line_width is not None:
             line_width = rectangle.line_width
         if line_width > 0:
-            draw_op.append(f" {line_width} w ".encode())  # Line width
-        draw_op.append(f"{x1} {y1} {width} {height} re ".encode())
+            draw_op.append(f" {line_width:.6f} w ".encode())  # Line width
+        draw_op.append(f"{x1:.6f} {y1:.6f} {width:.6f} {height:.6f} re ".encode())
         if rectangle.fill_background:
             draw_op.append(b" f ")
         else:
             draw_op.append(b" S ")
 
         # Restore graphics state
-        draw_op.append(b"Q\n")
+        draw_op.append(b" n Q\n")
 
     def _render_pdf_curve(
         self,
@@ -391,6 +714,7 @@ class PDFCreater:
             final_op += b" "
         if curve.stroke_path:
             final_op += b"S "
+        final_op += b" n "
 
         draw_op.append(final_op)
         # Restore graphics state
@@ -561,7 +885,7 @@ class PDFCreater:
                 page_op.append(base_op)
             page_op.append(b" Q ")
             page_op.append(
-                f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode(),
+                f"q Q 1 0 0 1 {page.cropbox.box.x:.6f} {page.cropbox.box.y:.6f} cm \n".encode(),
             )
             # 收集所有字符
             chars = []
@@ -927,96 +1251,31 @@ class PDFCreater:
                     # page_op.append(b" \n")
                     page_op.append(ctm_for_ops)
                     page_op.append(b" \n")
-                    # page_op.append(b" Q ")
-                    # page_op.append(
-                    #     f"q Q 1 0 0 1 {page.cropbox.box.x} {page.cropbox.box.y} cm \n".encode(),
-                    # )
-                    # 收集所有字符
-                    chars = []
-                    # 首先添加页面级别的字符
-                    if page.pdf_character:
-                        chars.extend(page.pdf_character)
-                    # 然后添加段落中的字符
-                    for paragraph in page.pdf_paragraph:
-                        chars.extend(self.render_paragraph_to_char(paragraph))
 
-                    for form in page.pdf_form:
-                        xobj_id = form.xobj_id
-                        if xobj_id in xobj_available_fonts:
-                            draw_op = xobj_draw_ops[xobj_id]
-                        else:
-                            draw_op = page_op
-                        self._render_pdf_form(draw_op, form, ctm_for_ops)
+                    # Create render context
+                    context = RenderContext(
+                        pdf_creator=self,
+                        page=page,
+                        available_font_list=available_font_list,
+                        page_encoding_length_map=page_encoding_length_map,
+                        all_encoding_length_map=all_encoding_length_map,
+                        xobj_available_fonts=xobj_available_fonts,
+                        xobj_encoding_length_map=xobj_encoding_length_map,
+                        ctm_for_ops=ctm_for_ops,
+                        check_font_exists=check_font_exists,
+                    )
 
-                    for rect in page.pdf_rectangle:
-                        if (
-                            translation_config.ocr_workaround
-                            and not rect.debug_info
-                            and rect.fill_background
-                        ):
-                            if rect.xobj_id in xobj_available_fonts:
-                                draw_op = xobj_draw_ops[rect.xobj_id]
-                            else:
-                                draw_op = page_op
-                            self._render_rectangle(draw_op, rect, line_width=0.1)
-                    for curve in page.pdf_curve:
-                        if curve.debug_info or translation_config.debug:
-                            if curve.xobj_id in xobj_available_fonts:
-                                draw_op = xobj_draw_ops[curve.xobj_id]
-                            else:
-                                draw_op = page_op
-                            self._render_pdf_curve(draw_op, curve)
-                    # 渲染所有字符
-                    for char in chars:
-                        if char.char_unicode == "\n":
-                            continue
-                        if char.pdf_character_id is None:
-                            # dummy char
-                            continue
-                        char_size = char.pdf_style.font_size
-                        font_id = char.pdf_style.font_id
-                        if char.xobj_id in xobj_available_fonts:
-                            if (
-                                check_font_exists
-                                and font_id not in xobj_available_fonts[char.xobj_id]
-                            ):
-                                continue
-                            draw_op = xobj_draw_ops[char.xobj_id]
-                            encoding_length_map = xobj_encoding_length_map[char.xobj_id]
-                        else:
-                            if check_font_exists and font_id not in available_font_list:
-                                continue
-                            draw_op = page_op
-                            encoding_length_map = page_encoding_length_map
+                    # Create render units for all renderable objects
+                    render_units = self.create_render_units_for_page(
+                        page, translation_config
+                    )
 
-                        draw_op.append(b"q ")
-                        self.render_graphic_state(draw_op, char.pdf_style.graphic_state)
-                        if char.vertical:
-                            draw_op.append(
-                                f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode(),
-                            )
-                        else:
-                            draw_op.append(
-                                f"BT /{font_id} {char_size:f} Tf 1 0 0 1 {char.box.x:f} {char.box.y:f} Tm ".encode(),
-                            )
+                    # Render all units to their appropriate streams
+                    self.render_units_to_stream(
+                        render_units, context, page_op, xobj_draw_ops
+                    )
 
-                        encoding_length = encoding_length_map.get(font_id, None)
-                        if encoding_length is None:
-                            if font_id in all_encoding_length_map:
-                                encoding_length = all_encoding_length_map[font_id]
-                            else:
-                                logger.debug(
-                                    f"Font {font_id} not found in encoding length map for page {page.page_number}"
-                                )
-                                continue
-                        # pdf32000-2008 page14:
-                        # As hexadecimal data enclosed in angle brackets < >
-                        # see 7.3.4.3, "Hexadecimal Strings."
-                        draw_op.append(
-                            f"<{char.pdf_character_id:0{encoding_length * 2}x}>".upper().encode(),
-                        )
-
-                        draw_op.append(b" Tj ET Q \n")
+                    # Update xobject streams
                     for xobj in page.pdf_xobject:
                         draw_op = xobj_draw_ops[xobj.xobj_id]
                         try:
@@ -1025,10 +1284,6 @@ class PDFCreater:
                             logger.warning(
                                 f"update xref {xobj.xref_id} stream fail, continue"
                             )
-                        # pdf.update_stream(xobj.xref_id, b'')
-                    for rect in page.pdf_rectangle:
-                        if translation_config.debug and rect.debug_info:
-                            self._render_rectangle(page_op, rect)
 
                     draw_op = page_op
                     op_container = pdf.get_new_xref()

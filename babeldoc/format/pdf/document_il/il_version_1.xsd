@@ -249,6 +249,7 @@
       <xs:attribute name="x" use="required" type="xs:float"/>
       <xs:attribute name="y" use="required" type="xs:float"/>
       <xs:attribute name="op" use="required" type="xs:string"/>
+      <xs:attribute name="has_xy" type="xs:boolean"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfForm">

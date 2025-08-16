@@ -309,7 +309,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             self.il_creater.on_xobj_end(
                 x_id,
                 # f"q {ops_base} Q {a} {b} {c} {d} {e} {f} cm ",
-                f"{a} {b} {c} {d} {e} {f} cm ",
+                f"{a:.6f} {b:.6f} {c:.6f} {d:.6f} {e:.6f} {f:.6f} cm ",
             )
             try:  # 有的时候 form 字体加不上这里会烂掉
                 self.device.fontid = interpreter.fontid
@@ -324,7 +324,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
                 a, b, c, d = ctm_inv.reshape(4).tolist()
                 e, f = pos_inv.tolist()[0]
                 self.obj_patch[self.xobjmap[xobjid].objid] = (
-                    f"q {ops_base}Q {a} {b} {c} {d} {e} {f} cm {ops_new}"
+                    f"q {ops_base}Q {a:.6f} {b:.6f} {c:.6f} {d:.6f} {e:.6f} {f:.6f} cm {ops_new}"
                 )
             except Exception:
                 pass
