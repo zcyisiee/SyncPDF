@@ -235,6 +235,7 @@
         <xs:element ref="box"/>
         <xs:element ref="graphicState"/>
         <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfPath"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfOriginalPath"/>
       </xs:sequence>
       <xs:attribute name="debug_info" type="xs:boolean"/>
       <xs:attribute name="fill_background" type="xs:boolean"/>
@@ -242,6 +243,27 @@
       <xs:attribute name="evenodd" type="xs:boolean"/>
       <xs:attribute name="xobjId" type="xs:int"/>
       <xs:attribute name="renderOrder" type="xs:int"/>
+      <xs:attribute name="ctm">
+        <xs:simpleType>
+          <xs:restriction>
+            <xs:simpleType>
+              <xs:list>
+                <xs:simpleType>
+                  <xs:union memberTypes="xs:float xs:float xs:float xs:float xs:float xs:float"/>
+                </xs:simpleType>
+              </xs:list>
+            </xs:simpleType>
+            <xs:length value="6"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:attribute>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="pdfOriginalPath">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="pdfPath"/>
+      </xs:sequence>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfPath">
@@ -262,6 +284,20 @@
         <xs:element ref="pdfFormSubtype"/>
       </xs:sequence>
       <xs:attribute name="xobjId" use="required" type="xs:int"/>
+      <xs:attribute name="ctm">
+        <xs:simpleType>
+          <xs:restriction>
+            <xs:simpleType>
+              <xs:list>
+                <xs:simpleType>
+                  <xs:union memberTypes="xs:float xs:float xs:float xs:float xs:float xs:float"/>
+                </xs:simpleType>
+              </xs:list>
+            </xs:simpleType>
+            <xs:length value="6"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:attribute>
       <xs:attribute name="renderOrder" use="required" type="xs:int"/>
       <xs:attribute name="formType" use="required" type="xs:string"/>
     </xs:complexType>

@@ -340,73 +340,6 @@ class PageLayout:
 
 
 @dataclass(slots=True)
-class PdfCurve:
-    class Meta:
-        name = "pdfCurve"
-
-    box: Box | None = field(
-        default=None,
-        metadata={
-            "type": "Element",
-            "required": True,
-        },
-    )
-    graphic_state: GraphicState | None = field(
-        default=None,
-        metadata={
-            "name": "graphicState",
-            "type": "Element",
-            "required": True,
-        },
-    )
-    pdf_path: list[PdfPath] = field(
-        default_factory=list,
-        metadata={
-            "name": "pdfPath",
-            "type": "Element",
-        },
-    )
-    debug_info: bool | None = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-        },
-    )
-    fill_background: bool | None = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-        },
-    )
-    stroke_path: bool | None = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-        },
-    )
-    evenodd: bool | None = field(
-        default=None,
-        metadata={
-            "type": "Attribute",
-        },
-    )
-    xobj_id: int | None = field(
-        default=None,
-        metadata={
-            "name": "xobjId",
-            "type": "Attribute",
-        },
-    )
-    render_order: int | None = field(
-        default=None,
-        metadata={
-            "name": "renderOrder",
-            "type": "Attribute",
-        },
-    )
-
-
-@dataclass(slots=True)
 class PdfFigure:
     class Meta:
         name = "pdfFigure"
@@ -518,6 +451,21 @@ class PdfFormSubtype:
         metadata={
             "name": "pdfXobjForm",
             "type": "Element",
+        },
+    )
+
+
+@dataclass(slots=True)
+class PdfOriginalPath:
+    class Meta:
+        name = "pdfOriginalPath"
+
+    pdf_path: PdfPath | None = field(
+        default=None,
+        metadata={
+            "name": "pdfPath",
+            "type": "Element",
+            "required": True,
         },
     )
 
@@ -714,6 +662,88 @@ class PdfCharacter:
 
 
 @dataclass(slots=True)
+class PdfCurve:
+    class Meta:
+        name = "pdfCurve"
+
+    box: Box | None = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "required": True,
+        },
+    )
+    graphic_state: GraphicState | None = field(
+        default=None,
+        metadata={
+            "name": "graphicState",
+            "type": "Element",
+            "required": True,
+        },
+    )
+    pdf_path: list[PdfPath] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfPath",
+            "type": "Element",
+        },
+    )
+    pdf_original_path: list[PdfOriginalPath] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfOriginalPath",
+            "type": "Element",
+        },
+    )
+    debug_info: bool | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    fill_background: bool | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    stroke_path: bool | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    evenodd: bool | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
+    xobj_id: int | None = field(
+        default=None,
+        metadata={
+            "name": "xobjId",
+            "type": "Attribute",
+        },
+    )
+    render_order: int | None = field(
+        default=None,
+        metadata={
+            "name": "renderOrder",
+            "type": "Attribute",
+        },
+    )
+    ctm: list[object] = field(
+        default_factory=list,
+        metadata={
+            "type": "Attribute",
+            "length": 6,
+            "tokens": True,
+        },
+    )
+
+
+@dataclass(slots=True)
 class PdfForm:
     class Meta:
         name = "pdfForm"
@@ -763,6 +793,14 @@ class PdfForm:
             "name": "xobjId",
             "type": "Attribute",
             "required": True,
+        },
+    )
+    ctm: list[object] = field(
+        default_factory=list,
+        metadata={
+            "type": "Attribute",
+            "length": 6,
+            "tokens": True,
         },
     )
     render_order: int | None = field(

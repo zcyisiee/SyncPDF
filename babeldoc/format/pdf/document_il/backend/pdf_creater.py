@@ -15,6 +15,7 @@ import pymupdf
 from bitstring import BitStream
 
 from babeldoc.assets.embedding_assets_metadata import FONT_NAMES
+from babeldoc.format.pdf.document_il import PdfOriginalPath
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
 from babeldoc.format.pdf.document_il.utils.matrix_helper import matrix_to_bytes
@@ -140,6 +141,12 @@ class FormRenderUnit(RenderUnit):
         form = self.form
         draw_op.append(b"q ")
 
+        # if form.ctm is not None:
+        #     ctm = form.ctm
+        #     draw_op.append(
+        #         f"{ctm[0]:.6f} {ctm[1]:.6f} {ctm[2]:.6f} {ctm[3]:.6f} {ctm[4]:.6f} {ctm[5]:.6f} cm ".encode()
+        #     )
+
         draw_op.append(
             form.graphic_state.passthrough_per_char_instruction.encode(),
         )
@@ -216,12 +223,27 @@ class CurveRenderUnit(RenderUnit):
         curve = self.curve
         draw_op.append(b"q n ")
 
+        # Apply CTM transformation if available
+        if curve.ctm is not None:
+            ctm = curve.ctm
+            draw_op.append(
+                f"{ctm[0]:.6f} {ctm[1]:.6f} {ctm[2]:.6f} {ctm[3]:.6f} {ctm[4]:.6f} {ctm[5]:.6f} cm ".encode()
+            )
+
         draw_op.append(
             curve.graphic_state.passthrough_per_char_instruction.encode(),
         )
         draw_op.append(b" ")
 
-        for path in curve.pdf_path:
+        # Use original path if available, otherwise fall back to transformed path
+        path_to_use = (
+            curve.pdf_original_path
+            if curve.pdf_original_path is not None
+            else curve.pdf_path
+        )
+        for path in path_to_use:
+            if isinstance(path, PdfOriginalPath):
+                path = path.pdf_path
             if path.has_xy:
                 draw_op.append(f"{path.x:F} {path.y:F} {path.op} ".encode())
             else:

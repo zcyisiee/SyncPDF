@@ -320,13 +320,19 @@ class ILCreater:
 
     def is_passthrough_per_char_operation(self, operator: str):
         return re.match(
-            "^(sc|SC|sh|scn|SCN|g|G|rg|RG|k|K|cs|CS|gs|ri|w|J|j|M|d|i)$", operator
+            "^(sc|SC|sh|scn|SCN|g|G|rg|RG|k|K|cs|CS|gs|ri|w|J|j|M|i)$",
+            operator,
         )
+
+    def on_line_dash(self, dash, phase):
+        dash_str = f"[{' '.join(f'{arg}' for arg in dash)}]"
+        self.on_passthrough_per_char("d", [dash_str, str(phase)])
 
     def on_passthrough_per_char(self, operator: str, args: list[str]):
         if not self.is_passthrough_per_char_operation(operator) and operator not in (
             "W n",
             "W* n",
+            "d",
         ):
             logger.error("Unknown passthrough_per_char operation: %s", operator)
             return
@@ -627,11 +633,21 @@ class ILCreater:
     def create_graphic_state(
         self,
         gs: babeldoc.pdfminer.pdfinterp.PDFGraphicState | list[tuple[str, str]],
+        include_clipping: bool = False,
     ):
         passthrough_instruction = getattr(gs, "passthrough_instruction", gs)
 
+        def filter_clipping(op):
+            return op not in ("W n", "W* n")
+
+        def pass_all(_op):
+            return True
+
+        if include_clipping:
+            filter_clipping = pass_all
+
         passthrough_per_char_instruction = " ".join(
-            f"{arg} {op}" for op, arg in passthrough_instruction
+            f"{arg} {op}" for op, arg in passthrough_instruction if filter_clipping(op)
         )
 
         # 可能会影响部分 graphic state 准确度。不过 BabelDOC 仅使用 passthrough_per_char_instruction
@@ -791,14 +807,15 @@ class ILCreater:
     def on_lt_curve(self, curve: babeldoc.pdfminer.layout.LTCurve):
         if not self.enable_graphic_element_process:
             return
-        close_path = False
         bbox = il_version_1.Box(
             x=curve.bbox[0],
             y=curve.bbox[1],
             x2=curve.bbox[2],
             y2=curve.bbox[3],
         )
-        gs = self.create_graphic_state(curve.passthrough_instruction)
+        gs = self.create_graphic_state(
+            curve.passthrough_instruction, include_clipping=True
+        )
         paths = []
         for point in curve.original_path:
             op = point[0]
@@ -833,7 +850,51 @@ class ILCreater:
         fill_background = curve.fill
         stroke_path = curve.stroke
         evenodd = curve.evenodd
-        curve = il_version_1.PdfCurve(
+        # Extract CTM from curve object if it exists
+        ctm = getattr(curve, "ctm", None)
+
+        # Extract raw path from curve object if it exists
+        raw_path = getattr(curve, "raw_path", None)
+        raw_pdf_paths = None
+        if raw_path is not None:
+            raw_pdf_paths = []
+            for path in raw_path:
+                if path[0] == "h":  # h command (close path)
+                    raw_pdf_paths.append(
+                        il_version_1.PdfOriginalPath(
+                            pdf_path=il_version_1.PdfPath(
+                                x=0.0,
+                                y=0.0,
+                                op=path[0],
+                                has_xy=False,
+                            )
+                        )
+                    )
+                else:  # commands with coordinates (m, l, c, v, y, etc.)
+                    for p in batched(path[1:-2], 2, strict=True):
+                        raw_pdf_paths.append(
+                            il_version_1.PdfOriginalPath(
+                                pdf_path=il_version_1.PdfPath(
+                                    x=float(p[0]),
+                                    y=float(p[1]),
+                                    op="",
+                                    has_xy=True,
+                                )
+                            )
+                        )
+                    # Last point in the path
+                    raw_pdf_paths.append(
+                        il_version_1.PdfOriginalPath(
+                            pdf_path=il_version_1.PdfPath(
+                                x=float(path[-2]),
+                                y=float(path[-1]),
+                                op=path[0],
+                                has_xy=True,
+                            )
+                        )
+                    )
+
+        curve_obj = il_version_1.PdfCurve(
             box=bbox,
             graphic_state=gs,
             pdf_path=paths,
@@ -843,8 +904,10 @@ class ILCreater:
             debug_info="a",
             xobj_id=curve.xobj_id,
             render_order=curve.render_order,
+            ctm=list(ctm) if ctm is not None else None,
+            pdf_original_path=raw_pdf_paths,
         )
-        self.current_page.pdf_curve.append(curve)
+        self.current_page.pdf_curve.append(curve_obj)
         pass
 
     def on_xobj_form(
@@ -862,7 +925,7 @@ class ILCreater:
         bounds = ((x, y), (x + w, y), (x, y + h), (x + w, y + h))
         bbox = get_bound(apply_matrix_pt(matrix, (p, q)) for (p, q) in bounds)
 
-        gs = self.create_graphic_state(self.passthrough_per_char_instruction)
+        gs = self.create_graphic_state(self.passthrough_per_char_instruction, True)
 
         figure_bbox = il_version_1.Box(
             x=bbox[0],
@@ -895,18 +958,28 @@ class ILCreater:
             render_order=self.get_render_order_and_increase(),
             form_type=form_type,
             pdf_form_subtype=pdf_form_subtype,
+            ctm=list(ctm),
         )
         self.current_page.pdf_form.append(new_form)
 
-    def on_pdf_clip_path(self, clip_path, evenodd: bool):
+    def on_pdf_clip_path(
+        self,
+        clip_path,
+        evenodd: bool,
+        ctm: tuple[float, float, float, float, float, float],
+    ):
         op = "W* n" if evenodd else "W n"
-        args = []
+        args = [
+            "q",
+            f"{ctm[0]:F} {ctm[1]:F} {ctm[2]:F} {ctm[3]:F} {ctm[4]:F} {ctm[5]:F} cm",
+        ]
         for p in clip_path:
             if len(p) == 1:
                 args.append(p[0])
-            elif len(p) == 2:
-                args.append(f"{p[1][0]:F} {p[1][1]:F} {p[0]}")
-
+            elif len(p) > 1:
+                args.extend([f"{x:F}" for x in p[1:]])
+                args.append(p[0])
+        args.append("Q")
         self.on_passthrough_per_char(op, args)
 
     def create_il(self):

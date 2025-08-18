@@ -156,13 +156,20 @@ PDFCurve =
     Box,
     GraphicState,
     PDFPath*,
+    PDFOriginalPath*,
     attribute debug_info { xsd:boolean }?,
     attribute fill_background { xsd:boolean }?,
     attribute stroke_path { xsd:boolean }?,
     attribute evenodd { xsd:boolean }?,
     attribute xobjId { xsd:int }?,
-    attribute renderOrder { xsd:int }?
+    attribute renderOrder { xsd:int }?,
+    attribute ctm {
+      list {
+        xsd:float, xsd:float, xsd:float, xsd:float, xsd:float, xsd:float
+      }
+    }?
   }
+PDFOriginalPath = element pdfOriginalPath { PDFPath }
 PDFPath =
   element pdfPath {
     attribute x { xsd:float },
@@ -177,6 +184,11 @@ PDFForm =
     GraphicState,
     PDFMatrix,
     PDFAffineTransform,
+    attribute ctm {
+      list {
+        xsd:float, xsd:float, xsd:float, xsd:float, xsd:float, xsd:float
+      }
+    }?,
     attribute renderOrder { xsd:int },
     attribute formType { xsd:string },
     PDFFormSubtype

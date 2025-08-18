@@ -425,6 +425,9 @@
       <zeroOrMore>
         <ref name="PDFPath"/>
       </zeroOrMore>
+      <zeroOrMore>
+        <ref name="PDFOriginalPath"/>
+      </zeroOrMore>
       <optional>
         <attribute name="debug_info">
           <data type="boolean"/>
@@ -455,6 +458,23 @@
           <data type="int"/>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="ctm">
+          <list>
+            <data type="float"/>
+            <data type="float"/>
+            <data type="float"/>
+            <data type="float"/>
+            <data type="float"/>
+            <data type="float"/>
+          </list>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+  <define name="PDFOriginalPath">
+    <element name="pdfOriginalPath">
+      <ref name="PDFPath"/>
     </element>
   </define>
   <define name="PDFPath">
@@ -484,6 +504,18 @@
       <ref name="GraphicState"/>
       <ref name="PDFMatrix"/>
       <ref name="PDFAffineTransform"/>
+      <optional>
+        <attribute name="ctm">
+          <list>
+            <data type="float"/>
+            <data type="float"/>
+            <data type="float"/>
+            <data type="float"/>
+            <data type="float"/>
+            <data type="float"/>
+          </list>
+        </attribute>
+      </optional>
       <attribute name="renderOrder">
         <data type="int"/>
       </attribute>

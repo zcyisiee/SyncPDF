@@ -18,6 +18,7 @@ from babeldoc.format.pdf.document_il.il_version_1 import PdfFormula
 from babeldoc.format.pdf.document_il.il_version_1 import PdfInlineForm
 from babeldoc.format.pdf.document_il.il_version_1 import PdfLine
 from babeldoc.format.pdf.document_il.il_version_1 import PdfMatrix
+from babeldoc.format.pdf.document_il.il_version_1 import PdfOriginalPath
 from babeldoc.format.pdf.document_il.il_version_1 import PdfParagraph
 from babeldoc.format.pdf.document_il.il_version_1 import PdfParagraphComposition
 from babeldoc.format.pdf.document_il.il_version_1 import PdfPath
@@ -50,6 +51,7 @@ __all__ = [
     "PdfInlineForm",
     "PdfLine",
     "PdfMatrix",
+    "PdfOriginalPath",
     "PdfParagraph",
     "PdfParagraphComposition",
     "PdfPath",

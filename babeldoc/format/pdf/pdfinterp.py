@@ -7,7 +7,6 @@ import numpy as np
 
 from babeldoc.format.pdf.babelpdf.utils import guarded_bbox
 from babeldoc.format.pdf.document_il.frontend.il_creater import ILCreater
-from babeldoc.format.pdf.document_il.utils.matrix_helper import Point
 from babeldoc.pdfminer import settings
 from babeldoc.pdfminer.pdfcolor import PREDEFINED_COLORSPACE
 from babeldoc.pdfminer.pdfcolor import PDFColorSpace
@@ -38,7 +37,6 @@ from babeldoc.pdfminer.psparser import keyword_name
 from babeldoc.pdfminer.psparser import literal_name
 from babeldoc.pdfminer.utils import MATRIX_IDENTITY
 from babeldoc.pdfminer.utils import Matrix
-from babeldoc.pdfminer.utils import PathSegment
 from babeldoc.pdfminer.utils import Rect
 from babeldoc.pdfminer.utils import apply_matrix_pt
 from babeldoc.pdfminer.utils import choplist
@@ -355,24 +353,7 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
 
     def handle_w(self, evenodd: bool):
         path = self.curpath
-        raw_pts = [cast(Point, p[-2:] if p[0] != "h" else path[0][-2:]) for p in path]
-        pts = [apply_matrix_pt(self.ctm, pt) for pt in raw_pts]
-
-        operators = [str(operation[0]) for operation in path]
-        transformed_points = [
-            [
-                apply_matrix_pt(self.ctm, (float(operand1), float(operand2)))
-                for operand1, operand2 in zip(
-                    operation[1::2], operation[2::2], strict=False
-                )
-            ]
-            for operation in path
-        ]
-        transformed_path = [
-            cast(PathSegment, (o, *p))
-            for o, p in zip(operators, transformed_points, strict=False)
-        ]
-        self.il_creater.on_pdf_clip_path(transformed_path, evenodd)
+        self.il_creater.on_pdf_clip_path(path, evenodd, self.ctm)
 
     def process_page(self, page: PDFPage) -> None:
         # 重载设置 page 的 obj_patch
@@ -461,6 +442,11 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
             seq = [seq]
         self.device.render_string(self.textstate, cast(PDFTextSeq, seq), self.ncs, gs)
         return
+
+    def do_d(self, dash: PDFStackT, phase: PDFStackT) -> None:
+        """Set line dash pattern"""
+        self.graphicstate.dash = (dash, phase)
+        self.il_creater.on_line_dash(dash, phase)
 
     # Run PostScript commands
     # The Do_xxx method is the method for executing corresponding postscript instructions
