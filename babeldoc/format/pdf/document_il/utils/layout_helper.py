@@ -15,30 +15,33 @@ from babeldoc.format.pdf.document_il.il_version_1 import PdfParagraph
 from babeldoc.format.pdf.document_il.il_version_1 import PdfParagraphComposition
 
 logger = logging.getLogger(__name__)
-HEIGHT_NOT_USFUL_CHAR_IN_CHAR = (
-    "∑︁",
-    # 暂时假设 cid:17 和 cid 16 是特殊情况
-    # 来源于 arXiv:2310.18608v2 第九页公式大括号
-    "(cid:17)",
-    "(cid:16)",
-    # arXiv:2411.19509v2 第四页 []
-    "(cid:104)",
-    "(cid:105)",
-    # arXiv:2411.19509v2 第四页 公式的 | 竖线
-    "(cid:13)",
-    "∑︁",
-    # arXiv:2412.05265 27 页 累加号
-    "(cid:88)",
-    # arXiv:2412.05265 16 页 累乘号
-    "(cid:89)",
-    # arXiv:2412.05265 27 页 积分
-    "(cid:90)",
-    # arXiv:2412.05265 32 页 公式左右的中括号
-    "(cid:2)",
-    "(cid:3)",
-    "·",
-    "√",
-)
+# HEIGHT_NOT_USFUL_CHAR_IN_CHAR = (
+#     "∑︁",
+#     # 暂时假设 cid:17 和 cid 16 是特殊情况
+#     # 来源于 arXiv:2310.18608v2 第九页公式大括号
+#     "(cid:17)",
+#     "(cid:16)",
+#     # arXiv:2411.19509v2 第四页 []
+#     "(cid:104)",
+#     "(cid:105)",
+#     # arXiv:2411.19509v2 第四页 公式的 | 竖线
+#     "(cid:13)",
+#     "∑︁",
+#     # arXiv:2412.05265 27 页 累加号
+#     "(cid:88)",
+#     # arXiv:2412.05265 16 页 累乘号
+#     "(cid:89)",
+#     # arXiv:2412.05265 27 页 积分
+#     "(cid:90)",
+#     # arXiv:2412.05265 32 页 公式左右的中括号
+#     "(cid:2)",
+#     "(cid:3)",
+#     "·",
+#     "√",
+# )
+
+# 由于我们有一套bbox解析机制了，所以现在不需要这个东西了。
+HEIGHT_NOT_USFUL_CHAR_IN_CHAR = (None,)
 
 
 LEFT_BRACKET = ("(cid:8)", "(", "(cid:16)", "{", "[", "(cid:104)", "(cid:2)")
