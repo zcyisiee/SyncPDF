@@ -160,7 +160,48 @@ class FormRenderUnit(RenderUnit):
             draw_op.append(
                 f" /{form.pdf_form_subtype.pdf_xobj_form.do_args} Do ".encode()
             )
-        draw_op.append(context.ctm_for_ops)
+        elif form.pdf_form_subtype.pdf_inline_form:
+            # Handle inline form (inline image)
+            inline_form = form.pdf_form_subtype.pdf_inline_form
+
+            # Start inline image
+            draw_op.append(b" BI ")
+
+            # Add image parameters if available
+            if inline_form.image_parameters:
+                import json
+
+                try:
+                    params = json.loads(inline_form.image_parameters)
+                    for key, value in params.items():
+                        if key.startswith("/"):
+                            key = key[1:]  # Remove leading slash
+                        # Convert Python boolean to PDF boolean
+                        if value is True:
+                            value = "true"
+                        elif value is False:
+                            value = "false"
+                        elif isinstance(value, str) and value in ("True", "False"):
+                            value = value.lower()
+                        draw_op.append(f"/{key} {value} ".encode())
+                except json.JSONDecodeError:
+                    pass
+
+            # Start image data
+            draw_op.append(b"ID ")
+
+            # Add image data if available (base64 decode it first)
+            if inline_form.form_data:
+                import base64
+
+                try:
+                    image_data = base64.b64decode(inline_form.form_data)
+                    draw_op.append(image_data)
+                except Exception:
+                    pass
+
+            # End inline image
+            draw_op.append(b" EI ")
         draw_op.append(b" Q\n")
 
 
@@ -763,7 +804,51 @@ class PDFCreater:
             draw_op.append(
                 f" /{form.pdf_form_subtype.pdf_xobj_form.do_args} Do ".encode()
             )
-        draw_op.append(page_ctm)
+        elif form.pdf_form_subtype.pdf_inline_form:
+            # Handle inline form (inline image)
+            inline_form = form.pdf_form_subtype.pdf_inline_form
+
+            # Start inline image
+            draw_op.append(b" BI ")
+
+            # Add image parameters if available
+            if inline_form.image_parameters:
+                import json
+
+                try:
+                    params = json.loads(inline_form.image_parameters)
+                    for key, value in params.items():
+                        if key.startswith("/"):
+                            key = key[1:]  # Remove leading slash
+                        # Convert Python boolean to PDF boolean
+                        if value is True:
+                            value = "true"
+                        elif value is False:
+                            value = "false"
+                        elif isinstance(value, str) and value in ("True", "False"):
+                            value = value.lower()
+                        draw_op.append(f"/{key} {value} ".encode())
+                except json.JSONDecodeError:
+                    pass
+
+            # Start image data
+            draw_op.append(b"ID")
+
+            # Add image data if available (base64 decode it first)
+            if inline_form.form_data:
+                import base64
+
+                try:
+                    image_data = base64.b64decode(inline_form.form_data)
+                    draw_op.append(image_data)
+                except Exception:
+                    pass
+
+            # End inline image
+            draw_op.append(b"EI ")
+        else:
+            # Only add CTM for non-inline forms
+            draw_op.append(page_ctm)
         draw_op.append(b" Q\n")
 
     def create_side_by_side_dual_pdf(

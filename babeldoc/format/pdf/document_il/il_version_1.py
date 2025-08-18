@@ -165,7 +165,13 @@ class PdfInlineForm:
         metadata={
             "name": "formData",
             "type": "Attribute",
-            "required": True,
+        },
+    )
+    image_parameters: str | None = field(
+        default=None,
+        metadata={
+            "name": "imageParameters",
+            "type": "Attribute",
         },
     )
 

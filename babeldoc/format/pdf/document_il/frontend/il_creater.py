@@ -1013,3 +1013,82 @@ class ILCreater:
             figure.bbox[3],
         )
         self.current_page.pdf_figure.append(il_version_1.PdfFigure(box=box))
+
+    def on_inline_image_begin(self):
+        """Begin processing inline image"""
+        # Store current state for inline image processing
+        self._inline_image_state = {
+            "ctm": None,
+            "parameters": {},
+        }
+
+    def on_inline_image_end(self, stream_obj, ctm):
+        """End processing inline image and create PdfForm"""
+        import base64
+        import json
+
+        from babeldoc.format.pdf.babelpdf.utils import guarded_bbox
+        from babeldoc.format.pdf.document_il.utils.matrix_helper import decompose_ctm
+        from babeldoc.pdfminer.utils import apply_matrix_pt
+        from babeldoc.pdfminer.utils import get_bound
+
+        # Extract image parameters from stream dictionary
+        image_dict = stream_obj.attrs if hasattr(stream_obj, "attrs") else {}
+
+        # Build parameters dictionary
+        parameters = {}
+        for key, value in image_dict.items():
+            if hasattr(value, "name"):
+                parameters[key] = value.name
+            else:
+                parameters[key] = str(value)
+
+        # Get image data (encoded as base64)
+        image_data = ""
+        if hasattr(stream_obj, "data") and stream_obj.data is not None:
+            image_data = base64.b64encode(stream_obj.data).decode("ascii")
+        elif hasattr(stream_obj, "rawdata") and stream_obj.rawdata is not None:
+            image_data = base64.b64encode(stream_obj.rawdata).decode("ascii")
+
+        # Create inline form with parameters as JSON string
+        inline_form = il_version_1.PdfInlineForm(
+            form_data=image_data, image_parameters=json.dumps(parameters)
+        )
+
+        # Calculate bounding box - inline images are typically 1x1 unit square in user space
+        bbox = (0, 0, 1, 1)
+        (x, y, w, h) = guarded_bbox(bbox)
+        bounds = ((x, y), (x + w, y), (x, y + h), (x + w, y + h))
+        final_bbox = get_bound(apply_matrix_pt(ctm, (p, q)) for (p, q) in bounds)
+
+        # Create graphics state
+        gs = self.create_graphic_state(self.passthrough_per_char_instruction, True)
+
+        # Create PdfMatrix from CTM
+        pdf_matrix = il_version_1.PdfMatrix(
+            a=ctm[0], b=ctm[1], c=ctm[2], d=ctm[3], e=ctm[4], f=ctm[5]
+        )
+
+        # Create affine transform
+        affine_transform = decompose_ctm(ctm)
+
+        # Create PdfFormSubtype with inline form
+        pdf_form_subtype = il_version_1.PdfFormSubtype(pdf_inline_form=inline_form)
+
+        # Create PdfForm for the inline image
+        pdf_form = il_version_1.PdfForm(
+            box=il_version_1.Box(
+                x=final_bbox[0], y=final_bbox[1], x2=final_bbox[2], y2=final_bbox[3]
+            ),
+            graphic_state=gs,
+            pdf_matrix=pdf_matrix,
+            pdf_affine_transform=affine_transform,
+            pdf_form_subtype=pdf_form_subtype,
+            xobj_id=self.xobj_id,
+            ctm=list(ctm),
+            render_order=self.get_render_order_and_increase(),
+            form_type="image",
+        )
+
+        # Add to current page
+        self.current_page.pdf_form.append(pdf_form)

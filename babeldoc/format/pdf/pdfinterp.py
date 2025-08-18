@@ -448,6 +448,19 @@ class PDFPageInterpreterEx(PDFPageInterpreter):
         self.graphicstate.dash = (dash, phase)
         self.il_creater.on_line_dash(dash, phase)
 
+    def do_BI(self) -> None:
+        """Begin inline image object"""
+        self.il_creater.on_inline_image_begin()
+
+    def do_ID(self) -> None:
+        """Begin inline image data"""
+        pass  # Handled by PDFContentParserEx
+
+    def do_EI(self, obj: PDFStackT) -> None:
+        """End inline image object"""
+        if isinstance(obj, PDFStream):
+            self.il_creater.on_inline_image_end(obj, self.ctm)
+
     # Run PostScript commands
     # The Do_xxx method is the method for executing corresponding postscript instructions
     def execute(self, streams: Sequence[object]) -> None:
