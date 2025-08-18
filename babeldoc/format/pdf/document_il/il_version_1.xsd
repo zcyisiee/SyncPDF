@@ -312,7 +312,8 @@
   </xs:element>
   <xs:element name="pdfInlineForm">
     <xs:complexType>
-      <xs:attribute name="formData" use="required" type="xs:string"/>
+      <xs:attribute name="formData" type="xs:string"/>
+      <xs:attribute name="imageParameters" type="xs:string"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfXobjForm">

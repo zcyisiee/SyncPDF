@@ -181,7 +181,10 @@ class FormRenderUnit(RenderUnit):
                             value = "true"
                         elif value is False:
                             value = "false"
-                        elif isinstance(value, str) and value in ("True", "False"):
+                        elif isinstance(value, str) and value in (
+                            "True",
+                            "False",
+                        ):
                             value = value.lower()
                         draw_op.append(f"/{key} {value} ".encode())
                 except json.JSONDecodeError:
@@ -825,7 +828,10 @@ class PDFCreater:
                             value = "true"
                         elif value is False:
                             value = "false"
-                        elif isinstance(value, str) and value in ("True", "False"):
+                        elif isinstance(value, str) and value in (
+                            "True",
+                            "False",
+                        ):
                             value = value.lower()
                         draw_op.append(f"/{key} {value} ".encode())
                 except json.JSONDecodeError:

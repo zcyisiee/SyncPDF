@@ -1078,7 +1078,10 @@ class ILCreater:
         # Create PdfForm for the inline image
         pdf_form = il_version_1.PdfForm(
             box=il_version_1.Box(
-                x=final_bbox[0], y=final_bbox[1], x2=final_bbox[2], y2=final_bbox[3]
+                x=final_bbox[0],
+                y=final_bbox[1],
+                x2=final_bbox[2],
+                y2=final_bbox[3],
             ),
             graphic_state=gs,
             pdf_matrix=pdf_matrix,

@@ -196,7 +196,8 @@ PDFForm =
 PDFFormSubtype = element pdfFormSubtype { PDFInlineForm | PDFXobjForm }
 PDFInlineForm =
   element pdfInlineForm {
-    attribute formData { xsd:string }
+    attribute formData { xsd:string }?,
+    attribute imageParameters { xsd:string }?
   }
 PDFXobjForm =
   element pdfXobjForm {

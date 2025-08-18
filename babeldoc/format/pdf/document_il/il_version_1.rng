@@ -535,9 +535,16 @@
   </define>
   <define name="PDFInlineForm">
     <element name="pdfInlineForm">
-      <attribute name="formData">
-        <data type="string"/>
-      </attribute>
+      <optional>
+        <attribute name="formData">
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="imageParameters">
+          <data type="string"/>
+        </attribute>
+      </optional>
     </element>
   </define>
   <define name="PDFXobjForm">
