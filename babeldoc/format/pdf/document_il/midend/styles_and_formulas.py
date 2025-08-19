@@ -29,7 +29,7 @@ from babeldoc.format.pdf.document_il.utils.layout_helper import (
 from babeldoc.format.pdf.document_il.utils.layout_helper import is_bullet_point
 from babeldoc.format.pdf.document_il.utils.layout_helper import is_same_style
 from babeldoc.format.pdf.document_il.utils.spatial_analyzer import (
-    find_all_contained_elements,
+    is_element_contained_in_formula,
 )
 from babeldoc.format.pdf.translation_config import TranslationConfig
 
@@ -60,33 +60,287 @@ class StylesAndFormulas:
                 if comp.pdf_formula:
                     self.update_formula_data(comp.pdf_formula)
 
-    def collect_contained_elements(self, page: Page):
-        """Collect curves and forms that are contained within formulas."""
+    def _calculate_element_formula_iou(
+        self, element_box: Box, formula_box: Box, tolerance: float = 2.0
+    ) -> float:
+        """Calculate precise IoU between an element and a formula with tolerance.
+
+        Args:
+            element_box: Bounding box of the element (curve/form)
+            formula_box: Bounding box of the formula
+            tolerance: Tolerance to expand formula box for containment check
+
+        Returns:
+            IoU value between element and expanded formula box
+        """
+        if element_box is None or formula_box is None:
+            return 0.0
+
+        # Expand formula box by tolerance for more lenient containment check
+        expanded_formula_box = Box(
+            x=formula_box.x - tolerance,
+            y=formula_box.y - tolerance,
+            x2=formula_box.x2 + tolerance,
+            y2=formula_box.y2 + tolerance,
+        )
+
+        return calculate_iou_for_boxes(element_box, expanded_formula_box)
+
+    def _is_element_contained_exact(
+        self, element_box: Box, formula_box: Box, containment_threshold: float = 0.95
+    ) -> bool:
+        """Check if an element is contained within a formula with zero tolerance.
+
+        Args:
+            element_box: Bounding box of the element (curve/form)
+            formula_box: Bounding box of the formula
+            containment_threshold: Minimum IoU ratio to consider as contained
+
+        Returns:
+            True if the element is contained within the formula (exact match)
+        """
+        if element_box is None or formula_box is None:
+            return False
+
+        # Use formula box without any tolerance expansion
+        iou = calculate_iou_for_boxes(element_box, formula_box)
+        return iou >= containment_threshold
+
+    def _calculate_element_formula_distance(
+        self, element_box: Box, formula_box: Box
+    ) -> float:
+        """Calculate the shortest distance between an element and a formula.
+
+        Args:
+            element_box: Bounding box of the element (curve/form)
+            formula_box: Bounding box of the formula
+
+        Returns:
+            Shortest distance between the element and formula boxes
+        """
+        if element_box is None or formula_box is None:
+            return float("inf")
+
+        # Calculate horizontal distance
+        if element_box.x2 < formula_box.x:
+            # Element is to the left of formula
+            dx = formula_box.x - element_box.x2
+        elif element_box.x > formula_box.x2:
+            # Element is to the right of formula
+            dx = element_box.x - formula_box.x2
+        else:
+            # Horizontal overlap
+            dx = 0.0
+
+        # Calculate vertical distance
+        if element_box.y2 < formula_box.y:
+            # Element is above formula
+            dy = formula_box.y - element_box.y2
+        elif element_box.y > formula_box.y2:
+            # Element is below formula
+            dy = element_box.y - formula_box.y2
+        else:
+            # Vertical overlap
+            dy = 0.0
+
+        # Return Euclidean distance
+        return (dx * dx + dy * dy) ** 0.5
+
+    def _collect_element_formula_candidates(
+        self, page: Page
+    ) -> tuple[list, dict, dict]:
+        """Collect all potential assignments of elements to formulas.
+
+        Uses two-level IoU matching strategy:
+        1. Exact IoU matching (zero tolerance) - highest priority
+        2. Tolerant IoU matching (2.0 tolerance, distance-sorted) - second priority
+
+        Returns:
+            Tuple of (all_formulas, curve_candidates, form_candidates) where:
+            - all_formulas: list of (formula, paragraph_xobj_id) tuples
+            - curve_candidates: dict mapping curve index to (curve, candidates) tuples
+            - form_candidates: dict mapping form index to (form, candidates) tuples
+            where candidates is a list of (formula_index, score, match_type) tuples
+        """
+        curve_candidates = {}
+        form_candidates = {}
+
+        # Configuration parameters
+        max_tolerant_distance = 100.0  # Maximum distance for tolerant matching scoring
+
         if not page.pdf_paragraph:
-            return
+            return [], curve_candidates, form_candidates
 
-        # Track elements to remove from page level
-        curves_to_remove = []
-        forms_to_remove = []
-
-        # For each paragraph containing formulas, find contained curves and forms
+        # Collect all formulas from all paragraphs with their index
+        all_formulas = []
         for paragraph in page.pdf_paragraph:
             for composition in paragraph.pdf_paragraph_composition:
                 if composition.pdf_formula:
-                    formula = composition.pdf_formula
-                    contained_curves, contained_forms = find_all_contained_elements(
-                        formula, page, paragraph.xobj_id
+                    all_formulas.append((composition.pdf_formula, paragraph.xobj_id))
+
+        # Check each curve against all formulas
+        for curve_idx, curve in enumerate(page.pdf_curve):
+            if not curve.box:
+                continue
+
+            candidates = []
+            for formula_idx, (formula, paragraph_xobj_id) in enumerate(all_formulas):
+                if not formula.box:
+                    continue
+
+                # Check xobj_id compatibility
+                if paragraph_xobj_id is not None and curve.xobj_id != paragraph_xobj_id:
+                    continue
+
+                # Level 1: Exact IoU matching (zero tolerance) - highest priority
+                if self._is_element_contained_exact(curve.box, formula.box):
+                    iou = calculate_iou_for_boxes(curve.box, formula.box)
+                    candidates.append((formula_idx, iou, "iou_exact"))
+                # Level 2: Tolerant IoU matching (with tolerance) - distance sorted
+                elif is_element_contained_in_formula(curve.box, formula.box):
+                    distance = self._calculate_element_formula_distance(
+                        curve.box, formula.box
                     )
+                    # Convert distance to score (closer = higher score)
+                    # Score range: 0.5-0.9 to ensure lower than exact IoU
+                    distance_factor = max(0.0, 1.0 - distance / max_tolerant_distance)
+                    score = 0.5 + 0.4 * distance_factor
+                    candidates.append((formula_idx, score, "iou_tolerant"))
 
-                    # Add contained elements to the formula
-                    formula.pdf_curve.extend(contained_curves)
-                    formula.pdf_form.extend(contained_forms)
+            if candidates:
+                curve_candidates[curve_idx] = (curve, candidates)
 
-                    # Track for removal from page level
-                    curves_to_remove.extend(contained_curves)
-                    forms_to_remove.extend(contained_forms)
+        # Check each form against all formulas
+        for form_idx, form in enumerate(page.pdf_form):
+            if not form.box:
+                continue
 
-        # Remove contained elements from page level
+            candidates = []
+            for formula_idx, (formula, paragraph_xobj_id) in enumerate(all_formulas):
+                if not formula.box:
+                    continue
+
+                # Check xobj_id compatibility
+                if paragraph_xobj_id is not None and form.xobj_id != paragraph_xobj_id:
+                    continue
+
+                # Level 1: Exact IoU matching (zero tolerance) - highest priority
+                if self._is_element_contained_exact(form.box, formula.box):
+                    iou = calculate_iou_for_boxes(form.box, formula.box)
+                    candidates.append((formula_idx, iou, "iou_exact"))
+                # Level 2: Tolerant IoU matching (with tolerance) - distance sorted
+                elif is_element_contained_in_formula(form.box, formula.box):
+                    distance = self._calculate_element_formula_distance(
+                        form.box, formula.box
+                    )
+                    # Convert distance to score (closer = higher score)
+                    # Score range: 0.5-0.9 to ensure lower than exact IoU
+                    distance_factor = max(0.0, 1.0 - distance / max_tolerant_distance)
+                    score = 0.5 + 0.4 * distance_factor
+                    candidates.append((formula_idx, score, "iou_tolerant"))
+
+            if candidates:
+                form_candidates[form_idx] = (form, candidates)
+
+        return all_formulas, curve_candidates, form_candidates
+
+    def _resolve_assignment_conflicts(
+        self, curve_candidates: dict, form_candidates: dict
+    ) -> tuple[dict, list, list]:
+        """Resolve assignment conflicts using prioritized matching strategy.
+
+        Args:
+            curve_candidates: dict mapping curve index to (curve, candidates) tuples
+            form_candidates: dict mapping form index to (form, candidates) tuples
+            where candidates is a list of (formula_index, score, match_type) tuples
+
+        Returns:
+            Tuple of (formula_assignments, curves_to_remove, forms_to_remove) where:
+            - formula_assignments: dict mapping formula_index to (curves, forms) tuples
+            - curves_to_remove: list of curves to remove from page level
+            - forms_to_remove: list of forms to remove from page level
+        """
+        formula_assignments = {}
+        curves_to_remove = []
+        forms_to_remove = []
+
+        def _get_best_candidate(candidates):
+            """Get the best candidate using priority: Exact IoU > Tolerant IoU, then by score."""
+            if not candidates:
+                return None
+
+            # Sort by match_type priority and then by score (descending)
+            def sort_key(candidate):
+                formula_idx, score, match_type = candidate
+                # Exact IoU matches get priority 1, tolerant IoU matches get priority 2
+                priority = 1 if match_type == "iou_exact" else 2
+                # Return tuple for sorting: (priority, -score) for descending score within priority
+                return (priority, -score)
+
+            sorted_candidates = sorted(candidates, key=sort_key)
+            return sorted_candidates[0]
+
+        # Resolve curve assignments
+        for _curve_idx, (curve, candidates) in curve_candidates.items():
+            if not candidates:
+                continue
+
+            best_candidate = _get_best_candidate(candidates)
+            if best_candidate:
+                best_formula_idx, best_score, match_type = best_candidate
+
+                # Add to assignments
+                if best_formula_idx not in formula_assignments:
+                    formula_assignments[best_formula_idx] = ([], [])
+                formula_assignments[best_formula_idx][0].append(curve)
+                curves_to_remove.append(curve)
+
+        # Resolve form assignments
+        for _form_idx, (form, candidates) in form_candidates.items():
+            if not candidates:
+                continue
+
+            best_candidate = _get_best_candidate(candidates)
+            if best_candidate:
+                best_formula_idx, best_score, match_type = best_candidate
+
+                # Add to assignments
+                if best_formula_idx not in formula_assignments:
+                    formula_assignments[best_formula_idx] = ([], [])
+                formula_assignments[best_formula_idx][1].append(form)
+                forms_to_remove.append(form)
+
+        return formula_assignments, curves_to_remove, forms_to_remove
+
+    def collect_contained_elements(self, page: Page):
+        """Collect curves and forms that are contained within formulas.
+
+        Uses two-phase assignment strategy to ensure each element is assigned
+        to only one formula based on highest IoU value.
+        """
+        if not page.pdf_paragraph:
+            return
+
+        # Phase 1: Collect all potential element-formula assignments
+        all_formulas, curve_candidates, form_candidates = (
+            self._collect_element_formula_candidates(page)
+        )
+
+        # Phase 2: Resolve conflicts using IoU maximization
+        formula_assignments, curves_to_remove, forms_to_remove = (
+            self._resolve_assignment_conflicts(curve_candidates, form_candidates)
+        )
+
+        # Apply the resolved assignments using formula indices
+        for formula_idx, (
+            assigned_curves,
+            assigned_forms,
+        ) in formula_assignments.items():
+            formula = all_formulas[formula_idx][0]  # Extract formula from tuple
+            formula.pdf_curve.extend(assigned_curves)
+            formula.pdf_form.extend(assigned_forms)
+
+        # Remove assigned elements from page level
         for curve in curves_to_remove:
             if curve in page.pdf_curve:
                 page.pdf_curve.remove(curve)
