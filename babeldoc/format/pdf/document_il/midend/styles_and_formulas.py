@@ -28,6 +28,9 @@ from babeldoc.format.pdf.document_il.utils.layout_helper import (
 )
 from babeldoc.format.pdf.document_il.utils.layout_helper import is_bullet_point
 from babeldoc.format.pdf.document_il.utils.layout_helper import is_same_style
+from babeldoc.format.pdf.document_il.utils.spatial_analyzer import (
+    find_all_contained_elements,
+)
 from babeldoc.format.pdf.translation_config import TranslationConfig
 
 
@@ -57,15 +60,55 @@ class StylesAndFormulas:
                 if comp.pdf_formula:
                     self.update_formula_data(comp.pdf_formula)
 
+    def collect_contained_elements(self, page: Page):
+        """Collect curves and forms that are contained within formulas."""
+        if not page.pdf_paragraph:
+            return
+
+        # Collect all formulas from the page
+        formulas = []
+        for paragraph in page.pdf_paragraph:
+            for composition in paragraph.pdf_paragraph_composition:
+                if composition.pdf_formula:
+                    formulas.append(composition.pdf_formula)
+
+        # Track elements to remove from page level
+        curves_to_remove = []
+        forms_to_remove = []
+
+        # For each formula, find contained curves and forms
+        for formula in formulas:
+            contained_curves, contained_forms = find_all_contained_elements(
+                formula, page
+            )
+
+            # Add contained elements to the formula
+            formula.pdf_curve.extend(contained_curves)
+            formula.pdf_form.extend(contained_forms)
+
+            # Track for removal from page level
+            curves_to_remove.extend(contained_curves)
+            forms_to_remove.extend(contained_forms)
+
+        # Remove contained elements from page level
+        for curve in curves_to_remove:
+            if curve in page.pdf_curve:
+                page.pdf_curve.remove(curve)
+
+        for form in forms_to_remove:
+            if form in page.pdf_form:
+                page.pdf_form.remove(form)
+
     def process_page(self, page: Page):
         """处理页面，包括公式识别和偏移量计算"""
         self.process_page_formulas(page)
         # self.process_page_offsets(page)
         self.process_comma_formulas(page)
-        self.merge_overlapping_formulas(page)
+        # self.merge_overlapping_formulas(page)
         # self.process_page_offsets(page)
         self.process_translatable_formulas(page)
         self.update_all_formula_data(page)
+        self.collect_contained_elements(page)
         self.process_page_offsets(page)
         self.update_all_formula_data(page)
         self.process_page_styles(page)

@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 #     "√",
 # )
 
-# 由于我们有一套bbox解析机制了，所以现在不需要这个东西了。
+# 由于我们有一套 bbox 解析机制了，所以现在不需要这个东西了。
 HEIGHT_NOT_USFUL_CHAR_IN_CHAR = (None,)
 
 

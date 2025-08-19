@@ -306,19 +306,19 @@ class ParagraphFinder:
 
         self.add_debug_info(page)
 
-        # 新阶段：设置段落的renderorder为所有组成部分中renderorder最小的
+        # 新阶段：设置段落的 renderorder 为所有组成部分中 renderorder 最小的
         self._set_paragraph_render_order(page)
 
     def _set_paragraph_render_order(self, page: Page):
         """
-        设置段落的renderorder为段落所有组成部分中renderorder最小的值
+        设置段落的 renderorder 为段落所有组成部分中 renderorder 最小的值
         """
         for paragraph in page.pdf_paragraph:
             min_render_order = 9999999999999999
 
             # 遍历段落的所有组成部分
             for composition in paragraph.pdf_paragraph_composition:
-                # 检查PdfLine中的字符
+                # 检查 PdfLine 中的字符
                 if composition.pdf_line:
                     for char in composition.pdf_line.pdf_character:
                         if (
@@ -342,7 +342,7 @@ class ParagraphFinder:
                         ):
                             min_render_order = min(min_render_order, char.render_order)
 
-            # 如果找到了有效的renderorder，设置段落的renderorder
+            # 如果找到了有效的 renderorder，设置段落的 renderorder
             if min_render_order != 9999999999999999:
                 paragraph.render_order = min_render_order
 

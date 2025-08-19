@@ -136,6 +136,8 @@ PDFFormula =
   element pdfFormula {
     Box,
     PDFCharacter+,
+    PDFCurve*,
+    PDFForm*,
     attribute x_offset { xsd:float },
     attribute y_offset { xsd:float },
     attribute x_advance { xsd:float }?
@@ -167,6 +169,11 @@ PDFCurve =
       list {
         xsd:float, xsd:float, xsd:float, xsd:float, xsd:float, xsd:float
       }
+    }?,
+    attribute relocation_transform {
+      list {
+        xsd:float, xsd:float, xsd:float, xsd:float, xsd:float, xsd:float
+      }
     }?
   }
 PDFOriginalPath = element pdfOriginalPath { PDFPath }
@@ -185,6 +192,11 @@ PDFForm =
     PDFMatrix,
     PDFAffineTransform,
     attribute ctm {
+      list {
+        xsd:float, xsd:float, xsd:float, xsd:float, xsd:float, xsd:float
+      }
+    }?,
+    attribute relocation_transform {
       list {
         xsd:float, xsd:float, xsd:float, xsd:float, xsd:float, xsd:float
       }

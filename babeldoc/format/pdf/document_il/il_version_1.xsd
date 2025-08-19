@@ -203,6 +203,8 @@
       <xs:sequence>
         <xs:element ref="box"/>
         <xs:element maxOccurs="unbounded" ref="pdfCharacter"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfCurve"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="pdfForm"/>
       </xs:sequence>
       <xs:attribute name="x_offset" use="required" type="xs:float"/>
       <xs:attribute name="y_offset" use="required" type="xs:float"/>
@@ -257,6 +259,20 @@
           </xs:restriction>
         </xs:simpleType>
       </xs:attribute>
+      <xs:attribute name="relocation_transform">
+        <xs:simpleType>
+          <xs:restriction>
+            <xs:simpleType>
+              <xs:list>
+                <xs:simpleType>
+                  <xs:union memberTypes="xs:float xs:float xs:float xs:float xs:float xs:float"/>
+                </xs:simpleType>
+              </xs:list>
+            </xs:simpleType>
+            <xs:length value="6"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:attribute>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfOriginalPath">
@@ -285,6 +301,20 @@
       </xs:sequence>
       <xs:attribute name="xobjId" use="required" type="xs:int"/>
       <xs:attribute name="ctm">
+        <xs:simpleType>
+          <xs:restriction>
+            <xs:simpleType>
+              <xs:list>
+                <xs:simpleType>
+                  <xs:union memberTypes="xs:float xs:float xs:float xs:float xs:float xs:float"/>
+                </xs:simpleType>
+              </xs:list>
+            </xs:simpleType>
+            <xs:length value="6"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:attribute>
+      <xs:attribute name="relocation_transform">
         <xs:simpleType>
           <xs:restriction>
             <xs:simpleType>

@@ -221,6 +221,111 @@ def scale_and_set_translation(
     )
 
 
+def create_translation_and_scale_matrix(
+    translation_x: float, translation_y: float, scale_factor: float
+) -> Matrix:
+    """Create a transformation matrix for translation and uniform scaling.
+
+    This creates a CTM that first scales uniformly by scale_factor, then translates
+    by (translation_x, translation_y).
+
+    Args:
+        translation_x: Translation in X direction
+        translation_y: Translation in Y direction
+        scale_factor: Uniform scale factor for both X and Y
+
+    Returns:
+        The CTM matrix (a, b, c, d, e, f)
+    """
+    # Matrix for uniform scaling and translation:
+    # [scale  0      tx]
+    # [0      scale  ty]
+    # [0      0      1 ]
+    # Which maps to CTM (scale, 0, 0, scale, tx, ty)
+    return (scale_factor, 0.0, 0.0, scale_factor, translation_x, translation_y)
+
+
+def multiply_matrices(m1: Matrix | PdfMatrix, m2: Matrix | PdfMatrix) -> Matrix:
+    """Multiply two transformation matrices (m1 * m2).
+
+    Args:
+        m1: Left matrix in multiplication
+        m2: Right matrix in multiplication
+
+    Returns:
+        Result matrix as tuple (a, b, c, d, e, f)
+    """
+    # Extract components from first matrix
+    if isinstance(m1, PdfMatrix):
+        a1, b1, c1, d1, e1, f1 = m1.a, m1.b, m1.c, m1.d, m1.e, m1.f
+        assert all(x is not None for x in [a1, b1, c1, d1, e1, f1])
+    else:
+        a1, b1, c1, d1, e1, f1 = m1
+
+    # Extract components from second matrix
+    if isinstance(m2, PdfMatrix):
+        a2, b2, c2, d2, e2, f2 = m2.a, m2.b, m2.c, m2.d, m2.e, m2.f
+        assert all(x is not None for x in [a2, b2, c2, d2, e2, f2])
+    else:
+        a2, b2, c2, d2, e2, f2 = m2
+
+    # Matrix multiplication for 2D affine transformations:
+    # [a1 c1 e1]   [a2 c2 e2]   [a1*a2+c1*b2  a1*c2+c1*d2  a1*e2+c1*f2+e1]
+    # [b1 d1 f1] * [b2 d2 f2] = [b1*a2+d1*b2  b1*c2+d1*d2  b1*e2+d1*f2+f1]
+    # [0  0  1 ]   [0  0  1 ]   [0            0            1              ]
+
+    a = a1 * a2 + c1 * b2
+    b = b1 * a2 + d1 * b2
+    c = a1 * c2 + c1 * d2
+    d = b1 * c2 + d1 * d2
+    e = a1 * e2 + c1 * f2 + e1
+    f = b1 * e2 + d1 * f2 + f1
+
+    return (a, b, c, d, e, f)
+
+
+def apply_transform_to_ctm(
+    existing_ctm: list[object],
+    translation_x: float,
+    translation_y: float,
+    scale_factor: float,
+) -> list[object]:
+    """Apply translation and scale transformation to an existing CTM.
+
+    Args:
+        existing_ctm: Existing CTM as list of 6 floats
+        translation_x: Translation in X direction
+        translation_y: Translation in Y direction
+        scale_factor: Uniform scale factor
+
+    Returns:
+        New CTM as list of objects
+    """
+    if len(existing_ctm) != 6:
+        # If CTM is invalid, create a new identity matrix with the transform
+        transform_matrix = create_translation_and_scale_matrix(
+            translation_x, translation_y, scale_factor
+        )
+        return list(transform_matrix)
+
+    # Convert existing CTM to Matrix format
+    try:
+        existing_matrix = tuple(float(x) for x in existing_ctm)
+    except (ValueError, TypeError):
+        # If conversion fails, use identity matrix
+        existing_matrix = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+
+    # Create the transform matrix
+    transform_matrix = create_translation_and_scale_matrix(
+        translation_x, translation_y, scale_factor
+    )
+
+    # Left-multiply: new_ctm = transform_matrix * existing_matrix
+    result_matrix = multiply_matrices(transform_matrix, existing_matrix)
+
+    return list(result_matrix)
+
+
 def matrix_to_bytes(m: Matrix | PdfMatrix) -> bytes:
     if isinstance(m, PdfMatrix):
         return (

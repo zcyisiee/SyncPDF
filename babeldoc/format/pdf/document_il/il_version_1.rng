@@ -369,6 +369,12 @@
       <oneOrMore>
         <ref name="PDFCharacter"/>
       </oneOrMore>
+      <zeroOrMore>
+        <ref name="PDFCurve"/>
+      </zeroOrMore>
+      <zeroOrMore>
+        <ref name="PDFForm"/>
+      </zeroOrMore>
       <attribute name="x_offset">
         <data type="float"/>
       </attribute>
@@ -470,6 +476,18 @@
           </list>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="relocation_transform">
+          <list>
+            <data type="float"/>
+            <data type="float"/>
+            <data type="float"/>
+            <data type="float"/>
+            <data type="float"/>
+            <data type="float"/>
+          </list>
+        </attribute>
+      </optional>
     </element>
   </define>
   <define name="PDFOriginalPath">
@@ -506,6 +524,18 @@
       <ref name="PDFAffineTransform"/>
       <optional>
         <attribute name="ctm">
+          <list>
+            <data type="float"/>
+            <data type="float"/>
+            <data type="float"/>
+            <data type="float"/>
+            <data type="float"/>
+            <data type="float"/>
+          </list>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="relocation_transform">
           <list>
             <data type="float"/>
             <data type="float"/>

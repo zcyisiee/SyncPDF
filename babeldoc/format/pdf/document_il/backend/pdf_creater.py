@@ -19,6 +19,7 @@ from babeldoc.format.pdf.document_il import PdfOriginalPath
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
 from babeldoc.format.pdf.document_il.utils.matrix_helper import matrix_to_bytes
+from babeldoc.format.pdf.document_il.utils.matrix_helper import multiply_matrices
 from babeldoc.format.pdf.document_il.utils.zstd_helper import zstd_decompress
 from babeldoc.format.pdf.translation_config import TranslateResult
 from babeldoc.format.pdf.translation_config import TranslationConfig
@@ -141,19 +142,35 @@ class FormRenderUnit(RenderUnit):
         form = self.form
         draw_op.append(b"q ")
 
-        # if form.ctm is not None:
-        #     ctm = form.ctm
-        #     draw_op.append(
-        #         f"{ctm[0]:.6f} {ctm[1]:.6f} {ctm[2]:.6f} {ctm[3]:.6f} {ctm[4]:.6f} {ctm[5]:.6f} cm ".encode()
-        #     )
-
         draw_op.append(
             form.graphic_state.passthrough_per_char_instruction.encode(),
         )
         draw_op.append(b" ")
 
+        # Apply relocation transform if present, otherwise use original pdf_matrix
         assert form.pdf_matrix is not None
-        draw_op.append(matrix_to_bytes(form.pdf_matrix))
+        if form.relocation_transform and len(form.relocation_transform) == 6:
+            try:
+                relocation_matrix = tuple(float(x) for x in form.relocation_transform)
+                # Apply relocation transform first, then original pdf_matrix
+                combined_matrix = multiply_matrices(
+                    relocation_matrix,
+                    (
+                        form.pdf_matrix.a,
+                        form.pdf_matrix.b,
+                        form.pdf_matrix.c,
+                        form.pdf_matrix.d,
+                        form.pdf_matrix.e,
+                        form.pdf_matrix.f,
+                    ),
+                )
+                draw_op.append(matrix_to_bytes(combined_matrix))
+            except (ValueError, TypeError):
+                # If relocation transform conversion fails, use original matrix
+                draw_op.append(matrix_to_bytes(form.pdf_matrix))
+        else:
+            # No relocation transform, use original pdf_matrix
+            draw_op.append(matrix_to_bytes(form.pdf_matrix))
 
         assert form.pdf_form_subtype is not None
         if form.pdf_form_subtype.pdf_xobj_form:
@@ -267,8 +284,27 @@ class CurveRenderUnit(RenderUnit):
         curve = self.curve
         draw_op.append(b"q n ")
 
-        # Apply CTM transformation if available
-        if curve.ctm is not None:
+        # Apply relocation transform if present, otherwise use original CTM
+        if curve.relocation_transform and len(curve.relocation_transform) == 6:
+            try:
+                relocation_matrix = tuple(float(x) for x in curve.relocation_transform)
+                if curve.ctm and len(curve.ctm) == 6:
+                    # Combine relocation transform with original CTM
+                    ctm_matrix = tuple(float(x) for x in curve.ctm)
+                    combined_matrix = multiply_matrices(relocation_matrix, ctm_matrix)
+                else:
+                    # Only relocation transform
+                    combined_matrix = relocation_matrix
+                draw_op.append(matrix_to_bytes(combined_matrix))
+            except (ValueError, TypeError):
+                # If relocation transform conversion fails, use original CTM
+                if curve.ctm and len(curve.ctm) == 6:
+                    ctm = curve.ctm
+                    draw_op.append(
+                        f"{ctm[0]:.6f} {ctm[1]:.6f} {ctm[2]:.6f} {ctm[3]:.6f} {ctm[4]:.6f} {ctm[5]:.6f} cm ".encode()
+                    )
+        elif curve.ctm and len(curve.ctm) == 6:
+            # No relocation transform, use original CTM
             ctm = curve.ctm
             draw_op.append(
                 f"{ctm[0]:.6f} {ctm[1]:.6f} {ctm[2]:.6f} {ctm[3]:.6f} {ctm[4]:.6f} {ctm[5]:.6f} cm ".encode()
@@ -585,7 +621,12 @@ class PDFCreater:
     ) -> list[il_version_1.PdfCharacter]:
         chars = []
         for composition in paragraph.pdf_paragraph_composition:
-            if not isinstance(composition.pdf_character, il_version_1.PdfCharacter):
+            if composition.pdf_character:
+                chars.append(composition.pdf_character)
+            elif composition.pdf_formula:
+                # Flatten formula: extract all characters from the formula
+                chars.extend(composition.pdf_formula.pdf_character)
+            else:
                 logger.error(
                     f"Unknown composition type. "
                     f"This type only appears in the IL "
@@ -595,7 +636,6 @@ class PDFCreater:
                     f"Paragraph: {paragraph}. ",
                 )
                 continue
-            chars.append(composition.pdf_character)
         if not chars and paragraph.unicode and paragraph.debug_id:
             logger.error(
                 f"Unable to export paragraphs that have "
@@ -627,8 +667,16 @@ class PDFCreater:
                 CharacterRenderUnit(char, render_order, sub_render_order)
             )
 
-        # Convert forms to render units
-        for i, form in enumerate(page.pdf_form):
+        # Collect forms from formulas within paragraphs
+        formula_forms = []
+        for paragraph in page.pdf_paragraph:
+            for composition in paragraph.pdf_paragraph_composition:
+                if composition.pdf_formula:
+                    formula_forms.extend(composition.pdf_formula.pdf_form)
+
+        # Convert forms to render units (page-level forms + forms from formulas)
+        all_forms = list(page.pdf_form) + formula_forms
+        for i, form in enumerate(all_forms):
             render_order = getattr(
                 form, "render_order", 50
             )  # Forms render before characters
@@ -653,8 +701,16 @@ class PDFCreater:
                     )
                 )
 
-        # Convert curves to render units (only for debug)
-        for i, curve in enumerate(page.pdf_curve):
+        # Collect curves from formulas within paragraphs
+        formula_curves = []
+        for paragraph in page.pdf_paragraph:
+            for composition in paragraph.pdf_paragraph_composition:
+                if composition.pdf_formula:
+                    formula_curves.extend(composition.pdf_formula.pdf_curve)
+
+        # Convert curves to render units (page-level curves + curves from formulas, only for debug)
+        all_curves = list(page.pdf_curve) + formula_curves
+        for i, curve in enumerate(all_curves):
             if curve.debug_info or translation_config.debug:
                 render_order = getattr(
                     curve, "render_order", 20

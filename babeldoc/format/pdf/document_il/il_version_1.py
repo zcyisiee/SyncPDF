@@ -747,6 +747,14 @@ class PdfCurve:
             "tokens": True,
         },
     )
+    relocation_transform: list[object] = field(
+        default_factory=list,
+        metadata={
+            "type": "Attribute",
+            "length": 6,
+            "tokens": True,
+        },
+    )
 
 
 @dataclass(slots=True)
@@ -802,6 +810,14 @@ class PdfForm:
         },
     )
     ctm: list[object] = field(
+        default_factory=list,
+        metadata={
+            "type": "Attribute",
+            "length": 6,
+            "tokens": True,
+        },
+    )
+    relocation_transform: list[object] = field(
         default_factory=list,
         metadata={
             "type": "Attribute",
@@ -917,6 +933,20 @@ class PdfFormula:
             "name": "pdfCharacter",
             "type": "Element",
             "min_occurs": 1,
+        },
+    )
+    pdf_curve: list[PdfCurve] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfCurve",
+            "type": "Element",
+        },
+    )
+    pdf_form: list[PdfForm] = field(
+        default_factory=list,
+        metadata={
+            "name": "pdfForm",
+            "type": "Element",
         },
     )
     x_offset: float | None = field(
