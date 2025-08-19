@@ -1548,11 +1548,9 @@ class Typesetting:
                 composition.append(PdfParagraphComposition(pdf_formula=unit.formular))
             else:
                 # 对于字符单元，使用原有逻辑
+                chars, curves, forms = unit.passthrough()
                 composition.extend(
-                    [
-                        PdfParagraphComposition(pdf_character=char)
-                        for char in unit.passthrough()
-                    ],
+                    [PdfParagraphComposition(pdf_character=char) for char in chars],
                 )
         return composition
 
