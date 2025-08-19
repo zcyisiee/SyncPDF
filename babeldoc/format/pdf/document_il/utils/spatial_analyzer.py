@@ -50,12 +50,16 @@ def is_element_contained_in_formula(
     return iou >= containment_threshold
 
 
-def find_contained_curves(formula: PdfFormula, page: Page) -> list[PdfCurve]:
+def find_contained_curves(
+    formula: PdfFormula, page: Page, paragraph_xobj_id: int | None = None
+) -> list[PdfCurve]:
     """Find all curves that are contained within the given formula.
 
     Args:
         formula: The formula to check for contained curves
         page: The page containing the curves
+        paragraph_xobj_id: The xobj_id of the paragraph containing the formula.
+                          If provided, only curves with matching xobj_id will be returned.
 
     Returns:
         List of curves that are contained within the formula
@@ -66,17 +70,24 @@ def find_contained_curves(formula: PdfFormula, page: Page) -> list[PdfCurve]:
     contained_curves = []
     for curve in page.pdf_curve:
         if curve.box and is_element_contained_in_formula(curve.box, formula.box):
+            # If paragraph_xobj_id is specified, only include curves with matching xobj_id
+            if paragraph_xobj_id is not None and curve.xobj_id != paragraph_xobj_id:
+                continue
             contained_curves.append(curve)
 
     return contained_curves
 
 
-def find_contained_forms(formula: PdfFormula, page: Page) -> list[PdfForm]:
+def find_contained_forms(
+    formula: PdfFormula, page: Page, paragraph_xobj_id: int | None = None
+) -> list[PdfForm]:
     """Find all forms that are contained within the given formula.
 
     Args:
         formula: The formula to check for contained forms
         page: The page containing the forms
+        paragraph_xobj_id: The xobj_id of the paragraph containing the formula.
+                          If provided, only forms with matching xobj_id will be returned.
 
     Returns:
         List of forms that are contained within the formula
@@ -87,25 +98,30 @@ def find_contained_forms(formula: PdfFormula, page: Page) -> list[PdfForm]:
     contained_forms = []
     for form in page.pdf_form:
         if form.box and is_element_contained_in_formula(form.box, formula.box):
+            # If paragraph_xobj_id is specified, only include forms with matching xobj_id
+            if paragraph_xobj_id is not None and form.xobj_id != paragraph_xobj_id:
+                continue
             contained_forms.append(form)
 
     return contained_forms
 
 
 def find_all_contained_elements(
-    formula: PdfFormula, page: Page
+    formula: PdfFormula, page: Page, paragraph_xobj_id: int | None = None
 ) -> tuple[list[PdfCurve], list[PdfForm]]:
     """Find all curves and forms that are contained within the given formula.
 
     Args:
         formula: The formula to check for contained elements
         page: The page containing the elements
+        paragraph_xobj_id: The xobj_id of the paragraph containing the formula.
+                          If provided, only elements with matching xobj_id will be returned.
 
     Returns:
         Tuple of (contained_curves, contained_forms)
     """
-    contained_curves = find_contained_curves(formula, page)
-    contained_forms = find_contained_forms(formula, page)
+    contained_curves = find_contained_curves(formula, page, paragraph_xobj_id)
+    contained_forms = find_contained_forms(formula, page, paragraph_xobj_id)
     return contained_curves, contained_forms
 
 

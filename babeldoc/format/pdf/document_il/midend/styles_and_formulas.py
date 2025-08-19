@@ -65,30 +65,26 @@ class StylesAndFormulas:
         if not page.pdf_paragraph:
             return
 
-        # Collect all formulas from the page
-        formulas = []
-        for paragraph in page.pdf_paragraph:
-            for composition in paragraph.pdf_paragraph_composition:
-                if composition.pdf_formula:
-                    formulas.append(composition.pdf_formula)
-
         # Track elements to remove from page level
         curves_to_remove = []
         forms_to_remove = []
 
-        # For each formula, find contained curves and forms
-        for formula in formulas:
-            contained_curves, contained_forms = find_all_contained_elements(
-                formula, page
-            )
+        # For each paragraph containing formulas, find contained curves and forms
+        for paragraph in page.pdf_paragraph:
+            for composition in paragraph.pdf_paragraph_composition:
+                if composition.pdf_formula:
+                    formula = composition.pdf_formula
+                    contained_curves, contained_forms = find_all_contained_elements(
+                        formula, page, paragraph.xobj_id
+                    )
 
-            # Add contained elements to the formula
-            formula.pdf_curve.extend(contained_curves)
-            formula.pdf_form.extend(contained_forms)
+                    # Add contained elements to the formula
+                    formula.pdf_curve.extend(contained_curves)
+                    formula.pdf_form.extend(contained_forms)
 
-            # Track for removal from page level
-            curves_to_remove.extend(contained_curves)
-            forms_to_remove.extend(contained_forms)
+                    # Track for removal from page level
+                    curves_to_remove.extend(contained_curves)
+                    forms_to_remove.extend(contained_forms)
 
         # Remove contained elements from page level
         for curve in curves_to_remove:
