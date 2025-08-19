@@ -410,7 +410,9 @@ class TypesettingUnit:
             "〚",  # 左单书名号
         ]
 
-    def passthrough(self) -> tuple[list[PdfCharacter], list[PdfCurve], list[PdfForm]]:
+    def passthrough(
+        self,
+    ) -> tuple[list[PdfCharacter], list[PdfCurve], list[PdfForm]]:
         if self.char:
             return [self.char], [], []
         elif self.formular:
@@ -762,7 +764,9 @@ class TypesettingUnit:
 
         return new_form
 
-    def render(self) -> tuple[list[PdfCharacter], list[PdfCurve], list[PdfForm]]:
+    def render(
+        self,
+    ) -> tuple[list[PdfCharacter], list[PdfCurve], list[PdfForm]]:
         """渲染排版单元为 PdfCharacter 列表
 
         Returns:
