@@ -141,7 +141,8 @@ PDFFormula =
     attribute x_offset { xsd:float },
     attribute y_offset { xsd:float },
     attribute x_advance { xsd:float }?,
-    attribute lineId { xsd:int }?
+    attribute lineId { xsd:int }?,
+    attribute is_corner_mark { xsd:boolean }?
   }
 PDFFigure = element pdfFigure { Box }
 PDFRectangle =

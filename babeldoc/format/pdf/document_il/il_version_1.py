@@ -976,6 +976,12 @@ class PdfFormula:
             "type": "Attribute",
         },
     )
+    is_corner_mark: bool | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass(slots=True)

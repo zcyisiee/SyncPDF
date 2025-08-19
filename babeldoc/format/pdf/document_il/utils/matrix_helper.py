@@ -329,7 +329,7 @@ def apply_transform_to_ctm(
 def matrix_to_bytes(m: Matrix | PdfMatrix) -> bytes:
     if isinstance(m, PdfMatrix):
         return (
-            f"{m.a:.6f} {m.b:.6f} {m.c:.6f} {m.d:.6f} {m.e:.6f} {m.f:.6f} cm".encode()
+            f" {m.a:.6f} {m.b:.6f} {m.c:.6f} {m.d:.6f} {m.e:.6f} {m.f:.6f} cm ".encode()
         )
     else:
-        return f"{m[0]:.6f} {m[1]:.6f} {m[2]:.6f} {m[3]:.6f} {m[4]:.6f} {m[5]:.6f} cm".encode()
+        return f" {m[0]:.6f} {m[1]:.6f} {m[2]:.6f} {m[3]:.6f} {m[4]:.6f} {m[5]:.6f} cm ".encode()

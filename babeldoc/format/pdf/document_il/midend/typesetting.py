@@ -559,8 +559,8 @@ class TypesettingUnit:
                     ),
                     visual_bbox=il_version_1.VisualBbox(
                         box=Box(
-                            x=x + visual_rel_x * scale,
-                            y=y + visual_rel_y * scale,
+                            x=x + (visual_rel_x + self.formular.x_offset) * scale,
+                            y=y + (visual_rel_y + self.formular.y_offset) * scale,
                             x2=x
                             + (
                                 visual_rel_x

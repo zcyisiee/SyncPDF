@@ -210,6 +210,7 @@
       <xs:attribute name="y_offset" use="required" type="xs:float"/>
       <xs:attribute name="x_advance" type="xs:float"/>
       <xs:attribute name="lineId" type="xs:int"/>
+      <xs:attribute name="is_corner_mark" type="xs:boolean"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfFigure">

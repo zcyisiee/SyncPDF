@@ -615,6 +615,38 @@ def calculate_y_iou_for_boxes(box1: Box, box2: Box) -> float:
     return intersection_height / first_box_height
 
 
+def calculate_y_true_iou_for_boxes(box1: Box, box2: Box) -> float:
+    """Calculate the intersection ratio in y-axis direction divided by the first box height.
+
+    Args:
+        box1: First box
+        box2: Second box
+
+    Returns:
+        float: Intersection ratio in y-axis direction between 0 and 1
+    """
+    y_bottom = max(box1.y, box2.y)
+    y_top = min(box1.y2, box2.y2)
+
+    if y_top <= y_bottom:
+        return 0.0
+
+    # Calculate intersection height
+    intersection_height = y_top - y_bottom
+
+    # Calculate height of first box
+    first_box_height = box1.y2 - box1.y
+    second_box_height = box2.y2 - box2.y
+
+    min_height = min(first_box_height, second_box_height)
+
+    # Return intersection divided by first box height, handle division by zero
+    if first_box_height <= 0:
+        return 0.0
+
+    return intersection_height / min_height
+
+
 def get_character_layout(
     char,
     layout_index,

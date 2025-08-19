@@ -391,6 +391,11 @@
           <data type="int"/>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="is_corner_mark">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
     </element>
   </define>
   <define name="PDFFigure">
