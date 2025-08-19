@@ -24,7 +24,7 @@ from babeldoc.format.pdf.document_il.utils.layout_helper import LEFT_BRACKET
 from babeldoc.format.pdf.document_il.utils.layout_helper import RIGHT_BRACKET
 from babeldoc.format.pdf.document_il.utils.layout_helper import calculate_iou_for_boxes
 from babeldoc.format.pdf.document_il.utils.layout_helper import (
-    calculate_y_iou_for_boxes,
+    calculate_y_true_iou_for_boxes,
 )
 from babeldoc.format.pdf.document_il.utils.layout_helper import is_bullet_point
 from babeldoc.format.pdf.document_il.utils.layout_helper import is_same_style
@@ -87,7 +87,10 @@ class StylesAndFormulas:
         return calculate_iou_for_boxes(element_box, expanded_formula_box)
 
     def _is_element_contained_exact(
-        self, element_box: Box, formula_box: Box, containment_threshold: float = 0.95
+        self,
+        element_box: Box,
+        formula_box: Box,
+        containment_threshold: float = 0.95,
     ) -> bool:
         """Check if an element is contained within a formula with zero tolerance.
 
@@ -355,7 +358,7 @@ class StylesAndFormulas:
         # self.process_page_offsets(page)
         self.process_comma_formulas(page)
         self.merge_overlapping_formulas(page)
-        # self.process_page_offsets(page)
+        self.process_page_offsets(page)
         self.process_translatable_formulas(page)
         self.update_all_formula_data(page)
         self.collect_contained_elements(page)
@@ -391,6 +394,7 @@ class StylesAndFormulas:
         first_is_bullet = first_is_bullet_so_far
         in_formula_state = False
         in_corner_mark_state = False
+        corner_mark_info = []
 
         # Determine the `is_formula` tag for each character
         for i, char in enumerate(line.pdf_character):
@@ -439,22 +443,40 @@ class StylesAndFormulas:
             )
 
             previous_char = line.pdf_character[i - 1] if i > 0 else None
+            next_char = (
+                line.pdf_character[i + 1] if i < len(line.pdf_character) - 1 else None
+            )
             isspace = char.char_unicode.isspace() if char.char_unicode else False
 
             is_corner_mark = (
-                previous_char is not None
-                and not isspace
-                and not first_is_bullet
-                # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
-                and char.pdf_style.font_size < previous_char.pdf_style.font_size * 0.79
-                and not in_corner_mark_state
-            ) or (
-                previous_char is not None
-                and not isspace
-                and not first_is_bullet
-                # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
-                and char.pdf_style.font_size < previous_char.pdf_style.font_size * 1.1
-                and in_corner_mark_state
+                (
+                    previous_char is not None
+                    and not isspace
+                    and not first_is_bullet
+                    # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
+                    and char.pdf_style.font_size
+                    < previous_char.pdf_style.font_size * 0.79
+                    and not in_corner_mark_state
+                )
+                or (
+                    previous_char is not None
+                    and not isspace
+                    and not first_is_bullet
+                    # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
+                    and char.pdf_style.font_size
+                    < previous_char.pdf_style.font_size * 1.1
+                    and in_corner_mark_state
+                )
+                or (
+                    # 检查段落开始的角标：当没有前一个字符时，通过下一个字符判断
+                    previous_char is None
+                    and next_char is not None
+                    and not isspace
+                    and not first_is_bullet
+                    # 当前字符字体大小明显小于下一个字符，判定为角标
+                    and char.pdf_style.font_size < next_char.pdf_style.font_size * 0.79
+                    and not in_corner_mark_state
+                )
             )
 
             is_formula = is_formula or is_corner_mark
@@ -468,16 +490,18 @@ class StylesAndFormulas:
 
             in_corner_mark_state = is_corner_mark
             is_formula_tags.append(is_formula)
+            corner_mark_info.append(is_corner_mark)
 
-        # Pair characters with their tags
-        for char, is_formula in zip(line.pdf_character, is_formula_tags, strict=False):
-            tagged_chars.append((char, is_formula))
+        for char, is_formula, is_corner_mark in zip(
+            line.pdf_character, is_formula_tags, corner_mark_info, strict=False
+        ):
+            tagged_chars.append((char, is_formula, is_corner_mark))
 
         return tagged_chars, first_is_bullet
 
     def _group_classified_characters(
         self,
-        tagged_chars: list[tuple[PdfCharacter, bool]],
+        tagged_chars: list[tuple[PdfCharacter, bool, bool]],
         line_index: int,
     ) -> list[PdfParagraphComposition]:
         """
@@ -489,20 +513,31 @@ class StylesAndFormulas:
         new_compositions = []
         current_chars = []
         current_tag = tagged_chars[0][1]
+        current_corner_mark_flags = []
 
-        for char, is_formula_tag in tagged_chars:
+        for char, is_formula_tag, is_corner_mark in tagged_chars:
             if is_formula_tag == current_tag:
                 current_chars.append(char)
+                current_corner_mark_flags.append(is_corner_mark)
             else:
+                # Check if any character in current group is a corner mark
+                has_corner_mark = any(current_corner_mark_flags)
                 new_compositions.append(
-                    self.create_composition(current_chars, current_tag, line_index),
+                    self.create_composition(
+                        current_chars, current_tag, line_index, has_corner_mark
+                    ),
                 )
                 current_chars = [char]
                 current_tag = is_formula_tag
+                current_corner_mark_flags = [is_corner_mark]
 
         if current_chars:
+            # Check if any character in final group is a corner mark
+            has_corner_mark = any(current_corner_mark_flags)
             new_compositions.append(
-                self.create_composition(current_chars, current_tag, line_index),
+                self.create_composition(
+                    current_chars, current_tag, line_index, has_corner_mark
+                ),
             )
 
         return new_compositions
@@ -571,8 +606,12 @@ class StylesAndFormulas:
 
             new_compositions = []
             for composition in paragraph.pdf_paragraph_composition:
-                if composition.pdf_formula is not None and self.is_translatable_formula(
-                    composition.pdf_formula,
+                if (
+                    composition.pdf_formula is not None
+                    and not composition.pdf_formula.is_corner_mark
+                    and self.is_translatable_formula(
+                        composition.pdf_formula,
+                    )
                 ):
                     # 将可翻译公式转换为普通文本行
                     new_line = PdfLine(
@@ -776,7 +815,9 @@ class StylesAndFormulas:
                             if not char.pdf_character_id:
                                 continue
                             # 检查 y 坐标是否接近，判断是否在同一行
-                            left_iou = calculate_y_iou_for_boxes(char.box, formula.box)
+                            left_iou = calculate_y_true_iou_for_boxes(
+                                formula.box, char.box
+                            )
                             if left_iou > 0.6:
                                 left_char = char
                                 break
@@ -790,7 +831,9 @@ class StylesAndFormulas:
                             if not char.pdf_character_id:
                                 continue
                             # 检查 y 坐标是否接近，判断是否在同一行
-                            right_iou = calculate_y_iou_for_boxes(char.box, formula.box)
+                            right_iou = calculate_y_true_iou_for_boxes(
+                                formula.box, char.box
+                            )
                             if right_iou > 0.6:
                                 right_char = char
                                 break
@@ -869,9 +912,11 @@ class StylesAndFormulas:
         chars: list[PdfCharacter],
         is_formula: bool,
         line_index: int,
+        is_corner_mark: bool = False,
     ) -> PdfParagraphComposition:
         if is_formula:
             formula = PdfFormula(pdf_character=chars, line_id=line_index)
+            formula.is_corner_mark = is_corner_mark
             self.update_formula_data(formula)
             return PdfParagraphComposition(pdf_formula=formula)
         else:

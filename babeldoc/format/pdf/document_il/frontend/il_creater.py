@@ -120,12 +120,35 @@ def get_truetype_ansi_bbox_list(face):
     return bbox_list
 
 
+def get_truetype_custom_bbox_list(face):
+    umap = []  # unicode maps
+    lmap = []  # legacy maps
+    for cmap in face.charmaps:
+        if cmap.encoding_name == "FT_ENCODING_UNICODE":
+            umap.append(cmap)
+        else:
+            lmap.append(cmap)
+    if umap:
+        face.set_charmap(umap[0])
+    elif lmap:
+        face.set_charmap(lmap[0])
+    else:
+        return []
+    scale = 1000 / face.units_per_EM
+    bbox_list = [get_char_cbox(face, code) for code in range(256)]
+    bbox_list = [[v * scale for v in bbox] for bbox in bbox_list]
+    return bbox_list
+
+
 def parse_font_file(doc, idx, encoding, differences):
     bbox_list = []
     data = doc.xref_stream(idx)
     face = freetype.Face(BytesIO(data))
-    if face.get_format() == b"TrueType" and encoding[0] == "WinAnsiEncoding":
-        return get_truetype_ansi_bbox_list(face)
+    if face.get_format() == b"TrueType":
+        if encoding[0] == "WinAnsiEncoding":
+            return get_truetype_ansi_bbox_list(face)
+        elif encoding[0] == "Custom":
+            return get_truetype_custom_bbox_list(face)
     glyph_name_set = set()
     for x in range(0, face.num_glyphs):
         glyph_name_set.add(face.get_glyph_name(x).decode("U8"))
