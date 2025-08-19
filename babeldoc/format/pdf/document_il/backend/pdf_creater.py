@@ -142,35 +142,23 @@ class FormRenderUnit(RenderUnit):
         form = self.form
         draw_op.append(b"q ")
 
+        # Apply relocation transform first if present (before passthrough instructions)
+        # This ensures masks in passthrough_per_char_instruction use the correct coordinate system
+        assert form.pdf_matrix is not None
+        if form.relocation_transform and len(form.relocation_transform) == 6:
+            try:
+                relocation_matrix = tuple(float(x) for x in form.relocation_transform)
+                draw_op.append(matrix_to_bytes(relocation_matrix))
+            except (ValueError, TypeError):
+                # If relocation transform conversion fails, skip it and use original matrix later
+                pass
+
         draw_op.append(
             form.graphic_state.passthrough_per_char_instruction.encode(),
         )
         draw_op.append(b" ")
 
-        # Apply relocation transform if present, otherwise use original pdf_matrix
-        assert form.pdf_matrix is not None
-        if form.relocation_transform and len(form.relocation_transform) == 6:
-            try:
-                relocation_matrix = tuple(float(x) for x in form.relocation_transform)
-                # Apply relocation transform first, then original pdf_matrix
-                combined_matrix = multiply_matrices(
-                    relocation_matrix,
-                    (
-                        form.pdf_matrix.a,
-                        form.pdf_matrix.b,
-                        form.pdf_matrix.c,
-                        form.pdf_matrix.d,
-                        form.pdf_matrix.e,
-                        form.pdf_matrix.f,
-                    ),
-                )
-                draw_op.append(matrix_to_bytes(combined_matrix))
-            except (ValueError, TypeError):
-                # If relocation transform conversion fails, use original matrix
-                draw_op.append(matrix_to_bytes(form.pdf_matrix))
-        else:
-            # No relocation transform, use original pdf_matrix
-            draw_op.append(matrix_to_bytes(form.pdf_matrix))
+        draw_op.append(matrix_to_bytes(form.pdf_matrix))
 
         assert form.pdf_form_subtype is not None
         if form.pdf_form_subtype.pdf_xobj_form:
