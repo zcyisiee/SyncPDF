@@ -140,7 +140,8 @@ PDFFormula =
     PDFForm*,
     attribute x_offset { xsd:float },
     attribute y_offset { xsd:float },
-    attribute x_advance { xsd:float }?
+    attribute x_advance { xsd:float }?,
+    attribute lineId { xsd:int }?
   }
 PDFFigure = element pdfFigure { Box }
 PDFRectangle =

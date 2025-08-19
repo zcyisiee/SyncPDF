@@ -969,6 +969,13 @@ class PdfFormula:
             "type": "Attribute",
         },
     )
+    line_id: int | None = field(
+        default=None,
+        metadata={
+            "name": "lineId",
+            "type": "Attribute",
+        },
+    )
 
 
 @dataclass(slots=True)

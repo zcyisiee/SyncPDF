@@ -386,6 +386,11 @@
           <data type="float"/>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="lineId">
+          <data type="int"/>
+        </attribute>
+      </optional>
     </element>
   </define>
   <define name="PDFFigure">

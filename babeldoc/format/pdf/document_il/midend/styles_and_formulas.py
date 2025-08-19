@@ -104,7 +104,7 @@ class StylesAndFormulas:
         self.process_page_formulas(page)
         # self.process_page_offsets(page)
         self.process_comma_formulas(page)
-        # self.merge_overlapping_formulas(page)
+        self.merge_overlapping_formulas(page)
         # self.process_page_offsets(page)
         self.process_translatable_formulas(page)
         self.update_all_formula_data(page)
@@ -125,6 +125,7 @@ class StylesAndFormulas:
         composition: PdfParagraphComposition,
         formula_font_ids: set[int],
         first_is_bullet_so_far: bool,
+        line_index: int,
     ) -> tuple[list[tuple[PdfCharacter, bool]], bool]:
         """
         Phase 1: Classify every character in a composition as either formula or text.
@@ -227,6 +228,7 @@ class StylesAndFormulas:
     def _group_classified_characters(
         self,
         tagged_chars: list[tuple[PdfCharacter, bool]],
+        line_index: int,
     ) -> list[PdfParagraphComposition]:
         """
         Phase 2: Group consecutive characters with the same tag into new compositions.
@@ -243,14 +245,14 @@ class StylesAndFormulas:
                 current_chars.append(char)
             else:
                 new_compositions.append(
-                    self.create_composition(current_chars, current_tag),
+                    self.create_composition(current_chars, current_tag, line_index),
                 )
                 current_chars = [char]
                 current_tag = is_formula_tag
 
         if current_chars:
             new_compositions.append(
-                self.create_composition(current_chars, current_tag),
+                self.create_composition(current_chars, current_tag, line_index),
             )
 
         return new_compositions
@@ -284,7 +286,9 @@ class StylesAndFormulas:
             # This flag is carried through all compositions in a paragraph, as in the original implementation.
             first_is_bullet = False
 
-            for composition in paragraph.pdf_paragraph_composition:
+            for line_index, composition in enumerate(
+                paragraph.pdf_paragraph_composition
+            ):
                 (
                     tagged_chars,
                     first_is_bullet,
@@ -292,13 +296,16 @@ class StylesAndFormulas:
                     composition,
                     current_formula_font_ids,
                     first_is_bullet,
+                    line_index,
                 )
 
                 if not tagged_chars:
                     new_paragraph_compositions.append(composition)
                     continue
 
-                grouped_compositions = self._group_classified_characters(tagged_chars)
+                grouped_compositions = self._group_classified_characters(
+                    tagged_chars, line_index
+                )
                 new_paragraph_compositions.extend(grouped_compositions)
 
             paragraph.pdf_paragraph_composition = new_paragraph_compositions
@@ -611,9 +618,10 @@ class StylesAndFormulas:
         self,
         chars: list[PdfCharacter],
         is_formula: bool,
+        line_index: int,
     ) -> PdfParagraphComposition:
         if is_formula:
-            formula = PdfFormula(pdf_character=chars)
+            formula = PdfFormula(pdf_character=chars, line_id=line_index)
             self.update_formula_data(formula)
             return PdfParagraphComposition(pdf_formula=formula)
         else:
@@ -689,7 +697,8 @@ class StylesAndFormulas:
         # sorted_chars = sorted(
         #     all_chars, key=lambda c: (c.visual_bbox.box.y, c.visual_bbox.box.x))
 
-        merged_formula = PdfFormula(pdf_character=all_chars)
+        # 继承第一个公式的行 ID
+        merged_formula = PdfFormula(pdf_character=all_chars, line_id=formula1.line_id)
         self.update_formula_data(merged_formula)
         return merged_formula
 
@@ -770,11 +779,16 @@ class StylesAndFormulas:
                         formula2 = comp2.pdf_formula
 
                         # 检查合并条件：
+                        # 0. 必须在同一行（line_id 相同），以及
                         # 1. x 轴重叠且 y 轴有交集，或者
                         # 2. x 轴相邻且 y 轴 IOU > 0.5，或者
                         # 3. 所有字符的 layout id 都相同，或者
                         # 4. 任意两个公式的 IOU > 0.8
-                        should_merge = (
+
+                        # 检查是否在同一行
+                        same_line = formula1.line_id == formula2.line_id
+
+                        should_merge = same_line and (
                             (
                                 j == i + 1
                                 and (
@@ -868,7 +882,11 @@ class StylesAndFormulas:
                     char_groups = self.split_formula_by_comma(composition.pdf_formula)
                     for chars, comma in char_groups:
                         if chars:  # 忽略空组（连续的逗号）
-                            formula = PdfFormula(pdf_character=chars)
+                            # 继承原公式的行 ID
+                            formula = PdfFormula(
+                                pdf_character=chars,
+                                line_id=composition.pdf_formula.line_id,
+                            )
                             self.update_formula_data(formula)
                             new_compositions.append(
                                 PdfParagraphComposition(pdf_formula=formula),

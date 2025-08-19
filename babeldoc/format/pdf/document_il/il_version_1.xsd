@@ -209,6 +209,7 @@
       <xs:attribute name="x_offset" use="required" type="xs:float"/>
       <xs:attribute name="y_offset" use="required" type="xs:float"/>
       <xs:attribute name="x_advance" type="xs:float"/>
+      <xs:attribute name="lineId" type="xs:int"/>
     </xs:complexType>
   </xs:element>
   <xs:element name="pdfFigure">
