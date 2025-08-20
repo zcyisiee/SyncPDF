@@ -19,7 +19,6 @@ from babeldoc.format.pdf.document_il import PdfOriginalPath
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
 from babeldoc.format.pdf.document_il.utils.matrix_helper import matrix_to_bytes
-from babeldoc.format.pdf.document_il.utils.matrix_helper import multiply_matrices
 from babeldoc.format.pdf.document_il.utils.zstd_helper import zstd_decompress
 from babeldoc.format.pdf.translation_config import TranslateResult
 from babeldoc.format.pdf.translation_config import TranslationConfig
@@ -153,12 +152,15 @@ class FormRenderUnit(RenderUnit):
                 # If relocation transform conversion fails, skip it and use original matrix later
                 pass
 
+        draw_op.append(matrix_to_bytes(form.pdf_matrix))
+
+        draw_op.append(b" ")
+
         draw_op.append(
             form.graphic_state.passthrough_per_char_instruction.encode(),
         )
-        draw_op.append(b" ")
 
-        draw_op.append(matrix_to_bytes(form.pdf_matrix))
+        draw_op.append(b" ")
 
         assert form.pdf_form_subtype is not None
         if form.pdf_form_subtype.pdf_xobj_form:
@@ -272,36 +274,33 @@ class CurveRenderUnit(RenderUnit):
         curve = self.curve
         draw_op.append(b"q n ")
 
-        # Apply relocation transform if present, otherwise use original CTM
+        # Apply relocation transform first if present (before passthrough instructions)
+        # This ensures masks in passthrough_per_char_instruction use the correct coordinate system
         if curve.relocation_transform and len(curve.relocation_transform) == 6:
             try:
                 relocation_matrix = tuple(float(x) for x in curve.relocation_transform)
-                if curve.ctm and len(curve.ctm) == 6:
-                    # Combine relocation transform with original CTM
-                    ctm_matrix = tuple(float(x) for x in curve.ctm)
-                    combined_matrix = multiply_matrices(relocation_matrix, ctm_matrix)
-                else:
-                    # Only relocation transform
-                    combined_matrix = relocation_matrix
-                draw_op.append(matrix_to_bytes(combined_matrix))
+                draw_op.append(matrix_to_bytes(relocation_matrix))
             except (ValueError, TypeError):
-                # If relocation transform conversion fails, use original CTM
-                if curve.ctm and len(curve.ctm) == 6:
-                    ctm = curve.ctm
-                    draw_op.append(
-                        f"{ctm[0]:.6f} {ctm[1]:.6f} {ctm[2]:.6f} {ctm[3]:.6f} {ctm[4]:.6f} {ctm[5]:.6f} cm ".encode()
-                    )
-        elif curve.ctm and len(curve.ctm) == 6:
-            # No relocation transform, use original CTM
+                # If relocation transform conversion fails, skip it and use original CTM later
+                pass
+
+        draw_op.append(b" ")
+
+        # Apply original CTM if present
+        if curve.ctm and len(curve.ctm) == 6:
             ctm = curve.ctm
             draw_op.append(
                 f"{ctm[0]:.6f} {ctm[1]:.6f} {ctm[2]:.6f} {ctm[3]:.6f} {ctm[4]:.6f} {ctm[5]:.6f} cm ".encode()
             )
 
+        draw_op.append(b" ")
+
         draw_op.append(
             curve.graphic_state.passthrough_per_char_instruction.encode(),
         )
+
         draw_op.append(b" ")
+        path_op = BitStream(b" ")
 
         # Use original path if available, otherwise fall back to transformed path
         path_to_use = (
@@ -313,21 +312,24 @@ class CurveRenderUnit(RenderUnit):
             if isinstance(path, PdfOriginalPath):
                 path = path.pdf_path
             if path.has_xy:
-                draw_op.append(f"{path.x:F} {path.y:F} {path.op} ".encode())
+                path_op.append(f"{path.x:F} {path.y:F} {path.op} ".encode())
             else:
-                draw_op.append(f"{path.op} ".encode())
+                path_op.append(f"{path.op} ".encode())
 
-        final_op = b""
+        draw_op.append(path_op)
+
         if curve.fill_background:
-            final_op = b" f"
+            draw_op.append(b" f")
         if curve.evenodd:
-            final_op += b"* "
+            draw_op.append(b"* ")
         else:
-            final_op += b" "
+            draw_op.append(b" ")
         if curve.stroke_path:
-            final_op += b"S "
+            draw_op.append(path_op)
+            draw_op.append(b"S ")
 
-        draw_op.append(final_op)
+        # final_op = b' B '
+
         draw_op.append(b" n Q\n")
 
 
@@ -663,13 +665,16 @@ class PDFCreater:
                     formula_forms.extend(composition.pdf_formula.pdf_form)
 
         # Convert forms to render units (page-level forms + forms from formulas)
-        all_forms = list(page.pdf_form) + formula_forms
-        for i, form in enumerate(all_forms):
-            render_order = getattr(
-                form, "render_order", 50
-            )  # Forms render before characters
-            sub_render_order = getattr(form, "sub_render_order", i)
-            render_units.append(FormRenderUnit(form, render_order, sub_render_order))
+        if not translation_config.skip_form_render:
+            all_forms = list(page.pdf_form) + formula_forms
+            for i, form in enumerate(all_forms):
+                render_order = getattr(
+                    form, "render_order", 50
+                )  # Forms render before characters
+                sub_render_order = getattr(form, "sub_render_order", i)
+                render_units.append(
+                    FormRenderUnit(form, render_order, sub_render_order)
+                )
 
         # Convert rectangles to render units (only for OCR workaround or debug)
         for i, rect in enumerate(page.pdf_rectangle):
@@ -697,16 +702,17 @@ class PDFCreater:
                     formula_curves.extend(composition.pdf_formula.pdf_curve)
 
         # Convert curves to render units (page-level curves + curves from formulas, only for debug)
-        all_curves = list(page.pdf_curve) + formula_curves
-        for i, curve in enumerate(all_curves):
-            if curve.debug_info or translation_config.debug:
-                render_order = getattr(
-                    curve, "render_order", 20
-                )  # Curves render after rectangles
-                sub_render_order = getattr(curve, "sub_render_order", i)
-                render_units.append(
-                    CurveRenderUnit(curve, render_order, sub_render_order)
-                )
+        if not translation_config.skip_curve_render:
+            all_curves = list(page.pdf_curve) + formula_curves
+            for i, curve in enumerate(all_curves):
+                if curve.debug_info or translation_config.debug:
+                    render_order = getattr(
+                        curve, "render_order", 20
+                    )  # Curves render after rectangles
+                    sub_render_order = getattr(curve, "sub_render_order", i)
+                    render_units.append(
+                        CurveRenderUnit(curve, render_order, sub_render_order)
+                    )
 
         return render_units
 

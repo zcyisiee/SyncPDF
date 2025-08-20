@@ -158,6 +158,8 @@ class TranslationConfig:
         enable_graphic_element_process: bool = True,
         merge_alternating_line_numbers: bool = True,
         skip_translation: bool = False,
+        skip_form_render: bool = False,
+        skip_curve_render: bool = False,
     ):
         self.translator = translator
         initial_user_glossaries = list(glossaries) if glossaries else []
@@ -287,6 +289,8 @@ class TranslationConfig:
         # force disable table translate until the new model is ready
         self.table_model = None
         self.enable_graphic_element_process = enable_graphic_element_process
+        self.skip_form_render = skip_form_render
+        self.skip_curve_render = skip_curve_render
 
     def parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
         """解析页码字符串，返回页码范围列表

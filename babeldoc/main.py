@@ -317,6 +317,18 @@ def create_parser():
         default=False,
         help="Skip translation step. (default: False)",
     )
+    translation_group.add_argument(
+        "--skip-form-render",
+        action="store_true",
+        default=False,
+        help="Skip form rendering. (default: False)",
+    )
+    translation_group.add_argument(
+        "--skip-curve-render",
+        action="store_true",
+        default=False,
+        help="Skip curve rendering. (default: False)",
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -568,6 +580,8 @@ async def main():
             enable_graphic_element_process=not args.disable_graphic_element_process,
             merge_alternating_line_numbers=args.merge_alternating_line_numbers,
             skip_translation=args.skip_translation,
+            skip_form_render=args.skip_form_render,
+            skip_curve_render=args.skip_curve_render,
         )
 
         def nop(_x):

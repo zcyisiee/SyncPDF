@@ -35,6 +35,36 @@ from babeldoc.pdfminer.utils import get_bound
 from babeldoc.pdfminer.utils import mult_matrix
 
 
+def invert_matrix(
+    ctm: tuple[float, float, float, float, float, float],
+) -> tuple[float, float, float, float, float, float]:
+    """
+    Calculate the inverse of a 2D transformation matrix.
+    Matrix format: (a, b, c, d, e, f) representing:
+    [a c e]
+    [b d f]
+    [0 0 1]
+    """
+    a, b, c, d, e, f = ctm
+
+    # Calculate determinant
+    det = a * d - b * c
+
+    if abs(det) < 1e-10:
+        # Matrix is singular, return identity matrix
+        return (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+
+    # Calculate inverse matrix elements
+    inv_a = d / det
+    inv_b = -b / det
+    inv_c = -c / det
+    inv_d = a / det
+    inv_e = (c * f - d * e) / det
+    inv_f = (b * e - a * f) / det
+
+    return (inv_a, inv_b, inv_c, inv_d, inv_e, inv_f)
+
+
 def batched(iterable, n, *, strict=False):
     # batched('ABCDEFG', 3) → ABC DEF G
     if n < 1:
@@ -356,6 +386,8 @@ class ILCreater:
             "W n",
             "W* n",
             "d",
+            "W",
+            "W*",
         ):
             logger.error("Unknown passthrough_per_char operation: %s", operator)
             return
@@ -576,6 +608,9 @@ class ILCreater:
             pdf_font_char_bounding_box=[],
         )
         try:
+            if xref_id is None:
+                logger.warning("xref_id is None for font %s", font_name)
+                raise ValueError("xref_id is None for font %s", font_name)
             bbox_list, cmap = self.parse_font_xobj_id(xref_id)
             font_char_bounding_box_map = {}
             if not cmap:
@@ -620,7 +655,10 @@ class ILCreater:
                     font_char_bounding_box_map
                 )
         except Exception as e:
-            logger.error("failed to parse font xobj id %d: %s", xref_id, e)
+            if xref_id is None:
+                logger.error("failed to parse font xobj id None: %s", e)
+            else:
+                logger.error("failed to parse font xobj id %d: %s", xref_id, e)
         self.current_page_font_name_id_map[xref_id] = font_id
         if self.xobj_id in self.xobj_map:
             self.xobj_map[self.xobj_id].pdf_font.append(il_font_metadata)
@@ -628,6 +666,9 @@ class ILCreater:
             self.current_page.pdf_font.append(il_font_metadata)
 
     def parse_font_xobj_id(self, xobj_id: int):
+        if xobj_id is None:
+            return [], {}
+
         bbox_list = []
         encoding = parse_font_encoding(self.mupdf, xobj_id)
         differences = []
@@ -991,19 +1032,28 @@ class ILCreater:
         evenodd: bool,
         ctm: tuple[float, float, float, float, float, float],
     ):
-        op = "W* n" if evenodd else "W n"
-        args = [
-            "q",
-            f"{ctm[0]:F} {ctm[1]:F} {ctm[2]:F} {ctm[3]:F} {ctm[4]:F} {ctm[5]:F} cm",
-        ]
-        for p in clip_path:
-            if len(p) == 1:
-                args.append(p[0])
-            elif len(p) > 1:
-                args.extend([f"{x:F}" for x in p[1:]])
-                args.append(p[0])
-        args.append("Q")
-        self.on_passthrough_per_char(op, args)
+        try:
+            op = "W* n" if evenodd else "W n"
+
+            # # Calculate inverse matrix for restoration
+            # inv_ctm = invert_matrix(ctm)
+            #
+            # args = [
+            #     f"{ctm[0]:F} {ctm[1]:F} {ctm[2]:F} {ctm[3]:F} {ctm[4]:F} {ctm[5]:F} cm",
+            # ]
+            args = []
+            for p in clip_path:
+                if len(p) == 1:
+                    args.append(p[0])
+                elif len(p) > 1:
+                    args.extend([f"{x:F}" for x in p[1:]])
+                    args.append(p[0])
+            # args.append(
+            #     f"{inv_ctm[0]:F} {inv_ctm[1]:F} {inv_ctm[2]:F} {inv_ctm[3]:F} {inv_ctm[4]:F} {inv_ctm[5]:F} cm"
+            # )
+            self.on_passthrough_per_char(op, args)
+        except Exception as e:
+            logger.warning("Error in on_pdf_clip_path: %s", e)
 
     def create_il(self):
         pages = [

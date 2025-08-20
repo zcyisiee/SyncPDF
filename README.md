@@ -163,6 +163,8 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 - `--primary-font-family`: Override primary font family for translated text. Choices: 'serif' for serif fonts, 'sans-serif' for sans-serif fonts, 'script' for script/italic fonts. If not specified, uses automatic font selection based on original text properties.
 - `--only-include-translated-page`: Only include translated pages in the output PDF. This option is only effective when `--pages` is used. (default: False)
 - `--merge-alternating-line-numbers`: Enable post-processing to merge alternating line-number layouts (keep the number paragraph as an independent paragraph b; merge adjacent text paragraphs a and c across it when `layout_id` and `xobj_id` match, digits are ASCII and spaces only). Default: off.
+- `--skip-form-render`: Skip form rendering (default: False). When enabled, PDF forms will not be rendered in the output.
+- `--skip-curve-render`: Skip curve rendering (default: False). When enabled, PDF curves will not be rendered in the output.
 
 - `--rpc-doclayout`: RPC service host address for document layout analysis (default: None)
 - `--working-dir`: Working directory for translation. If not set, use temp directory.
@@ -283,6 +285,8 @@ ocr_workaround = false # Use OCR workaround for scanned PDFs
 rpc_doclayout = "" # RPC service host for document layout analysis
 working_dir = "" # Working directory for translation
 auto_enable_ocr_workaround = false # Enable automatic OCR workaround for scanned PDFs. See docs for interaction with ocr_workaround and skip_scanned_detection.
+skip_form_render = false # Skip form rendering (default: False)
+skip_curve_render = false # Skip curve rendering (default: False)
 
 # Translation service
 openai = true
