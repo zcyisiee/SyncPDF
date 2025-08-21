@@ -351,6 +351,47 @@ class ILCreater:
             translation_config.enable_graphic_element_process
         )
         self.render_order = 0
+        self.current_clip_paths: list[tuple] = []
+        self.clip_paths_stack: list[list[tuple]] = []
+
+    def transform_clip_path(
+        self,
+        clip_path,
+        source_ctm: tuple[float, float, float, float, float, float],
+        target_ctm: tuple[float, float, float, float, float, float],
+    ):
+        """Transform clip path coordinates from source CTM to target CTM."""
+        if source_ctm == target_ctm:
+            return clip_path
+
+        # Calculate transformation matrix: inverse(target_ctm) * source_ctm
+        inv_target_ctm = invert_matrix(target_ctm)
+        transform_matrix = mult_matrix(source_ctm, inv_target_ctm)
+
+        transformed_path = []
+        for path_element in clip_path:
+            if len(path_element) == 1:
+                # Path operation without coordinates (e.g., 'h' for close path)
+                transformed_path.append(path_element)
+            else:
+                # Path operation with coordinates
+                op = path_element[0]
+                coords = path_element[1:]
+                transformed_coords = []
+
+                # Transform coordinate pairs
+                for i in range(0, len(coords), 2):
+                    if i + 1 < len(coords):
+                        x, y = coords[i], coords[i + 1]
+                        transformed_point = apply_matrix_pt(transform_matrix, (x, y))
+                        transformed_coords.extend(transformed_point)
+                    else:
+                        # Handle odd number of coordinates (shouldn't happen in well-formed paths)
+                        transformed_coords.append(coords[i])
+
+                transformed_path.append([op] + transformed_coords)
+
+        return transformed_path
 
     def get_render_order_and_increase(self):
         self.render_order += 1
@@ -377,6 +418,12 @@ class ILCreater:
             operator,
         )
 
+    def can_remove_old_passthrough_per_char_instruction(self, operator: str):
+        return re.match(
+            "^(sc|SC|sh|scn|SCN|g|G|rg|RG|k|K|cs|CS|ri|w|J|j|M|i|d)$",
+            operator,
+        )
+
     def on_line_dash(self, dash, phase):
         dash_str = f"[{' '.join(f'{arg}' for arg in dash)}]"
         self.on_passthrough_per_char("d", [dash_str, str(phase)])
@@ -393,11 +440,12 @@ class ILCreater:
             return
         # logger.debug("xobj_id: %d, on_passthrough_per_char: %s ( %s )", self.xobj_id, operator, args)
         args = [self.parse_arg(arg) for arg in args]
-        for _i, value in enumerate(self.passthrough_per_char_instruction.copy()):
-            op, arg = value
-            if op == operator:
-                self.passthrough_per_char_instruction.remove(value)
-                break
+        if self.can_remove_old_passthrough_per_char_instruction(operator):
+            for _i, value in enumerate(self.passthrough_per_char_instruction.copy()):
+                op, arg = value
+                if op == operator:
+                    self.passthrough_per_char_instruction.remove(value)
+                    break
         self.passthrough_per_char_instruction.append((operator, " ".join(args)))
         pass
 
@@ -424,10 +472,16 @@ class ILCreater:
                 self.current_page.page_number,
             )
 
+        if self.clip_paths_stack:
+            self.current_clip_paths = self.clip_paths_stack.pop()
+        else:
+            self.current_clip_paths = []
+
     def push_passthrough_per_char_instruction(self):
         self.passthrough_per_char_instruction_stack.append(
             self.passthrough_per_char_instruction.copy(),
         )
+        self.clip_paths_stack.append(self.current_clip_paths.copy())
 
     # pdf32000 page 171
     def on_stroking_color_space(self, color_space_name):
@@ -440,6 +494,7 @@ class ILCreater:
         self.stroking_color_space_name = None
         self.non_stroking_color_space_name = None
         self.passthrough_per_char_instruction = []
+        self.current_clip_paths = []
 
     def push_xobj(self):
         self.xobj_stack.append(
@@ -447,16 +502,19 @@ class ILCreater:
                 self.current_page_font_name_id_map.copy(),
                 self.current_page_font_char_bounding_box_map.copy(),
                 self.xobj_id,
+                self.current_clip_paths.copy(),
             ),
         )
         self.current_page_font_name_id_map = {}
         self.current_page_font_char_bounding_box_map = {}
+        self.current_clip_paths = []
 
     def pop_xobj(self):
         (
             self.current_page_font_name_id_map,
             self.current_page_font_char_bounding_box_map,
             self.xobj_id,
+            self.current_clip_paths,
         ) = self.xobj_stack.pop()
 
     def on_xobj_begin(self, bbox, xref_id):
@@ -503,6 +561,8 @@ class ILCreater:
         self.xobj_stack = []
         self.non_stroking_color_space_name = None
         self.stroking_color_space_name = None
+        self.current_clip_paths = []
+        self.clip_paths_stack = []
         self.docs.page.append(self.current_page)
 
     def on_page_end(self):
@@ -698,7 +758,11 @@ class ILCreater:
         self,
         gs: babeldoc.pdfminer.pdfinterp.PDFGraphicState | list[tuple[str, str]],
         include_clipping: bool = False,
+        target_ctm: tuple[float, float, float, float, float, float] = None,
+        clip_paths=None,
     ):
+        if clip_paths is None:
+            clip_paths = self.current_clip_paths
         passthrough_instruction = getattr(gs, "passthrough_instruction", gs)
 
         def filter_clipping(op):
@@ -710,8 +774,40 @@ class ILCreater:
         if include_clipping:
             filter_clipping = pass_all
 
-        passthrough_per_char_instruction = " ".join(
+        passthrough_per_char_instruction_parts = [
             f"{arg} {op}" for op, arg in passthrough_instruction if filter_clipping(op)
+        ]
+
+        # Add transformed clipping paths if requested and target CTM is provided
+        if include_clipping and target_ctm and clip_paths:
+            for clip_path, source_ctm, evenodd in clip_paths:
+                try:
+                    # Transform clip path from source CTM to target CTM
+                    transformed_path = self.transform_clip_path(
+                        clip_path, source_ctm, target_ctm
+                    )
+
+                    # Generate clipping instruction
+                    op = "W* n" if evenodd else "W n"
+                    args = []
+                    for p in transformed_path:
+                        if len(p) == 1:
+                            args.append(p[0])
+                        elif len(p) > 1:
+                            args.extend([f"{x:F}" for x in p[1:]])
+                            args.append(p[0])
+
+                    if args:
+                        clipping_instruction = f"{' '.join(args)} {op}"
+                        passthrough_per_char_instruction_parts.append(
+                            clipping_instruction
+                        )
+
+                except Exception as e:
+                    logger.warning("Error transforming clip path: %s", e)
+
+        passthrough_per_char_instruction = " ".join(
+            passthrough_per_char_instruction_parts
         )
 
         # 可能会影响部分 graphic state 准确度。不过 BabelDOC 仅使用 passthrough_per_char_instruction
@@ -877,8 +973,13 @@ class ILCreater:
             x2=curve.bbox[2],
             y2=curve.bbox[3],
         )
+        # Extract CTM from curve object if it exists
+        curve_ctm = getattr(curve, "ctm", None)
         gs = self.create_graphic_state(
-            curve.passthrough_instruction, include_clipping=True
+            curve.passthrough_instruction,
+            include_clipping=True,
+            target_ctm=curve_ctm,
+            clip_paths=curve.clip_paths,
         )
         paths = []
         for point in curve.original_path:
@@ -989,7 +1090,9 @@ class ILCreater:
         bounds = ((x, y), (x + w, y), (x, y + h), (x + w, y + h))
         bbox = get_bound(apply_matrix_pt(matrix, (p, q)) for (p, q) in bounds)
 
-        gs = self.create_graphic_state(self.passthrough_per_char_instruction, True)
+        gs = self.create_graphic_state(
+            self.passthrough_per_char_instruction, include_clipping=True, target_ctm=ctm
+        )
 
         figure_bbox = il_version_1.Box(
             x=bbox[0],
@@ -1033,25 +1136,7 @@ class ILCreater:
         ctm: tuple[float, float, float, float, float, float],
     ):
         try:
-            op = "W* n" if evenodd else "W n"
-
-            # # Calculate inverse matrix for restoration
-            # inv_ctm = invert_matrix(ctm)
-            #
-            # args = [
-            #     f"{ctm[0]:F} {ctm[1]:F} {ctm[2]:F} {ctm[3]:F} {ctm[4]:F} {ctm[5]:F} cm",
-            # ]
-            args = []
-            for p in clip_path:
-                if len(p) == 1:
-                    args.append(p[0])
-                elif len(p) > 1:
-                    args.extend([f"{x:F}" for x in p[1:]])
-                    args.append(p[0])
-            # args.append(
-            #     f"{inv_ctm[0]:F} {inv_ctm[1]:F} {inv_ctm[2]:F} {inv_ctm[3]:F} {inv_ctm[4]:F} {inv_ctm[5]:F} cm"
-            # )
-            self.on_passthrough_per_char(op, args)
+            self.current_clip_paths.append((clip_path.copy(), ctm, evenodd))
         except Exception as e:
             logger.warning("Error in on_pdf_clip_path: %s", e)
 
@@ -1135,7 +1220,9 @@ class ILCreater:
         final_bbox = get_bound(apply_matrix_pt(ctm, (p, q)) for (p, q) in bounds)
 
         # Create graphics state
-        gs = self.create_graphic_state(self.passthrough_per_char_instruction, True)
+        gs = self.create_graphic_state(
+            self.passthrough_per_char_instruction, include_clipping=True, target_ctm=ctm
+        )
 
         # Create PdfMatrix from CTM
         pdf_matrix = il_version_1.PdfMatrix(

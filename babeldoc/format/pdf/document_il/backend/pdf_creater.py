@@ -316,9 +316,8 @@ class CurveRenderUnit(RenderUnit):
             else:
                 path_op.append(f"{path.op} ".encode())
 
-        draw_op.append(path_op)
-
         if curve.fill_background:
+            draw_op.append(path_op)
             draw_op.append(b" f")
         if curve.evenodd:
             draw_op.append(b"* ")

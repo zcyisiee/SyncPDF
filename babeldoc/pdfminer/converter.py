@@ -112,7 +112,7 @@ class PDFLayoutAnalyzer(PDFTextDevice):
     ) -> None:
         """Paint paths described in section 4.4 of the PDF reference manual"""
         shape = "".join(x[0] for x in path)
-
+        current_clip_paths = self.il_creater.current_clip_paths.copy()
         if shape[:1] != "m":
             # Per PDF Reference Section 4.4.1, "path construction operators may
             # be invoked in any sequence, but the first one invoked must be m
@@ -186,7 +186,8 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                 line.xobj_id = xobj_id
                 line.render_order = self.il_creater.get_render_order_and_increase()
                 line.ctm = self.ctm
-                line.raw_path = path
+                line.raw_path = path.copy()
+                line.clip_paths = current_clip_paths
                 self.cur_item.add(line)
 
             elif shape in {"mlllh", "mllll"}:
@@ -212,7 +213,8 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                     rect.xobj_id = xobj_id
                     rect.render_order = self.il_creater.get_render_order_and_increase()
                     rect.ctm = self.ctm
-                    rect.raw_path = path
+                    rect.raw_path = path.copy()
+                    rect.clip_paths = current_clip_paths
                     self.cur_item.add(rect)
                 else:
                     curve = LTCurve(
@@ -230,7 +232,8 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                     curve.xobj_id = xobj_id
                     curve.render_order = self.il_creater.get_render_order_and_increase()
                     curve.ctm = self.ctm
-                    curve.raw_path = path
+                    curve.raw_path = path.copy()
+                    curve.clip_paths = current_clip_paths
                     self.cur_item.add(curve)
             else:
                 curve = LTCurve(
@@ -248,7 +251,8 @@ class PDFLayoutAnalyzer(PDFTextDevice):
                 curve.xobj_id = xobj_id
                 curve.render_order = self.il_creater.get_render_order_and_increase()
                 curve.ctm = self.ctm
-                curve.raw_path = path
+                curve.raw_path = path.copy()
+                curve.clip_paths = current_clip_paths
                 self.cur_item.add(curve)
 
     def render_char(
