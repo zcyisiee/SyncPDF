@@ -160,6 +160,7 @@ class TranslationConfig:
         skip_translation: bool = False,
         skip_form_render: bool = False,
         skip_curve_render: bool = False,
+        only_parse_generate_pdf: bool = False,
     ):
         self.translator = translator
         initial_user_glossaries = list(glossaries) if glossaries else []
@@ -264,7 +265,9 @@ class TranslationConfig:
         self.auto_extract_glossary = auto_extract_glossary
         self.auto_enable_ocr_workaround = auto_enable_ocr_workaround
         self.skip_translation = skip_translation
-        if self.skip_translation:
+        self.only_parse_generate_pdf = only_parse_generate_pdf
+
+        if self.skip_translation or self.only_parse_generate_pdf:
             self.auto_extract_glossary = False
 
         if auto_enable_ocr_workaround:

@@ -329,6 +329,12 @@ def create_parser():
         default=False,
         help="Skip curve rendering. (default: False)",
     )
+    translation_group.add_argument(
+        "--only-parse-generate-pdf",
+        action="store_true",
+        default=False,
+        help="Only parse PDF and generate output PDF without translation (default: False). This skips all translation-related processing including layout analysis, paragraph finding, style processing, and translation itself.",
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -582,6 +588,7 @@ async def main():
             skip_translation=args.skip_translation,
             skip_form_render=args.skip_form_render,
             skip_curve_render=args.skip_curve_render,
+            only_parse_generate_pdf=args.only_parse_generate_pdf,
         )
 
         def nop(_x):
