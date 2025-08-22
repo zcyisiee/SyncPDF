@@ -162,8 +162,8 @@ class TranslationConfig:
         skip_curve_render: bool = False,
         only_parse_generate_pdf: bool = False,
         remove_non_formula_lines: bool = False,
-        non_formula_line_iou_threshold: float = 0.2,
-        figure_table_protection_threshold: float = 0.3,
+        non_formula_line_iou_threshold: float = 0.9,
+        figure_table_protection_threshold: float = 0.9,
         skip_formula_offset_calculation: bool = False,
     ):
         self.translator = translator
@@ -302,6 +302,9 @@ class TranslationConfig:
         self.non_formula_line_iou_threshold = non_formula_line_iou_threshold
         self.figure_table_protection_threshold = figure_table_protection_threshold
         self.skip_formula_offset_calculation = skip_formula_offset_calculation
+
+        if self.ocr_workaround:
+            self.remove_non_formula_lines = False
 
     def parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
         """解析页码字符串，返回页码范围列表

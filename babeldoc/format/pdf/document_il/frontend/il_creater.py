@@ -932,6 +932,7 @@ class ILCreater:
         )
         if self.translation_config.ocr_workaround:
             pdf_char.pdf_style.graphic_state = BLACK
+            pdf_char.render_order = None
         if pdf_style.font_size == 0.0:
             logger.warning(
                 "Font size is 0.0 for character %s. Skip it.",
