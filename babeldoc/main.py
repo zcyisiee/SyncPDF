@@ -335,6 +335,24 @@ def create_parser():
         default=False,
         help="Only parse PDF and generate output PDF without translation (default: False). This skips all translation-related processing including layout analysis, paragraph finding, style processing, and translation itself.",
     )
+    translation_group.add_argument(
+        "--remove-non-formula-lines",
+        action="store_true",
+        default=False,
+        help="Remove non-formula lines from paragraph areas. This removes decorative lines that are not part of formulas, while protecting lines in figure/table areas. (default: False)",
+    )
+    translation_group.add_argument(
+        "--non-formula-line-iou-threshold",
+        type=float,
+        default=0.9,
+        help="IoU threshold for detecting paragraph overlap when removing non-formula lines. Higher values are more conservative. (default: 0.9)",
+    )
+    translation_group.add_argument(
+        "--figure-table-protection-threshold",
+        type=float,
+        default=0.9,
+        help="IoU threshold for protecting lines in figure/table areas when removing non-formula lines. Higher values provide more protection. (default: 0.9)",
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -589,6 +607,9 @@ async def main():
             skip_form_render=args.skip_form_render,
             skip_curve_render=args.skip_curve_render,
             only_parse_generate_pdf=args.only_parse_generate_pdf,
+            remove_non_formula_lines=args.remove_non_formula_lines,
+            non_formula_line_iou_threshold=args.non_formula_line_iou_threshold,
+            figure_table_protection_threshold=args.figure_table_protection_threshold,
         )
 
         def nop(_x):

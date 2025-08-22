@@ -166,6 +166,9 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 - `--skip-form-render`: Skip form rendering (default: False). When enabled, PDF forms will not be rendered in the output.
 - `--skip-curve-render`: Skip curve rendering (default: False). When enabled, PDF curves will not be rendered in the output.
 - `--only-parse-generate-pdf`: Only parse PDF and generate output PDF without translation (default: False). This skips all translation-related processing including layout analysis, paragraph finding, style processing, and translation itself. Useful for testing PDF parsing and reconstruction functionality.
+- `--remove-non-formula-lines`: Remove non-formula lines from paragraph areas (default: False). This removes decorative lines that are not part of formulas, while protecting lines in figure/table areas. Useful for cleaning up documents with decorative elements that interfere with text flow.
+- `--non-formula-line-iou-threshold`: IoU threshold for detecting paragraph overlap when removing non-formula lines (default: 0.9). Higher values are more conservative and will remove fewer lines.
+- `--figure-table-protection-threshold`: IoU threshold for protecting lines in figure/table areas when removing non-formula lines (default: 0.9). Higher values provide more protection for structural elements in figures and tables.
 
 - `--rpc-doclayout`: RPC service host address for document layout analysis (default: None)
 - `--working-dir`: Working directory for translation. If not set, use temp directory.
@@ -289,6 +292,9 @@ auto_enable_ocr_workaround = false # Enable automatic OCR workaround for scanned
 skip_form_render = false # Skip form rendering (default: False)
 skip_curve_render = false # Skip curve rendering (default: False)
 only_parse_generate_pdf = false # Only parse PDF and generate output PDF without translation (default: False)
+remove_non_formula_lines = false # Remove non-formula lines from paragraph areas (default: False)
+non_formula_line_iou_threshold = 0.2 # IoU threshold for paragraph overlap detection (default: 0.2)
+figure_table_protection_threshold = 0.3 # IoU threshold for figure/table protection (default: 0.3)
 
 # Translation service
 openai = true

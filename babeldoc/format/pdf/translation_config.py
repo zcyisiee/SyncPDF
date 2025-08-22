@@ -161,6 +161,9 @@ class TranslationConfig:
         skip_form_render: bool = False,
         skip_curve_render: bool = False,
         only_parse_generate_pdf: bool = False,
+        remove_non_formula_lines: bool = False,
+        non_formula_line_iou_threshold: float = 0.2,
+        figure_table_protection_threshold: float = 0.3,
     ):
         self.translator = translator
         initial_user_glossaries = list(glossaries) if glossaries else []
@@ -294,6 +297,9 @@ class TranslationConfig:
         self.enable_graphic_element_process = enable_graphic_element_process
         self.skip_form_render = skip_form_render
         self.skip_curve_render = skip_curve_render
+        self.remove_non_formula_lines = remove_non_formula_lines
+        self.non_formula_line_iou_threshold = non_formula_line_iou_threshold
+        self.figure_table_protection_threshold = figure_table_protection_threshold
 
     def parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
         """解析页码字符串，返回页码范围列表

@@ -878,3 +878,136 @@ def is_character_in_formula_layout(
                 return layout.id
 
     return None
+
+
+def is_curve_in_figure_table_layout(
+    curve, layout_index, layout_map, protection_threshold: float = 0.3
+) -> bool:
+    """Check if curve is within figure/table layout areas.
+
+    Args:
+        curve: The curve object to check
+        layout_index: Spatial index for layouts
+        layout_map: Mapping from layout IDs to layout objects
+        protection_threshold: IoU threshold for figure/table protection
+
+    Returns:
+        True if curve is within figure/table layout areas
+    """
+    if not curve.box:
+        return False
+
+    # Figure/table related layout types
+    figure_table_layouts = {
+        "figure",
+        "table",
+        "figure_text",
+        "table_text",
+        "figure_caption",
+        "table_caption",
+        "figure_title",
+        "table_title",
+        "chart_title",
+        "table_cell",
+        "table_cell_hybrid",
+        "wired_table_cell",
+        "wireless_table_cell",
+        "table_footnote",
+    }
+
+    # Get candidate layouts that intersect with curve
+    candidate_ids = list(layout_index.intersection(box_to_tuple(curve.box)))
+    candidate_layouts = [layout_map[i] for i in candidate_ids]
+
+    for layout in candidate_layouts:
+        if layout.class_name in figure_table_layouts:
+            # Check if curve has significant overlap with figure/table layout
+            iou = calculate_iou_for_boxes(curve.box, layout.box)
+            if iou > protection_threshold:
+                return True
+
+    return False
+
+
+def is_curve_overlapping_with_paragraphs(
+    curve, paragraphs: list, overlap_threshold: float = 0.2
+) -> bool:
+    """Check if curve overlaps with text paragraph areas.
+
+    Args:
+        curve: The curve object to check
+        paragraphs: List of paragraph objects
+        overlap_threshold: IoU threshold for paragraph overlap detection
+
+    Returns:
+        True if curve overlaps with any paragraph area
+    """
+    if not curve.box:
+        return False
+
+    for paragraph in paragraphs:
+        para_box = get_paragraph_bounding_box(paragraph)
+        if para_box:
+            iou = calculate_iou_for_boxes(curve.box, para_box)
+            if iou > overlap_threshold:
+                return True
+
+    return False
+
+
+def get_paragraph_bounding_box(paragraph) -> Box | None:
+    """Calculate the bounding box of a paragraph from its compositions.
+
+    Args:
+        paragraph: The paragraph object
+
+    Returns:
+        Box object representing the paragraph bounds, or None if no valid bounds
+    """
+    if not paragraph.pdf_paragraph_composition:
+        return None
+
+    min_x = float("inf")
+    min_y = float("inf")
+    max_x = float("-inf")
+    max_y = float("-inf")
+
+    has_valid_box = False
+
+    for composition in paragraph.pdf_paragraph_composition:
+        comp_box = None
+
+        if composition.pdf_line and composition.pdf_line.box:
+            comp_box = composition.pdf_line.box
+        elif composition.pdf_formula and composition.pdf_formula.box:
+            comp_box = composition.pdf_formula.box
+        elif (
+            composition.pdf_same_style_characters
+            and composition.pdf_same_style_characters.box
+        ):
+            comp_box = composition.pdf_same_style_characters.box
+        elif composition.pdf_character and len(composition.pdf_character) > 0:
+            # Calculate box from character list
+            char_boxes = [
+                char.visual_bbox.box
+                for char in composition.pdf_character
+                if char.visual_bbox and char.visual_bbox.box
+            ]
+            if char_boxes:
+                comp_min_x = min(box.x for box in char_boxes)
+                comp_min_y = min(box.y for box in char_boxes)
+                comp_max_x = max(box.x2 for box in char_boxes)
+                comp_max_y = max(box.y2 for box in char_boxes)
+                comp_box = Box(comp_min_x, comp_min_y, comp_max_x, comp_max_y)
+
+        if comp_box:
+            min_x = min(min_x, comp_box.x)
+            min_y = min(min_y, comp_box.y)
+            max_x = max(max_x, comp_box.x2)
+            max_y = max(max_y, comp_box.y2)
+            has_valid_box = True
+
+    if not has_valid_box:
+        return None
+
+    return Box(min_x, min_y, max_x, max_y)

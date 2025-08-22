@@ -22,11 +22,18 @@ from babeldoc.format.pdf.document_il.utils.formular_helper import is_formulas_st
 from babeldoc.format.pdf.document_il.utils.formular_helper import update_formula_data
 from babeldoc.format.pdf.document_il.utils.layout_helper import LEFT_BRACKET
 from babeldoc.format.pdf.document_il.utils.layout_helper import RIGHT_BRACKET
+from babeldoc.format.pdf.document_il.utils.layout_helper import build_layout_index
 from babeldoc.format.pdf.document_il.utils.layout_helper import calculate_iou_for_boxes
 from babeldoc.format.pdf.document_il.utils.layout_helper import (
     calculate_y_true_iou_for_boxes,
 )
 from babeldoc.format.pdf.document_il.utils.layout_helper import is_bullet_point
+from babeldoc.format.pdf.document_il.utils.layout_helper import (
+    is_curve_in_figure_table_layout,
+)
+from babeldoc.format.pdf.document_il.utils.layout_helper import (
+    is_curve_overlapping_with_paragraphs,
+)
 from babeldoc.format.pdf.document_il.utils.layout_helper import is_same_style
 from babeldoc.format.pdf.document_il.utils.spatial_analyzer import (
     is_element_contained_in_formula,
@@ -362,6 +369,11 @@ class StylesAndFormulas:
         self.process_translatable_formulas(page)
         self.update_all_formula_data(page)
         self.collect_contained_elements(page)
+
+        # Process remaining non-formula lines after formula assignment is complete
+        if self.translation_config.remove_non_formula_lines:
+            self.remove_non_formula_lines_from_paragraphs(page)
+
         self.process_page_offsets(page)
         self.update_all_formula_data(page)
         self.process_page_styles(page)
@@ -1198,3 +1210,56 @@ class StylesAndFormulas:
                     new_compositions.append(composition)
 
             paragraph.pdf_paragraph_composition = new_compositions
+
+    def remove_non_formula_lines_from_paragraphs(self, page: Page):
+        """Remove non-formula lines from paragraphs.
+
+        This method processes curves that remain in page.pdf_curve after
+        collect_contained_elements() has assigned formula-related curves to formulas.
+        All remaining curves are non-formula lines, but we need to be careful
+        not to remove lines from figure/table areas.
+
+        Args:
+            page: The page to process
+        """
+        if not page.pdf_curve:
+            return
+
+        # Build layout index for efficient spatial queries
+        layout_index, layout_map = build_layout_index(page)
+
+        curves_to_remove = []
+
+        # Get configuration thresholds
+        protection_threshold = getattr(
+            self.translation_config, "figure_table_protection_threshold", 0.9
+        )
+        overlap_threshold = getattr(
+            self.translation_config, "non_formula_line_iou_threshold", 0.9
+        )
+
+        for curve in page.pdf_curve:
+            # Skip if curve is in figure/table layout areas
+            if is_curve_in_figure_table_layout(
+                curve, layout_index, layout_map, protection_threshold
+            ):
+                continue
+
+            # Only remove if curve overlaps with text paragraph areas
+            if is_curve_overlapping_with_paragraphs(
+                curve, page.pdf_paragraph, overlap_threshold
+            ):
+                curves_to_remove.append(curve)
+
+        # Remove identified curves
+        removed_count = 0
+        for curve in curves_to_remove:
+            if curve in page.pdf_curve:
+                page.pdf_curve.remove(curve)
+                removed_count += 1
+
+        if removed_count > 0:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.debug(f"Removed {removed_count} non-formula lines from paragraphs")
