@@ -369,7 +369,8 @@ class StylesAndFormulas:
             self.process_page_offsets(page)
         self.process_translatable_formulas(page)
         self.update_all_formula_data(page)
-        self.collect_contained_elements(page)
+        if not self.translation_config.ocr_workaround:
+            self.collect_contained_elements(page)
 
         # Process remaining non-formula lines after formula assignment is complete
         if self.translation_config.remove_non_formula_lines:
