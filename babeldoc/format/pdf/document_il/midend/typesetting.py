@@ -1148,9 +1148,12 @@ class Typesetting:
                 para_index.insert(i, box_to_tuple(para.box))
 
             for i, p_upper in para_map.items():
-                required_gap = 6
                 if not (p_upper.box and p_upper.box.y is not None):
                     continue
+
+                # Calculate paragraph height and set required gap accordingly
+                para_height = p_upper.box.y2 - p_upper.box.y
+                required_gap = 0.5 if para_height < 36 else 3
 
                 check_area = il_version_1.Box(
                     x=p_upper.box.x,

@@ -394,6 +394,84 @@ class RpcDocLayoutModel(DocLayoutModel):
         boxes = (boxes - [pad_x, pad_y, pad_x, pad_y]) / gain
         return boxes
 
+    def calculate_iou(self, box1, box2):
+        """Calculate IoU between two boxes in xyxy format."""
+        x1_1, y1_1, x2_1, y2_1 = box1
+        x1_2, y1_2, x2_2, y2_2 = box2
+
+        # Calculate intersection area
+        x1_inter = max(x1_1, x1_2)
+        y1_inter = max(y1_1, y1_2)
+        x2_inter = min(x2_1, x2_2)
+        y2_inter = min(y2_1, y2_2)
+
+        if x2_inter <= x1_inter or y2_inter <= y1_inter:
+            return 0.0
+
+        intersection = (x2_inter - x1_inter) * (y2_inter - y1_inter)
+
+        # Calculate union area
+        area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+        area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+        union = area1 + area2 - intersection
+
+        return intersection / union if union > 0 else 0.0
+
+    def is_subset(self, inner_box, outer_box):
+        """Check if inner_box is a subset of outer_box."""
+        x1_inner, y1_inner, x2_inner, y2_inner = inner_box
+        x1_outer, y1_outer, x2_outer, y2_outer = outer_box
+
+        return (
+            x1_inner >= x1_outer
+            and y1_inner >= y1_outer
+            and x2_inner <= x2_outer
+            and y2_inner <= y2_outer
+        )
+
+    def expand_box_to_contain(self, box_to_expand, box_to_contain):
+        """Expand box_to_expand to fully contain box_to_contain."""
+        x1_expand, y1_expand, x2_expand, y2_expand = box_to_expand
+        x1_contain, y1_contain, x2_contain, y2_contain = box_to_contain
+
+        return [
+            min(x1_expand, x1_contain),
+            min(y1_expand, y1_contain),
+            max(x2_expand, x2_contain),
+            max(y2_expand, y2_contain),
+        ]
+
+    def post_process_boxes(self, merged_boxes: list[YoloBox], names: dict[int, str]):
+        """Post-process merged boxes to handle text and paragraph_hybrid overlaps."""
+        for i, text_box in enumerate(merged_boxes):
+            text_label = names.get(text_box.cls, "")
+            if "text" not in text_label:
+                continue
+
+            for j, para_box in enumerate(merged_boxes):
+                if i == j:
+                    continue
+
+                para_label = names.get(para_box.cls, "")
+                if "paragraph_hybrid" not in para_label:
+                    continue
+
+                # Calculate IoU
+                iou = self.calculate_iou(text_box.xyxy, para_box.xyxy)
+
+                # Check if IoU > 0.95 and paragraph is not subset of text
+                if iou > 0.95 and not self.is_subset(para_box.xyxy, text_box.xyxy):
+                    # Expand text box to contain paragraph_hybrid
+                    expanded_box = self.expand_box_to_contain(
+                        text_box.xyxy, para_box.xyxy
+                    )
+                    merged_boxes[i] = YoloBox(
+                        None,
+                        np.array(expanded_box),
+                        text_box.conf,
+                        text_box.cls,
+                    )
+
     def predict_image(
         self,
         image,
@@ -471,6 +549,9 @@ class RpcDocLayoutModel(DocLayoutModel):
 
         # Sort boxes by confidence desc (YoloResult expects sorted list)
         merged_boxes.sort(key=lambda b: b.conf, reverse=True)
+
+        # Post-process boxes to handle text and paragraph_hybrid overlaps
+        self.post_process_boxes(merged_boxes, names)
 
         return YoloResult(boxes=merged_boxes, names=names)
 
