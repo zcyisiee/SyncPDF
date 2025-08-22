@@ -164,6 +164,7 @@ class TranslationConfig:
         remove_non_formula_lines: bool = False,
         non_formula_line_iou_threshold: float = 0.2,
         figure_table_protection_threshold: float = 0.3,
+        skip_formula_offset_calculation: bool = False,
     ):
         self.translator = translator
         initial_user_glossaries = list(glossaries) if glossaries else []
@@ -300,6 +301,7 @@ class TranslationConfig:
         self.remove_non_formula_lines = remove_non_formula_lines
         self.non_formula_line_iou_threshold = non_formula_line_iou_threshold
         self.figure_table_protection_threshold = figure_table_protection_threshold
+        self.skip_formula_offset_calculation = skip_formula_offset_calculation
 
     def parse_pages(self, pages_str: str | None) -> list[tuple[int, int]] | None:
         """解析页码字符串，返回页码范围列表

@@ -365,7 +365,8 @@ class StylesAndFormulas:
         # self.process_page_offsets(page)
         self.process_comma_formulas(page)
         self.merge_overlapping_formulas(page)
-        self.process_page_offsets(page)
+        if not self.translation_config.skip_formula_offset_calculation:
+            self.process_page_offsets(page)
         self.process_translatable_formulas(page)
         self.update_all_formula_data(page)
         self.collect_contained_elements(page)
@@ -374,7 +375,8 @@ class StylesAndFormulas:
         if self.translation_config.remove_non_formula_lines:
             self.remove_non_formula_lines_from_paragraphs(page)
 
-        self.process_page_offsets(page)
+        if not self.translation_config.skip_formula_offset_calculation:
+            self.process_page_offsets(page)
         self.update_all_formula_data(page)
         self.process_page_styles(page)
 

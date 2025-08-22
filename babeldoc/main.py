@@ -353,6 +353,12 @@ def create_parser():
         default=0.9,
         help="IoU threshold for protecting lines in figure/table areas when removing non-formula lines. Higher values provide more protection. (default: 0.9)",
     )
+    translation_group.add_argument(
+        "--skip-formula-offset-calculation",
+        action="store_true",
+        default=False,
+        help="Skip formula offset calculation (default: False)",
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -610,6 +616,7 @@ async def main():
             remove_non_formula_lines=args.remove_non_formula_lines,
             non_formula_line_iou_threshold=args.non_formula_line_iou_threshold,
             figure_table_protection_threshold=args.figure_table_protection_threshold,
+            skip_formula_offset_calculation=args.skip_formula_offset_calculation,
         )
 
         def nop(_x):
