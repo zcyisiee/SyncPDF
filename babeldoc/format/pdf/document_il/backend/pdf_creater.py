@@ -1256,103 +1256,9 @@ class PDFCreater:
                 len(self.docs.page),
             ) as pbar:
                 for page in self.docs.page:
-                    assert page.cropbox is not None and page.cropbox.box is not None
-                    page_crop_box = page.cropbox.box
-                    ctm_for_ops = (
-                        1,
-                        0,
-                        0,
-                        1,
-                        -page_crop_box.x,
-                        -page_crop_box.y,
+                    self.update_page_content_stream(
+                        check_font_exists, page, pdf, translation_config
                     )
-                    ctm_for_ops = (
-                        f" {' '.join(f'{x:f}' for x in ctm_for_ops)} cm ".encode()
-                    )
-
-                    translation_config.raise_if_cancelled()
-                    xobj_available_fonts = {}
-                    xobj_draw_ops = {}
-                    xobj_encoding_length_map = {}
-                    available_font_list = self.get_available_font_list(pdf, page)
-                    page_encoding_length_map: dict[str | None, int | None] = {
-                        f.font_id: f.encoding_length for f in page.pdf_font
-                    }
-                    all_encoding_length_map = page_encoding_length_map.copy()
-
-                    for xobj in page.pdf_xobject:
-                        xobj_available_fonts[xobj.xobj_id] = available_font_list.copy()
-                        try:
-                            xobj_available_fonts[xobj.xobj_id].update(
-                                self.get_xobj_available_fonts(xobj.xref_id, pdf),
-                            )
-                        except Exception:
-                            pass
-                        xobj_encoding_length_map[xobj.xobj_id] = {
-                            f.font_id: f.encoding_length for f in xobj.pdf_font
-                        }
-                        all_encoding_length_map.update(
-                            xobj_encoding_length_map[xobj.xobj_id]
-                        )
-                        xobj_encoding_length_map[xobj.xobj_id].update(
-                            page_encoding_length_map
-                        )
-                        xobj_op = BitStream()
-                        base_op = xobj.base_operations.value
-                        base_op = zstd_decompress(base_op)
-                        xobj_op.append(base_op.encode())
-                        xobj_draw_ops[xobj.xobj_id] = xobj_op
-
-                    page_op = BitStream()
-                    # q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}
-                    # page_op.append(b"q ")
-                    # base_op = page.base_operations.value
-                    # base_op = zstd_decompress(base_op)
-                    # page_op.append(base_op.encode())
-                    # page_op.append(b" \n")
-                    page_op.append(ctm_for_ops)
-                    page_op.append(b" \n")
-
-                    # Create render context
-                    context = RenderContext(
-                        pdf_creator=self,
-                        page=page,
-                        available_font_list=available_font_list,
-                        page_encoding_length_map=page_encoding_length_map,
-                        all_encoding_length_map=all_encoding_length_map,
-                        xobj_available_fonts=xobj_available_fonts,
-                        xobj_encoding_length_map=xobj_encoding_length_map,
-                        ctm_for_ops=ctm_for_ops,
-                        check_font_exists=check_font_exists,
-                    )
-
-                    # Create render units for all renderable objects
-                    render_units = self.create_render_units_for_page(
-                        page, translation_config
-                    )
-
-                    # Render all units to their appropriate streams
-                    self.render_units_to_stream(
-                        render_units, context, page_op, xobj_draw_ops
-                    )
-
-                    # Update xobject streams
-                    for xobj in page.pdf_xobject:
-                        draw_op = xobj_draw_ops[xobj.xobj_id]
-                        try:
-                            pdf.update_stream(xobj.xref_id, draw_op.tobytes())
-                        except Exception:
-                            logger.warning(
-                                f"update xref {xobj.xref_id} stream fail, continue"
-                            )
-
-                    draw_op = page_op
-                    op_container = pdf.get_new_xref()
-                    # Since this is a draw instruction container,
-                    # no additional information is needed
-                    pdf.update_object(op_container, "<<>>")
-                    pdf.update_stream(op_container, draw_op.tobytes())
-                    pdf[page.page_number].set_contents(op_container)
                     pbar.advance()
             translation_config.raise_if_cancelled()
             gc_level = 1
@@ -1512,3 +1418,90 @@ class PDFCreater:
             if not check_font_exists:
                 return self.write(translation_config, True)
             raise
+
+    def update_page_content_stream(
+        self, check_font_exists, page, pdf, translation_config, skip_char: bool = False
+    ):
+        assert page.cropbox is not None and page.cropbox.box is not None
+        page_crop_box = page.cropbox.box
+        ctm_for_ops = (
+            1,
+            0,
+            0,
+            1,
+            -page_crop_box.x,
+            -page_crop_box.y,
+        )
+        ctm_for_ops = f" {' '.join(f'{x:f}' for x in ctm_for_ops)} cm ".encode()
+        translation_config.raise_if_cancelled()
+        xobj_available_fonts = {}
+        xobj_draw_ops = {}
+        xobj_encoding_length_map = {}
+        available_font_list = self.get_available_font_list(pdf, page)
+        page_encoding_length_map: dict[str | None, int | None] = {
+            f.font_id: f.encoding_length for f in page.pdf_font
+        }
+        all_encoding_length_map = page_encoding_length_map.copy()
+        for xobj in page.pdf_xobject:
+            xobj_available_fonts[xobj.xobj_id] = available_font_list.copy()
+            try:
+                xobj_available_fonts[xobj.xobj_id].update(
+                    self.get_xobj_available_fonts(xobj.xref_id, pdf),
+                )
+            except Exception:
+                pass
+            xobj_encoding_length_map[xobj.xobj_id] = {
+                f.font_id: f.encoding_length for f in xobj.pdf_font
+            }
+            all_encoding_length_map.update(xobj_encoding_length_map[xobj.xobj_id])
+            xobj_encoding_length_map[xobj.xobj_id].update(page_encoding_length_map)
+            xobj_op = BitStream()
+            base_op = xobj.base_operations.value
+            base_op = zstd_decompress(base_op)
+            xobj_op.append(base_op.encode())
+            xobj_draw_ops[xobj.xobj_id] = xobj_op
+        page_op = BitStream()
+        # q {ops_base}Q 1 0 0 1 {x0} {y0} cm {ops_new}
+        # page_op.append(b"q ")
+        # base_op = page.base_operations.value
+        # base_op = zstd_decompress(base_op)
+        # page_op.append(base_op.encode())
+        # page_op.append(b" \n")
+        page_op.append(ctm_for_ops)
+        page_op.append(b" \n")
+        # Create render context
+        context = RenderContext(
+            pdf_creator=self,
+            page=page,
+            available_font_list=available_font_list,
+            page_encoding_length_map=page_encoding_length_map,
+            all_encoding_length_map=all_encoding_length_map,
+            xobj_available_fonts=xobj_available_fonts,
+            xobj_encoding_length_map=xobj_encoding_length_map,
+            ctm_for_ops=ctm_for_ops,
+            check_font_exists=check_font_exists,
+        )
+        # Create render units for all renderable objects
+        render_units = self.create_render_units_for_page(page, translation_config)
+        if skip_char:
+            render_units = [
+                unit
+                for unit in render_units
+                if not isinstance(unit, CharacterRenderUnit)
+            ]
+        # Render all units to their appropriate streams
+        self.render_units_to_stream(render_units, context, page_op, xobj_draw_ops)
+        # Update xobject streams
+        for xobj in page.pdf_xobject:
+            draw_op = xobj_draw_ops[xobj.xobj_id]
+            try:
+                pdf.update_stream(xobj.xref_id, draw_op.tobytes())
+            except Exception:
+                logger.warning(f"update xref {xobj.xref_id} stream fail, continue")
+        draw_op = page_op
+        op_container = pdf.get_new_xref()
+        # Since this is a draw instruction container,
+        # no additional information is needed
+        pdf.update_object(op_container, "<<>>")
+        pdf.update_stream(op_container, draw_op.tobytes())
+        pdf[page.page_number].set_contents(op_container)

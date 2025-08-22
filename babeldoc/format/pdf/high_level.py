@@ -877,7 +877,9 @@ def _do_translate_single(
         logger.debug("skipping scanned file detection")
     else:
         logger.debug("start detect scanned file")
-        DetectScannedFile(translation_config).process(docs)
+        DetectScannedFile(translation_config).process(
+            docs, temp_pdf_path, mediabox_data
+        )
         logger.debug("finish detect scanned file")
         if translation_config.debug:
             xml_converter.write_json(
