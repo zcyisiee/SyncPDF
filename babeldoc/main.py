@@ -22,7 +22,7 @@ from babeldoc.translator.translator import OpenAITranslator
 from babeldoc.translator.translator import set_translate_rate_limiter
 
 logger = logging.getLogger(__name__)
-__version__ = "0.4.22"
+__version__ = "0.5.0"
 
 
 def create_parser():
@@ -298,6 +298,67 @@ def create_parser():
         default=False,
         help="Save automatically extracted glossary terms to a CSV file in the output directory.",
     )
+    translation_group.add_argument(
+        "--disable-graphic-element-process",
+        action="store_true",
+        default=False,
+        help="Disable graphic element process. (default: False)",
+    )
+    translation_group.add_argument(
+        "--no-merge-alternating-line-numbers",
+        action="store_false",
+        dest="merge_alternating_line_numbers",
+        default=True,
+        help="Disable post-processing that merges alternating line-number layouts (by default this feature is enabled).",
+    )
+    translation_group.add_argument(
+        "--skip-translation",
+        action="store_true",
+        default=False,
+        help="Skip translation step. (default: False)",
+    )
+    translation_group.add_argument(
+        "--skip-form-render",
+        action="store_true",
+        default=False,
+        help="Skip form rendering. (default: False)",
+    )
+    translation_group.add_argument(
+        "--skip-curve-render",
+        action="store_true",
+        default=False,
+        help="Skip curve rendering. (default: False)",
+    )
+    translation_group.add_argument(
+        "--only-parse-generate-pdf",
+        action="store_true",
+        default=False,
+        help="Only parse PDF and generate output PDF without translation (default: False). This skips all translation-related processing including layout analysis, paragraph finding, style processing, and translation itself.",
+    )
+    translation_group.add_argument(
+        "--remove-non-formula-lines",
+        action="store_true",
+        default=False,
+        help="Remove non-formula lines from paragraph areas. This removes decorative lines that are not part of formulas, while protecting lines in figure/table areas. (default: False)",
+    )
+    translation_group.add_argument(
+        "--non-formula-line-iou-threshold",
+        type=float,
+        default=0.9,
+        help="IoU threshold for detecting paragraph overlap when removing non-formula lines. Higher values are more conservative. (default: 0.9)",
+    )
+    translation_group.add_argument(
+        "--figure-table-protection-threshold",
+        type=float,
+        default=0.9,
+        help="IoU threshold for protecting lines in figure/table areas when removing non-formula lines. Higher values provide more protection. (default: 0.9)",
+    )
+    translation_group.add_argument(
+        "--skip-formula-offset-calculation",
+        action="store_true",
+        default=False,
+        help="Skip formula offset calculation (default: False)",
+    )
     # service option argument group
     service_group = translation_group.add_mutually_exclusive_group()
     service_group.add_argument(
@@ -546,8 +607,22 @@ async def main():
             primary_font_family=args.primary_font_family,
             only_include_translated_page=args.only_include_translated_page,
             save_auto_extracted_glossary=args.save_auto_extracted_glossary,
+            enable_graphic_element_process=not args.disable_graphic_element_process,
+            merge_alternating_line_numbers=args.merge_alternating_line_numbers,
+            skip_translation=args.skip_translation,
+            skip_form_render=args.skip_form_render,
+            skip_curve_render=args.skip_curve_render,
+            only_parse_generate_pdf=args.only_parse_generate_pdf,
+            remove_non_formula_lines=args.remove_non_formula_lines,
+            non_formula_line_iou_threshold=args.non_formula_line_iou_threshold,
+            figure_table_protection_threshold=args.figure_table_protection_threshold,
+            skip_formula_offset_calculation=args.skip_formula_offset_calculation,
         )
 
+        def nop(_x):
+            pass
+
+        getattr(doc_layout_model, "init_font_mapper", nop)(config)
         # Create progress handler
         progress_context, progress_handler = create_progress_handler(config)
 

@@ -255,12 +255,32 @@ def get_translation_stage(
 ) -> list[tuple[str, float]]:
     result = copy.deepcopy(TRANSLATE_STAGES)
     should_remove = []
-    if not translation_config.table_model:
-        should_remove.append(TableParser.stage_name)
-    if translation_config.skip_scanned_detection:
-        should_remove.append(DetectScannedFile.stage_name)
-    if not translation_config.auto_extract_glossary:
-        should_remove.append(AutomaticTermExtractor.stage_name)
+
+    # If only parsing and generating PDF, skip all translation-related stages
+    if translation_config.only_parse_generate_pdf:
+        should_remove.extend(
+            [
+                DetectScannedFile.stage_name,
+                LayoutParser.stage_name,
+                TableParser.stage_name,
+                ParagraphFinder.stage_name,
+                StylesAndFormulas.stage_name,
+                AutomaticTermExtractor.stage_name,
+                ILTranslator.stage_name,
+                Typesetting.stage_name,
+            ]
+        )
+    else:
+        # Original logic for selective removal
+        if not translation_config.table_model:
+            should_remove.append(TableParser.stage_name)
+        if translation_config.skip_scanned_detection:
+            should_remove.append(DetectScannedFile.stage_name)
+        if not translation_config.auto_extract_glossary:
+            should_remove.append(AutomaticTermExtractor.stage_name)
+        if translation_config.skip_translation:
+            should_remove.append(ILTranslator.stage_name)
+
     result = [x for x in result if x[0] not in should_remove]
     return result
 
@@ -840,6 +860,15 @@ def _do_translate_single(
     if check_cid_char(docs):
         raise ExtractTextError("The document contains too many CID chars.")
 
+    # Skip all translation processing if only_parse_generate_pdf is enabled
+    if translation_config.only_parse_generate_pdf:
+        logger.debug("only_parse_generate_pdf enabled, skipping translation processing")
+        # Skip directly to PDF generation
+        pdf_creater = PDFCreater(temp_pdf_path, docs, translation_config, mediabox_data)
+        result = pdf_creater.write(translation_config)
+        result.original_pdf_path = translation_config.input_file
+        return result
+
     # Rest of the original translation logic...
     # [Previous implementation of do_translate continues here]
 
@@ -902,14 +931,18 @@ def _do_translate_single(
     if support_llm_translate and translation_config.auto_extract_glossary:
         AutomaticTermExtractor(translate_engine, translation_config).procress(docs)
 
-    if support_llm_translate:
-        il_translator = ILTranslatorLLMOnly(translate_engine, translation_config)
-    else:
-        il_translator = ILTranslator(translate_engine, translation_config)
+    if not translation_config.skip_translation:
+        if support_llm_translate:
+            il_translator = ILTranslatorLLMOnly(translate_engine, translation_config)
+        else:
+            il_translator = ILTranslator(translate_engine, translation_config)
 
-    il_translator.translate(docs)
-    del il_translator
-    logger.debug(f"finish ILTranslator from {temp_pdf_path}")
+        il_translator.translate(docs)
+        del il_translator
+        logger.debug(f"finish ILTranslator from {temp_pdf_path}")
+    else:
+        logger.info("skip ILTranslator")
+
     if translation_config.debug:
         xml_converter.write_json(
             docs,

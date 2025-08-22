@@ -286,6 +286,10 @@ class ParagraphFinder:
         # 第五步：处理独立段落
         self.process_independent_paragraphs(paragraphs, median_width)
 
+        # 新增后处理：合并带行号交替的正文段落（a 正文、b 行号、c 正文 -> 合并 a 与 c，保留 b）
+        if getattr(self.translation_config, "merge_alternating_line_numbers", True):
+            self.merge_alternating_line_number_paragraphs(paragraphs)
+
         for paragraph in paragraphs:
             self.update_paragraph_data(paragraph, update_unicode=True)
 
@@ -302,6 +306,46 @@ class ParagraphFinder:
 
         self.add_debug_info(page)
 
+        # 新阶段：设置段落的 renderorder 为所有组成部分中 renderorder 最小的
+        self._set_paragraph_render_order(page)
+
+    def _set_paragraph_render_order(self, page: Page):
+        """
+        设置段落的 renderorder 为段落所有组成部分中 renderorder 最小的值
+        """
+        for paragraph in page.pdf_paragraph:
+            min_render_order = 9999999999999999
+
+            # 遍历段落的所有组成部分
+            for composition in paragraph.pdf_paragraph_composition:
+                # 检查 PdfLine 中的字符
+                if composition.pdf_line:
+                    for char in composition.pdf_line.pdf_character:
+                        if (
+                            hasattr(char, "render_order")
+                            and char.render_order is not None
+                        ):
+                            min_render_order = min(min_render_order, char.render_order)
+
+                # 检查单个字符
+                elif composition.pdf_character:
+                    char = composition.pdf_character
+                    if hasattr(char, "render_order") and char.render_order is not None:
+                        min_render_order = min(min_render_order, char.render_order)
+
+                # 检查公式中的字符
+                elif composition.pdf_formula:
+                    for char in composition.pdf_formula.pdf_character:
+                        if (
+                            hasattr(char, "render_order")
+                            and char.render_order is not None
+                        ):
+                            min_render_order = min(min_render_order, char.render_order)
+
+            # 如果找到了有效的 renderorder，设置段落的 renderorder
+            if min_render_order != 9999999999999999:
+                paragraph.render_order = min_render_order
+
     def is_isolated_formula(self, char: PdfCharacter):
         return char.char_unicode in (
             "(cid:122)",
@@ -309,6 +353,69 @@ class ParagraphFinder:
             "(cid:124)",
             "(cid:125)",
         )
+
+    def _paragraph_text_ascii(self, p: PdfParagraph) -> str:
+        parts: list[str] = []
+        for comp in p.pdf_paragraph_composition or []:
+            if comp.pdf_line:
+                for ch in comp.pdf_line.pdf_character or []:
+                    if ch.char_unicode is not None:
+                        parts.append(ch.char_unicode)
+            elif comp.pdf_character and comp.pdf_character.char_unicode is not None:
+                parts.append(comp.pdf_character.char_unicode)
+        return "".join(parts)
+
+    def _is_ascii_digit_or_space_paragraph(self, p: PdfParagraph) -> bool:
+        text = self._paragraph_text_ascii(p)
+        if not text:
+            return True
+        has_digit = False
+        for c in text:
+            if c.isdigit() and ord(c) < 128:
+                has_digit = True
+                continue
+            if c.isspace():
+                continue
+            return False
+        return True if has_digit or text.strip() == "" else False
+
+    @staticmethod
+    def _same_layout_and_xobj(a: PdfParagraph, c: PdfParagraph) -> bool:
+        return (
+            a.layout_id is not None
+            and c.layout_id is not None
+            and a.layout_id == c.layout_id
+            and a.xobj_id is not None
+            and c.xobj_id is not None
+            and a.xobj_id == c.xobj_id
+        )
+
+    def merge_alternating_line_number_paragraphs(self, paragraphs: list[PdfParagraph]):
+        # a 代表正文
+        # l 代表行号
+        if not paragraphs or len(paragraphs) < 3:
+            return
+        i = 0
+        while i < len(paragraphs) - 2:
+            a = paragraphs[i]
+            # 吞掉一个或多个连续的行号段 l
+            j = i + 1
+            saw_l = False
+            while j < len(paragraphs) and self._is_ascii_digit_or_space_paragraph(
+                paragraphs[j]
+            ):
+                saw_l = True
+                j += 1
+            # 现在 j 指向候选的 c
+            if saw_l and j < len(paragraphs):
+                c = paragraphs[j]
+                if self._same_layout_and_xobj(a, c):
+                    a.pdf_paragraph_composition.extend(c.pdf_paragraph_composition)
+                    self.update_paragraph_data(a)
+                    del paragraphs[j]
+                    # 不移动 i，继续尝试把更多正文接到 a，实现 a l+ a l+ a ... 链式合并
+                    continue
+            i += 1
 
     def _group_characters_into_paragraphs(
         self, page: Page, layout_index, layout_map

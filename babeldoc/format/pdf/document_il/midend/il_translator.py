@@ -115,7 +115,11 @@ class DocumentTranslateTracker:
             paragraphs = self.convert_paragraph(page)
             cross_column.append({"paragraph": paragraphs})
         return json.dumps(
-            {"cross_page": cross_page, "cross_column": cross_column, "page": pages},
+            {
+                "cross_page": cross_page,
+                "cross_column": cross_column,
+                "page": pages,
+            },
             ensure_ascii=False,
             indent=2,
         )

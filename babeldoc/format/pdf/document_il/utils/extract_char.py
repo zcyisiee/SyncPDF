@@ -23,7 +23,7 @@ BAND_CREATION_OVERLAP_THRESHOLD = 0.5
 
 # --- Line Clustering (within a band) ---
 # Epsilon for DBSCAN, as a multiplier of the average character width/height.
-LINE_CLUSTERING_EPS_MULTIPLIER = 4.0
+LINE_CLUSTERING_EPS_MULTIPLIER = 3.5
 
 # --- Line Splitting (for tall/wide lines) ---
 # A line is considered for splitting if its height/width is > X times the max char size.
@@ -107,6 +107,7 @@ def _recalculate_line_text_with_spacing(line, orientation):
 
         def get_main_size(c):
             return c[0].x2 - c[0].x
+
     else:  # vertical
 
         def get_main_start(c):
@@ -186,6 +187,7 @@ def _cluster_by_axis(chars: list[tuple[il_version_1.Box, str, bool]], orientatio
 
         def get_main_size(c):
             return c[0].x2 - c[0].x
+
     else:  # vertical
 
         def get_secondary_start(c):
@@ -475,7 +477,8 @@ def _merge_lines_on_page(page_lines: list[Line]) -> list[Line]:
                     height2 = bbox2[3] - bbox2[1]
                     if height1 > 0 and height2 > 0:
                         v_overlap = max(
-                            0, min(bbox1[3], bbox2[3]) - max(bbox1[1], bbox2[1])
+                            0,
+                            min(bbox1[3], bbox2[3]) - max(bbox1[1], bbox2[1]),
                         )
                         if (
                             v_overlap / height1
@@ -514,7 +517,8 @@ def _merge_lines_on_page(page_lines: list[Line]) -> list[Line]:
                     width2 = bbox2[2] - bbox2[0]
                     if width1 > 0 and width2 > 0:
                         h_overlap = max(
-                            0, min(bbox1[2], bbox2[2]) - max(bbox1[0], bbox2[0])
+                            0,
+                            min(bbox1[2], bbox2[2]) - max(bbox1[0], bbox2[0]),
                         )
                         if (
                             h_overlap / width1

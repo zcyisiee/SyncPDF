@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 import threading
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -25,6 +26,8 @@ from babeldoc.format.pdf.document_il.utils.extract_char import (
 from babeldoc.format.pdf.document_il.utils.extract_char import (
     process_page_chars_to_lines,
 )
+from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
+from babeldoc.format.pdf.document_il.utils.layout_helper import SPACE_REGEX
 from babeldoc.format.pdf.document_il.utils.mupdf_helper import get_no_rotation_img
 
 logger = logging.getLogger(__name__)
@@ -64,11 +67,21 @@ def encode_image(image) -> bytes:
         f"(Attempt {retry_state.attempt_number}/3)"
     ),
 )
+def clip_num(num: float, min_value: float, max_value: float) -> float:
+    """Clip a number to a specified range."""
+    if num < min_value:
+        return min_value
+    elif num > max_value:
+        return max_value
+    return num
+
+
 def predict_layout(
     image,
     host: str = "http://localhost:8000",
     _imgsz: int = 1024,
     lines=None,
+    font_mapper: FontMapper | None = None,
 ):
     """Predict document layout using OCR line information (RPC service)."""
 
@@ -86,20 +99,30 @@ def predict_layout(
         min_y = min(b.y for b in boxes)
         max_y = max(b.y2 for b in boxes)
 
+        image_height, image_width = image.shape[:2]
+
         # Transform to image pixel coordinates
         min_x = min_x / 72 * DPI
         max_x = max_x / 72 * DPI
         min_y = min_y / 72 * DPI
         max_y = max_y / 72 * DPI
 
-        image_height = image.shape[0]
         min_y, max_y = image_height - max_y, image_height - min_y
 
         box_volume = (max_x - min_x) * (max_y - min_y)
         if box_volume < 1:
             return None
 
-        return {"box": [min_x, min_y, max_x, max_y], "text": line.text}
+        min_x = clip_num(min_x, 0, image_width - 1)
+        max_x = clip_num(max_x, 0, image_width - 1)
+        min_y = clip_num(min_y, 0, image_height - 1)
+        max_y = clip_num(max_y, 0, image_height - 1)
+
+        filtered_text = filter_text(line.text, font_mapper)
+        if not filtered_text:
+            return None
+
+        return {"box": [min_x, min_y, max_x, max_y], "text": filtered_text}
 
     formatted_results = [convert_line(l) for l in lines]
     formatted_results = [r for r in formatted_results if r is not None]
@@ -261,6 +284,17 @@ class ResultContainer:
         self.result = YoloResult(boxes_data=np.array([]), names=[])
 
 
+def filter_text(txt: str, font_mapper: FontMapper):
+    normalize = unicodedata.normalize("NFKC", txt)
+    unicodes = []
+    for c in normalize:
+        if font_mapper.has_char(c):
+            unicodes.append(c)
+    normalize = "".join(unicodes)
+    result = SPACE_REGEX.sub(" ", normalize).strip()
+    return result
+
+
 class RpcDocLayoutModel(DocLayoutModel):
     """DocLayoutModel implementation that uses RPC service."""
 
@@ -283,6 +317,10 @@ class RpcDocLayoutModel(DocLayoutModel):
         self._stride = 32  # Default stride value
         self._names = ["text", "title", "list", "table", "figure"]
         self.lock = threading.Lock()
+        self.font_mapper = None
+
+    def init_font_mapper(self, translation_config):
+        self.font_mapper = FontMapper(translation_config)
 
     @property
     def stride(self) -> int:
@@ -356,6 +394,84 @@ class RpcDocLayoutModel(DocLayoutModel):
         boxes = (boxes - [pad_x, pad_y, pad_x, pad_y]) / gain
         return boxes
 
+    def calculate_iou(self, box1, box2):
+        """Calculate IoU between two boxes in xyxy format."""
+        x1_1, y1_1, x2_1, y2_1 = box1
+        x1_2, y1_2, x2_2, y2_2 = box2
+
+        # Calculate intersection area
+        x1_inter = max(x1_1, x1_2)
+        y1_inter = max(y1_1, y1_2)
+        x2_inter = min(x2_1, x2_2)
+        y2_inter = min(y2_1, y2_2)
+
+        if x2_inter <= x1_inter or y2_inter <= y1_inter:
+            return 0.0
+
+        intersection = (x2_inter - x1_inter) * (y2_inter - y1_inter)
+
+        # Calculate union area
+        area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+        area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+        union = area1 + area2 - intersection
+
+        return intersection / union if union > 0 else 0.0
+
+    def is_subset(self, inner_box, outer_box):
+        """Check if inner_box is a subset of outer_box."""
+        x1_inner, y1_inner, x2_inner, y2_inner = inner_box
+        x1_outer, y1_outer, x2_outer, y2_outer = outer_box
+
+        return (
+            x1_inner >= x1_outer
+            and y1_inner >= y1_outer
+            and x2_inner <= x2_outer
+            and y2_inner <= y2_outer
+        )
+
+    def expand_box_to_contain(self, box_to_expand, box_to_contain):
+        """Expand box_to_expand to fully contain box_to_contain."""
+        x1_expand, y1_expand, x2_expand, y2_expand = box_to_expand
+        x1_contain, y1_contain, x2_contain, y2_contain = box_to_contain
+
+        return [
+            min(x1_expand, x1_contain),
+            min(y1_expand, y1_contain),
+            max(x2_expand, x2_contain),
+            max(y2_expand, y2_contain),
+        ]
+
+    def post_process_boxes(self, merged_boxes: list[YoloBox], names: dict[int, str]):
+        """Post-process merged boxes to handle text and paragraph_hybrid overlaps."""
+        for i, text_box in enumerate(merged_boxes):
+            text_label = names.get(text_box.cls, "")
+            if "text" not in text_label:
+                continue
+
+            for j, para_box in enumerate(merged_boxes):
+                if i == j:
+                    continue
+
+                para_label = names.get(para_box.cls, "")
+                if "paragraph_hybrid" not in para_label:
+                    continue
+
+                # Calculate IoU
+                iou = self.calculate_iou(text_box.xyxy, para_box.xyxy)
+
+                # Check if IoU > 0.95 and paragraph is not subset of text
+                if iou > 0.95 and not self.is_subset(para_box.xyxy, text_box.xyxy):
+                    # Expand text box to contain paragraph_hybrid
+                    expanded_box = self.expand_box_to_contain(
+                        text_box.xyxy, para_box.xyxy
+                    )
+                    merged_boxes[i] = YoloBox(
+                        None,
+                        np.array(expanded_box),
+                        text_box.conf,
+                        text_box.cls,
+                    )
+
     def predict_image(
         self,
         image,
@@ -376,7 +492,12 @@ class RpcDocLayoutModel(DocLayoutModel):
         with ThreadPoolExecutor(max_workers=2) as ex:
             if lines:
                 future1 = ex.submit(
-                    predict_layout, image_proc, self.host1, imgsz, lines
+                    predict_layout,
+                    image_proc,
+                    self.host1,
+                    imgsz,
+                    lines,
+                    self.font_mapper,
                 )
             future2 = ex.submit(predict_layout2, image_proc, self.host2, imgsz)
 
@@ -428,6 +549,9 @@ class RpcDocLayoutModel(DocLayoutModel):
 
         # Sort boxes by confidence desc (YoloResult expects sorted list)
         merged_boxes.sort(key=lambda b: b.conf, reverse=True)
+
+        # Post-process boxes to handle text and paragraph_hybrid overlaps
+        self.post_process_boxes(merged_boxes, names)
 
         return YoloResult(boxes=merged_boxes, names=names)
 

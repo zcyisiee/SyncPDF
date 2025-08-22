@@ -162,6 +162,13 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 - `--auto-enable-ocr-workaround`: Enable automatic OCR workaround (default: False). If a document is detected as heavily scanned, this will attempt to enable OCR processing and skip further scan detection. See "Important Interaction Note" below for crucial details on how this interacts with `--ocr-workaround` and `--skip-scanned-detection`.
 - `--primary-font-family`: Override primary font family for translated text. Choices: 'serif' for serif fonts, 'sans-serif' for sans-serif fonts, 'script' for script/italic fonts. If not specified, uses automatic font selection based on original text properties.
 - `--only-include-translated-page`: Only include translated pages in the output PDF. This option is only effective when `--pages` is used. (default: False)
+- `--merge-alternating-line-numbers`: Enable post-processing to merge alternating line-number layouts (keep the number paragraph as an independent paragraph b; merge adjacent text paragraphs a and c across it when `layout_id` and `xobj_id` match, digits are ASCII and spaces only). Default: off.
+- `--skip-form-render`: Skip form rendering (default: False). When enabled, PDF forms will not be rendered in the output.
+- `--skip-curve-render`: Skip curve rendering (default: False). When enabled, PDF curves will not be rendered in the output.
+- `--only-parse-generate-pdf`: Only parse PDF and generate output PDF without translation (default: False). This skips all translation-related processing including layout analysis, paragraph finding, style processing, and translation itself. Useful for testing PDF parsing and reconstruction functionality.
+- `--remove-non-formula-lines`: Remove non-formula lines from paragraph areas (default: False). This removes decorative lines that are not part of formulas, while protecting lines in figure/table areas. Useful for cleaning up documents with decorative elements that interfere with text flow.
+- `--non-formula-line-iou-threshold`: IoU threshold for detecting paragraph overlap when removing non-formula lines (default: 0.9). Higher values are more conservative and will remove fewer lines.
+- `--figure-table-protection-threshold`: IoU threshold for protecting lines in figure/table areas when removing non-formula lines (default: 0.9). Higher values provide more protection for structural elements in figures and tables.
 
 - `--rpc-doclayout`: RPC service host address for document layout analysis (default: None)
 - `--working-dir`: Working directory for translation. If not set, use temp directory.
@@ -282,6 +289,12 @@ ocr_workaround = false # Use OCR workaround for scanned PDFs
 rpc_doclayout = "" # RPC service host for document layout analysis
 working_dir = "" # Working directory for translation
 auto_enable_ocr_workaround = false # Enable automatic OCR workaround for scanned PDFs. See docs for interaction with ocr_workaround and skip_scanned_detection.
+skip_form_render = false # Skip form rendering (default: False)
+skip_curve_render = false # Skip curve rendering (default: False)
+only_parse_generate_pdf = false # Only parse PDF and generate output PDF without translation (default: False)
+remove_non_formula_lines = false # Remove non-formula lines from paragraph areas (default: False)
+non_formula_line_iou_threshold = 0.2 # IoU threshold for paragraph overlap detection (default: 0.2)
+figure_table_protection_threshold = 0.3 # IoU threshold for figure/table protection (default: 0.3)
 
 # Translation service
 openai = true
@@ -307,48 +320,10 @@ report-interval = 0.5
 
 ## Python API
 
-> [!TIP]
->
-> 1. Before pdf2zh 2.0 is released, you can temporarily use BabelDOC's Python API. However, after pdf2zh 2.0 is released, please directly use pdf2zh's Python API.
->
-> 2. This project's Python API does not guarantee any compatibility. However, the Python API from pdf2zh will guarantee a certain level of compatibility.
->
-> 3. We do not provide any technical support for the BabelDOC API.
->
-> 4. When performing secondary development, please refer to [pdf2zh 2.0 high level](https://github.com/PDFMathTranslate/PDFMathTranslate-next/blob/main/pdf2zh_next/high_level.py) and ensure that BabelDOC runs in a subprocess.
+The current recommended way to call BabelDOC in Python is to call the `high_level.do_translate_async_stream` function of [pdf2zh next](https://github.com/PDFMathTranslate/PDFMathTranslate-next).
 
-You can refer to the example in [main.py](https://github.com/funstory-ai/yadt/blob/main/babeldoc/main.py) to use BabelDOC's Python API.
-
-Please note:
-
-1. Make sure call `babeldoc.format.pdf.high_level.init()` before using the API
-
-2. The current `TranslationConfig` does not fully validate input parameters, so you need to ensure the validity of input parameters
-
-3. For offline assets management, you can use the following functions:
-   ```python
-   # Generate an offline assets package
-   from pathlib import Path
-   import babeldoc.assets.assets
-   
-   # Generate package to a specific directory
-   # path is optional, default is ~/.cache/babeldoc/assets/offline_assets_{hash}.zip
-   babeldoc.assets.assets.generate_offline_assets_package(Path("/path/to/output/dir"))
-   
-   # Restore from a package file
-   # path is optional, default is ~/.cache/babeldoc/assets/offline_assets_{hash}.zip
-   babeldoc.assets.assets.restore_offline_assets_package(Path("/path/to/offline_assets_package.zip"))
-   
-   # You can also restore from a directory containing the offline assets package
-   # The tool will automatically find the correct package file based on the hash
-   babeldoc.assets.assets.restore_offline_assets_package(Path("/path/to/directory"))
-   ```
-
-> [!TIP]
-> 
-> 1. The offline assets package name cannot be modified because the file list hash is encoded in the name.
-> 2. When using in production environments, it's recommended to pre-generate the assets package and include it with your application distribution.
-> 3. The package verification ensures that all required assets are intact and match their expected checksums.
+> [!WARNING]
+> **All APIs of BabelDOC should be considered as internal APIs, and any direct use of BabelDOC is not supported.**
 
 ## Background
 
@@ -402,6 +377,11 @@ And meet the following requirements:
 ## Version Number Explanation
 
 This project uses a combination of [Semantic Versioning](https://semver.org/) and [Pride Versioning](https://pridever.org/). The version number format is: "0.MAJOR.MINOR".
+
+> [!NOTE]
+>
+> The API compatibility here mainly refers to the compatibility with [pdf2zh_next](https://github.com/PDFMathTranslate/PDFMathTranslate-next).
+
 
 - MAJOR: Incremented by 1 when API incompatible changes are made or when proud improvements are implemented.
 
