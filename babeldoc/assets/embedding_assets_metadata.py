@@ -79,6 +79,32 @@ EMBEDDING_FONT_METADATA = {
         "sha3_256": "8585c29f89b322d937f83739f61ede5d84297873e1465cad9a120a208ac55ce0",
         "size": 8724704,
     },
+    "LXGWWenKai-Regular.1.520.ttf": {
+        "ascent": 928,
+        "bold": 0,
+        "descent": -256,
+        "encoding_length": 2,
+        "file_name": "LXGWWenKai-Regular.1.520.ttf",
+        "font_name": "LXGW WenKai Regular",
+        "italic": 0,
+        "monospace": 0,
+        "serif": 0,
+        "sha3_256": "708b4fd6cfae62a26f71016724d38e862210732f101b9225225a1d5e8205f94d",
+        "size": 24744500,
+    },
+    "LXGWWenKaiGB-Regular.1.520.ttf": {
+        "ascent": 928,
+        "bold": 0,
+        "descent": -256,
+        "encoding_length": 2,
+        "file_name": "LXGWWenKaiGB-Regular.1.520.ttf",
+        "font_name": "LXGW WenKai GB Regular",
+        "italic": 0,
+        "monospace": 0,
+        "serif": 0,
+        "sha3_256": "0671656b00992e317f9e20610e7145b024e664ada9f272d4f8e497196af98005",
+        "size": 24903712,
+    },
     "LXGWWenKaiGB-Regular.ttf": {
         "ascent": 928,
         "bold": 0,
@@ -104,6 +130,19 @@ EMBEDDING_FONT_METADATA = {
         "serif": 0,
         "sha3_256": "596b278d11418d374a1cfa3a50cbfb82b31db82d3650cfacae8f94311b27fdc5",
         "size": 13115416,
+    },
+    "LXGWWenKaiTC-Regular.1.520.ttf": {
+        "ascent": 928,
+        "bold": 0,
+        "descent": -256,
+        "encoding_length": 2,
+        "file_name": "LXGWWenKaiTC-Regular.1.520.ttf",
+        "font_name": "LXGW WenKai TC Regular",
+        "italic": 0,
+        "monospace": 0,
+        "serif": 0,
+        "sha3_256": "347d3d4bd88c2afcb194eba186d2c6c0b95d18b2145220feb1c88abf761f1398",
+        "size": 15348376,
     },
     "LXGWWenKaiTC-Regular.ttf": {
         "ascent": 928,
@@ -497,12 +536,13 @@ EMBEDDING_FONT_METADATA = {
     },
 }
 
+
 FONT_NAMES = {v["font_name"] for v in EMBEDDING_FONT_METADATA.values()}
 
 CN_FONT_FAMILY = {
     # 手写体
     "script": [
-        "LXGWWenKaiGB-Regular.ttf",
+        "LXGWWenKaiGB-Regular.1.520.ttf",
     ],
     # 正文字体
     "normal": [
@@ -520,7 +560,7 @@ CN_FONT_FAMILY = {
 }
 
 HK_FONT_FAMILY = {
-    "script": ["LXGWWenKaiTC-Regular.ttf"],
+    "script": ["LXGWWenKaiTC-Regular.1.520.ttf"],
     "normal": [
         "SourceHanSerifHK-Bold.ttf",
         "SourceHanSerifHK-Regular.ttf",
@@ -535,7 +575,7 @@ HK_FONT_FAMILY = {
 }
 
 TW_FONT_FAMILY = {
-    "script": ["LXGWWenKaiTC-Regular.ttf"],
+    "script": ["LXGWWenKaiTC-Regular.1.520.ttf"],
     "normal": [
         "SourceHanSerifTW-Bold.ttf",
         "SourceHanSerifTW-Regular.ttf",
@@ -627,7 +667,21 @@ def __add_fallback_to_font_family():
                             added_font.add(font)
 
 
+def __cleanup_unused_font_metadata():
+    """Remove unused font metadata that are not referenced in any font family."""
+    referenced_fonts = set()
+    for family in ALL_FONT_FAMILY.values():
+        for font_list in family.values():
+            referenced_fonts.update(font_list)
+
+    # Remove unreferenced fonts from EMBEDDING_FONT_METADATA
+    unused_fonts = set(EMBEDDING_FONT_METADATA.keys()) - referenced_fonts
+    for font_name in unused_fonts:
+        del EMBEDDING_FONT_METADATA[font_name]
+
+
 __add_fallback_to_font_family()
+__cleanup_unused_font_metadata()
 
 
 def get_font_family(lang_code: str):
