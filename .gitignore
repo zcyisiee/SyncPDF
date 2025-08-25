@@ -44,3 +44,4 @@ uv.lock
 # Claude Code memory file
 CLAUDE.md
 /.claude
+babeldoc/format/playground
