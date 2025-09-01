@@ -2482,9 +2482,18 @@ ZapfDingbats = [
     (0, 0, 0, 0),
 ]
 
+base14_alias = {
+    "Times New Roman": "Times-Roman",
+    "Times New Roman,Bold": "Times-Bold",
+    "Times New Roman,Italic": "Times-Italic",
+}
+
 
 def get_base14_bbox(family):
     bbox = []
+    if family in base14_alias:
+        family = base14_alias[family]
+
     if family in base14_bbox:
         base = base14_bbox[family]
         for name in win_ansi:

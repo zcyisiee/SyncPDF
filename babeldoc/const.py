@@ -3,7 +3,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
 
 CACHE_FOLDER = Path.home() / ".cache" / "babeldoc"
 

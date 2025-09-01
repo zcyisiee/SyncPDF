@@ -28,6 +28,12 @@ from babeldoc.format.pdf.document_il.utils.layout_helper import (
 from babeldoc.format.pdf.document_il.utils.layout_helper import (
     is_same_style_except_size,
 )
+from babeldoc.format.pdf.document_il.utils.paragraph_helper import (
+    is_placeholder_only_paragraph,
+)
+from babeldoc.format.pdf.document_il.utils.paragraph_helper import (
+    is_pure_numeric_paragraph,
+)
 from babeldoc.format.pdf.translation_config import TranslationConfig
 from babeldoc.translator.translator import BaseTranslator
 from babeldoc.utils.priority_thread_pool_executor import PriorityThreadPoolExecutor
@@ -436,6 +442,14 @@ class ILTranslator:
     ):
         if not paragraph.pdf_paragraph_composition:
             return
+
+        # Skip pure numeric paragraphs
+        if is_pure_numeric_paragraph(paragraph):
+            return None
+
+        # Skip paragraphs with only placeholders
+        if is_placeholder_only_paragraph(paragraph):
+            return None
         if len(paragraph.pdf_paragraph_composition) == 1:
             # 如果整个段落只有一个组成部分，那么直接返回，不需要套占位符等
             composition = paragraph.pdf_paragraph_composition[0]
