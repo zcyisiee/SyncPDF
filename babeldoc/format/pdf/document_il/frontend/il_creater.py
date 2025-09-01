@@ -190,6 +190,15 @@ def parse_font_file(doc, idx, encoding, differences):
             if charmap.encoding_name == "FT_ENCODING_ADOBE_CUSTOM":
                 face.select_charmap(charmap.encoding)
                 break
+    elif enc_name == "MacRomanEncoding":
+        for charmap in face.charmaps:
+            face.select_charmap(charmap.encoding)
+            if (
+                charmap.encoding_name == "FT_ENCODING_ADOBE_CUSTOM"
+                or charmap.encoding_name == "FT_ENCODING_APPLE_ROMAN"
+            ):
+                face.select_charmap(charmap.encoding)
+                break
     for i, x in enumerate(enc_vector):
         if x in glyph_name_set:
             v = get_name_cbox(face, x.encode("U8"))
