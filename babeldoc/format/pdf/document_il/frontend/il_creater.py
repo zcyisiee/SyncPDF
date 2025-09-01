@@ -958,9 +958,12 @@ class ILCreater:
             y_max = y_max * factor
             ll = (char.bbox[0] + x_min, char.bbox[1] + y_min)
             ur = (char.bbox[0] + x_max, char.bbox[1] + y_max)
-            pdf_char.visual_bbox = il_version_1.VisualBbox(
-                il_version_1.Box(ll[0], ll[1], ur[0], ur[1])
-            )
+
+            volume = (ur[0] - ll[0]) * (ur[1] - ll[1])
+            if volume > 1:
+                pdf_char.visual_bbox = il_version_1.VisualBbox(
+                    il_version_1.Box(ll[0], ll[1], ur[0], ur[1])
+                )
 
         self.current_page.pdf_character.append(pdf_char)
 
