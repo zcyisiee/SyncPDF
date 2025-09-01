@@ -20,6 +20,12 @@ from babeldoc.format.pdf.document_il.midend.il_translator import ILTranslator
 from babeldoc.format.pdf.document_il.midend.il_translator import PageTranslateTracker
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
 from babeldoc.format.pdf.document_il.utils.paragraph_helper import is_cid_paragraph
+from babeldoc.format.pdf.document_il.utils.paragraph_helper import (
+    is_placeholder_only_paragraph,
+)
+from babeldoc.format.pdf.document_il.utils.paragraph_helper import (
+    is_pure_numeric_paragraph,
+)
 from babeldoc.format.pdf.translation_config import TranslationConfig
 from babeldoc.translator.translator import BaseTranslator
 from babeldoc.utils.priority_thread_pool_executor import PriorityThreadPoolExecutor
@@ -478,6 +484,16 @@ class ILTranslatorLLMOnly:
 
             # Check minimum length - advance progress bar if filtered out
             if len(paragraph.unicode) < self.translation_config.min_text_length:
+                if pbar:
+                    pbar.advance(1)
+                continue
+
+            if is_pure_numeric_paragraph(paragraph):
+                if pbar:
+                    pbar.advance(1)
+                continue
+
+            if is_placeholder_only_paragraph(paragraph):
                 if pbar:
                     pbar.advance(1)
                 continue

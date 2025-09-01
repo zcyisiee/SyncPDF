@@ -14,6 +14,12 @@ from babeldoc.format.pdf.document_il import (
 from babeldoc.format.pdf.document_il import PdfParagraph  # Renamed to avoid conflict
 from babeldoc.format.pdf.document_il.midend.il_translator import Page
 from babeldoc.format.pdf.document_il.utils.paragraph_helper import is_cid_paragraph
+from babeldoc.format.pdf.document_il.utils.paragraph_helper import (
+    is_placeholder_only_paragraph,
+)
+from babeldoc.format.pdf.document_il.utils.paragraph_helper import (
+    is_pure_numeric_paragraph,
+)
 from babeldoc.utils.priority_thread_pool_executor import PriorityThreadPoolExecutor
 
 if TYPE_CHECKING:
@@ -192,6 +198,12 @@ class AutomaticTermExtractor:
                 pbar.advance(1)
                 continue
             if is_cid_paragraph(paragraph):
+                pbar.advance(1)
+                continue
+            if is_pure_numeric_paragraph(paragraph):
+                pbar.advance(1)
+                continue
+            if is_placeholder_only_paragraph(paragraph):
                 pbar.advance(1)
                 continue
             # if len(paragraph.unicode) < self.translation_config.min_text_length:
