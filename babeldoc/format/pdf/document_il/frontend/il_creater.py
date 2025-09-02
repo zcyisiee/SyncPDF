@@ -150,7 +150,7 @@ def get_truetype_ansi_bbox_list(face):
     return bbox_list
 
 
-def get_truetype_custom_bbox_list(face):
+def collect_face_cmap(face):
     umap = []  # unicode maps
     lmap = []  # legacy maps
     for cmap in face.charmaps:
@@ -158,6 +158,11 @@ def get_truetype_custom_bbox_list(face):
             umap.append(cmap)
         else:
             lmap.append(cmap)
+    return umap, lmap
+
+
+def get_truetype_custom_bbox_list(face):
+    umap, lmap = collect_face_cmap(face)
     if umap:
         face.set_charmap(umap[0])
     elif lmap:
@@ -184,21 +189,10 @@ def parse_font_file(doc, idx, encoding, differences):
         glyph_name_set.add(face.get_glyph_name(x).decode("U8"))
     scale = 1000 / face.units_per_EM
     enc_name, enc_vector = encoding
-    if enc_name == "Custom":
-        for charmap in face.charmaps:
-            face.select_charmap(charmap.encoding)
-            if charmap.encoding_name == "FT_ENCODING_ADOBE_CUSTOM":
-                face.select_charmap(charmap.encoding)
-                break
-    elif enc_name == "MacRomanEncoding":
-        for charmap in face.charmaps:
-            face.select_charmap(charmap.encoding)
-            if (
-                charmap.encoding_name == "FT_ENCODING_ADOBE_CUSTOM"
-                or charmap.encoding_name == "FT_ENCODING_APPLE_ROMAN"
-            ):
-                face.select_charmap(charmap.encoding)
-                break
+    _, lmap = collect_face_cmap(face)
+    abbr = enc_name.removesuffix("Encoding")
+    if lmap and abbr in ["Custom", "MacRoman", "Standard", "WinAnsi", "MacExpert"]:
+        face.set_charmap(lmap[0])
     for i, x in enumerate(enc_vector):
         if x in glyph_name_set:
             v = get_name_cbox(face, x.encode("U8"))
