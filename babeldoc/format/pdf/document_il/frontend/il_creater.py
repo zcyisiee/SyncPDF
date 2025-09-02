@@ -192,7 +192,7 @@ def parse_font_file(doc, idx, encoding, differences):
     _, lmap = collect_face_cmap(face)
     abbr = enc_name.removesuffix("Encoding")
     if lmap and abbr in ["Custom", "MacRoman", "Standard", "WinAnsi", "MacExpert"]:
-        face.select_charmap(lmap[0])
+        face.set_charmap(lmap[0])
     for i, x in enumerate(enc_vector):
         if x in glyph_name_set:
             v = get_name_cbox(face, x.encode("U8"))
