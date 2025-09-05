@@ -85,9 +85,6 @@ class SharedContextCrossSplitPart:
             for src, tgts in term_translations.items():
                 if not tgts:
                     continue
-                src_norm = Glossary.normalize_source(src)
-                if src_norm in self.norm_terms:
-                    continue
                 most_common_tgt = Counter(tgts).most_common(1)[0][0]
                 final_entries.append(GlossaryEntry(src, most_common_tgt))
 
@@ -102,6 +99,18 @@ class SharedContextCrossSplitPart:
             if self.auto_extracted_glossary:
                 all_glossaries.append(self.auto_extracted_glossary)
             return all_glossaries
+
+    def get_glossaries_for_translation(
+        self, auto_extract_enabled: bool
+    ) -> list[Glossary]:
+        with self._lock:
+            if auto_extract_enabled and self.auto_extracted_glossary:
+                return [self.auto_extracted_glossary]
+            else:
+                all_glossaries = list(self.user_glossaries)
+                if self.auto_extracted_glossary:
+                    all_glossaries.append(self.auto_extracted_glossary)
+                return all_glossaries
 
 
 class TranslationConfig:

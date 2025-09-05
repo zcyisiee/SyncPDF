@@ -68,7 +68,11 @@ class ILTranslatorLLMOnly:
             self.tokenizer = tokenizer
 
         # Cache glossaries at initialization
-        self._cached_glossaries = self.shared_context_cross_split_part.get_glossaries()
+        self._cached_glossaries = (
+            self.shared_context_cross_split_part.get_glossaries_for_translation(
+                translation_config.auto_extract_glossary
+            )
+        )
 
         self.il_translator = ILTranslator(
             translate_engine=translate_engine,
