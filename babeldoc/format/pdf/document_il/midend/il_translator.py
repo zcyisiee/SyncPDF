@@ -292,7 +292,11 @@ class ILTranslator:
             self.tokenizer = tokenizer
 
         # Cache glossaries at initialization
-        self._cached_glossaries = self.shared_context_cross_split_part.get_glossaries()
+        self._cached_glossaries = (
+            self.shared_context_cross_split_part.get_glossaries_for_translation(
+                self.translation_config.auto_extract_glossary
+            )
+        )
 
         self.support_llm_translate = False
         try:
