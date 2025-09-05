@@ -58,6 +58,19 @@ class RichTextPlaceholder:
         self.left_regex_pattern = left_regex_pattern
         self.right_regex_pattern = right_regex_pattern
 
+    def to_dict(self) -> dict:
+        return {
+            "type": "rich_text",
+            "id": self.id,
+            "left_placeholder": self.left_placeholder,
+            "right_placeholder": self.right_placeholder,
+            "left_regex_pattern": self.left_regex_pattern,
+            "right_regex_pattern": self.right_regex_pattern,
+            "composition_chars": get_char_unicode_string(self.composition.pdf_character)
+            if self.composition and self.composition.pdf_character
+            else None,
+        }
+
 
 class FormulaPlaceholder:
     def __init__(
@@ -71,6 +84,17 @@ class FormulaPlaceholder:
         self.formula = formula
         self.placeholder = placeholder
         self.regex_pattern = regex_pattern
+
+    def to_dict(self) -> dict:
+        return {
+            "type": "formula",
+            "id": self.id,
+            "placeholder": self.placeholder,
+            "regex_pattern": self.regex_pattern,
+            "formula_chars": get_char_unicode_string(self.formula.pdf_character)
+            if self.formula and self.formula.pdf_character
+            else None,
+        }
 
 
 class PbarContext:
@@ -137,9 +161,18 @@ class DocumentTranslateTracker:
             o_str = getattr(para, "output", None)
             pdf_unicode = getattr(para, "pdf_unicode", None)
             llm_translate_trackers = getattr(para, "llm_translate_trackers", None)
+            placeholders = getattr(para, "placeholders", None)
+
             llm_translate_trackers_json = []
-            for tracker in llm_translate_trackers:
-                llm_translate_trackers_json.append(tracker.to_dict())
+            if llm_translate_trackers:
+                for tracker in llm_translate_trackers:
+                    llm_translate_trackers_json.append(tracker.to_dict())
+
+            placeholders_json = []
+            if placeholders:
+                for placeholder in placeholders:
+                    placeholders_json.append(placeholder.to_dict())
+
             if pdf_unicode is None or i_str is None:
                 continue
             paragraph_json = {
@@ -147,6 +180,9 @@ class DocumentTranslateTracker:
                 "output": o_str,
                 "pdf_unicode": pdf_unicode,
                 "llm_translate_trackers": llm_translate_trackers_json,
+                "placeholders": placeholders_json,
+                "multi_paragraph_id": getattr(para, "multi_paragraph_id", None),
+                "multi_paragraph_index": getattr(para, "multi_paragraph_index", None),
             }
             paragraphs.append(
                 paragraph_json,
@@ -173,6 +209,17 @@ class ParagraphTranslateTracker:
 
     def set_input(self, input_text: str):
         self.input = input_text
+
+    def set_placeholders(
+        self, placeholders: list[RichTextPlaceholder | FormulaPlaceholder]
+    ):
+        self.placeholders = placeholders
+
+    def record_multi_paragraph_id(self, mid):
+        self.multi_paragraph_id = mid
+
+    def record_multi_paragraph_index(self, index):
+        self.multi_paragraph_index = index
 
     def set_output(self, output: str):
         self.output = output
@@ -778,6 +825,7 @@ class ILTranslator:
         if not translate_input:
             return None, None
         tracker.set_input(translate_input.unicode)
+        tracker.set_placeholders(translate_input.placeholders)
         text = translate_input.unicode
         if len(text) < self.translation_config.min_text_length:
             logger.debug(

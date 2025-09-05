@@ -18,6 +18,9 @@ from babeldoc.format.pdf.document_il.midend.il_translator import (
 )
 from babeldoc.format.pdf.document_il.midend.il_translator import ILTranslator
 from babeldoc.format.pdf.document_il.midend.il_translator import PageTranslateTracker
+from babeldoc.format.pdf.document_il.midend.il_translator import (
+    ParagraphTranslateTracker,
+)
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
 from babeldoc.format.pdf.document_il.utils.paragraph_helper import is_cid_paragraph
 from babeldoc.format.pdf.document_il.utils.paragraph_helper import (
@@ -106,6 +109,7 @@ class ILTranslatorLLMOnly:
 
     def translate(self, docs: Document) -> None:
         tracker = DocumentTranslateTracker()
+        self.mid = 0
 
         if not self.translation_config.shared_context_cross_split_part.first_paragraph:
             # Try to find the first title paragraph
@@ -357,6 +361,7 @@ class ILTranslatorLLMOnly:
                 cross_page_paragraphs, tracker.new_cross_page()
             )
 
+            self.mid += 1
             # Submit translation task (force submit regardless of token count)
             executor.submit(
                 self.translate_paragraph,
@@ -369,6 +374,7 @@ class ILTranslatorLLMOnly:
                 executor2,
                 priority=1048576 - total_token_count,
                 paragraph_token_count=total_token_count,
+                mp_id=self.mid,
             )
 
             # Mark paragraphs as translated
@@ -429,6 +435,7 @@ class ILTranslatorLLMOnly:
             ) + self.calc_token_count(p2.unicode)
 
             batch = BatchParagraph([p1, p2], tracker.new_cross_column())
+            self.mid += 1
             executor.submit(
                 self.translate_paragraph,
                 batch,
@@ -440,6 +447,7 @@ class ILTranslatorLLMOnly:
                 executor2,
                 priority=1048576 - total_token_count,
                 paragraph_token_count=total_token_count,
+                mp_id=self.mid,
             )
 
             translated_ids.add(id(p1))
@@ -508,6 +516,7 @@ class ILTranslatorLLMOnly:
                 )
 
             if total_token_count > 200 or len(paragraphs) > 5:
+                self.mid += 1
                 executor.submit(
                     self.translate_paragraph,
                     BatchParagraph(paragraphs, tracker),
@@ -519,11 +528,13 @@ class ILTranslatorLLMOnly:
                     executor2,
                     priority=1048576 - total_token_count,
                     paragraph_token_count=total_token_count,
+                    mp_id=self.mid,
                 )
                 paragraphs = []
                 total_token_count = 0
 
         if paragraphs:
+            self.mid += 1
             executor.submit(
                 self.translate_paragraph,
                 BatchParagraph(paragraphs, tracker),
@@ -535,6 +546,7 @@ class ILTranslatorLLMOnly:
                 executor2,
                 priority=1048576 - total_token_count,
                 paragraph_token_count=total_token_count,
+                mp_id=self.mid,
             )
 
     def translate_paragraph(
@@ -547,6 +559,7 @@ class ILTranslatorLLMOnly:
         local_title_paragraph: PdfParagraph | None = None,
         executor: PriorityThreadPoolExecutor | None = None,
         paragraph_token_count: int = 0,
+        mp_id: int = 0,
     ):
         """Translate a paragraph using pre and post processing functions."""
         self.translation_config.raise_if_cancelled()
@@ -564,6 +577,9 @@ class ILTranslatorLLMOnly:
                 if text is None:
                     pbar.advance(1)
                     continue
+
+                tracker.record_multi_paragraph_id(mp_id)
+
                 llm_translate_tracker = tracker.new_llm_translate_tracker()
                 should_translate_paragraph.append(i)
                 llm_translate_trackers.append(llm_translate_tracker)
@@ -584,6 +600,8 @@ class ILTranslatorLLMOnly:
 
             for id_, input_text in enumerate(inputs):
                 ti: il_translator.ILTranslator.TranslateInput = input_text[1]
+                tracker: ParagraphTranslateTracker = input_text[3]
+                tracker.record_multi_paragraph_index(id_)
                 placeholders_hint = ti.get_placeholders_hint()
                 obj = {
                     "id": id_,
