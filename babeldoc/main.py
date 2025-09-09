@@ -384,6 +384,24 @@ def create_parser():
         "-k",
         help="The API key for the OpenAI API.",
     )
+    service_group.add_argument(
+        "--enable-json-mode-if-requested",
+        action="store_true",
+        default=False,
+        help="Enable JSON mode for OpenAI requests.",
+    )
+    service_group.add_argument(
+        "--send-dashscope-header",
+        action="store_true",
+        default=False,
+        help="Send DashScope data inspection header to disable input/output inspection.",
+    )
+    service_group.add_argument(
+        "--no-send-temperature",
+        action="store_true",
+        default=False,
+        help="Do not send temperature parameter to OpenAI API (default: send temperature).",
+    )
 
     return parser
 
@@ -431,6 +449,9 @@ async def main():
             base_url=args.openai_base_url,
             api_key=args.openai_api_key,
             ignore_cache=args.ignore_cache,
+            enable_json_mode_if_requested=args.enable_json_mode_if_requested,
+            send_dashscope_header=args.send_dashscope_header,
+            send_temperature=not args.no_send_temperature,
         )
     else:
         raise ValueError("Invalid translator type")

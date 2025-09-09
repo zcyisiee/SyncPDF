@@ -746,21 +746,20 @@ class ILTranslatorLLMOnly:
             llm_prompt_parts.append("```json")
             llm_prompt_parts.append("Input:")
             llm_prompt_parts.append("{")
-            llm_prompt_parts.append('    "id": 1,')
-            llm_prompt_parts.append('    "input": "Source",')
-            llm_prompt_parts.append('    "layout_label": "plain text",')
-            llm_prompt_parts.append("    // this is optional")
-            llm_prompt_parts.append('    "formula_placeholders_hint": {')
-            llm_prompt_parts.append('        "placeholder1": "hint1",')
-            llm_prompt_parts.append('        "placeholder2": "hint2"')
-            llm_prompt_parts.append("    }")
+            llm_prompt_parts.append('    "id": 0,')
+            llm_prompt_parts.append(
+                '    "input": "{v1}<style id=\'2\'>hello</style>,world!",'
+            )
+            llm_prompt_parts.append('    "layout_label": "list_item_hybrid"')
             llm_prompt_parts.append("}")
             llm_prompt_parts.append("```")
             llm_prompt_parts.append("Output:")
             llm_prompt_parts.append("```json")
             llm_prompt_parts.append("{")
-            llm_prompt_parts.append('    "id": 1,')
-            llm_prompt_parts.append('    "output": "Translation"')
+            llm_prompt_parts.append('    "id": 0,')
+            llm_prompt_parts.append(
+                '    "output": "{v1}<style id=\'2\'>你好</style>，世界！"'
+            )
             llm_prompt_parts.append("}")
             llm_prompt_parts.append("```")
             llm_prompt_parts.append("</example>")
@@ -778,7 +777,10 @@ class ILTranslatorLLMOnly:
                 llm_translate_tracker.set_input(final_input)
             llm_output = self.translate_engine.llm_translate(
                 final_input,
-                rate_limit_params={"paragraph_token_count": paragraph_token_count},
+                rate_limit_params={
+                    "paragraph_token_count": paragraph_token_count,
+                    "request_json_mode": True,
+                },
             )
             for llm_translate_tracker in llm_translate_trackers:
                 llm_translate_tracker.set_output(llm_output)

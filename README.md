@@ -210,6 +210,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 - `--openai-model`: OpenAI model to use (default: gpt-4o-mini)
 - `--openai-base-url`: Base URL for OpenAI API
 - `--openai-api-key`: API key for OpenAI service
+- `--enable-json-mode-if-requested`: Enable JSON mode for OpenAI requests (default: False)
 
 > [!TIP]
 >
@@ -301,6 +302,7 @@ openai = true
 openai-model = "gpt-4o-mini"
 openai-base-url = "https://api.openai.com/v1"
 openai-api-key = "your-api-key-here"
+enable-json-mode-if-requested = false  # Enable JSON mode when requested (default: false)
 pool-max-workers = 8  # Maximum worker threads for task processing (defaults to QPS value if not set)
 
 # Glossary Options (Optional)
