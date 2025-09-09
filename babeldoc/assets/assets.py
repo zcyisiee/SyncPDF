@@ -273,6 +273,7 @@ async def get_font_and_metadata_async(
             return cache_file_path, font_metadata[font_file_name]
 
     assert font_metadata is not None
+    logger.info(f"download {font_file_name} from {fastest_upstream}")
 
     url = get_font_url_by_name_and_upstream(font_file_name, fastest_upstream)
     if "sha3_256" not in font_metadata[font_file_name]:
