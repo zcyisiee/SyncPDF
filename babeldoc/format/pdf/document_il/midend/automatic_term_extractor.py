@@ -284,7 +284,10 @@ class AutomaticTermExtractor:
 
             output = self.translate_engine.llm_translate(
                 prompt,
-                rate_limit_params={"paragraph_token_count": paragraph_token_count},
+                rate_limit_params={
+                    "paragraph_token_count": paragraph_token_count,
+                    "request_json_mode": True,
+                },
             )
             tracker.set_output(output)
             cleaned_output = self._clean_json_output(output)
@@ -296,6 +299,8 @@ class AutomaticTermExtractor:
                 if isinstance(term, dict) and "src" in term and "tgt" in term:
                     src_term = str(term["src"]).strip()
                     tgt_term = str(term["tgt"]).strip()
+                    if src_term == tgt_term and len(src_term) < 3:
+                        continue
                     if src_term and tgt_term and len(src_term) < 100:
                         self.shared_context.add_raw_extracted_term_pair(
                             src_term, tgt_term

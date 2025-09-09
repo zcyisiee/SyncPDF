@@ -206,6 +206,9 @@ class OpenAITranslator(BaseTranslator):
         base_url=None,
         api_key=None,
         ignore_cache=False,
+        enable_json_mode_if_requested=False,
+        send_dashscope_header=False,
+        send_temperature=True,
     ):
         super().__init__(lang_in, lang_out, ignore_cache)
         self.options = {"temperature": 0}  # 随机采样可能会打断公式标记
@@ -219,10 +222,18 @@ class OpenAITranslator(BaseTranslator):
                 timeout=60,  # Set a reasonable timeout
             ),
         )
-        self.add_cache_impact_parameters("temperature", self.options["temperature"])
+        if send_temperature:
+            self.add_cache_impact_parameters("temperature", self.options["temperature"])
         self.model = model
+        self.enable_json_mode_if_requested = enable_json_mode_if_requested
+        self.send_dashscope_header = send_dashscope_header
+        self.send_temperature = send_temperature
         self.add_cache_impact_parameters("model", self.model)
         self.add_cache_impact_parameters("prompt", self.prompt(""))
+        if self.enable_json_mode_if_requested:
+            self.add_cache_impact_parameters(
+                "enable_json_mode_if_requested", self.enable_json_mode_if_requested
+            )
         self.token_count = AtomicInteger()
         self.prompt_token_count = AtomicInteger()
         self.completion_token_count = AtomicInteger()
@@ -234,9 +245,13 @@ class OpenAITranslator(BaseTranslator):
         before_sleep=before_sleep_log(logger, logging.WARNING),
     )
     def do_translate(self, text, rate_limit_params: dict = None) -> str:
+        options = {}
+        if self.send_temperature:
+            options.update(self.options)
+
         response = self.client.chat.completions.create(
             model=self.model,
-            **self.options,
+            **options,
             messages=self.prompt(text),
         )
         self.update_token_count(response)
@@ -264,9 +279,23 @@ class OpenAITranslator(BaseTranslator):
         if text is None:
             return None
 
+        options = {}
+        if self.send_temperature:
+            options.update(self.options)
+        if self.enable_json_mode_if_requested and rate_limit_params.get(
+            "request_json_mode", False
+        ):
+            options["response_format"] = {"type": "json_object"}
+
+        extra_headers = {}
+        if self.send_dashscope_header:
+            extra_headers["X-DashScope-DataInspection"] = (
+                '{"input": "disable", "output": "disable"}'
+            )
+
         response = self.client.chat.completions.create(
             model=self.model,
-            **self.options,
+            **options,
             max_tokens=2048,
             messages=[
                 {
@@ -274,6 +303,7 @@ class OpenAITranslator(BaseTranslator):
                     "content": text,
                 },
             ],
+            extra_headers=extra_headers,
         )
         self.update_token_count(response)
         return response.choices[0].message.content.strip()
