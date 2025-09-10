@@ -891,7 +891,7 @@ class PDFCreater:
 
     def create_alternating_pages_dual_pdf(
         self,
-        original_pdf_path: str,
+        original_pdf: pymupdf.Document,
         translated_pdf: pymupdf.Document,
         translation_config: TranslationConfig,
     ) -> pymupdf.Document:
@@ -906,7 +906,7 @@ class PDFCreater:
             The created dual PDF document
         """
         # Open the original PDF and insert translated PDF
-        dual = pymupdf.open(original_pdf_path)
+        dual = original_pdf
         dual.insert_file(translated_pdf)
 
         # Rearrange pages to alternate between original and translated
@@ -1355,7 +1355,7 @@ class PDFCreater:
                     if use_alternating_pages:
                         # Create a dual PDF with alternating pages (original and translation)
                         dual = self.create_alternating_pages_dual_pdf(
-                            self.original_pdf_path,
+                            original_pdf,
                             translated_pdf,
                             translation_config,
                         )
