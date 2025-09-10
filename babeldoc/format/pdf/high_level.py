@@ -672,6 +672,9 @@ def do_translate(
 def migrate_toc(
     translation_config: TranslationConfig, translate_result: TranslateResult
 ):
+    if translation_config.use_alternating_pages_dual:
+        logger.info('skipping TOC migration for "use_alternating_pages_dual" mode')
+        return
     old_doc = Document(translation_config.input_file)
     if not old_doc:
         return
