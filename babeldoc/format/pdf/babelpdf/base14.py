@@ -1,4 +1,5 @@
 from .encoding import get_type1_encoding
+from .win_core import win_core
 
 base14_bbox = {
     "Courier-BoldOblique": {
@@ -3307,6 +3308,16 @@ base14_alias = {
 }
 
 
+def get_cached_bbox(database, family, encoding):
+    bbox = [(0, 0, 0, 0)] * 256
+    base_font = database[family]
+    for index, name in enumerate(encoding):
+        if name:
+            if cur_bbox := base_font.get(name, None):
+                bbox[index] = cur_bbox
+    return bbox
+
+
 def get_base14_bbox(family, encoding_name="WinAnsiEncoding"):
     bbox = [(0, 0, 0, 0)] * 256
     encoding = get_type1_encoding(encoding_name)
@@ -3317,9 +3328,9 @@ def get_base14_bbox(family, encoding_name="WinAnsiEncoding"):
         family = base14_alias[family]
 
     if family in base14_bbox:
-        base_font = base14_bbox[family]
-        for index, name in enumerate(encoding):
-            if name:
-                if cur_bbox := base_font.get(name, None):
-                    bbox[index] = cur_bbox
+        bbox = get_cached_bbox(base14_bbox, family, encoding)
+
+    if family in win_core:
+        bbox = get_cached_bbox(win_core, family, encoding)
+
     return bbox
