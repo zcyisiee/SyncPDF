@@ -79,7 +79,7 @@ class AddDebugInformation:
         # Add page number text at top-left corner
         page_width = page.cropbox.box.x2 - page.cropbox.box.x
         page_height = page.cropbox.box.y2 - page.cropbox.box.y
-        page_number_text = f"pagenumber: {page.page_number}"
+        page_number_text = f"pagenumber: {page.page_number + 1}"
         page_number_box = il_version_1.Box(
             x=page.cropbox.box.x + page_width * 0.02,
             y=page.cropbox.box.y,
