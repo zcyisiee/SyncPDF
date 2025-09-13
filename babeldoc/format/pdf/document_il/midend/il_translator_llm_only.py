@@ -912,6 +912,8 @@ class ILTranslatorLLMOnly:
             for llm_translate_tracker in llm_translate_trackers:
                 llm_translate_tracker.set_error_message(error_message)
                 llm_translate_tracker.set_fallback_to_translate()
+            self.total_count += len(llm_translate_trackers)
+            self.fallback_count += len(llm_translate_trackers)
             for input_ in inputs:
                 input_[2].unicode = input_[5]
             if not should_translate_paragraph:
