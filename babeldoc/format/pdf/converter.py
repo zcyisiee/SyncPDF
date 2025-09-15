@@ -92,8 +92,10 @@ class PDFConverterEx(PDFConverter):
             text = self.handle_undefined_char(font, cid)
         textwidth = font.char_width(cid)
         textdisp = font.char_disp(cid)
-
-        if not hasattr(font, "xobj_id"):
+        font_id = font.font_id_temp
+        if font_id is not None:
+            pass
+        elif not hasattr(font, "xobj_id"):
             log.debug(
                 f"Font {font.fontname} does not have xobj_id attribute.",
             )

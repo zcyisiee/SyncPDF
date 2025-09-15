@@ -348,6 +348,7 @@ class ILCreater:
         self.xobj_stack = []
         self.current_page_font_name_id_map = {}
         self.current_page_font_char_bounding_box_map = {}
+        self.current_available_fonts = {}
         self.mupdf_font_map: dict[int, pymupdf.Font] = {}
         self.graphic_state_pool = {}
         self.enable_graphic_element_process = (
@@ -504,15 +505,15 @@ class ILCreater:
             (
                 self.xobj_id,
                 self.current_clip_paths.copy(),
+                self.current_available_fonts.copy(),
             ),
         )
         self.current_clip_paths = []
 
     def pop_xobj(self):
-        (
-            self.xobj_id,
-            self.current_clip_paths,
-        ) = self.xobj_stack.pop()
+        (self.xobj_id, self.current_clip_paths, self.current_available_fonts) = (
+            self.xobj_stack.pop()
+        )
 
     def on_xobj_begin(self, bbox, xref_id):
         logger.debug(f"on_xobj_begin: {bbox} @ {xref_id}")
@@ -529,9 +530,11 @@ class ILCreater:
             ),
             xobj_id=self.xobj_id,
             xref_id=xref_id,
+            pdf_font=[],
         )
         self.current_page.pdf_xobject.append(xobject)
         self.xobj_map[self.xobj_id] = xobject
+        xobject.pdf_font.extend(self.current_available_fonts.values())
         return self.xobj_id
 
     def on_xobj_end(self, xobj_id, base_op):
@@ -719,10 +722,18 @@ class ILCreater:
             else:
                 logger.error("failed to parse font xobj id %d: %s", xref_id, e)
         self.current_page_font_name_id_map[xref_id] = font_id
+        self.current_available_fonts[font_id] = il_font_metadata
+
+        fonts = self.current_page.pdf_font
         if self.xobj_id in self.xobj_map:
-            self.xobj_map[self.xobj_id].pdf_font.append(il_font_metadata)
-        else:
-            self.current_page.pdf_font.append(il_font_metadata)
+            fonts = self.xobj_map[self.xobj_id].pdf_font
+        should_remove = []
+        for f in fonts:
+            if f.font_id == font_id:
+                should_remove.append(f)
+        for sr in should_remove:
+            fonts.remove(sr)
+        fonts.append(il_font_metadata)
 
     def parse_font_xobj_id(self, xobj_id: int):
         if xobj_id is None:
