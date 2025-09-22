@@ -127,6 +127,19 @@ def verify_file_hash(file_path: str, expected_hash: str) -> bool:
     return sha256_hash.hexdigest() == expected_hash
 
 
+def translator_supports_llm(translator) -> bool:
+    if not translator or not hasattr(translator, "do_llm_translate"):
+        return False
+    try:
+        translator.do_llm_translate(None)
+        return True
+    except NotImplementedError:
+        return False
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.debug("translator %s failed llm detection: %s", translator, exc)
+        return False
+
+
 def start_parse_il(
     inf: BinaryIO,
     pages: list[int] | None = None,
@@ -924,17 +937,15 @@ def _do_translate_single(
         )
 
     translate_engine = translation_config.translator
+    term_extraction_engine = translation_config.get_term_extraction_translator()
 
-    support_llm_translate = False
-    try:
-        if translate_engine and hasattr(translate_engine, "do_llm_translate"):
-            translate_engine.do_llm_translate(None)
-            support_llm_translate = True
-    except NotImplementedError:
-        support_llm_translate = False
+    support_llm_translate = translator_supports_llm(translate_engine)
+    support_llm_term_extraction = translator_supports_llm(term_extraction_engine)
 
-    if support_llm_translate and translation_config.auto_extract_glossary:
-        AutomaticTermExtractor(translate_engine, translation_config).procress(docs)
+    if support_llm_term_extraction and translation_config.auto_extract_glossary:
+        AutomaticTermExtractor(term_extraction_engine, translation_config).procress(
+            docs
+        )
 
     if not translation_config.skip_translation:
         if support_llm_translate:
