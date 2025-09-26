@@ -1,6 +1,7 @@
-import freetype
 import re
 from io import BytesIO
+
+import freetype
 
 
 def indirect(obj):

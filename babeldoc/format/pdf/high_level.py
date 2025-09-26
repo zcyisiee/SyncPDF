@@ -502,8 +502,10 @@ def fix_filter(doc):
                 m0 = pymupdf.Matrix(rotate)
                 b0 = page.mediabox * m0
                 m1 = m0 * pymupdf.Matrix(1, 0, 0, 1, b0.x0, -b0.y0)
-                page_prefix = f" {m1.a} {m1.b} {m1.c} {m1.d} {m1.e} {m1.f} cm q ".encode("U8")
-                page_suffix = f" Q ".encode("U8")
+                page_prefix = (
+                    f" {m1.a} {m1.b} {m1.c} {m1.d} {m1.e} {m1.f} cm q ".encode()
+                )
+                page_suffix = b" Q "
                 update_page_bbox(doc, page, page.cropbox * m1, "CropBox")
                 update_page_bbox(doc, page, page.mediabox * m1, "MediaBox")
                 update_page_bbox(doc, page, page.artbox * m1, "ArtBox")
@@ -512,6 +514,7 @@ def fix_filter(doc):
             doc.update_object(r, "<<>>")
             doc.update_stream(r, page_prefix + b" ".join(page_streams) + page_suffix)
             doc.xref_set_key(page.xref, "Contents", f"{r} 0 R")
+
 
 def update_page_bbox(doc, page, box, key):
     if doc.xref_get_key(page.xref, key)[0] == "array":

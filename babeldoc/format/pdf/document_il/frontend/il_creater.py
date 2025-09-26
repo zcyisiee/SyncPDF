@@ -12,9 +12,9 @@ import pymupdf
 
 import babeldoc.pdfminer.pdfinterp
 from babeldoc.format.pdf.babelpdf.base14 import get_base14_bbox
+from babeldoc.format.pdf.babelpdf.cidfont import get_cidfont_bbox
 from babeldoc.format.pdf.babelpdf.encoding import WinAnsiEncoding
 from babeldoc.format.pdf.babelpdf.encoding import get_type1_encoding
-from babeldoc.format.pdf.babelpdf.cidfont import get_cidfont_bbox
 from babeldoc.format.pdf.babelpdf.utils import guarded_bbox
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils import zstd_helper
