@@ -489,15 +489,33 @@ def fix_filter(doc):
         if f[0] == "xref":
             data = doc.xref_stream(page_piece)
             doc.update_stream(page_piece, data)
-
     for page in doc:
         contents = page.get_contents()
-        if len(contents) > 1:
+        t, v = doc.xref_get_key(page.xref, "Rotate")
+        rotate = -int(v) if t == "int" else 0
+        if len(contents) > 1 or rotate:
             page_streams = [doc.xref_stream(i) for i in contents]
             r = doc.get_new_xref()
+            page_prefix = b""
+            page_suffix = b""
+            if rotate:
+                m0 = pymupdf.Matrix(rotate)
+                b0 = page.mediabox * m0
+                m1 = m0 * pymupdf.Matrix(1, 0, 0, 1, b0.x0, -b0.y0)
+                page_prefix = f" {m1.a} {m1.b} {m1.c} {m1.d} {m1.e} {m1.f} cm q ".encode("U8")
+                page_suffix = f" Q ".encode("U8")
+                update_page_bbox(doc, page, page.cropbox * m1, "CropBox")
+                update_page_bbox(doc, page, page.mediabox * m1, "MediaBox")
+                update_page_bbox(doc, page, page.artbox * m1, "ArtBox")
+                update_page_bbox(doc, page, page.bleedbox * m1, "BleedBox")
+                doc.xref_set_key(page.xref, "Rotate", "0")
             doc.update_object(r, "<<>>")
-            doc.update_stream(r, b" ".join(page_streams))
+            doc.update_stream(r, page_prefix + b" ".join(page_streams) + page_suffix)
             doc.xref_set_key(page.xref, "Contents", f"{r} 0 R")
+
+def update_page_bbox(doc, page, box, key):
+    if doc.xref_get_key(page.xref, key)[0] == "array":
+        doc.xref_set_key(page.xref, key, f"[{box.x0} {box.y0} {box.x1} {box.y1}]")
 
 
 def do_translate(
