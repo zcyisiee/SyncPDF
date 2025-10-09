@@ -175,6 +175,7 @@ class TranslationConfig:
         figure_table_protection_threshold: float = 0.9,
         skip_formula_offset_calculation: bool = False,
         term_extraction_translator: BaseTranslator | None = None,
+        metadata_extra_data: str | None = None,
     ):
         self.translator = translator
         self.term_extraction_translator = term_extraction_translator or translator
@@ -313,6 +314,8 @@ class TranslationConfig:
         self.non_formula_line_iou_threshold = non_formula_line_iou_threshold
         self.figure_table_protection_threshold = figure_table_protection_threshold
         self.skip_formula_offset_calculation = skip_formula_offset_calculation
+
+        self.metadata_extra_data = metadata_extra_data
 
         self.term_extraction_token_usage: dict[str, int] = {
             "total_tokens": 0,

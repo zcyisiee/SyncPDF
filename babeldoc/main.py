@@ -98,6 +98,11 @@ def create_parser():
         default=None,
         help="Working directory for translation. If not set, use temp directory.",
     )
+    parser.add_argument(
+        "--metadata-extra-data",
+        default=None,
+        help="Extra data for metadata",
+    )
     # translation option argument group
     translation_group = parser.add_argument_group(
         "Translation",
@@ -675,6 +680,7 @@ async def main():
             non_formula_line_iou_threshold=args.non_formula_line_iou_threshold,
             figure_table_protection_threshold=args.figure_table_protection_threshold,
             skip_formula_offset_calculation=args.skip_formula_offset_calculation,
+            metadata_extra_data=args.metadata_extra_data,
         )
 
         def nop(_x):
