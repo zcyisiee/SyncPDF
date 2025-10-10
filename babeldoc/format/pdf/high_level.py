@@ -574,9 +574,9 @@ def fix_filter(doc):
                 )
                 page_suffix = b" Q "
                 update_page_bbox(doc, page, page.cropbox * m1, "CropBox")
-                update_page_bbox(doc, page, page.mediabox * m1, "MediaBox")
                 update_page_bbox(doc, page, page.artbox * m1, "ArtBox")
                 update_page_bbox(doc, page, page.bleedbox * m1, "BleedBox")
+                update_page_bbox(doc, page, page.mediabox * m1, "MediaBox")
                 doc.xref_set_key(page.xref, "Rotate", "0")
             doc.update_object(r, "<<>>")
             doc.update_stream(r, page_prefix + b" ".join(page_streams) + page_suffix)

@@ -1,6 +1,9 @@
 import asyncio
 import logging
+import multiprocessing as mp
 import queue
+import random
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +18,7 @@ from rich.progress import TimeRemainingColumn
 
 import babeldoc.assets.assets
 import babeldoc.format.pdf.high_level
+from babeldoc.const import enable_process_pool
 from babeldoc.format.pdf.translation_config import TranslationConfig
 from babeldoc.format.pdf.translation_config import WatermarkOutputMode
 from babeldoc.glossary import Glossary
@@ -427,6 +431,7 @@ def create_parser():
 
 
 async def main():
+    enable_process_pool()
     parser = create_parser()
     args: Any = parser.parse_args()
 
@@ -688,7 +693,9 @@ async def main():
 
         getattr(doc_layout_model, "init_font_mapper", nop)(config)
         # Create progress handler
-        progress_context, progress_handler = create_progress_handler(config)
+        progress_context, progress_handler = create_progress_handler(
+            config, show_log=False
+        )
 
         # 开始翻译
         with progress_context:
@@ -725,7 +732,9 @@ async def main():
         )
 
 
-def create_progress_handler(translation_config: TranslationConfig):
+def create_progress_handler(
+    translation_config: TranslationConfig, show_log: bool = False
+):
     """Create a progress handler function based on the configuration.
 
     Args:
@@ -748,6 +757,8 @@ def create_progress_handler(translation_config: TranslationConfig):
         stage_tasks = {}
 
         def progress_handler(event):
+            if show_log and random.random() <= 0.1:  # noqa: S311
+                logger.info(event)
             if event["type"] == "progress_start":
                 if event["stage"] not in stage_tasks:
                     stage_tasks[event["stage"]] = progress.add_task(
@@ -876,4 +887,8 @@ def cli():
 
 
 if __name__ == "__main__":
+    if sys.platform == "darwin" or sys.platform == "win32":
+        mp.set_start_method("spawn")
+    else:
+        mp.set_start_method("forkserver")
     cli()
