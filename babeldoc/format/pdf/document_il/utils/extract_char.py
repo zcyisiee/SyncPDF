@@ -11,6 +11,7 @@ from sklearn.cluster import DBSCAN
 
 import babeldoc.format.pdf.high_level
 import babeldoc.format.pdf.translation_config
+from babeldoc.const import get_process_pool
 from babeldoc.format.pdf.document_il import il_version_1
 
 logger = logging.getLogger(__name__)
@@ -570,6 +571,15 @@ def _merge_lines_on_page(page_lines: list[Line]) -> list[Line]:
 
 
 def process_page_chars_to_lines(
+    chars: list[tuple[il_version_1.Box, str, bool]],
+) -> list[Line]:
+    pool = get_process_pool()
+    if pool is None:
+        return process_page_chars_to_lines_internal(chars)
+    return pool.apply(process_page_chars_to_lines_internal, (chars,))
+
+
+def process_page_chars_to_lines_internal(
     chars: list[tuple[il_version_1.Box, str, bool]],
 ) -> list[Line]:
     """

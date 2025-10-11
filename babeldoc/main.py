@@ -1,6 +1,9 @@
 import asyncio
 import logging
+import multiprocessing as mp
 import queue
+import random
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +18,7 @@ from rich.progress import TimeRemainingColumn
 
 import babeldoc.assets.assets
 import babeldoc.format.pdf.high_level
+from babeldoc.const import enable_process_pool
 from babeldoc.format.pdf.translation_config import TranslationConfig
 from babeldoc.format.pdf.translation_config import WatermarkOutputMode
 from babeldoc.glossary import Glossary
@@ -22,7 +26,7 @@ from babeldoc.translator.translator import OpenAITranslator
 from babeldoc.translator.translator import set_translate_rate_limiter
 
 logger = logging.getLogger(__name__)
-__version__ = "0.5.11"
+__version__ = "0.5.12"
 
 
 def create_parser():
@@ -102,6 +106,11 @@ def create_parser():
         "--metadata-extra-data",
         default=None,
         help="Extra data for metadata",
+    )
+    parser.add_argument(
+        "--enable-process-pool",
+        action="store_true",
+        help="DEBUG ONLY",
     )
     # translation option argument group
     translation_group = parser.add_argument_group(
@@ -460,6 +469,9 @@ async def main():
     if args.openai and not args.openai_api_key:
         parser.error("使用 OpenAI 服务时必须提供 API key")
 
+    if args.enable_process_pool:
+        enable_process_pool()
+
     # 实例化翻译器
     if args.openai:
         translator = OpenAITranslator(
@@ -688,7 +700,9 @@ async def main():
 
         getattr(doc_layout_model, "init_font_mapper", nop)(config)
         # Create progress handler
-        progress_context, progress_handler = create_progress_handler(config)
+        progress_context, progress_handler = create_progress_handler(
+            config, show_log=False
+        )
 
         # 开始翻译
         with progress_context:
@@ -725,7 +739,9 @@ async def main():
         )
 
 
-def create_progress_handler(translation_config: TranslationConfig):
+def create_progress_handler(
+    translation_config: TranslationConfig, show_log: bool = False
+):
     """Create a progress handler function based on the configuration.
 
     Args:
@@ -748,6 +764,8 @@ def create_progress_handler(translation_config: TranslationConfig):
         stage_tasks = {}
 
         def progress_handler(event):
+            if show_log and random.random() <= 0.1:  # noqa: S311
+                logger.info(event)
             if event["type"] == "progress_start":
                 if event["stage"] not in stage_tasks:
                     stage_tasks[event["stage"]] = progress.add_task(
@@ -876,4 +894,8 @@ def cli():
 
 
 if __name__ == "__main__":
+    if sys.platform == "darwin" or sys.platform == "win32":
+        mp.set_start_method("spawn")
+    else:
+        mp.set_start_method("forkserver")
     cli()

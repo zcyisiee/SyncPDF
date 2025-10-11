@@ -9,6 +9,7 @@ from skimage.metrics import structural_similarity
 from babeldoc.babeldoc_exception.BabelDOCException import ScannedPDFError
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.backend.pdf_creater import PDFCreater
+from babeldoc.format.pdf.document_il.utils.style_helper import BLACK
 from babeldoc.format.pdf.document_il.utils.style_helper import GREEN
 from babeldoc.format.pdf.translation_config import TranslationConfig
 
@@ -143,6 +144,8 @@ class DetectScannedFile:
         for page in docs.page:
             for char in page.pdf_character:
                 char.render_order = None
+                if not char.debug_info:
+                    char.pdf_style.graphic_state = BLACK
 
     def detect_page_is_scanned(
         self, page: il_version_1.Page, pdf: pymupdf.Document, pdf_creater: PDFCreater
