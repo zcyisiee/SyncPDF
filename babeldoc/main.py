@@ -107,6 +107,11 @@ def create_parser():
         default=None,
         help="Extra data for metadata",
     )
+    parser.add_argument(
+        "--enable-process-pool",
+        action="store_true",
+        help="DEBUG ONLY",
+    )
     # translation option argument group
     translation_group = parser.add_argument_group(
         "Translation",
@@ -431,7 +436,6 @@ def create_parser():
 
 
 async def main():
-    enable_process_pool()
     parser = create_parser()
     args: Any = parser.parse_args()
 
@@ -464,6 +468,9 @@ async def main():
     # 验证 OpenAI 参数
     if args.openai and not args.openai_api_key:
         parser.error("使用 OpenAI 服务时必须提供 API key")
+
+    if args.enable_process_pool:
+        enable_process_pool()
 
     # 实例化翻译器
     if args.openai:

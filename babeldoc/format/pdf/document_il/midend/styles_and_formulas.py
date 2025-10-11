@@ -462,11 +462,17 @@ class StylesAndFormulas:
                 line.pdf_character[i + 1] if i < len(line.pdf_character) - 1 else None
             )
             isspace = char.char_unicode.isspace() if char.char_unicode else False
+            prev_is_space = (
+                previous_char.char_unicode.isspace()
+                if previous_char and previous_char.char_unicode
+                else False
+            )
 
             is_corner_mark = (
                 (
                     previous_char is not None
                     and not isspace
+                    and not prev_is_space
                     and not first_is_bullet
                     # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
                     and char.pdf_style.font_size
@@ -476,6 +482,7 @@ class StylesAndFormulas:
                 or (
                     previous_char is not None
                     and not isspace
+                    and not prev_is_space
                     and not first_is_bullet
                     # 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
                     and char.pdf_style.font_size
@@ -487,6 +494,7 @@ class StylesAndFormulas:
                     previous_char is None
                     and next_char is not None
                     and not isspace
+                    and not prev_is_space
                     and not first_is_bullet
                     # 当前字符字体大小明显小于下一个字符，判定为角标
                     and char.pdf_style.font_size < next_char.pdf_style.font_size * 0.79
