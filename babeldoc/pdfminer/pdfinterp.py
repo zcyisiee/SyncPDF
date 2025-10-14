@@ -119,6 +119,7 @@ class PDFTextState:
         obj.rise = self.rise
         obj.matrix = self.matrix
         obj.linematrix = self.linematrix
+        obj.font_id = getattr(self, "font_id", None)
         return obj
 
     def reset(self) -> None:

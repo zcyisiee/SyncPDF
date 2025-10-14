@@ -14,6 +14,7 @@ from tenacity import retry_if_exception_type
 from tenacity import stop_after_attempt
 from tenacity import wait_exponential
 
+from babeldoc.babeldoc_exception.BabelDOCException import ContentFilterError
 from babeldoc.translator.cache import TranslationCache
 from babeldoc.utils.atomic_integer import AtomicInteger
 
@@ -155,7 +156,12 @@ class BaseTranslator(ABC):
         _translate_rate_limiter.wait()
         translation = self.do_llm_translate(text, rate_limit_params)
         if not (self.ignore_cache or ignore_cache):
-            self.cache.set(text, translation)
+            try:
+                self.cache.set(text, translation)
+            except Exception as e:
+                logger.debug(
+                    f"try set cache failed, ignore it: {e}, text: {text}, translation: {translation}"
+                )
         return translation
 
     @abstractmethod
@@ -299,22 +305,30 @@ class OpenAITranslator(BaseTranslator):
             extra_headers["X-DashScope-DataInspection"] = (
                 '{"input": "disable", "output": "disable"}'
             )
-
-        response = self.client.chat.completions.create(
-            model=self.model,
-            **options,
-            max_tokens=2048,
-            messages=[
-                {
-                    "role": "user",
-                    "content": text,
-                },
-            ],
-            extra_headers=extra_headers,
-            extra_body=self.extra_body,
-        )
-        self.update_token_count(response)
-        return response.choices[0].message.content.strip()
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                **options,
+                max_tokens=2048,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": text,
+                    },
+                ],
+                extra_headers=extra_headers,
+                extra_body=self.extra_body,
+            )
+            self.update_token_count(response)
+            return response.choices[0].message.content.strip()
+        except openai.BadRequestError as e:
+            if (
+                "系统检测到输入或生成内容可能包含不安全或敏感内容，请您避免输入易产生敏感内容的提示语，感谢您的配合。"
+                in e.message
+            ):
+                raise ContentFilterError(e.message) from e
+            else:
+                raise
 
     def update_token_count(self, response):
         try:

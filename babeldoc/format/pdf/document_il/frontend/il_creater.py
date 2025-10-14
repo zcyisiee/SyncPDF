@@ -955,7 +955,7 @@ class ILCreater:
             )
             return
 
-        if char_bounding_box:
+        if char_bounding_box and len(char_bounding_box) == 4:
             x_min, y_min, x_max, y_max = char_bounding_box
             factor = 1 / 1000 * pdf_style.font_size
             x_min = x_min * factor

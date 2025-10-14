@@ -599,7 +599,7 @@ class RpcDocLayoutModel(DocLayoutModel):
     ):
         layout_temp_path = translate_config.get_working_file_path("layout.temp.pdf")
         mupdf_doc.save(layout_temp_path.as_posix())
-        with ThreadPoolExecutor(max_workers=32) as executor:
+        with ThreadPoolExecutor(max_workers=8) as executor:
             yield from executor.map(
                 self.predict_page,
                 pages,

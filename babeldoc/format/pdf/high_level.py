@@ -25,6 +25,7 @@ from babeldoc.babeldoc_exception.BabelDOCException import (
 )
 from babeldoc.const import CACHE_FOLDER
 from babeldoc.const import WATERMARK_VERSION
+from babeldoc.const import close_process_pool
 from babeldoc.format.pdf.converter import TranslateConverter
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.backend.pdf_creater import SAVE_PDF_STAGE_NAME
@@ -1005,6 +1006,7 @@ def _do_translate_single(
     logger.debug("start generating layouts")
     docs = LayoutParser(translation_config).process(docs, doc_pdf2zh)
     logger.debug("finish generating layouts")
+    close_process_pool()
     if translation_config.debug:
         xml_converter.write_json(
             docs,

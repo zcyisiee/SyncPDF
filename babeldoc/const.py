@@ -73,6 +73,17 @@ def get_process_pool():
         return _process_pool
 
 
+def close_process_pool():
+    if not _ENABLE_PROCESS_POOL:
+        return None
+    global _process_pool
+    with _process_pool_lock:
+        if _process_pool:
+            _process_pool.close()
+            _process_pool.join()
+            _process_pool = None
+
+
 def batched(iterable, n, *, strict=False):
     # batched('ABCDEFG', 3) → ABC DEF G
     if n < 1:

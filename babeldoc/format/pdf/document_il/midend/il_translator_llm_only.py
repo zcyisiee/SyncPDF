@@ -40,9 +40,11 @@ class BatchParagraph:
     def __init__(
         self,
         paragraphs: list[PdfParagraph],
+        pages: list[Page],
         page_tracker: PageTranslateTracker,
     ):
         self.paragraphs = paragraphs
+        self.pages = pages
         self.trackers = [page_tracker.new_paragraph() for _ in paragraphs]
 
 
@@ -112,6 +114,7 @@ class ILTranslatorLLMOnly:
         return None
 
     def translate(self, docs: Document) -> None:
+        self.il_translator.docs = docs
         tracker = DocumentTranslateTracker()
         self.mid = 0
 
@@ -361,8 +364,9 @@ class ILTranslatorLLMOnly:
 
             # Create batch with both paragraphs
             cross_page_paragraphs = [last_curr_paragraph, first_next_paragraph]
+            cross_page_pages = [page_curr, page_next]
             batch_paragraph = BatchParagraph(
-                cross_page_paragraphs, tracker.new_cross_page()
+                cross_page_paragraphs, cross_page_pages, tracker.new_cross_page()
             )
 
             self.mid += 1
@@ -438,7 +442,7 @@ class ILTranslatorLLMOnly:
                 p1.unicode
             ) + self.calc_token_count(p2.unicode)
 
-            batch = BatchParagraph([p1, p2], tracker.new_cross_column())
+            batch = BatchParagraph([p1, p2], [page, page], tracker.new_cross_column())
             self.mid += 1
             executor.submit(
                 self.translate_paragraph,
@@ -523,7 +527,7 @@ class ILTranslatorLLMOnly:
                 self.mid += 1
                 executor.submit(
                     self.translate_paragraph,
-                    BatchParagraph(paragraphs, tracker),
+                    BatchParagraph(paragraphs, [page] * len(paragraphs), tracker),
                     pbar,
                     page_font_map,
                     page_xobj_font_map,
@@ -541,7 +545,7 @@ class ILTranslatorLLMOnly:
             self.mid += 1
             executor.submit(
                 self.translate_paragraph,
-                BatchParagraph(paragraphs, tracker),
+                BatchParagraph(paragraphs, [page] * len(paragraphs), tracker),
                 pbar,
                 page_font_map,
                 page_xobj_font_map,
@@ -630,6 +634,9 @@ class ILTranslatorLLMOnly:
             llm_prompt_parts.append("#role")
             if self.translation_config.custom_system_prompt:
                 llm_prompt_parts.append(self.translation_config.custom_system_prompt)
+                llm_prompt_parts.append(
+                    "When translating, strictly follow the instructions below to ensure translation quality and preserve all formatting, tags, and placeholders:\n"
+                )
             else:
                 llm_prompt_parts.append(
                     f"You are a professional and reliable machine translation engine responsible for translating the input text into {self.translation_config.lang_out}.\n"
@@ -894,6 +901,7 @@ class ILTranslatorLLMOnly:
                         executor.submit(
                             self.il_translator.translate_paragraph,
                             inputs[id_][2],
+                            batch_paragraph.pages[id_],
                             pbar,
                             inputs[id_][3],
                             page_font_map,
@@ -929,6 +937,7 @@ class ILTranslatorLLMOnly:
                 executor.submit(
                     self.il_translator.translate_paragraph,
                     paragraph,
+                    batch_paragraph.pages[i],
                     pbar,
                     tracker,
                     page_font_map,
