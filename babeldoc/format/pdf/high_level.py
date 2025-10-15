@@ -150,6 +150,12 @@ def add_metadata(
             translated_by += f"_{translate_config.metadata_extra_data}"
         meta["producer"] = translated_by
         meta["creator"] = creator
+
+        for k, v in meta.items():
+            if v:
+                # 使用正则替换掉 surrogate 范围内的字符
+                meta[k] = re.sub(r"[\uD800-\uDFFF]", "", v)
+
         pdf.set_metadata(meta)
         safe_save(pdf, temp_path)
         shutil.move(temp_path, path)
