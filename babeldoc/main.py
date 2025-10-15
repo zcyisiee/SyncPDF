@@ -636,6 +636,7 @@ async def main():
     total_term_extraction_total_tokens = 0
     total_term_extraction_prompt_tokens = 0
     total_term_extraction_completion_tokens = 0
+    total_term_extraction_cache_hit_prompt_tokens = 0
 
     for file in pending_files:
         # 清理文件路径，去除两端的引号
@@ -721,21 +722,29 @@ async def main():
         total_term_extraction_total_tokens += usage["total_tokens"]
         total_term_extraction_prompt_tokens += usage["prompt_tokens"]
         total_term_extraction_completion_tokens += usage["completion_tokens"]
+        total_term_extraction_cache_hit_prompt_tokens += usage[
+            "cache_hit_prompt_tokens"
+        ]
     logger.info(f"Total tokens: {translator.token_count.value}")
     logger.info(f"Prompt tokens: {translator.prompt_token_count.value}")
     logger.info(f"Completion tokens: {translator.completion_token_count.value}")
     logger.info(
-        "Term extraction tokens: total=%s prompt=%s completion=%s",
+        f"Cache hit prompt tokens: {translator.cache_hit_prompt_token_count.value}"
+    )
+    logger.info(
+        "Term extraction tokens: total=%s prompt=%s completion=%s cache_hit_prompt=%s",
         total_term_extraction_total_tokens,
         total_term_extraction_prompt_tokens,
         total_term_extraction_completion_tokens,
+        total_term_extraction_cache_hit_prompt_tokens,
     )
     if term_extraction_translator is not translator:
         logger.info(
-            "Term extraction translator raw tokens: total=%s prompt=%s completion=%s",
+            "Term extraction translator raw tokens: total=%s prompt=%s completion=%s cache_hit_prompt=%s",
             term_extraction_translator.token_count.value,
             term_extraction_translator.prompt_token_count.value,
             term_extraction_translator.completion_token_count.value,
+            term_extraction_translator.cache_hit_prompt_token_count.value,
         )
 
 

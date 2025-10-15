@@ -890,6 +890,38 @@ class ILTranslator:
                 f"You are a professional and reliable machine translation engine responsible for translating the input text into {self.translation_config.lang_out}."
             ]
 
+        llm_input.append("When translating, please follow the following rules:")
+
+        rich_text_left_placeholder = (
+            self.translate_engine.get_rich_text_left_placeholder(1)
+        )
+        if isinstance(rich_text_left_placeholder, tuple):
+            rich_text_left_placeholder = rich_text_left_placeholder[0]
+        rich_text_right_placeholder = (
+            self.translate_engine.get_rich_text_right_placeholder(2)
+        )
+        if isinstance(rich_text_right_placeholder, tuple):
+            rich_text_right_placeholder = rich_text_right_placeholder[0]
+
+        # Create a structured prompt template for LLM translation
+        llm_input.append(
+            f'1. Do not translate style tags, such as "{rich_text_left_placeholder}xxx{rich_text_right_placeholder}"!'
+        )
+
+        formula_placeholder = self.translate_engine.get_formular_placeholder(3)
+        if isinstance(formula_placeholder, tuple):
+            formula_placeholder = formula_placeholder[0]
+
+        llm_input.append(
+            f'2. Do not translate formula placeholders, such as "{formula_placeholder}". The system will automatically replace the placeholders with the corresponding formulas.'
+        )
+        llm_input.append(
+            "3. If there is no need to translate (such as proper nouns, codes, etc.), then return the original text."
+        )
+        llm_input.append(
+            f"4. Only output the translation result in {self.translation_config.lang_out} without explanations and annotations."
+        )
+
         llm_context_hints = []
 
         if title_paragraph:
@@ -952,41 +984,8 @@ class ILTranslator:
                 for md_block in active_glossary_markdown_blocks:
                     llm_input.append(f"\n{md_block}\n")
 
-        llm_input.append("When translating, please follow the following rules:")
-
-        rich_text_left_placeholder = (
-            self.translate_engine.get_rich_text_left_placeholder(1)
-        )
-        if isinstance(rich_text_left_placeholder, tuple):
-            rich_text_left_placeholder = rich_text_left_placeholder[0]
-        rich_text_right_placeholder = (
-            self.translate_engine.get_rich_text_right_placeholder(2)
-        )
-        if isinstance(rich_text_right_placeholder, tuple):
-            rich_text_right_placeholder = rich_text_right_placeholder[0]
-
-        # Create a structured prompt template for LLM translation
-        llm_input.append(
-            f'1. Do not translate style tags, such as "{rich_text_left_placeholder}xxx{rich_text_right_placeholder}"!'
-        )
-
-        formula_placeholder = self.translate_engine.get_formular_placeholder(3)
-        if isinstance(formula_placeholder, tuple):
-            formula_placeholder = formula_placeholder[0]
-
-        llm_input.append(
-            f'2. Do not translate formula placeholders, such as "{formula_placeholder}". The system will automatically replace the placeholders with the corresponding formulas.'
-        )
-        llm_input.append(
-            "3. If there is no need to translate (such as proper nouns, codes, etc.), then return the original text."
-        )
-        llm_input.append(
-            f"4. Only output the translation result in {self.translation_config.lang_out} without explanations and annotations."
-        )
-        llm_input.append(f"5. Translate text into {self.translation_config.lang_out}.")
         prompt_template = f"""
 Now, please carefully read the following text to be translated and directly output your translation.\n\n{text}
-
 """
         llm_input.append(prompt_template)
 

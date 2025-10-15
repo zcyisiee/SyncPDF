@@ -643,69 +643,6 @@ class ILTranslatorLLMOnly:
                     "When translating, strictly follow the instructions below to ensure translation quality and preserve all formatting, tags, and placeholders:\n"
                 )
 
-            # 2. ##Contextual Hints for Better Translation
-            contextual_hints_section: list[str] = []
-            hint_idx = 1
-            if title_paragraph:
-                contextual_hints_section.append(
-                    f"{hint_idx}. First title in full text: {title_paragraph.unicode}"
-                )
-                hint_idx += 1
-
-            if local_title_paragraph:
-                is_different_from_global = True
-                if title_paragraph:
-                    if local_title_paragraph.debug_id == title_paragraph.debug_id:
-                        is_different_from_global = False
-
-                if is_different_from_global:
-                    contextual_hints_section.append(
-                        f"{hint_idx}. Most similar section title: {local_title_paragraph.unicode}"
-                    )
-                    hint_idx += 1
-
-            # --- ADD GLOSSARY HINTS ---
-            batch_text_for_glossary_matching = "\n".join(
-                item.get("input", "") for item in json_format_input
-            )
-
-            active_glossary_markdown_blocks: list[str] = []
-            # Use cached glossaries
-            if self._cached_glossaries:
-                for glossary in self._cached_glossaries:
-                    # Get active entries for the current batch_text_for_glossary_matching
-                    active_entries = glossary.get_active_entries_for_text(
-                        batch_text_for_glossary_matching
-                    )
-
-                    if active_entries:
-                        current_glossary_md_entries: list[str] = []
-                        for original_source, target_text in sorted(active_entries):
-                            current_glossary_md_entries.append(
-                                f"| {original_source} | {target_text} |"
-                            )
-
-                        if current_glossary_md_entries:
-                            glossary_table_md = (
-                                f"### Glossary: {glossary.name}\n\n"
-                                "| Source Term | Target Term |\n"
-                                "|-------------|-------------|\n"
-                                + "\n".join(current_glossary_md_entries)
-                            )
-                            active_glossary_markdown_blocks.append(glossary_table_md)
-
-            if contextual_hints_section or active_glossary_markdown_blocks:
-                llm_prompt_parts.append("\n## Contextual Hints for Better Translation")
-                llm_prompt_parts.extend(contextual_hints_section)
-
-                if active_glossary_markdown_blocks:
-                    llm_prompt_parts.append(
-                        f"{hint_idx}. You MUST strictly adhere to the following glossaries. auto_extracted_glossary has a lower priority; please give preference to other glossaries. If a source term from a table appears in the text, use the corresponding target term in your translation:"
-                    )
-                    # hint_idx += 1 # No need to increment if tables are part of this point
-                    for md_block in active_glossary_markdown_blocks:
-                        llm_prompt_parts.append(f"\n{md_block}\n")
-
             # 3. ## Strict Rules:
             llm_prompt_parts.append("\n## Strict Rules:")
             llm_prompt_parts.append(
@@ -770,6 +707,69 @@ class ILTranslatorLLMOnly:
             llm_prompt_parts.append("}")
             llm_prompt_parts.append("```")
             llm_prompt_parts.append("</example>")
+
+            # 2. ##Contextual Hints for Better Translation
+            contextual_hints_section: list[str] = []
+            hint_idx = 1
+            if title_paragraph:
+                contextual_hints_section.append(
+                    f"{hint_idx}. First title in full text: {title_paragraph.unicode}"
+                )
+                hint_idx += 1
+
+            if local_title_paragraph:
+                is_different_from_global = True
+                if title_paragraph:
+                    if local_title_paragraph.debug_id == title_paragraph.debug_id:
+                        is_different_from_global = False
+
+                if is_different_from_global:
+                    contextual_hints_section.append(
+                        f"{hint_idx}. The most recent title is: {local_title_paragraph.unicode}"
+                    )
+                    hint_idx += 1
+
+            # --- ADD GLOSSARY HINTS ---
+            batch_text_for_glossary_matching = "\n".join(
+                item.get("input", "") for item in json_format_input
+            )
+
+            active_glossary_markdown_blocks: list[str] = []
+            # Use cached glossaries
+            if self._cached_glossaries:
+                for glossary in self._cached_glossaries:
+                    # Get active entries for the current batch_text_for_glossary_matching
+                    active_entries = glossary.get_active_entries_for_text(
+                        batch_text_for_glossary_matching
+                    )
+
+                    if active_entries:
+                        current_glossary_md_entries: list[str] = []
+                        for original_source, target_text in sorted(active_entries):
+                            current_glossary_md_entries.append(
+                                f"| {original_source} | {target_text} |"
+                            )
+
+                        if current_glossary_md_entries:
+                            glossary_table_md = (
+                                f"### Glossary: {glossary.name}\n\n"
+                                "| Source Term | Target Term |\n"
+                                "|-------------|-------------|\n"
+                                + "\n".join(current_glossary_md_entries)
+                            )
+                            active_glossary_markdown_blocks.append(glossary_table_md)
+
+            if contextual_hints_section or active_glossary_markdown_blocks:
+                llm_prompt_parts.append("\n## Contextual Hints for Better Translation")
+                llm_prompt_parts.extend(contextual_hints_section)
+
+                if active_glossary_markdown_blocks:
+                    llm_prompt_parts.append(
+                        f"{hint_idx}. You MUST strictly adhere to the following glossaries. please give preference to other glossaries. If a source term from a table appears in the text, use the corresponding target term in your translation:"
+                    )
+                    # hint_idx += 1 # No need to increment if tables are part of this point
+                    for md_block in active_glossary_markdown_blocks:
+                        llm_prompt_parts.append(f"\n{md_block}\n")
 
             # 6. ## Here is the input:
             llm_prompt_parts.append("\n## Here is the input:")
