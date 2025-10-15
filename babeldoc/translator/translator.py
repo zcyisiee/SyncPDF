@@ -249,6 +249,7 @@ class OpenAITranslator(BaseTranslator):
         self.token_count = AtomicInteger()
         self.prompt_token_count = AtomicInteger()
         self.completion_token_count = AtomicInteger()
+        self.cache_hit_prompt_token_count = AtomicInteger()
 
     @retry(
         retry=retry_if_exception_type(openai.RateLimitError),
@@ -338,6 +339,10 @@ class OpenAITranslator(BaseTranslator):
                 self.prompt_token_count.inc(response.usage.prompt_tokens)
             if response.usage and response.usage.completion_tokens:
                 self.completion_token_count.inc(response.usage.completion_tokens)
+            if response.usage and (
+                hit_count := getattr(response.usage, "prompt_cache_hit_tokens", 0)
+            ):
+                self.cache_hit_prompt_token_count.inc(hit_count)
         except Exception as e:
             logger.exception("Error updating token count")
 
