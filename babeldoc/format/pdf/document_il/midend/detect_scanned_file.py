@@ -131,6 +131,7 @@ class DetectScannedFile:
                 self.translation_config.shared_context_cross_split_part.auto_enabled_ocr_workaround = True
                 self.translation_config.ocr_workaround = True
                 self.translation_config.skip_scanned_detection = True
+                self.translation_config.disable_rich_text_translate = True
                 self.clean_render_order_for_chars(docs)
                 self.translation_config.remove_non_formula_lines = False
             else:

@@ -227,6 +227,7 @@ class TranslationConfig:
 
         if self.ocr_workaround:
             self.skip_scanned_detection = True
+            self.disable_rich_text_translate = True
 
         # for backward compatibility
         if use_side_by_side_dual is False and use_alternating_pages_dual is False:

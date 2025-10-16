@@ -58,17 +58,6 @@ def encode_image(image) -> bytes:
     return encoded
 
 
-@retry(
-    stop=stop_after_attempt(3),  # 最多重试 3 次
-    wait=wait_exponential(
-        multiplier=1, min=1, max=10
-    ),  # 指数退避策略，初始 1 秒，最大 10 秒
-    retry=retry_if_exception_type((httpx.HTTPError, Exception)),  # 针对哪些异常重试
-    before_sleep=lambda retry_state: logger.warning(
-        f"Request failed, retrying in {getattr(retry_state.next_action, 'sleep', 'unknown')} seconds... "
-        f"(Attempt {retry_state.attempt_number}/3)"
-    ),
-)
 def clip_num(num: float, min_value: float, max_value: float) -> float:
     """Clip a number to a specified range."""
     if num < min_value:
@@ -78,6 +67,17 @@ def clip_num(num: float, min_value: float, max_value: float) -> float:
     return num
 
 
+@retry(
+    stop=stop_after_attempt(5),  # 最多重试 3 次
+    wait=wait_exponential(
+        multiplier=1, min=1, max=10
+    ),  # 指数退避策略，初始 1 秒，最大 10 秒
+    retry=retry_if_exception_type((httpx.HTTPError, Exception)),  # 针对哪些异常重试
+    before_sleep=lambda retry_state: logger.warning(
+        f"Request failed VLM, retrying in {getattr(retry_state.next_action, 'sleep', 'unknown')} seconds... "
+        f"(Attempt {retry_state.attempt_number}/5)"
+    ),
+)
 def predict_layout(
     image,
     host: str = "http://localhost:8000",
@@ -186,14 +186,14 @@ def predict_layout(
 
 
 @retry(
-    stop=stop_after_attempt(3),  # 最多重试 3 次
+    stop=stop_after_attempt(5),  # 最多重试 3 次
     wait=wait_exponential(
         multiplier=1, min=1, max=10
     ),  # 指数退避策略，初始 1 秒，最大 10 秒
     retry=retry_if_exception_type((httpx.HTTPError, Exception)),  # 针对哪些异常重试
     before_sleep=lambda retry_state: logger.warning(
-        f"Request failed, retrying in {getattr(retry_state.next_action, 'sleep', 'unknown')} seconds... "
-        f"(Attempt {retry_state.attempt_number}/3)"
+        f"Request failed PADDLE, retrying in {getattr(retry_state.next_action, 'sleep', 'unknown')} seconds... "
+        f"(Attempt {retry_state.attempt_number}/5)"
     ),
 )
 def predict_layout2(
@@ -599,7 +599,7 @@ class RpcDocLayoutModel(DocLayoutModel):
     ):
         layout_temp_path = translate_config.get_working_file_path("layout.temp.pdf")
         mupdf_doc.save(layout_temp_path.as_posix())
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        with ThreadPoolExecutor(max_workers=32) as executor:
             yield from executor.map(
                 self.predict_page,
                 pages,

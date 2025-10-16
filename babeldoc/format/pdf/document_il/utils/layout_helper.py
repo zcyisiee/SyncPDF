@@ -659,7 +659,6 @@ def get_character_layout(
         layout_priority = [
             "number",
             "reference",
-            "reference_hybrid",
             "reference_content",
             "algorithm",
             "formula_caption",
@@ -703,6 +702,7 @@ def get_character_layout(
             "page_header",
             "page_footer",
             # --- hybrid labels ---
+            "reference_hybrid",
             "document_hybrid",
             "academic_paper_hybrid",
             "form_or_table_hybrid",
