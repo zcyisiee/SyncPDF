@@ -32,6 +32,9 @@ class SharedContextCrossSplitPart:
         self.auto_extracted_glossary: Glossary | None = None
         self.raw_extracted_terms: list[tuple[str, str]] = []
         self.auto_enabled_ocr_workaround = False
+        # Statistics for valid characters/text across the whole file
+        self.valid_char_count_total: int = 0
+        self.total_valid_text_token_count: int = 0
 
     def initialize_glossaries(self, initial_glossaries: list[Glossary] | None):
         with self._lock:
@@ -45,6 +48,9 @@ class SharedContextCrossSplitPart:
             for g in self.user_glossaries:
                 for entity in g.normalized_lookup:
                     self.norm_terms.add(entity)
+            # reset statistics buffer when initializing
+            self.valid_char_count_total = 0
+            self.total_valid_text_token_count = 0
 
     def add_raw_extracted_term_pair(self, src: str, tgt: str):
         with self._lock:
@@ -67,7 +73,11 @@ class SharedContextCrossSplitPart:
         return current_name
 
     def contains_term(self, term: str) -> bool:
-        pass
+        with self._lock:
+            try:
+                return term in self.norm_terms
+            except Exception:
+                return False
 
     def finalize_auto_extracted_glossary(self):
         with self._lock:
@@ -111,6 +121,16 @@ class SharedContextCrossSplitPart:
                 if self.auto_extracted_glossary:
                     all_glossaries.append(self.auto_extracted_glossary)
                 return all_glossaries
+
+    def add_valid_counts(self, char_count: int, token_count: int):
+        """Accumulate valid character and token counts in a threadsafe way."""
+        if char_count <= 0 and token_count <= 0:
+            return
+        with self._lock:
+            if char_count > 0:
+                self.valid_char_count_total += char_count
+            if token_count > 0:
+                self.total_valid_text_token_count += token_count
 
 
 class TranslationConfig:
@@ -463,6 +483,8 @@ class TranslateResult:
     no_watermark_dual_pdf_path: Path | None
     peak_memory_usage: int | None
     auto_extracted_glossary_path: Path | None
+    total_valid_character_count: int | None
+    total_valid_text_token_count: int | None
 
     def __init__(
         self,
@@ -479,6 +501,8 @@ class TranslateResult:
         self.no_watermark_dual_pdf_path = dual_pdf_path
 
         self.auto_extracted_glossary_path = auto_extracted_glossary_path
+        self.total_valid_character_count = None
+        self.total_valid_text_token_count = None
 
     def __str__(self):
         """Return a human-readable string representation of the translation result."""
@@ -523,6 +547,20 @@ class TranslateResult:
 
         if hasattr(self, "peak_memory_usage") and self.peak_memory_usage:
             result.append(f"\tPeak memory usage: {self.peak_memory_usage} MB")
+
+        if hasattr(self, "total_valid_character_count") and isinstance(
+            self.total_valid_character_count, int
+        ):
+            result.append(
+                f"\tTotal valid character count: {self.total_valid_character_count}"
+            )
+
+        if hasattr(self, "total_valid_text_token_count") and isinstance(
+            self.total_valid_text_token_count, int
+        ):
+            result.append(
+                f"\tTotal valid text token count (gpt-4o): {self.total_valid_text_token_count}"
+            )
 
         if result:
             result.insert(0, "Translation results:")
