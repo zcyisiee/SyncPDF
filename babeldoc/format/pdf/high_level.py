@@ -755,6 +755,23 @@ def do_translate(
         logger.info(
             f"finish translate: {original_pdf_path}, cost: {finish_time - start_time} s",
         )
+        # Populate aggregate valid text statistics into result
+        try:
+            sc = translation_config.shared_context_cross_split_part
+            result.total_valid_character_count = getattr(
+                sc, "valid_char_count_total", 0
+            )
+            token_total = getattr(sc, "total_valid_text_token_count", None)
+            result.total_valid_text_token_count = (
+                token_total if isinstance(token_total, int) else 0
+            )
+        except Exception as e:
+            logger.warning("Failed to populate valid text statistics: %s", e)
+            try:
+                result.total_valid_character_count = 0
+                result.total_valid_text_token_count = 0
+            except Exception:
+                pass
         result.original_pdf_path = translation_config.input_file
         result.peak_memory_usage = peak_memory_usage
 

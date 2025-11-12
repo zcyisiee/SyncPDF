@@ -3,12 +3,14 @@ import functools
 import logging
 import math
 import re
+import unicodedata
 from io import BytesIO
 from itertools import islice
 from typing import Literal
 
 import freetype
 import pymupdf
+import tiktoken
 
 import babeldoc.pdfminer.pdfinterp
 from babeldoc.format.pdf.babelpdf.base14 import get_base14_bbox
@@ -18,6 +20,7 @@ from babeldoc.format.pdf.babelpdf.encoding import get_type1_encoding
 from babeldoc.format.pdf.babelpdf.utils import guarded_bbox
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils import zstd_helper
+from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
 from babeldoc.format.pdf.document_il.utils.matrix_helper import decompose_ctm
 from babeldoc.format.pdf.document_il.utils.style_helper import BLACK
 from babeldoc.format.pdf.document_il.utils.style_helper import YELLOW
@@ -358,6 +361,10 @@ class ILCreater:
         self.render_order = 0
         self.current_clip_paths: list[tuple] = []
         self.clip_paths_stack: list[list[tuple]] = []
+        # For valid character collection
+        self.font_mapper = FontMapper(translation_config)
+        self.tokenizer = tiktoken.encoding_for_model("gpt-4o")
+        self._page_valid_chars_buffer: list[str] | None = None
 
     def transform_clip_path(
         self,
@@ -566,8 +573,32 @@ class ILCreater:
         self.current_clip_paths = []
         self.clip_paths_stack = []
         self.docs.page.append(self.current_page)
+        # Prepare per-page buffer for valid characters on translated pages
+        self._page_valid_chars_buffer = []
 
     def on_page_end(self):
+        # Accumulate this page's valid characters and tokens into shared context
+        try:
+            if (
+                self._page_valid_chars_buffer is not None
+                and len(self._page_valid_chars_buffer) > 0
+            ):
+                page_text = "".join(self._page_valid_chars_buffer)
+                char_count = len(page_text)
+                try:
+                    token_count = len(
+                        self.tokenizer.encode(page_text, disallowed_special=())
+                    )
+                except Exception as e:
+                    logger.warning("Failed to compute token count for page: %s", e)
+                    token_count = 0
+                self.translation_config.shared_context_cross_split_part.add_valid_counts(
+                    char_count, token_count
+                )
+        except Exception as e:
+            logger.warning("Failed to accumulate page valid stats: %s", e)
+        finally:
+            self._page_valid_chars_buffer = []
         self.progress.advance(1)
 
     def on_page_crop_box(
@@ -848,6 +879,11 @@ class ILCreater:
                 "Failed to get rotation angle for char %s",
                 char.get_text(),
             )
+        # Collect valid characters for statistics
+        try:
+            self._collect_valid_char(char.get_text())
+        except Exception as e:
+            logger.warning("Error collecting valid char: %s", e)
         gs = self.create_graphic_state(char.graphicstate)
         # Get font from current page or xobject
         font = None
@@ -982,6 +1018,43 @@ class ILCreater:
                     line_width=0.2,
                 )
             )
+
+    def _collect_valid_char(self, ch: str):
+        """Append a valid character into the current page buffer according to rules.
+        Rules:
+        - Include whitespace matched by space_regex directly.
+        - Ignore categories that are never normal text: {Cc, Cs, Co, Cn}.
+        - Apply inverted criteria from formular_helper.py (21-28):
+          empty -> invalid, contains '(cid:' -> invalid,
+          not has_char(ch) -> invalid unless len(ch) > 1 and all(has_char(x)).
+        """
+        if self._page_valid_chars_buffer is None:
+            return
+        if space_regex.match(ch):
+            self._page_valid_chars_buffer.append(ch)
+            return
+        try:
+            cat = unicodedata.category(ch[0]) if ch else None
+        except Exception:
+            cat = None
+        if cat in {"Cc", "Cs", "Co", "Cn"}:
+            return
+        is_invalid = False
+        if not ch:
+            is_invalid = True
+        elif "(cid:" in ch:
+            is_invalid = True
+        else:
+            try:
+                if not self.font_mapper.has_char(ch):
+                    if len(ch) > 1 and all(self.font_mapper.has_char(x) for x in ch):
+                        is_invalid = False
+                    else:
+                        is_invalid = True
+            except Exception:
+                is_invalid = True
+        if not is_invalid:
+            self._page_valid_chars_buffer.append(ch)
 
     def on_lt_curve(self, curve: babeldoc.pdfminer.layout.LTCurve):
         if not self.enable_graphic_element_process:
