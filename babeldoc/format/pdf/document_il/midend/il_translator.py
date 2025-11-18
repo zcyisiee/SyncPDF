@@ -6,6 +6,7 @@ import logging
 import re
 import threading
 from pathlib import Path
+from string import Template
 
 import tiktoken
 from tqdm import tqdm
@@ -44,6 +45,33 @@ from babeldoc.translator.translator import BaseTranslator
 from babeldoc.utils.priority_thread_pool_executor import PriorityThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
+
+
+PROMPT_TEMPLATE = Template(
+    """$role_block
+
+## Rules
+
+1. Keep the structure exactly unchanged: do NOT add/remove/reorder any tags, placeholders, or tokens.
+2. Keep all tags unchanged (e.g., <style>, <b>, </style>).
+   - Translate human-readable text inside tags.
+   - Do NOT translate text inside <code>…</code>.
+3. Do NOT translate or alter placeholders: {v1}, {name}, %s, %d, [[...]], %%...%%.
+4. If the entire input is pure code/identifiers, return it unchanged.
+5. Translate ALL human-readable content into $lang_out.
+
+$glossary_block
+
+$context_block
+
+## Output
+
+Output ONLY the translated $lang_out text. No explanations, no backticks, no extra text.
+
+Now translate the following text:
+
+$text_to_translate"""
+)
 
 
 class RichTextPlaceholder:
@@ -167,6 +195,12 @@ class DocumentTranslateTracker:
             pdf_unicode = getattr(para, "pdf_unicode", None)
             llm_translate_trackers = getattr(para, "llm_translate_trackers", None)
             placeholders = getattr(para, "placeholders", None)
+            original_placeholders = getattr(para, "original_placeholders", None)
+            removed_hallucinated_placeholders = getattr(
+                para,
+                "removed_hallucinated_placeholders",
+                None,
+            )
 
             llm_translate_trackers_json = []
             if llm_translate_trackers:
@@ -188,6 +222,8 @@ class DocumentTranslateTracker:
                 "placeholders": placeholders_json,
                 "multi_paragraph_id": getattr(para, "multi_paragraph_id", None),
                 "multi_paragraph_index": getattr(para, "multi_paragraph_index", None),
+                "original_placeholders": original_placeholders,
+                "removed_hallucinated_placeholders": removed_hallucinated_placeholders,
             }
             paragraphs.append(
                 paragraph_json,
@@ -208,6 +244,8 @@ class PageTranslateTracker:
 class ParagraphTranslateTracker:
     def __init__(self):
         self.llm_translate_trackers = []
+        self.original_placeholders: dict[str, int] = {}
+        self.removed_hallucinated_placeholders: dict[str, int] = {}
 
     def set_pdf_unicode(self, unicode: str):
         self.pdf_unicode = unicode
@@ -220,6 +258,10 @@ class ParagraphTranslateTracker:
     ):
         self.placeholders = placeholders
 
+    def set_original_placeholders(self, placeholders: dict[str, int] | None):
+        """Record original placeholder-like tokens from the source text."""
+        self.original_placeholders = placeholders or {}
+
     def record_multi_paragraph_id(self, mid):
         self.multi_paragraph_id = mid
 
@@ -228,6 +270,14 @@ class ParagraphTranslateTracker:
 
     def set_output(self, output: str):
         self.output = output
+
+    def record_removed_hallucinated_placeholder(self, token: str):
+        """Record placeholder-like tokens removed from translated text."""
+        if not token:
+            return
+        self.removed_hallucinated_placeholders[token] = (
+            self.removed_hallucinated_placeholders.get(token, 0) + 1
+        )
 
     def new_llm_translate_tracker(self) -> LLMTranslateTracker:
         tracker = LLMTranslateTracker()
@@ -315,6 +365,20 @@ class ILTranslator:
         self.add_content_filter_hint_lock = threading.Lock()
         self.docs = None
 
+        # Pre-compile patterns for placeholder-like tokens that may be hallucinated by LLM.
+        # We only consider the same shapes as our own formula & rich-text placeholders.
+        self._formula_placeholder_pattern = re.compile(
+            self.translate_engine.get_formular_placeholder(r"\d+")[1], re.IGNORECASE
+        )
+        self._style_left_placeholder_pattern = re.compile(
+            self.translate_engine.get_rich_text_left_placeholder(r"\d+")[1],
+            re.IGNORECASE,
+        )
+        self._style_right_placeholder_pattern = re.compile(
+            self.translate_engine.get_rich_text_right_placeholder(r"\d+")[1],
+            re.IGNORECASE,
+        )
+
     def calc_token_count(self, text: str) -> int:
         try:
             return len(self.tokenizer.encode(text, disallowed_special=()))
@@ -351,7 +415,10 @@ class ILTranslator:
 
         path = self.translation_config.get_working_file_path("translate_tracking.json")
 
-        if self.translation_config.debug:
+        if (
+            self.translation_config.debug
+            or self.translation_config.working_dir is not None
+        ):
             logger.debug(f"save translate tracking to {path}")
             with Path(path).open("w", encoding="utf-8") as f:
                 f.write(tracker.to_json())
@@ -419,6 +486,13 @@ class ILTranslator:
             self.unicode = unicode
             self.placeholders = placeholders
             self.base_style = base_style
+            # Original placeholder-like tokens extracted from the source text.
+            # Key: exact matched token string; Value: occurrence count.
+            self.original_placeholder_tokens: dict[str, int] = {}
+
+        def set_original_placeholder_tokens(self, tokens: dict[str, int] | None):
+            """Attach original placeholder-like tokens from source text."""
+            self.original_placeholder_tokens = tokens or {}
 
         def get_placeholders_hint(self) -> dict[str, str] | None:
             hint = {}
@@ -510,6 +584,22 @@ class ILTranslator:
         # Skip paragraphs with only placeholders
         if is_placeholder_only_paragraph(paragraph):
             return None
+
+        # Extract original placeholder-like tokens from the raw paragraph text
+        original_placeholder_tokens: dict[str, int] = {}
+
+        def scan_placeholder_tokens(text: str, tokens: dict[str, int]):
+            for pattern in (
+                self._formula_placeholder_pattern,
+                self._style_left_placeholder_pattern,
+                self._style_right_placeholder_pattern,
+            ):
+                for match in pattern.finditer(text):
+                    token = match.group(0)
+                    tokens[token] = tokens.get(token, 0) + 1
+
+        if paragraph.unicode:
+            scan_placeholder_tokens(paragraph.unicode, original_placeholder_tokens)
         if len(paragraph.pdf_paragraph_composition) == 1:
             # 如果整个段落只有一个组成部分，那么直接返回，不需要套占位符等
             composition = paragraph.pdf_paragraph_composition[0]
@@ -518,7 +608,15 @@ class ILTranslator:
                 or composition.pdf_same_style_characters
                 or composition.pdf_character
             ):
-                return self.TranslateInput(paragraph.unicode, [], paragraph.pdf_style)
+                translate_input = self.TranslateInput(
+                    paragraph.unicode,
+                    [],
+                    paragraph.pdf_style,
+                )
+                translate_input.set_original_placeholder_tokens(
+                    original_placeholder_tokens,
+                )
+                return translate_input
             elif composition.pdf_formula:
                 # 不需要翻译纯公式
                 return None
@@ -627,7 +725,9 @@ class ILTranslator:
                 return self.get_translate_input(paragraph, page_font_map, True)
 
         text = get_char_unicode_string(chars)
-        return self.TranslateInput(text, placeholders, paragraph.pdf_style)
+        translate_input = self.TranslateInput(text, placeholders, paragraph.pdf_style)
+        translate_input.set_original_placeholder_tokens(original_placeholder_tokens)
+        return translate_input
 
     def process_formula(
         self,
@@ -668,6 +768,7 @@ class ILTranslator:
         self,
         input_text: TranslateInput,
         output: str,
+        tracker: ParagraphTranslateTracker | None = None,
         llm_translate_tracker: LLMTranslateTracker | None = None,
     ) -> [PdfParagraphComposition]:
         result = []
@@ -715,9 +816,42 @@ class ILTranslator:
         # 合并所有模式
         combined_pattern = "|".join(patterns)
         combined_placeholder_pattern = "|".join(placeholder_patterns)
+        # Build allowed placeholder tokens: originals from source + placeholders we injected.
+        allowed_placeholder_tokens: set[str] = set()
+        if getattr(input_text, "original_placeholder_tokens", None):
+            allowed_placeholder_tokens.update(input_text.original_placeholder_tokens)
+        for placeholder in input_text.placeholders:
+            if isinstance(placeholder, FormulaPlaceholder):
+                allowed_placeholder_tokens.add(placeholder.placeholder)
+            else:
+                allowed_placeholder_tokens.add(placeholder.left_placeholder)
+                allowed_placeholder_tokens.add(placeholder.right_placeholder)
 
         def remove_placeholder(text: str):
-            return re.sub(combined_placeholder_pattern, "", text, flags=re.IGNORECASE)
+            """Remove placeholder artifacts and hallucinated placeholder-like tokens."""
+            # First, remove any leftover placeholders built from our own regex patterns.
+            if combined_placeholder_pattern:
+                text = re.sub(
+                    combined_placeholder_pattern,
+                    "",
+                    text,
+                    flags=re.IGNORECASE,
+                )
+
+            # Then, detect placeholder-like tokens of the same shapes as our own
+            # formula and rich-text placeholders. Only keep those in the allowed set.
+            def _replace_token(match: re.Match) -> str:
+                token = match.group(0)
+                if token in allowed_placeholder_tokens:
+                    return token
+                if tracker is not None:
+                    tracker.record_removed_hallucinated_placeholder(token)
+                return ""
+
+            text = self._formula_placeholder_pattern.sub(_replace_token, text)
+            text = self._style_left_placeholder_pattern.sub(_replace_token, text)
+            text = self._style_right_placeholder_pattern.sub(_replace_token, text)
+            return text
 
         # 找到所有匹配
         last_end = 0
@@ -839,6 +973,9 @@ class ILTranslator:
             return None, None
         tracker.set_input(translate_input.unicode)
         tracker.set_placeholders(translate_input.placeholders)
+        tracker.set_original_placeholders(
+            getattr(translate_input, "original_placeholder_tokens", None),
+        )
         text = translate_input.unicode
         if len(text) < self.translation_config.min_text_length:
             logger.debug(
@@ -864,6 +1001,7 @@ class ILTranslator:
         paragraph.pdf_paragraph_composition = self.parse_translate_output(
             translate_input,
             translated_text,
+            tracker,
             tracker.last_llm_translate_tracker(),
         )
         for composition in paragraph.pdf_paragraph_composition:
@@ -876,6 +1014,119 @@ class ILTranslator:
                 )
         return True
 
+    def _build_role_block(self) -> str:
+        """Build the role block for LLM prompt.
+
+        Returns:
+            Role block string with custom_system_prompt or default role description.
+        """
+        custom_prompt = getattr(self.translation_config, "custom_system_prompt", None)
+        if custom_prompt:
+            role_block = custom_prompt.strip()
+            if "Follow all rules strictly." not in role_block:
+                if not role_block.endswith("\n"):
+                    role_block += "\n"
+                role_block += "Follow all rules strictly."
+        else:
+            role_block = (
+                f"You are a professional {self.translation_config.lang_out} native translator who needs to fluently translate text "
+                f"into {self.translation_config.lang_out}.\n\n"
+                "Follow all rules strictly."
+            )
+        return role_block
+
+    def _build_context_block(
+        self,
+        title_paragraph: PdfParagraph | None = None,
+        local_title_paragraph: PdfParagraph | None = None,
+        translate_input: TranslateInput | None = None,
+    ) -> str:
+        """Build the context/hints block for LLM prompt.
+
+        Args:
+            title_paragraph: First title paragraph in the document
+            local_title_paragraph: Most recent title paragraph
+            translate_input: TranslateInput containing placeholder hints
+
+        Returns:
+            Context block string, empty if no context hints available
+        """
+        context_lines: list[str] = []
+        hint_idx = 1
+
+        if title_paragraph:
+            context_lines.append(
+                f"{hint_idx}. First title in the full text: {title_paragraph.unicode}"
+            )
+            hint_idx += 1
+
+        if local_title_paragraph:
+            is_different_from_global = True
+            if title_paragraph:
+                if local_title_paragraph.debug_id == title_paragraph.debug_id:
+                    is_different_from_global = False
+
+            if is_different_from_global:
+                context_lines.append(
+                    f"{hint_idx}. The most recent title is: {local_title_paragraph.unicode}"
+                )
+                hint_idx += 1
+
+        if translate_input and self.translation_config.add_formula_placehold_hint:
+            placeholders_hint = translate_input.get_placeholders_hint()
+            if placeholders_hint:
+                context_lines.append(
+                    f"{hint_idx}. Formula placeholder hint:\n{placeholders_hint}"
+                )
+
+        if context_lines:
+            return "## Context / Hints\n" + "\n".join(context_lines) + "\n"
+        return ""
+
+    def _build_glossary_block(self, text: str) -> str:
+        """Build the glossary block for LLM prompt.
+
+        Args:
+            text: Text to match against glossary entries
+
+        Returns:
+            Glossary block string with tables, empty if no active glossary entries
+        """
+        if not self._cached_glossaries:
+            return ""
+
+        glossary_entries_per_glossary: dict[str, list[tuple[str, str]]] = {}
+
+        for glossary in self._cached_glossaries:
+            active_entries = glossary.get_active_entries_for_text(text)
+            if active_entries:
+                glossary_entries_per_glossary[glossary.name] = sorted(active_entries)
+
+        if not glossary_entries_per_glossary:
+            return ""
+
+        glossary_block_lines: list[str] = [
+            "## Glossary",
+            "",
+            "Always use the glossary's **Target Term** for any occurrence of its **Source Term** "
+            "(including variants, inside tags, or broken across lines).",
+            "",
+            "Unlisted terms are translated naturally.",
+            "",
+        ]
+
+        for glossary_name, entries in glossary_entries_per_glossary.items():
+            glossary_block_lines.append(f"### Glossary: {glossary_name}")
+            glossary_block_lines.append("")
+            glossary_block_lines.append(
+                "| Source Term | Target Term |\n|-------------|-------------|"
+            )
+            for original_source, target_text in entries:
+                glossary_block_lines.append(f"| {original_source} | {target_text} |")
+            glossary_block_lines.append("")
+
+        return "\n".join(glossary_block_lines)
+
     def generate_prompt_for_llm(
         self,
         text: str,
@@ -883,115 +1134,30 @@ class ILTranslator:
         local_title_paragraph: PdfParagraph | None = None,
         translate_input: TranslateInput | None = None,
     ):
-        if self.translation_config.custom_system_prompt:
-            llm_input = [self.translation_config.custom_system_prompt]
-        else:
-            llm_input = [
-                f"You are a professional and reliable machine translation engine responsible for translating the input text into {self.translation_config.lang_out}."
-            ]
+        """Generate LLM prompt using template-based approach.
 
-        llm_input.append("When translating, please follow the following rules:")
+        Args:
+            text: Text to be translated
+            title_paragraph: First title paragraph in the document
+            local_title_paragraph: Most recent title paragraph
+            translate_input: TranslateInput containing placeholder information
 
-        rich_text_left_placeholder = (
-            self.translate_engine.get_rich_text_left_placeholder(1)
+        Returns:
+            Final LLM prompt string
+        """
+        role_block = self._build_role_block()
+        context_block = self._build_context_block(
+            title_paragraph, local_title_paragraph, translate_input
         )
-        if isinstance(rich_text_left_placeholder, tuple):
-            rich_text_left_placeholder = rich_text_left_placeholder[0]
-        rich_text_right_placeholder = (
-            self.translate_engine.get_rich_text_right_placeholder(2)
+        glossary_block = self._build_glossary_block(text)
+
+        return PROMPT_TEMPLATE.substitute(
+            role_block=role_block,
+            glossary_block=glossary_block,
+            context_block=context_block,
+            lang_out=self.translation_config.lang_out,
+            text_to_translate=text,
         )
-        if isinstance(rich_text_right_placeholder, tuple):
-            rich_text_right_placeholder = rich_text_right_placeholder[0]
-
-        # Create a structured prompt template for LLM translation
-        llm_input.append(
-            f'1. Do not translate style tags, such as "{rich_text_left_placeholder}xxx{rich_text_right_placeholder}"!'
-        )
-
-        formula_placeholder = self.translate_engine.get_formular_placeholder(3)
-        if isinstance(formula_placeholder, tuple):
-            formula_placeholder = formula_placeholder[0]
-
-        llm_input.append(
-            f'2. Do not translate formula placeholders, such as "{formula_placeholder}". The system will automatically replace the placeholders with the corresponding formulas.'
-        )
-        llm_input.append(
-            "3. If there is no need to translate (such as proper nouns, codes, etc.), then return the original text."
-        )
-        llm_input.append(
-            f"4. Only output the translation result in {self.translation_config.lang_out} without explanations and annotations."
-        )
-
-        llm_context_hints = []
-
-        if title_paragraph:
-            llm_context_hints.append(
-                f"The first title in the full text: {title_paragraph.unicode}"
-            )
-        if (
-            local_title_paragraph
-            and title_paragraph
-            and local_title_paragraph.debug_id != title_paragraph.debug_id
-        ):
-            llm_context_hints.append(
-                f"The most similar title in the full text: {local_title_paragraph.unicode}"
-            )
-
-        if translate_input and self.translation_config.add_formula_placehold_hint:
-            placeholders_hint = translate_input.get_placeholders_hint()
-            if placeholders_hint:
-                llm_context_hints.append(
-                    f"This is the formula placeholder hint: \n{placeholders_hint}"
-                )
-
-        active_glossary_markdown_blocks: list[str] = []
-        # Use cached glossaries
-        if self._cached_glossaries:
-            for glossary in self._cached_glossaries:
-                # Get active entries for the current text being processed (passed as 'text')
-                active_entries = glossary.get_active_entries_for_text(text)
-
-                if active_entries:
-                    current_glossary_md_entries: list[str] = []
-                    for original_source, target_text in sorted(active_entries):
-                        current_glossary_md_entries.append(
-                            f"| {original_source} | {target_text} |"
-                        )
-
-                    if current_glossary_md_entries:
-                        glossary_table_md = (
-                            f"### Glossary: {glossary.name}\n\n"
-                            "| Source Term | Target Term |\n"
-                            "|-------------|-------------|\n"
-                            + "\n".join(current_glossary_md_entries)
-                        )
-                        active_glossary_markdown_blocks.append(glossary_table_md)
-
-        if llm_context_hints or active_glossary_markdown_blocks:
-            llm_input.append(
-                "When translating, please refer to the following information to improve translation quality:"
-            )
-            current_hint_index = 1
-            for hint_line in llm_context_hints:
-                llm_input.append(f"{current_hint_index}. {hint_line}")
-                current_hint_index += 1
-
-            if active_glossary_markdown_blocks:
-                llm_input.append(
-                    f"{current_hint_index}. Strictly follow the glossary: use its target terms for all source terms (including variants), do not alter existing translations, and translate any unmatched terms naturally:"
-                )
-                current_hint_index += 1
-                for md_block in active_glossary_markdown_blocks:
-                    llm_input.append(f"\n{md_block}\n")
-
-        prompt_template = f"""
-Now, please carefully read the following text to be translated and directly output your translation.\n\n{text}
-"""
-        llm_input.append(prompt_template)
-
-        final_input = "\n".join(llm_input).strip()
-
-        return final_input
 
     def add_content_filter_hint(self, page: Page, paragraph: PdfParagraph):
         with self.add_content_filter_hint_lock:
