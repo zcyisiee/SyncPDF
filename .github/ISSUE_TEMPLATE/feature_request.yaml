@@ -16,6 +16,15 @@ body:
           required: true
         - label: I have fully read and understood the [README](https://github.com/funstory-ai/BabelDOC/blob/main/README.md)
           required: true
+        - label: This feature is not related to BabelDOC CLI. The CLI is only used for debugging purposes, we do not accept any feature requests related to the CLI.
+          required: true
+  
+  - type: markdown
+    attributes:
+      value: |
+        如果您想自部署 BabelDOC，请使用 [PDFMathTranslate-next](https://github.com/PDFMathTranslate-next/PDFMathTranslate-next) 代替。若其功能无法满足，请向 [PDFMathTranslate-next](https://github.com/PDFMathTranslate-next/PDFMathTranslate-next) 提交功能请求。
+        If you wish to self-host BabelDOC, please use [PDFMathTranslate-next](https://github.com/PDFMathTranslate-next/PDFMathTranslate-next) instead. If its features do not meet your needs, please submit a feature request to [PDFMathTranslate-next](https://github.com/PDFMathTranslate-next/PDFMathTranslate-next).
+
 
   - type: textarea
     id: describe
