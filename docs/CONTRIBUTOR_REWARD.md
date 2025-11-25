@@ -18,10 +18,9 @@
 #### **申请条件**
    - PR 需被成功合并至以下几个仓库：
      1. [funstory-ai/BabelDOC](https://github.com/funstory-ai/BabelDOC/pulls) 仓库
-     2. [Byaidu/PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate/pulls) 的主分支 
-     3. [PDFMathTranslate/PDFMathTranslate-next](https://github.com/PDFMathTranslate/PDFMathTranslate-next/pulls) 的主分支。
-     4. [guaguastandup/zotero-pdf2zh](https://github.com/guaguastandup/zotero-pdf2zh) 的主分支
-     5. [funstory-ai/aifw](https://github.com/funstory-ai/aifw) 的主分支
+     2. [PDFMathTranslate-next/PDFMathTranslate-next](https://github.com/PDFMathTranslate-next/PDFMathTranslate-next) 的主分支。
+     3. [guaguastandup/zotero-pdf2zh](https://github.com/guaguastandup/zotero-pdf2zh) 的主分支
+     4. [funstory-ai/aifw](https://github.com/funstory-ai/aifw) 的主分支
    - 若目标为 [funstory-ai/BabelDOC](https://github.com/funstory-ai/BabelDOC/pulls) 的 PR 未被合并，但被维护者认定为有价值的概念验证，同样符合条件。
    - 审核 PR、撰写 wiki 等贡献也必须是以上两个仓库。
    - 同一贡献者每月仅可申请一次（无论提交 PR 数量）
