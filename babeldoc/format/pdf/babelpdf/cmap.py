@@ -1,4 +1,3 @@
-import base64
 import re
 import struct
 
@@ -27,11 +26,7 @@ pattern_one_r = (
 
 
 def parse_blob_value(text):
-    blob = base64.b16decode(text, casefold=True)
-    val = 0
-    for i, x in enumerate(blob):
-        val = (val << (i * 8)) + x
-    return val, len(blob)
+    return int(text, 16), len(text) // 2
 
 
 def parse_cmap_char(text, store):

@@ -1021,11 +1021,18 @@ class PDFCIDFont(PDFFont):
         ttf = None
         self.has_encoding = False
         self.cid_encoding = None
-        if "Encoding" in spec:
-            encoding_part = spec["Encoding"]
-            if isinstance(encoding_part, PDFStream):
-                self.has_encoding = True
-                self.cid_encoding = CharacterMap(encoding_part.get_data().decode("U8"))
+        try:
+            if "Encoding" in spec:
+                encoding_part = spec["Encoding"]
+                if isinstance(encoding_part, PDFStream):
+                    self.has_encoding = True
+                    self.cid_encoding = CharacterMap(
+                        encoding_part.get_data().decode("U8")
+                    )
+        except Exception as e:
+            log.error(f"Error get cid_encoding from spec: {e}")
+            self.has_encoding = False
+            self.cid_encoding = None
         if "FontFile2" in descriptor:
             self.fontfile = stream_value(descriptor.get("FontFile2"))
             ttf = TrueTypeFont(self.basefont, BytesIO(self.fontfile.get_data()))
@@ -1130,8 +1137,14 @@ class PDFCIDFont(PDFFont):
         return True
 
     def decode(self, bytes: bytes) -> Iterable[int]:
-        if self.has_encoding:
-            return self.cid_encoding.decode(bytes)
+        try:
+            if self.has_encoding:
+                res = self.cid_encoding.decode(bytes)
+
+                if res is not None and all(x > 0 for x in res):
+                    return res
+        except Exception as e:
+            log.error(f"Error use cid_encoding to decode bytes: {e}")
         return self.cmap.decode(bytes)
 
     def char_disp(self, cid: int) -> float | tuple[float | None, float]:
