@@ -1023,7 +1023,7 @@ class PDFCIDFont(PDFFont):
         self.cid_encoding = None
         try:
             if "Encoding" in spec:
-                encoding_part = spec["Encoding"]
+                encoding_part = resolve1(spec["Encoding"])
                 if isinstance(encoding_part, PDFStream):
                     self.has_encoding = True
                     self.cid_encoding = CharacterMap(
