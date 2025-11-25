@@ -28,7 +28,11 @@ body:
     attributes:
       value: |
         Thank you for using **BabelDOC** and helping us improve it! 🙏
+        Please confirm again that the above checklist items have been carefully executed! (If you have not carefully executed them, the issue will be closed directly without any response)
 
+        Please also note:
+        - If you are using a downstream project like pdf2zh-next, please submit an issue directly to the downstream application. Only when you confirm that this issue is a problem with the core library of BabelDOC, submit this issue.
+        - The CLI is only used for debugging purposes, we do not provide any technical support for CLI usage.
   - type: textarea
     id: environment
     attributes:
