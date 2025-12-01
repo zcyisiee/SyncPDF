@@ -468,7 +468,9 @@ class ILCreater:
     def parse_arg(self, arg: str):
         if isinstance(arg, PSLiteral):
             return f"/{arg.name}"
-        if not isinstance(arg, str):
+        elif isinstance(arg, float):
+            return f"{arg:f}"
+        elif not isinstance(arg, str):
             return str(arg)
         return arg
 
