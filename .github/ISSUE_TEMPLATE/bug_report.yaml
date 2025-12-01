@@ -23,6 +23,8 @@ body:
           required: true
         - label: I confirm that the latest version of BabelDOC is being used.
           required: true
+        - label: I am aware that the issue section of this project is only for submitting bugs that are clearly related to the BabelDOC core, with complete reproduction steps and relevant logs attached.** Otherwise, issues will be closed directly.
+          required: true
 
   - type: markdown
     attributes:
@@ -33,6 +35,12 @@ body:
         Please also note:
         - If you are using a downstream project like pdf2zh-next, please submit an issue directly to the downstream application. Only when you confirm that this issue is a problem with the core library of BabelDOC, submit this issue.
         - The CLI is only used for debugging purposes, we do not provide any technical support for CLI usage.
+
+  - type: markdown
+    attributes:
+      value: |
+        Please note! Users of immersive translate online services should contact customer service and provide their translation ID. **Feedback related to online services is not handled here.**
+
   - type: textarea
     id: environment
     attributes:
@@ -58,7 +66,7 @@ body:
     id: reproduce
     attributes:
       label: Steps to Reproduce
-      description: Help us reproduce the issue
+      description: Help us reproduce the issue. Issues that do not provide reproduction steps will be closed directly.
       value: |
         1. Go to '...'
         2. Click on '...'
