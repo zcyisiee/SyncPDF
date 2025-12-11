@@ -350,7 +350,7 @@ class TranslateConverter(PDFConverterEx):
                 # 当前字符不属于公式或当前字符是公式的第一个字符
                 if not vstk:
                     if cls == xt_cls:               # 当前字符与前一个字符属于同一段落
-                        if child.x0 > xt.x1 + max(1, 0.25 * child.size):    # 添加行内空格
+                        if child.x0 > xt.x1 + 1:    # 添加行内空格
                             sstk[-1] += " "
                         elif child.x1 < xt.x0:      # 添加换行空格并标记原文段落存在换行
                             sstk[-1] += " "
