@@ -46,6 +46,9 @@ Please pay special attention to:
 > 
 > Due to the current high rate of code changes, this project only accepts small PRs. If you would like to suggest a change and you include a patch as a proof-of-concept, that would be great. However, please do not be offended if we rewrite your patch from scratch.
 >
+> In addition, we do not accept PRs involving the following changes:
+> 1. PRs that modify prompts.
+>
 > **This project cannot accept all PRs. We recommend that you discuss with the maintainers via [Issue](https://github.com/funstory-ai/BabelDOC/issues) before submitting a PR.**
 
 [//]: # (> We welcome pull requests and will review your contributions.)
