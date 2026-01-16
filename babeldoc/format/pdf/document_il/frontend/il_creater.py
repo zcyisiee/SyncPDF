@@ -18,6 +18,7 @@ from babeldoc.format.pdf.babelpdf.cidfont import get_cidfont_bbox
 from babeldoc.format.pdf.babelpdf.cidfont import get_glyph_bbox
 from babeldoc.format.pdf.babelpdf.encoding import WinAnsiEncoding
 from babeldoc.format.pdf.babelpdf.encoding import get_type1_encoding
+from babeldoc.format.pdf.babelpdf.type3 import get_type3_bbox
 from babeldoc.format.pdf.babelpdf.utils import guarded_bbox
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils import zstd_helper
@@ -800,6 +801,8 @@ class ILCreater:
                 bbox_list = get_base14_bbox(obj_val[1:])
         if cid_bbox := get_cidfont_bbox(self.mupdf, xobj_id):
             bbox_list = cid_bbox
+        if self.mupdf.xref_get_key(xobj_id, "Subtype")[1] == "/Type3":
+            bbox_list = get_type3_bbox(self.mupdf, xobj_id)
         return bbox_list, cmap
 
     def create_graphic_state(
