@@ -40,7 +40,7 @@ def get_descendant_fonts(doc, xref):
         return get_font_descriptor(doc, int(m.group(0)))
 
 
-def get_glyph_bbox(face, g):
+def get_cidfont_glyph_bbox(face, g):
     try:
         face.load_glyph(g, freetype.FT_LOAD_NO_SCALE)
         outline = face.glyph.outline
@@ -56,12 +56,12 @@ def get_glyph_bbox(face, g):
 def get_face_bbox(blob):
     face = freetype.Face(BytesIO(blob))
     scale = 1000 / face.units_per_EM
-    bbox_list = [get_glyph_bbox(face, code) for code in range(face.num_glyphs)]
+    bbox_list = [get_cidfont_glyph_bbox(face, code) for code in range(face.num_glyphs)]
     bbox_list = [[v * scale for v in bbox] for bbox in bbox_list]
     return bbox_list
 
 
-def get_cidfont_bbox(doc, xref):
+def get_cidfont_font_bbox(doc, xref):
     if doc.xref_get_key(xref, "Subtype")[1] == "/Type0":
         if blob := get_descendant_fonts(doc, xref):
             return get_face_bbox(blob)
