@@ -15,6 +15,7 @@ import tiktoken
 import babeldoc.pdfminer.pdfinterp
 from babeldoc.format.pdf.babelpdf.base14 import get_base14_bbox
 from babeldoc.format.pdf.babelpdf.cidfont import get_cidfont_bbox
+from babeldoc.format.pdf.babelpdf.cidfont import get_glyph_bbox
 from babeldoc.format.pdf.babelpdf.encoding import WinAnsiEncoding
 from babeldoc.format.pdf.babelpdf.encoding import get_type1_encoding
 from babeldoc.format.pdf.babelpdf.utils import guarded_bbox
@@ -112,9 +113,10 @@ def indirect(obj):
 
 
 def get_glyph_cbox(face, g):
-    face.load_glyph(g, freetype.FT_LOAD_NO_SCALE)
-    cbox = face.glyph.outline.get_bbox()
-    return cbox.xMin, cbox.yMin, cbox.xMax, cbox.yMax
+    return get_glyph_bbox(face, g)
+    # face.load_glyph(g, freetype.FT_LOAD_NO_SCALE)
+    # cbox = face.glyph.outline.get_bbox()
+    # return cbox.xMin, cbox.yMin, cbox.xMax, cbox.yMax
 
 
 def get_char_cbox(face, idx):
