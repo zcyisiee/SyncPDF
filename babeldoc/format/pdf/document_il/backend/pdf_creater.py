@@ -492,7 +492,6 @@ def reproduce_cmap(doc):
                     font_set.add(font)
         except Exception as e:
             logger.error(f"Error in getting page fonts: {e}")
-            pass
     for font in font_set:
         reproduce_one_font(doc, font[0])
     return doc

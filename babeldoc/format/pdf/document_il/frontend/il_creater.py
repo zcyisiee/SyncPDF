@@ -14,8 +14,8 @@ import tiktoken
 
 import babeldoc.pdfminer.pdfinterp
 from babeldoc.format.pdf.babelpdf.base14 import get_base14_bbox
-from babeldoc.format.pdf.babelpdf.cidfont import get_cidfont_font_bbox
-from babeldoc.format.pdf.babelpdf.cidfont import get_cidfont_glyph_bbox
+from babeldoc.format.pdf.babelpdf.cidfont import get_cidfont_bbox
+from babeldoc.format.pdf.babelpdf.cidfont import get_glyph_bbox
 from babeldoc.format.pdf.babelpdf.encoding import WinAnsiEncoding
 from babeldoc.format.pdf.babelpdf.encoding import get_type1_encoding
 from babeldoc.format.pdf.babelpdf.type3 import get_type3_bbox
@@ -115,7 +115,7 @@ def indirect(obj):
 
 def get_char_cbox(face, idx):
     g = face.get_char_index(idx)
-    return get_cidfont_glyph_bbox(face, g)
+    return get_glyph_bbox(face, g)
 
 
 def get_name_cbox(face, name):
@@ -123,7 +123,7 @@ def get_name_cbox(face, name):
         if isinstance(name, str):
             name = name.encode("utf-8")
         g = face.get_name_index(name)
-        return get_cidfont_glyph_bbox(face, g)
+        return get_glyph_bbox(face, g)
     return (0, 0, 0, 0)
 
 
@@ -792,7 +792,7 @@ class ILCreater:
             obj_type, obj_val = self.mupdf.xref_get_key(xobj_id, "BaseFont")
             if obj_type == "name":
                 bbox_list = get_base14_bbox(obj_val[1:])
-        if cid_bbox := get_cidfont_font_bbox(self.mupdf, xobj_id):
+        if cid_bbox := get_cidfont_bbox(self.mupdf, xobj_id):
             bbox_list = cid_bbox
         if self.mupdf.xref_get_key(xobj_id, "Subtype")[1] == "/Type3":
             bbox_list = get_type3_bbox(self.mupdf, xobj_id)
