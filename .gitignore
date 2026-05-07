@@ -25,7 +25,9 @@ memray*
 .vscode
 __pycache__
 .ruff_cache
+.tmp
 yadt.toml
+yadt.toml*
 examples/
 /make_gif.py
 /dist
@@ -41,10 +43,9 @@ babeldoc/format/txt
 # uv
 uv.lock
 
-# Claude Code memory file
-CLAUDE.md
 /.claude
 babeldoc/format/playground
 temp.jpg
-AGENTS.md
 .serena
+.codex
+

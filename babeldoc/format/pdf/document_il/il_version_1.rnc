@@ -165,6 +165,7 @@ PDFCurve =
     attribute fill_background { xsd:boolean }?,
     attribute stroke_path { xsd:boolean }?,
     attribute evenodd { xsd:boolean }?,
+    attribute passthroughPaint { xsd:boolean }?,
     attribute xobjId { xsd:int }?,
     attribute renderOrder { xsd:int }?,
     attribute ctm {

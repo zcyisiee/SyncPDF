@@ -306,7 +306,12 @@ class TranslationConfig:
         self._part_working_dirs: dict[int, Path] = {}
         self._part_output_dirs: dict[int, Path] = {}
 
-        self.table_model = table_model
+        if table_model is not None:
+            logger.warning(
+                "TranslationConfig.table_model is deprecated and ignored; "
+                "RapidOCR table-text detection has been retired."
+            )
+        self.table_model = None
         self.show_char_box = show_char_box
         self.custom_system_prompt = custom_system_prompt
         self.add_formula_placehold_hint = add_formula_placehold_hint
@@ -337,8 +342,6 @@ class TranslationConfig:
 
         self.save_auto_extracted_glossary = save_auto_extracted_glossary
 
-        # force disable table translate until the new model is ready
-        self.table_model = None
         self.enable_graphic_element_process = enable_graphic_element_process
         self.skip_form_render = skip_form_render
         self.skip_curve_render = skip_curve_render

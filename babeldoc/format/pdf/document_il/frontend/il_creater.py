@@ -1,3 +1,5 @@
+"""Legacy IR creator retained for explicit compatibility tooling."""
+
 import base64
 import functools
 import logging
@@ -21,11 +23,15 @@ from babeldoc.format.pdf.babelpdf.encoding import get_type1_encoding
 from babeldoc.format.pdf.babelpdf.type3 import get_type3_bbox
 from babeldoc.format.pdf.babelpdf.utils import guarded_bbox
 from babeldoc.format.pdf.document_il import il_version_1
+from babeldoc.format.pdf.document_il.frontend.inline_image_params import (
+    normalize_inline_image_parameters,
+)
 from babeldoc.format.pdf.document_il.utils import zstd_helper
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
 from babeldoc.format.pdf.document_il.utils.matrix_helper import decompose_ctm
 from babeldoc.format.pdf.document_il.utils.style_helper import BLACK
 from babeldoc.format.pdf.document_il.utils.style_helper import YELLOW
+from babeldoc.format.pdf.new_parser.pdf_token_serializer import serialize_pdf_token
 from babeldoc.format.pdf.translation_config import TranslationConfig
 from babeldoc.pdfminer.layout import LTChar
 from babeldoc.pdfminer.layout import LTFigure
@@ -35,7 +41,6 @@ from babeldoc.pdfminer.pdffont import PDFFont
 # from babeldoc.pdfminer.pdfpage import PDFPage as PDFMinerPDFPage
 # from babeldoc.pdfminer.pdftypes import PDFObjRef as PDFMinerPDFObjRef
 # from babeldoc.pdfminer.pdftypes import resolve1 as pdftypes_resolve1
-from babeldoc.pdfminer.psparser import PSLiteral
 from babeldoc.pdfminer.utils import apply_matrix_pt
 from babeldoc.pdfminer.utils import get_bound
 from babeldoc.pdfminer.utils import mult_matrix
@@ -462,13 +467,7 @@ class ILCreater:
             self.passthrough_per_char_instruction.pop()
 
     def parse_arg(self, arg: str):
-        if isinstance(arg, PSLiteral):
-            return f"/{arg.name}"
-        elif isinstance(arg, float):
-            return f"{arg:f}"
-        elif not isinstance(arg, str):
-            return str(arg)
-        return arg
+        return serialize_pdf_token(arg)
 
     def pop_passthrough_per_char_instruction(self):
         if self.passthrough_per_char_instruction_stack:
@@ -1151,6 +1150,16 @@ class ILCreater:
                         )
                     )
 
+        original_path_primitive = None
+        if (
+            getattr(curve, "original_path_primitive", None) is not None
+            and curve.original_path_primitive[0] == "re"
+        ):
+            original_path_primitive = il_version_1.PdfOriginalPathPrimitive(
+                op="re",
+                args=[float(arg) for arg in curve.original_path_primitive[1]],
+            )
+
         curve_obj = il_version_1.PdfCurve(
             box=bbox,
             graphic_state=gs,
@@ -1163,6 +1172,7 @@ class ILCreater:
             render_order=curve.render_order,
             ctm=list(ctm) if ctm is not None else None,
             pdf_original_path=raw_pdf_paths,
+            pdf_original_path_primitive=original_path_primitive,
         )
         self.current_page.pdf_curve.append(curve_obj)
         pass
@@ -1287,12 +1297,7 @@ class ILCreater:
         image_dict = stream_obj.attrs if hasattr(stream_obj, "attrs") else {}
 
         # Build parameters dictionary
-        parameters = {}
-        for key, value in image_dict.items():
-            if hasattr(value, "name"):
-                parameters[key] = value.name
-            else:
-                parameters[key] = str(value)
+        parameters = normalize_inline_image_parameters(image_dict)
 
         # Get image data (encoded as base64)
         image_data = ""

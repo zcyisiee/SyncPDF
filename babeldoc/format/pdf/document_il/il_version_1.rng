@@ -465,6 +465,11 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="passthroughPaint">
+          <data type="boolean"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="xobjId">
           <data type="int"/>
         </attribute>

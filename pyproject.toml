@@ -1,6 +1,6 @@
 [project]
 name = "BabelDOC"
-version = "0.5.24"
+version = "0.6.0"
 description = "Yet Another Document Translator"
 license = "AGPL-3.0"
 readme = "README.md"
@@ -44,7 +44,6 @@ dependencies = [
     "tiktoken>=0.9.0",
     "Levenshtein>=0.27.1",
     "opencv-python-headless>=4.10.0.84",
-    "rapidocr-onnxruntime>=1.4.4",
     "pyzstd>=0.17.0",
     "hyperscan>=0.7.13",
     "rtree>=1.4.0",
@@ -134,6 +133,8 @@ max-complexity = 10 # 函数圈复杂度阈值
 [tool.ruff.lint.per-file-ignores]
 "babeldoc/babeldoc_exception/BabelDOCException.py" = ["N999"]
 "babeldoc/format/pdf/pdfinterp.py" = ["N"] # 忽略命名规范
+"babeldoc/tools/executor/babeldoc_adapter.py" = ["F401"]
+"babeldoc/tools/executor/server.py" = ["N802"]
 "tests/*" = ["S101"]            # 在测试文件中允许 assert
 "**/__init__.py" = ["F401"]     # 允许未使用的导入
 # 忽略 S311 警告，因为这是有意的
@@ -156,13 +157,12 @@ dev = [
     "pylance>=0.29.0",
     "py-spy>=0.4.0",
 ]
-
 [tool.pytest.ini_options]
 pythonpath = [".", "src"]
 testpaths = ["tests"]
 
 [bumpver]
-current_version = "0.5.24"
+current_version = "0.6.0"
 version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
 
 [bumpver.file_patterns]

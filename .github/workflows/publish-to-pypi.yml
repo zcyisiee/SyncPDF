@@ -55,6 +55,11 @@ jobs:
           version-command: |
             cat pyproject.toml | grep "version = " | head -n 1 | awk -F'"' '{print $2}'
 
+      - name: Check manual release notes
+        if: steps.check-version.outputs.tag
+        run: |
+          test -f "docs/release-notes/${{ steps.check-version.outputs.tag }}.md"
+
       - name: Install Dependencies
         run: |
           uv sync
@@ -152,3 +157,21 @@ jobs:
           tag: ${{ needs.build.outputs.is_release }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepend manual release notes
+        if: needs.build.outputs.is_release != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.build.outputs.is_release }}
+        run: |
+          set -euo pipefail
+          notes_path="docs/release-notes/${TAG}.md"
+          current_body="$(mktemp)"
+          combined_body="$(mktemp)"
+          gh release view "${TAG}" --json body --jq .body > "${current_body}"
+          {
+            cat "${notes_path}"
+            printf '\n\n---\n\n'
+            cat "${current_body}"
+          } > "${combined_body}"
+          gh release edit "${TAG}" --notes-file "${combined_body}"

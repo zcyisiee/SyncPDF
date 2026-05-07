@@ -9,8 +9,6 @@ import pymupdf
 from rich.logging import RichHandler
 from sklearn.cluster import DBSCAN
 
-import babeldoc.format.pdf.high_level
-import babeldoc.format.pdf.translation_config
 from babeldoc.const import get_process_pool
 from babeldoc.format.pdf.document_il import il_version_1
 
@@ -54,6 +52,11 @@ MERGE_ADJACENCY_GAP_MULTIPLIER = 1.5
 
 
 def parse_pdf(pdf_path, page_ranges=None) -> il_version_1.Document:
+    import babeldoc.format.pdf.high_level
+    import babeldoc.format.pdf.translation_config
+    from babeldoc.format.pdf.document_il.frontend.il_creater import ILCreater
+    from babeldoc.format.pdf.legacy_parse import start_parse_il
+
     translation_config = babeldoc.format.pdf.translation_config.TranslationConfig(
         *[None for _ in range(4)], doc_layout_model=None
     )
@@ -67,12 +70,12 @@ def parse_pdf(pdf_path, page_ranges=None) -> il_version_1.Document:
     try:
         shutil.copy(pdf_path, translation_config.get_working_file_path("input.pdf"))
         doc = pymupdf.open(pdf_path)
-        il_creater = babeldoc.format.pdf.high_level.ILCreater(translation_config)
+        il_creater = ILCreater(translation_config)
         il_creater.mupdf = doc
         with Path(translation_config.get_working_file_path("input.pdf")).open(
             "rb"
         ) as f:
-            babeldoc.format.pdf.high_level.start_parse_il(
+            start_parse_il(
                 f,
                 doc_zh=doc,
                 resfont="test_font",

@@ -129,6 +129,8 @@ markdown_extensions:
       custom_checkbox: true
 not_in_nav: |
   /tutorials/**/*.md
+exclude_docs: |
+  /release-notes/**/*.md
 
 # Page tree
 nav:

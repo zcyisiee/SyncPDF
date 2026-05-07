@@ -245,6 +245,7 @@
       <xs:attribute name="fill_background" type="xs:boolean"/>
       <xs:attribute name="stroke_path" type="xs:boolean"/>
       <xs:attribute name="evenodd" type="xs:boolean"/>
+      <xs:attribute name="passthroughPaint" type="xs:boolean"/>
       <xs:attribute name="xobjId" type="xs:int"/>
       <xs:attribute name="renderOrder" type="xs:int"/>
       <xs:attribute name="ctm">

@@ -14,6 +14,8 @@ import babeldoc.format.pdf.translation_config
 import orjson
 import pymupdf
 from babeldoc.format.pdf.document_il import PdfFont
+from babeldoc.format.pdf.document_il.frontend.il_creater import ILCreater
+from babeldoc.format.pdf.legacy_parse import start_parse_il
 from rich.logging import RichHandler
 
 logger = logging.getLogger(__name__)
@@ -39,11 +41,11 @@ def get_font_metadata(font_path) -> PdfFont:
         )
     )
     translation_config.font = font_path
-    il_creater = babeldoc.format.pdf.high_level.ILCreater(translation_config)
+    il_creater = ILCreater(translation_config)
     il_creater.mupdf = doc
     buffer = io.BytesIO()
     doc.save(buffer)
-    babeldoc.format.pdf.high_level.start_parse_il(
+    start_parse_il(
         buffer,
         doc_zh=doc,
         resfont="test_font",

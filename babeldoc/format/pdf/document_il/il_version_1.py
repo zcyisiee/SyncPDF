@@ -477,6 +477,27 @@ class PdfOriginalPath:
 
 
 @dataclass(slots=True)
+class PdfOriginalPathPrimitive:
+    class Meta:
+        name = "pdfOriginalPathPrimitive"
+
+    op: str | None = field(
+        default=None,
+        metadata={
+            "type": "Attribute",
+            "required": True,
+        },
+    )
+    args: list[float] = field(
+        default_factory=list,
+        metadata={
+            "type": "Attribute",
+            "tokens": True,
+        },
+    )
+
+
+@dataclass(slots=True)
 class PdfRectangle:
     class Meta:
         name = "pdfRectangle"
@@ -701,6 +722,13 @@ class PdfCurve:
             "type": "Element",
         },
     )
+    pdf_original_path_primitive: PdfOriginalPathPrimitive | None = field(
+        default=None,
+        metadata={
+            "name": "pdfOriginalPathPrimitive",
+            "type": "Element",
+        },
+    )
     debug_info: bool | None = field(
         default=None,
         metadata={
@@ -722,6 +750,13 @@ class PdfCurve:
     evenodd: bool | None = field(
         default=None,
         metadata={
+            "type": "Attribute",
+        },
+    )
+    passthrough_paint: bool | None = field(
+        default=None,
+        metadata={
+            "name": "passthroughPaint",
             "type": "Attribute",
         },
     )

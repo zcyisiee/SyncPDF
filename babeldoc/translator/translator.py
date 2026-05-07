@@ -233,7 +233,7 @@ class OpenAITranslator(BaseTranslator):
                 limits=httpx.Limits(
                     max_connections=None, max_keepalive_connections=None
                 ),
-                timeout=60,  # Set a reasonable timeout
+                timeout=600,
             ),
         )
         if send_temperature:
