@@ -89,6 +89,7 @@ CONTENT_KEYWORDS = {
     "null",
 }
 COMPOSITE_SPLIT_KEYWORDS = tuple(sorted(CONTENT_KEYWORDS, key=len, reverse=True))
+MAX_PDF_TOKEN_NESTING_DEPTH = 128
 
 if TYPE_CHECKING:
     from babeldoc.format.pdf.new_parser.active_value_access import PDFStream
@@ -147,10 +148,12 @@ class ContentStreamTokenizer:
         data: bytes,
         *,
         recover_trailing_composites: bool = False,
+        max_nesting_depth: int = MAX_PDF_TOKEN_NESTING_DEPTH,
     ) -> None:
         self.data = data
         self.pos = 0
         self.recover_trailing_composites = recover_trailing_composites
+        self.max_nesting_depth = max_nesting_depth
         self.pending_tokens: deque[object] = deque()
 
     def iter_operation_stream(self):
@@ -374,7 +377,13 @@ class ContentStreamTokenizer:
         self.pos = probe + 2
         return True
 
-    def _next_token(self):
+    def _check_nesting_depth(self, depth: int) -> None:
+        if depth > self.max_nesting_depth:
+            msg = f"PDF token nesting exceeded max depth {self.max_nesting_depth}"
+            raise TokenizerError(msg)
+
+    def _next_token(self, *, depth: int = 0):
+        self._check_nesting_depth(depth)
         if self.pending_tokens:
             return self.pending_tokens.popleft()
         while True:
@@ -389,12 +398,12 @@ class ContentStreamTokenizer:
                 return self._read_literal_string()
             if byte == b"<":
                 if self._peek(2) == b"<<":
-                    return self._read_dictionary()
+                    return self._read_dictionary(depth=depth + 1)
                 return self._read_hex_string()
             if byte == b"[":
-                return self._read_array()
+                return self._read_array(depth=depth + 1)
             if byte in b"+-.0123456789":
-                return self._recover_token(self._read_number_or_keyword())
+                return self._recover_token(self._read_number_or_keyword(depth=depth))
             if byte in b"]>}":
                 if self.recover_trailing_composites and byte in b"]>":
                     self.pos += 1
@@ -503,7 +512,8 @@ class ContentStreamTokenizer:
             raw += b"0"
         return PdfString(bytes.fromhex(raw.decode("ascii")), is_hex=True)
 
-    def _read_array(self) -> list[object]:
+    def _read_array(self, *, depth: int = 0) -> list[object]:
+        self._check_nesting_depth(depth)
         self.pos += 1
         items: list[object] = []
         while True:
@@ -515,9 +525,10 @@ class ContentStreamTokenizer:
             if self.data[self.pos : self.pos + 1] == b"]":
                 self.pos += 1
                 return items
-            items.append(self._next_token())
+            items.append(self._next_token(depth=depth))
 
-    def _read_dictionary(self) -> dict[str, object]:
+    def _read_dictionary(self, *, depth: int = 0) -> dict[str, object]:
+        self._check_nesting_depth(depth)
         if self._peek(2) != b"<<":
             raise TokenizerError("Dictionary must start with <<.")
         self.pos += 2
@@ -531,23 +542,23 @@ class ContentStreamTokenizer:
             if self._peek(2) == b">>":
                 self.pos += 2
                 return items
-            key = self._next_token()
+            key = self._next_token(depth=depth)
             if not isinstance(key, PdfName):
                 raise TokenizerError(
                     f"Dictionary key must be PdfName, got {type(key)}."
                 )
-            value = self._next_token()
+            value = self._next_token(depth=depth)
             if value is None:
                 if self.recover_trailing_composites and self.pos >= len(self.data):
                     return items
                 raise TokenizerError("Dictionary value missing.")
             items[key.value] = value
 
-    def _read_number_or_keyword(self):
+    def _read_number_or_keyword(self, *, depth: int = 0):
         numeric_token = self._read_numeric_token()
         if numeric_token is not _NO_TOKEN:
             if numeric_token is None:
-                return self._next_token()
+                return self._next_token(depth=depth)
             return numeric_token
 
         start = self.pos

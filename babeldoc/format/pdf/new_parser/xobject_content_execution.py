@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from babeldoc.format.pdf.new_parser.base_operations import BaseOperationSidecar
 from babeldoc.format.pdf.new_parser.base_operations import (
     collect_page_base_inner_operation,
@@ -18,6 +20,10 @@ from babeldoc.format.pdf.new_parser.state import multiply_matrices
 from babeldoc.format.pdf.new_parser.tokenizer import PdfOperation
 from babeldoc.format.pdf.new_parser.tokenizer import tokenize_operations
 
+logger = logging.getLogger(__name__)
+
+MAX_XOBJECT_NESTING_DEPTH = 64
+
 
 def tokenize_content_stream(content: bytes) -> list[PdfOperation]:
     return tokenize_operations(content)
@@ -35,7 +41,11 @@ def interpret_operations_with_xobjects(
     resource_bundle: PageResourceBundle,
     initial_state: InterpreterState | None = None,
     xobject_path: tuple[str, ...] = (),
+    active_xobject_ids: frozenset[int] | None = None,
+    max_xobject_depth: int = MAX_XOBJECT_NESTING_DEPTH,
 ) -> tuple[list[object], BaseOperationSidecar]:
+    if active_xobject_ids is None:
+        active_xobject_ids = frozenset()
     sink = CollectingEventSink()
     interpreter = TextContentInterpreter(sink=sink)
     if initial_state is not None:
@@ -72,6 +82,23 @@ def interpret_operations_with_xobjects(
             ]
         if not details.is_form:
             return []
+        child_path = (*xobject_path, name)
+        details_identity = id(details)
+        if details_identity in active_xobject_ids:
+            logger.warning(
+                "Skipping recursive Form XObject %s at path %s",
+                name,
+                "/".join(child_path),
+            )
+            return []
+        if len(child_path) > max_xobject_depth:
+            logger.warning(
+                "Skipping Form XObject %s at depth %s over limit %s",
+                name,
+                len(child_path),
+                max_xobject_depth,
+            )
+            return []
         child_state = InterpreterState()
         child_state.graphics_state.ctm = multiply_matrices(
             details.matrix,
@@ -83,9 +110,10 @@ def interpret_operations_with_xobjects(
             details.xobject_map,
             resource_bundle=resource_bundle,
             initial_state=child_state,
-            xobject_path=(*xobject_path, name),
+            xobject_path=child_path,
+            active_xobject_ids=active_xobject_ids | {details_identity},
+            max_xobject_depth=max_xobject_depth,
         )
-        child_path = (*xobject_path, name)
         sidecar.xobject_end_operations[child_path] = compute_xobject_end_operation(
             details.matrix,
             state.graphics_state.ctm,

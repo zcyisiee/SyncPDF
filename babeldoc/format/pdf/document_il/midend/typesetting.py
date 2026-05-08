@@ -664,9 +664,22 @@ class TypesettingUnit:
         scale: float,
     ):
         """Transform a curve for formula relocation."""
-        import copy
-
-        new_curve = copy.deepcopy(curve)
+        new_curve = PdfCurve(
+            box=curve.box,
+            graphic_state=curve.graphic_state,
+            pdf_path=list(curve.pdf_path),
+            pdf_original_path=list(curve.pdf_original_path),
+            pdf_original_path_primitive=curve.pdf_original_path_primitive,
+            debug_info=curve.debug_info,
+            fill_background=curve.fill_background,
+            stroke_path=curve.stroke_path,
+            evenodd=curve.evenodd,
+            passthrough_paint=curve.passthrough_paint,
+            xobj_id=curve.xobj_id,
+            render_order=curve.render_order,
+            ctm=list(curve.ctm),
+            relocation_transform=list(curve.relocation_transform),
+        )
 
         if new_curve.box:
             # Calculate relative position to formula's original position (same as chars)
@@ -723,9 +736,18 @@ class TypesettingUnit:
         scale: float,
     ):
         """Transform a form for formula relocation."""
-        import copy
-
-        new_form = copy.deepcopy(form)
+        new_form = PdfForm(
+            box=form.box,
+            graphic_state=form.graphic_state,
+            pdf_matrix=form.pdf_matrix,
+            pdf_affine_transform=form.pdf_affine_transform,
+            pdf_form_subtype=form.pdf_form_subtype,
+            xobj_id=form.xobj_id,
+            ctm=list(form.ctm),
+            relocation_transform=list(form.relocation_transform),
+            render_order=form.render_order,
+            form_type=form.form_type,
+        )
 
         if new_form.box:
             # Calculate relative position to formula's original position (same as chars)
@@ -1203,7 +1225,7 @@ class Typesetting:
             font_size=6,
             graphic_state=il_version_1.GraphicState(),
         )
-        text = f"本文档由 funstory.ai 的开源 PDF 翻译库 BabelDOC {WATERMARK_VERSION} (http://yadt.io) 翻译，本仓库正在积极的建设当中，欢迎 star 和关注。"
+        text = f"本文档由 funstory.ai 的开源 PDF 翻译库 BabelDOC {WATERMARK_VERSION} (https://github.com/funstory-ai/BabelDOC) 翻译，本仓库正在积极的建设当中，欢迎 star 和关注。"
         if self.translation_config.debug:
             text += "\n 当前为 DEBUG 模式，将显示更多辅助信息。请注意，部分框的位置对应原文，但在译文中可能不正确。"
         page.pdf_paragraph.append(

@@ -1,7 +1,4 @@
-<!-- # Yet Another Document Translator -->
-
 <div align="center">
-<!-- <img src="https://s.immersivetranslate.com/assets/r2-uploads/images/babeldoc-banner.png" width="320px"  alt="YADT"/> -->
 
 <br/>
 
@@ -64,11 +61,11 @@ See details: [EN](https://github.com/funstory-ai/jobs) | [ZH](https://github.com
 
 ### Install from PyPI
 
-We recommend using the Tool feature of [uv](https://github.com/astral-sh/uv) to install yadt.
+We recommend using the Tool feature of [uv](https://github.com/astral-sh/uv) to install BabelDOC.
 
 1. First, you need to refer to [uv installation](https://github.com/astral-sh/uv#installation) to install uv and set up the `PATH` environment variable as prompted.
 
-2. Use the following command to install yadt:
+2. Use the following command to install BabelDOC:
 
 ```bash
 uv tool install --python 3.12 BabelDOC
@@ -91,7 +88,7 @@ We still recommend using [uv](https://github.com/astral-sh/uv) to manage virtual
 
 1. First, you need to refer to [uv installation](https://github.com/astral-sh/uv#installation) to install uv and set up the `PATH` environment variable as prompted.
 
-2. Use the following command to install yadt:
+2. Use the following command to install BabelDOC:
 
 ```bash
 # clone the project
@@ -235,7 +232,7 @@ uv run babeldoc --files example.pdf --files example2.pdf --openai --openai-model
 ### Output Control
 
 - `--output`, `-o`: Output directory for translated files. If not set, use current working directory.
-- `--debug`: Enable debug logging level and export detailed intermediate results in `~/.cache/yadt/working`.
+- `--debug`: Enable debug logging level and export detailed intermediate results in `~/.cache/babeldoc/working`.
 - `--report-interval`: Progress report interval in seconds (default: 0.1).
 
 ### General Options
@@ -338,7 +335,7 @@ There are a lot projects and teams working on to make document editing and trans
 - [mathpix](https://mathpix.com/)
 - [Doc2X](https://doc2x.noedgeai.com/)
 - [minerU](https://github.com/opendatalab/MinerU)
-- [PDFMathTranslate](https://github.com/funstory-ai/yadt)
+- [PDFMathTranslate](https://github.com/PDFMathTranslate/PDFMathTranslate)
 
 There are also some solutions to solve specific parts of the problem like:
 
@@ -402,15 +399,25 @@ This project uses a combination of [Semantic Versioning](https://semver.org/) an
 
 ## How to Contribute
 
-We encourage you to contribute to YADT! Please check out the [CONTRIBUTING](https://github.com/funstory-ai/yadt/blob/main/docs/CONTRIBUTING.md) guide.
+BabelDOC is currently developed in a maintainer-led mode. Bug reports,
+reproducible PDFs, documentation fixes, and small compatibility fixes are
+welcome. For changes to parsing, rendering, translation, or service integration
+behavior, please open an issue for discussion before submitting a pull request.
 
-Everyone interacting in YADT and its sub-projects' codebases, issue trackers, chat rooms, and mailing lists is expected to follow the YADT [Code of Conduct](https://github.com/funstory-ai/yadt/blob/main/docs/CODE_OF_CONDUCT.md).
+Everyone interacting in BabelDOC and its sub-projects' codebases, issue trackers, chat rooms, and mailing lists is expected to follow the BabelDOC [Code of Conduct](https://github.com/funstory-ai/BabelDOC/blob/main/docs/CODE_OF_CONDUCT.md).
 
 [Immersive Translation](https://immersivetranslate.com) sponsors monthly Pro membership redemption codes for active contributors to this project, see details at: [CONTRIBUTOR_REWARD.md](https://github.com/funstory-ai/BabelDOC/blob/main/docs/CONTRIBUTOR_REWARD.md)
 
 ## Acknowledgements
 
-- [PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate)
+BabelDOC is still at an early stage of development, and many parts are not as
+polished as we would like yet. We sincerely appreciate every bug report,
+criticism, suggestion, reproducible PDF, downstream integration experience, and
+contribution from people working on BabelDOC and related upstream/downstream
+projects. We will keep iterating on BabelDOC, fixing bugs, and making it better
+step by step.
+
+- [PDFMathTranslate](https://github.com/PDFMathTranslate/PDFMathTranslate)
 - [DocLayout-YOLO](https://github.com/opendatalab/DocLayout-YOLO)
 - [pdfminer](https://github.com/pdfminer/pdfminer.six)
 - [PyMuPDF](https://github.com/pymupdf/PyMuPDF)

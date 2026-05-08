@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import json
 import logging
 import re
@@ -40,6 +39,7 @@ from babeldoc.format.pdf.document_il.utils.paragraph_helper import (
     is_pure_numeric_paragraph,
 )
 from babeldoc.format.pdf.document_il.utils.style_helper import GRAY80
+from babeldoc.format.pdf.translation_config import TitleContextSnapshot
 from babeldoc.format.pdf.translation_config import TranslationConfig
 from babeldoc.translator.translator import BaseTranslator
 from babeldoc.utils.priority_thread_pool_executor import PriorityThreadPoolExecutor
@@ -393,9 +393,11 @@ class ILTranslator:
             # Try to find the first title paragraph
             title_paragraph = self.find_title_paragraph(docs)
             self.translation_config.shared_context_cross_split_part.first_paragraph = (
-                copy.deepcopy(title_paragraph)
+                self.shared_context_cross_split_part.snapshot_title_paragraph(
+                    title_paragraph
+                )
             )
-            self.translation_config.shared_context_cross_split_part.recent_title_paragraph = copy.deepcopy(
+            self.translation_config.shared_context_cross_split_part.recent_title_paragraph = self.shared_context_cross_split_part.snapshot_title_paragraph(
                 title_paragraph
             )
             if title_paragraph:
@@ -460,7 +462,9 @@ class ILTranslator:
             paragraph_token_count = self.calc_token_count(paragraph.unicode)
             if paragraph.layout_label == "title":
                 self.shared_context_cross_split_part.recent_title_paragraph = (
-                    copy.deepcopy(paragraph)
+                    self.shared_context_cross_split_part.snapshot_title_paragraph(
+                        paragraph
+                    )
                 )
             executor.submit(
                 self.translate_paragraph,
@@ -1037,8 +1041,8 @@ class ILTranslator:
 
     def _build_context_block(
         self,
-        title_paragraph: PdfParagraph | None = None,
-        local_title_paragraph: PdfParagraph | None = None,
+        title_paragraph: TitleContextSnapshot | None = None,
+        local_title_paragraph: TitleContextSnapshot | None = None,
         translate_input: TranslateInput | None = None,
     ) -> str:
         """Build the context/hints block for LLM prompt.
@@ -1130,8 +1134,8 @@ class ILTranslator:
     def generate_prompt_for_llm(
         self,
         text: str,
-        title_paragraph: PdfParagraph | None = None,
-        local_title_paragraph: PdfParagraph | None = None,
+        title_paragraph: TitleContextSnapshot | None = None,
+        local_title_paragraph: TitleContextSnapshot | None = None,
         translate_input: TranslateInput | None = None,
     ):
         """Generate LLM prompt using template-based approach.
@@ -1216,8 +1220,8 @@ class ILTranslator:
         page_font_map: dict[str, PdfFont] = None,
         xobj_font_map: dict[int, dict[str, PdfFont]] = None,
         paragraph_token_count: int = 0,
-        title_paragraph: PdfParagraph | None = None,
-        local_title_paragraph: PdfParagraph | None = None,
+        title_paragraph: TitleContextSnapshot | None = None,
+        local_title_paragraph: TitleContextSnapshot | None = None,
     ):
         """Translate a paragraph using pre and post processing functions."""
         self.translation_config.raise_if_cancelled()

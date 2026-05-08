@@ -8,6 +8,16 @@
 - PRs are limited to English
 - All documents are provided in English only
 
+### **Contribution policy**
+
+BabelDOC is currently developed in a maintainer-led mode. Bug reports,
+reproducible PDFs, documentation fixes, and small compatibility fixes are
+welcome. For changes to parsing, rendering, translation, or service integration
+behavior, please open an issue for discussion before submitting a pull request.
+
+Because the codebase is changing quickly, maintainers may rewrite contributed
+proof-of-concept patches from scratch before merging the underlying fix.
+
 ### **Did you find a bug?**
 
 - **Ensure the bug was not already reported** by searching on GitHub under [Issues](https://github.com/funstory-ai/BabelDOC/issues).
@@ -26,7 +36,7 @@ Please pay special attention to:
 ### **If you wish to add more translators**
 
 - This project is not intended for direct end-user use, and the supported translators are mainly for debugging purposes. Unless it clearly helps with development and debugging, PRs for directly adding translators will not be accepted.
-- You can directly use [PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate) to get support for more translators.
+- You can directly use [PDFMathTranslate](https://github.com/PDFMathTranslate/PDFMathTranslate) to get support for more translators.
 
 ### **If you want to add new accelerator support for the layout model**
 
@@ -44,8 +54,6 @@ Please pay special attention to:
 > 
 > You can contact the maintainers in the pdf2zh discussion group.
 > 
-> Due to the current high rate of code changes, this project only accepts small PRs. If you would like to suggest a change and you include a patch as a proof-of-concept, that would be great. However, please do not be offended if we rewrite your patch from scratch.
->
 > In addition, we do not accept PRs involving the following changes:
 > 1. PRs that modify prompts.
 > 2. Adding GUI or other features directly targeting end users to this project. (Exceptions granted by maintainers in issues are excluded.)
@@ -171,11 +179,11 @@ git commit -m "<semantic commit message>"
         """
     ```
 
-The existing codebase does not comply with the above specifications in some aspects. Contributions for modifications are welcome.
+The existing codebase does not comply with the above specifications in some aspects. Please discuss broad style-only rewrites with maintainers before submitting a PR.
 
 #### How to modify the intermediate representation
 
-The intermediate representation is described by [il_version_1.rnc](https://github.com/funstory-ai/BabelDOC/blob/main/BabelDOC/format/pdf/document_il/il_version_1.rnc). Corresponding Python data classes are generated using [xsdata](https://xsdata.readthedocs.io/en/latest/). The files `il_version_1.rng`, `il_version_1.xsd`, and `il_version_1.py` are auto-generated and must not be manually modified.
+The intermediate representation is described by [il_version_1.rnc](https://github.com/funstory-ai/BabelDOC/blob/main/babeldoc/format/pdf/document_il/il_version_1.rnc). Corresponding Python data classes are generated using [xsdata](https://xsdata.readthedocs.io/en/latest/). The files `il_version_1.rng`, `il_version_1.xsd`, and `il_version_1.py` are auto-generated and must not be manually modified.
 
 ##### Format RNC file
 
@@ -199,5 +207,5 @@ xsdata generate babeldoc/format/pdf/document_il/il_version_1.xsd --package babel
 ##### Profile memory usage
 
 ```bash
-uv run memray run --native --aggregate babeldoc/main.py -c yadt.toml
+uv run memray run --native --aggregate babeldoc/main.py -c babeldoc.toml
 ```

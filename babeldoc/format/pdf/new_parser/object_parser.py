@@ -10,6 +10,8 @@ from babeldoc.format.pdf.new_parser.tokenizer import PdfString
 from babeldoc.format.pdf.new_parser.tokenizer import TokenizerError
 from babeldoc.format.pdf.new_parser.tokenizer import decode_pdf_name
 
+MAX_OBJECT_NESTING_DEPTH = 128
+
 
 class ObjectParserError(ValueError):
     pass
@@ -18,6 +20,7 @@ class ObjectParserError(ValueError):
 @dataclass(slots=True)
 class _Parser:
     lexer: ContentStreamTokenizer
+    max_nesting_depth: int = MAX_OBJECT_NESTING_DEPTH
 
     def parse(self) -> object:
         value = self._parse_value()
@@ -27,16 +30,22 @@ class _Parser:
             raise ObjectParserError(f"Trailing data after object: {tail!r}")
         return value
 
-    def _parse_value(self) -> object:
+    def _check_nesting_depth(self, depth: int) -> None:
+        if depth > self.max_nesting_depth:
+            msg = f"PDF object nesting exceeded max depth {self.max_nesting_depth}"
+            raise ObjectParserError(msg)
+
+    def _parse_value(self, *, depth: int = 0) -> object:
+        self._check_nesting_depth(depth)
         self.lexer._skip_space_and_comments()  # noqa: SLF001
         if self.lexer.pos >= len(self.lexer.data):
             raise ObjectParserError("Unexpected EOF while parsing object.")
 
         token = self.lexer.data[self.lexer.pos : self.lexer.pos + 1]
         if token == b"<" and self.lexer._peek(2) == b"<<":  # noqa: SLF001
-            return self._parse_dict()
+            return self._parse_dict(depth=depth + 1)
         if token == b"[":
-            return self._parse_array()
+            return self._parse_array(depth=depth + 1)
         if token == b"/":
             return decode_pdf_name(self.lexer._read_name().value)  # noqa: SLF001
         if token == b"(":
@@ -47,7 +56,8 @@ class _Parser:
         raw = self.lexer._read_number_or_keyword()  # noqa: SLF001
         return self._maybe_indirect_ref(raw)
 
-    def _parse_array(self) -> list[object]:
+    def _parse_array(self, *, depth: int = 0) -> list[object]:
+        self._check_nesting_depth(depth)
         if self.lexer.data[self.lexer.pos : self.lexer.pos + 1] != b"[":
             raise ObjectParserError("Array must start with '['.")
         self.lexer.pos += 1
@@ -59,9 +69,10 @@ class _Parser:
             if self.lexer.data[self.lexer.pos : self.lexer.pos + 1] == b"]":
                 self.lexer.pos += 1
                 return items
-            items.append(self._parse_value())
+            items.append(self._parse_value(depth=depth))
 
-    def _parse_dict(self) -> dict[str, object]:
+    def _parse_dict(self, *, depth: int = 0) -> dict[str, object]:
+        self._check_nesting_depth(depth)
         if self.lexer._peek(2) != b"<<":  # noqa: SLF001
             raise ObjectParserError("Dictionary must start with '<<'.")
         self.lexer.pos += 2
@@ -77,7 +88,7 @@ class _Parser:
             key = self.lexer._read_name()  # noqa: SLF001
             if not isinstance(key, PdfName):
                 raise ObjectParserError(f"Dictionary key must be PdfName, got {key!r}")
-            items[key.value] = self._parse_value()
+            items[key.value] = self._parse_value(depth=depth)
 
     def _maybe_indirect_ref(self, first: object) -> object:
         if not isinstance(first, int):
@@ -106,8 +117,15 @@ class _Parser:
         return value
 
 
-def parse_object_bytes(data: bytes) -> object:
-    parser = _Parser(ContentStreamTokenizer(data))
+def parse_object_bytes(
+    data: bytes,
+    *,
+    max_nesting_depth: int = MAX_OBJECT_NESTING_DEPTH,
+) -> object:
+    parser = _Parser(
+        ContentStreamTokenizer(data, max_nesting_depth=max_nesting_depth),
+        max_nesting_depth=max_nesting_depth,
+    )
     try:
         return parser.parse()
     except TokenizerError as exc:

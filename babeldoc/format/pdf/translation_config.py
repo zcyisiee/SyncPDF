@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import threading
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 from babeldoc.const import CACHE_FOLDER
@@ -23,10 +24,17 @@ class WatermarkOutputMode(enum.Enum):
     Both = "both"
 
 
+@dataclass(frozen=True, slots=True)
+class TitleContextSnapshot:
+    debug_id: str | None
+    unicode: str | None
+    layout_label: str | None = None
+
+
 class SharedContextCrossSplitPart:
     def __init__(self):
-        self.first_paragraph = None
-        self.recent_title_paragraph = None
+        self.first_paragraph: TitleContextSnapshot | None = None
+        self.recent_title_paragraph: TitleContextSnapshot | None = None
         self._lock = threading.Lock()
         self.user_glossaries: list[Glossary] = []
         self.auto_extracted_glossary: Glossary | None = None
@@ -35,6 +43,15 @@ class SharedContextCrossSplitPart:
         # Statistics for valid characters/text across the whole file
         self.valid_char_count_total: int = 0
         self.total_valid_text_token_count: int = 0
+
+    def snapshot_title_paragraph(self, paragraph) -> TitleContextSnapshot | None:
+        if paragraph is None:
+            return None
+        return TitleContextSnapshot(
+            debug_id=getattr(paragraph, "debug_id", None),
+            unicode=getattr(paragraph, "unicode", None),
+            layout_label=getattr(paragraph, "layout_label", None),
+        )
 
     def initialize_glossaries(self, initial_glossaries: list[Glossary] | None):
         with self._lock:

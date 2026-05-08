@@ -141,12 +141,12 @@ nav:
   - Implementation Details:
     - ImplementationDetails/README.md
     - PDF Parsing: ImplementationDetails/PDFParsing/PDFParsing.md
-    - Layout Parser(.py): https://github.com/funstory-ai/BabelDOC/blob/main/babeldoc/document_il/midend/layout_parser.py
+    - Layout Parser(.py): https://github.com/funstory-ai/BabelDOC/blob/main/babeldoc/format/pdf/document_il/midend/layout_parser.py
     - Paragraph Finding: ImplementationDetails/ParagraphFinding/ParagraphFinding.md
     - Styles and Formulas: ImplementationDetails/StylesAndFormulas/StylesAndFormulas.md
     - IL Translator: ImplementationDetails/ILTranslator/ILTranslator.md
     - Typesetting: ImplementationDetails/Typesetting/Typesetting.md
-    - Font Mapper(.py): https://github.com/funstory-ai/BabelDOC/blob/main/babeldoc/document_il/utils/fontmap.py
+    - Font Mapper(.py): https://github.com/funstory-ai/BabelDOC/blob/main/babeldoc/format/pdf/document_il/utils/fontmap.py
     - PDF Creation: ImplementationDetails/PDFCreation/PDFCreation.md
     - Intro To PDF Object: intro-to-pdf-object.md
   - Community:
