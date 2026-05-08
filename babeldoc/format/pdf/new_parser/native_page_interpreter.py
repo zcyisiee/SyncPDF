@@ -19,6 +19,8 @@ def create_native_page_interpreter(
     resource_runtime: PageResourceRuntime,
     config: object | None = None,
 ) -> PageInterpreter:
+    _ = config
+
     class _NativePageInterpreter:
         def begin_page(self, page: PreparedPdfPage, pageno: int) -> None:
             sink.on_page_start()
