@@ -1,0 +1,55 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Package and lightweight PDF smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Cache BabelDOC assets
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/babeldoc
+          key: babeldoc-assets-${{ hashFiles('babeldoc/assets/embedding_assets_metadata.py') }}
+
+      - name: Setup uv with Python 3.12
+        uses: astral-sh/setup-uv@85856786d1ce8acfbcc2f13a5f3fbd6b938f9f41 # v7.1.2
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          activate-environment: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Build package
+        run: uv build
+
+      - name: Import and CLI smoke
+        run: |
+          uv run python -m compileall babeldoc
+          uv run babeldoc --help
+
+      - name: Lightweight no-secret PDF E2E
+        run: |
+          uv run babeldoc \
+            --openai \
+            --openai-api-key ci-dummy-key \
+            --files examples/ci/test.pdf \
+            --only-parse-generate-pdf \
+            --skip-scanned-detection

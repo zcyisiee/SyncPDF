@@ -14,4 +14,4 @@ jobs:
       - name: Ruff
         uses: astral-sh/ruff-action@v3
       - name: AutoCorrect
-        uses: huacnlee/autocorrect-action@main
+        uses: huacnlee/autocorrect-action@bf91ab3904c2908dd8e71312a8a83ed1eb632997 # v2.13.3
