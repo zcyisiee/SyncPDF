@@ -280,7 +280,7 @@ class ImageWriter:
     def _create_unique_image_name(self, image: LTImage, ext: str) -> tuple[str, str]:
         # SECURITY: image.name comes from the PDF XObject and may carry '..'
         # or absolute paths. basename strips any directory components so the
-        # final path stays inside outdir (security hardening sweep).
+        # final path stays inside outdir (GHSA-m8gf-v64p-gfmg hardening sweep).
         safe_stem = os.path.basename(image.name)
         if safe_stem in ("", ".", ".."):
             safe_stem = "image"

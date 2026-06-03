@@ -1,4 +1,4 @@
-"""Integrity-locked loader for bundled CMap pickle files.
+"""Integrity-locked loader for bundled CMap pickle files (GHSA-m8gf-v64p-gfmg).
 
 The legacy loaders built a filesystem path from a PDF-controlled CMap name and
 pickle.loads()'d it, allowing absolute-path injection / `..` traversal to an
