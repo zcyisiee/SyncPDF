@@ -9,7 +9,8 @@ from babeldoc.format.pdf.high_level import fix_filter
 from babeldoc.format.pdf.high_level import fix_media_box
 from babeldoc.format.pdf.high_level import fix_null_page_content
 from babeldoc.format.pdf.high_level import fix_null_xref
-from babeldoc.format.pdf.high_level import safe_save
+from babeldoc.format.pdf.high_level import open_pdf_with_save_fallback
+from babeldoc.format.pdf.high_level import save_pdf_with_same_path_fallback
 from babeldoc.format.pdf.translation_config import TranslationConfig
 from babeldoc.progress_monitor import ProgressMonitor
 
@@ -52,12 +53,11 @@ def prepare_pdf_for_parse(
     temp_pdf_path = config.get_working_file_path("input.pdf")
     shutil.copy2(pdf_path, temp_pdf_path)
 
-    doc_pdf = pymupdf.open(pdf_path)
-    safe_save(doc_pdf, temp_pdf_path)
+    doc_pdf = open_pdf_with_save_fallback(pdf_path, temp_pdf_path)
 
     fix_null_page_content(doc_pdf)
     fix_filter(doc_pdf)
     fix_null_xref(doc_pdf)
     fix_media_box(doc_pdf)
-    safe_save(doc_pdf, temp_pdf_path)
+    doc_pdf = save_pdf_with_same_path_fallback(doc_pdf, temp_pdf_path)
     return doc_pdf, temp_pdf_path

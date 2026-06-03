@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import logging
 import subprocess
@@ -418,12 +419,33 @@ class ExecutorHandler(BaseHTTPRequestHandler):
         self._write_json(status, {"code": code, "message": message})
 
 
+def _is_loopback_host(host: str) -> bool:
+    """Return True iff ``host`` binds to a loopback interface only.
+
+    Used by ``serve`` to warn when the executor sidecar is exposed beyond
+    its intended trust boundary (loopback / Unix-domain peer).
+    """
+    if host in ("localhost",):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def serve(
     host: str,
     port: int,
     store: ExecutionStore | None = None,
     runner_name: str = "babeldoc",
 ):
+    if not _is_loopback_host(host):
+        logger.warning(
+            "executor sidecar binding to non-loopback host %r has no built-in "
+            "authentication; treat the bind interface as a trust boundary and "
+            "ensure only intended peers can reach it",
+            host,
+        )
     runner = _create_runner(runner_name)
     if store is None and isinstance(runner, MultiprocessExecutionRunner):
         runner.warmup()

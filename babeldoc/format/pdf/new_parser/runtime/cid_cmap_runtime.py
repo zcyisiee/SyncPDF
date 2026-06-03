@@ -7,11 +7,11 @@ from babeldoc.format.pdf.new_parser.runtime.cmap_types_runtime import FileUnicod
 from babeldoc.format.pdf.new_parser.runtime.cmap_types_runtime import IdentityCMap
 from babeldoc.format.pdf.new_parser.runtime.cmap_types_runtime import IdentityCMapByte
 from babeldoc.format.pdf.new_parser.runtime.cmap_types_runtime import IdentityUnicodeMap
+from babeldoc.format.pdf.new_parser.runtime.cmapdb_runtime import CMapDB
 from babeldoc.format.pdf.new_parser.runtime.runtime_settings import STRICT
 from babeldoc.format.pdf.new_parser.runtime.to_unicode_parser_runtime import (
     parse_tounicode_stream,
 )
-from babeldoc.pdfminer.cmapdb import CMapDB
 
 
 def _normalize_cmap_name(cmap_name: object) -> str:

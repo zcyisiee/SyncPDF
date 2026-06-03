@@ -402,6 +402,34 @@ class PdfFont:
             "required": True,
         },
     )
+    font_subtype: str | None = field(
+        default=None,
+        metadata={
+            "name": "fontSubtype",
+            "type": "Attribute",
+        },
+    )
+    type3_font_matrix: str | None = field(
+        default=None,
+        metadata={
+            "name": "type3FontMatrix",
+            "type": "Attribute",
+        },
+    )
+    type3_font_bbox: str | None = field(
+        default=None,
+        metadata={
+            "name": "type3FontBBox",
+            "type": "Attribute",
+        },
+    )
+    type3_em_height: float | None = field(
+        default=None,
+        metadata={
+            "name": "type3EmHeight",
+            "type": "Attribute",
+        },
+    )
     bold: bool | None = field(
         default=None,
         metadata={

@@ -4,18 +4,14 @@
 
 import argparse
 import hashlib
-import io
 import logging
 import re
+import tempfile
 from pathlib import Path
 
-import babeldoc.format.pdf.high_level
-import babeldoc.format.pdf.translation_config
 import orjson
 import pymupdf
 from babeldoc.format.pdf.document_il import PdfFont
-from babeldoc.format.pdf.document_il.frontend.il_creater import ILCreater
-from babeldoc.format.pdf.legacy_parse import start_parse_il
 from rich.logging import RichHandler
 
 logger = logging.getLogger(__name__)
@@ -28,41 +24,72 @@ serif_regex = "|".join(serif_keywords)
 sans_serif_regex = "|".join(sans_serif_keywords)
 
 
-def get_font_metadata(font_path) -> PdfFont:
-    doc = pymupdf.open()
-    page = doc.new_page(width=1000, height=1000)
-    page.insert_font("test_font", font_path)
-    translation_config = babeldoc.format.pdf.translation_config.TranslationConfig(
-        *[None for _ in range(4)], doc_layout_model=1
-    )
-    translation_config.progress_monitor = (
-        babeldoc.format.pdf.high_level.ProgressMonitor(
-            babeldoc.format.pdf.high_level.get_translation_stage(translation_config)
-        )
-    )
-    translation_config.font = font_path
-    il_creater = ILCreater(translation_config)
-    il_creater.mupdf = doc
-    buffer = io.BytesIO()
-    doc.save(buffer)
-    start_parse_il(
-        buffer,
-        doc_zh=doc,
-        resfont="test_font",
-        il_creater=il_creater,
-        translation_config=translation_config,
+def get_font_metadata(
+    font_path,
+    *,
+    working_dir: str | Path | None = None,
+) -> PdfFont:
+    from babeldoc.format.pdf.new_parser.native_parse import (
+        parse_with_new_parser_to_legacy_ir,
     )
 
-    il = il_creater.create_il()
+    font_path = Path(font_path)
+    temp_root = Path(working_dir) if working_dir is not None else None
+    if temp_root is not None:
+        temp_root.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(
+        dir=temp_root,
+        prefix="babeldoc-font-metadata-",
+    ) as temp_dir:
+        temp_dir_path = Path(temp_dir)
+        probe_pdf_path = temp_dir_path / "font_probe.pdf"
+        parse_working_dir = temp_dir_path / "parse_working"
+
+        _write_font_probe_pdf(font_path, probe_pdf_path)
+        il = parse_with_new_parser_to_legacy_ir(
+            probe_pdf_path,
+            working_dir=parse_working_dir,
+        )
+
     il_page = il.page[0]
-    font_metadata = il_page.pdf_font[0]
-    return font_metadata
+    if not il_page.pdf_font:
+        raise RuntimeError(
+            "new parser did not produce font metadata from the generated probe PDF"
+        )
+    return il_page.pdf_font[0]
+
+
+def _write_font_probe_pdf(font_path: Path, output_path: Path) -> None:
+    doc = pymupdf.open()
+    try:
+        page = doc.new_page(width=1000, height=1000)
+        page.insert_font("test_font", fontfile=str(font_path))
+        page.insert_text(
+            (72, 120),
+            "BabelDOC font metadata probe",
+            fontname="test_font",
+            fontsize=32,
+        )
+        doc.save(output_path)
+    finally:
+        doc.close()
+
+
+def _stable_json_number(value: int | float) -> int | float:
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
 
 
 def main():
     logging.basicConfig(level=logging.INFO, handlers=[RichHandler()])
     parser = argparse.ArgumentParser(description="Get font metadata.")
     parser.add_argument("assets_repo_path", type=str, help="Path to the font file.")
+    parser.add_argument(
+        "--working-dir",
+        help="Optional directory for temporary generated probe PDFs.",
+    )
     args = parser.parse_args()
     repo_path = Path(args.assets_repo_path)
     assert repo_path.exists(), f"Assets repo path {repo_path} does not exist."
@@ -85,7 +112,10 @@ def main():
                 if not chunk:
                     break
                 hash_.update(chunk)
-        extracted_metadata = get_font_metadata(font_path)
+        extracted_metadata = get_font_metadata(
+            font_path,
+            working_dir=args.working_dir,
+        )
 
         if re.search(serif_regex, extracted_metadata.name, re.IGNORECASE):
             serif = 1
@@ -100,8 +130,8 @@ def main():
             "italic": extracted_metadata.italic,
             "monospace": extracted_metadata.monospace,
             "serif": serif,
-            "ascent": extracted_metadata.ascent,
-            "descent": extracted_metadata.descent,
+            "ascent": _stable_json_number(extracted_metadata.ascent),
+            "descent": _stable_json_number(extracted_metadata.descent),
             "sha3_256": hash_.hexdigest(),
             "size": font_path.stat().st_size,
         }

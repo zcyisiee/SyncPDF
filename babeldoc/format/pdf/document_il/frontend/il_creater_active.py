@@ -19,7 +19,9 @@ import tiktoken
 
 from babeldoc.format.pdf.babelpdf.base14 import get_base14_bbox
 from babeldoc.format.pdf.babelpdf.cidfont import get_cidfont_bbox
+from babeldoc.format.pdf.babelpdf.type3 import Type3FontMetrics
 from babeldoc.format.pdf.babelpdf.type3 import get_type3_bbox
+from babeldoc.format.pdf.babelpdf.type3 import get_type3_font_metrics
 from babeldoc.format.pdf.babelpdf.utils import guarded_bbox
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.frontend.il_creater_active_support import (
@@ -84,6 +86,12 @@ from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
 from babeldoc.format.pdf.document_il.utils.matrix_helper import decompose_ctm
 from babeldoc.format.pdf.document_il.utils.style_helper import BLACK
 from babeldoc.format.pdf.document_il.utils.style_helper import YELLOW
+from babeldoc.format.pdf.document_il.utils.type3_font_metrics import (
+    build_type3_pdf_font_fields,
+)
+from babeldoc.format.pdf.document_il.utils.type3_font_metrics import (
+    effective_type3_font_size,
+)
 from babeldoc.format.pdf.new_parser.interpreter import BeginXObjectEvent
 from babeldoc.format.pdf.new_parser.interpreter import ImageXObjectEvent
 from babeldoc.format.pdf.new_parser.interpreter import InlineImageEvent
@@ -97,6 +105,7 @@ from babeldoc.format.pdf.new_parser.state import get_bound
 from babeldoc.format.pdf.new_parser.state import invert_matrix
 from babeldoc.format.pdf.new_parser.state import multiply_matrices
 from babeldoc.format.pdf.new_parser.text_positioning import TextRunPositioner
+from babeldoc.format.pdf.new_parser.tokenizer import canonical_pdf_name
 from babeldoc.format.pdf.translation_config import TranslationConfig
 
 if TYPE_CHECKING:
@@ -445,7 +454,11 @@ class ActiveILCreater:
             if font_key not in emitted_font_keys:
                 font.descent = getattr(font, "legacy_descent", font.descent)
                 emitted_font_keys.add(font_key)
-            self.on_page_resource_font(font, getattr(font, "xobj_id", None), font_id)
+            self.on_page_resource_font(
+                font,
+                getattr(font, "xobj_id", None),
+                canonical_pdf_name(font_id),
+            )
             font.descent = original_descent
 
     def begin_native_root_scope(
@@ -589,6 +602,18 @@ class ActiveILCreater:
             return self._clone_projected_font_resource_template(cached)
 
         font_name = self._decode_font_name(font.fontname)
+        font_subtype = self._get_font_subtype(xref_id)
+        type3_metrics = (
+            get_type3_font_metrics(self.mupdf, xref_id)
+            if font_subtype == "Type3"
+            else None
+        )
+        type3_fields = build_type3_pdf_font_fields(
+            font_subtype=font_subtype,
+            metrics=type3_metrics,
+            fallback_ascent=font.ascent,
+            fallback_descent=font.descent,
+        )
         il_font_metadata = il_version_1.PdfFont(
             name=font_name,
             xref_id=xref_id,
@@ -597,14 +622,14 @@ class ActiveILCreater:
                 font=font,
                 xref_id=xref_id,
             ),
+            **type3_fields,
             pdf_font_char_bounding_box=[],
             **self._compute_font_style_flags(xref_id),
-            ascent=font.ascent,
-            descent=font.descent,
         )
         bbox_map = self._populate_font_bounding_boxes(
             metadata=il_font_metadata,
             xref_id=xref_id,
+            type3_metrics=type3_metrics,
         )
         projected = _ProjectedFontResource(
             metadata=il_font_metadata,
@@ -666,6 +691,15 @@ class ActiveILCreater:
             raise TypeError(msg)
         return compute_encoding_length(mupdf=self.mupdf, xref_id=xref_id)
 
+    def _get_font_subtype(self, xref_id: int) -> str | None:
+        try:
+            _kind, value = self.mupdf.xref_get_key(xref_id, "Subtype")
+        except Exception:
+            return None
+        if not value:
+            return None
+        return value[1:] if value.startswith("/") else value
+
     def _compute_font_style_flags(self, xref_id: int) -> dict[str, bool | None]:
         try:
             if xref_id in self.mupdf_font_map:
@@ -699,13 +733,17 @@ class ActiveILCreater:
         *,
         metadata: il_version_1.PdfFont,
         xref_id: int,
+        type3_metrics: Type3FontMetrics | None = None,
     ) -> dict[int, tuple[float, float, float, float]]:
         font_char_bounding_box_map: dict[int, tuple[float, float, float, float]] = {}
         try:
             if xref_id is None:
                 logger.warning("xref_id is None for font %s", metadata.name)
                 raise ValueError(f"xref_id is None for font {metadata.name}")
-            bbox_list, cmap = self.parse_font_xobj_id(xref_id)
+            bbox_list, cmap = self.parse_font_xobj_id(
+                xref_id,
+                type3_metrics=type3_metrics,
+            )
             if not cmap:
                 cmap = {x: x for x in range(257)}
             for char_id, char_bbox in enumerate(bbox_list):
@@ -779,7 +817,12 @@ class ActiveILCreater:
             fonts.remove(sr)
         fonts.append(metadata)
 
-    def parse_font_xobj_id(self, xobj_id: int):
+    def parse_font_xobj_id(
+        self,
+        xobj_id: int,
+        *,
+        type3_metrics: Type3FontMetrics | None = None,
+    ):
         if xobj_id is None:
             return [], {}
 
@@ -809,7 +852,12 @@ class ActiveILCreater:
         if cid_bbox := get_cidfont_bbox(self.mupdf, xobj_id):
             bbox_list = cid_bbox
         if self.mupdf.xref_get_key(xobj_id, "Subtype")[1] == "/Type3":
-            bbox_list = get_type3_bbox(self.mupdf, xobj_id)
+            bbox_list = get_type3_bbox(
+                self.mupdf,
+                xobj_id,
+                normalize_to_1000_em=True,
+                metrics=type3_metrics,
+            )
         return bbox_list, cmap
 
     def on_line_dash(self, dash, phase):
@@ -1265,9 +1313,11 @@ class ActiveILCreater:
                 font = pdf_font
                 break
 
+        font_size = effective_type3_font_size(font, char.size)
+
         descent = 0
         if font and hasattr(font, "descent"):
-            descent = font.descent * char.size / 1000
+            descent = font.descent * font_size / 1000
 
         char_id = char.cid
 
@@ -1321,7 +1371,7 @@ class ActiveILCreater:
         visual_bbox = il_version_1.VisualBbox(box=visual_bbox)
         pdf_style = il_version_1.PdfStyle(
             font_id=char.aw_font_id,
-            font_size=char.size,
+            font_size=font_size,
             graphic_state=gs,
         )
 

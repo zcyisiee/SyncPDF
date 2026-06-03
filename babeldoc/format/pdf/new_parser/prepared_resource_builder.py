@@ -86,11 +86,15 @@ def build_prepared_font_specs(
     )
     result: list[PreparedFontSpec] = []
     for font_id, spec in font_section.items():
+        try:
+            spec_dict = object_access.dict_value(spec)
+        except TypeError:
+            continue
         result.append(
             PreparedFontSpec(
                 name=object_access.literal_name(font_id),
                 objid=getattr(spec, "objid", None),
-                spec=object_access.dict_value(spec),
+                spec=spec_dict,
                 resolve_indirect=object_access.resolve_indirect,
             )
         )

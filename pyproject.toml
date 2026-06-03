@@ -1,6 +1,6 @@
 [project]
 name = "BabelDOC"
-version = "0.6.2"
+version = "0.6.3"
 description = "Yet Another Document Translator"
 license = "AGPL-3.0"
 readme = "README.md"
@@ -22,17 +22,17 @@ dependencies = [
     "httpx[socks]>=0.27.0",
     "huggingface-hub>=0.27.0",
     "numpy>=2.0.2",
-    "onnx>=1.18.0",
+    "onnx>=1.21.0",
     "onnxruntime>=1.16.1,<1.24; python_version < '3.11'",
     "onnxruntime>=1.16.1; python_version >= '3.11'",
     "openai>=1.59.3",
     "orjson>=3.10.14",
     "charset-normalizer >= 2.0.0",
-    "cryptography >= 36.0.0",
+    "cryptography >= 46.0.7",
     #    "pdfminer-six==20250416",
     "peewee>=3.17.8",
     "psutil>=7.0.0",
-    "pymupdf>=1.25.1",
+    "pymupdf>=1.26.7",
     "rich>=13.9.4",
     "toml>=0.10.2",
     "tqdm>=4.67.1",
@@ -163,7 +163,7 @@ pythonpath = [".", "src"]
 testpaths = ["tests"]
 
 [bumpver]
-current_version = "0.6.2"
+current_version = "0.6.3"
 version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
 
 [bumpver.file_patterns]

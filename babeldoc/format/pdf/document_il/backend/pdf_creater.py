@@ -20,6 +20,9 @@ from babeldoc.format.pdf.document_il import PdfOriginalPath
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
 from babeldoc.format.pdf.document_il.utils.matrix_helper import matrix_to_bytes
+from babeldoc.format.pdf.document_il.utils.type3_font_metrics import (
+    inverse_type3_font_size_for_tf,
+)
 from babeldoc.format.pdf.document_il.utils.zstd_helper import zstd_decompress
 from babeldoc.format.pdf.new_parser.pdf_token_serializer import serialize_pdf_token
 from babeldoc.format.pdf.translation_config import TranslateResult
@@ -86,6 +89,7 @@ class CharacterRenderUnit(RenderUnit):
 
         char_size = char.pdf_style.font_size
         font_id = char.pdf_style.font_id
+        tf_font_size = self._font_size_for_pdf_tf(char_size, font_id, context)
 
         # Get encoding length map based on xobj_id
         if self.xobj_id in context.xobj_encoding_length_map:
@@ -106,11 +110,11 @@ class CharacterRenderUnit(RenderUnit):
 
         if char.vertical:
             draw_op.append(
-                f"BT /{font_id} {char_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode(),
+                f"BT /{font_id} {tf_font_size:f} Tf 0 1 -1 0 {char.box.x2:f} {char.box.y:f} Tm ".encode(),
             )
         else:
             text_draw_op = (
-                f"BT /{font_id} {char_size:f} Tf "
+                f"BT /{font_id} {tf_font_size:f} Tf "
                 f"1 0 0 1 {char.box.x:f} {char.box.y:f} Tm "
             )
             draw_op.append(text_draw_op.encode())
@@ -129,6 +133,28 @@ class CharacterRenderUnit(RenderUnit):
             f"<{char.pdf_character_id:0{encoding_length * 2}x}>".upper().encode(),
         )
         draw_op.append(b" Tj ET Q \n")
+
+    def _font_size_for_pdf_tf(
+        self,
+        char_size: float,
+        font_id: str,
+        context: "RenderContext",
+    ) -> float:
+        get_scoped_font = getattr(context, "get_scoped_font", None)
+        font = (
+            get_scoped_font(font_id, self.xobj_id)
+            if callable(get_scoped_font)
+            else None
+        )
+        if font is None:
+            xobj_font_map = getattr(context, "xobj_font_map", {})
+            if self.xobj_id in xobj_font_map:
+                font = xobj_font_map[self.xobj_id].get(font_id)
+        if font is None:
+            font = getattr(context, "page_font_map", {}).get(font_id)
+        if font is None:
+            return char_size
+        return inverse_type3_font_size_for_tf(font, char_size)
 
 
 class FormRenderUnit(RenderUnit):
@@ -358,6 +384,8 @@ class RenderContext:
         all_encoding_length_map: dict[str, int],
         xobj_available_fonts: dict[str, set[str]],
         xobj_encoding_length_map: dict[str, dict[str, int]],
+        page_font_map: dict[str, il_version_1.PdfFont],
+        xobj_font_map: dict[str, dict[str, il_version_1.PdfFont]],
         ctm_for_ops: bytes,
         check_font_exists: bool = False,
     ):
@@ -368,8 +396,21 @@ class RenderContext:
         self.all_encoding_length_map = all_encoding_length_map
         self.xobj_available_fonts = xobj_available_fonts
         self.xobj_encoding_length_map = xobj_encoding_length_map
+        self.page_font_map = page_font_map
+        self.xobj_font_map = xobj_font_map
         self.ctm_for_ops = ctm_for_ops
         self.check_font_exists = check_font_exists
+
+    def get_scoped_font(
+        self,
+        font_id: str,
+        xobj_id: str | None = None,
+    ) -> il_version_1.PdfFont | None:
+        if xobj_id in self.xobj_font_map:
+            scoped_font = self.xobj_font_map[xobj_id].get(font_id)
+            if scoped_font is not None:
+                return scoped_font
+        return self.page_font_map.get(font_id)
 
 
 def to_int(src):
@@ -622,7 +663,15 @@ class PDFCreater:
             )
 
     @staticmethod
+    def _parse_xref_ref(value: str) -> int | None:
+        match = re.match(r"^\s*(\d+)\s+0\s+R\s*$", value)
+        if match is None:
+            return None
+        return int(match.group(1))
+
+    @classmethod
     def _find_resource_ref(
+        cls,
         pdf: pymupdf.Document,
         candidate_resource_xrefs: list[int],
         resource_kind: str,
@@ -639,6 +688,46 @@ class PDFCreater:
             if value_type != "null" and value != "null":
                 return value
         return None
+
+    @classmethod
+    def _set_resource_ref(
+        cls,
+        pdf: pymupdf.Document,
+        target_xref: int,
+        resource_kind: str,
+        name: str,
+        resource_ref: str,
+    ) -> None:
+        resource_key = f"Resources/{resource_kind}/{name}"
+        try:
+            pdf.xref_set_key(target_xref, resource_key, resource_ref)
+            return
+        except Exception as exc:
+            if "has indirects" not in str(exc):
+                raise
+            direct_set_error = exc
+
+        resources_type, resources_value = pdf.xref_get_key(
+            target_xref,
+            "Resources",
+        )
+        resources_xref = (
+            cls._parse_xref_ref(resources_value) if resources_type == "xref" else None
+        )
+        if resources_xref is None:
+            raise direct_set_error
+
+        kind_type, kind_value = pdf.xref_get_key(resources_xref, resource_kind)
+        kind_xref = cls._parse_xref_ref(kind_value) if kind_type == "xref" else None
+        if kind_xref is not None:
+            pdf.xref_set_key(kind_xref, name, resource_ref)
+            return
+
+        pdf.xref_set_key(
+            resources_xref,
+            f"{resource_kind}/{name}",
+            resource_ref,
+        )
 
     @classmethod
     def _ensure_stream_named_resources(
@@ -676,9 +765,11 @@ class PDFCreater:
             )
             if resource_ref is None:
                 continue
-            pdf.xref_set_key(
+            cls._set_resource_ref(
+                pdf,
                 target_xref,
-                f"Resources/{resource_kind}/{name}",
+                resource_kind,
+                name,
                 resource_ref,
             )
 
@@ -1554,6 +1645,8 @@ class PDFCreater:
         xobj_draw_ops = {}
         xobj_encoding_length_map = {}
         available_font_list = self.get_available_font_list(pdf, page)
+        page_font_map = {f.font_id: f for f in page.pdf_font}
+        xobj_font_map = {}
         page_encoding_length_map: dict[str | None, int | None] = {
             f.font_id: f.encoding_length for f in page.pdf_font
         }
@@ -1566,6 +1659,8 @@ class PDFCreater:
                 )
             except Exception:
                 pass
+            xobj_font_map[xobj.xobj_id] = page_font_map.copy()
+            xobj_font_map[xobj.xobj_id].update({f.font_id: f for f in xobj.pdf_font})
             xobj_encoding_length_map[xobj.xobj_id] = {
                 f.font_id: f.encoding_length for f in xobj.pdf_font
             }
@@ -1594,6 +1689,8 @@ class PDFCreater:
             all_encoding_length_map=all_encoding_length_map,
             xobj_available_fonts=xobj_available_fonts,
             xobj_encoding_length_map=xobj_encoding_length_map,
+            page_font_map=page_font_map,
+            xobj_font_map=xobj_font_map,
             ctm_for_ops=ctm_for_ops,
             check_font_exists=check_font_exists,
         )
@@ -1639,13 +1736,13 @@ class PDFCreater:
         stream = draw_op.tobytes()
         self._ensure_stream_extgstate_resources(
             pdf,
-            op_container,
+            pdf[page.page_number].xref,
             stream,
             candidate_resource_xrefs,
         )
         self._ensure_stream_shading_resources(
             pdf,
-            op_container,
+            pdf[page.page_number].xref,
             stream,
             candidate_resource_xrefs,
         )

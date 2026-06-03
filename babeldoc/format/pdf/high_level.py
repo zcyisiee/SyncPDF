@@ -94,6 +94,66 @@ def safe_save(doc, *args, **kwargs):
         doc.ez_save(*args, **kwargs)
 
 
+def rebuild_pdf_by_inserting_pages(
+    pdf_path: str | Path,
+    output_pdf_path: str | Path,
+) -> None:
+    output_pdf_path = Path(output_pdf_path)
+    rebuilt_pdf_path = output_pdf_path.with_name(
+        f"{output_pdf_path.stem}.rebuilt{output_pdf_path.suffix}"
+    )
+    if rebuilt_pdf_path.exists():
+        rebuilt_pdf_path.unlink()
+
+    source_doc = Document(pdf_path)
+    rebuilt_doc = Document()
+    try:
+        rebuilt_doc.insert_pdf(source_doc)
+        rebuilt_doc.save(rebuilt_pdf_path)
+    finally:
+        rebuilt_doc.close()
+        source_doc.close()
+
+    rebuilt_pdf_path.replace(output_pdf_path)
+
+
+def open_pdf_with_save_fallback(
+    pdf_path: str | Path,
+    output_pdf_path: str | Path,
+) -> Document:
+    doc_pdf = Document(pdf_path)
+    try:
+        safe_save(doc_pdf, output_pdf_path)
+        return doc_pdf
+    except Exception:
+        doc_pdf.close()
+        rebuild_pdf_by_inserting_pages(pdf_path, output_pdf_path)
+        return Document(output_pdf_path)
+
+
+def save_pdf_with_same_path_fallback(
+    doc_pdf: Document,
+    output_pdf_path: str | Path,
+) -> Document:
+    output_pdf_path = Path(output_pdf_path)
+    doc_name = Path(getattr(doc_pdf, "name", "") or "")
+    if doc_name.resolve() != output_pdf_path.resolve():
+        safe_save(doc_pdf, output_pdf_path)
+        return doc_pdf
+
+    saved_pdf_path = output_pdf_path.with_name(
+        f"{output_pdf_path.stem}.saved{output_pdf_path.suffix}"
+    )
+    if saved_pdf_path.exists():
+        saved_pdf_path.unlink()
+    try:
+        safe_save(doc_pdf, saved_pdf_path)
+    finally:
+        doc_pdf.close()
+    saved_pdf_path.replace(output_pdf_path)
+    return Document(output_pdf_path)
+
+
 def check_metadata(pdf: Document):
     meta = pdf.metadata
     if not meta:
@@ -803,8 +863,7 @@ def _do_translate_single(
 
     # Continue with original processing
     temp_pdf_path = translation_config.get_working_file_path("input.pdf")
-    doc_pdf2zh = Document(original_pdf_path)
-    safe_save(doc_pdf2zh, temp_pdf_path)
+    doc_pdf2zh = open_pdf_with_save_fallback(original_pdf_path, temp_pdf_path)
 
     # Fix null xref in PDF file
     invalid_pages = []
@@ -820,7 +879,7 @@ def _do_translate_single(
     # for page in doc_pdf2zh:
     #     page.insert_font(resfont, None)
 
-    safe_save(doc_pdf2zh, temp_pdf_path)
+    doc_pdf2zh = save_pdf_with_same_path_fallback(doc_pdf2zh, temp_pdf_path)
 
     # if not translation_config.skip_scanned_detection and DetectScannedFile(
     #     translation_config

@@ -8,6 +8,7 @@ from babeldoc.format.pdf.new_parser.interpreter import TextRunEvent
 from babeldoc.format.pdf.new_parser.resources import PageResourceBundle
 from babeldoc.format.pdf.new_parser.state import multiply_matrices
 from babeldoc.format.pdf.new_parser.state import translate_existing_matrix
+from babeldoc.format.pdf.new_parser.tokenizer import canonical_pdf_name
 
 
 class TextRunPositioner(Protocol):
@@ -66,7 +67,9 @@ class NativeTextRunPositioner:
                         pos_x += charspace
                 char_matrix = translate_existing_matrix(matrix, (pos_x, pos_y))
                 text = font.unicode_text(cid, f"(cid:{cid})")
-                font_id = getattr(font, "font_id_temp", None) or event.font_name
+                font_id = getattr(font, "font_id_temp", None) or canonical_pdf_name(
+                    event.font_name
+                )
                 item = AWLTChar(
                     char_matrix,
                     font,

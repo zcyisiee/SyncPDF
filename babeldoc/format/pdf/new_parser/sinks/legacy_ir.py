@@ -15,6 +15,7 @@ from babeldoc.format.pdf.new_parser.resources import PageResourceBundle
 from babeldoc.format.pdf.new_parser.state import apply_matrix_pt
 from babeldoc.format.pdf.new_parser.state import multiply_matrices
 from babeldoc.format.pdf.new_parser.text_positioning import TextRunPositioner
+from babeldoc.format.pdf.new_parser.tokenizer import canonical_pdf_name
 
 
 class _NativeCurve:
@@ -139,7 +140,11 @@ class LegacyIRSink:
             if font_key not in emitted_font_keys:
                 font.descent = getattr(font, "legacy_descent", font.descent)
                 emitted_font_keys.add(font_key)
-            self.on_page_resource_font(font, getattr(font, "xobj_id", None), font_id)
+            self.on_page_resource_font(
+                font,
+                getattr(font, "xobj_id", None),
+                canonical_pdf_name(font_id),
+            )
             font.descent = original_descent
 
     def begin_native_root_scope(

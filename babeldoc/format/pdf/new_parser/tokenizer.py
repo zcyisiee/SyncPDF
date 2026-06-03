@@ -139,6 +139,15 @@ def decode_pdf_name(value: str) -> str:
     return "".join(result)
 
 
+def canonical_pdf_name(value: str) -> str:
+    current = value
+    while True:
+        decoded = decode_pdf_name(current)
+        if decoded == current:
+            return current
+        current = decoded
+
+
 _NO_TOKEN = object()
 
 
