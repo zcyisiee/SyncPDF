@@ -1422,7 +1422,17 @@ class Typesetting:
                 max_height = max(current_line_heights)
                 mode_height = statistics.mode(current_line_heights)
 
-                current_y -= max(mode_height * line_skip, max_height * 1.05)
+                # Line advance must not collapse below the dominant em height.
+                # current_line_heights are per-glyph bounding-box heights, which
+                # for an all-Latin line (e.g. a citation run) are far shorter than
+                # the CJK em, shrinking the advance to ~half a line and letting the
+                # next CJK line overlap it. Floor the advance with font_size (the
+                # paragraph's dominant em) so script-mix never undersizes the gap.
+                current_y -= max(
+                    font_size * scale * line_skip,
+                    mode_height * line_skip,
+                    max_height * 1.05,
+                )
                 line_ys.append(current_y)
                 line_height = 0.0
                 current_line_heights = []  # 清空当前行高度列表

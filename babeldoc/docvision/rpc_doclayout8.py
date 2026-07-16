@@ -26,7 +26,8 @@ from babeldoc.format.pdf.document_il.utils.extract_char import (
 )
 from babeldoc.format.pdf.document_il.utils.fontmap import FontMapper
 from babeldoc.format.pdf.document_il.utils.layout_helper import SPACE_REGEX
-from babeldoc.format.pdf.document_il.utils.mupdf_helper import get_no_rotation_img
+from babeldoc.format.pdf.document_il.utils.raster_geometry import RasterGeometry
+from babeldoc.format.pdf.document_il.utils.raster_geometry import with_pixel_budget
 
 DPI = 150
 LAYOUT_ERROR = "layout 解析失败"
@@ -87,6 +88,7 @@ class _PageInput:
     page: il_version_1.Page
     image: np.ndarray
     image_data: bytes
+    geometry: RasterGeometry
     line_results: list[dict[str, Any]] | None
 
 
@@ -199,23 +201,22 @@ class RpcDocLayoutModel(DocLayoutModel):
             if self.requires_line_extraction
             else None
         )
-        pix = get_no_rotation_img(mupdf_doc[page.page_number], dpi=DPI)
-        image = np.frombuffer(pix.samples, np.uint8).reshape(
-            pix.height,
-            pix.width,
-            3,
+        geometry = with_pixel_budget(
+            mupdf_doc[page.page_number],
+            DPI,
+            normalize_rotation=True,
         )
+        image = geometry.image
         image_data = _encode_image(image)
         line_results = (
             self._convert_line_results(
                 line_future.result(),
-                image.shape[1],
-                image.shape[0],
+                geometry,
             )
             if line_future is not None
             else None
         )
-        return _PageInput(index, page, image, image_data, line_results)
+        return _PageInput(index, page, image, image_data, geometry, line_results)
 
     def _extract_raw_lines(self, page: il_version_1.Page):
         if self.font_mapper is None:
@@ -227,12 +228,11 @@ class RpcDocLayoutModel(DocLayoutModel):
     def _convert_line_results(
         self,
         lines,
-        image_width: int,
-        image_height: int,
+        geometry: RasterGeometry,
     ) -> list[dict[str, Any]]:
         results = []
         for line in lines:
-            converted = self._convert_line(line, image_width, image_height)
+            converted = self._convert_line(line, geometry)
             if converted is not None:
                 results.append(converted)
         return results
@@ -240,8 +240,7 @@ class RpcDocLayoutModel(DocLayoutModel):
     def _convert_line(
         self,
         line,
-        image_width: int,
-        image_height: int,
+        geometry: RasterGeometry,
     ) -> dict[str, Any] | None:
         if not line.text or self.font_mapper is None:
             return None
@@ -251,10 +250,12 @@ class RpcDocLayoutModel(DocLayoutModel):
         min_y = min(box.y for box in boxes)
         max_y = max(box.y2 for box in boxes)
 
-        min_x = min_x / 72 * DPI
-        max_x = max_x / 72 * DPI
-        min_y = min_y / 72 * DPI
-        max_y = max_y / 72 * DPI
+        min_x = geometry.pt_len_to_px(min_x, "x")
+        max_x = geometry.pt_len_to_px(max_x, "x")
+        min_y = geometry.pt_len_to_px(min_y, "y")
+        max_y = geometry.pt_len_to_px(max_y, "y")
+        image_width = geometry.pixel_width
+        image_height = geometry.pixel_height
         min_y, max_y = image_height - max_y, image_height - min_y
 
         box_volume = (max_x - min_x) * (max_y - min_y)
@@ -284,7 +285,7 @@ class RpcDocLayoutModel(DocLayoutModel):
         request_body: dict[str, Any] = {
             "schema_version": 1,
             "page_number": page_input.page.page_number,
-            "dpi": DPI,
+            "dpi": page_input.geometry.render_dpi,
             "image": base64.b64encode(page_input.image_data).decode("utf-8"),
             "image_size": [page_input.image.shape[1], page_input.image.shape[0]],
         }
@@ -305,11 +306,7 @@ class RpcDocLayoutModel(DocLayoutModel):
             if response.status_code < 200 or response.status_code >= 300:
                 raise RuntimeError(LAYOUT_ERROR)
             payload = response.json()
-            yolo_result = self._parse_response(
-                payload,
-                page_input.image.shape[1],
-                page_input.image.shape[0],
-            )
+            yolo_result = self._parse_response(payload, page_input.geometry)
             return page_input.page, yolo_result
         except Exception as exc:
             raise RuntimeError(LAYOUT_ERROR) from exc
@@ -317,8 +314,8 @@ class RpcDocLayoutModel(DocLayoutModel):
     def _parse_response(
         self,
         payload: Any,
-        _image_width: int,
-        _image_height: int,
+        geometry: RasterGeometry | int,
+        _image_height: int | None = None,
     ) -> YoloResult:
         if not isinstance(payload, dict) or payload.get("schema_version") != 1:
             raise RuntimeError(LAYOUT_ERROR)
@@ -328,7 +325,6 @@ class RpcDocLayoutModel(DocLayoutModel):
 
         names: dict[int, str] = {}
         boxes: list[YoloBox] = []
-        scale = 72 / DPI
         for item in boxes_payload:
             if not isinstance(item, dict):
                 raise RuntimeError(LAYOUT_ERROR)
@@ -344,7 +340,15 @@ class RpcDocLayoutModel(DocLayoutModel):
                 or len(box) != 4
             ):
                 raise RuntimeError(LAYOUT_ERROR)
-            coords = [float(value) * scale for value in box]
+            if isinstance(geometry, RasterGeometry):
+                coords = [
+                    geometry.px_len_to_pt(float(value), "x" if index % 2 == 0 else "y")
+                    for index, value in enumerate(box)
+                ]
+            else:
+                # Keep the narrow legacy direct-call compatibility used by
+                # old callers/tests; all request-path calls pass RasterGeometry.
+                coords = [float(value) * 72 / DPI for value in box]
             names[class_id] = label
             boxes.append(
                 YoloBox(

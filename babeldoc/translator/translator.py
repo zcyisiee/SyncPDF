@@ -216,6 +216,7 @@ class OpenAITranslator(BaseTranslator):
         send_dashscope_header=False,
         send_temperature=True,
         reasoning=None,
+        thinking=None,
     ):
         super().__init__(lang_in, lang_out, ignore_cache)
         self.options = {"temperature": 0}  # 随机采样可能会打断公式标记
@@ -247,6 +248,11 @@ class OpenAITranslator(BaseTranslator):
         if self.reasoning:
             self.extra_body["reasoning"] = {"effort": self.reasoning}
             self.add_cache_impact_parameters("reasoning", self.reasoning)
+        self.thinking = thinking
+        if self.thinking:
+            # DeepSeek-style thinking switch: {"type": "enabled"|"disabled"}
+            self.extra_body["thinking"] = {"type": self.thinking}
+            self.add_cache_impact_parameters("thinking", self.thinking)
         if self.enable_json_mode_if_requested:
             self.add_cache_impact_parameters(
                 "enable_json_mode_if_requested", self.enable_json_mode_if_requested

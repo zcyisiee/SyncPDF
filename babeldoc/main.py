@@ -26,7 +26,7 @@ from babeldoc.translator.translator import OpenAITranslator
 from babeldoc.translator.translator import set_translate_rate_limiter
 
 logger = logging.getLogger(__name__)
-__version__ = "0.6.3"
+__version__ = "0.6.4"
 
 
 def create_parser():
@@ -449,6 +449,13 @@ def create_parser():
         help="Reasoning string to send in the OpenAI request body 'reasoning' field. If not set, the field is not sent.",
     )
     service_group.add_argument(
+        "--openai-thinking",
+        type=str,
+        choices=["enabled", "disabled"],
+        default=None,
+        help="DeepSeek-style thinking switch sent as request body 'thinking': {'type': ...}. If not set, the field is not sent.",
+    )
+    service_group.add_argument(
         "--openai-term-extraction-reasoning",
         type=str,
         default=None,
@@ -500,6 +507,8 @@ async def main():
         translator_kwargs: dict[str, Any] = {}
         if args.openai_reasoning is not None:
             translator_kwargs["reasoning"] = args.openai_reasoning
+        if args.openai_thinking is not None:
+            translator_kwargs["thinking"] = args.openai_thinking
         translator = OpenAITranslator(
             lang_in=args.lang_in,
             lang_out=args.lang_out,

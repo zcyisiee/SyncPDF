@@ -1,6 +1,6 @@
 [project]
 name = "BabelDOC"
-version = "0.6.3"
+version = "0.6.4"
 description = "Yet Another Document Translator"
 license = "AGPL-3.0"
 readme = "README.md"
@@ -137,6 +137,7 @@ max-complexity = 10 # 函数圈复杂度阈值
 "babeldoc/tools/executor/babeldoc_adapter.py" = ["F401"]
 "babeldoc/tools/executor/server.py" = ["N802"]
 "tests/*" = ["S101"]            # 在测试文件中允许 assert
+"scripts/*/tests/*" = ["S101", "S106"]  # scaffold tests: allow assert + token fixture
 "**/__init__.py" = ["F401"]     # 允许未使用的导入
 # 忽略 S311 警告，因为这是有意的
 "babeldoc/format/pdf/document_il/midend/paragraph_finder.py" = ["S311"]
@@ -163,7 +164,7 @@ pythonpath = [".", "src"]
 testpaths = ["tests"]
 
 [bumpver]
-current_version = "0.6.3"
+current_version = "0.6.4"
 version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
 
 [bumpver.file_patterns]
