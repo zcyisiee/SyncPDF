@@ -21,7 +21,9 @@
 from __future__ import annotations
 
 import json
+import os
 import pickle
+import re
 import shutil
 from pathlib import Path
 
@@ -116,14 +118,60 @@ def _page_font_maps(page):
     return page_font_map, page_xobj_font_map
 
 
+def _bump_title_font_size(paragraph):
+    """标题类段落字号修正。
+
+    IEEE/ACM 标题用小型大写字母排版：首字母 ~10pt、其余 ~8pt 两种字号混排，
+    解析器按多数字符取段级 pdf_style 时会选中偏小的小型大写字号，导致译文
+    整段按小字号渲染（如 'I. 引言' 明显小于原文）。这里把标题段的段级字号
+    提到段落内最大 run 字号（即首字母字号）。只影响 base_style（译文的
+    默认样式），composition 各 run 自身样式不动，跳过段落不受影响。
+    """
+    import copy as _copy
+
+    if (paragraph.layout_label or "").strip().lower() not in (
+        "title",
+        "doc_title",
+        "paragraph_title",
+    ):
+        return
+    if not paragraph.pdf_style or not paragraph.pdf_paragraph_composition:
+        return
+    sizes = []
+    for c in paragraph.pdf_paragraph_composition:
+        ssc = c.pdf_same_style_unicode_characters
+        if ssc and ssc.pdf_style and ssc.pdf_style.font_size:
+            sizes.append(ssc.pdf_style.font_size)
+        chars = []
+        if c.pdf_same_style_characters and c.pdf_same_style_characters.pdf_character:
+            chars = c.pdf_same_style_characters.pdf_character
+        elif c.pdf_character:
+            chars = c.pdf_character
+        for ch in chars:
+            if ch.pdf_style and ch.pdf_style.font_size:
+                sizes.append(ch.pdf_style.font_size)
+    if sizes and paragraph.pdf_style.font_size < max(sizes):
+        new_style = _copy.copy(paragraph.pdf_style)
+        new_style.font_size = max(sizes)
+        paragraph.pdf_style = new_style
+
+
 def extract(
     pdf_path,
     workdir,
     lang_in="en",
     lang_out="zh",
     pages: str | None = None,
+    layout: str = "native",
+    mineru_token: str | None = None,
+    skip_labels: str | None = None,
 ):
-    """解析 PDF 并导出翻译 sheet + 状态文件。返回统计 dict。"""
+    """解析 PDF 并导出翻译 sheet + 状态文件。返回统计 dict。
+
+    layout="mineru" 时用 MinerU API 做布局（需 token；结果按 PDF 内容哈希缓存），
+    默认 skip 集生效：reference/author/表格内部/图片内部/页眉页脚等跳过，
+    *_caption 保留翻译。skip_labels 可在两种模式下追加跳过的标签。
+    """
     from babeldoc.const import close_process_pool
     from babeldoc.format.pdf.new_parser.native_parse import (
         parse_prepared_pdf_with_new_parser_to_legacy_ir,
@@ -136,11 +184,35 @@ def extract(
         )
 
     config = _base_config(pdf_path, workdir, lang_in, lang_out)
-    # 换成真实 layout model（build_parse_only_config 塞的是占位对象；
-    # 自动加载只在 TranslationConfig.__init__ 内触发，事后赋 None 不会加载）
-    from babeldoc.docvision.doclayout import DocLayoutModel
+    extra_skipped = []
+    if skip_labels:
+        extra_skipped = [
+            x.strip().lower() for x in skip_labels.split(",") if x.strip()
+        ]
 
-    config.doc_layout_model = DocLayoutModel.load_available()
+    if layout == "mineru":
+        from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+        from babeldoc.format.pdf.translation_config import TranslationConfig
+
+        token = mineru_token or os.environ.get("MINERU_API_TOKEN")
+        if not token:
+            raise ValueError(
+                "mineru 布局需要 --mineru-token 或环境变量 MINERU_API_TOKEN"
+            )
+        config.doc_layout_model = MinerUDocLayoutModel(api_token=token)
+        config.mineru_doclayout_enabled = True
+        config.mineru_skip_translate_effective_labels = (
+            TranslationConfig.expand_mineru_skip_translate_layout_labels(
+                TranslationConfig.get_mineru_default_skip_translate_layout_labels()
+                + tuple(extra_skipped)
+            )
+        )
+    else:
+        # 换成真实 layout model（build_parse_only_config 塞的是占位对象；
+        # 自动加载只在 TranslationConfig.__init__ 内触发，事后赋 None 不会加载）
+        from babeldoc.docvision.doclayout import DocLayoutModel
+
+        config.doc_layout_model = DocLayoutModel.load_available()
     config.skip_scanned_detection = True
 
     doc_pdf, temp_pdf_path, mediabox_data = _prepare_pdf(pdf_path, config)
@@ -158,12 +230,19 @@ def extract(
     inputs = {}
     rows = []
     label_counts = {}
+    skipped_counts = {}
     for page in docs.page:
         page_font_map, page_xobj_font_map = _page_font_maps(page)
         page_tracker = PageTranslateTracker()
         for paragraph in page.pdf_paragraph:
             if not paragraph.debug_id:
                 continue
+            label = paragraph.layout_label or "text"
+            if label.lower() in extra_skipped and layout != "mineru":
+                # mineru 模式下 extra 已并入 config 的 effective labels，这里会重复跳过
+                skipped_counts[label] = skipped_counts.get(label, 0) + 1
+                continue
+            _bump_title_font_size(paragraph)
             text, translate_input = il_translator.pre_translate_paragraph(
                 paragraph,
                 page_tracker.new_paragraph(),
@@ -171,9 +250,9 @@ def extract(
                 page_xobj_font_map,
             )
             if text is None:
+                skipped_counts[label] = skipped_counts.get(label, 0) + 1
                 continue
             inputs[paragraph.debug_id] = translate_input
-            label = paragraph.layout_label or "text"
             rows.append(
                 {
                     "id": paragraph.debug_id,
@@ -207,8 +286,54 @@ def extract(
         "sheet": str(sheet_path(workdir)),
         "paragraphs": len(rows),
         "layout_label_counts": label_counts,
+        "skipped_label_counts": skipped_counts,
         "pages": len(docs.page),
     }
+
+
+def _formula_expansion(translator_input) -> dict[str, str]:
+    """{vN} 占位符 -> 渲染时展开的原文文本（含原有尾随标点，如 '[17],'）。"""
+    expansions = {}
+    for placeholder in translator_input.placeholders:
+        formula = getattr(placeholder, "formula", None)
+        token = getattr(placeholder, "placeholder", None)
+        if formula is None or not token:
+            continue
+        chars = getattr(formula, "pdf_character", None) or []
+        expansions[token] = "".join(
+            c.char_unicode or "" for c in chars
+        )
+    return expansions
+
+
+# 占位符展开尾部已有标点时，译文中紧随的同类中文标点会造成双重标点
+# （渲染为 "[17],，"），归一化时删除。
+_STRIP_AFTER_COMMA = ("，", "、")
+_STRIP_AFTER_PERIOD = ("。",)
+
+
+def _normalize_placeholder_punctuation(
+    target: str, expansions: dict[str, str]
+) -> tuple[str, list[str]]:
+    """删除与占位符展开尾随标点重复的中文标点。返回 (新文本, 修改记录)。"""
+    changes = []
+    for token, expansion in expansions.items():
+        stripped = expansion.rstrip()
+        if not stripped:
+            continue
+        if stripped.endswith((",", "，", "、")):
+            pattern = re.compile(
+                re.escape(token) + r"\s*([，、])"
+            )
+        elif stripped.endswith("."):
+            pattern = re.compile(re.escape(token) + r"\s*(。)")
+        else:
+            continue
+        new_target, n = pattern.subn(token, target)
+        if n:
+            changes.append(f"{token}: removed {n} duplicate punctuation")
+            target = new_target
+    return target, changes
 
 
 def apply(workdir, translated_sheet):
@@ -253,12 +378,19 @@ def apply(workdir, translated_sheet):
     )
     page_tracker = PageTranslateTracker()
     applied = 0
+    punctuation_fixes = []
     for entry in entries:
+        target = entry["target"]
+        target, changes = _normalize_placeholder_punctuation(
+            target, _formula_expansion(inputs[entry["id"]])
+        )
+        for change in changes:
+            punctuation_fixes.append({"id": entry["id"], "change": change})
         il_translator.post_translate_paragraph(
             index[entry["id"]],
             page_tracker.new_paragraph(),
             inputs[entry["id"]],
-            entry["target"],
+            target,
         )
         applied += 1
 
@@ -267,7 +399,13 @@ def apply(workdir, translated_sheet):
     XMLConverter().write_json(
         doc, str(agent_dir(workdir) / "il_translated.applied.json")
     )
-    return {"applied": applied, "unknown_ids": [], "violations": [], "ok": True}
+    return {
+        "applied": applied,
+        "unknown_ids": [],
+        "violations": [],
+        "punctuation_fixes": punctuation_fixes,
+        "ok": True,
+    }
 
 
 def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False):

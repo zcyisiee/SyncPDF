@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
@@ -348,6 +349,28 @@ class MinerUDocLayoutModel(DocLayoutModel):
                 )
             return json.loads(zf.read(target_name).decode("utf-8"))
 
+    LAYOUT_CACHE_DIR = Path.home() / ".cache" / "babeldoc" / "mineru-layout.v1"
+
+    def _layout_cache_path(self, pdf_path: Path) -> Path | None:
+        """按 PDF 内容哈希 keyed 的 layout.json 缓存路径（文件不可读时返回 None）。"""
+        try:
+            digest = hashlib.sha256(Path(pdf_path).read_bytes()).hexdigest()
+        except OSError:
+            return None
+        return self.LAYOUT_CACHE_DIR / f"{digest}.json"
+
+    def _write_layout_cache(self, cache_file: Path, layout_json: dict[str, Any]) -> None:
+        try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = cache_file.with_suffix(".tmp")
+            tmp.write_text(
+                json.dumps(layout_json, ensure_ascii=False), encoding="utf-8"
+            )
+            tmp.replace(cache_file)
+            logger.info("MinerU layout cached: %s", cache_file)
+        except OSError:
+            logger.warning("Failed to write MinerU layout cache", exc_info=True)
+
     def handle_document(
         self,
         pages,
@@ -392,13 +415,20 @@ class MinerUDocLayoutModel(DocLayoutModel):
             )
 
         pdf_path = Path(translate_config.input_file)
-        with httpx.Client(timeout=float(self.timeout_seconds)) as client:
-            batch_id, upload_url = self._request_upload_urls(client, pdf_path)
-            self._upload_pdf(client, upload_url, pdf_path)
-            full_zip_url = self._poll_full_zip_url(client, batch_id, translate_config)
-            zip_bytes = self._download_zip_bytes(client, full_zip_url)
+        cache_file = self._layout_cache_path(pdf_path)
+        if cache_file is not None and cache_file.exists():
+            logger.info("MinerU layout cache hit: %s", cache_file)
+            layout_json = json.loads(cache_file.read_text(encoding="utf-8"))
+        else:
+            with httpx.Client(timeout=float(self.timeout_seconds)) as client:
+                batch_id, upload_url = self._request_upload_urls(client, pdf_path)
+                self._upload_pdf(client, upload_url, pdf_path)
+                full_zip_url = self._poll_full_zip_url(client, batch_id, translate_config)
+                zip_bytes = self._download_zip_bytes(client, full_zip_url)
 
-        layout_json = self._load_layout_json_from_zip_bytes(zip_bytes)
+            layout_json = self._load_layout_json_from_zip_bytes(zip_bytes)
+            if cache_file is not None:
+                self._write_layout_cache(cache_file, layout_json)
         pdf_info = layout_json.get("pdf_info") or []
         requested_page_numbers = {
             int(page.page_number)
