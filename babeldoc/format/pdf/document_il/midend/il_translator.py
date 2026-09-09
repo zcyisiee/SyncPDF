@@ -46,6 +46,12 @@ from babeldoc.utils.priority_thread_pool_executor import PriorityThreadPoolExecu
 
 logger = logging.getLogger(__name__)
 
+# 圈号等被包围字母数字：原字体往往没有对应字形，不能复用原 composition
+# （否则会回退到原字符字形，如 ① 显示成 1）。
+_ENCLOSED_ALNUM_RE = re.compile(
+    r"[\u2460-\u24ff\u2776-\u2793\u3251-\u325f\u32b1-\u32bf\u1f100-\u1f1ff]"
+)
+
 
 PROMPT_TEMPLATE = Template(
     """$role_block
@@ -910,14 +916,19 @@ class ILTranslator:
                     re.IGNORECASE,
                 ).group(1)
 
-                if isinstance(
-                    placeholder.composition,
-                    PdfSameStyleCharacters,
-                ) and text.replace(" ", "") == "".join(
-                    x.char_unicode for x in placeholder.composition.pdf_character
-                ).replace(
-                    " ",
-                    "",
+                if (
+                    isinstance(
+                        placeholder.composition,
+                        PdfSameStyleCharacters,
+                    )
+                    and not _ENCLOSED_ALNUM_RE.search(text)
+                    and text.replace(" ", "")
+                    == "".join(
+                        x.char_unicode for x in placeholder.composition.pdf_character
+                    ).replace(
+                        " ",
+                        "",
+                    )
                 ):
                     comp = PdfParagraphComposition(
                         pdf_same_style_characters=placeholder.composition,

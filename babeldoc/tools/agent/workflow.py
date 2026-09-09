@@ -173,6 +173,9 @@ def extract(
     *_caption 保留翻译。skip_labels 可在两种模式下追加跳过的标签。
     """
     from babeldoc.const import close_process_pool
+    from babeldoc.format.pdf.document_il.midend.enclosed_marker_fixer import (
+        EnclosedMarkerFixer,
+    )
     from babeldoc.format.pdf.new_parser.native_parse import (
         parse_prepared_pdf_with_new_parser_to_legacy_ir,
     )
@@ -221,6 +224,7 @@ def extract(
     )
     docs = LayoutParser(config).process(docs, doc_pdf)
     close_process_pool()
+    docs = EnclosedMarkerFixer(config).process(docs)
     ParagraphFinder(config).process(docs)
     StylesAndFormulas(config).process(docs)
 

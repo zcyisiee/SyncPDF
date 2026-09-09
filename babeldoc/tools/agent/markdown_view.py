@@ -282,6 +282,9 @@ def _deterministic_ids(docs) -> None:
 
 def _run_parse(pdf_path, workdir, lang_in, lang_out, layout, mineru_token, mineru_json, pages):
     from babeldoc.const import close_process_pool
+    from babeldoc.format.pdf.document_il.midend.enclosed_marker_fixer import (
+        EnclosedMarkerFixer,
+    )
     from babeldoc.format.pdf.document_il.midend.il_translator import ILTranslator
     from babeldoc.format.pdf.document_il.midend.il_translator import PageTranslateTracker
     from babeldoc.format.pdf.document_il.midend.layout_parser import LayoutParser
@@ -332,6 +335,7 @@ def _run_parse(pdf_path, workdir, lang_in, lang_out, layout, mineru_token, miner
     )
     docs = LayoutParser(config).process(docs, doc_pdf)
     close_process_pool()
+    docs = EnclosedMarkerFixer(config).process(docs)
     docs = ParagraphFinder(config).process(docs) or docs
     docs = StylesAndFormulas(config).process(docs) or docs
 
