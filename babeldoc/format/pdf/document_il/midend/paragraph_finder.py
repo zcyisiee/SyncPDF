@@ -445,13 +445,26 @@ class ParagraphFinder:
         skip_chars = []
 
         for char in page.pdf_character:
-            char_layout = get_character_layout(char, layout_index, layout_map)
+            char_layout = get_character_layout(
+                char,
+                layout_index,
+                layout_map,
+                protected_layout_labels=self.translation_config.mineru_skip_translate_effective_labels,
+            )
             # Check if character is in any formula layout and set formula_layout_id
             char.formula_layout_id = is_character_in_formula_layout(
                 char, page, layout_index, layout_map
             )
 
-            if not is_text_layout(char_layout) or self.is_isolated_formula(char):
+            protected = (
+                char_layout is not None
+                and self.translation_config.should_skip_translate_layout_label(
+                    char_layout.name
+                )
+            )
+            if (
+                not is_text_layout(char_layout) and not protected
+            ) or self.is_isolated_formula(char):
                 skip_chars.append(char)
                 continue
 

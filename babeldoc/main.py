@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import multiprocessing as mp
+import os
 import queue
 import random
 import sys
@@ -63,6 +64,20 @@ def create_parser():
         "--rpc-doclayout",
         help="RPC service host address for document layout analysis",
     )
+    parser.add_argument(
+        "--mineru-doclayout",
+        action="store_true",
+        help="Use MinerU VLM layout recognition",
+    )
+    parser.add_argument(
+        "--mineru-api-token", default=os.environ.get("MINERU_API_TOKEN")
+    )
+    parser.add_argument("--mineru-api-base-url", default="https://mineru.net")
+    parser.add_argument("--mineru-model-version", default="vlm")
+    parser.add_argument("--mineru-language", default=None)
+    parser.add_argument("--mineru-poll-interval-seconds", type=float, default=5.0)
+    parser.add_argument("--mineru-timeout-seconds", type=int, default=900)
+    parser.add_argument("--mineru-skip-translate-layout-labels", default=None)
     parser.add_argument(
         "--rpc-doclayout2",
         help="RPC service host address for document layout analysis",
@@ -550,7 +565,18 @@ async def main():
     # 设置翻译速率限制
     set_translate_rate_limiter(args.qps)
     # 初始化文档布局模型
-    if args.rpc_doclayout:
+    if args.mineru_doclayout:
+        from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+
+        doc_layout_model = MinerUDocLayoutModel(
+            api_token=args.mineru_api_token,
+            base_url=args.mineru_api_base_url,
+            model_version=args.mineru_model_version,
+            language=args.mineru_language,
+            poll_interval_seconds=args.mineru_poll_interval_seconds,
+            timeout_seconds=args.mineru_timeout_seconds,
+        )
+    elif args.rpc_doclayout:
         from babeldoc.docvision.rpc_doclayout import RpcDocLayoutModel
 
         doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout)
@@ -736,6 +762,14 @@ async def main():
             non_formula_line_iou_threshold=args.non_formula_line_iou_threshold,
             figure_table_protection_threshold=args.figure_table_protection_threshold,
             skip_formula_offset_calculation=args.skip_formula_offset_calculation,
+            mineru_doclayout_enabled=args.mineru_doclayout,
+            mineru_skip_translate_layout_labels=tuple(
+                x.strip()
+                for x in args.mineru_skip_translate_layout_labels.split(",")
+                if x.strip()
+            )
+            if args.mineru_skip_translate_layout_labels
+            else None,
             metadata_extra_data=args.metadata_extra_data,
             term_pool_max_workers=args.term_pool_max_workers,
         )

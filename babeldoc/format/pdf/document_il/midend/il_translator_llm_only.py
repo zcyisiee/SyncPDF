@@ -287,6 +287,10 @@ class ILTranslatorLLMOnly:
         Returns:
             True if paragraph should be translated, False otherwise
         """
+        if self.translation_config.should_skip_translate_layout_label(
+            paragraph.layout_label
+        ):
+            return False
         # Basic validation checks
         if paragraph.debug_id is None or paragraph.unicode is None:
             return False

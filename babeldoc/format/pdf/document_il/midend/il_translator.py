@@ -959,7 +959,12 @@ class ILTranslator:
         xobj_font_map: dict[int, dict[str, PdfFont]],
     ):
         """Pre-translation processing: prepare text for translation."""
-        if paragraph.vertical:
+        if (
+            paragraph.vertical
+            or self.translation_config.should_skip_translate_layout_label(
+                paragraph.layout_label
+            )
+        ):
             return None, None
         tracker.set_pdf_unicode(paragraph.unicode)
         if paragraph.xobj_id in xobj_font_map:
