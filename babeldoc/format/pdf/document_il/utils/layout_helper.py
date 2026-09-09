@@ -243,6 +243,29 @@ def _has_word_gap(prev: "PdfCharacter", nxt: "PdfCharacter") -> bool:
     return extra >= max(0.1 * font_size, 0.6)
 
 
+# 圈号等“被包围字母数字”字符在 NFKC 下会被拆成普通字母/数字
+# （① → 1），而这些字符是排版的一部分，必须原样保留。
+_ENCLOSED_ALNUM_RE = re.compile(
+    r"[\u2460-\u24ff\u2776-\u2793\u3251-\u325f\u32b1-\u32bf\u1f100-\u1f1ff]"
+)
+
+
+def _nfkc_preserving_enclosed(text: str) -> str:
+    """NFKC 归一化，但保留圈号等被包围字母数字字符。"""
+    saved: dict[str, str] = {}
+
+    def _save(m: re.Match) -> str:
+        key = f"\ue000{len(saved)}\ue001"
+        saved[key] = m.group(0)
+        return key
+
+    protected = _ENCLOSED_ALNUM_RE.sub(_save, text)
+    normalized = unicodedata.normalize("NFKC", protected)
+    for key, value in saved.items():
+        normalized = normalized.replace(key, value)
+    return normalized
+
+
 def get_char_unicode_string(chars: list[PdfCharacter | str]) -> str:
     """
     将字符列表转换为 Unicode 字符串，根据字符间距自动插入空格。
@@ -289,7 +312,7 @@ def get_char_unicode_string(chars: list[PdfCharacter | str]) -> str:
             regex.sub(
                 r"\s+",
                 " ",
-                unicodedata.normalize("NFKC", chars[i].char_unicode),
+                _nfkc_preserving_enclosed(chars[i].char_unicode),
             )
         )
 
@@ -312,7 +335,7 @@ def get_char_unicode_string(chars: list[PdfCharacter | str]) -> str:
 
     result = "".join(unicode_chars)
     # use unicode regex to replace all space with " "
-    normalize = unicodedata.normalize("NFKC", result)
+    normalize = _nfkc_preserving_enclosed(result)
     result = SPACE_REGEX.sub(" ", normalize).strip()
     return result
 
