@@ -151,6 +151,49 @@ class SharedContextCrossSplitPart:
 
 
 class TranslationConfig:
+    MINERU_SKIP_TRANSLATE_ALIAS_MAP = {
+        "reference": ("reference",),
+        "table": ("table_text", "table_caption", "table_footnote"),
+        "image": ("figure", "figure_caption", "figure_text"),
+        "code": ("code", "code_caption"),
+        "author": ("author",),
+        "header": ("header",),
+        "footer": ("footer",),
+        "page_number": ("page_number",),
+        "page_footnote": ("page_footnote",),
+        "aside_text": ("aside_text",),
+    }
+    MINERU_DEFAULT_SKIP_TRANSLATE_LAYOUT_LABELS = (
+        "reference",
+        "table",
+        "image",
+        "code",
+        "header",
+        "footer",
+        "page_number",
+        "page_footnote",
+        "aside_text",
+        "author",
+    )
+
+    @classmethod
+    def expand_mineru_skip_translate_layout_labels(cls, labels):
+        out = set()
+        for label in labels or ():
+            out.update(
+                cls.MINERU_SKIP_TRANSLATE_ALIAS_MAP.get(
+                    str(label).strip().lower(), (str(label).strip().lower(),)
+                )
+            )
+        return frozenset(x for x in out if x)
+
+    def should_skip_translate_layout_label(self, layout_label):
+        return bool(
+            self.mineru_doclayout_enabled
+            and str(layout_label or "").strip().lower()
+            in self.mineru_skip_translate_effective_labels
+        )
+
     @staticmethod
     def create_max_pages_per_part_split_strategy(max_pages_per_part: int):
         return PageCountStrategy(max_pages_per_part)
@@ -217,6 +260,8 @@ class TranslationConfig:
         metadata_extra_data: str | None = None,
         term_pool_max_workers: int | None = None,
         disable_same_text_fallback: bool = False,
+        mineru_doclayout_enabled: bool = False,
+        mineru_skip_translate_layout_labels=None,
     ):
         self.translator = translator
         self.term_extraction_translator = term_extraction_translator or translator
@@ -258,6 +303,19 @@ class TranslationConfig:
         self.use_rich_pbar = use_rich_pbar
         self.progress_monitor = progress_monitor
         self.doc_layout_model = doc_layout_model
+        self.mineru_doclayout_enabled = mineru_doclayout_enabled
+        labels = (
+            mineru_skip_translate_layout_labels
+            if mineru_skip_translate_layout_labels is not None
+            else (
+                self.MINERU_DEFAULT_SKIP_TRANSLATE_LAYOUT_LABELS
+                if mineru_doclayout_enabled
+                else ()
+            )
+        )
+        self.mineru_skip_translate_effective_labels = (
+            self.expand_mineru_skip_translate_layout_labels(labels)
+        )
 
         self.skip_clean = skip_clean or enhance_compatibility
         self.skip_scanned_detection = skip_scanned_detection

@@ -653,6 +653,7 @@ def get_character_layout(
     layout_map,
     layout_priority=None,
     _bbox_mode: Literal["auto", "visual", "box"] = "auto",
+    protected_layout_labels=(),
 ):
     """Get the layout for a character based on priority and IoU."""
     if layout_priority is None:
@@ -763,7 +764,9 @@ def get_character_layout(
                     {
                         "layout": Layout(layout.id, layout.class_name),
                         "priority": (
-                            layout_priority.index(layout.class_name)
+                            -1
+                            if layout.class_name in protected_layout_labels
+                            else layout_priority.index(layout.class_name)
                             if layout.class_name in layout_priority
                             else len(layout_priority)
                         ),
