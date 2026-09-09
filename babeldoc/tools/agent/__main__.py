@@ -17,6 +17,7 @@ import json
 import sys
 
 from babeldoc.tools.agent import workflow
+from babeldoc.tools.agent import markdown_view
 
 
 def main(argv=None):
@@ -60,6 +61,20 @@ def main(argv=None):
     p_render.add_argument("--dpi", type=int, default=110)
     p_render.add_argument("--out-dir", default=None)
 
+    p_md = sub.add_parser("md-extract", help="解析 PDF 导出连续 Markdown（带行内锚点）")
+    p_md.add_argument("pdf")
+    p_md.add_argument("--workdir", required=True)
+    p_md.add_argument("--lang-in", default="en")
+    p_md.add_argument("--lang-out", default="zh")
+    p_md.add_argument("--pages", default=None)
+    p_md.add_argument("--layout", choices=["native", "mineru"], default="mineru")
+    p_md.add_argument("--mineru-token", default=None)
+    p_md.add_argument("--mineru-json", default=None, help="回放已缓存的 MinerU layout.json")
+
+    p_mda = sub.add_parser("md-apply", help="校验译文 Markdown 并写回 IR")
+    p_mda.add_argument("workdir")
+    p_mda.add_argument("markdown", help="模型输出的译文 Markdown")
+
     args = parser.parse_args(argv)
 
     if args.command == "extract":
@@ -88,6 +103,22 @@ def main(argv=None):
         result = workflow.render(
             args.pdf, args.pages, dpi=args.dpi, out_dir=args.out_dir
         )
+    elif args.command == "md-extract":
+        result = markdown_view.extract_markdown(
+            args.pdf,
+            args.workdir,
+            lang_in=args.lang_in,
+            lang_out=args.lang_out,
+            pages=args.pages,
+            layout=args.layout,
+            mineru_token=args.mineru_token,
+            mineru_json=args.mineru_json,
+        )
+    elif args.command == "md-apply":
+        result = markdown_view.apply_markdown(args.workdir, args.markdown)
+        if not result.get("ok"):
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            sys.exit(1)
     else:  # pragma: no cover
         parser.error(f"未知命令: {args.command}")
 

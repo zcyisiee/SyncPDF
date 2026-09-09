@@ -223,6 +223,26 @@ def get_paragraph_unicode(paragraph: PdfParagraph) -> str:
 SPACE_REGEX = regex.compile(r"\s+", regex.UNICODE)
 
 
+def _has_word_gap(prev: "PdfCharacter", nxt: "PdfCharacter") -> bool:
+    """基于 advance 的可靠词间空格判定。
+
+    有些 PDF 用变宽空格排版（两端对齐），仅靠 gap 的"第二小距离"阈值会漏判
+    （实测 'either statically' 被粘成 'eitherstatically'）。这里用
+    ``next.box.x - (prev.box.x + prev.advance)`` 得到"额外间距"：正常字距≈0，
+    词间空格≈一个空格宽度。阈值取 0.1em 以避免把 kerning 误判成空格。
+    """
+    if prev.vertical:
+        return False
+    advance = getattr(prev, "advance", None)
+    if not advance or advance <= 0 or prev.box is None or nxt.box is None:
+        return False
+    font_size = 10.0
+    if prev.pdf_style is not None and prev.pdf_style.font_size:
+        font_size = float(prev.pdf_style.font_size)
+    extra = nxt.box.x - (prev.box.x + float(advance))
+    return extra >= max(0.1 * font_size, 0.6)
+
+
 def get_char_unicode_string(chars: list[PdfCharacter | str]) -> str:
     """
     将字符列表转换为 Unicode 字符串，根据字符间距自动插入空格。
@@ -280,10 +300,14 @@ def get_char_unicode_string(chars: list[PdfCharacter | str]) -> str:
         # 如果两个字符都是 PdfCharacter，检查间距
         if i < len(chars) - 1 and isinstance(chars[i + 1], PdfCharacter):
             distance = chars[i + 1].box.x - chars[i].box.x2
-            if distance >= median_distance or Layout.is_newline(  # 间距大于中位数
-                chars[i],
-                chars[i + 1],
-            ):  # 换行
+            if (
+                distance >= median_distance
+                or Layout.is_newline(  # 间距大于中位数
+                    chars[i],
+                    chars[i + 1],
+                )
+                or _has_word_gap(chars[i], chars[i + 1])
+            ):  # 换行或 advance 指示词间空格
                 unicode_chars.append(" ")  # 添加空格
 
     result = "".join(unicode_chars)
