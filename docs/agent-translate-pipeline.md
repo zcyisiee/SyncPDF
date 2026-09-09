@@ -379,11 +379,19 @@ header / footer / page_number / page_footnote / aside_text / author`
 {"model": "gemini-3.8-flash-low", "effort": "low",
  "input_tokens": 26178, "output_tokens": 19150, "thinking_tokens": 0,
  "cache_read_tokens": 8164, "total_tokens": 45328,
- "duration_seconds": 96.34, "num_turns": 1, "conversation_id": "..."}
+ "duration_seconds": 96.34, "num_turns": 1, "conversation_id": "...",
+ "retry": {"...": "仅当发生漏行补译时出现"}}
 ```
 
+**漏行补译**：模型偶尔会合并/漏掉段落。编排器在应用前用
+`markdown_view.missing_ids()` 对比 `state.pkl` 的 id 集合与译文中的 `<!-- id -->`，
+若缺失则**只对缺失段落再调用一次**（产物 `prompt.retry.md` / `translated.retry.md`），
+并把结果追加到 `translated.md`。若补译仍失败，`md-apply` 回退
+`target = source`（原文保留）并在报告里记 `fallback_ids`，保证流程不中断。
+
 **效果**：一次调用即完成全篇；术语天然一致（实测「极限内联」59 次、
-「极端/极致内联」0 次）。实测 16 页论文 96s、53,492 tokens（含缓存）。
+「极端/极致内联」0 次）。实测 16 页论文 96s、53,492 tokens（含缓存）；
+21 页论文主调用 64,569 + 补译 16,048 tokens。
 
 ---
 
@@ -442,6 +450,10 @@ header / footer / page_number / page_footnote / aside_text / author`
   2. `_copy_page_links_to_dual` 把链接搬到 dual 左右两半（`show_pdf_page` 不复制注释）；
   3. `_remap_links_by_text` 按「链接覆盖的原文文字」在译文中搜索同名 token
      （`[94]`、URL 等），就近重定位矩形。
+- **目录（书签）**：`show_pdf_page` 同样不复制 outline。
+  `_copy_toc_to_dual` 把原 PDF 的 `get_toc()` 写入 dual（左右拼宽模式页序一致，
+  页码 1:1 映射）；交替页模式按 `2p-1` / `2p` 重映射页码。
+  mono 因是原 PDF 的就地修改，目录天然保留。
 
 **产物**：
 
@@ -456,8 +468,10 @@ header / footer / page_number / page_footnote / aside_text / author`
 |---|---:|---:|---:|
 | `input.pdf` | 429 | 429 | 856 |
 | `2312.04432v2.pdf` | 323 | 323 | 646 |
+| `ccs2026b-paper3764.pdf` | 319 | 319 | 638 |
 
-mono 中 77% 链接矩形按译文重定位。
+mono 中 77% 链接矩形按译文重定位。目录（书签）同样保持：
+`input.pdf` 53 条、`ccs2026b-paper3764.pdf` 28 条，mono/dual 均一致。
 
 ---
 
@@ -481,7 +495,8 @@ mono 中 77% 链接矩形按译文重定位。
 | `state.pkl` | 7 | IR 状态，apply/reconstruct 真源 | **否** |
 | `prompt.md` | 8 | 实际发出的提示词 | — |
 | `translated.md` | 8 | 模型译文 Markdown | **是**（改后可重跑 md-apply） |
-| `usage.json` | 8 | token 用量 | — |
+| `usage.json` | 8 | token 用量（含 `retry`） | — |
+| `prompt.retry.md` / `translated.retry.md` | 8 | 漏行补译的提示词与输出（仅缺失时生成） | — |
 | `translated.jsonl` | 9 | canonical 译文（apply 输入） | 是 |
 | `apply_report.json` | 9 | 校验/修复/告警报告 | — |
 | `il_translated.applied.json` | 9 | 写回后的 IR 快照 | — |
@@ -541,6 +556,6 @@ mono 中 77% 链接矩形按译文重定位。
 1. `apply_report.json`：`ok=true`、`violations=[]`；
 2. `repaired` 数量（理想趋近 0）、`warnings` 数量（空 span）；
 3. mono/dual 页数与原文一致；
-4. 链接数：mono ≈ 原文、dual ≈ 2×原文；
+4. 链接数：mono ≈ 原文、dual ≈ 2×原文；**目录条目数：mono/dual 与原文一致**；
 5. 渲染首页、图注密集页、表格页、末页，检查标题字号、溢出、重叠；
 6. 术语一致性抽样（同一英文术语在全文的中文译名是否唯一）。

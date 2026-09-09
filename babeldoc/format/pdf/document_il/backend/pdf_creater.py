@@ -1227,6 +1227,9 @@ class PDFCreater:
             self._copy_page_links_to_dual(
                 dual_page, translated_pdf, page_id, rect_right
             )
+        # 目录（书签）不会随 show_pdf_page 复制，需显式搬过来；
+        # 左右拼宽模式下页序与原文一致，页码 1:1 映射。
+        self._copy_toc_to_dual(dual, original_pdf)
         return dual
 
     def create_alternating_pages_dual_pdf(
@@ -1257,7 +1260,36 @@ class PDFCreater:
             else:
                 dual.move_page(page_count + page_id, page_id * 2 + 1)
 
+        # 交替页模式下原文页被移动到偶数位，目录页码需要重映射
+        try:
+            toc = dual.get_toc()
+            if toc:
+                remapped = []
+                for entry in toc:
+                    level, title, page = entry[0], entry[1], entry[2]
+                    if page > 0:
+                        page = (
+                            page * 2
+                            if translation_config.dual_translate_first
+                            else page * 2 - 1
+                        )
+                    remapped.append([level, title, page])
+                dual.set_toc(remapped)
+        except Exception:
+            logger.warning("remap toc for alternating dual failed", exc_info=True)
+
         return dual
+
+    def _copy_toc_to_dual(
+        self, dual: pymupdf.Document, src_doc: pymupdf.Document
+    ) -> None:
+        """把源 PDF 的目录（书签）复制到 dual（页序一致时 1:1 映射页码）。"""
+        try:
+            toc = src_doc.get_toc()
+            if toc:
+                dual.set_toc(toc)
+        except Exception:
+            logger.warning("copy toc to dual failed", exc_info=True)
 
     def write_debug_info(
         self,
