@@ -25,7 +25,6 @@ dependencies = [
     "onnx>=1.21.0",
     "onnxruntime>=1.16.1,<1.24; python_version < '3.11'",
     "onnxruntime>=1.16.1; python_version >= '3.11'",
-    "openai>=1.59.3",
     "orjson>=3.10.14",
     "charset-normalizer >= 2.0.0",
     "cryptography >= 46.0.7",
