@@ -453,6 +453,33 @@ def fix_null_page_content(doc: Document) -> list[int]:
     return invalid_page
 
 
+def _keep_link_annotations(doc: Document, xref: int) -> None:
+    """只保留 /Link 注释（超链接），其余注释置空。
+
+    历史实现会把页面上所有 /Annots 直接置 null，导致**所有超链接失效**
+    （实测 e2e-f1872 原文 429 个链接全部丢失）。这里改为保留 Link 类型，
+    其它注释（批注/表单等）仍然清除，避免破坏后续解析。
+    """
+    try:
+        kind, value = doc.xref_get_key(xref, "Annots")
+        if kind != "array" or not value:
+            doc.xref_set_key(xref, "Annots", "null")
+            return
+        kept = []
+        for ref in re.findall(r"(\d+)\s+\d+\s+R", value):
+            try:
+                sub_kind, sub_value = doc.xref_get_key(int(ref), "Subtype")
+            except Exception:
+                continue
+            if sub_kind == "name" and sub_value == "/Link":
+                kept.append(f"{ref} 0 R")
+        doc.xref_set_key(
+            xref, "Annots", "[" + " ".join(kept) + "]" if kept else "null"
+        )
+    except Exception:
+        logger.debug("keep link annotations failed for xref %s", xref, exc_info=True)
+
+
 def fix_null_xref(doc: Document) -> None:
     """Fix null xref in PDF file by replacing them with empty arrays.
 
@@ -471,7 +498,7 @@ def fix_null_xref(doc: Document) -> None:
                 data = doc.xref_stream(i)
                 doc.update_stream(i, data)
             elif obj and "/Annots" in obj:
-                doc.xref_set_key(i, "Annots", "null")
+                _keep_link_annotations(doc, i)
         except Exception:
             doc.update_object(i, "[]")
 
