@@ -1,0 +1,570 @@
+"""Markdown 视图管线：整篇文档 → 连续英文 Markdown（带行内锚点）→ 译文无损写回 IR。
+
+设计目标（相对 sheet.jsonl 分批协议）：
+1. 翻译模型看到的是**一篇连续的论文**（标题/章节/图注/正文按阅读顺序），
+   而不是 40 行一撮的 JSONL —— 术语与语气一致性和上下文理解都更好。
+2. 排版信息不丢：富文本片段变成 ``[[S1]]...[[/S1]]`` 锚点，公式变成 ``[[F3]]``；
+   锚点 1:1 映射回 BabelDOC 的 ``<style id='1'>``/``</style>``/``{v3}`` 协议，
+   因此 reconstruct 仍能逐 span 还原字体/字号/公式图形。
+3. 确定性段落 id（``P01-005``），跨运行可复现。
+4. 文本层修复：断词连字符、缺失空格、标点后缺空格。
+
+产物（均在 ``<workdir>/agent/``）：
+- ``document.md``       给翻译模型的连续 Markdown
+- ``anchors.json``      id → 源文/锚点明细（诊断用）
+- ``sheet.jsonl``       与 extract 兼容的清单（id/source 为 canonical 形式）
+- ``state.pkl``         与 extract 兼容的 IR 状态（供 apply/reconstruct）
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import pickle
+import re
+from pathlib import Path
+
+from babeldoc.tools.agent import workflow
+
+# 锚点：[[S1]] / [[/S1]] / [[F3]]（容忍模型写成 [[ S 1 ]]/[[/s1]]）
+ANCHOR_RE = re.compile(r"\[\[\s*(/?)\s*([SFsf])\s*(\d+)?\s*\]\]")
+# canonical 占位符
+CANON_RE = re.compile(r"<style id='(\d+)'>|</style>|\{v(\d+)\}")
+# Markdown 段落标记
+ID_MARK_RE = re.compile(r"<!--\s*id\s*=\s*([A-Za-z0-9._-]+)\s*(?:label\s*=\s*([A-Za-z0-9_-]+))?\s*-->")
+
+MD_HEADER = (
+    "<!-- babeldoc-markdown v1 -->\n"
+    "<!-- 这是一篇论文的完整正文（Markdown）。请翻译为简体中文。 -->\n"
+    "<!-- 必须原样保留：样式锚点（双方括号 S+数字，开闭成对）、"
+    "公式锚点（双方括号 F+数字）、以及每段上方的段落标记注释。 -->\n"
+)
+
+
+# --------------------------------------------------------------------------- #
+# 文本层修复
+# --------------------------------------------------------------------------- #
+_WORDS: set[str] | None = None
+
+_HYPHEN_RE = re.compile(r"([A-Za-z][A-Za-z0-9]*)[-\u2010\u2011]\s+([A-Za-z][A-Za-z']*)")
+
+# 两个部分都是单词、但实际是断词粘连的常见词
+_HYPHEN_EXCEPTIONS = {
+    "mean-while": "meanwhile",
+    "there-fore": "therefore",
+    "how-ever": "however",
+    "more-over": "moreover",
+    "further-more": "furthermore",
+    "never-theless": "nevertheless",
+    "none-theless": "nonetheless",
+    "al-though": "although",
+    "where-as": "whereas",
+    "there-by": "thereby",
+    "there-in": "therein",
+    "there-after": "thereafter",
+    "notwith-standing": "notwithstanding",
+    "some-times": "sometimes",
+    "else-where": "elsewhere",
+}
+
+# 这些前缀与后面的词构成固定连字符复合词，应保留连字符
+_PREFIX_KEEP = {
+    "non", "opt", "pre", "post", "anti", "multi", "inter", "intra",
+    "semi", "sub", "super", "ultra", "self", "cross", "micro", "macro",
+    "meta", "pseudo", "quasi", "vice", "well", "high", "low", "long",
+    "short", "mid", "top", "end", "all", "co",
+}
+
+
+def _load_words() -> set[str]:
+    global _WORDS
+    if _WORDS is None:
+        words: set[str] = set()
+        try:
+            with open("/usr/share/dict/words", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    w = line.strip().lower()
+                    if w.isalpha():
+                        words.add(w)
+        except OSError:
+            pass
+        _WORDS = words
+    return _WORDS
+
+
+def _join_hyphen(m: re.Match) -> str:
+    """行末连字符：单词被断行时去连字符拼接；真复合词保留连字符。"""
+    left, right = m.group(1), m.group(2)
+    r_core = right.split("'")[0]
+    key = f"{left.lower()}-{r_core.lower()}"
+    if key in _HYPHEN_EXCEPTIONS:
+        return _HYPHEN_EXCEPTIONS[key] + right[len(r_core) :]
+    # 缩写/型号（ML-based、RQ3-based）：保留连字符
+    if left[-1].isupper() or any(c.isdigit() for c in left):
+        return f"{left}-{right}"
+    if right[:1].isupper():
+        return f"{left}-{right}"
+    l_low, r_low = left.lower(), r_core.lower()
+    # 拼接后是词典词 → 是断词（hidden / meanwhile / engineering ...）
+    words = _load_words()
+    if words and (l_low + r_low) in words:
+        return f"{left}{right}"
+    # 固定连字符前缀（non-neural / opt-out / pre-training ...）
+    if l_low in _PREFIX_KEEP:
+        return f"{left}-{right}"
+    # 左侧是完整单词且右侧足够长 → 复合词（high-dimensional / compiler-producing）
+    if words and l_low in words and len(l_low) >= 4 and len(r_low) >= 4:
+        return f"{left}-{right}"
+    return f"{left}{right}"  # inlin-ing -> inlining
+
+
+def repair_text(s: str) -> str:
+    """修复 PDF 文本层缺陷（只改空白/标点，不动锚点）。"""
+    if not s:
+        return s
+    s = _HYPHEN_RE.sub(_join_hyphen, s)
+    s = re.sub(r",([a-z])", r", \1", s)  # graphs,which
+    s = re.sub(r";([a-z])", r"; \1", s)
+    s = re.sub(r"([a-z]{2})\.([A-Z])", r"\1. \2", s)  # structures.These
+    s = re.sub(r"[ \t]{2,}", " ", s)
+    s = s.replace("\n", " ")
+    return s
+
+
+# --------------------------------------------------------------------------- #
+# canonical <-> 锚点
+# --------------------------------------------------------------------------- #
+def canonical_to_markdown(text: str) -> str:
+    """canonical 占位符 → 短锚点，同时修复文本片段。"""
+    out: list[str] = []
+    pos = 0
+    stack: list[str] = []
+    for m in CANON_RE.finditer(text):
+        out.append(repair_text(text[pos : m.start()]))
+        if m.group(1):
+            stack.append(m.group(1))
+            out.append(f"[[S{m.group(1)}]]")
+        elif m.group(2):
+            out.append(f"[[F{m.group(2)}]]")
+        else:
+            sid = stack.pop() if stack else ""
+            out.append(f"[[/S{sid}]]")
+        pos = m.end()
+    out.append(repair_text(text[pos:]))
+    return "".join(out)
+
+
+def markdown_to_canonical(text: str) -> str:
+    """短锚点 → canonical 占位符。"""
+
+    def rep(m: re.Match) -> str:
+        slash, kind, num = m.group(1), m.group(2).upper(), m.group(3)
+        if kind == "F":
+            return f"{{v{num}}}"
+        if slash:
+            return "</style>"
+        return f"<style id='{num}'>"
+
+    return ANCHOR_RE.sub(rep, text)
+
+
+def anchor_sequence(text: str) -> list[tuple[str, str, str]]:
+    return [
+        (m.group(1) or "", m.group(2).upper(), m.group(3) or "")
+        for m in ANCHOR_RE.finditer(text)
+    ]
+
+
+def _fmt_anchor(seq: tuple[str, str, str]) -> str:
+    slash, kind, num = seq
+    if kind == "F":
+        return f"[[F{num}]]"
+    return f"[[{'/' if slash else ''}S{num}]]"
+
+
+def _split_anchors(text: str) -> tuple[list[tuple[str, str]], str]:
+    """→ (tokens, plain)；tokens 为 ('a', anchor) / ('t', text)。"""
+    tokens: list[tuple[str, str]] = []
+    plain: list[str] = []
+    pos = 0
+    for m in ANCHOR_RE.finditer(text):
+        if m.start() > pos:
+            chunk = text[pos : m.start()]
+            tokens.append(("t", chunk))
+            plain.append(chunk)
+        tokens.append(("a", m.group(0)))
+        pos = m.end()
+    if pos < len(text):
+        chunk = text[pos:]
+        tokens.append(("t", chunk))
+        plain.append(chunk)
+    return tokens, "".join(plain)
+
+
+def _fix_empty_spans(s: str) -> str:
+    """把 [[SN]][[/SN]]X 修成 [[SN]]X[[/SN]]（X 为普通字符）。"""
+    pattern = re.compile(r"\[\[S(\d+)\]\]\[\[/S\1\]\]([^\s\[\]])")
+    while True:
+        m = pattern.search(s)
+        if not m:
+            return s
+        s = (
+            s[: m.start()]
+            + f"[[S{m.group(1)}]]{m.group(2)}[[/S{m.group(1)}]]"
+            + s[m.end() :]
+        )
+
+
+def repair_target(src_md: str, tgt_md: str) -> tuple[str, str]:
+    """把模型译文的锚点修回源文顺序（确定性，不调用模型）。
+
+    模式 1（reorder）：锚点多重集一致，仅顺序/位置错乱 —— 保留模型切分位置，
+    把源文锚点按顺序重新贴到这些位置上。
+    模式 2（proportional）：锚点有增删 —— 按源文各文本段长度占比，把源文锚点
+    序列等比投放到译文上，保证协议合法。
+    """
+    from collections import Counter
+
+    src_seq = anchor_sequence(src_md)
+    tokens, plain = _split_anchors(tgt_md)
+    tgt_tokens = [tok for kind, tok in tokens if kind == "a"]
+    tgt_seq = anchor_sequence(tgt_md)
+
+    if Counter(tgt_seq) == Counter(src_seq) and len(tgt_seq) == len(src_seq):
+        positions: list[int] = []
+        idx = 0
+        for kind, val in tokens:
+            if kind == "t":
+                idx += len(val)
+            else:
+                positions.append(idx)
+        out: list[str] = []
+        pos = 0
+        for seq, at in zip(src_seq, positions):
+            at = max(pos, min(at, len(plain)))
+            out.append(plain[pos:at])
+            out.append(_fmt_anchor(seq))
+            pos = at
+        out.append(plain[pos:])
+        return _fix_empty_spans("".join(out)), "reorder"
+
+    src_tokens, src_plain = _split_anchors(src_md)
+    total = max(1, len(src_plain))
+    length = len(plain)
+    out_tokens: list[str] = []
+    cum = 0
+    pos = 0
+    for kind, val in src_tokens:
+        if kind == "a":
+            out_tokens.append(val)
+            continue
+        cum += len(val)
+        target_pos = min(length, max(pos, round(cum / total * length)))
+        out_tokens.append(plain[pos:target_pos])
+        pos = target_pos
+    out_tokens.append(plain[pos:])
+    return _fix_empty_spans("".join(out_tokens)), "proportional"
+
+
+# --------------------------------------------------------------------------- #
+# 解析管线（与 workflow.extract 同源，但加确定性 id + Markdown 渲染）
+# --------------------------------------------------------------------------- #
+def _deterministic_ids(docs) -> None:
+    """把随机 debug_id 换成 P<page>-<seq>（按页内顺序）。"""
+    for page in docs.page:
+        seq = 0
+        for paragraph in page.pdf_paragraph:
+            if not paragraph.debug_id:
+                continue
+            seq += 1
+            paragraph.debug_id = f"P{page.page_number + 1:02d}-{seq:03d}"
+
+
+def _run_parse(pdf_path, workdir, lang_in, lang_out, layout, mineru_token, mineru_json, pages):
+    from babeldoc.const import close_process_pool
+    from babeldoc.format.pdf.document_il.midend.il_translator import ILTranslator
+    from babeldoc.format.pdf.document_il.midend.il_translator import PageTranslateTracker
+    from babeldoc.format.pdf.document_il.midend.layout_parser import LayoutParser
+    from babeldoc.format.pdf.document_il.midend.paragraph_finder import ParagraphFinder
+    from babeldoc.format.pdf.document_il.midend.styles_and_formulas import (
+        StylesAndFormulas,
+    )
+    from babeldoc.format.pdf.new_parser.native_parse import (
+        parse_prepared_pdf_with_new_parser_to_legacy_ir,
+    )
+    from babeldoc.tools.agent.sheet_translator import SheetProtocolTranslator
+
+    workdir = Path(workdir)
+    pdf_path = Path(pdf_path)
+    if pages:
+        pdf_path = workflow._trim_pages(
+            pdf_path, workflow._parse_pages(pages), workdir / "trimmed.pdf"
+        )
+
+    config = workflow._base_config(pdf_path, workdir, lang_in, lang_out)
+    if layout == "mineru":
+        from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+        from babeldoc.format.pdf.translation_config import TranslationConfig
+
+        if mineru_json:
+            os.environ["BABELDOC_MINERU_LAYOUT_JSON"] = str(mineru_json)
+            config.doc_layout_model = MinerUDocLayoutModel(api_token="replay")
+        else:
+            token = mineru_token or os.environ.get("MINERU_API_TOKEN")
+            if not token:
+                raise ValueError("mineru 布局需要 --mineru-token / MINERU_API_TOKEN / --mineru-json")
+            config.doc_layout_model = MinerUDocLayoutModel(api_token=token)
+        config.mineru_doclayout_enabled = True
+        config.mineru_skip_translate_effective_labels = (
+            TranslationConfig.expand_mineru_skip_translate_layout_labels(
+                TranslationConfig.get_mineru_default_skip_translate_layout_labels()
+            )
+        )
+    else:
+        from babeldoc.docvision.doclayout import DocLayoutModel
+
+        config.doc_layout_model = DocLayoutModel.load_available()
+    config.skip_scanned_detection = True
+
+    doc_pdf, temp_pdf_path, mediabox_data = workflow._prepare_pdf(pdf_path, config)
+    docs = parse_prepared_pdf_with_new_parser_to_legacy_ir(
+        temp_pdf_path, config=config, doc_pdf=doc_pdf
+    )
+    docs = LayoutParser(config).process(docs, doc_pdf)
+    close_process_pool()
+    docs = ParagraphFinder(config).process(docs) or docs
+    docs = StylesAndFormulas(config).process(docs) or docs
+
+    _deterministic_ids(docs)
+
+    il_translator = ILTranslator(SheetProtocolTranslator(lang_in, lang_out, True), config)
+    inputs = {}
+    rows = []
+    label_counts: dict[str, int] = {}
+    skipped: dict[str, int] = {}
+    for page in docs.page:
+        page_font_map, page_xobj_font_map = workflow._page_font_maps(page)
+        tracker = PageTranslateTracker()
+        for paragraph in page.pdf_paragraph:
+            if not paragraph.debug_id:
+                continue
+            label = paragraph.layout_label or "text"
+            workflow._bump_title_font_size(paragraph)
+            text, translate_input = il_translator.pre_translate_paragraph(
+                paragraph, tracker.new_paragraph(), page_font_map, page_xobj_font_map
+            )
+            if text is None:
+                skipped[label] = skipped.get(label, 0) + 1
+                continue
+            inputs[paragraph.debug_id] = translate_input
+            rows.append(
+                {
+                    "id": paragraph.debug_id,
+                    "page": page.page_number,
+                    "layout_label": label,
+                    "source": text,
+                }
+            )
+            label_counts[label] = label_counts.get(label, 0) + 1
+
+    return {
+        "docs": docs,
+        "inputs": inputs,
+        "rows": rows,
+        "label_counts": label_counts,
+        "skipped_label_counts": skipped,
+        "temp_pdf_path": str(temp_pdf_path),
+        "pdf_path": str(pdf_path),
+        "lang_in": lang_in,
+        "lang_out": lang_out,
+        "mediabox_data": mediabox_data,
+    }
+
+
+def _render_markdown(rows) -> str:
+    lines = [MD_HEADER.rstrip("\n"), ""]
+    first_title = True
+    for row in rows:
+        label = row["layout_label"]
+        body = canonical_to_markdown(row["source"])
+        lines.append(f"<!-- id={row['id']} label={label} -->")
+        if label == "title":
+            if first_title:
+                lines.append(f"# {body}")
+                first_title = False
+            else:
+                lines.append(f"## {body}")
+        elif label == "figure_caption":
+            lines.append(f"*{body}*")
+        elif label == "table_caption":
+            lines.append(f"**{body}**")
+        else:
+            lines.append(body)
+        lines.append("")
+    return "\n".join(lines)
+
+
+def extract_markdown(
+    pdf_path,
+    workdir,
+    lang_in="en",
+    lang_out="zh",
+    layout="mineru",
+    mineru_token=None,
+    mineru_json=None,
+    pages=None,
+):
+    """解析 PDF → 写 document.md / anchors.json / sheet.jsonl / state.pkl。"""
+    workdir = Path(workdir)
+    result = _run_parse(
+        pdf_path, workdir, lang_in, lang_out, layout, mineru_token, mineru_json, pages
+    )
+    agent = workflow.agent_dir(workdir)
+    agent.mkdir(parents=True, exist_ok=True)
+
+    rows = result["rows"]
+    md = _render_markdown(rows)
+    (agent / "document.md").write_text(md, encoding="utf-8")
+    with open(agent / "sheet.jsonl", "w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    (agent / "anchors.json").write_text(
+        json.dumps(
+            {
+                "rows": [
+                    {
+                        "id": row["id"],
+                        "page": row["page"],
+                        "layout_label": row["layout_label"],
+                        "canonical": row["source"],
+                        "markdown": canonical_to_markdown(row["source"]),
+                        "anchors": anchor_sequence(canonical_to_markdown(row["source"])),
+                    }
+                    for row in rows
+                ]
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    with open(workflow.state_path(workdir), "wb") as f:
+        pickle.dump(
+            {
+                "doc": result["docs"],
+                "inputs": result["inputs"],
+                "temp_pdf_path": result["temp_pdf_path"],
+                "pdf_path": result["pdf_path"],
+                "lang_in": lang_in,
+                "lang_out": lang_out,
+                "mediabox_data": result["mediabox_data"],
+            },
+            f,
+        )
+    return {
+        "document_md": str(agent / "document.md"),
+        "anchors_json": str(agent / "anchors.json"),
+        "sheet": str(agent / "sheet.jsonl"),
+        "paragraphs": len(rows),
+        "chars": len(md),
+        "label_counts": result["label_counts"],
+        "skipped_label_counts": result["skipped_label_counts"],
+    }
+
+
+# --------------------------------------------------------------------------- #
+# 译文 Markdown → translated.jsonl（canonical）→ 写回 IR
+# --------------------------------------------------------------------------- #
+def _clean_markdown_body(body: str, label: str) -> str:
+    body = body.strip()
+    body = re.sub(r"^#{1,6}\s*", "", body)  # 去标题前缀
+    body = re.sub(r"\s*\n\s*", " ", body)  # 段内换行折成空格
+    if label in ("figure_caption", "table_caption"):
+        if len(body) >= 4 and body.startswith("**") and body.endswith("**"):
+            body = body[2:-2].strip()
+        elif len(body) >= 2 and body.startswith("*") and body.endswith("*"):
+            body = body[1:-1].strip()
+    return body
+
+
+def parse_translated_markdown(md_text: str) -> dict[str, tuple[str, str]]:
+    """→ {id: (body, label)}。按 <!-- id=... --> 切块。"""
+    out: dict[str, tuple[str, str]] = {}
+    matches = list(ID_MARK_RE.finditer(md_text))
+    for i, m in enumerate(matches):
+        pid, label = m.group(1), m.group(2) or ""
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(md_text)
+        out[pid] = (md_text[start:end], label)
+    return out
+
+
+def apply_markdown(workdir, translated_md):
+    """校验译文 Markdown 并按锚点写回 IR。返回报告 dict。"""
+    workdir = Path(workdir)
+    agent = workflow.agent_dir(workdir)
+    with open(workflow.state_path(workdir), "rb") as f:
+        state = pickle.load(f)
+    inputs = state["inputs"]
+    anchors_meta = json.loads((agent / "anchors.json").read_text(encoding="utf-8"))
+    labels = {r["id"]: r["layout_label"] for r in anchors_meta["rows"]}
+
+    md_text = Path(translated_md).read_text(encoding="utf-8")
+    parsed = parse_translated_markdown(md_text)
+
+    missing = [pid for pid in inputs if pid not in parsed]
+    extra = [pid for pid in parsed if pid not in inputs]
+
+    violations: list[str] = []
+    warnings: list[str] = []
+    entries: list[dict] = []
+    repaired: list[dict] = []
+    for pid, translate_input in inputs.items():
+        if pid not in parsed:
+            continue
+        body, _ = parsed[pid]
+        body = _clean_markdown_body(body, labels.get(pid, "text"))
+        src_md = canonical_to_markdown(translate_input.unicode)
+        # 锚点顺序必须与源文完全一致（防跨 span 搬运）
+        src_seq = anchor_sequence(src_md)
+        tgt_seq = anchor_sequence(body)
+        has_empty = bool(
+            re.search(r"\[\[S(\d+)\]\]\[\[/S\1\]\]", body)
+        )
+        if src_seq != tgt_seq or has_empty:
+            body, mode = repair_target(src_md, body)
+            repaired.append({"id": pid, "mode": mode})
+        # 修复后再校（应全部通过；不过则阻断）
+        if anchor_sequence(body) != src_seq:
+            violations.append(
+                f"anchor_order_mismatch: id {pid} expected {len(src_seq)} anchors, "
+                f"got {len(anchor_sequence(body))}"
+            )
+        target = markdown_to_canonical(body)
+        # 空 span：模型省略了该片段（如英文冠词 The 无中文对应），不阻断重建
+        for m in re.finditer(r"<style id='(\d+)'>(.*?)</style>", target, re.DOTALL):
+            if not m.group(2).strip():
+                warnings.append(f"empty_style_span: id {pid} style {m.group(1)}")
+        entries.append({"id": pid, "target": target})
+
+    if missing or extra or violations:
+        return {
+            "ok": False,
+            "missing_ids": missing,
+            "extra_ids": extra,
+            "violations": violations,
+            "warnings": warnings,
+            "parsed": len(parsed),
+            "repaired": repaired,
+        }
+
+    sheet = agent / "translated.jsonl"
+    with open(sheet, "w", encoding="utf-8") as f:
+        for entry in entries:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    report = workflow.apply(workdir, str(sheet))
+    report["markdown_sheet"] = str(sheet)
+    report["repaired"] = repaired
+    report["warnings"] = warnings
+    return report
