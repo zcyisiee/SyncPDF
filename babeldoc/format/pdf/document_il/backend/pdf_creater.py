@@ -1012,6 +1012,127 @@ class PDFCreater:
         # Restore graphics state
         draw_op.append(b" n Q\n")
 
+    @staticmethod
+    def _rebuild_link(link: dict, rect: pymupdf.Rect) -> dict | None:
+        """根据原 link 字典构造可直接 insert 的链接（把命名目的地转成直接目标）。"""
+        kind = link.get("kind")
+        if kind == pymupdf.LINK_URI and link.get("uri"):
+            return {"kind": pymupdf.LINK_URI, "from": rect, "uri": link["uri"]}
+        if kind in (pymupdf.LINK_GOTO, pymupdf.LINK_NAMED) and link.get(
+            "page"
+        ) is not None:
+            out = {
+                "kind": pymupdf.LINK_GOTO,
+                "from": rect,
+                "page": link["page"],
+            }
+            to = link.get("to")
+            if to is not None:
+                out["to"] = pymupdf.Point(to.x, to.y)
+            return out
+        return None
+
+    def _remap_links_by_text(
+        self, src_page: pymupdf.Page, dst_page: pymupdf.Page
+    ) -> int:
+        """按原文文字在译文中的位置重新定位链接矩形。
+
+        译文重排后，链接矩形仍停在原坐标，可能落在无关文字上。这里取链接覆盖的
+        原文文字（引用号 [12]、URL、图号等通常被原样保留），在译文中搜索同名文字，
+        取离原位置最近的一处作为新矩形；搜不到则保持原位。
+        对同一 token 的多个出现，其跳转目标相同，因此就近选择是安全的。
+        """
+        remapped = 0
+        for link in list(dst_page.get_links()):
+            rect = link.get("from")
+            if rect is None or rect.is_empty:
+                continue
+            try:
+                text = " ".join(src_page.get_text("text", clip=rect).split())
+            except Exception:
+                continue
+            if not text or len(text) > 60:
+                continue
+            try:
+                hits = dst_page.search_for(text)
+            except Exception:
+                continue
+            if not hits:
+                continue
+            best = min(
+                hits, key=lambda r: abs(r.y0 - rect.y0) + abs(r.x0 - rect.x0)
+            )
+            new_link = self._rebuild_link(link, best)
+            if new_link is None:
+                continue
+            try:
+                dst_page.insert_link(new_link)
+                dst_page.delete_link(link)
+                remapped += 1
+            except Exception:
+                logger.debug("remap link failed", exc_info=True)
+        return remapped
+
+    def _copy_page_links_to_dual(
+        self,
+        dual_page: pymupdf.Page,
+        src_doc: pymupdf.Document,
+        src_page_id: int,
+        dst_rect: pymupdf.Rect,
+    ) -> None:
+        """把源页超链接复制到 dual 页的指定区域。
+
+        ``show_pdf_page`` 只复制页面内容、不复制注释，所以双语的超链接会全部丢失。
+        这里按 show_pdf_page 的矩形映射把 Link 注释重新插入：URI 链接原样复制，
+        内部跳转（GOTO）重建为直接目标（不依赖命名目的地）。
+        """
+        try:
+            src_page = src_doc[src_page_id]
+        except Exception:
+            return
+        src_rect = src_page.rect
+        if src_rect.width <= 0 or src_rect.height <= 0:
+            return
+        sx = dst_rect.width / src_rect.width
+        sy = dst_rect.height / src_rect.height
+
+        def _map_point(x: float, y: float) -> pymupdf.Point:
+            return pymupdf.Point(
+                dst_rect.x0 + (x - src_rect.x0) * sx,
+                dst_rect.y0 + (y - src_rect.y0) * sy,
+            )
+
+        def _map_rect(rect: pymupdf.Rect) -> pymupdf.Rect:
+            return pymupdf.Rect(
+                _map_point(rect.x0, rect.y0), _map_point(rect.x1, rect.y1)
+            )
+
+        for link in src_page.get_links():
+            kind = link.get("kind")
+            try:
+                if kind == pymupdf.LINK_URI and link.get("uri"):
+                    dual_page.insert_link(
+                        {
+                            "kind": pymupdf.LINK_URI,
+                            "from": _map_rect(link["from"]),
+                            "uri": link["uri"],
+                        }
+                    )
+                elif kind in (pymupdf.LINK_GOTO, pymupdf.LINK_NAMED) and link.get(
+                    "page"
+                ) is not None:
+                    new_link = {
+                        "kind": pymupdf.LINK_GOTO,
+                        "from": _map_rect(link["from"]),
+                        "page": link["page"],
+                    }
+                    to = link.get("to")
+                    if to is not None:
+                        new_link["to"] = _map_point(to.x, to.y)
+                    dual_page.insert_link(new_link)
+            except Exception:
+                logger.debug("copy link to dual failed", exc_info=True)
+
     def create_side_by_side_dual_pdf(
         self,
         original_pdf: pymupdf.Document,
@@ -1033,6 +1154,7 @@ class PDFCreater:
         # Create a new PDF for side-by-side pages
         dual = pymupdf.open()
         page_count = min(original_pdf.page_count, translated_pdf.page_count)
+        link_jobs: list[tuple[int, pymupdf.Rect, pymupdf.Rect]] = []
 
         for page_id in range(page_count):
             # Get pages from both PDFs
@@ -1094,6 +1216,17 @@ class PDFCreater:
                     f"Translated PDF: {translation_config.input_file}. ",
                     exc_info=e,
                 )
+            # show_pdf_page 不复制注释，超链接需要手动搬运。
+            # 注意：必须等所有页都创建后再插入链接，否则指向后面页的
+            # 内部跳转会因目标页尚不存在而报 "bad page number(s)"。
+            link_jobs.append((page_id, rect_left, rect_right))
+
+        for page_id, rect_left, rect_right in link_jobs:
+            dual_page = dual[page_id]
+            self._copy_page_links_to_dual(dual_page, original_pdf, page_id, rect_left)
+            self._copy_page_links_to_dual(
+                dual_page, translated_pdf, page_id, rect_right
+            )
         return dual
 
     def create_alternating_pages_dual_pdf(
@@ -1467,6 +1600,20 @@ class PDFCreater:
                         check_font_exists, page, pdf, translation_config
                     )
                     pbar.advance()
+            # 超链接按译文文字重定位（译文重排后链接矩形会落在旧位置）
+            try:
+                original_for_links = pymupdf.open(self.original_pdf_path)
+                remapped_total = 0
+                for page in pdf:
+                    if page.number < original_for_links.page_count:
+                        remapped_total += self._remap_links_by_text(
+                            original_for_links[page.number], page
+                        )
+                original_for_links.close()
+                if remapped_total:
+                    logger.info("Remapped %d hyperlink rects by text", remapped_total)
+            except Exception:
+                logger.warning("remap hyperlink rects failed", exc_info=True)
             translation_config.raise_if_cancelled()
             gc_level = 1
             if self.translation_config.ocr_workaround:
