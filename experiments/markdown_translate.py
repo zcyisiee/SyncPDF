@@ -46,7 +46,8 @@ def load_prompt_template() -> str:
     return blocks[0]
 
 
-def run_agy(prompt: str, model: str, effort: str, timeout_s: int) -> str:
+def run_agy(prompt: str, model: str, effort: str, timeout_s: int) -> tuple[str, dict]:
+    """调用 agy 一次，返回 (译文, usage)。usage 含 input/output/cache_read/total tokens。"""
     started = time.time()
     result = subprocess.run(
         [
@@ -58,6 +59,8 @@ def run_agy(prompt: str, model: str, effort: str, timeout_s: int) -> str:
             "--disable-slash-commands",
             "--print-timeout",
             f"{timeout_s // 60}m",
+            "--output-format",
+            "json",
             "--print",
             prompt,
         ],
@@ -69,8 +72,24 @@ def run_agy(prompt: str, model: str, effort: str, timeout_s: int) -> str:
         raise RuntimeError(
             f"agy 退出码 {result.returncode}: {result.stderr[:800]}"
         )
-    print(f"agy 完成：{round(time.time() - started, 1)}s, 输出 {len(result.stdout)} 字符")
-    return result.stdout
+    elapsed = round(time.time() - started, 1)
+    raw = result.stdout.strip()
+    usage: dict = {}
+    try:
+        payload = json.loads(raw)
+        response = payload.get("response", "")
+        usage = payload.get("usage") or {}
+        usage["duration_seconds"] = payload.get("duration_seconds", elapsed)
+        usage["num_turns"] = payload.get("num_turns")
+        usage["conversation_id"] = payload.get("conversation_id")
+    except json.JSONDecodeError:
+        response = raw
+        usage = {"duration_seconds": elapsed, "parse_error": True}
+    print(
+        f"agy 完成：{elapsed}s, 输出 {len(response)} 字符, "
+        f"usage={json.dumps(usage, ensure_ascii=False)}"
+    )
+    return response, usage
 
 
 def main():
@@ -96,14 +115,24 @@ def main():
         return 0
 
     translated_md = agent / "translated.md"
+    usage: dict = {}
     if args.skip_translate:
         if not translated_md.exists():
             raise SystemExit(f"--skip-translate 但 {translated_md} 不存在")
         print(f"复用 {translated_md}")
     else:
-        raw = run_agy(prompt, args.model, args.effort, args.timeout)
-        translated_md.write_text(raw, encoding="utf-8")
-        print(f"译文 Markdown: {translated_md} ({len(raw)} 字符)")
+        response, usage = run_agy(prompt, args.model, args.effort, args.timeout)
+        translated_md.write_text(response, encoding="utf-8")
+        (agent / "usage.json").write_text(
+            json.dumps(
+                {"model": args.model, "effort": args.effort, **usage},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print(f"译文 Markdown: {translated_md} ({len(response)} 字符)")
+        print(f"token usage: {json.dumps(usage, ensure_ascii=False)}")
 
     report = markdown_view.apply_markdown(workdir, translated_md)
     (agent / "apply_report.json").write_text(
