@@ -55,3 +55,6 @@ temp.jpg
 /output/
 
 .env.local
+
+# 本会话工作区元数据
+/.zcode/

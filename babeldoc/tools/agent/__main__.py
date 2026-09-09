@@ -32,6 +32,18 @@ def main(argv=None):
     p_extract.add_argument("--lang-in", default="en")
     p_extract.add_argument("--lang-out", default="zh")
     p_extract.add_argument("--pages", default=None, help="如 1,2 或 1-3")
+    p_extract.add_argument(
+        "--layout",
+        choices=["native", "mineru"],
+        default="native",
+        help="布局后端：native(本地 ONNX) 或 mineru(API，需 token，结果按内容哈希缓存)",
+    )
+    p_extract.add_argument("--mineru-token", default=None)
+    p_extract.add_argument(
+        "--skip-labels",
+        default=None,
+        help="追加跳过的 layout 标签（逗号分隔，如 reference,author,figure）",
+    )
 
     p_apply = sub.add_parser("apply", help="校验译文并写回 IR")
     p_apply.add_argument("workdir")
@@ -57,6 +69,9 @@ def main(argv=None):
             lang_in=args.lang_in,
             lang_out=args.lang_out,
             pages=args.pages,
+            layout=args.layout,
+            mineru_token=args.mineru_token,
+            skip_labels=args.skip_labels,
         )
     elif args.command == "apply":
         result = workflow.apply(args.workdir, args.sheet)
