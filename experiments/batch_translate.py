@@ -6,12 +6,15 @@
 
 读 <workdir>/agent/sheet.jsonl，写 <workdir>/agent/translated.jsonl 与
 <workdir>/agent/batch_report.json。占位符校验复用 babeldoc.tools.agent.protocol。
+提示词单一来源：skills/document-translate/prompts/translator.md（取其中 ```text 块，
+第 1 块为翻译提示词，第 2 块为重试提示词；文件缺失时回退内置模板）。
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -21,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from babeldoc.tools.agent import protocol  # noqa: E402
 
-PROMPT_TEMPLATE = """你是专业英译中（简体中文）翻译。下面的输入是论文 PDF 逐段抽取的翻译清单（JSONL，每行一个对象）。
+_FALLBACK_PROMPT = """你是专业英译中（简体中文）翻译。下面的输入是论文 PDF 逐段抽取的翻译清单（JSONL，每行一个对象）。
 
 ## 占位符协议（必须严格遵守）
 - 源文中形如 {{v1}} {{v2}} 的 token 是公式占位符：原样保留，不得改写、增删、翻译。
@@ -38,13 +41,35 @@ PROMPT_TEMPLATE = """你是专业英译中（简体中文）翻译。下面的�
 ## Here is the input:
 {input}"""
 
-RETRY_TEMPLATE = """你上一批译文有协议违规，被校验器拒绝。违规清单与对应源文如下（JSONL）。
+_FALLBACK_RETRY = """你上一批译文有协议违规，被校验器拒绝。违规清单与对应源文如下（JSONL）。
 请重新翻译这些行并严格遵守占位符协议；只输出这些行的 JSONL 译文。
 
 {feedback}
 
 ## Here is the input:
 {input}"""
+
+
+def _load_prompts() -> tuple[str, str]:
+    prompt_file = (
+        Path(__file__).resolve().parents[1]
+        / "skills"
+        / "document-translate"
+        / "prompts"
+        / "translator.md"
+    )
+    try:
+        blocks = re.findall(
+            r"```text\n(.*?)```", prompt_file.read_text(encoding="utf-8"), re.DOTALL
+        )
+        if len(blocks) >= 2:
+            return blocks[0].strip(), blocks[1].strip()
+    except OSError:
+        pass
+    return _FALLBACK_PROMPT, _FALLBACK_RETRY
+
+
+PROMPT_TEMPLATE, RETRY_TEMPLATE = _load_prompts()
 
 
 def run_agy(prompt: str, model: str, effort: str) -> str:
