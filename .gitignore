@@ -50,3 +50,8 @@ temp.jpg
 .codex
 .repomap.tags.cache.v1/
 
+# 实验产物与临时数据（含 MinerU 原始返回、渲染 PNG、中间 JSON）
+/tmp/
+/output/
+
+.env.local

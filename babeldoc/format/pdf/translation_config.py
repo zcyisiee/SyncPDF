@@ -151,11 +151,13 @@ class SharedContextCrossSplitPart:
 
 
 class TranslationConfig:
+    # 别名展开刻意不包含 *_caption（标题型图注/表注/代码注默认要翻译）；
+    # 如需跳过 caption，必须显式传入细粒度标签（如 "table_caption"）。
     MINERU_SKIP_TRANSLATE_ALIAS_MAP = {
         "reference": ("reference",),
-        "table": ("table_text", "table_caption", "table_footnote"),
-        "image": ("figure", "figure_caption", "figure_text"),
-        "code": ("code", "code_caption"),
+        "table": ("table_text", "table_footnote"),
+        "image": ("figure", "figure_text"),
+        "code": ("code",),
         "author": ("author",),
         "header": ("header",),
         "footer": ("footer",),
@@ -175,6 +177,10 @@ class TranslationConfig:
         "aside_text",
         "author",
     )
+
+    @classmethod
+    def get_mineru_default_skip_translate_layout_labels(cls) -> tuple[str, ...]:
+        return cls.MINERU_DEFAULT_SKIP_TRANSLATE_LAYOUT_LABELS
 
     @classmethod
     def expand_mineru_skip_translate_layout_labels(cls, labels):
@@ -202,11 +208,11 @@ class TranslationConfig:
     # new parameters should be added at the end of the function.
     def __init__(
         self,
-        translator: BaseTranslator,
-        input_file: str | Path,
-        lang_in: str,
-        lang_out: str,
-        doc_layout_model,  # DocLayoutModel
+        translator: BaseTranslator | None = None,
+        input_file: str | Path = "",
+        lang_in: str = "",
+        lang_out: str = "",
+        doc_layout_model=None,  # DocLayoutModel
         # for backward compatibility
         font: str | Path | None = None,
         pages: str | None = None,

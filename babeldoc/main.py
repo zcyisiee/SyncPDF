@@ -23,7 +23,6 @@ from babeldoc.const import enable_process_pool
 from babeldoc.format.pdf.translation_config import TranslationConfig
 from babeldoc.format.pdf.translation_config import WatermarkOutputMode
 from babeldoc.glossary import Glossary
-from babeldoc.translator.translator import OpenAITranslator
 from babeldoc.translator.translator import set_translate_rate_limiter
 
 logger = logging.getLogger(__name__)
@@ -166,11 +165,6 @@ def create_parser():
         type=int,
         default=4,
         help="QPS limit of translation service",
-    )
-    translation_group.add_argument(
-        "--ignore-cache",
-        action="store_true",
-        help="Ignore translation cache.",
     )
     translation_group.add_argument(
         "--no-dual",
@@ -399,85 +393,64 @@ def create_parser():
         default=False,
         help="Skip formula offset calculation (default: False)",
     )
-    # service option argument group
-    service_group = translation_group.add_mutually_exclusive_group()
-    service_group.add_argument(
-        "--openai",
-        action="store_true",
-        help="Use OpenAI translator.",
-    )
-    service_group = parser.add_argument_group(
-        "Translation - OpenAI Options",
-        description="OpenAI specific options",
-    )
-    service_group.add_argument(
-        "--openai-model",
-        default="gpt-4o-mini",
-        help="The OpenAI model to use for translation.",
-    )
-    service_group.add_argument(
-        "--openai-base-url",
-        help="The base URL for the OpenAI API.",
-    )
-    service_group.add_argument(
-        "--openai-api-key",
-        "-k",
-        help="The API key for the OpenAI API.",
-    )
-    service_group.add_argument(
-        "--openai-term-extraction-model",
-        default=None,
-        help="OpenAI model to use for automatic term extraction. Defaults to --openai-model when unset.",
-    )
-    service_group.add_argument(
-        "--openai-term-extraction-base-url",
-        default=None,
-        help="Base URL for the OpenAI API used during automatic term extraction. Falls back to --openai-base-url when unset.",
-    )
-    service_group.add_argument(
-        "--openai-term-extraction-api-key",
-        default=None,
-        help="API key for the OpenAI API used during automatic term extraction. Falls back to --openai-api-key when unset.",
-    )
-    service_group.add_argument(
-        "--enable-json-mode-if-requested",
-        action="store_true",
-        default=False,
-        help="Enable JSON mode for OpenAI requests.",
-    )
-    service_group.add_argument(
-        "--send-dashscope-header",
-        action="store_true",
-        default=False,
-        help="Send DashScope data inspection header to disable input/output inspection.",
-    )
-    service_group.add_argument(
-        "--no-send-temperature",
-        action="store_true",
-        default=False,
-        help="Do not send temperature parameter to OpenAI API (default: send temperature).",
-    )
-    service_group.add_argument(
-        "--openai-reasoning",
-        type=str,
-        default=None,
-        help="Reasoning string to send in the OpenAI request body 'reasoning' field. If not set, the field is not sent.",
-    )
-    service_group.add_argument(
-        "--openai-thinking",
-        type=str,
-        choices=["enabled", "disabled"],
-        default=None,
-        help="DeepSeek-style thinking switch sent as request body 'thinking': {'type': ...}. If not set, the field is not sent.",
-    )
-    service_group.add_argument(
-        "--openai-term-extraction-reasoning",
-        type=str,
-        default=None,
-        help="Reasoning string for the OpenAI term extraction translator. If not set, no reasoning field is sent for term extraction requests.",
-    )
 
     return parser
+
+
+def _create_doc_layout_model_from_args(args):
+    if getattr(args, "mineru_doclayout", False):
+        if args.mineru_model_version == "MinerU-HTML":
+            raise ValueError(
+                "MinerU-HTML is HTML-only and is not supported for BabelDOC PDF layout flow."
+            )
+        if not args.mineru_api_token:
+            raise ValueError(
+                "--mineru-api-token (or MINERU_API_TOKEN) is required when --mineru-doclayout is enabled."
+            )
+
+        from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+
+        return MinerUDocLayoutModel(
+            api_token=args.mineru_api_token,
+            base_url=args.mineru_api_base_url,
+            model_version=args.mineru_model_version,
+            language=args.mineru_language,
+            poll_interval_seconds=args.mineru_poll_interval_seconds,
+            timeout_seconds=args.mineru_timeout_seconds,
+        )
+
+    if args.rpc_doclayout:
+        from babeldoc.docvision.rpc_doclayout import RpcDocLayoutModel
+
+        return RpcDocLayoutModel(host=args.rpc_doclayout)
+    if args.rpc_doclayout2:
+        from babeldoc.docvision.rpc_doclayout2 import RpcDocLayoutModel
+
+        return RpcDocLayoutModel(host=args.rpc_doclayout2)
+    if args.rpc_doclayout3:
+        from babeldoc.docvision.rpc_doclayout3 import RpcDocLayoutModel
+
+        return RpcDocLayoutModel(host=args.rpc_doclayout3)
+    if args.rpc_doclayout4:
+        from babeldoc.docvision.rpc_doclayout4 import RpcDocLayoutModel
+
+        return RpcDocLayoutModel(host=args.rpc_doclayout4)
+    if args.rpc_doclayout5:
+        from babeldoc.docvision.rpc_doclayout5 import RpcDocLayoutModel
+
+        return RpcDocLayoutModel(host=args.rpc_doclayout5)
+    if args.rpc_doclayout6:
+        from babeldoc.docvision.rpc_doclayout6 import RpcDocLayoutModel
+
+        return RpcDocLayoutModel(host=args.rpc_doclayout6)
+    if args.rpc_doclayout7:
+        from babeldoc.docvision.rpc_doclayout7 import RpcDocLayoutModel
+
+        return RpcDocLayoutModel(host=args.rpc_doclayout7)
+
+    from babeldoc.docvision.doclayout import DocLayoutModel
+
+    return DocLayoutModel.load_onnx()
 
 
 async def main():
@@ -506,108 +479,22 @@ async def main():
         logger.info("Warmup completed, exiting...")
         return
 
-    # 验证翻译服务选择
-    if not args.openai:
-        parser.error("必须选择一个翻译服务：--openai")
-
-    # 验证 OpenAI 参数
-    if args.openai and not args.openai_api_key:
-        parser.error("使用 OpenAI 服务时必须提供 API key")
+    # 本分支不内置 API 翻译器：翻译由外部 agent subagent 完成（见 skills/document-translate），
+    # CLI 仅支持解析/重构模式。
+    translation_skipped = args.only_parse_generate_pdf or args.skip_translation
+    if not translation_skipped:
+        parser.error(
+            "此分支的翻译由 agent subagent 完成，请使用 --skip-translation 或 "
+            "--only-parse-generate-pdf 进入解析/重构模式"
+        )
 
     if args.enable_process_pool:
         enable_process_pool()
 
-    # 实例化翻译器
-    if args.openai:
-        translator_kwargs: dict[str, Any] = {}
-        if args.openai_reasoning is not None:
-            translator_kwargs["reasoning"] = args.openai_reasoning
-        if args.openai_thinking is not None:
-            translator_kwargs["thinking"] = args.openai_thinking
-        translator = OpenAITranslator(
-            lang_in=args.lang_in,
-            lang_out=args.lang_out,
-            model=args.openai_model,
-            base_url=args.openai_base_url,
-            api_key=args.openai_api_key,
-            ignore_cache=args.ignore_cache,
-            enable_json_mode_if_requested=args.enable_json_mode_if_requested,
-            send_dashscope_header=args.send_dashscope_header,
-            send_temperature=not args.no_send_temperature,
-            **translator_kwargs,
-        )
-        term_extraction_translator = translator
-        if (
-            args.openai_term_extraction_model
-            or args.openai_term_extraction_base_url
-            or args.openai_term_extraction_api_key
-        ):
-            term_translator_kwargs: dict[str, Any] = {}
-            if args.openai_term_extraction_reasoning is not None:
-                term_translator_kwargs["reasoning"] = (
-                    args.openai_term_extraction_reasoning
-                )
-            term_extraction_translator = OpenAITranslator(
-                lang_in=args.lang_in,
-                lang_out=args.lang_out,
-                model=args.openai_term_extraction_model or args.openai_model,
-                base_url=(args.openai_term_extraction_base_url or args.openai_base_url),
-                api_key=args.openai_term_extraction_api_key or args.openai_api_key,
-                ignore_cache=args.ignore_cache,
-                enable_json_mode_if_requested=args.enable_json_mode_if_requested,
-                send_dashscope_header=args.send_dashscope_header,
-                send_temperature=not args.no_send_temperature,
-                **term_translator_kwargs,
-            )
-    else:
-        raise ValueError("Invalid translator type")
-
     # 设置翻译速率限制
     set_translate_rate_limiter(args.qps)
     # 初始化文档布局模型
-    if args.mineru_doclayout:
-        from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
-
-        doc_layout_model = MinerUDocLayoutModel(
-            api_token=args.mineru_api_token,
-            base_url=args.mineru_api_base_url,
-            model_version=args.mineru_model_version,
-            language=args.mineru_language,
-            poll_interval_seconds=args.mineru_poll_interval_seconds,
-            timeout_seconds=args.mineru_timeout_seconds,
-        )
-    elif args.rpc_doclayout:
-        from babeldoc.docvision.rpc_doclayout import RpcDocLayoutModel
-
-        doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout)
-    elif args.rpc_doclayout2:
-        from babeldoc.docvision.rpc_doclayout2 import RpcDocLayoutModel
-
-        doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout2)
-    elif args.rpc_doclayout3:
-        from babeldoc.docvision.rpc_doclayout3 import RpcDocLayoutModel
-
-        doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout3)
-    elif args.rpc_doclayout4:
-        from babeldoc.docvision.rpc_doclayout4 import RpcDocLayoutModel
-
-        doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout4)
-    elif args.rpc_doclayout5:
-        from babeldoc.docvision.rpc_doclayout5 import RpcDocLayoutModel
-
-        doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout5)
-    elif args.rpc_doclayout6:
-        from babeldoc.docvision.rpc_doclayout6 import RpcDocLayoutModel
-
-        doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout6)
-    elif args.rpc_doclayout7:
-        from babeldoc.docvision.rpc_doclayout7 import RpcDocLayoutModel
-
-        doc_layout_model = RpcDocLayoutModel(host=args.rpc_doclayout7)
-    else:
-        from babeldoc.docvision.doclayout import DocLayoutModel
-
-        doc_layout_model = DocLayoutModel.load_onnx()
+    doc_layout_model = _create_doc_layout_model_from_args(args)
 
     if args.translate_table_text:
         from babeldoc.docvision.table_detection.rapidocr import RapidOCRModel
@@ -715,8 +602,6 @@ async def main():
             font=None,
             pages=args.pages,
             output_dir=args.output,
-            translator=translator,
-            term_extraction_translator=term_extraction_translator,
             debug=args.debug,
             lang_in=args.lang_in,
             lang_out=args.lang_out,
@@ -803,12 +688,6 @@ async def main():
         total_term_extraction_cache_hit_prompt_tokens += usage[
             "cache_hit_prompt_tokens"
         ]
-    logger.info(f"Total tokens: {translator.token_count.value}")
-    logger.info(f"Prompt tokens: {translator.prompt_token_count.value}")
-    logger.info(f"Completion tokens: {translator.completion_token_count.value}")
-    logger.info(
-        f"Cache hit prompt tokens: {translator.cache_hit_prompt_token_count.value}"
-    )
     logger.info(
         "Term extraction tokens: total=%s prompt=%s completion=%s cache_hit_prompt=%s",
         total_term_extraction_total_tokens,
@@ -816,14 +695,6 @@ async def main():
         total_term_extraction_completion_tokens,
         total_term_extraction_cache_hit_prompt_tokens,
     )
-    if term_extraction_translator is not translator:
-        logger.info(
-            "Term extraction translator raw tokens: total=%s prompt=%s completion=%s cache_hit_prompt=%s",
-            term_extraction_translator.token_count.value,
-            term_extraction_translator.prompt_token_count.value,
-            term_extraction_translator.completion_token_count.value,
-            term_extraction_translator.cache_hit_prompt_token_count.value,
-        )
 
 
 def create_progress_handler(
@@ -955,8 +826,6 @@ def cli():
 
     logging.getLogger("httpx").setLevel("CRITICAL")
     logging.getLogger("httpx").propagate = False
-    logging.getLogger("openai").setLevel("CRITICAL")
-    logging.getLogger("openai").propagate = False
     logging.getLogger("httpcore").setLevel("CRITICAL")
     logging.getLogger("httpcore").propagate = False
     logging.getLogger("http11").setLevel("CRITICAL")
@@ -969,7 +838,6 @@ def cli():
             or v.name.startswith("peewee")
             or v.name.startswith("httpx")
             or "http11" in v.name
-            or "openai" in v.name
             or "pdfminer" in v.name
         ):
             v.disabled = True
