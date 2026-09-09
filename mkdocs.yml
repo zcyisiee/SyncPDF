@@ -149,6 +149,8 @@ nav:
     - Font Mapper(.py): https://github.com/funstory-ai/BabelDOC/blob/main/babeldoc/format/pdf/document_il/utils/fontmap.py
     - PDF Creation: ImplementationDetails/PDFCreation/PDFCreation.md
     - Intro To PDF Object: intro-to-pdf-object.md
+  - Agent Pipeline:
+    - Agent 编排的 PDF 翻译流水线: agent-translate-pipeline.md
   - Community:
     - Code of Conduct: CODE_OF_CONDUCT.md
     - Contributing:
