@@ -385,12 +385,16 @@ def _run_parse(pdf_path, workdir, lang_in, lang_out, layout, mineru_token, miner
     }
 
 
-def _render_markdown(rows) -> str:
-    lines = [MD_HEADER.rstrip("\n"), ""]
+def render_rows_markdown(rows, include_header: bool = True) -> str:
+    """把行（id/layout_label/markdown）渲染成连续 Markdown。"""
+    lines: list[str] = []
+    if include_header:
+        lines.append(MD_HEADER.rstrip("\n"))
+        lines.append("")
     first_title = True
     for row in rows:
         label = row["layout_label"]
-        body = canonical_to_markdown(row["source"])
+        body = row["markdown"]
         lines.append(f"<!-- id={row['id']} label={label} -->")
         if label == "title":
             if first_title:
@@ -406,6 +410,19 @@ def _render_markdown(rows) -> str:
             lines.append(body)
         lines.append("")
     return "\n".join(lines)
+
+
+def _render_markdown(rows) -> str:
+    return render_rows_markdown(
+        [
+            {
+                "id": row["id"],
+                "layout_label": row["layout_label"],
+                "markdown": canonical_to_markdown(row["source"]),
+            }
+            for row in rows
+        ]
+    )
 
 
 def extract_markdown(
@@ -503,6 +520,23 @@ def parse_translated_markdown(md_text: str) -> dict[str, tuple[str, str]]:
     return out
 
 
+def missing_ids(workdir, md_text: str) -> list[str]:
+    """返回译文中缺失的段落 id（供编排器重试）。"""
+    with open(workflow.state_path(workdir), "rb") as f:
+        state = pickle.load(f)
+    parsed = parse_translated_markdown(md_text)
+    return [pid for pid in state["inputs"] if pid not in parsed]
+
+
+def render_retry_markdown(workdir, ids: list[str]) -> str:
+    """只渲染缺失段落，作为补译提示词的输入文档。"""
+    anchors = json.loads(
+        (workflow.agent_dir(workdir) / "anchors.json").read_text(encoding="utf-8")
+    )
+    by_id = {row["id"]: row for row in anchors["rows"]}
+    return render_rows_markdown([by_id[pid] for pid in ids if pid in by_id])
+
+
 def apply_markdown(workdir, translated_md):
     """校验译文 Markdown 并按锚点写回 IR。返回报告 dict。"""
     workdir = Path(workdir)
@@ -516,15 +550,18 @@ def apply_markdown(workdir, translated_md):
     md_text = Path(translated_md).read_text(encoding="utf-8")
     parsed = parse_translated_markdown(md_text)
 
-    missing = [pid for pid in inputs if pid not in parsed]
     extra = [pid for pid in parsed if pid not in inputs]
 
     violations: list[str] = []
     warnings: list[str] = []
     entries: list[dict] = []
     repaired: list[dict] = []
+    fallback_ids: list[str] = []
     for pid, translate_input in inputs.items():
         if pid not in parsed:
+            # 漏行回退原文（与旧 batch 协议一致，恒通过校验）
+            fallback_ids.append(pid)
+            entries.append({"id": pid, "target": translate_input.unicode})
             continue
         body, _ = parsed[pid]
         body = _clean_markdown_body(body, labels.get(pid, "text"))
@@ -551,10 +588,10 @@ def apply_markdown(workdir, translated_md):
                 warnings.append(f"empty_style_span: id {pid} style {m.group(1)}")
         entries.append({"id": pid, "target": target})
 
-    if missing or extra or violations:
+    if extra or violations:
         return {
             "ok": False,
-            "missing_ids": missing,
+            "missing_ids": fallback_ids,
             "extra_ids": extra,
             "violations": violations,
             "warnings": warnings,
@@ -571,4 +608,5 @@ def apply_markdown(workdir, translated_md):
     report["markdown_sheet"] = str(sheet)
     report["repaired"] = repaired
     report["warnings"] = warnings
+    report["fallback_ids"] = fallback_ids
     return report
