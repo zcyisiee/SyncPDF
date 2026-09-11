@@ -618,6 +618,7 @@ class PDFCreater:
         document: il_version_1.Document,
         translation_config: TranslationConfig,
         mediabox_data: dict,
+        link_remap_state: dict | None = None,
     ):
         self.original_pdf_path = original_pdf_path
         self.docs = document
@@ -625,6 +626,19 @@ class PDFCreater:
         self.font_mapper = FontMapper(translation_config)
         self.translation_config = translation_config
         self.mediabox_data = mediabox_data
+        # 超链接映射状态（来自 state.pkl）：
+        # ``link_snapshot`` 是页号 → 链接快照（含 char_indices/paragraph_ids），
+        # ``page_char_objects`` 是页号 → 解析时的字符对象列表（与下标同序，
+        # pickle 后保持对象身份，重排后直接读新 box）。为 None 时跳过
+        # remap 与 URI 集合门禁（保持旧调用方行为）。
+        self.link_remap_state = link_remap_state
+        self.link_stats: dict = {
+            "total": 0,
+            "remapped": 0,
+            "fallback_paragraph": 0,
+            "unresolved": [],
+            "uri_set_match": None,
+        }
 
     def render_graphic_state(
         self,
@@ -1032,46 +1046,82 @@ class PDFCreater:
             return out
         return None
 
-    def _remap_links_by_text(
-        self, src_page: pymupdf.Page, dst_page: pymupdf.Page
-    ) -> int:
-        """按原文文字在译文中的位置重新定位链接矩形。
+    def _remap_links_by_char_identity(self, pdf: pymupdf.Document) -> dict:
+        """按源字符身份重算 mono 每页的链接矩形。返回聚合统计。
 
-        译文重排后，链接矩形仍停在原坐标，可能落在无关文字上。这里取链接覆盖的
-        原文文字（引用号 [12]、URL、图号等通常被原样保留），在译文中搜索同名文字，
-        取离原位置最近的一处作为新矩形；搜不到则保持原位。
-        对同一 token 的多个出现，其跳转目标相同，因此就近选择是安全的。
+        旧实现按译文文字搜索定位，译文改写后飘移；现在用解析阶段快照的
+        「链接 → 源字符下标/段落 id」+ 对象身份映射（见 link_remap）。
+        字符并集命中 → 精确；段落 box 回退 → 粗粒度；均失败 → unresolved
+        （保持原矩形，不删链接）。
         """
-        remapped = 0
-        for link in list(dst_page.get_links()):
-            rect = link.get("from")
-            if rect is None or rect.is_empty:
+        from babeldoc.format.pdf.document_il.backend import link_remap
+
+        snapshot = (self.link_remap_state or {}).get("link_snapshot") or {}
+        page_char_objects = (self.link_remap_state or {}).get("page_char_objects") or {}
+        paragraph_index: dict[str, object] = {}
+        for page in self.docs.page:
+            for paragraph in page.pdf_paragraph:
+                if paragraph.debug_id:
+                    paragraph_index[paragraph.debug_id] = paragraph
+        alive_ids = link_remap.build_alive_char_ids(self.docs)
+
+        stats = {
+            "total": 0,
+            "remapped": 0,
+            "fallback_paragraph": 0,
+            "unresolved": [],
+        }
+        for page_index, entries in snapshot.items():
+            if page_index >= len(pdf):
                 continue
-            try:
-                text = " ".join(src_page.get_text("text", clip=rect).split())
-            except Exception:
-                continue
-            if not text or len(text) > 60:
-                continue
-            try:
-                hits = dst_page.search_for(text)
-            except Exception:
-                continue
-            if not hits:
-                continue
-            best = min(
-                hits, key=lambda r: abs(r.y0 - rect.y0) + abs(r.x0 - rect.x0)
+            page = pdf[page_index]
+            page_height = float(page.rect.height)
+            result = link_remap.remap_page_links(
+                page,
+                entries,
+                page_char_objects.get(page_index) or [],
+                paragraph_index,
+                page_height,
+                alive_ids=alive_ids,
             )
-            new_link = self._rebuild_link(link, best)
-            if new_link is None:
-                continue
-            try:
-                dst_page.insert_link(new_link)
-                dst_page.delete_link(link)
-                remapped += 1
-            except Exception:
-                logger.debug("remap link failed", exc_info=True)
-        return remapped
+            stats["total"] += result.total
+            stats["remapped"] += result.remapped
+            stats["fallback_paragraph"] += result.fallback_paragraph
+            stats["unresolved"].extend(
+                {"page": page_index, **item} for item in result.unresolved
+            )
+        self.link_stats.update(stats)
+        return stats
+
+    def _enforce_link_uri_set(self, pdf: pymupdf.Document) -> None:
+        """URI 集合门禁：mono 输出的 URI 集合必须与源快照一致。
+
+        只翻译部分页（``only_include_translated_page``）会删页连带删链接，
+        该模式下跳过门禁；无 link_remap_state 时也跳过（保持旧调用方行为）。
+        """
+        from babeldoc.format.pdf.document_il.backend import link_remap
+
+        if not self.link_remap_state:
+            return
+        if getattr(self.translation_config, "only_include_translated_page", False):
+            return
+        expected_uris = self._source_uri_set()
+        if not expected_uris:
+            self.link_stats["uri_set_match"] = True
+            return
+        link_remap.assert_uri_set_matches(
+            expected_uris, link_remap.uri_set(pdf), context="mono"
+        )
+        self.link_stats["uri_set_match"] = True
+
+    def _source_uri_set(self) -> set[str]:
+        """源 PDF 的 URI 集合（从链接快照取，避免重复打开源文件）。"""
+        uris: set[str] = set()
+        for entries in (self.link_remap_state or {}).get("link_snapshot", {}).values():
+            for entry in entries:
+                if entry.get("uri"):
+                    uris.add(entry["uri"])
+        return uris
 
     def _copy_page_links_to_dual(
         self,
@@ -1080,11 +1130,15 @@ class PDFCreater:
         src_page_id: int,
         dst_rect: pymupdf.Rect,
     ) -> None:
-        """把源页超链接复制到 dual 页的指定区域。
+        """把源页（或 mono 页）超链接搬运到 dual 页的指定区域。
 
         ``show_pdf_page`` 只复制页面内容、不复制注释，所以双语的超链接会全部丢失。
         这里按 show_pdf_page 的矩形映射把 Link 注释重新插入：URI 链接原样复制，
         内部跳转（GOTO）重建为直接目标（不依赖命名目的地）。
+
+        调用方两处：左侧传 ``original_pdf``（源矩形），右侧传 mono 输出 doc——
+        mono 页上的链接已经被 ``_remap_links_by_char_identity`` 换成译文矩形，
+        所以这里只需缩放，不再需要额外定位。
         """
         try:
             src_page = src_doc[src_page_id]
@@ -1632,20 +1686,20 @@ class PDFCreater:
                         check_font_exists, page, pdf, translation_config
                     )
                     pbar.advance()
-            # 超链接按译文文字重定位（译文重排后链接矩形会落在旧位置）
-            try:
-                original_for_links = pymupdf.open(self.original_pdf_path)
-                remapped_total = 0
-                for page in pdf:
-                    if page.number < original_for_links.page_count:
-                        remapped_total += self._remap_links_by_text(
-                            original_for_links[page.number], page
+            # 超链接按「源字符身份」重定位：旧实现按译文文字搜索，译文改写后飘移。
+            # 无 link_remap_state 时（旧调用方）跳过，保持现状行为。
+            if self.link_remap_state:
+                try:
+                    stats = self._remap_links_by_char_identity(pdf)
+                    if stats["remapped"] or stats["unresolved"]:
+                        logger.info(
+                            "超链接重映射：remapped=%d fallback_paragraph=%d unresolved=%d",
+                            stats["remapped"],
+                            stats["fallback_paragraph"],
+                            len(stats["unresolved"]),
                         )
-                original_for_links.close()
-                if remapped_total:
-                    logger.info("Remapped %d hyperlink rects by text", remapped_total)
-            except Exception:
-                logger.warning("remap hyperlink rects failed", exc_info=True)
+                except Exception:
+                    logger.warning("链接重映射失败", exc_info=True)
             translation_config.raise_if_cancelled()
             gc_level = 1
             if self.translation_config.ocr_workaround:
@@ -1679,6 +1733,10 @@ class PDFCreater:
                 should_removed_page = list(total_page - pages_to_translate)
 
                 pdf.delete_pages(should_removed_page)
+
+            # URI 集合门禁（在 save 前）：源快照与 mono 输出的 URI 集合必须一致；
+            # 不一致则阻断，避免链接静默丢失。
+            self._enforce_link_uri_set(pdf)
 
             with self.translation_config.progress_monitor.stage_start(
                 SAVE_PDF_STAGE_NAME,

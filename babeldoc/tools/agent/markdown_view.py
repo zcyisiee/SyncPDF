@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import pickle
 import re
@@ -28,6 +29,8 @@ from babeldoc.tools.agent import workflow
 from babeldoc.tools.agent.translation_selection import SelectionContext
 from babeldoc.tools.agent.translation_selection import normalize_label
 from babeldoc.tools.agent.translation_selection import select_page_paragraphs
+
+logger = logging.getLogger(__name__)
 
 # 锚点：[[S1]] / [[/S1]] / [[F3]]（容忍模型写成 [[ S 1 ]]/[[/s1]]）
 ANCHOR_RE = re.compile(r"\[\[\s*(/?)\s*([SFsf])\s*(\d+)?\s*\]\]")
@@ -321,6 +324,27 @@ def _snapshot_bookmarks(pdf_path, workdir) -> None:
         logger.warning("书签快照失败", exc_info=True)
 
 
+def _snapshot_links(pdf_path, workdir, docs) -> dict:
+    """快照超链接 → ``source/links.json`` + state 用的字符映射。
+
+    返回 ``{"link_snapshot", "page_char_objects"}``（见 link_snapshot.build_link_state）。
+    必须在 Typesetting 之前调用；失败时返回空状态，不阻断解析（此时重建阶段
+    会跳过链接重映射，保持现状行为）。
+    """
+    from babeldoc.tools.agent import link_snapshot
+
+    try:
+        state = link_snapshot.build_link_state(pdf_path, docs)
+        link_snapshot.write_links(
+            state.get("link_snapshot", {}),
+            link_snapshot.links_path(workflow.agent_dir(workdir)),
+        )
+        return state
+    except Exception:  # noqa: BLE001 - 链接快照是审计产物，不阻断解析
+        logger.warning("超链接快照失败", exc_info=True)
+        return {"link_snapshot": {}, "page_char_objects": {}}
+
+
 def _run_parse(
     pdf_path,
     workdir,
@@ -414,6 +438,10 @@ def _run_parse(
 
     _deterministic_ids(docs)
 
+    # 超链接快照：必须在 _deterministic_ids 之后（paragraph_ids 要拿确定性 id，
+    # 与 reconstruct 阶段的段落对齐）、Typesetting 之前（字符 box 还是源坐标）。
+    link_state = _snapshot_links(temp_pdf_path, workdir, docs)
+
     il_translator = ILTranslator(SheetProtocolTranslator(lang_in, lang_out, True), config)
     inputs = {}
     rows = []
@@ -465,6 +493,7 @@ def _run_parse(
         "label_counts": label_counts,
         "skipped_label_counts": skipped,
         "skipped_rows": skipped_rows,
+        "link_state": link_state,
         "temp_pdf_path": str(temp_pdf_path),
         "pdf_path": str(pdf_path),
         "lang_in": lang_in,
@@ -592,6 +621,12 @@ def extract_markdown(
                 "lang_out": lang_out,
                 "mediabox_data": result["mediabox_data"],
                 "skipped_rows": skipped_rows,
+                # 超链接映射状态：快照（链接 → 字符下标/段落 id）+ 字符对象列表
+                # （与 char_indices 同序，pickle 后保持对象身份，重建阶段读新 box）。
+                "link_snapshot": result.get("link_state", {}).get("link_snapshot", {}),
+                "page_char_objects": result.get("link_state", {}).get(
+                    "page_char_objects", {}
+                ),
             },
             f,
         )
