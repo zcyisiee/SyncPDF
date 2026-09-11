@@ -25,14 +25,20 @@ import re
 from pathlib import Path
 
 from babeldoc.tools.agent import workflow
+from babeldoc.tools.agent.translation_selection import SelectionContext
+from babeldoc.tools.agent.translation_selection import normalize_label
+from babeldoc.tools.agent.translation_selection import select_page_paragraphs
 
 # 锚点：[[S1]] / [[/S1]] / [[F3]]（容忍模型写成 [[ S 1 ]]/[[/s1]]）
 ANCHOR_RE = re.compile(r"\[\[\s*(/?)\s*([SFsf])\s*(\d+)?\s*\]\]")
 # canonical 占位符
 CANON_RE = re.compile(r"<style id='(\d+)'>|</style>|\{v(\d+)\}")
 # Markdown 段落标记
-ID_MARK_RE = re.compile(r"<!--\s*id\s*=\s*([A-Za-z0-9._-]+)\s*(?:label\s*=\s*([A-Za-z0-9_-]+))?\s*-->")
-
+# label 可能含空格（如 native 布局的 "plain text"）或斜杠，这里放宽到"不含 > 的任意字符"
+ID_MARK_RE = re.compile(r"<!--\s*id\s*=\s*([A-Za-z0-9._-]+)\s*(?:label\s*=\s*([^>]*?))?\s*-->")
+# 模型抄进段落正文的 HTML 注释（典型：文件头 <!-- babeldoc-markdown v1 -->）
+HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+HTML_COMMENT_DANGLING_RE = re.compile(r"<!--[^>]*$", re.DOTALL)
 MD_HEADER = (
     "<!-- babeldoc-markdown v1 -->\n"
     "<!-- 这是一篇论文的完整正文（Markdown）。请翻译为简体中文。 -->\n"
@@ -346,13 +352,27 @@ def _run_parse(pdf_path, workdir, lang_in, lang_out, layout, mineru_token, miner
     rows = []
     label_counts: dict[str, int] = {}
     skipped: dict[str, int] = {}
+    skipped_rows: list[dict] = []
+    selection_context = SelectionContext()
     for page in docs.page:
         page_font_map, page_xobj_font_map = workflow._page_font_maps(page)
         tracker = PageTranslateTracker()
-        for paragraph in page.pdf_paragraph:
+        for paragraph, decision in select_page_paragraphs(page, selection_context):
             if not paragraph.debug_id:
                 continue
             label = paragraph.layout_label or "text"
+            if not decision.translate:
+                skipped[label] = skipped.get(label, 0) + 1
+                skipped_rows.append(
+                    {
+                        "id": paragraph.debug_id,
+                        "page": page.page_number,
+                        "layout_label": label,
+                        "source": paragraph.unicode or "",
+                        "reason": decision.reason or "protected",
+                    }
+                )
+                continue
             workflow._bump_title_font_size(paragraph)
             text, translate_input = il_translator.pre_translate_paragraph(
                 paragraph, tracker.new_paragraph(), page_font_map, page_xobj_font_map
@@ -377,12 +397,24 @@ def _run_parse(pdf_path, workdir, lang_in, lang_out, layout, mineru_token, miner
         "rows": rows,
         "label_counts": label_counts,
         "skipped_label_counts": skipped,
+        "skipped_rows": skipped_rows,
         "temp_pdf_path": str(temp_pdf_path),
         "pdf_path": str(pdf_path),
         "lang_in": lang_in,
         "lang_out": lang_out,
         "mediabox_data": mediabox_data,
     }
+
+
+def _label_token(label: str | None) -> str:
+    """把 layout_label 规范成注释里安全的 token（空格/斜杠 → 下划线）。
+
+    容器标签（如 native 布局的 "plain text"）含空格会让段落标记不可解析，
+    这里复用 selection helper 的 ``normalize_label`` 统一折叠大小写/空格/斜杠，
+    再把剩余不安全字符替换掉；解析侧仍兼容模型写回带空格的旧格式。
+    """
+    token = re.sub(r"[^A-Za-z0-9_-]+", "_", normalize_label(label))
+    return token or "text"
 
 
 def render_rows_markdown(rows, include_header: bool = True) -> str:
@@ -395,7 +427,7 @@ def render_rows_markdown(rows, include_header: bool = True) -> str:
     for row in rows:
         label = row["layout_label"]
         body = row["markdown"]
-        lines.append(f"<!-- id={row['id']} label={label} -->")
+        lines.append(f"<!-- id={row['id']} label={_label_token(label)} -->")
         if label == "title":
             if first_title:
                 lines.append(f"# {body}")
@@ -444,6 +476,7 @@ def extract_markdown(
     agent.mkdir(parents=True, exist_ok=True)
 
     rows = result["rows"]
+    skipped_rows = result.get("skipped_rows", [])
     md = _render_markdown(rows)
     (agent / "document.md").write_text(md, encoding="utf-8")
     with open(agent / "sheet.jsonl", "w", encoding="utf-8") as f:
@@ -462,7 +495,8 @@ def extract_markdown(
                         "anchors": anchor_sequence(canonical_to_markdown(row["source"])),
                     }
                     for row in rows
-                ]
+                ],
+                "skipped": skipped_rows,
             },
             ensure_ascii=False,
             indent=2,
@@ -479,6 +513,7 @@ def extract_markdown(
                 "lang_in": lang_in,
                 "lang_out": lang_out,
                 "mediabox_data": result["mediabox_data"],
+                "skipped_rows": skipped_rows,
             },
             f,
         )
@@ -490,13 +525,23 @@ def extract_markdown(
         "chars": len(md),
         "label_counts": result["label_counts"],
         "skipped_label_counts": result["skipped_label_counts"],
+        "skipped_rows": skipped_rows,
     }
 
 
 # --------------------------------------------------------------------------- #
 # 译文 Markdown → translated.jsonl（canonical）→ 写回 IR
 # --------------------------------------------------------------------------- #
+def strip_html_comments(text: str) -> str:
+    """剔除 HTML 注释：模型会抄文件头注释，渲染后会变成可见乱码文本。"""
+    if not text or "<!--" not in text:
+        return text
+    text = HTML_COMMENT_RE.sub(" ", text)
+    return HTML_COMMENT_DANGLING_RE.sub(" ", text)
+
+
 def _clean_markdown_body(body: str, label: str) -> str:
+    body = strip_html_comments(body)
     body = body.strip()
     body = re.sub(r"^#{1,6}\s*", "", body)  # 去标题前缀
     body = re.sub(r"\s*\n\s*", " ", body)  # 段内换行折成空格

@@ -315,8 +315,12 @@ class TranslationConfig:
             if mineru_skip_translate_layout_labels is not None
             else (
                 self.MINERU_DEFAULT_SKIP_TRANSLATE_LAYOUT_LABELS
-                if mineru_doclayout_enabled
-                else ()
+                # Native ONNX/fallback layout uses the same label vocabulary
+                # when a region is detected.  Keep these protections active
+                # regardless of provider; the agent selection layer adds
+                # geometry/content heuristics for unlabeled fallback lines.
+                if mineru_doclayout_enabled or doc_layout_model is not None
+                else self.MINERU_DEFAULT_SKIP_TRANSLATE_LAYOUT_LABELS
             )
         )
         self.mineru_skip_translate_effective_labels = (
@@ -440,6 +444,18 @@ class TranslationConfig:
             "cache_hit_prompt_tokens": 0,
         }
         self.disable_same_text_fallback = disable_same_text_fallback
+
+        # agent 排版微调通道（由 babeldoc.tools.agent.layout_overrides 注入）：
+        # 默认全空 = 不改变任何现有行为。
+        # paragraph_layout_overrides: {debug_id: {scale_cap/font_scale/line_skip/
+        #   force_break_after_text/force_break_after_offset/...}}
+        self.paragraph_layout_overrides: dict = {}
+        # page_font_scale: {1-based 页码: 字号乘数}
+        self.page_font_scale: dict[int, float] = {}
+        # 文档级行距覆盖（None = 用 Typesetting 内置默认值）
+        self.line_skip_override: float | None = None
+        # Typesetting 阶段记录的非致命警告（如强制换行锚点解析失败）
+        self.layout_warnings: list[str] = []
 
         if self.ocr_workaround:
             self.remove_non_formula_lines = False
