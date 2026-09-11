@@ -23,13 +23,21 @@
   │
   ├─[2] new parser → legacy IR      扁平字符流：page.pdf_character（只有字符+坐标+字体，无段落）
   │
-  ├─[3] LayoutParser                版面识别（MinerU 云端 / 本地 DocLayout），page.page_layout
+  ├─[3] LayoutParser                版面识别（MinerU，唯一后端），page.page_layout
+  │         → source/mineru/provider_ir.json（MinerU 结构树）
+  │         → <workdir>/<pdf名>/layout_coverage.json（覆盖率门禁审计）
+  │
+  ├─[3b] InlineMathProtector        行内公式 span → formula 区域；→ source/mineru/alignment.json
   │
   ├─[4] EnclosedMarkerFixer         圈号修复：数字+矢量圆圈 → Unicode 圈号字符，删除装饰曲线
   │
   ├─[5] ParagraphFinder             聚类成行、成段；分配 layout_label 与确定性 debug_id
   │
+  ├─[5b] TocDetector                目录页条目化（toc_entry / toc_entry_page）；→ source/toc.json
+  │
   ├─[6] StylesAndFormulas           同样式 run 合并、公式对象识别
+  │
+  ├─[6b] 注释快照                     → source/bookmarks.json + source/links.json
   │
   ├─[7] ILTranslator.pre_translate_paragraph
   │         → document.md（连续英文 Markdown + 行内锚点 + 段落 id）
@@ -37,14 +45,17 @@
   │
   ├─[8] 翻译（一次 agy 调用，整篇）  → translated.md + usage.json
   │
-  ├─[9] md-apply                    校验（id / 锚点多重集+顺序 / 空 span）→ 确定性修复
+  ├─[9] md-apply                    校验（id / 锚点多重集+顺序 / 空 span / label）→ 确定性修复
   │         → translated.jsonl（canonical）→ 写回 IR（state.pkl）
   │
   ├─[10] reconstruct                Typesetting + PDFCreater → mono.pdf / dual.pdf
-  │         （超链接保留、搬运到 dual、按译文重定位）
+  │         （链接按源字符身份重映射 + URI 集合门禁；书签搬运到 dual）
   │
   └─[11] render                     代表性页 PNG（视觉审查）
 ```
+
+> 阶段号与 [`docs/toolchain/pipeline-stages.md`](../../../docs/toolchain/pipeline-stages.md)
+> 的「阶段 0–15」一一对应（本文号序为历史编号）。
 
 设计目标：
 
@@ -91,9 +102,17 @@ python experiments/dump_parse_stages.py <pdf> --out-dir <dir>/parse-stages \
 | 配置 | 默认 | 说明 |
 |---|---|---|
 | `--layout mineru` | 唯一 | MinerU 云端版面识别；作者区/参考文献/图表内部/代码等自动跳过（本地 ONNX 后端 `native` 已移除） |
+| `--mineru-json <path>` | — | 回放已缓存的 layout.json（不消耗 API） |
+| `--mineru-cache-key <sha256>` | — | 按 PDF 内容哈希直接指定缓存 layout.json（`~/.cache/babeldoc/mineru-layout.v1/<key>.json`）；未命中明确报错 |
 | `MINERU_API_TOKEN` | — | MinerU 云端 token；结果按 PDF 内容 sha256 缓存在 `~/.cache/babeldoc/mineru-layout.v1/` |
-| `--layout-coverage-threshold` | `0.005` | 布局覆盖率门禁：未命中任何 layout 区域的原生字符占比上限，超阈值解析失败并落盘 `layout_coverage.json` |
+| `--layout-coverage-threshold` | `0.005` | 布局覆盖率门禁：未命中任何 layout 区域的原生字符占比上限，超阈值解析失败并落盘 `<workdir>/<pdf名>/layout_coverage.json`（解析中止，不产出 document.md） |
 | `config.fix_enclosed_markers` | `True` | 圈号修复开关（`getattr` 读取，可程序化关闭） |
+
+> **本轮新增产物**（板块 1–5）：`agent/source/mineru/{provider_ir,alignment}.json`
+> （MinerU 结构树与字符对齐）、`agent/source/{toc,bookmarks,links}.json`
+> （目录条目、书签、超链接快照）。字段与门禁详见
+> [`docs/toolchain/`](../../../docs/toolchain/)（架构 / 阶段契约 / 工具 API /
+> 标签字典 / 门禁 / 排查）。
 
 ---
 
@@ -156,33 +175,50 @@ python experiments/dump_parse_stages.py <pdf> --out-dir <dir>/parse-stages \
 
 ### [3] `LayoutParser` — 版面识别
 
-**功能**：调用版面模型（MinerU / 本地 DocLayout），把识别框写入 `page.page_layout`。
+**功能**：调用 MinerU 布局模型，把识别框写入 `page.page_layout`；同时保留完整结构树、
+执行覆盖率门禁。
 
-- MinerU 适配器 `MinerUDocLayoutModel` **只消费 bbox + block type 标签**，
-  文字仍来自 PDF 文本层；
-- BabelDOC 自己再按字符聚类补 `fallback_line`（覆盖模型未覆盖的字符）；
+- MinerU 适配器 `MinerUDocLayoutModel` 消费 bbox + block type 得到 layout 区域；
+  **文字仍来自 PDF 原生文本层**（MinerU 的 `content` 只用于 token 决策与一致性校验，
+  不覆盖原生字符）；
+- 同时构建 **provider IR**（完整 block/line/span 树 + 阅读顺序）落盘
+  `agent/source/mineru/provider_ir.json`；
+- 字符聚类兜底 `fallback_line` **已删除**，替换为覆盖率门禁（未命中任何 layout 区域的
+  原生字符占比 > 阈值即失败）；
 - 图/表内部的标签用于跳过语义。
 
-**产物 schema**（`03_layout.json`）：
+**产物 A：`agent/source/mineru/provider_ir.json`**
 
 ```json
-{
-  "per_page": [{"page": 1,
-    "counts": {"title": 2, "author": 3, "text": 7, "header": 1,
-               "page_footnote": 2, "fallback_line": 109}}],
-  "layouts": [
-    {"id": 1, "class_name": "title", "conf": 1.0,
-     "box": {"x": 48.0, "y": 685.0, "x2": 571.0, "y2": 742.0, "w": 523.0, "h": 57.0}}
-  ]
-}
+{"version_name": "3.4.4", "backend": "hybrid", "page_count": 51,
+ "pages": [{"page_index": 0,
+   "blocks": [{"block_id": "p0-b0", "type": "title", "bbox": [217,97,379,114],
+               "level": 1, "index": 1, "lines": [{"line_id": "p0-b0-l0",
+                 "spans": [{"span_id": "p0-b0-l0-s0", "kind": "text",
+                            "content": "…", "score": 1.0}]}],
+               "children": [], "source": "para_blocks"}],
+   "reading_order": ["p0-b0"]}],
+ "unknown_types": []}
+```
+
+**产物 B：`<workdir>/<pdf名>/layout_coverage.json`**（覆盖率门禁审计，始终落盘）
+
+```json
+{"pages": [{"page_index": 0, "total_chars": 1354, "uncovered_chars": 0,
+            "coverage": 1.0, "uncovered_text_preview": "…"}],
+ "global": {"total_chars": 135415, "uncovered_chars": 59,
+            "uncovered_ratio": 0.0004357, "coverage": 0.99956},
+ "threshold": 0.005, "passed": true}
 ```
 
 常见 `class_name`：`title / text / author / reference / figure / figure_caption /
 table / table_text / table_caption / code / code_caption / header / footer /
-page_number / page_footnote / aside_text / formula / isolate_formula / fallback_line`。
+page_number / page_footnote / aside_text / formula / isolate_formula /
+toc_entry / toc_entry_page`。完整字典见
+[`docs/toolchain/label-dictionary.md`](../../../docs/toolchain/label-dictionary.md)。
 
-**效果**：为段落打语义标签，决定「译 / 不译」；实测一页 124 个框中只有 15 个来自
-MinerU，109 个是 `fallback_line`。
+**效果**：为段落打语义标签，决定「译 / 不译」；保留 MinerU 结构供行内公式保护、
+目录识别与超链接映射复用。
 
 ---
 
@@ -300,11 +336,17 @@ Unicode 圈号字符，并删除装饰曲线。否则译文重排后圆圈留在
 
 | `layout_label` | Markdown 呈现 |
 |---|---|
-| 首个 `title` | `# …` |
+| `doc_title` / 首个 `title` | `# …` |
 | 其它 `title` | `## …` |
+| `paragraph_title` | `### …` |
 | `figure_caption` | `*…*` |
 | `table_caption` | `**…**` |
-| `text` / `fallback_line` | 普通段落 |
+| 列表项（首可见字符是项目符号/圈号） | `- …` |
+| `toc_entry` | 裸行（目录条目本身是短行） |
+| `text` | 普通段落 |
+
+> 结构前缀只给翻译模型看：回填时由 `_clean_markdown_body` 按 label 剥离，
+> 不进入译文 IR（不会渲染成 `#`/`- ` 正文字符）。
 
 **产物 B：`agent/sheet.jsonl`**（与旧协议兼容的清单，canonical 文本）
 
@@ -452,12 +494,15 @@ header / footer / page_number / page_footnote / aside_text / author`
 - **超链接**：
   1. 保留原 Link 注释（`fix_null_xref` 不再清空 `/Annots`）；
   2. `_copy_page_links_to_dual` 把链接搬到 dual 左右两半（`show_pdf_page` 不复制注释）；
-  3. `_remap_links_by_text` 按「链接覆盖的原文文字」在译文中搜索同名 token
-     （`[94]`、URL 等），就近重定位矩形。
+  3. **链接矩形按源字符身份重算**（`backend/link_remap.py`）：
+     ① 字符并集（源字符对象仍存活于 composition）→ ② 段落 box + 段内相对投影 →
+     ③ `unresolved`（保持原矩形，不删链接）。旧的按译文文字搜索（`_remap_links_by_text`）
+     已删除；URI 集合不一致会硬阻断（`link_uri_set_mismatch`）。
 - **目录（书签）**：`show_pdf_page` 同样不复制 outline。
   `_copy_toc_to_dual` 把原 PDF 的 `get_toc()` 写入 dual（左右拼宽模式页序一致，
   页码 1:1 映射）；交替页模式按 `2p-1` / `2p` 重映射页码。
-  mono 因是原 PDF 的就地修改，目录天然保留。
+  mono 因是原 PDF 的就地修改，目录天然保留；解析阶段已把书签快照到
+  `source/bookmarks.json` 供对照。
 
 **产物**：
 
@@ -466,16 +511,18 @@ header / footer / page_number / page_footnote / aside_text / author`
 | `output/<name>.zh.mono.pdf` | 中文单语 |
 | `output/<name>.zh.dual.pdf` | 中英左右对照 |
 
-**效果**（实测）：
+**效果**（实测，`link_remap` 重写后）：
 
-| PDF | 原文链接 | mono | dual |
+| 样本 | 源链接 | mono | dual |
 |---|---:|---:|---:|
-| `input.pdf` | 429 | 429 | 856 |
+| `DeepSeek_V41_Tech_Report.pdf` | 410 | 410 | 820 |
 | `2312.04432v2.pdf` | 323 | 323 | 646 |
 | `ccs2026b-paper3764.pdf` | 319 | 319 | 638 |
 
-mono 中 77% 链接矩形按译文重定位。目录（书签）同样保持：
-`input.pdf` 53 条、`ccs2026b-paper3764.pdf` 28 条，mono/dual 均一致。
+DeepSeek 样本 mono 的链接映射分布：`total=410, remapped=408`
+（字符并集 58 / 段落投影 350）、`unresolved=2`（code 图内无字符细线链接），
+`uri_set_match=true`。定位与排查见
+[`docs/toolchain/troubleshooting.md`](../../../docs/toolchain/troubleshooting.md#2-链接丢失--矩形漂移)。
 
 ---
 
@@ -504,6 +551,24 @@ mono 中 77% 链接矩形按译文重定位。目录（书签）同样保持：
 | `translated.jsonl` | 9 | canonical 译文（apply 输入） | 是 |
 | `apply_report.json` | 9 | 校验/修复/告警报告 | — |
 | `il_translated.applied.json` | 9 | 写回后的 IR 快照 | — |
+| `layout_geometry.json` | 10 | 重排几何（框/缩放/警告） | 否 |
+| `reconstruct_report.json` | 10 | 重建报告（含 `link_*` 指标） | — |
+| `FINAL_REPORT.md` | 15 | 汇总报告 | — |
+
+### 新增审计产物（板块 1–5）
+
+| 文件 | 阶段 | 作用 |
+|---|---|---|
+| `source/mineru/provider_ir.json` | 3 | MinerU 完整 block/line/span 树 + `reading_order` + `unknown_types` |
+| `source/mineru/alignment.json` | 3b | 原生字符 ↔ span 对齐统计（`inline_equation_matched` / `native_char_coverage`） |
+| `source/toc.json` | 5b | 目录页判定与条目明细（`heading_text` / `printed_page_label` / `level`） |
+| `source/bookmarks.json` | 6b | 书签快照（`level/title/page/to/nameddest`） |
+| `source/links.json` | 6b | 超链接快照 + 覆盖的源字符下标/段落 id/段内相对比例 |
+| `<workdir>/<pdf名>/layout_coverage.json` | 3 | 覆盖率门禁审计（逐页未覆盖字符 + 文本片段） |
+
+> 完整 schema 与字段语义见
+> [`docs/toolchain/pipeline-stages.md`](../../../docs/toolchain/pipeline-stages.md)
+> 与 [`reference/schemas.md`](schemas.md)。
 
 `<workdir>/input/` 保存修复后的临时 PDF；`<workdir>/output/` 保存成品。
 

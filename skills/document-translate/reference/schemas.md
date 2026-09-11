@@ -42,6 +42,121 @@ reconstructed → rendered → accepted`；`blocked_protocol`、`blocked_transla
 
 `target` 与 `source` 的锚点/占位符**多重集必须一致**（apply 程序化校验）。
 
+## 2.5 新增审计产物（板块 1–5）
+
+以下文件在解析阶段由各新 pass 写出，路径相对 `<workdir>/agent/`（`layout_coverage.json` 除外）。
+
+### `source/mineru/provider_ir.json`（MinerU 结构树，阶段 3）
+
+```json
+{"version_name": "3.4.4", "backend": "hybrid", "page_count": 51,
+ "pages": [{"page_index": 0, "reading_order": ["p0-b0"],
+   "blocks": [{"block_id": "p0-b0", "type": "title", "sub_type": null,
+               "bbox": [217, 97, 379, 114],   // 页面坐标（左上原点）
+               "level": 1, "index": 1, "angle": 0.0,
+               "lines": [{"line_id": "p0-b0-l0", "bbox": [...],
+                 "spans": [{"span_id": "p0-b0-l0-s0", "kind": "text",
+                            "content": "…", "score": 1.0, "page_index": 0}]}],
+               "children": [], "parent_block_id": null, "merge_prev": null,
+               "source": "para_blocks"}]}],
+ "unknown_types": [{"type": "…", "where": "block|span", "page_index": 3, "count": 2}]}
+```
+
+- `kind` ∈ `text / inline_equation / interline_equation / image / table / chart`。
+- `source` ∈ `para_blocks / discarded_blocks`；`discarded_blocks` 不进 `reading_order`。
+- 坐标是 MinerU 页面坐标；消费者按页高转 IL 坐标（`y' = H - y`）。
+
+### `source/mineru/alignment.json`（字符↔span 对齐，阶段 3b）
+
+```json
+{"version": 1,
+ "summary": {"page_count": 51, "total_chars": 135415, "matched_chars": 127751,
+             "unmatched_chars": 7664, "ambiguous_chars": 5475,
+             "native_char_coverage": 0.943404,
+             "inline_equation_total": 126, "inline_equation_matched": 103,
+             "span_text_mismatch": 24, "protected_inline_math": 104},
+ "pages": [{"page_index": 0, "coverage": 1.0, "span_to_chars": {"span_id": [下标]},
+            "inline_equation": [{"span_id": "…", "kind": "inline_equation",
+                                  "matched": true, "method": "char_bbox",
+                                  "char_count": 3, "ambiguous": false}],
+            "span_text_mismatch": 0, "span_text_samples": []}],
+ "protected_inline_math": [{"page_index": 3, "layout_id": 12, "box": [...]}]}
+```
+
+- `inline_equation_matched` = 已对齐（→ 会被保护成 `{vN}`）的行内公式 span 数。
+- `protected_inline_math` = 实际追加的 `formula` 布局区域数。
+- 对齐规则：span 中心包含 → span 覆盖率 ≥0.6 → line bbox 回退。
+
+### `source/toc.json`（目录条目，阶段 5b）
+
+```json
+{"version": 1,
+ "summary": {"toc_pages": 2, "entries": 54, "replaced_paragraphs": 2,
+             "low_confidence_pages": [], "warnings": [], "skipped_pages": []},
+ "pages": [{"page_index": 1, "is_toc": true, "confidence": 0.9394,
+            "low_confidence": false, "candidate_lines": 31, "total_lines": 33,
+            "title_heading": "Contents",
+            "entries": [{"entry_index": 1, "heading_text": "1 Introduction",
+                          "printed_page_label": "4", "leader_kind": "spaces",
+                          "indent_x0": 71.248, "level": 1}]}]}
+```
+
+- `leader_kind` ∈ `dots / spaces / none`；`level` 由编号模式（`2.1` → 2）或缩进聚类推断。
+- `entry_index` 是**页内**序号；全局顺序按页序拼接。
+
+### `source/bookmarks.json`（书签快照，阶段 6b）
+
+```json
+[{"level": 1, "title": "Introduction", "page": 4, "to": [70.866, 756.85],
+  "nameddest": "section.1", "collapse": false}]
+```
+
+### `source/links.json`（超链接快照，阶段 6b）
+
+```json
+{"0": [{"link_index": 0, "page_index": 0, "kind": "URI",
+        "uri": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash",
+        "page": null, "to": null, "from": [206.05, 487.14, 495.71, 500.15],
+        "char_indices": [1897, 1898, "…"],        // 页内字符下标
+        "paragraph_ids": ["P01-004"],            // 覆盖到的段落 id
+        "src_rect_ratio": [0.298, 0.0, 0.933, 0.040]}]}  // 源矩形在源段内的相对位置
+```
+
+- 键是页号（字符串，0-based）；`kind` ∈ `URI / GOTO / NAMED`。
+- `char_indices` 与 `state.pkl` 里的 `page_char_objects[页]` 同序（对象身份保持）。
+- `src_rect_ratio` 供段落回退时的「段内相对投影」用；为空时退化为整段 box。
+
+### `<workdir>/<pdf名>/layout_coverage.json`（覆盖率门禁，阶段 3）
+
+```json
+{"pages": [{"page_index": 0, "total_chars": 1354, "uncovered_chars": 0,
+            "coverage": 1.0, "uncovered_samples": [{"box": [...], "text": "…"}],
+            "uncovered_text_preview": "…"}],
+ "global": {"total_chars": 135415, "uncovered_chars": 59,
+            "uncovered_ratio": 0.0004357, "coverage": 0.99956},
+ "threshold": 0.005, "passed": true}
+```
+
+- `global.uncovered_ratio > threshold` ⇔ `passed == false` → 解析阶段抛 `layout_coverage_gate`。
+- 无字符页 `total_chars == 0`，`coverage` 记 1.0（不参与门禁）。
+
+### `reconstruct_report.json`（重建报告，阶段 13）
+
+```json
+{"mono_pdf": "…mono.pdf", "dual_pdf": "…dual.pdf",
+ "layout_geometry": "…/layout_geometry.json",
+ "layout_override_stats": {"font_scaled": 0, "box_changed": 0, "clamped": 0,
+                          "unmatched_ids": [], "warnings": []},
+ "layout_warnings": [],
+ "link_total": 410, "link_remapped": 408, "link_fallback_paragraph": 350,
+ "link_unresolved": [{"page": 15, "link_index": 0, "uri": null}],
+ "link_uri_set_match": true,
+ "stats": {"mono": {"pages": 51, "toc_entries": 54, "links": 410}}}
+```
+
+- `link_fallback_paragraph`：走「段落 box + 段内相对投影」的链接数。
+- `link_uri_set_match == false` → 重建阶段硬失败（`link_uri_set_mismatch`）。
+
 ## 3. `apply_report.json`
 
 ```json
