@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import pickle
 import re
@@ -59,6 +60,8 @@ from babeldoc.tools.agent.translation_selection import select_page_paragraphs
 AGENT_DIR = "agent"
 STATE_FILE = "state.pkl"
 SHEET_FILE = "sheet.jsonl"
+
+logger = logging.getLogger(__name__)
 
 
 def agent_dir(workdir: str | Path) -> Path:
@@ -246,6 +249,19 @@ def extract(
     docs = TocDetector(config).process(docs) or docs
     StylesAndFormulas(config).process(docs)
 
+    # 超链接快照：必须在 Typesetting 之前（字符 box 还是源坐标）。
+    from babeldoc.tools.agent import link_snapshot
+
+    try:
+        link_state = link_snapshot.build_link_state(temp_pdf_path, docs)
+        link_snapshot.write_links(
+            link_state.get("link_snapshot", {}),
+            link_snapshot.links_path(agent_dir(workdir)),
+        )
+    except Exception:  # noqa: BLE001 - 链接快照是审计产物，不阻断解析
+        logger.warning("超链接快照失败", exc_info=True)
+        link_state = {"link_snapshot": {}, "page_char_objects": {}}
+
     il_translator = ILTranslator(
         SheetProtocolTranslator(lang_in, lang_out, True), config
     )
@@ -314,6 +330,10 @@ def extract(
                 "lang_out": lang_out,
                 "mediabox_data": mediabox_data,
                 "skipped_rows": skipped_rows,
+                # 超链接映射状态：快照（链接 → 字符下标/段落 id）+ 字符对象列表
+                # （与 char_indices 同序，pickle 后保持对象身份，重建阶段读新 box）。
+                "link_snapshot": link_state.get("link_snapshot", {}),
+                "page_char_objects": link_state.get("page_char_objects", {}),
             },
             f,
         )
@@ -496,7 +516,14 @@ def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False):
     geometry_path = layout_geometry.write_geometry(workdir, geometry)
 
     pdf_creater = PDFCreater(
-        str(temp_pdf_path), doc, config, state["mediabox_data"]
+        str(temp_pdf_path),
+        doc,
+        config,
+        state["mediabox_data"],
+        link_remap_state={
+            "link_snapshot": state.get("link_snapshot") or {},
+            "page_char_objects": state.get("page_char_objects") or {},
+        },
     )
     result = pdf_creater.write(config)
     return {
@@ -505,6 +532,13 @@ def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False):
         "layout_geometry": str(geometry_path),
         "layout_override_stats": ir_stats,
         "layout_warnings": list(getattr(config, "layout_warnings", []) or []),
+        "link_total": pdf_creater.link_stats.get("total", 0),
+        "link_remapped": pdf_creater.link_stats.get("remapped", 0),
+        "link_fallback_paragraph": pdf_creater.link_stats.get(
+            "fallback_paragraph", 0
+        ),
+        "link_unresolved": pdf_creater.link_stats.get("unresolved", []),
+        "link_uri_set_match": pdf_creater.link_stats.get("uri_set_match"),
     }
 
 
