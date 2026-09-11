@@ -30,6 +30,9 @@ from pathlib import Path
 from babeldoc.format.pdf.document_il.backend.pdf_creater import PDFCreater
 from babeldoc.format.pdf.document_il.midend.il_translator import ILTranslator
 from babeldoc.format.pdf.document_il.midend.il_translator import PageTranslateTracker
+from babeldoc.format.pdf.document_il.midend.inline_math_protector import (
+    InlineMathProtector,
+)
 from babeldoc.format.pdf.document_il.midend.layout_parser import LayoutParser
 from babeldoc.format.pdf.document_il.midend.paragraph_finder import ParagraphFinder
 from babeldoc.format.pdf.document_il.midend.styles_and_formulas import (
@@ -172,10 +175,9 @@ def extract(
 ):
     """解析 PDF 并导出翻译 sheet + 状态文件。返回统计 dict。
 
-    layout 仅支持 "mineru"（本地 ONNX 后端已移除）：调用 MinerU API 做布局
-    （需 token；结果按 PDF 内容哈希缓存），默认 skip 集生效：
-    reference/author/表格内部/图片内部/页眉页脚等跳过，*_caption 保留翻译。
-    skip_labels 可追加跳过的标签。layout_coverage_threshold 控制布局覆盖率门禁。
+    layout="mineru" 时用 MinerU API 做布局（需 token；结果按 PDF 内容哈希缓存），
+    默认 skip 集生效：reference/author/表格内部/图片内部/页眉页脚等跳过，
+    *_caption 保留翻译。skip_labels 可在两种模式下追加跳过的标签。
     """
     from babeldoc.const import close_process_pool
     from babeldoc.format.pdf.document_il.midend.enclosed_marker_fixer import (
@@ -233,6 +235,9 @@ def extract(
         temp_pdf_path, config=config, doc_pdf=doc_pdf
     )
     docs = LayoutParser(config).process(docs, doc_pdf)
+    # 行内公式保护 + 原生字符↔MinerU span 对齐审计（与 markdown_view 同位置：
+    # ParagraphFinder 之前，page.pdf_character 还是全量）。
+    docs = InlineMathProtector(config).process(docs) or docs
     close_process_pool()
     docs = EnclosedMarkerFixer(config).process(docs)
     ParagraphFinder(config).process(docs)

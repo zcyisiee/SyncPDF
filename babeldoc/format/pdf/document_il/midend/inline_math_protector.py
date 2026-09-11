@@ -106,7 +106,12 @@ def protect_page(
     if page_height <= 0:
         return []
     existing = list(_existing_formula_regions(page))
-    next_id = max((layout.id or 0) for layout in page.page_layout or ()) + 1
+    # 页内可能没有任何布局区域（如 MinerU 只返回被丢弃块的页），
+    # ``default=0`` 保证空页也能追加保护区域而不是抛 max() 空序列错误。
+    next_id = max(
+        (layout.id or 0 for layout in page.page_layout or ()),
+        default=0,
+    ) + 1
     added: list[dict] = []
 
     for region in inline_equation_regions(provider_page, page_height):
