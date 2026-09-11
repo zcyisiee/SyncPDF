@@ -208,6 +208,8 @@ def extract(
                 "mineru 布局需要 --mineru-token 或环境变量 MINERU_API_TOKEN"
             )
         config.doc_layout_model = MinerUDocLayoutModel(api_token=token)
+        # provider IR 落到 <workdir>/agent/source/mineru/provider_ir.json
+        config.provider_ir_dir = agent_dir(workdir)
         config.mineru_doclayout_enabled = True
         config.mineru_skip_translate_effective_labels = (
             TranslationConfig.expand_mineru_skip_translate_layout_labels(

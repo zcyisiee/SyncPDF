@@ -286,7 +286,40 @@ def _deterministic_ids(docs) -> None:
             paragraph.debug_id = f"P{page.page_number + 1:02d}-{seq:03d}"
 
 
-def _run_parse(pdf_path, workdir, lang_in, lang_out, layout, mineru_token, mineru_json, pages):
+def _resolve_mineru_json(mineru_json, mineru_cache_key):
+    """解析回放路径：显式 --mineru-json 优先，否则按内容哈希找缓存。
+
+    缓存 key 是 PDF 内容的 sha256，缓存目录与 MinerUDocLayoutModel 保持一致
+    （~/.cache/babeldoc/mineru-layout.v1/）。缓存不存在时直接报错，
+    避免静默回退到 API（可能无 token）。
+    """
+    if mineru_json:
+        return str(mineru_json)
+    if not mineru_cache_key:
+        return None
+    from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+
+    cache_path = MinerUDocLayoutModel.LAYOUT_CACHE_DIR / f"{mineru_cache_key}.json"
+    if not cache_path.exists():
+        raise ValueError(
+            "MinerU 缓存未命中："
+            f"{cache_path} 不存在。请提供 --mineru-json 或设置 MINERU_API_TOKEN "
+            "让 MinerU 重新解析一次。"
+        )
+    return str(cache_path)
+
+
+def _run_parse(
+    pdf_path,
+    workdir,
+    lang_in,
+    lang_out,
+    layout,
+    mineru_token,
+    mineru_json,
+    pages,
+    mineru_cache_key=None,
+):
     from babeldoc.const import close_process_pool
     from babeldoc.format.pdf.document_il.midend.enclosed_marker_fixer import (
         EnclosedMarkerFixer,
@@ -315,6 +348,9 @@ def _run_parse(pdf_path, workdir, lang_in, lang_out, layout, mineru_token, miner
         from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
         from babeldoc.format.pdf.translation_config import TranslationConfig
 
+        # --mineru-json 优先；否则按内容哈希解析 --mineru-cache-key。
+        mineru_json = _resolve_mineru_json(mineru_json, mineru_cache_key)
+
         if mineru_json:
             os.environ["BABELDOC_MINERU_LAYOUT_JSON"] = str(mineru_json)
             config.doc_layout_model = MinerUDocLayoutModel(api_token="replay")
@@ -323,6 +359,8 @@ def _run_parse(pdf_path, workdir, lang_in, lang_out, layout, mineru_token, miner
             if not token:
                 raise ValueError("mineru 布局需要 --mineru-token / MINERU_API_TOKEN / --mineru-json")
             config.doc_layout_model = MinerUDocLayoutModel(api_token=token)
+        # provider IR 落到 <workdir>/agent/source/mineru/provider_ir.json
+        config.provider_ir_dir = workflow.agent_dir(workdir)
         config.mineru_doclayout_enabled = True
         config.mineru_skip_translate_effective_labels = (
             TranslationConfig.expand_mineru_skip_translate_layout_labels(
@@ -466,11 +504,20 @@ def extract_markdown(
     mineru_token=None,
     mineru_json=None,
     pages=None,
+    mineru_cache_key=None,
 ):
     """解析 PDF → 写 document.md / anchors.json / sheet.jsonl / state.pkl。"""
     workdir = Path(workdir)
     result = _run_parse(
-        pdf_path, workdir, lang_in, lang_out, layout, mineru_token, mineru_json, pages
+        pdf_path,
+        workdir,
+        lang_in,
+        lang_out,
+        layout,
+        mineru_token,
+        mineru_json,
+        pages,
+        mineru_cache_key=mineru_cache_key,
     )
     agent = workflow.agent_dir(workdir)
     agent.mkdir(parents=True, exist_ok=True)
