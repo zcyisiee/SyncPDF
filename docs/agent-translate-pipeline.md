@@ -100,9 +100,9 @@ python experiments/dump_parse_stages.py <pdf> --out-dir <dir>/parse-stages \
 
 | 配置 | 默认 | 说明 |
 |---|---|---|
-| `--layout mineru` | 推荐 | MinerU 云端版面识别；作者区/参考文献/图表内部/代码等自动跳过 |
-| `--layout native` | — | 本地 DocLayoutModel（无 token，但跳过语义较弱） |
+| `--layout mineru` | 唯一 | MinerU 云端版面识别；作者区/参考文献/图表内部/代码等自动跳过（本地 ONNX 后端 `native` 已移除） |
 | `MINERU_API_TOKEN` | — | MinerU 云端 token；结果按 PDF 内容 sha256 缓存在 `~/.cache/babeldoc/mineru-layout.v1/` |
+| `--layout-coverage-threshold` | `0.005` | 布局覆盖率门禁：未命中任何 layout 区域的原生字符占比上限，超阈值解析失败并落盘 `layout_coverage.json` |
 | `config.fix_enclosed_markers` | `True` | 圈号修复开关（`getattr` 读取，可程序化关闭） |
 
 ---

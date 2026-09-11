@@ -14,7 +14,7 @@
 
 用法：
     python experiments/dump_parse_stages.py <pdf> --out-dir <dir> \
-        [--workdir <dir>] [--layout mineru|native] \
+        [--workdir <dir>] [--layout mineru] \
         [--mineru-json <cached layout.json>] [--pages 1,2] [--detail-page 1]
 """
 
@@ -147,7 +147,7 @@ def main():
     ap.add_argument("pdf")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--workdir", default=None)
-    ap.add_argument("--layout", choices=["mineru", "native"], default="mineru")
+    ap.add_argument("--layout", choices=["mineru"], default="mineru")
     ap.add_argument("--mineru-json", default=None)
     ap.add_argument("--pages", default=None, help="1-based，如 1,2 或 1-3")
     ap.add_argument("--detail-page", type=int, default=1, help="详细 dump 的页（1-based）")
@@ -203,27 +203,25 @@ def main():
         )
     config = workflow._base_config(pdf_path, workdir, args.lang_in, args.lang_out)
 
-    if args.layout == "mineru":
-        from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
-        from babeldoc.format.pdf.translation_config import TranslationConfig
+    if args.layout != "mineru":
+        raise SystemExit("native 布局后端已移除，请使用 --layout mineru")
 
-        mineru_json = args.mineru_json or os.environ.get("BABELDOC_MINERU_LAYOUT_JSON")
-        if not mineru_json:
-            raise SystemExit(
-                "mineru 模式需要 --mineru-json 或环境变量 BABELDOC_MINERU_LAYOUT_JSON"
-            )
-        os.environ["BABELDOC_MINERU_LAYOUT_JSON"] = str(mineru_json)
-        config.doc_layout_model = MinerUDocLayoutModel(api_token="replay")
-        config.mineru_doclayout_enabled = True
-        config.mineru_skip_translate_effective_labels = (
-            TranslationConfig.expand_mineru_skip_translate_layout_labels(
-                TranslationConfig.get_mineru_default_skip_translate_layout_labels()
-            )
+    from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+    from babeldoc.format.pdf.translation_config import TranslationConfig
+
+    mineru_json = args.mineru_json or os.environ.get("BABELDOC_MINERU_LAYOUT_JSON")
+    if not mineru_json:
+        raise SystemExit(
+            "mineru 模式需要 --mineru-json 或环境变量 BABELDOC_MINERU_LAYOUT_JSON"
         )
-    else:
-        from babeldoc.docvision.doclayout import DocLayoutModel
-
-        config.doc_layout_model = DocLayoutModel.load_available()
+    os.environ["BABELDOC_MINERU_LAYOUT_JSON"] = str(mineru_json)
+    config.doc_layout_model = MinerUDocLayoutModel(api_token="replay")
+    config.mineru_doclayout_enabled = True
+    config.mineru_skip_translate_effective_labels = (
+        TranslationConfig.expand_mineru_skip_translate_layout_labels(
+            TranslationConfig.get_mineru_default_skip_translate_layout_labels()
+        )
+    )
     config.skip_scanned_detection = True
 
     # ---- Step 1: _prepare_pdf ----

@@ -1,8 +1,8 @@
 """Deterministic selection of paragraphs that may be sent to a translator.
 
-The PDF layout detector is deliberately treated as a hint: native/fallback
-parsing often labels author bands, figure text, and table cells as
-``plain text`` or ``fallback_line``.  This module combines explicit labels,
+The PDF layout detector is deliberately treated as a hint: layout
+labels can still under-report author bands, figure text, and table cells
+that are labeled ``plain text``.  This module combines explicit labels,
 layout-region geometry, and a small amount of document-level context so that
 protected content never enters the translation prompt.
 """

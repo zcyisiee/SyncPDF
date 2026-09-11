@@ -448,9 +448,11 @@ def _create_doc_layout_model_from_args(args):
 
         return RpcDocLayoutModel(host=args.rpc_doclayout7)
 
-    from babeldoc.docvision.doclayout import DocLayoutModel
-
-    return DocLayoutModel.load_onnx()
+    # 本地 ONNX 后端已移除：未指定任何布局后端时明确报错，不做静默回退。
+    raise ValueError(
+        "未指定布局后端：本地 ONNX 后端已移除，请使用 --mineru-doclayout"
+        "（需 --mineru-api-token / MINERU_API_TOKEN）或 --rpc-doclayout*。"
+    )
 
 
 async def main():

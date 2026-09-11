@@ -69,13 +69,13 @@ def test_figure_and_table_captions_are_translated():
         assert decision.reason is None
 
 
-def test_fallback_line_inside_figure_region_is_not_translated():
+def test_paragraph_inside_figure_region_is_not_translated():
     figure_region = SimpleNamespace(
         class_name="figure", box=make_box(50, 100, 300, 400)
     )
     paragraph = make_paragraph(
         "axis label",
-        layout_label="fallback_line",
+        layout_label="text",
         box=make_box(60, 150, 200, 250),
     )
     page = make_page(paragraph, page_layout=[figure_region])
@@ -121,7 +121,7 @@ def test_first_page_author_band_is_not_translated():
 
 def test_references_heading_and_following_reference_are_skipped():
     heading = make_paragraph("REFERENCES", layout_label="paragraph_title")
-    reference = make_paragraph("Smith et al. 2020.", layout_label="fallback_line")
+    reference = make_paragraph("Smith et al. 2020.", layout_label="text")
     page = make_page(heading, reference)
     context = SelectionContext()
     decisions = list(select_page_paragraphs(page, context))
@@ -140,9 +140,9 @@ def test_ordinary_heading_does_not_end_references_section():
     """
     paragraphs = [
         make_paragraph("REFERENCES", layout_label="paragraph_title"),
-        make_paragraph("Smith et al. 2020.", layout_label="fallback_line"),
+        make_paragraph("Smith et al. 2020.", layout_label="text"),
         make_paragraph("1. METHOD", layout_label="paragraph_title"),
-        make_paragraph("Jones and Lee, 2021.", layout_label="fallback_line"),
+        make_paragraph("Jones and Lee, 2021.", layout_label="text"),
     ]
     page = make_page(*paragraphs)
     context = SelectionContext()
@@ -161,7 +161,7 @@ def test_appendix_boundary_ends_references_section():
     """Only an explicit appendix/open-science boundary resumes translation."""
     paragraphs = [
         make_paragraph("BIBLIOGRAPHY", layout_label="paragraph_title"),
-        make_paragraph("Smith et al. 2020.", layout_label="fallback_line"),
+        make_paragraph("Smith et al. 2020.", layout_label="text"),
         make_paragraph("Appendix A: Proofs", layout_label="paragraph_title"),
         make_paragraph("We now prove the main theorem.", layout_label="plain text"),
     ]

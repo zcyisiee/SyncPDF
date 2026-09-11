@@ -268,6 +268,7 @@ class TranslationConfig:
         disable_same_text_fallback: bool = False,
         mineru_doclayout_enabled: bool = False,
         mineru_skip_translate_layout_labels=None,
+        layout_coverage_threshold: float = 0.005,
     ):
         self.translator = translator
         self.term_extraction_translator = term_extraction_translator or translator
@@ -310,18 +311,14 @@ class TranslationConfig:
         self.progress_monitor = progress_monitor
         self.doc_layout_model = doc_layout_model
         self.mineru_doclayout_enabled = mineru_doclayout_enabled
+        # 布局覆盖率门禁阈值：未命中任何 layout 区域的原生字符占比上限。
+        # 本地 ONNX 后端与字符聚类兜底（fallback_line）已移除，超阈值即明确失败。
+        self.layout_coverage_threshold = layout_coverage_threshold
+        # MinerU 是唯一布局后端；跳过翻译的标签集合固定，与后端选择无关。
         labels = (
             mineru_skip_translate_layout_labels
             if mineru_skip_translate_layout_labels is not None
-            else (
-                self.MINERU_DEFAULT_SKIP_TRANSLATE_LAYOUT_LABELS
-                # Native ONNX/fallback layout uses the same label vocabulary
-                # when a region is detected.  Keep these protections active
-                # regardless of provider; the agent selection layer adds
-                # geometry/content heuristics for unlabeled fallback lines.
-                if mineru_doclayout_enabled or doc_layout_model is not None
-                else self.MINERU_DEFAULT_SKIP_TRANSLATE_LAYOUT_LABELS
-            )
+            else self.MINERU_DEFAULT_SKIP_TRANSLATE_LAYOUT_LABELS
         )
         self.mineru_skip_translate_effective_labels = (
             self.expand_mineru_skip_translate_layout_labels(labels)
@@ -374,9 +371,12 @@ class TranslationConfig:
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
         if not doc_layout_model:
-            from babeldoc.docvision.doclayout import DocLayoutModel
-
-            doc_layout_model = DocLayoutModel.load_available()
+            # 本地 ONNX 后端已移除：必须显式提供布局模型（MinerU 或 RPC 网关）。
+            raise ValueError(
+                "未提供布局模型：本地 ONNX 后端（--layout native）已移除，"
+                "请使用 MinerU 布局（--mineru-doclayout，需 --mineru-api-token / "
+                "MINERU_API_TOKEN）或 RPC 网关（--rpc-doclayout*）。"
+            )
         self.doc_layout_model = doc_layout_model
 
         self.shared_context_cross_split_part = SharedContextCrossSplitPart()

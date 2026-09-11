@@ -1,12 +1,9 @@
 import abc
-import logging
 from collections.abc import Generator
 
 import pymupdf
 
 from babeldoc.format.pdf.document_il.il_version_1 import Page
-
-logger = logging.getLogger(__name__)
 
 
 class YoloResult:
@@ -38,27 +35,12 @@ class YoloBox:
 
 
 class DocLayoutModel(abc.ABC):
-    @property
-    def provides_complete_layout(self) -> bool:
-        """Whether the model covers all text regions on every page.
+    """布局模型基类。
 
-        Native detectors may miss characters, so the parser keeps its
-        character clustering fallback for them. Remote structured layout
-        providers can opt out when their result is already complete.
-        """
-        return False
-
-    @staticmethod
-    def load_onnx():
-        logger.info("Loading ONNX model...")
-        from babeldoc.docvision.doclayout import OnnxModel
-
-        model = OnnxModel.from_pretrained()
-        return model
-
-    @staticmethod
-    def load_available():
-        return DocLayoutModel.load_onnx()
+    本地 ONNX 后端（`babeldoc.docvision.doclayout`）已移除：MinerU 是唯一布局
+    后端。字符聚类兜底（`fallback_line`）随之删除，改由
+    `LayoutParser` 的布局覆盖率门禁暴露未覆盖字符。
+    """
 
     @property
     @abc.abstractmethod
