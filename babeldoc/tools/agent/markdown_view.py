@@ -25,6 +25,7 @@ import pickle
 import re
 from pathlib import Path
 
+from babeldoc.format.pdf.document_il.utils.layout_helper import BULLET_POINT_PATTERN
 from babeldoc.tools.agent import workflow
 from babeldoc.tools.agent.translation_selection import SelectionContext
 from babeldoc.tools.agent.translation_selection import normalize_label
@@ -513,27 +514,118 @@ def _label_token(label: str | None) -> str:
     return token or "text"
 
 
+# --------------------------------------------------------------------------- #
+# Markdown 结构前缀（标题层级 / 列表 / 图注表注）
+#
+# 这些前缀是给翻译模型的**结构提示**：让模型感知「这是章节标题」「这是列表项」
+# 「这是图注」，从而保持译文的段落层级与列表切分。回填时由
+# ``_clean_markdown_body`` 剥掉，不进入译文 IR（composition 不变）。
+# --------------------------------------------------------------------------- #
+# 章节标题标签：MinerU 把论文标题与章节标题都映射成 ``title``，首个 ``title``
+# 占 ``#``（最高级），其余用 ``##``；``paragraph_title`` 是小节，用 ``###``。
+_TITLE_LEVEL1_LABELS = ("doc_title",)
+_TITLE_LEVEL2_LABELS = ("title",)
+_TITLE_LEVEL3_LABELS = ("paragraph_title",)
+# 列表项渲染前缀
+LIST_PREFIX = "- "
+# 已经是列表行时（避免重复加前缀，也用于回填时判断前缀是不是我们加的）
+_EXISTING_LIST_RE = re.compile(r"^[-*+]\s+")
+# 段首这些字符是脚注/上标引用，不是列表标记（虽在 BULLET_POINT_PATTERN 里）
+_FOOTNOTE_MARKER_CHARS = frozenset("†‡¶※·∗⁎")
+_FOOTNOTE_MARKER_CHARS |= frozenset(
+    ch
+    for ch in "¹²³⁴⁵⁶⁷⁸⁹⁰₁₂₃₄₅₆₇₈₉₀ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ"
+)
+
+
+def _first_visible_char(markdown: str) -> str:
+    """取正文首个可见字符，跳过前导样式/公式锚点（``[[S1]]`` / ``[[F3]]``）。"""
+    rest = ANCHOR_RE.sub("", markdown.lstrip())
+    return rest.lstrip()[:1]
+
+
+def _is_list_item(markdown: str) -> bool:
+    """段落是否应渲染成 Markdown 列表行（即我们会加 ``- `` 前缀）。
+
+    判据：首个可见字符是项目符号。字符集合来自
+    ``layout_helper.BULLET_POINT_PATTERN``（与排版阶段同一套口径，避免两处各维护
+    一份字符表而漂移），但**排除脚注/上标类字符**（上标数字 ¹²³、†‡¶※·）——
+    它们出现在段首时不是列表标记，而是脚注引用。
+
+    已经以 ``- ``/``* ``/``+ `` 开头的行本来就有列表标记，不再加前缀。该函数的
+    返回值同时用于回填阶段判断「那个 ``- `` 是不是我们加的」：只有我们加过前缀
+    的段落，回填时才剥一层。
+    """
+    body = markdown.lstrip()
+    if not body:
+        return False
+    if _EXISTING_LIST_RE.match(body):
+        return False
+    first = _first_visible_char(body)
+    if not first:
+        return False
+    if first in _FOOTNOTE_MARKER_CHARS:
+        return False
+    # 圈号序数（①-⑳、ⓐ 等）在 CJK 字体里有字形，也是列表标记
+    if 0x2460 <= ord(first) <= 0x24FF or 0x2776 <= ord(first) <= 0x2793:
+        return True
+    return bool(BULLET_POINT_PATTERN.match(first))
+
+
+def _heading_prefix(label: str, h1_used: bool) -> str | None:
+    """返回标题标签的 Markdown 前缀；非标题标签返回 None。
+
+    ``h1_used`` 记录文档主标题（``#``）是否已被占用：MinerU 把论文标题与章节
+    标题都标成 ``title``（``doc_title`` 在 MinerU 路径下不出现），首个命中者占
+    ``#``，其余降为 ``##``；``paragraph_title`` 是小节，固定 ``###``。
+    """
+    if label in _TITLE_LEVEL1_LABELS or label in _TITLE_LEVEL2_LABELS:
+        return "##" if h1_used else "#"
+    if label in _TITLE_LEVEL3_LABELS:
+        return "###"
+    return None
+
+
 def render_rows_markdown(rows, include_header: bool = True) -> str:
-    """把行（id/layout_label/markdown）渲染成连续 Markdown。"""
+    """把行（id/layout_label/markdown）渲染成连续 Markdown。
+
+    前缀规则（label → 形式）：
+
+    ====================  ==============================
+    label                  渲染
+    ====================  ==============================
+    ``doc_title``/首个 ``title``  ``# <正文>``
+    其余 ``title``          ``## <正文>``
+    ``paragraph_title``     ``### <正文>``
+    ``figure_caption``      ``*<正文>*``
+    ``table_caption``       ``**<正文>**``
+    列表项（首字符是项目符号）  ``- <正文>``
+    其余                    ``<正文>``
+    ====================  ==============================
+
+    ``toc_entry`` 按普通行渲染（条目本身是短行，无需前缀）。
+    """
     lines: list[str] = []
     if include_header:
         lines.append(MD_HEADER.rstrip("\n"))
         lines.append("")
-    first_title = True
+    h1_used = False
     for row in rows:
         label = row["layout_label"]
         body = row["markdown"]
         lines.append(f"<!-- id={row['id']} label={_label_token(label)} -->")
-        if label == "title":
-            if first_title:
-                lines.append(f"# {body}")
-                first_title = False
-            else:
-                lines.append(f"## {body}")
-        elif label == "figure_caption":
+        normalized = normalize_label(label)
+        prefix = _heading_prefix(normalized, h1_used)
+        if prefix is not None:
+            lines.append(f"{prefix} {body}")
+            if prefix == "#":
+                h1_used = True
+        elif normalized == "figure_caption":
             lines.append(f"*{body}*")
-        elif label == "table_caption":
+        elif normalized == "table_caption":
             lines.append(f"**{body}**")
+        elif _is_list_item(body):
+            lines.append(f"{LIST_PREFIX}{body}")
         else:
             lines.append(body)
         lines.append("")
@@ -653,16 +745,54 @@ def strip_html_comments(text: str) -> str:
     return HTML_COMMENT_DANGLING_RE.sub(" ", text)
 
 
-def _clean_markdown_body(body: str, label: str) -> str:
+def _strip_caption_markers(body: str) -> str:
+    """图注/表注的星号容错剥离与归一。
+
+    期望形式：``figure_caption`` → ``*…*``；``table_caption`` → ``**…**``。
+    模型常把两侧格式写错（只加单侧 `*`、或把图注写成 `**`），这里按期望形式
+    归一：先剥两侧成对星号（任意层数），再剥单侧残留——两种 label 的最终正文
+    都是无星号形式，因此不需要区分 label。
+    """
+    body = body.strip()
+    if not body:
+        return body
+    # 成对剥离（不管写了多少层星号）
+    if len(body) >= 2 and body.startswith("*") and body.endswith("*"):
+        body = body.strip("*").strip()
+    # 单侧残留（模型只加了一侧，或中文标点挤到星号之间）
+    elif body.startswith("*"):
+        body = body.lstrip("*").strip()
+    elif body.endswith("*"):
+        body = body.rstrip("*").strip()
+    # 中间的孤立星号（如 `*x*` 被拆成 `*x *`）不影响正文，保留原文即可
+    return body
+
+
+def _clean_markdown_body(body: str, label: str, source_markdown: str | None = None) -> str:
+    """剥掉渲染时加的 Markdown 结构前缀（标题/列表/图注表注），回到纯正文。
+
+    前缀只是给翻译模型的结构提示，不能进入译文 IR（否则 `#`/`- ` 会被当成
+    正文字符渲染）。这里按 label 期望形式剥离，并兼容模型自行添加/删减前缀。
+
+    ``source_markdown`` 是源文渲染后的 Markdown（可选）：只有当渲染阶段给该
+    段加过 ``- `` 前缀（即 ``_is_list_item(source_markdown)`` 为真）时，才把
+    译文里对应的前缀剥掉；否则保留（可能是正文里真实的 ``- ``）。
+    """
     body = strip_html_comments(body)
     body = body.strip()
-    body = re.sub(r"^#{1,6}\s*", "", body)  # 去标题前缀
+    if not body:
+        return body
+    normalized = normalize_label(label)
+    # 标题前缀：模型可能改写层级（`#`→`##`），一律剥到正文
+    body = re.sub(r"^#{1,6}\s*", "", body)
+    # 列表前缀：只剥一层，且只剥我们加过的那一层
+    if normalized not in ("figure_caption", "table_caption") and _is_list_item(
+        source_markdown or ""
+    ):
+        body = _EXISTING_LIST_RE.sub("", body, count=1)
     body = re.sub(r"\s*\n\s*", " ", body)  # 段内换行折成空格
-    if label in ("figure_caption", "table_caption"):
-        if len(body) >= 4 and body.startswith("**") and body.endswith("**"):
-            body = body[2:-2].strip()
-        elif len(body) >= 2 and body.startswith("*") and body.endswith("*"):
-            body = body[1:-1].strip()
+    if normalized in ("figure_caption", "table_caption"):
+        body = _strip_caption_markers(body)
     return body
 
 
@@ -715,15 +845,39 @@ def apply_markdown(workdir, translated_md):
     entries: list[dict] = []
     repaired: list[dict] = []
     fallback_ids: list[str] = []
+    label_mismatches: list[dict] = []
+    empty_ids: list[str] = []
     for pid, translate_input in inputs.items():
         if pid not in parsed:
             # 漏行回退原文（与旧 batch 协议一致，恒通过校验）
             fallback_ids.append(pid)
             entries.append({"id": pid, "target": translate_input.unicode})
             continue
-        body, _ = parsed[pid]
-        body = _clean_markdown_body(body, labels.get(pid, "text"))
-        src_md = canonical_to_markdown(translate_input.unicode)
+        body, echoed_label = parsed[pid]
+        source_markdown = canonical_to_markdown(translate_input.unicode)
+        body = _clean_markdown_body(body, labels.get(pid, "text"), source_markdown)
+        # 模型改写了段落标记里的 label（不影响回填，以源 label 为准）：记警告
+        if echoed_label and normalize_label(echoed_label) != normalize_label(
+            labels.get(pid, "text")
+        ):
+            label_mismatches.append(
+                {
+                    "id": pid,
+                    "expected": normalize_label(labels.get(pid, "text")),
+                    "got": normalize_label(echoed_label),
+                }
+            )
+            warnings.append(
+                f"label_mismatch: id {pid} expected "
+                f"{normalize_label(labels.get(pid, 'text'))} got {normalize_label(echoed_label)}"
+            )
+        # 标记存在但正文为空：模型丢掉了该段译文 → 回退原文，不阻断重建
+        if not body:
+            empty_ids.append(pid)
+            warnings.append(f"empty_translation: id {pid}")
+            entries.append({"id": pid, "target": translate_input.unicode})
+            continue
+        src_md = source_markdown
         # 锚点顺序必须与源文完全一致（防跨 span 搬运）
         src_seq = anchor_sequence(src_md)
         tgt_seq = anchor_sequence(body)
@@ -755,6 +909,8 @@ def apply_markdown(workdir, translated_md):
             "warnings": warnings,
             "parsed": len(parsed),
             "repaired": repaired,
+            "label_mismatches": label_mismatches,
+            "empty_ids": empty_ids,
         }
 
     sheet = agent / "translated.jsonl"
@@ -767,4 +923,7 @@ def apply_markdown(workdir, translated_md):
     report["repaired"] = repaired
     report["warnings"] = warnings
     report["fallback_ids"] = fallback_ids
+    # 段落标记健壮性指标（不阻断）：label 被改写 / 正文为空的段落清单
+    report["label_mismatches"] = label_mismatches
+    report["empty_ids"] = empty_ids
     return report
