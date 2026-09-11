@@ -38,6 +38,9 @@ PROTECTED_LABELS = {
     "page_footnote",
     "aside_text",
     "abandon",
+    # 目录条目的页码/引导线段落：页码位置由程序保持，不进翻译
+    # （标题段 toc_entry 是可翻译的，不在这个集合里）。
+    "toc_entry_page",
 }
 PROTECTED_REGION_LABELS = PROTECTED_LABELS | {
     "figure_title",
