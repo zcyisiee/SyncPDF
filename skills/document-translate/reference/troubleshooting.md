@@ -148,7 +148,11 @@ bdt call layout_set --workdir <wd> --arg 'patch={"paragraphs":{"P02-010":{"box":
 | `workdir_missing` | 先 `parse_document`（`agent/` 目录必须存在） |
 | `mineru_token_missing` | 设 `MINERU_API_TOKEN`，或 `--arg mineru_json=<缓存 layout.json>`（本地 ONNX 布局 `layout=native` 已移除） |
 | `layout_unsupported` | 布局后端只支持 `mineru`；本地 ONNX 后端已移除 |
-| `layout_coverage_gate` | 未命中 layout 区域的原生字符超阈值（默认 0.5%）：看 `<workdir>/layout_coverage.json` 的逐页明细与未覆盖文本片段，`--layout-coverage-threshold` 调大阈值或重新解析 MinerU 布局 |
+| `layout_coverage_gate` | 未命中 layout 区域的原生字符超阈值（默认 0.5%）：看 `<workdir>/<pdf名>/layout_coverage.json` 的逐页明细与 `uncovered_text_preview`，`--layout-coverage-threshold` 调大阈值或重新解析 MinerU 布局 |
+| `link_uri_set_mismatch` | mono 输出的 URI 集合 ≠ 源快照（硬阻断）：看 `reconstruct_report.json` 的 `link_uri_set_match`，或 `python experiments/toolchain_gates.py <wd>` 的 `link_integrity.missing_uris` |
+| `toc_low_confidence`（警告） | 目录页条目切分置信度 < 0.6：不改结构，只记警告；看 `agent/source/toc.json` 的 `confidence` / `candidate_lines` |
+| 目录页被整段翻译 / 条目丢失 | 看 `agent/source/toc.json` 的 `summary.entries` 与 `anchors.json` 的 `toc_entry` 行数；无编号/页码未右对齐导致未切分 |
+| 链接矩形漂移 / 点不到 | 看 `reconstruct_report.json` 的 `link_remapped` / `link_fallback_paragraph` / `link_unresolved`；三级回退：字符并集 → 段落投影 → 保持原矩形 |
 | `model_cli_missing` | 装了 `agy`/其它 CLI 才能自动翻译；否则用 `--arg translated_md=<文件>` 导入译文 |
 | `model_failed: Agent execution terminated due to error.` | 该 `--model` 在当前环境不可用；先 `agy models` 列可用模型，再换模型（如 `claude-sonnet-4-6` 需 `--arg effort="none"`） |
 | `geometry_missing` | 先 `reconstruct_pdf`（geometry 由重排阶段 dump） |
@@ -157,8 +161,40 @@ bdt call layout_set --workdir <wd> --arg 'patch={"paragraphs":{"P02-010":{"box":
 | 重建结果和上次不一致 | 检查是否残留 `layout_overrides.json`；用 `experiments/pdf_fingerprint.py` 比对文本层哈希 |
 | 脚本里调 `reconstruct_pdf` 报 multiprocessing `bootstrapping phase` 错 | PDF 字体子集化用 spawn 起子进程：脚本入口必须有 `if __name__ == "__main__":` 保护（`bdt`/`python -m babeldoc_tools` 与已有 experiments 脚本都已满足） |
 | 审查 agent 需要 grep 文本层 | `bdt call dump_text_layer --pdf <mono.pdf> --arg with_spans=true` → `output/text_layer/page-XX.txt`（页首注释列出该页兼容表意文字） |
+| `invalid_args: 未知参数: mineru_json` | 在仓库根 cwd 下跑 `python -m babeldoc_tools` 会命中仓库根的 **MAS 版** `babeldoc_tools`（不含 MinerU 参数），而非 skills 下的 agent 版。改用 legacy CLI（`python -m babeldoc.tools.agent …`）或在非仓库根 cwd 下用 `skills/document-translate/tools/bin/bdt` |
 
-## 四、回归自检（改动 Typesetting/重建后必跑）
+## 四、新增门禁与排查入口（板块 1–5）
+
+**一次跑完全部门禁**：
+
+```bash
+python experiments/toolchain_gates.py <workdir> --pdf <源pdf> --json
+```
+
+五项：`layout_coverage`（硬）、`link_integrity`（URI 集合硬 / unresolved 软）、
+`toc_integrity`（硬）、`protected_tokens`（软）、`protocol`（硬）。
+任一硬门禁失败 → 退出码 1 + `"ok": false`。
+
+新审计产物速查：
+
+| 文件 | 看什么 |
+|---|---|
+| `agent/source/mineru/provider_ir.json` | MinerU 结构树；`unknown_types` 非空说明有未识别类型 |
+| `agent/source/mineru/alignment.json` | `inline_equation_matched/total`（公式保护覆盖率）、`native_char_coverage` |
+| `agent/source/toc.json` | `summary.entries`（条目数）、`confidence`、`low_confidence_pages` |
+| `agent/source/bookmarks.json` | 书签条目数（应与源 PDF `get_toc()` 一致） |
+| `agent/source/links.json` | 每条链接覆盖的 `char_indices` / `paragraph_ids` |
+| `<workdir>/<pdf名>/layout_coverage.json` | `global.uncovered_ratio`、逐页 `uncovered_text_preview` |
+| `agent/reconstruct_report.json` | `link_total/remapped/fallback_paragraph/unresolved/uri_set_match` |
+
+**详细排查手册**（目录/链接/漏译/公式/字号/圈号六大症状）：
+[`docs/toolchain/troubleshooting.md`](../../../docs/toolchain/troubleshooting.md)。
+**门禁阈值与人为触发方式**：
+[`docs/toolchain/gates.md`](../../../docs/toolchain/gates.md)。
+
+---
+
+## 五、回归自检（改动 Typesetting/重建后必跑）
 
 ```bash
 .venv/bin/python -m pytest tests -q                                  # 全量单元/契约测试
