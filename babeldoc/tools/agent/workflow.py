@@ -48,6 +48,9 @@ from babeldoc.format.pdf.parse_shared import build_parse_only_config
 from babeldoc.format.pdf.translation_config import WatermarkOutputMode
 from babeldoc.tools.agent import protocol
 from babeldoc.tools.agent.sheet_translator import SheetProtocolTranslator
+from babeldoc.tools.agent.translation_selection import SelectionContext
+from babeldoc.tools.agent.translation_selection import normalize_label
+from babeldoc.tools.agent.translation_selection import select_page_paragraphs
 
 AGENT_DIR = "agent"
 STATE_FILE = "state.pkl"
@@ -189,8 +192,10 @@ def extract(
     config = _base_config(pdf_path, workdir, lang_in, lang_out)
     extra_skipped = []
     if skip_labels:
+        # Canonicalize once here; the selection helper and MinerU alias
+        # expansion both expect the same space/slash/case-folded vocabulary.
         extra_skipped = [
-            x.strip().lower() for x in skip_labels.split(",") if x.strip()
+            normalize_label(x) for x in skip_labels.split(",") if x.strip()
         ]
 
     if layout == "mineru":
@@ -235,16 +240,29 @@ def extract(
     rows = []
     label_counts = {}
     skipped_counts = {}
+    skipped_rows = []
+    selection_context = SelectionContext()
     for page in docs.page:
         page_font_map, page_xobj_font_map = _page_font_maps(page)
         page_tracker = PageTranslateTracker()
-        for paragraph in page.pdf_paragraph:
+        extra_labels_set = set(extra_skipped)
+        for paragraph, decision in select_page_paragraphs(
+            page, selection_context, extra_labels=extra_labels_set
+        ):
             if not paragraph.debug_id:
                 continue
             label = paragraph.layout_label or "text"
-            if label.lower() in extra_skipped and layout != "mineru":
-                # mineru 模式下 extra 已并入 config 的 effective labels，这里会重复跳过
+            if not decision.translate:
                 skipped_counts[label] = skipped_counts.get(label, 0) + 1
+                skipped_rows.append(
+                    {
+                        "id": paragraph.debug_id,
+                        "page": page.page_number,
+                        "layout_label": label,
+                        "source": paragraph.unicode or "",
+                        "reason": decision.reason or "protected",
+                    }
+                )
                 continue
             _bump_title_font_size(paragraph)
             text, translate_input = il_translator.pre_translate_paragraph(
@@ -282,6 +300,7 @@ def extract(
                 "lang_in": lang_in,
                 "lang_out": lang_out,
                 "mediabox_data": mediabox_data,
+                "skipped_rows": skipped_rows,
             },
             f,
         )
@@ -291,6 +310,7 @@ def extract(
         "paragraphs": len(rows),
         "layout_label_counts": label_counts,
         "skipped_label_counts": skipped_counts,
+        "skipped_rows": skipped_rows,
         "pages": len(docs.page),
     }
 
@@ -413,7 +433,15 @@ def apply(workdir, translated_sheet):
 
 
 def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False):
-    """从写回后的 IR 重排并生成 PDF。返回输出路径 dict。"""
+    """从写回后的 IR 重排并生成 PDF。返回输出路径 dict。
+
+    支持 agent 排版微调：读 ``<workdir>/agent/layout_overrides.json`` →
+    注入 Typesetting（scale_cap / line_skip / 强制换行）并在 IR 上应用
+    box / font_scale；Typesetting 之后 dump ``agent/layout_geometry.json``。
+    """
+    from babeldoc.tools.agent import layout_geometry
+    from babeldoc.tools.agent import layout_overrides
+
     workdir = Path(workdir)
     with open(state_path(workdir), "rb") as f:
         state = pickle.load(f)
@@ -436,7 +464,24 @@ def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False):
         WatermarkOutputMode.Watermarked if watermark else WatermarkOutputMode.NoWatermark
     )
 
+    overrides = layout_overrides.load_overrides(workdir)
+    config.paragraph_layout_overrides = layout_overrides.to_config_hook(overrides)
+    config.page_font_scale = {
+        int(page): float(patch["font_scale"])
+        for page, patch in (overrides.get("pages") or {}).items()
+        if isinstance(patch, dict) and patch.get("font_scale")
+    }
+    source_state = layout_geometry.capture_source_state(doc, overrides)
+    ir_stats = layout_overrides.apply_to_ir(doc, overrides)
+    layout_geometry.capture_source_state(doc, overrides, state=source_state)
+
     Typesetting(config).typesetting_document(doc)
+
+    geometry = layout_geometry.build_geometry(doc, source_state, overrides)
+    geometry["warnings"] = list(getattr(config, "layout_warnings", []) or [])
+    geometry["ir_overrides"] = ir_stats
+    geometry_path = layout_geometry.write_geometry(workdir, geometry)
+
     pdf_creater = PDFCreater(
         str(temp_pdf_path), doc, config, state["mediabox_data"]
     )
@@ -444,6 +489,9 @@ def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False):
     return {
         "mono_pdf": str(result.mono_pdf_path) if result.mono_pdf_path else None,
         "dual_pdf": str(result.dual_pdf_path) if result.dual_pdf_path else None,
+        "layout_geometry": str(geometry_path),
+        "layout_override_stats": ir_stats,
+        "layout_warnings": list(getattr(config, "layout_warnings", []) or []),
     }
 
 

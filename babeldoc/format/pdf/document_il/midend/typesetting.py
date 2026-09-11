@@ -87,6 +87,15 @@ LINE_BREAK_REGEX = regex.compile(
 )
 
 
+def _unit_text(unit: TypesettingUnit) -> str:
+    """排版单元对应的渲染文本（公式单元无文本 → 空串，不参与强制换行锚定）。"""
+    if unit.char is not None:
+        return unit.char.char_unicode or ""
+    if unit.unicode:
+        return unit.unicode
+    return ""
+
+
 class TypesettingUnit:
     def __str__(self):
         return self.try_get_unicode() or ""
@@ -938,6 +947,30 @@ class Typesetting:
                 "document_scales is empty, there seems no paragraph in this PDF"
             )
 
+        # agent 排版覆盖：scale_cap 是缩放**上限**（只降不升）。必须在众数压缩
+        # **之后**应用，否则会被众数逻辑吃掉。无覆盖时此段不执行。
+        self._apply_scale_caps(all_paragraphs)
+
+    def _apply_scale_caps(self, paragraphs) -> None:
+        overrides = getattr(self.translation_config, "paragraph_layout_overrides", None)
+        if not overrides:
+            return
+        for paragraph in paragraphs:
+            patch = overrides.get(getattr(paragraph, "debug_id", None) or "") or {}
+            cap = patch.get("scale_cap")
+            if not cap:
+                continue
+            try:
+                cap = float(cap)
+            except (TypeError, ValueError):
+                continue
+            if paragraph.optimal_scale is not None and paragraph.optimal_scale > cap:
+                logger.debug(
+                    f"layout override: {paragraph.debug_id} scale "
+                    f"{paragraph.optimal_scale} -> {cap}"
+                )
+                paragraph.optimal_scale = cap
+
     def _find_optimal_scale_and_layout(
         self,
         paragraph: il_version_1.PdfParagraph,
@@ -965,7 +998,7 @@ class Typesetting:
 
         box = paragraph.box
         scale = initial_scale
-        line_skip = 1.50 if self.is_cjk else 1.3
+        line_skip = self._line_skip_for(paragraph)
         min_scale = 0.1
         expand_space_flag = 0
         final_typeset_units = None
@@ -1074,6 +1107,100 @@ class Typesetting:
 
         # 最后返回最小缩放因子
         return min_scale, final_typeset_units
+
+    def _force_break_indices(
+        self, typesetting_units: list[TypesettingUnit], paragraph
+    ) -> set[int]:
+        """把 force_break_after_text/_offset 解析成"在此索引**之前**换行"集合。
+
+        - 文本锚定：在渲染文本中取**最后一次**匹配（重复子串取后者），
+          匹配末尾必须落在排版单元边界上，否则记 warning 并不换行。
+        - 偏移锚定：``offset`` = 新行开始处的字符偏移（即"前 offset 个字符留在
+          本行"）， 同样要求落在单元边界上。
+        - 无覆盖 / 解析失败：返回空集，行为与未开启时完全一致。
+        """
+        overrides = getattr(self.translation_config, "paragraph_layout_overrides", None)
+        if not overrides:
+            return set()
+        patch = overrides.get(getattr(paragraph, "debug_id", None) or "") or {}
+        texts = patch.get("force_break_after_text") or []
+        offsets = patch.get("force_break_after_offset") or []
+        if not texts and not offsets:
+            return set()
+
+        buffer_parts: list[str] = []
+        spans: list[tuple[int, int]] = []  # 每个单元在渲染文本中的 (start, end)
+        cursor = 0
+        for unit in typesetting_units:
+            text = _unit_text(unit)
+            buffer_parts.append(text)
+            spans.append((cursor, cursor + len(text)))
+            cursor += len(text)
+        buffer = "".join(buffer_parts)
+
+        def unit_index_at(offset: int) -> int | None:
+            """返回恰好在 offset 结束（且非空）的单元索引；边界不齐返回 None。"""
+            for index, (start, end) in enumerate(spans):
+                if end == offset and end > start:
+                    return index
+            return None
+
+        result: set[int] = set()
+        warnings: list[str] = []
+        debug_id = getattr(paragraph, "debug_id", None)
+
+        def add_before(unit_index: int | None) -> None:
+            if unit_index is None:
+                return
+            # 在索引 i **之前**换行；i<=0 等于行首换行（无意义）
+            if unit_index + 1 > 0:
+                result.add(unit_index + 1)
+
+        for needle in texts:
+            position = buffer.rfind(needle)
+            if position < 0:
+                warnings.append(f"force_break_after_text 未命中: {needle!r}")
+                continue
+            index = unit_index_at(position + len(needle))
+            if index is None:
+                warnings.append(f"force_break_after_text 不在单元边界: {needle!r}")
+                continue
+            add_before(index)
+        for offset in offsets:
+            index = unit_index_at(int(offset))
+            if index is None:
+                warnings.append(f"force_break_after_offset 不在单元边界: {offset}")
+                continue
+            add_before(index)
+
+        if warnings:
+            logger.warning(f"layout override 强制换行未生效 ({debug_id}): {warnings}")
+            bucket = getattr(self.translation_config, "layout_warnings", None)
+            if isinstance(bucket, list):
+                bucket.extend(f"{debug_id}: {message}" for message in warnings)
+        return result
+
+    def _line_skip_for(self, paragraph) -> float:
+        """行距系数：段落覆盖 → 文档级覆盖 → 内置默认值。"""
+        default = 1.50 if self.is_cjk else 1.3
+        config = self.translation_config
+        overrides = getattr(config, "paragraph_layout_overrides", None)
+        if overrides:
+            patch = overrides.get(getattr(paragraph, "debug_id", None) or "") or {}
+            try:
+                value = float(patch["line_skip"])
+                return value if value > 0 else default
+            except (KeyError, TypeError, ValueError):
+                pass
+        document_override = getattr(config, "line_skip_override", None)
+        if document_override:
+            try:
+                value = float(document_override)
+                if value > 0:
+                    return value
+            except (TypeError, ValueError):
+                pass
+        return default
 
     def _get_optimal_scale(
         self,
@@ -1360,8 +1487,50 @@ class Typesetting:
         line_ys = [current_y]
         if paragraph.first_line_indent:
             current_x += space_width * 4
+
+        break_before_indices = self._force_break_indices(typesetting_units, paragraph)
+
+        def do_line_break() -> bool:
+            """执行一次换行（推进 current_y、重置行状态）。放不下时返回 False。"""
+            nonlocal current_x, current_y, line_height, current_line_heights
+            nonlocal all_units_fit
+            current_x = box.x
+            if not current_line_heights:
+                return False
+            max_height = max(current_line_heights)
+            mode_height = statistics.mode(current_line_heights)
+
+            # Line advance must not collapse below the dominant em height.
+            # current_line_heights are per-glyph bounding-box heights, which
+            # for an all-Latin line (e.g. a citation run) are far shorter than
+            # the CJK em, shrinking the advance to ~half a line and letting the
+            # next CJK line overlap it. Floor the advance with font_size (the
+            # paragraph's dominant em) so script-mix never undersizes the gap.
+            current_y -= max(
+                font_size * scale * line_skip,
+                mode_height * line_skip,
+                max_height * 1.05,
+            )
+            line_ys.append(current_y)
+            line_height = 0.0
+            current_line_heights = []  # 清空当前行高度列表
+
+            # 检查是否超出底部边界
+            # if current_y - unit_height < box.y:
+            if current_y < box.y:
+                all_units_fit = False
+                # 这里不要 break，继续排版剩余内容
+            return True
+
         # 遍历所有排版单元
         for i, unit in enumerate(typesetting_units):
+            # agent 覆盖：在该索引前强制换行（force_break_after_*）
+            if i in break_before_indices and current_line_heights:
+                if not do_line_break():
+                    return [], False
+                if unit.is_space:
+                    continue
+
             # 计算当前单元在当前缩放下的尺寸
             unit_width = unit.width * scale
             unit_height = unit.height * scale
@@ -1415,34 +1584,8 @@ class Typesetting:
                     and current_x + unit_width * 2 > box.x2
                 )
             ):
-                # 换行
-                current_x = box.x
-                if not current_line_heights:
+                if not do_line_break():
                     return [], False
-                max_height = max(current_line_heights)
-                mode_height = statistics.mode(current_line_heights)
-
-                # Line advance must not collapse below the dominant em height.
-                # current_line_heights are per-glyph bounding-box heights, which
-                # for an all-Latin line (e.g. a citation run) are far shorter than
-                # the CJK em, shrinking the advance to ~half a line and letting the
-                # next CJK line overlap it. Floor the advance with font_size (the
-                # paragraph's dominant em) so script-mix never undersizes the gap.
-                current_y -= max(
-                    font_size * scale * line_skip,
-                    mode_height * line_skip,
-                    max_height * 1.05,
-                )
-                line_ys.append(current_y)
-                line_height = 0.0
-                current_line_heights = []  # 清空当前行高度列表
-
-                # 检查是否超出底部边界
-                # if current_y - unit_height < box.y:
-                if current_y < box.y:
-                    all_units_fit = False
-                    # 这里不要 break，继续排版剩余内容
-
                 if unit.is_space:
                     line_height = max(line_height, unit_height)
                     continue
