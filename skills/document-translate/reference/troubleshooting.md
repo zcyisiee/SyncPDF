@@ -146,7 +146,9 @@ bdt call layout_set --workdir <wd> --arg 'patch={"paragraphs":{"P02-010":{"box":
 | 症状 | 处理 |
 |---|---|
 | `workdir_missing` | 先 `parse_document`（`agent/` 目录必须存在） |
-| `mineru_token_missing` | 设 `MINERU_API_TOKEN`，或 `--arg layout=native`，或 `--arg mineru_json=<缓存 layout.json>` |
+| `mineru_token_missing` | 设 `MINERU_API_TOKEN`，或 `--arg mineru_json=<缓存 layout.json>`（本地 ONNX 布局 `layout=native` 已移除） |
+| `layout_unsupported` | 布局后端只支持 `mineru`；本地 ONNX 后端已移除 |
+| `layout_coverage_gate` | 未命中 layout 区域的原生字符超阈值（默认 0.5%）：看 `<workdir>/layout_coverage.json` 的逐页明细与未覆盖文本片段，`--layout-coverage-threshold` 调大阈值或重新解析 MinerU 布局 |
 | `model_cli_missing` | 装了 `agy`/其它 CLI 才能自动翻译；否则用 `--arg translated_md=<文件>` 导入译文 |
 | `model_failed: Agent execution terminated due to error.` | 该 `--model` 在当前环境不可用；先 `agy models` 列可用模型，再换模型（如 `claude-sonnet-4-6` 需 `--arg effort="none"`） |
 | `geometry_missing` | 先 `reconstruct_pdf`（geometry 由重排阶段 dump） |

@@ -14,7 +14,7 @@ PDF_SCHEMA = {"type": "string", "minLength": 1}
     "parse_document",
     group="parse",
     description=(
-        "解析 PDF：MinerU/native 布局 → 段落 → 连续英文 Markdown（带行内锚点），"
+        "解析 PDF：MinerU 布局 → 段落 → 连续英文 Markdown（带行内锚点），"
         "写 <workdir>/agent/{document.md,anchors.json,sheet.jsonl,state.pkl}"
     ),
     output_hint="paragraphs / label_counts / skipped_label_counts / document_md / sheet",
@@ -23,7 +23,7 @@ PDF_SCHEMA = {"type": "string", "minLength": 1}
         "properties": {
             "pdf": PDF_SCHEMA,
             "workdir": {"type": "string", "minLength": 1},
-            "layout": {"type": "string", "enum": ["mineru", "native"]},
+            "layout": {"type": "string", "enum": ["mineru"]},
             "mineru_token": {"type": "string"},
             "mineru_json": {"type": "string", "description": "回放缓存的 MinerU layout.json"},
             "pages": {"type": "string", "description": "如 1,2 或 1-3"},
@@ -41,12 +41,19 @@ def parse_document(args: dict) -> dict:
         raise common.ToolError("pdf_missing", f"PDF 不存在: {pdf}")
     workdir = Path(args["workdir"])
     layout = args.get("layout") or "mineru"
+    if layout != "mineru":
+        # 本地 ONNX 后端已移除，MinerU 是唯一布局后端。
+        raise common.ToolError(
+            "layout_unsupported",
+            "native 布局后端已移除，请使用 layout=mineru"
+            "（需 mineru_token/MINERU_API_TOKEN 或 mineru_json 回放）",
+        )
     token = args.get("mineru_token") or common.env_default("MINERU_API_TOKEN")
-    if layout == "mineru" and not token and not args.get("mineru_json"):
+    if not token and not args.get("mineru_json"):
         raise common.ToolError(
             "mineru_token_missing",
             "mineru 布局需要 mineru_token 或环境变量 MINERU_API_TOKEN"
-            "（或用 layout=native / mineru_json 回放）",
+            "（或用 mineru_json 回放缓存布局）",
         )
     result = markdown_view.extract_markdown(
         pdf,

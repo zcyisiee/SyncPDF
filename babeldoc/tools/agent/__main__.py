@@ -35,15 +35,21 @@ def main(argv=None):
     p_extract.add_argument("--pages", default=None, help="如 1,2 或 1-3")
     p_extract.add_argument(
         "--layout",
-        choices=["native", "mineru"],
-        default="native",
-        help="布局后端：native(本地 ONNX) 或 mineru(API，需 token，结果按内容哈希缓存)",
+        choices=["mineru"],
+        default="mineru",
+        help="布局后端：仅 mineru（需 token 或 MINERU_API_TOKEN，结果按内容哈希缓存）；本地 ONNX 后端已移除",
     )
     p_extract.add_argument("--mineru-token", default=None)
     p_extract.add_argument(
         "--skip-labels",
         default=None,
         help="追加跳过的 layout 标签（逗号分隔，如 reference,author,figure）",
+    )
+    p_extract.add_argument(
+        "--layout-coverage-threshold",
+        type=float,
+        default=0.005,
+        help="布局覆盖率门禁阈值：未命中任何 layout 区域的原生字符占比上限（默认 0.005）",
     )
 
     p_apply = sub.add_parser("apply", help="校验译文并写回 IR")
@@ -67,13 +73,19 @@ def main(argv=None):
     p_md.add_argument("--lang-in", default="en")
     p_md.add_argument("--lang-out", default="zh")
     p_md.add_argument("--pages", default=None)
-    p_md.add_argument("--layout", choices=["native", "mineru"], default="mineru")
+    p_md.add_argument("--layout", choices=["mineru"], default="mineru")
     p_md.add_argument("--mineru-token", default=None)
     p_md.add_argument("--mineru-json", default=None, help="回放已缓存的 MinerU layout.json")
     p_md.add_argument(
         "--mineru-cache-key",
         default=None,
         help="按 PDF 内容 sha256 直接指定已缓存的 MinerU layout.json（~/.cache/babeldoc/mineru-layout.v1/<key>.json）",
+    )
+    p_md.add_argument(
+        "--layout-coverage-threshold",
+        type=float,
+        default=0.005,
+        help="布局覆盖率门禁阈值：未命中任何 layout 区域的原生字符占比上限（默认 0.005）",
     )
 
     p_mda = sub.add_parser("md-apply", help="校验译文 Markdown 并写回 IR")
@@ -92,6 +104,7 @@ def main(argv=None):
             layout=args.layout,
             mineru_token=args.mineru_token,
             skip_labels=args.skip_labels,
+            layout_coverage_threshold=args.layout_coverage_threshold,
         )
     elif args.command == "apply":
         result = workflow.apply(args.workdir, args.sheet)
@@ -119,6 +132,7 @@ def main(argv=None):
             mineru_token=args.mineru_token,
             mineru_json=args.mineru_json,
             mineru_cache_key=args.mineru_cache_key,
+            layout_coverage_threshold=args.layout_coverage_threshold,
         )
     elif args.command == "md-apply":
         result = markdown_view.apply_markdown(args.workdir, args.markdown)

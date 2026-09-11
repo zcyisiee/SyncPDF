@@ -165,15 +165,17 @@ def extract(
     lang_in="en",
     lang_out="zh",
     pages: str | None = None,
-    layout: str = "native",
+    layout: str = "mineru",
     mineru_token: str | None = None,
     skip_labels: str | None = None,
+    layout_coverage_threshold: float = 0.005,
 ):
     """解析 PDF 并导出翻译 sheet + 状态文件。返回统计 dict。
 
-    layout="mineru" 时用 MinerU API 做布局（需 token；结果按 PDF 内容哈希缓存），
-    默认 skip 集生效：reference/author/表格内部/图片内部/页眉页脚等跳过，
-    *_caption 保留翻译。skip_labels 可在两种模式下追加跳过的标签。
+    layout 仅支持 "mineru"（本地 ONNX 后端已移除）：调用 MinerU API 做布局
+    （需 token；结果按 PDF 内容哈希缓存），默认 skip 集生效：
+    reference/author/表格内部/图片内部/页眉页脚等跳过，*_caption 保留翻译。
+    skip_labels 可追加跳过的标签。layout_coverage_threshold 控制布局覆盖率门禁。
     """
     from babeldoc.const import close_process_pool
     from babeldoc.format.pdf.document_il.midend.enclosed_marker_fixer import (
@@ -198,31 +200,32 @@ def extract(
             normalize_label(x) for x in skip_labels.split(",") if x.strip()
         ]
 
-    if layout == "mineru":
-        from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
-        from babeldoc.format.pdf.translation_config import TranslationConfig
-
-        token = mineru_token or os.environ.get("MINERU_API_TOKEN")
-        if not token:
-            raise ValueError(
-                "mineru 布局需要 --mineru-token 或环境变量 MINERU_API_TOKEN"
-            )
-        config.doc_layout_model = MinerUDocLayoutModel(api_token=token)
-        # provider IR 落到 <workdir>/agent/source/mineru/provider_ir.json
-        config.provider_ir_dir = agent_dir(workdir)
-        config.mineru_doclayout_enabled = True
-        config.mineru_skip_translate_effective_labels = (
-            TranslationConfig.expand_mineru_skip_translate_layout_labels(
-                TranslationConfig.get_mineru_default_skip_translate_layout_labels()
-                + tuple(extra_skipped)
-            )
+    if layout != "mineru":
+        # 本地 ONNX 后端（--layout native）已移除，MinerU 是唯一布局后端。
+        raise ValueError(
+            "native 布局后端已移除，请使用 --layout mineru"
+            "（需 MINERU_API_TOKEN 或 --mineru-json 回放）"
         )
-    else:
-        # 换成真实 layout model（build_parse_only_config 塞的是占位对象；
-        # 自动加载只在 TranslationConfig.__init__ 内触发，事后赋 None 不会加载）
-        from babeldoc.docvision.doclayout import DocLayoutModel
 
-        config.doc_layout_model = DocLayoutModel.load_available()
+    from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+    from babeldoc.format.pdf.translation_config import TranslationConfig
+
+    token = mineru_token or os.environ.get("MINERU_API_TOKEN")
+    if not token:
+        raise ValueError(
+            "mineru 布局需要 --mineru-token 或环境变量 MINERU_API_TOKEN"
+        )
+    config.doc_layout_model = MinerUDocLayoutModel(api_token=token)
+    # provider IR 落到 <workdir>/agent/source/mineru/provider_ir.json
+    config.provider_ir_dir = agent_dir(workdir)
+    config.mineru_doclayout_enabled = True
+    config.mineru_skip_translate_effective_labels = (
+        TranslationConfig.expand_mineru_skip_translate_layout_labels(
+            TranslationConfig.get_mineru_default_skip_translate_layout_labels()
+            + tuple(extra_skipped)
+        )
+    )
+    config.layout_coverage_threshold = layout_coverage_threshold
     config.skip_scanned_detection = True
 
     doc_pdf, temp_pdf_path, mediabox_data = _prepare_pdf(pdf_path, config)

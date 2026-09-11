@@ -19,7 +19,7 @@ class JobConfig:
     skip_policy: SkipPolicy = field(default_factory=SkipPolicy)
     max_translation_repairs: int = 2
     max_layout_repairs: int = 2
-    layout: str = "native"
+    layout: str = "mineru"
     provider_summary: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:

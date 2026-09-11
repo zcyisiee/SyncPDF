@@ -89,7 +89,7 @@ def test_selected_rows_markdown_omits_protected_paragraphs():
             box=box(72, 600, 500, 650), debug_id="P01-003"),
         _ns(unicode="REFERENCES", layout_label="paragraph_title",
             box=box(72, 200, 500, 220), debug_id="P01-004"),
-        _ns(unicode="Smith et al. 2020.", layout_label="fallback_line",
+        _ns(unicode="Smith et al. 2020.", layout_label="text",
             box=box(72, 170, 500, 190), debug_id="P01-005"),
     ]
     page = _ns(
