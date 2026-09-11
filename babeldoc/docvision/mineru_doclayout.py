@@ -17,6 +17,7 @@ import pymupdf
 from babeldoc.docvision.base_doclayout import DocLayoutModel
 from babeldoc.docvision.base_doclayout import YoloBox
 from babeldoc.docvision.base_doclayout import YoloResult
+from babeldoc.docvision.provider_ir import ProviderDocument
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,9 @@ class MinerUDocLayoutModel(DocLayoutModel):
         self.poll_interval_seconds = poll_interval_seconds
         self.timeout_seconds = timeout_seconds
         self._stride = 32
+        # 最近一次 handle_document 构建的 provider IR（完整 block/line/span 树）。
+        # 每次 handle_document 调用都会重置，避免多文档/多次调用串数据。
+        self.provider_document: ProviderDocument | None = None
 
     @property
     def stride(self) -> int:
@@ -240,6 +244,44 @@ class MinerUDocLayoutModel(DocLayoutModel):
 
         return page_results
 
+    def _build_provider_document(self, layout_json: dict[str, Any]) -> None:
+        """构建并缓存 provider IR（完整 block/line/span 树），失败不阻断解析。"""
+        self.provider_document = ProviderDocument.from_layout_json(layout_json)
+
+    def _provider_ir_output_path(self, translate_config) -> Path | None:
+        """provider IR 落盘路径。
+
+        工具层通过 ``translate_config.provider_ir_dir`` 显式指定 agent 产物根目录
+        （即 ``<workdir>/agent``），文件落在其下的 ``source/mineru/provider_ir.json``；
+        未指定时回退到 ``working_dir/agent/source/mineru/``，两者都没有则跳过落盘。
+        """
+        if translate_config is None:
+            return None
+        provider_ir_dir = getattr(translate_config, "provider_ir_dir", None)
+        if provider_ir_dir:
+            return Path(provider_ir_dir) / "source" / "mineru" / "provider_ir.json"
+        working_dir = getattr(translate_config, "working_dir", None)
+        if not working_dir:
+            return None
+        return Path(working_dir) / "agent" / "source" / "mineru" / "provider_ir.json"
+
+    def _persist_provider_document(self, translate_config) -> None:
+        """落盘 provider IR（规范化产物）。落盘失败只 warning，不影响 YoloResult 路径。"""
+        document = self.provider_document
+        if document is None:
+            return
+        output_path = self._provider_ir_output_path(translate_config)
+        if output_path is None:
+            return
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = output_path.with_suffix(".tmp")
+            tmp.write_text(document.to_json(indent=2), encoding="utf-8")
+            tmp.replace(output_path)
+            logger.info("MinerU provider IR written: %s", output_path)
+        except OSError:
+            logger.warning("Failed to write MinerU provider IR", exc_info=True)
+
     def _headers(self) -> dict[str, str]:
         if not self.api_token:
             raise ValueError("MinerU API token is required")
@@ -364,7 +406,9 @@ class MinerUDocLayoutModel(DocLayoutModel):
             return None
         return self.LAYOUT_CACHE_DIR / f"{digest}.json"
 
-    def _write_layout_cache(self, cache_file: Path, layout_json: dict[str, Any]) -> None:
+    def _write_layout_cache(
+        self, cache_file: Path, layout_json: dict[str, Any]
+    ) -> None:
         try:
             cache_file.parent.mkdir(parents=True, exist_ok=True)
             tmp = cache_file.with_suffix(".tmp")
@@ -376,6 +420,18 @@ class MinerUDocLayoutModel(DocLayoutModel):
         except OSError:
             logger.warning("Failed to write MinerU layout cache", exc_info=True)
 
+    def _prepare_provider_ir(
+        self, layout_json: dict[str, Any], translate_config
+    ) -> None:
+        """构建并落盘 provider IR。IR 构建失败不阻断 YoloResult 路径。"""
+        try:
+            self._build_provider_document(layout_json)
+        except Exception:  # noqa: BLE001 - IR 是附加产物，不应影响布局解析
+            self.provider_document = None
+            logger.warning("Failed to build MinerU provider IR", exc_info=True)
+            return
+        self._persist_provider_document(translate_config)
+
     def handle_document(
         self,
         pages,
@@ -383,9 +439,12 @@ class MinerUDocLayoutModel(DocLayoutModel):
         translate_config,
         save_debug_image,
     ):
+        # 每次 handle_document 重置 provider IR，避免跨调用残留。
+        self.provider_document = None
         replay_path = os.environ.get("BABELDOC_MINERU_LAYOUT_JSON")
         if replay_path:
             layout_json = json.loads(Path(replay_path).read_text(encoding="utf-8"))
+            self._prepare_provider_ir(layout_json, translate_config)
             requested_page_numbers = {
                 int(page.page_number) for page in pages if hasattr(page, "page_number")
             }
@@ -428,12 +487,15 @@ class MinerUDocLayoutModel(DocLayoutModel):
             with httpx.Client(timeout=float(self.timeout_seconds)) as client:
                 batch_id, upload_url = self._request_upload_urls(client, pdf_path)
                 self._upload_pdf(client, upload_url, pdf_path)
-                full_zip_url = self._poll_full_zip_url(client, batch_id, translate_config)
+                full_zip_url = self._poll_full_zip_url(
+                    client, batch_id, translate_config
+                )
                 zip_bytes = self._download_zip_bytes(client, full_zip_url)
 
             layout_json = self._load_layout_json_from_zip_bytes(zip_bytes)
             if cache_file is not None:
                 self._write_layout_cache(cache_file, layout_json)
+        self._prepare_provider_ir(layout_json, translate_config)
         pdf_info = layout_json.get("pdf_info") or []
         requested_page_numbers = {
             int(page.page_number)

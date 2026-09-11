@@ -70,6 +70,11 @@ def main(argv=None):
     p_md.add_argument("--layout", choices=["native", "mineru"], default="mineru")
     p_md.add_argument("--mineru-token", default=None)
     p_md.add_argument("--mineru-json", default=None, help="回放已缓存的 MinerU layout.json")
+    p_md.add_argument(
+        "--mineru-cache-key",
+        default=None,
+        help="按 PDF 内容 sha256 直接指定已缓存的 MinerU layout.json（~/.cache/babeldoc/mineru-layout.v1/<key>.json）",
+    )
 
     p_mda = sub.add_parser("md-apply", help="校验译文 Markdown 并写回 IR")
     p_mda.add_argument("workdir")
@@ -113,6 +118,7 @@ def main(argv=None):
             layout=args.layout,
             mineru_token=args.mineru_token,
             mineru_json=args.mineru_json,
+            mineru_cache_key=args.mineru_cache_key,
         )
     elif args.command == "md-apply":
         result = markdown_view.apply_markdown(args.workdir, args.markdown)
