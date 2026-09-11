@@ -327,6 +327,9 @@ def _run_parse(
     )
     from babeldoc.format.pdf.document_il.midend.il_translator import ILTranslator
     from babeldoc.format.pdf.document_il.midend.il_translator import PageTranslateTracker
+    from babeldoc.format.pdf.document_il.midend.inline_math_protector import (
+        InlineMathProtector,
+    )
     from babeldoc.format.pdf.document_il.midend.layout_parser import LayoutParser
     from babeldoc.format.pdf.document_il.midend.paragraph_finder import ParagraphFinder
     from babeldoc.format.pdf.document_il.midend.styles_and_formulas import (
@@ -384,6 +387,9 @@ def _run_parse(
         temp_pdf_path, config=config, doc_pdf=doc_pdf
     )
     docs = LayoutParser(config).process(docs, doc_pdf)
+    # 行内公式保护 + 原生字符↔MinerU span 对齐审计（需在 ParagraphFinder 之前：
+    # 此时 page.pdf_character 仍是全量，且新 formula 区域会被 ParagraphFinder 采纳）。
+    docs = InlineMathProtector(config).process(docs) or docs
     close_process_pool()
     docs = EnclosedMarkerFixer(config).process(docs)
     docs = ParagraphFinder(config).process(docs) or docs
