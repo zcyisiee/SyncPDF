@@ -38,6 +38,16 @@ class YoloBox:
 
 
 class DocLayoutModel(abc.ABC):
+    @property
+    def provides_complete_layout(self) -> bool:
+        """Whether the model covers all text regions on every page.
+
+        Native detectors may miss characters, so the parser keeps its
+        character clustering fallback for them. Remote structured layout
+        providers can opt out when their result is already complete.
+        """
+        return False
+
     @staticmethod
     def load_onnx():
         logger.info("Loading ONNX model...")

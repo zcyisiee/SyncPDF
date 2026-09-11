@@ -168,11 +168,15 @@ class LayoutParser:
                 # self.generate_fallback_line_layout_for_page(page)
                 # self._save_debug_box_to_page(page)
                 progress.advance(1)
-            with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-                for page in docs.page:
-                    executor.submit(
-                        self.generate_fallback_line_layout_for_page, page, progress
-                    )
+            if self.model.provides_complete_layout:
+                for _ in docs.page:
+                    progress.advance(1)
+            else:
+                with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+                    for page in docs.page:
+                        executor.submit(
+                            self.generate_fallback_line_layout_for_page, page, progress
+                        )
         return docs
 
     def generate_fallback_line_layout_for_page(self, page: il_version_1.Page, progress):

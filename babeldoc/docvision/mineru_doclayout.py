@@ -45,6 +45,11 @@ class MinerUDocLayoutModel(DocLayoutModel):
     def stride(self) -> int:
         return self._stride
 
+    @property
+    def provides_complete_layout(self) -> bool:
+        """MinerU returns page coverage and block labels for all text regions."""
+        return True
+
     @staticmethod
     def _empty_result() -> YoloResult:
         return YoloResult(names={}, boxes=[])
