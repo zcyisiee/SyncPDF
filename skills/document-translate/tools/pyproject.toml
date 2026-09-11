@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "babeldoc-tools"
+version = "0.1.0"
+description = "BabelDOC agent 工具层：解析/翻译/审查/重建/排版微调（JSON in / JSON out）"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "AGPL-3.0" }
+dependencies = [
+    # babeldoc 本体（同仓）。安装方式二选一：
+    #   1) pip install -e .（本包）+ 仓库根 pip install -e .
+    #   2) 不安装，直接 PYTHONPATH=<repo>/skills/document-translate/tools python -m babeldoc_tools
+    # 未安装 babeldoc 时包内会自动把仓库根加进 sys.path（见 babeldoc_tools/__init__.py）。
+]
+
+[project.scripts]
+bdt = "babeldoc_tools.__main__:main"
+
+[tool.setuptools]
+packages = ["babeldoc_tools"]
+
+[tool.setuptools.package-dir]
+"" = "."

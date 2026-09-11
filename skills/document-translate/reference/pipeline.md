@@ -1,26 +1,16 @@
-# Agent 编排的 PDF 翻译流水线
+# 管线参考（skill 内副本）
 
+> **provenance**：本文件是 `docs/agent-translate-pipeline.md` 的同步副本，供 skill
+> 自包含阅读；阶段详解的改动请改主文档再同步。工具层契约与版面微调闭环见文末
+> 「附录 A/B」，那两节为新内容（主文档未含）。
+>
 > 本文描述 `BabelDOC-agy-mvp` 分支上 **Markdown 视图 + 行内锚点** 的端到端翻译流程：
 > 从 PDF 解析到 mono/dual 成品，逐步说明**功能、中间产物、schema 与效果**，
 > 末尾给出面向「排版质量」的优化空间。
 >
-> 适用代码：`babeldoc/tools/agent/`（工具层）、`experiments/markdown_translate.py`
-> （编排器）、`babeldoc/format/pdf/document_il/midend/`（解析中端）、
+> 适用代码：`babeldoc/tools/agent/`（工具层）、`skills/document-translate/tools/`
+> （agent 工具包）、`babeldoc/format/pdf/document_il/midend/`（解析中端）、
 > `babeldoc/format/pdf/document_il/backend/pdf_creater.py`（重建）。
-
----
-
-> **M4 更新（agent 工具层 + 稳定性检测 + 排版微调已落地）**：本文描述的解析/写回/
-> 重建链路未变，但上层已封装为 agent 工具包（`skills/document-translate/tools/`，
-> `python -m babeldoc_tools`），并新增：
-> - 结构化审查 gate：`review_document`（apply 报告 + 段内完整性 + 页数/目录/链接 +
->   占位符残留 + 标题字号 → `verdict: pass|needs_fix`）、`backtranslate_check`（回译 + Levenshtein）；
-> - 排版微调通道：`agent/layout_overrides.json`（`scale_cap` / `font_scale` / `line_skip` /
->   `box_scale` / `box` / `force_break_after_*`，页级 `font_scale`）+ `layout_lint` /
->   `layout_locate` / `layout_geometry.json`；
-> - 回归硬约束：**无覆盖 = 零行为变化**（三篇论文重建的文本层哈希已比对一致）。
-> 详见 `skills/document-translate/SKILL.md` 与 `reference/{schemas,troubleshooting}.md`；
-> 附录 A/B（工具层契约与版面闭环）在 `skills/document-translate/reference/pipeline.md`。
 
 ---
 
@@ -573,3 +563,54 @@ mono 中 77% 链接矩形按译文重定位。目录（书签）同样保持：
 4. 链接数：mono ≈ 原文、dual ≈ 2×原文；**目录条目数：mono/dual 与原文一致**；
 5. 渲染首页、图注密集页、表格页、末页，检查标题字号、溢出、重叠；
 6. 术语一致性抽样（同一英文术语在全文的中文译名是否唯一）。
+
+
+---
+
+## 附录 A：agent 工具层（`skills/document-translate/tools/`）
+
+统一入口（`registry + dispatch + CLI`，JSON in / JSON out）：
+
+```bash
+PYTHONPATH=skills/document-translate/tools python -m babeldoc_tools list
+PYTHONPATH=skills/document-translate/tools python -m babeldoc_tools call layout_lint \
+    --workdir tmp/md-ccs3764 --arg min_sev='"P1"'
+skills/document-translate/tools/bin/bdt call review_document --workdir tmp/md-ccs3764
+```
+
+| 组 | 工具 | 关键产物 |
+|---|---|---|
+| parse | `parse_document` | `document.md` / `anchors.json` / `sheet.jsonl` / `state.pkl` |
+| translate | `translate_document` / `retranslate_ids` / `apply_translation` | `translated.md` / `translated.jsonl` / `apply_report.json` |
+| review | `review_document` / `backtranslate_check` | `review_verdict.json` / `backtranslation_check.json` |
+| layout | `reconstruct_pdf` / `render_pages` | mono+dual PDF / `layout_geometry.json` / `render/*.png` |
+| layout | `layout_set` / `layout_lint` / `layout_locate` | `layout_overrides.json` / `layout_lint.json` |
+| version | `snapshot` / `restore` / `list_snapshots` | `snapshots/<name>/`（小文件，不含 state.pkl） |
+| report | `report` | `FINAL_REPORT.md` |
+
+返回值统一为 `{"ok": true, "tool": ..., "data": {...}}` /
+`{"ok": false, "tool": ..., "error": {"code", "message", ...}}`；CLI 退出码 0/1/2。
+`registry.dispatch(name, args)` 可直接被 MCP wrapper 复用。
+
+## 附录 B：排版微调闭环（layout overrides）
+
+```text
+review_document（结构 gate: pass/needs_fix）
+   ├─ blockers（漏行/锚点/占位符/空译/注释残留）
+   │     → retranslate_ids(feedback) → apply_translation → 重新 review
+   ├─ 高风险段 → backtranslate_check（回译 + Levenshtein）→ 仍不过 → retranslate_ids
+   └─ pass → reconstruct_pdf（应用 layout_overrides.json，dump layout_geometry.json）
+              → render_pages → 并行审查（protocol / fidelity / layout）
+              → findings + layout-fixer 决策 → snapshot → layout_set → reconstruct_pdf
+              → layout_lint 复核（≤2 轮；每轮可 restore 回滚）
+              → report → FINAL_REPORT.md
+```
+
+三条硬约束：
+
+1. **无覆盖 = 零行为变化**：`layout_overrides.json` 缺失/为空时，Typesetting 与既有
+   路径完全一致（回归用三篇论文的文本层哈希比对守住）。
+2. **覆盖不写 `state.pkl`**：`reconstruct` 只在内存中应用覆盖，因此删 key / 删文件 /
+   `restore` 都能回滚。
+3. **视觉结论必须回到数据**：lint 结论来自 IR 几何 dump（精确 id），PNG 只用于定位；
+   P2（兼容表意文字 / 链接错位）只记录不阻断。

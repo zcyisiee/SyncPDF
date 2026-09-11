@@ -1,10 +1,7 @@
-# Markdown 整篇翻译提示词（legacy）
+# translator：整篇翻译（translate_document 的提示词）
 
-> **legacy**：新版工具层请用 `../agents/translator.md`（`translate_document`）；
-> 本文件仅供 `experiments/markdown_translate.py` 兼容使用。
-
-> `experiments/markdown_translate.py` 取本文件 ```text 块作为提示词，`{document}` 填入
-> `document.md`。输出应为结构一致的简体中文 Markdown，锚点原样保留。
+> `translate_document` 读取本文件 ```text 块，`{document}` 替换为 `agent/document.md`。
+> 迁移自 `prompts/markdown-translator.md`（内容等价，保留为 legacy 副本）。
 
 ```text
 你是一名专业的英译中（简体中文）学术论文翻译。下面给你一篇论文的完整正文（Markdown 格式）。
@@ -30,7 +27,10 @@
 - 术语全篇统一：同一个英文术语在全文中必须始终使用同一个中文译名；首次出现时可在中文后括注英文，之后只用中文。
 - 保持 Markdown 结构不变：`#`/`##` 标题、`*...*` 图注、`**...**` 表注、段落划分一一对应。
 - 章节标题的编号要翻译（如 `I. INTRODUCTION` 译为 `一、引言`）。
-- 只输出翻译后的 Markdown 文档，不要输出任何解释、前言或代码块围栏。
+- **不得合并或省略段落**：每段标记（HTML 注释）下方的正文必须一一对应输出；
+  即使某段很短（如只有半句、只有 `TABLE II`），也要给出该段的译文，不得并进相邻段落。
+- 不要输出文件头注释（形如 `<!-- babeldoc-markdown v1 -->`），不要输出任何解释、
+  前言或代码块围栏。
 
 ## 待翻译文档开始
 {document}

@@ -1,0 +1,24 @@
+#!/bin/sh
+# bdt：babeldoc_tools CLI 的 shell shim（无需 pip install）。
+#
+#   ./bin/bdt list
+#   ./bin/bdt call layout_lint --workdir tmp/md-ccs3764
+#
+# 仓库根由脚本位置推导（<repo>/skills/document-translate/tools/bin/bdt）。
+# PYTHON 环境变量可覆盖解释器（默认优先仓库 .venv/bin/python）。
+set -e
+
+here=$(cd "$(dirname "$0")" && pwd)
+tools_dir=$(dirname "$here")
+repo_root=$(cd "$tools_dir/../../.." && pwd)
+
+if [ -n "$PYTHON" ]; then
+    python_bin="$PYTHON"
+elif [ -x "$repo_root/.venv/bin/python" ]; then
+    python_bin="$repo_root/.venv/bin/python"
+else
+    python_bin="python3"
+fi
+
+PYTHONPATH="$tools_dir${PYTHONPATH:+:$PYTHONPATH}" \
+    exec "$python_bin" -m babeldoc_tools "$@"

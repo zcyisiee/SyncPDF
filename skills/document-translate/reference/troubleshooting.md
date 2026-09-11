@@ -1,0 +1,167 @@
+# 故障排查：症状 → 工具 → 参数
+
+按"你看到什么"查表。所有命令在仓库根执行；`bdt` 指
+`skills/document-translate/tools/bin/bdt`（等价 `PYTHONPATH=skills/document-translate/tools python -m babeldoc_tools`）。
+
+---
+
+## 一、翻译内容类
+
+### 1. 某段漏译 / 只翻译了半句
+
+症状：`review_document` 报 `missing_ids` / `empty_target` / `intra_paragraph_truncated`，
+或 `backtranslate_check` 相似度 < 0.55。
+
+```bash
+bdt call review_document --workdir <wd> --compact            # 拿 blockers/warnings
+bdt call retranslate_ids --workdir <wd> \
+    --arg ids='["P07-012"]' \
+    --arg feedback='"原文后半句 additional task configurations… 未译出，请补全整段"'
+bdt call review_document --workdir <wd> --compact            # 复核
+```
+
+- `retranslate_ids` 默认重译后自动 apply；`--arg apply=false` 可只看结果。
+- 想先看提示词：`--arg dry_run=true` → `<wd>/agent/prompt.retry.md`。
+- 没有 `agy` 时的替代：`translate_document --arg translated_md=<外部译文.md>` 或
+  `--arg backtranslation='{"P07-012": "...英文回译..."}'`。
+
+### 2. 术语不统一
+
+症状：同一英文术语出现多个中文译名。
+
+```bash
+python -c "import pymupdf,re;t=''.join(p.get_text() for p in pymupdf.open('<mono pdf>'));\
+print(len(re.findall('注意力', t)), len(re.findall('自注意力', t)))"
+bdt call retranslate_ids --workdir <wd> --arg ids='["P03-004","P08-002"]' \
+    --arg feedback='"术语表：attention 统一译作「注意力」，transformer 统一译作「Transformer」；请只改术语，其余保持"'
+```
+
+程序化替换（不改语义、无需模型）：直接改 `agent/translated.jsonl` 的 `target` 再
+`bdt call apply_translation --workdir <wd>`。
+
+### 3. 占位符/样式锚点被模型改坏
+
+症状：`apply_report.violations` 非空，`ok=false`。
+
+- 看到 `anchor_order_mismatch` → 模型把 span 搬了位置；`apply_translation` 会先做
+  `reorder` 修复，仍失败才报错；
+- 看到 `placeholder_lost/hallucinated` → 对相应 id `retranslate_ids`，feedback 里点名
+  缺/多的 token；
+- 输出 PDF 文本层出现 `{v1}` / `<style`（`review_document` 的 `placeholder_leftover`）
+  → 说明 target 里带了字面占位符：同样走 `retranslate_ids`。
+
+### 4. 译文里混进文件头注释
+
+症状：`markdown_comment_leak` blocker / PDF 末页出现 `babeldoc-markdown v1` 文本。
+
+`apply_translation` 已程序化剔除（`markdown_view.strip_html_comments`），重跑一次 apply 即可：
+
+```bash
+bdt call apply_translation --workdir <wd> && bdt call reconstruct_pdf --workdir <wd>
+```
+
+### 5. 译文"不完整/句子缺主语"但指标全绿
+
+症状：`review_document` 报 `formula_splice`（P2），或人工读起来句子不通（例如
+"图 5 说明了改变如何影响…" 缺主语、"当设置得过高时" 缺变量）。
+
+根因在**解析层**：公式被抽成 `{vN}` 后，原文文本流在占位符两侧直接相连
+（`varying{v9}influences`），英文源文本身就已经破碎。核对方法：
+
+```bash
+python -c "import pickle;st=pickle.load(open('<wd>/agent/state.pkl','rb'));\
+print(st['inputs']['P09-017'].unicode)"      # 看 source 是否本身就断
+```
+
+处理：
+- 源文断裂 → 重译也无法修复，列入遗留项（建议在 IL 层合并同一公式的多个 fragment、
+  补回词间空格）；
+- 源文完整但译文断裂 → 正常走 `retranslate_ids`。
+
+---
+
+## 二、排版类
+
+### 5. 某段太挤 / 溢出 / 与相邻段重叠
+
+```bash
+bdt call layout_lint --workdir <wd> --arg min_sev='"P1"'        # out_of_page / paragraph_overlap
+bdt call layout_locate --workdir <wd> --arg page=5 --arg text='"（1）"'   # 拿 id
+bdt call layout_set --workdir <wd> \
+    --arg 'patch={"paragraphs":{"P05-012":{"scale_cap":0.9}}}' \
+    --arg reason='"P1 重叠：与 P05-013 IoU 0.23"' \
+&& bdt call reconstruct_pdf --workdir <wd> \
+&& bdt call layout_lint --workdir <wd> --arg min_sev='"P1"'     # 复核
+```
+
+### 6. 字号明显小于原文（`font_shrink`）
+
+先看 evidence 的 `font_scale`：
+
+- `font_scale = 1.0` → Typesetting 自动缩放（`optimal_scale` < 1）。**放宽框**通常比继续
+  降字号更有效：`{"box_scale": 1.15}`（框锚定左上、向右下生长，不会顶到上一段）；
+- `font_scale ≠ 1.0` → 是上一次覆盖造成的，回退该字段：`{"font_scale": null}`。
+
+### 7. 行断得难看（公式列表挤在一行、单字成行）
+
+```bash
+bdt call layout_set --workdir <wd> \
+    --arg 'patch={"paragraphs":{"P02-010":{"force_break_after_text":["。我们假设"]}}}'
+```
+
+- 文本锚点优先（抗译文改动）；同一子串多次出现时取**最后一次**匹配；
+- 需要精确位置时用 `force_break_after_offset`（偏移 = 新行起始字符位置）；
+- 锚点没命中不会报错，只在 `layout_lint` 里出现 `force_break_unresolved`（P2）——
+  先在 `layout_geometry.json` 的 `text` 字段确认子串真的存在。
+
+### 8. 段落位置整体不对
+
+```bash
+bdt call layout_geometry 2>/dev/null || true   # 没有这个工具，直接读文件
+python -c "import json;g=json.load(open('<wd>/agent/layout_geometry.json'));\
+print([p for p in g['paragraphs'] if p['id']=='P02-010'][0])"
+bdt call layout_set --workdir <wd> --arg 'patch={"paragraphs":{"P02-010":{"box":[318,600,562,700]}}}'
+```
+
+`box` 是 PDF 坐标（y 向上，原点左下角），超界会被自动裁剪到 cropbox 并在
+`ir_overrides.clamped` 计数。
+
+### 9. 文本层出现兼容表意文字（复制/检索乱码）
+
+`text_layer_compat_ideograph`（P2）：字体缺该字形时回退到 CJK 兼容区码位
+（如 `了` → U+FA0A），视觉正常但复制会得到兼容码位。不阻断交付；
+可用 `unicodedata.normalize("NFKC", ch)` 还原，或 `bdt call dump_text_layer` 的
+页首注释查看每页的兼容字清单。需要根治请改 `pdf_creater` 的 ToUnicode 生成
+（见 `reference/pipeline.md` 5.2 第 9 条）。
+
+### 10. 链接点不准
+
+`link_misaligned`（P2）：链接矩形下方没有文本块，多为译文重排后引用位置漂移。
+记录即可；根治需要按段落新旧 box 仿射映射重定位链接。
+
+---
+
+## 三、流程/环境类
+
+| 症状 | 处理 |
+|---|---|
+| `workdir_missing` | 先 `parse_document`（`agent/` 目录必须存在） |
+| `mineru_token_missing` | 设 `MINERU_API_TOKEN`，或 `--arg layout=native`，或 `--arg mineru_json=<缓存 layout.json>` |
+| `model_cli_missing` | 装了 `agy`/其它 CLI 才能自动翻译；否则用 `--arg translated_md=<文件>` 导入译文 |
+| `model_failed: Agent execution terminated due to error.` | 该 `--model` 在当前环境不可用；先 `agy models` 列可用模型，再换模型（如 `claude-sonnet-4-6` 需 `--arg effort="none"`） |
+| `geometry_missing` | 先 `reconstruct_pdf`（geometry 由重排阶段 dump） |
+| `unmatched_ids` 非空 | 覆盖里的 id 拼错或来自另一次 parse（段落 id 与解析绑定） |
+| 想整体回滚 | `bdt call layout_set --workdir <wd> --arg clear=true`；内容回滚用 `snapshot` / `restore` |
+| 重建结果和上次不一致 | 检查是否残留 `layout_overrides.json`；用 `experiments/pdf_fingerprint.py` 比对文本层哈希 |
+| 脚本里调 `reconstruct_pdf` 报 multiprocessing `bootstrapping phase` 错 | PDF 字体子集化用 spawn 起子进程：脚本入口必须有 `if __name__ == "__main__":` 保护（`bdt`/`python -m babeldoc_tools` 与已有 experiments 脚本都已满足） |
+| 审查 agent 需要 grep 文本层 | `bdt call dump_text_layer --pdf <mono.pdf> --arg with_spans=true` → `output/text_layer/page-XX.txt`（页首注释列出该页兼容表意文字） |
+
+## 四、回归自检（改动 Typesetting/重建后必跑）
+
+```bash
+.venv/bin/python -m pytest tests -q                                  # 全量单元/契约测试
+bdt call reconstruct_pdf --workdir tmp/md-ccs3764                    # 空覆盖重建
+.venv/bin/python experiments/pdf_fingerprint.py \
+    tmp/md-ccs3764/output/<new>.mono.pdf --compare <baseline.pdf>    # 文本层哈希必须一致
+bdt call layout_lint --workdir tmp/md-ccs3764 --compact              # 与基线 counts 对比
+```
