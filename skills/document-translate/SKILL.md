@@ -1,89 +1,123 @@
 ---
 name: document-translate
-description: Agent 编排的高保真 PDF 文档翻译（BabelDOC 解析/重构 + subagent 翻译）。适用于英文学术论文→中文等文档翻译任务，保留排版、公式与富文本样式。当用户要求翻译 PDF 文档并保留格式时使用。
+description: Agent 编排的高保真 PDF 文档翻译（BabelDOC 解析/重构 + subagent 翻译 + 结构化审查 + 排版微调）。适用于英文学术论文→中文等文档翻译任务，保留排版、公式与富文本样式；当需要翻译 PDF 文档、复核译文完整性、或按 review 结论微调排版并重排时使用。
 ---
 
 # document-translate：agent 编排的 PDF 文档翻译
 
-本 skill 把 BabelDOC 管道拆成可编排的工具调用：解析与排版重构由确定性工具完成，
-**翻译本身由你（翻译 subagent）完成**。翻译通过"translation sheet"交换，必须遵守占位符协议。
+把 BabelDOC 管道拆成**可恢复的 DocumentJob**：解析/写回/重建/审查/lint 都是确定性工具，
+翻译和审查通过可替换 Provider 注入，排版微调由**覆盖文件**驱动、可回滚。
 
-## 工具层
+发布包提供两个稳定 namespace：
 
-在仓库根目录（BabelDOC-agy-mvp 分支）执行，四个子命令：
-
-```bash
-# 1. 解析 + 布局 + 段落 → 翻译清单（每行 {id, page, layout_label, source}）
-#    --layout mineru：MinerU 云端布局识别（推荐，作者区/参考文献/图表内部可自动跳过）
-#    --mineru-token：默认读环境变量 MINERU_API_TOKEN；同一 PDF 的布局结果按内容哈希缓存
-#    --skip-labels：在默认跳过集之外追加跳过的 label（逗号分隔）
-python -m babeldoc.tools.agent extract <pdf> --workdir <dir> --layout mineru \
-    [--pages 1,2] [--lang-in en --lang-out zh] [--mineru-token <tok>] [--skip-labels author,code]
-
-# 2. 校验译文（id 对齐 + 占位符完整）并写回 IR；失败输出违规清单，退出码 1
-#    apply 自动归一化占位符双标点（{vN} 展开尾部已带标点而译文又紧跟 ，/、/。）
-python -m babeldoc.tools.agent apply <workdir> <translated.jsonl>
-
-# 3. 从 IR 重排生成 PDF：mono 中文单语 + dual 中英拼宽对照（最终交付两者都要）
-python -m babeldoc.tools.agent reconstruct <workdir> --output-dir <dir> --dual
-
-# 4. 页渲染 PNG（视觉审查用）
-python -m babeldoc.tools.agent render <pdf> --pages 1,2 [--dpi 120] [--out-dir <dir>]
+```python
+from babeldoc_core import DocumentJob, JobConfig
+from babeldoc_tools import dispatch, list_tools, get_schema
 ```
 
-产物路径：`<workdir>/agent/sheet.jsonl`（待译清单）、`<workdir>/agent/state.pkl`（IR 状态，勿手改）。
-**subagent 提示词已落盘**：`skills/document-translate/prompts/translator.md`（翻译，batch_translate.py
-自动加载）、`skills/document-translate/prompts/format-reviewer.md`（格式审查清单，审查阶段逐项执行）。
+`babeldoc_core` 保存 IR、公式原子、协议 gate 和 Job manifest；`babeldoc_tools` 提供
+Python/JSON/CLI 三层工具适配。skill 目录只保存角色提示词、编排规则和验收说明。
 
-### 布局模式与跳过语义
+```
+job_create → parse_document → translate_document → validate_translation（gate）
+   ├ blockers → retranslate_ids → apply_translation → 复核
+   └ pass → reconstruct_pdf → render_pages → 并行审查（protocol/fidelity/layout）
+            → layout_patch → reconstruct_pdf → render_pages → layout_lint（≤2 轮）→ export_report
+```
 
-- **native**（默认）：本地 DocLayoutModel。所有 text 段都会进 sheet。
-- **mineru**（推荐）：作者区（author）、参考文献（reference）、图片内部（figure）、表格内部
-  （table_text）、代码（code）、页眉页脚页码等自动跳过不译，**保留原文渲染**；
-  图注/表注（figure_caption / table_caption / code_caption）正常翻译。
-  用 `--skip-labels` 追加、或查看 extract 返回的 `skipped_label_counts` 确认跳过了什么。
+> 目录：`agents/`（各角色的提示词）`tools/`（legacy 兼容工具）`reference/`（管线 / 契约 / 排查）
+> `prompts/`（legacy 提示词，供旧 batch 流程兼容）
 
-## 占位符协议（翻译时必须严格遵守）
+## 加载方式
 
-- `{v1}` `{v2}` … 是公式占位符：**原样保留**，不得改写、增删、翻译、调换顺序。
-  展开内容可能自带标点（如 `[17],`），因此**占位符后不要再加 ，/、/。**（apply 也会程序化去重）。
-- `<style id='1'>…</style>` 是富文本标记：**标签原样保留**，只翻译标签内外的自然语言文本。
-- 人名、邮箱、URL、引用标记（如 [1]）原样保留。
-- 译文 target 中占位符的集合与出现次数必须与 source 完全一致——apply 会程序化校验，不符即拒绝。
+- 由编排者显式指向本目录即可：`pi --skill skills/document-translate`；
+- 或写进项目设置：`.pi/settings.json` 里 `{"skills": ["skills"]}`；
+- 本 skill 目录不在 pi 默认发现路径内，**默认不改 harness 配置**，需要自动发现时用上面两种写法。
 
-## 编排流程
+## 工具速查
 
-1. **extract**：`--layout mineru` 解析（大文档先用 `--pages` 限制页数试点）。检查返回的
-   `layout_label_counts` 与 `skipped_label_counts`，确认跳过语义符合预期。
-2. **翻译 subagent**：把 `sheet.jsonl` 分批（建议每批 ≤40 行）译出，输出 `translated.jsonl`，
-   每行 `{"id": ..., "target": ...}`，不增行不漏行。提示词落盘于 `prompts/translator.md`
-   （含占位符协议、术语统一、JSONL 输出要求），直接执行：
-   `python experiments/batch_translate.py <workdir> --model <model> --effort low --batch-size 40`
-   （脚本自动加载该提示词，并做协议校验 + 违规打回重试 ≤2 + 回退）。
-3. **apply**：校验通过 → 进入 4；失败 → 读取违规清单（缺/多哪个占位符、哪个 id），只把违规行
-   发回重译，**重试 ≤2 次**；仍失败的段落回退 `target = source`（恒通过校验，原文保留）。
-4. **reconstruct --dual** → **render**：生成中文 mono PDF + 中英对照 dual PDF（拼宽页，
-   左原文右译文），渲染代表性页 PNG（首页、图注最密集页、表格页、末页）。
-5. **格式审查 subagent**：按 `prompts/format-reviewer.md` 的清单逐项执行并记录 PASS/FAIL 证据。
-   清单覆盖五组检查：A 跳过语义（作者区/参考文献/图表内部应保留原文）、B caption 已译且未截断、
-   C 排版（标题字号/dual 左右对应/溢出重叠）、D 协议与标点（review_report.json 五项指标应全 0）、
-   E 术语一致性。**铁律：视觉发现必须回到输出 PDF 文本层（pymupdf）复核**——视觉模型会把作者区
-   混排、小号图注读错（实测误报率高），未复核的发现不得作为修复依据。
-   结构化锚点：`python experiments/review_report.py <workdir> <mono pdf>` → `agent/review_report.json`。
-6. **迭代**：段落级问题 → 改 `translated.jsonl` 对应行后重新 apply（可多次覆盖）；
-   确定性缺陷（术语不统一、双标点残留）→ 直接程序化改写 target 再 apply，无需重译。
-   修完后重复 4-5 验证。**文档级迭代 ≤2 轮**，超出则接受现状并在报告中说明。
+```bash
+# 发布 wheel 后：
+babeldoc-tools list                      # 全部工具 + JSON Schema
+babeldoc-tools schema layout_patch       # 单工具入参
+babeldoc-tools call <tool> --args-json '{...}'
+# 仓库 checkout 的 legacy shim 仍可用于旧实验：
+skills/document-translate/tools/bin/bdt list
+```
 
-## 预算与产出
+stdout 恒为 `{"ok": true, "tool": …, "data": {…}}` 或 `{"ok": false, "error": {…}}`；
+退出码 0/1（1 = 工具失败，错误码见 `error.code`）。
 
-- 成本护栏：目标 ≤3x 固定管道（当前无内建计费，凭 sheet 行数与重试次数估算）。
-- 最终交付：中文 mono PDF + 中英对照 dual PDF、render PNG、审查报告
-  （清单各项 PASS/FAIL + 已修复项对照 + 遗留项，推荐落盘 `<workdir>/FINAL_REPORT.md`）。
+| 组 | 工具 | 一句话 |
+|---|---|---|
+| parse | `parse_document` | PDF → 连续 Markdown（锚点）+ IR 状态 |
+| translate | `translate_document` | 整篇翻译（默认 `agy` CLI），自动补译漏行 |
+| translate | `retranslate_ids` | 按 id 重译（带 feedback）→ 合并 → 可选 apply |
+| translate | `apply_translation` | 校验收写回 IR（确定性修复锚点/双标点/注释残留） |
+| review | `review_document` | 结构 gate：`verdict=pass\|needs_fix` + blockers/warnings |
+| review | `backtranslate_check` | 高风险段回译 + Levenshtein 相似度 |
+| review | `dump_text_layer` | PDF 文本层导出（视觉结论必须回文本层复核） |
+| layout | `reconstruct_pdf` | 应用排版覆盖重排 + dump 几何 |
+| layout | `render_pages` | 页面 → PNG（视觉审查） |
+| layout | `layout_set` / `layout_lint` / `layout_locate` | 写覆盖 / 查缺陷 / 定位 id |
+| version | `snapshot` / `restore` / `list_snapshots` | 小文件快照与回滚 |
+| report | `export_report`（兼容 `report`） | 产出 `agent/FINAL_REPORT.md` |
 
-## 已知边界（MVP）
+工具契约、字段与阈值：`reference/schemas.md`；出问题先查 `reference/troubleshooting.md`。
 
-- `page` 字段为 0-based 页号。
-- 段落粒度由 ParagraphFinder 决定；MinerU author 判定是首页标题与摘要之间的启发式，
-  极端版式可能漏标——审查时用文本层复核作者区是否保持原文。
-- 引用占位符展开内的 ASCII 逗号（`[17],`）会原样保留，中文句中偶现半角逗号，属可接受残留。
-- layout_label 的 skip 杠杆（set-skip）、box 编辑、IR 快照回滚尚未实现（M4）。
+## 编排流程（主 Agent 视角）
+
+1. **解析**：`parse_document --pdf <pdf> --workdir <wd> --layout mineru`
+   检查返回的 `label_counts` / `skipped_label_counts` —— 作者区/参考文献/图内/表内
+   应被跳过（保留原文渲染），图注/表注应进入 `sheet`。
+2. **翻译**：`translate_document --workdir <wd> --model <m> --effort low`
+   （提示词 `agents/translator.md`；缺 `agy` 时用 `--arg translated_md=<文件>` 导入译文）。
+3. **写回 + 结构 gate**：
+   `apply_translation` → `review_document`（可传 `--arg mono=<pdf> --arg dual=<pdf>` 做页数/目录/链接核对）
+   - `blockers` 里的 id → `retranslate_ids --ids [...] --feedback "..."` → 回到本步（**≤2 轮**）；
+   - `warnings` 里的高风险段 → `backtranslate_check`（相似度 < 0.55 判为重译对象）；
+   - `verdict=pass` 才继续（warnings 允许携带）。
+4. **重排 + 渲染**：`reconstruct_pdf --workdir <wd>`（默认出 mono+dual）→
+   `render_pages`（首页、图表密集页、表格页、末页）。
+5. **并行审查**（三个角色，提示词已落盘）：
+   - `agents/reviewer-protocol.md`：结构/协议/跳过语义（数据源：`review_verdict.json`）；
+   - `agents/reviewer-fidelity.md`：语义与漏译（回译）；
+   - `agents/reviewer-layout.md`：版式（数据源：`layout_lint` + PNG，结论必须带 id/box）。
+   findings 汇总成一份清单（每条含 `sev` / `evidence` / `fix`）。
+6. **排版迭代**（≤2 轮）：`snapshot` → 用 `agents/layout-fixer.md` 决策出 patch →
+   `layout_set` → `reconstruct_pdf` → `layout_lint` 复核。
+   变差就 `restore`；每轮只改必要字段，**单轮 ≤8 段**。
+7. **收尾**：`report --workdir <wd>` → `FINAL_REPORT.md`（token 用量 / apply 指标 /
+   verdict / lint 前后对比 / 遗留项），交付 mono + dual + render PNG。
+
+## 排版微调杠杆（`layout_set`）
+
+| 症状 | 首选杠杆 |
+|---|---|
+| 溢出/与相邻段重叠 | `scale_cap` 下调（如 0.9） |
+| 字号比原文明显偏小（自动缩放） | `box_scale` 1.05~1.3（放宽框） |
+| 主动减字（标题偏大） | `font_scale` 0.9~0.95 |
+| 需要在该段内部分行 | `force_break_after_text`（锚定子串） |
+| 段落位置不对 | `box`（PDF 坐标，自动裁剪到页面） |
+
+规则：**一次只改必要字段**；skip 段落（`overridable=false`）不可覆盖；
+`layout_overrides.json` 不写 `state.pkl`，所以随时可回滚。
+
+## 验收清单
+
+- [ ] `review_document`：`verdict=pass`，`apply_ok=true`，`fallback=0`；
+- [ ] 页数/目录条目与原文一致；`links_mono ≥ 原文`、`links_dual ≈ 2×`；
+- [ ] `placeholder_leftovers_* = 0`、`p1_title_shrink = 0`；
+- [ ] `layout_lint`：`P0 = 0`；P1 全部有结论（已修 or 明确 accept）；
+- [ ] `formula_splice`（P2）等已知解析层限制已列入遗留项，不得当作翻译缺陷重译；
+- [ ] 渲染首页/图表密集页/表格页/末页，人工确认无压字、无豆腐块；
+- [ ] `FINAL_REPORT.md` 落盘，遗留项逐条写明原因。
+
+## 已知边界
+
+- 段落粒度由 ParagraphFinder 决定；`page` 字段为 0-based，`id` 为 `P<页>-<序号>`。
+- 表格内部、图内文字保持原文（`table_text`/`figure` 跳过）——本版本不翻译表内内容。
+- 文本层可能出现 CJK 兼容区码位（复制/检索得到兼容字，视觉正常），属 P2 记录项。
+- 排版自动缩放（Typesetting `optimal_scale`）是保守策略：译文长度变化大的段落仍可能
+  字号偏小，需要人工覆盖或接受。
+- 覆盖不做跨段落联动（改了 A 段高度可能压到 B 段）：靠 `layout_lint` 复核发现。

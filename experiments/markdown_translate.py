@@ -36,13 +36,23 @@ PROMPT_FILE = (
     / "markdown-translator.md"
 )
 
+# 新版提示词位置（tools/babeldoc_tools.common 同此口径）；不存在时回退 legacy
+NEW_PROMPT_FILE = (
+    Path(__file__).resolve().parents[1]
+    / "skills"
+    / "document-translate"
+    / "agents"
+    / "translator.md"
+)
+
 
 def load_prompt_template() -> str:
+    file = PROMPT_FILE if PROMPT_FILE.exists() else NEW_PROMPT_FILE
     blocks = re.findall(
-        r"```text\n(.*?)```", PROMPT_FILE.read_text(encoding="utf-8"), re.DOTALL
+        r"```text\n(.*?)```", file.read_text(encoding="utf-8"), re.DOTALL
     )
     if not blocks:
-        raise SystemExit(f"提示词文件缺少 ```text 块: {PROMPT_FILE}")
+        raise SystemExit(f"提示词文件缺少 ```text 块: {file}")
     return blocks[0]
 
 

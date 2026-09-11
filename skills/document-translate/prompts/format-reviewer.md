@@ -1,4 +1,7 @@
-# 格式审查 subagent 提示词（format-reviewer）
+# 格式审查 subagent 提示词（legacy）
+
+> **legacy**：新版审查请用 `../agents/reviewer-protocol.md`（数据源为
+> `review_document` / `layout_lint` 的输出）；本文件保留 A/D/E 组检查项的原始表述。
 
 > 用途：reconstruct（mono + dual）→ render 之后，由格式审查 subagent（或主 agent 按此清单
 > 角色化执行）做交付前审查。占位符 `<WORKDIR>` `<OUTPUT_DIR>` 由编排者填入。
