@@ -38,6 +38,7 @@ from babeldoc.format.pdf.document_il.midend.paragraph_finder import ParagraphFin
 from babeldoc.format.pdf.document_il.midend.styles_and_formulas import (
     StylesAndFormulas,
 )
+from babeldoc.format.pdf.document_il.midend.toc_detector import TocDetector
 from babeldoc.format.pdf.document_il.midend.typesetting import Typesetting
 from babeldoc.format.pdf.document_il.xml_converter import XMLConverter
 from babeldoc.format.pdf.high_level import fix_filter
@@ -240,7 +241,9 @@ def extract(
     docs = InlineMathProtector(config).process(docs) or docs
     close_process_pool()
     docs = EnclosedMarkerFixer(config).process(docs)
-    ParagraphFinder(config).process(docs)
+    docs = ParagraphFinder(config).process(docs)
+    # 目录页条目化（需要段落结构；新段落要经过 StylesAndFormulas 的样式处理）。
+    docs = TocDetector(config).process(docs) or docs
     StylesAndFormulas(config).process(docs)
 
     il_translator = ILTranslator(

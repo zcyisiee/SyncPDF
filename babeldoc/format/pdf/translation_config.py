@@ -176,6 +176,8 @@ class TranslationConfig:
         "page_footnote",
         "aside_text",
         "author",
+        # 目录条目的页码/引导线段：位置由程序保持，不进翻译。
+        "toc_entry_page",
     )
 
     @classmethod

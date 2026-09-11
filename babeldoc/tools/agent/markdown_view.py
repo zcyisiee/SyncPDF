@@ -309,6 +309,18 @@ def _resolve_mineru_json(mineru_json, mineru_cache_key):
     return str(cache_path)
 
 
+def _snapshot_bookmarks(pdf_path, workdir) -> None:
+    """把源 PDF 书签快照到 ``<workdir>/agent/source/bookmarks.json``。"""
+    from babeldoc.tools.agent import link_snapshot
+
+    try:
+        link_snapshot.write_bookmarks(
+            pdf_path, link_snapshot.bookmarks_path(workflow.agent_dir(workdir))
+        )
+    except Exception:  # noqa: BLE001 - 快照是审计产物，不阻断解析
+        logger.warning("书签快照失败", exc_info=True)
+
+
 def _run_parse(
     pdf_path,
     workdir,
@@ -335,6 +347,7 @@ def _run_parse(
     from babeldoc.format.pdf.document_il.midend.styles_and_formulas import (
         StylesAndFormulas,
     )
+    from babeldoc.format.pdf.document_il.midend.toc_detector import TocDetector
     from babeldoc.format.pdf.new_parser.native_parse import (
         parse_prepared_pdf_with_new_parser_to_legacy_ir,
     )
@@ -383,6 +396,8 @@ def _run_parse(
     config.skip_scanned_detection = True
 
     doc_pdf, temp_pdf_path, mediabox_data = workflow._prepare_pdf(pdf_path, config)
+    # 书签（outline）快照：解析阶段绑定源页，重建阶段据此写回 mono/dual。
+    _snapshot_bookmarks(temp_pdf_path, workdir)
     docs = parse_prepared_pdf_with_new_parser_to_legacy_ir(
         temp_pdf_path, config=config, doc_pdf=doc_pdf
     )
@@ -393,6 +408,8 @@ def _run_parse(
     close_process_pool()
     docs = EnclosedMarkerFixer(config).process(docs)
     docs = ParagraphFinder(config).process(docs) or docs
+    # 目录页条目化（需要段落结构；新段落要经过 StylesAndFormulas 的样式处理）。
+    docs = TocDetector(config).process(docs) or docs
     docs = StylesAndFormulas(config).process(docs) or docs
 
     _deterministic_ids(docs)
