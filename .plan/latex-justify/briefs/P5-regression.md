@@ -18,7 +18,19 @@ P1–P4 各 brief 与其 decisions/acceptance 报告；验收工具
 
 三篇回放 workdir（只读源）：`/tmp/babeldoc-latex-acceptance/{2026-f1872,deepseek-v4,lawbench}/workdir`
 （含 `agent/state.pkl`、`agent/translated.jsonl`、MinerU 缓存）。
-日常回放 = extract（MinerU 缓存）→ apply 现有 translated.jsonl → reconstruct。
+**重要（P2/P4 已验证）**：MinerU 重新 extract 会生成随机 `debug_id`，
+「extract→apply 现有 translated.jsonl」流程不可用；三篇回放改为：复制 workdir
+→ 直接 `reconstruct --latex-bbox --dual`（与 P1–P4 验收同路径）。
+P4 最新基线（/tmp/p4-verify、/tmp/p4-final/）：deepseek 220/220、f1872 152/159、
+lawbench 98/98；额外耗时 21.3/19.0/11.9s；缓存二次命中 211/98。
+P3/P4 遗留台账（P5 验收时一并报告，不要求修复）：
+- f1872 的 7 段 `text-mismatch`（xeCJK 字符类 + ToUnicode 码点映射，实测 5 种
+  字体组合无解）：安全回退，应用率上限 95.33%；
+- HZpip 0.069 / aG4M3 0.221（公式密集段 fill 低）；
+- fill_after=None 的段（~14/220，fragment 密集段无法量测）；
+- text 类片段样式（粗/斜）未随 escape_latex 入 body。
+DONE fill 口径（已裁定）：**merged 校正口径**
+（`lines_nonfinal_merged_*`），基线口径并列上报。
 DONE 标准（用户已批准）：
 - 应用率 ≥ 95%（分母 eligible = 正文标签 ∧ 已翻译且译文≠原文 ∧ 源行数 ≥2 ∧
   非旋转页 ∧ 不压水印）；
