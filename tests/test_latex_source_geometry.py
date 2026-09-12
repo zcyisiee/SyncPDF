@@ -230,3 +230,39 @@ def test_geometry_from_char_objects_keeps_columns_separate():
         assert meta["n_lines"] == 2, (debug_id, meta)
         assert meta["first_line_dx"] == 0.0, (debug_id, meta)
         assert meta["baseline_pitch"] == 12.0
+
+
+def test_capture_requires_pre_translation_composition():
+    """翻译前采集契约：译文回填后的 composition 已丢失源行几何。
+
+    ``ILTranslator`` 会把 composition 换成 ``pdf_same_style_unicode_characters``
+    （纯文本 run，无字符 box）：此时 ``capture_source_line_geometry`` 已拿不到
+    任何行几何，只能靠 ``geometry_from_char_objects``（extract 期落盘的
+    ``page_char_objects``）兜底 —— 这正是采集必须前移的原因（根因 5）。
+    """
+    before = _doc([_page(0, [_three_line_paragraph()])])
+    assert source_geometry.capture_source_line_geometry(before)["P01-001"]["n_lines"] == 3
+
+    translated = _paragraph(
+        "P01-001",
+        il_version_1.Box(54.0, 180.0, 300.0, 214.0),
+        [
+            il_version_1.PdfParagraphComposition(
+                pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
+                    pdf_style=_style(), unicode="这是回填后的译文纯文本 run"
+                )
+            )
+        ],
+    )
+    after = _doc([_page(0, [translated])])
+
+    # 译文回填后：composition 无字符 box，采集不到几何。
+    assert source_geometry.capture_source_line_geometry(after) == {}
+
+    # 旧 workdir 兜底仍能重建（extract 期落盘的字符 box 未被回写）。
+    chars = []
+    for x, top in ((60.0, 210.0), (54.0, 198.0), (54.0, 186.0)):
+        chars.extend(_char("字", x + 5 * col, top - 10.0) for col in range(6))
+    fallback = source_geometry.geometry_from_char_objects(after, {0: chars})
+    assert fallback["P01-001"]["n_lines"] == 3
+    assert fallback["P01-001"]["first_line_dx"] == 6.0

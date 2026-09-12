@@ -217,7 +217,31 @@ python -m babeldoc.tools.agent md-apply tmp/gate-protocol tmp/gate-protocol/agen
 
 ---
 
-## 7. 门禁速查表
+## 7. `Latex bbox 排版验收`（软，`--latex-bbox` 专用）
+
+LaTeX bbox 排版的有效性门禁不在 `toolchain_gates.py`（它只管链接/目录/覆盖率/
+协议），而是一组独立指标。对每个回放 workdir 跑：
+
+```bash
+python3 experiments/acceptance_latex.py <workdir> <mono.pdf> [--dual-pdf <dual.pdf>]
+```
+
+产出 `<workdir>/acceptance/acceptance_latex.{json,md}`，判定口径：
+
+| 指标 | 阈值 | 字段 |
+|---|---|---|
+| 应用率 = applied / eligible | ≥ 95% | `application_rate` |
+| 非末行 fill ≥ 0.98 行占比 | ≥ 99%（`lines_nonfinal_merged_*`，基线口径并列上报） | `lines_nonfinal_merged_ge_threshold / _total` |
+| 贴片文本层零差异（容差口径） | 100%（严格字符级计数并列上报） | `text_diff_zero_ratio_non_formula` |
+
+同时看 `latex_bbox_report.json` 的聚合字段（`applied` / `fallback_reasons` /
+`links.uri_set_match` / `reverted`）与逐段 `decisions[]`；目视用
+`experiments/render_compare.py` 出 default vs latex 并排 PNG。
+回放方式与已知限制见 `docs/layout-hypothesis/ACCEPTANCE.md`。
+
+---
+
+## 8. 门禁速查表
 
 | 门禁 | 硬/软 | 阈值 | 产物 | 阻断点 |
 |---|---|---|---|---|
@@ -227,6 +251,7 @@ python -m babeldoc.tools.agent md-apply tmp/gate-protocol tmp/gate-protocol/agen
 | `toc_low_confidence` | 软 | 置信度 ≥ 0.6 | `agent/source/toc.json` | — |
 | protocol（anchors/占位符） | 硬 | 0 违规 | `apply_report.json` / `protocol_report.json` | `apply_markdown` |
 | `layout_lint` | 软 | 记发现 | `agent/layout_lint.json` | — |
+| `acceptance_latex`（`--latex-bbox`） | 软 | 应用率 ≥95%、fill ≥99%、text_diff=0 | `agent/../<pdf名>/latex_bbox_report.json` + `<workdir>/acceptance/` | — |
 
 ```bash
 # 一次跑完全部（推荐）
