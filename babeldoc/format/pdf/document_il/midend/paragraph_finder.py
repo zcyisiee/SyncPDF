@@ -199,7 +199,7 @@ class ParagraphFinder:
             len(document.page),
         ) as pbar:
             if not document.page:
-                return
+                return document
             for page in document.page:
                 self.translation_config.raise_if_cancelled()
                 self.process_page(page)
@@ -213,6 +213,9 @@ class ParagraphFinder:
 
             if self.check_cid_paragraph(document):
                 raise ExtractTextError("The document contains too many CID paragraphs.")
+        # 与其他 midend pass 约定一致：返回 document（workflow.extract 会
+        # 赋值接收；此前无 return 导致 extract 拿到 None 崩溃）。
+        return document
 
     def check_cid_paragraph(self, doc: Document):
         cid_para_count = 0
