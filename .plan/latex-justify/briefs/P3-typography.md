@@ -10,13 +10,25 @@ Sans + Source Han Serif/Sans CN）；启用英文断词与容差；复刻首行�
 ## Context
 
 分支 `feature/latex-bbox-layout`（P1/P2 已合入：full 模式门禁、bp 单位、
-`decisions[]` 报告、三级融合分类）。通读
+`decisions[]` 报告、四级融合分类 text→mineru→simple_math→fragment、
+`(cid:N)` 拒绝、源 PDF 裁片段嵌入）。通读
 `babeldoc/format/pdf/document_il/backend/latex_bbox/renderer.py`（模板 29–46、
 `build_tex`、`_render_uncached`）、`overlay.py`、`capability.py:33-50`；
 复用 `layout_geometry._annotate_space` 算法与 `link_snapshot.collect_page_chars`。
 关联：`babeldoc/format/pdf/high_level.py`（约 1009 行后）、
 `babeldoc/tools/agent/workflow.py`（extract 约 323 行 pickle 前）、
 `babeldoc/format/pdf/document_il/backend/pdf_creater.py`。
+
+P2 审查遗留（收养或跟踪）：
+- text 类片段样式（粗/斜）未随 `escape_latex` 入 body（P2-2 部分落实）；
+  P3-1 字体工作时若成本低可顺带（`FormulaClassification` 携带 style）；
+- `HZpip`（7 mineru 片段）`fill_after=0.07`、`aG4M3` `0.22`：公式密集段
+  盒内行填充仍差，正是 P3-4 行距推导与 P3-2 断词的靶子；
+- 2026-f1872 的 7 段编译失败多为拉丁字形 `\uffff`（默认拉丁字体无
+  ToUnicode），预期由 P3-1 `\setmainfont` 收口（这是 P3 验收重点之一：
+  f1872 应用率应从 95.3% 回升）；
+- 片段 PDF 存临时目录而非 workdir（P2 审查 P2-3）：P3 若重构 workdir
+  路径可顺带落盘，非阻塞。
 
 字体证据：产品默认输出拉丁 = Noto Serif Regular/Bold（sans 源则 Noto Sans），
 CJK = Source Han Serif CN；TeX 模板当前只设 CJK 且默认 SourceHanSans，拉丁回落
