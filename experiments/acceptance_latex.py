@@ -255,7 +255,10 @@ def measure_workdir(
 
         lines_total = 0
         lines_filled = 0
+        merged_lines_total = 0
+        merged_lines_filled = 0
         paragraphs_all_ok = 0
+        paragraphs_merged_all_ok = 0
         diffs: list[dict] = []
         non_formula_applied = 0
         non_formula_zero_diff = 0
@@ -274,6 +277,17 @@ def measure_workdir(
             lines_filled += sum(1 for value in body_fills if value >= fill_threshold)
             if body_fills and all(value >= fill_threshold for value in body_fills):
                 paragraphs_all_ok += 1
+            # 校正口径（P3）：行内数学的上下标会把同一视觉行拆成多行，首行
+            # 缩进（复刻源排版）会压低首行 fill。基线口径（上面）不变，用于
+            # 向后对比；校正口径按视觉行合并 + 首行按缩进后宽度归一。
+            visual = _visual_line_fills(doc[item["page"]], rect) if rect is not None else []
+            merged_body = visual[:-1] if len(visual) > 1 else []
+            merged_lines_total += len(merged_body)
+            merged_lines_filled += sum(
+                1 for value in merged_body if value >= fill_threshold
+            )
+            if merged_body and all(v >= fill_threshold for v in merged_body):
+                paragraphs_merged_all_ok += 1
 
             target = (translated.get(item["id"]) or {}).get("target") or ""
             # 期望可见文本：capture 写的 plain_text（译文去标记 + text/mineru/
@@ -349,7 +363,17 @@ def measure_workdir(
             "lines_nonfinal_ge_threshold_ratio": (
                 round(lines_filled / lines_total, 4) if lines_total else None
             ),
+            #: 校正口径：同一视觉行合并（行内数学上下标）+ 首行按缩进后宽度
+            #: 归一；基线口径（上面）保持不变（向后对比）。
+            "lines_nonfinal_merged_total": merged_lines_total,
+            "lines_nonfinal_merged_ge_threshold": merged_lines_filled,
+            "lines_nonfinal_merged_ge_threshold_ratio": (
+                round(merged_lines_filled / merged_lines_total, 4)
+                if merged_lines_total
+                else None
+            ),
             "applied_paragraphs_all_nonfinal_ok": paragraphs_all_ok,
+            "applied_paragraphs_merged_all_nonfinal_ok": paragraphs_merged_all_ok,
             "fusion_classes": (report or {}).get("fusion") or {},
             "applied_paragraphs_zero_diff_non_formula": non_formula_zero_diff,
             #: 严格字符级（text_diff==0）计数：断词连字符/同形字形会让它偏低，
@@ -374,6 +398,51 @@ def measure_workdir(
     return summary
 
 
+def _visual_line_fills(page: pymupdf.Page, clip: pymupdf.Rect) -> list[float]:
+    """按**视觉行**量测填充率（校正 P3 引入的两个度量伪影）。
+
+    1. 行内数学的上下标会让 PyMuPDF 把同一视觉行报成多条 line（基线不同），
+       按基线差 ≤ 3bp 合并；
+    2. 复刻源首行缩进后，首行的墨迹天然从缩进处开始，因此首行按
+       ``宽 - 缩进`` 归一（其余行仍按整个 box 宽）。
+    """
+    rows: list[dict] = []
+    for block in page.get_text("dict", clip=clip)["blocks"]:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = [span for span in line["spans"] if span["text"].strip()]
+            if not spans:
+                continue
+            rows.append(
+                {
+                    "y": sum((s["bbox"][1] + s["bbox"][3]) / 2 for s in spans)
+                    / len(spans),
+                    "x0": min(s["bbox"][0] for s in spans),
+                    "x1": max(s["bbox"][2] for s in spans),
+                }
+            )
+    if not rows:
+        return []
+    rows.sort(key=lambda row: row["y"])
+    merged: list[dict] = []
+    for row in rows:
+        if merged and abs(row["y"] - merged[-1]["y"]) <= 3.0:
+            current = merged[-1]
+            current["x0"] = min(current["x0"], row["x0"])
+            current["x1"] = max(current["x1"], row["x1"])
+        else:
+            merged.append(dict(row))
+    fills: list[float] = []
+    for index, row in enumerate(merged):
+        indent = max(0.0, row["x0"] - clip.x0) if index == 0 else 0.0
+        width = clip.width - indent
+        if width <= 0:
+            continue
+        fills.append((row["x1"] - row["x0"]) / width)
+    return fills
+
+
 def render_markdown(result: dict) -> str:
     """把度量结果渲染成便于目视的 Markdown 摘要。"""
     lines = [
@@ -389,6 +458,12 @@ def render_markdown(result: dict) -> str:
         f"**{result['lines_nonfinal_ge_threshold_ratio']}**"
         f"（{result['lines_nonfinal_ge_threshold']}/{result['lines_nonfinal_total']}）",
         f"- applied 段全部非末行达标: {result['applied_paragraphs_all_nonfinal_ok']}"
+        f"/{result['applied']}",
+        f"- 校正口径（视觉行合并 + 首行缩进归一）行占比: "
+        f"**{result['lines_nonfinal_merged_ge_threshold_ratio']}**"
+        f"（{result['lines_nonfinal_merged_ge_threshold']}"
+        f"/{result['lines_nonfinal_merged_total']}），"
+        f"段全部达标 {result['applied_paragraphs_merged_all_nonfinal_ok']}"
         f"/{result['applied']}",
         f"- 非公式 applied 段文本层完整（容差口径，期望文本是抽取文本的子序列）: "
         f"**{result['applied_paragraphs_zero_diff_non_formula']}"
@@ -470,6 +545,7 @@ def main() -> int:
         f"eligible={result['eligible']} applied={result['applied']} "
         f"rate={result['application_rate']} "
         f"nonfinal_fill_ratio={result['lines_nonfinal_ge_threshold_ratio']} "
+        f"merged_fill_ratio={result['lines_nonfinal_merged_ge_threshold_ratio']} "
         f"zero_diff={result['applied_paragraphs_zero_diff_non_formula']}"
         f"/{result['applied_paragraphs_non_formula']} "
         f"max_text_diff={result['text_diff_max']} "

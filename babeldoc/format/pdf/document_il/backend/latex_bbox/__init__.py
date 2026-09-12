@@ -7,6 +7,8 @@
 公共入口：
 
 - :func:`record_source_texts` — 翻译之前记录源文（未翻译段判定）；
+- :func:`capture_source_line_geometry` — 翻译之前采集源行几何（缩进/行距/净空）；
+- :func:`geometry_from_char_objects` — 旧 workdir 用 ``page_char_objects`` 兜底；
 - :func:`capture_layout_sources` — Typesetting 之前捕获源几何 + 公式融合 body
   （四级分类 text/mineru/simple_math/fragment；fragment 记录源区域裁剪引用）；
 - :class:`LatexBboxOverlay` — PDFCreater.write 的 ``prepare``（内容流前预选+编译）
@@ -41,6 +43,12 @@ from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
 )
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import StampRequest
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import StampResult
+from babeldoc.format.pdf.document_il.backend.latex_bbox.source_geometry import (
+    capture_source_line_geometry,
+)
+from babeldoc.format.pdf.document_il.backend.latex_bbox.source_geometry import (
+    geometry_from_char_objects,
+)
 
 __all__ = [
     "LatexCapability",
@@ -57,4 +65,6 @@ __all__ = [
     "BboxStampRenderer",
     "StampRequest",
     "StampResult",
+    "capture_source_line_geometry",
+    "geometry_from_char_objects",
 ]

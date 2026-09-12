@@ -23,6 +23,7 @@ import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from dataclasses import field
+from functools import lru_cache
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -34,16 +35,23 @@ TEX_HEADER = r"""\documentclass{article}
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{graphicx}
-\setCJKmainfont[Path=%(fontdir)s/,Extension=.ttf,UprightFont=%(cjkbase)s%(boldfont)s]{%(cjkbase)s}
+\usepackage[english]{babel}
+\usepackage{url}
+%(fontsetup)s
 \XeTeXlinebreaklocale "zh"
-\XeTeXlinebreakskip = 0pt plus 1pt
+\XeTeXlinebreakskip = 0pt plus 0.3em
 \xeCJKsetup{PunctStyle=plain}
+\hyphenpenalty=50
+\tolerance=1500
+\emergencystretch=1em
+\lineskiplimit=-\maxdimen
 \pagestyle{empty}
-\setlength{\parindent}{0pt}
+\setlength{\parindent}{%(parindent).4fbp}
 \setlength{\parskip}{0pt}
+%(topskip)s
 \begin{document}
 \fontsize{%(fs).4fbp}{%(lead).4fbp}\selectfont
-%(body)s
+%(hangindent)s%(body)s
 \end{document}
 """
 
@@ -53,13 +61,68 @@ TEX_HEADER = r"""\documentclass{article}
 _SHRINK_FACTOR = 0.95
 _MAX_SHRINK_STEPS = 12
 _MIN_FONT_SIZE = 4.0
-#: 行距系数：与产品 Typesetting 的 CJK 默认 line_skip(1.5) 一致。
+#: 行距系数：产品 Typesetting 的 CJK 默认 line_skip(1.5)，用于没有源行距时。
 DEFAULT_LEAD_RATIO = 1.5
 _DEFAULT_LEAD_RATIO = DEFAULT_LEAD_RATIO
+#: 源行距推导的可行区间（相对源字号）：clamp(baseline_pitch, 1.15fs, 1.6fs)。
+_LEAD_RATIO_MIN = 1.15
+_LEAD_RATIO_MAX = 1.6
+#: 字号缩小前先试的行距系数（相对推导出的源行距）。
+_LEAD_TRIAL_RATIOS = (1.1, 0.9)
+#: 字体 ascender 探测失败时的保守上限（首行墨迹不会被裁）。
+_DEFAULT_ASCENT_RATIO = 1.15
+#: ``\topskip`` 额外余量（em）：行内数学的上标会把墨迹抬到字体 ascender 之上。
+_TOPSKIP_HEADROOM_EM = 0.1
 #: 墨迹/overfull 判定容差（pt），吸收 geometry 舍入。
 _FIT_TOLERANCE = 0.5
 #: 进程内 stamp 缓存上限（LRU 近似：超限清空）。
 _CACHE_LIMIT = 512
+
+
+def derive_lead(font_size: float, baseline_pitch: float | None) -> float:
+    """由源行间距推导行距：``clamp(baseline_pitch, 1.15fs, 1.6fs)``。
+
+    没有源行距（旧产物/无几何）时退回产品 CJK 默认系数 1.5。
+    """
+    if not baseline_pitch or baseline_pitch <= 0 or font_size <= 0:
+        return font_size * DEFAULT_LEAD_RATIO
+    return min(
+        max(float(baseline_pitch), font_size * _LEAD_RATIO_MIN),
+        font_size * _LEAD_RATIO_MAX,
+    )
+
+
+@lru_cache(maxsize=8)
+def _font_ascent_ratio(font_path: str) -> float:
+    """字体 ascender（em）：``\topskip`` 按真实字面上开，失败时取保守上限。"""
+    try:
+        import pymupdf
+
+        value = float(pymupdf.Font(fontfile=font_path).ascender)
+        return value if value > 0 else _DEFAULT_ASCENT_RATIO
+    except Exception:  # noqa: BLE001 - 字体不可读时用保守值
+        return _DEFAULT_ASCENT_RATIO
+
+
+def _face_clause(command: str, files: dict[str, str]) -> str:
+    """用路径加载字体的一行 fontspec 声明（四体可选）。"""
+    regular = Path(files["regular"])
+    options = [
+        f"Path={regular.parent}/",
+        "Extension=.ttf",
+        f"UprightFont={regular.stem}",
+    ]
+    for key, option in (
+        ("bold", "BoldFont"),
+        ("italic", "ItalicFont"),
+        ("bolditalic", "BoldItalicFont"),
+    ):
+        value = files.get(key)
+        if value:
+            options.append(f"{option}={Path(value).stem}")
+    return "\\{command}[{options}]{{{regular.stem}}}".format(
+        command=command, options=",".join(options), regular=regular
+    )
 
 
 @dataclass(slots=True)
@@ -73,6 +136,27 @@ class StampRequest:
     font_size: float
     #: 期望可见文本（去标记、去公式的纯文本），用于检测垂直裁剪丢字。
     expected_text: str = ""
+    #: 源行距（bp）。None → ``font_size * DEFAULT_LEAD_RATIO``。
+    lead: float | None = None
+    #: 首行缩进（bp，正=缩进、负=悬挂 → 转成 hangindent）。
+    first_line_dx: float = 0.0
+    #: 首行字顶到 box 顶的距离（bp），写入 ``\topskip``；None=无源几何，不设。
+    ascent_top: float | None = None
+    #: 段落主字体是否衬线（决定拉丁/中文用 Noto Serif/Source Han Serif 还是 Sans）。
+    serif: bool = True
+
+    @property
+    def indentation(self) -> tuple[float, float]:
+        r"""→ (parindent, hangindent)，保留首行相对其余行的偏移。
+
+        正 dx（首行缩进）→ ``\parindent=dx``；
+        负 dx（悬挂：首行在段落左缘、其余行缩进）→ ``\hangindent=|dx|`` 且
+        ``\hangafter=1``（只缩首行之后的行），``\parindent=0``。
+        """
+        dx = float(self.first_line_dx or 0.0)
+        if dx >= 0.0:
+            return dx, 0.0
+        return 0.0, abs(dx)
 
     @property
     def cache_key(self) -> tuple:
@@ -81,7 +165,10 @@ class StampRequest:
             round(self.width, 2),
             round(self.height, 2),
             round(self.font_size, 2),
-            _DEFAULT_LEAD_RATIO,
+            round(float(self.lead), 3) if self.lead else None,
+            round(float(self.first_line_dx or 0.0), 3),
+            None if self.ascent_top is None else round(float(self.ascent_top), 3),
+            bool(self.serif),
         )
 
 
@@ -94,6 +181,8 @@ class StampResult:
     pdf_path: str | None = None
     font_size: float | None = None
     scale: float | None = None
+    #: 实际使用的行距（bp），供决策报告与验收对账。
+    lead: float | None = None
     seconds: float = 0.0
     compile_attempts: int = 0
     reason: str = ""
@@ -228,22 +317,96 @@ class BboxStampRenderer:
         return self._compile_seconds
 
     def build_tex(
-        self, body: str, width: float, height: float, font_size: float
+        self,
+        body: str,
+        width: float,
+        height: float,
+        font_size: float,
+        *,
+        lead: float | None = None,
+        parindent: float = 0.0,
+        hangindent: float = 0.0,
+        topskip: float | None = None,
+        serif: bool = True,
     ) -> str:
-        font_path = Path(self._capability.font_path)
-        cjk_base = font_path.stem
-        bold = self._capability.bold_font_path
-        bold_clause = f",BoldFont={Path(bold).stem}" if bold else ""
+        effective_lead = float(lead) if lead else font_size * _DEFAULT_LEAD_RATIO
+        hang_clause = ""
+        if hangindent:
+            # ``\hangindent``/``\hangafter`` 只在正文里生效（导言区赋值会被
+            # ``\begin{document}`` 重置），因此放在 ``\selectfont`` 之后。
+            hang_clause = (
+                f"\\setlength{{\\hangindent}}{{{hangindent:.4f}bp}}\\hangafter=1\n"
+            )
+        # ``\topskip`` = 源首行字顶余量 + 字体 ascender：首行墨迹不从 box 顶溢出
+        # （TeX 把首行 baseline 放在 ``max(\topskip, 行高)``）。
+        topskip_clause = ""
+        if topskip is not None:
+            ascent_ratio = max(
+                (
+                    _font_ascent_ratio(path)
+                    for path in self._regular_font_paths(serif)
+                ),
+                default=_DEFAULT_ASCENT_RATIO,
+            )
+            topskip_clause = (
+                f"\\setlength{{\\topskip}}{{{max(0.0, float(topskip)) + (ascent_ratio + _TOPSKIP_HEADROOM_EM) * font_size:.4f}bp}}\n"
+            )
         return TEX_HEADER % {
             "w": width,
             "h": height,
-            "fontdir": font_path.parent,
-            "cjkbase": cjk_base,
-            "boldfont": bold_clause,
+            "fontsetup": self._font_setup(serif),
             "fs": font_size,
-            "lead": font_size * _DEFAULT_LEAD_RATIO,
+            "lead": effective_lead,
+            "parindent": parindent,
+            "hangindent": hang_clause,
+            "topskip": topskip_clause,
             "body": body,
         }
+
+    def _regular_font_paths(self, serif: bool) -> list[str]:
+        """实际会用到的正体字体路径（算 ``\topskip`` 的 ascender）。"""
+        capability = self._capability
+        paths: list[str] = []
+        latin = capability.latin_fonts(serif)
+        if latin and latin.get("regular"):
+            paths.append(latin["regular"])
+        if capability.font_explicit:
+            if capability.font_path:
+                paths.append(capability.font_path)
+            return paths
+        cjk = capability.cjk_fonts(serif)
+        if cjk and cjk.get("regular"):
+            paths.append(cjk["regular"])
+        elif capability.font_path:
+            paths.append(capability.font_path)
+        return paths
+
+    def _font_setup(self, serif: bool) -> str:
+        """字体声明：与产品一致（拉丁 Noto Serif/Sans，中文 Source Han Serif/Sans）。
+
+        显式 ``--latex-cjk-font-path`` 优先（用户指定则只设中文主字体，拉丁
+        仍尽力用产品字体）；拉丁字体缺失时不声明 → 退回 Latin Modern。
+        """
+        capability = self._capability
+        clauses: list[str] = []
+        latin = capability.latin_fonts(serif)
+        if latin:
+            clauses.append(_face_clause("setmainfont", latin))
+        if capability.font_explicit and capability.font_path:
+            explicit = {"regular": capability.font_path}
+            if capability.bold_font_path:
+                explicit["bold"] = capability.bold_font_path
+            clauses.append(_face_clause("setCJKmainfont", explicit))
+            return "\n".join(clauses)
+        cjk = capability.cjk_fonts(serif) or capability.cjk_fonts(not serif)
+        if cjk is None and capability.font_path:
+            fallback = {"regular": capability.font_path}
+            if capability.bold_font_path:
+                fallback["bold"] = capability.bold_font_path
+            cjk = fallback
+        if cjk:
+            clauses.append(_face_clause("setCJKmainfont", cjk))
+        return "\n".join(clauses)
 
     def render_one(self, request: StampRequest, workdir: Path) -> StampResult:
         """编译单个请求（含缓存与有界缩小）。调用方负责 workdir 生命周期。"""
@@ -282,7 +445,25 @@ class BboxStampRenderer:
     def _render_uncached(self, request: StampRequest, workdir: Path) -> StampResult:
         started = time.perf_counter()
         result = StampResult(key=request.key)
-        font_size = request.font_size
+        base_lead = (
+            float(request.lead)
+            if request.lead
+            else request.font_size * _DEFAULT_LEAD_RATIO
+        )
+        parindent, hangindent = request.indentation
+        # 尝试阶梯（P3-4）：先源字号 + 源行距，再在 [0.9, 1.1]×源行距 调两步，
+        # 最后才进有界字号缩小（行距随字号等比缩放）。
+        ladder: list[tuple[float, float]] = [(request.font_size, base_lead)]
+        ladder.extend(
+            (request.font_size, base_lead * ratio) for ratio in _LEAD_TRIAL_RATIOS
+        )
+        for step in range(1, _MAX_SHRINK_STEPS + 1):
+            size = max(
+                request.font_size * (_SHRINK_FACTOR**step), _MIN_FONT_SIZE
+            )
+            ladder.append((size, base_lead * (size / request.font_size)))
+            if size <= _MIN_FONT_SIZE:
+                break
         reasons: list[str] = []
         logs: list[str] = []
         # 目录名带 request.key：内容相同的不同段落各自独立编译目录，
@@ -293,11 +474,21 @@ class BboxStampRenderer:
         safe_key = re.sub(r"[^0-9A-Za-z_-]", "_", str(request.key))[:24]
         stem = f"{safe_key}-{stem}"
         try:
-            for step in range(_MAX_SHRINK_STEPS + 1):
+            for step, (font_size, lead) in enumerate(ladder):
                 result.compile_attempts = step + 1
                 attempt_dir = workdir / f"{stem}_s{step}"
                 attempt_dir.mkdir(parents=True, exist_ok=True)
-                tex = self.build_tex(request.body, request.width, request.height, font_size)
+                tex = self.build_tex(
+                    request.body,
+                    request.width,
+                    request.height,
+                    font_size,
+                    lead=lead,
+                    parindent=parindent,
+                    hangindent=hangindent,
+                    topskip=request.ascent_top,
+                    serif=request.serif,
+                )
                 outcome = self._compile_tex(tex, attempt_dir, stem, font_size)
                 logs.extend(outcome["errors"][:3])
                 if not outcome["compiled"]:
@@ -306,7 +497,9 @@ class BboxStampRenderer:
                     result.log_excerpt = logs
                     return result
                 fits, fit_reason, _ = _measure_fit(
-                    attempt_dir / f"{stem}.pdf", request.width, request.height,
+                    attempt_dir / f"{stem}.pdf",
+                    request.width,
+                    request.height,
                     request.expected_text,
                 )
                 if outcome["overfull_hbox"]:
@@ -318,6 +511,7 @@ class BboxStampRenderer:
                     result.pdf_path = str(attempt_dir / f"{stem}.pdf")
                     result.font_size = font_size
                     result.scale = font_size / request.font_size
+                    result.lead = lead
                     result.reason = "ok"
                     result.log_excerpt = logs
                     return result
@@ -327,10 +521,6 @@ class BboxStampRenderer:
                     result.reason = ";".join(reasons)
                     result.log_excerpt = logs
                     return result
-                next_size = max(font_size * _SHRINK_FACTOR, _MIN_FONT_SIZE)
-                if next_size >= font_size:
-                    break
-                font_size = next_size
             result.reason = ";".join(reasons) or "shrink-exhausted"
             result.log_excerpt = logs
             return result

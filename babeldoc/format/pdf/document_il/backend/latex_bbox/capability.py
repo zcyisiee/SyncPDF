@@ -24,6 +24,8 @@ REQUIRED_PACKAGES = (
     "amsmath",
     "amssymb",
     "graphicx",
+    "babel",
+    "url",
 )
 
 #: 常见安装路径（macOS TeX Live、Linux 发行版）。
@@ -56,6 +58,34 @@ _CJK_FONT_CANDIDATES = {
     ),
 }
 
+#: 中文正文字体（与产品 CN_FONT_FAMILY 一致）：serif / sans 两套。
+_CJK_FAMILY_FILES = {
+    "serif": (
+        "SourceHanSerifCN-Regular.ttf",
+        "SourceHanSerifCN-Bold.ttf",
+    ),
+    "sans": (
+        "SourceHanSansCN-Regular.ttf",
+        "SourceHanSansCN-Bold.ttf",
+    ),
+}
+
+#: 拉丁字体（与产品 CN_FONT_FAMILY.normal 一致）：serif=Noto Serif，sans=Noto Sans。
+_LATIN_FAMILY_FILES = {
+    "serif": {
+        "regular": "NotoSerif-Regular.ttf",
+        "bold": "NotoSerif-Bold.ttf",
+        "italic": "NotoSerif-Italic.ttf",
+        "bolditalic": "NotoSerif-BoldItalic.ttf",
+    },
+    "sans": {
+        "regular": "NotoSans-Regular.ttf",
+        "bold": "NotoSans-Bold.ttf",
+        "italic": "NotoSans-Italic.ttf",
+        "bolditalic": "NotoSans-BoldItalic.ttf",
+    },
+}
+
 
 @dataclass(slots=True)
 class LatexCapability:
@@ -68,6 +98,17 @@ class LatexCapability:
     missing_packages: list[str] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
     pymupdf_ok: bool = True
+    #: 拉丁字体四体（regular/bold/italic/bolditalic）；探测不到时为 None，
+    #: 模板退回 Latin Modern（只 warning，不阻断）。
+    latin_serif_fonts: dict[str, str] | None = None
+    latin_sans_fonts: dict[str, str] | None = None
+    #: 中文正文两套（serif/sans，各含 regular/bold）。
+    cjk_serif_fonts: dict[str, str] | None = None
+    cjk_sans_fonts: dict[str, str] | None = None
+    #: 非致命提示（例如拉丁字体缺失）。
+    notes: list[str] = field(default_factory=list)
+    #: 中文字体是否由调用方显式指定（显式时只设中文主字体，不用候选族）。
+    font_explicit: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -78,7 +119,21 @@ class LatexCapability:
             "missing_packages": list(self.missing_packages),
             "reasons": list(self.reasons),
             "pymupdf_ok": self.pymupdf_ok,
+            "latin_serif_fonts": self.latin_serif_fonts,
+            "latin_sans_fonts": self.latin_sans_fonts,
+            "cjk_serif_fonts": self.cjk_serif_fonts,
+            "cjk_sans_fonts": self.cjk_sans_fonts,
+            "notes": list(self.notes),
+            "font_explicit": self.font_explicit,
         }
+
+    def latin_fonts(self, serif: bool) -> dict[str, str] | None:
+        """按 serif 标志取拉丁四体（缺失返回 None）。"""
+        return self.latin_serif_fonts if serif else self.latin_sans_fonts
+
+    def cjk_fonts(self, serif: bool) -> dict[str, str] | None:
+        """按 serif 标志取中文 regular/bold（缺失返回 None）。"""
+        return self.cjk_serif_fonts if serif else self.cjk_sans_fonts
 
 
 def _find_xelatex(explicit: str | None) -> str | None:
@@ -113,6 +168,47 @@ def _find_cjk_font(explicit: str | None, primary_font_family: str | None):
 def _guess_bold_sibling(path: Path) -> Path | None:
     bold = path.with_name(path.name.replace("Regular", "Bold"))
     return bold if bold.is_file() else None
+
+
+def _font_dirs(explicit_font_path: str | None) -> list[Path]:
+    """字体查找目录：显式字体所在目录优先，再看 BabelDOC 字体缓存目录。"""
+    dirs: list[Path] = []
+    if explicit_font_path:
+        parent = Path(explicit_font_path).parent
+        if parent.is_dir():
+            dirs.append(parent)
+    if _FONT_CACHE_DIR not in dirs:
+        dirs.append(_FONT_CACHE_DIR)
+    return dirs
+
+
+def _find_face(dirs: list[Path], file_name: str) -> Path | None:
+    for directory in dirs:
+        candidate = directory / file_name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _latin_face_files(dirs: list[Path], styles: dict[str, str]) -> dict[str, str] | None:
+    """四个字形都齐才算命中（缺一则整组退回默认）。"""
+    found: dict[str, str] = {}
+    for key, file_name in styles.items():
+        path = _find_face(dirs, file_name)
+        if path is None:
+            return None
+        found[key] = str(path)
+    return found
+
+
+def _cjk_face_files(dirs: list[Path], names: tuple[str, str]) -> dict[str, str] | None:
+    regular, bold = (_find_face(dirs, name) for name in names)
+    if regular is None:
+        return None
+    result = {"regular": str(regular)}
+    if bold is not None:
+        result["bold"] = str(bold)
+    return result
 
 
 def _missing_packages(xelatex_path: str) -> list[str]:
@@ -156,10 +252,29 @@ def probe_latex_capability(
     capability.font_path, capability.bold_font_path = _find_cjk_font(
         font_path, primary_font_family
     )
+    capability.font_explicit = bool(font_path) and capability.font_path is not None
     if capability.font_path is None:
         capability.reasons.append(
             f"未找到中文字体（查找 {_FONT_CACHE_DIR}，可用 --latex-cjk-font-path 指定）"
         )
+
+    # 拉丁/中文两套字体：与产品一致（拉丁 Noto Serif/Sans，中文 Source Han
+    # Serif/Sans CN）。拉丁字体缺失只 warning（模板退回 Latin Modern）。
+    font_dirs = _font_dirs(font_path)
+    capability.latin_serif_fonts = _latin_face_files(
+        font_dirs, _LATIN_FAMILY_FILES["serif"]
+    )
+    capability.latin_sans_fonts = _latin_face_files(
+        font_dirs, _LATIN_FAMILY_FILES["sans"]
+    )
+    capability.cjk_serif_fonts = _cjk_face_files(font_dirs, _CJK_FAMILY_FILES["serif"])
+    capability.cjk_sans_fonts = _cjk_face_files(font_dirs, _CJK_FAMILY_FILES["sans"])
+    if capability.latin_serif_fonts is None and capability.latin_sans_fonts is None:
+        capability.notes.append(
+            f"未找到拉丁字体（查找 {', '.join(str(d) for d in font_dirs)}），"
+            "拉丁字形退回 Latin Modern"
+        )
+        logger.warning("LaTeX bbox 未找到产品拉丁字体，拉丁字形退回 Latin Modern")
 
     if capability.xelatex_path is not None:
         capability.missing_packages = _missing_packages(capability.xelatex_path)
