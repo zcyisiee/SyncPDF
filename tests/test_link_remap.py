@@ -511,3 +511,80 @@ class TestSnapshotLinks:
         # 段落字符在前，未入段的 page.pdf_character 在后
         assert collected[:2] == para_chars
         assert collected[2] is orphan
+
+
+def test_safe_insert_link_repairs_link_substring_corruption(tmp_path):
+    """pymupdf 1.27 getLinkText 的 /NM 注入缺陷回归：URI 含 "/Link" 子串。
+
+    上游 ``annot.replace("/Link", "/Link/NM(name)")`` 会把 URI 中首次出现的
+    "/Link" 一并改写（真实论文 llvm.org/docs/LinkTimeOptimization.html 被
+    污染并触发 URI 集合门禁失败）。safe_insert_link 必须修复该污染。
+    """
+    import pymupdf
+    from babeldoc.format.pdf.document_il.backend.link_remap import safe_insert_link
+
+    doc = pymupdf.open()
+    page = doc.new_page(width=300, height=100)
+    uri = "https://llvm.org/docs/LinkTimeOptimization.html"
+    safe_insert_link(page, {"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(10, 10, 100, 30), "uri": uri})
+    # pymupdf 的 link 读缓存在 insert 后是脏的（get_links 可能暂不可见），
+    # 一律用落盘 reload 验证（污染发生在对象序列化层）。
+    out = tmp_path / "link-corrupt.pdf"
+    doc.save(out)
+    doc.close()
+    doc = pymupdf.open(out)
+    uris = [l["uri"] for l in doc[0].get_links()]
+    assert uris == [uri]
+    doc.close()
+
+
+def test_remap_page_links_preserves_uri_containing_link_substring(tmp_path):
+    """remap_page_links 全链路：URI 含 "/Link" 子串时重定位后目标不变。"""
+    import pymupdf
+    from babeldoc.format.pdf.document_il.backend.link_remap import remap_page_links
+
+    doc = pymupdf.open()
+    page = doc.new_page(width=300, height=200)
+    uri = "https://example.org/docs/LinkCheck.html"
+    # 暂存注记不能用 insert_link（它自身就会触发同一上游缺陷把 URI 污染），
+    # 用 xref 手工构造干净的源链接。
+    annot_xref = doc.get_new_xref()
+    doc.update_object(
+        annot_xref,
+        f"<</A<</S/URI/URI({uri})>>/Rect[10 20 100 40]/Subtype/Link>>",
+    )
+    doc.xref_set_key(page.xref, "Annots", f"[{annot_xref} 0 R]")
+    # pymupdf 的 insert_link 要等 save/reload 后才会出现在 get_links 里。
+    staged = tmp_path / "staged.pdf"
+    doc.save(staged)
+    doc.close()
+    doc = pymupdf.open(staged)
+    page = doc[0]
+    assert [l["uri"] for l in page.get_links()] == [uri]  # 暂存必须干净
+    entries = [
+        {
+            "link_index": 0,
+            "from": (10, 160, 100, 180),
+            "uri": uri,
+            "char_indices": [],
+            "paragraph_ids": ["p0"],
+            "src_rect_ratio": (0.0, 0.0, 1.0, 1.0),
+        }
+    ]
+
+    class FakeBox:
+        x, y, x2, y2 = 20, 40, 260, 60
+
+    class FakeParagraph:
+        box = FakeBox()
+
+    result = remap_page_links(
+        page, entries, [], {"p0": FakeParagraph()}, page.rect.height
+    )
+    assert result.remapped == 1
+    out = tmp_path / "remap-corrupt.pdf"
+    doc.save(out)
+    doc.close()
+    doc = pymupdf.open(out)
+    assert [l["uri"] for l in doc[0].get_links()] == [uri]
+    doc.close()

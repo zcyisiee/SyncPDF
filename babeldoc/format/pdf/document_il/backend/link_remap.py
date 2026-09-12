@@ -238,7 +238,7 @@ def remap_page_links(
             continue
         try:
             dst_page.delete_link(old_link)
-            dst_page.insert_link(new_link)
+            safe_insert_link(dst_page, new_link)
         except Exception:  # noqa: BLE001 - 单条链接失败不应中断重建
             logger.debug("链接重映射失败: %s", entry.get("link_index"), exc_info=True)
             result.unresolved.append(_unresolved_entry(entry))
@@ -287,6 +287,65 @@ def _rebuild_link(link: dict, rect) -> dict | None:
                 "nameddest": nameddest,
             }
     return None
+
+
+def _page_link_xrefs(page: pymupdf.Page) -> list[int]:
+    """页 /Annots 数组里的全部注解 xref（直读 live 对象，避开读缓存）。"""
+    import re
+
+    doc = page.parent
+    kind, value = doc.xref_get_key(page.xref, "Annots")
+    if kind != "array":
+        return []
+    return [int(m) for m in re.findall(r"(\d+)\s+0\s+R", value)]
+
+
+def safe_insert_link(page: pymupdf.Page, link: dict) -> None:
+    """``insert_link`` 的 pymupdf 1.27 缺陷防御：插入后校验并修复字符串字段。
+
+    上游缺陷：``utils.getLinkText`` 用无界 ``str.replace("/Link", "/Link/NM(name)")``
+    给新注记注入 ``/NM``，会连带把 URI/file/nameddest 字段内出现的 ``"/Link"``
+    子串改写（实测 ``https://llvm.org/docs/LinkTimeOptimization.html`` 被污染成
+    ``.../Link/NM(fitz-L13)TimeOptimization.html``，触发 URI 集合门禁失败）。
+
+    这里在目标字段含 ``"/Link"`` 时，插入后通过 live 对象读取新注记的真实
+    落盘值（``annot_xrefs``/``get_links`` 的读缓存可能滞后），不一致则用
+    ``xref_set_key`` 修复。
+    """
+    uri = link.get("uri")
+    file_target = link.get("file")
+    nameddest = link.get("nameddest")
+    if not any("/Link" in str(v) for v in (uri, file_target, nameddest) if v):
+        page.insert_link(link)
+        return
+
+    before = set(_page_link_xrefs(page))
+    page.insert_link(link)
+    doc = page.parent
+    for xref in _page_link_xrefs(page):
+        if xref in before:
+            continue
+        if uri:
+            kind, value = doc.xref_get_key(xref, "A/URI")
+            if kind == "string" and _pdf_string_value(value) != uri:
+                doc.xref_set_key(xref, "A/URI", pymupdf.get_pdf_str(uri))
+        if file_target:
+            kind, value = doc.xref_get_key(xref, "A/F/F")
+            if kind == "string" and _pdf_string_value(value) != file_target:
+                doc.xref_set_key(xref, "A/F/F", pymupdf.get_pdf_str(file_target))
+                doc.xref_set_key(xref, "A/F/UF", pymupdf.get_pdf_str(file_target))
+        if nameddest:
+            kind, value = doc.xref_get_key(xref, "A/D")
+            if kind == "string" and _pdf_string_value(value) != nameddest:
+                doc.xref_set_key(xref, "A/D", pymupdf.get_pdf_str(nameddest))
+
+
+def _pdf_string_value(raw: str) -> str:
+    """``xref_get_key`` 返回的 PDF 字符串值 → 去括号与反转义。"""
+    value = raw.strip()
+    if value.startswith("(") and value.endswith(")"):
+        value = value[1:-1]
+    return value.replace(r"\(", "(").replace(r"\)", ")").replace("\\\\", "\\")
 
 
 def uri_set(pdf) -> set[str]:
