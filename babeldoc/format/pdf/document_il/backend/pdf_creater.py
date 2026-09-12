@@ -858,15 +858,23 @@ class PDFCreater:
         self,
         page: il_version_1.Page,
         translation_config: TranslationConfig,
+        skip_paragraph_ids: frozenset | set | None = None,
     ) -> list[RenderUnit]:
-        """Convert all renderable objects in a page to render units."""
+        """Convert all renderable objects in a page to render units.
+
+        ``skip_paragraph_ids``：已被 LaTeX bbox 贴片接管的段落 debug_id —— 这些
+        段落的字符/公式 form/curve 不再进内容流（无双层文本靠构造保证）。
+        """
         render_units = []
+        skip_ids = skip_paragraph_ids or frozenset()
 
         # Collect all characters (from page and paragraphs)
         chars = []
         if page.pdf_character:
             chars.extend(page.pdf_character)
         for paragraph in page.pdf_paragraph:
+            if paragraph.debug_id and paragraph.debug_id in skip_ids:
+                continue
             chars.extend(self.render_paragraph_to_char(paragraph))
 
         # Convert characters to render units
@@ -880,6 +888,8 @@ class PDFCreater:
         # Collect forms from formulas within paragraphs
         formula_forms = []
         for paragraph in page.pdf_paragraph:
+            if paragraph.debug_id and paragraph.debug_id in skip_ids:
+                continue
             for composition in paragraph.pdf_paragraph_composition:
                 if composition.pdf_formula:
                     formula_forms.extend(composition.pdf_formula.pdf_form)
@@ -917,6 +927,8 @@ class PDFCreater:
         # Collect curves from formulas within paragraphs
         formula_curves = []
         for paragraph in page.pdf_paragraph:
+            if paragraph.debug_id and paragraph.debug_id in skip_ids:
+                continue
             for composition in paragraph.pdf_paragraph_composition:
                 if composition.pdf_formula:
                     formula_curves.extend(composition.pdf_formula.pdf_curve)
@@ -1814,17 +1826,11 @@ class PDFCreater:
             )
             pdf = pymupdf.open(self.original_pdf_path)
             self.font_mapper.add_font(pdf, self.docs)
-            with self.translation_config.progress_monitor.stage_start(
-                self.stage_name,
-                len(self.docs.page),
-            ) as pbar:
-                for page in self.docs.page:
-                    self.update_page_content_stream(
-                        check_font_exists, page, pdf, translation_config
-                    )
-                    pbar.advance()
-            # LaTeX bbox 排版（实验特性，默认关闭）：内容流生成后、超链接
-            # 重映射之前做选择性贴片；任何失败都安全回退现有渲染。
+            # LaTeX bbox 排版（实验特性，默认关闭）：内容流生成**之前**先选段 +
+            # 编译（此时页面还是源文，可量测源行数），生成内容流时跳过已贴片段落
+            # 的字符（旧路径译文不入流），生成之后再贴片。任何失败都安全回退。
+            latex_overlay = None
+            skip_paragraph_ids: frozenset = frozenset()
             if (
                 getattr(translation_config, "enable_latex_bbox_layout", False)
                 and not self._latex_overlay_done
@@ -1832,19 +1838,62 @@ class PDFCreater:
                 self._latex_overlay_done = True
                 try:
                     from babeldoc.format.pdf.document_il.backend.latex_bbox import (
-                        apply_latex_bbox_overlay,
+                        LatexBboxOverlay,
                     )
 
-                    pdf, latex_stats = apply_latex_bbox_overlay(
+                    latex_overlay = LatexBboxOverlay(
                         pdf, self.docs, translation_config
                     )
-                    self.latex_bbox_stats = latex_stats
-                    translation_config.latex_bbox_stats = latex_stats
+                    skip_paragraph_ids = frozenset(latex_overlay.prepare())
+                except Exception:
+                    logger.warning(
+                        "LaTeX bbox 预选失败，保留现有渲染", exc_info=True
+                    )
+                    latex_overlay = None
+                    skip_paragraph_ids = frozenset()
+                    self.latex_bbox_stats = {"error": "overlay-exception"}
+                    translation_config.latex_bbox_stats = self.latex_bbox_stats
+            with self.translation_config.progress_monitor.stage_start(
+                self.stage_name,
+                len(self.docs.page),
+            ) as pbar:
+                for page in self.docs.page:
+                    self.update_page_content_stream(
+                        check_font_exists,
+                        page,
+                        pdf,
+                        translation_config,
+                        skip_paragraph_ids=skip_paragraph_ids,
+                    )
+                    pbar.advance()
+            if latex_overlay is not None:
+                try:
+                    pages_by_number = {
+                        page.page_number: page for page in self.docs.page
+                    }
+
+                    def _regenerate_pages(page_indices) -> None:
+                        """链接校验失败时重新生成受影响页（不跳过字符）。
+
+                        ``set_contents`` 会整页替换内容流，贴片随之丢弃。
+                        """
+                        for page_index in page_indices:
+                            target = pages_by_number.get(page_index)
+                            if target is None:
+                                continue
+                            self.update_page_content_stream(
+                                check_font_exists, target, pdf, translation_config
+                            )
+
+                    pdf = latex_overlay.stamp(regenerate_pages=_regenerate_pages)
+                    self.latex_bbox_stats = latex_overlay.stats
+                    translation_config.latex_bbox_stats = latex_overlay.stats
                 except Exception:
                     logger.warning(
                         "LaTeX bbox overlay 异常，保留现有渲染", exc_info=True
                     )
                     self.latex_bbox_stats = {"error": "overlay-exception"}
+                    translation_config.latex_bbox_stats = self.latex_bbox_stats
             # 超链接按「源字符身份」重定位：旧实现按译文文字搜索，译文改写后飘移。
             # 无 link_remap_state 时（旧调用方）跳过，保持现状行为。
             if self.link_remap_state:
@@ -2023,7 +2072,13 @@ class PDFCreater:
             raise
 
     def update_page_content_stream(
-        self, check_font_exists, page, pdf, translation_config, skip_char: bool = False
+        self,
+        check_font_exists,
+        page,
+        pdf,
+        translation_config,
+        skip_char: bool = False,
+        skip_paragraph_ids: frozenset | set | None = None,
     ):
         assert page.cropbox is not None and page.cropbox.box is not None
         page_crop_box = page.cropbox.box
@@ -2091,7 +2146,9 @@ class PDFCreater:
             check_font_exists=check_font_exists,
         )
         # Create render units for all renderable objects
-        render_units = self.create_render_units_for_page(page, translation_config)
+        render_units = self.create_render_units_for_page(
+            page, translation_config, skip_paragraph_ids=skip_paragraph_ids
+        )
         if skip_char:
             render_units = [
                 unit

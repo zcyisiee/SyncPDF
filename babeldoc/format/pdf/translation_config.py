@@ -1,5 +1,6 @@
 import enum
 import logging
+import os
 import shutil
 import tempfile
 import threading
@@ -278,9 +279,10 @@ class TranslationConfig:
         latex_xelatex_path: str | None = None,
         latex_cjk_font_path: str | None = None,
         latex_compile_timeout_seconds: float = 45.0,
-        latex_max_compile_workers: int = 2,
+        latex_max_compile_workers: int | None = None,
         latex_fallback_policy: str = "fallback",
         latex_min_line_fill: float = 0.85,
+        latex_bbox_mode: str = "full",
     ):
         self.translator = translator
         self.term_extraction_translator = term_extraction_translator or translator
@@ -478,7 +480,11 @@ class TranslationConfig:
         self.latex_xelatex_path = latex_xelatex_path
         self.latex_cjk_font_path = latex_cjk_font_path
         self.latex_compile_timeout_seconds = float(latex_compile_timeout_seconds)
-        self.latex_max_compile_workers = max(1, int(latex_max_compile_workers))
+        # 并发默认取 CPU 核数（上限 16）：一期批量编译按核数吃满。
+        if latex_max_compile_workers is None:
+            self.latex_max_compile_workers = min(os.cpu_count() or 1, 16)
+        else:
+            self.latex_max_compile_workers = max(1, int(latex_max_compile_workers))
         if latex_fallback_policy != "fallback":
             logger.warning(
                 "未知的 latex_fallback_policy=%s，按 fallback 处理",
@@ -486,6 +492,16 @@ class TranslationConfig:
             )
         self.latex_fallback_policy = "fallback"
         self.latex_min_line_fill = float(latex_min_line_fill)
+        # 资格模式：full（默认，正文段落默认走 LaTeX）/ repair（复现旧门禁行为）。
+        if latex_bbox_mode not in ("full", "repair"):
+            logger.warning(
+                "未知的 latex_bbox_mode=%s，按 full 处理",
+                latex_bbox_mode,
+            )
+            latex_bbox_mode = "full"
+        self.latex_bbox_mode = latex_bbox_mode
+        # 翻译前记录的段落源文（debug_id → unicode），供 overlay 判定未翻译段。
+        self.latex_source_texts: dict = {}
         # LaTeX overlay 的源几何快照（capture_layout_sources 在 Typesetting
         # 之前写入）：paragraphs={debug_id: {page/box/font_size/...}}、
         # formula_source_boxes={page_number: {id(formula): box}}。

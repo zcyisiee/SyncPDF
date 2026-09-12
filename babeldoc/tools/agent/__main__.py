@@ -65,6 +65,12 @@ def main(argv=None):
         action="store_true",
         help="开启 LaTeX bbox 排版（实验特性，默认关闭；缺 XeLaTeX/字体时自动回退）",
     )
+    p_recon.add_argument(
+        "--latex-bbox-mode",
+        choices=("full", "repair"),
+        default=None,
+        help="LaTeX bbox 资格模式：full（默认，正文本体段落默认重排）/ repair（复现旧行为）",
+    )
 
     p_render = sub.add_parser("render", help="PDF 页渲染 PNG")
     p_render.add_argument("pdf")
@@ -122,6 +128,7 @@ def main(argv=None):
             output_dir=args.output_dir,
             no_dual=not args.dual,
             latex_bbox=args.latex_bbox,
+            latex_bbox_mode=args.latex_bbox_mode,
         )
     elif args.command == "render":
         result = workflow.render(

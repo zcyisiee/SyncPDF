@@ -6,8 +6,11 @@
 
 公共入口：
 
+- :func:`record_source_texts` — 翻译之前记录源文（未翻译段判定）；
 - :func:`capture_layout_sources` — Typesetting 之前捕获源几何 + 公式融合 body；
-- :func:`apply_latex_bbox_overlay` — PDFCreater.write 内容流生成后执行贴片；
+- :class:`LatexBboxOverlay` — PDFCreater.write 的 ``prepare``（内容流前预选+编译）
+  与 ``stamp``（内容流后贴片）两步入口；
+- :func:`apply_latex_bbox_overlay` — 直接跑完整 overlay（prepare + stamp）；
 - :func:`probe_latex_capability` — XeLaTeX/宏包/字体能力探测。
 """
 
@@ -28,6 +31,9 @@ from babeldoc.format.pdf.document_il.backend.latex_bbox.overlay import (
 from babeldoc.format.pdf.document_il.backend.latex_bbox.overlay import (
     capture_layout_sources,
 )
+from babeldoc.format.pdf.document_il.backend.latex_bbox.overlay import (
+    record_source_texts,
+)
 from babeldoc.format.pdf.document_il.backend.latex_bbox.overlay import write_report
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
     BboxStampRenderer,
@@ -45,6 +51,7 @@ __all__ = [
     "LatexBboxOverlay",
     "apply_latex_bbox_overlay",
     "capture_layout_sources",
+    "record_source_texts",
     "write_report",
     "BboxStampRenderer",
     "StampRequest",
