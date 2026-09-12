@@ -426,8 +426,22 @@ def create_parser():
     translation_group.add_argument(
         "--latex-max-compile-workers",
         type=int,
-        default=2,
-        help="Max concurrent XeLaTeX compile workers for LaTeX bbox layout. (default: 2)",
+        default=None,
+        help=(
+            "Max concurrent XeLaTeX compile workers for LaTeX bbox layout. "
+            "(default: CPU count, capped at 16)"
+        ),
+    )
+    translation_group.add_argument(
+        "--latex-bbox-mode",
+        choices=("full", "repair"),
+        default="full",
+        help=(
+            "LaTeX bbox layout qualification mode: 'full' (default; body "
+            "paragraphs with >=2 source lines are re-typeset unless they fail) "
+            "or 'repair' (legacy gating: only short-line paragraphs are "
+            "replaced)."
+        ),
     )
 
     return parser
@@ -700,6 +714,7 @@ async def main():
             latex_cjk_font_path=args.latex_cjk_font_path,
             latex_compile_timeout_seconds=args.latex_compile_timeout,
             latex_max_compile_workers=args.latex_max_compile_workers,
+            latex_bbox_mode=args.latex_bbox_mode,
         )
 
         def nop(_x):

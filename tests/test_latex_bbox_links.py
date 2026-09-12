@@ -81,7 +81,8 @@ def _translated_paragraph(debug_id: str, text: str, box_il, size: float = 9.0):
         ],
         unicode=text,
         debug_id=debug_id,
-        layout_label="reference",
+        # 正文本体标签：full 模式（默认）只重排 body 标签的段落。
+        layout_label="text",
         xobj_id=0,
         first_line_indent=False,
     )
@@ -115,6 +116,7 @@ class _FakeConfig:
         )
         self.latex_max_compile_workers = kwargs.get("latex_max_compile_workers", 2)
         self.latex_min_line_fill = kwargs.get("latex_min_line_fill", 1.01)
+        self.latex_bbox_mode = kwargs.get("latex_bbox_mode", "full")
         self.primary_font_family = kwargs.get("primary_font_family", None)
         self.working_dir = kwargs.get("working_dir", None)
         self.latex_bbox_stats = {}
@@ -127,7 +129,7 @@ def _bbox_state(debug_id="P01-001", text="这是一段中文参考文献译文�
                 "page": 0,
                 "box": list(_BOX_IL),
                 "font_size": 9.0,
-                "layout_label": "reference",
+                "layout_label": "text",
                 "has_formula": True,
             }
         },

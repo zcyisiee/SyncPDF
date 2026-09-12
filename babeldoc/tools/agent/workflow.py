@@ -465,7 +465,14 @@ def apply(workdir, translated_sheet):
     }
 
 
-def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False, latex_bbox=False):
+def reconstruct(
+    workdir,
+    output_dir=None,
+    no_dual=True,
+    watermark=False,
+    latex_bbox=False,
+    latex_bbox_mode=None,
+):
     """从写回后的 IR 重排并生成 PDF。返回输出路径 dict。
 
     支持 agent 排版微调：读 ``<workdir>/agent/layout_overrides.json`` →
@@ -473,8 +480,9 @@ def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False, latex_b
     box / font_scale；Typesetting 之后 dump ``agent/layout_geometry.json``。
 
     ``latex_bbox=True`` 时开启 LaTeX bbox 排版（实验特性）：Typesetting 之前
-    捕获源几何与公式融合 body，PDFCreater 在内容流生成后选择性贴片；
-    能力缺失或任何失败自动回退现有渲染。
+    捕获源几何与公式融合 body，PDFCreater 在内容流生成时跳过已贴片段落的
+    字符并贴片；能力缺失或任何失败自动回退现有渲染。``latex_bbox_mode``
+    可选 ``"full"``（默认）/ ``"repair"``。
     """
     from babeldoc.tools.agent import layout_geometry
     from babeldoc.tools.agent import layout_overrides
@@ -514,6 +522,8 @@ def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False, latex_b
 
     if latex_bbox:
         config.enable_latex_bbox_layout = True
+        if latex_bbox_mode:
+            config.latex_bbox_mode = str(latex_bbox_mode)
         # 公式融合需要 provider IR（extract 时落在 <workdir>/agent；
         # _base_config 不设 provider_ir_dir，这里补齐，与 extract 保持一致）。
         config.provider_ir_dir = agent_dir(workdir)
@@ -522,7 +532,12 @@ def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False, latex_b
         )
 
         try:
-            capture_layout_sources(doc, config)
+            # 未翻译段判定：用 extract 时记录的源文（translated.jsonl 的输入侧）。
+            source_texts = {
+                debug_id: getattr(item, "unicode", "") or ""
+                for debug_id, item in (state.get("inputs") or {}).items()
+            }
+            capture_layout_sources(doc, config, source_texts=source_texts)
         except Exception:
             logger.warning(
                 "LaTeX bbox 版面源捕获失败，回退现有渲染路径", exc_info=True
@@ -547,6 +562,9 @@ def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False, latex_b
         },
     )
     result = pdf_creater.write(config)
+    # decisions[] 已完整落盘 latex_bbox_report.json；stdout 只给摘要，
+    # 避免把数十 KB 的逐段决策重复展开到终端。
+    latex_stats_summary = _latex_stats_summary(pdf_creater.latex_bbox_stats)
     return {
         "mono_pdf": str(result.mono_pdf_path) if result.mono_pdf_path else None,
         "dual_pdf": str(result.dual_pdf_path) if result.dual_pdf_path else None,
@@ -560,13 +578,24 @@ def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False, latex_b
         ),
         "link_unresolved": pdf_creater.link_stats.get("unresolved", []),
         "link_uri_set_match": pdf_creater.link_stats.get("uri_set_match"),
-        "latex_bbox": pdf_creater.latex_bbox_stats,
+        "latex_bbox": latex_stats_summary,
         "latex_bbox_report": (
             str(Path(config.working_dir) / "latex_bbox_report.json")
             if pdf_creater.latex_bbox_stats
             else None
         ),
     }
+
+
+def _latex_stats_summary(stats: dict | None) -> dict | None:
+    """去掉逐段 decisions，只留摘要（完整报告在 latex_bbox_report.json）。"""
+    if not stats:
+        return stats
+    summary = dict(stats)
+    decisions = summary.pop("decisions", None)
+    if decisions is not None:
+        summary["decision_count"] = len(decisions)
+    return summary
 
 
 def render(pdf_path, pages, dpi=110, out_dir=None):

@@ -27,7 +27,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 TEX_HEADER = r"""\documentclass{article}
-\usepackage[paperwidth=%(w).4fpt,paperheight=%(h).4fpt,margin=0pt]{geometry}
+\usepackage[paperwidth=%(w).4fbp,paperheight=%(h).4fbp,margin=0pt]{geometry}
 \usepackage{fontspec}
 \usepackage{xeCJK}
 \usepackage{amsmath}
@@ -40,12 +40,14 @@ TEX_HEADER = r"""\documentclass{article}
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{0pt}
 \begin{document}
-\fontsize{%(fs).4f}{%(lead).4f}\selectfont
+\fontsize{%(fs).4fbp}{%(lead).4fbp}\selectfont
 %(body)s
 \end{document}
 """
 
 #: 有界缩小：每步 ×0.95，最多 12 步（≈0.54×），字号绝对下限 4pt。
+#: 长度单位统一用 TeX ``bp``（= 1/72in = PDF 用户单位）：父页面 bbox/fit
+#: 都用 PDF bp，若用 ``pt``（1/72.27in）会差 0.37% 并被 show_pdf_page 拉伸。
 _SHRINK_FACTOR = 0.95
 _MAX_SHRINK_STEPS = 12
 _MIN_FONT_SIZE = 4.0
@@ -222,9 +224,13 @@ class BboxStampRenderer:
         font_size = request.font_size
         reasons: list[str] = []
         logs: list[str] = []
-        stem = hashlib.sha1(  # noqa: S324 - 非密码学用途，仅作缓存文件名
-            f"{request.cache_key}".encode()
+        # 目录名带 request.key：内容相同的不同段落各自独立编译目录，
+        # 并发批编译时不会互相覆盖（缓存命中仍按内容键去重）。
+        stem = hashlib.sha1(  # noqa: S324 - 非密码学用途，仅作临时文件名
+            f"{request.key}|{request.cache_key}".encode()
         ).hexdigest()[:16]
+        safe_key = re.sub(r"[^0-9A-Za-z_-]", "_", str(request.key))[:24]
+        stem = f"{safe_key}-{stem}"
         try:
             for step in range(_MAX_SHRINK_STEPS + 1):
                 result.compile_attempts = step + 1

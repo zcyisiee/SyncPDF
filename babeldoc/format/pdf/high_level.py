@@ -1025,6 +1025,19 @@ def _do_translate_single(
             docs
         )
 
+    # LaTeX bbox 排版（实验特性）：翻译会原地改写 paragraph.unicode，
+    # 需在翻译前记录源文，供 overlay 判定「未翻译段」。
+    # （不翻译（skip_translation）时也记：此时译文恒等于源文 → 全部跳过。）
+    if getattr(translation_config, "enable_latex_bbox_layout", False):
+        from babeldoc.format.pdf.document_il.backend.latex_bbox import (
+            record_source_texts,
+        )
+
+        try:
+            record_source_texts(docs, translation_config)
+        except Exception:
+            logger.warning("LaTeX bbox 源文记录失败", exc_info=True)
+
     if not translation_config.skip_translation:
         if support_llm_translate:
             il_translator = ILTranslatorLLMOnly(translate_engine, translation_config)

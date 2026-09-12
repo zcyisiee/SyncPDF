@@ -113,6 +113,7 @@ class _FakeConfig:
         )
         self.latex_max_compile_workers = kwargs.get("latex_max_compile_workers", 2)
         self.latex_min_line_fill = kwargs.get("latex_min_line_fill", 0.85)
+        self.latex_bbox_mode = kwargs.get("latex_bbox_mode", "full")
         self.primary_font_family = kwargs.get("primary_font_family", None)
         self.working_dir = kwargs.get("working_dir", None)
         self.latex_bbox_stats = {}
@@ -450,13 +451,17 @@ def test_formula_index_missing_provider_ir_returns_none(tmp_path):
 def test_build_tex_contains_required_directives():
     renderer = BboxStampRenderer(_CAPABILITY)
     tex = renderer.build_tex("测试", 200.0, 100.0, 10.0)
-    assert "paperwidth=200.0000pt" in tex
-    assert "paperheight=100.0000pt" in tex
+    # 纸张与字号统一用 TeX bp（= 1/72in = PDF 用户单位），与 bbox/fit 同单位。
+    assert "paperwidth=200.0000bp" in tex
+    assert "paperheight=100.0000bp" in tex
+    # 不再用 TeX pt 指定纸张/字号。
+    assert "paperwidth=200.0000pt" not in tex
+    assert "\\fontsize{10.0000pt}" not in tex
     assert "\\usepackage{xeCJK}" in tex
     assert "\\XeTeXlinebreaklocale" in tex
     assert "PunctStyle=plain" in tex
     assert pathlib.Path(_CAPABILITY.font_path).stem in tex
-    assert "\\fontsize{10.0000}{15.0000}" in tex
+    assert "\\fontsize{10.0000bp}{15.0000bp}" in tex
     assert "测试" in tex
 
 
@@ -923,24 +928,99 @@ def test_overlay_capability_unavailable_falls_back(tmp_path, monkeypatch):
 
 
 def test_overlay_geometry_and_quality_gates(tmp_path, monkeypatch):
-    """box 超页 / 过小 / 行填充正常 → 全部回退且原因可归因。"""
+    """repair 模式：纯文本短行门禁保持旧行为（line-fill-ok 回退）。"""
     pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    config.latex_bbox_mode = "repair"
     # 把段落标为无公式，行填充门禁调低 → "line-fill-ok" 回退。
     config.latex_bbox_state["paragraphs"]["P01-001"]["has_formula"] = False
     config.latex_min_line_fill = 0.0
     _result, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
     assert stats["applied"] == 0
     assert stats["fallback_reasons"].get("line-fill-ok") == 1
+    assert stats["mode"] == "repair"
+
+
+def test_overlay_full_mode_ignores_line_fill_gate(tmp_path, monkeypatch):
+    """full 模式：行填充门禁不再拦段落（多行正文段默认入选）。"""
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    config.latex_min_line_fill = 1.01  # repair 模式下会拦掉；full 模式不看它
+    _result, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+    assert stats["mode"] == "full"
+    assert stats["applied"] == 1
+    assert "line-fill-ok" not in stats["fallback_reasons"]
+
+
+def test_overlay_full_mode_rejects_non_body_label(tmp_path, monkeypatch):
+    """full 模式：title/toc/reference 等非正文本体标签永不走 LaTeX。"""
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    docs.page[0].pdf_paragraph[0].layout_label = "title"
+    config.latex_bbox_state["paragraphs"]["P01-001"]["layout_label"] = "title"
+    _result, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+    assert stats["applied"] == 0
+    assert stats["fallback_reasons"].get("label-not-eligible") == 1
+
+
+def test_overlay_full_mode_rejects_single_line(tmp_path, monkeypatch):
+    """full 模式：源行数 <2 的段落跳过。"""
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    # 只留一行源文：清掉 box 内的第二行。
+    page = pdf[0]
+    rect = pymupdf.Rect(30, 50, 300, 110)
+    page.add_redact_annot(pymupdf.Rect(30, 80, 300, 110))
+    page.apply_redactions()
+    _result, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+    assert stats["applied"] == 0
+    assert stats["fallback_reasons"].get("single-line") == 1
+    assert rect is not None  # 保留 rect 变量供阅读者对照
+
+
+def test_overlay_full_mode_skips_untranslated(tmp_path, monkeypatch):
+    """译文与源文一致（LLM 未翻译）→ untranslated 跳过。"""
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    text = "这是一段较长的中文译文用于替换原有英文段落内容。"
+    config.latex_bbox_state["paragraphs"]["P01-001"]["source_text"] = text
+    _result, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+    assert stats["applied"] == 0
+    assert stats["fallback_reasons"].get("untranslated") == 1
+    decisions = {d["debug_id"]: d for d in stats["decisions"]}
+    assert decisions["P01-001"]["reason"] == "untranslated"
+
+
+def test_overlay_full_mode_keeps_translated_paragraph(tmp_path, monkeypatch):
+    """源文与译文不同 → 不被 untranslated 拦截。"""
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    config.latex_bbox_state["paragraphs"]["P01-001"]["source_text"] = (
+        "Original paragraph line one original paragraph second line"
+    )
+    _result, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+    assert stats["applied"] == 1
+    assert "untranslated" not in stats["fallback_reasons"]
 
 
 def test_overlay_skips_box_expanded_after_typesetting(tmp_path, monkeypatch):
-    """Typesetting 扩展过段落 box → 跳过（避免 redaction 漏区留下双层文本）。"""
+    """扩后 box 内落有别的段落 → 跳过（贴片/redaction 可能伤到它们）。"""
     pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
     paragraph = docs.page[0].pdf_paragraph[0]
     paragraph.box = il_version_1.Box(30, 100, 300, 280)  # 远超源 box
+    # 另一个段落落在扩后区域内。
+    other = _translated_paragraph(
+        "P01-002", "另一段正文内容。", il_version_1.Box(40, 150, 280, 170)
+    )
+    docs.page[0].pdf_paragraph.append(other)
     _result, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
     assert stats["applied"] == 0
     assert stats["fallback_reasons"].get("box-expanded-after-typesetting") == 1
+
+
+def test_overlay_allows_expanded_box_without_other_paragraphs(
+    tmp_path, monkeypatch
+):
+    """扩后 box 干净 → full 模式允许（字符已不进内容流，无双层文本风险）。"""
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    docs.page[0].pdf_paragraph[0].box = il_version_1.Box(30, 100, 300, 280)
+    _result, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+    assert stats["applied"] == 1
+    assert "box-expanded-after-typesetting" not in stats["fallback_reasons"]
 
 
 @requires_latex
@@ -1102,14 +1182,18 @@ def _minimal_write_fixture(tmp_path, enable_latex: bool):
 
 
 def test_default_off_does_not_touch_overlay(tmp_path, monkeypatch):
-    """enable_latex_bbox_layout=False：不调用 overlay，统计为空。"""
+    """enable_latex_bbox_layout=False：不创建 overlay，统计为空。"""
     called = {"n": 0}
 
-    def spy(*_args, **_kwargs):
-        called["n"] += 1
-        raise AssertionError("overlay 不应在默认关闭时被调用")
+    class _SpyOverlay:
+        def __init__(self, *_args, **_kwargs):
+            called["n"] += 1
+            raise AssertionError("overlay 不应在默认关闭时被创建")
 
-    monkeypatch.setattr(overlay_mod, "apply_latex_bbox_overlay", spy)
+    monkeypatch.setattr(
+        "babeldoc.format.pdf.document_il.backend.latex_bbox.LatexBboxOverlay",
+        _SpyOverlay,
+    )
     creater, config, _docs = _minimal_write_fixture(tmp_path, enable_latex=False)
     try:
         result = creater.write(config)
@@ -1123,25 +1207,36 @@ def test_default_off_does_not_touch_overlay(tmp_path, monkeypatch):
 
 
 def test_enabled_write_invokes_overlay_once(tmp_path, monkeypatch):
-    """enable_latex_bbox_layout=True：overlay 被调用一次且统计回写。"""
-    calls = {"n": 0}
+    """enable_latex_bbox_layout=True：prepare/stamp 各被调用一次且统计回写。"""
+    calls = {"prepare": 0, "stamp": 0}
 
-    def fake_overlay(pdf, _docs, config):
-        calls["n"] += 1
-        stats = {"enabled": True, "applied": 0, "available": False}
-        config.latex_bbox_stats = stats
-        return pdf, stats
+    class _FakeOverlay:
+        def __init__(self, pdf, _docs, config):
+            self.pdf = pdf
+            self.config = config
+            self.stats = {"enabled": True, "applied": 0, "available": False}
+
+        def prepare(self):
+            calls["prepare"] += 1
+            return set()
+
+        def stamp(self, regenerate_pages=None):
+            _ = regenerate_pages
+            calls["stamp"] += 1
+            self.config.latex_bbox_stats = self.stats
+            return self.pdf
 
     monkeypatch.setattr(
-        "babeldoc.format.pdf.document_il.backend.latex_bbox.apply_latex_bbox_overlay",
-        fake_overlay,
+        "babeldoc.format.pdf.document_il.backend.latex_bbox.LatexBboxOverlay",
+        _FakeOverlay,
     )
     creater, config, _docs = _minimal_write_fixture(tmp_path, enable_latex=True)
     try:
         result = creater.write(config)
     finally:
         config.cleanup_temp_files()
-    assert calls["n"] == 1
+    assert calls["prepare"] == 1
+    assert calls["stamp"] == 1
     assert creater.latex_bbox_stats == {"enabled": True, "applied": 0, "available": False}
     assert result.mono_pdf_path is not None
 
@@ -1432,3 +1527,296 @@ def test_measure_line_fills_reports_per_line_fills(tmp_path):
     assert len(fills["fills"]) == 2
     assert fills["fills"][0] < fills["fills"][1]
     assert fills["min_body_fill"] == aggregate["min_body_fill"]
+
+
+# --------------------------------------------------------------------------- #
+# P1：prepare/stamp 拆分、免 redaction 贴片、bp 单位、未翻译与模式开关
+# --------------------------------------------------------------------------- #
+def _typeset_paragraph(debug_id: str, text: str, box, size: float = 9.0):
+    """构造 Typesetting 之后的段落（composition 已是逐字符）。"""
+    style = _style(size)
+    compositions = [
+        il_version_1.PdfParagraphComposition(
+            pdf_character=il_version_1.PdfCharacter(
+                char_unicode=char,
+                box=il_version_1.Box(box.x + index * 5, box.y, box.x + index * 5 + 5, box.y2),
+                pdf_character_id=ord(char) % 100,
+                pdf_style=style,
+                xobj_id=0,
+            )
+        )
+        for index, char in enumerate(text)
+    ]
+    return il_version_1.PdfParagraph(
+        box=box,
+        pdf_style=style,
+        pdf_paragraph_composition=compositions,
+        unicode=text,
+        debug_id=debug_id,
+        layout_label="text",
+        xobj_id=0,
+        first_line_indent=False,
+    )
+
+
+def test_render_units_skip_stamped_paragraph_chars(tmp_path):
+    """内容流生成跳过 stamped_ids 的字符：已贴片段落的旧译文不再入流。"""
+    creater, config, docs = _minimal_write_fixture(tmp_path, enable_latex=True)
+    page = docs.page[0]
+    page.pdf_paragraph.append(
+        _typeset_paragraph("P01-001", "译文内容", il_version_1.Box(30, 60, 200, 90))
+    )
+    page.pdf_paragraph.append(
+        _typeset_paragraph("P01-002", "另一段", il_version_1.Box(30, 100, 200, 130))
+    )
+
+    all_units = creater.create_render_units_for_page(page, config)
+    skipped_units = creater.create_render_units_for_page(
+        page, config, skip_paragraph_ids={"P01-001"}
+    )
+
+    all_chars = [unit.char.char_unicode for unit in all_units if hasattr(unit, "char")]
+    skipped_chars = [
+        unit.char.char_unicode for unit in skipped_units if hasattr(unit, "char")
+    ]
+    assert "译文内容" not in "".join(skipped_chars)
+    assert "译文内容" in "".join(all_chars)
+    assert "另一段" in "".join(skipped_chars)
+    assert len(all_units) - len(skipped_units) == len("译文内容")
+
+
+def test_prepare_returns_stamped_ids_before_stamp(tmp_path, monkeypatch):
+    """prepare 预先选段+编译并返回 stamped_ids；stamp 才真正落贴片。"""
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    overlay = overlay_mod.LatexBboxOverlay(pdf, docs, config)
+    stamped_ids = overlay.prepare()
+
+    assert stamped_ids == {"P01-001"}
+    assert overlay.stats["attempted"] == 1
+    assert overlay.stats["applied"] == 0
+
+    result = overlay.stamp()
+    assert result is pdf
+    assert overlay.stats["applied"] == 1
+    assert overlay.stats["applied_paragraphs"] == ["P01-001"]
+    assert overlay.stats["reverted"] is False
+
+
+def test_prepare_repair_mode_skips_no_chars(tmp_path, monkeypatch):
+    """repair 模式不做预选：prepare 返回空集合（旧译文照常入内容流）。"""
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    config.latex_bbox_mode = "repair"
+    overlay = overlay_mod.LatexBboxOverlay(pdf, docs, config)
+    assert overlay.prepare() == set()
+    assert overlay.stats["attempted"] == 0
+    result = overlay.stamp()
+    assert overlay.stats["applied"] == 1
+    assert result is pdf or result is not None
+
+
+def test_stamp_without_text_layer_does_not_redact(tmp_path, monkeypatch):
+    """stamp rect 内没有文本层时不走 redaction（链接不被删除/重插）。
+
+    真实 full 流程下已贴片段落的字符不会进内容流，正常命中本分支；这里用
+    repair 模式 + 空矩形直接验证「只在有文本时才 redact」的条件逻辑。
+    """
+    pdf = pymupdf.open(_make_link_pdf(tmp_path, pymupdf.Rect()))
+    # 目标 rect 区域（mupdf (30,150)-(300,200)）里没有任何文本。
+    box = [30.0, 300.0 - 200.0, 300.0, 300.0 - 150.0]
+    docs = _il_doc(
+        [
+            _il_page(
+                0,
+                [
+                    _translated_paragraph(
+                        "P01-001", "中文贴片内容替换空白区域。", il_version_1.Box(*box)
+                    )
+                ],
+                width=400,
+                height=300,
+            )
+        ]
+    )
+    state = {
+        "paragraphs": {
+            "P01-001": {
+                "page": 0,
+                "box": box,
+                "font_size": 9.0,
+                "layout_label": "text",
+                "has_formula": True,
+            }
+        },
+        "bodies": {"P01-001": "中文贴片内容替换空白区域。"},
+        "plain_texts": {"P01-001": "中文贴片内容替换空白区域。"},
+        "fusion_failures": {},
+        "provider_inline_spans": 0,
+    }
+    config = _FakeConfig(
+        latex_bbox_state=state, working_dir=tmp_path, latex_bbox_mode="repair"
+    )
+    stamp_path = _make_stamp_pdf(tmp_path / "stamp.pdf", 270.0, 60.0)
+
+    def fake_render_many(self, requests):
+        _ = self
+        return {
+            request.key: renderer_mod.StampResult(
+                key=request.key, ok=True, pdf_path=stamp_path, font_size=9.0, scale=1.0
+            )
+            for request, _wd in requests
+        }
+
+    monkeypatch.setattr(BboxStampRenderer, "render_many", fake_render_many)
+    _result, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+
+    assert stats["applied"] == 1
+    assert stats["links"]["restored"] == 0
+    assert stats["links"]["uri_set_match"] is True
+
+
+@requires_latex
+def test_compiled_page_matches_bbox_in_bp(tmp_path):
+    """编译页尺寸 == bbox（±0.01bp）：模板长度单位与 PDF bp 一致。"""
+    renderer = BboxStampRenderer(_CAPABILITY, max_workers=1)
+    request = StampRequest(
+        key="P01-bp",
+        body="单位一致性验证文本",
+        width=180.5,
+        height=42.25,
+        font_size=9.0,
+    )
+    result = renderer.render_one(request, tmp_path)
+    assert result.ok, result.reason
+    doc = pymupdf.open(result.pdf_path)
+    try:
+        rect = doc[0].rect
+        assert abs(rect.width - 180.5) <= 0.01
+        assert abs(rect.height - 42.25) <= 0.01
+    finally:
+        doc.close()
+
+
+def test_repair_mode_reproduces_legacy_no_body_lines(tmp_path, monkeypatch):
+    """repair 模式保留旧词表：单行纯文本段 → no-body-lines。"""
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    config.latex_bbox_mode = "repair"
+    config.latex_bbox_state["paragraphs"]["P01-001"]["has_formula"] = False
+    page = pdf[0]
+    page.add_redact_annot(pymupdf.Rect(30, 80, 300, 110))
+    page.apply_redactions()
+    _result, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+    assert stats["applied"] == 0
+    assert stats["fallback_reasons"].get("no-body-lines") == 1
+
+
+def test_record_source_texts_and_capture_meta():
+    """record_source_texts 记录源文；capture 把它写进段落 meta（供 untranslated）。"""
+    paragraph = _translated_paragraph(
+        "P01-001", "译文文本", il_version_1.Box(30, 60, 200, 90)
+    )
+    docs = _il_doc([_il_page(0, [paragraph], width=400, height=300)])
+    config = _FakeConfig(latex_bbox_state={})
+
+    texts = overlay_mod.record_source_texts(docs, config)
+    assert texts == {"P01-001": "译文文本"}
+    assert config.latex_source_texts == {"P01-001": "译文文本"}
+
+    state = overlay_mod.capture_layout_sources(docs, config)
+    assert state["paragraphs"]["P01-001"]["source_text"] == "译文文本"
+
+    state2 = overlay_mod.capture_layout_sources(
+        docs, _FakeConfig(latex_bbox_state={}), source_texts={"P01-001": "别的源文"}
+    )
+    assert state2["paragraphs"]["P01-001"]["source_text"] == "别的源文"
+
+
+def test_stamp_exception_regenerates_affected_pages(tmp_path, monkeypatch):
+    """贴片中途抛异常：重新生成受影响页（不跳过字符），避免段落丢字。"""
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    overlay = overlay_mod.LatexBboxOverlay(pdf, docs, config)
+    assert overlay.prepare() == {"P01-001"}
+
+    regenerated: list[list[int]] = []
+
+    def _regenerate(page_indices):
+        regenerated.append(list(page_indices))
+
+    def _boom(self, jobs, successful):
+        _ = (self, jobs, successful)
+        raise RuntimeError("simulated-stamp-failure")
+
+    monkeypatch.setattr(overlay_mod.LatexBboxOverlay, "_stamp_pages", _boom)
+    result = overlay.stamp(regenerate_pages=_regenerate)
+
+    assert result is pdf
+    assert regenerated == [[0]]
+    assert overlay.stats["reverted"] is True
+    assert overlay.stats["applied"] == 0
+    assert overlay.stats["error"] and "simulated-stamp-failure" in overlay.stats["error"]
+    assert (tmp_path / "latex_bbox_report.json").exists()
+
+
+@requires_latex
+def test_concurrent_identical_content_uses_isolated_dirs(tmp_path):
+    """并发批编译：内容相同但 key 不同的段落各自独立目录，互不覆盖。"""
+    renderer = BboxStampRenderer(_CAPABILITY, max_workers=4)
+    requests = [
+        (
+            StampRequest(
+                key=f"P0{index}-dup",
+                body="并发相同内容段落测试文本",
+                width=160.0,
+                height=40.0,
+                font_size=9.0,
+            ),
+            tmp_path,
+        )
+        for index in range(4)
+    ]
+    stamps = renderer.render_many(requests)
+    assert set(stamps) == {request.key for request, _wd in requests}
+    for stamp in stamps.values():
+        assert stamp.ok, stamp.reason
+        assert pathlib.Path(stamp.pdf_path).exists()
+
+
+def test_overlay_mode_defaults_to_full_and_unknown_falls_back(tmp_path, monkeypatch):
+    """未知 mode 按 full 处理；stats 里记录生效的 mode。"""
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    config.latex_bbox_mode = "bogus"
+    overlay = overlay_mod.LatexBboxOverlay(pdf, docs, config)
+    assert overlay.mode == "full"
+    overlay.prepare()
+    assert overlay.stats["mode"] == "full"
+    assert overlay.stamp() is pdf
+
+
+def test_overlay_link_gate_fail_regenerates_affected_pages(tmp_path, monkeypatch):
+    """full 模式链接门禁失败：重生成受影响页回滚（非字节快照），统计一致。"""
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    before_links = _read_links(pdf)
+
+    regenerated: list[list[int]] = []
+
+    def _regenerate(page_indices):
+        regenerated.append(list(page_indices))
+
+    monkeypatch.setattr(
+        overlay_mod.LatexBboxOverlay,
+        "_verify_links",
+        lambda _self, *_args, **_kwargs: False,
+    )
+    overlay = overlay_mod.LatexBboxOverlay(pdf, docs, config)
+    overlay.prepare()
+    result_pdf, stats = overlay.stamp(regenerate_pages=_regenerate), overlay.stats
+
+    assert stats["reverted"] is True
+    assert stats["applied"] == 0
+    assert stats["applied_paragraphs"] == []
+    assert stats["links"]["restored"] == 0
+    # 重生成回调收到受影响页（0-based）
+    assert regenerated == [[0]]
+    # 重生成后链接与 overlay 前一致
+    assert _read_links(result_pdf) == before_links
+    # 回滚后 fallback_reasons 不再残留 applied 计数
+    assert stats["fallback_reasons"].get("applied", 0) == 0
