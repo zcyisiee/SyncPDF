@@ -9,6 +9,10 @@ r"""bbox 级 XeLaTeX 编译渲染器（带界缩小 + stamp 缓存）。
 - stamp 以 (body, 字号, 尺寸) 为键缓存，同文本同字号不重复编译；
 - 支持有界并发编译（每编译独立目录，无临时文件冲突）；
 - 禁止跨页流动：每 bbox 独立约束在原页/原列区域内。
+
+本模块同时提供 :class:`BatchStampRenderer`（``renderer_batch``）复用的公共件：
+:data:`TEX_COMMON` 导言区、:func:`font_setup_clauses` / :func:`topskip_clause`
+与 :func:`_measure_fit`（支持指定 PDF 页号）。
 """
 
 from __future__ import annotations
@@ -28,9 +32,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-TEX_HEADER = r"""\documentclass{article}
-\usepackage[paperwidth=%(w).4fbp,paperheight=%(h).4fbp,margin=0pt]{geometry}
-\usepackage{fontspec}
+#: 导言区公共部分（不含纸张尺寸与正文）：单段与批编译共用，避免模板漂移。
+TEX_COMMON = r"""\usepackage{fontspec}
 \usepackage{xeCJK}
 \usepackage{amsmath}
 \usepackage{amssymb}
@@ -46,7 +49,14 @@ TEX_HEADER = r"""\documentclass{article}
 \emergencystretch=1em
 \lineskiplimit=-\maxdimen
 \pagestyle{empty}
-\setlength{\parindent}{%(parindent).4fbp}
+"""
+
+TEX_HEADER = (
+    r"""\documentclass{article}
+\usepackage[paperwidth=%(w).4fbp,paperheight=%(h).4fbp,margin=0pt]{geometry}
+"""
+    + TEX_COMMON
+    + r"""\setlength{\parindent}{%(parindent).4fbp}
 \setlength{\parskip}{0pt}
 %(topskip)s
 \begin{document}
@@ -54,6 +64,10 @@ TEX_HEADER = r"""\documentclass{article}
 %(hangindent)s%(body)s
 \end{document}
 """
+)
+
+#: 模板/排版指令版本：进入持久化 stamp 缓存 key，改模板必须同步递增。
+TEMPLATE_VERSION = "latex-bbox-2026-09-p4"
 
 #: 有界缩小：每步 ×0.95，最多 12 步（≈0.54×），字号绝对下限 4pt。
 #: 长度单位统一用 TeX ``bp``（= 1/72in = PDF 用户单位）：父页面 bbox/fit
@@ -79,6 +93,29 @@ _FIT_TOLERANCE = 0.5
 _CACHE_LIMIT = 512
 
 
+def font_signature(capability) -> str:
+    """字体签名：字体文件变了缓存贴片必须失效（不允许串用旧字形）。"""
+    parts: list[str] = []
+    for group in (
+        capability.latin_serif_fonts or {},
+        capability.latin_sans_fonts or {},
+        capability.cjk_serif_fonts or {},
+        capability.cjk_sans_fonts or {},
+    ):
+        parts.extend(f"{key}={value}" for key, value in sorted(group.items()))
+    if capability.font_path:
+        parts.append(f"explicit={capability.font_path}")
+    if capability.bold_font_path:
+        parts.append(f"explicit-bold={capability.bold_font_path}")
+    payload = "|".join(parts)
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]  # noqa: S324 - 非密码学用途
+
+
+def cache_namespace(capability) -> str:
+    """持久化 stamp 缓存的命名空间：模板版本 + 字体签名。"""
+    return f"{TEMPLATE_VERSION}|{font_signature(capability)}"
+
+
 def derive_lead(font_size: float, baseline_pitch: float | None) -> float:
     """由源行间距推导行距：``clamp(baseline_pitch, 1.15fs, 1.6fs)``。
 
@@ -102,6 +139,63 @@ def _font_ascent_ratio(font_path: str) -> float:
         return value if value > 0 else _DEFAULT_ASCENT_RATIO
     except Exception:  # noqa: BLE001 - 字体不可读时用保守值
         return _DEFAULT_ASCENT_RATIO
+
+
+def regular_font_paths(capability, serif: bool) -> list[str]:
+    """实际会用到的正体字体路径（算 ``\topskip`` 的 ascender）。"""
+    paths: list[str] = []
+    latin = capability.latin_fonts(serif)
+    if latin and latin.get("regular"):
+        paths.append(latin["regular"])
+    if capability.font_explicit:
+        if capability.font_path:
+            paths.append(capability.font_path)
+        return paths
+    cjk = capability.cjk_fonts(serif)
+    if cjk and cjk.get("regular"):
+        paths.append(cjk["regular"])
+    elif capability.font_path:
+        paths.append(capability.font_path)
+    return paths
+
+
+def font_setup_clauses(capability, serif: bool) -> str:
+    """字体声明：与产品一致（拉丁 Noto Serif/Sans，中文 Source Han Serif/Sans）。
+
+    显式 ``--latex-cjk-font-path`` 优先（用户指定则只设中文主字体，拉丁
+    仍尽力用产品字体）；拉丁字体缺失时不声明 → 退回 Latin Modern。
+    """
+    clauses: list[str] = []
+    latin = capability.latin_fonts(serif)
+    if latin:
+        clauses.append(_face_clause("setmainfont", latin))
+    if capability.font_explicit and capability.font_path:
+        explicit = {"regular": capability.font_path}
+        if capability.bold_font_path:
+            explicit["bold"] = capability.bold_font_path
+        clauses.append(_face_clause("setCJKmainfont", explicit))
+        return "\n".join(clauses)
+    cjk = capability.cjk_fonts(serif) or capability.cjk_fonts(not serif)
+    if cjk is None and capability.font_path:
+        fallback = {"regular": capability.font_path}
+        if capability.bold_font_path:
+            fallback["bold"] = capability.bold_font_path
+        cjk = fallback
+    if cjk:
+        clauses.append(_face_clause("setCJKmainfont", cjk))
+    return "\n".join(clauses)
+
+
+def topskip_clause(capability, serif: bool, font_size: float, topskip: float | None) -> str:
+    """``\topskip`` 声明：源首行字顶余量 + 字体 ascender（不裁剪首行墨迹）。"""
+    if topskip is None:
+        return ""
+    ascent_ratio = max(
+        (_font_ascent_ratio(path) for path in regular_font_paths(capability, serif)),
+        default=_DEFAULT_ASCENT_RATIO,
+    )
+    value = max(0.0, float(topskip)) + (ascent_ratio + _TOPSKIP_HEADROOM_EM) * font_size
+    return f"\\setlength{{\\topskip}}{{{value:.4f}bp}}\n"
 
 
 def _face_clause(command: str, files: dict[str, str]) -> str:
@@ -251,19 +345,24 @@ def _measure_fit(
     width: float,
     height: float,
     expected_text: str = "",
+    page_index: int = 0,
 ) -> tuple[bool, str, int]:
     """打开编译产物检查墨迹边界、可抽取文本与内容完整性。
 
     ``expected_text`` 非空时额外做「无丢字」校验：PyMuPDF 的文本抽取会裁剪到
     页面边界，排版溢出页面底部的行会静默消失（TeX 的 overfull vbox 不一定是
     错误）。这里比对归一化后的长度与结尾字符，防止贴片静默吃掉译文。
+
+    ``page_index``：批编译产物是多页文档，测量哪一页（单段产物固定第 0 页）。
     返回 (fits, reason, text_chars)。
     """
     import pymupdf
 
     doc = pymupdf.open(pdf_path)
     try:
-        page = doc[0]
+        if page_index < 0 or page_index >= len(doc):
+            return False, "page-missing", 0
+        page = doc[page_index]
         extracted = normalize_rendered_text(page.get_text())
         text_chars = len(extracted)
         ink = pymupdf.Rect()
@@ -299,10 +398,18 @@ def _measure_fit(
 class BboxStampRenderer:
     """bbox 编译器：编译 + 有界缩小 + 缓存 + 有界并发。"""
 
-    def __init__(self, capability, timeout_seconds: float = 45.0, max_workers: int = 2):
+    def __init__(
+        self,
+        capability,
+        timeout_seconds: float = 45.0,
+        max_workers: int = 2,
+        cache=None,
+    ):
         self._capability = capability
         self._timeout = max(5.0, float(timeout_seconds))
         self._max_workers = max(1, int(max_workers))
+        #: 可选的跨进程缓存（:class:`StampCache`）；None 时只做进程内缓存。
+        self._persistent = cache
         self._cache: dict[tuple, StampResult] = {}
         self._lock = threading.Lock()
         self._cache_hits = 0
@@ -339,18 +446,6 @@ class BboxStampRenderer:
             )
         # ``\topskip`` = 源首行字顶余量 + 字体 ascender：首行墨迹不从 box 顶溢出
         # （TeX 把首行 baseline 放在 ``max(\topskip, 行高)``）。
-        topskip_clause = ""
-        if topskip is not None:
-            ascent_ratio = max(
-                (
-                    _font_ascent_ratio(path)
-                    for path in self._regular_font_paths(serif)
-                ),
-                default=_DEFAULT_ASCENT_RATIO,
-            )
-            topskip_clause = (
-                f"\\setlength{{\\topskip}}{{{max(0.0, float(topskip)) + (ascent_ratio + _TOPSKIP_HEADROOM_EM) * font_size:.4f}bp}}\n"
-            )
         return TEX_HEADER % {
             "w": width,
             "h": height,
@@ -359,54 +454,19 @@ class BboxStampRenderer:
             "lead": effective_lead,
             "parindent": parindent,
             "hangindent": hang_clause,
-            "topskip": topskip_clause,
+            "topskip": topskip_clause(
+                self._capability, serif, font_size, topskip
+            ),
             "body": body,
         }
 
     def _regular_font_paths(self, serif: bool) -> list[str]:
         """实际会用到的正体字体路径（算 ``\topskip`` 的 ascender）。"""
-        capability = self._capability
-        paths: list[str] = []
-        latin = capability.latin_fonts(serif)
-        if latin and latin.get("regular"):
-            paths.append(latin["regular"])
-        if capability.font_explicit:
-            if capability.font_path:
-                paths.append(capability.font_path)
-            return paths
-        cjk = capability.cjk_fonts(serif)
-        if cjk and cjk.get("regular"):
-            paths.append(cjk["regular"])
-        elif capability.font_path:
-            paths.append(capability.font_path)
-        return paths
+        return regular_font_paths(self._capability, serif)
 
     def _font_setup(self, serif: bool) -> str:
-        """字体声明：与产品一致（拉丁 Noto Serif/Sans，中文 Source Han Serif/Sans）。
-
-        显式 ``--latex-cjk-font-path`` 优先（用户指定则只设中文主字体，拉丁
-        仍尽力用产品字体）；拉丁字体缺失时不声明 → 退回 Latin Modern。
-        """
-        capability = self._capability
-        clauses: list[str] = []
-        latin = capability.latin_fonts(serif)
-        if latin:
-            clauses.append(_face_clause("setmainfont", latin))
-        if capability.font_explicit and capability.font_path:
-            explicit = {"regular": capability.font_path}
-            if capability.bold_font_path:
-                explicit["bold"] = capability.bold_font_path
-            clauses.append(_face_clause("setCJKmainfont", explicit))
-            return "\n".join(clauses)
-        cjk = capability.cjk_fonts(serif) or capability.cjk_fonts(not serif)
-        if cjk is None and capability.font_path:
-            fallback = {"regular": capability.font_path}
-            if capability.bold_font_path:
-                fallback["bold"] = capability.bold_font_path
-            cjk = fallback
-        if cjk:
-            clauses.append(_face_clause("setCJKmainfont", cjk))
-        return "\n".join(clauses)
+        """字体声明（委托 :func:`font_setup_clauses`，与批编译共用）。"""
+        return font_setup_clauses(self._capability, serif)
 
     def render_one(self, request: StampRequest, workdir: Path) -> StampResult:
         """编译单个请求（含缓存与有界缩小）。调用方负责 workdir 生命周期。"""
@@ -415,8 +475,17 @@ class BboxStampRenderer:
         if cached is not None:
             self._cache_hits += 1
             return cached
+        if self._persistent is not None:
+            from_disk = self._persistent.get(request)
+            if from_disk is not None:
+                self._cache_hits += 1
+                with self._lock:
+                    self._cache[request.cache_key] = from_disk
+                return from_disk
 
         result = self._render_uncached(request, workdir)
+        if result.ok and self._persistent is not None:
+            result = self._persistent.put(request, result) or result
         with self._lock:
             if len(self._cache) >= _CACHE_LIMIT:
                 self._cache.clear()

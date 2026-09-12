@@ -51,12 +51,15 @@ from babeldoc.format.pdf.document_il.backend.latex_bbox.fusion import (
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
     DEFAULT_LEAD_RATIO,
 )
-from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
-    BboxStampRenderer,
-)
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import StampRequest
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import StampResult
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import derive_lead
+from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer_batch import (
+    BatchStampRenderer,
+)
+from babeldoc.format.pdf.document_il.backend.latex_bbox.stamp_cache import (
+    build_stamp_cache,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -331,6 +334,25 @@ def _rows_geometry(rows: list[dict], rect: pymupdf.Rect) -> dict | None:
         "ascent_top": round(max(0.0, first["y0"] - rect.y0), 3),
         "source": "source-page-rows",
     }
+
+
+def _compile_stats(renderer, stamps: dict) -> dict:
+    """编译统计（P4 起含批编译轮/段明细；单段渲染器没有这些字段时为 0）。"""
+    stats = {
+        "attempts": sum(result.compile_attempts for result in stamps.values()),
+        "seconds": round(renderer.compile_seconds, 3),
+        "cache_hits": renderer.cache_hits,
+        "batches": getattr(renderer, "batch_count", 0),
+        "segments": getattr(renderer, "segment_count", 0),
+    }
+    rounds = getattr(renderer, "round_log", None)
+    if rounds:
+        stats["rounds"] = rounds
+        stats["fallback_segments"] = getattr(renderer, "fallback_segments", 0)
+        stats["fallback_seconds"] = round(
+            getattr(renderer, "fallback_seconds", 0.0), 3
+        )
+    return stats
 
 
 def _source_pdf_path(config) -> Path | None:
@@ -746,6 +768,22 @@ class LatexBboxOverlay:
         self._prepared = True
         return set(self.stamped_ids)
 
+    def _build_renderer(self, capability):
+        """P4：整文档轮次制批编译（坏段内部回退单段渲染 + 落盘 stamp 缓存）。
+
+        返回的渲染器与 :class:`BboxStampRenderer` 同构（``render_many`` /
+        ``cache_hits`` / ``compile_seconds``），调用方无需区分。
+        """
+        timeout = getattr(self.config, "latex_compile_timeout_seconds", 45.0)
+        workers = getattr(self.config, "latex_max_compile_workers", 2)
+        cache = build_stamp_cache(self.config, capability)
+        return BatchStampRenderer(
+            capability,
+            timeout_seconds=timeout,
+            max_workers=workers,
+            cache=cache,
+        )
+
     def _prepare_jobs(self, capability) -> None:
         jobs, reasons = self._select_candidates(self._paragraphs, self._bodies)
         self._reasons = Counter(reasons)
@@ -756,11 +794,7 @@ class LatexBboxOverlay:
             self.stats["fallback"] = len(self._paragraphs)
             self.stats["fallback_reasons"] = dict(self._reasons)
             return
-        renderer = BboxStampRenderer(
-            capability,
-            timeout_seconds=getattr(self.config, "latex_compile_timeout_seconds", 45.0),
-            max_workers=getattr(self.config, "latex_max_compile_workers", 2),
-        )
+        renderer = self._build_renderer(capability)
         requests = [
             (
                 self._stamp_request(job),
@@ -771,11 +805,7 @@ class LatexBboxOverlay:
         stamps = renderer.render_many(requests)
         # P3-5：垂直放不下的段落先安全下扩（不缩字）；扩后区域必须无他内容。
         self._expand_vertical_failures(jobs, stamps, renderer, Path(self._tmpdir.name))
-        self.stats["compile"] = {
-            "attempts": sum(r.compile_attempts for r in stamps.values()),
-            "seconds": round(renderer.compile_seconds, 3),
-            "cache_hits": renderer.cache_hits,
-        }
+        self.stats["compile"] = _compile_stats(renderer, stamps)
         for job in jobs:
             stamp = stamps.get(job["debug_id"])
             if stamp is None:
@@ -1132,11 +1162,7 @@ class LatexBboxOverlay:
             self.stats["fallback"] = len(self._paragraphs)
             self.stats["fallback_reasons"] = dict(counter)
             return pdf
-        renderer = BboxStampRenderer(
-            capability,
-            timeout_seconds=getattr(self.config, "latex_compile_timeout_seconds", 45.0),
-            max_workers=getattr(self.config, "latex_max_compile_workers", 2),
-        )
+        renderer = self._build_renderer(capability)
         with tempfile.TemporaryDirectory(prefix="babeldoc-latex-bbox-") as tmp:
             jobs = self._substitute_fragments(jobs, Path(tmp))
             if not jobs:
@@ -1158,11 +1184,7 @@ class LatexBboxOverlay:
                 for job in jobs
             ]
             stamps = renderer.render_many(requests)
-            self.stats["compile"] = {
-                "attempts": sum(r.compile_attempts for r in stamps.values()),
-                "seconds": round(renderer.compile_seconds, 3),
-                "cache_hits": renderer.cache_hits,
-            }
+            self.stats["compile"] = _compile_stats(renderer, stamps)
             for job in jobs:
                 stamp = stamps.get(job["debug_id"])
                 if stamp is None:
