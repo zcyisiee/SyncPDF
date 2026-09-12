@@ -23,6 +23,7 @@ overlay 前快照页内链接，redaction 后按原矩形重新插入，再交�
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import re
@@ -36,10 +37,15 @@ import pymupdf
 from babeldoc.format.pdf.document_il.backend.latex_bbox.capability import (
     probe_latex_capability,
 )
+from babeldoc.format.pdf.document_il.backend.latex_bbox.fusion import FRAGMENT_PATTERN
 from babeldoc.format.pdf.document_il.backend.latex_bbox.fusion import FormulaLatexIndex
+from babeldoc.format.pdf.document_il.backend.latex_bbox.fusion import FragmentRef
 from babeldoc.format.pdf.document_il.backend.latex_bbox.fusion import fuse_paragraph
 from babeldoc.format.pdf.document_il.backend.latex_bbox.fusion import (
     iter_composition_units,
+)
+from babeldoc.format.pdf.document_il.backend.latex_bbox.fusion import (
+    render_fragment_latex,
 )
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
     DEFAULT_LEAD_RATIO,
@@ -113,6 +119,9 @@ def capture_layout_sources(docs, config, source_texts: dict | None = None) -> di
     bodies: dict[str, str] = {}
     plain_texts: dict[str, str] = {}
     failures: dict[str, list[str]] = {}
+    fragments: dict[str, dict] = {}
+    class_counts: Counter = Counter()
+    note_counts: Counter = Counter()
 
     for page in docs.page:
         page_font_map = {font.font_id: font for font in page.pdf_font}
@@ -167,6 +176,18 @@ def capture_layout_sources(docs, config, source_texts: dict | None = None) -> di
             if fused.ok:
                 bodies[paragraph.debug_id] = fused.body
                 plain_texts[paragraph.debug_id] = fused.plain_text
+                meta["fuse_classes"] = list(fused.formula_classes)
+                if fused.fragments:
+                    meta["fragment_keys"] = [frag.key for frag in fused.fragments]
+                for frag in fused.fragments:
+                    fragments[frag.key] = {
+                        "page": frag.page,
+                        "box": list(frag.box),
+                        "y_offset": frag.y_offset,
+                        "height": frag.height,
+                    }
+                class_counts.update(fused.formula_classes)
+                note_counts.update(fused.formula_notes)
             else:
                 failures[paragraph.debug_id] = fused.reasons
 
@@ -175,10 +196,64 @@ def capture_layout_sources(docs, config, source_texts: dict | None = None) -> di
         "bodies": bodies,
         "plain_texts": plain_texts,
         "fusion_failures": failures,
+        #: 需要从源 PDF 裁区域嵌入的片段（key → page/box/y_offset/height）。
+        "fragments": fragments,
+        #: 四级分类统计（text/mineru/simple_math/fragment）与降级留痕。
+        "fusion_stats": {
+            "classes": dict(class_counts),
+            "notes": dict(note_counts),
+        },
         "provider_inline_spans": latex_index.total_spans if latex_index else 0,
     }
     config.latex_bbox_state = state
     return state
+
+
+def _source_pdf_path(config) -> Path | None:
+    """定位源 PDF（裁片段用）：显式配置 > input_file > working_dir/input.pdf。"""
+    explicit = getattr(config, "latex_source_pdf_path", None)
+    if explicit:
+        candidate = Path(explicit)
+        if candidate.is_file():
+            return candidate
+    input_file = getattr(config, "input_file", None)
+    if input_file:
+        candidate = Path(input_file)
+        if candidate.is_file():
+            return candidate
+    getter = getattr(config, "get_working_file_path", None)
+    if callable(getter):
+        try:
+            candidate = Path(getter("input.pdf"))
+        except Exception:  # noqa: BLE001 - 路径解析失败只是拿不到源 PDF
+            return None
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def crop_fragment_pdf(
+    source: pymupdf.Document, page_index: int, rect: pymupdf.Rect, out_path: Path
+) -> bool:
+    """从源 PDF 裁出 ``rect`` 区域存成单页 PDF（片段内联用）。
+
+    源页面尺寸未知（越界）时返回 False，调用方按「片段不可用」回退整段。
+    """
+    if page_index < 0 or page_index >= len(source):
+        return False
+    page_rect = source[page_index].rect
+    clipped = pymupdf.Rect(rect) & page_rect
+    if clipped.is_empty or clipped.width <= 0.5 or clipped.height <= 0.5:
+        return False
+    out = pymupdf.open()
+    try:
+        target = out.new_page(width=clipped.width, height=clipped.height)
+        target.show_pdf_page(target.rect, source, page_index, clip=clipped)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out.save(out_path)
+    finally:
+        out.close()
+    return out_path.is_file()
 
 
 def _rect_key(rect) -> tuple:
@@ -343,6 +418,10 @@ class LatexBboxOverlay:
         self._paragraphs: dict[str, dict] = {}
         self._bodies: dict[str, str] = {}
         self._plain_texts: dict[str, str] = {}
+        #: 片段引用（key → page/box/y_offset/height，capture 阶段写出）。
+        self._fragments: dict[str, dict] = {}
+        #: capture 阶段的四级分类统计（写入报告）。
+        self._fusion_stats: dict = {}
         #: prepare 的结果：成功编译的段落（内容流需跳过其字符）。
         self._jobs: list[dict] = []
         self._compiled: dict[str, StampResult] = {}
@@ -370,6 +449,11 @@ class LatexBboxOverlay:
                 "label": label,
                 "reason": None,
                 "fuse_kinds": list(meta.get("fuse_kinds") or []),
+                #: 该段公式单元的四级分类（text/mineru/simple_math/fragment）。
+                "fuse_classes": list(meta.get("fuse_classes") or []),
+                #: 期望可见文本（译文去标记 + text/mineru/simple_math 片段原文，
+                #: fragment 除外）：验收脚本用它做「贴片文本层零差异」判定。
+                "expected_text": self._plain_texts.get(debug_id, ""),
                 "fill_before": None,
                 "fill_after": None,
                 "font_scale": None,
@@ -403,6 +487,8 @@ class LatexBboxOverlay:
         self._paragraphs = state.get("paragraphs") or {}
         self._bodies = state.get("bodies") or {}
         self._plain_texts = state.get("plain_texts") or {}
+        self._fragments = state.get("fragments") or {}
+        self._fusion_stats = state.get("fusion_stats") or {}
 
     def _docs_pages(self) -> dict[int, object]:
         if self._pages_by_number is None:
@@ -491,6 +577,7 @@ class LatexBboxOverlay:
         """
         self._load_state()
         self._init_decisions(self._paragraphs)
+        self.stats["fusion"] = copy.deepcopy(self._fusion_stats)
         if self.mode == "repair":
             self._prepared = True
             return set()
@@ -532,12 +619,13 @@ class LatexBboxOverlay:
     def _prepare_jobs(self, capability) -> None:
         jobs, reasons = self._select_candidates(self._paragraphs, self._bodies)
         self._reasons = Counter(reasons)
+        self._tmpdir = tempfile.TemporaryDirectory(prefix="babeldoc-latex-bbox-")
+        jobs = self._substitute_fragments(jobs, Path(self._tmpdir.name))
         self.stats["attempted"] = len(jobs)
         if not jobs:
             self.stats["fallback"] = len(self._paragraphs)
             self.stats["fallback_reasons"] = dict(self._reasons)
             return
-        self._tmpdir = tempfile.TemporaryDirectory(prefix="babeldoc-latex-bbox-")
         renderer = BboxStampRenderer(
             capability,
             timeout_seconds=getattr(self.config, "latex_compile_timeout_seconds", 45.0),
@@ -598,6 +686,117 @@ class LatexBboxOverlay:
         self._compiled = successful
         self.stamped_ids = set(successful)
 
+    def _substitute_fragments(self, jobs: list[dict], tmpdir: Path) -> list[dict]:
+        """把 body 里的片段占位符替换成源 PDF 裁出来的内联图片。
+
+        片段来自**源 PDF**（不是译文/贴片 PDF），按源 box 外扩 0.5bp 裁单页；
+        任一片段裁剪失败即整段回退现有渲染（不会留下空图片引用）。
+        """
+        if not any(FRAGMENT_PATTERN.search(job["body"]) for job in jobs):
+            return jobs
+        source_path = _source_pdf_path(self.config)
+        kept: list[dict] = []
+        if source_path is None:
+            for job in jobs:
+                if FRAGMENT_PATTERN.search(job["body"]):
+                    self._reject_job(job, "fragment-source-missing")
+                    continue
+                kept.append(job)
+            return kept
+        try:
+            source = pymupdf.open(source_path)
+        except Exception:  # noqa: BLE001 - 打不开源 PDF 只影响片段
+            logger.warning("打开源 PDF 失败，含片段的段落回退", exc_info=True)
+            for job in jobs:
+                if FRAGMENT_PATTERN.search(job["body"]):
+                    self._reject_job(job, "fragment-source-missing")
+                    continue
+                kept.append(job)
+            return kept
+        try:
+            rendered: dict[str, str] = {}
+            for job in jobs:
+                keys = FRAGMENT_PATTERN.findall(job["body"])
+                if not keys:
+                    kept.append(job)
+                    continue
+                body = job["body"]
+                failed = False
+                for key in keys:
+                    if key not in rendered:
+                        path = self._crop_fragment(source, tmpdir, key)
+                        if path is None:
+                            failed = True
+                            break
+                        rendered[key] = path
+                    body = FRAGMENT_PATTERN.sub(
+                        lambda match, _key=key: rendered[_key]
+                        if match.group(1) == _key
+                        else match.group(0),
+                        body,
+                    )
+                if failed:
+                    self._reject_job(job, "fragment-crop-failed")
+                    continue
+                job["body"] = body
+                kept.append(job)
+            return kept
+        finally:
+            source.close()
+
+    def _crop_fragment(self, source, tmpdir: Path, key: str) -> str | None:
+        """裁一个片段并返回可用于 ``\\includegraphics`` 的绝对路径。"""
+        ref = self._fragments.get(key)
+        if not ref:
+            return None
+        box = ref.get("box") or []
+        if len(box) != 4:
+            return None
+        page_index = int(ref.get("page", -1))
+        height = float(ref.get("height") or 0.0)
+        if height <= 0:
+            return None
+        page_height = self._page_height(page_index)
+        if page_height <= 0:
+            return None
+        # IL 坐标（y 向上）→ PDF 矩形（y 向下），外扩 0.5bp 保证字形边缘完整。
+        expand = 0.5
+        rect = pymupdf.Rect(
+            box[0] - expand,
+            page_height - box[3] - expand,
+            box[2] + expand,
+            page_height - box[1] + expand,
+        )
+        safe = re.sub(r"[^0-9A-Za-z_-]", "_", key)
+        out_path = tmpdir / f"frag-{safe}.pdf"
+        fragment = FragmentRef(
+            key=key,
+            page=page_index,
+            box=(box[0], box[1], box[2], box[3]),
+            y_offset=float(ref.get("y_offset") or 0.0),
+            height=height,
+        )
+        try:
+            if not crop_fragment_pdf(source, page_index, rect, out_path):
+                return None
+        except Exception:  # noqa: BLE001 - 裁剪失败按片段不可用处理
+            logger.debug("片段裁剪失败 key=%s", key, exc_info=True)
+            return None
+        return render_fragment_latex(fragment, str(out_path))
+
+    def _page_height(self, page_index: int) -> float:
+        page = self._docs_pages().get(page_index)
+        if page is not None and page.cropbox is not None and page.cropbox.box is not None:
+            return float(page.cropbox.box.y2) - float(page.cropbox.box.y)
+        if 0 <= page_index < len(self.pdf):
+            return float(self.pdf[page_index].rect.height)
+        return 0.0
+
+    def _reject_job(self, job: dict, reason: str) -> None:
+        """把已入选的段落降级为回退（片段不可用等编译期前失败）。"""
+        self._reasons.update([reason])
+        self._decide(job["debug_id"], reason)
+
     def _abort_prepared(self) -> None:
         """预选/编译失败：清掉临时目录与选段结果（不跳过任何字符）。"""
         self._jobs = []
@@ -654,6 +853,7 @@ class LatexBboxOverlay:
     def _apply_legacy(self) -> pymupdf.Document:
         """repair 模式：内容流生成后选段 + redaction + 贴片（旧行为）。"""
         self._load_state()
+        self.stats["fusion"] = copy.deepcopy(self._fusion_stats)
         if not self._paragraphs:
             self.stats["fallback"] = 0
             self.stats["fallback_reasons"] = {"no-captured-paragraphs": 0}
@@ -687,6 +887,11 @@ class LatexBboxOverlay:
             max_workers=getattr(self.config, "latex_max_compile_workers", 2),
         )
         with tempfile.TemporaryDirectory(prefix="babeldoc-latex-bbox-") as tmp:
+            jobs = self._substitute_fragments(jobs, Path(tmp))
+            if not jobs:
+                self.stats["fallback"] = len(self._paragraphs)
+                self.stats["fallback_reasons"] = dict(counter)
+                return pdf
             requests = [
                 (
                     StampRequest(

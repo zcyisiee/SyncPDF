@@ -1029,6 +1029,8 @@ def _do_translate_single(
     # 需在翻译前记录源文，供 overlay 判定「未翻译段」。
     # （不翻译（skip_translation）时也记：此时译文恒等于源文 → 全部跳过。）
     if getattr(translation_config, "enable_latex_bbox_layout", False):
+        # 片段级公式嵌图需要源 PDF（与 IL 坐标同源）。
+        translation_config.latex_source_pdf_path = str(temp_pdf_path)
         from babeldoc.format.pdf.document_il.backend.latex_bbox import (
             record_source_texts,
         )

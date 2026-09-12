@@ -12,8 +12,12 @@
 - **应用率** = applied / eligible（applied 取自 ``latex_bbox_report.json``）；
 - **applied 段非末行 fill 分布**：复用 ``overlay.measure_line_fills`` 从贴片
   文本层按行量测（口径与产品门禁一致）；
-- **贴片文本层 vs 译文纯文本 diff**：逐段字符级差异计数（含公式的段落单独
-  标记，零差异判定只统计非公式段）；
+- **贴片文本层 vs 期望可见文本**：期望值取 overlay 报告 ``decisions[].expected_text``
+  （译文去标记 + text/mineru/simple_math 片段原文；旧报告回退译文去标记）。
+  逐段给出严格字符差 ``text_diff`` 与容差判定 ``text_layer_match``
+  （NFKC + 同形字形折叠 + 去空白后「期望文本是抽取文本的子序列」，容忍断词
+  连字符/额外字形但不容忍缺字）；零差异比率只统计非公式段
+  （``mineru``/``simple_math``/``fragment`` 类段单独排除）；
 - 耗时（报告里的编译秒数）与 PDF 体积。
 
 设计约束：本脚本不重跑任何阶段、不写输入 workdir（除显式传入的 out_dir）。
@@ -34,6 +38,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from babeldoc.format.pdf.document_il.backend.latex_bbox import (  # noqa: E402
     overlay as overlay_mod,
+)
+from babeldoc.format.pdf.document_il.backend.latex_bbox import (
+    renderer as renderer_mod,  # noqa: E402
 )
 from babeldoc.format.pdf.document_il.backend.latex_bbox.fusion import (  # noqa: E402
     FORMULA_PLACEHOLDER,
@@ -126,6 +133,25 @@ def _char_diff(expected: str, extracted: str) -> int:
     )
 
 
+#: 「公式段」判定用的分类：包含这些类的段不参与零差异（位图/数学渲染）。
+FORMULA_BEARING_CLASSES = frozenset({"mineru", "simple_math", "fragment"})
+#: ``text`` 级公式就是文本，参与零差异判定。
+
+
+def fuse_classes_for(pid, para, decisions: dict) -> list[str]:
+    """段落的公式级分类（P2 起由 capture 写入 overlay 报告 decisions）。
+
+    优先取 ``decisions[pid]["fuse_classes"]``；旧产物没有该字段时回退
+    ``n_formula_chars`` 的粗判定（把「有公式字符」折算成非 text 类），
+    保证历史产物仍可度量。
+    """
+    entry = decisions.get(pid) or {}
+    classes = entry.get("fuse_classes")
+    if classes:
+        return list(classes)
+    return ["simple_math"] if para.get("n_formula_chars") else []
+
+
 def measure_workdir(
     workdir: Path,
     mono_pdf: Path,
@@ -214,7 +240,11 @@ def measure_workdir(
                     "n_lines_stamped": metrics["n_lines"],
                     "src_box": box,
                     "rect": [rect.x0, rect.y0, rect.x1, rect.y1] if rect else None,
-                    "has_formula": bool(para.get("n_formula_chars")),
+                    "fuse_classes": fuse_classes_for(pid, para, decisions),
+                    "has_formula": bool(
+                        set(fuse_classes_for(pid, para, decisions))
+                        & FORMULA_BEARING_CLASSES
+                    ),
                     "target_chars": len(_normalize_text(_strip_markup(target))),
                 }
             )
@@ -229,6 +259,7 @@ def measure_workdir(
         diffs: list[dict] = []
         non_formula_applied = 0
         non_formula_zero_diff = 0
+        non_formula_strict = 0
 
         for item in applied:
             entry = decisions.get(item["id"]) or {}
@@ -245,23 +276,30 @@ def measure_workdir(
                 paragraphs_all_ok += 1
 
             target = (translated.get(item["id"]) or {}).get("target") or ""
-            expected = _normalize_text(_strip_markup(target))
+            # 期望可见文本：capture 写的 plain_text（译文去标记 + text/mineru/
+            # simple_math 片段原文）；旧报告没有该字段时回退译文去标记。
+            expected_source = entry.get("expected_text") or _strip_markup(target)
+            expected = _normalize_text(expected_source)
             extracted = (
                 _normalize_text(doc[item["page"]].get_text(clip=rect))
                 if rect is not None
                 else ""
             )
             text_diff = _char_diff(expected, extracted)
+            text_ok = renderer_mod.text_layer_matches(expected_source, extracted)
             if not item["has_formula"]:
                 non_formula_applied += 1
-                if text_diff == 0:
+                if text_ok:
                     non_formula_zero_diff += 1
+                if text_diff == 0:
+                    non_formula_strict += 1
             diffs.append(
                 {
                     "id": item["id"],
                     "page": item["page"],
                     "layout_label": item["label"],
                     "has_formula": item["has_formula"],
+                    "fuse_classes": item["fuse_classes"],
                     "fill_before": entry.get("fill_before"),
                     "fill_after": entry.get("fill_after"),
                     "min_body_fill": fills["min_body_fill"],
@@ -273,6 +311,7 @@ def measure_workdir(
                     "extracted_chars": len(extracted),
                     "text_diff": text_diff,
                     "zero_diff": text_diff == 0,
+                    "text_layer_match": text_ok,
                     "extracted_head": extracted[:40],
                 }
             )
@@ -311,7 +350,11 @@ def measure_workdir(
                 round(lines_filled / lines_total, 4) if lines_total else None
             ),
             "applied_paragraphs_all_nonfinal_ok": paragraphs_all_ok,
+            "fusion_classes": (report or {}).get("fusion") or {},
             "applied_paragraphs_zero_diff_non_formula": non_formula_zero_diff,
+            #: 严格字符级（text_diff==0）计数：断词连字符/同形字形会让它偏低，
+            #: 只作参考；DONE 判定用上面的容差口径。
+            "applied_paragraphs_strict_zero_diff_non_formula": non_formula_strict,
             "applied_paragraphs_non_formula": non_formula_applied,
             "text_diff_zero_ratio_non_formula": (
                 round(non_formula_zero_diff / non_formula_applied, 4)
@@ -347,10 +390,13 @@ def render_markdown(result: dict) -> str:
         f"（{result['lines_nonfinal_ge_threshold']}/{result['lines_nonfinal_total']}）",
         f"- applied 段全部非末行达标: {result['applied_paragraphs_all_nonfinal_ok']}"
         f"/{result['applied']}",
-        f"- 非公式 applied 段 text_diff=0: "
+        f"- 非公式 applied 段文本层完整（容差口径，期望文本是抽取文本的子序列）: "
         f"**{result['applied_paragraphs_zero_diff_non_formula']}"
         f"/{result['applied_paragraphs_non_formula']}**"
-        f"（max text_diff={result['text_diff_max']}）",
+        f"（严格字符级 zero-diff："
+        f"{result.get('applied_paragraphs_strict_zero_diff_non_formula')}"
+        f"/{result['applied_paragraphs_non_formula']}，"
+        f"max text_diff={result['text_diff_max']}：断词连字符与同形字形）",
         f"- 编译: attempts={result['compile'].get('attempts')} "
         f"seconds={result['compile_seconds']} "
         f"cache_hits={result['compile'].get('cache_hits')}",

@@ -527,6 +527,8 @@ def reconstruct(
         # 公式融合需要 provider IR（extract 时落在 <workdir>/agent；
         # _base_config 不设 provider_ir_dir，这里补齐，与 extract 保持一致）。
         config.provider_ir_dir = agent_dir(workdir)
+        # 片段级公式嵌图需要源 PDF（不是 mono 产物）：用 extract 落的输入副本。
+        config.latex_source_pdf_path = str(temp_pdf_path)
         from babeldoc.format.pdf.document_il.backend.latex_bbox import (
             capture_layout_sources,
         )

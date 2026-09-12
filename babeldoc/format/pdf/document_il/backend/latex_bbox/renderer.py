@@ -19,6 +19,7 @@ import re
 import subprocess
 import threading
 import time
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from dataclasses import field
@@ -32,6 +33,7 @@ TEX_HEADER = r"""\documentclass{article}
 \usepackage{xeCJK}
 \usepackage{amsmath}
 \usepackage{amssymb}
+\usepackage{graphicx}
 \setCJKmainfont[Path=%(fontdir)s/,Extension=.ttf,UprightFont=%(cjkbase)s%(boldfont)s]{%(cjkbase)s}
 \XeTeXlinebreaklocale "zh"
 \XeTeXlinebreakskip = 0pt plus 1pt
@@ -98,8 +100,61 @@ class StampResult:
     log_excerpt: list[str] = field(default_factory=list)
 
 
-def _normalize_text(text: str) -> str:
-    return re.sub(r"\s+", "", text or "")
+#: 同形数学字形折叠表（仅用于比较）：XeLaTeX 数学字体经 PyMuPDF 抽取时，
+#: 部分字形映射到形状相同但码点不同的符号（如 ``\Delta`` 落成 INCREMENT）。
+_GLYPH_ALIASES = str.maketrans(
+    {
+        "\u2206": "\u0394",  # ∆ INCREMENT → Δ GREEK CAPITAL DELTA
+        "\u2212": "-",  # − MINUS SIGN
+        "\u2010": "-",  # ‐ HYPHEN
+        "\u2011": "-",  # ‑ NON-BREAKING HYPHEN
+        "\u2044": "/",  # ⁄ FRACTION SLASH
+        "\u2215": "/",  # ∕ DIVISION SLASH
+        "\u2217": "*",  # ∗ ASTERISK OPERATOR
+        "\u22c5": "*",  # ⋅ DOT OPERATOR
+        "\u00b7": "*",  # · MIDDLE DOT
+        "\u2236": ":",  # ∶ RATIO
+    }
+)
+
+
+def normalize_rendered_text(text: str) -> str:
+    """渲染文本的比较键：NFKC + 同形字形折叠 + 去全部空白。
+
+    XeLaTeX 渲染出的字形与原生字符可能字面不同（``𝑛`` 与 ``n``、
+    ``$\times$`` 与 ``×``），NFKC 把兼容等价形式折叠后再比较，避免把
+    「渲染差异」误判成丢字。
+    """
+    normalized = unicodedata.normalize("NFKC", text or "").translate(_GLYPH_ALIASES)
+    return re.sub(r"\s+", "", normalized)
+
+
+def text_layer_matches(expected: str, extracted: str) -> bool:
+    """文本层是否完整包含期望文本（验收与 fit 判定共用口径）。
+
+    归一化（NFKC + 同形字形折叠 + 去空白）后：完全相等 → True；否则要求
+    期望文本是抽取文本的**子序列**（大小写不敏感），即「可以多出渲染插入的
+    字符（断词连字符、额外字形），但一个都不能少」。
+    """
+    left = normalize_rendered_text(expected).casefold()
+    right = normalize_rendered_text(extracted).casefold()
+    if left == right:
+        return True
+    return _is_subsequence(left, right)
+
+
+def _is_subsequence(expected: str, extracted: str) -> bool:
+    """``expected`` 是否是 ``extracted`` 的子序列（容忍渲染插入的字符）。
+
+    断词连字符、LaTeX 额外字形都会在文本层多出字符；丢字则是**缺少**
+    期望字符。子序列判定正好「容忍多、不容忍少」，并且大小写不敏感
+    （MinerU LaTeX 与原生字符偶有大小写差异，不是丢字）。
+    """
+    index = 0
+    for ch in extracted:
+        if index < len(expected) and ch == expected[index]:
+            index += 1
+    return index == len(expected)
 
 
 def _measure_fit(
@@ -120,7 +175,7 @@ def _measure_fit(
     doc = pymupdf.open(pdf_path)
     try:
         page = doc[0]
-        extracted = _normalize_text(page.get_text())
+        extracted = normalize_rendered_text(page.get_text())
         text_chars = len(extracted)
         ink = pymupdf.Rect()
         for block in page.get_text("blocks"):
@@ -133,14 +188,20 @@ def _measure_fit(
             if ink.y1 > height + _FIT_TOLERANCE or ink.y0 < -_FIT_TOLERANCE:
                 return False, "vertical-overflow", text_chars
         if expected_text:
-            expected = _normalize_text(expected_text)
+            expected = normalize_rendered_text(expected_text)
             if expected:
-                # 丢失超过 2% 字符，或结尾字符不在 → 判定为被裁剪。
-                if len(extracted) < len(expected) * 0.98:
-                    return False, "text-clipped", text_chars
-                tail = expected[-3:]
-                if tail not in extracted:
-                    return False, "text-clipped-tail", text_chars
+                # 全文归一化比较：渲染结果必须逐字符等于期望可见文本
+                # （fragment 位图区域已在调用方从 expected 中排除）。
+                if extracted != expected:
+                    # 长度骤减 / 结尾缺失是最典型的静默裁剪信号。
+                    if len(extracted) < len(expected) * 0.98:
+                        return False, "text-clipped", text_chars
+                    if expected[-3:] not in extracted:
+                        return False, "text-clipped-tail", text_chars
+                    # 归一化全文比较（大小写不敏感）：容忍渲染插入，
+                    # 不接受任何期望字符缺失。
+                    if not _is_subsequence(expected.casefold(), extracted.casefold()):
+                        return False, "text-mismatch", text_chars
         return True, "ok", text_chars
     finally:
         doc.close()
@@ -261,6 +322,11 @@ class BboxStampRenderer:
                     result.log_excerpt = logs
                     return result
                 reasons.append(f"s{step}:{fit_reason}")
+                if fit_reason in ("text-mismatch", "no-extractable-text"):
+                    # 内容不一致/无文本不是尺寸问题，缩小字号无法修复。
+                    result.reason = ";".join(reasons)
+                    result.log_excerpt = logs
+                    return result
                 next_size = max(font_size * _SHRINK_FACTOR, _MIN_FONT_SIZE)
                 if next_size >= font_size:
                     break

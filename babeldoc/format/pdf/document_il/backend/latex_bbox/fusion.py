@@ -9,19 +9,39 @@
 2. ``<style id='N'>…</style>`` / ``<bN>…</bN>`` 富文本标记按 composition
    中对应样式 run 解析为 ``\\textbf{}``/``\\textit{}``；
 3. ``{vN}`` 按出现顺序对应 composition 中第 N 个 ``PdfFormula`` 对象
-   （parse_translate_output 按译文顺序回填公式），用公式**源 bbox** 匹配
-   MinerU ``inline_equation`` span 取 LaTeX 源码并包裹 ``$...$``；
-4. 任何环节无法建立一一对应（占位符数量不符、公式无 MinerU 匹配、
-   顺序校验失败）→ 返回"不可替换"，走现有 ``PdfFormula`` 矢量路径，
-   绝不猜测公式。
+   （parse_translate_output 按译文顺序回填公式），按四级分类处理
+   （``classify_formula``，顺序 ``text → mineru → simple_math → fragment``）：
+
+   - ``text``：原生字符全是普通文本字符且无矢量图形 → 按字面文本入 body
+     （BabelDOC 启发式把引文号 ``[55]``、项目符号 ``•`` 聚成公式的场景）；
+   - ``mineru``：公式字符落在**单个**受保护 formula 区域内，该区域由
+     protector 从 MinerU ``inline_equation`` span 原样转换而来（精确盒同一性），
+     且 span 文本与原生字符一致、未被其它公式复用 → 用 MinerU LaTeX 源码
+     包裹 ``$...$``；
+   - ``simple_math``：原生字符是可转写的 Unicode 数学（``unicode_math``）
+     → 转写成 ``$...$``；
+   - ``fragment``：其余 → 记录源 PDF 裁片段引用，由 overlay 裁区域嵌入
+     （``\bdocfrag{...}``），绝不猜测公式。
+
+4. 任何环节无法建立一一对应（占位符数量不符、顺序校验失败）→ 返回"不可替换"，
+   走现有 ``PdfFormula`` 矢量路径，绝不猜测公式。
 """
 
 from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from dataclasses import field
+
+from babeldoc.format.pdf.document_il.backend.latex_bbox.unicode_math import (
+    CID_PLACEHOLDER,
+)
+from babeldoc.format.pdf.document_il.backend.latex_bbox.unicode_math import math_latex
+from babeldoc.format.pdf.document_il.utils.provider_alignment import (
+    span_text_consistent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +65,15 @@ LATEX_SPECIALS = {
     "^": r"\textasciicircum{}",
 }
 
-# formula 源 box 与 MinerU span 的匹配阈值：IoU 或中心点包含。
-_MIN_IOU = 0.25
+#: ``text`` 级允许的原生字符（普通正文/引文号/项目符号等，含空格）。
+TEXT_CLASS_CHARS = frozenset("[]()•·_-–—,.;:+=<>/%*| ")
+#: 形如纯英文单词片段的原生字符（≥3 个连续字母）→ 判 ``text``（BabelDOC 把
+#: 正文词片误聚成公式的场景，如 MinerU 把 ``ng stora`` 误判成行内公式）。
+PROSE_WORD_FRAGMENT = re.compile(r"^(?=.*[A-Za-z]{3})[A-Za-z]+(?: [A-Za-z]+)*$")
+#: 片段占位符：overlay 在编译前替换成 ``\raisebox{...}{\includegraphics...}``。
+FRAGMENT_MACRO = "\\bdocfrag"
+#: MinerU LaTeX 去命令后与原生字符的字母数字相容阈值（子序列占比）。
+MIN_LATEX_COMPATIBILITY = 0.6
 
 
 def escape_latex(text: str) -> str:
@@ -55,15 +82,50 @@ def escape_latex(text: str) -> str:
 
 
 @dataclass(slots=True)
+class FragmentRef:
+    """一个需要从源 PDF 裁区域嵌入的公式片段。"""
+
+    key: str
+    page: int
+    #: IL 坐标 box (x, y, x2, y2)。
+    box: tuple[float, float, float, float]
+    #: 源字号下的竖直基线偏移（``PdfFormula.y_offset``，IL 单位 pt）。
+    y_offset: float
+    height: float
+
+
+@dataclass(slots=True)
+class FormulaClassification:
+    """一个 ``PdfFormula`` 单元的分类结果。"""
+
+    kind: str
+    native_text: str = ""
+    #: ``mineru``/``simple_math`` 的数学模式片段（不含 ``$``）。
+    latex: str = ""
+    #: 命中的 MinerU span id（``mineru`` 级）。
+    span_id: str | None = None
+    fragment: FragmentRef | None = None
+    #: 降级原因（``mineru`` 级失败时的证据，供报告留痕）。
+    reason: str = ""
+
+
+@dataclass(slots=True)
 class FuseResult:
     """一个段落的融合结果。"""
 
     ok: bool = False
     body: str = ""
-    #: 期望可见文本（去标记、去公式），用于检测贴片后是否丢字。
+    #: 期望可见文本（去标记 + text/mineru/simple_math 片段原文，fragment 除外），
+    #: 用于检测贴片后是否丢字。
     plain_text: str = ""
     formula_count: int = 0
     formulas_matched: int = 0
+    #: 逐公式分类（与 ``formula_count`` 同序）。
+    formula_classes: list[str] = field(default_factory=list)
+    #: 需要裁片段嵌入的引用（body 内已写入 ``\\bdocfrag{key}``）。
+    fragments: list[FragmentRef] = field(default_factory=list)
+    #: 降级/分类留痕（``kind:reason``），供 overlay 报告聚合。
+    formula_notes: list[str] = field(default_factory=list)
     style_runs: int = 0
     reasons: list[str] = field(default_factory=list)
 
@@ -183,29 +245,88 @@ def parse_segments(text: str) -> list[tuple[str, str]] | None:
     return segments
 
 
-class FormulaLatexIndex:
-    """MinerU ``inline_equation`` span 的 LaTeX 源码索引（IL 坐标）。
+@dataclass(slots=True)
+class ProtectedFormula:
+    """一个 IL formula 保护区与其 MinerU ``inline_equation`` span 的对应。"""
 
-    MinerU bbox 为 top-left 原点，转换沿用 provider_alignment 的页高翻转；
-    匹配策略：IoU 优先，公式源 box 中心点落入 span box 兜底。
+    span_id: str
+    latex: str
+    text: str
+
+
+def _box_key(box) -> tuple[float, float, float, float]:
+    return (
+        round(float(box.x), 3),
+        round(float(box.y), 3),
+        round(float(box.x2), 3),
+        round(float(box.y2), 3),
+    )
+
+
+def _alnum(text: str) -> str:
+    """去掉 LaTeX 命令与花括号后保留字母数字（用于跨表示比对）。"""
+    stripped = re.sub(r"\\[A-Za-z]+", " ", text or "")
+    normalized = unicodedata.normalize("NFKC", stripped)
+    return "".join(ch for ch in normalized if ch.isalnum()).lower()
+
+
+def _subsequence_ratio(native: str, latex: str) -> float:
+    """``latex`` 的字母数字在 ``native`` 里的**有序**子序列覆盖率（0..1）。
+
+    用 ``difflib`` 匹配块长度之和度量：顺序错乱（如 OCR 把正文词认成公式）
+    会显著拉低该值。
+    """
+    import difflib
+
+    if not native:
+        return 0.0
+    matcher = difflib.SequenceMatcher(a=native, b=latex, autojunk=False)
+    return sum(block.size for block in matcher.get_matching_blocks()) / len(native)
+
+
+def _latex_compatible(native_text: str, latex: str) -> bool:
+    """MinerU LaTeX 去命令后的字母数字与原生字符是否相容。"""
+    native = _alnum(native_text)
+    if not native:
+        return False
+    candidate = _alnum(latex)
+    if not candidate:
+        return False
+    return _subsequence_ratio(native, candidate) >= MIN_LATEX_COMPATIBILITY
+
+
+class FormulaLatexIndex:
+    """IL formula 保护区 → MinerU ``inline_equation`` span 的索引。
+
+    匹配是**精确盒同一性**：``inline_math_protector`` 把 span 的 IL bbox 原样
+    追加为 ``class_name="formula"`` 的 ``PageLayout``，因此公式字符的
+    ``formula_layout_id`` 所指区域的 box 与该 span 的 box 完全相等。同一 box
+    命中多个 span（MinerU 重复产物）视为不确定，该区域不做 MinerU 级融合。
+
+    与旧的 IoU/中心点就近匹配不同：这里不做任何几何近似，宁可降级
+    （simple_math / fragment）也不用可能属于相邻区域的 LaTeX —— 根因 3
+    的 B2Rrm 错误正是 IoU 就近取造成的。
     """
 
-    def __init__(self, spans_by_page: dict[int, list[tuple[tuple, str]]]):
-        self._spans_by_page = spans_by_page
+    def __init__(self, by_page: dict[int, dict[int, ProtectedFormula]]):
+        self._by_page = by_page
 
     @property
     def total_spans(self) -> int:
-        return sum(len(entries) for entries in self._spans_by_page.values())
+        return sum(len(entries) for entries in self._by_page.values())
 
     @classmethod
-    def from_documents(
-        cls, docs, config
-    ) -> FormulaLatexIndex | None:
-        """从 provider IR + IL 文档构建索引（页高用 IL cropbox）。"""
+    def from_documents(cls, docs, config) -> FormulaLatexIndex | None:
+        """从 provider IR + IL 文档的 formula 保护区构建索引。
+
+        页高用 IL cropbox；无 provider IR（native 路径）时返回 None。
+        """
         from babeldoc.format.pdf.document_il.midend.inline_math_protector import (
             load_provider_document,
         )
-        from babeldoc.format.pdf.document_il.utils.provider_alignment import to_il_box
+        from babeldoc.format.pdf.document_il.utils.provider_alignment import (
+            inline_equation_spans,
+        )
 
         provider = load_provider_document(
             getattr(config, "provider_ir_dir", None),
@@ -218,52 +339,186 @@ class FormulaLatexIndex:
             if page.cropbox is not None and page.cropbox.box is not None:
                 box = page.cropbox.box
                 page_heights[page.page_number] = float(box.y2) - float(box.y)
-        spans_by_page: dict[int, list[tuple[tuple, str]]] = {}
-        for page in provider.pages:
-            height = page_heights.get(page.page_index)
-            if height is None or height <= 0:
+        provider_pages = {page.page_index: page for page in provider.pages}
+        by_page: dict[int, dict[int, ProtectedFormula]] = {}
+        for page in docs.page:
+            provider_page = provider_pages.get(page.page_number)
+            height = page_heights.get(page.page_number)
+            if provider_page is None or height is None or height <= 0:
                 continue
-            entries = spans_by_page.setdefault(page.page_index, [])
-            for block in page.iter_blocks(recursive=True):
-                for line in block.lines:
-                    for span in line.spans:
-                        if span.kind != "inline_equation":
-                            continue
-                        latex = (span.content or "").strip()
-                        box = to_il_box(span.bbox, height)
-                        if latex and box is not None:
-                            entries.append(((box.x, box.y, box.x2, box.y2), latex))
-        return cls(spans_by_page)
+            spans_by_box: dict[tuple, list] = {}
+            for span, box in inline_equation_spans(provider_page, height):
+                spans_by_box.setdefault(_box_key(box), []).append(span)
+            mapping: dict[int, ProtectedFormula] = {}
+            for layout in page.page_layout or []:
+                if layout.class_name not in ("formula", "isolate_formula"):
+                    continue
+                if layout.box is None or layout.id is None:
+                    continue
+                hits = spans_by_box.get(_box_key(layout.box))
+                if not hits or len(hits) != 1:
+                    continue
+                span = hits[0]
+                latex = (span.content or "").strip()
+                if not latex:
+                    continue
+                mapping[int(layout.id)] = ProtectedFormula(
+                    span_id=span.span_id, latex=latex, text=span.content or ""
+                )
+            if mapping:
+                by_page[page.page_number] = mapping
+        return cls(by_page)
 
-    def lookup(
-        self, page_index: int, box: tuple[float, float, float, float]
-    ) -> str | None:
-        entries = self._spans_by_page.get(page_index)
-        if not entries:
+    def resolve(
+        self,
+        page_index: int,
+        layout_ids: frozenset[int],
+        used_spans: set[str],
+    ) -> ProtectedFormula | None:
+        """解析公式字符的 ``formula_layout_id`` 指向的保护区。
+
+        要求：全部字符指向**同一个**保护区、该保护区对应唯一 MinerU span、
+        span 未被同段其它公式复用。不满足返回 None（降级）。
+        """
+        if len(layout_ids) != 1:
             return None
-        x0, y0, x1, y1 = box
-        area = max(0.0, x1 - x0) * max(0.0, y1 - y0)
-        if area <= 0:
+        protected = (self._by_page.get(page_index) or {}).get(next(iter(layout_ids)))
+        if protected is None:
             return None
-        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-        best = None
-        best_score = 0.0
-        for span_box, latex in entries:
-            sx0, sy0, sx1, sy1 = span_box
-            ix0, iy0 = max(x0, sx0), max(y0, sy0)
-            ix1, iy1 = min(x1, sx1), min(y1, sy1)
-            inter = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
-            span_area = max(0.0, sx1 - sx0) * max(0.0, sy1 - sy0)
-            union = area + span_area - inter
-            score = inter / union if union > 0 else 0.0
-            if score < _MIN_IOU and sx0 <= cx <= sx1 and sy0 <= cy <= sy1:
-                score = _MIN_IOU
-            if score > best_score:
-                best_score = score
-                best = latex
-        if best is not None and best_score >= _MIN_IOU:
-            return best
+        if protected.span_id in used_spans:
+            return None
+        return protected
+
+
+def _native_text(formula) -> str:
+    return "".join(char.char_unicode or "" for char in formula.pdf_character or [])
+
+
+def _layout_ids(formula) -> frozenset[int]:
+    return frozenset(
+        char.formula_layout_id
+        for char in formula.pdf_character or []
+        if char.formula_layout_id
+    )
+
+
+def _is_text_native(native: str) -> bool:
+    """原生字符是否全是普通文本字符（``text`` 级判定）。
+
+    源解析器对未映射字形会给出 ``(cid:N)`` 占位串；它由纯 ASCII 组成，
+    若不显式拒绝会被当正文字面写进成品 PDF。含此形态一律降级 fragment
+    （裁源区域反而能画出正确字形）。
+    """
+    if CID_PLACEHOLDER.search(native):
+        return False
+    for ch in native:
+        if ch.isspace() or ch in TEXT_CLASS_CHARS:
+            continue
+        if ch.isascii() and ch.isalnum():
+            continue
+        return False
+    return True
+
+
+def _is_prose_word_fragment(native: str) -> bool:
+    """原生字符是否是纯英文单词片段（正文词被误聚成公式）。"""
+    return bool(PROSE_WORD_FRAGMENT.match(native.strip()))
+
+
+def classify_formula(
+    formula,
+    page_index: int,
+    latex_index: FormulaLatexIndex | None,
+    used_spans: set[str] | None = None,
+    fragment_key: str = "",
+) -> FormulaClassification:
+    """把 composition 里的一个 ``PdfFormula`` 单元分级。
+
+    顺序硬约束：``text → mineru → simple_math → fragment``；任何不确定即降级。
+    """
+    native = _native_text(formula)
+    has_graphics = bool(formula.pdf_curve) or bool(formula.pdf_form)
+    if not has_graphics and _is_text_native(native):
+        return FormulaClassification(kind="text", native_text=native)
+    if _is_prose_word_fragment(native):
+        # 纯英文词片：无论是否带矢量图形都按文本处理（B2Rrm 类误判）。
+        return FormulaClassification(
+            kind="text", native_text=native, reason="prose-word-fragment"
+        )
+    if latex_index is not None:
+        protected = latex_index.resolve(
+            page_index, _layout_ids(formula), used_spans if used_spans is not None else set()
+        )
+        if protected is not None:
+            if not native:
+                return FormulaClassification(
+                    kind="fragment",
+                    native_text=native,
+                    reason="mineru-empty-native",
+                    fragment=_fragment(formula, page_index, fragment_key),
+                )
+            if not span_text_consistent(protected.text, native):
+                return FormulaClassification(
+                    kind="fragment",
+                    native_text=native,
+                    span_id=protected.span_id,
+                    reason="mineru-span-inconsistent",
+                    fragment=_fragment(formula, page_index, fragment_key),
+                )
+            if not _latex_compatible(native, protected.latex):
+                return FormulaClassification(
+                    kind="fragment",
+                    native_text=native,
+                    span_id=protected.span_id,
+                    reason="mineru-latex-incompatible",
+                    fragment=_fragment(formula, page_index, fragment_key),
+                )
+            return FormulaClassification(
+                kind="mineru",
+                native_text=native,
+                latex=protected.latex,
+                span_id=protected.span_id,
+            )
+    transliterated = math_latex(native)
+    if transliterated:
+        return FormulaClassification(
+            kind="simple_math", native_text=native, latex=transliterated
+        )
+    return FormulaClassification(
+        kind="fragment",
+        native_text=native,
+        reason="untranslatable-native",
+        fragment=_fragment(formula, page_index, fragment_key),
+    )
+
+
+#: fragment 占位符的正则（overlay 用它在编译前替换成内联图片）。
+FRAGMENT_PATTERN = re.compile(re.escape(FRAGMENT_MACRO) + r"\{([^{}]+)\}")
+
+
+def render_fragment_latex(ref: FragmentRef, path: str) -> str:
+    """把片段引用渲染成内联图片 LaTeX（编译前由 overlay 调用）。
+
+    与源文字号等高、按 ``PdfFormula.y_offset`` 竖直对齐基线；``bp`` 与
+    bbox/stamp 同单位（架构：P1-3 单位统一）。
+    """
+    return (
+        f"\\raisebox{{{ref.y_offset:.4f}bp}}{{"
+        f"\\includegraphics[height={ref.height:.4f}bp]{{{path}}}}}"
+    )
+
+
+def _fragment(formula, page_index: int, key: str) -> FragmentRef | None:
+    box = formula.box
+    if box is None or None in (box.x, box.y, box.x2, box.y2):
         return None
+    return FragmentRef(
+        key=key,
+        page=page_index,
+        box=(float(box.x), float(box.y), float(box.x2), float(box.y2)),
+        y_offset=float(formula.y_offset or 0.0),
+        height=float(box.y2) - float(box.y),
+    )
 
 
 def fuse_paragraph(paragraph, page_index: int, page_font_map: dict, latex_index: FormulaLatexIndex | None) -> FuseResult:
@@ -324,10 +579,6 @@ def fuse_paragraph(paragraph, page_index: int, page_font_map: dict, latex_index:
         result.plain_text = text
         return result
 
-    if latex_index is None:
-        result.reasons.append("no-provider-ir")
-        return result
-
     units = list(iter_composition_units(paragraph))
     formula_units = [u for u in units if u[0] == "formula"]
     text_units = [u for u in units if u[0] == "text"]
@@ -348,26 +599,48 @@ def fuse_paragraph(paragraph, page_index: int, page_font_map: dict, latex_index:
         return result
 
     body_parts: list[str] = []
+    plain_parts: list[str] = []
     text_iter = iter(text_units)
     formula_iter = iter(formula_units)
     matched = 0
+    formula_index = 0
+    used_spans: set[str] = set()
     for kind, content in segments:
         if kind == "formula":
             _, formula, _ = next(formula_iter)
-            box = formula.box
-            if box is None or box.x is None:
-                result.reasons.append(f"formula-box-missing:v{content}")
-                return result
-            latex = latex_index.lookup(
-                page_index, (float(box.x), float(box.y), float(box.x2), float(box.y2))
+            classification = classify_formula(
+                formula,
+                page_index,
+                latex_index,
+                used_spans,
+                fragment_key=f"{paragraph.debug_id or 'para'}-{formula_index}",
             )
-            if not latex:
-                result.reasons.append(f"formula-latex-unmatched:v{content}")
-                return result
-            body_parts.append(f"${latex}$")
-            matched += 1
+            formula_index += 1
+            result.formula_classes.append(classification.kind)
+            if classification.span_id:
+                used_spans.add(classification.span_id)
+            if classification.reason:
+                result.formula_notes.append(
+                    f"{classification.kind}:{classification.reason}"
+                )
+            if classification.kind == "text":
+                # 启发式「公式」其实就是文本：按字面入 body（已转义）。
+                body_parts.append(escape_latex(classification.native_text))
+                plain_parts.append(classification.native_text)
+            elif classification.kind in ("mineru", "simple_math"):
+                body_parts.append(f"${classification.latex}$")
+                plain_parts.append(classification.native_text)
+                matched += 1
+            else:
+                fragment = classification.fragment
+                if fragment is None:
+                    result.reasons.append(f"fragment-box-missing:v{content}")
+                    return result
+                result.fragments.append(fragment)
+                body_parts.append(f"{FRAGMENT_MACRO}{{{fragment.key}}}")
         else:
             _, unit_text, unit_style = next(text_iter)
+            plain_parts.append(content)
             if kind == "styled":
                 result.style_runs += 1
                 bold, italic = _style_flags(unit_style, page_font_map)
@@ -387,9 +660,12 @@ def fuse_paragraph(paragraph, page_index: int, page_font_map: dict, latex_index:
     if "<style" in body or re.search(r"</?[biue]", body, re.IGNORECASE):
         result.reasons.append("unhandled-markup-in-body")
         return result
+    if FRAGMENT_MACRO not in body and result.fragments:
+        result.reasons.append("fragment-macro-missing")
+        return result
     result.ok = True
     result.body = body
-    result.plain_text = "".join(
-        content for kind, content in segments if kind != "formula"
-    )
+    # 期望可见文本：译文（去标记）+ text/mineru/simple_math 片段原文；
+    # fragment 是位图区域，文本抽取不到，故不纳入比较（P2-6）。
+    result.plain_text = "".join(plain_parts)
     return result
