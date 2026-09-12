@@ -7,7 +7,7 @@
 // 用法：启动前把 PHASE 改成本阶段条目，父代理调用
 //   subagent({ workflowScriptPath: <本文件>, async: true, missionId: <mission> })
 
-const PHASE = { id: "P1-gating", label: "P1 门禁重写与贴片机制" };
+const PHASE = { id: "P2-fusion", label: "P2 融合重构与一致性校验" };
 // 依次可用：P0-diagnostics / P1-gating / P2-fusion / P3-typography / P4-batching / P5-regression
 
 const REPO = "/Users/zhengcaiyi/Desktop/博0/杂项/Github小玩意/BabelDOC/ieeTranslater";
