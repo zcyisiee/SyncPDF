@@ -215,71 +215,112 @@ def test_fuse_paragraph_placeholder_count_mismatch():
     assert any("mismatch" in reason for reason in result.reasons)
 
 
-def test_fuse_paragraph_formula_unmatched_falls_back():
-    """公式存在但无 MinerU 匹配 → 不可替换（绝不猜测公式）。"""
-    box = il_version_1.Box(10, 10, 40, 25)
-    formula = il_version_1.PdfFormula(box=box, x_offset=0.0, y_offset=0.0)
-    composition = il_version_1.PdfParagraphComposition(pdf_formula=formula)
-    text = "前 {v1} 后"
-    style = _style()
-    paragraph = il_version_1.PdfParagraph(
-        box=il_version_1.Box(0, 0, 200, 40),
+def _formula_paragraph(debug_id: str, text: str, formula, box, style=None):
+    """构造含一个公式 composition 的段落（译文 text 里带 {v1}）。"""
+    style = style or _style()
+    return il_version_1.PdfParagraph(
+        box=box,
         pdf_style=style,
         pdf_paragraph_composition=[
             il_version_1.PdfParagraphComposition(
                 pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
-                    unicode="前 ", pdf_style=style
-                )
-            ),
-            composition,
-            il_version_1.PdfParagraphComposition(
-                pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
-                    unicode=" 后", pdf_style=style
-                )
-            ),
-        ],
-        unicode=text,
-        debug_id="P01-003",
-        layout_label="text",
-        xobj_id=0,
-    )
-    index = fusion.FormulaLatexIndex({0: [((100, 100, 110, 110), "x^2")]})
-    result = fusion.fuse_paragraph(paragraph, 0, {"F1": None}, index)
-    assert result.ok is False
-    assert any("unmatched" in reason for reason in result.reasons)
-
-
-def test_fuse_paragraph_formula_matched_inlines_math():
-    """公式源 box 与 MinerU span 重合 → {v1} 还原为 $...$。"""
-    formula_box = il_version_1.Box(50, 300, 70, 315)
-    formula = il_version_1.PdfFormula(box=formula_box, x_offset=0.0, y_offset=0.0)
-    style = _style()
-    paragraph = il_version_1.PdfParagraph(
-        box=il_version_1.Box(0, 200, 300, 400),
-        pdf_style=style,
-        pdf_paragraph_composition=[
-            il_version_1.PdfParagraphComposition(
-                pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
-                    unicode="见 ", pdf_style=style
+                    unicode=text.split("{v1}")[0], pdf_style=style
                 )
             ),
             il_version_1.PdfParagraphComposition(pdf_formula=formula),
             il_version_1.PdfParagraphComposition(
                 pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
-                    unicode=" 所示。", pdf_style=style
+                    unicode=text.split("{v1}")[1], pdf_style=style
                 )
             ),
         ],
-        unicode="见 {v1} 所示。",
-        debug_id="P01-004",
+        unicode=text,
+        debug_id=debug_id,
         layout_label="text",
         xobj_id=0,
     )
-    index = fusion.FormulaLatexIndex({0: [((50, 300, 70, 315), r"\alpha_{1}")]})
+
+
+def _formula_with_chars(text: str, box, layout_id=None, curve=False):
+    chars = [
+        il_version_1.PdfCharacter(
+            char_unicode=ch,
+            box=il_version_1.Box(box.x + i * 4, box.y, box.x + i * 4 + 4, box.y2),
+            pdf_character_id=i,
+            pdf_style=_style(),
+            formula_layout_id=layout_id,
+            xobj_id=0,
+        )
+        for i, ch in enumerate(text)
+    ]
+    formula = il_version_1.PdfFormula(
+        box=box, x_offset=0.0, y_offset=-2.0, pdf_character=chars
+    )
+    if curve:
+        formula.pdf_curve = [il_version_1.PdfCurve(box=box)]
+    return formula
+
+
+def test_fuse_paragraph_without_alignment_keeps_heuristic_formula_as_text():
+    """无 MinerU 对齐时：启发式「公式」的原生字符是普通文本 → 按字面入 body。"""
+    box = il_version_1.Box(10, 10, 40, 25)
+    formula = _formula_with_chars("[62], ", box)
+    paragraph = _formula_paragraph(
+        "P01-003", "见 {v1} 所示", formula, il_version_1.Box(0, 0, 200, 40)
+    )
+    result = fusion.fuse_paragraph(paragraph, 0, {"F1": None}, None)
+    assert result.ok is True
+    # 公式原生字符自带尾随空格，与后一段文本拼接后出现双空格。
+    assert result.body == "见 [62],  所示"
+    assert result.formula_classes == ["text"]
+    assert result.plain_text == "见 [62],  所示"
+
+
+def test_fuse_paragraph_untranslatable_formula_becomes_fragment():
+    """既非文本、也无 MinerU 源、又不可转写 → 片段占位符（绝不猜测公式）。"""
+    box = il_version_1.Box(10, 10, 40, 25)
+    formula = _formula_with_chars("caf\u00b4", box)
+    paragraph = _formula_paragraph(
+        "P01-004", "见 {v1} 所示", formula, il_version_1.Box(0, 0, 200, 40)
+    )
+    result = fusion.fuse_paragraph(paragraph, 0, {"F1": None}, None)
+    assert result.ok is True
+    assert result.formula_classes == ["fragment"]
+    assert len(result.fragments) == 1
+    ref = result.fragments[0]
+    assert ref.key in result.body
+    assert fusion.FRAGMENT_MACRO in result.body
+    assert ref.box == (10.0, 10.0, 40.0, 25.0)
+    assert ref.y_offset == -2.0
+    assert ref.height == 15.0
+    # 片段是位图，不参与期望可见文本比较
+    assert result.plain_text == "见  所示"
+
+
+def test_fuse_paragraph_formula_matched_inlines_math():
+    """公式字符落在受保护区域且 MinerU span 一致 → 还原为 $...$。"""
+    formula_box = il_version_1.Box(50, 300, 70, 315)
+    # 真实场景：原生字符是数学斜体（𝑛win），MinerU 给出等价 LaTeX。
+    formula = _formula_with_chars("\U0001d45bwin", formula_box, layout_id=7)
+    paragraph = _formula_paragraph(
+        "P01-005", "见 {v1} 所示。", formula, il_version_1.Box(0, 200, 300, 400)
+    )
+    index = fusion.FormulaLatexIndex(
+        {
+            0: {
+                7: fusion.ProtectedFormula(
+                    span_id="s1",
+                    latex=r"n_{\mathrm{win}}",
+                    text=r"n_{\mathrm{win}}",
+                )
+            }
+        }
+    )
     result = fusion.fuse_paragraph(paragraph, 0, {"F1": None}, index)
     assert result.ok is True
-    assert result.body == r"见 $\alpha_{1}$ 所示。"
+    assert result.body == r"见 $n_{\mathrm{win}}$ 所示。"
     assert result.formulas_matched == 1
+    assert result.formula_classes == ["mineru"]
 
 
 def test_fuse_paragraph_segment_order_mismatch_falls_back():
@@ -370,19 +411,29 @@ def test_fuse_paragraph_plain_text_unresolved_style_falls_back():
 # --------------------------------------------------------------------------- #
 # FormulaLatexIndex
 # --------------------------------------------------------------------------- #
-def test_formula_index_iou_and_center_fallback():
-    index = fusion.FormulaLatexIndex({0: [((50, 300, 70, 315), "a+b")]})
-    assert index.lookup(0, (50, 300, 70, 315)) == "a+b"
-    # 中心点落入 span box（IoU 低）→ 兜底命中
-    assert index.lookup(0, (55, 305, 65, 310)) == "a+b"
-    # 完全无关 → None
-    assert index.lookup(0, (200, 200, 220, 215)) is None
-    assert index.lookup(9, (50, 300, 70, 315)) is None
+def test_formula_index_requires_exact_box_identity():
+    """保护区与 MinerU span 必须 box 完全相等才建立映射（不做 IoU 近似）。"""
+    index = fusion.FormulaLatexIndex(
+        {
+            0: {
+                7: fusion.ProtectedFormula(
+                    span_id="s1", latex="a+b", text="a+b"
+                )
+            }
+        }
+    )
     assert index.total_spans == 1
+    assert index.resolve(0, frozenset({7}), set()).latex == "a+b"
+    # 未保护的区域 id / 其它页 / 多个 lid → 不解析
+    assert index.resolve(0, frozenset({8}), set()) is None
+    assert index.resolve(1, frozenset({7}), set()) is None
+    assert index.resolve(0, frozenset({7, 8}), set()) is None
+    # span 已被同段其它公式复用 → 拒绝
+    assert index.resolve(0, frozenset({7}), {"s1"}) is None
 
 
-def test_formula_index_from_documents_loads_provider_ir(tmp_path):
-    """从 provider_ir.json 构建索引：inline_equation span 转 IL 坐标。"""
+def test_formula_index_from_documents_requires_matching_region(tmp_path):
+    """从 provider_ir.json + IL formula 保护区建立映射；box 不等则不映射。"""
 
     from babeldoc.docvision.provider_ir import ProviderDocument
 
@@ -404,17 +455,11 @@ def test_formula_index_from_documents_loads_provider_ir(tmp_path):
                                     "bbox": [10, 10, 200, 40],
                                     "spans": [
                                         {
-                                            "span_id": "s1",
-                                            "bbox": [10, 10, 60, 25],
-                                            "kind": "text",
-                                            "content": "hello",
-                                        },
-                                        {
                                             "span_id": "s2",
                                             "bbox": [62, 10, 100, 25],
                                             "kind": "inline_equation",
                                             "content": "E = mc^2",
-                                        },
+                                        }
                                     ],
                                 }
                             ],
@@ -429,14 +474,81 @@ def test_formula_index_from_documents_loads_provider_ir(tmp_path):
         provider.to_json(), encoding="utf-8"
     )
 
+    # MinerU y 向下（10..25）→ IL y 向上、页高 792 → (62, 767)-(100, 782)
+    matching = il_version_1.PageLayout(
+        id=7,
+        box=il_version_1.Box(62, 792 - 25, 100, 792 - 10),
+        class_name="formula",
+        conf=1.0,
+    )
+    shifted = il_version_1.PageLayout(
+        id=8, box=il_version_1.Box(63, 792 - 25, 100, 792 - 10), class_name="formula",
+        conf=1.0,
+    )
     docs = _il_doc([_il_page(0, [], width=612, height=792)])
+    docs.page[0].page_layout = [matching, shifted]
     config = _FakeConfig(working_dir=tmp_path)
     index = fusion.FormulaLatexIndex.from_documents(docs, config)
     assert index is not None
+    # 只有 box 精确相等的 7 建了映射；偏移 1pt 的 8 不映射（不做近似匹配）。
     assert index.total_spans == 1
-    # MinerU y 向下（top=10, bottom=25）→ IL y 向上，页高 792
-    latex = index.lookup(0, (62, 792 - 25, 100, 792 - 10))
-    assert latex == "E = mc^2"
+    assert index.resolve(0, frozenset({7}), set()).latex == "E = mc^2"
+    assert index.resolve(0, frozenset({8}), set()) is None
+
+
+def test_formula_index_ambiguous_duplicate_span_box_is_skipped(tmp_path):
+    """同一 box 命中多个 span（MinerU 重复）视为不确定，不建立映射。"""
+
+    from babeldoc.docvision.provider_ir import ProviderDocument
+
+    agent_dir = tmp_path / "agent" / "source" / "mineru"
+    agent_dir.mkdir(parents=True)
+    duplicate = {
+        "pages": [
+            {
+                "page_index": 0,
+                "blocks": [
+                    {
+                        "block_id": "b1",
+                        "type": "text",
+                        "bbox": [10, 10, 200, 40],
+                        "lines": [
+                            {
+                                "line_id": "l1",
+                                "bbox": [10, 10, 200, 40],
+                                "spans": [
+                                    {
+                                        "span_id": f"s{i}",
+                                        "bbox": [62, 10, 100, 25],
+                                        "kind": "inline_equation",
+                                        "content": f"x^{i}",
+                                    }
+                                    for i in (1, 2)
+                                ],
+                            }
+                        ],
+                    }
+                ],
+                "reading_order": [],
+            }
+        ]
+    }
+    (agent_dir / "provider_ir.json").write_text(
+        ProviderDocument.from_dict(duplicate).to_json(), encoding="utf-8"
+    )
+    docs = _il_doc([_il_page(0, [], width=612, height=792)])
+    docs.page[0].page_layout = [
+        il_version_1.PageLayout(
+            id=7,
+            box=il_version_1.Box(62, 792 - 25, 100, 792 - 10),
+            class_name="formula",
+            conf=1.0,
+        )
+    ]
+    index = fusion.FormulaLatexIndex.from_documents(docs, _FakeConfig(working_dir=tmp_path))
+    assert index is not None
+    assert index.total_spans == 0
+    assert index.resolve(0, frozenset({7}), set()) is None
 
 
 def test_formula_index_missing_provider_ir_returns_none(tmp_path):
@@ -643,14 +755,13 @@ def test_capture_only_translated_paragraphs_excludes_watermark():
 
 
 def test_capture_fuses_inline_formula_from_provider_ir(tmp_path):
-    """端到端融合：真实 provider_ir.json + 公式段落 → body 内联 $...$。"""
+    """端到端融合：真实 provider_ir.json + 受保护 formula 区域 → body 内联 $...$。"""
 
     from babeldoc.docvision.provider_ir import ProviderDocument
 
     agent_dir = tmp_path / "agent" / "source" / "mineru"
     agent_dir.mkdir(parents=True)
-    # 公式源 box（IL 坐标 y-up）: (50,300)-(70,315)；页高 792
-    # 对应 MinerU top-left bbox: (50, 792-315=477)-(70, 792-300=492)
+    # MinerU y 向下（top=477, bottom=492）→ IL y 向上（页高 792）→ (50,300)-(70,315)
     provider = ProviderDocument.from_dict(
         {
             "pages": [
@@ -670,7 +781,7 @@ def test_capture_fuses_inline_formula_from_provider_ir(tmp_path):
                                             "span_id": "s1",
                                             "bbox": [50, 477, 70, 492],
                                             "kind": "inline_equation",
-                                            "content": r"\alpha_{1}",
+                                            "content": r"n_{\mathrm{win}}",
                                         }
                                     ],
                                 }
@@ -687,9 +798,10 @@ def test_capture_fuses_inline_formula_from_provider_ir(tmp_path):
     )
 
     style = _style()
-    formula = il_version_1.PdfFormula(
-        box=il_version_1.Box(50, 300, 70, 315), x_offset=0.0, y_offset=0.0
+    formula = _formula_with_chars(
+        "\U0001d45bwin", il_version_1.Box(50, 300, 70, 315), layout_id=7
     )
+    formula.x_offset = 0.0
     paragraph = il_version_1.PdfParagraph(
         box=il_version_1.Box(0, 200, 300, 400),
         pdf_style=style,
@@ -711,14 +823,49 @@ def test_capture_fuses_inline_formula_from_provider_ir(tmp_path):
         layout_label="text",
         xobj_id=0,
     )
-    docs = _il_doc([_il_page(0, [paragraph], width=612, height=792)])
+    # protector 会把 span 的 IL box 原样追加为 formula 区域（id=7）：
+    # 融合凭「保护区 box == span box」的精确同一性认定 MinerU 级。
+    page = _il_page(0, [paragraph], width=612, height=792)
+    page.page_layout = [
+        il_version_1.PageLayout(
+            id=7,
+            box=il_version_1.Box(50, 300, 70, 315),
+            class_name="formula",
+            conf=1.0,
+        )
+    ]
+    docs = _il_doc([page])
     config = _FakeConfig(working_dir=tmp_path)
     state = overlay_mod.capture_layout_sources(docs, config)
 
     assert state["provider_inline_spans"] == 1
     assert "P01-100" in state["bodies"]
-    assert state["bodies"]["P01-100"] == r"见 $\alpha_{1}$ 所示。"
+    assert state["bodies"]["P01-100"] == r"见 $n_{\mathrm{win}}$ 所示。"
     assert state["paragraphs"]["P01-100"]["has_formula"] is True
+    assert state["paragraphs"]["P01-100"]["fuse_classes"] == ["mineru"]
+    assert state["fusion_stats"]["classes"] == {"mineru": 1}
+
+
+def test_capture_records_fragment_ref_and_stats(tmp_path):
+    """不可转写的启发式公式 → 片段引用写进状态（供 overlay 裁源 PDF）。"""
+    style = _style()
+    formula = _formula_with_chars("caf\u00b4", il_version_1.Box(50, 300, 70, 315))
+    paragraph = _formula_paragraph(
+        "P01-101", "见 {v1}。", formula, il_version_1.Box(0, 200, 300, 400)
+    )
+    docs = _il_doc([_il_page(0, [paragraph], width=612, height=792)])
+    config = _FakeConfig(working_dir=tmp_path)
+    state = overlay_mod.capture_layout_sources(docs, config)
+
+    assert state["paragraphs"]["P01-101"]["fuse_classes"] == ["fragment"]
+    keys = state["paragraphs"]["P01-101"]["fragment_keys"]
+    assert len(keys) == 1
+    ref = state["fragments"][keys[0]]
+    assert ref["page"] == 0
+    assert ref["box"] == [50.0, 300.0, 70.0, 315.0]
+    assert ref["height"] == 15.0
+    assert state["fusion_stats"]["classes"] == {"fragment": 1}
+    assert fusion.FRAGMENT_MACRO in state["bodies"]["P01-101"]
 
 
 # --------------------------------------------------------------------------- #

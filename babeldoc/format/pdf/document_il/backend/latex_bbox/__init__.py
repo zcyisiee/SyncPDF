@@ -7,7 +7,8 @@
 公共入口：
 
 - :func:`record_source_texts` — 翻译之前记录源文（未翻译段判定）；
-- :func:`capture_layout_sources` — Typesetting 之前捕获源几何 + 公式融合 body；
+- :func:`capture_layout_sources` — Typesetting 之前捕获源几何 + 公式融合 body
+  （四级分类 text/mineru/simple_math/fragment；fragment 记录源区域裁剪引用）；
 - :class:`LatexBboxOverlay` — PDFCreater.write 的 ``prepare``（内容流前预选+编译）
   与 ``stamp``（内容流后贴片）两步入口；
 - :func:`apply_latex_bbox_overlay` — 直接跑完整 overlay（prepare + stamp）；

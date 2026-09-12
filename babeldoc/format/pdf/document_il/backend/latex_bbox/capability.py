@@ -17,7 +17,14 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 #: xelatex 必需宏包（tex 文件 \usepackage 依赖）。
-REQUIRED_PACKAGES = ("xeCJK", "geometry", "fontspec", "amsmath", "amssymb")
+REQUIRED_PACKAGES = (
+    "xeCJK",
+    "geometry",
+    "fontspec",
+    "amsmath",
+    "amssymb",
+    "graphicx",
+)
 
 #: 常见安装路径（macOS TeX Live、Linux 发行版）。
 _COMMON_XELATEX_PATHS = (

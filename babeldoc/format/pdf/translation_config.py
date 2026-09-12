@@ -502,9 +502,13 @@ class TranslationConfig:
         self.latex_bbox_mode = latex_bbox_mode
         # 翻译前记录的段落源文（debug_id → unicode），供 overlay 判定未翻译段。
         self.latex_source_texts: dict = {}
+        # 源 PDF 路径（fragment 级公式从源区域裁图嵌入）：workflow 用
+        # extract 落的输入副本，high_level 用 get_working_file_path("input.pdf")。
+        self.latex_source_pdf_path: str | None = None
         # LaTeX overlay 的源几何快照（capture_layout_sources 在 Typesetting
-        # 之前写入）：paragraphs={debug_id: {page/box/font_size/...}}、
-        # formula_source_boxes={page_number: {id(formula): box}}。
+        # 之前写入）：paragraphs={debug_id: {page/box/font_size/fuse_classes/...}}、
+        # bodies/plain_texts（融合后的 LaTeX body 与期望可见文本）、
+        # fragments（fragment 级公式的源区域裁剪引用）、fusion_stats（分类统计）。
         # 公式对象按对象身份（id()）对应——Typesetting 原地重定位公式对象但
         # 保持身份，与 link_remap 的字符身份机制同一假设。
         self.latex_bbox_state: dict = {}
