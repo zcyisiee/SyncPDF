@@ -282,7 +282,7 @@ def measure_source_rows(page: pymupdf.Page, clip: pymupdf.Rect) -> list[dict]:
     rows.sort(key=lambda row: row["center"])
     merged: list[dict] = []
     for row in rows:
-        if merged and abs(row["center"] - merged[-1]["center"]) <= _ROW_MERGE_TOLERANCE:
+        if merged and _same_visual_line(merged[-1], row):
             current = merged[-1]
             current["y0"] = min(current["y0"], row["y0"])
             current["y1"] = max(current["y1"], row["y1"])
@@ -291,6 +291,25 @@ def measure_source_rows(page: pymupdf.Page, clip: pymupdf.Rect) -> list[dict]:
         else:
             merged.append(dict(row))
     return merged
+
+
+def _same_visual_line(a: dict, b: dict) -> bool:
+    """两个 pymupdf line 是否属于同一视觉行。
+
+    行内公式（上下标）会被 pymupdf 拆成独立 line：字高小、center 偏上/下，
+    但 y 区间与正文行大量重叠。用「y 区间重叠占较矮行高≥ 50%」判定比
+    center 距离更稳：center 容差在字高差大时会误拆（rows[0] 错取公式行、
+    first_line_dx 偏差可达数百 bp）；而纯重叠 >1bp 在行距紧、span 含
+    上下标拉伸时会误合相邻行。50% 阈值两头都避开（回归：8tHmq 段
+    𝐺𝑡 行重叠 83% 合并、下一行重叠 48% 不合并）。
+    """
+    shorter = min(a["y1"] - a["y0"], b["y1"] - b["y0"])
+    if shorter <= 0:
+        return abs(a["center"] - b["center"]) <= _ROW_MERGE_TOLERANCE
+    overlap = min(a["y1"], b["y1"]) - max(a["y0"], b["y0"])
+    if overlap / shorter >= 0.5:
+        return True
+    return abs(a["center"] - b["center"]) <= _ROW_MERGE_TOLERANCE
 
 
 def _rows_geometry(rows: list[dict], rect: pymupdf.Rect) -> dict | None:

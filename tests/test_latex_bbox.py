@@ -2350,3 +2350,23 @@ def test_expand_does_not_overlap_watermark(tmp_path, monkeypatch):
     # 水印在远处时应允许扩
     monkeypatch.setattr(overlay, "_watermark_rects", lambda _p: [pymupdf.Rect(30, 200, 300, 230)])
     assert overlay._strip_is_clear(page, pymupdf.Rect(30, 50, 300, 100), 40.0) is True
+
+
+def test_measure_source_rows_merges_inline_formula_lines():
+    """行内公式被 pymupdf 拆成独立 line（字高小、center 偏移）时须并入视觉行。
+
+    回归：8tHmq 段 𝐺𝑡 公式行 center 与正文行差 4.7 > 3.0 容差被误拆，
+    rows[0] 错取公式行 → first_line_dx=207（真实首行缩进应为 ~16.6）。
+    """
+    doc = pymupdf.open()
+    page = doc.new_page(width=400, height=300)
+    # 正文行（y 100-114）+ 同视觉行的行内公式（y 98-110，字高小、center 偏上）
+    page.insert_text((50, 112), "Given the update", fontsize=10)
+    page.insert_text((200, 110), "Gt", fontsize=7)
+    # 下一视觉行
+    page.insert_text((50, 130), "second line here", fontsize=10)
+    rows = overlay_mod.measure_source_rows(page, pymupdf.Rect(40, 90, 390, 145))
+    assert len(rows) == 2, rows
+    assert rows[0]["x0"] < 60.0  # 首行 x0 是正文行起点，不是公式行
+    geo = overlay_mod._rows_geometry(rows, pymupdf.Rect(40, 90, 390, 145))
+    assert 0.0 < geo["first_line_dx"] < 30.0  # 真实缩进量级
