@@ -56,7 +56,8 @@
    → 旧路径译文不入流；redaction 仅作兜底（先断言 stamp rect 内文本层为空，
    断言失败才 redact）；`box-expanded-after-typesetting` 门禁改为对扩后矩形
    做"无他段字符"校验。链接多重集/URI 集合仍恒等（复用 `_verify_links`）。
-6. `tests/test_latex_bbox.py` 追加：full 模式资格（多行正文段入选、单行/标题/
+6. **P1-6 stdout 去噪**（收养 P0 审查 P2-8）：`workflow.py`/`__main__.py` 打印 reconstruct 统计时不再展开整份 `decisions`（如只打印统计摘要或截断），报告完整内容仍落盘 `latex_bbox_report.json`。
+7. `tests/test_latex_bbox.py` 追加：full 模式资格（多行正文段入选、单行/标题/
    toc 排除）、repair 模式旧行为回归、untranslated 跳过、bp 单位
    （编译页 rect==bbox±0.01，xelatex 缺失时 skipif）、无 stamp 区双层文本测试、
    prepare/stamp 拆分调用顺序。
@@ -73,18 +74,22 @@
 ## Validation
 
 ```bash
-python3 -m pytest tests/ -q                    # 308+新增 / 7 既有失败
+python3 -m pytest tests/ -q                    # 313+新增 / 7 既有失败
 python3 -m pytest tests/test_latex_bbox.py tests/test_latex_bbox_links.py -q
 python3 -m babeldoc.tools.agent reconstruct --help
-# 回放验证（DeepSeek）：attempted 应 ≥ 200（eligible 约 211）
-python3 -m babeldoc.tools.agent reconstruct /tmp/babeldoc-latex-acceptance/deepseek-v4/workdir \
-  --latex-bbox --dual --output-dir /tmp/p1-verify/deepseek-out
-python3 experiments/toolchain_gates.py /tmp/babeldoc-latex-acceptance/deepseek-v4/workdir
-python3 experiments/acceptance_latex.py /tmp/babeldoc-latex-acceptance/deepseek-v4/workdir <mono_pdf>
+# 回放验证（DeepSeek）：先把 workdir 完整复制到 /tmp/p1-verify/workdir（勿直接改
+# /tmp/babeldoc-latex-acceptance 下的源 workdir），attempted 应 ≥ 200（eligible 约 211）
+cp -r /tmp/babeldoc-latex-acceptance/deepseek-v4/workdir /tmp/p1-verify/workdir
+python3 -m babeldoc.tools.agent reconstruct /tmp/p1-verify/workdir \
+  --latex-bbox --dual --output-dir /tmp/p1-verify/out
+python3 experiments/toolchain_gates.py /tmp/p1-verify/workdir
+python3 experiments/acceptance_latex.py /tmp/p1-verify/workdir /tmp/p1-verify/out/<mono_pdf>
 ```
 
 （回放命令的具体参数以 `reconstruct --help` 实际签名与 workdir 布局为准，
-先跑 `--help` 确认。）
+先跑 `--help` 确认。）注意：P1 门禁改为源行数 ≥2 后，acceptance 的 eligible
+行数基准仍是 `n_lines`（rendered 代理，JSON 里 `line_basis: "rendered"`）；
+P1 验收时在报告中说明两者口径差异即可，真正切源行数基准在 P3-0 落地后进行。
 
 ## Report back
 
