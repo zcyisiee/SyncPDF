@@ -60,6 +60,11 @@ def main(argv=None):
     p_recon.add_argument("workdir")
     p_recon.add_argument("--output-dir", default=None)
     p_recon.add_argument("--dual", action="store_true", help="同时输出拼宽双语 PDF")
+    p_recon.add_argument(
+        "--latex-bbox",
+        action="store_true",
+        help="开启 LaTeX bbox 排版（实验特性，默认关闭；缺 XeLaTeX/字体时自动回退）",
+    )
 
     p_render = sub.add_parser("render", help="PDF 页渲染 PNG")
     p_render.add_argument("pdf")
@@ -116,6 +121,7 @@ def main(argv=None):
             args.workdir,
             output_dir=args.output_dir,
             no_dual=not args.dual,
+            latex_bbox=args.latex_bbox,
         )
     elif args.command == "render":
         result = workflow.render(

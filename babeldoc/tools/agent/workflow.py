@@ -465,12 +465,16 @@ def apply(workdir, translated_sheet):
     }
 
 
-def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False):
+def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False, latex_bbox=False):
     """从写回后的 IR 重排并生成 PDF。返回输出路径 dict。
 
     支持 agent 排版微调：读 ``<workdir>/agent/layout_overrides.json`` →
     注入 Typesetting（scale_cap / line_skip / 强制换行）并在 IR 上应用
     box / font_scale；Typesetting 之后 dump ``agent/layout_geometry.json``。
+
+    ``latex_bbox=True`` 时开启 LaTeX bbox 排版（实验特性）：Typesetting 之前
+    捕获源几何与公式融合 body，PDFCreater 在内容流生成后选择性贴片；
+    能力缺失或任何失败自动回退现有渲染。
     """
     from babeldoc.tools.agent import layout_geometry
     from babeldoc.tools.agent import layout_overrides
@@ -508,6 +512,20 @@ def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False):
     ir_stats = layout_overrides.apply_to_ir(doc, overrides)
     layout_geometry.capture_source_state(doc, overrides, state=source_state)
 
+    if latex_bbox:
+        config.enable_latex_bbox_layout = True
+        from babeldoc.format.pdf.document_il.backend.latex_bbox import (
+            capture_layout_sources,
+        )
+
+        try:
+            capture_layout_sources(doc, config)
+        except Exception:
+            logger.warning(
+                "LaTeX bbox 版面源捕获失败，回退现有渲染路径", exc_info=True
+            )
+            config.enable_latex_bbox_layout = False
+
     Typesetting(config).typesetting_document(doc)
 
     geometry = layout_geometry.build_geometry(doc, source_state, overrides)
@@ -539,6 +557,7 @@ def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False):
         ),
         "link_unresolved": pdf_creater.link_stats.get("unresolved", []),
         "link_uri_set_match": pdf_creater.link_stats.get("uri_set_match"),
+        "latex_bbox": pdf_creater.latex_bbox_stats,
     }
 
 
