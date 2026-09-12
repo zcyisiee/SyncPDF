@@ -50,7 +50,8 @@ _SHRINK_FACTOR = 0.95
 _MAX_SHRINK_STEPS = 12
 _MIN_FONT_SIZE = 4.0
 #: 行距系数：与产品 Typesetting 的 CJK 默认 line_skip(1.5) 一致。
-_DEFAULT_LEAD_RATIO = 1.5
+DEFAULT_LEAD_RATIO = 1.5
+_DEFAULT_LEAD_RATIO = DEFAULT_LEAD_RATIO
 #: 墨迹/overfull 判定容差（pt），吸收 geometry 舍入。
 _FIT_TOLERANCE = 0.5
 #: 进程内 stamp 缓存上限（LRU 近似：超限清空）。
