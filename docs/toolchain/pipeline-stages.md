@@ -356,6 +356,43 @@
 
 ---
 
+## 阶段 13b：LaTeX bbox 排版（可选，`--latex-bbox` / `enable_latex_bbox_layout`）
+
+以 `enable_latex_bbox_layout=False` 为默认：**关闭时零行为变化**（不采集几何、
+不预选、不贴片、报告为空）。打开后每个正文段在 MinerU bbox 内用 XeLaTeX 重排
+两端对齐译文并贴回。
+
+- **入口**：`backend/latex_bbox/`（`source_geometry` / `fusion` / `renderer_batch` /
+  `stamp_cache` / `overlay` / `capability`）
+- **四个阶段**
+
+  | 阶段 | 时机 | 说明 |
+  |---|---|---|
+  | 采集 | `extract` / `high_level` 中，`ILTranslator` **之前** | `capture_source_line_geometry` 读仍是源坐标的 composition（`pdf_line` 字符 box）→ `n_lines` / `first_line_dx` / `baseline_pitch` / `ascent_top` / `space_below_pt`，随 `state.pkl` 落盘；译文回填后这些信息就丢了（根因 5） |
+  | `prepare` | `PDFCreater.write` 的**内容流生成之前** | 选段（正文标签 ∧ 源行数 ≥2 ∧ 已翻译）+ 融合 `{vN}` 占位符 + 批编译贴片；此时页面仍是源文，可量源行距/首行缩进、判断下方净空 |
+  | 内容流 | 同上循环内 | `stamped_ids` 的段**字符不进内容流**（无双层文本靠构造保证），失败段照旧走默认路径 |
+  | `stamp` | 内容流生成之后 | 按 rect 贴片；链接快照 → 贴片 → 硬校验链接多重集与 URI 集合，失败则重生成受影响页回滚 |
+
+- **`{vN}` 分类**（顺序硬约束，任何不确定即降级）：`text` → `mineru`（alignment
+  一一对应 + 原生字符一致性校验）→ `simple_math`（Unicode 数学转写）→
+  `fragment`（从源 PDF 裁区域 `\includegraphics` 内嵌）。`(cid:N)` 占位串
+  一律降级 `fragment`。
+- **批编译**：`renderer_batch.BatchStampRenderer` 每轮把待定段拼一份 tex（每段一页，
+  逐页显式 `\pdfpagewidth/\hsize/...`，不用 `\newgeometry`），段前后 `\message{@@S n@@}` /
+  `@@E n@@` + `at lines X--Y` 归属 Overfull 与 `!` 错误；坏段内部回退单段渲染。
+- **缓存**：`<workdir>/<pdf名>/latex_cache/`（key = 模板版本 + 字体签名 + 请求内容，
+  `mkstemp` + `os.replace` 原子写）；二次回放命中后近乎零编译。
+- **产物**：`<workdir>/<pdf名>/latex_bbox_report.json` —— 聚合统计 + 逐段
+  `decisions[]`（`debug_id/page/label/reason/fuse_kinds/fuse_classes/expected_text/
+  fill_before/fill_after/font_scale/lead/attempts/expanded_pt/n_lines_source/indent_pt`）。
+- **失败模式**（都只影响该段，绝不阻断翻译）：`compile:<原因>`（TeX 错误/超时）、
+  `text-mismatch`、`single-line`、`untranslated`、`formula-fusion-failed`、
+  `fragment-source-missing`、`capability-unavailable`（缺 XeLaTeX/宏包/字体只 warning）。
+- **验收**：见 `experiments/acceptance_latex.py` 与
+  `docs/layout-hypothesis/ACCEPTANCE.md` 的「LaTeX bbox 排版验收」一节。
+
+---
+
 ## 阶段 14：`render_pages`（渲染）
 
 - **入口**：`tools/agent/workflow.py::render` / `babeldoc_tools.render_pages`
@@ -402,5 +439,7 @@
 │   │       ├── provider_ir.json               # MinerU 结构树
 │   │       └── alignment.json                 # 字符↔span 对齐审计
 │   └── render/page-NN.png                     # 渲染页
+├── <pdf名>/latex_bbox_report.json             # LaTeX bbox 统计 + 逐段 decisions（仅 --latex-bbox）
+├── <pdf名>/latex_cache/                       # 批编译贴片缓存（仅 --latex-bbox，可删）
 └── output/*.mono.pdf / *.dual.pdf             # 交付产物
 ```
