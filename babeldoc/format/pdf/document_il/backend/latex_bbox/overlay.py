@@ -515,9 +515,13 @@ class LatexBboxOverlay:
 
             # redaction 后重插被删链接（原矩形）；随后 link_remap 会按原矩形
             # 匹配并重定位到译文/贴片位置。
+            from babeldoc.format.pdf.document_il.backend.link_remap import (
+                safe_insert_link,
+            )
+
             for link in removed:
                 try:
-                    page.insert_link(link)
+                    safe_insert_link(page, link)
                     restored += 1
                 except Exception:  # noqa: BLE001 - 单条链接失败由硬校验兜底
                     logger.debug("重插链接失败", exc_info=True)

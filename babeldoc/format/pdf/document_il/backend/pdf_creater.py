@@ -1180,7 +1180,11 @@ class PDFCreater:
                     link, _map_rect(from_rect), _map_point
                 )
                 if new_link is not None:
-                    dual_page.insert_link(new_link)
+                    from babeldoc.format.pdf.document_il.backend.link_remap import (
+                        safe_insert_link,
+                    )
+
+                    safe_insert_link(dual_page, new_link)
             except Exception:
                 logger.debug("copy link to dual failed", exc_info=True)
 
@@ -1435,7 +1439,11 @@ class PDFCreater:
                 if signature in existing:
                     continue
                 try:
-                    dual_page.insert_link(new_link)
+                    from babeldoc.format.pdf.document_il.backend.link_remap import (
+                        safe_insert_link,
+                    )
+
+                    safe_insert_link(dual_page, new_link)
                     existing.add(signature)
                 except Exception:
                     logger.debug("restore link after insert_file failed", exc_info=True)
