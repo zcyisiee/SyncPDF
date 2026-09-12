@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 
 import pymupdf
@@ -1222,3 +1223,212 @@ def test_renderer_bounded_shrink_uses_multiple_attempts(tmp_path):
     assert result.compile_attempts >= 1
     if not result.ok:
         assert result.reason
+
+
+# --------------------------------------------------------------------------- #
+# 逐段决策报告（decisions[]）
+# --------------------------------------------------------------------------- #
+def _make_two_line_stamp_pdf(path: pathlib.Path, width: float, height: float):
+    doc = pymupdf.open()
+    page = doc.new_page(width=width, height=height)
+    page.insert_text((2, 12), "第一行贴片译文内容", fontsize=8)
+    page.insert_text((2, 26), "第二行贴片译文内容", fontsize=8)
+    doc.save(path)
+    doc.close()
+    return str(path)
+
+
+def _decisions_fixture(tmp_path, monkeypatch):
+    """三个正文/非正文段落：一个 applied、一个 box-too-small、一个 page_number。"""
+    src = _pdf_with_text(
+        tmp_path,
+        [(30, 70, "line one of the original paragraph", 9), (30, 90, "line two here", 9)],
+        width=400,
+        height=300,
+    )
+    pdf = pymupdf.open(src)
+    applied_box = [30.0, 300.0 - 110.0, 300.0, 300.0 - 50.0]
+    applied = _translated_paragraph(
+        "P01-001",
+        "这是一段较长的中文译文用于替换原有英文段落内容。",
+        il_version_1.Box(*applied_box),
+    )
+    tiny_box = [30.0, 200.0, 300.0, 204.0]
+    tiny = _translated_paragraph(
+        "P01-002", "小框段落", il_version_1.Box(*tiny_box), size=10.0
+    )
+    page_number_para = _translated_paragraph(
+        "P01-003",
+        "1",
+        il_version_1.Box(*applied_box),
+        layout_label="page_number",
+    )
+    docs = _il_doc(
+        [_il_page(0, [applied, tiny, page_number_para], width=400, height=300)]
+    )
+    state = {
+        "paragraphs": {
+            "P01-001": {
+                "page": 0,
+                "box": applied_box,
+                "font_size": 9.0,
+                "layout_label": "text",
+                "has_formula": True,
+                "fuse_kinds": ["formula", "text"],
+            },
+            "P01-002": {
+                "page": 0,
+                "box": tiny_box,
+                "font_size": 10.0,
+                "layout_label": "text",
+                "has_formula": False,
+                "fuse_kinds": ["text"],
+            },
+            "P01-003": {
+                "page": 0,
+                "box": applied_box,
+                "font_size": 9.0,
+                "layout_label": "page_number",
+                "has_formula": True,
+                "fuse_kinds": ["text"],
+            },
+        },
+        "bodies": {
+            "P01-001": "这是一段较长的中文译文用于替换原有英文段落内容。",
+            "P01-002": "小框段落",
+            "P01-003": "1",
+        },
+        "plain_texts": {
+            "P01-001": "这是一段较长的中文译文用于替换原有英文段落内容。",
+            "P01-002": "小框段落",
+            "P01-003": "1",
+        },
+        "fusion_failures": {},
+        "provider_inline_spans": 1,
+    }
+    config = _FakeConfig(latex_bbox_state=state, working_dir=tmp_path)
+
+    stamp_dir = tmp_path / "stamps"
+    stamp_dir.mkdir(exist_ok=True)
+    stamp_path = _make_two_line_stamp_pdf(
+        stamp_dir / "stamp.pdf", applied_box[2] - applied_box[0], applied_box[3] - applied_box[1]
+    )
+
+    def fake_render_many(
+        self, requests  # noqa: ARG001 - 与 BboxStampRenderer.render_many 同签名
+    ):
+        results = {}
+        for request, _workdir in requests:
+            ok = request.key == "P01-001"
+            results[request.key] = renderer_mod.StampResult(
+                key=request.key,
+                ok=ok,
+                pdf_path=stamp_path if ok else None,
+                font_size=9.0,
+                scale=1.0,
+                compile_attempts=2 if ok else 1,
+                reason="ok" if ok else "s0:vertical-overflow",
+            )
+        return results
+
+    monkeypatch.setattr(BboxStampRenderer, "render_many", fake_render_many)
+    return pdf, docs, config, applied_box
+
+
+def test_report_records_per_paragraph_decisions(tmp_path, monkeypatch):
+    """decisions[] 记录 body 候选段的 applied 与回退原因，不记 page_number。"""
+    pdf, docs, config, applied_box = _decisions_fixture(tmp_path, monkeypatch)
+
+    _result, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+
+    by_id = {row["debug_id"]: row for row in stats["decisions"]}
+    assert set(by_id) == {"P01-001", "P01-002"}
+
+    applied_row = by_id["P01-001"]
+    assert applied_row["reason"] == "applied"
+    assert applied_row["page"] == 0
+    assert applied_row["label"] == "text"
+    assert applied_row["fuse_kinds"] == ["formula", "text"]
+    assert applied_row["font_scale"] == 1.0
+    assert applied_row["attempts"] == 2
+    assert applied_row["lead"] == 13.5  # 9.0pt × 1.5
+    assert applied_row["fill_after"] is not None
+
+    rejected_row = by_id["P01-002"]
+    assert rejected_row["reason"] == "box-too-small"
+    assert rejected_row["font_scale"] is None
+    assert rejected_row["attempts"] is None
+
+    # 决策数组按 (page, debug_id) 排序。
+    assert [row["debug_id"] for row in stats["decisions"]] == ["P01-001", "P01-002"]
+
+
+def test_report_decisions_written_to_working_dir(tmp_path, monkeypatch):
+    """decisions[] 落盘到 working_dir/latex_bbox_report.json。"""
+    pdf, docs, config, _box = _decisions_fixture(tmp_path, monkeypatch)
+
+    overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+
+    report = json.loads((tmp_path / "latex_bbox_report.json").read_text(encoding="utf-8"))
+    reasons = {row["debug_id"]: row["reason"] for row in report["decisions"]}
+    assert reasons == {"P01-001": "applied", "P01-002": "box-too-small"}
+
+
+def test_report_records_compile_failure_reason(tmp_path, monkeypatch):
+    """编译失败的候选段记 compile:<reason>，并保留 fill_before。"""
+    pdf, docs, config, _box = _decisions_fixture(tmp_path, monkeypatch)
+    pdf2, docs2, config2 = _overlay_fixture(tmp_path, monkeypatch, with_links=False)
+
+    def fake_failing_render_many(self, requests):  # noqa: ARG001
+        return {
+            request.key: renderer_mod.StampResult(
+                key=request.key,
+                ok=False,
+                reason="s0:vertical-overflow",
+                compile_attempts=1,
+            )
+            for request, _workdir in requests
+        }
+
+    monkeypatch.setattr(BboxStampRenderer, "render_many", fake_failing_render_many)
+    _result, stats = overlay_mod.apply_latex_bbox_overlay(pdf2, docs2, config2)
+
+    row = next(r for r in stats["decisions"] if r["debug_id"] == "P01-001")
+    assert row["reason"] == "compile:s0:vertical-overflow"
+    assert row["attempts"] == 1
+    assert row["fill_after"] is None
+    # 未进入量测阶段的段落 fill_before 保持 None（box-too-small 在量测之前）。
+    assert pdf is not None and docs is not None and config is not None
+
+
+def test_report_records_capability_unavailable_reason(tmp_path, monkeypatch):
+    """能力缺失时每个 body 候选段记 capability-unavailable。"""
+    pdf, docs, config, _box = _decisions_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        overlay_mod,
+        "probe_latex_capability",
+        lambda **_kwargs: capability.LatexCapability(available=False, reasons=["no-xelatex"]),
+    )
+
+    _result, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+
+    assert stats["decisions"]
+    assert {row["reason"] for row in stats["decisions"]} == {"capability-unavailable"}
+
+
+def test_measure_line_fills_reports_per_line_fills(tmp_path):
+    """measure_line_fills 返回逐行填充率，min_body_fill 与 measure_line_fill 一致。"""
+    path = _pdf_with_text(
+        tmp_path,
+        [(30, 70, "short", 9), (30, 90, "a much longer second line of text", 9)],
+    )
+    doc = pymupdf.open(path)
+    try:
+        fills = overlay_mod.measure_line_fills(doc[0], pymupdf.Rect(0, 0, 400, 300))
+        aggregate = overlay_mod.measure_line_fill(doc[0], pymupdf.Rect(0, 0, 400, 300))
+    finally:
+        doc.close()
+    assert fills["n_lines"] == 2
+    assert len(fills["fills"]) == 2
+    assert fills["fills"][0] < fills["fills"][1]
+    assert fills["min_body_fill"] == aggregate["min_body_fill"]

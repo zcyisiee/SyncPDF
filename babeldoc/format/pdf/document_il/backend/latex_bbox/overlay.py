@@ -30,6 +30,12 @@ from babeldoc.format.pdf.document_il.backend.latex_bbox.capability import (
 )
 from babeldoc.format.pdf.document_il.backend.latex_bbox.fusion import FormulaLatexIndex
 from babeldoc.format.pdf.document_il.backend.latex_bbox.fusion import fuse_paragraph
+from babeldoc.format.pdf.document_il.backend.latex_bbox.fusion import (
+    iter_composition_units,
+)
+from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
+    DEFAULT_LEAD_RATIO,
+)
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
     BboxStampRenderer,
 )
@@ -43,6 +49,17 @@ _PAGE_MARGIN = 1.0
 _MIN_BOX_WIDTH = 30.0
 #: 水印文本标记（Typesetting.add_watermark 注入的段落文本）。
 _WATERMARK_MARKERS = ("funstory.ai", "BabelDOC")
+#: 逐段决策报告只记录这些「正文本体」标签；水印/页码/目录等不记录。
+_BODY_LABELS = frozenset(
+    {
+        "text",
+        "list",
+        "figure_caption",
+        "table_caption",
+        "page_footnote",
+        "table_footnote",
+    }
+)
 
 
 def capture_layout_sources(docs, config) -> dict:
@@ -96,6 +113,12 @@ def capture_layout_sources(docs, config) -> dict:
                     for composition in paragraph.pdf_paragraph_composition or []
                 ),
             }
+            meta["fuse_kinds"] = sorted(
+                {
+                    kind
+                    for kind, _unit, _style in iter_composition_units(paragraph)
+                }
+            )
             paragraphs[paragraph.debug_id] = meta
             fused = fuse_paragraph(
                 paragraph, page.page_number, page_font_map, latex_index
@@ -251,7 +274,52 @@ class LatexBboxOverlay:
             },
             "reverted": False,
             "error": None,
+            #: 逐段决策留痕（正文类候选段；由 ``export_decisions`` 填充）。
+            "decisions": [],
         }
+        #: debug_id → 决策记录（字段未到该阶段时为 None）。
+        self._decisions: dict[str, dict] = {}
+
+    # ------------------------------------------------------------------
+    def _init_decisions(self, paragraphs: dict) -> None:
+        """为正文类候选段建立决策骨架（各字段先留 None）。"""
+        self._decisions = {}
+        for debug_id, meta in paragraphs.items():
+            label = meta.get("layout_label")
+            if label not in _BODY_LABELS:
+                continue
+            self._decisions[debug_id] = {
+                "debug_id": debug_id,
+                "page": meta.get("page"),
+                "label": label,
+                "reason": None,
+                "fuse_kinds": list(meta.get("fuse_kinds") or []),
+                "fill_before": None,
+                "fill_after": None,
+                "font_scale": None,
+                "lead": None,
+                "attempts": None,
+            }
+
+    def _decide(self, debug_id: str, reason: str | None = None, **fields) -> None:
+        """更新一个决策记录（``reason=None`` 表示只填字段，不改原因）。"""
+        record = self._decisions.get(debug_id)
+        if record is None:
+            return
+        if reason is not None:
+            record["reason"] = reason
+        for key, value in fields.items():
+            record[key] = value
+
+    def export_decisions(self) -> list[dict]:
+        """按 (page, debug_id) 排序导出逐段决策记录。"""
+        return sorted(
+            self._decisions.values(),
+            key=lambda item: (
+                item["page"] if item.get("page") is not None else -1,
+                item["debug_id"],
+            ),
+        )
 
     # ------------------------------------------------------------------
     def apply(self) -> pymupdf.Document:
@@ -259,6 +327,7 @@ class LatexBboxOverlay:
         state = getattr(self.config, "latex_bbox_state", None) or {}
         paragraphs = state.get("paragraphs") or {}
         bodies = state.get("bodies") or {}
+        self._init_decisions(paragraphs)
         if not paragraphs:
             self.stats["fallback"] = 0
             self.stats["fallback_reasons"] = {"no-captured-paragraphs": len(paragraphs)}
@@ -274,6 +343,8 @@ class LatexBboxOverlay:
         if not capability.available:
             self.stats["fallback"] = len(paragraphs)
             self.stats["fallback_reasons"] = {"capability-unavailable": len(paragraphs)}
+            for debug_id in self._decisions:
+                self._decide(debug_id, "capability-unavailable")
             return self.pdf
 
         try:
@@ -284,6 +355,9 @@ class LatexBboxOverlay:
             reverted = self._revert()
             self.stats["reverted"] = reverted
             self.stats["fallback"] = len(paragraphs)
+            for record in self._decisions.values():
+                if record["reason"] is None:
+                    record["reason"] = "overlay-error"
             return self.pdf
 
     # ------------------------------------------------------------------
@@ -325,6 +399,26 @@ class LatexBboxOverlay:
                 "seconds": round(renderer.compile_seconds, 3),
                 "cache_hits": renderer.cache_hits,
             }
+            for job in jobs:
+                stamp = stamps.get(job["debug_id"])
+                if stamp is None:
+                    continue
+                if stamp.ok and stamp.pdf_path:
+                    effective_size = stamp.font_size or job["font_size"]
+                    self._decide(
+                        job["debug_id"],
+                        font_scale=(
+                            round(stamp.scale, 4) if stamp.scale is not None else None
+                        ),
+                        lead=round(effective_size * DEFAULT_LEAD_RATIO, 3),
+                        attempts=stamp.compile_attempts,
+                    )
+                else:
+                    self._decide(
+                        job["debug_id"],
+                        f"compile:{stamp.reason or 'unknown'}",
+                        attempts=stamp.compile_attempts,
+                    )
 
             successful = {k: v for k, v in stamps.items() if v.ok and v.pdf_path}
             failed = {
@@ -371,6 +465,10 @@ class LatexBboxOverlay:
                 self.stats["applied_paragraphs"] = []
                 self.stats["pages_affected"] = []
                 self.stats["links"]["restored"] = 0
+                for record in self._decisions.values():
+                    if record["reason"] == "applied":
+                        record["reason"] = "reverted-link-check"
+                        record["fill_after"] = None
                 self.stats["links"]["after_total"] = sum(
                     len(page.get_links()) for page in doc
                 )
@@ -401,19 +499,24 @@ class LatexBboxOverlay:
                         paragraph
                     )
 
+        def reject(debug_id: str, reason: str) -> None:
+            """记录聚合原因（现有统计口径）与逐段决策原因。"""
+            reasons.append(reason)
+            self._decide(debug_id, reason)
+
         for debug_id, meta in paragraphs.items():
             box = meta["box"]
             page_index = meta["page"]
             if page_index >= len(pdf):
-                reasons.append("page-out-of-range")
+                reject(debug_id, "page-out-of-range")
                 continue
             page = pdf[page_index]
             if page.rotation != 0:
-                reasons.append("rotated-page")
+                reject(debug_id, "rotated-page")
                 continue
             body = bodies.get(debug_id)
             if not body:
-                reasons.append("formula-fusion-failed")
+                reject(debug_id, "formula-fusion-failed")
                 continue
             # 段落必须仍存在于当前 IR（页号一致）。
             paragraph = next(
@@ -421,13 +524,13 @@ class LatexBboxOverlay:
                 None,
             )
             if paragraph is None or not (paragraph.unicode or "").strip():
-                reasons.append("paragraph-missing")
+                reject(debug_id, "paragraph-missing")
                 continue
             # Typesetting 可能向下/向右扩展 paragraph.box 以容纳译文；此时
             # 源 box 不再覆盖实际渲染区域，redaction 会漏掉扩展区文字而留下
             # 双层文本。这种段落一律跳过。
             if _box_expanded_beyond(paragraph.box, box):
-                reasons.append("box-expanded-after-typesetting")
+                reject(debug_id, "box-expanded-after-typesetting")
                 continue
 
             page_rect = page.rect
@@ -437,7 +540,7 @@ class LatexBboxOverlay:
             height = y1 - y0
             font_size = meta["font_size"]
             if width < _MIN_BOX_WIDTH or height < font_size * 1.05:
-                reasons.append("box-too-small")
+                reject(debug_id, "box-too-small")
                 continue
             if (
                 rect.x0 < page_rect.x0 - _PAGE_MARGIN
@@ -445,20 +548,21 @@ class LatexBboxOverlay:
                 or rect.x1 > page_rect.x1 + _PAGE_MARGIN
                 or rect.y1 > page_rect.y1 + _PAGE_MARGIN
             ):
-                reasons.append("box-outside-page")
+                reject(debug_id, "box-outside-page")
                 continue
 
             metrics = measure_line_fill(page, rect)
+            self._decide(debug_id, fill_before=metrics["min_body_fill"])
             if metrics["watermark"]:
-                reasons.append("watermark-overlap")
+                reject(debug_id, "watermark-overlap")
                 continue
             if not meta["has_formula"]:
                 # 纯文本段落：仅在检测到异常短行时才值得替换（选择性替换原则）。
                 if metrics["n_lines"] < 2 or metrics["min_body_fill"] is None:
-                    reasons.append("no-body-lines")
+                    reject(debug_id, "no-body-lines")
                     continue
                 if metrics["min_body_fill"] >= self.config.latex_min_line_fill:
-                    reasons.append("line-fill-ok")
+                    reject(debug_id, "line-fill-ok")
                     continue
 
             jobs.append(
@@ -543,6 +647,11 @@ class LatexBboxOverlay:
                     stamp_doc.close()
                 applied += 1
                 self.stats["applied_paragraphs"].append(job["debug_id"])
+                self._decide(
+                    job["debug_id"],
+                    "applied",
+                    fill_after=measure_line_fill(page, job["rect"])["min_body_fill"],
+                )
             self.stats["pages_affected"].append(page_index)
         return applied, restored
 
@@ -582,6 +691,57 @@ class LatexBboxOverlay:
         return False
 
 
+def measure_line_fills(page: pymupdf.Page, clip: pymupdf.Rect) -> dict:
+    """量测 clip 区域内每行的填充率（相对 box 宽度的占比）。
+
+    返回 ``{"n_lines", "fills", "min_body_fill", "watermark"}``；
+    ``fills`` 为按纵坐标排序的逐行填充率，``min_body_fill`` 取非末行最小值
+    （与 :func:`measure_line_fill` 口径一致，供验收脚本做分布统计）。
+    """
+    box_width = clip.width
+    if box_width <= 0:
+        return {
+            "n_lines": 0,
+            "fills": [],
+            "min_body_fill": None,
+            "watermark": False,
+        }
+    rows: dict[float, list] = {}
+    watermark = False
+    text_all = ""
+    for block in page.get_text("dict", clip=clip)["blocks"]:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = [s for s in line["spans"] if s["text"].strip()]
+            if not spans:
+                continue
+            key = round(line["bbox"][1], 0)
+            rows.setdefault(key, []).append(
+                (
+                    min(s["bbox"][0] for s in spans),
+                    max(s["bbox"][2] for s in spans),
+                )
+            )
+            text_all += "".join(s["text"] for s in spans)
+    for marker in _WATERMARK_MARKERS:
+        if marker in text_all:
+            watermark = True
+            break
+    fills = []
+    for key in sorted(rows):
+        x0 = min(r[0] for r in rows[key])
+        x1 = max(r[1] for r in rows[key])
+        fills.append((x1 - x0) / box_width)
+    body_fills = fills[:-1] if len(fills) > 1 else []
+    return {
+        "n_lines": len(fills),
+        "fills": fills,
+        "min_body_fill": min(body_fills) if body_fills else None,
+        "watermark": watermark,
+    }
+
+
 def write_report(config, stats: dict) -> Path | None:
     """把 overlay 统计写入 working_dir/latex_bbox_report.json。"""
     working_dir = getattr(config, "working_dir", None)
@@ -611,5 +771,6 @@ def apply_latex_bbox_overlay(pdf: pymupdf.Document, docs, config) -> tuple[pymup
         try:
             result_pdf = overlay.apply()
         finally:
+            stats["decisions"] = overlay.export_decisions()
             write_report(config, stats)
         return result_pdf, stats
