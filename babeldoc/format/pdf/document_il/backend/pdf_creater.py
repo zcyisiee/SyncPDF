@@ -639,6 +639,10 @@ class PDFCreater:
             "unresolved": [],
             "uri_set_match": None,
         }
+        # LaTeX bbox overlay 统计（仅 enable_latex_bbox_layout 时填充）；
+        # _latex_overlay_done 防止 write 重试时二次贴片。
+        self.latex_bbox_stats: dict = {}
+        self._latex_overlay_done = False
 
     def render_graphic_state(
         self,
@@ -1686,6 +1690,28 @@ class PDFCreater:
                         check_font_exists, page, pdf, translation_config
                     )
                     pbar.advance()
+            # LaTeX bbox 排版（实验特性，默认关闭）：内容流生成后、超链接
+            # 重映射之前做选择性贴片；任何失败都安全回退现有渲染。
+            if (
+                getattr(translation_config, "enable_latex_bbox_layout", False)
+                and not self._latex_overlay_done
+            ):
+                self._latex_overlay_done = True
+                try:
+                    from babeldoc.format.pdf.document_il.backend.latex_bbox import (
+                        apply_latex_bbox_overlay,
+                    )
+
+                    pdf, latex_stats = apply_latex_bbox_overlay(
+                        pdf, self.docs, translation_config
+                    )
+                    self.latex_bbox_stats = latex_stats
+                    translation_config.latex_bbox_stats = latex_stats
+                except Exception:
+                    logger.warning(
+                        "LaTeX bbox overlay 异常，保留现有渲染", exc_info=True
+                    )
+                    self.latex_bbox_stats = {"error": "overlay-exception"}
             # 超链接按「源字符身份」重定位：旧实现按译文文字搜索，译文改写后飘移。
             # 无 link_remap_state 时（旧调用方）跳过，保持现状行为。
             if self.link_remap_state:

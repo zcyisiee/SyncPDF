@@ -1,0 +1,1224 @@
+"""LaTeX bbox 排版测试（capability / fusion / renderer / overlay / 默认关闭回归）。
+
+覆盖：
+- 能力探测：显式路径不存在时安全回退，永不抛异常；
+- 融合：转义、segment 解析、占位符/公式数量不符、无 MinerU 匹配时回退；
+- 渲染器：TeX 头部关键指令、缓存命中；
+- overlay：只捕获译文段落、排除水印；链接安全（URI/GOTO/NAMED 多重集
+  与 URI 集合在 overlay 前后一致）；质量门禁与几何拒绝路径；
+- 真实样本离线集成冒烟：编译中文段落并在 bbox 内替换原英文文本；
+- 默认关闭：``enable_latex_bbox_layout=False`` 时 overlay 不触发。
+"""
+
+from __future__ import annotations
+
+import pathlib
+
+import pymupdf
+import pytest
+from babeldoc.format.pdf.document_il import il_version_1
+from babeldoc.format.pdf.document_il.backend.latex_bbox import capability
+from babeldoc.format.pdf.document_il.backend.latex_bbox import fusion
+from babeldoc.format.pdf.document_il.backend.latex_bbox import overlay as overlay_mod
+from babeldoc.format.pdf.document_il.backend.latex_bbox import renderer as renderer_mod
+from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
+    BboxStampRenderer,
+)
+from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import StampRequest
+
+# --------------------------------------------------------------------------- #
+# 共用 fixture
+# --------------------------------------------------------------------------- #
+_CAPABILITY = capability.probe_latex_capability()
+_HAS_LATEX = _CAPABILITY.available
+requires_latex = pytest.mark.skipif(
+    not _HAS_LATEX, reason="需要可用的 XeLaTeX + 中文字体"
+)
+
+
+def _style(size: float = 10.0, font_id: str = "F1"):
+    return il_version_1.PdfStyle(
+        font_id=font_id,
+        font_size=size,
+        graphic_state=il_version_1.GraphicState(passthrough_per_char_instruction=""),
+    )
+
+
+def _translated_paragraph(
+    debug_id: str,
+    text: str,
+    box,
+    size: float = 10.0,
+    xobj_id: int | None = 0,
+    layout_label: str = "text",
+    extra_compositions=(),
+):
+    style = _style(size)
+    compositions = [
+        il_version_1.PdfParagraphComposition(
+            pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
+                unicode=text, pdf_style=style
+            )
+        ),
+        *extra_compositions,
+    ]
+    return il_version_1.PdfParagraph(
+        box=box,
+        pdf_style=style,
+        pdf_paragraph_composition=compositions,
+        unicode=text,
+        debug_id=debug_id,
+        layout_label=layout_label,
+        xobj_id=xobj_id,
+        first_line_indent=False,
+    )
+
+
+def _il_doc(pages):
+    return il_version_1.Document(page=list(pages), total_pages=len(pages))
+
+
+def _il_page(page_number: int, paragraphs, width=612, height=792):
+    return il_version_1.Page(
+        page_number=page_number,
+        pdf_paragraph=list(paragraphs),
+        page_layout=[],
+        cropbox=il_version_1.Cropbox(box=il_version_1.Box(0, 0, width, height)),
+        mediabox=il_version_1.Mediabox(box=il_version_1.Box(0, 0, width, height)),
+    )
+
+
+def _pdf_with_text(tmp_path: pathlib.Path, lines, width=400, height=300, name="in.pdf"):
+    doc = pymupdf.open()
+    page = doc.new_page(width=width, height=height)
+    for x, y, text, size in lines:
+        page.insert_text((x, y), text, fontsize=size)
+    path = tmp_path / name
+    doc.save(path)
+    doc.close()
+    return path
+
+
+class _FakeConfig:
+    """最小 config 替身（overlay 只读取少量属性）。"""
+
+    def __init__(self, **kwargs):
+        self.latex_bbox_state = kwargs.get("latex_bbox_state", {})
+        self.enable_latex_bbox_layout = kwargs.get("enable_latex_bbox_layout", True)
+        self.latex_xelatex_path = kwargs.get("latex_xelatex_path", _CAPABILITY.xelatex_path)
+        self.latex_cjk_font_path = kwargs.get("latex_cjk_font_path", _CAPABILITY.font_path)
+        self.latex_compile_timeout_seconds = kwargs.get(
+            "latex_compile_timeout_seconds", 45.0
+        )
+        self.latex_max_compile_workers = kwargs.get("latex_max_compile_workers", 2)
+        self.latex_min_line_fill = kwargs.get("latex_min_line_fill", 0.85)
+        self.primary_font_family = kwargs.get("primary_font_family", None)
+        self.working_dir = kwargs.get("working_dir", None)
+        self.latex_bbox_stats = {}
+
+
+def _make_stamp_pdf(path: pathlib.Path, width: float, height: float, text="中文贴片内容"):
+    doc = pymupdf.open()
+    page = doc.new_page(width=width, height=height)
+    page.insert_text((2, min(12, height - 2)), text, fontsize=8)
+    doc.save(path)
+    doc.close()
+    return str(path)
+
+
+# --------------------------------------------------------------------------- #
+# capability
+# --------------------------------------------------------------------------- #
+def test_probe_capability_missing_explicit_paths_never_raises():
+    result = capability.probe_latex_capability(
+        xelatex_path="/nonexistent/xelatex",
+        font_path="/nonexistent/font.ttf",
+    )
+    assert result.available is False
+    assert result.reasons
+    assert result.xelatex_path is None
+    assert result.font_path is None
+    # 结果可序列化（报告用）
+    assert result.to_dict()["available"] is False
+
+
+def test_probe_capability_missing_font_only(monkeypatch):
+    monkeypatch.setattr(
+        capability,
+        "_FONT_CACHE_DIR",
+        pathlib.Path("/nonexistent/babeldoc-fonts"),
+    )
+    result = capability.probe_latex_capability()
+    if result.xelatex_path is None:
+        pytest.skip("环境无 xelatex，跳过字体单独缺失场景")
+    assert result.available is False
+    assert result.font_path is None
+    assert any("字体" in reason for reason in result.reasons)
+
+
+def test_probe_capability_reports_packages(monkeypatch):
+    monkeypatch.setattr(capability, "_missing_packages", lambda _p: ["xeCJK"])
+    result = capability.probe_latex_capability(
+        xelatex_path=_CAPABILITY.xelatex_path or "/usr/bin/xelatex",
+        font_path=_CAPABILITY.font_path or str(pathlib.Path("/nonexistent/f.ttf")),
+    )
+    assert result.available is False
+    assert result.missing_packages == ["xeCJK"]
+
+
+# --------------------------------------------------------------------------- #
+# fusion
+# --------------------------------------------------------------------------- #
+def test_escape_latex_specials():
+    assert fusion.escape_latex("a_b & 50% #1 $x$ {y}") == (
+        r"a\_b \& 50\% \#1 \$x\$ \{y\}"
+    )
+    assert fusion.escape_latex("~^\\") == (
+        r"\textasciitilde{}\textasciicircum{}\textbackslash{}"
+    )
+
+
+def test_parse_segments_plain_and_marked():
+    assert fusion.parse_segments("纯中文") == [("text", "纯中文")]
+    assert fusion.parse_segments("a {v1} b") == [
+        ("text", "a "),
+        ("formula", "1"),
+        ("text", " b"),
+    ]
+    assert fusion.parse_segments("前 <style id='2'>粗</style> 后") == [
+        ("text", "前 "),
+        ("styled", "粗"),
+        ("text", " 后"),
+    ]
+
+
+def test_parse_segments_unbalanced_returns_none():
+    assert fusion.parse_segments("<style id='1'>未闭合") is None
+
+
+def test_fuse_paragraph_plain_text_ok():
+    paragraph = _translated_paragraph("P01-001", "这是一段纯中文译文。", il_version_1.Box(0, 0, 200, 40))
+    result = fusion.fuse_paragraph(paragraph, 0, {"F1": None}, None)
+    assert result.ok is True
+    assert result.body == "这是一段纯中文译文。"
+    assert result.formula_count == 0
+
+
+def test_fuse_paragraph_placeholder_count_mismatch():
+    """译文有 {v1} 但 composition 无公式 → 不可替换。"""
+    paragraph = _translated_paragraph("P01-002", "前 {v1} 后", il_version_1.Box(0, 0, 200, 40))
+    index = fusion.FormulaLatexIndex({0: [((10, 10, 20, 20), "x")]})
+    result = fusion.fuse_paragraph(paragraph, 0, {}, index)
+    assert result.ok is False
+    assert any("mismatch" in reason for reason in result.reasons)
+
+
+def test_fuse_paragraph_formula_unmatched_falls_back():
+    """公式存在但无 MinerU 匹配 → 不可替换（绝不猜测公式）。"""
+    box = il_version_1.Box(10, 10, 40, 25)
+    formula = il_version_1.PdfFormula(box=box, x_offset=0.0, y_offset=0.0)
+    composition = il_version_1.PdfParagraphComposition(pdf_formula=formula)
+    text = "前 {v1} 后"
+    style = _style()
+    paragraph = il_version_1.PdfParagraph(
+        box=il_version_1.Box(0, 0, 200, 40),
+        pdf_style=style,
+        pdf_paragraph_composition=[
+            il_version_1.PdfParagraphComposition(
+                pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
+                    unicode="前 ", pdf_style=style
+                )
+            ),
+            composition,
+            il_version_1.PdfParagraphComposition(
+                pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
+                    unicode=" 后", pdf_style=style
+                )
+            ),
+        ],
+        unicode=text,
+        debug_id="P01-003",
+        layout_label="text",
+        xobj_id=0,
+    )
+    index = fusion.FormulaLatexIndex({0: [((100, 100, 110, 110), "x^2")]})
+    result = fusion.fuse_paragraph(paragraph, 0, {"F1": None}, index)
+    assert result.ok is False
+    assert any("unmatched" in reason for reason in result.reasons)
+
+
+def test_fuse_paragraph_formula_matched_inlines_math():
+    """公式源 box 与 MinerU span 重合 → {v1} 还原为 $...$。"""
+    formula_box = il_version_1.Box(50, 300, 70, 315)
+    formula = il_version_1.PdfFormula(box=formula_box, x_offset=0.0, y_offset=0.0)
+    style = _style()
+    paragraph = il_version_1.PdfParagraph(
+        box=il_version_1.Box(0, 200, 300, 400),
+        pdf_style=style,
+        pdf_paragraph_composition=[
+            il_version_1.PdfParagraphComposition(
+                pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
+                    unicode="见 ", pdf_style=style
+                )
+            ),
+            il_version_1.PdfParagraphComposition(pdf_formula=formula),
+            il_version_1.PdfParagraphComposition(
+                pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
+                    unicode=" 所示。", pdf_style=style
+                )
+            ),
+        ],
+        unicode="见 {v1} 所示。",
+        debug_id="P01-004",
+        layout_label="text",
+        xobj_id=0,
+    )
+    index = fusion.FormulaLatexIndex({0: [((50, 300, 70, 315), r"\alpha_{1}")]})
+    result = fusion.fuse_paragraph(paragraph, 0, {"F1": None}, index)
+    assert result.ok is True
+    assert result.body == r"见 $\alpha_{1}$ 所示。"
+    assert result.formulas_matched == 1
+
+
+def test_fuse_paragraph_segment_order_mismatch_falls_back():
+    """composition 文本与译文不一致（顺序破坏）→ 拒绝替换。"""
+    formula_box = il_version_1.Box(50, 300, 70, 315)
+    formula = il_version_1.PdfFormula(box=formula_box, x_offset=0.0, y_offset=0.0)
+    style = _style()
+    paragraph = il_version_1.PdfParagraph(
+        box=il_version_1.Box(0, 200, 300, 400),
+        pdf_style=style,
+        pdf_paragraph_composition=[
+            il_version_1.PdfParagraphComposition(
+                pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
+                    unicode="完全不同的内容", pdf_style=style
+                )
+            ),
+            il_version_1.PdfParagraphComposition(pdf_formula=formula),
+        ],
+        unicode="见 {v1}",
+        debug_id="P01-005",
+        layout_label="text",
+        xobj_id=0,
+    )
+    index = fusion.FormulaLatexIndex({0: [((50, 300, 70, 315), "x")]})
+    result = fusion.fuse_paragraph(paragraph, 0, {"F1": None}, index)
+    assert result.ok is False
+    assert any("segment-order-mismatch" in reason for reason in result.reasons)
+
+
+def test_fuse_paragraph_plain_text_resolves_style_markup():
+    """纯文本段落里的 <style> 标记必须解析为样式命令，不能原样交给 XeLaTeX。"""
+    style = _style()
+    paragraph = il_version_1.PdfParagraph(
+        box=il_version_1.Box(0, 0, 300, 60),
+        pdf_style=style,
+        pdf_paragraph_composition=[
+            il_version_1.PdfParagraphComposition(
+                pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
+                    unicode="前 ", pdf_style=style
+                )
+            ),
+            il_version_1.PdfParagraphComposition(
+                pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
+                    unicode="加粗文字",
+                    pdf_style=il_version_1.PdfStyle(
+                        font_id="F1", font_size=10.0, graphic_state=None
+                    ),
+                )
+            ),
+        ],
+        unicode="前 <style id='2'>加粗文字</style>",
+        debug_id="P01-006",
+        layout_label="text",
+        xobj_id=0,
+    )
+    bold_font = il_version_1.PdfFont(font_id="F1", name="Foo-Bold", bold=True)
+    result = fusion.fuse_paragraph(paragraph, 0, {"F1": bold_font}, None)
+    assert result.ok is True
+    assert "<style" not in result.body
+    assert r"\textbf{加粗文字}" in result.body
+    assert result.style_runs == 1
+    assert result.plain_text == "前 加粗文字"
+
+
+def test_fuse_paragraph_plain_text_unresolved_style_falls_back():
+    """composition 顺序与译文不一致时不能做样式映射 → 拒绝替换。"""
+    style = _style()
+    paragraph = il_version_1.PdfParagraph(
+        box=il_version_1.Box(0, 0, 300, 60),
+        pdf_style=style,
+        pdf_paragraph_composition=[
+            il_version_1.PdfParagraphComposition(
+                pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
+                    unicode="完全对不上的内容", pdf_style=style
+                )
+            )
+        ],
+        unicode="前 <style id='2'>加粗</style>",
+        debug_id="P01-007",
+        layout_label="text",
+        xobj_id=0,
+    )
+    result = fusion.fuse_paragraph(paragraph, 0, {}, None)
+    assert result.ok is False
+    assert any("segment-order-mismatch" in reason for reason in result.reasons)
+
+
+# --------------------------------------------------------------------------- #
+# FormulaLatexIndex
+# --------------------------------------------------------------------------- #
+def test_formula_index_iou_and_center_fallback():
+    index = fusion.FormulaLatexIndex({0: [((50, 300, 70, 315), "a+b")]})
+    assert index.lookup(0, (50, 300, 70, 315)) == "a+b"
+    # 中心点落入 span box（IoU 低）→ 兜底命中
+    assert index.lookup(0, (55, 305, 65, 310)) == "a+b"
+    # 完全无关 → None
+    assert index.lookup(0, (200, 200, 220, 215)) is None
+    assert index.lookup(9, (50, 300, 70, 315)) is None
+    assert index.total_spans == 1
+
+
+def test_formula_index_from_documents_loads_provider_ir(tmp_path):
+    """从 provider_ir.json 构建索引：inline_equation span 转 IL 坐标。"""
+
+    from babeldoc.docvision.provider_ir import ProviderDocument
+
+    agent_dir = tmp_path / "agent" / "source" / "mineru"
+    agent_dir.mkdir(parents=True)
+    provider = ProviderDocument.from_dict(
+        {
+            "pages": [
+                {
+                    "page_index": 0,
+                    "blocks": [
+                        {
+                            "block_id": "b1",
+                            "type": "text",
+                            "bbox": [10, 10, 200, 40],
+                            "lines": [
+                                {
+                                    "line_id": "l1",
+                                    "bbox": [10, 10, 200, 40],
+                                    "spans": [
+                                        {
+                                            "span_id": "s1",
+                                            "bbox": [10, 10, 60, 25],
+                                            "kind": "text",
+                                            "content": "hello",
+                                        },
+                                        {
+                                            "span_id": "s2",
+                                            "bbox": [62, 10, 100, 25],
+                                            "kind": "inline_equation",
+                                            "content": "E = mc^2",
+                                        },
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                    "reading_order": [],
+                }
+            ]
+        }
+    )
+    (agent_dir / "provider_ir.json").write_text(
+        provider.to_json(), encoding="utf-8"
+    )
+
+    docs = _il_doc([_il_page(0, [], width=612, height=792)])
+    config = _FakeConfig(working_dir=tmp_path)
+    index = fusion.FormulaLatexIndex.from_documents(docs, config)
+    assert index is not None
+    assert index.total_spans == 1
+    # MinerU y 向下（top=10, bottom=25）→ IL y 向上，页高 792
+    latex = index.lookup(0, (62, 792 - 25, 100, 792 - 10))
+    assert latex == "E = mc^2"
+
+
+def test_formula_index_missing_provider_ir_returns_none(tmp_path):
+    docs = _il_doc([_il_page(0, [])])
+    config = _FakeConfig(working_dir=tmp_path)
+    assert fusion.FormulaLatexIndex.from_documents(docs, config) is None
+
+
+# --------------------------------------------------------------------------- #
+# renderer
+# --------------------------------------------------------------------------- #
+def test_build_tex_contains_required_directives():
+    renderer = BboxStampRenderer(_CAPABILITY)
+    tex = renderer.build_tex("测试", 200.0, 100.0, 10.0)
+    assert "paperwidth=200.0000pt" in tex
+    assert "paperheight=100.0000pt" in tex
+    assert "\\usepackage{xeCJK}" in tex
+    assert "\\XeTeXlinebreaklocale" in tex
+    assert "PunctStyle=plain" in tex
+    assert pathlib.Path(_CAPABILITY.font_path).stem in tex
+    assert "\\fontsize{10.0000}{15.0000}" in tex
+    assert "测试" in tex
+
+
+def test_build_tex_includes_bold_font_when_available():
+    renderer = BboxStampRenderer(_CAPABILITY)
+    tex = renderer.build_tex("x", 100.0, 50.0, 10.0)
+    if _CAPABILITY.bold_font_path:
+        assert f"BoldFont={pathlib.Path(_CAPABILITY.bold_font_path).stem}" in tex
+
+
+def test_render_many_empty_returns_empty():
+    renderer = BboxStampRenderer(_CAPABILITY)
+    assert renderer.render_many([]) == {}
+
+
+@requires_latex
+def test_render_one_compiles_and_caches(tmp_path):
+    renderer = BboxStampRenderer(_CAPABILITY, max_workers=1)
+    request = StampRequest(
+        key="P01-001",
+        body="这是一段用于缓存的测试中文文本。",
+        width=200.0,
+        height=60.0,
+        font_size=9.0,
+    )
+    first = renderer.render_one(request, tmp_path)
+    assert first.ok is True
+    assert first.pdf_path and pathlib.Path(first.pdf_path).exists()
+    assert first.font_size is not None and first.scale is not None
+
+    before = renderer.cache_hits
+    second = renderer.render_one(request, tmp_path)
+    assert second is first
+    assert renderer.cache_hits == before + 1
+
+
+@requires_latex
+def test_render_one_compile_failure_returns_reason(tmp_path):
+    """非法 LaTeX（未闭合数学模式）→ 编译失败且有原因，不抛异常。"""
+    renderer = BboxStampRenderer(_CAPABILITY, timeout_seconds=20.0)
+    request = StampRequest(
+        key="bad",
+        body=r"缺失闭合的数学模式 $\alpha",
+        width=120.0,
+        height=40.0,
+        font_size=9.0,
+    )
+    result = renderer.render_one(request, tmp_path)
+    assert result.ok is False
+    assert result.reason
+
+
+@requires_latex
+def test_render_one_shrinks_when_overflowing(tmp_path):
+    """超长不可断 token 在源字号溢出 → 有界缩后成功且有 scale < 1。"""
+    renderer = BboxStampRenderer(_CAPABILITY, timeout_seconds=30.0)
+    long_token = "averyveryverylongunbreakabletoken_" * 3
+    request = StampRequest(
+        key="long",
+        body=long_token,
+        width=160.0,
+        height=30.0,
+        font_size=10.0,
+    )
+    result = renderer.render_one(request, tmp_path)
+    assert result.compile_attempts >= 1
+    if result.ok:
+        assert result.scale is not None
+
+
+def test_measure_fit_detects_clipped_text(tmp_path):
+    """排版溢出页面底部的行会被 pymupdf 静默裁掉：必须报 text-clipped。"""
+    stamp = tmp_path / "clipped.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page(width=120, height=30)
+    # 写到 page 下方（会被 get_text 裁掉）
+    page.insert_text((2, 60), "BOTTOMLINE", fontsize=9)
+    page.insert_text((2, 12), "top line", fontsize=9)
+    doc.save(stamp)
+    doc.close()
+    fits, reason, _chars = renderer_mod._measure_fit(
+        stamp, 120.0, 30.0, "top lineBOTTOMLINE"
+    )
+    assert fits is False
+    assert "text-clipped" in reason
+
+
+def test_measure_fit_accepts_complete_text(tmp_path):
+    stamp = tmp_path / "ok.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page(width=200, height=60)
+    page.insert_text((2, 20), "complete text here", fontsize=9)
+    doc.save(stamp)
+    doc.close()
+    fits, reason, chars = renderer_mod._measure_fit(
+        stamp, 200.0, 60.0, "complete text here"
+    )
+    assert fits is True
+    assert reason == "ok"
+    assert chars > 0
+
+
+@requires_latex
+def test_render_shrinks_instead_of_clipping(tmp_path):
+    """太长而垂直放不下时应有界缩小，而不是静默截断文本。"""
+    renderer = BboxStampRenderer(_CAPABILITY, timeout_seconds=30.0)
+    plain = "这是一段很长的中文文本" * 8
+    request = StampRequest(
+        key="clip",
+        body=plain,
+        width=200.0,
+        height=20.0,
+        font_size=10.0,
+        expected_text=plain,
+    )
+    result = renderer.render_one(request, tmp_path)
+    assert result.compile_attempts >= 2 or result.ok is False
+    if result.ok:
+        import pymupdf as _fitz
+
+        doc = _fitz.open(result.pdf_path)
+        try:
+            got = "".join(doc[0].get_text().split())
+            assert "这是一个很长的中文文本" not in got  # 语句不匹配则只校验末尾
+            assert plain.strip()[-3:] in got
+        finally:
+            doc.close()
+
+
+# --------------------------------------------------------------------------- #
+# capture_layout_sources
+# --------------------------------------------------------------------------- #
+def test_capture_only_translated_paragraphs_excludes_watermark():
+    translated = _translated_paragraph(
+        "P01-001", "译文段落一", il_version_1.Box(10, 600, 200, 700)
+    )
+    watermark = _translated_paragraph(
+        "WATERMARK",
+        "本文档由 funstory.ai 的 BabelDOC 翻译",
+        il_version_1.Box(30, 0, 580, 780),
+        xobj_id=-1,
+    )
+    untranslated_style = _style()
+    untranslated = il_version_1.PdfParagraph(
+        box=il_version_1.Box(10, 500, 200, 560),
+        pdf_style=untranslated_style,
+        pdf_paragraph_composition=[
+            il_version_1.PdfParagraphComposition(
+                pdf_same_style_characters=il_version_1.PdfSameStyleCharacters(
+                    pdf_character=[], pdf_style=untranslated_style
+                )
+            )
+        ],
+        unicode="original english text",
+        debug_id="P01-002",
+        layout_label="reference",
+        xobj_id=0,
+    )
+    vertical = _translated_paragraph(
+        "P01-003", "竖排", il_version_1.Box(10, 400, 200, 460)
+    )
+    vertical.vertical = True
+    page = _il_page(0, [translated, watermark, untranslated, vertical])
+    docs = _il_doc([page])
+
+    config = _FakeConfig(latex_bbox_state={}, working_dir=None)
+    state = overlay_mod.capture_layout_sources(docs, config)
+
+    assert "P01-001" in state["paragraphs"]
+    assert state["paragraphs"]["P01-001"]["page"] == 0
+    assert state["paragraphs"]["P01-001"]["font_size"] == pytest.approx(10.0)
+    assert state["paragraphs"]["P01-001"]["has_formula"] is False
+    assert "WATERMARK" not in state["paragraphs"]
+    assert "P01-002" not in state["paragraphs"]
+    assert "P01-003" not in state["paragraphs"]
+    assert config.latex_bbox_state is state
+    assert state["provider_inline_spans"] == 0  # 无 provider IR
+    assert state["bodies"]["P01-001"] == "译文段落一"
+
+
+def test_capture_fuses_inline_formula_from_provider_ir(tmp_path):
+    """端到端融合：真实 provider_ir.json + 公式段落 → body 内联 $...$。"""
+
+    from babeldoc.docvision.provider_ir import ProviderDocument
+
+    agent_dir = tmp_path / "agent" / "source" / "mineru"
+    agent_dir.mkdir(parents=True)
+    # 公式源 box（IL 坐标 y-up）: (50,300)-(70,315)；页高 792
+    # 对应 MinerU top-left bbox: (50, 792-315=477)-(70, 792-300=492)
+    provider = ProviderDocument.from_dict(
+        {
+            "pages": [
+                {
+                    "page_index": 0,
+                    "blocks": [
+                        {
+                            "block_id": "b1",
+                            "type": "text",
+                            "bbox": [0, 400, 300, 600],
+                            "lines": [
+                                {
+                                    "line_id": "l1",
+                                    "bbox": [0, 400, 300, 600],
+                                    "spans": [
+                                        {
+                                            "span_id": "s1",
+                                            "bbox": [50, 477, 70, 492],
+                                            "kind": "inline_equation",
+                                            "content": r"\alpha_{1}",
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                    "reading_order": [],
+                }
+            ]
+        }
+    )
+    (agent_dir / "provider_ir.json").write_text(
+        provider.to_json(), encoding="utf-8"
+    )
+
+    style = _style()
+    formula = il_version_1.PdfFormula(
+        box=il_version_1.Box(50, 300, 70, 315), x_offset=0.0, y_offset=0.0
+    )
+    paragraph = il_version_1.PdfParagraph(
+        box=il_version_1.Box(0, 200, 300, 400),
+        pdf_style=style,
+        pdf_paragraph_composition=[
+            il_version_1.PdfParagraphComposition(
+                pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
+                    unicode="见 ", pdf_style=style
+                )
+            ),
+            il_version_1.PdfParagraphComposition(pdf_formula=formula),
+            il_version_1.PdfParagraphComposition(
+                pdf_same_style_unicode_characters=il_version_1.PdfSameStyleUnicodeCharacters(
+                    unicode=" 所示。", pdf_style=style
+                )
+            ),
+        ],
+        unicode="见 {v1} 所示。",
+        debug_id="P01-100",
+        layout_label="text",
+        xobj_id=0,
+    )
+    docs = _il_doc([_il_page(0, [paragraph], width=612, height=792)])
+    config = _FakeConfig(working_dir=tmp_path)
+    state = overlay_mod.capture_layout_sources(docs, config)
+
+    assert state["provider_inline_spans"] == 1
+    assert "P01-100" in state["bodies"]
+    assert state["bodies"]["P01-100"] == r"见 $\alpha_{1}$ 所示。"
+    assert state["paragraphs"]["P01-100"]["has_formula"] is True
+
+
+# --------------------------------------------------------------------------- #
+# overlay：链接安全
+# --------------------------------------------------------------------------- #
+def _make_link_pdf(tmp_path: pathlib.Path, box: pymupdf.Rect):
+    """构造带 URI/GOTO/NAMED 链接的两页 PDF（box 参数保留以兼容调用方）。"""
+    _ = box
+    doc = pymupdf.open()
+    doc.new_page(width=400, height=300)
+    doc.new_page(width=400, height=300)
+    page = doc[0]
+    page.insert_text((30, 70), "Original paragraph line one", fontsize=9)
+    page.insert_text((30, 90), "original paragraph second line", fontsize=9)
+    page.insert_link(
+        {
+            "kind": pymupdf.LINK_URI,
+            "from": pymupdf.Rect(30, 50, 300, 66),
+            "uri": "https://example.com/ref1",
+        }
+    )
+    page.insert_link(
+        {
+            "kind": pymupdf.LINK_GOTO,
+            "from": pymupdf.Rect(30, 70, 300, 86),
+            "page": 1,
+            "to": pymupdf.Point(30, 40),
+        }
+    )
+    page.insert_link(
+        {
+            "kind": pymupdf.LINK_NAMED,
+            "from": pymupdf.Rect(360, 280, 395, 296),
+            "nameddest": "sec1",
+        }
+    )
+    path = tmp_path / "links.pdf"
+    doc.save(path)
+    doc.close()
+    return path
+
+
+def _overlay_fixture(tmp_path, monkeypatch, *, with_links=True, min_fill=1.01):
+    src = _make_link_pdf(tmp_path, pymupdf.Rect()) if with_links else _pdf_with_text(
+        tmp_path,
+        [(30, 70, "Original paragraph line one", 9), (30, 90, "second line here", 9)],
+    )
+    pdf = pymupdf.open(src) if with_links else pymupdf.open(src)
+    page = pdf[0]
+    # 目标 box（IL 坐标，y-up）：mupdf rect (30,50)-(300,110) → IL y 300-110..300-50
+    box = [30.0, 300.0 - 110.0, 300.0, 300.0 - 50.0]
+    paragraph = _translated_paragraph(
+        "P01-001",
+        "这是一段较长的中文译文用于替换原有英文段落内容。",
+        il_version_1.Box(*box),
+    )
+    docs = _il_doc([_il_page(0, [paragraph], width=400, height=300)])
+    state = {
+        "paragraphs": {
+            "P01-001": {
+                "page": 0,
+                "box": box,
+                "font_size": 9.0,
+                "layout_label": "text",
+                "has_formula": True,
+            }
+        },
+        "bodies": {"P01-001": "这是一段较长的中文译文用于替换原有英文段落内容。"},
+        "plain_texts": {"P01-001": "这是一段较长的中文译文用于替换原有英文段落内容。"},
+        "fusion_failures": {},
+        "provider_inline_spans": 1,
+    }
+    config = _FakeConfig(latex_bbox_state=state, latex_min_line_fill=min_fill, working_dir=tmp_path)
+
+    stamp_dir = tmp_path / "stamps"
+    stamp_dir.mkdir(exist_ok=True)
+    stamp_path = _make_stamp_pdf(stamp_dir / "stamp.pdf", 270.0, 60.0)
+
+    def fake_render_many(self, requests):
+        _ = self
+        results = {}
+        for request, _workdir in requests:
+            results[request.key] = renderer_mod.StampResult(
+                key=request.key, ok=True, pdf_path=stamp_path, font_size=9.0, scale=1.0
+            )
+        return results
+
+    monkeypatch.setattr(BboxStampRenderer, "render_many", fake_render_many)
+    return pdf, docs, config
+
+
+def _read_links(path: pathlib.Path):
+    doc = pymupdf.open(path)
+    try:
+        return sorted(
+            (
+                page.number,
+                tuple(link["from"]),
+                link.get("kind"),
+                link.get("uri"),
+                link.get("page"),
+                link.get("nameddest"),
+            )
+            for page in doc
+            for link in page.get_links()
+        )
+    finally:
+        doc.close()
+
+
+def test_overlay_preserves_link_multiset_and_uri_set(tmp_path, monkeypatch):
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    before_path = tmp_path / "before.pdf"
+    pdf.save(before_path)
+    before_links = _read_links(before_path)
+    before_uris = {item[3] for item in before_links if item[3]}
+
+    result_pdf, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+
+    after_path = tmp_path / "after.pdf"
+    result_pdf.save(after_path)
+    after_links = _read_links(after_path)
+
+    assert stats["applied"] >= 1
+    assert after_links == before_links
+    assert {item[3] for item in after_links if item[3]} == before_uris
+    assert stats["links"]["uri_set_match"] is True
+    assert stats["reverted"] is False
+    assert stats["links"]["restored"] >= 1
+
+
+def test_overlay_replaces_text_layer_without_double_layer(tmp_path, monkeypatch):
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    result_pdf, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+    out = tmp_path / "out.pdf"
+    result_pdf.save(out)
+
+    doc = pymupdf.open(out)
+    try:
+        rect = pymupdf.Rect(30, 50, 300, 110)
+        in_box = doc[0].get_text(clip=rect)
+        assert "Original paragraph" not in in_box
+        assert "original paragraph" not in in_box
+    finally:
+        doc.close()
+    assert stats["applied_paragraphs"] == ["P01-001"]
+
+
+def test_overlay_reverts_to_pre_overlay_bytes_when_gate_fails(tmp_path, monkeypatch):
+    """链接门禁失败 → 整体回滚到 overlay 前字节快照，链接完整恢复。"""
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    before_path = tmp_path / "before.pdf"
+    pdf.save(before_path)
+    before_links = _read_links(before_path)
+
+    monkeypatch.setattr(
+        overlay_mod.LatexBboxOverlay,
+        "_verify_links",
+        lambda _self, *_args, **_kwargs: False,
+    )
+    result_pdf, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+
+    out = tmp_path / "reverted.pdf"
+    result_pdf.save(out)
+    assert stats["reverted"] is True
+    assert stats["applied"] == 0
+    assert stats["applied_paragraphs"] == []
+    assert _read_links(out) == before_links
+
+
+def test_verify_links_detects_missing_link(tmp_path):
+    """门禁本体：链接被删/多出时返回 False，一致时返回 True。"""
+    src = _make_link_pdf(tmp_path, pymupdf.Rect())
+    pdf = pymupdf.open(src)
+    overlay = overlay_mod.LatexBboxOverlay(pdf, _il_doc([_il_page(0, [])]), _FakeConfig())
+
+    actual = overlay_mod._links_by_signature(pdf[0].get_links())
+    uris = overlay._uri_set(pdf)
+    assert overlay._verify_links({0: actual}, uris) is True
+    # 期望多一条链接 → False
+    bogus = dict(actual)
+    bogus[((0.0, 0.0, 1.0, 1.0), 2, "https://missing.example", None, "")] = 1
+    assert overlay._verify_links({0: bogus}, uris) is False
+    # URI 集合不一致 → False
+    assert overlay._verify_links({0: actual}, uris | {"https://extra.example"}) is False
+
+
+def test_overlay_no_captured_paragraphs_is_noop(tmp_path):
+    pdf = pymupdf.open(_make_link_pdf(tmp_path, pymupdf.Rect()))
+    docs = _il_doc([_il_page(0, [])])
+    config = _FakeConfig(latex_bbox_state={}, working_dir=tmp_path)
+    result_pdf, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+    assert result_pdf is pdf
+    assert stats["applied"] == 0
+    assert stats["fallback_reasons"] == {"no-captured-paragraphs": 0}
+
+
+def test_overlay_capability_unavailable_falls_back(tmp_path, monkeypatch):
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    config.latex_xelatex_path = "/nonexistent/xelatex"
+    config.latex_cjk_font_path = "/nonexistent/font.ttf"
+    result_pdf, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+    assert result_pdf is pdf
+    assert stats["available"] is False
+    assert stats["applied"] == 0
+    assert "capability-unavailable" in stats["fallback_reasons"]
+
+
+def test_overlay_geometry_and_quality_gates(tmp_path, monkeypatch):
+    """box 超页 / 过小 / 行填充正常 → 全部回退且原因可归因。"""
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    # 把段落标为无公式，行填充门禁调低 → "line-fill-ok" 回退。
+    config.latex_bbox_state["paragraphs"]["P01-001"]["has_formula"] = False
+    config.latex_min_line_fill = 0.0
+    _result, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+    assert stats["applied"] == 0
+    assert stats["fallback_reasons"].get("line-fill-ok") == 1
+
+
+def test_overlay_skips_box_expanded_after_typesetting(tmp_path, monkeypatch):
+    """Typesetting 扩展过段落 box → 跳过（避免 redaction 漏区留下双层文本）。"""
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    paragraph = docs.page[0].pdf_paragraph[0]
+    paragraph.box = il_version_1.Box(30, 100, 300, 280)  # 远超源 box
+    _result, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+    assert stats["applied"] == 0
+    assert stats["fallback_reasons"].get("box-expanded-after-typesetting") == 1
+
+
+@requires_latex
+@pytest.mark.parametrize(
+    ("kind", "extra"),
+    [
+        (pymupdf.LINK_URI, {"uri": "https://example.com/plain"}),
+        (pymupdf.LINK_GOTO, {"page": 1, "to": pymupdf.Point(20, 30)}),
+        (pymupdf.LINK_NAMED, {"nameddest": "sec1"}),
+        (pymupdf.LINK_LAUNCH, {"file": "https://example.com/launch"}),
+    ],
+)
+def test_overlay_keeps_all_link_kinds_inside_redacted_box(
+    tmp_path, monkeypatch, kind, extra
+):
+    """URI/GOTO/NAMED/LAUNCH 四种链接在 redaction 区内都能保留（不丢目标）。"""
+    doc = pymupdf.open()
+    doc.new_page(width=400, height=300)
+    doc.new_page(width=400, height=300)
+    page = doc[0]
+    page.insert_text((30, 70), "Original paragraph line one", fontsize=9)
+    page.insert_text((30, 90), "original paragraph second line", fontsize=9)
+    target = {"kind": kind, "from": pymupdf.Rect(30, 50, 300, 66), **extra}
+    page.insert_link(target)
+    src = tmp_path / f"link-{kind}.pdf"
+    doc.save(src)
+    doc.close()
+
+    pdf = pymupdf.open(src)
+    before_path = tmp_path / f"before-{kind}.pdf"
+    pdf.save(before_path)
+
+    box = [30.0, 300.0 - 110.0, 300.0, 300.0 - 50.0]
+    paragraph = _translated_paragraph(
+        "P01-001", "中文译文内容替换原有英文段落。", il_version_1.Box(*box)
+    )
+    docs = _il_doc([_il_page(0, [paragraph], width=400, height=300)])
+    state = {
+        "paragraphs": {
+            "P01-001": {
+                "page": 0,
+                "box": box,
+                "font_size": 9.0,
+                "layout_label": "text",
+                "has_formula": True,
+            }
+        },
+        "bodies": {"P01-001": "中文译文内容替换原有英文段落。"},
+        "plain_texts": {"P01-001": "中文译文内容替换原有英文段落。"},
+        "fusion_failures": {},
+        "provider_inline_spans": 1,
+    }
+    config = _FakeConfig(latex_bbox_state=state, working_dir=tmp_path)
+    stamp_path = _make_stamp_pdf(tmp_path / f"stamp-{kind}.pdf", 270.0, 60.0)
+
+    def fake_render_many(self, requests):
+        _ = self
+        return {
+            request.key: renderer_mod.StampResult(
+                key=request.key, ok=True, pdf_path=stamp_path, font_size=9.0, scale=1.0
+            )
+            for request, _wd in requests
+        }
+
+    monkeypatch.setattr(BboxStampRenderer, "render_many", fake_render_many)
+    result_pdf, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+    out = tmp_path / f"out-{kind}.pdf"
+    result_pdf.save(out)
+
+    assert stats["reverted"] is False, stats["links"]
+    assert stats["links"]["uri_set_match"] is True
+    kept = pymupdf.open(out)
+    try:
+        links = kept[0].get_links()
+        assert links, "链接在 overlay 后丢失"
+        if kind == pymupdf.LINK_URI:
+            assert {l["uri"] for l in links if l.get("uri")} == {
+                "https://example.com/plain"
+            }
+        elif kind in (pymupdf.LINK_GOTO,):
+            assert any(l.get("page") == 1 for l in links)
+        elif kind == pymupdf.LINK_NAMED:
+            assert any(l.get("nameddest") == "sec1" for l in links)
+        elif kind == pymupdf.LINK_LAUNCH:
+            # pymupdf 落盘时 LAUNCH 会改写为 GOTOR 并对 file 做百分号编码，
+            # 但目标语义必须保留（与门禁同一归一化）。
+            assert any(
+                overlay_mod._canonical_file_target(l.get("file") or "")
+                == "https:/example.com/launch"
+                for l in links
+            )
+    finally:
+        kept.close()
+
+
+def test_measure_line_fill_detects_watermark(tmp_path):
+    path = _pdf_with_text(
+        tmp_path,
+        [(30, 70, "本文档由 funstory.ai 的 BabelDOC 翻译", 9)],
+    )
+    doc = pymupdf.open(path)
+    try:
+        metrics = overlay_mod.measure_line_fill(
+            doc[0], pymupdf.Rect(0, 0, 400, 300)
+        )
+    finally:
+        doc.close()
+    assert metrics["watermark"] is True
+
+
+def test_measure_line_fill_reports_min_body_fill(tmp_path):
+    path = _pdf_with_text(
+        tmp_path,
+        [(30, 70, "short", 9), (30, 90, "a much longer second line of text", 9)],
+    )
+    doc = pymupdf.open(path)
+    try:
+        metrics = overlay_mod.measure_line_fill(
+            doc[0], pymupdf.Rect(0, 0, 400, 300)
+        )
+    finally:
+        doc.close()
+    assert metrics["n_lines"] == 2
+    assert metrics["min_body_fill"] is not None
+
+
+# --------------------------------------------------------------------------- #
+# 默认关闭回归：PDFCreater.write 不得触发 overlay
+# --------------------------------------------------------------------------- #
+def _minimal_write_fixture(tmp_path, enable_latex: bool):
+    """构造可跑 PDFCreater.write 的最小 mono 环境。"""
+    from babeldoc.format.pdf.document_il.backend.pdf_creater import PDFCreater
+    from babeldoc.format.pdf.high_level import get_translation_stage
+    from babeldoc.format.pdf.translation_config import TranslationConfig
+    from babeldoc.format.pdf.translation_config import WatermarkOutputMode
+    from babeldoc.progress_monitor import ProgressMonitor
+
+    src = _pdf_with_text(tmp_path, [(30, 70, "Hello world original", 9)])
+    config = TranslationConfig(
+        input_file=str(src),
+        lang_in="en",
+        lang_out="zh",
+        doc_layout_model=object(),
+        output_dir=str(tmp_path),
+        working_dir=str(tmp_path / f"wd-{enable_latex}"),
+        watermark_output_mode=WatermarkOutputMode.NoWatermark,
+        enable_latex_bbox_layout=enable_latex,
+    )
+    config.progress_monitor = ProgressMonitor(get_translation_stage(config))
+    config.skip_clean = True
+    page = il_version_1.Page(
+        page_number=0,
+        cropbox=il_version_1.Cropbox(box=il_version_1.Box(0, 0, 400, 300)),
+        mediabox=il_version_1.Mediabox(box=il_version_1.Box(0, 0, 400, 300)),
+    )
+    docs = _il_doc([page])
+    creater = PDFCreater(str(src), docs, config, {})
+    return creater, config, docs
+
+
+def test_default_off_does_not_touch_overlay(tmp_path, monkeypatch):
+    """enable_latex_bbox_layout=False：不调用 overlay，统计为空。"""
+    called = {"n": 0}
+
+    def spy(*_args, **_kwargs):
+        called["n"] += 1
+        raise AssertionError("overlay 不应在默认关闭时被调用")
+
+    monkeypatch.setattr(overlay_mod, "apply_latex_bbox_overlay", spy)
+    creater, config, _docs = _minimal_write_fixture(tmp_path, enable_latex=False)
+    try:
+        result = creater.write(config)
+    finally:
+        config.cleanup_temp_files()
+    assert called["n"] == 0
+    assert creater.latex_bbox_stats == {}
+    assert config.latex_bbox_stats == {}
+    assert result.mono_pdf_path is not None
+    assert pathlib.Path(result.mono_pdf_path).exists()
+
+
+def test_enabled_write_invokes_overlay_once(tmp_path, monkeypatch):
+    """enable_latex_bbox_layout=True：overlay 被调用一次且统计回写。"""
+    calls = {"n": 0}
+
+    def fake_overlay(pdf, _docs, config):
+        calls["n"] += 1
+        stats = {"enabled": True, "applied": 0, "available": False}
+        config.latex_bbox_stats = stats
+        return pdf, stats
+
+    monkeypatch.setattr(
+        "babeldoc.format.pdf.document_il.backend.latex_bbox.apply_latex_bbox_overlay",
+        fake_overlay,
+    )
+    creater, config, _docs = _minimal_write_fixture(tmp_path, enable_latex=True)
+    try:
+        result = creater.write(config)
+    finally:
+        config.cleanup_temp_files()
+    assert calls["n"] == 1
+    assert creater.latex_bbox_stats == {"enabled": True, "applied": 0, "available": False}
+    assert result.mono_pdf_path is not None
+
+
+# --------------------------------------------------------------------------- #
+# 真实样本离线集成冒烟（编译 + redact + 贴片）
+# --------------------------------------------------------------------------- #
+@requires_latex
+def test_real_compile_overlay_end_to_end(tmp_path):
+    """真实编译中文段落并在 bbox 内替换原英文文本，链接保持。"""
+    src = _make_link_pdf(tmp_path, pymupdf.Rect())
+    pdf = pymupdf.open(src)
+    before_path = tmp_path / "before.pdf"
+    pdf.save(before_path)
+    before_links = _read_links(before_path)
+
+    box = [30.0, 300.0 - 110.0, 300.0, 300.0 - 50.0]  # mupdf (30,50)-(300,110)
+    paragraph = _translated_paragraph(
+        "P01-001",
+        "这是一段真实编译的中文译文，用来验证 LaTeX bbox 排版与贴片链路可以端到端工作。",
+        il_version_1.Box(*box),
+    )
+    docs = _il_doc([_il_page(0, [paragraph], width=400, height=300)])
+    state = {
+        "paragraphs": {
+            "P01-001": {
+                "page": 0,
+                "box": box,
+                "font_size": 9.0,
+                "layout_label": "text",
+                "has_formula": True,
+            }
+        },
+        "bodies": {
+            "P01-001": "这是一段真实编译的中文译文，用来验证 LaTeX bbox 排版与贴片链路可以端到端工作。"
+        },
+        "plain_texts": {
+            "P01-001": "这是一段真实编译的中文译文，用来验证 LaTeX bbox 排版与贴片链路可以端到端工作。"
+        },
+        "fusion_failures": {},
+        "provider_inline_spans": 1,
+    }
+    config = _FakeConfig(latex_bbox_state=state, working_dir=tmp_path)
+
+    result_pdf, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+    out = tmp_path / "e2e.pdf"
+    result_pdf.save(out)
+
+    assert stats["available"] is True
+    assert stats["applied"] >= 1
+    assert stats["compile"]["attempts"] >= 1
+    assert stats["links"]["uri_set_match"] is True
+
+    doc = pymupdf.open(out)
+    try:
+        rect = pymupdf.Rect(30, 50, 300, 110)
+        in_box = doc[0].get_text(clip=rect)
+        assert "中文译文" in in_box
+        assert "Original paragraph" not in in_box
+    finally:
+        doc.close()
+    assert _read_links(out) == before_links
+    # 报告落盘
+    assert (tmp_path / "latex_bbox_report.json").exists()
+
+
+@requires_latex
+def test_renderer_bounded_shrink_uses_multiple_attempts(tmp_path):
+    """极小 bbox + 长文本：缩小后仍失败也不抛异常，且记录尝试次数。"""
+    renderer = BboxStampRenderer(_CAPABILITY, timeout_seconds=20.0)
+    request = StampRequest(
+        key="tiny",
+        body="这是一段很长的中文文本" * 20,
+        width=40.0,
+        height=12.0,
+        font_size=10.0,
+    )
+    result = renderer.render_one(request, tmp_path)
+    assert result.compile_attempts >= 1
+    if not result.ok:
+        assert result.reason

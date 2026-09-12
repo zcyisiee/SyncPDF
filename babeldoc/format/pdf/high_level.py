@@ -1066,6 +1066,21 @@ def _do_translate_single(
         mono_watermark_first_page_doc_bytes = None
         dual_watermark_first_page_doc_bytes = None
 
+    # LaTeX bbox 排版（实验特性，默认关闭）：必须在 Typesetting 之前捕获源几何与
+    # 公式融合 body（此时段落/公式 box 仍是源坐标、composition 仍按译文顺序回填）。
+    if getattr(translation_config, "enable_latex_bbox_layout", False):
+        from babeldoc.format.pdf.document_il.backend.latex_bbox import (
+            capture_layout_sources,
+        )
+
+        try:
+            capture_layout_sources(docs, translation_config)
+        except Exception:
+            logger.warning(
+                "LaTeX bbox 版面源捕获失败，回退现有渲染路径", exc_info=True
+            )
+            translation_config.enable_latex_bbox_layout = False
+
     Typesetting(translation_config).typesetting_document(docs)
     logger.debug(f"finish typsetting from {temp_pdf_path}")
     if translation_config.debug:
