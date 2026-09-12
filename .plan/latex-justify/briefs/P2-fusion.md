@@ -23,6 +23,10 @@ Unicode→LaTeX 转写模块；`fragment` 级从源 PDF 裁区域嵌入。
   `span_text_mismatch=24`），fusion 用 IoU 就近取了 OCR LaTeX。
 - `{vN}` 成分统计：2026-f1872 281 个中 261 纯文本 / 15 简单符号 / 4 MinerU；
   DeepSeek 240：75/88/77；LawBench 132 全纯文本；带曲线 0。
+- **P1 后现状**：DeepSeek full 模式 attempted=144/applied=143，剩余 80 段全部
+  卡在 `formula-fusion-failed`（BabelDOC 启发式 `{vN}` 无 MinerU 源即整体失败）。
+  P1 验收已把「attempted ≥ 200」判为依赖本阶段的指标：P2 完成后 DeepSeek
+  attempted 应 ≈ 224（237 正文段 - 10 单行 - 3 未翻译）。
 - 回放 workdir（只读）：`/tmp/babeldoc-latex-acceptance/{2026-f1872,deepseek-v4,lawbench}/workdir`，
   各 `<paper>/agent/source/mineru/alignment.json` 可查 span_id/一致性。
 - 单测基线 308 passed / 7 既有失败不变；`test_provider_alignment` 不得变。
@@ -64,6 +68,11 @@ Unicode→LaTeX 转写模块；`fragment` 级从源 PDF 裁区域嵌入。
    `simple_math` 原文；`renderer.py` `_measure_fit` 改全文归一化比较
    （`fragment` 区域除外）；三篇 `text_diff=0`（用 P0 的
    `acceptance_latex.py` 度量）。
+7. **P2-7 验收口径修正**（收养 P1 审查 P2-5）：
+   `experiments/acceptance_latex.py` 的 `has_formula` 改为读 overlay 报告
+   的 `fuse_kinds`（而非 `layout_geometry.n_formula_chars`），并在 DONE
+   口径里显式区分公式段（`fragment`/`mineru` 类）与非公式段的 text_diff
+   判定。
 7. `tests/test_latex_bbox.py`（或新 `test_latex_fusion_alignment.py` 雏形）：
    四类分类单测；拒绝 span 文本不一致 / 混杂 layout_id / span 复用；
    一致时成功；裁片段 fixture（含曲线的最小 PDF）编译通过。
