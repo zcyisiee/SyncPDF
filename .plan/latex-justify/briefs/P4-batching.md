@@ -24,7 +24,21 @@ spike 结论（/tmp/latex-spike，必须遵守）：
 - 一期并发 = CPU 核数（18）。
 
 验收基线：DeepSeek 回放 200+ 段在 P3 后的 compile 秒数（decisions/
-报告 `compile` 字段）为对比基准。单测基线以合入后实际数字为准。
+报告 `compile` 字段）为对比基准（P3 实测：DeepSeek 350s CPU / wall、
+f1872 284s、lawbench 177s——单段编译是主要耗时，批编译目标 DeepSeek
+额外耗时 ≤ 30s，即接近消除编译开销）。单测基线 385 passed / 7 既有失败。
+
+P3 审查遗留（收养或跟踪）：
+- **DONE fill 口径已裁定**（主代理）：P5 验收用**校正口径**
+  （`lines_nonfinal_merged_*`，视觉行合并 + 首行缩进归一），基线口径
+  （`lines_nonfinal_*`）并列上报供向后对比。理由：P3 起首行缩进复刻源
+  排版与行内数学上下标会让基线口径系统性低估（deepseek 0.8875 vs
+  校正 0.9951），这不是排版缺陷而是度量口径滞后。
+- f1872 的 7 段 `text-mismatch`（xeCJK 字符类 + ToUnicode 码点映射，
+  实测 5 种字体组合无解）已裁定安全回退，应用率 95.3% 为 P5 起始基线，
+  若 P4 批编译不改善则接受（与 DONE ≥95% 的差距交 P5 台账）。
+- HZpip 0.069 / aG4M3 0.221（公式密集段 fill）：批编译状态机的行距
+  ±10% 与下扩重试可能部分改善；不改善则记录为已知限制。
 
 ## Deliverables
 
