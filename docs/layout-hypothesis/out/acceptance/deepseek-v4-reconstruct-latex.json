@@ -1,0 +1,115 @@
+{
+  "mono_pdf": "/tmp/babeldoc-latex-acceptance/deepseek-v4/out-latex/DeepSeek_V41_Tech_Report.no_watermark.zh.mono.pdf",
+  "dual_pdf": "/tmp/babeldoc-latex-acceptance/deepseek-v4/out-latex/DeepSeek_V41_Tech_Report.no_watermark.zh.dual.pdf",
+  "layout_geometry": "/tmp/babeldoc-latex-acceptance/deepseek-v4/workdir/agent/layout_geometry.json",
+  "layout_override_stats": {
+    "paragraphs_touched": 0,
+    "font_scaled": 0,
+    "box_changed": 0,
+    "clamped": 0,
+    "unmatched_ids": [],
+    "warnings": []
+  },
+  "layout_warnings": [],
+  "link_total": 410,
+  "link_remapped": 408,
+  "link_fallback_paragraph": 350,
+  "link_unresolved": [
+    {
+      "page": 15,
+      "link_index": 0,
+      "uri": null
+    },
+    {
+      "page": 15,
+      "link_index": 1,
+      "uri": null
+    }
+  ],
+  "link_uri_set_match": true,
+  "latex_bbox": {
+    "enabled": true,
+    "available": true,
+    "attempted": 29,
+    "applied": 28,
+    "fallback": 322,
+    "failed": 1,
+    "fallback_reasons": {
+      "no-body-lines": 91,
+      "box-too-small": 34,
+      "line-fill-ok": 116,
+      "formula-fusion-failed": 80,
+      "compile:s0:vertical-overflow;s1:vertical-overflow;s2:text-clipped-tail;s3:text-clipped-tail;s4:text-clipped-tail;s5:text-clipped-tail;s6:text-clipped-tail;s7:text-clipped-tail;s8:text-clipped-tail;s9:text-clipped-tail;s10:text-clipped-tail;s11:text-clipped-tail;s12:text-clipped-tail": 1,
+      "applied": 28
+    },
+    "applied_paragraphs": [
+      "B2Rrm",
+      "qiZgx",
+      "HZpip",
+      "rpN5L",
+      "RCLek",
+      "mebkh",
+      "4pUgY",
+      "XnFuA",
+      "jg9AB",
+      "XFQ55",
+      "KJwQv",
+      "DkVKZ",
+      "7pC6L",
+      "Gv6PJ",
+      "aG4M3",
+      "C5Q7b",
+      "qm3jg",
+      "RW2hv",
+      "w593f",
+      "CQT2k",
+      "xqSq5",
+      "4yk6T",
+      "ZrHYj",
+      "hBnns",
+      "B9LKd",
+      "QrdY3",
+      "GjFkg",
+      "Lk6ob"
+    ],
+    "pages_affected": [
+      3,
+      5,
+      8,
+      11,
+      14,
+      18,
+      19,
+      20,
+      22,
+      28,
+      32,
+      36,
+      48,
+      49
+    ],
+    "compile": {
+      "attempts": 49,
+      "seconds": 24.639,
+      "cache_hits": 0
+    },
+    "links": {
+      "before_total": 410,
+      "after_total": 410,
+      "restored": 8,
+      "uri_set_match": true
+    },
+    "reverted": false,
+    "error": null,
+    "capability": {
+      "available": true,
+      "xelatex_path": "/Library/TeX/texbin/xelatex",
+      "font_path": "/Users/zhengcaiyi/.cache/babeldoc/fonts/SourceHanSansCN-Regular.ttf",
+      "bold_font_path": "/Users/zhengcaiyi/.cache/babeldoc/fonts/SourceHanSansCN-Bold.ttf",
+      "missing_packages": [],
+      "reasons": [],
+      "pymupdf_ok": true
+    }
+  },
+  "latex_bbox_report": "/tmp/babeldoc-latex-acceptance/deepseek-v4/workdir/DeepSeek_V41_Tech_Report/latex_bbox_report.json"
+}
