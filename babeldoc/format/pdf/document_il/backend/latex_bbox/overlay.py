@@ -350,8 +350,9 @@ class LatexBboxOverlay:
                 for page_index in affected_pages
             }
             pre_uri_set = self._uri_set(pdf)
+            # 口径统一：before/after 都是全文档链接总数（含未受影响页）。
             self.stats["links"]["before_total"] = sum(
-                sum(counts.values()) for counts in pre_links.values()
+                len(page.get_links()) for page in pdf
             )
 
             applied, restored = self._stamp_pages(jobs, successful)

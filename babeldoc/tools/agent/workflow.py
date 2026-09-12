@@ -514,6 +514,9 @@ def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False, latex_b
 
     if latex_bbox:
         config.enable_latex_bbox_layout = True
+        # 公式融合需要 provider IR（extract 时落在 <workdir>/agent；
+        # _base_config 不设 provider_ir_dir，这里补齐，与 extract 保持一致）。
+        config.provider_ir_dir = agent_dir(workdir)
         from babeldoc.format.pdf.document_il.backend.latex_bbox import (
             capture_layout_sources,
         )
@@ -558,6 +561,11 @@ def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False, latex_b
         "link_unresolved": pdf_creater.link_stats.get("unresolved", []),
         "link_uri_set_match": pdf_creater.link_stats.get("uri_set_match"),
         "latex_bbox": pdf_creater.latex_bbox_stats,
+        "latex_bbox_report": (
+            str(Path(config.working_dir) / "latex_bbox_report.json")
+            if pdf_creater.latex_bbox_stats
+            else None
+        ),
     }
 
 
