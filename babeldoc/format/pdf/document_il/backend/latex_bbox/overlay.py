@@ -31,6 +31,7 @@ import tempfile
 import threading
 from collections import Counter
 from pathlib import Path
+from statistics import median
 
 import pymupdf
 
@@ -55,6 +56,7 @@ from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
 )
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import StampRequest
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import StampResult
+from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import derive_lead
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +81,19 @@ _BODY_LABELS = frozenset(
 _LATEX_BBOX_MODES = ("full", "repair")
 #: box 相交判定的容差（pt）：相邻段落 box 相接不算重叠。
 _BOX_TOUCH_TOLERANCE = 0.5
+#: 下扩时与下方障碍保留的最小净空（pt）：bbox 最多扩到 ``h + space_below − 2``。
+_EXPANSION_MARGIN = 2.0
+#: 触发「先安全下扩」的失败原因（尺寸不够，不是内容错误）。
+_EXPANSION_REASONS = (
+    "vertical-overflow",
+    "overfull-vbox",
+    "text-clipped",
+    "text-clipped-tail",
+)
+#: 段落主字体的默认 serif 取值（拿不到字体信息时按衬线处理）。
+_DEFAULT_SERIF = True
+#: 源页行合并容差（pt）：同一视觉行的多个 span 基线差。
+_ROW_MERGE_TOLERANCE = 3.0
 
 
 def _normalize_ws(text: str | None) -> str:
@@ -114,6 +129,8 @@ def capture_layout_sources(docs, config, source_texts: dict | None = None) -> di
     """
     if source_texts is None:
         source_texts = getattr(config, "latex_source_texts", None) or {}
+    source_geometry = getattr(config, "latex_source_geometry", None) or {}
+    primary_font_family = getattr(config, "primary_font_family", None)
     latex_index = FormulaLatexIndex.from_documents(docs, config)
     paragraphs: dict[str, dict] = {}
     bodies: dict[str, str] = {}
@@ -169,6 +186,13 @@ def capture_layout_sources(docs, config, source_texts: dict | None = None) -> di
                     for kind, _unit, _style in iter_composition_units(paragraph)
                 }
             )
+            meta["serif"] = _paragraph_serif(
+                paragraph, page_font_map, primary_font_family
+            )
+            geometry = source_geometry.get(paragraph.debug_id)
+            if geometry:
+                # 源行几何（P3-0）：缩进 / 行距 / 首行 ascent / 下方净空。
+                meta["source_geometry"] = geometry
             paragraphs[paragraph.debug_id] = meta
             fused = fuse_paragraph(
                 paragraph, page.page_number, page_font_map, latex_index
@@ -207,6 +231,87 @@ def capture_layout_sources(docs, config, source_texts: dict | None = None) -> di
     }
     config.latex_bbox_state = state
     return state
+
+
+def _paragraph_serif(paragraph, page_font_map: dict, primary_font_family) -> bool:
+    """段落主字体是否衬线（决定拉丁/中文用 Serif 还是 Sans 字体）。
+
+    ``primary_font_family`` 与产品的 FontMapper 同口径：serif → 衬线；
+    sans-serif / script → 非衬线；None → 看源段落主字体自身的 serif 标志。
+    """
+    family = (primary_font_family or "").strip().lower()
+    if family == "serif":
+        return True
+    if family in ("sans-serif", "script"):
+        return False
+    font_id = getattr(getattr(paragraph, "pdf_style", None), "font_id", None)
+    font = page_font_map.get(font_id) if font_id else None
+    serif = getattr(font, "serif", None)
+    return _DEFAULT_SERIF if serif is None else bool(serif)
+
+
+def measure_source_rows(page: pymupdf.Page, clip: pymupdf.Rect) -> list[dict]:
+    """量测 ``clip`` 区域内的源文本行（按 y 合并同一视觉行的多 span）。
+
+    prepare 在内容流生成之前调用，此时页面仍是**源文**：这里得到的行数/行距/
+    首行缩进就是源排版事实，比 IL 字符聚类稳定（字符聚类会把同一行按字高拆开，
+    导致 n_lines 偏大、pitch 偏小）。
+
+    返回按纵坐标升序的行：``{"y0"(顶), "y1"(底), "x0", "x1"}``。
+    """
+    rows: list[dict] = []
+    for block in page.get_text("dict", clip=clip)["blocks"]:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            spans = [span for span in line["spans"] if span["text"].strip()]
+            if not spans:
+                continue
+            rows.append(
+                {
+                    "center": sum(
+                        (span["bbox"][1] + span["bbox"][3]) / 2 for span in spans
+                    )
+                    / len(spans),
+                    "y0": min(span["bbox"][1] for span in spans),
+                    "y1": max(span["bbox"][3] for span in spans),
+                    "x0": min(span["bbox"][0] for span in spans),
+                    "x1": max(span["bbox"][2] for span in spans),
+                }
+            )
+    rows.sort(key=lambda row: row["center"])
+    merged: list[dict] = []
+    for row in rows:
+        if merged and abs(row["center"] - merged[-1]["center"]) <= _ROW_MERGE_TOLERANCE:
+            current = merged[-1]
+            current["y0"] = min(current["y0"], row["y0"])
+            current["y1"] = max(current["y1"], row["y1"])
+            current["x0"] = min(current["x0"], row["x0"])
+            current["x1"] = max(current["x1"], row["x1"])
+        else:
+            merged.append(dict(row))
+    return merged
+
+
+def _rows_geometry(rows: list[dict], rect: pymupdf.Rect) -> dict | None:
+    """源行 → {n_lines, baseline_pitch, first_line_dx, ascent_top}（页面坐标）。"""
+    if not rows:
+        return None
+    pitches = [
+        rows[index + 1]["center"] - rows[index]["center"]
+        for index in range(len(rows) - 1)
+    ]
+    pitches = [value for value in pitches if value > 0.5]
+    first = rows[0]
+    return {
+        "n_lines": len(rows),
+        "baseline_pitch": (
+            round(median(pitches), 3) if pitches else None
+        ),
+        "first_line_dx": round(first["x0"] - rect.x0, 3),
+        "ascent_top": round(max(0.0, first["y0"] - rect.y0), 3),
+        "source": "source-page-rows",
+    }
 
 
 def _source_pdf_path(config) -> Path | None:
@@ -459,6 +564,12 @@ class LatexBboxOverlay:
                 "font_scale": None,
                 "lead": None,
                 "attempts": None,
+                #: 安全下扩的额外高度（P3-5，0 表示未扩）。
+                "expanded_pt": 0.0,
+                #: 源行数（P3-0 几何；无几何时为 None）。
+                "n_lines_source": (meta.get("source_geometry") or {}).get("n_lines"),
+                #: 首行缩进（P3-0 几何，正=缩进、负=悬挂）。
+                "indent_pt": (meta.get("source_geometry") or {}).get("first_line_dx"),
             }
 
     def _decide(self, debug_id: str, reason: str | None = None, **fields) -> None:
@@ -633,19 +744,14 @@ class LatexBboxOverlay:
         )
         requests = [
             (
-                StampRequest(
-                    key=job["debug_id"],
-                    body=job["body"],
-                    width=job["width"],
-                    height=job["height"],
-                    font_size=job["font_size"],
-                    expected_text=self._plain_texts.get(job["debug_id"], ""),
-                ),
+                self._stamp_request(job),
                 Path(self._tmpdir.name),
             )
             for job in jobs
         ]
         stamps = renderer.render_many(requests)
+        # P3-5：垂直放不下的段落先安全下扩（不缩字）；扩后区域必须无他内容。
+        self._expand_vertical_failures(jobs, stamps, renderer, Path(self._tmpdir.name))
         self.stats["compile"] = {
             "attempts": sum(r.compile_attempts for r in stamps.values()),
             "seconds": round(renderer.compile_seconds, 3),
@@ -662,8 +768,13 @@ class LatexBboxOverlay:
                     font_scale=(
                         round(stamp.scale, 4) if stamp.scale is not None else None
                     ),
-                    lead=round(effective_size * DEFAULT_LEAD_RATIO, 3),
+                    lead=(
+                        round(stamp.lead, 3)
+                        if stamp.lead is not None
+                        else round(effective_size * DEFAULT_LEAD_RATIO, 3)
+                    ),
                     attempts=stamp.compile_attempts,
+                    expanded_pt=round(job.get("expanded_pt", 0.0), 3),
                 )
             else:
                 self._decide(
@@ -685,6 +796,127 @@ class LatexBboxOverlay:
         self._jobs = jobs
         self._compiled = successful
         self.stamped_ids = set(successful)
+
+    def _stamp_request(self, job: dict) -> StampRequest:
+        """由 job（含源行几何）构造编译请求。
+
+        几何优先级：源页面文本行（
+        :func:`measure_source_rows`）> capture 阶段的 IL 字符聚类。
+        """
+        meta = self._paragraphs.get(job["debug_id"]) or {}
+        geometry = job.get("row_geometry") or {}
+        if not geometry:
+            geometry = meta.get("source_geometry") or {}
+        font_size = job["font_size"]
+        lead = derive_lead(font_size, geometry.get("baseline_pitch"))
+        return StampRequest(
+            key=job["debug_id"],
+            body=job["body"],
+            width=job["width"],
+            height=job["height"],
+            font_size=font_size,
+            expected_text=self._plain_texts.get(job["debug_id"], ""),
+            lead=lead,
+            first_line_dx=float(geometry.get("first_line_dx") or 0.0),
+            ascent_top=(
+                float(geometry["ascent_top"])
+                if geometry.get("ascent_top") is not None
+                else None
+            ),
+            serif=bool(meta.get("serif", _DEFAULT_SERIF)),
+        )
+
+    def _expand_vertical_failures(
+        self,
+        jobs: list[dict],
+        stamps: dict,
+        renderer,
+        tmpdir: Path,
+    ) -> None:
+        """垂直放不下的段落：先安全下扩重试一轮（P3-5）。
+
+        只扩到 ``h + space_below − 2bp``；新增区域必须无文本/图形/图片（源页
+        内容），否则不扩（交给字号缩小）。扩后同步更新 job 的 rect/height。
+        """
+        if not jobs:
+            return
+        retry: list[tuple[StampRequest, Path]] = []
+        pending: dict[str, dict] = {}
+        for job in jobs:
+            stamp = stamps.get(job["debug_id"])
+            if stamp is None or (stamp.ok and stamp.pdf_path):
+                continue
+            if not any(reason in (stamp.reason or "") for reason in _EXPANSION_REASONS):
+                continue
+            meta = self._paragraphs.get(job["debug_id"]) or {}
+            geometry = meta.get("source_geometry") or {}
+            space_below = geometry.get("space_below_pt")
+            if not space_below:
+                continue
+            added = float(space_below) - _EXPANSION_MARGIN
+            if added <= 1.0:
+                continue
+            if not self._strip_is_clear(job["page"], job["rect"], added):
+                continue
+            request = self._stamp_request(job)
+            request.height = job["height"] + added
+            retry.append((request, tmpdir))
+            pending[job["debug_id"]] = {"job": job, "request": request, "added": added}
+        if not retry:
+            return
+        expanded = renderer.render_many(retry)
+        for debug_id, info in pending.items():
+            stamp = expanded.get(debug_id)
+            if stamp is None:
+                continue
+            job = info["job"]
+            job["attempts"] = int(job.get("attempts", 0)) + stamp.compile_attempts
+            if stamp.ok and stamp.pdf_path:
+                added = float(info["added"])
+                job["height"] = float(info["request"].height)
+                job["rect"] = pymupdf.Rect(
+                    job["rect"].x0,
+                    job["rect"].y0,
+                    job["rect"].x1,
+                    job["rect"].y1 + added,
+                )
+                job["expanded_pt"] = added
+                stamps[debug_id] = stamp
+
+    def _strip_is_clear(
+        self, page_index: int, rect: pymupdf.Rect, added: float
+    ) -> bool:
+        """下扩新增区域（原 box 底边之下 ``added`` pt）是否无他内容。"""
+        if added <= 0 or page_index >= len(self.pdf):
+            return False
+        page = self.pdf[page_index]
+        # 页面坐标 y 向下：box 下方 = rect.y1 再往下 added。
+        strip = pymupdf.Rect(rect.x0, rect.y1, rect.x1, rect.y1 + added - 0.5)
+        if strip.is_empty or strip.height <= 0.5:
+            return False
+        if strip.y1 > page.rect.y1:
+            return False
+        if page.get_text("words", clip=strip):
+            return False
+        try:
+            for drawing in page.get_drawings():
+                if pymupdf.Rect(drawing["rect"]).intersects(strip):
+                    return False
+        except Exception:  # noqa: BLE001 - 图形探测失败按不安全处理
+            logger.debug("下扩净空判定：get_drawings 失败", exc_info=True)
+            return False
+        try:
+            for info in page.get_image_info():
+                if pymupdf.Rect(info["bbox"]).intersects(strip):
+                    return False
+        except Exception:  # noqa: BLE001 - 图片探测失败按不安全处理
+            logger.debug("下扩净空判定：get_image_info 失败", exc_info=True)
+            return False
+        # 水印区域（prepare 时页面上尚无水印文本，需用 IL 水印段字符盒判定）。
+        for mark in self._watermark_rects(page_index):
+            if mark.intersects(strip):
+                return False
+        return True
 
     def _substitute_fragments(self, jobs: list[dict], tmpdir: Path) -> list[dict]:
         """把 body 里的片段占位符替换成源 PDF 裁出来的内联图片。
@@ -1123,6 +1355,17 @@ class LatexBboxOverlay:
 
             metrics = measure_line_fill(page, rect)
             self._decide(debug_id, fill_before=metrics["min_body_fill"])
+            # 源行几何（P3）：优先用源**页面文本行**（prepare 时页面仍是源文），
+            # 比 IL 字符聚类稳定；无文本行时用 capture 的 IL 几何兵底。
+            row_geometry = None
+            if full_mode:
+                row_geometry = _rows_geometry(measure_source_rows(page, rect), rect)
+                if row_geometry:
+                    self._decide(
+                        debug_id,
+                        n_lines_source=row_geometry["n_lines"],
+                        indent_pt=row_geometry["first_line_dx"],
+                    )
             watermark = metrics["watermark"]
             if not watermark and full_mode:
                 watermark = any(
@@ -1155,6 +1398,7 @@ class LatexBboxOverlay:
                     "height": height,
                     "font_size": font_size,
                     "body": body,
+                    "row_geometry": row_geometry,
                 }
             )
         return jobs, reasons

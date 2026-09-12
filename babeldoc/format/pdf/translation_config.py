@@ -502,6 +502,9 @@ class TranslationConfig:
         self.latex_bbox_mode = latex_bbox_mode
         # 翻译前记录的段落源文（debug_id → unicode），供 overlay 判定未翻译段。
         self.latex_source_texts: dict = {}
+        # 翻译前采集的源行几何（debug_id → n_lines/first_line_dx/baseline_pitch/
+        # ascent_top/line_boxes/space_below_pt），供 P3 缩进/行距/安全下扩使用。
+        self.latex_source_geometry: dict = {}
         # 源 PDF 路径（fragment 级公式从源区域裁图嵌入）：workflow 用
         # extract 落的输入副本，high_level 用 get_working_file_path("input.pdf")。
         self.latex_source_pdf_path: str | None = None

@@ -26,6 +26,7 @@ from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
     BboxStampRenderer,
 )
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import StampRequest
+from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import derive_lead
 
 # --------------------------------------------------------------------------- #
 # 共用 fixture
@@ -572,7 +573,12 @@ def test_build_tex_contains_required_directives():
     assert "\\usepackage{xeCJK}" in tex
     assert "\\XeTeXlinebreaklocale" in tex
     assert "PunctStyle=plain" in tex
-    assert pathlib.Path(_CAPABILITY.font_path).stem in tex
+    # 字体与产品一致：中文主字体仍是探测到的中文字体族（serif 默认）。
+    expected_cjk = _CAPABILITY.cjk_fonts(True) or {}
+    if expected_cjk:
+        assert pathlib.Path(expected_cjk["regular"]).stem in tex
+    else:
+        assert pathlib.Path(_CAPABILITY.font_path).stem in tex
     assert "\\fontsize{10.0000bp}{15.0000bp}" in tex
     assert "测试" in tex
 
@@ -580,8 +586,10 @@ def test_build_tex_contains_required_directives():
 def test_build_tex_includes_bold_font_when_available():
     renderer = BboxStampRenderer(_CAPABILITY)
     tex = renderer.build_tex("x", 100.0, 50.0, 10.0)
-    if _CAPABILITY.bold_font_path:
-        assert f"BoldFont={pathlib.Path(_CAPABILITY.bold_font_path).stem}" in tex
+    expected_cjk = _CAPABILITY.cjk_fonts(True) or {}
+    bold = expected_cjk.get("bold") or _CAPABILITY.bold_font_path
+    if bold:
+        assert f"BoldFont={pathlib.Path(bold).stem}" in tex
 
 
 def test_render_many_empty_returns_empty():
@@ -1967,3 +1975,378 @@ def test_overlay_link_gate_fail_regenerates_affected_pages(tmp_path, monkeypatch
     assert _read_links(result_pdf) == before_links
     # 回滚后 fallback_reasons 不再残留 applied 计数
     assert stats["fallback_reasons"].get("applied", 0) == 0
+
+
+# --------------------------------------------------------------------------- #
+# P3：源行几何 → 请求（缩进/行距/serif）与安全下扩
+# --------------------------------------------------------------------------- #
+def _geometry_meta(box, *, n_lines=3, dx=6.0, pitch=12.0, ascent=0.5, below=40.0):
+    return {
+        "page": 0,
+        "box": list(box),
+        "n_lines": n_lines,
+        "first_line_dx": dx,
+        "baseline_pitch": pitch,
+        "ascent_top": ascent,
+        "line_boxes": [],
+        "space_below_pt": below,
+    }
+
+
+def _geometry_fixture(tmp_path, *, below=40.0):
+    """带源行几何的 overlay fixture：段落失败一次后（扩后）成功。"""
+    box = [30.0, 300.0 - 110.0, 300.0, 300.0 - 50.0]
+    paragraph = _translated_paragraph(
+        "P01-001",
+        "这是一段较长的中文译文用于替换原有英文段落内容。",
+        il_version_1.Box(*box),
+    )
+    docs = _il_doc([_il_page(0, [paragraph], width=400, height=300)])
+    state = {
+        "paragraphs": {
+            "P01-001": {
+                "page": 0,
+                "box": box,
+                "font_size": 9.0,
+                "layout_label": "text",
+                "has_formula": False,
+                "serif": True,
+                "source_geometry": _geometry_meta(box, below=below),
+            }
+        },
+        "bodies": {"P01-001": "这是一段较长的中文译文用于替换原有英文段落内容。"},
+        "plain_texts": {"P01-001": "这是一段较长的中文译文用于替换原有英文段落内容。"},
+        "fusion_failures": {},
+        "provider_inline_spans": 0,
+    }
+    config = _FakeConfig(latex_bbox_state=state, working_dir=tmp_path)
+    source = _pdf_with_text(
+        tmp_path,
+        [(30, 70, "Original paragraph line one", 9), (30, 90, "second line here", 9)],
+        width=400,
+        height=300,
+    )
+    pdf = pymupdf.open(source)
+    return pdf, docs, config
+
+
+def test_stamp_request_uses_source_geometry(tmp_path):
+    """请求按源几何带 缩进/行距/serif：lead=clamp(pitch)、parindent=dx。"""
+    pdf, docs, config = _geometry_fixture(tmp_path)
+    overlay = overlay_mod.LatexBboxOverlay(pdf, docs, config)
+    overlay._load_state()
+    job = {
+        "debug_id": "P01-001",
+        "page": 0,
+        "rect": pymupdf.Rect(30, 50, 300, 110),
+        "width": 270.0,
+        "height": 60.0,
+        "font_size": 9.0,
+        "body": "x",
+    }
+
+    request = overlay._stamp_request(job)
+
+    assert request.lead == pytest.approx(12.0)
+    assert request.first_line_dx == pytest.approx(6.0)
+    assert request.ascent_top == pytest.approx(0.5)
+    assert request.serif is True
+    assert request.indentation == (6.0, 0.0)
+
+
+def test_stamp_request_without_geometry_keeps_defaults(tmp_path):
+    """无源几何（旧产物）：lead 用默认系数、不设 topskip、缩进为 0。"""
+    pdf, docs, config = _geometry_fixture(tmp_path)
+    config.latex_bbox_state["paragraphs"]["P01-001"].pop("source_geometry")
+    overlay = overlay_mod.LatexBboxOverlay(pdf, docs, config)
+    overlay._load_state()
+    job = {
+        "debug_id": "P01-001",
+        "page": 0,
+        "rect": pymupdf.Rect(30, 50, 300, 110),
+        "width": 270.0,
+        "height": 60.0,
+        "font_size": 9.0,
+        "body": "x",
+    }
+
+    request = overlay._stamp_request(job)
+
+    assert request.lead == pytest.approx(13.5)
+    assert request.ascent_top is None
+    assert request.first_line_dx == 0.0
+
+
+def test_prepare_expands_box_when_below_is_free(tmp_path, monkeypatch):
+    """垂直放不下 + 下方无内容：先安全下扩（不缩字），rect/height 同步。"""
+    pdf, docs, config = _geometry_fixture(tmp_path, below=40.0)
+    seen: list[tuple[str, float]] = []
+
+    def fake_render_many(self, requests):  # noqa: ARG001
+        results = {}
+        for request, _workdir in requests:
+            seen.append((request.key, request.height))
+            first = request.height < 61.0
+            results[request.key] = renderer_mod.StampResult(
+                key=request.key,
+                ok=not first,
+                pdf_path=None if first else _stamp_pdf,
+                font_size=9.0,
+                scale=1.0,
+                lead=request.lead,
+                compile_attempts=1,
+                reason="s0:vertical-overflow" if first else "ok",
+            )
+        return results
+
+    stamp_dir = tmp_path / "stamps"
+    stamp_dir.mkdir(exist_ok=True)
+    _stamp_pdf = _make_stamp_pdf(stamp_dir / "stamp.pdf", 270.0, 98.0)
+    monkeypatch.setattr(BboxStampRenderer, "render_many", fake_render_many)
+
+    overlay = overlay_mod.LatexBboxOverlay(pdf, docs, config)
+    overlay.prepare()
+
+    # 先按原高 60 试一次，再按下扩后的高度重试。
+    assert [height for _key, height in seen] == [60.0, 98.0]
+    job = overlay._jobs[0]
+    assert job["height"] == pytest.approx(98.0)
+    assert job["rect"].y1 == pytest.approx(148.0)  # 110 + 38
+    assert job["expanded_pt"] == pytest.approx(38.0)  # 40 - 2（保留净空）
+    assert overlay.stamped_ids == {"P01-001"}
+
+
+def test_prepare_does_not_expand_when_below_has_text(tmp_path, monkeypatch):
+    """下扩新增区域有文本（他人内容）时不扩，保持失败回退。"""
+    pdf, docs, config = _geometry_fixture(tmp_path, below=40.0)
+    # 源页在 box 下方再放一行文本 → 扩后区域不干净。
+    page = pdf[0]
+    page.insert_text((30, 130), "below content stays", fontsize=9)
+    seen: list[float] = []
+
+    def fake_render_many(self, requests):  # noqa: ARG001
+        results = {}
+        for request, _workdir in requests:
+            seen.append(request.height)
+            results[request.key] = renderer_mod.StampResult(
+                key=request.key,
+                ok=False,
+                reason="s0:vertical-overflow",
+                compile_attempts=1,
+            )
+        return results
+
+    monkeypatch.setattr(BboxStampRenderer, "render_many", fake_render_many)
+
+    overlay = overlay_mod.LatexBboxOverlay(pdf, docs, config)
+    overlay.prepare()
+
+    assert seen == [60.0]
+    assert overlay.stamped_ids == set()
+    assert overlay._decisions["P01-001"]["reason"].startswith("compile:")
+
+
+def test_prepare_without_space_below_skips_expansion(tmp_path, monkeypatch):
+    """无源几何净空（旧产物）时不做下扩。"""
+    pdf, docs, config = _geometry_fixture(tmp_path)
+    config.latex_bbox_state["paragraphs"]["P01-001"]["source_geometry"].pop(
+        "space_below_pt"
+    )
+    heights: list[float] = []
+
+    def fake_render_many(_self, requests):
+        for request, _workdir in requests:
+            heights.append(request.height)
+        return {
+            request.key: renderer_mod.StampResult(
+                key=request.key,
+                ok=False,
+                reason="s0:vertical-overflow",
+                compile_attempts=1,
+            )
+            for request, _workdir in requests
+        }
+
+    monkeypatch.setattr(BboxStampRenderer, "render_many", fake_render_many)
+
+    overlay = overlay_mod.LatexBboxOverlay(pdf, docs, config)
+    overlay.prepare()
+
+    assert heights == [60.0]
+
+
+def test_decisions_record_lead_and_expansion(tmp_path, monkeypatch):
+    """decisions 记录真实 lead（来自 renderer）与下扩高度。"""
+    pdf, docs, config = _geometry_fixture(tmp_path, below=40.0)
+    stamp_path = _make_stamp_pdf(tmp_path / "stamp.pdf", 270.0, 98.0)
+
+    def fake_render_many(self, requests):  # noqa: ARG001
+        results = {}
+        for request, _workdir in requests:
+            expanded = request.height > 61.0
+            results[request.key] = renderer_mod.StampResult(
+                key=request.key,
+                ok=expanded,
+                pdf_path=stamp_path if expanded else None,
+                font_size=9.0,
+                scale=1.0,
+                lead=request.lead,
+                compile_attempts=1,
+                reason="ok" if expanded else "s0:vertical-overflow",
+            )
+        return results
+
+    monkeypatch.setattr(BboxStampRenderer, "render_many", fake_render_many)
+
+    _result_pdf, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
+
+    row = next(r for r in stats["decisions"] if r["debug_id"] == "P01-001")
+    assert row["reason"] == "applied"
+    # lead 取源**页面行**距（fixture 源页两行、行距 20bp），覆盖 IL 几何兜底。
+    assert row["lead"] == pytest.approx(derive_lead(9.0, 20.0))
+    assert row["expanded_pt"] == pytest.approx(38.0)
+    assert row["n_lines_source"] == 2
+
+
+def test_capture_merges_source_geometry_and_serif():
+    """capture 把源行几何与 serif 标志写进段落 meta。"""
+    paragraph = _translated_paragraph(
+        "P01-001", "译文文本", il_version_1.Box(30, 60, 200, 90)
+    )
+    docs = _il_doc([_il_page(0, [paragraph], width=400, height=300)])
+    geometry = {"P01-001": _geometry_meta([30.0, 60.0, 200.0, 90.0])}
+    config = _FakeConfig(latex_bbox_state={})
+    config.latex_source_geometry = geometry
+    config.primary_font_family = "serif"
+
+    state = overlay_mod.capture_layout_sources(docs, config)
+
+    meta = state["paragraphs"]["P01-001"]
+    assert meta["source_geometry"]["baseline_pitch"] == 12.0
+    assert meta["serif"] is True
+
+
+def test_paragraph_serif_follows_primary_font_family():
+    from babeldoc.format.pdf.document_il.backend.latex_bbox.fusion import _style_flags
+
+    _ = _style_flags  # 保持 import 与模块一致（同一模块风格）
+    paragraph = _translated_paragraph(
+        "P01-001", "译文", il_version_1.Box(30, 60, 200, 90)
+    )
+    serif_font = type("F", (), {"serif": True, "font_id": "F1"})()
+    sans_font = type("F", (), {"serif": False, "font_id": "F1"})()
+
+    assert (
+        overlay_mod._paragraph_serif(paragraph, {"F1": sans_font}, "serif") is True
+    )
+    assert (
+        overlay_mod._paragraph_serif(paragraph, {"F1": serif_font}, "sans-serif")
+        is False
+    )
+    assert overlay_mod._paragraph_serif(paragraph, {"F1": serif_font}, None) is True
+    assert overlay_mod._paragraph_serif(paragraph, {"F1": sans_font}, None) is False
+    assert overlay_mod._paragraph_serif(paragraph, {}, None) is True
+
+
+def test_measure_source_rows_groups_spans_and_derives_geometry(tmp_path):
+    """源页面文本行 → n_lines/pitch/首行缩进（prepare 时页面仍是源文）。"""
+    path = _pdf_with_text(
+        tmp_path,
+        [(88, 70, "第一行文本", 9), (70, 90, "第二行文本", 9), (70, 110, "第三行文本", 9)],
+        width=400,
+        height=300,
+    )
+    doc = pymupdf.open(path)
+    rect = pymupdf.Rect(70, 50, 300, 130)
+
+    rows = overlay_mod.measure_source_rows(doc[0], rect)
+    geometry = overlay_mod._rows_geometry(rows, rect)
+
+    assert len(rows) == 3
+    assert geometry["n_lines"] == 3
+    assert geometry["baseline_pitch"] == pytest.approx(20.0, abs=0.5)
+    assert geometry["first_line_dx"] == pytest.approx(18.0, abs=0.5)
+    assert geometry["ascent_top"] >= 0.0
+    assert geometry["source"] == "source-page-rows"
+
+
+def test_prepare_uses_source_page_rows_for_lead_and_indent(tmp_path, monkeypatch):
+    """full 模式：决策的 n_lines_source/indent_pt 与请求 lead 取自源页面行。"""
+    box = [70.0, 170.0, 330.0, 250.0]  # IL 坐标（页高 300）
+    paragraph = _translated_paragraph(
+        "P01-001", "这是一段译文。", il_version_1.Box(*box)
+    )
+    docs = _il_doc([_il_page(0, [paragraph], width=400, height=300)])
+    state = {
+        "paragraphs": {
+            "P01-001": {
+                "page": 0,
+                "box": box,
+                "font_size": 9.0,
+                "layout_label": "text",
+                "has_formula": False,
+                "serif": True,
+            }
+        },
+        "bodies": {"P01-001": "这是一段译文。"},
+        "plain_texts": {"P01-001": "这是一段译文。"},
+        "fusion_failures": {},
+        "provider_inline_spans": 0,
+    }
+    config = _FakeConfig(latex_bbox_state=state, working_dir=tmp_path)
+    source = _pdf_with_text(
+        tmp_path,
+        [
+            (88, 70, "first source row", 9),
+            (70, 90, "second source row", 9),
+            (70, 110, "third source row", 9),
+        ],
+        width=400,
+        height=300,
+    )
+    pdf = pymupdf.open(source)
+    seen: list = []
+
+    def fake_render_many(_self, requests):
+        for request, _workdir in requests:
+            seen.append(request)
+        return {
+            request.key: renderer_mod.StampResult(
+                key=request.key,
+                ok=False,
+                reason="s0:text-mismatch",
+                compile_attempts=1,
+            )
+            for request, _workdir in requests
+        }
+
+    monkeypatch.setattr(BboxStampRenderer, "render_many", fake_render_many)
+
+    overlay = overlay_mod.LatexBboxOverlay(pdf, docs, config)
+    overlay.prepare()
+
+    assert seen, "应有候选段进入编译"
+    request = seen[0]
+    # 首行缩进 18bp（88 - 70）、源行距 20bp。
+    assert request.first_line_dx == pytest.approx(18.0, abs=0.5)
+    assert request.lead == pytest.approx(derive_lead(9.0, 20.0))
+    row = overlay._decisions["P01-001"]
+    assert row["n_lines_source"] == 3
+    assert row["indent_pt"] == pytest.approx(18.0, abs=0.5)
+
+
+def test_expand_does_not_overlap_watermark(tmp_path, monkeypatch):
+    """下扩区域落在水印字符盒内时不得扩（prepare 时页面尚无水印文本）。"""
+    pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
+    overlay = overlay_mod.LatexBboxOverlay(pdf, docs, config)
+    overlay.prepare()
+    page = 0
+    mark = pymupdf.Rect(30, 100, 300, 130)  # box 底边之下的水印区
+    monkeypatch.setattr(overlay, "_watermark_rects", lambda _p: [mark])
+    job = overlay_mod.LatexBboxOverlay._StampJob = type(
+        "_Job", (), {"page": page, "rect": pymupdf.Rect(30, 50, 300, 100), "height": 50.0}
+    )
+    assert overlay._strip_is_clear(page, pymupdf.Rect(30, 50, 300, 100), 40.0) is False
+    # 水印在远处时应允许扩
+    monkeypatch.setattr(overlay, "_watermark_rects", lambda _p: [pymupdf.Rect(30, 200, 300, 230)])
+    assert overlay._strip_is_clear(page, pymupdf.Rect(30, 50, 300, 100), 40.0) is True
