@@ -65,3 +65,6 @@ Repository reality takes precedence over stale assumptions in a brief. Adapt min
 ### Acceptance
 
 A worker report or successful process exit is not proof of correctness. The orchestrator must inspect the resulting diff and relevant validation before accepting the task.
+
+## 本项目的要求
+运行翻译测试的结果需要保留在当前路径的tmp/文件夹下。tmp 文件夹应该加入.gitignore

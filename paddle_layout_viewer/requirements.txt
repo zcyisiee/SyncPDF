@@ -1,0 +1,14 @@
+# Runtime dependencies for the PP-DocLayoutV3 layout viewer.
+# Everything here is already available in the project's conda env; nothing is
+# pip-installed by the scripts themselves.
+#
+# Deliberately NOT required: paddlepaddle / paddleocr / paddlex. The official
+# ONNX export plus onnxruntime's CoreML provider covers the whole job and keeps
+# the Apple Silicon GPU path available.
+
+numpy>=1.24
+onnx>=1.16            # graph surgery in prepare_model.py (onnx.utils.extract_model)
+onnxruntime>=1.20     # CoreML execution provider (mlprogram) needs >= 1.17
+opencv-python>=4.9    # only for the 800x800 INTER_CUBIC resize that PaddleX uses
+PyMuPDF>=1.24         # PDF rasterisation + drawing the annotated PDF
+Pillow>=10            # WebP encoding of the page images
