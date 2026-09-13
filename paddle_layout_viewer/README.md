@@ -17,6 +17,7 @@ paddle_layout_viewer/
 ```
 
 产物默认写在仓库的 `tmp/paddle-layout/<pdf文件名>/` 下（`tmp/` 已在 `.gitignore`）。
+同一个输出根目录下的多份文档可以在一个前端里切换查看。
 
 ---
 
@@ -30,8 +31,13 @@ python3 scripts/prepare_model.py --check
 
 # 2. 跑一遍 PDF
 python3 scripts/run_layout.py --pdf ../2512.08296v3.pdf
+python3 scripts/run_layout.py --pdf ../DeepSeek_V41_Tech_Report.pdf
 
 # 3. 打开查看器（会自动开浏览器）
+#    指向【目录】就能在一个前端里切换所有文档：
+python3 scripts/serve.py --data ../tmp/paddle-layout
+
+#    也可以只指向单个文档：
 python3 scripts/serve.py --data ../tmp/paddle-layout/2512.08296v3
 ```
 
@@ -46,33 +52,107 @@ python3 scripts/run_layout.py --pdf X.pdf \
     --no-annotate           # 跳过 boxes_overlay.pdf
 ```
 
-在 `2512.08296v3.pdf`（44 页，A4）上的实测结果：
+在 `2512.08296v3.pdf`（44 页）与 `DeepSeek_V41_Tech_Report.pdf`（51 页）上的实测结果：
 
-| 指标 | 数值 |
-|---|---|
-| 检测耗时 | **4.8 s / 44 页（94 ms 每页中位数）** |
-| 整个流程（含渲染、WebP、标注 PDF、模型加载） | 8.1 s |
-| 检出框 | 644 个，19 个类别 |
-| 设备 | `coreml/CPUAndGPU`（GPU 自检 Δ=2.7e-06） |
+| | 2512.08296v3 | DeepSeek_V41 |
+|---|---|---|
+| 页数 | 44 | 51 |
+| 检测耗时 | **4.6 s（95 ms/页）** | **6.0 s（99 ms/页）** |
+| 检出框 | 644（19 类） | 624（19 类） |
+| 设备 | `coreml/CPUAndGPU` | `coreml/CPUAndGPU` |
+
+---
+
+## 一个前端看多份文档
+
+`serve.py --data` 指向**目录**时（目录下每个子文件夹各含一份 `layout.json`），
+服务器会实时扫描并生成 `/data/index.json`，前端顶部就出现文档切换标签：
+
+```
+[ 2512.08296v3.pdf 44p ] [ DeepSeek_V41_Tech_Report.pdf 51p ]
+```
+
+- 选中状态存在 `localStorage`，下次打开还是上次那份。
+- URL 带 hash，可以直接深链到具体文档和页码：
+  `http://127.0.0.1:8770/#doc=DeepSeek_V41_Tech_Report&page=20`
+- 切换文档会整体重建页面/覆盖层/图例，**阈值、框外扩、透明度等显示设置会保留**。
+- 只有一份文档时标签栏自动隐藏，行为和以前完全一致。
+- index.json 每次请求重新扫描，重跑 `run_layout.py` 后刷新页面即可，不用重启服务器。
+- `/data/` 下的路径做了越界校验，`../` 出不去。
+
+`data/index.json` 形如：
+
+```json
+{ "multi": true, "docs": [
+  { "id": "2512.08296v3", "name": "2512.08296v3.pdf", "base": "data/2512.08296v3/",
+    "pages": 44, "boxes": 644, "ms_per_page": 95.0, "device": "coreml/CPUAndGPU" }
+] }
+```
+前端只依赖 `base` 拼接 `layout.json` / `pages/*.webp` / `boxes_overlay.pdf`，
+所以把产物放到任何静态服务器上都能直接用。
 
 ---
 
 ## 前端
 
+- **多文档切换**：`--data` 指向输出根目录时，顶部出现文档标签（见上一节）。
 - **连续滚动浏览**，页面图懒加载；bbox 覆盖层只对当前可视页构建，滚远了就销毁，
-  44 页文档在 DOM 里始终只有两三个覆盖层。
+  51 页文档在 DOM 里始终只有两三个覆盖层。
 - **鼠标悬停**：框从浅色变深色（填充 `0.07` → `0.28` 透明度，描边 `1px/62%` → `2px/100%`），
   同时**弱化其它框**（降到 38%），并在光标旁浮出信息条：
   类别、score、阅读顺序、框尺寸。
 - **框与文字不重叠**：描边用 `outline` + **正 `outline-offset`**（默认 2px，可调 0–8px）
   画在文字 bbox **外面**的空白处，永远不压在字形上；填充用
   `mix-blend-mode: multiply`，深色字形乘完仍是深色，所以被框住的文字照样清晰可读。
-- **类别图例**：右下角浮层，点击类别名即可隐藏/显示该类别，带颜色与计数。
-  平时半透明（0.6），鼠标移上去才变实，可用 ▾ 收起。
+- **类别图例**：右下角浮层，同时显示**中文名 + 英文名 + 计数**（`目录 content 2`），
+  点击即可隐藏/显示该类别。平时半透明（0.6），鼠标移上去才变实，可用 ▾ 收起。
+- 悬停信息条同样中英并列：`目录 content | score 0.972 · 阅读序 #2 · 926×1262 px`；
+  “常显标签”开关打出的标签也用中文名。
 - 底部工具条：置信度阈值、框外扩距离、填充/悬停透明度、
   阅读顺序徽标、常显标签、隐藏整页大框、下载带框 PDF。
 
 快捷键：`←/→`、`PageUp/PageDown` 翻页；`+/-` 缩放；`o` 阅读顺序；`l` 常显标签。
+
+---
+
+## 类别说明（25 类）
+
+官方类别名有几个用英文看很容易误读，最坑的就是 **`content` = 目录（Table of Contents）**，
+**不是**“正文内容”（正文是 `text`）。所以一份报告的目录页被识别成 `content` 是**正确**的，
+不是模型错。前端图例和悬停信息条现在都同时显示中文名，就是为了避免这个歧义。
+
+| 英文名 | 中文含义 | | 英文名 | 中文含义 |
+|---|---|---|---|---|
+| `abstract` | 摘要 | | `header` | 页眉 |
+| `algorithm` | 算法 | | `header_image` | 页眉图像 |
+| `aside_text` | 侧栏文本 | | `image` | 图像 |
+| `chart` | 图表 | | `inline_formula` | 行内公式 |
+| **`content`** | **目录** | | `number` | 页码 |
+| `display_formula` | 行间公式 | | `paragraph_title` | 段落标题 |
+| `doc_title` | 文档标题 | | `reference` | 参考文献 |
+| `figure_title` | 图表标题 | | `reference_content` | 参考文献内容 |
+| `footer` | 页脚 | | `seal` | 印章 |
+| `footer_image` | 页脚图像 | | `table` | 表格 |
+| `footnote` | 脚注 | | `text` | 文本（正文） |
+| `formula_number` | 公式编号 | | `vertical_text` | 竖版文字 |
+| | | | `vision_footnote` | 图注 |
+
+配色按**语义分组**（同类共享色系），`content`（目录）单独用中性石板灰 `#475569`：
+它是导航元素而非正文，必须和正文的蓝色、页眉页脚的玫红都区分开。
+
+| 分组 | 颜色系 | 成员 |
+|---|---|---|
+| 正文类 | 蓝 | `text` `vertical_text` `aside_text` `abstract` `footnote` `vision_footnote` |
+| 标题类 | 紫 | `doc_title` `paragraph_title` `figure_title` |
+| 目录 | 石板灰 | `content` |
+| 页眉页脚页码 | 玫红 | `header` `footer` `number` |
+| 参考文献 | 靖蓝 | `reference` `reference_content` |
+| 图表媒体 | 绿/青绿 | `image` `chart` `table` `header_image` `footer_image` `seal` |
+| 公式与算法 | 橙/棕 | `display_formula` `inline_formula` `formula_number` `algorithm` |
+
+实测：`DeepSeek_V41_Tech_Report.pdf` 第 2/3 页（就是目录页）被正确识别为 `content`
+（score 0.972 / 0.974），`Contents` 标题是 `paragraph_title`，页码是 `number`；
+而 `2512.08296v3.pdf`（无目录页的 arXiv 论文）检出 0 个 `content`，也是一致的。
 
 ---
 
@@ -109,6 +189,10 @@ python3 scripts/run_layout.py --pdf X.pdf \
 | `CoreML / MLProgram / ALL`（含 ANE） | ~99 ms | ANE 反而更慢 |
 | `CoreML / MLProgram / CPUOnly` | ~302 ms | 证明前两行确实是 GPU 在算 |
 | `CoreML` 默认选项 / `NeuralNetwork` 格式 | — | **数值错误**（Δ≈1400 px），已排除 |
+
+> 绝对数字是**空载机器**上测的；机器有负载时两边都会变慢（实测 load≈11.7 时
+> CPU 609 ms / GPU 158 ms）。真正稳定的是**倍率 3.2–3.8×**——而且 CPU 被争抢时
+> GPU 的优势反而更大（3.84×）。
 
 做了这几件事才拿到这个速度：
 

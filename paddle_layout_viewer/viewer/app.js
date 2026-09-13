@@ -1,22 +1,25 @@
-/* PP-DocLayoutV3 bbox viewer
+/* PP-DocLayoutV3 bbox viewer  (multi-document)
    ------------------------------------------------------------------
-   Loads layout.json, renders each PDF page as an image and paints the detected
-   bboxes as absolutely-positioned elements on top. Overlays are built lazily and
-   torn down once their page leaves the viewport, so a 44-page document keeps
-   only a couple of overlays in the DOM at any moment.
+   Reads data/index.json for the list of processed PDFs, shows a picker when
+   there is more than one, and renders the selected document: each page as an
+   image with the detected bboxes painted on top as absolutely-positioned
+   elements. Overlays are built lazily and torn down once their page leaves the
+   viewport, so a 50-page document keeps only a couple of overlays in the DOM.
 
-   Styling knobs that must stay inherited (not set per element, or the :hover
+   Styling knobs that must stay inherited (never set per element, or the :hover
    rule loses the specificity fight): --pad, --fill-a, --hover-fill-a,
-   --line-a, --line-w. They all live on :root; each box only carries --c-rgb.
+   --line-a, --line-w. They live on :root; each box only carries --c-rgb.
    ------------------------------------------------------------------ */
 
 'use strict';
 
-const DATA_BASE = 'data/';
 const BASE_WIDTH = 900;          // page width in px at 100% zoom
 const LARGE_AREA_RATIO = 0.6;    // "整页大框" area threshold
 
 const state = {
+  docs: [],
+  docId: null,
+  base: 'data/',
   zoom: 1,
   fit: true,
   threshold: 0.5,
@@ -29,13 +32,16 @@ const state = {
   total: 0,
 };
 
-let doc = null;
-const pageViews = [];
-const byIndex = new Map();
+let doc = null;                  // current layout.json payload
+let pageViews = [];
+let byIndex = new Map();
+let liveObserver = null;
+let currentObserver = null;
 
 const $ = (id) => document.getElementById(id);
 const scroller = $('scroller');
 const pagesEl = $('pages');
+const statusEl = $('status');
 const chip = $('hoverChip');
 
 /* ------------------------------------------------------------------ utils */
@@ -55,7 +61,11 @@ function hexToRgb(hex) {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-const colorOf = (label) => (doc && doc.palette && doc.palette[label]) || '#475569';
+const colorOf = (label) => (doc && doc.palette && doc.palette[label]) || '#111827';
+
+/* Official Chinese meaning (``content`` = 目录, not 正文内容). The English label alone is
+   misleading, so the legend and the hover chip always show both. */
+const zhOf = (label) => (doc && doc.labels_zh && doc.labels_zh[label]) || '';
 
 function isVisible(box, page) {
   if (state.hidden.has(box.label)) return false;
@@ -67,13 +77,66 @@ function isVisible(box, page) {
   return true;
 }
 
-/* ------------------------------------------------------------------ page scaffolding */
+function setStatus(kind, html) {
+  statusEl.hidden = kind === 'none';
+  statusEl.className = kind === 'error' ? 'error' : 'loading';
+  if (html !== undefined) statusEl.innerHTML = html;
+}
+
+/* ------------------------------------------------------------------ document picker */
+function renderDocTabs() {
+  const tabs = $('docTabs');
+  const total = state.docs.length;
+  const multi = state.docs.some((d) => d.id !== '') && total > 1;
+  tabs.hidden = !multi;
+  if (!multi) {
+    tabs.replaceChildren();
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  for (const d of state.docs) {
+    const btn = document.createElement('button');
+    btn.className = 'doc-tab' + (d.id === state.docId ? ' active' : '');
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('aria-selected', String(d.id === state.docId));
+    btn.title = `${d.name} — ${d.pages} 页 / ${d.boxes} 框`
+      + (d.device ? ` · ${d.device}` : '');
+    const nm = document.createElement('span');
+    nm.className = 'doc-name';
+    nm.textContent = d.name;
+    btn.append(nm);
+    if (d.pages) {
+      const n = document.createElement('span');
+      n.className = 'doc-n';
+      n.textContent = `${d.pages}p`;
+      btn.append(n);
+    }
+    btn.onclick = () => { if (d.id !== state.docId) loadDoc(d.id); };
+    frag.append(btn);
+  }
+  tabs.replaceChildren(frag);
+}
+
+/* ------------------------------------------------------------------ teardown / load */
+function teardown() {
+  if (liveObserver) liveObserver.disconnect();
+  if (currentObserver) currentObserver.disconnect();
+  liveObserver = currentObserver = null;
+  pagesEl.replaceChildren();
+  pageViews = [];
+  byIndex.clear();
+  chip.hidden = true;
+  chip.removeAttribute('style');
+  doc = null;
+}
+
 function buildPages() {
   const frag = document.createDocumentFragment();
   doc.pages.forEach((entry, idx) => {
     const root = document.createElement('section');
     root.className = 'page';
     root.id = `page-${entry.page}`;
+    root.dataset.idx = String(idx);      // read by the IntersectionObserver callbacks
 
     const tag = document.createElement('div');
     tag.className = 'page-tag';
@@ -82,21 +145,21 @@ function buildPages() {
     const img = document.createElement('img');
     img.loading = 'lazy';
     img.decoding = 'async';
-    img.alt = `第 ${entry.page} 页`;
-    img.src = DATA_BASE + entry.image;
+    img.alt = `${state.docs.find((d) => d.id === state.docId)?.name || ''} 第 ${entry.page} 页`;
+    img.src = state.base + entry.image;
     img.style.aspectRatio = `${entry.width} / ${entry.height}`;
 
     const overlay = document.createElement('div');
     overlay.className = 'overlay';
+    overlay.dataset.idx = String(idx);
 
     root.append(tag, img, overlay);
     frag.append(root);
 
-    const view = { idx, entry, root, overlay, built: false };
-    pageViews.push(view);
+    pageViews.push({ idx, entry, root, overlay, built: false });
     byIndex.set(entry.index, idx);
   });
-  pagesEl.append(frag);
+  pagesEl.replaceChildren(frag);
 }
 
 /* ------------------------------------------------------------------ overlays */
@@ -120,7 +183,7 @@ function buildOverlay(view) {
     if (state.showLabels) {
       const t = document.createElement('span');
       t.className = 'tag';
-      t.textContent = b.label;
+      t.textContent = zhOf(b.label) || b.label;
       el.append(t);
     }
     if (state.showOrder) {
@@ -155,6 +218,33 @@ function refreshOverlays() {
 }
 const refreshOverlaysSoon = debounceRAF(refreshOverlays);
 
+function observeAll() {
+  liveObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      const view = pageViews[Number(e.target.dataset.idx)];
+      if (!view) continue;
+      if (e.isIntersecting) buildOverlay(view);
+      else teardownOverlay(view);
+    }
+  }, { root: scroller, rootMargin: '120% 0px 120% 0px' });
+
+  currentObserver = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      const idx = Number(e.target.dataset.idx);
+      if (e.isIntersecting && pageViews[idx]) setCurrent(idx, false);
+    }
+  }, { root: scroller, rootMargin: '-48% 0px -48% 0px' });
+
+  for (const view of pageViews) {
+    view.overlay.addEventListener('mouseover', onOverlayOver);
+    view.overlay.addEventListener('mouseout', onBoxOut);
+    view.overlay.addEventListener('mousemove', onOverlayMove);
+    view.overlay.addEventListener('mouseleave', onOverlayOut);
+    liveObserver.observe(view.root);
+    currentObserver.observe(view.root);
+  }
+}
+
 /* ------------------------------------------------------------------ hover */
 function showChip(b) {
   chip.replaceChildren();
@@ -164,7 +254,16 @@ function showChip(b) {
   sw.className = 'hc-swatch';
   sw.style.background = colorOf(b.label);
   const name = document.createElement('span');
-  name.textContent = b.label;
+  const zh = zhOf(b.label);
+  if (zh) {
+    name.textContent = `${zh} `;
+    const en = document.createElement('span');
+    en.className = 'hc-en';
+    en.textContent = b.label;
+    name.append(en);
+  } else {
+    name.textContent = b.label;
+  }
   head.append(sw, name);
 
   const sub = document.createElement('div');
@@ -191,6 +290,7 @@ function boxFromEvent(ev) {
   const el = ev.target.closest('.box');
   if (!el) return null;
   const view = pageViews[Number(ev.currentTarget.dataset.idx)];
+  if (!view) return null;
   return { el, view, box: view.entry.boxes[Number(el.dataset.bi)] };
 }
 
@@ -227,28 +327,28 @@ function onOverlayMove(ev) {
   if (!chip.hidden) placeChip(ev);
 }
 
-/* ------------------------------------------------------------------ observers */
-const liveObserver = new IntersectionObserver((entries) => {
-  for (const e of entries) {
-    const view = pageViews[Number(e.target.dataset.idx)];
-    if (e.isIntersecting) buildOverlay(view);
-    else teardownOverlay(view);
-  }
-}, { root: scroller, rootMargin: '120% 0px 120% 0px' });
+/* ------------------------------------------------------------------ navigation */
+function writeHash() {
+  if (state.docId === null) return;
+  const p = new URLSearchParams();
+  if (state.docId) p.set('doc', state.docId);
+  p.set('page', String(state.current + 1));
+  try { history.replaceState(null, '', `#${p.toString()}`); } catch (err) { /* ignore */ }
+}
 
-const currentObserver = new IntersectionObserver((entries) => {
-  for (const e of entries) {
-    if (e.isIntersecting) setCurrent(Number(e.target.dataset.idx), false);
-  }
-}, { root: scroller, rootMargin: '-48% 0px -48% 0px' });
+function readHash() {
+  const p = new URLSearchParams(location.hash.replace(/^#/, ''));
+  return { doc: p.get('doc'), page: Number(p.get('page')) || 0 };
+}
 
-/* ------------------------------------------------------------------ controls */
 function setCurrent(i, scroll) {
+  if (!Number.isFinite(i) || !pageViews.length) return;
   state.current = Math.max(0, Math.min(state.total - 1, i));
   $('pageInput').value = state.current + 1;
   pageViews.forEach((v, n) => v.root.classList.toggle('is-current', n === state.current));
   if (scroll) {
     pageViews[state.current].root.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    writeHash();
   }
 }
 
@@ -265,6 +365,7 @@ function fitWidth() {
   setZoom(avail / BASE_WIDTH, { fit: true });
 }
 
+/* ------------------------------------------------------------------ legend / meta */
 function buildLegend() {
   const counts = doc.class_counts || {};
   const frag = document.createDocumentFragment();
@@ -279,13 +380,23 @@ function buildLegend() {
 
     const nm = document.createElement('span');
     nm.className = 'legend-name';
-    nm.textContent = label;
+    const zh = document.createElement('span');
+    zh.className = 'zh';
+    zh.textContent = zhOf(label) || label;
+    nm.append(zh);
+    if (zhOf(label)) {
+      const en = document.createElement('span');
+      en.className = 'en';
+      en.textContent = label;
+      nm.append(en);
+    }
 
     const ct = document.createElement('span');
     ct.className = 'legend-count';
     ct.textContent = counts[label];
 
     item.append(sw, nm, ct);
+    item.title = `${zhOf(label) ? `${zhOf(label)} ` : ''}${label} — ${counts[label]} 个`;
     item.addEventListener('click', () => {
       if (state.hidden.has(label)) state.hidden.delete(label);
       else state.hidden.add(label);
@@ -298,6 +409,27 @@ function buildLegend() {
   $('legendCount').textContent = `${Object.keys(counts).length}`;
 }
 
+function renderMeta() {
+  const m = doc.meta || {};
+  const total = doc.pages.reduce((a, p) => a + p.boxes.length, 0);
+  const bits = [
+    `${doc.pages.length} 页 · ${total} 框`,
+    `${m.ms_per_page_median ?? '?'} ms/页`,
+    `设备 <b>${m.device || '?'}</b>`,
+    `阈值 ${m.threshold}`,
+  ];
+  $('meta').innerHTML = bits.map((b) => `<span>${b}</span>`).join('<span>·</span>');
+  $('pageTotal').textContent = doc.pages.length;
+  $('pageInput').max = doc.pages.length;
+
+  const links = [];
+  if (m.annotated_pdf) links.push(`<a href="${state.base}${m.annotated_pdf}" download>下载带框 PDF</a>`);
+  links.push(`<a href="${state.base}layout.json" target="_blank">layout.json</a>`);
+  links.push(`<a href="${state.base}run.log" target="_blank">运行日志</a>`);
+  $('links').innerHTML = links.join(' &nbsp;·&nbsp; ');
+}
+
+/* ------------------------------------------------------------------ controls */
 function bindRange(id, labelId, fmt, apply) {
   const el = $(id);
   const lab = $(labelId);
@@ -411,69 +543,89 @@ function wireControls() {
   });
 }
 
-/* ------------------------------------------------------------------ meta */
-function renderMeta() {
-  const m = doc.meta || {};
-  const total = doc.pages.reduce((a, p) => a + p.boxes.length, 0);
-  const bits = [
-    `<b>${m.pdf || ''}</b>`,
-    `${doc.pages.length} 页 · ${total} 框`,
-    `${m.ms_per_page_median ?? '?'} ms/页`,
-    `设备 <b>${m.device || '?'}</b>`,
-    `阈值 ${m.threshold}`,
-  ];
-  $('meta').innerHTML = bits.map((b) => `<span>${b}</span>`).join('<span>·</span>');
-  $('pageTotal').textContent = doc.pages.length;
-  $('pageInput').max = doc.pages.length;
-
-  const links = [];
-  if (m.annotated_pdf) links.push(`<a href="${DATA_BASE}${m.annotated_pdf}" download>下载带框 PDF</a>`);
-  links.push(`<a href="${DATA_BASE}layout.json" target="_blank">layout.json</a>`);
-  links.push(`<a href="${DATA_BASE}run.log" target="_blank">运行日志</a>`);
-  $('links').innerHTML = links.join(' &nbsp;·&nbsp; ');
+/* ------------------------------------------------------------------ boot */
+async function loadIndex() {
+  try {
+    const res = await fetch('data/index.json', { cache: 'no-store' });
+    if (res.ok) {
+      const payload = await res.json();
+      if (Array.isArray(payload.docs) && payload.docs.length) return payload;
+    }
+  } catch (err) { /* fall through to single-document mode */ }
+  return { docs: [{ id: '', name: '当前文档', base: 'data/', pages: null, boxes: null }] };
 }
 
-/* ------------------------------------------------------------------ boot */
-function fail(title, detail) {
-  const el = $('loading');
-  el.className = 'error';
-  el.innerHTML = `<p><strong>${title}</strong></p><p>${detail || ''}</p>`;
+async function loadDoc(id, page) {
+  const info = state.docs.find((d) => d.id === id) || state.docs[0];
+  state.docId = info.id;
+  state.base = info.base || 'data/';
+  state.hidden = new Set();
+  state.current = 0;
+  teardown();
+  renderDocTabs();
+  try { localStorage.setItem('doclayout.doc', info.id); } catch (err) { /* private mode */ }
+  setStatus('loading', `正在加载 <b>${info.name}</b> …`);
+
+  let res;
+  try {
+    res = await fetch(`${state.base}layout.json`, { cache: 'no-store' });
+  } catch (err) {
+    return setStatus('error',
+      `<p><strong>无法读取 layout.json</strong></p><p>${String(err)}</p>`);
+  }
+  if (!res.ok) {
+    return setStatus('error', '<p><strong>无法读取 layout.json</strong> '
+      + `（HTTP ${res.status}）</p><p>请先运行 `
+      + '<code>python scripts/run_layout.py --pdf &lt;文件.pdf&gt;</code>。</p>');
+  }
+  doc = await res.json();
+  if (!Array.isArray(doc.pages) || !doc.pages.length) {
+    return setStatus('error', '<p><strong>该文档没有可用页面</strong></p>');
+  }
+
+  state.total = doc.pages.length;
+  buildPages();
+  buildLegend();
+  renderMeta();
+  observeAll();
+  fitWidth();
+  setStatus('none');
+
+  const start = Math.max(0, Math.min(state.total - 1, (page || 1) - 1));
+  setCurrent(start, false);
+  scroller.scrollTop = 0;
+  if (start > 0) {
+    requestAnimationFrame(() => {
+      pageViews[start].root.scrollIntoView({ block: 'start' });
+      setCurrent(start, false);
+    });
+  }
+  writeHash();
 }
 
 async function boot() {
-  let res;
-  try {
-    res = await fetch(`${DATA_BASE}layout.json`, { cache: 'no-store' });
-  } catch (err) {
-    return fail('无法读取 <code>layout.json</code>', String(err));
+  const index = await loadIndex();
+  state.docs = index.docs;
+  renderDocTabs();
+  const hash = readHash();
+  let wanted = hash.doc;
+  if (!wanted || !state.docs.some((d) => d.id === wanted)) {
+    try { wanted = localStorage.getItem('doclayout.doc'); } catch (err) { wanted = null; }
   }
-  if (!res.ok) {
-    return fail(`无法读取 <code>layout.json</code>（HTTP ${res.status}）`,
-      '请先运行 <code>python scripts/run_layout.py --pdf &lt;文件.pdf&gt;</code>，'
-      + '再用 <code>python scripts/serve.py --data &lt;输出目录&gt;</code> 打开本页。');
-  }
-  doc = await res.json();
-  state.total = doc.pages.length;
-
-  buildPages();
-  buildLegend();
-  wireControls();
-  renderMeta();
-  fitWidth();
-
-  for (const view of pageViews) {
-    view.root.dataset.idx = String(view.idx);
-    view.overlay.dataset.idx = String(view.idx);
-    view.overlay.addEventListener('mouseover', onOverlayOver);
-    view.overlay.addEventListener('mouseout', onBoxOut);
-    view.overlay.addEventListener('mousemove', onOverlayMove);
-    view.overlay.addEventListener('mouseleave', onOverlayOut);
-    liveObserver.observe(view.root);
-    currentObserver.observe(view.root);
-  }
-
-  $('loading').remove();
-  setCurrent(0, false);
+  if (!wanted || !state.docs.some((d) => d.id === wanted)) wanted = state.docs[0].id;
+  await loadDoc(wanted, hash.page);
+  window.addEventListener('hashchange', () => {
+    const h = readHash();
+    if (h.doc && h.doc !== state.docId && state.docs.some((d) => d.id === h.doc)) {
+      loadDoc(h.doc, h.page);
+    } else if (h.page && h.page - 1 !== state.current) {
+      setCurrent(h.page - 1, false);
+      pageViews[state.current]?.root.scrollIntoView({ block: 'start' });
+    }
+  });
 }
 
-document.addEventListener('DOMContentLoaded', boot);
+document.addEventListener('DOMContentLoaded', () => {
+  wireControls();
+  boot();
+});

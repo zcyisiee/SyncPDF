@@ -55,6 +55,9 @@ FREE_DIMS = ("DynamicDimension.0", "DynamicDimension.1", "DynamicDimension.2")
 RAW_ONNX = MODEL_DIR / "inference.onnx"
 
 #: PP-DocLayoutV3 classes, in the order of ``label_list`` in ``inference.yml``.
+#: NOTE: several names are misleading in English - see ``LABELS_ZH``.
+#: In particular ``content`` means **table of contents (目录)**, NOT "body content";
+#: body text is ``text``. A document's TOC page therefore comes back as ``content``.
 LABELS: tuple[str, ...] = (
     "abstract", "algorithm", "aside_text", "chart", "content", "display_formula",
     "doc_title", "figure_title", "footer", "footer_image", "footnote", "formula_number",
@@ -63,41 +66,77 @@ LABELS: tuple[str, ...] = (
     "vision_footnote",
 )
 
-#: Display colours, grouped so that semantically similar classes share a hue family:
-#: body text = blue, headings = purple, formulas/math = orange, media = green, furniture = rose.
+#: Official Chinese meaning of every class, from the PaddleX layout-analysis docs
+#: (https://paddlepaddle.github.io/PaddleX/latest/module_usage/tutorials/ocr_modules/layout_analysis.html).
+#: Surfaced in the viewer's legend and hover chip so the English label can never
+#: be misread again.
+LABELS_ZH: dict[str, str] = {
+    "abstract": "摘要",
+    "algorithm": "算法",
+    "aside_text": "侧栏文本",
+    "chart": "图表",
+    "content": "目录",
+    "display_formula": "行间公式",
+    "doc_title": "文档标题",
+    "figure_title": "图表标题",
+    "footer": "页脚",
+    "footer_image": "页脚图像",
+    "footnote": "脚注",
+    "formula_number": "公式编号",
+    "header": "页眉",
+    "header_image": "页眉图像",
+    "image": "图像",
+    "inline_formula": "行内公式",
+    "number": "页码",
+    "paragraph_title": "段落标题",
+    "reference": "参考文献",
+    "reference_content": "参考文献内容",
+    "seal": "印章",
+    "table": "表格",
+    "text": "文本",
+    "vertical_text": "竖版文字",
+    "vision_footnote": "图注",
+}
+
+#: Display colours, grouped by *semantic role*. Similar roles share a hue family so the
+#: viewer reads as clusters rather than 25 random colours.
+#: ``content`` (目录) deliberately gets a desaturated steel tone: it is navigation, not prose,
+#: and it must not be mistaken for body text (blue) or for the page furniture (rose).
 PALETTE: dict[str, str] = {
-    # body text / prose
+    # --- 正文类 / prose ---------------------------------------------------
     "text": "#2563eb",
-    "content": "#1d4ed8",
-    "abstract": "#1e40af",
-    "reference": "#3b82f6",
-    "reference_content": "#60a5fa",
-    "footnote": "#0ea5e9",
-    "vision_footnote": "#06b6d4",
-    "aside_text": "#0891b2",
-    "vertical_text": "#64748b",
-    # headings
+    "vertical_text": "#3b82f6",
+    "aside_text": "#0ea5e9",
+    "abstract": "#1d4ed8",
+    "footnote": "#06b6d4",
+    "vision_footnote": "#22d3ee",
+    # --- 标题类 / headings ------------------------------------------------
     "doc_title": "#7c3aed",
     "paragraph_title": "#a855f7",
     "figure_title": "#c026d3",
-    # math
-    "display_formula": "#ea580c",
-    "inline_formula": "#f59e0b",
-    "formula_number": "#d97706",
-    "algorithm": "#b45309",
-    # media / floats
+    # --- 目录 / table of contents -----------------------------------------
+    "content": "#475569",
+    # --- 页眉页脚页码 / page furniture ------------------------------------
+    "header": "#dc2626",
+    "footer": "#e11d48",
+    "number": "#f43f5e",
+    # --- 参考文献 / bibliography ------------------------------------------
+    "reference": "#4f46e5",
+    "reference_content": "#818cf8",
+    # --- 图表媒体 / media -------------------------------------------------
     "image": "#059669",
     "chart": "#10b981",
     "table": "#0d9488",
     "header_image": "#14b8a6",
     "footer_image": "#2dd4bf",
     "seal": "#65a30d",
-    # page furniture
-    "header": "#dc2626",
-    "footer": "#e11d48",
-    "number": "#f43f5e",
+    # --- 公式与算法 / math ------------------------------------------------
+    "display_formula": "#ea580c",
+    "inline_formula": "#f59e0b",
+    "formula_number": "#d97706",
+    "algorithm": "#7c2d12",
 }
-FALLBACK_COLOR = "#475569"
+FALLBACK_COLOR = "#111827"
 
 
 @dataclass
@@ -386,3 +425,8 @@ def class_counts(pages: Iterable[Sequence[Box]]) -> dict[str, int]:
 
 def color_for(label: str) -> str:
     return PALETTE.get(label, FALLBACK_COLOR)
+
+
+def zh_for(label: str) -> str:
+    """Official Chinese meaning of a class, e.g. ``content`` -> 目录."""
+    return LABELS_ZH.get(label, label)

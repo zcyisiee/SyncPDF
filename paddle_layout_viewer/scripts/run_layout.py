@@ -32,7 +32,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from layout_engine import (  # noqa: E402
-    LABELS, PALETTE, Box, LayoutEngine, class_counts, color_for,
+    LABELS, LABELS_ZH, PALETTE, Box, LayoutEngine, class_counts, color_for,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -284,7 +284,8 @@ def main(argv: list[str] | None = None) -> int:
             "annotated_pdf": overlay_rel,
         },
         "labels": list(LABELS),
-        "palette": {**{l: PALETTE.get(l, "#475569") for l in LABELS}},
+        "labels_zh": dict(LABELS_ZH),
+        "palette": {**{l: PALETTE.get(l, "#111827") for l in LABELS}},
         "class_counts": counts,
         "pages": entries,
     }
