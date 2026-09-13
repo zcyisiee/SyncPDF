@@ -340,3 +340,97 @@ class TestApplyReport:
         )
         assert sheet_line["target"] == "图 1：架构"
         assert report["ok"] is True
+
+
+# --------------------------------------------------------------------------- #
+# 锚点语序：尊重模型重排（A2）
+# --------------------------------------------------------------------------- #
+class TestAnchorWordOrder:
+    """锚点多重集一致时尊重模型语序；仅多重集不一致才做 proportional 修复。
+
+    回归来源（P01-017 实测）：源文 ``coordinates [[F5]] rounds across [[F6]]
+    sub-agents`` 的中文合法语序是"在 [[F6]] 个子智能体间协调 [[F5]] 轮"。旧的
+    reorder 模式按源文顺序强行回贴 → 语义颠倒为"在 T 个子智能体间协调 S 轮"。
+    """
+
+    def _report(self, _apply_env, tmp_path, source, translated_body):
+        build, _ = _apply_env
+        workdir = build({"P01-001": _ti(source)}, {"P01-001": "text"})
+        md_file = tmp_path / "translated.md"
+        md_file.write_text(
+            f"<!-- id=P01-001 label=text -->\n{translated_body}\n", encoding="utf-8"
+        )
+        report = mv.apply_markdown(workdir, md_file)
+        import json
+
+        sheet = [
+            json.loads(line)
+            for line in (tmp_path / "agent" / "translated.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        return report, sheet
+
+    def test_reordered_anchors_keep_model_order(self, _apply_env, tmp_path):
+        report, sheet = self._report(
+            _apply_env,
+            tmp_path,
+            "A single orchestrator coordinates {v5} rounds across {v6} sub-agents",
+            "单个编排器在 [[F6]] 个子智能体间协调 [[F5]] 轮",
+        )
+        assert report["ok"] is True
+        # 模型语序被接受：不修复，只记警告供观察
+        assert report["repaired"] == []
+        assert "anchor_reordered: id P01-001" in report["warnings"]
+        assert report.get("violations", []) == []
+        # F6（智能体数）在前、F5（轮数）在后 —— 与译文语序一致，语义不颠倒
+        assert sheet[0]["target"] == "单个编排器在 {v6} 个子智能体间协调 {v5} 轮"
+
+    def test_same_order_stays_silent(self, _apply_env, tmp_path):
+        report, sheet = self._report(
+            _apply_env,
+            tmp_path,
+            "A single orchestrator coordinates {v5} rounds across {v6} sub-agents",
+            "单个编排器协调 [[F5]] 轮，跨 [[F6]] 个子智能体",
+        )
+        assert report["repaired"] == []
+        assert not any("anchor_reordered" in w for w in report["warnings"])
+        assert sheet[0]["target"] == "单个编排器协调 {v5} 轮，跨 {v6} 个子智能体"
+
+    def test_missing_anchor_still_proportional(self, _apply_env, tmp_path):
+        report, sheet = self._report(
+            _apply_env,
+            tmp_path,
+            "coordinates {v5} rounds across {v6} sub-agents",
+            "在 [[F5]] 轮内协调若干子智能体",
+        )
+        assert report["repaired"] == [{"id": "P01-001", "mode": "proportional"}]
+        assert report.get("violations", []) == []
+        # proportional 把丢失的锚点按长度占比投回，协议恢复合法
+        assert "{v5}" in sheet[0]["target"]
+        assert "{v6}" in sheet[0]["target"]
+
+    def test_hallucinated_anchor_is_repaired_not_blocking(self, _apply_env, tmp_path):
+        report, sheet = self._report(
+            _apply_env,
+            tmp_path,
+            "coordinates {v5} rounds",
+            "协调 [[F5]] 轮，另外 [[F9]]",
+        )
+        assert report["ok"] is True
+        assert report["repaired"] == [{"id": "P01-001", "mode": "proportional"}]
+        assert report.get("violations", []) == []
+        assert "{v9}" not in sheet[0]["target"]
+        assert "{v5}" in sheet[0]["target"]
+
+    def test_empty_span_still_fixed_without_reorder(self, _apply_env, tmp_path):
+        report, sheet = self._report(
+            _apply_env,
+            tmp_path,
+            "<style id='1'>S</style> has one locus",
+            "[[S1]][[/S1]]S 只有一个推理位点",
+        )
+        assert report["ok"] is True
+        # 空 span 与顺序无关：仍走修复（mode=accepted），锚点顺序保持模型原样
+        assert report["repaired"] == [{"id": "P01-001", "mode": "accepted"}]
+        assert sheet[0]["target"] == "<style id='1'>S</style> 只有一个推理位点"

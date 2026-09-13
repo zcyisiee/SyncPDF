@@ -25,6 +25,7 @@ import logging
 import os
 import pickle
 import re
+from collections import Counter
 from pathlib import Path
 
 from babeldoc.format.pdf.document_il.utils.layout_helper import BULLET_POINT_PATTERN
@@ -187,13 +188,6 @@ def anchor_sequence(text: str) -> list[tuple[str, str, str]]:
     ]
 
 
-def _fmt_anchor(seq: tuple[str, str, str]) -> str:
-    slash, kind, num = seq
-    if kind == "F":
-        return f"[[F{num}]]"
-    return f"[[{'/' if slash else ''}S{num}]]"
-
-
 def _split_anchors(text: str) -> tuple[list[tuple[str, str]], str]:
     """→ (tokens, plain)；tokens 为 ('a', anchor) / ('t', text)。"""
     tokens: list[tuple[str, str]] = []
@@ -228,39 +222,21 @@ def _fix_empty_spans(s: str) -> str:
 
 
 def repair_target(src_md: str, tgt_md: str) -> tuple[str, str]:
-    """把模型译文的锚点修回源文顺序（确定性，不调用模型）。
+    """确定性地把译文的锚点修成协议合法形态（不调用模型）。
 
-    模式 1（reorder）：锚点多重集一致，仅顺序/位置错乱 —— 保留模型切分位置，
-    把源文锚点按顺序重新贴到这些位置上。
-    模式 2（proportional）：锚点有增删 —— 按源文各文本段长度占比，把源文锚点
-    序列等比投放到译文上，保证协议合法。
+    模式 1（accepted）：锚点多重集与源文一致 —— **尊重模型语序**。中英翻译调整
+    锚点位置是合法行为（"coordinates T rounds across S sub-agents" → "在 S 个子
+    智能体间协调 T 轮"），按源文顺序回贴会把语义颠倒；这里只修空 span。
+    模式 2（proportional）：锚点有增删/幻觉 —— 按源文各文本段长度占比，把源文
+    锚点序列等比投放到译文上，保证协议合法。
+
+    返回 ``(target, mode)``，``mode`` ∈ ``{"accepted", "proportional"}``。
     """
-    from collections import Counter
-
-    src_seq = anchor_sequence(src_md)
-    tokens, plain = _split_anchors(tgt_md)
-    tgt_tokens = [tok for kind, tok in tokens if kind == "a"]
-    tgt_seq = anchor_sequence(tgt_md)
-
-    if Counter(tgt_seq) == Counter(src_seq) and len(tgt_seq) == len(src_seq):
-        positions: list[int] = []
-        idx = 0
-        for kind, val in tokens:
-            if kind == "t":
-                idx += len(val)
-            else:
-                positions.append(idx)
-        out: list[str] = []
-        pos = 0
-        for seq, at in zip(src_seq, positions):
-            at = max(pos, min(at, len(plain)))
-            out.append(plain[pos:at])
-            out.append(_fmt_anchor(seq))
-            pos = at
-        out.append(plain[pos:])
-        return _fix_empty_spans("".join(out)), "reorder"
+    if Counter(anchor_sequence(tgt_md)) == Counter(anchor_sequence(src_md)):
+        return _fix_empty_spans(tgt_md), "accepted"
 
     src_tokens, src_plain = _split_anchors(src_md)
+    _, plain = _split_anchors(tgt_md)
     total = max(1, len(src_plain))
     length = len(plain)
     out_tokens: list[str] = []
@@ -899,19 +875,23 @@ def apply_markdown(workdir, translated_md):
             entries.append({"id": pid, "target": translate_input.unicode})
             continue
         src_md = source_markdown
-        # 锚点顺序必须与源文完全一致（防跨 span 搬运）
+        # 锚点多重集必须与源文一致；**顺序不强制**（模型按中文语序重排是合法翻译）
         src_seq = anchor_sequence(src_md)
         tgt_seq = anchor_sequence(body)
         has_empty = bool(
             re.search(r"\[\[S(\d+)\]\]\[\[/S\1\]\]", body)
         )
-        if src_seq != tgt_seq or has_empty:
+        multiset_match = Counter(tgt_seq) == Counter(src_seq)
+        if multiset_match and src_seq != tgt_seq:
+            # 不修复、不阻断，只记录真实发生率（跨 span 搬运需人工观察）
+            warnings.append(f"anchor_reordered: id {pid}")
+        if not multiset_match or has_empty:
             body, mode = repair_target(src_md, body)
             repaired.append({"id": pid, "mode": mode})
-        # 修复后再校（应全部通过；不过则阻断）
-        if anchor_sequence(body) != src_seq:
+        # 修复后再校：多重集不一致才违规（顺序不再视为违规）
+        if Counter(anchor_sequence(body)) != Counter(src_seq):
             violations.append(
-                f"anchor_order_mismatch: id {pid} expected {len(src_seq)} anchors, "
+                f"anchor_multiset_mismatch: id {pid} expected {len(src_seq)} anchors, "
                 f"got {len(anchor_sequence(body))}"
             )
         target = markdown_to_canonical(body)

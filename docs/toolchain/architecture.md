@@ -135,8 +135,10 @@ mediabox），并**保留 Link 注释与书签树**。
 
 - **I5.1** 翻译单元是**整篇**：`document.md` 一次调用翻译完，不分块并发。
   单词/术语一致性由此保证。
-- **I5.2** 锚点多重集 + **顺序**必须与源文完全一致；不一致时先确定性修复
-  （`repair_target`：reorder / proportional），修复后仍不一致 → `anchor_order_mismatch` 阻断。
+- **I5.2** 锚点多重集必须与源文一致；**顺序不强制**；锚点有增删时先确定性
+  修复（`repair_target`：proportional），修复后多重集仍不一致 →
+  `anchor_multiset_mismatch` 阻断。顺序与源文不同不阻断，只记
+  `anchor_reordered` 警告。
 - **I5.3** 漏行回退原文（`fallback_ids`），不阻断重建——**这是有意的**：
   宁可交付带原文的行，也不因模型漏行而整篇失败。
 - **I5.4** Markdown 结构前缀（`#`/`##`/`###`/`*`/`**`/`- `）只给模型看，

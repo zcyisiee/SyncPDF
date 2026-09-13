@@ -302,8 +302,9 @@
   2. 逐段：漏行 → 回退原文（`fallback_ids`，不阻断，I5.3）
   3. 标记存在但正文为空 → `empty_translation` 警告 + 回退原文
   4. label 与 anchors 不一致 → `label_mismatch` 警告（不阻断）
-  5. 锚点顺序/多重集不一致 → `repair_target` 确定性修复（reorder / proportional）
-     后仍不一致 → `anchor_order_mismatch` → **阻断**
+  5. 锚点多重集不一致 → `repair_target` 确定性修复（proportional）
+     后仍不一致 → `anchor_multiset_mismatch` → **阻断**；锚点顺序与源文不同不阻断
+     （逐段记 `anchor_reordered` 警告，尊重模型语序）
   6. 空样式 span → `empty_style_span` 警告（不阻断）
   7. `workflow.apply`：占位符多重集校验（`protocol.check_placeholders`）+
      双标点归一 + 写回 composition

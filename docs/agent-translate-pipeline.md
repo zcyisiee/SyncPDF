@@ -420,11 +420,13 @@ header / footer / page_number / page_footnote / aside_text / author`
 2. 锚点回写：`[[S1]]→<style id='1'>`、`[[/S1]]→</style>`、`[[F3]]→{v3}`；
 3. 校验：
    - id 完整性（缺/多即拒绝）；
-   - **锚点顺序**必须与源文完全一致（旧协议只查多重集，会漏检跨 span 搬运）；
+   - **锚点多重集**必须与源文一致；锚点顺序**不强制**——中英翻译调整锚点位置是
+     合法语序（如"在 S 个子智能体间协调 T 轮"），强制回贴会颠倒语义。顺序与
+     源文不同只记 `anchor_reordered: id X` 警告（供观察跨 span 搬运的真实发生率）；
    - 空 span 记为 warning（模型省略无中文对应片段，如英文冠词）；
 4. 确定性修复（不二次调用模型）：
-   - `reorder`：锚点多重集一致、仅顺序错乱 → 保留模型切分位置，按源文顺序重贴；
-   - `proportional`：锚点有增删 → 按源文各文本段长度占比等比投放；
+   - `accepted`：锚点多重集一致、仅顺序不同 → 接受模型语序，只修空 span；
+   - `proportional`：锚点有增删/幻觉 → 按源文各文本段长度占比等比投放；
 5. 通过后调 `workflow.apply()`：占位符多重集校验 + 占位符后重复标点归一化 +
    `post_translate_paragraph` 重建 composition 写回 IR。
 
@@ -443,7 +445,7 @@ header / footer / page_number / page_footnote / aside_text / author`
   "unknown_ids": [],
   "violations": [],
   "warnings": ["empty_style_span: id P02-004 style 3", "..."],
-  "repaired": [{"id": "P05-012", "mode": "reorder"},
+  "repaired": [{"id": "P05-012", "mode": "accepted"},
                {"id": "P06-015", "mode": "proportional"}],
   "punctuation_fixes": [{"id": "P01-010", "change": "{v4}: removed 1 duplicate punctuation"}],
   "markdown_sheet": ".../translated.jsonl"
@@ -542,7 +544,7 @@ mono 中 77% 链接矩形按译文重定位。目录（书签）同样保持：
 
 | # | 问题 | 现状 | 建议 |
 |---|---|---|---|
-| 1 | **锚点错位仍需修复** | 208 段中 13 段被 `reorder/proportional` 修复，后者样式边界是近似值 | 缩短锚点 token（如 `[[S1]]` 已较短）、把公式密集长段单独成块、在提示词里给出「锚点必须原位」的对照示例；或在 apply 阶段用「原文 span 内字符 → 译文 span 内字符」的对齐模型替代比例投放 |
+| 1 | **锚点错位仍需人工观察** | 208 段中 13 段锚点顺序与源文不同：删除 reorder 后不再回贴（那是合法语序调整），只记 `anchor_reordered` 警告；仍被 `proportional` 修复的是多重集不一致（锚点增删）的段落，其样式边界是近似值 | 在审查阶段抽样 `anchor_reordered` 段落，区分「合法语序调整」与「跨 span 搬运」；对后者用提示词给出「锚点必须原位」的对照示例，或在 apply 阶段用「原文 span 内字符 → 译文 span 内字符」的对齐模型替代比例投放 |
 | 2 | **空 span（模型省略内容）** | 10 处 warning，如英文冠词 `The` 无中文对应 | 允许空 span 合法化（已不阻断），但在审查阶段标记「原文有内容而译文为空」的片段，提示模型补译或改写 |
 | 3 | **表格内部未翻译** | `table_text` 跳过、保留英文 | 增加 `table` 模式：解析表格单元格，按行翻译并回填（需处理列宽/换行） |
 | 4 | **图内文字未翻译** | `figure` 跳过（多为位图） | 对矢量图内文字做 OCR/提取并翻译；位图图内文字需 OCR（成本高，可作可选） |
@@ -571,7 +573,8 @@ mono 中 77% 链接矩形按译文重定位。目录（书签）同样保持：
 ### 5.4 快速自检清单（发版前）
 
 1. `apply_report.json`：`ok=true`、`violations=[]`；
-2. `repaired` 数量（理想趋近 0）、`warnings` 数量（空 span）；
+2. `repaired` 数量（理想趋近 0，只应有 proportional 兜底）、`warnings` 里的
+   `anchor_reordered` 数量（合法语序调整，抽样确认非跨 span 搬运）；
 3. mono/dual 页数与原文一致；
 4. 链接数：mono ≈ 原文、dual ≈ 2×原文；**目录条目数：mono/dual 与原文一致**；
 5. 渲染首页、图注密集页、表格页、末页，检查标题字号、溢出、重叠；

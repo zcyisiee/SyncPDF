@@ -168,7 +168,8 @@ EOF
 | 违规 | 触发 | 是否阻断 | 说明 |
 |---|---|---|---|
 | `extra_ids` | 译文出现源码没有的段落 id | ✓ | 模型伪造/复制了段落标记 |
-| `anchor_order_mismatch` | 确定性修复后锚点顺序仍与源文不一致 | ✓ | 防跨 span 搬运 |
+| `anchor_multiset_mismatch` | 确定性修复后锚点多重集仍与源文不一致（丢/幻觉锚点） | ✓ | 防丢 content / 幻觉锚点 |
+| `anchor_reordered` | 锚点多重集一致但顺序与源文不同 | ✗ | **尊重模型语序**（中英语序调整是合法翻译），仅记警告观察发生率 |
 | `missing_ids` | 源码有、译文无 | ✗ | **回退原文**（`fallback_ids`），不阻断 |
 | `empty_translation` | 标记在但正文为空 | ✗ | 回退原文 + 警告 |
 | `label_mismatch` | 译文回写的 label 与 anchors 不一致 | ✗ | 警告（`label_mismatches[]`） |
