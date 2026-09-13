@@ -78,14 +78,17 @@ python -m babeldoc.tools.agent md-extract <pdf> --workdir <dir> \
 # 2) 一次调用翻译 + 写回 + 重建 + 渲染（编排器）
 python experiments/markdown_translate.py <dir> \
     --model gemini-3.8-flash-low --effort low --output-dir <dir>/output \
-    [--skip-translate] [--dry-run]
+    [--skip-translate] [--dry-run] [--skip-reconstruct] \
+    [--latex-bbox [--latex-bbox-mode full|repair]] [--no-dual]
+#    （--skip-reconstruct 只到 md-apply，验收流程分开跑 default/latex 两次
+#      reconstruct 时用；--latex-bbox 与 `reconstruct --latex-bbox` 同链路）
 
 # 3) 单独执行写回 / 重建
 python -m babeldoc.tools.agent md-apply <dir> <dir>/agent/translated.md
 python -m babeldoc.tools.agent reconstruct <dir> --output-dir <dir>/output --dual
 python -m babeldoc.tools.agent render <mono.pdf> --pages 1,5,8
 
-# ── 旧 sheet 分批协议（保留兼容）────────────────────────────────
+# ── 旧 sheet 分批协议（保留兼容，不再用于新验收；见 ACCEPTANCE.md）──
 python -m babeldoc.tools.agent extract <pdf> --workdir <dir> --layout mineru
 python experiments/batch_translate.py <dir> --model ... --batch-size 40
 python -m babeldoc.tools.agent apply <dir> <dir>/agent/translated.jsonl

@@ -33,11 +33,29 @@
 
 ## LaTeX bbox 排版验收（`--latex-bbox`）
 
+### 翻译协议（新论文验收从 md 协议开始）
+
+新论文的全链路验收用 **md 整篇协议**（一次模型调用看到全文，术语/语气全局一致）：
+
+```bash
+# 1) 解析 → 连续 Markdown + 锚点 + state.pkl（含 LaTeX bbox 源行几何）
+python3 -m babeldoc.tools.agent md-extract <paper>.pdf --workdir <wd> \
+    --mineru-cache-key <sha256>   # 或 --mineru-json / MINERU_API_TOKEN
+# 2) 单次整篇翻译 + 漏行补译 + md-apply 写回（到写回为止，reconstruct 分开跑）
+python3 experiments/markdown_translate.py <wd> --model gemini-3.8-flash-low \
+    --effort low --skip-reconstruct
+# 3) 两次 reconstruct + 门禁 + 度量（同下面的回放命令）
+```
+
+旧 sheet 分批协议（`extract` + `experiments/batch_translate.py`）保留兼容，
+不再用于新验收。md 协议的 `debug_id` 是确定性的（`P01-005`），同一 PDF 重复
+`md-extract` 得到相同 id 集合，回放时可直接复用 `agent/translated.jsonl`。
+
 ### 回放方式（不要重新 extract）
 
-`extract` 每次解析会给段落分配**随机 `debug_id`**，因此「重新 extract →
-复用旧 `translated.jsonl`」会因 id 不匹配而全部落空（`unknown_ids`）。
-日常回放与最终验收统一用：
+legacy `extract` 每次解析会给段落分配**随机 `debug_id`**，因此「重新 extract →
+复用旧 `translated.jsonl`」会因 id 不匹配而全部落空（`unknown_ids`）；
+`md-extract` 的确定性 id 没有这个问题。日常回放与最终验收统一用：
 
 ```bash
 cp -r /tmp/babeldoc-latex-acceptance/<paper>/workdir /tmp/p5-final/<paper>/workdir
@@ -64,7 +82,7 @@ python3 experiments/render_compare.py <default.mono.pdf> <latex.mono.pdf> \
 | 应用率 | `applied / eligible`，要求 **≥ 95%** | `application_rate` |
 | 非末行填充率 | applied 段贴片文本层非末行 fill ≥ 0.98 的行占比，要求 **≥ 99%**；判定用 `lines_nonfinal_merged_*`（视觉行合并 + 首行缩进归一），`lines_nonfinal_*`（未合并基线口径）并列上报 | `lines_nonfinal_merged_ge_threshold / lines_nonfinal_merged_total` |
 | 文本层零差异 | 贴片文本层 vs 期望纯文本（译文去标记 + `text` 类片段原文），容差口径须 **100%**；严格字符级 `applied_paragraphs_strict_zero_diff_non_formula` 作为门槛并列上报 | `text_diff_zero_ratio_non_formula` |
-| 门禁 | `toolchain_gates.py` 无 `fail`（本流程 `extract → apply → reconstruct` 下 `toc_integrity` / `protected_tokens` / `protocol` 会因缺 `anchors.json` 降级为 `not_available`，与历史基线一致；走 `md-*` 流程时五项全可判定） | `toolchain_gates.json` |
+| 门禁 | `toolchain_gates.py` 无 `fail`（md 协议下五项全可判定；本篇 2512.08296v3 无目录页，`toc_integrity` 合法降级 `not_available`。旧 sheet 流程 `extract → apply → reconstruct` 缺 `anchors.json`，`toc_integrity` / `protected_tokens` / `protocol` 降级 `not_available`，仅作历史基线） | `toolchain_gates.json` |
 | 目视 | 每篇首页、公式页、末页 + 随机 2 页 `render_compare.py` 并排 PNG | `/tmp/p5-final/<paper>/renders/` |
 
 ### 已知限制（P5 台账）
