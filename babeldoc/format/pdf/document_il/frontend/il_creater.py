@@ -1024,6 +1024,18 @@ class ILCreater:
         if space_regex.match(char_unicode):
             char_unicode = " "
         advance = char.adv
+        if advance:
+            # char.adv 是 text-space 宽度，而 box 是 device-space 坐标。
+            # 用 char.matrix（Tm × CTM）的书写方向缩放因子把它换算到 box 的
+            # 空间：Tf 1 型 PDF 把缩放烘进 Tm（a ≈ 11.1），此前两者相差
+            # ~11 倍，导致 _has_word_gap 逐字符假阳性插空格。
+            if char.matrix[0] == 0 and char.matrix[3] == 0:
+                writing_direction_scale = math.hypot(char.matrix[2], char.matrix[3])
+            else:
+                writing_direction_scale = math.hypot(char.matrix[0], char.matrix[1])
+            # 退化矩阵（无缩放信息）保持原值，交由下游 fallback。
+            if writing_direction_scale:
+                advance = advance * writing_direction_scale
         bbox = il_version_1.Box(
             x=char.bbox[0],
             y=char.bbox[1],
