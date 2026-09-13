@@ -13,7 +13,9 @@
 - ``document.md``       给翻译模型的连续 Markdown
 - ``anchors.json``      id → 源文/锚点明细（诊断用）
 - ``sheet.jsonl``       与 extract 兼容的清单（id/source 为 canonical 形式）
-- ``state.pkl``         与 extract 兼容的 IR 状态（供 apply/reconstruct）
+- ``state.pkl``         与 extract 兼容的 IR 状态（供 apply/reconstruct；
+                        含 LaTeX bbox 所需的 ``source_line_geometry``，
+                        解析时无条件采集）
 """
 
 from __future__ import annotations
@@ -439,6 +441,21 @@ def _run_parse(
 
     _deterministic_ids(docs)
 
+    # LaTeX bbox 源行几何（P3-0）：必须在译文回填之前采集——post_translate_paragraph
+    # 会把 composition 换成纯文本 run，pdf_line 与源坐标随之丢失。md 路径是主协议，
+    # 无条件采集（legacy extract 按 enable_latex_bbox_layout 门控、默认关闭，
+    # 依赖 reconstruct 的 page_char_objects 兜底；这里直接落精确几何，兜底仅在
+    # 旧 workdir 复用时生效）。失败不阻断解析，reconstruct 仍有兜底路径。
+    from babeldoc.format.pdf.document_il.backend.latex_bbox.source_geometry import (
+        capture_source_line_geometry,
+    )
+
+    try:
+        source_line_geometry = capture_source_line_geometry(docs)
+    except Exception:  # noqa: BLE001 - 几何采集失败只影响 LaTeX 保真，有兜底
+        logger.warning("源行几何采集失败", exc_info=True)
+        source_line_geometry = {}
+
     # 超链接快照：必须在 _deterministic_ids 之后（paragraph_ids 要拿确定性 id，
     # 与 reconstruct 阶段的段落对齐）、Typesetting 之前（字符 box 还是源坐标）。
     link_state = _snapshot_links(temp_pdf_path, workdir, docs)
@@ -495,6 +512,7 @@ def _run_parse(
         "skipped_label_counts": skipped,
         "skipped_rows": skipped_rows,
         "link_state": link_state,
+        "source_line_geometry": source_line_geometry,
         "temp_pdf_path": str(temp_pdf_path),
         "pdf_path": str(pdf_path),
         "lang_in": lang_in,
@@ -719,6 +737,9 @@ def extract_markdown(
                 "page_char_objects": result.get("link_state", {}).get(
                     "page_char_objects", {}
                 ),
+                # 源行几何（P3-0）：译文回填前采集，重建阶段直接复用
+                # （reconstruct --latex-bbox 的首选来源）。
+                "source_line_geometry": result.get("source_line_geometry", {}),
             },
             f,
         )

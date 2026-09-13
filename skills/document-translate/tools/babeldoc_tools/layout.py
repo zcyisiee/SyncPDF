@@ -25,6 +25,15 @@ SEV_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
             "output_dir": {"type": "string"},
             "dual": {"type": "boolean", "description": "同时输出拼宽双语 PDF（默认 true）"},
             "watermark": {"type": "boolean"},
+            "latex_bbox": {
+                "type": "boolean",
+                "description": "开启 LaTeX bbox 排版（实验特性；缺 XeLaTeX/字体时自动回退）",
+            },
+            "latex_bbox_mode": {
+                "type": "string",
+                "enum": ["full", "repair"],
+                "description": "LaTeX bbox 资格模式：full（默认）/ repair（复现旧行为）",
+            },
             "stats": {"type": "boolean", "description": "附带 PDF 页数/目录/链接统计"},
         },
         "required": ["workdir"],
@@ -41,6 +50,8 @@ def reconstruct_pdf(args: dict) -> dict:
         output_dir=output_dir,
         no_dual=not (True if dual is None else dual),
         watermark=bool(args.get("watermark")),
+        latex_bbox=bool(args.get("latex_bbox")),
+        latex_bbox_mode=args.get("latex_bbox_mode"),
     )
     if args.get("stats", True):
         result["stats"] = {
