@@ -13,7 +13,9 @@
 - ``document.md``       给翻译模型的连续 Markdown
 - ``anchors.json``      id → 源文/锚点明细（诊断用）
 - ``sheet.jsonl``       与 extract 兼容的清单（id/source 为 canonical 形式）
-- ``state.pkl``         与 extract 兼容的 IR 状态（供 apply/reconstruct）
+- ``state.pkl``         与 extract 兼容的 IR 状态（供 apply/reconstruct；
+                        含 LaTeX bbox 所需的 ``source_line_geometry``，
+                        解析时无条件采集）
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ import logging
 import os
 import pickle
 import re
+from collections import Counter
 from pathlib import Path
 
 from babeldoc.format.pdf.document_il.utils.layout_helper import BULLET_POINT_PATTERN
@@ -185,13 +188,6 @@ def anchor_sequence(text: str) -> list[tuple[str, str, str]]:
     ]
 
 
-def _fmt_anchor(seq: tuple[str, str, str]) -> str:
-    slash, kind, num = seq
-    if kind == "F":
-        return f"[[F{num}]]"
-    return f"[[{'/' if slash else ''}S{num}]]"
-
-
 def _split_anchors(text: str) -> tuple[list[tuple[str, str]], str]:
     """→ (tokens, plain)；tokens 为 ('a', anchor) / ('t', text)。"""
     tokens: list[tuple[str, str]] = []
@@ -226,39 +222,21 @@ def _fix_empty_spans(s: str) -> str:
 
 
 def repair_target(src_md: str, tgt_md: str) -> tuple[str, str]:
-    """把模型译文的锚点修回源文顺序（确定性，不调用模型）。
+    """确定性地把译文的锚点修成协议合法形态（不调用模型）。
 
-    模式 1（reorder）：锚点多重集一致，仅顺序/位置错乱 —— 保留模型切分位置，
-    把源文锚点按顺序重新贴到这些位置上。
-    模式 2（proportional）：锚点有增删 —— 按源文各文本段长度占比，把源文锚点
-    序列等比投放到译文上，保证协议合法。
+    模式 1（accepted）：锚点多重集与源文一致 —— **尊重模型语序**。中英翻译调整
+    锚点位置是合法行为（"coordinates T rounds across S sub-agents" → "在 S 个子
+    智能体间协调 T 轮"），按源文顺序回贴会把语义颠倒；这里只修空 span。
+    模式 2（proportional）：锚点有增删/幻觉 —— 按源文各文本段长度占比，把源文
+    锚点序列等比投放到译文上，保证协议合法。
+
+    返回 ``(target, mode)``，``mode`` ∈ ``{"accepted", "proportional"}``。
     """
-    from collections import Counter
-
-    src_seq = anchor_sequence(src_md)
-    tokens, plain = _split_anchors(tgt_md)
-    tgt_tokens = [tok for kind, tok in tokens if kind == "a"]
-    tgt_seq = anchor_sequence(tgt_md)
-
-    if Counter(tgt_seq) == Counter(src_seq) and len(tgt_seq) == len(src_seq):
-        positions: list[int] = []
-        idx = 0
-        for kind, val in tokens:
-            if kind == "t":
-                idx += len(val)
-            else:
-                positions.append(idx)
-        out: list[str] = []
-        pos = 0
-        for seq, at in zip(src_seq, positions):
-            at = max(pos, min(at, len(plain)))
-            out.append(plain[pos:at])
-            out.append(_fmt_anchor(seq))
-            pos = at
-        out.append(plain[pos:])
-        return _fix_empty_spans("".join(out)), "reorder"
+    if Counter(anchor_sequence(tgt_md)) == Counter(anchor_sequence(src_md)):
+        return _fix_empty_spans(tgt_md), "accepted"
 
     src_tokens, src_plain = _split_anchors(src_md)
+    _, plain = _split_anchors(tgt_md)
     total = max(1, len(src_plain))
     length = len(plain)
     out_tokens: list[str] = []
@@ -439,6 +417,21 @@ def _run_parse(
 
     _deterministic_ids(docs)
 
+    # LaTeX bbox 源行几何（P3-0）：必须在译文回填之前采集——post_translate_paragraph
+    # 会把 composition 换成纯文本 run，pdf_line 与源坐标随之丢失。md 路径是主协议，
+    # 无条件采集（legacy extract 按 enable_latex_bbox_layout 门控、默认关闭，
+    # 依赖 reconstruct 的 page_char_objects 兜底；这里直接落精确几何，兜底仅在
+    # 旧 workdir 复用时生效）。失败不阻断解析，reconstruct 仍有兜底路径。
+    from babeldoc.format.pdf.document_il.backend.latex_bbox.source_geometry import (
+        capture_source_line_geometry,
+    )
+
+    try:
+        source_line_geometry = capture_source_line_geometry(docs)
+    except Exception:  # noqa: BLE001 - 几何采集失败只影响 LaTeX 保真，有兜底
+        logger.warning("源行几何采集失败", exc_info=True)
+        source_line_geometry = {}
+
     # 超链接快照：必须在 _deterministic_ids 之后（paragraph_ids 要拿确定性 id，
     # 与 reconstruct 阶段的段落对齐）、Typesetting 之前（字符 box 还是源坐标）。
     link_state = _snapshot_links(temp_pdf_path, workdir, docs)
@@ -495,6 +488,7 @@ def _run_parse(
         "skipped_label_counts": skipped,
         "skipped_rows": skipped_rows,
         "link_state": link_state,
+        "source_line_geometry": source_line_geometry,
         "temp_pdf_path": str(temp_pdf_path),
         "pdf_path": str(pdf_path),
         "lang_in": lang_in,
@@ -719,6 +713,9 @@ def extract_markdown(
                 "page_char_objects": result.get("link_state", {}).get(
                     "page_char_objects", {}
                 ),
+                # 源行几何（P3-0）：译文回填前采集，重建阶段直接复用
+                # （reconstruct --latex-bbox 的首选来源）。
+                "source_line_geometry": result.get("source_line_geometry", {}),
             },
             f,
         )
@@ -878,19 +875,23 @@ def apply_markdown(workdir, translated_md):
             entries.append({"id": pid, "target": translate_input.unicode})
             continue
         src_md = source_markdown
-        # 锚点顺序必须与源文完全一致（防跨 span 搬运）
+        # 锚点多重集必须与源文一致；**顺序不强制**（模型按中文语序重排是合法翻译）
         src_seq = anchor_sequence(src_md)
         tgt_seq = anchor_sequence(body)
         has_empty = bool(
             re.search(r"\[\[S(\d+)\]\]\[\[/S\1\]\]", body)
         )
-        if src_seq != tgt_seq or has_empty:
+        multiset_match = Counter(tgt_seq) == Counter(src_seq)
+        if multiset_match and src_seq != tgt_seq:
+            # 不修复、不阻断，只记录真实发生率（跨 span 搬运需人工观察）
+            warnings.append(f"anchor_reordered: id {pid}")
+        if not multiset_match or has_empty:
             body, mode = repair_target(src_md, body)
             repaired.append({"id": pid, "mode": mode})
-        # 修复后再校（应全部通过；不过则阻断）
-        if anchor_sequence(body) != src_seq:
+        # 修复后再校：多重集不一致才违规（顺序不再视为违规）
+        if Counter(anchor_sequence(body)) != Counter(src_seq):
             violations.append(
-                f"anchor_order_mismatch: id {pid} expected {len(src_seq)} anchors, "
+                f"anchor_multiset_mismatch: id {pid} expected {len(src_seq)} anchors, "
                 f"got {len(anchor_sequence(body))}"
             )
         target = markdown_to_canonical(body)

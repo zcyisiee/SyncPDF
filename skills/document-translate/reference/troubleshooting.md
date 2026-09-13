@@ -43,8 +43,9 @@ bdt call retranslate_ids --workdir <wd> --arg ids='["P03-004","P08-002"]' \
 
 症状：`apply_report.violations` 非空，`ok=false`。
 
-- 看到 `anchor_order_mismatch` → 模型把 span 搬了位置；`apply_translation` 会先做
-  `reorder` 修复，仍失败才报错；
+- 看到 `anchor_multiset_mismatch` → 模型丢了或幻觉了锚点；`apply_translation` 会先做
+  `proportional` 修复，仍失败才报错；多数错位只是 `anchor_reordered` 警告（合法语序），
+  不阻断，但需抽样确认不是跨 span 搬运；
 - 看到 `placeholder_lost/hallucinated` → 对相应 id `retranslate_ids`，feedback 里点名
   缺/多的 token；
 - 输出 PDF 文本层出现 `{v1}` / `<style`（`review_document` 的 `placeholder_leftover`）

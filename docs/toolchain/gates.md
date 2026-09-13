@@ -168,7 +168,8 @@ EOF
 | 违规 | 触发 | 是否阻断 | 说明 |
 |---|---|---|---|
 | `extra_ids` | 译文出现源码没有的段落 id | ✓ | 模型伪造/复制了段落标记 |
-| `anchor_order_mismatch` | 确定性修复后锚点顺序仍与源文不一致 | ✓ | 防跨 span 搬运 |
+| `anchor_multiset_mismatch` | 确定性修复后锚点多重集仍与源文不一致（丢/幻觉锚点） | ✓ | 防丢 content / 幻觉锚点 |
+| `anchor_reordered` | 锚点多重集一致但顺序与源文不同 | ✗ | **尊重模型语序**（中英语序调整是合法翻译），仅记警告观察发生率 |
 | `missing_ids` | 源码有、译文无 | ✗ | **回退原文**（`fallback_ids`），不阻断 |
 | `empty_translation` | 标记在但正文为空 | ✗ | 回退原文 + 警告 |
 | `label_mismatch` | 译文回写的 label 与 anchors 不一致 | ✗ | 警告（`label_mismatches[]`） |
@@ -217,7 +218,31 @@ python -m babeldoc.tools.agent md-apply tmp/gate-protocol tmp/gate-protocol/agen
 
 ---
 
-## 7. 门禁速查表
+## 7. `Latex bbox 排版验收`（软，`--latex-bbox` 专用）
+
+LaTeX bbox 排版的有效性门禁不在 `toolchain_gates.py`（它只管链接/目录/覆盖率/
+协议），而是一组独立指标。对每个回放 workdir 跑：
+
+```bash
+python3 experiments/acceptance_latex.py <workdir> <mono.pdf> [--dual-pdf <dual.pdf>]
+```
+
+产出 `<workdir>/acceptance/acceptance_latex.{json,md}`，判定口径：
+
+| 指标 | 阈值 | 字段 |
+|---|---|---|
+| 应用率 = applied / eligible | ≥ 95% | `application_rate` |
+| 非末行 fill ≥ 0.98 行占比 | ≥ 99%（`lines_nonfinal_merged_*`，基线口径并列上报） | `lines_nonfinal_merged_ge_threshold / _total` |
+| 贴片文本层零差异（容差口径） | 100%（严格字符级计数并列上报） | `text_diff_zero_ratio_non_formula` |
+
+同时看 `latex_bbox_report.json` 的聚合字段（`applied` / `fallback_reasons` /
+`links.uri_set_match` / `reverted`）与逐段 `decisions[]`；目视用
+`experiments/render_compare.py` 出 default vs latex 并排 PNG。
+回放方式与已知限制见 `docs/layout-hypothesis/ACCEPTANCE.md`。
+
+---
+
+## 8. 门禁速查表
 
 | 门禁 | 硬/软 | 阈值 | 产物 | 阻断点 |
 |---|---|---|---|---|
@@ -227,6 +252,7 @@ python -m babeldoc.tools.agent md-apply tmp/gate-protocol tmp/gate-protocol/agen
 | `toc_low_confidence` | 软 | 置信度 ≥ 0.6 | `agent/source/toc.json` | — |
 | protocol（anchors/占位符） | 硬 | 0 违规 | `apply_report.json` / `protocol_report.json` | `apply_markdown` |
 | `layout_lint` | 软 | 记发现 | `agent/layout_lint.json` | — |
+| `acceptance_latex`（`--latex-bbox`） | 软 | 应用率 ≥95%、fill ≥99%、text_diff=0 | `agent/../<pdf名>/latex_bbox_report.json` + `<workdir>/acceptance/` | — |
 
 ```bash
 # 一次跑完全部（推荐）

@@ -175,15 +175,15 @@ skills/document-translate/tools/bin/bdt call translate_document --args-json \
 **出参**
 
 ```jsonc
-{ "ok": true, "applied": 352, "violations": [], "repaired": [{"id":"P09-006","mode":"reorder"}],
-  "warnings": ["empty_style_span: id P12-002 style 1"],
+{ "ok": true, "applied": 352, "violations": [], "repaired": [{"id":"P09-006","mode":"accepted"}],
+  "warnings": ["empty_style_span: id P12-002 style 1", "anchor_reordered: id P09-006"],
   "fallback_ids": [], "label_mismatches": [], "empty_ids": [],
   "markdown_sheet": "<workdir>/agent/translated.jsonl" }
 ```
 
 **副作用**：`agent/translated.jsonl`、`agent/il_translated.applied.json`、
 `agent/apply_report.json`
-**失败码**：`ok=false` + `violations[]`（`anchor_order_mismatch`、`extra_ids` 等），
+**失败码**：`ok=false` + `violations[]`（`anchor_multiset_mismatch`、`extra_ids` 等），
 退出码 1
 
 ### `validate_translation` / `review_protocol`

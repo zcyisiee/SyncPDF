@@ -1,5 +1,6 @@
 import enum
 import logging
+import os
 import shutil
 import tempfile
 import threading
@@ -271,6 +272,17 @@ class TranslationConfig:
         mineru_doclayout_enabled: bool = False,
         mineru_skip_translate_layout_labels=None,
         layout_coverage_threshold: float = 0.005,
+        # LaTeX bbox 排版（实验特性，默认关闭）：
+        # 开启后在 generate 阶段对满足条件的段落用 XeLaTeX 在原 bbox 内
+        # 重新排版并贴回；任何前置能力缺失/编译失败都会回退现有渲染路径。
+        enable_latex_bbox_layout: bool = False,
+        latex_xelatex_path: str | None = None,
+        latex_cjk_font_path: str | None = None,
+        latex_compile_timeout_seconds: float = 45.0,
+        latex_max_compile_workers: int | None = None,
+        latex_fallback_policy: str = "fallback",
+        latex_min_line_fill: float = 0.85,
+        latex_bbox_mode: str = "full",
     ):
         self.translator = translator
         self.term_extraction_translator = term_extraction_translator or translator
@@ -462,6 +474,50 @@ class TranslationConfig:
         # 结构化中间产物落盘到其下（如 source/mineru/provider_ir.json）；
         # None = 由 provider 自行决定（回退到 working_dir）。
         self.provider_ir_dir: Path | None = None
+
+        # LaTeX bbox 排版配置（默认关闭；能力探测失败只告警并回退）。
+        self.enable_latex_bbox_layout = enable_latex_bbox_layout
+        self.latex_xelatex_path = latex_xelatex_path
+        self.latex_cjk_font_path = latex_cjk_font_path
+        self.latex_compile_timeout_seconds = float(latex_compile_timeout_seconds)
+        # 并发默认取 CPU 核数（上限 16）：一期批量编译按核数吃满。
+        if latex_max_compile_workers is None:
+            self.latex_max_compile_workers = min(os.cpu_count() or 1, 16)
+        else:
+            self.latex_max_compile_workers = max(1, int(latex_max_compile_workers))
+        if latex_fallback_policy != "fallback":
+            logger.warning(
+                "未知的 latex_fallback_policy=%s，按 fallback 处理",
+                latex_fallback_policy,
+            )
+        self.latex_fallback_policy = "fallback"
+        self.latex_min_line_fill = float(latex_min_line_fill)
+        # 资格模式：full（默认，正文段落默认走 LaTeX）/ repair（复现旧门禁行为）。
+        if latex_bbox_mode not in ("full", "repair"):
+            logger.warning(
+                "未知的 latex_bbox_mode=%s，按 full 处理",
+                latex_bbox_mode,
+            )
+            latex_bbox_mode = "full"
+        self.latex_bbox_mode = latex_bbox_mode
+        # 翻译前记录的段落源文（debug_id → unicode），供 overlay 判定未翻译段。
+        self.latex_source_texts: dict = {}
+        # 翻译前采集的源行几何（debug_id → n_lines/first_line_dx/baseline_pitch/
+        # ascent_top/line_boxes/space_below_pt），供 P3 缩进/行距/安全下扩使用。
+        self.latex_source_geometry: dict = {}
+        # 源 PDF 路径（fragment 级公式从源区域裁图嵌入）：workflow 用
+        # extract 落的输入副本，high_level 用 get_working_file_path("input.pdf")。
+        self.latex_source_pdf_path: str | None = None
+        # LaTeX overlay 的源几何快照（capture_layout_sources 在 Typesetting
+        # 之前写入）：paragraphs={debug_id: {page/box/font_size/fuse_classes/...}}、
+        # bodies/plain_texts（融合后的 LaTeX body 与期望可见文本）、
+        # fragments（fragment 级公式的源区域裁剪引用）、fusion_stats（分类统计）。
+        # 公式对象按对象身份（id()）对应——Typesetting 原地重定位公式对象但
+        # 保持身份，与 link_remap 的字符身份机制同一假设。
+        self.latex_bbox_state: dict = {}
+        # LaTeX bbox overlay 的统计（PDFCreater 写入）：
+        # attempted/applied/fallback/failed + 原因/耗时/字号缩放明细。
+        self.latex_bbox_stats: dict = {}
 
         if self.ocr_workaround:
             self.remove_non_formula_lines = False

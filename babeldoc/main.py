@@ -393,6 +393,56 @@ def create_parser():
         default=False,
         help="Skip formula offset calculation (default: False)",
     )
+    translation_group.add_argument(
+        "--enable-latex-bbox-layout",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable LaTeX bbox layout (experimental): re-typeset selected "
+            "paragraphs inside their original bbox with XeLaTeX and stamp them "
+            "back. Requires xelatex + CJK font; falls back to the existing "
+            "renderer when unavailable. (default: False)"
+        ),
+    )
+    translation_group.add_argument(
+        "--latex-xelatex-path",
+        default=None,
+        help="Path to the xelatex executable (auto-detected by default).",
+    )
+    translation_group.add_argument(
+        "--latex-cjk-font-path",
+        default=None,
+        help=(
+            "Path to the CJK TrueType font used by LaTeX bbox layout "
+            "(defaults to BabelDOC's bundled Source Han font)."
+        ),
+    )
+    translation_group.add_argument(
+        "--latex-compile-timeout",
+        type=float,
+        default=45.0,
+        help="Per-bbox XeLaTeX compile timeout in seconds. (default: 45.0)",
+    )
+    translation_group.add_argument(
+        "--latex-max-compile-workers",
+        type=int,
+        default=None,
+        help=(
+            "Max concurrent XeLaTeX compile workers for LaTeX bbox layout. "
+            "(default: CPU count, capped at 16)"
+        ),
+    )
+    translation_group.add_argument(
+        "--latex-bbox-mode",
+        choices=("full", "repair"),
+        default="full",
+        help=(
+            "LaTeX bbox layout qualification mode: 'full' (default; body "
+            "paragraphs with >=2 source lines are re-typeset unless they fail) "
+            "or 'repair' (legacy gating: only short-line paragraphs are "
+            "replaced)."
+        ),
+    )
 
     return parser
 
@@ -659,6 +709,12 @@ async def main():
             else None,
             metadata_extra_data=args.metadata_extra_data,
             term_pool_max_workers=args.term_pool_max_workers,
+            enable_latex_bbox_layout=args.enable_latex_bbox_layout,
+            latex_xelatex_path=args.latex_xelatex_path,
+            latex_cjk_font_path=args.latex_cjk_font_path,
+            latex_compile_timeout_seconds=args.latex_compile_timeout,
+            latex_max_compile_workers=args.latex_max_compile_workers,
+            latex_bbox_mode=args.latex_bbox_mode,
         )
 
         def nop(_x):

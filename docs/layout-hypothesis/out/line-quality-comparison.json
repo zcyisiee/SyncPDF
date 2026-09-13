@@ -1,0 +1,3505 @@
+{
+  "2026-f1872": {
+    "pages": [
+      2,
+      3,
+      4,
+      5
+    ],
+    "current_pipeline": {
+      "n_paragraphs": 83,
+      "n_with_short_nonfinal_line": 3,
+      "min_body_fill": 0.185,
+      "median_body_fill": 1.0,
+      "paragraphs": [
+        {
+          "para_id": "P02-001",
+          "layout_label": "plain text",
+          "n_lines": 18,
+          "box_w": 251.944,
+          "n_lines_geometry": 9,
+          "fills": [
+            0.981,
+            1.974,
+            0.991,
+            0.968,
+            1.157,
+            1.529,
+            0.977,
+            1.864,
+            1.254,
+            1.0,
+            1.864,
+            1.352,
+            2.03,
+            1.339,
+            0.999,
+            0.999,
+            2.103,
+            0.976
+          ],
+          "min_body_fill": 0.968,
+          "short_nonfinal_lines": 0,
+          "text_head": "从本质上讲，LLVM 的内联过程遵循一个结构化的流水",
+          "page": 2
+        },
+        {
+          "para_id": "P02-002",
+          "layout_label": "plain text",
+          "n_lines": 14,
+          "box_w": 246.076,
+          "n_lines_geometry": 9,
+          "fills": [
+            1.0,
+            1.83,
+            1.0,
+            1.0,
+            2.118,
+            1.0,
+            1.193,
+            1.0,
+            1.598,
+            1.0,
+            1.0,
+            2.121,
+            1.0,
+            2.098
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "在这项工作中，我们考察了将函数内联滥用为规避基于",
+          "page": 2
+        },
+        {
+          "para_id": "P02-003",
+          "layout_label": "plain text",
+          "n_lines": 18,
+          "box_w": 251.537,
+          "n_lines_geometry": 11,
+          "fills": [
+            0.978,
+            2.053,
+            0.965,
+            2.038,
+            0.978,
+            2.059,
+            0.99,
+            2.052,
+            0.998,
+            2.066,
+            0.988,
+            1.601,
+            0.979,
+            0.95,
+            0.988,
+            2.052,
+            0.988,
+            2.052
+          ],
+          "min_body_fill": 0.95,
+          "short_nonfinal_lines": 0,
+          "text_head": "为了验证我们的论点，我们从两个不同视角定义了九个",
+          "page": 2
+        },
+        {
+          "para_id": "P02-004",
+          "layout_label": "plain text",
+          "n_lines": 14,
+          "box_w": 250.997,
+          "n_lines_geometry": 8,
+          "fills": [
+            1.0,
+            2.076,
+            0.98,
+            2.069,
+            0.98,
+            2.058,
+            0.98,
+            2.056,
+            0.99,
+            2.056,
+            0.98,
+            2.06,
+            0.98,
+            2.056
+          ],
+          "min_body_fill": 0.98,
+          "short_nonfinal_lines": 0,
+          "text_head": "我们的主要发现表明：➀函数内联本身虽然本意是良性",
+          "page": 2
+        },
+        {
+          "para_id": "P02-006",
+          "layout_label": "plain text",
+          "n_lines": 5,
+          "box_w": 252.891,
+          "n_lines_geometry": 4,
+          "fills": [
+            1.0,
+            0.987,
+            1.882,
+            0.973,
+            1.971
+          ],
+          "min_body_fill": 0.973,
+          "short_nonfinal_lines": 0,
+          "text_head": "• 据我们所知，这是首个专门针对函数内联开展的全面研究。",
+          "page": 2
+        },
+        {
+          "para_id": "P02-008",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 12.952,
+          "n_lines_geometry": 1,
+          "fills": [
+            1.0,
+            8.233
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "选项",
+          "page": 2
+        },
+        {
+          "para_id": "P02-014",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 59.089,
+          "n_lines_geometry": 1,
+          "fills": [
+            3.946,
+            1.0
+          ],
+          "min_body_fill": 3.946,
+          "short_nonfinal_lines": 0,
+          "text_head": "显示未执行的内联（例如启发式规则限制、开销过高）",
+          "page": 2
+        },
+        {
+          "para_id": "P02-021",
+          "layout_label": "plain text",
+          "n_lines": 10,
+          "box_w": 251.887,
+          "n_lines_geometry": 11,
+          "fills": [
+            1.0,
+            0.977,
+            0.978,
+            0.997,
+            0.981,
+            0.978,
+            0.963,
+            0.983,
+            0.977,
+            0.991
+          ],
+          "min_body_fill": 0.963,
+          "short_nonfinal_lines": 0,
+          "text_head": "LLVM 架构与中间输出。LLVM（底层虚拟机）[87]是一个",
+          "page": 2
+        },
+        {
+          "para_id": "P02-022",
+          "layout_label": "plain text",
+          "n_lines": 13,
+          "box_w": 250.912,
+          "n_lines_geometry": 14,
+          "fills": [
+            0.981,
+            0.981,
+            0.981,
+            0.981,
+            1.0,
+            0.993,
+            0.982,
+            0.981,
+            0.981,
+            0.984,
+            0.98,
+            0.981,
+            0.981
+          ],
+          "min_body_fill": 0.98,
+          "short_nonfinal_lines": 0,
+          "text_head": "符号与链接类型。编译器在生成二进制文件时维护了几种不",
+          "page": 2
+        },
+        {
+          "para_id": "P02-023",
+          "layout_label": "abandon",
+          "n_lines": 2,
+          "box_w": 228.782,
+          "n_lines_geometry": 2,
+          "fills": [
+            0.902,
+            1.0
+          ],
+          "min_body_fill": 0.902,
+          "short_nonfinal_lines": 0,
+          "text_head": "1https://doi.org/10.5281/zenodo.17759528",
+          "page": 2
+        },
+        {
+          "para_id": "P03-001",
+          "layout_label": "plain text",
+          "n_lines": 2,
+          "box_w": 244.172,
+          "n_lines_geometry": 2,
+          "fills": [
+            2.152,
+            1.0
+          ],
+          "min_body_fill": 2.152,
+          "short_nonfinal_lines": 0,
+          "text_head": "通过构建签名数据库来启发式地处理内联，以识别（已知的）",
+          "page": 3
+        },
+        {
+          "para_id": "P03-002",
+          "layout_label": "plain text",
+          "n_lines": 18,
+          "box_w": 255.541,
+          "n_lines_geometry": 11,
+          "fills": [
+            0.859,
+            2.038,
+            0.968,
+            1.946,
+            0.926,
+            2.033,
+            0.952,
+            2.02,
+            0.963,
+            2.02,
+            0.983,
+            1.316,
+            0.972,
+            0.972,
+            1.0,
+            2.02,
+            0.96,
+            2.02
+          ],
+          "min_body_fill": 0.859,
+          "short_nonfinal_lines": 0,
+          "text_head": "DWARF 信息。基于属性记录格式的调试标准（简称",
+          "page": 3
+        },
+        {
+          "para_id": "P03-003",
+          "layout_label": "plain text",
+          "n_lines": 15,
+          "box_w": 246.076,
+          "n_lines_geometry": 10,
+          "fills": [
+            1.0,
+            2.097,
+            1.0,
+            2.02,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.591,
+            1.0,
+            2.055,
+            1.0,
+            1.519,
+            1.0,
+            1.373
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "函数内联的利与弊。函数内联优化涉及权衡取舍。内联显而",
+          "page": 3
+        },
+        {
+          "para_id": "P03-005",
+          "layout_label": "plain text",
+          "n_lines": 33,
+          "box_w": 259.728,
+          "n_lines_geometry": 17,
+          "fills": [
+            0.947,
+            1.909,
+            0.936,
+            1.981,
+            0.725,
+            1.989,
+            0.999,
+            1.222,
+            1.886,
+            0.953,
+            1.982,
+            0.947,
+            2.023,
+            0.964,
+            1.987,
+            0.894,
+            1.998,
+            1.0,
+            1.929,
+            0.812,
+            2.005,
+            0.94,
+            1.878,
+            0.947,
+            0.947,
+            0.957,
+            0.947,
+            2.038,
+            0.946,
+            1.475,
+            1.93,
+            0.838,
+            1.852
+          ],
+          "min_body_fill": 0.725,
+          "short_nonfinal_lines": 1,
+          "text_head": "相关工作中的函数内联。在调研以往的研究时，我们发现函",
+          "page": 3
+        },
+        {
+          "para_id": "P03-006",
+          "layout_label": "plain text",
+          "n_lines": 8,
+          "box_w": 255.54,
+          "n_lines_geometry": 9,
+          "fills": [
+            1.0,
+            0.959,
+            0.958,
+            0.981,
+            0.889,
+            0.976,
+            0.963,
+            0.963
+          ],
+          "min_body_fill": 0.889,
+          "short_nonfinal_lines": 0,
+          "text_head": "通过构建签名数据库来启发式地处理内联，以识别（已知的）",
+          "page": 3
+        },
+        {
+          "para_id": "P03-007",
+          "layout_label": "plain text",
+          "n_lines": 7,
+          "box_w": 246.076,
+          "n_lines_geometry": 8,
+          "fills": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "威胁模型与假设。我们的威胁模型假设良性的标准构建流程",
+          "page": 3
+        },
+        {
+          "para_id": "P03-009",
+          "layout_label": "plain text",
+          "n_lines": 2,
+          "box_w": 235.456,
+          "n_lines_geometry": 2,
+          "fills": [
+            1.0,
+            0.44
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "图 1 展示了函数内联的完整决策流程，重点聚焦于 LLV",
+          "page": 3
+        },
+        {
+          "para_id": "P03-011",
+          "layout_label": "plain text",
+          "n_lines": 16,
+          "box_w": 255.541,
+          "n_lines_geometry": 16,
+          "fills": [
+            0.973,
+            0.963,
+            0.985,
+            0.983,
+            0.923,
+            0.883,
+            0.956,
+            0.965,
+            0.185,
+            0.86,
+            0.958,
+            1.0,
+            0.963,
+            0.974,
+            0.903,
+            0.981
+          ],
+          "min_body_fill": 0.185,
+          "short_nonfinal_lines": 1,
+          "text_head": "1) 源码中的（间接）直接内联提示：C 和 C++编程语言",
+          "page": 3
+        },
+        {
+          "para_id": "P03-012",
+          "layout_label": "abandon",
+          "n_lines": 3,
+          "box_w": 259.482,
+          "n_lines_geometry": 3,
+          "fills": [
+            1.0,
+            0.436,
+            0.892
+          ],
+          "min_body_fill": 0.436,
+          "short_nonfinal_lines": 1,
+          "text_head": "3__inline 说明符在 C99 标准之前具有相同的用途；但它仍与现代编译器",
+          "page": 3
+        },
+        {
+          "para_id": "P04-001",
+          "layout_label": "fallback_line",
+          "n_lines": 3,
+          "box_w": 74.592,
+          "n_lines_geometry": 1,
+          "fills": [
+            1.0,
+            1.997,
+            4.071
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "源码中的（间接）直接提示",
+          "page": 4
+        },
+        {
+          "para_id": "P04-002",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 52.491,
+          "n_lines_geometry": 1,
+          "fills": [
+            1.0,
+            5.741
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "（属性与指示符）",
+          "page": 4
+        },
+        {
+          "para_id": "P04-003",
+          "layout_label": "fallback_line",
+          "n_lines": 3,
+          "box_w": 26.246,
+          "n_lines_geometry": 1,
+          "fills": [
+            5.826,
+            1.0,
+            3.588
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "alwaysinline",
+          "page": 4
+        },
+        {
+          "para_id": "P04-004",
+          "layout_label": "fallback_line",
+          "n_lines": 4,
+          "box_w": 34.749,
+          "n_lines_geometry": 1,
+          "fills": [
+            2.66,
+            1.0,
+            9.042,
+            2.71
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "l",
+          "page": 4
+        },
+        {
+          "para_id": "P04-005",
+          "layout_label": "fallback_line",
+          "n_lines": 3,
+          "box_w": 32.807,
+          "n_lines_geometry": 1,
+          "fills": [
+            2.87,
+            1.0,
+            9.366
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "In",
+          "page": 4
+        },
+        {
+          "para_id": "P04-006",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 26.206,
+          "n_lines_geometry": 1,
+          "fills": [
+            1.0,
+            8.825
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "（表 II）",
+          "page": 4
+        },
+        {
+          "para_id": "P04-007",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 2.046,
+          "n_lines_geometry": 1,
+          "fills": [
+            172.633,
+            1.121
+          ],
+          "min_body_fill": 172.633,
+          "short_nonfinal_lines": 0,
+          "text_head": "全量 LTO",
+          "page": 4
+        },
+        {
+          "para_id": "P04-014",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 8.094,
+          "n_lines_geometry": 1,
+          "fills": [
+            17.106,
+            0.088
+          ],
+          "min_body_fill": 17.106,
+          "short_nonfinal_lines": 0,
+          "text_head": "l",
+          "page": 4
+        },
+        {
+          "para_id": "P04-015",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 1.867,
+          "n_lines_geometry": 1,
+          "fills": [
+            74.844,
+            1.067
+          ],
+          "min_body_fill": 74.844,
+          "short_nonfinal_lines": 0,
+          "text_head": "F",
+          "page": 4
+        },
+        {
+          "para_id": "P04-037",
+          "layout_label": "fallback_line",
+          "n_lines": 3,
+          "box_w": 28.529,
+          "n_lines_geometry": 1,
+          "fills": [
+            10.735,
+            1.0,
+            6.402
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "第 §VI-C 节",
+          "page": 4
+        },
+        {
+          "para_id": "P04-039",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 17.817,
+          "n_lines_geometry": 1,
+          "fills": [
+            5.644,
+            1.0
+          ],
+          "min_body_fill": 5.644,
+          "short_nonfinal_lines": 0,
+          "text_head": "内联器 Pass",
+          "page": 4
+        },
+        {
+          "para_id": "P04-044",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 17.646,
+          "n_lines_geometry": 1,
+          "fills": [
+            1.0,
+            9.766
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "(Clang)",
+          "page": 4
+        },
+        {
+          "para_id": "P04-045",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 59.551,
+          "n_lines_geometry": 1,
+          "fills": [
+            1.892,
+            1.0
+          ],
+          "min_body_fill": 1.892,
+          "short_nonfinal_lines": 0,
+          "text_head": "链接时优化",
+          "page": 4
+        },
+        {
+          "para_id": "P04-046",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 28.087,
+          "n_lines_geometry": 1,
+          "fills": [
+            5.401,
+            1.0
+          ],
+          "min_body_fill": 5.401,
+          "short_nonfinal_lines": 0,
+          "text_head": "第 §VI-C 节",
+          "page": 4
+        },
+        {
+          "para_id": "P04-048",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 10.892,
+          "n_lines_geometry": 1,
+          "fills": [
+            13.054,
+            1.0
+          ],
+          "min_body_fill": 13.054,
+          "short_nonfinal_lines": 0,
+          "text_head": "链接",
+          "page": 4
+        },
+        {
+          "para_id": "P04-049",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 18.369,
+          "n_lines_geometry": 1,
+          "fills": [
+            5.646,
+            1.0
+          ],
+          "min_body_fill": 5.646,
+          "short_nonfinal_lines": 0,
+          "text_head": "(LT",
+          "page": 4
+        },
+        {
+          "para_id": "P04-050",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 39.309,
+          "n_lines_geometry": 1,
+          "fills": [
+            1.0,
+            2.811
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "LLVM 开销模型",
+          "page": 4
+        },
+        {
+          "para_id": "P04-057",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 7.078,
+          "n_lines_geometry": 2,
+          "fills": [
+            1.0,
+            0.696
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "(LT",
+          "page": 4
+        },
+        {
+          "para_id": "P04-063",
+          "layout_label": "figure_caption",
+          "n_lines": 4,
+          "box_w": 519.665,
+          "n_lines_geometry": 5,
+          "fills": [
+            1.0,
+            0.997,
+            0.974,
+            0.989
+          ],
+          "min_body_fill": 0.974,
+          "short_nonfinal_lines": 0,
+          "text_head": "图 1：LLVM 工具链中整个函数内联流程概览[87]。我们通过将影响内联的因素",
+          "page": 4
+        },
+        {
+          "para_id": "P04-086",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 11.256,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.999,
+            5.197
+          ],
+          "min_body_fill": 0.999,
+          "short_nonfinal_lines": 0,
+          "text_head": "Opt",
+          "page": 4
+        },
+        {
+          "para_id": "P04-090",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 11.256,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.999,
+            5.197
+          ],
+          "min_body_fill": 0.999,
+          "short_nonfinal_lines": 0,
+          "text_head": "Opt",
+          "page": 4
+        },
+        {
+          "para_id": "P04-094",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 11.256,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.999,
+            5.197
+          ],
+          "min_body_fill": 0.999,
+          "short_nonfinal_lines": 0,
+          "text_head": "Opt",
+          "page": 4
+        },
+        {
+          "para_id": "P04-098",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 11.256,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.999,
+            5.197
+          ],
+          "min_body_fill": 0.999,
+          "short_nonfinal_lines": 0,
+          "text_head": "Opt",
+          "page": 4
+        },
+        {
+          "para_id": "P04-102",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 11.256,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.999,
+            5.197
+          ],
+          "min_body_fill": 0.999,
+          "short_nonfinal_lines": 0,
+          "text_head": "Opt",
+          "page": 4
+        },
+        {
+          "para_id": "P04-106",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 11.256,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.999,
+            5.197
+          ],
+          "min_body_fill": 0.999,
+          "short_nonfinal_lines": 0,
+          "text_head": "Opt",
+          "page": 4
+        },
+        {
+          "para_id": "P04-110",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 11.256,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.999,
+            5.197
+          ],
+          "min_body_fill": 0.999,
+          "short_nonfinal_lines": 0,
+          "text_head": "Opt",
+          "page": 4
+        },
+        {
+          "para_id": "P04-114",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 11.256,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.999,
+            4.878
+          ],
+          "min_body_fill": 0.999,
+          "short_nonfinal_lines": 0,
+          "text_head": "Opt",
+          "page": 4
+        },
+        {
+          "para_id": "P04-118",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 11.256,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.999,
+            5.197
+          ],
+          "min_body_fill": 0.999,
+          "short_nonfinal_lines": 0,
+          "text_head": "Opt",
+          "page": 4
+        },
+        {
+          "para_id": "P04-122",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 11.256,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.999,
+            5.197
+          ],
+          "min_body_fill": 0.999,
+          "short_nonfinal_lines": 0,
+          "text_head": "Opt",
+          "page": 4
+        },
+        {
+          "para_id": "P04-126",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 11.256,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.999,
+            5.197
+          ],
+          "min_body_fill": 0.999,
+          "short_nonfinal_lines": 0,
+          "text_head": "Opt",
+          "page": 4
+        },
+        {
+          "para_id": "P04-130",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 11.256,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.999,
+            5.197
+          ],
+          "min_body_fill": 0.999,
+          "short_nonfinal_lines": 0,
+          "text_head": "Opt",
+          "page": 4
+        },
+        {
+          "para_id": "P04-133",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 110.695,
+          "n_lines_geometry": 1,
+          "fills": [
+            1.0,
+            1.988
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "-inline-enable-cost-benefit-analysis",
+          "page": 4
+        },
+        {
+          "para_id": "P04-134",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 11.256,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.999,
+            4.917
+          ],
+          "min_body_fill": 0.999,
+          "short_nonfinal_lines": 0,
+          "text_head": "Opt",
+          "page": 4
+        },
+        {
+          "para_id": "P04-137",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 47.912,
+          "n_lines_geometry": 1,
+          "fills": [
+            1.0,
+            4.593
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "-inline-cost-full",
+          "page": 4
+        },
+        {
+          "para_id": "P04-138",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 11.256,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.999,
+            4.917
+          ],
+          "min_body_fill": 0.999,
+          "short_nonfinal_lines": 0,
+          "text_head": "Opt",
+          "page": 4
+        },
+        {
+          "para_id": "P04-142",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 11.256,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.999,
+            5.197
+          ],
+          "min_body_fill": 0.999,
+          "short_nonfinal_lines": 0,
+          "text_head": "Opt",
+          "page": 4
+        },
+        {
+          "para_id": "P04-145",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 92.684,
+          "n_lines_geometry": 1,
+          "fills": [
+            1.0,
+            2.374
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "-disable-gep-const-evaluation",
+          "page": 4
+        },
+        {
+          "para_id": "P04-146",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 11.256,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.999,
+            4.917
+          ],
+          "min_body_fill": 0.999,
+          "short_nonfinal_lines": 0,
+          "text_head": "Opt",
+          "page": 4
+        },
+        {
+          "para_id": "P04-149",
+          "layout_label": "plain text",
+          "n_lines": 2,
+          "box_w": 246.152,
+          "n_lines_geometry": 2,
+          "fills": [
+            1.0,
+            2.123
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "__attribute__((optnone)) 属性会禁用函数的所有优化以及内",
+          "page": 4
+        },
+        {
+          "para_id": "P04-150",
+          "layout_label": "plain text",
+          "n_lines": 11,
+          "box_w": 252.777,
+          "n_lines_geometry": 7,
+          "fills": [
+            1.0,
+            2.042,
+            0.956,
+            2.056,
+            0.973,
+            2.044,
+            0.975,
+            1.353,
+            0.963,
+            0.993,
+            1.489
+          ],
+          "min_body_fill": 0.956,
+          "short_nonfinal_lines": 0,
+          "text_head": "2) 优化级别：编译器优化级别极大地影响 IR 和机器代码",
+          "page": 4
+        },
+        {
+          "para_id": "P04-151",
+          "layout_label": "plain text",
+          "n_lines": 2,
+          "box_w": 249.54,
+          "n_lines_geometry": 2,
+          "fills": [
+            1.0,
+            2.083
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "3) 编译器选项：LLVM [87]提供了多种选项，用于为",
+          "page": 4
+        },
+        {
+          "para_id": "P04-152",
+          "layout_label": "plain text",
+          "n_lines": 6,
+          "box_w": 252.353,
+          "n_lines_geometry": 7,
+          "fills": [
+            1.0,
+            1.0,
+            0.964,
+            0.972,
+            0.986,
+            0.974
+          ],
+          "min_body_fill": 0.964,
+          "short_nonfinal_lines": 0,
+          "text_head": "控制 LLVM 中函数内联行为的全面（与风格无关的）选项5。",
+          "page": 4
+        },
+        {
+          "para_id": "P04-155",
+          "layout_label": "abandon",
+          "n_lines": 2,
+          "box_w": 254.193,
+          "n_lines_geometry": 3,
+          "fills": [
+            0.982,
+            0.973
+          ],
+          "min_body_fill": 0.982,
+          "short_nonfinal_lines": 0,
+          "text_head": "5支持的选项可通过--help-hidden查看。在 Clang 中，适用于 L",
+          "page": 4
+        },
+        {
+          "para_id": "P05-004",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 17.839,
+          "n_lines_geometry": 1,
+          "fills": [
+            1.0,
+            9.343
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "基本块",
+          "page": 5
+        },
+        {
+          "para_id": "P05-009",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 15.022,
+          "n_lines_geometry": 1,
+          "fills": [
+            1.0,
+            2.248
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "调用者",
+          "page": 5
+        },
+        {
+          "para_id": "P05-011",
+          "layout_label": "fallback_line",
+          "n_lines": 3,
+          "box_w": 12.205,
+          "n_lines_geometry": 2,
+          "fills": [
+            1.0,
+            35.174,
+            0.333
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "被调用",
+          "page": 5
+        },
+        {
+          "para_id": "P05-015",
+          "layout_label": "fallback_line",
+          "n_lines": 4,
+          "box_w": 12.205,
+          "n_lines_geometry": 2,
+          "fills": [
+            1.0,
+            36.616,
+            26.357,
+            0.333
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "被调用",
+          "page": 5
+        },
+        {
+          "para_id": "P05-021",
+          "layout_label": "fallback_line",
+          "n_lines": 3,
+          "box_w": 17.839,
+          "n_lines_geometry": 1,
+          "fills": [
+            23.106,
+            1.0,
+            4.473
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "基于目标特定架构的调整",
+          "page": 5
+        },
+        {
+          "para_id": "P05-022",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 35.0,
+          "n_lines_geometry": 1,
+          "fills": [
+            10.497,
+            1.0
+          ],
+          "min_body_fill": 10.497,
+          "short_nonfinal_lines": 0,
+          "text_head": "基于目标特定架构的调整",
+          "page": 5
+        },
+        {
+          "para_id": "P05-035",
+          "layout_label": "plain text",
+          "n_lines": 22,
+          "box_w": 252.37,
+          "n_lines_geometry": 7,
+          "fills": [
+            1.939,
+            0.977,
+            1.775,
+            1.754,
+            1.0,
+            1.831,
+            1.638,
+            0.974,
+            1.386,
+            1.686,
+            0.975,
+            1.747,
+            0.993,
+            1.348,
+            1.838,
+            1.592,
+            1.695,
+            1.373,
+            1.599,
+            1.808,
+            0.975,
+            1.316
+          ],
+          "min_body_fill": 0.974,
+          "short_nonfinal_lines": 0,
+          "text_head": "是否应用？",
+          "page": 5
+        },
+        {
+          "para_id": "P05-036",
+          "layout_label": "plain text",
+          "n_lines": 11,
+          "box_w": 251.651,
+          "n_lines_geometry": 7,
+          "fills": [
+            0.97,
+            0.977,
+            2.011,
+            0.977,
+            2.039,
+            1.0,
+            2.063,
+            0.965,
+            2.064,
+            0.979,
+            2.062
+          ],
+          "min_body_fill": 0.965,
+          "short_nonfinal_lines": 0,
+          "text_head": "2) LLVM 内联器 Pass：LLVM 提供了能够分析和变换",
+          "page": 5
+        },
+        {
+          "para_id": "P05-039",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 33.087,
+          "n_lines_geometry": 1,
+          "fills": [
+            3.459,
+            1.0
+          ],
+          "min_body_fill": 3.459,
+          "short_nonfinal_lines": 0,
+          "text_head": "<",
+          "page": 5
+        },
+        {
+          "para_id": "P05-043",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 12.225,
+          "n_lines_geometry": 1,
+          "fills": [
+            6.078,
+            1.0
+          ],
+          "min_body_fill": 6.078,
+          "short_nonfinal_lines": 0,
+          "text_head": "最终",
+          "page": 5
+        },
+        {
+          "para_id": "P05-049",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 15.476,
+          "n_lines_geometry": 1,
+          "fills": [
+            1.0,
+            3.16
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "调用者",
+          "page": 5
+        },
+        {
+          "para_id": "P05-059",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 9.457,
+          "n_lines_geometry": 1,
+          "fills": [
+            1.023,
+            6.186
+          ],
+          "min_body_fill": 1.023,
+          "short_nonfinal_lines": 0,
+          "text_head": "YES",
+          "page": 5
+        },
+        {
+          "para_id": "P05-061",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 27.377,
+          "n_lines_geometry": 1,
+          "fills": [
+            2.778,
+            1.0
+          ],
+          "min_body_fill": 2.778,
+          "short_nonfinal_lines": 0,
+          "text_head": "初始阈值= ?",
+          "page": 5
+        },
+        {
+          "para_id": "P05-063",
+          "layout_label": "plain text",
+          "n_lines": 6,
+          "box_w": 249.183,
+          "n_lines_geometry": 5,
+          "fills": [
+            0.95,
+            1.933,
+            0.961,
+            1.0,
+            0.995,
+            2.052
+          ],
+          "min_body_fill": 0.95,
+          "short_nonfinal_lines": 0,
+          "text_head": "控制流图简化（SimplifyCFG Pass [70]）、标量替换聚合体",
+          "page": 5
+        },
+        {
+          "para_id": "P05-064",
+          "layout_label": "plain text",
+          "n_lines": 11,
+          "box_w": 261.115,
+          "n_lines_geometry": 7,
+          "fills": [
+            0.953,
+            1.904,
+            0.929,
+            1.991,
+            0.942,
+            1.995,
+            1.0,
+            1.914,
+            0.942,
+            1.523,
+            0.938
+          ],
+          "min_body_fill": 0.929,
+          "short_nonfinal_lines": 0,
+          "text_head": "3) 开销模型：LLVM 中的开销模型首先从预定义的绝不",
+          "page": 5
+        },
+        {
+          "para_id": "P05-065",
+          "layout_label": "plain text",
+          "n_lines": 2,
+          "box_w": 238.87,
+          "n_lines_geometry": 2,
+          "fills": [
+            1.0,
+            2.159
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "阈值计算。在每个调用点，阈值由优化级别初始化（例如-Oz ",
+          "page": 5
+        },
+        {
+          "para_id": "P05-067",
+          "layout_label": "fallback_line",
+          "n_lines": 3,
+          "box_w": 12.818,
+          "n_lines_geometry": 1,
+          "fills": [
+            6.556,
+            1.0,
+            4.03
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "条件",
+          "page": 5
+        },
+        {
+          "para_id": "P05-068",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 12.818,
+          "n_lines_geometry": 1,
+          "fills": [
+            3.526,
+            1.0
+          ],
+          "min_body_fill": 3.526,
+          "short_nonfinal_lines": 0,
+          "text_head": "条件",
+          "page": 5
+        },
+        {
+          "para_id": "P05-092",
+          "layout_label": "figure_caption",
+          "n_lines": 6,
+          "box_w": 249.493,
+          "n_lines_geometry": 7,
+          "fills": [
+            0.946,
+            0.975,
+            0.999,
+            1.0,
+            0.998,
+            0.986
+          ],
+          "min_body_fill": 0.946,
+          "short_nonfinal_lines": 0,
+          "text_head": "图 2：LLVM 中用于判定函数是否内联的开销模型概览。",
+          "page": 5
+        },
+        {
+          "para_id": "P05-093",
+          "layout_label": "plain text",
+          "n_lines": 7,
+          "box_w": 251.859,
+          "n_lines_geometry": 8,
+          "fills": [
+            0.958,
+            0.998,
+            1.0,
+            0.902,
+            0.992,
+            0.997,
+            0.913
+          ],
+          "min_body_fill": 0.902,
+          "short_nonfinal_lines": 0,
+          "text_head": "-O1→225、-O2→225、-O3→250）。此外，CGSCC ",
+          "page": 5
+        },
+        {
+          "para_id": "P05-094",
+          "layout_label": "plain text",
+          "n_lines": 2,
+          "box_w": 245.578,
+          "n_lines_geometry": 3,
+          "fills": [
+            1.0,
+            1.0
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "开销计算。默认情况下，开销初始化为零。当被调用者是静态函数",
+          "page": 5
+        }
+      ]
+    },
+    "latex_hypothesis": {
+      "n_paragraphs": 10,
+      "n_with_short_nonfinal_line": 0,
+      "min_body_fill": 0.996,
+      "median_body_fill": 0.996,
+      "n_fits": 9,
+      "total_seconds": 4.634,
+      "paragraphs": [
+        {
+          "para_id": "P02-001",
+          "box_w": 252.552,
+          "box_h": 143.233,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 9,
+          "fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.711
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.459,
+          "page": 2
+        },
+        {
+          "para_id": "P02-002",
+          "box_w": 252.084,
+          "box_h": 143.642,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 9,
+          "fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.458,
+          "page": 2
+        },
+        {
+          "para_id": "P02-003",
+          "box_w": 252.093,
+          "box_h": 165.56,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 11,
+          "fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.93
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.463,
+          "page": 2
+        },
+        {
+          "para_id": "P02-004",
+          "box_w": 251.93,
+          "box_h": 121.724,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 8,
+          "fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.473
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.458,
+          "page": 2
+        },
+        {
+          "para_id": "P03-003",
+          "box_w": 252.555,
+          "box_h": 165.56,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 10,
+          "fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.904
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.475,
+          "page": 3
+        },
+        {
+          "para_id": "P03-007",
+          "box_w": 252.094,
+          "box_h": 132.673,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 9,
+          "fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.236
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.471,
+          "page": 3
+        },
+        {
+          "para_id": "P04-154",
+          "box_w": 251.816,
+          "box_h": 34.053,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 2,
+          "fills": [
+            0.996,
+            0.863
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.465,
+          "page": 4
+        },
+        {
+          "para_id": "P05-035",
+          "box_w": 252.443,
+          "box_h": 99.806,
+          "fits": false,
+          "fits_reason": "vertical-overflow",
+          "n_lines": 7,
+          "fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.888
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.464,
+          "page": 5
+        },
+        {
+          "para_id": "P05-064",
+          "box_w": 251.843,
+          "box_h": 97.765,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 6,
+          "fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.461,
+          "page": 5
+        },
+        {
+          "para_id": "P05-094",
+          "box_w": 251.695,
+          "box_h": 34.053,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 2,
+          "fills": [
+            0.996,
+            0.996
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.46,
+          "page": 5
+        }
+      ]
+    },
+    "paired": {
+      "n_paired_paragraphs": 9,
+      "n_current_has_short_line": 0,
+      "n_latex_has_short_line": 0,
+      "paragraphs": [
+        {
+          "para_id": "P02-001",
+          "page": 2,
+          "current_n_lines": 18,
+          "latex_n_lines": 9,
+          "current_min_body_fill": 0.968,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            0.981,
+            1.974,
+            0.991,
+            0.968,
+            1.157,
+            1.529,
+            0.977,
+            1.864,
+            1.254,
+            1.0,
+            1.864,
+            1.352,
+            2.03,
+            1.339,
+            0.999,
+            0.999,
+            2.103,
+            0.976
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.711
+          ],
+          "text_head": "从本质上讲，LLVM 的内联过程遵循一个结构化的流水"
+        },
+        {
+          "para_id": "P02-002",
+          "page": 2,
+          "current_n_lines": 14,
+          "latex_n_lines": 9,
+          "current_min_body_fill": 1.0,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            1.0,
+            1.83,
+            1.0,
+            1.0,
+            2.118,
+            1.0,
+            1.193,
+            1.0,
+            1.598,
+            1.0,
+            1.0,
+            2.121,
+            1.0,
+            2.098
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996
+          ],
+          "text_head": "在这项工作中，我们考察了将函数内联滥用为规避基于"
+        },
+        {
+          "para_id": "P02-003",
+          "page": 2,
+          "current_n_lines": 18,
+          "latex_n_lines": 11,
+          "current_min_body_fill": 0.95,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            0.978,
+            2.053,
+            0.965,
+            2.038,
+            0.978,
+            2.059,
+            0.99,
+            2.052,
+            0.998,
+            2.066,
+            0.988,
+            1.601,
+            0.979,
+            0.95,
+            0.988,
+            2.052,
+            0.988,
+            2.052
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.93
+          ],
+          "text_head": "为了验证我们的论点，我们从两个不同视角定义了九个"
+        },
+        {
+          "para_id": "P02-004",
+          "page": 2,
+          "current_n_lines": 14,
+          "latex_n_lines": 8,
+          "current_min_body_fill": 0.98,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            1.0,
+            2.076,
+            0.98,
+            2.069,
+            0.98,
+            2.058,
+            0.98,
+            2.056,
+            0.99,
+            2.056,
+            0.98,
+            2.06,
+            0.98,
+            2.056
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.473
+          ],
+          "text_head": "我们的主要发现表明：➀函数内联本身虽然本意是良性"
+        },
+        {
+          "para_id": "P03-003",
+          "page": 3,
+          "current_n_lines": 15,
+          "latex_n_lines": 10,
+          "current_min_body_fill": 1.0,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            1.0,
+            2.097,
+            1.0,
+            2.02,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.591,
+            1.0,
+            2.055,
+            1.0,
+            1.519,
+            1.0,
+            1.373
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.904
+          ],
+          "text_head": "函数内联的利与弊。函数内联优化涉及权衡取舍。内联显而"
+        },
+        {
+          "para_id": "P03-007",
+          "page": 3,
+          "current_n_lines": 7,
+          "latex_n_lines": 9,
+          "current_min_body_fill": 1.0,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.236
+          ],
+          "text_head": "威胁模型与假设。我们的威胁模型假设良性的标准构建流程"
+        },
+        {
+          "para_id": "P05-035",
+          "page": 5,
+          "current_n_lines": 22,
+          "latex_n_lines": 7,
+          "current_min_body_fill": 0.974,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            1.939,
+            0.977,
+            1.775,
+            1.754,
+            1.0,
+            1.831,
+            1.638,
+            0.974,
+            1.386,
+            1.686,
+            0.975,
+            1.747,
+            0.993,
+            1.348,
+            1.838,
+            1.592,
+            1.695,
+            1.373,
+            1.599,
+            1.808,
+            0.975,
+            1.316
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.888
+          ],
+          "text_head": "是否应用？"
+        },
+        {
+          "para_id": "P05-064",
+          "page": 5,
+          "current_n_lines": 11,
+          "latex_n_lines": 6,
+          "current_min_body_fill": 0.929,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            0.953,
+            1.904,
+            0.929,
+            1.991,
+            0.942,
+            1.995,
+            1.0,
+            1.914,
+            0.942,
+            1.523,
+            0.938
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996
+          ],
+          "text_head": "3) 开销模型：LLVM 中的开销模型首先从预定义的绝不"
+        },
+        {
+          "para_id": "P05-094",
+          "page": 5,
+          "current_n_lines": 2,
+          "latex_n_lines": 2,
+          "current_min_body_fill": 1.0,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            1.0,
+            1.0
+          ],
+          "latex_fills": [
+            0.996,
+            0.996
+          ],
+          "text_head": "开销计算。默认情况下，开销初始化为零。当被调用者是静态函数"
+        }
+      ]
+    }
+  },
+  "2312-04432": {
+    "pages": [
+      2,
+      3,
+      4,
+      5
+    ],
+    "current_pipeline": {
+      "n_paragraphs": 40,
+      "n_with_short_nonfinal_line": 7,
+      "min_body_fill": 0.293,
+      "median_body_fill": 0.966,
+      "paragraphs": [
+        {
+          "para_id": "P02-001",
+          "layout_label": "plain text",
+          "n_lines": 21,
+          "box_w": 260.512,
+          "n_lines_geometry": 11,
+          "fills": [
+            0.956,
+            1.958,
+            0.956,
+            1.966,
+            0.956,
+            1.274,
+            0.956,
+            1.947,
+            0.929,
+            1.941,
+            0.956,
+            1.959,
+            0.956,
+            1.987,
+            0.956,
+            1.942,
+            0.956,
+            1.968,
+            0.956,
+            1.968,
+            1.0
+          ],
+          "min_body_fill": 0.929,
+          "short_nonfinal_lines": 0,
+          "text_head": "这些局限性凸显了针对投毒攻击开发更为通用、鲁棒且有",
+          "page": 2
+        },
+        {
+          "para_id": "P02-002",
+          "layout_label": "plain text",
+          "n_lines": 15,
+          "box_w": 259.027,
+          "n_lines_geometry": 10,
+          "fills": [
+            0.923,
+            1.977,
+            0.97,
+            0.962,
+            0.962,
+            1.214,
+            1.0,
+            1.947,
+            0.962,
+            1.918,
+            0.962,
+            1.975,
+            0.962,
+            1.966,
+            0.962
+          ],
+          "min_body_fill": 0.923,
+          "short_nonfinal_lines": 0,
+          "text_head": "目标与贡献。为了解决现有防御的局限性，我们提出了",
+          "page": 2
+        },
+        {
+          "para_id": "P02-003",
+          "layout_label": "plain text",
+          "n_lines": 12,
+          "box_w": 249.065,
+          "n_lines_geometry": 5,
+          "fills": [
+            0.949,
+            1.63,
+            0.96,
+            0.96,
+            1.536,
+            0.96,
+            1.599,
+            1.552,
+            1.668,
+            1.681,
+            1.483,
+            2.022
+          ],
+          "min_body_fill": 0.949,
+          "short_nonfinal_lines": 0,
+          "text_head": "•我们提出了FreqFed，这是一种针对联邦学习投毒攻",
+          "page": 2
+        },
+        {
+          "para_id": "P02-004",
+          "layout_label": "plain text",
+          "n_lines": 18,
+          "box_w": 239.391,
+          "n_lines_geometry": 11,
+          "fills": [
+            0.817,
+            1.174,
+            0.982,
+            0.977,
+            1.496,
+            0.979,
+            0.999,
+            2.095,
+            0.852,
+            2.079,
+            1.0,
+            2.137,
+            0.999,
+            1.929,
+            0.94,
+            2.073,
+            0.966,
+            2.095
+          ],
+          "min_body_fill": 0.817,
+          "short_nonfinal_lines": 0,
+          "text_head": "• 我们采用频域分析方法——离散余弦变换（",
+          "page": 2
+        },
+        {
+          "para_id": "P02-005",
+          "layout_label": "plain text",
+          "n_lines": 2,
+          "box_w": 229.14,
+          "n_lines_geometry": 3,
+          "fills": [
+            0.991,
+            1.0
+          ],
+          "min_body_fill": 0.991,
+          "short_nonfinal_lines": 0,
+          "text_head": "分量融入到我们的自动聚类方法（HDBSCAN）中，",
+          "page": 2
+        },
+        {
+          "para_id": "P02-006",
+          "layout_label": "plain text",
+          "n_lines": 7,
+          "box_w": 244.084,
+          "n_lines_geometry": 8,
+          "fills": [
+            0.958,
+            0.951,
+            0.97,
+            1.0,
+            0.952,
+            0.98,
+            0.98
+          ],
+          "min_body_fill": 0.951,
+          "short_nonfinal_lines": 0,
+          "text_head": "•我们在不同应用领域（如图像与图分类 IC、GC、词",
+          "page": 2
+        },
+        {
+          "para_id": "P02-010",
+          "layout_label": "plain text",
+          "n_lines": 10,
+          "box_w": 249.184,
+          "n_lines_geometry": 9,
+          "fills": [
+            0.968,
+            0.938,
+            0.998,
+            0.988,
+            0.615,
+            0.986,
+            1.0,
+            0.957,
+            1.0,
+            0.616
+          ],
+          "min_body_fill": 0.615,
+          "short_nonfinal_lines": 1,
+          "text_head": "联邦学习（FL）允许多个客户端在不共享自身数据的情",
+          "page": 2
+        },
+        {
+          "para_id": "P02-013",
+          "layout_label": "plain text",
+          "n_lines": 6,
+          "box_w": 259.027,
+          "n_lines_geometry": 7,
+          "fills": [
+            0.962,
+            0.946,
+            1.0,
+            0.808,
+            0.941,
+            0.962
+          ],
+          "min_body_fill": 0.808,
+          "short_nonfinal_lines": 0,
+          "text_head": "联邦学习中的投毒攻击大致可分为两类：非目标性攻击与",
+          "page": 2
+        },
+        {
+          "para_id": "P03-002",
+          "layout_label": "plain text",
+          "n_lines": 12,
+          "box_w": 249.065,
+          "n_lines_geometry": 7,
+          "fills": [
+            0.993,
+            2.056,
+            1.0,
+            2.056,
+            0.971,
+            2.056,
+            0.998,
+            2.056,
+            0.985,
+            2.047,
+            1.0,
+            1.186
+          ],
+          "min_body_fill": 0.971,
+          "short_nonfinal_lines": 0,
+          "text_head": "在信号处理领域，离散余弦变换（DCT）[36]被用于将信",
+          "page": 3
+        },
+        {
+          "para_id": "P03-003",
+          "layout_label": "plain text",
+          "n_lines": 11,
+          "box_w": 249.184,
+          "n_lines_geometry": 7,
+          "fills": [
+            1.0,
+            2.057,
+            0.998,
+            2.017,
+            0.968,
+            1.569,
+            1.0,
+            1.0,
+            0.995,
+            2.029,
+            0.485
+          ],
+          "min_body_fill": 0.968,
+          "short_nonfinal_lines": 0,
+          "text_head": "在数学上，DCT 变换是可逆函数，它将包含N个实数的",
+          "page": 3
+        },
+        {
+          "para_id": "P03-006",
+          "layout_label": "plain text",
+          "n_lines": 22,
+          "box_w": 249.663,
+          "n_lines_geometry": 13,
+          "fills": [
+            0.999,
+            2.039,
+            0.998,
+            2.053,
+            0.998,
+            1.734,
+            1.0,
+            0.984,
+            2.087,
+            0.998,
+            2.053,
+            1.0,
+            2.053,
+            1.0,
+            1.415,
+            0.998,
+            0.998,
+            1.614,
+            1.0,
+            1.943,
+            0.998,
+            2.052
+          ],
+          "min_body_fill": 0.984,
+          "short_nonfinal_lines": 0,
+          "text_head": "HDBSCAN [29]是一种先进的基于密度的聚类技术，它",
+          "page": 3
+        },
+        {
+          "para_id": "P03-007",
+          "layout_label": "plain text",
+          "n_lines": 2,
+          "box_w": 219.458,
+          "n_lines_geometry": 2,
+          "fills": [
+            1.0,
+            0.29
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "3基于密度的带噪声层次空间聚类应用算法（Hierarchical Density",
+          "page": 3
+        },
+        {
+          "para_id": "P03-009",
+          "layout_label": "plain text",
+          "n_lines": 6,
+          "box_w": 249.404,
+          "n_lines_geometry": 7,
+          "fills": [
+            0.999,
+            0.999,
+            0.999,
+            0.999,
+            0.999,
+            0.99
+          ],
+          "min_body_fill": 0.999,
+          "short_nonfinal_lines": 0,
+          "text_head": "攻击者的目标要么是使全局模型失效并最终导致拒绝服务",
+          "page": 3
+        },
+        {
+          "para_id": "P03-011",
+          "layout_label": "plain text",
+          "n_lines": 5,
+          "box_w": 239.999,
+          "n_lines_geometry": 4,
+          "fills": [
+            0.432,
+            1.0,
+            0.996,
+            0.955,
+            0.489
+          ],
+          "min_body_fill": 0.432,
+          "short_nonfinal_lines": 1,
+          "text_head": "•完全控制多达kA<",
+          "page": 3
+        },
+        {
+          "para_id": "P03-012",
+          "layout_label": "plain text",
+          "n_lines": 3,
+          "box_w": 239.102,
+          "n_lines_geometry": 4,
+          "fills": [
+            0.971,
+            1.0,
+            1.0
+          ],
+          "min_body_fill": 0.971,
+          "short_nonfinal_lines": 0,
+          "text_head": "•在将所得本地模型提交给全局服务器进行聚合之前操",
+          "page": 3
+        },
+        {
+          "para_id": "P03-013",
+          "layout_label": "plain text",
+          "n_lines": 6,
+          "box_w": 245.576,
+          "n_lines_geometry": 7,
+          "fills": [
+            1.0,
+            0.974,
+            0.974,
+            0.993,
+            0.969,
+            0.974
+          ],
+          "min_body_fill": 0.969,
+          "short_nonfinal_lines": 0,
+          "text_head": "• 通过在损失函数中添加正则化项来恶意构造模型更新，",
+          "page": 3
+        },
+        {
+          "para_id": "P03-014",
+          "layout_label": "plain text",
+          "n_lines": 2,
+          "box_w": 239.102,
+          "n_lines_geometry": 3,
+          "fills": [
+            0.985,
+            1.0
+          ],
+          "min_body_fill": 0.985,
+          "short_nonfinal_lines": 0,
+          "text_head": "• 在各轮次间改变其本地训练策略，并可在特定的训练",
+          "page": 3
+        },
+        {
+          "para_id": "P03-015",
+          "layout_label": "plain text",
+          "n_lines": 3,
+          "box_w": 247.469,
+          "n_lines_geometry": 4,
+          "fills": [
+            1.0,
+            0.966,
+            0.966
+          ],
+          "min_body_fill": 0.966,
+          "short_nonfinal_lines": 0,
+          "text_head": "•通过手动微调攻击参数（即投毒模型率、投毒数据率、",
+          "page": 3
+        },
+        {
+          "para_id": "P03-017",
+          "layout_label": "plain text",
+          "n_lines": 4,
+          "box_w": 249.394,
+          "n_lines_geometry": 5,
+          "fills": [
+            0.891,
+            1.0,
+            0.999,
+            1.0
+          ],
+          "min_body_fill": 0.891,
+          "short_nonfinal_lines": 0,
+          "text_head": "本节介绍FreqFed的设计与实现。首先，我们讨论",
+          "page": 3
+        },
+        {
+          "para_id": "P04-002",
+          "layout_label": "plain text",
+          "n_lines": 17,
+          "box_w": 255.441,
+          "n_lines_geometry": 9,
+          "fills": [
+            0.947,
+            1.226,
+            0.975,
+            1.588,
+            0.75,
+            1.339,
+            1.873,
+            1.0,
+            0.976,
+            1.334,
+            0.984,
+            1.493,
+            1.853,
+            0.962,
+            1.382,
+            1.855,
+            0.953
+          ],
+          "min_body_fill": 0.75,
+          "short_nonfinal_lines": 1,
+          "text_head": "在联邦学习中缓解投毒攻击面临若干挑战：(i) 需要有效",
+          "page": 4
+        },
+        {
+          "para_id": "P04-003",
+          "layout_label": "plain text",
+          "n_lines": 20,
+          "box_w": 259.027,
+          "n_lines_geometry": 8,
+          "fills": [
+            0.962,
+            1.0,
+            1.121,
+            1.821,
+            0.962,
+            1.461,
+            0.96,
+            1.218,
+            1.346,
+            1.686,
+            1.87,
+            1.532,
+            0.962,
+            1.22,
+            1.79,
+            1.449,
+            1.174,
+            0.962,
+            0.962,
+            1.611
+          ],
+          "min_body_fill": 0.96,
+          "short_nonfinal_lines": 0,
+          "text_head": "为了同时应对这些挑战，确定一种替代的模型权重表示形",
+          "page": 4
+        },
+        {
+          "para_id": "P04-004",
+          "layout_label": "plain text",
+          "n_lines": 16,
+          "box_w": 249.065,
+          "n_lines_geometry": 10,
+          "fills": [
+            1.0,
+            1.955,
+            0.981,
+            1.585,
+            1.0,
+            1.0,
+            1.262,
+            1.0,
+            2.033,
+            1.0,
+            2.054,
+            1.0,
+            2.059,
+            1.0,
+            1.377,
+            1.0
+          ],
+          "min_body_fill": 0.981,
+          "short_nonfinal_lines": 0,
+          "text_head": "为了阐明我们的思路，我们对上述直觉作如下讨论：在神",
+          "page": 4
+        },
+        {
+          "para_id": "P04-018",
+          "layout_label": "fallback_line",
+          "n_lines": 3,
+          "box_w": 27.541,
+          "n_lines_geometry": 2,
+          "fills": [
+            4.112,
+            0.931,
+            3.366
+          ],
+          "min_body_fill": 0.931,
+          "short_nonfinal_lines": 0,
+          "text_head": "客户端",
+          "page": 4
+        },
+        {
+          "para_id": "P04-028",
+          "layout_label": "plain text",
+          "n_lines": 3,
+          "box_w": 249.065,
+          "n_lines_geometry": 3,
+          "fills": [
+            1.0,
+            1.296,
+            1.0
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "设计与实现方式，该模式既可能是细微的，也可能是十分",
+          "page": 4
+        },
+        {
+          "para_id": "P04-029",
+          "layout_label": "plain text",
+          "n_lines": 10,
+          "box_w": 249.065,
+          "n_lines_geometry": 6,
+          "fills": [
+            0.979,
+            2.035,
+            1.0,
+            2.062,
+            0.997,
+            2.056,
+            0.979,
+            2.056,
+            0.97,
+            1.736
+          ],
+          "min_body_fill": 0.97,
+          "short_nonfinal_lines": 0,
+          "text_head": "由于权重的 DCT 变换展现了权重能量在不同频率上的分",
+          "page": 4
+        },
+        {
+          "para_id": "P04-031",
+          "layout_label": "plain text",
+          "n_lines": 2,
+          "box_w": 246.086,
+          "n_lines_geometry": 3,
+          "fills": [
+            1.0,
+            0.91
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "逐渐从低频向高频推进[42],[60]。这些观察促使我们更",
+          "page": 4
+        },
+        {
+          "para_id": "P04-033",
+          "layout_label": "plain text",
+          "n_lines": 3,
+          "box_w": 249.783,
+          "n_lines_geometry": 4,
+          "fills": [
+            0.973,
+            0.994,
+            1.0
+          ],
+          "min_body_fill": 0.973,
+          "short_nonfinal_lines": 0,
+          "text_head": "我们的框架FreqFed 的高层概述如图 1 所示。FreqFed ",
+          "page": 4
+        },
+        {
+          "para_id": "P04-034",
+          "layout_label": "plain text",
+          "n_lines": 3,
+          "box_w": 249.852,
+          "n_lines_geometry": 4,
+          "fills": [
+            0.997,
+            1.0,
+            0.997
+          ],
+          "min_body_fill": 0.997,
+          "short_nonfinal_lines": 0,
+          "text_head": "本地模型更新的频域分析获取参与联邦学习过程的每个客",
+          "page": 4
+        },
+        {
+          "para_id": "P04-035",
+          "layout_label": "plain text",
+          "n_lines": 4,
+          "box_w": 250.639,
+          "n_lines_geometry": 5,
+          "fills": [
+            0.973,
+            1.0,
+            0.994,
+            0.994
+          ],
+          "min_body_fill": 0.973,
+          "short_nonfinal_lines": 0,
+          "text_head": "模型筛选负责处理 DCT 系数矩阵并提取低频分量，随后",
+          "page": 4
+        },
+        {
+          "para_id": "P05-002",
+          "layout_label": "plain text",
+          "n_lines": 7,
+          "box_w": 249.065,
+          "n_lines_geometry": 4,
+          "fills": [
+            0.972,
+            1.365,
+            1.0,
+            1.704,
+            1.0,
+            1.631,
+            1.103
+          ],
+          "min_body_fill": 0.972,
+          "short_nonfinal_lines": 0,
+          "text_head": "模型聚合在步骤 4 中利用联邦平均算法（参见第二节 A ",
+          "page": 5
+        },
+        {
+          "para_id": "P05-004",
+          "layout_label": "plain text",
+          "n_lines": 42,
+          "box_w": 255.054,
+          "n_lines_geometry": 14,
+          "fills": [
+            0.977,
+            1.634,
+            1.764,
+            1.775,
+            1.078,
+            0.977,
+            1.363,
+            1.454,
+            1.51,
+            1.078,
+            0.977,
+            1.322,
+            0.937,
+            1.965,
+            0.981,
+            1.992,
+            1.078,
+            0.956,
+            1.693,
+            1.078,
+            0.968,
+            1.573,
+            1.078,
+            0.914,
+            1.604,
+            1.078,
+            1.408,
+            0.984,
+            0.907,
+            1.473,
+            0.978,
+            1.247,
+            1.078,
+            0.954,
+            1.499,
+            1.078,
+            1.001,
+            1.56,
+            1.078,
+            1.649,
+            0.293,
+            1.078
+          ],
+          "min_body_fill": 0.293,
+          "short_nonfinal_lines": 1,
+          "text_head": "下文将介绍用于实现我们所提框架的算法。我们对算法中",
+          "page": 5
+        },
+        {
+          "para_id": "P05-005",
+          "layout_label": "plain text",
+          "n_lines": 25,
+          "box_w": 249.065,
+          "n_lines_geometry": 8,
+          "fills": [
+            1.0,
+            1.705,
+            1.736,
+            0.982,
+            1.103,
+            1.535,
+            0.93,
+            1.103,
+            1.597,
+            1.103,
+            0.997,
+            2.079,
+            1.103,
+            0.968,
+            2.047,
+            1.103,
+            0.985,
+            1.952,
+            1.103,
+            1.0,
+            1.977,
+            1.103,
+            1.279,
+            0.341,
+            1.103
+          ],
+          "min_body_fill": 0.341,
+          "short_nonfinal_lines": 1,
+          "text_head": "一旦所有客户端都提交了其模型更新，算法便以从所有客",
+          "page": 5
+        },
+        {
+          "para_id": "P05-006",
+          "layout_label": "plain text",
+          "n_lines": 8,
+          "box_w": 249.486,
+          "n_lines_geometry": 5,
+          "fills": [
+            0.975,
+            1.392,
+            1.102,
+            0.991,
+            2.058,
+            1.283,
+            0.986,
+            1.0
+          ],
+          "min_body_fill": 0.975,
+          "short_nonfinal_lines": 0,
+          "text_head": "通过训练更新本地模型的过程在第 8–12 行进行了描述。在",
+          "page": 5
+        },
+        {
+          "para_id": "P05-007",
+          "layout_label": "plain text",
+          "n_lines": 12,
+          "box_w": 248.169,
+          "n_lines_geometry": 7,
+          "fills": [
+            0.993,
+            2.058,
+            0.982,
+            2.064,
+            0.982,
+            2.08,
+            0.988,
+            2.04,
+            0.936,
+            2.068,
+            1.0,
+            2.063
+          ],
+          "min_body_fill": 0.936,
+          "short_nonfinal_lines": 0,
+          "text_head": "过滤 DCT 系数的过程在第 13–18 行进行了描述。在计算",
+          "page": 5
+        },
+        {
+          "para_id": "P05-016",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 111.836,
+          "n_lines_geometry": 1,
+          "fills": [
+            1.0,
+            0.113
+          ],
+          "min_body_fill": 1.0,
+          "short_nonfinal_lines": 0,
+          "text_head": "i←ClientUpdate(Gt,i)",
+          "page": 5
+        },
+        {
+          "para_id": "P05-018",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 66.438,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.941,
+            0.158
+          ],
+          "min_body_fill": 0.941,
+          "short_nonfinal_lines": 0,
+          "text_head": "i←DCT(W t",
+          "page": 5
+        },
+        {
+          "para_id": "P05-020",
+          "layout_label": "fallback_line",
+          "n_lines": 2,
+          "box_w": 80.047,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.961,
+            0.124
+          ],
+          "min_body_fill": 0.961,
+          "short_nonfinal_lines": 0,
+          "text_head": "i←Filtering(Vt",
+          "page": 5
+        },
+        {
+          "para_id": "P05-022",
+          "layout_label": "fallback_line",
+          "n_lines": 3,
+          "box_w": 156.981,
+          "n_lines_geometry": 1,
+          "fills": [
+            0.771,
+            0.982,
+            1.0
+          ],
+          "min_body_fill": 0.771,
+          "short_nonfinal_lines": 1,
+          "text_head": "(b1, . . . , bL)←Clustering(Ft",
+          "page": 5
+        },
+        {
+          "para_id": "P05-024",
+          "layout_label": "fallback_line",
+          "n_lines": 3,
+          "box_w": 89.438,
+          "n_lines_geometry": null,
+          "fills": [
+            0.586,
+            0.845,
+            1.004
+          ],
+          "min_body_fill": 0.586,
+          "short_nonfinal_lines": 1,
+          "text_head": "Gt+1←PL",
+          "page": 5
+        },
+        {
+          "para_id": "P05-080",
+          "layout_label": "plain text",
+          "n_lines": 7,
+          "box_w": 253.27,
+          "n_lines_geometry": 8,
+          "fills": [
+            0.989,
+            0.979,
+            0.985,
+            1.0,
+            0.961,
+            0.989,
+            0.984
+          ],
+          "min_body_fill": 0.961,
+          "short_nonfinal_lines": 0,
+          "text_head": "Clustering 过程旨在通过基于余弦距离对模型更新的低频",
+          "page": 5
+        }
+      ]
+    },
+    "latex_hypothesis": {
+      "n_paragraphs": 11,
+      "n_with_short_nonfinal_line": 0,
+      "min_body_fill": 0.996,
+      "median_body_fill": 0.996,
+      "n_fits": 11,
+      "total_seconds": 5.125,
+      "paragraphs": [
+        {
+          "para_id": "P02-002",
+          "box_w": 251.526,
+          "box_h": 179.497,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 10,
+          "fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.592
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.494,
+          "page": 2
+        },
+        {
+          "para_id": "P02-005",
+          "box_w": 230.783,
+          "box_h": 47.591,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 3,
+          "fills": [
+            0.996,
+            0.996,
+            0.217
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.47,
+          "page": 2
+        },
+        {
+          "para_id": "P03-009",
+          "box_w": 250.938,
+          "box_h": 106.628,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 7,
+          "fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.123
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.468,
+          "page": 3
+        },
+        {
+          "para_id": "P03-017",
+          "box_w": 251.506,
+          "box_h": 83.856,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 5,
+          "fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.474
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.461,
+          "page": 3
+        },
+        {
+          "para_id": "P04-003",
+          "box_w": 251.017,
+          "box_h": 155.597,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 9,
+          "fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.158
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.461,
+          "page": 4
+        },
+        {
+          "para_id": "P04-004",
+          "box_w": 251.037,
+          "box_h": 178.417,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 10,
+          "fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.514
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.461,
+          "page": 4
+        },
+        {
+          "para_id": "P04-028",
+          "box_w": 250.898,
+          "box_h": 44.849,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 3,
+          "fills": [
+            0.996,
+            0.996,
+            0.316
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.464,
+          "page": 4
+        },
+        {
+          "para_id": "P04-033",
+          "box_w": 250.754,
+          "box_h": 59.955,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 4,
+          "fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.317
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.457,
+          "page": 4
+        },
+        {
+          "para_id": "P04-034",
+          "box_w": 250.809,
+          "box_h": 83.866,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 4,
+          "fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.237
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.464,
+          "page": 4
+        },
+        {
+          "para_id": "P04-035",
+          "box_w": 251.526,
+          "box_h": 95.821,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 5,
+          "fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.671
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.453,
+          "page": 4
+        },
+        {
+          "para_id": "P05-002",
+          "box_w": 250.829,
+          "box_h": 59.956,
+          "fits": true,
+          "fits_reason": "ok",
+          "n_lines": 4,
+          "fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.317
+          ],
+          "min_body_fill": 0.996,
+          "short_nonfinal_lines": 0,
+          "seconds": 0.472,
+          "page": 5
+        }
+      ]
+    },
+    "paired": {
+      "n_paired_paragraphs": 11,
+      "n_current_has_short_line": 0,
+      "n_latex_has_short_line": 0,
+      "paragraphs": [
+        {
+          "para_id": "P02-002",
+          "page": 2,
+          "current_n_lines": 15,
+          "latex_n_lines": 10,
+          "current_min_body_fill": 0.923,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            0.923,
+            1.977,
+            0.97,
+            0.962,
+            0.962,
+            1.214,
+            1.0,
+            1.947,
+            0.962,
+            1.918,
+            0.962,
+            1.975,
+            0.962,
+            1.966,
+            0.962
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.592
+          ],
+          "text_head": "目标与贡献。为了解决现有防御的局限性，我们提出了"
+        },
+        {
+          "para_id": "P02-005",
+          "page": 2,
+          "current_n_lines": 2,
+          "latex_n_lines": 3,
+          "current_min_body_fill": 0.991,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            0.991,
+            1.0
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.217
+          ],
+          "text_head": "分量融入到我们的自动聚类方法（HDBSCAN）中，"
+        },
+        {
+          "para_id": "P03-009",
+          "page": 3,
+          "current_n_lines": 6,
+          "latex_n_lines": 7,
+          "current_min_body_fill": 0.999,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            0.999,
+            0.999,
+            0.999,
+            0.999,
+            0.999,
+            0.99
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.123
+          ],
+          "text_head": "攻击者的目标要么是使全局模型失效并最终导致拒绝服务"
+        },
+        {
+          "para_id": "P03-017",
+          "page": 3,
+          "current_n_lines": 4,
+          "latex_n_lines": 5,
+          "current_min_body_fill": 0.891,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            0.891,
+            1.0,
+            0.999,
+            1.0
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.474
+          ],
+          "text_head": "本节介绍FreqFed的设计与实现。首先，我们讨论"
+        },
+        {
+          "para_id": "P04-003",
+          "page": 4,
+          "current_n_lines": 20,
+          "latex_n_lines": 9,
+          "current_min_body_fill": 0.96,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            0.962,
+            1.0,
+            1.121,
+            1.821,
+            0.962,
+            1.461,
+            0.96,
+            1.218,
+            1.346,
+            1.686,
+            1.87,
+            1.532,
+            0.962,
+            1.22,
+            1.79,
+            1.449,
+            1.174,
+            0.962,
+            0.962,
+            1.611
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.158
+          ],
+          "text_head": "为了同时应对这些挑战，确定一种替代的模型权重表示形"
+        },
+        {
+          "para_id": "P04-004",
+          "page": 4,
+          "current_n_lines": 16,
+          "latex_n_lines": 10,
+          "current_min_body_fill": 0.981,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            1.0,
+            1.955,
+            0.981,
+            1.585,
+            1.0,
+            1.0,
+            1.262,
+            1.0,
+            2.033,
+            1.0,
+            2.054,
+            1.0,
+            2.059,
+            1.0,
+            1.377,
+            1.0
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.514
+          ],
+          "text_head": "为了阐明我们的思路，我们对上述直觉作如下讨论：在神"
+        },
+        {
+          "para_id": "P04-028",
+          "page": 4,
+          "current_n_lines": 3,
+          "latex_n_lines": 3,
+          "current_min_body_fill": 1.0,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            1.0,
+            1.296,
+            1.0
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.316
+          ],
+          "text_head": "设计与实现方式，该模式既可能是细微的，也可能是十分"
+        },
+        {
+          "para_id": "P04-033",
+          "page": 4,
+          "current_n_lines": 3,
+          "latex_n_lines": 4,
+          "current_min_body_fill": 0.973,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            0.973,
+            0.994,
+            1.0
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.317
+          ],
+          "text_head": "我们的框架FreqFed 的高层概述如图 1 所示。FreqFed "
+        },
+        {
+          "para_id": "P04-034",
+          "page": 4,
+          "current_n_lines": 3,
+          "latex_n_lines": 4,
+          "current_min_body_fill": 0.997,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            0.997,
+            1.0,
+            0.997
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.237
+          ],
+          "text_head": "本地模型更新的频域分析获取参与联邦学习过程的每个客"
+        },
+        {
+          "para_id": "P04-035",
+          "page": 4,
+          "current_n_lines": 4,
+          "latex_n_lines": 5,
+          "current_min_body_fill": 0.973,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            0.973,
+            1.0,
+            0.994,
+            0.994
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.996,
+            0.671
+          ],
+          "text_head": "模型筛选负责处理 DCT 系数矩阵并提取低频分量，随后"
+        },
+        {
+          "para_id": "P05-002",
+          "page": 5,
+          "current_n_lines": 7,
+          "latex_n_lines": 4,
+          "current_min_body_fill": 0.972,
+          "latex_min_body_fill": 0.996,
+          "current_short_nonfinal": 0,
+          "latex_short_nonfinal": 0,
+          "current_fills": [
+            0.972,
+            1.365,
+            1.0,
+            1.704,
+            1.0,
+            1.631,
+            1.103
+          ],
+          "latex_fills": [
+            0.996,
+            0.996,
+            0.996,
+            0.317
+          ],
+          "text_head": "模型聚合在步骤 4 中利用联邦平均算法（参见第二节 A "
+        }
+      ]
+    }
+  }
+}

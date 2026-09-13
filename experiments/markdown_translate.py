@@ -3,7 +3,12 @@
 用法：
     python experiments/markdown_translate.py <workdir> \
         [--model gemini-3.8-flash-low] [--effort low] \
-        [--output-dir <dir>] [--skip-translate] [--dry-run]
+        [--output-dir <dir>] [--skip-translate] [--dry-run] \
+        [--skip-reconstruct] [--latex-bbox [--latex-bbox-mode full|repair]] [--no-dual]
+
+--skip-reconstruct：只到 md-apply 为止（验收流程分开跑 default/--latex-bbox 两次
+reconstruct 时用）；--latex-bbox：reconstruct 开启 LaTeX bbox 排版（与
+`babeldoc.tools.agent reconstruct --latex-bbox` 同一链路）。
 
 产物（均在 <workdir>/agent/ 与 --output-dir）：
     agent/prompt.md        实际发给模型的完整提示词
@@ -112,6 +117,23 @@ def main():
     ap.add_argument("--skip-translate", action="store_true", help="复用已有 translated.md")
     ap.add_argument("--dry-run", action="store_true", help="只生成 prompt.md，不调用模型")
     ap.add_argument("--render-pages", default="1,5,8,11,20")
+    ap.add_argument(
+        "--skip-reconstruct",
+        action="store_true",
+        help="只到 md-apply 为止（验收流程需要分开跑 default/latex 两次 reconstruct 时用）",
+    )
+    ap.add_argument(
+        "--latex-bbox",
+        action="store_true",
+        help="reconstruct 开启 LaTeX bbox 排版（实验特性；缺 XeLaTeX/字体时自动回退）",
+    )
+    ap.add_argument(
+        "--latex-bbox-mode",
+        choices=("full", "repair"),
+        default=None,
+        help="LaTeX bbox 资格模式：full（默认）/ repair",
+    )
+    ap.add_argument("--no-dual", action="store_true", help="只输出 mono，不输出拼宽双语")
     args = ap.parse_args()
 
     workdir = Path(args.workdir)
@@ -190,8 +212,18 @@ def main():
     if not report.get("ok"):
         return 1
 
+    if args.skip_reconstruct:
+        print("--skip-reconstruct：已写回 IR，跳过 reconstruct/render")
+        return 0
+
     output_dir = Path(args.output_dir) if args.output_dir else workdir / "output"
-    recon = workflow.reconstruct(workdir, output_dir=str(output_dir), no_dual=False)
+    recon = workflow.reconstruct(
+        workdir,
+        output_dir=str(output_dir),
+        no_dual=args.no_dual,
+        latex_bbox=args.latex_bbox,
+        latex_bbox_mode=args.latex_bbox_mode,
+    )
     print("reconstruct:", json.dumps(recon, ensure_ascii=False))
 
     mono = recon.get("mono_pdf")

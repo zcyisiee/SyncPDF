@@ -1025,6 +1025,33 @@ def _do_translate_single(
             docs
         )
 
+    # LaTeX bbox 排版（实验特性）：翻译会原地改写 paragraph.unicode，
+    # 需在翻译前记录源文，供 overlay 判定「未翻译段」。
+    # （不翻译（skip_translation）时也记：此时译文恒等于源文 → 全部跳过。）
+    if getattr(translation_config, "enable_latex_bbox_layout", False):
+        # 片段级公式嵌图需要源 PDF（与 IL 坐标同源）。
+        translation_config.latex_source_pdf_path = str(temp_pdf_path)
+        from babeldoc.format.pdf.document_il.backend.latex_bbox import (
+            capture_source_line_geometry,
+        )
+        from babeldoc.format.pdf.document_il.backend.latex_bbox import (
+            record_source_texts,
+        )
+
+        try:
+            record_source_texts(docs, translation_config)
+        except Exception:
+            logger.warning("LaTeX bbox 源文记录失败", exc_info=True)
+        # 源行几何（P3-0）：必须在 ILTranslator 之前（译文回填会换掉
+        # composition，源行盒随之丢失）。
+        try:
+            translation_config.latex_source_geometry = capture_source_line_geometry(
+                docs
+            )
+        except Exception:
+            logger.warning("LaTeX bbox 源行几何采集失败", exc_info=True)
+            translation_config.latex_source_geometry = {}
+
     if not translation_config.skip_translation:
         if support_llm_translate:
             il_translator = ILTranslatorLLMOnly(translate_engine, translation_config)
@@ -1065,6 +1092,21 @@ def _do_translate_single(
         translation_config.watermark_output_mode = WatermarkOutputMode.NoWatermark
         mono_watermark_first_page_doc_bytes = None
         dual_watermark_first_page_doc_bytes = None
+
+    # LaTeX bbox 排版（实验特性，默认关闭）：必须在 Typesetting 之前捕获源几何与
+    # 公式融合 body（此时段落/公式 box 仍是源坐标、composition 仍按译文顺序回填）。
+    if getattr(translation_config, "enable_latex_bbox_layout", False):
+        from babeldoc.format.pdf.document_il.backend.latex_bbox import (
+            capture_layout_sources,
+        )
+
+        try:
+            capture_layout_sources(docs, translation_config)
+        except Exception:
+            logger.warning(
+                "LaTeX bbox 版面源捕获失败，回退现有渲染路径", exc_info=True
+            )
+            translation_config.enable_latex_bbox_layout = False
 
     Typesetting(translation_config).typesetting_document(docs)
     logger.debug(f"finish typsetting from {temp_pdf_path}")

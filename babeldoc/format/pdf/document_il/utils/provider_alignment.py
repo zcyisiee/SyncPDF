@@ -415,13 +415,30 @@ def align_document(
     return report
 
 
+def inline_equation_spans(
+    provider_page: ProviderPage,
+    page_height: float,
+) -> list[tuple[ProviderSpan, ProviderBox]]:
+    """页内 inline_equation span 及其 IL 坐标 bbox（供 protector 转布局区域）。"""
+    pairs: list[tuple[ProviderSpan, ProviderBox]] = []
+    for candidate in _iter_candidates(provider_page, page_height):
+        if candidate.span.kind == "inline_equation":
+            pairs.append((candidate.span, candidate.box))
+    return pairs
+
+
 def inline_equation_regions(
     provider_page: ProviderPage,
     page_height: float,
 ) -> list[ProviderBox]:
     """页内 inline_equation span 的 IL 坐标 bbox 列表（供 protector 转布局区域）。"""
-    regions: list[ProviderBox] = []
-    for candidate in _iter_candidates(provider_page, page_height):
-        if candidate.span.kind == "inline_equation":
-            regions.append(candidate.box)
-    return regions
+    return [box for _span, box in inline_equation_spans(provider_page, page_height)]
+
+
+def span_text_consistent(span_content: str, native_text: str) -> bool:
+    """span 文本与原生字符是否一致（宽松字母集比对，与对齐审计同口径）。
+
+    公开入口供其它模块复用：``inline_math_protector`` 的内置公式保护判定与
+    LaTeX 融合的 MinerU 级一致性校验共用同一实现，避免两处漂移。
+    """
+    return _span_text_consistent(span_content, native_text)

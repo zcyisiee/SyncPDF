@@ -1,0 +1,67 @@
+{
+  "workdir": "/tmp/p5-final/2026-f1872-agy/workdir",
+  "pdf": null,
+  "ok": true,
+  "hard_failures": [],
+  "not_evaluated": [
+    "toc_integrity",
+    "protected_tokens",
+    "protocol"
+  ],
+  "gates": {
+    "layout_coverage": {
+      "status": "pass",
+      "hard": true,
+      "artifact": "/tmp/p5-final/2026-f1872-agy/workdir/2026-f1872-paper/layout_coverage.json",
+      "threshold": 0.005,
+      "uncovered_ratio": 0.0004368893478433553,
+      "coverage": 0.9995631106521566,
+      "total_chars": 100712,
+      "uncovered_chars": 44,
+      "unhealthy_pages": [
+        {
+          "page_index": 15,
+          "uncovered_chars": 44,
+          "coverage": 0.9916839916839917
+        }
+      ],
+      "detail": "未覆盖 44/100712 字符，占比 0.0437%（阈值 0.5000%）"
+    },
+    "link_integrity": {
+      "status": "pass",
+      "hard": true,
+      "artifact": "/tmp/p5-final/2026-f1872-agy/workdir/agent/reconstruct_report.json",
+      "source": "reconstruct_report",
+      "total": 429,
+      "remapped": 428,
+      "fallback_paragraph": 326,
+      "unresolved_count": 1,
+      "unresolved": [
+        {
+          "page": 0,
+          "link_index": 55,
+          "uri": null
+        }
+      ],
+      "uri_set_match": true,
+      "snapshot_total": 429,
+      "snapshot_uri_count": 38,
+      "detail": "remapped 428/429，unresolved 1，URI 集合一致=True"
+    },
+    "toc_integrity": {
+      "status": "not_available",
+      "hard": true,
+      "reason": "toc.json 或 anchors.json 缺失（需要先 parse/md-extract）"
+    },
+    "protected_tokens": {
+      "status": "not_available",
+      "hard": false,
+      "reason": "anchors.json 缺失（需要先 parse/md-extract）"
+    },
+    "protocol": {
+      "status": "not_available",
+      "hard": true,
+      "reason": "apply_report.json / protocol_report.json / translated.jsonl 均缺失（需要先 apply）"
+    }
+  }
+}

@@ -1,0 +1,265 @@
+{
+  "2026-f1872": {
+    "applied": 5,
+    "improved": 5,
+    "avg_before": 0.823,
+    "avg_after": 1.0,
+    "rows": [
+      {
+        "id": "Qreuu",
+        "before_min_fill": 0.848,
+        "after_min_fill": 1.0,
+        "before_lines": 7,
+        "after_lines": 7
+      },
+      {
+        "id": "kR1rD",
+        "before_min_fill": 0.759,
+        "after_min_fill": 1.0,
+        "before_lines": 6,
+        "after_lines": 6
+      },
+      {
+        "id": "fx77q",
+        "before_min_fill": 0.835,
+        "after_min_fill": 1.0,
+        "before_lines": 6,
+        "after_lines": 5
+      },
+      {
+        "id": "e23kx",
+        "before_min_fill": 0.842,
+        "after_min_fill": 1.0,
+        "before_lines": 9,
+        "after_lines": 9
+      },
+      {
+        "id": "xdtC8",
+        "before_min_fill": 0.83,
+        "after_min_fill": 1.0,
+        "before_lines": 4,
+        "after_lines": 4
+      }
+    ]
+  },
+  "deepseek-v4": {
+    "applied": 28,
+    "improved": 21,
+    "avg_before": 0.885,
+    "avg_after": 0.881,
+    "rows": [
+      {
+        "id": "B2Rrm",
+        "before_min_fill": 0.833,
+        "after_min_fill": 1.0,
+        "before_lines": 12,
+        "after_lines": 11
+      },
+      {
+        "id": "qiZgx",
+        "before_min_fill": 0.7,
+        "after_min_fill": 1.0,
+        "before_lines": 7,
+        "after_lines": 6
+      },
+      {
+        "id": "HZpip",
+        "before_min_fill": 0.718,
+        "after_min_fill": 0.071,
+        "before_lines": 4,
+        "after_lines": 6
+      },
+      {
+        "id": "rpN5L",
+        "before_min_fill": 0.798,
+        "after_min_fill": 1.0,
+        "before_lines": 2,
+        "after_lines": 2
+      },
+      {
+        "id": "RCLek",
+        "before_min_fill": 0.978,
+        "after_min_fill": 1.0,
+        "before_lines": 3,
+        "after_lines": 3
+      },
+      {
+        "id": "mebkh",
+        "before_min_fill": 0.936,
+        "after_min_fill": 1.0,
+        "before_lines": 5,
+        "after_lines": 5
+      },
+      {
+        "id": "4pUgY",
+        "before_min_fill": 0.936,
+        "after_min_fill": 1.0,
+        "before_lines": 3,
+        "after_lines": 3
+      },
+      {
+        "id": "XnFuA",
+        "before_min_fill": 0.955,
+        "after_min_fill": 1.0,
+        "before_lines": 5,
+        "after_lines": 5
+      },
+      {
+        "id": "jg9AB",
+        "before_min_fill": 0.991,
+        "after_min_fill": 1.0,
+        "before_lines": 3,
+        "after_lines": 3
+      },
+      {
+        "id": "XFQ55",
+        "before_min_fill": 0.904,
+        "after_min_fill": 1.0,
+        "before_lines": 7,
+        "after_lines": 7
+      },
+      {
+        "id": "KJwQv",
+        "before_min_fill": 0.946,
+        "after_min_fill": 1.0,
+        "before_lines": 5,
+        "after_lines": 5
+      },
+      {
+        "id": "DkVKZ",
+        "before_min_fill": 0.916,
+        "after_min_fill": 1.0,
+        "before_lines": 5,
+        "after_lines": 5
+      },
+      {
+        "id": "7pC6L",
+        "before_min_fill": 0.93,
+        "after_min_fill": 1.0,
+        "before_lines": 3,
+        "after_lines": 3
+      },
+      {
+        "id": "Gv6PJ",
+        "before_min_fill": 0.998,
+        "after_min_fill": 1.0,
+        "before_lines": 2,
+        "after_lines": 2
+      },
+      {
+        "id": "aG4M3",
+        "before_min_fill": 0.961,
+        "after_min_fill": 0.009,
+        "before_lines": 7,
+        "after_lines": 9
+      },
+      {
+        "id": "C5Q7b",
+        "before_min_fill": 0.979,
+        "after_min_fill": 1.0,
+        "before_lines": 5,
+        "after_lines": 5
+      },
+      {
+        "id": "qm3jg",
+        "before_min_fill": 0.784,
+        "after_min_fill": 1.0,
+        "before_lines": 5,
+        "after_lines": 5
+      },
+      {
+        "id": "RW2hv",
+        "before_min_fill": null,
+        "after_min_fill": null,
+        "before_lines": 1,
+        "after_lines": 1
+      },
+      {
+        "id": "w593f",
+        "before_min_fill": 0.99,
+        "after_min_fill": 1.0,
+        "before_lines": 2,
+        "after_lines": 2
+      },
+      {
+        "id": "CQT2k",
+        "before_min_fill": 0.811,
+        "after_min_fill": 1.0,
+        "before_lines": 4,
+        "after_lines": 4
+      },
+      {
+        "id": "xqSq5",
+        "before_min_fill": 0.783,
+        "after_min_fill": 1.0,
+        "before_lines": 8,
+        "after_lines": 7
+      },
+      {
+        "id": "4yk6T",
+        "before_min_fill": 0.772,
+        "after_min_fill": 1.0,
+        "before_lines": 11,
+        "after_lines": 11
+      },
+      {
+        "id": "ZrHYj",
+        "before_min_fill": 0.781,
+        "after_min_fill": 1.0,
+        "before_lines": 5,
+        "after_lines": 5
+      },
+      {
+        "id": "hBnns",
+        "before_min_fill": null,
+        "after_min_fill": null,
+        "before_lines": 1,
+        "after_lines": 1
+      },
+      {
+        "id": "B9LKd",
+        "before_min_fill": null,
+        "after_min_fill": null,
+        "before_lines": 1,
+        "after_lines": 1
+      },
+      {
+        "id": "QrdY3",
+        "before_min_fill": null,
+        "after_min_fill": 0.073,
+        "before_lines": 1,
+        "after_lines": 2
+      },
+      {
+        "id": "GjFkg",
+        "before_min_fill": 0.952,
+        "after_min_fill": 1.0,
+        "before_lines": 2,
+        "after_lines": 2
+      },
+      {
+        "id": "Lk6ob",
+        "before_min_fill": null,
+        "after_min_fill": null,
+        "before_lines": 1,
+        "after_lines": 1
+      }
+    ]
+  },
+  "lawbench": {
+    "applied": 1,
+    "improved": 1,
+    "avg_before": 0.844,
+    "avg_after": 1.0,
+    "rows": [
+      {
+        "id": "fxvQA",
+        "before_min_fill": 0.844,
+        "after_min_fill": 1.0,
+        "before_lines": 5,
+        "after_lines": 5
+      }
+    ]
+  },
+  "_interpretation": "min_body_fill 对含行内公式的段落有测量伪影：下标/上标字形（如 𝑙）在 get_text(dict) 中形成独立伪行（default 与 latex 均出现，fill≈0.004~0.071）。HZpip/aG4M3 两段的“回退”即此伪影：LaTeX 真实文本行 fill=1.000 （default 0.945/0.980），为改善而非回退。纯文本段落（无公式尾巴）avg 0.823→1.0（2026-f1872 5/5、lawbench 1/1 全部改善）。"
+}

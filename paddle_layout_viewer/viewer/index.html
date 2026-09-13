@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='3' width='14' height='10' fill='none' stroke='%232563eb' stroke-width='2'/%3E%3C/svg%3E">
+<title>PP-DocLayoutV3 · 布局框查看器</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="toolbar">
+  <div class="row row-main">
+    <div class="brand">
+      <span class="dot"></span>
+      <strong>PP-DocLayoutV3</strong>
+      <span class="brand-sub">布局框查看器</span>
+    </div>
+
+    <div class="docs" id="docTabs" role="tablist" aria-label="选择文档"></div>
+
+    <div class="meta" id="meta"></div>
+
+    <div class="spacer"></div>
+
+    <nav class="pager">
+      <button id="prev" title="上一页 (← / PageUp)">‹</button>
+      <input id="pageInput" type="number" min="1" value="1" inputmode="numeric">
+      <span class="of">/ <b id="pageTotal">–</b></span>
+      <button id="next" title="下一页 (→ / PageDown)">›</button>
+    </nav>
+
+    <div class="zoom">
+      <button id="zoomOut" title="缩小 (-)">−</button>
+      <button id="zoomFit" class="wide" title="适应宽度">适应宽度</button>
+      <button id="zoomIn" title="放大 (+)">+</button>
+      <span class="zoom-val" id="zoomVal">100%</span>
+    </div>
+
+    <button id="togglePanel" class="ghost" aria-expanded="false">显示设置</button>
+  </div>
+
+  <div class="row row-panel" id="panel" hidden>
+    <label class="ctl">
+      <span>置信度 ≥ <b id="thVal">0.50</b></span>
+      <input id="threshold" type="range" min="0.05" max="0.95" step="0.01" value="0.5">
+    </label>
+
+    <label class="ctl">
+      <span>框外扩 <b id="padVal">2</b> px</span>
+      <input id="pad" type="range" min="0" max="8" step="1" value="2">
+    </label>
+
+    <label class="ctl">
+      <span>填充透明度 <b id="fillVal">7%</b></span>
+      <input id="fillAlpha" type="range" min="0" max="40" step="1" value="7">
+    </label>
+
+    <label class="ctl">
+      <span>悬停透明度 <b id="hoverVal">28%</b></span>
+      <input id="hoverAlpha" type="range" min="5" max="70" step="1" value="28">
+    </label>
+
+    <fieldset class="checks">
+      <label><input id="showOrder" type="checkbox"> 阅读顺序</label>
+      <label><input id="showLabels" type="checkbox"> 常显标签</label>
+      <label><input id="dimOthers" type="checkbox" checked> 悬停时弱化其它框</label>
+      <label><input id="hideFilled" type="checkbox"> 隐藏整页大框</label>
+    </fieldset>
+
+    <div class="links" id="links"></div>
+  </div>
+</header>
+
+<main id="scroller">
+  <div id="pages"></div>
+  <div id="status" class="loading">正在加载 …</div>
+</main>
+
+<aside id="legend" class="legend" aria-label="类别筛选">
+  <div class="legend-head">
+    <strong>类别 <span id="legendCount" class="legend-count"></span></strong>
+    <span class="legend-actions">
+      <button id="allOn" class="mini">全选</button>
+      <button id="allOff" class="mini">全不选</button>
+      <button id="legendToggle" class="mini" title="收起 / 展开" aria-expanded="true">▾</button>
+    </span>
+  </div>
+  <div id="legendList" class="legend-list"></div>
+</aside>
+
+<div id="hoverChip" class="hover-chip" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>

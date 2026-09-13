@@ -1,0 +1,272 @@
+{
+  "2026-f1872": {
+    "source": {
+      "pages": 20,
+      "toc": 53,
+      "links": {
+        "uri": 67,
+        "goto": 0,
+        "named": 361,
+        "other": 1
+      },
+      "nameddest_count": 164,
+      "reference_pages": [
+        13
+      ],
+      "reference_page_links": 21
+    },
+    "default_mono": {
+      "pages": 20,
+      "toc": 53,
+      "links": {
+        "uri": 67,
+        "goto": 361,
+        "named": 0,
+        "other": 1
+      },
+      "nameddest_count": 0,
+      "reference_pages": [
+        13
+      ],
+      "reference_page_links": 21
+    },
+    "latex_mono": {
+      "pages": 20,
+      "toc": 53,
+      "links": {
+        "uri": 67,
+        "goto": 361,
+        "named": 0,
+        "other": 1
+      },
+      "nameddest_count": 0,
+      "reference_pages": [
+        13
+      ],
+      "reference_page_links": 21
+    },
+    "default_dual": {
+      "pages": 20,
+      "toc": 53,
+      "links": {
+        "uri": 134,
+        "goto": 722,
+        "named": 0,
+        "other": 2
+      },
+      "nameddest_count": 0,
+      "reference_pages": [
+        13
+      ],
+      "reference_page_links": 42
+    },
+    "latex_dual": {
+      "pages": 20,
+      "toc": 53,
+      "links": {
+        "uri": 134,
+        "goto": 722,
+        "named": 0,
+        "other": 2
+      },
+      "nameddest_count": 0,
+      "reference_pages": [
+        13
+      ],
+      "reference_page_links": 42
+    },
+    "default_mono_uri_set_match": true,
+    "latex_mono_uri_set_match": true,
+    "default_dual_uri_set_match": true,
+    "latex_dual_uri_set_match": true,
+    "latex_text_layer": {
+      "mixed_lines_heuristic": 2
+    },
+    "renders": [
+      "/tmp/babeldoc-latex-acceptance/2026-f1872/renders/page001.png",
+      "/tmp/babeldoc-latex-acceptance/2026-f1872/renders/page014.png",
+      "/tmp/babeldoc-latex-acceptance/2026-f1872/renders/page020.png"
+    ],
+    "gates_exit": 0
+  },
+  "deepseek-v4": {
+    "source": {
+      "pages": 51,
+      "toc": 54,
+      "links": {
+        "uri": 55,
+        "goto": 0,
+        "named": 355,
+        "other": 0
+      },
+      "nameddest_count": 176,
+      "reference_pages": [
+        37
+      ],
+      "reference_page_links": 8
+    },
+    "default_mono": {
+      "pages": 51,
+      "toc": 54,
+      "links": {
+        "uri": 55,
+        "goto": 353,
+        "named": 2,
+        "other": 0
+      },
+      "nameddest_count": 1,
+      "reference_pages": [
+        37
+      ],
+      "reference_page_links": 8
+    },
+    "latex_mono": {
+      "pages": 51,
+      "toc": 54,
+      "links": {
+        "uri": 55,
+        "goto": 353,
+        "named": 2,
+        "other": 0
+      },
+      "nameddest_count": 1,
+      "reference_pages": [
+        37
+      ],
+      "reference_page_links": 8
+    },
+    "default_dual": {
+      "pages": 51,
+      "toc": 54,
+      "links": {
+        "uri": 110,
+        "goto": 710,
+        "named": 0,
+        "other": 0
+      },
+      "nameddest_count": 0,
+      "reference_pages": [
+        37
+      ],
+      "reference_page_links": 16
+    },
+    "latex_dual": {
+      "pages": 51,
+      "toc": 54,
+      "links": {
+        "uri": 110,
+        "goto": 710,
+        "named": 0,
+        "other": 0
+      },
+      "nameddest_count": 0,
+      "reference_pages": [
+        37
+      ],
+      "reference_page_links": 16
+    },
+    "default_mono_uri_set_match": true,
+    "latex_mono_uri_set_match": true,
+    "default_dual_uri_set_match": true,
+    "latex_dual_uri_set_match": true,
+    "latex_text_layer": {
+      "mixed_lines_heuristic": 26
+    },
+    "renders": [
+      "/tmp/babeldoc-latex-acceptance/deepseek-v4/renders/page001.png",
+      "/tmp/babeldoc-latex-acceptance/deepseek-v4/renders/page038.png",
+      "/tmp/babeldoc-latex-acceptance/deepseek-v4/renders/page051.png"
+    ],
+    "gates_exit": 0
+  },
+  "lawbench": {
+    "source": {
+      "pages": 38,
+      "toc": 18,
+      "links": {
+        "uri": 18,
+        "goto": 0,
+        "named": 142,
+        "other": 1
+      },
+      "nameddest_count": 116,
+      "reference_pages": [
+        16
+      ],
+      "reference_page_links": 4
+    },
+    "default_mono": {
+      "pages": 38,
+      "toc": 18,
+      "links": {
+        "uri": 18,
+        "goto": 142,
+        "named": 0,
+        "other": 1
+      },
+      "nameddest_count": 0,
+      "reference_pages": [
+        16
+      ],
+      "reference_page_links": 4
+    },
+    "latex_mono": {
+      "pages": 38,
+      "toc": 18,
+      "links": {
+        "uri": 18,
+        "goto": 142,
+        "named": 0,
+        "other": 1
+      },
+      "nameddest_count": 0,
+      "reference_pages": [
+        16
+      ],
+      "reference_page_links": 4
+    },
+    "default_dual": {
+      "pages": 38,
+      "toc": 18,
+      "links": {
+        "uri": 36,
+        "goto": 284,
+        "named": 0,
+        "other": 2
+      },
+      "nameddest_count": 0,
+      "reference_pages": [
+        16
+      ],
+      "reference_page_links": 8
+    },
+    "latex_dual": {
+      "pages": 38,
+      "toc": 18,
+      "links": {
+        "uri": 36,
+        "goto": 284,
+        "named": 0,
+        "other": 2
+      },
+      "nameddest_count": 0,
+      "reference_pages": [
+        16
+      ],
+      "reference_page_links": 8
+    },
+    "default_mono_uri_set_match": true,
+    "latex_mono_uri_set_match": true,
+    "default_dual_uri_set_match": true,
+    "latex_dual_uri_set_match": true,
+    "latex_text_layer": {
+      "mixed_lines_heuristic": 1
+    },
+    "renders": [
+      "/tmp/babeldoc-latex-acceptance/lawbench/renders/page001.png",
+      "/tmp/babeldoc-latex-acceptance/lawbench/renders/page017.png",
+      "/tmp/babeldoc-latex-acceptance/lawbench/renders/page038.png"
+    ],
+    "gates_exit": 0
+  }
+}

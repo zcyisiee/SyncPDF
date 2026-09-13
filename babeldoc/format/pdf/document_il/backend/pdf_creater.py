@@ -639,6 +639,10 @@ class PDFCreater:
             "unresolved": [],
             "uri_set_match": None,
         }
+        # LaTeX bbox overlay 统计（仅 enable_latex_bbox_layout 时填充）；
+        # _latex_overlay_done 防止 write 重试时二次贴片。
+        self.latex_bbox_stats: dict = {}
+        self._latex_overlay_done = False
 
     def render_graphic_state(
         self,
@@ -854,15 +858,23 @@ class PDFCreater:
         self,
         page: il_version_1.Page,
         translation_config: TranslationConfig,
+        skip_paragraph_ids: frozenset | set | None = None,
     ) -> list[RenderUnit]:
-        """Convert all renderable objects in a page to render units."""
+        """Convert all renderable objects in a page to render units.
+
+        ``skip_paragraph_ids``：已被 LaTeX bbox 贴片接管的段落 debug_id —— 这些
+        段落的字符/公式 form/curve 不再进内容流（无双层文本靠构造保证）。
+        """
         render_units = []
+        skip_ids = skip_paragraph_ids or frozenset()
 
         # Collect all characters (from page and paragraphs)
         chars = []
         if page.pdf_character:
             chars.extend(page.pdf_character)
         for paragraph in page.pdf_paragraph:
+            if paragraph.debug_id and paragraph.debug_id in skip_ids:
+                continue
             chars.extend(self.render_paragraph_to_char(paragraph))
 
         # Convert characters to render units
@@ -876,6 +888,8 @@ class PDFCreater:
         # Collect forms from formulas within paragraphs
         formula_forms = []
         for paragraph in page.pdf_paragraph:
+            if paragraph.debug_id and paragraph.debug_id in skip_ids:
+                continue
             for composition in paragraph.pdf_paragraph_composition:
                 if composition.pdf_formula:
                     formula_forms.extend(composition.pdf_formula.pdf_form)
@@ -913,6 +927,8 @@ class PDFCreater:
         # Collect curves from formulas within paragraphs
         formula_curves = []
         for paragraph in page.pdf_paragraph:
+            if paragraph.debug_id and paragraph.debug_id in skip_ids:
+                continue
             for composition in paragraph.pdf_paragraph_composition:
                 if composition.pdf_formula:
                     formula_curves.extend(composition.pdf_formula.pdf_curve)
@@ -1133,8 +1149,13 @@ class PDFCreater:
         """把源页（或 mono 页）超链接搬运到 dual 页的指定区域。
 
         ``show_pdf_page`` 只复制页面内容、不复制注释，所以双语的超链接会全部丢失。
-        这里按 show_pdf_page 的矩形映射把 Link 注释重新插入：URI 链接原样复制，
-        内部跳转（GOTO）重建为直接目标（不依赖命名目的地）。
+        这里按 show_pdf_page 的矩形映射把 Link 注释重新插入：
+
+        - URI 原样复制；
+        - GOTO / 带 page 的 NAMED 重建为直接目标（不依赖命名目的地）；
+        - 不带 page 的 NAMED 保留 ``nameddest``（不能转 GOTO，否则内跳丢目标）；
+        - LAUNCH/GOTOR（``file`` 目标，参考文献里的外部 URL 常是这种形态，
+          pymupdf 落盘后会改写为 GOTOR）按 ``file`` 复制。
 
         调用方两处：左侧传 ``original_pdf``（源矩形），右侧传 mono 输出 doc——
         mono 页上的链接已经被 ``_remap_links_by_char_identity`` 换成译文矩形，
@@ -1163,29 +1184,54 @@ class PDFCreater:
 
         for link in src_page.get_links():
             kind = link.get("kind")
+            from_rect = link.get("from")
+            if from_rect is None:
+                continue
             try:
-                if kind == pymupdf.LINK_URI and link.get("uri"):
-                    dual_page.insert_link(
-                        {
-                            "kind": pymupdf.LINK_URI,
-                            "from": _map_rect(link["from"]),
-                            "uri": link["uri"],
-                        }
+                new_link = self._dual_link_for_source(
+                    link, _map_rect(from_rect), _map_point
+                )
+                if new_link is not None:
+                    from babeldoc.format.pdf.document_il.backend.link_remap import (
+                        safe_insert_link,
                     )
-                elif kind in (pymupdf.LINK_GOTO, pymupdf.LINK_NAMED) and link.get(
-                    "page"
-                ) is not None:
-                    new_link = {
-                        "kind": pymupdf.LINK_GOTO,
-                        "from": _map_rect(link["from"]),
-                        "page": link["page"],
-                    }
-                    to = link.get("to")
-                    if to is not None:
-                        new_link["to"] = _map_point(to.x, to.y)
-                    dual_page.insert_link(new_link)
+
+                    safe_insert_link(dual_page, new_link)
             except Exception:
                 logger.debug("copy link to dual failed", exc_info=True)
+
+    @staticmethod
+    def _dual_link_for_source(link: dict, rect, map_point) -> dict | None:
+        """把源链接转成可插入 dual 的链接字典（目标语义保持不变）。
+
+        ``NAMED`` 分两种：带 ``page`` 的转 ``GOTO``（不依赖命名目的地），
+        只带 ``nameddest`` 的保留命名目的地；``LAUNCH``/``GOTOR`` 按 ``file``
+        复制（pymupdf 落盘时会再改写回 GOTOR，属正常）。
+        """
+        kind = link.get("kind")
+        if kind == pymupdf.LINK_URI and link.get("uri"):
+            return {"kind": pymupdf.LINK_URI, "from": rect, "uri": link["uri"]}
+        if kind in (pymupdf.LINK_LAUNCH, pymupdf.LINK_GOTOR) and link.get("file"):
+            return {"kind": pymupdf.LINK_LAUNCH, "from": rect, "file": link["file"]}
+        if kind in (pymupdf.LINK_GOTO, pymupdf.LINK_NAMED):
+            if link.get("page") is not None:
+                out = {
+                    "kind": pymupdf.LINK_GOTO,
+                    "from": rect,
+                    "page": link["page"],
+                }
+                to = link.get("to")
+                if to is not None:
+                    out["to"] = map_point(to.x, to.y)
+                return out
+            nameddest = link.get("nameddest")
+            if nameddest:
+                return {
+                    "kind": pymupdf.LINK_NAMED,
+                    "from": rect,
+                    "nameddest": nameddest,
+                }
+        return None
 
     def create_side_by_side_dual_pdf(
         self,
@@ -1305,6 +1351,9 @@ class PDFCreater:
         # Open the original PDF and insert translated PDF
         dual = original_pdf
         dual.insert_file(translated_pdf)
+        # ``move_page`` 会就地重写 pymupdf 内存中的 TOC 页码，所以必须在移动
+        # 之前快照源 TOC，后面用「源页码 → 交替页码」一次性映射。
+        source_toc = list(dual.get_toc())
 
         # Rearrange pages to alternate between original and translated
         page_count = translated_pdf.page_count
@@ -1314,12 +1363,18 @@ class PDFCreater:
             else:
                 dual.move_page(page_count + page_id, page_id * 2 + 1)
 
-        # 交替页模式下原文页被移动到偶数位，目录页码需要重映射
+        # ``insert_file`` 不搬运 NAMED 链接（真实论文的参考文献引用正是
+        # 这种形态，实测 361 条全部丢失）。这里给译文页补齐缺失的 NAMED。
+        self._restore_named_links_after_insert_file(
+            dual, translated_pdf, page_count, translation_config
+        )
+
+        # 交替页模式下原文页落在偶数/奇数位，目录页码按源页码一次性映射；
+        # 对已被 ``move_page`` 改写过的 TOC 再乘 2 会越界并丢目录。
         try:
-            toc = dual.get_toc()
-            if toc:
+            if source_toc:
                 remapped = []
-                for entry in toc:
+                for entry in source_toc:
                     level, title, page = entry[0], entry[1], entry[2]
                     if page > 0:
                         page = (
@@ -1333,6 +1388,100 @@ class PDFCreater:
             logger.warning("remap toc for alternating dual failed", exc_info=True)
 
         return dual
+
+    @staticmethod
+    def _restore_named_links_after_insert_file(
+        dual: pymupdf.Document,
+        translated_pdf: pymupdf.Document,
+        page_count: int,
+        translation_config: TranslationConfig,
+    ) -> None:
+        """补齐 ``insert_file`` 搬运后丢失的译文侧 NAMED 链接。
+
+        - 带 ``page`` 的 NAMED → 重建为 ``GOTO``，目标页按译文页 → 交替页
+          映射（不依赖命名目的地，与 insert_file 对 GOTO 的处置一致）；
+        - 只带 ``nameddest`` 的 NAMED → 保留命名目的地。
+
+        用「矩形 + 目标」签名去重，避免重复插入 insert_file 已搬运的链接。
+        """
+        for page_id in range(page_count):
+            if page_id >= len(translated_pdf):
+                continue
+            target_index = (
+                page_id * 2
+                if translation_config.dual_translate_first
+                else page_id * 2 + 1
+            )
+            if target_index >= len(dual):
+                continue
+            dual_page = dual[target_index]
+            existing = {
+                PDFCreater._dual_link_signature(link) for link in dual_page.get_links()
+            }
+            for link in translated_pdf[page_id].get_links():
+                if link.get("kind") != pymupdf.LINK_NAMED:
+                    continue
+                from_rect = link.get("from")
+                if from_rect is None:
+                    continue
+                to = link.get("to")
+                page_target = link.get("page")
+                nameddest = link.get("nameddest")
+                if page_target is not None:
+                    new_link = {
+                        "kind": pymupdf.LINK_GOTO,
+                        "from": pymupdf.Rect(from_rect),
+                        "page": (
+                            page_target * 2
+                            if translation_config.dual_translate_first
+                            else page_target * 2 + 1
+                        ),
+                    }
+                    if to is not None:
+                        new_link["to"] = pymupdf.Point(to.x, to.y)
+                elif nameddest:
+                    new_link = {
+                        "kind": pymupdf.LINK_NAMED,
+                        "from": pymupdf.Rect(from_rect),
+                        "nameddest": nameddest,
+                    }
+                else:
+                    continue
+                signature = PDFCreater._dual_link_signature(new_link)
+                if signature in existing:
+                    continue
+                try:
+                    from babeldoc.format.pdf.document_il.backend.link_remap import (
+                        safe_insert_link,
+                    )
+
+                    safe_insert_link(dual_page, new_link)
+                    existing.add(signature)
+                except Exception:
+                    logger.debug("restore link after insert_file failed", exc_info=True)
+
+    @staticmethod
+    def _dual_link_signature(link: dict) -> tuple:
+        """链接去重签名：矩形 + 目标（URI/file/命名目的地/页码 + 目标点）。"""
+        from_rect = link.get("from")
+        rect_key = (
+            None
+            if from_rect is None
+            else (
+                round(float(from_rect.x0), 2),
+                round(float(from_rect.y0), 2),
+                round(float(from_rect.x1), 2),
+                round(float(from_rect.y1), 2),
+            )
+        )
+        return (
+            rect_key,
+            str(link.get("uri") or ""),
+            str(link.get("file") or ""),
+            str(link.get("nameddest") or ""),
+            link.get("page"),
+            str(link.get("to") or ""),
+        )
 
     def _copy_toc_to_dual(
         self, dual: pymupdf.Document, src_doc: pymupdf.Document
@@ -1677,15 +1826,74 @@ class PDFCreater:
             )
             pdf = pymupdf.open(self.original_pdf_path)
             self.font_mapper.add_font(pdf, self.docs)
+            # LaTeX bbox 排版（实验特性，默认关闭）：内容流生成**之前**先选段 +
+            # 编译（此时页面还是源文，可量测源行数），生成内容流时跳过已贴片段落
+            # 的字符（旧路径译文不入流），生成之后再贴片。任何失败都安全回退。
+            latex_overlay = None
+            skip_paragraph_ids: frozenset = frozenset()
+            if (
+                getattr(translation_config, "enable_latex_bbox_layout", False)
+                and not self._latex_overlay_done
+            ):
+                self._latex_overlay_done = True
+                try:
+                    from babeldoc.format.pdf.document_il.backend.latex_bbox import (
+                        LatexBboxOverlay,
+                    )
+
+                    latex_overlay = LatexBboxOverlay(
+                        pdf, self.docs, translation_config
+                    )
+                    skip_paragraph_ids = frozenset(latex_overlay.prepare())
+                except Exception:
+                    logger.warning(
+                        "LaTeX bbox 预选失败，保留现有渲染", exc_info=True
+                    )
+                    latex_overlay = None
+                    skip_paragraph_ids = frozenset()
+                    self.latex_bbox_stats = {"error": "overlay-exception"}
+                    translation_config.latex_bbox_stats = self.latex_bbox_stats
             with self.translation_config.progress_monitor.stage_start(
                 self.stage_name,
                 len(self.docs.page),
             ) as pbar:
                 for page in self.docs.page:
                     self.update_page_content_stream(
-                        check_font_exists, page, pdf, translation_config
+                        check_font_exists,
+                        page,
+                        pdf,
+                        translation_config,
+                        skip_paragraph_ids=skip_paragraph_ids,
                     )
                     pbar.advance()
+            if latex_overlay is not None:
+                try:
+                    pages_by_number = {
+                        page.page_number: page for page in self.docs.page
+                    }
+
+                    def _regenerate_pages(page_indices) -> None:
+                        """链接校验失败时重新生成受影响页（不跳过字符）。
+
+                        ``set_contents`` 会整页替换内容流，贴片随之丢弃。
+                        """
+                        for page_index in page_indices:
+                            target = pages_by_number.get(page_index)
+                            if target is None:
+                                continue
+                            self.update_page_content_stream(
+                                check_font_exists, target, pdf, translation_config
+                            )
+
+                    pdf = latex_overlay.stamp(regenerate_pages=_regenerate_pages)
+                    self.latex_bbox_stats = latex_overlay.stats
+                    translation_config.latex_bbox_stats = latex_overlay.stats
+                except Exception:
+                    logger.warning(
+                        "LaTeX bbox overlay 异常，保留现有渲染", exc_info=True
+                    )
+                    self.latex_bbox_stats = {"error": "overlay-exception"}
+                    translation_config.latex_bbox_stats = self.latex_bbox_stats
             # 超链接按「源字符身份」重定位：旧实现按译文文字搜索，译文改写后飘移。
             # 无 link_remap_state 时（旧调用方）跳过，保持现状行为。
             if self.link_remap_state:
@@ -1864,7 +2072,13 @@ class PDFCreater:
             raise
 
     def update_page_content_stream(
-        self, check_font_exists, page, pdf, translation_config, skip_char: bool = False
+        self,
+        check_font_exists,
+        page,
+        pdf,
+        translation_config,
+        skip_char: bool = False,
+        skip_paragraph_ids: frozenset | set | None = None,
     ):
         assert page.cropbox is not None and page.cropbox.box is not None
         page_crop_box = page.cropbox.box
@@ -1932,7 +2146,9 @@ class PDFCreater:
             check_font_exists=check_font_exists,
         )
         # Create render units for all renderable objects
-        render_units = self.create_render_units_for_page(page, translation_config)
+        render_units = self.create_render_units_for_page(
+            page, translation_config, skip_paragraph_ids=skip_paragraph_ids
+        )
         if skip_char:
             render_units = [
                 unit

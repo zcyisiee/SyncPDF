@@ -265,6 +265,22 @@ def extract(
     il_translator = ILTranslator(
         SheetProtocolTranslator(lang_in, lang_out, True), config
     )
+    # LaTeX bbox 排版（实验特性）：源行几何必须在译文回填之前采集——
+    # post_translate_paragraph 会把 composition 换成纯文本 run，pdf_line 与
+    # 源坐标随之丢失（根因 5）。这里随 state.pkl 落盘，reconstruct 时读取。
+    # 门禁：默认关闭时不采集（零行为变化，含 state.pkl 体积/耗时）。
+    if config.enable_latex_bbox_layout:
+        from babeldoc.format.pdf.document_il.backend.latex_bbox.source_geometry import (
+            capture_source_line_geometry,
+        )
+
+        try:
+            source_line_geometry = capture_source_line_geometry(docs)
+        except Exception:  # noqa: BLE001 - 几何采集失败只影响 P3 保真
+            logger.warning("源行几何采集失败", exc_info=True)
+            source_line_geometry = {}
+    else:
+        source_line_geometry = {}
     inputs = {}
     rows = []
     label_counts = {}
@@ -334,6 +350,8 @@ def extract(
                 # （与 char_indices 同序，pickle 后保持对象身份，重建阶段读新 box）。
                 "link_snapshot": link_state.get("link_snapshot", {}),
                 "page_char_objects": link_state.get("page_char_objects", {}),
+                # 源行几何（P3-0）：译文回填前采集，重建阶段直接复用。
+                "source_line_geometry": source_line_geometry,
             },
             f,
         )
@@ -465,12 +483,24 @@ def apply(workdir, translated_sheet):
     }
 
 
-def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False):
+def reconstruct(
+    workdir,
+    output_dir=None,
+    no_dual=True,
+    watermark=False,
+    latex_bbox=False,
+    latex_bbox_mode=None,
+):
     """从写回后的 IR 重排并生成 PDF。返回输出路径 dict。
 
     支持 agent 排版微调：读 ``<workdir>/agent/layout_overrides.json`` →
     注入 Typesetting（scale_cap / line_skip / 强制换行）并在 IR 上应用
     box / font_scale；Typesetting 之后 dump ``agent/layout_geometry.json``。
+
+    ``latex_bbox=True`` 时开启 LaTeX bbox 排版（实验特性）：Typesetting 之前
+    捕获源几何与公式融合 body，PDFCreater 在内容流生成时跳过已贴片段落的
+    字符并贴片；能力缺失或任何失败自动回退现有渲染。``latex_bbox_mode``
+    可选 ``"full"``（默认）/ ``"repair"``。
     """
     from babeldoc.tools.agent import layout_geometry
     from babeldoc.tools.agent import layout_overrides
@@ -508,6 +538,42 @@ def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False):
     ir_stats = layout_overrides.apply_to_ir(doc, overrides)
     layout_geometry.capture_source_state(doc, overrides, state=source_state)
 
+    if latex_bbox:
+        config.enable_latex_bbox_layout = True
+        if latex_bbox_mode:
+            config.latex_bbox_mode = str(latex_bbox_mode)
+        # 公式融合需要 provider IR（extract 时落在 <workdir>/agent；
+        # _base_config 不设 provider_ir_dir，这里补齐，与 extract 保持一致）。
+        config.provider_ir_dir = agent_dir(workdir)
+        # 片段级公式嵌图需要源 PDF（不是 mono 产物）：用 extract 落的输入副本。
+        config.latex_source_pdf_path = str(temp_pdf_path)
+        from babeldoc.format.pdf.document_il.backend.latex_bbox import (
+            capture_layout_sources,
+        )
+        from babeldoc.format.pdf.document_il.backend.latex_bbox.source_geometry import (
+            geometry_from_char_objects,
+        )
+
+        try:
+            # 未翻译段判定：用 extract 时记录的源文（translated.jsonl 的输入侧）。
+            source_texts = {
+                debug_id: getattr(item, "unicode", "") or ""
+                for debug_id, item in (state.get("inputs") or {}).items()
+            }
+            # 源行几何（P3-0）：extract 落的为主；旧 workdir 用 extract 时的
+            # page_char_objects（box 仍是源坐标）按段 box 聚类兜底。
+            config.latex_source_geometry = state.get("source_line_geometry") or {}
+            if not config.latex_source_geometry:
+                config.latex_source_geometry = geometry_from_char_objects(
+                    doc, state.get("page_char_objects") or {}
+                )
+            capture_layout_sources(doc, config, source_texts=source_texts)
+        except Exception:
+            logger.warning(
+                "LaTeX bbox 版面源捕获失败，回退现有渲染路径", exc_info=True
+            )
+            config.enable_latex_bbox_layout = False
+
     Typesetting(config).typesetting_document(doc)
 
     geometry = layout_geometry.build_geometry(doc, source_state, overrides)
@@ -526,6 +592,9 @@ def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False):
         },
     )
     result = pdf_creater.write(config)
+    # decisions[] 已完整落盘 latex_bbox_report.json；stdout 只给摘要，
+    # 避免把数十 KB 的逐段决策重复展开到终端。
+    latex_stats_summary = _latex_stats_summary(pdf_creater.latex_bbox_stats)
     return {
         "mono_pdf": str(result.mono_pdf_path) if result.mono_pdf_path else None,
         "dual_pdf": str(result.dual_pdf_path) if result.dual_pdf_path else None,
@@ -539,7 +608,24 @@ def reconstruct(workdir, output_dir=None, no_dual=True, watermark=False):
         ),
         "link_unresolved": pdf_creater.link_stats.get("unresolved", []),
         "link_uri_set_match": pdf_creater.link_stats.get("uri_set_match"),
+        "latex_bbox": latex_stats_summary,
+        "latex_bbox_report": (
+            str(Path(config.working_dir) / "latex_bbox_report.json")
+            if pdf_creater.latex_bbox_stats
+            else None
+        ),
     }
+
+
+def _latex_stats_summary(stats: dict | None) -> dict | None:
+    """去掉逐段 decisions，只留摘要（完整报告在 latex_bbox_report.json）。"""
+    if not stats:
+        return stats
+    summary = dict(stats)
+    decisions = summary.pop("decisions", None)
+    if decisions is not None:
+        summary["decision_count"] = len(decisions)
+    return summary
 
 
 def render(pdf_path, pages, dpi=110, out_dir=None):
