@@ -163,13 +163,15 @@ reconstructed → rendered → accepted`；`blocked_protocol`、`blocked_transla
 {"ok": true, "applied": 209, "unknown_ids": [], "violations": [],
  "punctuation_fixes": [{"id": "P03-002", "change": "{v1}: removed 1 duplicate punctuation"}],
  "markdown_sheet": "…/translated.jsonl",
- "repaired": [{"id": "P05-001", "mode": "reorder"}],
- "warnings": ["empty_style_span: id P02-010 style 2"],
+ "repaired": [{"id": "P05-001", "mode": "accepted"}],
+ "warnings": ["empty_style_span: id P02-010 style 2", "anchor_reordered: id P05-001"],
  "fallback_ids": ["P11-020"]}
 ```
 
 - `fallback_ids`：模型漏行、已回退原文渲染的段落（**不是** `target==source` 判定的）。
-- `repaired[].mode`：`reorder`（锚点顺序修正）或 `proportional`（锚点增删后等比投放）。
+- `repaired[].mode`：`accepted`（锚点多重集一致，接受模型语序，只修空 span）或
+  `proportional`（锚点增删后等比投放）。锚点顺序与源文不同不修复，只在 `warnings`
+  里记 `anchor_reordered: id X`。
 
 ## 4. `layout_overrides.json`（排版覆盖，唯一真源）
 

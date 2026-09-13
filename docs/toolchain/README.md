@@ -51,7 +51,7 @@
   ├─[10] LLM 整篇翻译 ──────── 一次调用翻译整篇 document.md → agent/translated.md
   │        （不是分块并发；术语与语气一次成型）
   │
-  ├─[11] md-apply ──────────── 校验（id 对齐 / 锚点顺序 / 空 span / label 一致性）→ 写回 IR
+  ├─[11] md-apply ──────────── 校验（id 对齐 / 锚点多重集 / 空 span / label 一致性）→ 写回 IR
   │        落盘 agent/translated.jsonl + agent/il_translated.applied.json
   │
   ├─[12] Typesetting ───────── 重排：源字符 box 原地改写 / 译文新建字符对象
@@ -74,7 +74,7 @@
 |---|---|---|---|---|
 | **解析** | `parse_document` / `md-extract` | PDF + MinerU 布局（API 或回放） | `document.md` `anchors.json` `sheet.jsonl` `state.pkl` `provider_ir.json` `alignment.json` `toc.json` `bookmarks.json` `links.json` `layout_coverage.json` | `layout_coverage_gate`（硬）；`toc_low_confidence`（软）；`mineru_token_missing`；`layout_unsupported` |
 | **翻译** | `translate_document` | `document.md` | `translated.md`（+ `usage.json`） | `model_cli_missing`（无 `agy` 等 CLI 时改用 `translated_md=` 导入） |
-| **写回** | `apply_translation` | `translated.md` | `translated.jsonl` `il_translated.applied.json` `apply_report.json` | `anchor_order_mismatch`、`extra_ids`（硬，阻断） |
+| **写回** | `apply_translation` | `translated.md` | `translated.jsonl` `il_translated.applied.json` `apply_report.json` | `anchor_multiset_mismatch`、`extra_ids`（硬，阻断） |
 | **审查** | `review_document` / `backtranslate_check` | 上述产物 | `review_verdict.json` | `verdict=needs_fix`（软，进重译循环） |
 | **重建** | `reconstruct_pdf` | IR + `state.pkl` | `output/*.mono.pdf` `*.dual.pdf` `reconstruct_report.json` | `link_uri_set_mismatch`（硬）；`link_unresolved`（软） |
 | **渲染** | `render_pages` | mono/dual PDF | `render/*.png` | 页号越界静默跳过 |

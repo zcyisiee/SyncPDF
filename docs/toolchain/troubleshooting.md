@@ -259,8 +259,10 @@ EOF
 见 [`gates.md`](gates.md#5-翻译协议门禁硬)。要点：
 
 - `extra_ids`（模型伪造段落 id）→ 从译文里删掉该段；
-- `anchor_order_mismatch` → 先自动修复（reorder/proportional），仍失败则
-  `retranslate_ids --ids [...] --feedback "锚点顺序必须与源文一致"`；
+- `anchor_multiset_mismatch` → 锚点数量/多重集与源文不一致（丢或幻觉锚点）；
+  先由 `proportional` 自动修复，仍失败则
+  `retranslate_ids --ids [...] --feedback "锚点必须与源文一致"`。锚点顺序与源文
+  不同**不算违规**（只记 `anchor_reordered` 警告），因为中英语序调整是合法翻译。
 - `missing_ids` **不阻断**（回退原文），但会进 `fallback_ids`——若大量出现，
   说明模型漏行，重译。
 
