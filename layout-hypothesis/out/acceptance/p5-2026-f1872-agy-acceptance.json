@@ -1,0 +1,33 @@
+{
+ "workdir": "/tmp/p5-final/2026-f1872-agy/workdir",
+ "mono_pdf": "/tmp/p5-final/2026-f1872-agy/out-latex/2026-f1872-paper.no_watermark.zh.mono.pdf",
+ "dual_pdf": "/tmp/p5-final/2026-f1872-agy/out-latex/2026-f1872-paper.no_watermark.zh.dual.pdf",
+ "pages": 20,
+ "fill_threshold": 0.98,
+ "eligible": 153,
+ "applied": 147,
+ "application_rate": 0.9608,
+ "applied_not_eligible": [
+  "uzRcg",
+  "D1Qwp",
+  "quU1t",
+  "S4rZo",
+  "hMrkW",
+  "oE5FZ"
+ ],
+ "ineligible_reasons": {
+  "label": 196,
+  "untranslated": 18,
+  "single-line": 14,
+  "target-equals-source": 1
+ },
+ "lines_nonfinal_ge_threshold": 726,
+ "lines_nonfinal_total": 768,
+ "lines_nonfinal_merged_ge_threshold": 767,
+ "lines_nonfinal_merged_total": 767,
+ "applied_paragraphs_zero_diff_non_formula": 137,
+ "applied_paragraphs_strict_zero_diff_non_formula": 127,
+ "text_diff_zero_ratio_non_formula": 1.0,
+ "text_diff_max": 2,
+ "note": "P5-3 agy 全链路（gemini-3.8-flash-low/effort low 重译）；完整逐段明细见 /tmp/p5-final/2026-f1872-agy/workdir/acceptance/"
+}

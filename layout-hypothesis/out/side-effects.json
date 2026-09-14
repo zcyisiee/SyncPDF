@@ -1,0 +1,122 @@
+{
+  "para_id": "P02-001",
+  "il_box": [
+    49.009,
+    593.771,
+    301.561,
+    737.004
+  ],
+  "requested_w_h": [
+    252.552,
+    143.233
+  ],
+  "font_size": 9.963,
+  "stamp_fonts": [
+    {
+      "name": "AEEVSY+SourceHanSansCN-Regular",
+      "type": "Type0",
+      "embedded": true
+    },
+    {
+      "name": "SYUHSZ+LMRoman10-Regular-Identity-H",
+      "type": "Type0",
+      "embedded": true
+    }
+  ],
+  "stamp_bytes": 29046,
+  "compile_seconds": 0.463,
+  "original_clip_chars": 747,
+  "original_clip_has_chinese": false,
+  "variants": {
+    "none": {
+      "out_pdf": "/Users/zhengcaiyi/Desktop/博0/杂项/Github小玩意/BabelDOC/ieeTranslater/docs/layout-hypothesis/out/sideeffects_none.pdf",
+      "page_index": 1,
+      "mode": "none",
+      "rect_mupdf": [
+        49.009,
+        54.996,
+        301.561,
+        198.229
+      ],
+      "seconds": 0.048,
+      "page_count": 20,
+      "extractable_chars": 6807,
+      "chars_in_box_clip": 990,
+      "file_size": 1136516,
+      "translated_first_8_in_clip": true,
+      "clip_contains_original_english": true,
+      "n_chinese_fragments_in_clip": 1,
+      "clip_chars": 990,
+      "source_fonts": [
+        {
+          "name": "AEEVSY+SourceHanSansCN-Regular",
+          "type": "Type0",
+          "embedded": true
+        }
+      ],
+      "all_fonts_embedded": true,
+      "n_fonts": 7,
+      "search_hits_for_translation": 1
+    },
+    "draw": {
+      "out_pdf": "/Users/zhengcaiyi/Desktop/博0/杂项/Github小玩意/BabelDOC/ieeTranslater/docs/layout-hypothesis/out/sideeffects_draw.pdf",
+      "page_index": 1,
+      "mode": "draw",
+      "rect_mupdf": [
+        49.009,
+        54.996,
+        301.561,
+        198.229
+      ],
+      "seconds": 0.048,
+      "page_count": 20,
+      "extractable_chars": 6807,
+      "chars_in_box_clip": 990,
+      "file_size": 1136678,
+      "translated_first_8_in_clip": true,
+      "clip_contains_original_english": true,
+      "n_chinese_fragments_in_clip": 1,
+      "clip_chars": 990,
+      "source_fonts": [
+        {
+          "name": "AEEVSY+SourceHanSansCN-Regular",
+          "type": "Type0",
+          "embedded": true
+        }
+      ],
+      "all_fonts_embedded": true,
+      "n_fonts": 7,
+      "search_hits_for_translation": 1
+    },
+    "redact": {
+      "out_pdf": "/Users/zhengcaiyi/Desktop/博0/杂项/Github小玩意/BabelDOC/ieeTranslater/docs/layout-hypothesis/out/sideeffects_redact.pdf",
+      "page_index": 1,
+      "mode": "redact",
+      "rect_mupdf": [
+        49.009,
+        54.996,
+        301.561,
+        198.229
+      ],
+      "seconds": 0.056,
+      "page_count": 20,
+      "extractable_chars": 6059,
+      "chars_in_box_clip": 242,
+      "file_size": 1135839,
+      "translated_first_8_in_clip": true,
+      "clip_contains_original_english": false,
+      "n_chinese_fragments_in_clip": 1,
+      "clip_chars": 242,
+      "source_fonts": [
+        {
+          "name": "AEEVSY+SourceHanSansCN-Regular",
+          "type": "Type0",
+          "embedded": true
+        }
+      ],
+      "all_fonts_embedded": true,
+      "n_fonts": 7,
+      "search_hits_for_translation": 1
+    }
+  }
+}

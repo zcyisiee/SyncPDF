@@ -1,0 +1,77 @@
+{
+  "mono_pdf": "/tmp/babeldoc-latex-acceptance/2026-f1872/out-latex/2026-f1872-paper.no_watermark.zh.mono.pdf",
+  "dual_pdf": "/tmp/babeldoc-latex-acceptance/2026-f1872/out-latex/2026-f1872-paper.no_watermark.zh.dual.pdf",
+  "layout_geometry": "/tmp/babeldoc-latex-acceptance/2026-f1872/workdir/agent/layout_geometry.json",
+  "layout_override_stats": {
+    "paragraphs_touched": 0,
+    "font_scaled": 0,
+    "box_changed": 0,
+    "clamped": 0,
+    "unmatched_ids": [],
+    "warnings": []
+  },
+  "layout_warnings": [],
+  "link_total": 429,
+  "link_remapped": 428,
+  "link_fallback_paragraph": 326,
+  "link_unresolved": [
+    {
+      "page": 0,
+      "link_index": 55,
+      "uri": null
+    }
+  ],
+  "link_uri_set_match": true,
+  "latex_bbox": {
+    "enabled": true,
+    "available": true,
+    "attempted": 5,
+    "applied": 5,
+    "fallback": 190,
+    "failed": 0,
+    "fallback_reasons": {
+      "line-fill-ok": 49,
+      "box-too-small": 13,
+      "formula-fusion-failed": 100,
+      "no-body-lines": 27,
+      "box-expanded-after-typesetting": 1,
+      "applied": 5
+    },
+    "applied_paragraphs": [
+      "Qreuu",
+      "kR1rD",
+      "fx77q",
+      "e23kx",
+      "xdtC8"
+    ],
+    "pages_affected": [
+      4,
+      10,
+      12,
+      17
+    ],
+    "compile": {
+      "attempts": 6,
+      "seconds": 3.012,
+      "cache_hits": 0
+    },
+    "links": {
+      "before_total": 429,
+      "after_total": 429,
+      "restored": 3,
+      "uri_set_match": true
+    },
+    "reverted": false,
+    "error": null,
+    "capability": {
+      "available": true,
+      "xelatex_path": "/Library/TeX/texbin/xelatex",
+      "font_path": "/Users/zhengcaiyi/.cache/babeldoc/fonts/SourceHanSansCN-Regular.ttf",
+      "bold_font_path": "/Users/zhengcaiyi/.cache/babeldoc/fonts/SourceHanSansCN-Bold.ttf",
+      "missing_packages": [],
+      "reasons": [],
+      "pymupdf_ok": true
+    }
+  },
+  "latex_bbox_report": "/tmp/babeldoc-latex-acceptance/2026-f1872/workdir/2026-f1872-paper/latex_bbox_report.json"
+}

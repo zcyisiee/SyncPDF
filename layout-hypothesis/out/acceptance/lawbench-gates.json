@@ -1,0 +1,67 @@
+{
+  "workdir": "/tmp/babeldoc-latex-acceptance/lawbench/workdir",
+  "pdf": "/Users/zhengcaiyi/Desktop/博0/杂项/Github小玩意/BabelDOC/ieeTranslater/Fei 等 - 2023 - LawBench Benchmarking Legal Knowledge of Large Language Models.pdf",
+  "ok": true,
+  "hard_failures": [],
+  "not_evaluated": [
+    "toc_integrity",
+    "protected_tokens",
+    "protocol"
+  ],
+  "gates": {
+    "layout_coverage": {
+      "status": "pass",
+      "hard": true,
+      "artifact": "/tmp/babeldoc-latex-acceptance/lawbench/workdir/Fei 等 - 2023 - LawBench Benchmarking Legal Knowledge of Large Language Models/layout_coverage.json",
+      "threshold": 0.005,
+      "uncovered_ratio": 0.0007842708105347632,
+      "coverage": 0.9992157291894652,
+      "total_chars": 109656,
+      "uncovered_chars": 86,
+      "unhealthy_pages": [
+        {
+          "page_index": 1,
+          "uncovered_chars": 86,
+          "coverage": 0.9595103578154426
+        }
+      ],
+      "detail": "未覆盖 86/109656 字符，占比 0.0784%（阈值 0.5000%）"
+    },
+    "link_integrity": {
+      "status": "pass",
+      "hard": true,
+      "artifact": "/tmp/babeldoc-latex-acceptance/lawbench/workdir/agent/reconstruct_report.json",
+      "source": "reconstruct_report",
+      "total": 161,
+      "remapped": 160,
+      "fallback_paragraph": 137,
+      "unresolved_count": 1,
+      "unresolved": [
+        {
+          "page": 8,
+          "link_index": 4,
+          "uri": null
+        }
+      ],
+      "uri_set_match": true,
+      "snapshot_total": 161,
+      "snapshot_uri_count": 16,
+      "detail": "remapped 160/161，unresolved 1，URI 集合一致=True"
+    },
+    "toc_integrity": {
+      "status": "not_available",
+      "hard": true,
+      "reason": "toc.json 或 anchors.json 缺失（需要先 parse/md-extract）"
+    },
+    "protected_tokens": {
+      "status": "not_available",
+      "hard": false,
+      "reason": "anchors.json 缺失（需要先 parse/md-extract）"
+    },
+    "protocol": {
+      "status": "not_available",
+      "hard": true,
+      "reason": "apply_report.json / protocol_report.json / translated.jsonl 均缺失（需要先 apply）"
+    }
+  }
+}
