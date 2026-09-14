@@ -1085,8 +1085,10 @@ class PDFCreater:
             "total": 0,
             "remapped": 0,
             "fallback_paragraph": 0,
+            "stamp_resolved": 0,
             "unresolved": [],
         }
+        stamp_rects_all = (self.link_remap_state or {}).get("stamp_link_rects") or {}
         for page_index, entries in snapshot.items():
             if page_index >= len(pdf):
                 continue
@@ -1099,10 +1101,12 @@ class PDFCreater:
                 paragraph_index,
                 page_height,
                 alive_ids=alive_ids,
+                stamp_rects=stamp_rects_all.get(page_index) or {},
             )
             stats["total"] += result.total
             stats["remapped"] += result.remapped
             stats["fallback_paragraph"] += result.fallback_paragraph
+            stats["stamp_resolved"] += result.stamp_resolved
             stats["unresolved"].extend(
                 {"page": page_index, **item} for item in result.unresolved
             )
@@ -1888,6 +1892,11 @@ class PDFCreater:
                     pdf = latex_overlay.stamp(regenerate_pages=_regenerate_pages)
                     self.latex_bbox_stats = latex_overlay.stats
                     translation_config.latex_bbox_stats = latex_overlay.stats
+                    # 印章内标记链接（bdoclink 注记映射的页面矩形）：作为链接
+                    # 重映射的最高优先级——那是上标引文在贴片里的真实墨迹位置。
+                    stamp_link_rects = getattr(latex_overlay, "stamp_link_rects", None)
+                    if stamp_link_rects and self.link_remap_state is not None:
+                        self.link_remap_state["stamp_link_rects"] = stamp_link_rects
                 except Exception:
                     logger.warning(
                         "LaTeX bbox overlay 异常，保留现有渲染", exc_info=True
@@ -1901,8 +1910,10 @@ class PDFCreater:
                     stats = self._remap_links_by_char_identity(pdf)
                     if stats["remapped"] or stats["unresolved"]:
                         logger.info(
-                            "超链接重映射：remapped=%d fallback_paragraph=%d unresolved=%d",
+                            "超链接重映射：remapped=%d stamp=%d fallback_paragraph=%d"
+                            " unresolved=%d",
                             stats["remapped"],
+                            stats.get("stamp_resolved", 0),
                             stats["fallback_paragraph"],
                             len(stats["unresolved"]),
                         )

@@ -9,8 +9,13 @@
 2. ``<style id='N'>…</style>`` / ``<bN>…</bN>`` 富文本标记按 composition
    中对应样式 run 解析为 ``\\textbf{}``/``\\textit{}``；
 3. ``{vN}`` 按出现顺序对应 composition 中第 N 个 ``PdfFormula`` 对象
-   （parse_translate_output 按译文顺序回填公式），按四级分类处理
-   （``classify_formula``，顺序 ``text → mineru → simple_math → fragment``）：
+   （parse_translate_output 按译文顺序回填公式），按五级分类处理
+   （``classify_formula``，顺序 ``cornermark → text → mineru → simple_math →
+   fragment``）：
+
+   - ``cornermark``：文本型角标（上标引文号 ``[1]`` 等）→ 按源字号 + 源抬升
+     渲染上标，链接覆盖的 run 用快照记录的源颜色 ``\\textcolor`` 并挂
+     ``\\href{bdoclink://l<N>}`` 标记（overlay 读印章注记还原精确矩形）；
 
    - ``text``：原生字符全是普通文本字符且无矢量图形 → 按字面文本入 body
      （BabelDOC 启发式把引文号 ``[55]``、项目符号 ``•`` 聚成公式的场景）；
@@ -107,6 +112,11 @@ class FormulaClassification:
     fragment: FragmentRef | None = None
     #: 降级原因（``mineru`` 级失败时的证据，供报告留痕）。
     reason: str = ""
+    #: ``cornermark`` 级：按链接归属切的 run，逐 run
+    #: ``(文本, link_index|None, 字号bp|None, 抬升bp|None)``。
+    corner_runs: list[
+        tuple[str, int | None, float | None, float | None]
+    ] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -425,20 +435,186 @@ def _is_prose_word_fragment(native: str) -> bool:
     return bool(PROSE_WORD_FRAGMENT.match(native.strip()))
 
 
+#: pymupdf sRGB 整数颜色 → RGB 三元组。
+def _int_to_rgb(value: int) -> tuple[int, int, int]:
+    return ((value >> 16) & 255, (value >> 8) & 255, value & 255)
+
+
+#: 印章内标记链接的 URI 方案（overlay 读印章注记时反解 link_index）。
+STAMP_LINK_URI_PREFIX = "bdoclink://l"
+
+#: 判定 run 字号是否「角标级」（相对段落基准字号）。
+_CORNER_SIZE_RATIO = 0.85
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    return ordered[len(ordered) // 2]
+
+
+def _cornermark_runs(
+    formula, char_link: dict | None, link_meta: dict | None, base_font_size: float | None
+) -> list[tuple[str, int | None, float | None, float | None]]:
+    """按链接归属切角标字符 run：[(文本, link_index|None, 字号|None, 抬升|None)]。
+
+    hyperref 只给引文数字本身做链接（``[``/``]``/``,
+`` `` 不在链接里），且粘连混合公式（``A2 in[3]``）里正文号与小号
+    角标共存——所以 run 按「链接归属 + 字号类别」双维度切：
+    链接边界不换字号也切（数字独立成 run），字号类别变化也切
+    （``[3]`` 的括号不并入 ``A2 in`` 正文）。逐 run 样式：
+
+    - 链接 run：快照实测的字号/抬升（最准）；
+    - 无链接的小字号 run（角标括号）：own 字号 + 就近继承链接 run 的抬升；
+    - 无链接的正文号 run：``(None, None)`` —— 按环境字号平排，不抬不缩；
+    - 抬升无来源时回退公式 ``y_offset``。
+    """
+    base = base_font_size or 0.0
+    raw: list[tuple[list[str], int | None, list[float], bool | None]] = []
+    for char in formula.pdf_character or []:
+        key = char_link.get(id(char)) if char_link else None
+        size = (
+            float(char.pdf_style.font_size)
+            if char.pdf_style is not None and char.pdf_style.font_size
+            else None
+        )
+        small: bool | None = None
+        if size and base:
+            small = size < base * _CORNER_SIZE_RATIO
+        if raw and raw[-1][1] == key and (
+            raw[-1][3] is None or small is None or raw[-1][3] == small
+        ):
+            raw[-1][0].append(char.char_unicode or "")
+            if size:
+                raw[-1][2].append(size)
+        else:
+            raw.append(
+                ([char.char_unicode or ""], key, [size] if size else [], small)
+            )
+    # 公式内小号链接 run 的实测样式（同公式内上标引文号样式一致，取首个）。
+    inherit_size = inherit_raise = None
+    for _parts, key, _sizes, _small in raw:
+        if key is None:
+            continue
+        meta = (link_meta or {}).get(key) or {}
+        fs = meta.get("font_size")
+        if fs and (not base or fs < base * _CORNER_SIZE_RATIO):
+            inherit_size, inherit_raise = float(fs), meta.get("raise_bp")
+            break
+
+    y_offset = float(formula.y_offset or 0.0)
+    runs: list[tuple[str, int | None, float | None, float | None]] = []
+    for parts, key, sizes, _small in raw:
+        text = "".join(parts)
+        own = _median(sizes)
+        if key is not None:
+            meta = (link_meta or {}).get(key) or {}
+            fs = float(meta.get("font_size") or own or 0.0) or None
+            raise_bp = meta.get("raise_bp")
+            if raise_bp is None:
+                raise_bp = (
+                    inherit_raise
+                    if fs and (not base or fs < base * _CORNER_SIZE_RATIO)
+                    else y_offset
+                )
+            runs.append((text, key, fs, float(raise_bp) if raise_bp is not None else None))
+            continue
+        small = bool(own and base and own < base * _CORNER_SIZE_RATIO)
+        if not small:
+            # 正文号的无链接 run（粘连混合体的正文部分）：平排。
+            runs.append((text, None, None, None))
+        elif inherit_size is not None:
+            runs.append((text, None, own, inherit_raise))
+        else:
+            runs.append((text, None, own, y_offset))
+    return runs
+
+
+def _link_marker_wrap(
+    piece: str, key: int | None, link_meta: dict | None
+) -> str:
+    """给已渲染的 LaTeX 片段挂印章内标记链接（+ 链接快照记录的源颜色）。
+
+    行内正文链接（``Section 3.1`` 的 ``3.1`` 等）不是公式，走文本级
+    ``styled`` run 渲染；样式对象身份联查（``style_link``）命中时同样用
+    ``\\href{bdoclink://l<N>}`` 标记，让 overlay 从印章注记拿到精确矩形。
+    """
+    if key is None:
+        return piece
+    meta = (link_meta or {}).get(key) or {}
+    color = meta.get("color")
+    if color is not None:
+        r, g, b = _int_to_rgb(int(color))
+        piece = f"\\textcolor[RGB]{{{r},{g},{b}}}{{{piece}}}"
+    return f"\\href{{{STAMP_LINK_URI_PREFIX}{key}}}{{{piece}}}"
+
+
+def _render_cornermark(
+    classification: FormulaClassification, link_meta: dict | None
+) -> str:
+    """角标公式 → 上标 LaTeX：逐 run 抬升 + 源字号 + 链接色 + 标记链接。
+
+    ``\\href{bdoclink://l<N>}`` 是**印章内**的定位标记（overlay 读印章注记
+    拿到精确矩形，再由 link_remap 换成真实目标）；``\\textcolor`` 用链接快照
+    记录的源颜色（IL 不存颜色，快照是唯一来源）。run 的字号/抬升为 None 时
+    按环境字号平排（粘连混合公式里的正文部分）。
+    """
+    parts: list[str] = []
+    for text, key, size, raise_bp in classification.corner_runs:
+        piece = _link_marker_wrap(escape_latex(text), key, link_meta)
+        if size and size > 0:
+            lead = size * 1.2
+            piece = f"{{\\fontsize{{{size:.2f}bp}}{{{lead:.2f}bp}}\\selectfont {piece}}}"
+        if raise_bp is not None and abs(raise_bp) >= 0.2:
+            piece = f"\\raisebox{{{raise_bp:.2f}bp}}{{{piece}}}"
+        parts.append(piece)
+    return "".join(parts)
+
+
 def classify_formula(
     formula,
     page_index: int,
     latex_index: FormulaLatexIndex | None,
     used_spans: set[str] | None = None,
     fragment_key: str = "",
+    char_link: dict | None = None,
+    link_meta: dict | None = None,
+    base_font_size: float | None = None,
 ) -> FormulaClassification:
     """把 composition 里的一个 ``PdfFormula`` 单元分级。
 
-    顺序硬约束：``text → mineru → simple_math → fragment``；任何不确定即降级。
+    顺序硬约束：``cornermark → text → mineru → simple_math → fragment``；
+    任何不确定即降级。``cornermark`` 是文本型角标（上标引文号等）：逐 run
+    按源字号 + 源抬升渲染，链接覆盖的 run 挂 ``\\href`` 标记。入选条件：
+    显式角标标志、含链接覆盖字符（空格前导的上标引文 ``[1,2]`` 没有角标
+    标志但有链接），或（旧调用兼容）字号显著小于段落基准。
     """
     native = _native_text(formula)
     has_graphics = bool(formula.pdf_curve) or bool(formula.pdf_form)
     if not has_graphics and _is_text_native(native):
+        flag = getattr(formula, "is_corner_mark", None)
+        covered = bool(char_link) and any(
+            id(char) in char_link for char in formula.pdf_character or []
+        )
+        sizes = [
+            float(char.pdf_style.font_size)
+            for char in formula.pdf_character or []
+            if char.pdf_style is not None and char.pdf_style.font_size
+        ]
+        size_small = bool(
+            base_font_size
+            and sizes
+            and _median(sizes) < base_font_size * _CORNER_SIZE_RATIO
+        )
+        if flag is True or covered or (flag is None and size_small):
+            return FormulaClassification(
+                kind="cornermark",
+                native_text=native,
+                corner_runs=_cornermark_runs(
+                    formula, char_link, link_meta, base_font_size
+                ),
+            )
         return FormulaClassification(kind="text", native_text=native)
     if _is_prose_word_fragment(native):
         # 纯英文词片：无论是否带矢量图形都按文本处理（B2Rrm 类误判）。
@@ -521,11 +697,25 @@ def _fragment(formula, page_index: int, key: str) -> FragmentRef | None:
     )
 
 
-def fuse_paragraph(paragraph, page_index: int, page_font_map: dict, latex_index: FormulaLatexIndex | None) -> FuseResult:
+def fuse_paragraph(
+    paragraph,
+    page_index: int,
+    page_font_map: dict,
+    latex_index: FormulaLatexIndex | None,
+    char_link: dict | None = None,
+    link_meta: dict | None = None,
+    style_link: dict | None = None,
+) -> FuseResult:
     """把 ``paragraph.unicode`` 融合为 LaTeX body（Typesetting 之前调用）。
 
     顺序契约：译文 token 流（text/styled/formula）与 composition 单元流
     （text/formula）一一对应；用归一化全文拼接校验，不一致即回退。
+
+    ``char_link``（id(字符对象) → link_index）与 ``link_meta``
+    （link_index → {"color", "font_size", "raise_bp"}）来自超链接快照，
+    供 ``cornermark`` 级按链接归属还原上标引文（颜色/字号/抬升/标记链接）。
+    ``style_link``（id(样式对象) → link_index）供文本级 ``styled`` run 挂
+    行内链接标记（译文 run 与源字符共享 PdfStyle 对象身份，md-apply 保持）。
     """
     result = FuseResult()
     text = paragraph.unicode or ""
@@ -558,8 +748,15 @@ def fuse_paragraph(paragraph, page_index: int, page_font_map: dict, latex_index:
                     result.style_runs += 1
                     _, _unit_text, unit_style = next(text_iter)
                     bold, italic = _style_flags(unit_style, page_font_map)
+                    piece = _style_command(bold, italic) % escape_latex(content)
                     body_parts.append(
-                        _style_command(bold, italic) % escape_latex(content)
+                        _link_marker_wrap(
+                            piece,
+                            (style_link or {}).get(id(unit_style))
+                            if unit_style is not None
+                            else None,
+                            link_meta,
+                        )
                     )
                 else:
                     next(text_iter)
@@ -605,6 +802,7 @@ def fuse_paragraph(paragraph, page_index: int, page_font_map: dict, latex_index:
     matched = 0
     formula_index = 0
     used_spans: set[str] = set()
+    base_font_size = getattr(paragraph.pdf_style, "font_size", None)
     for kind, content in segments:
         if kind == "formula":
             _, formula, _ = next(formula_iter)
@@ -614,6 +812,9 @@ def fuse_paragraph(paragraph, page_index: int, page_font_map: dict, latex_index:
                 latex_index,
                 used_spans,
                 fragment_key=f"{paragraph.debug_id or 'para'}-{formula_index}",
+                char_link=char_link,
+                link_meta=link_meta,
+                base_font_size=base_font_size,
             )
             formula_index += 1
             result.formula_classes.append(classification.kind)
@@ -623,7 +824,11 @@ def fuse_paragraph(paragraph, page_index: int, page_font_map: dict, latex_index:
                 result.formula_notes.append(
                     f"{classification.kind}:{classification.reason}"
                 )
-            if classification.kind == "text":
+            if classification.kind == "cornermark":
+                # 文本型角标（上标引文号）：抬升 + 源字号 + 链接色 + 标记链接。
+                body_parts.append(_render_cornermark(classification, link_meta))
+                plain_parts.append(classification.native_text)
+            elif classification.kind == "text":
                 # 启发式「公式」其实就是文本：按字面入 body（已转义）。
                 body_parts.append(escape_latex(classification.native_text))
                 plain_parts.append(classification.native_text)
@@ -644,7 +849,16 @@ def fuse_paragraph(paragraph, page_index: int, page_font_map: dict, latex_index:
             if kind == "styled":
                 result.style_runs += 1
                 bold, italic = _style_flags(unit_style, page_font_map)
-                body_parts.append(_style_command(bold, italic) % escape_latex(content))
+                piece = _style_command(bold, italic) % escape_latex(content)
+                body_parts.append(
+                    _link_marker_wrap(
+                        piece,
+                        (style_link or {}).get(id(unit_style))
+                        if unit_style is not None
+                        else None,
+                        link_meta,
+                    )
+                )
             else:
                 body_parts.append(escape_latex(content))
 

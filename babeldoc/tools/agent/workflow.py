@@ -568,7 +568,17 @@ def reconstruct(
                 config.latex_source_geometry = geometry_from_char_objects(
                     doc, state.get("page_char_objects") or {}
                 )
-            capture_layout_sources(doc, config, source_texts=source_texts)
+            capture_layout_sources(
+                doc,
+                config,
+                source_texts=source_texts,
+                # 超链接快照：角标引文的颜色/字号/抬升 + 字符归属（fusion 的
+                # cornermark 级用它把上标引文渲染成 bdoclink 标记链接）。
+                link_state={
+                    "link_snapshot": state.get("link_snapshot") or {},
+                    "page_char_objects": state.get("page_char_objects") or {},
+                },
+            )
         except Exception:
             logger.warning(
                 "LaTeX bbox 版面源捕获失败，回退现有渲染路径", exc_info=True

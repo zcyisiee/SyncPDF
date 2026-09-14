@@ -206,14 +206,69 @@ def resolve_link_chars(links: list[dict], page, page_height: float) -> list[dict
     return annotated
 
 
+def _link_span_facts(page, page_dict: dict, rect) -> dict:
+    """链接矩形覆盖文字的源样式事实：主色 / 字号 / 相对正文基线的抬升。
+
+    IL 不存颜色（只在 passthrough 指令里），这里从源 PDF 的文本层直接量：
+    - ``color``/``font_size``：矩形内按字符数最多的 span（链接文字通常同款）；
+    - ``raise_bp``：链接 span 基线与**同一视觉行**正文主 span（字号最大者）
+      基线之差（pymupdf 左上原点，正文在下 → 上标为正）。上标引文类链接的
+      「还原到右上角」就靠这个实测值，不用猜。
+    """
+    facts: dict = {"color": None, "font_size": None, "raise_bp": None}
+    import pymupdf
+
+    weight = 0
+    link_origin_y = None
+    for block in page_dict.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            line_rect = pymupdf.Rect(line["bbox"])
+            if not line_rect.intersects(rect):
+                continue
+            body_size, body_origin_y = 0.0, None
+            for span in line["spans"]:
+                if span["size"] > body_size:
+                    body_size, body_origin_y = (
+                        float(span["size"]),
+                        float(span["origin"][1]),
+                    )
+            for span in line["spans"]:
+                span_rect = pymupdf.Rect(span["bbox"])
+                intersection = span_rect & rect
+                if intersection.is_empty or not span["text"].strip():
+                    continue
+                covered = intersection.get_area() / max(span_rect.get_area(), 1e-9)
+                if covered < 0.5:
+                    continue
+                text_weight = len(span["text"].strip())
+                if text_weight > weight:
+                    weight = text_weight
+                    facts["color"] = int(span["color"])
+                    facts["font_size"] = float(span["size"])
+                    link_origin_y = float(span["origin"][1])
+            if (
+                body_origin_y is not None
+                and link_origin_y is not None
+                and facts["raise_bp"] is None
+            ):
+                facts["raise_bp"] = round(body_origin_y - link_origin_y, 2)
+    return facts
+
+
 def snapshot_links(pdf_path: str | Path) -> dict:
     """读取 PDF 超链接注释，按页返回 JSON 可序列化的元数据。
 
     ```json
     {"0": [{"link_index": 0, "page_index": 0, "kind": "URI",
              "uri": "https://...", "page": null,
-             "to": [x, y], "from": [x0, y0, x1, y1]}], ...}
+             "to": [x, y], "from": [x0, y0, x1, y1],
+             "color": 255, "font_size": 7.97, "raise_bp": 4.2}], ...}
     ```
+
+    ``color``/``font_size``/``raise_bp`` 是链接覆盖文字的源样式事实
+    （见 :func:`_link_span_facts`），供 LaTeX 融合还原上标引文。
     """
     import pymupdf
 
@@ -222,11 +277,15 @@ def snapshot_links(pdf_path: str | Path) -> dict:
         pages: dict[str, list[dict]] = {}
         for page_index in range(doc.page_count):
             entries: list[dict] = []
+            page_dict = None
             for link_index, link in enumerate(doc[page_index].get_links()):
                 rect = link.get("from")
                 if rect is None:
                     continue
                 to_point = link.get("to")
+                if page_dict is None:
+                    page_dict = doc[page_index].get_text("dict")
+                facts = _link_span_facts(doc[page_index], page_dict, rect)
                 entries.append(
                     {
                         "link_index": link_index,
@@ -245,6 +304,7 @@ def snapshot_links(pdf_path: str | Path) -> dict:
                             float(rect.x1),
                             float(rect.y1),
                         ],
+                        **facts,
                     }
                 )
             if entries:

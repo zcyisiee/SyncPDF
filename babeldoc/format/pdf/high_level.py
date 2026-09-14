@@ -453,26 +453,47 @@ def fix_null_page_content(doc: Document) -> list[int]:
     return invalid_page
 
 
+def _filter_link_refs(doc: Document, array_source: str) -> list[str]:
+    """数组源文本（内联或间接目标的源码）里只留 Subtype=/Link 的引用。"""
+    kept = []
+    for ref in re.findall(r"(\d+)\s+\d+\s+R", array_source):
+        try:
+            sub_kind, sub_value = doc.xref_get_key(int(ref), "Subtype")
+        except Exception:
+            continue
+        if sub_kind == "name" and sub_value == "/Link":
+            kept.append(f"{ref} 0 R")
+    return kept
+
+
 def _keep_link_annotations(doc: Document, xref: int) -> None:
     """只保留 /Link 注释（超链接），其余注释置空。
 
     历史实现会把页面上所有 /Annots 直接置 null，导致**所有超链接失效**
     （实测 e2e-f1872 原文 429 个链接全部丢失）。这里改为保留 Link 类型，
     其它注释（批注/表单等）仍然清除，避免破坏后续解析。
+
+    /Annots 有两种形态：内联数组（``[176 0 R ...]``）与指向数组对象的
+    间接引用（``176 0 R``，LaTeX/hyperref 产物常见）。间接引用同样要解析到
+    目标数组再过滤；历史实现只认内联数组，间接形态会被整体置 null
+    （实测 hyperref 编译的 samples/main.pdf 37 条链接全灭）。
     """
     try:
         kind, value = doc.xref_get_key(xref, "Annots")
-        if kind != "array" or not value:
+        if kind == "xref":
+            match = re.match(r"(\d+)\s+\d+\s+R", value or "")
+            array_source = (
+                doc.xref_object(int(match.group(1))) if match else None
+            )
+            if not array_source or not array_source.lstrip().startswith("["):
+                doc.xref_set_key(xref, "Annots", "null")
+                return
+        elif kind != "array" or not value:
             doc.xref_set_key(xref, "Annots", "null")
             return
-        kept = []
-        for ref in re.findall(r"(\d+)\s+\d+\s+R", value):
-            try:
-                sub_kind, sub_value = doc.xref_get_key(int(ref), "Subtype")
-            except Exception:
-                continue
-            if sub_kind == "name" and sub_value == "/Link":
-                kept.append(f"{ref} 0 R")
+        else:
+            array_source = value
+        kept = _filter_link_refs(doc, array_source)
         doc.xref_set_key(
             xref, "Annots", "[" + " ".join(kept) + "]" if kept else "null"
         )

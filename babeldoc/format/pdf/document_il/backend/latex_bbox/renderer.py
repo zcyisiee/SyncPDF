@@ -33,6 +33,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 #: 导言区公共部分（不含纸张尺寸与正文）：单段与批编译共用，避免模板漂移。
+#: ``xcolor``/``hyperref`` 供融合的角标链接渲染（``\\textcolor``/``\\href``）；
+#: hyperref 惯例最后加载，``hidelinks`` 关掉它自己的着色/边框（颜色由快照还原）。
 TEX_COMMON = r"""\usepackage{fontspec}
 \usepackage{xeCJK}
 \usepackage{amsmath}
@@ -40,6 +42,7 @@ TEX_COMMON = r"""\usepackage{fontspec}
 \usepackage{graphicx}
 \usepackage[english]{babel}
 \usepackage{url}
+\usepackage{xcolor}
 %(fontsetup)s
 \XeTeXlinebreaklocale "zh"
 \XeTeXlinebreakskip = 0pt plus 0.3em
@@ -49,6 +52,7 @@ TEX_COMMON = r"""\usepackage{fontspec}
 \emergencystretch=1em
 \lineskiplimit=-\maxdimen
 \pagestyle{empty}
+\usepackage[hidelinks]{hyperref}
 """
 
 TEX_HEADER = (
@@ -67,7 +71,8 @@ TEX_HEADER = (
 )
 
 #: 模板/排版指令版本：进入持久化 stamp 缓存 key，改模板必须同步递增。
-TEMPLATE_VERSION = "latex-bbox-2026-09-p4"
+#: p5：+xcolor/+hyperref(hidelinks)（角标引文的 \\textcolor/\\href 渲染）。
+TEMPLATE_VERSION = "latex-bbox-2026-09-p5"
 
 #: 有界缩小：每步 ×0.95，最多 12 步（≈0.54×），字号绝对下限 4pt。
 #: 长度单位统一用 TeX ``bp``（= 1/72in = PDF 用户单位）：父页面 bbox/fit

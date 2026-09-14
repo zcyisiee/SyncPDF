@@ -119,7 +119,7 @@ def record_source_texts(docs, config) -> dict:
     return texts
 
 
-def capture_layout_sources(docs, config, source_texts: dict | None = None) -> dict:
+def capture_layout_sources(docs, config, source_texts: dict | None = None, link_state: dict | None = None) -> dict:
     """Typesetting 之前捕获 LaTeX overlay 所需的源几何与融合 body。
 
     必须在 ``Typesetting`` 之前调用：此时段落 box / 公式 box 仍是源坐标，
@@ -129,12 +129,68 @@ def capture_layout_sources(docs, config, source_texts: dict | None = None) -> di
     ``source_texts``（debug_id → 源文）用于未翻译段判定：workflow 路径从
     ``state.pkl`` 的 ``inputs`` 传入，high_level 路径用
     :func:`record_source_texts` 预先写入 ``config.latex_source_texts``。
+
+    ``link_state``（``{"link_snapshot", "page_char_objects"}``，来自超链接
+    快照）供融合的 ``cornermark`` 级按链接归属还原上标引文：字符对象身份
+    在同一 state.pkl 内一致，这里用 ``id()`` 就地建页内反查表；无链接状态
+    （high_level 路径）时角标仍还原抬升/字号，只是不挂标记链接/颜色。
     """
     if source_texts is None:
         source_texts = getattr(config, "latex_source_texts", None) or {}
     source_geometry = getattr(config, "latex_source_geometry", None) or {}
     primary_font_family = getattr(config, "primary_font_family", None)
     latex_index = FormulaLatexIndex.from_documents(docs, config)
+    char_link_by_page: dict[int, dict[int, int]] = {}
+    link_meta_by_page: dict[int, dict[int, dict]] = {}
+    style_link_by_page: dict[int, dict[int, int]] = {}
+    if link_state:
+        snap = link_state.get("link_snapshot") or {}
+        char_objects = link_state.get("page_char_objects") or {}
+        for raw_page_index, entries in snap.items():
+            page_index = int(raw_page_index)
+            chars = char_objects.get(page_index) or []
+            char_link: dict[int, int] = {}
+            link_meta: dict[int, dict] = {}
+            # 样式对象身份 → 链接（行内正文链接用）：仅当该样式覆盖的全部
+            # 字符都唯一属于同一链接时收录，避免把 \href 扩大到无关文字。
+            style_total: dict[int, int] = {}
+            for char in chars:
+                if char is not None and char.pdf_style is not None:
+                    style_total[id(char.pdf_style)] = (
+                        style_total.get(id(char.pdf_style), 0) + 1
+                    )
+            style_hits: dict[int, set[int]] = {}
+            style_hit_count: dict[int, int] = {}
+            for entry in entries:
+                link_index = entry.get("link_index")
+                if link_index is None:
+                    continue
+                link_meta[int(link_index)] = {
+                    "color": entry.get("color"),
+                    "font_size": entry.get("font_size"),
+                    "raise_bp": entry.get("raise_bp"),
+                }
+                for idx in entry.get("char_indices") or []:
+                    if 0 <= idx < len(chars):
+                        char_link[id(chars[idx])] = int(link_index)
+                        style = chars[idx].pdf_style
+                        if style is not None:
+                            style_hits.setdefault(id(style), set()).add(
+                                int(link_index)
+                            )
+                            style_hit_count[id(style)] = (
+                                style_hit_count.get(id(style), 0) + 1
+                            )
+            style_link = {
+                style_id: next(iter(link_ids))
+                for style_id, link_ids in style_hits.items()
+                if len(link_ids) == 1
+                and style_hit_count[style_id] >= style_total.get(style_id, 0)
+            }
+            char_link_by_page[page_index] = char_link
+            link_meta_by_page[page_index] = link_meta
+            if style_link:
+                style_link_by_page[page_index] = style_link
     paragraphs: dict[str, dict] = {}
     bodies: dict[str, str] = {}
     plain_texts: dict[str, str] = {}
@@ -198,7 +254,13 @@ def capture_layout_sources(docs, config, source_texts: dict | None = None) -> di
                 meta["source_geometry"] = geometry
             paragraphs[paragraph.debug_id] = meta
             fused = fuse_paragraph(
-                paragraph, page.page_number, page_font_map, latex_index
+                paragraph,
+                page.page_number,
+                page_font_map,
+                latex_index,
+                char_link=char_link_by_page.get(page.page_number),
+                link_meta=link_meta_by_page.get(page.page_number),
+                style_link=style_link_by_page.get(page.page_number),
             )
             if fused.ok:
                 bodies[paragraph.debug_id] = fused.body
@@ -580,6 +642,11 @@ class LatexBboxOverlay:
         self._pages_by_number: dict[int, object] | None = None
         self._paragraphs_by_page: dict[int, dict[str, object]] | None = None
         self._watermark_rects_cache: dict[int, list[pymupdf.Rect]] = {}
+        #: 印章内标记链接（``bdoclink://l<N>``）映射回的页面矩形：
+        #: {page_index: {link_index: [页面坐标 Rect, ...]}}。
+        #: ``_stamp_pages`` 贴片时填充；PDFCreater 在链接重映射前取走，
+        #: 作为该链接新矩形的最高优先级（比字符并集精确——那是印章的真实墨迹）。
+        self.stamp_link_rects: dict[int, dict[int, list[pymupdf.Rect]]] = {}
 
     # ------------------------------------------------------------------
     def _init_decisions(self, paragraphs: dict) -> None:
@@ -1459,6 +1526,9 @@ class LatexBboxOverlay:
         pdf = self.pdf
         applied = 0
         restored = 0
+        stamp_links_found = 0
+        # regenerate 回滚会整页重来：每次贴片从空表重建，避免残留过期矩形。
+        self.stamp_link_rects = {}
         by_page: dict[int, list[dict]] = {}
         for job in jobs:
             if job["debug_id"] in successful:
@@ -1510,6 +1580,9 @@ class LatexBboxOverlay:
                 stamp_result = successful[job["debug_id"]]
                 stamp_doc = pymupdf.open(stamp_result.pdf_path)
                 try:
+                    stamp_links_found += self._collect_stamp_links(
+                        stamp_doc, page_index, job
+                    )
                     page.show_pdf_page(
                         job["rect"],
                         stamp_doc,
@@ -1527,7 +1600,58 @@ class LatexBboxOverlay:
                     fill_after=measure_line_fill(page, job["rect"])["min_body_fill"],
                 )
             self.stats["pages_affected"].append(page_index)
+        self.stats["links"]["stamp_marked"] = stamp_links_found
         return applied, restored
+
+    def _collect_stamp_links(
+        self, stamp_doc: pymupdf.Document, page_index: int, job: dict
+    ) -> int:
+        """读印章内的 ``bdoclink://l<N>`` 链接注记，映射为页面坐标矩形。
+
+        融合阶段把链接覆盖的角标 run 包进 ``\\href{bdoclink://l<N>}``，
+        XeLaTeX 落成印章页自己的 URI 注记——矩形就是上标引文在印章里的
+        **真实墨迹位置**。``show_pdf_page`` 只搬内容流不搬注记，所以这里
+        读出来存进 ``stamp_link_rects``，由链接重映射换成真实目标。
+
+        坐标：印章页与 job rect 同尺寸（构造保证），仿射 1:1 缩放即可；
+        两边都是 pymupdf 页面坐标（左上原点），无需翻转。
+        """
+        from babeldoc.format.pdf.document_il.backend.latex_bbox.fusion import (
+            STAMP_LINK_URI_PREFIX,
+        )
+
+        found = 0
+        try:
+            stamp_page = stamp_doc[0]
+            stamp_rect = stamp_page.rect
+            if stamp_rect.width <= 0 or stamp_rect.height <= 0:
+                return 0
+            sx = job["rect"].width / stamp_rect.width
+            sy = job["rect"].height / stamp_rect.height
+            page_map = self.stamp_link_rects.setdefault(page_index, {})
+            for link in stamp_page.get_links():
+                uri = link.get("uri") or ""
+                if not uri.startswith(STAMP_LINK_URI_PREFIX):
+                    continue
+                digits = uri[len(STAMP_LINK_URI_PREFIX) :]
+                if not digits.isdigit():
+                    continue
+                rect = link.get("from")
+                if rect is None:
+                    continue
+                mapped = pymupdf.Rect(
+                    job["rect"].x0 + rect.x0 * sx,
+                    job["rect"].y0 + rect.y0 * sy,
+                    job["rect"].x0 + rect.x1 * sx,
+                    job["rect"].y0 + rect.y1 * sy,
+                )
+                if mapped.is_empty:
+                    continue
+                page_map.setdefault(int(digits), []).append(mapped)
+                found += 1
+        except Exception:  # noqa: BLE001 - 标记链接丢失只降级到常规重映射
+            logger.debug("读取印章标记链接失败", exc_info=True)
+        return found
 
     # ------------------------------------------------------------------
     def _verify_links(self, pre_links: dict, pre_uri_set: set) -> bool:

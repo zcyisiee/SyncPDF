@@ -45,6 +45,7 @@ class LinkRemapResult:
     total: int = 0
     remapped: int = 0
     fallback_paragraph: int = 0
+    stamp_resolved: int = 0
     unresolved: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -52,6 +53,7 @@ class LinkRemapResult:
             "total": self.total,
             "remapped": self.remapped,
             "fallback_paragraph": self.fallback_paragraph,
+            "stamp_resolved": self.stamp_resolved,
             "unresolved": list(self.unresolved),
         }
 
@@ -197,11 +199,16 @@ def remap_page_links(
     paragraph_index: dict,
     page_height: float,
     alive_ids: set[int] | None = None,
+    stamp_rects: dict[int, list] | None = None,
 ) -> LinkRemapResult:
     """按源字符映射重算一页的链接矩形并写回 ``dst_page``。
 
     ``dst_page`` 是从源 PDF 打开、内容流已被整体替换的 mono 页——页上链接注释
     仍是源矩形；按 ``from`` 矩形与快照条目一一对应后替换为映射矩形。
+
+    ``stamp_rects``（link_index → 页面坐标矩形列表，pymupdf 左上原点）来自
+    LaTeX 印章内的 ``bdoclink`` 标记注记：那是上标引文在印章里的**真实墨迹
+    位置**，精度高于一切几何推导，作为最高优先级。
     """
     result = LinkRemapResult(total=len(page_links))
     if not page_links:
@@ -222,9 +229,15 @@ def remap_page_links(
             result.unresolved.append(_unresolved_entry(entry))
             continue
         old_link = candidates.pop(0)
-        rect, method = resolve_link_rect(
-            entry, page_char_objects, paragraph_index, alive_ids
+        stamp_il = _stamp_rect_union(
+            (stamp_rects or {}).get(entry.get("link_index")), page_height
         )
+        if stamp_il is not None:
+            rect, method = stamp_il, "stamp"
+        else:
+            rect, method = resolve_link_rect(
+                entry, page_char_objects, paragraph_index, alive_ids
+            )
         if rect is None:
             result.unresolved.append(_unresolved_entry(entry))
             continue
@@ -246,7 +259,32 @@ def remap_page_links(
         result.remapped += 1
         if method == "paragraph":
             result.fallback_paragraph += 1
+        elif method == "stamp":
+            result.stamp_resolved += 1
     return result
+
+
+def _stamp_rect_union(rects, page_height: float) -> pymupdf.Rect | None:
+    """印章标记矩形（页面坐标，左上原点）→ IL 坐标并集。
+
+    跨行断开的链接会有多个矩形（hyperref 每行一个注记）：取并集保持
+    快照条目与页面注记 1:1（点击区域宁可稍大）。
+    """
+    union: pymupdf.Rect | None = None
+    for rect in rects or []:
+        try:
+            candidate = pymupdf.Rect(
+                float(rect.x0),
+                page_height - float(rect.y1),
+                float(rect.x1),
+                page_height - float(rect.y0),
+            )
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if candidate.is_empty:
+            continue
+        union = candidate if union is None else (union | candidate)
+    return union
 
 
 def _unresolved_entry(entry: dict) -> dict:
