@@ -171,6 +171,8 @@ def resolve_link_chars(links: list[dict], page, page_height: float) -> list[dict
         entry = dict(link)
         entry["char_indices"] = []
         entry["paragraph_ids"] = []
+        entry["source_text"] = None
+        entry["source_char_count"] = 0
         if from_rect is None:
             annotated.append(entry)
             continue
@@ -195,6 +197,15 @@ def resolve_link_chars(links: list[dict], page, page_height: float) -> list[dict
                     hit_paragraphs.append(pid)
         entry["char_indices"] = hit_indices
         entry["paragraph_ids"] = hit_paragraphs
+        # 链接覆盖的源文字（精确到 IL 字符）：文本锚点匹配的 needle 来源。
+        # 旧缓存快照没有该字段时，link_remap 会按 char_indices 现场重建。
+        source_text = "".join(
+            str(getattr(chars[index], "char_unicode", "") or "")
+            for index in hit_indices
+            if 0 <= index < len(chars)
+        )
+        entry["source_text"] = source_text or None
+        entry["source_char_count"] = len(hit_indices)
         # 段落回退时的相对几何：源矩形与首个命中段落的源 box 的相对比例，
         # 供 link_remap 在译文段内做同比例投影（比整段 box 精确得多）。
         if hit_paragraphs:
@@ -204,6 +215,41 @@ def resolve_link_chars(links: list[dict], page, page_height: float) -> list[dict
                 entry["src_rect_ratio"] = _relative_ratio(region, src_box)
         annotated.append(entry)
     return annotated
+
+
+def _clip_text(page, rect, max_chars: int = 200) -> str | None:
+    """链接矩形覆盖的源页文字（审计/匹配线索）。"""
+    try:
+        text = page.get_text("text", clip=rect).strip()
+    except Exception:  # noqa: BLE001 - 文字抽取失败不影响快照
+        return None
+    text = " ".join(text.split())
+    return text[:max_chars] or None
+
+
+def _line_context(page_dict: dict, rect, max_chars: int = 160) -> str | None:
+    """链接所在视觉行的整行文字（源上下文，供审计与人工核对）。"""
+    import pymupdf
+
+    best_line = None
+    best_area = 0.0
+    for block in page_dict.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            line_rect = pymupdf.Rect(line["bbox"])
+            intersection = line_rect & rect
+            if intersection.is_empty:
+                continue
+            area = intersection.get_area()
+            if area > best_area:
+                best_area = area
+                best_line = line
+    if best_line is None:
+        return None
+    text = "".join(span.get("text", "") for span in best_line.get("spans", []))
+    text = " ".join(text.split())
+    return text[:max_chars] or None
 
 
 def _link_span_facts(page, page_dict: dict, rect) -> dict:
@@ -282,7 +328,6 @@ def snapshot_links(pdf_path: str | Path) -> dict:
                 rect = link.get("from")
                 if rect is None:
                     continue
-                to_point = link.get("to")
                 if page_dict is None:
                     page_dict = doc[page_index].get_text("dict")
                 facts = _link_span_facts(doc[page_index], page_dict, rect)
@@ -293,11 +338,15 @@ def snapshot_links(pdf_path: str | Path) -> dict:
                         "kind": _kind_name(link.get("kind")),
                         "uri": _link_uri(link),
                         "page": link.get("page"),
-                        "to": (
-                            [float(to_point.x), float(to_point.y)]
-                            if to_point is not None
-                            else None
-                        ),
+                        "to": _link_to_value(link),
+                        # 完整动作元数据（name/file/zoom/nameddest）＋源覆盖文字：
+                        # 就地 /Rect 更新靠这些字段保留任意动作语义并做文本锚点匹配。
+                        "name": link.get("id") or None,
+                        "file": link.get("file"),
+                        "zoom": link.get("zoom"),
+                        "nameddest": link.get("nameddest"),
+                        "target_text": _clip_text(doc[page_index], rect),
+                        "context_line": _line_context(page_dict, rect),
                         "from": [
                             float(rect.x0),
                             float(rect.y0),
@@ -314,6 +363,26 @@ def snapshot_links(pdf_path: str | Path) -> dict:
         doc.close()
 
 
+def _link_to_value(link: dict):
+    """链接 ``to`` 的 JSON 安全表示。
+
+    ``pymupdf.getLinkDict`` 的 ``to`` 对 GOTO 是 ``Point``，对 ``page < 0``
+    的 GOTOR 却可能是**命名目的地的字符串**——旧实现对 ``to_point.x`` 的
+    无脑假设会在这种 PDF 上直接抛异常。这里显式区分。
+    """
+    to_value = link.get("to")
+    if to_value is None:
+        return None
+    if isinstance(to_value, str):
+        return to_value
+    if hasattr(to_value, "x") and hasattr(to_value, "y"):
+        return [float(to_value.x), float(to_value.y)]
+    try:
+        return [float(to_value[0]), float(to_value[1])]
+    except (TypeError, ValueError, IndexError):
+        return str(to_value)
+
+
 def _kind_name(kind) -> str:
     """链接 kind → 名称。pymupdf 不同版本可能返回 int 或数字字符串。"""
     try:
@@ -324,10 +393,11 @@ def _kind_name(kind) -> str:
 
 
 _KIND_NAMES = {
-    2: "URI",
     1: "GOTO",
-    4: "NAMED",
+    2: "URI",
     3: "LAUNCH",
+    4: "NAMED",
+    5: "GOTOR",
 }
 
 

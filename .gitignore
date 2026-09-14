@@ -62,3 +62,5 @@ temp.jpg
 
 # PP-DocLayoutV3 布局查看器：权重与编译缓存（约 130MB 二进制），以及运行产物
 /paddle_layout_viewer/model/
+
+/samples/
