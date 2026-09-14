@@ -272,10 +272,11 @@ class TranslationConfig:
         mineru_doclayout_enabled: bool = False,
         mineru_skip_translate_layout_labels=None,
         layout_coverage_threshold: float = 0.005,
-        # LaTeX bbox 排版（实验特性，默认关闭）：
+        # LaTeX bbox 排版（默认开启）：
         # 开启后在 generate 阶段对满足条件的段落用 XeLaTeX 在原 bbox 内
         # 重新排版并贴回；任何前置能力缺失/编译失败都会回退现有渲染路径。
-        enable_latex_bbox_layout: bool = False,
+        # 传 False（如 --disable-latex-bbox-layout）可整体关闭。
+        enable_latex_bbox_layout: bool = True,
         latex_xelatex_path: str | None = None,
         latex_cjk_font_path: str | None = None,
         latex_compile_timeout_seconds: float = 45.0,

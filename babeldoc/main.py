@@ -396,12 +396,21 @@ def create_parser():
     translation_group.add_argument(
         "--enable-latex-bbox-layout",
         action="store_true",
-        default=False,
+        default=True,
         help=(
-            "Enable LaTeX bbox layout (experimental): re-typeset selected "
-            "paragraphs inside their original bbox with XeLaTeX and stamp them "
-            "back. Requires xelatex + CJK font; falls back to the existing "
-            "renderer when unavailable. (default: False)"
+            "Enable LaTeX bbox layout: re-typeset selected paragraphs inside "
+            "their original bbox with XeLaTeX and stamp them back. Requires "
+            "xelatex + CJK font; falls back to the existing renderer when "
+            "unavailable. (default: True)"
+        ),
+    )
+    translation_group.add_argument(
+        "--disable-latex-bbox-layout",
+        action="store_false",
+        dest="enable_latex_bbox_layout",
+        help=(
+            "Disable LaTeX bbox layout; output is byte-identical to the "
+            "legacy renderer. (default: False)"
         ),
     )
     translation_group.add_argument(

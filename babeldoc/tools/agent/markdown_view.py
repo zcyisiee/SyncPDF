@@ -419,7 +419,7 @@ def _run_parse(
 
     # LaTeX bbox 源行几何（P3-0）：必须在译文回填之前采集——post_translate_paragraph
     # 会把 composition 换成纯文本 run，pdf_line 与源坐标随之丢失。md 路径是主协议，
-    # 无条件采集（legacy extract 按 enable_latex_bbox_layout 门控、默认关闭，
+    # 无条件采集（legacy extract 按 enable_latex_bbox_layout 门控（可关闭），
     # 依赖 reconstruct 的 page_char_objects 兜底；这里直接落精确几何，兜底仅在
     # 旧 workdir 复用时生效）。失败不阻断解析，reconstruct 仍有兜底路径。
     from babeldoc.format.pdf.document_il.backend.latex_bbox.source_geometry import (

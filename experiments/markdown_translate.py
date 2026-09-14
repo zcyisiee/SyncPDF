@@ -125,7 +125,14 @@ def main():
     ap.add_argument(
         "--latex-bbox",
         action="store_true",
-        help="reconstruct 开启 LaTeX bbox 排版（实验特性；缺 XeLaTeX/字体时自动回退）",
+        default=True,
+        help="reconstruct 开启 LaTeX bbox 排版（默认开启；缺 XeLaTeX/字体时自动回退）",
+    )
+    ap.add_argument(
+        "--no-latex-bbox",
+        action="store_false",
+        dest="latex_bbox",
+        help="关闭 LaTeX bbox 排版（输出与旧渲染路径逐字节一致）",
     )
     ap.add_argument(
         "--latex-bbox-mode",

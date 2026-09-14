@@ -79,9 +79,10 @@ python -m babeldoc.tools.agent md-extract <pdf> --workdir <dir> \
 python experiments/markdown_translate.py <dir> \
     --model gemini-3.8-flash-low --effort low --output-dir <dir>/output \
     [--skip-translate] [--dry-run] [--skip-reconstruct] \
-    [--latex-bbox [--latex-bbox-mode full|repair]] [--no-dual]
+    [--no-latex-bbox] [--latex-bbox-mode full|repair] [--no-dual]
 #    （--skip-reconstruct 只到 md-apply，验收流程分开跑 default/latex 两次
-#      reconstruct 时用；--latex-bbox 与 `reconstruct --latex-bbox` 同链路）
+#      reconstruct 时用；LaTeX bbox 默认开启，--no-latex-bbox 关闭后与
+#      `reconstruct --no-latex-bbox` 同链路）
 
 # 3) 单独执行写回 / 重建
 python -m babeldoc.tools.agent md-apply <dir> <dir>/agent/translated.md

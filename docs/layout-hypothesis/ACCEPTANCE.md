@@ -31,7 +31,7 @@
 
 大型 PDF、渲染 PNG、TeX 编译缓存**一律不提交**。
 
-## LaTeX bbox 排版验收（`--latex-bbox`）
+## LaTeX bbox 排版验收（默认开启；`--no-latex-bbox` 对照组）
 
 ### 翻译协议（新论文验收从 md 协议开始）
 
@@ -59,8 +59,10 @@ legacy `extract` 每次解析会给段落分配**随机 `debug_id`**，因此「
 
 ```bash
 cp -r /tmp/babeldoc-latex-acceptance/<paper>/workdir /tmp/p5-final/<paper>/workdir
-python3 -m babeldoc.tools.agent reconstruct /tmp/p5-final/<paper>/workdir --dual \
+# default 对照组（LaTeX bbox 默认开启，需显式关闭）
+python3 -m babeldoc.tools.agent reconstruct /tmp/p5-final/<paper>/workdir --no-latex-bbox --dual \
     --output-dir /tmp/p5-final/<paper>/out-default
+# latex 构建（默认即开启，--latex-bbox 可省）
 python3 -m babeldoc.tools.agent reconstruct /tmp/p5-final/<paper>/workdir --latex-bbox --dual \
     --output-dir /tmp/p5-final/<paper>/out-latex
 python3 experiments/toolchain_gates.py /tmp/p5-final/<paper>/workdir

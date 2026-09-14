@@ -83,9 +83,11 @@ stdout 恒为 `{"ok": true, "tool": …, "data": {…}}` 或 `{"ok": false, "err
    - `verdict=pass` 才继续（warnings 允许携带）。
 4. **重排 + 渲染**：`reconstruct_pdf --workdir <wd>`（默认出 mono+dual）→
    `render_pages`（首页、图表密集页、表格页、末页）。
-   需要两端对齐排版时加 `--latex-bbox`（实验特性：正文段在 MinerU bbox 内用
-   XeLaTeX 重排；默认关闭零行为变化）。三篇论文的验收口径、回放方式与已知限制见
-   `docs/layout-hypothesis/ACCEPTANCE.md`，度量脚本 `experiments/acceptance_latex.py`。
+   LaTeX bbox 排版**默认开启**（正文段在 MinerU bbox 内用 XeLaTeX 两端对齐重排；
+   缺 XeLaTeX/字体时自动回退）；传 `latex_bbox=false`（CLI `--no-latex-bbox`）
+   关闭，关闭时输出与旧渲染路径逐字节一致。三篇论文的验收口径、回放方式与
+   已知限制见 `docs/layout-hypothesis/ACCEPTANCE.md`，度量脚本
+   `experiments/acceptance_latex.py`。
 5. **并行审查**（三个角色，提示词已落盘）：
    - `agents/reviewer-protocol.md`：结构/协议/跳过语义（数据源：`review_verdict.json`）；
    - `agents/reviewer-fidelity.md`：语义与漏译（回译）；
@@ -116,7 +118,7 @@ stdout 恒为 `{"ok": true, "tool": …, "data": {…}}` 或 `{"ok": false, "err
 - [ ] 页数/目录条目与原文一致；`links_mono ≥ 原文`、`links_dual ≈ 2×`；
 - [ ] `toolchain_gates.py`：五项门禁无 `fail`；`link_uri_set_match=true`、
       `unresolved` 已逐条确认（纯图形链接可接受）；
-- [ ] 若启用 `--latex-bbox`（实验特性，默认关闭）：
+- [ ] LaTeX bbox 构建（默认开启；`--no-latex-bbox` / `latex_bbox=false` 关闭）：
       - [ ] 应用率 `applied/eligible ≥ 95%`（eligible = 正文标签 ∧ 已翻译 ∧
             源行数 ≥2 ∧ 非旋转页 ∧ 不压水印；`experiments/acceptance_latex.py`）；
       - [ ] applied 段非末行 fill ≥ 0.98 的行占比 ≥ 99%（`lines_nonfinal_merged_*`，
@@ -127,7 +129,7 @@ stdout 恒为 `{"ok": true, "tool": …, "data": {…}}` 或 `{"ok": false, "err
             `fragment-source-missing` 等只影响该段）；
       - [ ] `render_compare.py` 并排目视首页/公式页/末页/随机 2 页：两端对齐、
             无压字、无重复文本层；
-      - [ ] 关闭该开关时输出与默认构建逐字节一致（默认关闭零行为变化）。
+      - [ ] 显式关闭（`--no-latex-bbox`）时输出与旧默认构建逐字节一致。
 - [ ] 目录页：`toc.json` 条目数 == `anchors.json` 的 `toc_entry` 行数 == 书签数；
 - [ ] 公式：`alignment.json` 的 `inline_equation_matched` 覆盖绝大多数 span
       （未对齐的应能解释为图内/代码块公式）；

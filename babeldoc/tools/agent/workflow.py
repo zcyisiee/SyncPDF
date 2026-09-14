@@ -488,7 +488,7 @@ def reconstruct(
     output_dir=None,
     no_dual=True,
     watermark=False,
-    latex_bbox=False,
+    latex_bbox=True,
     latex_bbox_mode=None,
 ):
     """从写回后的 IR 重排并生成 PDF。返回输出路径 dict。
@@ -497,10 +497,11 @@ def reconstruct(
     注入 Typesetting（scale_cap / line_skip / 强制换行）并在 IR 上应用
     box / font_scale；Typesetting 之后 dump ``agent/layout_geometry.json``。
 
-    ``latex_bbox=True`` 时开启 LaTeX bbox 排版（实验特性）：Typesetting 之前
-    捕获源几何与公式融合 body，PDFCreater 在内容流生成时跳过已贴片段落的
-    字符并贴片；能力缺失或任何失败自动回退现有渲染。``latex_bbox_mode``
-    可选 ``"full"``（默认）/ ``"repair"``。
+    ``latex_bbox`` 默认开启：Typesetting 之前捕获源几何与公式融合 body，
+    PDFCreater 在内容流生成时跳过已贴片段落的字符并贴片；能力缺失或任何
+    失败自动回退现有渲染。传 ``latex_bbox=False``（CLI ``--no-latex-bbox``）
+    关闭，关闭时输出与旧渲染路径逐字节一致。``latex_bbox_mode`` 可选
+    ``"full"``（默认）/ ``"repair"``。
     """
     from babeldoc.tools.agent import layout_geometry
     from babeldoc.tools.agent import layout_overrides
@@ -573,6 +574,9 @@ def reconstruct(
                 "LaTeX bbox 版面源捕获失败，回退现有渲染路径", exc_info=True
             )
             config.enable_latex_bbox_layout = False
+    else:
+        # 显式关闭：不受 TranslationConfig 默认值影响，确保零行为变化。
+        config.enable_latex_bbox_layout = False
 
     Typesetting(config).typesetting_document(doc)
 

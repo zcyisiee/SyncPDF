@@ -357,11 +357,11 @@
 
 ---
 
-## 阶段 13b：LaTeX bbox 排版（可选，`--latex-bbox` / `enable_latex_bbox_layout`）
+## 阶段 13b：LaTeX bbox 排版（默认开启，`--no-latex-bbox` / `enable_latex_bbox_layout=False` 可关）
 
-以 `enable_latex_bbox_layout=False` 为默认：**关闭时零行为变化**（不采集几何、
-不预选、不贴片、报告为空）。打开后每个正文段在 MinerU bbox 内用 XeLaTeX 重排
-两端对齐译文并贴回。
+以 `enable_latex_bbox_layout=True` 为默认：每个正文段在 MinerU bbox 内用 XeLaTeX 重排
+两端对齐译文并贴回。**显式关闭时零行为变化**（不采集几何、不预选、不贴片、报告为空），
+输出与旧渲染路径逐字节一致；缺 XeLaTeX/字体时也会自动回退到旧渲染路径。
 
 - **入口**：`backend/latex_bbox/`（`source_geometry` / `fusion` / `renderer_batch` /
   `stamp_cache` / `overlay` / `capability`）

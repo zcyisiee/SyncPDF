@@ -27,7 +27,8 @@ SEV_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
             "watermark": {"type": "boolean"},
             "latex_bbox": {
                 "type": "boolean",
-                "description": "开启 LaTeX bbox 排版（实验特性；缺 XeLaTeX/字体时自动回退）",
+                "default": True,
+                "description": "LaTeX bbox 排版（默认 true：正文段在 MinerU bbox 内用 XeLaTeX 两端对齐重排；缺 XeLaTeX/字体时自动回退；传 false 关闭）",
             },
             "latex_bbox_mode": {
                 "type": "string",
@@ -50,7 +51,7 @@ def reconstruct_pdf(args: dict) -> dict:
         output_dir=output_dir,
         no_dual=not (True if dual is None else dual),
         watermark=bool(args.get("watermark")),
-        latex_bbox=bool(args.get("latex_bbox")),
+        latex_bbox=bool(args.get("latex_bbox", True)),
         latex_bbox_mode=args.get("latex_bbox_mode"),
     )
     if args.get("stats", True):
