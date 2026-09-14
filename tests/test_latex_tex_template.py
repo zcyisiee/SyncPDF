@@ -160,9 +160,10 @@ def test_stamp_request_indentation_derives_parindent_and_hang():
 
 
 def test_derive_lead_clamps_source_pitch():
-    assert derive_lead(9.0, 11.4) == 11.4
-    # 小于 1.15×字号 → 抬到下限。
-    assert derive_lead(9.0, 3.0) == pytest.approx(10.35)
+    # 区间内（1.4×字号）原样保留。
+    assert derive_lead(9.0, 12.6) == 12.6
+    # 小于 1.3×字号 → 抬到下限。
+    assert derive_lead(9.0, 3.0) == pytest.approx(11.7)
     # 大于 1.6×字号 → 压到上限。
     assert derive_lead(9.0, 30.0) == pytest.approx(14.4)
     # 无源行距 → 产品默认系数。

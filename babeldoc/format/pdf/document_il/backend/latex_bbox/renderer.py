@@ -78,8 +78,8 @@ _MIN_FONT_SIZE = 4.0
 #: 行距系数：产品 Typesetting 的 CJK 默认 line_skip(1.5)，用于没有源行距时。
 DEFAULT_LEAD_RATIO = 1.5
 _DEFAULT_LEAD_RATIO = DEFAULT_LEAD_RATIO
-#: 源行距推导的可行区间（相对源字号）：clamp(baseline_pitch, 1.15fs, 1.6fs)。
-_LEAD_RATIO_MIN = 1.15
+#: 源行距推导的可行区间（相对源字号）：clamp(baseline_pitch, 1.3fs, 1.6fs)。
+_LEAD_RATIO_MIN = 1.3
 _LEAD_RATIO_MAX = 1.6
 #: 字号缩小前先试的行距系数（相对推导出的源行距）。
 _LEAD_TRIAL_RATIOS = (1.1, 0.9)
@@ -117,7 +117,7 @@ def cache_namespace(capability) -> str:
 
 
 def derive_lead(font_size: float, baseline_pitch: float | None) -> float:
-    """由源行间距推导行距：``clamp(baseline_pitch, 1.15fs, 1.6fs)``。
+    """由源行间距推导行距：``clamp(baseline_pitch, 1.3fs, 1.6fs)``。
 
     没有源行距（旧产物/无几何）时退回产品 CJK 默认系数 1.5。
     """
