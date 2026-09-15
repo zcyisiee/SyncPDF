@@ -1,9 +1,9 @@
 # 数据契约（JSON schema 速查）
 
 工具层所有交换文件都在 `<workdir>/agent/`。本文件是**唯一契约表**：改字段先改这里，
-再改 `babeldoc/tools/agent/`（IR 侧）与 `skills/document-translate/tools/`（工具侧）。
+再改 `babeldoc/tools/agent/`（IR 侧）与 `babeldoc_tools/`（工具侧）。
 
-发布 API 的契约由 `babeldoc_core` / `babeldoc_tools` 提供：所有工具成功返回
+发布 API 的契约由 `babeldoc_tools` 提供：所有工具成功返回
 `{ok, tool, job_id, data, warnings, artifacts}`，失败返回稳定的 `error.code`；状态真源为
 `agent/manifest.json`，`state.pkl` 只作 IR 缓存，不能替代 manifest。
 

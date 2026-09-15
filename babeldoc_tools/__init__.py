@@ -1,36 +1,17 @@
-"""MAS-facing BabelDOC tools (Python API, JSON schema, and dispatch)."""
+"""babeldoc_tools：agent 面向的文档翻译工具包（JSON in / JSON out）。
 
-import sys
-from pathlib import Path
+定位：把 BabelDOC 的 agent 工作流（解析 / 翻译 / 审查 / 重建 / 排版微调）
+包成**稳定、可机读、无副作用惊喜**的工具，供编排者（主 Agent，或后续的
+MCP wrapper）调用。
 
-from . import registry
-from .registry import dispatch
-from .registry import get_schema
-from .registry import list_tools
-from .registry import tool_names
-from .registry import ToolResult
+- 每个工具输入一个 JSON 对象，返回一个 JSON 对象；错误不抛栈，走
+  ``{"ok": false, "error": {...}}``。
+- 注册表 + 派发器在 :mod:`babeldoc_tools.registry`，CLI 只是薄壳：
+  ``python -m babeldoc_tools list | schema <tool> | call <tool> --args-json '{...}'``。
+- 工具实现尽量薄：核心逻辑在 ``babeldoc.tools.agent``（同仓可测试），
+  这里只做参数校验、编排、落盘与报告。
+"""
 
-from . import tools as _tools  # noqa: F401 - registration side effect
+from __future__ import annotations
 
 __version__ = "0.1.0"
-
-
-def find_repo_root(start: Path | None = None) -> Path | None:
-    """Find a checkout containing the legacy ``babeldoc`` package."""
-
-    current = (start or Path(__file__).resolve().parent).resolve()
-    for _ in range(8):
-        if (current / "babeldoc" / "tools" / "agent" / "__init__.py").is_file():
-            return current
-        if current.parent == current:
-            break
-        current = current.parent
-    return None
-
-
-def ensure_repo_importable() -> None:
-    root = find_repo_root()
-    if root is not None and str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-
-__all__ = ["ToolResult", "dispatch", "ensure_repo_importable", "find_repo_root", "get_schema", "list_tools", "registry", "tool_names"]

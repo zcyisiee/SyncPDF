@@ -64,14 +64,13 @@ Issues = "https://github.com/funstory-ai/BabelDOC/issues"
 
 [project.scripts]
 babeldoc = "babeldoc.main:cli"
-babeldoc-tools = "babeldoc_tools.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["babeldoc", "babeldoc_core", "babeldoc_tools"]
+packages = ["babeldoc", "babeldoc_tools"]
 
 [tool.flake8]
 ignore = ["E203", "E261", "E501", "W503", "E741", "E501"]

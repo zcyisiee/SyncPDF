@@ -175,7 +175,7 @@ EOF
 | `label_mismatch` | 译文回写的 label 与 anchors 不一致 | ✗ | 警告（`label_mismatches[]`） |
 | `empty_style_span` | 译文里出现空样式 span | ✗ | 警告（重建时按空文本处理） |
 | `placeholder_lost` / `placeholder_hallucinated` | 公式占位符丢失/新增 | ✓ | agent 链路：`babeldoc/tools/agent/protocol.py::check_placeholders`（占位符多重集） |
-| `formula_changed` | 公式内容被改动 | ✓ | MAS 链路：`babeldoc_core/protocol.py`（按 `formula_id` 校验；agent 链路以占位符多重集等价校验） |
+| `formula_changed` | 公式内容被改动 | ✓ | agent 链路以占位符多重集等价校验（`babeldoc/tools/agent/protocol.py::check_placeholders`） |
 
 **产物**：`agent/apply_report.json`（工具层）或 `agent/protocol_report.json`；
 无报告时脚本用 `translated.jsonl` 与 `anchors.json` 做等价 id 覆盖校验。

@@ -12,8 +12,7 @@
 - 工作目录 <WORKDIR>：含 agent/{sheet.jsonl,translated.jsonl,apply_report.json,
   review_verdict.json,layout_geometry.json,layout_lint.json,anchors.json}
 - 产物：<OUTPUT_DIR>/*.mono.pdf、*.dual.pdf、render/page-XX.png
-- 工具：`bdt call <tool> ...`（PYTHONPATH=skills/document-translate/tools，
-  或 skills/document-translate/tools/bin/bdt）
+- 工具：`python -m babeldoc_tools call <tool> ...`（在仓库根或任意 cwd 均可）
 
 ## 审查清单（逐项给 PASS / FAIL + 证据）
 A. 封面/作者区与跳过语义

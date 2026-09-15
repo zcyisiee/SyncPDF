@@ -9,9 +9,9 @@
 （render/page-XX.png）与 IR 几何数据（agent/layout_geometry.json + layout_lint.json）。
 
 ## 输入
-- <OUTPUT_DIR>/render/*.png（由 `bdt call render_pages` 生成，建议首页、图表密集页、末页）
-- `bdt call layout_lint --workdir <WORKDIR> [--page N] [--min_sev P1]` 的 findings
-- `bdt call layout_locate --workdir <WORKDIR> --page N --box "[x,y,x2,y2]"` 的候选 id
+- <OUTPUT_DIR>/render/*.png（由 `python -m babeldoc_tools call render_pages` 生成，建议首页、图表密集页、末页）
+- `python -m babeldoc_tools call layout_lint --workdir <WORKDIR> [--page N] [--min_sev P1]` 的 findings
+- `python -m babeldoc_tools call layout_locate --workdir <WORKDIR> --page N --box "[x,y,x2,y2]"` 的候选 id
 
 ## 检查项
 L1 越界：文字/标题超出页面或压在页边（lint code: out_of_page）→ 必须修。

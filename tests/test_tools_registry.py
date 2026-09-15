@@ -10,12 +10,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-TOOLS_DIR = REPO_ROOT / "skills" / "document-translate" / "tools"
 
-if str(TOOLS_DIR) not in sys.path:
-    sys.path.insert(0, str(TOOLS_DIR))
-
-from babeldoc_tools import find_repo_root  # noqa: E402
 from babeldoc_tools import registry  # noqa: E402
 
 registry.load_builtin_tools()
@@ -40,18 +35,8 @@ EXPECTED_TOOLS = {
 }
 
 
-def test_bootstrap_finds_repo_root(tmp_path):
-    """包内能自行找到仓库根（`bdt` shim 不带 PYTHONPATH 也能 import babeldoc）。"""
-    repo_root = find_repo_root()
-    assert repo_root is not None
-    assert (repo_root / "babeldoc" / "tools" / "agent" / "__init__.py").is_file()
-    assert repo_root.name == REPO_ROOT.name
-    # 从无关目录出发找不到 marker → 返回 None（不抛异常）
-    assert find_repo_root(tmp_path) is None
-
-
 def test_all_expected_tools_registered():
-    assert EXPECTED_TOOLS <= set(registry.tool_names())
+    assert EXPECTED_TOOLS == set(registry.tool_names())
 
 
 def test_list_and_schema_contract():
@@ -105,20 +90,18 @@ def test_cli_list_and_schema():
         capture_output=True,
         text=True,
         cwd=REPO_ROOT,
-        env=_env(),
     )
     assert out.returncode == 0, out.stderr
     payload = json.loads(out.stdout)
     assert payload["ok"] is True
     names = {tool["name"] for tool in payload["data"]["tools"]}
-    assert EXPECTED_TOOLS <= names
+    assert names == EXPECTED_TOOLS
 
     out = subprocess.run(
         [sys.executable, "-m", "babeldoc_tools", "schema", "layout_set"],
         capture_output=True,
         text=True,
         cwd=REPO_ROOT,
-        env=_env(),
     )
     assert out.returncode == 0, out.stderr
     assert json.loads(out.stdout)["data"]["type"] == "object"
@@ -130,18 +113,9 @@ def test_cli_call_error_exit_code():
         capture_output=True,
         text=True,
         cwd=REPO_ROOT,
-        env=_env(),
     )
     assert out.returncode == 1
     assert json.loads(out.stdout)["error"]["code"] == "unknown_tool"
-
-
-def _env() -> dict:
-    import os
-
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(TOOLS_DIR) + os.pathsep + env.get("PYTHONPATH", "")
-    return env
 
 
 # --------------------------------------------------------------------------- #

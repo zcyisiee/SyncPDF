@@ -1,7 +1,7 @@
 # 故障排查：症状 → 工具 → 参数
 
-按"你看到什么"查表。所有命令在仓库根执行；`bdt` 指
-`skills/document-translate/tools/bin/bdt`（等价 `PYTHONPATH=skills/document-translate/tools python -m babeldoc_tools`）。
+按"你看到什么"查表。所有命令都用 `python -m babeldoc_tools`（包位于仓库根）
+执行，任意 cwd 均可。
 
 ---
 
@@ -13,11 +13,11 @@
 或 `backtranslate_check` 相似度 < 0.55。
 
 ```bash
-bdt call review_document --workdir <wd> --compact            # 拿 blockers/warnings
-bdt call retranslate_ids --workdir <wd> \
+python -m babeldoc_tools call review_document --workdir <wd> --compact            # 拿 blockers/warnings
+python -m babeldoc_tools call retranslate_ids --workdir <wd> \
     --arg ids='["P07-012"]' \
     --arg feedback='"原文后半句 additional task configurations… 未译出，请补全整段"'
-bdt call review_document --workdir <wd> --compact            # 复核
+python -m babeldoc_tools call review_document --workdir <wd> --compact            # 复核
 ```
 
 - `retranslate_ids` 默认重译后自动 apply；`--arg apply=false` 可只看结果。
@@ -32,12 +32,12 @@ bdt call review_document --workdir <wd> --compact            # 复核
 ```bash
 python -c "import pymupdf,re;t=''.join(p.get_text() for p in pymupdf.open('<mono pdf>'));\
 print(len(re.findall('注意力', t)), len(re.findall('自注意力', t)))"
-bdt call retranslate_ids --workdir <wd> --arg ids='["P03-004","P08-002"]' \
+python -m babeldoc_tools call retranslate_ids --workdir <wd> --arg ids='["P03-004","P08-002"]' \
     --arg feedback='"术语表：attention 统一译作「注意力」，transformer 统一译作「Transformer」；请只改术语，其余保持"'
 ```
 
 程序化替换（不改语义、无需模型）：直接改 `agent/translated.jsonl` 的 `target` 再
-`bdt call apply_translation --workdir <wd>`。
+`python -m babeldoc_tools call apply_translation --workdir <wd>`。
 
 ### 3. 占位符/样式锚点被模型改坏
 
@@ -58,7 +58,7 @@ bdt call retranslate_ids --workdir <wd> --arg ids='["P03-004","P08-002"]' \
 `apply_translation` 已程序化剔除（`markdown_view.strip_html_comments`），重跑一次 apply 即可：
 
 ```bash
-bdt call apply_translation --workdir <wd> && bdt call reconstruct_pdf --workdir <wd>
+python -m babeldoc_tools call apply_translation --workdir <wd> && python -m babeldoc_tools call reconstruct_pdf --workdir <wd>
 ```
 
 ### 5. 译文"不完整/句子缺主语"但指标全绿
@@ -86,13 +86,13 @@ print(st['inputs']['P09-017'].unicode)"      # 看 source 是否本身就断
 ### 5. 某段太挤 / 溢出 / 与相邻段重叠
 
 ```bash
-bdt call layout_lint --workdir <wd> --arg min_sev='"P1"'        # out_of_page / paragraph_overlap
-bdt call layout_locate --workdir <wd> --arg page=5 --arg text='"（1）"'   # 拿 id
-bdt call layout_set --workdir <wd> \
+python -m babeldoc_tools call layout_lint --workdir <wd> --arg min_sev='"P1"'        # out_of_page / paragraph_overlap
+python -m babeldoc_tools call layout_locate --workdir <wd> --arg page=5 --arg text='"（1）"'   # 拿 id
+python -m babeldoc_tools call layout_set --workdir <wd> \
     --arg 'patch={"paragraphs":{"P05-012":{"scale_cap":0.9}}}' \
     --arg reason='"P1 重叠：与 P05-013 IoU 0.23"' \
-&& bdt call reconstruct_pdf --workdir <wd> \
-&& bdt call layout_lint --workdir <wd> --arg min_sev='"P1"'     # 复核
+&& python -m babeldoc_tools call reconstruct_pdf --workdir <wd> \
+&& python -m babeldoc_tools call layout_lint --workdir <wd> --arg min_sev='"P1"'     # 复核
 ```
 
 ### 6. 字号明显小于原文（`font_shrink`）
@@ -106,7 +106,7 @@ bdt call layout_set --workdir <wd> \
 ### 7. 行断得难看（公式列表挤在一行、单字成行）
 
 ```bash
-bdt call layout_set --workdir <wd> \
+python -m babeldoc_tools call layout_set --workdir <wd> \
     --arg 'patch={"paragraphs":{"P02-010":{"force_break_after_text":["。我们假设"]}}}'
 ```
 
@@ -118,10 +118,10 @@ bdt call layout_set --workdir <wd> \
 ### 8. 段落位置整体不对
 
 ```bash
-bdt call layout_geometry 2>/dev/null || true   # 没有这个工具，直接读文件
+python -m babeldoc_tools call layout_geometry 2>/dev/null || true   # 没有这个工具，直接读文件
 python -c "import json;g=json.load(open('<wd>/agent/layout_geometry.json'));\
 print([p for p in g['paragraphs'] if p['id']=='P02-010'][0])"
-bdt call layout_set --workdir <wd> --arg 'patch={"paragraphs":{"P02-010":{"box":[318,600,562,700]}}}'
+python -m babeldoc_tools call layout_set --workdir <wd> --arg 'patch={"paragraphs":{"P02-010":{"box":[318,600,562,700]}}}'
 ```
 
 `box` 是 PDF 坐标（y 向上，原点左下角），超界会被自动裁剪到 cropbox 并在
@@ -131,7 +131,7 @@ bdt call layout_set --workdir <wd> --arg 'patch={"paragraphs":{"P02-010":{"box":
 
 `text_layer_compat_ideograph`（P2）：字体缺该字形时回退到 CJK 兼容区码位
 （如 `了` → U+FA0A），视觉正常但复制会得到兼容码位。不阻断交付；
-可用 `unicodedata.normalize("NFKC", ch)` 还原，或 `bdt call dump_text_layer` 的
+可用 `unicodedata.normalize("NFKC", ch)` 还原，或 `python -m babeldoc_tools call dump_text_layer` 的
 页首注释查看每页的兼容字清单。需要根治请改 `pdf_creater` 的 ToUnicode 生成
 （见 `reference/pipeline.md` 5.2 第 9 条）。
 
@@ -158,11 +158,11 @@ bdt call layout_set --workdir <wd> --arg 'patch={"paragraphs":{"P02-010":{"box":
 | `model_failed: Agent execution terminated due to error.` | 该 `--model` 在当前环境不可用；先 `agy models` 列可用模型，再换模型（如 `claude-sonnet-4-6` 需 `--arg effort="none"`） |
 | `geometry_missing` | 先 `reconstruct_pdf`（geometry 由重排阶段 dump） |
 | `unmatched_ids` 非空 | 覆盖里的 id 拼错或来自另一次 parse（段落 id 与解析绑定） |
-| 想整体回滚 | `bdt call layout_set --workdir <wd> --arg clear=true`；内容回滚用 `snapshot` / `restore` |
+| 想整体回滚 | `python -m babeldoc_tools call layout_set --workdir <wd> --arg clear=true`；内容回滚用 `snapshot` / `restore` |
 | 重建结果和上次不一致 | 检查是否残留 `layout_overrides.json`；用 `experiments/pdf_fingerprint.py` 比对文本层哈希 |
-| 脚本里调 `reconstruct_pdf` 报 multiprocessing `bootstrapping phase` 错 | PDF 字体子集化用 spawn 起子进程：脚本入口必须有 `if __name__ == "__main__":` 保护（`bdt`/`python -m babeldoc_tools` 与已有 experiments 脚本都已满足） |
-| 审查 agent 需要 grep 文本层 | `bdt call dump_text_layer --pdf <mono.pdf> --arg with_spans=true` → `output/text_layer/page-XX.txt`（页首注释列出该页兼容表意文字） |
-| `invalid_args: 未知参数: mineru_json` | 在仓库根 cwd 下跑 `python -m babeldoc_tools` 会命中仓库根的 **MAS 版** `babeldoc_tools`（不含 MinerU 参数），而非 skills 下的 agent 版。改用 legacy CLI（`python -m babeldoc.tools.agent …`）或在非仓库根 cwd 下用 `skills/document-translate/tools/bin/bdt` |
+| 脚本里调 `reconstruct_pdf` 报 multiprocessing `bootstrapping phase` 错 | PDF 字体子集化用 spawn 起子进程：脚本入口必须有 `if __name__ == "__main__":` 保护（`python -m babeldoc_tools` 与已有 experiments 脚本都已满足） |
+| 审查 agent 需要 grep 文本层 | `python -m babeldoc_tools call dump_text_layer --pdf <mono.pdf> --arg with_spans=true` → `output/text_layer/page-XX.txt`（页首注释列出该页兼容表意文字） |
+| `invalid_args: 未知参数: mineru_json` | 历史上源于仓库里两个同名 `babeldoc_tools` 包互相遮蔽；现已只剩仓库根一个包（U1 迁移完成）。若仍命中，说明解释器加载了旧安装产物：执行 `uv sync` 刷新 |
 
 ## 四、新增门禁与排查入口（板块 1–5）
 
@@ -199,8 +199,8 @@ python experiments/toolchain_gates.py <workdir> --pdf <源pdf> --json
 
 ```bash
 .venv/bin/python -m pytest tests -q                                  # 全量单元/契约测试
-bdt call reconstruct_pdf --workdir tmp/md-ccs3764                    # 空覆盖重建
+python -m babeldoc_tools call reconstruct_pdf --workdir tmp/md-ccs3764                    # 空覆盖重建
 .venv/bin/python experiments/pdf_fingerprint.py \
     tmp/md-ccs3764/output/<new>.mono.pdf --compare <baseline.pdf>    # 文本层哈希必须一致
-bdt call layout_lint --workdir tmp/md-ccs3764 --compact              # 与基线 counts 对比
+python -m babeldoc_tools call layout_lint --workdir tmp/md-ccs3764 --compact              # 与基线 counts 对比
 ```

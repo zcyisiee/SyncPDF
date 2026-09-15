@@ -15,7 +15,7 @@ region onto the original PDF — fixing bad line breaking inside bboxes.
 |---|---|---|
 | parse | `markdown_view.extract_markdown` → `_run_parse` | `babeldoc/tools/agent/markdown_view.py:648`, `:349` |
 | parse (CLI) | `python -m babeldoc.tools.agent md-extract` | `babeldoc/tools/agent/__main__.py:70-98` |
-| parse (tool layer) | `parse_document` | `skills/document-translate/tools/babeldoc_tools/parse.py:24` |
+| parse (tool layer) | `parse_document` | `babeldoc_tools/parse.py:24` |
 | parse→IR | `parse_prepared_pdf_with_new_parser_to_legacy_ir` | `babeldoc/format/pdf/new_parser/native_parse.py:39` |
 | layout / MinerU OCR | `MinerUDocLayoutModel.handle_document` | `babeldoc/docvision/mineru_doclayout.py:430` |
 | bbox regions | `LayoutParser.process` / `_write_coverage_report` | `babeldoc/format/pdf/document_il/midend/layout_parser.py:114`, `:278` |

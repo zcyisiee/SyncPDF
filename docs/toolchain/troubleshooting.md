@@ -270,36 +270,22 @@ EOF
 
 ## 10. 工具层调用失败（`invalid_args: 未知参数`）
 
-**症状**：在仓库根执行 `python -m babeldoc_tools call parse_document --args-json
+**症状**：执行 `python -m babeldoc_tools call parse_document --args-json
 '{"pdf": …, "mineru_json": …}'` 报 `invalid_args: 未知参数: mineru_json`。
 
-**原因**：仓库里有两个同名包 `babeldoc_tools`：
+**原因**：历史上仓库里有**两个同名包** `babeldoc_tools`（仓库根的 MAS 版，与
+skills 下 agent 版的副本）；Python 把 **cwd 排在 `PYTHONPATH` 之前**，因此在仓库根调用
+会命中不含 MinerU 参数的 MAS 版。
 
-| 包位置 | 定位 | 是否支持 MinerU |
-|---|---|---|
-| `babeldoc_tools/`（仓库根） | MAS 版（`babeldoc_core.DocumentJob` 文本管线） | ✗ |
-| `skills/document-translate/tools/babeldoc_tools/` | agent 版（MinerU/Markdown 管线） | ✓ |
-
-Python 把 **cwd 排在 `PYTHONPATH` 之前**，所以在仓库根跑 `python -m babeldoc_tools`
-必然命中 MAS 版；`skills/.../bin/bdt` shim 虽预置了 `PYTHONPATH`，但 cwd 在仓库根时
-仍会被遮蔽。
-
-**验证**
-
-```bash
-# 在仓库根：命中 MAS 版（props 无 mineru_json）
-python -m babeldoc_tools schema parse_document
-
-# 在非仓库根 cwd：命中 agent 版（props 含 layout/mineru_json）
-cd skills/document-translate/tools && python -m babeldoc_tools schema parse_document
-```
+**现状**：该同名包陷阱已消除——仓库里只剩一个 `babeldoc_tools` 包，位于仓库根，
+即 MinerU/Markdown agent 管线；`python -m babeldoc_tools` 在任何 cwd 下命中的都是它。
 
 **修复**
 
-- 需要 MinerU/新产物时，用 **legacy CLI**（cwd 无关）：
-  `python -m babeldoc.tools.agent md-extract …`；
-- 或用 agent 版工具层：在非仓库根 cwd 下执行
-  `skills/document-translate/tools/bin/bdt call …`（或 `cd skills/document-translate/tools`）。
+- 若仍看到 `未知参数: mineru_json`，说明解释器加载的是旧安装产物：
+  在仓库根执行 `uv sync` 刷新安装即可；
+- 需要 MinerU/新产物时也可用 **legacy CLI**（cwd 无关）：
+  `python -m babeldoc.tools.agent md-extract …`。
 
 ---
 

@@ -8,15 +8,14 @@ description: Agent 编排的高保真 PDF 文档翻译（BabelDOC 解析/重构 
 把 BabelDOC 管道拆成**可恢复的 DocumentJob**：解析/写回/重建/审查/lint 都是确定性工具，
 翻译和审查通过可替换 Provider 注入，排版微调由**覆盖文件**驱动、可回滚。
 
-发布包提供两个稳定 namespace：
+发布包提供一个稳定 namespace：
 
 ```python
-from babeldoc_core import DocumentJob, JobConfig
 from babeldoc_tools import dispatch, list_tools, get_schema
 ```
 
-`babeldoc_core` 保存 IR、公式原子、协议 gate 和 Job manifest；`babeldoc_tools` 提供
-Python/JSON/CLI 三层工具适配。skill 目录只保存角色提示词、编排规则和验收说明。
+`babeldoc_tools` 提供 Python/JSON/CLI 三层工具适配。skill 目录只保存角色提示词、
+编排规则和验收说明。
 
 ```
 job_create → parse_document → translate_document → validate_translation（gate）
@@ -25,7 +24,7 @@ job_create → parse_document → translate_document → validate_translation（
             → layout_patch → reconstruct_pdf → render_pages → layout_lint（≤2 轮）→ export_report
 ```
 
-> 目录：`agents/`（各角色的提示词）`tools/`（legacy 兼容工具）`reference/`（管线 / 契约 / 排查）
+> 目录：`agents/`（各角色的提示词）`reference/`（管线 / 契约 / 排查）
 > `prompts/`（legacy 提示词，供旧 batch 流程兼容）
 
 ## 加载方式
@@ -37,12 +36,10 @@ job_create → parse_document → translate_document → validate_translation（
 ## 工具速查
 
 ```bash
-# 发布 wheel 后：
-babeldoc-tools list                      # 全部工具 + JSON Schema
-babeldoc-tools schema layout_patch       # 单工具入参
-babeldoc-tools call <tool> --args-json '{...}'
-# 仓库 checkout 的 legacy shim 仍可用于旧实验：
-skills/document-translate/tools/bin/bdt list
+# 在仓库根执行（包已在仓库根，任意 cwd 均可）：
+python -m babeldoc_tools list                      # 全部工具 + JSON Schema
+python -m babeldoc_tools schema layout_set          # 单工具入参
+python -m babeldoc_tools call <tool> --args-json '{...}'
 ```
 
 stdout 恒为 `{"ok": true, "tool": …, "data": {…}}` 或 `{"ok": false, "error": {…}}`；

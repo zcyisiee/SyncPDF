@@ -3,7 +3,7 @@
 .. note::
    本脚本已被工具层的 ``review_document`` 取代（数据源改用 ``apply_report``，
    长度比改为相对全文中位比，并新增排版 lint / 回译校验），保留仅供历史比对：
-   ``PYTHONPATH=skills/document-translate/tools python -m babeldoc_tools call review_document``
+   ``python -m babeldoc_tools call review_document``
 
 用法：
     python experiments/review_report.py <workdir> <output_pdf> [--render-dir <dir>]

@@ -119,8 +119,8 @@ PY
 也可以使用仓库内的稳定工具入口：
 
 ```bash
-skills/document-translate/tools/bin/bdt list
-skills/document-translate/tools/bin/bdt call parse_document --workdir tmp/my-paper ...
+python -m babeldoc_tools list
+python -m babeldoc_tools call parse_document --workdir tmp/my-paper ...
 ```
 
 ### 常用参数

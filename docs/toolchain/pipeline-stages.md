@@ -274,7 +274,7 @@
 
 ## 阶段 10：`translate_document`（整篇翻译）
 
-- **入口**：`skills/document-translate/tools/babeldoc_tools/translate.py`
+- **入口**：`babeldoc_tools/translate.py`
 - **输入**：`agent/document.md` + 提示词 `agents/translator.md`
 - **输出**：`agent/translated.md`（+ `usage.json` 若 CLI 支持统计）
 - **不变量**：**一次调用整篇**（I5.1）；模型必须原样保留段落标记与锚点

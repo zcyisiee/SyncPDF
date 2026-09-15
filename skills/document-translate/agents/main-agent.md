@@ -1,7 +1,7 @@
 # main-agent：可恢复 DocumentJob 编排器
 
 主 Agent 只负责阶段状态、Provider 注入和验收决策；解析、协议 gate、落盘与重建由
-`babeldoc_core.DocumentJob` 和 `babeldoc_tools.dispatch` 完成。
+`babeldoc_tools.dispatch` 及其背后的能力层完成。
 
 ## 固定阶段
 

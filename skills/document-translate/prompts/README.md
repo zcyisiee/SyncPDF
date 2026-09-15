@@ -3,7 +3,7 @@
 本目录是旧 `experiments/batch_translate.py`（sheet 分批 JSONL 协议）与
 `experiments/markdown_translate.py`（整篇 Markdown）使用的提示词。
 
-新版工具层（`skills/document-translate/tools/`）从 `../agents/` 读取提示词：
+新版工具层（`babeldoc_tools/`，仓库根）从 `../agents/` 读取提示词：
 
 | 旧文件 | 新位置 | 用途 |
 |---|---|---|

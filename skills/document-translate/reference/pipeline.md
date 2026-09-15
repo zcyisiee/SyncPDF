@@ -8,8 +8,8 @@
 > 从 PDF 解析到 mono/dual 成品，逐步说明**功能、中间产物、schema 与效果**，
 > 末尾给出面向「排版质量」的优化空间。
 >
-> 适用代码：`babeldoc/tools/agent/`（工具层）、`skills/document-translate/tools/`
-> （agent 工具包）、`babeldoc/format/pdf/document_il/midend/`（解析中端）、
+> 适用代码：`babeldoc/tools/agent/`（工具层）、`babeldoc_tools/`（agent 工具包，仓库根）、
+> `babeldoc/format/pdf/document_il/midend/`（解析中端）、
 > `babeldoc/format/pdf/document_il/backend/pdf_creater.py`（重建）。
 
 ---
@@ -635,15 +635,15 @@ DeepSeek 样本 mono 的链接映射分布：`total=410, remapped=408`
 
 ---
 
-## 附录 A：agent 工具层（`skills/document-translate/tools/`）
+## 附录 A：agent 工具层（`babeldoc_tools/`，仓库根）
 
 统一入口（`registry + dispatch + CLI`，JSON in / JSON out）：
 
 ```bash
-PYTHONPATH=skills/document-translate/tools python -m babeldoc_tools list
-PYTHONPATH=skills/document-translate/tools python -m babeldoc_tools call layout_lint \
+python -m babeldoc_tools list
+python -m babeldoc_tools call layout_lint \
     --workdir tmp/md-ccs3764 --arg min_sev='"P1"'
-skills/document-translate/tools/bin/bdt call review_document --workdir tmp/md-ccs3764
+python -m babeldoc_tools call review_document --workdir tmp/md-ccs3764
 ```
 
 | 组 | 工具 | 关键产物 |

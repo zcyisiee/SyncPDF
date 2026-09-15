@@ -11,7 +11,7 @@
 ---
 
 > **M4 更新（agent 工具层 + 稳定性检测 + 排版微调已落地）**：本文描述的解析/写回/
-> 重建链路未变，但上层已封装为 agent 工具包（`skills/document-translate/tools/`，
+> 重建链路未变，但上层已封装为 agent 工具包（`babeldoc_tools/`，仓库根，
 > `python -m babeldoc_tools`），并新增：
 > - 结构化审查 gate：`review_document`（apply 报告 + 段内完整性 + 页数/目录/链接 +
 >   占位符残留 + 标题字号 → `verdict: pass|needs_fix`）、`backtranslate_check`（回译 + Levenshtein）；

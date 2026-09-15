@@ -9,18 +9,9 @@
 | **legacy CLI**（本文示例以它为准） | `python -m babeldoc.tools.agent <cmd> …` | 名字空间固定，**与 cwd 无关**；可回放 MinerU 布局 |
 | **工具层** | `python -m babeldoc_tools call <tool> --args-json '{…}'` | 稳定 JSON 契约、错误结构化、落盘报告 |
 
-> ⚠ **同名包陷阱（实测）**：仓库里有两个 `babeldoc_tools`：
-> 仓库根 `babeldoc_tools/`（MAS 版，`babeldoc_core.DocumentJob` 文本管线，
-> **不含 MinerU 参数**）与 `skills/document-translate/tools/babeldoc_tools/`
-> （agent 版，即本文描述的 MinerU/Markdown 管线）。Python 把 **cwd 排在
-> `PYTHONPATH` 之前**，因此：
-> - 在仓库根跑 `python -m babeldoc_tools call parse_document …` → 命中 **MAS 版**，
->   `mineru_json` 等参数报 `invalid_args: 未知参数`；
-> - 在非仓库根目录（如 `/tmp`）跑 `skills/document-translate/tools/bin/bdt …`，
->   或 `cd skills/document-translate/tools` 后跑 `python -m babeldoc_tools` → 命中 **agent 版**。
->
-> **建议**：需要 MinerU/回放/新产物时，用 legacy CLI
-> （`python -m babeldoc.tools.agent`，见下）或 skills 的 `bdt` shim（在非仓库根 cwd 下）。
+> 仓库里只有一个 `babeldoc_tools` 包，位于仓库根 `babeldoc_tools/`（即本文描述的
+> MinerU/Markdown agent 管线）。安装后 `python -m babeldoc_tools` 在任何 cwd 下
+> 命中的都是这一份代码。
 
 约定：stdout 恒为 `{"ok": true, "tool": …, "data": {…}}` 或
 `{"ok": false, "error": {"code": …, "message": …}}`；退出码 0/1。
@@ -110,9 +101,8 @@ python -m babeldoc.tools.agent md-extract DeepSeek_V41_Tech_Report.pdf \
   --workdir tmp/docs-smoke \
   --mineru-json ~/.cache/babeldoc/mineru-layout.v1/ba68e2e40408125ae6d2f63a9a241b61c73910691c74ec1a2a7023c851eac08d.json
 
-# ② 工具层（agent 版）：必须在非仓库根 cwd 下调用 bdt shim，
-#    否则会被仓库根的 MAS 版 babeldoc_tools 遮蔽（见开头同名包陷阱）。
-skills/document-translate/tools/bin/bdt call parse_document --args-json '{
+# ② 工具层（agent 版）：`python -m babeldoc_tools`，任意 cwd 均可。
+python -m babeldoc_tools call parse_document --args-json '{
   "pdf": "DeepSeek_V41_Tech_Report.pdf",
   "workdir": "tmp/docs-smoke",
   "layout": "mineru",
@@ -154,10 +144,10 @@ skills/document-translate/tools/bin/bdt call parse_document --args-json '{
 `model_failed: …`、`translated_md_missing`
 
 ```bash
-# 工具层（agent 版；非仓库根 cwd 下用 bdt shim）
-skills/document-translate/tools/bin/bdt call translate_document --args-json '{"workdir":"tmp/docs-smoke"}'
+# 工具层（agent 版）：
+python -m babeldoc_tools call translate_document --args-json '{"workdir":"tmp/docs-smoke"}'
 # 或导入已生成译文：
-skills/document-translate/tools/bin/bdt call translate_document --args-json \
+python -m babeldoc_tools call translate_document --args-json \
   '{"workdir":"tmp/docs-smoke","translated_md":"/path/to/translated.md"}'
 ```
 
@@ -219,8 +209,8 @@ skills/document-translate/tools/bin/bdt call translate_document --args-json \
 
 ```bash
 python -m babeldoc.tools.agent reconstruct tmp/docs-smoke --output-dir tmp/docs-smoke/output --dual
-# 工具层（agent 版，非仓库根 cwd）：
-skills/document-translate/tools/bin/bdt call reconstruct_pdf --args-json '{"workdir":"tmp/docs-smoke","dual":true}'
+# 工具层：
+python -m babeldoc_tools call reconstruct_pdf --args-json '{"workdir":"tmp/docs-smoke","dual":true}'
 ```
 
 ### `render_pages`
@@ -259,7 +249,7 @@ python -m babeldoc.tools.agent render tmp/docs-smoke/output/DeepSeek_V41_Tech_Re
 | `backtranslate_check` | `{"checked": bool, …}` | — |
 | `dump_text_layer` | 文本层 | — |
 
-`review_document` 的检查项（`skills/document-translate/tools/babeldoc_tools/review.py`）：
+`review_document` 的检查项（`babeldoc_tools/review.py`）：
 apply 报告、段内完整性、占位符残留、页数/目录/链接一致性、标题字号。
 
 ---
