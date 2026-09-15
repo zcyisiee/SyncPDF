@@ -272,17 +272,16 @@ def backtranslate_check(
     ids: list[str] | None = None,
     max_ids: int = 40,
     threshold: float = 0.55,
-    model: str | None = None,
-    effort: str | None = None,
+    translator: str | None = None,
     timeout: int | None = None,
-    command: str | None = None,
     dry_run: bool = False,
     backtranslation: dict | None = None,
 ) -> dict:
     """回译校验：对指定 id（默认高风险段）由 reviewer agent 回译英文，
     Python 侧算 Levenshtein 相似度并判定是否需要重译。
 
-    已从公开 CLI 移除；保留为内部 Python 函数。
+    已从公开 CLI 移除；保留为内部 Python 函数。调用方必须显式传入回译命令
+    （``translator``）——本函数不再有默认 agy 行为，命令走 stdin/stdout 协议。
     """
     from babeldoc.tools.agent import markdown_view
 
@@ -316,7 +315,6 @@ def backtranslate_check(
     prompt_file = agent / "prompt.backtranslate.md"
     prompt_file.write_text(prompt_text, encoding="utf-8")
 
-    usage: dict = {}
     if backtranslation:
         back = {
             pid: (backtranslation.get(pid) or {}).get("text", backtranslation.get(pid, ""))
@@ -327,22 +325,16 @@ def backtranslate_check(
     elif dry_run:
         return {"dry_run": True, "prompt": str(prompt_file), "ids": ids}
     else:
-        resolved_model = (
-            model
-            or common.env_default("BABELDOC_REVIEWER_MODEL")
-            or common.env_default("BABELDOC_TRANSLATOR_MODEL")
-            or "gemini-3.8-flash-low"
-        )
-        resolved_effort = effort or common.env_default("BABELDOC_REVIEWER_EFFORT") or "low"
-        response, usage = common.run_model(
-            prompt_text,
-            resolved_model,
-            resolved_effort,
-            timeout_s=int(timeout or 900),
-            command=command or "agy",
+        if not translator:
+            raise common.ToolError(
+                "translator_missing",
+                "backtranslate_check 需要显式 translator 命令"
+                "（stdin 收提示词、stdout 出回译文本，经 BDT_TRANSLATOR 或调用方传入）",
+            )
+        response = common.run_translator(
+            prompt_text, translator, timeout_s=int(timeout or 900)
         )
         (agent / "backtranslation.raw.md").write_text(response, encoding="utf-8")
-        common.append_usage(workdir_path, "backtranslate", usage)
         back = _parse_backtranslation(response, ids)
 
     per_id = []
@@ -367,7 +359,6 @@ def backtranslate_check(
         "needs_retranslate_ids": [
             item["id"] for item in per_id if item["verdict"] == "needs_retranslate"
         ],
-        "usage": usage,
         "prompt": str(prompt_file),
     }
     common.write_json(agent / "backtranslation_check.json", result)

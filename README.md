@@ -87,8 +87,10 @@ PDF="/absolute/path/paper.pdf"
 # 1. 解析
 bdt parse "$PDF" --workdir "$WD" --layout mineru
 
-# 2. 使用 agy 翻译
-bdt translate --workdir "$WD" --model gemini-3.8-flash-low --effort low --timeout 3600
+# 2. 翻译：被调命令从 stdin 读提示词、把译文写到 stdout（模型/档位由它自己决定）
+bdt translate --workdir "$WD" --translator scripts/agy-translator.sh --timeout 3600
+#    或用 BDT_TRANSLATOR 环境变量指定命令；也可 --markdown <已有译文.md> 导入、
+#    --prompt-only 只写出 agent/prompt.md
 
 # 3. 写回、审查、重建
 bdt apply --workdir "$WD"
@@ -193,7 +195,6 @@ agent/
   link_audit.json      # 链接逐条审计结果
   layout_geometry.json # 排版几何信息
   layout_lint.json     # 排版检查结果
-  usage.json           # 模型用量
   FINAL_REPORT.md      # 汇总报告
 output/
   *.zh.mono.pdf

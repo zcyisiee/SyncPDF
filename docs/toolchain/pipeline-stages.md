@@ -276,11 +276,14 @@
 
 - **入口**：`babeldoc_tools/translate.py`（CLI = `bdt translate`）
 - **输入**：`agent/document.md` + 提示词 `agents/translator.md`
-- **输出**：`agent/translated.md`（+ `usage.json` 若 CLI 支持统计）
-- **不变量**：**一次调用整篇**（I5.1）；模型必须原样保留段落标记与锚点
+- **输出**：`agent/translated.md`
+- **不变量**：**一次调用整篇**（I5.1）；被调命令必须原样保留段落标记与锚点
+- **协议**：`--translator <command>`（或 `BDT_TRANSLATOR`）从 stdin 读提示词、
+  stdout 出译文、退出码 0 表成功；模型/档位由该命令自管
 - **失败模式**
-  - `model_cli_missing`：无 `agy` 等 CLI → 用 `--markdown <文件>` 导入
-  - `model_failed: …`：该模型在当前环境不可用 → `agy models` 列可用模型
+  - `translator_missing`：未给 `--translator`/`BDT_TRANSLATOR` → 用
+    `--markdown <文件>` 导入，或 `--prompt-only` 取提示词
+  - `translator_failed` / `translator_timeout` / `translator_empty`：命令失败/超时/无输出
   - `document_missing`：未先 `bdt parse`
 
 ---

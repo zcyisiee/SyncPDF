@@ -73,7 +73,7 @@
 | 阶段 | 入口 | 输入 | 输出（落盘） | 失败模式 |
 |---|---|---|---|---|
 | **解析** | `bdt parse` / `md-extract` | PDF + MinerU 布局（API 或回放） | `document.md` `anchors.json` `sheet.jsonl` `state.pkl` `provider_ir.json` `alignment.json` `toc.json` `bookmarks.json` `links.json` `layout_coverage.json` | `layout_coverage_gate`（硬）；`toc_low_confidence`（软）；`mineru_token_missing`；`layout_unsupported` |
-| **翻译** | `bdt translate` | `document.md` | `translated.md`（+ `usage.json`） | `model_cli_missing`（无 `agy` 等 CLI 时改用 `--markdown <文件>` 导入） |
+| **翻译** | `bdt translate` | `document.md` | `translated.md` | `translator_missing`（未给 `--translator`/`BDT_TRANSLATOR` 时改用 `--markdown <文件>` 导入或 `--prompt-only`） |
 | **写回** | `bdt apply` | `translated.md` | `translated.jsonl` `il_translated.applied.json` `apply_report.json` | `anchor_multiset_mismatch`、`extra_ids`（硬，阻断） |
 | **审查** | `bdt check`（内部 `review.backtranslate_check`） | 上述产物 | `review_verdict.json` | `verdict=needs_fix`（软，进重译循环） |
 | **重建** | `bdt build` | IR + `state.pkl` | `output/*.mono.pdf` `*.dual.pdf` `reconstruct_report.json` | `link_uri_set_mismatch`（硬）；`link_unresolved`（软） |

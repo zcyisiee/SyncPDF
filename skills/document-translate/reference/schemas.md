@@ -321,16 +321,14 @@ CJK 兼容表意文字（`兼容表意文字 N 种: 了->了, …`），正文�
 
 相似度 = 归一化（去锚点、去 CJK、小写、去标点）后的 Levenshtein ratio；< 0.55 → 需重译。
 
-## 9. `usage.json` / `lint_history.json`
+## 9. `lint_history.json`
 
 ```json
-// usage.json
-{"translate": {"input_tokens": 39590, "output_tokens": 24979, "total_tokens": 64569,
-               "duration_seconds": 188.6, "model": "…", "effort": "low"},
- "retry": {...}, "backtranslate": {...}}
-
 // lint_history.json（report 用）
 [{"ts": "2026-09-10T12:00:00", "summary": {...}, "counts": {...}}]
 ```
+
+> U3 起不再有独立的用量产物：用量统计归被调命令（`--translator` / `--reviewer`）自管，
+> 工具层只做 stdin/stdout 文本交换。
 
 > 快照（`snapshots/<name>/`）随 U2 删除；回滚改用 `bdt layout-set --clear` 与重新 apply。

@@ -48,7 +48,7 @@ stdout 恒为 `{"ok": true, "data": {…}}` 或 `{"ok": false, "error": {…}}`�
 | 子命令 | 一句话 |
 |---|---|
 | `parse` | PDF → 连续 Markdown（锚点）+ IR 状态 |
-| `translate` | 整篇翻译（默认 `agy` CLI），自动补译漏行；`--ids` 走重译合并 |
+| `translate` | 整篇翻译（`--translator <命令>`，stdin/stdout 协议），自动补译漏行；`--ids` 走重译合并 |
 | `apply` | 校验译文 Markdown 写回 IR（确定性修复锚点/双标点/注释残留） |
 | `build` | 应用排版覆盖重排生成 mono/dual PDF + dump 几何；`--render` 渲染页 |
 | `check` | 结构 gate：`verdict=pass\|needs_fix` + blockers/warnings（当前为转调占位） |
@@ -70,8 +70,10 @@ stdout 恒为 `{"ok": true, "data": {…}}` 或 `{"ok": false, "error": {…}}`�
    `layout_coverage`（未覆盖字符占比 ≤ 0.5%）、`toc_integrity`（
    `agent/source/toc.json` 的条目数 == `anchors.json` 的 `toc_entry` 行数 == 书签数）、
    `protected_tokens`（`alignment.json` 的 `inline_equation_matched`）。
-2. **翻译**：`bdt translate --workdir <wd> --model <m> --effort low`
-   （提示词 `agents/translator.md`；缺 `agy` 时用 `--markdown <文件>` 导入译文）。
+2. **翻译**：`bdt translate --workdir <wd> --translator scripts/agy-translator.sh`
+   （提示词 `agents/translator.md`；被调命令从 stdin 读提示词、把译文写到 stdout，
+   模型与档位由它自己决定——`scripts/agy-translator.sh` 用 `AGY_MODEL`/`AGY_EFFORT`）。
+   没有可调命令时用 `--markdown <文件>` 导入已有译文，或 `--prompt-only` 只取提示词。
 3. **写回 + 结构 gate**：
    `bdt apply` → `bdt check`（可传 `--mono <pdf> --dual <pdf>` 做页数/目录/链接核对）
    - `blockers` 里的 id → `bdt translate --ids P01-003,P01-007 --feedback "..."` → 回到本步（**≤2 轮**）；
@@ -92,7 +94,7 @@ stdout 恒为 `{"ok": true, "data": {…}}` 或 `{"ok": false, "error": {…}}`�
 6. **排版迭代**（≤2 轮）：备份 `agent/layout_overrides.json` → 用 `agents/layout-fixer.md`
    决策出 patch → `bdt layout-set --patch '{...}'` → `bdt build` → `bdt check` 复核。
    变差就还原备份；每轮只改必要字段，**单轮 ≤8 段**。
-7. **收尾**：`bdt report --workdir <wd>` → `FINAL_REPORT.md`（token 用量 / apply 指标 /
+7. **收尾**：`bdt report --workdir <wd>` → `FINAL_REPORT.md`（apply 指标 /
    verdict / lint 前后对比 / 遗留项），交付 mono + dual + render PNG。
 
 ## 排版微调杠杆（`bdt layout-set`）

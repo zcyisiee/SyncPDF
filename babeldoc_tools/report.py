@@ -15,10 +15,9 @@ def report(
     title: str | None = None,
     notes: str | None = None,
 ) -> dict:
-    """汇总 token 用量 / apply 指标 / 审查 verdict / lint 前后对比 → FINAL_REPORT.md。"""
+    """汇总 apply 指标 / 审查 verdict / lint 前后对比 → FINAL_REPORT.md。"""
     workdir_path = common.require_workdir(workdir)
     agent = common.agent_dir(workdir_path)
-    usage = common.read_json(agent / "usage.json", default={}) or {}
     apply_report = common.read_json(agent / "apply_report.json", default={}) or {}
     verdict = common.read_json(agent / "review_verdict.json", default={}) or {}
     lint = common.read_json(agent / "layout_lint.json", default={}) or {}
@@ -32,6 +31,7 @@ def report(
 
     leftovers = _leftovers(verdict, lint, apply_report, backtranslation)
     lines: list[str] = []
+    section = _Section()
     title = title or f"文档翻译报告（{workdir_path.name}）"
     lines.append(f"# {title}")
     lines.append("")
@@ -41,31 +41,8 @@ def report(
         lines.append(f"- 页数：{geometry['pages']}；段落：{len(geometry.get('paragraphs') or [])}")
     lines.append("")
 
-    # ---- token 用量 ------------------------------------------------------- #
-    lines.append("## 一、Token 用量")
-    lines.append("")
-    usage_rows = _usage_rows(usage)
-    if usage_rows:
-        lines.append("| 调用 | 模型 | input | output | cache_read | total | 耗时(s) |")
-        lines.append("|---|---|---:|---:|---:|---:|---:|")
-        total = 0
-        for label, item in usage_rows:
-            tokens = item.get("total_tokens") or 0
-            total += tokens if isinstance(tokens, (int, float)) else 0
-            lines.append(
-                f"| {label} | {item.get('model', '-')} "
-                f"| {item.get('input_tokens', item.get('prompt_tokens', '-'))} "
-                f"| {item.get('output_tokens', item.get('completion_tokens', '-'))} "
-                f"| {item.get('cache_read_input_tokens', item.get('cache_read_tokens', item.get('cache_hit_prompt_tokens', 0)))} "
-                f"| {tokens} | {_round(item.get('duration_seconds'))} |"
-            )
-        lines.append(f"| **合计** |  |  |  |  | **{total}** |  |")
-    else:
-        lines.append("（无 usage.json：本次未调用外部模型或因故未记录）")
-    lines.append("")
-
     # ---- apply ------------------------------------------------------------ #
-    lines.append("## 二、写回 IR（apply）")
+    lines.append(section.heading("写回 IR（apply）"))
     lines.append("")
     if apply_report:
         lines.append(
@@ -81,7 +58,7 @@ def report(
     lines.append("")
 
     # ---- 审查 ------------------------------------------------------------- #
-    lines.append("## 三、稳定性审查")
+    lines.append(section.heading("稳定性审查"))
     lines.append("")
     if verdict:
         metrics = verdict.get("metrics") or {}
@@ -116,7 +93,7 @@ def report(
 
     # ---- 回译 ------------------------------------------------------------- #
     if backtranslation:
-        lines.append("## 四、回译校验")
+        lines.append(section.heading("回译校验"))
         lines.append("")
         lines.append(
             f"- 抽查 {len(backtranslation.get('ids') or [])} 段，阈值 "
@@ -130,7 +107,7 @@ def report(
         lines.append("")
 
     # ---- 排版 ------------------------------------------------------------- #
-    lines.append("## 五、排版微调")
+    lines.append(section.heading("排版微调"))
     lines.append("")
     if lint_history:
         first, last = lint_history[0], lint_history[-1]
@@ -175,7 +152,7 @@ def report(
         lines.append("")
 
     # ---- 遗留项 ----------------------------------------------------------- #
-    lines.append("## 六、遗留项")
+    lines.append(section.heading("遗留项"))
     lines.append("")
     if leftovers:
         for item in leftovers:
@@ -202,36 +179,18 @@ def report(
     }
 
 
-def _round(value):
-    if isinstance(value, (int, float)):
-        return round(value, 1)
-    return value if value is not None else "-"
+class _Section:
+    """FINAL_REPORT 小节编号：条件小节缺席时不留下编号空档。"""
 
+    _NUMERALS = "一二三四五六七八九十"
 
-def _usage_rows(usage: dict) -> list[tuple[str, dict]]:
-    """把 usage.json 拆成 [(阶段名, 用量)]。
+    def __init__(self) -> None:
+        self._index = 0
 
-    兼容两种历史格式：
-    - 新格式：``{"translate": {...}, "retry": {...}}``
-    - 旧格式（`markdown_translate.py` 写的）：
-      ``{"model": "…", "input_tokens": …, "retry": {...}}``（顶层就是一次调用）
-    """
-    if not usage:
-        return []
-    nested = {k: v for k, v in usage.items() if isinstance(v, dict)}
-    flat = {
-        k: v
-        for k, v in usage.items()
-        if not isinstance(v, dict) and k not in ("model", "effort")
-    }
-    rows: list[tuple[str, dict]] = []
-    if flat.get("total_tokens") or flat.get("input_tokens"):
-        rows.append(("translate", {**flat, "model": usage.get("model", "-")}))
-    for key, item in nested.items():
-        rows.append((key, item))
-    if not rows:
-        rows.append(("translate", usage))
-    return rows
+    def heading(self, title: str) -> str:
+        numeral = self._NUMERALS[self._index] if self._index < len(self._NUMERALS) else str(self._index + 1)
+        self._index += 1
+        return f"## {numeral}、{title}"
 
 
 def _leftovers(verdict: dict, lint: dict, apply_report: dict, backtranslation: dict) -> list[str]:

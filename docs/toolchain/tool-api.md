@@ -127,18 +127,19 @@ bdt parse DeepSeek_V41_Tech_Report.pdf \
 | 字段 | 说明 |
 |---|---|
 | `workdir` | ✓ |
-| `translated_md` | 导入外部译文（无 `agy` CLI 时的替代路径） |
+| `markdown` | 导入外部译文（无可用翻译命令时的替代路径） |
 | `provider` | Python provider 对象（进程内调用；省略则回退源文） |
-| `model` / `effort` | 传给翻译 CLI 的参数（legacy 写法：`--model` / `--effort`） |
+| `translator` | 翻译命令（stdin 收提示词、stdout 出译文）；模型/档位由该命令自管 |
 
 **出参**：`{"state": "translated"}` + `warnings`（若发生回退）
-**副作用**：`agent/translated.md`（+ `usage.json`）
-**失败码**：`document_missing`（未先 parse）、`model_cli_missing`、
-`model_failed: …`、`translated_md_missing`
+**副作用**：`agent/translated.md`
+**失败码**：`document_missing`（未先 parse）、`translator_missing`、
+`translator_failed`、`translator_timeout`、`translator_empty`、`translated_md_missing`
 
 ```bash
 # 工具层（agent 版）：
-bdt translate --workdir tmp/docs-smoke
+bdt translate --workdir tmp/docs-smoke --translator scripts/agy-translator.sh
+# 或只取提示词：bdt translate --workdir tmp/docs-smoke --prompt-only
 # 或导入已生成译文：
 bdt translate --workdir tmp/docs-smoke --markdown /path/to/translated.md
 ```

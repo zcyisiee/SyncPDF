@@ -46,7 +46,7 @@
   │         → document.md（连续英文 Markdown + 行内锚点 + 段落 id）
   │         → sheet.jsonl / anchors.json / state.pkl
   │
-  ├─[8] 翻译（一次 agy 调用，整篇）  → translated.md + usage.json
+  ├─[8] 翻译（一次用户指定的命令调用，整篇）→ translated.md
   │
   ├─[9] md-apply                    校验（id / 锚点多重集+顺序 / 空 span）→ 确定性修复
   │         → translated.jsonl（canonical）→ 写回 IR（state.pkl）
@@ -392,16 +392,6 @@ header / footer / page_number / page_footnote / aside_text / author`
 
 **产物 B：`agent/translated.md`**（模型输出，结构与输入一致，锚点原样保留）
 
-**产物 C：`agent/usage.json`**（token 计量）
-
-```json
-{"model": "gemini-3.8-flash-low", "effort": "low",
- "input_tokens": 26178, "output_tokens": 19150, "thinking_tokens": 0,
- "cache_read_tokens": 8164, "total_tokens": 45328,
- "duration_seconds": 96.34, "num_turns": 1, "conversation_id": "...",
- "retry": {"...": "仅当发生漏行补译时出现"}}
-```
-
 **漏行补译**：模型偶尔会合并/漏掉段落。编排器在应用前用
 `markdown_view.missing_ids()` 对比 `state.pkl` 的 id 集合与译文中的 `<!-- id -->`，
 若缺失则**只对缺失段落再调用一次**（产物 `prompt.retry.md` / `translated.retry.md`），
@@ -516,7 +506,6 @@ mono 中 77% 链接矩形按译文重定位。目录（书签）同样保持：
 | `state.pkl` | 7 | IR 状态，apply/reconstruct 真源 | **否** |
 | `prompt.md` | 8 | 实际发出的提示词 | — |
 | `translated.md` | 8 | 模型译文 Markdown | **是**（改后可重跑 md-apply） |
-| `usage.json` | 8 | token 用量（含 `retry`） | — |
 | `prompt.retry.md` / `translated.retry.md` | 8 | 漏行补译的提示词与输出（仅缺失时生成） | — |
 | `translated.jsonl` | 9 | canonical 译文（apply 输入） | 是 |
 | `apply_report.json` | 9 | 校验/修复/告警报告 | — |

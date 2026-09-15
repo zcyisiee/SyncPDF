@@ -154,31 +154,13 @@ def main():
         return 0
 
     translated_md = agent / "translated.md"
-    usage: dict = {}
     if args.skip_translate:
         if not translated_md.exists():
             raise SystemExit(f"--skip-translate 但 {translated_md} 不存在")
         print(f"复用 {translated_md}")
-        # 保留上一次调用的用量，补译时追加而非覆盖
-        usage_path = agent / "usage.json"
-        if usage_path.exists():
-            try:
-                usage = json.loads(usage_path.read_text(encoding="utf-8"))
-                usage.pop("model", None)
-                usage.pop("effort", None)
-            except Exception:
-                usage = {}
     else:
         response, usage = run_agy(prompt, args.model, args.effort, args.timeout)
         translated_md.write_text(response, encoding="utf-8")
-        (agent / "usage.json").write_text(
-            json.dumps(
-                {"model": args.model, "effort": args.effort, **usage},
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
         print(f"译文 Markdown: {translated_md} ({len(response)} 字符)")
         print(f"token usage: {json.dumps(usage, ensure_ascii=False)}")
 
@@ -191,21 +173,12 @@ def main():
         retry_doc = markdown_view.render_retry_markdown(workdir, missing)
         retry_prompt = load_prompt_template().replace("{document}", retry_doc)
         (agent / "prompt.retry.md").write_text(retry_prompt, encoding="utf-8")
-        retry_response, retry_usage = run_agy(
+        retry_response, _retry_usage = run_agy(
             retry_prompt, args.model, args.effort, args.timeout
         )
         (agent / "translated.retry.md").write_text(retry_response, encoding="utf-8")
         with open(translated_md, "a", encoding="utf-8") as f:
             f.write("\n\n" + retry_response)
-        usage["retry"] = retry_usage
-        (agent / "usage.json").write_text(
-            json.dumps(
-                {"model": args.model, "effort": args.effort, **usage},
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
         still_missing = markdown_view.missing_ids(
             workdir, translated_md.read_text(encoding="utf-8")
         )

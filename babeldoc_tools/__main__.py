@@ -3,13 +3,17 @@
 用法::
 
     bdt parse <pdf> --workdir tmp/wd [--layout mineru|paddle]
-    bdt translate --workdir tmp/wd [--ids P01-003,P01-007] [--feedback "..."]
+    bdt translate --workdir tmp/wd --translator scripts/agy-translator.sh
+    bdt translate --workdir tmp/wd [--ids P01-003] [--feedback "..."]
+    bdt translate --workdir tmp/wd --markdown <已有译文.md>   # 不调命令
+    bdt translate --workdir tmp/wd --prompt-only              # 只写 agent/prompt.md
     bdt apply --workdir tmp/wd [--markdown tmp/wd/agent/translated.md]
     bdt build --workdir tmp/wd [--output-dir tmp/wd/output] [--dual] [--render 1,2]
     bdt check --workdir tmp/wd [--skip-pdf-checks]
     bdt layout-set --workdir tmp/wd --patch '{"paragraphs": {...}}'
     bdt report --workdir tmp/wd
-    bdt run <pdf> --workdir tmp/wd [--from build] [--markdown self]
+    bdt run <pdf> --workdir tmp/wd [--from build] [--markdown self] \
+        [--translator <cmd>] [--reviewer <cmd>]
 
 约定：
 
@@ -17,6 +21,9 @@
   ``{"ok": false, "error": {"code", "message"}}``；
 - 日志/进度/第三方库输出统一走 stderr；
 - 退出码：0 = ok，1 = 失败（含可预期错误），2 = 用法错误（argparse）。
+- 翻译/审查只有一种机制：被调命令从 stdin 读提示词、把结果写到 stdout。
+  ``run`` 在 ``--prompt-only`` 时停在 translate、无 ``--reviewer`` 时停在 review
+  （``stopped_at`` / ``status`` 字段，exit 0，但都不是最终成功）。
 """
 
 from __future__ import annotations
@@ -94,31 +101,30 @@ def _build_parser() -> argparse.ArgumentParser:
     p_translate = sub.add_parser("translate", help="整篇翻译 / 按 id 重译合并")
     _add_workdir(p_translate)
     p_translate.add_argument(
+        "--translator",
+        default=None,
+        help=(
+            "翻译命令（命令行字符串，如 scripts/agy-translator.sh）：从 stdin 读提示词、"
+            "把译文写到 stdout。缺省读环境变量 BDT_TRANSLATOR"
+        ),
+    )
+    p_translate.add_argument(
         "--ids",
         default=None,
         help="逗号分隔的段落 id（如 P01-003,P01-007）；给出则走重译合并路径",
     )
-    p_translate.add_argument("--feedback", default=None, help="重译时给模型的反馈")
+    p_translate.add_argument("--feedback", default=None, help="重译时给翻译命令的反馈")
     p_translate.add_argument(
         "--markdown",
         default=None,
-        help="已有译文 Markdown 路径：直接导入，不调用模型",
+        help="已有译文 Markdown 路径：直接导入，不调用任何命令",
     )
     p_translate.add_argument(
         "--prompt-only",
         action="store_true",
-        help="只写 agent/prompt.md，不调用模型",
+        help="只写 agent/prompt.md 后返回，不调用任何命令",
     )
-    p_translate.add_argument("--model", default=None)
-    p_translate.add_argument("--effort", default=None, help='"none" 表示不传 --effort')
-    p_translate.add_argument("--timeout", type=int, default=1800)
-    p_translate.add_argument(
-        "--command",
-        dest="translator_command",
-        default=None,
-        help="翻译 CLI，默认 agy",
-    )
-    p_translate.add_argument("--prompt", default=None, help="提示词名，默认 translator")
+    p_translate.add_argument("--timeout", type=int, default=1800, help="命令超时秒数")
     p_translate.add_argument("--repair-prompt", default=None, help="重译提示词名")
     p_translate.add_argument(
         "--no-retry-missing",
@@ -236,27 +242,36 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--no-stats", action="store_false", dest="stats")
     p_run.add_argument("--skip-pdf-checks", action="store_true")
     p_run.add_argument("--source-pdf", default=None)
-    # translate 相关
+    # translate 相关（透传给 translate）
     p_run.add_argument("--ids", default=None, help="重译段落 id，逗号分隔")
     p_run.add_argument("--feedback", default=None)
     p_run.add_argument(
         "--markdown",
         default=None,
-        help="已有译文 Markdown；'self' = 用 agent/document.md 自译（不调模型）",
+        help="已有译文 Markdown；'self' = 用 agent/document.md 自译（不调命令）",
     )
     p_run.add_argument("--prompt-only", action="store_true")
-    p_run.add_argument("--model", default=None)
-    p_run.add_argument("--effort", default=None)
     p_run.add_argument("--timeout", type=int, default=1800)
     p_run.add_argument(
         "--translator",
         default=None,
-        help="翻译 provider（U3 定义语义；本版本仅接收并存进 run 配置）",
+        help=(
+            "翻译命令：stdin 读提示词、stdout 出译文（缺省读 BDT_TRANSLATOR）。"
+            "给了 --markdown 或 --prompt-only 时不会调用它"
+        ),
     )
-    p_run.add_argument("--prompt", default=None)
-    p_run.add_argument("--repair-prompt", default=None)
+    p_run.add_argument("--repair-prompt", default=None, help="重译提示词名（透传 translate）")
     p_run.add_argument(
         "--no-retry-missing", action="store_false", dest="retry_missing"
+    )
+    # review 相关
+    p_run.add_argument(
+        "--reviewer",
+        default=None,
+        help=(
+            "审查命令：stdin 读审查提示词、stdout 必须是 JSON 对象"
+            "（verdict: pass|needs_fix + findings）。缺省则停在 review 等待状态"
+        ),
     )
     # report 相关
     p_run.add_argument("--title", default=None)
@@ -290,11 +305,8 @@ def _dispatch(args: argparse.Namespace) -> dict:
             feedback=args.feedback,
             markdown=args.markdown,
             prompt_only=args.prompt_only,
-            model=args.model,
-            effort=args.effort,
+            translator=args.translator,
             timeout=args.timeout,
-            command=args.translator_command,
-            prompt=args.prompt,
             repair_prompt=args.repair_prompt,
             retry_missing=args.retry_missing,
         )
@@ -375,12 +387,9 @@ def _dispatch(args: argparse.Namespace) -> dict:
                 feedback=args.feedback,
                 markdown=args.markdown,
                 prompt_only=args.prompt_only,
-                model=args.model,
-                effort=args.effort,
                 timeout=args.timeout,
                 translator=args.translator,
-                prompt=args.prompt,
-                repair_prompt=args.repair_prompt,
+                reviewer=args.reviewer,
                 retry_missing=args.retry_missing,
                 dual=args.dual,
                 watermark=args.watermark,

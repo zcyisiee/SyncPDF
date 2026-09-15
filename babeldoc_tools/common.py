@@ -1,13 +1,17 @@
-"""公共小工具：workdir 路径、prompt 加载、模型调用（agy）、JSON 读写。"""
+"""公共小工具：workdir 路径、prompt 加载、子进程 Agent 调用、JSON 读写。
+
+翻译/审查只有一种 provider 机制：把提示词写进子命令 stdin，从 stdout 读结果，
+退出码 0 表示成功（:func:`run_translator`）。模型、档位、JSON 解包等 agy 专属
+细节属于被调命令自己的事，由仓库 ``scripts/`` 下的 wrapper 承担。
+"""
 
 from __future__ import annotations
 
 import json
 import os
 import re
-import shutil
+import shlex
 import subprocess
-import time
 from pathlib import Path
 
 AGENT_DIR = "agent"
@@ -108,93 +112,63 @@ def prompt_path(name: str) -> Path | None:
     return None
 
 
-def run_model(
-    prompt: str,
-    model: str,
-    effort: str | None,
-    timeout_s: int = 1800,
-    command: str = "agy",
-) -> tuple[str, dict]:
-    """调用外部翻译模型 CLI（默认 agy），返回 (response, usage)。
+def _run_subprocess(
+    prompt: str, command: str, timeout_s: int, error_prefix: str
+) -> str:
+    """把 ``prompt`` 写进 ``command`` 的 stdin，返回它的 stdout。
 
-    ``effort`` 为空 / ``"none"`` / ``"default"`` / ``"auto"`` 时不传 ``--effort``
-    （部分模型如 claude-* 不支持该参数）。
+    唯一协议：退出码 0 表示成功；非 0 / 超时 / 空 stdout 都以结构化错误抛出，
+    错误码为 ``<error_prefix>_failed`` / ``_timeout`` / ``_empty``。命令经
+    :func:`shlex.split` 拆成 argv，**不经 shell**——需要管道或 JSON 解包时请在
+    仓库 wrapper 脚本里做。翻译与审查调用共用本函数。
     """
-    if shutil.which(command) is None:
-        raise ToolError(
-            "model_cli_missing",
-            f"找不到可执行文件 {command}；可改用 translated_md 参数直接导入译文，"
-            f"或指定 command/mcmd 指向本地 CLI",
-        )
-    started = time.time()
-    cmd = [
-        command,
-        "--model",
-        model,
-        "--disable-slash-commands",
-        "--print-timeout",
-        f"{max(1, timeout_s // 60)}m",
-        "--output-format",
-        "json",
-        "--print",
-        prompt,
-    ]
-    if effort and str(effort).lower() not in ("none", "default", "auto"):
-        cmd.insert(3, "--effort")
-        cmd.insert(4, str(effort))
     try:
-        # cmd 由本包参数/环境变量构造（command + model + prompt），非外部输入拼接
+        argv = shlex.split(command)
+    except ValueError as exc:
+        raise ToolError(
+            f"{error_prefix}_failed", f"命令无法解析（引号不匹配？）: {command}"
+        ) from exc
+    if not argv:
+        raise ToolError(f"{error_prefix}_failed", "翻译/审查命令为空")
+    try:
+        # argv 由用户的显式 --translator/--reviewer 参数定义，shlex.split 后不经 shell；
+        # 这是唯一的 provider 机制（stdin/stdout 子进程协议），非 shell 拼接。
         result = subprocess.run(  # noqa: S603
-            cmd, capture_output=True, text=True, timeout=timeout_s
+            argv,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
         )
     except subprocess.TimeoutExpired as exc:
         raise ToolError(
-            "model_timeout", f"模型调用超过 {timeout_s}s 超时", timeout=timeout_s
+            f"{error_prefix}_timeout",
+            f"命令超过 {timeout_s}s 超时: {command}",
+            timeout=timeout_s,
         ) from exc
-    elapsed = round(time.time() - started, 1)
+    except OSError as exc:
+        # FileNotFoundError / PermissionError 等：命令不存在或不可执行
+        raise ToolError(
+            f"{error_prefix}_failed", f"无法执行 {command}: {exc}"
+        ) from exc
     if result.returncode != 0:
         raise ToolError(
-            "model_failed",
+            f"{error_prefix}_failed",
             f"{command} 退出码 {result.returncode}: {result.stderr[:500]}",
         )
-    raw = result.stdout.strip()
-    usage: dict = {}
-    try:
-        payload = json.loads(raw)
-        response = payload.get("response", "")
-        usage = payload.get("usage") or {}
-        usage["duration_seconds"] = payload.get("duration_seconds", elapsed)
-        usage["num_turns"] = payload.get("num_turns")
-        usage["conversation_id"] = payload.get("conversation_id")
-    except json.JSONDecodeError:
-        response = raw
-        usage = {"duration_seconds": elapsed, "parse_error": True}
-    usage.setdefault("model", model)
-    if effort:
-        usage.setdefault("effort", effort)
-    return response, usage
+    if not result.stdout.strip():
+        raise ToolError(
+            f"{error_prefix}_empty", f"{command} 的 stdout 为空"
+        )
+    return result.stdout
 
 
-def usage_path(workdir) -> Path:
-    return agent_dir(workdir) / "usage.json"
+def run_translator(prompt: str, command: str, timeout_s: int = 1800) -> str:
+    """调用用户指定的翻译命令：stdin 收提示词，stdout 出译文，返回 stdout。
 
-
-def append_usage(workdir, key: str, usage: dict) -> dict:
-    """把一次调用的 usage 记到 ``agent/usage.json``（key 如 "translate"/"retry"）。"""
-    path = usage_path(workdir)
-    current = read_json(path, default={}) or {}
-    if key in current and isinstance(current[key], dict) and isinstance(usage, dict):
-        merged = dict(current[key])
-        for field, value in usage.items():
-            if isinstance(value, (int, float)) and isinstance(merged.get(field), (int, float)):
-                merged[field] = merged[field] + value
-            else:
-                merged[field] = value
-        current[key] = merged
-    else:
-        current[key] = usage
-    write_json(path, current)
-    return current
+    不解析 JSON、不抽 usage——提示词与译文就是纯文本交换。
+    """
+    return _run_subprocess(prompt, command, timeout_s, "translator")
 
 
 def env_default(name: str, default=None):

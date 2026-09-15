@@ -156,8 +156,9 @@ bdt layout-set --workdir <wd> --patch '{"paragraphs":{"P02-010":{"box":[318,600,
 | `toc_low_confidence`（警告） | 目录页条目切分置信度 < 0.6：不改结构，只记警告；看 `agent/source/toc.json` 的 `confidence` / `candidate_lines` |
 | 目录页被整段翻译 / 条目丢失 | 看 `agent/source/toc.json` 的 `summary.entries` 与 `anchors.json` 的 `toc_entry` 行数；无编号/页码未右对齐导致未切分 |
 | 链接矩形漂移 / 点不到 | 看 `reconstruct_report.json` 的 `link_remapped` / `link_fallback_paragraph` / `link_unresolved`；三级回退：字符并集 → 段落投影 → 保持原矩形 |
-| `model_cli_missing` | 装了 `agy`/其它 CLI 才能自动翻译；否则用 `--markdown <文件>` 导入译文 |
-| `model_failed: Agent execution terminated due to error.` | 该 `--model` 在当前环境不可用；先 `agy models` 列可用模型，再换模型（如 `claude-sonnet-4-6` 需 `--effort none`） |
+| `translator_missing` | 未给 `--translator`/`BDT_TRANSLATOR`：用 `--markdown <文件>` 导入译文，或 `--prompt-only` 只取提示词 |
+| `translator_failed: Agent execution terminated due to error.` | 被调命令自身失败：翻译命令里指定了当前环境不可用的模型；先 `agy models` 列可用模型，再改 `AGY_MODEL`（如 `claude-sonnet-4-6` 需 `AGY_EFFORT=none`） |
+| `translator_empty` | 命令退出码 0 但 stdout 为空：检查 wrapper 的解包（如 agy 的 `response` 字段）是否取到内容 |
 | `geometry_missing` | 先 `bdt build`（geometry 由重排阶段 dump） |
 | `unmatched_ids` 非空 | 覆盖里的 id 拼错或来自另一次 parse（段落 id 与解析绑定） |
 | 想整体回滚 | `bdt layout-set --workdir <wd> --clear`；内容回滚改 `agent/translated.md` 后重新 `bdt apply`（早前的 `snapshot` / `restore` 已随 U2 删除） |
