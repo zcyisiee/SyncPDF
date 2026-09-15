@@ -565,3 +565,222 @@ def test_resolve_mineru_cache_key_hit_returns_path(tmp_path, monkeypatch):
 
     assert _resolve_mineru_json(None, "abc") == str(cached)
     assert _resolve_mineru_json(None, None) is None
+
+
+# --------------------------------------------------------------------------- #
+# 跨页/跨栏合并修复（repair_merged_cross_page_blocks）
+# --------------------------------------------------------------------------- #
+def _line(bbox: list[float], content: str = "x") -> dict:
+    return {
+        "bbox": bbox,
+        "spans": [{"bbox": bbox, "type": "text", "content": content}],
+    }
+
+
+def _merged_two_page_layout() -> dict:
+    """右栏底块合并了下一页左栏顶的续文，续页留下 lines_deleted 空块。"""
+    return {
+        "pdf_info": [
+            {
+                "page_idx": 0,
+                "para_blocks": [
+                    {
+                        "type": "text",
+                        "bbox": [314, 598, 560, 711],
+                        "lines": [
+                            _line([317, 600, 559, 609], "own page"),
+                            _line([52, 83, 293, 96], "continuation"),
+                        ],
+                    }
+                ],
+            },
+            {
+                "page_idx": 1,
+                "para_blocks": [
+                    {
+                        "type": "text",
+                        "bbox": [50, 83, 296, 173],
+                        "lines": [],
+                        "lines_deleted": True,
+                    }
+                ],
+            },
+        ]
+    }
+
+
+def test_cross_page_merged_lines_move_to_receiver_page():
+    layout = _merged_two_page_layout()
+    original = json.loads(json.dumps(layout))
+
+    document = ProviderDocument.from_layout_json(layout)
+
+    source = document.page(0).blocks[0]
+    receiver = document.page(1).blocks[0]
+    assert [line.spans[0].content for line in source.lines] == ["own page"]
+    assert [line.spans[0].content for line in receiver.lines] == ["continuation"]
+    assert receiver.lines[0].spans[0].page_index == 1
+    stats = document.metadata["cross_page_repair"]
+    assert stats["moved_lines"] == 1
+    assert stats["receiver_pages"] == [1]
+    # 输入 dict 不被修改（from_layout_json 在深拷贝上修复）。
+    assert layout == original
+
+
+def test_cross_page_legit_lines_inside_own_block_never_move():
+    """前页正常行不会被同位置的续页空块误搬（行在本块 bbox 内即豁免）。"""
+    layout = {
+        "pdf_info": [
+            {
+                "page_idx": 0,
+                "para_blocks": [
+                    {
+                        # 正常块：bbox 覆盖全部行。
+                        "type": "text",
+                        "bbox": [50, 85, 296, 174],
+                        "lines": [_line([52, 90, 294, 100], "legit")],
+                    }
+                ],
+            },
+            {
+                "page_idx": 1,
+                "para_blocks": [
+                    {
+                        # 与前页块几乎同位置的同构空块。
+                        "type": "text",
+                        "bbox": [50, 83, 296, 173],
+                        "lines": [],
+                        "lines_deleted": True,
+                    }
+                ],
+            },
+        ]
+    }
+    document = ProviderDocument.from_layout_json(layout)
+    assert len(document.page(0).blocks[0].lines) == 1
+    assert len(document.page(1).blocks[0].lines) == 0
+    assert document.metadata == {}
+
+
+def test_cross_page_receiver_without_marker_still_receives():
+    """旧版回放数据可能缺 lines_deleted 标记：空文本块仍可接收。"""
+    layout = _merged_two_page_layout()
+    del layout["pdf_info"][1]["para_blocks"][0]["lines_deleted"]
+    document = ProviderDocument.from_layout_json(layout)
+    receiver = document.page(1).blocks[0]
+    assert [line.spans[0].content for line in receiver.lines] == ["continuation"]
+
+
+def test_cross_page_right_column_source_skips_same_page_left_receiver():
+    """右栏源块的续文只能去下一页：同页左栏空块在阅读顺序上位于它之前。
+
+    两页左栏顶的近似 bbox 会互相包含，这是「最近页距」必须叠加阅读顺序
+    过滤的原因（真实样本 ccs3764 的 p2/p3 截胡场景）。
+    """
+    layout = {
+        "pdf_info": [
+            {
+                "page_idx": 0,
+                "para_blocks": [
+                    {
+                        # 左栏正常块 + 左栏顶空块（接收同页更早内容用）。
+                        "type": "text",
+                        "bbox": [50, 300, 296, 400],
+                        "lines": [_line([52, 310, 294, 320], "legit-left")],
+                    },
+                    {
+                        "type": "text",
+                        "bbox": [50, 85, 296, 174],
+                        "lines": [],
+                        "lines_deleted": True,
+                    },
+                    {
+                        # 右栏底块：合并了下一页左栏顶的续文。
+                        "type": "text",
+                        "bbox": [314, 598, 560, 711],
+                        "lines": [_line([52, 90, 294, 100], "overflow")],
+                    },
+                ],
+            },
+            {
+                "page_idx": 1,
+                "para_blocks": [
+                    {
+                        "type": "text",
+                        "bbox": [50, 83, 296, 173],
+                        "lines": [],
+                        "lines_deleted": True,
+                    }
+                ],
+            },
+        ]
+    }
+    document = ProviderDocument.from_layout_json(layout)
+    # 同页左栏空块（阅读顺序在前）不得截胡；续文进下一页。
+    assert len(document.page(0).blocks[1].lines) == 0
+    assert [
+        line.spans[0].content for line in document.page(1).blocks[0].lines
+    ] == ["overflow"]
+
+
+def test_cross_column_same_page_continuation_moves_to_right_column():
+    """两栏排版：左栏底块的续文在同页右栏顶（阅读顺序的下一站）。"""
+    layout = {
+        "pdf_info": [
+            {
+                "page_idx": 0,
+                "para_blocks": [
+                    {
+                        "type": "text",
+                        "bbox": [50, 677, 296, 711],
+                        "lines": [
+                            _line([52, 680, 294, 690], "own-column"),
+                            _line([317, 330, 559, 338], "next-column"),
+                        ],
+                    },
+                    {
+                        "type": "text",
+                        "bbox": [314, 307, 561, 407],
+                        "lines": [],
+                        "lines_deleted": True,
+                    },
+                ],
+            }
+        ]
+    }
+    document = ProviderDocument.from_layout_json(layout)
+    source = document.page(0).blocks[0]
+    receiver = document.page(0).blocks[1]
+    assert [line.spans[0].content for line in source.lines] == ["own-column"]
+    assert [line.spans[0].content for line in receiver.lines] == ["next-column"]
+
+
+def test_cross_page_image_block_never_receives_lines():
+    """image 等图形型空块合法地没有行，绝不能当接收块。"""
+    layout = _merged_two_page_layout()
+    layout["pdf_info"][1]["para_blocks"][0]["type"] = "image"
+    document = ProviderDocument.from_layout_json(layout)
+    # image 块不是接收者：溢出行无处可去，保持原位（宁可不动）。
+    assert len(document.page(1).blocks[0].lines) == 0
+    assert len(document.page(0).blocks[0].lines) == 2
+    assert document.metadata == {}
+
+
+def test_cached_samples_have_no_residual_misplaced_lines():
+    """真实样本修复后：所有行都落在本块 bbox 内（残缺样本自动 skip）。"""
+    for cache_key in SAMPLE_CACHE_KEYS:
+        layout_json = _load_cache(cache_key)
+        document = ProviderDocument.from_layout_json(layout_json)
+        for page in document.pages:
+            for block in page.iter_blocks(recursive=True):
+                if block.bbox is None or not block.lines:
+                    continue
+                for line in block.lines:
+                    if line.bbox is None:
+                        continue
+                    cx = (line.bbox[0] + line.bbox[2]) / 2
+                    cy = (line.bbox[1] + line.bbox[3]) / 2
+                    assert (
+                        block.bbox[0] - 1.0 <= cx <= block.bbox[2] + 1.0
+                        and block.bbox[1] - 1.0 <= cy <= block.bbox[3] + 1.0
+                    ), (cache_key, block.block_id, line.line_id)

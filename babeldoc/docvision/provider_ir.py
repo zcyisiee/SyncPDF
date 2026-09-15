@@ -5,6 +5,12 @@
 sub_type / score。本模块把同一份 layout.json 规范化成结构化 IR，供字符对齐、
 目录识别、超链接映射等下游消费者使用（对应 .plan/minerU深度融合.md 板块 1）。
 
+MinerU（vlm）会把跨页段落整体合并到前一页的块里，并在续页留下
+``lines_deleted: true`` 的空块——溢出行保留的是续页坐标（落在本块 bbox
+之外）。IR 构建前先做 :func:`repair_merged_cross_page_blocks` 把这些行搬回
+物理所在页，否则按页消费 IR 的对齐/行内公式保护/LaTeX 融合都会拿不到
+这些 span（下游全部按 ``page_index`` 逐页匹配）。
+
 坐标约定：MinerU bbox 为 ``[x0, y0, x1, y1]``，页面坐标系（左上原点，y 向下），
 与 BabelDOC IL 坐标（左下原点，y 向上）不同；本模块**原样保留** MinerU 坐标，
 坐标转换由消费者按页高自行完成。
@@ -18,6 +24,7 @@ id 规则（跨文档唯一，页内按 JSON 出现顺序的深度优先序号�
 
 from __future__ import annotations
 
+import copy
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -286,6 +293,161 @@ class ProviderPage:
         )
 
 
+# 行 bbox 中心落入块 bbox 的容差（pt），与 provider_alignment 的口径一致。
+_CENTER_TOLERANCE = 1.0
+# 可作接收块的文本型 block 类型（跨页/跨栏续文都是文本行）：image/table 等
+# 图形型块合法地没有行，绝不能当接收块；无 ``lines_deleted`` 标记时同样
+# 只信任文本型空块（兜底旧版回放数据）。
+_TEXTUAL_RECEIVER_TYPES = frozenset({"text", "title", "ref_text"})
+
+
+def _iter_page_blocks(page_info: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """深度优先迭代一页的全部 block dict（para/discarded + 嵌套 children）。"""
+
+    def walk(block: Any) -> Iterator[dict[str, Any]]:
+        if not isinstance(block, dict):
+            return
+        yield block
+        for key in _CHILD_KEYS:
+            for child in block.get(key) or []:
+                yield from walk(child)
+
+    for key in ("para_blocks", "discarded_blocks"):
+        for block in page_info.get(key) or []:
+            yield from walk(block)
+
+
+def _center_inside(bbox: list[float], box: list[float]) -> bool:
+    cx = (bbox[0] + bbox[2]) / 2
+    cy = (bbox[1] + bbox[3]) / 2
+    return (
+        box[0] - _CENTER_TOLERANCE <= cx <= box[2] + _CENTER_TOLERANCE
+        and box[1] - _CENTER_TOLERANCE <= cy <= box[3] + _CENTER_TOLERANCE
+    )
+
+
+def _is_forward_receiver(
+    receiver: dict[str, Any], page_idx: int, block_bbox: list[float]
+) -> bool:
+    """接收块在阅读顺序上是否位于源块之后。
+
+    更晚页恒为后续；同页时要求接收块起始于源块右边缘之后的栏（LTR 两栏：
+    左栏底续到同页右栏顶）。同栏或左侧的接收块在阅读顺序上先于右栏源块，
+    不可能是其续文——否则跨页/跨栏的近似栏顶 bbox 会互相截胡。
+    """
+    if receiver["page_idx"] != page_idx:
+        return receiver["page_idx"] > page_idx
+    return receiver["bbox"][0] >= block_bbox[2] - _CENTER_TOLERANCE
+
+
+def repair_merged_cross_page_blocks(pdf_info: list[Any]) -> dict[str, Any]:
+    """把 MinerU 跨页/跨栏合并的行搬回其物理所在位置（就地修改 ``pdf_info``）。
+
+    MinerU 的段落合并行为：跨页或跨栏（两栏排版的左栏底 → 同页右栏顶）段落
+    被整段并入阅读顺序在前的那一块，物理续文位置留下 ``lines_deleted: true``、
+    ``lines: []`` 的空块。溢出行保留的是续文位置的真实坐标——因此落在本块
+    bbox 之外，这是判定"被搬错位置"的唯一可靠信号（正常行必然在本块 bbox
+    内，即使别处有同构内容也不会被误搬）。
+
+    规则：
+
+    1. 接收块 = 文本型（text/title/ref_text）空块，带 ``lines_deleted:
+       true`` 标记或（兜底旧版回放数据）无行无子块；
+    2. 溢出行 = bbox 中心不在其所属块 bbox 内的行；搬入包含它、且在阅读
+       顺序上位于源块**之后**的接收块——更晚页恒为后续；同页接收块必须
+       在源块右侧的后续栏（``receiver.x0 ≥ source.x1``，LTR 两栏排版的
+       左栏底 → 同页右栏顶）。多候选按「页距最近、同页距取面积更小
+       （更精确）」——不同页/栏的近似栏顶 bbox 会互相包含，阅读顺序是
+       比几何更强的判据；
+    3. 只动行的归属，不改任何 bbox：源块 bbox 本就不含溢出行，接收块 bbox
+       即溢出行的并集。
+
+    返回统计 ``{"moved_lines": n, "receiver_pages": [...]}``（供测试与审计）。
+    """
+    pages: dict[int, dict[str, Any]] = {}
+    for page_info in pdf_info:
+        if isinstance(page_info, dict) and isinstance(page_info.get("page_idx"), int):
+            pages[page_info["page_idx"]] = page_info
+    if not pages:
+        return {"moved_lines": 0, "receiver_pages": []}
+
+    receivers: list[dict[str, Any]] = []
+    for page_idx, page_info in pages.items():
+        for block in _iter_page_blocks(page_info):
+            bbox = _normalize_bbox(block.get("bbox"))
+            if bbox is None:
+                continue
+            has_children = any(
+                isinstance(child, dict)
+                for key in _CHILD_KEYS
+                for child in (block.get(key) or [])
+            )
+            deleted = block.get("lines_deleted") is True
+            empty_textual = not block.get("lines") and not has_children
+            if str(block.get("type") or "") in _TEXTUAL_RECEIVER_TYPES and (
+                deleted or empty_textual
+            ):
+                receivers.append(
+                    {
+                        "page_idx": page_idx,
+                        "bbox": bbox,
+                        "area": (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]),
+                        "block": block,
+                    }
+                )
+    if not receivers:
+        return {"moved_lines": 0, "receiver_pages": []}
+
+    moves: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+    for page_idx in sorted(pages):
+        for block in _iter_page_blocks(pages[page_idx]):
+            block_bbox = _normalize_bbox(block.get("bbox"))
+            if block_bbox is None:
+                # 无法验证行的归属，宁可不动。
+                continue
+            for line in block.get("lines") or []:
+                if not isinstance(line, dict):
+                    continue
+                line_bbox = _normalize_bbox(line.get("bbox"))
+                if line_bbox is None or _center_inside(line_bbox, block_bbox):
+                    continue
+                candidates = [
+                    receiver
+                    for receiver in receivers
+                    if _is_forward_receiver(receiver, page_idx, block_bbox)
+                    and _center_inside(line_bbox, receiver["bbox"])
+                ]
+                if not candidates:
+                    continue
+                best = min(
+                    candidates,
+                    key=lambda receiver: (
+                        receiver["page_idx"] - page_idx,
+                        receiver["area"],
+                    ),
+                )
+                moves.append((block, line, best))
+
+    if not moves:
+        return {"moved_lines": 0, "receiver_pages": []}
+
+    moved_ids: dict[int, dict[str, Any]] = {}
+    used_receiver_pages: set[int] = set()
+    for block, line, receiver in moves:
+        receiver["block"].setdefault("lines", []).append(line)
+        moved_ids[id(line)] = block
+        used_receiver_pages.add(receiver["page_idx"])
+    for block in {id(block): block for block in moved_ids.values()}.values():
+        block["lines"] = [
+            line for line in (block.get("lines") or []) if id(line) not in moved_ids
+        ]
+
+    return {
+        "moved_lines": len(moves),
+        "receiver_pages": sorted(used_receiver_pages),
+    }
+
+
 class _LayoutJsonBuilder:
     """layout.json → provider IR 的逐页/逐块构造器。
 
@@ -470,10 +632,18 @@ class ProviderDocument:
         只导入 ``pdf_info`` 的 ``para_blocks`` 与 ``discarded_blocks``；
         ``preproc_blocks`` 是 MinerU 的中间预处理结果（与 para_blocks 重复），
         不进入 IR，避免同页内容出现两份。
+
+        构建前先修复跨页合并（:func:`repair_merged_cross_page_blocks`）。在
+        深拷贝上修复，不改调用方的 dict——``handle_document`` 会把同一份
+        layout_json 复用于 YoloResult 路径，行迁移对该路径不可见（它只读叶子
+        块 bbox），但保持输入只读仍是更稳的契约。
         """
         pdf_info = layout_json.get("pdf_info")
         if not isinstance(pdf_info, list):
             raise ValueError("Invalid MinerU layout.json: missing pdf_info list")
+
+        pdf_info = copy.deepcopy(pdf_info)
+        repair_stats = repair_merged_cross_page_blocks(pdf_info)
 
         builder = _LayoutJsonBuilder()
         for page_info in pdf_info:
@@ -498,6 +668,11 @@ class ProviderDocument:
             page_count=page_count,
             pages=pages,
             unknown_types=unknown_types,
+            metadata=(
+                {"cross_page_repair": repair_stats}
+                if repair_stats["moved_lines"]
+                else {}
+            ),
         )
 
     # ------------------------------------------------------------------ #
