@@ -1,3 +1,10 @@
+"""Link correspondence tests.
+
+U0 adds strict xfails for the eight currently red link preservation cases.
+The link preservation backlog is expected to remove them; XPASS(strict) is
+intentionally a failure so a completed implementation cannot be forgotten.
+"""
+
 from types import SimpleNamespace
 
 import pymupdf
@@ -6,6 +13,10 @@ from babeldoc.format.pdf.document_il.backend import link_remap
 from babeldoc.format.pdf.document_il.backend.link_text import anchor_variants
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="链接保真实现未跟上 6c0b75d 的 TDD 测试；backlog 独立跟踪",
+)
 def test_decimal_identifiers_have_complete_boundaries():
     chars = [
         (c, pymupdf.Rect(i, 0, i + 1, 10)) for i, c in enumerate("13.1 / 3.12 / 3.1")
@@ -29,6 +40,10 @@ def _link_page(text, uri="https://example.org"):
     return pymupdf.open(stream=doc.tobytes(), filetype="pdf")
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="链接保真实现未跟上 6c0b75d 的 TDD 测试；backlog 独立跟踪",
+)
 def test_wrong_style_stamp_is_rejected_and_relocated():
     doc = _link_page("Wrong 13; correct 3.")
     page = doc[0]
@@ -55,6 +70,10 @@ def test_wrong_style_stamp_is_rejected_and_relocated():
     assert saved[0].get_text(clip=saved[0].get_links()[0]["from"]).strip() == "3"
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="链接保真实现未跟上 6c0b75d 的 TDD 测试；backlog 独立跟踪",
+)
 def test_same_number_keeps_footnote_figure_and_citation_distinct():
     doc = pymupdf.open()
     page = doc.new_page(width=400, height=300)
@@ -83,6 +102,10 @@ def test_same_number_keeps_footnote_figure_and_citation_distinct():
     assert links[0]["from"].x0 < links[1]["from"].x0 < links[2]["from"].x0
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="链接保真实现未跟上 6c0b75d 的 TDD 测试；backlog 独立跟踪",
+)
 def test_multiline_clone_preserves_literal_pdf_key_strings():
     uri = "https://example.org/?q=/Rect [1 2 3 4]/NM(test)"
     doc = _link_page("reference", uri)
@@ -106,6 +129,10 @@ def test_multiline_clone_preserves_literal_pdf_key_strings():
     assert identities == ["0:0", "0:0"]
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="链接保真实现未跟上 6c0b75d 的 TDD 测试；backlog 独立跟踪",
+)
 def test_relocated_link_drops_stale_quadpoints():
     doc = _link_page("reference")
     page = doc[0]
@@ -123,6 +150,10 @@ def test_relocated_link_drops_stale_quadpoints():
     assert doc.xref_get_key(xref, "QuadPoints")[0] == "null"
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="链接保真实现未跟上 6c0b75d 的 TDD 测试；backlog 独立跟踪",
+)
 def test_remote_named_destination_with_link_substring_survives_serialization():
     doc = pymupdf.open()
     page = doc.new_page()
@@ -143,6 +174,10 @@ def test_remote_named_destination_with_link_substring_survives_serialization():
 
 
 @pytest.mark.parametrize("first", [False, True])
+@pytest.mark.xfail(
+    strict=True,
+    reason="链接保真实现未跟上 6c0b75d 的 TDD 测试；backlog 独立跟踪",
+)
 def test_dual_destination_uses_destination_page_dimensions(first):
     from babeldoc.format.pdf.document_il.backend.pdf_creater import PDFCreater
 

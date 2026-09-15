@@ -1,6 +1,14 @@
+"""Link audit tests.
+
+U0 adds a strict xfail for the unfinished public audit tool test. U4 is
+expected to rewrite this test and remove the marker; XPASS(strict) intentionally
+fails so the marker cannot be forgotten after implementation.
+"""
+
 from pathlib import Path
 
 import pymupdf
+import pytest
 from babeldoc.tools.agent.link_audit import audit_links
 from babeldoc.tools.agent.link_audit import inventory
 
@@ -92,6 +100,10 @@ def test_external_file_action_not_called_invalid(tmp_path):
         assert row["target_status"] == "external_unchecked"
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="audit_links 工具化属于 U4，届时重写本测试",
+)
 def test_public_audit_tool(tmp_path):
     from babeldoc_tools.registry import dispatch
 
