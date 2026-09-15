@@ -1018,6 +1018,19 @@ def run_pipeline(
         # prompt_only：不是失败，但也不是最终成功。
         return {"ok": True, "data": summary}
 
+    if check_data is None:
+        # --from review/report 续跑：本次会话没跑 check，但前置校验已确认
+        # review_verdict.json 存在且上游哈希未变，check 的结论以 run_state
+        # 记录为准——否则 reviewer 的 pass 会绕过 check 的确定性 blocker。
+        recorded = (state.get("quality") or {}).get("check") or {}
+        if recorded.get("verdict"):
+            check_data = {
+                "verdict": recorded.get("verdict"),
+                "reasons": recorded.get("reasons") or [],
+                "blockers": [],
+                "layout": {"status": recorded.get("layout")},
+                "links": {"status": recorded.get("links")},
+            }
     verdict = (check_data or {}).get("verdict")
     review_verdict = (agent_review or {}).get("verdict")
     if verdict == "needs_fix":

@@ -475,6 +475,26 @@ def test_reviewer_pass_cannot_override_check_blocker(tmp_path, stub_stages):  # 
     assert result["error"]["verdict"] == "needs_fix"
 
 
+def test_resume_from_review_keeps_check_gate(tmp_path, stub_stages):
+    """`--from review` 续跑不能丢掉已记录的 check needs_fix（reviewer pass 不可绕过）。"""
+    workdir = _make_workdir(tmp_path)
+    pdf = str(_make_pdf(tmp_path))
+    stub_stages["behavior"]["check_verdict"] = "needs_fix"
+
+    first = run_tool.run_pipeline(str(workdir), pdf, markdown="self", reviewer=REVIEWER)
+    assert first["ok"] is False
+    assert first["error"]["code"] == "check_needs_fix"
+
+    resumed = run_tool.run_pipeline(
+        str(workdir), from_stage="review", reviewer=REVIEWER
+    )
+
+    assert resumed["ok"] is False
+    assert resumed["error"]["code"] == "check_needs_fix"
+    assert resumed["error"]["reviewer_verdict"] == "pass"
+    assert resumed["error"]["verdict"] == "needs_fix"
+
+
 def test_reviewer_needs_fix_returns_actions_and_counts_a_round(tmp_path, stub_stages):  # noqa: ARG001
     """needs_fix 的 findings 映射为 actions；run 不自动修复，只记一轮。"""
     workdir = _make_workdir(tmp_path)
