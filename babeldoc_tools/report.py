@@ -6,28 +6,18 @@ import datetime
 from pathlib import Path
 
 from babeldoc_tools import common
-from babeldoc_tools.registry import register
 
 
-@register(
-    "report",
-    group="report",
-    description="汇总 token 用量 / apply 指标 / 审查 verdict / lint 前后对比 → FINAL_REPORT.md",
-    output_hint="report(path) / sections / leftovers",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "workdir": {"type": "string", "minLength": 1},
-            "output_dir": {"type": "string"},
-            "title": {"type": "string"},
-            "notes": {"type": "string", "description": "追加的备注（Markdown）"},
-        },
-        "required": ["workdir"],
-    },
-)
-def report(args: dict) -> dict:
-    workdir = common.require_workdir(args["workdir"])
-    agent = common.agent_dir(workdir)
+def report(
+    workdir: str,
+    *,
+    output_dir: str | None = None,
+    title: str | None = None,
+    notes: str | None = None,
+) -> dict:
+    """汇总 token 用量 / apply 指标 / 审查 verdict / lint 前后对比 → FINAL_REPORT.md。"""
+    workdir_path = common.require_workdir(workdir)
+    agent = common.agent_dir(workdir_path)
     usage = common.read_json(agent / "usage.json", default={}) or {}
     apply_report = common.read_json(agent / "apply_report.json", default={}) or {}
     verdict = common.read_json(agent / "review_verdict.json", default={}) or {}
@@ -42,10 +32,10 @@ def report(args: dict) -> dict:
 
     leftovers = _leftovers(verdict, lint, apply_report, backtranslation)
     lines: list[str] = []
-    title = args.get("title") or f"文档翻译报告（{workdir.name}）"
+    title = title or f"文档翻译报告（{workdir_path.name}）"
     lines.append(f"# {title}")
     lines.append("")
-    lines.append(f"- 工作目录：`{workdir}`")
+    lines.append(f"- 工作目录：`{workdir_path}`")
     lines.append(f"- 生成时间：{datetime.datetime.now().isoformat(timespec='seconds')}")
     if geometry.get("pages"):
         lines.append(f"- 页数：{geometry['pages']}；段落：{len(geometry.get('paragraphs') or [])}")
@@ -192,14 +182,14 @@ def report(args: dict) -> dict:
             lines.append(f"- {item}")
     else:
         lines.append("- 无（所有确定性检查通过；排版 lint 仅剩 P2 信息项）")
-    if args.get("notes"):
+    if notes:
         lines.append("")
-        lines.append(args["notes"])
+        lines.append(notes)
     lines.append("")
 
-    output_dir = Path(args.get("output_dir") or workdir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / "FINAL_REPORT.md"
+    resolved_output_dir = Path(output_dir) if output_dir else workdir_path
+    resolved_output_dir.mkdir(parents=True, exist_ok=True)
+    path = resolved_output_dir / "FINAL_REPORT.md"
     path.write_text("\n".join(lines), encoding="utf-8")
     return {
         "report": str(path),

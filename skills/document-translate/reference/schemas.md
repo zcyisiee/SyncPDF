@@ -3,13 +3,14 @@
 工具层所有交换文件都在 `<workdir>/agent/`。本文件是**唯一契约表**：改字段先改这里，
 再改 `babeldoc/tools/agent/`（IR 侧）与 `babeldoc_tools/`（工具侧）。
 
-发布 API 的契约由 `babeldoc_tools` 提供：所有工具成功返回
-`{ok, tool, job_id, data, warnings, artifacts}`，失败返回稳定的 `error.code`；状态真源为
-`agent/manifest.json`，`state.pkl` 只作 IR 缓存，不能替代 manifest。
+发布 API 的契约由 `babeldoc_tools` 提供（`registry.invoke` 统一信封）：所有子命令成功返回
+`{"ok": true, "data": {...}}`，失败返回稳定的 `error.code` / `error.message`；状态真源为
+`agent/` 下的确定性产物（`document.md` / `translated.md` / `apply_report.json` /
+`review_verdict.json` / `layout_geometry.json`），`state.pkl` 只作 IR 缓存。
 
-核心状态转换为：`created → parsed → translated → protocol_validated → reviewed →
-reconstructed → rendered → accepted`；`blocked_protocol`、`blocked_translation`、
-`blocked_layout` 和 `needs_human_review` 是显式阻断状态。
+核心状态转换为：`parsed → translated → applied → reviewed → reconstructed → rendered →
+accepted`；`blocked_protocol`、`blocked_translation`、`blocked_layout` 和
+`needs_human_review` 是显式阻断状态。
 
 ---
 
@@ -298,13 +299,18 @@ reconstructed → rendered → accepted`；`blocked_protocol`、`blocked_transla
 | `empty_target` | 去掉锚点后目标为空而源文非空（blocker） |
 | `markdown_comment_leak` | 译文残留 `<!--`（blocker；apply 会程序化剔除） |
 
-## 7.5 `dump_text_layer` 产物（`output/text_layer/`）
+## 7.5 文本层产物（`output/text_layer/`）
 
+由内部函数 `babeldoc_tools.layout.dump_text_layer(pdf=..., with_spans=True)` 生成
+（已从公开 CLI 移除）。
 `page-XX.txt`（可选 `page-XX.spans.txt` 带字号/坐标）：页首注释列出该页的
 CJK 兼容表意文字（`兼容表意文字 N 种: 了->了, …`），正文为 pymupdf 抽取的文本层。
 审查 agent 的视觉结论必须回到这里复核。
 
 ## 8. `backtranslation_check.json`
+
+由内部函数 `babeldoc_tools.review.backtranslate_check(workdir=...)` 生成
+（已从公开 CLI 移除）。
 
 ```json
 {"ids": ["P07-012"], "threshold": 0.55,
@@ -315,7 +321,7 @@ CJK 兼容表意文字（`兼容表意文字 N 种: 了->了, …`），正文�
 
 相似度 = 归一化（去锚点、去 CJK、小写、去标点）后的 Levenshtein ratio；< 0.55 → 需重译。
 
-## 9. `usage.json` / `lint_history.json` / `snapshots/`
+## 9. `usage.json` / `lint_history.json`
 
 ```json
 // usage.json
@@ -325,7 +331,6 @@ CJK 兼容表意文字（`兼容表意文字 N 种: 了->了, …`），正文�
 
 // lint_history.json（report 用）
 [{"ts": "2026-09-10T12:00:00", "summary": {...}, "counts": {...}}]
-
-// snapshots/<name>/ ：translated.jsonl + translated.md + layout_overrides.json
-//                    + apply_report.json + review_verdict.json + meta.json
 ```
+
+> 快照（`snapshots/<name>/`）随 U2 删除；回滚改用 `bdt layout-set --clear` 与重新 apply。

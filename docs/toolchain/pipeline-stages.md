@@ -272,20 +272,20 @@
 
 ---
 
-## 阶段 10：`translate_document`（整篇翻译）
+## 阶段 10：`bdt translate` / `translate_document`（整篇翻译）
 
-- **入口**：`babeldoc_tools/translate.py`
+- **入口**：`babeldoc_tools/translate.py`（CLI = `bdt translate`）
 - **输入**：`agent/document.md` + 提示词 `agents/translator.md`
 - **输出**：`agent/translated.md`（+ `usage.json` 若 CLI 支持统计）
 - **不变量**：**一次调用整篇**（I5.1）；模型必须原样保留段落标记与锚点
 - **失败模式**
-  - `model_cli_missing`：无 `agy` 等 CLI → 用 `--arg translated_md=<文件>` 导入
+  - `model_cli_missing`：无 `agy` 等 CLI → 用 `--markdown <文件>` 导入
   - `model_failed: …`：该模型在当前环境不可用 → `agy models` 列可用模型
-  - `document_missing`：未先 `parse_document`
+  - `document_missing`：未先 `bdt parse`
 
 ---
 
-## 阶段 11：`md-apply` / `apply_translation`（校验与写回）
+## 阶段 11：`md-apply` / `bdt apply` / `apply_translation`（校验与写回）
 
 - **入口**：`markdown_view.apply_markdown`（`md-apply`）或
   `babeldoc_tools.translate.apply_translation`
@@ -394,21 +394,22 @@
 
 ---
 
-## 阶段 14：`render_pages`（渲染）
+## 阶段 14：渲染（`bdt build --render`）
 
-- **入口**：`tools/agent/workflow.py::render` / `babeldoc_tools.render_pages`
+- **入口**：`bdt build --render 1,2`（内部 `babeldoc_tools.layout.render_pages` /
+  `tools/agent/workflow.py::render`）
 - **输入**：mono/dual PDF + 页号串（`2,3` 或 `1-3`）
 - **输出**：`render/page-NN.png`（默认 dpi 110）
 - **失败模式**：页号越界静默跳过（返回已渲染的列表）
 
 ---
 
-## 阶段 15：`export_report`（报告）
+## 阶段 15：`bdt report`（报告）
 
-- **入口**：`babeldoc_tools.tools.export_report`
-- **输出**：`agent/FINAL_REPORT.md` + `<workdir>/FINAL_REPORT.md`
-- **内容**：manifest 摘要、apply/reconstruct 指标、layout lint 摘要、
-  链接/目录/覆盖率指标（供人工抽检）
+- **入口**：`babeldoc_tools/report.py`（CLI = `bdt report`）
+- **输出**：`<workdir>/FINAL_REPORT.md`（或 `--output-dir`）
+- **内容**：token 用量、apply 指标、review verdict、layout lint 前后对比、遗留项
+  （供人工抽检）
 
 ---
 

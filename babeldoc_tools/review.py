@@ -3,7 +3,8 @@
 - ``review_document``：确定性检查（apply 报告 + 段内完整性 + 页数/目录/链接 +
   文本层占位符残留 + 标题字号）→ ``verdict: pass | needs_fix``。
 - ``backtranslate_check``：只对高风险段落做回译（由 reviewer-fidelity agent
-  产出英文），Python 侧用 Levenshtein 相似度判定。
+  产出英文），Python 侧用 Levenshtein 相似度判定。已从公开 CLI 移除，保留为
+  内部 Python 函数。
 """
 
 from __future__ import annotations
@@ -12,7 +13,6 @@ import re
 from pathlib import Path
 
 from babeldoc_tools import common
-from babeldoc_tools.registry import register
 
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 LEFT_OVER_V_RE = re.compile(r"\{\s*v\s*\d+\s*\}")
@@ -42,33 +42,22 @@ def _pdf_stats(pdf_path) -> dict:
     return result
 
 
-@register(
-    "review_document",
-    group="review",
-    description=(
-        "结构性审查并给出 verdict：apply 报告 + 段内完整性 + 页数/目录/链接 + "
-        "占位符残留 + 标题字号；blockers → needs_fix"
-    ),
-    output_hint="verdict / blockers / warnings / metrics / report(path)",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "workdir": {"type": "string", "minLength": 1},
-            "mono": {"type": "string", "description": "mono PDF 路径（可选，用于 PDF 层核对）"},
-            "dual": {"type": "string"},
-            "source_pdf": {"type": "string", "description": "原文 PDF（默认取 state.pkl 内路径）"},
-            "skip_pdf_checks": {"type": "boolean"},
-        },
-        "required": ["workdir"],
-    },
-)
-def review_document(args: dict) -> dict:
+def review_document(
+    workdir: str,
+    *,
+    mono: str | None = None,
+    dual: str | None = None,
+    source_pdf: str | None = None,
+    skip_pdf_checks: bool = False,
+) -> dict:
+    """结构性审查并给出 verdict：apply 报告 + 段内完整性 + 页数/目录/链接 +
+    占位符残留 + 标题字号；blockers → needs_fix。"""
     import pickle
 
     from babeldoc.tools.agent import quality_checks
 
-    workdir = common.require_workdir(args["workdir"])
-    agent = common.agent_dir(workdir)
+    workdir_path = common.require_workdir(workdir)
+    agent = common.agent_dir(workdir_path)
     rows = common.read_jsonl(agent / "sheet.jsonl")
     targets = {
         row["id"]: row.get("target", "")
@@ -116,11 +105,11 @@ def review_document(args: dict) -> dict:
     metrics.update(checks["metrics"])
 
     # ---- 3) PDF 层核对 --------------------------------------------------- #
-    skip_pdf = bool(args.get("skip_pdf_checks"))
-    mono = args.get("mono") or _find_output(workdir, "mono")
-    dual = args.get("dual") or _find_output(workdir, "dual")
+    skip_pdf = bool(skip_pdf_checks)
+    mono = mono or _find_output(workdir_path, "mono")
+    dual = dual or _find_output(workdir_path, "dual")
     if not skip_pdf and (mono or dual):
-        source_pdf = args.get("source_pdf") or state.get("pdf_path")
+        source_pdf = source_pdf or state.get("pdf_path")
         source_stats = _pdf_stats(source_pdf) if source_pdf and Path(source_pdf).exists() else None
         for kind, path in (("mono", mono), ("dual", dual)):
             if not path or not Path(path).exists():
@@ -277,46 +266,30 @@ def high_risk_ids(workdir: Path, limit: int = 40) -> list[str]:
     return ids[:limit]
 
 
-@register(
-    "backtranslate_check",
-    group="review",
-    description=(
-        "回译校验：对指定 id（默认高风险段）由 reviewer agent 回译英文，"
-        "Python 侧算 Levenshtein 相似度并判定是否需要重译"
-    ),
-    output_hint="per_id / needs_retranslate_ids / usage / prompt(path)",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "workdir": {"type": "string", "minLength": 1},
-            "ids": {"type": "array", "items": {"type": "string"}},
-            "max_ids": {"type": "integer", "minimum": 1, "maximum": 200},
-            "threshold": {"type": "number", "minimum": 0, "maximum": 1},
-            "model": {"type": "string"},
-            "effort": {
-                "type": "string",
-                "description": "thinking 档位；\"none\" = 不传 --effort（claude-* 等）",
-            },
-            "timeout": {"type": "integer", "minimum": 30},
-            "command": {"type": "string"},
-            "dry_run": {"type": "boolean"},
-            "backtranslation": {
-                "type": "object",
-                "description": "{id: 回译英文}：给出则不调用模型（供外部 reviewer 产出）",
-            },
-        },
-        "required": ["workdir"],
-    },
-)
-def backtranslate_check(args: dict) -> dict:
+def backtranslate_check(
+    workdir: str,
+    *,
+    ids: list[str] | None = None,
+    max_ids: int = 40,
+    threshold: float = 0.55,
+    model: str | None = None,
+    effort: str | None = None,
+    timeout: int | None = None,
+    command: str | None = None,
+    dry_run: bool = False,
+    backtranslation: dict | None = None,
+) -> dict:
+    """回译校验：对指定 id（默认高风险段）由 reviewer agent 回译英文，
+    Python 侧算 Levenshtein 相似度并判定是否需要重译。
+
+    已从公开 CLI 移除；保留为内部 Python 函数。
+    """
     from babeldoc.tools.agent import markdown_view
 
-    workdir = common.require_workdir(args["workdir"])
-    agent = common.agent_dir(workdir)
-    threshold = float(args.get("threshold") if args.get("threshold") is not None else 0.55)
-    ids = args.get("ids") or high_risk_ids(
-        workdir, limit=int(args.get("max_ids") or 40)
-    )
+    workdir_path = common.require_workdir(workdir)
+    agent = common.agent_dir(workdir_path)
+    threshold = float(threshold if threshold is not None else 0.55)
+    ids = ids or high_risk_ids(workdir_path, limit=int(max_ids or 40))
     sources = {
         row["id"]: row.get("source", "") for row in common.read_jsonl(agent / "sheet.jsonl")
     }
@@ -339,38 +312,37 @@ def backtranslate_check(args: dict) -> dict:
         f"<!-- id={item['id']} -->\n{markdown_view.canonical_to_markdown(item['translated'])}"
         for item in items
     )
-    prompt = common.load_prompt("reviewer-fidelity", document=document, ids=", ".join(ids))
+    prompt_text = common.load_prompt("reviewer-fidelity", document=document, ids=", ".join(ids))
     prompt_file = agent / "prompt.backtranslate.md"
-    prompt_file.write_text(prompt, encoding="utf-8")
+    prompt_file.write_text(prompt_text, encoding="utf-8")
 
-    provided = args.get("backtranslation")
     usage: dict = {}
-    if provided:
+    if backtranslation:
         back = {
-            pid: (provided.get(pid) or {}).get("text", provided.get(pid, ""))
-            if isinstance(provided.get(pid), dict)
-            else provided.get(pid, "")
+            pid: (backtranslation.get(pid) or {}).get("text", backtranslation.get(pid, ""))
+            if isinstance(backtranslation.get(pid), dict)
+            else backtranslation.get(pid, "")
             for pid in ids
         }
-    elif args.get("dry_run"):
+    elif dry_run:
         return {"dry_run": True, "prompt": str(prompt_file), "ids": ids}
     else:
-        model = (
-            args.get("model")
+        resolved_model = (
+            model
             or common.env_default("BABELDOC_REVIEWER_MODEL")
             or common.env_default("BABELDOC_TRANSLATOR_MODEL")
             or "gemini-3.8-flash-low"
         )
-        effort = args.get("effort") or common.env_default("BABELDOC_REVIEWER_EFFORT") or "low"
+        resolved_effort = effort or common.env_default("BABELDOC_REVIEWER_EFFORT") or "low"
         response, usage = common.run_model(
-            prompt,
-            model,
-            effort,
-            timeout_s=int(args.get("timeout") or 900),
-            command=args.get("command") or "agy",
+            prompt_text,
+            resolved_model,
+            resolved_effort,
+            timeout_s=int(timeout or 900),
+            command=command or "agy",
         )
         (agent / "backtranslation.raw.md").write_text(response, encoding="utf-8")
-        common.append_usage(workdir, "backtranslate", usage)
+        common.append_usage(workdir_path, "backtranslate", usage)
         back = _parse_backtranslation(response, ids)
 
     per_id = []

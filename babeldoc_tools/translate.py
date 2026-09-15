@@ -6,103 +6,131 @@ import re
 from pathlib import Path
 
 from babeldoc_tools import common
-from babeldoc_tools.registry import register
 
 ID_MARK_RE = re.compile(
     r"<!--\s*id\s*=\s*([A-Za-z0-9._-]+)\s*(?:label\s*=\s*([^>]*?))?\s*-->"
 )
 
 
-def _model_defaults(args: dict) -> tuple[str, str | None, int]:
+def _model_defaults(
+    model: str | None = None,
+    effort: str | None = None,
+    timeout: int | None = None,
+) -> tuple[str, str | None, int]:
     """(model, effort, timeout)；effort 为 None 时不传 --effort 给 CLI。
 
-    优先级：显式参数 → 环境变量 → 默认；``--arg effort="none"`` 可显式关闭。
+    优先级：显式参数 → 环境变量 → 默认；``--effort none`` 可显式关闭。
     """
-    model = (
-        args.get("model")
-        or common.env_default("BABELDOC_TRANSLATOR_MODEL")
-        or "gemini-3.8-flash-low"
+    resolved_model = (
+        model or common.env_default("BABELDOC_TRANSLATOR_MODEL") or "gemini-3.8-flash-low"
     )
-    effort = args.get("effort")
-    if effort is None:
-        effort = common.env_default("BABELDOC_TRANSLATOR_EFFORT") or "low"
-    if str(effort).lower() in ("none", "default", "auto"):
-        effort = None
-    timeout = int(args.get("timeout") or 1800)
-    return model, effort, timeout
+    resolved_effort = effort
+    if resolved_effort is None:
+        resolved_effort = common.env_default("BABELDOC_TRANSLATOR_EFFORT") or "low"
+    if str(resolved_effort).lower() in ("none", "default", "auto"):
+        resolved_effort = None
+    return resolved_model, resolved_effort, int(timeout or 1800)
 
 
-@register(
-    "translate_document",
-    group="translate",
-    description=(
-        "整篇翻译：document.md 一次性交给翻译模型（默认 agy CLI），"
-        "自动补译缺失段落，产出 agent/translated.md + usage.json"
-    ),
-    output_hint="translated_md / chars / missing / retried / usage / dry_run",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "workdir": {"type": "string", "minLength": 1},
-            "model": {"type": "string"},
-            "effort": {
-                "type": "string",
-                "description": "thinking 档位（low/medium/high）；\"none\" 表示不传 --effort"
-                "（claude-* 等不支持该参数的模型用 \"none\"）",
-            },
-            "timeout": {"type": "integer", "minimum": 30},
-            "command": {"type": "string", "description": "翻译 CLI，默认 agy"},
-            "prompt": {"type": "string", "description": "提示词名，默认 translator"},
-            "translated_md": {
-                "type": "string",
-                "description": "已有译文 Markdown 路径（给出则不调用模型，直接导入）",
-            },
-            "dry_run": {"type": "boolean", "description": "只写 prompt.md，不调用模型"},
-            "retry_missing": {"type": "boolean", "description": "缺失段落自动补译一次"},
-        },
-        "required": ["workdir"],
-    },
-)
-def translate_document(args: dict) -> dict:
+def translate_document(
+    workdir: str,
+    *,
+    ids: list[str] | None = None,
+    feedback: str | None = None,
+    markdown: str | None = None,
+    prompt_only: bool = False,
+    model: str | None = None,
+    effort: str | None = None,
+    timeout: int | None = None,
+    command: str | None = None,
+    prompt: str | None = None,
+    repair_prompt: str | None = None,
+    retry_missing: bool = True,
+) -> dict:
+    """翻译整篇（默认）或按 ``ids`` 重译合并。
+
+    - 无 ``ids``：``document.md`` 一次性交给翻译模型，自动补译缺失段落。
+    - 有 ``ids``：走 ``retranslate_blocks`` 补译/重译并合并进 ``translated.md``。
+    - ``markdown``：直接导入已有译文，不调用模型。
+    - ``prompt_only``：只写 ``agent/prompt.md``，不调用模型。
+    """
+    workdir_path = common.require_workdir(workdir)
+    if ids:
+        return retranslate_ids(
+            str(workdir_path),
+            ids,
+            feedback=feedback,
+            model=model,
+            effort=effort,
+            timeout=timeout,
+            command=command,
+            repair_prompt=repair_prompt,
+        )
+    return _translate_whole_document(
+        workdir_path,
+        markdown=markdown,
+        prompt_only=prompt_only,
+        model=model,
+        effort=effort,
+        timeout=timeout,
+        command=command,
+        prompt=prompt,
+        retry_missing=retry_missing,
+    )
+
+
+def _translate_whole_document(
+    workdir: Path,
+    *,
+    markdown: str | None,
+    prompt_only: bool,
+    model: str | None,
+    effort: str | None,
+    timeout: int | None,
+    command: str | None,
+    prompt: str | None,
+    retry_missing: bool,
+) -> dict:
     from babeldoc.tools.agent import markdown_view
 
-    workdir = common.require_workdir(args["workdir"])
     agent = common.agent_dir(workdir)
     document_md = agent / "document.md"
     if not document_md.exists():
-        raise common.ToolError("document_missing", f"{document_md} 不存在：请先 parse_document")
+        raise common.ToolError("document_missing", f"{document_md} 不存在：请先 bdt parse")
 
-    prompt_name = args.get("prompt") or "translator"
+    prompt_name = prompt or "translator"
     document = document_md.read_text(encoding="utf-8")
-    prompt = common.load_prompt(prompt_name, document=document)
+    prompt_text = common.load_prompt(prompt_name, document=document)
     prompt_file = agent / "prompt.md"
-    prompt_file.write_text(prompt, encoding="utf-8")
+    prompt_file.write_text(prompt_text, encoding="utf-8")
 
     translated_path = agent / "translated.md"
     usage: dict = {}
-    imported = args.get("translated_md")
-    if imported:
-        imported_path = Path(imported)
+    if markdown:
+        imported_path = Path(markdown)
         if not imported_path.exists():
             raise common.ToolError("translated_md_missing", f"{imported_path} 不存在")
         translated_path.write_text(
             imported_path.read_text(encoding="utf-8"), encoding="utf-8"
         )
-    elif args.get("dry_run"):
+    elif prompt_only:
         return {
             "dry_run": True,
+            "prompt_only": True,
             "prompt": str(prompt_file),
-            "prompt_chars": len(prompt),
+            "prompt_chars": len(prompt_text),
             "translated_md": None,
         }
     else:
-        model, effort, timeout = _model_defaults(args)
+        resolved_model, resolved_effort, resolved_timeout = _model_defaults(
+            model, effort, timeout
+        )
         response, usage = common.run_model(
-            prompt,
-            model,
-            effort,
-            timeout_s=timeout,
-            command=args.get("command") or "agy",
+            prompt_text,
+            resolved_model,
+            resolved_effort,
+            timeout_s=resolved_timeout,
+            command=command or "agy",
         )
         translated_path.write_text(response, encoding="utf-8")
         common.append_usage(workdir, "translate", usage)
@@ -111,8 +139,11 @@ def translate_document(args: dict) -> dict:
         workdir, translated_path.read_text(encoding="utf-8")
     )
     retried = None
-    if missing and args.get("retry_missing", True) and not args.get("dry_run"):
-        retried = retranslate_blocks(workdir, missing, feedback="", args=args)
+    if missing and retry_missing and not prompt_only:
+        retried = retranslate_blocks(
+            workdir, missing, feedback="", model=model, effort=effort,
+            timeout=timeout, command=command, repair_prompt=None,
+        )
         missing = retried["still_missing"]
     return {
         "prompt": str(prompt_file),
@@ -128,11 +159,20 @@ def translate_document(args: dict) -> dict:
 # --------------------------------------------------------------------------- #
 # 按 id 重译
 # --------------------------------------------------------------------------- #
-def retranslate_blocks(workdir: Path, ids: list[str], feedback: str = "", args: dict | None = None) -> dict:
+def retranslate_blocks(
+    workdir: Path,
+    ids: list[str],
+    feedback: str = "",
+    *,
+    model: str | None = None,
+    effort: str | None = None,
+    timeout: int | None = None,
+    command: str | None = None,
+    repair_prompt: str | None = None,
+) -> dict:
     """补译/重译指定段落，合并进 translated.md。返回统计（不写 IR）。"""
     from babeldoc.tools.agent import markdown_view
 
-    args = args or {}
     agent = common.agent_dir(workdir)
     ids = [pid for pid in ids if pid]
     if not ids:
@@ -146,23 +186,31 @@ def retranslate_blocks(workdir: Path, ids: list[str], feedback: str = "", args: 
     retry_doc = markdown_view.render_retry_markdown(workdir, ids)
     if not retry_doc.strip():
         raise common.ToolError("ids_unknown", f"这些 id 不在解析产物中: {ids}")
-    prompt = common.load_prompt(
-        args.get("repair_prompt") or "translator-repair",
+    prompt_text = common.load_prompt(
+        repair_prompt or "translator-repair",
         document=retry_doc,
         feedback=feedback or "（无额外反馈）",
     )
     prompt_file = agent / "prompt.retry.md"
-    prompt_file.write_text(prompt, encoding="utf-8")
+    prompt_file.write_text(prompt_text, encoding="utf-8")
 
-    model, effort, timeout = _model_defaults(args)
+    resolved_model, resolved_effort, resolved_timeout = _model_defaults(
+        model, effort, timeout
+    )
     response, usage = common.run_model(
-        prompt, model, effort, timeout_s=timeout, command=args.get("command") or "agy"
+        prompt_text,
+        resolved_model,
+        resolved_effort,
+        timeout_s=resolved_timeout,
+        command=command or "agy",
     )
     (agent / "translated.retry.md").write_text(response, encoding="utf-8")
     common.append_usage(workdir, "retry", usage)
 
     blocks = markdown_view.parse_translated_markdown(response)
-    merged_path = merge_translated_markdown(workdir, {pid: blocks[pid] for pid in ids if pid in blocks})
+    merged_path = merge_translated_markdown(
+        workdir, {pid: blocks[pid] for pid in ids if pid in blocks}
+    )
     all_missing = markdown_view.missing_ids(
         workdir, Path(merged_path).read_text(encoding="utf-8")
     )
@@ -175,6 +223,32 @@ def retranslate_blocks(workdir: Path, ids: list[str], feedback: str = "", args: 
         "prompt": str(prompt_file),
         "usage": usage,
     }
+
+
+def retranslate_ids(
+    workdir: str,
+    ids: list[str],
+    *,
+    feedback: str | None = None,
+    model: str | None = None,
+    effort: str | None = None,
+    timeout: int | None = None,
+    command: str | None = None,
+    repair_prompt: str | None = None,
+) -> dict:
+    """按 id 补译/重译（可带 feedback），合并回 translated.md。"""
+    workdir_path = common.require_workdir(workdir)
+    result = retranslate_blocks(
+        workdir_path,
+        list(ids),
+        feedback or "",
+        model=model,
+        effort=effort,
+        timeout=timeout,
+        command=command,
+        repair_prompt=repair_prompt,
+    )
+    return result
 
 
 def merge_translated_markdown(workdir: Path, replacements: dict[str, tuple[str, str]]) -> str:
@@ -214,84 +288,24 @@ def _label_of(anchors: dict, pid: str) -> str | None:
     return None
 
 
-@register(
-    "retranslate_ids",
-    group="translate",
-    description=(
-        "按 id 补译/重译（可带 feedback），合并回 translated.md；默认同时 apply 写回 IR"
-    ),
-    output_hint="requested_ids / returned_ids / still_missing / apply_report / usage",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "workdir": {"type": "string", "minLength": 1},
-            "ids": {"type": "array", "items": {"type": "string"}, "minItems": 1},
-            "feedback": {"type": "string", "description": "给翻译模型的反馈（缺陷清单/术语要求）"},
-            "model": {"type": "string"},
-            "effort": {
-                "type": "string",
-                "description": "thinking 档位（low/medium/high）；\"none\" 表示不传 --effort"
-                "（claude-* 等不支持该参数的模型用 \"none\"）",
-            },
-            "timeout": {"type": "integer", "minimum": 30},
-            "command": {"type": "string"},
-            "repair_prompt": {"type": "string"},
-            "apply": {"type": "boolean", "description": "重译后自动 apply（默认 true）"},
-            "dry_run": {"type": "boolean"},
-        },
-        "required": ["workdir", "ids"],
-    },
-)
-def retranslate_ids(args: dict) -> dict:
-    workdir = common.require_workdir(args["workdir"])
-    if args.get("dry_run"):
-        from babeldoc.tools.agent import markdown_view
-
-        retry_doc = markdown_view.render_retry_markdown(workdir, args["ids"])
-        prompt = common.load_prompt(
-            args.get("repair_prompt") or "translator-repair",
-            document=retry_doc,
-            feedback=args.get("feedback") or "（无额外反馈）",
-        )
-        path = common.agent_dir(workdir) / "prompt.retry.md"
-        path.write_text(prompt, encoding="utf-8")
-        return {"dry_run": True, "prompt": str(path), "ids": args["ids"]}
-    result = retranslate_blocks(workdir, list(args["ids"]), args.get("feedback") or "", args)
-    result["apply_report"] = None
-    if args.get("apply", True):
-        result["apply_report"] = apply_translation({"workdir": str(workdir)})
-    return result
-
-
 # --------------------------------------------------------------------------- #
 # 写回 IR
 # --------------------------------------------------------------------------- #
-@register(
-    "apply_translation",
-    group="translate",
-    description=(
-        "校验译文 Markdown（id 对齐 + 锚点协议）并写回 IR；确定性修复锚点/双标点/注释残留"
-    ),
-    output_hint="ok / applied / violations / repaired / warnings / fallback_ids",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "workdir": {"type": "string", "minLength": 1},
-            "translated_md": {"type": "string", "description": "默认 agent/translated.md"},
-        },
-        "required": ["workdir"],
-    },
-)
-def apply_translation(args: dict) -> dict:
+def apply_translation(workdir: str, *, markdown: str | None = None) -> dict:
+    """校验译文 Markdown（id 对齐 + 锚点协议）并写回 IR。
+
+    ``markdown`` 缺省为 ``agent/translated.md``；也接受 ``agent/document.md``
+    （自译自校验仅用于验证链路）。
+    """
     from babeldoc.tools.agent import markdown_view
 
-    workdir = common.require_workdir(args["workdir"])
-    md_path = Path(args.get("translated_md") or common.agent_dir(workdir) / "translated.md")
+    workdir_path = common.require_workdir(workdir)
+    md_path = Path(markdown) if markdown else common.agent_dir(workdir_path) / "translated.md"
     if not md_path.exists():
         raise common.ToolError(
-            "translated_md_missing", f"{md_path} 不存在：请先 translate_document"
+            "translated_md_missing", f"{md_path} 不存在：请先 bdt translate"
         )
-    report = markdown_view.apply_markdown(workdir, md_path)
+    report = markdown_view.apply_markdown(workdir_path, md_path)
     report["translated_md"] = str(md_path)
-    common.write_json(common.agent_dir(workdir) / "apply_report.json", report)
+    common.write_json(common.agent_dir(workdir_path) / "apply_report.json", report)
     return report

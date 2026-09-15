@@ -85,21 +85,18 @@ WD=tmp/my-paper
 PDF="/absolute/path/paper.pdf"
 
 # 1. 解析
-a=('{"pdf":"'"$PDF"'","workdir":"'"$WD"'","layout":"mineru"}')
-python -m babeldoc_tools call parse_document --args-json "$a"
+bdt parse "$PDF" --workdir "$WD" --layout mineru
 
 # 2. 使用 agy 翻译
-a=('{"workdir":"'"$WD"'","model":"gemini-3.8-flash-low","effort":"low","timeout":3600}')
-python -m babeldoc_tools call translate_document --args-json "$a"
+bdt translate --workdir "$WD" --model gemini-3.8-flash-low --effort low --timeout 3600
 
 # 3. 写回、审查、重建
-python -m babeldoc_tools call apply_translation --args-json '{"workdir":"'"$WD"'"}'
-python -m babeldoc_tools call review_document --args-json '{"workdir":"'"$WD"'","skip_pdf_checks":true}'
-python -m babeldoc_tools call reconstruct_pdf --args-json '{"workdir":"'"$WD"'","dual":true,"latex_bbox":true,"stats":true}'
+bdt apply --workdir "$WD"
+bdt check --workdir "$WD" --skip-pdf-checks
+bdt build --workdir "$WD" --dual
 
-# 4. 检查排版并导出报告
-python -m babeldoc_tools call layout_lint --args-json '{"workdir":"'"$WD"'"}'
-python -m babeldoc_tools call report --args-json '{"workdir":"'"$WD"'"}'
+# 4. 导出报告
+bdt report --workdir "$WD"
 ```
 
 链接审计：
@@ -116,11 +113,11 @@ audit_links(
 PY
 ```
 
-也可以使用仓库内的稳定工具入口：
+也可以使用仓库内的稳定工具入口（stdout 恒为单行 JSON）：
 
 ```bash
-python -m babeldoc_tools list
-python -m babeldoc_tools call parse_document --workdir tmp/my-paper ...
+bdt --help                              # 子命令清单
+bdt parse --help                        # 单子命令参数
 ```
 
 ### 常用参数
@@ -139,7 +136,7 @@ python -m babeldoc_tools call parse_document --workdir tmp/my-paper ...
 1. 翻译前：`InlineMathProtector` 在三个入口（extract / md-translate / high_level）无条件运行，把 inline_equation 的 span 盒转成 formula 布局区 → 聚成 `PdfFormula` → 翻译模型看到 `{vN}` 占位符；
 2. 渲染时：LaTeX bbox 融合的 `mineru` 级自动采用 span 自带的公式 LaTeX（精确盒匹配 + 三道一致性闸门，不过就降级 simple_math/fragment，同样无开关）。
 
-完整特性清单（CLI = `python -m babeldoc.tools.agent` 子命令旗标；JSON = `babeldoc_tools call` 参数键）：
+完整特性清单（CLI = `python -m babeldoc.tools.agent` 子命令旗标；`bdt` = 工具层子命令旗标）：
 
 | 特性 | CLI 旗标 | JSON 键 | 默认 | 说明 |
 |---|---|---|---|---|

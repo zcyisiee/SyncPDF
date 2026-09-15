@@ -637,41 +637,44 @@ DeepSeek 样本 mono 的链接映射分布：`total=410, remapped=408`
 
 ## 附录 A：agent 工具层（`babeldoc_tools/`，仓库根）
 
-统一入口（`registry + dispatch + CLI`，JSON in / JSON out）：
+统一入口 `bdt`（= `python -m babeldoc_tools`，argparse 子命令，JSON out）：
 
 ```bash
-python -m babeldoc_tools list
-python -m babeldoc_tools call layout_lint \
-    --workdir tmp/md-ccs3764 --arg min_sev='"P1"'
-python -m babeldoc_tools call review_document --workdir tmp/md-ccs3764
+bdt --help
+bdt check --workdir tmp/md-ccs3764                    # 结构 gate（占位转调）
+python -c "from babeldoc_tools import layout;print(layout.layout_lint(workdir='tmp/md-ccs3764', min_sev='P1'))"
+python -c "from babeldoc_tools import review;print(review.backtranslate_check(workdir='tmp/md-ccs3764'))"
 ```
 
-| 组 | 工具 | 关键产物 |
+| 子命令 | 实现函数 | 关键产物 |
 |---|---|---|
-| parse | `parse_document` | `document.md` / `anchors.json` / `sheet.jsonl` / `state.pkl` |
-| translate | `translate_document` / `retranslate_ids` / `apply_translation` | `translated.md` / `translated.jsonl` / `apply_report.json` |
-| review | `review_document` / `backtranslate_check` | `review_verdict.json` / `backtranslation_check.json` |
-| layout | `reconstruct_pdf` / `render_pages` | mono+dual PDF / `layout_geometry.json` / `render/*.png` |
-| layout | `layout_set` / `layout_lint` / `layout_locate` | `layout_overrides.json` / `layout_lint.json` |
-| version | `snapshot` / `restore` / `list_snapshots` | `snapshots/<name>/`（小文件，不含 state.pkl） |
-| report | `report` | `FINAL_REPORT.md` |
+| `parse` | `parse.parse_document` | `document.md` / `anchors.json` / `sheet.jsonl` / `state.pkl` |
+| `translate` | `translate.translate_document`（`--ids` → `retranslate_ids`） | `translated.md` / `translated.jsonl` |
+| `apply` | `translate.apply_translation` | `apply_report.json` |
+| `build` | `layout.build_pdf`（`reconstruct_pdf` + 可选 `render_pages`） | mono+dual PDF / `layout_geometry.json` / `render/*.png` |
+| `check` | `review.review_document`（占位） | `review_verdict.json` |
+| `layout-set` | `layout.layout_set` | `layout_overrides.json` |
+| `report` | `report.report` | `FINAL_REPORT.md` |
 
-返回值统一为 `{"ok": true, "tool": ..., "data": {...}}` /
-`{"ok": false, "tool": ..., "error": {"code", "message", ...}}`；CLI 退出码 0/1/2。
-`registry.dispatch(name, args)` 可直接被 MCP wrapper 复用。
+内部 Python 函数（已从公开 CLI 移除）：`layout.layout_lint` / `layout.layout_locate` /
+`layout.render_pages` / `layout.dump_text_layer` / `review.backtranslate_check`。
+
+返回值统一为 `{"ok": true, "data": {...}}` /
+`{"ok": false, "error": {"code", "message", ...}}`；CLI 退出码 0/1（2 = argparse 用法错误）。
+`registry.invoke(fn, **kwargs)` 是唯一的信封包装点。
 
 ## 附录 B：排版微调闭环（layout overrides）
 
 ```text
-review_document（结构 gate: pass/needs_fix）
+bdt check（结构 gate: pass/needs_fix）
    ├─ blockers（漏行/锚点/占位符/空译/注释残留）
-   │     → retranslate_ids(feedback) → apply_translation → 重新 review
-   ├─ 高风险段 → backtranslate_check（回译 + Levenshtein）→ 仍不过 → retranslate_ids
-   └─ pass → reconstruct_pdf（应用 layout_overrides.json，dump layout_geometry.json）
-              → render_pages → 并行审查（protocol / fidelity / layout）
-              → findings + layout-fixer 决策 → snapshot → layout_set → reconstruct_pdf
-              → layout_lint 复核（≤2 轮；每轮可 restore 回滚）
-              → report → FINAL_REPORT.md
+   │     → bdt translate --ids ... --feedback ... → bdt apply → 重新 check
+   ├─ 高风险段 → review.backtranslate_check（回译 + Levenshtein）→ 仍不过 → bdt translate --ids ...
+   └─ pass → bdt build（应用 layout_overrides.json，dump layout_geometry.json）
+              → 渲染 PNG → 并行审查（protocol / fidelity / layout）
+              → findings + layout-fixer 决策 → 备份覆盖 → bdt layout-set → bdt build
+              → layout_lint 复核（≤2 轮；每轮还原备份回滚）
+              → bdt report → FINAL_REPORT.md
 ```
 
 三条硬约束：
@@ -679,6 +682,6 @@ review_document（结构 gate: pass/needs_fix）
 1. **无覆盖 = 零行为变化**：`layout_overrides.json` 缺失/为空时，Typesetting 与既有
    路径完全一致（回归用三篇论文的文本层哈希比对守住）。
 2. **覆盖不写 `state.pkl`**：`reconstruct` 只在内存中应用覆盖，因此删 key / 删文件 /
-   `restore` 都能回滚。
+   还原备份都能回滚。
 3. **视觉结论必须回到数据**：lint 结论来自 IR 几何 dump（精确 id），PNG 只用于定位；
    P2（兼容表意文字 / 链接错位）只记录不阻断。

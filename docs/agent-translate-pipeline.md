@@ -10,14 +10,15 @@
 
 ---
 
-> **M4 更新（agent 工具层 + 稳定性检测 + 排版微调已落地）**：本文描述的解析/写回/
-> 重建链路未变，但上层已封装为 agent 工具包（`babeldoc_tools/`，仓库根，
-> `python -m babeldoc_tools`），并新增：
-> - 结构化审查 gate：`review_document`（apply 报告 + 段内完整性 + 页数/目录/链接 +
->   占位符残留 + 标题字号 → `verdict: pass|needs_fix`）、`backtranslate_check`（回译 + Levenshtein）；
+> **M4 更新（agent 工具层 + 稳定性检测 + 排版微调已落地；U2 起入口为 `bdt` 子命令）**：
+> 本文描述的解析/写回/重建链路未变，但上层已封装为 agent 工具包（`babeldoc_tools/`，
+> 仓库根，CLI = `bdt`），并新增：
+> - 结构化审查 gate：`bdt check`（apply 报告 + 段内完整性 + 页数/目录/链接 +
+>   占位符残留 + 标题字号 → `verdict: pass|needs_fix`）、回译校验
+>   `review.backtranslate_check`（回译 + Levenshtein）；
 > - 排版微调通道：`agent/layout_overrides.json`（`scale_cap` / `font_scale` / `line_skip` /
->   `box_scale` / `box` / `force_break_after_*`，页级 `font_scale`）+ `layout_lint` /
->   `layout_locate` / `layout_geometry.json`；
+>   `box_scale` / `box` / `force_break_after_*`，页级 `font_scale`）+ `bdt layout-set` /
+>   `layout.layout_lint` / `layout.layout_locate` / `layout_geometry.json`；
 > - 回归硬约束：**无覆盖 = 零行为变化**（三篇论文重建的文本层哈希已比对一致）。
 > 详见 `skills/document-translate/SKILL.md` 与 `reference/{schemas,troubleshooting}.md`；
 > 附录 A/B（工具层契约与版面闭环）在 `skills/document-translate/reference/pipeline.md`。

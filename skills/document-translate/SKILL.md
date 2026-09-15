@@ -11,17 +11,17 @@ description: Agent 编排的高保真 PDF 文档翻译（BabelDOC 解析/重构 
 发布包提供一个稳定 namespace：
 
 ```python
-from babeldoc_tools import dispatch, list_tools, get_schema
+from babeldoc_tools import layout, parse, report, review, translate
 ```
 
-`babeldoc_tools` 提供 Python/JSON/CLI 三层工具适配。skill 目录只保存角色提示词、
-编排规则和验收说明。
+`babeldoc_tools` 提供 Python/CLI 两层工具适配（统一信封 `registry.invoke`）。
+skill 目录只保存角色提示词、编排规则和验收说明。
 
 ```
-job_create → parse_document → translate_document → validate_translation（gate）
-   ├ blockers → retranslate_ids → apply_translation → 复核
-   └ pass → reconstruct_pdf → render_pages → 并行审查（protocol/fidelity/layout）
-            → layout_patch → reconstruct_pdf → render_pages → layout_lint（≤2 轮）→ export_report
+bdt parse → bdt translate → bdt apply（gate）
+   ├ blockers → bdt translate --ids [...] --feedback "..." → bdt apply → 复核
+   └ pass → bdt build → 渲染 PNG → 并行审查（protocol/fidelity/layout）
+            → bdt layout-set → bdt build → bdt check（≤2 轮）→ bdt report
 ```
 
 > 目录：`agents/`（各角色的提示词）`reference/`（管线 / 契约 / 排查）
@@ -37,49 +37,48 @@ job_create → parse_document → translate_document → validate_translation（
 
 ```bash
 # 在仓库根执行（包已在仓库根，任意 cwd 均可）：
-python -m babeldoc_tools list                      # 全部工具 + JSON Schema
-python -m babeldoc_tools schema layout_set          # 单工具入参
-python -m babeldoc_tools call <tool> --args-json '{...}'
+bdt --help                     # 子命令清单（= python -m babeldoc_tools --help）
+bdt parse --help                # 单子命令参数
+bdt <subcommand> ...            # stdout 恒为单行 JSON
 ```
 
-stdout 恒为 `{"ok": true, "tool": …, "data": {…}}` 或 `{"ok": false, "error": {…}}`；
-退出码 0/1（1 = 工具失败，错误码见 `error.code`）。
+stdout 恒为 `{"ok": true, "data": {…}}` 或 `{"ok": false, "error": {…}}`；
+日志/进度走 stderr；退出码 0/1（1 = 失败，错误码见 `error.code`）。
 
-| 组 | 工具 | 一句话 |
-|---|---|---|
-| parse | `parse_document` | PDF → 连续 Markdown（锚点）+ IR 状态 |
-| translate | `translate_document` | 整篇翻译（默认 `agy` CLI），自动补译漏行 |
-| translate | `retranslate_ids` | 按 id 重译（带 feedback）→ 合并 → 可选 apply |
-| translate | `apply_translation` | 校验收写回 IR（确定性修复锚点/双标点/注释残留） |
-| review | `review_document` | 结构 gate：`verdict=pass\|needs_fix` + blockers/warnings |
-| review | `backtranslate_check` | 高风险段回译 + Levenshtein 相似度 |
-| review | `dump_text_layer` | PDF 文本层导出（视觉结论必须回文本层复核） |
-| layout | `reconstruct_pdf` | 应用排版覆盖重排 + dump 几何 |
-| layout | `render_pages` | 页面 → PNG（视觉审查） |
-| layout | `layout_set` / `layout_lint` / `layout_locate` | 写覆盖 / 查缺陷 / 定位 id |
-| version | `snapshot` / `restore` / `list_snapshots` | 小文件快照与回滚 |
-| report | `export_report`（兼容 `report`） | 产出 `agent/FINAL_REPORT.md` |
+| 子命令 | 一句话 |
+|---|---|
+| `parse` | PDF → 连续 Markdown（锚点）+ IR 状态 |
+| `translate` | 整篇翻译（默认 `agy` CLI），自动补译漏行；`--ids` 走重译合并 |
+| `apply` | 校验译文 Markdown 写回 IR（确定性修复锚点/双标点/注释残留） |
+| `build` | 应用排版覆盖重排生成 mono/dual PDF + dump 几何；`--render` 渲染页 |
+| `check` | 结构 gate：`verdict=pass\|needs_fix` + blockers/warnings（当前为转调占位） |
+| `layout-set` | 写排版覆盖（`--patch` / `--clear`） |
+| `report` | 产出 `agent/FINAL_REPORT.md` |
+
+内部 Python 函数（已从公开 CLI 移除，供 reviewer agent 与脚本调用）：
+`layout.render_pages` / `layout.layout_lint` / `layout.layout_locate` /
+`layout.dump_text_layer` / `review.backtranslate_check`。
 
 工具契约、字段与阈值：`reference/schemas.md`；出问题先查 `reference/troubleshooting.md`。
 
 ## 编排流程（主 Agent 视角）
 
-1. **解析**：`parse_document --pdf <pdf> --workdir <wd> --layout mineru`
+1. **解析**：`bdt parse <pdf> --workdir <wd> --layout mineru`
    检查返回的 `label_counts` / `skipped_label_counts` —— 作者区/参考文献/图内/表内
    应被跳过（保留原文渲染），图注/表注应进入 `sheet`。
    同时确认三项新指标（`python experiments/toolchain_gates.py <wd>`）：
    `layout_coverage`（未覆盖字符占比 ≤ 0.5%）、`toc_integrity`（
    `agent/source/toc.json` 的条目数 == `anchors.json` 的 `toc_entry` 行数 == 书签数）、
    `protected_tokens`（`alignment.json` 的 `inline_equation_matched`）。
-2. **翻译**：`translate_document --workdir <wd> --model <m> --effort low`
-   （提示词 `agents/translator.md`；缺 `agy` 时用 `--arg translated_md=<文件>` 导入译文）。
+2. **翻译**：`bdt translate --workdir <wd> --model <m> --effort low`
+   （提示词 `agents/translator.md`；缺 `agy` 时用 `--markdown <文件>` 导入译文）。
 3. **写回 + 结构 gate**：
-   `apply_translation` → `review_document`（可传 `--arg mono=<pdf> --arg dual=<pdf>` 做页数/目录/链接核对）
-   - `blockers` 里的 id → `retranslate_ids --ids [...] --feedback "..."` → 回到本步（**≤2 轮**）；
-   - `warnings` 里的高风险段 → `backtranslate_check`（相似度 < 0.55 判为重译对象）；
+   `bdt apply` → `bdt check`（可传 `--mono <pdf> --dual <pdf>` 做页数/目录/链接核对）
+   - `blockers` 里的 id → `bdt translate --ids P01-003,P01-007 --feedback "..."` → 回到本步（**≤2 轮**）；
+   - `warnings` 里的高风险段 → 回译校验（`review.backtranslate_check`，相似度 < 0.55 判为重译对象）；
    - `verdict=pass` 才继续（warnings 允许携带）。
-4. **重排 + 渲染**：`reconstruct_pdf --workdir <wd>`（默认出 mono+dual）→
-   `render_pages`（首页、图表密集页、表格页、末页）。
+4. **重排 + 渲染**：`bdt build --workdir <wd>`（`--dual` 出拼宽双语）→
+   渲染首页、图表密集页、表格页、末页 PNG（`--render 1,5,12`）。
    LaTeX bbox 排版**默认开启**（正文段在 MinerU bbox 内用 XeLaTeX 两端对齐重排；
    缺 XeLaTeX/字体时自动回退）；传 `latex_bbox=false`（CLI `--no-latex-bbox`）
    关闭，关闭时输出与旧渲染路径逐字节一致。三篇论文的验收口径、回放方式与
@@ -90,13 +89,13 @@ stdout 恒为 `{"ok": true, "tool": …, "data": {…}}` 或 `{"ok": false, "err
    - `agents/reviewer-fidelity.md`：语义与漏译（回译）；
    - `agents/reviewer-layout.md`：版式（数据源：`layout_lint` + PNG，结论必须带 id/box）。
    findings 汇总成一份清单（每条含 `sev` / `evidence` / `fix`）。
-6. **排版迭代**（≤2 轮）：`snapshot` → 用 `agents/layout-fixer.md` 决策出 patch →
-   `layout_set` → `reconstruct_pdf` → `layout_lint` 复核。
-   变差就 `restore`；每轮只改必要字段，**单轮 ≤8 段**。
-7. **收尾**：`report --workdir <wd>` → `FINAL_REPORT.md`（token 用量 / apply 指标 /
+6. **排版迭代**（≤2 轮）：备份 `agent/layout_overrides.json` → 用 `agents/layout-fixer.md`
+   决策出 patch → `bdt layout-set --patch '{...}'` → `bdt build` → `bdt check` 复核。
+   变差就还原备份；每轮只改必要字段，**单轮 ≤8 段**。
+7. **收尾**：`bdt report --workdir <wd>` → `FINAL_REPORT.md`（token 用量 / apply 指标 /
    verdict / lint 前后对比 / 遗留项），交付 mono + dual + render PNG。
 
-## 排版微调杠杆（`layout_set`）
+## 排版微调杠杆（`bdt layout-set`）
 
 | 症状 | 首选杠杆 |
 |---|---|
@@ -111,7 +110,7 @@ stdout 恒为 `{"ok": true, "tool": …, "data": {…}}` 或 `{"ok": false, "err
 
 ## 验收清单
 
-- [ ] `review_document`：`verdict=pass`，`apply_ok=true`，`fallback=0`；
+- [ ] `bdt check`：`verdict=pass`，`apply_ok=true`，`fallback=0`；
 - [ ] 页数/目录条目与原文一致；`links_mono ≥ 原文`、`links_dual ≈ 2×`；
 - [ ] `toolchain_gates.py`：五项门禁无 `fail`；`link_uri_set_match=true`、
       `unresolved` 已逐条确认（纯图形链接可接受）；

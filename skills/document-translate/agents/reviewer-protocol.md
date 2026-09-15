@@ -12,7 +12,9 @@
 - 工作目录 <WORKDIR>：含 agent/{sheet.jsonl,translated.jsonl,apply_report.json,
   review_verdict.json,layout_geometry.json,layout_lint.json,anchors.json}
 - 产物：<OUTPUT_DIR>/*.mono.pdf、*.dual.pdf、render/page-XX.png
-- 工具：`python -m babeldoc_tools call <tool> ...`（在仓库根或任意 cwd 均可）
+- 工具：`bdt <subcommand>`（在仓库根或任意 cwd 均可；stdout 单行 JSON，诊断走 stderr）
+- 文本层复核：`python -c "import pymupdf;print(pymupdf.open('<pdf>').get_text())"`
+  （等价于内部函数 `babeldoc_tools.layout.dump_text_layer`）
 
 ## 审查清单（逐项给 PASS / FAIL + 证据）
 A. 封面/作者区与跳过语义
@@ -33,7 +35,7 @@ C. 协议与标点（确定性，agent 不应列入待修）
    C2 quality_checks 的 warning 逐条判定：
       intra_paragraph_truncated / low_cjk / sentence_end_mismatch / suspect_merge。
       判定"非法漏译"的段落 → 记 retranslate:<id>；判定"术语密集合法行" → 记接受并说明。
-   C3 回译校验（backtranslate_check）中 similarity < 0.55 的段落 → 记 retranslate:<id>。
+   C3 回译校验（`babeldoc_tools.review.backtranslate_check`）中 similarity < 0.55 的段落 → 记 retranslate:<id>。
 
 D. 排版缺陷（layout_lint）
    D1 P0（out_of_page）必须修：给出 layout patch 建议。

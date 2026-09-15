@@ -72,12 +72,12 @@
 
 | 阶段 | 入口 | 输入 | 输出（落盘） | 失败模式 |
 |---|---|---|---|---|
-| **解析** | `parse_document` / `md-extract` | PDF + MinerU 布局（API 或回放） | `document.md` `anchors.json` `sheet.jsonl` `state.pkl` `provider_ir.json` `alignment.json` `toc.json` `bookmarks.json` `links.json` `layout_coverage.json` | `layout_coverage_gate`（硬）；`toc_low_confidence`（软）；`mineru_token_missing`；`layout_unsupported` |
-| **翻译** | `translate_document` | `document.md` | `translated.md`（+ `usage.json`） | `model_cli_missing`（无 `agy` 等 CLI 时改用 `translated_md=` 导入） |
-| **写回** | `apply_translation` | `translated.md` | `translated.jsonl` `il_translated.applied.json` `apply_report.json` | `anchor_multiset_mismatch`、`extra_ids`（硬，阻断） |
-| **审查** | `review_document` / `backtranslate_check` | 上述产物 | `review_verdict.json` | `verdict=needs_fix`（软，进重译循环） |
-| **重建** | `reconstruct_pdf` | IR + `state.pkl` | `output/*.mono.pdf` `*.dual.pdf` `reconstruct_report.json` | `link_uri_set_mismatch`（硬）；`link_unresolved`（软） |
-| **渲染** | `render_pages` | mono/dual PDF | `render/*.png` | 页号越界静默跳过 |
+| **解析** | `bdt parse` / `md-extract` | PDF + MinerU 布局（API 或回放） | `document.md` `anchors.json` `sheet.jsonl` `state.pkl` `provider_ir.json` `alignment.json` `toc.json` `bookmarks.json` `links.json` `layout_coverage.json` | `layout_coverage_gate`（硬）；`toc_low_confidence`（软）；`mineru_token_missing`；`layout_unsupported` |
+| **翻译** | `bdt translate` | `document.md` | `translated.md`（+ `usage.json`） | `model_cli_missing`（无 `agy` 等 CLI 时改用 `--markdown <文件>` 导入） |
+| **写回** | `bdt apply` | `translated.md` | `translated.jsonl` `il_translated.applied.json` `apply_report.json` | `anchor_multiset_mismatch`、`extra_ids`（硬，阻断） |
+| **审查** | `bdt check`（内部 `review.backtranslate_check`） | 上述产物 | `review_verdict.json` | `verdict=needs_fix`（软，进重译循环） |
+| **重建** | `bdt build` | IR + `state.pkl` | `output/*.mono.pdf` `*.dual.pdf` `reconstruct_report.json` | `link_uri_set_mismatch`（硬）；`link_unresolved`（软） |
+| **渲染** | `bdt build --render 1,2`（内部 `layout.render_pages`） | mono/dual PDF | `render/*.png` | 页号越界静默跳过 |
 
 > 硬/软门禁的完整清单与触发方式：见 [`gates.md`](gates.md)。
 
@@ -97,6 +97,10 @@ python -m babeldoc.tools.agent md-extract DeepSeek_V41_Tech_Report.pdf \
 # ② 只给内容哈希（--mineru-cache-key），缓存未命中时明确报错
 python -m babeldoc.tools.agent md-extract DeepSeek_V41_Tech_Report.pdf \
   --workdir tmp/docs-smoke \
+  --mineru-cache-key ba68e2e40408125ae6d2f63a9a241b61c73910691c74ec1a2a7023c851eac08d
+
+# ③ 工具层等价写法（bdt）
+bdt parse DeepSeek_V41_Tech_Report.pdf --workdir tmp/docs-smoke \
   --mineru-cache-key ba68e2e40408125ae6d2f63a9a241b61c73910691c74ec1a2a7023c851eac08d
 ```
 

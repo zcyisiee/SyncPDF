@@ -1,6 +1,6 @@
-# reviewer-fidelity：语义保真与漏译审查（含回译，backtranslate_check 的提示词）
+# reviewer-fidelity：语义保真与漏译审查（含回译，`review.backtranslate_check` 的提示词）
 
-> `backtranslate_check` 读取本文件 ```text 块：
+> `babeldoc_tools.review.backtranslate_check` 读取本文件 ```text 块：
 > - `{document}` 替换为**待核对的译文段落**（`<!-- id=... -->` + 中文译文）
 > - `{ids}` 替换为 id 清单（调试用）
 > 输出被解析为 `{id: 回译英文}`，Python 侧再算 Levenshtein 相似度。

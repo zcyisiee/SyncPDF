@@ -18,7 +18,7 @@ PROMPTS_DIR = SKILL_ROOT / "prompts"  # legacy 提示词
 
 
 class ToolError(RuntimeError):
-    """工具层可预期的失败（会被 dispatch 转成机读错误）。"""
+    """工具层可预期的失败（会被 registry.invoke 转成机读错误）。"""
 
     def __init__(self, code: str, message: str, **extra):
         super().__init__(message)
@@ -36,7 +36,7 @@ def require_workdir(workdir) -> Path:
     if not (path / AGENT_DIR).is_dir():
         raise ToolError(
             "workdir_missing",
-            f"{path}/agent 不存在：请先跑 parse_document 生成解析产物",
+            f"{path}/agent 不存在：请先跑 bdt parse 生成解析产物",
             workdir=str(path),
         )
     return path

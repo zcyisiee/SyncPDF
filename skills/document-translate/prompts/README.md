@@ -7,10 +7,10 @@
 
 | 旧文件 | 新位置 | 用途 |
 |---|---|---|
-| `markdown-translator.md` | `../agents/translator.md` | 整篇翻译（`translate_document`） |
-| — | `../agents/translator-repair.md` | 按 id 重译（`retranslate_ids`） |
+| `markdown-translator.md` | `../agents/translator.md` | 整篇翻译（`bdt translate`） |
+| — | `../agents/translator-repair.md` | 按 id 重译（`bdt translate --ids ...`） |
 | `format-reviewer.md` | `../agents/reviewer-protocol.md` | 结构/协议审查清单 |
-| — | `../agents/reviewer-fidelity.md` | 回译校验（`backtranslate_check`） |
+| — | `../agents/reviewer-fidelity.md` | 回译校验（`review.backtranslate_check`） |
 | — | `../agents/reviewer-layout.md` | 版式视觉审查 |
 | — | `../agents/layout-fixer.md` | findings → layout patch 决策 |
 | `translator.md` | （保留） | 旧 sheet 分批协议的翻译提示词 |

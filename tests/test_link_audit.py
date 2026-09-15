@@ -105,8 +105,12 @@ def test_external_file_action_not_called_invalid(tmp_path):
     reason="audit_links 工具化属于 U4，届时重写本测试",
 )
 def test_public_audit_tool(tmp_path):
-    from babeldoc_tools.registry import dispatch
+    # U2 删除了 registry.dispatch 元层（import 保留在函数体内，故只在 call 阶段
+    # 触发 AttributeError → 稳定 xfailed，不会 collection error、也不会 pass）。
+    # U4 把 audit_links 接入 bdt check 后本测试应重写并移除 xfail 标记。
+    from babeldoc_tools import registry
 
+    dispatch = registry.dispatch
     source = tmp_path / "source.pdf"
     _pdf(source)
     result = dispatch(

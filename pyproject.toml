@@ -64,6 +64,7 @@ Issues = "https://github.com/funstory-ai/BabelDOC/issues"
 
 [project.scripts]
 babeldoc = "babeldoc.main:cli"
+bdt = "babeldoc_tools.__main__:main"
 
 [build-system]
 requires = ["hatchling"]

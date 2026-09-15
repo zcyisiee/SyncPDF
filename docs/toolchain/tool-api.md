@@ -7,39 +7,36 @@
 | 入口 | 调用方式 | 定位 |
 |---|---|---|
 | **legacy CLI**（本文示例以它为准） | `python -m babeldoc.tools.agent <cmd> …` | 名字空间固定，**与 cwd 无关**；可回放 MinerU 布局 |
-| **工具层** | `python -m babeldoc_tools call <tool> --args-json '{…}'` | 稳定 JSON 契约、错误结构化、落盘报告 |
+| **工具层 `bdt`** | `bdt <subcommand> [flags]`（= `python -m babeldoc_tools`） | 稳定 JSON 契约、错误结构化、落盘报告 |
 
 > 仓库里只有一个 `babeldoc_tools` 包，位于仓库根 `babeldoc_tools/`（即本文描述的
-> MinerU/Markdown agent 管线）。安装后 `python -m babeldoc_tools` 在任何 cwd 下
-> 命中的都是这一份代码。
+> MinerU/Markdown agent 管线）。安装后 `bdt`（或 `python -m babeldoc_tools`）在任何
+> cwd 下命中的都是这一份代码。
 
-约定：stdout 恒为 `{"ok": true, "tool": …, "data": {…}}` 或
-`{"ok": false, "error": {"code": …, "message": …}}`；退出码 0/1。
+约定：stdout 恒为单行 `{"ok": true, "data": {…}}` 或
+`{"ok": false, "error": {"code": …, "message": …}}`；日志/进度走 stderr；退出码 0/1。
 
 ---
 
 ## 1. 工具总表
 
-| 组 | 工具 | 一句话 |
-|---|---|---|
-| job | `job_create` / `job_status` / `job_resume` | 可恢复 job 的创建/查询/续跑 |
-| parse | `parse_document` | PDF → 连续 Markdown（锚点）+ IR 状态 |
-| parse | `dump_markdown` / `dump_ir` / `dump_text_layer` | 读产物 |
-| parse | `inspect_selection` / `inspect_document` | 读翻译选择/段落决策报告 |
-| translate | `translate_document` | 整篇翻译（默认 `agy` CLI），或导入外部译文 |
-| translate | `retranslate_ids` / `repair_translation` | 按 id 重译（带 feedback） |
-| translate | `apply_translation` | 校验收写回 IR |
-| translate | `validate_translation` | 确定性协议门禁 |
-| review | `review_document` / `review_protocol` / `review_fidelity` / `review_layout` | 结构/协议/语义/排版审查 |
-| review | `backtranslate_check` | 高风险段回译 + 相似度 |
-| layout | `reconstruct_pdf` | 应用排版覆盖重排 + dump 几何 |
-| layout | `render_pages` | 页面 → PNG |
-| layout | `layout_patch` / `layout_set` / `layout_lint` / `layout_locate` / `layout_rollback` / `inspect_layout` | 排版覆盖闭环 |
-| version | `snapshot` / `restore` / `list_snapshots` / `job_snapshot` / `job_restore` | 快照与回滚 |
-| report | `export_report` / `report` | 产出 `FINAL_REPORT.md` |
+`bdt` 子命令固定为 7 个（`bdt --help`）：
 
-> 查单个工具的最新 schema：`python -m babeldoc_tools schema <tool>`
-> （注意上面的同名包陷阱：该命令在仓库根会命中 MAS 版）。
+| 子命令 | 实现函数 | 一句话 |
+|---|---|---|
+| `parse` | `babeldoc_tools.parse.parse_document` | PDF → 连续 Markdown（锚点）+ IR 状态 |
+| `translate` | `translate.translate_document`（`--ids` → `retranslate_ids`） | 整篇翻译（默认 `agy` CLI），或导入外部译文 |
+| `apply` | `translate.apply_translation` | 校验译文写回 IR |
+| `build` | `layout.build_pdf`（`reconstruct_pdf` + 可选 `render_pages`） | 应用排版覆盖重排 + dump 几何 |
+| `check` | `review.review_document`（占位） | 结构/协议审查，`verdict=pass\|needs_fix` |
+| `layout-set` | `layout.layout_set` | 写/清排版覆盖 |
+| `report` | `report.report` | 产出 `FINAL_REPORT.md` |
+
+内部 Python 函数（已从公开 CLI 移除，供 reviewer agent/脚本调用）：
+`layout.layout_lint`、`layout.layout_locate`、`layout.render_pages`、
+`layout.dump_text_layer`、`review.backtranslate_check`。
+
+> 查子命令参数：`bdt <subcommand> --help`（U2 起不再有 `list` / `schema` 元命令）。
 
 ---
 
@@ -101,18 +98,14 @@ python -m babeldoc.tools.agent md-extract DeepSeek_V41_Tech_Report.pdf \
   --workdir tmp/docs-smoke \
   --mineru-json ~/.cache/babeldoc/mineru-layout.v1/ba68e2e40408125ae6d2f63a9a241b61c73910691c74ec1a2a7023c851eac08d.json
 
-# ② 工具层（agent 版）：`python -m babeldoc_tools`，任意 cwd 均可。
-python -m babeldoc_tools call parse_document --args-json '{
-  "pdf": "DeepSeek_V41_Tech_Report.pdf",
-  "workdir": "tmp/docs-smoke",
-  "layout": "mineru",
-  "mineru_json": "<缓存 layout.json 路径>"
-}'
+# ② 工具层 `bdt`（agent 版）：任意 cwd 均可。
+bdt parse DeepSeek_V41_Tech_Report.pdf \
+  --workdir tmp/docs-smoke \
+  --layout mineru \
+  --mineru-json "<缓存 layout.json 路径>"
 ```
 
-> 实测两种写法的返回一致（`paragraphs=352`）。若在仓库根直接用
-> `python -m babeldoc_tools call parse_document`，`layout`/`mineru_json`
-> 会报 `invalid_args: 未知参数`。
+> 实测两种写法的返回一致（`paragraphs=352`）。
 
 **失败码**
 
@@ -145,10 +138,9 @@ python -m babeldoc_tools call parse_document --args-json '{
 
 ```bash
 # 工具层（agent 版）：
-python -m babeldoc_tools call translate_document --args-json '{"workdir":"tmp/docs-smoke"}'
+bdt translate --workdir tmp/docs-smoke
 # 或导入已生成译文：
-python -m babeldoc_tools call translate_document --args-json \
-  '{"workdir":"tmp/docs-smoke","translated_md":"/path/to/translated.md"}'
+bdt translate --workdir tmp/docs-smoke --markdown /path/to/translated.md
 ```
 
 ### `retranslate_ids`
@@ -210,16 +202,19 @@ python -m babeldoc_tools call translate_document --args-json \
 ```bash
 python -m babeldoc.tools.agent reconstruct tmp/docs-smoke --output-dir tmp/docs-smoke/output --dual
 # 工具层：
-python -m babeldoc_tools call reconstruct_pdf --args-json '{"workdir":"tmp/docs-smoke","dual":true}'
+bdt build --workdir tmp/docs-smoke --output-dir tmp/docs-smoke/output --dual
 ```
 
-### `render_pages`
+### `render_pages`（内部函数）
 
 **入参**：`workdir` 或 `pdf`、`pages`（`"2,3"` / `"1-3"`）、`dpi`（默认 110）、`out_dir`
 **出参**：`{"images": ["…/render/page-02.png", …]}`
 **副作用**：`render/page-NN.png`（或 `--out-dir`）
 
 ```bash
+# 公开 CLI：bdt build --render 2,3（重建后渲染）
+bdt build --workdir tmp/docs-smoke --render 2,3
+# legacy CLI：
 python -m babeldoc.tools.agent render tmp/docs-smoke/output/DeepSeek_V41_Tech_Report.no_watermark.zh.mono.pdf \
   --pages 2,3 --dpi 100 --out-dir tmp/docs-smoke/render
 ```
@@ -228,39 +223,38 @@ python -m babeldoc.tools.agent render tmp/docs-smoke/output/DeepSeek_V41_Tech_Re
 
 ## 5. 排版微调组
 
-| 工具 | 入参要点 | 副作用 |
+| 入口 | 入参要点 | 副作用 |
 |---|---|---|
-| `layout_patch`（别名 `layout_set`） | `patch`（`paragraphs{id:{box/font_scale/…}}` / `pages{page:{font_scale}}`）、`reason`、`finding_id`、`round`、`render_verified`、`clear` | `agent/layout_overrides.json`（写前备份） |
-| `layout_lint` | `workdir` | 读 `agent/layout_lint.json` |
-| `layout_locate` | `workdir`、`page`、`box` | 读 `agent/layout_geometry.json` |
-| `layout_rollback` | `workdir` | 删 `layout_overrides.json`，返回备份 |
-| `inspect_layout` | `workdir` | 读 `layout_geometry.json` |
+| `bdt layout-set`（`layout.layout_set`） | `--patch '{"paragraphs":{id:{box/font_scale/…}},"pages":{…}}'`、`--reason`、`--clear` | `agent/layout_overrides.json`（写前备份） |
+| `layout.layout_lint`（内部函数） | `workdir`、`page`、`code`、`min_sev` | 读 `layout_geometry.json`，写 `agent/layout_lint.json` |
+| `layout.layout_locate`（内部函数） | `workdir`、`page`、`box`、`text` | 读 `agent/layout_geometry.json` |
 
 **失败码**：`patch_missing`（既无 patch 又无 clear）、`invalid_box`、
-`geometry_missing`（未先 reconstruct）
+`geometry_missing`（未先 `bdt build`）
 
 ---
 
 ## 6. 审查组
 
-| 工具 | 出参 | 副作用 |
+| 入口 | 出参 | 副作用 |
 |---|---|---|
-| `review_document`（别名 `review_fidelity`） | `{"verdict": "pass\|needs_fix", "findings": [...]}` | `agent/review_verdict.json` |
-| `backtranslate_check` | `{"checked": bool, …}` | — |
-| `dump_text_layer` | 文本层 | — |
+| `bdt check`（`review.review_document`，当前为转调占位） | `{"verdict": "pass\|needs_fix", "blockers": [...], "warnings": [...]}` | `agent/review_verdict.json` |
+| `review.backtranslate_check`（内部函数） | `{"ids": [...], "per_id": [...], "needs_retranslate_ids": [...]}` | `agent/backtranslation_check.json` |
+| `layout.dump_text_layer`（内部函数） | 文本层文件清单 | `output/text_layer/page-XX.txt` |
 
 `review_document` 的检查项（`babeldoc_tools/review.py`）：
 apply 报告、段内完整性、占位符残留、页数/目录/链接一致性、标题字号。
 
 ---
 
-## 7. 报告与版本
+## 7. 报告
 
-| 工具 | 出参 | 副作用 |
+| 入口 | 出参 | 副作用 |
 |---|---|---|
-| `export_report`（别名 `report`） | `{"report": path}` | `agent/FINAL_REPORT.md` + `<workdir>/FINAL_REPORT.md` |
-| `snapshot` / `list_snapshots` / `restore` | 快照名与路径 | `agent/snapshots/<name>/` |
-| `job_create` / `job_status` / `job_resume` | manifest 状态 | `agent/manifest.json` |
+| `bdt report`（`report.report`） | `{"report": path}` | `<workdir>/FINAL_REPORT.md` |
+
+> 快照（`snapshot` / `restore` / `list_snapshots`）与 `babeldoc_tools/version.py`
+> 已在 U2 删除；回滚改用 `bdt layout-set --clear` 与重新 `bdt apply`。
 
 ---
 

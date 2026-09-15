@@ -268,21 +268,24 @@ EOF
 
 ---
 
-## 10. 工具层调用失败（`invalid_args: 未知参数`）
+## 10. 工具层调用失败（旧「元命令 + JSON 入参」语法已删除）
 
-**症状**：执行 `python -m babeldoc_tools call parse_document --args-json
-'{"pdf": …, "mineru_json": …}'` 报 `invalid_args: 未知参数: mineru_json`。
+**症状**：沿用 U2 之前的元命令写法的命令，报
+`argument command: invalid choice: 'call'`（同理 `list` / `schema` / `--args-json`）。
 
-**原因**：历史上仓库里有**两个同名包** `babeldoc_tools`（仓库根的 MAS 版，与
-skills 下 agent 版的副本）；Python 把 **cwd 排在 `PYTHONPATH` 之前**，因此在仓库根调用
-会命中不含 MinerU 参数的 MAS 版。
+**原因**：U2 起工具层改为固定子命令（`bdt parse` / `translate` / `apply` / `build` /
+`check` / `layout-set` / `report`），元命令与 `--args-json` 入参已删除。历史上还曾有过
+**两个同名包** `babeldoc_tools`（仓库根的 MAS 版，与 skills 下 agent 版的副本）
+互相遮蔽的问题。
 
-**现状**：该同名包陷阱已消除——仓库里只剩一个 `babeldoc_tools` 包，位于仓库根，
-即 MinerU/Markdown agent 管线；`python -m babeldoc_tools` 在任何 cwd 下命中的都是它。
+**现状**：仓库里只剩一个 `babeldoc_tools` 包，位于仓库根，即 MinerU/Markdown agent
+管线；`bdt`（或 `python -m babeldoc_tools`）在任何 cwd 下命中的都是它。
 
 **修复**
 
-- 若仍看到 `未知参数: mineru_json`，说明解释器加载的是旧安装产物：
+- 改用常规旗标子命令，如解析：`bdt parse <pdf> --workdir <wd> [--mineru-json …]`
+  （`bdt <cmd> --help` 查全部旗标）；
+- 若报 `未知参数: mineru_json`，说明解释器加载的是旧安装产物：
   在仓库根执行 `uv sync` 刷新安装即可；
 - 需要 MinerU/新产物时也可用 **legacy CLI**（cwd 无关）：
   `python -m babeldoc.tools.agent md-extract …`。
