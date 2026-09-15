@@ -79,6 +79,22 @@
 | **重建** | `bdt build` | IR + `state.pkl` | `output/*.mono.pdf` `*.dual.pdf` `reconstruct_report.json` | `link_uri_set_mismatch`（硬）；`link_unresolved`（软） |
 | **渲染** | `bdt build --render 1,2`（内部 `layout.render_pages`） | mono/dual PDF | `render/*.png` | 页号越界静默跳过 |
 
+### 编排：`bdt run`
+
+`bdt run <pdf> --workdir <WD>` 按 `parse → translate → apply → build → check →
+report` 顺序执行（reviewer 阶段由后续阶段注入）。要点：
+
+- 每个要执行的阶段先校验所需 artifact（translate 前 `agent/document.md`、apply 前
+  `agent/translated.md`、build 前 `agent/apply_report.json`、check 前 build 的
+  PDF），缺失时以 `missing_artifact` 报错（exit 1）并指明该跑哪一步；
+- `agent/run_state.json` 记录每阶段完成标记与关键输入 sha256（`document.md` /
+  `translated.md` / `layout_overrides.json` / PDF）；
+- `--from {parse,translate,apply,build,check,review,report}` 续跑时，若被跳过阶段的
+  输入哈希与记录不符，报 `stale_upstream` 并给出 `suggested_from`（最早受影响
+  阶段），不静默沿用旧产物；
+- `check` 的 `verdict=needs_fix` 仍会跑完 `report`，但整体 exit 1 且 JSON 带
+  `verdict` / `blockers`；任一步失败即返回该步错误 JSON，已完成产物保留供续跑。
+
 > 硬/软门禁的完整清单与触发方式：见 [`gates.md`](gates.md)。
 
 ---

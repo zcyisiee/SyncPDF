@@ -99,6 +99,23 @@ bdt build --workdir "$WD" --dual
 bdt report --workdir "$WD"
 ```
 
+也可以一条命令串起来（`bdt run`）：
+
+```bash
+# 完整链路：parse → translate → apply → build → check → report
+bdt run "$PDF" --workdir "$WD" --layout mineru --dual
+
+# 续跑：从 build 开始（上游阶段跳过；若上游产物被改动会报 stale_upstream 并要求重跑）
+bdt run --workdir "$WD" --from build --dual
+
+# 不调模型走通链路：--markdown self 用 agent/document.md 当译文
+bdt run "$PDF" --workdir "$WD" --markdown self --dual
+```
+
+`bdt run` 把每阶段的完成标记与关键输入 sha256 记进 `agent/run_state.json`
+（run 私有状态，其他工具不读）。任一步失败即以该步错误 JSON 退出（exit 1），
+已完成阶段产物保留在 workdir 供续跑。`--from` 见下方"常用参数"。
+
 链接审计：
 
 ```bash
@@ -128,6 +145,14 @@ bdt parse --help                        # 单子命令参数
 - `dual=true`：同时生成 mono 和 dual PDF。
 - `latex_bbox=true`：启用 bbox 内 LaTeX 两端对齐排版。
 - `pages`：只处理指定页，例如 `1,2,5-7`。
+- `--from {parse,translate,apply,build,check,review,report}`（仅 `bdt run`）：
+  从指定阶段续跑。若被跳过阶段的输入哈希与 `agent/run_state.json` 记录不符
+  （上游被改动），会以 `stale_upstream` 报错并在 `suggested_from` 里给出该重跑的
+  最早阶段，不会静默沿用旧产物。
+- `--markdown`：导入已有译文；`bdt run ... --markdown self` 表示用
+  `agent/document.md` 自译（不调用模型，适合离线验证链路）。
+- `--translator`：翻译 provider 选择，语义由后续阶段定义；当前版本仅接收并写入
+  `run_state.json` 的 `config`。
 
 ### 特性开关与默认值
 

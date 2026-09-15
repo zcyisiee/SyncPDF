@@ -1,7 +1,7 @@
 """``bdt`` CLI 契约：子命令存在性 / stdout 单行 JSON / 错误路径退出码。
 
-U2 起工具层不再有注册表 / JSON Schema / ``call`` 元命令；测试改为针对
-``babeldoc_tools.__main__`` 的 7 个固定子命令（``run`` 由后续阶段注册）。
+U2 起工具层不再有注册表 / JSON Schema / ``call`` 元命令；测试针对
+``babeldoc_tools.__main__`` 的 8 个固定子命令（含 ``run`` 编排）。
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ SUBCOMMANDS = {
     "check",
     "layout-set",
     "report",
+    "run",
 }
 
 

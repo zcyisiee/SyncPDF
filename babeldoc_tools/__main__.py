@@ -9,6 +9,7 @@
     bdt check --workdir tmp/wd [--skip-pdf-checks]
     bdt layout-set --workdir tmp/wd --patch '{"paragraphs": {...}}'
     bdt report --workdir tmp/wd
+    bdt run <pdf> --workdir tmp/wd [--from build] [--markdown self]
 
 约定：
 
@@ -26,12 +27,17 @@ import json
 import sys
 
 from babeldoc_tools import __version__
+from babeldoc_tools import common
 from babeldoc_tools import layout
 from babeldoc_tools import parse
 from babeldoc_tools import registry
 from babeldoc_tools import report
 from babeldoc_tools import review
+from babeldoc_tools import run as run_tool
 from babeldoc_tools import translate
+
+#: ``run`` 的续跑起点；顺序与 :data:`babeldoc_tools.run.STAGES` 一致。
+RUN_STAGES = run_tool.STAGES
 
 
 def _split_ids(raw: str | None) -> list[str]:
@@ -185,6 +191,77 @@ def _build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("--title", default=None)
     p_report.add_argument("--notes", default=None, help="追加备注（Markdown）")
 
+    # ---- run ------------------------------------------------------------- #
+    p_run = sub.add_parser(
+        "run",
+        help="串联 parse→translate→apply→build→check→report（可 --from 续跑）",
+        description=(
+            "端到端编排：parse → translate → apply → build → check → report。"
+            "阶段产物缺失会以 missing_artifact 错误退出；上游被改动会使下游阶段"
+            "失效并要求从最早受影响阶段重跑。"
+        ),
+    )
+    _add_workdir(p_run, required=False)
+    p_run.add_argument(
+        "pdf",
+        nargs="?",
+        default=None,
+        help="源 PDF 路径（--from translate 及之后可省略）",
+    )
+    p_run.add_argument(
+        "--from",
+        dest="from_stage",
+        choices=RUN_STAGES,
+        default="parse",
+        help="从指定阶段续跑（review 等价直通；缺省 parse）",
+    )
+    p_run.add_argument("--output-dir", default=None)
+    # 各阶段透传旗标
+    p_run.add_argument("--layout", choices=("mineru", "paddle"), default="mineru")
+    p_run.add_argument("--mineru-token", default=None)
+    p_run.add_argument("--mineru-json", default=None)
+    p_run.add_argument("--mineru-cache-key", default=None)
+    p_run.add_argument("--layout-coverage-threshold", type=float, default=0.005)
+    p_run.add_argument("--mineru-ocr-text", action="store_true", dest="mineru_ocr_text")
+    p_run.add_argument("--pages", default=None)
+    p_run.add_argument("--lang-in", default="en")
+    p_run.add_argument("--lang-out", default="zh")
+    p_run.add_argument("--dual", action="store_true")
+    p_run.add_argument(
+        "--no-latex-bbox", action="store_false", dest="latex_bbox", default=True
+    )
+    p_run.add_argument("--latex-bbox-mode", choices=("full", "repair"), default=None)
+    p_run.add_argument("--render", default=None, help="build 后渲染页，如 1,2 或 1-3")
+    p_run.add_argument("--watermark", action="store_true")
+    p_run.add_argument("--no-stats", action="store_false", dest="stats")
+    p_run.add_argument("--skip-pdf-checks", action="store_true")
+    p_run.add_argument("--source-pdf", default=None)
+    # translate 相关
+    p_run.add_argument("--ids", default=None, help="重译段落 id，逗号分隔")
+    p_run.add_argument("--feedback", default=None)
+    p_run.add_argument(
+        "--markdown",
+        default=None,
+        help="已有译文 Markdown；'self' = 用 agent/document.md 自译（不调模型）",
+    )
+    p_run.add_argument("--prompt-only", action="store_true")
+    p_run.add_argument("--model", default=None)
+    p_run.add_argument("--effort", default=None)
+    p_run.add_argument("--timeout", type=int, default=1800)
+    p_run.add_argument(
+        "--translator",
+        default=None,
+        help="翻译 provider（U3 定义语义；本版本仅接收并存进 run 配置）",
+    )
+    p_run.add_argument("--prompt", default=None)
+    p_run.add_argument("--repair-prompt", default=None)
+    p_run.add_argument(
+        "--no-retry-missing", action="store_false", dest="retry_missing"
+    )
+    # report 相关
+    p_run.add_argument("--title", default=None)
+    p_run.add_argument("--notes", default=None)
+
     return parser
 
 
@@ -272,6 +349,60 @@ def _dispatch(args: argparse.Namespace) -> dict:
             title=args.title,
             notes=args.notes,
         )
+    if command == "run":
+        # run 自己返回完整信封（含 data 摘要），不能再套 invoke。
+        workdir = args.workdir
+        if not workdir:
+            return registry.error_payload(
+                "workdir_missing", "run 需要 --workdir（如 --workdir tmp/my-paper）"
+            )
+        try:
+            return run_tool.run_pipeline(
+                workdir,
+                args.pdf,
+                from_stage=args.from_stage,
+                output_dir=args.output_dir,
+                layout_backend=args.layout,
+                pages=args.pages,
+                lang_in=args.lang_in,
+                lang_out=args.lang_out,
+                mineru_token=args.mineru_token,
+                mineru_json=args.mineru_json,
+                mineru_cache_key=args.mineru_cache_key,
+                layout_coverage_threshold=args.layout_coverage_threshold,
+                mineru_use_ocr_text=args.mineru_ocr_text,
+                ids=_split_ids(args.ids),
+                feedback=args.feedback,
+                markdown=args.markdown,
+                prompt_only=args.prompt_only,
+                model=args.model,
+                effort=args.effort,
+                timeout=args.timeout,
+                translator=args.translator,
+                prompt=args.prompt,
+                repair_prompt=args.repair_prompt,
+                retry_missing=args.retry_missing,
+                dual=args.dual,
+                watermark=args.watermark,
+                latex_bbox=args.latex_bbox,
+                latex_bbox_mode=args.latex_bbox_mode,
+                render=args.render,
+                stats=args.stats,
+                skip_pdf_checks=args.skip_pdf_checks,
+                source_pdf=args.source_pdf,
+                title=args.title,
+                notes=args.notes,
+            )
+        except common.ToolError as exc:
+            return registry.error_payload(exc.code, exc.message, **exc.extra)
+        except Exception as exc:  # noqa: BLE001 - 保证 stdout 恒为单行 JSON
+            import traceback
+
+            return registry.error_payload(
+                "tool_exception",
+                f"{type(exc).__name__}: {exc}",
+                traceback=traceback.format_exc(limit=8).splitlines()[-8:],
+            )
     raise SystemExit(f"未知子命令: {command}")  # pragma: no cover
 
 
