@@ -12,7 +12,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-
 CAPTION_LABELS = {"figure_caption", "table_caption", "code_caption"}
 PROTECTED_LABELS = {
     "author",

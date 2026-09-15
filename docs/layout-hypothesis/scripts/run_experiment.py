@@ -498,7 +498,7 @@ def case_sweep(name: str, data: dict, max_paras: int = 30) -> dict:
     }
 
 
-def case_current_pipeline_lines(name: str, data: dict, page: int = 2) -> dict:
+def case_current_pipeline_lines(_name: str, data: dict, page: int = 2) -> dict:
     """Measure the line breaking of the current pipeline output on the same page.
 
     Used as the baseline the hypothesis claims to improve. Reads the existing

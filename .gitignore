@@ -64,3 +64,6 @@ temp.jpg
 /paddle_layout_viewer/model/
 
 /samples/
+
+# mkdocs 构建产物
+/site/

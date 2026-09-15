@@ -18,7 +18,6 @@ AGENT_DIR = "agent"
 # 包位于 <repo>/babeldoc_tools/，技能资源仍在 <repo>/skills/document-translate/。
 SKILL_ROOT = Path(__file__).resolve().parents[1] / "skills" / "document-translate"
 AGENTS_DIR = SKILL_ROOT / "agents"
-PROMPTS_DIR = SKILL_ROOT / "prompts"  # legacy 提示词
 
 
 class ToolError(RuntimeError):
@@ -83,12 +82,10 @@ _FENCE_RE = re.compile(r"```(?:text|markdown)\n(.*?)```", re.DOTALL)
 def load_prompt(name: str, **substitutions) -> str:
     """加载提示词文件并替换 ``{key}`` 占位符。
 
-    优先 ``agents/<name>.md``，回退 ``prompts/<name>.md``；文件里若有
-    ```text 代码块则取块内内容。
+    从 ``agents/<name>.md`` 读取；文件里若有 ```text 代码块则取块内内容。
     """
     candidates = [
         AGENTS_DIR / f"{name}.md",
-        PROMPTS_DIR / f"{name}.md",
         Path(name),
     ]
     for candidate in candidates:
@@ -106,10 +103,8 @@ def load_prompt(name: str, **substitutions) -> str:
 
 
 def prompt_path(name: str) -> Path | None:
-    for candidate in (AGENTS_DIR / f"{name}.md", PROMPTS_DIR / f"{name}.md"):
-        if candidate.exists():
-            return candidate
-    return None
+    candidate = AGENTS_DIR / f"{name}.md"
+    return candidate if candidate.exists() else None
 
 
 def _run_subprocess(

@@ -1,10 +1,16 @@
-# Agent 编排的 PDF 翻译流水线
+# Agent 编排的 PDF 翻译流水线（历史背景，不在导航中）
 
+> **历史记录**：本文是重构前的逐步详解，保留作为背景与设计动机的存档，
+> **不在 mkdocs 导航中**，也不作为推荐命令来源。当前入口只有 `bdt`，
+> 权威的阶段契约见 [`toolchain/pipeline-stages.md`](toolchain/pipeline-stages.md)，
+> 门禁与数据结构见 [`toolchain/README.md`](toolchain/README.md)，编排流程见
+> [`skills/document-translate/SKILL.md`](https://github.com/zcyisiee/ieeTranslater/blob/main/skills/document-translate/SKILL.md)。
+>
 > 本文描述 `BabelDOC-agy-mvp` 分支上 **Markdown 视图 + 行内锚点** 的端到端翻译流程：
 > 从 PDF 解析到 mono/dual 成品，逐步说明**功能、中间产物、schema 与效果**，
 > 末尾给出面向「排版质量」的优化空间。
 >
-> 适用代码：`babeldoc/tools/agent/`（工具层）、`babeldoc_tools/`（`bdt run` 编排器）、
+> 适用代码：`babeldoc/tools/agent/`（工具层）、`babeldoc_tools/`（`bdt` 编排器）、
 > `babeldoc/format/pdf/document_il/midend/`（解析中端）、
 > `babeldoc/format/pdf/document_il/backend/pdf_creater.py`（重建）。
 
@@ -366,17 +372,19 @@ header / footer / page_number / page_footnote / aside_text / author`
 
 即：作者区、参考文献、图内文字、表格内部、代码、页眉页脚页码全部保留原文；
 **图注 / 表注（`figure_caption` / `table_caption` / `code_caption`）正常翻译**。
-`--skip-labels` 可追加跳过标签。
+跳过标签集由 `translation_selection.py::PROTECTED_LABELS` 与
+`TranslationConfig.MINERU_DEFAULT_SKIP_TRANSLATE_LAYOUT_LABELS` 决定（`bdt` 无单独的
+`--skip-labels` 旗标；要改跳过集需改这两处配置）。
 
 **效果**：一份连续 Markdown + 完整锚点 + 可校验状态。实测 20 页论文：
 208 段、881 个样式锚点、294 个公式锚点、100,891 字符。
 
 ---
 
-### [8] 翻译（单次 agy 调用）
+### [8] 翻译（一次用户指定的命令调用）
 
-**功能**：`bdt run`（`babeldoc_tools/translate.py`）读取 `document.md`，套用
-`skills/document-translate/prompts/markdown-translator.md`，**整篇一次调用**
+**功能**：`bdt translate`（`babeldoc_tools/translate.py`）读取 `document.md`，套用
+`skills/document-translate/agents/translator.md` 提示词，**整篇一次调用**
 （translator 为 stdin/stdout 子进程；`--markdown self` 则直接使用已有译文）。
 
 **产物 A：`agent/prompt.md`**（实际发出的提示词，便于复盘）

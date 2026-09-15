@@ -20,10 +20,9 @@ import fitz
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from latex_box import compile_tex  # noqa: E402
 from latex_box import build_tex  # noqa: E402
+from latex_box import compile_tex  # noqa: E402
 from latex_box import escape_latex  # noqa: E402
-from latex_box import line_fill_metrics  # noqa: E402
 from latex_box import strip_style_markup  # noqa: E402
 
 ROOT = HERE.parents[2]
@@ -38,11 +37,11 @@ JOBS = {
 
 def current_pipeline_paragraph_fills(job: Path, page: int) -> list[dict]:
     """Per-paragraph non-final-line fill ratios in the current pipeline output."""
-    rows, _ = _current_pipeline_fills(job, page, include_lines=False)
+    rows, _ = _current_pipeline_fills(job, page)
     return rows
 
 
-def _current_pipeline_fills(job: Path, page: int, include_lines: bool = False):
+def _current_pipeline_fills(job: Path, page: int):
     geom = json.loads((job / "agent" / "layout_geometry.json").read_text())
     mono = next((job / "output").glob("*.mono.pdf"))
     doc = fitz.open(mono)

@@ -7,7 +7,6 @@
 """
 
 import pymupdf
-
 from babeldoc.format.pdf import high_level as hl
 
 

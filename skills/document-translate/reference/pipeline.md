@@ -207,7 +207,7 @@ python experiments/dump_parse_stages.py <pdf> --out-dir <dir>/parse-stages \
 table / table_text / table_caption / code / code_caption / header / footer /
 page_number / page_footnote / aside_text / formula / isolate_formula /
 toc_entry / toc_entry_page`。完整字典见
-[`docs/toolchain/label-dictionary.md`](../../../docs/toolchain/label-dictionary.md)。
+[`docs/toolchain/README.md`](../../../docs/toolchain/README.md#4-layout-label-字典)。
 
 **效果**：为段落打语义标签，决定「译 / 不译」；保留 MinerU 结构供行内公式保护、
 目录识别与超链接映射复用。
@@ -395,17 +395,19 @@ header / footer / page_number / page_footnote / aside_text / author`
 
 即：作者区、参考文献、图内文字、表格内部、代码、页眉页脚页码全部保留原文；
 **图注 / 表注（`figure_caption` / `table_caption` / `code_caption`）正常翻译**。
-`--skip-labels` 可追加跳过标签。
+跳过标签集由 `translation_selection.py::PROTECTED_LABELS` 与
+`TranslationConfig.MINERU_DEFAULT_SKIP_TRANSLATE_LAYOUT_LABELS` 决定（`bdt` 无单独的
+`--skip-labels` 旗标；要改跳过集需改这两处配置）。
 
 **效果**：一份连续 Markdown + 完整锚点 + 可校验状态。实测 20 页论文：
 208 段、881 个样式锚点、294 个公式锚点、100,891 字符。
 
 ---
 
-### [8] 翻译（单次 agy 调用）
+### [8] 翻译（一次用户指定的命令调用）
 
-**功能**：`bdt run`（`babeldoc_tools/translate.py`）读取 `document.md`，套用
-`skills/document-translate/prompts/markdown-translator.md`，**整篇一次调用**。
+**功能**：`bdt translate`（`babeldoc_tools/translate.py`）读取 `document.md`，套用
+`skills/document-translate/agents/translator.md` 提示词，**整篇一次调用**。
 
 **产物 A：`agent/prompt.md`**（实际发出的提示词，便于复盘）
 
@@ -622,7 +624,7 @@ DeepSeek 样本 mono 的链接映射分布：`total=410, remapped=408`
 
 ```bash
 bdt --help
-bdt check --workdir tmp/md-ccs3764                    # 结构 gate（占位转调）
+bdt check --workdir tmp/md-ccs3764                    # 三合一：结构审查 + 排版 lint + 链接审计
 python -c "from babeldoc_tools import layout;print(layout.layout_lint(workdir='tmp/md-ccs3764', min_sev='P1'))"
 python -c "from babeldoc_tools import review;print(review.backtranslate_check(workdir='tmp/md-ccs3764'))"
 ```
@@ -630,12 +632,13 @@ python -c "from babeldoc_tools import review;print(review.backtranslate_check(wo
 | 子命令 | 实现函数 | 关键产物 |
 |---|---|---|
 | `parse` | `parse.parse_document` | `document.md` / `anchors.json` / `sheet.jsonl` / `state.pkl` |
-| `translate` | `translate.translate_document`（`--ids` → `retranslate_ids`） | `translated.md` / `translated.jsonl` |
+| `translate` | `translate.translate_document`（`--ids` → `retranslate_blocks`） | `translated.md` / `translated.jsonl` |
 | `apply` | `translate.apply_translation` | `apply_report.json` |
-| `build` | `layout.build_pdf`（`reconstruct_pdf` + 可选 `render_pages`） | mono+dual PDF / `layout_geometry.json` / `render/*.png` |
-| `check` | `review.review_document`（占位） | `review_verdict.json` |
+| `build` | `layout.build_pdf`（重排 + 可选渲染页） | mono+dual PDF / `layout_geometry.json` / `render/*.png` |
+| `check` | `review.check_document`（三合一聚合） | `review_verdict.json` / `layout_lint.json` / `link_audit.json` |
 | `layout-set` | `layout.layout_set` | `layout_overrides.json` |
 | `report` | `report.report` | `FINAL_REPORT.md` |
+| `run` | `run.run_pipeline` | `run_state.json` / `agent_review.json` / `FINAL_REPORT.md` |
 
 内部 Python 函数（已从公开 CLI 移除）：`layout.layout_lint` / `layout.layout_locate` /
 `layout.render_pages` / `layout.dump_text_layer` / `review.backtranslate_check`。

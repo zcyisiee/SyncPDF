@@ -46,7 +46,7 @@ Note: there is **no stage literally named `generate`**. In this repo "generate" 
    `inline_equation` survives (`provider_ir.py:113`).
 3. **Bbox region**: `il_version_1.PageLayout{box, id, conf, class_name}` — `il_version_1.py:314`.
    Coordinate invariant: MinerU y-down → IL y-up, `y' = H - y`, H from `page.cropbox`
-   (`docs/toolchain/architecture.md` I1.2; impl `provider_alignment.py:65`).
+   (`docs/toolchain/README.md#2-数据流与分层` I1.2; impl `provider_alignment.py:65`).
 4. **Paragraph bbox + rendered bbox**: `PdfParagraph{box, pdf_style, pdf_paragraph_composition, unicode, debug_id, layout_label, scale, optimal_scale}` (`il_version_1.py:1152`);
    `PdfCharacter{box, visual_bbox, pdf_style, char_unicode, advance, xobj_id, formula_layout_id}` (`:627`).
 5. **Generatable geometry, already on disk for real jobs**: `<workdir>/agent/layout_geometry.json`
@@ -157,7 +157,7 @@ product path as-is.
 2. **MinerU LaTeX is not compilable as-is**: spaced tokens (`\mathrm { ~ - ~ }`), `<sup>` markup inside
    text spans, likely unbalanced `\left`/`\right`. Needs a normalization pass before `xelatex`.
 3. **Box→paper mapping**: `src_box` is the *paragraph* box (contract: Typesetting rewrites char boxes in
-   place, `docs/toolchain/architecture.md` I6.1). Using the paragraph box as `geometry` paper size
+   place, `docs/toolchain/README.md#2-数据流与分层` I6.1). Using the paragraph box as `geometry` paper size
    changes the layout basis vs. the source column (BabelDOC's renderer uses column width + line rules,
    not LaTeX's paragraph model). Whether to use `src_box`, `layout_box` or a layout region box needs a
    decision; `layout_geometry.json.page_info[].layout_regions` gives figure/table/formula boxes only,

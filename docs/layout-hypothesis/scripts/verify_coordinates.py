@@ -62,7 +62,7 @@ def main() -> None:
     il_as_down = [il_box[0], page_h - il_box[3], il_box[2], page_h - il_box[1]]
     for block in page["para_blocks"]:
         bb = block["bbox"]
-        dist = sum(abs(a - b) for a, b in zip(bb, il_as_down))
+        dist = sum(abs(a - b) for a, b in zip(bb, il_as_down, strict=False))
         if best is None or dist < best[0]:
             best = (dist, bb, block["type"])
     print(f"IL box (as y-down) : {[round(v, 3) for v in il_as_down]}")

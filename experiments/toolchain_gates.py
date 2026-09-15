@@ -81,7 +81,7 @@ def gate_layout_coverage(workdir: Path) -> dict:
         return {
             "status": "not_available",
             "hard": True,
-            "reason": "layout_coverage.json 未找到（需要先跑 parse/md-extract）",
+            "reason": "layout_coverage.json 未找到（需要先跑 bdt parse）",
             "artifact": None,
         }
     report = _read_json(path)
@@ -174,7 +174,7 @@ def gate_link_integrity(workdir: Path) -> dict:
         )
 
     # 优先用 reconstruct 阶段落的报告（含三级回退计数）；缺失时用
-    # 「mono PDF + links.json 快照」直接重算 URI 集合门禁（legacy CLI 不落报告）。
+    # 「mono PDF + links.json 快照」直接重算 URI 集合门禁（早期 CLI 不落报告）。
     if not isinstance(recon, dict) or "link_total" not in recon:
         mono = _find_mono_pdf(workdir)
         if mono is None or snapshot_uris is None:
@@ -251,7 +251,7 @@ def gate_toc_integrity(workdir: Path) -> dict:
         return {
             "status": "not_available",
             "hard": True,
-            "reason": "toc.json 或 anchors.json 缺失（需要先 parse/md-extract）",
+            "reason": "toc.json 或 anchors.json 缺失（需要先跑 bdt parse）",
         }
 
     entries = [
@@ -322,7 +322,7 @@ def gate_protected_tokens(workdir: Path) -> dict:
         return {
             "status": "not_available",
             "hard": False,
-            "reason": "anchors.json 缺失（需要先 parse/md-extract）",
+            "reason": "anchors.json 缺失（需要先跑 bdt parse）",
         }
 
     rows = anchors.get("rows") or []
@@ -384,7 +384,7 @@ def gate_protocol(workdir: Path) -> dict:
                 "violations": protocol.get("violations") or [],
                 "warnings": [],
             }
-        # legacy CLI（md-apply）只在 stdout 报报告、不落盘；用 translated.jsonl
+        # 早期 CLI 只在 stdout 报报告、不落盘；用 translated.jsonl
         # 与 anchors.json 做等价确定性校验：每个应翻译段落都有 target。
         fallback = _protocol_from_translated(agent)
         if fallback is not None:

@@ -29,6 +29,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+#: 回放缓存布局时使用的占位 token（不发起 MinerU API 调用）。
+_MINERU_REPLAY_ARG = "replay"
+
 
 def box_dict(b):
     if b is None:
@@ -215,7 +218,7 @@ def main():
             "mineru 模式需要 --mineru-json 或环境变量 BABELDOC_MINERU_LAYOUT_JSON"
         )
     os.environ["BABELDOC_MINERU_LAYOUT_JSON"] = str(mineru_json)
-    config.doc_layout_model = MinerUDocLayoutModel(api_token="replay")
+    config.doc_layout_model = MinerUDocLayoutModel(api_token=_MINERU_REPLAY_ARG)
     config.mineru_doclayout_enabled = True
     config.mineru_skip_translate_effective_labels = (
         TranslationConfig.expand_mineru_skip_translate_layout_labels(
@@ -304,8 +307,8 @@ def main():
 
     # ---- Step 3: LayoutParser ----
     print("[3/6] LayoutParser ...")
-    from babeldoc.format.pdf.document_il.midend.layout_parser import LayoutParser
     from babeldoc.const import close_process_pool
+    from babeldoc.format.pdf.document_il.midend.layout_parser import LayoutParser
 
     docs = LayoutParser(config).process(docs, doc_pdf)
     close_process_pool()
@@ -381,16 +384,16 @@ def main():
         "05_styles_formulas.json",
         {
             "detail_page": detail_page + 1,
-            "paragraphs": [
-                p for p in run_styles(docs.page[detail_page])
-            ],
+            "paragraphs": list(run_styles(docs.page[detail_page])),
         },
     )
 
     # ---- Step 6: ILTranslator.pre_translate_paragraph -> sheet ----
     print("[6/6] ILTranslator.pre_translate_paragraph -> sheet.jsonl ...")
     from babeldoc.format.pdf.document_il.midend.il_translator import ILTranslator
-    from babeldoc.format.pdf.document_il.midend.il_translator import PageTranslateTracker
+    from babeldoc.format.pdf.document_il.midend.il_translator import (
+        PageTranslateTracker,
+    )
     from babeldoc.tools.agent.sheet_translator import SheetProtocolTranslator
 
     il_translator = ILTranslator(
@@ -425,7 +428,7 @@ def main():
             inputs[paragraph.debug_id] = translate_input
             label_counts[label] = label_counts.get(label, 0) + 1
 
-    with open(out_dir / "06_sheet.jsonl", "w", encoding="utf-8") as f:
+    with (out_dir / "06_sheet.jsonl").open("w", encoding="utf-8") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     print(f"  -> {out_dir / '06_sheet.jsonl'}")

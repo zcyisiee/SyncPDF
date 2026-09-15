@@ -146,4 +146,4 @@ MinerU 不同版本、后端和输出格式的字段名称会变化，下面按�
 - 百度 OCR 文档解析 API 文档：<https://cloud.baidu.com/doc/OCR/s/llxst5nn0>
 - PaddleOCR 版面分析：<https://www.paddleocr.ai/latest/en/version3.x/module_usage/layout_analysis.html>
 - PaddleOCR 公式识别：<https://www.paddleocr.ai/main/en/version3.x/pipeline_usage/formula_recognition.html>
-- BabelDOC 当前翻译 pipeline：[`skills/document-translate/reference/pipeline.md`](../skills/document-translate/reference/pipeline.md)
+- BabelDOC 当前翻译 pipeline：[`skills/document-translate/reference/pipeline.md`](https://github.com/zcyisiee/ieeTranslater/blob/main/skills/document-translate/reference/pipeline.md)

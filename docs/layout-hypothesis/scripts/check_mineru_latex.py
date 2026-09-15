@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+#: 解析后的 xelatex 可执行路径（避免在 argv 里用部分路径，S607）。
+_XELATEX = shutil.which("xelatex") or "xelatex"
 sys.path.insert(0, str(HERE))
 
 
@@ -81,7 +83,7 @@ def try_compile(content: str, idx: int, timeout: float = 20.0) -> dict:
     try:
         proc = subprocess.run(
             [
-                "xelatex",
+                _XELATEX,
                 "-interaction=nonstopmode",
                 "-halt-on-error",
                 f"-output-directory={WORK}",

@@ -1,15 +1,12 @@
 import json
 
 import pytest
-
-from babeldoc.tools.agent.protocol import (
-    TranslationValidationError,
-    build_repair_feedback,
-    check_placeholders,
-    extract_input_items,
-    extract_placeholders,
-    validate_output,
-)
+from babeldoc.tools.agent.protocol import TranslationValidationError
+from babeldoc.tools.agent.protocol import build_repair_feedback
+from babeldoc.tools.agent.protocol import check_placeholders
+from babeldoc.tools.agent.protocol import extract_input_items
+from babeldoc.tools.agent.protocol import extract_placeholders
+from babeldoc.tools.agent.protocol import validate_output
 
 PROMPT_TEMPLATE = "You are a translator.\n\n## Here is the input:\n\n{payload}"
 

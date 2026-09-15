@@ -36,14 +36,14 @@ from babeldoc.format.pdf.document_il.midend.automatic_term_extractor import (
     AutomaticTermExtractor,
 )
 from babeldoc.format.pdf.document_il.midend.detect_scanned_file import DetectScannedFile
+from babeldoc.format.pdf.document_il.midend.enclosed_marker_fixer import (
+    EnclosedMarkerFixer,
+)
 from babeldoc.format.pdf.document_il.midend.il_translator import ILTranslator
 from babeldoc.format.pdf.document_il.midend.il_translator_llm_only import (
     ILTranslatorLLMOnly,
 )
 from babeldoc.format.pdf.document_il.midend.layout_parser import LayoutParser
-from babeldoc.format.pdf.document_il.midend.enclosed_marker_fixer import (
-    EnclosedMarkerFixer,
-)
 from babeldoc.format.pdf.document_il.midend.paragraph_finder import ParagraphFinder
 from babeldoc.format.pdf.document_il.midend.styles_and_formulas import StylesAndFormulas
 from babeldoc.format.pdf.document_il.midend.table_parser import TableParser

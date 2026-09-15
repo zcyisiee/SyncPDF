@@ -68,3 +68,7 @@ A worker report or successful process exit is not proof of correctness. The orch
 
 ## 本项目的要求
 运行翻译测试的结果需要保留在当前路径的tmp/文件夹下。tmp 文件夹应该加入.gitignore
+
+对外接口只有 `bdt`：新增能力必须作为 `bdt` 的子命令或其参数暴露，不得新建并行入口
+（不再有 `babeldoc.tools.agent` 内部 CLI、`experiments/*_translate.py` 脚本入口或第二个
+`babeldoc_tools` 包）。守卫测试 `tests/test_single_entry.py` 会拦截这类回归。

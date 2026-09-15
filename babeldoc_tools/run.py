@@ -808,6 +808,10 @@ def run_pipeline(
             # ---- 没有 --reviewer：质量门禁失败（U4 收紧，U3 曾是 exit 0 的等待） -- #
             # "没人审查"不能算交付成功：停在 review、exit 1、error.code 为
             # waiting_for_reviewer，并写清 --reviewer 用法；report 不执行。
+            # 审查提示词落盘（agent/review_prompt.md），供上层 Agent 接手执行。
+            (common.agent_dir(workdir_path) / "review_prompt.md").write_text(
+                _review_prompt(workdir_path, cfg), encoding="utf-8"
+            )
             current = _current_input_hashes(workdir_path, pdf, markdown)
             entry = _record(
                 state,

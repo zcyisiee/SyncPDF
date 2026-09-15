@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
 
 import fitz
+
+#: 解析后的 xelatex 可执行路径（避免在 argv 里用部分路径，S607）。
+_XELATEX = shutil.which("xelatex") or "xelatex"
 
 # BabelDOC ships these fonts; reference them by path so fontspec does not need
 # a system fontconfig entry (a bare family name failed on this machine).
@@ -168,7 +172,7 @@ def count_render_lines(page: fitz.Page) -> int:
         return 0
     baselines.sort()
     n = 1
-    for prev, cur in zip(baselines, baselines[1:]):
+    for prev, cur in zip(baselines, baselines[1:], strict=False):
         if cur - prev > 2.0:
             n += 1
     return n
@@ -209,7 +213,7 @@ def compile_tex(
     started = time.perf_counter()
     proc = subprocess.run(
         [
-            "xelatex",
+            _XELATEX,
             "-interaction=nonstopmode",
             "-halt-on-error",
             f"-output-directory={workdir}",
@@ -328,7 +332,6 @@ def overlay_box(
     box_yup: list[float],
     stamp_pdf: Path,
     page_h: float,
-    erase: bool = True,
     erase_color: tuple[float, float, float] = (1, 1, 1),
     mode: str = "draw",
 ) -> dict:

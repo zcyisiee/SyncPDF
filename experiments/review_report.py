@@ -53,7 +53,8 @@ def main():
         for line in (agent_dir / "translated.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     }
-    state = pickle.load(open(agent_dir / "state.pkl", "rb"))
+    with (agent_dir / "state.pkl").open("rb") as handle:
+        state = pickle.load(handle)  # noqa: S301 - 本地 workdir 产物
     para_by_id = {}
     for page in state["doc"].page:
         for para in page.pdf_paragraph:
@@ -128,10 +129,10 @@ def main():
     ]
 
     # P2 渲染层双标点：输出 PDF 文本里 ] 后 ASCII+CJK 标点连写、连续中文标点等
-    RENDERED_DOUBLE = re.compile(r"\]\s*,\s*[，、。]|[，、]\s*[，、]|,,|、、")
+    rendered_double_re = re.compile(r"\]\s*,\s*[，、。]|[，、]\s*[，、]|,,|、、")
     rendered_double = []
     for pno, text in enumerate(page_texts):
-        for m in RENDERED_DOUBLE.finditer(text):
+        for m in rendered_double_re.finditer(text):
             rendered_double.append(
                 {"page": pno + 1, "text": text[max(0, m.start() - 15) : m.end() + 15]}
             )
@@ -162,7 +163,7 @@ def main():
         if not probe:
             continue
         rendered = None
-        for pno, t, size in span_index:
+        for _pno, t, size in span_index:
             if probe in t.replace(" ", ""):
                 rendered = size
                 break

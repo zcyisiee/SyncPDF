@@ -4,6 +4,11 @@
 > - `{document}` 替换为**待核对的译文段落**（`<!-- id=... -->` + 中文译文）
 > - `{ids}` 替换为 id 清单（调试用）
 > 输出被解析为 `{id: 回译英文}`，Python 侧再算 Levenshtein 相似度。
+>
+> 注意：本文件的 JSON 契约（`items`）是回译校验内部使用的，不同于 `bdt run` 的
+> reviewer 契约（`verdict` / `findings`，见 `reviewer-protocol.md`）。回译校验的
+> `needs_retranslate_ids`（相似度 < 0.55）由 reviewer 汇总进 findings 的
+> `kind=retranslate`。
 
 ```text
 你是双语审校专家。下面给你若干**已经译成简体中文**的论文段落（每段带 id 标记）。

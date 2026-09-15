@@ -79,7 +79,7 @@
   > 未覆盖字符的 bbox 与文本片段（每页前 200 字符，`uncovered_text_preview`）
   > 用于人工定位「漏译源头」。
 
-- **不变量**：I1.1–I1.3（见 [`architecture.md`](architecture.md)）
+- **不变量**：I1.1–I1.3（见 [`README.md`](README.md#2-数据流与分层)）
 - **失败模式**
   - `layout_coverage_gate`（**硬**）：超阈值 → `RuntimeError`，消息含
     `uncovered=…/…`、阈值、`layout_coverage.json` 路径与两条修复建议。
@@ -288,17 +288,16 @@
 
 ---
 
-## 阶段 11：`md-apply` / `bdt apply` / `apply_translation`（校验与写回）
+## 阶段 11：`bdt apply`（`apply_translation` 校验与写回）
 
-- **入口**：`markdown_view.apply_markdown`（`md-apply`）或
-  `babeldoc_tools.translate.apply_translation`
+- **入口**：`babeldoc_tools.translate.apply_translation`（内部 `markdown_view.apply_markdown`）
 - **输入**：`translated.md` + `state.pkl` + `anchors.json`
 - **输出**
   | 路径 | 内容 |
   |---|---|
   | `agent/translated.jsonl` | `{id, target}`（canonical 译文）——重建的输入 |
   | `agent/il_translated.applied.json` | 写回后的 IR（诊断） |
-  | `agent/apply_report.json` | 结构化报告（仅工具层写；legacy CLI 只打印 stdout） |
+  | `agent/apply_report.json` | 结构化报告（`bdt apply` 落盘） |
 
 - **校验与修复顺序**（`apply_markdown`）
   1. 按 `<!-- id=… -->` 切块；`extra_ids`（多出的 id）→ **阻断**
@@ -334,7 +333,7 @@
   1. 从源 PDF 打开 → 逐页重写内容流
   2. 链接按源字符身份重映射（三级回退，见下）
   3. **URI 集合门禁**（删页模式跳过）
-  4. `subset_fonts`（可用 `--skip-clean` 关）
+  4. `subset_fonts`
   5. save（`garbage=1`；OCR workaround 时 `garbage=4`）
   6. dual（可选）：拼宽/交替页 + 链接搬运 + 书签搬运/页码重映射
 - **链接三级回退**（`backend/link_remap.py::resolve_link_rect`）
@@ -444,7 +443,7 @@
 │   │       ├── provider_ir.json               # MinerU 结构树
 │   │       └── alignment.json                 # 字符↔span 对齐审计
 │   └── render/page-NN.png                     # 渲染页
-├── <pdf名>/latex_bbox_report.json             # LaTeX bbox 统计 + 逐段 decisions（仅 --latex-bbox）
-├── <pdf名>/latex_cache/                       # 批编译贴片缓存（仅 --latex-bbox，可删）
+├── <pdf名>/latex_bbox_report.json             # LaTeX bbox 统计 + 逐段 decisions（默认开启时）
+├── <pdf名>/latex_cache/                       # 批编译贴片缓存（默认开启时，可删）
 └── output/*.mono.pdf / *.dual.pdf             # 交付产物
 ```

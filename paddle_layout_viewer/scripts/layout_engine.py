@@ -32,9 +32,12 @@ from __future__ import annotations
 
 import json
 import shutil
-from dataclasses import dataclass, asdict
+from collections.abc import Iterable
+from collections.abc import Sequence
+from dataclasses import asdict
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 import numpy as np
 
@@ -284,8 +287,10 @@ class LayoutEngine:
         providers = [("CoreMLExecutionProvider", opts)]
         try:
             self.ort.get_available_providers().index("CoreMLExecutionProvider")
-        except ValueError:
-            raise RuntimeError("CoreMLExecutionProvider unavailable in this onnxruntime build")
+        except ValueError as exc:
+            raise RuntimeError(
+                "CoreMLExecutionProvider unavailable in this onnxruntime build"
+            ) from exc
         return self.ort.InferenceSession(
             str(self.staged_path), self._session_options(),
             providers=providers + ["CPUExecutionProvider"],
@@ -363,7 +368,7 @@ class LayoutEngine:
 
     # ------------------------------------------------------------------ inference
     def infer_rgb(self, rgb: np.ndarray, threshold: float = 0.5,
-                  session=None, ) -> list[Box]:
+                  session=None ) -> list[Box]:
         """Detect layout regions on an RGB uint8 page image."""
         sess = session or self.session
         tensor, scale_factor, (h, w) = preprocess(rgb)

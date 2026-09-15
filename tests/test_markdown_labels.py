@@ -72,10 +72,8 @@ def test_selected_rows_markdown_omits_protected_paragraphs():
 
     用轻量 fake 对象走一遍“选择 → 渲染”链路，不调用任何 LLM / ONNX。
     """
-    from babeldoc.tools.agent.translation_selection import (
-        SelectionContext,
-        select_page_paragraphs,
-    )
+    from babeldoc.tools.agent.translation_selection import SelectionContext
+    from babeldoc.tools.agent.translation_selection import select_page_paragraphs
 
     def box(x, y, x2, y2):
         return _ns(x=x, y=y, x2=x2, y2=y2)

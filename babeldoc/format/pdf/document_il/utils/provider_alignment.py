@@ -31,7 +31,6 @@ from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
 
-from babeldoc.docvision.provider_ir import ProviderBlock
 from babeldoc.docvision.provider_ir import ProviderDocument
 from babeldoc.docvision.provider_ir import ProviderLine
 from babeldoc.docvision.provider_ir import ProviderPage

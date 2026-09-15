@@ -3,7 +3,6 @@
 from types import SimpleNamespace
 
 import pytest
-
 from babeldoc.docvision import resource_controller as rc
 
 
@@ -11,7 +10,7 @@ def test_gpu_driver_sensor_is_read_without_privilege(monkeypatch):
     monkeypatch.setattr(rc.platform, "system", lambda: "Darwin")
     calls = []
 
-    def run(args, **kwargs):
+    def run(args, **_kwargs):
         calls.append(args)
         return SimpleNamespace(
             stdout='"Device Utilization %"=32\n"Device Utilization %"=47'

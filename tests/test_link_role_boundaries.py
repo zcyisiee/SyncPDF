@@ -1,4 +1,3 @@
-import pytest
 
 from babeldoc.format.pdf.document_il.backend.link_text import role_matches
 

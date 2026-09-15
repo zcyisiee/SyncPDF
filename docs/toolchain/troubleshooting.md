@@ -193,8 +193,7 @@ grep -n "font_size" <wd>/agent/layout_geometry.json | head
 解析器按多数字符取段级 `pdf_style` 时会选中偏小字号。
 
 **修复**：`workflow._bump_title_font_size` 已把标题段段级字号提到段落内最大 run 字号。
-若仍偏小：用 `layout_patch` 调该段 `font_scale` →
-`reconstruct_pdf` 复核（≤2 轮）。
+若仍偏小：用 `bdt layout-set` 调该段 `font_scale` → `bdt build` 复核（≤2 轮）。
 
 ---
 
@@ -248,52 +247,51 @@ EOF
 
 | 症状 | 原因 | 修复 |
 |---|---|---|
-| 参考文献被翻译 | 参考文献区靠 `references_heading` 信号阻断；若标题未被识别为 heading，阻断不生效 | 用 `--skip-labels reference_content` 追加；或修 `_REFERENCE_HEADING_RE` |
-| 作者区被翻译 | `author` 是首页启发式（标题与 Abstract 之间） | 用 `--skip-labels author`；或检查 `_first_page_author_band` 判据 |
+| 参考文献被翻译 | 参考文献区靠 `references_heading` 信号阻断；若标题未被识别为 heading，阻断不生效 | 调整 `translation_selection.py` 的 `_REFERENCE_HEADING_RE`；确认 `reference` 在 `PROTECTED_LABELS` |
+| 作者区被翻译 | `author` 是首页启发式（标题与 Abstract 之间） | 检查 `_first_page_author_band` 判据 |
 | 图注被跳过（应翻译） | 图注落进受保护几何区域 | `CAPTION_LABELS` 已优先翻译；确认标签映射（`image_caption` → `figure_caption`） |
 
 ---
 
 ## 8. 协议违规（apply 失败）
 
-见 [`gates.md`](gates.md#5-翻译协议门禁硬)。要点：
+见 [`README.md`](README.md#3-门禁速查) 的门禁速查。要点：
 
 - `extra_ids`（模型伪造段落 id）→ 从译文里删掉该段；
 - `anchor_multiset_mismatch` → 锚点数量/多重集与源文不一致（丢或幻觉锚点）；
   先由 `proportional` 自动修复，仍失败则
-  `retranslate_ids --ids [...] --feedback "锚点必须与源文一致"`。锚点顺序与源文
+  `bdt translate --ids [...] --feedback "锚点必须与源文一致"`。锚点顺序与源文
   不同**不算违规**（只记 `anchor_reordered` 警告），因为中英语序调整是合法翻译。
 - `missing_ids` **不阻断**（回退原文），但会进 `fallback_ids`——若大量出现，
   说明模型漏行，重译。
 
 ---
 
-## 10. 工具层调用失败（旧「元命令 + JSON 入参」语法已删除）
+## 9. 工具层调用失败（旧「元命令 + JSON 入参」语法已删除）
 
-**症状**：沿用 U2 之前的元命令写法的命令，报
-`argument command: invalid choice: 'call'`（同理 `list` / `schema` / `--args-json`）。
+**症状**：工具层改为固定子命令（U2）之前写法的命令，报
+`argument command: invalid choice: 'call'`（同理 `list` / `schema`）。
 
 **原因**：U2 起工具层改为固定子命令（`bdt parse` / `translate` / `apply` / `build` /
-`check` / `layout-set` / `report`），元命令与 `--args-json` 入参已删除。历史上还曾有过
-**两个同名包** `babeldoc_tools`（仓库根的 MAS 版，与 skills 下 agent 版的副本）
-互相遮蔽的问题。
+`check` / `layout-set` / `report` / `run`），元命令已删除。历史上还曾有过
+**两个同名包** `babeldoc_tools`（仓库根的版本，与 skills 下副本）互相遮蔽的问题。
 
 **现状**：仓库里只剩一个 `babeldoc_tools` 包，位于仓库根，即 MinerU/Markdown agent
 管线；`bdt`（或 `python -m babeldoc_tools`）在任何 cwd 下命中的都是它。
 
 **修复**
 
-- 改用常规旗标子命令，如解析：`bdt parse <pdf> --workdir <wd> [--mineru-json …]`
-  （`bdt <cmd> --help` 查全部旗标）；
+- 改用常规旗标子命令，如解析：`uv run bdt parse <pdf> --workdir <wd> [--mineru-json …]`
+  （`uv run bdt <cmd> --help` 查全部旗标）；
 - 若报 `未知参数: mineru_json`，说明解释器加载的是旧安装产物：
   在仓库根执行 `uv sync` 刷新安装即可。
 
 ---
 
-## 11. 一页的完整排查流程（模板）
+## 10. 一页的完整排查流程（模板）
 
 ```bash
-WD=<wd>; PDF=DeepSeek_V41_Tech_Report.pdf
+WD=<wd>; PDF=<源.pdf>
 # ① 门禁总览
 python experiments/toolchain_gates.py $WD --pdf $PDF --json
 # ② 覆盖率

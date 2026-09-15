@@ -9,12 +9,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from babeldoc.tools.agent.translation_selection import (
-    SelectionContext,
-    normalize_label,
-    select_page_paragraphs,
-    select_paragraph,
-)
+from babeldoc.tools.agent.translation_selection import SelectionContext
+from babeldoc.tools.agent.translation_selection import normalize_label
+from babeldoc.tools.agent.translation_selection import select_page_paragraphs
+from babeldoc.tools.agent.translation_selection import select_paragraph
 
 
 def make_box(x: float, y: float, x2: float, y2: float) -> SimpleNamespace:

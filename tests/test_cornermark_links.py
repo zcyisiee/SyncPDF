@@ -15,11 +15,9 @@ from __future__ import annotations
 import pymupdf
 import pytest
 from babeldoc.format.pdf.document_il import il_version_1
-from babeldoc.format.pdf.document_il.backend.latex_bbox import fusion
-from babeldoc.format.pdf.document_il.backend.latex_bbox.overlay import (
-    LatexBboxOverlay,
-)
 from babeldoc.format.pdf.document_il.backend import link_remap
+from babeldoc.format.pdf.document_il.backend.latex_bbox import fusion
+from babeldoc.format.pdf.document_il.backend.latex_bbox.overlay import LatexBboxOverlay
 
 _SAMPLE = None  # lazy
 

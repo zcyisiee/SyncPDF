@@ -252,7 +252,7 @@ def _line_context(page_dict: dict, rect, max_chars: int = 160) -> str | None:
     return text[:max_chars] or None
 
 
-def _link_span_facts(page, page_dict: dict, rect) -> dict:
+def _link_span_facts(_page, page_dict: dict, rect) -> dict:
     """链接矩形覆盖文字的源样式事实：主色 / 字号 / 相对正文基线的抬升。
 
     IL 不存颜色（只在 passthrough 指令里），这里从源 PDF 的文本层直接量：

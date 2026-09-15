@@ -1,6 +1,7 @@
-# translator-repair：按 id 补译/重译（retranslate_ids 的提示词）
+# translator-repair：按 id 补译/重译（`bdt translate --ids` 的提示词）
 
-> `retranslate_ids` 读取本文件 ```text 块：
+> `babeldoc_tools.translate.retranslate_blocks`（即 `uv run bdt translate --ids ...`）
+> 读取本文件 ```text 块：
 > - `{document}` 替换为**只含待修段落**的 Markdown（每段保留 `<!-- id=... -->` 标记）
 > - `{feedback}` 替换为审查反馈（缺陷清单 / 术语要求 / 回译差异），可为空
 

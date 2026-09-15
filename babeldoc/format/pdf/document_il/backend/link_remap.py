@@ -916,7 +916,7 @@ def assert_uri_set_matches(
     )
 
 
-def normalize_link_action(doc, link: dict) -> dict:
+def normalize_link_action(_doc, link: dict) -> dict:
     """Normalize a MuPDF link dictionary while preserving action metadata."""
     out = dict(link)
     out.setdefault('kind', link.get('kind'))

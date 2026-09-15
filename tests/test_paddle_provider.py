@@ -1,19 +1,17 @@
-from types import SimpleNamespace as NS
+from types import SimpleNamespace
 
 import pytest
-
 from babeldoc.docvision.paddle_provider import _align_formula
 from babeldoc.docvision.paddle_provider import build_provider_page
-from babeldoc.docvision.paddle_provider import formula_text
 from babeldoc.docvision.provider_ir import ProviderDocument
 
 
 def chars(text, y=50):
     return [
-        NS(
+        SimpleNamespace(
             char_unicode=c,
             visual_bbox=None,
-            box=NS(x=10 + 6 * i, y=y, x2=16 + 6 * i, y2=y + 10),
+            box=SimpleNamespace(x=10 + 6 * i, y=y, x2=16 + 6 * i, y2=y + 10),
         )
         for i, c in enumerate(text)
     ]
@@ -42,9 +40,9 @@ def test_formula_alignment_falls_back_on_ambiguity_or_prose(source, latex, reaso
 
 
 def test_block_reference_is_not_pretended_to_be_precise_ocr():
-    page = NS(
+    page = SimpleNamespace(
         page_number=0,
-        cropbox=NS(box=NS(y=0, y2=100)),
+        cropbox=SimpleNamespace(box=SimpleNamespace(y=0, y2=100)),
         pdf_character=chars("size |A|=1"),
     )
     provider, report = build_provider_page(

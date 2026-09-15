@@ -25,15 +25,20 @@ import sys
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime
+from datetime import timezone
 from pathlib import Path
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from layout_engine import (  # noqa: E402
-    LABELS, LABELS_ZH, PALETTE, Box, LayoutEngine, class_counts, color_for,
-)
+from layout_engine import LABELS  # noqa: E402
+from layout_engine import LABELS_ZH  # noqa: E402
+from layout_engine import PALETTE  # noqa: E402
+from layout_engine import Box  # noqa: E402
+from layout_engine import LayoutEngine  # noqa: E402
+from layout_engine import class_counts  # noqa: E402
+from layout_engine import color_for  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -133,7 +138,7 @@ class Tee:
 
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.fh = open(path, "w", buffering=1)
+        self.fh = path.open("w", buffering=1)
 
     def write(self, s: str) -> None:
         sys.__stdout__.write(s)

@@ -57,7 +57,7 @@ def download(repo: str, filename: str, dest: Path, force: bool = False) -> Path:
     url = f"{_endpoint()}/{repo}/resolve/main/{filename}"
     tmp = dest.with_suffix(dest.suffix + ".part")
     print(f"  [get ] {url}")
-    with urllib.request.urlopen(url, timeout=120) as resp, open(tmp, "wb") as fh:
+    with urllib.request.urlopen(url, timeout=120) as resp, tmp.open("wb") as fh:  # noqa: S310 - 固定 https huggingface 端点
         total = int(resp.headers.get("Content-Length") or 0)
         done = 0
         while chunk := resp.read(1 << 20):

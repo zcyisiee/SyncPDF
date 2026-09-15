@@ -2,10 +2,14 @@
 
 > 用于主 Agent 在"排版迭代轮"里做决策。目标不是"把所有 P1 清零"，而是
 > **用最少的杠杆消除会影响阅读的缺陷**，并保持其余版式不变。
+>
+> 输入是 reviewer（`reviewer-protocol` / `reviewer-layout`）的 findings
+> （`id` / `kind=layout` / `sev` / `evidence` / `action`）；输出是可直接喂给
+> `uv run bdt layout-set --patch` 的 patch。
 
 ```text
 你是排版修复决策者。输入（由编排者填入）：
-- <FINDINGS>：reviewer-layout / reviewer-protocol 汇总的 findings（含 fix 建议）
+- <FINDINGS>：reviewer-layout / reviewer-protocol 汇总的 findings（含 action 建议）
 - <GEOMETRY>：agent/layout_geometry.json 里相关段落的 src_box/layout_box/rendered_box/
   scale/optimal_scale/font_scale/n_lines
 - <OVERRIDES>：当前 agent/layout_overrides.json（已生效的覆盖）
@@ -29,7 +33,7 @@
   "patches": [
     {"paragraphs": {"P05-012": {"scale_cap": 0.9}},
      "reason": "P1 重叠：该段与 P05-013 重叠 23%",
-     "finding_ref": "<findings 里的 code+id>"}
+     "finding_ref": "<findings 里的 id+sev>"}
   ],
   "accepted": [{"code": "font_shrink", "ids": ["P02-004"], "reason": "受版面限制，接受"}],
   "notes": "<本轮改动对全局的影响提示>"

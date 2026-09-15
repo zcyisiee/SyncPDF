@@ -194,7 +194,7 @@ python experiments/toolchain_gates.py <workdir> --pdf <源pdf> --json
 **详细排查手册**（目录/链接/漏译/公式/字号/圈号六大症状）：
 [`docs/toolchain/troubleshooting.md`](../../../docs/toolchain/troubleshooting.md)。
 **门禁阈值与人为触发方式**：
-[`docs/toolchain/gates.md`](../../../docs/toolchain/gates.md)。
+[`docs/toolchain/README.md`](../../../docs/toolchain/README.md#3-门禁速查)。
 
 ---
 

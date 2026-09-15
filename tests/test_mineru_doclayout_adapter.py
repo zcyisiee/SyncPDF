@@ -2,6 +2,9 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+#: 构造 MinerU 适配器只需一个不触发 API 的占位值（回放路径不用它）。
+_DUMMY_MINERU_ARG = "dummy"
+
 
 def _labels_from_result(result) -> set[str]:
     labels = set()
@@ -17,7 +20,7 @@ def test_mineru_adapter_recursively_expands_leaf_blocks_and_maps_types():
     fixture = Path("tests/fixtures/mineru/layout_v275_s41586_excerpt.json")
     layout_json = json.loads(fixture.read_text(encoding="utf-8"))
 
-    model = MinerUDocLayoutModel(api_token="dummy-token")
+    model = MinerUDocLayoutModel(api_token=_DUMMY_MINERU_ARG)
     page_results = model._parse_layout_json_page_results(layout_json, total_pages=7)
 
     # page 1 contains image blocks with nested image_body / image_caption
@@ -46,7 +49,7 @@ def test_mineru_adapter_outputs_numpy_like_yolobox_values():
 
     fixture = Path("tests/fixtures/mineru/layout_v275_s41586_excerpt.json")
     layout_json = json.loads(fixture.read_text(encoding="utf-8"))
-    model = MinerUDocLayoutModel(api_token="dummy-token")
+    model = MinerUDocLayoutModel(api_token=_DUMMY_MINERU_ARG)
     page_results = model._parse_layout_json_page_results(layout_json, total_pages=7)
 
     sample_box = page_results[2].boxes[0]
@@ -61,19 +64,19 @@ def test_mineru_handle_document_allows_requested_page_subset(monkeypatch):
 
     fixture = Path("tests/fixtures/mineru/layout_v275_s41586_excerpt.json")
     layout_json = json.loads(fixture.read_text(encoding="utf-8"))
-    model = MinerUDocLayoutModel(api_token="dummy-token")
+    model = MinerUDocLayoutModel(api_token=_DUMMY_MINERU_ARG)
 
     monkeypatch.setattr(
         model,
         "_request_upload_urls",
-        lambda client, pdf_path: ("batch-1", "https://upload.example"),
+        lambda _client, _pdf_path: ("batch-1", "https://upload.example"),
     )
-    monkeypatch.setattr(model, "_upload_pdf", lambda client, upload_url, pdf_path: None)
+    monkeypatch.setattr(model, "_upload_pdf", lambda _client, _upload_url, _pdf_path: None)
     monkeypatch.setattr(
-        model, "_poll_full_zip_url", lambda client, batch_id, translate_config: "https://zip.example"
+        model, "_poll_full_zip_url", lambda _client, _batch_id, _translate_config: "https://zip.example"
     )
-    monkeypatch.setattr(model, "_download_zip_bytes", lambda client, zip_url: b"dummy")
-    monkeypatch.setattr(model, "_load_layout_json_from_zip_bytes", lambda zip_bytes: layout_json)
+    monkeypatch.setattr(model, "_download_zip_bytes", lambda _client, _zip_url: b"dummy")
+    monkeypatch.setattr(model, "_load_layout_json_from_zip_bytes", lambda _zip_bytes: layout_json)
 
     translate_config = SimpleNamespace(
         input_file="dummy.pdf",

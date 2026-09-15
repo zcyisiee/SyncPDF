@@ -18,12 +18,13 @@ import argparse
 import json
 import sqlite3
 import sys
-from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from babeldoc.tools.agent.protocol import INPUT_HEADING, extract_input_items, validate_output  # noqa: E402
+from babeldoc.tools.agent.protocol import INPUT_HEADING  # noqa: E402
+from babeldoc.tools.agent.protocol import extract_input_items  # noqa: E402
+from babeldoc.tools.agent.protocol import validate_output  # noqa: E402
 
 
 def iter_cache_rows(db_path: str):
@@ -33,12 +34,11 @@ def iter_cache_rows(db_path: str):
         "WHERE translate_engine = 'openai' AND original_text LIKE ?",
         (f"%{INPUT_HEADING}%",),
     ).fetchall()
-    for prompt, output in rows:
-        yield prompt, output
+    yield from rows
 
 
 def iter_tracking_rows(tracking_path: str):
-    with open(tracking_path) as f:
+    with Path(tracking_path).open() as f:
         data = json.load(f)
 
     def walk(items):

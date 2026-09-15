@@ -1,7 +1,7 @@
 # translator：整篇翻译（translate_document 的提示词）
 
-> `translate_document` 读取本文件 ```text 块，`{document}` 替换为 `agent/document.md`。
-> 迁移自 `prompts/markdown-translator.md`（内容等价，保留为 legacy 副本）。
+> `babeldoc_tools.translate.translate_document` 读取本文件 ```text 块，
+> `{document}` 替换为 `agent/document.md`。
 
 ```text
 你是一名专业的英译中（简体中文）学术论文翻译。下面给你一篇论文的完整正文（Markdown 格式）。

@@ -1,15 +1,15 @@
+from types import SimpleNamespace
+
 import numpy as np
 import pymupdf
-
-from babeldoc.docvision.paddle_doclayout import (
-    PaddleDocLayoutModel,
-    PaddleDependencyError,
-)
+import pytest
+from babeldoc.docvision.paddle_doclayout import PaddleDependencyError
+from babeldoc.docvision.paddle_doclayout import PaddleDocLayoutModel
 
 
 def test_paddle_adapter_normalizes_labels_and_preserves_order():
     model = PaddleDocLayoutModel(
-        predictor=lambda image: [
+        predictor=lambda _image: [
             {"bbox": [1, 2, 30, 40], "score": 0.9, "label": "text", "order_rank": 3},
             {
                 "bbox": [5, 6, 20, 25],
@@ -32,7 +32,7 @@ def test_paddle_adapter_handles_page_and_rotation_with_injected_predictor():
     doc = pymupdf.open()
     page = doc.new_page(width=200, height=100)
     page.set_rotation(90)
-    model = PaddleDocLayoutModel(predictor=lambda image: [], dpi=72)
+    model = PaddleDocLayoutModel(predictor=lambda _image: [], dpi=72)
     page_obj = type("Page", (), {"page_number": 0})()
     page_obj_result = list(model.handle_document([page_obj], doc, None, False))
     assert len(page_obj_result) == 1
@@ -60,8 +60,6 @@ def test_paddle_dependency_error_is_explicit(monkeypatch):
         raise AssertionError("missing PaddleX must be reported explicitly")
 
 
-import pytest
-from types import SimpleNamespace as NS
 
 
 @pytest.mark.parametrize("rotation", [0, 90, 180, 270])
@@ -83,7 +81,7 @@ def test_pixel_to_point_coordinates_with_crop_and_rotation(rotation, dpi):
             ]
 
         model = PaddleDocLayoutModel(predictor=predict, dpi=dpi)
-        result = list(model.handle_document([NS(page_number=0)], doc, None, False))[0][
+        result = list(model.handle_document([SimpleNamespace(page_number=0)], doc, None, False))[0][
             1
         ]
         assert result.boxes[0].xyxy == pytest.approx([40, 50, 120, 100], abs=0.001)
@@ -93,25 +91,23 @@ def test_pixel_to_point_coordinates_with_crop_and_rotation(rotation, dpi):
 def test_pixel_guard_does_not_lower_resolution():
     with pymupdf.open() as doc:
         doc.new_page(width=200, height=100)
-        model = PaddleDocLayoutModel(predictor=lambda im: [], max_pixels=100, dpi=144)
+        model = PaddleDocLayoutModel(predictor=lambda _im: [], max_pixels=100, dpi=144)
         with pytest.raises(ValueError, match="without reducing DPI"):
-            list(model.handle_document([NS(page_number=0)], doc, None, False))
+            list(model.handle_document([SimpleNamespace(page_number=0)], doc, None, False))
 
 
 @pytest.mark.parametrize("bbox", [[float("nan"), 0, 1, 1], [3, 0, 1, 1], [0, 0, 1]])
 def test_malformed_detections_fail_instead_of_dropping_characters(bbox):
     with pytest.raises(ValueError):
-        PaddleDocLayoutModel(predictor=lambda im: [])._normalize(
+        PaddleDocLayoutModel(predictor=lambda _im: [])._normalize(
             [{"bbox": bbox, "label": "text"}], 100, 100
         )
 
 
 def test_all_twenty_five_labels_have_a_downstream_role():
-    from babeldoc.docvision.layout_labels import (
-        PADDLE_LABELS,
-        PADDLE_TO_LAYOUT,
-        PADDLE_ROLES,
-    )
+    from babeldoc.docvision.layout_labels import PADDLE_LABELS
+    from babeldoc.docvision.layout_labels import PADDLE_ROLES
+    from babeldoc.docvision.layout_labels import PADDLE_TO_LAYOUT
 
     assert len(PADDLE_LABELS) == 25
     assert set(PADDLE_LABELS) == set(PADDLE_TO_LAYOUT) == set(PADDLE_ROLES)
@@ -139,10 +135,10 @@ def test_uncovered_char_indices_mirrors_coverage_gate_frame():
 
     class Char:
         def __init__(self, box):
-            self.visual_bbox = NS(box=box)
+            self.visual_bbox = SimpleNamespace(box=box)
             self.box = box
 
-    page = NS(
+    page = SimpleNamespace(
         pdf_character=[
             Char(Box(10, 10, 20, 20)),
             Char(Box(40, 40, 50, 50)),

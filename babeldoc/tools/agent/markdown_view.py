@@ -57,6 +57,9 @@ MD_HEADER = (
 # --------------------------------------------------------------------------- #
 # 文本层修复
 # --------------------------------------------------------------------------- #
+#: MinerU 回放（`--mineru-json`）时使用的占位 token：不发起 API 调用，仅满足构造签名。
+_MINERU_REPLAY_ARG = "replay"
+
 _WORDS: set[str] | None = None
 
 _HYPHEN_RE = re.compile(r"([A-Za-z][A-Za-z0-9]*)[-\u2010\u2011]\s+([A-Za-z][A-Za-z']*)")
@@ -94,7 +97,9 @@ def _load_words() -> set[str]:
     if _WORDS is None:
         words: set[str] = set()
         try:
-            with open("/usr/share/dict/words", encoding="utf-8", errors="ignore") as f:
+            with Path("/usr/share/dict/words").open(
+                encoding="utf-8", errors="ignore"
+            ) as f:
                 for line in f:
                     w = line.strip().lower()
                     if w.isalpha():
@@ -342,7 +347,9 @@ def _run_parse(
         EnclosedMarkerFixer,
     )
     from babeldoc.format.pdf.document_il.midend.il_translator import ILTranslator
-    from babeldoc.format.pdf.document_il.midend.il_translator import PageTranslateTracker
+    from babeldoc.format.pdf.document_il.midend.il_translator import (
+        PageTranslateTracker,
+    )
     from babeldoc.format.pdf.document_il.midend.inline_math_protector import (
         InlineMathProtector,
     )
@@ -378,7 +385,7 @@ def _run_parse(
         from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
 
         os.environ["BABELDOC_MINERU_LAYOUT_JSON"] = str(mineru_json)
-        config.doc_layout_model = MinerUDocLayoutModel(api_token="replay")
+        config.doc_layout_model = MinerUDocLayoutModel(api_token=_MINERU_REPLAY_ARG)
     elif layout == "mineru":
         from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
 
@@ -686,7 +693,7 @@ def extract_markdown(
     skipped_rows = result.get("skipped_rows", [])
     md = _render_markdown(rows)
     (agent / "document.md").write_text(md, encoding="utf-8")
-    with open(agent / "sheet.jsonl", "w", encoding="utf-8") as f:
+    with (agent / "sheet.jsonl").open("w", encoding="utf-8") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     (agent / "anchors.json").write_text(
@@ -710,7 +717,7 @@ def extract_markdown(
         ),
         encoding="utf-8",
     )
-    with open(workflow.state_path(workdir), "wb") as f:
+    with workflow.state_path(workdir).open("wb") as f:
         pickle.dump(
             {
                 "doc": result["docs"],
@@ -821,8 +828,8 @@ def parse_translated_markdown(md_text: str) -> dict[str, tuple[str, str]]:
 
 def missing_ids(workdir, md_text: str) -> list[str]:
     """返回译文中缺失的段落 id（供编排器重试）。"""
-    with open(workflow.state_path(workdir), "rb") as f:
-        state = pickle.load(f)
+    with workflow.state_path(workdir).open("rb") as f:
+        state = pickle.load(f)  # noqa: S301 - workdir 私有产物，非不可信输入
     parsed = parse_translated_markdown(md_text)
     return [pid for pid in state["inputs"] if pid not in parsed]
 
@@ -840,8 +847,8 @@ def apply_markdown(workdir, translated_md):
     """校验译文 Markdown 并按锚点写回 IR。返回报告 dict。"""
     workdir = Path(workdir)
     agent = workflow.agent_dir(workdir)
-    with open(workflow.state_path(workdir), "rb") as f:
-        state = pickle.load(f)
+    with workflow.state_path(workdir).open("rb") as f:
+        state = pickle.load(f)  # noqa: S301 - workdir 私有产物，非不可信输入
     inputs = state["inputs"]
     anchors_meta = json.loads((agent / "anchors.json").read_text(encoding="utf-8"))
     labels = {r["id"]: r["layout_label"] for r in anchors_meta["rows"]}
@@ -929,7 +936,7 @@ def apply_markdown(workdir, translated_md):
         }
 
     sheet = agent / "translated.jsonl"
-    with open(sheet, "w", encoding="utf-8") as f:
+    with sheet.open("w", encoding="utf-8") as f:
         for entry in entries:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 

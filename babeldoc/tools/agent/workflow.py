@@ -191,8 +191,8 @@ def _normalize_placeholder_punctuation(
 def apply(workdir, translated_sheet):
     """校验译文 sheet 并写回 IR。返回报告 dict；失败时 ok=False。"""
     workdir = Path(workdir)
-    with open(state_path(workdir), "rb") as f:
-        state = pickle.load(f)
+    with state_path(workdir).open("rb") as f:
+        state = pickle.load(f)  # noqa: S301 - workdir 私有产物，非不可信输入
     doc = state["doc"]
     inputs = state["inputs"]
 
@@ -246,7 +246,7 @@ def apply(workdir, translated_sheet):
         )
         applied += 1
 
-    with open(state_path(workdir), "wb") as f:
+    with state_path(workdir).open("wb") as f:
         pickle.dump(state, f)
     XMLConverter().write_json(
         doc, str(agent_dir(workdir) / "il_translated.applied.json")
@@ -284,8 +284,8 @@ def reconstruct(
     from babeldoc.tools.agent import layout_overrides
 
     workdir = Path(workdir)
-    with open(state_path(workdir), "rb") as f:
-        state = pickle.load(f)
+    with state_path(workdir).open("rb") as f:
+        state = pickle.load(f)  # noqa: S301 - workdir 私有产物，非不可信输入
     doc = state["doc"]
 
     temp_pdf_path = Path(state["temp_pdf_path"])
