@@ -9,7 +9,7 @@
     bdt translate --workdir tmp/wd --prompt-only              # 只写 agent/prompt.md
     bdt apply --workdir tmp/wd [--markdown tmp/wd/agent/translated.md]
     bdt build --workdir tmp/wd [--output-dir tmp/wd/output] [--dual] [--render 1,2]
-    bdt check --workdir tmp/wd [--skip-pdf-checks]
+    bdt check --workdir tmp/wd [--skip-pdf-checks] [--strict]
     bdt layout-set --workdir tmp/wd --patch '{"paragraphs": {...}}'
     bdt report --workdir tmp/wd
     bdt run <pdf> --workdir tmp/wd [--from build] [--markdown self] \
@@ -22,8 +22,10 @@
 - 日志/进度/第三方库输出统一走 stderr；
 - 退出码：0 = ok，1 = 失败（含可预期错误），2 = 用法错误（argparse）。
 - 翻译/审查只有一种机制：被调命令从 stdin 读提示词、把结果写到 stdout。
-  ``run`` 在 ``--prompt-only`` 时停在 translate、无 ``--reviewer`` 时停在 review
-  （``stopped_at`` / ``status`` 字段，exit 0，但都不是最终成功）。
+  ``run`` 在 ``--prompt-only`` 时停在 translate；无 ``--reviewer`` 时停在 review
+  并以 ``waiting_for_reviewer``（exit 1）结束——质量门禁不把"没人审查"当成功。
+- ``bdt check`` 聚合结构审查 / 排版 lint / 链接审计；``--strict`` 时 verdict
+  非 pass（含子项不可用）退出码 1，``bdt run`` 的 check 步用同一语义。
 """
 
 from __future__ import annotations
@@ -171,13 +173,19 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ---- check ----------------------------------------------------------- #
     p_check = sub.add_parser(
-        "check", help="结构性审查（占位：转调 review_document，聚合逻辑后续阶段实现）"
+        "check",
+        help="三合一聚合：结构审查 + 排版 lint + 链接审计（--strict 时非 pass 退出码 1）",
     )
     _add_workdir(p_check)
     p_check.add_argument("--mono", default=None, help="mono PDF 路径（默认自动查找）")
     p_check.add_argument("--dual", default=None)
     p_check.add_argument("--source-pdf", default=None, help="原文 PDF（默认取 state.pkl 内路径）")
     p_check.add_argument("--skip-pdf-checks", action="store_true")
+    p_check.add_argument(
+        "--strict",
+        action="store_true",
+        help="verdict != pass（含子项 not_available 导致无法确认）时退出码置 1",
+    )
 
     # ---- layout-set ------------------------------------------------------ #
     p_layout = sub.add_parser("layout-set", help="写入/合并段落级排版覆盖")
@@ -330,12 +338,13 @@ def _dispatch(args: argparse.Namespace) -> dict:
         )
     if command == "check":
         return registry.invoke(
-            review.review_document,
+            review.check_document,
             workdir=args.workdir,
             mono=args.mono,
             dual=args.dual,
             source_pdf=args.source_pdf,
             skip_pdf_checks=args.skip_pdf_checks,
+            strict=args.strict,
         )
     if command == "layout-set":
         patch = None
@@ -423,7 +432,14 @@ def main(argv=None) -> int:
         payload = _dispatch(args)
     sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
     sys.stdout.flush()
-    return 0 if payload.get("ok") else 1
+    if payload.get("ok"):
+        # ``check --strict``：verdict != pass（含子项 not_available 导致的无法确认）
+        # 时退出码置 1，供 CI / run 做质量门禁；默认仍返回 0 让审查 Agent 读 JSON。
+        if getattr(args, "strict", False) and args.command == "check":
+            if ((payload.get("data") or {}).get("verdict")) != "pass":
+                return 1
+        return 0
+    return 1
 
 
 if __name__ == "__main__":

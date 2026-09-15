@@ -16,8 +16,8 @@ from babeldoc_tools import run as run_tool
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-#: 显式 reviewer 命令：给了它 review 阶段才会执行并进入 report（U3 起无 --reviewer
-#: 时 run 停在 ``waiting_for_reviewer``，不返回最终成功）。
+#: 显式 reviewer 命令：给了它 review 阶段才会执行并进入 report（U4 起无 --reviewer
+#: 时 run 以 ``waiting_for_reviewer`` / exit 1 结束——质量门禁不把"没人审查"当成功）。
 REVIEWER = "stub-reviewer"
 
 DOC_MD = (
@@ -44,7 +44,7 @@ def _cli(*argv: str) -> subprocess.CompletedProcess:
 def stub_stages(monkeypatch):
     """把 ``run._run_stage`` 换成替身，返回被调用的阶段名列表。"""
     calls: list[str] = []
-    behavior: dict = {"check_verdict": "pass"}
+    behavior: dict = {"check_verdict": "pass", "review": {"verdict": "pass", "findings": []}}
 
     def fake_stage(stage, workdir_path, _cfg):
         calls.append(stage)
@@ -78,11 +78,14 @@ def stub_stages(monkeypatch):
                     "blockers": [],
                     "warnings": [],
                     "metrics": {},
+                    "layout": {"status": "ok", "summary": {}},
+                    "links": {"status": "ok", "missing": 0, "wrong_label": 0, "wrong_role": 0},
+                    "reasons": [] if behavior["check_verdict"] == "pass" else ["demo blocker"],
                     "report": str(agent / "review_verdict.json"),
                 },
             }
         if stage == "review":
-            review = {"verdict": "pass", "findings": []}
+            review = dict(behavior["review"])
             (agent / "agent_review.json").write_text(
                 json.dumps(review), encoding="utf-8"
             )
@@ -434,22 +437,112 @@ def test_prompt_only_stops_after_translate(tmp_path, stub_stages, monkeypatch): 
     assert statuses["apply"] == "skipped"
 
 
-def test_run_without_reviewer_stops_at_review(tmp_path, stub_stages):  # noqa: ARG001
-    """U3：没有 --reviewer 时停在 review 等待状态，不返回最终成功、不跑 report。"""
+def test_run_without_reviewer_fails_the_gate(tmp_path, stub_stages):  # noqa: ARG001
+    """U4 收紧：没有 --reviewer 时停在 review 并**失败**（exit 1），不跑 report。
+
+    U3 曾把它当"等待"返回 exit 0；质量门禁不能把"没人审查"当交付成功。
+    """
     workdir = _make_workdir(tmp_path)
 
     result = run_tool.run_pipeline(
         str(workdir), str(_make_pdf(tmp_path)), markdown="self"
     )
 
-    assert result["ok"] is True
+    assert result["ok"] is False
+    assert result["error"]["code"] == "waiting_for_reviewer"
+    assert result["error"]["stage"] == "review"
+    assert "--reviewer" in result["error"]["reviewer_usage"]
     assert result["data"]["stopped_at"] == "review"
-    assert result["data"]["status"] == "waiting_for_reviewer"
     assert "report" not in stub_stages["calls"]
     statuses = {item["stage"]: item["status"] for item in result["data"]["stages"]}
     assert statuses["review"] == "waiting"
     assert statuses["report"] == "skipped"
     assert not (workdir / "FINAL_REPORT.md").exists()
+
+
+def test_reviewer_pass_cannot_override_check_blocker(tmp_path, stub_stages):  # noqa: ARG001
+    """check 的确定性 blocker 优先：reviewer 给 pass 也不能把整体判成成功。"""
+    workdir = _make_workdir(tmp_path)
+    stub_stages["behavior"]["check_verdict"] = "needs_fix"
+
+    result = run_tool.run_pipeline(
+        str(workdir), str(_make_pdf(tmp_path)), markdown="self", reviewer=REVIEWER
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "check_needs_fix"
+    assert result["error"]["reviewer_verdict"] == "pass"
+    assert result["error"]["verdict"] == "needs_fix"
+
+
+def test_reviewer_needs_fix_returns_actions_and_counts_a_round(tmp_path, stub_stages):  # noqa: ARG001
+    """needs_fix 的 findings 映射为 actions；run 不自动修复，只记一轮。"""
+    workdir = _make_workdir(tmp_path)
+    stub_stages["behavior"]["review"] = {
+        "verdict": "needs_fix",
+        "findings": [
+            {
+                "id": "P01-001",
+                "kind": "retranslate",
+                "evidence": "demo",
+                "action": "translate --ids P01-001",
+            },
+            {
+                "id": "P02-003",
+                "kind": "layout",
+                "evidence": "overflow",
+                "action": "layout-set scale_cap 0.9",
+            },
+        ],
+    }
+
+    result = run_tool.run_pipeline(
+        str(workdir), str(_make_pdf(tmp_path)), markdown="self", reviewer=REVIEWER
+    )
+
+    assert result["ok"] is False
+    error = result["error"]
+    assert error["code"] == "reviewer_needs_fix"
+    assert error["actions"]["retranslate"]["ids"] == ["P01-001"]
+    assert error["actions"]["layout"]["items"][0]["id"] == "P02-003"
+    assert error["fix_rounds"] == {"retranslate": 1, "layout": 1}
+    # report 仍跑完（check 之后）；review 没有隐藏的自动修复循环
+    assert result["data"]["stages"][-1]["stage"] == "report"
+    assert stub_stages["calls"].count("translate") == 1
+
+    state = json.loads((workdir / "agent" / "run_state.json").read_text(encoding="utf-8"))
+    assert state["quality"]["fix_rounds"] == {"retranslate": 1, "layout": 1}
+    assert state["quality"]["reviewer"]["verdict"] == "needs_fix"
+
+
+def test_reviewer_fix_rounds_are_capped(tmp_path, stub_stages):  # noqa: ARG001
+    """超上限停在 needs_human_review，不再调用 reviewer。"""
+    workdir = _make_workdir(tmp_path)
+    finding = {
+        "id": "P01-001",
+        "kind": "retranslate",
+        "evidence": "demo",
+        "action": "translate --ids P01-001",
+    }
+    stub_stages["behavior"]["review"] = {"verdict": "needs_fix", "findings": [finding]}
+
+    for expected_round in (1, 2):
+        result = run_tool.run_pipeline(
+            str(workdir), str(_make_pdf(tmp_path)), markdown="self", reviewer=REVIEWER
+        )
+        assert result["error"]["code"] == "reviewer_needs_fix"
+        assert result["error"]["fix_rounds"]["retranslate"] == expected_round
+
+    stub_stages["calls"].clear()
+    result = run_tool.run_pipeline(
+        str(workdir), str(_make_pdf(tmp_path)), markdown="self", reviewer=REVIEWER
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "needs_human_review"
+    assert result["error"]["exhausted"] == ["retranslate"]
+    # 已超限：review 阶段的模型调用不再发生（check 仍跑了）
+    assert "review" not in stub_stages["calls"]
 
 
 # --------------------------------------------------------------------------- #

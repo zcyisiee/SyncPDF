@@ -28,6 +28,7 @@ def report(
     ) or {}
     geometry = common.read_json(agent / "layout_geometry.json", default={}) or {}
     recon = common.read_json(agent / "reconstruct_report.json", default={}) or {}
+    link_audit = common.read_json(agent / "link_audit.json", default=None)
 
     leftovers = _leftovers(verdict, lint, apply_report, backtranslation)
     lines: list[str] = []
@@ -143,6 +144,47 @@ def report(
         lines.append("- 生效覆盖：无（默认布局）")
     if geometry.get("warnings"):
         lines.append(f"- 覆盖告警：{geometry['warnings'][:5]}")
+    lines.append("")
+
+    # ---- 链接 ------------------------------------------------------------- #
+    lines.append(section.heading("链接"))
+    lines.append("")
+    if isinstance(link_audit, dict):
+        summary = link_audit.get("summary") or {}
+        problem = [
+            item
+            for item in (link_audit.get("findings") or [])
+            if item.get("anchor_status") not in ("verified", "no_source_text")
+        ]
+        lines.append(
+            f"- 源链接 {summary.get('source_links', 0)} 条 → 译文注释 "
+            f"{summary.get('output_annotations', 0)} 条；保留 {summary.get('preserved', 0)} 条"
+            f"（targets_preserved={link_audit.get('targets_preserved')}，"
+            f"anchors_verified={link_audit.get('anchors_verified')}）"
+        )
+        lines.append(
+            f"- 缺失 `missing`={summary.get('missing', 0)}；编号错 `wrong_label`="
+            f"{summary.get('wrong_label', 0)}；角色错 `wrong_role`="
+            f"{summary.get('wrong_role', 0)}；未确认 `unverified`="
+            f"{summary.get('unverified', 0)}"
+        )
+        lines.append(
+            f"- 源侧无效 {summary.get('source_invalid', 0)}；译文侧无效 "
+            f"{summary.get('output_invalid', 0)}；外部地址未校验 "
+            f"{summary.get('external_unchecked', 0)}"
+        )
+        if problem:
+            lines.append(f"- 待复核条目（前 10 条，共 {len(problem)} 条）：")
+            for item in problem[:10]:
+                lines.append(
+                    f"  - p{item.get('page')} `{item.get('anchor_status')}` "
+                    f"`{item.get('source_text')}` → `{item.get('output_text')}`"
+                )
+        else:
+            lines.append("- 待复核条目：无")
+        lines.append(f"- 逐条审计：`{agent / 'link_audit.json'}`")
+    else:
+        lines.append("（未执行：无 agent/link_audit.json；跑 `bdt check` 后生效）")
     lines.append("")
 
     if recon:

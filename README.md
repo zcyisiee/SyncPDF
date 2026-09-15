@@ -115,10 +115,31 @@ bdt run "$PDF" --workdir "$WD" --markdown self --dual
 ```
 
 `bdt run` 把每阶段的完成标记与关键输入 sha256 记进 `agent/run_state.json`
-（run 私有状态，其他工具不读）。任一步失败即以该步错误 JSON 退出（exit 1），
-已完成阶段产物保留在 workdir 供续跑。`--from` 见下方"常用参数"。
+（run 私有状态，其他工具不读），并记录 `quality`（check verdict、reviewer 结论、
+修复轮计数）。任一步失败即以该步错误 JSON 退出（exit 1），已完成阶段产物保留在
+workdir 供续跑。`--from` 见下方"常用参数"。
+
+`run` 的质量门禁（U4）：
+
+- `check` 步用 `--strict` 语义：verdict 非 pass（含子项 `not_available`）时继续跑完
+  reviewer 与 report，但整体退出码 1。check 的确定性 blocker 优先，reviewer 的
+  `pass` 不能覆盖它。
+- 没有 `--reviewer` 时以 `waiting_for_reviewer` 结束（exit 1）——没人审查不算成功；
+  审查提示词写在 `agent/review_prompt.md`。
+- `--reviewer` 返回 `needs_fix` 时，findings（每条带 `id`/`kind`/`evidence`/`action`）
+  被映射成 `actions` JSON（`bdt translate --ids` / `bdt layout-set`）；执行后用
+  `bdt run --from apply` 续跑。单任务最多 2 个翻译修复轮 + 2 个排版修复轮，超限停在
+  `needs_human_review` 并不再调用模型。run 不做自动修复。
 
 链接审计：
+
+```bash
+# 三合一质量门禁：结构审查 + 排版 lint + 链接审计（结果落 agent/link_audit.json）
+bdt check --workdir tmp/my-paper            # 只读，返回合并 JSON（exit 0）
+bdt check --workdir tmp/my-paper --strict    # verdict 非 pass 时 exit 1（CI / run 用）
+```
+
+需要单独调用底层函数时：
 
 ```bash
 python - <<'PY'

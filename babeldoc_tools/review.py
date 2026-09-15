@@ -1,10 +1,23 @@
-"""审查工具：结构性 verdict + 回译校验。
+"""审查工具：结构性 verdict + 排版 lint + 链接审计 + 回译校验。
 
 - ``review_document``：确定性检查（apply 报告 + 段内完整性 + 页数/目录/链接 +
   文本层占位符残留 + 标题字号）→ ``verdict: pass | needs_fix``。
+- ``audit_links_tool``：调用 ``babeldoc.tools.agent.link_audit.audit_links``，
+  把链接逐条审计结果落到 ``agent/link_audit.json``（只封装调用，不改算法）。
+- ``check_document``：``bdt check`` 的三合一聚合——结构审查 + 排版 lint +
+  链接审计，返回统一 verdict 与各子项状态。
 - ``backtranslate_check``：只对高风险段落做回译（由 reviewer-fidelity agent
   产出英文），Python 侧用 Levenshtein 相似度判定。已从公开 CLI 移除，保留为
   内部 Python 函数。
+
+聚合的 verdict 规则（``pass`` / ``needs_fix`` 二值）：
+
+- 结构审查有 blocker，或排版 lint 有 P0/P1，或链接审计出现 missing /
+  wrong_label / wrong_role / unresolved → ``needs_fix``；
+- 子项 ``not_available`` / ``not_reconstructed``（产物缺失、源 PDF 不可用）
+  说明"无法确认"，同样按 ``needs_fix`` 处理（只读 check 不崩，但质量门禁
+  不能把"没检查"当通过）；
+- ``ok`` 只在真正的执行异常时为 false：子项缺失只降级该子项。
 """
 
 from __future__ import annotations
@@ -217,6 +230,253 @@ def _find_output(workdir: Path, suffix: str) -> str | None:
         for path in sorted(base.glob(f"*.{suffix}.pdf")):
             return str(path)
     return None
+
+
+# --------------------------------------------------------------------------- #
+# 链接审计（封装 babeldoc.tools.agent.link_audit.audit_links）
+# --------------------------------------------------------------------------- #
+#: 链接子项里视为"需要修复"的计数键；``external_unchecked`` / ``no_source_text``
+#: 是"未确认"类信息，不单独触发 needs_fix（外部地址本就只校验是否保留）。
+LINK_PROBLEM_KEYS = ("missing", "wrong_label", "wrong_role", "unresolved")
+
+#: 链接审计结果里前 N 条问题进 JSON（完整清单在 agent/link_audit.json）。
+LINK_PROBLEM_LIMIT = 20
+
+
+def _existing_path(raw, workdir_path: Path) -> str | None:
+    """把记录里的路径解析成真实存在的路径（相对路径先按 CWD、再按 workdir 试）。"""
+    if not raw:
+        return None
+    candidate = Path(raw)
+    if candidate.exists():
+        return str(candidate)
+    fallback = workdir_path / candidate
+    if fallback.exists():
+        return str(fallback)
+    return None
+
+
+def state_pdf_path(workdir) -> str | None:
+    """从 ``agent/state.pkl`` 取源 PDF 路径（parse 阶段落的 ``pdf_path``）。"""
+    import pickle
+
+    workdir_path = Path(workdir)
+    state_file = common.agent_dir(workdir_path) / "state.pkl"
+    if not state_file.exists():
+        return None
+    try:
+        with state_file.open("rb") as handle:
+            state = pickle.load(handle)  # noqa: S301 - 本地 workdir 私有产物
+    except Exception:  # noqa: BLE001 - 取不到源 PDF 不应阻断其余子项
+        return None
+    raw = state.get("pdf_path") if isinstance(state, dict) else None
+    if not raw:
+        return None
+    return _existing_path(raw, workdir_path) or str(raw)
+
+
+def reconstruct_mono_pdf(workdir) -> str | None:
+    """从 ``agent/reconstruct_report.json`` 取 mono PDF 路径。"""
+    workdir_path = Path(workdir)
+    recon = common.read_json(
+        common.agent_dir(workdir_path) / "reconstruct_report.json", default={}
+    ) or {}
+    return recon.get("mono_pdf") or recon.get("dual_pdf")
+
+
+def _link_summary(report: dict, report_path: Path) -> dict:
+    summary = report.get("summary") or {}
+    findings = report.get("findings") or []
+    problems = [
+        {
+            "page": item.get("page"),
+            "logical_id": item.get("logical_id"),
+            "anchor_status": item.get("anchor_status"),
+            "source_text": item.get("source_text"),
+            "output_text": item.get("output_text"),
+        }
+        for item in findings
+        if item.get("anchor_status") in ("missing", "wrong_label", "wrong_role", "unverified")
+    ]
+    return {
+        "status": "ok",
+        "source_pdf": report.get("source_pdf"),
+        "pdf": report.get("pdf"),
+        "missing": summary.get("missing", 0),
+        "wrong_label": summary.get("wrong_label", 0),
+        "wrong_role": summary.get("wrong_role", 0),
+        "unverified": summary.get("unverified", 0),
+        "unresolved": summary.get("unverified", 0),
+        "no_source_text": summary.get("no_source_text", 0),
+        "verified": summary.get("verified", 0),
+        "external_unchecked": summary.get("external_unchecked", 0),
+        "source_invalid": summary.get("source_invalid", 0),
+        "output_invalid": summary.get("output_invalid", 0),
+        "source_links": summary.get("source_links", 0),
+        "output_annotations": summary.get("output_annotations", 0),
+        "preserved": summary.get("preserved", 0),
+        "targets_preserved": bool(report.get("targets_preserved")),
+        "anchors_verified": bool(report.get("anchors_verified")),
+        "problem_count": len(problems),
+        "problems": problems[:LINK_PROBLEM_LIMIT],
+        "report": str(report_path),
+    }
+
+
+def audit_links_tool(
+    workdir: str,
+    *,
+    mono: str | None = None,
+    source_pdf: str | None = None,
+    report_path: str | None = None,
+) -> dict:
+    """把源 PDF 与 mono PDF 的逐条链接审计落到 ``agent/link_audit.json``。
+
+    - 源 PDF 取自 ``state.pkl`` 的 ``pdf_path``（可显式 ``source_pdf`` 覆盖）；
+    - mono PDF 取自 ``agent/reconstruct_report.json``（可显式 ``mono`` 覆盖）；
+    - mono PDF 不存在 → ``{"status": "not_reconstructed"}``（不报错）；
+    - 源 PDF 不可用 / 页数序列不一致 → ``{"status": "not_available"}``；
+    - 成功 → 计数 + ``targets_preserved`` / ``anchors_verified`` 语义原样透出。
+
+    不改 ``audit_links`` 的算法与判定口径，只做调用封装。
+    """
+    from babeldoc.tools.agent import link_audit
+
+    workdir_path = common.require_workdir(workdir)
+    agent = common.agent_dir(workdir_path)
+
+    mono_raw = mono or reconstruct_mono_pdf(workdir_path) or _find_output(workdir_path, "mono")
+    mono_path = _existing_path(mono_raw, workdir_path)
+    if not mono_path:
+        return {
+            "status": "not_reconstructed",
+            "reason": "reconstruct_report.json 里没有可用的 mono PDF：先跑 bdt build",
+            "mono_pdf": str(mono_raw) if mono_raw else None,
+        }
+
+    source_raw = source_pdf or state_pdf_path(workdir_path)
+    source_path = _existing_path(source_raw, workdir_path)
+    if not source_path:
+        return {
+            "status": "not_available",
+            "reason": f"源 PDF 不可用（来自 state.pkl 的 pdf_path）：{source_raw}",
+            "pdf": mono_path,
+        }
+
+    target = Path(report_path) if report_path else (agent / "link_audit.json")
+    try:
+        report = link_audit.audit_links(source_path, mono_path, report_path=target)
+    except ValueError as exc:
+        # audit_links 要求 mono 与源页数序列一致；不满足时该子项不可确认，
+        # 但不影响结构审查与排版 lint 的结论。
+        return {
+            "status": "not_available",
+            "reason": str(exc),
+            "source_pdf": source_path,
+            "pdf": mono_path,
+        }
+    return _link_summary(report, target)
+
+
+# --------------------------------------------------------------------------- #
+# 排版 lint 子项
+# --------------------------------------------------------------------------- #
+def layout_subitem(workdir) -> dict:
+    """排版 lint 子项：缺 ``layout_geometry.json`` → ``not_available``。"""
+    from babeldoc_tools import layout as layout_tool
+
+    workdir_path = common.require_workdir(workdir)
+    agent = common.agent_dir(workdir_path)
+    geometry = common.read_json(agent / "layout_geometry.json", default=None)
+    if not isinstance(geometry, dict) or not geometry.get("paragraphs"):
+        return {
+            "status": "not_available",
+            "reason": "layout_geometry.json 不存在或为空：先跑 bdt build",
+        }
+    result = layout_tool.layout_lint(str(workdir_path))
+    return {
+        "status": "ok",
+        "summary": result.get("summary") or {},
+        "counts": result.get("counts") or {},
+        "findings": result.get("findings") or [],
+        "report": str(agent / "layout_lint.json"),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# 三合一聚合：``bdt check``
+# --------------------------------------------------------------------------- #
+def _aggregate_verdict(review: dict, layout: dict, links: dict) -> tuple[str, list[str], list[str]]:
+    """返回 ``(verdict, reasons, unconfirmed)``；needs_fix 由三者最严重的一档决定。"""
+    reasons: list[str] = []
+    unconfirmed: list[str] = []
+
+    blockers = review.get("blockers") or []
+    for blocker in blockers:
+        reasons.append(f"结构审查 blocker `{blocker.get('code')}`")
+    if review.get("verdict") == "needs_fix" and not blockers:
+        reasons.append("结构审查 verdict=needs_fix")
+
+    if layout.get("status") != "ok":
+        unconfirmed.append("layout")
+        reasons.append(f"排版 lint 不可用（{layout.get('status')}）：{layout.get('reason')}")
+    else:
+        severity = (layout.get("summary") or {}).get("by_severity") or {}
+        if severity.get("P0") or severity.get("P1"):
+            reasons.append(
+                f"排版 lint 缺陷 P0={severity.get('P0', 0)} P1={severity.get('P1', 0)}"
+            )
+
+    if links.get("status") != "ok":
+        unconfirmed.append("links")
+        reasons.append(f"链接审计不可用（{links.get('status')}）：{links.get('reason')}")
+    else:
+        for key in LINK_PROBLEM_KEYS:
+            if links.get(key):
+                reasons.append(f"链接审计 {key}={links[key]}")
+
+    return ("needs_fix" if reasons else "pass"), reasons, unconfirmed
+
+
+def check_document(
+    workdir: str,
+    *,
+    mono: str | None = None,
+    dual: str | None = None,
+    source_pdf: str | None = None,
+    skip_pdf_checks: bool = False,
+    strict: bool = False,
+) -> dict:
+    """三合一质量门禁：结构审查 → 排版 lint → 链接审计，返回合并 JSON。
+
+    子项产物缺失只让该子项 ``{"status": "not_available"}``（或
+    ``not_reconstructed``），不影响其余子项，``ok`` 仍为 true；真正的执行异常
+    会让整个调用以错误信封返回。``strict`` 只回填到结果里（供 CLI 决定退出码）。
+    """
+    workdir_path = common.require_workdir(workdir)
+    review = review_document(
+        workdir,
+        mono=mono,
+        dual=dual,
+        source_pdf=source_pdf,
+        skip_pdf_checks=skip_pdf_checks,
+    )
+    layout = layout_subitem(workdir_path)
+    links = audit_links_tool(str(workdir_path), mono=mono, source_pdf=source_pdf)
+    verdict, reasons, unconfirmed = _aggregate_verdict(review, layout, links)
+    return {
+        "verdict": verdict,
+        "blockers": review.get("blockers") or [],
+        "warnings": review.get("warnings") or [],
+        "metrics": review.get("metrics") or {},
+        "layout": layout,
+        "links": links,
+        "reasons": reasons,
+        "unconfirmed": unconfirmed,
+        "strict": bool(strict),
+        "apply_report": review.get("apply_report") or {},
+        "report": review.get("report"),
+    }
 
 
 # --------------------------------------------------------------------------- #

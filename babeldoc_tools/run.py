@@ -16,11 +16,16 @@
   产物被改过，**报错并给出明确指引**（不静默沿用旧产物，也不静默回退长跑）。
 - 任一步失败：以该步错误 JSON 退出，已完成步骤的产物留在 workdir 供续跑。
 
-**停止语义（U3）**：``--prompt-only`` 让编排停在 translate 步；``review`` 阶段没有
-``--reviewer`` 时停在等待状态（``stopped_at=review`` / ``waiting_for_reviewer``，
-exit 0；U4 会收紧为质量门禁失败）。两者都不算失败，但也不返回最终成功。
+**停止语义（U4）**：``--prompt-only`` 让编排停在 translate 步；``review`` 阶段没有
+``--reviewer`` 时**质量门禁失败**——停在 review、退出码 1、错误码
+``waiting_for_reviewer``（U3 曾把它当"等待"返回 exit 0；U4 收紧为失败，因为
+"没人审查"不能算交付成功）。``reviewer`` 返回 ``needs_fix`` 时把 findings 映射成
+``actions`` JSON 并以 ``reviewer_needs_fix`` 失败；单个任务最多 2 个翻译修复轮 +
+2 个排版修复轮，超限停在 ``needs_human_review`` 且不再调用模型。
 
-``agent/run_state.json`` 是 run 的私有状态，别的工具不读它。
+``agent/run_state.json`` 是 run 的私有状态，别的工具不读它；除各阶段哈希外还记录
+``quality``：check 的 verdict 与子项状态、reviewer 结论、修复轮计数（供 ``--from``
+与人工判断）。
 """
 
 from __future__ import annotations
@@ -44,6 +49,11 @@ STAGES = ("parse", "translate", "apply", "build", "check", "review", "report")
 STATE_FILE = "run_state.json"
 STATE_VERSION = 1
 
+#: 单任务修复轮上限：kind → 最多可记录的修复轮数（超限停 ``needs_human_review``）。
+#: run 不自动执行修复，一轮 = reviewer 给出一次 needs_fix（上层 Agent 执行
+#: ``translate --ids`` / ``layout-set`` 后再 ``--from apply`` 续跑）。
+MAX_FIX_ROUNDS = {"retranslate": 2, "layout": 2}
+
 #: 每个阶段的输入依赖（键名同 :func:`_current_input_hashes` 的返回值）。
 #: 只用于 ``--from`` 续跑时判断"被跳过的阶段是否已失效"。
 STAGE_INPUTS: dict[str, tuple[str, ...]] = {
@@ -61,7 +71,11 @@ STAGE_ARTIFACTS = {
     "parse": {"document_md": ("agent", "document.md"), "anchors": ("agent", "anchors.json")},
     "translate": {"translated_md": ("agent", "translated.md")},
     "apply": {"apply_report": ("agent", "apply_report.json")},
-    "check": {"review_verdict": ("agent", "review_verdict.json")},
+    "check": {
+        "review_verdict": ("agent", "review_verdict.json"),
+        "layout_lint": ("agent", "layout_lint.json"),
+        "link_audit": ("agent", "link_audit.json"),
+    },
     "review": {"agent_review": ("agent", "agent_review.json")},
     "report": {},
 }
@@ -296,7 +310,6 @@ def _preflight(stage: str, workdir: Path, pdf) -> dict | None:
             }
     return None
 
-
 # --------------------------------------------------------------------------- #
 # 阶段执行
 # --------------------------------------------------------------------------- #
@@ -346,13 +359,16 @@ def _run_stage(stage: str, workdir: Path, cfg: dict) -> dict:
     if stage == "check":
         mono = _find_pdf(workdir, "mono")
         dual = _find_pdf(workdir, "dual")
+        # run 的 check 使用 strict 语义：verdict != pass（含子项 not_available 导致
+        # 无法确认）时整体失败；但继续跑 reviewer 与 report（由 run_pipeline 决定）。
         return registry.invoke(
-            review.review_document,
+            review.check_document,
             workdir=str(workdir),
             mono=str(mono) if mono else None,
             dual=str(dual) if dual else None,
             source_pdf=cfg["source_pdf"],
             skip_pdf_checks=cfg["skip_pdf_checks"],
+            strict=True,
         )
     if stage == "review":
         return registry.invoke(_review_with_agent, workdir=str(workdir), cfg=cfg)
@@ -371,6 +387,8 @@ def _stage_artifacts(stage: str, workdir: Path, data: dict, cfg: dict) -> dict:
     artifacts = {
         label: _rel(workdir, workdir.joinpath(*parts))
         for label, parts in STAGE_ARTIFACTS.get(stage, {}).items()
+        # check 的子项产物按需生成（not_available 时不存在）：只记真实落盘的。
+        if workdir.joinpath(*parts).exists()
     }
     if stage == "build":
         output_dir = Path(cfg["output_dir"] or (workdir / "output"))
@@ -394,8 +412,11 @@ def _stage_artifacts(stage: str, workdir: Path, data: dict, cfg: dict) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# reviewer 契约（U3）：check 之后由外部审查命令给出结构化 verdict
+# reviewer 契约（U3 调用方 / U4 质量门禁）
 # --------------------------------------------------------------------------- #
+PROBLEM_ANCHORS = ("missing", "wrong_label", "wrong_role", "unverified")
+
+
 def _find_render_images(workdir: Path, output_dir) -> list[str]:
     """找一个 workdir 里已有的渲染图（build --render 的产物）。"""
     bases = [Path(output_dir)] if output_dir else []
@@ -432,7 +453,13 @@ def _review_prompt(workdir: Path, cfg: dict) -> str:
     mono = _find_pdf(workdir, "mono")
     dual = _find_pdf(workdir, "dual")
     images = _find_render_images(workdir, cfg.get("output_dir"))
-    layout_lint = agent / "layout_lint.json"
+    # check 三块结论的落盘位置固定出现在提示词里；缺失时写"未产出"而不是省略，
+    # 让 reviewer 明确知道缺了什么，不需要去猜内部目录。
+    required = [
+        ("结构审查结果", agent / "review_verdict.json"),
+        ("排版 lint", agent / "layout_lint.json"),
+        ("链接审计", agent / "link_audit.json"),
+    ]
     optional = [
         ("apply_report.json", agent / "apply_report.json"),
         ("layout_geometry.json", agent / "layout_geometry.json"),
@@ -446,9 +473,9 @@ def _review_prompt(workdir: Path, cfg: dict) -> str:
         f"- 源 PDF：`{_source_pdf_path(workdir, cfg) or '（未找到）'}`",
         f"- mono PDF：`{mono or '（未生成）'}`",
         f"- dual PDF：`{dual or '（未生成）'}`",
-        f"- 结构审查结果：`{agent / 'review_verdict.json'}`",
-        f"- 排版 lint：`{layout_lint if layout_lint.exists() else '（check 阶段未产出 layout_lint.json）'}`",
     ]
+    for label, path in required:
+        lines.append(f"- {label}：`{path}`" if path.exists() else f"- {label}：（未产出 {path.name}）")
     for label, path in optional:
         if path.exists():
             lines.append(f"- {label}：`{path}`")
@@ -462,10 +489,15 @@ def _review_prompt(workdir: Path, cfg: dict) -> str:
         "## 输出协议（必须遵守）",
         "只输出一个 JSON 对象，不要代码围栏、不要额外解释：",
         '{"verdict": "pass" | "needs_fix", "findings": ['
-        '{"sev": "P0|P1|P2", "check": "<编号>", "page": <页号或 null>, '
-        '"evidence": "<工具输出片段/坐标/文本>", "fix": "retranslate:<id> | '
-        'layout:<patch> | accept:<理由> | none"}]}',
+        '{"id": "<段落 id 或 <页号>:<链接逻辑 id>>", "kind": "retranslate" | "layout", '
+        '"sev": "P0|P1|P2", "page": <页号或 null>, '
+        '"evidence": "<工具输出片段/坐标/文本>", "action": "translate --ids <id> | '
+        'layout-set <patch> | accept:<理由>"}]}',
         'verdict 只能是 "pass" 或 "needs_fix"；findings 必须存在（可为空数组）。',
+        "findings 每条必须带 id / kind（retranslate 或 layout）/ evidence / action；",
+        "缺字段或不合法会让 run 以 reviewer_invalid_json 失败（未知字段会保留）。",
+        "run 不会自动修复：它把 findings 映射成 actions 交给上层 Agent 执行后",
+        "再以 `bdt run --from apply` 续跑。",
         "",
     ]
     guidance = _reviewer_guidance()
@@ -508,7 +540,108 @@ def _parse_review_json(stdout: str) -> dict:
         raise common.ToolError(
             "reviewer_invalid_json", "reviewer 输出的 findings 必须是数组"
         )
+    for index, finding in enumerate(findings):
+        if not isinstance(finding, dict):
+            raise common.ToolError(
+                "reviewer_invalid_json",
+                f"reviewer 的 findings[{index}] 必须是对象，得到 {type(finding).__name__}",
+            )
+        for field in ("id", "kind", "evidence", "action"):
+            value = finding.get(field)
+            if value in (None, "", []):
+                raise common.ToolError(
+                    "reviewer_invalid_json",
+                    f"reviewer 的 findings[{index}] 缺 {field}"
+                    "（每条必须带 id / kind / evidence / action）",
+                )
+        kind = finding["kind"]
+        if kind not in ("retranslate", "layout"):
+            raise common.ToolError(
+                "reviewer_invalid_json",
+                f'reviewer 的 findings[{index}].kind 必须是 "retranslate" 或 "layout"，'
+                f"得到 {kind!r}",
+            )
     return payload
+
+
+def _findings_to_actions(findings: list[dict]) -> dict:
+    """把 reviewer findings 映射成上层 Agent 可直接执行的 actions JSON。
+
+    run 不自动执行任何修复（无隐藏循环）：只产出 actions，Agent 执行
+    ``bdt translate --ids`` / ``bdt layout-set`` 后再 ``--from apply`` 续跑。
+    """
+    retranslate_ids: list[str] = []
+    layout_items: list[dict] = []
+    accepted: list[dict] = []
+    for finding in findings:
+        kind = finding.get("kind")
+        action = finding.get("action")
+        entry = {
+            "id": finding.get("id"),
+            "kind": kind,
+            "action": action,
+            "evidence": finding.get("evidence"),
+            "sev": finding.get("sev"),
+        }
+        if isinstance(action, str) and action.lower().startswith("accept"):
+            accepted.append(entry)
+            continue
+        if kind == "retranslate":
+            retranslate_ids.append(str(finding.get("id")))
+        else:
+            layout_items.append(entry)
+    actions: dict = {"round_kind": None}
+    if retranslate_ids:
+        actions["round_kind"] = "retranslate"
+        actions["retranslate"] = {
+            "command": "bdt translate --ids " + ",".join(retranslate_ids),
+            "ids": retranslate_ids,
+        }
+    if layout_items:
+        if actions["round_kind"] is None:
+            actions["round_kind"] = "layout"
+        actions["layout"] = {
+            "command": "bdt layout-set --patch <patch> 然后 bdt build",
+            "items": layout_items,
+        }
+    if accepted:
+        actions["accepted"] = accepted
+    actions["resume"] = "执行上面的命令后：bdt run --workdir <WD> --from apply"
+    return actions
+
+
+def _fix_rounds(state: dict) -> dict:
+    """修复轮计数（record：kind → 已记录的修复轮数）。"""
+    quality = state.setdefault("quality", {})
+    rounds = quality.get("fix_rounds")
+    if not isinstance(rounds, dict):
+        rounds = {}
+        quality["fix_rounds"] = rounds
+    for kind in MAX_FIX_ROUNDS:
+        rounds.setdefault(kind, 0)
+    return rounds
+
+
+def _record_fix_round(state: dict, actions: dict) -> dict:
+    """按 findings 的 kind 记一轮修复；返回每个 kind 的最新计数。"""
+    rounds = _fix_rounds(state)
+    kinds = set()
+    if (actions.get("retranslate") or {}).get("ids"):
+        kinds.add("retranslate")
+    if (actions.get("layout") or {}).get("items"):
+        kinds.add("layout")
+    for kind in kinds:
+        rounds[kind] = int(rounds.get(kind, 0)) + 1
+    return rounds
+
+
+def _rounds_exhausted(rounds: dict) -> list[str]:
+    """已达上限的 kind 列表（计入下一轮前先判断，避免超限调用模型）。"""
+    return [
+        kind
+        for kind, limit in MAX_FIX_ROUNDS.items()
+        if int(rounds.get(kind, 0)) >= limit
+    ]
 
 
 def _review_with_agent(workdir: str, *, cfg: dict) -> dict:
@@ -672,9 +805,9 @@ def run_pipeline(
             return _fail(failure, stage, stage_results, workdir_path, state, from_stage)
 
         if stage == "review" and not reviewer:
-            # ---- 没有 --reviewer：停在等待状态，不返回最终成功 ------------------ #
-            # U4 会把这里收紧为"质量门禁失败"（review 未执行即不可交付）；本任务只
-            # 提供结构化停止点，exit 0，方便 Agent 侧拿到 review_prompt 后再决定。
+            # ---- 没有 --reviewer：质量门禁失败（U4 收紧，U3 曾是 exit 0 的等待） -- #
+            # "没人审查"不能算交付成功：停在 review、exit 1、error.code 为
+            # waiting_for_reviewer，并写清 --reviewer 用法；report 不执行。
             current = _current_input_hashes(workdir_path, pdf, markdown)
             entry = _record(
                 state,
@@ -685,6 +818,10 @@ def run_pipeline(
                 detail={"waiting_for_reviewer": True},
                 status="waiting",
             )
+            state.setdefault("quality", {})["reviewer"] = {
+                "status": "waiting_for_reviewer",
+                "verdict": None,
+            }
             _save_state(workdir_path, state)
             stage_results.append(
                 {
@@ -696,7 +833,7 @@ def run_pipeline(
             stopped = {
                 "stage": "review",
                 "reason": "waiting_for_reviewer",
-                "note": "未指定 --reviewer；report 未执行。U4 会将其收紧为门禁失败",
+                "note": "未指定 --reviewer，review/report 未执行",
             }
             for stage_name in STAGES[index + 1 :]:
                 stage_results.append(
@@ -707,6 +844,45 @@ def run_pipeline(
                     }
                 )
             break
+
+        if stage == "review":
+            # ---- 迭代上限：超限就停，且**不再调用模型** ---------------------- #
+            # 单任务最多 2 个翻译修复轮 + 2 个排版修复轮（记在 run_state.json）。
+            # 任一 kind 用尽即停：继续让模型审查也无法再推进修复（findings 会重复），
+            # 属"需要人判断"而非"再试一次"。
+            exhausted = _rounds_exhausted(_fix_rounds(state))
+            if exhausted:
+                state.setdefault("quality", {})["reviewer"] = {
+                    "status": "needs_human_review",
+                    "verdict": None,
+                    "fix_rounds": dict(_fix_rounds(state)),
+                    "rounds_exhausted": exhausted,
+                }
+                _save_state(workdir_path, state)
+                stage_results.append(
+                    {
+                        "stage": "review",
+                        "status": "blocked",
+                        "reason": "needs_human_review",
+                    }
+                )
+                stopped = {
+                    "stage": "review",
+                    "reason": "needs_human_review",
+                    "note": (
+                        "修复轮已达上限"
+                        f"（{MAX_FIX_ROUNDS}）；不再调用 reviewer，请人工判断"
+                    ),
+                }
+                for stage_name in STAGES[index + 1 :]:
+                    stage_results.append(
+                        {
+                            "stage": stage_name,
+                            "status": "skipped",
+                            "reason": "needs_human_review",
+                        }
+                    )
+                break
 
         started = time.time()
         result = _run_stage(stage, workdir_path, cfg)
@@ -745,8 +921,26 @@ def run_pipeline(
 
         if stage == "check":
             check_data = data
+            state.setdefault("quality", {})["check"] = {
+                "verdict": data.get("verdict"),
+                "blockers": len(data.get("blockers") or []),
+                "layout": (data.get("layout") or {}).get("status"),
+                "links": (data.get("links") or {}).get("status"),
+                "reasons": data.get("reasons") or [],
+            }
+            _save_state(workdir_path, state)
         if stage == "review":
+            actions = _findings_to_actions(data.get("findings") or [])
+            rounds = _fix_rounds(state)
+            state.setdefault("quality", {})["reviewer"] = {
+                "verdict": data.get("verdict"),
+                "findings": len(data.get("findings") or []),
+                "actions": actions,
+                "fix_rounds_before": dict(rounds),
+                "rounds_exhausted_before": _rounds_exhausted(rounds),
+            }
             agent_review = data
+            agent_review["actions"] = actions
         if stage == "translate" and (data.get("dry_run") or not data.get("translated_md")):
             # --prompt-only：只写 agent/prompt.md，不调用任何命令；后续阶段无从谈起。
             # 返回停止点而非错误：Agent 侧读走提示词后自己调翻译命令，再以 --markdown
@@ -777,22 +971,106 @@ def run_pipeline(
         agent_review,
     )
     if stopped is not None:
-        # 提前停止（prompt_only / waiting_for_reviewer）：不是失败，但也不是最终成功。
+        if stopped.get("reason") == "waiting_for_reviewer":
+            # U4 收紧：没有 --reviewer 即质量门禁失败（exit 1），不再是 U3 的等待。
+            return {
+                "ok": False,
+                "error": {
+                    "code": "waiting_for_reviewer",
+                    "message": (
+                        "review 阶段未执行：需要显式审查命令才能确认交付质量。"
+                        "请用 `bdt run --workdir <WD> --from check "
+                        "--reviewer '<命令>'` 续跑（命令 stdin 收审查提示词、"
+                        "stdout 必须是 {verdict, findings} JSON）。"
+                        f"审查提示词已写好在 {common.agent_dir(workdir_path) / 'review_prompt.md'}"
+                    ),
+                    "stage": "review",
+                    "stopped_at": "review",
+                    "prompt": str(common.agent_dir(workdir_path) / "review_prompt.md"),
+                    "reviewer_usage": (
+                        "bdt run --workdir <WD> --from check --reviewer '<cmd>'"
+                    ),
+                },
+                "data": summary,
+            }
+        if stopped.get("reason") == "needs_human_review":
+            rounds = dict(_fix_rounds(state))
+            return {
+                "ok": False,
+                "error": {
+                    "code": "needs_human_review",
+                    "message": (
+                        "修复轮已达上限（单任务最多 2 个翻译修复轮 + 2 个排版修复轮："
+                        f"{MAX_FIX_ROUNDS}）。stop 自动迭代，不再调用模型；请人工判断。"
+                    ),
+                    "stage": "review",
+                    "fix_rounds": rounds,
+                    "limits": dict(MAX_FIX_ROUNDS),
+                    "exhausted": _rounds_exhausted(rounds),
+                    "stopped_at": "review",
+                },
+                "data": summary,
+            }
+        # prompt_only：不是失败，但也不是最终成功。
         return {"ok": True, "data": summary}
+
     verdict = (check_data or {}).get("verdict")
+    review_verdict = (agent_review or {}).get("verdict")
     if verdict == "needs_fix":
-        # check 失败：仍然跑完 report（上面已跑），但整体 exit 1 并带上 verdict。
+        # check 失败：report/review 已跑完，但整体 exit 1。reviewer 的 pass 不能
+        # 覆盖 check 的确定性 blocker（check needs_fix 优先）。
+        error = {
+            "code": "check_needs_fix",
+            "message": (
+                "check verdict=needs_fix：report 已生成，但整体视为失败；"
+                "按 reasons / blockers 决定重译哪些 id 或调整排版后重跑"
+            ),
+            "stage": "check",
+            "verdict": verdict,
+            "reasons": (check_data or {}).get("reasons") or [],
+            "blockers": (check_data or {}).get("blockers") or [],
+            "reviewer_verdict": review_verdict,
+            "layout": (check_data or {}).get("layout") or {},
+            "links": (check_data or {}).get("links") or {},
+        }
+        # reviewer 也判 needs_fix 时，把它的可执行 actions 一并给出（修复入口），
+        # 但错误码仍是 check_needs_fix——确定性 blocker 优先。
+        if review_verdict == "needs_fix":
+            actions = (agent_review or {}).get("actions") or {}
+            after = _record_fix_round(state, actions)
+            state["quality"]["reviewer"]["fix_rounds"] = dict(after)
+            state["quality"]["reviewer"]["status"] = "needs_fix"
+            _save_state(workdir_path, state)
+            summary["fix_rounds"] = dict(after)
+            error["findings"] = (agent_review or {}).get("findings") or []
+            error["actions"] = actions
+            error["fix_rounds"] = dict(after)
+            error["limits"] = dict(MAX_FIX_ROUNDS)
+        return {"ok": False, "error": error, "data": summary}
+    if review_verdict == "needs_fix":
+        actions = (agent_review or {}).get("actions") or {}
+        # 记一轮修复（run 不自动执行修复，只产出 actions 供上层 Agent 执行）。
+        # 上限判断在调用 reviewer 之前完成（超限时根本不会走到这里）。
+        after = _record_fix_round(state, actions)
+        state["quality"]["reviewer"]["fix_rounds"] = dict(after)
+        state["quality"]["reviewer"]["status"] = "needs_fix"
+        _save_state(workdir_path, state)
+        summary["fix_rounds"] = dict(after)
         return {
             "ok": False,
             "error": {
-                "code": "check_needs_fix",
+                "code": "reviewer_needs_fix",
                 "message": (
-                    "check verdict=needs_fix：report 已生成，但整体视为失败；"
-                    "按 blockers 决定重译哪些 id 后重跑"
+                    "reviewer verdict=needs_fix：findings 已映射为 actions；"
+                    "执行 `bdt translate --ids ...` / `bdt layout-set` 后"
+                    "以 `bdt run --from apply` 续跑"
                 ),
-                "stage": "check",
-                "verdict": verdict,
-                "blockers": (check_data or {}).get("blockers") or [],
+                "stage": "review",
+                "verdict": "needs_fix",
+                "findings": (agent_review or {}).get("findings") or [],
+                "actions": actions,
+                "fix_rounds": dict(after),
+                "limits": dict(MAX_FIX_ROUNDS),
             },
             "data": summary,
         }
@@ -821,8 +1099,12 @@ def _summary(
         "outputs": outputs,
         "state": _rel(workdir, state_path(workdir)),
         "config": state.get("config") or {},
+        "fix_rounds": dict((state.get("quality") or {}).get("fix_rounds") or {}),
+        "fix_round_limits": dict(MAX_FIX_ROUNDS),
     }
     if check_data is not None:
+        layout = check_data.get("layout") or {}
+        links = check_data.get("links") or {}
         payload["check"] = {
             "verdict": check_data.get("verdict"),
             "blockers": len(check_data.get("blockers") or []),
@@ -831,12 +1113,32 @@ def _summary(
             ],
             "warnings": len(check_data.get("warnings") or []),
             "metrics": check_data.get("metrics") or {},
+            "reasons": check_data.get("reasons") or [],
+            "unconfirmed": check_data.get("unconfirmed") or [],
+            # 各子项状态（ok / not_available / not_reconstructed）
+            "layout": {
+                "status": layout.get("status"),
+                "summary": layout.get("summary") or {},
+                "reason": layout.get("reason"),
+            },
+            "links": {
+                "status": links.get("status"),
+                "missing": links.get("missing"),
+                "wrong_label": links.get("wrong_label"),
+                "wrong_role": links.get("wrong_role"),
+                "external_unchecked": links.get("external_unchecked"),
+                "targets_preserved": links.get("targets_preserved"),
+                "anchors_verified": links.get("anchors_verified"),
+                "reason": links.get("reason"),
+            },
         }
     if agent_review is not None:
         payload["agent_review"] = {
             "verdict": agent_review.get("verdict"),
             "findings": len(agent_review.get("findings") or []),
         }
+        if agent_review.get("actions"):
+            payload["agent_review"]["actions"] = agent_review["actions"]
     if stopped is not None:
         payload["stopped"] = stopped
         # 顶层停止点：方便脚本直接判断是停在哪一步（translate / review）。

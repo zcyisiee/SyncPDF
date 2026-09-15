@@ -1,14 +1,16 @@
 """Link audit tests.
 
-U0 adds a strict xfail for the unfinished public audit tool test. U4 is
-expected to rewrite this test and remove the marker; XPASS(strict) intentionally
-fails so the marker cannot be forgotten after implementation.
+U0 added a strict xfail for the unfinished public audit tool test; U4 completed
+the work, rewrote ``test_public_audit_tool`` to assert the new
+``babeldoc_tools.review.audit_links_tool`` entry point directly, and removed the
+marker. The remaining ``test_link_correspondence.py`` xfails stay untouched
+(they cover the link_remap algorithm, not this encapsulation).
 """
 
+import json
 from pathlib import Path
 
 import pymupdf
-import pytest
 from babeldoc.tools.agent.link_audit import audit_links
 from babeldoc.tools.agent.link_audit import inventory
 
@@ -100,26 +102,62 @@ def test_external_file_action_not_called_invalid(tmp_path):
         assert row["target_status"] == "external_unchecked"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="audit_links 工具化属于 U4，届时重写本测试",
-)
 def test_public_audit_tool(tmp_path):
-    # U2 删除了 registry.dispatch 元层（import 保留在函数体内，故只在 call 阶段
-    # 触发 AttributeError → 稳定 xfailed，不会 collection error、也不会 pass）。
-    # U4 把 audit_links 接入 bdt check 后本测试应重写并移除 xfail 标记。
-    from babeldoc_tools import registry
+    """U4：``audit_links`` 经 ``review.audit_links_tool`` 接入工具层。
 
-    dispatch = registry.dispatch
+    构造 tmp PDF 源 + 伪造 ``agent/state.pkl``（源 PDF）与
+    ``agent/reconstruct_report.json``（mono PDF），断言 ``agent/link_audit.json``
+    落盘且 ``targets_preserved`` / ``anchors_verified`` 语义保留。
+    """
+    import pickle
+
+    from babeldoc_tools.review import audit_links_tool
+
     source = tmp_path / "source.pdf"
+    mono = tmp_path / "mono.pdf"
     _pdf(source)
-    result = dispatch(
-        "audit_links",
-        {"source_pdf": str(source), "pdf": str(source), "workdir": str(tmp_path)},
+    _pdf(mono)
+
+    agent = tmp_path / "agent"
+    agent.mkdir()
+    with (agent / "state.pkl").open("wb") as handle:
+        pickle.dump({"pdf_path": str(source)}, handle)
+    (agent / "reconstruct_report.json").write_text(
+        json.dumps({"mono_pdf": str(mono)}), encoding="utf-8"
     )
-    assert result["ok"]
-    assert result["data"]["targets_preserved"]
-    assert result["data"]["anchors_verified"]
+
+    result = audit_links_tool(str(tmp_path))
+
+    assert result["status"] == "ok"
+    assert result["targets_preserved"] is True
+    assert result["anchors_verified"] is True
+    assert result["missing"] == 0
+    report_path = Path(result["report"])
+    assert report_path == agent / "link_audit.json"
+    assert report_path.is_file()
+    # 落盘内容与返回值同源（语义未在封装层丢失）
+    written = json.loads(report_path.read_text(encoding="utf-8"))
+    assert written["targets_preserved"] is True
+    assert written["anchors_verified"] is True
+    assert len(written["findings"]) == 2
+
+
+def test_audit_links_tool_degrades_without_mono(tmp_path):
+    """mono PDF 不存在时返回 not_reconstructed，而不是报错。"""
+    import pickle
+
+    from babeldoc_tools.review import audit_links_tool
+
+    agent = tmp_path / "agent"
+    agent.mkdir()
+    with (agent / "state.pkl").open("wb") as handle:
+        pickle.dump({"pdf_path": str(tmp_path / "source.pdf")}, handle)
+
+    assert audit_links_tool(str(tmp_path)) == {
+        "status": "not_reconstructed",
+        "reason": "reconstruct_report.json 里没有可用的 mono PDF：先跑 bdt build",
+        "mono_pdf": None,
+    }
 
 
 def test_audit_detects_swapped_roles_with_identical_numbers(tmp_path):
