@@ -338,6 +338,7 @@ def _run_parse(
     mineru_token,
     mineru_json,
     pages,
+    mineru_language="en",
     mineru_cache_key=None,
     layout_coverage_threshold=0.005,
     mineru_use_ocr_text=False,
@@ -394,7 +395,9 @@ def _run_parse(
             raise ValueError(
                 "mineru 布局需要 --mineru-token / MINERU_API_TOKEN / --mineru-json"
             )
-        config.doc_layout_model = MinerUDocLayoutModel(api_token=token)
+        config.doc_layout_model = MinerUDocLayoutModel(
+            api_token=token, language=mineru_language
+        )
     else:
         raise ValueError("layout 必须是 mineru 或 paddle")
     # provider IR 落到 <workdir>/agent/source/mineru/provider_ir.json
@@ -667,6 +670,7 @@ def extract_markdown(
     mineru_token=None,
     mineru_json=None,
     pages=None,
+    mineru_language="en",
     mineru_cache_key=None,
     layout_coverage_threshold=0.005,
     mineru_use_ocr_text=False,
@@ -682,6 +686,7 @@ def extract_markdown(
         mineru_token,
         mineru_json,
         pages,
+        mineru_language=mineru_language,
         mineru_cache_key=mineru_cache_key,
         layout_coverage_threshold=layout_coverage_threshold,
         mineru_use_ocr_text=mineru_use_ocr_text,

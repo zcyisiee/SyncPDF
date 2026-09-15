@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import pathlib
 
+import numpy as np
 import pymupdf
 import pytest
 from babeldoc.format.pdf.document_il.backend.latex_bbox import (
@@ -25,6 +26,9 @@ from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
 )
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import StampRequest
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import derive_lead
+from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer_batch import (
+    BatchStampRenderer,
+)
 
 _CAPABILITY = capability_mod.probe_latex_capability()
 requires_latex = pytest.mark.skipif(
@@ -104,7 +108,9 @@ def test_template_enables_hyphenation_and_tolerance():
     assert "\\hyphenpenalty=50" in tex
     assert "\\tolerance=1500" in tex
     assert "\\emergencystretch=1em" in tex
-    assert "\\lineskiplimit=-\\maxdimen" in tex
+    assert "\\lineskiplimit=0pt" in tex
+    assert "\\lineskip=1pt" in tex
+    assert "\\lineskiplimit=-\\maxdimen" not in tex
     assert "\\XeTeXlinebreakskip = 0pt plus 0.3em" in tex
     # 不用 \sloppy（会牺牲字间距质量）。
     assert "\\sloppy" not in tex
@@ -184,6 +190,63 @@ def test_cache_key_includes_geometry_fields():
 # --------------------------------------------------------------------------- #
 # 真实编译
 # --------------------------------------------------------------------------- #
+@requires_latex
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+def test_compiled_tall_inline_formulas_have_row_clearance(tmp_path, batch):
+    formula = r"$x_{i_{j_k}}^{a^{b^c}} + \frac{\frac{a}{b}}{\frac{c}{d}}$"
+    request = StampRequest(
+        key="tall-rows",
+        body=rf"A {formula}\\B {formula}\\C ordinary text\\D ordinary text",
+        width=240.0,
+        height=140.0,
+        font_size=9.0,
+        lead=11.656,
+        ascent_top=0.5,
+    )
+    if batch:
+        renderer = BatchStampRenderer(_CAPABILITY)
+        companion = StampRequest(
+            key="companion", body="Companion", width=240, height=140, font_size=9
+        )
+        result = renderer.render_many(
+            [(request, tmp_path), (companion, tmp_path)]
+        )[request.key]
+        assert renderer.batch_count == 1
+    else:
+        result = _renderer().render_one(request, tmp_path)
+    assert result.ok, result.reason
+    assert result.scale == pytest.approx(1.0)
+    assert result.compile_attempts == 1
+
+    with pymupdf.open(result.pdf_path) as doc:
+        chars = [
+            char
+            for block in doc[0].get_text("rawdict")["blocks"]
+            for line in block.get("lines", [])
+            for span in line["spans"]
+            for char in span["chars"]
+        ]
+        markers = {
+            char["c"]: index
+            for index, char in enumerate(chars)
+            if char["c"] in "ABCD"
+        }
+        assert set(markers) == set("ABCD")
+        # Font envelopes overestimate nested math ink; measure the actual raster,
+        # including fraction rules, at 4 pixels per bp instead.
+        pix = doc[0].get_pixmap(matrix=pymupdf.Matrix(4, 4), colorspace=pymupdf.csGRAY)
+        pixels = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width)
+        occupied = np.flatnonzero((pixels < 128).any(axis=1))
+        rows = np.split(occupied, np.where(np.diff(occupied) > 1)[0] + 1)
+        assert len(rows) == 4, "Formula rows must have separate ink bands"
+        clearance = (rows[1][0] - rows[0][-1] - 1) / 4
+        assert clearance >= 0.75, f"Adjacent formula rows overlap: {clearance=:.3f}bp"
+        # Normal rows retain the requested baseline pitch, not a global increase.
+        baseline_c = chars[markers["C"]]["origin"][1]
+        baseline_d = chars[markers["D"]]["origin"][1]
+        assert baseline_d - baseline_c == pytest.approx(request.lead, abs=0.02)
+
+
 @requires_latex
 def test_compiled_paragraph_uses_product_fonts_and_indent(tmp_path):
     renderer = _renderer()

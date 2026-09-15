@@ -30,14 +30,14 @@ class MinerUDocLayoutModel(DocLayoutModel):
         api_token: str | None,
         base_url: str = "https://mineru.net",
         model_version: str = "vlm",
-        language: str | None = None,
+        language: str | None = "en",
         poll_interval_seconds: float = 5.0,
         timeout_seconds: int = 900,
     ):
         self.api_token = api_token
         self.base_url = base_url.rstrip("/")
         self.model_version = model_version
-        self.language = language
+        self.language = "en" if language is None else language
         self.poll_interval_seconds = poll_interval_seconds
         self.timeout_seconds = timeout_seconds
         self._stride = 32

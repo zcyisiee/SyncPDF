@@ -78,6 +78,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="布局后端：mineru（云端 API）或 paddle（本地 PP-DocLayoutV3）",
     )
     p_parse.add_argument("--mineru-token", default=None)
+    p_parse.add_argument(
+        "--mineru-language",
+        default="en",
+        help="MinerU 请求的 language 参数（如 en/zh）；默认 en（英语）",
+    )
     p_parse.add_argument("--mineru-json", default=None, help="回放已缓存的 MinerU layout.json")
     p_parse.add_argument(
         "--mineru-cache-key",
@@ -233,6 +238,11 @@ def _build_parser() -> argparse.ArgumentParser:
     # 各阶段透传旗标
     p_run.add_argument("--layout", choices=("mineru", "paddle"), default="mineru")
     p_run.add_argument("--mineru-token", default=None)
+    p_run.add_argument(
+        "--mineru-language",
+        default="en",
+        help="MinerU 请求的 language 参数（如 en/zh）；默认 en（英语）",
+    )
     p_run.add_argument("--mineru-json", default=None)
     p_run.add_argument("--mineru-cache-key", default=None)
     p_run.add_argument("--layout-coverage-threshold", type=float, default=0.005)
@@ -300,6 +310,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
             lang_in=args.lang_in,
             lang_out=args.lang_out,
             mineru_token=args.mineru_token,
+            mineru_language=args.mineru_language,
             mineru_json=args.mineru_json,
             mineru_cache_key=args.mineru_cache_key,
             layout_coverage_threshold=args.layout_coverage_threshold,
@@ -388,6 +399,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
                 lang_in=args.lang_in,
                 lang_out=args.lang_out,
                 mineru_token=args.mineru_token,
+                mineru_language=args.mineru_language,
                 mineru_json=args.mineru_json,
                 mineru_cache_key=args.mineru_cache_key,
                 layout_coverage_threshold=args.layout_coverage_threshold,

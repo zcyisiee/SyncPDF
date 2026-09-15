@@ -28,6 +28,14 @@ from babeldoc.format.pdf.translation_config import WatermarkOutputMode
 
 logger = logging.getLogger(__name__)
 
+# 「扩容优先」排版的边界参数（pt）：纵向拉满时与上下相邻区域保留的间隔，
+# 以及宽度不足时不做激进横向扩容、只左右各加一点不明显的 tolerance。
+EXPAND_VERTICAL_GAP = 2.0
+EXPAND_HORIZONTAL_TOLERANCE = 2.0
+# 页边只在 bbox 已经贴近该边（≤此距离）时才可作为扩容边界——即"位于顶部/
+# 底部"的 bbox。远离页边且该方向无相邻障碍时不扩：防止把段落拉进页边距。
+EXPAND_PAGE_EDGE_MAX_DISTANCE = 15.0
+
 LINE_BREAK_REGEX = regex.compile(
     r"^["
     r"a-z"
@@ -982,6 +990,10 @@ class Typesetting:
     ) -> tuple[float, list[TypesettingUnit] | None]:
         """查找最优缩放因子并可选择性地执行布局
 
+        顺序：先在原始 box 内尝试初始字号；放不下时先把 box 纵向拉满到
+        合法边界（``_expanded_box``），回到初始字号重试；仍放不下才按阶梯
+        缩小字号。
+
         Args:
             paragraph: 段落对象
             page: 页面对象
@@ -1000,7 +1012,7 @@ class Typesetting:
         scale = initial_scale
         line_skip = self._line_skip_for(paragraph)
         min_scale = 0.1
-        expand_space_flag = 0
+        box_expanded = False
         final_typeset_units = None
 
         while scale >= min_scale:
@@ -1041,58 +1053,25 @@ class Typesetting:
             if not hasattr(paragraph, "debug_id") or not paragraph.debug_id:
                 return scale, final_typeset_units
 
+            # 扩容优先：首次放不下时，先把区域一次性拉到合法边界（纵向拉满，
+            # 与上下相邻区域保持阈值间隔，页顶/页底封边；宽度不足也只走纵向
+            # 扩容，横向仅加不明显的 tolerance），并回到初始字号重试；扩无可
+            # 扩之后才进入缩字阶梯。
+            if not box_expanded:
+                box_expanded = True
+                expanded_box = self._expanded_box(box, page)
+                if expanded_box is not None:
+                    box = expanded_box
+                    if apply_layout:
+                        paragraph.box = expanded_box
+                    scale = initial_scale
+                    continue
+
             # 减小缩放因子
             if scale > 0.6:
                 scale -= 0.05
             else:
                 scale -= 0.1
-
-            if scale < 0.7:
-                space_expanded = False  # 标记是否成功扩展了空间
-
-                if expand_space_flag == 0:
-                    # 尝试向下扩展
-                    try:
-                        min_y = self.get_max_bottom_space(box, page) + 2
-                        if min_y < box.y:
-                            expanded_box = Box(x=box.x, y=min_y, x2=box.x2, y2=box.y2)
-                            box = expanded_box
-                            if apply_layout:
-                                # 更新段落的边界框
-                                paragraph.box = expanded_box
-                            space_expanded = True
-                    except Exception:
-                        pass
-                    expand_space_flag = 1
-
-                    # 只有成功扩展空间时才 continue，否则继续减小 scale
-                    if space_expanded:
-                        continue
-
-                elif expand_space_flag == 1:
-                    # 尝试向右扩展
-                    try:
-                        max_x = self.get_max_right_space(box, page) - 5
-                        if max_x > box.x2:
-                            expanded_box = Box(x=box.x, y=box.y, x2=max_x, y2=box.y2)
-                            box = expanded_box
-                            if apply_layout:
-                                # 更新段落的边界框
-                                paragraph.box = expanded_box
-                            space_expanded = True
-                    except Exception:
-                        pass
-                    expand_space_flag = 2
-
-                    # 只有成功扩展空间时才 continue，否则继续减小 scale
-                    if space_expanded:
-                        continue
-
-                # 只有在扩展尝试阶段 (expand_space_flag < 2) 且扩展失败时才重置 scale
-                # 当 expand_space_flag >= 2 时，说明已经尝试过所有扩展，应该继续正常的 scale 减小
-                if expand_space_flag < 2:
-                    # 如果无法扩展空间，重置 scale 并继续循环
-                    scale = 1.0
 
         # 如果仍然放不下，尝试去除英文换行限制
         if use_english_line_break:
@@ -1732,77 +1711,91 @@ class Typesetting:
                 )
         return composition
 
-    def get_max_right_space(self, current_box: Box, page) -> float:
-        """获取段落右侧最大可用空间
+    def _expanded_box(self, current_box: Box, page: il_version_1.Page) -> Box | None:
+        """把段落框一次性拉满到合法边界，供"扩容优先"排版使用。
 
-        Args:
-            current_box: 当前段落的边界框
-            page: 当前页面
-
-        Returns:
-            可以扩展到的最大 x 坐标
-        """
-        # 获取页面的裁剪框作为初始最大限制
-        max_x = page.cropbox.box.x2 * 0.9
-
-        # 检查所有可能的阻挡元素
-        for para in page.pdf_paragraph:
-            if para.box == current_box or para.box is None:  # 跳过当前段落
-                continue
-            # 只考虑在当前段落右侧且有垂直重叠的元素
-            if para.box.x > current_box.x and not (
-                para.box.y >= current_box.y2 or para.box.y2 <= current_box.y
-            ):
-                max_x = min(max_x, para.box.x)
-        for char in page.pdf_character:
-            if char.box.x > current_box.x and not (
-                char.box.y >= current_box.y2 or char.box.y2 <= current_box.y
-            ):
-                max_x = min(max_x, char.box.x)
-        # 检查图形
-        for figure in page.pdf_figure:
-            if figure.box.x > current_box.x and not (
-                figure.box.y >= current_box.y2 or figure.box.y2 <= current_box.y
-            ):
-                max_x = min(max_x, figure.box.x)
-
-        return max_x
-
-    def get_max_bottom_space(self, current_box: Box, page: il_version_1.Page) -> float:
-        """获取段落下方最大可用空间
-
-        Args:
-            current_box: 当前段落的边界框
-            page: 当前页面
+        纵向：向上、向下都扩到最近障碍（与相邻区域保持阈值间隔）；某方向
+        没有障碍时，只有 bbox 已贴近页顶/页底（≤ EXPAND_PAGE_EDGE_MAX_DISTANCE）
+        才扩到页边——位于页顶的 bbox 只能向下扩、位于页底只能向上扩，远离
+        页边的段落不进页边距。宽度不足时不做激进横向扩容，只左右各加一点
+        不明显的 tolerance，且不越过横向障碍/页边。
 
         Returns:
-            可以扩展到的最小 y 坐标
+            扩容后的新 Box；任何方向都无可扩空间时返回 None。
         """
-        # 获取页面的裁剪框作为初始最小限制
-        min_y = page.cropbox.box.y * 1.1
+        crop = page.cropbox.box if page.cropbox is not None else None
+        if crop is None:
+            return None
+        # 页边封边：上界是页顶、下界是页底（不允许扩出页面）。
+        top = float(crop.y2)
+        bottom = float(crop.y)
+        left = float(crop.x)
+        right = float(crop.x2)
 
-        # 检查所有可能的阻挡元素
+        boxes = []
         for para in page.pdf_paragraph:
-            if para.box == current_box or para.box is None:  # 跳过当前段落
+            if para.box is None or para.box == current_box:
                 continue
-            # 只考虑在当前段落下方且有水平重叠的元素
-            if para.box.y2 < current_box.y and not (
-                para.box.x >= current_box.x2 or para.box.x2 <= current_box.x
-            ):
-                min_y = max(min_y, para.box.y2)
-        for char in page.pdf_character:
-            if char.box.y2 < current_box.y and not (
-                char.box.x >= current_box.x2 or char.box.x2 <= current_box.x
-            ):
-                min_y = max(min_y, char.box.y2)
-        # 检查图形
-        for figure in page.pdf_figure:
-            if figure.box.y2 < current_box.y and not (
-                figure.box.x >= current_box.x2 or figure.box.x2 <= current_box.x
-            ):
-                min_y = max(min_y, figure.box.y2)
+            boxes.append(para.box)
+        boxes.extend(char.box for char in page.pdf_character if char.box is not None)
+        boxes.extend(figure.box for figure in page.pdf_figure if figure.box is not None)
 
-        return min_y
+        for obstacle in boxes:
+            horizontally_overlaps = not (
+                obstacle.x >= current_box.x2 or obstacle.x2 <= current_box.x
+            )
+            vertically_overlaps = not (
+                obstacle.y >= current_box.y2 or obstacle.y2 <= current_box.y
+            )
+            if horizontally_overlaps and not vertically_overlaps:
+                # 纯上下邻居：纵向扩到它的边缘（间隔在最终 Box 里预留）
+                if obstacle.y >= current_box.y2:
+                    top = min(top, float(obstacle.y))
+                else:
+                    bottom = max(bottom, float(obstacle.y2))
+            elif vertically_overlaps and not horizontally_overlaps:
+                # 纯左右邻居：只用于 clamp 横向 tolerance
+                if obstacle.x >= current_box.x2:
+                    right = min(right, float(obstacle.x))
+                else:
+                    left = max(left, float(obstacle.x2))
+            # 两轴都重叠（交叠，如整页水印框）或只是对角相邻：不构成扩容边界
+
+        # 页边封边：某个方向没有任何相邻障碍时，只有 bbox 已贴近该页边
+        # （"位于顶部/底部"）才把页边当边界；否则不向该方向扩容，避免段落
+        # 被拉进页边距。
+        if (
+            top >= float(crop.y2)
+            and float(crop.y2) - float(current_box.y2) > EXPAND_PAGE_EDGE_MAX_DISTANCE
+        ):
+            top = float(current_box.y2)
+        if (
+            bottom <= float(crop.y)
+            and float(current_box.y) - float(crop.y) > EXPAND_PAGE_EDGE_MAX_DISTANCE
+        ):
+            bottom = float(current_box.y)
+
+        # 扩容只增不减：横向 clamp / 页边都不允许把任何一边往内推。
+        expanded = Box(
+            x=min(
+                max(float(current_box.x) - EXPAND_HORIZONTAL_TOLERANCE, left),
+                float(current_box.x),
+            ),
+            y=min(float(current_box.y), bottom + EXPAND_VERTICAL_GAP),
+            x2=max(
+                min(float(current_box.x2) + EXPAND_HORIZONTAL_TOLERANCE, right),
+                float(current_box.x2),
+            ),
+            y2=max(float(current_box.y2), top - EXPAND_VERTICAL_GAP),
+        )
+        if (
+            expanded.x >= current_box.x
+            and expanded.x2 <= current_box.x2
+            and expanded.y >= current_box.y
+            and expanded.y2 <= current_box.y2
+        ):
+            return None
+        return expanded
 
     def _update_paragraph_render_order(self, paragraph: il_version_1.PdfParagraph):
         """

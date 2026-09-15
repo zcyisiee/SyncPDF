@@ -50,7 +50,9 @@ TEX_COMMON = r"""\usepackage{fontspec}
 \hyphenpenalty=50
 \tolerance=1500
 \emergencystretch=1em
-\lineskiplimit=-\maxdimen
+%% Keep baseline spacing unless tall inline content needs collision-avoiding glue.
+\lineskiplimit=0pt
+\lineskip=1pt
 \pagestyle{empty}
 \usepackage[hidelinks]{hyperref}
 """
@@ -71,8 +73,8 @@ TEX_HEADER = (
 )
 
 #: 模板/排版指令版本：进入持久化 stamp 缓存 key，改模板必须同步递增。
-#: p5：+xcolor/+hyperref(hidelinks)（角标引文的 \\textcolor/\\href 渲染）。
-TEMPLATE_VERSION = "latex-bbox-2026-09-p5"
+#: p6: Restore TeX interline collision avoidance for tall formulas/fragments.
+TEMPLATE_VERSION = "latex-bbox-2026-09-p6"
 
 #: 有界缩小：每步 ×0.95，最多 12 步（≈0.54×），字号绝对下限 4pt。
 #: 长度单位统一用 TeX ``bp``（= 1/72in = PDF 用户单位）：父页面 bbox/fit
