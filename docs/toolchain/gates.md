@@ -57,7 +57,7 @@ python experiments/toolchain_gates.py <workdir> [--pdf <源pdf>] [--json]
 
 ```bash
 # 把阈值调到低于真实未覆盖率（DeepSeek 实测 0.0436%）→ 必定触发
-python -m babeldoc.tools.agent md-extract DeepSeek_V41_Tech_Report.pdf \
+bdt parse DeepSeek_V41_Tech_Report.pdf \
   --workdir tmp/gate-coverage \
   --layout-coverage-threshold 0.0001 \
   --mineru-json ~/.cache/babeldoc/mineru-layout.v1/ba68e2e40408125ae6d2f63a9a241b61c73910691c74ec1a2a7023c851eac08d.json
@@ -199,8 +199,8 @@ print('ok', r['ok'], 'violations', r['violations'][:5],
 # 复制 workdir，往译文塞一个不存在的 id → extra_ids → ok=false
 cp -r <workdir> tmp/gate-protocol
 printf '\n<!-- id=P99-999 label=text -->\n伪造段落\n' >> tmp/gate-protocol/agent/translated.md
-python -m babeldoc.tools.agent md-apply tmp/gate-protocol tmp/gate-protocol/agent/translated.md
-# 预期：{"ok": false, "extra_ids": ["P99-999"], ...}，退出码 1
+bdt apply --workdir tmp/gate-protocol
+# 预期：{"ok": false, "error": {... "extra_ids": ["P99-999"] ...}}，退出码 1
 ```
 
 ---

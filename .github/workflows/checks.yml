@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   checks:
-    name: Package and lightweight PDF smoke
+    name: Package, lint, tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -40,16 +40,10 @@ jobs:
       - name: Build package
         run: uv build
 
-      - name: Import and CLI smoke
+      - name: Single entry smoke
         run: |
-          uv run python -m compileall babeldoc
-          uv run babeldoc --help
+          uv run python -m compileall babeldoc babeldoc_tools experiments
+          uv run bdt --help
 
-      - name: Lightweight no-secret PDF E2E
-        run: |
-          uv run babeldoc \
-            --openai \
-            --openai-api-key ci-dummy-key \
-            --files examples/ci/test.pdf \
-            --only-parse-generate-pdf \
-            --skip-scanned-detection
+      - name: Tests
+        run: uv run python -m pytest tests/ -q

@@ -2,12 +2,14 @@
 
 本文列出工具链的**全部工具**：入参、出参、副作用（落盘）、典型调用、失败码。
 
-工具有两套入口，能力重叠：
+工具只有一个入口：
 
 | 入口 | 调用方式 | 定位 |
 |---|---|---|
-| **legacy CLI**（本文示例以它为准） | `python -m babeldoc.tools.agent <cmd> …` | 名字空间固定，**与 cwd 无关**；可回放 MinerU 布局 |
-| **工具层 `bdt`** | `bdt <subcommand> [flags]`（= `python -m babeldoc_tools`） | 稳定 JSON 契约、错误结构化、落盘报告 |
+| **`bdt`**（唯一 CLI） | `bdt <subcommand> [flags]`（= `python -m babeldoc_tools`） | 名字空间固定、稳定 JSON 契约、错误结构化、落盘报告；可回放 MinerU 布局 |
+
+> 旧的 `python -m babeldoc.tools.agent` 内部 CLI 已随 U5 删除；其能力函数仍保留在
+> `babeldoc/tools/agent/` 模块中，测试与脚本直接调用 Python 函数或走 `bdt`。
 
 > 仓库里只有一个 `babeldoc_tools` 包，位于仓库根 `babeldoc_tools/`（即本文描述的
 > MinerU/Markdown agent 管线）。安装后 `bdt`（或 `python -m babeldoc_tools`）在任何
@@ -58,7 +60,7 @@
 | `pages` | string | | 页范围，如 `1,2` 或 `1-3` |
 | `lang_in` / `lang_out` | string | | 默认 `en` / `zh` |
 
-**legacy CLI 额外旗标**（`python -m babeldoc.tools.agent md-extract`）：
+**`bdt parse` 额外旗标**：
 
 | 旗标 | 说明 |
 |---|---|
@@ -93,16 +95,11 @@ agent/source/mineru/provider_ir.json  agent/source/mineru/alignment.json
 **典型调用**
 
 ```bash
-# ① legacy CLI（推荐：cwd 无关，支持 MinerU 回放与所有新旗标）
-python -m babeldoc.tools.agent md-extract DeepSeek_V41_Tech_Report.pdf \
-  --workdir tmp/docs-smoke \
-  --mineru-json ~/.cache/babeldoc/mineru-layout.v1/ba68e2e40408125ae6d2f63a9a241b61c73910691c74ec1a2a7023c851eac08d.json
-
-# ② 工具层 `bdt`（agent 版）：任意 cwd 均可。
+# `bdt`：任意 cwd 均可，支持 MinerU 回放与所有新旗标。
 bdt parse DeepSeek_V41_Tech_Report.pdf \
   --workdir tmp/docs-smoke \
   --layout mineru \
-  --mineru-json "<缓存 layout.json 路径>"
+  --mineru-json ~/.cache/babeldoc/mineru-layout.v1/ba68e2e40408125ae6d2f63a9a241b61c73910691c74ec1a2a7023c851eac08d.json
 ```
 
 > 实测两种写法的返回一致（`paragraphs=352`）。
@@ -201,8 +198,6 @@ bdt translate --workdir tmp/docs-smoke --markdown /path/to/translated.md
 `FileNotFoundError`（未先 parse，`input.pdf` 缺失）
 
 ```bash
-python -m babeldoc.tools.agent reconstruct tmp/docs-smoke --output-dir tmp/docs-smoke/output --dual
-# 工具层：
 bdt build --workdir tmp/docs-smoke --output-dir tmp/docs-smoke/output --dual
 ```
 
@@ -215,9 +210,8 @@ bdt build --workdir tmp/docs-smoke --output-dir tmp/docs-smoke/output --dual
 ```bash
 # 公开 CLI：bdt build --render 2,3（重建后渲染）
 bdt build --workdir tmp/docs-smoke --render 2,3
-# legacy CLI：
-python -m babeldoc.tools.agent render tmp/docs-smoke/output/DeepSeek_V41_Tech_Report.no_watermark.zh.mono.pdf \
-  --pages 2,3 --dpi 100 --out-dir tmp/docs-smoke/render
+# 任意 PDF 直接渲染（内部函数）：
+uv run python -c "from babeldoc.tools.agent import workflow; print(workflow.render('x.pdf', '2,3', dpi=100, out_dir='tmp/docs-smoke/render'))"
 ```
 
 ---
@@ -259,13 +253,13 @@ apply 报告、段内完整性、占位符残留、页数/目录/链接一致性
 
 ---
 
-## 8. legacy CLI 速查
+## 8. `bdt` 速查
 
 ```bash
-python -m babeldoc.tools.agent --help
-# extract / apply / reconstruct / render / md-extract / md-apply
+bdt --help
+# parse / translate / apply / build / check / layout-set / report / run
 
-# 关键新旗标（md-extract 与 extract 都支持）
+# 解析阶段关键旗标
 --mineru-cache-key <sha256>            # 按内容哈希指定缓存 layout.json
 --mineru-json <path>                   # 直接给 layout.json 路径
 --layout-coverage-threshold <float>    # 默认 0.005

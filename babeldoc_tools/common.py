@@ -84,7 +84,7 @@ def load_prompt(name: str, **substitutions) -> str:
     """加载提示词文件并替换 ``{key}`` 占位符。
 
     优先 ``agents/<name>.md``，回退 ``prompts/<name>.md``；文件里若有
-    ```text 代码块则取块内内容（与 experiments/markdown_translate.py 一致）。
+    ```text 代码块则取块内内容。
     """
     candidates = [
         AGENTS_DIR / f"{name}.md",

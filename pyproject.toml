@@ -63,7 +63,6 @@ Homepage = "https://github.com/funstory-ai/BabelDOC"
 Issues = "https://github.com/funstory-ai/BabelDOC/issues"
 
 [project.scripts]
-babeldoc = "babeldoc.main:cli"
 bdt = "babeldoc_tools.__main__:main"
 
 [build-system]
@@ -137,8 +136,6 @@ max-complexity = 10 # 函数圈复杂度阈值
 [tool.ruff.lint.per-file-ignores]
 "babeldoc/babeldoc_exception/BabelDOCException.py" = ["N999"]
 "babeldoc/format/pdf/pdfinterp.py" = ["N"] # 忽略命名规范
-"babeldoc/tools/executor/babeldoc_adapter.py" = ["F401"]
-"babeldoc/tools/executor/server.py" = ["N802"]
 "tests/*" = ["S101"]            # 在测试文件中允许 assert
 "scripts/*/tests/*" = ["S101", "S106"]  # scaffold tests: allow assert + token fixture
 "**/__init__.py" = ["F401"]     # 允许未使用的导入
@@ -176,9 +173,6 @@ version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
     'version = "{version}"'
 ]
 "babeldoc/__init__.py" = [
-    '__version__ = "{version}"'
-]
-"babeldoc/main.py" = [
     '__version__ = "{version}"'
 ]
 "babeldoc/const.py" = [

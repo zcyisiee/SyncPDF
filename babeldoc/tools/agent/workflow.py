@@ -1,18 +1,13 @@
-"""agent 文档翻译工作流：extract → (subagent 翻译) → apply → reconstruct。
+"""agent 文档翻译工作流：(解析) → (subagent 翻译) → apply → reconstruct。
 
 设计：
-- extract：进程内复现管道 parse→layout→paragraph→styles 链（与
-  high_level.do_translate 前半段一致），对每个段落跑
-  ILTranslator.pre_translate_paragraph 得到带占位符（{vN}、<style>）的源文，
-  产出 translation sheet（JSONL，给翻译 subagent）+ state.pkl（给 apply/
-  reconstruct；单次 pickle 保持 Document 与 TranslateInput 共享公式对象的
-  同一性）。mediabox_data 必须在 extract 时捕获（fix_media_box 不幂等，
-  二次调用返回归一化后的值）。
 - apply：读取译文 sheet，用 tools/agent/protocol 校验（id 对齐 + 占位符
   多重集），通过后经 ILTranslator.post_translate_paragraph 写回段落并
-  重建 composition。
+  重建 composition。state.pkl（含解析后的 IR 与 TranslateInput，单次
+  pickle 保持 Document 与 TranslateInput 共享公式对象的同一性）由
+  ``markdown_view`` 解析阶段落盘。
 - reconstruct：从 state.pkl 加载写回后的 IR，跑 Typesetting + PDFCreater
-  生成 mono/dual PDF（复用 extract 保存的 temp pdf 与 mediabox_data）。
+  生成 mono/dual PDF（复用解析阶段保存的 temp pdf 与 mediabox_data）。
 - render：PDF 页 → PNG（视觉审查用）。
 
 翻译本身完全由外部 agent subagent 完成，本模块不含任何 LLM 调用。
@@ -22,7 +17,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import pickle
 import re
 import shutil
@@ -31,15 +25,6 @@ from pathlib import Path
 from babeldoc.format.pdf.document_il.backend.pdf_creater import PDFCreater
 from babeldoc.format.pdf.document_il.midend.il_translator import ILTranslator
 from babeldoc.format.pdf.document_il.midend.il_translator import PageTranslateTracker
-from babeldoc.format.pdf.document_il.midend.inline_math_protector import (
-    InlineMathProtector,
-)
-from babeldoc.format.pdf.document_il.midend.layout_parser import LayoutParser
-from babeldoc.format.pdf.document_il.midend.paragraph_finder import ParagraphFinder
-from babeldoc.format.pdf.document_il.midend.styles_and_formulas import (
-    StylesAndFormulas,
-)
-from babeldoc.format.pdf.document_il.midend.toc_detector import TocDetector
 from babeldoc.format.pdf.document_il.midend.typesetting import Typesetting
 from babeldoc.format.pdf.document_il.xml_converter import XMLConverter
 from babeldoc.format.pdf.high_level import fix_filter
@@ -53,13 +38,9 @@ from babeldoc.format.pdf.parse_shared import build_parse_only_config
 from babeldoc.format.pdf.translation_config import WatermarkOutputMode
 from babeldoc.tools.agent import protocol
 from babeldoc.tools.agent.sheet_translator import SheetProtocolTranslator
-from babeldoc.tools.agent.translation_selection import SelectionContext
-from babeldoc.tools.agent.translation_selection import normalize_label
-from babeldoc.tools.agent.translation_selection import select_page_paragraphs
 
 AGENT_DIR = "agent"
 STATE_FILE = "state.pkl"
-SHEET_FILE = "sheet.jsonl"
 
 logger = logging.getLogger(__name__)
 
@@ -70,10 +51,6 @@ def agent_dir(workdir: str | Path) -> Path:
 
 def state_path(workdir: str | Path) -> Path:
     return agent_dir(workdir) / STATE_FILE
-
-
-def sheet_path(workdir: str | Path) -> Path:
-    return agent_dir(workdir) / SHEET_FILE
 
 
 def _base_config(pdf_path, workdir, lang_in, lang_out):
@@ -164,221 +141,6 @@ def _bump_title_font_size(paragraph):
         new_style = _copy.copy(paragraph.pdf_style)
         new_style.font_size = max(sizes)
         paragraph.pdf_style = new_style
-
-
-def extract(
-    pdf_path,
-    workdir,
-    lang_in="en",
-    lang_out="zh",
-    pages: str | None = None,
-    layout: str = "mineru",
-    mineru_token: str | None = None,
-    skip_labels: str | None = None,
-    layout_coverage_threshold: float = 0.005,
-    mineru_use_ocr_text: bool = False,
-):
-    """解析 PDF 并导出翻译 sheet + 状态文件。返回统计 dict。
-
-    layout="mineru" 时用 MinerU API 做布局（需 token；结果按 PDF 内容哈希缓存）；
-    layout="paddle" 时使用本地 PP-DocLayoutV3/PaddleOCR-VL（按需加载依赖）。
-    默认 skip 集生效：reference/author/表格内部/图片内部/页眉页脚等跳过，
-    *_caption 保留翻译。skip_labels 可在两种模式下追加跳过的标签。
-    """
-    from babeldoc.const import close_process_pool
-    from babeldoc.format.pdf.document_il.midend.enclosed_marker_fixer import (
-        EnclosedMarkerFixer,
-    )
-    from babeldoc.format.pdf.new_parser.native_parse import (
-        parse_prepared_pdf_with_new_parser_to_legacy_ir,
-    )
-
-    workdir = Path(workdir)
-    if pages:
-        pdf_path = _trim_pages(
-            Path(pdf_path), _parse_pages(pages), workdir / "trimmed.pdf"
-        )
-
-    config = _base_config(pdf_path, workdir, lang_in, lang_out)
-    extra_skipped = []
-    if skip_labels:
-        # Canonicalize once here; the selection helper and MinerU alias
-        # expansion both expect the same space/slash/case-folded vocabulary.
-        extra_skipped = [
-            normalize_label(x) for x in skip_labels.split(",") if x.strip()
-        ]
-
-    from babeldoc.format.pdf.translation_config import TranslationConfig
-    if layout == "paddle":
-        from babeldoc.docvision.layout_selection import configure_paddle
-
-        configure_paddle(config)
-    elif layout == "mineru":
-        from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
-
-        token = mineru_token or os.environ.get("MINERU_API_TOKEN")
-        if not token:
-            raise ValueError(
-                "mineru 布局需要 --mineru-token 或环境变量 MINERU_API_TOKEN"
-            )
-        config.doc_layout_model = MinerUDocLayoutModel(api_token=token)
-    else:
-        raise ValueError("layout 必须是 mineru 或 paddle")
-    # provider IR 落到 <workdir>/agent/source/mineru/provider_ir.json
-    config.provider_ir_dir = agent_dir(workdir)
-    config.mineru_doclayout_enabled = layout == "mineru"
-    config.mineru_use_ocr_text = bool(mineru_use_ocr_text)
-    if layout == "mineru":
-        config.mineru_skip_translate_effective_labels = (
-            TranslationConfig.expand_mineru_skip_translate_layout_labels(
-                TranslationConfig.get_mineru_default_skip_translate_layout_labels()
-                + tuple(extra_skipped)
-            )
-        )
-    else:
-        config.layout_skip_translate_effective_labels = frozenset(
-            set(config.layout_skip_translate_effective_labels) | set(extra_skipped)
-        )
-    config.layout_coverage_threshold = layout_coverage_threshold
-    config.skip_scanned_detection = True
-
-    doc_pdf, temp_pdf_path, mediabox_data = _prepare_pdf(pdf_path, config)
-    docs = parse_prepared_pdf_with_new_parser_to_legacy_ir(
-        temp_pdf_path, config=config, doc_pdf=doc_pdf
-    )
-    docs = LayoutParser(config).process(docs, doc_pdf)
-    # 行内公式保护 + 原生字符↔MinerU span 对齐审计（与 markdown_view 同位置：
-    # ParagraphFinder 之前，page.pdf_character 还是全量）。
-    docs = InlineMathProtector(config).process(docs) or docs
-    # 实验性高质量 OCR：在段落识别前安全回填字符文本，保留原生 bbox/样式。
-    if config.mineru_use_ocr_text:
-        from babeldoc.format.pdf.document_il.midend.provider_ocr import (
-            ProviderOcrTextFusion,
-        )
-
-        docs = ProviderOcrTextFusion(config).process(docs) or docs
-    close_process_pool()
-    docs = EnclosedMarkerFixer(config).process(docs)
-    docs = ParagraphFinder(config).process(docs)
-    # 目录页条目化（需要段落结构；新段落要经过 StylesAndFormulas 的样式处理）。
-    docs = TocDetector(config).process(docs) or docs
-    StylesAndFormulas(config).process(docs)
-
-    # 超链接快照：必须在 Typesetting 之前（字符 box 还是源坐标）。
-    from babeldoc.tools.agent import link_snapshot
-
-    try:
-        link_state = link_snapshot.build_link_state(temp_pdf_path, docs)
-        link_snapshot.write_links(
-            link_state.get("link_snapshot", {}),
-            link_snapshot.links_path(agent_dir(workdir)),
-        )
-    except Exception:  # noqa: BLE001 - 链接快照是审计产物，不阻断解析
-        logger.warning("超链接快照失败", exc_info=True)
-        link_state = {"link_snapshot": {}, "page_char_objects": {}}
-
-    il_translator = ILTranslator(
-        SheetProtocolTranslator(lang_in, lang_out, True), config
-    )
-    # LaTeX bbox 排版（实验特性）：源行几何必须在译文回填之前采集——
-    # post_translate_paragraph 会把 composition 换成纯文本 run，pdf_line 与
-    # 源坐标随之丢失（根因 5）。这里随 state.pkl 落盘，reconstruct 时读取。
-    # 门禁：默认关闭时不采集（零行为变化，含 state.pkl 体积/耗时）。
-    if config.enable_latex_bbox_layout:
-        from babeldoc.format.pdf.document_il.backend.latex_bbox.source_geometry import (
-            capture_source_line_geometry,
-        )
-
-        try:
-            source_line_geometry = capture_source_line_geometry(docs)
-        except Exception:  # noqa: BLE001 - 几何采集失败只影响 P3 保真
-            logger.warning("源行几何采集失败", exc_info=True)
-            source_line_geometry = {}
-    else:
-        source_line_geometry = {}
-    inputs = {}
-    rows = []
-    label_counts = {}
-    skipped_counts = {}
-    skipped_rows = []
-    selection_context = SelectionContext()
-    for page in docs.page:
-        page_font_map, page_xobj_font_map = _page_font_maps(page)
-        page_tracker = PageTranslateTracker()
-        extra_labels_set = set(extra_skipped)
-        for paragraph, decision in select_page_paragraphs(
-            page, selection_context, extra_labels=extra_labels_set
-        ):
-            if not paragraph.debug_id:
-                continue
-            label = paragraph.layout_label or "text"
-            if not decision.translate:
-                skipped_counts[label] = skipped_counts.get(label, 0) + 1
-                skipped_rows.append(
-                    {
-                        "id": paragraph.debug_id,
-                        "page": page.page_number,
-                        "layout_label": label,
-                        "source": paragraph.unicode or "",
-                        "reason": decision.reason or "protected",
-                    }
-                )
-                continue
-            _bump_title_font_size(paragraph)
-            text, translate_input = il_translator.pre_translate_paragraph(
-                paragraph,
-                page_tracker.new_paragraph(),
-                page_font_map,
-                page_xobj_font_map,
-            )
-            if text is None:
-                skipped_counts[label] = skipped_counts.get(label, 0) + 1
-                continue
-            inputs[paragraph.debug_id] = translate_input
-            rows.append(
-                {
-                    "id": paragraph.debug_id,
-                    "page": page.page_number,
-                    "layout_label": label,
-                    "source": text,
-                }
-            )
-            label_counts[label] = label_counts.get(label, 0) + 1
-
-    out_dir = agent_dir(workdir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    with open(sheet_path(workdir), "w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-    with open(state_path(workdir), "wb") as f:
-        pickle.dump(
-            {
-                "doc": docs,
-                "inputs": inputs,
-                "temp_pdf_path": str(temp_pdf_path),
-                "pdf_path": str(pdf_path),
-                "lang_in": lang_in,
-                "lang_out": lang_out,
-                "mediabox_data": mediabox_data,
-                "skipped_rows": skipped_rows,
-                # 超链接映射状态：快照（链接 → 字符下标/段落 id）+ 字符对象列表
-                # （与 char_indices 同序，pickle 后保持对象身份，重建阶段读新 box）。
-                "link_snapshot": link_state.get("link_snapshot", {}),
-                "page_char_objects": link_state.get("page_char_objects", {}),
-                # 源行几何（P3-0）：译文回填前采集，重建阶段直接复用。
-                "source_line_geometry": source_line_geometry,
-            },
-            f,
-        )
-
-    return {
-        "sheet": str(sheet_path(workdir)),
-        "paragraphs": len(rows),
-        "layout_label_counts": label_counts,
-        "skipped_label_counts": skipped_counts,
-        "skipped_rows": skipped_rows,
-        "pages": len(docs.page),
-    }
 
 
 def _formula_expansion(translator_input) -> dict[str, str]:

@@ -1,7 +1,7 @@
 """解析管线分阶段快照导出器（诊断/优化用）。
 
-把 `babeldoc.tools.agent extract` 的内部管线拆成可观测的 6 步，每步把中间产物
-落盘到 <out-dir>/，便于对照优化：
+把解析管线（`workflow` 与 `markdown_view` 共用的阶段）拆成可观测的 6 步，
+每步把中间产物落盘到 <out-dir>/，便于对照优化：
 
     00_input.json          PDF 元信息（页数、mediabox、sha256）
     01_prepare.json        _prepare_pdf 之后（修复后的临时 PDF + mediabox_data）
@@ -9,7 +9,7 @@
     03_layout.json         LayoutParser 之后的版面框（class_name/box/conf）
     04_paragraphs.json     ParagraphFinder 之后的段落（debug_id/layout_label/box/unicode）
     05_styles_formulas.json StylesAndFormulas 之后的 composition runs（样式/公式）
-    06_sheet.jsonl         与 extract 完全一致的待译清单（source 字符串）
+    06_sheet.jsonl         与解析阶段一致的待译清单（source 字符串）
     06_translate_inputs.json 每个 id 的占位符明细（{vN} / <style id='N'> 各自是什么）
 
 用法：

@@ -181,10 +181,10 @@ bdt parse --help                        # 单子命令参数
 
 **MinerU 识别出的 `inline_equation`（行内公式）是默认行为，没有任何开关**。只要布局阶段产出了 provider IR（`layout=mineru` 或 `paddle` 都会），它就在两段链路上自动生效：
 
-1. 翻译前：`InlineMathProtector` 在三个入口（extract / md-translate / high_level）无条件运行，把 inline_equation 的 span 盒转成 formula 布局区 → 聚成 `PdfFormula` → 翻译模型看到 `{vN}` 占位符；
+1. 翻译前：`InlineMathProtector` 在 `bdt parse`（markdown_view）与 `high_level` 两个入口无条件运行，把 inline_equation 的 span 盒转成 formula 布局区 → 聚成 `PdfFormula` → 翻译模型看到 `{vN}` 占位符；
 2. 渲染时：LaTeX bbox 融合的 `mineru` 级自动采用 span 自带的公式 LaTeX（精确盒匹配 + 三道一致性闸门，不过就降级 simple_math/fragment，同样无开关）。
 
-完整特性清单（CLI = `python -m babeldoc.tools.agent` 子命令旗标；`bdt` = 工具层子命令旗标）：
+完整特性清单（`bdt` = 唯一入口，子命令旗标）：
 
 | 特性 | CLI 旗标 | JSON 键 | 默认 | 说明 |
 |---|---|---|---|---|
@@ -192,13 +192,12 @@ bdt parse --help                        # 单子命令参数
 | MinerU OCR 文本回填 | `--mineru-ocr-text` | —（暂未暴露） | **关** | 等长 text span 保守字符回填（见 `samples/pipeline/03b-provider-ocr`）；**会改变模型输入**，实验性 |
 | LaTeX bbox 排版 | `--latex-bbox` / `--no-latex-bbox` | `latex_bbox` | **开** | 缺 XeLaTeX/字体自动回退旧渲染并在报告 `fallbacks` 留痕；关闭时输出与旧渲染逐字节一致 |
 | LaTeX bbox 模式 | `--latex-bbox-mode full/repair` | `latex_bbox_mode` | `full` | `repair` = 复现旧行为（只修溢出，不整段重排） |
-| dual 双语 PDF | `--dual`（reconstruct） | `dual` | CLI **关** / JSON **开** | 拼宽左原文右译文；两入口默认值相反，注意区分 |
-| 水印 | —（仅 API `reconstruct(watermark=)`） | `watermark` | 关 | CLI 子命令未暴露 |
+| dual 双语 PDF | `--dual`（build） | `dual` | CLI **关** / JSON **开** | 拼宽左原文右译文；两入口默认值相反，注意区分 |
+| 水印 | `--watermark`（build） | `watermark` | 关 | — |
 | 布局覆盖率门禁 | `--layout-coverage-threshold` | —（暂未暴露） | `0.005` | 原生字符未被任何区域覆盖的占比上限，超限解析失败（防静默漏译） |
-| 追加跳过标签 | `--skip-labels` | —（暂未暴露） | 无 | 默认已跳过 reference/author/图表内部/页眉页脚；`*_caption` 保留翻译 |
 | 页码子集 | `--pages 1,2 或 1-3` | `pages` | 全文 | 解析前裁剪 |
-| MinerU 结果回放 | `--mineru-json` / `--mineru-cache-key`（md-translate） | `mineru_json` | 无 | 离线回放已缓存布局，不联网 |
-| 页渲染 DPI | `--dpi`（render） | — | `110` | 视觉审查 PNG |
+| MinerU 结果回放 | `--mineru-json` / `--mineru-cache-key`（parse） | `mineru_json` | 无 | 离线回放已缓存布局，不联网 |
+| 页渲染 | `--render`（build） | — | 无 | 重建后渲染指定页 PNG（视觉审查） |
 
 两条容易混淆的边界：OCR 文本回填（opt-in）与公式 LaTeX（默认）是独立通道——前者动模型输入（改了要重翻译），后者只在渲染侧（升级不需要重翻译）；`latex_bbox` 默认开但尽力而为，能力探测失败自动回退，不会让任务失败。
 

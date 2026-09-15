@@ -685,16 +685,13 @@ def test_deepseek_cache_to_il_box_stays_within_page():
 
 
 # --------------------------------------------------------------------------- #
-# 7. 回归锚点：两条管线必须调用 InlineMathProtector
+# 7. 回归锚点：解析管线必须调用 InlineMathProtector
+#    （markdown_view 是 bdt parse 的唯一解析入口；legacy workflow.extract 已删除）
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize(
-    "module_name",
-    ["babeldoc.tools.agent.markdown_view", "babeldoc.tools.agent.workflow"],
-)
-def test_pipelines_call_inline_math_protector(module_name):
+def test_pipelines_call_inline_math_protector():
     import importlib
 
-    module = importlib.import_module(module_name)
+    module = importlib.import_module("babeldoc.tools.agent.markdown_view")
     source = inspect.getsource(module)
     assert "InlineMathProtector" in source
     assert "InlineMathProtector(" in source

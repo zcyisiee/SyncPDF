@@ -207,5 +207,5 @@ xsdata generate babeldoc/format/pdf/document_il/il_version_1.xsd --package babel
 ##### Profile memory usage
 
 ```bash
-uv run memray run --native --aggregate babeldoc/main.py -c babeldoc.toml
+uv run memray run --native -m babeldoc_tools parse <pdf> --workdir tmp/profile
 ```

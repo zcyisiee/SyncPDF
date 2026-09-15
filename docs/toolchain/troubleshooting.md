@@ -286,9 +286,7 @@ EOF
 - 改用常规旗标子命令，如解析：`bdt parse <pdf> --workdir <wd> [--mineru-json …]`
   （`bdt <cmd> --help` 查全部旗标）；
 - 若报 `未知参数: mineru_json`，说明解释器加载的是旧安装产物：
-  在仓库根执行 `uv sync` 刷新安装即可；
-- 需要 MinerU/新产物时也可用 **legacy CLI**（cwd 无关）：
-  `python -m babeldoc.tools.agent md-extract …`。
+  在仓库根执行 `uv sync` 刷新安装即可。
 
 ---
 

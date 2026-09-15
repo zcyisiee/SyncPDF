@@ -14,7 +14,7 @@ region onto the original PDF — fixing bad line breaking inside bboxes.
 | Stage (user's word) | Real entry point | File:line |
 |---|---|---|
 | parse | `markdown_view.extract_markdown` → `_run_parse` | `babeldoc/tools/agent/markdown_view.py:648`, `:349` |
-| parse (CLI) | `python -m babeldoc.tools.agent md-extract` | `babeldoc/tools/agent/__main__.py:70-98` |
+| parse (CLI) | `bdt parse` | `babeldoc_tools/__main__.py`（parse 子命令） |
 | parse (tool layer) | `parse_document` | `babeldoc_tools/parse.py:24` |
 | parse→IR | `parse_prepared_pdf_with_new_parser_to_legacy_ir` | `babeldoc/format/pdf/new_parser/native_parse.py:39` |
 | layout / MinerU OCR | `MinerUDocLayoutModel.handle_document` | `babeldoc/docvision/mineru_doclayout.py:430` |
@@ -23,7 +23,7 @@ region onto the original PDF — fixing bad line breaking inside bboxes.
 | generate / typeset | `Typesetting.typesetting_document` / `render_page` / `_find_optimal_scale_and_layout` | `babeldoc/format/pdf/document_il/midend/typesetting.py:1245`, `:1264`, `:974` |
 | generate / write PDF | `PDFCreater.write` (+`update_page_content_stream`) | `babeldoc/format/pdf/document_il/backend/pdf_creater.py:1662` |
 | **generate (orchestrator)** | `workflow.reconstruct` | `babeldoc/tools/agent/workflow.py:468` |
-| **existing overlay precedent** | `add_tiled_watermark` / `add_corner_watermark` (`page.show_pdf_page(..., overlay=True)`) | `babeldoc/tools/executor/watermark_transform.py:10, 45, 34, 146` |
+| **existing overlay precedent** | `add_tiled_watermark` / `add_corner_watermark`（PyMuPDF `page.show_pdf_page(..., overlay=True)` 叠加内容流） | 已移除的 executor 死代码（`watermark_transform`），可用 git 历史回溯 |
 | render (visual check) | `workflow.render` / `render_pages` tool | `babeldoc/tools/agent/workflow.py:545`, `.../babeldoc_tools/layout.py:84` |
 | layout overrides (existing knob) | `layout_overrides` + `layout_geometry` | `babeldoc/tools/agent/layout_overrides.py:45-411`, `layout_geometry.py:150, 358, 607` |
 
@@ -137,7 +137,8 @@ xelatex -interaction=nonstopmode -halt-on-error -output-directory docs/layout-hy
 # then pymupdf: page.show_pdf_page(rect_in_il_yup, out, 0, keep_proportion=False) → save → render PNG
 
 # 4. visual + text-layer check (existing repo tools, read-only w.r.t. product code)
-python -m babeldoc.tools.agent render <overlaid.pdf> --pages 2 --dpi 150 --out-dir /tmp/_lh_probe/png
+# bdt 无独立 render 子命令：直接调用 workflow.render(pdf, "2", dpi=150, out_dir=...)
+# （bdt build --render 2 渲染的是构建产物 mono/dual PDF）
 ```
 
 Time budget per bbox: ~0.8 s `xelatex` + ~0.06 s overlay. For a full page (≈45 paragraphs) that is

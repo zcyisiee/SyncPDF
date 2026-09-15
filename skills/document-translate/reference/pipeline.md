@@ -45,7 +45,7 @@
   │
   ├─[8] 翻译（一次用户指定的命令调用，整篇）→ translated.md
   │
-  ├─[9] md-apply                    校验（id / 锚点多重集+顺序 / 空 span / label）→ 确定性修复
+  ├─[9] bdt apply                    校验（id / 锚点多重集+顺序 / 空 span / label）→ 确定性修复
   │         → translated.jsonl（canonical）→ 写回 IR（state.pkl）
   │
   ├─[10] reconstruct                Typesetting + PDFCreater → mono.pdf / dual.pdf
@@ -70,27 +70,19 @@
 在仓库根目录执行：
 
 ```bash
-# ── Markdown 视图（推荐）────────────────────────────────────────
+# ── 端到端（唯一入口 bdt run）────────────────────────────────────
 # 1) 解析 PDF → 连续英文 Markdown + 锚点
-python -m babeldoc.tools.agent md-extract <pdf> --workdir <dir> \
+bdt parse <pdf> --workdir <dir> \
     --layout mineru [--mineru-token <tok>] [--mineru-json <cached layout.json>] \
     [--pages 1,2] [--lang-in en --lang-out zh]
 
-# 2) 一次调用翻译 + 写回 + 重建 + 渲染（编排器）
-python experiments/markdown_translate.py <dir> \
-    --model gemini-3.8-flash-low --effort low --output-dir <dir>/output \
-    [--skip-translate] [--dry-run]
+# 2) 翻译 + 写回 + 重建 + 审查 + 报告（编排器）
+bdt run <pdf> --workdir <dir> --translator <cmd> --dual \
+    [--reviewer <cmd>] [--markdown self]
 
 # 3) 单独执行写回 / 重建
-python -m babeldoc.tools.agent md-apply <dir> <dir>/agent/translated.md
-python -m babeldoc.tools.agent reconstruct <dir> --output-dir <dir>/output --dual
-python -m babeldoc.tools.agent render <mono.pdf> --pages 1,5,8
-
-# ── 旧 sheet 分批协议（保留兼容）────────────────────────────────
-python -m babeldoc.tools.agent extract <pdf> --workdir <dir> --layout mineru
-python experiments/batch_translate.py <dir> --model ... --batch-size 40
-python -m babeldoc.tools.agent apply <dir> <dir>/agent/translated.jsonl
-python -m babeldoc.tools.agent reconstruct <dir> --output-dir <dir>/output --dual
+bdt apply --workdir <dir> --markdown <dir>/agent/translated.md
+bdt build --workdir <dir> --output-dir <dir>/output --dual --render 1,5,8
 
 # ── 诊断：导出每一步中间产物 ────────────────────────────────────
 python experiments/dump_parse_stages.py <pdf> --out-dir <dir>/parse-stages \
@@ -412,7 +404,7 @@ header / footer / page_number / page_footnote / aside_text / author`
 
 ### [8] 翻译（单次 agy 调用）
 
-**功能**：`experiments/markdown_translate.py` 读取 `document.md`，套用
+**功能**：`bdt run`（`babeldoc_tools/translate.py`）读取 `document.md`，套用
 `skills/document-translate/prompts/markdown-translator.md`，**整篇一次调用**。
 
 **产物 A：`agent/prompt.md`**（实际发出的提示词，便于复盘）
@@ -422,7 +414,7 @@ header / footer / page_number / page_footnote / aside_text / author`
 **漏行补译**：模型偶尔会合并/漏掉段落。编排器在应用前用
 `markdown_view.missing_ids()` 对比 `state.pkl` 的 id 集合与译文中的 `<!-- id -->`，
 若缺失则**只对缺失段落再调用一次**（产物 `prompt.retry.md` / `translated.retry.md`），
-并把结果追加到 `translated.md`。若补译仍失败，`md-apply` 回退
+并把结果追加到 `translated.md`。若补译仍失败，`bdt apply` 回退
 `target = source`（原文保留）并在报告里记 `fallback_ids`，保证流程不中断。
 
 **效果**：一次调用即完成全篇；术语天然一致（实测「极限内联」59 次、
@@ -431,7 +423,7 @@ header / footer / page_number / page_footnote / aside_text / author`
 
 ---
 
-### [9] `md-apply` — 校验、修复、写回
+### [9] `bdt apply` — 校验、修复、写回
 
 **功能**：把译文 Markdown 切回逐段 canonical 文本，校验后写回 IR。
 
@@ -537,7 +529,7 @@ DeepSeek 样本 mono 的链接映射分布：`total=410, remapped=408`
 | `anchors.json` | 7 | 锚点明细（诊断） | 否 |
 | `state.pkl` | 7 | IR 状态，apply/reconstruct 真源 | **否** |
 | `prompt.md` | 8 | 实际发出的提示词 | — |
-| `translated.md` | 8 | 模型译文 Markdown | **是**（改后可重跑 md-apply） |
+| `translated.md` | 8 | 模型译文 Markdown | **是**（改后可重跑 bdt apply） |
 | `prompt.retry.md` / `translated.retry.md` | 8 | 漏行补译的提示词与输出（仅缺失时生成） | — |
 | `translated.jsonl` | 9 | canonical 译文（apply 输入） | 是 |
 | `apply_report.json` | 9 | 校验/修复/告警报告 | — |

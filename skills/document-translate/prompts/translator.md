@@ -1,7 +1,7 @@
 # 翻译 subagent 提示词（translator）
 
-> 本文件是 `experiments/batch_translate.py` 的提示词单一来源（`{{` `}}` 为 format 转义，
-> `{input}` 由脚本填入待译 JSONL）。
+> 本文件是旧 sheet 分批协议（已删除的 `experiments/batch_translate.py`）的提示词，
+> 保留作为 `load_prompt()` 的回退（`{{` `}}` 为 format 转义，`{input}` 由脚本填入待译 JSONL）。
 
 ```text
 你是专业英译中（简体中文）翻译。下面的输入是论文 PDF 逐段抽取的翻译清单（JSONL，每行一个对象）。

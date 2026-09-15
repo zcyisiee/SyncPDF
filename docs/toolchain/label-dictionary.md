@@ -132,9 +132,7 @@ MinerU 的 span `type` 与 block 类型同源，用于 token 决策而非 layout
 | `provides_complete_layout` | **已移除** | ONNX 后端撤离后无意义 |
 | 本地 ONNX 后端（`--layout native`） | **已移除** | MinerU 是唯一布局后端；无布局模型时 `TranslationConfig` 直接报错 |
 | `DocLayoutModel.load_onnx` / `load_available` | **已移除** | — |
-
-> `rpc_doclayout6/7/8`（executor 网关链路）**保留**，它们复用
-> `extract_char.py` 的字符聚类函数（与已删除的 `fallback_line` 无关）。
+| rpc 布局网关模块（doclayout rpc 1-8，executor/旧 CLI 链路） | **已移除** | 只被旧 CLI 与 executor 死代码引用，两者均已删除；可 git 历史回溯 |
 
 ---
 

@@ -106,17 +106,13 @@ MinerU layout.json 按 **PDF 内容 sha256** 缓存在 `~/.cache/babeldoc/mineru
 
 ```bash
 # ① 直接给缓存文件路径
-python -m babeldoc.tools.agent md-extract DeepSeek_V41_Tech_Report.pdf \
+bdt parse DeepSeek_V41_Tech_Report.pdf \
   --workdir tmp/docs-smoke \
   --mineru-json ~/.cache/babeldoc/mineru-layout.v1/ba68e2e40408125ae6d2f63a9a241b61c73910691c74ec1a2a7023c851eac08d.json
 
 # ② 只给内容哈希（--mineru-cache-key），缓存未命中时明确报错
-python -m babeldoc.tools.agent md-extract DeepSeek_V41_Tech_Report.pdf \
+bdt parse DeepSeek_V41_Tech_Report.pdf \
   --workdir tmp/docs-smoke \
-  --mineru-cache-key ba68e2e40408125ae6d2f63a9a241b61c73910691c74ec1a2a7023c851eac08d
-
-# ③ 工具层等价写法（bdt）
-bdt parse DeepSeek_V41_Tech_Report.pdf --workdir tmp/docs-smoke \
   --mineru-cache-key ba68e2e40408125ae6d2f63a9a241b61c73910691c74ec1a2a7023c851eac08d
 ```
 

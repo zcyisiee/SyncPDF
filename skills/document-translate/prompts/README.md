@@ -1,9 +1,10 @@
 # legacy 提示词（保留兼容）
 
-本目录是旧 `experiments/batch_translate.py`（sheet 分批 JSONL 协议）与
-`experiments/markdown_translate.py`（整篇 Markdown）使用的提示词。
+本目录是旧编排脚本（已随 U5 删除的 `experiments/batch_translate.py` /
+`experiments/markdown_translate.py`）使用的 legacy 提示词。
 
-新版工具层（`babeldoc_tools/`，仓库根）从 `../agents/` 读取提示词：
+`babeldoc_tools/`（仓库根）从 `../agents/` 优先读取提示词，本目录作为回退路径
+（`load_prompt()` 的 `PROMPTS_DIR`）保留：
 
 | 旧文件 | 新位置 | 用途 |
 |---|---|---|

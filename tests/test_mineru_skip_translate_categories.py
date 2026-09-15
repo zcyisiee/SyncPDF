@@ -89,3 +89,21 @@ def test_default_skip_labels_translate_all_captions():
     assert "table_text" in effective
     assert "figure" in effective and "figure_text" in effective
     assert "author" in effective
+
+
+def test_default_skip_labels_include_revised_entries():
+    """`bdt parse --layout mineru` 的默认跳过词表（markdown_view 配置构造）。"""
+    from babeldoc.format.pdf.translation_config import TranslationConfig
+
+    defaults = set(TranslationConfig.get_mineru_default_skip_translate_layout_labels())
+    assert {
+        "reference",
+        "table",
+        "image",
+        "code",
+        "header",
+        "footer",
+        "page_number",
+        "page_footnote",
+        "aside_text",
+    }.issubset(defaults)

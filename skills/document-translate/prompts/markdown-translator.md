@@ -1,9 +1,8 @@
 # Markdown 整篇翻译提示词（legacy）
 
-> **legacy**：新版工具层请用 `../agents/translator.md`（`translate_document`）；
-> 本文件仅供 `experiments/markdown_translate.py` 兼容使用。
+> **legacy**：新版工具层请用 `../agents/translator.md`（`translate_document`）。
 
-> `experiments/markdown_translate.py` 取本文件 ```text 块作为提示词，`{document}` 填入
+> 旧编排脚本（已删除）取本文件 ```text 块作为提示词，`{document}` 填入
 > `document.md`。输出应为结构一致的简体中文 Markdown，锚点原样保留。
 
 ```text
