@@ -1005,6 +1005,15 @@ def _do_translate_single(
     docs = LayoutParser(translation_config).process(docs, doc_pdf2zh)
     logger.debug("finish generating layouts")
     close_process_pool()
+    # MinerU/Paddle provider spans include precise inline-equation boxes.  Feed
+    # those boxes into the existing formula pipeline before ParagraphFinder;
+    # otherwise the provider OCR/layout result is reduced to coarse blocks and
+    # inline formulas fall back to ASCII text during typesetting.
+    from babeldoc.format.pdf.document_il.midend.inline_math_protector import (
+        InlineMathProtector,
+    )
+
+    docs = InlineMathProtector(translation_config).process(docs) or docs
     EnclosedMarkerFixer(translation_config).process(docs)
     if translation_config.debug:
         xml_converter.write_json(

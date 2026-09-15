@@ -42,13 +42,22 @@ MIN_REGION_SIZE = 1.0
 
 
 def provider_ir_path(provider_ir_dir, working_dir) -> Path | None:
-    """定位 ``provider_ir.json``：显式目录优先，其次 working_dir 下的 agent 目录。"""
+    """定位 provider IR。
+
+    Paddle writes backend-neutral artifacts under ``source/provider`` while
+    historical MinerU workdirs use ``source/mineru``.  Accept both locations
+    so the same inline-math protection pass is shared by both backends.
+    """
     candidates: list[Path] = []
     if provider_ir_dir:
-        candidates.append(Path(provider_ir_dir) / "source" / "mineru" / "provider_ir.json")
+        root = Path(provider_ir_dir) / "source"
+        candidates.extend(
+            [root / "provider" / "provider_ir.json", root / "mineru" / "provider_ir.json"]
+        )
     if working_dir:
-        candidates.append(
-            Path(working_dir) / "agent" / "source" / "mineru" / "provider_ir.json"
+        root = Path(working_dir) / "agent" / "source"
+        candidates.extend(
+            [root / "provider" / "provider_ir.json", root / "mineru" / "provider_ir.json"]
         )
     for candidate in candidates:
         if candidate.is_file():
@@ -214,7 +223,18 @@ class InlineMathProtector:
             directory = Path(working_dir) / "agent" if working_dir else None
         if not directory:
             return
-        output_path = Path(directory) / "source" / "mineru" / "alignment.json"
+        # Place audit beside the provider IR that was actually consumed.  New
+        # Paddle workdirs use ``source/provider`` while historical MinerU
+        # replays remain under ``source/mineru``.
+        ir_path = provider_ir_path(
+            getattr(self.translate_config, "provider_ir_dir", None),
+            getattr(self.translate_config, "working_dir", None),
+        )
+        output_path = (
+            ir_path.with_name("alignment.json")
+            if ir_path is not None
+            else Path(directory) / "source" / "mineru" / "alignment.json"
+        )
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = output_path.with_suffix(".tmp")

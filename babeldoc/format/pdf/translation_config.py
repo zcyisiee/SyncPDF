@@ -197,6 +197,13 @@ class TranslationConfig:
         return frozenset(x for x in out if x)
 
     def should_skip_translate_layout_label(self, layout_label):
+        # Paddle exposes its own canonical labels and protected-role set.  Keep
+        # this branch separate from MinerU so selecting the local backend does
+        # not alter the legacy MinerU defaults or replay behavior.
+        if getattr(self, "layout_backend", None) == "paddle":
+            return str(layout_label or "").strip().lower() in getattr(
+                self, "layout_skip_translate_effective_labels", frozenset()
+            )
         return bool(
             self.mineru_doclayout_enabled
             and str(layout_label or "").strip().lower()
@@ -284,6 +291,7 @@ class TranslationConfig:
         latex_fallback_policy: str = "fallback",
         latex_min_line_fill: float = 0.85,
         latex_bbox_mode: str = "full",
+        mineru_use_ocr_text: bool = False,
     ):
         self.translator = translator
         self.term_extraction_translator = term_extraction_translator or translator
@@ -325,6 +333,8 @@ class TranslationConfig:
         self.use_rich_pbar = use_rich_pbar
         self.progress_monitor = progress_monitor
         self.doc_layout_model = doc_layout_model
+        self.layout_backend: str | None = None
+        self.layout_skip_translate_effective_labels = frozenset()
         self.mineru_doclayout_enabled = mineru_doclayout_enabled
         # 布局覆盖率门禁阈值：未命中任何 layout 区域的原生字符占比上限。
         # 本地 ONNX 后端与字符聚类兜底（fallback_line）已移除，超阈值即明确失败。
@@ -475,6 +485,9 @@ class TranslationConfig:
         # 结构化中间产物落盘到其下（如 source/mineru/provider_ir.json）；
         # None = 由 provider 自行决定（回退到 working_dir）。
         self.provider_ir_dir: Path | None = None
+        # MinerU 返回的 span 文本可选地回填到原生 PdfCharacter。默认关闭，
+        # 以保持历史行为；启用后仅应用字符数一致的 text span（保守映射）。
+        self.mineru_use_ocr_text = bool(mineru_use_ocr_text)
 
         # LaTeX bbox 排版配置（默认关闭；能力探测失败只告警并回退）。
         self.enable_latex_bbox_layout = enable_latex_bbox_layout

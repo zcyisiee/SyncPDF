@@ -9,13 +9,18 @@ from babeldoc.format.pdf.document_il.il_version_1 import Page
 class YoloResult:
     """Helper class to store detection results from ONNX model."""
 
-    def __init__(self, names, boxes=None, boxes_data=None):
+    def __init__(self, names, boxes=None, boxes_data=None, *, preserve_order=False):
         if boxes is not None:
             self.boxes = boxes
         else:
             assert boxes_data is not None
             self.boxes = [YoloBox(data=d) for d in boxes_data]
-        self.boxes.sort(key=lambda x: x.conf, reverse=True)
+        # Most legacy providers rank regions by confidence.  Paddle's
+        # PP-DocLayoutV3 additionally emits an explicit reading order; preserve
+        # that order when requested so downstream paragraph clustering follows
+        # the model's column/region sequence.
+        if not preserve_order:
+            self.boxes.sort(key=lambda x: x.conf, reverse=True)
         self.names = names
 
 

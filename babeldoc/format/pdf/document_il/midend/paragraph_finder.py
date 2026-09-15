@@ -452,7 +452,12 @@ class ParagraphFinder:
                 char,
                 layout_index,
                 layout_map,
-                protected_layout_labels=self.translation_config.mineru_skip_translate_effective_labels,
+                protected_layout_labels=(
+                    self.translation_config.layout_skip_translate_effective_labels
+                    if getattr(self.translation_config, "layout_backend", None)
+                    == "paddle"
+                    else self.translation_config.mineru_skip_translate_effective_labels
+                ),
             )
             # Check if character is in any formula layout and set formula_layout_id
             char.formula_layout_id = is_character_in_formula_layout(

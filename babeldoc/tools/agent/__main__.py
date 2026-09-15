@@ -35,11 +35,16 @@ def main(argv=None):
     p_extract.add_argument("--pages", default=None, help="如 1,2 或 1-3")
     p_extract.add_argument(
         "--layout",
-        choices=["mineru"],
+        choices=["mineru", "paddle"],
         default="mineru",
-        help="布局后端：仅 mineru（需 token 或 MINERU_API_TOKEN，结果按内容哈希缓存）；本地 ONNX 后端已移除",
+        help="布局后端：mineru（云端 API）或 paddle（本地 PP-DocLayoutV3）",
     )
     p_extract.add_argument("--mineru-token", default=None)
+    p_extract.add_argument(
+        "--mineru-ocr-text",
+        action="store_true",
+        help="实验性：将 MinerU 高质量 OCR 文本安全回填到原生字符（仅等长 text span）",
+    )
     p_extract.add_argument(
         "--skip-labels",
         default=None,
@@ -91,8 +96,13 @@ def main(argv=None):
     p_md.add_argument("--lang-in", default="en")
     p_md.add_argument("--lang-out", default="zh")
     p_md.add_argument("--pages", default=None)
-    p_md.add_argument("--layout", choices=["mineru"], default="mineru")
+    p_md.add_argument("--layout", choices=["mineru", "paddle"], default="mineru")
     p_md.add_argument("--mineru-token", default=None)
+    p_md.add_argument(
+        "--mineru-ocr-text",
+        action="store_true",
+        help="实验性：将 MinerU 高质量 OCR 文本安全回填到原生字符（仅等长 text span）",
+    )
     p_md.add_argument("--mineru-json", default=None, help="回放已缓存的 MinerU layout.json")
     p_md.add_argument(
         "--mineru-cache-key",
@@ -121,6 +131,7 @@ def main(argv=None):
             pages=args.pages,
             layout=args.layout,
             mineru_token=args.mineru_token,
+            mineru_use_ocr_text=args.mineru_ocr_text,
             skip_labels=args.skip_labels,
             layout_coverage_threshold=args.layout_coverage_threshold,
         )
@@ -153,6 +164,7 @@ def main(argv=None):
             mineru_json=args.mineru_json,
             mineru_cache_key=args.mineru_cache_key,
             layout_coverage_threshold=args.layout_coverage_threshold,
+            mineru_use_ocr_text=args.mineru_ocr_text,
         )
     elif args.command == "md-apply":
         result = markdown_view.apply_markdown(args.workdir, args.markdown)

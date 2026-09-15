@@ -254,3 +254,35 @@ def with_target_long_edge(
         render_dpi,
         normalize_rotation=normalize_rotation,
     )
+
+
+def with_fixed_dpi(
+    page: pymupdf.Page,
+    dpi: int,
+    *,
+    normalize_rotation: bool,
+    max_pixels: int = DEFAULT_MAX_PIXELS,
+) -> RasterGeometry:
+    """Render at ``dpi`` exactly, failing instead of silently lowering quality.
+
+    PP-DocLayoutV3 was trained for a fixed raster scale.  Unlike
+    :func:`with_pixel_budget`, this helper keeps the requested DPI and raises a
+    clear error when the page exceeds the configured pixel guard.
+    """
+
+    dpi = _positive_int(dpi, "dpi")
+    max_pixels = _positive_int(max_pixels, "max_pixels")
+    original_rotation = page.rotation
+    try:
+        if normalize_rotation:
+            page.set_rotation(0)
+        width, height = _pixel_dimensions(page.rect.width, page.rect.height, dpi)
+        if width * height > max_pixels:
+            raise ValueError(
+                "Page exceeds the raster pixel guard; increase max_pixels "
+                "without reducing DPI"
+            )
+    finally:
+        if normalize_rotation:
+            page.set_rotation(original_rotation)
+    return _make_geometry(page, dpi, dpi, normalize_rotation=normalize_rotation)

@@ -69,6 +69,44 @@ def create_parser():
         help="Use MinerU VLM layout recognition",
     )
     parser.add_argument(
+        "--layout",
+        choices=("paddle", "mineru"),
+        default=None,
+        help="Select layout backend; paddle uses local PP-DocLayoutV3",
+    )
+    parser.add_argument(
+        "--paddle-model-revision",
+        default="PP-DocLayoutV3",
+        help="PP-DocLayoutV3 model revision (default: PP-DocLayoutV3)",
+    )
+    parser.add_argument(
+        "--paddle-device",
+        choices=("auto", "mlx", "cpu"),
+        default="auto",
+        help="Paddle device: auto, mlx (Apple GPU), or cpu",
+    )
+    parser.add_argument(
+        "--paddle-dpi",
+        type=int,
+        default=144,
+        help="Raster DPI for local PP-DocLayoutV3 (default: 144)",
+    )
+    parser.add_argument(
+        "--paddle-layout-model-dir",
+        default=None,
+        help="Local PP-DocLayoutV3 model directory",
+    )
+    parser.add_argument(
+        "--paddle-vlm-model-dir",
+        default=None,
+        help="Local PaddleOCR-VL model directory (optional)",
+    )
+    parser.add_argument(
+        "--paddle-onnx-model",
+        default=None,
+        help="Verified PP-DocLayoutV3 ONNX graph (optional CoreML/MPS path)",
+    )
+    parser.add_argument(
         "--mineru-api-token", default=os.environ.get("MINERU_API_TOKEN")
     )
     parser.add_argument("--mineru-api-base-url", default="https://mineru.net")
@@ -77,6 +115,14 @@ def create_parser():
     parser.add_argument("--mineru-poll-interval-seconds", type=float, default=5.0)
     parser.add_argument("--mineru-timeout-seconds", type=int, default=900)
     parser.add_argument("--mineru-skip-translate-layout-labels", default=None)
+    parser.add_argument(
+        "--mineru-use-ocr-text",
+        action="store_true",
+        help=(
+            "实验性：将 MinerU 高质量 OCR 文本安全回填到原生字符，"
+            "仅应用等长 text span"
+        ),
+    )
     parser.add_argument(
         "--rpc-doclayout2",
         help="RPC service host address for document layout analysis",
@@ -457,6 +503,17 @@ def create_parser():
 
 
 def _create_doc_layout_model_from_args(args):
+    if getattr(args, "layout", None) == "paddle":
+        from babeldoc.docvision.paddle_doclayout import PaddleDocLayoutModel
+
+        return PaddleDocLayoutModel(
+            model_revision=args.paddle_model_revision,
+            device=args.paddle_device,
+            dpi=args.paddle_dpi,
+            layout_model_dir=args.paddle_layout_model_dir,
+            vlm_model_dir=args.paddle_vlm_model_dir,
+            onnx_model=args.paddle_onnx_model,
+        )
     if getattr(args, "mineru_doclayout", False):
         if args.mineru_model_version == "MinerU-HTML":
             raise ValueError(
@@ -507,10 +564,10 @@ def _create_doc_layout_model_from_args(args):
 
         return RpcDocLayoutModel(host=args.rpc_doclayout7)
 
-    # 本地 ONNX 后端已移除：未指定任何布局后端时明确报错，不做静默回退。
+    # 未指定后端时明确报错，不做静默回退；Paddle 本地是显式 opt-in。
     raise ValueError(
-        "未指定布局后端：本地 ONNX 后端已移除，请使用 --mineru-doclayout"
-        "（需 --mineru-api-token / MINERU_API_TOKEN）或 --rpc-doclayout*。"
+        "未指定布局后端：请使用 --layout paddle（本地 PP-DocLayoutV3）、"
+        "--mineru-doclayout（需 --mineru-api-token / MINERU_API_TOKEN）或 --rpc-doclayout*。"
     )
 
 
@@ -724,7 +781,23 @@ async def main():
             latex_compile_timeout_seconds=args.latex_compile_timeout,
             latex_max_compile_workers=args.latex_max_compile_workers,
             latex_bbox_mode=args.latex_bbox_mode,
+            mineru_use_ocr_text=args.mineru_use_ocr_text,
         )
+
+        # Keep backend-specific protected labels explicit.  The Paddle model
+        # emits PP-DocLayoutV3 labels (mapped to BabelDOC canonical labels), so
+        # ParagraphFinder/ILTranslator can preserve figures, tables, formulas,
+        # and references while translating ordinary prose.
+        if args.layout == "paddle":
+            from babeldoc.docvision.layout_labels import PADDLE_ROLES
+            from babeldoc.docvision.layout_labels import PADDLE_TO_LAYOUT
+
+            config.layout_backend = "paddle"
+            config.layout_skip_translate_effective_labels = frozenset(
+                PADDLE_TO_LAYOUT[label]
+                for label, role in PADDLE_ROLES.items()
+                if role == "protected" and label != "inline_formula"
+            )
 
         def nop(_x):
             pass

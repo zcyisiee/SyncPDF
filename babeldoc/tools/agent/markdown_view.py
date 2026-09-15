@@ -335,6 +335,7 @@ def _run_parse(
     pages,
     mineru_cache_key=None,
     layout_coverage_threshold=0.005,
+    mineru_use_ocr_text=False,
 ):
     from babeldoc.const import close_process_pool
     from babeldoc.format.pdf.document_il.midend.enclosed_marker_fixer import (
@@ -364,37 +365,41 @@ def _run_parse(
         )
 
     config = workflow._base_config(pdf_path, workdir, lang_in, lang_out)
-    if layout != "mineru":
-        # 本地 ONNX 后端（--layout native）已移除，MinerU 是唯一布局后端。
-        raise ValueError(
-            "native 布局后端已移除，请使用 --layout mineru"
-            "（需 MINERU_API_TOKEN 或 --mineru-json 回放）"
-        )
-
-    from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
     from babeldoc.format.pdf.translation_config import TranslationConfig
 
     # --mineru-json 优先；否则按内容哈希解析 --mineru-cache-key。
     mineru_json = _resolve_mineru_json(mineru_json, mineru_cache_key)
 
-    if mineru_json:
+    if layout == "paddle":
+        from babeldoc.docvision.layout_selection import configure_paddle
+
+        configure_paddle(config)
+    elif mineru_json:
+        from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+
         os.environ["BABELDOC_MINERU_LAYOUT_JSON"] = str(mineru_json)
         config.doc_layout_model = MinerUDocLayoutModel(api_token="replay")
-    else:
+    elif layout == "mineru":
+        from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+
         token = mineru_token or os.environ.get("MINERU_API_TOKEN")
         if not token:
             raise ValueError(
                 "mineru 布局需要 --mineru-token / MINERU_API_TOKEN / --mineru-json"
             )
         config.doc_layout_model = MinerUDocLayoutModel(api_token=token)
+    else:
+        raise ValueError("layout 必须是 mineru 或 paddle")
     # provider IR 落到 <workdir>/agent/source/mineru/provider_ir.json
     config.provider_ir_dir = workflow.agent_dir(workdir)
-    config.mineru_doclayout_enabled = True
-    config.mineru_skip_translate_effective_labels = (
-        TranslationConfig.expand_mineru_skip_translate_layout_labels(
-            TranslationConfig.get_mineru_default_skip_translate_layout_labels()
+    config.mineru_doclayout_enabled = layout == "mineru"
+    config.mineru_use_ocr_text = bool(mineru_use_ocr_text)
+    if layout == "mineru":
+        config.mineru_skip_translate_effective_labels = (
+            TranslationConfig.expand_mineru_skip_translate_layout_labels(
+                TranslationConfig.get_mineru_default_skip_translate_layout_labels()
+            )
         )
-    )
     config.layout_coverage_threshold = layout_coverage_threshold
     config.skip_scanned_detection = True
 
@@ -408,6 +413,13 @@ def _run_parse(
     # 行内公式保护 + 原生字符↔MinerU span 对齐审计（需在 ParagraphFinder 之前：
     # 此时 page.pdf_character 仍是全量，且新 formula 区域会被 ParagraphFinder 采纳）。
     docs = InlineMathProtector(config).process(docs) or docs
+    # 实验性高质量 OCR：在段落识别前安全回填字符文本，保留原生 bbox/样式。
+    if config.mineru_use_ocr_text:
+        from babeldoc.format.pdf.document_il.midend.provider_ocr import (
+            ProviderOcrTextFusion,
+        )
+
+        docs = ProviderOcrTextFusion(config).process(docs) or docs
     close_process_pool()
     docs = EnclosedMarkerFixer(config).process(docs)
     docs = ParagraphFinder(config).process(docs) or docs
@@ -650,6 +662,7 @@ def extract_markdown(
     pages=None,
     mineru_cache_key=None,
     layout_coverage_threshold=0.005,
+    mineru_use_ocr_text=False,
 ):
     """解析 PDF → 写 document.md / anchors.json / sheet.jsonl / state.pkl。"""
     workdir = Path(workdir)
@@ -664,6 +677,7 @@ def extract_markdown(
         pages,
         mineru_cache_key=mineru_cache_key,
         layout_coverage_threshold=layout_coverage_threshold,
+        mineru_use_ocr_text=mineru_use_ocr_text,
     )
     agent = workflow.agent_dir(workdir)
     agent.mkdir(parents=True, exist_ok=True)

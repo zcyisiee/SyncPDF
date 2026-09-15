@@ -119,6 +119,11 @@ class ProviderSpan:
     content: str
     score: float | None
     page_index: int
+    # Provider-specific evidence (for example PaddleOCR-VL recognition
+    # status).  Keeping this optional preserves compatibility with historical
+    # MinerU provider artifacts while allowing local backends to expose
+    # provenance without changing the canonical span fields.
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -128,6 +133,7 @@ class ProviderSpan:
             "content": self.content,
             "score": self.score,
             "page_index": self.page_index,
+            "metadata": self.metadata,
         }
 
     @classmethod
@@ -139,6 +145,7 @@ class ProviderSpan:
             content=str(data.get("content") or ""),
             score=_as_float(data.get("score")),
             page_index=int(data.get("page_index") or 0),
+            metadata=dict(data.get("metadata") or {}),
         )
 
 
@@ -451,6 +458,7 @@ class ProviderDocument:
     page_count: int
     pages: list[ProviderPage] = field(default_factory=list)
     unknown_types: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------ #
     # 构造
@@ -502,6 +510,7 @@ class ProviderDocument:
             "page_count": self.page_count,
             "pages": [page.to_dict() for page in self.pages],
             "unknown_types": [dict(item) for item in self.unknown_types],
+            "metadata": self.metadata,
         }
 
     def to_json(self, indent: int | None = None) -> str:
@@ -522,6 +531,7 @@ class ProviderDocument:
             page_count=page_count,
             pages=pages,
             unknown_types=[dict(item) for item in (data.get("unknown_types") or [])],
+            metadata=dict(data.get("metadata") or {}),
         )
 
     @classmethod
