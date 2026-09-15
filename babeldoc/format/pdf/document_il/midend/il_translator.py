@@ -370,6 +370,11 @@ class ILTranslator:
         self.use_as_fallback = False
         self.add_content_filter_hint_lock = threading.Lock()
         self.docs = None
+        # Tokenization is done before work is submitted to the translation pool
+        # and repeated headers/labels are common.  A bounded per-document cache
+        # avoids invoking tiktoken once per duplicate paragraph.
+        self._token_count_cache: dict[str, int] = {}
+        self._token_count_cache_limit = 4096
 
         # Pre-compile patterns for placeholder-like tokens that may be hallucinated by LLM.
         # We only consider the same shapes as our own formula & rich-text placeholders.
@@ -386,10 +391,20 @@ class ILTranslator:
         )
 
     def calc_token_count(self, text: str) -> int:
+        cached = self._token_count_cache.get(text)
+        if cached is not None:
+            return cached
         try:
-            return len(self.tokenizer.encode(text, disallowed_special=()))
+            count = len(self.tokenizer.encode(text, disallowed_special=()))
         except Exception:
-            return 0
+            count = 0
+        if len(self._token_count_cache) >= self._token_count_cache_limit:
+            # Keep insertion order as a cheap bounded FIFO.  Exact LRU behavior
+            # is unnecessary here because this cache is only used for scheduling
+            # priorities, not translation correctness.
+            self._token_count_cache.pop(next(iter(self._token_count_cache)))
+        self._token_count_cache[text] = count
+        return count
 
     def translate(self, docs: Document):
         self.docs = docs
@@ -455,15 +470,16 @@ class ILTranslator:
         tracker: PageTranslateTracker = None,
     ):
         self.translation_config.raise_if_cancelled()
+        # These maps depend only on the page.  Building them inside the paragraph
+        # loop made large pages pay the same O(fonts + xobjects) setup cost for
+        # every paragraph.
+        page_font_map = {font.font_id: font for font in page.pdf_font}
+        page_xobj_font_map = {}
+        for xobj in page.pdf_xobject:
+            page_xobj_font_map[xobj.xobj_id] = page_font_map.copy()
+            for font in xobj.pdf_font:
+                page_xobj_font_map[xobj.xobj_id][font.font_id] = font
         for paragraph in page.pdf_paragraph:
-            page_font_map = {}
-            for font in page.pdf_font:
-                page_font_map[font.font_id] = font
-            page_xobj_font_map = {}
-            for xobj in page.pdf_xobject:
-                page_xobj_font_map[xobj.xobj_id] = page_font_map.copy()
-                for font in xobj.pdf_font:
-                    page_xobj_font_map[xobj.xobj_id][font.font_id] = font
             # self.translate_paragraph(paragraph, pbar,tracker.new_paragraph(), page_font_map, page_xobj_font_map)
             paragraph_token_count = self.calc_token_count(paragraph.unicode)
             if paragraph.layout_label == "title":
@@ -1013,7 +1029,10 @@ class ILTranslator:
     ):
         """Post-translation processing: update paragraph with translated text."""
         tracker.set_output(translated_text)
-        if translated_text == translate_input:
+        # ``translate_input`` is a TranslateInput object; compare against its
+        # source string so unchanged provider output preserves the original
+        # composition and style objects without rebuilding them.
+        if translated_text == translate_input.unicode:
             if llm_translate_tracker := tracker.last_llm_translate_tracker():
                 llm_translate_tracker.set_placeholder_full_match()
             return False

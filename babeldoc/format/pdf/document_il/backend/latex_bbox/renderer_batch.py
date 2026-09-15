@@ -55,7 +55,9 @@ from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
 )
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import StampRequest
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import StampResult
-from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import _measure_fit
+from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
+    _measure_page_fit,
+)
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
     font_setup_clauses,
 )
@@ -196,16 +198,33 @@ class BatchStampRenderer:
             return {}
         results: dict[str, StampResult] = {}
         pending: dict[str, tuple[StampRequest, Path]] = {}
+        # Paragraph ids are unique in normal documents, but repeated translated
+        # text is common (for example, list labels and recurring captions).  A
+        # request's cache key includes every layout input, so requests sharing
+        # it are byte-for-byte interchangeable and only one needs compiling.
+        aliases: dict[str, list[str]] = {}
+        pending_by_cache: dict[tuple, str] = {}
         for request, workdir in requests:
             cached = self._cache.get(request) if self._cache is not None else None
             if cached is not None:
                 self._cache_hits += 1
                 results[request.key] = cached
             else:
+                # Keep the legacy no-cache behavior (each request is compiled
+                # independently); deduplication is enabled when the persistent
+                # stamp cache is active, where avoiding duplicate work is safe
+                # across repeated translation runs as well.
+                if self._cache is not None:
+                    canonical = pending_by_cache.get(request.cache_key)
+                    if canonical is not None:
+                        aliases.setdefault(canonical, []).append(request.key)
+                        continue
+                    pending_by_cache[request.cache_key] = request.key
                 pending[request.key] = (request, Path(workdir))
         if len(pending) <= 1:
             # 单段没有批量收益：直接走单段渲染（完整缩小阶梯）。
-            return self._render_leftovers(pending, results)
+            results = self._render_leftovers(pending, results)
+            return _copy_alias_results(results, aliases)
 
         self._render_calls += 1
         single_only: dict[str, tuple[StampRequest, Path]] = {}
@@ -228,7 +247,8 @@ class BatchStampRenderer:
                 elif reason in _SINGLE_ONLY_REASONS:
                     single_only[key] = pending.pop(key)
         single_only.update(pending)
-        return self._render_leftovers(single_only, results)
+        results = self._render_leftovers(single_only, results)
+        return _copy_alias_results(results, aliases)
 
     def _render_leftovers(
         self,
@@ -410,47 +430,55 @@ class BatchStampRenderer:
         if set(range(len(items))) - info["starts"]:
             logger.warning("LaTeX bbox 批编译标记缺失，交回单段渲染")
             return attribution_failed
-        with pymupdf.open(pdf_path) as doc:
-            page_count = len(doc)
-        if page_count != len(items):
-            # 页码 = 候选项序号是归属前提；页数不符时整块交回单段渲染。
-            logger.warning(
-                "LaTeX bbox 批编译页数 %d != 候选页数 %d，交回单段渲染",
-                page_count,
-                len(items),
-            )
+        # Keep the block PDF open while measuring candidate pages.  Previously
+        # every candidate was extracted to a one-page PDF and reopened just
+        # for measurement, which adds substantial filesystem/PDF parsing I/O
+        # when a block contains several variants per paragraph.
+        try:
+            doc = pymupdf.open(pdf_path)
+        except Exception:  # noqa: BLE001 - unreadable output means attribution failure
+            logger.debug("打开批编译产物失败", exc_info=True)
             return attribution_failed
+        try:
+            page_count = len(doc)
+            if page_count != len(items):
+                # 页码 = 候选项序号是归属前提；页数不符时整块交回单段渲染。
+                logger.warning(
+                    "LaTeX bbox 批编译页数 %d != 候选页数 %d，交回单段渲染",
+                    page_count,
+                    len(items),
+                )
+                return attribution_failed
 
-        per_key: dict[str, dict] = {
-            key: {"candidate": None, "error": None, "reason": None}
-            for key in keys
-        }
-        for index, (key, request) in enumerate(items):
-            bucket = info["segments"].get(index) or {}
-            record = per_key[key]
-            if index not in info["ends"]:
-                continue
-            errors = bucket.get("errors") or []
-            if errors and record["error"] is None:
-                # TeX 错误：与单段渲染一致，不缩小重试，只该段回退。
-                record["error"] = errors[0]
-                continue
-            stamp_path = block_dir / f"{stem}-p{index}.pdf"
-            if not _extract_page(pdf_path, index, stamp_path):
-                continue
-            fits, reason, _chars = _measure_fit(
-                stamp_path, request.width, request.height, request.expected_text
-            )
-            if bucket.get("overfull_hbox"):
-                fits, reason = False, "overfull-hbox"
-            # 页级 ``Overfull \vbox`` 在批编译里只剩「vbox 高度 + 末行 depth」
-            # 的系统噪声（内容超高已被 ``\vbox to`` 封在一页内），因此不作为
-            # 失败信号；真正的垂直溢出由 ``_measure_fit`` 的墨迹/文本判定发现。
-            if fits and record["candidate"] is None:
-                # 同一轮的页按档位优先级排列：先到先得。
-                record["candidate"] = (request, stamp_path)
-            elif not fits:
-                record["reason"] = reason
+            per_key: dict[str, dict] = {
+                key: {"candidate": None, "error": None, "reason": None}
+                for key in keys
+            }
+            for index, (key, request) in enumerate(items):
+                bucket = info["segments"].get(index) or {}
+                record = per_key[key]
+                if index not in info["ends"]:
+                    continue
+                errors = bucket.get("errors") or []
+                if errors and record["error"] is None:
+                    # TeX 错误：与单段渲染一致，不缩小重试，只该段回退。
+                    record["error"] = errors[0]
+                    continue
+                fits, reason, _chars = _measure_page_fit(
+                    doc[index], request.width, request.height, request.expected_text
+                )
+                if bucket.get("overfull_hbox"):
+                    fits, reason = False, "overfull-hbox"
+                # 页级 ``Overfull \vbox`` 在批编译里只剩「vbox 高度 + 末行 depth」
+                # 的系统噪声（内容超高已被 ``\vbox to`` 封在一页内），因此不作为
+                # 失败信号；真正的垂直溢出由 ``_measure_page_fit`` 的墨迹/文本判定发现。
+                if fits and record["candidate"] is None:
+                    # 同一轮的页按档位优先级排列：先到先得。
+                    record["candidate"] = (request, index)
+                elif not fits:
+                    record["reason"] = reason
+        finally:
+            doc.close()
 
         results: dict[str, StampResult] = {}
         for key in keys:
@@ -477,7 +505,11 @@ class BatchStampRenderer:
                         reason=f"s{attempt - 1}:{record['reason']}",
                     )
                 continue
-            request, stamp_path = candidate
+            request, page_index = candidate
+            stamp_path = block_dir / f"{stem}-p{page_index}.pdf"
+            if not _extract_page(pdf_path, page_index, stamp_path):
+                results[key] = attribution_failed[key]
+                continue
             result = StampResult(
                 key=key, ok=True, compile_attempts=attempt, reason="ok"
             )
@@ -661,6 +693,23 @@ def _round_variants(request: StampRequest, attempt: int) -> list[StampRequest]:
 def _line_count(text: str) -> int:
     """一段 tex 片段占用的行数（含末尾换行）。"""
     return text.count("\n") + 1
+
+
+def _copy_alias_results(
+    results: dict[str, StampResult], aliases: dict[str, list[str]]
+) -> dict[str, StampResult]:
+    """Expose one compiled result under every deduplicated request key."""
+    if not aliases:
+        return results
+    for canonical, keys in aliases.items():
+        result = results.get(canonical)
+        if result is None:
+            continue
+        for key in keys:
+            # StampResult is mutable (the overlay records paths and metrics),
+            # so clone it instead of sharing the canonical object's key field.
+            results[key] = replace(result, key=key)
+    return results
 
 
 def _owner_of(number: int, ranges: list[tuple[int, int]]) -> int | None:

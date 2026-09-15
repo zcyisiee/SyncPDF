@@ -2,6 +2,7 @@ import json
 import logging
 import random
 import threading
+from collections import OrderedDict
 from pathlib import Path
 
 import peewee
@@ -52,6 +53,11 @@ class _TranslationCache(Model):
 
 
 class TranslationCache:
+    # Paragraphs frequently repeat (headers, labels, and cross-column fragments).
+    # Keep a small process-local LRU in front of SQLite to avoid a query for every
+    # repeated paragraph while retaining the persistent cache across runs.
+    MEMORY_CACHE_SIZE = 256
+
     @staticmethod
     def _sort_dict_recursively(obj):
         if isinstance(obj, dict):
@@ -66,6 +72,8 @@ class TranslationCache:
 
     def __init__(self, translate_engine: str, translate_engine_params: dict = None):
         self.translate_engine = translate_engine
+        self._memory_cache: OrderedDict[str, str] = OrderedDict()
+        self._memory_cache_lock = threading.RLock()
         self.replace_params(translate_engine_params)
 
     # The program typically starts multi-threaded translation
@@ -77,6 +85,12 @@ class TranslationCache:
         self.params = params
         params = self._sort_dict_recursively(params)
         self.translate_engine_params = json.dumps(params)
+        # Cache entries are scoped by the serialized parameters.  Clearing here
+        # prevents values produced with an old model/configuration from leaking
+        # into a subsequent translation after add/update_params().
+        if hasattr(self, "_memory_cache"):
+            with self._memory_cache_lock:
+                self._memory_cache.clear()
 
     def update_params(self, params: dict = None):
         if params is None:
@@ -88,9 +102,12 @@ class TranslationCache:
         self.params[k] = v
         self.replace_params(self.params)
 
-    # Since peewee and the underlying sqlite are thread-safe,
-    # get and set operations don't need locks.
     def get(self, original_text: str) -> str | None:
+        with self._memory_cache_lock:
+            cached = self._memory_cache.get(original_text)
+            if cached is not None:
+                self._memory_cache.move_to_end(original_text)
+                return cached
         try:
             result = _TranslationCache.get_or_none(
                 translate_engine=self.translate_engine,
@@ -100,7 +117,15 @@ class TranslationCache:
             # Trigger cache cleanup with a small probability.
             if result and random.random() < CLEAN_PROBABILITY:  # noqa: S311
                 self._cleanup()
-            return result.translation if result else None
+            if result is None:
+                return None
+            translation = result.translation
+            with self._memory_cache_lock:
+                self._memory_cache[original_text] = translation
+                self._memory_cache.move_to_end(original_text)
+                if len(self._memory_cache) > self.MEMORY_CACHE_SIZE:
+                    self._memory_cache.popitem(last=False)
+            return translation
         except peewee.OperationalError as e:
             if "database is locked" in str(e):
                 logger.debug("Cache is locked")
@@ -109,6 +134,14 @@ class TranslationCache:
                 raise
 
     def set(self, original_text: str, translation: str):
+        # Populate the local cache even when SQLite is temporarily busy.  The
+        # current process can still reuse a successful translation and avoid a
+        # burst of duplicate provider requests.
+        with self._memory_cache_lock:
+            self._memory_cache[original_text] = translation
+            self._memory_cache.move_to_end(original_text)
+            if len(self._memory_cache) > self.MEMORY_CACHE_SIZE:
+                self._memory_cache.popitem(last=False)
         try:
             _TranslationCache.create(
                 translate_engine=self.translate_engine,

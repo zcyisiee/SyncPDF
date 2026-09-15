@@ -367,7 +367,31 @@ def _measure_fit(
     try:
         if page_index < 0 or page_index >= len(doc):
             return False, "page-missing", 0
-        page = doc[page_index]
+        return _measure_page_fit(
+            doc[page_index], width, height, expected_text
+        )
+    finally:
+        doc.close()
+
+
+def _measure_page_fit(
+    page,
+    width: float,
+    height: float,
+    expected_text: str = "",
+) -> tuple[bool, str, int]:
+    """Measure a page that is already open.
+
+    Batch rendering used to write every candidate page to a temporary PDF and
+    reopen it before measuring.  A block can contain several variants per
+    paragraph, so that turned into hundreds of unnecessary PDF open/save
+    operations.  Keeping the block document open and measuring its pages
+    directly avoids that I/O while preserving the exact checks used by
+    :func:`_measure_fit`.
+    """
+    import pymupdf
+
+    try:
         extracted = normalize_rendered_text(page.get_text())
         text_chars = len(extracted)
         ink = pymupdf.Rect()
@@ -396,8 +420,9 @@ def _measure_fit(
                     if not _is_subsequence(expected.casefold(), extracted.casefold()):
                         return False, "text-mismatch", text_chars
         return True, "ok", text_chars
-    finally:
-        doc.close()
+    except Exception:  # noqa: BLE001 - malformed page counts as a failed fit
+        logger.debug("测量 LaTeX 页面失败", exc_info=True)
+        return False, "page-measure-failed", 0
 
 
 class BboxStampRenderer:
