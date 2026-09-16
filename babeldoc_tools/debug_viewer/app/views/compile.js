@@ -289,7 +289,15 @@ export function createCompileView(ctx) {
     ctx.pager.setDocument(ctx.run, monoPdf(ctx.manifest), pages);
     ctx.pager.setOverlayProvider((idx) => state.byPage.get(idx) || []);
     renderPanel();
-    ctx.setStageStatus(geometry ? '' : '缺少 typesetting_geometry 快照', 'error');
+    /* parse-only 调试归档没有 build 阶段：按「未采集」中性说明，只有跑过
+       build 却缺快照才算采集缺失。 */
+    if (geometry) {
+      ctx.setStageStatus('');
+    } else if (ctx.events.some((e) => e.stage === 'build')) {
+      ctx.setStageStatus('缺少 typesetting_geometry 快照', 'error');
+    } else {
+      ctx.setStageStatus('该 run 未运行 build 阶段（如 parse-only 调试归档），无编译证据', 'muted');
+    }
   }
 
   function consume(ev) {

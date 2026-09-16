@@ -209,7 +209,18 @@ export function createTranslateView(ctx) {
     state.shown = PAGE;
     renderList();
     renderPanel();
-    ctx.setStageStatus(state.selection ? '' : '缺少 selection 快照', 'error');
+    /* parse-only 调试归档没有 translate 阶段：行级「无写回记录」属预期，状态栏
+       给中性说明，避免误读为写回失败。selection 是 parse 阶段证据，run 连
+       parse 都没跑时同样按「未采集」处理。 */
+    const ranParse = ctx.events.some((e) => e.stage === 'parse');
+    const ranTranslate = ctx.events.some((e) => e.stage === 'translate');
+    if (!state.selection) {
+      ctx.setStageStatus('缺少 selection 快照', ranParse ? 'error' : 'muted');
+    } else if (!ranTranslate) {
+      ctx.setStageStatus('该 run 未运行 translate 阶段（如 parse-only 调试归档），段落无写回记录属预期', 'muted');
+    } else {
+      ctx.setStageStatus('');
+    }
   }
 
   function onEvent(ev) {

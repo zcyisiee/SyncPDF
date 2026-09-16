@@ -244,10 +244,14 @@ export function createCheckView(ctx) {
     ctx.pager.setOverlayProvider((idx) => state.byPage.get(idx) || []);
     renderPanel();
     if (ctx.setIssueCount) ctx.setIssueCount(state.issues.length);
-    if (!verdict && !lint && !links) {
+    /* parse-only 调试归档没有 check 阶段：按「未采集」中性说明，只有跑过
+       check 却缺产物才算采集缺失。 */
+    if (verdict || lint || links) {
+      ctx.setStageStatus('');
+    } else if (ctx.events.some((e) => e.stage === 'check')) {
       ctx.setStageStatus('未找到 check 产物', 'error');
     } else {
-      ctx.setStageStatus('');
+      ctx.setStageStatus('该 run 未运行 check 阶段（如 parse-only 调试归档），无检查证据', 'muted');
     }
   }
 
