@@ -46,17 +46,51 @@ def build_pdf(
             "debug_recompile": bool(debug_recompile),
         },
     ):
-        result = reconstruct_pdf(
-            str(workdir_path),
-            output_dir=resolved_output_dir,
-            dual=dual,
-            watermark=watermark,
-            latex_bbox=latex_bbox,
-            latex_bbox_mode=latex_bbox_mode,
-            stats=stats,
-            debug_recorder=debug_recorder,
-            debug_recompile=debug_recompile,
-        )
+        try:
+            result = reconstruct_pdf(
+                str(workdir_path),
+                output_dir=resolved_output_dir,
+                dual=dual,
+                watermark=watermark,
+                latex_bbox=latex_bbox,
+                latex_bbox_mode=latex_bbox_mode,
+                stats=stats,
+                debug_recorder=debug_recorder,
+                debug_recompile=debug_recompile,
+            )
+        except Exception as exc:
+            if debug_recorder is not None:
+                # 失败现场：只归档本次构建新落盘的 agent 文件与输出目录里的
+                # 部分 PDF。``reconstruct_report.json`` 只在成功路径写出，
+                # 失败时残留的是上一轮旧报告 → 不归档，避免误报为本次输出。
+                from babeldoc.tools.agent import debug_capture
+
+                debug_capture.capture_files(
+                    debug_recorder,
+                    "build",
+                    workdir_path,
+                    ["layout_geometry.json", "latex_bbox_report.json"],
+                    phase="partial_outputs",
+                )
+                partial_pdfs = {}
+                for pdf_path in sorted(Path(resolved_output_dir).glob("*.pdf")):
+                    artifact = debug_recorder.archive_file(
+                        "build", f"partial/{pdf_path.name}", pdf_path
+                    )
+                    if artifact:
+                        partial_pdfs[pdf_path.name] = artifact
+                if partial_pdfs:
+                    debug_recorder.record_event(
+                        "build",
+                        "artifact_bundle",
+                        {"phase": "partial_output_pdfs", "artifacts": partial_pdfs},
+                    )
+                debug_recorder.record_event(
+                    "build",
+                    "build_failed",
+                    {"error": f"{type(exc).__name__}: {exc}"},
+                )
+            raise
         result.setdefault("images", [])
         if render:
             rendered = render_pages(

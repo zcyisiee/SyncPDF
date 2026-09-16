@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from .model import PDF_TOPLEFT
 from .model import Box
+from .model import CompileCandidate
 from .model import Entity
 from .model import PageFrame
 from .model import Relation
@@ -51,6 +52,7 @@ __all__ = [
     "STATUS_INTERRUPTED",
     "STATUS_RUNNING",
     "Box",
+    "CompileCandidate",
     "DebugRecorder",
     "Entity",
     "NullRecorder",

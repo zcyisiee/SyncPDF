@@ -578,6 +578,10 @@ class NullRecorder:
     def archive_text(self, stage, name, text):
         return None
 
+    @contextlib.contextmanager
+    def process(self, stage, origin, command, **kwargs):
+        yield None
+
     @property
     def capture_status(self) -> dict:
         return {"ok": True}

@@ -324,6 +324,10 @@ def reconstruct(
         from babeldoc import debug_recorder as _dr
 
         debug_recorder = _dr.get_current()
+    else:
+        from babeldoc import debug_recorder as _dr
+
+        _dr.set_current(debug_recorder)
     config.debug_recorder = debug_recorder
     config.latex_debug_recompile = bool(debug_recompile)
     config.watermark_output_mode = (
@@ -343,6 +347,8 @@ def reconstruct(
             doc, state.get("page_char_objects") or {}
         )
     source_state = layout_geometry.capture_source_state(doc, overrides)
+    if debug_recorder:
+        debug_recorder.write_snapshot("build", "source_state", source_state)
     ir_stats = layout_overrides.apply_to_ir(doc, overrides)
     layout_geometry.capture_source_state(doc, overrides, state=source_state)
 
@@ -394,6 +400,15 @@ def reconstruct(
     geometry["warnings"] = list(getattr(config, "layout_warnings", []) or [])
     geometry["ir_overrides"] = ir_stats
     geometry_path = layout_geometry.write_geometry(workdir, geometry)
+    if debug_recorder:
+        from babeldoc.tools.agent import debug_capture
+
+        debug_capture.record_typesetting_geometry(
+            debug_recorder,
+            geometry,
+            pages=len(doc.page),
+            overrides=overrides,
+        )
 
     pdf_creater = PDFCreater(
         str(temp_pdf_path),
@@ -409,6 +424,10 @@ def reconstruct(
     # decisions[] 已完整落盘 latex_bbox_report.json；stdout 只给摘要，
     # 避免把数十 KB 的逐段决策重复展开到终端。
     latex_stats_summary = _latex_stats_summary(pdf_creater.latex_bbox_stats)
+    if debug_recorder:
+        debug_recorder.record_event(
+            "build", "latex_summary", latex_stats_summary or {"enabled": False}
+        )
     return {
         "mono_pdf": str(result.mono_pdf_path) if result.mono_pdf_path else None,
         "dual_pdf": str(result.dual_pdf_path) if result.dual_pdf_path else None,

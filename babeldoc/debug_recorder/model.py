@@ -143,6 +143,35 @@ class Relation:
         return asdict(self)
 
 
+@dataclass(slots=True)
+class CompileCandidate:
+    id: str
+    paragraph_id: str
+    request_id: str
+    renderer: str
+    round: int
+    priority: int
+    width: float
+    height: float
+    font_size_initial: float
+    font_size: float
+    lead: float
+    parent_id: str | None = None
+    batch_id: str | None = None
+    pdf_page_index: int | None = None
+    tex_line_range: list[int] | None = None
+    font: dict = field(default_factory=dict)
+    status: str = "pending"
+    fit: dict = field(default_factory=dict)
+    selected: bool = False
+    reason: str | None = None
+    seconds: float | None = None
+    artifacts: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
 def frame_from_pymupdf_page(page, page_number: int) -> PageFrame:
     """由 pymupdf ``Page`` 构造 :class:`PageFrame`（``page_number`` 为 1-based 物理页号）。"""
     rect = getattr(page, "rect", None)

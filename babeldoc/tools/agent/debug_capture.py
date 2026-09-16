@@ -547,3 +547,38 @@ def capture_apply_validation(recorder, inputs, parsed, entries, **validation):
         **validation,
     })
     recorder.record_event("apply", "apply_validation", {"snapshot": snapshot, **validation})
+
+
+def record_typesetting_geometry(
+    recorder,
+    geometry: dict | None,
+    *,
+    pages: int | None = None,
+    overrides: dict | None = None,
+) -> None:
+    """发布 Typesetting 后几何证据：``build/typesetting_geometry`` 快照 + 事件。
+
+    ``geometry`` 是 ``layout_geometry.build_geometry`` 的完整返回（逐段
+    src_box/layout_box/rendered_box/字号/行数）；事件体只带聚合计数与告警，
+    明细留在快照里（快照已在 ``agent/layout_geometry.json`` 之外独立留存）。
+    """
+    if not recorder or not geometry:
+        return
+    snapshot = recorder.write_snapshot("build", "typesetting_geometry", geometry)
+    paragraphs = geometry.get("paragraphs") or []
+    warnings = [
+        {"id": p.get("id"), "page": p.get("page"), "reason": "missing-rendered-box"}
+        for p in paragraphs
+        if not p.get("rendered_box")
+    ]
+    recorder.record_event(
+        "build",
+        "typesetting_geometry",
+        {
+            "snapshot": snapshot,
+            "pages": pages if pages is not None else geometry.get("pages"),
+            "paragraphs": len(paragraphs),
+            "overrides": bool((overrides or {}).get("paragraphs") or (overrides or {}).get("pages")),
+            "warnings": warnings,
+        },
+    )
