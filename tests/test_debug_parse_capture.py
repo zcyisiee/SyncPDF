@@ -513,6 +513,65 @@ def test_run_parse_emits_full_evidence(monkeypatch, tmp_path):
     assert recorder.capture_status["ok"] is True
 
 
+def test_run_parse_layout_snapshot_includes_inline_protection(monkeypatch, tmp_path):
+    """layout 快照在行内公式保护之后采集：protector 追加的 formula 区域必须入档。
+
+    回归锚点：快照若在 ``InlineMathProtector`` 之前拍，行内公式保护区
+    （alignment.json 里有坐标）在 layout.json 里没有对应实体，查看器无从渲染。
+    """
+    docs = _docs(
+        _page(
+            0,
+            chars=[_char("h", 10, 700, 20, 712)],
+            paras=[_paragraph(None, 1, "text", "hello", 50, 600, 300, 700)],
+            fonts=[_font("F1")],
+        )
+    )
+    _stub_run_parse_deps(monkeypatch, tmp_path, docs)
+
+    from babeldoc.format.pdf.document_il.midend import inline_math_protector as imp_mod
+
+    class _AppendingProtector:
+        """模拟真实 InlineMathProtector：追加 class_name="formula" 的保护区。"""
+
+        def __init__(self, config):
+            self.config = config
+
+        def process(self, docs):
+            for page in docs.page:
+                page.page_layout.append(
+                    _layout(2, "formula", 60, 500, 120, 512, conf=1.0)
+                )
+            return docs
+
+    monkeypatch.setattr(imp_mod, "InlineMathProtector", _AppendingProtector)
+
+    import pymupdf
+    from babeldoc_tools import parse as bdt_parse
+
+    pdf = tmp_path / "src.pdf"
+    src = pymupdf.open()
+    src.new_page(width=612, height=792)
+    src.save(pdf)
+    src.close()
+
+    monkeypatch.setenv("BABELDOC_MINERU_LAYOUT_JSON", str(tmp_path / "m.json"))
+    recorder = _recorder(tmp_path)
+    result = bdt_parse.parse_document(
+        str(pdf),
+        str(tmp_path / "work"),
+        layout="mineru",
+        mineru_json=str(tmp_path / "m.json"),
+        debug_recorder=recorder,
+    )
+    assert result["paragraphs"] == 1
+
+    entities = _snapshot(recorder, "layout")["pages"][0]["entities"]
+    by_id = {e["id"]: e for e in entities}
+    assert by_id["L01-001"]["label"] == "text"
+    assert by_id["L01-002"]["label"] == "formula"
+
+
 def test_run_parse_keeps_evidence_on_gate_failure(monkeypatch, tmp_path):
     docs = _docs(_page(0, chars=[_char("x", 1, 700, 5, 712)]))
     _stub_run_parse_deps(

@@ -98,7 +98,8 @@
 - **debug 采集点**：`parse/layout` 快照 + `parse/layout_parsed` 事件（区域计数与
   label 直方图，`error` 标注门禁失败）、`parse/layout_coverage` 事件、
   `parse/provider_artifacts` 事件；归档 `layout-coverage.json` / `provider-ir.json` /
-  `provider-layout.json`。门禁抛错路径**同样先采集再抛**（证据不丢）。
+  `provider-layout.json`。成功路径的 `layout` 快照在**阶段 3 行内公式保护之后**采集
+  （含追加的保护区）；门禁抛错路径**同样先采集再抛**（证据不丢）。
 
 ---
 

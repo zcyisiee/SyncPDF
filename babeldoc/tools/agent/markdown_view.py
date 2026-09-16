@@ -462,14 +462,23 @@ def _run_parse(
                 recorder, workdir, backend=layout
             )
         raise
+    # 行内公式保护 + 原生字符↔MinerU span 对齐审计（需在 ParagraphFinder 之前：
+    # 此时 page.pdf_character 仍是全量，且新 formula 区域会被 ParagraphFinder 采纳）。
+    # layout 证据在保护之后采集：layout.json 需含追加的行内公式保护区。
+    try:
+        docs = InlineMathProtector(config).process(docs) or docs
+    except Exception as exc:
+        if recorder is not None:
+            debug_capture.capture_layout(docs, recorder, backend=layout, error=exc)
+            debug_capture.capture_coverage(config, recorder)
+            debug_capture.archive_provider_artifacts(
+                recorder, workdir, backend=layout
+            )
+        raise
     if recorder is not None:
         debug_capture.capture_layout(docs, recorder, backend=layout)
         debug_capture.capture_coverage(config, recorder)
         debug_capture.archive_provider_artifacts(recorder, workdir, backend=layout)
-    # 行内公式保护 + 原生字符↔MinerU span 对齐审计（需在 ParagraphFinder 之前：
-    # 此时 page.pdf_character 仍是全量，且新 formula 区域会被 ParagraphFinder 采纳）。
-    docs = InlineMathProtector(config).process(docs) or docs
-    if recorder is not None:
         debug_capture.capture_inline_math(recorder, workdir)
     # 实验性高质量 OCR：在段落识别前安全回填字符文本，保留原生 bbox/样式。
     if config.mineru_use_ocr_text:
