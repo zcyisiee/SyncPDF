@@ -147,6 +147,8 @@
 
 - **debug 采集点**：`parse/inline_math` 事件（`summary` 摘要 + `protected` 计数；
   provider IR 缺失时记 `status=skipped`，不编造）+ 归档 `alignment.json`。
+  保护完成后才写 `parse/layout` 快照（见阶段 2），查看器识别视图以
+  `alignment.json` 的 `protected_inline_math` 叠加「行内公式」图层（默认关）。
 
 ---
 

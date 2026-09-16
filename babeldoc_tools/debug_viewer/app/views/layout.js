@@ -5,6 +5,7 @@
 - snapshots/parse/layout.json     → 适配后 layout 区域（含 conf）
 - snapshots/parse/paragraphs.json → 段落（debug_id + layout_id 关联）
 - snapshots/parse/native-chars.json → 字符层（按页开关，默认关）
+- artifacts/parse/alignment.json → 行内公式保护区（默认关，图例可开）
 - artifacts/parse/prepared.pdf | input.pdf → 源页面渲染
 */
 'use strict';
@@ -27,12 +28,48 @@ export function createLayoutView(ctx) {
     paragraphs: null,   // {entities, relations}
     chars: null,        // native-chars（整篇一次拉取，按页开关渲染）
     selection: null,
+    alignment: null,    // artifacts/parse/alignment.json（行内公式保护区）
     hidden: new Set(),
     confMin: 0,
     showParagraphs: true,
     showChars: new Set(),   // 开启字符层的页
     byPage: new Map(),      // page_index → boxes[]
   };
+
+  /* 行内公式保护区：alignment.json 的 protected_inline_math（IL 左下原点坐标）。
+     新归档 layout.json 已含这些 formula 区域（同 id，采集在保护 pass 之后）→
+     改标签为「行内公式」；旧归档缺这些区域 → 按页高翻转补框。 */
+  function applyInlineProtection() {
+    const items = (state.alignment && state.alignment.protected_inline_math) || [];
+    if (!items.length) return;
+    const frames = (state.frames && state.frames.frames) || [];
+    for (const item of items) {
+      const pi = item.page_index;
+      if (pi == null || !Array.isArray(item.box) || item.box.length !== 4) continue;
+      const eid = `L${String(pi + 1).padStart(2, '0')}-${String(item.layout_id).padStart(3, '0')}`;
+      const list = state.byPage.get(pi) || [];
+      const existing = list.find((b) => b.id === eid);
+      if (existing) {
+        existing.label = '行内公式';
+        existing.kind = 'inline_formula';
+        continue;
+      }
+      const height = (frames[pi] && frames[pi].height) || 0;
+      if (!height) continue;
+      const [x0, y0, x1, y1] = item.box.map(Number);
+      list.push({
+        id: eid,
+        box: { x0, y0: height - y1, x1, y1: height - y0 },
+        label: '行内公式',
+        kind: 'inline_formula',
+        layer: 'layout',
+        cls: '',
+        color: labelColor('行内公式'),
+        preview: '',
+      });
+      state.byPage.set(pi, list);
+    }
+  }
 
   function ensureBoxes() {
     state.byPage.clear();
@@ -71,6 +108,7 @@ export function createLayoutView(ctx) {
       });
       state.byPage.set(entity.page - 1, list);
     }
+    applyInlineProtection();
   }
 
   function visibleBoxes(pageIndex) {
@@ -233,19 +271,25 @@ export function createLayoutView(ctx) {
   /* ------------------------------------------------------------ mount */
   async function mount() {
     const run = ctx.run;
-    const [frames, layout, paragraphs, chars, selection] = await Promise.all([
+    const [frames, layout, paragraphs, chars, selection, alignment] = await Promise.all([
       ctx.api.snapshot(run, 'parse/page-frames.json'),
       ctx.api.snapshot(run, 'parse/layout.json'),
       ctx.api.snapshot(run, 'parse/paragraphs.json'),
       ctx.api.snapshot(run, 'parse/native-chars.json'),
       ctx.api.snapshot(run, 'parse/selection.json'),
+      ctx.api.artifactJson(run, 'artifacts/parse/alignment.json'),
     ]);
     state.frames = frames;
     state.layout = layout;
     state.paragraphs = paragraphs;
     state.chars = chars;
     state.selection = selection;
+    state.alignment = alignment;
     ensureBoxes();
+    /* 行内公式保护区数量多且嵌在正文里：默认关，经图例勾选开启。 */
+    if (((alignment && alignment.protected_inline_math) || []).length) {
+      state.hidden.add('行内公式');
+    }
     const pages = (frames && frames.frames) ||
       (layout ? layout.pages.map((p) => ({ index: p.page_index, width: 1, height: p.height || 1 })) : []);
     const normalized = pages.map((f, i) => ({
