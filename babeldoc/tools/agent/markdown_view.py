@@ -922,7 +922,7 @@ def render_retry_markdown(workdir, ids: list[str]) -> str:
     return render_rows_markdown([by_id[pid] for pid in ids if pid in by_id])
 
 
-def apply_markdown(workdir, translated_md):
+def apply_markdown(workdir, translated_md, *, debug_recorder=None):
     """校验译文 Markdown 并按锚点写回 IR。返回报告 dict。"""
     workdir = Path(workdir)
     agent = workflow.agent_dir(workdir)
@@ -986,8 +986,15 @@ def apply_markdown(workdir, translated_md):
             # 不修复、不阻断，只记录真实发生率（跨 span 搬运需人工观察）
             warnings.append(f"anchor_reordered: id {pid}")
         if not multiset_match or has_empty:
+            before_repair = body
             body, mode = repair_target(src_md, body)
             repaired.append({"id": pid, "mode": mode})
+            if debug_recorder:
+                debug_recorder.record_event("apply", "anchor_repair", {
+                    "id": pid, "mode": mode, "source": src_md,
+                    "before": before_repair, "after": body,
+                    "source_anchors": src_seq, "target_anchors_before": tgt_seq,
+                })
         # 修复后再校：多重集不一致才违规（顺序不再视为违规）
         if Counter(anchor_sequence(body)) != Counter(src_seq):
             violations.append(
@@ -1001,6 +1008,16 @@ def apply_markdown(workdir, translated_md):
                 warnings.append(f"empty_style_span: id {pid} style {m.group(1)}")
         entries.append({"id": pid, "target": target})
 
+    if debug_recorder:
+        from babeldoc.tools.agent import debug_capture
+
+        debug_recorder.capture(
+            "apply_validation", debug_capture.capture_apply_validation,
+            debug_recorder, inputs, parsed, entries,
+            extra_ids=extra, violations=violations, warnings=warnings,
+            repaired=repaired, fallback_ids=fallback_ids, empty_ids=empty_ids,
+            label_mismatches=label_mismatches, writeback_allowed=not (extra or violations),
+        )
     if extra or violations:
         return {
             "ok": False,
@@ -1019,7 +1036,9 @@ def apply_markdown(workdir, translated_md):
         for entry in entries:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    report = workflow.apply(workdir, str(sheet))
+    report = workflow.apply(
+        workdir, str(sheet), **({"debug_recorder": debug_recorder} if debug_recorder else {})
+    )
     report["markdown_sheet"] = str(sheet)
     report["repaired"] = repaired
     report["warnings"] = warnings

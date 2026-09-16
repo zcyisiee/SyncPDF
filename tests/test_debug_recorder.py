@@ -337,3 +337,53 @@ def test_contract_dataclasses_serialize():
 
     frame = PageFrame(page_index=0, width=100.0, height=200.0)
     assert frame.to_dict()["page_index"] == 0
+
+
+def test_concurrent_publication_keeps_manifest_and_artifact_refs(tmp_path):
+    recorder = _recorder(tmp_path)
+
+    def publish(index):
+        name = recorder.new_id("call")
+        text = recorder.archive_text("translate", f"{name}/stdout.txt", str(index))
+        snapshot = recorder.write_snapshot("translate", name, {"stdout": text})
+        recorder.record_event("translate", "call_finished", {"snapshot": snapshot})
+        return name
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        names = list(pool.map(publish, range(40)))
+    recorder.finish()
+    manifest = json.loads(recorder.manifest_path.read_text())
+    assert len(set(names)) == 40
+    assert manifest["artifact_count"] == 40
+    assert len(manifest["artifacts"]) == 40
+    assert len(manifest["snapshots"]) == 40
+    assert recorder.capture_status == {"ok": True}
+    for artifact in manifest["artifacts"].values():
+        assert artifact["sha256"]
+        assert (recorder.run_dir / artifact["path"]).is_file()
+    recorder.close()
+
+
+def test_text_capture_redacts_known_credentials_not_pipeline_inputs(tmp_path):
+    recorder = _recorder(tmp_path)
+    secret = "-".join(("fixture", "credential", "value"))
+    command = f"provider --api-key {secret} --model offline"
+    recorder.register_command(command)
+    source = f"A paper paragraph. Bearer {secret}\nstdout: {secret}"
+    path = recorder.archive_text("translate", "call/stdout.txt", source)
+    recorder.record_event("translate", "failed", {"error": command})
+    captured = (recorder.run_dir / path).read_text()
+    assert secret not in captured
+    assert "A paper paragraph." in captured
+    assert "[REDACTED]" in captured
+    assert secret not in recorder.events_path.read_text()
+    assert secret in source
+    recorder.close()
+
+
+def test_archive_paths_cannot_escape_run(tmp_path):
+    recorder = _recorder(tmp_path)
+    assert recorder.archive_text("translate", "../../../../outside.txt", "no") is None
+    assert not (tmp_path / "outside.txt").exists()
+    assert recorder.capture_status["ok"] is False
+    recorder.close()

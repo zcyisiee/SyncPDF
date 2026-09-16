@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from babeldoc.tools.agent import debug_capture
+
 from babeldoc_tools import common
 from babeldoc_tools import debug_runtime
 
@@ -79,6 +81,12 @@ def translate_document(
             "retry_missing": bool(retry_missing),
         },
     ):
+        if debug_recorder:
+            debug_recorder.capture(
+                "translation_inputs", debug_capture.capture_files,
+                debug_recorder, "translate", workdir_path,
+                ("document.md", "anchors.json", "sheet.jsonl", "translated.md"),
+            )
         if ids:
             result = retranslate_ids(
                 str(workdir_path),
@@ -87,6 +95,7 @@ def translate_document(
                 translator=translator,
                 timeout=resolved_timeout,
                 repair_prompt=repair_prompt,
+                debug_recorder=debug_recorder,
             )
         else:
             result = _translate_whole_document(
@@ -97,6 +106,7 @@ def translate_document(
                 timeout=resolved_timeout,
                 prompt=prompt,
                 retry_missing=retry_missing,
+                debug_recorder=debug_recorder,
             )
         if debug_recorder is not None:
             agent = common.agent_dir(workdir_path)
@@ -131,6 +141,7 @@ def _translate_whole_document(
     timeout: int,
     prompt: str | None,
     retry_missing: bool,
+    debug_recorder=None,
 ) -> dict:
     from babeldoc.tools.agent import markdown_view
 
@@ -144,6 +155,8 @@ def _translate_whole_document(
     prompt_text = common.load_prompt(prompt_name, document=document)
     prompt_file = agent / "prompt.md"
     prompt_file.write_text(prompt_text, encoding="utf-8")
+    if debug_recorder:
+        debug_recorder.archive_text("translate", f"prompts/{debug_recorder.new_id('prompt')}.md", prompt_text)
 
     translated_path = agent / "translated.md"
     called_agent = False
@@ -151,9 +164,9 @@ def _translate_whole_document(
         imported_path = Path(markdown)
         if not imported_path.exists():
             raise common.ToolError("translated_md_missing", f"{imported_path} 不存在")
-        translated_path.write_text(
-            imported_path.read_text(encoding="utf-8"), encoding="utf-8"
-        )
+        imported_text = imported_path.read_text(encoding="utf-8")
+        _capture_text(debug_recorder, workdir, imported_text, "imported")
+        translated_path.write_text(imported_text, encoding="utf-8")
     elif prompt_only:
         return {
             "dry_run": True,
@@ -164,7 +177,11 @@ def _translate_whole_document(
         }
     else:
         command = _resolve_translator(translator)
-        response = common.run_translator(prompt_text, command, timeout_s=timeout)
+        response = common.run_translator(
+            prompt_text, command, timeout_s=timeout,
+            debug_recorder=debug_recorder, debug_origin="translator.whole",
+        )
+        _capture_text(debug_recorder, workdir, response, "raw")
         translated_path.write_text(response, encoding="utf-8")
         called_agent = True
 
@@ -172,12 +189,17 @@ def _translate_whole_document(
         workdir, translated_path.read_text(encoding="utf-8")
     )
     retried = None
+    if debug_recorder:
+        debug_recorder.record_event("translate", "missing_ids", {
+            "ids": missing, "retry": bool(missing and retry_missing and called_agent),
+            "origin": "provider" if called_agent else "import",
+        })
     # 只有真的调用过翻译命令才自动补译：``--markdown`` 承诺"不调任何命令"，
     # 导入译文若本身缺段，交由调用方用 --ids（显式给 --translator）处理。
     if missing and retry_missing and called_agent:
         retried = retranslate_blocks(
             workdir, missing, feedback="", translator=translator,
-            timeout=timeout, repair_prompt=None,
+            timeout=timeout, repair_prompt=None, debug_recorder=debug_recorder,
         )
         missing = retried["still_missing"]
     return {
@@ -201,6 +223,7 @@ def retranslate_blocks(
     translator: str | None = None,
     timeout: int | None = None,
     repair_prompt: str | None = None,
+    debug_recorder=None,
 ) -> dict:
     """补译/重译指定段落，合并进 translated.md。返回统计（不写 IR）。"""
     from babeldoc.tools.agent import markdown_view
@@ -224,16 +247,22 @@ def retranslate_blocks(
     )
     prompt_file = agent / "prompt.retry.md"
     prompt_file.write_text(prompt_text, encoding="utf-8")
+    if debug_recorder:
+        debug_recorder.archive_text("translate", f"prompts/{debug_recorder.new_id('retry')}.md", prompt_text)
 
     command = _resolve_translator(translator)
     response = common.run_translator(
-        prompt_text, command, timeout_s=int(timeout or 1800)
+        prompt_text, command, timeout_s=int(timeout or 1800),
+        debug_recorder=debug_recorder, debug_origin="translator.retry",
+        debug_context={"requested_ids": ids},
     )
+    _capture_text(debug_recorder, workdir, response, "raw", requested_ids=ids)
     (agent / "translated.retry.md").write_text(response, encoding="utf-8")
 
     blocks = markdown_view.parse_translated_markdown(response)
     merged_path = merge_translated_markdown(
-        workdir, {pid: blocks[pid] for pid in ids if pid in blocks}
+        workdir, {pid: blocks[pid] for pid in ids if pid in blocks},
+        debug_recorder=debug_recorder,
     )
     all_missing = markdown_view.missing_ids(
         workdir, Path(merged_path).read_text(encoding="utf-8")
@@ -256,6 +285,7 @@ def retranslate_ids(
     translator: str | None = None,
     timeout: int | None = None,
     repair_prompt: str | None = None,
+    debug_recorder=None,
 ) -> dict:
     """按 id 补译/重译（可带 feedback），合并回 translated.md。
 
@@ -269,11 +299,22 @@ def retranslate_ids(
         translator=translator,
         timeout=timeout,
         repair_prompt=repair_prompt,
+        debug_recorder=debug_recorder,
     )
     return result
 
 
-def merge_translated_markdown(workdir: Path, replacements: dict[str, tuple[str, str]]) -> str:
+def _capture_text(recorder, workdir, text, phase, **kwargs):
+    if recorder:
+        recorder.capture(
+            "text_version", debug_capture.capture_text_version,
+            recorder, workdir, text, phase, **kwargs,
+        )
+
+
+def merge_translated_markdown(
+    workdir: Path, replacements: dict[str, tuple[str, str]], *, debug_recorder=None,
+) -> str:
     """把 {id: (body, label)} 合并进 translated.md（按 sheet 顺序重排）。"""
     from babeldoc.tools.agent import markdown_view
 
@@ -281,9 +322,9 @@ def merge_translated_markdown(workdir: Path, replacements: dict[str, tuple[str, 
     translated_path = agent / "translated.md"
     existing: dict[str, tuple[str, str]] = {}
     if translated_path.exists():
-        existing = markdown_view.parse_translated_markdown(
-            translated_path.read_text(encoding="utf-8")
-        )
+        previous_text = translated_path.read_text(encoding="utf-8")
+        _capture_text(debug_recorder, workdir, previous_text, "before_merge")
+        existing = markdown_view.parse_translated_markdown(previous_text)
     anchors = common.read_json(agent / "anchors.json", default={"rows": []}) or {}
     order = [row["id"] for row in anchors.get("rows", [])]
     existing.update(replacements)
@@ -299,7 +340,9 @@ def merge_translated_markdown(workdir: Path, replacements: dict[str, tuple[str, 
         ordered.append(body.strip())
         ordered.append("")
         written.add(pid)
-    translated_path.write_text("\n".join(ordered), encoding="utf-8")
+    merged_text = "\n".join(ordered)
+    _capture_text(debug_recorder, workdir, merged_text, "merged", requested_ids=list(replacements))
+    translated_path.write_text(merged_text, encoding="utf-8")
     return str(translated_path)
 
 
@@ -332,10 +375,21 @@ def apply_translation(
     with debug_runtime.debug_stage(
         debug_recorder, "apply", {"markdown": str(md_path)}
     ):
-        report = markdown_view.apply_markdown(workdir_path, md_path)
+        if debug_recorder:
+            debug_recorder.archive_file("apply", f"inputs/{debug_recorder.new_id('markdown')}.md", md_path)
+            debug_recorder.capture(
+                "apply_inputs", debug_capture.capture_files, debug_recorder, "apply",
+                workdir_path, ("anchors.json", "sheet.jsonl", "translated.jsonl"),
+            )
+        report = markdown_view.apply_markdown(workdir_path, md_path, debug_recorder=debug_recorder)
         report["translated_md"] = str(md_path)
         common.write_json(common.agent_dir(workdir_path) / "apply_report.json", report)
         if debug_recorder is not None:
+            if report.get("ok"):
+                debug_recorder.capture(
+                    "apply_outputs", debug_capture.capture_files, debug_recorder, "apply",
+                    workdir_path, ("translated.jsonl", "il_translated.applied.json"), phase="outputs",
+                )
             debug_recorder.archive_file("apply", "translated.md", md_path)
             debug_recorder.archive_file(
                 "apply",

@@ -188,7 +188,7 @@ def _normalize_placeholder_punctuation(
     return target, changes
 
 
-def apply(workdir, translated_sheet):
+def apply(workdir, translated_sheet, *, debug_recorder=None):
     """校验译文 sheet 并写回 IR。返回报告 dict；失败时 ok=False。"""
     workdir = Path(workdir)
     with state_path(workdir).open("rb") as f:
@@ -214,6 +214,11 @@ def apply(workdir, translated_sheet):
             protocol.check_placeholders(entry["id"], source, entry["target"])
         )
 
+    if debug_recorder:
+        debug_recorder.record_event("apply", "placeholder_validation", {
+            "unknown_ids": unknown, "violations": violations,
+            "valid": not (unknown or violations), "entries": len(entries),
+        })
     if unknown or violations:
         return {
             "applied": 0,
@@ -245,12 +250,21 @@ def apply(workdir, translated_sheet):
             target,
         )
         applied += 1
+        if debug_recorder:
+            debug_recorder.record_event("apply", "canonical_writeback", {
+                "id": entry["id"], "source": inputs[entry["id"]].unicode,
+                "canonical_before": entry["target"], "canonical_after": target,
+                "unicode": index[entry["id"]].unicode,
+                "punctuation_fixes": changes, "persisted": False,
+            })
 
     with state_path(workdir).open("wb") as f:
         pickle.dump(state, f)
     XMLConverter().write_json(
         doc, str(agent_dir(workdir) / "il_translated.applied.json")
     )
+    if debug_recorder:
+        debug_recorder.record_event("apply", "writeback_saved", {"applied": applied})
     return {
         "applied": applied,
         "unknown_ids": [],

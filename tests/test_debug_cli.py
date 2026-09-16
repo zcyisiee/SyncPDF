@@ -86,6 +86,7 @@ def test_debug_start_reuse_stop(tmp_path):
         assert not (workdir / "debug" / "viewer.json").exists()
 
         third = _main("debug", "--workdir", str(workdir), "--no-open")
+        assert third["ok"] is True, third
         assert third["data"]["reused"] is False
 
         again = _main("debug", "--workdir", str(workdir), "--stop")
@@ -104,10 +105,23 @@ def test_debug_stale_viewer_state_replaced(workdir):
     (workdir / "debug").mkdir()
     (workdir / "debug" / "viewer.json").write_text(json.dumps(stale))
     out = _main("debug", "--workdir", str(workdir), "--no-open")
-    assert out["ok"] is True
+    assert out["ok"] is True, out
     state = _viewer_json(workdir)
     assert state["pid"] != 999999
     assert state["port"] == out["data"]["port"]
+
+
+def test_automatic_port_is_bound_by_server_without_reservation_race(workdir, monkeypatch):
+    import socket
+
+    with socket.socket() as occupied:
+        occupied.bind(("127.0.0.1", 0))
+        occupied.listen()
+        port = occupied.getsockname()[1]
+        monkeypatch.setattr(debug_runtime, "_find_free_port", lambda: port)
+        result = _main("debug", "--workdir", str(workdir), "--no-open")
+        assert result["ok"] is True, result
+        assert result["data"]["port"] != port
 
 
 # --------------------------------------------------------------------------- #

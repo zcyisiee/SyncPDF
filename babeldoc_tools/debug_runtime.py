@@ -243,7 +243,7 @@ class DebugSession:
 
         token = secrets.token_urlsafe(16)
         requested = int(port or 0)
-        bind_port = requested if requested > 0 else _find_free_port()
+        bind_port = requested if requested > 0 else 0
         env = dict(os.environ)
         package_parent = str(_package_parent())
         env["PYTHONPATH"] = (
@@ -277,7 +277,6 @@ class DebugSession:
                 "debug_start_failed", f"查看器进程启动失败: {exc}"
             ) from exc
 
-        heartbeat = f"http://127.0.0.1:{bind_port}/api/v1/heartbeat"
         deadline = time.time() + VIEWER_READY_TIMEOUT_S
         while time.time() < deadline:
             if proc.poll() is not None:
@@ -286,6 +285,12 @@ class DebugSession:
                     f"查看器进程启动后立即退出（exit {proc.returncode}）；"
                     f"端口 {bind_port} 可能被占用",
                 )
+            ready = self.viewer_state() or {}
+            if ready.get("pid") != proc.pid or ready.get("token") != token:
+                time.sleep(0.1)
+                continue
+            bind_port = int(ready["port"])
+            heartbeat = f"http://127.0.0.1:{bind_port}/api/v1/heartbeat"
             try:
                 request = urllib.request.Request(
                     heartbeat, headers={"X-Debug-Token": token}
@@ -437,8 +442,12 @@ def debug_stage(recorder, stage: str, data: dict | None = None):
     recorder.record_event(stage, "stage_started", data or {})
     try:
         yield
-    except Exception as exc:  # noqa: BLE001 - 记录后原样向上抛
-        recorder.record_event(stage, "stage_error", {"error": str(exc)[:500]})
-        recorder.finish_stage(stage, "error")
+    except BaseException as exc:  # noqa: BLE001 - 记录后原样向上抛
+        status = "error" if isinstance(exc, Exception) else "interrupted"
+        recorder.record_event(stage, "stage_error", {
+            "error": str(exc)[:500], "error_type": type(exc).__name__,
+            "error_code": getattr(exc, "code", None), "status": status,
+        })
+        recorder.finish_stage(stage, status)
         raise
     recorder.finish_stage(stage, "ok")

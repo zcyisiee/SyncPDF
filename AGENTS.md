@@ -72,3 +72,9 @@ A worker report or successful process exit is not proof of correctness. The orch
 对外接口只有 `bdt`：新增能力必须作为 `bdt` 的子命令或其参数暴露，不得新建并行入口
 （不再有 `babeldoc.tools.agent` 内部 CLI、`experiments/*_translate.py` 脚本入口或第二个
 `babeldoc_tools` 包）。守卫测试 `tests/test_single_entry.py` 会拦截这类回归。
+
+## 本地验证
+
+- 使用仓库 `.venv/bin/python -m pytest` 运行测试，完整回归需把 `.venv/bin` 加入 `PATH`，供测试调用唯一入口 `bdt`。
+- 测试使用 `--basetemp="tmp/pytest-$(date +%Y%m%d-%H%M%S)"` 将产物留在本仓库；每次采用新目录，避免 pytest 清空上一轮证据。
+- 对改动文件运行 `.venv/bin/ruff check <files>`，提交前运行 `git diff --check`。

@@ -23,13 +23,19 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import hashlib
 import json
 import os
+import re
+import shlex
 import shutil
 import threading
+import time
+import uuid
 from pathlib import Path
+from pathlib import PurePosixPath
 
 SCHEMA_VERSION = 1
 
@@ -82,7 +88,14 @@ def _sha256_file(path) -> str:
 
 def _join(*parts: str, suffix: str = "") -> str:
     """拼相对路径（统一 ``/`` 分隔）；``suffix`` 在缺后缀时补齐。"""
-    segments = [str(part).strip("/") for part in parts]
+    segments = [str(part) for part in parts]
+    if any(
+        PurePosixPath(part).is_absolute()
+        or ".." in PurePosixPath(part).parts
+        or "\\" in part
+        for part in segments
+    ):
+        raise ValueError("归档路径必须位于 run 目录内")
     relative = "/".join(segment for segment in segments if segment)
     if suffix and not relative.endswith(suffix):
         relative += suffix
@@ -90,7 +103,7 @@ def _join(*parts: str, suffix: str = "") -> str:
 
 
 def _tmp_path_for(target: Path) -> Path:
-    return target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    return target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
 
 
 # --------------------------------------------------------------------------- #
@@ -155,8 +168,11 @@ class DebugRecorder:
     def __init__(self, run_dir):
         self.run_dir = Path(run_dir)
         self.run_id = self.run_dir.name
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._publication_lock = threading.RLock()
         self._seq = 0
+        self._ids = 0
+        self._secrets: set[str] = set()
         self._errors: list[dict] = []
         self._closed = False
         self._snapshots_dir = self.run_dir / SNAPSHOTS_DIR
@@ -201,6 +217,116 @@ class DebugRecorder:
         if not errors:
             return {"ok": True}
         return {"ok": False, "errors": errors}
+
+    def new_id(self, prefix: str) -> str:
+        with self._lock:
+            self._ids += 1
+            return f"{prefix}-{self._ids:06d}"
+
+    def capture(self, operation: str, callback, *args, **kwargs):
+        try:
+            return callback(*args, **kwargs)
+        except Exception as exc:
+            self._record_error(operation, exc)
+            return None
+
+    def register_command(self, command: str) -> dict:
+        try:
+            argv = shlex.split(command)
+        except ValueError:
+            return {"executable": None, "arguments": "omitted", "valid": False}
+        sensitive = re.compile(r"api.?key|token|secret|password|passwd|authorization", re.I)
+        with self._lock:
+            for index, arg in enumerate(argv):
+                key, separator, value = arg.partition("=")
+                if sensitive.search(key) and key.startswith("-"):
+                    if not separator and index + 1 < len(argv):
+                        value = argv[index + 1]
+                    if value:
+                        self._secrets.add(value)
+                        if value.lower().startswith("bearer "):
+                            self._secrets.add(value[7:])
+        return {
+            "executable": Path(argv[0]).name if argv else None,
+            "argc": len(argv),
+            "arguments": "omitted",
+        }
+
+    def redact(self, value):
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", errors="replace")
+        if isinstance(value, str):
+            with self._lock:
+                secrets = sorted(self._secrets, key=len, reverse=True)
+            for secret in secrets:
+                value = value.replace(secret, "[REDACTED]")
+            value = re.sub(r"(?i)(\bBearer\s+)[^\s\"',;]+", r"\1[REDACTED]", value)
+            return re.sub(
+                r"(?i)(\b(?:api[_-]?key|access[_-]?token|client[_-]?secret|password|passwd|token)\b[\"']?\s*[=:]\s*[\"']?)[^\s\"',;&]+",
+                r"\1[REDACTED]",
+                value,
+            )
+        if isinstance(value, dict):
+            return {str(key): self.redact(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [self.redact(item) for item in value]
+        return value
+
+    @contextlib.contextmanager
+    def process(self, stage: str, origin: str, command, *, prompt=None, timeout=None, **context):
+        state = {"call_id": self.new_id("call")}
+        metadata = self.capture(
+            "process_started", self._start_process, stage, origin, command,
+            state["call_id"], prompt, timeout, context,
+        ) or {"call_id": state["call_id"], "origin": origin}
+        started = time.perf_counter()
+        try:
+            yield state
+        except BaseException as exc:
+            state["exception"] = exc
+            raise
+        finally:
+            seconds = time.perf_counter() - started
+            self.capture("process_finished", self._finish_process, stage, metadata, state, seconds)
+
+    def _start_process(self, stage, origin, command, call_id, prompt, timeout, context):
+        metadata = {
+            "call_id": call_id,
+            "origin": origin,
+            "command": self.register_command(command if isinstance(command, str) else shlex.join(command)),
+            "timeout": timeout,
+            **context,
+        }
+        if prompt is not None:
+            metadata["prompt"] = self.archive_text(stage, f"calls/{call_id}/prompt.txt", prompt)
+        self.record_event(stage, "call_started", metadata)
+        return metadata
+
+    def _finish_process(self, stage, metadata, state, seconds):
+        exception = state.get("exception")
+        cause = (exception.__cause__ or exception) if exception is not None else None
+        result = state.get("result")
+        output = result if result is not None else cause
+        returncode = getattr(result, "returncode", None)
+        status = "error" if exception is not None or returncode not in (None, 0) else "ok"
+        if exception is not None and not isinstance(exception, Exception):
+            status = "interrupted"
+        data = {
+            **metadata,
+            "status": status,
+            "returncode": returncode,
+            "seconds": round(seconds, 6),
+            "error_code": getattr(exception, "code", None),
+            "error_type": type(cause).__name__ if cause is not None else None,
+            "error": str(exception) if exception is not None else None,
+        }
+        for name in ("stdout", "stderr"):
+            text = getattr(output, name, None)
+            if name == "stdout" and text is None:
+                text = getattr(output, "output", None)
+            data[name] = self.archive_text(stage, f"calls/{state['call_id']}/{name}.txt", text)
+        snapshot = self.write_snapshot(stage, f"calls/{state['call_id']}", data)
+        self.record_event(stage, "call_finished", {**data, "snapshot": snapshot})
 
     # ---------------------------------------------------------- manifest
     def add_input(self, name: str, path, *, sha256: str | None = None) -> str | None:
@@ -264,7 +390,7 @@ class DebugRecorder:
                     "at": _now(milliseconds=True),
                     "stage": stage,
                     "kind": kind,
-                    "data": data if isinstance(data, dict) else {"value": data},
+                    "data": self.redact(data if isinstance(data, dict) else {"value": data}),
                 }
                 self._events_handle.write(json.dumps(event, ensure_ascii=False) + "\n")
                 self._events_handle.flush()
@@ -280,8 +406,9 @@ class DebugRecorder:
         """原子写 ``snapshots/<stage>/<name>.json``；返回相对 run_dir 的路径。"""
         try:
             relative = _join(SNAPSHOTS_DIR, stage, name, suffix=".json")
-            self._atomic_write_json(self.run_dir / relative, payload)
-            self._flush_manifest()
+            with self._publication_lock:
+                self._atomic_write_json(self.run_dir / relative, self.redact(payload))
+                self._publish_ref(relative, "snapshots", stage)
             return relative
         except Exception as exc:  # noqa: BLE001
             self._record_error("write_snapshot", exc, stage=stage, name=name)
@@ -299,23 +426,57 @@ class DebugRecorder:
             source_path = Path(source)
             if not source_path.is_file():
                 raise FileNotFoundError(f"证据文件不存在: {source_path}")
+            if source_path.suffix.lower() in {".txt", ".md", ".log", ".tex", ".json", ".jsonl"}:
+                return self.archive_text(stage, name, source_path.read_bytes())
             target = self.run_dir / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             tmp = _tmp_path_for(target)
             try:
                 shutil.copyfile(source_path, tmp)
-                tmp.replace(target)
+                with self._publication_lock:
+                    tmp.replace(target)
+                    self._publish_ref(relative, "artifacts", stage)
             finally:
                 self._remove_quietly(tmp)
-            with self._lock:
-                self._manifest["artifact_count"] = (
-                    int(self._manifest.get("artifact_count", 0)) + 1
-                )
-            self._flush_manifest()
             return relative
         except Exception as exc:  # noqa: BLE001
             self._record_error("archive_file", exc, stage=stage, name=name)
             return None
+
+    def archive_text(self, stage: str, name: str, text) -> str | None:
+        try:
+            relative = _join(ARTIFACTS_DIR, stage, name)
+            target = self.run_dir / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            source = text.decode("utf-8", errors="replace") if isinstance(text, bytes) else str(text or "")
+            sanitized = self.redact(source)
+            tmp = _tmp_path_for(target)
+            try:
+                tmp.write_text(sanitized, encoding="utf-8")
+                with self._publication_lock:
+                    tmp.replace(target)
+                    self._publish_ref(relative, "artifacts", stage, redacted=source != sanitized)
+            finally:
+                self._remove_quietly(tmp)
+            return relative
+        except Exception as exc:
+            self._record_error("archive_text", exc, stage=stage, name=name)
+            return None
+
+    def _publish_ref(self, relative: str, category: str, stage: str, **metadata) -> None:
+        target = self.run_dir / relative
+        entry = {
+            "path": relative,
+            "stage": stage,
+            "sha256": _sha256_file(target),
+            "bytes": target.stat().st_size,
+            **metadata,
+        }
+        with self._lock:
+            self._manifest.setdefault(category, {})[relative] = entry
+            if category == "artifacts":
+                self._manifest["artifact_count"] = len(self._manifest[category])
+        self._flush_manifest()
 
     # ---------------------------------------------------------- lifecycle
     def finish(self, status: str = STATUS_FINISHED) -> None:
@@ -350,7 +511,7 @@ class DebugRecorder:
         error = {
             "operation": operation,
             "type": type(exc).__name__,
-            "message": str(exc)[:300],
+            "message": self.redact(str(exc))[:300],
         }
         error.update(
             {key: value for key, value in context.items() if value is not None}
@@ -361,9 +522,12 @@ class DebugRecorder:
     def _flush_manifest(self) -> None:
         """原子写 manifest；失败只记错误不抛出。"""
         try:
-            with self._lock:
-                payload = json.loads(json.dumps(self._manifest))
-            self._atomic_write_json(self._manifest_path, payload)
+            with self._publication_lock:
+                with self._lock:
+                    payload = self.redact(json.loads(json.dumps(self._manifest)))
+                    if self._errors:
+                        payload["capture_status"] = self.capture_status
+                self._atomic_write_json(self._manifest_path, payload)
         except Exception as exc:  # noqa: BLE001
             self._record_error("flush_manifest", exc)
 
@@ -395,6 +559,24 @@ class NullRecorder:
 
     run_id = ""
     run_dir = None
+
+    def __bool__(self):
+        return False
+
+    def new_id(self, prefix):
+        return ""
+
+    def capture(self, operation, callback, *args, **kwargs):
+        return None
+
+    def register_command(self, command):
+        return {}
+
+    def redact(self, value):
+        return value
+
+    def archive_text(self, stage, name, text):
+        return None
 
     @property
     def capture_status(self) -> dict:

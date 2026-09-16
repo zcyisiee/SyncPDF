@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import Counter
 from pathlib import Path
 
 from babeldoc.debug_recorder import model as dm
@@ -482,3 +483,67 @@ def capture_selection(
             "skipped_label_counts": skipped_label_counts,
         },
     )
+
+
+def capture_files(recorder, stage, workdir, names, *, phase="inputs"):
+    bundle_id = recorder.new_id(phase)
+    artifacts = {}
+    for name in names:
+        path = Path(workdir) / "agent" / name
+        if path.is_file():
+            artifacts[name] = recorder.archive_file(stage, f"{bundle_id}/{name}", path)
+    recorder.record_event(stage, "artifact_bundle", {"phase": phase, "artifacts": artifacts})
+    return artifacts
+
+
+def capture_text_version(recorder, workdir, text, phase, *, stage="translate", requested_ids=None):
+    from babeldoc.tools.agent.markdown_view import ID_MARK_RE
+
+    anchors = _read_json(Path(workdir) / "agent" / "anchors.json") or {}
+    sources = {row["id"]: row for row in anchors.get("rows", [])}
+    matches = list(ID_MARK_RE.finditer(text))
+    counts = Counter(match.group(1) for match in matches)
+    rows = []
+    for index, match in enumerate(matches):
+        pid = match.group(1)
+        source = sources.get(pid) or {}
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        rows.append({
+            "id": pid,
+            "page": source.get("page"),
+            "label": source.get("layout_label") or match.group(2),
+            "source": source.get("markdown"),
+            "canonical_source": source.get("canonical"),
+            "target": text[match.end():end],
+            "matched": pid in sources,
+            "duplicate": counts[pid] > 1,
+            "method": "paragraph_id" if pid in sources else "unmatched",
+            "requested": requested_ids is None or pid in requested_ids,
+        })
+    prefix = text[:matches[0].start()] if matches else text
+    version_id = recorder.new_id("text")
+    artifact = recorder.archive_text(stage, f"texts/{version_id}.md", text)
+    payload = {
+        "version": 1, "phase": phase, "rows": rows,
+        "unmatched": [{"reason": "no_paragraph_id", "text": prefix}] if prefix.strip() else [],
+        "missing_ids": [pid for pid in sources if not counts[pid]],
+        "requested_ids": requested_ids,
+        "artifact": artifact,
+    }
+    snapshot = recorder.write_snapshot(stage, f"texts/{version_id}", payload)
+    recorder.record_event(stage, "text_version", {
+        "phase": phase, "snapshot": snapshot, "artifact": artifact,
+        "rows": len(rows), "missing_ids": payload["missing_ids"],
+    })
+    return snapshot
+
+
+def capture_apply_validation(recorder, inputs, parsed, entries, **validation):
+    snapshot = recorder.write_snapshot("apply", recorder.new_id("validation"), {
+        "version": 1,
+        "sources": {pid: getattr(value, "unicode", "") for pid, value in inputs.items()},
+        "parsed": parsed,
+        "entries": entries,
+        **validation,
+    })
+    recorder.record_event("apply", "apply_validation", {"snapshot": snapshot, **validation})
