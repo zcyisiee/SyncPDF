@@ -48,11 +48,12 @@ export function createCheckView(ctx) {
     const push = (source, severity, message, ref) => {
       state.issues.push({ source, severity, message: String(message), ref });
     };
-    /* 产物用 sev: P1/P2（P1=缺陷 → error，P2/P3 → warning）。 */
+    /* 产物用 ``sev`` 表达级别：P0（阻塞）/ P1（缺陷）→ error，P2/P3（提示）→ warning。
+       漏掉 P0 会让越出页面这类最严重的问题降级显示成黄色警告。 */
     const sevOf = (it, fallback) => {
       if (it.severity) return it.severity;
       const sev = String(it.sev || '').toUpperCase();
-      if (sev === 'P1') return 'error';
+      if (sev === 'P0' || sev === 'P1') return 'error';
       if (sev === 'P2' || sev === 'P3') return 'warning';
       return fallback;
     };
@@ -62,38 +63,42 @@ export function createCheckView(ctx) {
       if (!code) return JSON.stringify(it).slice(0, 200);
       return it.hint ? `${code}：${it.hint}` : code;
     };
+    /* 指向对象可能是单段（``id``）或一段对（``ids``，如 lint 的 paragraph_overlap
+       重叠涉及两段）。归一成 ids 数组：``id`` 取首个供选中/深链，``ids`` 供逐个画框。 */
+    const refOf = (it) => {
+      const ids = Array.isArray(it.ids)
+        ? it.ids.filter(Boolean)
+        : [it.id || it.paragraph || it.debug_id].filter(Boolean);
+      return { page: it.page, ids, id: ids[0] || null };
+    };
 
     const lint = state.lint;
     if (lint) {
       const items = lint.findings || lint.issues || lint.violations || [];
       for (const it of items) {
-        push('lint', sevOf(it, 'warning'), msgOf(it), {
-          page: it.page, id: it.id || it.paragraph || it.debug_id,
-        });
+        push('lint', sevOf(it, 'warning'), msgOf(it), refOf(it));
       }
     }
     const links = state.links;
     if (links) {
       for (const it of links.findings || links.issues || links.missing || []) {
-        push('link', sevOf(it, 'warning'), msgOf(it), {
-          page: it.page, id: it.id || it.paragraph,
-        });
+        push('link', sevOf(it, 'warning'), msgOf(it), refOf(it));
       }
       const broken = links.broken || links.unresolved || links.invalid_destinations;
       if (Array.isArray(broken)) {
         for (const it of broken) {
           const target = typeof it === 'string' ? it : (it.target || it.destination || it.id || '');
-          push('link', 'error', `断链/无效目标 ${target}`, { page: it.page, id: it.id });
+          push('link', 'error', `断链/无效目标 ${target}`, refOf(it));
         }
       }
     }
     const verdict = state.verdict;
     if (verdict) {
       for (const it of verdict.blockers || []) {
-        push('review', sevOf(it, 'error'), msgOf(it), { page: it.page, id: it.id || it.paragraph });
+        push('review', sevOf(it, 'error'), msgOf(it), refOf(it));
       }
       for (const it of verdict.warnings || verdict.issues || verdict.findings || []) {
-        push('review', sevOf(it, 'warning'), msgOf(it), { page: it.page, id: it.id || it.paragraph });
+        push('review', sevOf(it, 'warning'), msgOf(it), refOf(it));
       }
     }
   }
@@ -104,29 +109,33 @@ export function createCheckView(ctx) {
     for (const issue of state.issues) {
       if (state.filter !== 'all' && issue.source !== state.filter) continue;
       const ref = issue.ref || {};
-      const para = ref.id ? state.paragraphs.get(ref.id) : null;
-      /* 页归属只认 typesetting_geometry 的 ``page``（1-based，段落→页的权威映射）。
+      /* 一条问题可能涉及多段（paragraph_overlap 的 ids）：逐段画框。
+         页归属只认 typesetting_geometry 的 ``page``（1-based，段落→页的权威映射）。
          产物里的 ``ref.page`` 基准不统一：layout_lint 是 1-based、review_verdict
          是 0-based（sheet 行页码），按它推页会把 review 的框整体错前一页。 */
-      const pageIdx = (para && Number(para.page)) - 1;
-      if (!(pageIdx >= 0)) continue;
-      const raw = para && (para.rendered_box || para.layout_box || para.src_box);
-      if (!raw) continue;
-      const pageH = state.heights.get(pageIdx) || 0;
-      let [x0, y0, x1, y1] = raw;
-      [y0, y1] = [pageH - y1, pageH - y0];
-      const color = issue.severity === 'error' ? 'hsl(0 75% 45%)' : 'hsl(30 90% 40%)';
-      const list = state.byPage.get(pageIdx) || [];
-      list.push({
-        id: ref.id || `issue-${state.issues.indexOf(issue)}`,
-        box: { x0, y0, x1, y1 },
-        label: `${issue.source} ${issue.severity}`,
-        kind: 'issue',
-        color,
-        preview: issue.message.slice(0, 80),
-        data: issue,
+      const ids = ref.ids && ref.ids.length ? ref.ids : [null];
+      ids.forEach((id, k) => {
+        const para = id ? state.paragraphs.get(id) : null;
+        const pageIdx = (para && Number(para.page)) - 1;
+        if (!(pageIdx >= 0)) return;
+        const raw = para.rendered_box || para.layout_box || para.src_box;
+        if (!raw) return;
+        const pageH = state.heights.get(pageIdx) || 0;
+        let [x0, y0, x1, y1] = raw;
+        [y0, y1] = [pageH - y1, pageH - y0];
+        const color = issue.severity === 'error' ? 'hsl(0 75% 45%)' : 'hsl(30 90% 40%)';
+        const list = state.byPage.get(pageIdx) || [];
+        list.push({
+          id: id || `issue-${state.issues.indexOf(issue)}-${k}`,
+          box: { x0, y0, x1, y1 },
+          label: `${issue.source} ${issue.severity}`,
+          kind: 'issue',
+          color,
+          preview: issue.message.slice(0, 80),
+          data: issue,
+        });
+        state.byPage.set(pageIdx, list);
       });
-      state.byPage.set(pageIdx, list);
     }
   }
 
@@ -179,12 +188,15 @@ export function createCheckView(ctx) {
       );
       item.onclick = () => {
         const ref = issue.ref || {};
-        const para = ref.id ? state.paragraphs.get(ref.id) : null;
+        const ids = ref.ids && ref.ids.length ? ref.ids : [];
+        const para = ids.length ? state.paragraphs.get(ids[0]) : null;
         /* 同 ensureBoxes：有 geometry 项就以它的 page 为准；无 id 的 lint 项
            才退回 ref.page（layout_lint 为 1-based）。 */
         const page = para ? Number(para.page) : (Number(ref.page) || null);
         if (page) ctx.pager.scrollToPage(page - 1);
-        if (ref.id) ctx.select(ref.id);
+        /* ctx.select 负责实体/URL 同步；一条问题涉及多段时再补全高亮。 */
+        if (ids.length) ctx.select(ids[0]);
+        if (ids.length > 1) ctx.pager.selectMany(ids);
         list.querySelectorAll('.item').forEach((n) => n.classList.remove('on'));
         item.classList.add('on');
         renderDetail(issue, idx);
@@ -210,10 +222,11 @@ export function createCheckView(ctx) {
     /* 显示权威页码（geometry 的 1-based 段落页）。产物自带的 ref.page 基准不统一
        （lint 1-based / review 0-based），直接显示会与本页页码自相矛盾。 */
     const ref = issue.ref || {};
-    const para = ref.id ? state.paragraphs.get(ref.id) : null;
+    const ids = ref.ids && ref.ids.length ? ref.ids : [];
+    const para = ids.length ? state.paragraphs.get(ids[0]) : null;
     const refPage = ref.page == null || ref.page === '' ? null : Number(ref.page);
     add('page', para ? para.page : refPage);
-    add('id', ref.id);
+    add('id', ids.length ? ids.join(', ') : null);
     sec.append(kv);
     sec.append(el('pre', 'raw', JSON.stringify(issue, null, 2)));
   }
@@ -270,8 +283,21 @@ export function createCheckView(ctx) {
   }
 
   function onSelect(id) {
-    const idx = state.issues.findIndex((i) => (i.ref || {}).id === id || `issue-${state.issues.indexOf(i)}` === id);
-    if (idx >= 0) renderDetail(state.issues[idx], idx);
+    /* 命中任一段即算选中该问题（paragraph_overlap 一条涉及两段）；
+       无 id 条目用 ``issue-<序号>[-<第几段>]`` 兜底标识。 */
+    const origin = String(id || '').match(/^issue-(\d+)/);
+    const idx = state.issues.findIndex((issue, i) => {
+      if (origin && Number(origin[1]) === i) return true;
+      const ref = issue.ref || {};
+      const ids = ref.ids && ref.ids.length ? ref.ids : (ref.id ? [ref.id] : []);
+      return ids.includes(id);
+    });
+    if (idx < 0) return;
+    const ref = state.issues[idx].ref || {};
+    const ids = ref.ids && ref.ids.length ? ref.ids : [];
+    /* 从画布点进重叠框时，把该问题的其余段一并高亮，避免只看一半。 */
+    if (ids.length > 1 && ctx.pager) ctx.pager.selectMany(ids);
+    renderDetail(state.issues[idx], idx);
   }
 
   return { mount, onEvent, onSelect, id: 'check' };

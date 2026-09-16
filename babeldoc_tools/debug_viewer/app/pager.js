@@ -73,7 +73,8 @@ export function createPager(opts) {
     pages: [],
     provider: null,                     // (pageIndex) → box[]
     views: [],
-    selected: null,
+    selected: null,                     // 主选中 id（深链/单段场景）
+    selectedIds: new Set(),             // 多选中（一条问题涉及多段，如段落重叠）
     liveObserver: null,
     currentObserver: null,
   };
@@ -90,6 +91,7 @@ export function createPager(opts) {
     host.replaceChildren();
     state.views = [];
     state.selected = null;
+    state.selectedIds = new Set();
     chip.hidden = true;
     hitlist.hidden = true;
   }
@@ -358,21 +360,31 @@ export function createPager(opts) {
 
   /* ---------------------------------------------------------- selection */
   function markSelected(view) {
+    const many = state.selectedIds.size > 0;
     for (const el of view.overlay.querySelectorAll('.box')) {
-      el.classList.toggle('is-selected', el._box && el._box.id === state.selected);
+      const hit = el._box && (many
+        ? state.selectedIds.has(el._box.id)
+        : el._box.id === state.selected);
+      el.classList.toggle('is-selected', Boolean(hit));
     }
   }
 
-  function select(box, view) {
-    state.selected = box ? box.id : null;
+  /* 多选：一条问题可涉及多段（如 lint 的段落重叠），两段都要高亮。 */
+  function selectMany(ids) {
+    const list = (ids || []).filter(Boolean);
+    state.selected = list[0] || null;
+    state.selectedIds = new Set(list);
     for (const v of state.views) markSelected(v);
+  }
+
+  function select(box, view) {
+    selectMany(box ? [box.id] : []);
     onSelect(box ? box.id : null, box || null, view ? view.idx : null);
   }
 
   function selectById(id) {
     /* 按实体 id 选中：找到所在页滚动过去并高亮。 */
-    state.selected = id || null;
-    for (const view of state.views) markSelected(view);
+    selectMany(id ? [id] : []);
     if (!id || !state.provider) return;
     for (const view of state.views) {
       for (const raw of state.provider(view.idx) || []) {
@@ -410,6 +422,7 @@ export function createPager(opts) {
     setOverlayProvider,
     refresh,
     selectById,
+    selectMany,
     scrollToPage,
     clear,
     get pageCount() { return state.pages.length; },

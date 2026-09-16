@@ -537,3 +537,8 @@
 > 0-based 段落页码。消费方若按单一来源推页，框会整体错位一页（review 警告框尤其
 > 明显：漂到上一页、压住该页的算法或表格区域）。定位框时以 geometry 的段落
 > `page`（权威映射）为准，`ref.page` 仅作无 id 条目（如部分 lint 项）的回退。
+>
+> **问题指向对象有两种形状**：单段用 `id`（字符串），涉及多段用 `ids`（数组，
+> 如 `layout_lint` 的 `paragraph_overlap`）。消费方只读 `id` 会静默丢掉多段问题
+> 的全部框，需同时接受两者。另注意部分 lint 项按页统计、本就无段落 id
+> （`text_layer_compat_ideograph`、`link_misaligned`），这类只有 `page`。
