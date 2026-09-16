@@ -415,10 +415,35 @@ class MinerUDocLayoutModel(DocLayoutModel):
         except OSError:
             logger.warning("Failed to write MinerU layout cache", exc_info=True)
 
+    def _dump_raw_layout_json(
+        self, layout_json: dict[str, Any], translate_config
+    ) -> None:
+        """debug 采集开启时把 provider 原始 layout JSON 落盘（``layout_raw.json``）。
+
+        解析管线随后把它归档进 debug run（``provider-layout.json``）；recorder
+        关闭时不写（原始 JSON 不含解析后的规范化结构，正常流程用不到）。
+        """
+        if getattr(translate_config, "debug_recorder", None) is None:
+            return
+        output_path = self._provider_ir_output_path(translate_config)
+        if output_path is None:
+            return
+        try:
+            raw_path = output_path.with_name("layout_raw.json")
+            raw_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = raw_path.with_suffix(".tmp")
+            tmp.write_text(
+                json.dumps(layout_json, ensure_ascii=False), encoding="utf-8"
+            )
+            tmp.replace(raw_path)
+        except OSError:
+            logger.warning("Failed to write MinerU raw layout JSON", exc_info=True)
+
     def _prepare_provider_ir(
         self, layout_json: dict[str, Any], translate_config
     ) -> None:
         """构建并落盘 provider IR。IR 构建失败不阻断 YoloResult 路径。"""
+        self._dump_raw_layout_json(layout_json, translate_config)
         try:
             self._build_provider_document(layout_json)
         except Exception:  # noqa: BLE001 - IR 是附加产物，不应影响布局解析

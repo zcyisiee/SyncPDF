@@ -296,16 +296,21 @@ def _resolve_mineru_json(mineru_json, mineru_cache_key):
     return str(cache_path)
 
 
-def _snapshot_bookmarks(pdf_path, workdir) -> None:
-    """把源 PDF 书签快照到 ``<workdir>/agent/source/bookmarks.json``。"""
+def _snapshot_bookmarks(pdf_path, workdir) -> dict:
+    """把源 PDF 书签快照到 ``<workdir>/agent/source/bookmarks.json``。
+
+    返回 ``write_bookmarks`` 的结果（``{"path", "count", "written"}``）；
+    失败时返回 ``{"count": 0, "written": False}``，不阻断解析。
+    """
     from babeldoc.tools.agent import link_snapshot
 
     try:
-        link_snapshot.write_bookmarks(
+        return link_snapshot.write_bookmarks(
             pdf_path, link_snapshot.bookmarks_path(workflow.agent_dir(workdir))
         )
     except Exception:  # noqa: BLE001 - 快照是审计产物，不阻断解析
         logger.warning("书签快照失败", exc_info=True)
+        return {"count": 0, "written": False}
 
 
 def _snapshot_links(pdf_path, workdir, docs) -> dict:
@@ -364,22 +369,25 @@ def _run_parse(
     from babeldoc.format.pdf.new_parser.native_parse import (
         parse_prepared_pdf_with_new_parser_to_legacy_ir,
     )
+    from babeldoc.tools.agent import debug_capture
     from babeldoc.tools.agent.sheet_translator import SheetProtocolTranslator
 
     workdir = Path(workdir)
     pdf_path = Path(pdf_path)
-    if pages:
-        pdf_path = workflow._trim_pages(
-            pdf_path, workflow._parse_pages(pages), workdir / "trimmed.pdf"
-        )
-
-    config = workflow._base_config(pdf_path, workdir, lang_in, lang_out)
     # 诊断采集器（bdt --debug）：显式参数优先，缺省回落进程内上下文；
     # 深层 midend processor 经 config.debug_recorder 取（None = 关闭）。
     if recorder is None:
         from babeldoc import debug_recorder as _dr
 
         recorder = _dr.get_current()
+    if recorder is not None:
+        debug_capture.capture_input_pdf(recorder, pdf_path)
+    if pages:
+        pdf_path = workflow._trim_pages(
+            pdf_path, workflow._parse_pages(pages), workdir / "trimmed.pdf"
+        )
+
+    config = workflow._base_config(pdf_path, workdir, lang_in, lang_out)
     config.debug_recorder = recorder
     from babeldoc.format.pdf.translation_config import TranslationConfig
 
@@ -423,14 +431,46 @@ def _run_parse(
 
     doc_pdf, temp_pdf_path, mediabox_data = workflow._prepare_pdf(pdf_path, config)
     # 书签（outline）快照：解析阶段绑定源页，重建阶段据此写回 mono/dual。
-    _snapshot_bookmarks(temp_pdf_path, workdir)
+    bookmark_result = _snapshot_bookmarks(temp_pdf_path, workdir)
+    if recorder is not None:
+        debug_capture.capture_pdf_prepared(
+            recorder,
+            temp_pdf_path,
+            page_count=len(doc_pdf),
+            trimmed=bool(pages),
+        )
     docs = parse_prepared_pdf_with_new_parser_to_legacy_ir(
         temp_pdf_path, config=config, doc_pdf=doc_pdf
     )
-    docs = LayoutParser(config).process(docs, doc_pdf)
+    if recorder is not None:
+        debug_capture.capture_page_frames(
+            doc_pdf,
+            recorder,
+            original_pages=workflow._parse_pages(pages) if pages else None,
+            mediabox_data=mediabox_data,
+        )
+        debug_capture.capture_native_chars(docs, recorder)
+    try:
+        docs = LayoutParser(config).process(docs, doc_pdf)
+    except Exception as exc:
+        # 覆盖率门禁等失败也要保留此前证据：layout 已赋到 docs.page，
+        # coverage 报告在抛错前已落盘。
+        if recorder is not None:
+            debug_capture.capture_layout(docs, recorder, backend=layout, error=exc)
+            debug_capture.capture_coverage(config, recorder)
+            debug_capture.archive_provider_artifacts(
+                recorder, workdir, backend=layout
+            )
+        raise
+    if recorder is not None:
+        debug_capture.capture_layout(docs, recorder, backend=layout)
+        debug_capture.capture_coverage(config, recorder)
+        debug_capture.archive_provider_artifacts(recorder, workdir, backend=layout)
     # 行内公式保护 + 原生字符↔MinerU span 对齐审计（需在 ParagraphFinder 之前：
     # 此时 page.pdf_character 仍是全量，且新 formula 区域会被 ParagraphFinder 采纳）。
     docs = InlineMathProtector(config).process(docs) or docs
+    if recorder is not None:
+        debug_capture.capture_inline_math(recorder, workdir)
     # 实验性高质量 OCR：在段落识别前安全回填字符文本，保留原生 bbox/样式。
     if config.mineru_use_ocr_text:
         from babeldoc.format.pdf.document_il.midend.provider_ocr import (
@@ -438,14 +478,27 @@ def _run_parse(
         )
 
         docs = ProviderOcrTextFusion(config).process(docs) or docs
+    if recorder is not None:
+        debug_capture.capture_ocr_fusion(
+            recorder, workdir, enabled=bool(config.mineru_use_ocr_text)
+        )
     close_process_pool()
-    docs = EnclosedMarkerFixer(config).process(docs)
+    marker_fixer = EnclosedMarkerFixer(config)
+    docs = marker_fixer.process(docs)
+    if recorder is not None:
+        debug_capture.capture_enclosed_marker(marker_fixer, recorder)
     docs = ParagraphFinder(config).process(docs) or docs
     # 目录页条目化（需要段落结构；新段落要经过 StylesAndFormulas 的样式处理）。
     docs = TocDetector(config).process(docs) or docs
+    if recorder is not None:
+        debug_capture.capture_toc(recorder, workdir)
     docs = StylesAndFormulas(config).process(docs) or docs
+    if recorder is not None:
+        debug_capture.capture_styles_formulas(docs, recorder)
 
     _deterministic_ids(docs)
+    if recorder is not None:
+        debug_capture.capture_paragraphs(docs, recorder)
 
     # LaTeX bbox 源行几何（P3-0）：必须在译文回填之前采集——post_translate_paragraph
     # 会把 composition 换成纯文本 run，pdf_line 与源坐标随之丢失。md 路径是主协议，
@@ -461,10 +514,16 @@ def _run_parse(
     except Exception:  # noqa: BLE001 - 几何采集失败只影响 LaTeX 保真，有兜底
         logger.warning("源行几何采集失败", exc_info=True)
         source_line_geometry = {}
+    if recorder is not None:
+        debug_capture.capture_source_geometry(source_line_geometry, recorder)
 
     # 超链接快照：必须在 _deterministic_ids 之后（paragraph_ids 要拿确定性 id，
     # 与 reconstruct 阶段的段落对齐）、Typesetting 之前（字符 box 还是源坐标）。
     link_state = _snapshot_links(temp_pdf_path, workdir, docs)
+    if recorder is not None:
+        debug_capture.capture_links(
+            link_state, bookmark_result, recorder, workdir
+        )
 
     il_translator = ILTranslator(SheetProtocolTranslator(lang_in, lang_out, True), config)
     inputs = {}
@@ -509,6 +568,11 @@ def _run_parse(
                 }
             )
             label_counts[label] = label_counts.get(label, 0) + 1
+
+    if recorder is not None:
+        debug_capture.capture_selection(
+            rows, skipped_rows, label_counts, skipped, recorder
+        )
 
     return {
         "docs": docs,
