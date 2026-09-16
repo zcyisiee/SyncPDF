@@ -40,6 +40,7 @@ from babeldoc import debug_recorder as _dr
 
 from babeldoc_tools import __version__
 from babeldoc_tools import common
+from babeldoc_tools import debug_replay
 from babeldoc_tools import debug_runtime
 from babeldoc_tools import debug_server
 from babeldoc_tools import layout
@@ -663,7 +664,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
 
 
 def _debug_command(args: argparse.Namespace) -> dict:
-    """``bdt debug``：启动/复用查看器、显式 PDF 绑定、``--stop``。"""
+    """``bdt debug``：启动/复用查看器、显式 PDF 绑定、``--stop``、旧目录回放。"""
     session = debug_runtime.DebugSession(args.workdir)
     try:
         bindings_path = session.record_bindings(
@@ -674,7 +675,33 @@ def _debug_command(args: argparse.Namespace) -> dict:
             if bindings_path:
                 data["bindings"] = str(bindings_path)
             return {"ok": True, "data": data}
-        run_id = args.run_id or debug_runtime.latest_run_id(args.workdir)
+        replayed = None
+        want_replay = args.run_id == "replay" or (
+            args.run_id is None
+            and debug_replay.replay_run_needed(args.workdir)
+        )
+        if want_replay:
+            session.acquire_write_lock()
+            try:
+                replayed = debug_replay.build_replay_run(
+                    args.workdir,
+                    source_pdf=args.source_pdf,
+                    mono=args.mono,
+                )
+            finally:
+                session.release_write_lock()
+            if replayed:
+                sys.stderr.write(
+                    "debug: 回放模式（来自旧 workdir 产物，证据不完整）\n"
+                )
+            elif args.run_id == "replay":
+                return registry.error_payload(
+                    "replay_unavailable",
+                    "workdir 中没有可回放的 agent/ 历史产物",
+                )
+        run_id = (
+            args.run_id or replayed or debug_runtime.latest_run_id(args.workdir)
+        )
         info = session.start_viewer(
             port=args.port, no_open=args.no_open, run_id=run_id
         )
