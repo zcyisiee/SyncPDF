@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import datetime
 import fcntl
+import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -175,13 +177,92 @@ def _resolve_artifact(run_dir: Path, relative: str) -> Path | None:
     return target if target.is_file() else None
 
 
+def _render_cache_dir(workdir: Path, run_id: str) -> Path:
+    return _debug_dir(workdir) / "render-cache" / run_id
+
+
+class _RenderWorker:
+    """按需拉起的 ``--debug-render-internal`` 子进程（单例、锁串行）。
+
+    PyMuPDF 文档对象不跨线程共享：渲染请求全部经 stdin/stdout 发给这个
+    单线程 worker；进程崩溃时下一个请求自动重启它（不会拖垮 HTTP 线程）。
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._proc: subprocess.Popen | None = None
+
+    def _spawn(self) -> subprocess.Popen:
+        cmd = [
+            sys.executable,
+            "-m",
+            "babeldoc_tools",
+            "--debug-render-internal",
+        ]
+        return subprocess.Popen(  # noqa: S603 - argv 固定，无外部输入
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def render(self, pdf: Path, page: int, dpi: int) -> bytes:
+        """渲染一页 → PNG bytes；任何失败都抛异常（调用方转成 5xx）。"""
+        request = json.dumps(
+            {"pdf": str(pdf), "page": int(page), "dpi": int(dpi)}
+        ).encode("utf-8") + b"\n"
+        with self._lock:
+            return self._request(request)
+
+    def _request(self, request: bytes) -> bytes:
+        last_exc: Exception | None = None
+        for _attempt in range(2):  # 首次失败重启 worker 再试一次
+            try:
+                proc = self._proc
+                if proc is None or proc.poll() is not None:
+                    proc = self._spawn()
+                    self._proc = proc
+                assert proc.stdin is not None and proc.stdout is not None
+                proc.stdin.write(request)
+                proc.stdin.flush()
+                header = proc.stdout.readline()
+                if not header:
+                    raise RuntimeError("render worker 无响应")
+                meta = json.loads(header.decode("utf-8"))
+                if not meta.get("ok"):
+                    raise RuntimeError(str(meta.get("error") or "render failed"))
+                size = int(meta["n"])
+                data = proc.stdout.read(size)
+                if len(data) != size:
+                    raise RuntimeError("render worker 输出截断")
+                return data
+            except Exception as exc:  # noqa: BLE001 - 重启后重试一次
+                last_exc = exc
+                self._kill()
+        raise RuntimeError(f"render worker 失败: {last_exc}")
+
+    def _kill(self) -> None:
+        proc = self._proc
+        self._proc = None
+        if proc is not None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+    def close(self) -> None:
+        with self._lock:
+            self._kill()
+
+
 class _Context:
-    """挂在 server 实例上的运行上下文（workdir / token / 活跃度）。"""
+    """挂在 server 实例上的运行上下文（workdir / token / 活跃度 / renderer）。"""
 
     def __init__(self, workdir: Path, token: str):
         self.workdir = workdir
         self.token = token
         self.last_request_at = time.time()
+        self.renderer = _RenderWorker()
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -276,7 +357,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_error_json(404, "not_found", "静态资源不存在")
             return
         content_type = _CONTENT_TYPES.get(target.suffix.lower(), "application/octet-stream")
-        self._send(200, target.read_bytes(), content_type)
+        self._send(
+            200,
+            target.read_bytes(),
+            content_type,
+            extra={"Cache-Control": "no-store"},
+        )
 
     def _route_api(self, path: str, parsed) -> None:
         workdir = self.ctx.workdir
@@ -311,6 +397,15 @@ class _Handler(BaseHTTPRequestHandler):
             events = read_events(run_dir, after_seq=after_seq)
             last_seq = max((event.get("seq") or 0 for event in events), default=after_seq)
             self._send_json({"ok": True, "events": events, "last_seq": last_seq})
+            return
+
+        match = re.match(r"^/api/v1/runs/([^/]+)/render/(\d+)\.png$", path)
+        if match:
+            run_dir = _resolve_run_dir(workdir, match.group(1))
+            if run_dir is None:
+                self._send_error_json(404, "run_not_found", "run 不存在")
+                return
+            self._route_render(run_dir, match, parsed)
             return
 
         match = re.match(r"^/api/v1/runs/([^/]+)/snapshot/(.+)$", path)
@@ -352,6 +447,51 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         self._send_error_json(404, "not_found", "未知 API 路径")
+
+    def _route_render(self, run_dir: Path, match, parsed) -> None:
+        """``/render/<page>.png?pdf=<artifact rel>&dpi=N``：经 worker 渲染页。
+
+        ``pdf`` 白名单：只允许该 run ``artifacts/`` 下的 ``.pdf``；
+        ``dpi`` 限 50–200（默认 110）。渲染结果磁盘缓存到
+        ``debug/render-cache/<run_id>/``。
+        """
+        query = urllib.parse.parse_qs(parsed.query)
+        page = int(match.group(2))
+        pdf_rel = (query.get("pdf") or [""])[0]
+        try:
+            dpi = int((query.get("dpi") or ["110"])[0])
+        except ValueError:
+            self._send_error_json(400, "bad_dpi", "dpi 必须是 50–200 的整数")
+            return
+        if not 50 <= dpi <= 200:
+            self._send_error_json(400, "bad_dpi", "dpi 必须是 50–200 的整数")
+            return
+        pdf_rel = pdf_rel.strip("/")
+        if not pdf_rel or not pdf_rel.lower().endswith(".pdf"):
+            self._send_error_json(400, "bad_pdf", "pdf 参数必须是 artifacts/ 下的 .pdf")
+            return
+        target = _resolve_artifact(run_dir, f"artifacts/{pdf_rel}")
+        if target is None:
+            self._send_error_json(404, "pdf_not_found", "PDF 证据不存在或不在白名单")
+            return
+        cache_dir = _render_cache_dir(self.ctx.workdir, run_dir.name)
+        digest = hashlib.sha1(pdf_rel.encode("utf-8")).hexdigest()[:10]  # noqa: S324
+        cache_path = cache_dir / f"{digest}-p{page}-d{dpi}.png"
+        try:
+            if cache_path.is_file():
+                self._send(200, cache_path.read_bytes(), "image/png")
+                return
+            png = self.ctx.renderer.render(target, page, dpi)
+            try:
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                tmp = cache_path.with_name(f".{cache_path.name}.{os.getpid()}.tmp")
+                tmp.write_bytes(png)
+                tmp.replace(cache_path)
+            except OSError:
+                pass  # 缓存失败不影响响应
+            self._send(200, png, "image/png")
+        except Exception as exc:  # noqa: BLE001 - 渲染失败 → 502
+            self._send_error_json(502, "render_failed", str(exc)[:200])
 
 
 def _write_viewer_state(workdir: Path, port: int, token: str) -> Path:
@@ -427,5 +567,6 @@ def serve(workdir, port: int = 0, token: str = "") -> int:
         pass
     finally:
         server.server_close()
+        ctx.renderer.close()
         _clear_viewer_state(workdir_path)
     return 0

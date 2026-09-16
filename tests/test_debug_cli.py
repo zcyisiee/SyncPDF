@@ -245,6 +245,7 @@ def served(tmp_path):
     yield workdir, server.server_address[1]
     server.shutdown()
     server.server_close()
+    server.debug_ctx.renderer.close()
 
 
 def _get(port: int, path: str, token: str | None = "tok123"):  # noqa: S107
@@ -340,6 +341,72 @@ def test_heartbeat_ok(served):
     status, body = _get(port, "/api/v1/heartbeat")
     assert status == 200
     assert body["ok"] is True
+
+
+def test_render_endpoint_validates_and_serves_png(served):
+    """渲染端点：白名单内 PDF → PNG；越界/非法参数 → 4xx。"""
+    pymupdf = pytest.importorskip("pymupdf")
+    workdir, port = served
+    run_dir = workdir / "debug" / "runs" / "20260916T000000Z-abc123"
+    (run_dir / "artifacts" / "parse").mkdir(parents=True)
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "run_id": run_dir.name,
+                "created_at": "2026-09-16T00:00:00+00:00",
+                "status": "finished",
+            }
+        ),
+        encoding="utf-8",
+    )
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 100), "render me", fontsize=14)
+    doc.save(run_dir / "artifacts" / "parse" / "input.pdf")
+    doc.close()
+
+    # 正常渲染 → PNG
+    status, body = _get(
+        port,
+        f"/api/v1/runs/{run_dir.name}/render/1.png?pdf=parse/input.pdf&dpi=72",
+    )
+    assert status == 200
+    assert isinstance(body, bytes) and body[:4] == b"\x89PNG"
+
+    # 磁盘缓存命中（第二次）
+    status, body = _get(
+        port,
+        f"/api/v1/runs/{run_dir.name}/render/1.png?pdf=parse/input.pdf&dpi=72",
+    )
+    assert status == 200
+    assert body[:4] == b"\x89PNG"
+
+    # 页码越界 → 502（worker 返回错误）
+    status, _ = _get(
+        port,
+        f"/api/v1/runs/{run_dir.name}/render/99.png?pdf=parse/input.pdf",
+    )
+    assert status == 502
+
+    # dpi 越界 → 400
+    status, _ = _get(
+        port,
+        f"/api/v1/runs/{run_dir.name}/render/1.png?pdf=parse/input.pdf&dpi=500",
+    )
+    assert status == 400
+
+    # pdf 非 artifacts 白名单 → 400/404
+    status, _ = _get(port, f"/api/v1/runs/{run_dir.name}/render/1.png?pdf=../x.pdf")
+    assert status in (400, 404)
+    status, _ = _get(
+        port, f"/api/v1/runs/{run_dir.name}/render/1.png?pdf=parse/missing.pdf"
+    )
+    assert status == 404
+
+    # 渲染缓存落在 workdir/debug/render-cache/ 下
+    cache = workdir / "debug" / "render-cache" / run_dir.name
+    assert cache.is_dir() and any(cache.glob("*.png"))
 
 
 def test_help_lists_debug_subcommand():

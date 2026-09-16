@@ -702,11 +702,24 @@ def _serve_internal(argv: list[str]) -> int:
     return debug_server.serve(ns.workdir, ns.port, ns.token)
 
 
+def _render_internal(argv: list[str]) -> int:
+    """隐藏参数入口：PDF 渲染 worker（stdin/stdout 协议，见 debug_render）。"""
+    internal = argparse.ArgumentParser(prog="bdt --debug-render-internal")
+    internal.add_argument("--debug-render-internal", action="store_true")
+    internal.parse_args(argv)
+    from babeldoc_tools import debug_render
+
+    return debug_render.render_worker()
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
-    # 隐藏的内部入口：detached 查看器服务进程（不进公开 --help，不占子命令）。
+    # 隐藏的内部入口：detached 查看器服务进程 / PDF 渲染 worker
+    # （不进公开 --help，不占子命令）。
     if "--debug-serve-internal" in argv:
         return _serve_internal(argv)
+    if "--debug-render-internal" in argv:
+        return _render_internal(argv)
     parser = _build_parser()
     args = parser.parse_args(argv)
     if getattr(args, "debug_recompile", False):
