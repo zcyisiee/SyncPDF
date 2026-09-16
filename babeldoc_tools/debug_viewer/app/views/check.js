@@ -105,8 +105,11 @@ export function createCheckView(ctx) {
       if (state.filter !== 'all' && issue.source !== state.filter) continue;
       const ref = issue.ref || {};
       const para = ref.id ? state.paragraphs.get(ref.id) : null;
-      const pageIdx = (ref.page || (para && para.page) || 0) - 1;
-      if (pageIdx < 0) continue;
+      /* 页归属只认 typesetting_geometry 的 ``page``（1-based，段落→页的权威映射）。
+         产物里的 ``ref.page`` 基准不统一：layout_lint 是 1-based、review_verdict
+         是 0-based（sheet 行页码），按它推页会把 review 的框整体错前一页。 */
+      const pageIdx = (para && Number(para.page)) - 1;
+      if (!(pageIdx >= 0)) continue;
       const raw = para && (para.rendered_box || para.layout_box || para.src_box);
       if (!raw) continue;
       const pageH = state.heights.get(pageIdx) || 0;
@@ -177,7 +180,9 @@ export function createCheckView(ctx) {
       item.onclick = () => {
         const ref = issue.ref || {};
         const para = ref.id ? state.paragraphs.get(ref.id) : null;
-        const page = ref.page || (para && para.page);
+        /* 同 ensureBoxes：有 geometry 项就以它的 page 为准；无 id 的 lint 项
+           才退回 ref.page（layout_lint 为 1-based）。 */
+        const page = para ? Number(para.page) : (Number(ref.page) || null);
         if (page) ctx.pager.scrollToPage(page - 1);
         if (ref.id) ctx.select(ref.id);
         list.querySelectorAll('.item').forEach((n) => n.classList.remove('on'));
@@ -202,8 +207,13 @@ export function createCheckView(ctx) {
     const add = (k, v) => { if (v != null) kv.append(el('dt', null, k), el('dd', 'mono', String(v))); };
     add('source', issue.source);
     add('severity', issue.severity);
-    add('page', issue.ref && issue.ref.page);
-    add('id', issue.ref && issue.ref.id);
+    /* 显示权威页码（geometry 的 1-based 段落页）。产物自带的 ref.page 基准不统一
+       （lint 1-based / review 0-based），直接显示会与本页页码自相矛盾。 */
+    const ref = issue.ref || {};
+    const para = ref.id ? state.paragraphs.get(ref.id) : null;
+    const refPage = ref.page == null || ref.page === '' ? null : Number(ref.page);
+    add('page', para ? para.page : refPage);
+    add('id', ref.id);
     sec.append(kv);
     sec.append(el('pre', 'raw', JSON.stringify(issue, null, 2)));
   }

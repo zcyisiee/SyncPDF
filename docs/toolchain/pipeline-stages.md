@@ -530,3 +530,10 @@
     ├── snapshots/         # 按阶段与页面拆分的快照 JSON
     └── artifacts/         # 复制的稳定证据文件（PDF 副本、TeX、日志等）
 ```
+
+> **页码基准陷阱（页归属一律取 `build/typesetting_geometry.json`）**：证据里的
+> `page` 字段基准不统一——`typesetting_geometry` / `layout.json` 与 `layout_lint.json`
+> 是 1-based，而 `sheet.jsonl` / `selection.json` / `review_verdict.json` 沿用
+> 0-based 段落页码。消费方若按单一来源推页，框会整体错位一页（review 警告框尤其
+> 明显：漂到上一页、压住该页的算法或表格区域）。定位框时以 geometry 的段落
+> `page`（权威映射）为准，`ref.page` 仅作无 id 条目（如部分 lint 项）的回退。
