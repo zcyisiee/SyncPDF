@@ -66,8 +66,8 @@ agy models
 ## 使用方法
 
 工具入口只有一个：`bdt`（安装后即在 PATH；等价于 `python -m babeldoc_tools`）。
-8 个子命令：`parse` / `translate` / `apply` / `build` / `check` / `layout-set` /
-`report` / `run`。stdout 恒为单行 JSON，日志走 stderr，退出码 0 = 成功、1 = 失败。
+9 个子命令：`parse` / `translate` / `apply` / `build` / `check` / `layout-set` /
+`report` / `debug` / `run`。stdout 恒为单行 JSON，日志走 stderr，退出码 0 = 成功、1 = 失败。
 
 ### 单一流程（推荐）
 
@@ -232,6 +232,43 @@ uv run bdt run --workdir "$WD" --from apply --dual
 两条容易混淆的边界：OCR 文本回填（opt-in）与公式 LaTeX（默认）是独立通道——前者动
 模型输入（改了要重翻译），后者只在渲染侧（升级不需要重翻译）；`latex_bbox` 默认开但
 尽力而为，能力探测失败自动回退，不会让任务失败。
+
+### Debug 工作台（诊断归档 + 只读查看器）
+
+给任一阶段加 `--debug`，该阶段的证据就会落进 `<workdir>/debug/runs/<run_id>/`，
+同时启动一个本地只读查看器（URL 打印到 stderr）：
+
+```bash
+uv run bdt run paper.pdf --workdir tmp/paper --debug \
+  --translator "scripts/agy-translator.sh" --reviewer "scripts/agy-reviewer.sh" --dual
+# 各阶段子命令同样支持：bdt parse|translate|apply|build|check|report ... --debug
+```
+
+- `--debug-port`：查看器端口，默认 `0` = 自动分配空闲端口；只监听 127.0.0.1。
+- `--debug-no-open`：不自动打开浏览器（URL 仍打印到 stderr）。
+
+不跑管线时用 `bdt debug` 启动或复用该 workdir 的查看器：
+
+```bash
+uv run bdt debug --workdir tmp/paper                     # 默认打开最新 run
+uv run bdt debug --workdir tmp/paper --run-id <run_id>   # 指定历史 run
+uv run bdt debug --workdir tmp/paper --stop              # 停止查看器
+```
+
+- 旧 workdir（`agent/` 有产物、`debug/runs/` 为空）自动生成 `mode=replay` 的回放
+  run；`--source-pdf` / `--mono` 为无法唯一确定的源/mono PDF 显式绑定（写
+  `debug/bindings.json`），`--run-id replay` 强制回放。
+- `--debug-recompile`（仅 `build` / `run`，必须与 `--debug` 同用，与 `--no-latex-bbox`
+  互斥）：绕过历史 LaTeX stamp 缓存的读取路径强制冷编译，保留本次运行内的去重与
+  缓存写入，不删除原缓存。
+- 归档在 `<workdir>/debug/runs/<run_id>/`（`manifest.json` / `events.jsonl` /
+  `snapshots/` / `artifacts/`）；历史 run 不覆盖、不自动删除。
+- 查看器安全边界：只读、只监听 127.0.0.1、每次请求校验随机访问令牌（URL 自带），
+  只提供 run 目录白名单内的文件，不提供任意文件访问。
+- 关闭方式：`bdt debug --workdir <wd> --stop`；或无活跃 pipeline 且无浏览器心跳
+  30 分钟后自动退出。
+- 旧目录回放限制：没有事件流（`events_available=false`）、识别阶段原始证据（字符层
+  /布局框）不可回放，源/mono PDF 无法唯一确定时标 `unavailable`。
 
 
 ## 输出文件

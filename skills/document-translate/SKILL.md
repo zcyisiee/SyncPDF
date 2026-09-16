@@ -49,6 +49,7 @@ stdout 恒为 `{"ok": true, "data": {…}}` 或 `{"ok": false, "error": {…}}`�
 | `check` | 三合一聚合：结构审查 + 排版 lint + 链接审计；`--strict` 时非 pass 退出码 1 |
 | `layout-set` | 写排版覆盖（`--patch` / `--clear`） |
 | `report` | 产出 `agent/FINAL_REPORT.md` |
+| `debug` | 起/复用 `<workdir>` 的只读 debug 查看器（`--run-id` / `--stop` / `--source-pdf` / `--mono`）；各阶段加 `--debug` 采集，见 [README「Debug 工作台」](../../README.md#debug-工作台诊断归档--只读查看器) |
 | `run` | 串联 parse→translate→apply→build→check→reviewer→report，可 `--from` 续跑 |
 
 内部 Python 函数（已从公开 CLI 移除，供 reviewer agent 与脚本调用）：
