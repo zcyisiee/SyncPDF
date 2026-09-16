@@ -1014,6 +1014,12 @@ class Typesetting:
         min_scale = 0.1
         box_expanded = False
         final_typeset_units = None
+        centered_title_box = self._centered_main_title_box(paragraph, page)
+        alignment = (
+            {"centered_title_box": centered_title_box}
+            if centered_title_box is not None
+            else {}
+        )
 
         while scale >= min_scale:
             try:
@@ -1025,6 +1031,7 @@ class Typesetting:
                     line_skip,
                     paragraph,
                     use_english_line_break,
+                    **alignment,
                 )
 
                 # 如果所有单元都放得下
@@ -1086,6 +1093,55 @@ class Typesetting:
 
         # 最后返回最小缩放因子
         return min_scale, final_typeset_units
+
+    def _centered_main_title_box(
+        self, paragraph: il_version_1.PdfParagraph, page: il_version_1.Page
+    ) -> Box | None:
+        """Recognize prominent, page-centered source titles, not section labels.
+
+        A tight single-line box alone cannot prove alignment. Require its center
+        (and every source line center) to agree with the page center as well.
+        Missing or ambiguous source geometry leaves native alignment unchanged.
+        """
+        if (
+            page.page_number != 0
+            or (paragraph.layout_label or "").lower() not in {"title", "doc_title"}
+            or paragraph.vertical
+            or paragraph.xobj_id not in (None, 0)
+            or not paragraph.pdf_style
+            or not paragraph.pdf_style.font_size
+            or not page.cropbox
+            or not page.cropbox.box
+        ):
+            return None
+        source = (
+            getattr(self.translation_config, "source_line_geometry", None) or {}
+        ).get(paragraph.debug_id, {})
+        bounds = source.get("box")
+        lines = source.get("line_boxes")
+        if not bounds or not lines:
+            return None
+        source_box = Box(*bounds)
+        crop = page.cropbox.box
+        if source_box.y2 < crop.y + (crop.y2 - crop.y) * 0.75:
+            return None
+        body_sizes = [
+            p.pdf_style.font_size
+            for p in page.pdf_paragraph
+            if p.layout_label == "text" and p.pdf_style and p.pdf_style.font_size
+        ]
+        if not body_sizes or paragraph.pdf_style.font_size < 1.4 * statistics.median(
+            body_sizes
+        ):
+            return None
+        tolerance = max(2.0, paragraph.pdf_style.font_size * 0.1)
+        page_center = (crop.x + crop.x2) / 2
+        title_center = (source_box.x + source_box.x2) / 2
+        if abs(title_center - page_center) > tolerance or any(
+            abs((line[0] + line[2]) / 2 - title_center) > tolerance for line in lines
+        ):
+            return None
+        return source_box
 
     def _force_break_indices(
         self, typesetting_units: list[TypesettingUnit], paragraph
@@ -1411,6 +1467,7 @@ class Typesetting:
         line_skip: float,
         paragraph: il_version_1.PdfParagraph,
         use_english_line_break: bool = True,
+        centered_title_box: Box | None = None,
     ) -> tuple[list[TypesettingUnit], bool]:
         """布局排版单元。
 
@@ -1422,6 +1479,10 @@ class Typesetting:
         Returns:
             tuple[list[TypesettingUnit], bool]: (已布局的排版单元列表，是否所有单元都放得下)
         """
+        if centered_title_box is not None:
+            box = copy.deepcopy(box)
+            box.x, box.x2 = centered_title_box.x, centered_title_box.x2
+
         # 计算字号众数
         font_sizes = []
         for unit in typesetting_units:
@@ -1464,10 +1525,29 @@ class Typesetting:
         all_units_fit = True
         last_unit: TypesettingUnit | None = None
         line_ys = [current_y]
-        if paragraph.first_line_indent:
+        if paragraph.first_line_indent and centered_title_box is None:
             current_x += space_width * 4
 
         break_before_indices = self._force_break_indices(typesetting_units, paragraph)
+        line_placements = []
+
+        def center_line():
+            if centered_title_box is None or not line_placements:
+                return
+            visible = [
+                typeset_units[unit_index]
+                for unit_index, unit, _x, _y in line_placements
+                if not unit.is_space
+            ]
+            if not visible:
+                return
+            left = min(unit.box.x for unit in visible)
+            right = max(unit.box.x2 for unit in visible)
+            dx = (centered_title_box.x + centered_title_box.x2 - left - right) / 2
+            # Relocate original units once: re-relocating formulas can apply
+            # their offsets twice, and must not change rich-text scales/styles.
+            for unit_index, unit, x, y in line_placements:
+                typeset_units[unit_index] = unit.relocate(x + dx, y, scale)
 
         def do_line_break() -> bool:
             """执行一次换行（推进 current_y、重置行状态）。放不下时返回 False。"""
@@ -1476,6 +1556,8 @@ class Typesetting:
             current_x = box.x
             if not current_line_heights:
                 return False
+            center_line()
+            line_placements.clear()
             max_height = max(current_line_heights)
             mode_height = statistics.mode(current_line_heights)
 
@@ -1571,6 +1653,8 @@ class Typesetting:
 
             # 放置当前单元
             relocated_unit = unit.relocate(current_x, current_y, scale)
+            if centered_title_box is not None:
+                line_placements.append((len(typeset_units), unit, current_x, current_y))
             typeset_units.append(relocated_unit)
 
             # 添加当前单元的高度到当前行高度列表
@@ -1585,6 +1669,7 @@ class Typesetting:
 
             last_unit = relocated_unit
 
+        center_line()
         return typeset_units, all_units_fit
 
     def create_typesetting_units(

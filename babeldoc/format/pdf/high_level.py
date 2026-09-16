@@ -1055,15 +1055,23 @@ def _do_translate_single(
             docs
         )
 
+    # Translation replaces source character runs, so capture alignment first.
+    from babeldoc.format.pdf.document_il.backend.latex_bbox import (
+        capture_source_line_geometry,
+    )
+
+    try:
+        translation_config.source_line_geometry = capture_source_line_geometry(docs)
+    except Exception:
+        logger.warning("Source line geometry capture failed", exc_info=True)
+        translation_config.source_line_geometry = {}
+
     # LaTeX bbox 排版（实验特性）：翻译会原地改写 paragraph.unicode，
     # 需在翻译前记录源文，供 overlay 判定「未翻译段」。
     # （不翻译（skip_translation）时也记：此时译文恒等于源文 → 全部跳过。）
     if getattr(translation_config, "enable_latex_bbox_layout", False):
         # 片段级公式嵌图需要源 PDF（与 IL 坐标同源）。
         translation_config.latex_source_pdf_path = str(temp_pdf_path)
-        from babeldoc.format.pdf.document_il.backend.latex_bbox import (
-            capture_source_line_geometry,
-        )
         from babeldoc.format.pdf.document_il.backend.latex_bbox import (
             record_source_texts,
         )
@@ -1072,15 +1080,9 @@ def _do_translate_single(
             record_source_texts(docs, translation_config)
         except Exception:
             logger.warning("LaTeX bbox 源文记录失败", exc_info=True)
-        # 源行几何（P3-0）：必须在 ILTranslator 之前（译文回填会换掉
-        # composition，源行盒随之丢失）。
-        try:
-            translation_config.latex_source_geometry = capture_source_line_geometry(
-                docs
-            )
-        except Exception:
-            logger.warning("LaTeX bbox 源行几何采集失败", exc_info=True)
-            translation_config.latex_source_geometry = {}
+        translation_config.latex_source_geometry = (
+            translation_config.source_line_geometry
+        )
 
     if not translation_config.skip_translation:
         if support_llm_translate:

@@ -481,6 +481,9 @@ class TranslationConfig:
         self.line_skip_override: float | None = None
         # Typesetting 阶段记录的非致命警告（如强制换行锚点解析失败）
         self.layout_warnings: list[str] = []
+        # Source geometry captured before translation/overrides, also used by
+        # native typesetting to preserve centered main titles.
+        self.source_line_geometry: dict = {}
         # agent 产物根目录（<workdir>/agent）：layout provider 把 provider IR 等
         # 结构化中间产物落盘到其下（如 source/mineru/provider_ir.json）；
         # None = 由 provider 自行决定（回退到 working_dir）。

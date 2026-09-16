@@ -277,9 +277,12 @@ def reconstruct(
     ``latex_bbox`` 默认开启：Typesetting 之前捕获源几何与公式融合 body，
     PDFCreater 在内容流生成时跳过已贴片段落的字符并贴片；能力缺失或任何
     失败自动回退现有渲染。传 ``latex_bbox=False``（CLI ``--no-latex-bbox``）
-    关闭，关闭时输出与旧渲染路径逐字节一致。``latex_bbox_mode`` 可选
+    关闭，关闭时仅使用原生排版（包括源主标题居中）。``latex_bbox_mode`` 可选
     ``"full"``（默认）/ ``"repair"``。
     """
+    from babeldoc.format.pdf.document_il.backend.latex_bbox.source_geometry import (
+        geometry_from_char_objects,
+    )
     from babeldoc.tools.agent import layout_geometry
     from babeldoc.tools.agent import layout_overrides
 
@@ -312,6 +315,11 @@ def reconstruct(
         for page, patch in (overrides.get("pages") or {}).items()
         if isinstance(patch, dict) and patch.get("font_scale")
     }
+    config.source_line_geometry = state.get("source_line_geometry") or {}
+    if not config.source_line_geometry:
+        config.source_line_geometry = geometry_from_char_objects(
+            doc, state.get("page_char_objects") or {}
+        )
     source_state = layout_geometry.capture_source_state(doc, overrides)
     ir_stats = layout_overrides.apply_to_ir(doc, overrides)
     layout_geometry.capture_source_state(doc, overrides, state=source_state)
@@ -328,9 +336,6 @@ def reconstruct(
         from babeldoc.format.pdf.document_il.backend.latex_bbox import (
             capture_layout_sources,
         )
-        from babeldoc.format.pdf.document_il.backend.latex_bbox.source_geometry import (
-            geometry_from_char_objects,
-        )
 
         try:
             # 未翻译段判定：用 extract 时记录的源文（translated.jsonl 的输入侧）。
@@ -340,11 +345,7 @@ def reconstruct(
             }
             # 源行几何（P3-0）：extract 落的为主；旧 workdir 用 extract 时的
             # page_char_objects（box 仍是源坐标）按段 box 聚类兜底。
-            config.latex_source_geometry = state.get("source_line_geometry") or {}
-            if not config.latex_source_geometry:
-                config.latex_source_geometry = geometry_from_char_objects(
-                    doc, state.get("page_char_objects") or {}
-                )
+            config.latex_source_geometry = config.source_line_geometry
             capture_layout_sources(
                 doc,
                 config,
@@ -362,7 +363,7 @@ def reconstruct(
             )
             config.enable_latex_bbox_layout = False
     else:
-        # 显式关闭：不受 TranslationConfig 默认值影响，确保零行为变化。
+        # 显式关闭 overlay，不受 TranslationConfig 默认值影响。
         config.enable_latex_bbox_layout = False
 
     Typesetting(config).typesetting_document(doc)
