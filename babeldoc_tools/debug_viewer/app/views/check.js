@@ -48,37 +48,52 @@ export function createCheckView(ctx) {
     const push = (source, severity, message, ref) => {
       state.issues.push({ source, severity, message: String(message), ref });
     };
+    /* 产物用 sev: P1/P2（P1=缺陷 → error，P2/P3 → warning）。 */
+    const sevOf = (it, fallback) => {
+      if (it.severity) return it.severity;
+      const sev = String(it.sev || '').toUpperCase();
+      if (sev === 'P1') return 'error';
+      if (sev === 'P2' || sev === 'P3') return 'warning';
+      return fallback;
+    };
+    const msgOf = (it) => {
+      if (it.message) return it.message;
+      const code = it.code || it.rule;
+      if (!code) return JSON.stringify(it).slice(0, 200);
+      return it.hint ? `${code}：${it.hint}` : code;
+    };
 
     const lint = state.lint;
     if (lint) {
-      const items = lint.issues || lint.violations || [];
+      const items = lint.findings || lint.issues || lint.violations || [];
       for (const it of items) {
-        const sev = it.severity || (it.level === 'error' ? 'error' : 'warning');
-        push('lint', sev, it.message || it.rule || JSON.stringify(it).slice(0, 200), {
+        push('lint', sevOf(it, 'warning'), msgOf(it), {
           page: it.page, id: it.id || it.paragraph || it.debug_id,
         });
       }
     }
     const links = state.links;
     if (links) {
-      for (const it of links.issues || links.missing || []) {
-        push('link', it.severity || 'warning', it.message || `链接 ${it.target || it.id || ''}`, {
+      for (const it of links.findings || links.issues || links.missing || []) {
+        push('link', sevOf(it, 'warning'), msgOf(it), {
           page: it.page, id: it.id || it.paragraph,
         });
       }
-      const broken = links.broken || links.unresolved;
+      const broken = links.broken || links.unresolved || links.invalid_destinations;
       if (Array.isArray(broken)) {
         for (const it of broken) {
-          push('link', 'error', `断链 ${it.target || it}`, { page: it.page, id: it.id });
+          const target = typeof it === 'string' ? it : (it.target || it.destination || it.id || '');
+          push('link', 'error', `断链/无效目标 ${target}`, { page: it.page, id: it.id });
         }
       }
     }
     const verdict = state.verdict;
     if (verdict) {
-      for (const it of verdict.issues || verdict.findings || []) {
-        push('review', it.severity || 'warning', it.message || it.summary || '', {
-          page: it.page, id: it.id || it.paragraph,
-        });
+      for (const it of verdict.blockers || []) {
+        push('review', sevOf(it, 'error'), msgOf(it), { page: it.page, id: it.id || it.paragraph });
+      }
+      for (const it of verdict.warnings || verdict.issues || verdict.findings || []) {
+        push('review', sevOf(it, 'warning'), msgOf(it), { page: it.page, id: it.id || it.paragraph });
       }
     }
   }

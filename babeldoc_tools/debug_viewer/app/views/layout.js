@@ -262,6 +262,13 @@ export function createLayoutView(ctx) {
   }
 
   function onSelect(id, box) {
+    /* 深链/跨视图跳转只带 id：回查 byPage 拿完整框数据。 */
+    if (!box && id) {
+      for (const boxes of state.byPage.values()) {
+        const hit = boxes.find((b) => b.id === id);
+        if (hit) { box = hit; break; }
+      }
+    }
     renderDetail(box);
   }
 

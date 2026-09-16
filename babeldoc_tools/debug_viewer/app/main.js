@@ -98,6 +98,7 @@ function select(id) {
   if (ctx.pager) ctx.pager.selectById(id);
   const view = views[state.activeView];
   if (view && view.onSelect) view.onSelect(id);
+  updateUrl();
 }
 
 async function goto(view, page, entity) {
@@ -387,6 +388,7 @@ async function boot() {
       state.selectedEntity = id;
       const view = views[state.activeView];
       if (view && view.onSelect) view.onSelect(id, box, pageIdx);
+      updateUrl();
     },
     onCurrent: onCurrentPage,
   });
