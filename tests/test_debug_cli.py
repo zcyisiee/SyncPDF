@@ -154,6 +154,8 @@ def test_parse_debug_envelope_and_archive(tmp_path, workdir, monkeypatch):
         str(pdf),
         "--workdir",
         str(workdir),
+        "--layout",
+        "paddle",
         "--debug",
         "--debug-no-open",
     )
@@ -204,7 +206,14 @@ def test_debug_run_failure_keeps_debug_block(tmp_path, workdir, monkeypatch):
     pdf = tmp_path / "paper.pdf"
     pdf.write_bytes(b"%PDF-1.4 stub\n")
     payload = _main(
-        "parse", str(pdf), "--workdir", str(workdir), "--debug", "--debug-no-open"
+        "parse",
+        str(pdf),
+        "--workdir",
+        str(workdir),
+        "--layout",
+        "paddle",
+        "--debug",
+        "--debug-no-open",
     )
     assert payload["ok"] is False
     block = payload["data"]["debug"]
