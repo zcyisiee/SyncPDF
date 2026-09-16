@@ -267,6 +267,8 @@ def reconstruct(
     watermark=False,
     latex_bbox=True,
     latex_bbox_mode=None,
+    debug_recorder=None,
+    debug_recompile=False,
 ):
     """从写回后的 IR 重排并生成 PDF。返回输出路径 dict。
 
@@ -304,6 +306,12 @@ def reconstruct(
     config.output_dir = output_dir
     config.no_dual = no_dual
     config.no_mono = False
+    if debug_recorder is None:
+        from babeldoc import debug_recorder as _dr
+
+        debug_recorder = _dr.get_current()
+    config.debug_recorder = debug_recorder
+    config.latex_debug_recompile = bool(debug_recompile)
     config.watermark_output_mode = (
         WatermarkOutputMode.Watermarked if watermark else WatermarkOutputMode.NoWatermark
     )

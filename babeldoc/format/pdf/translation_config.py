@@ -535,6 +535,13 @@ class TranslationConfig:
         # LaTeX bbox overlay 的统计（PDFCreater 写入）：
         # attempted/applied/fallback/failed + 原因/耗时/字号缩放明细。
         self.latex_bbox_stats: dict = {}
+        # 诊断采集器（bdt --debug；None = 关闭，零额外 IO）。由 bdt 工具层
+        # 在 _base_config 之后挂上来，深层模块用 getattr(config, "debug_recorder",
+        # None) 取——与 babeldoc.debug_recorder.get_current() 是同一个对象。
+        self.debug_recorder = None
+        # --debug-recompile：绕过 stamp 持久缓存的读取（本次运行内去重与
+        # 正常缓存写入不变）；仅 debug 模式可用。
+        self.latex_debug_recompile: bool = False
 
         if self.ocr_workaround:
             self.remove_non_formula_lines = False

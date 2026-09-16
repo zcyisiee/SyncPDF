@@ -315,6 +315,7 @@ def _preflight(stage: str, workdir: Path, pdf) -> dict | None:
 # --------------------------------------------------------------------------- #
 def _run_stage(stage: str, workdir: Path, cfg: dict) -> dict:
     """执行单个阶段，返回 ``registry.invoke`` 信封（``cfg["pdf"]`` 为源 PDF）。"""
+    recorder = cfg.get("debug_recorder")
     if stage == "parse":
         return registry.invoke(
             parse.parse_document,
@@ -330,6 +331,7 @@ def _run_stage(stage: str, workdir: Path, cfg: dict) -> dict:
             mineru_cache_key=cfg["mineru_cache_key"],
             layout_coverage_threshold=cfg["layout_coverage_threshold"],
             mineru_use_ocr_text=cfg["mineru_use_ocr_text"],
+            debug_recorder=recorder,
         )
     if stage == "translate":
         return registry.invoke(
@@ -342,9 +344,14 @@ def _run_stage(stage: str, workdir: Path, cfg: dict) -> dict:
             translator=cfg["translator"],
             timeout=cfg["timeout"],
             retry_missing=cfg["retry_missing"],
+            debug_recorder=recorder,
         )
     if stage == "apply":
-        return registry.invoke(translate.apply_translation, workdir=str(workdir))
+        return registry.invoke(
+            translate.apply_translation,
+            workdir=str(workdir),
+            debug_recorder=recorder,
+        )
     if stage == "build":
         return registry.invoke(
             layout.build_pdf,
@@ -356,6 +363,8 @@ def _run_stage(stage: str, workdir: Path, cfg: dict) -> dict:
             latex_bbox_mode=cfg["latex_bbox_mode"],
             render=cfg["render"],
             stats=cfg["stats"],
+            debug_recorder=recorder,
+            debug_recompile=cfg.get("debug_recompile", False),
         )
     if stage == "check":
         mono = _find_pdf(workdir, "mono")
@@ -370,6 +379,7 @@ def _run_stage(stage: str, workdir: Path, cfg: dict) -> dict:
             source_pdf=cfg["source_pdf"],
             skip_pdf_checks=cfg["skip_pdf_checks"],
             strict=True,
+            debug_recorder=recorder,
         )
     if stage == "review":
         return registry.invoke(_review_with_agent, workdir=str(workdir), cfg=cfg)
@@ -380,6 +390,7 @@ def _run_stage(stage: str, workdir: Path, cfg: dict) -> dict:
             output_dir=cfg["output_dir"],
             title=cfg["title"],
             notes=cfg["notes"],
+            debug_recorder=recorder,
         )
     raise common.ToolError("unknown_stage", f"未知阶段: {stage}")  # pragma: no cover
 
@@ -716,6 +727,8 @@ def run_pipeline(
     source_pdf: str | None = None,
     title: str | None = None,
     notes: str | None = None,
+    debug_recorder=None,
+    debug_recompile: bool = False,
 ) -> dict:
     """按阶段顺序执行并返回完整 JSON 信封（``ok`` / ``data`` 或 ``error``）。"""
     if from_stage not in STAGES:
@@ -770,6 +783,8 @@ def run_pipeline(
         "source_pdf": source_pdf,
         "title": title,
         "notes": notes,
+        "debug_recorder": debug_recorder,
+        "debug_recompile": bool(debug_recompile),
     }
 
     state = load_state(workdir_path)

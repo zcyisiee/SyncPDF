@@ -342,6 +342,7 @@ def _run_parse(
     mineru_cache_key=None,
     layout_coverage_threshold=0.005,
     mineru_use_ocr_text=False,
+    recorder=None,
 ):
     from babeldoc.const import close_process_pool
     from babeldoc.format.pdf.document_il.midend.enclosed_marker_fixer import (
@@ -373,6 +374,13 @@ def _run_parse(
         )
 
     config = workflow._base_config(pdf_path, workdir, lang_in, lang_out)
+    # 诊断采集器（bdt --debug）：显式参数优先，缺省回落进程内上下文；
+    # 深层 midend processor 经 config.debug_recorder 取（None = 关闭）。
+    if recorder is None:
+        from babeldoc import debug_recorder as _dr
+
+        recorder = _dr.get_current()
+    config.debug_recorder = recorder
     from babeldoc.format.pdf.translation_config import TranslationConfig
 
     # --mineru-json 优先；否则按内容哈希解析 --mineru-cache-key。
@@ -674,6 +682,7 @@ def extract_markdown(
     mineru_cache_key=None,
     layout_coverage_threshold=0.005,
     mineru_use_ocr_text=False,
+    recorder=None,
 ):
     """解析 PDF → 写 document.md / anchors.json / sheet.jsonl / state.pkl。"""
     workdir = Path(workdir)
@@ -690,6 +699,7 @@ def extract_markdown(
         mineru_cache_key=mineru_cache_key,
         layout_coverage_threshold=layout_coverage_threshold,
         mineru_use_ocr_text=mineru_use_ocr_text,
+        recorder=recorder,
     )
     agent = workflow.agent_dir(workdir)
     agent.mkdir(parents=True, exist_ok=True)

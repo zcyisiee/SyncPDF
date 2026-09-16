@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 
 from babeldoc_tools import common
+from babeldoc_tools import debug_runtime
 
 ID_MARK_RE = re.compile(
     r"<!--\s*id\s*=\s*([A-Za-z0-9._-]+)\s*(?:label\s*=\s*([^>]*?))?\s*-->"
@@ -45,6 +46,7 @@ def translate_document(
     prompt: str | None = None,
     repair_prompt: str | None = None,
     retry_missing: bool = True,
+    debug_recorder=None,
 ) -> dict:
     """翻译整篇（默认）或按 ``ids`` 重译合并。
 
@@ -58,24 +60,66 @@ def translate_document(
     """
     workdir_path = common.require_workdir(workdir)
     resolved_timeout = int(timeout or 1800)
-    if ids:
-        return retranslate_ids(
-            str(workdir_path),
-            ids,
-            feedback=feedback,
-            translator=translator,
-            timeout=resolved_timeout,
-            repair_prompt=repair_prompt,
-        )
-    return _translate_whole_document(
-        workdir_path,
-        markdown=markdown,
-        prompt_only=prompt_only,
-        translator=translator,
-        timeout=resolved_timeout,
-        prompt=prompt,
-        retry_missing=retry_missing,
+    mode = (
+        "ids"
+        if ids
+        else "markdown"
+        if markdown
+        else "prompt_only"
+        if prompt_only
+        else "whole"
     )
+    with debug_runtime.debug_stage(
+        debug_recorder,
+        "translate",
+        {
+            "mode": mode,
+            "ids": list(ids or []),
+            "timeout": resolved_timeout,
+            "retry_missing": bool(retry_missing),
+        },
+    ):
+        if ids:
+            result = retranslate_ids(
+                str(workdir_path),
+                ids,
+                feedback=feedback,
+                translator=translator,
+                timeout=resolved_timeout,
+                repair_prompt=repair_prompt,
+            )
+        else:
+            result = _translate_whole_document(
+                workdir_path,
+                markdown=markdown,
+                prompt_only=prompt_only,
+                translator=translator,
+                timeout=resolved_timeout,
+                prompt=prompt,
+                retry_missing=retry_missing,
+            )
+        if debug_recorder is not None:
+            agent = common.agent_dir(workdir_path)
+            for name in (
+                "prompt.md",
+                "prompt.retry.md",
+                "translated.md",
+                "translated.retry.md",
+            ):
+                artifact = agent / name
+                if artifact.exists():
+                    debug_recorder.archive_file("translate", name, artifact)
+            debug_recorder.record_event(
+                "translate",
+                "stage_finished",
+                {
+                    "mode": mode,
+                    "translated_md": result.get("translated_md"),
+                    "chars": result.get("chars"),
+                    "missing_after_retry": result.get("missing_after_retry"),
+                },
+            )
+        return result
 
 
 def _translate_whole_document(
@@ -269,7 +313,9 @@ def _label_of(anchors: dict, pid: str) -> str | None:
 # --------------------------------------------------------------------------- #
 # 写回 IR
 # --------------------------------------------------------------------------- #
-def apply_translation(workdir: str, *, markdown: str | None = None) -> dict:
+def apply_translation(
+    workdir: str, *, markdown: str | None = None, debug_recorder=None
+) -> dict:
     """校验译文 Markdown（id 对齐 + 锚点协议）并写回 IR。
 
     ``markdown`` 缺省为 ``agent/translated.md``；也接受 ``agent/document.md``
@@ -283,7 +329,27 @@ def apply_translation(workdir: str, *, markdown: str | None = None) -> dict:
         raise common.ToolError(
             "translated_md_missing", f"{md_path} 不存在：请先 bdt translate"
         )
-    report = markdown_view.apply_markdown(workdir_path, md_path)
-    report["translated_md"] = str(md_path)
-    common.write_json(common.agent_dir(workdir_path) / "apply_report.json", report)
-    return report
+    with debug_runtime.debug_stage(
+        debug_recorder, "apply", {"markdown": str(md_path)}
+    ):
+        report = markdown_view.apply_markdown(workdir_path, md_path)
+        report["translated_md"] = str(md_path)
+        common.write_json(common.agent_dir(workdir_path) / "apply_report.json", report)
+        if debug_recorder is not None:
+            debug_recorder.archive_file("apply", "translated.md", md_path)
+            debug_recorder.archive_file(
+                "apply",
+                "apply_report.json",
+                common.agent_dir(workdir_path) / "apply_report.json",
+            )
+            debug_recorder.record_event(
+                "apply",
+                "stage_finished",
+                {
+                    "applied": report.get("applied"),
+                    "violations_n": len(report.get("violations") or []),
+                    "fallback_ids": report.get("fallback_ids") or [],
+                    "repaired_n": len(report.get("repaired") or []),
+                },
+            )
+        return report
