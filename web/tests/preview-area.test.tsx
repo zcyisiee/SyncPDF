@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PreviewArea } from '../src/components/preview/PreviewArea';
 import { InspectorPanel } from '../src/components/shell/InspectorPanel';
 import { STORAGE_KEYS, uiStore } from '../src/stores/ui';
-import { jsonResponse, mockApiFetch, renderWithQuery, resetUiStore } from './helpers';
+import { jsonResponse, makeEventFeed, mockApiFetch, renderWithQuery, resetUiStore } from './helpers';
 
 vi.mock('../src/lib/pdf', () => ({
   PDF_CMAP_URL: '/pdfjs/cmaps/',
@@ -159,7 +159,8 @@ describe('PreviewArea bbox 降级与模式', () => {
     renderWithQuery(
       <>
         <PreviewArea did={DID} view="progress" />
-        <InspectorPanel />
+        {/* 段落占位面板在非进度视图（进度视图的面板是 W06 事件流） */}
+        <InspectorPanel did={DID} view="translate" feed={makeEventFeed()} />
       </>,
     );
     await screen.findByText('正在加载 PDF…');

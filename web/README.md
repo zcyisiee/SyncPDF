@@ -5,10 +5,11 @@ Vite + React 18 + TypeScript + Tailwind + TanStack Query + Zustand。
 `tailwind.config.ts` + `src/app/globals.css`）；HTTP 契约唯一事实来源：
 `docs/frontend/api.md` 与运行中服务的 `/openapi.json`。
 
-本目录当前范围（W05）：三栏工作台壳 + 设计令牌 + 文件库屏（真数据）+ hash 路由 +
-**PDF 预览**（pdf.js 渲染产物 PDF、parse/layout 两套 bbox 叠加、源/译/对照三模式、点框选中）。
-**不做**：连续滚动、缩放控件、bbox 拖拽（W09）、译文覆盖层（W06）、事件流/时间线真数据（W06）、
-上传（W08）；这些区域渲染带 `data-od-id` 的占位并写明接入任务。
+本目录当前范围（W06）：三栏工作台壳 + 设计令牌 + 文件库屏（真数据）+ hash 路由 +
+**PDF 预览**（pdf.js 渲染产物 PDF、parse/layout 两套 bbox 叠加、源/译/对照三模式、点框选中）+
+**进度层**（事件流面板 + 真 SSE 增量 + 阶段时间线真耗时 + 运行中状态）。
+**不做**：连续滚动、缩放控件、bbox 拖拽（W09）、译文覆盖层、段落属性面板（W10）、
+上传（W08）、job 启动/取消（W07）；这些区域渲染带 `data-od-id` 的占位并写明接入任务。
 
 ## 开发工作流（两个终端）
 
@@ -50,14 +51,16 @@ web/
     app/        App.tsx（hash 路由分发）+ globals.css（设计令牌 CSS 变量）
     components/ icons.tsx · ui/（Button/Chip/StatusBadge/ScrollArea/ErrorCard/Tooltip）
                 shell/（Topbar/IconRail/ScreenFrame/Gutter/ViewRail/InspectorPanel/Timeline）
+                events/（EventStreamPanel · EventRow · useEventWindow · useEventStream · useTimelineStages）
                 preview/（PdfCanvas · BboxLayer · PreviewToolbar · PreviewArea）
     lib/        api.ts（/api/v1 + 错误信封）· queries.ts · preview.ts（产物选择 + geometry 解析）
+                events.ts（SSE 帧/URL/live/分组/窗口合并）· timeline.ts（阶段合并 + 条宽）
                 pdf.ts（pdf.js worker/cmap/字体配置）· humanize.ts · routing.ts · cn.ts
     screens/    LibraryScreen / DocumentCard / WorkbenchScreen / PlaceholderScreen
     stores/     ui.ts（三栏宽度 + 分隔条 + 屏/预览模式 + 预览页码/bbox 图层/选中段落）
   scripts/      sync-pdfjs-assets.mjs（把 pdf.js 静态资源复制进 public/pdfjs/）
-  e2e/          Playwright 真浏览器用例（preview.spec.ts）
-  tests/        Vitest 用例（api / store / routing / 文件库屏 / 工作台壳 / 预览坐标与组件 / App 路由）
+  e2e/          Playwright 真浏览器用例（preview.spec.ts · progress.spec.ts）
+  tests/        Vitest 用例（api / store / routing / 文件库屏 / 工作台壳 / 预览坐标与组件 / 事件流与时间线）
   public/pdfjs/ pdf.js worker + cmaps + standard_fonts（生成物，.gitignore，不入库）
   tmp-smoke/    本地冒烟截图与日志（.gitignore，不入库）
 ```
@@ -94,13 +97,76 @@ cd web && pnpm e2e        # 自动起 bdt serve --root ../tmp --port 8793 + vite
 ```
 
 - fixture 用本仓库 `tmp/` 下的真实 workdir：主用例读 `tmp/ccs3764-dyn`（21 页、parse/layout 各
-  420 段），缺失时用例会失败并提示；重产物用例读 `tmp/e2e-2602-02908v2-20260917`
-  （65MB mono / 84MB dual），fixture 不在时自动 skip。
+  420 段、事件归档 12 条、7 段全 ok），缺失时用例会失败并提示；重产物用例读
+  `tmp/e2e-2602-02908v2-20260917`（65MB mono / 84MB dual），fixture 不在时自动 skip。
 - 断言：canvas 真有文字像素、bbox 数量 == 服务端实体数、框内有文字像素、parse/layout 两套换算
   落到同一矩形（±0.6px）、点框选中联动右侧面板、切换模式不重建译侧画布、产物响应含 `206`、
-  全程无外网请求（禁 CDN）。
+  全程无外网请求（禁 CDN）；`progress.spec.ts` 再断言事件面板行数 == 服务端本页条数、最新在上、
+  SSE 连上（`data-status=open`）、时间线 7 段 `data-state=ok` 且耗时/总用时与 `stage-state` 同口径、
+  无 console error。
 - 截图落在 `web/tmp-smoke/`（`e2e-preview.png` / `-layout` / `-compare` / `-selected` /
-  `-heavy-range`），性能数字以 `[perf]` / `[range]` 打到 stdout。
+  `-heavy-range` / `e2e-progress*.png`），性能数字以 `[perf]` / `[range]` 打到 stdout。
+
+## 进度层（W06）：事件流 + 时间线 + SSE
+
+### 事件流面板（右侧面板「进度」tab）
+
+- **尾部窗口**：默认只渲染最近 **200** 条（§4.6；3758 条的 run 全量渲染 DOM 会卡）。窗口是
+  `lib/events.ts` 的纯函数合并出来的：首拉窗口（query） + SSE 增量 + 「载入更早」页，按 `seq` 去重、
+  升序存储、显示时反转成**最新在上**。
+- **首拉策略**：分页接口只能正向翻（只有 `after_seq`，没有 before/desc 参数），所以拿“尾部”
+  必须从 0 扫到 `has_more=false`：`fetchEventTail` 循环 `?limit=2000`（服务端上限）并只留尾部 200。
+  实测：12 条的 run = **1 次**；3758 条的 run = **2 次**（`after_seq=0` + `after_seq=2000`）。
+  单 run 超过 `EVENTS_TAIL_MAX_PAGES × 2000` 条时窗口不是真正的尾部（已知边界，实跑未见）。
+- **「载入更早」每次 500 条**：游标 = `最旧 seq - 1 - 2000`，一次请求扫回来后只留 `seq < 最旧 seq`
+  的尾 500 条并入，窗口上限放宽到 `200 + 已载入条数`（不奉承已载入的历史）。
+- **kind 分组过滤**（全部/阶段/调用/缓存/候选/编译/其他）**只影响显示**，不动游标、不改窗口。
+- 点行展开完整 JSON（`<pre>` 最高 220px，§4.6）；`seq` 右对齐、时间戳是归档里的 UTC 时刻（`title`
+  给完整 ISO）。
+
+### SSE（原生 `EventSource`，禁库）
+
+- 地址：`/api/v1/documents/{did}/events/stream?run_id=<run>&after_seq=<尾部扫过的最大 seq>`，
+  **固定带 run_id**（换 run 必须换它，否则续传游标指向另一个 run）；相对路径走同源代理。
+- `event: <kind>` 是**命名分发**，`onmessage` 只收默认类型 → `useEventStream` 会为
+  `humanize.EVENT_KINDS` 里的每个 kind 单独 `addEventListener`（**新 kind 必须补表**，否则收不到
+  那个 kind 的事件）。
+- 断线：`onerror` + `readyState` 区分「连接断开，重试中」（CONNECTING，浏览器自己重连并带
+  `Last-Event-ID`）与「连接已关闭」（CLOSED）；不写 backoff。心跳 `: ping` 是注释行，天然忽略。
+- `404 events_unavailable`（没有 run 归档）**不是 SSE 帧**：先用分页接口首拉，归档不存在就不建
+  EventSource，面板显示空态；真错误（500/网络）显示错误文案 + 重试。
+
+### 时间线（stage-state 基线 + 事件 live 段）
+
+- 基线是 `GET /stage-state`（真实测 `duration_s`）；事件流只用来给**基线还没定论**的阶段算
+  「已进行 Xs」（本地时钟差值，1s ticker；非 live 时不跑）。条宽 = 该段耗时 / 最长已完成段
+  （同一线性标尺，§8.3），未开始段固定 64px 虚线不参与比例，0s/刚起步给 2% 最小可见宽。
+- 点击整列 → 跳该阶段对应视图（映射表 `lib/timeline.ts::STAGE_VIEWS`，注释里写了理由：
+  parse→识别、translate/apply→翻译、build/report→进度、check/review→检查）。
+- **`isRunLive(events)` 的规则与局限**：末条不是 `stage_finished`，或它的 stage 不是 `report` → live。
+  局限：归档被截断的 run（legacy replay 只到 `check`，而 `run_state` 里 `review`/`report` 有真耗时）
+  会被误报；失败/中断的 run（末条 `stage_error`）也算 live。因此**徽标与轮询的「运行中」一律用
+  基线裁决后的 `hasLiveSegment(segments)`**（`ok`/`failed` 的基线永远赢），`isRunLive` 只用来判定
+  "事件流是否还在增长"（stage-state 的 2s 轮询）。
+- 自动刷新：`useDocument` 只在时间线出现 live 段时 2s 轮询；`useStageState` 在事件流说 live 时 2s；
+  列表页 `useDocuments` 在有任一 `running` 阶段时 3s（`hasRunningDocument`）。
+- 顶栏/视图栏徽标：时间线判定 live → 「翻译中」+ 脉冲；否则用 `stage_summary` 的
+  「已完成 / 进行中 / 失败 / 未运行」。全站唯一动效仍然只加在真运行中的元素上。
+
+### 手工冒烟（SSE 实时性 + 首拉请求数 + 截图）
+
+```bash
+# 手工起后端 + 前端（8800/5173 任选）
+PATH="$PWD/.venv/bin:$PATH" bdt serve --root tmp --port 8787
+cd web && BDT_SERVE_PORT=8787 pnpm dev --host 127.0.0.1 --port 5173
+
+cd web && node tmp-smoke/w06-sse-smoke.mjs   # 真 Chromium，跑完写 tmp-smoke/w06-sse-smoke.txt
+```
+
+脚本会向 `tmp/ccs3764-dyn` 最新 run 的 `events.jsonl` **追加一行**合法事件（模拟进行中的 run），
+量浏览器收到它的延迟，结束前按备份**还原 fixture**。W06 实测：追加 → 浏览器 534ms 收到（<1s），
+首屏到第一行事件 113ms，3758 条的 run 窗口 200 行 / 首屏 117ms / 2 次分页请求，无 console error。
+SSE 增量的 e2e 留到 W15（W07 有真 job 之后）。
 
 ## 设计与契约约束（改动时别忘）
 
@@ -114,4 +180,10 @@ cd web && pnpm e2e        # 自动起 bdt serve --root ../tmp --port 8793 + vite
 - 计数为 `null` 表示产物缺失，显示 `—`，不要当 0（`docs/frontend/api.md` §3.1）。
 - 预览只叠加**已实现**的图层：bbox 的 parse/layout 换算、geometry 的 404 降级、产物缺失占位；
   不造假数据、不引外网依赖（worker/cmap/字形全本地）。
-- 全站唯一动效是 running 圆点脉冲（`.pulse-dot`），只加在真实 `running` 状态上。
+- 事件流用**原生 `EventSource`**（禁库、禁 fetch-stream）：SSE 的 `event: <kind>` 是命名分发，
+  kind 清单在 `humanize.EVENT_KINDS`；面板只渲染窗口（默认 200 + 已载入），不做虚拟化。
+- 事件不带 level（api.md §4），级别只由 kind + `data.status`/`returncode`/`error_code` 推导
+  （`events.ts::eventLevel`）；`data` 原样留在内存，面板只显示摘要。
+- 时间线以 `stage-state` 为**基线**（有真实 `duration_s`），事件只补 live 段的本地秒表；
+  不编造百分比 / ETA。
+- 全站唯一动效是 running 圆点脉冲（`.pulse-dot`），只加在真实 `running` 或时间线 live 段上。

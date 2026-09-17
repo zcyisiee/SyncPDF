@@ -50,8 +50,25 @@ export function StatusBadge({
   );
 }
 
-/** 文档整体状态徽标（顶栏右侧 / 视图栏文档头）。 */
-export function DocumentStatusBadge({ stageSummary }: { stageSummary?: Record<string, string> }) {
+/**
+ * 文档整体状态徽标（顶栏右侧 / 视图栏文档头）。
+ * `live` = 时间线（stage-state 基线 + 事件流）判定这个 run 正在跑（§8.1 的「翻译中」脉冲）——
+ * 它比 `stage_summary` 更准（`stage_summary` 里没有 `running` 值，W02 起就是如此），所以 live 优先。
+ */
+export function DocumentStatusBadge({
+  stageSummary,
+  live = false,
+}: {
+  stageSummary?: Record<string, string>;
+  live?: boolean;
+}) {
+  if (live) {
+    return (
+      <StatusBadge tone="run" running>
+        翻译中
+      </StatusBadge>
+    );
+  }
   const status = documentStatus(stageSummary);
   return (
     <StatusBadge tone={status.tone} running={status.running}>

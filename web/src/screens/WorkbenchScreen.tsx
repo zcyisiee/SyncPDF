@@ -1,5 +1,6 @@
 import { describeApiError } from '../lib/api';
-import { useDocument } from '../lib/queries';
+import { isRunLive } from '../lib/events';
+import { DOCUMENT_LIVE_REFETCH_MS, useDocument } from '../lib/queries';
 import { WORKBENCH_VIEWS, type WorkbenchView } from '../lib/routing';
 import { Button, LinkButton } from '../components/ui/Button';
 import { ErrorCard } from '../components/ui/ErrorCard';
@@ -11,11 +12,16 @@ import { ScreenFrame } from '../components/shell/ScreenFrame';
 import { Timeline } from '../components/shell/Timeline';
 import { ViewRail } from '../components/shell/ViewRail';
 import { PreviewArea } from '../components/preview/PreviewArea';
+import { useEventWindow } from '../components/events/useEventWindow';
+import { useTimelineStages } from '../components/events/useTimelineStages';
 import { useUiStore } from '../stores/ui';
 import type { CSSProperties } from 'react';
 
 /** 预览区接真 PDF 的四个视图（bbox 默认模式不同，见 `bboxModeForView`）。 */
 const PREVIEW_VIEWS: readonly WorkbenchView[] = ['progress', 'layout', 'translate', 'check'];
+
+/** 事件流说 live 时 stage-state 的轮询间隔（brief：live 2s 否则不轮询）。 */
+const STAGE_STATE_LIVE_REFETCH_MS = 2_000;
 
 /**
  * `#/d/:did/*` 工作台壳（§3 栅格 + §8.1/8.2）：
@@ -23,7 +29,17 @@ const PREVIEW_VIEWS: readonly WorkbenchView[] = ['progress', 'layout', 'translat
  * 三条分隔条宽度由 `--vrw`/`--inspw`/`--tlh` 驱动（写在本容器行内 style 上）。
  */
 export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchView }) {
-  const documentQuery = useDocument(did);
+  // 进度层：事件窗口（首拉 + SSE）→ 时间线段（stage-state 基线 + live）→ 详情轮询间隔。
+  const feed = useEventWindow(did);
+  // stage-state 的轮询用「事件流是否还在增长」（brief 冻结的 isRunLive；归档截断时会多轮询，
+  // 但时间线/徽标的 live 一律由基线裁决，见 lib/timeline.ts 的注释）。
+  const eventsLive = isRunLive(feed.events);
+  const timeline = useTimelineStages(did, feed.events, {
+    refetchMs: eventsLive ? STAGE_STATE_LIVE_REFETCH_MS : 0,
+  });
+  const documentQuery = useDocument(did, {
+    refetchMs: timeline.live ? DOCUMENT_LIVE_REFETCH_MS : 0,
+  });
   const doc = documentQuery.data;
   const activeView = WORKBENCH_VIEWS.find((candidate) => candidate.id === view) ?? WORKBENCH_VIEWS[0];
   const viewrailWidth = useUiStore((state) => state.viewrailWidth);
@@ -37,7 +53,7 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
         <span className="max-w-[34ch] truncate font-serif text-sm text-ink-2">
           {doc.title ?? doc.did}
         </span>
-        <DocumentStatusBadge stageSummary={doc.stage_summary} />
+        <DocumentStatusBadge stageSummary={doc.stage_summary} live={timeline.live} />
       </>
     );
 
@@ -77,7 +93,7 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
         data-view={view}
         data-did={did}
       >
-        <ViewRail did={did} view={view} doc={doc} />
+        <ViewRail did={did} view={view} doc={doc} live={timeline.live} />
         <Gutter id="viewrail" className="col-start-2 row-start-1" />
         <section
           aria-label="预览区"
@@ -103,9 +119,9 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
           )}
         </section>
         <Gutter id="inspector" className="col-start-4 row-start-1" />
-        <InspectorPanel />
+        <InspectorPanel did={did} view={view} feed={feed} />
         <Gutter id="timeline" className="col-span-full row-start-2" />
-        <Timeline did={did} />
+        <Timeline did={did} segments={timeline.segments} unavailable={timeline.isError} />
       </div>
     </ScreenFrame>
   );

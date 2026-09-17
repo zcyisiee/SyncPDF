@@ -7,6 +7,51 @@ import { uiStore } from '../src/stores/ui';
 import { jsonResponse, mockApiFetch, renderWithQuery, resetUiStore } from './helpers';
 
 const DID = 'ccs3764-dyn';
+const RUN_ID = '20260916T132829Z-000183';
+
+/** 7 阶段全 ok（真 fixture `tmp/ccs3764-dyn` 的形状：manifest 给前 5 段，run_state 给后 2 段）。 */
+const STAGE_STATE = {
+  did: DID,
+  run_id: RUN_ID,
+  stages: ([
+    ['parse', 15.83],
+    ['translate', 248.93],
+    ['apply', 4.07],
+    ['build', 23.85],
+    ['check', 25.23],
+    ['review', 0.32],
+    ['report', 0],
+  ] as const).map(([stage, duration]) => ({
+    stage,
+    status: 'ok',
+    ok: true,
+    started_at: '2026-09-16T13:28:29.000Z',
+    finished_at: '2026-09-16T13:28:29.000Z',
+    duration_s: duration,
+    timing_source: 'manifest',
+  })),
+};
+
+/** 归档事件（legacy replay：只到 check 的 stage_finished，与真 fixture 一致）。 */
+const EVENTS_PAGE = {
+  run_id: RUN_ID,
+  events: [
+    { seq: 1, at: '2026-09-16T13:28:29.373+00:00', stage: 'parse', kind: 'stage_started', data: { replayed: true } },
+    { seq: 2, at: '2026-09-16T13:28:29.386+00:00', stage: 'parse', kind: 'stage_finished', data: { status: 'ok' } },
+    { seq: 3, at: '2026-09-16T13:28:29.390+00:00', stage: 'translate', kind: 'text_version', data: { rows: 206 } },
+    { seq: 4, at: '2026-09-16T13:28:29.391+00:00', stage: 'translate', kind: 'call_started', data: { attempt: 1 } },
+    { seq: 5, at: '2026-09-16T13:28:29.400+00:00', stage: 'translate', kind: 'cache_miss', data: { key: 'p-05' } },
+    { seq: 6, at: '2026-09-16T13:28:29.410+00:00', stage: 'translate', kind: 'stage_finished', data: { status: 'ok' } },
+    { seq: 7, at: '2026-09-16T13:28:29.420+00:00', stage: 'apply', kind: 'stage_started', data: {} },
+    { seq: 8, at: '2026-09-16T13:28:29.430+00:00', stage: 'apply', kind: 'stage_finished', data: { status: 'ok' } },
+    { seq: 9, at: '2026-09-16T13:28:29.440+00:00', stage: 'build', kind: 'compile_requests', data: { count: 3 } },
+    { seq: 10, at: '2026-09-16T13:28:29.450+00:00', stage: 'build', kind: 'stage_finished', data: { status: 'ok' } },
+    { seq: 11, at: '2026-09-16T13:28:29.460+00:00', stage: 'check', kind: 'stage_started', data: {} },
+    { seq: 12, at: '2026-09-16T13:28:29.470+00:00', stage: 'check', kind: 'stage_finished', data: { status: 'ok' } },
+  ],
+  next_after_seq: 12,
+  has_more: false,
+};
 
 const DETAIL = {
   did: DID,
@@ -45,7 +90,11 @@ const DETAIL = {
 };
 
 function mockDetail(did = DID, body: unknown = DETAIL, status = 200) {
-  return mockApiFetch({ [`/api/v1/documents/${did}`]: () => jsonResponse(body, status) });
+  return mockApiFetch({
+    [`/api/v1/documents/${did}`]: () => jsonResponse(body, status),
+    [`/api/v1/documents/${did}/stage-state`]: () => jsonResponse(STAGE_STATE),
+    [`/api/v1/documents/${did}/events?after_seq=0&limit=2000`]: () => jsonResponse(EVENTS_PAGE),
+  });
 }
 
 /** 详情 + 产物清单（预览区要真数据：清单里没有产物 PDF 时落在占位卡上）。 */
@@ -53,14 +102,15 @@ function mockDetailAndArtifacts(artifacts: unknown = []) {
   return mockApiFetch({
     [`/api/v1/documents/${DID}`]: () => jsonResponse(DETAIL),
     [`/api/v1/documents/${DID}/artifacts`]: () => jsonResponse(artifacts),
+    [`/api/v1/documents/${DID}/stage-state`]: () => jsonResponse(STAGE_STATE),
+    [`/api/v1/documents/${DID}/events?after_seq=0&limit=2000`]: () => jsonResponse(EVENTS_PAGE),
   });
 }
 
 beforeEach(() => {
   resetUiStore();
 });
-
-describe('工作台壳（三栏 + 时间线占位）', () => {
+describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
   it('渲染 5 个视图项、视图栏文档头与真实计数', async () => {
     mockDetail();
     renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
@@ -147,12 +197,12 @@ describe('工作台壳（三栏 + 时间线占位）', () => {
     mockDetail();
     renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
     await screen.findByText('206/420');
-    expect(document.querySelector('[data-od-id="inspector-placeholder"]')).not.toBeNull();
+    expect(document.querySelector('[data-od-id="event-stream"]')).not.toBeNull();
 
     // 折叠态由 store 驱动（生产里由交互触发），store 变更会重渲染订阅组件
     act(() => uiStore.getState().setInspectorCollapsed(true));
     await waitFor(() =>
-      expect(document.querySelector('[data-od-id="inspector-placeholder"]')).toBeNull(),
+      expect(document.querySelector('[data-od-id="event-stream"]')).toBeNull(),
     );
     const grid = document.querySelector('[data-od-id="workbench"]') as HTMLElement;
     expect(grid.style.getPropertyValue('--inspw')).toBe('0px');
@@ -163,7 +213,7 @@ describe('工作台壳（三栏 + 时间线占位）', () => {
     });
     await waitFor(() => expect(grid.style.getPropertyValue('--inspw')).toBe('376px'));
     expect(uiStore.getState().inspectorCollapsed).toBe(false);
-    expect(document.querySelector('[data-od-id="inspector-placeholder"]')).not.toBeNull();
+    expect(document.querySelector('[data-od-id="event-stream"]')).not.toBeNull();
   });
 
   it('预览区接 W05 真预览：工具条 + 无产物占位卡', async () => {
@@ -173,9 +223,18 @@ describe('工作台壳（三栏 + 时间线占位）', () => {
     expect(document.querySelector('[data-od-id="preview-toolbar"]')).not.toBeNull();
     expect(document.querySelector('[data-od-id="preview-no-pdf"]')).not.toBeNull();
     expect(screen.getByRole('group', { name: '预览模式' })).toBeInTheDocument();
-    // 右侧面板：未选中段落时的说明
+    // 右侧面板：进度视图是 W06 事件流（段落属性面板在其它视图）
+    expect(document.querySelector('[data-od-id="event-stream"]')).not.toBeNull();
+    expect(await screen.findByText('事件流')).toBeInTheDocument();
+  });
+
+  it('非进度视图的右侧面板仍是段落占位（W10 接入）', async () => {
+    mockDetailAndArtifacts();
+    renderWithQuery(<WorkbenchScreen did={DID} view="translate" />);
+    await screen.findByText('无产物 PDF');
     expect(document.querySelector('[data-od-id="inspector-placeholder"]')).not.toBeNull();
     expect(screen.getByText(/点击预览里的段落框查看该段/)).toBeInTheDocument();
+    expect(document.querySelector('[data-od-id="event-stream"]')).toBeNull();
   });
 
   it('归档视图仍是占位（W12 接入）', async () => {
@@ -190,7 +249,7 @@ describe('工作台壳（三栏 + 时间线占位）', () => {
     );
   });
 
-  it('时间线占位：7 段名称行 + 未开始灰条，且是静态数据', async () => {
+  it('时间线是真数据：7 段 + 真实耗时条 + 总用时 chip', async () => {
     mockDetail();
     renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
     const timeline = document.querySelector('[data-od-id="timeline"]') as HTMLElement;
@@ -199,7 +258,23 @@ describe('工作台壳（三栏 + 时间线占位）', () => {
       expect(within(timeline).getByText(STAGE_LABELS[stage])).toBeInTheDocument();
       expect(timeline.querySelector(`[data-od-id="timeline-stage-${stage}"]`)).not.toBeNull();
     }
-    expect(within(timeline).getByText(/静态占位 · 真实事件流 W06 接入/)).toBeInTheDocument();
+    // 等 stage-state 到达：全 ok（不能用「静态占位」那一套）
+    await waitFor(() =>
+      expect(
+        timeline.querySelector('[data-od-id="timeline-stage-parse"]')?.getAttribute('data-state'),
+      ).toBe('ok'),
+    );
+    expect(within(timeline).getByText('15s')).toBeInTheDocument();
+    expect(within(timeline).queryByText(/静态占位/)).toBeNull();
+    const total = timeline.querySelector('[data-od-id="timeline-total"]');
+    expect(total?.textContent).toMatch(/总用时 \d/);
+    // 点击段 → 跳到该阶段对应的视图（映射表在 lib/timeline.ts）
+    expect(
+      timeline.querySelector('[data-od-id="timeline-stage-parse"] a')?.getAttribute('href'),
+    ).toBe(`#/d/${DID}/layout`);
+    expect(
+      timeline.querySelector('[data-od-id="timeline-stage-check"] a')?.getAttribute('href'),
+    ).toBe(`#/d/${DID}/check`);
   });
 
   it('did 不存在：错误卡 + 返回文件库（不留白屏）', async () => {

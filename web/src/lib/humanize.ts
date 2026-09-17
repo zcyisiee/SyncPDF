@@ -1,6 +1,6 @@
 /**
- * 文案口径（最小版）：7 个阶段名 + 状态徽标文案。
- * 事件 kind → 人话的映射表在 W06 建 `src/events/humanize.ts`，本模块不预置。
+ * 文案口径：7 个阶段名 + 状态徽标文案 + 事件 kind 短标签 + 耗时文案。
+ * 事件 kind 标签是 W06 补的（`docs/frontend/api.md` §4 明确「level 推导表放前端」）。
  */
 export const STAGE_NAMES = [
   'parse',
@@ -26,6 +26,106 @@ export const STAGE_LABELS: Record<StageName, string> = {
 
 export function stageLabel(stage: string): string {
   return STAGE_LABELS[stage as StageName] ?? stage;
+}
+
+/** 最后一个阶段：跑完它就说明 run 收尾（事件流的 live 判据，见 `lib/events.ts`）。 */
+export const FINAL_STAGE: StageName = STAGE_NAMES[STAGE_NAMES.length - 1];
+
+/**
+ * 事件 kind → 中文短标签（优先 ≤4 字）。表里是**本仓库 run 归档里真实出现过的** 47 种 kind
+ * （`tmp/<did>/debug/runs/<run>/events.jsonl` 全量统计），没有 kind 就原样显示英文，不编造。
+ */
+export const KIND_LABELS: Record<string, string> = {
+  // 阶段骨架
+  stage_started: '阶段开始',
+  stage_finished: '阶段完成',
+  stage_error: '阶段失败',
+  replay_notice: '归档提示',
+  // 模型调用
+  call_started: '调用开始',
+  call_finished: '调用完成',
+  provider_artifacts: '调用产物',
+  // 缓存
+  cache_hit: '缓存命中',
+  cache_miss: '缓存未命中',
+  cache_write: '缓存写入',
+  cache_bypass: '缓存绕过',
+  // 候选 / 写回
+  candidate_evaluated: '候选评估',
+  candidate_selected: '候选采用',
+  canonical_writeback: '写回规范',
+  writeback_saved: '写回保存',
+  text_version: '文本版本',
+  // 编译
+  compile_requests: '编译请求',
+  compile_reuse: '编译复用',
+  compile_fallback: '编译回退',
+  compile_expand: '编译扩展',
+  artifact_bundle: '产物打包',
+  // 解析 / 版面
+  pdf_prepared: 'PDF 准备',
+  page_frames: '页面框',
+  paragraphs_found: '段落发现',
+  selection: '选区',
+  native_chars: '原生字符',
+  source_geometry: '原文几何',
+  toc: '目录',
+  enclosed_marker: '包围标记',
+  inline_math: '行内公式',
+  ocr_backfill: 'OCR 回填',
+  links_snapshot: '链接快照',
+  styles_formulas: '样式公式',
+  // 套版 / 校验
+  anchor_repair: '锚点修复',
+  apply_validation: '套版校验',
+  placeholder_validation: '占位校验',
+  missing_ids: '缺失 id',
+  layout_parsed: '版面解析',
+  layout_coverage: '版面覆盖',
+  typesetting_geometry: '排版几何',
+  span_started: '片段开始',
+  span_finished: '片段完成',
+  // 公式（LaTeX）
+  latex_capability: '公式能力',
+  latex_candidates: '公式候选',
+  latex_prepare: '公式准备',
+  latex_stamp: '公式标记',
+  latex_summary: '公式汇总',
+};
+
+/**
+ * SSE 必须逐个 `addEventListener(<kind>)` 的 kind 清单（见 `useEventStream` 注释：
+ * `event: <kind>` 是命名分发，`onmessage` 只收默认类型）。表里没有的 kind 收不到 ——
+ * 新 kind 落地时必须在这里补一行（W07 的 job_* 事件就属于这种）。
+ */
+export const EVENT_KINDS: readonly string[] = Object.keys(KIND_LABELS);
+
+export function kindLabel(kind: string): string {
+  return KIND_LABELS[kind] ?? kind;
+}
+
+/**
+ * 秒 → 短耗时文案（live 段秒表口径）。`null`（阶段没跑 / 拿不到耗时）显示 `—`，不编造 0。
+ * `<1s → 刚启动`：只用于 live 段秒表（还在走）；已完成阶段的耗时用 formatStageDuration
+ * （`0.3s` 实测值），避免「已完成 + 刚启动」的矛盾文案。
+ */
+export function formatDuration(seconds: number | null | undefined): string {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return '—';
+  const total = Math.max(0, Math.floor(seconds));
+  if (total < 1) return '刚启动';
+  if (total < 60) return `${total}s`;
+  if (total < 3600) return `${Math.floor(total / 60)}m ${total % 60}s`;
+  return `${Math.floor(total / 3600)}h ${Math.floor((total % 3600) / 60)}m`;
+}
+
+/**
+ * 已完成阶段的实测耗时文案：`<1s` 如实显示一位小数（`0.3s` / `0s`），
+ * 不用「刚启动」（那是 live 段的口径）。
+ */
+export function formatStageDuration(seconds: number | null | undefined): string {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return '—';
+  if (seconds < 1) return `${Math.round(seconds * 10) / 10}s`.replace('.0s', 's');
+  return formatDuration(seconds);
 }
 
 export type StatusTone = 'pass' | 'run' | 'err' | 'idle';
@@ -84,6 +184,18 @@ export function documentStatus(stageSummary: Record<string, string> | undefined)
     return { label: '未运行', tone: 'idle', running: false };
   }
   return { label: '未完成', tone: 'idle', running: false };
+}
+
+/**
+ * 列表页的自动刷新判据：`GET /documents` 的 `stage_summary` 里有任一阶段真是 `running`。
+ * （正在跑的 run 才会让列表/详情按 2–3s 轮询；全完成的文档不轮询。）
+ */
+export function hasRunningDocument(
+  documents: readonly { stage_summary: Record<string, string> }[],
+): boolean {
+  return documents.some((doc) =>
+    STAGE_NAMES.some((stage) => isRunningStatus(doc.stage_summary[stage] ?? 'not_run')),
+  );
 }
 
 /** `updated_at`（UTC ISO8601）→ 中文相对时间；拿不到时间戳显示 `—`。 */

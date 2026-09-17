@@ -5,6 +5,8 @@ import { vi } from 'vitest';
 
 import { createQueryClient } from '../src/app/App';
 import type { ScreenViewport } from '../src/components/preview/BboxLayer';
+import type { EventFeed } from '../src/components/events/useEventWindow';
+import type { RunEvent } from '../src/lib/events';
 import { createUiStore, uiStore } from '../src/stores/ui';
 
 /** 最小 fetch 响应替身：api.ts 只读 ok/status/text()，不依赖全局 Response。 */
@@ -59,7 +61,38 @@ export function renderWithQuery(ui: ReactElement) {
 }
 
 /**
- * pdf.js `PageViewport`（rotation=0）的替身：变换公式照抄 pdf.js 源码
+ * 事件窗口 feed 的替身（W06）：组件只需要这份数据结构，SSE 生命周期由
+ * `useEventWindow` 负责（那个用 stub EventSource 单测）。
+ */
+export function makeEventFeed(overrides: Partial<EventFeed> = {}): EventFeed {
+  return {
+    events: [],
+    runId: null,
+    isPending: false,
+    hasArchive: true,
+    error: null,
+    connection: 'open',
+    hasEarlier: false,
+    isLoadingEarlier: false,
+    loadEarlier: () => {},
+    retry: () => {},
+    ...overrides,
+  };
+}
+
+/** 一条事件（`{seq, at, stage, kind, data}`）。 */
+export function makeEvent(seq: number, overrides: Partial<RunEvent> = {}): RunEvent {
+  return {
+    seq,
+    at: `2026-09-16T13:28:${String(seq % 60).padStart(2, '0')}.000+00:00`,
+    stage: 'translate',
+    kind: 'call_started',
+    data: { attempt: 1 },
+    ...overrides,
+  };
+}
+
+/** pdf.js `PageViewport`（rotation=0）的替身：变换公式照抄 pdf.js 源码
  * （build/pdf.mjs `PageViewport` 构造器，rotation=0 时 `transform = [s,0,0,-s,-s*x0,s*y1]`）。
  * 单测不需要真 pdf.js（jsdom 无 canvas），但公式必须与库一致，否则换算测试自说自话。
  */
