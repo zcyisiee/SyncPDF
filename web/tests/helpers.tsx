@@ -4,6 +4,7 @@ import type { ReactElement } from 'react';
 import { vi } from 'vitest';
 
 import { createQueryClient } from '../src/app/App';
+import type { ScreenViewport } from '../src/components/preview/BboxLayer';
 import { createUiStore, uiStore } from '../src/stores/ui';
 
 /** 最小 fetch 响应替身：api.ts 只读 ok/status/text()，不依赖全局 Response。 */
@@ -45,10 +46,42 @@ export function resetUiStore(): void {
     timelineHeight: fresh.timelineHeight,
     inspectorCollapsed: fresh.inspectorCollapsed,
     previewMode: 'target',
+    previewPage: 1,
+    previewDid: null,
+    bboxMode: 'parse',
+    selectedParagraphId: null,
     dragging: null,
   });
 }
 
 export function renderWithQuery(ui: ReactElement) {
   return render(<QueryClientProvider client={createQueryClient()}>{ui}</QueryClientProvider>);
+}
+
+/**
+ * pdf.js `PageViewport`（rotation=0）的替身：变换公式照抄 pdf.js 源码
+ * （build/pdf.mjs `PageViewport` 构造器，rotation=0 时 `transform = [s,0,0,-s,-s*x0,s*y1]`）。
+ * 单测不需要真 pdf.js（jsdom 无 canvas），但公式必须与库一致，否则换算测试自说自话。
+ */
+export function makeViewport({
+  scale = 1,
+  viewBox = [0, 0, 612, 792],
+}: { scale?: number; viewBox?: [number, number, number, number] } = {}): ScreenViewport {
+  const [x0, y0, x1, y1] = viewBox;
+  const a = scale;
+  const d = -scale;
+  const e = -scale * x0;
+  const f = scale * y1;
+  return {
+    width: (x1 - x0) * scale,
+    height: (y1 - y0) * scale,
+    scale,
+    viewBox,
+    convertToViewportRectangle(rect) {
+      const map = (x: number, y: number) => [a * x + e, d * y + f];
+      const [ax, ay] = map(rect[0], rect[1]);
+      const [bx, by] = map(rect[2], rect[3]);
+      return [ax, ay, bx, by];
+    },
+  };
 }

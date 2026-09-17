@@ -5,18 +5,20 @@
   "type": "module",
   "description": "iee Translater 前端（Vite + React 18 + TS + Tailwind + TanStack Query + Zustand）",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "dev": "node scripts/sync-pdfjs-assets.mjs && vite",
+    "build": "node scripts/sync-pdfjs-assets.mjs && tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
-    "e2e": "playwright test",
+    "e2e": "node scripts/sync-pdfjs-assets.mjs && playwright test",
+    "sync:pdfjs": "node scripts/sync-pdfjs-assets.mjs",
     "gen:api": "openapi-typescript \"http://127.0.0.1:${BDT_SERVE_PORT:-8787}/openapi.json\" -o src/api/schema.d.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.103.1",
     "clsx": "^2.1.1",
+    "pdfjs-dist": "4.10.38",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tailwind-merge": "^3.7.0",

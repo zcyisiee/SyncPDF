@@ -10,8 +10,12 @@ import { InspectorPanel } from '../components/shell/InspectorPanel';
 import { ScreenFrame } from '../components/shell/ScreenFrame';
 import { Timeline } from '../components/shell/Timeline';
 import { ViewRail } from '../components/shell/ViewRail';
+import { PreviewArea } from '../components/preview/PreviewArea';
 import { useUiStore } from '../stores/ui';
 import type { CSSProperties } from 'react';
+
+/** 预览区接真 PDF 的四个视图（bbox 默认模式不同，见 `bboxModeForView`）。 */
+const PREVIEW_VIEWS: readonly WorkbenchView[] = ['progress', 'layout', 'translate', 'check'];
 
 /**
  * `#/d/:did/*` 工作台壳（§3 栅格 + §8.1/8.2）：
@@ -80,19 +84,23 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
           data-od-id="stage"
           className="col-start-3 row-start-1 flex min-h-0 min-w-0 flex-col"
         >
-          <div
-            data-od-id={view === 'progress' ? 'preview-placeholder' : 'view-placeholder'}
-            className="grid min-h-0 flex-1 place-items-center overflow-auto p-s6"
-          >
-            <div className="max-w-[42ch] text-center">
-              <p className="font-serif text-md font-medium leading-[1.4] text-ink-2">
-                {view === 'progress'
-                  ? 'PDF 预览将在 W05 接入'
-                  : `${activeView.label}视图待 W05–W12 接入`}
-              </p>
-              <p className="mt-s3 font-mono text-tiny text-ink-4">#/d/{did}/{view}</p>
+          {PREVIEW_VIEWS.includes(view) ? (
+            <PreviewArea did={did} view={view} />
+          ) : (
+            <div
+              data-od-id="view-placeholder"
+              className="grid min-h-0 flex-1 place-items-center overflow-auto p-s6"
+            >
+              <div className="max-w-[42ch] text-center">
+                <p className="font-serif text-md font-medium leading-[1.4] text-ink-2">
+                  {activeView.label}视图待 W12 接入
+                </p>
+                <p className="mt-s3 font-mono text-tiny text-ink-4">
+                  #/d/{did}/{view}
+                </p>
+              </div>
             </div>
-          </div>
+          )}
         </section>
         <Gutter id="inspector" className="col-start-4 row-start-1" />
         <InspectorPanel />

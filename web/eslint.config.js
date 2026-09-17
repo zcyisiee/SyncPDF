@@ -8,6 +8,8 @@ export default tseslint.config(
     ignores: [
       'dist/**',
       'node_modules/**',
+      // pdf.js 静态资源副本（scripts/sync-pdfjs-assets.mjs 生成，不入库）
+      'public/**',
       // openapi-typescript 从运行中的 bdt serve 生成，不由手写规则约束
       'src/api/schema.d.ts',
       'tmp-smoke/**',
@@ -33,7 +35,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['*.config.{ts,js}', 'tests/**/*.{ts,tsx}'],
+    files: ['*.config.{ts,js}', 'scripts/**/*.{js,mjs}', 'tests/**/*.{ts,tsx}'],
     languageOptions: { globals: { ...globals.node } },
   },
 );

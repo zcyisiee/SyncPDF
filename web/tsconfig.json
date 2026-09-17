@@ -21,6 +21,7 @@
   "include": [
     "src",
     "tests",
+    "e2e",
     "vite.config.ts",
     "vitest.setup.ts",
     "tailwind.config.ts",

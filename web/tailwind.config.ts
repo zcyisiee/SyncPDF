@@ -17,6 +17,8 @@ export default {
           2: 'color-mix(in oklch, #141413 22%, transparent)',
         },
         accent: { DEFAULT: '#1B365D', soft: '#E4ECF5', on: '#f7f6f0' },
+        // §1.1 bbox 数据编码色（墨蓝 8% / 14%，来自 globals.css 的 --tint / --tint-2）
+        tint: { DEFAULT: 'var(--tint)', 2: 'var(--tint-2)' },
         run: {
           DEFAULT: '#B7791F',
           soft: 'color-mix(in oklch, #B7791F 13%, #faf9f5)',

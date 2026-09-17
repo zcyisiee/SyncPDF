@@ -1,15 +1,19 @@
 /**
- * 工作台外壳的 UI 状态：屏/视图路由镜像、三栏宽度、分隔条拖拽态、预览模式。
- * 宽度与折叠态持久化到 localStorage，键名按 DESIGN.md §8.2 冻结（`ieet.vrw`/`ieet.inspw`/
- * `ieet.tlh`/`ieet.inspCollapsed`/`ieet.screen`），范围也按 §8.2 表 clamp。
+ * 工作台外壳的 UI 状态：屏/视图路由镜像、三栏宽度、分隔条拖拽态、预览模式与 bbox 图层。
+ * 宽度、折叠态、屏幕与 bbox 图层持久化到 localStorage，键名按 DESIGN.md §8.2 冻结
+ * （`ieet.vrw`/`ieet.inspw`/`ieet.tlh`/`ieet.inspCollapsed`/`ieet.screen`/`ieet.bboxMode`），
+ * 范围也按 §8.2 表 clamp；预览页码与选中段落只活在会话里（不持久化）。
  */
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 
+import type { BboxMode } from '../lib/preview';
 import type { ScreenId } from '../lib/routing';
 
 export type GutterId = 'viewrail' | 'inspector' | 'timeline';
 export type PreviewMode = 'source' | 'target' | 'compare';
+
+const BBOX_MODES: readonly BboxMode[] = ['parse', 'layout', 'off'];
 
 export const STORAGE_KEYS = {
   viewrail: 'ieet.vrw',
@@ -17,6 +21,7 @@ export const STORAGE_KEYS = {
   timeline: 'ieet.tlh',
   inspectorCollapsed: 'ieet.inspCollapsed',
   screen: 'ieet.screen',
+  bboxMode: 'ieet.bboxMode',
 } as const;
 
 export interface LayoutSpec {
@@ -79,6 +84,14 @@ export interface UiState {
   timelineHeight: number;
   inspectorCollapsed: boolean;
   previewMode: PreviewMode;
+  /** 预览页码（1 基；**不**持久化，`resetPreviewForDocument` 在 did 变化时重置为 1）。 */
+  previewPage: number;
+  /** 预览状态当前绑定的 did（`resetPreviewForDocument` 靠它判断是否换文档）。 */
+  previewDid: string | null;
+  /** bbox 图层三态（持久化 `ieet.bboxMode`；默认值由视图决定，见 `bboxModeForView`）。 */
+  bboxMode: BboxMode;
+  /** 当前选中的段落 id（W05 只联动右侧面板占位；真内容 W10）。 */
+  selectedParagraphId: string | null;
   /** 正在拖拽的分隔条（用于 `is-drag` 视觉态）。 */
   dragging: GutterId | null;
   setScreen: (screen: ScreenId) => void;
@@ -88,6 +101,11 @@ export interface UiState {
   /** 折叠右侧面板（`--inspw:0`）与 `ieet.inspCollapsed`。 */
   setInspectorCollapsed: (collapsed: boolean) => void;
   setPreviewMode: (mode: PreviewMode) => void;
+  setPreviewPage: (page: number) => void;
+  /** did 变化时重置会话内预览状态（页码回 1 + 清空选中）；同一 did 重复调用无副作用。 */
+  resetPreviewForDocument: (did: string) => void;
+  setBboxMode: (mode: BboxMode) => void;
+  setSelectedParagraph: (id: string | null) => void;
 }
 
 const SCREENS: readonly ScreenId[] = ['library', 'glossary', 'settings', 'workbench'];
@@ -136,6 +154,16 @@ export function readStoredScreen(): ScreenId | null {
   }
 }
 
+/** 用户显式选过的 bbox 图层模式；没选过 → null（PreviewArea 用视图默认值）。 */
+export function readStoredBboxMode(): BboxMode | null {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEYS.bboxMode);
+    return BBOX_MODES.find((mode) => mode === raw) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function writeStored(key: string, value: string): void {
   try {
     window.localStorage.setItem(key, value);
@@ -152,6 +180,10 @@ export function createUiStore(): StoreApi<UiState> {
     timelineHeight: readStoredNumber(LAYOUT_SPECS.timeline),
     inspectorCollapsed: readStoredFlag(STORAGE_KEYS.inspectorCollapsed, false),
     previewMode: 'target',
+    previewPage: 1,
+    previewDid: null,
+    bboxMode: readStoredBboxMode() ?? 'parse',
+    selectedParagraphId: null,
     dragging: null,
     setScreen: (screen) => {
       writeStored(STORAGE_KEYS.screen, screen);
@@ -180,6 +212,16 @@ export function createUiStore(): StoreApi<UiState> {
       set({ inspectorCollapsed: collapsed });
     },
     setPreviewMode: (previewMode) => set({ previewMode }),
+    setPreviewPage: (page) => set({ previewPage: Number.isFinite(page) ? Math.max(1, Math.round(page)) : 1 }),
+    resetPreviewForDocument: (did) => {
+      if (get().previewDid === did) return;
+      set({ previewDid: did, previewPage: 1, selectedParagraphId: null });
+    },
+    setBboxMode: (bboxMode) => {
+      writeStored(STORAGE_KEYS.bboxMode, bboxMode);
+      set({ bboxMode });
+    },
+    setSelectedParagraph: (selectedParagraphId) => set({ selectedParagraphId }),
   }));
 }
 

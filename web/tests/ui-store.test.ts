@@ -4,6 +4,7 @@ import {
   LAYOUT_SPECS,
   STORAGE_KEYS,
   createUiStore,
+  readStoredBboxMode,
   readStoredScreen,
   widthFromDelta,
 } from '../src/stores/ui';
@@ -127,5 +128,63 @@ describe('ui store 屏 / 预览模式 / 拖拽态', () => {
     expect(store.getState().dragging).toBe('timeline');
     store.getState().setDragging(null);
     expect(store.getState().dragging).toBeNull();
+  });
+});
+
+describe('ui store 预览页 / bbox 图层 / 选中段落（W05）', () => {
+  it('previewPage 默认 1、setPreviewPage clamp 到整数且不持久化', () => {
+    const store = createUiStore();
+    expect(store.getState().previewPage).toBe(1);
+    store.getState().setPreviewPage(5);
+    expect(store.getState().previewPage).toBe(5);
+    store.getState().setPreviewPage(0);
+    expect(store.getState().previewPage).toBe(1);
+    store.getState().setPreviewPage(3.6);
+    expect(store.getState().previewPage).toBe(4);
+    store.getState().setPreviewPage(Number.NaN);
+    expect(store.getState().previewPage).toBe(1);
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it('resetPreviewForDocument：换文档回第 1 页并清空选中，同一 did 不重复重置', () => {
+    const store = createUiStore();
+    store.getState().setPreviewPage(7);
+    store.getState().setSelectedParagraph('P07-002');
+    store.getState().resetPreviewForDocument('doc-a');
+    expect(store.getState().previewPage).toBe(1);
+    expect(store.getState().selectedParagraphId).toBeNull();
+    expect(store.getState().previewDid).toBe('doc-a');
+
+    store.getState().setPreviewPage(4);
+    store.getState().resetPreviewForDocument('doc-a');
+    expect(store.getState().previewPage).toBe(4);
+    store.getState().resetPreviewForDocument('doc-b');
+    expect(store.getState().previewPage).toBe(1);
+  });
+
+  it('bboxMode 默认 parse；setBboxMode 持久化 ieet.bboxMode；坏值退回默认', () => {
+    const store = createUiStore();
+    expect(store.getState().bboxMode).toBe('parse');
+    store.getState().setBboxMode('off');
+    expect(store.getState().bboxMode).toBe('off');
+    expect(window.localStorage.getItem(STORAGE_KEYS.bboxMode)).toBe('off');
+    expect(readStoredBboxMode()).toBe('off');
+
+    window.localStorage.setItem(STORAGE_KEYS.bboxMode, 'bogus');
+    expect(readStoredBboxMode()).toBeNull();
+  });
+
+  it('冷启动读回 ieet.bboxMode（用户显式选择跨会话保留）', () => {
+    window.localStorage.setItem(STORAGE_KEYS.bboxMode, 'layout');
+    expect(createUiStore().getState().bboxMode).toBe('layout');
+  });
+
+  it('selectedParagraphId 可设可清', () => {
+    const store = createUiStore();
+    expect(store.getState().selectedParagraphId).toBeNull();
+    store.getState().setSelectedParagraph('P01-001');
+    expect(store.getState().selectedParagraphId).toBe('P01-001');
+    store.getState().setSelectedParagraph(null);
+    expect(store.getState().selectedParagraphId).toBeNull();
   });
 });

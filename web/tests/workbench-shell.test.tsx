@@ -48,6 +48,14 @@ function mockDetail(did = DID, body: unknown = DETAIL, status = 200) {
   return mockApiFetch({ [`/api/v1/documents/${did}`]: () => jsonResponse(body, status) });
 }
 
+/** 详情 + 产物清单（预览区要真数据：清单里没有产物 PDF 时落在占位卡上）。 */
+function mockDetailAndArtifacts(artifacts: unknown = []) {
+  return mockApiFetch({
+    [`/api/v1/documents/${DID}`]: () => jsonResponse(DETAIL),
+    [`/api/v1/documents/${DID}/artifacts`]: () => jsonResponse(artifacts),
+  });
+}
+
 beforeEach(() => {
   resetUiStore();
 });
@@ -158,22 +166,25 @@ describe('工作台壳（三栏 + 时间线占位）', () => {
     expect(document.querySelector('[data-od-id="inspector-placeholder"]')).not.toBeNull();
   });
 
-  it('预览区与右侧面板是带 data-od-id 的 W05 占位', async () => {
-    mockDetail();
+  it('预览区接 W05 真预览：工具条 + 无产物占位卡', async () => {
+    mockDetailAndArtifacts();
     renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
-    expect(await screen.findByText('PDF 预览将在 W05 接入')).toBeInTheDocument();
-    expect(document.querySelector('[data-od-id="preview-placeholder"]')).not.toBeNull();
+    expect(await screen.findByText('无产物 PDF')).toBeInTheDocument();
+    expect(document.querySelector('[data-od-id="preview-toolbar"]')).not.toBeNull();
+    expect(document.querySelector('[data-od-id="preview-no-pdf"]')).not.toBeNull();
+    expect(screen.getByRole('group', { name: '预览模式' })).toBeInTheDocument();
+    // 右侧面板：未选中段落时的说明
     expect(document.querySelector('[data-od-id="inspector-placeholder"]')).not.toBeNull();
-    expect(screen.getByText(/段落属性 \/ 事件流 \/ 检查问题将在 W05–W06 接入/)).toBeInTheDocument();
+    expect(screen.getByText(/点击预览里的段落框查看该段/)).toBeInTheDocument();
   });
 
-  it('非进度视图显示「待 W05–W12 接入」占位', async () => {
-    mockDetail();
-    renderWithQuery(<WorkbenchScreen did={DID} view="layout" />);
-    expect(await screen.findByText('识别视图待 W05–W12 接入')).toBeInTheDocument();
+  it('归档视图仍是占位（W12 接入）', async () => {
+    mockDetailAndArtifacts();
+    renderWithQuery(<WorkbenchScreen did={DID} view="archive" />);
+    expect(await screen.findByText('归档视图待 W12 接入')).toBeInTheDocument();
     expect(document.querySelector('[data-od-id="view-placeholder"]')).not.toBeNull();
     const viewRail = screen.getByRole('navigation', { name: '视图导航' });
-    expect(within(viewRail).getByRole('link', { name: /识别/ })).toHaveAttribute(
+    expect(within(viewRail).getByRole('link', { name: /归档/ })).toHaveAttribute(
       'aria-current',
       'page',
     );
