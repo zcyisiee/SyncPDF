@@ -22,6 +22,8 @@ import type {
   DraftResponse,
   EventsPage,
   GeometryResponse,
+  GlossaryResponse,
+  GlossaryUpdateRequest,
   JobAccepted,
   JobCreateRequest,
   JobRecord,
@@ -30,7 +32,7 @@ import type {
   StageStateResponse,
   VersionsResponse,
 } from '../api/types';
-import { ApiError, apiGet, apiPatch, apiPost, apiUpload } from './api';
+import { ApiError, apiDelete, apiGet, apiPatch, apiPost, apiPut, apiUpload } from './api';
 import {
   EVENTS_PAGE_LIMIT,
   EVENTS_TAIL_MAX_PAGES,
@@ -66,6 +68,8 @@ export const queryKeys = {
   paragraphs: (did: string) => ['documents', did, 'paragraphs'] as const,
   candidates: (did: string, pid: string) => ['documents', did, 'paragraphs', pid, 'candidates'] as const,
   versions: (did: string) => ['documents', did, 'versions'] as const,
+  /** W13 全局词表（只有一个，不带 did）。 */
+  glossary: ['glossary'] as const,
 };
 
 /**
@@ -339,6 +343,8 @@ export function useCompileDraftMutation(did: string) {
         base_revision: baseRevision,
         // 生成的类型把 `dual` 标成必填（服务端有默认值 false）：显式给 false，compile 不产出 dual
         dual: false,
+        // 词表只约束翻译阶段：编译永远不注入（服务端对非 action=run 也恒记 false）
+        use_glossary: false,
       } satisfies JobCreateRequest),
     onSuccess: () => {
       invalidateJobViews(client, did);
@@ -392,7 +398,8 @@ export function useUploadMutation() {
  * 提交 job（`POST /documents/{did}/jobs`）。
  *
  * `JobCreateRequest`（生成的 OpenAPI 类型）里**没有** translator/reviewer/timeout 字段：
- * 那些由服务端从 profile 解析，带了会被 422 `forbidden_field` 拒掉。
+ * 那些由服务端从 profile 解析，带了会被 422 `forbidden_field` 拒掉。`use_glossary` 是
+ * W13 新增的**唯一**词表相关字段（布尔开关）：词表内容与注入用的文件路径全在服务端。
  */
 export function useCreateJobMutation(did: string) {
   const client = useQueryClient();
@@ -555,5 +562,53 @@ export function useVersions(did: string | null, options: { refetchMs?: number } 
     staleTime: 5_000,
     refetchInterval: refetchMs > 0 ? refetchMs : false,
     enabled: did !== null && did !== '',
+  });
+}
+
+// --------------------------------------------------------------------------- #
+// W13：全局术语表（api.md §3.8）
+// --------------------------------------------------------------------------- #
+
+/**
+ * 全局词表（`GET /glossary`）：**只有一个**，不带 did。没有词表 → `entries: []`
+ * （不是 404，所以没有错误分支）。
+ *
+ * `staleTime` 30s：词表是低频资源，改它只走本屏的写路径（写成功即把响应写进缓存）；
+ * 它不影响任何已翻译内容（**不回溯**），所以不需要轮询。
+ */
+export function useGlossary() {
+  return useQuery({
+    queryKey: queryKeys.glossary,
+    queryFn: () => apiGet<GlossaryResponse>('/glossary'),
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * 整表替换词表（`PUT /glossary`）。
+ *
+ * 编辑器在本地编完整张表才保存（不做行级 patch）：成功即把响应当作新词表写进缓存
+ * （服务端已规范化：去重/排序），并让**待提交的 job 表单**跟着失效 —— 词表从空变非空
+ * （或反之）会改变 `StartJobCard` 里那个开关能不能用，以及图标栏的条数徽标。
+ * 失败（422 `glossary_invalid`）由调用方按 `detail.index`/`detail.field` 定位到行。
+ */
+export function useReplaceGlossaryMutation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: GlossaryUpdateRequest) => apiPut<GlossaryResponse>('/glossary', body),
+    onSuccess: (glossaryData) => {
+      client.setQueryData(queryKeys.glossary, glossaryData);
+    },
+  });
+}
+
+/** 清空词表（`DELETE /glossary`，幂等）：响应就是空表，直接写进缓存。 */
+export function useClearGlossaryMutation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiDelete<GlossaryResponse>('/glossary'),
+    onSuccess: (glossaryData) => {
+      client.setQueryData(queryKeys.glossary, glossaryData);
+    },
   });
 }

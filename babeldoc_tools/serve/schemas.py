@@ -474,6 +474,15 @@ class JobCreateRequest(BaseModel):
             "409 revision_conflict，防止编译一个已经不是最新的草稿"
         ),
     )
+    use_glossary: bool = Field(
+        default=True,
+        description=(
+            "是否给这次翻译注入全局词表（只对 action=run 且真的跑 translate 阶段有效）。"
+            "客户端只给这个布尔；词表内容与文件路径全在服务端"
+            "（``<store_base>/.bdt-serve/glossary.csv`` → ``--glossaries``）；"
+            "词表为空或该 action 不跑翻译时一律不注入"
+        ),
+    )
 
     @model_validator(mode="after")
     def _require_profile_for_run_and_check(self) -> JobCreateRequest:
@@ -731,3 +740,36 @@ class VersionsResponse(BaseModel):
     #: 草稿比 ``current_revision`` 新（有未编译修改）→ 前端显式提示。
     stale: bool = False
     items: list[VersionItem] = []
+
+
+# --------------------------------------------------------------------------- #
+# W13：术语表（api.md §3.2）
+# --------------------------------------------------------------------------- #
+class GlossaryEntryModel(BaseModel):
+    """一条术语对 ``source → target``（``note`` 可选，给人看的备注，不参与匹配）。"""
+
+    source: str
+    target: str
+    note: str | None = None
+
+
+class GlossaryResponse(BaseModel):
+    """``GET/PUT/DELETE /glossary`` 的响应：规范化后的条目 + 条数。
+
+    ``entries`` 按 ``source`` 排序、同一 source 只留最后一条（校验/去重/排序都在
+    :func:`babeldoc_tools.glossary.normalize_entries`，与 CLI 注入时**同一份**规则）。
+    没有词表 = 空数组（不是错误）。
+    """
+
+    entries: list[GlossaryEntryModel]
+    count: int
+
+
+class GlossaryUpdateRequest(BaseModel):
+    """``PUT /glossary`` 的请求体：**整表替换**（``{entries: [...]}``）。
+
+    编辑器在本地编完整张表再一次性保存。服务端不收 CSV 文本：CSV 的解析/导出在前端，
+    导入导出都走这个 JSON 形状。校验失败 → 422 ``glossary_invalid``（盘上一字不改）。
+    """
+
+    entries: list[GlossaryEntryModel]

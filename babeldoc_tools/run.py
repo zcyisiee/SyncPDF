@@ -344,6 +344,7 @@ def _run_stage(stage: str, workdir: Path, cfg: dict) -> dict:
             translator=cfg["translator"],
             timeout=cfg["timeout"],
             retry_missing=cfg["retry_missing"],
+            glossaries=cfg["glossaries"],
             debug_recorder=recorder,
         )
     if stage == "apply":
@@ -717,6 +718,7 @@ def run_pipeline(
     translator: str | None = None,
     reviewer: str | None = None,
     retry_missing: bool = True,
+    glossaries: str | None = None,
     dual: bool = False,
     watermark: bool = False,
     latex_bbox: bool = True,
@@ -772,6 +774,9 @@ def run_pipeline(
         "translator": translator,
         "reviewer": reviewer,
         "retry_missing": retry_missing,
+        #: 术语表 CSV 路径（W13）：只被 translate 阶段消费（apply/build/check/review 忽略），
+        #: 且只在整篇翻译的提示词里生效（重译不注入，见 translate.translate_document）。
+        "glossaries": glossaries,
         "output_dir": output_dir,
         "dual": dual,
         "watermark": watermark,

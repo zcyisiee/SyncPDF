@@ -464,6 +464,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/glossary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 全局词表（条目 + 条数）
+         * @description 返回 ``<store_base>/.bdt-serve/glossary.csv`` 的内容，已按 ``source`` 排序、同 source 只留最后一条。没有词表 → ``entries=[]``/``count=0``（不是 404）。
+         */
+        get: operations["get_glossary_api_v1_glossary_get"];
+        /**
+         * 整表替换全局词表
+         * @description 用 ``entries`` **整体替换**词表（本地编辑后一次保存，不做行级 patch）。校验：source/target 去空白后必须非空且在长度上限内、同 source 后者覆盖前者、按 source 排序；不合法 → 422 ``glossary_invalid``（带 ``index``/``field``）且**盘上一字不改**。空数组 = 清空（等效于 DELETE）。**词表变更不回溯**：已经翻译过的内容不会自动重译，重新跑翻译才生效。
+         */
+        put: operations["put_glossary_api_v1_glossary_put"];
+        post?: never;
+        /**
+         * 清空全局词表（幂等）
+         * @description 删掉词表文件。之后翻译 job 不再注入（``use_glossary=true`` 也一样），``GET`` 返回空表。已经翻译过的内容不受影响（词表变更不回溯）。
+         */
+        delete: operations["delete_glossary_api_v1_glossary_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -907,6 +935,43 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        /**
+         * GlossaryEntryModel
+         * @description 一条术语对 ``source → target``（``note`` 可选，给人看的备注，不参与匹配）。
+         */
+        GlossaryEntryModel: {
+            /** Source */
+            source: string;
+            /** Target */
+            target: string;
+            /** Note */
+            note?: string | null;
+        };
+        /**
+         * GlossaryResponse
+         * @description ``GET/PUT/DELETE /glossary`` 的响应：规范化后的条目 + 条数。
+         *
+         *     ``entries`` 按 ``source`` 排序、同一 source 只留最后一条（校验/去重/排序都在
+         *     :func:`babeldoc_tools.glossary.normalize_entries`，与 CLI 注入时**同一份**规则）。
+         *     没有词表 = 空数组（不是错误）。
+         */
+        GlossaryResponse: {
+            /** Entries */
+            entries: components["schemas"]["GlossaryEntryModel"][];
+            /** Count */
+            count: number;
+        };
+        /**
+         * GlossaryUpdateRequest
+         * @description ``PUT /glossary`` 的请求体：**整表替换**（``{entries: [...]}``）。
+         *
+         *     编辑器在本地编完整张表再一次性保存。服务端不收 CSV 文本：CSV 的解析/导出在前端，
+         *     导入导出都走这个 JSON 形状。校验失败 → 422 ``glossary_invalid``（盘上一字不改）。
+         */
+        GlossaryUpdateRequest: {
+            /** Entries */
+            entries: components["schemas"]["GlossaryEntryModel"][];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1012,6 +1077,12 @@ export interface components {
              * @description 期望的草稿 revision（只对 action=compile 有效）：与当前不一致 → 409 revision_conflict，防止编译一个已经不是最新的草稿
              */
             base_revision?: number | null;
+            /**
+             * Use Glossary
+             * @description 是否给这次翻译注入全局词表（只对 action=run 且真的跑 translate 阶段有效）。客户端只给这个布尔；词表内容与文件路径全在服务端（``<store_base>/.bdt-serve/glossary.csv`` → ``--glossaries``）；词表为空或该 action 不跑翻译时一律不注入
+             * @default true
+             */
+            use_glossary: boolean;
         };
         /**
          * JobRecord
@@ -1054,6 +1125,11 @@ export interface components {
              * @default false
              */
             dual: boolean;
+            /**
+             * Use Glossary
+             * @default false
+             */
+            use_glossary: boolean;
             /** Requested Scope */
             requested_scope?: string | null;
             /** Effective Scope */
@@ -2377,6 +2453,77 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_glossary_api_v1_glossary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlossaryResponse"];
+                };
+            };
+        };
+    };
+    put_glossary_api_v1_glossary_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GlossaryUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlossaryResponse"];
+                };
+            };
+            /** @description glossary_invalid / validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_glossary_api_v1_glossary_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlossaryResponse"];
+                };
             };
         };
     };

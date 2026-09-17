@@ -2,13 +2,13 @@ import { LinkButton } from '../components/ui/Button';
 import { ScrollArea } from '../components/ui/ScrollArea';
 import { ScreenFrame } from '../components/shell/ScreenFrame';
 
-/** 词表 / 设置占位屏：标题 + 「后续版本提供」说明（brief 明确不做，能力由 W13 起落地）。 */
+/** 设置占位屏：标题 + 「后续版本提供」说明（W13 已把词表从占位换成真屏）。 */
 export function PlaceholderScreen({ screen }: { screen: 'glossary' | 'settings' }) {
   const label = screen === 'glossary' ? '词表' : '设置';
   const note =
     screen === 'glossary'
-      ? '全局/文档词表的 CRUD、CSV 导入导出与命中计数将在 W13 接入。'
-      : '模型 profile 与检查阈值设置将在 W08 之后接入。';
+      ? '词表已是真屏（见 src/screens/GlossaryScreen.tsx）：全局术语表的增删改查与 CSV 导入导出。'
+      : '模型 profile 与检查阈值设置将在后续版本接入。';
   return (
     <ScreenFrame>
       <ScrollArea className="h-full" data-od-id={`screen-${screen}`}>

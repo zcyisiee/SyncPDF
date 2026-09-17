@@ -59,6 +59,9 @@ export function ActiveJobCard({ did, job }: { did: string; job: JobRecord }) {
       pages: job.pages ?? undefined,
       dual: job.dual,
       profile: job.profile,
+      // 重试沿用上一个 job 的词表开关（记录里的 use_glossary 已经是“生效后的值”）；
+      // action=check 之类在服务端会归一成 false，这里如实回传。
+      use_glossary: job.use_glossary,
     });
 
   return (

@@ -5,7 +5,7 @@ Vite + React 18 + TypeScript + Tailwind + TanStack Query + Zustand。
 `tailwind.config.ts` + `src/app/globals.css`）；HTTP 契约唯一事实来源：
 `docs/frontend/api.md` 与运行中服务的 `/openapi.json`。
 
-本目录当前范围（W12）：三栏工作台壳 + 设计令牌 + hash 路由 +
+本目录当前范围（W13）：三栏工作台壳 + 设计令牌 + hash 路由 +
 **PDF 预览**（pdf.js 渲染产物 PDF、parse/layout 两套 bbox 叠加、源/译/对照三模式、点框选中）+
 **进度层**（事件流面板 + 真 SSE 增量 + 阶段时间线真耗时 + 运行中状态）+
 **上传与任务**（文件库拖/选上传 PDF → 新文档、工作台「开始翻译」配置卡、运行中/失败卡与取消）+
@@ -13,9 +13,11 @@ Vite + React 18 + TypeScript + Tailwind + TanStack Query + Zustand。
 自动/手动编译状态条、按修订号下载与质量徽标）+
 **重译候选**（段落面板「AI 重译」→ 候选对比（原文/当前译文/候选译文）→ 采用进草稿 / 拒绝）+
 **版本归档**（归档视图 `#/d/:did/archive`：全部历史版本（时间/修订/触发原因/质量状态/大小）+
-任一版本下载；右侧面板「归档」tab 给同一份数据的摘要 + 「查看全部」）。
-**不做**：连续滚动、缩放控件、译文覆盖层、版本回滚（v1 不做）、词表（W13）；
-这些区域渲染带 `data-od-id` 的占位并写明接入任务。
+任一版本下载；右侧面板「归档」tab 给同一份数据的摘要 + 「查看全部」）+
+**词表**（`#/glossary` 全局术语表：行内编辑/加删行/整表保存、CSV 导入导出、
+「开始翻译」卡上的词表开关、图标栏条数徽标）。
+**不做**：连续滚动、缩放控件、译文覆盖层、版本回滚（v1 不做）；
+未实现的区域渲染带 `data-od-id` 的占位并写明接入任务。
 
 ## 开发工作流（两个终端）
 
@@ -42,7 +44,7 @@ serve 不注册 CORS，所以前端必须走这个同源代理（`docs/frontend/
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm lint` | eslint flat config + typescript-eslint，`--max-warnings 0` |
 | `pnpm test` | Vitest（jsdom + @testing-library/react），不起真后端 |
-| `pnpm e2e` | Playwright 真浏览器用例（`e2e/archive.spec.ts` · `edit.spec.ts` · `preview.spec.ts` · `progress.spec.ts` · `retranslate.spec.ts` · `upload.spec.ts`）：起真 serve + 真 dev server |
+| `pnpm e2e` | Playwright 真浏览器用例（`e2e/archive.spec.ts` · `edit.spec.ts` · `glossary.spec.ts` · `preview.spec.ts` · `progress.spec.ts` · `retranslate.spec.ts` · `upload.spec.ts`）：起真 serve + 真 dev server |
 | `pnpm sync:pdfjs` | 单独把 pdf.js worker/cmaps/standard_fonts 复制进 `public/pdfjs/` |
 | `pnpm gen:api` | 从运行中的 serve 拉 `/openapi.json` 生成 `src/api/schema.d.ts` |
 
@@ -61,21 +63,23 @@ web/
                 preview/（PdfCanvas · BboxLayer · PreviewToolbar · PreviewArea · CompileBar · DownloadButton）
                 edit/（ParagraphEditor · BboxEditor · CandidatePanel（W11 重译候选））
                 archive/（ArchiveView 版本列表 · ArchiveSummary 归档摘要（W12））
-    lib/        api.ts（/api/v1 + 错误信封 + PATCH/POST/PUT/multipart）· queries.ts（含 W08 上传/job/profiles、W10 草稿/段落、W11 候选、W12 版本）
+    lib/        api.ts（/api/v1 + 错误信封 + PATCH/POST/PUT/DELETE/multipart）· queries.ts（含 W08 上传/job/profiles、W10 草稿/段落、W11 候选、W12 版本、W13 词表）
                 uploads.ts（客户端预检：魔数 + 200MB）· jobs.ts（活动判据/轮询/from 判断/页码形状）
                 preview.ts（产物选择 + geometry 解析）· events.ts（SSE 帧/URL/live/分组/窗口合并）
                 draft.ts（草稿解析/排版范围校验/PATCH 构造）· download.ts（下载与质量徽标判定表）
                 versions.ts（版本归档的 URL/徽标/摘要判定表，复用 download.ts）
+                glossary.ts（词表行编辑模型 + CSV 解析/导出 + 行级校验，与后端 §3.8 同口径）
                 timeline.ts（阶段合并 + 条宽）· pdf.ts（pdf.js worker/cmap/字体配置）
                 humanize.ts · routing.ts · cn.ts
-    components/jobs/  StartJobCard（开始翻译配置卡）· ActiveJobCard（运行中/失败/取消卡）
-    screens/    LibraryScreen / DocumentCard / WorkbenchScreen / PlaceholderScreen
+    components/jobs/  StartJobCard（开始翻译配置卡，含 W13 词表开关）· ActiveJobCard（运行中/失败/取消卡）
+    screens/    LibraryScreen / DocumentCard / GlossaryScreen（W13 全局词表）/ WorkbenchScreen / PlaceholderScreen
     stores/     ui.ts（三栏宽度 + 分隔条 + 屏/预览模式 + 预览页码/bbox 图层/选中段落/重译 profile）
   scripts/      sync-pdfjs-assets.mjs（把 pdf.js 静态资源复制进 public/pdfjs/）
-  e2e/          Playwright 真浏览器用例（archive.spec.ts · edit.spec.ts · preview.spec.ts · progress.spec.ts · upload.spec.ts）
+  e2e/          Playwright 真浏览器用例（archive.spec.ts · edit.spec.ts · glossary.spec.ts · preview.spec.ts · progress.spec.ts · upload.spec.ts）
                 fixtures/sample.pdf（602 字节最小合法 PDF）· fixtures/sleep-translator.sh（长睡 stub）
+                fixtures/glossary-translator.sh（W13 离线 stub：读干提示词、回显原文）
   tests/        Vitest 用例（api / store / routing / 文件库屏+上传 / job 卡与 hooks / 工作台壳 /
-                预览坐标与组件 / 编辑坐标与组件（W10 编辑、W11 候选面板、W12 归档视图）/ 事件流与时间线）
+                预览坐标与组件 / 编辑坐标与组件（W10 编辑、W11 候选面板、W12 归档视图、W13 词表）/ 事件流与时间线）
   public/pdfjs/ pdf.js worker + cmaps + standard_fonts（生成物，.gitignore，不入库）
   tmp-smoke/    本地冒烟截图与日志（.gitignore，不入库）
 ```
@@ -228,10 +232,12 @@ SSE 增量的 e2e 留到 W15（W07 有真 job 之后）。
 
 - 显示条件：该文档**没有活动 job**，且清单里已有产物（`source.pdf` 或任何 `agent/*`）。
 - 表单：profile 下拉（`GET /profiles`，只见 `id`/`label`）、页码范围（占位 `1-3,5 全部留空`）、
-  dual 开关、高级折叠里的「起点阶段」；`from` 默认值 = **有 parse 产物 → translate，否则 parse**
+  dual 开关、**词表开关**（`use_glossary`，缺省开；词表为空时禁用并提示「词表为空」，
+  条数从 `GET /glossary` 读）、高级折叠里的「起点阶段」；`from` 默认值 = **有 parse 产物 → translate，否则 parse**
   （判据 `stage_summary.parse === 'ok'` 或 `available.anchors`/`parse_snapshot`）。
-- 提交 `POST /documents/{did}/jobs`，body 只有 `action`/`from`/`pages`/`dual`/`profile`
-  —— translator/reviewer 命令由**服务端**从 profile 解析，前端连字段都没有。
+- 提交 `POST /documents/{did}/jobs`，body 只有 `action`/`from`/`pages`/`dual`/`profile`/`use_glossary`
+  —— translator/reviewer 命令由**服务端**从 profile 解析，前端连字段都没有；词表也只有这个布尔，
+  词表内容与注入用的文件路径全在服务端（docs/frontend/api.md §3.8）。
 - **MinerU token 只走 serve 进程环境**（`MINERU_API_TOKEN`）：`from=parse` 时卡片会提示
   「首次翻译需要 MinerU（由服务环境提供 token），耗时较长」，但前端**无法**预知有没有 token，
   所以任务是否成功以服务端返回的 `error_code` 为准（不假装成功）。
@@ -331,6 +337,12 @@ SSE 增量的 e2e 留到 W15（W07 有真 job 之后）。
   当前版本高亮、stale 提示条、r1 下载的 href/落盘名与实际字节、非数字/不在清单 → 404
   `version_not_found`、`GET /artifacts` 不混入 versions、空态引导。归档**写入**（发布即归档、
   50 上限、失败/取消不归档、trigger 值）由后端 pytest 用 stub 编译路径覆盖（见 W12 报告）。
+- `glossary.spec.ts`（W13）**不跑真翻译**（translator 是离线 stub）：“开始翻译”那条用例用 stub
+  translator 从 translate 起跑，再取 `GET /artifacts/agent/prompt.md` 断言它含「术语约束（词表）」
+  段与词条，并用 `use_glossary:false` 的第二次 job 做对比 —— 这是“服务端真把词表注入了翻译提示词”
+  的端到端证据。词表的 CRUD / CSV 导入导出 / 开关禁用逻辑也在同一个 spec 里。
+  它的副作用（共享的 `tmp/.bdt-serve/glossary.csv` 与 `profiles.json`、自建 workdir、debug 查看器）
+  在用例前后备份/还原。
 
 ## 版本归档（W12）：历史版本列表 + 任一版本下载
 
@@ -350,6 +362,25 @@ SSE 增量的 e2e 留到 W15（W07 有真 job 之后）。
   一个「历史版本」文本链接跳归档视图。质量徽标复用 `lib/download.ts::qualityBadge`
   （版本快照只有 `check_verdict`/`pipeline_ok`，映射后走同一份判定表）：**needs_fix 不禁用下载**
   （质量只记录不门禁，黄标），与 W10 规则一致。
+
+## 词表（W13）：全局术语表（`#/glossary`）
+
+服务端真源在 `docs/frontend/api.md` §3.8（`GET/PUT/DELETE /api/v1/glossary`，**一个全局词表**，
+落在 `<store_base>/.bdt-serve/glossary.csv`）。四块 UI：
+
+- **词表屏**（`screens/GlossaryScreen.tsx`）：表格三列（source / target / note）行内编辑 +
+  添加行/删行 + 保存/放弃。保存是**整表替换**（`PUT`，不做行级 patch）：所以「保存」只在真有
+  改动且行级校验通过时可用，「放弃」把本地草稿丢掉回到服务端那一份。行级错误（只填了一边 /
+  超 200 字符）就地标在行上（`lib/glossary.ts::validateGlossaryRows`，与后端同一口径），
+  服务端仍是最终权威（`422 glossary_invalid` 带 `detail.index`/`detail.field`）。
+- **CSV 导入/导出在浏览器里**（后端 `PUT` 只收 JSON 条目）：导入走隐藏的 file input，
+  RFC 4180 解析 + 表头校验（缺 `source`/`target` → 就地报错，不动现有表），导入结果只是本地草稿，
+  要再点保存；导出用 `Blob` + `download` 落盘 `glossary.csv`，内容是**屏幕上的表**（含未保存的编辑）。
+- **不回溯提示条**（`data-od-id="glossary-no-retro"`，常驻）：词表变更不会自动重翻任何已翻译内容，
+  重新跑一次翻译才生效 —— 这是 brief 的一致性红线，不允许只写在文档里。
+- **注入入口**：「开始翻译」卡上的`使用词表`开关（`use_glossary`，缺省开）；词表为空时禁用并写
+  「（词表为空）」。客户端只给这个布尔，**词表内容与注入用的文件路径全在服务端**；
+  图标栏「词表」项带**条数徽标**（有词表时才显示，拿不到数据就不冒充 0 条）。
 
 ## 设计与契约约束（改动时别忘）
 

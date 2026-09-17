@@ -20,6 +20,15 @@ const PROFILES = [
   { id: 'deepseek-flash', label: 'Deepseek Flash', has_translator: true, has_reviewer: true },
 ];
 
+/** 全局词表（W13）：默认非空，所以开关默认开着且可用。 */
+const GLOSSARY = {
+  entries: [
+    { source: 'attention', target: '注意力', note: null },
+    { source: 'LTO', target: '链接时优化', note: null },
+  ],
+  count: 2,
+};
+
 const STAGES_NOT_RUN = {
   parse: 'not_run',
   translate: 'not_run',
@@ -65,6 +74,8 @@ function routes(extra: Record<string, () => Response> = {}) {
   return {
     '/api/v1/documents/up-sample-20260917-120000/artifacts': () => jsonResponse(ARTIFACTS),
     '/api/v1/profiles': () => jsonResponse(PROFILES),
+    // W13：卡上的词表开关要读全局词表条数（空表 → 开关禁用 + 提示）
+    '/api/v1/glossary': () => jsonResponse(GLOSSARY),
     ...extra,
   };
 }
@@ -119,7 +130,7 @@ describe('StartJobCard（开始翻译配置卡）', () => {
     expect(screen.queryByText(/MINERU_API_TOKEN/)).toBeNull();
   });
 
-  it('提交时只发服务端接受的字段（action/from/pages/dual/profile）', async () => {
+  it('提交时只发服务端接受的字段（action/from/pages/dual/profile/use_glossary）', async () => {
     const calls: { url: string; body: unknown }[] = [];
     const fetchMock = mockApiFetch(routes());
     fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -148,6 +159,8 @@ describe('StartJobCard（开始翻译配置卡）', () => {
       pages: '1-3,5',
       dual: true,
       profile: 'echo-t',
+      // 词表只有这一个布尔字段（内容/路径全在服务端）
+      use_glossary: true,
     });
   });
 
@@ -189,5 +202,59 @@ describe('StartJobCard（开始翻译配置卡）', () => {
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('这个文档已有任务在跑');
     expect(alert).toHaveTextContent('文档已有活动 job：j_1（running）');
+  });
+
+  it('词表非空：开关默认开着（并标出条数），关掉后提交 use_glossary=false', async () => {
+    const bodies: unknown[] = [];
+    const fetchMock = mockApiFetch(routes());
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/jobs')) {
+        bodies.push(JSON.parse(String(init?.body)));
+        return jsonResponse({ job_id: 'j_1', status: 'queued', action: 'run' }, 202);
+      }
+      const all = routes();
+      const route = all[url as keyof typeof all];
+      return route ? route() : jsonResponse({ error: { code: 'not_found', message: url } }, 404);
+    });
+
+    renderWithQuery(<StartJobCard did="up-sample-20260917-120000" document={makeDocument()} />);
+    const toggle = await screen.findByLabelText(/使用词表/);
+    expect(toggle).toBeChecked();
+    expect(toggle).toBeEnabled();
+    expect(screen.getByText('2 条')).toBeInTheDocument();
+
+    fireEvent.click(toggle); // 关掉这一次的注入
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: '开始翻译' }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toMatchObject({ use_glossary: false });
+  });
+
+  it('词表为空：开关禁用、恒为关、提示「词表为空」，提交仍带 use_glossary=false', async () => {
+    const bodies: unknown[] = [];
+    const fetchMock = mockApiFetch(
+      routes({ '/api/v1/glossary': () => jsonResponse({ entries: [], count: 0 }) }),
+    );
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/jobs')) {
+        bodies.push(JSON.parse(String(init?.body)));
+        return jsonResponse({ job_id: 'j_1', status: 'queued', action: 'run' }, 202);
+      }
+      const all = routes({ '/api/v1/glossary': () => jsonResponse({ entries: [], count: 0 }) });
+      const route = all[url as keyof typeof all];
+      return route ? route() : jsonResponse({ error: { code: 'not_found', message: url } }, 404);
+    });
+
+    renderWithQuery(<StartJobCard did="up-sample-20260917-120000" document={makeDocument()} />);
+    const toggle = await screen.findByLabelText(/使用词表/);
+    expect(await screen.findByText('（词表为空）')).toBeInTheDocument();
+    expect(toggle).toBeDisabled();
+    expect(toggle).not.toBeChecked();
+
+    fireEvent.click(screen.getByRole('button', { name: '开始翻译' }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toMatchObject({ use_glossary: false });
   });
 });

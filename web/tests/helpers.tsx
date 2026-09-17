@@ -235,6 +235,7 @@ export function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
     profile: 'echo-t',
     pages: null,
     dual: false,
+    use_glossary: false,
     run_id: null,
     exit_code: null,
     envelope: null,

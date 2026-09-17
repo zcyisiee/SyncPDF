@@ -2,6 +2,10 @@
 
 翻译命令是**用户指定的子进程**（``--translator`` / ``BDT_TRANSLATOR``）：提示词
 从 stdin 进，译文从 stdout 出。工具层不再拼 agy 参数，也不解析 JSON/usage。
+
+术语表（W13）由 ``--glossaries <csv>`` 传入：整篇翻译的提示词带上术语约束段，
+按 id 重译/补译不注入（重译候选保持段落上下文自由）。CSV 编解码见
+:mod:`babeldoc_tools.glossary`。
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from babeldoc.tools.agent import debug_capture
 
 from babeldoc_tools import common
 from babeldoc_tools import debug_runtime
+from babeldoc_tools import glossary as glossary_mod
 
 ID_MARK_RE = re.compile(
     r"<!--\s*id\s*=\s*([A-Za-z0-9._-]+)\s*(?:label\s*=\s*([^>]*?))?\s*-->"
@@ -48,6 +53,7 @@ def translate_document(
     prompt: str | None = None,
     repair_prompt: str | None = None,
     retry_missing: bool = True,
+    glossaries: str | None = None,
     debug_recorder=None,
 ) -> dict:
     """翻译整篇（默认）或按 ``ids`` 重译合并。
@@ -59,6 +65,11 @@ def translate_document(
 
     翻译命令（``--translator`` / ``BDT_TRANSLATOR``）只走 stdin/stdout 协议，
     模型与档位由该命令自己决定。
+
+    ``glossaries``（W13）是术语表 CSV 路径：**只作用于整篇翻译的提示词**
+    （:func:`_translate_whole_document` 里渲染进 ``{glossary}``）。按 ``ids`` 重译/补译
+    走 ``translator-repair`` 模板，**不注入词表** —— 重译候选要保持段落上下文自由，
+    词表约束翻译阶段，不约束重译。
     """
     workdir_path = common.require_workdir(workdir)
     resolved_timeout = int(timeout or 1800)
@@ -79,6 +90,7 @@ def translate_document(
             "ids": list(ids or []),
             "timeout": resolved_timeout,
             "retry_missing": bool(retry_missing),
+            "glossaries": glossaries,
         },
     ):
         if debug_recorder:
@@ -106,6 +118,7 @@ def translate_document(
                 timeout=resolved_timeout,
                 prompt=prompt,
                 retry_missing=retry_missing,
+                glossaries=glossaries,
                 debug_recorder=debug_recorder,
             )
         if debug_recorder is not None:
@@ -141,6 +154,7 @@ def _translate_whole_document(
     timeout: int,
     prompt: str | None,
     retry_missing: bool,
+    glossaries: str | None = None,
     debug_recorder=None,
 ) -> dict:
     from babeldoc.tools.agent import markdown_view
@@ -152,7 +166,12 @@ def _translate_whole_document(
 
     prompt_name = prompt or "translator"
     document = document_md.read_text(encoding="utf-8")
-    prompt_text = common.load_prompt(prompt_name, document=document)
+    # 词表只在整篇翻译这一路注入（见 translate_document 的 docstring）。文件不存在/
+    # 格式坏 → ToolError(glossary_missing/glossary_invalid)，不静默当空词表。
+    glossary_entries = glossary_mod.load_entries(glossaries) if glossaries else None
+    prompt_text = common.load_prompt(
+        prompt_name, document=document, glossary=glossary_entries
+    )
     prompt_file = agent / "prompt.md"
     prompt_file.write_text(prompt_text, encoding="utf-8")
     if debug_recorder:

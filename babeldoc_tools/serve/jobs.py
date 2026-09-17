@@ -216,6 +216,10 @@ class JobRecord(BaseModel):
     #: ``--pages`` 原样透传（只对 ``run`` 有效）。
     pages: str | None = None
     dual: bool = False
+    #: ``POST /documents/{did}/jobs`` 的 ``use_glossary``（W13，缺省 true）实际落成的值：
+    #: 只有 ``action=run`` 才是 true（词表只约束翻译阶段）。它只是**开关**；词表内容与
+    #: 注入用的文件路径全在服务端，客户端看不到也不传。
+    use_glossary: bool = False
     #: ``compile`` 的页级语义（api.md §3.4）：请求的 scope / 实际生效的 scope /
     #: 回退原因。v1 页级编译回退全量，所以 ``requested_scope="pages"`` 时
     #: ``effective_scope="full"`` 且 ``downgrade_reason`` 非空。
@@ -374,8 +378,13 @@ class JobRegistry:
         trigger: str | None = None,
         paragraph_id: str | None = None,
         candidate_id: str | None = None,
+        use_glossary: bool = False,
     ) -> JobRecord:
-        """新建 job 并入队（``queued``）；准入判断由调用方在 ``lock`` 内做。"""
+        """新建 job 并入队（``queued``）；准入判断由调用方在 ``lock`` 内做。
+
+        ``use_glossary`` 在这里归一：只有 ``action="run"``（= 真的会跑翻译阶段）才留
+        true，其余 action 一律记 false —— 记录里的字段要么真生效，要么就别声称生效。
+        """
         record = JobRecord(
             job_id=new_job_id(),
             did=did,
@@ -385,6 +394,7 @@ class JobRegistry:
             profile=profile,
             pages=pages,
             dual=dual,
+            use_glossary=bool(use_glossary) and action == "run",
             requested_scope=requested_scope,
             effective_scope=effective_scope,
             downgrade_reason=downgrade_reason,

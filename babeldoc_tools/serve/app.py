@@ -18,10 +18,11 @@
   与 ``GET/PUT /api/v1/profiles``（W08，见 :mod:`babeldoc_tools.serve.routers.profiles`）
 - ``GET /api/v1/documents/{did}/versions[/{revision}/pdf]``（W12 版本归档，见
   :mod:`babeldoc_tools.serve.routers.versions`）
+- ``GET/PUT/DELETE /api/v1/glossary``（W13 全局词表，见
+  :mod:`babeldoc_tools.serve.routers.glossary`）
 - ``GET /openapi.json`` / ``GET /docs``（FastAPI 自带）
 
-后续端点（词表…）在 ``docs/frontend/api.md`` 里冻结形状，由 W13 实现 ——
-这里不写假成功 stub。
+后续端点（流式段落级进度…）在 ``docs/frontend/api.md`` 里冻结形状 —— 这里不写假成功 stub。
 
 本模块在 import 时即需要 ``fastapi``（web extra）；``bdt serve --help`` 与其它
 ``bdt`` 子命令都不 import 本模块，因此没有 web extra 也能用。
@@ -50,11 +51,13 @@ from babeldoc_tools import __version__
 from babeldoc_tools.common import ToolError
 from babeldoc_tools.serve.candidates import CandidateService
 from babeldoc_tools.serve.compile import CompileService
+from babeldoc_tools.serve.glossary import GlossaryStore
 from babeldoc_tools.serve.routers.artifacts import artifacts_router
 from babeldoc_tools.serve.routers.candidates import candidates_router
 from babeldoc_tools.serve.routers.documents import documents_router
 from babeldoc_tools.serve.routers.draft import draft_router
 from babeldoc_tools.serve.routers.events import events_router
+from babeldoc_tools.serve.routers.glossary import glossary_router
 from babeldoc_tools.serve.routers.jobs import jobs_router
 from babeldoc_tools.serve.routers.profiles import profiles_router
 from babeldoc_tools.serve.routers.versions import versions_router
@@ -98,6 +101,8 @@ _TOOL_ERROR_STATUS = {
     # W09 草稿：乐观并发失败（带 detail.current_revision）/ 字段与范围不合法
     "revision_conflict": 409,
     "draft_invalid": 422,
+    # W13 词表：条目不合法（空 source/target、超长、超条数）→ 422（盘上一字不改）
+    "glossary_invalid": 422,
     # 客户端不得自带的命令/密钥字段（不是"参数错了"，是"这类输入不接受"）
     "forbidden_field": 422,
     # W08 上传：体积超限是 413；不是 PDF/缺文件名是 422；候选目录名全被占是 409
@@ -146,7 +151,9 @@ def error_response(
 def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI:
     """组装 FastAPI 应用（工厂：不读环境变量、不起进程；恢复只改确实要改的状态）。"""
     # 共享实例：job 注册表 / 草稿锁 / 编译调度 / 候选存储（路由们用同一份，见模块 docstring）。
-    runner = JobRunner(store)
+    # 全局词表（W13）也是共享实例：``/glossary`` 路由写它，job 启动时从它取注入路径。
+    glossary = GlossaryStore(store.store_base)
+    runner = JobRunner(store, glossary=glossary)
     compiles = CompileService(store, runner)
     # 候选服务复用 runner 的 job 注册表与候选 registry：生成是 job，采用写草稿。
     candidates = CandidateService(store, runner, compiles)
@@ -241,5 +248,6 @@ def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI
     app.include_router(candidates_router(candidates))
     app.include_router(versions_router(store))
     app.include_router(profiles_router(store))
+    app.include_router(glossary_router(glossary))
 
     return app

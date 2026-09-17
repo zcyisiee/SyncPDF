@@ -298,7 +298,7 @@ POST /api/v1/documents/{did}/jobs
 | `GET/PATCH/DELETE /documents/{did}/draft` | 草稿读写（§3.3） | 已实现（W09） |
 | `POST /documents/{did}/paragraphs/{pid}/retranslate`、`GET …/candidates`、`POST …/candidates/{cid}/adopt\|reject` | 重译候选：生成不改译文、采用进草稿（§3.6） | 已实现（W11） |
 | `GET /documents/{did}/versions[/{revision}/pdf]` | 版本归档清单 + 任一版本下载（§3.7） | 已实现（W12） |
-| `/glossary...` | 词表 CRUD（全局 + 文档级）、CSV、命中计数 | W13 |
+| `GET/PUT/DELETE /glossary` | 全局术语表 CRUD（JSON 整表；CSV 只在前端） | 已实现（W13，§3.8） |
 
 上表**尚未实现**的行：调用它们会得到 `404 not_found`（统一错误信封），不要在前端把
 `404` 当成业务错误处理。
@@ -474,6 +474,52 @@ GET /api/v1/documents/{did}/versions/2/pdf
 - **持久化**：清单与版本文件都在盘上，serve 重启后照旧（重启不影响历史）。从没编译成功过
   → `200` + `items: []` + `current_revision: 0`（不是 404）。失败/取消/超时的编译**不归档**：
   上一版仍可下载，历史不多一行。
+
+### 3.8 术语表（已实现 W13）
+
+**一个全局词表**，不属于任何文档：落在 `<store_base>/.bdt-serve/glossary.csv`
+（`--root` 模式 = 服务根目录，`--workdir` 模式 = 那个 workdir；两个模式都只有这一份）。
+条目是「源词 → 指定译名（可选备注）」，翻译时由**服务端**渲染进提示词的术语约束段。
+
+```json
+GET /api/v1/glossary
+→ 200 {"entries": [{"source": "attention", "target": "注意力", "note": null}], "count": 1}
+   # 没有词表 → {"entries": [], "count": 0}（不是 404）
+
+PUT /api/v1/glossary      # 整表替换：编辑完一次保存，不做行级 patch
+  {"entries": [{"source": "attention", "target": "注意力", "note": "可选"}]}
+→ 200 与 GET 同形（回显规范化后的结果）
+→ 422 {"error": {"code": "glossary_invalid", "message": "第 1 条的 source 不能为空",
+        "detail": {"index": 0, "field": "source"}}}
+
+DELETE /api/v1/glossary   # 清空（幂等）→ 200 与 GET 同形（空表）
+```
+
+- **形状**：`source`/`target` 必填、`note` 可选（没有备注时响应里是 `null`）。`GET`/`PUT`/
+  `DELETE` 的响应**同形**（`entries` + `count`），前端一次解析三处都能用。
+- **规范化**（服务端做，`GET` 回来的就是规范形）：`source`/`target` 去空白后必须非空，
+  各 ≤200 字符（`note` ≤200）；**同一 `source` 后者覆盖前者**；结果按 `source` 字典序排序。
+  `PUT` 校验失败时**盘上一字不改**（先规范化再写）。`PUT {"entries": []}` 与 `DELETE` 同义。
+- **CSV 只在两端各自那一侧**：`PUT` 只收 JSON 条目（**不收 CSV 文本**）；CSV 的解析/导出在
+  前端（列 `source,target,note`，导入导出都先转成 `entries` 再 PUT）。后端落盘的那份 CSV 与
+  CLI（`bdt translate --glossaries <csv>` / `bdt run --glossaries <csv>`）**共用同一个解析器**。
+- **注入语义**：`POST /documents/{did}/jobs` 的 `use_glossary`（**缺省 true**，客户端只能给这个
+  布尔）决定本次翻译要不要带术语约束。服务端在构造 argv 时把
+  `<store_base>/.bdt-serve/glossary.csv` 的**路径**经 `--glossaries` 传给子进程 —— 客户端
+  永远拿不到、也传不了这个路径，更传不了词表内容。job 记录回显生效后的 `use_glossary`
+  （§3.4）供前端核对。
+- **只在翻译阶段注入**：`action=run` 且真的会跑 `translate` 阶段（`from` 缺省 / `parse` /
+  `translate`）才注入。`compile`、`check`、`run --from apply|build|check|review|report`、
+  以及 `retranslate`（重译候选）**一律不注入**。重译候选走 `translator-repair` 模板、保持
+  段落上下文自由 —— 词表约束的是整篇初译，不是重译候选。`use_glossary` 在记录里对非
+  `action=run` 的 job 恒为 `false`（要么真生效，要么别声称生效）。
+- **空词表不注入**：文件不存在、只有表头、或 `DELETE` 之后，`use_glossary=true` 也不会带
+  `--glossaries`（给提示词塞一段没有条目的约束说明毫无收益）。
+- **词表变更不回溯**：改词表**不会**自动重翻任何已翻译内容 —— 已经译过的段落保持原样，
+  重新跑一次翻译才生效。前端词表视图必须显式提示这一点。
+- **错误码**：`glossary_invalid` → 422（条目不合法，`detail.index`/`detail.field` 指到出错的
+  第几条/哪个字段）；`forbidden_field` → 422（从 job 提交端口进来的命令类字段，与 §3.4 同源）；
+  坏文件（手工改坏）**不报错**，按空词表读（注入少几条 < 整个服务起不来）。
 
 ## 4. 前端消费注意
 

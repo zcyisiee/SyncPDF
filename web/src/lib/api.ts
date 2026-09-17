@@ -74,6 +74,14 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
 }
 
 /**
+ * `DELETE` 无体（`DELETE /glossary` 清空词表）：响应仍是 JSON 资源体
+ * （`{entries, count}`），所以走的还是同一套信封解析。
+ */
+export async function apiDelete<T>(path: string): Promise<T> {
+  return request<T>(path, { method: 'DELETE', headers: { accept: 'application/json' } });
+}
+
+/**
  * `POST` multipart 上传（`POST /documents`）。`FormData` 里只有 `file` 字段：
  * 目录名/did 全由服务端生成，客户端不提供任何路径或命令。
  */

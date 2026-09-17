@@ -3,10 +3,12 @@
 三条硬约束（EXECUTION.md 纠偏第 5 / 8 条；``docs/frontend/api.md`` §3.4）：
 
 1. **argv 只由服务端构造**。客户端能给的只有 ``action``/``from``/``pages``/``dual``/
-   ``profile``；translator/reviewer 命令在 :mod:`babeldoc_tools.serve.profiles` 里按
+   ``profile``/``use_glossary``；translator/reviewer 命令在 :mod:`babeldoc_tools.serve.profiles` 里按
    profile id 解析后直接进 argv，**不回传客户端**。入口固定为
    ``sys.executable -m babeldoc_tools run``（模块入口，不是第二个 console 入口；裸
-   ``bdt`` 依赖 PATH，服务端不可靠）。
+   ``bdt`` 依赖 PATH，服务端不可靠）。词表同理：客户端只给 ``use_glossary`` 布尔，
+   词表**文件路径**由服务端取 ``<store_base>/.bdt-serve/glossary.csv`` 经 ``--glossaries``
+   注入（仅 ``action=run`` 且真的跑 translate 阶段时；重译/编译不注入）。
 2. **取消杀整个进程组**。``start_new_session=True`` 让子进程自成进程组，取消时
    ``os.killpg`` SIGTERM → 5s 宽限 → SIGKILL，连带 translator 孙进程一起收掉，并且
    **等进程真的退出后才置 canceled 并释放文档槽**（锁持到退出）。
@@ -42,6 +44,7 @@ from babeldoc_tools.common import ToolError
 from babeldoc_tools.serve import candidates as candidates_mod
 from babeldoc_tools.serve import compile as compile_mod
 from babeldoc_tools.serve.draft import DraftRegistry
+from babeldoc_tools.serve.glossary import GlossaryStore
 from babeldoc_tools.serve.jobs import TERMINAL_STATUSES
 from babeldoc_tools.serve.jobs import JobRecord
 from babeldoc_tools.serve.jobs import JobRegistry
@@ -118,6 +121,7 @@ def build_job_argv(
     pages: str | None,
     dual: bool,
     profile: Profile,
+    glossaries: str | None = None,
 ) -> list[str]:
     """job → ``bdt run`` 的 argv。**唯一**的 argv 来源（服务端拼装）。
 
@@ -126,6 +130,9 @@ def build_job_argv(
       质量门禁，不另起一份判断）；``run`` 用请求里的 ``from``（缺省留给 CLI 的 parse）；
     - ``--translator``/``--reviewer`` 只在 profile 给了对应命令时出现，值来自 profile
       （客户端无法影响）；
+    - ``glossaries`` 是**服务端**取好的词表 CSV 绝对路径（值为 ``None`` = 不注入）。
+      调用方（:meth:`JobRunner._glossary_path`）已经判过“这个 job 该不该注入 + 词表是不是
+      空”，这里只管拼接：空词表不注入（仅多一段没有条目的约束说明，毫无收益）；
     - ``run`` 且起点是 ``parse``（含缺省）时**追加 PDF 位置参数**
       ``<workdir>/source.pdf``：位置参数是 parse 的输入，服务端只有这一个来源
       （上传时写在那里）；``translate`` 及之后的阶段不需要它（CLI 允许省略）；
@@ -154,6 +161,8 @@ def build_job_argv(
         argv += ["--pages", pages]
     if dual:
         argv += ["--dual"]
+    if glossaries:
+        argv += ["--glossaries", str(glossaries)]
     if action == "run" and (from_stage or "parse") == "parse":
         # parse 阶段需要 PDF 位置参数（``bdt run <pdf> --from parse``）：新文档的源文件
         # 固定在 workdir 根下（W03 白名单里的 ``source.pdf``，上传时写在那里）。
@@ -486,10 +495,14 @@ class JobRunner:
     只有一把草稿写锁。
     """
 
-    def __init__(self, store: DocumentStore) -> None:
+    def __init__(self, store: DocumentStore, *, glossary: GlossaryStore | None = None) -> None:
         self.store = store
         self.registry = JobRegistry(store.store_base)
         self.drafts = DraftRegistry(store)
+        #: 全局词表存储（W13）：翻译 job 的注入路径就取自它。缺省自建一份；
+        #: :func:`babeldoc_tools.serve.app.create_app` 传进来的那一份与 ``/glossary`` 路由
+        #: 共用（同一个文件 + 同一个模块级写锁）。
+        self.glossary = glossary or GlossaryStore(store.store_base)
         #: 候选存储（W11）：与候选路由共用同一个 registry，因此同一个 did 的候选行
         #: 只有一把写锁；job 收尾（填/删候选行）与 HTTP 采用/拒绝走的是同一把。
         self.candidates = candidates_mod.CandidateRegistry(store)
@@ -529,6 +542,7 @@ class JobRunner:
         trigger: str | None = None,
         paragraph_id: str | None = None,
         candidate_id: str | None = None,
+        use_glossary: bool = False,
     ) -> JobRecord:
         """建 job（``queued``）→ 尽量立刻启动；同文档已有活动 job → 409 语义。
 
@@ -536,6 +550,8 @@ class JobRunner:
         的 ``status`` 是契约冻结的 ``queued``（前端本来就该轮询 ``GET /jobs/{jid}``）。
         ``compile`` 不需要 provider（``profile_id=None``）：它只跑 apply+build；
         ``retranslate``（W11）必须带 ``paragraph_id`` + ``candidate_id``（候选已经建好）。
+        ``use_glossary`` 只对 ``action=run`` 有意义（翻译阶段才注入），其余 action 一律记
+        ``False`` —— 免得记录里出现一个实际不起作用的“已注入”。
         """
         # 先过 store 的路径边界（不在服务范围内/越界 → 400/404，不进队列）。
         self.store.resolve(did)
@@ -571,6 +587,7 @@ class JobRunner:
                 trigger=trigger,
                 paragraph_id=paragraph_id,
                 candidate_id=candidate_id,
+                use_glossary=use_glossary,
             )
         await self._pump()
         return record
@@ -633,6 +650,25 @@ class JobRunner:
             await self.candidates.for_did(record.did).drop(record.candidate_id)
 
     # -------------------------------------------------------------- 调度
+    def _glossary_path(self, record: JobRecord) -> str | None:
+        """这个 job 该注入的词表 CSV 路径；不注入 → ``None``。
+
+        四条规则（brief 红线，W13）：
+
+        - 客户端没开 ``use_glossary`` → 不注入；
+        - 只有 ``action=run`` 且真的会跑 translate 阶段（``from`` 缺省/parse/translate）
+          才注入 —— ``compile``/``retranslate``/``check`` 以及 ``run --from apply`` 之后的
+          起点都不跑翻译，注入毫无意义；**重译候选不注入**：它走 ``translator-repair``
+          模板，候选要保持段落上下文自由；
+        - 词表为空（文件不存在或没有条目）→ 不注入；
+        - 路径恒为服务端自己的 ``<store_base>/.bdt-serve/glossary.csv``，客户端给不了。
+        """
+        if not record.use_glossary or record.action != "run":
+            return None
+        if (record.from_stage or "parse") not in ("parse", "translate"):
+            return None
+        return self.glossary.injection_path()
+
     async def _pump(self) -> None:
         """把排队的 job 尽量补进空槽（准入锁内：槽位判断与启动跨 await 原子）。
 
@@ -685,6 +721,7 @@ class JobRunner:
                 pages=record.pages,
                 dual=record.dual,
                 profile=profile,
+                glossaries=self._glossary_path(record),
             )
             proc = spawn_job(argv, workdir)
         except (ToolError, OSError) as exc:

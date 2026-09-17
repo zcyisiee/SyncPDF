@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 
 import { initialHash, screenIdOf, useHashRoute } from '../lib/routing';
 import { readStoredScreen, useUiStore } from '../stores/ui';
+import { GlossaryScreen } from '../screens/GlossaryScreen';
 import { LibraryScreen } from '../screens/LibraryScreen';
 import { PlaceholderScreen, UnknownScreen } from '../screens/PlaceholderScreen';
 import { WorkbenchScreen } from '../screens/WorkbenchScreen';
@@ -45,7 +46,7 @@ function AppRoutes() {
     case 'library':
       return <LibraryScreen />;
     case 'glossary':
-      return <PlaceholderScreen screen="glossary" />;
+      return <GlossaryScreen />;
     case 'settings':
       return <PlaceholderScreen screen="settings" />;
     case 'workbench':

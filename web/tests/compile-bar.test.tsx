@@ -61,6 +61,8 @@ describe('CompileBar 状态', () => {
         scope: 'full',
         base_revision: 6,
         dual: false,
+        // 词表只约束翻译阶段：编译永远不注入（W13）
+        use_glossary: false,
       });
     });
   });

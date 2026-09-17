@@ -275,6 +275,17 @@ HTTP 形状的单一事实来源是运行中服务的 `/openapi.json`（可读�
   （**只记录不门禁**：`needs_fix` 的版本照样可下载，前端黄标）。归档目录**不在**产物白名单里 ——
   `GET /artifacts` 清单永远不会出现 versions，版本 PDF 只能经上面那条专用端点读；
   界面入口是归档视图 `#/d/<did>/archive`（下载按钮旁的「历史版本」）。
+- **全局词表**（`GET/PUT/DELETE /api/v1/glossary`）：一个全局术语表（术语 → 指定译名），
+  落在 `<store_base>/.bdt-serve/glossary.csv`（**不属于任何 workdir**）。`PUT` 是整表替换
+  （JSON 条目，**不收 CSV 文本**：CSV 的导入导出在前端）；服务端校验 + 去重（同 source 以后者
+  为准）+ 按 source 排序，不合法 → `422 glossary_invalid` 且盘上一字不改。翻译时由**服务端**把
+  这个 CSV 路径经 `bdt run --glossaries <csv>` 交给子进程（词表渲染进 `translator` 提示词的
+  `{glossary}` 段，见 `skills/document-translate/agents/translator.md`）；客户端在
+  `POST /documents/{did}/jobs` 里只能给 `use_glossary` 布尔（缺省 true），只对 `action=run`
+  且真的跑 translate 阶段的 job 生效 —— `compile`/`check`/`retranslate`（重译候选）一律不注入，
+  词表为空也不注入。**词表变更不回溯**：已经翻译过的内容不会自动重翻，重新跑翻译才生效
+  （前端词表视图有常驻提示）。CLI 侧同一套机制：`bdt translate --glossaries <csv>` /
+  `bdt run --glossaries <csv>`（不带这个词表时提示词与之前逐字节一致）。
 
 查看已编译结果：`GET /api/v1/documents/{did}` 的 `compile` 字段（`status`/`revision`/
 `stale`/`artifact`），下载走 `GET /api/v1/documents/{did}/artifacts/{name}`（支持 Range，

@@ -188,6 +188,8 @@ def jobs_router(
                 pages=payload.pages if payload.action == "run" else None,
                 dual=payload.dual if payload.action == "run" else False,
                 profile_id=payload.profile or "",
+                # 词表开关（W13）：客户端只给布尔，注入路径由服务端在 argv 构造时取。
+                use_glossary=payload.use_glossary,
             )
         response.headers["Location"] = f"{API_PREFIX}/jobs/{record.job_id}"
         return JobAccepted(job_id=record.job_id, action=payload.action)

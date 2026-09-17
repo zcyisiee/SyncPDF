@@ -4,6 +4,7 @@
 
     bdt parse <pdf> --workdir tmp/wd [--layout mineru|paddle]
     bdt translate --workdir tmp/wd --translator scripts/agy-translator.sh
+    bdt translate --workdir tmp/wd [--glossaries tmp/wd/glossary.csv]
     bdt translate --workdir tmp/wd [--ids P01-003] [--feedback "..."]
     bdt translate --workdir tmp/wd --markdown <已有译文.md>   # 不调命令
     bdt translate --workdir tmp/wd --prompt-only              # 只写 agent/prompt.md
@@ -13,7 +14,7 @@
     bdt layout-set --workdir tmp/wd --patch '{"paragraphs": {...}}'
     bdt report --workdir tmp/wd
     bdt run <pdf> --workdir tmp/wd [--from build] [--markdown self] \
-        [--translator <cmd>] [--reviewer <cmd>]
+        [--translator <cmd>] [--reviewer <cmd>] [--glossaries <csv>]
     bdt serve (--root <dir> | --workdir <dir>) [--host 127.0.0.1] [--port 0] [--open]
 
 约定：
@@ -170,6 +171,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="只写 agent/prompt.md 后返回，不调用任何命令",
     )
     p_translate.add_argument("--timeout", type=int, default=1800, help="命令超时秒数")
+    p_translate.add_argument(
+        "--glossaries",
+        default=None,
+        help=(
+            "术语表 CSV 路径（列 source,target[,note]）：整篇翻译的提示词带上术语约束段；"
+            "按 --ids 重译不注入。缺省 = 不用词表"
+        ),
+    )
     p_translate.add_argument("--repair-prompt", default=None, help="重译提示词名")
     p_translate.add_argument(
         "--no-retry-missing",
@@ -323,6 +332,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--layout-coverage-threshold", type=float, default=0.005)
     p_run.add_argument("--mineru-ocr-text", action="store_true", dest="mineru_ocr_text")
     p_run.add_argument("--pages", default=None)
+    p_run.add_argument(
+        "--glossaries",
+        default=None,
+        help=(
+            "术语表 CSV 路径（列 source,target[,note]）：from=parse/translate 时整篇翻译"
+            "带上术语约束段；其它阶段/重译不注入。缺省 = 不用词表"
+        ),
+    )
     p_run.add_argument("--lang-in", default="en")
     p_run.add_argument("--lang-out", default="zh")
     p_run.add_argument("--dual", action="store_true")
@@ -477,6 +494,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
                     "translator": args.translator,
                     "timeout": args.timeout,
                     "retry_missing": args.retry_missing,
+                    "glossaries": args.glossaries,
                 },
             },
             call=lambda rec: registry.invoke(
@@ -490,6 +508,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
                 timeout=args.timeout,
                 repair_prompt=args.repair_prompt,
                 retry_missing=args.retry_missing,
+                glossaries=args.glossaries,
                 debug_recorder=rec,
             ),
         )
@@ -621,6 +640,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
                     translator=args.translator,
                     reviewer=args.reviewer,
                     retry_missing=args.retry_missing,
+                    glossaries=args.glossaries,
                     dual=args.dual,
                     watermark=args.watermark,
                     latex_bbox=args.latex_bbox,
@@ -658,6 +678,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
                     "markdown": args.markdown,
                     "prompt_only": args.prompt_only,
                     "timeout": args.timeout,
+                    "glossaries": args.glossaries,
                     "dual": args.dual,
                     "watermark": args.watermark,
                     "latex_bbox": args.latex_bbox,

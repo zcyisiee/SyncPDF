@@ -170,6 +170,9 @@ ALLOWED_WRITE_ROUTES = frozenset(
         ("post", f"{API_PREFIX}/documents/{{did}}/paragraphs/{{pid}}/retranslate"),
         ("post", f"{API_PREFIX}/documents/{{did}}/paragraphs/{{pid}}/candidates/{{cid}}/adopt"),
         ("post", f"{API_PREFIX}/documents/{{did}}/paragraphs/{{pid}}/candidates/{{cid}}/reject"),
+        # W13 词表（§3.2）：整表替换（PUT）与清空（DELETE）；GET 仍是只读。
+        ("put", f"{API_PREFIX}/glossary"),
+        ("delete", f"{API_PREFIX}/glossary"),
     }
 )
 
@@ -178,8 +181,9 @@ def assert_no_unexpected_write_routes(schema: dict) -> None:
     """OpenAPI 里除白名单内的写端点外，所有端点必须只有 GET。
 
     W01–W03 是只读服务；W07 加了两条 POST（提交/取消 job）；W08 加了上传（POST）与
-    profile 写入（PUT）；W11 加了候选的三条 POST（生成/采用/拒绝）。这里的断言是
-    **安全边界**：多出任何写方法都算越界（而不是"测试过时了"）。
+    profile 写入（PUT）；W11 加了候选的三条 POST（生成/采用/拒绝）；W13 加了词表的
+    PUT（整表替换）与 DELETE（清空）。这里的断言是
+    **安全边界**：多出任何写方法都算越界（而不是“测试过时了”）。
     """
     for path, item in schema["paths"].items():
         for method in item:

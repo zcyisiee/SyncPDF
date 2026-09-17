@@ -79,11 +79,22 @@ def read_jsonl(path) -> list[dict]:
 
 _FENCE_RE = re.compile(r"```(?:text|markdown)\n(.*?)```", re.DOTALL)
 
+#: 模板里的词表占位行（W13）：整行由 :func:`load_prompt` 的 ``glossary`` 参数决定。
+GLOSSARY_PLACEHOLDER = "{glossary}"
+#: 词表为空时占位行的删法：连它**前面**那个换行一起删掉 —— 于是「不带词表」渲染出来
+#: 的提示词与加占位符之前的模板**逐字节一致**（不会多一个空行）。
+_GLOSSARY_EMPTY_RE = re.compile(r"\n[ \t]*\{glossary\}[ \t]*")
 
-def load_prompt(name: str, **substitutions) -> str:
+
+def load_prompt(name: str, glossary=None, **substitutions) -> str:
     """加载提示词文件并替换 ``{key}`` 占位符。
 
     从 ``agents/<name>.md`` 读取；文件里若有 ```text 代码块则取块内内容。
+
+    ``glossary`` 是可选的术语表（:class:`babeldoc_tools.glossary.GlossaryEntry` 序列）：
+    非空时渲染成术语约束段替换模板里的 ``{glossary}`` 占位行；为空/缺省时该占位行整行
+    省略（模板里没有这个占位符也不报错）。术语表的渲染规则见
+    :func:`babeldoc_tools.glossary.render_prompt_block`。
     """
     candidates = [
         AGENTS_DIR / f"{name}.md",
@@ -94,6 +105,7 @@ def load_prompt(name: str, **substitutions) -> str:
             text = candidate.read_text(encoding="utf-8")
             blocks = _FENCE_RE.findall(text)
             body = blocks[0] if blocks else text
+            body = _substitute_glossary(body, glossary)
             for key, value in substitutions.items():
                 body = body.replace("{" + key + "}", str(value))
             return body
@@ -101,6 +113,21 @@ def load_prompt(name: str, **substitutions) -> str:
         "prompt_missing",
         f"提示词未找到: {name}（查找 {[str(c) for c in candidates]}）",
     )
+
+
+def _substitute_glossary(body: str, glossary) -> str:
+    """替换/删除模板里的术语表占位行（见 :func:`load_prompt`）。
+
+    渲染器放在 :mod:`babeldoc_tools.glossary`（CLI 与 serve 共用一份词表实现），
+    这里**延迟导入**：``glossary`` 模块 import 本模块取 ``ToolError``，模块级互相 import
+    会成环。
+    """
+    from babeldoc_tools import glossary as glossary_mod
+
+    block = glossary_mod.render_prompt_block(glossary or ())
+    if block:
+        return body.replace(GLOSSARY_PLACEHOLDER, block)
+    return _GLOSSARY_EMPTY_RE.sub("", body, count=1)
 
 
 def prompt_path(name: str) -> Path | None:

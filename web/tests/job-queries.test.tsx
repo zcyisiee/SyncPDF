@@ -124,13 +124,20 @@ describe('W08 hooks（mock fetch）', () => {
     expect(result.current.error).toMatchObject({ code: 'file_too_large', status: 413 });
   });
 
-  it('useCreateJobMutation：POST 只带 action/from/pages/dual/profile', async () => {
+  it('useCreateJobMutation：POST 只带 action/from/pages/dual/profile/use_glossary', async () => {
     const calls = recordFetch({
       'POST /api/v1/documents/alpha/jobs': () =>
         jsonResponse({ job_id: 'j_1', status: 'queued', action: 'run' }, 202),
     });
     const { result } = renderHook(() => useCreateJobMutation('alpha'), { wrapper });
-    result.current.mutate({ action: 'run', from: 'parse', pages: '1-3', dual: true, profile: 'echo-t' });
+    result.current.mutate({
+      action: 'run',
+      from: 'parse',
+      pages: '1-3',
+      dual: true,
+      profile: 'echo-t',
+      use_glossary: true,
+    });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(calls[0].method).toBe('POST');
     expect(calls[0].url).toBe('/api/v1/documents/alpha/jobs');
@@ -140,14 +147,16 @@ describe('W08 hooks（mock fetch）', () => {
       pages: '1-3',
       dual: true,
       profile: 'echo-t',
+      use_glossary: true,
     });
-    // 客户端侧没有命令/密钥字段可传（类型里也没有）
+    // 客户端侧没有命令/密钥字段可传（类型里也没有）；词表只有这一个布尔开关
     expect(Object.keys(JSON.parse(String(calls[0].body)))).toEqual([
       'action',
       'from',
       'pages',
       'dual',
       'profile',
+      'use_glossary',
     ]);
   });
 

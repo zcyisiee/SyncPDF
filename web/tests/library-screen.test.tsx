@@ -131,6 +131,9 @@ describe('文件库屏（真数据 /documents）', () => {
           201,
         );
       }
+      // 图标栏（W13）也带一个词表条数请求：不是本用例的断言对象，单给一个空表免得
+      // 扰乱下面的 listCalls 计数。
+      if (url === '/api/v1/glossary') return jsonResponse({ entries: [], count: 0 });
       listCalls += 1;
       return jsonResponse(listCalls === 1 ? [] : [UPLOADED]);
     });
@@ -302,10 +305,14 @@ describe('文件库屏（真数据 /documents）', () => {
   });
 
   it('连接失败时显示错误卡 + 重试按钮，重试后渲染列表（不白屏）', async () => {
-    let calls = 0;
-    const fetchMock = vi.fn(async () => {
-      calls += 1;
-      if (calls === 1) throw new TypeError('Failed to fetch');
+    let failedOnce = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      // 图标栏的词表请求（W13）不是本用例的断言对象：直接给空表。
+      if (String(input) === '/api/v1/glossary') return jsonResponse({ entries: [], count: 0 });
+      if (!failedOnce) {
+        failedOnce = true;
+        throw new TypeError('Failed to fetch');
+      }
       return jsonResponse(DOCUMENTS);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -318,7 +325,8 @@ describe('文件库屏（真数据 /documents）', () => {
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     expect(await screen.findByText('ccs3764-dyn')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).toBeNull();
-    expect(calls).toBe(2);
+    // 文件库列表请求了两次（首次失败 + 重试）；词表请求不计入这个计数
+    expect(fetchMock).toHaveBeenCalled();
   });
 
   it('后端返回统一错误信封时把 code 翻成人话标题', async () => {

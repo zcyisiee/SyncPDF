@@ -88,13 +88,14 @@ describe('ActiveJobCard（活动/最近失败任务卡）', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     await waitFor(() => expect(bodies).toHaveLength(1));
-    // 同参数、新 job（不自动重跑）
+    // 同参数、新 job（不自动重跑）；词表开关按记录里的实际值回传（W13）
     expect(bodies[0]).toEqual({
       action: 'run',
       from: 'translate',
       pages: '1-3',
       dual: true,
       profile: 'echo-t',
+      use_glossary: false,
     });
   });
 
