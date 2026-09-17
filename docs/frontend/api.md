@@ -58,6 +58,9 @@ curl -sS http://127.0.0.1:<port>/api/v1/health
 | 400 | `path_escape` | `did` 解析后越出服务根目录（含符号链接越界） |
 | 404 | `document_not_found` | 文档不存在，或不在 `--workdir` 的可见范围内 |
 | 404 | `not_found` | 未知端点 |
+| 404 | `snapshot_unavailable` | `geometry?kind=parse` 缺 parse 段落快照（W02） |
+| 404 | `geometry_unavailable` | `geometry?kind=layout` 缺 `layout_geometry.json`（W02） |
+| 404 | `paragraphs_unavailable` | `paragraphs` 四份段落产物都不存在（W02） |
 | 405 | `method_not_allowed` | 方法不允许（带 `Allow` 头） |
 | 409 | `revision_conflict`（计划） | 草稿乐观并发失败，`detail.current_revision` 给最新值 |
 | 409 | `document_busy`（计划） | 同文档已有活动 job |
@@ -114,20 +117,20 @@ fastapi/uvicorn，message 里给安装命令）、`invalid_port`、`port_unavail
 FastAPI 自带（OpenAPI 3.1）。`openapi-typescript` 从这里生成 `web/src/api/schema.d.ts`。
 
 W01 **只**有这两个端点；没有写端点、没有假 stub。校验（越界/符号链接/`did` 规则）已在
-服务端 resolver 实现并被测试覆盖，但尚未暴露独立端点（见 §3.1）。
+服务端 resolver 实现并被测试覆盖；W02 起这些规则经 §3.1 的六个只读文档端点暴露。
 
 ## 3. 契约词汇（字段冻结；端点在后续任务实现）
 
-### 3.1 只读文档端点（未实现：W02 / W03）
+### 3.1 只读文档端点（前六个已实现：W02；其余待实现：W03）
 
 | 方法 | 路径 | 说明 | 状态 |
 |---|---|---|---|
-| GET | `/api/v1/documents` | 文档列表（`did`、页数/段数、阶段状态、最近活动时间） | 未实现（W02） |
-| GET | `/api/v1/documents/{did}` | 元信息：`pdf`、`config`、页数/段数、质量与编译状态 | 未实现（W02） |
-| GET | `/api/v1/documents/{did}/stage-state` | 7 阶段状态 + **真实** `started_at`/`finished_at`/耗时 | 未实现（W02） |
-| GET | `/api/v1/documents/{did}/paragraphs` | 段落面板数据（原文/译文/排版参数 join） | 未实现（W02） |
-| GET | `/api/v1/documents/{did}/geometry` | `?kind=parse\|layout&page=N`，bbox（`pdf_topleft`） | 未实现（W02） |
-| GET | `/api/v1/documents/{did}/check` | 结构审查/排版 lint/链接审计三组组装 | 未实现（W02） |
+| GET | `/api/v1/documents` | 文档列表（`did`、页数/段数、阶段状态、最近活动时间） | 已实现（W02） |
+| GET | `/api/v1/documents/{did}` | 元信息：`pdf`、`config`、页数/段数、质量与编译状态 | 已实现（W02） |
+| GET | `/api/v1/documents/{did}/stage-state` | 7 阶段状态 + **真实** `started_at`/`finished_at`/耗时 | 已实现（W02） |
+| GET | `/api/v1/documents/{did}/paragraphs` | 段落面板数据（原文/译文/排版参数 join） | 已实现（W02） |
+| GET | `/api/v1/documents/{did}/geometry` | `?kind=parse\|layout&page=N`，bbox（`pdf_topleft`） | 已实现（W02） |
+| GET | `/api/v1/documents/{did}/check` | 结构审查/排版 lint/链接审计三组组装 | 已实现（W02） |
 | GET | `/api/v1/documents/{did}/events` | 分页事件（§1.3） | 未实现（W03） |
 | GET | `/api/v1/documents/{did}/events/stream` | SSE（§1.4） | 未实现（W03） |
 | GET | `/api/v1/documents/{did}/artifacts[/{name}]` | 清单 + 白名单 Range 下载 | 未实现（W03） |

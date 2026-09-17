@@ -1,12 +1,14 @@
-"""FastAPI app factory：``bdt serve`` 的 HTTP 层（W01 只读骨架）。
+"""FastAPI app factory：``bdt serve`` 的 HTTP 层（只读）。
 
-W01 只实现两个端点：
+端点：
 
-- ``GET /api/v1/health``
-- ``GET /openapi.json``（FastAPI 自带；``/docs`` 亦可用）
+- ``GET /api/v1/health``（W01）
+- ``GET /api/v1/documents`` 及其只读子资源（W02，见
+  :mod:`babeldoc_tools.serve.routers.documents`）
+- ``GET /openapi.json`` / ``GET /docs``（FastAPI 自带）
 
-后续端点（文档列表/详情、几何、事件 SSE、下载、jobs…）在
-``docs/frontend/api.md`` 里冻结形状，由 W02+ 实现 —— 这里不写假成功 stub。
+后续端点（事件 SSE、下载、jobs…）在 ``docs/frontend/api.md`` 里冻结形状，由
+W03+ 实现 —— 这里不写假成功 stub。
 
 本模块在 import 时即需要 ``fastapi``（web extra）；``bdt serve --help`` 与其它
 ``bdt`` 子命令都不 import 本模块，因此没有 web extra 也能用。
@@ -25,6 +27,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from babeldoc_tools import __version__
 from babeldoc_tools.common import ToolError
+from babeldoc_tools.serve.routers.documents import documents_router
 from babeldoc_tools.serve.schemas import API_PREFIX
 from babeldoc_tools.serve.schemas import ErrorBody
 from babeldoc_tools.serve.schemas import ErrorEnvelope
@@ -38,6 +41,10 @@ _TOOL_ERROR_STATUS = {
     "invalid_document_id": 400,
     "path_escape": 400,
     "document_not_found": 404,
+    # 产物不存在（不是空数组假成功）：parse 快照 / layout 几何 / 全部段落产物
+    "snapshot_unavailable": 404,
+    "geometry_unavailable": 404,
+    "paragraphs_unavailable": 404,
     "invalid_root": 500,
     "root_missing": 503,
 }
@@ -76,7 +83,7 @@ def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI
     """组装 FastAPI 应用（纯工厂：不读环境变量、不起进程、不写文件）。"""
     app = FastAPI(
         title="bdt serve",
-        description="BabelDOC 文档翻译工具层的本地只读 HTTP 接口（W01 骨架）",
+        description="BabelDOC 文档翻译工具层的本地只读 HTTP 接口",
         version=__version__,
     )
     # 不注册 CORSMiddleware：v1 只服务 loopback 同源/开发代理，禁止任意来源跨域。
@@ -144,5 +151,7 @@ def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI
             root=str(store.root),
             documents=len(store.list_dids()),
         )
+
+    app.include_router(documents_router(store))
 
     return app
