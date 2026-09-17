@@ -1,4 +1,29 @@
-# ieeTranslater Web 前端 — 架构与协议初稿（v0.1）
+# ieeTranslater Web 前端 — 架构与协议初稿（v0.1，历史）
+
+> ⚠️ **历史协议：不要据本文实现。** 本文是 2026-09 的初稿，其中
+> `/projects/{pid}/documents/{did}` 前缀、模块清单与部分端点形状已被修订。
+>
+> - 现行 HTTP 契约：`docs/frontend/api.md`（+ 运行中 `bdt serve` 的 `/openapi.json`）
+> - 范围 / 顺序 / 验收：`.plan/web-frontend/PLAN.md` 与 `.plan/web-frontend/EXECUTION.md`
+>   （EXECUTION.md 优先于 PLAN.md 与本文的旧结论）
+>
+> 本文只保留为决策记录与设计背景。
+
+## 快速开始（现行）
+
+```bash
+# 装 web extra（不装也能用 parse/translate/.../run）
+uv pip install --python .venv/bin/python "fastapi>=0.115" "uvicorn[standard]>=0.32" "python-multipart>=0.0.9"
+
+# 启动只读服务（stdout 打印真实端口；docs 页在 /docs）
+PATH="$PWD/.venv/bin:$PATH" bdt serve --root tmp            # 枚举 tmp/<did>/
+PATH="$PWD/.venv/bin:$PATH" bdt serve --workdir tmp/ccs3764-dyn   # 只公开这一个文档
+curl -sS http://127.0.0.1:<port>/api/v1/health
+```
+
+完整约定见 `docs/frontend/api.md`。
+
+---
 
 > 分支 `feat/web-frontend`。本文是与用户多轮对齐后的**决策记录 + 接口协议初稿**，
 > 供后续迭代修订。设计稿见 OpenDesign 项目「ieeTranslater 前端交互设计」。

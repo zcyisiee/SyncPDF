@@ -57,6 +57,12 @@ dependencies = [
 directml = ["onnxruntime-directml>=1.16.1"]
 cuda = ["onnxruntime-gpu>=1.16.1"]
 memray = ["memray>=1.17.1"]
+# Web 前端服务（``bdt serve``）。基础 CLI（parse/translate/.../run）不需要这些依赖。
+web = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "python-multipart>=0.0.9",
+]
 
 [project.urls]
 Homepage = "https://github.com/funstory-ai/BabelDOC"

@@ -14,6 +14,7 @@
     bdt report --workdir tmp/wd
     bdt run <pdf> --workdir tmp/wd [--from build] [--markdown self] \
         [--translator <cmd>] [--reviewer <cmd>]
+    bdt serve (--root <dir> | --workdir <dir>) [--host 127.0.0.1] [--port 0] [--open]
 
 约定：
 
@@ -26,6 +27,8 @@
   并以 ``waiting_for_reviewer``（exit 1）结束——质量门禁不把"没人审查"当成功。
 - ``bdt check`` 聚合结构审查 / 排版 lint / 链接审计；``--strict`` 时 verdict
   非 pass（含子项不可用）退出码 1，``bdt run`` 的 check 步用同一语义。
+- ``bdt serve`` 是长驻 HTTP 服务（需 web extra），stdout 只在**绑定端口成功后**
+  打印一次启动信封（含真实端口/URL），之后日志全部走 stderr。
 """
 
 from __future__ import annotations
@@ -50,6 +53,7 @@ from babeldoc_tools import report
 from babeldoc_tools import review
 from babeldoc_tools import run as run_tool
 from babeldoc_tools import translate
+from babeldoc_tools.serve import cli as serve_cli
 
 #: ``run`` 的续跑起点；顺序与 :data:`babeldoc_tools.run.STAGES` 一致。
 RUN_STAGES = run_tool.STAGES
@@ -366,6 +370,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--title", default=None)
     p_run.add_argument("--notes", default=None)
     _add_debug_flags(p_run, recompile=True)
+
+    # ---- serve ----------------------------------------------------------- #
+    # Web 前端入口；只 import 标准库 + store/schemas，缺 web extra 也能 --help。
+    serve_cli.add_parser(sub)
 
     return parser
 
@@ -754,6 +762,9 @@ def main(argv=None) -> int:
             parser.error("--debug-recompile 需要同时指定 --debug")
         if getattr(args, "latex_bbox", True) is False:
             parser.error("--debug-recompile 与 --no-latex-bbox 互斥")
+    if args.command == "serve":
+        # 长驻服务：自己写启动信封（绑定端口后才知道真实 URL），不走单行 JSON 收尾。
+        return serve_cli.run(args)
     # 实现函数/第三方库的 print 一律走 stderr，保证 stdout 只有最终 JSON。
     with contextlib.redirect_stdout(sys.stderr):
         payload = _dispatch(args)
