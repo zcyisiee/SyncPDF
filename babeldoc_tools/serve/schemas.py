@@ -1,9 +1,11 @@
 """``bdt serve`` 的响应模型与公共契约词表。
 
 只有**已实现**端点才在这里建模（W01 ``/api/v1/health``；W02 ``/api/v1/documents``
-六个只读端点）；后续端点的字段形状冻结在 ``docs/frontend/api.md``，实现时再落到
-本模块 —— 不预置假 stub。模型里的 ``dict`` 字段承载产物内部结构：产物是信任边界内
-的本地文件，不在这里逐字段复刻它们的 schema。
+六个只读端点；W03 事件分页与产物清单）；后续端点的字段形状冻结在
+``docs/frontend/api.md``，实现时再落到本模块 —— 不预置假 stub。SSE 帧是
+``text/event-stream`` 文本行，不走 pydantic（见
+:mod:`babeldoc_tools.serve.routers.events`）。模型里的 ``dict`` 字段承载产物内部
+结构：产物是信任边界内的本地文件，不在这里逐字段复刻它们的 schema。
 
 HTTP 层约定（与 ``bdt`` CLI 的 stdout 信封不同）：
 
@@ -40,6 +42,8 @@ STAGE_NOT_RUN = "not_run"
 
 __all__ = [
     "API_PREFIX",
+    "ArtifactItem",
+    "ArtifactsResponse",
     "COORD_SYSTEM_LAYOUT",
     "COORD_SYSTEM_PARSE",
     "STAGES",
@@ -53,6 +57,7 @@ __all__ = [
     "DocumentPdf",
     "ErrorBody",
     "ErrorEnvelope",
+    "EventsPage",
     "GeometryResponse",
     "HealthResponse",
     "ParagraphItem",
@@ -311,3 +316,50 @@ class CheckResponse(BaseModel):
     #: ``agent/link_audit.json``（链接审计）。
     link_audit: dict[str, Any] | None = None
     available: CheckAvailability
+
+
+# --------------------------------------------------------------------------- #
+# W03：事件分页与产物清单（api.md §1.3 / §1.5）
+# --------------------------------------------------------------------------- #
+class EventsPage(BaseModel):
+    """``GET /api/v1/documents/{did}/events``：一页事件 + 续传游标（api.md §1.3）。
+
+    ``run_id`` 是本页事件**实际来源**的 run。``seq`` 只在单 run 内单调递增，游标语义
+    是 ``(run_id, seq)``（api.md §1.3），前端要靠它组 SSE 的 ``Last-Event-ID``；
+    这是对 §1.3 响应形状的 additive 扩展（三个原键不变）。
+
+    ``next_after_seq`` 是**扫描位置**而不是匹配位置：带 ``stage``/``kind`` 过滤时
+    即使本页 0 条匹配也必须推进，否则过滤条件会卡住轮询。``events`` 是事件原样
+    透传（``{seq, at, stage, kind, data}``，不裁剪 ``data``）。
+    """
+
+    run_id: str
+    events: list[dict[str, Any]]
+    next_after_seq: int
+    has_more: bool
+
+
+class ArtifactItem(BaseModel):
+    """``GET /api/v1/documents/{did}/artifacts`` 的一件产物（api.md §1.5）。
+
+    ``name`` 既是稳定短名也是下载键（``artifacts/{name}`` 的路径参数）：workdir
+    相对路径，如 ``output/paper.mono.pdf`` / ``agent/translated.md`` / ``source.pdf``。
+    ``path`` 与 ``name`` 同值（沿用 W02 ``PdfOutput.path`` 的"相对 workdir"约定，
+    不是服务端绝对路径）。
+
+    W03 没有草稿编译产物（草稿与编译修订号按 §3.2 在 W09 落地），所以 §1.5 提到的
+    ``revision`` 字段在这里暂不出现 —— 没有真实来源就不塞假值。
+    """
+
+    name: str
+    path: str
+    kind: Literal["pdf", "markdown", "json", "report", "source"]
+    size: int
+    #: 文件 mtime，UTC ISO8601（毫秒 + ``Z``）。
+    mtime: str
+
+
+#: ``GET /api/v1/documents/{did}/artifacts`` 的响应形状：**JSON 数组**（与
+#: ``/paragraphs`` 同风格，不额外套一层对象）。白名单与 kind 规则见
+#: :mod:`babeldoc_tools.serve.artifacts`。
+ArtifactsResponse = list[ArtifactItem]

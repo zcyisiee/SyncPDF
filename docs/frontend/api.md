@@ -61,6 +61,8 @@ curl -sS http://127.0.0.1:<port>/api/v1/health
 | 404 | `snapshot_unavailable` | `geometry?kind=parse` 缺 parse 段落快照（W02） |
 | 404 | `geometry_unavailable` | `geometry?kind=layout` 缺 `layout_geometry.json`（W02） |
 | 404 | `paragraphs_unavailable` | `paragraphs` 四份段落产物都不存在（W02） |
+| 404 | `events_unavailable` | 没有任何 run 归档，或指定的 `run_id` 不存在（W03） |
+| 404 | `artifact_not_found` | 产物不在白名单内或不存在（不泄露存在性，W03） |
 | 405 | `method_not_allowed` | 方法不允许（带 `Allow` 头） |
 | 409 | `revision_conflict`（计划） | 草稿乐观并发失败，`detail.current_revision` 给最新值 |
 | 409 | `document_busy`（计划） | 同文档已有活动 job |
@@ -73,7 +75,7 @@ fastapi/uvicorn，message 里给安装命令）、`invalid_port`、`port_unavail
 
 ### 1.3 分页 / 游标
 
-- 事件分页：`?after_seq=<int>&limit=<int>`，响应 `{"events": [...], "next_after_seq": <int>, "has_more": <bool>}`。
+- 事件分页：`?after_seq=<int>&limit=<int>`（默认 500，上限 2000；另有 `stage`/`kind` 过滤与 `run_id` 选择），响应 `{"run_id": <str>, "events": [...], "next_after_seq": <int>, "has_more": <bool>}`。`run_id` 是本页事件实际来源的 run（前端组 SSE `Last-Event-ID` 需要；W03 additive 扩展）。
 - **即使本页没有匹配事件也要推进 `next_after_seq`**（游标是扫描位置，不是匹配位置），
   否则过滤条件会卡住轮询。
 - `events.jsonl` 的 `seq` **只在单个 run 内**单调递增：跨 run 必须用 `run_id` 作为身份，
@@ -89,7 +91,7 @@ fastapi/uvicorn，message 里给安装命令）、`invalid_port`、`port_unavail
 
 ### 1.5 归档下载
 
-- `GET /documents/{did}/artifacts`：产物清单（`name`、`size`、`mtime`、`revision`、`kind`）。
+- `GET /documents/{did}/artifacts`：产物清单（`name`、`path`、`size`、`mtime`、`kind`；`revision` 待 W09 编译修订落地后加入，不塞假值）。
 - `GET /documents/{did}/artifacts/{name}`：只允许清单内的白名单名字，支持 Range
   （`Accept-Ranges: bytes`，`206` + `Content-Range`），pdf.js 依赖这一点。
 - **下载链接必须关联 artifact 的编译 revision**；旧 PDF 不得被前端标成最新（见 §3.2）。
@@ -121,7 +123,7 @@ W01 **只**有这两个端点；没有写端点、没有假 stub。校验（越�
 
 ## 3. 契约词汇（字段冻结；端点在后续任务实现）
 
-### 3.1 只读文档端点（前六个已实现：W02；其余待实现：W03）
+### 3.1 只读文档端点（前六个：W02；后三行：W03）
 
 | 方法 | 路径 | 说明 | 状态 |
 |---|---|---|---|
@@ -131,9 +133,9 @@ W01 **只**有这两个端点；没有写端点、没有假 stub。校验（越�
 | GET | `/api/v1/documents/{did}/paragraphs` | 段落面板数据（原文/译文/排版参数 join） | 已实现（W02） |
 | GET | `/api/v1/documents/{did}/geometry` | `?kind=parse\|layout&page=N`，bbox（`pdf_topleft`） | 已实现（W02） |
 | GET | `/api/v1/documents/{did}/check` | 结构审查/排版 lint/链接审计三组组装 | 已实现（W02） |
-| GET | `/api/v1/documents/{did}/events` | 分页事件（§1.3） | 未实现（W03） |
-| GET | `/api/v1/documents/{did}/events/stream` | SSE（§1.4） | 未实现（W03） |
-| GET | `/api/v1/documents/{did}/artifacts[/{name}]` | 清单 + 白名单 Range 下载 | 未实现（W03） |
+| GET | `/api/v1/documents/{did}/events` | 分页事件（§1.3） | 已实现（W03） |
+| GET | `/api/v1/documents/{did}/events/stream` | SSE（§1.4） | 已实现（W03） |
+| GET | `/api/v1/documents/{did}/artifacts[/{name}]` | 清单 + 白名单 Range 下载 | 已实现（W03） |
 
 阶段名固定为 `parse` → `translate` → `apply` → `build` → `check` → `review` → `report`
 （`babeldoc_tools/run.py::STAGES`）。

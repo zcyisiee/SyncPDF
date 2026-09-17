@@ -5,10 +5,14 @@
 - ``GET /api/v1/health``（W01）
 - ``GET /api/v1/documents`` 及其只读子资源（W02，见
   :mod:`babeldoc_tools.serve.routers.documents`）
+- ``GET /api/v1/documents/{did}/events`` + ``/events/stream``（W03，见
+  :mod:`babeldoc_tools.serve.routers.events`）
+- ``GET/HEAD /api/v1/documents/{did}/artifacts[/{name}]``（W03，见
+  :mod:`babeldoc_tools.serve.routers.artifacts`）
 - ``GET /openapi.json`` / ``GET /docs``（FastAPI 自带）
 
-后续端点（事件 SSE、下载、jobs…）在 ``docs/frontend/api.md`` 里冻结形状，由
-W03+ 实现 —— 这里不写假成功 stub。
+后续端点（jobs、草稿、版本…）在 ``docs/frontend/api.md`` 里冻结形状，由 W07+
+实现 —— 这里不写假成功 stub。
 
 本模块在 import 时即需要 ``fastapi``（web extra）；``bdt serve --help`` 与其它
 ``bdt`` 子命令都不 import 本模块，因此没有 web extra 也能用。
@@ -27,7 +31,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from babeldoc_tools import __version__
 from babeldoc_tools.common import ToolError
+from babeldoc_tools.serve.routers.artifacts import artifacts_router
 from babeldoc_tools.serve.routers.documents import documents_router
+from babeldoc_tools.serve.routers.events import events_router
 from babeldoc_tools.serve.schemas import API_PREFIX
 from babeldoc_tools.serve.schemas import ErrorBody
 from babeldoc_tools.serve.schemas import ErrorEnvelope
@@ -45,6 +51,10 @@ _TOOL_ERROR_STATUS = {
     "snapshot_unavailable": 404,
     "geometry_unavailable": 404,
     "paragraphs_unavailable": 404,
+    # 事件：没有任何 run 归档 / 指定的 run 不存在（不拿空数组冒充"没有事件"）
+    "events_unavailable": 404,
+    # 产物下载：不在白名单内 / 不存在 / 路径或符号链接越界（同一个码，不泄露存在性）
+    "artifact_not_found": 404,
     "invalid_root": 500,
     "root_missing": 503,
 }
@@ -153,5 +163,7 @@ def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI
         )
 
     app.include_router(documents_router(store))
+    app.include_router(events_router(store))
+    app.include_router(artifacts_router(store))
 
     return app
