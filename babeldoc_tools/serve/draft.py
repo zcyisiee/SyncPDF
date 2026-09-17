@@ -49,6 +49,7 @@ __all__ = [
     "DraftStore",
     "PARAGRAPH_ID_RE",
     "draft_path",
+    "merge_changes",
     "read_draft",
     "validate_changes",
 ]
@@ -176,6 +177,31 @@ def validate_changes(paragraphs: Any) -> dict[str, dict[str, Any] | None]:
     return out
 
 
+def merge_changes(
+    doc: DraftDoc, changes: dict[str, dict[str, Any] | None], now: str
+) -> None:
+    """把校验过的补丁合并进草稿（**就地**改 ``doc.paragraphs``，不 +revision、不落盘）。
+
+    :meth:`DraftStore.patch` 与 :meth:`DraftStore.patch_current` 共用这一份合并逻辑：
+    两个写者的区别只在"基准 revision 由谁给"，合并语义必须完全一致（否则同一个补丁
+    走两条路会落出两份不同的草稿）。
+    """
+    for pid, entry in changes.items():
+        if entry is None:
+            doc.paragraphs.pop(pid, None)
+            continue
+        para = doc.paragraphs.get(pid) or DraftParagraph()
+        if "target" in entry:
+            para.target = entry["target"]
+        if "layout" in entry:
+            para.layout = entry["layout"]
+        if para.target is None and para.layout is None:
+            doc.paragraphs.pop(pid, None)  # 两个字段都被删 = 整段没覆盖
+            continue
+        para.updated_at = now
+        doc.paragraphs[pid] = para
+
+
 class DraftStore:
     """一个 workdir 的草稿读写（``asyncio.Lock`` 串行化写，读不加锁）。
 
@@ -230,20 +256,25 @@ class DraftStore:
                     base_revision=base_revision,
                 )
             now = utc_now()
-            for pid, entry in changes.items():
-                if entry is None:
-                    doc.paragraphs.pop(pid, None)
-                    continue
-                para = doc.paragraphs.get(pid) or DraftParagraph()
-                if "target" in entry:
-                    para.target = entry["target"]
-                if "layout" in entry:
-                    para.layout = entry["layout"]
-                if para.target is None and para.layout is None:
-                    doc.paragraphs.pop(pid, None)  # 两个字段都被删 = 整段没覆盖
-                    continue
-                para.updated_at = now
-                doc.paragraphs[pid] = para
+            merge_changes(doc, changes, now)
+            doc.revision += 1
+            doc.updated_at = now
+            self._write(doc)
+            return doc
+
+    async def patch_current(self, paragraphs: Any) -> DraftDoc:
+        """服务端自身的写者（W11 候选采用）：锁内以**当前** revision 为基准写。
+
+        与 :meth:`patch` 共用同一把锁与同一条落盘路径，因此写入仍然串行；区别只是
+        "基准"由服务端在锁内读，而不是由客户端给 —— 采用候选是服务端发起的动作，
+        客户端给不出一个它没读过的 revision（也不该为了这个多发一次 GET）。
+        ``revision`` 照常 +1（不回退），因此照样触发编译防抖。
+        """
+        changes = validate_changes(paragraphs)
+        async with self._lock:
+            doc = self.read()
+            now = utc_now()
+            merge_changes(doc, changes, now)
             doc.revision += 1
             doc.updated_at = now
             self._write(doc)

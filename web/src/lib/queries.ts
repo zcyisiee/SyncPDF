@@ -12,6 +12,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type {
   ArtifactItem,
+  CandidateItem,
+  CandidateJobAccepted,
+  CandidateListResponse,
   DocumentDetail,
   DocumentListItem,
   DocumentUploaded,
@@ -60,6 +63,7 @@ export const queryKeys = {
   profiles: ['profiles'] as const,
   draft: (did: string) => ['documents', did, 'draft'] as const,
   paragraphs: (did: string) => ['documents', did, 'paragraphs'] as const,
+  candidates: (did: string, pid: string) => ['documents', did, 'paragraphs', pid, 'candidates'] as const,
 };
 
 /**
@@ -417,6 +421,111 @@ function invalidateJobViews(client: ReturnType<typeof useQueryClient>, did: stri
   void client.invalidateQueries({ queryKey: queryKeys.document(did) });
   void client.invalidateQueries({ queryKey: queryKeys.stageState(did) });
   void client.invalidateQueries({ queryKey: queryKeys.documents });
+}
+
+// --------------------------------------------------------------------------- #
+// W11：重译候选（api.md §3.6）
+// --------------------------------------------------------------------------- #
+
+/** 候选列表里还有"生成中"（`candidate_target=null`）的条目时的轮询间隔。 */
+export const CANDIDATES_PENDING_REFETCH_MS = 2_000;
+
+/**
+ * 某段的重译候选（`GET /documents/{did}/paragraphs/{pid}/candidates`）。
+ *
+ * 自限轮询：只有列表里还有 `pending` 且 `candidate_target=null`（生成中的那条）时才按
+ * 2s 取——候选行在提交时就出现（服务端发号），生成完成后同一个 id 才拿到译文，
+ * 所以这里必须轮询一次；一旦都生成完了就停，不空转。
+ */
+export function useCandidates(did: string | null, pid: string | null) {
+  return useQuery({
+    queryKey: queryKeys.candidates(did ?? '', pid ?? ''),
+    queryFn: () =>
+      apiGet<CandidateListResponse>(
+        `/documents/${encodeURIComponent(did ?? '')}/paragraphs/${encodeURIComponent(
+          pid ?? '',
+        )}/candidates`,
+      ),
+    staleTime: 2_000,
+    enabled: did !== null && did !== '' && pid !== null && pid !== '',
+    refetchInterval: (query) =>
+      (query.state.data?.items ?? []).some(
+        (item) => item.status === 'pending' && item.candidate_target === null,
+      )
+        ? CANDIDATES_PENDING_REFETCH_MS
+        : false,
+  });
+}
+
+/**
+ * 生成重译候选（`POST …/paragraphs/{pid}/retranslate`）：只传 **profile id**
+ * （translator 命令由服务端从 profile 解析，客户端连字段都没有）。
+ *
+ * 生成是一个 job（同文档串行）：202 拿到 `job_id` 后靠 `useJobs` 轮询看结局；候选行
+ * 同时出现在候选列表里（`candidate_target=null` = 生成中）。**不采用就不改译文** ——
+ * 这里不碰草稿缓存，只有 `useAdoptCandidateMutation` 才会让草稿失效。
+ */
+export function useRetranslateMutation(did: string, pid: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (profile: string) =>
+      apiPost<CandidateJobAccepted>(
+        `/documents/${encodeURIComponent(did)}/paragraphs/${encodeURIComponent(
+          pid,
+        )}/retranslate`,
+        { profile },
+      ),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.candidates(did, pid) });
+      // 生成是一个 job（排队/并发/取消）：job 与进度视图要刷新。刻意**不**失效草稿：
+      // 生成不改译文（这正是 W11 的语义），草稿在这里不该被重新拉。
+      void client.invalidateQueries({ queryKey: queryKeys.jobs(did) });
+      void client.invalidateQueries({ queryKey: queryKeys.stageState(did) });
+    },
+  });
+}
+
+/**
+ * 采用候选（`POST …/candidates/{cid}/adopt`）：服务端写草稿（`revision+1`）+ 触发防抖编译，
+ * 返回体就是**新草稿**（与 `PATCH /draft` 同形状），直接写进草稿缓存并让详情/列表失效
+ * （`compile.stale` 会随之变化）。
+ */
+export function useAdoptCandidateMutation(did: string, pid: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (candidateId: string) =>
+      apiPost<DraftResponse>(
+        `/documents/${encodeURIComponent(did)}/paragraphs/${encodeURIComponent(
+          pid,
+        )}/candidates/${encodeURIComponent(candidateId)}/adopt`,
+      ),
+    onSuccess: (draft) => {
+      // 与 `usePatchDraftMutation` 同一口径：先把响应当作新草稿写进缓存（译文框**立刻**变
+      // 候选文本），再让受 job 影响的视图重新取（`compile.stale` 会随之变化）。
+      client.setQueryData(queryKeys.draft(did), draft);
+      void client.invalidateQueries({ queryKey: queryKeys.candidates(did, pid) });
+      invalidateJobViews(client, did);
+    },
+  });
+}
+
+/**
+ * 拒绝候选（`POST …/candidates/{cid}/reject`）：只改候选状态（服务端不动草稿、不触发编译），
+ * 因此也不让草稿/详情失效 —— 只刷新候选列表。
+ */
+export function useRejectCandidateMutation(did: string, pid: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (candidateId: string) =>
+      apiPost<CandidateItem>(
+        `/documents/${encodeURIComponent(did)}/paragraphs/${encodeURIComponent(
+          pid,
+        )}/candidates/${encodeURIComponent(candidateId)}/reject`,
+      ),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.candidates(did, pid) });
+    },
+  });
 }
 
 /** 供 UI 判断"这次失败是不是文件太大"（413 单独给文案）。 */

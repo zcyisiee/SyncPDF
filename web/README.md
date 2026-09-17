@@ -5,13 +5,14 @@ Vite + React 18 + TypeScript + Tailwind + TanStack Query + Zustand。
 `tailwind.config.ts` + `src/app/globals.css`）；HTTP 契约唯一事实来源：
 `docs/frontend/api.md` 与运行中服务的 `/openapi.json`。
 
-本目录当前范围（W10）：三栏工作台壳 + 设计令牌 + hash 路由 +
+本目录当前范围（W11）：三栏工作台壳 + 设计令牌 + hash 路由 +
 **PDF 预览**（pdf.js 渲染产物 PDF、parse/layout 两套 bbox 叠加、源/译/对照三模式、点框选中）+
 **进度层**（事件流面板 + 真 SSE 增量 + 阶段时间线真耗时 + 运行中状态）+
 **上传与任务**（文件库拖/选上传 PDF → 新文档、工作台「开始翻译」配置卡、运行中/失败卡与取消）+
 **编辑闭环**（右侧面板段落 tab：改译文 / 调排版参数、bbox 八手柄拖拽、草稿乐观并发写、
-自动/手动编译状态条、按修订号下载与质量徽标）。
-**不做**：连续滚动、缩放控件、译文覆盖层、重译候选（W11）、版本归档/回滚（W12）、词表（W13）；
+自动/手动编译状态条、按修订号下载与质量徽标）+
+**重译候选**（段落面板「AI 重译」→ 候选对比（原文/当前译文/候选译文）→ 采用进草稿 / 拒绝）。
+**不做**：连续滚动、缩放控件、译文覆盖层、版本归档/回滚（W12）、词表（W13）；
 这些区域渲染带 `data-od-id` 的占位并写明接入任务。
 
 ## 开发工作流（两个终端）
@@ -39,7 +40,7 @@ serve 不注册 CORS，所以前端必须走这个同源代理（`docs/frontend/
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm lint` | eslint flat config + typescript-eslint，`--max-warnings 0` |
 | `pnpm test` | Vitest（jsdom + @testing-library/react），不起真后端 |
-| `pnpm e2e` | Playwright 真浏览器用例（`e2e/edit.spec.ts` · `preview.spec.ts` · `progress.spec.ts` · `upload.spec.ts`）：起真 serve + 真 dev server |
+| `pnpm e2e` | Playwright 真浏览器用例（`e2e/edit.spec.ts` · `preview.spec.ts` · `progress.spec.ts` · `retranslate.spec.ts` · `upload.spec.ts`）：起真 serve + 真 dev server |
 | `pnpm sync:pdfjs` | 单独把 pdf.js worker/cmaps/standard_fonts 复制进 `public/pdfjs/` |
 | `pnpm gen:api` | 从运行中的 serve 拉 `/openapi.json` 生成 `src/api/schema.d.ts` |
 
@@ -56,8 +57,8 @@ web/
                 shell/（Topbar/IconRail/ScreenFrame/Gutter/ViewRail/InspectorPanel/Timeline）
                 events/（EventStreamPanel · EventRow · useEventWindow · useEventStream · useTimelineStages）
                 preview/（PdfCanvas · BboxLayer · PreviewToolbar · PreviewArea · CompileBar · DownloadButton）
-                edit/（ParagraphEditor · BboxEditor）
-    lib/        api.ts（/api/v1 + 错误信封 + PATCH/POST/PUT/multipart）· queries.ts（含 W08 上传/job/profiles、W10 草稿/段落）
+                edit/（ParagraphEditor · BboxEditor · CandidatePanel（W11 重译候选））
+    lib/        api.ts（/api/v1 + 错误信封 + PATCH/POST/PUT/multipart）· queries.ts（含 W08 上传/job/profiles、W10 草稿/段落、W11 候选）
                 uploads.ts（客户端预检：魔数 + 200MB）· jobs.ts（活动判据/轮询/from 判断/页码形状）
                 preview.ts（产物选择 + geometry 解析）· events.ts（SSE 帧/URL/live/分组/窗口合并）
                 draft.ts（草稿解析/排版范围校验/PATCH 构造）· download.ts（下载与质量徽标判定表）
@@ -65,12 +66,12 @@ web/
                 humanize.ts · routing.ts · cn.ts
     components/jobs/  StartJobCard（开始翻译配置卡）· ActiveJobCard（运行中/失败/取消卡）
     screens/    LibraryScreen / DocumentCard / WorkbenchScreen / PlaceholderScreen
-    stores/     ui.ts（三栏宽度 + 分隔条 + 屏/预览模式 + 预览页码/bbox 图层/选中段落）
+    stores/     ui.ts（三栏宽度 + 分隔条 + 屏/预览模式 + 预览页码/bbox 图层/选中段落/重译 profile）
   scripts/      sync-pdfjs-assets.mjs（把 pdf.js 静态资源复制进 public/pdfjs/）
   e2e/          Playwright 真浏览器用例（edit.spec.ts · preview.spec.ts · progress.spec.ts · upload.spec.ts）
                 fixtures/sample.pdf（602 字节最小合法 PDF）· fixtures/sleep-translator.sh（长睡 stub）
   tests/        Vitest 用例（api / store / routing / 文件库屏+上传 / job 卡与 hooks / 工作台壳 /
-                预览坐标与组件 / 编辑坐标与组件（W10）/ 事件流与时间线）
+                预览坐标与组件 / 编辑坐标与组件（W10 编辑、W11 候选面板）/ 事件流与时间线）
   public/pdfjs/ pdf.js worker + cmaps + standard_fonts（生成物，.gitignore，不入库）
   tmp-smoke/    本地冒烟截图与日志（.gitignore，不入库）
 ```
@@ -120,6 +121,14 @@ cd web && pnpm e2e        # 自动起 bdt serve --root ../tmp --port 8793 + vite
   全程无外网请求（禁 CDN）；`progress.spec.ts` 再断言事件面板行数 == 服务端本页条数、最新在上、
   SSE 连上（`data-status=open`）、时间线 7 段 `data-state=ok` 且耗时/总用时与 `stage-state` 同口径、
   无 console error；`upload.spec.ts` 覆盖 W08 的上传→开始→取消（见下）。
+- `retranslate.spec.ts`（W11）自建**完全离线**的 fixture：`tmp/w11-candidates-<时间戳>/` 里放一份
+  602 字节的合法 PDF（根下 `source.pdf` + `output/paper.mono.pdf`，预览要能渲染）+ 最小
+  `agent/{anchors,translated.md,translated.jsonl,layout_geometry}`（段落面板与 bbox 图层有数据），
+  `tmp/.bdt-serve/profiles.json` 里写两条 stub profile（translator = 仓库 `e2e/fixtures/
+  candidate-translator.sh` + 候选正文，**不联网**），跑完还原。用例顺序：点段 → AI 重译 →
+  断言候选 `pending` + **`agent/translated.md`/旧 PDF 的 sha256 不变、`GET /paragraphs` 仍是基线、
+  草稿仍是 r0** → 采用（草稿 r1 + target=候选 + 译文框变文本）→ 断言 1.5s 防抖编译 job 出现后取消
+  （不跑真 build）→ 再生成一条并拒绝（草稿仍是 r1）。
 - **W08 `upload.spec.ts` 的副作用**（都在 `tmp/`，本仓库不入库）：
   - 上传用仓库里的 fixture `web/e2e/fixtures/sample.pdf`（602 字节、正确 xref 的最小合法 PDF），
     每次跑都会在 `tmp/` 下留一个 `up-sample-<时间戳>` 文档（证据，可手工删）；
@@ -290,6 +299,28 @@ SSE 增量的 e2e 留到 W15（W07 有真 job 之后）。
   也让预览在编译后重新取字节（同名产物会被原地替换，不带参数的话 pdf.js 还显示旧 PDF）。
 - 质量徽标：只有 `quality.pipeline_ok=true` 才绿；`check.verdict=needs_fix`（或 reviewer needs_fix）
   一律黄标「检查未通过」；其余中性（「待人工审查」/「检查不可用」）——编译成功 ≠ 质量通过。
+
+## 重译候选（W11）：AI 重译 → 采用 / 拒绝
+
+服务端真源在 `docs/frontend/api.md` §3.6。前端只做两件事：把 profile **id** 发过去（命令由服务端解析）、
+把候选与当前译文并排显示：
+
+- `CandidatePanel`（`components/edit/CandidatePanel.tsx`，挂在 `ParagraphEditor` 下半部分）：
+  「AI 重译」按钮 + profile 下拉（**只列有 translator 的 profile**；选过的记在 `uiStore.retranslateProfile`，
+  会话内记住 = 「或用上次」）+ 候选对比区。
+- 三条数据口径（hooks 在 `lib/queries.ts`）：
+  - 生成 = `POST …/paragraphs/{pid}/retranslate {profile}`（job，`useRetranslateMutation`）：
+    成功后只让候选列表/ jobs / stage-state 失效 —— **草稿不失效**（候选没采用就不改译文，这是 W11 的语义）；
+  - 采用 = `POST …/candidates/{cid}/adopt`（`useAdoptCandidateMutation`）：服务端写草稿（`revision+1`）
+    并触发防抖编译，返回体就是**新草稿** → 直接 `setQueryData(draft)`，所以译文框**立刻**变候选文本、
+    顶部出现「草稿已修改」（不会本地替掉正文，路径与服务端一致）；
+  - 拒绝 = `POST …/candidates/{cid}/reject`：只改候选状态（不动草稿），因此**活动 job 期间也允许**，
+    列表刷新后该候选折进「已决定的候选（N）」（`<details>`）。
+- 候选列表自限轮询：只要有 `pending` 且 `candidate_target=null`（那条还在生成）就 2s 取一次，
+  都生成完就停 —— 候选行在提交时就出现（服务端发号），译文是 job 结束才填上的。
+- 禁用口径：有活动 job / 编译中 → 生成与采用禁用（服务端 409 `document_busy`）；
+  生成中的候选（`candidate_target=null`）采用禁用（服务端 409 `candidate_not_ready`）。
+- 候选**不影响**预览/详情/下载：采用之前那些接口看不到候选内容（服务端保证），前端也不本地替换。
 
 ## 设计与契约约束（改动时别忘）
 

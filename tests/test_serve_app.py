@@ -166,6 +166,10 @@ ALLOWED_WRITE_ROUTES = frozenset(
         # W09 草稿（§3.3）：只有这两个方法会改盘，GET 仍是只读。
         ("patch", f"{API_PREFIX}/documents/{{did}}/draft"),
         ("delete", f"{API_PREFIX}/documents/{{did}}/draft"),
+        # W11 候选（§3.6）：生成（建候选 + 提 job）、采用（写草稿）、拒绝（只改候选状态）。
+        ("post", f"{API_PREFIX}/documents/{{did}}/paragraphs/{{pid}}/retranslate"),
+        ("post", f"{API_PREFIX}/documents/{{did}}/paragraphs/{{pid}}/candidates/{{cid}}/adopt"),
+        ("post", f"{API_PREFIX}/documents/{{did}}/paragraphs/{{pid}}/candidates/{{cid}}/reject"),
     }
 )
 
@@ -174,8 +178,8 @@ def assert_no_unexpected_write_routes(schema: dict) -> None:
     """OpenAPI 里除白名单内的写端点外，所有端点必须只有 GET。
 
     W01–W03 是只读服务；W07 加了两条 POST（提交/取消 job）；W08 加了上传（POST）与
-    profile 写入（PUT）。这里的断言是**安全边界**：多出任何写方法都算越界
-    （而不是"测试过时了"）。
+    profile 写入（PUT）；W11 加了候选的三条 POST（生成/采用/拒绝）。这里的断言是
+    **安全边界**：多出任何写方法都算越界（而不是"测试过时了"）。
     """
     for path, item in schema["paths"].items():
         for method in item:

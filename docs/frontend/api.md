@@ -235,7 +235,7 @@ W01 **只**有这两个端点；没有写端点、没有假 stub。校验（越�
 - 草稿保存触发服务端 1.5s 防抖编译（纯服务端定时器，浏览器断开不丢）；编译在跑的
   1.5s 内到点也会被跳过（不重复编译）。重启后定时器丢失 = 下次写草稿再触发。
 
-### 3.4 jobs（已实现 W07：`run`/`check`；W09：`compile`；`retranslate`→W11）
+### 3.4 jobs（已实现 W07：`run`/`check`；W09：`compile`；`retranslate` 见 §3.6）
 
 ```json
 POST /api/v1/documents/{did}/jobs
@@ -254,8 +254,10 @@ POST /api/v1/documents/{did}/jobs
   服务端在 argv 里**自动带上** `<workdir>/source.pdf` 位置参数（parse 的输入；上传后就在
   那里）；`translate` 及之后不需要它（也不接受客户端传 PDF 路径）。parse 的 MinerU token
   由 **serve 进程环境**（`MINERU_API_TOKEN`）提供，客户端永远不传。
-- `paragraph_ids` / `feedback` 只对 `retranslate` 有效；候选**不得**直接改当前译文
-  （`retranslate_ids` 会合并进 `translated.md`，必须走隔离副本，采用后才写入草稿）。
+- `paragraph_ids` / `feedback`（旧设计稿里的字段）**不在** `POST /jobs` 的请求体里：重译候选
+  必须绑定一个段落（候选 id 由服务端发号），入口是 §3.6 的
+  `POST /documents/{did}/paragraphs/{pid}/retranslate`。`POST /jobs` 收到 `action=retranslate`
+  仍然诚实报 `422 action_not_available`（`detail.hint` 给出替代入口），不返回假 job。
 - `scope` / `base_revision` 只对 `action=compile` 有效（给了别的 action → `422 forbidden_field`）；
   `from` / `pages` / `dual` 只对 `action=run` 有效。v1 页级编译按已批准设计**回退全量**，
   记录里返回 `requested_scope` / `effective_scope` / `downgrade_reason`。
@@ -275,6 +277,8 @@ POST /api/v1/documents/{did}/jobs
   字符串替换为 `<profile:<id>>`，带 token 的 `data.debug.url` 已移除（`run_id`/`manifest` 保留）。
   落盘的那一份（`.bdt-serve/jobs/<jid>.json` 快照）就是脱敏后的文本；`jobs.jsonl` 是状态
   变迁审计日志（只记状态/时间/pid，不带 envelope）。
+- job 记录里的 `paragraph_id` / `candidate_id` 只对 `action=retranslate` 有值（§3.6）：前端从
+  job 就能找到它对应的候选，不需要自己拼 `pid → 最新候选` 的映射。
 
 ### 3.5 上传与 profiles（已实现 W08）+ 其余端点（未实现）
 
@@ -283,7 +287,7 @@ POST /api/v1/documents/{did}/jobs
 | `POST /documents` | multipart 上传 PDF → 建 did | 已实现（W08） |
 | `GET/PUT /profiles` | provider profiles（仅名字对前端可见） | 已实现（W08） |
 | `GET/PATCH/DELETE /documents/{did}/draft` | 草稿读写（§3.3） | 已实现（W09） |
-| `GET /documents/{did}/candidates`、`POST /documents/{did}/candidates/{cid}/accept\|discard` | 重译候选（生成不合并） | W11 |
+| `POST /documents/{did}/paragraphs/{pid}/retranslate`、`GET …/candidates`、`POST …/candidates/{cid}/adopt\|reject` | 重译候选：生成不改译文、采用进草稿（§3.6） | 已实现（W11） |
 | `GET/POST /documents/{did}/versions`、`POST /documents/{did}/versions/{vid}/rollback` | 版本归档与回滚 | W12 |
 | `/glossary...` | 词表 CRUD（全局 + 文档级）、CSV、命中计数 | W13 |
 
@@ -325,6 +329,89 @@ PUT {"id": "deepseek-flash", "label": "DeepSeek Flash", "translator_script": "sc
   缺"可改字段"，报的也是 `forbidden_field`，不是 `validation_error` —— 别把它当成参数没写全。
 - 写盘是同目录 tmp + `os.replace` 的原子写，且只动目标 id 那一条。
 - `DELETE /profiles` 不在 v1 范围（"清空三个字段"就是删除）。
+
+### 3.6 重译候选（已实现 W11）
+
+对不满意段落让 AI 重译，但**候选未采用前绝不进正文**。四条端点：
+
+```json
+POST /api/v1/documents/{did}/paragraphs/P05-002/retranslate
+{"profile": "deepseek-flash"}
+→ 202 {"candidate_id": "c_0001", "job_id": "j_01H...", "status": "queued", "action": "retranslate"}
+
+GET /api/v1/documents/{did}/paragraphs/P05-002/candidates
+→ 200 {"pid": "P05-002", "items": [
+    {"id": "c_0002", "pid": "P05-002", "source": "……原文……", "baseline_target": "基线译文",
+     "candidate_target": "候选译文", "status": "pending", "model_label": "deepseek-flash",
+     "job_id": "j_01H...", "created_at": "2026-09-17T15:54:45.123Z", "adopted_at": null}]}
+
+POST /api/v1/documents/{did}/paragraphs/P05-002/candidates/c_0002/adopt
+→ 200 {"revision": 4, "updated_at": "...", "paragraphs": {"P05-002": {"target": "候选译文", ...}}}
+
+POST /api/v1/documents/{did}/paragraphs/P05-002/candidates/c_0002/reject
+→ 200 {"id": "c_0002", "status": "rejected", ...}
+```
+
+存储：`<did>/.bdt-serve/candidates.json`（服务端私有状态，与 `draft.json` 同级，**不进**
+`agent/`，也不在产物下载白名单里）：
+
+```json
+{"version": 1, "next_id": 3, "items": [
+  {"id": "c_0001", "pid": "P05-002", "source": "……", "baseline_target": "基线译文",
+   "candidate_target": "候选译文", "status": "pending", "model_label": "deepseek-flash",
+   "job_id": "j_01H...", "created_at": "2026-09-17T15:54:45.123Z", "adopted_at": null}]}
+```
+
+- `status` ∈ `pending` | `adopted` | `rejected`（状态机：`pending` → 采用/拒绝；都是终态）。
+- `id` = `c_` + 4 位十进制（`next_id` 单调发号，删行不回退）。
+- `source` / `baseline_target` 是**生成时刻**的快照：`source` 与 `GET /paragraphs` 的
+  `source` 同源（canonical）；`baseline_target` 取 `translated.jsonl`。
+- `candidate_target` 与 `GET /paragraphs` 的 `target`、草稿 `target` **同一表示**（canonical IR
+  占位符）。为 `null` = 还在生成中（job 结束前）；生成失败/被取消的候选行会被**删掉**
+  （列表里不留半条），所以这个态只在 job 活动期间可见。
+- `model_label` 是 profile **id**（命令字符串永不出现）；`job_id` 是生成它的
+  `action=retranslate` job（该 job 的 `paragraph_id`/`candidate_id` 指回这里）。
+- 列表顺序：同一段里最新的 `pending` 在前，其后已决定的候选（新 → 旧）。
+- 重启：已生成的候选仍在（`candidates.json` 持久化）；**生成中**（`candidate_target=null`）
+  的行在启动时删掉 —— job 不会跨进程存活，那些行永远等不到结果。
+
+**零副作用（红线）**：`retranslate` 只写 `candidates.json` + job 状态。生成在
+`<did>/.bdt-serve/candidates-<job_id>/` 的**隔离副本**里跑 `bdt translate --ids <pid>`，
+`agent/translated.md`、`agent/translated.jsonl`、`draft.json`、`compile.json`、`output/`
+一概不动（副本用完即删）。理由：`translate.retranslate_blocks` 会把新译文合并进
+`translated.md`，只能在副本里跑；`translated.md` 的变更只允许发生在**采用后的编译**
+（隔离副本 → 发布），这条链路是 §3.2/§3.3 的那一条。
+
+**命令来源**：请求体只有一个 `profile`（id）。translator 命令由服务端从 profile 解析后进
+argv，客户端永远不传命令/密钥（带了 → `422 forbidden_field`）。v1 不接受 `feedback` 之类
+自由文本（提示词由服务端拼）。
+
+**采用（adopt）**：写草稿 `target = candidate_target`（走 :3.3 的草稿通道：`revision+1`，
+**不需要** `base_revision` —— 服务端在草稿写锁内取当前 revision）→ 候选标 `adopted` +
+`adopted_at` → 触发 1.5s 防抖编译（与 `PATCH /draft` 完全同一条链）。返回体就是新草稿
+（与 `PATCH /draft` 同形状），前端可直接写进草稿缓存。
+
+**错误码**（都走统一错误信封）：
+
+| 场景 | 状态码 | `code` |
+|---|---|---|
+| 文档不存在 / 越界 | 404 / 400 | `document_not_found` / `invalid_document_id` |
+| `pid` 不在段落产物里（含形状不合法） | 404 | `paragraph_not_found` |
+| `cid` 不存在，或不属于路径上的 `pid` | 404 | `candidate_not_found` |
+| 没给 `profile`，或该 profile 没配 translator | 422 | `profile_missing` |
+| 未知 profile | 422 | `unknown_profile`（`detail.available` 只列 id） |
+| 请求体里带 `translator`/`reviewer`/`timeout`… | 422 | `forbidden_field` |
+| 候选已采用/已拒绝（再采用/再改回去） | 409 | `candidate_decided` |
+| 候选还在生成中（`candidate_target=null`）就采用 | 409 | `candidate_not_ready` |
+| 该文档有活动 job：生成（要排队）/ 采用（要写草稿） | 409 | `document_busy`（`detail.job_id`） |
+
+- **拒绝不受忙限制**：它不改草稿、不触发编译，重复拒绝幂等（200 返回当前候选）。
+- 生成是一个 job：排队/全局并发上限/取消/重启恢复全部与 §3.4 同一套规则；`job.profile` 是
+  所用 translator profile 的 id，`job.from_stage` 为 `null`。取消会连带杀掉 translator
+  孙进程（收费调用），候选行随之删掉。
+- 候选**不影响** `GET /paragraphs` / `GET /documents/{did}`（§3.1/§3.2）：采用之前，预览、
+  详情、编译产物里都看不到候选译文；采用之后，草稿 revision 变了，`compile.stale` 才是
+  那个"该重新编译"的真信号。
 
 ## 4. 前端消费注意
 

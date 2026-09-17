@@ -46,8 +46,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from babeldoc_tools import __version__
 from babeldoc_tools.common import ToolError
+from babeldoc_tools.serve.candidates import CandidateService
 from babeldoc_tools.serve.compile import CompileService
 from babeldoc_tools.serve.routers.artifacts import artifacts_router
+from babeldoc_tools.serve.routers.candidates import candidates_router
 from babeldoc_tools.serve.routers.documents import documents_router
 from babeldoc_tools.serve.routers.draft import draft_router
 from babeldoc_tools.serve.routers.events import events_router
@@ -80,6 +82,14 @@ _TOOL_ERROR_STATUS = {
     "job_not_found": 404,
     "unknown_profile": 422,
     "action_not_available": 422,
+    "report": 422,
+    # W11 候选：pid/cid 不存在是 404（不是"空列表假成功"）；已决定/还没生成完是 409
+    "paragraph_not_found": 404,
+    "candidate_not_found": 404,
+    "candidate_decided": 409,
+    "candidate_not_ready": 409,
+    # W11 候选：没给 profile / profile 没配 translator 命令（后者与 unknown_profile 分开上报）
+    "profile_missing": 422,
     # W09 草稿：乐观并发失败（带 detail.current_revision）/ 字段与范围不合法
     "revision_conflict": 409,
     "draft_invalid": 422,
@@ -130,9 +140,11 @@ def error_response(
 
 def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI:
     """组装 FastAPI 应用（工厂：不读环境变量、不起进程；恢复只改确实要改的状态）。"""
-    # 共享实例：job 注册表 / 草稿锁 / 编译调度（三个路由用同一份，见模块 docstring）。
+    # 共享实例：job 注册表 / 草稿锁 / 编译调度 / 候选存储（路由们用同一份，见模块 docstring）。
     runner = JobRunner(store)
     compiles = CompileService(store, runner)
+    # 候选服务复用 runner 的 job 注册表与候选 registry：生成是 job，采用写草稿。
+    candidates = CandidateService(store, runner, compiles)
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -221,6 +233,7 @@ def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI
     app.include_router(artifacts_router(store))
     app.include_router(jobs_router(store, runner, compiles))
     app.include_router(draft_router(runner, compiles))
+    app.include_router(candidates_router(candidates))
     app.include_router(profiles_router(store))
 
     return app

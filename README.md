@@ -259,6 +259,13 @@ HTTP 形状的单一事实来源是运行中服务的 `/openapi.json`（可读�
 - **防抖**：草稿写成功后在**服务端** 1.5s 后自动编译一次（浏览器断开不丢）；期间再写一次
   重置计时器，到点时已有活动 job 则跳过。任务（run/check/compile）期间草稿只读：
   `PATCH`/`DELETE` → `409 document_busy`。
+- **重译候选**（`POST /api/v1/documents/{did}/paragraphs/{pid}/retranslate`、`GET …/candidates`、
+  `POST …/candidates/{cid}/adopt|reject`）：对不满意段落让 AI 重译，**候选未采用前绝不进正文**。
+  生成是一个 job（`action=retranslate`，排队/并发/取消同其它 job），跑在
+  `<did>/.bdt-serve/candidates-<job_id>/` 隔离副本里（`bdt translate --ids`），只写
+  `<did>/.bdt-serve/candidates.json` —— `agent/translated.md`、`draft.json`、`output/` 分毫不动；
+  「采用」才把候选写成草稿 `target`（`revision+1`）并触发防抖编译，「拒绝」只改候选状态。
+  translator 命令只来自 profile（客户端只传 profile id，命令/密钥字段一律 422）。
 
 查看已编译结果：`GET /api/v1/documents/{did}` 的 `compile` 字段（`status`/`revision`/
 `stale`/`artifact`），下载走 `GET /api/v1/documents/{did}/artifacts/{name}`（支持 Range，

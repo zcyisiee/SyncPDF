@@ -47,11 +47,20 @@ STAGE_NOT_RUN = "not_run"
 # --------------------------------------------------------------------------- #
 #: action 的**固定四值**（api.md §3.4）。
 JOB_ACTIONS = ("run", "retranslate", "compile", "check")
-#: 已实现的 action；``retranslate`` 诚实报 422 ``action_not_available``，不冒充。
-#: （W07：run/check；W09：compile = 草稿编译，隔离副本里 apply+build。）
+#: ``POST /documents/{did}/jobs`` 接受的 action（W07：run/check；W09：compile）。
+#: ``retranslate`` 不从这里进：它必须绑定一个段落（候选 id/段落 id 由服务端发号），
+#: 入口是 W11 的 ``POST /documents/{did}/paragraphs/{pid}/retranslate``（§3.6），
+#: 这里仍然诚实报 422 ``action_not_available`` + 替代入口提示，不返回假 job。
 JOB_ACTIONS_IMPLEMENTED = ("run", "check", "compile")
-#: 未实现 action → 归属任务（写进 422 的 detail，前端好排期）。
+#: ``jobs`` 端点不接受的 action → 归属任务（写进 422 的 detail，前端好排期）。
 JOB_ACTION_PHASE = {"retranslate": "W11"}
+#: 未实现 action 的**替代入口**提示（同一个 422 的 detail：前端知道该去哪里）。
+JOB_ACTION_HINT = {
+    "retranslate": (
+        "候选重译走 POST /documents/{did}/paragraphs/{pid}/retranslate"
+        "（生成候选，不直接改译文；见 api.md §3.6）"
+    )
+}
 
 #: ``compile`` 的 ``scope`` 取值（api.md §3.4）。v1 页级编译按已批准设计回退全量。
 JOB_COMPILE_SCOPES = ("full", "pages")
@@ -72,6 +81,7 @@ __all__ = [
     "DocumentUploaded",
     "JOB_ACTIONS",
     "JOB_ACTIONS_IMPLEMENTED",
+    "JOB_ACTION_HINT",
     "JOB_ACTION_PHASE",
     "JOB_COMPILE_SCOPES",
     "JOB_FROM_PATTERN",
@@ -81,6 +91,10 @@ __all__ = [
     "STAGE_NOT_RUN",
     "CheckAvailability",
     "CheckResponse",
+    "CandidateItem",
+    "CandidateJobAccepted",
+    "CandidateListResponse",
+    "CandidateRetranslateRequest",
     "CompileStatus",
     "DocumentAvailability",
     "DocumentDetail",
@@ -583,3 +597,80 @@ class ProfileUpdateRequest(BaseModel):
                 "至少要给出 label / translator_script / reviewer_script 之一"
             )
         return self
+
+
+# --------------------------------------------------------------------------- #
+# W11：候选重译（api.md §3.6）
+# --------------------------------------------------------------------------- #
+class CandidateItem(BaseModel):
+    """一条重译候选（``<workdir>/.bdt-serve/candidates.json`` 的条目 / 各端点的响应体）。
+
+    **候选不是译文**：``candidate_target`` 在采用（adopt）之前不出现在任何产物里
+    （不写 ``agent/translated.md``、不写草稿、不影响编译）。``source``/``baseline_target``
+    是生成时刻的快照（原文用与 ``GET /paragraphs`` 同一口径的 canonical 文本；基线取
+    ``translated.jsonl``），前端拿它们做三段对比。
+
+    ``candidate_target`` 为 ``null`` = 生成中（job 还没跑完）；生成失败/被取消的候选行
+    会被删掉（不留在列表里骗人），所以这个态只在 job 活动期间可见。
+    """
+
+    id: str
+    pid: str
+    #: 原文（生成时刻，canonical 形式，与 ``GET /paragraphs`` 的 ``source`` 同源）。
+    source: str | None = None
+    #: 生成时刻的译文基线（``translated.jsonl``）；该段没有译文 → null。
+    baseline_target: str | None = None
+    #: 候选译文（canonical 形式，与 ``/paragraphs`` 的 ``target`` 和草稿 ``target`` 同表示）；
+    #: null = 生成中。
+    candidate_target: str | None = None
+    status: Literal["pending", "adopted", "rejected"] = "pending"
+    #: 生成用的 profile **id**（命令字符串永不出现）。
+    model_label: str | None = None
+    #: 生成这个候选的 job（``action=retranslate``）；生成中的候选靠它对上号。
+    job_id: str | None = None
+    created_at: str
+    #: 采用时刻（``status=adopted`` 才有值）。
+    adopted_at: str | None = None
+
+
+class CandidateListResponse(BaseModel):
+    """``GET /documents/{did}/paragraphs/{pid}/candidates``：该段的候选列表。
+
+    ``items`` 里最新的 ``pending`` 在前（生成中的那个最先看到），其后是已决定的候选（新 → 旧）。
+    """
+
+    pid: str
+    items: list[CandidateItem]
+
+
+class CandidateRetranslateRequest(BaseModel):
+    """``POST /documents/{did}/paragraphs/{pid}/retranslate`` 的请求体（api.md §3.6）。
+
+    只有一个字段：``profile``（provider **id**）。translator 命令由服务端从 profile 解析，
+    客户端连字段都没有（带了会被 422 ``forbidden_field``）；``feedback`` 之类"给模型的自由
+    文本"v1 不接受（提示词由服务端拼，见 §3.6）。
+    """
+
+    profile: str | None = Field(
+        default=None,
+        pattern=JOB_PROFILE_PATTERN,
+        description=(
+            "provider profile id（候选生成只用它的 translator 命令）；"
+            "必填（缺 → 422 profile_missing），未知 id → 422 unknown_profile，"
+            "该 profile 没配 translator → 422 profile_missing"
+        ),
+    )
+
+
+class CandidateJobAccepted(BaseModel):
+    """``POST /documents/{did}/paragraphs/{pid}/retranslate`` 的 202 响应（api.md §3.6）。
+
+    ``status`` 恒为 ``queued``（契约形状，与 ``JobAccepted`` 同一口径）：真实状态轮询
+    ``GET /jobs/{jid}``。候选行在提交时就建好了（``status=pending`` + ``candidate_target=null``），
+    job 成功后填上候选译文、失败/取消时删掉。
+    """
+
+    candidate_id: str
+    job_id: str
+    status: Literal["queued"] = "queued"
+    action: Literal["retranslate"] = "retranslate"

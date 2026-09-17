@@ -41,6 +41,7 @@ from babeldoc_tools.serve.jobs import JobRecord
 from babeldoc_tools.serve.routers.documents import DOCUMENT_ID
 from babeldoc_tools.serve.runner import JobRunner
 from babeldoc_tools.serve.schemas import API_PREFIX
+from babeldoc_tools.serve.schemas import JOB_ACTION_HINT
 from babeldoc_tools.serve.schemas import JOB_ACTION_PHASE
 from babeldoc_tools.serve.schemas import JOB_ACTIONS_IMPLEMENTED
 from babeldoc_tools.serve.schemas import JobAccepted
@@ -153,10 +154,11 @@ def jobs_router(
         if payload.action not in JOB_ACTIONS_IMPLEMENTED:
             raise ToolError(
                 "action_not_available",
-                f"action={payload.action} 还没实现：job 的 argv 与质量门禁都要按实"
-                "阶段拼装，不返回假 job",
+                f"action={payload.action} 不在 jobs 端点：候选重译要绑定段落"
+                "（pid + 候选 id 由服务端发号），入口是段落下的 retranslate 端点",
                 action=payload.action,
                 phase=JOB_ACTION_PHASE.get(payload.action, "未排期"),
+                hint=JOB_ACTION_HINT.get(payload.action),
             )
         if payload.action == "compile":
             # profile 是可选的（compile 不调 provider）：给了也不进记录，不报错 ——

@@ -222,6 +222,11 @@ class JobRecord(BaseModel):
     requested_scope: str | None = None
     effective_scope: str | None = None
     downgrade_reason: str | None = None
+    #: ``retranslate``（W11）的段落 id 与候选 id：job 与候选一一对应（其它 action 为
+    #: ``None``）。候选行在提交时就建好了，这两个字段是 job 侧的回链（前端从 job 找到
+    #: 候选、或从候选找到 job 都不需要额外请求）。
+    paragraph_id: str | None = None
+    candidate_id: str | None = None
     #: 子进程 debug recorder 建的 run（spawn 之后新出现的那个）；没有 → None。
     run_id: str | None = None
     exit_code: int | None = None
@@ -362,6 +367,8 @@ class JobRegistry:
         requested_scope: str | None = None,
         effective_scope: str | None = None,
         downgrade_reason: str | None = None,
+        paragraph_id: str | None = None,
+        candidate_id: str | None = None,
     ) -> JobRecord:
         """新建 job 并入队（``queued``）；准入判断由调用方在 ``lock`` 内做。"""
         record = JobRecord(
@@ -376,6 +383,8 @@ class JobRegistry:
             requested_scope=requested_scope,
             effective_scope=effective_scope,
             downgrade_reason=downgrade_reason,
+            paragraph_id=paragraph_id,
+            candidate_id=candidate_id,
         )
         self.records[record.job_id] = record
         self._queue.append(record.job_id)
@@ -482,6 +491,8 @@ class JobRegistry:
             "interrupted_reason",
             "requested_scope",
             "effective_scope",
+            "paragraph_id",
+            "candidate_id",
         ):
             value = getattr(record, key)
             if value is not None:

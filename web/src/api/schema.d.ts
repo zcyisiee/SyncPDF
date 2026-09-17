@@ -320,6 +320,86 @@ export interface paths {
         patch: operations["patch_draft_api_v1_documents__did__draft_patch"];
         trace?: never;
     };
+    "/api/v1/documents/{did}/paragraphs/{pid}/retranslate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 生成重译候选（不采用就不改译文）
+         * @description 对不满意段落让 AI 重译：建一条 `pending` 候选并提交 `action=retranslate` job（同文档串行、全局限流、可取消——与其它 job 同规则）。翻译命令来自 `profile`（客户端永远不传命令），生成在**隔离副本**里跑，`agent/translated.md`／`draft.json`／`output/` 一概不动；候选译文只在人工采用后才会进草稿。`profile` 缺失／该 profile 没配 translator → 422 `profile_missing`；未知 profile → 422 `unknown_profile`；pid 不存在 → 404 `paragraph_not_found`；有活动 job → 409 `document_busy`。
+         */
+        post: operations["retranslate_api_v1_documents__did__paragraphs__pid__retranslate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{did}/paragraphs/{pid}/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 该段的候选列表
+         * @description 该段的重译候选：最新的 `pending` 在前，其后是已决定的候选（新 → 旧）。`candidate_target=null` 表示还在生成中（job 结束前）；生成失败/取消的候选行会被删掉，不留在列表里。pid 不在段落产物里 → 404 `paragraph_not_found`。
+         */
+        get: operations["list_candidates_api_v1_documents__did__paragraphs__pid__candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{did}/paragraphs/{pid}/candidates/{cid}/adopt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 采用候选（写草稿 + 防抖编译）
+         * @description 人工采用：把候选译文写成该段的草稿 `target`（走草稿通道，`revision+1`）并触发1.5s 防抖编译，然后把候选标成 `adopted`。返回**新草稿**（与 `PATCH /draft` 同一形状），前端可直接写进缓存。不需要 `base_revision`（服务端自己在写锁内取当前 revision）。已有相同译文覆盖 → 仍 +1（不猜用户意图）。cid 不存在 → 404 `candidate_not_found`；已采用/已拒绝 → 409 `candidate_decided`；还在生成中 → 409 `candidate_not_ready`；有活动 job（要写草稿）→ 409 `document_busy`。
+         */
+        post: operations["adopt_candidate_api_v1_documents__did__paragraphs__pid__candidates__cid__adopt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{did}/paragraphs/{pid}/candidates/{cid}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 拒绝候选（只改状态）
+         * @description 把候选标成 `rejected`：不改译文、不改草稿、不触发编译（因此**不**受活动 job 的草稿只读守卫限制）。重复拒绝是幂等的（返回当前候选，不再改任何东西）；已采用的候选不能用拒绝改回去 → 409 `candidate_decided`；cid 不存在 → 404 `candidate_not_found`。
+         */
+        post: operations["reject_candidate_api_v1_documents__did__paragraphs__pid__candidates__cid__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles": {
         parameters: {
             query?: never;
@@ -382,6 +462,97 @@ export interface components {
              * @description multipart/form-data 的 file 字段：源 PDF（读前 5 字节必须是 %PDF-，上限 209715200 字节）。文件名只用来生成 did 的 slug。
              */
             file: string;
+        };
+        /**
+         * CandidateItem
+         * @description 一条重译候选（``<workdir>/.bdt-serve/candidates.json`` 的条目 / 各端点的响应体）。
+         *
+         *     **候选不是译文**：``candidate_target`` 在采用（adopt）之前不出现在任何产物里
+         *     （不写 ``agent/translated.md``、不写草稿、不影响编译）。``source``/``baseline_target``
+         *     是生成时刻的快照（原文用与 ``GET /paragraphs`` 同一口径的 canonical 文本；基线取
+         *     ``translated.jsonl``），前端拿它们做三段对比。
+         *
+         *     ``candidate_target`` 为 ``null`` = 生成中（job 还没跑完）；生成失败/被取消的候选行
+         *     会被删掉（不留在列表里骗人），所以这个态只在 job 活动期间可见。
+         */
+        CandidateItem: {
+            /** Id */
+            id: string;
+            /** Pid */
+            pid: string;
+            /** Source */
+            source?: string | null;
+            /** Baseline Target */
+            baseline_target?: string | null;
+            /** Candidate Target */
+            candidate_target?: string | null;
+            /**
+             * Status
+             * @default pending
+             * @enum {string}
+             */
+            status: "pending" | "adopted" | "rejected";
+            /** Model Label */
+            model_label?: string | null;
+            /** Job Id */
+            job_id?: string | null;
+            /** Created At */
+            created_at: string;
+            /** Adopted At */
+            adopted_at?: string | null;
+        };
+        /**
+         * CandidateJobAccepted
+         * @description ``POST /documents/{did}/paragraphs/{pid}/retranslate`` 的 202 响应（api.md §3.6）。
+         *
+         *     ``status`` 恒为 ``queued``（契约形状，与 ``JobAccepted`` 同一口径）：真实状态轮询
+         *     ``GET /jobs/{jid}``。候选行在提交时就建好了（``status=pending`` + ``candidate_target=null``），
+         *     job 成功后填上候选译文、失败/取消时删掉。
+         */
+        CandidateJobAccepted: {
+            /** Candidate Id */
+            candidate_id: string;
+            /** Job Id */
+            job_id: string;
+            /**
+             * Status
+             * @default queued
+             * @constant
+             */
+            status: "queued";
+            /**
+             * Action
+             * @default retranslate
+             * @constant
+             */
+            action: "retranslate";
+        };
+        /**
+         * CandidateListResponse
+         * @description ``GET /documents/{did}/paragraphs/{pid}/candidates``：该段的候选列表。
+         *
+         *     ``items`` 里最新的 ``pending`` 在前（生成中的那个最先看到），其后是已决定的候选（新 → 旧）。
+         */
+        CandidateListResponse: {
+            /** Pid */
+            pid: string;
+            /** Items */
+            items: components["schemas"]["CandidateItem"][];
+        };
+        /**
+         * CandidateRetranslateRequest
+         * @description ``POST /documents/{did}/paragraphs/{pid}/retranslate`` 的请求体（api.md §3.6）。
+         *
+         *     只有一个字段：``profile``（provider **id**）。translator 命令由服务端从 profile 解析，
+         *     客户端连字段都没有（带了会被 422 ``forbidden_field``）；``feedback`` 之类"给模型的自由
+         *     文本"v1 不接受（提示词由服务端拼，见 §3.6）。
+         */
+        CandidateRetranslateRequest: {
+            /**
+             * Profile
+             * @description provider profile id（候选生成只用它的 translator 命令）；必填（缺 → 422 profile_missing），未知 id → 422 unknown_profile，该 profile 没配 translator → 422 profile_missing
+             */
+            profile?: string | null;
         };
         /**
          * CheckAvailability
@@ -849,6 +1020,10 @@ export interface components {
             effective_scope?: string | null;
             /** Downgrade Reason */
             downgrade_reason?: string | null;
+            /** Paragraph Id */
+            paragraph_id?: string | null;
+            /** Candidate Id */
+            candidate_id?: string | null;
             /** Run Id */
             run_id?: string | null;
             /** Exit Code */
@@ -1774,6 +1949,195 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    retranslate_api_v1_documents__did__paragraphs__pid__retranslate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文档 id：workdir 目录名（单段，解析结果必须在服务根目录内） */
+                did: string;
+                /** @description 段落 id（与 GET /paragraphs 的 id 一致，如 P05-002） */
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CandidateRetranslateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateJobAccepted"];
+                };
+            };
+            /** @description document_not_found / paragraph_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description document_busy */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description profile_missing / unknown_profile / forbidden_field */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_candidates_api_v1_documents__did__paragraphs__pid__candidates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文档 id：workdir 目录名（单段，解析结果必须在服务根目录内） */
+                did: string;
+                /** @description 段落 id（与 GET /paragraphs 的 id 一致，如 P05-002） */
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateListResponse"];
+                };
+            };
+            /** @description document_not_found / paragraph_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    adopt_candidate_api_v1_documents__did__paragraphs__pid__candidates__cid__adopt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文档 id：workdir 目录名（单段，解析结果必须在服务根目录内） */
+                did: string;
+                /** @description 段落 id（与 GET /paragraphs 的 id 一致，如 P05-002） */
+                pid: string;
+                /** @description 候选 id（``c_`` + 4 位十进制；来自 retranslate / candidates 响应） */
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftResponse"];
+                };
+            };
+            /** @description document_not_found / candidate_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description document_busy / candidate_decided / candidate_not_ready */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description draft_invalid（候选文本写不进草稿时不静默） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reject_candidate_api_v1_documents__did__paragraphs__pid__candidates__cid__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文档 id：workdir 目录名（单段，解析结果必须在服务根目录内） */
+                did: string;
+                /** @description 段落 id（与 GET /paragraphs 的 id 一致，如 P05-002） */
+                pid: string;
+                /** @description 候选 id（``c_`` + 4 位十进制；来自 retranslate / candidates 响应） */
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateItem"];
+                };
+            };
+            /** @description document_not_found / candidate_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description candidate_decided */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

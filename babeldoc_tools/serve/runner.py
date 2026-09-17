@@ -39,6 +39,7 @@ from typing import Any
 from typing import NamedTuple
 
 from babeldoc_tools.common import ToolError
+from babeldoc_tools.serve import candidates as candidates_mod
 from babeldoc_tools.serve import compile as compile_mod
 from babeldoc_tools.serve.draft import DraftRegistry
 from babeldoc_tools.serve.jobs import TERMINAL_STATUSES
@@ -430,6 +431,7 @@ class _RunningJob:
         "popen",
         "profile",
         "record",
+        "retranslate",
         "runs_before",
         "workdir",
     )
@@ -443,6 +445,7 @@ class _RunningJob:
         workdir: Path,
         profile: Profile,
         plan: compile_mod.CompilePlan | None = None,
+        retranslate: candidates_mod.CandidatePlan | None = None,
     ) -> None:
         self.record = record
         self.popen = popen
@@ -454,10 +457,15 @@ class _RunningJob:
         #: ``compile`` job 的隔离上下文（真 workdir / 副本 / 捕获的 revision）；
         #: 其它 action 为 ``None``。
         self.plan = plan
+        #: ``retranslate`` job（W11 候选生成）的隔离上下文（真 workdir / 副本 /
+        #: 候选行）；其它 action 为 ``None``。
+        self.retranslate = retranslate
         #: spawn 之前已存在的 run 归档；之后新出现的那个才是这次 job 的 run。
-        #: ``compile`` 的归档落在隔离副本里、随副本一起删掉，所以不抓 run_id。
+        #: 隔离副本里的归档随副本一起删掉（compile / retranslate），所以不抓 run_id。
         self.runs_before = (
-            frozenset() if plan is not None else frozenset(list_run_ids(workdir))
+            frozenset()
+            if plan is not None or retranslate is not None
+            else frozenset(list_run_ids(workdir))
         )
         self.monitor: asyncio.Task | None = None
 
@@ -482,6 +490,9 @@ class JobRunner:
         self.store = store
         self.registry = JobRegistry(store.store_base)
         self.drafts = DraftRegistry(store)
+        #: 候选存储（W11）：与候选路由共用同一个 registry，因此同一个 did 的候选行
+        #: 只有一把写锁；job 收尾（填/删候选行）与 HTTP 采用/拒绝走的是同一把。
+        self.candidates = candidates_mod.CandidateRegistry(store)
         self._running: dict[str, _RunningJob] = {}
         #: 本次启动被标记为 interrupted 的历史 job（启动日志/诊断用）。
         self.recovered: list[JobRecord] = self.registry.load()
@@ -515,12 +526,15 @@ class JobRunner:
         requested_scope: str | None = None,
         effective_scope: str | None = None,
         downgrade_reason: str | None = None,
+        paragraph_id: str | None = None,
+        candidate_id: str | None = None,
     ) -> JobRecord:
         """建 job（``queued``）→ 尽量立刻启动；同文档已有活动 job → 409 语义。
 
         返回时的 ``status`` 可能是 ``running``（有空槽位就马上起了）—— 202 响应体里
         的 ``status`` 是契约冻结的 ``queued``（前端本来就该轮询 ``GET /jobs/{jid}``）。
-        ``compile`` 不需要 provider（``profile_id=None``）：它只跑 apply+build。
+        ``compile`` 不需要 provider（``profile_id=None``）：它只跑 apply+build；
+        ``retranslate``（W11）必须带 ``paragraph_id`` + ``candidate_id``（候选已经建好）。
         """
         # 先过 store 的路径边界（不在服务范围内/越界 → 400/404，不进队列）。
         self.store.resolve(did)
@@ -553,6 +567,8 @@ class JobRunner:
                 requested_scope=requested_scope,
                 effective_scope=effective_scope,
                 downgrade_reason=downgrade_reason,
+                paragraph_id=paragraph_id,
+                candidate_id=candidate_id,
             )
         await self._pump()
         return record
@@ -572,12 +588,15 @@ class JobRunner:
             record = self.require(job_id)
             if record.status == "queued":
                 self.registry.mark_cancel_requested(record)
-                return self.registry.mark_finished(
+                canceled = self.registry.mark_finished(
                     record,
                     status="canceled",
                     error_code="canceled",
                     error_message="排队中取消：没有启动过子进程",
                 )
+                # 没启动就没有隔离副本/收尾，候选行得在这里删（否则永远挂一个"生成中"）。
+                await self._drop_candidate(record)
+                return canceled
         if record.status in TERMINAL_STATUSES:
             return record
         running = self._running.get(job_id)
@@ -603,6 +622,13 @@ class JobRunner:
         if running.monitor is not None:
             await running.monitor  # 等监控收尾：置 canceled + 释放文档槽都在那里
         return self.registry.get(job_id) or record
+
+    async def _drop_candidate(self, record: JobRecord) -> None:
+        """删掉该 job 的候选行（没启动过子进程时的收尾：不留半条候选）。"""
+        if not record.candidate_id:
+            return
+        with contextlib.suppress(ToolError):
+            await self.candidates.for_did(record.did).drop(record.candidate_id)
 
     # -------------------------------------------------------------- 调度
     async def _pump(self) -> None:
@@ -636,6 +662,9 @@ class JobRunner:
             return
         if record.action == "compile":
             await self._start_compile(record, workdir)
+            return
+        if record.action == "retranslate":
+            await self._start_retranslate(record, workdir)
             return
         try:
             profile = resolve_profile(self.store.store_base, record.profile or "")
@@ -734,6 +763,84 @@ class JobRunner:
             plan=plan,
         )
 
+    async def _start_retranslate(self, record: JobRecord, workdir: Path) -> None:
+        """``retranslate``（W11 候选生成）的启动：隔离副本 → spawn ``bdt translate --ids``。
+
+        与 ``run`` 的差别：translator 命令来自 profile（客户端只说 id），整个生成跑在
+        副本里（``retranslate_blocks`` 会写 ``translated.md``／``prompt.retry.md``），
+        真 workdir 分毫未动。任何前置失败都**不 spawn**、删副本、删候选行，job 如实置
+        ``failed``（``queued`` 已回复，失败只能在 job 记录里看到）。
+        """
+        store = self.candidates.for_did(record.did)
+        profile = resolve_profile(self.store.store_base, record.profile or "")
+        if profile is None or not profile.translator:
+            # 路由层已经校过；提交与启动之间 profile 被删/被改空 → 不 spawn，如实报错。
+            await self._fail_retranslate_start(
+                record,
+                store,
+                error_code="profile_missing",
+                error_message=f"profile {record.profile} 已不存在或没有 translator 命令",
+            )
+            return
+        try:
+            plan = await asyncio.to_thread(
+                candidates_mod.prepare_candidates, record, workdir, store
+            )
+        except ToolError as exc:
+            await self._fail_retranslate_start(
+                record, store, error_code=exc.code, error_message=exc.message
+            )
+            return
+        except OSError as exc:
+            await self._fail_retranslate_start(
+                record,
+                store,
+                error_code="snapshot_failed",
+                error_message=f"隔离副本创建失败：{exc}",
+            )
+            return
+        argv = candidates_mod.build_candidates_argv(
+            plan.isolated, pid=plan.pid, translator=profile.translator
+        )
+        try:
+            # cwd = 副本：子进程里任何相对路径都落在隔离目录内（与 compile 同一口径）。
+            # profile 的 translator 命令经 PUT /profiles 已落成绝对路径。
+            proc = spawn_job(argv, plan.isolated)
+        except OSError as exc:
+            outcome = await candidates_mod.discard_plan(
+                plan,
+                error_code="spawn_failed",
+                error_message=f"无法启动子进程：{exc}",
+            )
+            self.registry.mark_finished(
+                record,
+                status=outcome.status,
+                error_code=outcome.error_code,
+                error_message=outcome.error_message,
+            )
+            return
+        self._launch(record, proc, workdir, profile, argv, retranslate=plan)
+
+    async def _fail_retranslate_start(
+        self,
+        record: JobRecord,
+        store: candidates_mod.CandidateStore,
+        *,
+        error_code: str,
+        error_message: str,
+    ) -> None:
+        """候选生成没真正开始（不 spawn）：删候选行 + 如实置 ``failed``。
+
+        与 :func:`~babeldoc_tools.serve.candidates.discard_plan` 的区别：那条路已经建了
+        隔离副本（要一起删）；这里的副本根本还没建（或建完就删了）。
+        """
+        if record.candidate_id:
+            with contextlib.suppress(ToolError):
+                await store.drop(record.candidate_id)
+        self.registry.mark_finished(
+            record, status="failed", error_code=error_code, error_message=error_message
+        )
+
     def _launch(
         self,
         record: JobRecord,
@@ -743,11 +850,21 @@ class JobRunner:
         argv: list[str],
         *,
         plan: compile_mod.CompilePlan | None = None,
+        retranslate: candidates_mod.CandidatePlan | None = None,
     ) -> None:
         """给刚 spawn 的子进程接管道、记身份、起监控任务（argv 只用于指纹）。"""
         capture = capture_pipes(proc)
         pgid = os.getpgid(proc.pid)
-        running = _RunningJob(record, proc, capture, pgid, workdir, profile, plan=plan)
+        running = _RunningJob(
+            record,
+            proc,
+            capture,
+            pgid,
+            workdir,
+            profile,
+            plan=plan,
+            retranslate=retranslate,
+        )
         self.registry.mark_started(
             record, pid=proc.pid, pgid=pgid, spawn_marker=argv_marker(argv)
         )
@@ -780,6 +897,26 @@ class JobRunner:
                     timed_out=timed_out,
                     canceled=canceled,
                 )
+            elif running.retranslate is not None:
+                # 候选生成的账：终态判定仍走既有规则（classify_exit），候选侧（填/删
+                # 候选行、删副本）由 settle_candidates 负责；取不到译文时它把这次 job
+                # 记成 failed(candidate_missing)，不报一个空成功。
+                base = classify_exit(
+                    action=record.action,
+                    cancel_requested=canceled,
+                    timed_out=timed_out,
+                    exit_code=exit_code,
+                    envelope=payload,
+                )
+                settled = await candidates_mod.settle_candidates(
+                    running.retranslate,
+                    status=base.status,
+                    error_code=base.error_code,
+                    error_message=base.error_message,
+                )
+                status = settled.status
+                error_code = settled.error_code
+                error_message = settled.error_message
             else:
                 outcome = classify_exit(
                     action=record.action,
@@ -806,7 +943,7 @@ class JobRunner:
                 # 已经不存在、而且是真 workdir 里别的 run 的 run_id。
                 run_id=(
                     None
-                    if running.plan is not None
+                    if running.plan is not None or running.retranslate is not None
                     else new_run_id(running.workdir, running.runs_before)
                 ),
             )

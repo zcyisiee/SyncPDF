@@ -37,6 +37,8 @@ function jobBadge(
  * - `queued`/`running`：状态徽标 + 「取消」（confirm 后 `POST /jobs/{jid}/cancel`）；
  * - `failed`/`canceled`/`interrupted`：如实显示 `error_code`/`error_message` + 「重试」
  *   （重试 = 用同参数**发一个新 job**，不自动重跑 —— 后端明确不重跑收费调用）；
+ *   `action=retranslate`（W11 重译候选）例外：它不能走 `POST /jobs`（服务端不接受裸
+ *   retranslate，候选必须绑定段落），重试入口在段落面板的「AI 重译」，这里只给提示文案；
  * - `succeeded` 不在这里（那时该显示开始卡，用户可以再跑一次）。
  */
 export function ActiveJobCard({ did, job }: { did: string; job: JobRecord }) {
@@ -87,6 +89,12 @@ export function ActiveJobCard({ did, job }: { did: string; job: JobRecord }) {
           >
             {cancelJob.isPending ? '正在取消…' : '取消'}
           </Button>
+        ) : job.action === 'retranslate' ? (
+          // 重译 job 的"重试"不能走 POST /jobs（服务端不接受裸 retranslate：候选要绑定段落），
+          // 重试入口就在段落面板的「AI 重译」；这里只把话说明白，不造一个必然 422 的按钮。
+          <span className="font-mono text-micro text-ink-4" data-od-id="retranslate-retry-hint">
+            在段落面板重试（AI 重译）
+          </span>
         ) : (
           <Button
             variant="primary"

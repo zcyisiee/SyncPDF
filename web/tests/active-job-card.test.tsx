@@ -113,6 +113,26 @@ describe('ActiveJobCard（活动/最近失败任务卡）', () => {
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument();
   });
 
+  it('failed（action=retranslate）：不给必然 422 的重试按钮，只指向段落面板（W11）', async () => {
+    const fetchMock = mockApiFetch({ [JOBS_URL]: () => jsonResponse([]) });
+    renderWithQuery(
+      <ActiveJobCard
+        did={DID}
+        job={makeJob({
+          action: 'retranslate',
+          status: 'failed',
+          error_code: 'translator_failed',
+          from_stage: null,
+        })}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: '重试' })).toBeNull();
+    expect(document.querySelector('[data-od-id="retranslate-retry-hint"]')?.textContent).toContain(
+      '段落面板',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('failed：徽标写「失败」（不是「运行中」）', () => {
     mockApiFetch({});
     renderWithQuery(<ActiveJobCard did={DID} job={makeJob({ status: 'failed' })} />);

@@ -13,6 +13,9 @@
  * - `revision_conflict`（两个标签页）→ 提示 + 「刷新草稿」；
  * - `document_busy`（活动 job 期间草稿只读）→ 提示「编译中，稍后再试」；
  * - `draft_invalid` → 字段/范围不合法 + `detail.errors` 原文。
+ *
+ * 面板下半部分的「AI 重译候选」是 W11（api.md §3.6，见 `CandidatePanel`）：候选未采用之前
+ * 不改译文/草稿/产物，采用后走的是**服务端**写草稿那一条链（这里只把返回的新草稿写进缓存）。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -42,6 +45,7 @@ import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';
 import { ErrorCard } from '../ui/ErrorCard';
 import { Tooltip } from '../ui/Tooltip';
+import { CandidatePanel } from './CandidatePanel';
 
 /** 本地自动保存防抖（与服务端 1.5s 防抖同量级；服务端才是真源）。 */
 export const SAVE_DEBOUNCE_MS = 1_500;
@@ -325,6 +329,15 @@ export function ParagraphEditor({
         {error !== null && error !== undefined && !conflict && !busy && !invalid ? (
           <ErrorCard className="mt-s3" data-od-id="paragraph-save-error" error={error} title="保存失败" />
         ) : null}
+
+        <CandidatePanel
+          did={did}
+          pid={paragraphId}
+          currentTarget={external.target}
+          baselineTarget={paragraph?.target ?? null}
+          disabled={disabled}
+          disabledReason={disabledReason}
+        />
       </div>
     </div>
   );

@@ -158,6 +158,13 @@ POST /…/{did}/jobs
 | POST | `/…/{did}/paragraphs/{para_id}/candidates/{cid}/accept` | 采用候选 → 写入草稿 |
 | DELETE | `/…/{did}/paragraphs/{para_id}/candidates/{cid}` | 丢弃候选 |
 
+> **已实现形状（W11，以 `docs/frontend/api.md` §3.6 为准）**：生成是
+> `POST /documents/{did}/paragraphs/{pid}/retranslate`（体里只有 `profile` id，job `action=retranslate`，
+> 跑在隔离副本里，只写 `<did>/.bdt-serve/candidates.json`）；列表是
+> `GET /documents/{did}/paragraphs/{pid}/candidates`；采用/拒绝是 `POST …/candidates/{cid}/adopt|reject`
+> （采用返回新草稿，拒绝只改状态）。本节的 `accept`/`DELETE` 命名与 `PUT /draft/paragraphs/{id}`
+> 都被 §3.3/§3.6 的 `PATCH /draft` + `adopt` 取代：草稿只有一个写入口，候选只在采用时进去。
+
 bbox 拖拽：前端在 SVG 层拖动手柄 → 换算为 PDF 坐标 → `PUT draft … {overrides:{box}}`。拖拽过程中本地即时绘制；松手才发请求。
 
 ### 4.4 版本
@@ -211,7 +218,9 @@ env = { PI_MODEL = "deepseek/deepseek-v4-pro:low" }
   working/            ← 最近一次 compile 产物（mono/dual/check.json/geometry.json）
   versions/v1/ …      ← translated.md overrides.json mono.pdf dual.pdf check.json report.md
   draft.json          ← {paragraphs:{P05-002:{translation, overrides, at}}}
-  candidates.json     ← {P05-002:[{cid, translation, feedback, provider, at}]}
+  candidates.json     ← 采用前的一切都在这里：{next_id, items:[{id, pid, source, baseline_target,
+                          candidate_target, status: pending|adopted|rejected, model_label, job_id,
+                          created_at, adopted_at}]}（W11；采用前的候选**不**进 translated.md）
 ```
 
 ## 6. 交互流程（关键路径）
@@ -219,7 +228,8 @@ env = { PI_MODEL = "deepseek/deepseek-v4-pro:low" }
 1. **上传**：拖入 PDF → 立即建文档并展示首页缩略 → 配置弹层（provider、词表多选、页范围、dual）→「开始翻译」→ `POST jobs {action:run}` → 自动进入该文档「进度」视图。
 2. **进度**：预览显示原文 PDF，段落 bbox 灰；`paragraph_done` 到达则该段变淡墨蓝并显示 n/N；build 完成后预览切到工作版译文；右侧事件流滚动；底部时间线。
 3. **编辑**：任务结束后进入「翻译」视图；点段 → 右侧面板；改译文 blur 即 PUT；拖 bbox 松手即 PUT；1.5s 后 `compile` 自动跑，顶部条「正在重排（预览）… 3 处改动」；完成后预览刷新（保持滚动位置与选中）。
-4. **AI 重译**：面板内填反馈 →「生成候选」→ job retranslate → 候选卡并排（当前 vs 候选）→「采用」进草稿。
+4. **AI 重译**：选 profile（或用上次）→「AI 重译」→ job retranslate（隔离副本，不写正文）→ 候选卡并排
+   （原文 / 当前译文 / 候选译文）→「采用」进草稿（触发防抖编译）或「拒绝」（候选折起）。
 5. **检查**：`check.json` 问题按 P0/P1/P2 分组 → 点问题 → 跳到翻译视图对应段并高亮。
 6. **归档**：「存为版本」（自动先全量 compile）→ 版本列表 → 下载 → 「归档」→ 文件库分组到已归档。
 

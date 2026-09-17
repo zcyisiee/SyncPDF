@@ -92,6 +92,8 @@ export interface UiState {
   bboxMode: BboxMode;
   /** 当前选中的段落 id（W05 只联动右侧面板占位；真内容 W10）。 */
   selectedParagraphId: string | null;
+  /** W11 重译候选：上次用过的 profile id（会话内记忆，**不**持久化；换文档不丢）。 */
+  retranslateProfile: string | null;
   /** 正在拖拽的分隔条（用于 `is-drag` 视觉态）。 */
   dragging: GutterId | null;
   setScreen: (screen: ScreenId) => void;
@@ -106,6 +108,7 @@ export interface UiState {
   resetPreviewForDocument: (did: string) => void;
   setBboxMode: (mode: BboxMode) => void;
   setSelectedParagraph: (id: string | null) => void;
+  setRetranslateProfile: (id: string | null) => void;
 }
 
 const SCREENS: readonly ScreenId[] = ['library', 'glossary', 'settings', 'workbench'];
@@ -184,6 +187,7 @@ export function createUiStore(): StoreApi<UiState> {
     previewDid: null,
     bboxMode: readStoredBboxMode() ?? 'parse',
     selectedParagraphId: null,
+    retranslateProfile: null,
     dragging: null,
     setScreen: (screen) => {
       writeStored(STORAGE_KEYS.screen, screen);
@@ -222,6 +226,7 @@ export function createUiStore(): StoreApi<UiState> {
       set({ bboxMode });
     },
     setSelectedParagraph: (selectedParagraphId) => set({ selectedParagraphId }),
+    setRetranslateProfile: (retranslateProfile) => set({ retranslateProfile }),
   }));
 }
 
