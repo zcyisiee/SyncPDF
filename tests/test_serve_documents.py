@@ -21,7 +21,8 @@ from babeldoc_tools.serve.schemas import STAGES  # noqa: E402
 from babeldoc_tools.serve.store import DocumentStore  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-# 写端点白名单是唯一来源：W07 只放行 job 的两条 POST（见那个模块的 ALLOWED_WRITE_ROUTES）。
+# 写端点白名单是唯一来源：W07 只放行 job 的两条 POST，W08 加上传与 profile 写入
+# （见那个模块的 ALLOWED_WRITE_ROUTES）。
 from test_serve_app import assert_no_unexpected_write_routes  # noqa: E402
 
 DID = "paper"
@@ -754,10 +755,10 @@ def test_error_codes_are_stable_across_endpoints(client):
         assert response.json()["error"]["code"] == "document_not_found", path
 
 
-def test_openapi_lists_document_routes_as_get_only(client):
+def test_openapi_lists_document_subresources_as_get_only(client):
+    """文档的只读子资源仍然只有 GET（``/documents`` 本身 W08 多了上传的 POST）。"""
     schema = client.get("/openapi.json").json()
     for path in (
-        DOCUMENTS,
         f"{DOCUMENTS}/{{did}}",
         f"{DOCUMENTS}/{{did}}/stage-state",
         f"{DOCUMENTS}/{{did}}/paragraphs",
@@ -765,7 +766,8 @@ def test_openapi_lists_document_routes_as_get_only(client):
         f"{DOCUMENTS}/{{did}}/check",
     ):
         assert set(schema["paths"][path]) == {"get"}, path
-    # W01–W03 的只读边界 + W07 的两条 job POST 白名单（helper 是唯一来源）
+    # ``POST /documents`` 是 W08 的上传：写端点白名单（helper 是唯一来源）放行它
+    assert set(schema["paths"][DOCUMENTS]) == {"get", "post"}
     assert_no_unexpected_write_routes(schema)
 
 

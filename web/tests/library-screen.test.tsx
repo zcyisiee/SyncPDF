@@ -1,9 +1,16 @@
-import { fireEvent, screen, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { DocumentListItem } from '../src/api/types';
 import { LibraryScreen } from '../src/screens/LibraryScreen';
-import { jsonResponse, mockApiFetch, renderWithQuery, resetUiStore } from './helpers';
+import {
+  jsonResponse,
+  makePdfFile,
+  makeTextFile,
+  mockApiFetch,
+  renderWithQuery,
+  resetUiStore,
+} from './helpers';
 
 const ALL_OK = {
   parse: 'ok',
@@ -26,6 +33,17 @@ const ALL_NOT_RUN = {
 };
 
 const THREE_DAYS_AGO = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+
+/** 上传成功后列表里出现的新文档（计数全 null：服务端只写了 source.pdf）。 */
+const UPLOADED: DocumentListItem = {
+  did: 'up-paper-20260917-120000',
+  title: null,
+  pages: null,
+  paragraph_count: null,
+  translated_count: null,
+  stage_summary: ALL_NOT_RUN,
+  updated_at: null,
+};
 
 const DOCUMENTS: DocumentListItem[] = [
   {
@@ -84,16 +102,195 @@ describe('文件库屏（真数据 /documents）', () => {
     expect(card).toHaveAttribute('href', '#/d/ccs3764-dyn/progress');
   });
 
-  it('上传按钮与拖放区已渲染但禁用（W08 接入）', async () => {
+  it('上传入口可用：按钮 + 拖放区（W08 接入，不再 disabled）', async () => {
     mockApiFetch({ '/api/v1/documents': () => jsonResponse([]) });
     renderWithQuery(<LibraryScreen />);
     expect(await screen.findByText('还没有文档')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /上传 PDF/ })).toBeDisabled();
-    expect(document.querySelector('[data-od-id="dropzone"]')).toHaveAttribute(
-      'aria-disabled',
-      'true',
+    expect(screen.getByRole('button', { name: /上传 PDF/ })).toBeEnabled();
+    const dropzone = document.querySelector('[data-od-id="dropzone"]');
+    expect(dropzone).not.toBeNull();
+    expect(dropzone).toHaveAttribute('data-drag', 'idle');
+  });
+
+  it('选中 PDF → POST /documents（只带 file）→ 列表刷新出新卡，不自动跳转', async () => {
+    const calls: { url: string; method: string; body: unknown }[] = [];
+    let listCalls = 0;
+    // POST 挂住不返回，好断言"上传中"那一行的行内状态（真跑时是几百毫秒的窗口）
+    let releasePost: (() => void) | undefined;
+    const fetchMock = mockApiFetch({});
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method ?? 'GET').toUpperCase();
+      calls.push({ url, method, body: init?.body });
+      if (url === '/api/v1/documents' && method === 'POST') {
+        await new Promise<void>((resolve) => {
+          releasePost = resolve;
+        });
+        return jsonResponse(
+          { did: 'up-paper-20260917-120000', bytes: 5, source: 'source.pdf' },
+          201,
+        );
+      }
+      listCalls += 1;
+      return jsonResponse(listCalls === 1 ? [] : [UPLOADED]);
+    });
+
+    renderWithQuery(<LibraryScreen />);
+    expect(await screen.findByText('还没有文档')).toBeInTheDocument();
+
+    const input = document.querySelector('[data-od-id="upload-input"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [makePdfFile('paper.pdf')] } });
+
+    // 上传中：行内状态（文件名 + 脉冲点，没有假百分比）
+    const row = await screen.findByText(/正在上传/, {
+      selector: '[data-od-id="upload-row"]',
+    });
+    expect(row).toHaveAttribute('data-status', 'uploading');
+    expect(row.textContent).toContain('paper.pdf');
+    // 放行 POST → 新卡片出现（列表被 invalidate）
+    releasePost?.();
+    // 成功后上传行消失 + 新卡片出现
+    await waitFor(() =>
+      expect(document.querySelector('[data-od-id="upload-row"]')).toBeNull(),
     );
-    expect(document.querySelector('[data-tip="W08 接入"]')).not.toBeNull();
+    expect(await screen.findByRole('link', { name: /up-paper-20260917-120000/ })).toHaveAttribute(
+      'href',
+      '#/d/up-paper-20260917-120000/progress',
+    );
+    // 不自动跳转：hash 没变
+    expect(window.location.hash).toBe('');
+    const posted = calls.filter((call) => call.method === 'POST');
+    expect(posted).toHaveLength(1);
+    expect(posted[0].url).toBe('/api/v1/documents');
+    expect(posted[0].body).toBeInstanceOf(FormData);
+  });
+
+  it('拖放 PDF → 走同一条上传路径', async () => {
+    const fetchMock = mockApiFetch({
+      '/api/v1/documents': () => jsonResponse([]),
+    });
+    fetchMock.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET').toUpperCase() === 'POST') {
+        return jsonResponse({ did: 'up-dropped-20260917-120000', bytes: 5, source: 'source.pdf' }, 201);
+      }
+      return jsonResponse([]);
+    });
+    renderWithQuery(<LibraryScreen />);
+    await screen.findByText('还没有文档');
+
+    fireEvent.drop(document.querySelector('[data-od-id="dropzone"]') as Element, {
+      dataTransfer: { files: [makePdfFile('dropped.pdf')] },
+    });
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some((call) => (call[1] as RequestInit)?.method === 'POST')).toBe(
+        true,
+      ),
+    );
+  });
+
+  it('413 file_too_large → 错误卡写明"文件过大"（不写假成功）', async () => {
+    mockApiFetch({
+      '/api/v1/documents': () => jsonResponse([]),
+    });
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET').toUpperCase() === 'POST') {
+        return jsonResponse(
+          {
+            error: {
+              code: 'file_too_large',
+              message: '上传超过上限 209715200 字节（本文件 300000000 字节）',
+              detail: { limit_bytes: 209715200, size_bytes: 300000000 },
+            },
+          },
+          413,
+        );
+      }
+      return jsonResponse([]);
+    });
+
+    renderWithQuery(<LibraryScreen />);
+    await screen.findByText('还没有文档');
+    fireEvent.change(document.querySelector('[data-od-id="upload-input"]') as Element, {
+      target: { files: [makePdfFile('huge.pdf')] },
+    });
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('文件过大：huge.pdf');
+    expect(alert).toHaveTextContent('上传超过上限 209715200 字节');
+  });
+
+  it('本地预检：非 .pdf 扩展名与假魔数都不发 POST', async () => {
+    const fetchMock = mockApiFetch({
+      '/api/v1/documents': () => jsonResponse([]),
+    });
+    renderWithQuery(<LibraryScreen />);
+    await screen.findByText('还没有文档');
+    const input = document.querySelector('[data-od-id="upload-input"]') as Element;
+
+    fireEvent.change(input, {
+      target: { files: [new File(['x'], 'notes.txt', { type: 'text/plain' })] },
+    });
+    expect(await screen.findByText(/这个文件不是 PDF：notes.txt/)).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { files: [makeTextFile('fake.pdf')] } });
+    expect(await screen.findByText(/前 5 字节不是 %PDF-/)).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.every((call) => call[1]?.method !== 'POST'),
+    ).toBe(true);
+  });
+
+  it('上传失败卡可以关掉', async () => {
+    const fetchMock = mockApiFetch({ '/api/v1/documents': () => jsonResponse([]) });
+    fetchMock.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET').toUpperCase() === 'POST') {
+        return jsonResponse(
+          { error: { code: 'invalid_pdf', message: '上传内容不是 PDF' } },
+          422,
+        );
+      }
+      return jsonResponse([]);
+    });
+    renderWithQuery(<LibraryScreen />);
+    await screen.findByText('还没有文档');
+    fireEvent.change(document.querySelector('[data-od-id="upload-input"]') as Element, {
+      target: { files: [makePdfFile('broken.pdf')] },
+    });
+    expect(await screen.findByText(/这个文件不是 PDF：broken.pdf/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '知道了' }));
+    await waitFor(() =>
+      expect(screen.queryByText(/这个文件不是 PDF：broken.pdf/)).toBeNull(),
+    );
+  });
+
+  it('多选：逐个串行 POST（不并发）', async () => {
+    const order: string[] = [];
+    let inflight = 0;
+    let maxInflight = 0;
+    const fetchMock = mockApiFetch({ '/api/v1/documents': () => jsonResponse([]) });
+    fetchMock.mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET').toUpperCase() !== 'POST') return jsonResponse([]);
+      inflight += 1;
+      maxInflight = Math.max(maxInflight, inflight);
+      const file = (init?.body as FormData).get('file') as File;
+      order.push(file.name);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      inflight -= 1;
+      return jsonResponse({ did: `up-${file.name}`, bytes: 5, source: 'source.pdf' }, 201);
+    });
+
+    renderWithQuery(<LibraryScreen />);
+    await screen.findByText('还没有文档');
+    fireEvent.change(document.querySelector('[data-od-id="upload-input"]') as Element, {
+      target: { files: [makePdfFile('a.pdf'), makePdfFile('b.pdf'), makePdfFile('c.pdf')] },
+    });
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter((call) => (call[1] as RequestInit)?.method === 'POST'),
+      ).toHaveLength(3),
+    );
+    expect(order).toEqual(['a.pdf', 'b.pdf', 'c.pdf']);
+    expect(maxInflight).toBe(1);
   });
 
   it('空态：没有文档时给出明确说明而不是空白', async () => {

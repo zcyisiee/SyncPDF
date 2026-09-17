@@ -5,11 +5,13 @@ Vite + React 18 + TypeScript + Tailwind + TanStack Query + Zustand。
 `tailwind.config.ts` + `src/app/globals.css`）；HTTP 契约唯一事实来源：
 `docs/frontend/api.md` 与运行中服务的 `/openapi.json`。
 
-本目录当前范围（W06）：三栏工作台壳 + 设计令牌 + 文件库屏（真数据）+ hash 路由 +
+本目录当前范围（W08）：三栏工作台壳 + 设计令牌 + hash 路由 +
 **PDF 预览**（pdf.js 渲染产物 PDF、parse/layout 两套 bbox 叠加、源/译/对照三模式、点框选中）+
-**进度层**（事件流面板 + 真 SSE 增量 + 阶段时间线真耗时 + 运行中状态）。
+**进度层**（事件流面板 + 真 SSE 增量 + 阶段时间线真耗时 + 运行中状态）+
+**上传与任务**（文件库拖/选上传 PDF → 新文档、工作台「开始翻译」配置卡、运行中/失败卡与取消）。
 **不做**：连续滚动、缩放控件、bbox 拖拽（W09）、译文覆盖层、段落属性面板（W10）、
-上传（W08）、job 启动/取消（W07）；这些区域渲染带 `data-od-id` 的占位并写明接入任务。
+profile 编辑器（W08 只有 GET /profiles 的下拉，写入接口在后端）；这些区域渲染带 `data-od-id`
+的占位并写明接入任务。
 
 ## 开发工作流（两个终端）
 
@@ -53,14 +55,19 @@ web/
                 shell/（Topbar/IconRail/ScreenFrame/Gutter/ViewRail/InspectorPanel/Timeline）
                 events/（EventStreamPanel · EventRow · useEventWindow · useEventStream · useTimelineStages）
                 preview/（PdfCanvas · BboxLayer · PreviewToolbar · PreviewArea）
-    lib/        api.ts（/api/v1 + 错误信封）· queries.ts · preview.ts（产物选择 + geometry 解析）
-                events.ts（SSE 帧/URL/live/分组/窗口合并）· timeline.ts（阶段合并 + 条宽）
-                pdf.ts（pdf.js worker/cmap/字体配置）· humanize.ts · routing.ts · cn.ts
+    lib/        api.ts（/api/v1 + 错误信封 + POST/PUT/multipart）· queries.ts（含 W08 上传/job/profiles）
+                uploads.ts（客户端预检：魔数 + 200MB）· jobs.ts（活动判据/轮询/from 判断/页码形状）
+                preview.ts（产物选择 + geometry 解析）· events.ts（SSE 帧/URL/live/分组/窗口合并）
+                timeline.ts（阶段合并 + 条宽）· pdf.ts（pdf.js worker/cmap/字体配置）
+                humanize.ts · routing.ts · cn.ts
+    components/jobs/  StartJobCard（开始翻译配置卡）· ActiveJobCard（运行中/失败/取消卡）
     screens/    LibraryScreen / DocumentCard / WorkbenchScreen / PlaceholderScreen
     stores/     ui.ts（三栏宽度 + 分隔条 + 屏/预览模式 + 预览页码/bbox 图层/选中段落）
   scripts/      sync-pdfjs-assets.mjs（把 pdf.js 静态资源复制进 public/pdfjs/）
-  e2e/          Playwright 真浏览器用例（preview.spec.ts · progress.spec.ts）
-  tests/        Vitest 用例（api / store / routing / 文件库屏 / 工作台壳 / 预览坐标与组件 / 事件流与时间线）
+  e2e/          Playwright 真浏览器用例（preview.spec.ts · progress.spec.ts · upload.spec.ts）
+                fixtures/sample.pdf（602 字节最小合法 PDF）· fixtures/sleep-translator.sh（长睡 stub）
+  tests/        Vitest 用例（api / store / routing / 文件库屏+上传 / job 卡与 hooks / 工作台壳 /
+                预览坐标与组件 / 事件流与时间线）
   public/pdfjs/ pdf.js worker + cmaps + standard_fonts（生成物，.gitignore，不入库）
   tmp-smoke/    本地冒烟截图与日志（.gitignore，不入库）
 ```
@@ -103,7 +110,17 @@ cd web && pnpm e2e        # 自动起 bdt serve --root ../tmp --port 8793 + vite
   落到同一矩形（±0.6px）、点框选中联动右侧面板、切换模式不重建译侧画布、产物响应含 `206`、
   全程无外网请求（禁 CDN）；`progress.spec.ts` 再断言事件面板行数 == 服务端本页条数、最新在上、
   SSE 连上（`data-status=open`）、时间线 7 段 `data-state=ok` 且耗时/总用时与 `stage-state` 同口径、
-  无 console error。
+  无 console error；`upload.spec.ts` 覆盖 W08 的上传→开始→取消（见下）。
+- **W08 `upload.spec.ts` 的副作用**（都在 `tmp/`，本仓库不入库）：
+  - 上传用仓库里的 fixture `web/e2e/fixtures/sample.pdf`（602 字节、正确 xref 的最小合法 PDF），
+    每次跑都会在 `tmp/` 下留一个 `up-sample-<时间戳>` 文档（证据，可手工删）；
+  - 取消用例每次用新 did `tmp/w08-e2e-cancel-<时间戳>/`（`job` 历史按 did 存在
+    `.bdt-serve/jobs/*.json`，固定 did 会让第二次跑先看到上一次的 canceled job）；
+  - 预置 `sleep-t` profile 指向 `web/e2e/fixtures/sleep-translator.sh`（长睡 stub）：
+    写入 `tmp/.bdt-serve/profiles.json` 前会**备份**，`afterAll` 还原（原本不存在就删掉）；
+  - `afterAll` 取消活动 job + `bdt debug --stop` 停查看器，不留 running 子进程/端口。
+- `from=parse` 的用例**诚实断言两种环境分支**：有 MinerU token（本机默认）→ 断言 job 进 `running`；
+  没有 token/MinerU 不可用 → 断言 `failed` 且 `error_code` 非空。分支写进 annotation（`[w08]`）。
 - 截图落在 `web/tmp-smoke/`（`e2e-preview.png` / `-layout` / `-compare` / `-selected` /
   `-heavy-range` / `e2e-progress*.png`），性能数字以 `[perf]` / `[range]` 打到 stdout。
 
@@ -167,6 +184,55 @@ cd web && node tmp-smoke/w06-sse-smoke.mjs   # 真 Chromium，跑完写 tmp-smok
 量浏览器收到它的延迟，结束前按备份**还原 fixture**。W06 实测：追加 → 浏览器 534ms 收到（<1s），
 首屏到第一行事件 113ms，3758 条的 run 窗口 200 行 / 首屏 117ms / 2 次分页请求，无 console error。
 SSE 增量的 e2e 留到 W15（W07 有真 job 之后）。
+
+## 上传与任务（W08）：拖 PDF → 开始翻译 → 取消
+
+### 上传（文件库）
+
+- 入口：文件库的拖放区 + 「上传 PDF」按钮（同一个隐藏 `<input type=file multiple>`）。
+  多选时**逐个串行** POST（`POST /api/v1/documents`，multipart，body 只有 `file` 字段）；
+  不伪造百分比，只有「正在上传 <文件名>…」一行（沿用全站唯一动效 `pulse-dot`，不引第二个 spinner）。
+- 客户端预检（`lib/uploads.ts`，与服务端同一套边界）：`file.size > 200MB` → 「文件过大」，
+  非 `.pdf` 扩展名 → 「只接受 .pdf」，再读前 5 字节确认 `%PDF-`（`file.slice(0,5)`，不整文件进内存）。
+  服务端仍会独立复核（`413 file_too_large` / `422 invalid_pdf`），前端预检只是省一次往返。
+- **did 由服务端生成**（`up-<slug>-<UTC 时间戳>`，同名冲突递增 `-2`/`-3`）——客户端不提供路径、
+  目录名或命令；上传只落 `<did>/source.pdf`（不建 `agent/` 骨架）。成功后列表自动刷新，
+  **不自动跳转**：用户自己点卡片进工作台（预览的「原文」模式立刻可用，因为 `source.pdf` 是
+  W03 白名单里的 `kind=source`）。
+- `bdt serve --workdir <dir>`（只公开一个 workdir）**不支持上传**：`409 upload_not_supported`
+  （旁边建的 did 进不了可见范围，宁可不做）。
+
+### 开始翻译（工作台进度视图顶部）
+
+- 显示条件：该文档**没有活动 job**，且清单里已有产物（`source.pdf` 或任何 `agent/*`）。
+- 表单：profile 下拉（`GET /profiles`，只见 `id`/`label`）、页码范围（占位 `1-3,5 全部留空`）、
+  dual 开关、高级折叠里的「起点阶段」；`from` 默认值 = **有 parse 产物 → translate，否则 parse**
+  （判据 `stage_summary.parse === 'ok'` 或 `available.anchors`/`parse_snapshot`）。
+- 提交 `POST /documents/{did}/jobs`，body 只有 `action`/`from`/`pages`/`dual`/`profile`
+  —— translator/reviewer 命令由**服务端**从 profile 解析，前端连字段都没有。
+- **MinerU token 只走 serve 进程环境**（`MINERU_API_TOKEN`）：`from=parse` 时卡片会提示
+  「首次翻译需要 MinerU（由服务环境提供 token），耗时较长」，但前端**无法**预知有没有 token，
+  所以任务是否成功以服务端返回的 `error_code` 为准（不假装成功）。
+
+### 运行中 / 取消 / 重试
+
+- job 状态轮询 `GET /documents/{did}/jobs`：有 `queued`/`running` 时 2s，否则 30s
+  （`lib/jobs.ts`）。它是「run 归档出现之前」唯一的真实信号；run 一出现，事件流/时间线照旧
+  由 SSE + `stage-state` 负责 —— 两路并存，任一 live 就快轮询详情/阶段。
+- 有活动 job → 顶部换 `ActiveJobCard`：状态徽标（排队中/运行中 · 阶段）+ 「取消」（`window.confirm`
+  后 `POST /jobs/{jid}/cancel`，服务端杀整个进程组）。
+- 失败/取消/中断 → 同一张卡如实显示 `error_code`/`error_message` + 「重试」；**重试 = 同参数发一个
+  新 job**（后端不自动重跑收费调用）；`interrupted` 明确写「服务曾重启，请重试」。
+- **信封脱敏**：`GET /jobs/{jid}` 拿到的 `envelope` 里 `data.config.translator/reviewer` 已是
+  `<profile:<id>>`、带 token 的 `data.debug.url` 已移除（后端落盘前处理）。
+
+### profiles（谁配命令）
+
+`<store_base>/.bdt-serve/profiles.json`（`--root` 模式 = 服务根目录下的 `.bdt-serve/`）。
+写入接口 `PUT /api/v1/profiles` **只接受脚本路径引用** `scripts/<name>`（必须落在
+`<store_base>/scripts/` 或仓库 `scripts/` 白名单目录内，越界/符号链接穿越/不存在一律 422），
+服务端解析成**绝对路径**再写盘 —— 客户端永远无法塞命令字符串或密钥（`translator`/`api_key`
+这类字段收到即 `422 forbidden_field`）。前端目前只用 `GET /profiles` 填下拉，不做 profile 编辑器。
 
 ## 设计与契约约束（改动时别忘）
 

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { STAGE_LABELS, STAGE_NAMES } from '../src/lib/humanize';
 import { WorkbenchScreen } from '../src/screens/WorkbenchScreen';
 import { uiStore } from '../src/stores/ui';
-import { jsonResponse, mockApiFetch, renderWithQuery, resetUiStore } from './helpers';
+import { jsonResponse, makeJob, mockApiFetch, renderWithQuery, resetUiStore } from './helpers';
 
 const DID = 'ccs3764-dyn';
 const RUN_ID = '20260916T132829Z-000183';
@@ -289,5 +289,67 @@ describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
       '#/library',
     );
     expect(within(alert).getByRole('button', { name: '重试' })).toBeInTheDocument();
+  });
+
+  /** W08 用到的固定 mock：详情 + 有产物的清单 + 指定 job 列表 + profiles。 */
+  function mockWorkbench(extra: Record<string, unknown>) {
+    return mockApiFetch({
+      [`/api/v1/documents/${DID}`]: () => jsonResponse(DETAIL),
+      [`/api/v1/documents/${DID}/artifacts`]: () =>
+        jsonResponse([
+          {
+            name: 'source.pdf',
+            path: 'source.pdf',
+            kind: 'source',
+            size: 1024,
+            mtime: '2026-09-16T13:28:29.000Z',
+          },
+        ]),
+      '/api/v1/profiles': () =>
+        jsonResponse([
+          { id: 'echo-t', label: 'Echo T', has_translator: true, has_reviewer: false },
+        ]),
+      [`/api/v1/documents/${DID}/stage-state`]: () => jsonResponse(STAGE_STATE),
+      [`/api/v1/documents/${DID}/events?after_seq=0&limit=2000`]: () => jsonResponse(EVENTS_PAGE),
+      ...extra,
+    });
+  }
+
+  it('进度视图顶部（W08）：无活动 job + 有产物 → StartJobCard（默认 translate）', async () => {
+    mockWorkbench({ [`/api/v1/documents/${DID}/jobs`]: () => jsonResponse([]) });
+    renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
+
+    // 面板在预览区上方（进度视图顶部）
+    expect(document.querySelector('[data-od-id="job-panel"]')).not.toBeNull();
+    const submit = await screen.findByRole('button', { name: '开始翻译' });
+    expect(submit).toBeEnabled();
+    // 已有 parse 产物（stage_state parse ok）→ 默认 translate，不提示 MinerU
+    expect(((await screen.findByLabelText('起点阶段')) as HTMLSelectElement).value).toBe('translate');
+    expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
+  });
+
+  it('进度视图顶部（W08）：有活动 job → ActiveJobCard（取消按钮替换开始卡）', async () => {
+    mockWorkbench({
+      [`/api/v1/documents/${DID}/jobs`]: () =>
+        jsonResponse([makeJob({ did: DID, status: 'running', profile: 'echo-t' })]),
+    });
+    renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
+
+    expect(await screen.findByRole('button', { name: '取消' })).toBeInTheDocument();
+    expect(document.querySelector('[data-od-id="active-job-card"]')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: '开始翻译' })).toBeNull();
+  });
+
+  it('非进度视图不显示 job 面板', async () => {
+    mockApiFetch({
+      [`/api/v1/documents/${DID}`]: () => jsonResponse(DETAIL),
+      [`/api/v1/documents/${DID}/artifacts`]: () => jsonResponse([]),
+      [`/api/v1/documents/${DID}/jobs`]: () => jsonResponse([makeJob({ did: DID })]),
+      [`/api/v1/documents/${DID}/stage-state`]: () => jsonResponse(STAGE_STATE),
+      [`/api/v1/documents/${DID}/events?after_seq=0&limit=2000`]: () => jsonResponse(EVENTS_PAGE),
+    });
+    renderWithQuery(<WorkbenchScreen did={DID} view="archive" />);
+    await screen.findByText(/归档视图待 W12 接入/);
+    expect(document.querySelector('[data-od-id="job-panel"]')).toBeNull();
   });
 });

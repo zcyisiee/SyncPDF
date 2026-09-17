@@ -1,0 +1,113 @@
+import type { JobRecord } from '../../api/types';
+import { describeApiError } from '../../lib/api';
+import { jobOutcomeMessage } from '../../lib/jobs';
+import { useCancelJobMutation, useCreateJobMutation } from '../../lib/queries';
+import { stageLabel } from '../../lib/humanize';
+import { Button } from '../ui/Button';
+import { ErrorCard } from '../ui/ErrorCard';
+import { StatusBadge } from '../ui/StatusBadge';
+
+/**
+ * job 状态 → 徽标文案/色调。**必须覆盖终态**：这个卡在"最近一次失败/取消"时也显示，
+ * 那时徽标若还写「运行中」就是骗人（e2e 的 DOM 快照抓到过这个）。
+ * `succeeded` 由工作台交回 StartJobCard（这里只是让 switch 全覆盖）。
+ */
+function jobBadge(
+  job: JobRecord,
+): { label: string; tone: 'idle' | 'run' | 'err' | 'pass'; running: boolean } {
+  switch (job.status) {
+    case 'queued':
+      return { label: '排队中', tone: 'idle', running: false };
+    case 'running': {
+      const stage = job.from_stage ? ` · ${stageLabel(job.from_stage)}` : '';
+      return { label: `运行中${stage}`, tone: 'run', running: true };
+    }
+    case 'succeeded':
+      return { label: '已完成', tone: 'pass', running: false };
+    case 'canceled':
+      return { label: '已取消', tone: 'idle', running: false };
+    default:
+      return { label: '失败', tone: 'err', running: false };
+  }
+}
+
+/**
+ * 活动/最近失败任务的卡（有活动 job 时替换 StartJobCard）：
+ *
+ * - `queued`/`running`：状态徽标 + 「取消」（confirm 后 `POST /jobs/{jid}/cancel`）；
+ * - `failed`/`canceled`/`interrupted`：如实显示 `error_code`/`error_message` + 「重试」
+ *   （重试 = 用同参数**发一个新 job**，不自动重跑 —— 后端明确不重跑收费调用）；
+ * - `succeeded` 不在这里（那时该显示开始卡，用户可以再跑一次）。
+ */
+export function ActiveJobCard({ did, job }: { did: string; job: JobRecord }) {
+  const cancelJob = useCancelJobMutation(did);
+  const createJob = useCreateJobMutation(did);
+  const active = job.status === 'queued' || job.status === 'running';
+  const badge = jobBadge(job);
+  const describe = cancelJob.error
+    ? describeApiError(cancelJob.error)
+    : createJob.error
+      ? describeApiError(createJob.error)
+      : null;
+
+  const retry = () =>
+    createJob.mutate({
+      action: job.action,
+      from: job.from_stage ?? undefined,
+      pages: job.pages ?? undefined,
+      dual: job.dual,
+      profile: job.profile,
+    });
+
+  return (
+    <div className="flex flex-col gap-s3 p-s4" data-od-id="active-job-card" data-job-id={job.job_id}>
+      <div className="flex flex-wrap items-center gap-s3">
+        <span data-od-id="active-job-status" data-status={job.status}>
+          <StatusBadge tone={badge.tone} running={badge.running}>
+            {badge.label}
+          </StatusBadge>
+        </span>
+        <span className="font-mono text-micro text-ink-4">{job.job_id}</span>
+        <span className="text-tiny text-ink-3">
+          profile <span className="font-mono text-ink-2">{job.profile}</span>
+          {job.pages ? ` · 第 ${job.pages} 页` : ''}
+          {job.dual ? ' · dual' : ''}
+        </span>
+        {active ? (
+          <Button
+            variant="danger"
+            data-od-id="cancel-job"
+            disabled={cancelJob.isPending}
+            onClick={() => {
+              const confirmed = window.confirm(
+                '取消这个任务？会终止整个进程组（含 translator 子进程），且不会自动重跑。',
+              );
+              if (confirmed) cancelJob.mutate(job.job_id);
+            }}
+          >
+            {cancelJob.isPending ? '正在取消…' : '取消'}
+          </Button>
+        ) : (
+          <Button
+            variant="primary"
+            data-od-id="retry-job"
+            disabled={createJob.isPending}
+            onClick={retry}
+          >
+            {createJob.isPending ? '正在提交…' : '重试'}
+          </Button>
+        )}
+      </div>
+
+      {active ? null : (
+        <p className="text-tiny text-ink-2" data-od-id="active-job-outcome">
+          {jobOutcomeMessage(job)}
+          {job.error_code ? <span className="ml-2 font-mono text-micro text-ink-4">{job.error_code}</span> : null}
+        </p>
+      )}
+      {describe === null ? null : (
+        <ErrorCard data-od-id="active-job-error" title={describe.title} message={describe.message} />
+      )}
+    </div>
+  );
+}

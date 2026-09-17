@@ -65,8 +65,12 @@ curl -sS http://127.0.0.1:<port>/api/v1/health
 | 404 | `artifact_not_found` | 产物不在白名单内或不存在（不泄露存在性，W03） |
 | 405 | `method_not_allowed` | 方法不允许（带 `Allow` 头） |
 | 409 | `revision_conflict`（计划） | 草稿乐观并发失败，`detail.current_revision` 给最新值 |
-| 409 | `document_busy`（计划） | 同文档已有活动 job |
+| 409 | `document_busy` | 同文档已有活动 job（W07） |
+| 413 | `file_too_large` | 上传超过 200MB 上限，`detail.limit_bytes`/`size_bytes`（W08） |
 | 422 | `validation_error` | 请求体/参数校验失败，`detail.errors` |
+| 422 | `forbidden_field` | 客户端自带了命令/密钥字段（`translator`/`reviewer`/`api_key`…）或脚本引用形状不合（W07/W08）。**优先于** `validation_error`：body 里有这类字段就先报它 |
+| 422 | `invalid_pdf` | 上传缺文件名或前 5 字节不是 `%PDF-`（W08） |
+| 422 | `script_path_forbidden` | `PUT /profiles` 的脚本引用不在白名单目录内/不存在（W08） |
 | 500 | `internal_error` / `invalid_root` | 服务内部错误；启动时根目录非法 |
 | 503 | `root_missing` | 运行期根目录不可用（health 也不谎报 `ok`） |
 
@@ -223,7 +227,10 @@ POST /api/v1/documents/{did}/jobs
 ```
 
 - `action` ∈ `run` | `retranslate` | `compile` | `check`（固定四值）。
-- `from` 只对 `action=run` 有效，取值 = §3.1 的 7 个阶段。
+- `from` 只对 `action=run` 有效，取值 = §3.1 的 7 个阶段。起点是 `parse`（含缺省）时
+  服务端在 argv 里**自动带上** `<workdir>/source.pdf` 位置参数（parse 的输入；上传后就在
+  那里）；`translate` 及之后不需要它（也不接受客户端传 PDF 路径）。parse 的 MinerU token
+  由 **serve 进程环境**（`MINERU_API_TOKEN`）提供，客户端永远不传。
 - `paragraph_ids` / `feedback` 只对 `retranslate` 有效；候选**不得**直接改当前译文
   （`retranslate_ids` 会合并进 `translated.md`，必须走隔离副本，采用后才写入草稿）。
 - `scope` / `pages` 只对 `compile` 有效；v1 页级编译按已批准设计**回退全量**，
@@ -233,20 +240,60 @@ POST /api/v1/documents/{did}/jobs
 - `GET /api/v1/jobs/{jid}`、`POST /api/v1/jobs/{jid}/cancel`、`GET /api/v1/documents/{did}/jobs`（`?status=` 按状态过滤，新 → 旧）。
 - 取消：终止整个进程组（连带 translator 孙进程），清理后才释放文档锁；明确不自动重跑收费调用。
 - job 状态持久化（重启后核对进程身份）；不凭孤立 PID 发信号。
+- `GET /jobs/{jid}` 的 `envelope` **已脱敏**（W08）：`data.config.translator/reviewer` 的命令
+  字符串替换为 `<profile:<id>>`，带 token 的 `data.debug.url` 已移除（`run_id`/`manifest` 保留）。
+  落盘的那一份（`.bdt-serve/jobs/<jid>.json` 快照）就是脱敏后的文本；`jobs.jsonl` 是状态
+  变迁审计日志（只记状态/时间/pid，不带 envelope）。
 
-### 3.5 其余端点（未实现，形状在各自 brief 冻结）
+### 3.5 上传与 profiles（已实现 W08）+ 其余端点（未实现）
 
 | 路径（前缀 `/api/v1`） | 说明 | 任务 |
 |---|---|---|
-| `POST /documents` | multipart 上传 PDF → 建 did | W08 |
-| `GET/PUT /profiles` | provider profiles（仅名字对前端可见） | W08 |
+| `POST /documents` | multipart 上传 PDF → 建 did | 已实现（W08） |
+| `GET/PUT /profiles` | provider profiles（仅名字对前端可见） | 已实现（W08） |
 | `GET/PATCH/DELETE /documents/{did}/draft` | 草稿读写（§3.3） | W09 |
 | `GET /documents/{did}/candidates`、`POST /documents/{did}/candidates/{cid}/accept\|discard` | 重译候选（生成不合并） | W11 |
 | `GET/POST /documents/{did}/versions`、`POST /documents/{did}/versions/{vid}/rollback` | 版本归档与回滚 | W12 |
 | `/glossary...` | 词表 CRUD（全局 + 文档级）、CSV、命中计数 | W13 |
 
-上表**尚未实现**：调用它们会得到 `404 not_found`（统一错误信封），不要在前端把
+上表**尚未实现**的行：调用它们会得到 `404 not_found`（统一错误信封），不要在前端把
 `404` 当成业务错误处理。
+
+#### `POST /documents`（W08）
+
+`multipart/form-data`，字段名 `file`（其余字段忽略）。校验 `%PDF-` 魔数与 200MB 上限，
+在服务根目录下建 `up-<slug>-<yyyymmdd-hhmmss>` 目录（`slug` 只取文件名的 `[a-z0-9-]`，
+同名冲突递增 `-2`/`-3`），字节流式写进 `<did>/source.pdf`（tmp + rename 原子落盘，
+**不预建** `agent/` 骨架）。上传后 W05 的"原文"预览（`kind=source`）与文件库列表立即可用。
+
+```json
+→ 201 {"did": "up-attention-is-all-you-20260917-172233", "bytes": 1300917, "source": "source.pdf"}
+→ 413 {"error": {"code": "file_too_large", "message": "…", "detail": {"limit_bytes": 209715200, "size_bytes": 316457912}}}
+→ 422 {"error": {"code": "invalid_pdf", "message": "…", "detail": {"reason": "not_pdf", "magic": "3c68746d6c"}}}
+```
+
+#### `GET/PUT /profiles`（W08）
+
+```json
+GET → 200 [{"id": "deepseek-flash", "label": "Deepseek Flash", "has_translator": true, "has_reviewer": false}]
+
+PUT {"id": "deepseek-flash", "label": "DeepSeek Flash", "translator_script": "scripts/agy-translator.sh", "reviewer_script": null}
+→ 200 {"id": "deepseek-flash", "label": "DeepSeek Flash", "has_translator": true, "has_reviewer": false}
+```
+
+- 响应里**没有命令字段**：translator/reviewer 命令字符串只存在于服务端
+  （`<store_base>/.bdt-serve/profiles.json`），前端只用 `id` 提 job、用 `label` 显示。
+- `translator_script`/`reviewer_script` 是**脚本路径引用**（`^scripts/[A-Za-z0-9._/-]+$`），必须解析到
+  `<store_base>/scripts/` 或仓库 `scripts/` 白名单目录内且确实存在（`..` 穿越/符号链接越界拒绝）；
+  含空格引号分号 `$` 之类 shell 元字符 → `422 forbidden_field`，白名单外/不存在 → `422 script_path_forbidden`。
+  服务端把它解析成**绝对路径**再落盘（子进程 cwd = 文档 workdir，相对引用在那里解析不到）。
+- 字段**缺席** = 不动该字段；显式 `null`/空串 = 删该字段；三个字段都空 = 删整个 profile
+  （之后用它提 job 会 `422 unknown_profile`）；只给 `id` 的请求是 `422 validation_error`。
+- `translator`/`reviewer`/`api_key`/`command`/`shell` 之类字段收到即 `422 forbidden_field`（不回显）。
+  这个判断在**模型校验之前**执行（FastAPI 依赖）：`{"id":"x","translator":"echo hi"}` 即使同时
+  缺"可改字段"，报的也是 `forbidden_field`，不是 `validation_error` —— 别把它当成参数没写全。
+- 写盘是同目录 tmp + `os.replace` 的原子写，且只动目标 id 那一条。
+- `DELETE /profiles` 不在 v1 范围（"清空三个字段"就是删除）。
 
 ## 4. 前端消费注意
 

@@ -1,6 +1,7 @@
 import { describeApiError } from '../lib/api';
 import { isRunLive } from '../lib/events';
-import { DOCUMENT_LIVE_REFETCH_MS, useDocument } from '../lib/queries';
+import { jobCardMode } from '../lib/jobs';
+import { DOCUMENT_LIVE_REFETCH_MS, useDocument, useJobs } from '../lib/queries';
 import { WORKBENCH_VIEWS, type WorkbenchView } from '../lib/routing';
 import { Button, LinkButton } from '../components/ui/Button';
 import { ErrorCard } from '../components/ui/ErrorCard';
@@ -11,6 +12,8 @@ import { InspectorPanel } from '../components/shell/InspectorPanel';
 import { ScreenFrame } from '../components/shell/ScreenFrame';
 import { Timeline } from '../components/shell/Timeline';
 import { ViewRail } from '../components/shell/ViewRail';
+import { ActiveJobCard } from '../components/jobs/ActiveJobCard';
+import { StartJobCard } from '../components/jobs/StartJobCard';
 import { PreviewArea } from '../components/preview/PreviewArea';
 import { useEventWindow } from '../components/events/useEventWindow';
 import { useTimelineStages } from '../components/events/useTimelineStages';
@@ -31,14 +34,20 @@ const STAGE_STATE_LIVE_REFETCH_MS = 2_000;
 export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchView }) {
   // 进度层：事件窗口（首拉 + SSE）→ 时间线段（stage-state 基线 + live）→ 详情轮询间隔。
   const feed = useEventWindow(did);
+  // jobs 轮询（W08）：有 queued/running 时 2s，否则 30s —— run 归档出现**之前**的唯一真实信号。
+  const jobsQuery = useJobs(did);
+  const cardMode = jobCardMode(jobsQuery.data);
+  const latestJob = jobsQuery.data?.[0] ?? null;
+  // 两路并存、任一 live 就快轮询：事件流还在增长，或有活动 job（前者要 run 归档才活）。
+  const eventsLive = isRunLive(feed.events);
+  const fastRefetch = eventsLive || cardMode === 'active';
   // stage-state 的轮询用「事件流是否还在增长」（brief 冻结的 isRunLive；归档截断时会多轮询，
   // 但时间线/徽标的 live 一律由基线裁决，见 lib/timeline.ts 的注释）。
-  const eventsLive = isRunLive(feed.events);
   const timeline = useTimelineStages(did, feed.events, {
-    refetchMs: eventsLive ? STAGE_STATE_LIVE_REFETCH_MS : 0,
+    refetchMs: fastRefetch ? STAGE_STATE_LIVE_REFETCH_MS : 0,
   });
   const documentQuery = useDocument(did, {
-    refetchMs: timeline.live ? DOCUMENT_LIVE_REFETCH_MS : 0,
+    refetchMs: timeline.live || cardMode === 'active' ? DOCUMENT_LIVE_REFETCH_MS : 0,
   });
   const doc = documentQuery.data;
   const activeView = WORKBENCH_VIEWS.find((candidate) => candidate.id === view) ?? WORKBENCH_VIEWS[0];
@@ -100,8 +109,22 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
           data-od-id="stage"
           className="col-start-3 row-start-1 flex min-h-0 min-w-0 flex-col"
         >
+          {view === 'progress' ? (
+            <div
+              className="flex-none border-b border-hair bg-ivory"
+              data-od-id="job-panel"
+            >
+              {cardMode === 'start' ? (
+                <StartJobCard did={did} document={doc} />
+              ) : latestJob === null ? null : (
+                <ActiveJobCard did={did} job={latestJob} />
+              )}
+            </div>
+          ) : null}
           {PREVIEW_VIEWS.includes(view) ? (
-            <PreviewArea did={did} view={view} />
+            <div className="min-h-0 flex-1">
+              <PreviewArea did={did} view={view} />
+            </div>
           ) : (
             <div
               data-od-id="view-placeholder"

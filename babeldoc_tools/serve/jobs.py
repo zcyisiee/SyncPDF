@@ -25,6 +25,10 @@
 - **不凭孤立 pid 发信号**：进程身份 = ``boot_id``（起 job 的 serve 进程 pid + 启动
   时刻）+ ``spawn_marker``（服务端构造的 argv 的 sha256 前缀）。**argv 本身不落盘** ——
   它含 profile 里的命令字符串，可能内嵌密钥；只存指纹用于核对。
+
+信封（``JobRecord.envelope``）落盘前也过一道脱敏（
+:func:`babeldoc_tools.serve.runner.sanitize_envelope`）：命令字符串换成 profile id、
+带 token 的 debug 查看器 URL 移除 —— ``GET /jobs/{jid}`` 返回的东西里没有密钥。
 """
 
 from __future__ import annotations
@@ -206,7 +210,10 @@ class JobRecord(BaseModel):
     #: 子进程 debug recorder 建的 run（spawn 之后新出现的那个）；没有 → None。
     run_id: str | None = None
     exit_code: int | None = None
-    #: 子进程 stdout 的收尾信封原文（截断到 :data:`~babeldoc_tools.serve.runner.MAX_ENVELOPE_BYTES`）。
+    #: 子进程 stdout 的收尾信封原文（截断到
+    #: :data:`~babeldoc_tools.serve.runner.MAX_ENVELOPE_BYTES`）。
+    #: **已脱敏**（W08）：``data.config.translator/reviewer`` 的命令字符串换成 profile id、
+    #: 带 token 的 ``data.debug.url`` 移除 —— 落盘/回传的都是这一份。
     envelope: str | None = None
     error_code: str | None = None
     error_message: str | None = None

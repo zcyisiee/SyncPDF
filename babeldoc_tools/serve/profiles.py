@@ -19,30 +19,45 @@ profile 是**命令的唯一来源**：客户端只能说 profile id，translato
 2. ``BDT_PROFILE_<ID_UPPER>_TRANSLATOR`` / ``BDT_PROFILE_<ID_UPPER>_REVIEWER``
    （id 里的 ``-`` 写成 ``_``）：测试与本地临时覆盖用。
 
-本模块**只读**文件（缺失/坏 JSON → 没有 profile），也不校验命令本身：命令是同样的
-本地配置，最终由 ``babeldoc_tools.common._run_subprocess`` 经 ``shlex.split`` 执行
-（不经 shell）。写入口留给 W08。
+文件的条目可选带 ``label``（给前端看的人性化名字，没有就用 id 兜底）。W08 起增加
+**写入口** :func:`save_profile`（``PUT /profiles`` 用），它只接受**脚本路径引用**
+（``scripts/<name>``，见 :func:`resolve_script_reference`）并把它解析成绝对路径再落盘：
+客户端永远无法直接写一个命令字符串或密钥进 profiles.json。
+
+命令本身不由本模块校验：最终由 ``babeldoc_tools.common._run_subprocess`` 经
+``shlex.split`` 执行（不经 shell）。
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 from pydantic import BaseModel
 
+from babeldoc_tools.common import ToolError
 from babeldoc_tools.serve.store import STATE_DIR
 
 __all__ = [
     "ENV_PREFIX",
+    "LABEL_FIELD",
     "PROFILES_FILE",
+    "PROFILE_FIELDS",
     "PROFILE_ID_RE",
+    "REPO_SCRIPTS_DIR",
+    "SCRIPT_DIR_NAME",
+    "SCRIPT_REF_RE",
     "Profile",
+    "humanize_profile_id",
     "list_profile_ids",
     "load_profiles",
     "profile_env_command",
     "resolve_profile",
+    "resolve_script_reference",
+    "save_profile",
+    "script_dirs",
 ]
 
 #: ``<store_base>/.bdt-serve/profiles.json``。
@@ -52,21 +67,33 @@ PROFILES_FILE = "profiles.json"
 ENV_PREFIX = "BDT_PROFILE_"
 #: env 覆盖字段（与 JSON 里的键同名）。
 ENV_FIELDS = ("translator", "reviewer")
+#: profiles.json 条目里可写、可被本模块读的字段（``save_profile`` 只认这三个键）。
+PROFILE_FIELDS = ("label", "translator", "reviewer")
+#: 人性化显示名字段（前端只从这里/ id 兜底拿显示文案）。
+LABEL_FIELD = "label"
 
 #: profile id 形状（与 ``docs/frontend/api.md`` §3.4 的 ``[a-z0-9-]{1,64}`` 一致）。
 PROFILE_ID_RE = r"^[a-z0-9-]{1,64}$"
+
+#: 脚本引用白名单目录名（相对 ``<store_base>`` 与仓库根各一个）。
+SCRIPT_DIR_NAME = "scripts"
+#: 仓库自带的脚本目录（``<repo>/scripts``）—— 与 ``<store_base>/scripts`` 同为白名单。
+REPO_SCRIPTS_DIR = Path(__file__).resolve().parents[2] / SCRIPT_DIR_NAME
+#: 脚本路径引用的**唯一**合法形状：``scripts/`` 前缀 + 单段字符集（无空格/引号/``$``/``;``）。
+SCRIPT_REF_RE = re.compile(r"^scripts/[A-Za-z0-9._/-]+$")
 
 
 class Profile(BaseModel):
     """一个 provider profile 的**服务端**配置。
 
     ``translator``/``reviewer`` 是命令字符串（stdin 读提示词、stdout 出结果），只喂给
-    argv 构造；它们不出现在任何 HTTP 响应里。
+    argv 构造；它们不出现在任何 HTTP 响应里。``label`` 是可选的人性化显示名。
     """
 
     id: str
     translator: str | None = None
     reviewer: str | None = None
+    label: str | None = None
 
 
 def profiles_path(store_base: Path | str) -> Path:
@@ -90,6 +117,7 @@ def load_profiles(store_base: Path | str) -> dict[str, Profile]:
             id=profile_id,
             translator=_clean(entry.get("translator")),
             reviewer=_clean(entry.get("reviewer")),
+            label=_clean(entry.get(LABEL_FIELD)),
         )
     return profiles
 
@@ -124,7 +152,128 @@ def resolve_profile(store_base: Path | str, profile_id: str) -> Profile | None:
     )
     if known is None and translator is None and reviewer is None:
         return None
-    return Profile(id=profile_id, translator=translator, reviewer=reviewer)
+    return Profile(
+        id=profile_id,
+        translator=translator,
+        reviewer=reviewer,
+        label=known.label if known else None,
+    )
+
+
+def humanize_profile_id(profile_id: str) -> str:
+    """没有 ``label`` 时的兜底显示名：``deepseek-flash`` → ``Deepseek Flash``。"""
+    parts = [part.capitalize() for part in profile_id.split("-") if part]
+    return " ".join(parts) or profile_id
+
+
+# --------------------------------------------------------------------------- #
+# 写入口（PUT /profiles）：只接受脚本路径引用
+# --------------------------------------------------------------------------- #
+def script_dirs(store_base: Path | str) -> tuple[Path, ...]:
+    """脚本引用的白名单目录（解析后的绝对路径，去重）：``<store_base>/scripts`` 与仓库 ``scripts/``。
+
+    只返回**已存在**的目录：不存在的目录不可能命中一个真实脚本，也避免把它报进
+    ``script_path_forbidden`` 的 ``searched`` 里误导人。
+    """
+    dirs: list[Path] = []
+    for candidate in (Path(store_base) / SCRIPT_DIR_NAME, REPO_SCRIPTS_DIR):
+        resolved = candidate.expanduser().resolve()
+        if resolved.is_dir() and resolved not in dirs:
+            dirs.append(resolved)
+    return tuple(dirs)
+
+
+def resolve_script_reference(
+    reference: str, store_base: Path | str, *, field: str = "script"
+) -> Path:
+    """``scripts/<name>`` → 白名单目录内的脚本绝对路径（PUT /profiles 的校验点）。
+
+    两道关：
+
+    1. **形状**：必须是 ``scripts/`` 开头的相对引用，字符集只允许 ``[A-Za-z0-9._/-]`` —— 空格、
+       引号、``;``、``$``、``|`` 之类 shell 元字符与绝对路径一律 **422 ``forbidden_field``**
+       （客户端不能借这个字段塞命令）；
+    2. **位置**：解析（``Path.resolve()``）后必须落在 :func:`script_dirs` 的某个目录**内**且
+       确实是个文件 —— ``..`` 穿越、符号链接越界、不存在都是 **422 ``script_path_forbidden``**。
+
+    通过后返回绝对路径：子进程继承 serve 的 cwd（= job 的 workdir），相对引用在那里
+    解析不到，所以落盘的就是这个绝对路径。
+    """
+    text = reference.strip() if isinstance(reference, str) else ""
+    if not SCRIPT_REF_RE.match(text):
+        # 不回显原值：形状违规的字符串可能整个就是一条命令（W07 的 forbid 字段同一口径）。
+        raise ToolError(
+            "forbidden_field",
+            (
+                "只接受白名单目录内的脚本路径引用（形如 scripts/agy-translator.sh）；"
+                "不接受命令字符串、shell 元字符或绝对路径"
+            ),
+            field=field,
+        )
+    name = text[len(SCRIPT_DIR_NAME) + 1 :]
+    dirs = script_dirs(store_base)
+    for directory in dirs:
+        candidate = (directory / name).resolve()
+        if directory not in candidate.parents:
+            continue  # 穿透 / 符号链接越界
+        if candidate.is_file():
+            return candidate
+    raise ToolError(
+        "script_path_forbidden",
+        f"脚本不在白名单目录内或不存在：{text}",
+        field=field,
+        reference=text[:120],
+        searched=[str(directory) for directory in dirs],
+    )
+
+
+def save_profile(
+    store_base: Path | str, profile_id: str, updates: dict[str, str | None]
+) -> None:
+    """按 ``updates`` 局部更新 ``profiles.json`` 里的一条（原子写）。
+
+    - ``updates`` 的键只能是 :data:`PROFILE_FIELDS`（``label``/``translator``/``reviewer``），
+      值 ``None`` = 删该字段、空条目 = 删整个 profile；
+    - **只动目标 id 这一条**：文件里其它条目（含本模块不认识的自定义键）原样保留；
+    - 写盘是**同目录 tmp + ``os.replace``**：读方（另一个 HTTP 请求/子进程）永远看到完整 JSON。
+    """
+    unknown = set(updates) - set(PROFILE_FIELDS)
+    if unknown:
+        raise ValueError(f"save_profile 不接受这些字段：{sorted(unknown)}")
+    raw = _load_raw(store_base)
+    entry = raw.get(profile_id)
+    entry = dict(entry) if isinstance(entry, dict) else {}
+    for key, value in updates.items():
+        cleaned = _clean(value)
+        if cleaned is None:
+            entry.pop(key, None)
+        else:
+            entry[key] = cleaned
+    if entry:
+        raw[profile_id] = entry
+    else:
+        raw.pop(profile_id, None)
+    _write_raw(store_base, raw)
+
+
+def _load_raw(store_base: Path | str) -> dict[str, object]:
+    """读 profiles.json 的**原始**结构（坏 JSON/非 dict → 空表，不猜、不备份）。"""
+    try:
+        payload = json.loads(profiles_path(store_base).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_raw(store_base: Path | str, payload: dict[str, object]) -> None:
+    """原子写 profiles.json（同目录 tmp + replace；不新增第二个拼写点）。"""
+    path = profiles_path(store_base)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    tmp.replace(path)
 
 
 def _env_profile_ids() -> set[str]:

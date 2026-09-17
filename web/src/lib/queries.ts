@@ -1,23 +1,28 @@
 /**
- * TanStack Query hooks：文件库列表、文档详情、产物清单、bbox 几何，以及 W06 的进度层
- * （事件分页 / 首拉尾部窗口 / 阶段状态）。
+ * TanStack Query hooks：文件库列表、文档详情、产物清单、bbox 几何、W06 的进度层
+ * （事件分页 / 首拉尾部窗口 / 阶段状态），以及 W08 的上传与 job（提交/轮询/取消）、profiles。
  *
  * geometry 的 404（`snapshot_unavailable` / `geometry_unavailable`）不是错误：产物缺失
  * 时该页照样能预览，只是没有 bbox，所以 query 归一成 `data = null` 由 UI 显示小条。
  * 事件分页的 404（`events_unavailable`）也不是“没事件”——是“没有 run 归档”，由
  * `useEventWindow` 归一成空态（`hasArchive=false`），不建 SSE。
  */
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type {
   ArtifactItem,
   DocumentDetail,
   DocumentListItem,
+  DocumentUploaded,
   EventsPage,
   GeometryResponse,
+  JobAccepted,
+  JobCreateRequest,
+  JobRecord,
+  ProfileListItem,
   StageStateResponse,
 } from '../api/types';
-import { ApiError, apiGet } from './api';
+import { ApiError, apiGet, apiPost, apiUpload } from './api';
 import {
   EVENTS_PAGE_LIMIT,
   EVENTS_TAIL_MAX_PAGES,
@@ -27,6 +32,7 @@ import {
   type RunEvent,
 } from './events';
 import { hasRunningDocument } from './humanize';
+import { jobsRefetchInterval } from './jobs';
 import type { BboxMode } from './preview';
 
 /** 列表/详情的自动刷新间隔（只在真有 running 阶段时才开）。 */
@@ -46,6 +52,8 @@ export const queryKeys = {
   eventTail: (did: string) => ['documents', did, 'events', 'tail'] as const,
   events: (did: string, afterSeq: number, limit: number, kind: string, stage: string) =>
     ['documents', did, 'events', afterSeq, limit, kind, stage] as const,
+  jobs: (did: string) => ['documents', did, 'jobs'] as const,
+  profiles: ['profiles'] as const,
 };
 
 /**
@@ -221,4 +229,86 @@ export function useStageState(did: string | null, refetchMs = 0) {
     refetchInterval: refetchMs > 0 ? refetchMs : false,
     enabled: did !== null && did !== '',
   });
+}
+
+// --------------------------------------------------------------------------- #
+// W08：上传 / profiles / jobs
+// --------------------------------------------------------------------------- #
+
+/** profile 列表（`GET /profiles`）：只有 id/label/has_*，命令字符串永不出现。 */
+export function useProfiles() {
+  return useQuery({
+    queryKey: queryKeys.profiles,
+    queryFn: () => apiGet<ProfileListItem[]>('/profiles'),
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * 该文档的 job 列表（`GET /documents/{did}/jobs`，新 → 旧）。
+ *
+ * 轮询口径（brief）：有 `queued`/`running` 时 2s，否则 30s —— job 是"run 归档还没出现"
+ * 那段时间里唯一的真实信号（事件流要等 run 归档建好才活）。
+ */
+export function useJobs(did: string | null) {
+  return useQuery({
+    queryKey: queryKeys.jobs(did ?? ''),
+    queryFn: () => apiGet<JobRecord[]>(`/documents/${encodeURIComponent(did ?? '')}/jobs`),
+    staleTime: 1_000,
+    refetchInterval: (query) => jobsRefetchInterval(query.state.data),
+    enabled: did !== null && did !== '',
+  });
+}
+
+/** 上传一个 PDF（`POST /documents`）；成功后文件库列表失效（服务端已建 did）。 */
+export function useUploadMutation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => apiUpload<DocumentUploaded>('/documents', file),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.documents });
+    },
+  });
+}
+
+/**
+ * 提交 job（`POST /documents/{did}/jobs`）。
+ *
+ * `JobCreateRequest`（生成的 OpenAPI 类型）里**没有** translator/reviewer/timeout 字段：
+ * 那些由服务端从 profile 解析，带了会被 422 `forbidden_field` 拒掉。
+ */
+export function useCreateJobMutation(did: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: JobCreateRequest) =>
+      apiPost<JobAccepted>(`/documents/${encodeURIComponent(did)}/jobs`, body),
+    onSuccess: () => {
+      invalidateJobViews(client, did);
+    },
+  });
+}
+
+/** 取消 job（`POST /jobs/{jid}/cancel`，幂等：已终态返回 200 + 当前状态）。 */
+export function useCancelJobMutation(did: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (jobId: string) =>
+      apiPost<JobRecord>(`/jobs/${encodeURIComponent(jobId)}/cancel`),
+    onSuccess: () => {
+      invalidateJobViews(client, did);
+    },
+  });
+}
+
+/** 提交/取消后让所有"受 job 影响"的视图重新取：job 列表 + 文档详情 + 列表卡片。 */
+function invalidateJobViews(client: ReturnType<typeof useQueryClient>, did: string): void {
+  void client.invalidateQueries({ queryKey: queryKeys.jobs(did) });
+  void client.invalidateQueries({ queryKey: queryKeys.document(did) });
+  void client.invalidateQueries({ queryKey: queryKeys.stageState(did) });
+  void client.invalidateQueries({ queryKey: queryKeys.documents });
+}
+
+/** 供 UI 判断"这次失败是不是文件太大"（413 单独给文案）。 */
+export function isFileTooLarge(error: unknown): boolean {
+  return error instanceof ApiError && (error.code === 'file_too_large' || error.status === 413);
 }

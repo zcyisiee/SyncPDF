@@ -37,7 +37,11 @@ export interface paths {
          */
         get: operations["list_documents_api_v1_documents_get"];
         put?: never;
-        post?: never;
+        /**
+         * 上传 PDF（建 did）
+         * @description multipart/form-data 上传源 PDF：校验 ``%PDF-`` 魔数与大小上限，在服务根目录下建 ``up-<slug>-<时间戳>`` 目录，把字节流式写进``<did>/source.pdf``（tmp + rename 原子落盘，不预建 agent/ 骨架）。did 由服务端生成（同名冲突递增 -2/-3），客户端给的文件名只贡献 slug。
+         */
+        post: operations["upload_document_api_v1_documents_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -224,6 +228,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{did}/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 该文档的 job 列表
+         * @description 该文档的全部 job，新 → 旧（job id 单调 ⇒ 倒序即时间倒序）；`?status=` 按状态过滤（取值同 job 的 status）。
+         */
+        get: operations["list_jobs_api_v1_documents__did__jobs_get"];
+        put?: never;
+        /**
+         * 提交 job（run / check）
+         * @description 以子进程跑 `bdt run`（同文档串行：已有活动 job → 409 document_busy；全局最多 2 个并发，超出排队 queued）。202 的 status 恒为 queued，真实状态轮询 GET /jobs/{jid}。retranslate/compile 未实现 → 422 action_not_available。客户端只能给 action/from/pages/dual/profile：translator/reviewer/timeout 之类一律 422 forbidden_field。
+         */
+        post: operations["create_job_api_v1_documents__did__jobs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{jid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * job 全状态
+         * @description job 快照全字段（envelope 是子进程 stdout 收尾信封原文，最长 4KB）。status ∈ queued|running|succeeded|failed|canceled|interrupted；pid/pgid 只在 running 时有值。
+         */
+        get: operations["get_job_api_v1_jobs__jid__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{jid}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 取消 job（终止整个进程组）
+         * @description 幂等：活动 job → 202，已终态 → 200 原样返回。running 时给整个进程组发SIGTERM（连带 translator 孙进程）→ 5s 宽限 → SIGKILL，进程真的退出后才置 canceled 并释放文档槽；queued 直接 canceled。不自动重跑。
+         */
+        post: operations["cancel_job_api_v1_jobs__jid__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * profile 列表（只有 id/label）
+         * @description 已知 profile id（``<store_base>/.bdt-serve/profiles.json`` ∪ ``BDT_PROFILE_<ID>_<FIELD>`` 环境变量），按 id 排序。**响应里没有命令字段**：translator/reviewer 命令只存在于服务端。``has_translator``/``has_reviewer`` 只说明配没配，不说明配的是什么。
+         */
+        get: operations["list_profiles_api_v1_profiles_get"];
+        /**
+         * 新建 / 更新 / 删除 profile（只接受脚本路径引用）
+         * @description 局部更新一条 profile 并原子写回 profiles.json。``translator_script``/``reviewer_script`` 是**脚本路径引用**（``scripts/<name>``，必须落在 ``<store_base>/scripts/`` 或仓库 ``scripts/`` 内，符号链接越界拒绝），不是命令字符串：含 shell 元字符 → 422 ``forbidden_field``，白名单外/不存在 → 422 ``script_path_forbidden``。字段缺席 = 不动，显式 null = 删该字段，三个字段都空 = 删整个 profile。响应形状与 GET 的条目相同（无命令）。
+         */
+        put: operations["put_profile_api_v1_profiles_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -254,6 +346,14 @@ export interface components {
             size: number;
             /** Mtime */
             mtime: string;
+        };
+        /** Body_upload_document_api_v1_documents_post */
+        Body_upload_document_api_v1_documents_post: {
+            /**
+             * File
+             * @description multipart/form-data 的 file 字段：源 PDF（读前 5 字节必须是 %PDF-，上限 209715200 字节）。文件名只用来生成 did 的 slug。
+             */
+            file: string;
         };
         /**
          * CheckAvailability
@@ -409,6 +509,26 @@ export interface components {
             outputs: components["schemas"]["PdfOutput"][];
         };
         /**
+         * DocumentUploaded
+         * @description ``POST /documents`` 的 201 响应（api.md §3.5 冻结形状）。
+         *
+         *     ``did`` 由服务端生成（``up-<slug>-<yyyymmdd-hhmmss>``，同名冲突递增后缀）；
+         *     ``source`` 恒为 ``source.pdf`` —— 上传只落这一个文件（W03 产物白名单里的
+         *     ``kind=source``），不建任何 ``agent/`` 骨架。
+         */
+        DocumentUploaded: {
+            /** Did */
+            did: string;
+            /** Bytes */
+            bytes: number;
+            /**
+             * Source
+             * @default source.pdf
+             * @constant
+             */
+            source: "source.pdf";
+        };
+        /**
          * EventsPage
          * @description ``GET /api/v1/documents/{did}/events``：一页事件 + 续传游标（api.md §1.3）。
          *
@@ -522,6 +642,132 @@ export interface components {
             documents: number;
         };
         /**
+         * JobAccepted
+         * @description ``POST /documents/{did}/jobs`` 的 202 响应（api.md §3.4 冻结形状）。
+         *
+         *     ``status`` 恒为 ``queued``（契约形状）：真正状态以 ``GET /jobs/{jid}`` 为准 ——
+         *     有空槽位时 job 在响应发出前就已经 ``running`` 了。
+         */
+        JobAccepted: {
+            /** Job Id */
+            job_id: string;
+            /**
+             * Status
+             * @default queued
+             * @constant
+             */
+            status: "queued";
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "run" | "check";
+        };
+        /**
+         * JobCreateRequest
+         * @description ``POST /documents/{did}/jobs`` 的请求体（api.md §3.4）。
+         *
+         *     客户端只能给这些字段：``action``/``from``/``pages``/``dual``/``profile``；
+         *     ``profile`` 只接 **id**。translator/reviewer/timeout 之类命令与密钥字段一律由
+         *     服务端从 profile 解析，带了就 422 ``forbidden_field``（见
+         *     :data:`babeldoc_tools.serve.routers.jobs.FORBIDDEN_JOB_FIELDS`）—— 这些字段**不**
+         *     出现在下面的模型里，避免被前端代码生成当成可用参数。
+         *
+         *     ``from`` 是 Python 关键字，用别名叫回来；OpenAPI 里仍是 ``from``。
+         */
+        JobCreateRequest: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "run" | "retranslate" | "compile" | "check";
+            /**
+             * From
+             * @description 起点阶段（只对 action=run 有效），取值 = §3.1 的 7 个阶段
+             */
+            from?: string | null;
+            /**
+             * Pages
+             * @description 页码范围（只对 action=run 有效），如 "1-3,5"
+             */
+            pages?: string | null;
+            /**
+             * Dual
+             * @description 是否生成 dual（双语）PDF
+             * @default false
+             */
+            dual: boolean;
+            /**
+             * Profile
+             * @description provider profile id（命令由服务端解析，永不回传）
+             */
+            profile: string;
+        };
+        /**
+         * JobRecord
+         * @description 一个 job 的持久化快照；**同时**是 ``GET /jobs/{jid}`` 的响应体。
+         *
+         *     一份模型两处用（快照文件 = 响应体），避免"存储字段"与"响应字段"两套字段漂移。
+         *     ``pid``/``pgid`` 只在运行中有值（终态清空：不再持有进程身份）；``boot_id`` 与
+         *     ``spawn_marker`` 是重启恢复用的身份指纹，不是命令原文。
+         */
+        JobRecord: {
+            /** Job Id */
+            job_id: string;
+            /** Did */
+            did: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "run" | "check";
+            /**
+             * Status
+             * @default queued
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "canceled" | "interrupted";
+            /** Created At */
+            created_at: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** From Stage */
+            from_stage?: string | null;
+            /** Profile */
+            profile: string;
+            /** Pages */
+            pages?: string | null;
+            /**
+             * Dual
+             * @default false
+             */
+            dual: boolean;
+            /** Run Id */
+            run_id?: string | null;
+            /** Exit Code */
+            exit_code?: number | null;
+            /** Envelope */
+            envelope?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Error Message */
+            error_message?: string | null;
+            /** Pid */
+            pid?: number | null;
+            /** Pgid */
+            pgid?: number | null;
+            /** Cancel Requested At */
+            cancel_requested_at?: string | null;
+            /** Boot Id */
+            boot_id?: string | null;
+            /** Spawn Marker */
+            spawn_marker?: string | null;
+            /** Interrupted Reason */
+            interrupted_reason?: string | null;
+        };
+        /**
          * ParagraphItem
          * @description ``GET /api/v1/documents/{did}/paragraphs`` 的单个段落（多产物 join）。
          */
@@ -554,6 +800,53 @@ export interface components {
             exists: boolean;
             /** Bytes */
             bytes?: number | null;
+        };
+        /**
+         * ProfileListItem
+         * @description ``GET /profiles`` 的条目 / ``PUT /profiles`` 的响应（api.md §3.5）。
+         *
+         *     **没有命令字段**：translator/reviewer 命令字符串只存在于服务端（可能内嵌密钥），
+         *     前端只用 ``id`` 提交 job、用 ``label`` 显示。
+         */
+        ProfileListItem: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Has Translator */
+            has_translator: boolean;
+            /** Has Reviewer */
+            has_reviewer: boolean;
+        };
+        /**
+         * ProfileUpdateRequest
+         * @description ``PUT /profiles`` 的请求体（api.md §3.5）。
+         *
+         *     字段**缺席**与显式 ``null`` 不同：缺席 = 不动这个字段，``null``/空串 = 删掉它
+         *     （删成空条目就是删整个 profile）。``translator``/``reviewer``/``api_key`` 之类字段
+         *     **不在**模型里：收到了由路由层 422 ``forbidden_field`` 拒掉，不静默忽略。
+         */
+        ProfileUpdateRequest: {
+            /**
+             * Id
+             * @description profile id（[a-z0-9-]{1,64}）
+             */
+            id: string;
+            /**
+             * Label
+             * @description 显示名；null/空串 = 清掉（显示时回退 id 的人性化形式）
+             */
+            label?: string | null;
+            /**
+             * Translator Script
+             * @description translator 脚本路径引用（scripts/<name>，必须在白名单目录内）；null = 删该字段
+             */
+            translator_script?: string | null;
+            /**
+             * Reviewer Script
+             * @description reviewer 脚本路径引用（scripts/<name>，必须在白名单目录内）；null = 删该字段
+             */
+            reviewer_script?: string | null;
         };
         /**
          * QualityCheck
@@ -711,6 +1004,51 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DocumentListItem"][];
                 };
+            };
+        };
+    };
+    upload_document_api_v1_documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_document_api_v1_documents_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentUploaded"];
+                };
+            };
+            /** @description upload_conflict：连续 50 个候选目录名都被占用 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description file_too_large：超过 200MB 上限 */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_pdf：缺文件名或前 5 字节不是 %PDF- */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -1030,6 +1368,225 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    list_jobs_api_v1_documents__did__jobs_get: {
+        parameters: {
+            query?: {
+                /** @description 只看该状态的 job（省略 = 全部，新 → 旧） */
+                status?: ("queued" | "running" | "succeeded" | "failed" | "canceled" | "interrupted") | null;
+            };
+            header?: never;
+            path: {
+                /** @description 文档 id：workdir 目录名（单段，解析结果必须在服务根目录内） */
+                did: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRecord"][];
+                };
+            };
+            /** @description document_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_job_api_v1_documents__did__jobs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文档 id：workdir 目录名（单段，解析结果必须在服务根目录内） */
+                did: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobAccepted"];
+                };
+            };
+            /** @description document_busy：同文档已有活动 job */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description unknown_profile / action_not_available / forbidden_field */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_job_api_v1_jobs__jid__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description job id（``j_`` + 26 字符 ULID 风格；来自 POST jobs 的响应） */
+                jid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRecord"];
+                };
+            };
+            /** @description job_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_job_api_v1_jobs__jid__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description job id（``j_`` + 26 字符 ULID 风格；来自 POST jobs 的响应） */
+                jid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已终态：幂等返回当前状态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRecord"];
+                };
+            };
+            /** @description job_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_profiles_api_v1_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileListItem"][];
+                };
+            };
+        };
+    };
+    put_profile_api_v1_profiles_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileListItem"];
+                };
+            };
+            /** @description forbidden_field / script_path_forbidden / validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

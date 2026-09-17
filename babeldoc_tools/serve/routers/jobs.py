@@ -21,6 +21,7 @@ from typing import Any
 from typing import Literal
 
 from fastapi import APIRouter
+from fastapi import Depends
 from fastapi import Path as PathParam
 from fastapi import Query
 from fastapi import Request
@@ -43,6 +44,7 @@ __all__ = [
     "JOB_ID_PATH",
     "JOB_STATUS_FILTER",
     "jobs_router",
+    "reject_forbidden_body",
     "reject_forbidden_fields",
 ]
 
@@ -65,6 +67,21 @@ FORBIDDEN_JOB_FIELDS = (
 JOB_ID_PATH = "job id（``j_`` + 26 字符 ULID 风格；来自 POST jobs 的响应）"
 #: ``GET /documents/{did}/jobs`` 的状态过滤说明。
 JOB_STATUS_FILTER = "只看该状态的 job（省略 = 全部，新 → 旧）"
+
+
+async def reject_forbidden_body(request: Request) -> None:
+    """FastAPI 依赖：**模型校验之前**读原始 body，禁止字段一律 422 ``forbidden_field``。
+
+    不能只写在路由函数体里：路由的请求体校验先于函数体执行，于是
+    ``{"action": "run", "translator": "..."}``（顺带缺 ``profile``）会先炸
+    ``validation_error``，把"不接受命令字段"这个更重要的信号盖掉（W08 冒烟实测）。
+    非 JSON 的 body 交给 FastAPI 自己报 422。
+    """
+    try:
+        body = await request.json()
+    except (ValueError, UnicodeDecodeError):  # pragma: no cover - FastAPI 先报 422
+        return
+    reject_forbidden_fields(body)
 
 
 def reject_forbidden_fields(body: Any) -> None:
@@ -112,11 +129,9 @@ def jobs_router(store: DocumentStore) -> APIRouter:
     async def create_job(
         did: Annotated[str, PathParam(description=DOCUMENT_ID)],
         payload: JobCreateRequest,
-        request: Request,
         response: Response,
+        _forbidden: Annotated[None, Depends(reject_forbidden_body)],
     ) -> JobAccepted:
-        # 禁止字段必须在模型校验之前看原始 body：模型里没有这些键，默认行为是忽略。
-        reject_forbidden_fields(await _body_object(request))
         if payload.action not in JOB_ACTIONS_IMPLEMENTED:
             raise ToolError(
                 "action_not_available",
@@ -220,11 +235,3 @@ def _reject_run_only_fields(payload: JobCreateRequest) -> None:
                 field=field,
                 action=payload.action,
             )
-
-
-async def _body_object(request: Request) -> Any:
-    """读原始请求体（FastAPI 已解析过，这里用的是同一份缓存）；非 JSON → ``None``。"""
-    try:
-        return await request.json()
-    except (ValueError, UnicodeDecodeError):  # pragma: no cover - FastAPI 先报 422
-        return None

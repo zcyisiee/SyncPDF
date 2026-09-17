@@ -37,9 +37,46 @@ export function parseErrorEnvelope(body: unknown): ErrorEnvelopeBody | null {
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
+  return request<T>(path, { headers: { accept: 'application/json' } });
+}
+
+/** `POST` JSON 体（job 提交/取消、profile 写入都用它；错误形状同 `apiGet`）。 */
+export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  });
+}
+
+/**
+ * `PUT` JSON 体（`PUT /profiles`）：只传 profile id 与**脚本路径引用**，
+ * 永远不在这里拼命令字符串（服务端也会 422 挡掉这类字段）。
+ */
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, {
+    method: 'PUT',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * `POST` multipart 上传（`POST /documents`）。`FormData` 里只有 `file` 字段：
+ * 目录名/did 全由服务端生成，客户端不提供任何路径或命令。
+ */
+export async function apiUpload<T>(path: string, file: File): Promise<T> {
+  const body = new FormData();
+  body.append('file', file, file.name);
+  // 不手写 content-type：浏览器要自己带 multipart 的 boundary。
+  return request<T>(path, { method: 'POST', headers: { accept: 'application/json' }, body });
+}
+
+/** 三个 `api*` 共用的请求+信封解析（错误一律 `ApiError`）。 */
+async function request<T>(path: string, init: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}${path}`, { headers: { accept: 'application/json' } });
+    response = await fetch(`${API_BASE}${path}`, init);
   } catch {
     throw new ApiError(
       'network_error',
@@ -78,6 +115,14 @@ const ERROR_TITLES: Record<string, string> = {
   root_missing: '服务根目录不可用',
   internal_error: '服务内部错误',
   invalid_response: '响应格式不符合契约',
+  file_too_large: '文件过大',
+  invalid_pdf: '这个文件不是 PDF',
+  upload_conflict: '服务端目录名冲突',
+  upload_not_supported: '当前服务不支持上传',
+  document_busy: '这个文档已有任务在跑',
+  unknown_profile: 'profile 不存在',
+  script_path_forbidden: '脚本不在白名单目录内',
+  forbidden_field: '服务端不接受这类输入',
 };
 
 export interface ApiErrorDescription {

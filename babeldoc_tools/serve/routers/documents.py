@@ -1,12 +1,11 @@
-"""``/api/v1/documents`` 只读路由：列表 / 详情 / 阶段 / 段落 / 几何 / 检查。
+"""``/api/v1/documents`` 路由：列表 / 详情 / 阶段 / 段落 / 几何 / 检查 + 上传（W08）。
 
-W02 实现 ``docs/frontend/api.md`` §3.1 的前六个 GET 端点。路由层只做三件事：
-解析路径/查询参数、调 :mod:`babeldoc_tools.serve.views` 组装视图、交给
-``response_model`` 序列化；**读文件的边界**仍是
-:meth:`babeldoc_tools.serve.store.DocumentStore.resolve`（did 校验 + 根目录内约束）。
-
-全部是 GET：W02 不引入任何写端点（``tests/test_serve_app.py`` 的
-``test_openapi_has_no_write_routes`` 守着这一点）。
+W02 实现 ``docs/frontend/api.md`` §3.1 的前六个 GET 端点；W08 增加 ``POST /documents``
+（multipart 上传 PDF → 建 did，见 :mod:`babeldoc_tools.serve.uploads`）。路由层只做三件事：
+解析路径/查询参数、调 :mod:`babeldoc_tools.serve.views`/上传层、交给 ``response_model``
+序列化；**读写文件的边界**仍是
+:meth:`babeldoc_tools.serve.store.DocumentStore.resolve`（did 校验 + 根目录内约束）+ 上传层的
+did 生成（目录名全由服务端拼，客户端字符串不进路径）。
 """
 
 from __future__ import annotations
@@ -15,24 +14,34 @@ from typing import Annotated
 from typing import Literal
 
 from fastapi import APIRouter
+from fastapi import File
 from fastapi import Path as PathParam
 from fastapi import Query
+from fastapi import UploadFile
 
 from babeldoc_tools.serve import views
 from babeldoc_tools.serve.schemas import API_PREFIX
 from babeldoc_tools.serve.schemas import CheckResponse
 from babeldoc_tools.serve.schemas import DocumentDetail
 from babeldoc_tools.serve.schemas import DocumentListItem
+from babeldoc_tools.serve.schemas import DocumentUploaded
 from babeldoc_tools.serve.schemas import GeometryResponse
 from babeldoc_tools.serve.schemas import ParagraphItem
 from babeldoc_tools.serve.schemas import StageStateResponse
 from babeldoc_tools.serve.store import DocumentStore
+from babeldoc_tools.serve.uploads import MAX_UPLOAD_BYTES
+from babeldoc_tools.serve.uploads import SOURCE_NAME
+from babeldoc_tools.serve.uploads import save_upload
 from babeldoc_tools.serve.workdir import WorkdirReader
 
 __all__ = ["documents_router"]
 
 DOCUMENT_ID = "文档 id：workdir 目录名（单段，解析结果必须在服务根目录内）"
 PAGE_QUERY = "页码过滤（1 基 PDF 页码）"
+UPLOAD_FILE = (
+    "multipart/form-data 的 file 字段：源 PDF（读前 5 字节必须是 %PDF-，"
+    f"上限 {MAX_UPLOAD_BYTES} 字节）。文件名只用来生成 did 的 slug。"
+)
 
 
 def documents_router(store: DocumentStore) -> APIRouter:
@@ -43,6 +52,30 @@ def documents_router(store: DocumentStore) -> APIRouter:
         """did → workdir 的产物读取器（路径校验全在 store 里）。"""
         return WorkdirReader(store.resolve(did))
 
+    @router.post(
+        "/documents",
+        response_model=DocumentUploaded,
+        status_code=201,
+        summary="上传 PDF（建 did）",
+        description=(
+            "multipart/form-data 上传源 PDF：校验 ``%PDF-`` 魔数与大小上限，"
+            "在服务根目录下建 ``up-<slug>-<时间戳>`` 目录，把字节流式写进"
+            "``<did>/source.pdf``（tmp + rename 原子落盘，不预建 agent/ 骨架）。"
+            "did 由服务端生成（同名冲突递增 -2/-3），客户端给的文件名只贡献 slug。"
+        ),
+        responses={
+            413: {"description": "file_too_large：超过 200MB 上限"},
+            422: {"description": "invalid_pdf：缺文件名或前 5 字节不是 %PDF-"},
+            409: {"description": "upload_conflict：连续 50 个候选目录名都被占用"},
+        },
+    )
+    def upload_document(
+        file: Annotated[UploadFile, File(description=UPLOAD_FILE)],
+    ) -> DocumentUploaded:
+        did = save_upload(store, file)
+        # 字节数取盘上文件的大小：上传写入多少，响应就报多少（不信请求声明）。
+        source = (store.resolve(did) / SOURCE_NAME).stat()
+        return DocumentUploaded(did=did, bytes=source.st_size)
     @router.get(
         "/documents",
         response_model=list[DocumentListItem],

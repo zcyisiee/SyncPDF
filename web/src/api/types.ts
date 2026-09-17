@@ -15,6 +15,12 @@ export type GeometryResponse = components['schemas']['GeometryResponse'];
 export type CheckResponse = components['schemas']['CheckResponse'];
 export type EventsPage = components['schemas']['EventsPage'];
 export type ArtifactItem = components['schemas']['ArtifactItem'];
+export type DocumentUploaded = components['schemas']['DocumentUploaded'];
+export type JobRecord = components['schemas']['JobRecord'];
+export type JobCreateRequest = components['schemas']['JobCreateRequest'];
+export type JobAccepted = components['schemas']['JobAccepted'];
+export type ProfileListItem = components['schemas']['ProfileListItem'];
+export type ProfileUpdateRequest = components['schemas']['ProfileUpdateRequest'];
 
 /**
  * 统一错误信封（docs/frontend/api.md §1）。唯一手写形状：FastAPI 的 OpenAPI 不导出异常响应

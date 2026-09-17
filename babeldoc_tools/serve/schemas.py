@@ -25,6 +25,7 @@ from typing import Literal
 from babeldoc.debug_recorder.model import PDF_TOPLEFT
 from pydantic import BaseModel
 from pydantic import Field
+from pydantic import model_validator
 
 #: 全部端点前缀（唯一拼写来源：路由、CLI banner、api.md）。
 API_PREFIX = "/api/v1"
@@ -64,6 +65,7 @@ __all__ = [
     "ArtifactsResponse",
     "COORD_SYSTEM_LAYOUT",
     "COORD_SYSTEM_PARSE",
+    "DocumentUploaded",
     "JOB_ACTIONS",
     "JOB_ACTIONS_IMPLEMENTED",
     "JOB_ACTION_PHASE",
@@ -86,8 +88,11 @@ __all__ = [
     "HealthResponse",
     "JobAccepted",
     "JobCreateRequest",
+    "PROFILE_LABEL_MAX_LENGTH",
     "ParagraphItem",
     "PdfOutput",
+    "ProfileListItem",
+    "ProfileUpdateRequest",
     "QualityCheck",
     "QualityReviewer",
     "QualityStatus",
@@ -435,3 +440,81 @@ class JobAccepted(BaseModel):
     job_id: str
     status: Literal["queued"] = "queued"
     action: Literal["run", "check"]
+
+
+# --------------------------------------------------------------------------- #
+# W08：上传与 profiles（api.md §3.5）
+# --------------------------------------------------------------------------- #
+#: ``PUT /profiles`` 的 ``label`` 长度上限（显示名，不是命令）。
+PROFILE_LABEL_MAX_LENGTH = 80
+
+
+class DocumentUploaded(BaseModel):
+    """``POST /documents`` 的 201 响应（api.md §3.5 冻结形状）。
+
+    ``did`` 由服务端生成（``up-<slug>-<yyyymmdd-hhmmss>``，同名冲突递增后缀）；
+    ``source`` 恒为 ``source.pdf`` —— 上传只落这一个文件（W03 产物白名单里的
+    ``kind=source``），不建任何 ``agent/`` 骨架。
+    """
+
+    did: str
+    #: 落盘字节数（盘上 ``source.pdf`` 的真实大小，不是请求声明的大小）。
+    bytes: int
+    source: Literal["source.pdf"] = "source.pdf"
+
+
+class ProfileListItem(BaseModel):
+    """``GET /profiles`` 的条目 / ``PUT /profiles`` 的响应（api.md §3.5）。
+
+    **没有命令字段**：translator/reviewer 命令字符串只存在于服务端（可能内嵌密钥），
+    前端只用 ``id`` 提交 job、用 ``label`` 显示。
+    """
+
+    id: str
+    #: 显示名：profiles.json 的 ``label``，没有则 id 的人性化形式（``deepseek-flash``
+    #: → ``Deepseek Flash``）。
+    label: str
+    #: 配没配 translator/reviewer（不说明配的是什么）。
+    has_translator: bool
+    has_reviewer: bool
+
+
+class ProfileUpdateRequest(BaseModel):
+    """``PUT /profiles`` 的请求体（api.md §3.5）。
+
+    字段**缺席**与显式 ``null`` 不同：缺席 = 不动这个字段，``null``/空串 = 删掉它
+    （删成空条目就是删整个 profile）。``translator``/``reviewer``/``api_key`` 之类字段
+    **不在**模型里：收到了由路由层 422 ``forbidden_field`` 拒掉，不静默忽略。
+    """
+
+    id: str = Field(
+        pattern=JOB_PROFILE_PATTERN, description="profile id（[a-z0-9-]{1,64}）"
+    )
+    label: str | None = Field(
+        default=None,
+        max_length=PROFILE_LABEL_MAX_LENGTH,
+        description="显示名；null/空串 = 清掉（显示时回退 id 的人性化形式）",
+    )
+    translator_script: str | None = Field(
+        default=None,
+        description=(
+            "translator 脚本路径引用（scripts/<name>，必须在白名单目录内）；null = 删该字段"
+        ),
+    )
+    reviewer_script: str | None = Field(
+        default=None,
+        description=(
+            "reviewer 脚本路径引用（scripts/<name>，必须在白名单目录内）；null = 删该字段"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _require_a_change(self) -> ProfileUpdateRequest:
+        """只给 ``id`` 的请求没有意义（既没建也没改）→ 422 ``validation_error``。"""
+        if not (
+            self.model_fields_set & {"label", "translator_script", "reviewer_script"}
+        ):
+            raise ValueError(
+                "至少要给出 label / translator_script / reviewer_script 之一"
+            )
+        return self

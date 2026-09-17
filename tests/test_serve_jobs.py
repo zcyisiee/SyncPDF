@@ -44,6 +44,7 @@ from babeldoc_tools.serve.runner import MAX_ENVELOPE_BYTES  # noqa: E402
 from babeldoc_tools.serve.runner import JobRunner  # noqa: E402
 from babeldoc_tools.serve.runner import build_job_argv  # noqa: E402
 from babeldoc_tools.serve.runner import classify_exit  # noqa: E402
+from babeldoc_tools.serve.runner import sanitize_envelope  # noqa: E402
 from babeldoc_tools.serve.runner import stdout_envelope  # noqa: E402
 from babeldoc_tools.serve.schemas import API_PREFIX as API  # noqa: E402
 from babeldoc_tools.serve.store import STATE_DIR  # noqa: E402
@@ -220,26 +221,59 @@ def get_job(client, job_id: str) -> dict:
     return response.json()
 
 
-def wait_status(client, job_id: str, statuses: set[str], timeout: float = 60.0) -> dict:
-    """轮询 ``GET /jobs/{jid}`` 直到状态落进 ``statuses``。"""
-    deadline = time.monotonic() + timeout
+#: 轮询步长（所有等待都用"固定步数"封顶，不裸 while）。
+POLL_SECONDS = 0.5
+
+
+def job_diagnostics(record: dict, root: Path | None = None) -> str:
+    """等待超时时打印的诊断：job 全字段 + （给了 root 就带上）``jobs.jsonl`` 末尾几行。
+
+    子进程起不来（例如 ``python -m babeldoc_tools`` import 失败）/监控没收尾这类问题，
+    只看"状态不对"是查不出来的；把 pid/pgid/boot_id、error_code、信封和事件尾部摆出来。
+    """
+    lines = [f"job 快照：{json.dumps(record, ensure_ascii=False)[:2000]}"]
+    if root is not None:
+        events = root / STATE_DIR / "jobs.jsonl"
+        if events.is_file():
+            tail = events.read_text(encoding="utf-8").splitlines()[-6:]
+            lines.append("jobs.jsonl 末尾：\n" + "\n".join(tail))
+            lines.append(f"workdir 内容：{sorted(path.name for path in root.iterdir())}")
+    return "\n".join(lines)
+
+
+def wait_status(
+    client,
+    job_id: str,
+    statuses: set[str],
+    timeout: float = 60.0,
+    root: Path | None = None,
+) -> dict:
+    """轮询 ``GET /jobs/{jid}`` 直到状态落进 ``statuses``；超时 fail 并 dump 诊断。
+
+    ``timeout`` 换算成固定步数（:data:`POLL_SECONDS` 一步）：**不会**无限等 —— 一个永远
+    到不了期望状态的 job 必须以带证据的断言失败收场，而不是让测试挂死。
+    """
+    steps = max(1, int(timeout / POLL_SECONDS))
     record = get_job(client, job_id)
-    while record["status"] not in statuses and time.monotonic() < deadline:
-        time.sleep(0.05)
+    for _ in range(steps):
+        if record["status"] in statuses:
+            return record
+        time.sleep(POLL_SECONDS)
         record = get_job(client, job_id)
-    assert record["status"] in statuses, f"job 停在 {record['status']}：{record}"
-    return record
+    raise AssertionError(
+        f"job 停在 {record['status']}（期望 {sorted(statuses)}，等了 "
+        f"{timeout:.0f}s）：\n{job_diagnostics(record, root)}"
+    )
 
 
 def wait_pidfile(path: Path, timeout: float = 30.0) -> int:
-    """等 stub translator 把孙进程 pid 写出来。"""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    """等 stub translator 把孙进程 pid 写出来（同样固定步数封顶）。"""
+    for _ in range(max(1, int(timeout / POLL_SECONDS))):
         with contextlib.suppress(OSError, ValueError):
             text = path.read_text(encoding="utf-8").strip()
             if text:
                 return int(text)
-        time.sleep(0.05)
+        time.sleep(POLL_SECONDS)
     raise AssertionError(f"孙进程 pid 文件没有出现：{path}")
 
 
@@ -256,7 +290,7 @@ def start_slow_job(client, root: Path, stubs, did: str = "alpha") -> tuple[str, 
     pidfile = root / did / "grandchild.pid"
     slow_profile(root, stubs, pidfile)
     job_id = post_job(client, did, from_stage="translate", profile="slow")
-    wait_status(client, job_id, {"running"})
+    wait_status(client, job_id, {"running"}, root=root)
     return job_id, pidfile
 
 
@@ -612,6 +646,20 @@ def test_forbidden_fields_are_422_and_not_echoed(client):
     assert client.get(f"{API}/documents/alpha/jobs").json() == []
 
 
+def test_forbidden_field_wins_over_missing_profile(client):
+    """带了命令字段就先报 ``forbidden_field``，不被“缺 profile”的校验盖掉（W08）。"""
+    response = client.post(
+        f"{API}/documents/alpha/jobs",
+        json={"action": "run", "translator": "rm -rf / --api-key sk-x"},
+    )
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error["code"] == "forbidden_field"
+    assert error["detail"]["field"] == "translator"
+    assert "rm -rf" not in response.text and "sk-x" not in response.text
+    assert client.get(f"{API}/documents/alpha/jobs").json() == []
+
+
 def test_unimplemented_actions_are_422_with_the_phase(client):
     for action, phase in (("retranslate", "W11"), ("compile", "W09")):
         response = client.post(
@@ -851,6 +899,53 @@ def test_build_job_argv_check_action_uses_check_stage(tmp_path):
     assert "--pages" not in argv and "--dual" not in argv
 
 
+def test_build_job_argv_from_parse_carries_the_source_pdf(tmp_path):
+    """``from=parse``（含缺省）必须带位置参数 ``<workdir>/source.pdf``：parse 的输入。"""
+    explicit = build_job_argv(
+        workdir=tmp_path / "wd",
+        action="run",
+        from_stage="parse",
+        pages=None,
+        dual=False,
+        profile=Profile(id="p"),
+    )
+    assert explicit[-1] == str(tmp_path / "wd" / "source.pdf")
+    assert explicit[explicit.index("--from") + 1] == "parse"
+
+    # from 缺省 = CLI 的 parse：同样要带（否则子进程直接 missing_pdf）
+    default_from = build_job_argv(
+        workdir=tmp_path / "wd",
+        action="run",
+        from_stage=None,
+        pages=None,
+        dual=False,
+        profile=Profile(id="p"),
+    )
+    assert default_from[-1] == str(tmp_path / "wd" / "source.pdf")
+    assert "--from" not in default_from
+
+    # translate 及之后不需要（CLI 允许省略：parse 产物已在 workdir 里）
+    later = build_job_argv(
+        workdir=tmp_path / "wd",
+        action="run",
+        from_stage="translate",
+        pages=None,
+        dual=False,
+        profile=Profile(id="p"),
+    )
+    assert str(tmp_path / "wd" / "source.pdf") not in later
+    # check 固定 --from check，也不带 PDF
+    check = build_job_argv(
+        workdir=tmp_path / "wd",
+        action="check",
+        from_stage="check",
+        pages=None,
+        dual=False,
+        profile=Profile(id="p"),
+    )
+    assert str(tmp_path / "wd" / "source.pdf") not in check
+
+
 def test_stdout_envelope_takes_the_last_json_line():
     assert stdout_envelope("") is None
     assert stdout_envelope("乱写\n还是乱写") is None
@@ -860,6 +955,136 @@ def test_stdout_envelope_takes_the_last_json_line():
     assert text == '{"ok": false, "error": {"code": "x"}}'
     # 末尾的日志行不算信封（只认真实 JSON 行）；取的是最后一个 JSON 行
     assert stdout_envelope('{"ok": true}\ntail log')[1] == {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+# 信封脱敏（W08：W07 遗留风险 #1 —— 信封会把 profile 命令与 debug token 带出去）
+# --------------------------------------------------------------------------- #
+#: 带假密钥形状的 profile 命令（落盘/回传的文本里绝不允许出现它）。
+COMMAND_WITH_FAKE_KEY = "secret-cmd --api-key sk-xxx"
+#: 带 token 的 debug 查看器 URL（json 里通常出现在 data.debug.url）。
+VIEWER_URL = "http://127.0.0.1:9999/?token=deadbeef"
+
+
+def _envelope_with_secrets() -> dict:
+    return {
+        "ok": True,
+        "data": {
+            "config": {
+                "from": "translate",
+                "translator": COMMAND_WITH_FAKE_KEY,
+                "reviewer": "rv-cmd --token sk-yyy",
+            },
+            "debug": {
+                "run_id": "20260917T120000Z-abcdef",
+                "url": VIEWER_URL,
+                "manifest": "/wd/debug/runs/x/manifest.json",
+            },
+        },
+    }
+
+
+def test_sanitize_envelope_replaces_commands_and_drops_debug_url():
+    profile = Profile(
+        id="echo-t", translator=COMMAND_WITH_FAKE_KEY, reviewer="rv-cmd --token sk-yyy"
+    )
+    text = sanitize_envelope(json.dumps(_envelope_with_secrets()), profile)
+
+    assert "sk-xxx" not in text and "sk-yyy" not in text and "deadbeef" not in text
+    body = json.loads(text)
+    assert body["data"]["config"]["translator"] == "<profile:echo-t>"
+    assert body["data"]["config"]["reviewer"] == "<profile:echo-t>"
+    assert body["data"]["config"]["from"] == "translate"  # 非命令字段原样保留
+    assert "url" not in body["data"]["debug"]  # 带 token 的 URL 移除
+    assert body["data"]["debug"]["run_id"] == "20260917T120000Z-abcdef"
+    assert body["data"]["debug"]["manifest"].endswith("manifest.json")
+
+
+def test_sanitize_envelope_scrubs_command_echoed_in_error_message():
+    """命令不只出现在 data.config：``<cmd> 退出码 1: ...`` 这种 error.message 也要抹掉。"""
+    profile = Profile(id="echo-t", translator=COMMAND_WITH_FAKE_KEY)
+    text = json.dumps(
+        {
+            "ok": False,
+            "error": {
+                "code": "translator_failed",
+                "message": f"{COMMAND_WITH_FAKE_KEY} 退出码 1: boom",
+            },
+        }
+    )
+    body = json.loads(sanitize_envelope(text, profile))
+    assert body["error"]["message"] == "<profile:echo-t> 退出码 1: boom"
+
+
+def test_sanitize_envelope_scrubs_json_escaped_command_everywhere():
+    """命令含引号时 JSON 里是转义形式：转义形式也要命中（任意字段位置）。"""
+    command = 'tr-cmd --prompt "hi"'
+    profile = Profile(id="p", translator=command)
+    text = json.dumps(
+        {"ok": True, "data": {"config": {"translator": command}, "note": command}},
+        ensure_ascii=False,
+    )
+    body = json.loads(sanitize_envelope(text, profile))
+    assert body["data"]["config"]["translator"] == "<profile:p>"
+    assert body["data"]["note"] == "<profile:p>"
+
+
+def test_sanitize_envelope_fallback_scrubs_truncated_json():
+    """解析失败（信封被截断）也要抹掉命令与 token URL：宁可文本难看，不留密钥。"""
+    profile = Profile(id="echo-t", translator=COMMAND_WITH_FAKE_KEY)
+    text = (
+        '{"ok": false, "error": {"message": "'
+        + COMMAND_WITH_FAKE_KEY
+        + ' 退出码 1", "debug": {"url": "'
+        + VIEWER_URL
+        + '"'
+    )
+    out = sanitize_envelope(text, profile)
+    assert "sk-xxx" not in out and "deadbeef" not in out
+    assert "<profile:echo-t>" in out and "<redacted-url>" in out
+
+
+def test_sanitize_envelope_caps_length_and_keeps_alien_json_readable():
+    profile = Profile(id="p")
+    huge = json.dumps({"ok": True, "data": {"blob": "x" * 9000}})
+    assert len(sanitize_envelope(huge, profile)) == MAX_ENVELOPE_BYTES
+    # 非 dict 的 JSON 也不出错（保留原文，只是截断）
+    assert sanitize_envelope("[]", profile) == "[]"
+    assert sanitize_envelope("not json at all", profile) == "not json at all"
+
+
+def test_job_envelope_is_sanitized_before_persisting(client, root, stubs):
+    """真 argv/真子进程：信封里的命令（含参数里的假密钥）与 debug token URL 都不落盘。
+
+    走真路径（不 mock argv）：profile 命令带一个假密钥，stub translator 立刻失败，
+    于是 bdt run 以 ``translator_failed`` 收尾 —— 那份信封的 ``data.config.translator``
+    与 ``error.message`` 都含整条命令、``data.debug.url`` 含 token，正是要脱敏的三处。
+    """
+    command = f"{stubs['failing']} --api-key sk-xxx"
+    _write_profiles(root, {"leaky": {"translator": command}})
+    job_id = post_job(client, "alpha", from_stage="translate", profile="leaky")
+    record = wait_status(client, job_id, {"failed"}, root=root)
+
+    assert record["error_code"] == "translator_failed"  # 真跑到了 translator
+    dumped = json.dumps(record)
+    assert "sk-xxx" not in dumped  # argv 指纹里没有命令原文
+    assert "token=" not in dumped  # 查看器 URL 整个被移除
+    envelope = json.loads(record["envelope"])
+    assert envelope["data"]["config"]["translator"] == "<profile:leaky>"
+    assert envelope["data"]["config"]["reviewer"] is None
+    assert "url" not in envelope["data"]["debug"]
+    assert envelope["data"]["debug"]["run_id"]
+    assert "sk-xxx" not in envelope["error"]["message"]  # 命令回显也被抹掉
+    assert envelope["error"]["code"] == "translator_failed"
+    # 盘上的两处（job 快照 + append-only 事件）同样干净
+    snapshot_text = (root / STATE_DIR / "jobs" / f"{job_id}.json").read_text(
+        encoding="utf-8"
+    )
+    events_text = (root / STATE_DIR / "jobs.jsonl").read_text(encoding="utf-8")
+    for text in (snapshot_text, events_text):
+        assert "sk-xxx" not in text and "token=" not in text
+    # 命令原文确实存在过（profiles.json 里），只是没进任何 job 产物
+    assert "sk-xxx" in (root / STATE_DIR / "profiles.json").read_text(encoding="utf-8")
 
 
 def test_classify_exit_matrix():

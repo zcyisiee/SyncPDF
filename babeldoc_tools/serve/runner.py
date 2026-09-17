@@ -12,6 +12,9 @@
    **等进程真的退出后才置 canceled 并释放文档槽**（锁持到退出）。
 3. **重启不自动重跑、不凭孤立 pid 发信号**（``boot_id`` 方案见
    :mod:`babeldoc_tools.serve.jobs`）：本模块只在**自己 spawn 过**的 ``Popen`` 上发信号。
+4. **信封脱敏后才落盘**：子进程 stdout 的收尾信封会被引在 ``data.config``/``error.message``
+   里的 profile 命令（可能内嵌密钥）与带 token 的 ``data.debug.url``，落库前一律经
+   :func:`sanitize_envelope` 换掉（W07 遗留风险 #1）。
 
 子进程的 stdout 只有收尾一行 JSON 信封（``{"ok":...}``）；stderr 是日志。两个管道都
 必须读干（见 :class:`PipeCapture`），否则子进程会被写满的管道卡住。
@@ -24,6 +27,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -31,6 +35,7 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
+from typing import Any
 from typing import NamedTuple
 
 from babeldoc_tools.common import ToolError
@@ -41,6 +46,7 @@ from babeldoc_tools.serve.profiles import Profile
 from babeldoc_tools.serve.profiles import list_profile_ids
 from babeldoc_tools.serve.profiles import resolve_profile
 from babeldoc_tools.serve.store import DocumentStore
+from babeldoc_tools.serve.uploads import SOURCE_NAME
 from babeldoc_tools.serve.workdir import list_run_ids
 
 __all__ = [
@@ -50,6 +56,7 @@ __all__ = [
     "JOB_TIMEOUT_SECONDS",
     "MAX_ENVELOPE_BYTES",
     "PIPE_TAIL_LINES",
+    "PROFILE_PLACEHOLDER",
     "JobOutcome",
     "JobRunner",
     "PipeCapture",
@@ -59,6 +66,8 @@ __all__ = [
     "classify_exit",
     "job_timeout_seconds",
     "new_run_id",
+    "sanitize_envelope",
+    "sanitize_payload",
     "spawn_job",
     "stdout_envelope",
 ]
@@ -82,6 +91,12 @@ PIPE_TAIL_LINES = 200
 
 #: 收尾信封入库的字节上限（``api.md`` §3.4：envelope 可截断到 4KB 存）。
 MAX_ENVELOPE_BYTES = 4096
+
+#: 脱敏后替换 profile 命令字符串的占位符形状（``api.md`` §3.4：``<profile:echo-t>``）。
+PROFILE_PLACEHOLDER = "<profile:{}>"
+
+#: 带 token 的 debug 查看器 URL（兜底路径用：``?token=...`` 整段抹掉）。
+_TOKEN_URL_RE = re.compile(r"https?://[^\s\"'<>]*\?token=[^\s\"'<>]*")
 
 
 def job_timeout_seconds(action: str) -> float:
@@ -108,6 +123,9 @@ def build_job_argv(
       质量门禁，不另起一份判断）；``run`` 用请求里的 ``from``（缺省留给 CLI 的 parse）；
     - ``--translator``/``--reviewer`` 只在 profile 给了对应命令时出现，值来自 profile
       （客户端无法影响）；
+    - ``run`` 且起点是 ``parse``（含缺省）时**追加 PDF 位置参数**
+      ``<workdir>/source.pdf``：位置参数是 parse 的输入，服务端只有这一个来源
+      （上传时写在那里）；``translate`` 及之后的阶段不需要它（CLI 允许省略）；
     - ``--debug --debug-no-open``：给子进程建 ``debug/runs/<run_id>`` 归档（前端事件/
       几何/时间线都读它）；``--debug-no-open`` 避免无人值守时弹浏览器。
     """
@@ -133,12 +151,99 @@ def build_job_argv(
         argv += ["--pages", pages]
     if dual:
         argv += ["--dual"]
+    if action == "run" and (from_stage or "parse") == "parse":
+        # parse 阶段需要 PDF 位置参数（``bdt run <pdf> --from parse``）：新文档的源文件
+        # 固定在 workdir 根下（W03 白名单里的 ``source.pdf``，上传时写在那里）。
+        # ``from_stage`` 为空 = CLI 缺省 parse，同样必须带。
+        argv.append(str(workdir / SOURCE_NAME))
     return argv
 
 
 def argv_marker(argv: list[str]) -> str:
     """argv 的 sha256 前缀（身份指纹）；**命令原文不落盘**（可能内嵌密钥）。"""
     return hashlib.sha256("\x00".join(argv).encode("utf-8")).hexdigest()[:16]
+
+
+# --------------------------------------------------------------------------- #
+# 信封脱敏（W07 风险 #1：信封原样落盘会把 profile 命令与 debug token 带出去）
+# --------------------------------------------------------------------------- #
+def sanitize_envelope(text: str, profile: Profile) -> str:
+    """把子进程信封里的**服务端秘密**换掉，返回可落盘/可回传的文本（纯函数）。
+
+    三件事（顺序固定）：
+
+    1. **全文替换命令字符串**：与 profile 的 translator/reviewer 命令（含 JSON 转义
+       形式）以及带上 token 的 debug URL 逐字命中的地方换成占位符 —— 命令不只出现在
+       ``data.config`` 里，还可能被引在 ``error.message``（如 ``<cmd> 退出码 1: ...``）；
+    2. **结构化改写**：解析成功时把 ``data.config.translator/reviewer`` 直接写成
+       ``<profile:<id>>``（形状与位置都确定，不靠字符串碰），并**删掉 ``data.debug.url``**
+       （查看器 URL 带 token），保留 ``run_id``/``manifest``；
+    3. **截断**到 :data:`MAX_ENVELOPE_BYTES`（契约就是"最多 4KB"）。
+
+    解析失败（信封被截断/本来就不是 JSON）时退到只做第 1 步的兜底正则路径 —— 宁可留
+    一份不好看的文本，也不把密钥写进 ``jobs.jsonl``。
+    """
+    scrubbed = _scrub_secrets(text, profile)
+    try:
+        payload = json.loads(scrubbed)
+    except ValueError:
+        return scrubbed[:MAX_ENVELOPE_BYTES]
+    if isinstance(payload, dict):
+        _scrub_payload(payload, profile)
+        with contextlib.suppress(TypeError, ValueError):
+            scrubbed = json.dumps(payload, ensure_ascii=False)
+    return scrubbed[:MAX_ENVELOPE_BYTES]
+
+
+def sanitize_payload(payload: dict, profile: Profile) -> None:
+    """已解析信封的**就地**脱敏（与 :func:`sanitize_envelope` 同一套规则）。
+
+    给 :func:`classify_exit` 用：它把 ``error.message`` 抄进 job 记录，而那条消息常常
+    整条回显命令（``<cmd> 退出码 3: ...``）—— 落库前必须先把解析结果里的秘密抹掉，
+    否则脱敏只做了信封文本那一半。
+    """
+    for key, value in list(payload.items()):
+        payload[key] = _scrub_value(value, profile)
+    _scrub_payload(payload, profile)
+
+
+def _scrub_value(value: Any, profile: Profile) -> Any:
+    """递归替换 JSON 值树里的命令字符串 / 带 token 的 URL（键名不动）。"""
+    if isinstance(value, str):
+        return _scrub_secrets(value, profile)
+    if isinstance(value, dict):
+        return {key: _scrub_value(item, profile) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_scrub_value(item, profile) for item in value]
+    return value
+
+
+def _scrub_secrets(text: str, profile: Profile) -> str:
+    """文本级兜底：命令字符串（含 JSON 转义形式）与带 token 的 URL 一律换掉。"""
+    for command in (profile.translator, profile.reviewer):
+        if not command:
+            continue
+        placeholder = PROFILE_PLACEHOLDER.format(profile.id)
+        text = text.replace(command, placeholder)
+        escaped = json.dumps(command, ensure_ascii=False)[1:-1]
+        if escaped != command:
+            text = text.replace(escaped, placeholder)
+    return _TOKEN_URL_RE.sub("<redacted-url>", text)
+
+
+def _scrub_payload(payload: dict, profile: Profile) -> None:
+    """结构改写：config 里的命令 → profile id；debug.url（带 token）删掉。"""
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return
+    config = data.get("config")
+    if isinstance(config, dict):
+        for field in ("translator", "reviewer"):
+            if isinstance(config.get(field), str):
+                config[field] = PROFILE_PLACEHOLDER.format(profile.id)
+    debug = data.get("debug")
+    if isinstance(debug, dict):
+        debug.pop("url", None)
 
 
 # --------------------------------------------------------------------------- #
@@ -320,6 +425,7 @@ class _RunningJob:
         "monitor",
         "pgid",
         "popen",
+        "profile",
         "record",
         "runs_before",
         "workdir",
@@ -332,12 +438,15 @@ class _RunningJob:
         capture: PipeCapture,
         pgid: int,
         workdir: Path,
+        profile: Profile,
     ) -> None:
         self.record = record
         self.popen = popen
         self.capture = capture
         self.pgid = pgid
         self.workdir = workdir
+        #: 这次 spawn 用的 profile（收尾信封脱敏要用它的命令原文，见 sanitize_envelope）。
+        self.profile = profile
         #: spawn 之前已存在的 run 归档；之后新出现的那个才是这次 job 的 run。
         self.runs_before = frozenset(list_run_ids(workdir))
         self.monitor: asyncio.Task | None = None
@@ -514,7 +623,7 @@ class JobRunner:
             return
         capture = capture_pipes(proc)
         pgid = os.getpgid(proc.pid)
-        running = _RunningJob(record, proc, capture, pgid, workdir)
+        running = _RunningJob(record, proc, capture, pgid, workdir, profile)
         self.registry.mark_started(
             record, pid=proc.pid, pgid=pgid, spawn_marker=argv_marker(argv)
         )
@@ -528,6 +637,10 @@ class JobRunner:
             exit_code, timed_out = await self._wait_exit(running)
             await running.capture.wait_closed(PIPE_JOIN_SECONDS)
             envelope = stdout_envelope(running.capture.stdout)
+            if envelope is not None:
+                # 先脱敏**解析结果**：classify_exit 会把 error.message 抄进 job 记录（可能
+                # 回显整条命令），落库的那份必须已经是干净的。
+                sanitize_payload(envelope[1], running.profile)
             outcome = classify_exit(
                 action=record.action,
                 cancel_requested=record.cancel_requested_at is not None,
@@ -535,11 +648,15 @@ class JobRunner:
                 exit_code=exit_code,
                 envelope=envelope[1] if envelope else None,
             )
+            # 落盘前脱敏：信封可能带 profile 命令（含密钥）与 debug 查看器 token URL。
+            text = (
+                sanitize_envelope(envelope[0], running.profile) if envelope else None
+            )
             self.registry.mark_finished(
                 record,
                 status=outcome.status,
                 exit_code=exit_code,
-                envelope=envelope[0] if envelope else None,
+                envelope=text,
                 error_code=outcome.error_code,
                 error_message=outcome.error_message,
                 run_id=new_run_id(running.workdir, running.runs_before),
