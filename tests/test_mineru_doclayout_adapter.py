@@ -71,11 +71,11 @@ def test_mineru_handle_document_allows_requested_page_subset(monkeypatch):
     monkeypatch.setattr(
         model,
         "_request_upload_urls",
-        lambda _client, _pdf_path: ("batch-1", "https://upload.example"),
+        lambda _client, _pdf_paths: ("batch-1", ["https://upload.example"]),
     )
     monkeypatch.setattr(model, "_upload_pdf", lambda _client, _upload_url, _pdf_path: None)
     monkeypatch.setattr(
-        model, "_poll_full_zip_url", lambda _client, _batch_id, _translate_config: "https://zip.example"
+        model, "_poll_full_zip_urls", lambda _client, _batch_id, _translate_config, _chunk_paths: ["https://zip.example"]
     )
     monkeypatch.setattr(model, "_download_zip_bytes", lambda _client, _zip_url: b"dummy")
     monkeypatch.setattr(model, "_load_layout_json_from_zip_bytes", lambda _zip_bytes: layout_json)
@@ -126,8 +126,8 @@ def test_mineru_request_payload_includes_language_when_set(kwargs, expected):
             return _Response()
 
     model = MinerUDocLayoutModel(api_token=_DUMMY_MINERU_ARG, **kwargs)
-    batch_id, upload_url = model._request_upload_urls(_Client(), Path("x.pdf"))
-    assert (batch_id, upload_url) == ("batch-1", "https://upload.example")
+    batch_id, upload_urls = model._request_upload_urls(_Client(), [Path("x.pdf")])
+    assert (batch_id, upload_urls) == ("batch-1", ["https://upload.example"])
     assert captured["payload"]["language"] == expected
 
 
@@ -183,3 +183,175 @@ def test_mineru_language_reaches_model_through_parse_and_run(
         )
         assert result["error"]["code"] == "config_captured"
     assert captured == [expected]
+
+
+# --------------------------------------------------------------------- #
+# 分片提交（>10 页拆 chunk、单 batch 多文件、≤50 chunks）
+# --------------------------------------------------------------------- #
+def _make_pdf(path: Path, pages: int) -> Path:
+    import pymupdf
+
+    with pymupdf.open() as doc:
+        for i in range(pages):
+            page = doc.new_page()
+            page.insert_text((72, 72), f"page {i}")
+        doc.save(path)
+    return path
+
+
+def test_mineru_split_pdf_chunks_under_threshold_is_passthrough(tmp_path):
+    from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+
+    pdf = _make_pdf(tmp_path / "small.pdf", 10)
+    model = MinerUDocLayoutModel(api_token=_DUMMY_MINERU_ARG)
+    chunk_paths, tmpdir = model._split_pdf_chunks(pdf, 10)
+    assert chunk_paths == [pdf]
+    assert tmpdir is None
+
+
+def test_mineru_split_pdf_chunks_over_threshold(tmp_path):
+    from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+
+    pdf = _make_pdf(tmp_path / "big.pdf", 25)
+    model = MinerUDocLayoutModel(api_token=_DUMMY_MINERU_ARG)
+    chunk_paths, tmpdir = model._split_pdf_chunks(pdf, 25)
+    try:
+        assert len(chunk_paths) == 3
+        import pymupdf
+
+        assert [pymupdf.open(p).page_count for p in chunk_paths] == [10, 10, 5]
+        # 分片文件名互不相同（data_id 依据文件名）
+        assert len({p.name for p in chunk_paths}) == 3
+        # 命名带页范围，便于服务端 file_name 对齐
+        assert "p0001-0010" in chunk_paths[0].name
+        assert "p0021-0025" in chunk_paths[2].name
+    finally:
+        tmpdir.cleanup()
+
+
+def test_mineru_split_pdf_chunks_rejects_over_max_chunks(tmp_path):
+    from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+
+    pdf = _make_pdf(tmp_path / "huge.pdf", 501)
+    model = MinerUDocLayoutModel(api_token=_DUMMY_MINERU_ARG)
+    with pytest.raises(ValueError, match="max_chunks"):
+        model._split_pdf_chunks(pdf, 501)
+
+
+def test_mineru_merge_layout_jsons_offsets_page_idx():
+    from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+
+    def chunk(_offset_pages, idx_values):
+        return {
+            "_backend": "vlm",
+            "pdf_info": [{"page_idx": i} for i in idx_values],
+        }
+
+    merged = MinerUDocLayoutModel._merge_layout_jsons(
+        [(0, chunk(0, [0, 1, 2])), (10, chunk(10, [0, 1]))]
+    )
+    assert [p["page_idx"] for p in merged["pdf_info"]] == [0, 1, 2, 10, 11]
+    assert merged["_backend"] == "vlm"
+
+
+def test_mineru_merge_layout_jsons_single_chunk_passthrough():
+    from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+
+    layout = {"_backend": "vlm", "pdf_info": [{"page_idx": 3}]}
+    assert MinerUDocLayoutModel._merge_layout_jsons([(0, layout)]) is layout
+
+
+def test_mineru_align_extract_results_by_file_name():
+    from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+
+    results = [
+        {"file_name": "b.pdf", "full_zip_url": "u-b"},
+        {"file_name": "a.pdf", "full_zip_url": "u-a"},
+    ]
+    aligned = MinerUDocLayoutModel._align_extract_results(
+        results, [Path("a.pdf"), Path("b.pdf")]
+    )
+    assert [item["full_zip_url"] for item in aligned] == ["u-a", "u-b"]
+
+
+def test_mineru_poll_full_zip_urls_waits_for_all_chunks():
+    from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+
+    model = MinerUDocLayoutModel(api_token=_DUMMY_MINERU_ARG, poll_interval_seconds=0)
+    states = [
+        [
+            {"file_name": "a.pdf", "state": "done", "full_zip_url": "u-a"},
+            {"file_name": "b.pdf", "state": "waiting"},
+        ],
+        [
+            {"file_name": "a.pdf", "state": "done", "full_zip_url": "u-a"},
+            {"file_name": "b.pdf", "state": "done", "full_zip_url": "u-b"},
+        ],
+    ]
+
+    class _Response:
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {
+                "code": 0,
+                "trace_id": "t",
+                "data": {"extract_result": states.pop(0)},
+            }
+
+    class _Client:
+        @staticmethod
+        def get(_url, **_kwargs):
+            return _Response()
+
+    urls = model._poll_full_zip_urls(
+        _Client(),
+        "batch-1",
+        SimpleNamespace(raise_if_cancelled=lambda: None),
+        [Path("a.pdf"), Path("b.pdf")],
+    )
+    assert urls == ["u-a", "u-b"]
+
+
+def test_mineru_poll_full_zip_urls_reports_chunk_failure():
+    from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+
+    model = MinerUDocLayoutModel(api_token=_DUMMY_MINERU_ARG, poll_interval_seconds=0)
+
+    class _Response:
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {
+                "code": 0,
+                "trace_id": "t",
+                "data": {
+                    "extract_result": [
+                        {"file_name": "a.pdf", "state": "done", "full_zip_url": "u-a"},
+                        {
+                            "file_name": "b.pdf",
+                            "state": "failed",
+                            "err_msg": "parsing failed",
+                        },
+                    ]
+                },
+            }
+
+    class _Client:
+        @staticmethod
+        def get(_url, **_kwargs):
+            return _Response()
+
+    with pytest.raises(RuntimeError, match=r"file=b\.pdf.*err_msg=parsing failed"):
+        model._poll_full_zip_urls(
+            _Client(),
+            "batch-1",
+            SimpleNamespace(raise_if_cancelled=lambda: None),
+            [Path("a.pdf"), Path("b.pdf")],
+        )

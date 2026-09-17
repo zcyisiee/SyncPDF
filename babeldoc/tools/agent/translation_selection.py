@@ -53,8 +53,16 @@ _EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 _REFERENCE_HEADING_RE = re.compile(
     r"^(?:references?|bibliography|参考文献|文献)$", re.I
 )
+# 附录边界标题。除了显式的 "Appendix ..." 外，还覆盖 NeurIPS 风格的裸字母
+# 附录标题（"A. Extended Related Work"）：仅当它是标题型布局标签且标题较短时，
+# 由调用方（select_paragraph）才可能把它当边界——正文里以 "A. " 开头的
+# 普通句子（如 "A. Smith et al. 2020." 的文献条目）不满足 title 标签约束，
+# 不会被误判（见 test_single_letter_appendix_heading_boundary）。
 _APPENDIX_HEADING_RE = re.compile(
     r"^(?:append(?:ix|ices)|open science|artifact|supplement(?:ary)?|附录)", re.I
+)
+_SINGLE_LETTER_APPENDIX_HEADING_RE = re.compile(
+    r"^[A-Z]\s*[.:)—-]\s*\S.{2,80}$"
 )
 _AUTHOR_NOTE_RE = re.compile(
     r"corresponding author|the author worked|permission to make digital|"
@@ -186,15 +194,29 @@ def _is_reference_heading(text: str) -> bool:
     return bool(_REFERENCE_HEADING_RE.match(re.sub(r"\s+", " ", text).strip()))
 
 
-def _is_reference_boundary(text: str) -> bool:
+def _is_reference_boundary(text: str, layout_label: str | None = None) -> bool:
     """Only these major headings may end a references section.
 
     Ordinary section headings (``"1. METHOD"``, ``"4. RESULTS"``) appear
     inside reference entries or are simply mis-detected; they must not resume
     translation.  An explicit appendix/open-science/artifact/supplementary
     boundary is the sole signal that a new translatable section started.
+
+    NeurIPS 风格的裸字母附录标题（"A. Extended Related Work"、"C. Proofs and
+    Derivations"）同样结束参考文献：仅当段落是标题型布局标签（title/
+    paragraph_title 类）时才认，避免把参考文献条目里 "A. Smith (2020) ..."
+    这类文本误判成附录边界。
     """
-    return bool(_APPENDIX_HEADING_RE.match(re.sub(r"\s+", " ", text).strip()))
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if _APPENDIX_HEADING_RE.match(normalized):
+        return True
+    if layout_label is not None and _norm_label(layout_label) in {
+        "title",
+        "doc_title",
+        "paragraph_title",
+    }:
+        return bool(_SINGLE_LETTER_APPENDIX_HEADING_RE.match(normalized))
+    return False
 
 
 def select_paragraph(
@@ -217,7 +239,7 @@ def select_paragraph(
         context.references_started = True
         return SelectionDecision(False, "references_heading")
     if context.references_started:
-        if not _is_reference_boundary(text):
+        if not _is_reference_boundary(text, getattr(paragraph, "layout_label", None)):
             return SelectionDecision(False, "references")
         # Explicit boundary heading: resume translation from here on.
         context.references_started = False
