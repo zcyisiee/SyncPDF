@@ -9,6 +9,7 @@ import json
 import os
 import re
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -110,6 +111,62 @@ def test_stage_lifecycle_and_input_config():
         assert manifest["stages"]["parse"]["status"] == "ok"
         assert manifest["stages"]["parse"]["events"] == 1
         recorder.close()
+
+
+# --------------------------------------------------------------------------- #
+# 时间片段：非子进程的等待型工作（远端调用 / 轮询 / 下载）
+# --------------------------------------------------------------------------- #
+def test_span_records_paired_events_with_seconds():
+    """``span`` 留一对 span_started/span_finished：耗时归因可读。"""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        recorder = _recorder(Path(tmp))
+        with recorder.span(
+            "parse", "mineru.poll", label="等待 MinerU 解析（轮询）", batch_id="b-1"
+        ):
+            time.sleep(0.01)
+        recorder.close()
+
+        started, finished = read_events(recorder.run_dir)
+        assert started["kind"] == "span_started"
+        assert started["stage"] == "parse"
+        assert started["data"]["origin"] == "mineru.poll"
+        assert started["data"]["label"] == "等待 MinerU 解析（轮询）"
+        assert started["data"]["batch_id"] == "b-1"
+        assert started["data"]["span_id"] == finished["data"]["span_id"]
+
+        assert finished["kind"] == "span_finished"
+        assert finished["data"]["status"] == "ok"
+        assert finished["data"]["seconds"] >= 0.01
+        # span 不产生 call 事件、不写 calls/ 快照。
+        assert "call_id" not in finished["data"]
+        assert read_events(recorder.run_dir)[1]["data"].get("snapshot") is None
+
+
+def test_span_marks_error_status_and_reraises():
+    """片段内异常：状态记 error，异常原样向上抛（采集不得吞异常）。"""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        recorder = _recorder(Path(tmp))
+        with pytest.raises(RuntimeError, match="mineru down"):
+            with recorder.span("parse", "mineru.upload"):
+                raise RuntimeError("mineru down")
+        recorder.close()
+
+        finished = read_events(recorder.run_dir)[1]
+        assert finished["data"]["status"] == "error"
+        assert finished["data"]["error_type"] == "RuntimeError"
+        assert "mineru down" in finished["data"]["error"]
+
+
+def test_null_recorder_span_is_noop():
+    """NullRecorder.span 可无条件使用（调用方不必判 recorder）。"""
+    recorder = NullRecorder()
+    with recorder.span("parse", "mineru.poll") as state:
+        assert state is None
+    assert bool(recorder) is False
 
 
 # --------------------------------------------------------------------------- #

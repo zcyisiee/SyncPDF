@@ -485,14 +485,27 @@ def capture_selection(
     )
 
 
-def capture_files(recorder, stage, workdir, names, *, phase="inputs"):
+def capture_files(recorder, stage, workdir, names, *, phase="inputs", since=None):
+    """归档 ``agent/`` 下的命名产物；``since`` 存在时跳过更早的残留文件。
+
+    失败现场采集必须区分「本次执行产出」与「上一轮残留」：``since`` 传本次
+    run 的起始时间戳， ``mtime`` 更早的文件不归档也不出现在事件里。
+    """
     bundle_id = recorder.new_id(phase)
     artifacts = {}
+    skipped = []
     for name in names:
         path = Path(workdir) / "agent" / name
-        if path.is_file():
-            artifacts[name] = recorder.archive_file(stage, f"{bundle_id}/{name}", path)
-    recorder.record_event(stage, "artifact_bundle", {"phase": phase, "artifacts": artifacts})
+        if not path.is_file():
+            continue
+        if since is not None and path.stat().st_mtime < since:
+            skipped.append(name)
+            continue
+        artifacts[name] = recorder.archive_file(stage, f"{bundle_id}/{name}", path)
+    payload = {"phase": phase, "artifacts": artifacts}
+    if skipped:
+        payload["skipped_stale"] = skipped
+    recorder.record_event(stage, "artifact_bundle", payload)
     return artifacts
 
 

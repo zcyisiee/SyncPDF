@@ -34,6 +34,17 @@ from babeldoc_tools import common
 VIEWER_READY_TIMEOUT_S = 10.0
 VIEWER_STOP_TIMEOUT_S = 5.0
 
+#: 独立下游阶段可继承的上游（parse）证据；复制成稳定快照而非引用旧目录。
+UPSTREAM_STAGE = "parse"
+UPSTREAM_SNAPSHOTS = ("selection", "page-frames", "paragraphs", "layout", "native-chars")
+UPSTREAM_ARTIFACTS = (
+    "input.pdf",
+    "prepared.pdf",
+    "document.md",
+    "anchors.json",
+    "sheet.jsonl",
+)
+
 
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
@@ -175,6 +186,16 @@ class DebugSession:
             run_dir = _debug_dir(self.workdir) / "runs" / run_id
             run_dir.mkdir(parents=True, exist_ok=False)
             recorder = _dr.DebugRecorder(run_dir)
+            # 归档不可写必须在 pipeline 开始前暴露：manifest 首次发布失败时
+            # DebugRecorder 内部只记错误不抛出，这里显式校验并升级为启动失败。
+            if not recorder.manifest_path.is_file():
+                raise OSError(f"manifest 未写成: {recorder.manifest_path}")
+            capture_status = recorder.capture_status
+            if not capture_status.get("ok", False):
+                first = (capture_status.get("errors") or [{}])[0]
+                raise OSError(
+                    f"manifest 首次发布失败: {first.get('message') or first}"
+                )
         except common.ToolError:
             self.release_write_lock()
             raise
@@ -183,14 +204,92 @@ class DebugSession:
             raise common.ToolError(
                 "debug_start_failed", f"debug 归档创建失败: {exc}"
             ) from exc
+        config = config or {}
+        options = config.get("options") or {}
+        # 命令行字符串（translator/reviewer）先登记其凭证参数再落盘，保证
+        # ``set_config`` 写入的配置不会带上明文 token/password。
+        for value in options.values():
+            if isinstance(value, str):
+                recorder.register_command(value)
         if config:
             recorder.set_config(
-                stages=config.get("stages"), options=config.get("options")
+                stages=config.get("stages"), options=options
             )
         if input_pdf:
             recorder.add_input("pdf", input_pdf)
+        if not self._stage_set_includes(config, UPSTREAM_STAGE):
+            self.inherit_upstream(recorder)
         _dr.set_current(recorder)
         return recorder
+
+    @staticmethod
+    def _stage_set_includes(config: dict, stage: str) -> bool:
+        stages = config.get("stages")
+        return bool(stages) and stage in {str(item) for item in stages}
+
+    def inherit_upstream(self, recorder) -> dict | None:
+        """独立下游阶段：把最近一次 parse 的上游证据复制成稳定快照。
+
+        只复用能读到、摘要可核的上游快照；复制而非引用旧 run 目录（旧产物可能
+        被覆盖）。复制内容在 manifest 的 ``inherited`` 下标注来源，与本次
+        执行区分；找不到可用上游时静默返回 ``None``（不伪造证据）。
+        """
+        from babeldoc_tools import debug_server
+
+        runs_dir = _debug_dir(self.workdir) / "runs"
+        for entry in debug_server.list_runs(self.workdir):
+            if entry.get("run_id") == recorder.run_id:
+                continue
+            manifest = _read_json(runs_dir / entry["run_id"] / "manifest.json")
+            if not manifest:
+                continue
+            snapshots = manifest.get("snapshots") or {}
+            artifacts = manifest.get("artifacts") or {}
+            copied_snapshots: list[str] = []
+            copied_artifacts: list[str] = []
+            for name in UPSTREAM_SNAPSHOTS:
+                key = f"snapshots/{UPSTREAM_STAGE}/{name}.json"
+                if key not in snapshots:
+                    continue
+                payload = _read_json(runs_dir / entry["run_id"] / key)
+                if payload is None:
+                    continue
+                relative = recorder.write_snapshot(UPSTREAM_STAGE, name, payload)
+                if relative:
+                    copied_snapshots.append(relative)
+            for name in UPSTREAM_ARTIFACTS:
+                key = f"artifacts/{UPSTREAM_STAGE}/{name}"
+                if key not in artifacts:
+                    continue
+                source = runs_dir / entry["run_id"] / key
+                if not source.is_file():
+                    continue
+                relative = recorder.archive_file(UPSTREAM_STAGE, name, source)
+                if relative:
+                    copied_artifacts.append(relative)
+            if not copied_snapshots and not copied_artifacts:
+                continue
+            recorder.mark_inherited(
+                entry["run_id"],
+                snapshots=copied_snapshots,
+                artifacts=copied_artifacts,
+                stages=[UPSTREAM_STAGE],
+            )
+            recorder.record_event(
+                "debug",
+                "upstream_inherited",
+                {
+                    "source_run_id": entry["run_id"],
+                    "snapshots": copied_snapshots,
+                    "artifacts": copied_artifacts,
+                },
+            )
+            return {
+                "source_run_id": entry["run_id"],
+                "snapshots": copied_snapshots,
+                "artifacts": copied_artifacts,
+            }
+        return None
 
     def finish_run(self, recorder, status: str = _dr.STATUS_FINISHED) -> None:
         """收 run：写 manifest 终态、复位上下文、释放写锁。"""

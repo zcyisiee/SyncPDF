@@ -253,10 +253,18 @@ export function createCheckView(ctx) {
     const pages = [];
     for (let i = 0; i < maxPage; i += 1) {
       const frame = frames && frames.frames && frames.frames[i];
-      const crop = (pageInfo[i] || {}).cropbox;
-      const height = (frame && frame.height) || (crop ? crop[3] - crop[1] : 792);
-      state.heights.set(i, height);
-      pages.push({ index: i, width: (frame && frame.width) || (crop ? crop[2] - crop[0] : 612), height });
+      const crop = (pageInfo[i] || {}).cropbox || (frame && frame.cropbox);
+      const dispW = (frame && frame.width) || (crop ? crop[2] - crop[0] : 612);
+      const dispH = (frame && frame.height) || (crop ? crop[3] - crop[1] : 792);
+      const baseW = crop && crop.length === 4 ? crop[2] - crop[0] : dispW;
+      const baseH = crop && crop.length === 4 ? crop[3] - crop[1] : dispH;
+      /* IL 框按未旋转裁剪页高翻转；旋转由 pager 转到显示坐标。 */
+      state.heights.set(i, baseH);
+      pages.push({
+        index: i, width: dispW, height: dispH,
+        rotation: (frame && frame.rotation) || 0,
+        baseWidth: baseW, baseHeight: baseH,
+      });
     }
     for (const p of (geometry && geometry.paragraphs) || []) {
       if (p.id) state.paragraphs.set(p.id, p);

@@ -26,13 +26,15 @@ export function createLayoutView(ctx) {
     frames: null,
     layout: null,       // {pages: [{page_index, height, entities}]}
     paragraphs: null,   // {entities, relations}
-    chars: null,        // native-chars（整篇一次拉取，按页开关渲染）
+    chars: null,        // native-chars（整篇一次拉取，首次开启字符层时按需加载）
     selection: null,
     alignment: null,    // artifacts/parse/alignment.json（行内公式保护区）
     hidden: new Set(),
     confMin: 0,
     showParagraphs: true,
     showChars: new Set(),   // 开启字符层的页
+    pendingSnapshots: new Set(),
+    reloadTimer: null,
     byPage: new Map(),      // page_index → boxes[]
   };
 
@@ -54,7 +56,8 @@ export function createLayoutView(ctx) {
         existing.kind = 'inline_formula';
         continue;
       }
-      const height = (frames[pi] && frames[pi].height) || 0;
+      /* alignment.json 是 IL（左下原点）坐标 → 用未旋转裁剪页高翻转。 */
+      const height = unrotatedHeight(frames[pi]);
       if (!height) continue;
       const [x0, y0, x1, y1] = item.box.map(Number);
       list.push({
@@ -143,6 +146,31 @@ export function createLayoutView(ctx) {
     return null;
   }
 
+  /* 页面几何：``width/height`` 是显示尺寸（＝已应用 /Rotate），
+     ``baseWidth/baseHeight`` 是未旋转裁剪尺寸（框坐标就是这一套）。 */
+  function unrotatedHeight(frame) {
+    const crop = frame && frame.cropbox;
+    if (crop && crop.length === 4) return crop[3] - crop[1];
+    return (frame && frame.height) || 0;
+  }
+
+  function pageGeometry(frames, fallbackPages) {
+    const list = frames && frames.length
+      ? frames
+      : (fallbackPages || []).map((p) => ({ page_index: p.page_index, width: 1, height: p.height || 1 }));
+    return list.map((f, i) => {
+      const crop = f.cropbox;
+      return {
+        index: f.page_index != null ? f.page_index : i,
+        width: f.width || 612,
+        height: f.height || 792,
+        rotation: f.rotation || 0,
+        baseWidth: crop && crop.length === 4 ? crop[2] - crop[0] : (f.width || 612),
+        baseHeight: crop && crop.length === 4 ? crop[3] - crop[1] : (f.height || 792),
+      };
+    });
+  }
+
   /* ------------------------------------------------------------ panel */
   function renderPanel() {
     const head = ctx.panelHead;
@@ -227,11 +255,24 @@ export function createLayoutView(ctx) {
     const charRow = el('div', 'ctl');
     const char = document.createElement('input');
     char.type = 'checkbox';
-    char.disabled = !state.chars;
+    char.checked = state.showChars.has(ctx.currentPage);
     charRow.append(char, el('span', null, '字符层（当前页）'));
     char.onchange = async () => {
       const idx = ctx.currentPage;
-      if (char.checked) state.showChars.add(idx); else state.showChars.delete(idx);
+      if (char.checked) {
+        // 字符层默认关：只有用户真的开启时才拉取 native-chars 快照。
+        char.disabled = true;
+        await ensureChars();
+        char.disabled = false;
+        if (!state.chars) {
+          char.checked = false;
+          ctx.setStageStatus('字符快照不可用（旧 run 或无字符证据）', 'error');
+          return;
+        }
+        state.showChars.add(idx);
+      } else {
+        state.showChars.delete(idx);
+      }
       ctx.pager.refresh();
     };
     ctlSec.append(charRow);
@@ -268,21 +309,80 @@ export function createLayoutView(ctx) {
     if (text) sec.append(el('pre', 'block', text));
   }
 
+  async function ensureChars() {
+    if (state.chars) return state.chars;
+    try {
+      state.chars = await ctx.api.snapshot(ctx.run, 'parse/native-chars.json');
+    } catch (err) {
+      state.chars = null;
+    }
+    return state.chars;
+  }
+
+  /* ------------------------------------------------------- 实时增量 */
+  /* 采集进程新发布的快照：凭事件重拉对应快照，不走整篇重扫；同一批事件
+     合并成一次刷新，保证“发布后两秒内可见”。 */
+  const SNAPSHOT_EVENTS = {
+    page_frames: 'parse/page-frames.json',
+    layout_parsed: 'parse/layout.json',
+    paragraphs_found: 'parse/paragraphs.json',
+    selection: 'parse/selection.json',
+    native_chars: 'parse/native-chars.json',
+  };
+
+  function onEvent(ev) {
+    if (!ev || ev.stage !== 'parse') return;
+    const name = SNAPSHOT_EVENTS[ev.kind];
+    if (!name) return;
+    state.pendingSnapshots.add(name);
+    if (state.reloadTimer) return;
+    state.reloadTimer = setTimeout(reloadPublished, 150);
+  }
+
+  async function reloadPublished() {
+    state.reloadTimer = null;
+    const names = [...state.pendingSnapshots];
+    state.pendingSnapshots.clear();
+    const run = ctx.run;
+    let framesChanged = false;
+    for (const name of names) {
+      try {
+        const payload = await ctx.api.snapshot(run, name);
+        if (name.endsWith('page-frames.json')) { state.frames = payload; framesChanged = true; }
+        else if (name.endsWith('layout.json')) state.layout = payload;
+        else if (name.endsWith('paragraphs.json')) state.paragraphs = payload;
+        else if (name.endsWith('selection.json')) state.selection = payload;
+        else if (name.endsWith('native-chars.json')) state.chars = payload;
+      } catch (err) {
+        /* 证据尚未发布完成：保留旧状态，等下一次事件再试。 */
+      }
+    }
+    ensureBoxes();
+    if (((state.alignment && state.alignment.protected_inline_math) || []).length) {
+      state.hidden.add('行内公式');
+    }
+    if (framesChanged && state.frames) {
+      ctx.pager.setDocument(run, sourcePdf(ctx.manifest), pageGeometry(state.frames.frames));
+    }
+    renderPanel();
+    ctx.pager.refresh();
+  }
+
   /* ------------------------------------------------------------ mount */
   async function mount() {
     const run = ctx.run;
-    const [frames, layout, paragraphs, chars, selection, alignment] = await Promise.all([
+    /* native-chars 不在此处拉取：字符层默认关，首次开启时才按需加载。 */
+    const [frames, layout, paragraphs, selection, alignment] = await Promise.all([
       ctx.api.snapshot(run, 'parse/page-frames.json'),
       ctx.api.snapshot(run, 'parse/layout.json'),
       ctx.api.snapshot(run, 'parse/paragraphs.json'),
-      ctx.api.snapshot(run, 'parse/native-chars.json'),
       ctx.api.snapshot(run, 'parse/selection.json'),
       ctx.api.artifactJson(run, 'artifacts/parse/alignment.json'),
     ]);
     state.frames = frames;
     state.layout = layout;
     state.paragraphs = paragraphs;
-    state.chars = chars;
+    state.chars = null;
     state.selection = selection;
     state.alignment = alignment;
     ensureBoxes();
@@ -290,14 +390,8 @@ export function createLayoutView(ctx) {
     if (((alignment && alignment.protected_inline_math) || []).length) {
       state.hidden.add('行内公式');
     }
-    const pages = (frames && frames.frames) ||
-      (layout ? layout.pages.map((p) => ({ index: p.page_index, width: 1, height: p.height || 1 })) : []);
-    const normalized = pages.map((f, i) => ({
-      index: f.page_index != null ? f.page_index : i,
-      width: f.width || 612,
-      height: f.height || 792,
-    }));
-    ctx.pager.setDocument(run, sourcePdf(ctx.manifest), normalized);
+    const pages = (frames && frames.frames) || (layout ? layout.pages.map((p) => ({ page_index: p.page_index, height: p.height || 1 })) : []);
+    ctx.pager.setDocument(run, sourcePdf(ctx.manifest), pageGeometry(pages.length ? pages : null, pages));
     ctx.pager.setOverlayProvider((idx) => visibleBoxes(idx));
     renderPanel();
     ctx.setStageStatus(
@@ -316,5 +410,5 @@ export function createLayoutView(ctx) {
     renderDetail(box);
   }
 
-  return { mount, onSelect, id: 'layout' };
+  return { mount, onEvent, onSelect, id: 'layout' };
 }

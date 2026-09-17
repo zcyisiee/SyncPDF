@@ -91,6 +91,13 @@
     解析在此中止，**不产出** `document.md`/`anchors.json`。
   - MinerU 页覆盖不匹配：`MinerU page coverage mismatch: missing_pages=[…]`（回放错样本时）
   - 回放页数不匹配：`MinerU replay layout does not match input PDF page count`
+  - 轮询超时：`MinerU polling timed out after …s`
+
+> **MinerU 等待时间单独成段**：`MinerUDocLayoutModel.handle_document` 对四段网络
+> 等待各记一个 span（`parse` 阶段，`origin` = `mineru.request_upload_urls` /
+> `mineru.upload` / `mineru.poll` / `mineru.download`，另有本地的
+> `mineru.parse_zip`；缓存命中走 `mineru.cache`）。没有这些 span，"等待 MinerU
+> 花了多久"只能靠 `layout_parsed` 的相邻事件差反推，且无法区分轮询与下载。
 
 > **审计产物始终落盘**（即使过门禁），因此 `layout_coverage.json` 可随时查看
 > 「哪些字符没被任何布局区域覆盖」。
@@ -542,3 +549,11 @@
 > 如 `layout_lint` 的 `paragraph_overlap`）。消费方只读 `id` 会静默丢掉多段问题
 > 的全部框，需同时接受两者。另注意部分 lint 项按页统计、本就无段落 id
 > （`text_layer_compat_ideograph`、`link_misaligned`），这类只有 `page`。
+>
+> **耗时证据有两类事件对**，查看器「事件」页据此画时间轴：
+> `call_started` / `call_finished` 是**子进程**（xelatex、翻译/审查命令）的起止与
+> `seconds`；`span_started` / `span_finished`（`DebugRecorder.span`）是**非子进程**
+> 的等待型工作——MinerU 走 httpx 而非子进程，所以它的申请上传地址/上传/轮询/下载
+> 各自成一段 span（`origin` = `mineru.*`），否则"等待 MinerU 花了多久"看不出来。
+> 两类都用同一 `origin` 命名空间做归因；并行任务（build 阶段 xelatex 批编译、
+> 多段候选）在时间轴上按真实区间重叠显示，累计耗时与墙钟耗时分开给。

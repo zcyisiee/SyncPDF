@@ -114,11 +114,16 @@ def _load_manifest(run_dir: Path) -> dict | None:
 
 
 def list_runs(workdir: Path) -> list[dict]:
-    """运行索引：按 created_at 倒序，含每阶段状态摘要。"""
+    """运行索引：按 created_at 倒序，含每阶段状态摘要。
+
+    写锁空闲却仍是 ``running`` 的 manifest = 写入方异常退出（崩溃/被 kill）：
+    如实报为 ``interrupted``，不把部分结果显示成仍在运行或已完成。
+    """
     runs = []
     base = _runs_dir(workdir)
     if not base.is_dir():
         return runs
+    pipeline_active = not write_lock_free(workdir)
     for child in base.iterdir():
         if not child.is_dir() or not RUN_ID_RE.match(child.name):
             continue
@@ -135,10 +140,13 @@ def list_runs(workdir: Path) -> list[dict]:
             )
             continue
         stages = manifest.get("stages") or {}
+        status = manifest.get("status")
+        if status == "running" and not pipeline_active:
+            status = "interrupted"
         runs.append(
             {
                 "run_id": manifest.get("run_id") or child.name,
-                "status": manifest.get("status"),
+                "status": status,
                 "mode": manifest.get("mode"),
                 "created_at": manifest.get("created_at"),
                 "finished_at": manifest.get("finished_at"),
@@ -315,9 +323,18 @@ class _Handler(BaseHTTPRequestHandler):
             return False
         origin = self.headers.get("Origin")
         if origin:
-            origin_host = urllib.parse.urlparse(origin).hostname or ""
+            parsed_origin = urllib.parse.urlparse(origin)
+            origin_host = parsed_origin.hostname or ""
+            request_host = (self.headers.get("Host") or "").strip().lower()
+            # 同源 = scheme + host（含回环地址）+ port 全部一致；只查 hostname
+            # 会让任意本地端口的页面（http://127.0.0.1:1）绕过同源限制。
             if origin_host not in ("127.0.0.1", "localhost"):
                 self._send_error_json(403, "bad_origin", "Origin 必须同源")
+                return False
+            if parsed_origin.scheme != "http" or parsed_origin.netloc.lower() != request_host:
+                self._send_error_json(
+                    403, "bad_origin", "Origin 必须与请求同源（scheme/host/port 一致）"
+                )
                 return False
         query = urllib.parse.parse_qs(parsed.query)
         token = (query.get("token") or [None])[0] or self.headers.get("X-Debug-Token")

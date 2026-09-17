@@ -130,10 +130,31 @@ def get_current() -> DebugRecorder | None:
         return _current
 
 
+_SEQ_PREFIX_RE = re.compile(r'^\{\s*"seq"\s*:\s*(\d+)')
+
+
+def _peek_seq(text: str) -> int | None:
+    """廉价读取行首的 ``seq``（recorder 总是把它写在最前），避免为跳过
+    已读前缀而整行 ``json.loads``。解析失败返回 ``None``，由调用方兜底。"""
+    match = _SEQ_PREFIX_RE.match(text)
+    if match is None:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
 def read_events(run_dir, after_seq: int = 0) -> list[dict]:
     """读取 ``events.jsonl``；忽略未写完/损坏的行，只返回 ``seq > after_seq``。
 
-    读取端（查看器）依赖这里的容错：写入方正在追加的行可能只有半行 JSON。
+    读取端（查看器）依赖这里的容错：
+
+    - 写入方正在追加的行可能只有半行 JSON；因此**没有以换行结尾的尾行一律
+      视为未发布**（即使内容恰好是完整 JSON 也不返回）：一次 ``write`` 未落完
+      时，内容可能是完整对象却仍在被截断的边界上。
+    - 续读（``after_seq``）不重新扫描整篇：先用行首 ``seq`` 前缀廉价跳过已读
+      前缀，只对真正需要返回的行做 ``json.loads``。
     """
     path = Path(run_dir) / EVENTS_FILE
     if not path.is_file():
@@ -142,19 +163,25 @@ def read_events(run_dir, after_seq: int = 0) -> list[dict]:
     events: list[dict] = []
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
+            if not line.endswith("\n"):
+                break  # 未写完的尾行：本次不发布，等下次续读
             text = line.strip()
             if not text:
+                continue
+            seq = _peek_seq(text)
+            if seq is not None and seq <= floor:
                 continue
             try:
                 event = json.loads(text)
             except (ValueError, TypeError):
-                # 未完成的尾行 / 损坏行：跳过，不让查看器整篇失败。
+                # 半行 / 损坏行：跳过，不让查看器整篇失败。
                 continue
             if not isinstance(event, dict):
                 continue
-            seq = event.get("seq")
-            if isinstance(seq, int) and seq <= floor:
-                continue
+            if seq is None:
+                value = event.get("seq")
+                if isinstance(value, int) and value <= floor:
+                    continue
             events.append(event)
     return events
 
@@ -179,6 +206,7 @@ class DebugRecorder:
         self._artifacts_dir = self.run_dir / ARTIFACTS_DIR
         self._manifest_path = self.run_dir / MANIFEST_FILE
         self._events_path = self.run_dir / EVENTS_FILE
+        self.started_at_ts = time.time()
         self._manifest: dict = {
             "schema_version": SCHEMA_VERSION,
             "run_id": self.run_id,
@@ -273,6 +301,46 @@ class DebugRecorder:
         return value
 
     @contextlib.contextmanager
+    def span(self, stage: str, origin: str, *, label: str | None = None, **context):
+        """非子进程的耗时片段（远端调用、轮询、下载等「等待型」工作）。
+
+        与 :meth:`process` 的区别：不归档 stdout/stderr、不写快照，只留一对
+        ``span_started`` / ``span_finished`` 事件（含 ``span_id`` / ``origin`` /
+        ``label`` / ``seconds``）。查看器据此把一段时间归因到明确来源——例如
+        「等待 MinerU 解析」与运行某个命令的耗时一样可读。异常照原样向上抛，
+        状态记 ``error`` / ``interrupted``；采集失败不影响管线。
+        """
+        state = {"span_id": self.new_id("span")}
+        metadata = {
+            "span_id": state["span_id"],
+            "origin": origin,
+            "label": label,
+            **context,
+        }
+        self.capture("span_started", self.record_event, stage, "span_started", metadata)
+        started = time.perf_counter()
+        try:
+            yield state
+        except BaseException as exc:
+            state["exception"] = exc
+            raise
+        finally:
+            seconds = time.perf_counter() - started
+            self.capture("span_finished", self._finish_span, stage, metadata, state, seconds)
+
+    def _finish_span(self, stage, metadata, state, seconds):
+        exception = state.get("exception")
+        cause = (exception.__cause__ or exception) if exception is not None else None
+        status = "ok"
+        if exception is not None:
+            status = "error" if isinstance(exception, Exception) else "interrupted"
+        data = {**metadata, "status": status, "seconds": round(seconds, 6)}
+        if cause is not None:
+            data["error_type"] = type(cause).__name__
+            data["error"] = str(exception)[:300]
+        self.record_event(stage, "span_finished", data)
+
+    @contextlib.contextmanager
     def process(self, stage: str, origin: str, command, *, prompt=None, timeout=None, **context):
         state = {"call_id": self.new_id("call")}
         metadata = self.capture(
@@ -344,6 +412,32 @@ class DebugRecorder:
         except Exception as exc:  # noqa: BLE001 - 采集中断不得影响管线
             self._record_error("add_input", exc, path=name)
             return None
+
+    def mark_inherited(
+        self,
+        source_run_id: str,
+        *,
+        snapshots: list[str] | None = None,
+        artifacts: list[str] | None = None,
+        stages: list[str] | None = None,
+    ) -> None:
+        """记录「历史继承」的上游证据来源（与本次执行明确区分）。
+
+        只登记来源与摘要引用；调用方负责把上游快照复制成稳定副本后再发布。
+        """
+        try:
+            with self._lock:
+                inherited = self._manifest.setdefault("inherited", {})
+                inherited[source_run_id] = {
+                    "source_run_id": source_run_id,
+                    "stages": [str(stage) for stage in (stages or [])],
+                    "snapshots": list(snapshots or []),
+                    "artifacts": list(artifacts or []),
+                    "at": _now(),
+                }
+            self._flush_manifest()
+        except Exception as exc:  # noqa: BLE001
+            self._record_error("mark_inherited", exc, source_run_id=source_run_id)
 
     def set_config(self, *, stages=None, options: dict | None = None) -> None:
         """写入配置白名单（不采集 token / 完整环境）。"""
@@ -580,6 +674,10 @@ class NullRecorder:
 
     @contextlib.contextmanager
     def process(self, stage, origin, command, **kwargs):
+        yield None
+
+    @contextlib.contextmanager
+    def span(self, stage, origin, **kwargs):
         yield None
 
     @property

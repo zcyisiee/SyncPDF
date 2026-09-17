@@ -23,50 +23,95 @@ const PAGE = 120;  // 对照列表分页大小（「加载更多」）
 export function createTranslateView(ctx) {
   const state = {
     selection: null,
-    targets: new Map(),     // id → {text, flags:Set}
+    targets: new Map(),     // id → 模型返回行（raw/merged）
+    writeback: new Map(),   // id → 最终 canonical 写回文本（apply 阶段）
+    unmatched: [],          // 未按 id 对齐的模型返回
     missing: new Set(),
     shown: 0,
     calls: [],
     versions: [],
+    applyValidations: [],   // apply_validation 事件（真实链路的写回证据）
     seenSeq: new Set(),   // 已入列事件 seq（mount 重放 + onEvent 去重）
   };
 
   function consume(ev) {
     if (state.seenSeq.has(ev.seq)) return;
     state.seenSeq.add(ev.seq);
+    const d = ev.data || {};
     if (ev.kind === 'call_finished') state.calls.push(ev);
     if (ev.kind === 'missing_ids') {
-      for (const id of (ev.data && ev.data.ids) || []) state.missing.add(id);
+      for (const id of d.ids || []) state.missing.add(id);
     }
     if (ev.kind === 'text_version') state.versions.push(ev);
+    if (ev.kind === 'canonical_writeback' && d.id) {
+      state.writeback.set(d.id, d.target);
+    }
+    if (ev.kind === 'apply_validation') state.applyValidations.push(ev);
+  }
+
+  async function collectUnmatched(snap, phase) {
+    for (const item of (snap && snap.unmatched) || []) {
+      if (item && item.text) state.unmatched.push({ ...item, phase });
+    }
   }
 
   async function loadTargets() {
-    /* 取最后一个 text_version 快照作为写回译文来源（rows[].target）。 */
+    /* 取最后一个 text_version 快照作为模型返回来源（rows[].target）。 */
     const versions = state.versions;
     if (!versions.length) return;
-    const last = versions[versions.length - 1];
-    const rel = (last.data && last.data.snapshot || '').replace(/^snapshots\//, '');
-    if (!rel) return;
-    const snap = await ctx.api.snapshot(ctx.run, rel);
-    for (const row of (snap && snap.rows) || []) {
-      if (row.id) state.targets.set(row.id, row);
-    }
-    // 相位标记：非首个版本命中的段 → merged/补译
-    for (const v of versions.slice(0, -1)) {
-      const vRel = (v.data && v.data.snapshot || '').replace(/^snapshots\//, '');
-      if (!vRel) continue;
-      const s = await ctx.api.snapshot(ctx.run, vRel);
-      const phase = (v.data && v.data.phase) || '';
-      for (const row of (s && s.rows) || []) {
-        const cur = state.targets.get(row.id);
-        if (!cur) continue;
-        if (phase === 'merged' || phase === 'retry' || phase === 'retranslated') {
-          cur.flags = cur.flags || new Set();
-          cur.flags.add('merged');
+    for (const v of versions) {
+      const rel = ((v.data && v.data.snapshot) || '').replace(/^snapshots\//, '');
+      if (!rel) continue;
+      const snap = await ctx.api.snapshot(ctx.run, rel);
+      await collectUnmatched(snap, (v.data && v.data.phase) || '');
+      const isLast = v === versions[versions.length - 1];
+      if (!isLast) {
+        // 相位标记：非首个版本命中的段 → merged/补译
+        const phase = (v.data && v.data.phase) || '';
+        for (const row of (snap && snap.rows) || []) {
+          const cur = state.targets.get(row.id);
+          if (!cur) continue;
+          if (phase === 'merged' || phase === 'retry' || phase === 'retranslated') {
+            cur.flags = cur.flags || new Set();
+            cur.flags.add('merged');
+          }
         }
+        continue;
+      }
+      for (const row of (snap && snap.rows) || []) {
+        if (row.id) state.targets.set(row.id, row);
       }
     }
+  }
+
+  /** 最终 canonical 写回：优先 apply_validation 快照（真实链路），其次
+      canonical_writeback 事件，最后 translated.jsonl 产物。 */
+  async function loadWriteback() {
+    const last = state.applyValidations[state.applyValidations.length - 1];
+    if (last) {
+      const rel = ((last.data && last.data.snapshot) || '').replace(/^snapshots\//, '');
+      if (rel) {
+        try {
+          const snap = await ctx.api.snapshot(ctx.run, rel);
+          for (const entry of (snap && snap.entries) || []) {
+            if (entry && entry.id) state.writeback.set(entry.id, entry.target);
+          }
+        } catch (err) { /* 快照不可用：保留事件/产物来源 */ }
+      }
+    }
+    const artifacts = Object.keys((ctx.manifest && ctx.manifest.artifacts) || {});
+    const jsonl = 'artifacts/apply/translated.jsonl';
+    if (!artifacts.includes(jsonl)) return;
+    try {
+      const text = await ctx.api.artifactText(ctx.run, jsonl);
+      for (const line of (text || '').split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let row = null;
+        try { row = JSON.parse(trimmed); } catch (err) { continue; }
+        if (row && row.id && row.target != null) state.writeback.set(row.id, row.target);
+      }
+    } catch (err) { /* 产物不可用：不阻塞视图 */ }
   }
 
   function renderList() {
@@ -81,16 +126,19 @@ export function createTranslateView(ctx) {
     const visible = rows.slice(0, state.shown);
     for (const row of visible) {
       const target = state.targets.get(row.id) || {};
+      const canonical = state.writeback.get(row.id);
       const line = el('div', 'seg-row');
       line.dataset.eid = row.id;
       line.append(el('span', 'seg-id mono', String(row.id)));
       line.append(el('div', 'seg-src', row.source || ''));
-      line.append(el('div', 'seg-tgt', target.target || '（无写回记录）'));
+      line.append(el('div', 'seg-tgt', canonical != null ? canonical : (target.target || '（无写回记录）')));
       const flags = [];
+      if (canonical != null) flags.push(['写回', 'ok']);
+      else if (target.target) flags.push(['raw', 'muted']);
       if (state.missing.has(row.id)) flags.push(['retry', 'warn']);
       if (target.flags && target.flags.has('merged')) flags.push(['merged', 'ok']);
       if (target.matched === false) flags.push(['unmatched', 'bad']);
-      if (!state.targets.has(row.id)) flags.push(['no-target', 'muted']);
+      if (!state.targets.has(row.id) && canonical == null) flags.push(['no-target', 'muted']);
       if (flags.length) {
         const holder = el('div', 'seg-flags');
         for (const [name, tone] of flags) holder.append(el('span', `badge ${tone}`, name));
@@ -104,6 +152,18 @@ export function createTranslateView(ctx) {
       more.style.margin = '12px 0';
       more.onclick = () => { state.shown += PAGE; renderList(); };
       frag.append(more);
+    }
+    /* 未按 id 对齐的模型返回：保留在未匹配区域，不静默丢弃。 */
+    const unmatched = state.unmatched.filter((u) => u && u.text);
+    if (unmatched.length) {
+      const sec = el('section', 'unmatched-region');
+      sec.id = 'unmatched';
+      sec.append(el('h4', null, `未匹配返回（${unmatched.length}）`));
+      for (const item of unmatched) {
+        sec.append(el('div', 'empty', item.reason || 'no_paragraph_id'));
+        sec.append(el('pre', 'block', String(item.text)));
+      }
+      frag.append(sec);
     }
     pane.append(frag);
   }
@@ -196,15 +256,19 @@ export function createTranslateView(ctx) {
   async function mount() {
     /* 视图实例跨 tab 复用：重进时先清空累积态，避免事件重复入列。 */
     state.targets = new Map();
+    state.writeback = new Map();
+    state.unmatched = [];
     state.missing = new Set();
     state.calls = [];
     state.versions = [];
+    state.applyValidations = [];
     state.seenSeq.clear();
     state.selection = await ctx.api.snapshot(ctx.run, 'parse/selection.json');
     for (const ev of ctx.events) {
-      if (ev.stage !== 'translate') continue;
+      if (ev.stage !== 'translate' && ev.stage !== 'apply') continue;
       consume(ev);
     }
+    await loadWriteback();
     await loadTargets();
     state.shown = PAGE;
     renderList();
@@ -224,13 +288,16 @@ export function createTranslateView(ctx) {
   }
 
   function onEvent(ev) {
-    if (ev.stage !== 'translate' || state.seenSeq.has(ev.seq)) return;
+    if ((ev.stage !== 'translate' && ev.stage !== 'apply') || state.seenSeq.has(ev.seq)) return;
     consume(ev);
     if (ev.kind === 'call_finished') renderPanel();
     if (ev.kind === 'missing_ids') { renderList(); renderPanel(); }
     if (ev.kind === 'text_version') {
       loadTargets().then(renderList);
       renderPanel();
+    }
+    if (ev.kind === 'apply_validation' || ev.kind === 'canonical_writeback') {
+      loadWriteback().then(renderList);
     }
   }
 

@@ -263,6 +263,25 @@ uv run bdt debug --workdir tmp/paper --stop              # 停止查看器
   缓存写入，不删除原缓存。
 - 归档在 `<workdir>/debug/runs/<run_id>/`（`manifest.json` / `events.jsonl` /
   `snapshots/` / `artifacts/`）；历史 run 不覆盖、不自动删除。
+- 查看器视图：**识别**（源 PDF + 布局/段落/字符框）、**翻译**（逐段对照 + 调用列表）、
+  **编译**（最终 PDF + 多层几何 + 候选树）、**检查**（verdict/lint/link 问题定位）、
+  **事件**（pipeline 时间轴）。
+- 「事件」页是耗时视图：上方一条阶段占比条，下方每个阶段一条泳道——把
+  `call_started/call_finished`（子进程）与 `span_started/span_finished`（远端等待，
+  如 MinerU 上传/轮询/下载）按真实起止时刻画成条，重叠的并行任务自动分成子行。
+  点阶段泳道可缩放到该阶段；「耗时归因」按来源汇总，直接看出"等待翻译多久 /
+  等待 MinerU 多久"。底部可展开原始事件流（带 kind 过滤与跳转）。
+- 要让时间轴显示**完整**七个阶段，必须整条跑 `bdt run`（parse→report）。只跑
+  `--from <stage>` 续跑会新建 run，归档里只有该阶段之后的事件。
+
+> **reviewer wrapper 需要 `--dangerously-skip-permissions`**：审查提示词要求
+> reviewer 亲自跑 `python -c "import pymupdf; …"` 复核文本层，而 agy 无头模式无法
+> 就地询问授权，会静默拒绝工具调用并产出空响应（bdt 侧报 `reviewer_empty` /
+> `reviewer_invalid_json`）。`scripts/agy-reviewer.sh` 已带上该标志，并把"拿不到
+> 结果"改成显式 stderr + 非零退出，避免真实原因被一句"stdout 为空"掩盖。
+> 代价：该次会话内所有工具调用被自动批准，而审查输入含论文正文，存在提示词注入
+> → 命令执行的风险；要收紧就在 `~/.gemini/antigravity-cli/settings.json` 里用
+> `permissions.allow` 只放行具体命令。翻译 wrapper 不需要它（纯文本进出、不调工具）。
 - 查看器安全边界：只读、只监听 127.0.0.1、每次请求校验随机访问令牌（URL 自带），
   只提供 run 目录白名单内的文件，不提供任意文件访问。
 - 关闭方式：`bdt debug --workdir <wd> --stop`；或无活跃 pipeline 且无浏览器心跳

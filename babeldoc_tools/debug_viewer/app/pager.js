@@ -54,6 +54,26 @@ function normBox(box) {
   return { x0: Number(box.x0), y0: Number(box.y0), x1: Number(box.x1), y1: Number(box.y1) };
 }
 
+/**
+ * 把「未旋转裁剪页、左上原点」的框转成「已旋转显示页」坐标。
+ *
+ * 归档快照的 box 一律是未旋转裁剪页坐标（计划的数据契约），而 PDF 页图按
+ * ``/Rotate`` 渲染 → 旋转页必须先把框转到显示坐标再按百分比定位，否则框会
+ * 整体错位。``page.baseWidth/baseHeight`` 是未旋转裁剪尺寸，``page.width/
+ * height`` 是显示尺寸。
+ */
+export function displayBox(box, page) {
+  const rot = (((Number(page && page.rotation) || 0) % 360) + 360) % 360;
+  if (!rot) return box;
+  const bw = Number(page.baseWidth) || Number(page.width) || 1;
+  const bh = Number(page.baseHeight) || Number(page.height) || 1;
+  const { x0, y0, x1, y1 } = box;
+  if (rot === 90) return { x0: bh - y1, y0: x0, x1: bh - y0, y1: x1 };
+  if (rot === 180) return { x0: bw - x1, y0: bh - y1, x1: bw - x0, y1: bh - y0 };
+  if (rot === 270) return { x0: y0, y0: bw - x1, x1: y1, y1: bw - x0 };
+  return box;
+}
+
 function boxArea(box) {
   return Math.max(0, box.x1 - box.x0) * Math.max(0, box.y1 - box.y0);
 }
@@ -182,8 +202,9 @@ export function createPager(opts) {
     if (state.provider) {
       const frag = document.createDocumentFragment();
       for (const box of state.provider(view.idx) || []) {
-        const b = { ...box, box: normBox(box.box) };
-        if (!b.box) continue;
+        const normalized = normBox(box.box);
+        if (!normalized) continue;
+        const b = { ...box, box: displayBox(normalized, view.page) };
         const el = boxEl(view, b);
         el._box = b;
         frag.append(el);

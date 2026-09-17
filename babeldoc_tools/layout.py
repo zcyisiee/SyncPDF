@@ -60,20 +60,25 @@ def build_pdf(
             )
         except Exception as exc:
             if debug_recorder is not None:
-                # 失败现场：只归档本次构建新落盘的 agent 文件与输出目录里的
-                # 部分 PDF。``reconstruct_report.json`` 只在成功路径写出，
-                # 失败时残留的是上一轮旧报告 → 不归档，避免误报为本次输出。
+                # 失败现场：只归档本次构建新落盘的 agent 文件与输出目录里新生成的
+                # 部分 PDF。上一轮残留（``mtime`` 早于本次 run 起始）不归档，
+                # 否则会被误报成本次输出。``reconstruct_report.json`` 只在成功
+                # 路径写出，失败时残留的是旧报告 → 同样不归档。
                 from babeldoc.tools.agent import debug_capture
 
+                since = getattr(debug_recorder, "started_at_ts", None)
                 debug_capture.capture_files(
                     debug_recorder,
                     "build",
                     workdir_path,
                     ["layout_geometry.json", "latex_bbox_report.json"],
                     phase="partial_outputs",
+                    since=since,
                 )
                 partial_pdfs = {}
                 for pdf_path in sorted(Path(resolved_output_dir).glob("*.pdf")):
+                    if since is not None and pdf_path.stat().st_mtime < since:
+                        continue
                     artifact = debug_recorder.archive_file(
                         "build", f"partial/{pdf_path.name}", pdf_path
                     )

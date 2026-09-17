@@ -915,11 +915,33 @@ def parse_translated_markdown(md_text: str) -> dict[str, tuple[str, str]]:
 
 
 def missing_ids(workdir, md_text: str) -> list[str]:
-    """返回译文中缺失的段落 id（供编排器重试）。"""
-    with workflow.state_path(workdir).open("rb") as f:
-        state = pickle.load(f)  # noqa: S301 - workdir 私有产物，非不可信输入
+    """返回译文中缺失的段落 id（供编排器重试）。
+
+    ``state.pkl`` 缺失/损坏时（例如旧 workdir 或缺 IR 状态的独立回放）回退
+    到 ``anchors.json`` 的段落 id：不给查看器/独立阶段引入对私有 pickle 的硬
+    依赖，也不因缺 state 直接崩溃。
+    """
     parsed = parse_translated_markdown(md_text)
-    return [pid for pid in state["inputs"] if pid not in parsed]
+    return [pid for pid in _known_paragraph_ids(workdir) if pid not in parsed]
+
+
+def _known_paragraph_ids(workdir) -> list[str]:
+    state_file = workflow.state_path(workdir)
+    if state_file.is_file():
+        try:
+            with state_file.open("rb") as f:
+                state = pickle.load(f)  # noqa: S301 - workdir 私有产物，非不可信输入
+            inputs = state.get("inputs") if isinstance(state, dict) else None
+            if inputs is not None:
+                return list(inputs)
+        except Exception:  # noqa: BLE001 - 损坏/不兼容状态 → 回退 JSON 锚点
+            pass
+    anchors = workflow.agent_dir(workdir) / "anchors.json"
+    try:
+        rows = json.loads(anchors.read_text(encoding="utf-8")).get("rows") or []
+    except (OSError, ValueError):
+        return []
+    return [row["id"] for row in rows if isinstance(row, dict) and row.get("id")]
 
 
 def render_retry_markdown(workdir, ids: list[str]) -> str:

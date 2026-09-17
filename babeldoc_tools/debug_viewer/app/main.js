@@ -114,7 +114,11 @@ function applyDeepLink() {
   const link = state.pendingDeepLink;
   state.pendingDeepLink = null;
   if (!link) return;
-  if (link.page && ctx.pager) ctx.pager.scrollToPage(link.page - 1);
+  /* 已经在目标页时不要滚动：深链默认带 page=1，每次加载都平滑滚一次会把
+     页面在光标下移走（正在看的框会漂移）。 */
+  if (link.page && ctx.pager && link.page - 1 !== state.currentPage) {
+    ctx.pager.scrollToPage(link.page - 1);
+  }
   if (link.entity) {
     state.selectedEntity = link.entity;
     if (ctx.pager) ctx.pager.selectById(link.entity);
@@ -154,7 +158,15 @@ async function activate(name) {
   const serial = ++state.mountSerial;
   try {
     await views[name].mount();
-    if (serial === state.mountSerial) applyDeepLink();
+    if (serial === state.mountSerial) {
+      applyDeepLink();
+      /* 切视图/重挂载后恢复已有选择：计划要求选择跨视图保留。 */
+      if (state.selectedEntity) {
+        ctx.pager.selectById(state.selectedEntity);
+        const view = views[name];
+        if (view && view.onSelect) view.onSelect(state.selectedEntity);
+      }
+    }
   } catch (err) {
     if (serial === state.mountSerial) {
       setStageStatus(`视图加载失败：${err.message || err}`, 'error');
@@ -327,8 +339,21 @@ window.addEventListener('hashchange', () => {
     switchRun(run).then(() => {
       if (view && view !== state.activeView) activate(view);
     });
-  } else if (view && view !== state.activeView && viewOf(view)) {
+    return;
+  }
+  if (!view || !viewOf(view)) return;
+  if (view !== state.activeView) {
     activate(view);
+    return;
+  }
+  /* 同视图内的深链变化（如仅换 entity）：直接应用，不需要重新激活视图。 */
+  const entity = get('entity');
+  const page = Number(get('page')) || null;
+  if (entity && entity !== state.selectedEntity) {
+    state.pendingDeepLink = { view, page, entity };
+    applyDeepLink();
+  } else if (page && page - 1 !== state.currentPage) {
+    ctx.pager.scrollToPage(page - 1);
   }
 });
 

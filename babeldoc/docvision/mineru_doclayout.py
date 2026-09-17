@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import io
 import json
@@ -20,6 +21,18 @@ from babeldoc.docvision.base_doclayout import YoloResult
 from babeldoc.docvision.provider_ir import ProviderDocument
 
 logger = logging.getLogger(__name__)
+
+
+def _wait_span(translate_config, origin: str, *, label: str | None = None, **context):
+    """远端等待型工作的耗时片段；未开启 debug 采集时 no-op。
+
+    MinerU 走 httpx 而非子进程，没有 ``call_started`` / ``call_finished`` 事件，
+    不显式采集就看不出「等待 MinerU」占了多少时间。
+    """
+    recorder = getattr(translate_config, "debug_recorder", None)
+    if not recorder:
+        return contextlib.nullcontext()
+    return recorder.span("parse", origin, label=label, **context)
 
 
 class MinerUDocLayoutModel(DocLayoutModel):
@@ -502,17 +515,56 @@ class MinerUDocLayoutModel(DocLayoutModel):
         cache_file = self._layout_cache_path(pdf_path)
         if cache_file is not None and cache_file.exists():
             logger.info("MinerU layout cache hit: %s", cache_file)
-            layout_json = json.loads(cache_file.read_text(encoding="utf-8"))
+            with _wait_span(
+                translate_config,
+                "mineru.cache",
+                label="MinerU 布局缓存命中（读本地缓存，无网络等待）",
+                cache_file=str(cache_file),
+            ):
+                layout_json = json.loads(cache_file.read_text(encoding="utf-8"))
         else:
             with httpx.Client(timeout=float(self.timeout_seconds)) as client:
-                batch_id, upload_url = self._request_upload_urls(client, pdf_path)
-                self._upload_pdf(client, upload_url, pdf_path)
-                full_zip_url = self._poll_full_zip_url(
-                    client, batch_id, translate_config
-                )
-                zip_bytes = self._download_zip_bytes(client, full_zip_url)
+                with _wait_span(
+                    translate_config,
+                    "mineru.request_upload_urls",
+                    label="MinerU 申请上传地址",
+                ) as span:
+                    batch_id, upload_url = self._request_upload_urls(client, pdf_path)
+                    if span is not None:
+                        span["batch_id"] = batch_id
+                with _wait_span(
+                    translate_config,
+                    "mineru.upload",
+                    label="MinerU 上传 PDF",
+                    batch_id=batch_id,
+                    bytes=pdf_path.stat().st_size if pdf_path.is_file() else None,
+                ):
+                    self._upload_pdf(client, upload_url, pdf_path)
+                with _wait_span(
+                    translate_config,
+                    "mineru.poll",
+                    label="等待 MinerU 解析（轮询任务状态）",
+                    batch_id=batch_id,
+                ):
+                    full_zip_url = self._poll_full_zip_url(
+                        client, batch_id, translate_config
+                    )
+                with _wait_span(
+                    translate_config,
+                    "mineru.download",
+                    label="下载 MinerU 结果压缩包",
+                    batch_id=batch_id,
+                ) as span:
+                    zip_bytes = self._download_zip_bytes(client, full_zip_url)
+                    if span is not None:
+                        span["bytes"] = len(zip_bytes)
 
-            layout_json = self._load_layout_json_from_zip_bytes(zip_bytes)
+            with _wait_span(
+                translate_config,
+                "mineru.parse_zip",
+                label="解包 MinerU 结果（本地）",
+            ):
+                layout_json = self._load_layout_json_from_zip_bytes(zip_bytes)
             if cache_file is not None:
                 self._write_layout_cache(cache_file, layout_json)
         self._prepare_provider_ir(layout_json, translate_config)
