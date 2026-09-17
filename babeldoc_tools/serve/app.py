@@ -9,13 +9,20 @@
   :mod:`babeldoc_tools.serve.routers.events`）
 - ``GET/HEAD /api/v1/documents/{did}/artifacts[/{name}]``（W03，见
   :mod:`babeldoc_tools.serve.routers.artifacts`）
+- ``POST /api/v1/documents/{did}/jobs``、``GET /api/v1/jobs/{jid}``、
+  ``POST /api/v1/jobs/{jid}/cancel``、``GET /api/v1/documents/{did}/jobs``
+  （W07，见 :mod:`babeldoc_tools.serve.routers.jobs`）
 - ``GET /openapi.json`` / ``GET /docs``（FastAPI 自带）
 
-后续端点（jobs、草稿、版本…）在 ``docs/frontend/api.md`` 里冻结形状，由 W07+
-实现 —— 这里不写假成功 stub。
+后续端点（草稿、版本…）在 ``docs/frontend/api.md`` 里冻结形状，由 W08+ 实现 ——
+这里不写假成功 stub。
 
 本模块在 import 时即需要 ``fastapi``（web extra）；``bdt serve --help`` 与其它
 ``bdt`` 子命令都不 import 本模块，因此没有 web extra 也能用。
+
+副作用说明：``jobs_router`` 在装配时读一次 ``<store_base>/.bdt-serve/jobs/*.json``
+做重启恢复（把残留的 ``queued``/``running`` 置 ``interrupted``）——
+**只有确实存在需要恢复的 job 才写盘**，新根目录下 create_app 不碰文件系统。
 """
 
 from __future__ import annotations
@@ -34,6 +41,7 @@ from babeldoc_tools.common import ToolError
 from babeldoc_tools.serve.routers.artifacts import artifacts_router
 from babeldoc_tools.serve.routers.documents import documents_router
 from babeldoc_tools.serve.routers.events import events_router
+from babeldoc_tools.serve.routers.jobs import jobs_router
 from babeldoc_tools.serve.schemas import API_PREFIX
 from babeldoc_tools.serve.schemas import ErrorBody
 from babeldoc_tools.serve.schemas import ErrorEnvelope
@@ -55,6 +63,13 @@ _TOOL_ERROR_STATUS = {
     "events_unavailable": 404,
     # 产物下载：不在白名单内 / 不存在 / 路径或符号链接越界（同一个码，不泄露存在性）
     "artifact_not_found": 404,
+    # job：同文档已有活动 job（409 是可重试冲突）；未知 job / profile；未实现的 action
+    "document_busy": 409,
+    "job_not_found": 404,
+    "unknown_profile": 422,
+    "action_not_available": 422,
+    # 客户端不得自带的命令/密钥字段（不是"参数错了"，是"这类输入不接受"）
+    "forbidden_field": 422,
     "invalid_root": 500,
     "root_missing": 503,
 }
@@ -90,7 +105,7 @@ def error_response(
 
 
 def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI:
-    """组装 FastAPI 应用（纯工厂：不读环境变量、不起进程、不写文件）。"""
+    """组装 FastAPI 应用（工厂：不读环境变量、不起进程；job 恢复只改确实要改的快照）。"""
     app = FastAPI(
         title="bdt serve",
         description="BabelDOC 文档翻译工具层的本地只读 HTTP 接口",
@@ -165,5 +180,6 @@ def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI
     app.include_router(documents_router(store))
     app.include_router(events_router(store))
     app.include_router(artifacts_router(store))
+    app.include_router(jobs_router(store))
 
     return app

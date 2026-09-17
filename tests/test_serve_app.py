@@ -154,12 +154,39 @@ def test_preflight_not_enabled(client):
 # --------------------------------------------------------------------------- #
 # 只读性与 app factory
 # --------------------------------------------------------------------------- #
-def test_openapi_has_no_write_routes(client):
-    """W01 不暴露任何写端点（不写假成功 stub）。"""
-    schema = client.get("/openapi.json").json()
-    methods = {method for item in schema["paths"].values() for method in item}
-    assert methods == {"get"}
+#: W07 之后唯一允许的写端点（``(method, path 模板)``）。**白名单的单一来源**：
+#: 其它 serve 测试模块 import :func:`assert_no_unexpected_write_routes` 来断言这条
+#: 安全边界，避免白名单在四处漂移。新增写端点必须显式改这里。
+ALLOWED_WRITE_ROUTES = frozenset(
+    {
+        ("post", f"{API_PREFIX}/documents/{{did}}/jobs"),
+        ("post", f"{API_PREFIX}/jobs/{{jid}}/cancel"),
+    }
+)
 
+
+def assert_no_unexpected_write_routes(schema: dict) -> None:
+    """OpenAPI 里除白名单内的写端点外，所有端点必须只有 GET。
+
+    W01–W03 是只读服务；W07 只加了两条 POST（提交/取消 job）。这里的断言是**安全
+    边界**：多出任何写方法都算越界（而不是"测试过时了"）。
+    """
+    for path, item in schema["paths"].items():
+        for method in item:
+            if method == "get":
+                continue
+            assert (method, path) in ALLOWED_WRITE_ROUTES, (
+                f"{method.upper()} {path} 不在写端点白名单里"
+            )
+
+
+def test_openapi_has_only_the_allowlisted_write_routes(client):
+    """除 job 的两条 POST 外没有任何写端点（不写假成功 stub）。"""
+    schema = client.get("/openapi.json").json()
+    assert_no_unexpected_write_routes(schema)
+    # 白名单不是空集：两条 job 写端点确实注册在 OpenAPI 里
+    for method, path in ALLOWED_WRITE_ROUTES:
+        assert method in schema["paths"][path], f"{method.upper()} {path} 没有注册"
 
 def test_factory_does_not_touch_filesystem_beyond_reading(root):
     """create_app 纯工厂：不创建/不修改任何文件。"""

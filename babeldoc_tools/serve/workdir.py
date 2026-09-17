@@ -18,14 +18,35 @@ import re
 from pathlib import Path
 from typing import Any
 
-__all__ = ["AGENT_DIR", "RUN_ID_RE", "WorkdirReader"]
+__all__ = ["AGENT_DIR", "RUNS_DIR", "RUN_ID_RE", "WorkdirReader", "list_run_ids"]
 
 #: 产物目录名（与 ``babeldoc_tools.common.AGENT_DIR`` 一致）。
 AGENT_DIR = "agent"
 
+#: run 归档目录（相对 workdir）；W03 事件端点与 W07 job 抓 run_id 都从这里找。
+RUNS_DIR = "debug/runs"
+
 #: run_id 目录名形态：``babeldoc.debug_recorder.new_run_id()`` 的产物
 #: ``<UTC时间戳>Z-<6位十六进制>``。固定长度 → 目录名字典序即时间序，可直接取最大。
 RUN_ID_RE = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}$")
+
+
+def list_run_ids(workdir: Path | str) -> list[str]:
+    """``debug/runs`` 下的合法 run_id，新 → 旧。
+
+    目录名定长（``RUN_ID_RE``），字典序倒序即时间序。没有 ``debug/runs`` /
+    不是目录 / 权限不足 → 空列表（调用方各自决定是 404 还是「还没有 run」）。
+    """
+    try:
+        names = [
+            entry.name
+            for entry in (Path(workdir) / RUNS_DIR).iterdir()
+            if entry.is_dir()
+        ]
+    except OSError:
+        return []
+    return sorted((name for name in names if RUN_ID_RE.match(name)), reverse=True)
+
 
 #: run 归档内的相对路径（统一用 ``/``，见 ``babeldoc.debug_recorder`` 的布局约定）。
 _MANIFEST = "manifest.json"
@@ -93,7 +114,7 @@ class WorkdirReader:
         ``run_id`` 始终是数据实际来源的那一个。
         """
         for run_id in self._run_ids():
-            run_dir = self.workdir / "debug" / "runs" / run_id
+            run_dir = self.workdir / RUNS_DIR / run_id
             if not relative or (run_dir / relative).is_file():
                 return run_id, run_dir
         return None
@@ -102,14 +123,7 @@ class WorkdirReader:
         """``debug/runs`` 下的 run_id，新→旧（目录名排序；非法名不参与）。"""
         key = "run_ids"
         if key not in self._cache:
-            runs_dir = self.workdir / "debug" / "runs"
-            try:
-                names = [entry.name for entry in runs_dir.iterdir() if entry.is_dir()]
-            except OSError:
-                names = []
-            self._cache[key] = sorted(
-                (name for name in names if RUN_ID_RE.match(name)), reverse=True
-            )
+            self._cache[key] = list_run_ids(self.workdir)
         return self._cache[key]
 
     # -------------------------------------------------------------- 产物读取

@@ -24,7 +24,11 @@ from pathlib import Path
 
 from babeldoc_tools.common import ToolError
 
-__all__ = ["DocumentStore"]
+__all__ = ["STATE_DIR", "DocumentStore"]
+
+#: 服务自己的状态目录名（job 持久化 / profiles），放在 :attr:`DocumentStore.store_base` 下。
+#: 以 ``.`` 开头，因此永远不是合法 did：既不会被枚举成文档，也不会被越界解析。
+STATE_DIR = ".bdt-serve"
 
 #: 目录名不允许的字符/形式（单段 did 规则）。
 _FORBIDDEN_DID = {".", ".."}
@@ -83,6 +87,19 @@ class DocumentStore:
                 root=str(resolved),
             )
         return cls(resolved.parent, allowed=frozenset({resolved.name}))
+
+    # ------------------------------------------------------------- 只读属性
+    @property
+    def store_base(self) -> Path:
+        """服务状态目录（``<store_base>/.bdt-serve/``）的宿主目录。
+
+        ``root`` 模式 = 服务根目录；``workdir`` 模式 = 那个 workdir 本身（兄弟目录
+        不可见，状态也不该在别人家里）。用它的模块：:mod:`babeldoc_tools.serve.jobs`
+        （job 持久化）与 :mod:`babeldoc_tools.serve.profiles`（provider 配置）。
+        """
+        if self.allowed is not None and len(self.allowed) == 1:
+            return self.root / next(iter(self.allowed))
+        return self.root
 
     # ------------------------------------------------------------- internals
     def _require_root(self) -> Path:

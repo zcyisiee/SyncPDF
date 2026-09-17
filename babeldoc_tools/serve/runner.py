@@ -1,0 +1,593 @@
+"""受控子进程：job → ``bdt run`` 子进程的启动、监控、取消（W07）。
+
+三条硬约束（EXECUTION.md 纠偏第 5 / 8 条；``docs/frontend/api.md`` §3.4）：
+
+1. **argv 只由服务端构造**。客户端能给的只有 ``action``/``from``/``pages``/``dual``/
+   ``profile``；translator/reviewer 命令在 :mod:`babeldoc_tools.serve.profiles` 里按
+   profile id 解析后直接进 argv，**不回传客户端**。入口固定为
+   ``sys.executable -m babeldoc_tools run``（模块入口，不是第二个 console 入口；裸
+   ``bdt`` 依赖 PATH，服务端不可靠）。
+2. **取消杀整个进程组**。``start_new_session=True`` 让子进程自成进程组，取消时
+   ``os.killpg`` SIGTERM → 5s 宽限 → SIGKILL，连带 translator 孙进程一起收掉，并且
+   **等进程真的退出后才置 canceled 并释放文档槽**（锁持到退出）。
+3. **重启不自动重跑、不凭孤立 pid 发信号**（``boot_id`` 方案见
+   :mod:`babeldoc_tools.serve.jobs`）：本模块只在**自己 spawn 过**的 ``Popen`` 上发信号。
+
+子进程的 stdout 只有收尾一行 JSON 信封（``{"ok":...}``）；stderr 是日志。两个管道都
+必须读干（见 :class:`PipeCapture`），否则子进程会被写满的管道卡住。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import hashlib
+import json
+import os
+import signal
+import subprocess
+import sys
+import threading
+import time
+from collections import deque
+from pathlib import Path
+from typing import NamedTuple
+
+from babeldoc_tools.common import ToolError
+from babeldoc_tools.serve.jobs import TERMINAL_STATUSES
+from babeldoc_tools.serve.jobs import JobRecord
+from babeldoc_tools.serve.jobs import JobRegistry
+from babeldoc_tools.serve.profiles import Profile
+from babeldoc_tools.serve.profiles import list_profile_ids
+from babeldoc_tools.serve.profiles import resolve_profile
+from babeldoc_tools.serve.store import DocumentStore
+from babeldoc_tools.serve.workdir import list_run_ids
+
+__all__ = [
+    "CANCEL_GRACE_SECONDS",
+    "CHECK_TIMEOUT_SECONDS",
+    "EXIT_POLL_SECONDS",
+    "JOB_TIMEOUT_SECONDS",
+    "MAX_ENVELOPE_BYTES",
+    "PIPE_TAIL_LINES",
+    "JobOutcome",
+    "JobRunner",
+    "PipeCapture",
+    "argv_marker",
+    "build_job_argv",
+    "capture_pipes",
+    "classify_exit",
+    "job_timeout_seconds",
+    "new_run_id",
+    "spawn_job",
+    "stdout_envelope",
+]
+
+#: job 级超时（``api.md`` §3.4 没有这个字段，是服务端护栏）：``run`` 一整条链路
+#: 默认 3600s、单阶段性的 ``check`` 600s。超时走取消路径（杀进程组）+ ``timed_out``。
+JOB_TIMEOUT_SECONDS = 3600.0
+CHECK_TIMEOUT_SECONDS = 600.0
+
+#: SIGTERM 之后的宽限时间；到点还在就 SIGKILL。
+CANCEL_GRACE_SECONDS = 5.0
+#: 等进程退出的轮询间隔（子进程真实退出优先于延迟）。
+EXIT_POLL_SECONDS = 0.05
+#: 宽限期内轮询进程退出的间隔。
+CANCEL_POLL_SECONDS = 0.05
+#: 等管道读线程收尾的上限（进程已退出，读线程只剩把缓冲读完）。
+PIPE_JOIN_SECONDS = 5.0
+
+#: 每个管道保留的末尾行数（诊断够用，不把整篇日志吃进内存）。
+PIPE_TAIL_LINES = 200
+
+#: 收尾信封入库的字节上限（``api.md`` §3.4：envelope 可截断到 4KB 存）。
+MAX_ENVELOPE_BYTES = 4096
+
+
+def job_timeout_seconds(action: str) -> float:
+    """该 action 的 job 级超时：``check`` 600s，``run`` 3600s。"""
+    return CHECK_TIMEOUT_SECONDS if action == "check" else JOB_TIMEOUT_SECONDS
+
+
+# --------------------------------------------------------------------------- #
+# argv 构造（客户端输入永远只是参数值，命令只来自 profile）
+# --------------------------------------------------------------------------- #
+def build_job_argv(
+    *,
+    workdir: Path,
+    action: str,
+    from_stage: str | None,
+    pages: str | None,
+    dual: bool,
+    profile: Profile,
+) -> list[str]:
+    """job → ``bdt run`` 的 argv。**唯一**的 argv 来源（服务端拼装）。
+
+    - 入口固定 ``[sys.executable, "-m", "babeldoc_tools", "run", "--workdir", <workdir>]``；
+    - ``--from``：``check`` 固定 ``check``（check 阶段 + 其后 review/report 沿用同一套
+      质量门禁，不另起一份判断）；``run`` 用请求里的 ``from``（缺省留给 CLI 的 parse）；
+    - ``--translator``/``--reviewer`` 只在 profile 给了对应命令时出现，值来自 profile
+      （客户端无法影响）；
+    - ``--debug --debug-no-open``：给子进程建 ``debug/runs/<run_id>`` 归档（前端事件/
+      几何/时间线都读它）；``--debug-no-open`` 避免无人值守时弹浏览器。
+    """
+    argv = [
+        sys.executable,
+        "-m",
+        "babeldoc_tools",
+        "run",
+        "--workdir",
+        str(workdir),
+        "--debug",
+        "--debug-no-open",
+    ]
+    if action == "check":
+        argv += ["--from", "check"]
+    elif from_stage:
+        argv += ["--from", from_stage]
+    if profile.translator:
+        argv += ["--translator", profile.translator]
+    if profile.reviewer:
+        argv += ["--reviewer", profile.reviewer]
+    if pages:
+        argv += ["--pages", pages]
+    if dual:
+        argv += ["--dual"]
+    return argv
+
+
+def argv_marker(argv: list[str]) -> str:
+    """argv 的 sha256 前缀（身份指纹）；**命令原文不落盘**（可能内嵌密钥）。"""
+    return hashlib.sha256("\x00".join(argv).encode("utf-8")).hexdigest()[:16]
+
+
+# --------------------------------------------------------------------------- #
+# 进程与管道
+# --------------------------------------------------------------------------- #
+def spawn_job(argv: list[str], workdir: Path) -> subprocess.Popen:
+    """在一个自有进程组里起子进程（取消时整组一起收）。
+
+    ``start_new_session=True`` = ``setsid``：子进程成为新会话/进程组的组长，之后它
+    自己拉起的 translator/reviewer 孙进程都留在同一组里（``os.killpg`` 才能一网打尽）。
+    stdout/stderr 都走管道（读干由 :class:`PipeCapture` 负责）；stdin 给 ``DEVNULL``
+    （``bdt run`` 不从 stdin 读输入，翻译命令的提示词走它自己的管道）。
+    """
+    return subprocess.Popen(  # noqa: S603 - argv 由服务端构造，不经 shell
+        argv,
+        cwd=str(workdir),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+
+
+class PipeCapture:
+    """后台线程把子进程的 stdout/stderr 读干，只保留末尾若干行。
+
+    只 ``wait()`` 不读管道，子进程会在写满内核缓冲区（约 64KB）后卡死 —— 那会变成
+    "假的慢"最后只能等超时收场。两个管道必须并发读（一个线程读一个）。
+    """
+
+    def __init__(
+        self, proc: subprocess.Popen, *, max_lines: int = PIPE_TAIL_LINES
+    ) -> None:
+        self._lines: dict[str, deque[str]] = {
+            "stdout": deque(maxlen=max_lines),
+            "stderr": deque(maxlen=max_lines),
+        }
+        self._threads: list[threading.Thread] = []
+        for name, stream in (("stdout", proc.stdout), ("stderr", proc.stderr)):
+            if stream is None:
+                continue
+            thread = threading.Thread(
+                target=self._read, args=(name, stream), daemon=True
+            )
+            thread.start()
+            self._threads.append(thread)
+
+    def _read(self, name: str, stream) -> None:
+        try:
+            for line in stream:
+                self._lines[name].append(line)
+        except (OSError, ValueError):  # 进程被杀 / 管道已关：读到哪算哪
+            return
+        finally:
+            with contextlib.suppress(OSError, ValueError):
+                stream.close()
+
+    async def wait_closed(self, timeout: float) -> None:
+        """等读线程收尾（``timeout`` 是合计上限）。
+
+        用 ``is_alive`` 轮询而不是同步 ``join``：同步 join 会卡住事件循环（最多
+        ``timeout`` 秒内所有 HTTP 请求都停摆），而放进执行器又会让事件循环关闭时
+        多等一个线程。
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and any(
+            thread.is_alive() for thread in self._threads
+        ):
+            await asyncio.sleep(EXIT_POLL_SECONDS)
+
+    def text(self, name: str) -> str:
+        """某个管道的末尾输出（未结束时读到的是当前已读到的部分）。"""
+        return "".join(self._lines[name])
+
+    @property
+    def stdout(self) -> str:
+        return self.text("stdout")
+
+    @property
+    def stderr(self) -> str:
+        """stderr 末尾（目前只用于诊断，不落盘：可能含命令与路径）。"""
+        return self.text("stderr")
+
+
+def capture_pipes(proc: subprocess.Popen) -> PipeCapture:
+    """给 :func:`spawn_job` 起的子进程接上管道读线程。"""
+    return PipeCapture(proc)
+
+
+def _kill_group(pgid: int, sig: signal.Signals) -> None:
+    """给整个进程组发信号（孙进程一并命中）；组已不存在 → 无操作。"""
+    try:
+        os.killpg(pgid, sig)
+    except ProcessLookupError:
+        return
+
+
+# --------------------------------------------------------------------------- #
+# 信封解析与终态判定
+# --------------------------------------------------------------------------- #
+def stdout_envelope(stdout: str) -> tuple[str, dict] | None:
+    """stdout 里**最后一个**可解析为 JSON 对象的行 → ``(原文, 解析结果)``。
+
+    只逐行找，不做流式拼接：``bdt`` 的收尾信封是完整的一行（日志都走 stderr）。都
+    没有 → ``None``（调用方按 :func:`classify_exit` 的 ``envelope_unparsed`` 处理）。
+    """
+    for line in reversed(stdout.splitlines()):
+        text = line.strip()
+        if not text.startswith("{"):
+            continue
+        try:
+            payload = json.loads(text)
+        except ValueError:
+            continue
+        if isinstance(payload, dict):
+            return text[:MAX_ENVELOPE_BYTES], payload
+    return None
+
+
+class JobOutcome(NamedTuple):
+    """终态判定结果（:func:`classify_exit` 的返回值）。"""
+
+    status: str
+    error_code: str | None
+    error_message: str | None
+
+
+def classify_exit(
+    *,
+    action: str,
+    cancel_requested: bool,
+    timed_out: bool,
+    exit_code: int | None,
+    envelope: dict | None,
+) -> JobOutcome:
+    """退出码 + 信封 → ``(status, error_code, error_message)``（纯函数，可单测）。
+
+    优先级：超时 > 取消 > 无信封 > 信封 ``ok`` + 退出码 0 = 成功 > 信封错误/退出码。
+    """
+    if timed_out:
+        return JobOutcome(
+            "failed",
+            "timed_out",
+            f"job 超过 {job_timeout_seconds(action):.0f}s 未结束，已终止整个进程组",
+        )
+    if cancel_requested:
+        return JobOutcome("canceled", "canceled", "已按取消请求终止整个进程组")
+    if envelope is None:
+        return JobOutcome(
+            "failed",
+            "envelope_unparsed",
+            "子进程 stdout 没有可解析的 JSON 信封（末行不是 JSON 对象）",
+        )
+    if envelope.get("ok") and exit_code == 0:
+        return JobOutcome("succeeded", None, None)
+    error = envelope.get("error")
+    if isinstance(error, dict):
+        code = error.get("code")
+        message = error.get("message")
+        return JobOutcome(
+            "failed",
+            str(code) if code else f"exit_{exit_code}",
+            str(message) if message else f"子进程退出码 {exit_code}",
+        )
+    return JobOutcome(
+        "failed", f"exit_{exit_code}", f"子进程退出码 {exit_code}（信封没有 error 块）"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 调度与生命周期
+# --------------------------------------------------------------------------- #
+class _RunningJob:
+    """一个正在跑的 job 的进程句柄（只存在于事件循环里）。"""
+
+    __slots__ = (
+        "capture",
+        "monitor",
+        "pgid",
+        "popen",
+        "record",
+        "runs_before",
+        "workdir",
+    )
+
+    def __init__(
+        self,
+        record: JobRecord,
+        popen: subprocess.Popen,
+        capture: PipeCapture,
+        pgid: int,
+        workdir: Path,
+    ) -> None:
+        self.record = record
+        self.popen = popen
+        self.capture = capture
+        self.pgid = pgid
+        self.workdir = workdir
+        #: spawn 之前已存在的 run 归档；之后新出现的那个才是这次 job 的 run。
+        self.runs_before = frozenset(list_run_ids(workdir))
+        self.monitor: asyncio.Task | None = None
+
+
+def new_run_id(workdir: Path, before: frozenset[str]) -> str | None:
+    """spawn 之后新出现的 run 归档 id（最新者）；没有新 run → ``None``。"""
+    fresh = [rid for rid in list_run_ids(workdir) if rid not in before]
+    return fresh[0] if fresh else None
+
+
+class JobRunner:
+    """job 的提交 / 排队 / 监控 / 取消（一个 ``bdt serve`` 一个实例）。
+
+    构造时会调 :meth:`JobRegistry.load`：上一次运行的 ``queued``/``running`` 在这里
+    变成 ``interrupted``（**不自动重跑**，也不对孤立的 pid 发信号）。
+    """
+
+    def __init__(self, store: DocumentStore) -> None:
+        self.store = store
+        self.registry = JobRegistry(store.store_base)
+        self._running: dict[str, _RunningJob] = {}
+        #: 本次启动被标记为 interrupted 的历史 job（启动日志/诊断用）。
+        self.recovered: list[JobRecord] = self.registry.load()
+
+    # ------------------------------------------------------------------ 读
+    def get(self, job_id: str) -> JobRecord | None:
+        """按 id 取 job；没有 → ``None``。"""
+        return self.registry.get(job_id)
+
+    def require(self, job_id: str) -> JobRecord:
+        """按 id 取 job；没有 → ``ToolError(job_not_found)``（HTTP 404）。"""
+        record = self.registry.get(job_id)
+        if record is None:
+            raise ToolError("job_not_found", f"job 不存在：{job_id}", job_id=job_id)
+        return record
+
+    def list_for_did(self, did: str, *, status: str | None = None) -> list[JobRecord]:
+        """某文档的 job，新 → 旧；``status`` 可选过滤。"""
+        return self.registry.list_for_did(did, status=status)
+
+    # ---------------------------------------------------------------- 提交
+    async def submit(
+        self,
+        *,
+        did: str,
+        action: str,
+        from_stage: str | None,
+        pages: str | None,
+        dual: bool,
+        profile_id: str,
+    ) -> JobRecord:
+        """建 job（``queued``）→ 尽量立刻启动；同文档已有活动 job → 409 语义。
+
+        返回时的 ``status`` 可能是 ``running``（有空槽位就马上起了）—— 202 响应体里
+        的 ``status`` 是契约冻结的 ``queued``（前端本来就该轮询 ``GET /jobs/{jid}``）。
+        """
+        # 先过 store 的路径边界（不在服务范围内/越界 → 400/404，不进队列）。
+        self.store.resolve(did)
+        if resolve_profile(self.store.store_base, profile_id) is None:
+            raise ToolError(
+                "unknown_profile",
+                f"未知 profile：{profile_id}",
+                profile=profile_id,
+                available=list_profile_ids(self.store.store_base),
+            )
+        async with self.registry.lock:
+            active = self.registry.active_for_did(did)
+            if active is not None:
+                raise ToolError(
+                    "document_busy",
+                    f"文档 {did} 已有活动 job：{active.job_id}（{active.status}）",
+                    job_id=active.job_id,
+                    status=active.status,
+                    action=active.action,
+                )
+            record = self.registry.create(
+                did=did,
+                action=action,
+                from_stage=from_stage,
+                profile=profile_id,
+                pages=pages,
+                dual=dual,
+            )
+        await self._pump()
+        return record
+
+    async def cancel(self, job_id: str) -> JobRecord:
+        """幂等取消，返回取消后的 job 快照。
+
+        - ``queued``：没有子进程可杀，直接置 ``canceled``；
+        - ``running``：``os.killpg`` SIGTERM → 宽限 → SIGKILL，**等进程退出**（监控任务
+          收尾、释放文档槽）再返回；
+        - 已终态：原样返回（不报错，也不改状态）；
+        - ``running`` 但没有本进程的进程句柄（重启恢复留下的）：不发信号，如实置
+          ``interrupted``（理由 ``process_not_owned``）。
+        """
+        self.require(job_id)
+        async with self.registry.lock:
+            record = self.require(job_id)
+            if record.status == "queued":
+                self.registry.mark_cancel_requested(record)
+                return self.registry.mark_finished(
+                    record,
+                    status="canceled",
+                    error_code="canceled",
+                    error_message="排队中取消：没有启动过子进程",
+                )
+        if record.status in TERMINAL_STATUSES:
+            return record
+        running = self._running.get(job_id)
+        if running is None:
+            # 没有句柄 = 两种可能：监控任务刚刚收尾（句柄在终态之后才摘掉），或者这条
+            # running 记录不是本进程起的（重启恢复）。两种都**不发信号** —— 孤立 pid
+            # 可能已经是别人的进程。前者以监控落的真实终态为准，后者如实置 interrupted。
+            current = self.require(job_id)
+            if (
+                current.status in TERMINAL_STATUSES
+                or current.boot_id == self.registry.boot_id
+            ):
+                return current
+            return self.registry.mark_finished(
+                record,
+                status="interrupted",
+                interrupted_reason="process_not_owned",
+                error_code="process_not_owned",
+                error_message="这个 job 的进程不是本进程起的（重启恢复），不发信号",
+            )
+        self.registry.mark_cancel_requested(record)
+        await self._terminate(running)
+        if running.monitor is not None:
+            await running.monitor  # 等监控收尾：置 canceled + 释放文档槽都在那里
+        return self.registry.get(job_id) or record
+
+    # -------------------------------------------------------------- 调度
+    async def _pump(self) -> None:
+        """把排队的 job 尽量补进空槽（准入锁内：槽位判断与启动跨 await 原子）。"""
+        async with self.registry.lock:
+            while len(self._running) < self.registry.max_concurrent:
+                record = self.registry.pop_queued()
+                if record is None:
+                    return
+                self._start(record)
+
+    def _start(self, record: JobRecord) -> None:
+        """spawn 子进程 + 起监控任务；起不来就如实置 ``failed``（不进 running）。"""
+        try:
+            workdir = self.store.resolve(record.did)
+            profile = resolve_profile(self.store.store_base, record.profile)
+            if profile is None:
+                self.registry.mark_finished(
+                    record,
+                    status="failed",
+                    error_code="unknown_profile",
+                    error_message=f"profile 已不存在：{record.profile}",
+                )
+                return
+            argv = build_job_argv(
+                workdir=workdir,
+                action=record.action,
+                from_stage=record.from_stage,
+                pages=record.pages,
+                dual=record.dual,
+                profile=profile,
+            )
+            proc = spawn_job(argv, workdir)
+        except (ToolError, OSError) as exc:
+            self.registry.mark_finished(
+                record,
+                status="failed",
+                error_code="spawn_failed",
+                error_message=f"无法启动子进程：{exc}",
+            )
+            return
+        capture = capture_pipes(proc)
+        pgid = os.getpgid(proc.pid)
+        running = _RunningJob(record, proc, capture, pgid, workdir)
+        self.registry.mark_started(
+            record, pid=proc.pid, pgid=pgid, spawn_marker=argv_marker(argv)
+        )
+        running.monitor = asyncio.create_task(self._watch(running))
+        self._running[record.job_id] = running
+
+    async def _watch(self, running: _RunningJob) -> None:
+        """等子进程退出 → 落终态 → 释放文档槽并让排队者上位（只释放一次）。"""
+        record = running.record
+        try:
+            exit_code, timed_out = await self._wait_exit(running)
+            await running.capture.wait_closed(PIPE_JOIN_SECONDS)
+            envelope = stdout_envelope(running.capture.stdout)
+            outcome = classify_exit(
+                action=record.action,
+                cancel_requested=record.cancel_requested_at is not None,
+                timed_out=timed_out,
+                exit_code=exit_code,
+                envelope=envelope[1] if envelope else None,
+            )
+            self.registry.mark_finished(
+                record,
+                status=outcome.status,
+                exit_code=exit_code,
+                envelope=envelope[0] if envelope else None,
+                error_code=outcome.error_code,
+                error_message=outcome.error_message,
+                run_id=new_run_id(running.workdir, running.runs_before),
+            )
+        except Exception as exc:  # noqa: BLE001 - 监控自身出错也必须落终态
+            self.registry.mark_finished(
+                record,
+                status="failed",
+                error_code="monitor_failed",
+                error_message=f"{type(exc).__name__}: {exc}",
+            )
+        finally:
+            self._running.pop(record.job_id, None)
+            await self._pump()
+
+    async def _wait_exit(self, running: _RunningJob) -> tuple[int | None, bool]:
+        """等退出；超时 → 走取消路径（杀进程组）并回报 ``timed_out``。
+
+        用 ``popen.poll()`` 轮询而不是 ``await asyncio.to_thread(popen.wait)``：
+        ``to_thread`` 占用事件循环的默认执行器，而 ``asyncio.run`` / anyio 的事件循环
+        关闭会 ``shutdown_default_executor()`` **等所有执行器线程结束** —— 那会让
+        Ctrl-C 或测试客户端退出在一个还在跑的 job 上卡到子进程自己退出。轮询没有这个
+        耦合，退出码同样由 ``Popen`` 缓存（``poll`` 负责收尸，不会留僵尸）。
+        """
+        timeout = job_timeout_seconds(running.record.action)
+        deadline = time.monotonic() + timeout
+        while True:
+            exit_code = running.popen.poll()
+            if exit_code is not None:
+                return exit_code, False
+            if time.monotonic() >= deadline:
+                return await self._terminate(running), True
+            await asyncio.sleep(EXIT_POLL_SECONDS)
+
+    async def _terminate(self, running: _RunningJob) -> int | None:
+        """SIGTERM 整个进程组 → 宽限 → SIGKILL；返回子进程退出码（拿不到就 ``None``）。
+
+        两段等待都有上限：SIGKILL 对普通进程不可屏蔽，但卡在不可中断 IO 的进程可能
+        超过宽限；那时不再无限等（job 仍按 canceled/timed_out 如实收尾，不假装进程
+        一定已死）。
+        """
+        _kill_group(running.pgid, signal.SIGTERM)
+        deadline = time.monotonic() + CANCEL_GRACE_SECONDS
+        while running.popen.poll() is None and time.monotonic() < deadline:
+            await asyncio.sleep(CANCEL_POLL_SECONDS)
+        if running.popen.poll() is None:
+            _kill_group(running.pgid, signal.SIGKILL)
+        deadline = time.monotonic() + CANCEL_GRACE_SECONDS
+        while running.popen.poll() is None and time.monotonic() < deadline:
+            await asyncio.sleep(CANCEL_POLL_SECONDS)
+        return running.popen.returncode

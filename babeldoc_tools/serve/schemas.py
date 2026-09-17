@@ -24,6 +24,7 @@ from typing import Literal
 
 from babeldoc.debug_recorder.model import PDF_TOPLEFT
 from pydantic import BaseModel
+from pydantic import Field
 
 #: 全部端点前缀（唯一拼写来源：路由、CLI banner、api.md）。
 API_PREFIX = "/api/v1"
@@ -40,12 +41,35 @@ STAGES = ("parse", "translate", "apply", "build", "check", "review", "report")
 #: 阶段在 ``run_state.json`` / manifest 里都没有记录时的状态（不谎报 ok）。
 STAGE_NOT_RUN = "not_run"
 
+# --------------------------------------------------------------------------- #
+# W07：jobs（api.md §3.4）
+# --------------------------------------------------------------------------- #
+#: action 的**固定四值**（api.md §3.4）。
+JOB_ACTIONS = ("run", "retranslate", "compile", "check")
+#: W07 真正实现的 action；另外两个诚实报 422 ``action_not_available``，不冒充。
+JOB_ACTIONS_IMPLEMENTED = ("run", "check")
+#: 未实现 action → 归属任务（写进 422 的 detail，前端好排期）。
+JOB_ACTION_PHASE = {"retranslate": "W11", "compile": "W09"}
+
+#: ``from`` 取值 = 7 个阶段（只有一个来源 :data:`STAGES`）。
+JOB_FROM_PATTERN = "^(" + "|".join(STAGES) + ")$"
+#: ``pages`` 形状（``bdt run --pages`` 接受的 ``"1-3,5"``；真实解析仍是 CLI 自己的事）。
+JOB_PAGES_PATTERN = r"^[0-9]+(-[0-9]+)?(,[0-9]+(-[0-9]+)?)*$"
+#: profile id 形状（api.md §3.4：只接 id，不接命令/密钥）。
+JOB_PROFILE_PATTERN = r"^[a-z0-9-]{1,64}$"
+
 __all__ = [
     "API_PREFIX",
     "ArtifactItem",
     "ArtifactsResponse",
     "COORD_SYSTEM_LAYOUT",
     "COORD_SYSTEM_PARSE",
+    "JOB_ACTIONS",
+    "JOB_ACTIONS_IMPLEMENTED",
+    "JOB_ACTION_PHASE",
+    "JOB_FROM_PATTERN",
+    "JOB_PAGES_PATTERN",
+    "JOB_PROFILE_PATTERN",
     "STAGES",
     "STAGE_NOT_RUN",
     "CheckAvailability",
@@ -60,6 +84,8 @@ __all__ = [
     "EventsPage",
     "GeometryResponse",
     "HealthResponse",
+    "JobAccepted",
+    "JobCreateRequest",
     "ParagraphItem",
     "PdfOutput",
     "QualityCheck",
@@ -363,3 +389,49 @@ class ArtifactItem(BaseModel):
 #: ``/paragraphs`` 同风格，不额外套一层对象）。白名单与 kind 规则见
 #: :mod:`babeldoc_tools.serve.artifacts`。
 ArtifactsResponse = list[ArtifactItem]
+
+
+# --------------------------------------------------------------------------- #
+# W07：jobs（api.md §3.4）
+# --------------------------------------------------------------------------- #
+class JobCreateRequest(BaseModel):
+    """``POST /documents/{did}/jobs`` 的请求体（api.md §3.4）。
+
+    客户端只能给这些字段：``action``/``from``/``pages``/``dual``/``profile``；
+    ``profile`` 只接 **id**。translator/reviewer/timeout 之类命令与密钥字段一律由
+    服务端从 profile 解析，带了就 422 ``forbidden_field``（见
+    :data:`babeldoc_tools.serve.routers.jobs.FORBIDDEN_JOB_FIELDS`）—— 这些字段**不**
+    出现在下面的模型里，避免被前端代码生成当成可用参数。
+
+    ``from`` 是 Python 关键字，用别名叫回来；OpenAPI 里仍是 ``from``。
+    """
+
+    action: Literal["run", "retranslate", "compile", "check"]
+    from_stage: str | None = Field(
+        default=None,
+        alias="from",
+        pattern=JOB_FROM_PATTERN,
+        description="起点阶段（只对 action=run 有效），取值 = §3.1 的 7 个阶段",
+    )
+    pages: str | None = Field(
+        default=None,
+        pattern=JOB_PAGES_PATTERN,
+        description='页码范围（只对 action=run 有效），如 "1-3,5"',
+    )
+    dual: bool = Field(default=False, description="是否生成 dual（双语）PDF")
+    profile: str = Field(
+        pattern=JOB_PROFILE_PATTERN,
+        description="provider profile id（命令由服务端解析，永不回传）",
+    )
+
+
+class JobAccepted(BaseModel):
+    """``POST /documents/{did}/jobs`` 的 202 响应（api.md §3.4 冻结形状）。
+
+    ``status`` 恒为 ``queued``（契约形状）：真正状态以 ``GET /jobs/{jid}`` 为准 ——
+    有空槽位时 job 在响应发出前就已经 ``running`` 了。
+    """
+
+    job_id: str
+    status: Literal["queued"] = "queued"
+    action: Literal["run", "check"]

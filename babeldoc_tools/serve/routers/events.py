@@ -39,6 +39,8 @@ from babeldoc_tools.serve.schemas import API_PREFIX
 from babeldoc_tools.serve.schemas import EventsPage
 from babeldoc_tools.serve.store import DocumentStore
 from babeldoc_tools.serve.workdir import RUN_ID_RE
+from babeldoc_tools.serve.workdir import RUNS_DIR
+from babeldoc_tools.serve.workdir import list_run_ids
 
 __all__ = [
     "EVENTS_DEFAULT_LIMIT",
@@ -66,9 +68,6 @@ SSE_HEARTBEAT_SECONDS = 15.0
 #: 心跳帧：SSE 注释行（客户端忽略，但连接保持活跃）。
 HEARTBEAT_FRAME = ": ping\n\n"
 
-#: run 归档目录（``babeldoc.debug_recorder`` 的布局约定）。
-RUNS_DIR = "debug/runs"
-
 #: 事件缺 ``kind`` 时的 SSE 事件名（SSE 默认类型）。
 _DEFAULT_EVENT_NAME = "message"
 
@@ -83,25 +82,8 @@ LIMIT_QUERY = (
 
 
 # --------------------------------------------------------------------------- #
-# run 选择与分页
+# 分页
 # --------------------------------------------------------------------------- #
-def list_run_ids(workdir: Path | str) -> list[str]:
-    """``debug/runs`` 下合法 run_id，新 → 旧。
-
-    目录名是 ``<UTC时间戳>Z-<6位十六进制>``（定长），字典序倒序即时间序
-    （与 W02 :meth:`WorkdirReader.latest_run_id` 同一判据）。
-    """
-    try:
-        names = [
-            entry.name
-            for entry in (Path(workdir) / RUNS_DIR).iterdir()
-            if entry.is_dir()
-        ]
-    except OSError:  # 没有 debug/runs / 不是目录 / 权限不足
-        return []
-    return sorted((name for name in names if RUN_ID_RE.match(name)), reverse=True)
-
-
 def select_run(workdir: Path | str, run_id: str | None) -> tuple[str, Path]:
     """选 run：``(run_id, run_dir)``；没有 run 或指定的 run 不存在 → 404 语义。"""
     runs = list_run_ids(workdir)

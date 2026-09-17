@@ -22,6 +22,9 @@ from babeldoc_tools.serve.schemas import API_PREFIX  # noqa: E402
 from babeldoc_tools.serve.store import DocumentStore  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+# 写端点白名单是唯一来源：W07 只放行 job 的两条 POST（见那个模块的 ALLOWED_WRITE_ROUTES）。
+from test_serve_app import assert_no_unexpected_write_routes  # noqa: E402
+
 DID = "paper"
 BARE = "bare"
 RUN_ID = "20260917T100000Z-0000a1"
@@ -361,5 +364,5 @@ def test_artifacts_openapi_exposes_get_and_hidden_head(client):
         "application/json",
         "text/markdown",
     }
-    methods = {method for item in schema["paths"].values() for method in item}
-    assert methods == {"get"}
+    # W01–W03 的只读边界 + W07 的两条 job POST 白名单（helper 是唯一来源）
+    assert_no_unexpected_write_routes(schema)

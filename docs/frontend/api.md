@@ -205,7 +205,7 @@ W01 **只**有这两个端点；没有写端点、没有假 stub。校验（越�
   （`detail.current_revision`）。两标签页冲突由前端提示刷新/重试。
 - 草稿保存触发服务端 1.5s 防抖编译；浏览器断开不丢编译。
 
-### 3.4 jobs（未实现：W07 / W08 / W09 / W11）
+### 3.4 jobs（已实现 W07：`run`/`check`；`compile`→W09、`retranslate`→W11）
 
 ```json
 POST /api/v1/documents/{did}/jobs
@@ -230,7 +230,7 @@ POST /api/v1/documents/{did}/jobs
   响应里返回 `requested_scope` / `effective_scope` / `downgrade_reason`。
 - `profile` 只接受 provider profile id；**不接受**客户端任意命令、密钥或 shell 字符串。
 - 同文档同时最多 1 个活动 job（冲突 `409 document_busy`）；跨文档并发但全局限流。
-- `GET /api/v1/jobs/{jid}`、`POST /api/v1/jobs/{jid}/cancel`、`GET /api/v1/documents/{did}/jobs`。
+- `GET /api/v1/jobs/{jid}`、`POST /api/v1/jobs/{jid}/cancel`、`GET /api/v1/documents/{did}/jobs`（`?status=` 按状态过滤，新 → 旧）。
 - 取消：终止整个进程组（连带 translator 孙进程），清理后才释放文档锁；明确不自动重跑收费调用。
 - job 状态持久化（重启后核对进程身份）；不凭孤立 PID 发信号。
 
