@@ -228,13 +228,20 @@ describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
     expect(await screen.findByText('事件流')).toBeInTheDocument();
   });
 
-  it('非进度视图的右侧面板仍是段落占位（W10 接入）', async () => {
+  it('非进度视图的右侧面板：段落编辑器 + 事件流双 tab（W10）', async () => {
     mockDetailAndArtifacts();
     renderWithQuery(<WorkbenchScreen did={DID} view="translate" />);
     await screen.findByText('无产物 PDF');
-    expect(document.querySelector('[data-od-id="inspector-placeholder"]')).not.toBeNull();
+    // 默认 tab = 段落（未选中段 → 空态提示）
+    expect(document.querySelector('[data-od-id="paragraph-editor-empty"]')).not.toBeNull();
     expect(screen.getByText(/点击预览里的段落框查看该段/)).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '段落' })).toHaveAttribute('aria-selected', 'true');
+    // 事件流退为次要 tab：不选它就不挂事件流面板
     expect(document.querySelector('[data-od-id="event-stream"]')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: '事件流' }));
+    await waitFor(() =>
+      expect(document.querySelector('[data-od-id="event-stream"]')).not.toBeNull(),
+    );
   });
 
   it('归档视图仍是占位（W12 接入）', async () => {

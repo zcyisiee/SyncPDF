@@ -2,7 +2,7 @@
  * `PreviewArea` 的占位/降级/模式分支（pdf.js 本体渲染不在 jsdom 单测范围，这里 mock
  * `src/lib/pdf`；真渲染由 `e2e/preview.spec.ts` 在 Chromium 里覆盖）。
  */
-import { act, fireEvent, screen, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PreviewArea } from '../src/components/preview/PreviewArea';
@@ -159,7 +159,7 @@ describe('PreviewArea bbox 降级与模式', () => {
     renderWithQuery(
       <>
         <PreviewArea did={DID} view="progress" />
-        {/* 段落占位面板在非进度视图（进度视图的面板是 W06 事件流） */}
+        {/* 段落编辑器在非进度视图（进度视图的面板是 W06 事件流） */}
         <InspectorPanel did={DID} view="translate" feed={makeEventFeed()} />
       </>,
     );
@@ -171,5 +171,59 @@ describe('PreviewArea bbox 降级与模式', () => {
     expect(document.querySelector('[data-od-id="selected-paragraph-id"]')?.textContent).toBe(
       'P01-001',
     );
+  });
+
+  it('编译产物存在：工具条右侧的下载链接带名字里的修订号 + 状态条显示最新', async () => {
+    mockApiFetch({
+      [`/api/v1/documents/${DID}`]: () =>
+        jsonResponse({
+          ...DETAIL,
+          compile: {
+            status: 'ok',
+            revision: 7,
+            stale: false,
+            artifact: { name: 'paper.mono.pdf', revision: 7, size: 1024 },
+          },
+          quality: {
+            check: { verdict: 'pass', blockers: [], warnings: [] },
+            reviewer: { status: 'pass', fix_rounds: {} },
+            pipeline_ok: true,
+          },
+        }),
+      [`/api/v1/documents/${DID}/artifacts`]: () => jsonResponse([MONO]),
+      [`/api/v1/documents/${DID}/draft`]: () =>
+        jsonResponse({ revision: 7, updated_at: null, paragraphs: {} }),
+      [`/api/v1/documents/${DID}/jobs`]: () => jsonResponse([]),
+    });
+    renderWithQuery(<PreviewArea did={DID} view="translate" />);
+
+    await screen.findByText('正在加载 PDF…');
+    const link = (await waitFor(() => {
+      const node = document.querySelector('[data-od-id="download-button"]');
+      expect(node?.getAttribute('data-enabled')).toBe('true');
+      return node;
+    })) as HTMLAnchorElement;
+    expect(link.getAttribute('download')).toBe('paper.mono.r7.pdf');
+    // 服务端下载键 = output/<裸文件名>（带 ?r= 保证取到该修订的字节）
+    expect(link.getAttribute('href')).toBe(
+      `/api/v1/documents/${DID}/artifacts/output/paper.mono.pdf?r=7`,
+    );
+    const bar = await waitFor(() => {
+      const node = document.querySelector('[data-od-id="compile-bar"]');
+      expect(node).toHaveAttribute('data-compile-status', 'ok');
+      return node;
+    });
+    expect(bar?.textContent).toContain('已更新到 r7');
+  });
+
+  it('没有可下载产物：下载按钮禁用；无产物时状态条不渲染', async () => {
+    mockPreview();
+    renderWithQuery(<PreviewArea did={DID} view="translate" />);
+    await screen.findByText('正在加载 PDF…');
+    expect(document.querySelector('[data-od-id="download-button"]')).toHaveAttribute(
+      'data-enabled',
+      'false',
+    );
+    expect(document.querySelector('[data-od-id="compile-bar"]')).toBeNull();
   });
 });

@@ -1,4 +1,5 @@
 import { describeApiError } from '../lib/api';
+import { compileUnsettled } from '../lib/download';
 import { isRunLive } from '../lib/events';
 import { jobCardMode } from '../lib/jobs';
 import { DOCUMENT_LIVE_REFETCH_MS, useDocument, useJobs } from '../lib/queries';
@@ -47,7 +48,11 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
     refetchMs: fastRefetch ? STAGE_STATE_LIVE_REFETCH_MS : 0,
   });
   const documentQuery = useDocument(did, {
-    refetchMs: timeline.live || cardMode === 'active' ? DOCUMENT_LIVE_REFETCH_MS : 0,
+    refetchMs: DOCUMENT_LIVE_REFETCH_MS,
+    // 时间线 live / 有活动 job → 一直按 2s 轮询；否则只在**编译未落定**时轮询
+    // （草稿一改，详情里的 `compile.status`/`stale` 就是唯一真信号；ok/停手后自然停）。
+    refetchWhen: (doc) =>
+      timeline.live || cardMode === 'active' || compileUnsettled(doc?.compile),
   });
   const doc = documentQuery.data;
   const activeView = WORKBENCH_VIEWS.find((candidate) => candidate.id === view) ?? WORKBENCH_VIEWS[0];

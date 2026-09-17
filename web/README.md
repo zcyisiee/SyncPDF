@@ -5,13 +5,14 @@ Vite + React 18 + TypeScript + Tailwind + TanStack Query + Zustand。
 `tailwind.config.ts` + `src/app/globals.css`）；HTTP 契约唯一事实来源：
 `docs/frontend/api.md` 与运行中服务的 `/openapi.json`。
 
-本目录当前范围（W08）：三栏工作台壳 + 设计令牌 + hash 路由 +
+本目录当前范围（W10）：三栏工作台壳 + 设计令牌 + hash 路由 +
 **PDF 预览**（pdf.js 渲染产物 PDF、parse/layout 两套 bbox 叠加、源/译/对照三模式、点框选中）+
 **进度层**（事件流面板 + 真 SSE 增量 + 阶段时间线真耗时 + 运行中状态）+
-**上传与任务**（文件库拖/选上传 PDF → 新文档、工作台「开始翻译」配置卡、运行中/失败卡与取消）。
-**不做**：连续滚动、缩放控件、bbox 拖拽（W09）、译文覆盖层、段落属性面板（W10）、
-profile 编辑器（W08 只有 GET /profiles 的下拉，写入接口在后端）；这些区域渲染带 `data-od-id`
-的占位并写明接入任务。
+**上传与任务**（文件库拖/选上传 PDF → 新文档、工作台「开始翻译」配置卡、运行中/失败卡与取消）+
+**编辑闭环**（右侧面板段落 tab：改译文 / 调排版参数、bbox 八手柄拖拽、草稿乐观并发写、
+自动/手动编译状态条、按修订号下载与质量徽标）。
+**不做**：连续滚动、缩放控件、译文覆盖层、重译候选（W11）、版本归档/回滚（W12）、词表（W13）；
+这些区域渲染带 `data-od-id` 的占位并写明接入任务。
 
 ## 开发工作流（两个终端）
 
@@ -38,7 +39,7 @@ serve 不注册 CORS，所以前端必须走这个同源代理（`docs/frontend/
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm lint` | eslint flat config + typescript-eslint，`--max-warnings 0` |
 | `pnpm test` | Vitest（jsdom + @testing-library/react），不起真后端 |
-| `pnpm e2e` | Playwright 真浏览器用例（`e2e/preview.spec.ts`）：起真 serve + 真 dev server |
+| `pnpm e2e` | Playwright 真浏览器用例（`e2e/edit.spec.ts` · `preview.spec.ts` · `progress.spec.ts` · `upload.spec.ts`）：起真 serve + 真 dev server |
 | `pnpm sync:pdfjs` | 单独把 pdf.js worker/cmaps/standard_fonts 复制进 `public/pdfjs/` |
 | `pnpm gen:api` | 从运行中的 serve 拉 `/openapi.json` 生成 `src/api/schema.d.ts` |
 
@@ -54,20 +55,22 @@ web/
     components/ icons.tsx · ui/（Button/Chip/StatusBadge/ScrollArea/ErrorCard/Tooltip）
                 shell/（Topbar/IconRail/ScreenFrame/Gutter/ViewRail/InspectorPanel/Timeline）
                 events/（EventStreamPanel · EventRow · useEventWindow · useEventStream · useTimelineStages）
-                preview/（PdfCanvas · BboxLayer · PreviewToolbar · PreviewArea）
-    lib/        api.ts（/api/v1 + 错误信封 + POST/PUT/multipart）· queries.ts（含 W08 上传/job/profiles）
+                preview/（PdfCanvas · BboxLayer · PreviewToolbar · PreviewArea · CompileBar · DownloadButton）
+                edit/（ParagraphEditor · BboxEditor）
+    lib/        api.ts（/api/v1 + 错误信封 + PATCH/POST/PUT/multipart）· queries.ts（含 W08 上传/job/profiles、W10 草稿/段落）
                 uploads.ts（客户端预检：魔数 + 200MB）· jobs.ts（活动判据/轮询/from 判断/页码形状）
                 preview.ts（产物选择 + geometry 解析）· events.ts（SSE 帧/URL/live/分组/窗口合并）
+                draft.ts（草稿解析/排版范围校验/PATCH 构造）· download.ts（下载与质量徽标判定表）
                 timeline.ts（阶段合并 + 条宽）· pdf.ts（pdf.js worker/cmap/字体配置）
                 humanize.ts · routing.ts · cn.ts
     components/jobs/  StartJobCard（开始翻译配置卡）· ActiveJobCard（运行中/失败/取消卡）
     screens/    LibraryScreen / DocumentCard / WorkbenchScreen / PlaceholderScreen
     stores/     ui.ts（三栏宽度 + 分隔条 + 屏/预览模式 + 预览页码/bbox 图层/选中段落）
   scripts/      sync-pdfjs-assets.mjs（把 pdf.js 静态资源复制进 public/pdfjs/）
-  e2e/          Playwright 真浏览器用例（preview.spec.ts · progress.spec.ts · upload.spec.ts）
+  e2e/          Playwright 真浏览器用例（edit.spec.ts · preview.spec.ts · progress.spec.ts · upload.spec.ts）
                 fixtures/sample.pdf（602 字节最小合法 PDF）· fixtures/sleep-translator.sh（长睡 stub）
   tests/        Vitest 用例（api / store / routing / 文件库屏+上传 / job 卡与 hooks / 工作台壳 /
-                预览坐标与组件 / 事件流与时间线）
+                预览坐标与组件 / 编辑坐标与组件（W10）/ 事件流与时间线）
   public/pdfjs/ pdf.js worker + cmaps + standard_fonts（生成物，.gitignore，不入库）
   tmp-smoke/    本地冒烟截图与日志（.gitignore，不入库）
 ```
@@ -106,6 +109,12 @@ cd web && pnpm e2e        # 自动起 bdt serve --root ../tmp --port 8793 + vite
 - fixture 用本仓库 `tmp/` 下的真实 workdir：主用例读 `tmp/ccs3764-dyn`（21 页、parse/layout 各
   420 段、事件归档 12 条、7 段全 ok），缺失时用例会失败并提示；重产物用例读
   `tmp/e2e-2602-02908v2-20260917`（65MB mono / 84MB dual），fixture 不在时自动 skip。
+- `edit.spec.ts`（W10）**不改基线**：setup 用 `cp -Rc`（clonefile，秒级）把
+  `tmp/e2e-2602-02908v2-20260917` 克隆成 `tmp/w10-edit-<时间戳>/`（每次新 did），
+  serve root 仍是仓库 `tmp/`（既有用例与 W08 上传都靠它）；草稿/编译产物都落在副本里。
+  该用例会跑一次**真编译**（实测 ~3.1 分钟，`test.setTimeout(300_000)`）：改译文 → 保存 →
+  断言 `running`（编辑禁用）→ 等 `ok` → `compile.revision/stale`/下载按钮断言 → 拖 bbox 手柄 →
+  断言草稿 `layout.box` 变化 → 第二次编译只断言进 `running` 后取消（不让 e2e 跑十分钟）。
 - 断言：canvas 真有文字像素、bbox 数量 == 服务端实体数、框内有文字像素、parse/layout 两套换算
   落到同一矩形（±0.6px）、点框选中联动右侧面板、切换模式不重建译侧画布、产物响应含 `206`、
   全程无外网请求（禁 CDN）；`progress.spec.ts` 再断言事件面板行数 == 服务端本页条数、最新在上、
@@ -122,7 +131,7 @@ cd web && pnpm e2e        # 自动起 bdt serve --root ../tmp --port 8793 + vite
 - `from=parse` 的用例**诚实断言两种环境分支**：有 MinerU token（本机默认）→ 断言 job 进 `running`；
   没有 token/MinerU 不可用 → 断言 `failed` 且 `error_code` 非空。分支写进 annotation（`[w08]`）。
 - 截图落在 `web/tmp-smoke/`（`e2e-preview.png` / `-layout` / `-compare` / `-selected` /
-  `-heavy-range` / `e2e-progress*.png`），性能数字以 `[perf]` / `[range]` 打到 stdout。
+  `-heavy-range` / `e2e-progress*.png` / `e2e-edit-*.png`），性能数字以 `[perf]` / `[range]` 打到 stdout。
 
 ## 进度层（W06）：事件流 + 时间线 + SSE
 
@@ -233,6 +242,54 @@ SSE 增量的 e2e 留到 W15（W07 有真 job 之后）。
 `<store_base>/scripts/` 或仓库 `scripts/` 白名单目录内，越界/符号链接穿越/不存在一律 422），
 服务端解析成**绝对路径**再写盘 —— 客户端永远无法塞命令字符串或密钥（`translator`/`api_key`
 这类字段收到即 `422 forbidden_field`）。前端目前只用 `GET /profiles` 填下拉，不做 profile 编辑器。
+
+## 编辑闭环（W10）：点段改译文 / 拖 bbox / 草稿与编译状态
+
+服务端真源在 `docs/frontend/api.md` §3.2/§3.3：草稿 `PATCH {base_revision, paragraphs}`（乐观并发 +
+1.5s 服务端防抖编译），`compile` 字段描述最近一次成功发布的产物。前端只做**显示与换算**。
+
+### 右侧面板（段落 | 事件流双 tab）
+
+- 进度视图仍是事件流在前（W06 语义不变）；翻译 / 识别 / 检查视图段落编辑器在前、事件流退为次要 tab；
+  顶部「已选中段落」一行在任何 tab 都可见（W05 的选中联动）。
+- `ParagraphEditor`（`components/edit/`）：译文 = **草稿覆盖优先于 `GET /paragraphs` 基线**，
+  有覆盖时显示「草稿已修改」+「恢复基线」（PATCH `target: null`）；排版四个数值覆盖
+  （`scale_cap` 0.1–5 / `font_scale` 0.2–5 / `line_skip` 0.8–3 / `box_scale` 0.3–5，与
+  `layout_overrides.PARAGRAPH_FLOAT_KEYS` 同范围）超范围时输入框旁给提示且**不发 PATCH**。
+- 保存：本地 1.5s 防抖（加载/失焦立即存，Cmd+S 也立即），无改动不发请求；`layout` 是**整对象替换**
+  （服务端语义），所以补丁会带上草稿里已有的 `box` 与不认识的键，不静默丢数据。
+- 冲突分支按错误码：409 `revision_conflict` → 提示 + 「刷新草稿」；409 `document_busy` →
+  「编译中，稍后再试」；422 `draft_invalid` → 错误条给服务端逐条 `detail.errors`。
+- **编辑禁用**：`compile.status=running` 或该文档有活动 job → textarea `readonly` + 参数输入禁用
+  （服务端也会 409 挡）。
+
+### bbox 拖拽（`components/edit/BboxEditor.tsx`）
+
+- 只对**选中段**且**版面框（`pdf_native`）+ 译文侧**生效：8 个手柄（四角 + 四边中点）+ 框体平移，
+  Pointer Events + `setPointerCapture`（与分隔条同一套拖拽模式）；拖拽中在整块视口上盖一层命中层
+  挡住底层 rect（不会误选别的段），ESC 取消本次拖拽。
+- 拖拽只更新屏幕矩形（预览反馈），**松手**才做 `screenToPdfBox` 逆变换并 PATCH 草稿的 `layout.box`。
+- **换算红线**：`screenToPdfBox(rect, viewport, coordSystem, cropbox)` 必须经 viewport 逆变换。
+  pdf.js 4.10 的 `PageViewport` 只暴露**点级**逆变换 `convertToPdfPoint`（内部即
+  `Util.applyInverseTransform(this.transform)`，没有 `convertToPdfRectangle`），所以逆变换 = 矩形两个
+  对角点各调一次 + min/max 归一，再反 cropbox 偏移与 y 翻转（`pdf_native` 减 `cropbox` 原点，
+  `pdf_topleft` 用 `cropbox.y1 - y`）。**绝不假设 scale=1、绝不直接减 cropbox**；与 `pdfToScreen`
+  的 roundtrip（含 scale≠1、cropbox 原点≠0、rotation 90/180/270）是 `tests/edit-coords.test.ts`。
+
+### 编译状态条与下载（`CompileBar` / `DownloadButton`）
+
+- 状态条：`running` → 「编译中…」+ 脉冲 + 编辑禁用；`failed` → 错误条 + `error_code`
+  （来自 `GET /documents/{did}/jobs` 里最近一条 `action=compile`，详情 `compile` 字段不带错误码）
+  + 重试；`stale` → 「草稿比当前 PDF 新（PDF 修订 r{n}，草稿 r{m}）」+ 手动编译；`ok` → 「已更新到 r{n}」。
+- 手动编译 = `POST /jobs {action:"compile", scope:"full", base_revision:<草稿 revision>}`；
+  活动 job 期间按钮禁用（服务端会 409）。详情在 `running`/`stale` 时按 2s 轮询（`useDocument` 的
+  `refetchWhen`），编译一落定自动停。
+- 下载：**只有 `compile.artifact` 存在才启用**（没有产物 → 禁用 + tooltip 说明原因）；`stale`/`failed`
+  时旧 PDF 仍可下载，但显式标「比草稿旧」/「编译失败 · 仍是 r{n}」；文件落盘名加 `r{artifact.revision}`
+  后缀（**只改前端名**，服务端产物名不动），URL 带 `?r=<revision>` 保证拿到该修订的字节、
+  也让预览在编译后重新取字节（同名产物会被原地替换，不带参数的话 pdf.js 还显示旧 PDF）。
+- 质量徽标：只有 `quality.pipeline_ok=true` 才绿；`check.verdict=needs_fix`（或 reviewer needs_fix）
+  一律黄标「检查未通过」；其余中性（「待人工审查」/「检查不可用」）——编译成功 ≠ 质量通过。
 
 ## 设计与契约约束（改动时别忘）
 

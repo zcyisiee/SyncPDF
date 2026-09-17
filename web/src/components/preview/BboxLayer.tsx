@@ -26,6 +26,8 @@ export interface ScreenViewport {
   readonly height: number;
   /** CSS px / PDF 点（pdf.js viewport 的 `scale`）。 */
   readonly scale: number;
+  /** 页面旋转角度（0/90/180/270）；换算不需要它（变换矩阵已含），仅用于提示。 */
+  readonly rotation?: number;
   /** 页面 viewBox（= cropbox，PDF user space 绝对坐标，未乘 scale）。 */
   readonly viewBox?: readonly number[];
   /** PDF user space → 视口坐标（左上原点、y 向下）的完整变换。 */
@@ -58,6 +60,18 @@ export function cropBoxFromViewport(viewport: ScreenViewport): CropBox {
   };
 }
 
+/**
+ * 逆变换所需的视口子集（真 `PageViewport` 天然满足）。
+ *
+ * **pdf.js 4.10 的 `PageViewport` 只暴露点级逆变换 `convertToPdfPoint(x, y)`**
+ * （内部就是 `Util.applyInverseTransform([x, y], this.transform)`），没有
+ * `convertToPdfRectangle`；所以逆变换按矩形的两个对角点各调一次，再在
+ * :func:`screenToPdfBox` 里按 min/max 归一。绝不假设 scale=1，也不直接减 cropbox。
+ */
+export interface PdfPointViewport {
+  convertToPdfPoint(x: number, y: number): number[];
+}
+
 /** bbox（输入坐标系）→ 预览画布上的 CSS px 矩形。纯函数，rotation 交给 pdf.js 变换处理。 */
 export function pdfToScreen(
   box: Box,
@@ -83,6 +97,38 @@ export function pdfToScreen(
     width: Math.abs(bx - ax),
     height: Math.abs(by - ay),
   };
+}
+
+/**
+ * :func:`pdfToScreen` 的**逆变换**：拖拽后的屏幕矩形 → 输入坐标系的 `[x, y, x2, y2]`
+ * （升序、`x2 > x` / `y2 > y`，正是服务端 `layout.box` 要求的形状）。
+ *
+ * 两步的逆序执行：
+ * 1. **视口逆变换**：两个对角点 → PDF user space（含 scale/rotation/viewBox 偏移的完整变换，
+ *    与正向共用同一个 viewport，所以 `screenToPdfBox(pdfToScreen(box)) ≈ box`）；
+ * 2. **反 cropbox 偏移 + 反 y 翻转**：`pdf_native`（y 向上）直接减 `cropbox` 原点；
+ *    `pdf_topleft`（y 向下）用 `cropbox.y1 - y` 翻回去。
+ *
+ * 视口坐标 y 向下、PDF user space y 向上，所以「屏幕矩形上边」对应 user space 里更大的 y：
+ * 排序时 `y2 = max(uy)`、`y = min(uy)`。
+ */
+export function screenToPdfBox(
+  rect: ScreenRect,
+  viewport: ScreenViewport & PdfPointViewport,
+  coordSystem: CoordSystem,
+  cropbox?: CropBox | null,
+): Box {
+  const crop = cropbox ?? cropBoxFromViewport(viewport);
+  const [ax, ay] = viewport.convertToPdfPoint(rect.x, rect.y);
+  const [bx, by] = viewport.convertToPdfPoint(rect.x + rect.width, rect.y + rect.height);
+  const left = Math.min(ax, bx) - crop.x0;
+  const right = Math.max(ax, bx) - crop.x0;
+  const top = Math.max(ay, by);
+  const bottom = Math.min(ay, by);
+  if (coordSystem === 'pdf_topleft') {
+    return [left, crop.y1 - top, right, crop.y1 - bottom];
+  }
+  return [left, bottom - crop.y0, right, top - crop.y0];
 }
 
 export interface BboxLayerProps {

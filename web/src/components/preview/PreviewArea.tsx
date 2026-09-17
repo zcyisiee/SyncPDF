@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
+import { ApiError, describeApiError } from '../../lib/api';
 import {
   artifactUrl,
   bboxModeForView,
@@ -19,14 +20,38 @@ import {
   geometryBboxes,
   pickPreviewArtifacts,
   type BboxMode,
+  type Box,
   type GeometryBboxes,
 } from '../../lib/preview';
-import { useArtifacts, useDocument, useGeometry } from '../../lib/queries';
+import {
+  draftParagraphOf,
+  layoutBox,
+  layoutInputsOf,
+  layoutPatch,
+  layoutValuesOf,
+} from '../../lib/draft';
+import { activeJob } from '../../lib/jobs';
+import {
+  compileArtifactKey,
+  compileArtifactRevision,
+  withArtifactRevision,
+} from '../../lib/download';
+import {
+  useArtifacts,
+  useDocument,
+  useDraft,
+  useGeometry,
+  useJobs,
+  usePatchDraftMutation,
+} from '../../lib/queries';
 import type { WorkbenchView } from '../../lib/routing';
 import { readStoredBboxMode, useUiStore } from '../../stores/ui';
 import { Button } from '../ui/Button';
 import { ErrorCard } from '../ui/ErrorCard';
-import { BboxLayer } from './BboxLayer';
+import { BboxEditor } from '../edit/BboxEditor';
+import { BboxLayer, pdfToScreen, type PdfPointViewport, type ScreenViewport } from './BboxLayer';
+import { CompileBar } from './CompileBar';
+import { DownloadButton } from './DownloadButton';
 import { PdfCanvas } from './PdfCanvas';
 import type { PdfPageInfo } from './PdfCanvas';
 import { PreviewToolbar } from './PreviewToolbar';
@@ -50,6 +75,7 @@ function PreviewPane({
   url,
   pageNumber,
   bbox,
+  overlay,
   odId,
   onPageInfo,
   onScale,
@@ -58,6 +84,11 @@ function PreviewPane({
   url: string | null;
   pageNumber: number;
   bbox: BboxPaneData | null;
+  /**
+   * 叠加在 bbox 层之上的编辑层：**渲染函数**而不是元素——编辑层要用与 canvas 同一个
+   * viewport 做 `pdfToScreen` 换算，而那个 viewport 只在这个 pane 里算出来。
+   */
+  overlay?: (viewport: ScreenViewport & PdfPointViewport) => ReactNode;
   odId: string;
   onPageInfo?: (info: PdfPageInfo) => void;
   onScale?: (scale: number) => void;
@@ -134,6 +165,7 @@ function PreviewPane({
                 onSelect={bbox.onSelect}
               />
             ) : null}
+            {viewport === null ? null : overlay?.(viewport)}
           </div>
         </>
       )}
@@ -146,6 +178,21 @@ export function PreviewArea({ did, view }: { did: string; view: WorkbenchView })
   // 文档本身不存在时不发产物请求：避免在「文档不存在」错误卡旁边再冒一个产物清单错误卡
   const artifactsQuery = useArtifacts(detailQuery.isSuccess ? did : null);
   const artifacts = artifactsQuery.data;
+  // W10：草稿（选中段的 box 覆盖 + 编译状态条的草稿修订号）+ 活动 job（编辑只读判据）
+  const draftQuery = useDraft(detailQuery.isSuccess ? did : null);
+  const jobsQuery = useJobs(detailQuery.isSuccess ? did : null);
+  const patchDraft = usePatchDraftMutation(did);
+  const draft = draftQuery.data;
+  const compile = detailQuery.data?.compile ?? null;
+  const busyJob = activeJob(jobsQuery.data);
+  // 契约也会挡（409 document_busy），这里提前置只读：编译中就不要让人白改
+  const editingLocked = compile?.status === 'running' || busyJob !== null;
+  const editingLockedReason =
+    compile?.status === 'running'
+      ? '编译中…：编译结束后可继续编辑'
+      : busyJob === null
+        ? null
+        : `该文档有活动任务 ${busyJob.job_id}（${busyJob.action}）：任务期间草稿只读`;
 
   const previewMode = useUiStore((state) => state.previewMode);
   const setPreviewMode = useUiStore((state) => state.setPreviewMode);
@@ -176,7 +223,15 @@ export function PreviewArea({ did, view }: { did: string; view: WorkbenchView })
     if (!bboxPickedByUser.current) setBboxMode(bboxModeForView(view));
   }, [view, setBboxMode]);
 
-  const targetUrl = target === null ? null : artifactUrl(did, target.name);
+  const targetUrl =
+    target === null
+      ? null
+      : withArtifactRevision(
+          artifactUrl(did, target.name),
+          // 预览的就是这次编译发布的那个产物时才带修订号：编译一结束 URL 变 →
+          // `PdfCanvas` 按 url 重挂载 → 真的重新取字节（否则 pdf.js 还拿着旧 PDF）
+          target.name === compileArtifactKey(compile) ? compileArtifactRevision(compile) : null,
+        );
   const sourceUrl = source === null ? null : artifactUrl(did, source.name);
   const primaryUrl = previewMode === 'source' ? sourceUrl : targetUrl;
 
@@ -228,6 +283,58 @@ export function PreviewArea({ did, view }: { did: string; view: WorkbenchView })
     [bboxData, layerMode, handleSelect, selectedParagraphId],
   );
 
+  /**
+   * 拖拽松手（`BboxEditor` 已做过 viewport 逆变换）→ PATCH 草稿的 `layout.box`。
+   * 只带这一段的 `layout`（整对象替换语义）：数值覆盖照**当前草稿**回填（不拿面板里正在改的
+   * 输入，避免把未保存的编辑状态写进去），也不碰别的段落。
+   */
+  const handleBoxCommit = useCallback(
+    (id: string, box: Box) => {
+      const revision = draft?.revision;
+      if (revision === undefined) return;
+      const current = draftParagraphOf(draft, id)?.layout ?? null;
+      const layout = layoutPatch(layoutValuesOf(layoutInputsOf(current)), box, current);
+      patchDraft.mutate({ baseRevision: revision, paragraphs: { [id]: { layout } } });
+    },
+    [draft, patchDraft],
+  );
+
+  /**
+   * 选中段的可拖拽编辑层：只在**版面框（`pdf_native`）+ 译文侧**开（源侧没有可写的 box）。
+   * box 优先用草稿覆盖（拖动后的值），否则用该页几何基线；屏幕矩形交给 `pdfToScreen`。
+   */
+  const buildOverlay = useCallback(
+    (withLayer: boolean) =>
+      (viewport: ScreenViewport & PdfPointViewport): ReactNode => {
+        if (!withLayer || selectedParagraphId === null || layerMode !== 'layout') return null;
+        const item = bboxData?.boxes.find((row) => row.id === selectedParagraphId);
+        if (item === undefined) return null;
+        const cropbox = bboxData?.cropbox ?? null;
+        const coordSystem = bboxData?.coordSystem ?? 'pdf_native';
+        const draftBox = layoutBox(draftParagraphOf(draft, selectedParagraphId)?.layout);
+        return (
+          <BboxEditor
+            id={selectedParagraphId}
+            rect={pdfToScreen(draftBox ?? item.box, viewport, coordSystem, cropbox)}
+            viewport={viewport}
+            cropbox={cropbox}
+            disabled={editingLocked}
+            disabledReason={editingLockedReason ?? undefined}
+            onCommit={(box) => handleBoxCommit(selectedParagraphId, box)}
+          />
+        );
+      },
+    [
+      bboxData,
+      draft,
+      editingLocked,
+      editingLockedReason,
+      handleBoxCommit,
+      layerMode,
+      selectedParagraphId,
+    ],
+  );
+
   const toolbar = (
     <PreviewToolbar
       page={page}
@@ -237,13 +344,45 @@ export function PreviewArea({ did, view }: { did: string; view: WorkbenchView })
       paged={primaryUrl !== null}
       onPageChange={setPreviewPage}
       onBboxModeChange={chooseBboxMode}
+      download={
+        <DownloadButton did={did} compile={compile} quality={detailQuery.data?.quality ?? null} />
+      }
     />
   );
+
+  const compileBar = (
+    <CompileBar
+      did={did}
+      compile={compile}
+      draftRevision={draft?.revision ?? null}
+      busyJobId={busyJob?.job_id ?? null}
+    />
+  );
+
+  // bbox 拖拽的 PATCH 失败（409/422）不静默：拖完的框是「预览态」，得说清为何存不上
+  const patchError = patchDraft.error ?? null;
+  const patchNotice =
+    patchError === null
+      ? null
+      : (
+          <p
+            data-od-id="bbox-patch-error"
+            data-error-code={patchError instanceof ApiError ? patchError.code : 'unknown'}
+            className="flex-none border-b border-hair bg-err-soft px-s5 py-[5px] text-tiny text-err-ink"
+          >
+            {patchError instanceof ApiError && patchError.code === 'document_busy'
+              ? '编译中，稍后再试：活动任务期间草稿只读（409 document_busy）'
+              : patchError instanceof ApiError && patchError.code === 'revision_conflict'
+                ? '草稿已被其它会话改动：刷新后重新拖拽（409 revision_conflict）'
+                : `保存段落框失败：${describeApiError(patchError).message}`}
+          </p>
+        );
 
   if (artifactsQuery.isError) {
     return (
       <div className="flex h-full min-h-0 flex-col" data-od-id="preview-area">
         {toolbar}
+        {compileBar}
         <div className="min-h-0 flex-1 overflow-auto p-s6">
           <ErrorCard
             data-od-id="preview-error"
@@ -314,6 +453,7 @@ export function PreviewArea({ did, view }: { did: string; view: WorkbenchView })
           url={primaryUrl}
           pageNumber={page}
           bbox={buildBbox(true)}
+          overlay={buildOverlay(previewMode !== 'source')}
           odId="preview-canvas"
           onPageInfo={handlePageInfo}
           onScale={setPaneScale}
@@ -326,6 +466,8 @@ export function PreviewArea({ did, view }: { did: string; view: WorkbenchView })
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col" data-od-id="preview-area">
       {toolbar}
+      {compileBar}
+      {patchNotice}
       {bboxUnavailable ? (
         <p
           data-od-id="preview-bbox-unavailable"

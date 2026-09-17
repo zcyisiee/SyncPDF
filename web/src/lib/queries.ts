@@ -1,6 +1,7 @@
 /**
  * TanStack Query hooks：文件库列表、文档详情、产物清单、bbox 几何、W06 的进度层
- * （事件分页 / 首拉尾部窗口 / 阶段状态），以及 W08 的上传与 job（提交/轮询/取消）、profiles。
+ * （事件分页 / 首拉尾部窗口 / 阶段状态），W08 的上传与 job（提交/轮询/取消）、profiles，
+ * 以及 W10 的草稿（读 + 乐观并发写入 + 手动编译）与段落面板数据。
  *
  * geometry 的 404（`snapshot_unavailable` / `geometry_unavailable`）不是错误：产物缺失
  * 时该页照样能预览，只是没有 bbox，所以 query 归一成 `data = null` 由 UI 显示小条。
@@ -14,15 +15,18 @@ import type {
   DocumentDetail,
   DocumentListItem,
   DocumentUploaded,
+  DraftPatchRequest,
+  DraftResponse,
   EventsPage,
   GeometryResponse,
   JobAccepted,
   JobCreateRequest,
   JobRecord,
+  ParagraphItem,
   ProfileListItem,
   StageStateResponse,
 } from '../api/types';
-import { ApiError, apiGet, apiPost, apiUpload } from './api';
+import { ApiError, apiGet, apiPatch, apiPost, apiUpload } from './api';
 import {
   EVENTS_PAGE_LIMIT,
   EVENTS_TAIL_MAX_PAGES,
@@ -54,6 +58,8 @@ export const queryKeys = {
     ['documents', did, 'events', afterSeq, limit, kind, stage] as const,
   jobs: (did: string) => ['documents', did, 'jobs'] as const,
   profiles: ['profiles'] as const,
+  draft: (did: string) => ['documents', did, 'draft'] as const,
+  paragraphs: (did: string) => ['documents', did, 'paragraphs'] as const,
 };
 
 /**
@@ -72,15 +78,27 @@ export function useDocuments() {
 
 /**
  * 文档详情。`refetchMs > 0` 时按它轮询（进度视图在时间线出现 live 段时给 2s）；
- * 默认不轮询（列表页/预览区等只读场景）。
+ * 默认不轮询（列表页/预览区等只读场景）。`refetchWhen` 是**条件轮询**：只有它为真才轮询
+ * （W10 用它把「编译未落定」也纳入 2s 轮询，编译一落定就自动停）。
  */
-export function useDocument(did: string | null, options: { refetchMs?: number } = {}) {
+export function useDocument(
+  did: string | null,
+  options: {
+    refetchMs?: number;
+    refetchWhen?: (doc: DocumentDetail | undefined) => boolean;
+  } = {},
+) {
   const refetchMs = options.refetchMs ?? 0;
+  const refetchWhen = options.refetchWhen;
   return useQuery({
     queryKey: queryKeys.document(did ?? ''),
     queryFn: () => apiGet<DocumentDetail>(`/documents/${encodeURIComponent(did ?? '')}`),
     staleTime: 5_000,
-    refetchInterval: refetchMs > 0 ? refetchMs : false,
+    refetchInterval: (query) => {
+      if (refetchMs <= 0) return false;
+      if (refetchWhen !== undefined && !refetchWhen(query.state.data)) return false;
+      return refetchMs;
+    },
     enabled: did !== null && did !== '',
   });
 }
@@ -231,6 +249,97 @@ export function useStageState(did: string | null, refetchMs = 0) {
   });
 }
 
+/**
+ * 段落面板数据（原文/译文/排版 join）。404（`paragraphs_unavailable`）归一成 `null`：
+ * 四份段落产物都不存在 ≠ 请求失败，面板显示「该文档还没有段落产物」。
+ */
+export function useParagraphs(did: string | null) {
+  return useQuery({
+    queryKey: queryKeys.paragraphs(did ?? ''),
+    queryFn: async () => {
+      try {
+        return await apiGet<ParagraphItem[]>(
+          `/documents/${encodeURIComponent(did ?? '')}/paragraphs`,
+        );
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) return null;
+        throw error;
+      }
+    },
+    staleTime: 30_000,
+    enabled: did !== null && did !== '',
+  });
+}
+
+// --------------------------------------------------------------------------- #
+// W10：草稿（api.md §3.3）
+// --------------------------------------------------------------------------- #
+
+/**
+ * 当前草稿（`GET /documents/{did}/draft`）：从没写过 → `revision=0` + 空 `paragraphs`。
+ * `staleTime` 5s：草稿是**乐观并发**资源，不做轮询——写入路径自己更新缓存
+ * （`usePatchDraftMutation` 的 `setQueryData`），跨标签页冲突由 409 提示刷新。
+ */
+export function useDraft(did: string | null) {
+  return useQuery({
+    queryKey: queryKeys.draft(did ?? ''),
+    queryFn: () =>
+      apiGet<DraftResponse>(`/documents/${encodeURIComponent(did ?? '')}/draft`),
+    staleTime: 5_000,
+    enabled: did !== null && did !== '',
+  });
+}
+
+export interface PatchDraftVariables {
+  /** 客户端期望的当前 revision（乐观并发；不匹配 → 409 `revision_conflict`）。 */
+  baseRevision: number;
+  /** `{段落 id: {target?, layout?}}`；`null` = 删字段、整段 `null` = 删该段覆盖。 */
+  paragraphs: Record<string, Record<string, unknown> | null>;
+}
+
+/**
+ * 写草稿（`PATCH /documents/{did}/draft`）：成功即把响应当作新草稿写进缓存
+ * （服务端已 `revision+1`），并让详情/列表失效——详情里 `compile.stale` 会随之变化。
+ * 服务端返回的两类冲突由调用方分支：409 `revision_conflict`（刷新草稿重试）、
+ * 409 `document_busy`（活动 job 期间只读）、422 `draft_invalid`（字段/范围不合法）。
+ */
+export function usePatchDraftMutation(did: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ baseRevision, paragraphs }: PatchDraftVariables) => {
+      const body: DraftPatchRequest = { base_revision: baseRevision, paragraphs };
+      return apiPatch<DraftResponse>(`/documents/${encodeURIComponent(did)}/draft`, body);
+    },
+    onSuccess: (draft) => {
+      client.setQueryData(queryKeys.draft(did), draft);
+      void client.invalidateQueries({ queryKey: queryKeys.document(did) });
+      void client.invalidateQueries({ queryKey: queryKeys.documents });
+    },
+  });
+}
+
+/**
+ * 手动编译（`POST /documents/{did}/jobs`，`action=compile`）：草稿比 PDF 新时用户点了才跑。
+ * 不传 `profile`（compile 不调翻译/审查）；`base_revision` = 当前草稿 revision，
+ * 服务端不符时 409 `revision_conflict`（点之前草稿又变了）。
+ */
+export function useCompileDraftMutation(did: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (baseRevision: number) =>
+      apiPost<JobAccepted>(`/documents/${encodeURIComponent(did)}/jobs`, {
+        action: 'compile',
+        scope: 'full',
+        base_revision: baseRevision,
+        // 生成的类型把 `dual` 标成必填（服务端有默认值 false）：显式给 false，compile 不产出 dual
+        dual: false,
+      } satisfies JobCreateRequest),
+    onSuccess: () => {
+      invalidateJobViews(client, did);
+    },
+  });
+}
+
 // --------------------------------------------------------------------------- #
 // W08：上传 / profiles / jobs
 // --------------------------------------------------------------------------- #
@@ -248,14 +357,16 @@ export function useProfiles() {
  * 该文档的 job 列表（`GET /documents/{did}/jobs`，新 → 旧）。
  *
  * 轮询口径（brief）：有 `queued`/`running` 时 2s，否则 30s —— job 是"run 归档还没出现"
- * 那段时间里唯一的真实信号（事件流要等 run 归档建好才活）。
+ * 那段时间里唯一的真实信号（事件流要等 run 归档建好才活）。`refetchMs` 显式给定时覆盖它
+ * （W10 的编译状态条在编译进行中要更快看到终态）。
  */
-export function useJobs(did: string | null) {
+export function useJobs(did: string | null, options: { refetchMs?: number } = {}) {
+  const refetchMs = options.refetchMs;
   return useQuery({
     queryKey: queryKeys.jobs(did ?? ''),
     queryFn: () => apiGet<JobRecord[]>(`/documents/${encodeURIComponent(did ?? '')}/jobs`),
     staleTime: 1_000,
-    refetchInterval: (query) => jobsRefetchInterval(query.state.data),
+    refetchInterval: (query) => refetchMs ?? jobsRefetchInterval(query.state.data),
     enabled: did !== null && did !== '',
   });
 }

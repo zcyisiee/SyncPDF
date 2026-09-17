@@ -57,7 +57,7 @@ export interface paths {
         };
         /**
          * 文档元信息
-         * @description 元信息 + 质量状态 + 编译状态。质量与编译**分开**报：quality.pipeline_ok 只有 check 门禁与 reviewer 都 pass 才为 true；compile 在 W02 没有真实编译产物，固定 status=none / revision=0。
+         * @description 元信息 + 质量状态 + 编译状态。质量与编译**分开**报：quality.pipeline_ok 只有 check 门禁与 reviewer 都 pass 才为 true（编译成功不算质量通过）；compile 读 `.bdt-serve/compile.json`：status/revision/artifact 来自最近一次成功编译，stale = 当前草稿 revision 更大（旧 PDF 不得当成最新）。
          */
         get: operations["get_document_api_v1_documents__did__get"];
         put?: never;
@@ -242,8 +242,8 @@ export interface paths {
         get: operations["list_jobs_api_v1_documents__did__jobs_get"];
         put?: never;
         /**
-         * 提交 job（run / check）
-         * @description 以子进程跑 `bdt run`（同文档串行：已有活动 job → 409 document_busy；全局最多 2 个并发，超出排队 queued）。202 的 status 恒为 queued，真实状态轮询 GET /jobs/{jid}。retranslate/compile 未实现 → 422 action_not_available。客户端只能给 action/from/pages/dual/profile：translator/reviewer/timeout 之类一律 422 forbidden_field。
+         * 提交 job（run / check / compile）
+         * @description 以子进程跑 `bdt run`（同文档串行：已有活动 job → 409 document_busy；全局最多 2 个并发，超出排队 queued）。202 的 status 恒为 queued，真实状态轮询 GET /jobs/{jid}。`compile`（W09）在隔离副本里跑apply+build 并原子发布 PDF：`scope=pages` 按已批准设计回退全量（记录 requested_scope/effective_scope/downgrade_reason），`base_revision` 与当前草稿不一致 → 409 revision_conflict。retranslate 未实现 → 422 action_not_available。客户端只能给action/from/pages/dual/profile/scope/base_revision：translator/reviewer/timeout 之类一律 422 forbidden_field。
          */
         post: operations["create_job_api_v1_documents__did__jobs_post"];
         delete?: never;
@@ -290,6 +290,34 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{did}/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 读草稿
+         * @description 当前草稿：`revision`、`updated_at`、`paragraphs`（每段 `target`/`layout`/`updated_at`）。从没写过 → `revision=0` + 空 `paragraphs`（不是 404）。
+         */
+        get: operations["get_draft_api_v1_documents__did__draft_get"];
+        put?: never;
+        post?: never;
+        /**
+         * 清空草稿（revision 不回退）
+         * @description 删掉全部段落覆盖；`revision` 继续 `+1`（**不回退**，前端靠单调 revision 判断 stale）。返回清空后的草稿，并触发防抖编译。活动 job 期间 → `409 document_busy`。
+         */
+        delete: operations["delete_draft_api_v1_documents__did__draft_delete"];
+        options?: never;
+        head?: never;
+        /**
+         * 写草稿（乐观并发 + 防抖编译）
+         * @description `base_revision` 必须等于服务器当前 `revision`，否则 `409 revision_conflict`（`detail.current_revision`）。`paragraphs` 是`{段落 id: {target?, layout?}}`，`null` = 删字段、整段 `null` = 删该段。成功 `revision+1` 并触发 1.5s 防抖编译。活动 job 期间 → `409 document_busy`；字段/范围不合法 → `422 draft_invalid`。
+         */
+        patch: operations["patch_draft_api_v1_documents__did__draft_patch"];
         trace?: never;
     };
     "/api/v1/profiles": {
@@ -390,11 +418,14 @@ export interface components {
         };
         /**
          * CompileStatus
-         * @description ``compile``：服务端管理的草稿编译产物（api.md §3.2）。
+         * @description ``compile``：服务端管理的草稿编译产物（api.md §3.2，W09 接真）。
          *
-         *     W02 没有真实编译产物（草稿编译在 W09）：固定 ``status="none"`` / ``revision=0`` /
-         *     ``stale=false`` / ``artifact=null``。``run_state`` 里 ``bdt run`` 直接产出的 PDF
-         *     不是编译 revision，已放在 :attr:`DocumentDetail.pdf`，不在这里冒充编译结果。
+         *     真源是 ``<workdir>/.bdt-serve/compile.json``（由
+         *     :mod:`babeldoc_tools.serve.compile` 写）：``revision``/``artifact`` 恒指
+         *     **最近一次成功发布**的产物（下载链接靠它标修订），``status``/失败原因描述
+         *     **最近一次尝试**，``stale = 当前草稿 revision > revision``（草稿一动，旧 PDF
+         *     就不许再被当成最新）。没有 compile.json（从没编译过）→ ``none``/``0``/``null``。
+         *     注意：``bdt run`` 直接产出的 PDF 不是编译修订，已放在 :attr:`DocumentDetail.pdf`。
          */
         CompileStatus: {
             /**
@@ -529,6 +560,63 @@ export interface components {
             source: "source.pdf";
         };
         /**
+         * DraftParagraph
+         * @description 一段草稿：译文覆盖 + 排版覆盖（两者都可缺）。
+         */
+        DraftParagraph: {
+            /** Target */
+            target?: string | null;
+            /** Layout */
+            layout?: {
+                [key: string]: unknown;
+            } | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * DraftPatchRequest
+         * @description ``PATCH /documents/{did}/draft`` 的请求体（api.md §3.3）。
+         *
+         *     只有两个字段：``base_revision``（乐观并发）与 ``paragraphs``（``{段落 id: 补丁}``）。
+         *     ``paragraphs`` 故意声明成宽松的 ``dict[str, Any]``：字段/范围的逐条校验在
+         *     :func:`babeldoc_tools.serve.draft.validate_changes` 里做，错误码是稳定的
+         *     ``422 draft_invalid`` + ``detail.errors``（不是 pydantic 的 ``validation_error``）。
+         */
+        DraftPatchRequest: {
+            /**
+             * Base Revision
+             * @description 客户端期望的当前草稿 revision；与服务器不一致 → 409 revision_conflict
+             */
+            base_revision: number;
+            /**
+             * Paragraphs
+             * @description {"段落 id": {"target"?: str|null, "layout"?: object|null}}，null = 删除；整段置 null = 删掉该段全部覆盖
+             */
+            paragraphs?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * DraftResponse
+         * @description ``GET/PATCH/DELETE /documents/{did}/draft`` 的响应体（api.md §3.3 冻结形状）。
+         */
+        DraftResponse: {
+            /**
+             * Revision
+             * @default 0
+             */
+            revision: number;
+            /** Updated At */
+            updated_at?: string | null;
+            /**
+             * Paragraphs
+             * @default {}
+             */
+            paragraphs: {
+                [key: string]: components["schemas"]["DraftParagraph"];
+            };
+        };
+        /**
          * EventsPage
          * @description ``GET /api/v1/documents/{did}/events``：一页事件 + 续传游标（api.md §1.3）。
          *
@@ -661,15 +749,16 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run" | "check";
+            action: "run" | "check" | "compile";
         };
         /**
          * JobCreateRequest
          * @description ``POST /documents/{did}/jobs`` 的请求体（api.md §3.4）。
          *
-         *     客户端只能给这些字段：``action``/``from``/``pages``/``dual``/``profile``；
-         *     ``profile`` 只接 **id**。translator/reviewer/timeout 之类命令与密钥字段一律由
-         *     服务端从 profile 解析，带了就 422 ``forbidden_field``（见
+         *     客户端只能给这些字段：``action``/``from``/``pages``/``dual``/``profile``
+         *     （``compile`` 用 ``scope``/``base_revision``）；``profile`` 只接 **id**。
+         *     translator/reviewer/timeout 之类命令与密钥字段一律由服务端从 profile 解析，
+         *     带了就 422 ``forbidden_field``（见
          *     :data:`babeldoc_tools.serve.routers.jobs.FORBIDDEN_JOB_FIELDS`）—— 这些字段**不**
          *     出现在下面的模型里，避免被前端代码生成当成可用参数。
          *
@@ -693,15 +782,25 @@ export interface components {
             pages?: string | null;
             /**
              * Dual
-             * @description 是否生成 dual（双语）PDF
+             * @description 是否生成 dual（双语）PDF（action=run）
              * @default false
              */
             dual: boolean;
             /**
              * Profile
-             * @description provider profile id（命令由服务端解析，永不回传）
+             * @description provider profile id（命令由服务端解析，永不回传）；action=run/check 必填，action=compile 不需要（不调翻译/审查）
              */
-            profile: string;
+            profile?: string | null;
+            /**
+             * Scope
+             * @description 编译范围（只对 action=compile 有效，缺省 full）；v1 页级编译按已批准设计回退全量，响应/记录里给 requested_scope/effective_scope/downgrade_reason
+             */
+            scope?: ("full" | "pages") | null;
+            /**
+             * Base Revision
+             * @description 期望的草稿 revision（只对 action=compile 有效）：与当前不一致 → 409 revision_conflict，防止编译一个已经不是最新的草稿
+             */
+            base_revision?: number | null;
         };
         /**
          * JobRecord
@@ -720,7 +819,7 @@ export interface components {
              * Action
              * @enum {string}
              */
-            action: "run" | "check";
+            action: "run" | "retranslate" | "compile" | "check";
             /**
              * Status
              * @default queued
@@ -736,7 +835,7 @@ export interface components {
             /** From Stage */
             from_stage?: string | null;
             /** Profile */
-            profile: string;
+            profile?: string | null;
             /** Pages */
             pages?: string | null;
             /**
@@ -744,6 +843,12 @@ export interface components {
              * @default false
              */
             dual: boolean;
+            /** Requested Scope */
+            requested_scope?: string | null;
+            /** Effective Scope */
+            effective_scope?: string | null;
+            /** Downgrade Reason */
+            downgrade_reason?: string | null;
             /** Run Id */
             run_id?: string | null;
             /** Exit Code */
@@ -1438,7 +1543,7 @@ export interface operations {
                     "application/json": components["schemas"]["JobAccepted"];
                 };
             };
-            /** @description document_busy：同文档已有活动 job */
+            /** @description document_busy / revision_conflict（compile 的 base_revision 不符） */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -1536,6 +1641,139 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    get_draft_api_v1_documents__did__draft_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文档 id：workdir 目录名（单段，解析结果必须在服务根目录内） */
+                did: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftResponse"];
+                };
+            };
+            /** @description document_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_draft_api_v1_documents__did__draft_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文档 id：workdir 目录名（单段，解析结果必须在服务根目录内） */
+                did: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftResponse"];
+                };
+            };
+            /** @description document_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description document_busy */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_draft_api_v1_documents__did__draft_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文档 id：workdir 目录名（单段，解析结果必须在服务根目录内） */
+                did: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftResponse"];
+                };
+            };
+            /** @description document_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description document_busy / revision_conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description draft_invalid / validation_error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

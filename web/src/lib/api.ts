@@ -53,6 +53,18 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
  * `PUT` JSON 体（`PUT /profiles`）：只传 profile id 与**脚本路径引用**，
  * 永远不在这里拼命令字符串（服务端也会 422 挡掉这类字段）。
  */
+/**
+ * `PATCH` JSON 体（`PATCH /documents/{did}/draft`）：草稿的乐观并发写入口。
+ * 请求体只带 `base_revision` + `paragraphs`，服务端 409/422 的错误码由调用方分支。
+ */
+export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, {
+    method: 'PATCH',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
 export async function apiPut<T>(path: string, body: unknown): Promise<T> {
   return request<T>(path, {
     method: 'PUT',
@@ -120,6 +132,8 @@ const ERROR_TITLES: Record<string, string> = {
   upload_conflict: '服务端目录名冲突',
   upload_not_supported: '当前服务不支持上传',
   document_busy: '这个文档已有任务在跑',
+  revision_conflict: '草稿已被其它会话改动',
+  draft_invalid: '草稿字段不合法',
   unknown_profile: 'profile 不存在',
   script_path_forbidden: '脚本不在白名单目录内',
   forbidden_field: '服务端不接受这类输入',

@@ -3,6 +3,7 @@
  * 缩放控件与连续滚动不在本任务（适宽固定），所以 zoom 只读。
  */
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 
 import { clampPage } from '../../lib/preview';
 import type { BboxMode } from '../../lib/preview';
@@ -91,6 +92,8 @@ export interface PreviewToolbarProps {
   paged: boolean;
   onPageChange: (page: number) => void;
   onBboxModeChange: (mode: BboxMode) => void;
+  /** 工具条最右侧的下载按钮槽（W10：修订号 + 质量徽标，见 `DownloadButton`）。 */
+  download?: ReactNode;
   className?: string;
 }
 
@@ -102,6 +105,7 @@ export function PreviewToolbar({
   paged,
   onPageChange,
   onBboxModeChange,
+  download,
   className,
 }: PreviewToolbarProps) {
   const previewMode = useUiStore((state) => state.previewMode);
@@ -199,6 +203,7 @@ export function PreviewToolbar({
         value={bboxMode}
         onChange={onBboxModeChange}
       />
+      {download}
     </div>
   );
 }

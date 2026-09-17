@@ -121,9 +121,19 @@ function entityBbox(row: Record<string, unknown>): BboxItem | null {
  */
 function paragraphBbox(row: Record<string, unknown>): BboxItem | null {
   const id = asString(row.id);
-  const box = asBox(row.layout_box);
+  const box = layoutBoxOfRow(row);
   if (id === null || box === null) return null;
   return { id, box, label: asString(row.layout_label) };
+}
+
+/**
+ * layout 几何行的 `layout_box`（`pdf_native`、y 向上）→ box；行/字段形状不对 → null。
+ * `GET /geometry?kind=layout` 的段落行与 `GET /paragraphs` 的 `geometry` 是同一个形状，
+ * 所以两处共用一个解析器（bbox 叠加层与段落面板的「当前框」不会各自解释）。
+ */
+export function layoutBoxOfRow(row: Record<string, unknown> | null | undefined): Box | null {
+  if (row === null || row === undefined) return null;
+  return asBox(row.layout_box);
 }
 
 /**

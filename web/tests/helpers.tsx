@@ -4,7 +4,7 @@ import type { ReactElement } from 'react';
 import { vi } from 'vitest';
 
 import { createQueryClient } from '../src/app/App';
-import type { ScreenViewport } from '../src/components/preview/BboxLayer';
+import type { PdfPointViewport, ScreenViewport } from '../src/components/preview/BboxLayer';
 import type { EventFeed } from '../src/components/events/useEventWindow';
 import type { RunEvent } from '../src/lib/events';
 import type { JobRecord } from '../src/api/types';
@@ -27,13 +27,18 @@ export function textResponse(body: string, status: number): Response {
   } as unknown as Response;
 }
 
-/** 按路径分发 mock fetch；未命中的路径返回 404 错误信封。 */
+/**
+ * 按路径分发 mock fetch；未命中的路径返回 404 错误信封。
+ * 键可以是纯 URL（所有方法共用），也可以是 `"PATCH /api/v1/..."` 这种「方法 + URL」
+ * （同一路径不同方法要分别 mock 时用，例如 W10 的 `GET/PATCH /draft`）。
+ */
 export function mockApiFetch(routes: Record<string, () => Response | Promise<Response>>) {
   // 参数签名与 `fetch` 对齐（含 init）：调用方要按 method/body 断言（W08 的上传/提交）。
   const fetchMock = vi.fn(
-    async (input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => {
+    async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = String(input);
-      const route = routes[url];
+      const method = (init?.method ?? 'GET').toUpperCase();
+      const route = routes[`${method} ${url}`] ?? routes[url];
       if (route) return await route();
       return jsonResponse({ error: { code: 'not_found', message: `未 mock 的路径：${url}` } }, 404);
     },
@@ -96,29 +101,69 @@ export function makeEvent(seq: number, overrides: Partial<RunEvent> = {}): RunEv
   };
 }
 
-/** pdf.js `PageViewport`（rotation=0）的替身：变换公式照抄 pdf.js 源码
- * （build/pdf.mjs `PageViewport` 构造器，rotation=0 时 `transform = [s,0,0,-s,-s*x0,s*y1]`）。
- * 单测不需要真 pdf.js（jsdom 无 canvas），但公式必须与库一致，否则换算测试自说自话。
+/**
+ * pdf.js `PageViewport` 的替身：变换公式照抄 pdf.js 源码（build/pdf.mjs `PageViewport`
+ * 构造器 + `Util.applyTransform` / `Util.applyInverseTransform`）。单测不需要真 pdf.js
+ * （jsdom 无 canvas），但公式必须与库一致，否则换算（正向 `pdfToScreen` 与逆向
+ * `screenToPdfBox`）的 roundtrip 测试会自说自话。
  */
 export function makeViewport({
   scale = 1,
   viewBox = [0, 0, 612, 792],
-}: { scale?: number; viewBox?: [number, number, number, number] } = {}): ScreenViewport {
+  rotation = 0,
+}: {
+  scale?: number;
+  viewBox?: [number, number, number, number];
+  rotation?: 0 | 90 | 180 | 270;
+} = {}): ScreenViewport & PdfPointViewport {
   const [x0, y0, x1, y1] = viewBox;
-  const a = scale;
-  const d = -scale;
-  const e = -scale * x0;
-  const f = scale * y1;
+  const centerX = (x1 + x0) / 2;
+  const centerY = (y1 + y0) / 2;
+  const rotate = ({
+    0: [1, 0, 0, -1],
+    90: [0, 1, 1, 0],
+    180: [-1, 0, 0, 1],
+    270: [0, -1, -1, 0],
+  } as const)[rotation];
+  const [rotateA, rotateB, rotateC, rotateD] = rotate;
+  const offsetCanvasX =
+    rotateA === 0 ? Math.abs(centerY - y0) * scale : Math.abs(centerX - x0) * scale;
+  const offsetCanvasY =
+    rotateA === 0 ? Math.abs(centerX - x0) * scale : Math.abs(centerY - y0) * scale;
+  const transform = [
+    rotateA * scale,
+    rotateB * scale,
+    rotateC * scale,
+    rotateD * scale,
+    offsetCanvasX - rotateA * scale * centerX - rotateC * scale * centerY,
+    offsetCanvasY - rotateB * scale * centerX - rotateD * scale * centerY,
+  ];
+  const width = (rotateA === 0 ? y1 - y0 : x1 - x0) * scale;
+  const height = (rotateA === 0 ? x1 - x0 : y1 - y0) * scale;
+  const applyTransform = ([px, py]: number[]) => [
+    transform[0] * px + transform[2] * py + transform[4],
+    transform[1] * px + transform[3] * py + transform[5],
+  ];
+  const applyInverseTransform = ([px, py]: number[]) => {
+    const d = transform[0] * transform[3] - transform[1] * transform[2];
+    return [
+      (px * transform[3] - py * transform[2] + transform[2] * transform[5] - transform[4] * transform[3]) / d,
+      (-px * transform[1] + py * transform[0] + transform[4] * transform[1] - transform[5] * transform[0]) / d,
+    ];
+  };
   return {
-    width: (x1 - x0) * scale,
-    height: (y1 - y0) * scale,
+    width,
+    height,
     scale,
+    rotation,
     viewBox,
     convertToViewportRectangle(rect) {
-      const map = (x: number, y: number) => [a * x + e, d * y + f];
-      const [ax, ay] = map(rect[0], rect[1]);
-      const [bx, by] = map(rect[2], rect[3]);
+      const [ax, ay] = applyTransform([rect[0], rect[1]]);
+      const [bx, by] = applyTransform([rect[2], rect[3]]);
       return [ax, ay, bx, by];
+    },
+    convertToPdfPoint(x, y) {
+      return applyInverseTransform([x, y]);
     },
   };
 }
@@ -147,6 +192,33 @@ export function makePdfFile(
 /** 非 PDF 的 File（魔数不对，用于预检分支）。 */
 export function makeTextFile(name = 'notes.pdf', text = 'not a pdf'): File {
   return makePdfFile(name, Array.from(new TextEncoder().encode(text)));
+}
+
+/**
+ * jsdom 没实现 PointerEvent 与捕获 API（`setPointerCapture` 不存在）。
+ * 拖拽类的单测用这个工厂造一个带 `pointerId`/`clientX`/`clientY` 的普通 Event，
+ * 并在渲染前把捕获 API 桩到 `Element.prototype` 上（否则组件一行就抛错）。
+ */
+export function makePointerEvent(
+  type: string,
+  init: { pointerId?: number; clientX?: number; clientY?: number; button?: number } = {},
+): Event {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.assign(event, {
+    pointerId: init.pointerId ?? 1,
+    clientX: init.clientX ?? 0,
+    clientY: init.clientY ?? 0,
+    button: init.button ?? 0,
+    pointerType: 'mouse',
+  });
+  return event;
+}
+
+/** 把指针捕获 API 桩进 `Element.prototype`（jsdom 缺失；只在需要拖拽的用例里调）。 */
+export function stubPointerCapture(): void {
+  Element.prototype.setPointerCapture = () => {};
+  Element.prototype.releasePointerCapture = () => {};
+  Element.prototype.hasPointerCapture = () => false;
 }
 
 /** 一条 job 记录（`GET /documents/{did}/jobs` 的元素；字段与生成的 OpenAPI 类型一致）。 */

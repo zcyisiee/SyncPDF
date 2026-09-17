@@ -21,6 +21,9 @@ export type JobCreateRequest = components['schemas']['JobCreateRequest'];
 export type JobAccepted = components['schemas']['JobAccepted'];
 export type ProfileListItem = components['schemas']['ProfileListItem'];
 export type ProfileUpdateRequest = components['schemas']['ProfileUpdateRequest'];
+export type DraftResponse = components['schemas']['DraftResponse'];
+export type DraftParagraph = components['schemas']['DraftParagraph'];
+export type DraftPatchRequest = components['schemas']['DraftPatchRequest'];
 
 /**
  * 统一错误信封（docs/frontend/api.md §1）。唯一手写形状：FastAPI 的 OpenAPI 不导出异常响应
