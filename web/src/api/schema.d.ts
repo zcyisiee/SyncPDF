@@ -400,6 +400,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{did}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 版本归档清单（新 → 旧）
+         * @description 每次**成功**编译发布的产物自动归档成一个版本（`revision` = 当时捕获的草稿revision），保留最近 50 个（超出淘汰最旧的版本文件与清单行）。响应是清单的**新 → 旧**倒序 + 当前编译上下文：`current_revision`/`stale` 取自详情端点的`compile`（§3.2）—— 当前可下载的那一版恒是 `output/` 的最新发布，不是清单的最新行。`trigger` ∈ `debounce`（草稿保存后的服务端自动编译）/ `manual`（显式POST compile）；`quality` 是发布时刻的质量快照，**只记录不门禁**（`pipeline_ok=false` 的版本照样可下载）。从没编译成功过 → 空数组（不是 404）。
+         */
+        get: operations["list_versions_api_v1_documents__did__versions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{did}/versions/{revision}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 下载指定历史版本
+         * @description 返回那一版的字节（`application/pdf`，`Content-Disposition: inline`，文件名 `<原产物名去 .pdf>.r<revision>.pdf`）。只认清单里有、且确实落在 `.bdt-serve/versions/` 下的数字名文件：非数字 / 不在清单 / 文件缺失 / 符号链接越界一律 404 `version_not_found`（同一个码，不泄露存在性）。当前版本仍走 `GET /artifacts`（`output/` 的最新发布）。
+         */
+        get: operations["download_version_api_v1_documents__did__versions__revision__pdf_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles": {
         parameters: {
             query?: never;
@@ -1020,6 +1060,8 @@ export interface components {
             effective_scope?: string | null;
             /** Downgrade Reason */
             downgrade_reason?: string | null;
+            /** Trigger */
+            trigger?: ("debounce" | "manual") | null;
             /** Paragraph Id */
             paragraph_id?: string | null;
             /** Candidate Id */
@@ -1237,6 +1279,72 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * VersionItem
+         * @description 一条版本归档（``<workdir>/.bdt-serve/versions.json`` 的条目 / §3.7 的列表元素）。
+         *
+         *     ``revision`` = 这次编译捕获的草稿 revision（与 ``compile.revision`` 同源）；
+         *     ``artifact_name`` 是发布时的**裸文件名**（前端据此给下载落盘名）。
+         */
+        VersionItem: {
+            /** Revision */
+            revision: number;
+            /** Created At */
+            created_at: string;
+            /**
+             * Trigger
+             * @enum {string}
+             */
+            trigger: "debounce" | "manual";
+            /** Artifact Name */
+            artifact_name: string;
+            /** Bytes */
+            bytes: number;
+            /** Sha256 Head */
+            sha256_head: string;
+            quality: components["schemas"]["VersionQuality"];
+        };
+        /**
+         * VersionQuality
+         * @description 版本归档时刻的质量快照（api.md §3.7）。
+         *
+         *     **只记录不门禁**：``pipeline_ok=false``（如 ``check_verdict=needs_fix``）的版本照样
+         *     可下载，前端黄标；归档不看质量，它只如实记下发布那一刻详情端点说的结论
+         *     （``views.quality_status`` 的同一实现）。
+         */
+        VersionQuality: {
+            /** Check Verdict */
+            check_verdict: string;
+            /** Pipeline Ok */
+            pipeline_ok: boolean;
+        };
+        /**
+         * VersionsResponse
+         * @description ``GET /documents/{did}/versions``：版本清单 + 当前编译上下文（api.md §3.7）。
+         *
+         *     ``items`` **新 → 旧**；``current_revision``/``stale`` 取自 ``compile``（§3.2）：当前
+         *     可下载的那一版不是清单里的最新行而**恒**是 ``compile.artifact``（``output/`` 的最新
+         *     发布）。``items`` 为空 = 从没编译成功过（不是错误）。
+         */
+        VersionsResponse: {
+            /** Did */
+            did: string;
+            /**
+             * Current Revision
+             * @default 0
+             */
+            current_revision: number;
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+            /**
+             * Items
+             * @default []
+             */
+            items: components["schemas"]["VersionItem"][];
         };
     };
     responses: never;
@@ -2125,6 +2233,86 @@ export interface operations {
             };
             /** @description candidate_decided */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_versions_api_v1_documents__did__versions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文档 id：workdir 目录名（单段，解析结果必须在服务根目录内） */
+                did: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionsResponse"];
+                };
+            };
+            /** @description document_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_version_api_v1_documents__did__versions__revision__pdf_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文档 id：workdir 目录名（单段，解析结果必须在服务根目录内） */
+                did: string;
+                /** @description 版本号 = 该版本的编译 revision（十进制整数；来自 `GET /versions` 的 `items[].revision`） */
+                revision: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 该版本的 PDF 字节 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": unknown;
+                };
+            };
+            /** @description document_not_found / version_not_found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

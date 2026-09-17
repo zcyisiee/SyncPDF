@@ -6,6 +6,9 @@
  * - 旧产物（stale）与编译失败（failed）**仍可下载**，但徽标显式写「比草稿旧」/「编译失败 ·
  *   仍是 r{n}」——客户端落盘名带 `r{artifact.revision}` 后缀（仅前端改名，服务端产物名不动）；
  * - 质量徽标只有 `quality.pipeline_ok` 才绿，`needs_fix` 一律黄标「检查未通过」。
+ *
+ * W12 只加一个入口：这条链接跳到归档视图（`#/d/:did/archive`，§3.7）下载任一历史版本。
+ * 主下载仍走 `output/<artifact.name>`（服务端发布的语义一个字不改）。
  */
 import { artifactUrl } from '../../lib/preview';
 import {
@@ -15,6 +18,7 @@ import {
   type CompileSummary,
   type QualitySummary,
 } from '../../lib/download';
+import { archiveHash } from '../../lib/versions';
 import { cn } from '../../lib/cn';
 import { StatusBadge } from '../ui/StatusBadge';
 import { Tooltip } from '../ui/Tooltip';
@@ -74,6 +78,14 @@ export function DownloadButton({ did, compile, quality }: DownloadButtonProps) {
           </span>
         </Tooltip>
       )}
+      <a
+        data-od-id="download-history"
+        href={archiveHash(did)}
+        title="查看版本归档：任一历史版本都能下载（质量状态随版本记录）"
+        className="text-tiny leading-none tracking-[0.02em] text-ink-3 underline decoration-hair-2 underline-offset-2 hover:text-ink"
+      >
+        历史版本
+      </a>
     </div>
   );
 }

@@ -222,6 +222,10 @@ class JobRecord(BaseModel):
     requested_scope: str | None = None
     effective_scope: str | None = None
     downgrade_reason: str | None = None
+    #: 这次 job 的**触发原因**（只有 ``compile`` 有值，W12）：``debounce`` = 草稿保存后
+    #: 服务端防抖自动编译，``manual`` = 显式 ``POST /jobs {action:"compile"}``；其它 action
+    #: （以及重启恢复留下的历史记录）为 ``None``。版本归档用它记 ``trigger``（api.md §3.7）。
+    trigger: Literal["debounce", "manual"] | None = None
     #: ``retranslate``（W11）的段落 id 与候选 id：job 与候选一一对应（其它 action 为
     #: ``None``）。候选行在提交时就建好了，这两个字段是 job 侧的回链（前端从 job 找到
     #: 候选、或从候选找到 job 都不需要额外请求）。
@@ -367,6 +371,7 @@ class JobRegistry:
         requested_scope: str | None = None,
         effective_scope: str | None = None,
         downgrade_reason: str | None = None,
+        trigger: str | None = None,
         paragraph_id: str | None = None,
         candidate_id: str | None = None,
     ) -> JobRecord:
@@ -383,6 +388,7 @@ class JobRegistry:
             requested_scope=requested_scope,
             effective_scope=effective_scope,
             downgrade_reason=downgrade_reason,
+            trigger=trigger,
             paragraph_id=paragraph_id,
             candidate_id=candidate_id,
         )
@@ -491,6 +497,7 @@ class JobRegistry:
             "interrupted_reason",
             "requested_scope",
             "effective_scope",
+            "trigger",
             "paragraph_id",
             "candidate_id",
         ):

@@ -47,6 +47,7 @@ from babeldoc_tools.serve.schemas import JOB_ACTIONS_IMPLEMENTED
 from babeldoc_tools.serve.schemas import JobAccepted
 from babeldoc_tools.serve.schemas import JobCreateRequest
 from babeldoc_tools.serve.store import DocumentStore
+from babeldoc_tools.serve.versions import TRIGGER_MANUAL
 
 __all__ = [
     "FORBIDDEN_JOB_FIELDS",
@@ -168,6 +169,9 @@ def jobs_router(
                 did,
                 scope=payload.scope or "full",
                 base_revision=payload.base_revision,
+                # 显式 POST 的触发原因（防抖自动编译走 CompileService 内部的
+                # debounce 分支）；版本归档靠它区分自动/手动（api.md §3.7）。
+                trigger=TRIGGER_MANUAL,
             )
         else:
             _reject_compile_only_fields(payload)

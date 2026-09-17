@@ -526,6 +526,7 @@ class JobRunner:
         requested_scope: str | None = None,
         effective_scope: str | None = None,
         downgrade_reason: str | None = None,
+        trigger: str | None = None,
         paragraph_id: str | None = None,
         candidate_id: str | None = None,
     ) -> JobRecord:
@@ -567,6 +568,7 @@ class JobRunner:
                 requested_scope=requested_scope,
                 effective_scope=effective_scope,
                 downgrade_reason=downgrade_reason,
+                trigger=trigger,
                 paragraph_id=paragraph_id,
                 candidate_id=candidate_id,
             )

@@ -5,6 +5,9 @@
 因为真 build 需要 LaTeX + 完整 IR（分钟级），而本轮验收点是 serve 层的隔离/发布/回滚/
 防抖/并发语义。真 build 的那一条在 ``tmp/`` 里的真实 workdir 副本上做冒烟（见 W09 报告）。
 
+W12 的版本归档（发布成功后归档 + 失败/取消不归档 + ``trigger``）也在这里覆盖：归档钩子
+长在 ``settle_compile`` 的成功分支上，用同一套 stub 才验得动。
+
 stub 脚本用 ``control/mode`` 控制四种结局：
 
 - ``ok``：写 PDF + ``ok=true`` 信封 + exit 0；
@@ -18,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import os
 import pickle
@@ -686,3 +690,137 @@ def test_new_root_gets_no_state_files(root):
     before = sorted(path.name for path in (root / "alpha").rglob("*"))
     create_app(DocumentStore.for_root(root))
     assert sorted(path.name for path in (root / "alpha").rglob("*")) == before
+
+
+# --------------------------------------------------------------------------- #
+# W12：发布后归档成版本（api.md §3.7）
+# --------------------------------------------------------------------------- #
+def version_pdf_path(root: Path, revision: int, did: str = "alpha") -> Path:
+    return workdir(root, did) / STATE_DIR / "versions" / f"{revision}.pdf"
+
+
+def version_items(root: Path, did: str = "alpha") -> list[dict]:
+    """版本清单的 ``items``（升序）；清单缺失 → 空列表。"""
+    path = workdir(root, did) / STATE_DIR / "versions.json"
+    if not path.is_file():
+        return []
+    return json.loads(path.read_text(encoding="utf-8"))["items"]
+
+
+def test_publish_archives_a_version_with_the_published_facts(client, root):
+    patch_draft(client, base=0, layout={"scale_cap": 0.9})
+    wait_job(client, start_compile(client), {"succeeded"})
+
+    items = version_items(root)
+    assert [row["revision"] for row in items] == [1]
+    row = items[0]
+    assert row["trigger"] == "manual"  # 显式 POST compile
+    assert row["artifact_name"] == PDF_NAME
+    assert row["bytes"] == len(PDF_OK)
+    assert row["sha256_head"] == hashlib.sha256(PDF_OK).hexdigest()
+    # quality 只记录不门禁：这份 workdir 的 run_state 没有门禁结论 → not_available/false
+    assert row["quality"] == {"check_verdict": "not_available", "pipeline_ok": False}
+    # 归档文件就是发布出去的那一份字节 + 下一次发布也不会换掉它
+    assert version_pdf_path(root, 1).read_bytes() == PDF_OK
+    assert version_pdf_path(root, 1).stat().st_ino == output_pdf(root).stat().st_ino
+
+    listed = client.get(f"{API}/documents/alpha/versions").json()
+    assert listed["current_revision"] == 1
+    assert [item["revision"] for item in listed["items"]] == [1]
+    download = client.get(f"{API}/documents/alpha/versions/1/pdf")
+    assert download.status_code == 200
+    assert download.content == PDF_OK
+    assert download.headers["content-disposition"] == (
+        'inline; filename="paper.no_watermark.zh.mono.r1.pdf"'
+    )
+
+
+def test_each_publish_keeps_its_own_version_bytes(client, root, control):
+    """两次编译 → 两版都在；下载 r1 拿到的仍是 r1 当时的字节与指纹。"""
+    patch_draft(client, "第一版", base=0)
+    wait_job(client, start_compile(client), {"succeeded"})
+    first_sha = version_items(root)[0]["sha256_head"]
+
+    patch_draft(client, "第二版", base=1)
+    set_mode(control, "quality_fail")  # 第二版产物字节不同（门禁不过但编译成功）
+    wait_job(client, start_compile(client), {"succeeded"})
+
+    items = version_items(root)
+    assert [row["revision"] for row in items] == [1, 2]
+    assert items[1]["sha256_head"] == hashlib.sha256(PDF_QUALITY).hexdigest()
+    assert items[1]["sha256_head"] != first_sha
+    assert version_pdf_path(root, 1).read_bytes() == PDF_OK
+    assert version_pdf_path(root, 2).read_bytes() == PDF_QUALITY
+    assert output_pdf(root).read_bytes() == PDF_QUALITY  # output/ 仍是最新发布
+    assert client.get(f"{API}/documents/alpha/versions/1/pdf").content == PDF_OK
+    # 详情/下载主路径（W09/W10 语义）不变：artifact 恒指最新发布
+    body = detail(client)
+    assert body["compile"]["revision"] == 2
+    assert body["compile"]["artifact"]["name"] == PDF_NAME
+    listed = client.get(f"{API}/documents/alpha/versions").json()
+    assert [item["revision"] for item in listed["items"]] == [2, 1]
+
+
+def test_failed_compile_does_not_archive(client, root, control):
+    patch_draft(client, base=0)
+    wait_job(client, start_compile(client), {"succeeded"})
+    assert [row["revision"] for row in version_items(root)] == [1]
+
+    patch_draft(client, "第二版", base=1)
+    set_mode(control, "build_fail")
+    wait_job(client, start_compile(client), {"failed"})
+
+    assert [row["revision"] for row in version_items(root)] == [1]  # 没多一行
+    assert not version_pdf_path(root, 2).exists()
+    assert version_pdf_path(root, 1).read_bytes() == PDF_OK  # 上一版仍可下载
+
+
+def test_canceled_compile_does_not_archive(client, root, control):
+    patch_draft(client, base=0)
+    wait_job(client, start_compile(client), {"succeeded"})
+
+    patch_draft(client, "第二版", base=1)
+    set_mode(control, "sleep")
+    job_id = start_compile(client)
+    wait_job(client, job_id, {"running"})
+    client.post(f"{API}/jobs/{job_id}/cancel")
+    wait_job(client, job_id, {"canceled"})
+
+    assert [row["revision"] for row in version_items(root)] == [1]
+    assert not version_pdf_path(root, 2).exists()
+
+
+def test_trigger_marks_debounce_and_manual_compiles(client, root, monkeypatch):
+    """``trigger`` 区分防抖自动与显式 POST（job 记录与版本清单两头都有）。"""
+    monkeypatch.setattr(compile_mod, "DEBOUNCE_SECONDS", 0.2)
+    patch_draft(client, "自动编译的草稿", base=0)
+    wait_compile_status(client, statuses={"ok"})
+
+    # 第二次：关掉防抖（拉长窗口），只用显式 POST
+    monkeypatch.setattr(compile_mod, "DEBOUNCE_SECONDS", 60.0)
+    patch_draft(client, "手动编译的草稿", base=1)
+    wait_job(client, start_compile(client), {"succeeded"})
+
+    jobs = compile_jobs(client)
+    assert [job["trigger"] for job in jobs] == ["manual", "debounce"]  # 新 → 旧
+    assert [row["trigger"] for row in version_items(root)] == ["debounce", "manual"]
+    listed = client.get(f"{API}/documents/alpha/versions").json()
+    assert [item["trigger"] for item in listed["items"]] == ["manual", "debounce"]
+
+
+def test_archive_failure_still_reports_a_successful_publish(client, root, monkeypatch):
+    """归档出错不改编译结论（发布已经发生）：job 照旧 succeeded、产物照旧可下载。"""
+    from babeldoc_tools.serve import versions  # noqa: PLC0415 - 只在这个用例里替换它
+
+    def boom(*_args, **_kwargs):
+        raise OSError("模拟磁盘满：清单写不进去")
+
+    monkeypatch.setattr(versions, "archive", boom)
+    patch_draft(client, base=0)
+    record = wait_job(client, start_compile(client), {"succeeded"})
+
+    assert record["exit_code"] == 0
+    assert output_pdf(root).read_bytes() == PDF_OK
+    assert read_compile_state(workdir(root))["status"] == "ok"
+    assert version_items(root) == []  # 归档失败 → 历史里少这一版（日志里有告警）
+    assert detail(client)["compile"]["artifact"]["revision"] == 1

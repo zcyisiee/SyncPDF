@@ -16,9 +16,11 @@
   :mod:`babeldoc_tools.serve.routers.draft`）
 - ``POST /api/v1/documents``（W08 上传，见 :mod:`babeldoc_tools.serve.routers.documents`）
   与 ``GET/PUT /api/v1/profiles``（W08，见 :mod:`babeldoc_tools.serve.routers.profiles`）
+- ``GET /api/v1/documents/{did}/versions[/{revision}/pdf]``（W12 版本归档，见
+  :mod:`babeldoc_tools.serve.routers.versions`）
 - ``GET /openapi.json`` / ``GET /docs``（FastAPI 自带）
 
-后续端点（版本、词表…）在 ``docs/frontend/api.md`` 里冻结形状，由 W11+ 实现 ——
+后续端点（词表…）在 ``docs/frontend/api.md`` 里冻结形状，由 W13 实现 ——
 这里不写假成功 stub。
 
 本模块在 import 时即需要 ``fastapi``（web extra）；``bdt serve --help`` 与其它
@@ -55,6 +57,7 @@ from babeldoc_tools.serve.routers.draft import draft_router
 from babeldoc_tools.serve.routers.events import events_router
 from babeldoc_tools.serve.routers.jobs import jobs_router
 from babeldoc_tools.serve.routers.profiles import profiles_router
+from babeldoc_tools.serve.routers.versions import versions_router
 from babeldoc_tools.serve.runner import JobRunner
 from babeldoc_tools.serve.schemas import API_PREFIX
 from babeldoc_tools.serve.schemas import ErrorBody
@@ -77,6 +80,8 @@ _TOOL_ERROR_STATUS = {
     "events_unavailable": 404,
     # 产物下载：不在白名单内 / 不存在 / 路径或符号链接越界（同一个码，不泄露存在性）
     "artifact_not_found": 404,
+    # W12 版本归档：版本不在清单里 / 文件名不是数字 / 文件缺失（同一个码，不泄露存在性）
+    "version_not_found": 404,
     # job：同文档已有活动 job（409 是可重试冲突）；未知 job / profile；未实现的 action
     "document_busy": 409,
     "job_not_found": 404,
@@ -234,6 +239,7 @@ def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI
     app.include_router(jobs_router(store, runner, compiles))
     app.include_router(draft_router(runner, compiles))
     app.include_router(candidates_router(candidates))
+    app.include_router(versions_router(store))
     app.include_router(profiles_router(store))
 
     return app

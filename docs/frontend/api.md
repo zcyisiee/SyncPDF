@@ -63,6 +63,7 @@ curl -sS http://127.0.0.1:<port>/api/v1/health
 | 404 | `paragraphs_unavailable` | `paragraphs` 四份段落产物都不存在（W02） |
 | 404 | `events_unavailable` | 没有任何 run 归档，或指定的 `run_id` 不存在（W03） |
 | 404 | `artifact_not_found` | 产物不在白名单内或不存在（不泄露存在性，W03） |
+| 404 | `version_not_found` | 版本不在归档清单里 / 版本号不是十进制数字 / 文件缺失或越界（同一个码，W12） |
 | 405 | `method_not_allowed` | 方法不允许（带 `Allow` 头） |
 | 409 | `revision_conflict` | 草稿乐观并发失败（或 `PATCH /draft` / `action=compile` 的 `base_revision` 不符），`detail.current_revision` 给最新值（W09） |
 | 409 | `document_busy` | 同文档已有活动 job（W07）；任务期间草稿写端点也返回它（W09） |
@@ -143,6 +144,8 @@ W01 **只**有这两个端点；没有写端点、没有假 stub。校验（越�
 | GET | `/api/v1/documents/{did}/events` | 分页事件（§1.3） | 已实现（W03） |
 | GET | `/api/v1/documents/{did}/events/stream` | SSE（§1.4） | 已实现（W03） |
 | GET | `/api/v1/documents/{did}/artifacts[/{name}]` | 清单 + 白名单 Range 下载 | 已实现（W03） |
+| GET | `/api/v1/documents/{did}/versions` | 版本归档清单（新 → 旧）+ 当前编译上下文 | 已实现（W12） |
+| GET | `/api/v1/documents/{did}/versions/{r}/pdf` | 下载任一历史版本（`inline`，`<名>.r<r>.pdf`） | 已实现（W12） |
 
 阶段名固定为 `parse` → `translate` → `apply` → `build` → `check` → `review` → `report`
 （`babeldoc_tools/run.py::STAGES`）。
@@ -185,6 +188,9 @@ W01 **只**有这两个端点；没有写端点、没有假 stub。校验（越�
 - 同一个 revision 只覆盖该次编译**发布的那批文件**（`compile.json.files`，当前=不 `--dual`
   的 mono）。`output/` 里可能有更早 `bdt run --dual` 留下的 dual PDF，它**不属于**这个
   revision（如果 W10 要 dual 预览，得让 compile 也带 `--dual`，不在 W09 范围）。
+- **历史版本**（W12）不在这里：每次成功发布自动归档一份到 `<did>/.bdt-serve/versions/`，
+  由 §3.7 的两条端点给出。`output/` 的最新发布仍是下载键主路径（W10 的下载按钮不改），
+  §3.7 只加「任一历史版本」。
 
 ### 3.3 草稿与 revision（已实现 W09）
 
@@ -271,6 +277,9 @@ POST /api/v1/documents/{did}/jobs
 - `profile` 只接受 provider profile id；**不接受**客户端任意命令、密钥或 shell 字符串。
 - 同文档同时最多 1 个活动 job（冲突 `409 document_busy`）；跨文档并发但全局限流。
 - `GET /api/v1/jobs/{jid}`、`POST /api/v1/jobs/{jid}/cancel`、`GET /api/v1/documents/{did}/jobs`（`?status=` 按状态过滤，新 → 旧）。
+- job 记录里的 `trigger`（W12）**只有 `action=compile` 有值**：`debounce` = 草稿保存后的服务端
+  防抖自动编译，`manual` = 显式 `POST /jobs {action:"compile"}`；其它 action（含重启恢复留下的
+  历史记录）为 `null`。版本归档靠它记每一版是怎么来的（§3.7）。
 - 取消：终止整个进程组（连带 translator 孙进程），清理后才释放文档锁；明确不自动重跑收费调用。
 - job 状态持久化（重启后核对进程身份）；不凭孤立 PID 发信号。
 - `GET /jobs/{jid}` 的 `envelope` **已脱敏**（W08）：`data.config.translator/reviewer` 的命令
@@ -288,7 +297,7 @@ POST /api/v1/documents/{did}/jobs
 | `GET/PUT /profiles` | provider profiles（仅名字对前端可见） | 已实现（W08） |
 | `GET/PATCH/DELETE /documents/{did}/draft` | 草稿读写（§3.3） | 已实现（W09） |
 | `POST /documents/{did}/paragraphs/{pid}/retranslate`、`GET …/candidates`、`POST …/candidates/{cid}/adopt\|reject` | 重译候选：生成不改译文、采用进草稿（§3.6） | 已实现（W11） |
-| `GET/POST /documents/{did}/versions`、`POST /documents/{did}/versions/{vid}/rollback` | 版本归档与回滚 | W12 |
+| `GET /documents/{did}/versions[/{revision}/pdf]` | 版本归档清单 + 任一版本下载（§3.7） | 已实现（W12） |
 | `/glossary...` | 词表 CRUD（全局 + 文档级）、CSV、命中计数 | W13 |
 
 上表**尚未实现**的行：调用它们会得到 `404 not_found`（统一错误信封），不要在前端把
@@ -412,6 +421,59 @@ argv，客户端永远不传命令/密钥（带了 → `422 forbidden_field`）�
 - 候选**不影响** `GET /paragraphs` / `GET /documents/{did}`（§3.1/§3.2）：采用之前，预览、
   详情、编译产物里都看不到候选译文；采用之后，草稿 revision 变了，`compile.stale` 才是
   那个"该重新编译"的真信号。
+
+### 3.7 版本归档（已实现 W12）
+
+每次**成功**的编译发布（`settle_compile` 的成功分支）都把那一份 PDF 自动归档成一个版本：
+`<did>/.bdt-serve/versions/<revision>.pdf`（同一 revision 一份）+ 往
+`<did>/.bdt-serve/versions.json` 追加一行。`revision` = 那次编译捕获的草稿 revision
+（与 `compile.revision` 同源）。归档**不改发布语义**：`output/` 的最新 PDF 仍是下载键主路径
+（W10 的下载按钮不改，只是多了「历史版本」入口），versions 是历史。
+
+```json
+GET /api/v1/documents/{did}/versions
+→ 200 {
+  "did": "paper",
+  "current_revision": 3,
+  "stale": true,
+  "items": [
+    {"revision": 3, "created_at": "2026-09-17T15:54:45.123Z", "trigger": "debounce",
+     "artifact_name": "paper.mono.pdf", "bytes": 123456,
+     "sha256_head": "3f1c…", "quality": {"check_verdict": "pass", "pipeline_ok": true}},
+    {"revision": 2, "created_at": "2026-09-17T15:20:03.004Z", "trigger": "manual",
+     "artifact_name": "paper.mono.pdf", "bytes": 121000,
+     "sha256_head": "9ab0…", "quality": {"check_verdict": "needs_fix", "pipeline_ok": false}}
+  ]
+}
+
+GET /api/v1/documents/{did}/versions/2/pdf
+→ 200 application/pdf（Content-Disposition: inline; filename="paper.mono.r2.pdf"）
+→ 404 {"error": {"code": "version_not_found", "message": "…", "detail": {"revision": "…"}}}
+```
+
+- `items` **新 → 旧**（清单文件本身是 `revision` 升序）：`revision`、`created_at`（归档时刻，
+  UTC ISO8601 毫秒 + `Z`）、`trigger`、`artifact_name`（发布时的**裸**产物名）、`bytes`、
+  `sha256_head`（该版本文件的**整文件** sha256：核对「下载到的就是当时那一份」。字段名沿用
+  W12 冻结形状；取整文件而不是只取头部，是因为实测同一文档两版编译产物的**前 19MB 逐字节相同**，
+  头部指纹区分不了版本。分块读，65MB 约 40ms）。
+- `current_revision` / `stale` 与详情端点的 `compile`（§3.2）**同一判据**：当前可下载的那一版
+  恒是 `compile.artifact`（`output/` 的最新发布），不是清单里的最新行；`stale = 草稿 revision >
+  current_revision`。前端据此高亮「当前版本」并显式提示「有未编译修改」。
+- `trigger` ∈ `debounce`（草稿保存后服务端 1.5s 防抖自动编译）/ `manual`（显式
+  `POST /jobs {action:"compile"}`）；同一来源也记在 job 记录的 `trigger` 字段（§3.4）。
+- `quality` 是**发布时刻**的质量快照（与详情端点同一实现），**只记录不门禁**：
+  `check_verdict=needs_fix` / `pipeline_ok=false` 的版本照样归档、照样可下载（前端黄标，
+  与 W10 的徽标规则一致）。归档不看质量，编译成功 ≠ 质量通过。
+- **保留最近 50 个版本**：超出删最旧的（版本文件 + 清单行）。被删的永远是最旧的，因此
+  不会删掉 `current_revision` 指向的那一版（它是最大值）。
+- **读边界**：`.bdt-serve/versions/` **不在** W03 的产物白名单里（`GET /artifacts` 清单里
+  永远不会出现 versions），版本 PDF 只能经 `…/versions/{r}/pdf` 读：只认清单里有、且在
+  `versions/` 目录里的十进制数字名文件；非数字 / 不在清单 / 文件缺失 / 符号链接越界一律
+  404 `version_not_found`（同一个码，不泄露存在性）。下载响应是 `inline`（由前端 `<a download>`
+  决定是否落盘），服务端给的名字是 `<原产物名去 .pdf>.r<revision>.pdf`。
+- **持久化**：清单与版本文件都在盘上，serve 重启后照旧（重启不影响历史）。从没编译成功过
+  → `200` + `items: []` + `current_revision: 0`（不是 404）。失败/取消/超时的编译**不归档**：
+  上一版仍可下载，历史不多一行。
 
 ## 4. 前端消费注意
 

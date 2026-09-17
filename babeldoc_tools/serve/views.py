@@ -56,6 +56,7 @@ __all__ = [
     "geometry_layout",
     "geometry_parse",
     "paragraphs",
+    "quality_status",
     "stage_state",
 ]
 
@@ -376,6 +377,19 @@ def _fix_rounds(recorded: dict, reviewer: dict) -> dict[str, int]:
     return dict(_NO_FIX_ROUNDS)
 
 
+def quality_status(reader: WorkdirReader) -> QualityStatus:
+    """``quality`` 字段的**唯一实现**（详情端点与版本归档快照共用）。
+
+    - 详情端点：``GET /documents/{did}`` 的 ``quality``；
+    - 版本归档：发布时刻的质量快照（W12，§3.7 ``quality``）—— 归档**只记录不门禁**
+      （``needs_fix`` 的版本照样可下载，前端黄标）。
+
+    两处同源：归档记下的就是"那一刻详情端点会报的结论"（``reader`` 内部缓存，
+    重复读 ``run_state`` 不会多一次 IO）。
+    """
+    return _quality(reader, reader.run_state())
+
+
 def _quality(reader: WorkdirReader, state: dict) -> QualityStatus:
     """``quality``：门禁结论 + reviewer 结论（api.md §3.2，编译状态分开报）。"""
     recorded = state.get("quality") if isinstance(state.get("quality"), dict) else {}
@@ -433,7 +447,7 @@ def document_detail(reader: WorkdirReader, did: str) -> DocumentDetail:
             source=_as_str(state.get("pdf")), outputs=_pdf_outputs(reader, state)
         ),
         config=state.get("config") if isinstance(state.get("config"), dict) else None,
-        quality=_quality(reader, state),
+        quality=_quality(reader, state),  # 与 quality_status 同一实现（详情直接传已读的 state）
         # 编译状态的真源是 <workdir>/.bdt-serve/compile.json（W09）；从来没有编译过
         # → status=none/revision=0。stale 由当前草稿 revision 算（api.md §3.2）。
         compile=compile_status(reader.workdir),

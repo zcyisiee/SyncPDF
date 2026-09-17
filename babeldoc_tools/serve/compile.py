@@ -46,6 +46,7 @@ from babeldoc.tools.agent import layout_overrides
 from babeldoc.tools.agent import markdown_view
 
 from babeldoc_tools.common import ToolError
+from babeldoc_tools.serve import versions
 from babeldoc_tools.serve.draft import DraftRegistry
 from babeldoc_tools.serve.draft import read_draft
 from babeldoc_tools.serve.jobs import JobRecord
@@ -53,6 +54,8 @@ from babeldoc_tools.serve.jobs import utc_now
 from babeldoc_tools.serve.schemas import CompileStatus
 from babeldoc_tools.serve.store import STATE_DIR
 from babeldoc_tools.serve.store import DocumentStore
+from babeldoc_tools.serve.versions import TRIGGER_DEBOUNCE
+from babeldoc_tools.serve.versions import TRIGGER_MANUAL
 from babeldoc_tools.translate import merge_translated_markdown
 
 if TYPE_CHECKING:
@@ -381,8 +384,11 @@ class CompilePlan:
     workdir: Path
     #: 隔离副本（编译实际发生的地方）。
     isolated: Path
-    #: 这次编译捕获的草稿 revision（写进 compile.json）。
+    #: 这次编译捕获的草稿 revision（写进 compile.json / 版本归档）。
     revision: int
+    #: 触发原因（``debounce`` / ``manual``，来自 job 记录）：成功发布后归档这一版时
+    #: 记进 ``versions.json``（api.md §3.7）。
+    trigger: str
     #: 物化的段落数（诊断用）。
     materialized: int
     #: 副本内的源 PDF 路径。
@@ -448,6 +454,7 @@ def prepare_compile(record: JobRecord, workdir: Path | str) -> CompilePlan:
             workdir=workdir,
             isolated=isolated,
             revision=doc.revision,
+            trigger=record.trigger or TRIGGER_MANUAL,
             materialized=materialized,
             source_pdf=destination,
             cache_dirs=tuple(cache_dirs),
@@ -596,6 +603,34 @@ def _publish(plan: CompilePlan, pdfs: list[Path]) -> dict:
     return artifact
 
 
+def _archive_version(plan: CompilePlan, artifact: dict) -> None:
+    """把刚发布的那一版归档成历史版本（W12，``docs/frontend/api.md`` §3.7）。
+
+    调用点在 :func:`_publish` **之后**：PDF 已经原子替换到 ``output/``，归档只给同一份
+    字节再加一个名字（硬链接，见 :func:`babeldoc_tools.serve.versions.archive`）。
+
+    **尽力而为**：归档自身出错（磁盘满、清单损坏、quality 读不出来）既不能回滚发布
+    （那才是真正的破坏），也不该把一次成功的编译报成失败 —— 记一条 stderr 日志，job
+    照常 ``succeeded``、``output/`` 的产物照旧可下载。
+    """
+    name = artifact.get("name")
+    if not isinstance(name, str) or not name:
+        _log(f"版本归档跳过 {plan.did} r{plan.revision}：发布信息里没有产物名")
+        return
+    try:
+        versions.archive(
+            plan.workdir,
+            plan.revision,
+            plan.trigger,
+            published=plan.workdir / BUILD_OUTPUT_DIR / name,
+        )
+    except Exception as exc:  # noqa: BLE001 - 归档是附带的账，不能反过来改编译结论
+        _log(
+            f"版本归档失败 {plan.did} r{plan.revision}：{type(exc).__name__}: {exc}"
+            "（发布已完成，产物照旧可下载；历史里少这一版）"
+        )
+
+
 def settle_compile(
     plan: CompilePlan,
     *,
@@ -640,6 +675,7 @@ def settle_compile(
                 message=f"build 阶段 ok，但副本 {BUILD_OUTPUT_DIR}/ 下没有 PDF",
             )
         artifact = _publish(plan, pdfs)
+        _archive_version(plan, artifact)
         return CompileOutcome(True, "ok", plan.revision, artifact, None)
     except Exception as exc:  # noqa: BLE001 - 收尾自身出错也必须落终态
         with contextlib.suppress(Exception):
@@ -755,7 +791,9 @@ class CompileService:
             _log(f"防抖跳过 {did}：已有活动 job {active.job_id}（{active.status}）")
             return
         try:
-            record = await self.request_compile(did, scope="full")
+            record = await self.request_compile(
+                did, scope="full", trigger=TRIGGER_DEBOUNCE
+            )
         except ToolError as exc:
             _log(f"防抖编译未提交 {did}：{exc.code} {exc.message}")
             return
@@ -766,11 +804,14 @@ class CompileService:
         self,
         did: str,
         *,
+        trigger: str,
         scope: str = "full",
         base_revision: int | None = None,
     ) -> JobRecord:
         """建一个 compile job（同文档串行、全局限流由 :class:`JobRunner` 管）。
 
+        ``trigger`` 是**必填**的：``debounce``（防抖自动）/ ``manual``（显式 POST）——
+        版本归档靠它记这一版是怎么来的（api.md §3.7）；给默认值会让调用方忘传时静默错记。
         ``base_revision``（显式 POST 可带）与当前草稿不一致 → ``409 revision_conflict``：
         请求要编译的那一版已经不是最新版，宁可让前端刷新重试。v1 的页级编译按已批准
         设计**回退全量**，把 requested/effective/reason 记进 job 记录（api.md §3.4）。
@@ -801,4 +842,5 @@ class CompileService:
             requested_scope=requested,
             effective_scope=effective,
             downgrade_reason=reason,
+            trigger=trigger,
         )

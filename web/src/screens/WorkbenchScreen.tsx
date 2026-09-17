@@ -3,7 +3,7 @@ import { compileUnsettled } from '../lib/download';
 import { isRunLive } from '../lib/events';
 import { jobCardMode } from '../lib/jobs';
 import { DOCUMENT_LIVE_REFETCH_MS, useDocument, useJobs } from '../lib/queries';
-import { WORKBENCH_VIEWS, type WorkbenchView } from '../lib/routing';
+import type { WorkbenchView } from '../lib/routing';
 import { Button, LinkButton } from '../components/ui/Button';
 import { ErrorCard } from '../components/ui/ErrorCard';
 import { ScrollArea } from '../components/ui/ScrollArea';
@@ -15,6 +15,7 @@ import { Timeline } from '../components/shell/Timeline';
 import { ViewRail } from '../components/shell/ViewRail';
 import { ActiveJobCard } from '../components/jobs/ActiveJobCard';
 import { StartJobCard } from '../components/jobs/StartJobCard';
+import { ArchiveView } from '../components/archive/ArchiveView';
 import { PreviewArea } from '../components/preview/PreviewArea';
 import { useEventWindow } from '../components/events/useEventWindow';
 import { useTimelineStages } from '../components/events/useTimelineStages';
@@ -55,7 +56,6 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
       timeline.live || cardMode === 'active' || compileUnsettled(doc?.compile),
   });
   const doc = documentQuery.data;
-  const activeView = WORKBENCH_VIEWS.find((candidate) => candidate.id === view) ?? WORKBENCH_VIEWS[0];
   const viewrailWidth = useUiStore((state) => state.viewrailWidth);
   const inspectorWidth = useUiStore((state) => state.inspectorWidth);
   const timelineHeight = useUiStore((state) => state.timelineHeight);
@@ -131,18 +131,9 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
               <PreviewArea did={did} view={view} />
             </div>
           ) : (
-            <div
-              data-od-id="view-placeholder"
-              className="grid min-h-0 flex-1 place-items-center overflow-auto p-s6"
-            >
-              <div className="max-w-[42ch] text-center">
-                <p className="font-serif text-md font-medium leading-[1.4] text-ink-2">
-                  {activeView.label}视图待 W12 接入
-                </p>
-                <p className="mt-s3 font-mono text-tiny text-ink-4">
-                  #/d/{did}/{view}
-                </p>
-              </div>
+            // 归档视图（W12）：预览区换成版本列表（右侧面板给同一份数据的摘要）。
+            <div className="min-h-0 flex-1" data-od-id="archive-panel">
+              <ArchiveView did={did} compile={doc?.compile} />
             </div>
           )}
         </section>

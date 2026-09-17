@@ -28,6 +28,7 @@ import type {
   ParagraphItem,
   ProfileListItem,
   StageStateResponse,
+  VersionsResponse,
 } from '../api/types';
 import { ApiError, apiGet, apiPatch, apiPost, apiUpload } from './api';
 import {
@@ -64,6 +65,7 @@ export const queryKeys = {
   draft: (did: string) => ['documents', did, 'draft'] as const,
   paragraphs: (did: string) => ['documents', did, 'paragraphs'] as const,
   candidates: (did: string, pid: string) => ['documents', did, 'paragraphs', pid, 'candidates'] as const,
+  versions: (did: string) => ['documents', did, 'versions'] as const,
 };
 
 /**
@@ -531,4 +533,27 @@ export function useRejectCandidateMutation(did: string, pid: string) {
 /** 供 UI 判断"这次失败是不是文件太大"（413 单独给文案）。 */
 export function isFileTooLarge(error: unknown): boolean {
   return error instanceof ApiError && (error.code === 'file_too_large' || error.status === 413);
+}
+
+// --------------------------------------------------------------------------- #
+// W12：版本归档（api.md §3.7）
+// --------------------------------------------------------------------------- #
+
+/**
+ * 版本归档清单（`GET /documents/{did}/versions`，新 → 旧 + 当前编译上下文）。
+ *
+ * `refetchMs > 0` 时按它轮询：归档视图在**编译未落定**（`compileUnsettled`）时给 2s
+ * —— 编译一发布就多出一版，轮询才看得到；编译一落定就停（与 `useDocument` 同一口径）。
+ * 从没编译成功过也有响应（`items: []`），所以不是错误、也没有 404 分支。
+ */
+export function useVersions(did: string | null, options: { refetchMs?: number } = {}) {
+  const refetchMs = options.refetchMs ?? 0;
+  return useQuery({
+    queryKey: queryKeys.versions(did ?? ''),
+    queryFn: () =>
+      apiGet<VersionsResponse>(`/documents/${encodeURIComponent(did ?? '')}/versions`),
+    staleTime: 5_000,
+    refetchInterval: refetchMs > 0 ? refetchMs : false,
+    enabled: did !== null && did !== '',
+  });
 }

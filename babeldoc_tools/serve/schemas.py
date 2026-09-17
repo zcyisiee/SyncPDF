@@ -118,6 +118,9 @@ __all__ = [
     "QualityStatus",
     "StageStateItem",
     "StageStateResponse",
+    "VersionItem",
+    "VersionQuality",
+    "VersionsResponse",
 ]
 
 
@@ -674,3 +677,57 @@ class CandidateJobAccepted(BaseModel):
     job_id: str
     status: Literal["queued"] = "queued"
     action: Literal["retranslate"] = "retranslate"
+
+
+# --------------------------------------------------------------------------- #
+# W12：版本归档（api.md §3.7）
+# ---------------------------------------------------------------------------
+class VersionQuality(BaseModel):
+    """版本归档时刻的质量快照（api.md §3.7）。
+
+    **只记录不门禁**：``pipeline_ok=false``（如 ``check_verdict=needs_fix``）的版本照样
+    可下载，前端黄标；归档不看质量，它只如实记下发布那一刻详情端点说的结论
+    （``views.quality_status`` 的同一实现）。
+    """
+
+    #: check 门禁结论（``pass`` / ``needs_fix`` / ``not_available``）。
+    check_verdict: str
+    #: 门禁与 reviewer 都 pass 才 true（与 :class:`QualityStatus` 同一口径）。
+    pipeline_ok: bool
+
+
+class VersionItem(BaseModel):
+    """一条版本归档（``<workdir>/.bdt-serve/versions.json`` 的条目 / §3.7 的列表元素）。
+
+    ``revision`` = 这次编译捕获的草稿 revision（与 ``compile.revision`` 同源）；
+    ``artifact_name`` 是发布时的**裸文件名**（前端据此给下载落盘名）。
+    """
+
+    revision: int
+    #: 归档时刻（UTC ISO8601，毫秒 + ``Z``）。
+    created_at: str
+    #: ``debounce``（草稿保存后的服务端自动编译）/ ``manual``（显式 POST compile）；
+    #: 词表在 :data:`babeldoc_tools.serve.versions.TRIGGERS`。
+    trigger: Literal["debounce", "manual"]
+    artifact_name: str
+    #: 归档文件字节数（发布那一刻的事实）。
+    bytes: int
+    #: 归档文件**前** 64KiB 的 sha256（指纹：核对下载到的就是当时那一份）。
+    sha256_head: str
+    quality: VersionQuality
+
+
+class VersionsResponse(BaseModel):
+    """``GET /documents/{did}/versions``：版本清单 + 当前编译上下文（api.md §3.7）。
+
+    ``items`` **新 → 旧**；``current_revision``/``stale`` 取自 ``compile``（§3.2）：当前
+    可下载的那一版不是清单里的最新行而**恒**是 ``compile.artifact``（``output/`` 的最新
+    发布）。``items`` 为空 = 从没编译成功过（不是错误）。
+    """
+
+    did: str
+    #: 最近一次成功发布的 revision（从没编译过 → 0）。
+    current_revision: int = 0
+    #: 草稿比 ``current_revision`` 新（有未编译修改）→ 前端显式提示。
+    stale: bool = False
+    items: list[VersionItem] = []

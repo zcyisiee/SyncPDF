@@ -28,6 +28,9 @@ export type CandidateItem = components['schemas']['CandidateItem'];
 export type CandidateJobAccepted = components['schemas']['CandidateJobAccepted'];
 export type CandidateListResponse = components['schemas']['CandidateListResponse'];
 export type CandidateRetranslateRequest = components['schemas']['CandidateRetranslateRequest'];
+export type VersionItem = components['schemas']['VersionItem'];
+export type VersionQuality = components['schemas']['VersionQuality'];
+export type VersionsResponse = components['schemas']['VersionsResponse'];
 
 /**
  * 统一错误信封（docs/frontend/api.md §1）。唯一手写形状：FastAPI 的 OpenAPI 不导出异常响应

@@ -266,10 +266,19 @@ HTTP 形状的单一事实来源是运行中服务的 `/openapi.json`（可读�
   `<did>/.bdt-serve/candidates.json` —— `agent/translated.md`、`draft.json`、`output/` 分毫不动；
   「采用」才把候选写成草稿 `target`（`revision+1`）并触发防抖编译，「拒绝」只改候选状态。
   translator 命令只来自 profile（客户端只传 profile id，命令/密钥字段一律 422）。
+- **版本归档**（`GET /api/v1/documents/{did}/versions`、`GET …/versions/{revision}/pdf`）：每次
+  **成功**的编译发布都把那一份 PDF 归档成一版（`<did>/.bdt-serve/versions/<revision>.pdf` + 清单
+  `<did>/.bdt-serve/versions.json`），保留最近 50 个（超出淘汰最旧的文件与清单行）。归档用
+  **硬链接**（零拷贝、不读字节、不影响发布的原子性）：下一次发布 `os.replace` 掉 `output/` 之后，
+  旧版本文件仍是当时那一份字节；失败/取消/超时的编译**不归档**，上一版仍可下载。清单里 `trigger`
+  记 `debounce`（防抖自动）/`manual`（显式 POST compile），`quality` 是发布时刻的质量快照
+  （**只记录不门禁**：`needs_fix` 的版本照样可下载，前端黄标）。归档目录**不在**产物白名单里 ——
+  `GET /artifacts` 清单永远不会出现 versions，版本 PDF 只能经上面那条专用端点读；
+  界面入口是归档视图 `#/d/<did>/archive`（下载按钮旁的「历史版本」）。
 
 查看已编译结果：`GET /api/v1/documents/{did}` 的 `compile` 字段（`status`/`revision`/
 `stale`/`artifact`），下载走 `GET /api/v1/documents/{did}/artifacts/{name}`（支持 Range，
-pdf.js 需要）。
+pdf.js 需要）；历史版本走 `GET /api/v1/documents/{did}/versions/{revision}/pdf`。
 
 ### Debug 工作台（诊断归档 + 只读查看器）
 

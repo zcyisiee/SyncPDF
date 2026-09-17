@@ -98,13 +98,45 @@ function mockDetail(did = DID, body: unknown = DETAIL, status = 200) {
 }
 
 /** 详情 + 产物清单（预览区要真数据：清单里没有产物 PDF 时落在占位卡上）。 */
-function mockDetailAndArtifacts(artifacts: unknown = []) {
+function mockDetailAndArtifacts(artifacts: unknown = [], extra: Record<string, unknown> = {}) {
   return mockApiFetch({
     [`/api/v1/documents/${DID}`]: () => jsonResponse(DETAIL),
     [`/api/v1/documents/${DID}/artifacts`]: () => jsonResponse(artifacts),
     [`/api/v1/documents/${DID}/stage-state`]: () => jsonResponse(STAGE_STATE),
     [`/api/v1/documents/${DID}/events?after_seq=0&limit=2000`]: () => jsonResponse(EVENTS_PAGE),
+    ...extra,
   });
+}
+
+/** 版本归档清单（§3.7）：两版，r3 是当前版本、r2 质量未过。 */
+const VERSIONS = {
+  did: DID,
+  current_revision: 3,
+  stale: true,
+  items: [
+    {
+      revision: 3,
+      created_at: '2026-09-17T15:54:45.123Z',
+      trigger: 'debounce',
+      artifact_name: 'paper.mono.pdf',
+      bytes: 2048,
+      sha256_head: 'a'.repeat(64),
+      quality: { check_verdict: 'pass', pipeline_ok: true },
+    },
+    {
+      revision: 2,
+      created_at: '2026-09-17T15:20:03.004Z',
+      trigger: 'manual',
+      artifact_name: 'paper.mono.pdf',
+      bytes: 1024,
+      sha256_head: 'b'.repeat(64),
+      quality: { check_verdict: 'needs_fix', pipeline_ok: false },
+    },
+  ],
+};
+
+function mockVersions(body: unknown = VERSIONS) {
+  return { [`/api/v1/documents/${DID}/versions`]: () => jsonResponse(body) };
 }
 
 beforeEach(() => {
@@ -228,8 +260,8 @@ describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
     expect(await screen.findByText('事件流')).toBeInTheDocument();
   });
 
-  it('非进度视图的右侧面板：段落编辑器 + 事件流双 tab（W10）', async () => {
-    mockDetailAndArtifacts();
+  it('非进度视图的右侧面板：段落编辑器 + 事件流 + 归档（W10/W12）', async () => {
+    mockDetailAndArtifacts([], mockVersions());
     renderWithQuery(<WorkbenchScreen did={DID} view="translate" />);
     await screen.findByText('无产物 PDF');
     // 默认 tab = 段落（未选中段 → 空态提示）
@@ -242,18 +274,66 @@ describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
     await waitFor(() =>
       expect(document.querySelector('[data-od-id="event-stream"]')).not.toBeNull(),
     );
+    // W12 的归档摘要也是这个面板的 tab：切过去能直接看到版本摘要与「查看全部」
+    fireEvent.click(screen.getByRole('tab', { name: '归档' }));
+    await waitFor(() =>
+      expect(document.querySelector('[data-od-id="archive-summary-count"]')?.textContent).toBe(
+        '2 个版本',
+      ),
+    );
+    expect(document.querySelector('[data-od-id="archive-summary-all"] a')).toHaveAttribute(
+      'href',
+      `#/d/${DID}/archive`,
+    );
   });
 
-  it('归档视图仍是占位（W12 接入）', async () => {
-    mockDetailAndArtifacts();
+  it('归档视图接真（W12）：版本列表 + 当前版本高亮 + 右侧面板归档摘要', async () => {
+    mockDetailAndArtifacts([], mockVersions());
     renderWithQuery(<WorkbenchScreen did={DID} view="archive" />);
-    expect(await screen.findByText('归档视图待 W12 接入')).toBeInTheDocument();
-    expect(document.querySelector('[data-od-id="view-placeholder"]')).not.toBeNull();
+
+    // 预览区换成版本列表（不再是 W04 占位）
+    expect(await screen.findByText('共 2 个版本')).toBeInTheDocument();
+    expect(document.querySelector('[data-od-id="archive-panel"]')).not.toBeNull();
+    expect(document.querySelector('[data-od-id="view-placeholder"]')).toBeNull();
+    const items = document.querySelectorAll('[data-od-id="archive-row"]');
+    expect(items).toHaveLength(2);
+    expect(items[0].getAttribute('data-current')).toBe('true');
+    expect(
+      items[1].querySelector('[data-od-id="archive-row-download"]')?.getAttribute('href'),
+    ).toBe(`/api/v1/documents/${DID}/versions/2/pdf`);
+
+    // 右侧面板：归档摘要在前（默认 tab），带「查看全部」链接
+    expect(document.querySelector('[data-od-id="archive-summary"]')).not.toBeNull();
+    expect(document.querySelector('[data-od-id="archive-summary-all"] a')).toHaveAttribute(
+      'href',
+      `#/d/${DID}/archive`,
+    );
+    expect(screen.getByRole('tab', { name: '归档' })).toHaveAttribute('aria-selected', 'true');
+    // 事件流退为次要 tab：不选它就不挂面板
+    expect(document.querySelector('[data-od-id="event-stream"]')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: '事件流' }));
+    await waitFor(() =>
+      expect(document.querySelector('[data-od-id="event-stream"]')).not.toBeNull(),
+    );
+
     const viewRail = screen.getByRole('navigation', { name: '视图导航' });
     expect(within(viewRail).getByRole('link', { name: /归档/ })).toHaveAttribute(
       'aria-current',
       'page',
     );
+  });
+
+  it('归档视图的空态：从来没编译成功过 → 引导去翻译视图', async () => {
+    mockDetailAndArtifacts(
+      [],
+      mockVersions({ did: DID, current_revision: 0, stale: false, items: [] }),
+    );
+    renderWithQuery(<WorkbenchScreen did={DID} view="archive" />);
+
+    expect(await screen.findByText('还没有版本归档')).toBeInTheDocument();
+    expect(
+      document.querySelector('[data-od-id="archive-empty-cta"] a')?.getAttribute('href'),
+    ).toBe(`#/d/${DID}/translate`);
   });
 
   it('时间线是真数据：7 段 + 真实耗时条 + 总用时 chip', async () => {
@@ -354,9 +434,10 @@ describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
       [`/api/v1/documents/${DID}/jobs`]: () => jsonResponse([makeJob({ did: DID })]),
       [`/api/v1/documents/${DID}/stage-state`]: () => jsonResponse(STAGE_STATE),
       [`/api/v1/documents/${DID}/events?after_seq=0&limit=2000`]: () => jsonResponse(EVENTS_PAGE),
+      ...mockVersions(),
     });
     renderWithQuery(<WorkbenchScreen did={DID} view="archive" />);
-    await screen.findByText(/归档视图待 W12 接入/);
+    await screen.findByText('共 2 个版本');
     expect(document.querySelector('[data-od-id="job-panel"]')).toBeNull();
   });
 });

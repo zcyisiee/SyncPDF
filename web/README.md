@@ -5,14 +5,16 @@ Vite + React 18 + TypeScript + Tailwind + TanStack Query + Zustand。
 `tailwind.config.ts` + `src/app/globals.css`）；HTTP 契约唯一事实来源：
 `docs/frontend/api.md` 与运行中服务的 `/openapi.json`。
 
-本目录当前范围（W11）：三栏工作台壳 + 设计令牌 + hash 路由 +
+本目录当前范围（W12）：三栏工作台壳 + 设计令牌 + hash 路由 +
 **PDF 预览**（pdf.js 渲染产物 PDF、parse/layout 两套 bbox 叠加、源/译/对照三模式、点框选中）+
 **进度层**（事件流面板 + 真 SSE 增量 + 阶段时间线真耗时 + 运行中状态）+
 **上传与任务**（文件库拖/选上传 PDF → 新文档、工作台「开始翻译」配置卡、运行中/失败卡与取消）+
 **编辑闭环**（右侧面板段落 tab：改译文 / 调排版参数、bbox 八手柄拖拽、草稿乐观并发写、
 自动/手动编译状态条、按修订号下载与质量徽标）+
-**重译候选**（段落面板「AI 重译」→ 候选对比（原文/当前译文/候选译文）→ 采用进草稿 / 拒绝）。
-**不做**：连续滚动、缩放控件、译文覆盖层、版本归档/回滚（W12）、词表（W13）；
+**重译候选**（段落面板「AI 重译」→ 候选对比（原文/当前译文/候选译文）→ 采用进草稿 / 拒绝）+
+**版本归档**（归档视图 `#/d/:did/archive`：全部历史版本（时间/修订/触发原因/质量状态/大小）+
+任一版本下载；右侧面板「归档」tab 给同一份数据的摘要 + 「查看全部」）。
+**不做**：连续滚动、缩放控件、译文覆盖层、版本回滚（v1 不做）、词表（W13）；
 这些区域渲染带 `data-od-id` 的占位并写明接入任务。
 
 ## 开发工作流（两个终端）
@@ -40,7 +42,7 @@ serve 不注册 CORS，所以前端必须走这个同源代理（`docs/frontend/
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm lint` | eslint flat config + typescript-eslint，`--max-warnings 0` |
 | `pnpm test` | Vitest（jsdom + @testing-library/react），不起真后端 |
-| `pnpm e2e` | Playwright 真浏览器用例（`e2e/edit.spec.ts` · `preview.spec.ts` · `progress.spec.ts` · `retranslate.spec.ts` · `upload.spec.ts`）：起真 serve + 真 dev server |
+| `pnpm e2e` | Playwright 真浏览器用例（`e2e/archive.spec.ts` · `edit.spec.ts` · `preview.spec.ts` · `progress.spec.ts` · `retranslate.spec.ts` · `upload.spec.ts`）：起真 serve + 真 dev server |
 | `pnpm sync:pdfjs` | 单独把 pdf.js worker/cmaps/standard_fonts 复制进 `public/pdfjs/` |
 | `pnpm gen:api` | 从运行中的 serve 拉 `/openapi.json` 生成 `src/api/schema.d.ts` |
 
@@ -58,20 +60,22 @@ web/
                 events/（EventStreamPanel · EventRow · useEventWindow · useEventStream · useTimelineStages）
                 preview/（PdfCanvas · BboxLayer · PreviewToolbar · PreviewArea · CompileBar · DownloadButton）
                 edit/（ParagraphEditor · BboxEditor · CandidatePanel（W11 重译候选））
-    lib/        api.ts（/api/v1 + 错误信封 + PATCH/POST/PUT/multipart）· queries.ts（含 W08 上传/job/profiles、W10 草稿/段落、W11 候选）
+                archive/（ArchiveView 版本列表 · ArchiveSummary 归档摘要（W12））
+    lib/        api.ts（/api/v1 + 错误信封 + PATCH/POST/PUT/multipart）· queries.ts（含 W08 上传/job/profiles、W10 草稿/段落、W11 候选、W12 版本）
                 uploads.ts（客户端预检：魔数 + 200MB）· jobs.ts（活动判据/轮询/from 判断/页码形状）
                 preview.ts（产物选择 + geometry 解析）· events.ts（SSE 帧/URL/live/分组/窗口合并）
                 draft.ts（草稿解析/排版范围校验/PATCH 构造）· download.ts（下载与质量徽标判定表）
+                versions.ts（版本归档的 URL/徽标/摘要判定表，复用 download.ts）
                 timeline.ts（阶段合并 + 条宽）· pdf.ts（pdf.js worker/cmap/字体配置）
                 humanize.ts · routing.ts · cn.ts
     components/jobs/  StartJobCard（开始翻译配置卡）· ActiveJobCard（运行中/失败/取消卡）
     screens/    LibraryScreen / DocumentCard / WorkbenchScreen / PlaceholderScreen
     stores/     ui.ts（三栏宽度 + 分隔条 + 屏/预览模式 + 预览页码/bbox 图层/选中段落/重译 profile）
   scripts/      sync-pdfjs-assets.mjs（把 pdf.js 静态资源复制进 public/pdfjs/）
-  e2e/          Playwright 真浏览器用例（edit.spec.ts · preview.spec.ts · progress.spec.ts · upload.spec.ts）
+  e2e/          Playwright 真浏览器用例（archive.spec.ts · edit.spec.ts · preview.spec.ts · progress.spec.ts · upload.spec.ts）
                 fixtures/sample.pdf（602 字节最小合法 PDF）· fixtures/sleep-translator.sh（长睡 stub）
   tests/        Vitest 用例（api / store / routing / 文件库屏+上传 / job 卡与 hooks / 工作台壳 /
-                预览坐标与组件 / 编辑坐标与组件（W10 编辑、W11 候选面板）/ 事件流与时间线）
+                预览坐标与组件 / 编辑坐标与组件（W10 编辑、W11 候选面板、W12 归档视图）/ 事件流与时间线）
   public/pdfjs/ pdf.js worker + cmaps + standard_fonts（生成物，.gitignore，不入库）
   tmp-smoke/    本地冒烟截图与日志（.gitignore，不入库）
 ```
@@ -321,6 +325,31 @@ SSE 增量的 e2e 留到 W15（W07 有真 job 之后）。
 - 禁用口径：有活动 job / 编译中 → 生成与采用禁用（服务端 409 `document_busy`）；
   生成中的候选（`candidate_target=null`）采用禁用（服务端 409 `candidate_not_ready`）。
 - 候选**不影响**预览/详情/下载：采用之前那些接口看不到候选内容（服务端保证），前端也不本地替换。
+- `archive.spec.ts`（W12）**不跑真编译**：fixture 直接按 §3.7 的落盘形状造出「已编译过两次」的
+  `tmp/w12-versions-<时间戳>/`（`versions.json` + `versions/{1,2}.pdf` + `compile.json`（当前 r2）+
+  `draft.json`（r3 → stale））与一个空态文档 `tmp/w12-empty-<时间戳>/`；断言清单新 → 旧、
+  当前版本高亮、stale 提示条、r1 下载的 href/落盘名与实际字节、非数字/不在清单 → 404
+  `version_not_found`、`GET /artifacts` 不混入 versions、空态引导。归档**写入**（发布即归档、
+  50 上限、失败/取消不归档、trigger 值）由后端 pytest 用 stub 编译路径覆盖（见 W12 报告）。
+
+## 版本归档（W12）：历史版本列表 + 任一版本下载
+
+服务端真源在 `docs/frontend/api.md` §3.7；四块的 UI 位置：
+
+- **归档视图** `#/d/:did/archive`（`components/archive/ArchiveView.tsx`，占满预览区）：版本列表
+  新 → 旧，每行 = r 徽标 + 「当前版本」标记 + 触发原因（自动/手动）+ 质量徽标 + 相对时间/大小 +
+  下载按钮（`…/versions/<r>/pdf` + `download=<名>.r<r>.pdf`）。头部说明「保留最近 50 个版本」。
+- **当前版本高亮**：判据是服务端的 `current_revision`（= `compile.artifact` 那一版，不是清单第一行）；
+  `stale=true` 时页面顶部给提示条「草稿有未编译修改：当前可下载的是 r{n}，比草稿旧」。
+- **空态**：从没编译成功过 → 引导卡 + 「去翻译视图开始编辑」（不是错误，也不报 404）。
+- **右侧面板**：非进度视图的 tab 集是「段落 | 事件流 | 归档」（归档视图下是「归档 | 事件流」，
+  默认归档）。归档 tab = 摘要（版本数 + 最新一版 + `stale` 提示 + 直达下载）+ 「查看全部」链接；
+  与归档视图共用 `useVersions` 的同一个 query key，切 tab 不会多打请求。
+- **轮询**：`compile` 未落定（running / stale）时 2s 一次（编译一发布就多一版），落定自停。
+- **主下载不变**：W10 的下载按钮仍指向 `output/<artifact.name>`（§3.2 主路径）；只在它旁边加了
+  一个「历史版本」文本链接跳归档视图。质量徽标复用 `lib/download.ts::qualityBadge`
+  （版本快照只有 `check_verdict`/`pipeline_ok`，映射后走同一份判定表）：**needs_fix 不禁用下载**
+  （质量只记录不门禁，黄标），与 W10 规则一致。
 
 ## 设计与契约约束（改动时别忘）
 

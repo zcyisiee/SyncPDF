@@ -155,4 +155,15 @@ describe('DownloadButton 渲染', () => {
     expect(document.querySelector('[data-od-id="compile-revision-badge"]')?.textContent).toContain('编译失败');
     expect(screen.getByText('检查未通过')).toBeInTheDocument();
   });
+
+  it('W12：主下载旁边给「历史版本」入口（跳归档视图，不改主下载逻辑）', () => {
+    render(<DownloadButton did={DID} compile={{ status: 'ok', revision: 7, stale: false, artifact: ARTIFACT }} quality={QUALITY_OK} />);
+    const history = document.querySelector('[data-od-id="download-history"]');
+    expect(history).not.toBeNull();
+    expect(history?.getAttribute('href')).toBe(`#/d/${DID}/archive`);
+    // 主下载仍是 output/<name>（W09/W10 语义不变）
+    expect((button() as HTMLAnchorElement).getAttribute('href')).toBe(
+      `/api/v1/documents/${DID}/artifacts/output/paper.mono.pdf?r=7`,
+    );
+  });
 });
