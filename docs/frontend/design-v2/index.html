@@ -1309,15 +1309,15 @@ function renderViewRail(){
       </div>
       <div class="vr__sub">本文档词表优先级高于全局词表；同名条目以下方列表为准。</div>`;
   }else{
-    const items=[['progress','进度','chip--run','运行中'],['recognize','识别','chip','587 块'],
-      ['translate','翻译','chip--run','3 处改动'],['check','检查','chip--err','问题 5'],['archive','归档','chip','v3']];
+    const items=[['progress','进度','chip--run','运行中'],['recognize','识别','','587 块'],
+      ['translate','翻译','chip--run','3 处改动'],['check','检查','chip--err','问题 5'],['archive','归档','','v3']];
     el.innerHTML=`
       <div class="vr__doc"><h2 class="vr__t">Attention Is All You Need</h2>
         <div class="vr__m"><span class="st st--run" id="doc-status"><i></i>翻译中</span>
           <span class="mono" style="font-size:10px;color:var(--fg-4)">15 页 · 206 段</span></div></div>
       <div class="vr__list" data-od-id="vr-views">
         ${items.map(([v,n,c,b])=>`<button class="vr__item ${TASK.view===v?'is-on':''}" data-view="${v}" data-act="view:${v}">
-          ${icon(IC[v],'ic vr__ic')}<span class="vr__txt">${n}</span><span class="${c}">${b}</span></button>`).join('')}
+          ${icon(IC[v],'ic vr__ic')}<span class="vr__txt">${n}</span><span class="chip ${c}">${b}</span></button>`).join('')}
       </div>
       <div class="vr__sub">任务 tr-2418 · 第 2/6 批 · ${STAGE_NAME[TASK.view]||''}</div>`;
   }
@@ -1496,7 +1496,7 @@ window.addEventListener('hashchange',()=>{const s=location.hash.replace('#/','')
 (function init(){
   loadW(); applyW();
   bindGutter($('#gutter-vr'),'vrw','x',false);
-  bindGutter($('#gutter-insp'),'inspw','x',false);
+  bindGutter($('#gutter-insp'),'inspw','x',true);
   bindGutter($('#gutter-tl'),'tlh','y',true);
   renderDevbar();
   const h=location.hash.replace('#/','');
