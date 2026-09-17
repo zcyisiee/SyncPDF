@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import contextlib
+import copy
 import hashlib
 import io
 import json
 import logging
 import os
+import tempfile
 import time
 import zipfile
 from pathlib import Path
@@ -22,6 +25,18 @@ from babeldoc.docvision.provider_ir import ProviderDocument
 logger = logging.getLogger(__name__)
 
 
+def _wait_span(translate_config, origin: str, *, label: str | None = None, **context):
+    """远端等待型工作的耗时片段；未开启 debug 采集时 no-op。
+
+    MinerU 走 httpx 而非子进程，没有 ``call_started`` / ``call_finished`` 事件，
+    不显式采集就看不出「等待 MinerU」占了多少时间。
+    """
+    recorder = getattr(translate_config, "debug_recorder", None)
+    if not recorder:
+        return contextlib.nullcontext()
+    return recorder.span("parse", origin, label=label, **context)
+
+
 class MinerUDocLayoutModel(DocLayoutModel):
     """DocLayoutModel implementation backed by MinerU API."""
 
@@ -33,6 +48,8 @@ class MinerUDocLayoutModel(DocLayoutModel):
         language: str | None = "en",
         poll_interval_seconds: float = 5.0,
         timeout_seconds: int = 900,
+        chunk_pages: int = 10,
+        max_chunks: int = 50,
     ):
         self.api_token = api_token
         self.base_url = base_url.rstrip("/")
@@ -40,6 +57,10 @@ class MinerUDocLayoutModel(DocLayoutModel):
         self.language = "en" if language is None else language
         self.poll_interval_seconds = poll_interval_seconds
         self.timeout_seconds = timeout_seconds
+        # MinerU 服务端对大文件解析容易失败：超过 chunk_pages 页的文档切成
+        # chunk_pages 页的分片，作为一个 batch 的多个文件一次性提交。
+        self.chunk_pages = max(1, int(chunk_pages))
+        self.max_chunks = max(1, int(max_chunks))
         self._stride = 32
         # 最近一次 handle_document 构建的 provider IR（完整 block/line/span 树）。
         # 每次 handle_document 调用都会重置，避免多文档/多次调用串数据。
@@ -289,10 +310,18 @@ class MinerUDocLayoutModel(DocLayoutModel):
     def _request_upload_urls(
         self,
         client: httpx.Client,
-        pdf_path: Path,
-    ) -> tuple[str, str]:
+        pdf_paths: list[Path],
+    ) -> tuple[str, list[str]]:
+        """为一个 batch 申请全部分片的上传地址。
+
+        ``pdf_paths`` 是同一文档切出的分片（≤ chunk_pages 页时就是原文件本身），
+        MinerU 的 file-urls/batch 天然支持一次提交多个文件，全部算一个 batch。
+        """
         payload: dict[str, Any] = {
-            "files": [{"name": pdf_path.name, "data_id": f"babeldoc-{pdf_path.stem}"}],
+            "files": [
+                {"name": path.name, "data_id": f"babeldoc-{path.stem}"}
+                for path in pdf_paths
+            ],
             "model_version": self.model_version,
             "enable_formula": True,
             "enable_table": True,
@@ -318,7 +347,12 @@ class MinerUDocLayoutModel(DocLayoutModel):
             raise RuntimeError(
                 "MinerU file-urls/batch response missing batch_id/file_urls"
             )
-        return batch_id, file_urls[0]
+        if len(file_urls) != len(pdf_paths):
+            raise RuntimeError(
+                "MinerU file-urls/batch returned wrong url count: "
+                f"expected={len(pdf_paths)} got={len(file_urls)}"
+            )
+        return batch_id, list(file_urls)
 
     def _upload_pdf(
         self, client: httpx.Client, upload_url: str, pdf_path: Path
@@ -329,9 +363,14 @@ class MinerUDocLayoutModel(DocLayoutModel):
         )
         response.raise_for_status()
 
-    def _poll_full_zip_url(
-        self, client: httpx.Client, batch_id: str, translate_config
-    ) -> str:
+    def _poll_full_zip_urls(
+        self,
+        client: httpx.Client,
+        batch_id: str,
+        translate_config,
+        chunk_paths: list[Path],
+    ) -> list[str]:
+        """轮询 batch，直到全部分片完成，按提交顺序返回各分片 zip URL。"""
         deadline = time.monotonic() + float(self.timeout_seconds)
         last_trace_id = None
         while time.monotonic() < deadline:
@@ -352,27 +391,215 @@ class MinerUDocLayoutModel(DocLayoutModel):
                 )
 
             data = body.get("data") or {}
-            extract_results = data.get("extract_result") or []
-            if extract_results and isinstance(extract_results[0], dict):
-                result0 = extract_results[0]
-                state = result0.get("state")
-                if state == "done" and result0.get("full_zip_url"):
-                    return result0["full_zip_url"]
-                if state == "failed":
+            extract_results = [
+                item
+                for item in (data.get("extract_result") or [])
+                if isinstance(item, dict)
+            ]
+            if len(extract_results) >= len(chunk_paths) and all(
+                item.get("state") in {"done", "failed"}
+                for item in extract_results[: len(chunk_paths)]
+            ):
+                results = self._align_extract_results(extract_results, chunk_paths)
+                failed = [
+                    item
+                    for item in results
+                    if item.get("state") == "failed" or not item.get("full_zip_url")
+                ]
+                if failed:
+                    first = failed[0]
                     raise RuntimeError(
                         "MinerU task failed: "
-                        f"batch_id={batch_id} trace_id={last_trace_id} err_msg={result0.get('err_msg')}"
+                        f"file={first.get('file_name') or '?'} "
+                        f"batch_id={batch_id} trace_id={last_trace_id} "
+                        f"err_msg={first.get('err_msg')}"
                     )
+                return [item["full_zip_url"] for item in results]
             time.sleep(max(0.1, float(self.poll_interval_seconds)))
 
         raise TimeoutError(
             f"MinerU polling timed out after {self.timeout_seconds}s. batch_id={batch_id} trace_id={last_trace_id}"
         )
 
+    @staticmethod
+    def _align_extract_results(
+        extract_results: list[dict[str, Any]], chunk_paths: list[Path]
+    ) -> list[dict[str, Any]]:
+        """把 extract_result 对齐回提交顺序。
+
+        优先按 ``file_name`` 匹配分片文件名；服务端不返回 file_name 或对不上时
+        回退按返回顺序（此时要求条数与分片数一致）。
+        """
+        by_name = {
+            item.get("file_name"): item
+            for item in extract_results
+            if isinstance(item.get("file_name"), str)
+        }
+        aligned: list[dict[str, Any]] = []
+        for path in chunk_paths:
+            item = by_name.get(path.name)
+            if item is None:
+                if len(extract_results) != len(chunk_paths):
+                    raise RuntimeError(
+                        "MinerU extract-results cannot be aligned to chunks: "
+                        f"expected={len(chunk_paths)} got={len(extract_results)}"
+                    )
+                item = extract_results[chunk_paths.index(path)]
+            aligned.append(item)
+        return aligned
+
     def _download_zip_bytes(self, client: httpx.Client, zip_url: str) -> bytes:
         response = client.get(zip_url, headers={"Accept": "*/*"})
         response.raise_for_status()
         return response.content
+
+    def _split_pdf_chunks(
+        self, pdf_path: Path, page_count: int
+    ) -> tuple[list[Path], tempfile.TemporaryDirectory | None]:
+        """超过 chunk_pages 页的 PDF 切成 ≤ chunk_pages 页的分片文件。
+
+        返回 ``(chunk_paths, tmpdir)``：tmpdir 持有分片文件，存活到下载完成为止；
+        未超过阈值时返回 ``([pdf_path], None)``（单文件即一个 batch 条目）。
+        分片数超过 max_chunks 时直接报错（限制一次提交的文件数上限）。
+        """
+        if page_count <= self.chunk_pages:
+            return [pdf_path], None
+        chunk_count = (page_count + self.chunk_pages - 1) // self.chunk_pages
+        if chunk_count > self.max_chunks:
+            raise ValueError(
+                "PDF too large for MinerU chunking: "
+                f"pages={page_count} chunk_pages={self.chunk_pages} "
+                f"chunks={chunk_count} max_chunks={self.max_chunks} "
+                f"(page limit={self.chunk_pages * self.max_chunks})"
+            )
+        tmpdir = tempfile.TemporaryDirectory(prefix="babeldoc-mineru-chunks-")
+        chunk_paths: list[Path] = []
+        with pymupdf.open(pdf_path) as src:
+            for start in range(0, page_count, self.chunk_pages):
+                end = min(start + self.chunk_pages, page_count)
+                out = Path(tmpdir.name) / (
+                    f"{pdf_path.stem}-p{start + 1:04d}-{end:04d}{pdf_path.suffix or '.pdf'}"
+                )
+                with pymupdf.open() as dst:
+                    dst.insert_pdf(src, from_page=start, to_page=end - 1)
+                    dst.save(out)
+                chunk_paths.append(out)
+        return chunk_paths, tmpdir
+
+    @staticmethod
+    def _merge_layout_jsons(
+        chunk_jsons: list[tuple[int, dict[str, Any]]],
+    ) -> dict[str, Any]:
+        """把各分片的 layout.json 按页偏移合并回整篇文档的 layout.json。
+
+        分片内 page_idx 是 0-based 分片局部页号，合并时加上页偏移并重打全局
+        顺序；块 index 保持分片内相对值（YoloResult / IR 均不依赖全局唯一）。
+        其余顶层字段（_backend、_version_name 等）取首个分片。
+        """
+        if len(chunk_jsons) == 1:
+            return chunk_jsons[0][1]
+        merged: dict[str, Any] = {}
+        pdf_info: list[dict[str, Any]] = []
+        for offset, chunk_json in chunk_jsons:
+            if not merged:
+                merged = {
+                    key: copy.deepcopy(value)
+                    for key, value in chunk_json.items()
+                    if key != "pdf_info"
+                }
+            for page_info in chunk_json.get("pdf_info") or []:
+                if not isinstance(page_info, dict):
+                    continue
+                page_info = copy.deepcopy(page_info)
+                page_info["page_idx"] = (
+                    int(page_info.get("page_idx", 0)) + offset
+                )
+                pdf_info.append(page_info)
+        pdf_info.sort(key=lambda item: item.get("page_idx", 0))
+        merged["pdf_info"] = pdf_info
+        return merged
+
+    def _fetch_layout_json(
+        self, pdf_path: Path, translate_config
+    ) -> dict[str, Any]:
+        """完整链路：切分片 → 一个 batch 提交 → 轮询 → 下载合并。"""
+        try:
+            with pymupdf.open(pdf_path) as doc:
+                page_count = doc.page_count
+        except Exception:  # noqa: BLE001 - 不可读时退回单文件提交（旧路径）
+            page_count = 0
+        chunk_paths, tmpdir = self._split_pdf_chunks(pdf_path, page_count)
+        if tmpdir is None:
+            logger.info(
+                "MinerU single-file submission: pages=%d", page_count
+            )
+        else:
+            logger.info(
+                "MinerU chunked submission: pages=%d chunks=%d chunk_pages=%d",
+                page_count,
+                len(chunk_paths),
+                self.chunk_pages,
+            )
+        try:
+            with httpx.Client(timeout=float(self.timeout_seconds)) as client:
+                with _wait_span(
+                    translate_config,
+                    "mineru.request_upload_urls",
+                    label="MinerU 申请上传地址",
+                    chunks=len(chunk_paths),
+                ) as span:
+                    batch_id, upload_urls = self._request_upload_urls(
+                        client, chunk_paths
+                    )
+                    if span is not None:
+                        span["batch_id"] = batch_id
+                with _wait_span(
+                    translate_config,
+                    "mineru.upload",
+                    label="MinerU 上传 PDF 分片",
+                    batch_id=batch_id,
+                    chunks=len(chunk_paths),
+                ):
+                    for upload_url, chunk_path in zip(upload_urls, chunk_paths, strict=True):
+                        self._upload_pdf(client, upload_url, chunk_path)
+                with _wait_span(
+                    translate_config,
+                    "mineru.poll",
+                    label="等待 MinerU 解析（轮询任务状态）",
+                    batch_id=batch_id,
+                    chunks=len(chunk_paths),
+                ):
+                    full_zip_urls = self._poll_full_zip_urls(
+                        client, batch_id, translate_config, chunk_paths
+                    )
+                chunk_jsons: list[tuple[int, dict[str, Any]]] = []
+                with _wait_span(
+                    translate_config,
+                    "mineru.download",
+                    label="下载 MinerU 结果压缩包",
+                    batch_id=batch_id,
+                    chunks=len(chunk_paths),
+                ) as span:
+                    for index, (_chunk_path, zip_url) in enumerate(
+                        zip(chunk_paths, full_zip_urls, strict=True)
+                    ):
+                        zip_bytes = self._download_zip_bytes(client, zip_url)
+                        if span is not None:
+                            span[f"chunk_{index}_bytes"] = len(zip_bytes)
+                        offset = index * self.chunk_pages
+                        chunk_jsons.append(
+                            (offset, self._load_layout_json_from_zip_bytes(zip_bytes))
+                        )
+            with _wait_span(
+                translate_config,
+                "mineru.parse_zip",
+                label="解包并合并 MinerU 结果（本地）",
+                chunks=len(chunk_paths),
+            ):
+                return self._merge_layout_jsons(chunk_jsons)
+        finally:
+            if tmpdir is not None:
+                tmpdir.cleanup()
 
     def _load_layout_json_from_zip_bytes(self, zip_bytes: bytes) -> dict[str, Any]:
         with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
@@ -415,10 +642,35 @@ class MinerUDocLayoutModel(DocLayoutModel):
         except OSError:
             logger.warning("Failed to write MinerU layout cache", exc_info=True)
 
+    def _dump_raw_layout_json(
+        self, layout_json: dict[str, Any], translate_config
+    ) -> None:
+        """debug 采集开启时把 provider 原始 layout JSON 落盘（``layout_raw.json``）。
+
+        解析管线随后把它归档进 debug run（``provider-layout.json``）；recorder
+        关闭时不写（原始 JSON 不含解析后的规范化结构，正常流程用不到）。
+        """
+        if getattr(translate_config, "debug_recorder", None) is None:
+            return
+        output_path = self._provider_ir_output_path(translate_config)
+        if output_path is None:
+            return
+        try:
+            raw_path = output_path.with_name("layout_raw.json")
+            raw_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = raw_path.with_suffix(".tmp")
+            tmp.write_text(
+                json.dumps(layout_json, ensure_ascii=False), encoding="utf-8"
+            )
+            tmp.replace(raw_path)
+        except OSError:
+            logger.warning("Failed to write MinerU raw layout JSON", exc_info=True)
+
     def _prepare_provider_ir(
         self, layout_json: dict[str, Any], translate_config
     ) -> None:
         """构建并落盘 provider IR。IR 构建失败不阻断 YoloResult 路径。"""
+        self._dump_raw_layout_json(layout_json, translate_config)
         try:
             self._build_provider_document(layout_json)
         except Exception:  # noqa: BLE001 - IR 是附加产物，不应影响布局解析
@@ -477,17 +729,15 @@ class MinerUDocLayoutModel(DocLayoutModel):
         cache_file = self._layout_cache_path(pdf_path)
         if cache_file is not None and cache_file.exists():
             logger.info("MinerU layout cache hit: %s", cache_file)
-            layout_json = json.loads(cache_file.read_text(encoding="utf-8"))
+            with _wait_span(
+                translate_config,
+                "mineru.cache",
+                label="MinerU 布局缓存命中（读本地缓存，无网络等待）",
+                cache_file=str(cache_file),
+            ):
+                layout_json = json.loads(cache_file.read_text(encoding="utf-8"))
         else:
-            with httpx.Client(timeout=float(self.timeout_seconds)) as client:
-                batch_id, upload_url = self._request_upload_urls(client, pdf_path)
-                self._upload_pdf(client, upload_url, pdf_path)
-                full_zip_url = self._poll_full_zip_url(
-                    client, batch_id, translate_config
-                )
-                zip_bytes = self._download_zip_bytes(client, full_zip_url)
-
-            layout_json = self._load_layout_json_from_zip_bytes(zip_bytes)
+            layout_json = self._fetch_layout_json(pdf_path, translate_config)
             if cache_file is not None:
                 self._write_layout_cache(cache_file, layout_json)
         self._prepare_provider_ir(layout_json, translate_config)

@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from babeldoc_tools import common
+from babeldoc_tools import debug_runtime
 
 SEV_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
@@ -24,6 +25,8 @@ def build_pdf(
     latex_bbox_mode: str | None = None,
     render: str | None = None,
     stats: bool = True,
+    debug_recorder=None,
+    debug_recompile: bool = False,
 ) -> dict:
     """从 IR 重排生成 mono/dual PDF（应用 ``agent/layout_overrides.json``）。
 
@@ -32,24 +35,102 @@ def build_pdf(
     """
     workdir_path = common.require_workdir(workdir)
     resolved_output_dir = output_dir or str(workdir_path / "output")
-    result = reconstruct_pdf(
-        str(workdir_path),
-        output_dir=resolved_output_dir,
-        dual=dual,
-        watermark=watermark,
-        latex_bbox=latex_bbox,
-        latex_bbox_mode=latex_bbox_mode,
-        stats=stats,
-    )
-    result.setdefault("images", [])
-    if render:
-        rendered = render_pages(
-            result.get("mono_pdf") or result.get("dual_pdf"),
-            render,
-            out_dir=str(Path(resolved_output_dir) / "render"),
-        )
-        result["images"] = rendered.get("images") or []
-    return result
+    with debug_runtime.debug_stage(
+        debug_recorder,
+        "build",
+        {
+            "latex_bbox": bool(latex_bbox),
+            "latex_bbox_mode": latex_bbox_mode,
+            "dual": bool(dual),
+            "watermark": bool(watermark),
+            "debug_recompile": bool(debug_recompile),
+        },
+    ):
+        try:
+            result = reconstruct_pdf(
+                str(workdir_path),
+                output_dir=resolved_output_dir,
+                dual=dual,
+                watermark=watermark,
+                latex_bbox=latex_bbox,
+                latex_bbox_mode=latex_bbox_mode,
+                stats=stats,
+                debug_recorder=debug_recorder,
+                debug_recompile=debug_recompile,
+            )
+        except Exception as exc:
+            if debug_recorder is not None:
+                # 失败现场：只归档本次构建新落盘的 agent 文件与输出目录里新生成的
+                # 部分 PDF。上一轮残留（``mtime`` 早于本次 run 起始）不归档，
+                # 否则会被误报成本次输出。``reconstruct_report.json`` 只在成功
+                # 路径写出，失败时残留的是旧报告 → 同样不归档。
+                from babeldoc.tools.agent import debug_capture
+
+                since = getattr(debug_recorder, "started_at_ts", None)
+                debug_capture.capture_files(
+                    debug_recorder,
+                    "build",
+                    workdir_path,
+                    ["layout_geometry.json", "latex_bbox_report.json"],
+                    phase="partial_outputs",
+                    since=since,
+                )
+                partial_pdfs = {}
+                for pdf_path in sorted(Path(resolved_output_dir).glob("*.pdf")):
+                    if since is not None and pdf_path.stat().st_mtime < since:
+                        continue
+                    artifact = debug_recorder.archive_file(
+                        "build", f"partial/{pdf_path.name}", pdf_path
+                    )
+                    if artifact:
+                        partial_pdfs[pdf_path.name] = artifact
+                if partial_pdfs:
+                    debug_recorder.record_event(
+                        "build",
+                        "artifact_bundle",
+                        {"phase": "partial_output_pdfs", "artifacts": partial_pdfs},
+                    )
+                debug_recorder.record_event(
+                    "build",
+                    "build_failed",
+                    {"error": f"{type(exc).__name__}: {exc}"},
+                )
+            raise
+        result.setdefault("images", [])
+        if render:
+            rendered = render_pages(
+                result.get("mono_pdf") or result.get("dual_pdf"),
+                render,
+                out_dir=str(Path(resolved_output_dir) / "render"),
+            )
+            result["images"] = rendered.get("images") or []
+        if debug_recorder is not None:
+            agent = common.agent_dir(workdir_path)
+            for key, name in (
+                ("mono_pdf", "mono.pdf"),
+                ("dual_pdf", "dual.pdf"),
+            ):
+                if result.get(key):
+                    debug_recorder.archive_file("build", name, result[key])
+            for name in (
+                "layout_geometry.json",
+                "latex_bbox_report.json",
+                "reconstruct_report.json",
+            ):
+                artifact = agent / name
+                if artifact.exists():
+                    debug_recorder.archive_file("build", name, artifact)
+            stats_map = result.get("stats") or {}
+            debug_recorder.record_event(
+                "build",
+                "stage_finished",
+                {
+                    "mono_pdf": result.get("mono_pdf"),
+                    "dual_pdf": result.get("dual_pdf"),
+                    "pages": (stats_map.get("mono") or {}).get("pages"),
+                },
+            )
+        return result
 
 
 def reconstruct_pdf(
@@ -61,6 +142,8 @@ def reconstruct_pdf(
     latex_bbox: bool = True,
     latex_bbox_mode: str | None = None,
     stats: bool = True,
+    debug_recorder=None,
+    debug_recompile: bool = False,
 ) -> dict:
     from babeldoc.tools.agent import workflow
 
@@ -73,6 +156,8 @@ def reconstruct_pdf(
         watermark=bool(watermark),
         latex_bbox=bool(latex_bbox),
         latex_bbox_mode=latex_bbox_mode,
+        debug_recorder=debug_recorder,
+        debug_recompile=debug_recompile,
     )
     if stats:
         result["stats"] = {

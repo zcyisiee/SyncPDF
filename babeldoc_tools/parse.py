@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from babeldoc_tools import common
+from babeldoc_tools import debug_runtime
 
 LAYOUTS = ("mineru", "paddle")
 
@@ -23,6 +24,7 @@ def parse_document(
     mineru_cache_key: str | None = None,
     layout_coverage_threshold: float = 0.005,
     mineru_use_ocr_text: bool = False,
+    debug_recorder=None,
 ) -> dict:
     """解析 PDF：布局后端 → 段落 → 连续英文 Markdown（带行内锚点）。
 
@@ -47,20 +49,48 @@ def parse_document(
             "mineru 布局需要 mineru_token 或环境变量 MINERU_API_TOKEN"
             "（或用 mineru_json / mineru_cache_key 回放缓存布局）",
         )
-    result = markdown_view.extract_markdown(
-        pdf_path,
-        workdir_path,
-        lang_in=lang_in or "en",
-        lang_out=lang_out or "zh",
-        layout=layout,
-        mineru_token=token,
-        mineru_language=mineru_language,
-        mineru_json=mineru_json,
-        mineru_cache_key=mineru_cache_key,
-        pages=pages,
-        layout_coverage_threshold=layout_coverage_threshold,
-        mineru_use_ocr_text=mineru_use_ocr_text,
-    )
+    with debug_runtime.debug_stage(
+        debug_recorder,
+        "parse",
+        {
+            "pdf": str(pdf_path),
+            "layout": layout,
+            "pages": pages,
+            "lang_in": lang_in or "en",
+            "lang_out": lang_out or "zh",
+        },
+    ):
+        result = markdown_view.extract_markdown(
+            pdf_path,
+            workdir_path,
+            lang_in=lang_in or "en",
+            lang_out=lang_out or "zh",
+            layout=layout,
+            mineru_token=token,
+            mineru_language=mineru_language,
+            mineru_json=mineru_json,
+            mineru_cache_key=mineru_cache_key,
+            pages=pages,
+            layout_coverage_threshold=layout_coverage_threshold,
+            mineru_use_ocr_text=mineru_use_ocr_text,
+            recorder=debug_recorder,
+        )
+        if debug_recorder is not None:
+            agent = common.agent_dir(workdir_path)
+            for name in ("document.md", "anchors.json", "sheet.jsonl"):
+                artifact = agent / name
+                if artifact.exists():
+                    debug_recorder.archive_file("parse", name, artifact)
+            debug_recorder.record_event(
+                "parse",
+                "stage_finished",
+                {
+                    "paragraphs": result.get("paragraphs"),
+                    "chars": result.get("chars"),
+                    "label_counts": result.get("label_counts"),
+                    "skipped_label_counts": result.get("skipped_label_counts"),
+                },
+            )
     result["workdir"] = str(workdir_path)
     result["layout"] = layout
     return result

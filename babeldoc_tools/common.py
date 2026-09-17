@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -108,7 +109,8 @@ def prompt_path(name: str) -> Path | None:
 
 
 def _run_subprocess(
-    prompt: str, command: str, timeout_s: int, error_prefix: str
+    prompt: str, command: str, timeout_s: int, error_prefix: str,
+    *, debug_recorder=None, debug_origin: str | None = None, debug_context: dict | None = None,
 ) -> str:
     """把 ``prompt`` 写进 ``command`` 的 stdin，返回它的 stdout。
 
@@ -117,53 +119,74 @@ def _run_subprocess(
     :func:`shlex.split` 拆成 argv，**不经 shell**——需要管道或 JSON 解包时请在
     仓库 wrapper 脚本里做。翻译与审查调用共用本函数。
     """
-    try:
-        argv = shlex.split(command)
-    except ValueError as exc:
-        raise ToolError(
-            f"{error_prefix}_failed", f"命令无法解析（引号不匹配？）: {command}"
-        ) from exc
-    if not argv:
-        raise ToolError(f"{error_prefix}_failed", "翻译/审查命令为空")
-    try:
-        # argv 由用户的显式 --translator/--reviewer 参数定义，shlex.split 后不经 shell；
-        # 这是唯一的 provider 机制（stdin/stdout 子进程协议），非 shell 拼接。
-        result = subprocess.run(  # noqa: S603
-            argv,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
+    if debug_recorder is None:
+        from babeldoc.debug_recorder import get_current
+
+        debug_recorder = get_current()
+    capture = (
+        debug_recorder.process(
+            "review" if error_prefix == "reviewer" else "translate",
+            debug_origin or error_prefix, command, prompt=prompt, timeout=timeout_s,
+            **(debug_context or {}),
         )
-    except subprocess.TimeoutExpired as exc:
-        raise ToolError(
-            f"{error_prefix}_timeout",
-            f"命令超过 {timeout_s}s 超时: {command}",
-            timeout=timeout_s,
-        ) from exc
-    except OSError as exc:
-        # FileNotFoundError / PermissionError 等：命令不存在或不可执行
-        raise ToolError(
-            f"{error_prefix}_failed", f"无法执行 {command}: {exc}"
-        ) from exc
-    if result.returncode != 0:
-        raise ToolError(
-            f"{error_prefix}_failed",
-            f"{command} 退出码 {result.returncode}: {result.stderr[:500]}",
-        )
-    if not result.stdout.strip():
-        raise ToolError(
-            f"{error_prefix}_empty", f"{command} 的 stdout 为空"
-        )
-    return result.stdout
+        if debug_recorder else contextlib.nullcontext()
+    )
+    with capture as evidence:
+        try:
+            argv = shlex.split(command)
+        except ValueError as exc:
+            raise ToolError(
+                f"{error_prefix}_failed", f"命令无法解析（引号不匹配？）: {command}"
+            ) from exc
+        if not argv:
+            raise ToolError(f"{error_prefix}_failed", "翻译/审查命令为空")
+        try:
+            # argv 由用户的显式 --translator/--reviewer 参数定义，shlex.split 后不经 shell；
+            # 这是唯一的 provider 机制（stdin/stdout 子进程协议），非 shell 拼接。
+            result = subprocess.run(  # noqa: S603
+                argv,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ToolError(
+                f"{error_prefix}_timeout",
+                f"命令超过 {timeout_s}s 超时: {command}",
+                timeout=timeout_s,
+            ) from exc
+        except OSError as exc:
+            # FileNotFoundError / PermissionError 等：命令不存在或不可执行
+            raise ToolError(
+                f"{error_prefix}_failed", f"无法执行 {command}: {exc}"
+            ) from exc
+        if evidence is not None:
+            evidence["result"] = result
+        if result.returncode != 0:
+            raise ToolError(
+                f"{error_prefix}_failed",
+                f"{command} 退出码 {result.returncode}: {result.stderr[:500]}",
+            )
+        if not result.stdout.strip():
+            raise ToolError(
+                f"{error_prefix}_empty", f"{command} 的 stdout 为空"
+            )
+        return result.stdout
 
 
-def run_translator(prompt: str, command: str, timeout_s: int = 1800) -> str:
+def run_translator(
+    prompt: str, command: str, timeout_s: int = 1800, *, debug_recorder=None,
+    debug_origin: str | None = None, debug_context: dict | None = None,
+) -> str:
     """调用用户指定的翻译命令：stdin 收提示词，stdout 出译文，返回 stdout。
 
     不解析 JSON、不抽 usage——提示词与译文就是纯文本交换。
     """
-    return _run_subprocess(prompt, command, timeout_s, "translator")
+    return _run_subprocess(
+        prompt, command, timeout_s, "translator", debug_recorder=debug_recorder,
+        debug_origin=debug_origin, debug_context=debug_context,
+    )
 
 
 def env_default(name: str, default=None):

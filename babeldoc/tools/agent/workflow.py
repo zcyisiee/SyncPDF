@@ -188,7 +188,7 @@ def _normalize_placeholder_punctuation(
     return target, changes
 
 
-def apply(workdir, translated_sheet):
+def apply(workdir, translated_sheet, *, debug_recorder=None):
     """校验译文 sheet 并写回 IR。返回报告 dict；失败时 ok=False。"""
     workdir = Path(workdir)
     with state_path(workdir).open("rb") as f:
@@ -214,6 +214,11 @@ def apply(workdir, translated_sheet):
             protocol.check_placeholders(entry["id"], source, entry["target"])
         )
 
+    if debug_recorder:
+        debug_recorder.record_event("apply", "placeholder_validation", {
+            "unknown_ids": unknown, "violations": violations,
+            "valid": not (unknown or violations), "entries": len(entries),
+        })
     if unknown or violations:
         return {
             "applied": 0,
@@ -245,12 +250,21 @@ def apply(workdir, translated_sheet):
             target,
         )
         applied += 1
+        if debug_recorder:
+            debug_recorder.record_event("apply", "canonical_writeback", {
+                "id": entry["id"], "source": inputs[entry["id"]].unicode,
+                "canonical_before": entry["target"], "canonical_after": target,
+                "unicode": index[entry["id"]].unicode,
+                "punctuation_fixes": changes, "persisted": False,
+            })
 
     with state_path(workdir).open("wb") as f:
         pickle.dump(state, f)
     XMLConverter().write_json(
         doc, str(agent_dir(workdir) / "il_translated.applied.json")
     )
+    if debug_recorder:
+        debug_recorder.record_event("apply", "writeback_saved", {"applied": applied})
     return {
         "applied": applied,
         "unknown_ids": [],
@@ -267,6 +281,8 @@ def reconstruct(
     watermark=False,
     latex_bbox=True,
     latex_bbox_mode=None,
+    debug_recorder=None,
+    debug_recompile=False,
 ):
     """从写回后的 IR 重排并生成 PDF。返回输出路径 dict。
 
@@ -304,6 +320,16 @@ def reconstruct(
     config.output_dir = output_dir
     config.no_dual = no_dual
     config.no_mono = False
+    if debug_recorder is None:
+        from babeldoc import debug_recorder as _dr
+
+        debug_recorder = _dr.get_current()
+    else:
+        from babeldoc import debug_recorder as _dr
+
+        _dr.set_current(debug_recorder)
+    config.debug_recorder = debug_recorder
+    config.latex_debug_recompile = bool(debug_recompile)
     config.watermark_output_mode = (
         WatermarkOutputMode.Watermarked if watermark else WatermarkOutputMode.NoWatermark
     )
@@ -321,6 +347,8 @@ def reconstruct(
             doc, state.get("page_char_objects") or {}
         )
     source_state = layout_geometry.capture_source_state(doc, overrides)
+    if debug_recorder:
+        debug_recorder.write_snapshot("build", "source_state", source_state)
     ir_stats = layout_overrides.apply_to_ir(doc, overrides)
     layout_geometry.capture_source_state(doc, overrides, state=source_state)
 
@@ -372,6 +400,15 @@ def reconstruct(
     geometry["warnings"] = list(getattr(config, "layout_warnings", []) or [])
     geometry["ir_overrides"] = ir_stats
     geometry_path = layout_geometry.write_geometry(workdir, geometry)
+    if debug_recorder:
+        from babeldoc.tools.agent import debug_capture
+
+        debug_capture.record_typesetting_geometry(
+            debug_recorder,
+            geometry,
+            pages=len(doc.page),
+            overrides=overrides,
+        )
 
     pdf_creater = PDFCreater(
         str(temp_pdf_path),
@@ -387,6 +424,10 @@ def reconstruct(
     # decisions[] 已完整落盘 latex_bbox_report.json；stdout 只给摘要，
     # 避免把数十 KB 的逐段决策重复展开到终端。
     latex_stats_summary = _latex_stats_summary(pdf_creater.latex_bbox_stats)
+    if debug_recorder:
+        debug_recorder.record_event(
+            "build", "latex_summary", latex_stats_summary or {"enabled": False}
+        )
     return {
         "mono_pdf": str(result.mono_pdf_path) if result.mono_pdf_path else None,
         "dual_pdf": str(result.dual_pdf_path) if result.dual_pdf_path else None,

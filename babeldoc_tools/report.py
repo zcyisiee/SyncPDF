@@ -14,9 +14,43 @@ def report(
     output_dir: str | None = None,
     title: str | None = None,
     notes: str | None = None,
+    debug_recorder=None,
 ) -> dict:
     """汇总 apply 指标 / 审查 verdict / lint 前后对比 → FINAL_REPORT.md。"""
     workdir_path = common.require_workdir(workdir)
+    if debug_recorder is not None:
+        debug_recorder.start_stage("report")
+        debug_recorder.record_event("report", "stage_started", {})
+    try:
+        result = _report_impl(
+            workdir_path, output_dir=output_dir, title=title, notes=notes
+        )
+    except Exception as exc:  # noqa: BLE001 - 记录后原样向上抛
+        if debug_recorder is not None:
+            debug_recorder.record_event(
+                "report", "stage_error", {"error": str(exc)[:500]}
+            )
+            debug_recorder.finish_stage("report", "error")
+        raise
+    if debug_recorder is not None:
+        report_path = result.get("report")
+        if report_path and Path(report_path).exists():
+            debug_recorder.archive_file("report", "FINAL_REPORT.md", report_path)
+        debug_recorder.record_event(
+            "report", "stage_finished", {"report": report_path}
+        )
+        debug_recorder.finish_stage("report", "ok")
+    return result
+
+
+def _report_impl(
+    workdir_path: Path,
+    *,
+    output_dir: str | None = None,
+    title: str | None = None,
+    notes: str | None = None,
+) -> dict:
+    agent = common.agent_dir(workdir_path)
     agent = common.agent_dir(workdir_path)
     apply_report = common.read_json(agent / "apply_report.json", default={}) or {}
     verdict = common.read_json(agent / "review_verdict.json", default={}) or {}

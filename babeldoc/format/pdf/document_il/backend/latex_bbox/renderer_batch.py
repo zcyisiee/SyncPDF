@@ -34,6 +34,7 @@ r"""整文档轮次制批编译（``BatchStampRenderer``）。
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 import subprocess
@@ -46,6 +47,7 @@ from pathlib import Path
 
 import pymupdf
 
+from babeldoc.debug_recorder import CompileCandidate
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
     DEFAULT_LEAD_RATIO,
 )
@@ -119,12 +121,15 @@ class BatchStampRenderer:
         block_size: int = _BLOCK_SIZE,
         cache=None,
         fallback: BboxStampRenderer | None = None,
+        debug_recorder=None,
     ):
         self._capability = capability
         self._timeout = max(5.0, float(timeout_seconds))
         self._max_workers = max(1, int(max_workers))
         self._block_size = max(1, int(block_size))
         self._cache = cache
+        #: 可选的诊断 recorder；None 时零额外 IO、行为与非 debug 完全一致。
+        self._debug_recorder = debug_recorder
         self._cache_hits = 0
         self._compile_seconds = 0.0
         self._batch_count = 0
@@ -135,6 +140,8 @@ class BatchStampRenderer:
         self._round_log: list[dict] = []
         self._fallback_segments = 0
         self._lock = threading.Lock()
+        #: 诊断专用：request key → 最近一次记录的候选 id（跨轮/回退父链）。
+        self._last_candidates: dict[str, str] = {}
         #: 单段回退渲染器（×0.95 有界缩小 + 进程内缓存）；与批编译共享持久缓存。
         self._fallback = (
             fallback
@@ -144,6 +151,7 @@ class BatchStampRenderer:
                 timeout_seconds=self._timeout,
                 max_workers=self._max_workers,
                 cache=cache,
+                debug_recorder=debug_recorder,
             )
         )
 
@@ -196,6 +204,7 @@ class BatchStampRenderer:
         """
         if not requests:
             return {}
+        request_id = self._record_requests(requests)
         results: dict[str, StampResult] = {}
         pending: dict[str, tuple[StampRequest, Path]] = {}
         # Paragraph ids are unique in normal documents, but repeated translated
@@ -209,6 +218,9 @@ class BatchStampRenderer:
             if cached is not None:
                 self._cache_hits += 1
                 results[request.key] = cached
+                self._record_reuse(
+                    request, cached, "persistent_cache", request_id=request_id
+                )
             else:
                 # Keep the legacy no-cache behavior (each request is compiled
                 # independently); deduplication is enabled when the persistent
@@ -223,21 +235,30 @@ class BatchStampRenderer:
                 pending[request.key] = (request, Path(workdir))
         if len(pending) <= 1:
             # 单段没有批量收益：直接走单段渲染（完整缩小阶梯）。
+            for key, (request, _workdir) in pending.items():
+                request.debug_parent = self._last_candidates.get(key)
+                self._record_fallback(
+                    key, "single-segment", request_id=request_id
+                )
             results = self._render_leftovers(pending, results)
-            return _copy_alias_results(results, aliases)
+            results = _copy_alias_results(results, aliases)
+            self._record_alias_reuse(aliases, results, request_id=request_id)
+            return results
 
         self._render_calls += 1
         single_only: dict[str, tuple[StampRequest, Path]] = {}
+        last_reasons: dict[str, str] = {}
         for attempt in range(1, _MAX_BATCH_ROUNDS + 1):
             if not pending:
                 break
             with self._lock:
                 self._round_count += 1
-            outcomes = self._compile_variants(pending, attempt)
+            outcomes = self._compile_variants(pending, attempt, request_id)
             for key, outcome in outcomes.items():
                 if key not in pending:
                     continue
                 reason = outcome.reason or ""
+                last_reasons[key] = reason
                 if outcome.ok:
                     entry = pending.pop(key)
                     results[key] = self._store(entry[0], outcome)
@@ -247,8 +268,17 @@ class BatchStampRenderer:
                 elif reason in _SINGLE_ONLY_REASONS:
                     single_only[key] = pending.pop(key)
         single_only.update(pending)
+        for key, (request, _workdir) in single_only.items():
+            request.debug_parent = self._last_candidates.get(key)
+            self._record_fallback(
+                key,
+                last_reasons.get(key) or "batch-rounds-exhausted",
+                request_id=request_id,
+            )
         results = self._render_leftovers(single_only, results)
-        return _copy_alias_results(results, aliases)
+        results = _copy_alias_results(results, aliases)
+        self._record_alias_reuse(aliases, results, request_id=request_id)
+        return results
 
     def _render_leftovers(
         self,
@@ -277,6 +307,7 @@ class BatchStampRenderer:
         self,
         pending: dict[str, tuple[StampRequest, Path]],
         attempt: int,
+        request_id: str | None = None,
     ) -> dict[str, StampResult]:
         """本轮所有待定段的候选档位按块编译（块间并行，块内一份 tex）。"""
         # 一轮内的候选项（每段可多页）：按轮次取阶梯档位。
@@ -293,24 +324,33 @@ class BatchStampRenderer:
             )
         results: dict[str, StampResult] = {}
         started = time.perf_counter()
-        items_by_block: list[list[tuple[str, StampRequest]]] = [
+        # items 为 (key, variant, priority) 三元组：priority 是该变体在整段
+        # 候选阶梯里的全局序号（第 1 轮首选档 = 0，第 2 轮剩余档 = 1..n）。
+        items_by_block: list[list[tuple[str, StampRequest, int]]] = [
             [
-                (key, variant)
+                (key, variant, position + attempt - 1)
                 for key in block
-                for variant in _round_variants(pending[key][0], attempt)
+                for position, variant in enumerate(
+                    _round_variants(pending[key][0], attempt)
+                )
             ]
             for block in blocks
         ]
         if len(blocks) == 1 or self._max_workers <= 1:
             for block_keys, items in zip(blocks, items_by_block, strict=True):
                 results.update(
-                    self._run_block(block_keys, items, pending, attempt)
+                    self._run_block(block_keys, items, pending, attempt, request_id)
                 )
         else:
             with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
                 futures = [
                     pool.submit(
-                        self._run_block, block_keys, items, pending, attempt
+                        self._run_block,
+                        block_keys,
+                        items,
+                        pending,
+                        attempt,
+                        request_id,
                     )
                     for block_keys, items in zip(
                         blocks, items_by_block, strict=True
@@ -333,17 +373,27 @@ class BatchStampRenderer:
     def _run_block(
         self,
         keys: list[str],
-        items: list[tuple[str, StampRequest]],
+        items: list[tuple[str, StampRequest, int]],
         pending: dict[str, tuple[StampRequest, Path]],
         attempt: int,
+        request_id: str | None = None,
     ) -> dict[str, StampResult]:
         """编译一块；块内异常只影响本块（标记归属失败，交单段渲染）。"""
         try:
             workdir = Path(pending[keys[0]][1])
             base_by_key = {key: pending[key][0] for key in keys}
-            return self._compile_block(items, workdir, attempt, base_by_key)
+            return self._compile_block(
+                items, workdir, attempt, base_by_key, request_id=request_id
+            )
         except Exception:  # noqa: BLE001 - 单块失败不拖垮整篇
             logger.warning("LaTeX bbox 批编译块失败，交回单段渲染", exc_info=True)
+            self._record_batch_failure(
+                items,
+                attempt=attempt,
+                request_id=request_id,
+                base_by_key=locals().get("base_by_key"),
+                reason="batch-attribution-failed",
+            )
             return {
                 key: StampResult(
                     key=key, ok=False, reason="batch-attribution-failed"
@@ -353,69 +403,143 @@ class BatchStampRenderer:
 
     def _compile_block(
         self,
-        items: list[tuple[str, StampRequest]],
+        items: list[tuple[str, StampRequest, int]],
         workdir: Path,
         attempt: int,
         base_by_key: dict[str, StampRequest],
         depth: int = 0,
+        request_id: str | None = None,
     ) -> dict[str, StampResult]:
         """编译一块（每个候选项一页）；超时按二分隔离坏段。"""
         if not items:
             return {}
-        keys = list(dict.fromkeys(key for key, _request in items))
+        keys = list(dict.fromkeys(key for key, _request, _prio in items))
         with self._lock:
             self._batch_count += 1
             self._segment_count += len(keys)
-        tex, ranges = self.build_batch_tex([request for _key, request in items])
-        # 调用方传入的 workdir 可能尚不存在（与单段渲染器的 attempt 目录一致，
-        # 这里自行建目录，不让路径问题把整块推给单段回退）。
-        Path(workdir).mkdir(parents=True, exist_ok=True)
-        block_dir = Path(tempfile.mkdtemp(dir=workdir, prefix="batch-"))
-        stem = "batch"
-        # 批超时 = 基础超时 + 0.2s × 段数（计划约定；按段而非按候选页计，
-        # 每页编译实测仅 ~0.04s，余量充足）。
-        timeout = self._timeout + _BATCH_TIMEOUT_PER_SEGMENT * len(keys)
-        started = time.perf_counter()
-        log, timed_out = self._run_xelatex(tex, block_dir, stem, timeout)
-        self._compile_seconds += time.perf_counter() - started
-        if timed_out:
-            if len(items) > 1 and depth < _MAX_SPLIT_DEPTH:
-                half = len(items) // 2
-                merged = self._compile_block(
-                    items[:half], workdir, attempt, base_by_key, depth + 1
-                )
-                merged.update(
-                    self._compile_block(
-                        items[half:], workdir, attempt, base_by_key, depth + 1
-                    )
-                )
-                return merged
-            logger.warning(
-                "LaTeX bbox 批编译超时（%.1fs，%d 段/%d 页），回退现有渲染",
+        recorder = self._debug_recorder
+        batch_id = recorder.new_id("batch") if recorder else None
+        try:
+            tex, ranges = self.build_batch_tex(
+                [request for _key, request, _prio in items]
+            )
+            # 调用方传入的 workdir 可能尚不存在（与单段渲染器的 attempt 目录
+            # 一致，这里自行建目录，不让路径问题把整块推给单段回退）。
+            Path(workdir).mkdir(parents=True, exist_ok=True)
+            block_dir = Path(tempfile.mkdtemp(dir=workdir, prefix="batch-"))
+            stem = "batch"
+            # 批超时 = 基础超时 + 0.2s × 段数（计划约定；按段而非按候选页计，
+            # 每页编译实测仅 ~0.04s，余量充足）。
+            timeout = self._timeout + _BATCH_TIMEOUT_PER_SEGMENT * len(keys)
+            started = time.perf_counter()
+            log, timed_out = self._run_xelatex(
+                tex,
+                block_dir,
+                stem,
                 timeout,
-                len(keys),
-                len(items),
+                debug_context={
+                    "batch_id": batch_id,
+                    "round": attempt,
+                    "segments": len(keys),
+                    "pages": len(items),
+                    "depth": depth,
+                },
+            )
+            self._compile_seconds += time.perf_counter() - started
+            artifacts = self._archive_block_artifacts(
+                batch_id, tex, block_dir, stem
+            )
+            if timed_out:
+                if len(items) > 1 and depth < _MAX_SPLIT_DEPTH:
+                    half = len(items) // 2
+                    merged = self._compile_block(
+                        items[:half],
+                        workdir,
+                        attempt,
+                        base_by_key,
+                        depth + 1,
+                        request_id=request_id,
+                    )
+                    merged.update(
+                        self._compile_block(
+                            items[half:],
+                            workdir,
+                            attempt,
+                            base_by_key,
+                            depth + 1,
+                            request_id=request_id,
+                        )
+                    )
+                    return merged
+                logger.warning(
+                    "LaTeX bbox 批编译超时（%.1fs，%d 段/%d 页），回退现有渲染",
+                    timeout,
+                    len(keys),
+                    len(items),
+                )
+                # 超时产物不可信：页归属无法验证，pdf_page_index 留空。
+                self._record_batch_failure(
+                    items,
+                    attempt=attempt,
+                    request_id=request_id,
+                    batch_id=batch_id,
+                    base_by_key=base_by_key,
+                    reason="timeout",
+                    artifacts=artifacts,
+                    ranges=ranges,
+                )
+                return {
+                    key: StampResult(key=key, ok=False, reason="timeout")
+                    for key in keys
+                }
+            return self._evaluate_block(
+                items,
+                ranges,
+                block_dir,
+                stem,
+                log,
+                attempt,
+                base_by_key,
+                batch_id=batch_id,
+                request_id=request_id,
+                block_artifacts=artifacts,
+            )
+        except Exception:
+            # 块级异常只影响本块（与 ``_run_block`` 语义一致：归属失败交单段
+            # 渲染）。候选已尽量记录（归属不明 → 页索引留空），不再上抛，
+            # 避免外层重复记录同一批候选。
+            logger.warning("LaTeX bbox 批编译块内部失败，交回单段渲染", exc_info=True)
+            self._record_batch_failure(
+                items,
+                attempt=attempt,
+                request_id=request_id,
+                batch_id=batch_id,
+                base_by_key=base_by_key,
+                reason="batch-exception",
             )
             return {
-                key: StampResult(key=key, ok=False, reason="timeout")
+                key: StampResult(
+                    key=key, ok=False, reason="batch-attribution-failed"
+                )
                 for key in keys
             }
-        return self._evaluate_block(
-            items, ranges, block_dir, stem, log, attempt, base_by_key
-        )
 
     def _evaluate_block(
         self,
-        items: list[tuple[str, StampRequest]],
+        items: list[tuple[str, StampRequest, int]],
         ranges: list[tuple[int, int]],
         block_dir: Path,
         stem: str,
         log: str,
         attempt: int,
         base_by_key: dict[str, StampRequest],
+        *,
+        batch_id: str | None = None,
+        request_id: str | None = None,
+        block_artifacts: dict | None = None,
     ) -> dict[str, StampResult]:
         """逐页判定，再按段取优先级最高的通过档位（归属 → 抽页 → fit 测量）。"""
-        keys = list(dict.fromkeys(key for key, _request in items))
+        keys = list(dict.fromkeys(key for key, _request, _prio in items))
         attribution_failed = {
             key: StampResult(
                 key=key, ok=False, reason="batch-attribution-failed"
@@ -426,9 +550,29 @@ class BatchStampRenderer:
         info = _attribute_log(log, ranges)
         if info["preamble_error"] or not pdf_path.is_file():
             logger.warning("LaTeX bbox 批编译产物/导言区异常，交回单段渲染")
+            self._record_batch_failure(
+                items,
+                attempt=attempt,
+                request_id=request_id,
+                batch_id=batch_id,
+                base_by_key=base_by_key,
+                reason="batch-attribution-failed",
+                artifacts=block_artifacts,
+                ranges=ranges,
+            )
             return attribution_failed
         if set(range(len(items))) - info["starts"]:
             logger.warning("LaTeX bbox 批编译标记缺失，交回单段渲染")
+            self._record_batch_failure(
+                items,
+                attempt=attempt,
+                request_id=request_id,
+                batch_id=batch_id,
+                base_by_key=base_by_key,
+                reason="batch-attribution-failed",
+                artifacts=block_artifacts,
+                ranges=ranges,
+            )
             return attribution_failed
         # Keep the block PDF open while measuring candidate pages.  Previously
         # every candidate was extracted to a one-page PDF and reopened just
@@ -438,7 +582,21 @@ class BatchStampRenderer:
             doc = pymupdf.open(pdf_path)
         except Exception:  # noqa: BLE001 - unreadable output means attribution failure
             logger.debug("打开批编译产物失败", exc_info=True)
+            self._record_batch_failure(
+                items,
+                attempt=attempt,
+                request_id=request_id,
+                batch_id=batch_id,
+                base_by_key=base_by_key,
+                reason="batch-attribution-failed",
+                artifacts=block_artifacts,
+                ranges=ranges,
+            )
             return attribution_failed
+        # 诊断：每个候选项一条记录（页索引 = 块内序号；tex 行区间来自
+        # build_batch_tex 的确定映射）。
+        item_candidates: dict[int, str] = {}
+        item_outcomes: dict[int, dict] = {}
         try:
             page_count = len(doc)
             if page_count != len(items):
@@ -448,67 +606,143 @@ class BatchStampRenderer:
                     page_count,
                     len(items),
                 )
+                self._record_batch_failure(
+                    items,
+                    attempt=attempt,
+                    request_id=request_id,
+                    batch_id=batch_id,
+                    base_by_key=base_by_key,
+                    reason="batch-attribution-failed",
+                    artifacts=block_artifacts,
+                    ranges=ranges,
+                )
                 return attribution_failed
 
             per_key: dict[str, dict] = {
                 key: {"candidate": None, "error": None, "reason": None}
                 for key in keys
             }
-            for index, (key, request) in enumerate(items):
+            for index, (key, request, priority) in enumerate(items):
                 bucket = info["segments"].get(index) or {}
                 record = per_key[key]
+                status = "pending"
+                reason: str | None = None
+                fits: bool | None = None
+                fit_reason: str | None = None
                 if index not in info["ends"]:
-                    continue
-                errors = bucket.get("errors") or []
-                if errors and record["error"] is None:
-                    # TeX 错误：与单段渲染一致，不缩小重试，只该段回退。
-                    record["error"] = errors[0]
-                    continue
-                fits, reason, _chars = _measure_page_fit(
-                    doc[index], request.width, request.height, request.expected_text
+                    status, reason = "skipped", "marker-missing"
+                else:
+                    errors = bucket.get("errors") or []
+                    if errors and record["error"] is None:
+                        # TeX 错误：与单段渲染一致，不缩小重试，只该段回退。
+                        record["error"] = errors[0]
+                        status, reason = "failed", f"compile:{errors[0][:160]}"
+                    else:
+                        fits, fit_reason, _chars = _measure_page_fit(
+                            doc[index],
+                            request.width,
+                            request.height,
+                            request.expected_text,
+                        )
+                        if bucket.get("overfull_hbox"):
+                            fits, fit_reason = False, "overfull-hbox"
+                        # 页级 ``Overfull \vbox`` 在批编译里只剩「vbox 高度 +
+                        # 末行 depth」的系统噪声（内容超高已被 ``\vbox to``
+                        # 封在一页内），因此不作为失败信号；真正的垂直溢出由
+                        # ``_measure_page_fit`` 的墨迹/文本判定发现。
+                        if fits and record["candidate"] is None:
+                            # 同一轮的页按档位优先级排列：先到先得。
+                            record["candidate"] = (request, index)
+                            status, reason = "ok", "ok"
+                        elif not fits:
+                            record["reason"] = fit_reason
+                            status, reason = "failed", fit_reason
+                        else:
+                            # 通过但已有更高优先级候选被采用。
+                            status, reason = "ok", "superseded"
+                item_outcomes[index] = {
+                    "status": status,
+                    "reason": reason,
+                    "fit": (
+                        {"fits": bool(fits), "reason": fit_reason}
+                        if fits is not None
+                        else {}
+                    ),
+                }
+                candidate_id = self._record_batch_candidate(
+                    key,
+                    request,
+                    priority,
+                    attempt=attempt,
+                    request_id=request_id,
+                    batch_id=batch_id,
+                    base_by_key=base_by_key,
+                    pdf_page_index=index,
+                    tex_line_range=(
+                        list(ranges[index]) if index < len(ranges) else None
+                    ),
+                    status=status,
+                    reason=reason,
+                    fit=item_outcomes[index]["fit"],
+                    artifacts=block_artifacts,
                 )
-                if bucket.get("overfull_hbox"):
-                    fits, reason = False, "overfull-hbox"
-                # 页级 ``Overfull \vbox`` 在批编译里只剩「vbox 高度 + 末行 depth」
-                # 的系统噪声（内容超高已被 ``\vbox to`` 封在一页内），因此不作为
-                # 失败信号；真正的垂直溢出由 ``_measure_page_fit`` 的墨迹/文本判定发现。
-                if fits and record["candidate"] is None:
-                    # 同一轮的页按档位优先级排列：先到先得。
-                    record["candidate"] = (request, index)
-                elif not fits:
-                    record["reason"] = reason
+                if candidate_id:
+                    item_candidates[index] = candidate_id
         finally:
             doc.close()
+
+        key_last_candidate: dict[str, str] = {}
+        for index, (key, _request, _prio) in enumerate(items):
+            if index in item_candidates:
+                key_last_candidate[key] = item_candidates[index]
 
         results: dict[str, StampResult] = {}
         for key in keys:
             record = per_key[key]
             if record["error"]:
-                results[key] = StampResult(
+                result = StampResult(
                     key=key,
                     ok=False,
                     compile_attempts=attempt,
                     reason=f"compile:{record['error']}",
                     log_excerpt=[record["error"]],
                 )
+                result.debug_ref = {
+                    "candidate_id": key_last_candidate.get(key),
+                    "request_id": request_id,
+                    "batch_id": batch_id,
+                }
+                results[key] = result
                 continue
             candidate = record["candidate"]
             if candidate is None:
                 if record["reason"] is None:
                     # 该段的页没有任何可信判定（标记/抽页缺失）。
-                    results[key] = attribution_failed[key]
+                    result = attribution_failed[key]
                 else:
-                    results[key] = StampResult(
+                    result = StampResult(
                         key=key,
                         ok=False,
                         compile_attempts=attempt,
                         reason=f"s{attempt - 1}:{record['reason']}",
                     )
+                result.debug_ref = {
+                    "candidate_id": key_last_candidate.get(key),
+                    "request_id": request_id,
+                    "batch_id": batch_id,
+                }
+                results[key] = result
                 continue
             request, page_index = candidate
             stamp_path = block_dir / f"{stem}-p{page_index}.pdf"
             if not _extract_page(pdf_path, page_index, stamp_path):
-                results[key] = attribution_failed[key]
+                result = attribution_failed[key]
+                result.debug_ref = {
+                    "candidate_id": key_last_candidate.get(key),
+                    "request_id": request_id,
+                    "batch_id": batch_id,
+                }
+                results[key] = result
                 continue
             result = StampResult(
                 key=key, ok=True, compile_attempts=attempt, reason="ok"
@@ -524,7 +758,23 @@ class BatchStampRenderer:
                 if request.lead
                 else request.font_size * DEFAULT_LEAD_RATIO
             )
+            selected_id = item_candidates.get(page_index)
+            result.debug_ref = {
+                "candidate_id": selected_id,
+                "request_id": request_id,
+                "batch_id": batch_id,
+                "pdf_page_index": page_index,
+            }
+            self._record_selected(
+                key,
+                selected_id,
+                items[page_index][2],
+                request_id=request_id,
+                batch_id=batch_id,
+                pdf_page_index=page_index,
+            )
             results[key] = result
+        self._last_candidates.update(key_last_candidate)
         return results
 
     # ------------------------------------------------------------------
@@ -613,7 +863,13 @@ class BatchStampRenderer:
 
     # ------------------------------------------------------------------
     def _run_xelatex(
-        self, tex: str, workdir: Path, stem: str, timeout: float
+        self,
+        tex: str,
+        workdir: Path,
+        stem: str,
+        timeout: float,
+        *,
+        debug_context: dict | None = None,
     ) -> tuple[str, bool]:
         """跑一次 xelatex；返回 (日志, 是否超时)。
 
@@ -622,19 +878,31 @@ class BatchStampRenderer:
         """
         tex_path = workdir / f"{stem}.tex"
         tex_path.write_text(tex, encoding="utf-8")
-        try:
-            proc = subprocess.run(  # noqa: S603 - 可执行文件已由能力探测校验
-                [
-                    self._capability.xelatex_path,
-                    "-interaction=nonstopmode",
-                    f"-output-directory={workdir}",
-                    str(tex_path),
-                ],
-                cwd=workdir,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
+        argv = [
+            self._capability.xelatex_path,
+            "-interaction=nonstopmode",
+            f"-output-directory={workdir}",
+            str(tex_path),
+        ]
+        recorder = self._debug_recorder
+        capture = (
+            recorder.process(
+                "build", "xelatex", argv, timeout=timeout, **(debug_context or {})
             )
+            if recorder
+            else contextlib.nullcontext()
+        )
+        try:
+            with capture as evidence:
+                proc = subprocess.run(  # noqa: S603 - 可执行文件已由能力探测校验
+                    argv,
+                    cwd=workdir,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                )
+                if evidence is not None:
+                    evidence["result"] = proc
         except subprocess.TimeoutExpired:
             logger.warning("LaTeX bbox 批编译超时（%.1fs）", timeout)
             return "", True
@@ -651,6 +919,272 @@ class BatchStampRenderer:
             except OSError:
                 logger.debug("读取批编译日志失败", exc_info=True)
         return log, False
+
+    # ------------------------------------------------------------------
+    # 诊断采集（recorder 为 None 时全部为 no-op；不改变编译行为）
+    # ------------------------------------------------------------------
+    def _record_requests(
+        self, requests: list[tuple[StampRequest, Path]]
+    ) -> str | None:
+        """``compile_requests`` 事件：进入渲染器的原始请求清单（含别名）。"""
+        recorder = self._debug_recorder
+        if not recorder:
+            return None
+        request_id = recorder.new_id("request")
+        recorder.record_event(
+            "build",
+            "compile_requests",
+            {
+                "request_id": request_id,
+                "renderer": "batch",
+                "requests": [
+                    {
+                        "key": request.key,
+                        "width": round(float(request.width), 3),
+                        "height": round(float(request.height), 3),
+                        "font_size": round(float(request.font_size), 3),
+                        "lead": (
+                            round(float(request.lead), 3) if request.lead else None
+                        ),
+                        "expected_chars": len(request.expected_text or ""),
+                    }
+                    for request, _workdir in requests
+                ],
+            },
+        )
+        return request_id
+
+    def _record_reuse(
+        self,
+        request: StampRequest,
+        result: StampResult,
+        kind: str,
+        *,
+        request_id: str | None = None,
+    ) -> None:
+        """``compile_reuse`` 事件：持久缓存命中，本次真实编译调用数为 0。"""
+        recorder = self._debug_recorder
+        if not recorder:
+            return
+        debug_ref = getattr(result, "debug_ref", None) or {}
+        recorder.record_event(
+            "build",
+            "compile_reuse",
+            {
+                "kind": kind,
+                "key": request.key,
+                "request_id": request_id,
+                "candidate_id": debug_ref.get("candidate_id"),
+                "actual_compile_calls": 0,
+                "pdf_path": result.pdf_path,
+                "font_size": result.font_size,
+                "scale": result.scale,
+                "lead": result.lead,
+            },
+        )
+
+    def _record_alias_reuse(
+        self,
+        aliases: dict[str, list[str]],
+        results: dict[str, StampResult],
+        *,
+        request_id: str | None = None,
+    ) -> None:
+        """``compile_reuse(deduplicated)``：别名段复用正段的真实编译候选。"""
+        recorder = self._debug_recorder
+        if not recorder or not aliases:
+            return
+        for canonical, keys in aliases.items():
+            result = results.get(canonical)
+            candidate_id = (
+                (getattr(result, "debug_ref", None) or {}).get("candidate_id")
+                if result is not None
+                else None
+            )
+            for key in keys:
+                recorder.record_event(
+                    "build",
+                    "compile_reuse",
+                    {
+                        "kind": "deduplicated",
+                        "key": key,
+                        "canonical": canonical,
+                        "request_id": request_id,
+                        "candidate_id": candidate_id,
+                        "actual_compile_calls": 0,
+                    },
+                )
+
+    def _record_fallback(
+        self, key: str, reason: str, *, request_id: str | None = None
+    ) -> None:
+        """``compile_fallback`` 事件：该段交回单段渲染器（每段一次）。"""
+        recorder = self._debug_recorder
+        if not recorder:
+            return
+        recorder.record_event(
+            "build",
+            "compile_fallback",
+            {
+                "key": key,
+                "reason": reason,
+                "request_id": request_id,
+                "parent_id": self._last_candidates.get(key),
+                "from": "batch",
+                "to": "single",
+            },
+        )
+
+    def _record_selected(
+        self,
+        key: str,
+        candidate_id: str | None,
+        priority: int,
+        *,
+        request_id: str | None = None,
+        batch_id: str | None = None,
+        pdf_page_index: int | None = None,
+    ) -> None:
+        """``candidate_selected`` 事件：段内最终采用的候选。"""
+        recorder = self._debug_recorder
+        if not recorder or not candidate_id:
+            return
+        recorder.record_event(
+            "build",
+            "candidate_selected",
+            {
+                "id": candidate_id,
+                "key": key,
+                "priority": priority,
+                "request_id": request_id,
+                "batch_id": batch_id,
+                "pdf_page_index": pdf_page_index,
+            },
+        )
+
+    def _archive_block_artifacts(
+        self, batch_id: str | None, tex: str, block_dir: Path, stem: str
+    ) -> dict:
+        """归档块级证据：一份 tex/log/pdf 供块内全部候选共享引用。"""
+        recorder = self._debug_recorder
+        if not recorder or not batch_id:
+            return {}
+        artifacts = {
+            "tex": recorder.archive_text(
+                "build", f"compile/batch/{batch_id}.tex", tex
+            )
+        }
+        for suffix in ("pdf", "log"):
+            path = block_dir / f"{stem}.{suffix}"
+            artifacts[suffix] = (
+                recorder.archive_file(
+                    "build", f"compile/batch/{batch_id}.{suffix}", path
+                )
+                if path.is_file()
+                else None
+            )
+        return artifacts
+
+    def _record_batch_candidate(
+        self,
+        key: str,
+        request: StampRequest,
+        priority: int,
+        *,
+        attempt: int,
+        request_id: str | None,
+        batch_id: str | None,
+        base_by_key: dict | None,
+        pdf_page_index: int | None,
+        tex_line_range,
+        status: str,
+        reason: str | None,
+        fit: dict | None = None,
+        artifacts: dict | None = None,
+    ) -> str | None:
+        """记录一个批编译候选；返回其候选 id（供选中/父链引用）。"""
+        recorder = self._debug_recorder
+        if not recorder:
+            return None
+        candidate_id = recorder.new_id("candidate")
+        base = (base_by_key or {}).get(key, request)
+        effective_lead = (
+            float(request.lead)
+            if request.lead
+            else request.font_size * DEFAULT_LEAD_RATIO
+        )
+        record = CompileCandidate(
+            id=candidate_id,
+            paragraph_id=str(key),
+            request_id=request_id or "",
+            renderer="batch",
+            round=attempt,
+            priority=priority,
+            width=round(float(request.width), 3),
+            height=round(float(request.height), 3),
+            font_size_initial=round(float(base.font_size), 3),
+            font_size=round(float(request.font_size), 3),
+            lead=round(float(effective_lead), 3),
+            parent_id=(
+                self._last_candidates.get(key)
+                or getattr(request, "debug_parent", None)
+            ),
+            batch_id=batch_id,
+            pdf_page_index=pdf_page_index,
+            tex_line_range=tex_line_range,
+            font={"serif": bool(request.serif)},
+            status=status,
+            fit=fit or {},
+            reason=reason,
+            artifacts=dict(artifacts or {}),
+        )
+        payload = record.to_dict()
+        snapshot = recorder.write_snapshot(
+            "build", f"candidates/{candidate_id}", payload
+        )
+        recorder.record_event(
+            "build", "candidate_evaluated", {**payload, "snapshot": snapshot}
+        )
+        return candidate_id
+
+    def _record_batch_failure(
+        self,
+        items: list[tuple[str, StampRequest, int]],
+        *,
+        attempt: int,
+        request_id: str | None = None,
+        batch_id: str | None = None,
+        base_by_key: dict | None = None,
+        reason: str,
+        artifacts: dict | None = None,
+        ranges=None,
+    ) -> None:
+        """归属失败/超时/异常路径：逐项记录候选（页索引留空，不伪造映射）。"""
+        recorder = self._debug_recorder
+        if not recorder:
+            return
+        for index, (key, request, priority) in enumerate(items):
+            line_range = (
+                list(ranges[index])
+                if ranges is not None and index < len(ranges)
+                else None
+            )
+            candidate_id = self._record_batch_candidate(
+                key,
+                request,
+                priority,
+                attempt=attempt,
+                request_id=request_id,
+                batch_id=batch_id,
+                base_by_key=base_by_key,
+                pdf_page_index=None,
+                tex_line_range=line_range,
+                status="failed",
+                reason=reason,
+                artifacts=artifacts,
+            )
+            if candidate_id:
+                self._last_candidates[key] = candidate_id
 
 
 # ----------------------------------------------------------------------

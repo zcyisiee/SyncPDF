@@ -34,9 +34,15 @@ import argparse
 import contextlib
 import json
 import sys
+import traceback
+
+from babeldoc import debug_recorder as _dr
 
 from babeldoc_tools import __version__
 from babeldoc_tools import common
+from babeldoc_tools import debug_replay
+from babeldoc_tools import debug_runtime
+from babeldoc_tools import debug_server
 from babeldoc_tools import layout
 from babeldoc_tools import parse
 from babeldoc_tools import registry
@@ -57,6 +63,33 @@ def _split_ids(raw: str | None) -> list[str]:
 
 def _add_workdir(parser: argparse.ArgumentParser, *, required: bool = True) -> None:
     parser.add_argument("--workdir", required=required, help="工作目录（含 agent/ 产物）")
+
+
+def _add_debug_flags(parser: argparse.ArgumentParser, *, recompile: bool = False) -> None:
+    """管线子命令共用的 debug 开关（采集 + 本地查看器）。"""
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="开启全链路诊断采集（<workdir>/debug/runs/）并启动本地查看器",
+    )
+    parser.add_argument(
+        "--debug-port",
+        type=int,
+        default=0,
+        help="debug 查看器端口（默认 0 = 自动分配空闲端口；仅监听 127.0.0.1）",
+    )
+    parser.add_argument(
+        "--debug-no-open",
+        action="store_true",
+        help="debug 模式不自动打开浏览器（URL 仍打印到 stderr）",
+    )
+    if recompile:
+        parser.add_argument(
+            "--debug-recompile",
+            action="store_true",
+            help="debug 模式专用：绕过 stamp 持久缓存读取，强制冷编译"
+            "（需同时指定 --debug；与 --no-latex-bbox 互斥）",
+        )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -103,6 +136,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="实验性：把 MinerU OCR 文本回填到原生字符（仅等长 text span）",
     )
+    _add_debug_flags(p_parse)
 
     # ---- translate ------------------------------------------------------- #
     p_translate = sub.add_parser("translate", help="整篇翻译 / 按 id 重译合并")
@@ -139,6 +173,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="retry_missing",
         help="缺失段落不自动补译",
     )
+    _add_debug_flags(p_translate)
 
     # ---- apply ----------------------------------------------------------- #
     p_apply = sub.add_parser("apply", help="校验译文 Markdown 并写回 IR")
@@ -148,6 +183,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="译文 Markdown（默认 agent/translated.md）",
     )
+    _add_debug_flags(p_apply)
 
     # ---- build ----------------------------------------------------------- #
     p_build = sub.add_parser("build", help="从 IR 重排生成 mono/dual PDF（可选渲染页）")
@@ -175,6 +211,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="stats",
         help="不附带 PDF 页数/目录/链接统计",
     )
+    _add_debug_flags(p_build, recompile=True)
 
     # ---- check ----------------------------------------------------------- #
     p_check = sub.add_parser(
@@ -191,6 +228,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="verdict != pass（含子项 not_available 导致无法确认）时退出码置 1",
     )
+    _add_debug_flags(p_check)
 
     # ---- layout-set ------------------------------------------------------ #
     p_layout = sub.add_parser("layout-set", help="写入/合并段落级排版覆盖")
@@ -209,6 +247,39 @@ def _build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("--output-dir", default=None)
     p_report.add_argument("--title", default=None)
     p_report.add_argument("--notes", default=None, help="追加备注（Markdown）")
+    _add_debug_flags(p_report)
+
+    # ---- debug ------------------------------------------------------------ #
+    p_debug = sub.add_parser(
+        "debug",
+        help="启动/复用本地 debug 查看器（只读归档），或 --stop 停止它",
+        description=(
+            "查看 <workdir>/debug/runs/ 下的诊断归档：默认打开最新 run，"
+            "--run-id 指定历史 run。查看器只读，每个 workdir 一个进程，"
+            "无活跃 pipeline 且无浏览器心跳 30 分钟后自动退出。"
+        ),
+    )
+    _add_workdir(p_debug)
+    p_debug.add_argument(
+        "--port", type=int, default=0, help="查看器端口（默认 0 = 自动分配）"
+    )
+    p_debug.add_argument(
+        "--no-open", action="store_true", help="不自动打开浏览器"
+    )
+    p_debug.add_argument("--run-id", default=None, help="要打开的 run_id")
+    p_debug.add_argument(
+        "--stop", action="store_true", help="只停止该 workdir 的查看器进程"
+    )
+    p_debug.add_argument(
+        "--source-pdf",
+        default=None,
+        help="为旧 workdir 回放显式绑定源 PDF（写入 debug/bindings.json）",
+    )
+    p_debug.add_argument(
+        "--mono",
+        default=None,
+        help="为旧 workdir 回放显式绑定 mono PDF（写入 debug/bindings.json）",
+    )
 
     # ---- run ------------------------------------------------------------- #
     p_run = sub.add_parser(
@@ -294,68 +365,185 @@ def _build_parser() -> argparse.ArgumentParser:
     # report 相关
     p_run.add_argument("--title", default=None)
     p_run.add_argument("--notes", default=None)
+    _add_debug_flags(p_run, recompile=True)
 
     return parser
+
+
+def _invoke_with_debug(args, *, config: dict, input_pdf=None, call) -> dict:
+    """``--debug`` 包装：建 run 归档 → 起查看器 → ``call(recorder)`` → 收尾。
+
+    ``call`` 是 ``recorder -> payload`` 的闭包（内部走 registry.invoke 或
+    run_pipeline 自己的信封）。成功与失败都把 ``debug`` 块附到 ``data``；
+    debug 基础设施失败（锁被占 / 归档不可写 / 查看器未就绪）直接返回错误
+    信封且不执行 ``call``。
+    """
+    if not getattr(args, "debug", False):
+        return call(None)
+    session = debug_runtime.DebugSession(args.workdir)
+    try:
+        recorder = session.create_run(config=config, input_pdf=input_pdf)
+    except common.ToolError as exc:
+        return registry.error_payload(exc.code, exc.message, **exc.extra)
+    try:
+        viewer = session.start_viewer(
+            port=getattr(args, "debug_port", 0),
+            no_open=getattr(args, "debug_no_open", False),
+            run_id=recorder.run_id,
+        )
+    except common.ToolError as exc:
+        session.finish_run(recorder, _dr.STATUS_ERROR)
+        return debug_runtime.attach_debug(
+            registry.error_payload(exc.code, exc.message, **exc.extra),
+            recorder,
+            None,
+        )
+    status = _dr.STATUS_FINISHED
+    try:
+        payload = call(recorder)
+        if not (isinstance(payload, dict) and payload.get("ok")):
+            status = _dr.STATUS_ERROR
+    except KeyboardInterrupt:
+        status = _dr.STATUS_INTERRUPTED
+        payload = registry.error_payload(
+            "interrupted", "pipeline 被中断（KeyboardInterrupt），证据保留已采集部分"
+        )
+    except Exception as exc:  # noqa: BLE001 - 保证 stdout 恒为单行 JSON
+        status = _dr.STATUS_ERROR
+        payload = registry.error_payload(
+            "tool_exception",
+            f"{type(exc).__name__}: {exc}",
+            traceback=traceback.format_exc(limit=8).splitlines()[-8:],
+        )
+    finally:
+        session.finish_run(recorder, status)
+    return debug_runtime.attach_debug(payload, recorder, viewer)
 
 
 def _dispatch(args: argparse.Namespace) -> dict:
     command = args.command
     if command == "parse":
-        return registry.invoke(
-            parse.parse_document,
-            pdf=args.pdf,
-            workdir=args.workdir,
-            layout=args.layout,
-            pages=args.pages,
-            lang_in=args.lang_in,
-            lang_out=args.lang_out,
-            mineru_token=args.mineru_token,
-            mineru_language=args.mineru_language,
-            mineru_json=args.mineru_json,
-            mineru_cache_key=args.mineru_cache_key,
-            layout_coverage_threshold=args.layout_coverage_threshold,
-            mineru_use_ocr_text=args.mineru_ocr_text,
+        return _invoke_with_debug(
+            args,
+            config={
+                "stages": ["parse"],
+                "options": {
+                    "layout": args.layout,
+                    "pages": args.pages,
+                    "lang_in": args.lang_in,
+                    "lang_out": args.lang_out,
+                    "mineru_language": args.mineru_language,
+                    "mineru_json": bool(args.mineru_json),
+                    "mineru_cache_key": bool(args.mineru_cache_key),
+                    "layout_coverage_threshold": args.layout_coverage_threshold,
+                    "mineru_ocr_text": args.mineru_ocr_text,
+                },
+            },
+            input_pdf=args.pdf,
+            call=lambda rec: registry.invoke(
+                parse.parse_document,
+                pdf=args.pdf,
+                workdir=args.workdir,
+                layout=args.layout,
+                pages=args.pages,
+                lang_in=args.lang_in,
+                lang_out=args.lang_out,
+                mineru_token=args.mineru_token,
+                mineru_language=args.mineru_language,
+                mineru_json=args.mineru_json,
+                mineru_cache_key=args.mineru_cache_key,
+                layout_coverage_threshold=args.layout_coverage_threshold,
+                mineru_use_ocr_text=args.mineru_ocr_text,
+                debug_recorder=rec,
+            ),
         )
     if command == "translate":
-        return registry.invoke(
-            translate.translate_document,
-            workdir=args.workdir,
-            ids=_split_ids(args.ids),
-            feedback=args.feedback,
-            markdown=args.markdown,
-            prompt_only=args.prompt_only,
-            translator=args.translator,
-            timeout=args.timeout,
-            repair_prompt=args.repair_prompt,
-            retry_missing=args.retry_missing,
+        return _invoke_with_debug(
+            args,
+            config={
+                "stages": ["translate"],
+                "options": {
+                    "ids": _split_ids(args.ids),
+                    "markdown": args.markdown,
+                    "prompt_only": args.prompt_only,
+                    "translator": args.translator,
+                    "timeout": args.timeout,
+                    "retry_missing": args.retry_missing,
+                },
+            },
+            call=lambda rec: registry.invoke(
+                translate.translate_document,
+                workdir=args.workdir,
+                ids=_split_ids(args.ids),
+                feedback=args.feedback,
+                markdown=args.markdown,
+                prompt_only=args.prompt_only,
+                translator=args.translator,
+                timeout=args.timeout,
+                repair_prompt=args.repair_prompt,
+                retry_missing=args.retry_missing,
+                debug_recorder=rec,
+            ),
         )
     if command == "apply":
-        return registry.invoke(
-            translate.apply_translation,
-            workdir=args.workdir,
-            markdown=args.markdown,
+        return _invoke_with_debug(
+            args,
+            config={"stages": ["apply"], "options": {"markdown": args.markdown}},
+            call=lambda rec: registry.invoke(
+                translate.apply_translation,
+                workdir=args.workdir,
+                markdown=args.markdown,
+                debug_recorder=rec,
+            ),
         )
     if command == "build":
-        return registry.invoke(
-            layout.build_pdf,
-            workdir=args.workdir,
-            output_dir=args.output_dir,
-            dual=args.dual,
-            watermark=args.watermark,
-            latex_bbox=args.latex_bbox,
-            latex_bbox_mode=args.latex_bbox_mode,
-            render=args.render,
-            stats=args.stats,
+        return _invoke_with_debug(
+            args,
+            config={
+                "stages": ["build"],
+                "options": {
+                    "dual": args.dual,
+                    "watermark": args.watermark,
+                    "latex_bbox": args.latex_bbox,
+                    "latex_bbox_mode": args.latex_bbox_mode,
+                    "render": args.render,
+                    "debug_recompile": args.debug_recompile,
+                },
+            },
+            call=lambda rec: registry.invoke(
+                layout.build_pdf,
+                workdir=args.workdir,
+                output_dir=args.output_dir,
+                dual=args.dual,
+                watermark=args.watermark,
+                latex_bbox=args.latex_bbox,
+                latex_bbox_mode=args.latex_bbox_mode,
+                render=args.render,
+                stats=args.stats,
+                debug_recorder=rec,
+                debug_recompile=args.debug_recompile,
+            ),
         )
     if command == "check":
-        return registry.invoke(
-            review.check_document,
-            workdir=args.workdir,
-            mono=args.mono,
-            dual=args.dual,
-            source_pdf=args.source_pdf,
-            skip_pdf_checks=args.skip_pdf_checks,
-            strict=args.strict,
+        return _invoke_with_debug(
+            args,
+            config={
+                "stages": ["check"],
+                "options": {
+                    "skip_pdf_checks": args.skip_pdf_checks,
+                    "strict": args.strict,
+                },
+            },
+            call=lambda rec: registry.invoke(
+                review.check_document,
+                workdir=args.workdir,
+                mono=args.mono,
+                dual=args.dual,
+                source_pdf=args.source_pdf,
+                skip_pdf_checks=args.skip_pdf_checks,
+                strict=args.strict,
+                debug_recorder=rec,
+            ),
         )
     if command == "layout-set":
         patch = None
@@ -374,13 +562,23 @@ def _dispatch(args: argparse.Namespace) -> dict:
             clear=args.clear,
         )
     if command == "report":
-        return registry.invoke(
-            report.report,
-            workdir=args.workdir,
-            output_dir=args.output_dir,
-            title=args.title,
-            notes=args.notes,
+        return _invoke_with_debug(
+            args,
+            config={
+                "stages": ["report"],
+                "options": {"title": args.title},
+            },
+            call=lambda rec: registry.invoke(
+                report.report,
+                workdir=args.workdir,
+                output_dir=args.output_dir,
+                title=args.title,
+                notes=args.notes,
+                debug_recorder=rec,
+            ),
         )
+    if command == "debug":
+        return _debug_command(args)
     if command == "run":
         # run 自己返回完整信封（含 data 摘要），不能再套 invoke。
         workdir = args.workdir
@@ -388,57 +586,174 @@ def _dispatch(args: argparse.Namespace) -> dict:
             return registry.error_payload(
                 "workdir_missing", "run 需要 --workdir（如 --workdir tmp/my-paper）"
             )
-        try:
-            return run_tool.run_pipeline(
-                workdir,
-                args.pdf,
-                from_stage=args.from_stage,
-                output_dir=args.output_dir,
-                layout_backend=args.layout,
-                pages=args.pages,
-                lang_in=args.lang_in,
-                lang_out=args.lang_out,
-                mineru_token=args.mineru_token,
-                mineru_language=args.mineru_language,
-                mineru_json=args.mineru_json,
-                mineru_cache_key=args.mineru_cache_key,
-                layout_coverage_threshold=args.layout_coverage_threshold,
-                mineru_use_ocr_text=args.mineru_ocr_text,
-                ids=_split_ids(args.ids),
-                feedback=args.feedback,
-                markdown=args.markdown,
-                prompt_only=args.prompt_only,
-                timeout=args.timeout,
-                translator=args.translator,
-                reviewer=args.reviewer,
-                retry_missing=args.retry_missing,
-                dual=args.dual,
-                watermark=args.watermark,
-                latex_bbox=args.latex_bbox,
-                latex_bbox_mode=args.latex_bbox_mode,
-                render=args.render,
-                stats=args.stats,
-                skip_pdf_checks=args.skip_pdf_checks,
-                source_pdf=args.source_pdf,
-                title=args.title,
-                notes=args.notes,
-            )
-        except common.ToolError as exc:
-            return registry.error_payload(exc.code, exc.message, **exc.extra)
-        except Exception as exc:  # noqa: BLE001 - 保证 stdout 恒为单行 JSON
-            import traceback
+        start_index = RUN_STAGES.index(args.from_stage)
 
-            return registry.error_payload(
-                "tool_exception",
-                f"{type(exc).__name__}: {exc}",
-                traceback=traceback.format_exc(limit=8).splitlines()[-8:],
-            )
+        def _run_call(rec):
+            try:
+                return run_tool.run_pipeline(
+                    workdir,
+                    args.pdf,
+                    from_stage=args.from_stage,
+                    output_dir=args.output_dir,
+                    layout_backend=args.layout,
+                    pages=args.pages,
+                    lang_in=args.lang_in,
+                    lang_out=args.lang_out,
+                    mineru_token=args.mineru_token,
+                    mineru_language=args.mineru_language,
+                    mineru_json=args.mineru_json,
+                    mineru_cache_key=args.mineru_cache_key,
+                    layout_coverage_threshold=args.layout_coverage_threshold,
+                    mineru_use_ocr_text=args.mineru_ocr_text,
+                    ids=_split_ids(args.ids),
+                    feedback=args.feedback,
+                    markdown=args.markdown,
+                    prompt_only=args.prompt_only,
+                    timeout=args.timeout,
+                    translator=args.translator,
+                    reviewer=args.reviewer,
+                    retry_missing=args.retry_missing,
+                    dual=args.dual,
+                    watermark=args.watermark,
+                    latex_bbox=args.latex_bbox,
+                    latex_bbox_mode=args.latex_bbox_mode,
+                    render=args.render,
+                    stats=args.stats,
+                    skip_pdf_checks=args.skip_pdf_checks,
+                    source_pdf=args.source_pdf,
+                    title=args.title,
+                    notes=args.notes,
+                    debug_recorder=rec,
+                    debug_recompile=args.debug_recompile,
+                )
+            except common.ToolError as exc:
+                return registry.error_payload(exc.code, exc.message, **exc.extra)
+            except Exception as exc:  # noqa: BLE001 - 保证 stdout 恒为单行 JSON
+                return registry.error_payload(
+                    "tool_exception",
+                    f"{type(exc).__name__}: {exc}",
+                    traceback=traceback.format_exc(limit=8).splitlines()[-8:],
+                )
+
+        return _invoke_with_debug(
+            args,
+            config={
+                "stages": list(RUN_STAGES[start_index:]),
+                "options": {
+                    "from_stage": args.from_stage,
+                    "layout": args.layout,
+                    "pages": args.pages,
+                    "lang_in": args.lang_in,
+                    "lang_out": args.lang_out,
+                    "translator": args.translator,
+                    "reviewer": args.reviewer,
+                    "markdown": args.markdown,
+                    "prompt_only": args.prompt_only,
+                    "timeout": args.timeout,
+                    "dual": args.dual,
+                    "watermark": args.watermark,
+                    "latex_bbox": args.latex_bbox,
+                    "latex_bbox_mode": args.latex_bbox_mode,
+                    "debug_recompile": args.debug_recompile,
+                },
+            },
+            input_pdf=args.pdf,
+            call=_run_call,
+        )
     raise SystemExit(f"未知子命令: {command}")  # pragma: no cover
 
 
+def _debug_command(args: argparse.Namespace) -> dict:
+    """``bdt debug``：启动/复用查看器、显式 PDF 绑定、``--stop``、旧目录回放。"""
+    session = debug_runtime.DebugSession(args.workdir)
+    try:
+        bindings_path = session.record_bindings(
+            source_pdf=args.source_pdf, mono=args.mono
+        )
+        if args.stop:
+            data = session.stop_viewer()
+            if bindings_path:
+                data["bindings"] = str(bindings_path)
+            return {"ok": True, "data": data}
+        replayed = None
+        want_replay = args.run_id == "replay" or (
+            args.run_id is None
+            and debug_replay.replay_run_needed(args.workdir)
+        )
+        if want_replay:
+            session.acquire_write_lock()
+            try:
+                replayed = debug_replay.build_replay_run(
+                    args.workdir,
+                    source_pdf=args.source_pdf,
+                    mono=args.mono,
+                )
+            finally:
+                session.release_write_lock()
+            if replayed:
+                sys.stderr.write(
+                    "debug: 回放模式（来自旧 workdir 产物，证据不完整）\n"
+                )
+            elif args.run_id == "replay":
+                return registry.error_payload(
+                    "replay_unavailable",
+                    "workdir 中没有可回放的 agent/ 历史产物",
+                )
+        run_id = (
+            args.run_id or replayed or debug_runtime.latest_run_id(args.workdir)
+        )
+        info = session.start_viewer(
+            port=args.port, no_open=args.no_open, run_id=run_id
+        )
+    except common.ToolError as exc:
+        return registry.error_payload(exc.code, exc.message, **exc.extra)
+    data = {
+        "url": info["url"],
+        "port": info["port"],
+        "run_id": run_id,
+        "reused": info["reused"],
+    }
+    if bindings_path:
+        data["bindings"] = str(bindings_path)
+    return {"ok": True, "data": data}
+
+
+def _serve_internal(argv: list[str]) -> int:
+    """隐藏参数入口：detached 查看器服务进程（不产出 stdout JSON）。"""
+    internal = argparse.ArgumentParser(prog="bdt --debug-serve-internal")
+    internal.add_argument("--debug-serve-internal", action="store_true")
+    internal.add_argument("--workdir", required=True)
+    internal.add_argument("--port", type=int, default=0)
+    internal.add_argument("--token", required=True)
+    ns = internal.parse_args(argv)
+    return debug_server.serve(ns.workdir, ns.port, ns.token)
+
+
+def _render_internal(argv: list[str]) -> int:
+    """隐藏参数入口：PDF 渲染 worker（stdin/stdout 协议，见 debug_render）。"""
+    internal = argparse.ArgumentParser(prog="bdt --debug-render-internal")
+    internal.add_argument("--debug-render-internal", action="store_true")
+    internal.parse_args(argv)
+    from babeldoc_tools import debug_render
+
+    return debug_render.render_worker()
+
+
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    # 隐藏的内部入口：detached 查看器服务进程 / PDF 渲染 worker
+    # （不进公开 --help，不占子命令）。
+    if "--debug-serve-internal" in argv:
+        return _serve_internal(argv)
+    if "--debug-render-internal" in argv:
+        return _render_internal(argv)
     parser = _build_parser()
     args = parser.parse_args(argv)
+    if getattr(args, "debug_recompile", False):
+        if not getattr(args, "debug", False):
+            parser.error("--debug-recompile 需要同时指定 --debug")
+        if getattr(args, "latex_bbox", True) is False:
+            parser.error("--debug-recompile 与 --no-latex-bbox 互斥")
     # 实现函数/第三方库的 print 一律走 stderr，保证 stdout 只有最终 JSON。
     with contextlib.redirect_stdout(sys.stderr):
         payload = _dispatch(args)

@@ -229,12 +229,14 @@ def test_batch_rounds_then_falls_back_to_single(tmp_path, monkeypatch):
     )
 
     def fake_evaluate(
-        _self, items, _ranges, _block_dir, _stem, _log, attempt, _base_by_key
+        _self, items, _ranges, _block_dir, _stem, _log, attempt, _base_by_key, **_k
     ):
-        rounds.append((attempt, sorted({round(req.lead, 3) for _k, req in items})))
+        rounds.append(
+            (attempt, sorted({round(req.lead, 3) for _k, req, _p in items}))
+        )
         return {
             key: StampResult(key=key, ok=False, reason="s0:vertical-overflow")
-            for key, _request in items
+            for key, _request, _p in items
         }
 
     monkeypatch.setattr(BatchStampRenderer, "_evaluate_block", fake_evaluate)
@@ -281,12 +283,12 @@ def test_batch_content_failure_is_not_retried(tmp_path, monkeypatch):
     )
 
     def fake_evaluate(
-        _self, items, _ranges, _block_dir, _stem, _log, attempt, _base_by_key
+        _self, items, _ranges, _block_dir, _stem, _log, attempt, _base_by_key, **_k
     ):
         attempts.append(attempt)
         return {
             key: StampResult(key=key, ok=False, reason="s0:text-mismatch")
-            for key, _request in items
+            for key, _request, _p in items
         }
 
     monkeypatch.setattr(BatchStampRenderer, "_evaluate_block", fake_evaluate)
@@ -315,7 +317,7 @@ def test_batch_timeout_splits_and_isolates_bad_segment(tmp_path, monkeypatch):
     timeouts: list[float] = []
 
     def fake_run(  # noqa: ARG001 - 与 _run_xelatex 同签名
-        _self, tex, _workdir, _stem, timeout
+        _self, tex, _workdir, _stem, timeout, **_k
     ):
         timeouts.append(timeout)
         if "TIMEOUTSEG" in tex:
@@ -328,7 +330,7 @@ def test_batch_timeout_splits_and_isolates_bad_segment(tmp_path, monkeypatch):
         "_evaluate_block",
         lambda _self, items, *_a, **_k: {
             key: StampResult(key=key, ok=False, reason="batch-attribution-failed")
-            for key, _request in items
+            for key, _request, _p in items
         },
     )
     fallback_ok: list[str] = []

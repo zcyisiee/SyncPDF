@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from babeldoc.tools.agent.translation_selection import SelectionContext
 from babeldoc.tools.agent.translation_selection import normalize_label
 from babeldoc.tools.agent.translation_selection import select_page_paragraphs
@@ -198,3 +199,58 @@ def test_normalize_label_folds_spaces_slashes_and_case():
     assert normalize_label("  plain text ") == "plain_text"
     assert normalize_label("REFERENCE") == "reference"
     assert normalize_label(None) == ""
+
+
+def test_single_letter_appendix_heading_boundary():
+    """NeurIPS 风格裸字母附录标题（"A. Extended Related Work"）结束 references。"""
+    paragraphs = [
+        make_paragraph("References", layout_label="title"),
+        make_paragraph("Smith et al. 2020.", layout_label="text"),
+        make_paragraph("A. Extended Related Work", layout_label="title"),
+        make_paragraph("We review additional related work here.", layout_label="text"),
+    ]
+    page = make_page(*paragraphs)
+    context = SelectionContext()
+    decisions = list(select_page_paragraphs(page, context))
+    assert [d.translate for _, d in decisions] == [False, False, True, True]
+    assert context.references_started is False
+
+
+@pytest.mark.parametrize(
+    "heading",
+    [
+        "A. Extended Related Work",
+        "B. Extended Results and Figures",
+        "C. Proofs and Derivations",
+        "D. Experimental Details",
+        "E. Usage of LLMs",
+    ],
+)
+def test_single_letter_appendix_headings_resume_translation(heading):
+    context = SelectionContext()
+    context.references_started = True
+    paragraph = make_paragraph(heading, layout_label="title")
+    page = make_page(paragraph)
+    decision = decide(paragraph, page, context=context)
+    assert decision.translate is True, heading
+    assert context.references_started is False
+
+
+@pytest.mark.parametrize(
+    ("text", "label"),
+    [
+        # 参考文献条目以 "A. " 开头但不是标题标签 → 不得结束 references
+        ("A. Smith and B. Jones. Some paper title that is long enough.", "text"),
+        ("A. Smith. Short paper.", "plain text"),
+        # 普通标题标签但不是单字母附录格式 → 不变（原 1. METHOD 行为）
+        ("1. METHOD", "paragraph_title"),
+    ],
+)
+def test_non_boundary_text_does_not_end_references(text, label):
+    context = SelectionContext()
+    context.references_started = True
+    paragraph = make_paragraph(text, layout_label=label)
+    page = make_page(paragraph)
+    decision = decide(paragraph, page, context=context)
+    assert decision.translate is False, text
+    assert context.references_started is True

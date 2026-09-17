@@ -647,6 +647,16 @@ class LatexBboxOverlay:
         #: ``_stamp_pages`` 贴片时填充；PDFCreater 在链接重映射前取走，
         #: 作为该链接新矩形的最高优先级（比字符并集精确——那是印章的真实墨迹）。
         self.stamp_link_rects: dict[int, dict[int, list[pymupdf.Rect]]] = {}
+        #: 诊断 recorder（``config.debug_recorder`` → 进程内当前值兜底）；
+        #: 关闭时全部采集调用为 no-op。
+        self._recorder = getattr(config, "debug_recorder", None)
+        if self._recorder is None:
+            try:
+                from babeldoc.debug_recorder import get_current
+
+                self._recorder = get_current()
+            except Exception:  # noqa: BLE001 - recorder 不可用只影响采集
+                self._recorder = None
 
     # ------------------------------------------------------------------
     def _init_decisions(self, paragraphs: dict) -> None:
@@ -678,6 +688,8 @@ class LatexBboxOverlay:
                 "n_lines_source": (meta.get("source_geometry") or {}).get("n_lines"),
                 #: 首行缩进（P3-0 几何，正=缩进、负=悬挂）。
                 "indent_pt": (meta.get("source_geometry") or {}).get("first_line_dx"),
+                #: 最终真实贴片矩形（页面坐标 [x0,y0,x1,y1]；扩框后与源框不同）。
+                "stamp_box": None,
             }
 
     def _decide(self, debug_id: str, reason: str | None = None, **fields) -> None:
@@ -689,6 +701,13 @@ class LatexBboxOverlay:
             record["reason"] = reason
         for key, value in fields.items():
             record[key] = value
+
+    def _event(self, kind: str, data: dict) -> None:
+        """发布 build 阶段事件；recorder 关闭时为 no-op。"""
+        recorder = self._recorder
+        if not recorder:
+            return
+        recorder.record_event("build", kind, data)
 
     def export_decisions(self) -> list[dict]:
         """按 (page, debug_id) 排序导出逐段决策记录。"""
@@ -812,6 +831,7 @@ class LatexBboxOverlay:
         )
         self.stats["available"] = capability.available
         self.stats["capability"] = capability.to_dict()
+        self._event("latex_capability", capability.to_dict())
         if not capability.available:
             self.stats["fallback"] = len(self._paragraphs)
             self.stats["fallback_reasons"] = {
@@ -833,6 +853,17 @@ class LatexBboxOverlay:
             self._abort_prepared()
             return set()
         self._prepared = True
+        self._event(
+            "latex_prepare",
+            {
+                "mode": self.mode,
+                "attempted": int(self.stats.get("attempted") or 0),
+                "compiled": len(self._compiled),
+                "stamped_ids": sorted(self.stamped_ids),
+                "selection_reasons": dict(self._reasons),
+                "compile": self.stats.get("compile") or {},
+            },
+        )
         return set(self.stamped_ids)
 
     def _build_renderer(self, capability):
@@ -849,11 +880,34 @@ class LatexBboxOverlay:
             timeout_seconds=timeout,
             max_workers=workers,
             cache=cache,
+            debug_recorder=self._recorder,
         )
 
     def _prepare_jobs(self, capability) -> None:
         jobs, reasons = self._select_candidates(self._paragraphs, self._bodies)
         self._reasons = Counter(reasons)
+        selected_ids = {job["debug_id"] for job in jobs}
+        self._event(
+            "latex_candidates",
+            {
+                "selected": [
+                    {
+                        "id": job["debug_id"],
+                        "page": job["page"],
+                        "width": round(float(job["width"]), 3),
+                        "height": round(float(job["height"]), 3),
+                        "font_size": round(float(job["font_size"]), 3),
+                    }
+                    for job in jobs
+                ],
+                "rejected": {
+                    debug_id: record["reason"]
+                    for debug_id, record in self._decisions.items()
+                    if record["reason"] and debug_id not in selected_ids
+                },
+                "reason_counts": dict(self._reasons),
+            },
+        )
         self._tmpdir = tempfile.TemporaryDirectory(prefix="babeldoc-latex-bbox-")
         jobs = self._substitute_fragments(jobs, Path(self._tmpdir.name))
         self.stats["attempted"] = len(jobs)
@@ -976,6 +1030,12 @@ class LatexBboxOverlay:
                 continue
             request = self._stamp_request(job)
             request.height = job["height"] + added
+            # 诊断：扩框重试候选的父链指向上一次失败的真实候选。
+            request.debug_parent = (
+                (stamp.debug_ref or {}).get("candidate_id")
+                if getattr(stamp, "debug_ref", None)
+                else None
+            )
             retry.append((request, tmpdir))
             pending[job["debug_id"]] = {"job": job, "request": request, "added": added}
         if not retry:
@@ -998,6 +1058,22 @@ class LatexBboxOverlay:
                 )
                 job["expanded_pt"] = added
                 stamps[debug_id] = stamp
+            self._event(
+                "compile_expand",
+                {
+                    "key": debug_id,
+                    "added_pt": round(float(info["added"]), 3),
+                    "height_after": round(float(info["request"].height), 3),
+                    "parent_id": info["request"].debug_parent,
+                    "candidate_id": (
+                        (stamp.debug_ref or {}).get("candidate_id")
+                        if getattr(stamp, "debug_ref", None)
+                        else None
+                    ),
+                    "ok": bool(stamp.ok and stamp.pdf_path),
+                    "reason": stamp.reason,
+                },
+            )
 
     def _strip_is_clear(
         self, page_index: int, rect: pymupdf.Rect, added: float
@@ -1194,6 +1270,19 @@ class LatexBboxOverlay:
             return self.pdf
         finally:
             self.stats["decisions"] = self.export_decisions()
+            self._event(
+                "latex_stamp",
+                {
+                    "mode": self.mode,
+                    "applied": int(self.stats.get("applied") or 0),
+                    "reverted": bool(self.stats.get("reverted")),
+                    "links": dict(self.stats.get("links") or {}),
+                    "error": self.stats.get("error"),
+                    "fallback_reasons": dict(
+                        self.stats.get("fallback_reasons") or {}
+                    ),
+                },
+            )
             write_report(self.config, self.stats)
             self._cleanup()
 
@@ -1213,6 +1302,7 @@ class LatexBboxOverlay:
         )
         self.stats["available"] = capability.available
         self.stats["capability"] = capability.to_dict()
+        self._event("latex_capability", capability.to_dict())
         if not capability.available:
             self.stats["fallback"] = len(self._paragraphs)
             self.stats["fallback_reasons"] = {
@@ -1224,6 +1314,28 @@ class LatexBboxOverlay:
         pdf = self.pdf
         jobs, reasons = self._select_candidates(self._paragraphs, self._bodies)
         counter = Counter(reasons)
+        selected_ids = {job["debug_id"] for job in jobs}
+        self._event(
+            "latex_candidates",
+            {
+                "selected": [
+                    {
+                        "id": job["debug_id"],
+                        "page": job["page"],
+                        "width": round(float(job["width"]), 3),
+                        "height": round(float(job["height"]), 3),
+                        "font_size": round(float(job["font_size"]), 3),
+                    }
+                    for job in jobs
+                ],
+                "rejected": {
+                    debug_id: record["reason"]
+                    for debug_id, record in self._decisions.items()
+                    if record["reason"] and debug_id not in selected_ids
+                },
+                "reason_counts": dict(counter),
+            },
+        )
         self.stats["attempted"] = len(jobs)
         if not jobs:
             self.stats["fallback"] = len(self._paragraphs)
@@ -1381,6 +1493,7 @@ class LatexBboxOverlay:
             if record["reason"] == "applied":
                 record["reason"] = "reverted-link-check"
                 record["fill_after"] = None
+                record["stamp_box"] = None
         self.stats["links"]["after_total"] = sum(
             len(page.get_links()) for page in doc
         )
@@ -1598,6 +1711,12 @@ class LatexBboxOverlay:
                     job["debug_id"],
                     "applied",
                     fill_after=measure_line_fill(page, job["rect"])["min_body_fill"],
+                    stamp_box=[
+                        round(float(job["rect"].x0), 3),
+                        round(float(job["rect"].y0), 3),
+                        round(float(job["rect"].x1), 3),
+                        round(float(job["rect"].y1), 3),
+                    ],
                 )
             self.stats["pages_affected"].append(page_index)
         self.stats["links"]["stamp_marked"] = stamp_links_found

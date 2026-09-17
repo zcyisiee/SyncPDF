@@ -142,6 +142,8 @@ class EnclosedMarkerFixer:
         self.enabled = getattr(translation_config, "fix_enclosed_markers", True)
 
     def process(self, docs: il_version_1.Document):
+        # last_stats 供 debug 采集读取（关闭时无人读，开销可忽略）。
+        self.last_stats = None
         if not self.enabled:
             return docs
         stats = {"shapes": 0, "converted": 0, "removed": 0}
@@ -180,4 +182,5 @@ class EnclosedMarkerFixer:
                 stats["shapes"],
                 stats["removed"],
             )
+        self.last_stats = stats
         return docs

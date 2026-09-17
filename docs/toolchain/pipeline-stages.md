@@ -17,6 +17,9 @@
   `fix_media_box`（返回 `mediabox_data` 供重建还原）/ `save_pdf_with_same_path_fallback`
 - **不变量**：页数与源 PDF 一致；Link 注释与书签保留
 - **失败模式**：`open_pdf_with_save_fallback` 抛错（源文件损坏）
+- **debug 采集点**：`parse/page-frames` 快照 + `parse/page_frames` 事件（MediaBox/
+  CropBox/旋转/裁页页号映射，`original_boxes` 保留归一化前盒子）；`parse/pdf_prepared`
+  事件 + 归档 `input.pdf`（原始）/`prepared.pdf`（修复后副本）。
 
 ---
 
@@ -29,6 +32,8 @@
   graphic_state}, char_unicode, advance, xobj_id, vertical, formula_layout_id}`
 - **不变量**：无段落结构（纯字符流）；字符顺序 = 内容流顺序
 - **失败模式**：解析异常（畸形 PDF）
+- **debug 采集点**：`parse/native-chars` 快照（逐页字符 `C<页>-<序>` + 字体表，统一转
+  左上原点 `PDF_TOPLEFT`）+ `parse/native_chars` 事件（页数/字符数）。
 
 ---
 
@@ -86,9 +91,22 @@
     解析在此中止，**不产出** `document.md`/`anchors.json`。
   - MinerU 页覆盖不匹配：`MinerU page coverage mismatch: missing_pages=[…]`（回放错样本时）
   - 回放页数不匹配：`MinerU replay layout does not match input PDF page count`
+  - 轮询超时：`MinerU polling timed out after …s`
+
+> **MinerU 等待时间单独成段**：`MinerUDocLayoutModel.handle_document` 对四段网络
+> 等待各记一个 span（`parse` 阶段，`origin` = `mineru.request_upload_urls` /
+> `mineru.upload` / `mineru.poll` / `mineru.download`，另有本地的
+> `mineru.parse_zip`；缓存命中走 `mineru.cache`）。没有这些 span，"等待 MinerU
+> 花了多久"只能靠 `layout_parsed` 的相邻事件差反推，且无法区分轮询与下载。
 
 > **审计产物始终落盘**（即使过门禁），因此 `layout_coverage.json` 可随时查看
 > 「哪些字符没被任何布局区域覆盖」。
+
+- **debug 采集点**：`parse/layout` 快照 + `parse/layout_parsed` 事件（区域计数与
+  label 直方图，`error` 标注门禁失败）、`parse/layout_coverage` 事件、
+  `parse/provider_artifacts` 事件；归档 `layout-coverage.json` / `provider-ir.json` /
+  `provider-layout.json`。成功路径的 `layout` 快照在**阶段 3 行内公式保护之后**采集
+  （含追加的保护区）；门禁抛错路径**同样先采集再抛**（证据不丢）。
 
 ---
 
@@ -134,6 +152,11 @@
 > **如何确认「公式没被翻译」**：看 `alignment.json.summary.inline_equation_matched`
 > 与 `anchors.json` 里 `{vN}` 计数。公式区间会变成占位符，模型看不到数学记号。
 
+- **debug 采集点**：`parse/inline_math` 事件（`summary` 摘要 + `protected` 计数；
+  provider IR 缺失时记 `status=skipped`，不编造）+ 归档 `alignment.json`。
+  保护完成后才写 `parse/layout` 快照（见阶段 2），查看器识别视图以
+  `alignment.json` 的 `protected_inline_math` 叠加「行内公式」图层（默认关）。
+
 ---
 
 ## 阶段 4：`EnclosedMarkerFixer`（圈号修复）
@@ -144,6 +167,8 @@
   替换为 Unicode 圈号（①…⑳ / ⓐ…ⓩ / Ⓐ…Ⓩ），删除装饰曲线
 - **不变量**：图/表内的圆圈不动（`is_curve_in_figure_table_layout`）
 - **失败模式**：软（按 `config.fix_enclosed_markers` 开关，异常只 warning）
+- **debug 采集点**：`parse/enclosed_marker` 事件（`EnclosedMarkerFixer.last_stats`；
+  未启用记 `enabled=false`）。
 
 ---
 
@@ -157,6 +182,8 @@
   `debug_id`；`char.formula_layout_id` 在本阶段赋值（I4.3）
 - **不变量**：`page.pdf_character` 在本阶段后**只剩被跳过的字符**（I3.2 提醒）
 - **失败模式**：异常向上抛（解析失败）
+- **debug 采集点**：`parse/paragraphs` 快照（实体 `P<页>-<序>` + `in_layout` 关系，
+  必须在 `_deterministic_ids` 之后采集）+ `parse/paragraphs_found` 事件。
 
 ---
 
@@ -198,6 +225,8 @@
 > **验收口径**：DeepSeek 样本印刷目录 54 条（页 2×31 + 页 3×23，与书签数一致）。
 > `anchors.json` 中 `layout_label == "toc_entry"` 的条数应等于 54。
 
+- **debug 采集点**：`parse/toc` 事件（`summary` 摘要）+ 归档 `toc.json`。
+
 ---
 
 ## 阶段 7：`StylesAndFormulas`（样式与公式）
@@ -208,6 +237,7 @@
 - **不变量**：`all(char.formula_layout_id …)` 的公式**不可翻译**
   （`is_translatable_formula` 直接返回 False）——这正是行内公式保护的落点
 - **失败模式**：异常向上抛
+- **debug 采集点**：`parse/styles_formulas` 事件（段落数与 `PdfFormula` 计数）。
 
 ---
 
@@ -237,6 +267,8 @@
 - **不变量**：I3.3（对象身份跨 pickle）；快照失败不阻断解析（返回空状态，
   重建时跳过重映射）
 - **失败模式**：软。`link_snapshot` 异常 → warning + 空状态
+- **debug 采集点**：`parse/links_snapshot` 事件（链接数/书签数 + 归档引用）+
+  归档 `links.json` / `bookmarks.json`。
 
 ---
 
@@ -269,6 +301,10 @@
 - **不变量**：I5.1–I5.4
 - **失败模式**：`text is None`（短文本 < `min_text_length=5`、纯占位符、
   vertical 文本、skip label）→ 该段不进翻译，进 `skipped_rows`
+- **debug 采集点**：`parse/selection` 快照 + 事件（选中行、跳过行及
+  `reason`、`label_counts`/`skipped_label_counts`）；`parse/source_geometry` 事件
+  （LaTeX bbox 源行几何条数）；`parse/stage_finished` 事件 + 归档
+  `document.md`/`anchors.json`/`sheet.jsonl`。
 
 ---
 
@@ -285,6 +321,12 @@
     `--markdown <文件>` 导入，或 `--prompt-only` 取提示词
   - `translator_failed` / `translator_timeout` / `translator_empty`：命令失败/超时/无输出
   - `document_missing`：未先 `bdt parse`
+- **debug 采集点**：每次被调命令 `translate/calls/<call_id>`（prompt 输入、stdout、
+  stderr、退出码与耗时）配 `call_started` / `call_finished` 事件；
+  `translate/texts/<version>` 快照 + `text_version` 事件（phase =
+  `imported`/`raw`/`before_merge`/`merged`，逐段 target 与匹配方式）；
+  `translate/missing_ids` 事件；`stage_finished` 事件 + 归档
+  `prompt*.md` / `translated*.md`。
 
 ---
 
@@ -311,6 +353,11 @@
   7. `workflow.apply`：占位符多重集校验（`protocol.check_placeholders`）+
      双标点归一 + 写回 composition
 - **失败模式**：`violations` 非空 → `"ok": false`，CLI 退出码 1
+- **debug 采集点**：`apply/<validation_id>` 快照（源文/解析结果/entries + 校验明细）+
+  `apply/apply_validation` 事件；`apply/anchor_repair`（proportional 修复）、
+  `apply/placeholder_validation`、`apply/canonical_writeback`、`apply/writeback_saved`
+  事件；`stage_finished` 事件 + 归档 `translated.jsonl` /
+  `il_translated.applied.json` / `translated.md` / `apply_report.json`。
 
 ---
 
@@ -321,6 +368,9 @@
 - **输出**：`agent/layout_geometry.json`（每段 `rendered_box` / `scale` / 警告）
 - **不变量**：I6.1（源字符 box 原地改写）、I6.2（无覆盖 = 零行为变化）
 - **失败模式**：`layout_warnings` 记入 geometry（软）
+- **debug 采集点**：`build/typesetting_geometry` 快照（完整几何，重排前还会先写
+  `build/source_state` 快照作对照）+ 同名事件（页数/段数/是否有覆盖/缺
+  `rendered_box` 的告警）。
 
 ---
 
@@ -356,6 +406,11 @@
 - **实测**（DeepSeek，identity 回填）：`total=410, remapped=408,
   fallback_paragraph=350, unresolved=2`（2 条为 code 图内无字符细线链接），
   `uri_set_match=true`。
+- **debug 采集点**：`build/latex_summary` 事件（贴片/回滚摘要）；归档 `mono.pdf` /
+  `dual.pdf` / `layout_geometry.json` / `latex_bbox_report.json` /
+  `reconstruct_report.json`；失败路径额外采 `build/build_failed` 事件 +
+  `artifact_bundle(phase=partial_output_pdfs)` 归档半成品 PDF（不归档残留的旧
+  `reconstruct_report.json`，避免误报为本次输出）。
 
 ---
 
@@ -393,6 +448,15 @@
   `fragment-source-missing`、`capability-unavailable`（缺 XeLaTeX/宏包/字体只 warning）。
 - **验收**：见 `experiments/acceptance_latex.py` 与
   `docs/layout-hypothesis/ACCEPTANCE.md` 的「LaTeX bbox 排版验收」一节。
+- **debug 采集点**：`build/latex_capability`（能力探测）、`latex_prepare`、
+  `latex_candidates`（选段 + 候选）、`compile_requests`（进渲染器的原始请求，含
+  去重别名）、`compile_reuse`（`kind=deduplicated`，`actual_compile_calls=0`）、
+  `compile_fallback`（批编译坏段交回单段）、`compile_expand`（高度扩展重试）、
+  `candidate_selected`（段内最终采用候选）、`candidate_evaluated` + 快照
+  `build/candidates/<candidate_id>`（逐候选正文/TeX/PDF 证据）、`latex_stamp`
+  （贴片与 `reverted` 回滚、链接多重集校验结果）事件；缓存生命周期事件
+  `cache_bypass` / `cache_miss` / `cache_hit` / `cache_write`
+  （`--debug-recompile` 走 `cache_bypass`）。
 
 ---
 
@@ -403,6 +467,10 @@
 - **输入**：mono/dual PDF + 页号串（`2,3` 或 `1-3`）
 - **输出**：`render/page-NN.png`（默认 dpi 110）
 - **失败模式**：页号越界静默跳过（返回已渲染的列表）
+- **debug 采集点**：无独立采集点；查看器直接对归档 PDF 走
+  `/api/v1/runs/<run_id>/render/<page>.png?pdf=<artifact rel>&dpi=N`（`pdf` 限
+  `artifacts/` 下的 `.pdf`，`dpi` 限 50–200，默认 110），结果缓存到
+  `debug/render-cache/<run_id>/`。
 
 ---
 
@@ -412,6 +480,8 @@
 - **输出**：`<workdir>/FINAL_REPORT.md`（或 `--output-dir`）
 - **内容**：token 用量、apply 指标、review verdict、layout lint 前后对比、遗留项
   （供人工抽检）
+- **debug 采集点**：`report/stage_started` / `stage_finished` / `stage_error` 事件 +
+  归档 `FINAL_REPORT.md`。
 
 ---
 
@@ -447,3 +517,43 @@
 ├── <pdf名>/latex_cache/                       # 批编译贴片缓存（默认开启时，可删）
 └── output/*.mono.pdf / *.dual.pdf             # 交付产物
 ```
+
+---
+
+## 附：debug 归档结构
+
+`--debug` / `bdt debug` 的证据落在 `<workdir>/debug/runs/<run_id>/`（每个 run 一个
+版本化归档：追加式事件流 + 阶段快照 + 稳定证据副本；历史 run 不覆盖、不自动删除）：
+
+```text
+<workdir>/debug/
+├── viewer.json            # {pid, port, token, started_at, heartbeat_at}（复用判据）
+├── write.lock             # 写互斥（fcntl 独占；查看器只读，不拿锁）
+├── bindings.json          # 旧目录回放的显式 PDF 绑定（可选）
+├── render-cache/<run_id>/ # 查看器页渲染缓存
+└── runs/<run_id>/
+    ├── manifest.json      # 版本化运行清单（原子写）
+    ├── events.jsonl       # 追加式事件流（每行一个 JSON 对象，含 seq）
+    ├── snapshots/         # 按阶段与页面拆分的快照 JSON
+    └── artifacts/         # 复制的稳定证据文件（PDF 副本、TeX、日志等）
+```
+
+> **页码基准陷阱（页归属一律取 `build/typesetting_geometry.json`）**：证据里的
+> `page` 字段基准不统一——`typesetting_geometry` / `layout.json` 与 `layout_lint.json`
+> 是 1-based，而 `sheet.jsonl` / `selection.json` / `review_verdict.json` 沿用
+> 0-based 段落页码。消费方若按单一来源推页，框会整体错位一页（review 警告框尤其
+> 明显：漂到上一页、压住该页的算法或表格区域）。定位框时以 geometry 的段落
+> `page`（权威映射）为准，`ref.page` 仅作无 id 条目（如部分 lint 项）的回退。
+>
+> **问题指向对象有两种形状**：单段用 `id`（字符串），涉及多段用 `ids`（数组，
+> 如 `layout_lint` 的 `paragraph_overlap`）。消费方只读 `id` 会静默丢掉多段问题
+> 的全部框，需同时接受两者。另注意部分 lint 项按页统计、本就无段落 id
+> （`text_layer_compat_ideograph`、`link_misaligned`），这类只有 `page`。
+>
+> **耗时证据有两类事件对**，查看器「事件」页据此画时间轴：
+> `call_started` / `call_finished` 是**子进程**（xelatex、翻译/审查命令）的起止与
+> `seconds`；`span_started` / `span_finished`（`DebugRecorder.span`）是**非子进程**
+> 的等待型工作——MinerU 走 httpx 而非子进程，所以它的申请上传地址/上传/轮询/下载
+> 各自成一段 span（`origin` = `mineru.*`），否则"等待 MinerU 花了多久"看不出来。
+> 两类都用同一 `origin` 命名空间做归因；并行任务（build 阶段 xelatex 批编译、
+> 多段候选）在时间轴上按真实区间重叠显示，累计耗时与墙钟耗时分开给。

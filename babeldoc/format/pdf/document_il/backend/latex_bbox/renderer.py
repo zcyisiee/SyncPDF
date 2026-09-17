@@ -17,6 +17,7 @@ r"""bbox 级 XeLaTeX 编译渲染器（带界缩小 + stamp 缓存）。
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import re
@@ -29,6 +30,8 @@ from dataclasses import dataclass
 from dataclasses import field
 from functools import lru_cache
 from pathlib import Path
+
+from babeldoc.debug_recorder import CompileCandidate
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +248,9 @@ class StampRequest:
     ascent_top: float | None = None
     #: 段落主字体是否衬线（决定拉丁/中文用 Noto Serif/Source Han Serif 还是 Sans）。
     serif: bool = True
+    #: 诊断专用：上一次失败编译的候选 id（扩框/回退重试的父节点）。
+    #: 只进证据链，不进 ``cache_key``、不影响任何排版语义。
+    debug_parent: str | None = None
 
     @property
     def indentation(self) -> tuple[float, float]:
@@ -288,6 +294,10 @@ class StampResult:
     compile_attempts: int = 0
     reason: str = ""
     log_excerpt: list[str] = field(default_factory=list)
+    #: 诊断专用：本结果对应的候选证据引用（``candidate_id``/``request_id``/
+    #: ``batch_id``/``pdf_page_index``）。缓存命中时由持久缓存元数据还原；
+    #: 无证据（旧缓存/非 debug 运行）时为空 dict，绝不推断。
+    debug_ref: dict = field(default_factory=dict)
 
 
 #: 同形数学字形折叠表（仅用于比较）：XeLaTeX 数学字体经 PyMuPDF 抽取时，
@@ -436,12 +446,15 @@ class BboxStampRenderer:
         timeout_seconds: float = 45.0,
         max_workers: int = 2,
         cache=None,
+        debug_recorder=None,
     ):
         self._capability = capability
         self._timeout = max(5.0, float(timeout_seconds))
         self._max_workers = max(1, int(max_workers))
         #: 可选的跨进程缓存（:class:`StampCache`）；None 时只做进程内缓存。
         self._persistent = cache
+        #: 可选的诊断 recorder；None 时零额外 IO、行为与非 debug 完全一致。
+        self._debug_recorder = debug_recorder
         self._cache: dict[tuple, StampResult] = {}
         self._lock = threading.Lock()
         self._cache_hits = 0
@@ -502,10 +515,12 @@ class BboxStampRenderer:
 
     def render_one(self, request: StampRequest, workdir: Path) -> StampResult:
         """编译单个请求（含缓存与有界缩小）。调用方负责 workdir 生命周期。"""
+        request_id = self._record_requests([request])
         with self._lock:
             cached = self._cache.get(request.cache_key)
         if cached is not None:
             self._cache_hits += 1
+            self._record_reuse(request, cached, "process_cache", request_id)
             return cached
         if self._persistent is not None:
             from_disk = self._persistent.get(request)
@@ -513,9 +528,10 @@ class BboxStampRenderer:
                 self._cache_hits += 1
                 with self._lock:
                     self._cache[request.cache_key] = from_disk
+                self._record_reuse(request, from_disk, "persistent_cache", request_id)
                 return from_disk
 
-        result = self._render_uncached(request, workdir)
+        result = self._render_uncached(request, workdir, request_id=request_id)
         if result.ok and self._persistent is not None:
             result = self._persistent.put(request, result) or result
         with self._lock:
@@ -543,7 +559,9 @@ class BboxStampRenderer:
                 results[key] = future.result()
         return results
 
-    def _render_uncached(self, request: StampRequest, workdir: Path) -> StampResult:
+    def _render_uncached(
+        self, request: StampRequest, workdir: Path, *, request_id: str | None = None
+    ) -> StampResult:
         started = time.perf_counter()
         result = StampResult(key=request.key)
         base_lead = (
@@ -574,11 +592,18 @@ class BboxStampRenderer:
         ).hexdigest()[:16]
         safe_key = re.sub(r"[^0-9A-Za-z_-]", "_", str(request.key))[:24]
         stem = f"{safe_key}-{stem}"
+        # 诊断：候选阶梯顺序就是编译顺序，逐步记录（父链 = 前一档候选）。
+        parent_id = request.debug_parent
         try:
             for step, (font_size, lead) in enumerate(ladder):
                 result.compile_attempts = step + 1
                 attempt_dir = workdir / f"{stem}_s{step}"
                 attempt_dir.mkdir(parents=True, exist_ok=True)
+                candidate_id = (
+                    self._debug_recorder.new_id("candidate")
+                    if self._debug_recorder
+                    else None
+                )
                 tex = self.build_tex(
                     request.body,
                     request.width,
@@ -590,12 +615,32 @@ class BboxStampRenderer:
                     topskip=request.ascent_top,
                     serif=request.serif,
                 )
-                outcome = self._compile_tex(tex, attempt_dir, stem, font_size)
+                outcome = self._compile_tex(
+                    tex, attempt_dir, stem, font_size, debug_candidate=candidate_id
+                )
                 logs.extend(outcome["errors"][:3])
                 if not outcome["compiled"]:
                     # TeX 错误不重试缩小：直接失败回退。
                     result.reason = outcome["reason"] or "compile-failed"
                     result.log_excerpt = logs
+                    parent_id = self._record_candidate(
+                        request,
+                        request_id=request_id,
+                        candidate_id=candidate_id,
+                        priority=step,
+                        font_size=font_size,
+                        lead=lead,
+                        parent_id=parent_id,
+                        tex=tex,
+                        attempt_dir=attempt_dir,
+                        stem=stem,
+                        status="failed",
+                        reason=result.reason,
+                    )
+                    result.debug_ref = {
+                        "candidate_id": parent_id,
+                        "request_id": request_id,
+                    }
                     return result
                 fits, fit_reason, _ = _measure_fit(
                     attempt_dir / f"{stem}.pdf",
@@ -607,6 +652,22 @@ class BboxStampRenderer:
                     fits, fit_reason = False, "overfull-hbox"
                 if outcome["overfull_vbox"]:
                     fits, fit_reason = False, "overfull-vbox"
+                parent_id = self._record_candidate(
+                    request,
+                    request_id=request_id,
+                    candidate_id=candidate_id,
+                    priority=step,
+                    font_size=font_size,
+                    lead=lead,
+                    parent_id=parent_id,
+                    tex=tex,
+                    attempt_dir=attempt_dir,
+                    stem=stem,
+                    status="ok" if fits else "failed",
+                    reason=fit_reason,
+                    selected=bool(fits),
+                    fit={"fits": bool(fits), "reason": fit_reason},
+                )
                 if fits:
                     result.ok = True
                     result.pdf_path = str(attempt_dir / f"{stem}.pdf")
@@ -615,37 +676,76 @@ class BboxStampRenderer:
                     result.lead = lead
                     result.reason = "ok"
                     result.log_excerpt = logs
+                    result.debug_ref = {
+                        "candidate_id": parent_id,
+                        "request_id": request_id,
+                    }
+                    self._record_selected(
+                        request, parent_id, step, request_id=request_id
+                    )
                     return result
                 reasons.append(f"s{step}:{fit_reason}")
                 if fit_reason in ("text-mismatch", "no-extractable-text"):
                     # 内容不一致/无文本不是尺寸问题，缩小字号无法修复。
                     result.reason = ";".join(reasons)
                     result.log_excerpt = logs
+                    result.debug_ref = {
+                        "candidate_id": parent_id,
+                        "request_id": request_id,
+                    }
                     return result
             result.reason = ";".join(reasons) or "shrink-exhausted"
             result.log_excerpt = logs
+            result.debug_ref = {
+                "candidate_id": parent_id,
+                "request_id": request_id,
+            }
             return result
         finally:
             result.seconds = round(time.perf_counter() - started, 3)
             self._compile_seconds += result.seconds
 
-    def _compile_tex(self, tex: str, workdir: Path, stem: str, font_size: float) -> dict:
+    def _compile_tex(
+        self,
+        tex: str,
+        workdir: Path,
+        stem: str,
+        font_size: float,
+        *,
+        debug_candidate: str | None = None,
+    ) -> dict:
         tex_path = workdir / f"{stem}.tex"
         tex_path.write_text(tex, encoding="utf-8")
-        try:
-            proc = subprocess.run(  # noqa: S603 - 可执行文件已由能力探测校验
-                [
-                    self._capability.xelatex_path,
-                    "-interaction=nonstopmode",
-                    "-halt-on-error",
-                    f"-output-directory={workdir}",
-                    str(tex_path),
-                ],
-                cwd=workdir,
-                capture_output=True,
-                text=True,
+        argv = [
+            self._capability.xelatex_path,
+            "-interaction=nonstopmode",
+            "-halt-on-error",
+            f"-output-directory={workdir}",
+            str(tex_path),
+        ]
+        recorder = self._debug_recorder
+        capture = (
+            recorder.process(
+                "build",
+                "xelatex",
+                argv,
                 timeout=self._timeout,
+                candidate=debug_candidate,
             )
+            if recorder
+            else contextlib.nullcontext()
+        )
+        try:
+            with capture as evidence:
+                proc = subprocess.run(  # noqa: S603 - 可执行文件已由能力探测校验
+                    argv,
+                    cwd=workdir,
+                    capture_output=True,
+                    text=True,
+                    timeout=self._timeout,
+                )
+                if evidence is not None:
+                    evidence["result"] = proc
         except subprocess.TimeoutExpired:
             logger.warning("LaTeX bbox 编译超时（%.1fs）：丢弃该段落", self._timeout)
             return {"compiled": False, "reason": "timeout", "overfull_hbox": 0, "overfull_vbox": 0, "errors": [f"timeout@{font_size:.1f}pt"]}
@@ -666,3 +766,156 @@ class BboxStampRenderer:
             "overfull_vbox": overfull_vbox,
             "errors": errors,
         }
+
+    # ------------------------------------------------------------------
+    # 诊断采集（recorder 为 None 时全部为 no-op；不改变编译行为）
+    # ------------------------------------------------------------------
+    def _record_requests(self, requests: list[StampRequest]) -> str | None:
+        """``compile_requests`` 事件：进入渲染器的原始请求清单（含去重前别名）。"""
+        recorder = self._debug_recorder
+        if not recorder:
+            return None
+        request_id = recorder.new_id("request")
+        recorder.record_event(
+            "build",
+            "compile_requests",
+            {
+                "request_id": request_id,
+                "renderer": "single",
+                "requests": [
+                    {
+                        "key": request.key,
+                        "width": round(float(request.width), 3),
+                        "height": round(float(request.height), 3),
+                        "font_size": round(float(request.font_size), 3),
+                        "lead": (
+                            round(float(request.lead), 3) if request.lead else None
+                        ),
+                        "expected_chars": len(request.expected_text or ""),
+                    }
+                    for request in requests
+                ],
+            },
+        )
+        return request_id
+
+    def _record_reuse(
+        self,
+        request: StampRequest,
+        result: StampResult,
+        kind: str,
+        request_id: str | None = None,
+    ) -> None:
+        """``compile_reuse`` 事件：缓存/去重命中，本次真实编译调用数恒为 0。"""
+        recorder = self._debug_recorder
+        if not recorder:
+            return
+        debug_ref = getattr(result, "debug_ref", None) or {}
+        recorder.record_event(
+            "build",
+            "compile_reuse",
+            {
+                "kind": kind,
+                "key": request.key,
+                "request_id": request_id,
+                "candidate_id": debug_ref.get("candidate_id"),
+                "actual_compile_calls": 0,
+                "pdf_path": result.pdf_path,
+                "font_size": result.font_size,
+                "scale": result.scale,
+                "lead": result.lead,
+            },
+        )
+
+    def _record_selected(
+        self,
+        request: StampRequest,
+        candidate_id: str | None,
+        priority: int,
+        *,
+        request_id: str | None = None,
+    ) -> None:
+        """``candidate_selected`` 事件：最终采用的候选（优先级 + 证据 id）。"""
+        recorder = self._debug_recorder
+        if not recorder or not candidate_id:
+            return
+        recorder.record_event(
+            "build",
+            "candidate_selected",
+            {
+                "id": candidate_id,
+                "key": request.key,
+                "priority": priority,
+                "request_id": request_id,
+            },
+        )
+
+    def _record_candidate(
+        self,
+        request: StampRequest,
+        *,
+        request_id: str | None,
+        candidate_id: str | None,
+        priority: int,
+        font_size: float,
+        lead: float,
+        parent_id: str | None,
+        tex: str,
+        attempt_dir: Path,
+        stem: str,
+        status: str,
+        reason: str | None,
+        selected: bool = False,
+        fit: dict | None = None,
+    ) -> str | None:
+        """归档候选的 TeX/PDF/日志并发布 ``candidate_evaluated`` 事件。
+
+        返回该候选 id（供父链传递）；recorder 关闭时原样返回 ``parent_id``。
+        缺失产物（如超时无 PDF）如实记 ``None``，不伪造。
+        """
+        recorder = self._debug_recorder
+        if not recorder or not candidate_id:
+            return parent_id
+        safe_key = re.sub(r"[^0-9A-Za-z_-]", "_", str(request.key))[:24]
+        artifacts = {
+            "tex": recorder.archive_text(
+                "build", f"compile/{safe_key}/{candidate_id}.tex", tex
+            )
+        }
+        for suffix in ("pdf", "log"):
+            path = attempt_dir / f"{stem}.{suffix}"
+            artifacts[suffix] = (
+                recorder.archive_file(
+                    "build", f"compile/{safe_key}/{candidate_id}.{suffix}", path
+                )
+                if path.is_file()
+                else None
+            )
+        record = CompileCandidate(
+            id=candidate_id,
+            paragraph_id=str(request.key),
+            request_id=request_id or "",
+            renderer="single",
+            round=1,
+            priority=priority,
+            width=round(float(request.width), 3),
+            height=round(float(request.height), 3),
+            font_size_initial=round(float(request.font_size), 3),
+            font_size=round(float(font_size), 3),
+            lead=round(float(lead), 3),
+            parent_id=parent_id,
+            font={"serif": bool(request.serif)},
+            status=status,
+            fit=fit or {},
+            selected=selected,
+            reason=reason,
+            artifacts=artifacts,
+        )
+        payload = record.to_dict()
+        snapshot = recorder.write_snapshot(
+            "build", f"candidates/{candidate_id}", payload
+        )
+        recorder.record_event(
+            "build", "candidate_evaluated", {**payload, "snapshot": snapshot}
+        )
+        return candidate_id

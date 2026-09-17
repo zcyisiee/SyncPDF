@@ -36,6 +36,7 @@
 | `check` | `review.check_document` | 三合一聚合：结构审查 + 排版 lint + 链接审计 |
 | `layout-set` | `layout.layout_set` | 写/清排版覆盖 |
 | `report` | `report.report` | 产出 `FINAL_REPORT.md` |
+| `debug` | `debug_runtime.DebugSession`（`__main__._debug_command`） | 启动/复用只读查看器（`--run-id` / `--stop` / `--source-pdf` / `--mono`），旧 workdir 自动回放 |
 | `run` | `run.run_pipeline` | 串联上述阶段，可 `--from` 续跑 |
 
 内部 Python 函数（已从公开 CLI 移除，供 reviewer agent/脚本调用）：
@@ -87,7 +88,8 @@
   ├─[11] bdt apply ──────────── 校验 + 写回 IR → translated.jsonl / apply_report.json
   ├─[12] Typesetting ────────── 重排 → layout_geometry.json
   ├─[13] PDFCreater ─────────── mono = 源容器 + 重生成内容流；链接重映射 + URI 集合门禁
-  └─[14] bdt build --render ─── 代表性页 PNG（视觉审查）
+  ├─[14] bdt build --render ─── 代表性页 PNG（视觉审查）
+  └─[debug] --debug 证据旁路 ── 各阶段 → <workdir>/debug/runs/<run_id>/ → 只读查看器 API
 ```
 
 **分层不变量**（改动任何一层时先确认这些仍成立）：

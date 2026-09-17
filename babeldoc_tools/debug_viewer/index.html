@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bdt debug 工作台</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header id="topbar">
+  <span id="brand">bdt debug</span>
+  <select id="runSelect" title="选择运行"></select>
+  <span id="runStatus" class="status" data-state="unknown">–</span>
+  <nav id="viewTabs" role="tablist" aria-label="视图">
+    <button class="tab" data-view="layout" role="tab">识别</button>
+    <button class="tab" data-view="translate" role="tab">翻译</button>
+    <button class="tab" data-view="compile" role="tab">编译</button>
+    <button class="tab" data-view="checks" role="tab">检查</button>
+    <button class="tab" data-view="events" role="tab">事件</button>
+  </nav>
+  <span class="spacer"></span>
+  <span id="issueCount" class="issues" title="检查阶段问题计数"></span>
+  <button id="prevPage" title="上一页">‹</button>
+  <input id="pageInput" type="number" min="1" value="1">
+  <span id="pageTotal">/ –</span>
+  <button id="nextPage" title="下一页">›</button>
+  <span id="netState" class="net" data-state="ok" title="事件流连接状态"></span>
+  <button id="panelToggle" aria-expanded="true" title="收起/展开工作台">⇋</button>
+</header>
+<main id="main">
+  <section id="stage" aria-label="主观察区">
+    <div id="stageStatus" class="stage-status" hidden></div>
+    <div id="pages" class="pages"></div>
+    <div id="textPane" class="text-pane" hidden></div>
+  </section>
+  <div id="splitter" title="拖动调整工作台宽度"></div>
+  <aside id="workbench" aria-label="工作台">
+    <div id="panelHead"></div>
+    <div id="panelBody"></div>
+  </aside>
+</main>
+<div id="hoverChip" class="chip" hidden></div>
+<div id="hitList" class="hitlist" hidden></div>
+<script type="module" src="/static/app/main.js"></script>
+</body>
+</html>

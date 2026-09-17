@@ -26,6 +26,7 @@ import re
 from pathlib import Path
 
 from babeldoc_tools import common
+from babeldoc_tools import debug_runtime
 
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 LEFT_OVER_V_RE = re.compile(r"\{\s*v\s*\d+\s*\}")
@@ -446,6 +447,7 @@ def check_document(
     source_pdf: str | None = None,
     skip_pdf_checks: bool = False,
     strict: bool = False,
+    debug_recorder=None,
 ) -> dict:
     """三合一质量门禁：结构审查 → 排版 lint → 链接审计，返回合并 JSON。
 
@@ -454,29 +456,55 @@ def check_document(
     会让整个调用以错误信封返回。``strict`` 只回填到结果里（供 CLI 决定退出码）。
     """
     workdir_path = common.require_workdir(workdir)
-    review = review_document(
-        workdir,
-        mono=mono,
-        dual=dual,
-        source_pdf=source_pdf,
-        skip_pdf_checks=skip_pdf_checks,
-    )
-    layout = layout_subitem(workdir_path)
-    links = audit_links_tool(str(workdir_path), mono=mono, source_pdf=source_pdf)
-    verdict, reasons, unconfirmed = _aggregate_verdict(review, layout, links)
-    return {
-        "verdict": verdict,
-        "blockers": review.get("blockers") or [],
-        "warnings": review.get("warnings") or [],
-        "metrics": review.get("metrics") or {},
-        "layout": layout,
-        "links": links,
-        "reasons": reasons,
-        "unconfirmed": unconfirmed,
-        "strict": bool(strict),
-        "apply_report": review.get("apply_report") or {},
-        "report": review.get("report"),
-    }
+    with debug_runtime.debug_stage(
+        debug_recorder,
+        "check",
+        {"skip_pdf_checks": bool(skip_pdf_checks), "strict": bool(strict)},
+    ):
+        review = review_document(
+            workdir,
+            mono=mono,
+            dual=dual,
+            source_pdf=source_pdf,
+            skip_pdf_checks=skip_pdf_checks,
+        )
+        layout = layout_subitem(workdir_path)
+        links = audit_links_tool(str(workdir_path), mono=mono, source_pdf=source_pdf)
+        verdict, reasons, unconfirmed = _aggregate_verdict(review, layout, links)
+        if debug_recorder is not None:
+            agent = common.agent_dir(workdir_path)
+            for name in (
+                "review_verdict.json",
+                "layout_lint.json",
+                "link_audit.json",
+            ):
+                artifact = agent / name
+                if artifact.exists():
+                    debug_recorder.archive_file("check", name, artifact)
+            debug_recorder.record_event(
+                "check",
+                "stage_finished",
+                {
+                    "verdict": verdict,
+                    "reasons": reasons,
+                    "unconfirmed": unconfirmed,
+                    "layout_status": layout.get("status"),
+                    "links_status": links.get("status"),
+                },
+            )
+        return {
+            "verdict": verdict,
+            "blockers": review.get("blockers") or [],
+            "warnings": review.get("warnings") or [],
+            "metrics": review.get("metrics") or {},
+            "layout": layout,
+            "links": links,
+            "reasons": reasons,
+            "unconfirmed": unconfirmed,
+            "strict": bool(strict),
+            "apply_report": review.get("apply_report") or {},
+            "report": review.get("report"),
+        }
 
 
 # --------------------------------------------------------------------------- #
