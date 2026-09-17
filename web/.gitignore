@@ -1,0 +1,11 @@
+# 依赖与构建产物
+node_modules/
+dist/
+*.local
+
+# 冒烟证据（截图、serve 日志）：本地保留，不入库
+tmp-smoke/
+
+# Playwright 产物
+playwright-report/
+test-results/
