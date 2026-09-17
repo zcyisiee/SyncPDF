@@ -36,6 +36,11 @@
 | 20 | 失败 | ✅ 阶段级错误卡：人话 + 动作（从 X 重试 / 换模型重试 / 看日志）= `POST /jobs {from: X}`；check 不通过不是失败，在「检查」视图列问题并可跳到段落编辑 |
 | 21 | 事件流 | ✅ 默认人话摘要（kind→文案模板表在前端 `web/src/events/humanize.ts`），可展开原始 JSON，按阶段/级别过滤 |
 | 22 | 仓库 | ✅ 同仓 `web/`（pnpm）；`pnpm build` 输出到 `babeldoc_tools/web_dist/`（入 git）；`bdt serve` 托管；开发时 Vite 代理 `/api` |
+| 23 | 流式段落契约 | ✅ translator 协议**不变**：持续往 stdout 写纯文本译文片段；`bdt translate` 边读边扫段落锚点，出现下一锚点即视上一段完成 → `paragraph_done`。wrapper 脚本负责把各 CLI 流式事件（agy `stream-json` / pi `--mode json`）拆成纯文本增量；不支持流式的命令天然兼容（进度一次跳满） |
+| 24 | 开发顺序 | ✅ ① `bdt serve` 骨架 + 只读接口（文档/几何/事件 SSE）→ ② `web/` 脚手架 + 三栏壳 + pdf.js 预览 + 事件流/时间线（接真数据）→ ③ jobs（run/cancel）+ 上传 + 配置弹层 → ④ 草稿/自动编译/bbox 拖拽 → ⑤ 候选重译/版本/归档 → ⑥ 词表/流式段落进度。①② 可并行（前端先 mock） |
+| 25 | 旧 debug 查看器 | ✅ 保留，直到新前端覆盖识别/编译/检查/事件能力后删除；届时 `bdt debug` 成为 `bdt serve --open <workdir>` 别名 |
+| 26 | 词表命中 | ✅ 统计术语在原文 `document.md` 出现次数（解析后即可算）；check 阶段「译文未按词表」警告留 v2 |
+| 27 | 验收底线 | ✅ Vitest（humanize / 坐标换算 / store）+ Playwright 冒烟（`bdt serve` 指向 `tmp/` 真实 workdir，截图落 `tmp/`）+ `tsc --noEmit` + eslint；Python 侧 pytest 覆盖 serve 路由 |
 
 ## 2. 前端结构
 
@@ -196,7 +201,6 @@ env = { PI_MODEL = "deepseek/deepseek-v4-pro:low" }
 ## 7. 待定（下一轮）
 
 - ❔ 页级增量 build 的实现路径与溢出判定（后端专题）。
-- ❔ translator 流式解析的段落闭合判定：以 `<!-- P05-002 -->`/标题锚点为界，还是要求 translator 按段输出 JSONL？agy 的 `--output-format stream-json` 可用，pi `--mode json` 已是 JSONL。
 - ❔ 对照模式跨侧高亮的几何来源：原文侧用 `snapshots/parse/paragraphs.json`，译文侧用 `typesetting_geometry.json`，同一 `paragraph_id` 关联 — 需确认 id 在两处一致。
 - ❔ 词表注入 prompt 的位置与格式（与 `translate.py` 的 prompt 模板对齐）。
 - ❔ 设计 token 最终值（等设计稿出来后定）。
