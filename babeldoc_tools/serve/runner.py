@@ -39,6 +39,8 @@ from typing import Any
 from typing import NamedTuple
 
 from babeldoc_tools.common import ToolError
+from babeldoc_tools.serve import compile as compile_mod
+from babeldoc_tools.serve.draft import DraftRegistry
 from babeldoc_tools.serve.jobs import TERMINAL_STATUSES
 from babeldoc_tools.serve.jobs import JobRecord
 from babeldoc_tools.serve.jobs import JobRegistry
@@ -424,6 +426,7 @@ class _RunningJob:
         "capture",
         "monitor",
         "pgid",
+        "plan",
         "popen",
         "profile",
         "record",
@@ -439,6 +442,7 @@ class _RunningJob:
         pgid: int,
         workdir: Path,
         profile: Profile,
+        plan: compile_mod.CompilePlan | None = None,
     ) -> None:
         self.record = record
         self.popen = popen
@@ -447,8 +451,14 @@ class _RunningJob:
         self.workdir = workdir
         #: 这次 spawn 用的 profile（收尾信封脱敏要用它的命令原文，见 sanitize_envelope）。
         self.profile = profile
+        #: ``compile`` job 的隔离上下文（真 workdir / 副本 / 捕获的 revision）；
+        #: 其它 action 为 ``None``。
+        self.plan = plan
         #: spawn 之前已存在的 run 归档；之后新出现的那个才是这次 job 的 run。
-        self.runs_before = frozenset(list_run_ids(workdir))
+        #: ``compile`` 的归档落在隔离副本里、随副本一起删掉，所以不抓 run_id。
+        self.runs_before = (
+            frozenset() if plan is not None else frozenset(list_run_ids(workdir))
+        )
         self.monitor: asyncio.Task | None = None
 
 
@@ -463,11 +473,15 @@ class JobRunner:
 
     构造时会调 :meth:`JobRegistry.load`：上一次运行的 ``queued``/``running`` 在这里
     变成 ``interrupted``（**不自动重跑**，也不对孤立的 pid 发信号）。
+    ``drafts`` 是草稿读写入口（``compile`` 在隔离副本里物化草稿要用）—— 和草稿路由
+    共用同一个 :class:`~babeldoc_tools.serve.draft.DraftRegistry`，因此同一个 did
+    只有一把草稿写锁。
     """
 
     def __init__(self, store: DocumentStore) -> None:
         self.store = store
         self.registry = JobRegistry(store.store_base)
+        self.drafts = DraftRegistry(store)
         self._running: dict[str, _RunningJob] = {}
         #: 本次启动被标记为 interrupted 的历史 job（启动日志/诊断用）。
         self.recovered: list[JobRecord] = self.registry.load()
@@ -497,16 +511,22 @@ class JobRunner:
         from_stage: str | None,
         pages: str | None,
         dual: bool,
-        profile_id: str,
+        profile_id: str | None,
+        requested_scope: str | None = None,
+        effective_scope: str | None = None,
+        downgrade_reason: str | None = None,
     ) -> JobRecord:
         """建 job（``queued``）→ 尽量立刻启动；同文档已有活动 job → 409 语义。
 
         返回时的 ``status`` 可能是 ``running``（有空槽位就马上起了）—— 202 响应体里
         的 ``status`` 是契约冻结的 ``queued``（前端本来就该轮询 ``GET /jobs/{jid}``）。
+        ``compile`` 不需要 provider（``profile_id=None``）：它只跑 apply+build。
         """
         # 先过 store 的路径边界（不在服务范围内/越界 → 400/404，不进队列）。
         self.store.resolve(did)
-        if resolve_profile(self.store.store_base, profile_id) is None:
+        if profile_id is not None and resolve_profile(
+            self.store.store_base, profile_id
+        ) is None:
             raise ToolError(
                 "unknown_profile",
                 f"未知 profile：{profile_id}",
@@ -530,6 +550,9 @@ class JobRunner:
                 profile=profile_id,
                 pages=pages,
                 dual=dual,
+                requested_scope=requested_scope,
+                effective_scope=effective_scope,
+                downgrade_reason=downgrade_reason,
             )
         await self._pump()
         return record
@@ -583,19 +606,39 @@ class JobRunner:
 
     # -------------------------------------------------------------- 调度
     async def _pump(self) -> None:
-        """把排队的 job 尽量补进空槽（准入锁内：槽位判断与启动跨 await 原子）。"""
+        """把排队的 job 尽量补进空槽（准入锁内：槽位判断与启动跨 await 原子）。
+
+        ``_start`` 里 ``compile`` 要先建隔离副本（可能拷几百 MB），所以启动这一步是
+        异步的（拷贝在 worker 线程里），整个准入锁在拷贝期间持有 —— 这本来就是
+        "槽位已占" 的状态，别的提交本来就该等。
+        """
         async with self.registry.lock:
             while len(self._running) < self.registry.max_concurrent:
                 record = self.registry.pop_queued()
                 if record is None:
                     return
-                self._start(record)
+                await self._start(record)
 
-    def _start(self, record: JobRecord) -> None:
-        """spawn 子进程 + 起监控任务；起不来就如实置 ``failed``（不进 running）。"""
+    async def _start(self, record: JobRecord) -> None:
+        """启动 job：spawn 子进程 + 起监控任务；起不来就如实置终态（不进 running）。
+
+        ``compile`` 走单独的启动路径（先快照/物化），前置失败不 spawn 子进程。
+        """
         try:
             workdir = self.store.resolve(record.did)
-            profile = resolve_profile(self.store.store_base, record.profile)
+        except ToolError as exc:
+            self.registry.mark_finished(
+                record,
+                status="failed",
+                error_code=exc.code,
+                error_message=exc.message,
+            )
+            return
+        if record.action == "compile":
+            await self._start_compile(record, workdir)
+            return
+        try:
+            profile = resolve_profile(self.store.store_base, record.profile or "")
             if profile is None:
                 self.registry.mark_finished(
                     record,
@@ -621,9 +664,90 @@ class JobRunner:
                 error_message=f"无法启动子进程：{exc}",
             )
             return
+        self._launch(record, proc, workdir, profile, argv)
+
+    async def _start_compile(self, record: JobRecord, workdir: Path) -> None:
+        """``compile`` 的启动：隔离副本（worker 线程里拷）→ spawn 子进程。
+
+        准备阶段失败（找不到源 PDF / state.pkl 坏 / 草稿不合法）在路由层就是 202 之后
+        的异步失败：**不 spawn**、真 workdir 未动，job 如实置 ``failed`` + error_code，
+        并把同一个 error_code 写进 compile.json（详情端点也看得到）。
+        """
+        try:
+            plan = await asyncio.to_thread(
+                compile_mod.prepare_compile, record, workdir
+            )
+        except ToolError as exc:
+            compile_mod.write_failed_state(
+                workdir,
+                error_code=exc.code,
+                message=exc.message,
+                revision_attempted=0,
+                job_id=record.job_id,
+                started_at=record.created_at,
+            )
+            self.registry.mark_finished(
+                record,
+                status="failed",
+                error_code=exc.code,
+                error_message=exc.message,
+            )
+            return
+        except OSError as exc:
+            compile_mod.write_failed_state(
+                workdir,
+                error_code="snapshot_failed",
+                message=f"隔离副本创建失败：{exc}",
+                revision_attempted=0,
+                job_id=record.job_id,
+                started_at=record.created_at,
+            )
+            self.registry.mark_finished(
+                record,
+                status="failed",
+                error_code="snapshot_failed",
+                error_message=f"隔离副本创建失败：{exc}",
+            )
+            return
+        try:
+            argv = compile_mod.build_compile_argv(plan.isolated)
+            proc = spawn_job(argv, plan.isolated)
+        except OSError as exc:
+            compile_mod.discard_plan(
+                plan,
+                error_code="spawn_failed",
+                message=f"无法启动子进程：{exc}",
+            )
+            self.registry.mark_finished(
+                record,
+                status="failed",
+                error_code="spawn_failed",
+                error_message=f"无法启动子进程：{exc}",
+            )
+            return
+        self._launch(
+            record,
+            proc,
+            workdir,
+            Profile(id=compile_mod.COMPILE_PROFILE_ID),
+            argv,
+            plan=plan,
+        )
+
+    def _launch(
+        self,
+        record: JobRecord,
+        proc: subprocess.Popen,
+        workdir: Path,
+        profile: Profile,
+        argv: list[str],
+        *,
+        plan: compile_mod.CompilePlan | None = None,
+    ) -> None:
+        """给刚 spawn 的子进程接管道、记身份、起监控任务（argv 只用于指纹）。"""
         capture = capture_pipes(proc)
         pgid = os.getpgid(proc.pid)
-        running = _RunningJob(record, proc, capture, pgid, workdir, profile)
+        running = _RunningJob(record, proc, capture, pgid, workdir, profile, plan=plan)
         self.registry.mark_started(
             record, pid=proc.pid, pgid=pgid, spawn_marker=argv_marker(argv)
         )
@@ -631,7 +755,11 @@ class JobRunner:
         self._running[record.job_id] = running
 
     async def _watch(self, running: _RunningJob) -> None:
-        """等子进程退出 → 落终态 → 释放文档槽并让排队者上位（只释放一次）。"""
+        """等子进程退出 → 落终态 → 释放文档槽并让排队者上位（只释放一次）。
+
+        ``compile`` job 的终态由 :func:`babeldoc_tools.serve.compile.settle_compile`
+        判定（发布成功 = ``succeeded``）：它同时负责"发布或保留上一版"与清理隔离副本。
+        """
         record = running.record
         try:
             exit_code, timed_out = await self._wait_exit(running)
@@ -641,25 +769,46 @@ class JobRunner:
                 # 先脱敏**解析结果**：classify_exit 会把 error.message 抄进 job 记录（可能
                 # 回显整条命令），落库的那份必须已经是干净的。
                 sanitize_payload(envelope[1], running.profile)
-            outcome = classify_exit(
-                action=record.action,
-                cancel_requested=record.cancel_requested_at is not None,
-                timed_out=timed_out,
-                exit_code=exit_code,
-                envelope=envelope[1] if envelope else None,
-            )
+            canceled = record.cancel_requested_at is not None
+            payload = envelope[1] if envelope else None
+            if running.plan is not None:
+                status, error_code, error_message = self._compile_outcome(
+                    running.plan,
+                    action=record.action,
+                    envelope=payload,
+                    exit_code=exit_code,
+                    timed_out=timed_out,
+                    canceled=canceled,
+                )
+            else:
+                outcome = classify_exit(
+                    action=record.action,
+                    cancel_requested=canceled,
+                    timed_out=timed_out,
+                    exit_code=exit_code,
+                    envelope=payload,
+                )
+                status = outcome.status
+                error_code = outcome.error_code
+                error_message = outcome.error_message
             # 落盘前脱敏：信封可能带 profile 命令（含密钥）与 debug 查看器 token URL。
             text = (
                 sanitize_envelope(envelope[0], running.profile) if envelope else None
             )
             self.registry.mark_finished(
                 record,
-                status=outcome.status,
+                status=status,
                 exit_code=exit_code,
                 envelope=text,
-                error_code=outcome.error_code,
-                error_message=outcome.error_message,
-                run_id=new_run_id(running.workdir, running.runs_before),
+                error_code=error_code,
+                error_message=error_message,
+                # compile 的 run 归档住在隔离副本里，随副本一起删 —— 不报一个
+                # 已经不存在、而且是真 workdir 里别的 run 的 run_id。
+                run_id=(
+                    None
+                    if running.plan is not None
+                    else new_run_id(running.workdir, running.runs_before)
+                ),
             )
         except Exception as exc:  # noqa: BLE001 - 监控自身出错也必须落终态
             self.registry.mark_finished(
@@ -671,6 +820,51 @@ class JobRunner:
         finally:
             self._running.pop(record.job_id, None)
             await self._pump()
+
+    def _compile_outcome(
+        self,
+        plan: compile_mod.CompilePlan,
+        *,
+        action: str,
+        envelope: dict | None,
+        exit_code: int | None,
+        timed_out: bool,
+        canceled: bool,
+    ) -> tuple[str, str | None, str | None]:
+        """``compile`` job 的 ``(status, error_code, error_message)``。
+
+        发布成功（build ok 且副本里确实有新 PDF）→ ``succeeded``，即使子进程因
+        check/review 质量门禁 exit 1 —— "编译成功 ≠ 质量通过"。未发布则按普通的退出码/
+        信封规则如实报失败（信封里保留门禁/构建的 error_code）。
+        """
+        settled = compile_mod.settle_compile(
+            plan,
+            exit_code=exit_code,
+            envelope=envelope,
+            timed_out=timed_out,
+            canceled=canceled,
+        )
+        if settled.published:
+            return "succeeded", None, None
+        outcome = classify_exit(
+            action=action,
+            cancel_requested=canceled,
+            timed_out=timed_out,
+            exit_code=exit_code,
+            envelope=envelope,
+        )
+        if outcome.status == "succeeded":
+            # 子进程自己说成功但没发布（build ok 却无产物）：不当作成功。
+            return (
+                "failed",
+                settled.error_code or "build_output_missing",
+                "build 阶段未产出可发布的 PDF（隔离副本 output/ 为空）",
+            )
+        return (
+            outcome.status,
+            settled.error_code or outcome.error_code,
+            outcome.error_message,
+        )
 
     async def _wait_exit(self, running: _RunningJob) -> tuple[int | None, bool]:
         """等退出；超时 → 走取消路径（杀进程组）并回报 ``timed_out``。

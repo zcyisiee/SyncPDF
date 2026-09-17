@@ -18,6 +18,12 @@
        └──(服务重启)────> interrupted
                          running ──(重启/身份不符)──> interrupted
 
+``action=compile``（W09）只对**终态判定**有一处特例：编译成功的定义是"隔离副本里
+apply+build 成功并发布了新 PDF"（见 :mod:`babeldoc_tools.serve.compile`），而
+``bdt run --from apply`` 之后的 check/review 是质量门禁 —— 门禁不过时子进程 exit 1，
+但编译其实成功了。那种情况 job 记 ``succeeded``（信封原样保留门禁结论）；
+build 没成功则按普通的退出码/信封规则记 ``failed``。
+
 两条**不可妥协**的规则（EXECUTION.md 纠偏第 5 条）：
 
 - **不自动重跑收费调用**：重启后 ``queued`` 一律置 ``interrupted``（前端显式重试 =
@@ -191,22 +197,31 @@ class JobRecord(BaseModel):
 
     job_id: str
     did: str
-    #: W07 只实现 ``run``（``bdt run --from <stage>``）与 ``check``（``--from check``）；
-    #: ``retranslate``/``compile`` 在路由层就按 422 拒绝，不会进到这里。
-    action: Literal["run", "check"]
+    #: W07 实现 ``run``（``bdt run --from <stage>``）与 ``check``（``--from check``）；
+    #: W09 加 ``compile``（草稿编译：隔离副本里 apply+build，见
+    #: :mod:`babeldoc_tools.serve.compile`）。``retranslate`` 仍是 W11，路由层 422。
+    action: Literal["run", "retranslate", "compile", "check"]
     status: Literal[
         "queued", "running", "succeeded", "failed", "canceled", "interrupted"
     ] = "queued"
     created_at: str
     started_at: str | None = None
     finished_at: str | None = None
-    #: 实际生效的起点阶段（``run`` 的 ``--from``；``check`` 固定 ``check``）。
+    #: 实际生效的起点阶段（``run`` 的 ``--from``；``check`` 固定 ``check``；
+    #: ``compile`` 固定 ``apply``）。
     from_stage: str | None = None
-    #: profile **id**（命令字符串永不进记录、永不回客户端）。
-    profile: str
+    #: profile **id**（命令字符串永不进记录、永不回客户端）；``compile`` 不需要
+    #: provider → ``None``（它只跑 apply+build，不调翻译/审查）。
+    profile: str | None = None
     #: ``--pages`` 原样透传（只对 ``run`` 有效）。
     pages: str | None = None
     dual: bool = False
+    #: ``compile`` 的页级语义（api.md §3.4）：请求的 scope / 实际生效的 scope /
+    #: 回退原因。v1 页级编译回退全量，所以 ``requested_scope="pages"`` 时
+    #: ``effective_scope="full"`` 且 ``downgrade_reason`` 非空。
+    requested_scope: str | None = None
+    effective_scope: str | None = None
+    downgrade_reason: str | None = None
     #: 子进程 debug recorder 建的 run（spawn 之后新出现的那个）；没有 → None。
     run_id: str | None = None
     exit_code: int | None = None
@@ -341,9 +356,12 @@ class JobRegistry:
         did: str,
         action: str,
         from_stage: str | None,
-        profile: str,
+        profile: str | None,
         pages: str | None = None,
         dual: bool = False,
+        requested_scope: str | None = None,
+        effective_scope: str | None = None,
+        downgrade_reason: str | None = None,
     ) -> JobRecord:
         """新建 job 并入队（``queued``）；准入判断由调用方在 ``lock`` 内做。"""
         record = JobRecord(
@@ -355,6 +373,9 @@ class JobRegistry:
             profile=profile,
             pages=pages,
             dual=dual,
+            requested_scope=requested_scope,
+            effective_scope=effective_scope,
+            downgrade_reason=downgrade_reason,
         )
         self.records[record.job_id] = record
         self._queue.append(record.job_id)
@@ -454,7 +475,14 @@ class JobRegistry:
             "status": record.status,
             "profile": record.profile,
         }
-        for key in ("run_id", "exit_code", "error_code", "interrupted_reason"):
+        for key in (
+            "run_id",
+            "exit_code",
+            "error_code",
+            "interrupted_reason",
+            "requested_scope",
+            "effective_scope",
+        ):
             value = getattr(record, key)
             if value is not None:
                 payload[key] = value

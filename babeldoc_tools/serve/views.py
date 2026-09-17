@@ -11,9 +11,9 @@
   （``snapshot_unavailable`` / ``geometry_unavailable`` / ``paragraphs_unavailable``）。
 - **不静默转换坐标**：parse 快照是 ``pdf_topleft``、layout 几何是 ``pdf_native``，
   各自在 ``coord_system`` 里标注，换算留给前端。
-- **不造假**：``compile`` 在 W02 没有真实编译产物（W09 才有），固定
-  ``status="none"`` / ``revision=0``；阶段时间只来自 ``run_state`` / manifest，
-  不编造百分比或 ETA。
+- **不造假**：``compile`` 的真源是 ``<workdir>/.bdt-serve/compile.json``（W09 草稿
+  编译写出；从没编译过才是 status="none"/revision=0）；阶段时间只来自 ``run_state`` /
+  manifest，不编造百分比或 ETA。
 
 页码统一 **1 基 PDF 页码**：``layout_geometry`` / parse 快照本身就是 1 基，只有
 ``anchors.json`` 是 0 基（``markdown_view`` 直接写 IL 的 ``page_number``），
@@ -28,13 +28,13 @@ from typing import Any
 from typing import Literal
 
 from babeldoc_tools.common import ToolError
+from babeldoc_tools.serve.compile import compile_status
 from babeldoc_tools.serve.schemas import COORD_SYSTEM_LAYOUT
 from babeldoc_tools.serve.schemas import COORD_SYSTEM_PARSE
 from babeldoc_tools.serve.schemas import STAGE_NOT_RUN
 from babeldoc_tools.serve.schemas import STAGES
 from babeldoc_tools.serve.schemas import CheckAvailability
 from babeldoc_tools.serve.schemas import CheckResponse
-from babeldoc_tools.serve.schemas import CompileStatus
 from babeldoc_tools.serve.schemas import DocumentAvailability
 from babeldoc_tools.serve.schemas import DocumentDetail
 from babeldoc_tools.serve.schemas import DocumentListItem
@@ -434,7 +434,9 @@ def document_detail(reader: WorkdirReader, did: str) -> DocumentDetail:
         ),
         config=state.get("config") if isinstance(state.get("config"), dict) else None,
         quality=_quality(reader, state),
-        compile=CompileStatus(),
+        # 编译状态的真源是 <workdir>/.bdt-serve/compile.json（W09）；从来没有编译过
+        # → status=none/revision=0。stale 由当前草稿 revision 算（api.md §3.2）。
+        compile=compile_status(reader.workdir),
         available=DocumentAvailability(
             run_state=bool(state),
             anchors=anchors is not None,

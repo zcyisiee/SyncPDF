@@ -163,6 +163,9 @@ ALLOWED_WRITE_ROUTES = frozenset(
         ("post", f"{API_PREFIX}/documents/{{did}}/jobs"),
         ("post", f"{API_PREFIX}/jobs/{{jid}}/cancel"),
         ("put", f"{API_PREFIX}/profiles"),
+        # W09 草稿（§3.3）：只有这两个方法会改盘，GET 仍是只读。
+        ("patch", f"{API_PREFIX}/documents/{{did}}/draft"),
+        ("delete", f"{API_PREFIX}/documents/{{did}}/draft"),
     }
 )
 

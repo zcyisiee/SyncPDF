@@ -233,6 +233,37 @@ uv run bdt run --workdir "$WD" --from apply --dual
 模型输入（改了要重翻译），后者只在渲染侧（升级不需要重翻译）；`latex_bbox` 默认开但
 尽力而为，能力探测失败自动回退，不会让任务失败。
 
+### Web 服务（`bdt serve`）
+
+本地只读的 HTTP 服务（需 web extra），把 workdir 产物、事件流和 job 暴露给浏览器：
+
+```bash
+PATH="$PWD/.venv/bin:$PATH" bdt serve --root tmp          # tmp/<did>/ 下每个目录 = 一个文档
+PATH="$PWD/.venv/bin:$PATH" bdt serve --workdir tmp/paper  # 只服务这一个 workdir
+# stdout 只在绑定端口成功后打印一次启动信封（含真实 URL/端口），日志全走 stderr
+```
+
+HTTP 形状的单一事实来源是运行中服务的 `/openapi.json`（可读版本：
+`docs/frontend/api.md`）。与编辑闭环相关的三块：
+
+- **草稿**（`GET/PATCH/DELETE /api/v1/documents/{did}/draft`）：译文与段落排版覆盖，
+  落在 `<did>/.bdt-serve/draft.json`。`revision` 从 0 起单调递增（清空也 +1，不回退）；
+  `PATCH {base_revision, paragraphs}` 的 `base_revision` 对不上 → `409 revision_conflict`；
+  字段/范围不合法 → `422 draft_invalid`（键名与范围与 `layout_overrides` 同一套校验）。
+- **编译**（`POST /api/v1/documents/{did}/jobs` + `{"action": "compile"}`）：把草稿物化到
+  `<did>/.bdt-serve/compile-<job_id>/` 隔离副本里跑 `bdt run --from apply`（apply + build），
+  成功后把 `output/*.pdf` 原子发布回真 workdir；失败/取消/超时只删副本，**上一版 PDF 分毫不动**
+  （能下载的仍可下载，只是被标成 `stale`）。成功判据是 build 阶段 ok 且副本里确实有新 PDF：
+  `--from apply` 之后的质量门禁（check/review）不过在命令层面是 exit 1，编译仍算成功
+  （`quality.pipeline_ok` 不受影响）。`scope=pages` 按已批准设计回退全量。
+- **防抖**：草稿写成功后在**服务端** 1.5s 后自动编译一次（浏览器断开不丢）；期间再写一次
+  重置计时器，到点时已有活动 job 则跳过。任务（run/check/compile）期间草稿只读：
+  `PATCH`/`DELETE` → `409 document_busy`。
+
+查看已编译结果：`GET /api/v1/documents/{did}` 的 `compile` 字段（`status`/`revision`/
+`stale`/`artifact`），下载走 `GET /api/v1/documents/{did}/artifacts/{name}`（支持 Range，
+pdf.js 需要）。
+
 ### Debug 工作台（诊断归档 + 只读查看器）
 
 给任一阶段加 `--debug`，该阶段的证据就会落进 `<workdir>/debug/runs/<run_id>/`，

@@ -1,14 +1,21 @@
-"""``/documents/{did}/jobs`` 与 ``/jobs/{jid}``：提交 / 查询 / 取消（api.md §3.4，W07）。
+"""``/documents/{did}/jobs`` 与 ``/jobs/{jid}``：提交 / 查询 / 取消（api.md §3.4，W07/W09）。
 
-本模块只做 HTTP 形状：校验请求体、调 :class:`babeldoc_tools.serve.runner.JobRunner`、
+本模块只做 HTTP 形状：校验请求体、调 :class:`babeldoc_tools.serve.runner.JobRunner`
+（``action=compile`` 走 :class:`babeldoc_tools.serve.compile.CompileService`）、
 交给 ``response_model`` 序列化。三条边界：
 
-- **客户端输入只有** ``action``/``from``/``pages``/``dual``/``profile``；
-  translator/reviewer/timeout 之类命令与密钥字段收到即 422 ``forbidden_field``
-  （见 :data:`FORBIDDEN_JOB_FIELDS`），argv 只在 :mod:`babeldoc_tools.serve.runner` 里构造；
+- **客户端输入只有** ``action``/``from``/``pages``/``dual``/``profile``（``compile`` 另加
+  ``scope``/``base_revision``）；translator/reviewer/timeout 之类命令与密钥字段收到即
+  422 ``forbidden_field``（见 :data:`FORBIDDEN_JOB_FIELDS`），argv 只在
+  :mod:`babeldoc_tools.serve.runner` / :mod:`babeldoc_tools.serve.compile` 里构造；
 - **同文档串行**：第二个活动 job → 409 ``document_busy``（detail 带现有 job_id）；
-- **诚实不冒充**：``retranslate``/``compile`` 未实现 → 422 ``action_not_available``
+- **诚实不冒充**：``retranslate`` 未实现 → 422 ``action_not_available``
   （detail 给归属任务），不返回假 job。
+
+``compile`` 的 provider 字段是**不需要**的（不调翻译/审查）：客户端给了也不进 job
+记录（前端把当前选中的 profile 一起发过来不会被拒）。它另有 ``scope``
+（v1 页级回退全量，见 :meth:`CompileService.request_compile`）与 ``base_revision``
+（不匹配 → 409 ``revision_conflict``）。
 
 两条 POST（提交 + 取消）是 W07 引入的写端点，``tests/test_serve_app.py`` 的写端点
 守卫用白名单放行它们，其余路由仍然必须只有 GET。
@@ -28,6 +35,7 @@ from fastapi import Request
 from fastapi import Response
 
 from babeldoc_tools.common import ToolError
+from babeldoc_tools.serve.compile import CompileService
 from babeldoc_tools.serve.jobs import TERMINAL_STATUSES
 from babeldoc_tools.serve.jobs import JobRecord
 from babeldoc_tools.serve.routers.documents import DOCUMENT_ID
@@ -100,27 +108,37 @@ def reject_forbidden_fields(body: Any) -> None:
             )
 
 
-def jobs_router(store: DocumentStore) -> APIRouter:
-    """按 store 生成 job 路由（job 状态落在 ``store.store_base`` 下）。"""
+def jobs_router(
+    store: DocumentStore, runner: JobRunner, compiles: CompileService
+) -> APIRouter:
+    """按 store 生成 job 路由（job 状态落在 ``store.store_base`` 下）。
+
+    ``runner``/``compiles`` 由 :func:`babeldoc_tools.serve.app.create_app` 建好传入：
+    同一个 job 注册表要同时给草稿路由（活动 job 期间编辑只读）与编译服务（防抖提交）
+    用，不能每个路由各建一个（那样重启恢复会跑两遍、活动表也会分裂）。
+    """
     router = APIRouter(prefix=API_PREFIX, tags=["jobs"])
-    # JobRunner 建立时就 load 一次持久化快照：上次残留的 queued/running → interrupted
-    # （不自动重跑、不凭孤立 pid 发信号），之后所有 job 读写都走这一个实例。
-    runner = JobRunner(store)
 
     @router.post(
         "/documents/{did}/jobs",
         response_model=JobAccepted,
         status_code=202,
-        summary="提交 job（run / check）",
+        summary="提交 job（run / check / compile）",
         description=(
             "以子进程跑 `bdt run`（同文档串行：已有活动 job → 409 document_busy；"
             "全局最多 2 个并发，超出排队 queued）。202 的 status 恒为 queued，"
-            "真实状态轮询 GET /jobs/{jid}。retranslate/compile 未实现 → 422 "
-            "action_not_available。客户端只能给 action/from/pages/dual/profile："
+            "真实状态轮询 GET /jobs/{jid}。`compile`（W09）在隔离副本里跑"
+            "apply+build 并原子发布 PDF：`scope=pages` 按已批准设计回退全量"
+            "（记录 requested_scope/effective_scope/downgrade_reason），"
+            "`base_revision` 与当前草稿不一致 → 409 revision_conflict。"
+            "retranslate 未实现 → 422 action_not_available。客户端只能给"
+            "action/from/pages/dual/profile/scope/base_revision："
             "translator/reviewer/timeout 之类一律 422 forbidden_field。"
         ),
         responses={
-            409: {"description": "document_busy：同文档已有活动 job"},
+            409: {
+                "description": "document_busy / revision_conflict（compile 的 base_revision 不符）"
+            },
             422: {
                 "description": "unknown_profile / action_not_available / forbidden_field"
             },
@@ -140,21 +158,31 @@ def jobs_router(store: DocumentStore) -> APIRouter:
                 action=payload.action,
                 phase=JOB_ACTION_PHASE.get(payload.action, "未排期"),
             )
-        if payload.action != "run":
+        if payload.action == "compile":
+            # profile 是可选的（compile 不调 provider）：给了也不进记录，不报错 ——
+            # 前端把当前选中的 profile 一起发过来是正常行为。
             _reject_run_only_fields(payload)
-            from_stage = "check"
+            record = await compiles.request_compile(
+                did,
+                scope=payload.scope or "full",
+                base_revision=payload.base_revision,
+            )
         else:
-            # 缺省留给 CLI（= parse）：契约里 from 是可选字段。
-            from_stage = payload.from_stage
-        # 文档不在服务范围/越界 → 404/400；同文档已有活动 job → 409（都在 runner 里）。
-        record = await runner.submit(
-            did=did,
-            action=payload.action,
-            from_stage=from_stage,
-            pages=payload.pages if payload.action == "run" else None,
-            dual=payload.dual if payload.action == "run" else False,
-            profile_id=payload.profile,
-        )
+            _reject_compile_only_fields(payload)
+            if payload.action == "check":
+                _reject_run_only_fields(payload)
+                from_stage = "check"
+            else:
+                # 缺省留给 CLI（= parse）：契约里 from 是可选字段。
+                from_stage = payload.from_stage
+            record = await runner.submit(
+                did=did,
+                action=payload.action,
+                from_stage=from_stage,
+                pages=payload.pages if payload.action == "run" else None,
+                dual=payload.dual if payload.action == "run" else False,
+                profile_id=payload.profile or "",
+            )
         response.headers["Location"] = f"{API_PREFIX}/jobs/{record.job_id}"
         return JobAccepted(job_id=record.job_id, action=payload.action)
 
@@ -232,6 +260,21 @@ def _reject_run_only_fields(payload: JobCreateRequest) -> None:
             raise ToolError(
                 "forbidden_field",
                 f"{field} 只对 action=run 有效（当前 action={payload.action}）",
+                field=field,
+                action=payload.action,
+            )
+
+
+def _reject_compile_only_fields(payload: JobCreateRequest) -> None:
+    """``scope``/``base_revision`` 只对 ``action=compile`` 有效（api.md §3.4）。"""
+    for field, value in (
+        ("scope", payload.scope),
+        ("base_revision", payload.base_revision),
+    ):
+        if value is not None:
+            raise ToolError(
+                "forbidden_field",
+                f"{field} 只对 action=compile 有效（当前 action={payload.action}）",
                 field=field,
                 action=payload.action,
             )

@@ -94,8 +94,9 @@ def documents_router(store: DocumentStore) -> APIRouter:
         summary="文档元信息",
         description=(
             "元信息 + 质量状态 + 编译状态。质量与编译**分开**报：quality.pipeline_ok "
-            "只有 check 门禁与 reviewer 都 pass 才为 true；compile 在 W02 没有真实"
-            "编译产物，固定 status=none / revision=0。"
+            "只有 check 门禁与 reviewer 都 pass 才为 true（编译成功不算质量通过）；"
+            "compile 读 `.bdt-serve/compile.json`：status/revision/artifact 来自最近"
+            "一次成功编译，stale = 当前草稿 revision 更大（旧 PDF 不得当成最新）。"
         ),
     )
     def get_document(

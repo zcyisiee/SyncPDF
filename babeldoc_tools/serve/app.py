@@ -11,24 +11,30 @@
   :mod:`babeldoc_tools.serve.routers.artifacts`）
 - ``POST /api/v1/documents/{did}/jobs``、``GET /api/v1/jobs/{jid}``、
   ``POST /api/v1/jobs/{jid}/cancel``、``GET /api/v1/documents/{did}/jobs``
-  （W07，见 :mod:`babeldoc_tools.serve.routers.jobs`）
+  （W07，见 :mod:`babeldoc_tools.serve.routers.jobs`；W09 起支持 ``action=compile``）
+- ``GET/PATCH/DELETE /api/v1/documents/{did}/draft``（W09，见
+  :mod:`babeldoc_tools.serve.routers.draft`）
 - ``POST /api/v1/documents``（W08 上传，见 :mod:`babeldoc_tools.serve.routers.documents`）
   与 ``GET/PUT /api/v1/profiles``（W08，见 :mod:`babeldoc_tools.serve.routers.profiles`）
 - ``GET /openapi.json`` / ``GET /docs``（FastAPI 自带）
 
-后续端点（草稿、版本…）在 ``docs/frontend/api.md`` 里冻结形状，由 W08+ 实现 ——
+后续端点（版本、词表…）在 ``docs/frontend/api.md`` 里冻结形状，由 W11+ 实现 ——
 这里不写假成功 stub。
 
 本模块在 import 时即需要 ``fastapi``（web extra）；``bdt serve --help`` 与其它
 ``bdt`` 子命令都不 import 本模块，因此没有 web extra 也能用。
 
-副作用说明：``jobs_router`` 在装配时读一次 ``<store_base>/.bdt-serve/jobs/*.json``
-做重启恢复（把残留的 ``queued``/``running`` 置 ``interrupted``）——
-**只有确实存在需要恢复的 job 才写盘**，新根目录下 create_app 不碰文件系统。
+副作用说明：``JobRunner`` 装配时读一次 ``<store_base>/.bdt-serve/jobs/*.json``
+做重启恢复（残留的 ``queued``/``running`` → ``interrupted``），``CompileService``
+把残留的 ``running`` 编译状态落定为 ``failed`` —— **只有确实存在需要恢复的状态才写盘**，
+新根目录下 create_app 不碰文件系统。job/草稿/编译状态是**共享实例**：job 注册表同时
+给 jobs 路由、草稿路由（活动 job 期间编辑只读）与编译服务（防抖）用。
 """
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import FastAPI
@@ -40,11 +46,14 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from babeldoc_tools import __version__
 from babeldoc_tools.common import ToolError
+from babeldoc_tools.serve.compile import CompileService
 from babeldoc_tools.serve.routers.artifacts import artifacts_router
 from babeldoc_tools.serve.routers.documents import documents_router
+from babeldoc_tools.serve.routers.draft import draft_router
 from babeldoc_tools.serve.routers.events import events_router
 from babeldoc_tools.serve.routers.jobs import jobs_router
 from babeldoc_tools.serve.routers.profiles import profiles_router
+from babeldoc_tools.serve.runner import JobRunner
 from babeldoc_tools.serve.schemas import API_PREFIX
 from babeldoc_tools.serve.schemas import ErrorBody
 from babeldoc_tools.serve.schemas import ErrorEnvelope
@@ -71,6 +80,9 @@ _TOOL_ERROR_STATUS = {
     "job_not_found": 404,
     "unknown_profile": 422,
     "action_not_available": 422,
+    # W09 草稿：乐观并发失败（带 detail.current_revision）/ 字段与范围不合法
+    "revision_conflict": 409,
+    "draft_invalid": 422,
     # 客户端不得自带的命令/密钥字段（不是"参数错了"，是"这类输入不接受"）
     "forbidden_field": 422,
     # W08 上传：体积超限是 413；不是 PDF/缺文件名是 422；候选目录名全被占是 409
@@ -117,11 +129,26 @@ def error_response(
 
 
 def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI:
-    """组装 FastAPI 应用（工厂：不读环境变量、不起进程；job 恢复只改确实要改的快照）。"""
+    """组装 FastAPI 应用（工厂：不读环境变量、不起进程；恢复只改确实要改的状态）。"""
+    # 共享实例：job 注册表 / 草稿锁 / 编译调度（三个路由用同一份，见模块 docstring）。
+    runner = JobRunner(store)
+    compiles = CompileService(store, runner)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        """服务关停：取消未触发的防抖计时器（到点没跑的编译不补跑）。
+
+        定时器是纯内存态（不持久化）：重启后丢就丢了，下次写草稿再触发；浏览器断开
+        与它无关（服务端定时器，EXECUTION.md 纠偏 7）。
+        """
+        yield
+        compiles.shutdown()
+
     app = FastAPI(
         title="bdt serve",
-        description="BabelDOC 文档翻译工具层的本地只读 HTTP 接口",
+        description="BabelDOC 文档翻译工具层的本地 HTTP 接口",
         version=__version__,
+        lifespan=lifespan,
     )
     # 不注册 CORSMiddleware：v1 只服务 loopback 同源/开发代理，禁止任意来源跨域。
 
@@ -192,7 +219,8 @@ def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI
     app.include_router(documents_router(store))
     app.include_router(events_router(store))
     app.include_router(artifacts_router(store))
-    app.include_router(jobs_router(store))
+    app.include_router(jobs_router(store, runner, compiles))
+    app.include_router(draft_router(runner, compiles))
     app.include_router(profiles_router(store))
 
     return app

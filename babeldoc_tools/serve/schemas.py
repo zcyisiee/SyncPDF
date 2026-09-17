@@ -47,10 +47,14 @@ STAGE_NOT_RUN = "not_run"
 # --------------------------------------------------------------------------- #
 #: action 的**固定四值**（api.md §3.4）。
 JOB_ACTIONS = ("run", "retranslate", "compile", "check")
-#: W07 真正实现的 action；另外两个诚实报 422 ``action_not_available``，不冒充。
-JOB_ACTIONS_IMPLEMENTED = ("run", "check")
+#: 已实现的 action；``retranslate`` 诚实报 422 ``action_not_available``，不冒充。
+#: （W07：run/check；W09：compile = 草稿编译，隔离副本里 apply+build。）
+JOB_ACTIONS_IMPLEMENTED = ("run", "check", "compile")
 #: 未实现 action → 归属任务（写进 422 的 detail，前端好排期）。
-JOB_ACTION_PHASE = {"retranslate": "W11", "compile": "W09"}
+JOB_ACTION_PHASE = {"retranslate": "W11"}
+
+#: ``compile`` 的 ``scope`` 取值（api.md §3.4）。v1 页级编译按已批准设计回退全量。
+JOB_COMPILE_SCOPES = ("full", "pages")
 
 #: ``from`` 取值 = 7 个阶段（只有一个来源 :data:`STAGES`）。
 JOB_FROM_PATTERN = "^(" + "|".join(STAGES) + ")$"
@@ -69,6 +73,7 @@ __all__ = [
     "JOB_ACTIONS",
     "JOB_ACTIONS_IMPLEMENTED",
     "JOB_ACTION_PHASE",
+    "JOB_COMPILE_SCOPES",
     "JOB_FROM_PATTERN",
     "JOB_PAGES_PATTERN",
     "JOB_PROFILE_PATTERN",
@@ -81,6 +86,7 @@ __all__ = [
     "DocumentDetail",
     "DocumentListItem",
     "DocumentPdf",
+    "DraftPatchRequest",
     "ErrorBody",
     "ErrorEnvelope",
     "EventsPage",
@@ -218,11 +224,14 @@ class QualityStatus(BaseModel):
 
 
 class CompileStatus(BaseModel):
-    """``compile``：服务端管理的草稿编译产物（api.md §3.2）。
+    """``compile``：服务端管理的草稿编译产物（api.md §3.2，W09 接真）。
 
-    W02 没有真实编译产物（草稿编译在 W09）：固定 ``status="none"`` / ``revision=0`` /
-    ``stale=false`` / ``artifact=null``。``run_state`` 里 ``bdt run`` 直接产出的 PDF
-    不是编译 revision，已放在 :attr:`DocumentDetail.pdf`，不在这里冒充编译结果。
+    真源是 ``<workdir>/.bdt-serve/compile.json``（由
+    :mod:`babeldoc_tools.serve.compile` 写）：``revision``/``artifact`` 恒指
+    **最近一次成功发布**的产物（下载链接靠它标修订），``status``/失败原因描述
+    **最近一次尝试**，``stale = 当前草稿 revision > revision``（草稿一动，旧 PDF
+    就不许再被当成最新）。没有 compile.json（从没编译过）→ ``none``/``0``/``null``。
+    注意：``bdt run`` 直接产出的 PDF 不是编译修订，已放在 :attr:`DocumentDetail.pdf`。
     """
 
     status: Literal["none", "running", "ok", "failed"] = "none"
@@ -402,9 +411,10 @@ ArtifactsResponse = list[ArtifactItem]
 class JobCreateRequest(BaseModel):
     """``POST /documents/{did}/jobs`` 的请求体（api.md §3.4）。
 
-    客户端只能给这些字段：``action``/``from``/``pages``/``dual``/``profile``；
-    ``profile`` 只接 **id**。translator/reviewer/timeout 之类命令与密钥字段一律由
-    服务端从 profile 解析，带了就 422 ``forbidden_field``（见
+    客户端只能给这些字段：``action``/``from``/``pages``/``dual``/``profile``
+    （``compile`` 用 ``scope``/``base_revision``）；``profile`` 只接 **id**。
+    translator/reviewer/timeout 之类命令与密钥字段一律由服务端从 profile 解析，
+    带了就 422 ``forbidden_field``（见
     :data:`babeldoc_tools.serve.routers.jobs.FORBIDDEN_JOB_FIELDS`）—— 这些字段**不**
     出现在下面的模型里，避免被前端代码生成当成可用参数。
 
@@ -423,11 +433,41 @@ class JobCreateRequest(BaseModel):
         pattern=JOB_PAGES_PATTERN,
         description='页码范围（只对 action=run 有效），如 "1-3,5"',
     )
-    dual: bool = Field(default=False, description="是否生成 dual（双语）PDF")
-    profile: str = Field(
+    dual: bool = Field(default=False, description="是否生成 dual（双语）PDF（action=run）")
+    profile: str | None = Field(
+        default=None,
         pattern=JOB_PROFILE_PATTERN,
-        description="provider profile id（命令由服务端解析，永不回传）",
+        description=(
+            "provider profile id（命令由服务端解析，永不回传）；"
+            "action=run/check 必填，action=compile 不需要（不调翻译/审查）"
+        ),
     )
+    scope: Literal["full", "pages"] | None = Field(
+        default=None,
+        description=(
+            "编译范围（只对 action=compile 有效，缺省 full）；v1 页级编译按已批准设计"
+            "回退全量，响应/记录里给 requested_scope/effective_scope/downgrade_reason"
+        ),
+    )
+    base_revision: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "期望的草稿 revision（只对 action=compile 有效）：与当前不一致 → "
+            "409 revision_conflict，防止编译一个已经不是最新的草稿"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _require_profile_for_run_and_check(self) -> JobCreateRequest:
+        """``run``/``check`` 必须给 ``profile``；``compile`` 不需要（给了也不进记录）。
+
+        少了字段就是 ``422 validation_error``（与 W07 的行为一致：以前 ``profile`` 是
+        必填字段），不用 ``unknown_profile`` 冒充"参数没填全"。
+        """
+        if self.action != "compile" and self.profile is None:
+            raise ValueError("action=run/check 必须给 profile（provider id）")
+        return self
 
 
 class JobAccepted(BaseModel):
@@ -439,7 +479,32 @@ class JobAccepted(BaseModel):
 
     job_id: str
     status: Literal["queued"] = "queued"
-    action: Literal["run", "check"]
+    action: Literal["run", "check", "compile"]
+
+
+# --------------------------------------------------------------------------- #
+# W09：草稿（api.md §3.3）
+# --------------------------------------------------------------------------- #
+class DraftPatchRequest(BaseModel):
+    """``PATCH /documents/{did}/draft`` 的请求体（api.md §3.3）。
+
+    只有两个字段：``base_revision``（乐观并发）与 ``paragraphs``（``{段落 id: 补丁}``）。
+    ``paragraphs`` 故意声明成宽松的 ``dict[str, Any]``：字段/范围的逐条校验在
+    :func:`babeldoc_tools.serve.draft.validate_changes` 里做，错误码是稳定的
+    ``422 draft_invalid`` + ``detail.errors``（不是 pydantic 的 ``validation_error``）。
+    """
+
+    base_revision: int = Field(
+        ge=0,
+        description="客户端期望的当前草稿 revision；与服务器不一致 → 409 revision_conflict",
+    )
+    paragraphs: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            '{"段落 id": {"target"?: str|null, "layout"?: object|null}}，null = 删除；'
+            "整段置 null = 删掉该段全部覆盖"
+        ),
+    )
 
 
 # --------------------------------------------------------------------------- #

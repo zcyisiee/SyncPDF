@@ -64,10 +64,11 @@ curl -sS http://127.0.0.1:<port>/api/v1/health
 | 404 | `events_unavailable` | 没有任何 run 归档，或指定的 `run_id` 不存在（W03） |
 | 404 | `artifact_not_found` | 产物不在白名单内或不存在（不泄露存在性，W03） |
 | 405 | `method_not_allowed` | 方法不允许（带 `Allow` 头） |
-| 409 | `revision_conflict`（计划） | 草稿乐观并发失败，`detail.current_revision` 给最新值 |
-| 409 | `document_busy` | 同文档已有活动 job（W07） |
+| 409 | `revision_conflict` | 草稿乐观并发失败（或 `PATCH /draft` / `action=compile` 的 `base_revision` 不符），`detail.current_revision` 给最新值（W09） |
+| 409 | `document_busy` | 同文档已有活动 job（W07）；任务期间草稿写端点也返回它（W09） |
 | 413 | `file_too_large` | 上传超过 200MB 上限，`detail.limit_bytes`/`size_bytes`（W08） |
 | 422 | `validation_error` | 请求体/参数校验失败，`detail.errors` |
+| 422 | `draft_invalid` | 草稿字段/范围不合法：`detail.errors` 逐条给 `paragraphs.<id>.<字段>`（W09） |
 | 422 | `forbidden_field` | 客户端自带了命令/密钥字段（`translator`/`reviewer`/`api_key`…）或脚本引用形状不合（W07/W08）。**优先于** `validation_error`：body 里有这类字段就先报它 |
 | 422 | `invalid_pdf` | 上传缺文件名或前 5 字节不是 `%PDF-`（W08） |
 | 422 | `script_path_forbidden` | `PUT /profiles` 的脚本引用不在白名单目录内/不存在（W08） |
@@ -95,7 +96,9 @@ fastapi/uvicorn，message 里给安装命令）、`invalid_port`、`port_unavail
 
 ### 1.5 归档下载
 
-- `GET /documents/{did}/artifacts`：产物清单（`name`、`path`、`size`、`mtime`、`kind`；`revision` 待 W09 编译修订落地后加入，不塞假值）。
+- `GET /documents/{did}/artifacts`：产物清单（`name`、`path`、`size`、`mtime`、`kind`；**清单不加** `revision` 字段）。
+- 下载链接的编译修订由**详情**给出：`compile.artifact.revision`（§3.2）+ `compile.stale`；
+  同一个 revision 覆盖该次编译发布的全部 `output/*.pdf`。旧 PDF 不得被前端标成最新。
 - `GET /documents/{did}/artifacts/{name}`：只允许清单内的白名单名字，支持 Range
   （`Accept-Ranges: bytes`，`206` + `Content-Range`），pdf.js 依赖这一点。
 - **下载链接必须关联 artifact 的编译 revision**；旧 PDF 不得被前端标成最新（见 §3.2）。
@@ -169,14 +172,24 @@ W01 **只**有这两个端点；没有写端点、没有假 stub。校验（越�
 - `quality.check.verdict` ∈ `pass` | `needs_fix`（子项不可用时该子项为 `not_available`）。
 - `quality.reviewer.status` ∈ `not_run` | `waiting_for_reviewer` | `pass` | `needs_fix` | `needs_human_review`。
 - `quality.pipeline_ok`：只有质量门禁全绿才为 `true`；**编译成功不得置 true**。
-- `compile.status` ∈ `none` | `running` | `ok` | `failed`；`compile.revision` = 编译时捕获的草稿
-  revision；`compile.stale = (draft.revision > compile.revision)`。
+- `compile.status` ∈ `none` | `running` | `ok` | `failed`；`compile.revision` 与
+  `compile.artifact` **恒指最近一次成功发布的产物**（`artifact = {name, size, revision}`），
+  `status`/失败原因描述最近一次尝试。真源是 `<did>/.bdt-serve/compile.json`（W09）：
+  从没编译过 → `none`/`0`/`null`；编译失败时旧 PDF 仍在、仍可下载，只是被标成
+  `failed` + `stale`。
+- `compile.stale = (draft.revision > compile.revision)`。
 - 下载/展示必须带 `artifact.revision` 与 `stale`：失败或取消不得破坏上一份可下载 PDF，
   旧 PDF 不标成最新（`stale: true` 时前端显式提示）。
+- `artifact.name` 是**裸文件名**；下载键是 workdir 相对路径 —— 用
+  `output/<artifact.name>` 在 `GET /artifacts` 清单里对接（清单里 `name == path`）。
+- 同一个 revision 只覆盖该次编译**发布的那批文件**（`compile.json.files`，当前=不 `--dual`
+  的 mono）。`output/` 里可能有更早 `bdt run --dual` 留下的 dual PDF，它**不属于**这个
+  revision（如果 W10 要 dual 预览，得让 compile 也带 `--dual`，不在 W09 范围）。
 
-### 3.3 草稿与 revision（未实现：W09）
+### 3.3 草稿与 revision（已实现 W09）
 
-`<did>/draft.json`：
+`<did>/.bdt-serve/draft.json`（服务端私有状态，与 job 状态同级；**不进** `agent/` 产物区，
+也不在产物下载白名单里）：
 
 ```json
 {
@@ -198,43 +211,61 @@ W01 **只**有这两个端点；没有写端点、没有假 stub。校验（越�
 }
 ```
 
-- `target`：该段译文（覆盖 `agent/translated.jsonl` 的同 id 值）。
+- `target`：该段译文（覆盖 `agent/translated.jsonl` 的同 id 值）。**表示形式与
+  `GET /paragraphs` 的 `target` 一致**：canonical IR 占位符（`<style id='1'>` / `</style>` /
+  `{v3}`，即 IR 的权威文本形式）。写回 `agent/translated.md` 时由服务端转成等价的
+  短锚点形式（`[[S1]]` / `[[/S1]]` / `[[F3]]`）后再合并 —— 前端**不要**自己做这个
+  转换，也不要传 `[[S1]]` 形式（`translated.md` 的表示属于后端细节）。
 - `layout`：段落排版覆盖，键名与取值范围必须与
   `babeldoc/tools/agent/layout_overrides.py` 一致 —— `scale_cap` 0.1–5.0、
   `font_scale` 0.2–5.0、`line_skip` 0.8–3.0、`box_scale` 0.3–5.0；
   `box` 是 `[x, y, x2, y2]`，**PDF 坐标 y 向上**（与几何端点的 `pdf_topleft` 相反，
   前端拖拽时必须换算，禁止直接透传屏幕坐标）。
-- `revision`：单调递增整数，从 1 开始，每次成功写入 +1；不因重启回退。
+  服务端用同一份 `layout_overrides.validate` 校验（含 `box` 的 `x2 > x` / `y2 > y` 与
+  列表键），非法值 → `422 draft_invalid`。
+- **写端点**（W09）：`PATCH {base_revision, paragraphs}`，`paragraphs` 是
+  `{段落 id: {target?, layout?}}`：字段 `null` = 删该字段，整段 `null` = 删该段全部覆盖；
+  成功返回新草稿并让 `revision + 1`。`DELETE` 清空全部覆盖，`revision` **继续 +1**
+  （不回退）。`GET` 从没写过 → `revision=0` + 空 `paragraphs`（不是 404）。
+- `revision`：单调递增整数，从 0 开始（第一次成功写入 → 1），每次成功写入 +1；不因重启回退。
 - 乐观并发：写请求带 `base_revision`；不匹配 → `409 revision_conflict`
   （`detail.current_revision`）。两标签页冲突由前端提示刷新/重试。
-- 草稿保存触发服务端 1.5s 防抖编译；浏览器断开不丢编译。
+- **活动任务期间草稿只读**（EXECUTION.md 纠偏 7）：该文档已有 `queued`/`running` job
+  （含正在跑的编译）时，`PATCH`/`DELETE` → `409 document_busy`（`detail.job_id`）。
+- 草稿保存触发服务端 1.5s 防抖编译（纯服务端定时器，浏览器断开不丢）；编译在跑的
+  1.5s 内到点也会被跳过（不重复编译）。重启后定时器丢失 = 下次写草稿再触发。
 
-### 3.4 jobs（已实现 W07：`run`/`check`；`compile`→W09、`retranslate`→W11）
+### 3.4 jobs（已实现 W07：`run`/`check`；W09：`compile`；`retranslate`→W11）
 
 ```json
 POST /api/v1/documents/{did}/jobs
-{
-  "action": "run",
-  "from": "build",
-  "paragraph_ids": ["P05-002"],
-  "feedback": "术语不统一",
-  "scope": "full",
-  "pages": [3, 4],
-  "profile": "deepseek-flash",
-  "base_revision": 7
-}
+{"action": "run", "from": "build", "pages": "1,3-4", "dual": false, "profile": "deepseek-flash"}
 → 202 {"job_id": "j_01H...", "status": "queued", "action": "run"}
+
+POST /api/v1/documents/{did}/jobs
+{"action": "compile", "scope": "full", "base_revision": 7}
+→ 202 {"job_id": "j_01H...", "status": "queued", "action": "compile"}
 ```
 
 - `action` ∈ `run` | `retranslate` | `compile` | `check`（固定四值）。
+- 客户端只能给：`action`、`from`、`pages`、`dual`、`profile`、`scope`、`base_revision`；
+  `translator`/`reviewer`/`timeout`/`api_key` 之类收到即 `422 forbidden_field`（不是"参数错了"）。
 - `from` 只对 `action=run` 有效，取值 = §3.1 的 7 个阶段。起点是 `parse`（含缺省）时
   服务端在 argv 里**自动带上** `<workdir>/source.pdf` 位置参数（parse 的输入；上传后就在
   那里）；`translate` 及之后不需要它（也不接受客户端传 PDF 路径）。parse 的 MinerU token
   由 **serve 进程环境**（`MINERU_API_TOKEN`）提供，客户端永远不传。
 - `paragraph_ids` / `feedback` 只对 `retranslate` 有效；候选**不得**直接改当前译文
   （`retranslate_ids` 会合并进 `translated.md`，必须走隔离副本，采用后才写入草稿）。
-- `scope` / `pages` 只对 `compile` 有效；v1 页级编译按已批准设计**回退全量**，
-  响应里返回 `requested_scope` / `effective_scope` / `downgrade_reason`。
+- `scope` / `base_revision` 只对 `action=compile` 有效（给了别的 action → `422 forbidden_field`）；
+  `from` / `pages` / `dual` 只对 `action=run` 有效。v1 页级编译按已批准设计**回退全量**，
+  记录里返回 `requested_scope` / `effective_scope` / `downgrade_reason`。
+- `action=compile`（W09）：不接 `profile`（不调翻译/审查，客户端带了也不进记录）。它把当前草稿
+  物化到**隔离副本**里跑 `bdt run --from apply`（apply + build），成功后把
+  `output/*.pdf` 原子发布回真 workdir（同名覆盖）、`compile.json` 记 `revision = 捕获的草稿 revision`；
+  失败/取消/超时只删副本，**上一版 PDF 分毫不动**。成功判据是"build 阶段 ok 且副本里确实有新
+  PDF"：`--from apply` 之后的质量门禁（check/review）不过在命令层面是 exit 1，但编译仍算成功，
+  门禁结论留在 job `envelope` 里，`quality.pipeline_ok` 不受影响。`base_revision` 与当前草稿
+  不符 → `409 revision_conflict`。
 - `profile` 只接受 provider profile id；**不接受**客户端任意命令、密钥或 shell 字符串。
 - 同文档同时最多 1 个活动 job（冲突 `409 document_busy`）；跨文档并发但全局限流。
 - `GET /api/v1/jobs/{jid}`、`POST /api/v1/jobs/{jid}/cancel`、`GET /api/v1/documents/{did}/jobs`（`?status=` 按状态过滤，新 → 旧）。
@@ -251,7 +282,7 @@ POST /api/v1/documents/{did}/jobs
 |---|---|---|
 | `POST /documents` | multipart 上传 PDF → 建 did | 已实现（W08） |
 | `GET/PUT /profiles` | provider profiles（仅名字对前端可见） | 已实现（W08） |
-| `GET/PATCH/DELETE /documents/{did}/draft` | 草稿读写（§3.3） | W09 |
+| `GET/PATCH/DELETE /documents/{did}/draft` | 草稿读写（§3.3） | 已实现（W09） |
 | `GET /documents/{did}/candidates`、`POST /documents/{did}/candidates/{cid}/accept\|discard` | 重译候选（生成不合并） | W11 |
 | `GET/POST /documents/{did}/versions`、`POST /documents/{did}/versions/{vid}/rollback` | 版本归档与回滚 | W12 |
 | `/glossary...` | 词表 CRUD（全局 + 文档级）、CSV、命中计数 | W13 |

@@ -661,15 +661,19 @@ def test_forbidden_field_wins_over_missing_profile(client):
 
 
 def test_unimplemented_actions_are_422_with_the_phase(client):
-    for action, phase in (("retranslate", "W11"), ("compile", "W09")):
-        response = client.post(
-            f"{API}/documents/alpha/jobs", json={"action": action, "profile": "stub"}
-        )
-        assert response.status_code == 422
-        error = response.json()["error"]
-        assert error["code"] == "action_not_available"
-        assert error["detail"]["action"] == action
-        assert error["detail"]["phase"] == phase
+    """``retranslate`` 仍未实现 → 422 ``action_not_available`` + 归属任务。
+
+    ``compile`` 自 W09 起已实现（它的行为在 ``tests/test_serve_compile.py`` 里测），
+    不再走这条分支。
+    """
+    response = client.post(
+        f"{API}/documents/alpha/jobs", json={"action": "retranslate", "profile": "stub"}
+    )
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error["code"] == "action_not_available"
+    assert error["detail"]["action"] == "retranslate"
+    assert error["detail"]["phase"] == "W11"
     assert client.get(f"{API}/documents/alpha/jobs").json() == []
 
 
@@ -718,6 +722,20 @@ def test_from_must_be_a_known_stage_and_run_only(client):
     assert check_with_from.status_code == 422
     error = check_with_from.json()["error"]
     assert error["code"] == "forbidden_field" and error["detail"]["field"] == "from"
+
+    compile_with_from = client.post(
+        f"{API}/documents/alpha/jobs",
+        json={"action": "compile", "from": "build"},
+    )
+    assert compile_with_from.status_code == 422
+    assert compile_with_from.json()["error"]["detail"]["field"] == "from"
+
+    scope_on_run = client.post(
+        f"{API}/documents/alpha/jobs",
+        json={"action": "run", "scope": "pages", "profile": "stub"},
+    )
+    assert scope_on_run.status_code == 422
+    assert scope_on_run.json()["error"]["detail"]["field"] == "scope"
 
     pages_on_check = client.post(
         f"{API}/documents/alpha/jobs",
