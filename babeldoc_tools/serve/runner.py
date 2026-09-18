@@ -1005,6 +1005,8 @@ class JobRunner:
                     else new_run_id(running.workdir, running.runs_before)
                 ),
             )
+            if status == "succeeded" and record.action in ("run", "compile"):
+                self._sync_metadata(record.did)
         except Exception as exc:  # noqa: BLE001 - 监控自身出错也必须落终态
             self.registry.mark_finished(
                 record,
@@ -1015,6 +1017,22 @@ class JobRunner:
         finally:
             self._running.pop(record.job_id, None)
             await self._pump()
+
+    def _sync_metadata(self, did: str) -> None:
+        """Import the latest derived block view after a successful job."""
+        try:
+            from babeldoc_tools.serve.views import paragraphs
+            from babeldoc_tools.serve.workdir import WorkdirReader
+
+            workdir = self.store.resolve(did)
+            self.store.database.upsert_blocks(
+                did,
+                [item.model_dump() for item in paragraphs(WorkdirReader(workdir), None)],
+            )
+        except Exception:
+            # Metadata is an index; the filesystem artifacts remain authoritative for
+            # legacy documents and can be indexed again on the next successful job.
+            return
 
     def _compile_outcome(
         self,

@@ -33,9 +33,12 @@ from fastapi import Path as PathParam
 from fastapi import Query
 from fastapi import Request
 from fastapi import Response
+from fastapi.responses import FileResponse
 
 from babeldoc_tools.common import ToolError
+from babeldoc_tools.serve import artifacts
 from babeldoc_tools.serve.compile import CompileService
+from babeldoc_tools.serve.compile import compile_status
 from babeldoc_tools.serve.jobs import TERMINAL_STATUSES
 from babeldoc_tools.serve.jobs import JobRecord
 from babeldoc_tools.serve.routers.documents import DOCUMENT_ID
@@ -201,6 +204,39 @@ def jobs_router(
         return JobAccepted(job_id=record.job_id, action=payload.action)
 
     @router.post(
+        "/documents/{did}/export",
+        response_model=JobAccepted,
+        status_code=202,
+        summary="导出当前 revision",
+    )
+    async def export_document(
+        did: Annotated[str, PathParam(description=DOCUMENT_ID)],
+        payload: dict[str, Any] | None = None,
+    ) -> JobAccepted:
+        current = compiles.drafts.for_did(did).read()
+        body = payload or {}
+        base_revision = body.get("base_revision", current.revision)
+        record = await compiles.request_compile(
+            did, scope="full", base_revision=base_revision, trigger=TRIGGER_MANUAL
+        )
+        return JobAccepted(job_id=record.job_id, action="compile")
+
+    @router.get(
+        "/documents/{did}/exports/latest",
+        summary="下载最新成功导出",
+    )
+    def latest_export(did: Annotated[str, PathParam(description=DOCUMENT_ID)]) -> FileResponse:
+        workdir = store.resolve(did)
+        status = compile_status(workdir)
+        if status.status != "ok" or status.stale or not status.artifact:
+            raise ToolError("export_not_ready", "当前 revision 尚未成功导出")
+        name = status.artifact.get("name")
+        if not isinstance(name, str):
+            raise ToolError("export_not_ready", "导出产物元数据不可用")
+        entry = artifacts.resolve_artifact(workdir, f"output/{name}")
+        return FileResponse(entry.path, media_type="application/pdf")
+
+    @router.post(
         "/documents/{did}/blocks/{block_id}/compile",
         response_model=JobAccepted,
         status_code=202,
@@ -217,7 +253,12 @@ def jobs_router(
             raise ToolError("block_not_found", "block_id 不合法")
         current = compiles.drafts.for_did(did).read()
         if block_id not in current.paragraphs:
-            raise ToolError("block_not_found", f"block 不存在：{block_id}")
+            from babeldoc_tools.serve.views import paragraphs
+            from babeldoc_tools.serve.workdir import WorkdirReader
+
+            items = paragraphs(WorkdirReader(store.resolve(did)), None)
+            if not any(item.id == block_id for item in items):
+                raise ToolError("block_not_found", f"block 不存在：{block_id}")
         base_revision = (payload or {}).get("base_revision", current.revision)
         if not isinstance(base_revision, int) or base_revision != current.revision:
             raise ToolError("revision_conflict", "草稿 revision 已变化", current_revision=current.revision)

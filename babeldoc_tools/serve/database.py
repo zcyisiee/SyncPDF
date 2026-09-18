@@ -85,6 +85,14 @@ class MetadataDB:
             row = self._connection.execute("SELECT payload FROM drafts WHERE document_id=?", (did,)).fetchone()
             return json.loads(row[0]) if row else None
 
+    def upsert_blocks(self, did: str, rows: list[dict[str, Any]]) -> None:
+        with self._lock, self._connection:
+            for row in rows:
+                self._connection.execute(
+                    "INSERT OR REPLACE INTO blocks(id,document_id,page,source,original_bbox,layout) VALUES (?,?,?,?,?,?)",
+                    (row.get("id"), did, row.get("page"), row.get("source"), json.dumps((row.get("geometry") or {}).get("src_box")), json.dumps(row.get("geometry"))),
+                )
+
     def save_job(self, payload: dict) -> None:
         with self._lock, self._connection:
             self._connection.execute("INSERT OR REPLACE INTO job_snapshots VALUES (?,?)", (payload["job_id"],json.dumps(payload,ensure_ascii=False)))

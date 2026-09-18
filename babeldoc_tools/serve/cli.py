@@ -67,6 +67,10 @@ def add_parser(subparsers) -> argparse.ArgumentParser:
     parser.add_argument(
         "--open", action="store_true", help="绑定成功后用浏览器打开（使用实际端口）"
     )
+    parser.add_argument(
+        "--migrate", action="store_true",
+        help="启动前把现有 workdir 的源 PDF 和可用段落索引导入 SQLite",
+    )
     return parser
 
 
@@ -185,6 +189,16 @@ def run(args: argparse.Namespace) -> int:
         return 1
     try:
         store = _build_store(args)
+        if args.migrate:
+            from babeldoc_tools.serve.migrate import migrate_root
+
+            if store.mode != "root":
+                raise ToolError("upload_not_supported", "--migrate 需要 --root 模式")
+            result = migrate_root(store.root)
+            sys.stderr.write(
+                f"bdt serve: migrated {len(result['migrated'])} documents; "
+                f"skipped {len(result['skipped'])}\n"
+            )
         app, uvicorn = _load_app(store)
     except ToolError as exc:
         _emit(
