@@ -1,6 +1,6 @@
 /**
  * 编译状态条（`CompileBar`）：running / failed / stale / ok 四分支 + 手动编译与重试提交
- * `POST /jobs {action:"compile", scope:"full", base_revision}`。
+ * `POST /blocks/{selectedId}/compile {base_revision}`，禁止回退全文编译。
  *
  * `error_code` 取自 `GET /documents/{did}/jobs` 里最近一条 `action=compile`（契约的
  * `compile` 字段不带错误码），所以这里也顺带钉住「不编造错误码」这条。
@@ -8,6 +8,7 @@
 import { screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { uiStore } from '../src/stores/ui';
 import { CompileBar } from '../src/components/preview/CompileBar';
 import { jsonResponse, makeJob, mockApiFetch, renderWithQuery, resetUiStore } from './helpers';
 
@@ -17,16 +18,35 @@ const JOBS_PATH = `/api/v1/documents/${DID}/jobs`;
 function mockBar(jobs: unknown = []) {
   return mockApiFetch({
     [JOBS_PATH]: () => jsonResponse(jobs),
-    [`POST ${JOBS_PATH}`]: () =>
+    [`POST /api/v1/documents/${DID}/blocks/P01-010/compile`]: () =>
       jsonResponse({ job_id: 'j_compile', status: 'queued', action: 'compile' }, 202),
   });
 }
 
 beforeEach(() => {
   resetUiStore();
+  uiStore.setState({ selectedParagraphId: 'P01-010' });
 });
 
 describe('CompileBar 状态', () => {
+  it('切换到第二个块不显示历史全文失败', async () => {
+    mockBar([makeJob({ action: 'compile', effective_scope: 'block', paragraph_id: 'P01-001', revision: 3, status: 'succeeded' })]);
+    renderWithQuery(<CompileBar did={DID} compile={{ status: 'failed', revision: 1, stale: true }} draftRevision={4} />);
+    await waitFor(() => expect(screen.queryByText('上次编译失败')).toBeNull());
+    expect(screen.getByRole('button', { name: '编译选中块' })).toBeEnabled();
+  });
+  it('当前块当前修订的失败仍显示真实错误', async () => {
+    mockBar([makeJob({ action: 'compile', effective_scope: 'block', paragraph_id: 'P01-010', revision: 4, status: 'failed', error_message: '贴片失败' })]);
+    renderWithQuery(<CompileBar did={DID} compile={{ status: 'ok', revision: 1, stale: true }} draftRevision={4} />);
+    expect(await screen.findByText('贴片失败')).toBeInTheDocument();
+  });
+  it('未选中 bbox 时禁用编译，不回退全文', () => {
+    mockBar();
+    uiStore.setState({ selectedParagraphId: null });
+    renderWithQuery(<CompileBar did={DID} compile={{ status: 'ok', revision: 1, stale: true }} draftRevision={2} />);
+    expect(screen.getByRole('button', { name: '编译选中块' })).toBeDisabled();
+    expect(screen.getByText(/请先选中一个段落框/)).toBeInTheDocument();
+  });
   it('running：编译中 + 脉冲 + 编辑已禁用（不发任何请求也看得见）', async () => {
     mockBar();
     renderWithQuery(
@@ -50,19 +70,15 @@ describe('CompileBar 状态', () => {
     expect(bar?.textContent).toContain('PDF 修订 r5');
     expect(bar?.textContent).toContain('草稿 r6');
 
-    screen.getByRole('button', { name: '手动编译' }).click();
+    screen.getByRole('button', { name: '编译选中块' }).click();
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(
-        ([input, init]) => String(input) === JOBS_PATH && init?.method === 'POST',
+        ([input, init]) => String(input) === `/api/v1/documents/${DID}/blocks/P01-010/compile` && init?.method === 'POST',
       );
       expect(call).toBeTruthy();
+      expect(fetchMock.mock.calls.some(([input, init]) => String(input) === JOBS_PATH && init?.method === 'POST')).toBe(false);
       expect(JSON.parse(String(call?.[1]?.body))).toEqual({
-        action: 'compile',
-        scope: 'full',
         base_revision: 6,
-        dual: false,
-        // 词表只约束翻译阶段：编译永远不注入（W13）
-        use_glossary: false,
       });
     });
   });
@@ -127,7 +143,7 @@ describe('CompileBar 状态', () => {
         busyJobId="j_running"
       />,
     );
-    expect(screen.getByRole('button', { name: '手动编译' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '编译选中块' })).toBeDisabled();
     expect(document.querySelector('[data-od-id="compile-bar"]')?.textContent).toContain('有任务在跑');
   });
 
@@ -136,7 +152,7 @@ describe('CompileBar 状态', () => {
     renderWithQuery(
       <CompileBar did={DID} compile={{ status: 'ok', revision: 5, stale: true, artifact: null }} draftRevision={null} />,
     );
-    expect(screen.getByRole('button', { name: '手动编译' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '编译选中块' })).toBeDisabled();
     expect(document.querySelector('[data-od-id="compile-bar"]')?.textContent).toContain('草稿 r?');
   });
 });

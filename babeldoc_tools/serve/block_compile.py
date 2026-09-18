@@ -169,6 +169,9 @@ def render_request(workdir, pid, target, box, temporary, cache_root):
         None,
     )
     source_input = state["inputs"].get(pid)
+    source_fonts = next(({font.font_id: font for font in page.pdf_font}
+                         for page in state["doc"].page
+                         if paragraph in page.pdf_paragraph), {})
     if paragraph is None or source_input is None:
         raise ToolError("block_not_found", "解析状态中没有该 block")
     violations = protocol.check_placeholders(pid, source_input.unicode, target)
@@ -207,6 +210,15 @@ def render_request(workdir, pid, target, box, temporary, cache_root):
     body = captured["bodies"].get(pid)
     if not meta or not body:
         raise ToolError("compile_failed", "该 block 无法安全生成 LaTeX 贴片")
+    # Plain translated runs have no <style> wrapper. Their paragraph-level
+    # font still carries bold/italic (notably titles and Abstract headings).
+    from babeldoc.format.pdf.document_il.backend.latex_bbox.fusion import _style_flags
+
+    bold, italic = _style_flags(paragraph.pdf_style, source_fonts)
+    if bold:
+        body = r"{\bfseries " + body + "}"
+    if italic:
+        body = r"{\itshape " + body + "}"
     capability = probe_latex_capability()
     if not capability.available:
         raise ToolError(

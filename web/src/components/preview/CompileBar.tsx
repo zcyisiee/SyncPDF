@@ -15,7 +15,8 @@
  */
 import { describeApiError } from '../../lib/api';
 import type { CompileSummary } from '../../lib/download';
-import { useCompileDraftMutation, useJobs } from '../../lib/queries';
+import { useCompileBlockMutation, useJobs } from '../../lib/queries';
+import { useUiStore } from '../../stores/ui';
 import { Button } from '../ui/Button';
 import { ErrorCard } from '../ui/ErrorCard';
 import { Tooltip } from '../ui/Tooltip';
@@ -31,11 +32,17 @@ export interface CompileBarProps {
 
 export function CompileBar({ did, compile, draftRevision, busyJobId = null }: CompileBarProps) {
   const jobsQuery = useJobs(did);
-  const compileMutation = useCompileDraftMutation(did);
-  const status = compile?.status ?? 'none';
+  const selectedId = useUiStore((state) => state.selectedParagraphId);
+  const compileMutation = useCompileBlockMutation(did, selectedId ?? '');
+  const selectedJob = jobsQuery.data?.find((job) => job.effective_scope === 'block' && job.paragraph_id === selectedId);
+  const hasLocalJobs = jobsQuery.data?.some((job) => job.effective_scope === 'block') ?? false;
+  const currentJob = selectedJob?.revision === draftRevision ? selectedJob : null;
+  const status = hasLocalJobs
+    ? currentJob?.status === 'failed' ? 'failed' : currentJob?.status === 'succeeded' ? 'ok' : 'none'
+    : compile?.status ?? 'none';
   const revision = compile?.revision ?? 0;
-  const stale = compile?.stale === true;
-  const latestCompileJob = jobsQuery.data?.find((job) => job.action === 'compile') ?? null;
+  const stale = hasLocalJobs ? currentJob?.status !== 'succeeded' : compile?.stale === true;
+  const latestCompileJob = hasLocalJobs ? currentJob : jobsQuery.data?.find((job) => job.action === 'compile') ?? null;
   const errorCode = latestCompileJob?.error_code ?? null;
   const errorMessage = latestCompileJob?.error_message ?? null;
   // react-query 无错时 `error` 是 **null**（不是 undefined）：两者都要当“没有错误”，
@@ -45,19 +52,28 @@ export function CompileBar({ did, compile, draftRevision, busyJobId = null }: Co
       ? null
       : describeApiError(compileMutation.error);
 
-  const canCompile = draftRevision !== null && busyJobId === null && !compileMutation.isPending;
+  const canCompile = selectedId !== null && draftRevision !== null && busyJobId === null && !compileMutation.isPending;
   const compileButton = (label: string, odId: string) => (
     <Button
       data-od-id={odId}
       disabled={!canCompile}
       onClick={() => {
-        if (draftRevision === null) return;
+        if (draftRevision === null || selectedId === null) return;
         compileMutation.mutate(draftRevision);
       }}
     >
       {compileMutation.isPending ? '正在提交…' : label}
     </Button>
   );
+
+  const localJob = latestCompileJob?.effective_scope === 'block' ? latestCompileJob : null;
+  if (localJob && localJob.revision === draftRevision && ['queued', 'running', 'succeeded'].includes(localJob.status)) {
+    return <div data-od-id="compile-bar" className="border-b border-hair bg-ivory px-s5 py-[5px] text-tiny">
+      {localJob.status === 'succeeded'
+        ? `块 ${localJob.paragraph_id} 已编译并更新预览（草稿 r${draftRevision}）`
+        : `正在编译 ${localJob.paragraph_id}…`}
+    </div>;
+  }
 
   if (status === 'running') {
     return (
@@ -104,14 +120,14 @@ export function CompileBar({ did, compile, draftRevision, busyJobId = null }: Co
         className="flex flex-none flex-wrap items-center gap-s2 border-b border-hair bg-run-soft px-s5 py-[5px] text-tiny text-run-ink"
       >
         <span aria-hidden="true" className="h-[6px] w-[6px] flex-none rounded-full bg-current" />
-        草稿比当前 PDF 新（PDF 修订 r{revision}，草稿 r{draftRevision ?? '?'}）——自动编译没跑或还在排队，
-        预览与下载拿到的仍是旧修订。
+        草稿比当前 PDF 新（PDF 修订 r{revision}，草稿 r{draftRevision ?? '?'}）。
+        {selectedId ? `只编译选中块 ${selectedId}；使用已保存的内容。` : '请先选中一个段落框。'}
         {busyJobId === null ? null : (
           <Tooltip content={`文档有活动 job ${busyJobId}：任务期间草稿只读`}>
             <span className="font-mono text-micro text-ink-4">（有任务在跑）</span>
           </Tooltip>
         )}
-        <span className="ml-auto">{compileButton('手动编译', 'compile-now')}</span>
+        <span className="ml-auto">{compileButton('编译选中块', 'compile-now')}</span>
         {mutationError === null ? null : (
           <span data-od-id="compile-submit-error" className="font-mono text-micro text-err">
             {mutationError.title}：{mutationError.message}
