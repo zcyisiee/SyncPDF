@@ -388,6 +388,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--notes", default=None)
     _add_debug_flags(p_run, recompile=True)
 
+    p_model = sub.add_parser("model-call", help="Call a saved model: stdin prompt, stdout text")
+    p_model.add_argument("--store-base", required=True)
+    p_model.add_argument("--model-profile", required=True)
+    p_run.add_argument("--skip-ai-review", action="store_true", help="Skip optional AI review; keep local checks")
+
     # ---- serve ----------------------------------------------------------- #
     # Web 前端入口；只 import 标准库 + store/schemas，缺 web extra 也能 --help。
     serve_cli.add_parser(sub)
@@ -639,6 +644,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
                     timeout=args.timeout,
                     translator=args.translator,
                     reviewer=args.reviewer,
+                    skip_ai_review=args.skip_ai_review,
                     retry_missing=args.retry_missing,
                     glossaries=args.glossaries,
                     dual=args.dual,
@@ -783,6 +789,19 @@ def main(argv=None) -> int:
             parser.error("--debug-recompile 需要同时指定 --debug")
         if getattr(args, "latex_bbox", True) is False:
             parser.error("--debug-recompile 与 --no-latex-bbox 互斥")
+    if args.command == "model-call":
+        from babeldoc_tools.serve.models import call_model
+
+        try:
+            text = call_model(args.store_base, args.model_profile, sys.stdin.read())
+        except common.ToolError as exc:
+            sys.stderr.write(exc.code + ": " + exc.message + "\n")
+            return 1
+        except Exception:
+            sys.stderr.write("model_call_failed: Model call failed\n")
+            return 1
+        sys.stdout.write(text)
+        return 0
     if args.command == "serve":
         # 长驻服务：自己写启动信封（绑定端口后才知道真实 URL），不走单行 JSON 收尾。
         return serve_cli.run(args)

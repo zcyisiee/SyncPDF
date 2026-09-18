@@ -144,12 +144,13 @@ describe('CandidatePanel 按钮态', () => {
     expect(screen.getByText('候选译文甲')).toBeInTheDocument();
   });
 
-  it('没有可用 profile 时不显示假下拉（给明确提示）', async () => {
+  it('没有可用翻译配置时禁用重译并提供设置入口', async () => {
     mockPanel({ profiles: [PROFILES[1]] });
     renderWithQuery(
       <CandidatePanel did={DID} pid={PID} currentTarget="基线译文" baselineTarget="基线译文" />,
     );
-    expect(await screen.findByText(/没有可用 profile/)).toBeInTheDocument();
+    expect(await screen.findByText(/没有可用翻译配置：/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '管理翻译配置' })).toHaveAttribute('href', '#/settings');
     expect(screen.getByText('AI 重译')).toBeDisabled();
   });
 });

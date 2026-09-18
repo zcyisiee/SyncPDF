@@ -188,3 +188,35 @@ describe('ui store 预览页 / bbox 图层 / 选中段落（W05）', () => {
     expect(store.getState().selectedParagraphId).toBeNull();
   });
 });
+
+describe('reader session choices', () => {
+  it('recognition and translation have independent defaults and remember explicit choices', () => {
+    const store = createUiStore();
+    store.getState().enterPreviewView('layout');
+    expect(store.getState()).toMatchObject({ previewMode: 'source', bboxMode: 'parse' });
+    store.getState().setPreviewMode('compare');
+    store.getState().setBboxMode('off');
+    store.getState().enterPreviewView('translate');
+    expect(store.getState()).toMatchObject({ previewMode: 'target', bboxMode: 'layout' });
+    store.getState().setPreviewMode('source');
+    store.getState().enterPreviewView('layout');
+    expect(store.getState()).toMatchObject({ previewMode: 'compare', bboxMode: 'off' });
+    store.getState().enterPreviewView('translate');
+    expect(store.getState()).toMatchObject({ previewMode: 'source', bboxMode: 'layout' });
+  });
+
+  it('zoom clamps invalid/extreme values, fit resets, compare links by default', () => {
+    const store = createUiStore();
+    expect(store.getState().compareLinked).toBe(true);
+    store.getState().setPreviewZoom(100);
+    expect(store.getState().previewZoom).toBe(4);
+    store.getState().setPreviewZoom(-1);
+    expect(store.getState().previewZoom).toBe(0.1);
+    store.getState().setPreviewZoom(Number.NaN);
+    expect(store.getState().previewZoom).toBe(0.1);
+    store.getState().setPreviewZoom(null);
+    expect(store.getState().previewZoom).toBeNull();
+    store.getState().setCompareLinked(false);
+    expect(store.getState().compareLinked).toBe(false);
+  });
+});

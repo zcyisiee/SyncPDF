@@ -96,18 +96,35 @@ describe('PreviewToolbar', () => {
     expect(screen.getByText('/ 21 页')).toBeInTheDocument();
   });
 
-  it('无产物 PDF 时翻页控件禁用；zoom 只读显示', () => {
+  it('无产物 PDF 时翻页与缩放控件禁用', () => {
     renderToolbar({ paged: false, scale: 1.25 });
     expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
     expect(screen.getByRole('spinbutton', { name: '页码' })).toBeDisabled();
-    expect(screen.getByText('适宽 · 1.25×')).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: '缩放百分比' })).toHaveValue(125);
+    expect(screen.getByRole('button', { name: '放大' })).toBeDisabled();
   });
 
   it('工具条带 data-od-id（§7.9）', () => {
     renderToolbar();
     const toolbar = screen.getByRole('toolbar', { name: '预览工具条' });
     expect(toolbar).toHaveAttribute('data-od-id', 'preview-toolbar');
-    expect(toolbar).toHaveAttribute('data-od-id', 'preview-toolbar');
     expect(window.localStorage.getItem(STORAGE_KEYS.bboxMode)).toBeNull();
+  });
+});
+
+describe('reader controls', () => {
+  it('zoom buttons, numeric zoom, fit width and link toggle update session state', () => {
+    renderToolbar();
+    fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    expect(uiStore.getState().previewZoom).toBe(1.2);
+    const input = screen.getByRole('spinbutton', { name: '缩放百分比' });
+    fireEvent.change(input, { target: { value: '175' } });
+    fireEvent.blur(input);
+    expect(uiStore.getState().previewZoom).toBe(1.75);
+    fireEvent.click(screen.getByRole('button', { name: '适宽' }));
+    expect(uiStore.getState().previewZoom).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '对照' }));
+    fireEvent.click(screen.getByRole('button', { name: '解除联动' }));
+    expect(uiStore.getState().compareLinked).toBe(false);
   });
 });

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { DocumentDetail } from '../../api/types';
 import { cn } from '../../lib/cn';
 import { countLabel, progressLabel } from '../../lib/humanize';
@@ -12,7 +13,9 @@ export function ViewRail({
   view,
   doc,
   live = false,
+  jobControls,
 }: {
+  jobControls?: ReactNode;
   did: string;
   view: WorkbenchView;
   doc?: DocumentDetail;
@@ -67,6 +70,7 @@ export function ViewRail({
           );
         })}
       </ul>
+      {jobControls ? <div className="mt-s2 border-t border-hair pt-s3" data-od-id="job-panel-rail">{jobControls}</div> : null}
     </nav>
   );
 }

@@ -1,6 +1,6 @@
 /**
- * 预览工具条（§3 内部栅格：44px）：源/译/对照三模式 + 页码导航 + 适宽缩放读数 + bbox 图层三态。
- * 缩放控件与连续滚动不在本任务（适宽固定），所以 zoom 只读。
+ * 预览工具条：源/译/对照、页码导航、比例缩放与适宽。
+ * 核心控件可换行，低频图层和下载操作收进更多。
  */
 import { useState } from 'react';
 import type { ReactNode } from 'react';
@@ -84,7 +84,7 @@ const BBOX_MODE_OPTIONS = [
 export interface PreviewToolbarProps {
   page: number;
   pageCount: number;
-  /** 当前适宽 scale（只读显示）。 */
+  /** 当前活动页的实际 scale。 */
   scale: number;
   /** 源 PDF 不可用（workdir 没有 source.pdf）→ 原文模式禁用。 */
   sourceAvailable: boolean;
@@ -111,6 +111,25 @@ export function PreviewToolbar({
   const previewMode = useUiStore((state) => state.previewMode);
   const setPreviewMode = useUiStore((state) => state.setPreviewMode);
   const bboxMode = useUiStore((state) => state.bboxMode);
+  const zoom = useUiStore((state) => state.previewZoom);
+  const setZoom = useUiStore((state) => state.setPreviewZoom);
+  const linked = useUiStore((state) => state.compareLinked);
+  const setLinked = useUiStore((state) => state.setCompareLinked);
+  const [zoomDraft, setZoomDraft] = useState(String(Math.round(scale * 100)));
+  const [editingZoom, setEditingZoom] = useState(false);
+  const [lastScale, setLastScale] = useState(scale);
+  if (scale !== lastScale && !editingZoom) {
+    setLastScale(scale);
+    setZoomDraft(String(Math.round(scale * 100)));
+  }
+  const commitZoom = () => {
+    const value = Number(zoomDraft);
+    if (Number.isFinite(value) && value > 0) {
+      setZoom(value / 100);
+      setZoomDraft(String(Math.min(400, Math.max(10, value))));
+    } else setZoomDraft(String(Math.round(scale * 100)));
+    setEditingZoom(false);
+  };
   // 受控输入的外部同步走「渲染期调整 state」（React 官方推荐），不在 effect 里同步 setState
   const [draft, setDraft] = useState(String(page));
   const [lastPage, setLastPage] = useState(page);
@@ -142,7 +161,7 @@ export function PreviewToolbar({
       aria-label="预览工具条"
       data-od-id="preview-toolbar"
       className={cn(
-        'flex h-11 flex-none items-center gap-s4 border-b border-hair bg-ivory px-s5',
+        'flex min-h-11 flex-wrap flex-none items-center py-s2 gap-s4 border-b border-hair bg-ivory px-s5',
         className,
       )}
     >
@@ -194,16 +213,29 @@ export function PreviewToolbar({
           </span>
         </label>
       </div>
-      <span className="ml-auto font-mono text-micro text-ink-4" data-od-id="preview-zoom">
-        适宽 · {scale.toFixed(2)}×
-      </span>
-      <SegmentedGroup
-        label="bbox 图层"
-        options={BBOX_MODE_OPTIONS}
-        value={bboxMode}
-        onChange={onBboxModeChange}
-      />
-      {download}
+      <div className="flex flex-wrap items-center gap-s2" data-od-id="preview-zoom">
+        <Button size="sm" aria-label="缩小" disabled={!paged} onClick={() => setZoom(scale / 1.2)}>−</Button>
+        <label className="flex items-center text-tiny">
+          <input aria-label="缩放百分比" type="number" min={10} max={400}
+            value={zoomDraft} disabled={!paged}
+            onFocus={() => setEditingZoom(true)}
+            onChange={(event) => setZoomDraft(event.target.value)}
+            className="h-6 w-14 rounded border border-hair bg-ivory px-1 text-center"
+            onBlur={commitZoom}
+            onKeyDown={(event) => { if (event.key === 'Enter') { commitZoom(); event.currentTarget.blur(); } }} />%
+        </label>
+        <Button size="sm" aria-label="放大" disabled={!paged} onClick={() => setZoom(scale * 1.2)}>+</Button>
+        <Button size="sm" aria-pressed={zoom === null} disabled={!paged} onClick={() => setZoom(null)}>适宽</Button>
+      </div>
+      {previewMode === 'compare' ? <Button size="sm" aria-pressed={linked}
+        onClick={() => setLinked(!linked)}>{linked ? '解除联动' : '联动阅读'}</Button> : null}
+      <details className="relative text-tiny">
+        <summary className="cursor-pointer rounded border border-hair px-s3 py-s2">更多</summary>
+        <div className="absolute right-0 z-30 mt-s2 flex w-max max-w-[calc(100vw-2rem)] flex-col gap-s3 whitespace-nowrap rounded border border-hair bg-ivory p-s3 shadow-lg">
+          <SegmentedGroup label="bbox 图层" options={BBOX_MODE_OPTIONS} value={bboxMode} onChange={onBboxModeChange} />
+          {download}
+        </div>
+      </details>
     </div>
   );
 }

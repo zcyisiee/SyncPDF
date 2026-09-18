@@ -459,6 +459,7 @@ class JobCreateRequest(BaseModel):
             "action=run/check 必填，action=compile 不需要（不调翻译/审查）"
         ),
     )
+    reviewer_profile: str | None = Field(default=None, pattern=JOB_PROFILE_PATTERN)
     scope: Literal["full", "pages"] | None = Field(
         default=None,
         description=(

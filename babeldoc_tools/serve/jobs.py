@@ -215,6 +215,7 @@ class JobRecord(BaseModel):
     #: profile **id**（命令字符串永不进记录、永不回客户端）；``compile`` 不需要
     #: provider → ``None``（它只跑 apply+build，不调翻译/审查）。
     profile: str | None = None
+    reviewer_profile: str | None = None
     #: ``--pages`` 原样透传（只对 ``run`` 有效）。
     pages: str | None = None
     dual: bool = False
@@ -408,6 +409,7 @@ class JobRegistry:
         paragraph_id: str | None = None,
         candidate_id: str | None = None,
         use_glossary: bool = False,
+        reviewer_profile: str | None = None,
     ) -> JobRecord:
         """新建 job 并入队（``queued``）；准入判断由调用方在 ``lock`` 内做。
 
@@ -421,6 +423,7 @@ class JobRegistry:
             created_at=utc_now(),
             from_stage=from_stage,
             profile=profile,
+            reviewer_profile=reviewer_profile,
             pages=pages,
             dual=dual,
             use_glossary=bool(use_glossary) and action == "run",

@@ -155,6 +155,8 @@ def build_job_argv(
         argv += ["--from", from_stage]
     if profile.translator:
         argv += ["--translator", profile.translator]
+    if profile.model_profile and not profile.reviewer:
+        argv += ["--skip-ai-review"]
     if profile.reviewer:
         argv += ["--reviewer", profile.reviewer]
     if pages:
@@ -543,6 +545,7 @@ class JobRunner:
         paragraph_id: str | None = None,
         candidate_id: str | None = None,
         use_glossary: bool = False,
+        reviewer_profile: str | None = None,
     ) -> JobRecord:
         """建 job（``queued``）→ 尽量立刻启动；同文档已有活动 job → 409 语义。
 
@@ -564,6 +567,11 @@ class JobRunner:
                 profile=profile_id,
                 available=list_profile_ids(self.store.store_base),
             )
+        if reviewer_profile is not None:
+            selected = resolve_profile(self.store.store_base, profile_id or "")
+            reviewer = resolve_profile(self.store.store_base, reviewer_profile)
+            if not selected or not selected.model_profile or not reviewer or not reviewer.model_profile:
+                raise ToolError("forbidden_field", "reviewer_profile requires model configurations")
         async with self.registry.lock:
             active = self.registry.active_for_did(did)
             if active is not None:
@@ -579,6 +587,7 @@ class JobRunner:
                 action=action,
                 from_stage=from_stage,
                 profile=profile_id,
+                reviewer_profile=reviewer_profile,
                 pages=pages,
                 dual=dual,
                 requested_scope=requested_scope,
@@ -714,6 +723,11 @@ class JobRunner:
                     error_message=f"profile 已不存在：{record.profile}",
                 )
                 return
+            if record.reviewer_profile:
+                reviewer = resolve_profile(self.store.store_base, record.reviewer_profile)
+                if reviewer is None or not reviewer.model_profile:
+                    raise ToolError("unknown_model", "Reviewer model configuration no longer exists")
+                profile.reviewer = reviewer.translator
             argv = build_job_argv(
                 workdir=workdir,
                 action=record.action,

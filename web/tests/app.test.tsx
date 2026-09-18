@@ -20,7 +20,7 @@ describe('App 路由（hash）', () => {
     expect(await screen.findByRole('heading', { name: '文件库' })).toBeInTheDocument();
   });
 
-  it('#/glossary 渲染真词表屏（W13），#/settings 仍是占位屏', async () => {
+  it('#/glossary 渲染真词表屏（W13），#/settings 渲染翻译配置屏', async () => {
     window.location.hash = '#/glossary';
     mockApiFetch({ '/api/v1/glossary': () => jsonResponse({ entries: [], count: 0 }) });
     const { unmount } = renderWithQuery(<App />);
@@ -31,7 +31,7 @@ describe('App 路由（hash）', () => {
     window.location.hash = '#/settings';
     renderWithQuery(<App />);
     expect(await screen.findByRole('heading', { name: '设置' })).toBeInTheDocument();
-    expect(screen.getAllByText('后续版本提供')).toHaveLength(1);
+    expect(screen.getByText('翻译配置')).toBeInTheDocument();
   });
 
   it('未知 hash 给出明确出口', async () => {

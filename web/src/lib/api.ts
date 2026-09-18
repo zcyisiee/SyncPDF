@@ -77,7 +77,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
  * `DELETE` 无体（`DELETE /glossary` 清空词表）：响应仍是 JSON 资源体
  * （`{entries, count}`），所以走的还是同一套信封解析。
  */
-export async function apiDelete<T>(path: string): Promise<T> {
+export async function apiDelete<T = void>(path: string): Promise<T> {
   return request<T>(path, { method: 'DELETE', headers: { accept: 'application/json' } });
 }
 
@@ -104,6 +104,7 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
       0,
     );
   }
+  if (response.ok && response.status === 204 && init.method === 'DELETE') return undefined as T;
   const text = await response.text();
   let body: unknown = null;
   if (text !== '') {
@@ -142,7 +143,7 @@ const ERROR_TITLES: Record<string, string> = {
   document_busy: '这个文档已有任务在跑',
   revision_conflict: '草稿已被其它会话改动',
   draft_invalid: '草稿字段不合法',
-  unknown_profile: 'profile 不存在',
+  unknown_profile: '翻译配置不存在',
   script_path_forbidden: '脚本不在白名单目录内',
   forbidden_field: '服务端不接受这类输入',
 };

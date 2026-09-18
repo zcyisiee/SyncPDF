@@ -93,7 +93,7 @@ describe('PreviewArea 产物与空态', () => {
   it('有产物 PDF → 画布容器带 data-od-id（jsdom 里停在加载态）', async () => {
     mockPreview();
     renderWithQuery(<PreviewArea did={DID} view="progress" />);
-    expect(await screen.findByText('正在加载 PDF…')).toBeInTheDocument();
+    expect((await screen.findAllByText('正在加载 PDF…')).length).toBeGreaterThan(1);
     expect(document.querySelector('[data-od-id="preview-canvas"]')).not.toBeNull();
     expect(document.querySelector('[data-od-id="preview-loading"]')).not.toBeNull();
     expect(document.querySelector('[data-od-id="pdf-canvas"]')).toBeNull();
@@ -120,7 +120,7 @@ describe('PreviewArea bbox 降级与模式', () => {
     renderWithQuery(<PreviewArea did={DID} view="progress" />);
     expect(await screen.findByText(/该页无解析数据/)).toBeInTheDocument();
     // 产物到达后画布容器仍在（预览不受 bbox 缺失影响），但没有 bbox 层
-    expect(await screen.findByText('正在加载 PDF…')).toBeInTheDocument();
+    expect((await screen.findAllByText('正在加载 PDF…')).length).toBeGreaterThan(1);
     expect(document.querySelector('[data-od-id="preview-canvas"]')).not.toBeNull();
     expect(document.querySelector('[data-od-id="bbox-layer"]')).toBeNull();
   });
@@ -130,7 +130,7 @@ describe('PreviewArea bbox 降级与模式', () => {
     uiStore.setState({ bboxMode: 'off' });
     const fetchMock = mockPreview();
     renderWithQuery(<PreviewArea did={DID} view="progress" />);
-    await screen.findByText('正在加载 PDF…');
+    await screen.findAllByText('正在加载 PDF…');
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/geometry'))).toBe(false);
     expect(document.querySelector('[data-od-id="preview-bbox-unavailable"]')).toBeNull();
   });
@@ -149,7 +149,7 @@ describe('PreviewArea bbox 降级与模式', () => {
     mockPreview();
     renderWithQuery(<PreviewArea did={DID} view="progress" />);
     expect(await screen.findByText(/对照模式的左侧不可用/)).toBeInTheDocument();
-    expect(await screen.findByText('正在加载 PDF…')).toBeInTheDocument();
+    expect((await screen.findAllByText('正在加载 PDF…')).length).toBeGreaterThan(1);
     expect(document.querySelector('[data-od-id="preview-canvas"]')).not.toBeNull();
     expect(document.querySelector('[data-od-id="preview-canvas-source"]')).toBeNull();
   });
@@ -163,7 +163,7 @@ describe('PreviewArea bbox 降级与模式', () => {
         <InspectorPanel did={DID} view="translate" feed={makeEventFeed()} />
       </>,
     );
-    await screen.findByText('正在加载 PDF…');
+    await screen.findAllByText('正在加载 PDF…');
     expect(screen.getByText(/点击预览里的段落框查看该段/)).toBeInTheDocument();
 
     act(() => uiStore.getState().setSelectedParagraph('P01-001'));
@@ -197,7 +197,7 @@ describe('PreviewArea bbox 降级与模式', () => {
     });
     renderWithQuery(<PreviewArea did={DID} view="translate" />);
 
-    await screen.findByText('正在加载 PDF…');
+    await screen.findAllByText('正在加载 PDF…');
     const link = (await waitFor(() => {
       const node = document.querySelector('[data-od-id="download-button"]');
       expect(node?.getAttribute('data-enabled')).toBe('true');
@@ -219,7 +219,7 @@ describe('PreviewArea bbox 降级与模式', () => {
   it('没有可下载产物：下载按钮禁用；无产物时状态条不渲染', async () => {
     mockPreview();
     renderWithQuery(<PreviewArea did={DID} view="translate" />);
-    await screen.findByText('正在加载 PDF…');
+    await screen.findAllByText('正在加载 PDF…');
     expect(document.querySelector('[data-od-id="download-button"]')).toHaveAttribute(
       'data-enabled',
       'false',

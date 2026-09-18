@@ -74,6 +74,7 @@ export function CandidatePanel({
       : (profiles[0]?.id ?? '');
 
   const items = candidatesQuery.data?.items ?? [];
+  const queryError = candidatesQuery.isError || profilesQuery.isError;
   const open = items.filter((item) => item.status === 'pending');
   const decided = items.filter((item) => item.status !== 'pending');
   const generating = open.some((item) => item.candidate_target === null);
@@ -93,6 +94,7 @@ export function CandidatePanel({
         </span>
       </div>
 
+      {queryError ? <p className="mt-2 text-micro text-err">翻译配置或候选读取失败，请刷新后重试。</p> : null}
       <div className="mt-2 flex flex-wrap items-end gap-s2">
         <label className="flex min-w-0 flex-col gap-1">
           <span className="text-tiny text-ink-4">profile（命令由服务端解析）</span>
@@ -130,7 +132,7 @@ export function CandidatePanel({
         </Tooltip>
         {profilesQuery.isSuccess && profiles.length === 0 ? (
           <span className="text-micro text-ink-4" data-od-id="retranslate-no-profile">
-            没有可用 profile：先配一条带 translator 的 profile。
+            没有可用翻译配置：请先在翻译配置中创建模型，或展开高级脚本 profile。 <a className="underline" href="#/settings">管理翻译配置</a>
           </span>
         ) : null}
       </div>

@@ -74,6 +74,7 @@ function routes(extra: Record<string, () => Response> = {}) {
   return {
     '/api/v1/documents/up-sample-20260917-120000/artifacts': () => jsonResponse(ARTIFACTS),
     '/api/v1/profiles': () => jsonResponse(PROFILES),
+    '/api/v1/models': () => jsonResponse([]),
     // W13：卡上的词表开关要读全局词表条数（空表 → 开关禁用 + 提示）
     '/api/v1/glossary': () => jsonResponse(GLOSSARY),
     ...extra,
@@ -105,7 +106,7 @@ describe('StartJobCard（开始翻译配置卡）', () => {
 
     const submit = await screen.findByRole('button', { name: '开始翻译' });
     expect(submit).toBeEnabled();
-    const profile = screen.getByLabelText('profile') as HTMLSelectElement;
+    const profile = screen.getByLabelText('翻译配置') as HTMLSelectElement;
     expect(profile.value).toBe('echo-t');
     expect(screen.getByLabelText('页码范围（留空 = 全部）')).toHaveAttribute(
       'placeholder',
@@ -177,7 +178,7 @@ describe('StartJobCard（开始翻译配置卡）', () => {
   it('没有 profile 时给出可操作提示并禁用提交', async () => {
     mockApiFetch(routes({ '/api/v1/profiles': () => jsonResponse([]) }));
     renderWithQuery(<StartJobCard did="up-sample-20260917-120000" document={makeDocument()} />);
-    expect(await screen.findByText(/没有可用 profile：/)).toBeInTheDocument();
+    expect(await screen.findByText(/没有可用翻译配置：/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '开始翻译' })).toBeDisabled();
   });
 

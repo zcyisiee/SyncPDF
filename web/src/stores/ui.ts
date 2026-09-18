@@ -8,7 +8,7 @@ import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 
 import type { BboxMode } from '../lib/preview';
-import type { ScreenId } from '../lib/routing';
+import type { WorkbenchView, ScreenId } from '../lib/routing';
 
 export type GutterId = 'viewrail' | 'inspector' | 'timeline';
 export type PreviewMode = 'source' | 'target' | 'compare';
@@ -84,6 +84,13 @@ export interface UiState {
   timelineHeight: number;
   inspectorCollapsed: boolean;
   previewMode: PreviewMode;
+  previewView: WorkbenchView | null;
+  previewChoices: Partial<Record<WorkbenchView, { mode: PreviewMode; bbox: BboxMode }>>;
+  previewZoom: number | null;
+  compareLinked: boolean;
+  enterPreviewView: (view: WorkbenchView) => void;
+  setPreviewZoom: (zoom: number | null) => void;
+  setCompareLinked: (linked: boolean) => void;
   /** 预览页码（1 基；**不**持久化，`resetPreviewForDocument` 在 did 变化时重置为 1）。 */
   previewPage: number;
   /** 预览状态当前绑定的 did（`resetPreviewForDocument` 靠它判断是否换文档）。 */
@@ -183,6 +190,23 @@ export function createUiStore(): StoreApi<UiState> {
     timelineHeight: readStoredNumber(LAYOUT_SPECS.timeline),
     inspectorCollapsed: readStoredFlag(STORAGE_KEYS.inspectorCollapsed, false),
     previewMode: 'target',
+    previewView: null,
+    previewChoices: {},
+    previewZoom: null,
+    compareLinked: true,
+    enterPreviewView: (view) => {
+      const state = get();
+      if (state.previewView === view) return;
+      const choices = { ...state.previewChoices };
+      if (state.previewView !== null) choices[state.previewView] = { mode: state.previewMode, bbox: state.bboxMode };
+      const choice = choices[view] ?? {
+        mode: view === 'layout' ? 'source' : view === 'translate' ? 'target' : state.previewMode,
+        bbox: view === 'translate' ? 'layout' : view === 'layout' ? 'parse' : state.bboxMode,
+      };
+      set({ previewView: view, previewChoices: choices, previewMode: choice.mode, bboxMode: choice.bbox });
+    },
+    setPreviewZoom: (zoom) => set({ previewZoom: zoom === null ? null : Number.isFinite(zoom) ? clamp(zoom, 0.1, 4) : get().previewZoom }),
+    setCompareLinked: (compareLinked) => set({ compareLinked }),
     previewPage: 1,
     previewDid: null,
     bboxMode: readStoredBboxMode() ?? 'parse',

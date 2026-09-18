@@ -17,7 +17,7 @@ export type EventsPage = components['schemas']['EventsPage'];
 export type ArtifactItem = components['schemas']['ArtifactItem'];
 export type DocumentUploaded = components['schemas']['DocumentUploaded'];
 export type JobRecord = components['schemas']['JobRecord'];
-export type JobCreateRequest = components['schemas']['JobCreateRequest'];
+export type JobCreateRequest = components['schemas']['JobCreateRequest'] & { reviewer_profile?: string | null };
 export type JobAccepted = components['schemas']['JobAccepted'];
 export type ProfileListItem = components['schemas']['ProfileListItem'];
 export type ProfileUpdateRequest = components['schemas']['ProfileUpdateRequest'];
@@ -45,3 +45,13 @@ export interface ErrorEnvelope {
 
 /** `stage_summary`：7 个固定阶段 → 状态字符串（见 babeldoc_tools/serve/schemas.py::STAGES）。 */
 export type StageSummary = DocumentListItem['stage_summary'];
+
+/** /models metadata deliberately never contains the saved credential. */
+export interface ModelConfiguration {
+  id: string;
+  label: string;
+  base_url: string;
+  model: string;
+  has_api_key: boolean;
+}
+export type ModelUpdate = Omit<ModelConfiguration, 'has_api_key'> & { api_key?: string };

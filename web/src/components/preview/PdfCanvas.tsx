@@ -57,6 +57,35 @@ function useLatest<T>(value: T): MutableRefObject<T> {
   return ref;
 }
 
+// Nearby page canvases share one loading task/worker per artifact. The last
+// consumer releases it, so navigating away also cancels pending Range requests.
+const documents = new Map<string, { users: number; promise: Promise<PDFDocumentProxy>; release: () => void }>();
+export function acquireDocument(url: string) {
+  let entry = documents.get(url);
+  if (!entry) {
+    let task: PDFDocumentLoadingTask | null = null;
+    let released = false;
+    const promise = import('../../lib/pdf').then(({ loadPdfDocument }) => {
+      if (released) throw new Error('PDF reader closed');
+      task = loadPdfDocument(url);
+      return task.promise;
+    });
+    entry = { users: 0, promise, release: () => { released = true; if (task) void task.destroy(); } };
+    documents.set(url, entry);
+    const pending = entry;
+    void promise.catch(() => { if (documents.get(url) === pending) documents.delete(url); });
+  }
+  entry.users += 1;
+  const acquired = entry;
+  return { promise: entry.promise, release: () => {
+    acquired.users -= 1;
+    if (acquired.users === 0) {
+      if (documents.get(url) === acquired) documents.delete(url);
+      acquired.release();
+    }
+  } };
+}
+
 interface PdfCanvasPageProps extends PdfCanvasProps {
   onRetry: () => void;
 }
@@ -78,25 +107,15 @@ function PdfCanvasPage({
   // 1) 加载文档：卸载/切换时销毁 loading task（中断进行中的 Range 请求）。
   useEffect(() => {
     let cancelled = false;
-    let task: PDFDocumentLoadingTask | null = null;
-    void (async () => {
-      try {
-        const { loadPdfDocument } = await import('../../lib/pdf');
-        if (cancelled) return;
-        task = loadPdfDocument(url);
-        const loaded = await task.promise;
-        if (cancelled) {
-          void loaded.destroy();
-          return;
-        }
-        setDoc(loaded);
-      } catch (cause) {
-        if (!cancelled) setError(cause);
-      }
-    })();
+    const handle = acquireDocument(url);
+    void handle.promise.then((loaded) => {
+      if (!cancelled) setDoc(loaded);
+    }).catch((cause: unknown) => {
+      if (!cancelled) setError(cause);
+    });
     return () => {
       cancelled = true;
-      if (task !== null) void task.destroy();
+      handle.release();
     };
   }, [url]);
 
@@ -152,6 +171,9 @@ function PdfCanvasPage({
     };
   }, [page, scale]);
 
+  // Release decoded page resources when a virtualized page leaves the window.
+  useEffect(() => () => { page?.cleanup(); }, [page]);
+
   if (error !== null) {
     return (
       <ErrorCard
@@ -169,7 +191,7 @@ function PdfCanvasPage({
     return (
       <div
         data-od-id="preview-loading"
-        className="grid h-[520px] w-[420px] place-items-center border border-hair bg-ivory text-tiny text-ink-4"
+        className="grid h-full w-full place-items-center border border-hair bg-ivory text-tiny text-ink-4"
       >
         正在加载 PDF…
       </div>
@@ -184,7 +206,7 @@ export function PdfCanvas({ url, pageNumber, scale, onPage, className }: PdfCanv
   const [attempt, setAttempt] = useState(0);
   return (
     <PdfCanvasPage
-      key={`${url}#${attempt}`}
+      key={`${url}#${pageNumber}#${attempt}`}
       url={url}
       pageNumber={pageNumber}
       scale={scale}

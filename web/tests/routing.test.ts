@@ -19,7 +19,7 @@ describe('parseHash', () => {
     expect(parseHash('#/library')).toEqual({ kind: 'library' });
   });
 
-  it('词表 / 设置占位屏', () => {
+  it('词表 / 设置路由', () => {
     expect(parseHash('#/glossary')).toEqual({ kind: 'glossary' });
     expect(parseHash('#/settings')).toEqual({ kind: 'settings' });
   });

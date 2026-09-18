@@ -170,6 +170,9 @@ ALLOWED_WRITE_ROUTES = frozenset(
         ("post", f"{API_PREFIX}/documents/{{did}}/paragraphs/{{pid}}/retranslate"),
         ("post", f"{API_PREFIX}/documents/{{did}}/paragraphs/{{pid}}/candidates/{{cid}}/adopt"),
         ("post", f"{API_PREFIX}/documents/{{did}}/paragraphs/{{pid}}/candidates/{{cid}}/reject"),
+        ("put", "/api/v1/models"),
+        ("delete", "/api/v1/models/{model_id}"),
+        ("post", "/api/v1/models/{model_id}/test"),
         # W13 词表（§3.2）：整表替换（PUT）与清空（DELETE）；GET 仍是只读。
         ("put", f"{API_PREFIX}/glossary"),
         ("delete", f"{API_PREFIX}/glossary"),

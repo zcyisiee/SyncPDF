@@ -598,3 +598,19 @@ def test_cli_run_help_exposes_from_choices():
     # U3 删除了 agy 专属旗标
     for flag in ("--model", "--effort"):
         assert flag not in out.stdout
+
+
+def test_optional_ai_review_skipped_keeps_local_checks(tmp_path, stub_stages):
+    calls, behavior = stub_stages["calls"], stub_stages["behavior"]
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-1.4 stub")
+    result = run_tool.run_pipeline(tmp_path, str(pdf), skip_ai_review=True)
+    assert result["ok"]
+    assert "review" not in calls
+    assert "check" in calls and "report" in calls
+    state = json.loads((tmp_path / "agent/run_state.json").read_text())
+    assert state["quality"]["reviewer"]["status"] == "skipped"
+    behavior["check_verdict"] = "needs_fix"
+    result = run_tool.run_pipeline(tmp_path, str(pdf), skip_ai_review=True)
+    assert not result["ok"]
+    assert result["error"]["code"] == "check_needs_fix"

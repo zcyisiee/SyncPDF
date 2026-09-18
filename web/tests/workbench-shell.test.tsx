@@ -406,8 +406,8 @@ describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
     mockWorkbench({ [`/api/v1/documents/${DID}/jobs`]: () => jsonResponse([]) });
     renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
 
-    // 面板在预览区上方（进度视图顶部）
-    expect(document.querySelector('[data-od-id="job-panel"]')).not.toBeNull();
+    // 开始配置位于左侧视图导航，避免占用 PDF 上方的预览空间。
+    expect(document.querySelector('[data-od-id="job-panel-rail"]')).not.toBeNull();
     const submit = await screen.findByRole('button', { name: '开始翻译' });
     expect(submit).toBeEnabled();
     // 已有 parse 产物（stage_state parse ok）→ 默认 translate，不提示 MinerU

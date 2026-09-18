@@ -91,6 +91,7 @@ class Profile(BaseModel):
     """
 
     id: str
+    model_profile: bool = False
     translator: str | None = None
     reviewer: str | None = None
     label: str | None = None
@@ -133,7 +134,9 @@ def list_profile_ids(store_base: Path | str) -> list[str]:
 
     只列 **id**：``unknown_profile`` 的错误 detail 用它给前端提示，不能把命令串列出去。
     """
-    ids = set(load_profiles(store_base)) | _env_profile_ids()
+    from babeldoc_tools.serve.models import load_models
+
+    ids = set(load_profiles(store_base)) | _env_profile_ids() | set(load_models(store_base))
     return sorted(ids)
 
 
@@ -143,6 +146,15 @@ def resolve_profile(store_base: Path | str, profile_id: str) -> Profile | None:
     "已知" = 文件里有这个 id，或该 id 有 env 覆盖。条目存在但两个命令都为空时仍然算
     已知（是否真的能翻译由 ``bdt run`` 如实报错，这里不替它假装有命令）。
     """
+    from babeldoc_tools.serve.models import load_models
+    from babeldoc_tools.serve.models import model_command
+
+    model = load_models(store_base).get(profile_id)
+    if model is not None:
+        if profile_id in load_profiles(store_base) or profile_id in _env_profile_ids():
+            raise ToolError("profile_collision", "Model and script profile IDs conflict")
+        return Profile(id=profile_id, label=model["label"], model_profile=True,
+                       translator=model_command(store_base, profile_id))
     known = load_profiles(store_base).get(profile_id)
     translator = profile_env_command(profile_id, "translator") or (
         known.translator if known else None
@@ -237,6 +249,16 @@ def save_profile(
     - **只动目标 id 这一条**：文件里其它条目（含本模块不认识的自定义键）原样保留；
     - 写盘是**同目录 tmp + ``os.replace``**：读方（另一个 HTTP 请求/子进程）永远看到完整 JSON。
     """
+    from babeldoc_tools.serve.models import _LOCK
+    from babeldoc_tools.serve.models import load_models
+
+    with _LOCK:
+        if profile_id in load_models(store_base):
+            raise ToolError("profile_collision", "ID already belongs to a model configuration")
+        _save_script_profile(store_base, profile_id, updates)
+
+
+def _save_script_profile(store_base, profile_id, updates):
     unknown = set(updates) - set(PROFILE_FIELDS)
     if unknown:
         raise ValueError(f"save_profile 不接受这些字段：{sorted(unknown)}")

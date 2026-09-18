@@ -17,6 +17,7 @@
  */
 import type { BboxItem, Box, CoordSystem, CropBox } from '../../lib/preview';
 import { coordSystemOfMode } from '../../lib/preview';
+import { categoryColor, categoryLabel, categoryVisible, DEFAULT_VISIBILITY, type BboxVisibility } from '../../lib/bbox';
 import { cn } from '../../lib/cn';
 
 /** pdf.js `PageViewport` 的结构子集（只用到换算需要的部分，便于单测注入替身）。 */
@@ -142,6 +143,9 @@ export interface BboxLayerProps {
   selectedId?: string | null;
   onSelect?: (id: string) => void;
   className?: string;
+  visibility?: BboxVisibility;
+  strokeWidth?: number;
+  fillOpacity?: number;
 }
 
 /**
@@ -156,9 +160,12 @@ export function BboxLayer({
   selectedId,
   onSelect,
   className,
+  visibility = DEFAULT_VISIBILITY,
+  strokeWidth = 1,
+  fillOpacity = 0.08,
 }: BboxLayerProps) {
   const coordSystem = coordSystemOfMode(mode);
-  const rects = boxes.map((item) => ({
+  const rects = boxes.filter((item) => categoryVisible(visibility, item.label)).map((item) => ({
     item,
     rect: pdfToScreen(item.box, viewport, coordSystem, cropbox),
   }));
@@ -185,18 +192,17 @@ export function BboxLayer({
             role="button"
             tabIndex={0}
             aria-pressed={selected}
-            aria-label={`段落 ${item.id}${item.label === null ? '' : ` · ${item.label}`}`}
+            aria-label={`段落 ${item.id} · ${categoryLabel(item.label)}`}
             x={rect.x}
             y={rect.y}
             width={rect.width}
             height={rect.height}
-            strokeWidth={selected ? 2 : 1}
-            className={cn(
-              'pointer-events-auto cursor-pointer transition-colors',
-              selected
-                ? 'fill-tint-2 stroke-accent'
-                : 'fill-tint stroke-transparent hover:fill-tint-2 hover:stroke-accent',
-            )}
+            stroke={categoryColor(item.label)}
+            fill={categoryColor(item.label)}
+            fillOpacity={fillOpacity}
+            strokeWidth={selected ? strokeWidth + 1 : strokeWidth}
+            strokeDasharray={selected ? '4 2' : undefined}
+            className="pointer-events-auto cursor-pointer transition-colors"
             onClick={() => onSelect?.(item.id)}
             onKeyDown={(event) => {
               if (event.key !== 'Enter' && event.key !== ' ') return;

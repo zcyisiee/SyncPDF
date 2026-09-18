@@ -165,6 +165,8 @@ def jobs_router(
             # profile 是可选的（compile 不调 provider）：给了也不进记录，不报错 ——
             # 前端把当前选中的 profile 一起发过来是正常行为。
             _reject_run_only_fields(payload)
+            if payload.reviewer_profile is not None:
+                raise ToolError("forbidden_field", "compile does not use AI review")
             record = await compiles.request_compile(
                 did,
                 scope=payload.scope or "full",
@@ -188,6 +190,7 @@ def jobs_router(
                 pages=payload.pages if payload.action == "run" else None,
                 dual=payload.dual if payload.action == "run" else False,
                 profile_id=payload.profile or "",
+                reviewer_profile=payload.reviewer_profile,
                 # 词表开关（W13）：客户端只给布尔，注入路径由服务端在 argv 构造时取。
                 use_glossary=payload.use_glossary,
             )

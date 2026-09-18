@@ -572,3 +572,48 @@ DELETE /api/v1/glossary   # 清空（幂等）→ 200 与 GET 同形（空表）
   `translated_count` 要等 `apply` 把 `agent/translated.jsonl` 写出来才变。
   前端必须如实标注（例如「已译段落（apply 后更新）」），**不得**做跳动动画或假进度；
   段落级实时需要把 translator 改成流式/分段调用（超出本阶段范围）。
+
+## 验收修复：OpenAI 兼容模型配置（本机后端）
+
+模型与高级脚本共享 profile ID 命名空间（`[a-z0-9-]{1,64}`）。`GET /profiles`
+继续返回精确的 `{id,label,has_translator,has_reviewer}` 形状，不新增字段、不返回命令；
+模型条目 `has_translator=true, has_reviewer=false`（审校需显式选择，不隐式启用）。
+脚本与模型同 ID 写入返回 `409 profile_collision`，环境变量碰撞也拒绝解析，不覆盖。
+
+- `GET /models`：模型元数据数组，按 ID 排序。
+- `PUT /models`：整条元数据更新，必填 `id,label,base_url,model`；可选 `api_key`。
+  API Key 缺省或 null 保留原值；创建时可省略 key（本地无认证服务）。空 key 拒绝。
+  换 key 需显式给非空值；要清除凭据请删除后重建。仅保存，不发送网络请求。
+- `GET /models/{id}`：单条元数据；不存在 `404 unknown_model`。
+- `DELETE /models/{id}`：删除配置和凭据，204；不存在 404。
+- `POST /models/{id}/test`：**可能产生费用**，显式发送 `Reply only OK.` 短生成请求
+  (`max_tokens=8`)，成功只返回 `{ok:true}`，不回传模型原文。
+
+元数据为 `{id,label,base_url,model,has_api_key}`，任何响应不含 API Key。
+Base URL 应为 API 根（例如 `https://example.com/v1`），后端追加 `/chat/completions`。
+只允许 HTTPS，loopback 本地服务可 HTTP；禁止 userinfo/query/fragment/空白。
+请求不使用环境代理、不自动重试、不跟随重定向，避免认证转发到其它站点。
+错误为脱敏错误信封：`model_invalid` 422、`model_auth` 422、`model_address` 422、
+`model_not_found` 422、`model_request` 422、`model_timeout` 504、`model_response` 502。
+响应体/异常原文均不作为错误消息回显。
+
+凭据保存在 `<store_base>/.bdt-serve/model-credentials/models.json`，目录 0700、
+文件 0600，同目录随机临时文件 + fsync + 原子替换；拒绝符号链接和不安全文件权限。
+该目录被 Git 忽略。这是本机文件权限保护，**不是加密**。
+
+`POST /documents/{did}/jobs` 保留必填 `profile`（翻译配置）。当它选择模型时，
+新增可选 `reviewer_profile`：另一个或相同模型 ID；缺省/null = AI 审校关闭。
+脚本 profile 行为保持不变，不能设置 `reviewer_profile`；compile 不接受该字段。
+关闭 AI 审校只跳过 AI，排版/链接等本地检查与报告照常执行；reviewer 状态为
+`skipped`，不伪装成 pass，`quality.pipeline_ok` 仍不声称通过 AI 审校。
+现有段落候选重译也可选择模型 profile。
+
+唯一命令适配器为 `bdt model-call --store-base <server-store> --model-profile <id>`：
+stdin 提示词、stdout 纯文本（为现有 translator/reviewer 子进程协议而非 JSON 信封），
+错误仅写安全代码/说明到 stderr。argv 仅含本机路径与 ID，不含 key、URL、模型名。
+模型调用最多 60 秒；`bdt run --skip-ai-review` 可显式跳过 AI，脚本默认行为不变。
+
+模型审校是**纯文本审校，不是视觉审校**：内联 document.md、translated.md 和三类
+本地检查 JSON（去除配置/凭据字段），不发送 PDF/图片/无关产物；累计超过 1 MB
+返回 `model_context_too_large`，不静默截断。需改用高级脚本审校或关闭 AI 审校。
+本轮验证只用 mocks；真实模型费用/兼容性需用户另行批准后手动测试。

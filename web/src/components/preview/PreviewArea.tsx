@@ -1,27 +1,15 @@
-/**
- * 预览区（§3 第 3 列）：工具条 + 适宽纸页画布 + bbox 叠加层。
- *
- * 数据来源全部是真产物：`GET /artifacts`（mono 首选 → dual → 无产物占位）、
- * `GET /documents/{did}`（页数）、`GET /geometry?kind=parse|layout&page=N`（bbox）。
- * 渲染的是**产物 PDF**，bbox 来自解析快照——对齐基准是页面渲染像素，所以适宽 scale 与
- * bbox 换算共用同一个 pdf.js viewport（`PdfCanvas` 交回的 scale=1 viewport 上 `clone({scale})`）。
- *
- * 三种模式：译文=单页产物（mono/dual）；原文=单页 source.pdf（无 source.pdf 时按钮禁用，
- * 误选也给出明确出口）；对照=左右双页（左源右译，bbox 层只叠在译侧）。
- */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+/** Continuous PDF reader with per-page viewport-aligned geometry and draft editing. */
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { ApiError, describeApiError } from '../../lib/api';
 import {
   artifactUrl,
-  bboxModeForView,
   clampPage,
   geometryBboxes,
   pickPreviewArtifacts,
   type BboxMode,
   type Box,
-  type GeometryBboxes,
 } from '../../lib/preview';
 import {
   draftParagraphOf,
@@ -45,135 +33,27 @@ import {
   usePatchDraftMutation,
 } from '../../lib/queries';
 import type { WorkbenchView } from '../../lib/routing';
-import { readStoredBboxMode, useUiStore } from '../../stores/ui';
+import { categoryVisible } from '../../lib/bbox';
+import { readVisibility, useBboxStore } from '../../stores/bbox';
+import { BboxLegend } from './BboxLegend';
+import { useUiStore } from '../../stores/ui';
 import { Button } from '../ui/Button';
 import { ErrorCard } from '../ui/ErrorCard';
 import { BboxEditor } from '../edit/BboxEditor';
-import { BboxLayer, pdfToScreen, type PdfPointViewport, type ScreenViewport } from './BboxLayer';
+import { pdfToScreen, type PdfPointViewport, type ScreenViewport } from './BboxLayer';
 import { CompileBar } from './CompileBar';
 import { DownloadButton } from './DownloadButton';
-import { PdfCanvas } from './PdfCanvas';
+import { ContinuousPdfPane, type BboxPaneData, type ReaderPosition } from './ContinuousPdfPane';
 import type { PdfPageInfo } from './PdfCanvas';
 import { PreviewToolbar } from './PreviewToolbar';
 
-/** 适宽 scale 的钳制区间（brief：0.5–3）。 */
-const FIT_SCALE_MIN = 0.5;
-const FIT_SCALE_MAX = 3;
-
-interface BboxPaneData {
-  mode: 'parse' | 'layout';
-  data: GeometryBboxes;
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-}
-
-/**
- * 单页容器：自己测容器宽算适宽 scale（对照模式两页各有各的宽），把 scale 报给工具条，
- * 并把渲染 viewport 交给 bbox 层——两者共用同一个 viewport，所以叠加层与 canvas 像素对齐。
- */
-function PreviewPane({
-  url,
-  pageNumber,
-  bbox,
-  overlay,
-  odId,
-  onPageInfo,
-  onScale,
-  emptyState,
-}: {
-  url: string | null;
-  pageNumber: number;
-  bbox: BboxPaneData | null;
-  /**
-   * 叠加在 bbox 层之上的编辑层：**渲染函数**而不是元素——编辑层要用与 canvas 同一个
-   * viewport 做 `pdfToScreen` 换算，而那个 viewport 只在这个 pane 里算出来。
-   */
-  overlay?: (viewport: ScreenViewport & PdfPointViewport) => ReactNode;
-  odId: string;
-  onPageInfo?: (info: PdfPageInfo) => void;
-  onScale?: (scale: number) => void;
-  emptyState: ReactNode;
-}) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [containerWidth, setContainerWidth] = useState<number | null>(null);
-  const [info, setInfo] = useState<PdfPageInfo | null>(null);
-
-  useEffect(() => {
-    const element = containerRef.current;
-    if (element === null) return;
-    const update = () => setContainerWidth(element.clientWidth);
-    update();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(update);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [url]);
-
-  const scale =
-    info !== null && containerWidth !== null && info.viewport.width > 0
-      ? Math.min(
-          Math.max(containerWidth / info.viewport.width, FIT_SCALE_MIN),
-          FIT_SCALE_MAX,
-        )
-      : 1;
-
-  useEffect(() => {
-    onScale?.(scale);
-  }, [onScale, scale]);
-
-  const viewport = info === null ? null : info.viewport.clone({ scale });
-
-  return (
-    <div ref={containerRef} className="min-h-0 min-w-0 flex-1 overflow-auto">
-      {url === null ? (
-        <div className="grid h-full place-items-center p-s6">{emptyState}</div>
-      ) : (
-        <>
-          {info !== null && info.viewport.rotation !== 0 ? (
-            <p
-              data-od-id="preview-rotation-warning"
-              className="mx-auto mt-s4 w-fit rounded border border-hair bg-run-soft px-s3 py-[3px] text-tiny text-run-ink"
-            >
-              该页 rotation={info.viewport.rotation}°：bbox 叠加按 pdf.js viewport 变换处理
-            </p>
-          ) : null}
-          <div
-            data-od-id={odId}
-            className="relative mx-auto my-s5"
-            style={
-              viewport === null
-                ? undefined
-                : { width: `${viewport.width}px`, height: `${viewport.height}px` }
-            }
-          >
-            <PdfCanvas
-              url={url}
-              pageNumber={pageNumber}
-              scale={scale}
-              onPage={(next) => {
-                setInfo(next);
-                onPageInfo?.(next);
-              }}
-            />
-            {viewport !== null && bbox !== null ? (
-              <BboxLayer
-                boxes={bbox.data.boxes}
-                viewport={viewport}
-                mode={bbox.mode}
-                cropbox={bbox.data.cropbox}
-                selectedId={bbox.selectedId}
-                onSelect={bbox.onSelect}
-              />
-            ) : null}
-            {viewport === null ? null : overlay?.(viewport)}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 export function PreviewArea({ did, view }: { did: string; view: WorkbenchView }) {
+  return <DocumentPreview key={did} did={did} view={view} />;
+}
+
+function DocumentPreview({ did, view }: { did: string; view: WorkbenchView }) {
+  const bboxPreferences = useBboxStore();
+  const visibility = useMemo(() => bboxPreferences.documents[did] ?? readVisibility(did), [bboxPreferences.documents, did]);
   const detailQuery = useDocument(did);
   // 文档本身不存在时不发产物请求：避免在「文档不存在」错误卡旁边再冒一个产物清单错误卡
   const artifactsQuery = useArtifacts(detailQuery.isSuccess ? did : null);
@@ -205,9 +85,33 @@ export function PreviewArea({ did, view }: { did: string; view: WorkbenchView })
   const setSelectedParagraph = useUiStore((state) => state.setSelectedParagraph);
 
   const [pdfPageInfo, setPdfPageInfo] = useState<{ url: string; numPages: number } | null>(null);
+  const [sourcePageInfo, setSourcePageInfo] = useState<{ url: string; numPages: number } | null>(null);
+  const [panePositions, setPanePositions] = useState<Record<string, ReaderPosition>>({});
   const [paneScale, setPaneScale] = useState(1);
-  // 用户显式选过 bbox 图层（持久化 ieet.bboxMode）之后，视图默认值不再覆盖它
-  const bboxPickedByUser = useRef(readStoredBboxMode() !== null);
+  const enterPreviewView = useUiStore((state) => state.enterPreviewView);
+  const linked = useUiStore((state) => state.compareLinked);
+  const [position, setPosition] = useState<ReaderPosition | null>(null);
+  const [navigation, setNavigation] = useState<{ page: number; revision: number; pane?: string }>({ page: 1, revision: 0 });
+  const navigate = (next: number) => {
+    setPosition({ pane: position?.pane ?? 'primary', page: next, fraction: 0 });
+    setPreviewPage(next);
+    setNavigation((previous) => ({ page: next, revision: previous.revision + 1,
+      pane: !linked && previewMode === 'compare' ? position?.pane ?? 'primary' : undefined }));
+  };
+  const onPosition = useCallback((next: ReaderPosition, programmatic = false) => {
+    setPanePositions((previous) => {
+      const saved = previous[next.pane];
+      return saved?.page === next.page && saved.fraction === next.fraction ? previous : { ...previous, [next.pane]: next };
+    });
+    setPosition((previous) => {
+      if (programmatic && previous && previous.pane !== next.pane) return previous;
+      if (previous?.pane === next.pane && previous.page === next.page && previous.fraction === next.fraction) return previous;
+      return next;
+    });
+    if (!programmatic) setPreviewPage(next.page);
+  }, [setPreviewPage]);
+
+  useEffect(() => { if (position) setPreviewPage(position.page); }, [position, setPreviewPage]);
 
   const { target, source } = useMemo(
     () => pickPreviewArtifacts(artifacts ?? []),
@@ -220,8 +124,8 @@ export function PreviewArea({ did, view }: { did: string; view: WorkbenchView })
   }, [did, resetPreviewForDocument]);
 
   useEffect(() => {
-    if (!bboxPickedByUser.current) setBboxMode(bboxModeForView(view));
-  }, [view, setBboxMode]);
+    enterPreviewView(view);
+  }, [view, enterPreviewView]);
 
   const targetUrl =
     target === null
@@ -235,9 +139,11 @@ export function PreviewArea({ did, view }: { did: string; view: WorkbenchView })
   const sourceUrl = source === null ? null : artifactUrl(did, source.name);
   const primaryUrl = previewMode === 'source' ? sourceUrl : targetUrl;
 
-  // 页数优先用文档详情（契约字段）；pdf.js 自己报的页数作为兜底，但要属当前主 PDF
+  // PDF 的实际页数优先（源/译页数可能不同）；加载前以文档详情估计。
   const numPages = pdfPageInfo !== null && pdfPageInfo.url === primaryUrl ? pdfPageInfo.numPages : null;
-  const pageCount = detailQuery.data?.pages ?? numPages ?? 1;
+  const primaryPageCount = numPages ?? detailQuery.data?.pages ?? 1;
+  const sourcePageCount = sourcePageInfo?.url === sourceUrl ? sourcePageInfo.numPages : detailQuery.data?.pages ?? 1;
+  const pageCount = previewMode === 'compare' && !linked && position?.pane === 'source' ? sourcePageCount : primaryPageCount;
   const page = clampPage(previewPage, pageCount);
 
   // 原文模式只叠识别框（源侧没有译文概念）；其余模式按 bbox 图层开关取值。
@@ -259,9 +165,11 @@ export function PreviewArea({ did, view }: { did: string; view: WorkbenchView })
     },
     [primaryUrl],
   );
+  const handleSourcePageInfo = useCallback((info: PdfPageInfo) => {
+    if (sourceUrl !== null) setSourcePageInfo({ url: sourceUrl, numPages: info.numPages });
+  }, [sourceUrl]);
   const chooseBboxMode = useCallback(
     (mode: BboxMode) => {
-      bboxPickedByUser.current = true;
       setBboxMode(mode);
     },
     [setBboxMode],
@@ -306,9 +214,9 @@ export function PreviewArea({ did, view }: { did: string; view: WorkbenchView })
   const buildOverlay = useCallback(
     (withLayer: boolean) =>
       (viewport: ScreenViewport & PdfPointViewport): ReactNode => {
-        if (!withLayer || selectedParagraphId === null || layerMode !== 'layout') return null;
+        if (geometryKind === null || !withLayer || selectedParagraphId === null || layerMode !== 'layout') return null;
         const item = bboxData?.boxes.find((row) => row.id === selectedParagraphId);
-        if (item === undefined) return null;
+        if (item === undefined || !categoryVisible(visibility, item.label)) return null;
         const cropbox = bboxData?.cropbox ?? null;
         const coordSystem = bboxData?.coordSystem ?? 'pdf_native';
         const draftBox = layoutBox(draftParagraphOf(draft, selectedParagraphId)?.layout);
@@ -326,6 +234,8 @@ export function PreviewArea({ did, view }: { did: string; view: WorkbenchView })
       },
     [
       bboxData,
+      visibility,
+      geometryKind,
       draft,
       editingLocked,
       editingLockedReason,
@@ -337,12 +247,12 @@ export function PreviewArea({ did, view }: { did: string; view: WorkbenchView })
 
   const toolbar = (
     <PreviewToolbar
-      page={page}
+      page={clampPage(previewPage, pageCount)}
       pageCount={pageCount}
       scale={paneScale}
       sourceAvailable={source !== null}
       paged={primaryUrl !== null}
-      onPageChange={setPreviewPage}
+      onPageChange={navigate}
       onBboxModeChange={chooseBboxMode}
       download={
         <DownloadButton did={did} compile={compile} quality={detailQuery.data?.quality ?? null} />
@@ -402,8 +312,10 @@ export function PreviewArea({ did, view }: { did: string; view: WorkbenchView })
   }
 
   let content: ReactNode;
-  if (primaryUrl === null) {
-    const noProduct = target === null;
+  if (artifactsQuery.isPending) {
+    content = <div className="p-s6 text-tiny text-ink-4">正在读取 PDF 清单…</div>;
+  } else if (primaryUrl === null) {
+    const noProduct = previewMode !== 'source' && target === null;
     content = (
       <div className="grid h-full place-items-center p-s6">
         <div
@@ -435,10 +347,19 @@ export function PreviewArea({ did, view }: { did: string; view: WorkbenchView })
     content = (
       <div className="flex min-h-0 min-w-0 flex-1 gap-s5 px-s5">
         {previewMode === 'compare' ? (
-          <PreviewPane
-            key="source"
+          <ContinuousPdfPane
+            key={`source-${did}-${sourceUrl}`}
             url={sourceUrl}
             pageNumber={page}
+            did={did}
+            pageCount={sourcePageCount}
+            initialPosition={panePositions.source ?? null}
+            onPageInfo={handleSourcePageInfo}
+            navigation={navigation}
+            position={linked ? position : null}
+            paneId="source"
+            onPosition={onPosition}
+            geometryKind={null}
             bbox={null}
             odId="preview-canvas-source"
             emptyState={
@@ -448,10 +369,18 @@ export function PreviewArea({ did, view }: { did: string; view: WorkbenchView })
             }
           />
         ) : null}
-        <PreviewPane
-          key="primary"
+        <ContinuousPdfPane
+          key={`primary-${did}-${primaryUrl}`}
           url={primaryUrl}
           pageNumber={page}
+          did={did}
+          pageCount={primaryPageCount}
+          initialPosition={panePositions.primary ?? null}
+          navigation={navigation}
+          position={linked ? position : null}
+          paneId="primary"
+          onPosition={onPosition}
+          geometryKind={geometryKind}
           bbox={buildBbox(true)}
           overlay={buildOverlay(previewMode !== 'source')}
           odId="preview-canvas"
@@ -468,6 +397,7 @@ export function PreviewArea({ did, view }: { did: string; view: WorkbenchView })
       {toolbar}
       {compileBar}
       {patchNotice}
+      {geometryKind !== null ? <BboxLegend did={did} page={page} boxes={bboxData?.boxes ?? []} /> : null}
       {bboxUnavailable ? (
         <p
           data-od-id="preview-bbox-unavailable"

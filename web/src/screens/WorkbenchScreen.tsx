@@ -117,25 +117,19 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
         data-view={view}
         data-did={did}
       >
-        <ViewRail did={did} view={view} doc={doc} live={timeline.live} />
+        <ViewRail
+          did={did}
+          view={view}
+          doc={doc}
+          live={timeline.live}
+          jobControls={view === 'progress' ? (cardMode === 'start' ? <StartJobCard did={did} document={doc} /> : latestJob === null ? null : <ActiveJobCard did={did} job={latestJob} document={doc} />) : undefined}
+        />
         <Gutter id="viewrail" className="col-start-2 row-start-1" />
         <section
           aria-label="预览区"
           data-od-id="stage"
           className="col-start-3 row-start-1 flex min-h-0 min-w-0 flex-col"
         >
-          {view === 'progress' ? (
-            <div
-              className="flex-none border-b border-hair bg-ivory"
-              data-od-id="job-panel"
-            >
-              {cardMode === 'start' ? (
-                <StartJobCard did={did} document={doc} />
-              ) : latestJob === null ? null : (
-                <ActiveJobCard did={did} job={latestJob} document={doc} />
-              )}
-            </div>
-          ) : null}
           {PREVIEW_VIEWS.includes(view) ? (
             <div className="min-h-0 flex-1">
               <PreviewArea did={did} view={view} />

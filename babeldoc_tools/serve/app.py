@@ -63,6 +63,7 @@ from babeldoc_tools.serve.routers.events import JobUpdateHub
 from babeldoc_tools.serve.routers.events import events_router
 from babeldoc_tools.serve.routers.glossary import glossary_router
 from babeldoc_tools.serve.routers.jobs import jobs_router
+from babeldoc_tools.serve.routers.models import models_router
 from babeldoc_tools.serve.routers.profiles import profiles_router
 from babeldoc_tools.serve.routers.versions import versions_router
 from babeldoc_tools.serve.runner import JobRunner
@@ -77,6 +78,16 @@ __all__ = ["create_app", "error_response"]
 
 #: ``ToolError.code`` → HTTP 状态码；未列出的一律 500。
 _TOOL_ERROR_STATUS = {
+    "model_invalid": 422,
+    "profile_collision": 409,
+    "unknown_model": 404,
+    "model_storage": 500,
+    "model_auth": 422,
+    "model_address": 422,
+    "model_not_found": 422,
+    "model_request": 422,
+    "model_timeout": 504,
+    "model_response": 502,
     "invalid_document_id": 400,
     "path_escape": 400,
     "document_not_found": 404,
@@ -259,6 +270,7 @@ def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI
     app.include_router(candidates_router(candidates))
     app.include_router(versions_router(store))
     app.include_router(profiles_router(store))
+    app.include_router(models_router(store))
     app.include_router(glossary_router(glossary))
     # 前端静态资源最后挂（`/{path:path}` 接住所有未被接口认领的路径）：没跑过
     # `pnpm build` 时静默跳过，只伺服 API —— 不报错、也不改启动信封。
