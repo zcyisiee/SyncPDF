@@ -50,9 +50,8 @@
   --r: 4px;
   --r2: 6px;
 
-  /* 工作台栏宽（§8.2 默认值；实际值由 src/components/shell 写在容器行内 style 上） */
+  /* 工作台栏宽（实际值由 src/components/shell 写在容器行内 style 上） */
   --gw: 6px;
-  --vrw: 220px;
   --inspw: 360px;
   --tlh: 96px;
 }
@@ -93,10 +92,11 @@
 }
 
 @layer components {
-  /* §3 工作台栅格：图标栏在栅格外（ScreenFrame 的 flex 行），这里只排视图栏/预览/面板/时间线 */
+  /* 工作台栅格：图标栏在栅格外（ScreenFrame 的 flex 行），这里只排预览区/右侧面板/时间线。
+   * 旧版的 220px 视图栏已删除：预览区占满除右栏外的全部宽度（二级视图合并成同一个工作台）。 */
   .wb-grid {
     display: grid;
-    grid-template-columns: var(--vrw) var(--gw) minmax(0, 1fr) var(--gw) var(--inspw);
+    grid-template-columns: minmax(0, 1fr) var(--gw) var(--inspw);
     grid-template-rows: minmax(0, 1fr) var(--gw) var(--tlh);
     min-height: 0;
     min-width: 0;

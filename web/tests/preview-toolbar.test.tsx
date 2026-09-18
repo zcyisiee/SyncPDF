@@ -1,4 +1,5 @@
-/** `PreviewToolbar`：模式切换、原文模式禁用态与 tooltip、页码提交、bbox 三态、只读 zoom。 */
+/** `PreviewToolbar`：模式切换、原文模式禁用态与 tooltip、页码提交、bbox 三态与下载槽。
+ * 缩放控件已删除（触控板捏合 / Ctrl+滚轮直接缩放），bbox 与下载从《更多》移出平铺。 */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -11,7 +12,6 @@ function renderToolbar(props: Partial<Parameters<typeof PreviewToolbar>[0]> = {}
     <PreviewToolbar
       page={1}
       pageCount={21}
-      scale={1}
       sourceAvailable
       paged
       onPageChange={() => {}}
@@ -61,9 +61,9 @@ describe('PreviewToolbar', () => {
     expect(onBboxModeChange.mock.calls).toEqual([['layout'], ['off']]);
   });
 
-  it('页码输入：合法值提交、越界 clamp、非法值回退；上下页在两端禁用', () => {
+  it('页码输入：合法值提交、越界 clamp、非法值回退（没有上一页/下一页按钮，滚轮/触控板翻页）', () => {
     const onPageChange = vi.fn();
-    const { rerender } = renderToolbar({ onPageChange });
+    renderToolbar({ onPageChange });
     const input = screen.getByRole('spinbutton', { name: '页码' });
 
     fireEvent.change(input, { target: { value: '5' } });
@@ -79,29 +79,32 @@ describe('PreviewToolbar', () => {
     expect(onPageChange).toHaveBeenCalledTimes(2);
     expect((input as HTMLInputElement).value).toBe('1');
 
-    expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled();
-    rerender(
-      <PreviewToolbar
-        page={21}
-        pageCount={21}
-        scale={1}
-        sourceAvailable
-        paged
-        onPageChange={onPageChange}
-        onBboxModeChange={() => {}}
-      />,
-    );
-    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+    // 上一页/下一页按钮已删除（触控板滚动即可连续翻页；Windows 按住右键拖滚轮同理）
+    expect(screen.queryByRole('button', { name: '上一页' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '下一页' })).toBeNull();
     expect(screen.getByText('/ 21 页')).toBeInTheDocument();
   });
 
-  it('无产物 PDF 时翻页与缩放控件禁用', () => {
-    renderToolbar({ paged: false, scale: 1.25 });
-    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+  it('没有缩放控件（触控板捏合 / Ctrl+滚轮缩放）；无产物时页码禁用', () => {
+    renderToolbar({ paged: false });
+    expect(screen.queryByRole('button', { name: '放大' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '缩小' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '适宽' })).toBeNull();
+    expect(screen.queryByRole('spinbutton', { name: '缩放百分比' })).toBeNull();
     expect(screen.getByRole('spinbutton', { name: '页码' })).toBeDisabled();
-    expect(screen.getByRole('spinbutton', { name: '缩放百分比' })).toHaveValue(125);
-    expect(screen.getByRole('button', { name: '放大' })).toBeDisabled();
+  });
+
+  it('bbox 三态与下载槽直接平铺（不再藏在《更多》里）', () => {
+    renderToolbar({ download: <a href="#dl">下载 PDF</a> });
+    expect(screen.getByRole('group', { name: 'bbox 图层' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '段落框' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('link', { name: '下载 PDF' })).toBeInTheDocument();
+    expect(screen.queryByText('更多')).toBeNull();
+    // 悬停说明（title）在：简洁标签 + 完整解释
+    expect(screen.getByRole('button', { name: '版面框' })).toHaveAttribute(
+      'title',
+      expect.stringContaining('拖拽'),
+    );
   });
 
   it('工具条带 data-od-id（§7.9）', () => {
@@ -113,16 +116,8 @@ describe('PreviewToolbar', () => {
 });
 
 describe('reader controls', () => {
-  it('zoom buttons, numeric zoom, fit width and link toggle update session state', () => {
+  it('compare link toggle updates session state (zoom lives on the trackpad/ctrl-wheel)', () => {
     renderToolbar();
-    fireEvent.click(screen.getByRole('button', { name: '放大' }));
-    expect(uiStore.getState().previewZoom).toBe(1.2);
-    const input = screen.getByRole('spinbutton', { name: '缩放百分比' });
-    fireEvent.change(input, { target: { value: '175' } });
-    fireEvent.blur(input);
-    expect(uiStore.getState().previewZoom).toBe(1.75);
-    fireEvent.click(screen.getByRole('button', { name: '适宽' }));
-    expect(uiStore.getState().previewZoom).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '对照' }));
     fireEvent.click(screen.getByRole('button', { name: '解除联动' }));
     expect(uiStore.getState().compareLinked).toBe(false);

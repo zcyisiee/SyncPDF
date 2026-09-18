@@ -14,7 +14,6 @@
 import type { StageStateItem } from '../api/types';
 import { isRunLive, type RunEvent } from './events';
 import { STAGE_NAMES, stageTone, type StageName, type StatusTone } from './humanize';
-import type { WorkbenchView } from './routing';
 
 export type SegmentState = 'ok' | 'err' | 'live' | 'not_run';
 
@@ -56,24 +55,6 @@ export function jobLiveStage(job: {
   return { stage: stage as StageName, at: job.started_at ?? null };
 }
 
-/**
- * 阶段 → 点击跳转的视图（映射表写死；没有专属视图的阶段回落到能看清它的视图）：
- * - `parse` → 识别（识别视图就是解析/栏位结果）
- * - `translate` / `apply` → 翻译（套版结果在翻译视图的排版预览里看）
- * - `build` → 进度（编译没有独立视图，编译状态与产物在进度/归档里）
- * - `check` → 检查；`review` → 检查（复核结论属于检查视图）
- * - `report` → 进度（报告产物在进度/归档里看）
- */
-export const STAGE_VIEWS: Record<StageName, WorkbenchView> = {
-  parse: 'layout',
-  translate: 'translate',
-  apply: 'translate',
-  build: 'progress',
-  check: 'check',
-  review: 'check',
-  report: 'progress',
-};
-
 /** 条最小可见宽（%）：`live` 段刚起步的秒数是 0，实测 0.0s 的阶段（report）也是 0。 */
 export const MIN_BAR_PERCENT = 2;
 
@@ -88,8 +69,6 @@ export interface TimelineSegment {
   elapsedS: number | null;
   /** live 段的起算时刻（`stage_started.at`，缺则 stage-state 的 `started_at`）。 */
   at: string | null;
-  /** 点击该段跳转的视图（`STAGE_VIEWS`）。 */
-  view: WorkbenchView;
 }
 
 function toSeconds(value: number | null | undefined): number | null {
@@ -152,13 +131,12 @@ export function timelineSegments(
     const item = byStage.get(stage);
     const status = item?.status ?? 'not_run';
     const tone = stageTone(status);
-    const view = STAGE_VIEWS[stage];
     const duration = toSeconds(item?.duration_s) ?? durationBetween(item?.started_at, item?.finished_at);
     if (tone === 'pass') {
-      return { stage, state: 'ok', status, durationS: duration, elapsedS: null, at: item?.started_at ?? null, view };
+      return { stage, state: 'ok', status, durationS: duration, elapsedS: null, at: item?.started_at ?? null };
     }
     if (tone === 'err') {
-      return { stage, state: 'err', status, durationS: duration, elapsedS: null, at: item?.started_at ?? null, view };
+      return { stage, state: 'err', status, durationS: duration, elapsedS: null, at: item?.started_at ?? null };
     }
     const openAt = runLive ? openStageAt(events, stage) : null;
     if (tone === 'run' || openAt !== null) {
@@ -170,7 +148,6 @@ export function timelineSegments(
         durationS: null,
         elapsedS: elapsedSeconds(at, nowMs),
         at,
-        view,
       };
     }
     // job 驱动的那一段（W14）：基线还没定论时，running 的 job 才是“这个阶段在跑”的真信号，
@@ -183,10 +160,9 @@ export function timelineSegments(
         durationS: null,
         elapsedS: elapsedSeconds(jobStage.at, nowMs),
         at: jobStage.at,
-        view,
       };
     }
-    return { stage, state: 'not_run', status, durationS: null, elapsedS: null, at: item?.started_at ?? null, view };
+    return { stage, state: 'not_run', status, durationS: null, elapsedS: null, at: item?.started_at ?? null };
   });
 }
 

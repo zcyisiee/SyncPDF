@@ -3,8 +3,7 @@
  * 未开始段固定 64px 虚线不参与比例、进行中段 run 色 + 脉冲 + 本地秒表、失败段朱红点。
  *
  * 数据来自 `useTimelineStages`（stage-state 基线 + 事件流的 live 段），本组件只负责渲染。
- * 点击整列 → 跳到该阶段对应的视图（映射表在 `lib/timeline.ts::STAGE_VIEWS`，注释里写了理由）。
- * 两行结构 + 压缩态（`--tlh < 94px` 时耗时内联到名称右侧）。
+ * 段不可点击（旧版点击跳视图已随视图合并移除）；两行结构 + 压缩态（`--tlh < 94px` 时耗时内联到名称右侧）。
  */
 import { cn } from '../../lib/cn';
 import type { RunEvent } from '../../lib/events';
@@ -119,13 +118,11 @@ export function Timeline({
                 key={segment.stage}
                 data-od-id={`timeline-stage-${segment.stage}`}
                 data-state={segment.state}
-                data-view={segment.view}
                 className="min-w-0"
               >
-                <a
-                  href={`#/d/${encodeURIComponent(did)}/${segment.view}`}
-                  title={`${STAGE_LABELS[segment.stage]} · ${stageStatusLabel(segment.status)}（${segment.status}） · 点击去对应视图`}
-                  className="grid min-w-0 grid-rows-[minmax(0,1fr)_14px] gap-y-[3px] rounded-[2px] hover:brightness-[.97]"
+                <div
+                  title={`${STAGE_LABELS[segment.stage]} · ${stageStatusLabel(segment.status)}（${segment.status}）`}
+                  className="grid min-w-0 grid-rows-[minmax(0,1fr)_14px] gap-y-[3px] rounded-[2px]"
                 >
                   <span className="flex min-w-0 flex-col justify-center">
                     <span
@@ -178,7 +175,7 @@ export function Timeline({
                       />
                     )}
                   </span>
-                </a>
+                </div>
               </li>
             );
           })}

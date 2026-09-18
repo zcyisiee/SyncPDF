@@ -115,6 +115,8 @@ test('改译文 → 真编译 → 拖 bbox 更新草稿（真 serve + 真产物�
   const targetId = target?.id as string;
   const baselineBox = target?.layout_box as number[];
 
+  // 版面框图层（拖拽编辑层只在 pdf_native 几何上出现）；旧链接 /translate 合并后仍解析
+  await page.addInitScript(() => localStorage.setItem('ieet.bboxMode', 'layout'));
   await page.goto(`/#/d/${COPY_DID}/translate`);
   await expect(page.locator('[data-od-id="preview-canvas"] canvas')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(`[data-bbox-id="${targetId}"]`)).toBeVisible({ timeout: 30_000 });

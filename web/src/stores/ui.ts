@@ -1,22 +1,24 @@
 /**
- * 工作台外壳的 UI 状态：屏/视图路由镜像、三栏宽度、分隔条拖拽态、预览模式与 bbox 图层。
+ * 工作台外壳的 UI 状态：屏/视图路由镜像、栏宽、分隔条拖拽态、预览模式与 bbox 图层。
  * 宽度、折叠态、屏幕与 bbox 图层持久化到 localStorage，键名按 DESIGN.md §8.2 冻结
- * （`ieet.vrw`/`ieet.inspw`/`ieet.tlh`/`ieet.inspCollapsed`/`ieet.screen`/`ieet.bboxMode`），
+ * （`ieet.inspw`/`ieet.tlh`/`ieet.inspCollapsed`/`ieet.screen`/`ieet.bboxMode`），
  * 范围也按 §8.2 表 clamp；预览页码与选中段落只活在会话里（不持久化）。
+ *
+ * 注：旧版的 220px 视图栏（`ieet.vrw`）已删除 —— 二级视图合并成同一个工作台，
+ * 预览占满除右栏/时间线外的全部宽度；预览模式与 bbox 图层也不再按视图记默认值。
  */
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 
 import type { BboxMode } from '../lib/preview';
-import type { WorkbenchView, ScreenId } from '../lib/routing';
+import type { ScreenId } from '../lib/routing';
 
-export type GutterId = 'viewrail' | 'inspector' | 'timeline';
+export type GutterId = 'inspector' | 'timeline';
 export type PreviewMode = 'source' | 'target' | 'compare';
 
 const BBOX_MODES: readonly BboxMode[] = ['parse', 'layout', 'off'];
 
 export const STORAGE_KEYS = {
-  viewrail: 'ieet.vrw',
   inspector: 'ieet.inspw',
   timeline: 'ieet.tlh',
   timelineCollapsed: 'ieet.timelineCollapsed',
@@ -27,7 +29,7 @@ export const STORAGE_KEYS = {
 
 export interface LayoutSpec {
   /** 该栏宽度在本 store 里的字段名。 */
-  key: 'viewrailWidth' | 'inspectorWidth' | 'timelineHeight';
+  key: 'inspectorWidth' | 'timelineHeight';
   storageKey: string;
   /** 分隔条拖拽轴：x = 竖条（调列宽），y = 横条（调行高）。 */
   axis: 'x' | 'y';
@@ -43,17 +45,6 @@ export interface LayoutSpec {
 
 /** §8.2 表：默认 / 范围 / 轴 / localStorage 键，逐项照抄。 */
 export const LAYOUT_SPECS = {
-  viewrail: {
-    key: 'viewrailWidth',
-    storageKey: STORAGE_KEYS.viewrail,
-    axis: 'x',
-    invert: false,
-    default: 220,
-    min: 160,
-    max: 320,
-    step: 16,
-    label: '调整视图栏宽度（160–320）',
-  },
   inspector: {
     key: 'inspectorWidth',
     storageKey: STORAGE_KEYS.inspector,
@@ -80,24 +71,20 @@ export const LAYOUT_SPECS = {
 
 export interface UiState {
   screen: ScreenId;
-  viewrailWidth: number;
   inspectorWidth: number;
   timelineHeight: number;
   timelineCollapsed: boolean;
   inspectorCollapsed: boolean;
   previewMode: PreviewMode;
-  previewView: WorkbenchView | null;
-  previewChoices: Partial<Record<WorkbenchView, { mode: PreviewMode; bbox: BboxMode }>>;
   previewZoom: number | null;
   compareLinked: boolean;
-  enterPreviewView: (view: WorkbenchView) => void;
   setPreviewZoom: (zoom: number | null) => void;
   setCompareLinked: (linked: boolean) => void;
   /** 预览页码（1 基；**不**持久化，`resetPreviewForDocument` 在 did 变化时重置为 1）。 */
   previewPage: number;
   /** 预览状态当前绑定的 did（`resetPreviewForDocument` 靠它判断是否换文档）。 */
   previewDid: string | null;
-  /** bbox 图层三态（持久化 `ieet.bboxMode`；默认值由视图决定，见 `bboxModeForView`）。 */
+  /** bbox 图层三态（持久化 `ieet.bboxMode`；默认段落框，用户可切）。 */
   bboxMode: BboxMode;
   /** 当前选中的段落 id（W05 只联动右侧面板占位；真内容 W10）。 */
   selectedParagraphId: string | null;
@@ -188,27 +175,13 @@ function writeStored(key: string, value: string): void {
 export function createUiStore(): StoreApi<UiState> {
   return createStore<UiState>()((set, get) => ({
     screen: readStoredScreen() ?? 'library',
-    viewrailWidth: readStoredNumber(LAYOUT_SPECS.viewrail),
     inspectorWidth: readStoredNumber(LAYOUT_SPECS.inspector),
     timelineHeight: readStoredNumber(LAYOUT_SPECS.timeline),
     timelineCollapsed: readStoredFlag(STORAGE_KEYS.timelineCollapsed, false),
     inspectorCollapsed: readStoredFlag(STORAGE_KEYS.inspectorCollapsed, false),
     previewMode: 'target',
-    previewView: null,
-    previewChoices: {},
     previewZoom: null,
     compareLinked: true,
-    enterPreviewView: (view) => {
-      const state = get();
-      if (state.previewView === view) return;
-      const choices = { ...state.previewChoices };
-      if (state.previewView !== null) choices[state.previewView] = { mode: state.previewMode, bbox: state.bboxMode };
-      const choice = choices[view] ?? {
-        mode: view === 'layout' ? 'source' : view === 'translate' ? 'target' : state.previewMode,
-        bbox: view === 'translate' ? 'layout' : view === 'layout' ? 'parse' : state.bboxMode,
-      };
-      set({ previewView: view, previewChoices: choices, previewMode: choice.mode, bboxMode: choice.bbox });
-    },
     setPreviewZoom: (zoom) => set({ previewZoom: zoom === null ? null : Number.isFinite(zoom) ? clamp(zoom, 0.1, 4) : get().previewZoom }),
     setCompareLinked: (compareLinked) => set({ compareLinked }),
     previewPage: 1,
@@ -225,10 +198,6 @@ export function createUiStore(): StoreApi<UiState> {
       const spec = LAYOUT_SPECS[id];
       const value = clamp(Math.round(next), spec.min, spec.max);
       writeStored(spec.storageKey, String(value));
-      if (id === 'viewrail') {
-        set({ viewrailWidth: value });
-        return;
-      }
       if (id === 'inspector') {
         // 折叠态（--inspw:0）下拖分隔条只在宽度真变化时展开：避免「拖回原宽度才意外展开」。
         const collapsed = get().inspectorCollapsed && value === get().inspectorWidth;

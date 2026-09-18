@@ -8,9 +8,8 @@
  *    「服务端状态已变 → 帧到达」的延迟远小于前端的兜底轮询（5s）。
  * 2. **UI 反应**：工作台自己那一条 SSE 连上（`data-status=open`），job 终态到达后
  *    页面**不重新加载**就发出新的 `GET /artifacts`（终态那一刀的失效链路）。
- * 3. **诚实的进度文案**：运行中的 run job 显示「已译段落 N/M（套版后更新）」——N/M 来自
- *    详情的 `translated_count`/`paragraph_count`，翻译阶段不会跳动（整篇单次子进程调用），
- *    这里断言的是「数字与产物一致 + 文案如实标注」。
+ * 3. **逐段进度在事件流里**：运行中切到「事件流」tab 能看到 paragraph_done 行
+ *    （旧版顶部的「已译段落 N/M」计数条已删除，事件流是唯一进度出口）。
  *
  * fixture（都在仓库 `tmp/` 下，不入库）：`tmp/w14-streaming-<时间戳>/` 自建最小 workdir
  * （`agent/document.md` + anchors/translated 产物 + 一个**手工写的** run 归档，让
@@ -285,8 +284,10 @@ test('SSE：job 状态变化推成 job_update 帧（命名空间 + 时序 + 失�
   });
 
   await page.goto(`/#/d/${DID}/progress`);
-  await expect(page.locator('[data-od-id="job-panel"]')).toBeVisible();
+  await expect(page.locator('[data-od-id="workbench"]')).toBeVisible();
 
+  // 右侧面板默认 tab 是「段落」：切到事件流才挂载 SSE 状态行（连接本身在 workbench 层）
+  await page.getByRole('tab', { name: '事件流' }).click();
   // 工作台自己那条流：真连上（open → 「实时」）。没有它 job_update 就没人收。
   await expect(page.locator('[data-od-id="event-stream-status"]')).toHaveAttribute(
     'data-status',
@@ -403,20 +404,21 @@ test('SSE：job 状态变化推成 job_update 帧（命名空间 + 时序 + 失�
   stopViewer(WORKDIR);
 });
 
-test('UI：运行中的 run job 显示「已译段落 N/M（套版后更新）」，取消后立刻切到已取消', async ({
+test('UI：run job 徽标如实显示，取消后立刻切到已取消（job_update 快路径）', async ({
   page,
   request,
 }) => {
   test.setTimeout(120_000);
   await page.goto(`/#/d/${DID}/progress`);
-  await expect(page.locator('[data-od-id="job-panel"]')).toBeVisible();
-  // 上一个用例的 job 已落定 → 显示开始卡
-  await expect(page.locator('[data-od-id="start-job-card"]')).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('[data-od-id="workbench"]')).toBeVisible();
 
-  await page.locator('[data-od-id="start-job-profile"]').selectOption('w14-sleep');
-  await page.getByText('高级：起点阶段').click();
-  await page.locator('[data-od-id="start-job-from"]').selectOption('translate');
-  await page.locator('[data-od-id="start-job-submit"]').click();
+  // stub 脚本 profile 不在 UI 下拉（模型只列内置 harness）：长睡 job 由 API 提交，
+  // UI 负责通过 SSE 的 job_update 如实切换徽标（旧「已译段落 N/M」计数条已删除，
+  // 逐段进度在事件流的 paragraph_done 行里看）。
+  const accepted = await request.post(`${API}/documents/${DID}/jobs`, {
+    data: { action: 'run', from: 'translate', profile: 'w14-sleep' },
+  });
+  expect(accepted.ok(), await accepted.text()).toBe(true);
 
   await expect(page.locator('[data-od-id="active-job-status"]')).toHaveAttribute(
     'data-status',
@@ -424,14 +426,11 @@ test('UI：运行中的 run job 显示「已译段落 N/M（套版后更新）�
     { timeout: 30_000 },
   );
 
-  // 诚实的进度文案：N/M 来自详情字段（fixture 里是 1 行译文 / 1 个段落），并且写明
-  // 「套版后更新」——翻译是整篇单次子进程调用，运行中这个数不会跳动。
-  const progress = page.locator('[data-od-id="active-job-progress"]');
-  await expect(progress).toBeVisible();
-  await expect(progress).toContainText('已译段落 1/1');
-  await expect(progress).toContainText('套版后更新');
-  await expect(progress).toHaveAttribute('data-translated', '1');
-  await expect(progress).toHaveAttribute('data-paragraphs', '1');
+  // 逐段进度现在只活在事件流里：切到「事件流」tab，运行中的 paragraph_done 行如实出现
+  await page.getByRole('tab', { name: '事件流' }).click();
+  await expect(
+    page.locator('[data-od-id="event-stream"]').getByText('paragraph_done', { exact: false }).first(),
+  ).toBeVisible({ timeout: 30_000 });
   await page.screenshot({ path: join(SHOT_DIR, 'e2e-w14-running.png') });
 
   // 从 API 取消（不走 UI 的 mutation）→ 页面的状态切换只能来自 SSE 的 job_update，
@@ -442,9 +441,11 @@ test('UI：运行中的 run job 显示「已译段落 N/M（套版后更新）�
   const canceled = await request.post(`${API}/jobs/${running?.job_id}/cancel`);
   expect(canceled.ok(), await canceled.text()).toBe(true);
 
-  await expect(page.locator('[data-od-id="active-job-outcome"]')).toContainText('已取消', {
-    timeout: FALLBACK_POLL_MS,
-  });
+  await expect(page.locator('[data-od-id="active-job-status"]')).toHaveAttribute(
+    'data-status',
+    'canceled',
+    { timeout: FALLBACK_POLL_MS },
+  );
   const elapsedMs = Date.now() - startedAt;
   console.log(`[w14] 取消后 UI 在 ${elapsedMs}ms 内切到「已取消」（兜底轮询是 ${FALLBACK_POLL_MS}ms）`);
   expect(elapsedMs).toBeLessThan(FALLBACK_POLL_MS);

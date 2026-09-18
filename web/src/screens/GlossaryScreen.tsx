@@ -141,6 +141,8 @@ export function GlossaryScreen() {
     URL.revokeObjectURL(url);
   };
 
+  // TanStack v5 的 mutation 无错时 `error` 是 **null**（不是 undefined）：必须用 `== null`
+  // 判空，否则会把 null 当成真错误渲染成「请求失败 / null」的假错误卡（W13 的真实回归）。
   const failure = replaceGlossary.error ?? clearGlossary.error;
 
   return (
@@ -244,7 +246,7 @@ export function GlossaryScreen() {
               message={csvError}
             />
           )}
-          {failure === undefined ? null : (
+          {failure == null ? null : (
             <ErrorCard className="mt-s3" data-od-id="glossary-save-error" error={failure} />
           )}
 

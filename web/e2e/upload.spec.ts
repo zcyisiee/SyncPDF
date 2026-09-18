@@ -110,10 +110,10 @@ test.afterAll(async ({ request }) => {
   }
 });
 
-/** 进入某个 did 的进度视图，返回该文档的 job 列表状态轮询器。 */
+/** 进入某个 did 的工作台（二级视图合并后唯一工作台），返回该文档的 job 列表状态轮询器。 */
 async function openProgress(page: Page, did: string) {
   await page.goto(`/#/d/${did}/progress`);
-  await expect(page.locator('[data-od-id="job-panel"]')).toBeVisible();
+  await expect(page.locator('[data-od-id="workbench"]')).toBeVisible();
 }
 
 test('上传 PDF → 列表出现新文档 → 开始翻译（from=parse，诚实断言两种环境分支）', async ({
@@ -165,20 +165,22 @@ test('上传 PDF → 列表出现新文档 → 开始翻译（from=parse，诚�
 
   await card.click();
   await expect(page).toHaveURL(new RegExp(`#/d/${did}/progress$`));
-  await expect(page.locator('[data-od-id="job-panel"]')).toBeVisible();
+  await expect(page.locator('[data-od-id="workbench"]')).toBeVisible();
 
-  // 上传的文档没有 parse 产物 → 默认从 parse 起，并提示 MinerU 约束
-  await expect(page.locator('[data-od-id="start-job-from"]')).toHaveValue('parse');
-  await expect(page.locator('[data-od-id="start-job-mineru-note"]')).toBeVisible();
-  await expect(page.locator('[data-od-id="start-job-profile"]')).not.toHaveValue('');
-  await page.locator('[data-od-id="start-job-submit"]').click();
+  // 上传的文档没有 parse 产物 → job 会从 parse 起（起点自动判断，不再有下拉）；
+  // 模型等配置在设置屏设默认，顶栏只剩「开始翻译」
+  const startButton = page.locator('[data-od-id="start-job-submit"]');
+  await expect(startButton).toBeEnabled({ timeout: 20_000 });
+  await startButton.click();
   await page.screenshot({ path: join(SHOT_DIR, 'w08-e2e-start.png'), fullPage: false });
 
-  // 诚实断言：要么真跑起来（running），要么失败且 error_code 非空（无 MinerU 环境）
-  await expect(page.locator('[data-od-id="active-job-card"]')).toBeVisible({ timeout: 30_000 });
+  // 诚实断言：要么真跑起来（running），要么失败且 error_code 非空（无 MinerU 环境）。
+  // 失败态的顶栏徽标带 data-tip=「error_code：message」（旧 active-job-outcome 条已并入）。
+  const status = page.locator('[data-od-id="active-job-status"]');
+  await expect(status).toBeVisible({ timeout: 30_000 });
   const running = page.locator('[data-od-id="active-job-status"][data-status="running"]');
-  const outcome = page.locator('[data-od-id="active-job-outcome"]');
-  await expect(running.or(outcome).first()).toBeVisible({ timeout: 60_000 });
+  const failed = page.locator('[data-od-id="active-job-status"][data-status="failed"]');
+  await expect(running.or(failed).first()).toBeVisible({ timeout: 60_000 });
 
   const jobs = await jobStatuses(request, did);
   const latest = jobs[0];
@@ -189,7 +191,9 @@ test('上传 PDF → 列表出现新文档 → 开始翻译（from=parse，诚�
   } else {
     branch = `诚实失败（无 MinerU token/不可用）：${latest.status} / ${latest.error_code}`;
     expect(latest.error_code, '失败必须有 error_code（不是静默）').toBeTruthy();
-    await expect(outcome).toContainText(latest.error_code ?? '');
+    await expect(page.locator('[data-od-id="active-job-status"] [data-tip]')).toContainText(
+      latest.error_code ?? '',
+    );
   }
   test.info().annotations.push({ type: 'mineru', description: branch });
   console.log(`[w08] 上传后开始翻译：${branch}（did=${did}）`);
@@ -214,14 +218,13 @@ test('上传 PDF → 列表出现新文档 → 开始翻译（from=parse，诚�
 
 test('运行中任务：取消 → canceled（真进程组终止）', async ({ page, request }) => {
   await openProgress(page, CANCEL_DID);
-  await expect(page.locator('[data-od-id="start-job-card"]')).toBeVisible();
 
-  // profile 选预置的 sleep-t，起点显式选 translate（stub 长睡 → 停在 running）。
-  // from 是「高级」折叠区里的下拉：先展开再选（和真人操作一致）。
-  await page.locator('[data-od-id="start-job-profile"]').selectOption('sleep-t');
-  await page.getByText('高级：起点阶段').click();
-  await page.locator('[data-od-id="start-job-from"]').selectOption('translate');
-  await page.locator('[data-od-id="start-job-submit"]').click();
+  // stub 脚本 profile（sleep-t）不再出现在 UI 下拉里（模型选择只列内置 harness），
+  // 长睡任务改由 API 直接提交；UI 负责如实展示徽标与取消。
+  const accepted = await request.post(`${API}/documents/${CANCEL_DID}/jobs`, {
+    data: { action: 'run', from: 'translate', profile: 'sleep-t' },
+  });
+  expect(accepted.ok(), await accepted.text()).toBe(true);
 
   await expect(page.locator('[data-od-id="active-job-status"]')).toHaveAttribute(
     'data-status',
@@ -235,16 +238,16 @@ test('运行中任务：取消 → canceled（真进程组终止）', async ({ p
   await page.locator('[data-od-id="cancel-job"]').click();
   await page.screenshot({ path: join(SHOT_DIR, 'w08-e2e-cancel.png'), fullPage: false });
 
-  await expect(page.locator('[data-od-id="active-job-outcome"]')).toContainText('已取消', {
-    timeout: 30_000,
-  });
+  // 取消后徽标立刻切「已取消」（tooltip 带结果文案），并出现「重试」
+  await expect(page.locator('[data-od-id="active-job-status"]')).toHaveAttribute(
+    'data-status',
+    'canceled',
+    { timeout: 30_000 },
+  );
+  await expect(page.locator('[data-od-id="active-job-status"] [data-tip]')).toContainText('已取消');
   await expect(page.locator('[data-od-id="retry-job"]')).toBeVisible();
 
   const jobs = await jobStatuses(request, CANCEL_DID);
   expect(jobs[0].status).toBe('canceled');
-  await expect(page.locator('[data-od-id="active-job-card"]')).toHaveAttribute(
-    'data-job-id',
-    jobs[0].job_id,
-  );
   stopViewer(CANCEL_WORKDIR);
 });

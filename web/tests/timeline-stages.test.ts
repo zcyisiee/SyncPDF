@@ -15,13 +15,11 @@ import {
   jobLiveStage,
   maxSegmentDuration,
   openStageAt,
-  STAGE_VIEWS,
   timelineSegments,
   timelineStatus,
   totalDurationS,
   type TimelineSegment,
 } from '../src/lib/timeline';
-import { STAGE_NAMES } from '../src/lib/humanize';
 
 const NOW = Date.parse('2026-09-16T13:30:00.000Z');
 
@@ -273,24 +271,10 @@ describe('总用时与视图映射', () => {
     expect(totalDurationS(segments)).toBe(72);
   });
 
-  it('7 个阶段都有跳转视图；检查/审校都去检查视图，编译/报告回落进度视图', () => {
-    expect(Object.keys(STAGE_VIEWS).sort()).toEqual([...STAGE_NAMES].sort());
-    expect(STAGE_VIEWS.parse).toBe('layout');
-    expect(STAGE_VIEWS.translate).toBe('translate');
-    expect(STAGE_VIEWS.apply).toBe('translate');
-    expect(STAGE_VIEWS.build).toBe('progress');
-    expect(STAGE_VIEWS.check).toBe('check');
-    expect(STAGE_VIEWS.review).toBe('check');
-    expect(STAGE_VIEWS.report).toBe('progress');
+  it('段不可点击（视图合并后没有跳转目标）：segment 不再带 view 字段', () => {
     const segments = timelineSegments(COMPLETE, [], NOW);
-    expect(segments.map((segment) => segment.view)).toEqual([
-      'layout',
-      'translate',
-      'translate',
-      'progress',
-      'check',
-      'check',
-      'progress',
-    ]);
+    for (const segment of segments) {
+      expect('view' in segment).toBe(false);
+    }
   });
 });

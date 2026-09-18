@@ -2,7 +2,6 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import {
-  WORKBENCH_VIEWS,
   hashFor,
   hashForScreen,
   initialHash,
@@ -24,19 +23,25 @@ describe('parseHash', () => {
     expect(parseHash('#/settings')).toEqual({ kind: 'settings' });
   });
 
-  it('工作台：5 个视图 id 与「缺省视图 = 进度」', () => {
+  it('工作台：唯一常规视图 + 归档变体；旧视图 id 统一落到 progress（旧链接不死链）', () => {
     expect(parseHash('#/d/ccs3764-dyn/progress')).toEqual({
       kind: 'workbench',
       did: 'ccs3764-dyn',
       view: 'progress',
     });
-    for (const view of WORKBENCH_VIEWS) {
-      expect(parseHash(`#/d/ccs3764-dyn/${view.id}`)).toEqual({
+    // 旧版二级视图（识别/翻译/检查）解析后都指向同一个工作台。
+    for (const legacy of ['progress', 'layout', 'translate', 'check']) {
+      expect(parseHash(`#/d/ccs3764-dyn/${legacy}`)).toEqual({
         kind: 'workbench',
         did: 'ccs3764-dyn',
-        view: view.id,
+        view: 'progress',
       });
     }
+    expect(parseHash('#/d/ccs3764-dyn/archive')).toEqual({
+      kind: 'workbench',
+      did: 'ccs3764-dyn',
+      view: 'archive',
+    });
     expect(parseHash('#/d/ccs3764-dyn')).toEqual({
       kind: 'workbench',
       did: 'ccs3764-dyn',
@@ -79,7 +84,7 @@ describe('parseHash', () => {
 
 describe('hashFor / hashForScreen / screenIdOf', () => {
   it('hashFor 与 parseHash 互逆', () => {
-    for (const hash of ['#/library', '#/glossary', '#/settings', '#/d/ccs3764-dyn/progress', '#/d/ccs3764-dyn/check']) {
+    for (const hash of ['#/library', '#/glossary', '#/settings', '#/d/ccs3764-dyn/progress', '#/d/ccs3764-dyn/archive']) {
       expect(hashFor(parseHash(hash))).toBe(hash);
     }
     expect(hashFor(parseHash('#/d/x'))).toBe('#/d/x/progress');
@@ -118,13 +123,13 @@ describe('useHashRoute', () => {
     expect(result.current).toEqual({ kind: 'glossary' });
 
     act(() => {
-      window.location.hash = '#/d/ccs3764-dyn/layout';
+      window.location.hash = '#/d/ccs3764-dyn/archive';
     });
     await waitFor(() =>
       expect(result.current).toEqual({
         kind: 'workbench',
         did: 'ccs3764-dyn',
-        view: 'layout',
+        view: 'archive',
       }),
     );
   });

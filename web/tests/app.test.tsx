@@ -31,7 +31,7 @@ describe('App 路由（hash）', () => {
     window.location.hash = '#/settings';
     renderWithQuery(<App />);
     expect(await screen.findByRole('heading', { name: '设置' })).toBeInTheDocument();
-    expect(screen.getByText('翻译配置')).toBeInTheDocument();
+    expect(screen.getByText('翻译偏好')).toBeInTheDocument();
   });
 
   it('未知 hash 给出明确出口', async () => {

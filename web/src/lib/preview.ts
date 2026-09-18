@@ -3,7 +3,6 @@
  * 坐标换算不在这里，在 `components/preview/BboxLayer.tsx` 的 `pdfToScreen`。
  */
 import type { ArtifactItem, GeometryResponse } from '../api/types';
-import type { WorkbenchView } from './routing';
 import { API_BASE } from './api';
 
 /** bbox 图层三态：识别框（parse 快照）/ 版面框（layout 几何）/ 关。 */
@@ -42,11 +41,6 @@ export interface PreviewArtifacts {
   target: ArtifactItem | null;
   /** 原文预览用产物（`source.pdf`，kind=source）；workdir 没有 → null。 */
   source: ArtifactItem | null;
-}
-
-/** 预览 bbox 的默认模式（brief：只用 `translate` 看译文排版，其余看识别框）。 */
-export function bboxModeForView(view: WorkbenchView): BboxMode {
-  return view === 'translate' ? 'layout' : 'parse';
 }
 
 /** bbox 图层模式 → 坐标系标注（唯一映射点：`parse` 永远配 `pdf_topleft`）。 */

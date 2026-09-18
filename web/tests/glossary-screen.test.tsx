@@ -81,6 +81,17 @@ describe('GlossaryScreen（全局词表）', () => {
     expect(notice?.textContent).toContain('对已翻译段落无追溯效果');
   });
 
+  it('没有保存/清空失败时不得渲染「请求失败 / null」假错误卡（TanStack error=null 回归）', async () => {
+    // TanStack v5 里 mutation 无错时 error 是 null（不是 undefined）：
+    // 旧代码 `failure === undefined` 判空把 null 当成真错误，屏上常驻「请求失败 / null」。
+    mockGlossary();
+    renderWithQuery(<GlossaryScreen />);
+
+    await screen.findByRole('table');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(document.querySelector('[data-od-id="glossary-save-error"]')).toBeNull();
+  });
+
   it('没有词表时给空态引导，不渲染空表格', async () => {
     mockGlossary({ '/api/v1/glossary': () => jsonResponse({ entries: [], count: 0 }) });
     renderWithQuery(<GlossaryScreen />);

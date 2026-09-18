@@ -1,23 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import type { IconName } from '../components/icons';
-
 /** 一级导航屏（顶栏不再承载屏切换，见 DESIGN.md §8.1）。 */
 export type ScreenId = 'library' | 'glossary' | 'settings' | 'workbench';
 
 /**
- * 工作台二级视图。hash 段用 `layout`（识别视图的产物是版面几何），标签用「识别」。
- * 本任务只有 `progress` 有内容，其余 4 个标签可点击但显示 W05–W12 占位。
+ * 工作台视图。页面合并后只有一个常规工作台（`progress` 是历史名，hash 里保留它做默认）；
+ * `archive` 只是把预览区换成版本列表的变体（其余内容完全相同）。
  */
-export const WORKBENCH_VIEWS = [
-  { id: 'progress', label: '进度', icon: 'progress' },
-  { id: 'layout', label: '识别', icon: 'recognize' },
-  { id: 'translate', label: '翻译', icon: 'translate' },
-  { id: 'check', label: '检查', icon: 'check' },
-  { id: 'archive', label: '归档', icon: 'archive' },
-] as const satisfies readonly { id: string; label: string; icon: IconName }[];
+export type WorkbenchView = 'progress' | 'archive';
 
-export type WorkbenchView = (typeof WORKBENCH_VIEWS)[number]['id'];
+/** 旧版二级视图 id（进度/识别/翻译/检查）：页面合并成同一个工作台后统一落到 `progress`。 */
+const LEGACY_VIEW_IDS: readonly string[] = ['progress', 'layout', 'translate', 'check'];
 
 export type Route =
   | { kind: 'library' }
@@ -43,9 +36,12 @@ function parseWorkbench(segments: string[], hash: string): Route {
   const did = safeDecode(segments[1] ?? '');
   if (!isValidDid(did)) return { kind: 'unknown', hash };
   if (segments.length === 2) return { kind: 'workbench', did, view: 'progress' };
-  const view = WORKBENCH_VIEWS.find((candidate) => candidate.id === segments[2]);
-  if (!view) return { kind: 'unknown', hash };
-  return { kind: 'workbench', did, view: view.id };
+  // 旧链接不死链：识别/翻译/检查视图合并后仍解析，只是落在同一个工作台。
+  const raw = segments[2];
+  const view: WorkbenchView | null =
+    raw === 'archive' ? 'archive' : LEGACY_VIEW_IDS.includes(raw) ? 'progress' : null;
+  if (view === null) return { kind: 'unknown', hash };
+  return { kind: 'workbench', did, view };
 }
 
 export function parseHash(hash: string): Route {

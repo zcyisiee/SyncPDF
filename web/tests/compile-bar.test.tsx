@@ -115,14 +115,12 @@ describe('CompileBar 状态', () => {
     expect(error?.textContent).toContain('最近一次编译没有成功');
   });
 
-  it('ok 且不 stale：条内提示「已更新到 r{n}」', async () => {
+  it('ok 且不 stale：不渲染常驻绿条（修订号与质量徽标在下载按钮上）', async () => {
     mockBar();
     renderWithQuery(
       <CompileBar did={DID} compile={{ status: 'ok', revision: 7, stale: false, artifact: { name: 'paper.mono.pdf', revision: 7 } }} draftRevision={7} />,
     );
-    const bar = document.querySelector('[data-od-id="compile-bar"]');
-    expect(bar).toHaveAttribute('data-compile-status', 'ok');
-    expect(bar?.textContent).toContain('已更新到 r7');
+    expect(document.querySelector('[data-od-id="compile-bar"]')).toBeNull();
   });
 
   it('none 且没有产物：不渲染状态条（下载按钮自己解释为什么禁用）', async () => {

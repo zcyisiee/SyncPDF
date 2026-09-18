@@ -213,6 +213,7 @@ test('点段 → AI 重译（零副作用）→ 采用进草稿 → 拒绝另一
   const pdfBefore = sha256(join(WORKDIR, 'output', 'paper.mono.pdf'));
 
   // ---- 1) 翻译视图点段选中 -------------------------------------------------------
+  await page.addInitScript(() => localStorage.setItem('ieet.bboxMode', 'layout'));
   await page.goto(`/#/d/${DID}/translate`);
   await expect(page.locator('[data-od-id="preview-canvas"] canvas')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(`[data-bbox-id="${PID}"]`)).toBeVisible({ timeout: 30_000 });

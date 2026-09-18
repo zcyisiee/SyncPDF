@@ -1,6 +1,14 @@
 /**
- * 预览工具条：源/译/对照、页码导航、比例缩放与适宽。
- * 核心控件可换行，低频图层和下载操作收进更多。
+ * 预览工具条：源/译/对照、页码跳转、bbox 图层与下载。
+ *
+ * 没有任何缩放控件：触控板捏合 / Ctrl(⌘)+滚轮 直接缩放（`ContinuousPdfPane` 的
+ * wheel/gesture 监听），所以「− / 缩放百分比 / ＋ / 适宽」四个按钮全部删除，腾出的
+ * 空间让低位图层与下载操作直接平铺（不再藏进《更多》）。
+ *
+ * 按钮文案保持简洁，把完整解释放进 tooltip（悬停才展开）：
+ * - 「原文/译文/对照」是分段控件，语义自明；
+ * - bbox 图层保留「段落框 / 版面框 / 关」的短标签，悬停给完整解释；
+ * - 下载按钮由 `DownloadButton` 提供（修订号 + 质量徽标 + 悬停说明）。
  */
 import { useState } from 'react';
 import type { ReactNode } from 'react';
@@ -16,6 +24,8 @@ import { Tooltip } from '../ui/Tooltip';
 interface SegmentedOption<T extends string> {
   value: T;
   label: string;
+  /** 悬停时的详细说明（简洁文案说不清的部分）。 */
+  title?: string;
   disabled?: boolean;
   /** 禁用原因（tooltip 文案）。 */
   disabledReason?: string;
@@ -47,6 +57,7 @@ function SegmentedGroup<T extends string>({
             type="button"
             aria-pressed={active}
             disabled={option.disabled === true}
+            title={option.title}
             onClick={() => onChange(option.value)}
             className={cn(
               'h-6 rounded px-[9px] text-tiny leading-none tracking-[0.02em] transition-colors',
@@ -70,22 +81,20 @@ function SegmentedGroup<T extends string>({
 }
 
 const PREVIEW_MODE_OPTIONS = [
-  { value: 'source', label: '原文' },
-  { value: 'target', label: '译文' },
-  { value: 'compare', label: '对照' },
+  { value: 'source', label: '原文', title: '只看上传的原文 PDF（可叠识别框）' },
+  { value: 'target', label: '译文', title: '只看当前编译出的译文 PDF' },
+  { value: 'compare', label: '对照', title: '原文与译文并排；左右可联动滚动' },
 ] as const satisfies readonly SegmentedOption<PreviewMode>[];
 
 const BBOX_MODE_OPTIONS = [
-  { value: 'parse', label: '段落框' },
-  { value: 'layout', label: '版面框' },
-  { value: 'off', label: '关' },
+  { value: 'parse', label: '段落框', title: '叠加识别出的段落框（点击可选中段落）' },
+  { value: 'layout', label: '版面框', title: '叠加套版后的版面框（可拖拽调整选中的框）' },
+  { value: 'off', label: '关', title: '不显示任何框，只看干净页面' },
 ] as const satisfies readonly SegmentedOption<BboxMode>[];
 
 export interface PreviewToolbarProps {
   page: number;
   pageCount: number;
-  /** 当前活动页的实际 scale。 */
-  scale: number;
   /** 源 PDF 不可用（workdir 没有 source.pdf）→ 原文模式禁用。 */
   sourceAvailable: boolean;
   /** 有可渲染 PDF 才允许翻页。 */
@@ -100,7 +109,6 @@ export interface PreviewToolbarProps {
 export function PreviewToolbar({
   page,
   pageCount,
-  scale,
   sourceAvailable,
   paged,
   onPageChange,
@@ -111,25 +119,8 @@ export function PreviewToolbar({
   const previewMode = useUiStore((state) => state.previewMode);
   const setPreviewMode = useUiStore((state) => state.setPreviewMode);
   const bboxMode = useUiStore((state) => state.bboxMode);
-  const zoom = useUiStore((state) => state.previewZoom);
-  const setZoom = useUiStore((state) => state.setPreviewZoom);
   const linked = useUiStore((state) => state.compareLinked);
   const setLinked = useUiStore((state) => state.setCompareLinked);
-  const [zoomDraft, setZoomDraft] = useState(String(Math.round(scale * 100)));
-  const [editingZoom, setEditingZoom] = useState(false);
-  const [lastScale, setLastScale] = useState(scale);
-  if (scale !== lastScale && !editingZoom) {
-    setLastScale(scale);
-    setZoomDraft(String(Math.round(scale * 100)));
-  }
-  const commitZoom = () => {
-    const value = Number(zoomDraft);
-    if (Number.isFinite(value) && value > 0) {
-      setZoom(value / 100);
-      setZoomDraft(String(Math.min(400, Math.max(10, value))));
-    } else setZoomDraft(String(Math.round(scale * 100)));
-    setEditingZoom(false);
-  };
   // 受控输入的外部同步走「渲染期调整 state」（React 官方推荐），不在 effect 里同步 setState
   const [draft, setDraft] = useState(String(page));
   const [lastPage, setLastPage] = useState(page);
@@ -171,71 +162,37 @@ export function PreviewToolbar({
         value={previewMode}
         onChange={setPreviewMode}
       />
-      <div className="flex items-center gap-s2">
-        <Button
-          size="sm"
-          variant="default"
-          aria-label="上一页"
-          disabled={!paged || page <= 1}
-          onClick={() => onPageChange(page - 1)}
-        >
-          上一页
-        </Button>
-        <Button
-          size="sm"
-          variant="default"
-          aria-label="下一页"
-          disabled={!paged || page >= pageCount}
-          onClick={() => onPageChange(page + 1)}
-        >
-          下一页
-        </Button>
-        <label className="flex items-center gap-s2 text-tiny text-ink-4">
-          <input
-            aria-label="页码"
-            type="number"
-            min={1}
-            max={pageCount}
-            inputMode="numeric"
-            disabled={!paged}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onBlur={commit}
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter') return;
-              event.preventDefault();
-              commit();
-            }}
-            className="h-6 w-11 rounded border border-hair bg-ivory px-[6px] text-center font-mono text-tiny [font-variant-numeric:tabular-nums] disabled:opacity-45"
-          />
-          <span data-od-id="page-count">
-            / {pageCount} 页
-          </span>
-        </label>
-      </div>
-      <div className="flex flex-wrap items-center gap-s2" data-od-id="preview-zoom">
-        <Button size="sm" aria-label="缩小" disabled={!paged} onClick={() => setZoom(scale / 1.2)}>−</Button>
-        <label className="flex items-center text-tiny">
-          <input aria-label="缩放百分比" type="number" min={10} max={400}
-            value={zoomDraft} disabled={!paged}
-            onFocus={() => setEditingZoom(true)}
-            onChange={(event) => setZoomDraft(event.target.value)}
-            className="h-6 w-14 rounded border border-hair bg-ivory px-1 text-center"
-            onBlur={commitZoom}
-            onKeyDown={(event) => { if (event.key === 'Enter') { commitZoom(); event.currentTarget.blur(); } }} />%
-        </label>
-        <Button size="sm" aria-label="放大" disabled={!paged} onClick={() => setZoom(scale * 1.2)}>+</Button>
-        <Button size="sm" aria-pressed={zoom === null} disabled={!paged} onClick={() => setZoom(null)}>适宽</Button>
-      </div>
-      {previewMode === 'compare' ? <Button size="sm" aria-pressed={linked}
-        onClick={() => setLinked(!linked)}>{linked ? '解除联动' : '联动阅读'}</Button> : null}
-      <details className="relative text-tiny">
-        <summary className="cursor-pointer rounded border border-hair px-s3 py-s2">更多</summary>
-        <div className="absolute right-0 z-30 mt-s2 flex w-max max-w-[calc(100vw-2rem)] flex-col gap-s3 whitespace-nowrap rounded border border-hair bg-ivory p-s3 shadow-lg">
-          <SegmentedGroup label="bbox 图层" options={BBOX_MODE_OPTIONS} value={bboxMode} onChange={onBboxModeChange} />
-          {download}
-        </div>
-      </details>
+      <label className="flex items-center gap-s2 text-tiny text-ink-4" title="输入页码后回车跳页；连续翻页用滚动">
+        <input
+          aria-label="页码"
+          type="number"
+          min={1}
+          max={pageCount}
+          inputMode="numeric"
+          disabled={!paged}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            commit();
+          }}
+          className="h-6 w-11 rounded border border-hair bg-ivory px-[6px] text-center font-mono text-tiny [font-variant-numeric:tabular-nums] disabled:opacity-45"
+        />
+        <span data-od-id="page-count">
+          / {pageCount} 页
+        </span>
+      </label>
+      <SegmentedGroup label="bbox 图层" options={BBOX_MODE_OPTIONS} value={bboxMode} onChange={onBboxModeChange} />
+      {previewMode === 'compare' ? (
+        <Tooltip content="对照模式下左右两栏一起滚动">
+          <Button size="sm" aria-pressed={linked} onClick={() => setLinked(!linked)}>
+            {linked ? '解除联动' : '联动阅读'}
+          </Button>
+        </Tooltip>
+      ) : null}
+      <div className="ml-auto flex flex-wrap items-center gap-s2">{download}</div>
     </div>
   );
 }

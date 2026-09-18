@@ -84,7 +84,7 @@ beforeEach(() => {
 describe('PreviewArea 产物与空态', () => {
   it('清单里没有产物 PDF → 明确占位卡（数据来自 /artifacts，不造假）', async () => {
     mockPreview({ artifacts: [{ ...MONO, name: 'agent/translated.json', kind: 'json' }] });
-    renderWithQuery(<PreviewArea did={DID} view="progress" />);
+    renderWithQuery(<PreviewArea did={DID} />);
     expect(await screen.findByText('无产物 PDF')).toBeInTheDocument();
     expect(document.querySelector('[data-od-id="preview-no-pdf"]')).not.toBeNull();
     expect(screen.getByRole('toolbar', { name: '预览工具条' })).toBeInTheDocument();
@@ -92,7 +92,7 @@ describe('PreviewArea 产物与空态', () => {
 
   it('有产物 PDF → 画布容器带 data-od-id（jsdom 里停在加载态）', async () => {
     mockPreview();
-    renderWithQuery(<PreviewArea did={DID} view="progress" />);
+    renderWithQuery(<PreviewArea did={DID} />);
     expect((await screen.findAllByText('正在加载 PDF…')).length).toBeGreaterThan(1);
     expect(document.querySelector('[data-od-id="preview-canvas"]')).not.toBeNull();
     expect(document.querySelector('[data-od-id="preview-loading"]')).not.toBeNull();
@@ -101,7 +101,7 @@ describe('PreviewArea 产物与空态', () => {
 
   it('当前任务的增量预览可在正式产物产生前显示，并标为临时预览', async () => {
     mockPreview({ artifacts: [] });
-    renderWithQuery(<PreviewArea did={DID} view="progress" streamArtifact="preview/current-1.pdf" />);
+    renderWithQuery(<PreviewArea did={DID} streamArtifact="preview/current-1.pdf" />);
     expect((await screen.findAllByText('正在加载 PDF…')).length).toBeGreaterThan(0);
     expect(screen.queryByText('无产物 PDF')).toBeNull();
     expect(screen.getByText(/实时翻译预览/)).toBeInTheDocument();
@@ -112,7 +112,7 @@ describe('PreviewArea 产物与空态', () => {
       artifacts: { error: { code: 'internal_error', message: '炸了' } },
       artifactsStatus: 500,
     });
-    renderWithQuery(<PreviewArea did={DID} view="progress" />);
+    renderWithQuery(<PreviewArea did={DID} />);
     const alert = await screen.findByRole('alert');
     expect(within(alert).getByText('读取产物清单失败')).toBeInTheDocument();
     expect(within(alert).getByRole('button', { name: '重试' })).toBeInTheDocument();
@@ -125,7 +125,7 @@ describe('PreviewArea bbox 降级与模式', () => {
       geometry: () =>
         jsonResponse({ error: { code: 'snapshot_unavailable', message: '没有快照' } }, 404),
     });
-    renderWithQuery(<PreviewArea did={DID} view="progress" />);
+    renderWithQuery(<PreviewArea did={DID} />);
     expect(await screen.findByText(/该页无解析数据/)).toBeInTheDocument();
     // 产物到达后画布容器仍在（预览不受 bbox 缺失影响），但没有 bbox 层
     expect((await screen.findAllByText('正在加载 PDF…')).length).toBeGreaterThan(1);
@@ -137,7 +137,7 @@ describe('PreviewArea bbox 降级与模式', () => {
     window.localStorage.setItem(STORAGE_KEYS.bboxMode, 'off');
     uiStore.setState({ bboxMode: 'off' });
     const fetchMock = mockPreview();
-    renderWithQuery(<PreviewArea did={DID} view="progress" />);
+    renderWithQuery(<PreviewArea did={DID} />);
     await screen.findAllByText('正在加载 PDF…');
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/geometry'))).toBe(false);
     expect(document.querySelector('[data-od-id="preview-bbox-unavailable"]')).toBeNull();
@@ -146,7 +146,7 @@ describe('PreviewArea bbox 降级与模式', () => {
   it('原文模式缺 source.pdf → 明确出口按钮可切回译文', async () => {
     uiStore.setState({ previewMode: 'source' });
     mockPreview();
-    renderWithQuery(<PreviewArea did={DID} view="progress" />);
+    renderWithQuery(<PreviewArea did={DID} />);
     expect(await screen.findByText('该文档没有 source.pdf')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '切换到译文' }));
     expect(uiStore.getState().previewMode).toBe('target');
@@ -155,7 +155,7 @@ describe('PreviewArea bbox 降级与模式', () => {
   it('对照模式缺 source.pdf → 右侧译侧仍有画布，左侧给出说明', async () => {
     uiStore.setState({ previewMode: 'compare' });
     mockPreview();
-    renderWithQuery(<PreviewArea did={DID} view="progress" />);
+    renderWithQuery(<PreviewArea did={DID} />);
     expect(await screen.findByText(/对照模式的左侧不可用/)).toBeInTheDocument();
     expect((await screen.findAllByText('正在加载 PDF…')).length).toBeGreaterThan(1);
     expect(document.querySelector('[data-od-id="preview-canvas"]')).not.toBeNull();
@@ -166,19 +166,22 @@ describe('PreviewArea bbox 降级与模式', () => {
     mockPreview();
     renderWithQuery(
       <>
-        <PreviewArea did={DID} view="progress" />
-        {/* 段落编辑器在非进度视图（进度视图的面板是 W06 事件流） */}
-        <InspectorPanel did={DID} view="translate" feed={makeEventFeed()} />
+        <PreviewArea did={DID} />
+        <InspectorPanel did={DID} view="progress" feed={makeEventFeed()} />
       </>,
     );
     await screen.findAllByText('正在加载 PDF…');
     expect(screen.getByText(/点击预览里的段落框查看该段/)).toBeInTheDocument();
 
     act(() => uiStore.getState().setSelectedParagraph('P01-001'));
-    expect(await screen.findByText('已选中段落')).toBeInTheDocument();
-    expect(document.querySelector('[data-od-id="selected-paragraph-id"]')?.textContent).toBe(
-      'P01-001',
-    );
+    // 选中段落 id 显示在右侧面板头部（tab 行右侧，旧版「已选中段落」独立条已合并）
+    expect(
+      await waitFor(() => {
+        const node = document.querySelector('[data-od-id="selected-paragraph-id"]');
+        expect(node?.textContent).toBe('P01-001');
+        return node;
+      }),
+    ).not.toBeNull();
   });
 
   it('编译产物存在：工具条右侧的下载链接带名字里的修订号 + 状态条显示最新', async () => {
@@ -203,7 +206,7 @@ describe('PreviewArea bbox 降级与模式', () => {
         jsonResponse({ revision: 7, updated_at: null, paragraphs: {} }),
       [`/api/v1/documents/${DID}/jobs`]: () => jsonResponse([]),
     });
-    renderWithQuery(<PreviewArea did={DID} view="translate" />);
+    renderWithQuery(<PreviewArea did={DID} />);
 
     await screen.findAllByText('正在加载 PDF…');
     const link = (await waitFor(() => {
@@ -216,17 +219,13 @@ describe('PreviewArea bbox 降级与模式', () => {
     expect(link.getAttribute('href')).toBe(
       `/api/v1/documents/${DID}/artifacts/output/paper.mono.pdf?r=7`,
     );
-    const bar = await waitFor(() => {
-      const node = document.querySelector('[data-od-id="compile-bar"]');
-      expect(node).toHaveAttribute('data-compile-status', 'ok');
-      return node;
-    });
-    expect(bar?.textContent).toContain('已更新到 r7');
+    // ok 且不 stale 的常驻状态条已删除（修订号在下载按钮上）
+    expect(document.querySelector('[data-od-id="compile-bar"]')).toBeNull();
   });
 
   it('没有可下载产物：下载按钮禁用；无产物时状态条不渲染', async () => {
     mockPreview();
-    renderWithQuery(<PreviewArea did={DID} view="translate" />);
+    renderWithQuery(<PreviewArea did={DID} />);
     await screen.findAllByText('正在加载 PDF…');
     expect(document.querySelector('[data-od-id="download-button"]')).toHaveAttribute(
       'data-enabled',

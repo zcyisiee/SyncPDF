@@ -6,7 +6,7 @@
  * | `running` | 「编译中…」+ 脉冲点 + 「编辑已禁用」 |
  * | `failed` | 错误条 + `error_code`（来自最近的 compile job，契约的 `compile` 字段不带它）+ 重试 |
  * | `stale` | 「草稿比当前 PDF 新（PDF 修订 r{n}，草稿 r{m}）」+ 手动编译 |
- * | `ok` 且不 stale | 「已更新到 r{n}」 |
+ * | `ok` 且不 stale | 不渲染（修订号与质量徽标在下载按钮上，不占一行） |
  * | `none` 且没有产物 | 不渲染（下载按钮自己会解释「还没有可下载产物」） |
  *
  * 失败原因取自 `GET /documents/{did}/jobs` 里最近一条 `action=compile` 的 `error_code`/
@@ -137,19 +137,6 @@ export function CompileBar({ did, compile, draftRevision, busyJobId = null }: Co
     );
   }
 
-  if (status === 'ok') {
-    return (
-      <div
-        data-od-id="compile-bar"
-        data-compile-status="ok"
-        className="flex flex-none items-center gap-s2 border-b border-hair bg-pass-soft px-s5 py-[5px] text-tiny text-pass-ink"
-      >
-        <span aria-hidden="true" className="h-[6px] w-[6px] flex-none rounded-full bg-current" />
-        已更新到 r{revision}（与当前草稿一致）
-        <span className="ml-auto text-ink-4">编译成功 ≠ 质量通过，见右侧质量徽标</span>
-      </div>
-    );
-  }
-
+  // ok 且不 stale → 不渲染常驻绿条（减少永久占一行的视觉杂讯）：修订号与质量徽标在下载按钮上。
   return null;
 }

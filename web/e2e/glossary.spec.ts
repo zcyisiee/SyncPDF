@@ -106,9 +106,9 @@ async function promptText(request: APIRequestContext): Promise<string> {
   return await response.text();
 }
 
-/** 进度视图里「开始翻译」卡上的词表开关。 */
-function glossaryToggle(page: Page): Locator {
-  return page.locator('[data-od-id="start-job-use-glossary"]');
+/** 设置屏里「使用全局词表」偏好旁的条数/空表提示（工作台不再重复展示词表状态）。 */
+function glossaryCount(page: Page): Locator {
+  return page.locator('[data-od-id="settings-glossary-count"]');
 }
 
 /** 一组输入框当前的值（`toHaveValue` 只看单个，这里要看整列）。 */
@@ -319,28 +319,21 @@ test('坏 CSV 导入 → 明确报错，不动现有表', async ({ page, request
   await expect(page.locator('[data-od-id="glossary-cell-target"]').first()).toHaveValue('注意力');
 });
 
-test('开始翻译卡：词表非空 → 开关默认开；清空后 → 禁用 + 提示「词表为空」', async ({
+test('设置屏：词表非空显示条数；清空后 → 提示「词表为空」（服务端空表不注入）', async ({
   page,
   request,
 }) => {
   await putGlossary(request, SEED);
-  await page.goto(`/#/d/${DID}/progress`);
-  await expect(page.locator('[data-od-id="start-job-card"]')).toBeVisible();
+  await page.goto('/#/settings');
+  await expect(glossaryCount(page)).toHaveText('1 条');
 
-  const toggle = glossaryToggle(page);
-  await expect(toggle).toBeChecked();
-  await expect(toggle).toBeEnabled();
-
-  // 清空词表（DELETE）→ 刷新后开关禁用且恒为关，并写明原因
+  // 清空词表（DELETE）→ 刷新后设置屏如实显示「词表为空」
   const cleared = await request.delete(`${API}/glossary`);
   expect(cleared.ok()).toBe(true);
   await page.reload();
-  await expect(page.locator('[data-od-id="start-job-card"]')).toBeVisible();
-  await expect(glossaryToggle(page)).toBeDisabled();
-  await expect(glossaryToggle(page)).not.toBeChecked();
-  await expect(page.locator('[data-od-id="start-job-glossary-empty"]')).toHaveText('（词表为空）');
+  await expect(glossaryCount(page)).toHaveText('（词表为空）');
 
-  await page.screenshot({ path: join(SHOT_DIR, 'w13-start-card-glossary.png'), fullPage: true });
+  await page.screenshot({ path: join(SHOT_DIR, 'w13-settings-glossary.png'), fullPage: true });
 });
 
 test('注入证据：run job 的 prompt.md 含术语约束段；use_glossary=false 时不含', async ({

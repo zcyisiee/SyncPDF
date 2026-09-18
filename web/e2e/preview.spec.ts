@@ -163,7 +163,10 @@ test('进度页：真 PDF 渲染 + 两套 bbox 换算对齐 + 点框选中联动
   ).json();
   await page.getByRole('button', { name: '段落框', exact: true }).click();
   const switchStarted = Date.now();
-  await page.getByRole('button', { name: '下一页' }).click();
+  // 上一页/下一页按钮已删除：跳页用页码输入（滚动/触控板负责连续翻页）
+  const pageInput = page.getByRole('spinbutton', { name: '页码' });
+  await pageInput.fill('2');
+  await pageInput.press('Enter');
   await expect(page.locator('[data-bbox-id]')).toHaveCount(parsePage2.entities.length);
   const pageSwitchMs = Date.now() - switchStarted;
   await expect(page.locator('[data-od-id="page-count"]')).toHaveText('/ 21 页');

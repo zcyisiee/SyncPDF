@@ -23,7 +23,7 @@ export function ErrorCard({
   className?: string;
   children?: ReactNode;
 } & Omit<HTMLAttributes<HTMLDivElement>, 'title'>) {
-  const described = error === undefined ? null : describeApiError(error);
+  const described = error == null ? null : describeApiError(error);
   const heading = title ?? described?.title ?? '请求失败';
   const body = message ?? described?.message ?? '';
   const meta = detail ?? described?.detail;

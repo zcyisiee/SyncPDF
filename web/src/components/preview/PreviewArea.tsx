@@ -32,7 +32,6 @@ import {
   useJobs,
   usePatchDraftMutation,
 } from '../../lib/queries';
-import type { WorkbenchView } from '../../lib/routing';
 import { categoryVisible } from '../../lib/bbox';
 import { readVisibility, useBboxStore } from '../../stores/bbox';
 import { BboxLegend } from './BboxLegend';
@@ -48,13 +47,13 @@ import { ContinuousPdfPane, type BboxPaneData, type ReaderPosition } from './Con
 import type { PdfPageInfo } from './PdfCanvas';
 import { PreviewToolbar } from './PreviewToolbar';
 
-type PreviewProps = { did: string; view: WorkbenchView; streamArtifact?: string | null };
+type PreviewProps = { did: string; streamArtifact?: string | null };
 
-export function PreviewArea({ did, view, streamArtifact }: PreviewProps) {
-  return <DocumentPreview key={did} did={did} view={view} streamArtifact={streamArtifact} />;
+export function PreviewArea({ did, streamArtifact }: PreviewProps) {
+  return <DocumentPreview key={did} did={did} streamArtifact={streamArtifact} />;
 }
 
-function DocumentPreview({ did, view, streamArtifact }: PreviewProps) {
+function DocumentPreview({ did, streamArtifact }: PreviewProps) {
   const bboxPreferences = useBboxStore();
   const visibility = useMemo(() => bboxPreferences.documents[did] ?? readVisibility(did), [bboxPreferences.documents, did]);
   const detailQuery = useDocument(did);
@@ -90,8 +89,6 @@ function DocumentPreview({ did, view, streamArtifact }: PreviewProps) {
   const [pdfPageInfo, setPdfPageInfo] = useState<{ url: string; numPages: number } | null>(null);
   const [sourcePageInfo, setSourcePageInfo] = useState<{ url: string; numPages: number } | null>(null);
   const [panePositions, setPanePositions] = useState<Record<string, ReaderPosition>>({});
-  const [paneScale, setPaneScale] = useState(1);
-  const enterPreviewView = useUiStore((state) => state.enterPreviewView);
   const linked = useUiStore((state) => state.compareLinked);
   const [position, setPosition] = useState<ReaderPosition | null>(null);
   const [navigation, setNavigation] = useState<{ page: number; revision: number; pane?: string }>({ page: 1, revision: 0 });
@@ -125,10 +122,6 @@ function DocumentPreview({ did, view, streamArtifact }: PreviewProps) {
   useEffect(() => {
     resetPreviewForDocument(did);
   }, [did, resetPreviewForDocument]);
-
-  useEffect(() => {
-    enterPreviewView(view);
-  }, [view, enterPreviewView]);
 
   const localPreview = detailQuery.data?.preview_asset;
   const targetUrl = localPreview ? `/api/v1/documents/${encodeURIComponent(did)}/assets/${localPreview}` : streamArtifact ? artifactUrl(did, streamArtifact) :
@@ -253,7 +246,6 @@ function DocumentPreview({ did, view, streamArtifact }: PreviewProps) {
     <PreviewToolbar
       page={clampPage(previewPage, pageCount)}
       pageCount={pageCount}
-      scale={paneScale}
       sourceAvailable={source !== null}
       paged={primaryUrl !== null}
       onPageChange={navigate}
@@ -390,7 +382,6 @@ function DocumentPreview({ did, view, streamArtifact }: PreviewProps) {
           overlay={buildOverlay(previewMode !== 'source')}
           odId="preview-canvas"
           onPageInfo={handlePageInfo}
-          onScale={setPaneScale}
           emptyState={null}
         />
       </div>

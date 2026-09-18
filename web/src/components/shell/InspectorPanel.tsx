@@ -20,14 +20,12 @@ const TAB_LABELS: Record<InspectorTab, string> = {
   archive: '归档',
 };
 
+const TABS: readonly InspectorTab[] = ['paragraph', 'events', 'archive'];
+
 /**
- * 右侧面板 360px（§3 栅格）：顶部一行「已选中段落」（W05 的选中联动，任何视图/任何 tab 都可见），
- * 下面是**每个视图自己的 tab 集**——
- *
- * - 进度：事件流是唯一内容（W06 语义不变，不渲染 tab 栏）；
- * - 翻译 / 识别 / 检查：段落编辑器在前（默认），事件流退为次要 tab，W12 的归档摘要常驻第三 tab
- *   （它只是摘要 + 「查看全部」链接到归档视图，不重复列表；数据与归档视图同一个 query key）；
- * - 归档：归档摘要在前（默认，与预览区的版本列表同屏），事件流在后。
+ * 右侧面板 360px：一行头部（左：段落/事件流/归档 tab；右：已选中段落 + 只读标记），
+ * 下面是当前 tab 的内容。三个 tab 任何视图都在（视图合并后不再按视图换 tab 集）——
+ * 翻译进行中看「事件流」，微调结果看「段落」，版本历史看「归档」。
  *
  * 编辑只读判据与服务端一致（api.md §3.3）：`compile.status=running` 或该文档有活动 job 时
  * 草稿写端点会 409 `document_busy`，所以这里提前把编辑器置只读并说明原因。
@@ -55,68 +53,50 @@ export function InspectorPanel({
       ? undefined
       : `该文档有活动任务 ${busyJob.job_id}（${busyJob.action}），任务期间草稿只读`;
 
-  const defaultTab: InspectorTab =
-    view === 'progress' ? 'events' : view === 'archive' ? 'archive' : 'paragraph';
-  const [tab, setTab] = useState<InspectorTab>(defaultTab);
-  // 换视图 → 回到该视图的默认 tab（渲染期调整 state，不在 effect 里同步）
-  const [lastView, setLastView] = useState(view);
-  if (view !== lastView) {
-    setLastView(view);
-    setTab(defaultTab);
-  }
-
-  const showEditor = view !== 'progress' && view !== 'archive';
-  // 每个视图的 tab 集：进度视图不渲染 tab 栏（事件流是唯一内容）。
-  const tabs: InspectorTab[] =
-    view === 'archive' ? ['archive', 'events'] : ['paragraph', 'events', 'archive'];
+  // 默认 tab：归档视图给归档摘要（与预览区的版本列表同屏），其余给段落编辑器。
+  const [tab, setTab] = useState<InspectorTab>(view === 'archive' ? 'archive' : 'paragraph');
 
   return (
     <aside
       aria-label="右侧面板"
       data-od-id="inspector"
-      className="col-start-5 row-start-1 min-h-0 overflow-hidden border-l border-hair bg-ivory"
+      className="col-start-3 row-start-1 min-h-0 overflow-hidden border-l border-hair bg-ivory"
     >
       {collapsed ? null : (
         <div className="flex h-full min-h-0 flex-col" data-od-id="inspector-body">
-          {selectedParagraphId === null ? null : (
-            <div
-              className="flex flex-none items-baseline gap-s2 border-b border-hair bg-sand px-s3 py-[6px]"
-              data-od-id="inspector-selection"
-            >
-              <span className="text-tiny text-ink-3">已选中段落</span>
-              <span
-                className="font-mono text-sm text-ink-2"
-                data-od-id="selected-paragraph-id"
+          <div
+            role="tablist"
+            aria-label="右侧面板"
+            data-od-id="inspector-tabs"
+            className="flex flex-none items-center gap-s2 border-b border-hair bg-ivory px-s3 py-[4px]"
+          >
+            {TABS.map((item) => (
+              <TabButton
+                key={item}
+                odId={`inspector-tab-${item}`}
+                active={tab === item}
+                onClick={() => setTab(item)}
               >
-                {selectedParagraphId}
-              </span>
-              {editingLocked ? (
-                <span className="ml-auto font-mono text-micro text-run-ink" data-od-id="editor-locked">
-                  只读（{compileRunning ? '编译中' : '有任务在跑'}）
-                </span>
-              ) : null}
-            </div>
-          )}
-          {view === 'progress' ? null : (
-            <div
-              role="tablist"
-              aria-label="右侧面板"
-              data-od-id="inspector-tabs"
-              className="flex flex-none items-center gap-s2 border-b border-hair bg-ivory px-s3 py-[4px]"
-            >
-              {tabs.map((item) => (
-                <TabButton
-                  key={item}
-                  odId={`inspector-tab-${item}`}
-                  active={tab === item}
-                  onClick={() => setTab(item)}
+                {TAB_LABELS[item]}
+              </TabButton>
+            ))}
+            {selectedParagraphId === null ? null : (
+              <span className="ml-auto flex min-w-0 items-center gap-s2">
+                {editingLocked ? (
+                  <span className="font-mono text-micro text-run-ink" data-od-id="editor-locked">
+                    只读（{compileRunning ? '编译中' : '有任务在跑'}）
+                  </span>
+                ) : null}
+                <span
+                  className="truncate font-mono text-micro text-ink-3"
+                  data-od-id="selected-paragraph-id"
                 >
-                  {TAB_LABELS[item]}
-                </TabButton>
-              ))}
-            </div>
-          )}
-          {tab === 'paragraph' && showEditor ? (
+                  {selectedParagraphId}
+                </span>
+              </span>
+            )}
+          </div>
+          {tab === 'paragraph' ? (
             <div role="tabpanel" aria-label="段落" className="min-h-0 flex-1">
               <ParagraphEditor
                 did={did}
@@ -126,12 +106,12 @@ export function InspectorPanel({
               />
             </div>
           ) : null}
-          {tab === 'archive' && view !== 'progress' ? (
+          {tab === 'archive' ? (
             <div role="tabpanel" aria-label="归档" className="min-h-0 flex-1">
               <ArchiveSummary did={did} />
             </div>
           ) : null}
-          {tab === 'events' || view === 'progress' ? (
+          {tab === 'events' ? (
             <div role="tabpanel" aria-label="事件流" className="min-h-0 flex-1">
               <EventStreamPanel did={did} feed={feed} />
             </div>

@@ -85,12 +85,12 @@ export function ArchiveView({ did, compile }: ArchiveViewProps) {
             还没有版本归档
           </p>
           <p className="mt-s2 text-tiny text-ink-3">
-            每次「成功」的编译发布都会自动归档一版。去翻译视图改好译文后，保存草稿会触发
+            每次「成功」的编译发布都会自动归档一版。改好译文后，保存草稿会触发
             自动编译（也可以点工具条上的「手动编译」），第一次成功后这里就有 r1。
           </p>
           <div className="mt-s3" data-od-id="archive-empty-cta">
-            <LinkButton href={`#/d/${encodeURIComponent(did)}/translate`}>
-              去翻译视图开始编辑
+            <LinkButton href={`#/d/${encodeURIComponent(did)}`}>
+              回到工作台开始编辑
             </LinkButton>
           </div>
         </div>

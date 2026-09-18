@@ -182,7 +182,7 @@ describe('ArchiveView（版本列表 + 当前高亮 + 下载）', () => {
     expect(document.querySelector('[data-od-id="archive-stale"]')).toBeNull();
   });
 
-  it('空态：从没编译成功过 → 引导 + 指向翻译视图（不是错误）', async () => {
+  it('空态：从没编译成功过 → 引导 + 指回工作台（不是错误）', async () => {
     mockVersions({ did: DID, current_revision: 0, stale: false, items: [] });
     renderWithQuery(<ArchiveView did={DID} compile={null} />);
 
@@ -191,7 +191,7 @@ describe('ArchiveView（版本列表 + 当前高亮 + 下载）', () => {
     expect(document.querySelector('[data-od-id="archive-empty"]')).not.toBeNull();
     expect(
       document.querySelector('[data-od-id="archive-empty-cta"] a')?.getAttribute('href'),
-    ).toBe(`#/d/${DID}/translate`);
+    ).toBe(`#/d/${DID}`);
     expect(rows()).toEqual([]);
     expect(document.querySelector('[data-od-id="archive-error"]')).toBeNull();
   });

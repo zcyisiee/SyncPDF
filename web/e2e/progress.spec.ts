@@ -47,6 +47,8 @@ test('进度视图：事件面板真事件 + 时间线真阶段耗时 + 无 cons
   expect(page_.events.length).toBeGreaterThanOrEqual(10);
 
   await page.goto(`/#/d/${DID}/progress`);
+  // 事件流面板默认不挂载（默认 tab 是段落）：切过去看
+  await page.getByRole('tab', { name: '事件流' }).click();
   await expect(page.locator('[data-od-id="event-stream"]')).toBeVisible();
 
   // 事件面板：行数 == 服务端本页条数（窗口 ≤200，本 fixture 12 条）
@@ -102,11 +104,8 @@ test('进度视图：事件面板真事件 + 时间线真阶段耗时 + 无 cons
   const minutes = Math.floor(Math.floor(totalSeconds) / 60);
   await expect(total).toContainText(`${minutes}m`);
 
-  // 点击段 → 跳该阶段对应的视图（映射表在 lib/timeline.ts）
-  await page.locator(`[data-od-id="timeline-stage-check"] a`).click();
-  await expect(page).toHaveURL(new RegExp(`#/d/${DID}/check$`));
-  await page.goBack();
-  await expect(page.locator('[data-od-id="event-stream"]')).toBeVisible();
+  // 段不可点击（视图合并后时间线只是状态图，不再是链接）
+  await expect(page.locator('[data-od-id="timeline-stage-check"] a')).toHaveCount(0);
 
   await page.screenshot({ path: join(SHOT_DIR, 'e2e-progress.png'), fullPage: false });
   await page.locator('[data-od-id="event-stream"]').screenshot({

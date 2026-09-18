@@ -52,13 +52,10 @@ export function resetUiStore(): void {
   const fresh = createUiStore().getState();
   uiStore.setState({
     screen: 'library',
-    viewrailWidth: fresh.viewrailWidth,
     inspectorWidth: fresh.inspectorWidth,
     timelineHeight: fresh.timelineHeight,
     inspectorCollapsed: fresh.inspectorCollapsed,
     previewMode: 'target',
-    previewView: null,
-    previewChoices: {},
     previewZoom: null,
     compareLinked: true,
     previewPage: 1,

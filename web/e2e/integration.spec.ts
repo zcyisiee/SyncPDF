@@ -510,24 +510,26 @@ test('全旅程：静态构建 → 上传 → 实时进度 → 编辑/bbox → �
   writeParseProducts(did);
 
   // ========================================================================= #
-  // 阶段 2：配置 job（profile / 页范围 / dual / 词表开关）+ 提交真 run job
+  // 阶段 2：提交真 run job（stub profile 经 API 直发；UI 的「开始翻译」只列内置模型，
+  // 页范围等参数也收进了设置屏默认 —— 这里用 API 精确控制本用例要的形状）
   // ========================================================================= #
   await page.goto(`${serveOrigin}/#/d/${did}/progress`);
-  await expect(page.locator('[data-od-id="start-job-card"]')).toBeVisible({ timeout: 30_000 });
-  await page.locator('[data-od-id="start-job-profile"]').selectOption('w15-slow');
-  await page.locator('[data-od-id="start-job-pages"]').fill('1');
-  await page.locator('[data-od-id="start-job-dual"]').check();
-  // 词表有 1 条 → 开关可用且默认开（空表时前端禁用它，那是另一条分支）
-  await expect(page.locator('[data-od-id="start-job-use-glossary"]')).toBeEnabled();
-  await expect(page.locator('[data-od-id="start-job-use-glossary"]')).toBeChecked();
-  await page.getByText('高级：起点阶段').click();
-  await page.locator('[data-od-id="start-job-from"]').selectOption('translate');
-  await shot(page, 'w15-04-configured');
+  await expect(page.locator('[data-od-id="workbench"]')).toBeVisible({ timeout: 30_000 });
 
   const beforeRunPdf = sha256File(join(workdirOf(did), 'output', 'paper.mono.pdf'));
 
-  await page.locator('[data-od-id="start-job-submit"]').click();
-  await expect(page.locator('[data-od-id="active-job-card"]')).toBeVisible({ timeout: 30_000 });
+  const accepted = await request.post(`${serveOrigin}${API}/documents/${did}/jobs`, {
+    data: {
+      action: 'run',
+      from: 'translate',
+      pages: '1',
+      dual: true,
+      profile: 'w15-slow',
+      use_glossary: true,
+    },
+  });
+  expect(accepted.ok(), await accepted.text()).toBe(true);
+  await shot(page, 'w15-04-configured');
 
   // 配置真的进了 job 记录（服务端字段，不是前端自说自话）
   const running = await latestJob(request);
@@ -549,6 +551,8 @@ test('全旅程：静态构建 → 上传 → 实时进度 → 编辑/bbox → �
     data: { base_revision: 0, paragraphs: { [PID]: { target: '运行中不该写得进去' } } },
   });
   expect(busy.status(), '活动 job 期间草稿必须只读').toBe(409);
+  // 事件流面板默认不挂载（默认 tab 是段落）：切过去看运行中的事件行
+  await page.getByRole('tab', { name: '事件流' }).click();
   await expect(page.locator('[data-od-id="event-row"]').first()).toBeVisible({ timeout: 30_000 });
   // 事件流（SSE）真的连上了：job_update 就是走这条流推来的（进度视图的右侧面板默认是「事件」tab）
   await expect(page.locator('[data-od-id="event-stream-status"]')).toHaveAttribute(
@@ -574,7 +578,8 @@ test('全旅程：静态构建 → 上传 → 实时进度 → 编辑/bbox → �
   const finished = await latestJob(request);
   expect(finished.status, '本 spec 的 fixture 没有真 IR：run 应如实失败').toBe('failed');
   expect(finished.error_code, '失败必须带 error_code（不是静默）').toBeTruthy();
-  await expect(page.locator('[data-od-id="active-job-outcome"]')).toContainText(
+  // 失败态的顶栏徽标 tooltip 带结果文案（旧 active-job-outcome 条已并入 JobControls）
+  await expect(page.locator('[data-od-id="active-job-status"] [data-tip]')).toContainText(
     finished.error_code ?? '',
     { timeout: 30_000 },
   );

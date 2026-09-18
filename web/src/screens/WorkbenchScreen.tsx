@@ -13,9 +13,7 @@ import { Gutter } from '../components/shell/Gutter';
 import { InspectorPanel } from '../components/shell/InspectorPanel';
 import { ScreenFrame } from '../components/shell/ScreenFrame';
 import { Timeline } from '../components/shell/Timeline';
-import { ViewRail } from '../components/shell/ViewRail';
-import { ActiveJobCard } from '../components/jobs/ActiveJobCard';
-import { StartJobCard } from '../components/jobs/StartJobCard';
+import { JobControls } from '../components/jobs/JobControls';
 import { ArchiveView } from '../components/archive/ArchiveView';
 import { PreviewArea } from '../components/preview/PreviewArea';
 import { useEventWindow } from '../components/events/useEventWindow';
@@ -24,16 +22,16 @@ import { useTimelineStages } from '../components/events/useTimelineStages';
 import { useUiStore } from '../stores/ui';
 import type { CSSProperties } from 'react';
 
-/** 预览区接真 PDF 的四个视图（bbox 默认模式不同，见 `bboxModeForView`）。 */
-const PREVIEW_VIEWS: readonly WorkbenchView[] = ['progress', 'layout', 'translate', 'check'];
-
 /** 事件流说 live 时 stage-state 的轮询间隔（brief：live 2s 否则不轮询）。 */
 const STAGE_STATE_LIVE_REFETCH_MS = 2_000;
 
 /**
- * `#/d/:did/*` 工作台壳（§3 栅格 + §8.1/8.2）：
- * 56px 图标栏 → 220px 视图栏 → gutter → 预览区 → gutter → 360px 右侧面板 → gutter → 96px 时间线。
- * 三条分隔条宽度由 `--vrw`/`--inspw`/`--tlh` 驱动（写在本容器行内 style 上）。
+ * `#/d/:did/*` 工作台（页面合并后的唯一工作台）：
+ * 预览区（占满除右栏外的全部宽度）→ gutter → 右侧面板（段落 / 事件流 / 归档）→ gutter → 时间线。
+ *
+ * 旧版的 220px 视图栏与 识别/翻译/检查 二级视图已删除：那些页面几乎相同，所有信息都在
+ * 右侧面板与时间线里；「开始翻译 / 取消 / 重试」收进顶栏（`JobControls`，配置在设置屏）。
+ * 事件流也只有一份：正在跑的 run 与历史归档共用同一个窗口，不再区分「进行中/已完成」。
  */
 export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchView }) {
   usePersistentEvents(did);
@@ -45,33 +43,20 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
   const cardMode = jobCardMode(jobsQuery.data);
   const latestJob = activeJob(jobsQuery.data) ?? jobsQuery.data?.[0] ?? null;
   const queued = cardMode === 'active' && latestJob?.status === 'queued';
-  // 进度层：事件窗口（首拉 + SSE）→ 时间线段（stage-state 基线 + 事件流 live + job 驱动 live）。
-  const archiveFeed = useEventWindow(did, {
+  // 事件窗口（首拉 + SSE）→ 时间线段（stage-state 基线 + 事件流 live + job 驱动 live）。
+  // 有活动 job 时首拉按 5s 重拉：新 run 归档只能这样被发现（SSE 订阅的是首拉拿到的 run）。
+  const feed = useEventWindow(did, {
     onJobUpdate: jobUpdates.onJobUpdate,
-    // 活动 job 期间首拉按 5s 重拉：新 run 归档只能这样被发现（SSE 订阅的是首拉拿到的 run）。
     activeJob: cardMode === 'active',
   });
-  // Keep discovery/SSE alive, but never render the old run as this job's progress.
-  const pipelineJob = latestJob?.action === 'run' || latestJob?.action === 'check';
-  const jobStart = pipelineJob ? Date.parse(latestJob.created_at) : NaN;
-  const currentEvents = pipelineJob && Number.isFinite(jobStart)
-    ? archiveFeed.events.filter((event) =>
-        !queued &&
-        (!latestJob.run_id || latestJob.run_id === archiveFeed.runId) &&
-        Date.parse(event.at) >= jobStart,
-      )
-    : archiveFeed.events;
-  const feed = { ...archiveFeed, events: currentEvents };
-  const paragraph = [...currentEvents].reverse().find((event) => event.kind === 'paragraph_done')?.data;
-  const streamProgress = typeof paragraph?.index === 'number' && typeof paragraph?.total === 'number'
-    ? { index: paragraph.index, total: paragraph.total } : null;
-  const preview = [...currentEvents].reverse().find((event) => event.kind === 'preview_ready')?.data;
+  const preview = [...feed.events].reverse().find((event) => event.kind === 'preview_ready')?.data;
+  // 翻译进行中的实时预览产物（服务端边翻边出的 preview/*.pdf）。
   const streamArtifact = cardMode === 'active' && typeof preview?.artifact === 'string' &&
     /^preview\/[A-Za-z0-9-]+\.pdf$/.test(preview.artifact) ? preview.artifact : null;
   // 两路并存、任一 live 就快轮询：事件流还在增长，或有活动 job（前者要 run 归档才活）。
   const eventsLive = isRunLive(feed.events);
   const fastRefetch = eventsLive || cardMode === 'active';
-  // stage-state 的轮询用「事件流是否还在增长」（brief 冻结的 isRunLive；归档截断时会多轮询，
+  // stage-state 的轮询用「事件流是否还在增长」（isRunLive；归档截断时会多轮询，
   // 但时间线/徽标的 live 一律由基线裁决，见 lib/timeline.ts 的注释）。
   const timeline = useTimelineStages(did, feed.events, {
     refetchMs: fastRefetch ? STAGE_STATE_LIVE_REFETCH_MS : 0,
@@ -86,12 +71,12 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
       timeline.live || cardMode === 'active' || compileUnsettled(doc?.compile),
   });
   const doc = documentQuery.data;
-  const viewrailWidth = useUiStore((state) => state.viewrailWidth);
   const inspectorWidth = useUiStore((state) => state.inspectorWidth);
   const timelineHeight = useUiStore((state) => state.timelineHeight);
   const timelineCollapsed = useUiStore((state) => state.timelineCollapsed);
   const inspectorCollapsed = useUiStore((state) => state.inspectorCollapsed);
 
+  // 顶栏：文档名 + 状态徽标 + 任务控制（开始翻译 / 取消 / 重试）。
   const meta =
     doc === undefined ? null : (
       <>
@@ -99,6 +84,7 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
           {doc.title ?? doc.did}
         </span>
         <DocumentStatusBadge stageSummary={doc.stage_summary} live={timeline.live} queued={queued} />
+        <JobControls did={did} document={doc} jobs={jobsQuery.data} />
       </>
     );
 
@@ -124,7 +110,6 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
   }
 
   const layoutStyle = {
-    '--vrw': `${viewrailWidth}px`,
     '--inspw': inspectorCollapsed ? '0px' : `${inspectorWidth}px`,
     '--tlh': timelineCollapsed ? '28px' : `${timelineHeight}px`,
   } as CSSProperties;
@@ -138,32 +123,23 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
         data-view={view}
         data-did={did}
       >
-        <ViewRail
-          did={did}
-          view={view}
-          doc={doc}
-          live={timeline.live}
-          queued={queued}
-          jobControls={view === 'progress' ? (cardMode === 'start' ? <StartJobCard did={did} document={doc} /> : latestJob === null ? null : <ActiveJobCard did={did} job={latestJob} document={doc} streamProgress={streamProgress} />) : undefined}
-        />
-        <Gutter id="viewrail" className="col-start-2 row-start-1" />
         <section
           aria-label="预览区"
           data-od-id="stage"
-          className="col-start-3 row-start-1 flex min-h-0 min-w-0 flex-col"
+          className="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col"
         >
-          {PREVIEW_VIEWS.includes(view) ? (
-            <div className="min-h-0 flex-1">
-              <PreviewArea did={did} view={view} streamArtifact={streamArtifact} />
-            </div>
-          ) : (
+          {view === 'archive' ? (
             // 归档视图（W12）：预览区换成版本列表（右侧面板给同一份数据的摘要）。
             <div className="min-h-0 flex-1" data-od-id="archive-panel">
               <ArchiveView did={did} compile={doc?.compile} />
             </div>
+          ) : (
+            <div className="min-h-0 flex-1">
+              <PreviewArea did={did} streamArtifact={streamArtifact} />
+            </div>
           )}
         </section>
-        <Gutter id="inspector" className="col-start-4 row-start-1" />
+        <Gutter id="inspector" className="col-start-2 row-start-1" />
         <InspectorPanel did={did} view={view} feed={feed} />
         {!timelineCollapsed ? <Gutter id="timeline" className="col-span-full row-start-2" /> : null}
         <Timeline did={did} segments={timeline.segments} events={feed.events} queued={queued} unavailable={timeline.isError} />

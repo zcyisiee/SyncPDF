@@ -11,7 +11,6 @@ import type { ScreenViewport } from '../src/components/preview/BboxLayer';
 import type { GeometryResponse } from '../src/api/types';
 import {
   artifactUrl,
-  bboxModeForView,
   clampPage,
   geometryBboxes,
   pickPreviewArtifacts,
@@ -228,14 +227,10 @@ describe('预览产物与页/模式映射', () => {
     expect(artifactUrl('a b', 'source.pdf')).toBe('/api/v1/documents/a%20b/artifacts/source.pdf');
   });
 
-  it('clampPage 与视图默认 bbox 模式', () => {
+  it('clampPage', () => {
     expect(clampPage(0, 21)).toBe(1);
     expect(clampPage(30, 21)).toBe(21);
     expect(clampPage(2.6, 21)).toBe(3);
     expect(clampPage(Number.NaN, 21)).toBe(1);
-    expect(bboxModeForView('progress')).toBe('parse');
-    expect(bboxModeForView('layout')).toBe('parse');
-    expect(bboxModeForView('translate')).toBe('layout');
-    expect(bboxModeForView('check')).toBe('parse');
   });
 });
