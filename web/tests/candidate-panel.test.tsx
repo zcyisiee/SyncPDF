@@ -26,7 +26,7 @@ const ADOPT_PATH = (cid: string) => `${CANDIDATES_PATH}/${cid}/adopt`;
 const REJECT_PATH = (cid: string) => `${CANDIDATES_PATH}/${cid}/reject`;
 
 const PROFILES = [
-  { id: 'echo-t', label: 'Echo T', has_translator: true, has_reviewer: false },
+  { id: 'pi-deepseek-flash', label: 'Pi · DeepSeek Flash', builtin: true, thinking_levels: ['off', 'low', 'high', 'max'], default_thinking: 'low', has_translator: true, has_reviewer: false },
   { id: 'review-only', label: 'Review Only', has_translator: false, has_reviewer: true },
 ];
 
@@ -113,15 +113,13 @@ describe('CandidatePanel 按钮态', () => {
       <CandidatePanel did={DID} pid={PID} currentTarget="基线译文" baselineTarget="基线译文" />,
     );
 
-    const select = await screen.findByLabelText('重译 profile');
-    await waitFor(() => expect(select).toHaveValue('echo-t'));
+    const select = await screen.findByLabelText('重译模型');
+    await waitFor(() => expect(select).toHaveValue('pi-deepseek-flash'));
     // 没配 translator 的 profile 不出现在候选生成的下拉里
     expect(screen.queryByText('Review Only')).toBeNull();
 
     await clickWhenEnabled('AI 重译');
-    await waitFor(() => expect(bodyOf(fetchMock, RETRANSLATE_PATH)).toEqual({ profile: 'echo-t' }));
-    // 「或用上次」：选过的 profile 进 UI store（会话内记忆）
-    expect(uiStore.getState().retranslateProfile).toBe('echo-t');
+    await waitFor(() => expect(bodyOf(fetchMock, RETRANSLATE_PATH)).toEqual({ profile: 'pi-deepseek-flash', thinking: 'low' }));
   });
 
   it('活动 job 期间：生成与采用禁用，拒绝仍可点（拒绝不写草稿）', async () => {
@@ -149,7 +147,7 @@ describe('CandidatePanel 按钮态', () => {
     renderWithQuery(
       <CandidatePanel did={DID} pid={PID} currentTarget="基线译文" baselineTarget="基线译文" />,
     );
-    expect(await screen.findByText(/没有可用翻译配置：/)).toBeInTheDocument();
+    expect(await screen.findByText(/未能读取内置模型/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '管理翻译配置' })).toHaveAttribute('href', '#/settings');
     expect(screen.getByText('AI 重译')).toBeDisabled();
   });

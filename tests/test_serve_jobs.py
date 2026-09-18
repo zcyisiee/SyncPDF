@@ -703,7 +703,9 @@ def test_unknown_profile_lists_ids_but_never_commands(client, root):
     assert response.status_code == 422
     error = response.json()["error"]
     assert error["code"] == "unknown_profile"
-    assert error["detail"]["available"] == ["known", "stub"]  # 只有 id
+    # 内置的四个 harness 永远可选；文件里的 id 也在，但只给 id、不给命令。
+    assert {"known", "stub"} <= set(error["detail"]["available"])
+    assert error["detail"]["available"] == sorted(error["detail"]["available"])
     assert "secret-cmd" not in response.text and "sk-xxx" not in response.text
 
 
@@ -870,9 +872,12 @@ def test_profile_resolution_reads_file_and_env_override(root, monkeypatch):
 
 
 def test_profile_missing_or_corrupt_file_means_no_profiles(tmp_path):
+    from babeldoc_tools.harnesses import BUILTINS
+
     empty = tmp_path / "empty"
     (empty / STATE_DIR).mkdir(parents=True)
-    assert list_profile_ids(empty) == []
+    # 没有文件也没有 env 覆盖时，只剩内置 harness；文件里的 id 一个都不认。
+    assert list_profile_ids(empty) == sorted(BUILTINS)
     assert resolve_profile(empty, "stub") is None
 
     (empty / STATE_DIR / "profiles.json").write_text("{oops", encoding="utf-8")

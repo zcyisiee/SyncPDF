@@ -65,6 +65,7 @@ class DocumentStore:
                 root=str(resolved),
             )
         self.root = resolved
+        self._database = None
         #: ``None`` = 枚举根目录全部子目录；否则只允许这些 did。
         self.allowed = allowed
         self.mode: str = "workdir" if allowed is not None else "root"
@@ -101,6 +102,14 @@ class DocumentStore:
             return self.root / next(iter(self.allowed))
         return self.root
 
+    @property
+    def database(self):
+        from babeldoc_tools.serve.database import MetadataDB
+
+        if self._database is None:
+            self._database = MetadataDB(self.store_base)
+        return self._database
+
     # ------------------------------------------------------------- internals
     def _require_root(self) -> Path:
         """确认根目录仍在（运行期被删 → ``root_missing``，供 health 报 503）。"""
@@ -116,7 +125,8 @@ class DocumentStore:
         root = self._require_root()
         if self.allowed is not None:
             return sorted(self.allowed)
-        return sorted(entry.name for entry in root.iterdir())
+        return sorted(entry.name for entry in root.iterdir()
+                      if entry.name not in {"assets", "cache", "tmp"})
 
     # ---------------------------------------------------------------- public
     def list_dids(self) -> list[str]:

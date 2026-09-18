@@ -138,6 +138,7 @@ def prompt_path(name: str) -> Path | None:
 def _run_subprocess(
     prompt: str, command: str, timeout_s: int, error_prefix: str,
     *, debug_recorder=None, debug_origin: str | None = None, debug_context: dict | None = None,
+    on_chunk=None,
 ) -> str:
     """把 ``prompt`` 写进 ``command`` 的 stdin，返回它的 stdout。
 
@@ -170,13 +171,14 @@ def _run_subprocess(
         try:
             # argv 由用户的显式 --translator/--reviewer 参数定义，shlex.split 后不经 shell；
             # 这是唯一的 provider 机制（stdin/stdout 子进程协议），非 shell 拼接。
-            result = subprocess.run(  # noqa: S603
-                argv,
-                input=prompt,
-                capture_output=True,
-                text=True,
-                timeout=timeout_s,
-            )
+            if on_chunk is not None:
+                from babeldoc_tools.process_stream import run_stream
+
+                result = run_stream(argv, input=prompt, timeout=timeout_s, on_stdout=on_chunk)
+            else:
+                result = subprocess.run(  # noqa: S603
+                    argv, input=prompt, capture_output=True, text=True, timeout=timeout_s,
+                )
         except subprocess.TimeoutExpired as exc:
             raise ToolError(
                 f"{error_prefix}_timeout",
@@ -205,6 +207,7 @@ def _run_subprocess(
 def run_translator(
     prompt: str, command: str, timeout_s: int = 1800, *, debug_recorder=None,
     debug_origin: str | None = None, debug_context: dict | None = None,
+    on_chunk=None,
 ) -> str:
     """调用用户指定的翻译命令：stdin 收提示词，stdout 出译文，返回 stdout。
 
@@ -212,7 +215,7 @@ def run_translator(
     """
     return _run_subprocess(
         prompt, command, timeout_s, "translator", debug_recorder=debug_recorder,
-        debug_origin=debug_origin, debug_context=debug_context,
+        debug_origin=debug_origin, debug_context=debug_context, on_chunk=on_chunk,
     )
 
 

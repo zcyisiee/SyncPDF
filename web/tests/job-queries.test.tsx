@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -16,6 +16,7 @@ import {
   JOBS_IDLE_REFETCH_MS,
 } from '../src/lib/jobs';
 import {
+  queryKeys,
   useCancelJobMutation,
   useCreateJobMutation,
   useJobs,
@@ -158,6 +159,33 @@ describe('W08 hooks（mock fetch）', () => {
       'profile',
       'use_glossary',
     ]);
+  });
+
+  it('accepted job replaces completed state before refetch and cancels an older in-flight list', async () => {
+    const client = createQueryClient();
+    const key = queryKeys.jobs('alpha');
+    const oldJob = makeJob({ job_id: 'j_old', status: 'succeeded' });
+    client.setQueryData(key, [oldJob]);
+    let resolveOld!: (response: Response) => void;
+    const oldRequest = new Promise<Response>((resolve) => { resolveOld = resolve; });
+    let listCalls = 0;
+    recordFetch({
+      '/api/v1/documents/alpha/jobs': () => {
+        listCalls += 1;
+        return listCalls === 1 ? oldRequest : new Promise<Response>(() => {});
+      },
+      'POST /api/v1/documents/alpha/jobs': () => jsonResponse({ job_id: 'j_new', action: 'run', status: 'queued' }, 202),
+    });
+    const { result } = renderHook(() => ({ jobs: useJobs('alpha'), create: useCreateJobMutation('alpha') }), {
+      wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    });
+    act(() => { void client.invalidateQueries({ queryKey: key }); });
+    await waitFor(() => expect(listCalls).toBe(1));
+    act(() => result.current.create.mutate({ action: 'run', from: 'translate', profile: 'echo-t', dual: false, use_glossary: true }));
+    await waitFor(() => expect(result.current.jobs.data?.[0]).toMatchObject({ job_id: 'j_new', status: 'queued', from_stage: 'translate' }));
+    await act(async () => { resolveOld(jsonResponse([oldJob])); });
+    expect(result.current.jobs.data?.[0].job_id).toBe('j_new');
+    expect(result.current.jobs.data?.[1].job_id).toBe('j_old');
   });
 
   it('useCancelJobMutation：POST /jobs/{jid}/cancel（幂等，终态返回 200 也是成功）', async () => {

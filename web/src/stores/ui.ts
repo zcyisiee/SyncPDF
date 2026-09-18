@@ -19,6 +19,7 @@ export const STORAGE_KEYS = {
   viewrail: 'ieet.vrw',
   inspector: 'ieet.inspw',
   timeline: 'ieet.tlh',
+  timelineCollapsed: 'ieet.timelineCollapsed',
   inspectorCollapsed: 'ieet.inspCollapsed',
   screen: 'ieet.screen',
   bboxMode: 'ieet.bboxMode',
@@ -82,6 +83,7 @@ export interface UiState {
   viewrailWidth: number;
   inspectorWidth: number;
   timelineHeight: number;
+  timelineCollapsed: boolean;
   inspectorCollapsed: boolean;
   previewMode: PreviewMode;
   previewView: WorkbenchView | null;
@@ -107,6 +109,7 @@ export interface UiState {
   /** 拖拽/键盘统一入口：clamp 到 §8.2 范围并持久化。 */
   setLayoutWidth: (id: GutterId, next: number) => void;
   setDragging: (id: GutterId | null) => void;
+  setTimelineCollapsed: (collapsed: boolean) => void;
   /** 折叠右侧面板（`--inspw:0`）与 `ieet.inspCollapsed`。 */
   setInspectorCollapsed: (collapsed: boolean) => void;
   setPreviewMode: (mode: PreviewMode) => void;
@@ -188,6 +191,7 @@ export function createUiStore(): StoreApi<UiState> {
     viewrailWidth: readStoredNumber(LAYOUT_SPECS.viewrail),
     inspectorWidth: readStoredNumber(LAYOUT_SPECS.inspector),
     timelineHeight: readStoredNumber(LAYOUT_SPECS.timeline),
+    timelineCollapsed: readStoredFlag(STORAGE_KEYS.timelineCollapsed, false),
     inspectorCollapsed: readStoredFlag(STORAGE_KEYS.inspectorCollapsed, false),
     previewMode: 'target',
     previewView: null,
@@ -235,6 +239,10 @@ export function createUiStore(): StoreApi<UiState> {
       set({ timelineHeight: value });
     },
     setDragging: (dragging) => set({ dragging }),
+    setTimelineCollapsed: (collapsed: boolean) => {
+      writeStored(STORAGE_KEYS.timelineCollapsed, collapsed ? '1' : '0');
+      set({ timelineCollapsed: collapsed });
+    },
     setInspectorCollapsed: (collapsed) => {
       writeStored(STORAGE_KEYS.inspectorCollapsed, collapsed ? '1' : '0');
       set({ inspectorCollapsed: collapsed });

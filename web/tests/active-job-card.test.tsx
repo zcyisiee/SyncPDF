@@ -180,19 +180,20 @@ describe('ActiveJobCard（活动/最近失败任务卡）', () => {
     expect(alert).toHaveTextContent('job 不存在');
   });
 
-  it('running 的 run job：显示「已译段落 N/M」并如实标注套版后更新（W14）', () => {
+  it('running 的 run job：实时计数取当前流，覆盖旧文档计数', () => {
     const fetchMock = mockApiFetch({});
     renderWithQuery(
       <ActiveJobCard
         did={DID}
         job={makeJob({ status: 'running', action: 'run', from_stage: 'translate' })}
-        document={makeDocument({ translated_count: 98, paragraph_count: 375 })}
+        document={makeDocument({ translated_count: 375, paragraph_count: 375 })}
+        streamProgress={{ index: 98, total: 375 }}
       />,
     );
     const progress = document.querySelector('[data-od-id="active-job-progress"]');
-    expect(progress?.textContent).toContain('已译段落 98/375');
-    // 红线：不许暗示“在跳动”——文案写明数据要套版后才更新，且 DOM 上带着两个原始计数
-    expect(progress?.textContent).toContain('套版后更新');
+    expect(progress?.textContent).toContain('已收到译文 98/375');
+    // 当前 run 的完整译文块进度，而不是上一轮的 translated.jsonl。
+    expect(progress?.textContent).toContain('实时');
     expect(progress?.getAttribute('data-translated')).toBe('98');
     expect(progress?.getAttribute('data-paragraphs')).toBe('375');
     expect(fetchMock).not.toHaveBeenCalled(); // 数据来自父级，本卡不发请求
@@ -208,7 +209,7 @@ describe('ActiveJobCard（活动/最近失败任务卡）', () => {
       />,
     );
     expect(document.querySelector('[data-od-id="active-job-progress"]')?.textContent).toContain(
-      '已译段落 —/—',
+      '等待完整译文段落',
     );
     unmount();
 

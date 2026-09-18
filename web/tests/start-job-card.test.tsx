@@ -16,7 +16,7 @@ const ARTIFACTS: ArtifactItem[] = [
 ];
 
 const PROFILES = [
-  { id: 'echo-t', label: 'Echo T', has_translator: true, has_reviewer: false },
+  { id: 'pi-deepseek-flash', label: 'Pi · DeepSeek Flash', builtin: true, thinking_levels: ['off', 'low', 'high', 'max'], default_thinking: 'low', has_translator: true, has_reviewer: false },
   { id: 'deepseek-flash', label: 'Deepseek Flash', has_translator: true, has_reviewer: true },
 ];
 
@@ -107,7 +107,7 @@ describe('StartJobCard（开始翻译配置卡）', () => {
     const submit = await screen.findByRole('button', { name: '开始翻译' });
     expect(submit).toBeEnabled();
     const profile = screen.getByLabelText('翻译配置') as HTMLSelectElement;
-    expect(profile.value).toBe('echo-t');
+    expect(profile.value).toBe('pi-deepseek-flash');
     expect(screen.getByLabelText('页码范围（留空 = 全部）')).toHaveAttribute(
       'placeholder',
       '1-3,5 全部留空',
@@ -159,7 +159,8 @@ describe('StartJobCard（开始翻译配置卡）', () => {
       from: 'parse',
       pages: '1-3,5',
       dual: true,
-      profile: 'echo-t',
+      profile: 'pi-deepseek-flash',
+      thinking: 'low',
       // 词表只有这一个布尔字段（内容/路径全在服务端）
       use_glossary: true,
     });
@@ -178,7 +179,7 @@ describe('StartJobCard（开始翻译配置卡）', () => {
   it('没有 profile 时给出可操作提示并禁用提交', async () => {
     mockApiFetch(routes({ '/api/v1/profiles': () => jsonResponse([]) }));
     renderWithQuery(<StartJobCard did="up-sample-20260917-120000" document={makeDocument()} />);
-    expect(await screen.findByText(/没有可用翻译配置：/)).toBeInTheDocument();
+    expect(await screen.findByText(/未能读取内置模型/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '开始翻译' })).toBeDisabled();
   });
 

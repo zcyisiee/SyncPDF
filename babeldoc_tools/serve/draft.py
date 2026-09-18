@@ -104,6 +104,21 @@ def read_draft(workdir: Path | str) -> DraftDoc:
     容错是刻意的：草稿文件坏了不该让详情/编译端点 500 —— 但**不**回退到某个旧的
     内存副本（那会让"读到的 revision"与磁盘不一致，破坏乐观并发）。
     """
+    workdir = Path(workdir)
+    # SQLite is authoritative once a draft has been persisted. Legacy files are
+    # read only until the first successful edit imports them.
+    database_path = next((base for base in (workdir, workdir.parent)
+                          if (base / "app.db").is_file()), None)
+    if database_path is not None:
+        from babeldoc_tools.serve.database import MetadataDB
+
+        database = MetadataDB(database_path)
+        try:
+            payload = database.draft(workdir.name)
+            if payload is not None:
+                return DraftDoc.model_validate(payload)
+        finally:
+            database.close()
     path = draft_path(workdir)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -209,8 +224,9 @@ class DraftStore:
     同文档串行）。锁只在**写**路径上；读路径靠原子替换保证"永远读到完整文件"。
     """
 
-    def __init__(self, workdir: Path | str) -> None:
+    def __init__(self, workdir: Path | str, database=None) -> None:
         self.workdir = Path(workdir)
+        self.database = database
         self._lock = asyncio.Lock()
 
     @property
@@ -224,6 +240,9 @@ class DraftStore:
 
     def _write(self, doc: DraftDoc) -> None:
         """原子写（同目录 tmp + ``os.replace``）。"""
+        if self.database is not None:
+            self.database.save_draft(self.workdir.name, doc.model_dump(),
+                                     expected_revision=doc.revision - 1)
         path = self.path
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(f".{path.name}.tmp")
@@ -303,6 +322,6 @@ class DraftRegistry:
         workdir = self._store.resolve(did)
         store = self._stores.get(did)
         if store is None:
-            store = DraftStore(workdir)
+            store = DraftStore(workdir, self._store.database)
             self._stores[did] = store
         return store

@@ -58,10 +58,13 @@ export function StatusBadge({
 export function DocumentStatusBadge({
   stageSummary,
   live = false,
+  queued = false,
 }: {
   stageSummary?: Record<string, string>;
   live?: boolean;
+  queued?: boolean;
 }) {
+  if (queued) return <StatusBadge tone="run">排队中</StatusBadge>;
   if (live) {
     return (
       <StatusBadge tone="run" running>

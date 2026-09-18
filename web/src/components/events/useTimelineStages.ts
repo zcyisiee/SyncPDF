@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import type { JobRecord } from '../../api/types';
+import { STAGE_NAMES } from '../../lib/humanize';
 import { useStageState } from '../../lib/queries';
 import type { RunEvent } from '../../lib/events';
 import {
@@ -45,11 +46,26 @@ export function useTimelineStages(
   const stageState = useStageState(did, options.refetchMs ?? 0);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const driven = jobLiveStage(options.job);
-  const segments = useMemo(
-    () => timelineSegments(stageState.data?.stages, events, nowMs, driven),
-    [stageState.data, events, nowMs, driven],
-  );
+  const job = options.job;
+  const driven = jobLiveStage(job);
+  const segments = useMemo(() => {
+    let stages = stageState.data?.stages;
+    if (job && (job.action === 'run' || job.action === 'check')) {
+      const from = job.action === 'check' ? 'check' : job.from_stage ?? 'parse';
+      const fromIndex = STAGE_NAMES.findIndex((stage) => stage === from);
+      const started = Date.parse(job.started_at ?? job.created_at);
+      // Earlier stages are reused; every rerun stage must belong to this job.
+      // run_id alone is insufficient: stage-state merges the new manifest with
+      // run_state, whose downstream entries may still describe the previous run.
+      if (fromIndex >= 0 && Number.isFinite(started)) {
+        stages = stages?.filter((item) =>
+          STAGE_NAMES.findIndex((stage) => stage === item.stage) < fromIndex ||
+          (job.status !== 'queued' && Date.parse(item.started_at ?? '') >= started),
+        );
+      }
+    }
+    return timelineSegments(stages, events, nowMs, driven);
+  }, [stageState.data, events, nowMs, driven, job]);
   const live = hasLiveSegment(segments);
 
   useEffect(() => {

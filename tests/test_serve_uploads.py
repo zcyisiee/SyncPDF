@@ -125,13 +125,18 @@ def test_upload_creates_document_and_returns_contract_shape(client, root):
     assert client.get(f"{API}/documents/{body['did']}/artifacts/{SOURCE_NAME}").status_code == 200
 
 
-def test_two_uploads_of_the_same_filename_get_distinct_dids(client, root):
+def test_identical_uploads_reuse_document_and_source_asset(client, root):
     first = posted(client, "same.pdf").json()["did"]
-    second = posted(client, "same.pdf").json()["did"]
+    second = posted(client, "renamed.pdf").json()["did"]
+    assert first == second
+    assert (root / first / SOURCE_NAME).is_file()
+    assert len(list((root / "assets").rglob("*.pdf"))) == 1
+
+
+def test_same_filename_different_pdf_is_not_merged(client):
+    first = posted(client, "same.pdf").json()["did"]
+    second = posted(client, "same.pdf", MINIMAL_PDF + b"\n% different version").json()["did"]
     assert first != second
-    # 同一秒内 → 同名后缀递增；跨到下一秒 → 时间戳不同。两种都不撞目录。
-    assert first.startswith("up-same-") and second.startswith("up-same-")
-    assert (root / first / SOURCE_NAME).is_file() and (root / second / SOURCE_NAME).is_file()
 
 
 # --------------------------------------------------------------------------- #

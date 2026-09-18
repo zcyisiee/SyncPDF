@@ -116,10 +116,13 @@ def require_model(base: Path | str, model_id: str) -> dict:
 
 
 def save_model(base: Path | str, update: ModelUpdate) -> dict:
+    from babeldoc_tools.harnesses import BUILTINS
     from babeldoc_tools.serve.profiles import load_profiles
     from babeldoc_tools.serve.profiles import profile_env_command
 
     with _LOCK:
+        if update.id in BUILTINS:
+            raise ToolError("profile_collision", "Built-in model IDs are reserved")
         if update.id in load_profiles(base) or any(profile_env_command(update.id, f) for f in ("translator", "reviewer")):
             raise ToolError("profile_collision", "ID already belongs to a script profile")
         data = load_models(base)

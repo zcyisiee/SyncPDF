@@ -7,6 +7,7 @@
  * 两行结构 + 压缩态（`--tlh < 94px` 时耗时内联到名称右侧）。
  */
 import { cn } from '../../lib/cn';
+import type { RunEvent } from '../../lib/events';
 import {
   formatDuration,
   formatStageDuration,
@@ -61,26 +62,42 @@ export function Timeline({
   did,
   segments,
   unavailable = false,
+  events = [],
+  queued = false,
 }: {
   did: string;
   segments: readonly TimelineSegment[];
+  events?: readonly RunEvent[];
+  queued?: boolean;
   /** stage-state 查询失败（时间线只有「未运行」时不能假装这是真实状态）。 */
   unavailable?: boolean;
 }) {
   const timelineHeight = useUiStore((state) => state.timelineHeight);
+  const timelineCollapsed = useUiStore((state) => state.timelineCollapsed);
+  const setTimelineCollapsed = useUiStore((state) => state.setTimelineCollapsed);
   const compact = timelineHeight < COMPACT_HEIGHT;
   const maxDuration = maxSegmentDuration(segments);
   const total = totalDurationS(segments);
-  const status = timelineStatus(segments);
+  const status = queued
+    ? { label: '排队中', tone: 'run' as const, running: false }
+    : timelineStatus(segments);
 
+  if (timelineCollapsed) {
+    return <section aria-label="阶段时间线" data-od-id="timeline-collapsed" className="relative col-span-full row-start-3 flex items-center justify-center border-t border-hair bg-ivory px-s4">
+      <button type="button" aria-label="展开时间线" title="展开时间线" onClick={() => setTimelineCollapsed(false)} className="absolute left-1/2 top-0 z-10 inline-flex h-5 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded border border-hair bg-ivory text-ink-3 shadow-sm hover:bg-sand focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
+        <span aria-hidden="true">⌃</span>
+      </button>
+    </section>;
+  }
   return (
     <section
       aria-label="阶段时间线"
       data-od-id="timeline"
-      className="col-span-full row-start-3 flex min-w-0 flex-col gap-[5px] overflow-hidden border-t border-hair bg-ivory px-s4 pb-[6px] pt-[7px]"
+      className="relative col-span-full row-start-3 flex min-w-0 flex-col gap-[5px] overflow-hidden border-t border-hair bg-ivory px-s4 pb-[6px] pt-[7px]"
     >
       <div className="flex h-5 flex-none items-center gap-s4 whitespace-nowrap font-mono text-micro tracking-[0.03em] text-ink-4">
         <span className="min-w-0 truncate">
+          <button type="button" aria-label="隐藏阶段时间线" onClick={() => setTimelineCollapsed(true)} className="absolute left-1/2 top-0 z-10 inline-flex h-5 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded border border-hair bg-ivory text-ink-3 shadow-sm hover:bg-sand focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent" title="隐藏时间线"><span aria-hidden="true">⌄</span></button>
           <b className="font-medium text-ink-2">{did}</b> · 阶段时间线
         </span>
         <StatusBadge tone={status.tone} running={status.running}>
@@ -124,6 +141,9 @@ export function Timeline({
                         />
                       ) : null}
                       {STAGE_LABELS[segment.stage]}
+                      {events.filter((event) => event.stage === segment.stage).length > 0 ? (
+                        <span className="font-normal text-ink-4">· {events.filter((event) => event.stage === segment.stage).length} 条事件</span>
+                      ) : null}
                       {segment.state === 'err' ? (
                         <span
                           aria-hidden="true"

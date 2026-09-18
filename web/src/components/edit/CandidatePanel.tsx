@@ -22,7 +22,8 @@ import {
   useRejectCandidateMutation,
   useRetranslateMutation,
 } from '../../lib/queries';
-import { useUiStore } from '../../stores/ui';
+import { useHarnessSelection } from '../../lib/harnesses';
+import { HarnessSelect } from '../jobs/HarnessSelect';
 import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';
 import { ErrorCard } from '../ui/ErrorCard';
@@ -62,16 +63,8 @@ export function CandidatePanel({
   const retranslate = useRetranslateMutation(did, pid);
   const adopt = useAdoptCandidateMutation(did, pid);
   const reject = useRejectCandidateMutation(did, pid);
-  const remembered = useUiStore((state) => state.retranslateProfile);
-  const setRemembered = useUiStore((state) => state.setRetranslateProfile);
-
-  // 只有配了 translator 的 profile 能生成候选（没配的服务端会 422 `profile_missing`）。
-  const profiles = (profilesQuery.data ?? []).filter((item) => item.has_translator);
-  // 「或用上次」：上次选过的 profile 还在列表里就继续用它，否则回第一个。
-  const profile =
-    remembered !== null && profiles.some((item) => item.id === remembered)
-      ? remembered
-      : (profiles[0]?.id ?? '');
+  const selection = useHarnessSelection(profilesQuery.data ?? []);
+  const { profiles, profile, thinking } = selection;
 
   const items = candidatesQuery.data?.items ?? [];
   const queryError = candidatesQuery.isError || profilesQuery.isError;
@@ -96,24 +89,7 @@ export function CandidatePanel({
 
       {queryError ? <p className="mt-2 text-micro text-err">翻译配置或候选读取失败，请刷新后重试。</p> : null}
       <div className="mt-2 flex flex-wrap items-end gap-s2">
-        <label className="flex min-w-0 flex-col gap-1">
-          <span className="text-tiny text-ink-4">profile（命令由服务端解析）</span>
-          <select
-            data-od-id="retranslate-profile"
-            aria-label="重译 profile"
-            value={profile}
-            disabled={disabled || profiles.length === 0}
-            onChange={(event) => setRemembered(event.target.value)}
-            className="h-6 rounded border border-hair bg-ivory px-1 font-mono text-micro text-ink-2 disabled:opacity-45"
-          >
-            {profiles.length === 0 ? <option value="">（没有可用 profile）</option> : null}
-            {profiles.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <HarnessSelect selection={selection} label="重译模型" idPrefix="retranslate" disabled={disabled} />
         <Tooltip content={disabled ? (disabledReason ?? '当前不可提交') : '对这一段让 AI 重新翻译（不采用就不改译文）'}>
           <span>
             <Button
@@ -122,8 +98,7 @@ export function CandidatePanel({
               disabled={!canGenerate}
               onClick={() => {
                 if (profile === '') return;
-                setRemembered(profile);
-                retranslate.mutate(profile);
+                retranslate.mutate({ profile, thinking });
               }}
             >
               AI 重译
@@ -132,7 +107,7 @@ export function CandidatePanel({
         </Tooltip>
         {profilesQuery.isSuccess && profiles.length === 0 ? (
           <span className="text-micro text-ink-4" data-od-id="retranslate-no-profile">
-            没有可用翻译配置：请先在翻译配置中创建模型，或展开高级脚本 profile。 <a className="underline" href="#/settings">管理翻译配置</a>
+            未能读取内置模型，请重试。 <a className="underline" href="#/settings">管理翻译配置</a>
           </span>
         ) : null}
       </div>

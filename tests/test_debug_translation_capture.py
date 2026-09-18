@@ -89,6 +89,7 @@ def test_retry_versions_keep_unmatched_response_and_do_not_change_translation(tm
             return subprocess.CompletedProcess(argv, 0, next(outputs), "fixture log")
 
         monkeypatch.setattr(common.subprocess, "run", run)
+        monkeypatch.setattr("babeldoc_tools.process_stream.run_stream", run)
         return translate.translate_document(str(_workdir(path)), translator="offline", debug_recorder=debug)
 
     plain = execute(tmp_path / "plain", None)
@@ -116,6 +117,7 @@ def test_failed_translation_keeps_current_prompt_and_input(tmp_path, monkeypatch
         return subprocess.CompletedProcess(argv, 2, "partial response", "failure log")
 
     monkeypatch.setattr(common.subprocess, "run", fail)
+    monkeypatch.setattr("babeldoc_tools.process_stream.run_stream", fail)
     with pytest.raises(common.ToolError):
         translate.translate_document(str(workdir), translator="offline", debug_recorder=recorder)
     assert recorder.manifest["stages"]["translate"]["status"] == "error"

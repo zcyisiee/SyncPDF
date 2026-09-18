@@ -48,6 +48,9 @@ export const KIND_LABELS: Record<string, string> = {
   stage_error: '阶段失败',
   replay_notice: '归档提示',
   // 模型调用
+  paragraph_done: '段落已翻译',
+  preview_ready: '增量预览已更新',
+  preview_failed: '增量预览失败',
   call_started: '调用开始',
   call_finished: '调用完成',
   provider_artifacts: '调用产物',

@@ -15,7 +15,8 @@ import {
   useProfiles,
 } from '../../lib/queries';
 import { stageLabel } from '../../lib/humanize';
-import { useModels } from '../../lib/models';
+import { useHarnessSelection } from '../../lib/harnesses';
+import { HarnessSelect } from './HarnessSelect';
 import { Button } from '../ui/Button';
 import { ErrorCard } from '../ui/ErrorCard';
 import { Tooltip } from '../ui/Tooltip';
@@ -48,28 +49,22 @@ export function StartJobCard({
 }) {
   const artifactsQuery = useArtifacts(did);
   const profilesQuery = useProfiles();
-  const modelsQuery = useModels();
   const glossaryQuery = useGlossary();
   const createJob = useCreateJobMutation(did);
   const artifacts = artifactsQuery.data ?? [];
-  const profiles = (profilesQuery.data ?? []).filter(item => item.has_translator);
-  const models = modelsQuery.data ?? [];
+  const selection = useHarnessSelection(profilesQuery.data ?? []);
+  const { profiles, profile, thinking } = selection;
   const glossaryCount = glossaryQuery.data?.count ?? 0;
   // 只有拿到服务端的答复才能说“词表为空”：请求失败/还没回来时不冒充空表，也不阻止提交
   // （注入终归由服务端判定）。
   const glossaryKnown = glossaryQuery.data !== undefined;
   const glossaryEmpty = glossaryKnown && glossaryCount === 0;
   // 只有"用户改过"才落到 state：默认值由数据推导（不在 effect 里写 state）。
-  const [profileOverride, setProfileOverride] = useState<string | null>(null);
   const [fromOverride, setFromOverride] = useState<string | null>(null);
   const [pages, setPages] = useState('');
   const [dual, setDual] = useState(false);
   const [useGlossaryOverride, setUseGlossaryOverride] = useState<boolean | null>(null);
   const [reviewerEnabled, setReviewerEnabled] = useState(false);
-  const [reviewer, setReviewer] = useState('');
-  const profile = profiles.some(item => item.id === profileOverride) ? profileOverride! : profiles[0]?.id ?? '';
-  const modelSelected = models.some(item => item.id === profile);
-  const reviewerProfile = models.some(item => item.id === reviewer) ? reviewer : profile;
   const from = fromOverride ?? defaultFromStage(document);
   // 词表为空时开关恒为关（禁用）；有词表时默认开，用户可关。
   const glossaryOn = glossaryEmpty ? false : (useGlossaryOverride ?? true);
@@ -78,30 +73,13 @@ export function StartJobCard({
   if (artifactsQuery.isPending || !hasAnything) return null;
 
   const pagesValid = isValidPagesSpec(pages);
-  const canSubmit = profile !== '' && profilesQuery.isSuccess && pagesValid && !createJob.isPending &&
-    (!modelSelected || !reviewerEnabled || models.some(item => item.id === reviewerProfile));
+  const canSubmit = profile !== '' && profilesQuery.isSuccess && pagesValid && !createJob.isPending;
   const describe = createJob.error ? describeApiError(createJob.error) : null;
 
   return (
     <div className="flex flex-col gap-s3 p-s4" data-od-id="start-job-card">
       <div className="flex flex-wrap items-end gap-s3">
-        <label className="flex min-w-0 flex-col gap-1">
-          <span className="text-tiny text-ink-3">翻译配置</span>
-          <select
-            data-od-id="start-job-profile"
-            value={profile}
-            onChange={(event) => setProfileOverride(event.target.value)}
-            className="h-7 rounded border border-hair bg-ivory px-2 font-mono text-sm text-ink-2"
-          >
-            {profiles.length === 0 ? <option value="">{profilesQuery.isPending ? '正在读取配置…' : '没有可用翻译配置'}</option> : null}
-            {profiles.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-                {item.has_translator ? '' : '（无 translator）'}
-              </option>
-            ))}
-          </select>
-        </label>
+        <HarnessSelect selection={selection} label="翻译配置" idPrefix="start-job" />
 
         <label className="flex min-w-0 flex-col gap-1">
           <span className="text-tiny text-ink-3">页码范围（留空 = 全部）</span>
@@ -171,18 +149,11 @@ export function StartJobCard({
           </label>
         </details>
 
-        {modelSelected ? <>
-          <label className="flex h-7 items-center gap-2 text-tiny text-ink-3">
-            <input type="checkbox" checked={reviewerEnabled} onChange={(event) => setReviewerEnabled(event.target.checked)} />
-            AI 审校
-          </label>
-          {reviewerEnabled ? <label className="flex flex-col gap-1 text-tiny">审校模型
-            <select value={reviewerProfile} onChange={(event) => setReviewer(event.target.value)} className="h-7 rounded border border-hair bg-ivory px-2 text-sm">
-              {models.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
-            </select>
-            <span>额外模型调用，仅审查文本，不检查 PDF 视觉效果。</span>
-          </label> : null}
-        </> : profile !== '' && modelsQuery.isSuccess ? <p className="text-tiny text-ink-4">脚本配置：审校按服务器脚本设置执行。</p> : null}
+        <label className="flex h-7 items-center gap-2 text-tiny text-ink-3">
+          <input type="checkbox" checked={reviewerEnabled} onChange={event => setReviewerEnabled(event.target.checked)} />
+          AI 审校
+        </label>
+        {reviewerEnabled && <p className="text-tiny text-ink-4">使用相同模型与思考强度额外审查文本，不检查 PDF 视觉效果。</p>}
 
         <Button
           variant="primary"
@@ -195,9 +166,10 @@ export function StartJobCard({
               pages: normalizePagesSpec(pages),
               dual,
               profile,
+              thinking,
               // 词表只给布尔（缺省 true）：词表内容与注入用文件路径由服务端管。
               use_glossary: glossaryOn,
-              ...(modelSelected && reviewerEnabled ? { reviewer_profile: reviewerProfile } : {}),
+              ...(reviewerEnabled ? { reviewer_profile: profile } : {}),
             })
           }
         >
@@ -215,12 +187,11 @@ export function StartJobCard({
           页码范围形状不对：只接受 1-3,5 这样的写法（留空表示全部页）。
         </p>
       )}
-      <a className="text-tiny underline" href="#/settings">创建或管理翻译配置</a>
+      <a className="text-tiny underline" href="#/settings">默认翻译模型</a>
       {profilesQuery.isError ? <p role="alert">翻译配置读取失败。<Button onClick={() => void profilesQuery.refetch()}>重试读取配置</Button></p> : null}
-      {modelsQuery.isError ? <p role="alert" className="text-tiny">模型配置读取失败，暂不可选择 AI 审校。<Button onClick={() => void modelsQuery.refetch()}>重试读取模型</Button></p> : null}
       {profilesQuery.isSuccess && profiles.length === 0 ? (
         <p className="text-tiny text-ink-4" data-od-id="start-job-no-profile">
-          没有可用翻译配置：请先在设置中创建模型配置，再开始翻译。
+          未能读取内置模型，请重试读取配置。
         </p>
       ) : null}
       {describe === null ? null : (

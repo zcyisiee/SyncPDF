@@ -514,7 +514,7 @@ def _review_prompt(workdir: Path, cfg: dict) -> str:
         "再以 `bdt run --from apply` 续跑。",
         "",
     ]
-    if " model-call " in (cfg.get("reviewer") or ""):
+    if any(adapter in (cfg.get("reviewer") or "") for adapter in (" model-call ", " harness-call ")):
         lines += ["Text-only review: no PDF/image access; do not claim visual inspection."]
         total = 0
         for name in ("document.md", "translated.md", "review_verdict.json", "layout_lint.json", "link_audit.json"):

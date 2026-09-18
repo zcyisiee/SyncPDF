@@ -19,7 +19,9 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import shutil
+import threading
 from datetime import datetime
 from datetime import timezone
 from pathlib import Path
@@ -46,6 +48,7 @@ __all__ = [
 
 #: 单个上传的大小上限（200MB）。超出 → 413 ``file_too_large``。
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+_UPLOAD_LOCK = threading.Lock()
 #: PDF 魔数（读前 5 字节比对）。
 PDF_MAGIC = b"%PDF-"
 #: 上传生成的 did 前缀（与手工命名（``ccs3764-dyn``）区分开）。
@@ -144,6 +147,7 @@ def save_upload(store: DocumentStore, upload: UploadedStream) -> str:
     target = directory / SOURCE_NAME
     try:
         written = 0
+        digest = hashlib.sha256()
         with tmp.open("wb") as handle:
             while True:
                 chunk = upload.file.read(CHUNK_BYTES)  # type: ignore[union-attr]
@@ -153,7 +157,23 @@ def save_upload(store: DocumentStore, upload: UploadedStream) -> str:
                 if written > MAX_UPLOAD_BYTES:
                     raise _too_large(written)
                 handle.write(chunk)
-        tmp.replace(target)
+                digest.update(chunk)
+        # Serialize lookup + insertion: simultaneous identical uploads share one document.
+        with _UPLOAD_LOCK:
+            from babeldoc_tools.serve.asset_store import AssetStore
+
+            database = store.database
+            existing = database.document_by_hash(digest.hexdigest())
+            if existing is not None:
+                existing_did = str(existing["id"])
+                store.resolve(existing_did)
+                shutil.rmtree(directory)
+                return existing_did
+            assets = AssetStore(store.store_base, database)
+            asset = assets.put(tmp, kind="source")
+            tmp.replace(target)
+            database.register_document(did, asset, written,
+                                       str(assets.resolve(asset).relative_to(store.store_base)))
     except BaseException:
         # 半成品与刚建的 did 目录一起收掉：宁可什么都没有，也不留一个空壳"文档"。
         shutil.rmtree(directory, ignore_errors=True)

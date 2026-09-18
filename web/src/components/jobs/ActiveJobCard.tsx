@@ -40,21 +40,19 @@ function jobBadge(
  *   `action=retranslate`（W11 重译候选）例外：它不能走 `POST /jobs`（服务端不接受裸
  *   retranslate，候选必须绑定段落），重试入口在段落面板的「AI 重译」，这里只给提示文案；
  * - `succeeded` 不在这里（那时该显示开始卡，用户可以再跑一次）；
- * - 运行中的 `action=run` 额外显示「已译段落 N/M」（W14）：数据源是**父级给的**文档详情
- *   （`translated_count`/`paragraph_count`，§3.1），本卡不发任何请求。**这两个数不诚实不了**：
- *   它们来自 `agent/translated.jsonl`（apply 阶段写出的产物），而翻译是**一次整篇子进程调用**、
- *   运行中不落任何逐段产物 —— 所以运行中 N 不跳动，只在套版落盘后跳变。文案因此带
- *   「套版后更新」，也不做跳动动画/假百分比。
+ * - 运行中的 run 以当前事件流的 paragraph_done 计数显示进度；未收到完整段落时显示等待。
  */
 export function ActiveJobCard({
   did,
   job,
   document,
+  streamProgress,
 }: {
   did: string;
   job: JobRecord;
   /** 文档详情（工作台的 `useDocument` 已经拿到了）：只用于阶段进度那两个计数。 */
   document?: DocumentDetail;
+  streamProgress?: { index: number; total: number } | null;
 }) {
   const cancelJob = useCancelJobMutation(did);
   const createJob = useCreateJobMutation(did);
@@ -135,11 +133,13 @@ export function ActiveJobCard({
         <p
           className="font-mono text-micro text-ink-4 [font-variant-numeric:tabular-nums]"
           data-od-id="active-job-progress"
-          data-translated={String(document?.translated_count ?? '')}
-          data-paragraphs={String(document?.paragraph_count ?? '')}
-          title="已译段落数来自 agent/translated.jsonl（套版阶段写出）；翻译是整篇单次子进程调用，运行中这个数不变，套版完成后才跳变"
+          data-translated={String(streamProgress?.index ?? '')}
+          data-paragraphs={String(streamProgress?.total ?? document?.paragraph_count ?? '')}
+          title="当前任务收到并校验通过的完整译文块；最终结果仍需套版校验"
         >
-          已译段落 {progressLabel(document?.translated_count, document?.paragraph_count)}（套版后更新）
+          {streamProgress
+            ? `已收到译文 ${progressLabel(streamProgress.index, streamProgress.total)}（实时）`
+            : '模型处理中，等待完整译文段落…'}
         </p>
       ) : null}
       {describe === null ? null : (

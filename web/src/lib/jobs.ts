@@ -106,9 +106,11 @@ export function jobOutcomeMessage(job: JobRecord): string | null {
 
 /** 工作台该显示哪张卡：活动 job → `active`；最近一次失败/取消/中断 → `failed`；否则 `start`。 */
 export function jobCardMode(jobs: readonly JobRecord[] | undefined): 'active' | 'failed' | 'start' {
+  // A successful job can remain at index 0 briefly while the newly accepted job
+  // is appended by the server. The active job is the current source of truth.
+  if (activeJob(jobs) !== null) return 'active';
   const latest = jobs?.[0];
   if (!latest) return 'start';
-  if (ACTIVE_JOB_STATUSES.has(latest.status)) return 'active';
   if (latest.status === 'succeeded') return 'start';
   return 'failed';
 }

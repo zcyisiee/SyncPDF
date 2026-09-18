@@ -460,6 +460,7 @@ class JobCreateRequest(BaseModel):
         ),
     )
     reviewer_profile: str | None = Field(default=None, pattern=JOB_PROFILE_PATTERN)
+    thinking: str | None = Field(default=None, max_length=16)
     scope: Literal["full", "pages"] | None = Field(
         default=None,
         description=(
@@ -569,6 +570,10 @@ class ProfileListItem(BaseModel):
     #: 配没配 translator/reviewer（不说明配的是什么）。
     has_translator: bool
     has_reviewer: bool
+    builtin: bool = False
+    model: str | None = None
+    thinking_levels: list[str] = Field(default_factory=list)
+    default_thinking: str | None = None
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -664,6 +669,7 @@ class CandidateRetranslateRequest(BaseModel):
     文本"v1 不接受（提示词由服务端拼，见 §3.6）。
     """
 
+    thinking: str | None = Field(default=None, max_length=16)
     profile: str | None = Field(
         default=None,
         pattern=JOB_PROFILE_PATTERN,

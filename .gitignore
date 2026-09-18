@@ -52,6 +52,7 @@ temp.jpg
 
 # 实验产物与临时数据（含 MinerU 原始返回、渲染 PNG、中间 JSON）
 /tmp/
+/tmp
 /output/
 
 .env.local

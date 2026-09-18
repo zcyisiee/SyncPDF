@@ -99,6 +99,14 @@ describe('PreviewArea 产物与空态', () => {
     expect(document.querySelector('[data-od-id="pdf-canvas"]')).toBeNull();
   });
 
+  it('当前任务的增量预览可在正式产物产生前显示，并标为临时预览', async () => {
+    mockPreview({ artifacts: [] });
+    renderWithQuery(<PreviewArea did={DID} view="progress" streamArtifact="preview/current-1.pdf" />);
+    expect((await screen.findAllByText('正在加载 PDF…')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('无产物 PDF')).toBeNull();
+    expect(screen.getByText(/实时翻译预览/)).toBeInTheDocument();
+  });
+
   it('产物清单 500 → 错误卡 + 重试', async () => {
     mockPreview({
       artifacts: { error: { code: 'internal_error', message: '炸了' } },

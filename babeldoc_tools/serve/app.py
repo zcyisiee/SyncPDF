@@ -78,6 +78,7 @@ __all__ = ["create_app", "error_response"]
 
 #: ``ToolError.code`` → HTTP 状态码；未列出的一律 500。
 _TOOL_ERROR_STATUS = {
+    "harness_invalid": 422,
     "model_invalid": 422,
     "profile_collision": 409,
     "unknown_model": 404,
@@ -117,6 +118,11 @@ _TOOL_ERROR_STATUS = {
     # W09 草稿：乐观并发失败（带 detail.current_revision）/ 字段与范围不合法
     "revision_conflict": 409,
     "draft_invalid": 422,
+    "block_not_found": 404,
+    "bbox_invalid": 422,
+    "compile_failed": 422,
+    "stale_job": 409,
+    "export_not_ready": 409,
     # W13 词表：条目不合法（空 source/target、超长、超条数）→ 422（盘上一字不改）
     "glossary_invalid": 422,
     # 客户端不得自带的命令/密钥字段（不是"参数错了"，是"这类输入不接受"）

@@ -17,9 +17,11 @@ export type EventsPage = components['schemas']['EventsPage'];
 export type ArtifactItem = components['schemas']['ArtifactItem'];
 export type DocumentUploaded = components['schemas']['DocumentUploaded'];
 export type JobRecord = components['schemas']['JobRecord'];
-export type JobCreateRequest = components['schemas']['JobCreateRequest'] & { reviewer_profile?: string | null };
+export type JobCreateRequest = components['schemas']['JobCreateRequest'] & { reviewer_profile?: string | null; thinking?: string | null };
 export type JobAccepted = components['schemas']['JobAccepted'];
-export type ProfileListItem = components['schemas']['ProfileListItem'];
+export type ProfileListItem = components['schemas']['ProfileListItem'] & {
+  builtin?: boolean; model?: string | null; thinking_levels?: string[]; default_thinking?: string | null;
+};
 export type ProfileUpdateRequest = components['schemas']['ProfileUpdateRequest'];
 export type DraftResponse = components['schemas']['DraftResponse'];
 export type DraftParagraph = components['schemas']['DraftParagraph'];

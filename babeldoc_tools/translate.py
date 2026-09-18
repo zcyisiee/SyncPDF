@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from pathlib import Path
 
 from babeldoc.tools.agent import debug_capture
@@ -22,6 +23,45 @@ from babeldoc_tools import glossary as glossary_mod
 ID_MARK_RE = re.compile(
     r"<!--\s*id\s*=\s*([A-Za-z0-9._-]+)\s*(?:label\s*=\s*([^>]*?))?\s*-->"
 )
+
+
+class TranslationBlocks:
+    """A block is complete at the next full anchor, or at successful process EOF."""
+
+    def __init__(self, workdir, emit):
+        rows = common.read_json(common.agent_dir(workdir) / "anchors.json", {}) or {}
+        self.rows = {row["id"]: row for row in rows.get("rows", [])}
+        self.emit = emit
+        self.pending = ""
+        self.seen = set()
+
+    def feed(self, text):
+        self.pending += text
+        marks = list(ID_MARK_RE.finditer(self.pending))
+        for left, right in zip(marks, marks[1:], strict=False):
+            self._block(left, self.pending[left.end():right.start()])
+        if marks:
+            self.pending = self.pending[marks[-1].start():]
+
+    def finish(self):
+        mark = ID_MARK_RE.search(self.pending)
+        if mark:
+            self._block(mark, self.pending[mark.end():])
+        self.pending = ""
+
+    def _block(self, mark, body):
+        from babeldoc.tools.agent import markdown_view
+
+        pid = mark.group(1)
+        row = self.rows.get(pid)
+        if row is None or pid in self.seen:
+            return
+        label = row.get("layout_label", "text")
+        body = markdown_view._clean_markdown_body(body, label, row.get("markdown", ""))
+        if not body or Counter(markdown_view.anchor_sequence(body)) != Counter(tuple(anchor) for anchor in row.get("anchors", [])):
+            return
+        self.seen.add(pid)
+        self.emit(pid, body, label, len(self.seen), len(self.rows))
 
 
 def _resolve_translator(translator: str | None) -> str:
@@ -196,10 +236,32 @@ def _translate_whole_document(
         }
     else:
         command = _resolve_translator(translator)
-        response = common.run_translator(
-            prompt_text, command, timeout_s=timeout,
-            debug_recorder=debug_recorder, debug_origin="translator.whole",
-        )
+        from babeldoc_tools.stream_preview import StreamPreview
+
+        preview = StreamPreview(workdir, debug_recorder) if debug_recorder else None
+
+        def completed(pid, body, label, index, total):
+            if debug_recorder:
+                debug_recorder.record_event("translate", "paragraph_done", {
+                    "paragraph_id": pid, "index": index, "total": total,
+                    "text": body, "provisional": True,
+                })
+            if preview:
+                preview.submit(pid, body, label)
+
+        blocks = TranslationBlocks(workdir, completed)
+        failed = True
+        try:
+            response = common.run_translator(
+                prompt_text, command, timeout_s=timeout,
+                debug_recorder=debug_recorder, debug_origin="translator.whole",
+                on_chunk=blocks.feed,
+            )
+            blocks.finish()
+            failed = False
+        finally:
+            if preview:
+                preview.close(failed=failed)
         _capture_text(debug_recorder, workdir, response, "raw")
         translated_path.write_text(response, encoding="utf-8")
         called_agent = True

@@ -109,13 +109,15 @@ def put(client, **body):
 # --------------------------------------------------------------------------- #
 def test_get_profiles_lists_ids_labels_and_flags(client):
     listed = client.get(f"{API}/profiles").json()
-    assert [item["id"] for item in listed] == [
+    assert [item["id"] for item in listed if not item.get("builtin")] == [
         "custom-label",
         "echo-t",
         "keeps-custom-keys",
     ]
     by_id = {item["id"]: item for item in listed}
     for item in listed:
+        if item.get("builtin"):
+            continue
         assert set(item) == {"id", "label", "has_translator", "has_reviewer"}
     assert by_id["echo-t"] == {
         "id": "echo-t",
@@ -138,11 +140,13 @@ def test_get_profiles_never_leaks_commands(client):
     assert "review-cmd" not in response.text
 
 
-def test_get_profiles_empty_when_no_file(tmp_path):
+def test_get_profiles_builtin_when_no_file(tmp_path):
     base = tmp_path / "empty"
     base.mkdir()
     with TestClient(create_app(DocumentStore.for_root(base))) as client:
-        assert client.get(f"{API}/profiles").json() == []
+        from babeldoc_tools.harnesses import BUILTINS
+
+        assert {item["id"] for item in client.get(f"{API}/profiles").json()} == set(BUILTINS)
 
 
 def test_env_only_profile_appears_without_commands(client, monkeypatch):

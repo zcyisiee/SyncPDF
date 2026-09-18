@@ -388,6 +388,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--notes", default=None)
     _add_debug_flags(p_run, recompile=True)
 
+    p_harness = sub.add_parser("harness-call", help="Call a built-in harness: stdin prompt, stdout text")
+    p_harness.add_argument("--profile", required=True)
+    p_harness.add_argument("--thinking", default=None)
+
     p_model = sub.add_parser("model-call", help="Call a saved model: stdin prompt, stdout text")
     p_model.add_argument("--store-base", required=True)
     p_model.add_argument("--model-profile", required=True)
@@ -789,6 +793,19 @@ def main(argv=None) -> int:
             parser.error("--debug-recompile 需要同时指定 --debug")
         if getattr(args, "latex_bbox", True) is False:
             parser.error("--debug-recompile 与 --no-latex-bbox 互斥")
+    if args.command == "harness-call":
+        from babeldoc_tools.harnesses import call_harness
+
+        try:
+            def emit(text):
+                sys.stdout.write(text)
+                sys.stdout.flush()
+
+            call_harness(args.profile, args.thinking, sys.stdin.read(), on_text=emit)
+        except common.ToolError as exc:
+            sys.stderr.write(exc.code + ": " + exc.message + "\n")
+            return 1
+        return 0
     if args.command == "model-call":
         from babeldoc_tools.serve.models import call_model
 

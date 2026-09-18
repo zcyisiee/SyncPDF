@@ -216,6 +216,7 @@ class JobRecord(BaseModel):
     #: provider → ``None``（它只跑 apply+build，不调翻译/审查）。
     profile: str | None = None
     reviewer_profile: str | None = None
+    thinking: str | None = None
     #: ``--pages`` 原样透传（只对 ``run`` 有效）。
     pages: str | None = None
     dual: bool = False
@@ -298,6 +299,15 @@ class JobRegistry:
         self._queue: list[str] = []
         #: 状态变化监听器（W14：SSE 的 job_update 广播挂在 `_write` 上）。
         self._listeners: list[JobStateListener] = []
+        self._database = None
+
+    @property
+    def database(self):
+        from babeldoc_tools.serve.database import MetadataDB
+
+        if self._database is None:
+            self._database = MetadataDB(self.store_base)
+        return self._database
 
     # ---------------------------------------------------------------- 路径
     @property
@@ -333,6 +343,10 @@ class JobRegistry:
         for path in self.jobs_dir.glob(f"{JOB_ID_PREFIX}*.json"):
             record = _read_snapshot(path)
             if record is not None:
+                self.records[record.job_id] = record
+        if (self.store_base / "app.db").is_file():
+            for payload in self.database.job_snapshots():
+                record = JobRecord.model_validate(payload)
                 self.records[record.job_id] = record
         for record in sorted(self.records.values(), key=lambda item: item.job_id):
             if record.status == "queued" or (
@@ -410,6 +424,7 @@ class JobRegistry:
         candidate_id: str | None = None,
         use_glossary: bool = False,
         reviewer_profile: str | None = None,
+        thinking: str | None = None,
     ) -> JobRecord:
         """新建 job 并入队（``queued``）；准入判断由调用方在 ``lock`` 内做。
 
@@ -424,6 +439,7 @@ class JobRegistry:
             from_stage=from_stage,
             profile=profile,
             reviewer_profile=reviewer_profile,
+            thinking=thinking,
             pages=pages,
             dual=dual,
             use_glossary=bool(use_glossary) and action == "run",
@@ -512,6 +528,7 @@ class JobRegistry:
     # ------------------------------------------------------------ 持久化
     def save(self, record: JobRecord) -> None:
         """原子写状态快照（同目录 tmp + ``os.replace``，读方永远看到完整 JSON）。"""
+        self.database.save_job(record.model_dump())
         path = self.snapshot_path(record.job_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(f".{path.name}.tmp")
@@ -547,6 +564,7 @@ class JobRegistry:
             if value is not None:
                 payload[key] = value
         payload.update(extra)
+        self.database.append_event(record.job_id, record.did, event, payload)
         self.events_path.parent.mkdir(parents=True, exist_ok=True)
         with self.events_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, ensure_ascii=False) + "\n")

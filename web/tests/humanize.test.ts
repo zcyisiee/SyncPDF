@@ -102,7 +102,7 @@ describe('kind 标签', () => {
     expect(EVENT_KINDS).toContain('job_update');
     // 47 种真 kind 一个没丢，也没有被虚拟 kind 顶掉
     expect(observedKinds).toHaveLength(47);
-    expect(EVENT_KINDS).toHaveLength(48);
+    expect(EVENT_KINDS).toHaveLength(51);
   });
 });
 

@@ -76,7 +76,7 @@ def candidates_router(service: CandidateService) -> APIRouter:
         payload: CandidateRetranslateRequest,
         _forbidden: Annotated[None, Depends(reject_forbidden_body)],
     ) -> CandidateJobAccepted:
-        item, record = await service.request_retranslate(did, pid, payload.profile)
+        item, record = await service.request_retranslate(did, pid, payload.profile, payload.thinking)
         return CandidateJobAccepted(candidate_id=item.id, job_id=record.job_id)
 
     @router.get(

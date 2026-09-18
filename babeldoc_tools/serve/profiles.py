@@ -38,6 +38,9 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from babeldoc_tools.common import ToolError
+from babeldoc_tools.harnesses import BUILTINS
+from babeldoc_tools.harnesses import harness_command
+from babeldoc_tools.harnesses import selection
 from babeldoc_tools.serve.store import STATE_DIR
 
 __all__ = [
@@ -92,6 +95,7 @@ class Profile(BaseModel):
 
     id: str
     model_profile: bool = False
+    builtin: bool = False
     translator: str | None = None
     reviewer: str | None = None
     label: str | None = None
@@ -136,11 +140,13 @@ def list_profile_ids(store_base: Path | str) -> list[str]:
     """
     from babeldoc_tools.serve.models import load_models
 
-    ids = set(load_profiles(store_base)) | _env_profile_ids() | set(load_models(store_base))
+    ids = set(BUILTINS) | set(load_profiles(store_base)) | _env_profile_ids() | set(load_models(store_base))
     return sorted(ids)
 
 
-def resolve_profile(store_base: Path | str, profile_id: str) -> Profile | None:
+def resolve_profile(
+    store_base: Path | str, profile_id: str, thinking: str | None = None
+) -> Profile | None:
     """profile id → :class:`Profile`（env 覆盖文件里同名字段）；未知 id → ``None``。
 
     "已知" = 文件里有这个 id，或该 id 有 env 覆盖。条目存在但两个命令都为空时仍然算
@@ -148,6 +154,13 @@ def resolve_profile(store_base: Path | str, profile_id: str) -> Profile | None:
     """
     from babeldoc_tools.serve.models import load_models
     from babeldoc_tools.serve.models import model_command
+
+    if profile_id in BUILTINS:
+        harness, _ = selection(profile_id, thinking)
+        return Profile(id=profile_id, label=harness.label, builtin=True, model_profile=True,
+                       translator=harness_command(profile_id, thinking))
+    if thinking is not None:
+        raise ToolError("harness_invalid", "Thinking is only available for built-in models")
 
     model = load_models(store_base).get(profile_id)
     if model is not None:
@@ -253,6 +266,8 @@ def save_profile(
     from babeldoc_tools.serve.models import load_models
 
     with _LOCK:
+        if profile_id in BUILTINS:
+            raise ToolError("profile_collision", "Built-in model IDs are reserved")
         if profile_id in load_models(store_base):
             raise ToolError("profile_collision", "ID already belongs to a model configuration")
         _save_script_profile(store_base, profile_id, updates)

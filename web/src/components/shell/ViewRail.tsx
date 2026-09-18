@@ -13,6 +13,7 @@ export function ViewRail({
   view,
   doc,
   live = false,
+  queued = false,
   jobControls,
 }: {
   jobControls?: ReactNode;
@@ -21,6 +22,7 @@ export function ViewRail({
   doc?: DocumentDetail;
   /** 时间线判定的「正在跑」（W06）→ 文档头徽标显示「翻译中」脉冲。 */
   live?: boolean;
+  queued?: boolean;
 }) {
   return (
     <nav
@@ -33,7 +35,7 @@ export function ViewRail({
           {doc?.title ?? did}
         </h2>
         <div className="mt-s2 flex flex-wrap items-center gap-s2">
-          <DocumentStatusBadge stageSummary={doc?.stage_summary} live={live} />
+          <DocumentStatusBadge stageSummary={doc?.stage_summary} live={live} queued={queued} />
           <span className="font-mono text-micro text-ink-4 [font-variant-numeric:tabular-nums]">
             {countLabel(doc?.pages, '页')}
           </span>

@@ -1,7 +1,7 @@
 import { describeApiError } from '../lib/api';
 import { compileUnsettled } from '../lib/download';
 import { isRunLive } from '../lib/events';
-import { jobCardMode } from '../lib/jobs';
+import { activeJob, jobCardMode } from '../lib/jobs';
 import { DOCUMENT_LIVE_REFETCH_MS, useDocument, useJobs } from '../lib/queries';
 import type { WorkbenchView } from '../lib/routing';
 import { Button, LinkButton } from '../components/ui/Button';
@@ -41,13 +41,31 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
   // 刚收到推送的静默窗口内连这 5s 那一次都跳过（SSE 已经刷新过一轮）。
   const jobsQuery = useJobs(did, { quietSinceMs: jobUpdates.pushedAtMs });
   const cardMode = jobCardMode(jobsQuery.data);
-  const latestJob = jobsQuery.data?.[0] ?? null;
+  const latestJob = activeJob(jobsQuery.data) ?? jobsQuery.data?.[0] ?? null;
+  const queued = cardMode === 'active' && latestJob?.status === 'queued';
   // 进度层：事件窗口（首拉 + SSE）→ 时间线段（stage-state 基线 + 事件流 live + job 驱动 live）。
-  const feed = useEventWindow(did, {
+  const archiveFeed = useEventWindow(did, {
     onJobUpdate: jobUpdates.onJobUpdate,
     // 活动 job 期间首拉按 5s 重拉：新 run 归档只能这样被发现（SSE 订阅的是首拉拿到的 run）。
     activeJob: cardMode === 'active',
   });
+  // Keep discovery/SSE alive, but never render the old run as this job's progress.
+  const pipelineJob = latestJob?.action === 'run' || latestJob?.action === 'check';
+  const jobStart = pipelineJob ? Date.parse(latestJob.created_at) : NaN;
+  const currentEvents = pipelineJob && Number.isFinite(jobStart)
+    ? archiveFeed.events.filter((event) =>
+        !queued &&
+        (!latestJob.run_id || latestJob.run_id === archiveFeed.runId) &&
+        Date.parse(event.at) >= jobStart,
+      )
+    : archiveFeed.events;
+  const feed = { ...archiveFeed, events: currentEvents };
+  const paragraph = [...currentEvents].reverse().find((event) => event.kind === 'paragraph_done')?.data;
+  const streamProgress = typeof paragraph?.index === 'number' && typeof paragraph?.total === 'number'
+    ? { index: paragraph.index, total: paragraph.total } : null;
+  const preview = [...currentEvents].reverse().find((event) => event.kind === 'preview_ready')?.data;
+  const streamArtifact = cardMode === 'active' && typeof preview?.artifact === 'string' &&
+    /^preview\/[A-Za-z0-9-]+\.pdf$/.test(preview.artifact) ? preview.artifact : null;
   // 两路并存、任一 live 就快轮询：事件流还在增长，或有活动 job（前者要 run 归档才活）。
   const eventsLive = isRunLive(feed.events);
   const fastRefetch = eventsLive || cardMode === 'active';
@@ -69,6 +87,7 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
   const viewrailWidth = useUiStore((state) => state.viewrailWidth);
   const inspectorWidth = useUiStore((state) => state.inspectorWidth);
   const timelineHeight = useUiStore((state) => state.timelineHeight);
+  const timelineCollapsed = useUiStore((state) => state.timelineCollapsed);
   const inspectorCollapsed = useUiStore((state) => state.inspectorCollapsed);
 
   const meta =
@@ -77,7 +96,7 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
         <span className="max-w-[34ch] truncate font-serif text-sm text-ink-2">
           {doc.title ?? doc.did}
         </span>
-        <DocumentStatusBadge stageSummary={doc.stage_summary} live={timeline.live} />
+        <DocumentStatusBadge stageSummary={doc.stage_summary} live={timeline.live} queued={queued} />
       </>
     );
 
@@ -105,7 +124,7 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
   const layoutStyle = {
     '--vrw': `${viewrailWidth}px`,
     '--inspw': inspectorCollapsed ? '0px' : `${inspectorWidth}px`,
-    '--tlh': `${timelineHeight}px`,
+    '--tlh': timelineCollapsed ? '28px' : `${timelineHeight}px`,
   } as CSSProperties;
 
   return (
@@ -122,7 +141,8 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
           view={view}
           doc={doc}
           live={timeline.live}
-          jobControls={view === 'progress' ? (cardMode === 'start' ? <StartJobCard did={did} document={doc} /> : latestJob === null ? null : <ActiveJobCard did={did} job={latestJob} document={doc} />) : undefined}
+          queued={queued}
+          jobControls={view === 'progress' ? (cardMode === 'start' ? <StartJobCard did={did} document={doc} /> : latestJob === null ? null : <ActiveJobCard did={did} job={latestJob} document={doc} streamProgress={streamProgress} />) : undefined}
         />
         <Gutter id="viewrail" className="col-start-2 row-start-1" />
         <section
@@ -132,7 +152,7 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
         >
           {PREVIEW_VIEWS.includes(view) ? (
             <div className="min-h-0 flex-1">
-              <PreviewArea did={did} view={view} />
+              <PreviewArea did={did} view={view} streamArtifact={streamArtifact} />
             </div>
           ) : (
             // 归档视图（W12）：预览区换成版本列表（右侧面板给同一份数据的摘要）。
@@ -143,8 +163,8 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
         </section>
         <Gutter id="inspector" className="col-start-4 row-start-1" />
         <InspectorPanel did={did} view={view} feed={feed} />
-        <Gutter id="timeline" className="col-span-full row-start-2" />
-        <Timeline did={did} segments={timeline.segments} unavailable={timeline.isError} />
+        {!timelineCollapsed ? <Gutter id="timeline" className="col-span-full row-start-2" /> : null}
+        <Timeline did={did} segments={timeline.segments} events={feed.events} queued={queued} unavailable={timeline.isError} />
       </div>
     </ScreenFrame>
   );

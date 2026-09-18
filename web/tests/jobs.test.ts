@@ -142,6 +142,7 @@ describe('job 口径（lib/jobs.ts）', () => {
     expect(jobCardMode([])).toBe('start');
     expect(jobCardMode([makeJob({ status: 'queued' })])).toBe('active');
     expect(jobCardMode([makeJob({ status: 'running' })])).toBe('active');
+    expect(jobCardMode([makeJob({ status: 'succeeded' }), makeJob({ status: 'queued' })])).toBe('active');
     expect(jobCardMode([makeJob({ status: 'succeeded' })])).toBe('start');
     expect(jobCardMode([makeJob({ status: 'failed' })])).toBe('failed');
     expect(jobCardMode([makeJob({ status: 'canceled' })])).toBe('failed');

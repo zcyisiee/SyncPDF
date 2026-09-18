@@ -423,7 +423,27 @@ export function useCreateJobMutation(did: string) {
   return useMutation({
     mutationFn: (body: JobCreateRequest) =>
       apiPost<JobAccepted>(`/documents/${encodeURIComponent(did)}/jobs`, body),
-    onSuccess: () => {
+    onSuccess: async (accepted, body) => {
+      const key = queryKeys.jobs(did);
+      // Cancel any list request started before POST completed, so it cannot put
+      // the previous job back after we install the accepted job.
+      await client.cancelQueries({ queryKey: key, exact: true });
+      client.setQueryData<JobRecord[]>(key, (previous = []) => {
+        const known = previous.find((job) => job.job_id === accepted.job_id);
+        const job: JobRecord = known ?? {
+          job_id: accepted.job_id,
+          did,
+          action: accepted.action,
+          status: accepted.status,
+          created_at: new Date().toISOString(),
+          from_stage: body.action === 'check' ? 'check' : body.from ?? 'parse',
+          profile: body.profile,
+          pages: body.pages,
+          dual: body.dual,
+          use_glossary: body.use_glossary,
+        };
+        return [job, ...previous.filter((item) => item.job_id !== job.job_id)];
+      });
       invalidateJobViews(client, did);
     },
   });
@@ -494,12 +514,12 @@ export function useCandidates(did: string | null, pid: string | null) {
 export function useRetranslateMutation(did: string, pid: string) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (profile: string) =>
+    mutationFn: (selection: { profile: string; thinking?: string } | string) =>
       apiPost<CandidateJobAccepted>(
         `/documents/${encodeURIComponent(did)}/paragraphs/${encodeURIComponent(
           pid,
         )}/retranslate`,
-        { profile },
+        typeof selection === 'string' ? { profile: selection } : selection,
       ),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.candidates(did, pid) });

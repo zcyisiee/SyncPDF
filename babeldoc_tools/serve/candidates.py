@@ -571,7 +571,7 @@ class CandidateService:
 
     # -------------------------------------------------------------- 生成
     async def request_retranslate(
-        self, did: str, pid: str, profile_id: str | None
+        self, did: str, pid: str, profile_id: str | None, thinking: str | None = None
     ) -> tuple[CandidateItem, JobRecord]:
         """建候选行 + 提交 ``action=retranslate`` job；返回 ``(候选, job)``。
 
@@ -581,6 +581,7 @@ class CandidateService:
         workdir = self.store.resolve(did)
         self._reject_busy(did)
         resolved = self._require_translator_profile(profile_id)
+        resolve_profile(self.store.store_base, resolved, thinking)
         source, baseline = paragraph_facts(workdir, pid)
         store = self.stores.for_did(did)
         item = await store.add_pending(
@@ -597,6 +598,7 @@ class CandidateService:
                 pages=None,
                 dual=False,
                 profile_id=resolved,
+                thinking=thinking,
                 paragraph_id=pid,
                 candidate_id=item.id,
             )

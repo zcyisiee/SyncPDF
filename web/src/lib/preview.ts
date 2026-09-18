@@ -57,7 +57,7 @@ export function coordSystemOfMode(mode: Exclude<BboxMode, 'off'>): CoordSystem {
 /** mono 首选、dual 次之，最后任一产物 PDF（名字排序保证确定性）；无产物 → 双 null。 */
 export function pickPreviewArtifacts(artifacts: readonly ArtifactItem[]): PreviewArtifacts {
   const pdfs = artifacts
-    .filter((artifact) => artifact.kind === 'pdf')
+    .filter((artifact) => artifact.kind === 'pdf' && !artifact.name.startsWith('preview/'))
     .sort((left, right) => left.name.localeCompare(right.name));
   const target =
     pdfs.find((artifact) => artifact.name.endsWith('.mono.pdf')) ??

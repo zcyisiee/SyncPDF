@@ -44,6 +44,7 @@ from typing import NamedTuple
 
 from babeldoc.tools.agent import layout_overrides
 from babeldoc.tools.agent import markdown_view
+from babeldoc.tools.agent.prepared_pdf import resolve_source_pdf
 
 from babeldoc_tools.common import ToolError
 from babeldoc_tools.serve import versions
@@ -110,7 +111,7 @@ SOURCE_PDF_NAME = "input.pdf"
 CACHE_DIR_NAME = "latex_cache"
 #: 快照排除的顶层名字（``.bdt-serve`` = 服务自己的状态；``debug`` = run 归档；
 #: ``output`` = 旧产物，build 会在副本里重建）。
-SNAPSHOT_SKIP = (STATE_DIR, "debug", BUILD_OUTPUT_DIR)
+SNAPSHOT_SKIP = (STATE_DIR, "debug", "preview", BUILD_OUTPUT_DIR)
 
 #: 草稿保存后的服务端防抖窗口（EXECUTION.md 纠偏 7）；测试 monkeypatch 这个模块属性。
 DEBOUNCE_SECONDS = 1.5
@@ -198,48 +199,6 @@ def relocate_source_pdf(state: dict, source_pdf: Path) -> dict:
     moved = dict(state)
     moved["temp_pdf_path"] = str(source_pdf)
     return moved
-
-
-def resolve_source_pdf(
-    state: dict,
-    workdir: Path | str,
-    *,
-    cwd: Path | str | None = None,
-) -> Path | None:
-    """state 记录的源 PDF → 磁盘上真实存在的绝对路径；找不到 → ``None``。
-
-    候选顺序（老 workdir 的记录是**相对 parse 时 cwd** 的路径，不能只按一个基准解释）：
-
-    1. 记录值本身：绝对路径，或相对 ``cwd``（缺省 = 当前进程 cwd —— 本地 serve 通常
-       就从仓库根启动，而历史 run 也是从那里跑的）；
-    2. ``<workdir>/<记录值>``（parse 时 cwd 就是 workdir 的那种 run）；
-    3. ``<workdir>/<pdf stem>/input.pdf`` 与 ``<workdir>/input.pdf``（
-       ``TranslationConfig`` 的工作目录约定）。
-    """
-    workdir = Path(workdir)
-    base = Path(cwd) if cwd is not None else Path.cwd()
-    candidates: list[Path] = []
-    recorded = state.get("temp_pdf_path")
-    if isinstance(recorded, str) and recorded:
-        path = Path(recorded)
-        if path.is_absolute():
-            candidates.append(path)
-        else:
-            candidates.append(base / path)
-            candidates.append(workdir / path)
-    pdf_path = state.get("pdf_path")
-    if isinstance(pdf_path, str) and pdf_path:
-        stem = Path(pdf_path).stem
-        if stem:
-            candidates.append(workdir / stem / SOURCE_PDF_NAME)
-    candidates.append(workdir / SOURCE_PDF_NAME)
-    for candidate in candidates:
-        try:
-            if candidate.is_file():
-                return candidate.resolve()
-        except OSError:
-            continue
-    return None
 
 
 def _source_pdf_destination(isolated: Path, pdf_path: Any) -> Path:
@@ -673,6 +632,11 @@ def settle_compile(
                 plan,
                 error_code="build_output_missing",
                 message=f"build 阶段 ok，但副本 {BUILD_OUTPUT_DIR}/ 下没有 PDF",
+            )
+        if read_draft(plan.workdir).revision != plan.revision:
+            return _write_failure(
+                plan, error_code="stale_job",
+                message="草稿已更新：过期编译结果未发布，请编译当前 revision",
             )
         artifact = _publish(plan, pdfs)
         _archive_version(plan, artifact)

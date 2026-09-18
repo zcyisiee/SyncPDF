@@ -546,6 +546,7 @@ class JobRunner:
         candidate_id: str | None = None,
         use_glossary: bool = False,
         reviewer_profile: str | None = None,
+        thinking: str | None = None,
     ) -> JobRecord:
         """建 job（``queued``）→ 尽量立刻启动；同文档已有活动 job → 409 语义。
 
@@ -559,7 +560,7 @@ class JobRunner:
         # 先过 store 的路径边界（不在服务范围内/越界 → 400/404，不进队列）。
         self.store.resolve(did)
         if profile_id is not None and resolve_profile(
-            self.store.store_base, profile_id
+            self.store.store_base, profile_id, thinking
         ) is None:
             raise ToolError(
                 "unknown_profile",
@@ -588,6 +589,7 @@ class JobRunner:
                 from_stage=from_stage,
                 profile=profile_id,
                 reviewer_profile=reviewer_profile,
+                thinking=thinking,
                 pages=pages,
                 dual=dual,
                 requested_scope=requested_scope,
@@ -714,7 +716,7 @@ class JobRunner:
             await self._start_retranslate(record, workdir)
             return
         try:
-            profile = resolve_profile(self.store.store_base, record.profile or "")
+            profile = resolve_profile(self.store.store_base, record.profile or "", record.thinking)
             if profile is None:
                 self.registry.mark_finished(
                     record,
@@ -724,7 +726,10 @@ class JobRunner:
                 )
                 return
             if record.reviewer_profile:
-                reviewer = resolve_profile(self.store.store_base, record.reviewer_profile)
+                reviewer = resolve_profile(
+                    self.store.store_base, record.reviewer_profile,
+                    record.thinking if record.reviewer_profile == record.profile else None,
+                )
                 if reviewer is None or not reviewer.model_profile:
                     raise ToolError("unknown_model", "Reviewer model configuration no longer exists")
                 profile.reviewer = reviewer.translator
@@ -825,7 +830,7 @@ class JobRunner:
         ``failed``（``queued`` 已回复，失败只能在 job 记录里看到）。
         """
         store = self.candidates.for_did(record.did)
-        profile = resolve_profile(self.store.store_base, record.profile or "")
+        profile = resolve_profile(self.store.store_base, record.profile or "", record.thinking)
         if profile is None or not profile.translator:
             # 路由层已经校过；提交与启动之间 profile 被删/被改空 → 不 spawn，如实报错。
             await self._fail_retranslate_start(

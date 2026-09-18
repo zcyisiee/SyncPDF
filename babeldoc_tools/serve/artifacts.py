@@ -53,6 +53,7 @@ ROOT_FILE_KINDS: dict[str, str] = {
 DIR_SUFFIX_KINDS: dict[str, dict[str, str]] = {
     "agent": {".md": "markdown", ".json": "json", ".jsonl": "json"},
     "output": {".pdf": "pdf"},
+    "preview": {".pdf": "pdf"},
 }
 
 #: kind → 下载响应的 ``Content-Type``（pdf.js 只依赖 pdf 的 Range，其余由前端按 kind 处理）。

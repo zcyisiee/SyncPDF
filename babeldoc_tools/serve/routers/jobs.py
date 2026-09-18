@@ -165,6 +165,8 @@ def jobs_router(
             # profile 是可选的（compile 不调 provider）：给了也不进记录，不报错 ——
             # 前端把当前选中的 profile 一起发过来是正常行为。
             _reject_run_only_fields(payload)
+            if payload.thinking is not None:
+                raise ToolError("forbidden_field", "compile does not use thinking")
             if payload.reviewer_profile is not None:
                 raise ToolError("forbidden_field", "compile does not use AI review")
             record = await compiles.request_compile(
@@ -191,11 +193,38 @@ def jobs_router(
                 dual=payload.dual if payload.action == "run" else False,
                 profile_id=payload.profile or "",
                 reviewer_profile=payload.reviewer_profile,
+                thinking=payload.thinking,
                 # 词表开关（W13）：客户端只给布尔，注入路径由服务端在 argv 构造时取。
                 use_glossary=payload.use_glossary,
             )
         response.headers["Location"] = f"{API_PREFIX}/jobs/{record.job_id}"
         return JobAccepted(job_id=record.job_id, action=payload.action)
+
+    @router.post(
+        "/documents/{did}/blocks/{block_id}/compile",
+        response_model=JobAccepted,
+        status_code=202,
+        summary="编译单个 block",
+    )
+    async def compile_block(
+        did: Annotated[str, PathParam(description=DOCUMENT_ID)],
+        block_id: str,
+        payload: dict[str, Any] | None = None,
+    ) -> JobAccepted:
+        import re
+
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", block_id):
+            raise ToolError("block_not_found", "block_id 不合法")
+        current = compiles.drafts.for_did(did).read()
+        if block_id not in current.paragraphs:
+            raise ToolError("block_not_found", f"block 不存在：{block_id}")
+        base_revision = (payload or {}).get("base_revision", current.revision)
+        if not isinstance(base_revision, int) or base_revision != current.revision:
+            raise ToolError("revision_conflict", "草稿 revision 已变化", current_revision=current.revision)
+        record = await compiles.request_compile(
+            did, scope="pages", base_revision=base_revision, trigger=TRIGGER_MANUAL
+        )
+        return JobAccepted(job_id=record.job_id, action="compile")
 
     @router.get(
         "/jobs/{jid}",

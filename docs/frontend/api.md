@@ -565,13 +565,16 @@ DELETE /api/v1/glossary   # 清空（幂等）→ 200 与 GET 同形（空表）
   invalidate 对应查询（按 `action` 分流），**不**把轮询关掉 —— 活动 job 的兜底轮询 5s、
   空闲 30s。理由：`job_update` 不重放、且“job 建出 run 归档之前”那段没有 SSE（§1.4.1）；
   只靠 SSE 会在丢帧/断线时静默不动。
-- **段落完成度只能由详情字段推**（W14 实测）：`translated_count` / `paragraph_count`（§3.1）。
-  真实 `bdt run` 的 translate 阶段是**一次整篇子进程调用**，既不产生段落级也不产生 batch 级
-  事件（只有 stage_started/artifact_bundle/call_started/call_finished/text_version/
-  missing_ids/stage_finished/stage_error），所以**翻译子进程运行中 N 不会跳动**，
-  `translated_count` 要等 `apply` 把 `agent/translated.jsonl` 写出来才变。
-  前端必须如实标注（例如「已译段落（apply 后更新）」），**不得**做跳动动画或假进度；
-  段落级实时需要把 translator 改成流式/分段调用（超出本阶段范围）。
+- **流式翻译**：translator 仍向 stdout 输出纯文本。下一完整 `<!-- id=… -->` 标记
+  到达时，上一个非空、已知 id 且锚点校验通过的块产生 `paragraph_done`
+  `{paragraph_id,index,total,text,provisional:true}`；最后一块只在子进程成功退出后确认。
+  内置 pi/agy 将文本增量解包，终态响应仍须验证；不支持流式的命令兼容原协议。
+- **增量工作预览**：后台串行 apply/build 使用隔离副本与已有 LaTeX 缓存；忙碌期间的新块
+  合并到下一批，不阻塞模型读取。成功后 `preview_ready`
+  `{artifact:"preview/<run>-<revision>.pdf",revision,paragraphs,provisional:true}`
+  切换当前任务预览。预览仍是全量 build，未译段使用原文，不替代正式 PDF/质量门禁。
+  编译失败发 `preview_failed`，最终流水线继续。任务结束/失败/取消后前端回到正式产物；
+  `preview/` 下 PDF 仅通过原有 artifacts 接口提供，不参与默认产物选择。
 
 ## 验收修复：OpenAI 兼容模型配置（本机后端）
 

@@ -48,15 +48,15 @@ export function EventRow({
         aria-expanded={expanded}
         onClick={() => onToggle(event.seq)}
         className={cn(
-          'flex w-full min-w-0 items-start gap-s2 px-s3 py-[3px] text-left transition-colors hover:bg-sand',
+          'grid w-full min-w-0 grid-cols-[40px_54px_auto_5px_minmax(0,1fr)] items-start gap-s2 px-s3 py-[3px] text-left transition-colors hover:bg-sand',
           expanded && 'bg-sand',
         )}
       >
-        <span className="w-[40px] flex-none text-right font-mono text-micro text-ink-4 [font-variant-numeric:tabular-nums]">
+        <span className="text-right font-mono text-micro text-ink-4 [font-variant-numeric:tabular-nums]">
           {event.seq}
         </span>
         <span
-          className="w-[54px] flex-none font-mono text-micro text-ink-4 [font-variant-numeric:tabular-nums]"
+          className="font-mono text-micro text-ink-4 [font-variant-numeric:tabular-nums]"
           title={event.at}
         >
           {eventTime(event.at)}
@@ -70,7 +70,7 @@ export function EventRow({
           aria-hidden="true"
           className={cn('mt-[7px] h-[5px] w-[5px] flex-none rounded-full', LEVEL_DOT[eventLevel(event)])}
         />
-        <span className="min-w-0 flex-1">
+        <span className="min-w-0">
           <span className="flex min-w-0 items-baseline gap-[6px]">
             <span className={cn('flex-none font-mono text-micro', GROUP_TEXT[group])} title={event.kind}>
               {kindLabel(event.kind)}
@@ -79,15 +79,15 @@ export function EventRow({
               {dataSummary(event.data)}
             </span>
           </span>
-          {expanded ? (
-            <pre
-              data-od-id="event-row-json"
-              className="mt-s1 max-h-[220px] overflow-auto rounded-[3px] border border-hair bg-parchment p-s2 font-mono text-micro leading-[1.5] text-ink-2"
-            >
-              {JSON.stringify(event, null, 2)}
-            </pre>
-          ) : null}
         </span>
+        {expanded ? (
+          <pre
+            data-od-id="event-row-json"
+            className="col-span-full mt-s1 max-h-[220px] overflow-auto rounded-[3px] border border-hair bg-parchment p-s2 font-mono text-micro leading-[1.5] text-ink-2"
+          >
+            {JSON.stringify(event, null, 2)}
+          </pre>
+        ) : null}
       </button>
     </li>
   );

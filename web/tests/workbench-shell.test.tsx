@@ -1,4 +1,8 @@
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { createQueryClient } from '../src/app/App';
+import { queryKeys } from '../src/lib/queries';
+import type { StageStateResponse } from '../src/api/types';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { STAGE_LABELS, STAGE_NAMES } from '../src/lib/humanize';
@@ -10,7 +14,7 @@ const DID = 'ccs3764-dyn';
 const RUN_ID = '20260916T132829Z-000183';
 
 /** 7 阶段全 ok（真 fixture `tmp/ccs3764-dyn` 的形状：manifest 给前 5 段，run_state 给后 2 段）。 */
-const STAGE_STATE = {
+const STAGE_STATE: StageStateResponse = {
   did: DID,
   run_id: RUN_ID,
   stages: ([
@@ -394,7 +398,7 @@ describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
         ]),
       '/api/v1/profiles': () =>
         jsonResponse([
-          { id: 'echo-t', label: 'Echo T', has_translator: true, has_reviewer: false },
+          { id: 'echo-t', label: 'Echo T', has_translator: true, has_reviewer: false, builtin: true },
         ]),
       [`/api/v1/documents/${DID}/stage-state`]: () => jsonResponse(STAGE_STATE),
       [`/api/v1/documents/${DID}/events?after_seq=0&limit=2000`]: () => jsonResponse(EVENTS_PAGE),
@@ -425,6 +429,59 @@ describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
     expect(await screen.findByRole('button', { name: '取消' })).toBeInTheDocument();
     expect(document.querySelector('[data-od-id="active-job-card"]')).not.toBeNull();
     expect(screen.queryByRole('button', { name: '开始翻译' })).toBeNull();
+  });
+
+  it('重跑立即进入排队，慢查询与旧归档不覆盖新任务，随后接管当前阶段', async () => {
+    const oldJob = makeJob({ did: DID, job_id: 'j_old', status: 'succeeded', run_id: RUN_ID });
+    const startedAt = '2026-10-01T00:00:00.000Z';
+    const newJob = makeJob({
+      did: DID, job_id: 'j_new', status: 'running', from_stage: 'translate',
+      created_at: startedAt, started_at: startedAt, run_id: 'new-run',
+    });
+    let submitted = false;
+    let resolveJobs!: (response: Response) => void;
+    const pendingJobs = new Promise<Response>((resolve) => { resolveJobs = resolve; });
+    let stageState: StageStateResponse = STAGE_STATE;
+    mockWorkbench({
+      [`/api/v1/documents/${DID}/jobs`]: () => submitted ? pendingJobs : jsonResponse([oldJob]),
+      [`POST /api/v1/documents/${DID}/jobs`]: () => {
+        submitted = true;
+        return jsonResponse({ job_id: 'j_new', status: 'queued', action: 'run' }, 202);
+      },
+      [`/api/v1/documents/${DID}/stage-state`]: () => jsonResponse(stageState),
+    });
+    const client = createQueryClient();
+    render(<QueryClientProvider client={client}><WorkbenchScreen did={DID} view="progress" /></QueryClientProvider>);
+    const timeline = document.querySelector('[data-od-id="timeline"]') as HTMLElement;
+    await waitFor(() => expect(within(timeline).getByText('已完成')).toBeInTheDocument());
+    const submit = await screen.findByRole('button', { name: '开始翻译' });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+    await waitFor(() => expect(within(timeline).getByText('排队中')).toBeInTheDocument());
+    expect(document.querySelector('[data-od-id="active-job-status"]')).toHaveAttribute('data-status', 'queued');
+    expect(document.querySelector('[data-od-id="timeline-stage-parse"]')).toHaveAttribute('data-state', 'ok');
+    expect(document.querySelector('[data-od-id="timeline-stage-translate"]')).toHaveAttribute('data-state', 'not_run');
+    expect(document.querySelector('[data-od-id="timeline-stage-build"]')).toHaveAttribute('data-state', 'not_run');
+    expect(within(timeline).queryByText(/条事件/)).toBeNull();
+    expect(document.querySelectorAll('[data-od-id="event-row"]')).toHaveLength(0);
+
+    // Even a temporarily unordered list must pick the active job, not the old success.
+    await act(async () => { resolveJobs(jsonResponse([oldJob, newJob])); });
+    await waitFor(() => expect(document.querySelector('[data-od-id="active-job-status"]')).toHaveAttribute('data-status', 'running'));
+    expect(within(timeline).getByText('翻译中')).toBeInTheDocument();
+    expect(document.querySelector('[data-od-id="timeline-stage-translate"]')).toHaveAttribute('data-state', 'live');
+    expect(document.querySelector('[data-od-id="timeline-stage-report"]')).toHaveAttribute('data-state', 'not_run');
+
+    stageState = {
+      ...STAGE_STATE, run_id: 'new-run',
+      stages: STAGE_STATE.stages.map((item) => item.stage === 'translate'
+        ? { ...item, started_at: startedAt, finished_at: '2026-10-01T00:00:01.000Z', duration_s: 1 }
+        : item.stage === 'apply' ? { ...item, status: 'running', started_at: '2026-10-01T00:00:01.000Z' } : item),
+    };
+    await act(async () => { await client.invalidateQueries({ queryKey: queryKeys.stageState(DID) }); });
+    await waitFor(() => expect(document.querySelector('[data-od-id="timeline-stage-translate"]')).toHaveAttribute('data-state', 'ok'));
+    expect(document.querySelector('[data-od-id="timeline-stage-apply"]')).toHaveAttribute('data-state', 'live');
+    expect(document.querySelector('[data-od-id="timeline-stage-build"]')).toHaveAttribute('data-state', 'not_run');
   });
 
   it('非进度视图不显示 job 面板', async () => {

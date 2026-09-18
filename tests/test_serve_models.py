@@ -36,7 +36,7 @@ def test_crud_offline_private_and_legacy_summary(client, tmp_path, monkeypatch):
     path = tmp_path / ".bdt-serve/model-credentials/models.json"
     assert path.stat().st_mode & 0o777 == 0o600
     assert path.parent.stat().st_mode & 0o777 == 0o700
-    assert client.get("/api/v1/profiles").json() == [
+    assert [item for item in client.get("/api/v1/profiles").json() if not item.get("builtin")] == [
         {"id": "local", "label": "Local", "has_translator": True, "has_reviewer": False}]
     update = config(label="Changed")
     del update["api_key"]

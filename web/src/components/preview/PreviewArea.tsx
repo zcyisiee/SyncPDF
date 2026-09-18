@@ -47,11 +47,13 @@ import { ContinuousPdfPane, type BboxPaneData, type ReaderPosition } from './Con
 import type { PdfPageInfo } from './PdfCanvas';
 import { PreviewToolbar } from './PreviewToolbar';
 
-export function PreviewArea({ did, view }: { did: string; view: WorkbenchView }) {
-  return <DocumentPreview key={did} did={did} view={view} />;
+type PreviewProps = { did: string; view: WorkbenchView; streamArtifact?: string | null };
+
+export function PreviewArea({ did, view, streamArtifact }: PreviewProps) {
+  return <DocumentPreview key={did} did={did} view={view} streamArtifact={streamArtifact} />;
 }
 
-function DocumentPreview({ did, view }: { did: string; view: WorkbenchView }) {
+function DocumentPreview({ did, view, streamArtifact }: PreviewProps) {
   const bboxPreferences = useBboxStore();
   const visibility = useMemo(() => bboxPreferences.documents[did] ?? readVisibility(did), [bboxPreferences.documents, did]);
   const detailQuery = useDocument(did);
@@ -127,7 +129,7 @@ function DocumentPreview({ did, view }: { did: string; view: WorkbenchView }) {
     enterPreviewView(view);
   }, [view, enterPreviewView]);
 
-  const targetUrl =
+  const targetUrl = streamArtifact ? artifactUrl(did, streamArtifact) :
     target === null
       ? null
       : withArtifactRevision(
@@ -396,6 +398,7 @@ function DocumentPreview({ did, view }: { did: string; view: WorkbenchView }) {
     <div className="flex h-full min-h-0 min-w-0 flex-col" data-od-id="preview-area">
       {toolbar}
       {compileBar}
+      {streamArtifact ? <p data-od-id="stream-preview-note" className="px-s5 py-1 text-tiny text-run-ink">实时翻译预览 · 未完成段落保留原文，最终结果仍在生成</p> : null}
       {patchNotice}
       {geometryKind !== null ? <BboxLegend did={did} page={page} boxes={bboxData?.boxes ?? []} /> : null}
       {bboxUnavailable ? (

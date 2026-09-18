@@ -218,6 +218,7 @@ describe('预览产物与页/模式映射', () => {
       'output/other.pdf',
     );
     expect(pickPreviewArtifacts([])).toEqual({ target: null, source: null });
+    expect(pickPreviewArtifacts([artifact('preview/run-1.pdf')])).toEqual({ target: null, source: null });
   });
 
   it('artifactUrl 逐段 encode 且保留 `/`（Range 下载键）', () => {

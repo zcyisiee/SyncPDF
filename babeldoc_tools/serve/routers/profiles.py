@@ -35,6 +35,7 @@ from typing import Annotated
 from fastapi import APIRouter
 from fastapi import Depends
 
+from babeldoc_tools.harnesses import BUILTINS
 from babeldoc_tools.serve.profiles import humanize_profile_id
 from babeldoc_tools.serve.profiles import list_profile_ids
 from babeldoc_tools.serve.profiles import resolve_profile
@@ -64,6 +65,10 @@ def profile_item(store_base: Path | str, profile_id: str) -> ProfileListItem:
     return ProfileListItem(
         id=profile_id,
         label=label,
+        builtin=profile_id in BUILTINS,
+        model=BUILTINS[profile_id].model if profile_id in BUILTINS else None,
+        thinking_levels=list(BUILTINS[profile_id].thinking_levels) if profile_id in BUILTINS else [],
+        default_thinking=BUILTINS[profile_id].default_thinking if profile_id in BUILTINS else None,
         has_translator=bool(profile is not None and profile.translator),
         has_reviewer=bool(profile is not None and profile.reviewer),
     )
@@ -76,6 +81,7 @@ def profiles_router(store: DocumentStore) -> APIRouter:
     @router.get(
         "/profiles",
         response_model=list[ProfileListItem],
+        response_model_exclude_defaults=True,
         summary="profile 列表（只有 id/label）",
         description=(
             "已知 profile id（``<store_base>/.bdt-serve/profiles.json`` ∪ "
@@ -93,6 +99,7 @@ def profiles_router(store: DocumentStore) -> APIRouter:
     @router.put(
         "/profiles",
         response_model=ProfileListItem,
+        response_model_exclude_defaults=True,
         summary="新建 / 更新 / 删除 profile（只接受脚本路径引用）",
         description=(
             "局部更新一条 profile 并原子写回 profiles.json。"
