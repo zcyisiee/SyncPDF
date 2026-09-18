@@ -302,6 +302,15 @@ HTTP 形状的单一事实来源是运行中服务的 `/openapi.json`（可读�
 `stale`/`artifact`），下载走 `GET /api/v1/documents/{did}/artifacts/{name}`（支持 Range，
 pdf.js 需要）；历史版本走 `GET /api/v1/documents/{did}/versions/{revision}/pdf`。
 
+- **前端静态伺服（W15）**：`pnpm --dir web build` 的产物（`web/dist`）存在时，`bdt serve`
+  在**同一个端口**上伺候 SPA —— `GET /` 给 `index.html`（`no-cache`）、带内容哈希的
+  `/assets/*` 长缓存（`immutable`）、其它固定名资源（`pdfjs/*` 等）`no-cache`、
+  **非接口路径回退到入口 HTML**（前端的 hash 路由在浏览器里解析）。没构建过就**静默跳过**
+  （只伺服 `/api/v1`，启动信封一个字不变）；`/api`、`/docs`、`/redoc`、`/openapi.json`
+  永不落进 SPA 回退（未知的接口路径照旧是 JSON 错误信封）。于是生产上就是单进程自包含：
+  `pnpm --dir web build && PATH="$PWD/.venv/bin:$PATH" bdt serve --root tmp`（开发时仍可用
+  Vite dev server + `/api` 代理，`web/README.md` 有两条工作流）。
+
 ### Debug 工作台（诊断归档 + 只读查看器）
 
 给任一阶段加 `--debug`，该阶段的证据就会落进 `<workdir>/debug/runs/<run_id>/`，

@@ -22,6 +22,8 @@
 - ``GET/PUT/DELETE /api/v1/glossary``（W13 全局词表，见
   :mod:`babeldoc_tools.serve.routers.glossary`）
 - ``GET /openapi.json`` / ``GET /docs``（FastAPI 自带）
+- ``GET /`` 及其下的前端静态资源（W15，见 :mod:`babeldoc_tools.serve.static`）：
+  ``web/dist`` 存在时同一个端口伺候 SPA（含前端路由回退），没构建过就静默跳过
 
 后续端点（流式段落级进度…）在 ``docs/frontend/api.md`` 里冻结形状 —— 这里不写假成功 stub。
 
@@ -68,6 +70,7 @@ from babeldoc_tools.serve.schemas import API_PREFIX
 from babeldoc_tools.serve.schemas import ErrorBody
 from babeldoc_tools.serve.schemas import ErrorEnvelope
 from babeldoc_tools.serve.schemas import HealthResponse
+from babeldoc_tools.serve.static import mount_frontend
 from babeldoc_tools.serve.store import DocumentStore
 
 __all__ = ["create_app", "error_response"]
@@ -257,5 +260,8 @@ def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI
     app.include_router(versions_router(store))
     app.include_router(profiles_router(store))
     app.include_router(glossary_router(glossary))
+    # 前端静态资源最后挂（`/{path:path}` 接住所有未被接口认领的路径）：没跑过
+    # `pnpm build` 时静默跳过，只伺服 API —— 不报错、也不改启动信封。
+    mount_frontend(app)
 
     return app

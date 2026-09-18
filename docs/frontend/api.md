@@ -147,6 +147,17 @@ fastapi/uvicorn，message 里给安装命令）、`invalid_port`、`port_unavail
 
 FastAPI 自带（OpenAPI 3.1）。`openapi-typescript` 从这里生成 `web/src/api/schema.d.ts`。
 
+### `GET /` 及其下的前端静态资源（W15）
+
+**不是接口，但同一个源**：`web/dist`（`pnpm build` 的产物）存在时，`bdt serve` 在同一个
+端口上伺服 SPA —— `GET /` → `index.html`（`Cache-Control: no-cache`）、带内容哈希的
+`/assets/*` → `public, max-age=31536000, immutable`、其它固定名资源（`pdfjs/*`）→ `no-cache`、
+其余路径（前端 hash 路由的深链）**回退**到 `index.html`。`web/dist` 不存在就静默跳过
+（只伺服 `/api/v1`，启动信封不变）；挂载点在所有接口路由**之后**注册，所以 `/api`、`/docs`、
+`/redoc`、`/openapi.json` 永不被回退接住（未知的 `/api/v1/...` 仍是 JSON 错误信封的 404）。
+前端拿到的相对地址（`/api/v1`、`/artifacts/...`）因此天然同源，不需要 CORS，也不需要
+Vite 代理（开发模式仍可用代理，见 `web/README.md`）。
+
 W01 **只**有这两个端点；没有写端点、没有假 stub。校验（越界/符号链接/`did` 规则）已在
 服务端 resolver 实现并被测试覆盖；W02 起这些规则经 §3.1 的六个只读文档端点暴露。
 

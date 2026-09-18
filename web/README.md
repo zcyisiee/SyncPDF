@@ -5,7 +5,7 @@ Vite + React 18 + TypeScript + Tailwind + TanStack Query + Zustand。
 `tailwind.config.ts` + `src/app/globals.css`）；HTTP 契约唯一事实来源：
 `docs/frontend/api.md` 与运行中服务的 `/openapi.json`。
 
-本目录当前范围（W13）：三栏工作台壳 + 设计令牌 + hash 路由 +
+本目录当前范围（W15）：三栏工作台壳 + 设计令牌 + hash 路由 +
 **PDF 预览**（pdf.js 渲染产物 PDF、parse/layout 两套 bbox 叠加、源/译/对照三模式、点框选中）+
 **进度层**（事件流面板 + 真 SSE 增量 + 阶段时间线真耗时 + 运行中状态）+
 **上传与任务**（文件库拖/选上传 PDF → 新文档、工作台「开始翻译」配置卡、运行中/失败卡与取消）+
@@ -16,6 +16,8 @@ Vite + React 18 + TypeScript + Tailwind + TanStack Query + Zustand。
 任一版本下载；右侧面板「归档」tab 给同一份数据的摘要 + 「查看全部」）+
 **词表**（`#/glossary` 全局术语表：行内编辑/加删行/整表保存、CSV 导入导出、
 「开始翻译」卡上的词表开关、图标栏条数徽标）。
+构建产物（`pnpm build` → `web/dist`）由 `bdt serve` **同一个端口**伺候（W15 静态伺服 +
+SPA 回退），并有**一条贯穿全旅程的集成验收**（`e2e/integration.spec.ts`，见下）。
 **不做**：连续滚动、缩放控件、译文覆盖层、版本回滚（v1 不做）；
 未实现的区域渲染带 `data-od-id` 的占位并写明接入任务。
 
@@ -40,11 +42,11 @@ serve 不注册 CORS，所以前端必须走这个同源代理（`docs/frontend/
 | 命令 | 作用 |
 |---|---|
 | `pnpm dev` | dev server（含 /api 代理）；先同步 pdf.js 静态资源 |
-| `pnpm build` | 同步 pdf.js 静态资源 + `tsc --noEmit` + `vite build` → `web/dist`（W15 才接到 `babeldoc_tools/web_dist/`） |
+| `pnpm build` | 同步 pdf.js 静态资源 + `tsc --noEmit` + `vite build` → `web/dist`（W15 起由 `bdt serve` 直接伺服这个目录） |
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm lint` | eslint flat config + typescript-eslint，`--max-warnings 0` |
 | `pnpm test` | Vitest（jsdom + @testing-library/react），不起真后端 |
-| `pnpm e2e` | Playwright 真浏览器用例（`e2e/archive.spec.ts` · `edit.spec.ts` · `glossary.spec.ts` · `preview.spec.ts` · `progress.spec.ts` · `retranslate.spec.ts` · `streaming.spec.ts` · `upload.spec.ts`）：起真 serve + 真 dev server |
+| `pnpm e2e` | Playwright 真浏览器用例（`e2e/archive.spec.ts` · `edit.spec.ts` · `glossary.spec.ts` · `integration.spec.ts` · `preview.spec.ts` · `progress.spec.ts` · `retranslate.spec.ts` · `streaming.spec.ts` · `upload.spec.ts`）：起真 serve + 真 dev server（`integration.spec.ts` 另起一个静态模式的 serve，见下） |
 | `pnpm sync:pdfjs` | 单独把 pdf.js worker/cmaps/standard_fonts 复制进 `public/pdfjs/` |
 | `pnpm gen:api` | 从运行中的 serve 拉 `/openapi.json` 生成 `src/api/schema.d.ts` |
 
@@ -75,8 +77,9 @@ web/
     screens/    LibraryScreen / DocumentCard / GlossaryScreen（W13 全局词表）/ WorkbenchScreen / PlaceholderScreen
     stores/     ui.ts（三栏宽度 + 分隔条 + 屏/预览模式 + 预览页码/bbox 图层/选中段落/重译 profile）
   scripts/      sync-pdfjs-assets.mjs（把 pdf.js 静态资源复制进 public/pdfjs/）
-  e2e/          Playwright 真浏览器用例（archive.spec.ts · edit.spec.ts · glossary.spec.ts · preview.spec.ts · progress.spec.ts · retranslate.spec.ts · streaming.spec.ts · upload.spec.ts）
+  e2e/          Playwright 真浏览器用例（archive.spec.ts · edit.spec.ts · glossary.spec.ts · integration.spec.ts · preview.spec.ts · progress.spec.ts · retranslate.spec.ts · streaming.spec.ts · upload.spec.ts）
                 fixtures/sample.pdf（602 字节最小合法 PDF）· fixtures/sleep-translator.sh（长睡 stub）
+                fixtures/slow-translator.sh（W15 离线 stub：睡 8s 再回显段落标记，好断言运行中链路）
                 fixtures/glossary-translator.sh（W13 离线 stub：读干提示词、回显原文）
   tests/        Vitest 用例（api / store / routing / 文件库屏+上传 / job 卡与 hooks / 工作台壳 /
                 预览坐标与组件 / 编辑坐标与组件（W10 编辑、W11 候选面板、W12 归档视图、W13 词表）/ 事件流与时间线）
@@ -424,6 +427,71 @@ SSE 原始帧，量三个数：①`job_update` 首帧在 `POST /jobs` 返回后 
 - **注入入口**：「开始翻译」卡上的`使用词表`开关（`use_glossary`，缺省开）；词表为空时禁用并写
   「（词表为空）」。客户端只给这个布尔，**词表内容与注入用的文件路径全在服务端**；
   图标栏「词表」项带**条数徽标**（有词表时才显示，拿不到数据就不冒充 0 条）。
+
+## 集成验收（W15）：静态伺服 + 一条贯穿全旅程的真浏览器用例
+
+### 静态伺服（同一端口，生产拓扑）
+
+后端实现：`babeldoc_tools/serve/static.py`（`create_app` 在**注册完全部接口路由之后**调用
+`mount_frontend`）。要点：
+
+- `web/dist` **存在**（且里面有 `index.html`）才挂：`GET /` 给入口、静态文件按路径解析、
+  未知路径（前端 hash 路由的深链，如 `/d/<did>/translate`）回退到入口 HTML —— 服务端不解析
+  hash，路由在浏览器里。
+- 缓存分两档：`/assets/*`（文件名带内容哈希）→ `public, max-age=31536000, immutable`；
+  `index.html` 与其它固定名资源（`pdfjs/*` 等）→ `no-cache`（新构建立刻生效）。
+- 不接管接口：`/api`、`/docs`、`/redoc`、`/openapi.json` 一律不走 SPA 回退，未知的
+  `/api/v1/...` 照旧是 JSON 错误信封的 404。符号链接不穿透（`resolve()` 之后做前缀判定）。
+- `web/dist` **不存在**（没跑过 `pnpm build`）→ 静默跳过，只伺服 API；启动信封一个字不变。
+
+```bash
+cd web && pnpm build                       # 产出 web/dist
+cd .. && PATH="$PWD/.venv/bin:$PATH" bdt serve --root tmp   # 打开 http://127.0.0.1:<port>/ 就是前端
+```
+
+### `e2e/integration.spec.ts`：一条旅程走完全部交互面
+
+它**不共用** playwright 配置里的 Vite dev server：`beforeAll` 跑 `pnpm build`，然后用
+`bdt serve --root tmp/w15-integration-<时间戳> --port 0` 起一个**静态模式**的 serve
+（专属 root，自带两条 stub profile 与一条词表），端口从 stdout 的启动信封里读真实值。
+好处是三重的：静态构建与 API 同源（生产拓扑）、不共享 `tmp/.bdt-serve`（无跨 spec 抢状态）、
+既有 15 个 spec 仍走 dev server（改这个 spec 不会动它们）。运行：
+
+```bash
+cd web && pnpm exec playwright test e2e/integration.spec.ts   # 实测 ~35s（含 pnpm build）
+```
+
+旅程与每步断言：
+
+| 阶段 | 断言（`data-od-id` 优先） |
+|---|---|
+| 0 静态伺服契约 | `GET /` 200 + `text/html` + `no-cache`；index 里的哈希资源 200 + `immutable`；`/d/whatever/translate` 回退 200；`/api/v1/health` 同源 200 |
+| 1 文件库 + 词表 + 上传 | dropzone 可见（页面来自 `dist`）；词表屏列出预置词条（cell 值）；拖选上传 `sample.pdf` → API 列表出现 `up-sample-*` → `doc-card` 可见 + `source.pdf` 落盘 |
+| 2 配置并提交真 run job | profile/页码/dual/词表开关可配；提交后 job 记录里 `from_stage=translate`/`pages=1`/`dual=true`/`use_glossary=true`；`active-job-status[data-status=running]`；事件流有 `event-row` 且 SSE `data-status=open`；`timeline-stage-translate[data-state=live]`；运行中 `PATCH /draft` → 409（只读） |
+| 3 终态（诚实失败） | `active-job-outcome` 显示服务端同一个 `error_code`；`run_state.json` 里 translate 阶段 `status=ok`（stub 译文真落进 `translated.md`）；**已发布 PDF 的 sha256 不变**、草稿仍 r0（失败只失败，不改产物） |
+| 4 SSE `job_update` + 一次**成功**的真 job | 页面内 fetch 读原始帧：`event: job_update` + `id: <job_id>:<n>` + data 恰好 5 个字段，且「POST 返回 → 首帧」实测 ~0.5s（远小于 5s 兜底轮询）—— 这一次是 `retranslate`，真的 `succeeded`，候选卡 `data-ready=true` 且页面**没重新加载** |
+| 5 编辑 + bbox | 采用候选（草稿 +1）→ 手改译文（失焦即存）→ 拖 `bbox-handle-se`（`layout.box` 按 `位移 / scale` 变化、译文不丢）→ `paragraph-layout-box_scale` 数值调整 —— 每步草稿 revision 前进 |
+| 6 编译链路 | 1.5s 防抖提交真 compile job → `compile-bar[data-compile-status=failed]` + `compile-error` 显示 `error_code`（本 fixture 是 `source_pdf_missing`）；隔离目录已清、无 `versions.json`、旧 PDF sha256 不变；`compile-retry` 再提交一条真 job |
+| 7 归档 + 下载字节 | 按 §3.7 落盘夹具写出「编译成功 r{N}」后：`compile-bar=ok`、`download-button` `data-enabled=true` + 落盘名 `paper.mono.r{N}.pdf` + href `?r=N`、修订徽标「最新 · rN」、质量徽标「检查通过」、预览按 `?r=N` 重新取产物；**浏览器真下载**最新版与历史版，sha256 与磁盘上的 `output/paper.mono.pdf` / `versions/<r>.pdf` 一致（历史版与最新版字节不同）；归档视图两行、当前版本高亮 |
+
+截图（每个阶段一张，落 `web/tmp-smoke/`，`.gitignore` 不入库）：
+`w15-01-library-static` · `w15-02-glossary` · `w15-03-uploaded` · `w15-04-configured` ·
+`w15-05-running` · `w15-06-run-failed` · `w15-07-candidate` · `w15-08-edited-dragged` ·
+`w15-09-box-numeric` · `w15-10-compile-failed` · `w15-11-compiled-ok` · `w15-12-archive`
+（serve 日志 `w15-serve.log`、用例输出 `w15-run*.log` 也在同一目录）。
+
+**诚实边界（写在这里就不许含糊）**：
+
+1. 上传后的文档只有 `source.pdf`；spec 按**真实形状**预置 parse 阶段的产物
+   （`agent/document.md`/`anchors.json`/`translated.md`/`translated.jsonl`/`layout_geometry.json`
+   + 一份旧的 `output/paper.mono.pdf`），跳过需要 MinerU 联网的 parse —— 不是伪造空态。
+2. 真 `bdt run --from translate` 在本 fixture 上**如实失败**（apply/build 需要真 IR
+   `agent/state.pkl`）：Phase 3/6 断言的就是「失败原因如实显示 + 产物不动」。
+3. **编译成功 → 新 rN → 下载**这一段用的是 §3.7 落盘夹具（与 W12 `archive.spec.ts` 同一先例），
+   **不是真 LaTeX build**。真编译成功链由 `edit.spec.ts`（W10，实测 ~3.1 分钟）与 W09 手工冒烟
+   覆盖；本 spec（以及整个 W15）**不声称**覆盖了真编译成功。
+4. 真实模型/真实 MinerU 都不在本 spec 内：translator 全是离线 stub（`slow-translator.sh` /
+   `candidate-translator.sh`）。
 
 ## 设计与契约约束（改动时别忘）
 
