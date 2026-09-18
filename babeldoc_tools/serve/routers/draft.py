@@ -1,6 +1,6 @@
-"""``/documents/{did}/draft``：草稿读写（``docs/frontend/api.md`` §3.3，W09）。
+"""``/documents/{did}/draft``：草稿读写（``docs/reference/http-api.md``，W09）。
 
-三个端点，形状与错误码都在 §3.3 冻结：
+三个端点，字段模型见 schemas.py，保存/编译行为见当前 HTTP 参考：
 
 - ``GET``：当前草稿（缺文件 → 空草稿 ``revision=0``）；
 - ``PATCH``：``{base_revision, paragraphs}``，成功 → ``revision+1`` 并**触发 1.5s

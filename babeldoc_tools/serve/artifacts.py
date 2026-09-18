@@ -1,4 +1,4 @@
-"""可下载产物白名单与路径判定（``docs/frontend/api.md`` §1.5）。
+"""可下载产物白名单与路径判定（``docs/reference/http-api.md``）。
 
 前端能下载的 workdir 产物只有三处：
 

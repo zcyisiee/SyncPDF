@@ -191,17 +191,15 @@ python experiments/toolchain_gates.py <workdir> --pdf <源pdf> --json
 | `<workdir>/<pdf名>/layout_coverage.json` | `global.uncovered_ratio`、逐页 `uncovered_text_preview` |
 | `agent/reconstruct_report.json` | `link_total/remapped/fallback_paragraph/unresolved/uri_set_match` |
 
-**详细排查手册**（目录/链接/漏译/公式/字号/圈号六大症状）：
-[`docs/toolchain/troubleshooting.md`](../../../docs/toolchain/troubleshooting.md)。
-**门禁阈值与人为触发方式**：
-[`docs/toolchain/README.md`](../../../docs/toolchain/README.md#3-门禁速查)。
+**排查入口**见 [运行与验证](../../../docs/guide/cli.md)，阶段产物见 [管线参考](../../../docs/reference/pipeline.md)。
 
 ---
 
 ## 五、回归自检（改动 Typesetting/重建后必跑）
 
 ```bash
-.venv/bin/python -m pytest tests -q                                  # 全量单元/契约测试
+PATH="$PWD/.venv/bin:$PATH" .venv/bin/python -m pytest tests -q \
+    --basetemp="tmp/pytest-$(date +%Y%m%d-%H%M%S)"  # 保留每轮证据
 bdt build --workdir tmp/md-ccs3764                                   # 空覆盖重建
 .venv/bin/python experiments/pdf_fingerprint.py \
     tmp/md-ccs3764/output/<new>.mono.pdf --compare <baseline.pdf>    # 文本层哈希必须一致

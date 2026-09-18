@@ -1,4 +1,4 @@
-"""版本归档：编译产物的历史版本存档与读取（``docs/frontend/api.md`` §3.7，W12）。
+"""版本归档：编译产物的历史版本存档与读取（``docs/reference/http-api.md``，W12）。
 
 每次**成功**的编译发布（:func:`babeldoc_tools.serve.compile.settle_compile` 的成功分支）
 都把那一份 PDF 归档成一个版本：``<workdir>/.bdt-serve/versions/<revision>.pdf``

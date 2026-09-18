@@ -1,6 +1,6 @@
 import { cn } from '../lib/cn';
 
-/** 图标路径取自 docs/frontend/design-v2/index.html 的 IC 表（16px、stroke 1.7）。 */
+/** 图标路径（16px、stroke 1.7）。 */
 const ICON_PATHS = {
   library: ['M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v6.5A1.5 1.5 0 0 1 17.5 18h-13A1.5 1.5 0 0 1 3 16.5z'],
   glossary: [

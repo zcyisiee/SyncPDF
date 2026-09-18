@@ -1,5 +1,5 @@
 /**
- * HTTP 封装：`/api/v1` 前缀 + 统一错误信封 `{"error": {code, message, detail?}}`（docs/frontend/api.md §1）。
+ * HTTP 封装：`/api/v1` 前缀 + 统一错误信封 `{"error": {code, message, detail?}}`（docs/reference/http-api.md）。
  * 错误一律抛 `ApiError`（带稳定 `code`），调用方按 code 分支，不要匹配 message 文案。
  */
 import type { ErrorEnvelope } from '../api/types';

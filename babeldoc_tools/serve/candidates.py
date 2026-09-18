@@ -1,4 +1,4 @@
-"""候选重译：生成（零副作用）/ 采用（写草稿 + 防抖）/ 拒绝（``docs/frontend/api.md`` §3.6，W11）。
+"""候选重译：生成（零副作用）/ 采用（写草稿 + 防抖）/ 拒绝（``docs/reference/http-api.md``，W11）。
 
 一句话的语义：**候选与译文是两回事**。生成一个候选只在
 ``<workdir>/.bdt-serve/candidates.json`` 里加一行（外加 job 状态），

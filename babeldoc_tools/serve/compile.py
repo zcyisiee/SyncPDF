@@ -1,4 +1,4 @@
-"""草稿编译：隔离副本 → apply+build → 原子发布（``docs/frontend/api.md`` §3.2/§3.4，W09）。
+"""草稿编译：隔离副本 → apply+build → 原子发布（``docs/reference/http-api.md``，W09）。
 
 一次 compile 的生命周期（每一步都可失败，失败**绝不**碰真 workdir 的产物）::
 
@@ -559,7 +559,7 @@ def _publish(plan: CompilePlan, pdfs: list[Path]) -> dict:
 
 
 def _archive_version(plan: CompilePlan, artifact: dict) -> None:
-    """把刚发布的那一版归档成历史版本（W12，``docs/frontend/api.md`` §3.7）。
+    """把刚发布的那一版归档成历史版本（W12，``docs/reference/http-api.md``）。
 
     调用点在 :func:`_publish` **之后**：PDF 已经原子替换到 ``output/``，归档只给同一份
     字节再加一个名字（硬链接，见 :func:`babeldoc_tools.serve.versions.archive`）。

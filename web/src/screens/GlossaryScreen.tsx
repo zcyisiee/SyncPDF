@@ -1,5 +1,5 @@
 /**
- * `#/glossary` 全局术语表视图（W13，docs/frontend/api.md §3.8）。
+ * `#/glossary` 全局术语表视图（W13，docs/reference/http-api.md）。
  *
  * 一个全局词表（术语 → 指定译名），不是多词表管理：`GET/PUT/DELETE /glossary`。
  * 本屏是**整表编辑**：本地改完一次保存（`PUT` 覆盖整表，不做行级 patch），因此「保存」

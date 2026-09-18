@@ -1,7 +1,7 @@
 /**
  * 由运行中的 `bdt serve` 生成（`pnpm gen:api`）的 OpenAPI 类型，收窄成本模块的具名别名。
  * 生成命令：`PATH="$PWD/.venv/bin:$PATH" bdt serve --root tmp --port 8787` + `pnpm gen:api`。
- * 契约文本：docs/frontend/api.md（冲突时以运行中服务的 /openapi.json 为准）。
+ * 契约文本：docs/reference/http-api.md（冲突时以运行中服务的 /openapi.json 为准）。
  */
 import type { components } from './schema';
 
@@ -42,8 +42,8 @@ export type GlossaryResponse = components['schemas']['GlossaryResponse'];
 export type GlossaryUpdateRequest = components['schemas']['GlossaryUpdateRequest'];
 
 /**
- * 统一错误信封（docs/frontend/api.md §1）。唯一手写形状：FastAPI 的 OpenAPI 不导出异常响应
- * 模型（`ErrorEnvelope` 不在 `components.schemas` 里），所以按 pydantic 模型 \`ErrorBody\` 逐字段照抄。
+ * 统一错误信封（docs/reference/http-api.md）。唯一手写形状：FastAPI 的 OpenAPI 不导出异常响应
+ * 结构；服务端 `serve/schemas.py::ErrorEnvelope` 与 `serve/app.py::error_response` 定义实际形状。
  */
 export interface ErrorEnvelope {
   error: { code: string; message: string; detail?: unknown };

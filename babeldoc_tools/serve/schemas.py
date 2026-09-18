@@ -1,8 +1,7 @@
 """``bdt serve`` 的响应模型与公共契约词表。
 
-只有**已实现**端点才在这里建模（W01 ``/api/v1/health``；W02 ``/api/v1/documents``
-六个只读端点；W03 事件分页与产物清单）；后续端点的字段形状冻结在
-``docs/frontend/api.md``，实现时再落到本模块 —— 不预置假 stub。SSE 帧是
+已实现端点的字段在本模块建模，路由使用这些模型生成 OpenAPI。
+当前接口行为见 ``docs/reference/http-api.md``，不预置假 stub。SSE 帧是
 ``text/event-stream`` 文本行，不走 pydantic（见
 :mod:`babeldoc_tools.serve.routers.events`）。模型里的 ``dict`` 字段承载产物内部
 结构：产物是信任边界内的本地文件，不在这里逐字段复刻它们的 schema。

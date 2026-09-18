@@ -24,7 +24,7 @@ type UploadRow =
 /**
  * `#/library` 文件库：真数据来自 `GET /api/v1/documents`；上传走 `POST /api/v1/documents`（W08）。
  *
- * 上传契约（`docs/frontend/api.md` §3.5）：请求体只有 `file` 字段，did 由**服务端**生成
+ * 上传契约（`docs/reference/http-api.md`）：请求体只有 `file` 字段，did 由**服务端**生成
  * （`up-<slug>-<时间戳>`），客户端不提供路径或命令。多选时**逐个串行** POST（并发上传
  * 不是本任务范围），不伪造百分比；成功后列表刷新，**不自动跳转**（用户自己点卡片进去）。
  */

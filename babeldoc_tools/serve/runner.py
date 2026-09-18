@@ -1,6 +1,6 @@
 """受控子进程：job → ``bdt run`` 子进程的启动、监控、取消（W07）。
 
-三条硬约束（EXECUTION.md 纠偏第 5 / 8 条；``docs/frontend/api.md`` §3.4）：
+三条硬约束（EXECUTION.md 纠偏第 5 / 8 条；``docs/reference/http-api.md``）：
 
 1. **argv 只由服务端构造**。客户端能给的只有 ``action``/``from``/``pages``/``dual``/
    ``profile``/``use_glossary``；translator/reviewer 命令在 :mod:`babeldoc_tools.serve.profiles` 里按

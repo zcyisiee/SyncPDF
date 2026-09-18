@@ -1,6 +1,6 @@
-"""``/documents/{did}/paragraphs/{pid}`` 下的候选重译端点（``docs/frontend/api.md`` §3.6，W11）。
+"""``/documents/{did}/paragraphs/{pid}`` 下的候选重译端点（``docs/reference/http-api.md``，W11）。
 
-四条端点，形状与错误码都在 §3.6 冻结：
+四条端点，字段模型见 schemas.py：
 
 - ``POST /…/paragraphs/{pid}/retranslate`` ``{profile}`` → 202 ``{candidate_id, job_id}``
   （建候选行 + 提交 ``action=retranslate`` job；**不动任何正文产物**）；

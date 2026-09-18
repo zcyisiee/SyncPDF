@@ -1,4 +1,4 @@
-"""provider profile 解析（``docs/frontend/api.md`` §3.4；W07 最小版，W08 扩成 CRUD + UI）。
+"""provider profile 解析（``docs/reference/http-api.md``；W07 最小版，W08 扩成 CRUD + UI）。
 
 profile 是**命令的唯一来源**：客户端只能说 profile id，translator/reviewer 命令字符串
 由服务端在这里解析后直接进 argv 构造（见
@@ -75,7 +75,7 @@ PROFILE_FIELDS = ("label", "translator", "reviewer")
 #: 人性化显示名字段（前端只从这里/ id 兜底拿显示文案）。
 LABEL_FIELD = "label"
 
-#: profile id 形状（与 ``docs/frontend/api.md`` §3.4 的 ``[a-z0-9-]{1,64}`` 一致）。
+#: profile id 格式；公开接口概览见 ``docs/reference/http-api.md``。
 PROFILE_ID_RE = r"^[a-z0-9-]{1,64}$"
 
 #: 脚本引用白名单目录名（相对 ``<store_base>`` 与仓库根各一个）。

@@ -19,7 +19,7 @@ parse → translate（可迭代 --ids）→ apply → build → check → review
 ```
 
 > 目录：`agents/`（各角色的提示词）`reference/`（管线 / 契约 / 排查）。
-> 工具链实现细节见 [`docs/toolchain/`](../../docs/toolchain/)。
+> 工具链实现细节见 [`docs/reference/pipeline.md`](../../docs/reference/pipeline.md)。
 
 ## 加载方式
 
@@ -180,4 +180,4 @@ reviewer 只在 stdout 输出一个 JSON 对象：
 - 覆盖不做跨段落联动（改了 A 段高度可能压到 B 段）：靠 `layout_lint` 复核发现。
 
 > 工具链实现细节（分层不变量、阶段契约、标签字典、门禁、排查手册）：
-> [`docs/toolchain/`](../../docs/toolchain/)。
+> [`docs/reference/pipeline.md`](../../docs/reference/pipeline.md)。
