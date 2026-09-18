@@ -73,9 +73,9 @@ describe('W08 hooks（mock fetch）', () => {
     expect(calls).toEqual([
       { method: 'GET', url: '/api/v1/documents/alpha/jobs', body: undefined },
     ]);
-    // 2s / 30s 两个间隔是 jobsRefetchInterval 的输出（tests/jobs.test.ts 已断言口径）；
-    // 这里只钉住常量没被人改错。
-    expect(JOBS_ACTIVE_REFETCH_MS).toBe(2000);
+    // 5s / 30s 两个间隔是 jobsRefetchInterval 的输出（tests/jobs.test.ts 已断言口径）；
+    // 这里只钉住常量没被人改错（W14 从 2s 放宽到 5s：快路径是 SSE 的 job_update）。
+    expect(JOBS_ACTIVE_REFETCH_MS).toBe(5000);
     expect(JOBS_IDLE_REFETCH_MS).toBe(30_000);
   });
 

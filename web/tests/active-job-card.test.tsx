@@ -1,11 +1,25 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { DocumentDetail } from '../src/api/types';
 import { ActiveJobCard } from '../src/components/jobs/ActiveJobCard';
 import { jsonResponse, makeJob, mockApiFetch, renderWithQuery, resetUiStore } from './helpers';
 
 const DID = 'up-sample-20260917-120000';
 const JOBS_URL = `/api/v1/documents/${DID}/jobs`;
+
+/** 文档详情的最小形状（只为 W14 的 `translated_count`/`paragraph_count` 两行用）。 */
+function makeDocument(overrides: Partial<DocumentDetail> = {}): DocumentDetail {
+  return {
+    did: DID,
+    title: null,
+    pages: 21,
+    paragraph_count: null,
+    translated_count: null,
+    stage_summary: {},
+    ...overrides,
+  } as DocumentDetail;
+}
 
 beforeEach(() => {
   resetUiStore();
@@ -164,5 +178,60 @@ describe('ActiveJobCard（活动/最近失败任务卡）', () => {
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('job 不存在');
+  });
+
+  it('running 的 run job：显示「已译段落 N/M」并如实标注套版后更新（W14）', () => {
+    const fetchMock = mockApiFetch({});
+    renderWithQuery(
+      <ActiveJobCard
+        did={DID}
+        job={makeJob({ status: 'running', action: 'run', from_stage: 'translate' })}
+        document={makeDocument({ translated_count: 98, paragraph_count: 375 })}
+      />,
+    );
+    const progress = document.querySelector('[data-od-id="active-job-progress"]');
+    expect(progress?.textContent).toContain('已译段落 98/375');
+    // 红线：不许暗示“在跳动”——文案写明数据要套版后才更新，且 DOM 上带着两个原始计数
+    expect(progress?.textContent).toContain('套版后更新');
+    expect(progress?.getAttribute('data-translated')).toBe('98');
+    expect(progress?.getAttribute('data-paragraphs')).toBe('375');
+    expect(fetchMock).not.toHaveBeenCalled(); // 数据来自父级，本卡不发请求
+  });
+
+  it('产物缺失时计数显示为 `—`（不编造 0）；非 run 的 job 不显示这行', () => {
+    mockApiFetch({});
+    const { unmount } = renderWithQuery(
+      <ActiveJobCard
+        did={DID}
+        job={makeJob({ status: 'running', action: 'run' })}
+        document={makeDocument({ translated_count: null, paragraph_count: null })}
+      />,
+    );
+    expect(document.querySelector('[data-od-id="active-job-progress"]')?.textContent).toContain(
+      '已译段落 —/—',
+    );
+    unmount();
+
+    // retranslate 是单段生成，不是“翻译全篇”：不拿这两个计数当进度。
+    renderWithQuery(
+      <ActiveJobCard
+        did={DID}
+        job={makeJob({ status: 'running', action: 'retranslate', from_stage: null })}
+        document={makeDocument({ translated_count: 98, paragraph_count: 375 })}
+      />,
+    );
+    expect(document.querySelector('[data-od-id="active-job-progress"]')).toBeNull();
+  });
+
+  it('queued：不显示进度行（还没开跑，任何“已译 N”都是无意义的）', () => {
+    mockApiFetch({});
+    renderWithQuery(
+      <ActiveJobCard
+        did={DID}
+        job={makeJob({ status: 'queued', action: 'run' })}
+        document={makeDocument({ translated_count: 98, paragraph_count: 375 })}
+      />,
+    );
+    expect(document.querySelector('[data-od-id="active-job-progress"]')).toBeNull();
   });
 });

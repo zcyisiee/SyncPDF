@@ -6,6 +6,10 @@
  * `tmp/ccs3764-dyn` 的 `events.jsonl` 是 legacy replay，只覆盖到 `check`，而 `run_state`
  * 里 `review`/`report` 都有真实耗时。所以 `ok`/`failed` 的基线永远赢；事件只能把
  * 「基线说 not_run（或 running/waiting）」的阶段标成 live。
+ *
+ * W14 又加了一层“job 驱动”的 live（`jobLiveStage`）：job 一提交，stage-state 基线讲的
+ * 还是**上一个** run（新 run 的 `run_state` 还没落盘），这时只有 job 记录说“正在跑”。
+ * 它只在基线**没有定论**（`ok`/`err` 永远优先）时生效。
  */
 import type { StageStateItem } from '../api/types';
 import { isRunLive, type RunEvent } from './events';
@@ -13,6 +17,44 @@ import { STAGE_NAMES, stageTone, type StageName, type StatusTone } from './human
 import type { WorkbenchView } from './routing';
 
 export type SegmentState = 'ok' | 'err' | 'live' | 'not_run';
+
+/**
+ * job 驱动的 live 段（只对 ``action=run`` 有意义）：job 在 ``running`` 时，它从
+ * ``from_stage`` 开始真的在真 workdir 里跑那个阶段；而 stage-state 基线是上一个 run 的
+ * 快照（甚至根本没有）—— job 一提交，基线还是旧的，这时“正在跑”的唯一真信号就是 job 本身。
+ *
+ * ``compile``/``retranslate`` 刻意**不**进这里：它们在隔离副本里跑，真 workdir 的 7 个阶段
+ * 没有动，标成 live 就是骗人（编译状态有它自己的状态条，见 ``lib/download.ts``）。
+ */
+export interface JobLiveStage {
+  stage: StageName;
+  /** job 的启动时刻（UTC ISO）；没有就不编造秒表（``elapsedS`` 为 null）。 */
+  at: string | null;
+}
+
+/**
+ * 活动 job → 它正在跑的那个真 workdir 阶段；不该由 job 驱动时间线时→ null。
+ *
+ * 口径（与 ``JobRecord.action`` 对应）：``run`` 的起点 = ``from_stage || 'parse'``
+ * （CLI 缺省就是 parse，与 ``build_job_argv`` 同一口径）；``check`` 固定 ``check``；
+ * ``compile``/``retranslate`` 返回 null（隔离副本，不动真 workdir 的阶段）。
+ */
+export function jobLiveStage(job: {
+  action: string;
+  status: string;
+  from_stage?: string | null;
+  started_at?: string | null;
+} | null | undefined): JobLiveStage | null {
+  if (!job || job.status !== 'running') return null;
+  const stage =
+    job.action === 'run'
+      ? (job.from_stage ?? 'parse')
+      : job.action === 'check'
+        ? 'check'
+        : null;
+  if (stage === null || !(STAGE_NAMES as readonly string[]).includes(stage)) return null;
+  return { stage: stage as StageName, at: job.started_at ?? null };
+}
 
 /**
  * 阶段 → 点击跳转的视图（映射表写死；没有专属视图的阶段回落到能看清它的视图）：
@@ -101,6 +143,7 @@ export function timelineSegments(
   stages: readonly StageStateItem[] | undefined,
   events: readonly RunEvent[],
   nowMs: number,
+  jobStage: JobLiveStage | null = null,
 ): TimelineSegment[] {
   const byStage = new Map((stages ?? []).map((item) => [item.stage, item]));
   // 事件流层面的活跃信号（brief 冻结规则）只是"可能还在跑"，最终仍由基线裁决。
@@ -127,6 +170,19 @@ export function timelineSegments(
         durationS: null,
         elapsedS: elapsedSeconds(at, nowMs),
         at,
+        view,
+      };
+    }
+    // job 驱动的那一段（W14）：基线还没定论时，running 的 job 才是“这个阶段在跑”的真信号，
+    // 秒表从 job 的 started_at 起（拿不到时刻就不编造秒数）。
+    if (jobStage !== null && jobStage.stage === stage) {
+      return {
+        stage,
+        state: 'live',
+        status: 'running',
+        durationS: null,
+        elapsedS: elapsedSeconds(jobStage.at, nowMs),
+        at: jobStage.at,
         view,
       };
     }

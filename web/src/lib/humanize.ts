@@ -32,8 +32,14 @@ export function stageLabel(stage: string): string {
 export const FINAL_STAGE: StageName = STAGE_NAMES[STAGE_NAMES.length - 1];
 
 /**
- * 事件 kind → 中文短标签（优先 ≤4 字）。表里是**本仓库 run 归档里真实出现过的** 47 种 kind
- * （`tmp/<did>/debug/runs/<run>/events.jsonl` 全量统计），没有 kind 就原样显示英文，不编造。
+ * 事件 kind → 中文短标签（优先 ≤4 字）。表里有两类：
+ *
+ * 1. **归档里真实出现过的 47 种 kind**（`tmp/<did>/debug/runs/<run>/events.jsonl` 全量统计）；
+ * 2. 一个**虚拟 kind** `job_update`（W14：SSE 同一条流里的 job 状态变化通知，不在
+ *    events.jsonl 里、没有 seq，见 api.md §1.4.1）—— 它进这张表只是为了有中文文案，
+ *    并且 `EVENT_KINDS`（SSE 必须逐个 `addEventListener` 的清单）漏了它就收不到。
+ *
+ * 没有 kind 就原样显示英文，不编造。
  */
 export const KIND_LABELS: Record<string, string> = {
   // 阶段骨架
@@ -91,12 +97,15 @@ export const KIND_LABELS: Record<string, string> = {
   latex_prepare: '公式准备',
   latex_stamp: '公式标记',
   latex_summary: '公式汇总',
+  // 虚拟 kind（不在归档里）：SSE 的 job 状态变化通知（W14，api.md §1.4.1）
+  job_update: '任务状态',
 };
 
 /**
  * SSE 必须逐个 `addEventListener(<kind>)` 的 kind 清单（见 `useEventStream` 注释：
  * `event: <kind>` 是命名分发，`onmessage` 只收默认类型）。表里没有的 kind 收不到 ——
- * 新 kind 落地时必须在这里补一行（W07 的 job_* 事件就属于这种）。
+ * 新 kind 落地时必须在这里补一行（W14 的虚拟 kind `job_update` 就是这样加进来的；
+ * 它在 `useEventStream` 里走单独的分支：通知不进事件窗口）。
  */
 export const EVENT_KINDS: readonly string[] = Object.keys(KIND_LABELS);
 

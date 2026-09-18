@@ -1,8 +1,8 @@
-import type { JobRecord } from '../../api/types';
+import type { DocumentDetail, JobRecord } from '../../api/types';
 import { describeApiError } from '../../lib/api';
 import { jobOutcomeMessage } from '../../lib/jobs';
 import { useCancelJobMutation, useCreateJobMutation } from '../../lib/queries';
-import { stageLabel } from '../../lib/humanize';
+import { progressLabel, stageLabel } from '../../lib/humanize';
 import { Button } from '../ui/Button';
 import { ErrorCard } from '../ui/ErrorCard';
 import { StatusBadge } from '../ui/StatusBadge';
@@ -39,11 +39,26 @@ function jobBadge(
  *   （重试 = 用同参数**发一个新 job**，不自动重跑 —— 后端明确不重跑收费调用）；
  *   `action=retranslate`（W11 重译候选）例外：它不能走 `POST /jobs`（服务端不接受裸
  *   retranslate，候选必须绑定段落），重试入口在段落面板的「AI 重译」，这里只给提示文案；
- * - `succeeded` 不在这里（那时该显示开始卡，用户可以再跑一次）。
+ * - `succeeded` 不在这里（那时该显示开始卡，用户可以再跑一次）；
+ * - 运行中的 `action=run` 额外显示「已译段落 N/M」（W14）：数据源是**父级给的**文档详情
+ *   （`translated_count`/`paragraph_count`，§3.1），本卡不发任何请求。**这两个数不诚实不了**：
+ *   它们来自 `agent/translated.jsonl`（apply 阶段写出的产物），而翻译是**一次整篇子进程调用**、
+ *   运行中不落任何逐段产物 —— 所以运行中 N 不跳动，只在套版落盘后跳变。文案因此带
+ *   「套版后更新」，也不做跳动动画/假百分比。
  */
-export function ActiveJobCard({ did, job }: { did: string; job: JobRecord }) {
+export function ActiveJobCard({
+  did,
+  job,
+  document,
+}: {
+  did: string;
+  job: JobRecord;
+  /** 文档详情（工作台的 `useDocument` 已经拿到了）：只用于阶段进度那两个计数。 */
+  document?: DocumentDetail;
+}) {
   const cancelJob = useCancelJobMutation(did);
   const createJob = useCreateJobMutation(did);
+  const showProgress = job.status === 'running' && job.action === 'run';
   const active = job.status === 'queued' || job.status === 'running';
   const badge = jobBadge(job);
   const describe = cancelJob.error
@@ -116,6 +131,17 @@ export function ActiveJobCard({ did, job }: { did: string; job: JobRecord }) {
           {job.error_code ? <span className="ml-2 font-mono text-micro text-ink-4">{job.error_code}</span> : null}
         </p>
       )}
+      {showProgress ? (
+        <p
+          className="font-mono text-micro text-ink-4 [font-variant-numeric:tabular-nums]"
+          data-od-id="active-job-progress"
+          data-translated={String(document?.translated_count ?? '')}
+          data-paragraphs={String(document?.paragraph_count ?? '')}
+          title="已译段落数来自 agent/translated.jsonl（套版阶段写出）；翻译是整篇单次子进程调用，运行中这个数不变，套版完成后才跳变"
+        >
+          已译段落 {progressLabel(document?.translated_count, document?.paragraph_count)}（套版后更新）
+        </p>
+      ) : null}
       {describe === null ? null : (
         <ErrorCard data-od-id="active-job-error" title={describe.title} message={describe.message} />
       )}

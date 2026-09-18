@@ -45,6 +45,7 @@ import json
 import os
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
 from datetime import timezone
 from pathlib import Path
@@ -72,6 +73,7 @@ __all__ = [
     "TERMINAL_STATUSES",
     "JobRecord",
     "JobRegistry",
+    "JobStateListener",
     "new_boot_id",
     "new_job_id",
     "pid_alive",
@@ -257,6 +259,9 @@ class JobRecord(BaseModel):
     interrupted_reason: str | None = None
 
 
+#: 状态变化监听器：收到刚写完盘的那个 job 快照（进程内通知，见 :meth:`JobRegistry._notify`）。
+JobStateListener = Callable[["JobRecord"], None]
+
 #: 终态 → 生命周期事件名。
 _TERMINAL_EVENTS = {
     "succeeded": EVENT_FINISHED,
@@ -290,6 +295,8 @@ class JobRegistry:
         self.lock = asyncio.Lock()
         #: 排队中的 job id，FIFO。
         self._queue: list[str] = []
+        #: 状态变化监听器（W14：SSE 的 job_update 广播挂在 `_write` 上）。
+        self._listeners: list[JobStateListener] = []
 
     # ---------------------------------------------------------------- 路径
     @property
@@ -340,6 +347,28 @@ class JobRegistry:
         if record.pgid is None:
             return True
         return process_group_id(record.pid) == record.pgid
+
+    # ------------------------------------------------------------ 状态通知
+    def add_listener(self, listener: JobStateListener) -> None:
+        """挂一个状态变化监听器（同步回调：每次 ``_write`` 后调一次）。
+
+        用途是**进程内通知**（W14 的 SSE `job_update`），不是持久化钩子：真相在
+        :meth:`save` 写的快照与 :meth:`append_event` 追加的 ``jobs.jsonl`` 里，监听器
+        只是在状态已经落盘**之后**被叫一声。回调节点见 ``create``/``mark_started``/
+        ``mark_finished``（都经 ``_write``）；``mark_cancel_requested`` 不改状态，不通知。
+        """
+        self._listeners.append(listener)
+
+    def _notify(self, record: JobRecord) -> None:
+        """通知全部监听器；监听器抛异常不改变状态机结果、也不中断其它监听器。
+
+        通知层刻意“尽力而为”：这里不重试、不排队、不落盘 —— 状态已经写完盘了，通知
+        丢了大不了让前端晚一个轮询周期看到（前端本来就有兜底轮询）。反过来，一个写坏
+        的监听器绝不能把 job 流转带沟里。
+        """
+        for listener in tuple(self._listeners):
+            with contextlib.suppress(Exception):
+                listener(record)
 
     # ---------------------------------------------------------------- 查询
     def get(self, job_id: str) -> JobRecord | None:
@@ -520,9 +549,14 @@ class JobRegistry:
             handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
     def _write(self, record: JobRecord, event: str) -> None:
-        """快照先落盘、事件后追加：事件日志不会引用盘上还没有的状态。"""
+        """快照先落盘、事件后追加、最后通知监听器。
+
+        前两步保证事件日志不会引用盘上还没有的状态；通知放最后，所以监听器读快照一定
+        读得到自己那一次状态（W14 的 SSE `job_update` 只是“刚变了”的提示，不是真相源）。
+        """
         self.save(record)
         self.append_event(event, record)
+        self._notify(record)
 
 
 def _read_snapshot(path: Path) -> JobRecord | None:

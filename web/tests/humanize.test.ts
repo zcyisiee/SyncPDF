@@ -1,6 +1,6 @@
 /**
- * `lib/humanize.ts`：事件 kind 短标签（本仓库归档里真实出现过的 47 种）、
- * `formatDuration` 边界、列表页 running 判据。
+ * `lib/humanize.ts`：事件 kind 短标签（本仓库归档里真实出现过的 47 种 + W14 的虚拟 kind
+ * `job_update`）、`formatDuration` 边界、列表页 running 判据。
  */
 import { describe, expect, it } from 'vitest';
 
@@ -17,6 +17,60 @@ import {
   stageStatusLabel,
 } from '../src/lib/humanize';
 
+/**
+ * `tmp/<did>/debug/runs/<run>/events.jsonl` 全量统计出来的 47 种**真 kind**（W06 实测）。
+ * W14 的 `job_update` 不在其中（它是 SSE 的虚拟 kind，归档里没有），见下一条断言。
+ */
+const observedKinds = [
+  'candidate_evaluated',
+  'call_started',
+  'call_finished',
+  'canonical_writeback',
+  'cache_write',
+  'cache_miss',
+  'candidate_selected',
+  'anchor_repair',
+  'cache_bypass',
+  'compile_requests',
+  'cache_hit',
+  'compile_reuse',
+  'compile_fallback',
+  'stage_started',
+  'stage_finished',
+  'artifact_bundle',
+  'span_started',
+  'span_finished',
+  'pdf_prepared',
+  'page_frames',
+  'native_chars',
+  'layout_parsed',
+  'layout_coverage',
+  'provider_artifacts',
+  'compile_expand',
+  'text_version',
+  'inline_math',
+  'ocr_backfill',
+  'enclosed_marker',
+  'toc',
+  'styles_formulas',
+  'paragraphs_found',
+  'source_geometry',
+  'links_snapshot',
+  'selection',
+  'typesetting_geometry',
+  'latex_capability',
+  'latex_candidates',
+  'latex_prepare',
+  'latex_stamp',
+  'latex_summary',
+  'missing_ids',
+  'apply_validation',
+  'placeholder_validation',
+  'writeback_saved',
+  'stage_error',
+  'replay_notice',
+];
+
 describe('kind 标签', () => {
   it('阶段名固定 7 个、最后一个阶段是 report（事件 live 判据依赖它）', () => {
     expect(STAGE_NAMES).toEqual(['parse', 'translate', 'apply', 'build', 'check', 'review', 'report']);
@@ -26,57 +80,7 @@ describe('kind 标签', () => {
 
   it('表里覆盖归档里真实出现过的 47 种 kind，且标签是中文短词', () => {
     // `tmp/<did>/debug/runs/<run>/events.jsonl` 全量统计出来的 kind（W06 实测）
-    const observed = [
-      'candidate_evaluated',
-      'call_started',
-      'call_finished',
-      'canonical_writeback',
-      'cache_write',
-      'cache_miss',
-      'candidate_selected',
-      'anchor_repair',
-      'cache_bypass',
-      'compile_requests',
-      'cache_hit',
-      'compile_reuse',
-      'compile_fallback',
-      'stage_started',
-      'stage_finished',
-      'artifact_bundle',
-      'span_started',
-      'span_finished',
-      'pdf_prepared',
-      'page_frames',
-      'native_chars',
-      'layout_parsed',
-      'layout_coverage',
-      'provider_artifacts',
-      'compile_expand',
-      'text_version',
-      'inline_math',
-      'ocr_backfill',
-      'enclosed_marker',
-      'toc',
-      'styles_formulas',
-      'paragraphs_found',
-      'source_geometry',
-      'links_snapshot',
-      'selection',
-      'typesetting_geometry',
-      'latex_capability',
-      'latex_candidates',
-      'latex_prepare',
-      'latex_stamp',
-      'latex_summary',
-      'missing_ids',
-      'apply_validation',
-      'placeholder_validation',
-      'writeback_saved',
-      'stage_error',
-      'replay_notice',
-    ];
-    expect(observed).toHaveLength(47);
-    for (const kind of observed) {
+    for (const kind of observedKinds) {
       expect(EVENT_KINDS).toContain(kind);
       expect(kindLabel(kind)).not.toBe(kind);
       // brief 的「≤4 字优先」是偏好：只有 `cache_miss` 取 5 字「缓存未命中」（比「缓存未中」清楚），
@@ -89,6 +93,16 @@ describe('kind 标签', () => {
     expect(kindLabel('job_queued')).toBe('job_queued');
     expect(stageLabel('replay')).toBe('replay');
     expect(stageStatusLabel('not_run')).toBe('未运行');
+  });
+
+  it('虚拟 kind `job_update`（W14）进表：有中文文案且进 SSE 必须监听的清单', () => {
+    // 它是 SSE 同一条流里的 job 状态变化通知（不在 events.jsonl 里、没有 seq）——
+    // 进 KIND_LABELS 只是为了有文案 + 进 EVENT_KINDS（否则 addEventListener 收不到）。
+    expect(kindLabel('job_update')).toBe('任务状态');
+    expect(EVENT_KINDS).toContain('job_update');
+    // 47 种真 kind 一个没丢，也没有被虚拟 kind 顶掉
+    expect(observedKinds).toHaveLength(47);
+    expect(EVENT_KINDS).toHaveLength(48);
   });
 });
 

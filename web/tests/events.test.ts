@@ -1,6 +1,6 @@
 /**
  * `lib/events.ts` 的纯函数：SSE id / URL、live 判定（brief 冻结规则的 4 个断言）、
- * kind 分组、data 摘要、窗口合并。
+ * kind 分组、data 摘要、窗口合并、job_update 帧解析（W14）。
  */
 import { describe, expect, it } from 'vitest';
 
@@ -10,9 +10,11 @@ import {
   eventSourceUrl,
   EVENTS_WINDOW_SIZE,
   isRunLive,
+  JOB_UPDATE_KIND,
   kindGroup,
   mergeEarlierWindow,
   mergeTailWindow,
+  parseJobUpdate,
   parseSseId,
   parseStreamEvent,
   runEventsFromPage,
@@ -183,5 +185,53 @@ describe('窗口合并', () => {
     expect(merged).toHaveLength(EVENTS_WINDOW_SIZE + 500);
     expect(merged[0].seq).toBe(301);
     expect(merged[merged.length - 1].seq).toBe(1000);
+  });
+});
+
+/** job_update 帧的原始 `data:` 行（api.md §1.4.1 冻结的形状）。 */
+function jobUpdateFrame(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    kind: JOB_UPDATE_KIND,
+    data: {
+      job_id: 'j_01M2RDB312K20Q280DHCTX7N19',
+      action: 'run',
+      status: 'running',
+      from_stage: 'translate',
+      error_code: null,
+      ...overrides,
+    },
+  });
+}
+
+describe('parseJobUpdate（SSE 虚拟 kind，W14）', () => {
+  it('正常帧 → 5 个字段（from_stage/error_code 可为 null）', () => {
+    expect(parseJobUpdate(jobUpdateFrame())).toEqual({
+      job_id: 'j_01M2RDB312K20Q280DHCTX7N19',
+      action: 'run',
+      status: 'running',
+      from_stage: 'translate',
+      error_code: null,
+    });
+    expect(
+      parseJobUpdate(
+        jobUpdateFrame({ status: 'failed', error_code: 'translator_failed', from_stage: null }),
+      ),
+    ).toMatchObject({ status: 'failed', error_code: 'translator_failed', from_stage: null });
+  });
+
+  it('不是 job_update / 坏 JSON / 缺关键字段 / data 不是对象 → null（不炸流）', () => {
+    // 归档里的真事件（有 seq、没有 kind="job_update"）：走 parseStreamEvent，不走这里
+    expect(parseJobUpdate('{"seq":1,"stage":"parse","kind":"stage_started","data":{}}')).toBeNull();
+    expect(parseJobUpdate('not json')).toBeNull();
+    expect(parseJobUpdate(jobUpdateFrame({ job_id: undefined }))).toBeNull();
+    expect(parseJobUpdate(jobUpdateFrame({ status: '' }))).toBeNull();
+    expect(parseJobUpdate(JSON.stringify({ kind: JOB_UPDATE_KIND, data: [] }))).toBeNull();
+    expect(parseJobUpdate(JSON.stringify({ kind: JOB_UPDATE_KIND }))).toBeNull();
+    expect(parseJobUpdate('[]')).toBeNull();
+  });
+
+  it('它不是归档事件：toRunEvent 会把它当无 seq 的坏行丢掉（不进事件窗口）', () => {
+    expect(parseStreamEvent(jobUpdateFrame())).toBeNull();
+    expect(toRunEvent(JSON.parse(jobUpdateFrame()))).toBeNull();
   });
 });

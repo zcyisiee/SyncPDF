@@ -20,6 +20,22 @@ export interface RunEvent {
   data: Record<string, unknown>;
 }
 
+/**
+ * SSE 的**虚拟 kind**：job 状态变化通知（api.md §1.4.1，W14）。它不是 `events.jsonl`
+ * 里的 kind，**没有 `seq`**（`id` 是 `<job_id>:<第 n 次变化>`），所以 `toRunEvent` 会把它
+ * 丢掉、不进事件窗口 —— 它只用来触发缓存失效（`useJobUpdates`）。
+ */
+export const JOB_UPDATE_KIND = 'job_update';
+
+/** `job_update` 的 `data`（恰好 5 个字段；命令/信封/pid 不进 SSE）。 */
+export interface JobUpdate {
+  job_id: string;
+  action: string;
+  status: string;
+  from_stage: string | null;
+  error_code: string | null;
+}
+
 /** 事件面板默认保留的尾部条数（§4.6：最多保留 N 条 + 溢出滚动）。 */
 export const EVENTS_WINDOW_SIZE = 200;
 
@@ -66,6 +82,42 @@ export function parseStreamEvent(payload: string): RunEvent | null {
   } catch {
     return null;
   }
+}
+
+function asText(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/**
+ * SSE `data:` 行（job_update 帧）→ JobUpdate；坏 JSON / 不是 job_update / 形状不对 → null。
+ *
+ * 与 `parseStreamEvent` 分开：job_update 没有 `seq`（不是事件归档里的事件），两个解析器
+ * 各自对一种帧形状负责 —— 混在一起会让“事件窗口”把通知当成事件收进来。
+ */
+export function parseJobUpdate(payload: string): JobUpdate | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const frame = parsed as Record<string, unknown>;
+  if (frame.kind !== JOB_UPDATE_KIND) return null;
+  const data = frame.data;
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return null;
+  const update = data as Record<string, unknown>;
+  const jobId = asText(update.job_id);
+  const action = asText(update.action);
+  const status = asText(update.status);
+  if (jobId === null || action === null || status === null) return null;
+  return {
+    job_id: jobId,
+    action,
+    status,
+    from_stage: asText(update.from_stage),
+    error_code: asText(update.error_code),
+  };
 }
 
 export interface SseId {

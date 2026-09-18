@@ -359,8 +359,9 @@ class DebugSession:
             str(self.workdir),
             "--port",
             str(bind_port),
-            "--token",
-            token,
+            # token_urlsafe 可能以 "-" 开头：必须用 "--token=<v>" 形式，
+            # 否则 argparse 会把它当选项解析 → 查看器进程 exit 2（1/64 概率 flake）。
+            f"--token={token}",
         ]
         try:
             proc = subprocess.Popen(  # noqa: S603 - 固定 argv 拉起自身包

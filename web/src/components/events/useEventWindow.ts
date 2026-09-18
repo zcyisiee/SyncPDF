@@ -7,7 +7,8 @@
  * - SSE 增量按 `seq` 去重后并入（断线重连会重发 `after_seq` 之后的事件）；
  * - 「载入更早」把更早的一页（500 条）并入并**放宽**上限（默认 200 + 已载入条数），
  *   已载入的历史不再被尾部裁剪吃掉；
- * - 没有 run 归档（404 `events_unavailable`）→ `hasArchive=false`，不建 EventSource。
+ * - 没有 run 归档（404 `events_unavailable`）→ `hasArchive=false`，不建 EventSource；
+ *   有活动 job 时首拉按 5s 重拉（新 run 归档只能这样被发现，见 `activeJob` 选项）。
  *
  * 结构上「首拉窗口」留在 query 里，本地 state 只放**增量**（SSE + 更早页），并按 `runKey`
  * 归属：换 run 时旧增量自动失效，不需要 effect 清状态。
@@ -22,9 +23,11 @@ import {
   mergeEarlierWindow,
   mergeTailWindow,
   runEventsFromPage,
+  type JobUpdate,
   type RunEvent,
 } from '../../lib/events';
 import { EVENT_KINDS } from '../../lib/humanize';
+import { EVENTS_TAIL_DISCOVERY_REFETCH_MS } from '../../lib/jobs';
 import { useEvents, useEventsTail } from '../../lib/queries';
 import { useEventStream, type EventSourceFactory, type SseStatus } from './useEventStream';
 
@@ -59,9 +62,22 @@ export interface EventFeed {
 
 export function useEventWindow(
   did: string | null,
-  options: { createEventSource?: EventSourceFactory } = {},
+  options: {
+    createEventSource?: EventSourceFactory;
+    /** `job_update` 回调（W14）：虚拟 kind，不进事件窗口，只用于缓存失效。 */
+    onJobUpdate?: (update: JobUpdate) => void;
+    /**
+     * 有活动 job（`queued`/`running`）：首拉窗口按 `EVENTS_TAIL_DISCOVERY_REFETCH_MS` 重拉，
+     * 直到 job 结束。首个 job 之前文档根本没有 run 归档（首拉 404），而**新 run 只能靠
+     * 首拉才能被 SSE 发现**（EventSource 订阅的是首拉拿到的那个 run_id）。
+     */
+    activeJob?: boolean;
+  } = {},
 ): EventFeed {
-  const tail = useEventsTail(did);
+  const tail = useEventsTail(did, {
+    refetchMs:
+      options.activeJob === true && did !== null ? EVENTS_TAIL_DISCOVERY_REFETCH_MS : 0,
+  });
   const tailData = tail.data;
   const runId = tailData?.runId ?? null;
   const runKey = `${did ?? ''}\u0000${runId ?? ''}`;
@@ -89,13 +105,14 @@ export function useEventWindow(
     });
   }, []);
 
-  const { createEventSource } = options;
+  const { createEventSource, onJobUpdate } = options;
   const connection = useEventStream({
     did,
     runId,
     afterSeq: tailData?.nextAfterSeq ?? null,
     kinds: EVENT_KINDS,
     onEvents: appendEvents,
+    onJobUpdate,
     createEventSource,
   });
 

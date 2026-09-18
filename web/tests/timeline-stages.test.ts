@@ -1,7 +1,8 @@
 /**
- * `lib/timeline.ts`：stage-state 基线 + 事件流 live 段的合并、条宽加权、视图映射、总用时。
- * 基线优先是核心不变式：`ok`/`failed` 的基线永远赢（事件归档被截断时也不能把已完成的阶段
- * 显示成进行中）。
+ * `lib/timeline.ts`：stage-state 基线 + 事件流 live 段 + job 驱动 live（W14）的合并、
+ * 条宽加权、视图映射、总用时。
+ * 基线优先是核心不变式：`ok`/`failed` 的基线永远赢（事件归档被截断、或新 run 还没落盘时
+ * 也不能把已完成的阶段显示成进行中）。
  */
 import { describe, expect, it } from 'vitest';
 
@@ -11,6 +12,7 @@ import {
   barWidthPercent,
   elapsedSeconds,
   hasLiveSegment,
+  jobLiveStage,
   maxSegmentDuration,
   openStageAt,
   STAGE_VIEWS,
@@ -135,6 +137,73 @@ describe('timelineSegments', () => {
       NOW,
     );
     expect(segments.find((segment) => segment.stage === 'translate')?.state).toBe('not_run');
+  });
+});
+
+describe('jobLiveStage（W14：job 驱动的 live 段）', () => {
+  const job = (overrides: Record<string, unknown>) => ({
+    action: 'run',
+    status: 'running',
+    from_stage: 'translate',
+    started_at: '2026-09-16T13:28:20.000Z',
+    ...overrides,
+  });
+
+  it('只有 running 的 run/check 才驱动时间线（起点 = from_stage，缺省 parse）', () => {
+    expect(jobLiveStage(job({}))).toEqual({
+      stage: 'translate',
+      at: '2026-09-16T13:28:20.000Z',
+    });
+    expect(jobLiveStage(job({ from_stage: null }))?.stage).toBe('parse');
+    expect(jobLiveStage(job({ action: 'check', from_stage: 'check' }))?.stage).toBe('check');
+  });
+
+  it('queued/终态不驱动（还没跑 / 已经跑完）；compile/retranslate 永远不驱动（隔离副本）', () => {
+    expect(jobLiveStage(job({ status: 'queued' }))).toBeNull();
+    expect(jobLiveStage(job({ status: 'succeeded' }))).toBeNull();
+    expect(jobLiveStage(job({ status: 'failed' }))).toBeNull();
+    for (const action of ['compile', 'retranslate']) {
+      expect(jobLiveStage(job({ action, from_stage: 'apply' }))).toBeNull();
+    }
+    expect(jobLiveStage(null)).toBeNull();
+    expect(jobLiveStage(undefined)).toBeNull();
+    // 未知 action / 非法阶段名不硬转成 live
+    expect(jobLiveStage(job({ action: 'future', from_stage: 'translate' }))).toBeNull();
+    expect(jobLiveStage(job({ from_stage: 'nope' }))).toBeNull();
+  });
+
+  it('基线优先：job 驱动只在基线没定论时生效，ok/err 阶段不被改写', () => {
+    const stages = [stage('parse', 'ok', 15.83), stage('translate', 'failed', 9.5)];
+    const segments = timelineSegments(stages, [], NOW, { stage: 'translate', at: null });
+    expect(segments.find((item) => item.stage === 'parse')?.state).toBe('ok');
+    expect(segments.find((item) => item.stage === 'translate')?.state).toBe('err');
+  });
+
+  it('job 驱动的那一段：live + 秒表从 job 的 started_at 算（拿不到时刻就不编造秒数）', () => {
+    // 新 run 的 stage-state 还没落盘：全部 not_run，但 job 说 translate 在跑
+    const segments = timelineSegments(
+      undefined,
+      [],
+      NOW,
+      { stage: 'translate', at: '2026-09-16T13:28:20.000Z' },
+    );
+    const translate = segments.find((item) => item.stage === 'translate');
+    expect(translate?.state).toBe('live');
+    expect(translate?.status).toBe('running');
+    expect(translate?.elapsedS).toBe(100);
+    expect(hasLiveSegment(segments)).toBe(true);
+    expect(timelineStatus(segments).label).toBe('翻译中');
+    // 其它阶段仍然 not_run（不假装整条时间线都在跑）
+    expect(segments.filter((item) => item.state === 'live')).toHaveLength(1);
+
+    const noClock = timelineSegments(undefined, [], NOW, { stage: 'translate', at: null });
+    expect(noClock.find((item) => item.stage === 'translate')?.elapsedS).toBeNull();
+  });
+
+  it('没给 job（或 job 不驱动）时行为与 W13 一致', () => {
+    const baseline = timelineSegments(undefined, [], NOW);
+    const withNull = timelineSegments(undefined, [], NOW, null);
+    expect(withNull).toEqual(baseline);
   });
 });
 

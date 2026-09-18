@@ -14,12 +14,18 @@
 
 没有 ``debug/runs``（或空）→ 404 ``events_unavailable``：不拿空数组冒充"没有事件"。
 run 存在但 ``events.jsonl`` 还没出现（刚启动）→ 200 + 空页，这是真实的"还没有事件"。
+
+W14 起 SSE **同一条流**里多了虚拟 kind ``job_update``（该文档 job 状态变化的纯通知，
+见 :class:`JobUpdateHub`）：run 事件照旧从归档读，job_update 由 `create_app` 挂在
+``JobRegistry`` 上的回调推 —— **不落盘**，真相仍在 ``.bdt-serve/jobs/`` 与 ``jobs.jsonl``。
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+from collections import deque
 from collections.abc import AsyncIterator
 from collections.abc import Mapping
 from pathlib import Path
@@ -34,6 +40,7 @@ from fastapi import Query
 from fastapi.responses import StreamingResponse
 
 from babeldoc_tools.common import ToolError
+from babeldoc_tools.serve.jobs import JobRecord
 from babeldoc_tools.serve.routers.documents import DOCUMENT_ID
 from babeldoc_tools.serve.schemas import API_PREFIX
 from babeldoc_tools.serve.schemas import EventsPage
@@ -46,11 +53,16 @@ __all__ = [
     "EVENTS_DEFAULT_LIMIT",
     "EVENTS_LIMIT_MAX",
     "HEARTBEAT_FRAME",
+    "JOB_UPDATE_BUFFER",
+    "JOB_UPDATE_KIND",
     "SSE_HEARTBEAT_SECONDS",
     "SSE_POLL_SECONDS",
+    "JobUpdateHub",
+    "JobUpdateSubscription",
     "event_page",
     "event_stream",
     "events_router",
+    "job_update_frame",
     "list_run_ids",
     "parse_last_event_id",
     "select_run",
@@ -67,6 +79,13 @@ SSE_HEARTBEAT_SECONDS = 15.0
 
 #: 心跳帧：SSE 注释行（客户端忽略，但连接保持活跃）。
 HEARTBEAT_FRAME = ": ping\n\n"
+
+#: SSE 的**虚拟** kind：job 状态变化通知（W14）。不是 ``events.jsonl`` 里的 kind，
+#: 也不落盘 —— 真相在 ``.bdt-serve/jobs/<jid>.json`` 与 ``jobs.jsonl``。
+JOB_UPDATE_KIND = "job_update"
+
+#: 每个 SSE 连接的 job_update 收件箱上限：满了丢最旧（通知层宁丢不积压）。
+JOB_UPDATE_BUFFER = 64
 
 #: 事件缺 ``kind`` 时的 SSE 事件名（SSE 默认类型）。
 _DEFAULT_EVENT_NAME = "message"
@@ -178,6 +197,102 @@ def parse_last_event_id(value: str | None) -> tuple[str, int] | None:
     return (run_id, seq) if seq >= 0 else None
 
 
+# --------------------------------------------------------------------------- #
+# job 状态变化广播（虚拟 kind `job_update`，W14）
+# --------------------------------------------------------------------------- #
+class JobUpdateSubscription:
+    """一个 SSE 连接的 job_update 收件箱（有界 `deque`：满了自动丢最旧那条）。
+
+    `did` 是订阅的那个文档：hub 只往同 did 的收件箱里投（job 是全局资源，事件流是
+    每文档一条）。投递不阻塞（同步 `append`）：发布方在事件循环里，收件方每
+    `poll_seconds` 排空一次 —— 推送延迟上限就是一个轮询间隔（0.5s），仍远快于前端
+    5s 的兜底轮询。
+    """
+
+    __slots__ = ("did", "frames")
+
+    def __init__(self, did: str, buffer: int) -> None:
+        self.did = did
+        self.frames: deque[str] = deque(maxlen=buffer)
+
+    def drain(self) -> list[str]:
+        """取走当前全部帧（入队顺序，最旧在前）；没有 → 空列表。"""
+        frames = list(self.frames)
+        self.frames.clear()
+        return frames
+
+
+class JobUpdateHub:
+    """进程内 job 状态变化广播（SSE 专用）：**无盘写、无订阅者即丢弃**（W14）。
+
+    - 发布方是 :meth:`~babeldoc_tools.serve.jobs.JobRegistry.add_listener` 注入的
+      :meth:`publish`（`create_app` 里挂），同步调用、就在那一次状态落盘**之后**；
+    - 每个 SSE 连接 :meth:`subscribe` 一个收件箱（按 did 过滤），断开时
+      :meth:`unsubscribe`；
+    - 没有订阅者时 :meth:`publish` 什么都不留（不积压、不需要后台任务）；有订阅者但
+      某一条来不及排空时，收件箱满了丢最旧（通知层宁丢不积压）；
+    - 帧的 `id` 是 ``<job_id>:<第 n 次状态变化>``，与 run 事件的 ``<run_id>:<seq>``
+      是两个命名空间：:func:`parse_last_event_id` 只认 run_id 形状，所以浏览器自动
+      重连时**不会**拿一个 job 命名空间去当续传游标。
+
+    ``_counts`` 每个 job 只留一个 int（与 `JobRegistry.records` 同一量级，不另开泄漏面）。
+    """
+
+    def __init__(self, *, buffer: int = JOB_UPDATE_BUFFER) -> None:
+        self.buffer = buffer
+        self._subscriptions: list[JobUpdateSubscription] = []
+        self._counts: dict[str, int] = {}
+
+    @property
+    def subscribers(self) -> int:
+        """当前订阅数（测试与诊断用）。"""
+        return len(self._subscriptions)
+
+    def subscribe(self, did: str) -> JobUpdateSubscription:
+        """订阅某个文档的 job 状态变化。"""
+        subscription = JobUpdateSubscription(did, self.buffer)
+        self._subscriptions.append(subscription)
+        return subscription
+
+    def unsubscribe(self, subscription: JobUpdateSubscription) -> None:
+        """退订（幂等）：丢掉收件箱，之后的 :meth:`publish` 不再写到它。"""
+        with contextlib.suppress(ValueError):
+            self._subscriptions.remove(subscription)
+        subscription.frames.clear()
+
+    def publish(self, record: JobRecord) -> None:
+        """一个 job 状态变化 → 同 did 的每个订阅者各入一帧；没有订阅者就丢掉。"""
+        count = self._counts.get(record.job_id, 0) + 1
+        self._counts[record.job_id] = count
+        if not self._subscriptions:
+            return
+        frame = job_update_frame(record, count)
+        for subscription in tuple(self._subscriptions):
+            if subscription.did == record.did:
+                subscription.frames.append(frame)
+
+
+def job_update_frame(record: JobRecord, count: int) -> str:
+    """一条 job_update 帧（api.md §1.4 冻结的形状）。
+
+    ``event: job_update`` + ``id: <job_id>:<count>`` + ``data: {kind, data:{...}}``；
+    ``data`` 里只有 job_id/action/status/from_stage/error_code —— 命令、信封、pid、
+    路径都不进 SSE。
+    """
+    payload = {
+        "kind": JOB_UPDATE_KIND,
+        "data": {
+            "job_id": record.job_id,
+            "action": record.action,
+            "status": record.status,
+            "from_stage": record.from_stage,
+            "error_code": record.error_code,
+        },
+    }
+    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return f"event: {JOB_UPDATE_KIND}\nid: {record.job_id}:{count}\ndata: {data}\n\n"
+
+
 async def event_stream(
     run_dir: Path,
     run_id: str,
@@ -185,38 +300,60 @@ async def event_stream(
     *,
     poll_seconds: float = SSE_POLL_SECONDS,
     heartbeat_seconds: float = SSE_HEARTBEAT_SECONDS,
+    updates: JobUpdateHub | None = None,
+    did: str | None = None,
 ) -> AsyncIterator[str]:
     """tail ``events.jsonl``：每 ``poll_seconds`` 推增量，静默 ``heartbeat_seconds`` 发心跳。
 
     首轮**立即**读一次存量事件（run 已结束时前端马上拿到全部事件，再转入心跳）。
     读取用 ``asyncio.to_thread``：``read_events`` 是同步 IO，不能阻塞事件循环。
 
+    给了 ``updates`` + ``did``（W14）时把该文档的 job_update 也接进**同一条流**：订阅
+    在生成器第一行才建（没人消费就不占订阅名额），生成器收尾（客户端断开）时退订。
+
     断开由 ``StreamingResponse`` 负责：Starlette 监听 ``http.disconnect`` 并取消本
     生成器所在任务（ASGI 2.4+ 时靠写失败抛 ``ClientDisconnect``）。这里**不**自己调
     ``request.is_disconnected()`` —— 那会与 Starlette 抢同一个 ``receive`` 通道。
     """
-    cursor = after_seq
-    idle = 0.0
-    while True:
-        events = await asyncio.to_thread(_read_events, run_dir, cursor)
-        if events:
-            idle = 0.0
-            for event in events:
-                cursor = max(cursor, event["seq"])
-                yield sse_frame(run_id, event, cursor)
-        else:
-            idle += poll_seconds
-            if idle >= heartbeat_seconds:
+    subscription = (
+        updates.subscribe(did) if updates is not None and did is not None else None
+    )
+    try:
+        cursor = after_seq
+        idle = 0.0
+        while True:
+            events = await asyncio.to_thread(_read_events, run_dir, cursor)
+            pushed = subscription.drain() if subscription is not None else []
+            if events or pushed:
                 idle = 0.0
-                yield HEARTBEAT_FRAME
-        await asyncio.sleep(poll_seconds)
+                for event in events:
+                    cursor = max(cursor, event["seq"])
+                    yield sse_frame(run_id, event, cursor)
+                for frame in pushed:
+                    yield frame
+            else:
+                idle += poll_seconds
+                if idle >= heartbeat_seconds:
+                    idle = 0.0
+                    yield HEARTBEAT_FRAME
+            await asyncio.sleep(poll_seconds)
+    finally:
+        if subscription is not None:
+            assert updates is not None  # 订阅存在 ⇒ hub 存在（构造时就绑定了）
+            updates.unsubscribe(subscription)
 
 
 # --------------------------------------------------------------------------- #
 # 路由
 # --------------------------------------------------------------------------- #
-def events_router(store: DocumentStore) -> APIRouter:
-    """按 store 生成事件路由（分页 + SSE）。"""
+def events_router(
+    store: DocumentStore, updates: JobUpdateHub | None = None
+) -> APIRouter:
+    """按 store（+ 可选的 job_update 广播）生成事件路由（分页 + SSE）。
+
+    ``updates`` 为 ``None`` 时 SSE 只有 run 事件（W03 行为逐帧不变）；``create_app``
+    总是传一个 —— job_update 与 run 事件共用 ``/documents/{did}/events/stream``。
+    """
     router = APIRouter(prefix=API_PREFIX, tags=["documents"])
 
     @router.get(
@@ -256,10 +393,14 @@ def events_router(store: DocumentStore) -> APIRouter:
         summary="事件实时流（SSE）",
         description=(
             "text/event-stream：每条形如 `event: <kind>` / `id: <run_id>:<seq>` / "
-            "`data: <事件 JSON>`；15s 无事件发一行 `: ping` 注释。断线续传用 "
-            "Last-Event-ID（`<run_id>:<seq>`）或 `?after_seq=`；换 run 时必须带新的 "
-            "?run_id=。没有 run 归档 → 404 events_unavailable（错误走统一 JSON 信封，"
-            "不是 SSE 帧）。"
+            "`data: <事件 JSON>`；15s 无事件发一行 `: ping` 注释。**同一条流还带"
+            "虚拟 kind `job_update`**（该文档的 job 状态变化：`event: job_update` + "
+            "`id: <job_id>:<第 n 次变化>` + `data: {kind,data:{job_id,action,status,"
+            "from_stage,error_code}}`，纯通知不落盘，无订阅者即丢弃；job 的真相在 "
+            "`GET /jobs/{jid}` 与 `jobs.jsonl`）。断线续传用 Last-Event-ID"
+            "（`<run_id>:<seq>`；job 命名空间不是 run 游标，会被忽略）或 "
+            "`?after_seq=`；换 run 时必须带新的 ?run_id=。没有 run 归档 → 404 "
+            "events_unavailable（错误走统一 JSON 信封，不是 SSE 帧；那时前端靠 job 轮询）"
         ),
         responses={
             200: {
@@ -294,7 +435,7 @@ def events_router(store: DocumentStore) -> APIRouter:
         if cursor is None:
             cursor = resume_seq if selected == resume_run_id else 0
         return StreamingResponse(
-            event_stream(run_dir, selected, cursor),
+            event_stream(run_dir, selected, cursor, updates=updates, did=did),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache"},
         )

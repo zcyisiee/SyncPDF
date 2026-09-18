@@ -18,6 +18,7 @@ import { StartJobCard } from '../components/jobs/StartJobCard';
 import { ArchiveView } from '../components/archive/ArchiveView';
 import { PreviewArea } from '../components/preview/PreviewArea';
 import { useEventWindow } from '../components/events/useEventWindow';
+import { useJobUpdates } from '../components/events/useJobUpdates';
 import { useTimelineStages } from '../components/events/useTimelineStages';
 import { useUiStore } from '../stores/ui';
 import type { CSSProperties } from 'react';
@@ -34,12 +35,19 @@ const STAGE_STATE_LIVE_REFETCH_MS = 2_000;
  * 三条分隔条宽度由 `--vrw`/`--inspw`/`--tlh` 驱动（写在本容器行内 style 上）。
  */
 export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchView }) {
-  // 进度层：事件窗口（首拉 + SSE）→ 时间线段（stage-state 基线 + live）→ 详情轮询间隔。
-  const feed = useEventWindow(did);
-  // jobs 轮询（W08）：有 queued/running 时 2s，否则 30s —— run 归档出现**之前**的唯一真实信号。
-  const jobsQuery = useJobs(did);
+  // job_update（W14）：收到就立刻失效对应查询，并把“刚推过”的时间戳交给 useJobs 做轮询节流。
+  const jobUpdates = useJobUpdates(did);
+  // jobs 轮询（W08/W14）：有 queued/running 时 5s（SSE 的 job_update 是快路径），否则 30s；
+  // 刚收到推送的静默窗口内连这 5s 那一次都跳过（SSE 已经刷新过一轮）。
+  const jobsQuery = useJobs(did, { quietSinceMs: jobUpdates.pushedAtMs });
   const cardMode = jobCardMode(jobsQuery.data);
   const latestJob = jobsQuery.data?.[0] ?? null;
+  // 进度层：事件窗口（首拉 + SSE）→ 时间线段（stage-state 基线 + 事件流 live + job 驱动 live）。
+  const feed = useEventWindow(did, {
+    onJobUpdate: jobUpdates.onJobUpdate,
+    // 活动 job 期间首拉按 5s 重拉：新 run 归档只能这样被发现（SSE 订阅的是首拉拿到的 run）。
+    activeJob: cardMode === 'active',
+  });
   // 两路并存、任一 live 就快轮询：事件流还在增长，或有活动 job（前者要 run 归档才活）。
   const eventsLive = isRunLive(feed.events);
   const fastRefetch = eventsLive || cardMode === 'active';
@@ -47,6 +55,8 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
   // 但时间线/徽标的 live 一律由基线裁决，见 lib/timeline.ts 的注释）。
   const timeline = useTimelineStages(did, feed.events, {
     refetchMs: fastRefetch ? STAGE_STATE_LIVE_REFETCH_MS : 0,
+    // job 驱动的那一段：新 run 的 stage-state 还没落盘时，只有 job 记录说“阶段在跑”。
+    job: latestJob,
   });
   const documentQuery = useDocument(did, {
     refetchMs: DOCUMENT_LIVE_REFETCH_MS,
@@ -122,7 +132,7 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
               {cardMode === 'start' ? (
                 <StartJobCard did={did} document={doc} />
               ) : latestJob === null ? null : (
-                <ActiveJobCard did={did} job={latestJob} />
+                <ActiveJobCard did={did} job={latestJob} document={doc} />
               )}
             </div>
           ) : null}

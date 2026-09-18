@@ -6,7 +6,8 @@
 - ``GET /api/v1/documents`` 及其只读子资源（W02，见
   :mod:`babeldoc_tools.serve.routers.documents`）
 - ``GET /api/v1/documents/{did}/events`` + ``/events/stream``（W03，见
-  :mod:`babeldoc_tools.serve.routers.events`）
+  :mod:`babeldoc_tools.serve.routers.events`；W14 起 SSE 同一条流里带虚拟 kind
+  ``job_update``）
 - ``GET/HEAD /api/v1/documents/{did}/artifacts[/{name}]``（W03，见
   :mod:`babeldoc_tools.serve.routers.artifacts`）
 - ``POST /api/v1/documents/{did}/jobs``、``GET /api/v1/jobs/{jid}``、
@@ -56,6 +57,7 @@ from babeldoc_tools.serve.routers.artifacts import artifacts_router
 from babeldoc_tools.serve.routers.candidates import candidates_router
 from babeldoc_tools.serve.routers.documents import documents_router
 from babeldoc_tools.serve.routers.draft import draft_router
+from babeldoc_tools.serve.routers.events import JobUpdateHub
 from babeldoc_tools.serve.routers.events import events_router
 from babeldoc_tools.serve.routers.glossary import glossary_router
 from babeldoc_tools.serve.routers.jobs import jobs_router
@@ -154,6 +156,10 @@ def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI
     # 全局词表（W13）也是共享实例：``/glossary`` 路由写它，job 启动时从它取注入路径。
     glossary = GlossaryStore(store.store_base)
     runner = JobRunner(store, glossary=glossary)
+    # W14：job 状态变化 → 进程内广播（SSE 的 job_update）。订阅者订阅才有开销：
+    # 没人连着事件流时 publish 直接丢弃（不积压、不落盘）。
+    job_updates = JobUpdateHub()
+    runner.registry.add_listener(job_updates.publish)
     compiles = CompileService(store, runner)
     # 候选服务复用 runner 的 job 注册表与候选 registry：生成是 job，采用写草稿。
     candidates = CandidateService(store, runner, compiles)
@@ -174,6 +180,8 @@ def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI
         version=__version__,
         lifespan=lifespan,
     )
+    # job_update 广播挂在 app.state 上（路由层拿到的是同一个实例；也方便诊断/测试）
+    app.state.job_updates = job_updates
     # 不注册 CORSMiddleware：v1 只服务 loopback 同源/开发代理，禁止任意来源跨域。
 
     @app.exception_handler(ToolError)
@@ -241,7 +249,7 @@ def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI
         )
 
     app.include_router(documents_router(store))
-    app.include_router(events_router(store))
+    app.include_router(events_router(store, job_updates))
     app.include_router(artifacts_router(store))
     app.include_router(jobs_router(store, runner, compiles))
     app.include_router(draft_router(runner, compiles))

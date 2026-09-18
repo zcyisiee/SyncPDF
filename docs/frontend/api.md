@@ -95,6 +95,27 @@ fastapi/uvicorn，message 里给安装命令）、`invalid_port`、`port_unavail
 - job 生命周期事件（`job_queued/started/finished/canceled/failed`）必须是服务端**持久化**的，
   不能由每个 SSE 连接临时生成。
 
+#### 1.4.1 虚拟 kind `job_update`（W14，同一条流）
+
+- 形状：`event: job_update`、`id: <job_id>:<第 n 次状态变化>`、
+  `data: {"kind":"job_update","data":{"job_id","action","status","from_stage","error_code"}}`
+  （恰好这 5 个字段；命令/信封/pid/路径**不进** SSE）。`status` 取值与 §3.4 一致，
+  `action` 是 `run|retranslate|compile|check`；`from_stage` 可能为 `null`。
+- **纯通知层，不落盘**：真相仍是 §3.4 的 `jobs.jsonl`（生命周期事件）+ `jobs/<jid>.json`
+  （快照）—— 服务端先把状态写完盘，才在**同一条 SSE 流**里推一帧；
+  因此“job 生命周期事件必须持久化”的红线仍然成立（持久化的是 jobs.jsonl，
+  `job_update` 只是那次已落盘变化的一帧通知）。重启/断线不重放：没有历史补发，
+  客户端重连后要自己 `GET /documents/{did}/jobs` 校准（前端就是这么做的）。
+- **按文档过滤**：一条 SSE 流只收该 `did` 的 job 状态变化。
+- **没有订阅者就丢弃**：不积压、不需要后台任务；重连拿到的是之后的变化。每个连接一个
+  有界收件箱（64 帧），来不及取就丢最旧（通知层宁丢不积压；丢的那次状态在 jobs.jsonl 里）。
+- **不污染续传游标**：`id` 的 `<job_id>` 不是 run_id 形状（`<UTC时间戳>Z-<6位十六进制>`），
+  所以浏览器自动重连带上 `Last-Event-ID: j_...` 时会被当作“没有游标”忽略，
+  run 侧按 `?after_seq=` 重来，不会把某个 run 的游标顶走。
+- **只在有 run 归档时有这条流**：没有任何 run 归档时该端点仍是 `404 events_unavailable`
+  （§1.3 的口径不变）。所以 job 从提交到“子进程建出 run 归档”之间没有 SSE 可言 ——
+  那段过渡期前端用兜底轮询（§4.6）。
+
 ### 1.5 归档下载
 
 - `GET /documents/{did}/artifacts`：产物清单（`name`、`path`、`size`、`mtime`、`kind`；**清单不加** `revision` 字段）。
@@ -529,3 +550,14 @@ DELETE /api/v1/glossary   # 清空（幂等）→ 200 与 GET 同形（空表）
 - 跨 run 合并事件流必须用 `(run_id, seq)`；单 run 内 `seq` 从 1 递增。
 - 阶段耗时只信 `run_state.json` / `debug/runs/<run_id>/manifest.json` 的真实时间戳。
 - 不支持流式的 translator：显示真实阶段等待，输出到达后再更新段落计数。
+- **job 状态的真相在轮询，`job_update` 只是加速键**（W14）：前端收到 `job_update` 就立刻
+  invalidate 对应查询（按 `action` 分流），**不**把轮询关掉 —— 活动 job 的兜底轮询 5s、
+  空闲 30s。理由：`job_update` 不重放、且“job 建出 run 归档之前”那段没有 SSE（§1.4.1）；
+  只靠 SSE 会在丢帧/断线时静默不动。
+- **段落完成度只能由详情字段推**（W14 实测）：`translated_count` / `paragraph_count`（§3.1）。
+  真实 `bdt run` 的 translate 阶段是**一次整篇子进程调用**，既不产生段落级也不产生 batch 级
+  事件（只有 stage_started/artifact_bundle/call_started/call_finished/text_version/
+  missing_ids/stage_finished/stage_error），所以**翻译子进程运行中 N 不会跳动**，
+  `translated_count` 要等 `apply` 把 `agent/translated.jsonl` 写出来才变。
+  前端必须如实标注（例如「已译段落（apply 后更新）」），**不得**做跳动动画或假进度；
+  段落级实时需要把 translator 改成流式/分段调用（超出本阶段范围）。

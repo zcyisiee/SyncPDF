@@ -2,15 +2,19 @@ import { describe, expect, it } from 'vitest';
 
 import type { DocumentDetail, JobRecord } from '../src/api/types';
 import {
+  EVENTS_TAIL_DISCOVERY_REFETCH_MS,
   JOBS_ACTIVE_REFETCH_MS,
   JOBS_IDLE_REFETCH_MS,
+  JOBS_UPDATE_QUIET_MS,
   activeJob,
   defaultFromStage,
   isValidPagesSpec,
   jobCardMode,
   jobOutcomeMessage,
+  jobUpdateInvalidations,
   jobsRefetchInterval,
   normalizePagesSpec,
+  withinJobUpdateQuietWindow,
 } from '../src/lib/jobs';
 import { makeJob } from './helpers';
 
@@ -65,11 +69,72 @@ describe('job 口径（lib/jobs.ts）', () => {
     expect(activeJob(undefined)).toBeNull();
   });
 
-  it('轮询间隔：有活动 job 2s，否则 30s 兜底', () => {
+  it('轮询间隔：有活动 job 5s（W14 从 2s 放宽），否则 30s 兜底', () => {
     expect(jobsRefetchInterval([makeJob({ status: 'running' })])).toBe(JOBS_ACTIVE_REFETCH_MS);
     expect(jobsRefetchInterval([makeJob({ status: 'queued' })])).toBe(JOBS_ACTIVE_REFETCH_MS);
     expect(jobsRefetchInterval([makeJob({ status: 'succeeded' })])).toBe(JOBS_IDLE_REFETCH_MS);
     expect(jobsRefetchInterval(undefined)).toBe(JOBS_IDLE_REFETCH_MS);
+    // 口径值本身也钉住：SSE 的 job_update 才是快路径，轮询只是兜底
+    expect(JOBS_ACTIVE_REFETCH_MS).toBe(5_000);
+    expect(JOBS_IDLE_REFETCH_MS).toBe(30_000);
+    expect(EVENTS_TAIL_DISCOVERY_REFETCH_MS).toBe(5_000);
+  });
+
+  it('静默窗口：收到 job_update 的 5s 内跳过兜底轮询，之后恢复正常', () => {
+    const pushedAt = 1_000_000;
+    expect(withinJobUpdateQuietWindow(pushedAt, pushedAt)).toBe(true);
+    expect(withinJobUpdateQuietWindow(pushedAt, pushedAt + JOBS_UPDATE_QUIET_MS - 1)).toBe(true);
+    expect(withinJobUpdateQuietWindow(pushedAt, pushedAt + JOBS_UPDATE_QUIET_MS)).toBe(false);
+    // 没收到过推送 → 没有快路径，不该抑制轮询（否则丢帧时页面不动了）
+    expect(withinJobUpdateQuietWindow(null, pushedAt)).toBe(false);
+    expect(JOBS_UPDATE_QUIET_MS).toBe(5_000);
+  });
+
+  it('job_update → 失效的 key：按 action 分流 + 终态补产物/详情', () => {
+    const keys = (action: string, status: string) =>
+      jobUpdateInvalidations('alpha', { action, status }).map((key) => key.join('/'));
+
+    // run：job 列表 + 详情 + 阶段状态 + 段落/候选 + 事件窗口（新 run 只能靠首拉发现） + 文档列表
+    expect(keys('run', 'running')).toEqual([
+      'documents/alpha/jobs',
+      'documents/alpha',
+      'documents/alpha/stage-state',
+      'documents/alpha/paragraphs',
+      'documents/alpha/events',
+      'documents',
+    ]);
+    // 终态再补一刀：产物清单（预览据此换新 PDF）
+    expect(keys('run', 'succeeded')).toEqual([
+      'documents/alpha/jobs',
+      'documents/alpha',
+      'documents/alpha/stage-state',
+      'documents/alpha/paragraphs',
+      'documents/alpha/events',
+      'documents',
+      'documents/alpha/artifacts',
+    ]);
+    // compile：详情 + 版本归档（+ 终态再带一次 versions，语义不变、幂等）
+    expect(keys('compile', 'running')).toEqual([
+      'documents/alpha/jobs',
+      'documents/alpha',
+      'documents/alpha/versions',
+    ]);
+    expect(keys('compile', 'failed')).toEqual([
+      'documents/alpha/jobs',
+      'documents/alpha',
+      'documents/alpha/versions',
+      'documents/alpha/artifacts',
+      'documents/alpha/versions',
+    ]);
+    // retranslate：只动候选行（前缀同时盖住段落列表与所有候选列表）
+    expect(keys('retranslate', 'succeeded')).toEqual([
+      'documents/alpha/jobs',
+      'documents/alpha/paragraphs',
+      'documents/alpha/artifacts',
+    ]);
+    // 未知 action（服务端将来加新 action）→ 按 run 那一档处理（宁可多刷，不可不动）
+    expect(keys('future-action', 'running')[0]).toBe('documents/alpha/jobs');
+    expect(keys('future-action', 'running')).toContain('documents/alpha/events');
   });
 
   it('jobCardMode：活动 → active；失败/取消/中断 → failed；成功/无 job → start', () => {

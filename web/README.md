@@ -44,7 +44,7 @@ serve 不注册 CORS，所以前端必须走这个同源代理（`docs/frontend/
 | `pnpm typecheck` | `tsc --noEmit` |
 | `pnpm lint` | eslint flat config + typescript-eslint，`--max-warnings 0` |
 | `pnpm test` | Vitest（jsdom + @testing-library/react），不起真后端 |
-| `pnpm e2e` | Playwright 真浏览器用例（`e2e/archive.spec.ts` · `edit.spec.ts` · `glossary.spec.ts` · `preview.spec.ts` · `progress.spec.ts` · `retranslate.spec.ts` · `upload.spec.ts`）：起真 serve + 真 dev server |
+| `pnpm e2e` | Playwright 真浏览器用例（`e2e/archive.spec.ts` · `edit.spec.ts` · `glossary.spec.ts` · `preview.spec.ts` · `progress.spec.ts` · `retranslate.spec.ts` · `streaming.spec.ts` · `upload.spec.ts`）：起真 serve + 真 dev server |
 | `pnpm sync:pdfjs` | 单独把 pdf.js worker/cmaps/standard_fonts 复制进 `public/pdfjs/` |
 | `pnpm gen:api` | 从运行中的 serve 拉 `/openapi.json` 生成 `src/api/schema.d.ts` |
 
@@ -75,7 +75,7 @@ web/
     screens/    LibraryScreen / DocumentCard / GlossaryScreen（W13 全局词表）/ WorkbenchScreen / PlaceholderScreen
     stores/     ui.ts（三栏宽度 + 分隔条 + 屏/预览模式 + 预览页码/bbox 图层/选中段落/重译 profile）
   scripts/      sync-pdfjs-assets.mjs（把 pdf.js 静态资源复制进 public/pdfjs/）
-  e2e/          Playwright 真浏览器用例（archive.spec.ts · edit.spec.ts · glossary.spec.ts · preview.spec.ts · progress.spec.ts · upload.spec.ts）
+  e2e/          Playwright 真浏览器用例（archive.spec.ts · edit.spec.ts · glossary.spec.ts · preview.spec.ts · progress.spec.ts · retranslate.spec.ts · streaming.spec.ts · upload.spec.ts）
                 fixtures/sample.pdf（602 字节最小合法 PDF）· fixtures/sleep-translator.sh（长睡 stub）
                 fixtures/glossary-translator.sh（W13 离线 stub：读干提示词、回显原文）
   tests/        Vitest 用例（api / store / routing / 文件库屏+上传 / job 卡与 hooks / 工作台壳 /
@@ -343,6 +343,49 @@ SSE 增量的 e2e 留到 W15（W07 有真 job 之后）。
   的端到端证据。词表的 CRUD / CSV 导入导出 / 开关禁用逻辑也在同一个 spec 里。
   它的副作用（共享的 `tmp/.bdt-serve/glossary.csv` 与 `profiles.json`、自建 workdir、debug 查看器）
   在用例前后备份/还原。
+- `streaming.spec.ts`（W14）**不跑真 build**：自建 `tmp/w14-streaming-<时间戳>/`（`agent/`
+  四份产物 + 一个**手工写的** run 归档，让 `/events/stream` 不是 404）与两条离线 stub profile
+  （`w14-sleep` = 长睡、`w14-candidate` = 回显候选文本）。用例一在页面里用 fetch 直接读 SSE
+  原始帧（按空行切帧）：断言 `event: job_update` + `id: <job_id>:<n>` 三条（queued→running→
+  succeeded）、data 只有 5 个字段、run 事件的 `<run_id>:<seq>` 命名空间没被顶掉、终态那一刀
+  让页面自己又拉了一次产物清单；并用页面时钟量出「POST 返回 → 第一帧到达」的延迟（实测 ~0.5s，
+  兜底轮询是 5s）。用例二走 `run` job（sleep stub）：断言运行中的卡显示「已译段落 1/1（套版后更新）」，
+  然后**从 API** 取消 —— 页面只能靠 SSE 的 job_update 切到「已取消」（实测 ~0.3–0.9s << 5s）。
+  副作用（`profiles.json`、debug 查看器、活动 job）在用例前后备份/还原/收尾。
+
+手工冒烟（真 `bdt serve` + stub，证据在 `web/tmp-smoke/w14-sse-smoke.txt`）：
+
+```bash
+cd web && PYTHONPATH="$PWD/.." ../.venv/bin/python tmp-smoke/w14-sse-smoke.py
+```
+
+它自建一个 workdir（3 段、套版产物 1 行）+ 两条 stub profile，起真 serve 后用后台线程读
+SSE 原始帧，量三个数：①`job_update` 首帧在 `POST /jobs` 返回后 **~460ms** 到达
+（前端兜底轮询是 5s）；②`canceled` 帧在服务端落定后 **~410ms** 到达（从点取消算 **~466ms**）；
+③`translated_count` 在套版产物写入后 1/3 → 3/3（而翻译阶段跑着的时候它**不动**）。
+同时打印两种 id 命名空间共存：`j_...:1|2|3`（job 推送）与 `<run_id>:1|2`（run 归档事件）。
+
+## 逐段实时进度（W14）：SSE 合并 + 轮询降级
+
+服务端契约在 `docs/frontend/api.md` §1.4.1（虚拟 kind `job_update`）。前端三块：
+
+- **订阅**：`useEventStream` 为 `job_update` 单开一个监听（它**不是**归档事件：没有 `seq`，
+  `parseStreamEvent` 会把它丢掉，所以它永远不进事件面板的窗口）。`useJobUpdates` 收到就按
+  `action` 分流失效（`lib/jobs.ts::jobUpdateInvalidations`）：`run` → job 列表 + 详情 + 阶段状态 +
+  段落/候选 + 事件窗口 + 文档列表；`compile` → 详情 + 版本；`retranslate` → 段落/候选；
+  **终态**再补一刀产物清单（预览据此换新 PDF，无需手动刷新）。
+- **轮询降级**：活动 job 的兜底轮询从 2s 放宽到 5s（`JOBS_ACTIVE_REFETCH_MS`），空闲 30s；
+  收到推送后的静默窗口内（`JOBS_UPDATE_QUIET_MS`）连这 5s 那一次也跳过 —— 推送刚触发过
+  refetch，再轮就是重复请求。窗口到点由 `useJobUpdates` 的定时器清掉时间戳（重渲染让
+  TanStack 重启计时器），所以轮询**不会**被卡在 `false` 上。轮询永远不关：推送不重放，而且
+  job 建出 run 归档之前根本没有这条流（那时端点还是 404）。活动 job 期间事件窗口首拉按 5s
+  重拉 —— 新 run 归档只能这样被发现（EventSource 订阅的是首拉拿到的 `run_id`）。
+- **进度文案（诚实红线）**：运行中的 `action=run` job 显示「已译段落 N/M（套版后更新）」，
+  N/M 取自详情的 `translated_count`/`paragraph_count`。实测（`tmp/` 全量归档统计）真实 `bdt run`
+  的 translate 阶段是**一次整篇子进程调用**，既无段落级也无 batch 级事件，且 `translated.jsonl`
+  （N 的来源）是套版阶段才写的 —— 所以**运行中 N 不跳动**，只在套版落盘后跳变。界面因此不做
+  跳动动画/假百分比，文案直接写明这一点；时间线上“翻译中”那一段也改由 **job 驱动**
+  （`lib/timeline.ts::jobLiveStage`，仅 `action=run|check`，基线有定论时不生效）。
 
 ## 版本归档（W12）：历史版本列表 + 任一版本下载
 

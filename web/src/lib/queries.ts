@@ -42,7 +42,7 @@ import {
   type RunEvent,
 } from './events';
 import { hasRunningDocument } from './humanize';
-import { jobsRefetchInterval } from './jobs';
+import { jobsRefetchInterval, withinJobUpdateQuietWindow } from './jobs';
 import type { BboxMode } from './preview';
 
 /** 列表/详情的自动刷新间隔（只在真有 running 阶段时才开）。 */
@@ -213,11 +213,16 @@ export async function fetchEventTail(
 }
 
 /** 首拉尾部窗口（每个 did 一次；SSE 增量由 `useEventWindow` 叠在这上面）。 */
-export function useEventsTail(did: string | null) {
+export function useEventsTail(did: string | null, options: { refetchMs?: number } = {}) {
+  const refetchMs = options.refetchMs ?? 0;
   return useQuery({
     queryKey: queryKeys.eventTail(did ?? ''),
     queryFn: () => fetchEventTail(did ?? ''),
     staleTime: 30_000,
+    // W14：有活动 job 时按 5s 重拉 —— run 归档是子进程启动后才建的（首个 job 之前这里是
+    // 404，staleTime 30s 又不会自己重取），而且**新 run 只有靠这次首拉才能被发现**
+    // （SSE 订阅的是首拉拿到的那个 run）。job 一结束就停。
+    refetchInterval: refetchMs > 0 ? refetchMs : false,
     enabled: did !== null && did !== '',
   });
 }
@@ -368,17 +373,29 @@ export function useProfiles() {
 /**
  * 该文档的 job 列表（`GET /documents/{did}/jobs`，新 → 旧）。
  *
- * 轮询口径（brief）：有 `queued`/`running` 时 2s，否则 30s —— job 是"run 归档还没出现"
- * 那段时间里唯一的真实信号（事件流要等 run 归档建好才活）。`refetchMs` 显式给定时覆盖它
- * （W10 的编译状态条在编译进行中要更快看到终态）。
+ * 轮询口径（W08/W14）：有 `queued`/`running` 时 5s（W14 从 2s 放宽：SSE 的 `job_update`
+ * 是快路径），否则 30s。job 仍是「run 归档还没出现」那段时间里唯一的真实信号（事件流要等
+ * run 归档建好才活）；`refetchMs` 显式给定时覆盖它（W10 的编译状态条要更快看到终态）。
+ *
+ * `quietSinceMs`（W14）是收到 `job_update` 的时刻（`useJobUpdates.pushedAtMs`）：静默窗口内
+ * 返回 `false` 跳过兜底轮询（推送刚触发过一次 refetch，再轮很快就只是重复请求）。窗口到点
+ * 由那个 hook 的定时器清掉状态 → 重渲染 → TanStack 重启计时器，所以不会停在 `false` 上。
  */
-export function useJobs(did: string | null, options: { refetchMs?: number } = {}) {
+export function useJobs(
+  did: string | null,
+  options: { refetchMs?: number; quietSinceMs?: number | null } = {},
+) {
   const refetchMs = options.refetchMs;
+  const quietSinceMs = options.quietSinceMs ?? null;
   return useQuery({
     queryKey: queryKeys.jobs(did ?? ''),
     queryFn: () => apiGet<JobRecord[]>(`/documents/${encodeURIComponent(did ?? '')}/jobs`),
     staleTime: 1_000,
-    refetchInterval: (query) => refetchMs ?? jobsRefetchInterval(query.state.data),
+    refetchInterval: (query) => {
+      if (refetchMs !== undefined) return refetchMs;
+      if (withinJobUpdateQuietWindow(quietSinceMs)) return false;
+      return jobsRefetchInterval(query.state.data);
+    },
     enabled: did !== null && did !== '',
   });
 }

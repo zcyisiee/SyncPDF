@@ -59,6 +59,12 @@ def _event(seq: int, stage: str, kind: str, data: dict | None = None) -> dict:
 
 
 #: 最新 run：5 条连续事件，覆盖两个阶段 / 两种 kind（过滤与分页都要能推进游标）。
+#:
+#: **注意：`paragraph.done` / `segment.done` / `batch.done` 是本用例专用的夹具 kind —— 真实
+#: `bdt run` 的 translate 阶段不会产生它们**（W14 实测：整篇翻译是一次 `translator.whole`
+#: 子进程调用，translate 阶段真实 kind 只有 stage_started / artifact_bundle / call_started /
+#: call_finished / text_version / missing_ids / stage_finished / stage_error）。这里用它们只是
+#: 因为“某阶段有多个不同 kind”能同时测过滤与分页游标；不要把它们当“已有段落级事件”的依据。
 _NEW_EVENTS = [
     _event(1, "parse", "stage.started"),
     _event(2, "parse", "paragraph.done", {"pages": 18}),

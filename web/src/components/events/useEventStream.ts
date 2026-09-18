@@ -6,14 +6,23 @@
  * 三条必须知道的实现约束：
  * 1. `event: <kind>` 是**命名分发**，`onmessage` 只收默认类型（服务端 kind 缺失时才发
  *    `message`）——所以要为每个 kind 单独 `addEventListener`。清单来自
- *    `humanize.EVENT_KINDS`（本仓库归档里真实出现过的 kind），新 kind 必须补表，否则收不到。
+ *    `humanize.EVENT_KINDS`（本仓库归档里真实出现过的 kind + 虚拟 kind `job_update`），
+ *    新 kind 必须补表，否则收不到。`job_update`（W14）单独走 `onJobUpdate`：它是 job 状态
+ *    通知，不是归档里的事件（没有 `seq`），**不进事件窗口**。
  * 2. 非 200（例如 404 `events_unavailable`）会让 EventSource 直接进 CLOSED 并触发 `error`：
  *    调用方**先**用分页接口首拉一次（`useEventWindow`），没有 run 归档就不建 EventSource。
  * 3. 心跳 `: ping` 是注释行，浏览器不会派发任何事件——不需要代码处理。
  */
 import { useEffect, useRef, useState } from 'react';
 
-import { eventSourceUrl, parseStreamEvent, type RunEvent } from '../../lib/events';
+import {
+  JOB_UPDATE_KIND,
+  eventSourceUrl,
+  parseJobUpdate,
+  parseStreamEvent,
+  type JobUpdate,
+  type RunEvent,
+} from '../../lib/events';
 
 /** `EventSource.readyState` 的三个取值（常量在本文件冻结，不依赖 DOM 全局）。 */
 export const EVENT_SOURCE_CONNECTING = 0;
@@ -58,18 +67,25 @@ export interface UseEventStreamOptions {
   kinds: readonly string[];
   /** 每收到一条事件回调一次（父级负责去重/裁剪窗口）。 */
   onEvents: (events: RunEvent[]) => void;
+  /**
+   * 每收到一条 `job_update` 回调一次（W14：虚拟 kind，不会进 `onEvents`）。
+   * 不给就只当没这个 kind（照样注册监听，丢在解析那一步）。
+   */
+  onJobUpdate?: (update: JobUpdate) => void;
   /** 测试注入 stub；生产用原生 EventSource。 */
   createEventSource?: EventSourceFactory;
 }
 
 export function useEventStream(options: UseEventStreamOptions): SseStatus {
-  const { did, runId, afterSeq, kinds, onEvents, createEventSource } = options;
+  const { did, runId, afterSeq, kinds, onEvents, onJobUpdate, createEventSource } =
+    options;
   // 状态带 key：连接参数一变，导出值立刻回到 connecting/idle（不需要在 effect 里同步 setState）。
   const [state, setState] = useState<{ key: string; status: SseStatus }>({
     key: '',
     status: 'connecting',
   });
   const handlerRef = useRef(onEvents);
+  const jobUpdateRef = useRef(onJobUpdate);
   const kindsKey = kinds.join('\u0000');
   const subscriptionKey = `${did ?? ''}\u0000${runId ?? ''}\u0000${afterSeq ?? ''}`;
   const active = did !== null && runId !== null && afterSeq !== null;
@@ -80,6 +96,10 @@ export function useEventStream(options: UseEventStreamOptions): SseStatus {
   useEffect(() => {
     handlerRef.current = onEvents;
   }, [onEvents]);
+
+  useEffect(() => {
+    jobUpdateRef.current = onJobUpdate;
+  }, [onJobUpdate]);
 
   useEffect(() => {
     if (!active || !canConnect || did === null || runId === null || afterSeq === null) return;
@@ -97,10 +117,18 @@ export function useEventStream(options: UseEventStreamOptions): SseStatus {
       if (parsed !== null) handlerRef.current([parsed]);
     };
 
+    // job_update 走自己的分支：它不是归档里的 run 事件（没有 seq），不进事件窗口。
+    const handleJobUpdate = (message: MessageEvent<string>) => {
+      const update = parseJobUpdate(message.data);
+      if (update !== null) jobUpdateRef.current?.(update);
+    };
+
     source.addEventListener('open', () => setState({ key: subscriptionKey, status: 'open' }));
     source.addEventListener('message', handleMessage);
     if (kindsKey !== '') {
-      for (const kind of kindsKey.split('\u0000')) source.addEventListener(kind, handleMessage);
+      for (const kind of kindsKey.split('\u0000')) {
+        source.addEventListener(kind, kind === JOB_UPDATE_KIND ? handleJobUpdate : handleMessage);
+      }
     }
     source.addEventListener('error', () =>
       setState({

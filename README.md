@@ -286,6 +286,17 @@ HTTP 形状的单一事实来源是运行中服务的 `/openapi.json`（可读�
   词表为空也不注入。**词表变更不回溯**：已经翻译过的内容不会自动重翻，重新跑翻译才生效
   （前端词表视图有常驻提示）。CLI 侧同一套机制：`bdt translate --glossaries <csv>` /
   `bdt run --glossaries <csv>`（不带这个词表时提示词与之前逐字节一致）。
+- **实时进度（SSE 合并，W14）**：`GET /api/v1/documents/{did}/events/stream` 除了 run 归档事件，
+  还推一个**虚拟 kind** `job_update`（`event: job_update` + `id: <job_id>:<第 n 次状态变化>` +
+  `data: {kind,data:{job_id,action,status,from_stage,error_code}}`）—— job 状态一变（**已落盘之后**）
+  就推一帧，**按文档过滤、纯通知不落盘、无订阅者即丢弃**（真相仍在 `<base>/.bdt-serve/jobs.jsonl`
+  与 `jobs/<jid>.json`；重启/断线不重放）。前端收到就按 `action` 分流失效对应查询、且把兑底
+  轮询从 2s 降到 5s（收到推送后的静默窗口内连那一次也跳过）。两个必须知道的边界：
+  ①没有 run 归档时该端点仍是 `404 events_unavailable`（§1.4.1），所以「提交后到子进程建出
+  run 归档」那段过渡期靠轮询；②真实 `bdt run` 的 translate 阶段是**一次整篇子进程调用**，
+  既无段落级也无 batch 级事件，且 `translated.jsonl`（已译段数的来源）是套版阶段才写的 ——
+  所以前端的「已译段落 N/M」**在翻译运行中不会跳动**，只在套版落盘后跳变（界面与 api.md
+  §4 都写明了这一点，不做假进度）。
 
 查看已编译结果：`GET /api/v1/documents/{did}` 的 `compile` 字段（`status`/`revision`/
 `stale`/`artifact`），下载走 `GET /api/v1/documents/{did}/artifacts/{name}`（支持 Range，
