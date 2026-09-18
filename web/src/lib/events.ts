@@ -3,7 +3,7 @@
  * kind 分组、尾部窗口合并。网络层在 `queries.ts`（分页）与
  * `components/events/useEventStream.ts`（原生 EventSource）。
  *
- * 契约：`docs/frontend/api.md` §1.3（分页游标是**扫描位置**）/ §1.4（SSE 帧
+ * 契约：`docs/reference/http-api.md`（分页游标是**扫描位置**；SSE 帧
  * `event: <kind>` + `id: <run_id>:<seq>` + `data: <事件 JSON>`）。单 run 内 `seq`
  * 从 1 递增，所以窗口/去重都按 `seq` 做（跨 run 才需要 `(run_id, seq)`）。
  */

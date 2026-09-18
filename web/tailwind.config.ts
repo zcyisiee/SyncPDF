@@ -1,7 +1,7 @@
 import type { Config } from 'tailwindcss';
 
-// 令牌唯一来源：docs/frontend/design-v2/DESIGN.md §6（Tailwind/shadcn 映射）+ §1/§2/§3。
-// 颜色/字体/圆角/阴影/间距照抄设计稿；`hair` 与 `fontSize` 阶梯是 §1.1 派生线与 §2.2 表格的逐一映射。
+// 设计令牌映射（参见 src/app/globals.css）。
+// 颜色、字体、圆角、阴影、间距在此定义；与 CSS 变量同步修改。
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {

@@ -25,7 +25,7 @@
 - ``GET /`` 及其下的前端静态资源（W15，见 :mod:`babeldoc_tools.serve.static`）：
   ``web/dist`` 存在时同一个端口伺候 SPA（含前端路由回退），没构建过就静默跳过
 
-后续端点（流式段落级进度…）在 ``docs/frontend/api.md`` 里冻结形状 —— 这里不写假成功 stub。
+当前接口行为见 ``docs/reference/http-api.md``，响应模型见 schemas.py；不注册假成功端点。
 
 本模块在 import 时即需要 ``fastapi``（web extra）；``bdt serve --help`` 与其它
 ``bdt`` 子命令都不 import 本模块，因此没有 web extra 也能用。

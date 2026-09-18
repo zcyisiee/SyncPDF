@@ -1,6 +1,6 @@
-"""草稿读写：``<workdir>/.bdt-serve/draft.json``（``docs/frontend/api.md`` §3.3，W09）。
+"""草稿读写：``<workdir>/.bdt-serve/draft.json``（``docs/reference/http-api.md``，W09）。
 
-草稿是"改译文 / 调排版"的唯一写入口，形状冻结在 §3.3::
+草稿是"改译文 / 调排版"的写入口，兼容文件形状如下（数据库读写见本模块实现）::
 
     {"revision": 3, "updated_at": "...", "paragraphs": {"P05-002": {...}}}
 

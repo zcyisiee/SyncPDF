@@ -1,7 +1,7 @@
 /**
  * job 的纯函数口径（W08）：活动判据、轮询间隔、`from` 自动判断、页码形状。
  *
- * 服务端契约在 `docs/frontend/api.md` §3.4：`action=run` 的 `from` 取值是 7 个阶段，
+ * 服务端契约在 `docs/reference/http-api.md`：`action=run` 的 `from` 取值是 7 个阶段，
  * `pages` 形如 `"1-3,5"`；客户端**永远**不传命令/密钥（profile 只传 id）。
  */
 import type { DocumentDetail, JobRecord } from '../api/types';

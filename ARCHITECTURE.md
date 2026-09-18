@@ -1,16 +1,94 @@
-# Architecture
+# 当前架构
 
-## 1. Purpose
-这个项目是什么，输入是什么，输出是什么。
+本文描述仓库现有实现，核对日期：2026-09-19。在线部署目标和未决定的存储方案见 [在线翻译设计](docs/design/online-translation.md)；运行与验证见 [CLI 指南](docs/guide/cli.md)。
 
-## 2. Entry Points
-人或其他系统从哪里进入这个项目。
+## 1. 目的
 
-## 3. Code Map
-重要目录 / 模块分别负责什么。
+把 PDF 解析为带段落身份、样式和公式锚点的可译文本，调用模型翻译，再重建译文 PDF，并允许用户查看进度、修改局部译文和重新编译。输入是 PDF、语言与布局配置、翻译/审查提供方；输出包括单语 PDF、可选双语 PDF、工作目录和质量报告。保真程度由检查与人工复核判断。
 
-## 4. Main Flows
-最重要的 1~3 条执行路径。
+当前产品由本地 CLI 和单机 Web 工作台组成。Web 已有上传、实时事件、草稿、段落编译与导出；尚无仓库内的多用户认证、跨机器任务队列或远端对象存储实现。
 
-## 5. Invariants
-哪些边界和规则不能被破坏。
+## 2. 入口
+
+唯一安装命令是 `bdt`，由 [pyproject.toml](pyproject.toml) 注册到 [babeldoc_tools/__main__.py](babeldoc_tools/__main__.py)。
+
+- `bdt run`：完整编排；`parse / translate / apply / build / check / layout-set / report`：分步操作。
+- `bdt serve`：启动 FastAPI 服务与可选的 `web/dist` 静态站点；默认 `127.0.0.1`、端口 `0`（绑定后返回真实端口）。HTTP 前缀 `/api/v1`，接口 schema 由 `/openapi.json` 提供。
+- `bdt debug` 与阶段命令的 `--debug`：诊断归档及查看器。
+- `bdt harness-call / model-call`：模型适配子命令，读 stdin 提示词、写 stdout 文本；仍属于同一个入口。
+
+普通阶段命令输出 JSON 信封，日志走 stderr；`--help`、模型适配和长驻服务各有自己的输出语义，不能一概按 JSON 解析。
+
+## 3. 代码地图
+
+| 责任 | 从哪里读 |
+|---|---|
+| 参数、阶段编排、续跑、外部命令协议 | `babeldoc_tools/__main__.py`、`run.py`、`common.py` |
+| 阶段门面 | `babeldoc_tools/{parse,translate,layout,review,report}.py` |
+| Markdown 与 IR 转换、写回、重建、协议检查 | `babeldoc/tools/agent/{markdown_view,workflow,protocol}.py`；这里是内部库 |
+| 原生 PDF 解析、文档中间表示、排版、PDF 生成 | `babeldoc/format/pdf/new_parser/`、`document_il/{frontend,midend,backend}/` |
+| 布局提供方与字符对齐 | `babeldoc/docvision/`、`document_il/utils/provider_alignment.py` |
+| HTTP 路由、任务、草稿、全量编译与候选 | `babeldoc_tools/serve/{app,runner,jobs,draft,compile,candidates}.py`、`routers/` |
+| 元数据、资产、局部编译、迁移与清理 | `babeldoc_tools/serve/{database,asset_store,block_compile,migrate,cleanup}.py` |
+| 工作台、API 消费、预览与事件订阅 | `web/src/{screens,components,lib,api}/` |
+| 模型调用与提示词 | `babeldoc_tools/harnesses.py`、`serve/models.py`、`skills/document-translate/agents/`、`scripts/` |
+| 质量检查与回归证据 | `tests/`、`babeldoc/tools/agent/{quality_checks,layout_geometry,link_audit}.py`、仓库 `tmp/` |
+
+核心引擎负责 PDF/IR，工具层负责工作目录与编排，服务层再包裹工具层及局部编译器；浏览器通过 HTTP 消费它们。现有外部边界是 MinerU 云 API 或本地 Paddle 布局后端、翻译提供方，以及默认启用的 XeLaTeX bbox 渲染。部分字体、模型和缓存还在用户缓存目录，不全在文档目录内。
+
+## 4. 三条主要路径
+
+### 完整翻译
+
+```text
+bdt run → parse → translate → apply → build → check → review → report
+             ↓          ↓         ↓        ↓                    ↓
+        agent/解析产物  translated.md  IR  output/*.pdf    FINAL_REPORT.md
+```
+
+`parse_document` 经 `markdown_view.extract_markdown` 生成带锚点的 Markdown 和 `state.pkl`。`translate_document` 调用外部命令或导入已有 Markdown；`apply_translation` 将通过协议检查的文本写回 IR；`layout.build_pdf` 经 `workflow.reconstruct` 排版并生成 PDF。`run.py::STAGES` 管理七阶段和输入哈希；AI 审查可显式跳过，本地质量检查仍保留。详细停止语义见 [管线参考](docs/reference/pipeline.md)。
+
+### 上传与实时进度
+
+```text
+浏览器 → POST /documents → uploads → workdir/source.pdf + app.db + assets/
+       → POST /documents/{did}/jobs → JobRunner → bdt run 子进程
+       ← SSE / 任务查询 ← 诊断事件、持久事件与任务状态
+```
+
+上传按内容哈希去重，上传本身不自动解析。任务执行阶段会保存可观察状态；翻译流可经 `ServeStreamPreview` 调用局部编译器生成预览。持久 SSE 读数据库事件，旧 SSE 读单次 run 的诊断归档，二者游标不同。
+
+### 局部修改与交付
+
+草稿保存带 `base_revision`，写入 SQLite 并保留兼容 JSON。**保存不自动编译**：当前 `CompileService.schedule` 只取消旧计时器。用户可显式编译单段（`BlockCompiler`，更新页面/预览资产），再导出当前 revision。局部发布会检查 revision 和任务状态，避免过期结果覆盖新编辑。
+
+旧的 `action=compile` 全量路径仍存在：在隔离目录物化草稿，调用 `bdt run --from apply`，发布 PDF 并归档版本。AI 重译另走候选路径，采用候选才写草稿。全量版本归档与局部导出是两套并存机制，见 [HTTP 参考](docs/reference/http-api.md)。
+
+### 数据落点
+
+| 位置 | 现有职责 |
+|---|---|
+| `<workdir>/agent/`、`output/` | CLI 的解析状态、文本、检查结果与 PDF |
+| `<store_base>/app.db` | SQLite（WAL）：文档、草稿、任务快照/事件、段落、页面、资产引用、导出 |
+| `<store_base>/assets/<哈希前缀>/` | 按 SHA-256 寻址的本地文件；数据库不保存 PDF 二进制 |
+| `<store_base>/.bdt-serve/`、`<workdir>/.bdt-serve/` | 服务配置、兼容任务/草稿文件、候选、全量编译状态及版本 |
+| `<workdir>/debug/runs/` | 按运行归档的诊断事件、快照与产物副本 |
+
+`store_base` 在 root 模式是服务根目录，在 workdir 模式是所选工作目录。SQLite 和文件目前并存；不是已经完成数据库替换，也不能只备份其中一边。
+
+## 5. 不可随意破坏的边界
+
+| 边界 | 代码与检查出口 |
+|---|---|
+| 新能力仍由 `bdt` 暴露，无第二个 CLI/工具包 | `pyproject.toml`、`tests/test_single_entry.py` |
+| 段落身份与样式/公式占位符受协议保护；修复与原文回退必须可观察 | `markdown_view.py`、`protocol.py`、`tests/test_markdown_format.py`、`test_agent_protocol.py` |
+| 续跑检查阶段依赖与记录哈希；过期输入不能静默复用 | `run.py::STAGE_INPUTS`、`tests/test_run_pipeline.py` |
+| 编译成功、预览可用、质量通过是不同状态；失败不得把旧产物标成当前 revision | `compile.py`、`block_compile.py`、`tests/test_serve_compile.py`、`test_serve_local_export.py` |
+| HTTP 文件访问经文档范围解析、产物白名单或资产归属校验 | `store.py`、`artifacts.py`、`routers/artifacts.py`、`tests/test_serve_artifacts.py` |
+| 测试证据写入仓库 `tmp/`，不得纳入版本控制 | `.gitignore`、`AGENTS.md` |
+
+## 6. 已知缺口
+
+- 双轨存储与两套编译/事件协议仍并存；统一迁移和旧路径退役时间未定。旧注释和部分测试还保留自动防抖编译的预期，判断行为应追到执行函数。
+- `bdt serve --cleanup` 仅清理服务根下过期的 `tmp/`、`cache/` 文件；没有对全部 workdir、debug、历史版本和资产的容量预算/自动淘汰闭环。
+- 尚未量化真实云服务器的磁盘峰值、并发与恢复目标。数据库和远端资产后端选型保持待定；不得从本机实现推断公网部署已就绪。

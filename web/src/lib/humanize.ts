@@ -1,6 +1,6 @@
 /**
  * 文案口径：7 个阶段名 + 状态徽标文案 + 事件 kind 短标签 + 耗时文案。
- * 事件 kind 标签是 W06 补的（`docs/frontend/api.md` §4 明确「level 推导表放前端」）。
+ * 事件 kind 的显示标签与 level 推导由本模块维护；服务契约见 `docs/reference/http-api.md`。
  */
 export const STAGE_NAMES = [
   'parse',
@@ -225,7 +225,7 @@ export function humanizeUpdatedAt(iso: string | null | undefined, now: Date = ne
   return at.toISOString().slice(0, 10);
 }
 
-/** 产物缺失时计数是 `null`（不是 0），显示 `—` 而不是编造 0（docs/frontend/api.md §3.1）。 */
+/** 产物缺失时计数是 `null`（不是 0），显示 `—` 而不是编造 0（docs/reference/http-api.md）。 */
 export function countLabel(value: number | null | undefined, unit: string): string {
   return typeof value === 'number' ? `${value} ${unit}` : '—';
 }

@@ -69,7 +69,7 @@ def verify_model(directory: Path, name: str) -> dict:
         if not path.is_file():
             raise PaddleDependencyError(
                 f"Missing {path}; install {lock['repo']} at revision {lock['revision']}. "
-                "See docs/paddle-migration/P3-RUNTIME.md"
+                "See docs/guide/cli.md"
             )
         if sha256_file(path) != expected:
             raise PaddleDependencyError(
@@ -344,7 +344,7 @@ class PaddleRuntime:
             )
         except ImportError as exc:
             raise PaddleDependencyError(
-                "Install the locked paddlex / paddleocr / paddlepaddle optional dependencies; see docs/paddle-migration/P3-RUNTIME.md"
+                "Install the locked paddlex / paddleocr / paddlepaddle optional dependencies; see docs/guide/cli.md"
             ) from exc
         try:
             versions = {

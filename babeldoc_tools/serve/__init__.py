@@ -5,7 +5,7 @@
 - :mod:`babeldoc_tools.serve.app`：FastAPI app factory（需 web extra）。
 - :mod:`babeldoc_tools.serve.cli`：``bdt serve`` 的参数与启动流程（不需 web extra）。
 
-契约单一事实来源是 ``docs/frontend/api.md``；HTTP 形状以运行中服务的
+契约单一事实来源是 ``docs/reference/http-api.md``；HTTP 形状以运行中服务的
 ``/openapi.json`` 为准。本包不新增对外 CLI：入口仍是 ``bdt serve``。
 """
 

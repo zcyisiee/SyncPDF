@@ -1,5 +1,5 @@
 /**
- * W13 术语表的前端纯函数：CSV 解析/导出、行校验、行 → 请求体（docs/frontend/api.md §3.8）。
+ * W13 术语表的前端纯函数：CSV 解析/导出、行校验、行 → 请求体（docs/reference/http-api.md）。
  *
  * 后端 `PUT /glossary` **不收 CSV**：CSV 的解析/导出全在这里，所以引号/换行/逗号/BOM
  * 这些真 CSV 的形状必须在本文件的用例里钉住。

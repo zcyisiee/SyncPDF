@@ -2,7 +2,7 @@
 
 服务读文档产物只有两条路：:meth:`babeldoc_tools.serve.store.DocumentStore.resolve`
 给出 workdir 绝对路径（安全边界），本模块把那个 workdir 里的产物读成 Python 值
-（对外形状见 ``docs/frontend/api.md`` §3.1）。
+（对外形状见 ``docs/reference/http-api.md``）。
 
 产物是信任边界内的**本地产物**：缺失 / JSON 损坏 / 外形不符一律降级成 ``None``
 （或空列表 + 一个 ``available`` 标志），由视图层如实上报 —— 单个产物坏掉不能让

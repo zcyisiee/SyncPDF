@@ -1,6 +1,6 @@
 """``/api/v1/documents`` 路由：列表 / 详情 / 阶段 / 段落 / 几何 / 检查 + 上传（W08）。
 
-W02 实现 ``docs/frontend/api.md`` §3.1 的前六个 GET 端点；W08 增加 ``POST /documents``
+当前端点概览见 ``docs/reference/http-api.md``；``POST /documents``
 （multipart 上传 PDF → 建 did，见 :mod:`babeldoc_tools.serve.uploads`）。路由层只做三件事：
 解析路径/查询参数、调 :mod:`babeldoc_tools.serve.views`/上传层、交给 ``response_model``
 序列化；**读写文件的边界**仍是

@@ -2,6 +2,8 @@
 
 本项目基于上游 [BabelDOC](https://github.com/funstory-ai/BabelDOC)，用于把英文论文翻译成中文 PDF，并生成原文与译文对照版。
 
+架构与维护从 [ARCHITECTURE.md](ARCHITECTURE.md)、[文档索引](docs/index.md) 开始；运行与检查见 [指南](docs/guide/cli.md)。
+
 ## 相对上游的改动
 
 ### 超链接保留与对应
@@ -36,7 +38,7 @@ CLI 入口是 `bdt check`（三合一：结构审查 + 排版 lint + 链接审�
 bdt parse → bdt translate → bdt apply → bdt build → bdt check → bdt report
 ```
 
-翻译输入使用带段落 ID、样式锚点和公式锚点的 Markdown。写回阶段会检查 ID、锚点顺序、公式占位符和段落完整性。翻译与审查都通过可替换的子进程命令注入（stdin 收提示词、stdout 出结果）。
+翻译输入使用带段落 ID、样式锚点和公式锚点的 Markdown。写回阶段检查 ID 与锚点多重集，记录修复和原文回退；锚点顺序允许随译序变化。翻译与审查都通过可替换的子进程命令注入（stdin 收提示词、stdout 出结果）。
 
 ### 解析和排版检查
 
@@ -66,8 +68,8 @@ agy models
 ## 使用方法
 
 工具入口只有一个：`bdt`（安装后即在 PATH；等价于 `python -m babeldoc_tools`）。
-9 个子命令：`parse` / `translate` / `apply` / `build` / `check` / `layout-set` /
-`report` / `debug` / `run`。stdout 恒为单行 JSON，日志走 stderr，退出码 0 = 成功、1 = 失败。
+子命令包括阶段操作、`run`、`debug`、`serve` 与模型适配；以 `bdt --help` 为准。
+普通阶段命令 stdout 为 JSON、日志走 stderr；帮助、模型适配与服务启动有各自输出语义。
 
 ### 单一流程（推荐）
 
@@ -156,7 +158,7 @@ uv run bdt apply --workdir "$WD"
 ```bash
 # 看结论：verdict + blockers/warnings + reviewer 结论（只读，exit 0）
 uv run bdt check --workdir "$WD"
-# CI / 门禁用：verdict 非 pass 时 exit 1
+# 本地门禁：verdict 非 pass 时 exit 1
 uv run bdt check --workdir "$WD" --strict
 
 # reviewer 给 needs_fix 时，按 findings 的 kind 分两路修复：
@@ -235,81 +237,17 @@ uv run bdt run --workdir "$WD" --from apply --dual
 
 ### Web 服务（`bdt serve`）
 
-本地只读的 HTTP 服务（需 web extra），把 workdir 产物、事件流和 job 暴露给浏览器：
+单机工作台提供上传、翻译任务、实时进度、草稿、段落预览与导出。需要 web extra；构建 `web/dist` 后，服务在同一端口提供前端。
 
 ```bash
-PATH="$PWD/.venv/bin:$PATH" bdt serve --root tmp          # tmp/<did>/ 下每个目录 = 一个文档
-PATH="$PWD/.venv/bin:$PATH" bdt serve --workdir tmp/paper  # 只服务这一个 workdir
-# stdout 只在绑定端口成功后打印一次启动信封（含真实 URL/端口），日志全走 stderr
+uv sync --extra web
+PATH="$PWD/.venv/bin:$PATH" bdt serve --root tmp --port 8787
+# 只公开单个已有目录：bdt serve --workdir tmp/paper
 ```
 
-HTTP 形状的单一事实来源是运行中服务的 `/openapi.json`（可读版本：
-`docs/frontend/api.md`）。与编辑闭环相关的三块：
+当前以 SQLite `app.db` 保存元数据，本地 `assets/` 保存哈希资产，并兼容原 workdir 文件。保存草稿后显式编译/导出，revision 防止旧结果覆盖新修改。旧全量编译与版本归档路径仍保留。
 
-- **草稿**（`GET/PATCH/DELETE /api/v1/documents/{did}/draft`）：译文与段落排版覆盖，
-  落在 `<did>/.bdt-serve/draft.json`。`revision` 从 0 起单调递增（清空也 +1，不回退）；
-  `PATCH {base_revision, paragraphs}` 的 `base_revision` 对不上 → `409 revision_conflict`；
-  字段/范围不合法 → `422 draft_invalid`（键名与范围与 `layout_overrides` 同一套校验）。
-- **编译**（`POST /api/v1/documents/{did}/jobs` + `{"action": "compile"}`）：把草稿物化到
-  `<did>/.bdt-serve/compile-<job_id>/` 隔离副本里跑 `bdt run --from apply`（apply + build），
-  成功后把 `output/*.pdf` 原子发布回真 workdir；失败/取消/超时只删副本，**上一版 PDF 分毫不动**
-  （能下载的仍可下载，只是被标成 `stale`）。成功判据是 build 阶段 ok 且副本里确实有新 PDF：
-  `--from apply` 之后的质量门禁（check/review）不过在命令层面是 exit 1，编译仍算成功
-  （`quality.pipeline_ok` 不受影响）。`scope=pages` 按已批准设计回退全量。
-- **防抖**：草稿写成功后在**服务端** 1.5s 后自动编译一次（浏览器断开不丢）；期间再写一次
-  重置计时器，到点时已有活动 job 则跳过。任务（run/check/compile）期间草稿只读：
-  `PATCH`/`DELETE` → `409 document_busy`。
-- **重译候选**（`POST /api/v1/documents/{did}/paragraphs/{pid}/retranslate`、`GET …/candidates`、
-  `POST …/candidates/{cid}/adopt|reject`）：对不满意段落让 AI 重译，**候选未采用前绝不进正文**。
-  生成是一个 job（`action=retranslate`，排队/并发/取消同其它 job），跑在
-  `<did>/.bdt-serve/candidates-<job_id>/` 隔离副本里（`bdt translate --ids`），只写
-  `<did>/.bdt-serve/candidates.json` —— `agent/translated.md`、`draft.json`、`output/` 分毫不动；
-  「采用」才把候选写成草稿 `target`（`revision+1`）并触发防抖编译，「拒绝」只改候选状态。
-  translator 命令只来自 profile（客户端只传 profile id，命令/密钥字段一律 422）。
-- **版本归档**（`GET /api/v1/documents/{did}/versions`、`GET …/versions/{revision}/pdf`）：每次
-  **成功**的编译发布都把那一份 PDF 归档成一版（`<did>/.bdt-serve/versions/<revision>.pdf` + 清单
-  `<did>/.bdt-serve/versions.json`），保留最近 50 个（超出淘汰最旧的文件与清单行）。归档用
-  **硬链接**（零拷贝、不读字节、不影响发布的原子性）：下一次发布 `os.replace` 掉 `output/` 之后，
-  旧版本文件仍是当时那一份字节；失败/取消/超时的编译**不归档**，上一版仍可下载。清单里 `trigger`
-  记 `debounce`（防抖自动）/`manual`（显式 POST compile），`quality` 是发布时刻的质量快照
-  （**只记录不门禁**：`needs_fix` 的版本照样可下载，前端黄标）。归档目录**不在**产物白名单里 ——
-  `GET /artifacts` 清单永远不会出现 versions，版本 PDF 只能经上面那条专用端点读；
-  界面入口是归档视图 `#/d/<did>/archive`（下载按钮旁的「历史版本」）。
-- **全局词表**（`GET/PUT/DELETE /api/v1/glossary`）：一个全局术语表（术语 → 指定译名），
-  落在 `<store_base>/.bdt-serve/glossary.csv`（**不属于任何 workdir**）。`PUT` 是整表替换
-  （JSON 条目，**不收 CSV 文本**：CSV 的导入导出在前端）；服务端校验 + 去重（同 source 以后者
-  为准）+ 按 source 排序，不合法 → `422 glossary_invalid` 且盘上一字不改。翻译时由**服务端**把
-  这个 CSV 路径经 `bdt run --glossaries <csv>` 交给子进程（词表渲染进 `translator` 提示词的
-  `{glossary}` 段，见 `skills/document-translate/agents/translator.md`）；客户端在
-  `POST /documents/{did}/jobs` 里只能给 `use_glossary` 布尔（缺省 true），只对 `action=run`
-  且真的跑 translate 阶段的 job 生效 —— `compile`/`check`/`retranslate`（重译候选）一律不注入，
-  词表为空也不注入。**词表变更不回溯**：已经翻译过的内容不会自动重翻，重新跑翻译才生效
-  （前端词表视图有常驻提示）。CLI 侧同一套机制：`bdt translate --glossaries <csv>` /
-  `bdt run --glossaries <csv>`（不带这个词表时提示词与之前逐字节一致）。
-- **实时进度（SSE 合并，W14）**：`GET /api/v1/documents/{did}/events/stream` 除了 run 归档事件，
-  还推一个**虚拟 kind** `job_update`（`event: job_update` + `id: <job_id>:<第 n 次状态变化>` +
-  `data: {kind,data:{job_id,action,status,from_stage,error_code}}`）—— job 状态一变（**已落盘之后**）
-  就推一帧，**按文档过滤、纯通知不落盘、无订阅者即丢弃**（真相仍在 `<base>/.bdt-serve/jobs.jsonl`
-  与 `jobs/<jid>.json`；重启/断线不重放）。前端收到就按 `action` 分流失效对应查询、且把兑底
-  轮询从 2s 降到 5s（收到推送后的静默窗口内连那一次也跳过）。两个必须知道的边界：
-  ①没有 run 归档时该端点仍是 `404 events_unavailable`（§1.4.1），所以「提交后到子进程建出
-  run 归档」那段过渡期靠轮询；②真实 `bdt run` 的 translate 阶段是**一次整篇子进程调用**，
-  既无段落级也无 batch 级事件，且 `translated.jsonl`（已译段数的来源）是套版阶段才写的 ——
-  所以前端的「已译段落 N/M」**在翻译运行中不会跳动**，只在套版落盘后跳变（界面与 api.md
-  §4 都写明了这一点，不做假进度）。
-
-查看已编译结果：`GET /api/v1/documents/{did}` 的 `compile` 字段（`status`/`revision`/
-`stale`/`artifact`），下载走 `GET /api/v1/documents/{did}/artifacts/{name}`（支持 Range，
-pdf.js 需要）；历史版本走 `GET /api/v1/documents/{did}/versions/{revision}/pdf`。
-
-- **前端静态伺服（W15）**：`pnpm --dir web build` 的产物（`web/dist`）存在时，`bdt serve`
-  在**同一个端口**上伺候 SPA —— `GET /` 给 `index.html`（`no-cache`）、带内容哈希的
-  `/assets/*` 长缓存（`immutable`）、其它固定名资源（`pdfjs/*` 等）`no-cache`、
-  **非接口路径回退到入口 HTML**（前端的 hash 路由在浏览器里解析）。没构建过就**静默跳过**
-  （只伺服 `/api/v1`，启动信封一个字不变）；`/api`、`/docs`、`/redoc`、`/openapi.json`
-  永不落进 SPA 回退（未知的接口路径照旧是 JSON 错误信封）。于是生产上就是单进程自包含：
-  `pnpm --dir web build && PATH="$PWD/.venv/bin:$PATH" bdt serve --root tmp`（开发时仍可用
-  Vite dev server + `/api` 代理，`web/README.md` 有两条工作流）。
+HTTP 字段看 `/openapi.json`，当前行为、两种 SSE 游标和编辑闭环集中维护在 [HTTP 参考](docs/reference/http-api.md)；前端开发见 [web/README.md](web/README.md)。云端部署与存储选型仍是 [待决策设计](docs/design/online-translation.md)。
 
 ### Debug 工作台（诊断归档 + 只读查看器）
 

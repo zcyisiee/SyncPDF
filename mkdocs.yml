@@ -18,149 +18,39 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
 
-# Project information
-site_name: BabelDOC
-site_url: https://squidfunk.github.io/mkdocs-material/
-site_author: funstory.ai
-site_description: >-
-  Write your documentation in Markdown and create a professional static site in
-  minutes – searchable, customizable, in 60+ languages, for all devices
-
-# Repository
-repo_name: funstory-ai/BabelDOC
-repo_url: https://github.com/funstory-ai/BabelDOC
+# 项目信息与知识库导航
+site_name: ieeTranslater
+site_description: PDF 翻译、局部修订与在线部署的项目文档
+repo_name: zcyisiee/ieeTranslater
+repo_url: https://github.com/zcyisiee/ieeTranslater
 edit_uri: edit/main/docs/
 docs_dir: docs
 
-# Copyright
-copyright: Copyright &copy; 2025 funstory.ai
-
-# Configuration
 theme:
   name: material
-  # custom_dir: material/overrides
+  language: zh
   features:
-    - announce.dismiss
-    - content.action.edit
-    - content.action.view
-    - content.code.annotate
-    - content.code.copy
-    - content.code.select
-    # - content.footnote.tooltips
-    # - content.tabs.link
-    - content.tooltips
-    # - header.autohide
-    # - navigation.expand
-    - navigation.footer
-    - navigation.indexes
-    # - navigation.instant
-    # - navigation.instant.prefetch
-    # - navigation.instant.progress
-    # - navigation.prune
-    - navigation.sections
-    - navigation.tabs
-    # - navigation.tabs.sticky
     - navigation.top
-    - navigation.tracking
-    - search.highlight
-    - search.share
-    - search.suggest
-    - toc.follow
-    # - toc.integrate
-  palette:
-    - media: "(prefers-color-scheme)"
-      toggle:
-        icon: material/brightness-auto
-        name: Switch to light mode
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: white
-      accent: indigo
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: black
-      accent: indigo
-      toggle:
-        icon: material/brightness-4
-        name: Switch to system preference
-  font:
-    text: Roboto
-    code: Roboto Mono
-  # favicon: assets/favicon.png
-  favicon: images/babeldoc-small-logo-with-transparent-background.svg
-  logo: images/babeldoc-small-logo-with-transparent-background.svg
+    - content.code.copy
 
-# Plugins
 plugins:
-  - search:
-      separator: '[\s\u200b\-_,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
-  - minify:
-      minify_html: true
-  - git-authors
-  - git-revision-date-localized:
-      enable_creation_date: true
-# Additional configuration
-extra:
-  status:
-    new: Recently added
-    deprecated: Deprecated
-  social:
-    - icon: fontawesome/brands/github
-      link: https://github.com/funstory-ai/BabelDOC
-    - icon: fontawesome/brands/python
-      link: https://pypi.org/project/BabelDOC/
+  - search
 
-# Extensions
 markdown_extensions:
-  - github-callouts
-  - markdown_include.include
-  - pymdownx.highlight:
-      anchor_linenums: true
-      line_spans: __span
-      pygments_lang_class: true
-  - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - tables
+  - toc:
+      permalink: true
   - pymdownx.superfences
-  - def_list
-  - pymdownx.tasklist:
-      custom_checkbox: true
-not_in_nav: |
-  /tutorials/**/*.md
-  /agent-translate-pipeline.md
-  /layout-hypothesis/**/*.md
-exclude_docs: |
-  /release-notes/**/*.md
-  # 与 index.md 冲突的历史 README；站点首页用 index.md
-  /README.md
-  # 重构前的解析链改造计划（历史存档，正文链接指向仓库根代码，不参与站点构建）
-  /babeldoc-original-parse-flow-and-improvement-plan.md
 
-# Page tree
+validation:
+  links:
+    anchors: warn
+    unrecognized_links: warn
+
 nav:
-  - Home: index.md
-  - Supported Languages: supported_languages.md
-  - API:
-    - Async Translation API: ImplementationDetails/AsyncTranslate/AsyncTranslate.md
-  - Implementation Details:
-    - ImplementationDetails/README.md
-    - PDF Parsing: ImplementationDetails/PDFParsing/PDFParsing.md
-    - Layout Parser(.py): https://github.com/funstory-ai/BabelDOC/blob/main/babeldoc/format/pdf/document_il/midend/layout_parser.py
-    - Paragraph Finding: ImplementationDetails/ParagraphFinding/ParagraphFinding.md
-    - Styles and Formulas: ImplementationDetails/StylesAndFormulas/StylesAndFormulas.md
-    - IL Translator: ImplementationDetails/ILTranslator/ILTranslator.md
-    - Typesetting: ImplementationDetails/Typesetting/Typesetting.md
-    - Font Mapper(.py): https://github.com/funstory-ai/BabelDOC/blob/main/babeldoc/format/pdf/document_il/utils/fontmap.py
-    - PDF Creation: ImplementationDetails/PDFCreation/PDFCreation.md
-    - Intro To PDF Object: intro-to-pdf-object.md
-  - Toolchain:
-    - Overview: toolchain/README.md
-    - Pipeline Stages: toolchain/pipeline-stages.md
-    - Troubleshooting: toolchain/troubleshooting.md
-  - Community:
-    - Code of Conduct: CODE_OF_CONDUCT.md
-    - Contributing:
-      - Contributing: CONTRIBUTING.md
-      - Contributor Reward: CONTRIBUTOR_REWARD.md
+  - 文档导航: index.md
+  - 运行与验证: guide/cli.md
+  - 子代理委派规范: guide/delegation.md
+  - 管线与数据: reference/pipeline.md
+  - HTTP 与工作台: reference/http-api.md
+  - 在线部署设计: design/online-translation.md

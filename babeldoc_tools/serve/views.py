@@ -1,4 +1,4 @@
-"""把 workdir 产物组装成 ``docs/frontend/api.md`` §3.1 六个端点的视图。
+"""把 workdir 产物组装成 ``docs/reference/http-api.md`` 六个端点的视图。
 
 分工：:mod:`babeldoc_tools.serve.workdir` 只负责"读产物"，本模块只负责"拼视图"
 （多产物 join、缺侧补 null、时间归一成 UTC），HTTP 参数与响应模型在

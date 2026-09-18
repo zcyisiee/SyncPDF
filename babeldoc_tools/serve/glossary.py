@@ -1,4 +1,4 @@
-"""全局词表存储（``docs/frontend/api.md`` §3.2，W13）。
+"""全局词表存储（``docs/reference/http-api.md``，W13）。
 
 **一个全局词表**（不做多词表管理）：``<store_base>/.bdt-serve/glossary.csv``
 （``DocumentStore.store_base`` 见 :mod:`babeldoc_tools.serve.store`）。它**不属于任何

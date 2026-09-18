@@ -1,4 +1,4 @@
-"""job 的持久化、准入控制与重启恢复（``docs/frontend/api.md`` §3.4，W07）。
+"""job 的持久化、准入控制与重启恢复（``docs/reference/http-api.md``，W07）。
 
 本模块只管**状态**：job 快照、生命周期事件、同文档串行与全局并发上限。真正起
 子进程、取消进程组的事在 :mod:`babeldoc_tools.serve.runner`。

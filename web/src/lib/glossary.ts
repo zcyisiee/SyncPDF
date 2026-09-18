@@ -1,5 +1,5 @@
 /**
- * 术语表的纯函数与形状（W13，docs/frontend/api.md §3.8）。
+ * 术语表的纯函数与形状（W13，docs/reference/http-api.md）。
  *
  * 两条职责，都是**前端自己那一侧**的事：
  *

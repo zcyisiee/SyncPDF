@@ -147,14 +147,9 @@ max-complexity = 10 # 函数圈复杂度阈值
 "**/__init__.py" = ["F401"]     # 允许未使用的导入
 # 忽略 S311 警告，因为这是有意的
 "babeldoc/format/pdf/document_il/midend/paragraph_finder.py" = ["S311"]
-"docs/*" = ["A001"]
-# 归档的离线实验脚本（不进产品链路）：硬编码 2026-09 那次实验的 /tmp run 目录是
-# 证据的一部分，不应改写；S603 是调用本地 xelatex 编译器。
-"docs/layout-hypothesis/scripts/*" = ["S108", "S603"]
 "babeldoc/pdfminer/*" =["A","F", "I", "N", "S", "B", "C", "COM", "ARG", "PTH", "UP"]
 [dependency-groups]
 dev = [
-    "bumpver>=2024.1130",
     "markdown-callouts>=0.4.0",
     "markdown-include>=0.8.1",
     "mkdocs-git-authors-plugin>=0.9.2",
@@ -172,22 +167,6 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = [".", "src"]
 testpaths = ["tests"]
-
-[bumpver]
-current_version = "0.6.4"
-version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
-
-[bumpver.file_patterns]
-"pyproject.toml" = [
-    'current_version = "{version}"',
-    'version = "{version}"'
-]
-"babeldoc/__init__.py" = [
-    '__version__ = "{version}"'
-]
-"babeldoc/const.py" = [
-    '__version__ = "{version}"'
-]
 
 [tool.pyright]
 pythonVersion = "3.10"
