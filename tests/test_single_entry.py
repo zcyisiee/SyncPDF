@@ -212,8 +212,8 @@ def test_run_without_reviewer_stops_waiting(tmp_path):
     assert (workdir / "agent" / "review_prompt.md").exists()
 
 
-def test_cli_help_lists_eight_subcommands():
-    """`bdt --help` 暴露 8 个固定子命令，没有 call/list/schema 元命令。"""
+def test_cli_help_lists_ten_subcommands():
+    """`bdt --help` 暴露 10 个固定子命令（含 debug/serve），没有 call/list/schema 元命令。"""
     out = _cli("--help")
     assert out.returncode == 0, out.stderr
     for command in (
@@ -224,7 +224,9 @@ def test_cli_help_lists_eight_subcommands():
         "check",
         "layout-set",
         "report",
+        "debug",
         "run",
+        "serve",
     ):
         assert command in out.stdout
     for removed in ("call", "list", "schema"):

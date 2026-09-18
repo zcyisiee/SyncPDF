@@ -4,6 +4,7 @@
 
     bdt parse <pdf> --workdir tmp/wd [--layout mineru|paddle]
     bdt translate --workdir tmp/wd --translator scripts/agy-translator.sh
+    bdt translate --workdir tmp/wd [--glossaries tmp/wd/glossary.csv]
     bdt translate --workdir tmp/wd [--ids P01-003] [--feedback "..."]
     bdt translate --workdir tmp/wd --markdown <已有译文.md>   # 不调命令
     bdt translate --workdir tmp/wd --prompt-only              # 只写 agent/prompt.md
@@ -13,7 +14,8 @@
     bdt layout-set --workdir tmp/wd --patch '{"paragraphs": {...}}'
     bdt report --workdir tmp/wd
     bdt run <pdf> --workdir tmp/wd [--from build] [--markdown self] \
-        [--translator <cmd>] [--reviewer <cmd>]
+        [--translator <cmd>] [--reviewer <cmd>] [--glossaries <csv>]
+    bdt serve (--root <dir> | --workdir <dir>) [--host 127.0.0.1] [--port 0] [--open]
 
 约定：
 
@@ -26,6 +28,8 @@
   并以 ``waiting_for_reviewer``（exit 1）结束——质量门禁不把"没人审查"当成功。
 - ``bdt check`` 聚合结构审查 / 排版 lint / 链接审计；``--strict`` 时 verdict
   非 pass（含子项不可用）退出码 1，``bdt run`` 的 check 步用同一语义。
+- ``bdt serve`` 是长驻 HTTP 服务（需 web extra），stdout 只在**绑定端口成功后**
+  打印一次启动信封（含真实端口/URL），之后日志全部走 stderr。
 """
 
 from __future__ import annotations
@@ -50,6 +54,7 @@ from babeldoc_tools import report
 from babeldoc_tools import review
 from babeldoc_tools import run as run_tool
 from babeldoc_tools import translate
+from babeldoc_tools.serve import cli as serve_cli
 
 #: ``run`` 的续跑起点；顺序与 :data:`babeldoc_tools.run.STAGES` 一致。
 RUN_STAGES = run_tool.STAGES
@@ -166,6 +171,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="只写 agent/prompt.md 后返回，不调用任何命令",
     )
     p_translate.add_argument("--timeout", type=int, default=1800, help="命令超时秒数")
+    p_translate.add_argument(
+        "--glossaries",
+        default=None,
+        help=(
+            "术语表 CSV 路径（列 source,target[,note]）：整篇翻译的提示词带上术语约束段；"
+            "按 --ids 重译不注入。缺省 = 不用词表"
+        ),
+    )
     p_translate.add_argument("--repair-prompt", default=None, help="重译提示词名")
     p_translate.add_argument(
         "--no-retry-missing",
@@ -319,6 +332,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--layout-coverage-threshold", type=float, default=0.005)
     p_run.add_argument("--mineru-ocr-text", action="store_true", dest="mineru_ocr_text")
     p_run.add_argument("--pages", default=None)
+    p_run.add_argument(
+        "--glossaries",
+        default=None,
+        help=(
+            "术语表 CSV 路径（列 source,target[,note]）：from=parse/translate 时整篇翻译"
+            "带上术语约束段；其它阶段/重译不注入。缺省 = 不用词表"
+        ),
+    )
     p_run.add_argument("--lang-in", default="en")
     p_run.add_argument("--lang-out", default="zh")
     p_run.add_argument("--dual", action="store_true")
@@ -366,6 +387,19 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--title", default=None)
     p_run.add_argument("--notes", default=None)
     _add_debug_flags(p_run, recompile=True)
+
+    p_harness = sub.add_parser("harness-call", help="Call a built-in harness: stdin prompt, stdout text")
+    p_harness.add_argument("--profile", required=True)
+    p_harness.add_argument("--thinking", default=None)
+
+    p_model = sub.add_parser("model-call", help="Call a saved model: stdin prompt, stdout text")
+    p_model.add_argument("--store-base", required=True)
+    p_model.add_argument("--model-profile", required=True)
+    p_run.add_argument("--skip-ai-review", action="store_true", help="Skip optional AI review; keep local checks")
+
+    # ---- serve ----------------------------------------------------------- #
+    # Web 前端入口；只 import 标准库 + store/schemas，缺 web extra 也能 --help。
+    serve_cli.add_parser(sub)
 
     return parser
 
@@ -469,6 +503,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
                     "translator": args.translator,
                     "timeout": args.timeout,
                     "retry_missing": args.retry_missing,
+                    "glossaries": args.glossaries,
                 },
             },
             call=lambda rec: registry.invoke(
@@ -482,6 +517,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
                 timeout=args.timeout,
                 repair_prompt=args.repair_prompt,
                 retry_missing=args.retry_missing,
+                glossaries=args.glossaries,
                 debug_recorder=rec,
             ),
         )
@@ -612,7 +648,9 @@ def _dispatch(args: argparse.Namespace) -> dict:
                     timeout=args.timeout,
                     translator=args.translator,
                     reviewer=args.reviewer,
+                    skip_ai_review=args.skip_ai_review,
                     retry_missing=args.retry_missing,
+                    glossaries=args.glossaries,
                     dual=args.dual,
                     watermark=args.watermark,
                     latex_bbox=args.latex_bbox,
@@ -650,6 +688,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
                     "markdown": args.markdown,
                     "prompt_only": args.prompt_only,
                     "timeout": args.timeout,
+                    "glossaries": args.glossaries,
                     "dual": args.dual,
                     "watermark": args.watermark,
                     "latex_bbox": args.latex_bbox,
@@ -754,6 +793,35 @@ def main(argv=None) -> int:
             parser.error("--debug-recompile 需要同时指定 --debug")
         if getattr(args, "latex_bbox", True) is False:
             parser.error("--debug-recompile 与 --no-latex-bbox 互斥")
+    if args.command == "harness-call":
+        from babeldoc_tools.harnesses import call_harness
+
+        try:
+            def emit(text):
+                sys.stdout.write(text)
+                sys.stdout.flush()
+
+            call_harness(args.profile, args.thinking, sys.stdin.read(), on_text=emit)
+        except common.ToolError as exc:
+            sys.stderr.write(exc.code + ": " + exc.message + "\n")
+            return 1
+        return 0
+    if args.command == "model-call":
+        from babeldoc_tools.serve.models import call_model
+
+        try:
+            text = call_model(args.store_base, args.model_profile, sys.stdin.read())
+        except common.ToolError as exc:
+            sys.stderr.write(exc.code + ": " + exc.message + "\n")
+            return 1
+        except Exception:
+            sys.stderr.write("model_call_failed: Model call failed\n")
+            return 1
+        sys.stdout.write(text)
+        return 0
+    if args.command == "serve":
+        # 长驻服务：自己写启动信封（绑定端口后才知道真实 URL），不走单行 JSON 收尾。
+        return serve_cli.run(args)
     # 实现函数/第三方库的 print 一律走 stderr，保证 stdout 只有最终 JSON。
     with contextlib.redirect_stdout(sys.stderr):
         payload = _dispatch(args)

@@ -307,9 +307,11 @@ def reconstruct(
         state = pickle.load(f)  # noqa: S301 - workdir 私有产物，非不可信输入
     doc = state["doc"]
 
-    temp_pdf_path = Path(state["temp_pdf_path"])
-    if not temp_pdf_path.exists():
-        raise FileNotFoundError(f"解析产物 PDF 不存在: {temp_pdf_path}，请重新 extract")
+    from babeldoc.tools.agent.prepared_pdf import resolve_source_pdf
+
+    temp_pdf_path = resolve_source_pdf(state, workdir)
+    if temp_pdf_path is None:
+        raise FileNotFoundError(f"解析产物 PDF 不存在: {state['temp_pdf_path']}，请重新 extract")
 
     config = _base_config(
         state["pdf_path"], workdir, state["lang_in"], state["lang_out"]

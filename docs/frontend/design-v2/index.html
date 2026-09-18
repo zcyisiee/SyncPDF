@@ -1,0 +1,1509 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ieeTranslater · 学术 PDF 翻译工作台</title>
+<style>
+:root{
+  /* ── 纸感底层 ── */
+  --parchment:#f5f4ed; --ivory:#faf9f5; --sand:#e8e6dc; --sand-2:#e5e3d8;
+  --fg:#141413; --fg-2:#3d3d3a; --fg-3:#504e49; --fg-4:#6b6a64;
+  /* ── 唯一强调色：墨蓝 ── */
+  --accent:#1B365D; --accent-soft:#E4ECF5; --on-accent:#f7f6f0;
+  /* ── 状态 ── */
+  --run:#B7791F; --pass:#2F6B4F; --err:#A63D2F;
+  --run-soft:color-mix(in oklch, var(--run) 13%, var(--ivory));
+  --pass-soft:color-mix(in oklch, var(--pass) 12%, var(--ivory));
+  --err-soft:color-mix(in oklch, var(--err) 11%, var(--ivory));
+  --run-ink:color-mix(in oklch, var(--run) 66%, var(--fg));
+  --pass-ink:color-mix(in oklch, var(--pass) 78%, var(--fg));
+  --err-ink:color-mix(in oklch, var(--err) 78%, var(--fg));
+  --hair:color-mix(in oklch, var(--fg) 11%, transparent);
+  --hair-2:color-mix(in oklch, var(--fg) 22%, transparent);
+  --tint:color-mix(in oklch, var(--accent) 8%, transparent);
+  --tint-2:color-mix(in oklch, var(--accent) 14%, transparent);
+  --scrim:color-mix(in oklch, var(--fg) 34%, transparent);
+  --shadow:0 1px 0 var(--hair), 0 4px 24px rgba(0,0,0,.05);
+  /* ── 识别类别色板：7 类淡暖色（低彩度、非鲜艳，均 ≥3:1 于 ivory） ── */
+  --c-text:oklch(52% .030 78);    /* 正文 · 暖褐 */
+  --c-head:oklch(46% .050 42);    /* 标题 · 赭石 */
+  --c-eq:oklch(54% .035 100);     /* 公式 · 橄榄 */
+  --c-fig:oklch(50% .055 26);     /* 图 · 陶土 */
+  --c-tbl:oklch(52% .040 118);    /* 表 · 苔绿 */
+  --c-margin:oklch(58% .020 62);  /* 页眉页脚 · 灰褐 */
+  --c-ref:oklch(44% .045 20);     /* 参考文献 · 深赭 */
+  /* ── 字体 ── */
+  --serif:Charter,"Source Han Serif SC","Noto Serif SC",Georgia,"Songti SC","SimSun",serif;
+  --sans:Inter,system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  /* ── 尺度与外壳尺寸 ── */
+  --fs-micro:10px; --fs-tiny:11px; --fs-sm:12px; --fs-body:13px; --fs-md:14px;
+  --fs-lg:16px; --fs-h2:17px; --fs-h1:21px;
+  --r:4px; --r2:6px;
+  --s1:4px; --s2:6px; --s3:8px; --s4:12px; --s5:16px; --s6:20px; --s7:28px;
+  --gw:6px;          /* 拖拽分隔条宽度 */
+  --vrw:220px;       /* 视图栏宽度 160–320 */
+  --inspw:360px;     /* 右侧面板宽度 280–560 */
+  --tlh:96px;        /* 时间线高度 72–160 */
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--parchment);color:var(--fg);
+  font:400 var(--fs-body)/1.55 var(--sans);overflow:hidden;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer}
+h1,h2,h3,h4,p{margin:0}
+pre{margin:0}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:0}
+.dim{color:var(--fg-4)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:color-mix(in oklch,var(--fg) 16%,transparent);border-radius:9px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:color-mix(in oklch,var(--fg) 28%,transparent);background-clip:padding-box}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ═══ 顶栏：品牌 + 当前文档/状态（无 tab） ═══ */
+.topbar{height:44px;display:flex;align-items:center;gap:var(--s4);padding:0 var(--s5);
+  border-bottom:1px solid var(--hair);background:var(--parchment);flex:none}
+.brand{display:flex;align-items:baseline;gap:7px;min-width:0}
+.brand__mark{font:500 var(--fs-md)/1 var(--serif);letter-spacing:-.01em}
+.brand__name{font:500 var(--fs-md)/1 var(--serif);letter-spacing:-.01em}
+.brand__sep{color:var(--fg-4)}
+.brand__sub{font:400 var(--fs-tiny)/1 var(--sans);color:var(--fg-4);letter-spacing:.02em;white-space:nowrap}
+.topbar__meta{margin-left:auto;display:flex;align-items:center;gap:var(--s3);white-space:nowrap;min-width:0}
+.topbar__meta .doc{font-family:var(--serif);font-size:var(--fs-sm);color:var(--fg-2);max-width:34ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.live{display:inline-flex;align-items:center;gap:5px;color:var(--run-ink)}
+.live__dot,.dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.live__dot{animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.82)}}
+
+/* ═══ 外壳：图标栏 + 工作区栅格 ═══ */
+.app{height:calc(100% - 44px);display:flex;min-height:0}
+.rail{width:56px;flex:none;background:var(--sand);border-right:1px solid var(--hair);
+  display:flex;flex-direction:column;align-items:center;gap:var(--s2);padding:var(--s3) 0}
+.rail__btn{width:36px;height:36px;display:grid;place-items:center;border-radius:var(--r);color:var(--fg-3);transition:background .12s,color .12s}
+.rail__btn:hover{background:color-mix(in oklch,var(--fg) 8%,transparent);color:var(--fg)}
+.rail__btn.is-on{background:var(--ivory);color:var(--accent);box-shadow:0 0 0 1px var(--hair)}
+.rail__sp{flex:1}
+.avatar{width:30px;height:30px;border-radius:50%;background:var(--ivory);box-shadow:0 0 0 1px var(--hair);
+  display:grid;place-items:center;font:500 var(--fs-tiny)/1 var(--mono);color:var(--fg-3)}
+.workspace{flex:1;min-width:0;min-height:0;display:grid;
+  grid-template-columns:var(--vrw) var(--gw) minmax(0,1fr) var(--gw) var(--inspw);
+  grid-template-rows:minmax(0,1fr) var(--gw) var(--tlh)}
+#viewrail{grid-column:1;grid-row:1}
+#gutter-vr{grid-column:2;grid-row:1}
+.stage{grid-column:3;grid-row:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+#gutter-insp{grid-column:4;grid-row:1}
+.inspector{grid-column:5;grid-row:1}
+#gutter-tl{grid-column:1/-1;grid-row:2}
+.timeline{grid-column:1/-1;grid-row:3}
+body[data-section="library"] .workspace,body[data-section="glossary"] .workspace{
+  grid-template-columns:var(--vrw) var(--gw) minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
+body[data-section="library"] .stage,body[data-section="glossary"] .stage{grid-column:3/-1}
+body[data-section="library"] #gutter-insp,body[data-section="library"] .inspector,
+body[data-section="library"] #gutter-tl,body[data-section="library"] .timeline,
+body[data-section="glossary"] #gutter-insp,body[data-section="glossary"] .inspector,
+body[data-section="glossary"] #gutter-tl,body[data-section="glossary"] .timeline{display:none}
+body.insp-collapsed #gutter-insp,body.insp-collapsed .inspector{display:none}
+
+/* 拖拽分隔条：6px；hover / 拖拽 / 聚焦时显 2px 墨蓝线 */
+.gutter{position:relative;background:var(--parchment);touch-action:none;z-index:6}
+.gutter::after{content:'';position:absolute;background:var(--accent);opacity:0;transition:opacity .12s;border-radius:1px}
+.gutter--v{cursor:col-resize}
+.gutter--v::after{top:0;bottom:0;left:2px;width:2px}
+.gutter--h{cursor:row-resize}
+.gutter--h::after{left:0;right:0;top:2px;height:2px}
+.gutter:hover{background:color-mix(in oklch,var(--accent) 7%,var(--parchment))}
+.gutter:hover::after,.gutter.is-drag::after,.gutter:focus-visible::after{opacity:1}
+.gutter:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+svg.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+svg.ic-sm{width:13px;height:13px}
+
+/* ═══ 通用控件 ═══ */
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:var(--r);
+  border:1px solid var(--hair);background:var(--ivory);color:var(--fg-2);font-size:var(--fs-sm);letter-spacing:.02em;
+  transition:background .12s,border-color .12s,color .12s}
+.btn:hover{background:var(--sand);border-color:var(--hair-2);color:var(--fg)}
+.btn:active{transform:translateY(1px)}
+.btn--primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn--primary:hover{background:color-mix(in oklch,var(--accent) 88%,var(--fg));border-color:transparent;color:var(--on-accent)}
+.btn--danger{color:var(--err);border-color:color-mix(in oklch,var(--err) 34%,transparent);background:var(--ivory)}
+.btn--danger:hover{background:var(--err-soft);border-color:var(--err);color:var(--err)}
+.btn[disabled]{opacity:.45;cursor:not-allowed;background:var(--ivory);color:var(--fg-4);border-color:var(--hair)}
+.btn--sm{height:24px;padding:0 8px;font-size:var(--fs-tiny)}
+.btn--icon{width:28px;padding:0;justify-content:center}
+.btn.is-on{background:var(--sand);border-color:var(--hair-2);color:var(--fg)}
+.tip{position:relative;display:inline-flex}
+.tip::after{content:attr(data-tip);position:absolute;top:calc(100% + 7px);right:0;z-index:40;
+  background:var(--fg);color:var(--parchment);font:400 var(--fs-tiny)/1.4 var(--sans);
+  padding:5px 8px;border-radius:var(--r);white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s}
+.tip--w::after{white-space:normal;width:216px;text-align:left;line-height:1.5}
+.tip:hover::after,.tip:focus-within::after{opacity:1}
+.lnk{font:400 var(--fs-tiny)/1 var(--mono);letter-spacing:.02em;color:var(--fg-2);
+  padding:2px 4px;border-radius:3px;border-bottom:1px solid var(--hair-2);transition:background .12s,color .12s,border-color .12s}
+.lnk:hover{background:var(--sand);color:var(--fg);border-bottom-color:var(--accent)}
+.seg{display:inline-flex;padding:2px;background:var(--sand);border-radius:var(--r2);gap:2px}
+.seg button{padding:3px 10px;border-radius:var(--r);font-size:var(--fs-sm);color:var(--fg-3);letter-spacing:.02em;transition:background .12s,color .12s}
+.seg button:hover{color:var(--fg);background:color-mix(in oklch,var(--fg) 6%,transparent)}
+.seg button[aria-pressed="true"]{background:var(--ivory);color:var(--fg);box-shadow:0 0 0 1px var(--hair)}
+.seg button.is-locked{opacity:.45;cursor:not-allowed}
+.seg button.is-locked:hover{background:transparent;color:var(--fg-3)}
+.tgl{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 8px;border-radius:var(--r);
+  border:1px solid transparent;color:var(--fg-4);font-size:var(--fs-tiny);letter-spacing:.02em;transition:all .12s}
+.tgl:hover{background:var(--sand);color:var(--fg-2)}
+.tgl[aria-pressed="true"]{background:var(--sand);border-color:var(--hair);color:var(--fg-2)}
+.tgl i{width:7px;height:7px;border-radius:2px;border:1.5px solid currentColor;flex:none}
+.tgl[aria-pressed="true"] i{background:currentColor}
+.swrow{display:flex;align-items:center;gap:8px;width:100%;padding:6px 12px;font-size:var(--fs-sm);
+  color:var(--fg-4);text-align:left;transition:background .12s,color .12s}
+.swrow:hover{background:var(--sand);color:var(--fg)}
+.swrow i{width:9px;height:9px;border-radius:2px;border:1.5px solid currentColor;flex:none}
+.swrow[aria-pressed="true"]{color:var(--fg-2)}
+.swrow[aria-pressed="true"] i{background:currentColor}
+.swrow .lbl{margin-left:auto;text-transform:none;letter-spacing:.02em;font-family:var(--sans);font-size:var(--fs-tiny);color:var(--fg-4)}
+.chip{display:inline-flex;align-items:center;gap:4px;height:19px;padding:0 6px;border-radius:3px;
+  background:var(--sand);color:var(--fg-3);font:400 var(--fs-micro)/1 var(--mono);letter-spacing:.03em;white-space:nowrap}
+.chip--run{background:var(--run-soft);color:var(--run-ink)}
+.chip--pass{background:var(--pass-soft);color:var(--pass-ink)}
+.chip--err{background:var(--err-soft);color:var(--err-ink)}
+.chip--acc{background:var(--accent-soft);color:var(--accent)}
+.chip--acc-line{border:1px dashed var(--accent);color:var(--accent);background:transparent}
+.st{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:3px;font:400 var(--fs-tiny)/1 var(--sans);letter-spacing:.02em;white-space:nowrap}
+.st i{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.st--run{background:var(--run-soft);color:var(--run-ink)}
+.st--pass{background:var(--pass-soft);color:var(--pass-ink)}
+.st--err{background:var(--err-soft);color:var(--err-ink)}
+.st--idle{background:var(--sand);color:var(--fg-4)}
+.sevr{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:18px;padding:0 5px;border-radius:3px;
+  font:500 var(--fs-micro)/1 var(--mono);letter-spacing:.04em}
+.sevr--p0{background:var(--err-soft);color:var(--err-ink)}
+.sevr--p1{background:var(--run-soft);color:var(--run-ink)}
+.sevr--p2{background:var(--sand);color:var(--fg-3)}
+.lbl{font-size:var(--fs-tiny);letter-spacing:.06em;color:var(--fg-4);text-transform:uppercase;font-family:var(--mono)}
+.vrdot{width:7px;height:7px;border:1.5px solid currentColor;border-radius:2px;flex:none}
+.vr__item.is-on .vrdot{background:currentColor}
+
+/* ═══ 视图栏（二级导航） ═══ */
+.viewrail{border-right:1px solid var(--hair);padding:var(--s4) 10px;display:flex;flex-direction:column;gap:var(--s4);min-height:0;overflow:auto}
+.vr__doc{padding:0 2px}
+.vr__t{font:500 var(--fs-h2)/1.3 var(--serif);letter-spacing:0}
+.vr__m{display:flex;align-items:center;gap:var(--s2);margin-top:6px;flex-wrap:wrap}
+.vr__list{display:flex;flex-direction:column;gap:2px}
+.vr__item{display:flex;align-items:center;gap:var(--s3);height:32px;padding:0 var(--s3);border-radius:var(--r);
+  color:var(--fg-3);font-size:var(--fs-body);transition:background .12s,color .12s}
+.vr__item:hover{background:var(--sand);color:var(--fg)}
+.vr__item.is-on{background:var(--ivory);color:var(--fg);box-shadow:0 0 0 1px var(--hair)}
+.vr__item.is-on .vr__ic{color:var(--accent)}
+.vr__ic{color:var(--fg-4);flex:none}
+.vr__txt{flex:1;text-align:left}
+.vr__sub{font-family:var(--mono);font-size:var(--fs-micro);color:var(--fg-4);padding:0 2px;margin-top:2px;line-height:1.5}
+
+/* ═══ 舞台 / 视图面板 ═══ */
+.pane{flex:1;display:none;min-width:0;min-height:0}
+.pane--lib.is-on{display:block;overflow:auto}
+.pane--gl.is-on{display:flex;flex-direction:column;overflow:hidden}
+.pane--work.is-on{display:flex;flex-direction:column}
+.stagebar{display:flex;align-items:center;gap:var(--s4);height:44px;padding:0 var(--s4);border-bottom:1px solid var(--hair);flex:none}
+.stagebar__r{margin-left:auto;display:flex;align-items:center;gap:var(--s2)}
+.pgnav{display:flex;align-items:center;gap:2px;font-family:var(--mono);font-size:var(--fs-tiny);color:var(--fg-3)}
+.pgnav b{color:var(--fg);font-weight:500}
+.zoombox{display:flex;align-items:center;gap:2px}
+.zoombox span{font-family:var(--mono);font-size:var(--fs-tiny);color:var(--fg-3);min-width:40px;text-align:center}
+.stagebar2{display:flex;align-items:center;gap:var(--s3);height:34px;padding:0 var(--s4);border-bottom:1px solid var(--hair);
+  background:var(--ivory);flex:none;font-size:var(--fs-sm);min-width:0}
+.stagebar2__r{margin-left:auto;display:flex;align-items:center;gap:var(--s2);flex:none}
+.stagebar2 .hint{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stagebody{flex:1;min-height:0;overflow:auto;padding:var(--s6) var(--s5) 32px;display:flex;justify-content:center;align-items:flex-start;gap:var(--s5)}
+.compare{display:flex;gap:16px;align-items:flex-start;justify-content:center}
+.cmpside{display:flex;flex-direction:column;gap:6px}
+.cmpside__h{font:400 var(--fs-micro)/1 var(--mono);letter-spacing:.06em;color:var(--fg-4);text-align:center}
+
+/* 纸页 */
+.paper{position:relative;width:var(--pw,520px);min-height:calc(var(--pw,520px) * 1.294);background:var(--ivory);
+  border:1px solid var(--hair);border-radius:2px;box-shadow:0 4px 24px rgba(0,0,0,.05);
+  padding:3.1em 3.4em;font-family:var(--serif);font-size:var(--pfs,13px);color:var(--fg)}
+.paper__head{display:flex;justify-content:space-between;gap:1em;font-family:var(--mono);font-size:.62em;letter-spacing:.04em;
+  color:var(--fg-4);border-bottom:1px solid var(--hair);padding-bottom:.9em;margin-bottom:1.5em}
+.paper__flow{display:flex;flex-direction:column;gap:.72em}
+.paper__badge{position:absolute;top:10px;right:10px;font-family:var(--mono);font-size:.62em;letter-spacing:.04em;
+  padding:3px 6px;border-radius:3px;background:var(--ivory)}
+.paper__badge--prev{border:1px dashed var(--accent);color:var(--accent)}
+.paper__badge--run{border:1px solid var(--hair);color:var(--run-ink)}
+.paper__badge--pass{border:1px solid color-mix(in oklch,var(--pass) 42%,transparent);color:var(--pass-ink)}
+.bk{position:relative;padding:.3em .38em;border-radius:2px;cursor:pointer;transition:background .12s}
+.bk:hover{background:color-mix(in oklch,var(--accent) 5%,transparent)}
+.bk--done{background:var(--tint)}
+.bk--done:hover{background:var(--tint-2)}
+.bk--pending{border:1px dashed var(--hair-2);color:var(--fg-3)}
+.bk--issue{box-shadow:0 0 0 1px var(--run);background:color-mix(in oklch,var(--run) 7%,transparent)}
+.bk--issue0{box-shadow:0 0 0 1px var(--err);background:color-mix(in oklch,var(--err) 7%,transparent)}
+.bk--edited{outline:1px dashed var(--accent);outline-offset:2px}
+.bk--peer,.bk--peer:hover{background:var(--tint);outline:1px dashed var(--accent);outline-offset:1px}
+.bk--sel,.bk--sel:hover,.bk--sel.bk--peer{background:var(--tint-2);outline:2px solid var(--accent);outline-offset:0}
+.bk__t{font-size:1em;line-height:1.5;letter-spacing:0}
+.paper[data-lang="zh"] .bk__t{line-height:1.78}
+.bk__h{font-weight:500;font-size:1.12em;line-height:1.35}
+.bk__eq{font-family:var(--mono);font-size:.86em;text-align:center;padding:.5em 0;letter-spacing:0}
+.bk__cap{font-size:.8em;color:var(--fg-3);line-height:1.45}
+.bk__m{position:absolute;top:-1px;left:-1px;transform:translateY(-100%);font-family:var(--mono);font-size:.6em;
+  letter-spacing:.03em;color:var(--fg-4);background:var(--ivory);padding:1px 4px;border-radius:2px;border:1px solid var(--hair)}
+.ph{display:flex;align-items:center;justify-content:center;gap:.5em;height:5.4em;border:1px dashed var(--hair-2);
+  border-radius:2px;background:var(--parchment);font-family:var(--mono);font-size:.72em;color:var(--fg-4);letter-spacing:.02em;text-align:center}
+.hnd{position:absolute;width:6px;height:6px;background:var(--ivory);border:1.5px solid var(--accent);border-radius:1px;z-index:3}
+/* 识别（只读）层 */
+.bk--rec{outline:1px dashed var(--cat);outline-offset:1px}
+.bk--rec:hover{background:color-mix(in oklch,var(--cat) 8%,transparent)}
+.bk--rec .bk__t{position:relative}
+.bk__tag{display:none;font:400 .58em/1.5 var(--mono);letter-spacing:.02em;padding:1px 4px;border-radius:2px;
+  border:1px solid var(--cat);color:color-mix(in oklch,var(--cat) 58%,var(--fg));background:var(--ivory);margin-bottom:.4em}
+.paper--rec.is-blocks .bk__tag{display:inline-block}
+.paper--rec.is-para .bk--rec{border-radius:3px;box-shadow:0 0 0 1px var(--hair-2)}
+.paper--rec.is-para .bk--rec::before{content:'¶';position:absolute;left:-1em;top:.35em;font:400 .6em/1 var(--mono);color:var(--fg-4)}
+.paper--rec.is-chars .bk__t{background-image:
+    repeating-linear-gradient(90deg,color-mix(in oklch,var(--cat) 46%,transparent) 0 1px,transparent 1px 6px),
+    repeating-linear-gradient(90deg,color-mix(in oklch,var(--cat) 46%,transparent) 0 1px,transparent 1px 6px);
+  background-position:left top,left bottom;background-size:100% 3px,100% 3px;background-repeat:no-repeat;padding:.25em 0}
+.paper--rec .fm{font-family:var(--mono);font-size:.92em;padding:0 2px}
+.paper--rec.is-ifm .fm{border:1px dashed var(--c-eq);border-radius:2px;background:color-mix(in oklch,var(--c-eq) 7%,transparent)}
+.mtbl{width:100%;border-collapse:collapse;font-size:.82em;font-family:var(--sans)}
+.mtbl th,.mtbl td{border:1px solid var(--hair);padding:.2em .5em;text-align:left}
+.mtbl th{color:var(--fg-4);font:400 .8em/1.5 var(--mono);letter-spacing:.04em}
+.mtbl td.num{text-align:right}
+
+/* 右侧面板 */
+.inspector{border-left:1px solid var(--hair);display:flex;flex-direction:column;min-height:0;min-width:0}
+.ins__tabs{display:flex;align-items:center;gap:2px;padding:var(--s3) var(--s3) 0;flex:none;border-bottom:1px solid var(--hair);overflow:hidden}
+.ins__tab{padding:5px 9px;border-radius:var(--r) var(--r) 0 0;font-size:var(--fs-sm);color:var(--fg-4);letter-spacing:.02em;white-space:nowrap}
+.ins__tab:hover{color:var(--fg-2);background:var(--sand)}
+.ins__tab.is-on{color:var(--fg);background:var(--ivory);box-shadow:0 0 0 1px var(--hair);border-bottom:1px solid var(--ivory);margin-bottom:-1px}
+.ins__body{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column}
+.ins__ft{flex:none;padding:7px var(--s4);border-top:1px solid var(--hair);font-size:var(--fs-tiny);color:var(--fg-4);background:var(--ivory)}
+.ins__hd{padding:var(--s3) var(--s4);display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;border-bottom:1px solid var(--hair);flex:none}
+.ins__hd .lbl{margin-right:auto}
+.filterrow{display:flex;gap:4px;flex-wrap:wrap;padding:var(--s3) var(--s4);border-bottom:1px solid var(--hair);flex:none}
+.fchip{height:21px;padding:0 7px;border-radius:3px;border:1px solid var(--hair);background:var(--ivory);
+  font:400 var(--fs-micro)/1 var(--mono);letter-spacing:.03em;color:var(--fg-3);transition:all .12s}
+.fchip:hover{border-color:var(--hair-2);color:var(--fg)}
+.fchip.is-on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.fsep{width:1px;background:var(--hair);margin:2px 3px}
+.evlist{min-height:0}
+.ev{display:grid;grid-template-columns:52px 1fr;gap:var(--s3);padding:var(--s3) var(--s4);border-bottom:1px solid var(--hair);cursor:pointer;transition:background .12s}
+.ev:hover{background:var(--sand)}
+.ev__t{font-family:var(--mono);font-size:var(--fs-micro);color:var(--fg-4);padding-top:2px}
+.ev__m{font-size:var(--fs-sm);line-height:1.5;color:var(--fg-2)}
+.ev__top{display:flex;align-items:center;gap:5px;margin-bottom:3px}
+.ev__lv{width:5px;height:5px;border-radius:50%;flex:none;margin-left:auto}
+.ev__lv--info{background:var(--hair-2)}
+.ev__lv--warn{background:var(--run)}
+.ev__lv--err{background:var(--err)}
+.ev__lv--run{background:var(--run);animation:pulse 1.6s infinite}
+.ev__json{margin-top:var(--s3);background:var(--parchment);border:1px solid var(--hair);border-radius:var(--r);
+  padding:var(--s3);font-family:var(--mono);font-size:var(--fs-micro);line-height:1.65;color:var(--fg-2);overflow-x:auto;white-space:pre}
+.k{color:var(--fg-4)}.v{color:var(--accent)}.n{color:var(--pass)}
+.err-card{margin:var(--s4);border:1px solid var(--hair);border-left:3px solid var(--err);border-radius:0;background:var(--err-soft);padding:var(--s4)}
+.err-card h4{font:500 var(--fs-md)/1.4 var(--serif);color:var(--err-ink)}
+.err-card p{font-size:var(--fs-sm);color:var(--fg-2);margin-top:4px;font-family:var(--mono)}
+.err-card__b{display:flex;gap:var(--s2);margin-top:var(--s4);flex-wrap:wrap}
+
+/* 段落面板 */
+.para{padding:var(--s4);display:flex;flex-direction:column;gap:var(--s5);min-height:0}
+.para__hd{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+.para__id{font-family:var(--mono);font-size:var(--fs-md);letter-spacing:.02em}
+.sec{display:flex;flex-direction:column;gap:var(--s2)}
+.sec__t{display:flex;align-items:center;gap:var(--s2)}
+.sec__t .lbl{flex:1}
+.ro{background:var(--parchment);border:1px solid var(--hair);border-radius:var(--r);padding:var(--s3);
+  font:400 13px/1.6 var(--serif);color:var(--fg-2)}
+textarea.ta{width:100%;min-height:126px;resize:vertical;background:var(--ivory);border:1px solid var(--hair-2);border-radius:var(--r);
+  padding:var(--s3);font:400 13.5px/1.8 var(--serif);color:var(--fg);transition:border-color .12s,box-shadow .12s}
+textarea.ta:hover{border-color:var(--hair-2)}
+textarea.ta:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.hint{font-size:var(--fs-tiny);color:var(--fg-4);display:flex;align-items:center;gap:5px;min-width:0}
+.hint code{font-family:var(--mono);background:var(--sand);padding:1px 4px;border-radius:2px;color:var(--fg-2)}
+.acc{border:1px solid var(--hair);border-radius:var(--r);background:var(--ivory)}
+.acc__hd{display:flex;align-items:center;gap:var(--s2);width:100%;padding:7px var(--s3);font-size:var(--fs-sm);color:var(--fg-2)}
+.acc__hd .lbl{margin-left:auto;text-transform:none;letter-spacing:0}
+.acc__bd{padding:0 var(--s3) var(--s3);display:none;flex-direction:column;gap:var(--s3)}
+.acc.is-open .acc__bd{display:flex}
+.acc__hd svg{transition:transform .14s}
+.acc.is-open .acc__hd svg{transform:rotate(90deg)}
+.sld{display:grid;grid-template-columns:minmax(72px,96px) 1fr 44px;align-items:center;gap:var(--s3)}
+.sld label{font-family:var(--mono);font-size:var(--fs-tiny);color:var(--fg-3);overflow:hidden;text-overflow:ellipsis}
+.sld output{font-family:var(--mono);font-size:var(--fs-tiny);text-align:right;color:var(--fg)}
+input[type=range]{-webkit-appearance:none;appearance:none;height:16px;background:transparent;width:100%}
+input[type=range]::-webkit-slider-runnable-track{height:2px;background:var(--hair-2);border-radius:2px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;margin-top:-4.5px;border-radius:50%;
+  background:var(--ivory);border:1.5px solid var(--accent)}
+input[type=range]:hover::-webkit-slider-thumb{background:var(--accent-soft)}
+input[type=range]::-moz-range-track{height:2px;background:var(--hair-2)}
+input[type=range]::-moz-range-thumb{width:11px;height:11px;border-radius:50%;background:var(--ivory);border:1.5px solid var(--accent)}
+.inset{background:var(--parchment);border:1px solid var(--hair);border-radius:var(--r);padding:var(--s3);font-size:var(--fs-tiny);color:var(--fg-4);line-height:1.6}
+.field{display:flex;flex-direction:column;gap:5px}
+.field>span{font-size:var(--fs-tiny);color:var(--fg-4);letter-spacing:.02em}
+.inp{height:28px;padding:0 8px;border:1px solid var(--hair-2);border-radius:var(--r);background:var(--ivory);font-size:var(--fs-sm)}
+.inp:hover{border-color:var(--hair-2)}
+.inp:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.row2{display:flex;gap:var(--s3);align-items:flex-end}
+.row2 .field{flex:1}
+.candwrap{display:grid;grid-template-columns:1fr 1fr;gap:var(--s3)}
+.cand{border:1px solid var(--hair);border-radius:var(--r);background:var(--ivory);padding:var(--s3);display:flex;flex-direction:column;gap:var(--s2)}
+.cand--new{border-color:var(--accent)}
+.cand__t{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:var(--fs-micro);color:var(--fg-4)}
+.cand__x{font:400 11.5px/1.7 var(--serif);color:var(--fg-2);flex:1}
+.cand__b{display:flex;gap:5px}
+
+/* 检查面板 */
+.verdict{margin:var(--s4);border:1px solid var(--hair);border-radius:var(--r2);background:var(--ivory);padding:var(--s4);display:flex;flex-direction:column;gap:var(--s3)}
+.verdict__r{display:flex;align-items:baseline;gap:var(--s3)}
+.verdict__v{font-family:var(--mono);font-size:var(--fs-lg);color:var(--err-ink);letter-spacing:.01em}
+.verdict__c{display:flex;gap:var(--s3);font-family:var(--mono);font-size:var(--fs-tiny);color:var(--fg-3)}
+.verdict__bar{display:flex;height:4px;border-radius:2px;overflow:hidden;gap:2px}
+.verdict__bar i{display:block;height:100%}
+.grpcard{border:1px solid var(--hair);border-radius:var(--r);background:var(--ivory);margin:0 var(--s4) var(--s3)}
+.grpcard__hd{display:flex;align-items:center;gap:var(--s2);padding:8px var(--s3);border-bottom:1px solid var(--hair)}
+.grpcard__hd .lbl{margin-left:auto;text-transform:none;letter-spacing:0}
+.iss{padding:var(--s3);border-bottom:1px solid var(--hair);display:flex;flex-direction:column;gap:6px}
+.iss:last-child{border-bottom:0}
+.iss:hover{background:var(--parchment)}
+.iss__r1{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.iss__ty{font-family:var(--mono);font-size:var(--fs-micro);color:var(--fg-2);background:var(--sand);padding:2px 5px;border-radius:3px}
+.iss__ev{font-size:var(--fs-sm);color:var(--fg-3);line-height:1.5}
+.iss__r2{display:flex;align-items:center;gap:var(--s3);font-family:var(--mono);font-size:var(--fs-micro);color:var(--fg-4)}
+.iss__r2 button{margin-left:auto}
+
+/* 识别面板 */
+.legend{padding:var(--s3) var(--s4);display:flex;flex-direction:column;gap:1px;flex:none}
+.lgd{display:flex;align-items:center;gap:var(--s3);padding:4px 0;font-size:var(--fs-sm);color:var(--fg-2)}
+.lgd i{width:11px;height:11px;border-radius:2px;border:1px dashed var(--cat);background:color-mix(in oklch,var(--cat) 26%,transparent);flex:none}
+.lgd__n{flex:1}
+.lgd__c{font-family:var(--mono);font-size:var(--fs-tiny);color:var(--fg-4)}
+.props{display:flex;flex-direction:column;flex:none}
+.kv{display:flex;align-items:center;gap:var(--s4);padding:6px var(--s4);border-bottom:1px solid var(--hair);font-size:var(--fs-sm)}
+.kv>span{color:var(--fg-4);font-size:var(--fs-tiny);flex:none;min-width:64px}
+.kv>b{font-weight:500;color:var(--fg-2);margin-left:auto;text-align:right;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:6px}
+.kv .swatch{width:10px;height:10px;border-radius:2px;border:1px dashed var(--cat);background:color-mix(in oklch,var(--cat) 26%,transparent);flex:none}
+.cfbar{height:4px;border-radius:2px;background:var(--sand);overflow:hidden;margin:var(--s3) var(--s4) var(--s2)}
+.cfbar i{display:block;height:100%;background:var(--pass)}
+/* 归档面板 */
+.vercard{border:1px solid var(--hair);border-radius:var(--r2);background:var(--ivory);margin:0 var(--s4) var(--s3);padding:var(--s4);display:flex;flex-direction:column;gap:var(--s3)}
+.vercard.is-cur{border-color:color-mix(in oklch,var(--accent) 40%,transparent);box-shadow:0 0 0 1px color-mix(in oklch,var(--accent) 22%,transparent)}
+.vercard__hd{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+.vercard__v{font-family:var(--mono);font-size:var(--fs-lg);color:var(--fg)}
+.vercard__t{margin-left:auto;font-family:var(--mono);font-size:var(--fs-micro);color:var(--fg-4)}
+.vercard__m{font-size:var(--fs-tiny);color:var(--fg-4);font-family:var(--mono);letter-spacing:.02em}
+.vercard__dl{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+.vercard__dl .sep{color:var(--hair-2);font-size:var(--fs-micro)}
+.vercard__f{display:flex;align-items:center;gap:var(--s3)}
+.vercard__f .hint{margin-left:auto;text-align:right}
+
+/* ═══ 时间线：名称行 + 时长条行 ═══ */
+.timeline{border-top:1px solid var(--hair);background:var(--ivory);padding:7px var(--s4) 6px;
+  display:flex;flex-direction:column;gap:5px;min-width:0;overflow:hidden}
+.tl__meta{display:flex;align-items:center;gap:var(--s4);font:400 var(--fs-micro)/1.4 var(--mono);letter-spacing:.03em;
+  color:var(--fg-4);white-space:nowrap;min-width:0;flex:none;height:20px}
+.tl__meta b{font-weight:500;color:var(--fg-2)}
+.tl__meta .mid{min-width:0;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
+.tl__meta .r{margin-left:auto;display:flex;align-items:center;gap:var(--s4);flex:none}
+.tl__gridwrap{flex:1;min-height:0;overflow-x:auto;overflow-y:hidden;display:flex}
+.tlgrid{display:grid;grid-template-columns:repeat(7,minmax(136px,1fr));gap:0 10px;flex:1;min-height:0}
+.tlcol{display:grid;grid-template-rows:minmax(0,1fr) 14px;row-gap:3px;min-width:0;text-align:left;padding:0}
+.tlcell{display:flex;flex-direction:column;justify-content:center;min-width:0}
+.tlname{font:500 var(--fs-tiny)/1.4 var(--sans);letter-spacing:.02em;color:var(--fg-3);white-space:nowrap;
+  display:flex;align-items:center;gap:5px;min-width:0}
+.tlname .tlnum{display:none;font:400 var(--fs-micro)/1 var(--mono);color:var(--fg-4)}
+.tlsub{font:400 var(--fs-tiny)/1.35 var(--mono);color:var(--fg-4);white-space:nowrap;font-variant-numeric:tabular-nums}
+.tlconn{width:1px;height:5px;background:var(--hair-2);margin-top:2px;flex:none}
+.tltrack{position:relative;display:flex;align-items:flex-end;height:14px;border-bottom:1px solid var(--hair)}
+.tlbar{display:block;height:10px;border-radius:2px 2px 0 0;background:var(--pass-soft);
+  border:1px solid color-mix(in oklch,var(--pass) 30%,transparent);border-bottom:0;min-width:8px}
+.tlbar b{display:block;height:100%;background:var(--pass);opacity:.45;border-radius:2px 2px 0 0}
+.tlbar.is-idle{width:64px;border:1px dashed var(--hair-2);background:transparent;border-radius:2px}
+.tlbar.is-run{background:var(--run-soft);border-color:color-mix(in oklch,var(--run) 34%,transparent)}
+.tlbar.is-run b{background:var(--run);opacity:.5}
+.tlbar.is-err{background:var(--err-soft);border-color:color-mix(in oklch,var(--err) 38%,transparent)}
+.tlbar.is-err b{background:var(--err);opacity:.5}
+.tlcol.is-pass .tlname{color:var(--pass-ink)}
+.tlcol.is-pass .tlsub{color:color-mix(in oklch,var(--pass) 62%,var(--fg))}
+.tlcol.is-run .tlname{color:var(--run-ink)}
+.tlcol.is-run .tlsub{color:var(--run-ink)}
+.tlcol.is-err .tlname,.tlcol.is-err .tlsub{color:var(--err-ink)}
+.tlcol.is-idle .tlname{color:var(--fg-4)}
+.tldot{width:6px;height:6px;border-radius:50%;background:var(--err);flex:none}
+.tlcol.is-focus .tlname{text-decoration:underline;text-decoration-color:var(--accent);text-underline-offset:3px}
+.tlcol.is-focus .tlbar{box-shadow:0 0 0 2px var(--accent)}
+.tlcol:hover .tlbar{filter:brightness(.97)}
+.tl-compact .tlsub,.tl-compact .tlconn{display:none}
+.tl-compact .tlname .tlnum{display:inline}
+
+/* ═══ 文件库 ═══ */
+.lib{padding:var(--s7) var(--s7) 48px;max-width:1220px;width:100%}
+.lib__hd{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--s5);margin-bottom:var(--s6)}
+.lib__t{font:500 28px/1.3 var(--serif);letter-spacing:0}
+.lib__s{color:var(--fg-4);font-size:var(--fs-body);margin-top:4px}
+.drop{margin:var(--s5) 0 var(--s7);border:1px dashed var(--hair-2);border-radius:var(--r2);background:var(--ivory);
+  padding:26px;display:flex;align-items:center;gap:var(--s5);text-align:left;transition:border-color .12s,background .12s;width:100%}
+.drop:hover,.drop.is-over{border-color:var(--accent);background:color-mix(in oklch,var(--accent) 5%,var(--ivory))}
+.drop__ic{width:40px;height:40px;border-radius:var(--r2);background:var(--sand);display:grid;place-items:center;color:var(--fg-3);flex:none}
+.drop__t{font:500 var(--fs-md)/1.4 var(--serif);display:block}
+.drop__d{color:var(--fg-4);font-size:var(--fs-sm);margin-top:2px;display:block}
+.grp{margin-top:var(--s6)}
+.grp__hd{display:flex;align-items:center;gap:var(--s3);margin-bottom:var(--s3)}
+.grp__t{font:500 var(--fs-md)/1 var(--serif)}
+.grp__n{font-family:var(--mono);font-size:var(--fs-tiny);color:var(--fg-4)}
+.grp--off{opacity:.52}
+.docgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s4)}
+.doccard{background:var(--ivory);border:1px solid var(--hair);border-radius:var(--r2);padding:var(--s4);
+  display:grid;grid-template-columns:52px 1fr;gap:var(--s4);transition:box-shadow .14s,border-color .14s;text-align:left}
+.doccard:hover{border-color:var(--hair-2);box-shadow:0 4px 24px rgba(0,0,0,.05)}
+.thumb{width:52px;height:68px;background:var(--parchment);border:1px solid var(--hair);border-radius:2px;padding:6px 5px;overflow:hidden}
+.thumb b{display:block;font:500 5.5px/1.35 var(--serif);color:var(--fg-3);letter-spacing:0;margin-bottom:4px}
+.thumb s{display:block;height:2px;background:color-mix(in oklch,var(--fg) 16%,transparent);border-radius:1px;margin-bottom:2.5px;text-decoration:none}
+.thumb s:nth-child(3n){width:72%}
+.doccard__t{font:500 var(--fs-md)/1.35 var(--serif);letter-spacing:0}
+.doccard__m{display:flex;flex-wrap:wrap;gap:5px var(--s3);margin-top:6px;font-family:var(--mono);font-size:var(--fs-micro);color:var(--fg-4)}
+.doccard__f{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);margin-top:var(--s3)}
+.mini{height:3px;border-radius:2px;background:var(--sand);overflow:hidden;flex:1}
+.mini i{display:block;height:100%;background:var(--run-ink)}
+.mini--pass i{background:var(--pass)}
+
+/* ═══ 词表 ═══ */
+.gl__hd{padding:var(--s7) var(--s7) 0;display:flex;align-items:baseline;gap:var(--s4);flex:none}
+.gl__hd h1{font:500 var(--fs-h1)/1.3 var(--serif)}
+.gl__hd p{font-size:var(--fs-body);color:var(--fg-4)}
+.gl__main{display:flex;flex-direction:column;min-height:0;flex:1}
+.gl__bar{display:flex;align-items:center;gap:var(--s3);padding:var(--s4) var(--s7);border-bottom:1px solid var(--hair);flex:none}
+.gl__bar .inp{width:230px}
+.gl__bar .r{margin-left:auto;display:flex;gap:var(--s2)}
+.tblwrap{flex:1;min-height:0;overflow:auto}
+table.gt{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+table.gt th{position:sticky;top:0;background:var(--parchment);text-align:left;font:400 var(--fs-micro)/1 var(--mono);
+  letter-spacing:.06em;text-transform:uppercase;color:var(--fg-4);padding:9px var(--s7);border-bottom:1px solid var(--hair);z-index:2}
+table.gt td{padding:7px var(--s7);border-bottom:1px solid var(--hair);color:var(--fg-2);vertical-align:middle}
+table.gt tr:hover td{background:var(--ivory)}
+table.gt td[contenteditable]{cursor:text}
+table.gt td[contenteditable]:hover{background:var(--sand);outline:1px dashed var(--hair-2);outline-offset:-3px}
+table.gt td[contenteditable]:focus{outline:2px solid var(--accent);outline-offset:-2px;background:var(--ivory)}
+.cell-en{font-family:var(--mono);font-size:var(--fs-tiny);color:var(--fg)}
+.cell-s{font-family:var(--serif);font-size:13.5px;color:var(--fg)}
+.sw{width:30px;height:17px;border-radius:9px;background:var(--sand);border:1px solid var(--hair);position:relative;transition:background .14s}
+.sw i{position:absolute;top:1.5px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--ivory);border:1px solid var(--hair-2);transition:transform .14s}
+.sw[aria-pressed="true"]{background:var(--accent);border-color:var(--accent)}
+.sw[aria-pressed="true"] i{transform:translateX(12px);background:var(--ivory);border-color:transparent}
+
+/* ═══ 弹层 / Toast / 开发用屏幕切换器 ═══ */
+.scrim{position:fixed;inset:0;background:var(--scrim);display:none;place-items:center;z-index:80}
+.scrim.is-on{display:grid}
+.modal{width:440px;background:var(--ivory);border:1px solid var(--hair);border-radius:var(--r2);box-shadow:0 4px 24px rgba(0,0,0,.14);
+  display:flex;flex-direction:column;overflow:hidden}
+.modal__hd{display:flex;align-items:flex-start;gap:var(--s3);padding:var(--s4) var(--s5);border-bottom:1px solid var(--hair)}
+.modal__hd h3{font:500 var(--fs-lg)/1.3 var(--serif)}
+.modal__sub{font-family:var(--mono);font-size:var(--fs-tiny);color:var(--fg-4);margin-top:5px;letter-spacing:.02em}
+.modal__bd{padding:var(--s5);display:flex;flex-direction:column;gap:var(--s5)}
+.modal__ft{display:flex;justify-content:flex-end;gap:var(--s2);padding:var(--s4) var(--s5);border-top:1px solid var(--hair)}
+.checks{display:flex;flex-direction:column;gap:7px}
+.ck{display:flex;align-items:center;gap:var(--s3);font-size:var(--fs-body);color:var(--fg-2);cursor:pointer}
+.ck i{width:14px;height:14px;border:1px solid var(--hair-2);border-radius:3px;flex:none;display:grid;place-items:center;color:transparent}
+.ck[aria-checked="true"] i{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.sel{height:30px;border:1px solid var(--hair-2);border-radius:var(--r);background:var(--ivory);padding:0 8px;font-size:var(--fs-sm);width:100%}
+.sel:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);z-index:90;background:var(--fg);color:var(--parchment);
+  font-size:var(--fs-sm);padding:8px 14px;border-radius:var(--r2);opacity:0;pointer-events:none;transition:opacity .16s,transform .16s}
+.toast.is-on{opacity:1;transform:translate(-50%,0)}
+.devbar{position:fixed;right:12px;bottom:calc(var(--tlh,96px) + 10px);z-index:75;display:flex;align-items:center;gap:2px;
+  padding:3px 6px;border:1px solid var(--hair);border-radius:var(--r);background:color-mix(in oklch,var(--parchment) 92%,transparent);
+  font:400 var(--fs-micro)/1.3 var(--mono);letter-spacing:.03em;color:var(--fg-4);opacity:.5;transition:opacity .14s}
+.devbar:hover,.devbar:focus-within{opacity:1}
+.devbar__list{display:none;align-items:center;gap:2px}
+.devbar:hover .devbar__list,.devbar:focus-within .devbar__list{display:flex}
+.devbar button{font:inherit;color:var(--fg-4);padding:2px 5px;border-radius:3px;letter-spacing:.03em}
+.devbar button:hover{background:var(--sand);color:var(--fg-2)}
+.devbar button[aria-current="true"]{background:var(--sand);color:var(--fg)}
+@media (max-width:1180px){.docgrid{grid-template-columns:repeat(2,minmax(0,1fr))}.lib,.gl__hd,.gl__bar,table.gt th,table.gt td{padding-left:var(--s5);padding-right:var(--s5)}}
+</style>
+</head>
+<body data-section="library">
+
+<header class="topbar" data-od-id="app-topbar">
+  <div class="brand">
+    <span class="brand__mark">iee</span><span class="brand__name">Translater</span>
+    <span class="brand__sep">·</span>
+    <span class="brand__sub">学术 PDF 翻译工作台</span>
+  </div>
+  <div class="topbar__meta">
+    <span class="doc">Attention Is All You Need</span>
+    <span class="st st--run" id="topstate"><i></i>tr-2418 翻译中</span>
+  </div>
+</header>
+
+<div class="app">
+  <nav class="rail" id="rail" data-od-id="icon-rail" aria-label="全局导航">
+    <button class="rail__btn" data-section="library" data-act="go:library" title="文件库" aria-label="文件库">
+      <svg class="ic" viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v6.5A1.5 1.5 0 0 1 17.5 18h-13A1.5 1.5 0 0 1 3 16.5z"/></svg>
+    </button>
+    <button class="rail__btn" data-section="glossary" data-act="go:glossary" title="词表" aria-label="词表">
+      <svg class="ic" viewBox="0 0 24 24"><path d="M5 4.5h9.5A2.5 2.5 0 0 1 17 7v12H7.5A2.5 2.5 0 0 1 5 16.5z"/><path d="M17 7h2v12H7.5"/><path d="M8.5 8.5h5M8.5 11.5h5"/></svg>
+    </button>
+    <button class="rail__btn" data-act="toast:设置面板不在本原型范围内" title="设置" aria-label="设置">
+      <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2M12 18.5v2M4.9 7.5l1.7 1M17.4 15.5l1.7 1M4.9 16.5l1.7-1M17.4 8.5l1.7-1"/></svg>
+    </button>
+    <span class="rail__sp"></span>
+    <div class="avatar" title="zheng">ZC</div>
+  </nav>
+
+  <div class="workspace" id="workspace">
+    <nav class="viewrail" id="viewrail" data-od-id="view-rail" aria-label="视图导航"></nav>
+
+    <div class="gutter gutter--v" id="gutter-vr" data-od-id="gutter-viewrail" role="separator" tabindex="0"
+      aria-orientation="vertical" aria-label="调整视图栏宽度（160–320）"></div>
+
+    <div class="stage" id="stage" data-od-id="stage">
+      <!-- ═══ 1 · 文件库 ═══ -->
+      <div class="pane pane--lib" data-pane="library" id="pane-library" data-od-id="screen-library">
+        <div class="lib">
+          <div class="lib__hd">
+            <div>
+              <h1 class="lib__t" data-od-id="library-title">文件库</h1>
+              <p class="lib__s">5 篇文档 · 1 个任务进行中 · 词表 412 条术语</p>
+            </div>
+            <button class="btn btn--primary" data-act="modal:open" data-od-id="cta-upload">
+              <svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M12 19V6M7 11l5-5 5 5"/></svg>上传 PDF
+            </button>
+          </div>
+
+          <button class="drop" id="dropzone" data-act="modal:open" data-od-id="dropzone">
+            <span class="drop__ic"><svg class="ic" viewBox="0 0 24 24"><path d="M12 16V5M8 9l4-4 4 4"/><path d="M4.5 15v3.5h15V15"/></svg></span>
+            <span>
+              <span class="drop__t">拖入 PDF 或点击选择</span>
+              <span class="drop__d">支持论文双栏 / 单栏版式，单文件 ≤ 200 MB，自动识别 15 页以内为快速通道</span>
+            </span>
+          </button>
+
+          <div class="grp" data-grp="run" data-od-id="group-running">
+            <div class="grp__hd"><h2 class="grp__t">进行中</h2><span class="grp__n">1</span></div>
+            <div class="docgrid">
+              <article class="doccard" data-act="go:progress" data-od-id="doc-attention">
+                <div class="thumb" aria-hidden="true"><b>Attention Is All You Need</b><s></s><s></s><s></s><s></s><s></s><s></s><s></s><s></s><s></s></div>
+                <div>
+                  <h3 class="doccard__t">Attention Is All You Need</h3>
+                  <div class="doccard__m"><span>15 页</span><span>206 段</span><span>Gemini Flash</span><span>10:49 更新</span></div>
+                  <div class="doccard__f"><span class="st st--run"><i></i>翻译中</span><span class="mono" style="font-size:10px;color:var(--fg-4)">128/206</span></div>
+                  <div class="mini" style="margin-top:6px"><i style="width:62%"></i></div>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <div class="grp" data-grp="review" data-od-id="group-review">
+            <div class="grp__hd"><h2 class="grp__t">待审校</h2><span class="grp__n">3</span></div>
+            <div class="docgrid">
+              <article class="doccard" data-act="toast:已打开 ·BERT 的编译结果" data-od-id="doc-bert">
+                <div class="thumb" aria-hidden="true"><b>BERT: Pre-training of Deep Bidirectional Transformers</b><s></s><s></s><s></s><s></s><s></s><s></s><s></s><s></s></div>
+                <div>
+                  <h3 class="doccard__t">BERT: Pre-training of Deep Bidirectional Transformers</h3>
+                  <div class="doccard__m"><span>16 页</span><span>231 段</span><span>Claude Sonnet</span><span>昨天 18:20</span></div>
+                  <div class="doccard__f"><span class="st st--pass"><i></i>编译完成 · 待审校</span><span class="mono" style="font-size:10px;color:var(--fg-4)">231/231</span></div>
+                  <div class="mini mini--pass" style="margin-top:6px"><i style="width:100%"></i></div>
+                </div>
+              </article>
+              <article class="doccard" data-act="toast:已打开 ·ViT 的编译结果" data-od-id="doc-vit">
+                <div class="thumb" aria-hidden="true"><b>An Image is Worth 16x16 Words</b><s></s><s></s><s></s><s></s><s></s><s></s><s></s><s></s></div>
+                <div>
+                  <h3 class="doccard__t">An Image is Worth 16x16 Words</h3>
+                  <div class="doccard__m"><span>22 页</span><span>318 段</span><span>DeepSeek V4 Pro</span><span>2 天前</span></div>
+                  <div class="doccard__f"><span class="st st--idle"><i></i>等待审校</span><span class="mono" style="font-size:10px;color:var(--fg-4)">318/318</span></div>
+                  <div class="mini mini--pass" style="margin-top:6px"><i style="width:100%"></i></div>
+                </div>
+              </article>
+              <article class="doccard" data-act="toast:已打开 ·GAN 的编译结果" data-od-id="doc-gan">
+                <div class="thumb" aria-hidden="true"><b>Generative Adversarial Networks</b><s></s><s></s><s></s><s></s><s></s><s></s></div>
+                <div>
+                  <h3 class="doccard__t">Generative Adversarial Networks</h3>
+                  <div class="doccard__m"><span>9 页</span><span>112 段</span><span>Claude Sonnet</span><span>3 天前</span></div>
+                  <div class="doccard__f"><span class="st st--idle"><i></i>等待审校</span><span class="mono" style="font-size:10px;color:var(--fg-4)">112/112</span></div>
+                  <div class="mini mini--pass" style="margin-top:6px"><i style="width:100%"></i></div>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <div class="grp grp--off" data-grp="archive" data-od-id="group-archive">
+            <div class="grp__hd"><h2 class="grp__t">已归档</h2><span class="grp__n">1</span></div>
+            <div class="docgrid">
+              <article class="doccard" data-act="toast:归档文档为只读" data-od-id="doc-resnet">
+                <div class="thumb" aria-hidden="true"><b>Deep Residual Learning for Image Recognition</b><s></s><s></s><s></s><s></s><s></s><s></s></div>
+                <div>
+                  <h3 class="doccard__t">Deep Residual Learning for Image Recognition</h3>
+                  <div class="doccard__m"><span>12 页</span><span>164 段</span><span>Gemini Flash</span><span>3 个月前</span></div>
+                  <div class="doccard__f"><span class="st st--idle"><i></i>已归档</span></div>
+                </div>
+              </article>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ 5 · 词表 ═══ -->
+      <div class="pane pane--gl" data-pane="glossary" id="pane-glossary" data-od-id="screen-glossary">
+        <div class="gl__hd">
+          <h1 id="gltitle">全局词表</h1>
+          <p id="glsub">命中后覆盖模型直译，并写入段落的 glossary_hits</p>
+        </div>
+        <div class="gl__main">
+          <div class="gl__bar">
+            <input class="inp" id="glsearch" placeholder="搜索术语或译法…" aria-label="搜索术语">
+            <span class="mono dim" style="font-size:10px" id="glcount"></span>
+            <div class="r">
+              <button class="btn btn--sm" data-act="toast:已导入 0 条术语（示例）">导入 CSV</button>
+              <button class="btn btn--sm" data-act="toast:已导出 glossary.csv">导出</button>
+              <button class="btn btn--sm btn--primary" data-act="gl:add">新增术语</button>
+            </div>
+          </div>
+          <div class="tblwrap">
+            <table class="gt" data-od-id="glossary-table">
+              <thead><tr><th style="width:28%">术语</th><th style="width:22%">译法</th><th style="width:30%">备注</th><th style="width:12%">大小写敏感</th><th style="width:8%">原文命中</th></tr></thead>
+              <tbody id="glbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ 2–4、6、7 · 工作台 ═══ -->
+      <div class="pane pane--work" data-pane="work" data-od-id="screen-workbench">
+        <div class="stagebar" data-od-id="preview-toolbar">
+          <div class="seg" id="pmode" role="group" aria-label="预览模式">
+            <button data-act="pmode:source" aria-pressed="true">原文</button>
+            <button data-act="pmode:target" aria-pressed="false">译文</button>
+            <button data-act="pmode:compare" aria-pressed="false">对照</button>
+          </div>
+          <div class="pgnav">
+            <button class="btn btn--icon btn--sm" data-act="page:prev" aria-label="上一页">
+              <svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+            <span><b id="pgnum">3</b> / 15</span>
+            <button class="btn btn--icon btn--sm" data-act="page:next" aria-label="下一页">
+              <svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+          </div>
+          <div class="zoombox">
+            <button class="btn btn--icon btn--sm" data-act="zoom:out" aria-label="缩小">
+              <svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+            <span class="num" id="zoomval">100%</span>
+            <button class="btn btn--icon btn--sm" data-act="zoom:in" aria-label="放大">
+              <svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button>
+          </div>
+          <div class="stagebar__r" id="layertoggles"></div>
+          <button class="btn btn--icon btn--sm tip" id="btn-insp" data-act="insp:toggle" aria-pressed="true"
+            aria-label="折叠右侧面板" data-tip="折叠 / 展开右侧面板">
+            <svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M4 5.5h16v13H4zM15 5.5v13"/><path d="M11.5 9.5L9 12l2.5 2.5"/></svg>
+          </button>
+        </div>
+        <div class="stagebar2" id="stagebar2"></div>
+        <div class="stagebody" id="stagebody"></div>
+      </div>
+    </div>
+
+    <div class="gutter gutter--v" id="gutter-insp" data-od-id="gutter-inspector" role="separator" tabindex="0"
+      aria-orientation="vertical" aria-label="调整右侧面板宽度（280–560）"></div>
+
+    <aside class="inspector" data-od-id="inspector">
+      <div class="ins__tabs" id="instabs"></div>
+      <div class="ins__body" id="insbody"></div>
+      <div class="ins__ft" id="insft" style="display:none"></div>
+    </aside>
+
+    <div class="gutter gutter--h" id="gutter-tl" data-od-id="gutter-timeline" role="separator" tabindex="0"
+      aria-orientation="horizontal" aria-label="调整时间线高度（72–160）"></div>
+
+    <footer class="timeline" id="timeline" data-od-id="timeline">
+      <div class="tl__meta" id="tlmeta"></div>
+      <div class="tl__gridwrap"><div class="tlgrid" id="tlgrid"></div></div>
+    </footer>
+  </div>
+</div>
+
+<div class="devbar" data-od-id="dev-screen-switcher" aria-label="开发用屏幕切换器">
+  <span>dev</span>
+  <div class="devbar__list" id="devlist"></div>
+</div>
+
+<div class="scrim" id="scrim" data-od-id="config-modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modaltitle">
+    <div class="modal__hd">
+      <div>
+        <h3 id="modaltitle">新建翻译任务</h3>
+        <p class="modal__sub">Attention Is All You Need.pdf · 15 页 · 8.4 MB</p>
+      </div>
+      <button class="btn btn--icon btn--sm" style="margin-left:auto" data-act="modal:close" aria-label="关闭">
+        <svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div class="modal__bd">
+      <label class="field"><span>翻译模型</span>
+        <select class="sel" id="modelSel">
+          <option>Gemini Flash（快）</option><option>Claude Sonnet</option><option>DeepSeek V4 Pro</option>
+        </select>
+      </label>
+      <div class="field"><span>词表</span>
+        <div class="checks">
+          <button class="ck" data-act="ck" aria-checked="true"><i><svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></svg></i>全局词表 · 412 条</button>
+          <button class="ck" data-act="ck" aria-checked="true"><i><svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></svg></i>本文档词表 · 18 条</button>
+        </div>
+      </div>
+      <div class="row2">
+        <label class="field"><span>页范围</span><input class="inp" id="pageRange" value="1-15"></label>
+        <div class="field"><span>同时生成对照版</span>
+          <button class="sw" data-act="sw" aria-pressed="true" aria-label="同时生成对照版"><i></i></button>
+        </div>
+      </div>
+      <div class="inset">预计耗时 ~11:00 · 206 段 · 约 42 次模型调用。占位符与公式块不会被翻译，仅重排。</div>
+    </div>
+    <div class="modal__ft">
+      <button class="btn" data-act="modal:close">取消</button>
+      <button class="btn btn--primary" data-act="modal:start">开始翻译</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+/* ═══════════════ 数据 ═══════════════ */
+const TASK={done:128,total:206,page:3,zoom:1,pmode:'source',view:'progress',screen:'library',section:'library',
+  layers:{para:true,blocks:false,formula:false,chars:false},sel:null,ins:null,errDemo:false,
+  fstage:'all',flevel:'all',open:{},compiled:false,cand:true,libfilter:'all',gltab:'global'};
+
+const STAGES=[
+  {k:'parse',n:'解析',d:271,state:'pass',t:'04:31'},
+  {k:'translate',n:'翻译',d:259,state:'running',t:'02:41',prog:'128/206'},
+  {k:'apply',n:'套用',d:18,state:'idle'},
+  {k:'build',n:'编译',d:26,state:'idle'},
+  {k:'check',n:'检查',d:31,state:'idle'},
+  {k:'review',n:'审校',d:45,state:'idle'},
+  {k:'report',n:'报告',d:12,state:'idle'}
+];
+const STAGE_NAME={parse:'解析',translate:'翻译',apply:'套用',build:'编译',check:'检查',review:'审校',report:'报告'};
+
+const EVENTS=[
+ {t:'10:41:52',s:'parse',lv:'info',m:'任务已创建 · 模型 Gemini Flash · 页范围 1–15',
+  j:{task:'tr-2418',doc:'attention-is-all-you-need.pdf',model:'gemini-2.5-flash',pages:'1-15',glossary:['global','doc'],target_lang:'zh-CN'}},
+ {t:'10:41:58',s:'parse',lv:'info',m:'PDF 载入完成 · 15 页 · 8.4 MB · 文本层可提取',
+  j:{file:'attention-is-all-you-need.pdf',bytes:8808038,pages:15,text_layer:true,ocr_used:false}},
+ {t:'10:42:06',s:'parse',lv:'info',m:'第 1 页版面识别完成，52 个区块',
+  j:{page:1,blocks:52,figures:3,tables:1,equations:2,elapsed_ms:7820}},
+ {t:'10:42:15',s:'parse',lv:'info',m:'第 2 页版面识别完成，44 个区块',
+  j:{page:2,blocks:44,figures:1,tables:0,equations:1,elapsed_ms:7340}},
+ {t:'10:42:24',s:'parse',lv:'info',m:'第 3 页版面识别完成，48 个区块',
+  j:{page:3,blocks:48,figures:1,tables:0,equations:1,elapsed_ms:8110}},
+ {t:'10:42:31',s:'parse',lv:'pass',m:'解析阶段完成：206 个段落 · 17 张图表 · 4 个公式块',
+  j:{stage:'parse',status:'pass',paragraphs:206,figures:17,equations:4,elapsed_ms:271000}},
+ {t:'10:42:33',s:'translate',lv:'info',m:'词表已载入：全局 412 条 · 本文档 18 条',
+  j:{glossaries:[{id:'global',terms:412},{id:'doc',terms:18}],priority:'doc > global'}},
+ {t:'10:42:35',s:'translate',lv:'info',m:'调用 Gemini Flash（第 1/6 批）· 35 段',
+  j:{batch:'1/6',model:'gemini-2.5-flash',paragraphs:35,tokens_in:41208,tokens_out:21644,elapsed_ms:27000}},
+ {t:'10:43:02',s:'translate',lv:'pass',m:'批次 1 完成 · 35/35 段 · 无回退',
+  j:{batch:'1/6',status:'pass',translated:35,fallback:0,glossary_hits:41}},
+ {t:'10:44:10',s:'translate',lv:'info',m:'调用 Gemini Flash（第 2/6 批）· 35 段',
+  j:{batch:'2/6',model:'gemini-2.5-flash',paragraphs:35,tokens_in:42980,tokens_out:23117,elapsed_ms:31240}},
+ {t:'10:45:12',s:'translate',lv:'warn',m:'段落 P03-014 术语未命中，已回退直译：self-attention',
+  j:{paragraph:'P03-014',term:'self-attention',expected:'自注意力',got:'自我注意力',action:'fallback_direct',severity:'warn'}},
+ {t:'10:46:48',s:'translate',lv:'info',m:'段落 P03-014 译文已就位 · 已套用词表修正',
+  j:{paragraph:'P03-014',page:3,chars:186,glossary_applied:['self-attention'],elapsed_ms:96400}},
+ {t:'10:47:20',s:'translate',lv:'warn',m:'段落 P05-021 超出 scale_cap，字号已缩至 0.93×',
+  j:{paragraph:'P05-021',page:5,scale_cap:1.15,font_scale:0.93,overflow_ratio:0.07}},
+ {t:'10:48:06',s:'translate',lv:'info',m:'调用 Gemini Flash（第 3/6 批）· 35 段',
+  j:{batch:'3/6',model:'gemini-2.5-flash',paragraphs:35,tokens_in:44012,tokens_out:23980}},
+ {t:'10:49:02',s:'translate',lv:'info',m:'段落 P05-002 译文已就位',
+  j:{paragraph:'P05-002',page:5,chars:212,placeholders:['{v1}','{v2}'],glossary_applied:['key-value pair'],elapsed_ms:41200}},
+ {t:'10:49:15',s:'translate',lv:'run',m:'正在调用 Gemini Flash（第 2/6 批）… 已译 128/206 段',
+  j:{batch:'2/6',model:'gemini-2.5-flash',translated:128,total:206,inflight:12}}
+];
+
+/* 纸页内容：仅第 3 页（原文）与第 5 页（译文）有完整排版示例 */
+const PAGES={
+ 3:{head:['Attention Is All You Need','Vaswani et al., 2017 · 第 3 页'],lang:'en',blocks:[
+  {id:'P03-001',k:'h',st:'done',src:'3.2  Attention',tr:'3.2  注意力机制'},
+  {id:'P03-002',k:'p',st:'done',src:'An attention function can be described as mapping a query and a set of key-value pairs to an output, where the query, keys, values and output are all vectors.',tr:'注意力函数可以描述为：把查询与一组键值对映射为一个输出。'},
+  {id:'P03-003',k:'eq',st:'done',src:'Attention(Q, K, V) = softmax( Q Kᵀ / √d_k ) V',tr:'Attention(Q, K, V) = softmax( Q Kᵀ / √d_k ) V'},
+  {id:'P03-004',k:'p',st:'done',src:'The two most commonly used attention functions are additive attention and dot-product attention. Dot-product attention is identical to our algorithm, except for the scaling factor of 1/√d_k.',tr:'最常用的注意力函数是加性注意力与点积注意力。'},
+  {id:'P03-005',k:'h',st:'done',src:'3.2.1  Scaled Dot-Product Attention',tr:'3.2.1  缩放点积注意力'},
+  {id:'P03-006',k:'fig',st:'done',src:'Figure 1 · Scaled Dot-Product Attention (original figure not embedded in this prototype)',tr:'图 1 · 缩放点积注意力（原论文插图未嵌入本原型）'},
+  {id:'P03-007',k:'p',st:'pending',src:'While for small values of d_k the two mechanisms perform similarly, additive attention outperforms dot-product attention without scaling for larger values of d_k.'},
+  {id:'P03-008',k:'p',st:'pending',src:'To counteract this effect we scale the dot products by 1/√d_k, and mask out all values in the input of the softmax which correspond to illegal connections.'}
+ ]},
+ 5:{head:['注意力就是全部所需','译自 Vaswani et al., 2017 · 第 5 页'],lang:'zh',blocks:[
+  {id:'P05-001',k:'h',st:'done',src:'3.2  Attention',tr:'3.2  注意力机制'},
+  {id:'P05-002',k:'p',st:'edited',src:'An attention function can be described as mapping a query and a set of key-value pairs to an output, where the query, keys, values and output are all vectors.',tr:'注意力函数可以描述为：把查询 {v1} 与一组键值对 {v2} 映射为一个输出，其中查询、键、值与输出均为向量。'},
+  {id:'P05-003',k:'p',st:'done',src:'The output is computed as a weighted sum of the values, where the weight assigned to each value is computed by a compatibility function of the query with the corresponding key.',tr:'输出由值的加权和计算得到，而赋予每个值的权重，由查询与相应键之间的相容性函数求得。'},
+  {id:'P05-004',k:'eq',st:'done',src:'Attention(Q, K, V) = softmax( Q Kᵀ / √d_k ) V',tr:'公式 1 · 缩放点积注意力'},
+  {id:'P05-005',k:'h',st:'done',src:'3.2.1  Scaled Dot-Product Attention',tr:'3.2.1  缩放点积注意力'},
+  {id:'P05-006',k:'p',st:'done',src:'The two most commonly used attention functions are additive attention and dot-product attention; dot-product attention is identical to our algorithm except for the scaling factor.',tr:'最常用的注意力函数有两类：加性注意力与点积注意力；除缩放因子 1/√d_k 外，点积注意力与本文算法完全一致。'},
+  {id:'P05-007',k:'p',st:'done',src:'While for small values of d_k the two mechanisms perform similarly, additive attention outperforms dot-product attention without scaling for larger values of d_k.',tr:'当 d_k 较小时，两种机制表现相近；但当 d_k 增大时，点积的幅度随之增大，使 softmax 落入梯度极小的区域。'},
+  {id:'P05-008',k:'fig',st:'done',src:'图 1 · Scaled Dot-Product Attention（原论文插图未嵌入本原型）',tr:'图 1 · 缩放点积注意力（原论文插图未嵌入本原型）'}
+ ]}
+};
+const VIEWCFG={
+ progress:{page:3,pmode:'source',badge:['run','128/206'],sel:null},
+ recognize:{page:3,pmode:'source',badge:null,sel:'P03-006'},
+ translate:{page:5,pmode:'target',badge:['prev','预览'],sel:'P05-002'},
+ check:{page:5,pmode:'target',badge:null,sel:'P05-007'},
+ archive:{page:5,pmode:'compare',badge:['pass','v3'],sel:null}
+};
+const LAYERD={
+ progress:{para:true,blocks:false,formula:false,chars:false},
+ recognize:{para:false,blocks:true,formula:false,chars:false},
+ translate:{para:true,blocks:false,formula:false,chars:false},
+ check:{para:true,blocks:false,formula:false,chars:false},
+ archive:{para:true,blocks:false,formula:false,chars:false}
+};
+const LAYERNAME={para:'段落框',blocks:'版面块',chars:'字符框',formula:'行内公式'};
+
+const ISSUES=[
+ {sev:'P0',ty:'overlap',tyn:'重叠 23%',pid:'P05-007',page:5,grp:'结构审查',ev:'与 P05-008 文本块重叠 23%（x 144–389 · y 512–547）'},
+ {sev:'P1',ty:'link_wrong_role',tyn:'链接角色错误',pid:'REF-33',page:12,grp:'链接审计',ev:'超链接指向「图 3」锚点，而非参考文献 [33]'},
+ {sev:'P1',ty:'font_shrink',tyn:'缩至 0.78×',pid:'P05-002',page:5,grp:'排版 lint',ev:'字号被压缩至 0.78×（命中 scale_cap 上限 1.15）'},
+ {sev:'P1',ty:'caption_overlap',tyn:'图注重叠 11%',pid:'P03-006',page:3,grp:'结构审查',ev:'图 1 标题与正文块 P03-005 重叠 11%（左侧栏溢出 4.2 pt）'},
+ {sev:'P2',ty:'orphan_last_line',tyn:'末行孤字',pid:'P05-006',page:5,grp:'排版 lint',ev:'末行仅 1 个字「的」，前一行余量 62% — 建议收紧 box_scale'}
+];
+const GLOSSARY=[
+ {en:'self-attention',zh:'自注意力',note:'首次出现保留英文括注',cs:false,hits:37},
+ {en:'multi-head attention',zh:'多头注意力',note:'与 attention head 区分',cs:false,hits:12},
+ {en:'positional encoding',zh:'位置编码',note:'不使用「位置嵌入」',cs:false,hits:9},
+ {en:'encoder-decoder',zh:'编码器-解码器',note:'连字符保留半角',cs:false,hits:14},
+ {en:'scaled dot-product attention',zh:'缩放点积注意力',note:'全文统一，含图表标题',cs:false,hits:6},
+ {en:'residual connection',zh:'残差连接',note:'',cs:false,hits:8},
+ {en:'layer normalization',zh:'层归一化',note:'不译为「分层归一化」',cs:false,hits:5},
+ {en:'beam search',zh:'束搜索',note:'beam size 保留英文',cs:false,hits:3},
+ {en:'key-value pair',zh:'键值对',note:'P05-002 已命中',cs:false,hits:21}
+];
+const GLOSSARY_DOC=[
+ {en:'attention head',zh:'注意力头',note:'本文档统一，不用「注意力头单元」',cs:true,hits:14},
+ {en:'base model',zh:'基础模型',note:'与 big model 区分',cs:true,hits:11},
+ {en:'scaled dot-product attention',zh:'缩放点积注意力',note:'覆盖全局词表同名条目',cs:false,hits:6},
+ {en:'label smoothing',zh:'标签平滑',note:'ε_ls 保留符号',cs:false,hits:4},
+ {en:'warmup step',zh:'预热步数',note:'',cs:false,hits:7},
+ {en:'BLEU',zh:'BLEU',note:'不翻译，全大写',cs:true,hits:9}
+];
+/* 识别类别：全文计数（演示数据，用于图例） */
+const RECOG_CATS=[
+ {k:'text',n:'正文',c:'--c-text',count:412},
+ {k:'head',n:'标题',c:'--c-head',count:68},
+ {k:'eq',n:'公式',c:'--c-eq',count:9},
+ {k:'fig',n:'图',c:'--c-fig',count:17},
+ {k:'tbl',n:'表',c:'--c-tbl',count:5},
+ {k:'margin',n:'页眉页脚',c:'--c-margin',count:30},
+ {k:'ref',n:'参考文献',c:'--c-ref',count:46}
+];
+const CAT=Object.fromEntries(RECOG_CATS.map(c=>[c.k,c]));
+/* 第 3 页识别结果节选：bbox 为 PDF 页面坐标（612×792 pt） */
+const RECOG=[
+ {id:'P03-000',cat:'margin',k:'m',conf:.999,tr:false,bbox:[72,54,468,12],h:'Attention Is All You Need · Vaswani et al., 2017'},
+ {id:'P03-001',cat:'head',k:'h',conf:.996,tr:true,bbox:[72,84,220,20],h:'3.2&nbsp;&nbsp;Attention'},
+ {id:'P03-002',cat:'text',k:'p',conf:.994,tr:true,bbox:[72,116,468,46],h:'An attention function can be described as mapping a query and a set of key-value pairs to an output, where the query, keys, values and output are all vectors.'},
+ {id:'P03-003',cat:'eq',k:'eq',conf:.961,tr:true,bbox:[150,176,312,24],h:'Attention(Q, K, V) = softmax( <i class="fm">Q Kᵀ / √d_k</i> ) V'},
+ {id:'P03-004',cat:'text',k:'p',conf:.992,tr:true,bbox:[72,216,468,58],h:'The two most commonly used attention functions are additive attention and dot-product attention; dot-product attention is identical to our algorithm except for the scaling factor of <i class="fm">1/√d_k</i>.'},
+ {id:'P03-005',cat:'head',k:'h',conf:.995,tr:true,bbox:[72,288,300,18],h:'3.2.1&nbsp;&nbsp;Scaled Dot-Product Attention'},
+ {id:'P03-006',cat:'fig',k:'fig',conf:.972,tr:false,bbox:[110,318,392,96],h:'Figure 1 · Scaled Dot-Product Attention（原论文插图未嵌入本原型）'},
+ {id:'P03-007',cat:'text',k:'p',conf:.991,tr:true,bbox:[72,430,468,40],h:'While for small values of <i class="fm">d_k</i> the two mechanisms perform similarly, additive attention outperforms dot-product attention without scaling.'},
+ {id:'P03-008',cat:'text',k:'p',conf:.988,tr:true,bbox:[72,486,468,34],h:'We suspect that for large values of <i class="fm">d_k</i>, the dot products grow large in magnitude, pushing the softmax into regions of extremely small gradients.'},
+ {id:'P03-009',cat:'tbl',k:'tbl',conf:.955,tr:true,bbox:[96,536,420,72],h:'表 1 · 示例表格（原型不引用原文数值）'},
+ {id:'P03-010',cat:'text',k:'p',conf:.993,tr:true,bbox:[72,624,468,34],h:'To counteract this effect we scale the dot products by <i class="fm">1/√d_k</i>, and mask out all values in the input of the softmax which correspond to illegal connections.'},
+ {id:'P03-011',cat:'eq',k:'eq',conf:.947,tr:true,bbox:[168,668,276,22],h:'softmax( Q Kᵀ / √d_k ) V'},
+ {id:'P03-012',cat:'text',k:'p',conf:.990,tr:true,bbox:[72,700,468,28],h:'The mask is applied by setting the corresponding entries to −∞ before the softmax, so that they receive zero weight.'},
+ {id:'P03-013',cat:'margin',k:'m',conf:.999,tr:false,bbox:[72,744,468,12],h:'第 3 页 · 3'}
+];
+const VERS=[
+ {v:'v3',t:'2026-04-12 18:20',label:'全量编译 · 206 段 · 15 页',verdict:['pass','check pass'],cur:true},
+ {v:'v2',t:'2026-04-12 16:05',label:'3 处改动 · 第 5 页重排',verdict:['pass','check pass'],cur:false},
+ {v:'v1',t:'2026-04-12 10:49',label:'初次翻译 · 206 段',verdict:['idle','未检查'],cur:false}
+];
+const BLOCKKIND={h:'标题',p:'正文',eq:'公式',fig:'图表'};
+const PARA={id:'P05-002',page:5,kind:'正文',
+ src:'An attention function can be described as mapping a query and a set of key-value pairs to an output, where the query, keys, values and output are all vectors.',
+ tr:'注意力函数可以描述为：把查询 {v1} 与一组键值对 {v2} 映射为一个输出，其中查询、键、值与输出均为向量。',
+ cand:'注意力机制可以这样理解：给定一个查询 {v1} 以及一组键值对 {v2}，将其映射为一个输出；查询、键、值与输出都是向量。'};
+
+/* ═══════════════ 工具 ═══════════════ */
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const icon=(p,cls='ic')=>`<svg class="${cls}" viewBox="0 0 24 24"><path d="${p}"/></svg>`;
+const CHEV='M9 5l7 7-7 7';
+const IC={
+ library:'M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v6.5A1.5 1.5 0 0 1 17.5 18h-13A1.5 1.5 0 0 1 3 16.5z',
+ globe:'M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16M4 12h16M12 4c2.5 3 2.5 13 0 16M12 4c-2.5 3-2.5 13 0 16',
+ doc:'M6 3.5h7l5 5V20.5H6zM13 3.5v5h5',
+ progress:'M3 12h3.5l2.5 6 4-13 2.5 7H21',
+ recognize:'M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M4 12h16',
+ translate:'M4 6h9M8.5 6v2c0 4-2 6-4.5 7M6 13c1.5 2 3.5 3 5.5 3.5M13 20l3.5-9 3.5 9M14.4 17h5.2',
+ check:'M12 3.5l7 3v5c0 4-3 7.5-7 9-4-1.5-7-5-7-9v-5zM9.2 12.2l2 2 3.6-4',
+ archive:'M4 7.5h16v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5zM3.5 4.5h17v3h-17zM10 11.5h4'
+};
+const jdump=o=>JSON.stringify(o,null,2).replace(/"([^"]+)":/g,'<span class="k">"$1"</span>:').replace(/: "([^"]*)"/g,': <span class="v">"$1"</span>').replace(/: (\d+|true|false)/g,': <span class="n">$1</span>');
+let toastTimer;
+function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('is-on');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('is-on'),1900);}
+
+/* ═══════════════ 纸页渲染 ═══════════════ */
+function pageHTML(n,lang,opts={}){
+  const pg=PAGES[n];
+  const badge=opts.badge?`<span class="paper__badge paper__badge--${opts.badge[0]}">${esc(opts.badge[1])}</span>`:'';
+  if(!pg){
+    return `<div class="paper" data-lang="${lang==='zh'?'zh':'en'}">${badge}
+      <div class="paper__head"><span>第 ${n} 页 / 15</span><span>ieeTranslater · 示例</span></div>
+      <div class="paper__flow">
+        <div class="ph" style="height:2.2em;border:none;background:transparent;color:var(--fg-4)">本原型仅提供第 3 页（原文）与第 5 页（译文）的完整排版示例</div>
+        ${Array.from({length:9}).map((_,i)=>`<div class="ph" style="height:${i%3===2?'5.4em':'3.1em'}">${i%3===2?'图表块 · 未渲染':`正文区块 · 第 ${n} 页`}</div>`).join('')}
+      </div></div>`;
+  }
+  const flow=pg.blocks.map(b=>{
+    const isSel=TASK.sel===b.id;
+    const txt=lang==='zh'?(b.tr||b.src):(b.src||b.tr);
+    let cls='bk';
+    if(TASK.layers.para){ if(b.st==='done'||b.st==='edited')cls+=' bk--done'; if(b.st==='pending')cls+=' bk--pending'; }
+    if(b.st==='edited'&&TASK.layers.para)cls+=' bk--edited';
+    if(opts.issues&&TASK.layers.para){
+      const it=opts.issues.find(x=>x.pid===b.id);
+      if(it)cls+=it.sev==='P0'?' bk--issue0':' bk--issue';
+    }
+    if(isSel)cls+=' bk--sel';
+    if(b.k==='fig'){return `<div class="${cls}" data-bid="${b.id}" data-act="sel:${b.id}" data-od-id="bbox-${b.id}"><div class="ph" style="height:5.2em">${esc(txt)}</div></div>`;}
+    if(b.k==='eq'){return `<div class="${cls}" data-bid="${b.id}" data-act="sel:${b.id}" data-od-id="bbox-${b.id}"><div class="bk__t bk__eq">${esc(b.src)}</div>${(lang==='zh'&&b.tr!==b.src)?`<div class="bk__t bk__cap" style="text-align:center">${esc(b.tr)}</div>`:''}</div>`;}
+    const meta=TASK.layers.blocks?`<span class="bk__m">${esc(b.id)} · ${BLOCKKIND[b.k]}</span>`:'';
+    return `<div class="${cls}" data-bid="${b.id}" data-act="sel:${b.id}" data-od-id="bbox-${b.id}">${meta}
+      <div class="bk__t ${b.k==='h'?'bk__h':''}">${esc(txt)}</div>
+      ${isSel?'<i class="hnd" style="left:-3px;top:-3px"></i><i class="hnd" style="left:calc(50% - 3px);top:-3px"></i><i class="hnd" style="right:-3px;top:-3px"></i><i class="hnd" style="left:-3px;top:calc(50% - 3px)"></i><i class="hnd" style="right:-3px;top:calc(50% - 3px)"></i><i class="hnd" style="left:-3px;bottom:-3px"></i><i class="hnd" style="left:calc(50% - 3px);bottom:-3px"></i><i class="hnd" style="right:-3px;bottom:-3px"></i>':''}
+    </div>`;
+  }).join('');
+  return `<div class="paper" data-lang="${lang}">${badge}
+    <div class="paper__head"><span>${esc(pg.head[0])}</span><span>${esc(pg.head[1])}</span></div>
+    <div class="paper__flow">${flow}</div></div>`;
+}
+/* 识别（只读）：原文页 + 按类别描边 + 层开关 */
+function recognizeHTML(){
+  const cls=['paper','paper--rec'];
+  if(TASK.layers.blocks)cls.push('is-blocks');
+  if(TASK.layers.para)cls.push('is-para');
+  if(TASK.layers.chars)cls.push('is-chars');
+  if(TASK.layers.formula)cls.push('is-ifm');
+  const flow=RECOG.map(b=>{
+    const cat=CAT[b.cat], sel=TASK.sel===b.id?' bk--sel':'';
+    const tag=`<span class="bk__tag">${b.id} · ${cat.n} · ${(b.conf*100).toFixed(1)}%</span>`;
+    const body=b.k==='fig'?`<div class="ph" style="height:5.2em">${esc(b.h)}</div>`
+      :b.k==='tbl'?`<div class="hint" style="font-family:var(--mono);color:color-mix(in oklch,var(--c-tbl) 58%,var(--fg))">${b.h}</div>
+        <table class="mtbl"><thead><tr><th>层</th><th>维度</th><th>头数</th></tr></thead>
+        <tbody><tr><td>编码器</td><td class="num">512</td><td class="num">8</td></tr>
+        <tr><td>解码器</td><td class="num">512</td><td class="num">8</td></tr></tbody></table>`
+      :b.k==='eq'?`<div class="bk__t bk__eq">${b.h}</div>`
+      :`<div class="bk__t ${b.k==='h'?'bk__h':''}" style="${b.k==='m'?'font-family:var(--mono);font-size:.66em;letter-spacing:.04em;color:var(--fg-4)':''}">${b.h}</div>`;
+    return `<div class="bk bk--rec${sel}" data-cat="${b.cat}" data-act="rec:${b.id}" data-od-id="rec-${b.id}" style="--cat:var(${cat.c})">${tag}${body}</div>`;
+  }).join('');
+  return `<div class="${cls.join(' ')}" data-lang="en">
+    <div class="paper__head"><span>Attention Is All You Need</span><span>第 3 页 / 15 · 版面识别（只读）</span></div>
+    <div class="paper__flow">${flow}</div></div>`;
+}
+function renderLayerToggles(){
+  const box=$('#layertoggles'); if(!box)return;
+  if(TASK.view==='recognize'){box.innerHTML='<span class="hint">层开关见右侧「识别」面板</span>';return;}
+  box.innerHTML=['para','blocks','formula'].map(k=>`<button class="tgl" data-act="layer:${k}" aria-pressed="${!!TASK.layers[k]}"><i></i>${LAYERNAME[k]}</button>`).join('');
+}
+function renderStage(){
+  const cfg=VIEWCFG[TASK.view]||VIEWCFG.progress;
+  const isRec=TASK.view==='recognize';
+  const p=$('#pgnum'); if(p)p.textContent=isRec?3:TASK.page;
+  const z=$('#zoomval'); if(z)z.textContent=Math.round(TASK.zoom*100)+'%';
+  $$('#pmode button').forEach(b=>{
+    const m=b.dataset.act.split(':')[1];
+    b.setAttribute('aria-pressed',String(m===TASK.pmode));
+    b.classList.toggle('is-locked',isRec&&m!=='source');
+  });
+  renderLayerToggles();
+  const body=$('#stagebody'); if(!body)return;
+  const st=$('#stage');
+  const zoom=TASK.zoom;
+  if(isRec){
+    st.style.setProperty('--pw',(460*zoom)+'px'); st.style.setProperty('--pfs',(11.5*zoom)+'px');
+    body.innerHTML=recognizeHTML();
+  }else if(TASK.pmode==='compare'){
+    st.style.setProperty('--pw',(300*zoom)+'px'); st.style.setProperty('--pfs',(7.6*zoom)+'px');
+    const iss=TASK.view==='check'?ISSUES:null;
+    body.innerHTML=`<div class="compare" data-od-id="compare-view">
+      <div class="cmpside"><div class="cmpside__h">原文 · 第 ${TASK.page} 页</div>${pageHTML(TASK.page,'en',{issues:iss})}</div>
+      <div class="cmpside"><div class="cmpside__h">译文 · 第 ${TASK.page} 页</div>${pageHTML(TASK.page,'zh',{issues:iss})}</div>
+    </div>`;
+  }else{
+    st.style.setProperty('--pw',(460*zoom)+'px'); st.style.setProperty('--pfs',(11.5*zoom)+'px');
+    body.innerHTML=pageHTML(TASK.page,TASK.pmode==='target'?'zh':'en',{badge:cfg.badge,issues:TASK.view==='check'?ISSUES:null});
+  }
+  // 上下文条
+  const bar2=$('#stagebar2');
+  bar2.className='stagebar2';
+  if(TASK.view==='progress'){
+    bar2.innerHTML=`
+      <span class="mono dim" style="font-size:10px">${TASK.errDemo?'阶段失败（示例）':'任务 tr-2418 · 第 2/6 批'}</span>
+      <span class="hint">第 ${TASK.page} 页已完成 ${TASK.done}/${TASK.total} 段</span>
+      <div class="stagebar2__r">
+        <button class="tgl" data-act="err:toggle" aria-pressed="${TASK.errDemo}"><i></i>${TASK.errDemo?'隐藏错误示例':'展示错误示例'}</button>
+        <button class="btn btn--sm tip" data-tip="任务完成后可编辑" disabled>编辑</button>
+        <button class="btn btn--sm btn--danger" data-act="toast:已请求取消任务 tr-2418">取消任务</button>
+      </div>`;
+  }else if(TASK.view==='translate'){
+    bar2.innerHTML=`
+      <span class="st st--run"><i></i>${TASK.compiled?'已全量编译':'3 处改动 · 正在重排预览（第 5 页）'}</span>
+      <span class="hint">改动：P05-002 · P05-006 · P05-007</span>
+      <div class="stagebar2__r">
+        <button class="btn btn--sm" data-act="toast:已存为版本 v4">存为版本</button>
+        <button class="btn btn--sm" data-act="compile">全量编译</button>
+      </div>`;
+  }else if(TASK.view==='check'){
+    bar2.innerHTML=`<span class="mono" style="font-size:10px;color:var(--err-ink)">needs_fix · 1 blocker · 4 warnings</span>
+      <span class="hint">预览中朱红 / 琥珀描边对应问题区块</span>
+      <div class="stagebar2__r"><button class="btn btn--sm" data-act="toast:已重新运行检查（示例）">重新检查</button></div>`;
+  }else if(TASK.view==='recognize'){
+    bar2.innerHTML=`<span class="mono dim" style="font-size:10px">版面识别 · 第 3 页 · 只读</span>
+      <span class="hint">bbox 按 7 类描边；选中区块可在右侧查看属性</span>
+      <div class="stagebar2__r"><span class="chip">识别模型 doc-layout-2.1</span></div>`;
+  }else if(TASK.view==='archive'){
+    bar2.innerHTML=`<span class="mono dim" style="font-size:10px">归档 · v3（2026-04-12 18:20）· 对照模式</span>
+      <span class="hint">同一段落 id 两侧同步高亮</span>
+      <div class="stagebar2__r">
+        <button class="btn btn--sm" data-act="ver:new">存为新版本</button>
+        <span class="tip tip--w" data-tip="尚有 1 个 blocker（P05-007 与 P05-008 重叠 23%），清零后才能归档">
+          <button class="btn btn--sm" disabled aria-disabled="true">标记完成并归档</button>
+        </span>
+      </div>`;
+  }else bar2.innerHTML='';
+}
+
+/* ═══════════════ 右侧面板 ═══════════════ */
+function tabsFor(){
+  const t=[];
+  if(TASK.view==='translate')t.push(['para','段落']);
+  if(TASK.view==='check')t.push(['check','检查']);
+  if(TASK.view==='recognize')t.push(['recog','识别']);
+  if(TASK.view==='archive')t.push(['vers','版本']);
+  t.push(['events','事件流']);
+  return t;
+}
+function renderInspector(){
+  const tabs=tabsFor();
+  if(!TASK.ins||!tabs.some(t=>t[0]===TASK.ins))TASK.ins=tabs[0][0];
+  $('#instabs').innerHTML=tabs.map(([k,n])=>`<button class="ins__tab ${TASK.ins===k?'is-on':''}" data-act="ins:${k}">${n}</button>`).join('');
+  const fn={events:renderEvents,para:renderPara,check:renderCheck,recog:renderRecog,vers:renderVers}[TASK.ins];
+  $('#insbody').innerHTML=fn();
+  const ft=$('#insft');
+  if(TASK.view==='recognize'){ft.style.display='';ft.textContent='修正识别结果将在后续版本提供';}
+  else{ft.style.display='none';ft.textContent='';}
+}
+function renderEvents(){
+  const list=EVENTS.filter(e=>(TASK.fstage==='all'||e.s===TASK.fstage)&&(TASK.flevel==='all'||e.lv===TASK.flevel)).slice().reverse();
+  const fc=(act,on,txt)=>`<button class="fchip ${on?'is-on':''}" data-act="${act}">${txt}</button>`;
+  return `<div class="ins__hd"><span class="lbl">事件流 · ${list.length} 条</span>
+      ${TASK.errDemo?'<span class="st st--err"><i></i>存在失败</span>':'<span class="live"><i class="live__dot"></i>实时</span>'}</div>
+    <div class="filterrow">
+      ${fc('filter:stage:all',TASK.fstage==='all','全部')}
+      ${STAGES.map(s=>fc('filter:stage:'+s.k,TASK.fstage===s.k,STAGE_NAME[s.k])).join('')}
+      <span class="fsep"></span>
+      ${fc('filter:level:info',TASK.flevel==='info','信息')}
+      ${fc('filter:level:warn',TASK.flevel==='warn','警告')}
+      ${fc('filter:level:err',TASK.flevel==='err','错误')}
+      ${fc('filter:level:all',TASK.flevel==='all','全级别')}
+    </div>
+    ${TASK.errDemo?`<div class="err-card" data-od-id="error-card">
+      <h4>翻译阶段失败</h4>
+      <p>模型调用超时（30 分钟）· gemini-2.5-flash · 第 2/6 批</p>
+      <div class="err-card__b">
+        <button class="btn btn--sm" data-act="toast:已从翻译阶段重试（示例）">从翻译重试</button>
+        <button class="btn btn--sm" data-act="toast:已切换到 Claude Sonnet 重试（示例）">换模型重试</button>
+        <button class="btn btn--sm" data-act="toast:日志已在新标签打开">查看日志</button>
+      </div></div>`:''}
+    <div class="evlist">${list.map(e=>{
+      const i=EVENTS.indexOf(e);
+      return `<div class="ev" data-act="ev:${i}">
+        <span class="ev__t">${e.t}</span>
+        <div><div class="ev__top">
+          <span class="chip ${e.lv==='run'?'chip--run':''}">${STAGE_NAME[e.s]}</span>
+          <span class="ev__lv ev__lv--${e.lv}"></span></div>
+          <div class="ev__m">${esc(e.m)}</div>
+          ${TASK.open[i]?`<pre class="ev__json">${jdump(e.j)}</pre>`:''}
+        </div></div>`;}).join('')}
+      ${list.length?'':'<div class="inset" style="margin:16px">当前过滤条件下没有事件。</div>'}
+    </div>`;
+}
+function renderPara(){
+  const p=PARA;
+  return `<div class="para">
+    <div class="para__hd">
+      <span class="para__id">${p.id}</span>
+      <span class="mono dim" style="font-size:10px">页 ${p.page}</span>
+      <span class="chip">${p.kind}</span>
+      <span class="chip chip--acc">已编辑 · 预览中</span>
+    </div>
+    <div class="sec"><div class="sec__t"><span class="lbl">原文</span><span class="hint">只读</span></div>
+      <div class="ro">${esc(p.src)}</div></div>
+    <div class="sec"><div class="sec__t"><span class="lbl">译文</span><span class="hint">已保存 · 预览中</span></div>
+      <textarea class="ta" id="trta" spellcheck="false">${esc(p.tr)}</textarea>
+      <div class="hint">${icon('M12 9v3.5M12 16.2v.3M12 3.5l9 16H3z','ic ic-sm')}占位符 <code>{v1}</code> <code>{v2}</code> 需保留</div></div>
+    <div class="acc is-open" id="typeacc"><button class="acc__hd" data-act="acc:typeacc">${icon(CHEV,'ic ic-sm')}排版<span class="lbl">按段落覆盖</span></button>
+      <div class="acc__bd">
+        ${[['scale_cap',1.15,0.8,2,0.05],['font_scale',0.78,0.5,1.5,0.01],['line_skip',2,0,6,1],['box_scale',1.0,0.5,2,0.05]]
+          .map(([k,v,mi,ma,st])=>`<div class="sld"><label>${k}</label>
+            <input type="range" min="${mi}" max="${ma}" step="${st}" value="${v}" data-slider="${k}">
+            <output class="num">${v}</output></div>`).join('')}
+        <div style="display:flex;gap:8px;align-items:center"><button class="btn btn--sm" data-act="para:reset">重置</button>
+          <span class="hint">也可直接在预览中拖动段落框</span></div>
+      </div></div>
+    <div class="sec"><div class="sec__t"><span class="lbl">AI 重译</span></div>
+      <textarea class="ta" style="min-height:58px" id="fbta" placeholder="反馈：例如「key-value pair 用词表译法，语气更贴近论文」" spellcheck="false"></textarea>
+      <div><button class="btn btn--sm" data-act="ai:gen">生成候选</button></div>
+      <div class="candwrap" id="candwrap">${TASK.cand!==false?`
+        <div class="cand"><span class="cand__t">当前</span><div class="cand__x">${esc(p.tr)}</div></div>
+        <div class="cand cand--new"><span class="cand__t">候选 1 · Claude Sonnet · 12s</span><div class="cand__x">${esc(p.cand)}</div>
+          <div class="cand__b"><button class="btn btn--sm btn--primary" data-act="ai:adopt">采用</button><button class="btn btn--sm" data-act="ai:discard">丢弃</button></div></div>`:''}
+      </div>
+    </div>
+    <div class="inset">段落框坐标由拖拽写回 <span class="mono">bbox</span>；字号压缩命中 <span class="mono">scale_cap</span> 时会写入检查报告（当前 P05-002 已命中）。</div>
+  </div>`;
+}
+function renderCheck(){
+  const g=['结构审查','排版 lint','链接审计'];
+  const bl=ISSUES.filter(i=>i.sev==='P0').length, wn=ISSUES.length-bl;
+  return `<div class="verdict" data-od-id="check-verdict">
+    <div class="verdict__r"><span class="verdict__v">needs_fix</span><span class="hint">最近一次检查 10:49:41</span></div>
+    <div class="verdict__c"><span style="color:var(--err-ink)">blockers ${bl}</span><span class="dim">·</span><span style="color:var(--run-ink)">warnings ${wn}</span></div>
+    <div class="verdict__bar"><i style="flex:${bl};background:var(--err)"></i><i style="flex:${wn};background:var(--run)"></i></div>
+    <div class="hint">blockers 必须清零才能归档；warnings 可在审校阶段逐条忽略。</div>
+  </div>
+  ${g.map(name=>{const it=ISSUES.filter(i=>i.grp===name);return `
+    <div class="grpcard"><div class="grpcard__hd"><span class="lbl" style="color:var(--fg-2);font-family:var(--sans);text-transform:none;font-size:12px;letter-spacing:.02em">${name}</span>
+      <span class="mono dim" style="font-size:10px;margin-left:auto">${it.length}</span></div>
+      ${it.map(i=>`<div class="iss">
+        <div class="iss__r1"><span class="sevr sevr--${i.sev.toLowerCase()}">${i.sev}</span><span class="iss__ty">${i.ty}</span><span class="chip">${esc(i.tyn)}</span></div>
+        <div class="iss__ev">${esc(i.ev)}</div>
+        <div class="iss__r2"><span>${i.pid}</span><span>p.${i.page}</span><button class="btn btn--sm" data-act="locate:${i.pid}:${i.page}">定位</button></div>
+      </div>`).join('')}
+    </div>`;}).join('')}`;
+}
+function renderRecog(){
+  const sel=RECOG.find(b=>b.id===TASK.sel)||RECOG[0];
+  const cat=CAT[sel.cat];
+  const bb=sel.bbox;
+  return `<div class="ins__hd"><span class="lbl">识别类别 · 全文 15 页</span><span class="hint">共 ${RECOG_CATS.reduce((a,c)=>a+c.count,0)} 块</span></div>
+    <div class="legend" data-od-id="recognize-legend">
+      ${RECOG_CATS.map(c=>`<div class="lgd" style="--cat:var(${c.c})"><i></i><span class="lgd__n">${c.n}</span><span class="lgd__c">${c.count}</span></div>`).join('')}
+    </div>
+    <div class="ins__hd"><span class="lbl">层</span><span class="hint">只读</span></div>
+    <div style="padding-bottom:6px">
+      ${['blocks','para','chars','formula'].map(k=>`<button class="swrow" data-act="layer:${k}" aria-pressed="${!!TASK.layers[k]}">
+        <i></i>${LAYERNAME[k]}<span class="lbl">${k==='blocks'?'区块元信息':k==='para'?'段落分组':k==='chars'?'字符框基线':'行内公式框'}</span></button>`).join('')}
+    </div>
+    <div class="ins__hd"><span class="lbl">区块属性</span><span class="chip">${sel.id}</span></div>
+    <div class="props" data-od-id="recognize-props">
+      <div class="kv"><span>id</span><b class="mono">${sel.id}</b></div>
+      <div class="kv"><span>类别</span><b><i class="swatch" style="--cat:var(${cat.c})"></i>${cat.n}</b></div>
+      <div class="kv"><span>页</span><b class="mono">3 / 15</b></div>
+      <div class="kv"><span>bbox</span><b class="mono">x ${bb[0]} · y ${bb[1]} · w ${bb[2]} · h ${bb[3]}</b></div>
+      <div class="kv"><span>是否翻译</span><b>${sel.tr?'是':'否'}</b></div>
+      <div class="kv"><span>识别置信度</span><b class="mono">${(sel.conf*100).toFixed(1)}%</b></div>
+      <div class="cfbar"><i style="width:${(sel.conf*100).toFixed(1)}%"></i></div>
+    </div>
+    <div class="inset" style="margin:0 12px 12px">${sel.tr?'该区块会进入翻译队列，译文回填到同一 bbox。':'该区块不翻译，仅在重排时保持原位。'} 预览呈现第 3 页的部分区块。</div>`;
+}
+function renderVers(){
+  return `<div class="ins__hd"><span class="lbl">版本</span><span class="hint">归档后只读</span></div>
+    ${VERS.map(v=>`<article class="vercard ${v.cur?'is-cur':''}" data-od-id="version-${v.v}">
+      <div class="vercard__hd">
+        <span class="vercard__v">${v.v}</span>
+        <span class="st st--${v.verdict[0]}"><i></i>${v.verdict[1]}</span>
+        ${v.cur?'<span class="chip chip--acc">当前</span>':''}
+        <span class="vercard__t">${v.t}</span>
+      </div>
+      <div class="vercard__m">${v.label}</div>
+      <div class="vercard__dl">
+        <button class="lnk" data-act="toast:已下载 attention-zh-${v.v}.pdf（示例）">PDF</button><span class="sep">·</span>
+        <button class="lnk" data-act="toast:已下载 attention-dual-${v.v}.pdf（示例）">dual PDF</button><span class="sep">·</span>
+        <button class="lnk" data-act="toast:已下载 attention-zh-${v.v}.md（示例）">译文 Markdown</button><span class="sep">·</span>
+        <button class="lnk" data-act="toast:已下载 check-report-${v.v}.json（示例）">报告</button>
+      </div>
+      <div class="vercard__f">
+        ${v.cur
+          ? `<span class="tip tip--w" data-tip="当前已是 ${v.v}"><button class="btn btn--sm" disabled aria-disabled="true">回滚到此版本</button></span><span class="hint">当前版本，无需回滚</span>`
+          : `<button class="btn btn--sm" data-act="ver:roll:${v.v}">回滚到此版本</button><span class="hint">回滚会新建 ${v.v}-r1，不覆盖历史</span>`}
+      </div>
+    </article>`).join('')}
+    <div class="inset" style="margin:0 12px 16px">版本来自「存为新版本」与全量编译；每版都保留 PDF / dual PDF / 译文 Markdown / 检查报告四种产物。</div>`;
+}
+
+/* ═══════════════ 时间线（名称行 + 时长条行） ═══════════════ */
+function renderTimeline(){
+  const tl=$('#timeline'); if(!tl)return;
+  tl.classList.toggle('tl-compact',W.tlh<94);
+  const max=Math.max(...STAGES.map(s=>s.d));
+  const errOn=TASK.errDemo;
+  $('#tlmeta').innerHTML=`
+    <span>任务 tr-2418 · 当前段 <b id="tlnow">02:41</b></span>
+    ${errOn?'<span class="st st--err" id="tlstate"><i></i>翻译阶段失败 · 超时</span>'
+           :'<span class="st st--run" id="tlstate"><i></i>第 2/6 批 · 翻译中</span>'}
+    <span class="mid">点选阶段可过滤事件流</span>
+    <span class="r"><span>总用时 <b>07:12</b></span><span>预计 ~11:00</span></span>`;
+  const cols=STAGES.map(s=>{
+    const st=(errOn&&s.k==='translate')?'err':s.state;
+    const sub=st==='pass'?s.t:(st==='running'?s.t+' · 已译 '+s.prog+' 段':(st==='err'?'超时 30:00':'未开始'));
+    const num=st==='running'?s.t+' · '+s.prog:(st==='err'?'30:00':'');
+    const w=Math.max(8,Math.round(s.d/max*100));
+    const bar=st==='idle'
+      ? '<i class="tlbar is-idle"></i>'
+      : `<i class="tlbar is-${st}" style="width:${w}%">${st==='running'?'<b style="width:62%"></b>':''}</i>`;
+    return `<button class="tlcol is-${st} ${TASK.fstage===s.k?'is-focus':''}" data-act="filter:stage:${s.k}"
+      data-od-id="tl-${s.k}" title="${STAGE_NAME[s.k]} · ${sub}" aria-label="${STAGE_NAME[s.k]} ${sub}">
+      <span class="tlcell">
+        <span class="tlname">${STAGE_NAME[s.k]}${st==='err'?'<i class="tldot"></i>':''}<span class="tlnum">${num}</span></span>
+        <span class="tlsub">${sub}</span>
+        <span class="tlconn"></span>
+      </span>
+      <span class="tltrack">${bar}</span>
+    </button>`;
+  }).join('');
+  $('#tlgrid').innerHTML=cols;
+}
+
+/* ═══════════════ 词表 ═══════════════ */
+function renderGlossary(){
+  const isDoc=TASK.gltab==='doc';
+  const src=isDoc?GLOSSARY_DOC:GLOSSARY;
+  const total=isDoc?18:412;
+  $('#gltitle').textContent=isDoc?'本文档词表':'全局词表';
+  $('#glsub').textContent=isDoc?'仅对 Attention Is All You Need 生效，优先级高于全局词表':'命中后覆盖模型直译，并写入段落的 glossary_hits';
+  const q=($('#glsearch')?.value||'').trim().toLowerCase();
+  const rows=src.map((g,i)=>({g,i})).filter(({g})=>!q||g.en.toLowerCase().includes(q)||g.zh.includes(q));
+  $('#glbody').innerHTML=rows.map(({g,i})=>`<tr data-row="${i}">
+    <td contenteditable="true" class="cell-en" data-f="en">${esc(g.en)}</td>
+    <td contenteditable="true" class="cell-s" data-f="zh">${esc(g.zh)}</td>
+    <td contenteditable="true" style="color:var(--fg-4);font-size:12px" data-f="note">${esc(g.note)}</td>
+    <td><button class="sw" data-act="gl:cs:${i}" aria-pressed="${g.cs}" aria-label="大小写敏感"><i></i></button></td>
+    <td class="num" style="color:var(--fg-3)">${g.hits}</td></tr>`).join('');
+  $('#glcount').textContent=`显示 ${rows.length} / ${total} 条`;
+}
+
+/* ═══════════════ 视图栏 / 图标栏 / 顶栏 / 文件库 ═══════════════ */
+function renderViewRail(){
+  const el=$('#viewrail');
+  if(TASK.section==='library'){
+    const f=[['all','全部文档','5'],['run','进行中','1'],['review','待审校','3'],['archive','已归档','1']];
+    el.innerHTML=`
+      <div class="vr__doc"><h2 class="vr__t">文件库</h2>
+        <div class="vr__m"><span class="mono dim" style="font-size:10px">5 篇文档 · 词表 412 条</span></div></div>
+      <div class="vr__list"><button class="vr__item" data-act="go:progress">
+        ${icon(IC.progress,'ic vr__ic')}<span class="vr__txt">当前任务 · 进度</span><span class="chip chip--run">翻译中</span></button></div>
+      <div class="vr__list">${f.map(([k,n,c])=>`<button class="vr__item ${TASK.libfilter===k?'is-on':''}" data-act="lib:filter:${k}">
+        <i class="vrdot vr__ic"></i><span class="vr__txt">${n}</span><span class="num" style="font-size:10px;color:var(--fg-4)">${c}</span></button>`).join('')}</div>
+      <div class="vr__sub">分组按任务状态划分；拖拽右侧分隔条可调整本栏宽度。</div>`;
+  }else if(TASK.section==='glossary'){
+    el.innerHTML=`
+      <div class="vr__doc"><h2 class="vr__t">词表</h2>
+        <div class="vr__m"><span class="mono dim" style="font-size:10px">全局 412 条 · 本文档 18 条</span></div></div>
+      <div class="vr__list">
+        <button class="vr__item ${TASK.gltab==='global'?'is-on':''}" data-act="gl:tab:global">
+          ${icon(IC.globe,'ic vr__ic')}<span class="vr__txt">全局词表</span><span class="num" style="font-size:10px;color:var(--fg-4)">412</span></button>
+        <button class="vr__item ${TASK.gltab==='doc'?'is-on':''}" data-act="gl:tab:doc">
+          ${icon(IC.doc,'ic vr__ic')}<span class="vr__txt">本文档词表</span><span class="num" style="font-size:10px;color:var(--fg-4)">18</span></button>
+      </div>
+      <div class="vr__sub">本文档词表优先级高于全局词表；同名条目以下方列表为准。</div>`;
+  }else{
+    const items=[['progress','进度','chip--run','运行中'],['recognize','识别','','587 块'],
+      ['translate','翻译','chip--run','3 处改动'],['check','检查','chip--err','问题 5'],['archive','归档','','v3']];
+    el.innerHTML=`
+      <div class="vr__doc"><h2 class="vr__t">Attention Is All You Need</h2>
+        <div class="vr__m"><span class="st st--run" id="doc-status"><i></i>翻译中</span>
+          <span class="mono" style="font-size:10px;color:var(--fg-4)">15 页 · 206 段</span></div></div>
+      <div class="vr__list" data-od-id="vr-views">
+        ${items.map(([v,n,c,b])=>`<button class="vr__item ${TASK.view===v?'is-on':''}" data-view="${v}" data-act="view:${v}">
+          ${icon(IC[v],'ic vr__ic')}<span class="vr__txt">${n}</span><span class="chip ${c}">${b}</span></button>`).join('')}
+      </div>
+      <div class="vr__sub">任务 tr-2418 · 第 2/6 批 · ${STAGE_NAME[TASK.view]||''}</div>`;
+  }
+  $$('#rail .rail__btn[data-section]').forEach(b=>{
+    const on=b.dataset.section==='library'?(TASK.section==='library'||TASK.section==='work'):b.dataset.section===TASK.section;
+    b.classList.toggle('is-on',on);
+  });
+  $$('#devlist button').forEach(b=>b.setAttribute('aria-current',String(b.dataset.act==='go:'+TASK.screen)));
+}
+function renderTopState(){
+  const el=$('#topstate'); if(!el)return;
+  if(TASK.errDemo){el.className='st st--err';el.innerHTML='<i></i>tr-2418 失败';}
+  else{el.className='st st--run';el.innerHTML='<i></i>tr-2418 翻译中';}
+}
+function renderLibrary(){
+  $$('#pane-library .grp').forEach(g=>{g.style.display=(TASK.libfilter==='all'||TASK.libfilter===g.dataset.grp)?'':'none';});
+}
+function renderDevbar(){
+  const items=[['library','文件库'],['progress','进度'],['recognize','识别'],['translate','翻译'],['check','检查'],['archive','归档'],['glossary','词表']];
+  $('#devlist').innerHTML=items.map(([k,n])=>`<button data-act="go:${k}">${n}</button>`).join('');
+}
+
+/* ═══════════════ 路由 ═══════════════ */
+const WORKVIEWS=['progress','recognize','translate','check','archive'];
+function setScreen(s,skipHash){
+  TASK.screen=s;
+  const isWork=WORKVIEWS.includes(s);
+  TASK.section=isWork?'work':s;
+  if(isWork){
+    TASK.view=s; const c=VIEWCFG[s];
+    TASK.page=c.page; TASK.pmode=c.pmode; TASK.sel=c.sel||null; TASK.ins=null;
+    TASK.layers=Object.assign({},LAYERD[s]);
+  }
+  document.body.dataset.section=TASK.section;
+  $$('.pane').forEach(p=>p.classList.toggle('is-on',p.dataset.pane===(isWork?'work':s)));
+  if(!skipHash)location.hash='#/'+s;
+  try{localStorage.setItem('ieet.screen',s);}catch(e){}
+  renderViewRail(); renderTopState();
+  if(isWork){renderStage();renderInspector();renderTimeline();}
+  else if(s==='glossary')renderGlossary();
+  else renderLibrary();
+}
+
+/* ═══════════════ 栏宽 / 分隔条 ═══════════════ */
+const W={vrw:220,inspw:360,tlh:96,collapsed:false};
+const WS={vrw:['ieet.vrw',160,320],inspw:['ieet.inspw',280,560],tlh:['ieet.tlh',72,160]};
+function loadW(){
+  Object.keys(WS).forEach(k=>{try{const v=+localStorage.getItem(WS[k][0]);if(v)W[k]=Math.max(WS[k][1],Math.min(WS[k][2],v));}catch(e){}});
+  try{W.collapsed=localStorage.getItem('ieet.inspCollapsed')==='1';}catch(e){}
+}
+function persist(){
+  try{Object.keys(WS).forEach(k=>localStorage.setItem(WS[k][0],String(W[k])));localStorage.setItem('ieet.inspCollapsed',W.collapsed?'1':'0');}catch(e){}
+}
+function applyW(){
+  const r=document.documentElement.style;
+  r.setProperty('--vrw',W.vrw+'px');
+  r.setProperty('--inspw',W.collapsed?'0px':W.inspw+'px');
+  r.setProperty('--tlh',W.tlh+'px');
+  document.body.classList.toggle('insp-collapsed',W.collapsed);
+  const b=$('#btn-insp');
+  if(b){b.setAttribute('aria-pressed',String(!W.collapsed));b.classList.toggle('is-on',!W.collapsed);
+    b.setAttribute('aria-label',W.collapsed?'展开右侧面板':'折叠右侧面板');}
+  const tl=$('#timeline'); if(tl)tl.classList.toggle('tl-compact',W.tlh<94);
+}
+function bindGutter(el,key,axis,invert){
+  if(!el)return;
+  let base=0,start=0;
+  el.addEventListener('pointerdown',e=>{
+    if(e.pointerType==='mouse'&&e.button!==0)return;
+    el.setPointerCapture(e.pointerId); el.classList.add('is-drag');
+    start=axis==='x'?e.clientX:e.clientY; base=W[key]; e.preventDefault();
+    const mv=ev=>{
+      let d=(axis==='x'?ev.clientX:ev.clientY)-start; if(invert)d=-d;
+      W[key]=Math.max(WS[key][1],Math.min(WS[key][2],Math.round(base+d)));
+      if(key==='inspw'&&W.collapsed)W.collapsed=false;
+      applyW();
+    };
+    const up=()=>{el.classList.remove('is-drag');el.removeEventListener('pointermove',mv);
+      el.removeEventListener('pointerup',up);el.removeEventListener('pointercancel',up);persist();};
+    el.addEventListener('pointermove',mv); el.addEventListener('pointerup',up); el.addEventListener('pointercancel',up);
+  });
+  el.addEventListener('keydown',e=>{
+    const s=axis==='x'?(e.key==='ArrowRight'?1:e.key==='ArrowLeft'?-1:0):(e.key==='ArrowDown'?1:e.key==='ArrowUp'?-1:0);
+    if(!s)return; e.preventDefault();
+    const d=(axis==='x'?16:8)*s*(invert?-1:1);
+    W[key]=Math.max(WS[key][1],Math.min(WS[key][2],W[key]+d));
+    if(key==='inspw'&&W.collapsed)W.collapsed=false;
+    applyW(); persist();
+  });
+}
+
+/* ═══════════════ 事件 ═══════════════ */
+document.addEventListener('click',e=>{
+  if(e.target.id==='scrim'){$('#scrim').classList.remove('is-on');return;}
+  const t=e.target.closest('[data-act]'); if(!t)return;
+  const a=t.dataset.act;
+  if(a.startsWith('go:')){setScreen(a.slice(3));return;}
+  if(a.startsWith('view:')){setScreen(a.slice(5));return;}
+  if(a.startsWith('pmode:')){
+    if(TASK.view==='recognize'){toast('识别视图为只读，仅显示原文页');return;}
+    TASK.pmode=a.slice(6);renderStage();return;}
+  if(a.startsWith('zoom:')){const d=a.slice(5);TASK.zoom=d==='in'?Math.min(1.4,TASK.zoom+0.1):Math.max(0.8,TASK.zoom-0.1);renderStage();return;}
+  if(a.startsWith('layer:')){const k=a.slice(6);TASK.layers[k]=!TASK.layers[k];renderStage();if(TASK.view==='recognize')renderInspector();return;}
+  if(a==='insp:toggle'){W.collapsed=!W.collapsed;applyW();persist();return;}
+  if(a==='page:prev'||a==='page:next'){
+    if(TASK.view==='recognize'){toast('原型仅提供第 3 页的识别结果');return;}
+    TASK.page=a==='page:next'?Math.min(15,TASK.page+1):Math.max(1,TASK.page-1);
+    renderStage();renderInspector();return;}
+  if(a.startsWith('sel:')){TASK.sel=a.slice(4);
+    if(TASK.view==='translate')TASK.ins='para';
+    renderStage();renderInspector();return;}
+  if(a.startsWith('rec:')){TASK.sel=a.slice(4);TASK.ins='recog';renderStage();renderInspector();return;}
+  if(a.startsWith('ins:')){TASK.ins=a.slice(4);renderInspector();return;}
+  if(a.startsWith('ev:')){const i=a.slice(3);TASK.open[i]=!TASK.open[i];renderInspector();return;}
+  if(a.startsWith('filter:stage:')){const k=a.slice(13);TASK.fstage=(TASK.fstage===k&&k!=='all')?'all':k;if(TASK.ins!=='events')TASK.ins='events';renderInspector();renderTimeline();return;}
+  if(a.startsWith('filter:level:')){TASK.flevel=a.slice(13);renderInspector();return;}
+  if(a==='err:toggle'){TASK.errDemo=!TASK.errDemo;renderStage();renderInspector();renderTimeline();renderTopState();return;}
+  if(a==='modal:open'){$('#scrim').classList.add('is-on');return;}
+  if(a==='modal:close'){$('#scrim').classList.remove('is-on');return;}
+  if(a==='modal:start'){$('#scrim').classList.remove('is-on');setScreen('progress');toast('任务已创建 · 使用 '+$('#modelSel').value);return;}
+  if(a==='ck'){t.setAttribute('aria-checked',t.getAttribute('aria-checked')!=='true');return;}
+  if(a==='sw'){t.setAttribute('aria-pressed',t.getAttribute('aria-pressed')!=='true');return;}
+  if(a==='acc:typeacc'){$('#typeacc').classList.toggle('is-open');return;}
+  if(a==='para:reset'){$$('#typeacc input[type=range]').forEach(r=>{r.value=r.dataset.slider==='scale_cap'?1.15:r.dataset.slider==='font_scale'?0.78:r.dataset.slider==='line_skip'?2:1;r.nextElementSibling.textContent=r.value;});toast('排版参数已重置');return;}
+  if(a==='ai:gen'){$('#candwrap').innerHTML='<div class="inset" style="grid-column:1/-1">正在生成候选…（Claude Sonnet）</div>';
+    setTimeout(()=>{$('#candwrap').innerHTML=`<div class="cand"><span class="cand__t">当前</span><div class="cand__x">${esc(PARA.tr)}</div></div>
+      <div class="cand cand--new"><span class="cand__t">候选 1 · Claude Sonnet · 12s</span><div class="cand__x">${esc(PARA.cand)}</div>
+      <div class="cand__b"><button class="btn btn--sm btn--primary" data-act="ai:adopt">采用</button><button class="btn btn--sm" data-act="ai:discard">丢弃</button></div></div>`;},900);return;}
+  if(a==='ai:adopt'){const ta=$('#trta');if(ta){ta.value=PARA.cand;PARA.tr=PARA.cand;}
+    const b=PAGES[5].blocks.find(x=>x.id==='P05-002');if(b){b.tr=PARA.cand;b.src=PARA.src;}
+    $('#candwrap').innerHTML='<div class="inset" style="grid-column:1/-1;color:var(--pass-ink)">候选已采用 · 预览中</div>';renderStage();toast('已采用候选 1');return;}
+  if(a==='ai:discard'){$('#candwrap').innerHTML='<div class="inset" style="grid-column:1/-1">候选已丢弃</div>';return;}
+  if(a==='compile'){TASK.compiled=true;renderStage();toast('全量编译完成 · 第 5 页已更新');return;}
+  if(a==='ver:new'){toast('已存为版本 v4 · 可继续编辑');return;}
+  if(a.startsWith('ver:roll:')){toast('已回滚到 '+a.slice(9)+' · 新建 '+a.slice(9)+'-r1');return;}
+  if(a.startsWith('locate:')){
+    const parts=a.split(':');const pid=parts[1],pg=+parts[2];
+    TASK.sel=pid;TASK.page=pg;if(TASK.view==='check')TASK.pmode='target';
+    renderStage();renderInspector();toast('已定位到 '+pid+' · 第 '+pg+' 页');return;}
+  if(a.startsWith('lib:filter:')){TASK.libfilter=a.slice(11);renderLibrary();renderViewRail();return;}
+  if(a.startsWith('gl:tab:')){TASK.gltab=a.slice(7);renderGlossary();renderViewRail();return;}
+  if(a==='gl:add'){const arr=TASK.gltab==='doc'?GLOSSARY_DOC:GLOSSARY;arr.unshift({en:'new term',zh:'新术语',note:'行内编辑可直接修改',cs:false,hits:0});renderGlossary();toast('已新增一行 · 可直接行内编辑');return;}
+  if(a.startsWith('gl:cs:')){const arr=TASK.gltab==='doc'?GLOSSARY_DOC:GLOSSARY;const i=+a.slice(6);arr[i].cs=!arr[i].cs;renderGlossary();return;}
+  if(a.startsWith('toast:')){toast(a.slice(6));return;}
+});
+document.addEventListener('input',e=>{
+  if(e.target.matches('[data-slider]')){e.target.nextElementSibling.textContent=e.target.value;return;}
+  if(e.target.id==='glsearch'){renderGlossary();return;}
+  if(e.target.closest('#glbody')&&e.target.dataset.f){
+    const arr=TASK.gltab==='doc'?GLOSSARY_DOC:GLOSSARY;
+    const i=+e.target.closest('tr').dataset.row;arr[i][e.target.dataset.f]=e.target.textContent.trim();return;}
+  if(e.target.id==='trta'){PARA.tr=e.target.value;const b=PAGES[5].blocks.find(x=>x.id==='P05-002');if(b)b.tr=e.target.value;return;}
+});
+/* 对照模式：悬停一侧段落，另一侧同 id 段落同步高亮 */
+document.addEventListener('mouseover',e=>{
+  const b=e.target.closest&&e.target.closest('.bk[data-bid]'); if(!b)return;
+  const id=b.dataset.bid;
+  $$('.compare .bk[data-bid]').forEach(x=>x.classList.toggle('bk--peer',x!==b&&x.dataset.bid===id));
+});
+document.addEventListener('mouseout',e=>{
+  const b=e.target.closest&&e.target.closest('.bk[data-bid]'); if(!b)return;
+  const to=e.relatedTarget&&e.relatedTarget.closest?e.relatedTarget.closest('.bk[data-bid]'):null;
+  if(to&&to.dataset.bid===b.dataset.bid)return;
+  $$('.bk--peer').forEach(x=>x.classList.remove('bk--peer'));
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')$('#scrim').classList.remove('is-on');});
+const dz=$('#dropzone');
+if(dz){
+  ['dragover','dragenter'].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.add('is-over');}));
+  ['dragleave','drop'].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.remove('is-over');}));
+  dz.addEventListener('drop',()=>$('#scrim').classList.add('is-on'));
+}
+window.addEventListener('hashchange',()=>{const s=location.hash.replace('#/','');if(s&&s!==TASK.screen)setScreen(s,true);});
+
+/* 启动：优先读取 hash，其次 localStorage */
+(function init(){
+  loadW(); applyW();
+  bindGutter($('#gutter-vr'),'vrw','x',false);
+  bindGutter($('#gutter-insp'),'inspw','x',true);
+  bindGutter($('#gutter-tl'),'tlh','y',true);
+  renderDevbar();
+  const h=location.hash.replace('#/','');
+  const saved=(()=>{try{return localStorage.getItem('ieet.screen');}catch(e){return null;}})();
+  const ok=['library','glossary'].concat(WORKVIEWS);
+  setScreen(ok.includes(h)?h:(ok.includes(saved)?saved:'library'));
+})();
+</script>
+</body>
+</html>

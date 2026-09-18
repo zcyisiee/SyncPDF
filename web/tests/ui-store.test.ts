@@ -1,0 +1,192 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  LAYOUT_SPECS,
+  STORAGE_KEYS,
+  createUiStore,
+  readStoredBboxMode,
+  readStoredScreen,
+  widthFromDelta,
+} from '../src/stores/ui';
+
+describe('分隔条位移 → 新宽度（widthFromDelta：方向 + clamp）', () => {
+  it('右侧面板 / 时间线：轴正向位移变窄（invert），两端 clamp', () => {
+    expect(widthFromDelta('inspector', 360, -40)).toBe(400);
+    expect(widthFromDelta('inspector', 360, 40)).toBe(320);
+    expect(widthFromDelta('inspector', 360, -400)).toBe(560);
+    expect(widthFromDelta('inspector', 360, 400)).toBe(280);
+    expect(widthFromDelta('timeline', 96, 20)).toBe(76);
+    expect(widthFromDelta('timeline', 96, 100)).toBe(72);
+    expect(widthFromDelta('timeline', 96, -100)).toBe(160);
+  });
+});
+
+describe('ui store 三栏宽度（DESIGN.md §8.2）', () => {
+  it('默认值与设计表一致（旧版视图栏已删除，没有 viewrail）', () => {
+    const state = createUiStore().getState();
+    expect(state.inspectorWidth).toBe(360);
+    expect(state.timelineHeight).toBe(96);
+    expect(state.inspectorCollapsed).toBe(false);
+    expect('viewrail' in LAYOUT_SPECS).toBe(false);
+    expect('viewrailWidth' in state).toBe(false);
+  });
+
+  it('spec 默认/范围与 §8.2 表逐项一致', () => {
+    expect(LAYOUT_SPECS.inspector).toMatchObject({ default: 360, min: 280, max: 560, step: 16 });
+    expect(LAYOUT_SPECS.timeline).toMatchObject({ default: 96, min: 72, max: 160, step: 8 });
+  });
+
+  it('setLayoutWidth 按范围 clamp（超上限/超下限/小数）', () => {
+    const store = createUiStore();
+    store.getState().setLayoutWidth('inspector', 9999);
+    expect(store.getState().inspectorWidth).toBe(560);
+    store.getState().setLayoutWidth('inspector', 0);
+    expect(store.getState().inspectorWidth).toBe(280);
+    store.getState().setLayoutWidth('timeline', 1000);
+    expect(store.getState().timelineHeight).toBe(160);
+    store.getState().setLayoutWidth('timeline', 1);
+    expect(store.getState().timelineHeight).toBe(72);
+    store.getState().setLayoutWidth('timeline', 99.6);
+    expect(store.getState().timelineHeight).toBe(100);
+  });
+
+  it('写入 localStorage 的键名按 §8.2（ieet.inspw / ieet.tlh）', () => {
+    const store = createUiStore();
+    store.getState().setLayoutWidth('inspector', 420);
+    store.getState().setLayoutWidth('timeline', 120);
+    expect(window.localStorage.getItem(STORAGE_KEYS.inspector)).toBe('420');
+    expect(window.localStorage.getItem(STORAGE_KEYS.timeline)).toBe('120');
+  });
+
+  it('冷启动读回持久化值，并把越界/坏值退回默认', () => {
+    window.localStorage.setItem(STORAGE_KEYS.inspector, '9999');
+    window.localStorage.setItem(STORAGE_KEYS.timeline, 'abc');
+    const state = createUiStore().getState();
+    expect(state.inspectorWidth).toBe(560);
+    expect(state.timelineHeight).toBe(96);
+  });
+
+  it('拖右侧分隔条只在宽度真变化时展开折叠的面板，并同步持久化', () => {
+    const store = createUiStore();
+    store.getState().setInspectorCollapsed(true);
+    expect(store.getState().inspectorCollapsed).toBe(true);
+    expect(window.localStorage.getItem(STORAGE_KEYS.inspectorCollapsed)).toBe('1');
+
+    // 拖到与折叠前相同的宽度：状态不变，不意外展开
+    store.getState().setLayoutWidth('inspector', 360);
+    expect(store.getState().inspectorCollapsed).toBe(true);
+    expect(window.localStorage.getItem(STORAGE_KEYS.inspectorCollapsed)).toBe('1');
+
+    store.getState().setLayoutWidth('inspector', 420);
+    expect(store.getState().inspectorWidth).toBe(420);
+    expect(store.getState().inspectorCollapsed).toBe(false);
+    expect(window.localStorage.getItem(STORAGE_KEYS.inspectorCollapsed)).toBe('0');
+  });
+
+  it('setInspectorCollapsed 持久化 ieet.inspCollapsed（折叠 = --inspw:0）', () => {
+    const store = createUiStore();
+    store.getState().setInspectorCollapsed(true);
+    expect(store.getState().inspectorCollapsed).toBe(true);
+    store.getState().setInspectorCollapsed(false);
+    expect(store.getState().inspectorCollapsed).toBe(false);
+    expect(window.localStorage.getItem(STORAGE_KEYS.inspectorCollapsed)).toBe('0');
+  });
+});
+
+describe('ui store 屏 / 预览模式 / 拖拽态', () => {
+  it('setScreen 持久化 ieet.screen，readStoredScreen 只认 4 个合法屏', () => {
+    const store = createUiStore();
+    store.getState().setScreen('workbench');
+    expect(store.getState().screen).toBe('workbench');
+    expect(window.localStorage.getItem(STORAGE_KEYS.screen)).toBe('workbench');
+    expect(readStoredScreen()).toBe('workbench');
+    window.localStorage.setItem(STORAGE_KEYS.screen, 'bogus');
+    expect(readStoredScreen()).toBeNull();
+  });
+
+  it('previewMode 与 dragging', () => {
+    const store = createUiStore();
+    expect(store.getState().previewMode).toBe('target');
+    store.getState().setPreviewMode('compare');
+    expect(store.getState().previewMode).toBe('compare');
+    store.getState().setDragging('timeline');
+    expect(store.getState().dragging).toBe('timeline');
+    store.getState().setDragging(null);
+    expect(store.getState().dragging).toBeNull();
+  });
+});
+
+describe('ui store 预览页 / bbox 图层 / 选中段落（W05）', () => {
+  it('previewPage 默认 1、setPreviewPage clamp 到整数且不持久化', () => {
+    const store = createUiStore();
+    expect(store.getState().previewPage).toBe(1);
+    store.getState().setPreviewPage(5);
+    expect(store.getState().previewPage).toBe(5);
+    store.getState().setPreviewPage(0);
+    expect(store.getState().previewPage).toBe(1);
+    store.getState().setPreviewPage(3.6);
+    expect(store.getState().previewPage).toBe(4);
+    store.getState().setPreviewPage(Number.NaN);
+    expect(store.getState().previewPage).toBe(1);
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it('resetPreviewForDocument：换文档回第 1 页并清空选中，同一 did 不重复重置', () => {
+    const store = createUiStore();
+    store.getState().setPreviewPage(7);
+    store.getState().setSelectedParagraph('P07-002');
+    store.getState().resetPreviewForDocument('doc-a');
+    expect(store.getState().previewPage).toBe(1);
+    expect(store.getState().selectedParagraphId).toBeNull();
+    expect(store.getState().previewDid).toBe('doc-a');
+
+    store.getState().setPreviewPage(4);
+    store.getState().resetPreviewForDocument('doc-a');
+    expect(store.getState().previewPage).toBe(4);
+    store.getState().resetPreviewForDocument('doc-b');
+    expect(store.getState().previewPage).toBe(1);
+  });
+
+  it('bboxMode 默认 parse；setBboxMode 持久化 ieet.bboxMode；坏值退回默认', () => {
+    const store = createUiStore();
+    expect(store.getState().bboxMode).toBe('parse');
+    store.getState().setBboxMode('off');
+    expect(store.getState().bboxMode).toBe('off');
+    expect(window.localStorage.getItem(STORAGE_KEYS.bboxMode)).toBe('off');
+    expect(readStoredBboxMode()).toBe('off');
+
+    window.localStorage.setItem(STORAGE_KEYS.bboxMode, 'bogus');
+    expect(readStoredBboxMode()).toBeNull();
+  });
+
+  it('冷启动读回 ieet.bboxMode（用户显式选择跨会话保留）', () => {
+    window.localStorage.setItem(STORAGE_KEYS.bboxMode, 'layout');
+    expect(createUiStore().getState().bboxMode).toBe('layout');
+  });
+
+  it('selectedParagraphId 可设可清', () => {
+    const store = createUiStore();
+    expect(store.getState().selectedParagraphId).toBeNull();
+    store.getState().setSelectedParagraph('P01-001');
+    expect(store.getState().selectedParagraphId).toBe('P01-001');
+    store.getState().setSelectedParagraph(null);
+    expect(store.getState().selectedParagraphId).toBeNull();
+  });
+});
+
+describe('reader session choices', () => {
+  it('zoom clamps invalid/extreme values, fit resets, compare links by default', () => {
+    const store = createUiStore();
+    expect(store.getState().compareLinked).toBe(true);
+    store.getState().setPreviewZoom(100);
+    expect(store.getState().previewZoom).toBe(4);
+    store.getState().setPreviewZoom(-1);
+    expect(store.getState().previewZoom).toBe(0.1);
+    store.getState().setPreviewZoom(Number.NaN);
+    expect(store.getState().previewZoom).toBe(0.1);
+    store.getState().setPreviewZoom(null);
+    expect(store.getState().previewZoom).toBeNull();
+    store.getState().setCompareLinked(false);
+    expect(store.getState().compareLinked).toBe(false);
+  });
+});

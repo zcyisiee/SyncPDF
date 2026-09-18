@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import json
 import time
 from pathlib import Path
 
@@ -344,6 +345,7 @@ def _run_stage(stage: str, workdir: Path, cfg: dict) -> dict:
             translator=cfg["translator"],
             timeout=cfg["timeout"],
             retry_missing=cfg["retry_missing"],
+            glossaries=cfg["glossaries"],
             debug_recorder=recorder,
         )
     if stage == "apply":
@@ -512,8 +514,32 @@ def _review_prompt(workdir: Path, cfg: dict) -> str:
         "再以 `bdt run --from apply` 续跑。",
         "",
     ]
+    if any(adapter in (cfg.get("reviewer") or "") for adapter in (" model-call ", " harness-call ")):
+        lines += ["Text-only review: no PDF/image access; do not claim visual inspection."]
+        total = 0
+        for name in ("document.md", "translated.md", "review_verdict.json", "layout_lint.json", "link_audit.json"):
+            path = agent / name
+            if path.is_file():
+                total += path.stat().st_size
+                if total > 1_000_000:
+                    raise common.ToolError("model_context_too_large", "Text review context exceeds 1 MB; use a script reviewer or disable AI review")
+                text = path.read_text(encoding="utf-8")
+                if name.endswith(".json"):
+                    text = json.dumps(_review_safe_json(json.loads(text)), ensure_ascii=False)
+                lines += ["## " + name, text]
     guidance = _reviewer_guidance()
     return (guidance + "\n\n" + "\n".join(lines)) if guidance else "\n".join(lines)
+
+
+def _review_safe_json(value):
+    """Exclude configuration/credential fields from text-only model review inputs."""
+    if isinstance(value, dict):
+        return {k: _review_safe_json(v) for k, v in value.items()
+                if not any(word in k.lower() for word in
+                           ("config", "token", "secret", "key", "command", "translator", "reviewer", "url"))}
+    if isinstance(value, list):
+        return [_review_safe_json(v) for v in value]
+    return value
 
 
 def _reviewer_guidance() -> str:
@@ -716,7 +742,9 @@ def run_pipeline(
     timeout: int = 1800,
     translator: str | None = None,
     reviewer: str | None = None,
+    skip_ai_review: bool = False,
     retry_missing: bool = True,
+    glossaries: str | None = None,
     dual: bool = False,
     watermark: bool = False,
     latex_bbox: bool = True,
@@ -772,6 +800,9 @@ def run_pipeline(
         "translator": translator,
         "reviewer": reviewer,
         "retry_missing": retry_missing,
+        #: 术语表 CSV 路径（W13）：只被 translate 阶段消费（apply/build/check/review 忽略），
+        #: 且只在整篇翻译的提示词里生效（重译不注入，见 translate.translate_document）。
+        "glossaries": glossaries,
         "output_dir": output_dir,
         "dual": dual,
         "watermark": watermark,
@@ -816,6 +847,14 @@ def run_pipeline(
     agent_review: dict | None = None
     for index in range(start_index, len(STAGES)):
         stage = STAGES[index]
+
+        if stage == "review" and skip_ai_review and not reviewer:
+            state.setdefault("quality", {})["reviewer"] = {"status": "skipped"}
+            _record(state, "review", inputs={}, artifacts={}, duration=0.0,
+                    detail={"ai_review": "disabled"}, status="skipped")
+            stage_results.append({"stage": "review", "status": "skipped"})
+            _save_state(workdir_path, state)
+            continue
 
         # 各阶段的前置产物校验（含 review 需要 check 的 review_verdict.json）
         failure = _preflight(stage, workdir_path, pdf)

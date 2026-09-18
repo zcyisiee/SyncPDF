@@ -2,6 +2,11 @@
 
 > `babeldoc_tools.translate.translate_document` 读取本文件 ```text 块，
 > `{document}` 替换为 `agent/document.md`。
+>
+> 下面第二行里的 `{glossary}` 是**词表占位行**（W13）：`bdt translate --glossaries <csv>`
+> 或 `bdt run --glossaries <csv>` 给了非空词表时，整行替换成「术语约束」段；
+> 没给词表时整行（连同它前面的换行）被删掉 —— 不带词表的提示词与加占位符之前
+> 逐字节一致。渲染规则见 `babeldoc_tools.glossary.render_prompt_block`。
 
 ```text
 你是一名专业的英译中（简体中文）学术论文翻译。下面给你一篇论文的完整正文（Markdown 格式）。
@@ -37,6 +42,7 @@
 - 不要输出文件头注释（形如 `<!-- babeldoc-markdown v1 -->`），不要输出任何解释、
   前言或代码块围栏。
 
+{glossary}
 ## 待翻译文档开始
 {document}
 ## 待翻译文档结束

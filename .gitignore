@@ -52,6 +52,7 @@ temp.jpg
 
 # 实验产物与临时数据（含 MinerU 原始返回、渲染 PNG、中间 JSON）
 /tmp/
+/tmp
 /output/
 
 .env.local
@@ -67,3 +68,9 @@ temp.jpg
 
 # mkdocs 构建产物
 /site/
+
+# web/ 前端工程的 JSON 配置（根 `*.json` 规则会误伤 package.json / tsconfig.json 等）
+!web/**/*.json
+
+# Local model credentials (owner-only files; never version control)
+**/.bdt-serve/model-credentials/

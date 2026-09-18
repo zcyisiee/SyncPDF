@@ -1,0 +1,15 @@
+# 依赖与构建产物
+node_modules/
+dist/
+*.local
+
+# 冒烟证据（截图、serve 日志）：本地保留，不入库
+tmp-smoke/
+
+# pdf.js 运行时静态资源（worker / cmaps / standard_fonts）：由
+# scripts/sync-pdfjs-assets.mjs 从 node_modules/pdfjs-dist 复制，不入库
+public/pdfjs/
+
+# Playwright 产物
+playwright-report/
+test-results/
