@@ -39,7 +39,12 @@ import {
   type LayoutInputs,
 } from '../../lib/draft';
 import { layoutBoxOfRow } from '../../lib/preview';
-import { useDraft, useParagraphs, usePatchDraftMutation } from '../../lib/queries';
+import {
+  useCompileBlockMutation,
+  useDraft,
+  useParagraphs,
+  usePatchDraftMutation,
+} from '../../lib/queries';
 import { useUiStore } from '../../stores/ui';
 import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';
@@ -77,6 +82,7 @@ export function ParagraphEditor({
   const paragraphsQuery = useParagraphs(did);
   const draftQuery = useDraft(did);
   const patchMutation = usePatchDraftMutation(did);
+  const compileMutation = useCompileBlockMutation(did, paragraphId ?? '');
   // 拖拽编辑只在「版面框（pdf_native）」图层上有意义 → 提示里说清当前图层能不能拖
   const bboxMode = useUiStore((state) => state.bboxMode);
   const draft = draftQuery.data;
@@ -274,6 +280,18 @@ export function ParagraphEditor({
           >
             保存
           </Button>
+          <Button
+            data-od-id="paragraph-compile"
+            disabled={disabled || paragraph === null || compileMutation.isPending}
+            onClick={() => compileMutation.mutate(revision)}
+          >
+            {compileMutation.isPending ? '正在提交编译…' : '编译此块'}
+          </Button>
+          {compileMutation.error ? (
+            <span className="text-micro text-err" data-od-id="paragraph-compile-error">
+              {describeApiError(compileMutation.error).message}
+            </span>
+          ) : null}
           {modified || hasLayoutOverride(draftLayout) ? (
             <Button
               data-od-id="paragraph-restore"

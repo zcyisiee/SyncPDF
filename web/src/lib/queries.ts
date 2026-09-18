@@ -338,6 +338,29 @@ export function usePatchDraftMutation(did: string) {
  * 不传 `profile`（compile 不调翻译/审查）；`base_revision` = 当前草稿 revision，
  * 服务端不符时 409 `revision_conflict`（点之前草稿又变了）。
  */
+export function useCompileBlockMutation(did: string, blockId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (baseRevision: number) =>
+      apiPost<JobAccepted>(
+        `/documents/${encodeURIComponent(did)}/blocks/${encodeURIComponent(blockId)}/compile`,
+        { base_revision: baseRevision },
+      ),
+    onSuccess: () => invalidateJobViews(client, did),
+  });
+}
+
+export function useExportMutation(did: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (baseRevision: number) =>
+      apiPost<JobAccepted>(`/documents/${encodeURIComponent(did)}/export`, {
+        base_revision: baseRevision,
+      }),
+    onSuccess: () => invalidateJobViews(client, did),
+  });
+}
+
 export function useCompileDraftMutation(did: string) {
   const client = useQueryClient();
   return useMutation({
