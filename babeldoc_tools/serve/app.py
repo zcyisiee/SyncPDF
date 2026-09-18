@@ -193,6 +193,9 @@ def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI
         """
         yield
         compiles.shutdown()
+        local = getattr(runner, "block_compiler", None)
+        if local is not None:
+            await local.shutdown()
 
     app = FastAPI(
         title="bdt serve",
@@ -256,8 +259,7 @@ def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI
         tags=["meta"],
         summary="存活探测 + 可见文档数",
         description=(
-            "根目录在运行期被删/不可读时返回 503 ``root_missing``"
-            "（而不是谎报 ok）。"
+            "根目录在运行期被删/不可读时返回 503 ``root_missing``（而不是谎报 ok）。"
         ),
     )
     def health() -> HealthResponse:

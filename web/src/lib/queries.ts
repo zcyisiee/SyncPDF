@@ -456,6 +456,7 @@ export function useCreateJobMutation(did: string) {
         const job: JobRecord = known ?? {
           job_id: accepted.job_id,
           did,
+          revision: body.base_revision ?? 0,
           action: accepted.action,
           status: accepted.status,
           created_at: new Date().toISOString(),

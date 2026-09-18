@@ -10,8 +10,8 @@
 
 from __future__ import annotations
 
+import os
 import re
-from collections import Counter
 from pathlib import Path
 
 from babeldoc.tools.agent import debug_capture
@@ -39,14 +39,14 @@ class TranslationBlocks:
         self.pending += text
         marks = list(ID_MARK_RE.finditer(self.pending))
         for left, right in zip(marks, marks[1:], strict=False):
-            self._block(left, self.pending[left.end():right.start()])
+            self._block(left, self.pending[left.end() : right.start()])
         if marks:
-            self.pending = self.pending[marks[-1].start():]
+            self.pending = self.pending[marks[-1].start() :]
 
     def finish(self):
         mark = ID_MARK_RE.search(self.pending)
         if mark:
-            self._block(mark, self.pending[mark.end():])
+            self._block(mark, self.pending[mark.end() :])
         self.pending = ""
 
     def _block(self, mark, body):
@@ -58,7 +58,9 @@ class TranslationBlocks:
             return
         label = row.get("layout_label", "text")
         body = markdown_view._clean_markdown_body(body, label, row.get("markdown", ""))
-        if not body or Counter(markdown_view.anchor_sequence(body)) != Counter(tuple(anchor) for anchor in row.get("anchors", [])):
+        if not body or markdown_view.anchor_sequence(body) != [
+            tuple(anchor) for anchor in row.get("anchors", [])
+        ]:
             return
         self.seen.add(pid)
         self.emit(pid, body, label, len(self.seen), len(self.rows))
@@ -135,8 +137,11 @@ def translate_document(
     ):
         if debug_recorder:
             debug_recorder.capture(
-                "translation_inputs", debug_capture.capture_files,
-                debug_recorder, "translate", workdir_path,
+                "translation_inputs",
+                debug_capture.capture_files,
+                debug_recorder,
+                "translate",
+                workdir_path,
                 ("document.md", "anchors.json", "sheet.jsonl", "translated.md"),
             )
         if ids:
@@ -202,7 +207,9 @@ def _translate_whole_document(
     agent = common.agent_dir(workdir)
     document_md = agent / "document.md"
     if not document_md.exists():
-        raise common.ToolError("document_missing", f"{document_md} 不存在：请先 bdt parse")
+        raise common.ToolError(
+            "document_missing", f"{document_md} 不存在：请先 bdt parse"
+        )
 
     prompt_name = prompt or "translator"
     document = document_md.read_text(encoding="utf-8")
@@ -215,7 +222,9 @@ def _translate_whole_document(
     prompt_file = agent / "prompt.md"
     prompt_file.write_text(prompt_text, encoding="utf-8")
     if debug_recorder:
-        debug_recorder.archive_text("translate", f"prompts/{debug_recorder.new_id('prompt')}.md", prompt_text)
+        debug_recorder.archive_text(
+            "translate", f"prompts/{debug_recorder.new_id('prompt')}.md", prompt_text
+        )
 
     translated_path = agent / "translated.md"
     called_agent = False
@@ -238,14 +247,44 @@ def _translate_whole_document(
         command = _resolve_translator(translator)
         from babeldoc_tools.stream_preview import StreamPreview
 
-        preview = StreamPreview(workdir, debug_recorder) if debug_recorder else None
+        if os.environ.get("BDT_SERVE_DATABASE"):
+            from babeldoc_tools.serve.stream_preview import ServeStreamPreview
+
+            preview = ServeStreamPreview(workdir, debug_recorder)
+        else:
+            preview = StreamPreview(workdir, debug_recorder) if debug_recorder else None
 
         def completed(pid, body, label, index, total):
+            database_path = os.environ.get("BDT_SERVE_DATABASE")
+            if database_path:
+                from babeldoc_tools.serve.database import MetadataDB
+
+                database = MetadataDB(Path(database_path).parent)
+                try:
+                    accepted = database.commit_translation(
+                        os.environ["BDT_SERVE_JOB"],
+                        os.environ["BDT_SERVE_DOCUMENT"],
+                        int(os.environ["BDT_SERVE_REVISION"]),
+                        pid,
+                        markdown_view.markdown_to_canonical(body),
+                        {"index": index, "total": total},
+                    )
+                    if not accepted:
+                        raise common.ToolError("stale_job", "翻译任务 revision 已失效")
+                finally:
+                    database.close()
             if debug_recorder:
-                debug_recorder.record_event("translate", "paragraph_done", {
-                    "paragraph_id": pid, "index": index, "total": total,
-                    "text": body, "provisional": True,
-                })
+                debug_recorder.record_event(
+                    "translate",
+                    "paragraph_done",
+                    {
+                        "paragraph_id": pid,
+                        "index": index,
+                        "total": total,
+                        "text": body,
+                        "provisional": True,
+                    },
+                )
             if preview:
                 preview.submit(pid, body, label)
 
@@ -253,8 +292,11 @@ def _translate_whole_document(
         failed = True
         try:
             response = common.run_translator(
-                prompt_text, command, timeout_s=timeout,
-                debug_recorder=debug_recorder, debug_origin="translator.whole",
+                prompt_text,
+                command,
+                timeout_s=timeout,
+                debug_recorder=debug_recorder,
+                debug_origin="translator.whole",
                 on_chunk=blocks.feed,
             )
             blocks.finish()
@@ -271,16 +313,26 @@ def _translate_whole_document(
     )
     retried = None
     if debug_recorder:
-        debug_recorder.record_event("translate", "missing_ids", {
-            "ids": missing, "retry": bool(missing and retry_missing and called_agent),
-            "origin": "provider" if called_agent else "import",
-        })
+        debug_recorder.record_event(
+            "translate",
+            "missing_ids",
+            {
+                "ids": missing,
+                "retry": bool(missing and retry_missing and called_agent),
+                "origin": "provider" if called_agent else "import",
+            },
+        )
     # 只有真的调用过翻译命令才自动补译：``--markdown`` 承诺"不调任何命令"，
     # 导入译文若本身缺段，交由调用方用 --ids（显式给 --translator）处理。
     if missing and retry_missing and called_agent:
         retried = retranslate_blocks(
-            workdir, missing, feedback="", translator=translator,
-            timeout=timeout, repair_prompt=None, debug_recorder=debug_recorder,
+            workdir,
+            missing,
+            feedback="",
+            translator=translator,
+            timeout=timeout,
+            repair_prompt=None,
+            debug_recorder=debug_recorder,
         )
         missing = retried["still_missing"]
     return {
@@ -329,12 +381,17 @@ def retranslate_blocks(
     prompt_file = agent / "prompt.retry.md"
     prompt_file.write_text(prompt_text, encoding="utf-8")
     if debug_recorder:
-        debug_recorder.archive_text("translate", f"prompts/{debug_recorder.new_id('retry')}.md", prompt_text)
+        debug_recorder.archive_text(
+            "translate", f"prompts/{debug_recorder.new_id('retry')}.md", prompt_text
+        )
 
     command = _resolve_translator(translator)
     response = common.run_translator(
-        prompt_text, command, timeout_s=int(timeout or 1800),
-        debug_recorder=debug_recorder, debug_origin="translator.retry",
+        prompt_text,
+        command,
+        timeout_s=int(timeout or 1800),
+        debug_recorder=debug_recorder,
+        debug_origin="translator.retry",
         debug_context={"requested_ids": ids},
     )
     _capture_text(debug_recorder, workdir, response, "raw", requested_ids=ids)
@@ -342,7 +399,8 @@ def retranslate_blocks(
 
     blocks = markdown_view.parse_translated_markdown(response)
     merged_path = merge_translated_markdown(
-        workdir, {pid: blocks[pid] for pid in ids if pid in blocks},
+        workdir,
+        {pid: blocks[pid] for pid in ids if pid in blocks},
         debug_recorder=debug_recorder,
     )
     all_missing = markdown_view.missing_ids(
@@ -388,13 +446,21 @@ def retranslate_ids(
 def _capture_text(recorder, workdir, text, phase, **kwargs):
     if recorder:
         recorder.capture(
-            "text_version", debug_capture.capture_text_version,
-            recorder, workdir, text, phase, **kwargs,
+            "text_version",
+            debug_capture.capture_text_version,
+            recorder,
+            workdir,
+            text,
+            phase,
+            **kwargs,
         )
 
 
 def merge_translated_markdown(
-    workdir: Path, replacements: dict[str, tuple[str, str]], *, debug_recorder=None,
+    workdir: Path,
+    replacements: dict[str, tuple[str, str]],
+    *,
+    debug_recorder=None,
 ) -> str:
     """把 {id: (body, label)} 合并进 translated.md（按 sheet 顺序重排）。"""
     from babeldoc.tools.agent import markdown_view
@@ -422,7 +488,9 @@ def merge_translated_markdown(
         ordered.append("")
         written.add(pid)
     merged_text = "\n".join(ordered)
-    _capture_text(debug_recorder, workdir, merged_text, "merged", requested_ids=list(replacements))
+    _capture_text(
+        debug_recorder, workdir, merged_text, "merged", requested_ids=list(replacements)
+    )
     translated_path.write_text(merged_text, encoding="utf-8")
     return str(translated_path)
 
@@ -448,28 +516,41 @@ def apply_translation(
     from babeldoc.tools.agent import markdown_view
 
     workdir_path = common.require_workdir(workdir)
-    md_path = Path(markdown) if markdown else common.agent_dir(workdir_path) / "translated.md"
+    md_path = (
+        Path(markdown) if markdown else common.agent_dir(workdir_path) / "translated.md"
+    )
     if not md_path.exists():
         raise common.ToolError(
             "translated_md_missing", f"{md_path} 不存在：请先 bdt translate"
         )
-    with debug_runtime.debug_stage(
-        debug_recorder, "apply", {"markdown": str(md_path)}
-    ):
+    with debug_runtime.debug_stage(debug_recorder, "apply", {"markdown": str(md_path)}):
         if debug_recorder:
-            debug_recorder.archive_file("apply", f"inputs/{debug_recorder.new_id('markdown')}.md", md_path)
-            debug_recorder.capture(
-                "apply_inputs", debug_capture.capture_files, debug_recorder, "apply",
-                workdir_path, ("anchors.json", "sheet.jsonl", "translated.jsonl"),
+            debug_recorder.archive_file(
+                "apply", f"inputs/{debug_recorder.new_id('markdown')}.md", md_path
             )
-        report = markdown_view.apply_markdown(workdir_path, md_path, debug_recorder=debug_recorder)
+            debug_recorder.capture(
+                "apply_inputs",
+                debug_capture.capture_files,
+                debug_recorder,
+                "apply",
+                workdir_path,
+                ("anchors.json", "sheet.jsonl", "translated.jsonl"),
+            )
+        report = markdown_view.apply_markdown(
+            workdir_path, md_path, debug_recorder=debug_recorder
+        )
         report["translated_md"] = str(md_path)
         common.write_json(common.agent_dir(workdir_path) / "apply_report.json", report)
         if debug_recorder is not None:
             if report.get("ok"):
                 debug_recorder.capture(
-                    "apply_outputs", debug_capture.capture_files, debug_recorder, "apply",
-                    workdir_path, ("translated.jsonl", "il_translated.applied.json"), phase="outputs",
+                    "apply_outputs",
+                    debug_capture.capture_files,
+                    debug_recorder,
+                    "apply",
+                    workdir_path,
+                    ("translated.jsonl", "il_translated.applied.json"),
+                    phase="outputs",
                 )
             debug_recorder.archive_file("apply", "translated.md", md_path)
             debug_recorder.archive_file(

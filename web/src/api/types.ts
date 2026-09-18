@@ -7,7 +7,11 @@ import type { components } from './schema';
 
 export type HealthResponse = components['schemas']['HealthResponse'];
 export type DocumentListItem = components['schemas']['DocumentListItem'];
-export type DocumentDetail = components['schemas']['DocumentDetail'];
+export type DocumentDetail = components['schemas']['DocumentDetail'] & {
+  revision?: number;
+  preview_asset?: string | null;
+  export_revision?: number | null;
+};
 export type StageStateItem = components['schemas']['StageStateItem'];
 export type StageStateResponse = components['schemas']['StageStateResponse'];
 export type ParagraphItem = components['schemas']['ParagraphItem'];

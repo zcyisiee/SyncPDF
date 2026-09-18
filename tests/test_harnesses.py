@@ -166,9 +166,17 @@ def test_runner_resolves_thinking_and_review_same_harness(tmp_path, monkeypatch)
                         pages=None, dual=False, profile_id="pi-deepseek-flash", thinking="max",
                         reviewer_profile="pi-deepseek-flash"))
     captured = []
-    monkeypatch.setattr(runner_module, "spawn_job", lambda argv, _cwd: captured.append(argv))
+    environments = []
+
+    def spawn(argv, _cwd, *, environment):
+        captured.append(argv)
+        environments.append(environment)
+
+    monkeypatch.setattr(runner_module, "spawn_job", spawn)
     monkeypatch.setattr(runner, "_launch", lambda *_a: None)
     asyncio.run(runner._start(record))
+    assert environments[0]["BDT_SERVE_DOCUMENT"] == "doc"
+    assert environments[0]["BDT_SERVE_JOB"] == record.job_id
     argv = captured[0]
     command = argv[argv.index("--translator") + 1]
     assert shlex.split(command)[-2:] == ["--thinking", "max"]

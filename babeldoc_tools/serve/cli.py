@@ -60,7 +60,9 @@ def add_parser(subparsers) -> argparse.ArgumentParser:
         "--workdir",
         help="只服务这一个 workdir（did = 目录名；兄弟目录不枚举、不暴露）",
     )
-    parser.add_argument("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1）")
+    parser.add_argument(
+        "--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1）"
+    )
     parser.add_argument(
         "--port", type=int, default=0, help="监听端口；0 = 自动分配空闲端口（默认）"
     )
@@ -68,8 +70,14 @@ def add_parser(subparsers) -> argparse.ArgumentParser:
         "--open", action="store_true", help="绑定成功后用浏览器打开（使用实际端口）"
     )
     parser.add_argument(
-        "--migrate", action="store_true",
+        "--migrate",
+        action="store_true",
         help="启动前把现有 workdir 的源 PDF 和可用段落索引导入 SQLite",
+    )
+    parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="启动前清理超过一天的临时文件与缓存；不删除 assets",
     )
     return parser
 
@@ -100,7 +108,9 @@ def _is_loopback(host: str) -> bool:
 
 def _bind_socket(host: str, port: int) -> socket.socket:
     """先自己 bind/listen，拿到真实端口后再交给 uvicorn（``--open`` 依赖这一点）。"""
-    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM, flags=socket.AI_PASSIVE)
+    infos = socket.getaddrinfo(
+        host, port, type=socket.SOCK_STREAM, flags=socket.AI_PASSIVE
+    )
     family, socktype, proto, _canon, sockaddr = infos[0]
     sock = socket.socket(family, socktype, proto)
     try:
@@ -189,6 +199,12 @@ def run(args: argparse.Namespace) -> int:
         return 1
     try:
         store = _build_store(args)
+        if args.cleanup:
+            from babeldoc_tools.serve.cleanup import cleanup
+
+            sys.stderr.write(
+                json.dumps(cleanup(store.store_base), ensure_ascii=False) + "\n"
+            )
         if args.migrate:
             from babeldoc_tools.serve.migrate import migrate_root
 

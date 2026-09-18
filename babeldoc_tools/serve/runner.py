@@ -263,7 +263,9 @@ def _scrub_payload(payload: dict, profile: Profile) -> None:
 # --------------------------------------------------------------------------- #
 # 进程与管道
 # --------------------------------------------------------------------------- #
-def spawn_job(argv: list[str], workdir: Path) -> subprocess.Popen:
+def spawn_job(
+    argv: list[str], workdir: Path, *, environment: dict | None = None
+) -> subprocess.Popen:
     """在一个自有进程组里起子进程（取消时整组一起收）。
 
     ``start_new_session=True`` = ``setsid``：子进程成为新会话/进程组的组长，之后它
@@ -274,6 +276,7 @@ def spawn_job(argv: list[str], workdir: Path) -> subprocess.Popen:
     return subprocess.Popen(  # noqa: S603 - argv 由服务端构造，不经 shell
         argv,
         cwd=str(workdir),
+        env={**os.environ, **(environment or {})},
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -497,7 +500,9 @@ class JobRunner:
     只有一把草稿写锁。
     """
 
-    def __init__(self, store: DocumentStore, *, glossary: GlossaryStore | None = None) -> None:
+    def __init__(
+        self, store: DocumentStore, *, glossary: GlossaryStore | None = None
+    ) -> None:
         self.store = store
         self.registry = JobRegistry(store.store_base)
         self.drafts = DraftRegistry(store)
@@ -559,9 +564,10 @@ class JobRunner:
         """
         # 先过 store 的路径边界（不在服务范围内/越界 → 400/404，不进队列）。
         self.store.resolve(did)
-        if profile_id is not None and resolve_profile(
-            self.store.store_base, profile_id, thinking
-        ) is None:
+        if (
+            profile_id is not None
+            and resolve_profile(self.store.store_base, profile_id, thinking) is None
+        ):
             raise ToolError(
                 "unknown_profile",
                 f"未知 profile：{profile_id}",
@@ -571,8 +577,15 @@ class JobRunner:
         if reviewer_profile is not None:
             selected = resolve_profile(self.store.store_base, profile_id or "")
             reviewer = resolve_profile(self.store.store_base, reviewer_profile)
-            if not selected or not selected.model_profile or not reviewer or not reviewer.model_profile:
-                raise ToolError("forbidden_field", "reviewer_profile requires model configurations")
+            if (
+                not selected
+                or not selected.model_profile
+                or not reviewer
+                or not reviewer.model_profile
+            ):
+                raise ToolError(
+                    "forbidden_field", "reviewer_profile requires model configurations"
+                )
         async with self.registry.lock:
             active = self.registry.active_for_did(did)
             if active is not None:
@@ -635,6 +648,11 @@ class JobRunner:
             # running 记录不是本进程起的（重启恢复）。两种都**不发信号** —— 孤立 pid
             # 可能已经是别人的进程。前者以监控落的真实终态为准，后者如实置 interrupted。
             current = self.require(job_id)
+            if (
+                current.effective_scope in ("block", "export")
+                and current.status == "running"
+            ):
+                return self.registry.mark_cancel_requested(current)
             if (
                 current.status in TERMINAL_STATUSES
                 or current.boot_id == self.registry.boot_id
@@ -716,7 +734,9 @@ class JobRunner:
             await self._start_retranslate(record, workdir)
             return
         try:
-            profile = resolve_profile(self.store.store_base, record.profile or "", record.thinking)
+            profile = resolve_profile(
+                self.store.store_base, record.profile or "", record.thinking
+            )
             if profile is None:
                 self.registry.mark_finished(
                     record,
@@ -727,11 +747,16 @@ class JobRunner:
                 return
             if record.reviewer_profile:
                 reviewer = resolve_profile(
-                    self.store.store_base, record.reviewer_profile,
-                    record.thinking if record.reviewer_profile == record.profile else None,
+                    self.store.store_base,
+                    record.reviewer_profile,
+                    record.thinking
+                    if record.reviewer_profile == record.profile
+                    else None,
                 )
                 if reviewer is None or not reviewer.model_profile:
-                    raise ToolError("unknown_model", "Reviewer model configuration no longer exists")
+                    raise ToolError(
+                        "unknown_model", "Reviewer model configuration no longer exists"
+                    )
                 profile.reviewer = reviewer.translator
             argv = build_job_argv(
                 workdir=workdir,
@@ -742,7 +767,39 @@ class JobRunner:
                 profile=profile,
                 glossaries=self._glossary_path(record),
             )
-            proc = spawn_job(argv, workdir)
+            record.revision = self.drafts.for_did(record.did).read().revision
+            self.registry.save(record)
+            if record.action == "run" and record.from_stage not in ("check", "report"):
+                with self.store.database._lock, self.store.database.connection:
+                    self.store.database.connection.execute(
+                        "UPDATE exports SET status='previous' WHERE document_id=?",
+                        (record.did,),
+                    )
+                    if record.from_stage not in ("apply", "build"):
+                        for statement in (
+                            "DELETE FROM local_pages WHERE document_id=?",
+                            "DELETE FROM pages WHERE document_id=?",
+                            "DELETE FROM compile_blocks WHERE document_id=?",
+                        ):
+                            self.store.database.connection.execute(statement, (record.did,))
+                    if record.from_stage in (None, "parse", "extract"):
+                        self.store.database.connection.execute(
+                            "UPDATE parse_results SET status='pending' WHERE document_id=?",
+                            (record.did,),
+                        )
+                        self.store.database.connection.execute(
+                            "DELETE FROM blocks WHERE document_id=?", (record.did,)
+                        )
+            proc = spawn_job(
+                argv,
+                workdir,
+                environment={
+                    "BDT_SERVE_DATABASE": str(self.store.database.path),
+                    "BDT_SERVE_DOCUMENT": record.did,
+                    "BDT_SERVE_JOB": record.job_id,
+                    "BDT_SERVE_REVISION": str(record.revision),
+                },
+            )
         except (ToolError, OSError) as exc:
             self.registry.mark_finished(
                 record,
@@ -761,9 +818,7 @@ class JobRunner:
         并把同一个 error_code 写进 compile.json（详情端点也看得到）。
         """
         try:
-            plan = await asyncio.to_thread(
-                compile_mod.prepare_compile, record, workdir
-            )
+            plan = await asyncio.to_thread(compile_mod.prepare_compile, record, workdir)
         except ToolError as exc:
             compile_mod.write_failed_state(
                 workdir,
@@ -830,7 +885,9 @@ class JobRunner:
         ``failed``（``queued`` 已回复，失败只能在 job 记录里看到）。
         """
         store = self.candidates.for_did(record.did)
-        profile = resolve_profile(self.store.store_base, record.profile or "", record.thinking)
+        profile = resolve_profile(
+            self.store.store_base, record.profile or "", record.thinking
+        )
         if profile is None or not profile.translator:
             # 路由层已经校过；提交与启动之间 profile 被删/被改空 → 不 spawn，如实报错。
             await self._fail_retranslate_start(
@@ -987,9 +1044,7 @@ class JobRunner:
                 error_code = outcome.error_code
                 error_message = outcome.error_message
             # 落盘前脱敏：信封可能带 profile 命令（含密钥）与 debug 查看器 token URL。
-            text = (
-                sanitize_envelope(envelope[0], running.profile) if envelope else None
-            )
+            text = sanitize_envelope(envelope[0], running.profile) if envelope else None
             self.registry.mark_finished(
                 record,
                 status=status,
@@ -1025,9 +1080,16 @@ class JobRunner:
             from babeldoc_tools.serve.workdir import WorkdirReader
 
             workdir = self.store.resolve(did)
+            if self.store.allowed is None and (workdir / "source.pdf").is_file():
+                from babeldoc_tools.serve.migrate import migrate_root
+
+                migrate_root(self.store.root, document_ids=[did])
             self.store.database.upsert_blocks(
                 did,
-                [item.model_dump() for item in paragraphs(WorkdirReader(workdir), None)],
+                [
+                    item.model_dump()
+                    for item in paragraphs(WorkdirReader(workdir), None)
+                ],
             )
         except Exception:
             # Metadata is an index; the filesystem artifacts remain authoritative for

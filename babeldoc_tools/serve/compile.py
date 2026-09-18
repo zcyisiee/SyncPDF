@@ -312,9 +312,7 @@ def _materialize_draft(isolated: Path, doc: DraftDoc) -> int:
         if para.target is not None
     }
     merge_translated_markdown(isolated, targets)
-    patches = {
-        pid: para.layout for pid, para in doc.paragraphs.items() if para.layout
-    }
+    patches = {pid: para.layout for pid, para in doc.paragraphs.items() if para.layout}
     if patches:
         result = layout_overrides.apply_patch(
             isolated,
@@ -537,9 +535,7 @@ def _publish(plan: CompilePlan, pdfs: list[Path]) -> dict:
     target_dir.mkdir(parents=True, exist_ok=True)
     for source in pdfs:
         source.replace(target_dir / source.name)
-    primary = next(
-        (path for path in pdfs if ".mono." in path.name), pdfs[0]
-    )
+    primary = next((path for path in pdfs if ".mono." in path.name), pdfs[0])
     published = target_dir / primary.name
     artifact = {
         "name": primary.name,
@@ -622,8 +618,7 @@ def settle_compile(
             return _write_failure(
                 plan,
                 error_code=code or "build_failed",
-                message=message
-                or f"build 阶段未成功（子进程退出码 {exit_code}）",
+                message=message or f"build 阶段未成功（子进程退出码 {exit_code}）",
             )
         pdfs = sorted((plan.isolated / BUILD_OUTPUT_DIR).glob("*.pdf"))
         if not pdfs:
@@ -635,7 +630,8 @@ def settle_compile(
             )
         if read_draft(plan.workdir).revision != plan.revision:
             return _write_failure(
-                plan, error_code="stale_job",
+                plan,
+                error_code="stale_job",
                 message="草稿已更新：过期编译结果未发布，请编译当前 revision",
             )
         artifact = _publish(plan, pdfs)
@@ -734,13 +730,10 @@ class CompileService:
 
     # -------------------------------------------------------------- 防抖
     def schedule(self, did: str) -> None:
-        """草稿写成功后重置该 did 的防抖计时器（1.5s 后自动编译）。"""
+        """Compatibility hook: draft saves no longer trigger compilation."""
         previous = self._timers.pop(did, None)
-        if previous is not None and not previous.done():
+        if previous is not None:
             previous.cancel()
-        task = asyncio.get_running_loop().create_task(self._debounced(did))
-        self._timers[did] = task
-        task.add_done_callback(lambda done, key=did: self._forget(key, done))
 
     def _forget(self, did: str, task: asyncio.Task) -> None:
         """任务结束后摘掉登记（只摘自己，别误删后建的新计时器）。"""

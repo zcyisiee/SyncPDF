@@ -199,6 +199,7 @@ class JobRecord(BaseModel):
 
     job_id: str
     did: str
+    revision: int = 0
     #: W07 实现 ``run``（``bdt run --from <stage>``）与 ``check``（``--from check``）；
     #: W09 加 ``compile``（草稿编译：隔离副本里 apply+build，见
     #: :mod:`babeldoc_tools.serve.compile`）。``retranslate`` 仍是 W11，路由层 422。

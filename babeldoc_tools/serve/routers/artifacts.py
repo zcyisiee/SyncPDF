@@ -40,6 +40,27 @@ def artifacts_router(store: DocumentStore) -> APIRouter:
     """按 store 生成产物路由（与其它只读路由同风格）。"""
     router = APIRouter(prefix=API_PREFIX, tags=["documents"])
 
+    @router.get("/documents/{did}/assets/{digest}", response_class=FileResponse)
+    def get_asset(did: str, digest: str) -> FileResponse:
+        from babeldoc_tools.common import ToolError
+        from babeldoc_tools.serve.asset_store import AssetStore
+
+        store.resolve(did)
+        database = store.database
+        with database._lock:
+            allowed = database.connection.execute(
+                "SELECT 1 FROM local_previews WHERE document_id=? AND asset_sha256=? "
+                "UNION SELECT 1 FROM pages WHERE document_id=? AND page_asset=? "
+                "UNION SELECT 1 FROM exports WHERE document_id=? AND asset_sha256=?",
+                (did, digest, did, digest, did, digest),
+            ).fetchone()
+        if not allowed:
+            raise ToolError("artifact_not_found", "该 asset 不属于文档当前产物")
+        return FileResponse(
+            AssetStore(store.store_base, database).resolve(digest),
+            media_type="application/pdf",
+        )
+
     def workdir(did: str) -> Path:
         """did → workdir（did 校验与根目录约束全在 store 里）。"""
         return store.resolve(did)

@@ -1,3 +1,4 @@
+import { usePersistentEvents } from '../lib/usePersistentEvents';
 import { describeApiError } from '../lib/api';
 import { compileUnsettled } from '../lib/download';
 import { isRunLive } from '../lib/events';
@@ -35,6 +36,7 @@ const STAGE_STATE_LIVE_REFETCH_MS = 2_000;
  * 三条分隔条宽度由 `--vrw`/`--inspw`/`--tlh` 驱动（写在本容器行内 style 上）。
  */
 export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchView }) {
+  usePersistentEvents(did);
   // job_update（W14）：收到就立刻失效对应查询，并把“刚推过”的时间戳交给 useJobs 做轮询节流。
   const jobUpdates = useJobUpdates(did);
   // jobs 轮询（W08/W14）：有 queued/running 时 5s（SSE 的 job_update 是快路径），否则 30s；

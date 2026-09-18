@@ -237,7 +237,9 @@ def job_diagnostics(record: dict, root: Path | None = None) -> str:
         if events.is_file():
             tail = events.read_text(encoding="utf-8").splitlines()[-6:]
             lines.append("jobs.jsonl 末尾：\n" + "\n".join(tail))
-            lines.append(f"workdir 内容：{sorted(path.name for path in root.iterdir())}")
+            lines.append(
+                f"workdir 内容：{sorted(path.name for path in root.iterdir())}"
+            )
     return "\n".join(lines)
 
 
@@ -561,8 +563,10 @@ def test_timeout_kills_process_group_and_reports_timed_out(
     client, root, stubs, monkeypatch
 ):
     """job 级超时（服务端护栏）走取消路径：杀进程组 + ``timed_out``，不假装成功。"""
-    monkeypatch.setattr(runner_module, "JOB_TIMEOUT_SECONDS", 1.0)
-    monkeypatch.setattr(runner_module, "CHECK_TIMEOUT_SECONDS", 1.0)
+    # Allow cold Python/provider imports before the stub can create its child.
+    # The stub sleeps for 300 seconds, so this still exercises the timeout kill.
+    monkeypatch.setattr(runner_module, "JOB_TIMEOUT_SECONDS", 5.0)
+    monkeypatch.setattr(runner_module, "CHECK_TIMEOUT_SECONDS", 5.0)
     job_id, pidfile = start_slow_job(client, root, stubs)
     grandchild = wait_pidfile(pidfile)
 

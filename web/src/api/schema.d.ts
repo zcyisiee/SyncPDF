@@ -177,9 +177,26 @@ export interface paths {
         };
         /**
          * 事件实时流（SSE）
-         * @description text/event-stream：每条形如 `event: <kind>` / `id: <run_id>:<seq>` / `data: <事件 JSON>`；15s 无事件发一行 `: ping` 注释。断线续传用 Last-Event-ID（`<run_id>:<seq>`）或 `?after_seq=`；换 run 时必须带新的 ?run_id=。没有 run 归档 → 404 events_unavailable（错误走统一 JSON 信封，不是 SSE 帧）。
+         * @description text/event-stream：每条形如 `event: <kind>` / `id: <run_id>:<seq>` / `data: <事件 JSON>`；15s 无事件发一行 `: ping` 注释。**同一条流还带虚拟 kind `job_update`**（该文档的 job 状态变化：`event: job_update` + `id: <job_id>:<第 n 次变化>` + `data: {kind,data:{job_id,action,status,from_stage,error_code}}`，纯通知不落盘，无订阅者即丢弃；job 的真相在 `GET /jobs/{jid}` 与 `jobs.jsonl`）。断线续传用 Last-Event-ID（`<run_id>:<seq>`；job 命名空间不是 run 游标，会被忽略）或 `?after_seq=`；换 run 时必须带新的 ?run_id=。没有 run 归档 → 404 events_unavailable（错误走统一 JSON 信封，不是 SSE 帧；那时前端靠 job 轮询）
          */
         get: operations["stream_events_api_v1_documents__did__events_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{did}/assets/{digest}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Asset */
+        get: operations["get_asset_api_v1_documents__did__assets__digest__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -246,6 +263,57 @@ export interface paths {
          * @description 以子进程跑 `bdt run`（同文档串行：已有活动 job → 409 document_busy；全局最多 2 个并发，超出排队 queued）。202 的 status 恒为 queued，真实状态轮询 GET /jobs/{jid}。`compile`（W09）在隔离副本里跑apply+build 并原子发布 PDF：`scope=pages` 按已批准设计回退全量（记录 requested_scope/effective_scope/downgrade_reason），`base_revision` 与当前草稿不一致 → 409 revision_conflict。retranslate 未实现 → 422 action_not_available。客户端只能给action/from/pages/dual/profile/scope/base_revision：translator/reviewer/timeout 之类一律 422 forbidden_field。
          */
         post: operations["create_job_api_v1_documents__did__jobs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{did}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 导出当前 revision */
+        post: operations["export_document_api_v1_documents__did__export_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{did}/exports/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 下载最新成功导出 */
+        get: operations["latest_export_api_v1_documents__did__exports_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{did}/blocks/{block_id}/compile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 编译单个 block */
+        post: operations["compile_block_api_v1_documents__did__blocks__block_id__compile_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -464,6 +532,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Models */
+        get: operations["list_models_api_v1_models_get"];
+        /** Put Model */
+        put: operations["put_model_api_v1_models_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/models/{model_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Model */
+        get: operations["get_model_api_v1_models__model_id__get"];
+        put?: never;
+        post?: never;
+        /** Remove Model */
+        delete: operations["remove_model_api_v1_models__model_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/models/{model_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Model
+         * @description Send a short generation request. May incur provider charges.
+         */
+        post: operations["test_model_api_v1_models__model_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/glossary": {
         parameters: {
             query?: never;
@@ -616,6 +740,8 @@ export interface components {
          *     文本"v1 不接受（提示词由服务端拼，见 §3.6）。
          */
         CandidateRetranslateRequest: {
+            /** Thinking */
+            thinking?: string | null;
             /**
              * Profile
              * @description provider profile id（候选生成只用它的 translator 命令）；必填（缺 → 422 profile_missing），未知 id → 422 unknown_profile，该 profile 没配 translator → 422 profile_missing
@@ -731,6 +857,15 @@ export interface components {
             };
             /** Updated At */
             updated_at?: string | null;
+            /**
+             * Revision
+             * @default 0
+             */
+            revision: number;
+            /** Preview Asset */
+            preview_asset?: string | null;
+            /** Export Revision */
+            export_revision?: number | null;
             pdf: components["schemas"]["DocumentPdf"];
             /** Config */
             config?: {
@@ -1067,6 +1202,10 @@ export interface components {
              * @description provider profile id（命令由服务端解析，永不回传）；action=run/check 必填，action=compile 不需要（不调翻译/审查）
              */
             profile?: string | null;
+            /** Reviewer Profile */
+            reviewer_profile?: string | null;
+            /** Thinking */
+            thinking?: string | null;
             /**
              * Scope
              * @description 编译范围（只对 action=compile 有效，缺省 full）；v1 页级编译按已批准设计回退全量，响应/记录里给 requested_scope/effective_scope/downgrade_reason
@@ -1098,6 +1237,11 @@ export interface components {
             /** Did */
             did: string;
             /**
+             * Revision
+             * @default 0
+             */
+            revision: number;
+            /**
              * Action
              * @enum {string}
              */
@@ -1118,6 +1262,10 @@ export interface components {
             from_stage?: string | null;
             /** Profile */
             profile?: string | null;
+            /** Reviewer Profile */
+            reviewer_profile?: string | null;
+            /** Thinking */
+            thinking?: string | null;
             /** Pages */
             pages?: string | null;
             /**
@@ -1215,6 +1363,17 @@ export interface components {
             has_translator: boolean;
             /** Has Reviewer */
             has_reviewer: boolean;
+            /**
+             * Builtin
+             * @default false
+             */
+            builtin: boolean;
+            /** Model */
+            model?: string | null;
+            /** Thinking Levels */
+            thinking_levels?: string[];
+            /** Default Thinking */
+            default_thinking?: string | null;
         };
         /**
          * ProfileUpdateRequest
@@ -1730,6 +1889,7 @@ export interface operations {
     stream_events_api_v1_documents__did__events_stream_get: {
         parameters: {
             query?: {
+                persistent?: boolean;
                 /** @description 扫描起点：只返回 seq 大于它的事件（同一 run 内有意义） */
                 after_seq?: number | null;
                 /** @description run id（默认最新 run）；形状必须是 <UTC时间戳>Z-<6位十六进制> */
@@ -1755,6 +1915,36 @@ export interface operations {
                 content: {
                     "text/event-stream": unknown;
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_asset_api_v1_documents__did__assets__digest__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                did: string;
+                digest: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -1915,6 +2105,117 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    export_document_api_v1_documents__did__export_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文档 id：workdir 目录名（单段，解析结果必须在服务根目录内） */
+                did: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                } | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobAccepted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    latest_export_api_v1_documents__did__exports_latest_get: {
+        parameters: {
+            query?: {
+                allow_previous?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description 文档 id：workdir 目录名（单段，解析结果必须在服务根目录内） */
+                did: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compile_block_api_v1_documents__did__blocks__block_id__compile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文档 id：workdir 目录名（单段，解析结果必须在服务根目录内） */
+                did: string;
+                block_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                } | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobAccepted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
@@ -2453,6 +2754,137 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    list_models_api_v1_models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    put_model_api_v1_models_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_model_api_v1_models__model_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_model_api_v1_models__model_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_model_api_v1_models__model_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

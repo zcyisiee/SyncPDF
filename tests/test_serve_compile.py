@@ -213,7 +213,9 @@ def patch_draft(client, target: str = "改后的译文", *, base: int, layout=No
 
 
 def post_compile(client, did: str = "alpha", **body) -> tuple[int, dict]:
-    response = client.post(f"{API}/documents/{did}/jobs", json={"action": "compile", **body})
+    response = client.post(
+        f"{API}/documents/{did}/jobs", json={"action": "compile", **body}
+    )
     return response.status_code, response.json()
 
 
@@ -246,7 +248,11 @@ def wait_job(
 
 
 def wait_compile_status(
-    client, did: str = "alpha", statuses: set[str] = frozenset({"ok"}), *, timeout=WAIT_SECONDS
+    client,
+    did: str = "alpha",
+    statuses: set[str] = frozenset({"ok"}),
+    *,
+    timeout=WAIT_SECONDS,
 ) -> dict:
     """轮询详情端点的 ``compile`` 字段直到落进 ``statuses``。"""
     body = client.get(f"{API}/documents/{did}").json()
@@ -331,7 +337,9 @@ def test_compile_materialises_draft_into_the_copy_only(client, root):
     patch_draft(client, "草稿译文", base=0, layout={"font_scale": 1.1})
     job_id = start_compile(client)
     wait_job(client, job_id, {"succeeded"})
-    assert (workdir(root) / "agent" / "translated.md").read_text(encoding="utf-8") == before
+    assert (workdir(root) / "agent" / "translated.md").read_text(
+        encoding="utf-8"
+    ) == before
 
 
 # --------------------------------------------------------------------------- #
@@ -489,7 +497,9 @@ def test_prepare_compile_materialises_into_the_copy_only(tmp_path):
         assert "[[S1]]附录 [[/S1]]草稿改后的译文" in body
         assert "<style id='1'>" not in body  # 副本里必须是锚点形式
         overrides = json.loads(
-            (plan.isolated / "agent" / "layout_overrides.json").read_text(encoding="utf-8")
+            (plan.isolated / "agent" / "layout_overrides.json").read_text(
+                encoding="utf-8"
+            )
         )
         assert overrides["paragraphs"][PID]["font_scale"] == 1.05
         # 源 PDF 落到 TranslationConfig 的工作目录约定位置，state.pkl 已重指
@@ -503,7 +513,9 @@ def test_prepare_compile_materialises_into_the_copy_only(tmp_path):
     finally:
         shutil.rmtree(plan.isolated, ignore_errors=True)
     # 真 workdir 的译文一个字节都没动
-    assert (workdir_path / "agent" / "translated.md").read_text(encoding="utf-8") == before
+    assert (workdir_path / "agent" / "translated.md").read_text(
+        encoding="utf-8"
+    ) == before
     assert not (workdir_path / "agent" / "layout_overrides.json").exists()
 
 
@@ -593,17 +605,14 @@ def test_patch_during_active_compile_is_409_document_busy(client, control):
 # --------------------------------------------------------------------------- #
 # 防抖
 # --------------------------------------------------------------------------- #
-def test_debounce_triggers_exactly_one_compile(client, root, monkeypatch):
+def test_draft_save_never_auto_compiles(client, root, monkeypatch):
     monkeypatch.setattr(compile_mod, "DEBOUNCE_SECONDS", 0.2)
     patch_draft(client, "改后的译文", base=0, layout={"font_scale": 1.05})
 
-    body = wait_compile_status(client, statuses={"ok"})
-    assert body["compile"]["revision"] == 1
-    jobs = compile_jobs(client)
-    assert len(jobs) == 1
-    assert jobs[0]["status"] == "succeeded"
-    assert jobs[0]["requested_scope"] == "full"
-    assert output_pdf(root).read_bytes() == PDF_OK
+    time.sleep(0.3)
+    assert compile_jobs(client) == []
+    assert client.get(f"{API}/documents/alpha/draft").json()["revision"] == 1
+    assert not output_pdf(root).exists()
 
 
 def test_two_quick_patches_reset_the_timer(client, monkeypatch):
@@ -612,9 +621,9 @@ def test_two_quick_patches_reset_the_timer(client, monkeypatch):
     time.sleep(0.15)  # 计时器还没到点 → 被下一次 PATCH 重置
     patch_draft(client, "第二版", base=1)
 
-    body = wait_compile_status(client, statuses={"ok"})
-    assert body["compile"]["revision"] == 2  # 编译的是最后那一版草稿
-    assert len(compile_jobs(client)) == 1
+    time.sleep(0.5)
+    assert client.get(f"{API}/documents/alpha/draft").json()["revision"] == 2
+    assert compile_jobs(client) == []
 
 
 def test_debounce_skips_while_an_explicit_compile_runs(client, control, monkeypatch):
@@ -633,17 +642,16 @@ def test_debounce_skips_while_an_explicit_compile_runs(client, control, monkeypa
     wait_job(client, explicit, {"canceled"})
 
 
-def test_delete_draft_also_schedules_a_compile(client, root, monkeypatch):
+def test_delete_draft_never_auto_compiles(client, root, monkeypatch):
     monkeypatch.setattr(compile_mod, "DEBOUNCE_SECONDS", 0.2)
     patch_draft(client, base=0)
     response = client.delete(f"{API}/documents/alpha/draft")
     assert response.status_code == 200
 
-    body = wait_compile_status(client, statuses={"ok"})
-    assert body["compile"]["revision"] == 2  # DELETE 也 +1
-    jobs = compile_jobs(client)
-    assert [job["status"] for job in jobs][0] in {"queued", "running", "succeeded"}
-    assert output_pdf(root).read_bytes() == PDF_OK
+    time.sleep(0.3)
+    assert client.get(f"{API}/documents/alpha/draft").json()["revision"] == 2
+    assert compile_jobs(client) == []
+    assert not output_pdf(root).exists()
 
 
 # --------------------------------------------------------------------------- #
@@ -682,7 +690,9 @@ def test_restart_settles_a_running_compile_state(root):
         assert state["status"] == "failed"
         assert state["error_code"] == "server_restart"
         assert state["revision_attempted"] == 3
-        assert client.get(f"{API}/documents/alpha").json()["compile"]["status"] == "failed"
+        assert (
+            client.get(f"{API}/documents/alpha").json()["compile"]["status"] == "failed"
+        )
 
 
 def test_new_root_gets_no_state_files(root):
@@ -794,18 +804,19 @@ def test_trigger_marks_debounce_and_manual_compiles(client, root, monkeypatch):
     """``trigger`` 区分防抖自动与显式 POST（job 记录与版本清单两头都有）。"""
     monkeypatch.setattr(compile_mod, "DEBOUNCE_SECONDS", 0.2)
     patch_draft(client, "自动编译的草稿", base=0)
-    wait_compile_status(client, statuses={"ok"})
+    time.sleep(0.3)
+    assert compile_jobs(client) == []
 
-    # 第二次：关掉防抖（拉长窗口），只用显式 POST
+    # Only explicit requests create compile jobs.
     monkeypatch.setattr(compile_mod, "DEBOUNCE_SECONDS", 60.0)
     patch_draft(client, "手动编译的草稿", base=1)
     wait_job(client, start_compile(client), {"succeeded"})
 
     jobs = compile_jobs(client)
-    assert [job["trigger"] for job in jobs] == ["manual", "debounce"]  # 新 → 旧
-    assert [row["trigger"] for row in version_items(root)] == ["debounce", "manual"]
+    assert [job["trigger"] for job in jobs] == ["manual"]
+    assert [row["trigger"] for row in version_items(root)] == ["manual"]
     listed = client.get(f"{API}/documents/alpha/versions").json()
-    assert [item["trigger"] for item in listed["items"]] == ["manual", "debounce"]
+    assert [item["trigger"] for item in listed["items"]] == ["manual"]
 
 
 def test_archive_failure_still_reports_a_successful_publish(client, root, monkeypatch):

@@ -42,6 +42,7 @@ import { ErrorCard } from '../ui/ErrorCard';
 import { BboxEditor } from '../edit/BboxEditor';
 import { pdfToScreen, type PdfPointViewport, type ScreenViewport } from './BboxLayer';
 import { CompileBar } from './CompileBar';
+import { ExportButton } from './ExportButton';
 import { DownloadButton } from './DownloadButton';
 import { ContinuousPdfPane, type BboxPaneData, type ReaderPosition } from './ContinuousPdfPane';
 import type { PdfPageInfo } from './PdfCanvas';
@@ -68,7 +69,7 @@ function DocumentPreview({ did, view, streamArtifact }: PreviewProps) {
   const compile = detailQuery.data?.compile ?? null;
   const busyJob = activeJob(jobsQuery.data);
   // 契约也会挡（409 document_busy），这里提前置只读：编译中就不要让人白改
-  const editingLocked = compile?.status === 'running' || busyJob !== null;
+  const editingLocked = compile?.status === 'running' || (busyJob !== null && busyJob.effective_scope !== 'block');
   const editingLockedReason =
     compile?.status === 'running'
       ? '编译中…：编译结束后可继续编辑'
@@ -129,7 +130,8 @@ function DocumentPreview({ did, view, streamArtifact }: PreviewProps) {
     enterPreviewView(view);
   }, [view, enterPreviewView]);
 
-  const targetUrl = streamArtifact ? artifactUrl(did, streamArtifact) :
+  const localPreview = detailQuery.data?.preview_asset;
+  const targetUrl = localPreview ? `/api/v1/documents/${encodeURIComponent(did)}/assets/${localPreview}` : streamArtifact ? artifactUrl(did, streamArtifact) :
     target === null
       ? null
       : withArtifactRevision(
@@ -256,9 +258,10 @@ function DocumentPreview({ did, view, streamArtifact }: PreviewProps) {
       paged={primaryUrl !== null}
       onPageChange={navigate}
       onBboxModeChange={chooseBboxMode}
-      download={
+      download={<>
+        <ExportButton did={did} />
         <DownloadButton did={did} compile={compile} quality={detailQuery.data?.quality ?? null} />
-      }
+      </>}
     />
   );
 

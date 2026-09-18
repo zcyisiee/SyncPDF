@@ -282,7 +282,7 @@ export function ParagraphEditor({
           </Button>
           <Button
             data-od-id="paragraph-compile"
-            disabled={disabled || paragraph === null || compileMutation.isPending}
+            disabled={disabled || paragraph === null || dirty || patchMutation.isPending || compileMutation.isPending}
             onClick={() => compileMutation.mutate(revision)}
           >
             {compileMutation.isPending ? '正在提交编译…' : '编译此块'}

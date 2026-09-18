@@ -495,6 +495,7 @@ def test_events_openapi_declares_sse_and_get_only(client):
         "after_seq": "query",
         "run_id": "query",
         "Last-Event-ID": "header",
+        "persistent": "query",
     }
 
     page_params = {

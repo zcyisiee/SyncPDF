@@ -101,13 +101,16 @@ def _make_workdir(root: Path, did: str) -> Path:
     (agent / "translated.md").write_text(
         "<!--MD_HEADER-->\n\n"
         + "".join(
-            f"<!-- id={row['id']} label=text -->\n旧译文 {row['id']}\n\n" for row in rows
+            f"<!-- id={row['id']} label=text -->\n旧译文 {row['id']}\n\n"
+            for row in rows
         ),
         encoding="utf-8",
     )
     (agent / "translated.jsonl").write_text(
         "".join(
-            json.dumps({"id": row["id"], "target": f"基线译文 {row['id']}"}, ensure_ascii=False)
+            json.dumps(
+                {"id": row["id"], "target": f"基线译文 {row['id']}"}, ensure_ascii=False
+            )
             + "\n"
             for row in rows
         ),
@@ -194,7 +197,9 @@ def client(root: Path, monkeypatch):
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
-def retranslate(client, did: str = "alpha", pid: str = PID, profile: str | None = "stub"):
+def retranslate(
+    client, did: str = "alpha", pid: str = PID, profile: str | None = "stub"
+):
     body: dict[str, object] = {} if profile is None else {"profile": profile}
     return client.post(f"{API}/documents/{did}/paragraphs/{pid}/retranslate", json=body)
 
@@ -246,7 +251,9 @@ def wait_candidate_target(
     raise AssertionError(f"候选一直没有拿到 candidate_target：{items}")
 
 
-def wait_compile_job(client, did: str = "alpha", *, timeout: float = 30.0) -> dict | None:
+def wait_compile_job(
+    client, did: str = "alpha", *, timeout: float = 30.0
+) -> dict | None:
     """等防抖编译 job 出现（不等它跑完 —— 真 build 分钟级）。"""
     for _ in range(max(1, int(timeout / POLL_SECONDS))):
         response = client.get(f"{API}/documents/{did}/jobs")
@@ -346,8 +353,14 @@ def test_candidates_are_listed_newest_pending_first(client):
     wait_job(client, second["job_id"], {"succeeded"})
 
     items = candidates(client)
-    assert [item["id"] for item in items] == [second["candidate_id"], first["candidate_id"]]
-    assert [item["candidate_target"] for item in items] == ["候选乙（stub）", "候选甲（stub）"]
+    assert [item["id"] for item in items] == [
+        second["candidate_id"],
+        first["candidate_id"],
+    ]
+    assert [item["candidate_target"] for item in items] == [
+        "候选乙（stub）",
+        "候选甲（stub）",
+    ]
     # 另一个段落的候选不受影响
     assert candidates(client, pid=OTHER_PID) == []
 
@@ -396,8 +409,8 @@ def test_adopt_is_blocked_while_generating(client):
 # --------------------------------------------------------------------------- #
 # 采用：写草稿 + 防抖
 # --------------------------------------------------------------------------- #
-def test_adopt_writes_draft_and_triggers_debounce(client, root, monkeypatch):
-    """采用 = 写草稿 target（revision+1）+ 标 adopted + 1.5s 防抖编译。"""
+def test_adopt_writes_draft_without_auto_compile(client, root, monkeypatch):
+    """采用写草稿并增加 revision；编译需要用户明确触发。"""
     monkeypatch.setattr(compile_mod, "DEBOUNCE_SECONDS", 0.2)
     before = fingerprint(workdir_of(root))
 
@@ -423,19 +436,19 @@ def test_adopt_writes_draft_and_triggers_debounce(client, root, monkeypatch):
         "agent/anchors.json",
         "output/paper.mono.pdf",
     ):
-        assert adopted_fingerprint[relative] == before[relative], f"{relative} 被采用改了"
-    assert adopted_fingerprint[".bdt-serve/draft.json"] != before[".bdt-serve/draft.json"]
+        assert adopted_fingerprint[relative] == before[relative], (
+            f"{relative} 被采用改了"
+        )
+    assert (
+        adopted_fingerprint[".bdt-serve/draft.json"] != before[".bdt-serve/draft.json"]
+    )
 
     adopted = candidates(client)
     assert adopted[0]["id"] == candidate["id"]
     assert adopted[0]["status"] == "adopted"
     assert adopted[0]["adopted_at"] is not None
 
-    # 防抖编译：1.5s（这里 0.2s）后出现 compile job；不等它跑完，直接取消
-    job = wait_compile_job(client)
-    assert job is not None, "采用候选后应触发防抖编译"
-    assert job["action"] == "compile"
-    cancel_active(client)
+    assert wait_compile_job(client, timeout=0.4) is None
 
 
 def test_adopt_is_idempotent_guard_and_uses_current_revision(client):
@@ -547,7 +560,9 @@ def test_unknown_paragraph_and_candidate_are_404(client):
     assert listed.json()["error"]["code"] == "paragraph_not_found"
 
     for verb in ("adopt", "reject"):
-        missing = client.post(f"{API}/documents/alpha/paragraphs/{PID}/candidates/c_9999/{verb}")
+        missing = client.post(
+            f"{API}/documents/alpha/paragraphs/{PID}/candidates/c_9999/{verb}"
+        )
         assert missing.status_code == 404, missing.text
         assert missing.json()["error"]["code"] == "candidate_not_found"
 

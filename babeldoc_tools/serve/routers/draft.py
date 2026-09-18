@@ -48,7 +48,7 @@ def draft_router(runner: JobRunner, compiles: CompileService) -> APIRouter:
     def reject_busy(did: str) -> None:
         """活动 job 期间编辑只读 → ``409 document_busy``（detail 指向那个 job）。"""
         active = runner.registry.active_for_did(did)
-        if active is None:
+        if active is None or active.effective_scope == "block":
             return
         raise ToolError(
             "document_busy",

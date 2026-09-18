@@ -4,6 +4,7 @@ The filesystem remains the asset payload store.  This module owns durable metada
 revision fencing, and the append-only event stream used by newer API consumers.
 It is deliberately dependency-free so ``bdt`` keeps working without web extras.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -13,11 +14,14 @@ import threading
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS translation_blocks (document_id TEXT NOT NULL, block_id TEXT NOT NULL, job_id TEXT NOT NULL, revision INTEGER NOT NULL, target TEXT NOT NULL, PRIMARY KEY(document_id,block_id));
+CREATE TABLE IF NOT EXISTS local_previews (document_id TEXT PRIMARY KEY, asset_sha256 TEXT NOT NULL, revision INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS local_pages (document_id TEXT NOT NULL, page INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(document_id,page));
 CREATE TABLE IF NOT EXISTS drafts (document_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, payload TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS job_snapshots (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS papers (id TEXT PRIMARY KEY, title TEXT, authors TEXT, doi TEXT, arxiv TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -35,6 +39,7 @@ CREATE INDEX IF NOT EXISTS idx_documents_sha ON documents(pdf_sha256);
 CREATE INDEX IF NOT EXISTS idx_job_events_document ON job_events(document_id, id);
 """
 
+
 class MetadataDB:
     def __init__(self, base: Path | str):
         self.path = Path(base) / "app.db"
@@ -44,7 +49,10 @@ class MetadataDB:
         self._connection.row_factory = sqlite3.Row
         self._connection.execute("PRAGMA foreign_keys=ON")
         self._connection.executescript(_SCHEMA)
-        self._connection.execute("INSERT OR IGNORE INTO schema_migrations(version) VALUES (?)", (SCHEMA_VERSION,))
+        self._connection.execute(
+            "INSERT OR IGNORE INTO schema_migrations(version) VALUES (?)",
+            (SCHEMA_VERSION,),
+        )
         self._connection.commit()
 
     @property
@@ -57,32 +65,68 @@ class MetadataDB:
 
     def document_by_hash(self, digest: str) -> sqlite3.Row | None:
         with self._lock:
-            return self._connection.execute("SELECT * FROM documents WHERE pdf_sha256=?", (digest,)).fetchone()
+            return self._connection.execute(
+                "SELECT * FROM documents WHERE pdf_sha256=?", (digest,)
+            ).fetchone()
 
-    def register_document(self, did: str, digest: str, size: int, relative_path: str = "source.pdf") -> None:
+    def register_document(
+        self, did: str, digest: str, size: int, relative_path: str = "source.pdf"
+    ) -> None:
         with self._lock, self._connection:
-            self._connection.execute("INSERT OR IGNORE INTO papers(id) VALUES (?)", (did,))
-            self._connection.execute("INSERT OR IGNORE INTO documents(id,paper_id,pdf_sha256,byte_size) VALUES (?,?,?,?)", (did,did,digest,size))
-            self._connection.execute("INSERT OR IGNORE INTO assets(sha256,relative_path,kind,byte_size) VALUES (?,?,?,?)", (digest,relative_path,"source",size))
+            self._connection.execute(
+                "INSERT OR IGNORE INTO papers(id) VALUES (?)", (did,)
+            )
+            self._connection.execute(
+                "INSERT OR IGNORE INTO documents(id,paper_id,pdf_sha256,byte_size) VALUES (?,?,?,?)",
+                (did, did, digest, size),
+            )
+            self._connection.execute(
+                "INSERT OR IGNORE INTO assets(sha256,relative_path,kind,byte_size) VALUES (?,?,?,?)",
+                (digest, relative_path, "source", size),
+            )
 
     def save_draft(self, did: str, payload: dict, *, expected_revision: int) -> None:
         from babeldoc_tools.common import ToolError
 
         with self._lock, self._connection:
             self._connection.execute("BEGIN IMMEDIATE")
-            row = self._connection.execute("SELECT revision FROM drafts WHERE document_id=?", (did,)).fetchone()
+            row = self._connection.execute(
+                "SELECT revision FROM drafts WHERE document_id=?", (did,)
+            ).fetchone()
             current = int(row[0]) if row else expected_revision
             if current != expected_revision:
-                raise ToolError("revision_conflict", "草稿已被其它会话修改", current_revision=current)
-            self._connection.execute("INSERT OR REPLACE INTO drafts VALUES (?,?,?)", (did,payload["revision"],json.dumps(payload,ensure_ascii=False)))
-            self._connection.execute("UPDATE documents SET revision=? WHERE id=?", (payload["revision"],did))
-            self._connection.execute("DELETE FROM block_edits WHERE document_id=?", (did,))
+                raise ToolError(
+                    "revision_conflict",
+                    "草稿已被其它会话修改",
+                    current_revision=current,
+                )
+            self._connection.execute(
+                "INSERT OR REPLACE INTO drafts VALUES (?,?,?)",
+                (did, payload["revision"], json.dumps(payload, ensure_ascii=False)),
+            )
+            self._connection.execute(
+                "UPDATE documents SET revision=? WHERE id=?", (payload["revision"], did)
+            )
+            self._connection.execute(
+                "DELETE FROM block_edits WHERE document_id=?", (did,)
+            )
             for pid, paragraph in payload["paragraphs"].items():
-                self._connection.execute("INSERT INTO block_edits(document_id,block_id,target,bbox,manual,revision) VALUES (?,?,?,?,1,?)", (did,pid,paragraph.get("target"),json.dumps(paragraph.get("layout")),payload["revision"]))
+                self._connection.execute(
+                    "INSERT INTO block_edits(document_id,block_id,target,bbox,manual,revision) VALUES (?,?,?,?,1,?)",
+                    (
+                        did,
+                        pid,
+                        paragraph.get("target"),
+                        json.dumps(paragraph.get("layout")),
+                        payload["revision"],
+                    ),
+                )
 
     def draft(self, did: str) -> dict | None:
         with self._lock:
-            row = self._connection.execute("SELECT payload FROM drafts WHERE document_id=?", (did,)).fetchone()
+            row = self._connection.execute(
+                "SELECT payload FROM drafts WHERE document_id=?", (did,)
+            ).fetchone()
             return json.loads(row[0]) if row else None
 
     def upsert_blocks(self, did: str, rows: list[dict[str, Any]]) -> None:
@@ -90,37 +134,152 @@ class MetadataDB:
             for row in rows:
                 self._connection.execute(
                     "INSERT OR REPLACE INTO blocks(id,document_id,page,source,original_bbox,layout) VALUES (?,?,?,?,?,?)",
-                    (row.get("id"), did, row.get("page"), row.get("source"), json.dumps((row.get("geometry") or {}).get("src_box")), json.dumps(row.get("geometry"))),
+                    (
+                        row.get("id"),
+                        did,
+                        row.get("page"),
+                        row.get("source"),
+                        json.dumps((row.get("geometry") or {}).get("src_box")),
+                        json.dumps(row.get("geometry")),
+                    ),
                 )
+                if row.get("target") is not None:
+                    self._connection.execute(
+                        "INSERT OR REPLACE INTO translation_blocks VALUES (?,?,?,?,?)",
+                        (did, row["id"], "indexed", self.revision(did), row["target"]),
+                    )
 
     def save_job(self, payload: dict) -> None:
         with self._lock, self._connection:
-            self._connection.execute("INSERT OR REPLACE INTO job_snapshots VALUES (?,?)", (payload["job_id"],json.dumps(payload,ensure_ascii=False)))
-            self._connection.execute("INSERT INTO jobs(id,document_id,action,status,from_stage,revision,error) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,error=excluded.error,updated_at=CURRENT_TIMESTAMP", (payload["job_id"],payload["did"],payload["action"],payload["status"],payload.get("from_stage"),payload.get("revision",0),payload.get("error_message")))
+            self._connection.execute(
+                "INSERT OR REPLACE INTO job_snapshots VALUES (?,?)",
+                (payload["job_id"], json.dumps(payload, ensure_ascii=False)),
+            )
+            self._connection.execute(
+                "INSERT INTO jobs(id,document_id,action,status,from_stage,revision,error) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,error=excluded.error,updated_at=CURRENT_TIMESTAMP",
+                (
+                    payload["job_id"],
+                    payload["did"],
+                    payload["action"],
+                    payload["status"],
+                    payload.get("from_stage"),
+                    payload.get("revision", 0),
+                    payload.get("error_message"),
+                ),
+            )
 
     def job_snapshots(self) -> list[dict]:
         with self._lock:
-            return [json.loads(row[0]) for row in self._connection.execute("SELECT payload FROM job_snapshots")]
+            return [
+                json.loads(row[0])
+                for row in self._connection.execute("SELECT payload FROM job_snapshots")
+            ]
 
     def set_revision(self, did: str, revision: int) -> None:
         with self._lock, self._connection:
-            self._connection.execute("UPDATE documents SET revision=? WHERE id=?", (revision,did))
+            self._connection.execute(
+                "UPDATE documents SET revision=? WHERE id=?", (revision, did)
+            )
 
     def revision(self, did: str) -> int:
         with self._lock:
-            row = self._connection.execute("SELECT revision FROM documents WHERE id=?", (did,)).fetchone()
+            row = self._connection.execute(
+                "SELECT revision FROM documents WHERE id=?", (did,)
+            ).fetchone()
             return int(row[0]) if row else 0
 
-    def append_event(self, job_id: str, did: str, event_type: str, data: dict[str, Any], *, block_id: str | None = None, page: int | None = None) -> int:
+    def commit_translation(
+        self,
+        job_id: str,
+        did: str,
+        revision: int,
+        pid: str,
+        target: str,
+        progress: dict,
+    ) -> bool:
+        """Validated complete block + progress + event are one atomic commit."""
         with self._lock, self._connection:
-            row = self._connection.execute("SELECT COALESCE(MAX(seq),0)+1 FROM job_events WHERE job_id=?", (job_id,)).fetchone()
+            self._connection.execute("BEGIN IMMEDIATE")
+            draft = self.draft(did) or {"revision": 0, "paragraphs": {}}
+            if draft["revision"] != revision:
+                return False
+            row = self._connection.execute(
+                "SELECT payload FROM job_snapshots WHERE id=?", (job_id,)
+            ).fetchone()
+            job = json.loads(row[0]) if row else {}
+            if job.get("status") not in ("queued", "running") or job.get(
+                "cancel_requested_at"
+            ):
+                return False
+            manual = draft["paragraphs"].get(pid) or {}
+            if manual.get("target") is None:
+                self._connection.execute(
+                    "INSERT OR REPLACE INTO translation_blocks VALUES (?,?,?,?,?)",
+                    (did, pid, job_id, revision, target),
+                )
+            seq = self._connection.execute(
+                "SELECT COALESCE(MAX(seq),0)+1 FROM job_events WHERE job_id=?",
+                (job_id,),
+            ).fetchone()[0]
+            data = {
+                **progress,
+                "paragraph_id": pid,
+                "text": manual.get("target") or target,
+                "revision": revision,
+            }
+            self._connection.execute(
+                "INSERT INTO job_events(job_id,document_id,block_id,seq,type,data) VALUES (?,?,?,?,?,?)",
+                (
+                    job_id,
+                    did,
+                    pid,
+                    seq,
+                    "translation_block_completed",
+                    json.dumps(data, ensure_ascii=False),
+                ),
+            )
+            self._connection.execute(
+                "UPDATE jobs SET progress=? WHERE id=?", (json.dumps(progress), job_id)
+            )
+            return True
+
+    def append_event(
+        self,
+        job_id: str,
+        did: str,
+        event_type: str,
+        data: dict[str, Any],
+        *,
+        block_id: str | None = None,
+        page: int | None = None,
+    ) -> int:
+        with self._lock, self._connection:
+            self._connection.execute("BEGIN IMMEDIATE")
+            row = self._connection.execute(
+                "SELECT COALESCE(MAX(seq),0)+1 FROM job_events WHERE job_id=?",
+                (job_id,),
+            ).fetchone()
             seq = int(row[0])
-            self._connection.execute("INSERT INTO job_events(job_id,document_id,block_id,page,seq,type,data) VALUES (?,?,?,?,?,?,?)", (job_id,did,block_id,page,seq,event_type,json.dumps(data,ensure_ascii=False)))
+            self._connection.execute(
+                "INSERT INTO job_events(job_id,document_id,block_id,page,seq,type,data) VALUES (?,?,?,?,?,?,?)",
+                (
+                    job_id,
+                    did,
+                    block_id,
+                    page,
+                    seq,
+                    event_type,
+                    json.dumps(data, ensure_ascii=False),
+                ),
+            )
             return seq
 
     def events(self, did: str, after: int = 0) -> list[dict[str, Any]]:
         with self._lock:
-            rows = self._connection.execute("SELECT * FROM job_events WHERE document_id=? AND id>? ORDER BY id", (did,after)).fetchall()
+            rows = self._connection.execute(
+                "SELECT * FROM job_events WHERE document_id=? AND id>? ORDER BY id",
+                (did, after),
+            ).fetchall()
             return [{**dict(row), "data": json.loads(row["data"])} for row in rows]
 
 

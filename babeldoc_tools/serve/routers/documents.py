@@ -76,6 +76,7 @@ def documents_router(store: DocumentStore) -> APIRouter:
         # 字节数取盘上文件的大小：上传写入多少，响应就报多少（不信请求声明）。
         source = (store.resolve(did) / SOURCE_NAME).stat()
         return DocumentUploaded(did=did, bytes=source.st_size)
+
     @router.get(
         "/documents",
         response_model=list[DocumentListItem],
@@ -102,7 +103,24 @@ def documents_router(store: DocumentStore) -> APIRouter:
     def get_document(
         did: Annotated[str, PathParam(description=DOCUMENT_ID)],
     ) -> DocumentDetail:
-        return views.document_detail(reader(did), did)
+        detail = views.document_detail(reader(did), did)
+        from babeldoc_tools.serve.draft import read_draft
+
+        detail.revision = read_draft(store.resolve(did)).revision
+        if (store.store_base / "app.db").is_file():
+            database = store.database
+            with database._lock:
+                preview = database.connection.execute(
+                    "SELECT asset_sha256 FROM local_previews WHERE document_id=?",
+                    (did,),
+                ).fetchone()
+                exported = database.connection.execute(
+                    "SELECT revision FROM exports WHERE document_id=? ORDER BY id DESC LIMIT 1",
+                    (did,),
+                ).fetchone()
+            detail.preview_asset = preview[0] if preview else None
+            detail.export_revision = exported[0] if exported else None
+        return detail
 
     @router.get(
         "/documents/{did}/stage-state",
@@ -133,6 +151,15 @@ def documents_router(store: DocumentStore) -> APIRouter:
         did: Annotated[str, PathParam(description=DOCUMENT_ID)],
         page: Annotated[int | None, Query(ge=1, description=PAGE_QUERY)] = None,
     ) -> list[ParagraphItem]:
+        if (store.store_base / "app.db").is_file():
+            from babeldoc_tools.serve.block_compile import document_blocks
+
+            store.resolve(did)
+            return [
+                row
+                for row in document_blocks(store, did)
+                if page is None or row.page == page
+            ]
         return views.paragraphs(reader(did), page)
 
     @router.get(

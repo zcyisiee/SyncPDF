@@ -48,7 +48,7 @@ export function InspectorPanel({
   const compile = documentQuery.data?.compile ?? null;
   const busyJob = activeJob(jobsQuery.data);
   const compileRunning = compile?.status === 'running';
-  const editingLocked = compileRunning || busyJob !== null;
+  const editingLocked = compileRunning || (busyJob !== null && busyJob.effective_scope !== 'block');
   const editingLockedReason = compileRunning
     ? '编译中…：编译结束后可继续编辑'
     : busyJob === null

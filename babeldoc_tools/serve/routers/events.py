@@ -343,6 +343,24 @@ async def event_stream(
             updates.unsubscribe(subscription)
 
 
+async def persistent_stream(store, did, after_seq=0):
+    """Document-global committed cursor survives process restarts and job changes."""
+    cursor = after_seq
+    idle = 0.0
+    while True:
+        events = await asyncio.to_thread(store.database.events, did, cursor)
+        for event in events:
+            cursor = event["id"]
+            payload = {**event, "seq": cursor, "kind": event["type"]}
+            data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            yield f"event: {event['type']}\nid: {cursor}\ndata: {data}\n\n"
+        idle = 0 if events else idle + SSE_POLL_SECONDS
+        if idle >= SSE_HEARTBEAT_SECONDS:
+            yield HEARTBEAT_FRAME
+            idle = 0
+        await asyncio.sleep(SSE_POLL_SECONDS)
+
+
 # --------------------------------------------------------------------------- #
 # 路由
 # --------------------------------------------------------------------------- #
@@ -411,6 +429,7 @@ def events_router(
     )
     async def stream_events(
         did: Annotated[str, PathParam(description=DOCUMENT_ID)],
+        persistent: bool = False,
         after_seq: Annotated[
             int | None, Query(ge=0, description=AFTER_SEQ_QUERY)
         ] = None,
@@ -423,6 +442,15 @@ def events_router(
         ] = None,
     ) -> StreamingResponse:
         workdir = store.resolve(did)
+        if persistent:
+            cursor = after_seq or 0
+            if last_event_id and last_event_id.isdecimal():
+                cursor = max(cursor, int(last_event_id))
+            return StreamingResponse(
+                persistent_stream(store, did, cursor),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
         resume = parse_last_event_id(last_event_id)
         resume_run_id, resume_seq = resume if resume is not None else (None, 0)
         # 显式 ?run_id= 优先；否则用 Last-Event-ID 里那个（还在 → 续传，没了 → 最新 run）。

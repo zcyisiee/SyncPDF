@@ -273,6 +273,10 @@ class DocumentAvailability(BaseModel):
 class DocumentDetail(DocumentListItem):
     """``GET /api/v1/documents/{did}``：列表项字段 + 元信息。"""
 
+    revision: int = 0
+    preview_asset: str | None = None
+    export_revision: int | None = None
+
     pdf: DocumentPdf
     #: ``run_state.config`` 原样（``bdt run`` 的本次运行配置）；没有 → null。
     config: dict[str, Any] | None = None
@@ -450,7 +454,9 @@ class JobCreateRequest(BaseModel):
         pattern=JOB_PAGES_PATTERN,
         description='页码范围（只对 action=run 有效），如 "1-3,5"',
     )
-    dual: bool = Field(default=False, description="是否生成 dual（双语）PDF（action=run）")
+    dual: bool = Field(
+        default=False, description="是否生成 dual（双语）PDF（action=run）"
+    )
     profile: str | None = Field(
         default=None,
         pattern=JOB_PROFILE_PATTERN,
