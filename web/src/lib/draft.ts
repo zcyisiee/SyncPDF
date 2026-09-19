@@ -22,6 +22,15 @@ export const LAYOUT_FIELDS = [
 
 export type LayoutFieldKey = (typeof LAYOUT_FIELDS)[number]['key'];
 
+/** 段落级排版覆盖的三个样式布尔键：键名抄自 `layout_overrides` 的样式覆盖（加粗/斜体/衬线）。 */
+export const STYLE_FIELDS = [
+  { key: 'bold', label: '加粗' },
+  { key: 'italic', label: '斜体' },
+  { key: 'serif', label: '衬线' },
+] as const;
+
+export type StyleFieldKey = (typeof STYLE_FIELDS)[number]['key'];
+
 /** 草稿里的 `layout` 覆盖对象（值形状由服务端校验，前端只读认识的键）。 */
 export type DraftLayout = Record<string, unknown>;
 
@@ -47,6 +56,16 @@ export function layoutNumber(layout: DraftLayout | null | undefined, key: Layout
   return asFiniteNumber(layout[key]);
 }
 
+/**
+ * 草稿里的某个样式布尔覆盖（加粗/斜体/衬线）；没有 / 不是布尔 → null。
+ * `null` = 「跟随原文」：该键在草稿里不存在（存在即覆盖）。
+ */
+export function layoutBool(layout: DraftLayout | null | undefined, key: StyleFieldKey): boolean | null {
+  if (layout === null || layout === undefined) return null;
+  const value = layout[key];
+  return typeof value === 'boolean' ? value : null;
+}
+
 /** 草稿里的 `box`（`[x, y, x2, y2]`，PDF 坐标 y 向上）；没有 / 形状不对 → null。 */
 export function layoutBox(layout: DraftLayout | null | undefined): Box | null {
   if (layout === null || layout === undefined) return null;
@@ -57,11 +76,25 @@ export function layoutBox(layout: DraftLayout | null | undefined): Box | null {
   return numbers as Box;
 }
 
-/** 该段草稿里有没有排版覆盖（四个数值键任一存在，或 box 存在）。 */
+/** 可编辑的样式覆盖状态：键缺席 = 跟随原文（不是 false）。 */
+export type StyleBools = Partial<Record<StyleFieldKey, boolean>>;
+
+/** 草稿 → 样式覆盖状态（跟随原文的键不进对象；用于编辑器的本地状态）。 */
+export function styleBoolsOf(layout: DraftLayout | null | undefined): StyleBools {
+  const bools: StyleBools = {};
+  for (const field of STYLE_FIELDS) {
+    const value = layoutBool(layout, field.key);
+    if (value !== null) bools[field.key] = value;
+  }
+  return bools;
+}
+
+/** 该段草稿里有没有排版覆盖（四个数值键或三个样式布尔任一存在，或 box 存在）。 */
 export function hasLayoutOverride(layout: DraftLayout | null | undefined): boolean {
   if (layout === null || layout === undefined) return false;
   if (layoutBox(layout) !== null) return true;
-  return LAYOUT_FIELDS.some((field) => layoutNumber(layout, field.key) !== null);
+  if (LAYOUT_FIELDS.some((field) => layoutNumber(layout, field.key) !== null)) return true;
+  return STYLE_FIELDS.some((field) => layoutBool(layout, field.key) !== null);
 }
 
 /**
@@ -106,22 +139,29 @@ export function layoutValuesOf(inputs: LayoutInputs): Partial<Record<LayoutField
 /**
  * 构造 `layout` 补丁（**整个对象**，服务端是替换语义）：
  * 认识的键按当前输入写，`extra` 里不认识的键（如 `force_break_after_text`）原样保留；
- * 结果为空对象 → `null`（删掉该段的排版覆盖）。
+ * `bools`（给了才管样式键）：`true/false` 写入键，**没给的样式键从补丁里删掉**
+ * （删键 = 跟随原文）；`bools === undefined` 时样式键按「不认识的键」原样保留
+ * （老调用方不传 bools 的行为不变）。结果为空对象 → `null`（删掉该段的排版覆盖）。
  */
 export function layoutPatch(
   values: Partial<Record<LayoutFieldKey, number>>,
   box: Box | null,
   extra: DraftLayout | null | undefined = undefined,
+  bools: StyleBools | undefined = undefined,
 ): DraftLayout | null {
   const out: DraftLayout = {};
   if (extra !== null && extra !== undefined) {
     for (const [key, value] of Object.entries(extra)) {
       if (key === 'box') continue;
       if (LAYOUT_FIELDS.some((field) => field.key === key)) continue;
+      if (bools !== undefined && STYLE_FIELDS.some((field) => field.key === key)) continue;
       out[key] = value;
     }
   }
   for (const [key, value] of Object.entries(values)) out[key] = value;
+  if (bools !== undefined) {
+    for (const [key, value] of Object.entries(bools)) out[key] = value;
+  }
   if (box !== null) out.box = [...box];
   return Object.keys(out).length === 0 ? null : out;
 }

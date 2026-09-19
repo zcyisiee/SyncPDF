@@ -1,7 +1,7 @@
 /**
  * `ParagraphEditor`：草稿优先显示、本地 1.5s 防抖保存、失焦/Cmd+S 立即保存、
  * 409 两分支（revision_conflict / document_busy）与 422 draft_invalid、编译中只读、
- * 恢复基线、排版参数范围校验。
+ * 恢复基线、排版参数范围校验，以及「编译样式」区（源文派生摘要 + 三态覆盖下拉）。
  */
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,6 +21,7 @@ const PARAGRAPHS = [
     source: 'Source text of P05-002.',
     target: '基线译文',
     geometry: { id: 'P05-002', page: 5, layout_label: 'text', layout_box: [72, 640, 520, 780] },
+    style: { font_size: 10.5, bold: true, italic: false, serif: true, font_name: 'TimesNewRomanPSMT' },
     layout_status: 'ok',
   },
 ];
@@ -196,6 +197,87 @@ describe('ParagraphEditor 保存', () => {
     expect(patchBody(fetchMock).paragraphs['P05-002']).toEqual({
       layout: { font_scale: 1.2, box: [70, 630, 522, 782] },
     });
+  });
+});
+
+describe('ParagraphEditor 编译样式区', () => {
+  it('只读行显示源文派生值：字号/字体名/加粗/斜体/衬线（font_scale 覆盖时带 × n）', async () => {
+    mockEditor({ draft: DRAFT_WITH_OVERRIDE }); // 草稿里 font_scale: 1.05
+    renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
+    await screen.findByLabelText('译文');
+    const info = document.querySelector('[data-od-id="paragraph-style-info"]');
+    expect(info?.textContent).toContain('字号 10.5pt');
+    expect(info?.textContent).toContain('× 1.05');
+    expect(info?.textContent).toContain('TimesNewRomanPSMT');
+    expect(info?.textContent).toContain('加粗 是');
+    expect(info?.textContent).toContain('斜体 否');
+    expect(info?.textContent).toContain('衬线 是');
+    // 三个三态下拉默认「跟随原文」（草稿里没有样式键）
+    for (const key of ['bold', 'italic', 'serif']) {
+      expect((document.querySelector(`[data-od-id="paragraph-style-${key}"]`) as HTMLSelectElement).value).toBe('');
+    }
+  });
+
+  it('style 为 null：整区显示「样式信息不可用」，不渲染下拉', async () => {
+    mockEditor({ paragraphs: [{ ...PARAGRAPHS[0], style: null }] });
+    renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
+    await screen.findByLabelText('译文');
+    expect(document.querySelector('[data-od-id="paragraph-style-unavailable"]')).not.toBeNull();
+    expect(document.querySelector('[data-od-id="paragraph-style-info"]')).toBeNull();
+    expect(document.querySelector('[data-od-id="paragraph-style-bold"]')).toBeNull();
+  });
+
+  it('下拉切「开启」→ 防抖 PATCH 的 layout 含 bold:true（box/数值不丢）', async () => {
+    const fetchMock = mockEditor({ draft: DRAFT_WITH_OVERRIDE });
+    renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
+    await screen.findByLabelText('译文');
+    fireEvent.change(document.querySelector('[data-od-id="paragraph-style-bold"]') as HTMLSelectElement, {
+      target: { value: 'on' },
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(SAVE_DEBOUNCE_MS + 50);
+    });
+    await waitFor(() => expect(patchBody(fetchMock).paragraphs['P05-002']).toBeTruthy());
+    expect(patchBody(fetchMock).paragraphs['P05-002']).toEqual({
+      // layout 整对象替换：带上草稿里已有的 font_scale 与 box，再写 bold
+      layout: { font_scale: 1.05, box: [70, 630, 522, 782], bold: true },
+    });
+  });
+
+  it('草稿里已有 bold:true，切回「跟随原文」→ 防抖 PATCH 的 layout 无 bold（删键）', async () => {
+    const draftWithBold = {
+      ...DRAFT_WITH_OVERRIDE,
+      paragraphs: {
+        'P05-002': {
+          ...DRAFT_WITH_OVERRIDE.paragraphs['P05-002'],
+          layout: { font_scale: 1.05, box: [70, 630, 522, 782], bold: true },
+        },
+      },
+    };
+    const fetchMock = mockEditor({ draft: draftWithBold });
+    renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
+    await screen.findByLabelText('译文');
+    const select = document.querySelector('[data-od-id="paragraph-style-bold"]') as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe('on')); // 草稿覆盖先显示出来
+    fireEvent.change(select, { target: { value: '' } }); // 跟随原文
+    await act(async () => {
+      vi.advanceTimersByTime(SAVE_DEBOUNCE_MS + 50);
+    });
+    await waitFor(() => expect(patchBody(fetchMock).paragraphs['P05-002']).toBeTruthy());
+    const entry = patchBody(fetchMock).paragraphs['P05-002'] as { layout: Record<string, unknown> };
+    expect(entry.layout).toEqual({ font_scale: 1.05, box: [70, 630, 522, 782] });
+    expect('bold' in entry.layout).toBe(false);
+  });
+
+  it('样式布尔计为排版覆盖：只有 bold 覆盖的草稿也出现「恢复基线」', async () => {
+    const draftStyleOnly = {
+      revision: 2,
+      updated_at: null,
+      paragraphs: { 'P05-002': { layout: { bold: true }, updated_at: null } },
+    };
+    mockEditor({ draft: draftStyleOnly });
+    renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
+    expect(await screen.findByRole('button', { name: '恢复基线' })).toBeInTheDocument();
   });
 });
 

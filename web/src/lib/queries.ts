@@ -13,6 +13,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   ArtifactItem,
   PreviewPagesResponse,
+  BlocksCompileRequest,
   CandidateItem,
   CandidateJobAccepted,
   CandidateListResponse,
@@ -357,6 +358,30 @@ export function useCompileBlockMutation(did: string, blockId: string) {
         `/documents/${encodeURIComponent(did)}/blocks/${encodeURIComponent(blockId)}/compile`,
         { base_revision: baseRevision },
       ),
+    onSuccess: () => invalidateJobViews(client, did),
+  });
+}
+
+/**
+ * 批量编译（`POST /documents/{did}/blocks/compile`，shift 多选）：一个 job 编一组
+ * block，各自的草稿覆盖互不影响。`base_revision` 与单块版同一口径（当前草稿
+ * revision，不符 → 409 `revision_conflict`）；清单里的 id 不存在 → 404
+ * `block_not_found`（去重保序由服务端做，这里原样提交）。
+ */
+export interface CompileBlocksVariables {
+  blockIds: string[];
+  /** 客户端期望的当前草稿 revision（乐观并发；不匹配 → 409 revision_conflict）。 */
+  baseRevision: number;
+}
+
+export function useCompileBlocksMutation(did: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ blockIds, baseRevision }: CompileBlocksVariables) =>
+      apiPost<JobAccepted>(`/documents/${encodeURIComponent(did)}/blocks/compile`, {
+        block_ids: blockIds,
+        base_revision: baseRevision,
+      } satisfies BlocksCompileRequest),
     onSuccess: () => invalidateJobViews(client, did),
   });
 }
