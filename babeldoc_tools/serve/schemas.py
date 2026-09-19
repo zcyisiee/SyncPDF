@@ -325,6 +325,9 @@ class ParagraphItem(BaseModel):
     #: ``layout_geometry.json`` 里该段的完整记录（PDF 原生坐标、y 向上）；
     #: 没有对应记录 → null。
     geometry: dict[str, Any] | None = None
+    #: 编译样式摘要（解析状态派生）：``font_size``/``serif``/``bold``/``italic``/
+    #: ``font_name``；解析状态不可用 → null。
+    style: dict[str, Any] | None = None
     #: ``layout_lint.json`` 该段最重缺陷级别（``P0``/``P1``/``P2``）；
     #: 无缺陷 ``ok``；lint 产物不可用 ``not_available``。
     layout_status: str

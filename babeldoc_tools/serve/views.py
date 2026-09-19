@@ -579,6 +579,10 @@ def paragraphs(reader: WorkdirReader, page: int | None = None) -> list[Paragraph
             "layout_geometry.json / parse 快照 / translated.jsonl 都不存在）",
             did=reader.workdir.name,
         )
+    # 编译样式摘要（懒导入：block_compile 顶层 import 了本模块）。
+    from babeldoc_tools.serve.block_compile import paragraph_styles
+
+    styles = paragraph_styles(reader.workdir)
     items: list[ParagraphItem] = []
     for paragraph_id in ids:
         geometry_row = geometry_by_id.get(paragraph_id)
@@ -595,6 +599,7 @@ def paragraphs(reader: WorkdirReader, page: int | None = None) -> list[Paragraph
                 source=_paragraph_source(anchor, entity),
                 target=_as_str(targets.get(paragraph_id)),
                 geometry=geometry_row,
+                style=styles.get(paragraph_id) if styles else None,
                 layout_status=_layout_status(paragraph_id, severities),
             )
         )

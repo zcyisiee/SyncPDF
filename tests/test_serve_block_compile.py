@@ -331,6 +331,216 @@ def test_block_endpoint_lifecycle_and_asset_download(local, monkeypatch):
         assert denied.status_code == 404
 
 
+# --------------------------------------------------------------------------- #
+# 浮动阶梯（P7）：跨栏横向扩 + 跨页整框迁移 + 样式覆盖透传
+# --------------------------------------------------------------------------- #
+def _multi_page_store(tmp_path, monkeypatch, *, pages: int = 2):
+    """与 ``local`` fixture 同构，但 baseline 有 ``pages`` 页、只有 P1 一个块。"""
+    workdir = tmp_path / "paper"
+    (workdir / "output").mkdir(parents=True)
+    with pymupdf.open() as pdf:
+        for index in range(pages):
+            page = pdf.new_page(width=400, height=400)
+            page.insert_text((30, 60), f"Old page {index + 1}")
+        pdf.save(workdir / "output/paper.mono.pdf")
+    store = DocumentStore.for_root(tmp_path)
+    compiler = BlockCompiler(store, None)
+    rows = [
+        SimpleNamespace(
+            id="P1",
+            page=1,
+            target="New block one",
+            geometry={"src_box": [20, 320, 200, 370]},
+        )
+    ]
+    monkeypatch.setattr(compiler, "_rows", lambda _did: rows)
+    return compiler, rows
+
+
+def _stamp_render(boxes, *, scale=0.7):
+    """假 render_request：记录每次 box，返回可缩字贴片。"""
+
+    def render(_workdir, _pid, target, box, temporary, _cache, **_kwargs):
+        boxes.append(list(box))
+        path = temporary / f"stamp-{len(boxes)}.pdf"
+        with pymupdf.open() as pdf:
+            page = pdf.new_page(width=box[2] - box[0], height=box[3] - box[1])
+            page.insert_text((5, 20), target)
+            pdf.save(path)
+        first = len(boxes) == 1
+        return (
+            SimpleNamespace(
+                ok=True, pdf_path=str(path), font_size=11, scale=scale if first else 1.0
+            ),
+            False,
+        )
+
+    return render
+
+
+def _page_text(store, page_number):
+    from babeldoc_tools.serve.asset_store import AssetStore
+
+    with store.database._lock:
+        row = store.database.connection.execute(
+            "SELECT page_asset FROM pages WHERE document_id='paper' AND page=?",
+            (page_number,),
+        ).fetchone()
+    assert row is not None, f"page {page_number} asset missing"
+    assets = AssetStore(store.store_base, store.database)
+    with pymupdf.open(assets.resolve(row[0])) as pdf:
+        return pdf[0].get_text()
+
+
+def test_float_widen_rerenders_with_wider_box(tmp_path, monkeypatch):
+    """同栏无净空、右邻栏空闲：横向扩框重渲染，贴片仍在本页。"""
+    from babeldoc.tools.agent import layout_refine
+    from babeldoc_tools.serve import block_compile
+
+    compiler, _rows = _multi_page_store(tmp_path, monkeypatch, pages=1)
+    boxes: list[list[float]] = []
+    monkeypatch.setattr(block_compile, "render_request", _stamp_render(boxes))
+    monkeypatch.setattr(
+        block_compile.BlockCompiler, "_layout_detector", lambda _self: object()
+    )
+    monkeypatch.setattr(
+        layout_refine, "plan_page_expansion", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        layout_refine,
+        "plan_widen_page_expansion",
+        lambda _page, box, _detector, **_kw: (box[0], box[1], box[2] + 60.0, box[3]),
+    )
+
+    result = compiler.compile(record())
+
+    assert len(boxes) == 2
+    assert boxes[1][2] == boxes[0][2] + 60.0
+    patch = _patch(compiler, page=1)["P1"]
+    assert patch["page"] == 1 and patch["box"][2] == pytest.approx(260.0)
+    assert result["stamp_page"] == 1
+    assert "New block one" in _page_text(compiler.store, 1)
+
+
+def test_float_to_next_page_moves_stamp(tmp_path, monkeypatch):
+    """同栏/跨栏都无净空：整框迁到下一页空闲区间，两页都重新合成。"""
+    from babeldoc.tools.agent import layout_refine
+    from babeldoc_tools.serve import block_compile
+
+    compiler, _rows = _multi_page_store(tmp_path, monkeypatch, pages=2)
+    boxes: list[list[float]] = []
+    monkeypatch.setattr(block_compile, "render_request", _stamp_render(boxes))
+    monkeypatch.setattr(
+        block_compile.BlockCompiler, "_layout_detector", lambda _self: object()
+    )
+    monkeypatch.setattr(
+        layout_refine, "plan_page_expansion", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        layout_refine, "plan_widen_page_expansion", lambda *_a, **_k: None
+    )
+    moved = (20.0, 300.0, 200.0, 350.0)
+    monkeypatch.setattr(
+        layout_refine, "plan_next_page_float", lambda *_a, **_k: moved
+    )
+
+    result = compiler.compile(record())
+
+    assert len(boxes) == 2 and boxes[1] == list(moved)
+    patch = _patch(compiler, page=1)["P1"]
+    assert patch["page"] == 2 and patch["box"] == list(moved)
+    assert result["stamp_page"] == 2 and result["previous_stamp_page"] == 1
+    # 主页不再有新贴片文本，下一页有；两页资产都重新发布。
+    assert "New block one" not in _page_text(compiler.store, 1)
+    assert "New block one" in _page_text(compiler.store, 2)
+
+
+def test_float_back_home_erases_old_foreign_stamp(tmp_path, monkeypatch):
+    """迁移后再编译回主页：下一页上的旧贴片要被擦掉（上一版落点页重合成）。"""
+    from babeldoc.tools.agent import layout_refine
+    from babeldoc_tools.serve import block_compile
+
+    compiler, _rows = _multi_page_store(tmp_path, monkeypatch, pages=2)
+    boxes: list[list[float]] = []
+    monkeypatch.setattr(block_compile, "render_request", _stamp_render(boxes))
+    monkeypatch.setattr(
+        block_compile.BlockCompiler, "_layout_detector", lambda _self: object()
+    )
+    monkeypatch.setattr(
+        layout_refine, "plan_page_expansion", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        layout_refine, "plan_widen_page_expansion", lambda *_a, **_k: None
+    )
+    moved = (20.0, 300.0, 200.0, 350.0)
+    monkeypatch.setattr(
+        layout_refine, "plan_next_page_float", lambda *_a, **_k: moved
+    )
+    compiler.compile(record())
+    assert "New block one" in _page_text(compiler.store, 2)
+
+    # 第二次编译不再浮动（贴片不缩字），贴片回主页。
+    monkeypatch.setattr(
+        layout_refine, "plan_next_page_float", lambda *_a, **_k: None
+    )
+    second: list[list[float]] = []
+    monkeypatch.setattr(
+        block_compile, "render_request", _stamp_render(second, scale=1.0)
+    )
+    result = compiler.compile(record())
+
+    assert result["stamp_page"] == 1 and result["previous_stamp_page"] == 2
+    assert "New block one" in _page_text(compiler.store, 1)
+    assert "New block one" not in _page_text(compiler.store, 2)
+
+
+def test_draft_layout_is_passed_to_render_request(tmp_path, monkeypatch):
+    """草稿的排版/样式覆盖（bold 等）要透传给 render_request。"""
+    from pathlib import Path
+
+    from babeldoc_tools.serve import block_compile
+
+    compiler, _rows = _multi_page_store(tmp_path, monkeypatch, pages=1)
+    compiler.store.database.save_draft(
+        "paper",
+        {
+            "revision": 1,
+            "paragraphs": {"P1": {"layout": {"bold": True, "font_scale": 1.2}}},
+        },
+        expected_revision=0,
+    )
+    seen: list[dict] = []
+
+    def render(_workdir, _pid, target, box, temporary, _cache, **kwargs):
+        seen.append(kwargs)
+        path = Path(temporary) / "stamp.pdf"
+        with pymupdf.open() as pdf:
+            page = pdf.new_page(width=box[2] - box[0], height=box[3] - box[1])
+            page.insert_text((5, 20), target)
+            pdf.save(path)
+        return (
+            SimpleNamespace(ok=True, pdf_path=str(path), font_size=11, scale=1.0),
+            False,
+        )
+
+    monkeypatch.setattr(block_compile, "render_request", render)
+    job = record()
+    job.revision = 1
+    compiler.compile_block_patch(job)
+
+    assert seen and seen[0].get("layout") == {"bold": True, "font_scale": 1.2}
+
+
+def _patch(compiler, *, page):
+    with compiler.store.database._lock:
+        row = compiler.store.database.connection.execute(
+            "SELECT payload FROM local_pages WHERE document_id='paper' AND page=?",
+            (page,),
+        ).fetchone()
+    assert row is not None
+    return json.loads(row[0])["patches"]
+
+
 @pytest.mark.parametrize(
     "box", [[0, 0, float("nan"), 10], [0, 0, 401, 10], [1, 1, 0, 0]]
 )

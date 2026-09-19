@@ -560,6 +560,33 @@ def plan_next_page_float(
     )
 
 
+def plan_widen_page_expansion(
+    page,
+    box,
+    detector: PaddleLayoutRegions,
+    *,
+    direction: str,
+    page_left: float = 0.0,
+    page_right: float | None = None,
+) -> Box | None:
+    """serve 局部编译用：对一张（已合成）页面把 ``box`` 向左/右横向扩框。
+
+    与 :func:`plan_page_expansion` 同一套数据（PP-DocLayoutV3 区域 + 精确墨迹，
+    已排除本段自身）；检测不可用或没有区域 → None。
+    """
+    if not detector.available:
+        return None
+    regions = _regions_il(page, detector)
+    if not regions:
+        return None
+    boxes = [region.box for region in regions]
+    ink = foreign_ink(page_ink_rects(page), box)
+    right = float(page.rect.width) if page_right is None else float(page_right)
+    return plan_widen_expansion(
+        box, boxes, ink=ink, direction=direction, page_left=page_left, page_right=right
+    )[0]
+
+
 def _regions_il(page, detector: PaddleLayoutRegions) -> list[Region]:
     """检测一页；失败按「无区域」处理（调用方保持原行为）。"""
     try:

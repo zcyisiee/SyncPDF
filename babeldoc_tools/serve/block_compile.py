@@ -134,6 +134,40 @@ def document_blocks(store, did):
     return rows
 
 
+def paragraph_styles(workdir):
+    """pid → 编译样式摘要（解析状态派生）：字号 / 衬线 / 加粗 / 斜体 / 字体名。
+
+    与 :func:`render_request` 同一派生源（段落级 ``pdf_style`` + 页字体表），
+    供 ``GET /paragraphs`` 展示每个 bbox 的样式信息。state.pkl 缺失或不可读
+    （迁移后未物化的文档）→ None，调用方保持旧行为。共享 ``_load_parse_state``
+    的进程内缓存，重复调用无额外反序列化成本。
+    """
+    from babeldoc.format.pdf.document_il.backend.latex_bbox import overlay
+    from babeldoc.format.pdf.document_il.backend.latex_bbox.fusion import _style_flags
+
+    try:
+        state = _load_parse_state(workdir)
+    except Exception:  # noqa: BLE001 - 样式摘要缺失不该让段落列表 500
+        return None
+    styles: dict[str, dict] = {}
+    for page in state["doc"].page:
+        font_map = {font.font_id: font for font in page.pdf_font}
+        for paragraph in page.pdf_paragraph:
+            if not paragraph.debug_id:
+                continue
+            style = paragraph.pdf_style
+            font = font_map.get(getattr(style, "font_id", None)) if style else None
+            bold, italic = _style_flags(style, font_map)
+            styles[paragraph.debug_id] = {
+                "font_size": getattr(style, "font_size", None) if style else None,
+                "bold": bold,
+                "italic": italic,
+                "serif": overlay._paragraph_serif(paragraph, font_map, None),
+                "font_name": getattr(font, "name", None),
+            }
+    return styles
+
+
 def valid_box(box, width, height):
     if (
         not isinstance(box, (list, tuple))
@@ -188,12 +222,19 @@ def hydrate_parse(workdir, temporary):
         database.close()
 
 
-def render_request(workdir, pid, target, box, temporary, cache_root, capability=None):
+def render_request(
+    workdir, pid, target, box, temporary, cache_root, capability=None, layout=None
+):
     """Restore parsed typography, apply only this translation in memory, then fuse.
 
     ``capability``：可选的已探测 LaTeX 能力（流式预览每段一编时由调用方缓存一次
     传入）；``None`` = 现场探测（单段编辑编译的冷路径，语义与旧版一致）。
+    ``layout``：该段草稿的排版覆盖（``layout_overrides`` 键）。局部编译消费其中
+    的 ``font_scale``（字号乘数）、``line_skip``（行距系数）与 ``bold``/``italic``/
+    ``serif`` 三态样式覆盖（布尔；缺省 = 跟随源文派生值）；``box`` 由调用方
+    解析成 ``box`` 参数（含 ``box_scale``），这里不再重复应用。
     """
+
     import pymupdf
     from babeldoc.format.pdf.document_il.backend.latex_bbox import overlay
     from babeldoc.format.pdf.document_il.backend.latex_bbox.capability import (
@@ -211,6 +252,10 @@ def render_request(workdir, pid, target, box, temporary, cache_root, capability=
     from babeldoc.tools.agent import protocol
     from babeldoc.tools.agent import workflow
     from babeldoc.tools.agent.prepared_pdf import resolve_source_pdf
+
+    def flag(key):
+        value = (layout or {}).get(key)
+        return value if isinstance(value, bool) else None
 
     workdir = hydrate_parse(workdir, temporary)
     state = _load_parse_state(workdir)
@@ -270,10 +315,21 @@ def render_request(workdir, pid, target, box, temporary, cache_root, capability=
     from babeldoc.format.pdf.document_il.backend.latex_bbox.fusion import _style_flags
 
     bold, italic = _style_flags(paragraph.pdf_style, source_fonts)
+    if flag("bold") is not None:
+        bold = flag("bold")
+    if flag("italic") is not None:
+        italic = flag("italic")
     if bold:
         body = r"{\bfseries " + body + "}"
     if italic:
         body = r"{\itshape " + body + "}"
+    if flag("serif") is not None:
+        meta["serif"] = flag("serif")
+    font_size = meta["font_size"]
+    font_scale = (layout or {}).get("font_scale")
+    if isinstance(font_scale, (int, float)) and not isinstance(font_scale, bool):
+        font_size = font_size * float(font_scale)
+    line_skip = (layout or {}).get("line_skip")
     if capability is None:
         capability = probe_latex_capability()
     if not capability.available:
@@ -294,12 +350,16 @@ def render_request(workdir, pid, target, box, temporary, cache_root, capability=
             "body": body,
             "width": box[2] - box[0],
             "height": box[3] - box[1],
-            "font_size": meta["font_size"],
+            "font_size": font_size,
         }
         jobs = engine._substitute_fragments([job], temporary)
         if len(jobs) != 1:
             raise ToolError("compile_failed", "公式片段无法恢复")
         request = engine._stamp_request(jobs[0])
+        if isinstance(line_skip, (int, float)) and not isinstance(line_skip, bool):
+            # 行距覆盖：直接用字号 × 系数（与全量路径 line_skip 语义一致），
+            # 不再走源行距推导的 clamp。
+            request.lead = request.font_size * float(line_skip)
         result = renderer.render_one(request, temporary)
     if not result.ok or not result.pdf_path:
         raise ToolError("compile_failed", "单块编译失败", reason=result.reason)
@@ -427,12 +487,13 @@ class BlockCompiler:
             self._detector = detector
         return detector if detector.available else None
 
-    def _expand_if_shrunk(self, page, box, stamp):
-        """贴片被缩字/垂直溢出时，按当前译文页面的墨迹把框向外扩（先向下再向上）。
+    def _float_if_shrunk(self, doc, page_number, rows, pid, box, stamp):
+        """缩字/溢出贴片的浮动阶梯：同栏下/上扩 → 跨栏横向扩 → 跨页整框迁移。
 
-        返回 ``(新框, 扩出的 pt)``；不扩时返回 ``(原框, 0.0)``。判定用 baseline
-        页（已完成的译文版式）；检测器不可用或没有净空时不扩。首行几何来自持久化
-        的源行量测（原框口径），所以两个方向都能真的换成可用高度。
+        返回 ``(新框, 贴片页码, 浮动方式)``；无可行方案时 ``(原框, page_number, None)``。
+        判定用 baseline 页的 PP-DocLayoutV3 区域 + 精确墨迹（与既有扩框同一套数据，
+        见 :mod:`babeldoc.tools.agent.layout_refine`）。跨页迁移保持 x 范围不变，
+        在下一页自上而下找第一个能容纳 ``原框高 / scale`` 的空闲区间（顶对齐）。
         """
         from babeldoc.tools.agent import layout_refine
 
@@ -442,16 +503,54 @@ class BlockCompiler:
             reason=getattr(stamp, "reason", None),
         )
         if reason is None or not layout_refine.refine_enabled():
-            return box, 0.0
+            return box, page_number, None
         detector = self._layout_detector()
         if detector is None:
-            return box, 0.0
+            return box, page_number, None
+        page = doc[page_number - 1]
         expanded = layout_refine.plan_page_expansion(page, box, detector)
-        if expanded is None:
-            return box, 0.0
-        # 方向无关：向下扩涨在 y，向上扩涨在 y2，只可能有一个为正。
-        gain = max(float(box[1]) - float(expanded[1]), float(expanded[3]) - float(box[3]))
-        return list(expanded), round(gain, 3)
+        if expanded is not None:
+            return list(expanded), page_number, "expand"
+        for direction in ("right", "left"):
+            widened = layout_refine.plan_widen_page_expansion(
+                page, box, detector, direction=direction
+            )
+            if widened is not None and self._float_box_is_clear(
+                rows, pid, page_number, widened
+            ):
+                return list(widened), page_number, f"widen-{direction}"
+        # 跨页迁移：仅当下一页存在且未旋转；所需高度按缩字比例放大回原字号。
+        next_index = page_number  # 1 基页码正好是下一页的 0 基下标
+        if next_index >= doc.page_count or doc[next_index].rotation:
+            return box, page_number, None
+        scale = getattr(stamp, "scale", None)
+        required = (box[3] - box[1]) / min(max(float(scale), 0.05), 1.0) if scale else (
+            box[3] - box[1]
+        ) * 1.2
+        moved = layout_refine.plan_next_page_float(
+            doc[next_index], box, detector, required_height=required
+        )
+        if moved is not None and self._float_box_is_clear(
+            rows, pid, next_index + 1, moved
+        ):
+            return list(moved), next_index + 1, "next-page"
+        return box, page_number, None
+
+    @staticmethod
+    def _float_box_is_clear(rows, pid, page_number, box):
+        """浮动框不与目标页上其它 block 的版面框相交（区域/墨迹之外的第二道保险）。"""
+        import pymupdf
+
+        rect = pymupdf.Rect(box)
+        for other in rows:
+            if other.id == pid or other.page != page_number:
+                continue
+            other_box = (other.geometry or {}).get("layout_box") or (
+                other.geometry or {}
+            ).get("src_box")
+            if other_box and rect.intersects(pymupdf.Rect(other_box)):
+                return False
+        return True
 
     def _outputs(self, did):
         workdir = self.store.resolve(did)
@@ -569,9 +668,19 @@ class BlockCompiler:
         rows = self._rows(did)
         row = next(item for item in rows if item.id == pid)
         edit = draft.paragraphs.get(pid)
+        layout = edit.layout if edit else None
         geometry = row.geometry or {}
-        box = (edit.layout or {}).get("box") if edit else None
-        box = box or geometry.get("layout_box") or geometry.get("src_box")
+        box = (layout or {}).get("box")
+        if box is None:
+            box = geometry.get("layout_box") or geometry.get("src_box")
+            box_scale = (layout or {}).get("box_scale")
+            if box and isinstance(box_scale, (int, float)) and not isinstance(
+                box_scale, bool
+            ):
+                # 与 layout_overrides.scale_box 同语义：锚定左上角向右/向下生长。
+                x, y, x2, y2 = (float(v) for v in box)
+                factor = float(box_scale)
+                box = [x, y2 - (y2 - y) * factor, x + (x2 - x) * factor, y2]
         target = edit.target if edit and edit.target is not None else row.target
         if target is None or row.page is None or box is None:
             raise ToolError("compile_failed", "缺少译文或排版数据")
@@ -628,6 +737,9 @@ class BlockCompiler:
                         )
             temporary_root = self.store.store_base / "tmp"
             temporary_root.mkdir(exist_ok=True)
+            prev_stamp_page = int(
+                (state["patches"].get(pid) or {}).get("page", row.page)
+            )
             with tempfile.TemporaryDirectory(
                 prefix=record.job_id + "-", dir=temporary_root
             ) as folder:
@@ -641,24 +753,44 @@ class BlockCompiler:
                     temporary,
                     cache_root,
                     capability=self.capability(),
+                    layout=layout,
                 )
-                # P6：被缩字就用中文译文页面的实际墨迹把框向下扩一段重渲染，
-                # 避免为了塞进原框而缩字号（serve 局部编译此前没有这一步）。
-                # 重渲染失败（超时/TeX 错）不算升级：保留原来可用的贴片。
-                expanded_box, expand_pt = self._expand_if_shrunk(page, box, stamp)
-                if expand_pt:
+                # P6+浮动：被缩字/溢出时按当前译文版面找净空——同栏下/上扩、
+                # 跨栏横向扩、跨页整框迁移（PP-DocLayoutV3 对译文页重识别），
+                # 避免为了塞进原框而缩字号。重渲染失败（超时/TeX 错）不算升级：
+                # 保留原来可用的贴片。
+                float_box, stamp_page, floated = self._float_if_shrunk(
+                    baseline, row.page, rows, pid, box, stamp
+                )
+                if floated:
                     try:
+                        if stamp_page != row.page:
+                            float_box = valid_box(
+                                float_box,
+                                baseline[stamp_page - 1].rect.width,
+                                baseline[stamp_page - 1].rect.height,
+                            )
                         retried, retry_hit = render_request(
-                            workdir, pid, target, expanded_box, temporary, cache_root
+                            workdir,
+                            pid,
+                            target,
+                            float_box,
+                            temporary,
+                            cache_root,
+                            capability=self.capability(),
+                            layout=layout,
                         )
                     except ToolError:
                         retried = None
                     if retried is not None:
-                        box, stamp, hit = expanded_box, retried, retry_hit
+                        box, stamp, hit = float_box, retried, retry_hit
+                    else:
+                        float_box, stamp_page, floated = box, row.page, None
                 stamp_asset = assets.put(Path(stamp.pdf_path), kind="stamp")
                 state["patches"][pid] = {
                     "asset": stamp_asset,
                     "box": box,
+                    "page": stamp_page,
                     "old_box": geometry.get("rendered_box")
                     or geometry.get("layout_box")
                     or geometry.get("src_box"),
@@ -667,6 +799,19 @@ class BlockCompiler:
                         "layout": edit.layout if edit else None,
                     },
                 }
+                if floated:
+                    self.store.database.append_event(
+                        record.job_id,
+                        did,
+                        "compile_float",
+                        {
+                            "paragraph_id": pid,
+                            "kind": floated,
+                            "page": stamp_page,
+                            "box": [round(float(v), 2) for v in box],
+                        },
+                        block_id=pid,
+                    )
         input_hash = hashlib.sha256(
             json.dumps(state, sort_keys=True).encode()
         ).hexdigest()
@@ -689,12 +834,41 @@ class BlockCompiler:
         result = {
             "block_id": pid,
             "page": row.page,
+            # 贴片实际落在哪页（跨页浮动后 ≠ 段落主页）；previous_* 供上层
+            # 重合成"上一版贴片所在页"（迁移回主页时要擦掉旧页上的贴片）。
+            "stamp_page": stamp_page,
+            "previous_stamp_page": prev_stamp_page,
             "revision": revision,
             "asset": stamp_asset,
             "cache_hit": hit,
             "duration_s": time.monotonic() - started,
         }
         return result
+
+    def _foreign_patches(self, did, page_number):
+        """落在 ``page_number`` 上、但 home 在其它页的贴片（跨页浮动的产物）。
+
+        贴片的 home 页状态负责擦 ``old_box``；落点页负责把贴片盖上去。这里扫
+        全文档的页面状态找"落在本页、home 不是本页"的贴片（量级 = 页数，可接受）。
+        """
+        database = self.store.database
+        foreign: dict[str, dict] = {}
+        with database._lock:
+            rows = database.connection.execute(
+                "SELECT page,payload FROM local_pages WHERE document_id=?",
+                (did,),
+            ).fetchall()
+        for number, payload in rows:
+            if number == page_number:
+                continue
+            try:
+                state = json.loads(payload)
+            except (TypeError, ValueError):
+                continue
+            for key, patch in (state.get("patches") or {}).items():
+                if patch.get("page", number) == page_number:
+                    foreign[key] = patch
+        return foreign
 
     def compose_page_asset(self, record, page_number, *, complete=True, duration_s=0.0):
         import pymupdf
@@ -714,9 +888,14 @@ class BlockCompiler:
                 "SELECT payload FROM local_pages WHERE document_id=? AND page=?",
                 (did, page_number),
             ).fetchone()
-        if saved is None:
-            raise ToolError("compile_failed", "页面没有可用 patch")
-        state = json.loads(saved[0])
+        if saved is not None:
+            state = json.loads(saved[0])
+        else:
+            # 跨页浮动的落点页可能没有自己的 patch 状态：用同一份 baseline 初始化。
+            outputs = self._outputs(did)
+            if not outputs:
+                raise ToolError("compile_failed", "页面没有可用 patch")
+            state = {"base": assets.put(outputs[0], kind="baseline"), "patches": {}}
         temporary_root = self.store.store_base / "tmp"
         temporary_root.mkdir(exist_ok=True)
         with pymupdf.open(assets.resolve(state["base"])) as baseline:
@@ -754,10 +933,20 @@ class BlockCompiler:
                             value[0], height - value[3], value[2], height - value[1]
                         )
 
+                    # 落在本页的贴片 = 本页 home 的（未迁走的）+ 其它页迁进来的。
+                    stamped = {
+                        key: patch
+                        for key, patch in {
+                            **self._foreign_patches(did, page_number),
+                            **state["patches"],
+                        }.items()
+                        if patch.get("page", page_number) == page_number
+                    }
                     for key, patch in state["patches"].items():
-                        # Redact the old footprint before stamping into the new bbox.
+                        # Redact the old footprint (home page) before stamping.
                         old_rect = flip(patch["old_box"] or patch["box"])
                         jobs.append({"debug_id": key, "page": 0, "rect": old_rect})
+                    for key, patch in stamped.items():
                         successful[key] = SimpleNamespace(
                             pdf_path=str(assets.resolve(patch["asset"]))
                         )
@@ -775,8 +964,10 @@ class BlockCompiler:
                     for link in removed:
                         if _links_by_signature([link]).keys().isdisjoint(remaining):
                             safe_insert_link(composed[0], link)
-                    for job in jobs:
-                        job["rect"] = flip(state["patches"][job["debug_id"]]["box"])
+                    jobs = [
+                        {"debug_id": key, "page": 0, "rect": flip(patch["box"])}
+                        for key, patch in stamped.items()
+                    ]
                     engine._stamp_pages(jobs, successful)
                     if not engine._verify_links(before, uris):
                         raise ToolError("compile_failed", "链接校验失败，已保留旧页面")
@@ -809,7 +1000,20 @@ class BlockCompiler:
     def compile(self, record, *, publish=True):
         result = self.compile_block_patch(record)
         if publish:
-            result.update(self.compose_page_asset(record, result["page"], duration_s=result["duration_s"]))
+            home = result["page"]
+            affected = {
+                home,
+                result.get("stamp_page") or home,
+                result.get("previous_stamp_page") or home,
+            }
+            # 迁出的落点页先合成，主页最后合成（result 保留主页口径）。
+            ordered = sorted(number for number in affected if number != home) + [home]
+            for number in ordered:
+                result.update(
+                    self.compose_page_asset(
+                        record, number, duration_s=result["duration_s"] if number == home else 0.0
+                    )
+                )
             result["preview_asset"] = self.compose_full_preview(record)["asset"]
         return result
 
