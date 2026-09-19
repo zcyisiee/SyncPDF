@@ -684,6 +684,125 @@ def test_measure_fit_accepts_complete_text(tmp_path):
     assert chars > 0
 
 
+# --------------------------------------------------------------------------- #
+# 水平 fit 容差放宽（_WIDTH_TOLERANCE = 2.5pt）
+# --------------------------------------------------------------------------- #
+def test_count_overfull_hbox_ignores_minor_overflow():
+    """超宽量 ≤ 2.5pt 的 overfull hbox 不计数（宽度口径是 advance 盒）。"""
+    log = "\n".join(
+        [
+            r"Overfull \hbox (0.50pt too wide) in paragraph at lines 24--28",
+            r"Overfull \hbox (2.4pt too wide) detected at line 40",
+        ]
+    )
+    assert (
+        renderer_mod._count_overfull_hbox(
+            log, renderer_mod._WIDTH_TOLERANCE
+        )
+        == 0
+    )
+
+
+def test_count_overfull_hbox_counts_major_overflow():
+    """超宽量 > 2.5pt 的 overfull hbox 仍计数。"""
+    log = "\n".join(
+        [
+            r"Overfull \hbox (2.6pt too wide) in paragraph at lines 24--28",
+            r"Overfull \hbox (12.00003pt too wide) in paragraph at lines 51--53",
+        ]
+    )
+    assert (
+        renderer_mod._count_overfull_hbox(
+            log, renderer_mod._WIDTH_TOLERANCE
+        )
+        == 2
+    )
+
+
+def test_count_overfull_hbox_counts_unparseable_lines():
+    """解析不出 pt 值的行（badness 形式、无括号）保守计数。"""
+    log = "\n".join(
+        [
+            r"Overfull \hbox (badness 10000) in paragraph at lines 10--12",
+            r"Overfull \hbox",
+        ]
+    )
+    assert (
+        renderer_mod._count_overfull_hbox(
+            log, renderer_mod._WIDTH_TOLERANCE
+        )
+        == 2
+    )
+
+
+def test_count_overfull_hbox_mixed_lines():
+    """多行混合：只数超阈值与解析不出的 hbox 行；vbox/underfull 不混入。"""
+    log = "\n".join(
+        [
+            r"Overfull \hbox (0.5pt too wide) in paragraph at lines 10--12",
+            r"Overfull \vbox (1.1pt too high) has occurred while \output is active",
+            r"Overfull \hbox (3.05pt too wide) in paragraph at lines 24--28",
+            r"Overfull \hbox (badness 10000) in paragraph at lines 30--33",
+            r"Underfull \hbox (badness 1000) in paragraph at lines 40--42",
+        ]
+    )
+    assert (
+        renderer_mod._count_overfull_hbox(
+            log, renderer_mod._WIDTH_TOLERANCE
+        )
+        == 2
+    )
+
+
+def test_measure_page_fit_tolerates_minor_horizontal_overflow():
+    """水平墨迹越界 ≤ 2.5pt 被接受；明显超宽仍报 horizontal-overflow。"""
+    width, height = 120.0, 40.0
+    span = pymupdf.Font("helv").text_length("edge line", fontsize=9)
+
+    def _fit_at(exceed: float):
+        doc = pymupdf.open()
+        page = doc.new_page(width=width, height=height)
+        try:
+            page.insert_text((width - span + exceed, 20), "edge line", fontsize=9)
+            return renderer_mod._measure_page_fit(page, width, height)
+        finally:
+            doc.close()
+
+    fits, reason, _chars = _fit_at(1.0)
+    assert fits is True
+    assert reason == "ok"
+    fits, reason, _chars = _fit_at(4.0)
+    assert fits is False
+    assert reason == "horizontal-overflow"
+
+
+def test_measure_page_fit_tolerates_minor_left_edge_overflow():
+    """左缘越界 ≤ 2.5pt（x0 分支）同样接受。"""
+    doc = pymupdf.open()
+    page = doc.new_page(width=120, height=40)
+    try:
+        page.insert_text((-1.0, 20), "edge line", fontsize=9)
+        fits, reason, _chars = renderer_mod._measure_page_fit(page, 120.0, 40.0)
+    finally:
+        doc.close()
+    assert fits is True
+    assert reason == "ok"
+
+
+def test_measure_page_fit_vertical_overflow_tolerance_unchanged():
+    """垂直判定仍用 0.5pt 容差：descender 越出页底 > 0.5pt 即失败。"""
+    doc = pymupdf.open()
+    page = doc.new_page(width=120, height=40)
+    try:
+        # 基线贴近页底：字形主体在页内可抽取，descender 越界约 1.9pt。
+        page.insert_text((2, 39.0), "going below", fontsize=9)
+        fits, reason, _chars = renderer_mod._measure_page_fit(page, 120.0, 40.0)
+    finally:
+        doc.close()
+    assert fits is False
+    assert reason == "vertical-overflow"
+
+
 @requires_latex
 def test_render_shrinks_instead_of_clipping(tmp_path):
     """太长而垂直放不下时应有界缩小，而不是静默截断文本。"""
