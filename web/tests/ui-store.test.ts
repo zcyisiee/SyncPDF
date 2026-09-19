@@ -174,6 +174,86 @@ describe('ui store 预览页 / bbox 图层 / 选中段落（W05）', () => {
   });
 });
 
+describe('ui store 段落多选（shift 语义）', () => {
+  it('默认空集合，selectedParagraphId 与集合末元素同步为 null', () => {
+    const store = createUiStore();
+    expect(store.getState().selectedParagraphIds).toEqual([]);
+    expect(store.getState().selectedParagraphId).toBeNull();
+  });
+
+  it('extend 追加：按点击顺序追加，主选中 = 最后一个', () => {
+    const store = createUiStore();
+    store.getState().selectParagraph('P01-001', { extend: true });
+    store.getState().selectParagraph('P01-002', { extend: true });
+    store.getState().selectParagraph('P01-003', { extend: true });
+    expect(store.getState().selectedParagraphIds).toEqual(['P01-001', 'P01-002', 'P01-003']);
+    expect(store.getState().selectedParagraphId).toBe('P01-003');
+  });
+
+  it('extend 移除已选：主选中回退到剩余最后一个；移除到空 → null', () => {
+    const store = createUiStore();
+    store.getState().selectParagraph('P01-001', { extend: true });
+    store.getState().selectParagraph('P01-002', { extend: true });
+    // 移除主选中（最后点击的那段）：集合剩前面的，主选中回退
+    store.getState().selectParagraph('P01-002', { extend: true });
+    expect(store.getState().selectedParagraphIds).toEqual(['P01-001']);
+    expect(store.getState().selectedParagraphId).toBe('P01-001');
+    store.getState().selectParagraph('P01-001', { extend: true });
+    expect(store.getState().selectedParagraphIds).toEqual([]);
+    expect(store.getState().selectedParagraphId).toBeNull();
+  });
+
+  it('非 extend 重置为单选 [id]（多选集合被丢弃）', () => {
+    const store = createUiStore();
+    store.getState().selectParagraph('P01-001', { extend: true });
+    store.getState().selectParagraph('P01-002', { extend: true });
+    store.getState().selectParagraph('P02-005');
+    expect(store.getState().selectedParagraphIds).toEqual(['P02-005']);
+    expect(store.getState().selectedParagraphId).toBe('P02-005');
+    // 单选同一 id 不换集合引用（无语义变化）
+    const before = store.getState().selectedParagraphIds;
+    store.getState().selectParagraph('P02-005');
+    expect(store.getState().selectedParagraphIds).toBe(before);
+  });
+
+  it('clearParagraphSelection 清空两个选中字段', () => {
+    const store = createUiStore();
+    store.getState().selectParagraph('P01-001', { extend: true });
+    store.getState().selectParagraph('P01-002', { extend: true });
+    store.getState().clearParagraphSelection();
+    expect(store.getState().selectedParagraphIds).toEqual([]);
+    expect(store.getState().selectedParagraphId).toBeNull();
+  });
+
+  it('resetPreviewForDocument 换文档清空多选，同一 did 不重复重置', () => {
+    const store = createUiStore();
+    store.getState().selectParagraph('P01-001', { extend: true });
+    store.getState().selectParagraph('P01-002', { extend: true });
+    store.getState().resetPreviewForDocument('doc-a');
+    expect(store.getState().previewDid).toBe('doc-a');
+    expect(store.getState().selectedParagraphIds).toEqual([]);
+    expect(store.getState().selectedParagraphId).toBeNull();
+
+    store.getState().selectParagraph('P02-001', { extend: true });
+    store.getState().resetPreviewForDocument('doc-a'); // 同一 did：保留选中
+    expect(store.getState().selectedParagraphIds).toEqual(['P02-001']);
+    store.getState().resetPreviewForDocument('doc-b');
+    expect(store.getState().selectedParagraphIds).toEqual([]);
+  });
+
+  it('setSelectedParagraph 兼容入口：非 null → [id]，null → 清空', () => {
+    const store = createUiStore();
+    store.getState().selectParagraph('P01-001', { extend: true });
+    store.getState().selectParagraph('P01-002', { extend: true });
+    store.getState().setSelectedParagraph('P03-001');
+    expect(store.getState().selectedParagraphIds).toEqual(['P03-001']);
+    expect(store.getState().selectedParagraphId).toBe('P03-001');
+    store.getState().setSelectedParagraph(null);
+    expect(store.getState().selectedParagraphIds).toEqual([]);
+    expect(store.getState().selectedParagraphId).toBeNull();
+  });
+});
+
 describe('reader session choices', () => {
   it('zoom clamps invalid/extreme values, fit resets, compare links by default', () => {
     const store = createUiStore();

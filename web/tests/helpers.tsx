@@ -61,6 +61,7 @@ export function resetUiStore(): void {
     previewPage: 1,
     previewDid: null,
     bboxMode: 'parse',
+    selectedParagraphIds: [],
     selectedParagraphId: null,
     dragging: null,
   });

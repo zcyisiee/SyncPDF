@@ -51,6 +51,46 @@ describe('BboxLayer', () => {
     expect(onSelect).toHaveBeenCalledTimes(1);
   });
 
+  it('shift 点击回调带 { shift: true }；普通点击不带修饰参数（键盘激活同普通点击）', () => {
+    const onSelect = vi.fn();
+    renderLayer({ onSelect });
+    fireEvent.click(screen.getByRole('button', { name: /P01-002/ }), { shiftKey: true });
+    expect(onSelect).toHaveBeenCalledWith('P01-002', { shift: true });
+    fireEvent.click(screen.getByRole('button', { name: /P01-001/ }));
+    expect(onSelect).toHaveBeenLastCalledWith('P01-001');
+    fireEvent.keyDown(screen.getByRole('button', { name: /P01-001/ }), { key: 'Enter', shiftKey: true });
+    expect(onSelect).toHaveBeenLastCalledWith('P01-001');
+  });
+
+  it('多选渲染：集合内都有选中态；主选中保持加粗虚线，其余用轻虚线变体', () => {
+    const { rerender } = renderLayer({ selectedIds: undefined, selectedId: null });
+    const first = screen.getByRole('button', { name: /P01-001/ });
+    expect(first).toHaveAttribute('aria-pressed', 'false');
+
+    rerender(
+      <BboxLayer
+        boxes={PARSE_BOXES}
+        viewport={makeViewport({ scale: 1 })}
+        mode="parse"
+        cropbox={LETTER_CROPBOX}
+        selectedId="P01-002"
+        selectedIds={['P01-001', 'P01-002']}
+        onSelect={() => {}}
+      />,
+    );
+    // 集合判定覆盖单选判定：两个 id 都是选中态
+    expect(screen.getByRole('button', { name: /P01-001/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /P01-002/ })).toHaveAttribute('aria-pressed', 'true');
+    // 主选中 = 集合最后一个（P01-002）：现样式（加粗 + '4 2'）
+    const primary = screen.getByRole('button', { name: /P01-002/ });
+    expect(primary.getAttribute('stroke-width')).toBe('2.5');
+    expect(primary).toHaveAttribute('stroke-dasharray', '4 2');
+    // 次选中（P01-001）：轻虚线变体（不加粗 + '2 2'）
+    const secondary = screen.getByRole('button', { name: /P01-001/ });
+    expect(secondary.getAttribute('stroke-width')).toBe('1.5');
+    expect(secondary).toHaveAttribute('stroke-dasharray', '2 2');
+  });
+
   it('选中态：加粗虚线 + aria-pressed；类别颜色不变', () => {
     const { rerender } = renderLayer({ selectedId: null });
     const before = screen.getByRole('button', { name: /P01-001/ });

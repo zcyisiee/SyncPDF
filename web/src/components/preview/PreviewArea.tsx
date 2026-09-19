@@ -86,8 +86,9 @@ function DocumentPreview({ did, streamArtifact }: PreviewProps) {
   const previewPage = useUiStore((state) => state.previewPage);
   const setPreviewPage = useUiStore((state) => state.setPreviewPage);
   const resetPreviewForDocument = useUiStore((state) => state.resetPreviewForDocument);
+  const selectedParagraphIds = useUiStore((state) => state.selectedParagraphIds);
   const selectedParagraphId = useUiStore((state) => state.selectedParagraphId);
-  const setSelectedParagraph = useUiStore((state) => state.setSelectedParagraph);
+  const selectParagraph = useUiStore((state) => state.selectParagraph);
 
   const [pdfPageInfo, setPdfPageInfo] = useState<{ url: string; numPages: number } | null>(null);
   const [sourcePageInfo, setSourcePageInfo] = useState<{ url: string; numPages: number } | null>(null);
@@ -161,9 +162,10 @@ function DocumentPreview({ did, streamArtifact }: PreviewProps) {
   const legendLabels = previewMode === 'target' && geometryKind === 'parse' ? coords?.paragraph_labels : legendCoords?.labels;
   const bboxUnavailable = geometryKind !== null && geometryQuery.isSuccess && coords === null;
 
+  // 普通点击单选、shift 点击进出多选集合（store 里维护集合与主选中段）
   const handleSelect = useCallback(
-    (id: string) => setSelectedParagraph(id),
-    [setSelectedParagraph],
+    (id: string, opts?: { shift?: boolean }) => selectParagraph(id, { extend: opts?.shift }),
+    [selectParagraph],
   );
   const handlePageInfo = useCallback(
     (info: PdfPageInfo) => {
@@ -191,10 +193,11 @@ function DocumentPreview({ did, streamArtifact }: PreviewProps) {
             mode: layerMode,
             data: bboxData,
             selectedId: selectedParagraphId,
+            selectedIds: selectedParagraphIds,
             onSelect: handleSelect,
           }
         : null,
-    [bboxData, layerMode, handleSelect, selectedParagraphId],
+    [bboxData, layerMode, handleSelect, selectedParagraphId, selectedParagraphIds],
   );
 
   /**
