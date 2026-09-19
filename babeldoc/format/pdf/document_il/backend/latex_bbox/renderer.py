@@ -97,8 +97,12 @@ _LEAD_TRIAL_RATIOS = (1.1, 0.9)
 _DEFAULT_ASCENT_RATIO = 1.15
 #: ``\topskip`` 额外余量（em）：行内数学的上标会把墨迹抬到字体 ascender 之上。
 _TOPSKIP_HEADROOM_EM = 0.1
-#: 墨迹/overfull 判定容差（pt），吸收 geometry 舍入。
+#: 墨迹/overfull 判定容差（pt），吸收 geometry 舍入（垂直方向使用）。
 _FIT_TOLERANCE = 0.5
+#: 水平方向（宽度）墨迹越界与 overfull hbox 共用的容差（pt）：TeX/PyMuPDF
+#: 的宽度口径都是 advance 盒（含字形右侧轴承），轻微超宽时可见墨迹几乎总在
+#: 页内；垂直判定仍用 ``_FIT_TOLERANCE``。
+_WIDTH_TOLERANCE = 2.5
 #: 进程内 stamp 缓存上限（LRU 近似：超限清空）。
 _CACHE_LIMIT = 512
 
@@ -412,7 +416,9 @@ def _measure_page_fit(
         if text_chars == 0:
             return False, "no-extractable-text", 0
         if not ink.is_empty and width > 0 and height > 0:
-            if ink.x1 > width + _FIT_TOLERANCE or ink.x0 < -_FIT_TOLERANCE:
+            # 水平方向用更宽的容差：宽度口径是 advance 盒（含右侧轴承），
+            # 轻微超宽（≤ _WIDTH_TOLERANCE）时可见墨迹几乎总在页内。
+            if ink.x1 > width + _WIDTH_TOLERANCE or ink.x0 < -_WIDTH_TOLERANCE:
                 return False, "horizontal-overflow", text_chars
             if ink.y1 > height + _FIT_TOLERANCE or ink.y0 < -_FIT_TOLERANCE:
                 return False, "vertical-overflow", text_chars
@@ -435,6 +441,30 @@ def _measure_page_fit(
     except Exception:  # noqa: BLE001 - malformed page counts as a failed fit
         logger.debug("测量 LaTeX 页面失败", exc_info=True)
         return False, "page-measure-failed", 0
+
+
+#: ``Overfull \hbox`` 行及其括号内的超宽量说明（如 ``3.05pt too wide``）。
+_OVERFULL_HBOX_LINE = re.compile(r"Overfull \\hbox(?: \(([^)]*)\))?")
+_OVERFULL_HBOX_WIDE = re.compile(r"([0-9]+(?:\.[0-9]+)?)pt too wide")
+
+
+def _count_overfull_hbox(log: str, tolerance: float) -> int:
+    """统计超宽量超过 ``tolerance`` 的 ``Overfull \\hbox`` 行数。
+
+    TeX 报 ``Overfull \\hbox (3.05pt too wide) in paragraph ...``；宽度口径是
+    advance 盒，轻微超宽（≤ tolerance）不再算失败。解析不出 pt 值的行
+    （badness 形式、无括号）保守计数。
+    """
+    count = 0
+    for match in _OVERFULL_HBOX_LINE.finditer(log):
+        detail = match.group(1)
+        if detail is None:
+            count += 1
+            continue
+        amount = _OVERFULL_HBOX_WIDE.fullmatch(detail)
+        if amount is None or float(amount.group(1)) > tolerance:
+            count += 1
+    return count
 
 
 class BboxStampRenderer:
@@ -755,7 +785,8 @@ class BboxStampRenderer:
 
         log = proc.stdout or ""
         errors = re.findall(r"^! .*$", log, flags=re.M)
-        overfull = len(re.findall(r"Overfull \\hbox", log))
+        # 只统计超宽量超过 _WIDTH_TOLERANCE 的 overfull hbox；vbox 出现即失败。
+        overfull = _count_overfull_hbox(log, _WIDTH_TOLERANCE)
         overfull_vbox = len(re.findall(r"Overfull \\vbox", log))
         pdf_path = workdir / f"{stem}.pdf"
         compiled = proc.returncode == 0 and pdf_path.exists()
