@@ -243,6 +243,9 @@ class JobRecord(BaseModel):
     #: ``None``）。候选行在提交时就建好了，这两个字段是 job 侧的回链（前端从 job 找到
     #: 候选、或从候选找到 job 都不需要额外请求）。
     paragraph_id: str | None = None
+    #: 批量块编译（``effective_scope="blocks"``）的段落 id 清单；其余 scope 为 ``None``。
+    #: 每个块各自的草稿覆盖（target/layout）互不影响，样式可以不一致。
+    paragraph_ids: list[str] | None = None
     candidate_id: str | None = None
     #: 子进程 debug recorder 建的 run（spawn 之后新出现的那个）；没有 → None。
     run_id: str | None = None
@@ -426,6 +429,7 @@ class JobRegistry:
         downgrade_reason: str | None = None,
         trigger: str | None = None,
         paragraph_id: str | None = None,
+        paragraph_ids: list[str] | None = None,
         candidate_id: str | None = None,
         use_glossary: bool = False,
         reviewer_profile: str | None = None,
@@ -460,6 +464,7 @@ class JobRegistry:
             downgrade_reason=downgrade_reason,
             trigger=trigger,
             paragraph_id=paragraph_id,
+            paragraph_ids=paragraph_ids,
             candidate_id=candidate_id,
         )
         self.records[record.job_id] = record

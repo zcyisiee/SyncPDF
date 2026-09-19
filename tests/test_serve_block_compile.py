@@ -541,6 +541,101 @@ def _patch(compiler, *, page):
     return json.loads(row[0])["patches"]
 
 
+# --------------------------------------------------------------------------- #
+# 批量块编译（shift 多选）：同页串行、每页只合成一次、单块失败不拖垮整批
+# --------------------------------------------------------------------------- #
+def _batch_record(pids):
+    job = record()
+    job.effective_scope = "blocks"
+    job.paragraph_ids = list(pids)
+    return job
+
+
+def test_batch_compile_composes_each_page_once(local, monkeypatch):
+    compiler, calls, _rows = local
+    compose_calls: list[int] = []
+    original = BlockCompiler.compose_page_asset
+
+    def counting(self, record, page_number, **kwargs):
+        compose_calls.append(page_number)
+        return original(self, record, page_number, **kwargs)
+
+    monkeypatch.setattr(BlockCompiler, "compose_page_asset", counting)
+
+    result = compiler.compile_blocks(_batch_record(["P1", "P2"]))
+
+    assert sorted(calls) == ["P1", "P2"] or set(calls) == {"P1", "P2"}
+    # 两块都在第 1 页：只合成一次该页（不是每块一次）。
+    assert compose_calls.count(1) == 1
+    patches = _patch(compiler, page=1)
+    assert set(patches) == {"P1", "P2"}
+    assert result["blocks"] == 2 and result["pages"] == [1]
+
+
+def test_batch_compile_failure_isolates_other_blocks(local, monkeypatch):
+    compiler, _calls, _rows = local
+    from babeldoc_tools.serve import block_compile
+
+    real = block_compile.render_request
+
+    def flaky(_workdir, pid, target, box, temporary, _cache, **kwargs):
+        if pid == "P1":
+            raise ToolError("compile_failed", "P1 故意失败")
+        return real(_workdir, pid, target, box, temporary, _cache, **kwargs)
+
+    monkeypatch.setattr(block_compile, "render_request", flaky)
+
+    with pytest.raises(ToolError) as error:
+        compiler.compile_blocks(_batch_record(["P1", "P2"]))
+
+    assert error.value.code == "compile_failed"
+    failures = error.value.extra.get("failures")
+    assert failures and failures[0]["block_id"] == "P1"
+    # P2 的贴片照常发布。
+    assert set(_patch(compiler, page=1)) == {"P2"}
+
+
+def test_batch_endpoint_lifecycle(local, monkeypatch):
+    import time
+
+    from babeldoc_tools.serve.app import create_app
+    from fastapi.testclient import TestClient
+
+    compiler, calls, rows = local
+    monkeypatch.setattr(BlockCompiler, "_rows", lambda _self, _did: rows)
+    with TestClient(create_app(compiler.store)) as client:
+        response = client.post(
+            "/api/v1/documents/paper/blocks/compile",
+            json={"base_revision": 0, "block_ids": ["P2", "P1", "P2"]},
+        )
+        assert response.status_code == 202, response.text
+        jid = response.json()["job_id"]
+        for _ in range(200):
+            job = client.get(f"/api/v1/jobs/{jid}").json()
+            if job["status"] not in ("queued", "running"):
+                break
+            time.sleep(0.01)
+        assert job["status"] == "succeeded", job
+        assert job["effective_scope"] == "blocks"
+        # 去重保序：P2、P1 各编一次。
+        assert sorted(calls) == ["P1", "P2"]
+        assert job["paragraph_ids"] == ["P2", "P1"]
+        assert '"blocks": 2' in (job["envelope"] or "")
+
+        # revision 过期 → 409。
+        bad = client.post(
+            "/api/v1/documents/paper/blocks/compile",
+            json={"base_revision": 99, "block_ids": ["P1"]},
+        )
+        assert bad.status_code == 409
+        # 空/未知块 → 4xx，不建 job。
+        unknown = client.post(
+            "/api/v1/documents/paper/blocks/compile",
+            json={"base_revision": 0, "block_ids": ["NOPE"]},
+        )
+        assert unknown.status_code in (404, 422)
+
+
 @pytest.mark.parametrize(
     "box", [[0, 0, float("nan"), 10], [0, 0, 401, 10], [1, 1, 0, 0]]
 )

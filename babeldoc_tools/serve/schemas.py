@@ -539,6 +539,25 @@ class JobAccepted(BaseModel):
     action: Literal["run", "check", "compile"]
 
 
+class BlocksCompileRequest(BaseModel):
+    """``POST /documents/{did}/blocks/compile`` 的请求体（shift 多选批量编译）。
+
+    ``block_ids`` 是要一起重新编译的段落清单（去重保序在路由层做）；每个块各自的
+    草稿覆盖（target/layout 样式）互不影响。服务端同页串行、跨页并行编译，
+    每个受影响页只合成一次。
+    """
+
+    base_revision: int = Field(
+        ge=0,
+        description="客户端期望的当前草稿 revision；与服务器不一致 → 409 revision_conflict",
+    )
+    block_ids: list[str] = Field(
+        min_length=1,
+        max_length=200,
+        description="要批量编译的段落 id 清单（[A-Za-z0-9._-]{1,64}，去重保序）",
+    )
+
+
 # --------------------------------------------------------------------------- #
 # W09：草稿（api.md §3.3）
 # --------------------------------------------------------------------------- #

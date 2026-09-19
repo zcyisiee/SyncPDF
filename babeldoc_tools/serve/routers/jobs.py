@@ -45,6 +45,7 @@ from babeldoc_tools.serve.schemas import API_PREFIX
 from babeldoc_tools.serve.schemas import JOB_ACTION_HINT
 from babeldoc_tools.serve.schemas import JOB_ACTION_PHASE
 from babeldoc_tools.serve.schemas import JOB_ACTIONS_IMPLEMENTED
+from babeldoc_tools.serve.schemas import BlocksCompileRequest
 from babeldoc_tools.serve.schemas import JobAccepted
 from babeldoc_tools.serve.schemas import JobCreateRequest
 from babeldoc_tools.serve.store import DocumentStore
@@ -253,6 +254,39 @@ def jobs_router(
         return FileResponse(
             path, media_type="application/pdf", filename=f"{did}-r{row[1]}.pdf"
         )
+
+    @router.post(
+        "/documents/{did}/blocks/compile",
+        response_model=JobAccepted,
+        status_code=202,
+        summary="批量编译多个 block",
+        description=(
+            "shift 多选后的批量重新编译：一个 job 编一组 block，各自的草稿覆盖"
+            "（target/layout 样式）互不影响。服务端同页串行、跨页并行编译，"
+            "每个受影响页只合成一次。"
+        ),
+    )
+    async def compile_blocks(
+        did: Annotated[str, PathParam(description=DOCUMENT_ID)],
+        payload: BlocksCompileRequest,
+    ) -> JobAccepted:
+        import re
+
+        block_ids: list[str] = []
+        for block_id in payload.block_ids:
+            if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", block_id):
+                raise ToolError("block_not_found", f"block_id 不合法：{block_id}")
+            if block_id not in block_ids:
+                block_ids.append(block_id)
+        current = compiles.drafts.for_did(did).read()
+        if payload.base_revision != current.revision:
+            raise ToolError(
+                "revision_conflict",
+                "草稿 revision 已变化",
+                current_revision=current.revision,
+            )
+        record = await block_compiler.submit_batch(did, block_ids, current.revision)
+        return JobAccepted(job_id=record.job_id, action="compile")
 
     @router.post(
         "/documents/{did}/blocks/{block_id}/compile",

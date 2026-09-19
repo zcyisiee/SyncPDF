@@ -11,6 +11,7 @@ import copy
 import hashlib
 import json
 import math
+import os
 import pickle
 import tempfile
 import threading
@@ -31,6 +32,22 @@ from babeldoc_tools.serve.workdir import WorkdirReader
 #: 翻译期间它不再变化；mtime 变了（重新 parse）就失效重读。进程内共享，跨 job 复用。
 _PARSE_STATE_CACHE: dict[str, tuple[int, dict]] = {}
 _PARSE_STATE_LOCK = threading.Lock()
+
+#: 批量块编译并行 worker 数上限（xelatex 是 CPU 密集进程；与流式预览同量级）。
+MAX_BATCH_WORKERS = 8
+_DEFAULT_BATCH_WORKERS = 4
+
+
+def batch_workers_from_environ(environ=None) -> int:
+    """解析 ``BDT_SERVE_BATCH_WORKERS``：缺省 4，非法值夹到 [1, 8]。"""
+    raw = (environ or os.environ).get("BDT_SERVE_BATCH_WORKERS")
+    if raw is None or not str(raw).strip():
+        return _DEFAULT_BATCH_WORKERS
+    try:
+        value = int(str(raw).strip())
+    except ValueError:
+        return _DEFAULT_BATCH_WORKERS
+    return max(1, min(MAX_BATCH_WORKERS, value))
 
 
 def _copy_page_shells(state: dict) -> dict:
@@ -390,7 +407,7 @@ class BlockCompiler:
 
     async def shutdown(self):
         for record in self.runner.registry.records.values():
-            if record.effective_scope not in ("block", "export"):
+            if record.effective_scope not in ("block", "blocks", "export"):
                 continue
             if record.status == "running":
                 self.runner.registry.mark_cancel_requested(record)
@@ -447,6 +464,37 @@ class BlockCompiler:
         task.add_done_callback(self.tasks.discard)
         return record
 
+    async def submit_batch(self, did, pids, revision):
+        """批量块编译：一个 job 编一组 block（各自的草稿覆盖互不影响）。"""
+        workdir = self.store.resolve(did)
+        if read_draft(workdir).revision != revision:
+            raise ToolError("revision_conflict", "草稿 revision 已变化")
+        known = {row.id for row in self._rows(did)}
+        missing = [pid for pid in pids if pid not in known]
+        if missing:
+            raise ToolError("block_not_found", f"文档中没有该 block：{missing[0]}")
+        async with self.runner.registry.lock:
+            active = self.runner.registry.active_for_did(did)
+            if active:
+                raise ToolError("document_busy", "已有编译任务", job_id=active.job_id)
+            record = self.runner.registry.create(
+                did=did,
+                action="compile",
+                from_stage="build",
+                profile=None,
+                paragraph_ids=list(pids),
+                requested_scope="blocks",
+                effective_scope="blocks",
+                trigger="manual",
+            )
+            record.revision = revision
+            self.runner.registry._queue.remove(record.job_id)
+            self.runner.registry.save(record)
+        task = asyncio.create_task(self._run(record))
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+        return record
+
     async def _run(self, record):
         async with self.semaphore:
             await self._execute(record)
@@ -459,8 +507,13 @@ class BlockCompiler:
         record.boot_id = self.runner.registry.boot_id
         self.runner.registry._write(record, EVENT_STARTED)
         try:
+            scope = record.effective_scope
             operation = (
-                self.export if record.effective_scope == "export" else self.compile
+                self.export
+                if scope == "export"
+                else self.compile_blocks
+                if scope == "blocks"
+                else self.compile
             )
             result = await asyncio.to_thread(operation, record)
             self.runner.registry.mark_finished(
@@ -1016,6 +1069,106 @@ class BlockCompiler:
                 )
             result["preview_asset"] = self.compose_full_preview(record)["asset"]
         return result
+
+    def compile_blocks(self, record):
+        """批量块编译：同页串行、跨页并行的贴片编译，最后每页只合成一次。
+
+        每个块各自读当前草稿的 target/layout 覆盖（样式可以不一致）；单个块失败
+        不中断其它块（失败清单进 error detail），全部完成后按受影响页各合成一次
+        页资产、再合成一次完整预览——这是批编译省时间的主要来源。
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        started = time.monotonic()
+        did, revision = record.did, record.revision
+        workdir = self.store.resolve(did)
+        draft = read_draft(workdir)
+        if draft.revision != revision:
+            raise ToolError("stale_job", "编译输入已过期")
+        rows = {row.id: row for row in self._rows(did)}
+        pids = list(record.paragraph_ids or [])
+        if not pids:
+            raise ToolError("compile_failed", "批量编译缺少 block 清单")
+        workers = batch_workers_from_environ()
+        page_locks: dict[int, threading.Lock] = {}
+        lock_guard = threading.Lock()
+        results: dict[str, dict] = {}
+        failures: list[dict] = []
+
+        def page_lock(page):
+            with lock_guard:
+                if page not in page_locks:
+                    page_locks[page] = threading.Lock()
+                return page_locks[page]
+
+        def one(pid):
+            row = rows[pid]
+            with page_lock(row.page):
+                if record.cancel_requested_at is not None:
+                    return
+                worker = record.model_copy()
+                worker.paragraph_id = pid
+                try:
+                    result = self.compile_block_patch(worker)
+                    results[pid] = result
+                    self.store.database.append_event(
+                        record.job_id,
+                        did,
+                        "block_compiled",
+                        {
+                            "paragraph_id": pid,
+                            "page": result["page"],
+                            "duration_s": round(result["duration_s"], 3),
+                        },
+                        block_id=pid,
+                    )
+                except ToolError as exc:
+                    failures.append(
+                        {
+                            "block_id": pid,
+                            "code": exc.code,
+                            "message": str(exc),
+                        }
+                    )
+                except Exception as exc:  # noqa: BLE001 - 单块失败不拖垮整批
+                    failures.append(
+                        {"block_id": pid, "code": "compile_failed", "message": str(exc)}
+                    )
+
+        with ThreadPoolExecutor(
+            max_workers=workers, thread_name_prefix="block-batch"
+        ) as pool:
+            list(pool.map(one, pids))
+        if record.cancel_requested_at is not None:
+            raise ToolError("canceled", "任务已取消，批量编译结果未发布")
+        if not results:
+            raise ToolError(
+                "compile_failed", "批量编译全部失败", failures=failures
+            )
+        # 受影响页 = 每块的主页/贴片页/上一版贴片页；每页只合成一次。
+        affected: set[int] = set()
+        for result in results.values():
+            home = result["page"]
+            affected.add(home)
+            affected.add(result.get("stamp_page") or home)
+            affected.add(result.get("previous_stamp_page") or home)
+        for number in sorted(affected):
+            self.compose_page_asset(record, number)
+        preview = self.compose_full_preview(record)
+        if failures:
+            raise ToolError(
+                "compile_failed",
+                f"{len(failures)} 个 block 编译失败（其余 {len(results)} 个已发布）",
+                failures=failures,
+                blocks=len(results),
+                pages=sorted(affected),
+            )
+        return {
+            "blocks": len(results),
+            "pages": sorted(affected),
+            "preview_asset": preview["asset"],
+            "duration_s": time.monotonic() - started,
+        }
 
     def compose_full_preview(self, record):
         import pymupdf
