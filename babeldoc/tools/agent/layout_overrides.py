@@ -10,8 +10,10 @@
     与段级 ``pdf_style``。字形变小但排版框/字距不变（"视觉减重"杠杆）。
   * ``line_skip``   覆盖该段行距系数（默认 CJK 1.50 / 其它 1.3）。
   * ``box_scale``   布局框等比扩缩，**锚定左上角**向右侧/下侧生长（文本生长方向）。
-  * ``box``         显式指定 ``[x, y, x2, y2]``（PDF 坐标，y 向上），优先于 box_scale。
-  * ``force_break_after_text`` / ``force_break_after_offset``
+ * ``box``         显式指定 ``[x, y, x2, y2]``（PDF 坐标，y 向上），优先于 box_scale。
+ * ``bold`` / ``italic`` / ``serif``  渲染样式三态覆盖（布尔；缺省 = 跟随源文派生值）。
+   由 serve 局部编译（``render_request``）消费；一次性全量编译路径暂不应用。
+ * ``force_break_after_text`` / ``force_break_after_offset``
     在渲染文本的指定位置强制换行（前者子串锚定，抗文本改动；后者按字符偏移精确兜底）。
 - 页级 ``pages[<n>].font_scale`` 作用于该页所有段落，段落级 font_scale 再叠乘。
 """
@@ -34,6 +36,8 @@ PARAGRAPH_FLOAT_KEYS = {
     "box_scale": (0.3, 5.0),
 }
 PARAGRAPH_LIST_KEYS = ("force_break_after_text", "force_break_after_offset")
+#: 渲染样式布尔键（serve 局部编译消费；True/False 覆盖，缺省跟随源文）。
+PARAGRAPH_BOOL_KEYS = ("bold", "italic", "serif")
 PAGE_FLOAT_KEYS = {"font_scale": (0.2, 5.0)}
 HISTORY_LIMIT = 200
 _ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -132,6 +136,9 @@ def validate(data: dict, allow_none: bool = False) -> list[str]:
                     errors.append(f"{where}: 超出范围 [{low}, {high}]：{value}")
             elif key == "box":
                 errors.extend(_validate_box(where, value))
+            elif key in PARAGRAPH_BOOL_KEYS:
+                if not isinstance(value, bool):
+                    errors.append(f"{where}: 必须是布尔值")
             elif key == "force_break_after_text":
                 if (
                     not isinstance(value, list)
@@ -311,6 +318,14 @@ def page_font_scale(overrides: dict | None, page_number: int) -> float | None:
 def line_skip_override(overrides: dict | None, debug_id: str | None) -> float | None:
     value = paragraph_override(overrides, debug_id).get("line_skip")
     return float(value) if value else None
+
+
+def style_flag(overrides: dict | None, debug_id: str | None, key: str) -> bool | None:
+    """段落样式布尔覆盖（``bold``/``italic``/``serif``）；没有覆盖 → None。"""
+    if key not in PARAGRAPH_BOOL_KEYS:
+        raise ValueError(f"未知样式键：{key!r}")
+    value = paragraph_override(overrides, debug_id).get(key)
+    return value if isinstance(value, bool) else None
 
 
 def to_config_hook(overrides: dict | None) -> dict:

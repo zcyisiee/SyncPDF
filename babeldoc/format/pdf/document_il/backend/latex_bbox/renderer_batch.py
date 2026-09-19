@@ -48,6 +48,7 @@ from pathlib import Path
 import pymupdf
 
 from babeldoc.debug_recorder import CompileCandidate
+from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import _WIDTH_TOLERANCE
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
     DEFAULT_LEAD_RATIO,
 )
@@ -62,6 +63,9 @@ from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
 )
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
     font_setup_clauses,
+)
+from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
+    overfull_hbox_exceeds,
 )
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import topskip_clause
 
@@ -100,7 +104,6 @@ _SINGLE_ONLY_REASONS = frozenset({"batch-attribution-failed"})
 
 _MARKER_START = re.compile(r"@@S (\d+)@@")
 _MARKER_END = re.compile(r"@@E (\d+)@@")
-_OVERFULL_HBOX = re.compile(r"Overfull \\hbox")
 _OVERFULL_VBOX = re.compile(r"Overfull \\vbox")
 #: ``at lines X--Y`` / ``on line X``：TeX 报出的源 tex 行号。
 _LINES_RANGE = re.compile(r"(?:at lines (\d+)--(\d+)|on line (\d+))")
@@ -1313,7 +1316,8 @@ def _attribute_log(log: str, ranges: list[tuple[int, int]]) -> dict:
     for index, line in enumerate(lines):
         if line.startswith("!"):
             kind = "error"
-        elif _OVERFULL_HBOX.search(line):
+        elif overfull_hbox_exceeds(line, _WIDTH_TOLERANCE):
+            # 轻微超宽（≤ _WIDTH_TOLERANCE）不算失败（口径同单段渲染器）。
             kind = "overfull_hbox"
         elif _OVERFULL_VBOX.search(line):
             kind = "overfull_vbox"

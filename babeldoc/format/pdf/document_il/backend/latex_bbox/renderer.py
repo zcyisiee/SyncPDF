@@ -448,6 +448,22 @@ _OVERFULL_HBOX_LINE = re.compile(r"Overfull \\hbox(?: \(([^)]*)\))?")
 _OVERFULL_HBOX_WIDE = re.compile(r"([0-9]+(?:\.[0-9]+)?)pt too wide")
 
 
+def overfull_hbox_exceeds(line: str, tolerance: float) -> bool:
+    """单行 ``Overfull \\hbox`` 是否超宽超过 ``tolerance``。
+
+    不是 overfull hbox 行 → False；解析不出 pt 值（badness 形式、无括号）→
+    保守 True。批渲染器（``renderer_batch._attribute_log``）按行归属时共用。
+    """
+    match = _OVERFULL_HBOX_LINE.search(line)
+    if match is None:
+        return False
+    detail = match.group(1)
+    if detail is None:
+        return True
+    amount = _OVERFULL_HBOX_WIDE.fullmatch(detail)
+    return amount is None or float(amount.group(1)) > tolerance
+
+
 def _count_overfull_hbox(log: str, tolerance: float) -> int:
     """统计超宽量超过 ``tolerance`` 的 ``Overfull \\hbox`` 行数。
 
@@ -455,16 +471,9 @@ def _count_overfull_hbox(log: str, tolerance: float) -> int:
     advance 盒，轻微超宽（≤ tolerance）不再算失败。解析不出 pt 值的行
     （badness 形式、无括号）保守计数。
     """
-    count = 0
-    for match in _OVERFULL_HBOX_LINE.finditer(log):
-        detail = match.group(1)
-        if detail is None:
-            count += 1
-            continue
-        amount = _OVERFULL_HBOX_WIDE.fullmatch(detail)
-        if amount is None or float(amount.group(1)) > tolerance:
-            count += 1
-    return count
+    return sum(
+        1 for line in log.split("\n") if overfull_hbox_exceeds(line, tolerance)
+    )
 
 
 class BboxStampRenderer:

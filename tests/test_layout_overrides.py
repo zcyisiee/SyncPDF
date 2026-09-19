@@ -71,6 +71,9 @@ def test_validate_accepts_full_patch():
                 "line_skip": 1.35,
                 "box_scale": 1.05,
                 "box": [44.0, 500.0, 300.0, 620.0],
+                "bold": True,
+                "italic": False,
+                "serif": True,
                 "force_break_after_text": ["（1）", "（2）"],
                 "force_break_after_offset": [23, 47],
             }
@@ -88,6 +91,9 @@ def test_validate_accepts_full_patch():
         ({"paragraphs": {"P1-1": {"box": [1, 2, 3]}}}, "四元数组"),
         ({"paragraphs": {"P1-1": {"box": [1, 2, 1, 9]}}}, "x2 > x"),
         ({"paragraphs": {"P1-1": {"box": [1, 9, 5, 2]}}}, "y2 > y"),
+        ({"paragraphs": {"P1-1": {"bold": "yes"}}}, "布尔值"),
+        ({"paragraphs": {"P1-1": {"italic": 1}}}, "布尔值"),
+        ({"paragraphs": {"P1-1": {"serif": "true"}}}, "布尔值"),
         ({"paragraphs": {"P1-1": {"force_break_after_offset": [-1]}}}, "非负整数"),
         ({"paragraphs": {"P1-1": {"typo_key": 1}}}, "未知字段"),
         ({"pages": {"first": {"font_scale": 0.9}}}, "页码"),
@@ -96,6 +102,22 @@ def test_validate_accepts_full_patch():
 def test_validate_rejects_bad_patch(patch, fragment):
     errors = lo.validate(lo.normalize(patch))
     assert any(fragment in error for error in errors), errors
+
+
+def test_validate_allows_bool_none_deletion_and_style_flag():
+    # allow_none=True 的 patch 里 null = 删除该样式覆盖。
+    patch = {"paragraphs": {"P1-1": {"bold": None}}}
+    assert lo.validate(lo.normalize(patch), allow_none=True) == []
+
+    overrides = lo.normalize(
+        {"paragraphs": {"P1-1": {"bold": True, "serif": False}}}
+    )
+    assert lo.style_flag(overrides, "P1-1", "bold") is True
+    assert lo.style_flag(overrides, "P1-1", "serif") is False
+    assert lo.style_flag(overrides, "P1-1", "italic") is None
+    assert lo.style_flag(overrides, "P2-1", "bold") is None
+    with pytest.raises(ValueError):
+        lo.style_flag(overrides, "P1-1", "typo")
 
 
 def test_patch_merge_diff_and_delete(tmp_path):
