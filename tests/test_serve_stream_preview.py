@@ -7,6 +7,7 @@ variable into the translation subprocess environment.
 """
 
 import json
+import pickle
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
@@ -126,6 +127,93 @@ def test_block_compiler_caches_capability_probe(tmp_path, monkeypatch):
     assert calls == [1]
     assert all(result is results[0] for result in results)
     assert results[0].marker == "probed"
+
+
+class _FakePage:
+    """测试用最小页面（pickle 需要模块级类）。"""
+
+    def __init__(self, paragraphs, number):
+        self.pdf_paragraph = paragraphs
+        self.page_number = number
+
+
+class _FakeDoc:
+    def __init__(self, pages):
+        self.page = pages
+
+
+class _FakeParagraph:
+    def __init__(self, debug_id, box):
+        self.debug_id = debug_id
+        self.box = box
+
+
+def _write_state(workdir, pages_paragraphs):
+    """写一个最小 ``agent/state.pkl``：``doc.page[*].pdf_paragraph`` 是给定段落对象。"""
+    (workdir / "agent").mkdir(parents=True, exist_ok=True)
+    pages = [
+        _FakePage([_FakeParagraph(pid, object()) for pid in pids], index)
+        for index, pids in enumerate(pages_paragraphs)
+    ]
+    state = {"doc": _FakeDoc(pages), "inputs": {}}
+    with (workdir / "agent/state.pkl").open("wb") as handle:
+        pickle.dump(state, handle)
+    return state
+
+
+def test_load_parse_state_copy_is_not_corrupted_by_page_filtering(tmp_path):
+    """回归：``render_request`` 就地重写 ``page.pdf_paragraph``（只留当前 pid），
+    共享缓存对象会被裁成 1 段 → 后续块全部报「缺少译文或排版数据」。
+
+    缓存必须给出可各自改写的页面外壳，且并行 worker 互不影响。
+    """
+    from babeldoc_tools.serve import block_compile as bc
+
+    workdir = tmp_path / "paper"
+    bc._PARSE_STATE_CACHE.clear()
+    _write_state(workdir, [["P01-001", "P01-002", "P01-003"], ["P02-001"]])
+
+    first = bc._load_parse_state(workdir)
+    assert [p.debug_id for p in first["doc"].page[0].pdf_paragraph] == [
+        "P01-001",
+        "P01-002",
+        "P01-003",
+    ]
+
+    # 复刻 render_request 的原地过滤（真实代码：for page in state["doc"].page）。
+    for page in first["doc"].page:
+        page.pdf_paragraph = [p for p in page.pdf_paragraph if p.debug_id == "P01-002"]
+
+    second = bc._load_parse_state(workdir)
+    assert second is not first
+    assert second["doc"] is not first["doc"]
+    assert [p.debug_id for p in second["doc"].page[0].pdf_paragraph] == [
+        "P01-001",
+        "P01-002",
+        "P01-003",
+    ], "缓存被上一个调用方的页面过滤污染了"
+    assert [p.debug_id for p in second["doc"].page[1].pdf_paragraph] == ["P02-001"]
+
+
+def test_load_parse_state_parallel_workers_see_full_paragraphs(tmp_path):
+    """8 个并行 worker 同时取 state 并各自过滤，谁也不该裁掉别人的段落。"""
+    from babeldoc_tools.serve import block_compile as bc
+
+    workdir = tmp_path / "paper"
+    bc._PARSE_STATE_CACHE.clear()
+    pids = [f"P01-{index:03d}" for index in range(1, 41)]
+    _write_state(workdir, [pids])
+
+    def worker(pid):
+        state = bc._load_parse_state(workdir)
+        for page in state["doc"].page:
+            page.pdf_paragraph = [p for p in page.pdf_paragraph if p.debug_id == pid]
+        # 再取一次：必须仍是完整 40 段。
+        return len(bc._load_parse_state(workdir)["doc"].page[0].pdf_paragraph)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        observed = list(pool.map(worker, pids))
+    assert observed == [len(pids)] * len(pids)
 
 
 def test_preview_workers_priority_job_over_server():

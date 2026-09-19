@@ -10,6 +10,7 @@ import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createQueryClient } from '../src/app/App';
+import { EventRow, eventTime } from '../src/components/events/EventRow';
 import { EventStreamPanel } from '../src/components/events/EventStreamPanel';
 import { useEventStream, type EventSourceLike } from '../src/components/events/useEventStream';
 import { useEventWindow } from '../src/components/events/useEventWindow';
@@ -32,6 +33,40 @@ function windowOf(n: number, offset = 0): RunEvent[] {
     }),
   );
 }
+
+describe('eventTime（北京时间显示）', () => {
+  it('带时区的 UTC 归档时刻按 Asia/Shanghai 换算（+8h），不跟浏览器本地时区', () => {
+    expect(eventTime('2026-09-19T09:16:25.710+00:00')).toBe('17:16:25');
+    expect(eventTime('2026-09-19T09:16:25.710Z')).toBe('17:16:25');
+    // 跨日：UTC 的 2026-09-19T20:00:00Z 是北京的 09-20 04:00。
+    expect(eventTime('2026-09-19T20:00:00+00:00')).toBe('04:00:00');
+    // UTC 00:30 → 北京 08:30（不因跨日错位）。
+    expect(eventTime('2026-09-19T00:30:00+00:00')).toBe('08:30:00');
+  });
+
+  it('无时区的裸串按 UTC 解释（job_events.created_at 是 SQLite CURRENT_TIMESTAMP）', () => {
+    expect(eventTime('2026-09-19 09:22:04')).toBe('17:22:04');
+  });
+
+  it('region=utc 保留原始 UTC 时刻；坏值 → —', () => {
+    expect(eventTime('2026-09-19T09:16:25.710+00:00', 'utc')).toBe('09:16:25');
+    expect(eventTime('')).toBe('—');
+    expect(eventTime('not-a-time')).toBe('—');
+  });
+
+  it('行内显示北京时间，title 里同时给出 UTC 原文与北京时间', () => {
+    render(
+      <EventRow
+        event={makeEvent(1, { at: '2026-09-19T09:16:25.710+00:00' })}
+        expanded={false}
+        onToggle={() => {}}
+      />,
+    );
+    const stamp = screen.getByText('17:16:25');
+    expect(stamp).toBeInTheDocument();
+    expect(stamp.getAttribute('title')).toContain('2026-09-19T09:16:25.710+00:00');
+  });
+});
 
 describe('EventStreamPanel', () => {
   it('窗口里的行全部渲染（默认 200 条上限）且最新在上', () => {
@@ -186,6 +221,42 @@ describe('EventStreamPanel', () => {
     await waitFor(() =>
       expect(document.querySelector('[data-od-id="event-new-events"]')).toBeNull(),
     );
+  });
+
+  it('换 run（重新开始翻译）：滚动贴回顶部、浮标清零、展开行收起、seq 从头显示', async () => {
+    const first = windowOf(3);
+    const { rerender } = render(
+      <EventStreamPanel did={DID} feed={makeEventFeed({ events: first, runId: RUN_ID })} />,
+    );
+    const scroll = document.querySelector('[data-od-id="event-stream-scroll"]') as HTMLElement;
+
+    // 滚走 + 展开一行 + 累计浮标：换 run 前先造出「非干净」的面板状态。
+    scroll.scrollTop = 120;
+    fireEvent.scroll(scroll);
+    fireEvent.click(document.querySelector('[data-od-id="event-row"] button') as HTMLElement);
+    expect(document.querySelector('[data-od-id="event-row-json"]')).not.toBeNull();
+    rerender(
+      <EventStreamPanel
+        did={DID}
+        feed={makeEventFeed({ events: [...first, makeEvent(4)], runId: RUN_ID })}
+      />,
+    );
+    await screen.findByRole('button', { name: '↑ 1 条新事件' });
+
+    // 新 run：seq 从 1 重新计数（同一份 windowOf 只是换了 run_id）。
+    const NEW_RUN = '20260920T010000Z-000200';
+    rerender(
+      <EventStreamPanel did={DID} feed={makeEventFeed({ events: windowOf(2), runId: NEW_RUN })} />,
+    );
+
+    expect(screen.getByText(new RegExp(NEW_RUN))).toBeInTheDocument();
+    expect(document.querySelector('[data-od-id="event-new-events"]')).toBeNull();
+    expect(document.querySelector('[data-od-id="event-row-json"]')).toBeNull();
+    expect(scroll.scrollTop).toBe(0);
+    const rows = document.querySelectorAll('[data-od-id="event-row"]');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].getAttribute('data-seq')).toBe('2');
+    expect(rows[1].getAttribute('data-seq')).toBe('1');
   });
 });
 
