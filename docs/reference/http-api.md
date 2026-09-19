@@ -24,6 +24,7 @@
 | `GET /jobs/{jid}`、`POST /jobs/{jid}/cancel` | 任务状态与取消；任务详情不在文档路径下面 |
 | `GET/PATCH/DELETE D/draft` | 草稿与 revision；`draft.py` |
 | `POST D/blocks/{block_id}/compile` | 显式编译单段；`block_compile.py` |
+| `POST D/blocks/compile` | 批量编译多段（shift 多选，一个 job）；`block_compile.py` |
 | `POST D/export`、`GET D/exports/latest` | 导出当前 revision、下载导出；`block_compile.py` |
 | `POST P/retranslate`、`GET P/candidates` | 生成、查看重译候选；`candidates.py` |
 | `POST P/candidates/{cid}/adopt`、`…/reject` | 采用写草稿，拒绝只改候选状态 |
@@ -59,15 +60,20 @@
 {"base_revision":3,"paragraphs":{"P01-001":{"target":"修改后的译文"}}}
 ```
 
-`PATCH D/draft` 成功递增 revision；`DELETE` 清空也递增。字段 `null` 可删除对应覆盖，整段 `null` 删除该段全部覆盖。`target` 使用 canonical 占位符（如 `<style id='1'>`、`{v3}`），不要直接传 Markdown 短锚点。`layout` 的合法键与数值范围由 `draft.py` 和 `babeldoc/tools/agent/layout_overrides.py` 校验。
+`PATCH D/draft` 成功递增 revision；`DELETE` 清空也递增。字段 `null` 可删除对应覆盖，整段 `null` 删除该段全部覆盖。`target` 使用 canonical 占位符（如 `<style id='1'>`、`{v3}`），不要直接传 Markdown 短锚点。`layout` 的合法键与数值范围由 `draft.py` 和 `babeldoc/tools/agent/layout_overrides.py` 校验：四个数值键（`scale_cap/font_scale/line_skip/box_scale`）、`box`、强制换行键，以及三个样式布尔键 `bold/italic/serif`（`true/false` 覆盖，缺省或删键 = 跟随源文派生值；`font_scale` 与样式键在局部块编译时真正生效）。
+
+`GET D/paragraphs` 的每个段落带 `style` 摘要（`font_size/bold/italic/serif/font_name`，由解析状态派生；解析状态不可用为 `null`），前端据此显示"当前 bbox 的编译样式"并提供三态覆盖下拉。
 
 当前保存草稿不自动编译。活动的非 block 任务期间拒绝草稿写入；block 编译允许新编辑，过期结果由 revision 检查挡住。保存后按目的选择：
 
 | 操作 | 调用 | 成功产物 |
 |---|---|---|
 | 看一段的局部排版 | `POST D/blocks/{block_id}/compile`，带 `base_revision` | 局部页面/预览资产；不等于最终导出 |
+| 多段一起重排（shift 多选） | `POST D/blocks/compile`，`{"base_revision":n,"block_ids":[…]}`（去重保序、1..200 项） | 一个 job（`effective_scope=blocks`，`paragraph_ids` 回链）；各块草稿覆盖互不影响，同页串行、跨页并行编译，每个受影响页只合成一次 |
 | 下载当前修订 | `POST D/export`，带 `base_revision` | 数据库 `exports` 记录与导出资产 |
 | 兼容全量重建 | `POST D/jobs`，`action=compile`、`base_revision` | 隔离重建后发布到 output，并进入旧版本归档 |
+
+局部编译（单段与批量）在贴片被缩字/溢出时自动"浮动"：用 PP-DocLayoutV3 对编译后的译文页重识别版面，按 同栏向下/向上扩 → 跨栏横向扩 → 跨页整框迁移 的顺序找净空并重渲染；成功发 `compile_float` 事件（`kind=expand/widen-right/widen-left/next-page`，含落点页与框），失败保留原贴片。批量编译每块完成发 `block_compiled` 事件。fit 判定对水平方向放宽到 2.5pt 容差（垂直仍 0.5pt），轻微超宽不再触发缩字号。
 
 全量 compile 的 `scope=pages` 仍回退全量并记录原因。局部编译和导出不是它的同义参数。
 

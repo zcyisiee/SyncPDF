@@ -68,7 +68,7 @@ def _compiler(monkeypatch, *, fail_calls=0, timeout=False, attribution=True):
         starts = re.findall(r"\\message\{@@S (\d+)@@\}", tex)
         pages = len(starts) or 1
         _pdf(tex_path.with_suffix(".pdf"), pages=pages)
-        overflow = "Overfull \\hbox (1pt too wide)\n" if len(calls) <= fail_calls else ""
+        overflow = "Overfull \\hbox (6pt too wide)\n" if len(calls) <= fail_calls else ""
         log = "\n".join(f"@@S {index}@@\n{overflow}@@E {index}@@" for index in starts) if starts else overflow
         if not attribution:
             log = "unattributed compiler output"

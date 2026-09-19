@@ -161,6 +161,7 @@ ALLOWED_WRITE_ROUTES = frozenset(
     {
         ("post", f"{API_PREFIX}/documents"),
         ("post", f"{API_PREFIX}/documents/{{did}}/jobs"),
+        ("post", f"{API_PREFIX}/documents/{{did}}/blocks/compile"),
         ("post", f"{API_PREFIX}/documents/{{did}}/blocks/{{block_id}}/compile"),
         ("post", f"{API_PREFIX}/documents/{{did}}/export"),
         ("post", f"{API_PREFIX}/jobs/{{jid}}/cancel"),

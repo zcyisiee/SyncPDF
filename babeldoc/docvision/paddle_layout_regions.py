@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import os
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,14 +52,16 @@ class PaddleLayoutRegions:
 
     ``device`` 沿用产品约定：``auto`` / 非 ``cpu`` 时走 ONNX Runtime 的 CoreML
     Execution Provider（Apple Silicon 上用 MLProgram 跑 GPU/ANE），``cpu`` 强制
-    CPU。``predictor`` 显式给出时完全不碰模型运行时（测试/替换后端用）；否则按需
-    构建引擎，构建失败只记录一次并保持不可用。
+    CPU。缺省读 ``BDT_PADDLE_DEVICE``（未设 = ``auto``）；CoreML 在**运行期**失败
+    （个别 macOS/模型组合的 ReduceMax 兼容问题）时自动降级 CPU 重试一次并记住
+    该选择，后续检测不再经过 CoreML。``predictor`` 显式给出时完全不碰模型运行时
+    （测试/替换后端用）；否则按需构建引擎，构建失败只记录一次并保持不可用。
     """
 
     def __init__(
         self,
         *,
-        device: str = "auto",
+        device: str | None = None,
         dpi: int = DEFAULT_DPI,
         predictor: Predictor | None = None,
         model_path: Path | str | None = None,
@@ -66,6 +70,8 @@ class PaddleLayoutRegions:
     ):
         if dpi < 72:
             raise ValueError("检测 dpi 不能低于 72")
+        if device is None:
+            device = (os.environ.get("BDT_PADDLE_DEVICE") or "auto").strip().lower() or "auto"
         self.device = device
         self.dpi = int(dpi)
         self._predictor = predictor
@@ -74,6 +80,7 @@ class PaddleLayoutRegions:
         self.threads = int(threads)
         self._engine = None
         self._engine_error: str | None = None
+        self._build_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     @property
@@ -91,32 +98,33 @@ class PaddleLayoutRegions:
         )
 
     def _build(self):
-        if self._engine is not None or self._engine_error is not None:
+        with self._build_lock:
+            if self._engine is not None or self._engine_error is not None:
+                return self._engine
+            try:
+                import paddlex
+                import yaml
+
+                from babeldoc.docvision.paddle_runtime import OnnxLayout
+
+                config = yaml.safe_load(
+                    (
+                        Path(paddlex.__file__).parent
+                        / "configs/pipelines/PaddleOCR-VL-1.6.yaml"
+                    ).read_text()
+                )["SubModules"]["LayoutDetection"]
+                # ONNX 图与锁定版本的哈希校验在 OnnxLayout 内完成（与 PaddleRuntime 同口径）。
+                self._engine = OnnxLayout(
+                    self.model_path,
+                    self.cache_dir,
+                    device=self.device,
+                    threads=self.threads,
+                    config=config,
+                )
+            except Exception as exc:  # noqa: BLE001 - 检测不可用只是跳过扩框
+                self._engine_error = f"{type(exc).__name__}: {exc}"
+                logger.warning("PP-DocLayoutV3 检测器不可用，跳过扩框", exc_info=True)
             return self._engine
-        try:
-            import paddlex
-            import yaml
-
-            from babeldoc.docvision.paddle_runtime import OnnxLayout
-
-            config = yaml.safe_load(
-                (
-                    Path(paddlex.__file__).parent
-                    / "configs/pipelines/PaddleOCR-VL-1.6.yaml"
-                ).read_text()
-            )["SubModules"]["LayoutDetection"]
-            # ONNX 图与锁定版本的哈希校验在 OnnxLayout 内完成（与 PaddleRuntime 同口径）。
-            self._engine = OnnxLayout(
-                self.model_path,
-                self.cache_dir,
-                device=self.device,
-                threads=self.threads,
-                config=config,
-            )
-        except Exception as exc:  # noqa: BLE001 - 检测不可用只是跳过扩框
-            self._engine_error = f"{type(exc).__name__}: {exc}"
-            logger.warning("PP-DocLayoutV3 检测器不可用，跳过扩框", exc_info=True)
-        return self._engine
 
     # ------------------------------------------------------------------
     def detect_page(self, page) -> list[Region]:
@@ -187,7 +195,23 @@ class PaddleLayoutRegions:
         engine = self._build()
         if engine is None:
             return []
-        result = next(iter(engine([image])))
+        try:
+            result = next(iter(engine([image])))
+        except Exception:  # noqa: BLE001 - CoreML 运行期兼容问题：降级 CPU 重试
+            if self.device == "cpu":
+                raise
+            logger.warning(
+                "布局检测运行失败（device=%s），降级 CPU EP 重试一次", self.device,
+                exc_info=True,
+            )
+            with self._build_lock:
+                self.device = "cpu"
+                self._engine = None
+                self._engine_error = None
+            engine = self._build()
+            if engine is None:
+                return []
+            result = next(iter(engine([image])))
         return list((result.json.get("res") or {}).get("boxes") or [])
 
 

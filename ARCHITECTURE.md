@@ -29,7 +29,7 @@
 | 原生 PDF 解析、文档中间表示、排版、PDF 生成 | `babeldoc/format/pdf/new_parser/`、`document_il/{frontend,midend,backend}/` |
 | 布局提供方与字符对齐 | `babeldoc/docvision/`、`document_il/utils/provider_alignment.py` |
 | HTTP 路由、任务、草稿、全量编译与候选 | `babeldoc_tools/serve/{app,runner,jobs,draft,compile,candidates}.py`、`routers/` |
-| 元数据、资产、局部编译、迁移与清理 | `babeldoc_tools/serve/{database,asset_store,block_compile,migrate,cleanup}.py` |
+| 元数据、资产、局部/批量编译、迁移与清理 | `babeldoc_tools/serve/{database,asset_store,block_compile,migrate,cleanup}.py` |
 | 工作台、API 消费、预览与事件订阅 | `web/src/{screens,components,lib,api}/` |
 | 模型调用与提示词 | `babeldoc_tools/harnesses.py`、`serve/models.py`、`skills/document-translate/agents/`、`scripts/` |
 | 质量检查与回归证据 | `tests/`、`babeldoc/tools/agent/{quality_checks,layout_geometry,link_audit}.py`、仓库 `tmp/` |
@@ -62,7 +62,11 @@ bdt run → parse → translate → apply → build → check → review → rep
 
 ### 局部修改与交付
 
-草稿保存带 `base_revision`，写入 SQLite 并保留兼容 JSON。**保存不自动编译**：当前 `CompileService.schedule` 只取消旧计时器。用户可显式编译单段（`BlockCompiler`，更新页面/预览资产），再导出当前 revision。局部发布会检查 revision 和任务状态，避免过期结果覆盖新编辑。
+草稿保存带 `base_revision`，写入 SQLite 并保留兼容 JSON。**保存不自动编译**：当前 `CompileService.schedule` 只取消旧计时器。用户可显式编译单段（`BlockCompiler`，更新页面/预览资产），或 shift 多选多段走 `POST /blocks/compile` 批量编译（一个 job；同页串行、跨页并行的线程池，每个受影响页只合成一次，各块草稿覆盖互不影响），再导出当前 revision。局部发布会检查 revision 和任务状态，避免过期结果覆盖新编辑。
+
+贴片渲染的 fit 判定对水平方向使用 2.5pt 容差（垂直 0.5pt）：TeX/PyMuPDF 的宽度口径是 advance 盒，轻微超宽不触发缩字号。贴片仍被缩字或溢出时自动**浮动**：`block_compile._float_if_shrunk` 用 PP-DocLayoutV3 对编译后的译文页重识别版面（`PaddleLayoutRegions`，缺 `BDT_PADDLE_DEVICE` 环境时 auto，CoreML 运行期失败自动降级 CPU），按 同栏下/上扩 → 跨栏横向扩 → 跨页整框迁移 找净空并重渲染；跨页迁移的贴片在 patch 里记 `page` 落点页，`compose_page_asset` 负责擦 home 页脚印、把外来贴片盖到落点页。
+
+`GET /paragraphs` 每段带解析状态派生的 `style` 摘要（字号/衬线/加粗/斜体/字体名）；草稿 `layout` 新增 `bold/italic/serif` 布尔覆盖并在局部编译注入 LaTeX（`font_scale`/`line_skip` 同路径生效）。前端段落面板提供三态下拉，多选时提供批量编译面板。
 
 原文识别叠加层经 `serve/recognition.py` 读取已持久化的 provider IR，展示原始 block/span 框（含行内公式）和全文实际 label 清单；旧 parse 段落快照仍供兼容与段落选择使用。span 是只读预览实体，不参与草稿/编译身份，也不叠加到译文页。接口字段与回退语义见 [HTTP 参考](docs/reference/http-api.md#识别框与-label-筛选)。
 
