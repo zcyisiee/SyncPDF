@@ -775,3 +775,154 @@ def test_workdir_mode_only_serves_that_document(root: Path):
     with TestClient(create_app(DocumentStore.for_workdir(root / DID))) as test_client:
         assert [item["did"] for item in test_client.get(DOCUMENTS).json()] == [DID]
         assert test_client.get(f"{DOCUMENTS}/{BARE}").status_code == 404
+
+
+@pytest.fixture
+def recognition_ir(workdir):
+    """Nested, discarded and unknown labels must survive without a whitelist."""
+    payload = {
+        "pages": [
+            {
+                "page_index": 0,
+                "blocks": [
+                    {
+                        "block_id": "p0-b0",
+                        "type": "title",
+                        "bbox": [63, 78, 547, 121],
+                        "lines": [
+                            {
+                                "spans": [
+                                    {
+                                        "span_id": "p0-b0-l0-s0",
+                                        "kind": "text",
+                                        "bbox": [66, 80, 200, 95],
+                                        "page_index": 0,
+                                    },
+                                    {
+                                        "span_id": "p0-b0-l0-s1",
+                                        "kind": "inline_equation",
+                                        "bbox": [201, 80, 220, 95],
+                                        "page_index": 0,
+                                    },
+                                    {
+                                        "span_id": "bad",
+                                        "kind": "invalid",
+                                        "bbox": [0, 0, float("nan"), 1],
+                                    },
+                                    {
+                                        "span_id": "empty",
+                                        "kind": "empty",
+                                        "bbox": [1, 1, 1, 1],
+                                    },
+                                ]
+                            }
+                        ],
+                    },
+                    {
+                        "block_id": "p0-b1",
+                        "type": "chart",
+                        "bbox": [10, 300, 400, 500],
+                        "children": [
+                            {
+                                "block_id": "p0-b2",
+                                "type": "chart_body",
+                                "bbox": [20, 310, 390, 450],
+                                "lines": [
+                                    {
+                                        "spans": [
+                                            {
+                                                "span_id": "p0-b2-l0-s0",
+                                                "kind": "chart",
+                                                "bbox": [20, 310, 390, 450],
+                                            }
+                                        ]
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            },
+            {
+                "page_index": 1,
+                "blocks": [
+                    {
+                        "block_id": "p1-b0",
+                        "type": "page_number",
+                        "source": "discarded_blocks",
+                        "bbox": [200, 770, 210, 782],
+                    },
+                    {
+                        "block_id": "p1-b1",
+                        "type": "future_label",
+                        "bbox": [10, 20, 40, 50],
+                    },
+                ],
+            },
+        ]
+    }
+    path = workdir / "agent/source/mineru/provider_ir.json"
+    _write_json(path, payload)
+    return path
+
+
+@pytest.mark.usefixtures("recognition_ir")
+def test_geometry_preserves_provider_blocks_spans_and_full_label_inventory(client):
+    body = client.get(GEOMETRY, params={"kind": "parse", "page": 1}).json()
+    assert body["coord_system"] == "pdf_topleft"
+    rows = body["recognition_entities"]
+    assert len(rows) == 6
+    assert len({row["id"] for row in rows}) == 6
+    inline = next(row for row in rows if row["label"] == "inline_equation")
+    assert inline["kind"] == "span"
+    assert inline["box"] == {"x0": 201, "y0": 80, "x1": 220, "y1": 95}
+    assert inline["parent_id"] == "provider:block:p0-b0"
+    assert inline["paragraph_id"] is None
+    assert rows[0]["paragraph_id"] == "P01-001"
+    counts = {row["label"]: row["count"] for row in body["labels"]}
+    assert counts == {
+        "title": 1,
+        "text": 1,
+        "inline_equation": 1,
+        "chart": 2,
+        "chart_body": 1,
+        "page_number": 1,
+        "future_label": 1,
+    }
+    page2 = client.get(GEOMETRY, params={"kind": "parse", "page": 2}).json()
+    assert page2["labels"] == body["labels"]
+    assert {row["label"] for row in page2["recognition_entities"]} == {
+        "page_number",
+        "future_label",
+    }
+    assert [row["id"] for row in body["entities"]] == ["P01-001", "P01-002"]
+    layout = client.get(GEOMETRY, params={"kind": "layout"}).json()
+    assert layout["recognition_entities"] is None
+    assert "inline_equation" not in {row["label"] for row in layout["labels"]}
+
+
+def test_geometry_provider_without_debug_snapshot_and_generic_path(
+    client, workdir, recognition_ir
+):
+    (workdir / "debug/runs" / RUN_ID / "snapshots/parse/paragraphs.json").unlink()
+    generic = workdir / "agent/source/provider/provider_ir.json"
+    generic.parent.mkdir(parents=True)
+    recognition_ir.rename(generic)
+    body = client.get(GEOMETRY, params={"kind": "parse", "page": 1}).json()
+    assert body["run_id"] is None
+    assert body["entities"] == []
+    assert len(body["recognition_entities"]) == 6
+    assert all(row["paragraph_id"] is None for row in body["recognition_entities"])
+
+
+def test_geometry_corrupt_provider_falls_back_and_reads_new_results(
+    client, recognition_ir
+):
+    recognition_ir.write_text('{"pages": "bad"}')
+    body = client.get(GEOMETRY, params={"kind": "parse"}).json()
+    assert body["recognition_entities"] is None
+    assert len(body["entities"]) == 3
+    recognition_ir.write_text('{"pages": []}')
+    body = client.get(GEOMETRY, params={"kind": "parse"}).json()
+    assert body["recognition_entities"] == []
+    assert body["labels"] == []

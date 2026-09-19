@@ -24,7 +24,7 @@ function bounded(value: unknown, fallback: number, min: number, max: number) {
 }
 function readStyle() {
   const value = read(STYLE_KEY);
-  return { strokeWidth: bounded(record(value) ? value.strokeWidth : null, 1, 0.5, 4),
+  return { strokeWidth: bounded(record(value) ? value.strokeWidth : null, 1.5, 0.5, 4),
     fillOpacity: bounded(record(value) ? value.fillOpacity : null, 0.08, 0, 0.4) };
 }
 interface BboxState {

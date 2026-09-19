@@ -28,6 +28,7 @@ interface Props {
   onPosition: (position: ReaderPosition, programmatic?: boolean) => void;
   geometryKind: 'parse' | 'layout' | null;
   bbox: BboxPaneData | null;
+  recognition?: boolean;
   overlay?: (viewport: ScreenViewport & PdfPointViewport) => ReactNode;
   odId: string;
   onPageInfo?: (info: PdfPageInfo) => void;
@@ -37,9 +38,9 @@ interface Props {
 
 const GAP = 20;
 
-function PageLayer({ did, kind, page, viewport, bbox }: {
+function PageLayer({ did, kind, page, viewport, bbox, recognition }: {
   did: string; kind: Props['geometryKind']; page: number;
-  viewport: PageViewport; bbox: BboxPaneData | null;
+  viewport: PageViewport; bbox: BboxPaneData | null; recognition: boolean;
 }) {
   const preferences = useBboxStore();
   const visibility = preferences.documents[did] ?? readVisibility(did);
@@ -47,7 +48,7 @@ function PageLayer({ did, kind, page, viewport, bbox }: {
   const selected = useUiStore((state) => state.selectedParagraphId);
   const select = useUiStore((state) => state.setSelectedParagraph);
   const setPage = useUiStore((state) => state.setPreviewPage);
-  const data = bbox?.data ?? (query.data ? geometryBboxes(query.data) : null);
+  const data = bbox?.data ?? (query.data ? geometryBboxes(query.data, recognition) : null);
   if (data === null || kind === null) return null;
   return <BboxLayer visibility={visibility} strokeWidth={preferences.strokeWidth} fillOpacity={preferences.fillOpacity} boxes={data.boxes} viewport={viewport}
     mode={data.coordSystem === 'pdf_native' ? 'layout' : 'parse'} cropbox={data.cropbox}
@@ -57,7 +58,7 @@ function PageLayer({ did, kind, page, viewport, bbox }: {
 /** Lightweight page slots preserve the scroll range; only the viewport and one
  * adjacent page on either side own canvases and geometry subscriptions. */
 export function ContinuousPdfPane({ did, url, pageNumber, pageCount, navigation, position,
-  initialPosition, paneId, onPosition, geometryKind, bbox, overlay, odId, onPageInfo, onScale, emptyState }: Props) {
+  initialPosition, paneId, onPosition, geometryKind, bbox, recognition = false, overlay, odId, onPageInfo, onScale, emptyState }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 600, height: 800 });
   const [scroll, setScroll] = useState(0);
@@ -214,7 +215,7 @@ export function ContinuousPdfPane({ did, url, pageNumber, pageCount, navigation,
               setActualCount(next.numPages);
               onPageInfo?.(next);
             }} />
-            {viewport ? <PageLayer did={did} kind={geometryKind} page={page} viewport={viewport}
+            {viewport ? <PageLayer recognition={recognition} did={did} kind={geometryKind} page={page} viewport={viewport}
               bbox={page === pageNumber ? bbox : null} /> : null}
             {viewport && page === pageNumber ? overlay?.(viewport) : null}
           </div>;

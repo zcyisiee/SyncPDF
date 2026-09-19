@@ -330,6 +330,11 @@ class ParagraphItem(BaseModel):
     layout_status: str
 
 
+class GeometryLabel(BaseModel):
+    label: str | None
+    count: int
+
+
 class GeometryResponse(BaseModel):
     """``GET /api/v1/documents/{did}/geometry``：bbox 数据。
 
@@ -347,6 +352,12 @@ class GeometryResponse(BaseModel):
     run_id: str | None = None
     #: kind=parse：段落实体（``{id, kind, label, page, box:{x0,y0,x1,y1}, attrs}``）。
     entities: list[dict[str, Any]] = []
+    #: 当前 provider IR 的原始 block/span 框；缺失为 null，旧客户端仍可读 entities。
+    recognition_entities: list[dict[str, Any]] | None = None
+    #: 整份文档的实际 label 清单，不受 page 过滤影响。
+    labels: list[GeometryLabel] | None = None
+    #: 旧段落实体的全文 label 清单，供译文侧兼容叠加使用。
+    paragraph_labels: list[GeometryLabel] | None = None
     #: kind=parse：实体关系（page 过滤时只留两端在筛后实体里的关系）。
     relations: list[dict[str, Any]] = []
     #: kind=layout：产物里的总页数。

@@ -149,7 +149,10 @@ function DocumentPreview({ did, streamArtifact }: PreviewProps) {
     primaryUrl === null || bboxMode === 'off' ? null : previewMode === 'source' ? 'parse' : bboxMode;
   const geometryQuery = useGeometry(did, geometryKind, page);
   const coords = geometryQuery.data ?? null;
-  const bboxData = useMemo(() => (coords === null ? null : geometryBboxes(coords)), [coords]);
+  const bboxData = useMemo(() => (coords === null ? null : geometryBboxes(coords, previewMode === 'source')), [coords, previewMode]);
+  const sourceGeometry = useGeometry(did, previewMode === 'compare' && bboxMode === 'parse' && sourceUrl !== null ? 'parse' : null, page);
+  const legendCoords = previewMode === 'compare' && bboxMode === 'parse' ? sourceGeometry.data : coords;
+  const legendLabels = previewMode === 'target' && geometryKind === 'parse' ? coords?.paragraph_labels : legendCoords?.labels;
   const bboxUnavailable = geometryKind !== null && geometryQuery.isSuccess && coords === null;
 
   const handleSelect = useCallback(
@@ -356,7 +359,8 @@ function DocumentPreview({ did, streamArtifact }: PreviewProps) {
             position={linked ? position : null}
             paneId="source"
             onPosition={onPosition}
-            geometryKind={null}
+            geometryKind={bboxMode === 'parse' ? 'parse' : null}
+            recognition
             bbox={null}
             odId="preview-canvas-source"
             emptyState={
@@ -378,6 +382,7 @@ function DocumentPreview({ did, streamArtifact }: PreviewProps) {
           paneId="primary"
           onPosition={onPosition}
           geometryKind={geometryKind}
+          recognition={previewMode === 'source'}
           bbox={buildBbox(true)}
           overlay={buildOverlay(previewMode !== 'source')}
           odId="preview-canvas"
@@ -394,7 +399,7 @@ function DocumentPreview({ did, streamArtifact }: PreviewProps) {
       {compileBar}
       {streamArtifact ? <p data-od-id="stream-preview-note" className="px-s5 py-1 text-tiny text-run-ink">实时翻译预览 · 未完成段落保留原文，最终结果仍在生成</p> : null}
       {patchNotice}
-      {geometryKind !== null ? <BboxLegend did={did} page={page} boxes={bboxData?.boxes ?? []} /> : null}
+      {geometryKind !== null ? <BboxLegend did={did} boxes={bboxData?.boxes ?? []} labels={legendLabels?.length ? legendLabels : undefined} /> : null}
       {bboxUnavailable ? (
         <p
           data-od-id="preview-bbox-unavailable"

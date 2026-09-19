@@ -166,6 +166,18 @@ class WorkdirReader:
         payload = self._read_json_at(self._agent("layout_geometry.json"))
         return payload if isinstance(payload, dict) else None
 
+    def provider_ir(self) -> dict | None:
+        """当前解析的 block/line/span IR；兼容 MinerU 与通用 provider 路径。"""
+        from babeldoc.docvision.provider_paths import provider_artifact_path
+
+        path = provider_artifact_path(self.agent_dir, self.workdir, existing=True)
+        if path is None:
+            return None
+        payload = self._read_json_at(path)
+        if not isinstance(payload, dict) or not isinstance(payload.get("pages"), list):
+            return None
+        return payload
+
     def review_verdict(self) -> dict | None:
         """``agent/review_verdict.json``（结构审查）；不可用 → ``None``。"""
         payload = self._read_json_at(self._agent("review_verdict.json"))

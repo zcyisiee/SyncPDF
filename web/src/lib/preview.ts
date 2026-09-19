@@ -27,6 +27,10 @@ export interface BboxItem {
   box: Box;
   /** parse 的 label（title/text/figure…）或 layout 的 layout_label；缺 → null。 */
   label: string | null;
+  kind?: string;
+  parentId?: string | null;
+  /** null means a read-only provider frame; undefined retains legacy paragraph selection. */
+  paragraphId?: string | null;
 }
 
 export interface GeometryBboxes {
@@ -105,7 +109,11 @@ function entityBbox(row: Record<string, unknown>): BboxItem | null {
   const box = raw as Record<string, unknown>;
   const boxValue = asBox([box.x0, box.y0, box.x1, box.y1]);
   if (boxValue === null) return null;
-  return { id, box: boxValue, label: asString(row.label) };
+  return { id, box: boxValue, label: asString(row.label),
+    ...(row.kind === 'block' || row.kind === 'span' ? {
+      kind: row.kind, parentId: asString(row.parent_id), paragraphId: asString(row.paragraph_id),
+    } : {}),
+  };
 }
 
 /**
@@ -132,12 +140,13 @@ export function layoutBoxOfRow(row: Record<string, unknown> | null | undefined):
 
 /**
  * `GET /geometry` 响应 → 该页 bbox 列表。`kind`/`coord_system` 由服务端标注，本函数
- * 只按 `coord_system` 选字段（parse=`entities`，layout=`paragraphs`），**不做换算**。
+ * 按 `coord_system` 选字段；原文优先 recognition_entities，旧数据/译文兼容 entities，
+ * layout 使用 paragraphs。recognition=false 时不把原文 span 叠到译文。**不做换算**。
  */
-export function geometryBboxes(response: GeometryResponse): GeometryBboxes {
+export function geometryBboxes(response: GeometryResponse, recognition = true): GeometryBboxes {
   const coordSystem = response.coord_system;
   const rows =
-    (coordSystem === 'pdf_topleft' ? response.entities : response.paragraphs) ?? [];
+    (coordSystem === 'pdf_topleft' ? (recognition ? response.recognition_entities : null) ?? response.entities : response.paragraphs) ?? [];
   const toBbox = coordSystem === 'pdf_topleft' ? entityBbox : paragraphBbox;
   const boxes: BboxItem[] = [];
   for (const row of rows) {

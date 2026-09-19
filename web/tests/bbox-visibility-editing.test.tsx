@@ -31,14 +31,14 @@ it('hiding a selected category removes its editor even when selected from elsewh
   // 版面框图层（几何 mock 是 pdf_native）：合并视图后没有按视图切默认值，显式选 layout
   act(() => uiStore.getState().setBboxMode('layout'));
   renderWithQuery(<PreviewArea did="local" />);
-  await screen.findByLabelText('标题 · title（1）');
+  await screen.findByLabelText('title');
   act(() => uiStore.getState().setSelectedParagraph('p1'));
   expect(screen.getByTestId('editing-overlay')).toBeInTheDocument();
-  fireEvent.click(screen.getByLabelText('标题 · title（1）'));
+  fireEvent.click(screen.getByLabelText('title'));
   expect(screen.queryByTestId('editing-overlay')).toBeNull();
   act(() => { uiStore.getState().setSelectedParagraph(null); uiStore.getState().setSelectedParagraph('p1'); });
   expect(screen.queryByTestId('editing-overlay')).toBeNull();
-  fireEvent.click(screen.getByText('全选类别'));
+  fireEvent.click(screen.getByLabelText('title'));
   expect(screen.getByTestId('editing-overlay')).toBeInTheDocument();
   act(() => uiStore.getState().setBboxMode('off'));
   await waitFor(() => expect(screen.queryByTestId('editing-overlay')).toBeNull());

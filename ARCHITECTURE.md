@@ -62,6 +62,8 @@ bdt run → parse → translate → apply → build → check → review → rep
 
 草稿保存带 `base_revision`，写入 SQLite 并保留兼容 JSON。**保存不自动编译**：当前 `CompileService.schedule` 只取消旧计时器。用户可显式编译单段（`BlockCompiler`，更新页面/预览资产），再导出当前 revision。局部发布会检查 revision 和任务状态，避免过期结果覆盖新编辑。
 
+原文识别叠加层经 `serve/recognition.py` 读取已持久化的 provider IR，展示原始 block/span 框（含行内公式）和全文实际 label 清单；旧 parse 段落快照仍供兼容与段落选择使用。span 是只读预览实体，不参与草稿/编译身份，也不叠加到译文页。接口字段与回退语义见 [HTTP 参考](docs/reference/http-api.md#识别框与-label-筛选)。
+
 旧的 `action=compile` 全量路径仍存在：在隔离目录物化草稿，调用 `bdt run --from apply`，发布 PDF 并归档版本。AI 重译另走候选路径，采用候选才写草稿。全量版本归档与局部导出是两套并存机制，见 [HTTP 参考](docs/reference/http-api.md)。
 
 ### 数据落点

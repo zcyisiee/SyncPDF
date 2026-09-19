@@ -86,3 +86,15 @@
 默认模式还推送 `job_update` 通知，它不落盘且可能丢失，重连必须查询任务状态。`GET D/events` 仍是旧诊断分页：`next_after_seq` 是扫描位置，即使过滤后没有匹配事件也要推进；不是数据库持久事件分页。
 
 新前端订阅实现在 `web/src/lib/usePersistentEvents.ts`，旧流消费在 `useEventStream` 等模块。显示真实阶段、段落事件与任务结果，不编造百分比或 ETA；断线不应被展示为任务成功。
+
+## 识别框与 label 筛选
+
+`GET D/geometry?kind=parse` 在 `recognition_entities` 中返回当前 `agent/source/provider/provider_ir.json`（兼容 `source/mineru/provider_ir.json`）的原始 block/span 框。递归包含容器子块、discarded 区域和全部 span kind，包括 `inline_equation`；不按翻译范围过滤，也不把未知 label 改成其他类别。非法或无面积的 bbox 跳过。页码为 1 基，坐标保留 PDF point、左上原点、y 向下。
+
+每个识别实体含稳定 `id`、`kind=block|span`、原始 `label`、`page`、`box:{x0,y0,x1,y1}`、`parent_id`、`paragraph_id`。仅当 block 覆盖一个且仅一个段落至少 80% 面积时关联该段落；无唯一关联时只显示框。span 始终只读，不作为草稿段落或拖拽编辑目标。几何接口保留旧 `entities/relations`；`run_id` 仍只表示这两项的快照来源。
+
+`labels:[{label,count}]` 汇总整份几何产物，`page` 只过滤几何，不过滤此清单。parse 优先统计 provider 框，`paragraph_labels` 单独统计旧段落快照；layout 统计排版段落。provider IR 缺失/损坏时 `recognition_entities=null`，回退旧快照；合法空 IR 返回 `[]`。仅有 IR、未开 debug 也能显示识别框。IR 和快照都不可用才返回 `snapshot_unavailable`。
+
+工作台的类别区只列 label 复选框，选中显示、取消隐藏，选择按文档保存在浏览器并跨页保留。原文模式与对照模式的原文侧显示原始 block/span；译文侧继续使用段落/排版几何，避免把原文 span 坐标当成译文位置。可见 block 已包住的 text span 不重复描边；隐藏父框后，仍选中的 text span 可独立显示。公式等非 text span 始终独立显示。框采用类别固定颜色、圆角描边与浅色填充，未知 label 使用稳定散列颜色。旧 workdir 没有 provider IR 时无法凭空补出行内公式框。
+
+当前仓库 `provider_ir.py` 声明 **27 个已知 block 类型、6 个已知 span 类型，去重后 28 个 label**。其中 span 包含 `text / inline_equation / interline_equation / image / table / chart`。这不是 MinerU 所有版本和后端的固定上限；例如新返回的未知 label 仍会进入清单，实际数量以本次响应的 `labels` 为准。

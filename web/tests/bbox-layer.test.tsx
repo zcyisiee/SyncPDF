@@ -55,7 +55,7 @@ describe('BboxLayer', () => {
     const { rerender } = renderLayer({ selectedId: null });
     const before = screen.getByRole('button', { name: /P01-001/ });
     expect(before).toHaveAttribute('aria-pressed', 'false');
-    expect(before.getAttribute('stroke-width')).toBe('1');
+    expect(before.getAttribute('stroke-width')).toBe('1.5');
     const categoryStroke = before.getAttribute('stroke');
 
     rerender(
@@ -70,7 +70,7 @@ describe('BboxLayer', () => {
     );
     const after = screen.getByRole('button', { name: /P01-001/ });
     expect(after).toHaveAttribute('aria-pressed', 'true');
-    expect(after.getAttribute('stroke-width')).toBe('2');
+    expect(after.getAttribute('stroke-width')).toBe('2.5');
     expect(after).toHaveAttribute('stroke-dasharray', '4 2');
     expect(after.getAttribute('stroke')).toBe(categoryStroke);
     expect(after).toHaveAttribute('fill-opacity', '0.08');

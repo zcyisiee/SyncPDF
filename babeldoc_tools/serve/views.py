@@ -29,6 +29,8 @@ from typing import Literal
 
 from babeldoc_tools.common import ToolError
 from babeldoc_tools.serve.compile import compile_status
+from babeldoc_tools.serve.recognition import label_inventory
+from babeldoc_tools.serve.recognition import provider_entities
 from babeldoc_tools.serve.schemas import COORD_SYSTEM_LAYOUT
 from babeldoc_tools.serve.schemas import COORD_SYSTEM_PARSE
 from babeldoc_tools.serve.schemas import STAGE_NOT_RUN
@@ -605,22 +607,28 @@ def paragraphs(reader: WorkdirReader, page: int | None = None) -> list[Paragraph
 def geometry_parse(
     reader: WorkdirReader, did: str, page: int | None = None
 ) -> GeometryResponse:
-    """``geometry?kind=parse``：最新 run 的 parse 段落实体（``pdf_topleft``）。
+    """当前 provider block/span 框与兼容 parse 段落实体（``pdf_topleft``）。
 
-    没有快照 → ``snapshot_unavailable``（404），不拿空数组冒充成功。
+    provider IR 和快照均缺失 → ``snapshot_unavailable``（404）。
+    ``run_id`` 仅标注 entities/relations 的快照来源。
     """
     found = reader.parse_snapshot()
-    if found is None:
+    provider = reader.provider_ir()
+    if found is None and provider is None:
         raise ToolError(
             "snapshot_unavailable",
-            f"文档 {did} 没有 parse 段落快照"
-            "（debug/runs/<run_id>/snapshots/parse/paragraphs.json）",
+            f"文档 {did} 没有 provider IR 或 parse 段落快照",
             did=did,
         )
-    run_id, snapshot = found
+    run_id, snapshot = found if found is not None else (None, {})
     entities = [e for e in snapshot.get("entities") or [] if isinstance(e, dict)]
     relations = [r for r in snapshot.get("relations") or [] if isinstance(r, dict)]
+    recognition = provider_entities(provider, entities) if provider is not None else None
+    paragraph_labels = label_inventory(entities)
+    labels = label_inventory(recognition) if recognition is not None else paragraph_labels
     if page is not None:
+        if recognition is not None:
+            recognition = [row for row in recognition if row["page"] == page]
         entities = [e for e in entities if _as_int(e.get("page")) == page]
         kept = {entity.get("id") for entity in entities}
         relations = [
@@ -635,6 +643,9 @@ def geometry_parse(
         page=page,
         run_id=run_id,
         entities=entities,
+        recognition_entities=recognition,
+        paragraph_labels=paragraph_labels,
+        labels=labels,
         relations=relations,
     )
 
@@ -655,6 +666,7 @@ def geometry_layout(
             did=did,
         )
     paragraphs_rows = [row for row in rows if isinstance(row, dict)]
+    labels = label_inventory(paragraphs_rows, "layout_label")
     page_info = [
         row for row in (geometry.get("page_info") or []) if isinstance(row, dict)
     ]
@@ -670,6 +682,7 @@ def geometry_layout(
         page=page,
         pages=_as_int(geometry.get("pages")),
         paragraphs=paragraphs_rows,
+        labels=labels,
         page_info=page_info,
     )
 

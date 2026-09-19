@@ -167,10 +167,12 @@ def documents_router(store: DocumentStore) -> APIRouter:
         response_model=GeometryResponse,
         summary="bbox 几何（parse 快照 / layout 几何）",
         description=(
-            "kind=parse 读最新 run 的 parse 段落实体，box 是 pdf_topleft（y 向下）；"
+            "kind=parse 返回当前 provider IR 的 recognition_entities（原始 block/span 框），"
+            "并保留最新 run 的 entities/relations（兼容段落快照）；box 是 pdf_topleft（y 向下）。"
+            "labels 是全文 label 清单，不受 page 过滤影响。"
             "kind=layout 读 layout_geometry.json，box 是 pdf_native（y 向上）并附 "
             "page_info 的 cropbox。两套坐标系统**不做转换**，由前端按 coord_system 换算。"
-            "缺对应产物时返回 404（snapshot_unavailable / geometry_unavailable），"
+            "parse 的 IR 与快照均缺失或 layout 产物缺失时返回 404（snapshot_unavailable / geometry_unavailable），"
             "不用空数组冒充成功。"
         ),
     )

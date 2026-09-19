@@ -161,11 +161,15 @@ export function BboxLayer({
   onSelect,
   className,
   visibility = DEFAULT_VISIBILITY,
-  strokeWidth = 1,
+  strokeWidth = 1.5,
   fillOpacity = 0.08,
 }: BboxLayerProps) {
   const coordSystem = coordSystemOfMode(mode);
-  const rects = boxes.filter((item) => categoryVisible(visibility, item.label)).map((item) => ({
+  const visible = boxes.filter((item) => categoryVisible(visibility, item.label));
+  const blocks = new Set(visible.filter((item) => item.kind === 'block').map((item) => item.id));
+  // A visible parent already outlines its text. Keep formula/image/table spans independent.
+  const rects = visible.filter((item) => !(item.kind === 'span' && item.label === 'text'
+    && item.parentId && blocks.has(item.parentId))).map((item) => ({
     item,
     rect: pdfToScreen(item.box, viewport, coordSystem, cropbox),
   }));
@@ -183,31 +187,36 @@ export function BboxLayer({
       data-bbox-mode={mode}
     >
       {rects.map(({ item, rect }) => {
-        const selected = item.id === selectedId;
+        const targetId = item.paragraphId === undefined ? item.id : item.paragraphId;
+        const selectable = targetId !== null;
+        const selected = selectable && targetId === selectedId;
         return (
           <rect
             key={item.id}
             data-od-id={`bbox-${item.id}`}
             data-bbox-id={item.id}
-            role="button"
-            tabIndex={0}
-            aria-pressed={selected}
-            aria-label={`段落 ${item.id} · ${categoryLabel(item.label)}`}
+            data-bbox-label={item.label ?? ''}
+            data-bbox-kind={item.kind ?? 'paragraph'}
+            role={selectable ? 'button' : 'img'}
+            tabIndex={selectable ? 0 : undefined}
+            aria-pressed={selectable ? selected : undefined}
+            aria-label={`${selectable ? `段落 ${targetId}` : item.kind ?? 'bbox'} · ${categoryLabel(item.label)}`}
             x={rect.x}
             y={rect.y}
             width={rect.width}
             height={rect.height}
+            rx={3}
             stroke={categoryColor(item.label)}
             fill={categoryColor(item.label)}
             fillOpacity={fillOpacity}
             strokeWidth={selected ? strokeWidth + 1 : strokeWidth}
             strokeDasharray={selected ? '4 2' : undefined}
-            className="pointer-events-auto cursor-pointer transition-colors"
-            onClick={() => onSelect?.(item.id)}
+            className={selectable ? 'pointer-events-auto cursor-pointer transition-colors' : 'pointer-events-none'}
+            onClick={() => { if (targetId !== null) onSelect?.(targetId); }}
             onKeyDown={(event) => {
-              if (event.key !== 'Enter' && event.key !== ' ') return;
+              if (targetId === null || (event.key !== 'Enter' && event.key !== ' ')) return;
               event.preventDefault();
-              onSelect?.(item.id);
+              onSelect?.(targetId);
             }}
           >
             <title>{`${item.id}${item.label === null ? '' : ` · ${item.label}`}`}</title>
