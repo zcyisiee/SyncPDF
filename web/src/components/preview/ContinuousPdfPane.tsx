@@ -6,15 +6,18 @@ import { clampPage, geometryBboxes, type GeometryBboxes } from '../../lib/previe
 import { useGeometry } from '../../lib/queries';
 import { readVisibility, useBboxStore } from '../../stores/bbox';
 import { useUiStore } from '../../stores/ui';
-import { BboxLayer, type PdfPointViewport, type ScreenViewport } from './BboxLayer';
+import { BboxLayer, type BboxSelectHandler, type PdfPointViewport, type ScreenViewport } from './BboxLayer';
 import { TransitioningPdfPage } from './TransitioningPdfPage';
 import { acquireDocument, type PdfPageInfo } from './PdfCanvas';
 
 export interface BboxPaneData {
   mode: 'parse' | 'layout';
   data: GeometryBboxes;
+  /** 主选中段（多选集合的最后一个；右栏编辑器跟随它）。 */
   selectedId: string | null;
-  onSelect: (id: string) => void;
+  /** shift 多选集合（按点击顺序）；给定时 bbox 层按集合渲染选中态。 */
+  selectedIds?: readonly string[];
+  onSelect: BboxSelectHandler;
 }
 export interface ReaderPosition { pane: string; page: number; fraction: number }
 interface Props {
@@ -47,14 +50,17 @@ function PageLayer({ did, kind, page, viewport, bbox, recognition }: {
   const preferences = useBboxStore();
   const visibility = preferences.documents[did] ?? readVisibility(did);
   const query = useGeometry(did, bbox === null ? kind : null, page);
+  // 选中态走全局 store（不是 pane 的 props）：两个 pane / 非 bbox 页的段落面板共用同一份选中
   const selected = useUiStore((state) => state.selectedParagraphId);
-  const select = useUiStore((state) => state.setSelectedParagraph);
+  const selectedIds = useUiStore((state) => state.selectedParagraphIds);
+  const select = useUiStore((state) => state.selectParagraph);
   const setPage = useUiStore((state) => state.setPreviewPage);
   const data = bbox?.data ?? (query.data ? geometryBboxes(query.data, recognition) : null);
   if (data === null || kind === null) return null;
   return <BboxLayer visibility={visibility} strokeWidth={preferences.strokeWidth} fillOpacity={preferences.fillOpacity} boxes={data.boxes} viewport={viewport}
     mode={data.coordSystem === 'pdf_native' ? 'layout' : 'parse'} cropbox={data.cropbox}
-    selectedId={selected} onSelect={(id) => { setPage(page); select(id); }} />;
+    selectedId={selected} selectedIds={selectedIds}
+    onSelect={(id, opts) => { setPage(page); select(id, { extend: opts?.shift }); }} />;
 }
 
 /** Lightweight page slots preserve the scroll range; only the viewport and one

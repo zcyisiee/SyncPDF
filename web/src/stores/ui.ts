@@ -69,6 +69,11 @@ export const LAYOUT_SPECS = {
   },
 } as const satisfies Record<GutterId, LayoutSpec>;
 
+export interface ParagraphSelectOptions {
+  /** shift 语义：已在集合中 → 移除，否则追加；移除后主选中 = 剩余最后一个。 */
+  extend?: boolean;
+}
+
 export interface UiState {
   screen: ScreenId;
   inspectorWidth: number;
@@ -86,7 +91,13 @@ export interface UiState {
   previewDid: string | null;
   /** bbox 图层三态（持久化 `ieet.bboxMode`；默认段落框，用户可切）。 */
   bboxMode: BboxMode;
-  /** 当前选中的段落 id（W05 只联动右侧面板占位；真内容 W10）。 */
+  /**
+   * 段落多选集合（shift 逐次点击 toggle，按点击顺序、无重复）。只活在会话里（不持久化）。
+   * `selectedParagraphId` = 集合的最后一个元素（右栏编辑器跟随的「主选中段」），
+   * 由 store 内部同步维护——读方（InspectorPanel/CompileBar）语义不变。
+   */
+  selectedParagraphIds: string[];
+  /** 当前选中的段落 id（= `selectedParagraphIds` 最后一个；无选择 → null）。 */
   selectedParagraphId: string | null;
   /** W11 重译候选：上次用过的 profile id（会话内记忆，**不**持久化；换文档不丢）。 */
   retranslateProfile: string | null;
@@ -104,6 +115,11 @@ export interface UiState {
   /** did 变化时重置会话内预览状态（页码回 1 + 清空选中）；同一 did 重复调用无副作用。 */
   resetPreviewForDocument: (did: string) => void;
   setBboxMode: (mode: BboxMode) => void;
+  /** 统一选中入口：`extend` = shift 多选语义，否则重置为单选 `[id]`。 */
+  selectParagraph: (id: string, opts?: ParagraphSelectOptions) => void;
+  /** 清空多选（`selectedParagraphId` 一并 → null）。 */
+  clearParagraphSelection: () => void;
+  /** 兼容入口（单选时代的调用方继续可用）：null → 清空，否则 `[id]`。 */
   setSelectedParagraph: (id: string | null) => void;
   setRetranslateProfile: (id: string | null) => void;
 }
@@ -172,6 +188,14 @@ function writeStored(key: string, value: string): void {
   }
 }
 
+/**
+ * 多选写回：一次 set 同步两个字段——`selectedParagraphId` 永远等于集合的最后一个元素，
+ * 保证只读 `selectedParagraphId` 的旧读方（InspectorPanel/CompileBar）无需感知多选。
+ */
+function selectionPatch(ids: string[]): Pick<UiState, 'selectedParagraphId' | 'selectedParagraphIds'> {
+  return { selectedParagraphIds: ids, selectedParagraphId: ids.length > 0 ? ids[ids.length - 1] : null };
+}
+
 export function createUiStore(): StoreApi<UiState> {
   return createStore<UiState>()((set, get) => ({
     screen: readStoredScreen() ?? 'library',
@@ -187,6 +211,7 @@ export function createUiStore(): StoreApi<UiState> {
     previewPage: 1,
     previewDid: null,
     bboxMode: readStoredBboxMode() ?? 'parse',
+    selectedParagraphIds: [],
     selectedParagraphId: null,
     retranslateProfile: null,
     dragging: null,
@@ -220,13 +245,34 @@ export function createUiStore(): StoreApi<UiState> {
     setPreviewPage: (page) => set({ previewPage: Number.isFinite(page) ? Math.max(1, Math.round(page)) : 1 }),
     resetPreviewForDocument: (did) => {
       if (get().previewDid === did) return;
-      set({ previewDid: did, previewPage: 1, selectedParagraphId: null });
+      // 段落 id 属于某个文档：换文档时页码与两个选中字段一起清空
+      set({ previewDid: did, previewPage: 1, ...selectionPatch([]) });
     },
     setBboxMode: (bboxMode) => {
       writeStored(STORAGE_KEYS.bboxMode, bboxMode);
       set({ bboxMode });
     },
-    setSelectedParagraph: (selectedParagraphId) => set({ selectedParagraphId }),
+    selectParagraph: (id, opts) => {
+      const current = get().selectedParagraphIds;
+      let next: string[];
+      if (opts?.extend) {
+        next = current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
+      } else if (current.length === 1 && current[0] === id) {
+        // 已是单选该段：保持原数组引用，避免无谓的订阅方重渲染
+        return;
+      } else {
+        next = [id];
+      }
+      set(selectionPatch(next));
+    },
+    clearParagraphSelection: () => {
+      if (get().selectedParagraphIds.length === 0) return;
+      set(selectionPatch([]));
+    },
+    setSelectedParagraph: (id) => {
+      if (id === null) get().clearParagraphSelection();
+      else get().selectParagraph(id);
+    },
     setRetranslateProfile: (retranslateProfile) => set({ retranslateProfile }),
   }));
 }

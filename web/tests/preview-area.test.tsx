@@ -8,13 +8,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PreviewArea } from '../src/components/preview/PreviewArea';
 import { InspectorPanel } from '../src/components/shell/InspectorPanel';
 import { STORAGE_KEYS, uiStore } from '../src/stores/ui';
-import { jsonResponse, makeEventFeed, mockApiFetch, renderWithQuery, resetUiStore } from './helpers';
+import { jsonResponse, makeEventFeed, makeViewport, mockApiFetch, renderWithQuery, resetUiStore } from './helpers';
 
+// jsdom 里默认让 pdf 永不 resolve（停在“正在加载 PDF…”，不碰真 pdf.js / canvas）；
+// 需要 bbox 层真实挂出的用例把 `doc` 换成替身（viewport 复用 helpers 的 pdf.js 同款公式）
+const pdfLoader = vi.hoisted(() => ({ doc: null as null | unknown }));
 vi.mock('../src/lib/pdf', () => ({
   PDF_CMAP_URL: '/pdfjs/cmaps/',
   PDF_STANDARD_FONT_DATA_URL: '/pdfjs/standard_fonts/',
-  // 永不 resolve：组件停在“正在加载 PDF…”，单测不碰真 pdf.js / canvas
-  loadPdfDocument: () => ({ promise: new Promise(() => {}), destroy: async () => {} }),
+  loadPdfDocument: () =>
+    pdfLoader.doc !== null
+      ? { promise: Promise.resolve(pdfLoader.doc), destroy: async () => {} }
+      : { promise: new Promise(() => {}), destroy: async () => {} },
 }));
 
 const DID = 'ccs3764-dyn';
@@ -79,6 +84,8 @@ function mockPreview(options: {
 
 beforeEach(() => {
   resetUiStore();
+  // 每个用例默认回到「永不 resolve」的加载态（需要 bbox 层的用例自行注入替身文档）
+  pdfLoader.doc = null;
 });
 
 describe('PreviewArea 产物与空态', () => {
@@ -232,5 +239,57 @@ describe('PreviewArea bbox 降级与模式', () => {
       'false',
     );
     expect(document.querySelector('[data-od-id="compile-bar"]')).toBeNull();
+  });
+});
+
+describe('PreviewArea 段落多选（shift）', () => {
+  const TWO_PARAGRAPH_GEOMETRY = {
+    ...PARSE_GEOMETRY,
+    entities: [
+      PARSE_GEOMETRY.entities[0],
+      {
+        id: 'P01-002',
+        kind: 'paragraph',
+        label: 'text',
+        page: 1,
+        box: { x0: 66.585, y0: 128.41, x1: 300, y1: 160 },
+      },
+    ],
+  };
+
+  /** 单页替身 PDF：`getViewport` 返回带 `clone` 的 viewport（ContinuousPdfPane 会
+   * `viewport.clone({scale})`），换算公式复用 helpers 里照抄 pdf.js 的 makeViewport。 */
+  function makeSinglePagePdf() {
+    const fakeViewport = (scale = 1) => ({
+      ...makeViewport({ scale }),
+      clone: ({ scale: next = 1 }: { scale?: number }) => fakeViewport(next),
+    });
+    const page = {
+      getViewport: ({ scale = 1 }: { scale?: number }) => fakeViewport(scale),
+      // PdfCanvas 卸载时会 `page.cleanup()`；render 在 jsdom 无 2d context 不会走到
+      cleanup: () => {},
+      render: () => ({ promise: Promise.resolve(), cancel: () => {} }),
+    };
+    return { numPages: 1, getPage: async () => page };
+  }
+
+  it('普通点击单选；shift 点击把段落加进多选集合（主选中 = 最后点击）', async () => {
+    pdfLoader.doc = makeSinglePagePdf();
+    mockPreview({ geometry: () => jsonResponse(TWO_PARAGRAPH_GEOMETRY) });
+    renderWithQuery(<PreviewArea did={DID} />);
+
+    const first = await screen.findByRole('button', { name: /P01-001/ });
+    fireEvent.click(first);
+    // 普通点击 = 单选路径：集合只有该段
+    expect(uiStore.getState().selectedParagraphIds).toEqual(['P01-001']);
+    expect(uiStore.getState().selectedParagraphId).toBe('P01-001');
+
+    fireEvent.click(screen.getByRole('button', { name: /P01-002/ }), { shiftKey: true });
+    // shift 点击 = extend 路径：追加进集合，主选中 = 最后点击的那段
+    expect(uiStore.getState().selectedParagraphIds).toEqual(['P01-001', 'P01-002']);
+    expect(uiStore.getState().selectedParagraphId).toBe('P01-002');
+    // 两个框都呈现选中态（集合判定），右栏只跟随主选中
+    expect(screen.getByRole('button', { name: /P01-001/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /P01-002/ })).toHaveAttribute('aria-pressed', 'true');
   });
 });

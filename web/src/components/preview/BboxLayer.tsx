@@ -132,6 +132,9 @@ export function screenToPdfBox(
   return [left, bottom - crop.y0, right, top - crop.y0];
 }
 
+/** 段落选中回调；`shift` = 多选修饰（只在真实鼠标点击时带，键盘激活不传）。 */
+export type BboxSelectHandler = (id: string, opts?: { shift?: boolean }) => void;
+
 export interface BboxLayerProps {
   /** 当前页的 bbox（输入坐标系，来自 geometry 响应）。 */
   boxes: readonly BboxItem[];
@@ -140,8 +143,11 @@ export interface BboxLayerProps {
   /** `parse` = 识别框（pdf_topleft）/ `layout` = 版面框（pdf_native）。 */
   mode: 'parse' | 'layout';
   cropbox?: CropBox | null;
+  /** 单选判定（多选集合未传时的回退路径，样式与旧版一致）。 */
   selectedId?: string | null;
-  onSelect?: (id: string) => void;
+  /** shift 多选集合（按点击顺序）；给定时覆盖 `selectedId` 的单选判定。 */
+  selectedIds?: readonly string[];
+  onSelect?: BboxSelectHandler;
   className?: string;
   visibility?: BboxVisibility;
   strokeWidth?: number;
@@ -158,6 +164,7 @@ export function BboxLayer({
   mode,
   cropbox,
   selectedId,
+  selectedIds,
   onSelect,
   className,
   visibility = DEFAULT_VISIBILITY,
@@ -175,6 +182,9 @@ export function BboxLayer({
   }));
   if (rects.length === 0) return null;
   const layerLabel = mode === 'parse' ? '识别框' : '版面框';
+  // 主选中 = 多选集合的最后一个（与 store 的 selectedParagraphId 同步）；未传集合时单选即主选中
+  const primaryId = selectedIds !== undefined ? selectedIds[selectedIds.length - 1] ?? null : selectedId;
+  const multi = selectedIds !== undefined && selectedIds.length > 1;
   return (
     <svg
       className={cn('pointer-events-none absolute left-0 top-0', className)}
@@ -189,7 +199,10 @@ export function BboxLayer({
       {rects.map(({ item, rect }) => {
         const targetId = item.paragraphId === undefined ? item.id : item.paragraphId;
         const selectable = targetId !== null;
-        const selected = selectable && targetId === selectedId;
+        const selected =
+          selectable && (selectedIds !== undefined ? selectedIds.includes(targetId) : targetId === selectedId);
+        // 多选 >1 时非主选中用更轻的虚线变体，主选中（右栏跟随的那段）保持单选样式
+        const secondary = selected && multi && targetId !== primaryId;
         return (
           <rect
             key={item.id}
@@ -209,10 +222,15 @@ export function BboxLayer({
             stroke={categoryColor(item.label)}
             fill={categoryColor(item.label)}
             fillOpacity={fillOpacity}
-            strokeWidth={selected ? strokeWidth + 1 : strokeWidth}
-            strokeDasharray={selected ? '4 2' : undefined}
+            strokeWidth={selected ? (secondary ? strokeWidth : strokeWidth + 1) : strokeWidth}
+            strokeDasharray={selected ? (secondary ? '2 2' : '4 2') : undefined}
             className={selectable ? 'pointer-events-auto cursor-pointer transition-colors' : 'pointer-events-none'}
-            onClick={() => { if (targetId !== null) onSelect?.(targetId); }}
+            onClick={(event) => {
+              if (targetId === null) return;
+              // 只有真实 shift 点击才带修饰（键盘 Enter/Space 等同普通单选）
+              if (event.shiftKey) onSelect?.(targetId, { shift: true });
+              else onSelect?.(targetId);
+            }}
             onKeyDown={(event) => {
               if (targetId === null || (event.key !== 'Enter' && event.key !== ' ')) return;
               event.preventDefault();
