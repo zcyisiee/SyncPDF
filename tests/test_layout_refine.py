@@ -192,6 +192,132 @@ class TestPlanUpwardExpansion:
         assert expanded == (20.0, 76.0, 200.0, 130.0)
 
 
+class TestPlanWidenExpansion:
+    #: 同 TestPlanExpansion 的框，只是扩的方向朝右/左（页宽 400）。
+    BOX = TestPlanExpansion.BOX
+    SELF = TestPlanExpansion.SELF
+    PAGE_RIGHT = 400.0
+
+    def _widen(self, regions, **kwargs):
+        return layout_refine.plan_widen_expansion(
+            self.BOX, regions, page_right=self.PAGE_RIGHT, **kwargs
+        )
+
+    def test_widens_right_to_neighbor_left_edge_minus_gap(self):
+        """右邻栏有文字（纵向交叠）→ 收边到它左沿减 EXPAND_GAP_PT。"""
+        regions = [self.SELF, (220.0, 100.0, 380.0, 130.0)]
+        expanded, reason = self._widen(regions)
+        assert reason is None
+        assert expanded == (20.0, 100.0, 219.0, 130.0)
+
+    def test_widens_right_to_page_edge_when_free(self):
+        expanded, reason = self._widen([self.SELF])
+        assert reason is None
+        assert expanded == (20.0, 100.0, 400.0, 130.0)
+
+    def test_ink_limits_right_widening(self):
+        expanded, reason = self._widen([self.SELF], ink=[(240.0, 105.0, 300.0, 125.0)])
+        assert reason is None
+        assert expanded == (20.0, 100.0, 239.0, 130.0)
+
+    def test_refuses_when_rect_overlaps_box_horizontally(self):
+        """纵向交叠且与框横向交叠 → 框内已有别人墨迹。"""
+        expanded, reason = self._widen([self.SELF, (150.0, 110.0, 260.0, 120.0)])
+        assert expanded is None
+        assert reason == layout_refine.SKIP_UNSAFE
+
+    def test_slight_vertical_overlap_neighbor_is_unsafe(self):
+        """邻栏文字只与框纵向轻微交叠、横向重叠远低于同栏比例 → 仍不安全。
+
+        纵向扩框可以用 ``X_OVERLAP_RATIO`` 忽略轻微交叠的邻栏；横向扩框扩过去
+        就是物理碰撞，必须按「任何纵向交叠」处理。
+        """
+        neighbor = (190.0, 110.0, 380.0, 125.0)  # 与框只重叠 10pt（约 5%）
+        expanded, reason = self._widen([self.SELF, neighbor])
+        assert expanded is None
+        assert reason == layout_refine.SKIP_UNSAFE
+
+    def test_no_room_right(self):
+        regions = [self.SELF, (204.0, 100.0, 380.0, 130.0)]
+        expanded, reason = self._widen(regions)
+        assert expanded is None
+        assert reason == layout_refine.SKIP_NO_ROOM
+
+    def test_widens_left_symmetrically(self):
+        """向左扩：收边到左邻右沿加 GAP，对称于向右。"""
+        regions = [self.SELF, (5.0, 100.0, 12.0, 130.0)]
+        expanded, reason = self._widen(regions, direction=layout_refine.DIRECTION_LEFT)
+        assert reason is None
+        assert expanded == (13.0, 100.0, 200.0, 130.0)
+
+    def test_far_rect_without_vertical_overlap_is_ignored(self):
+        """纵向不交叠的远处矩形（物理上碰不到）不阻碍横向扩。"""
+        regions = [self.SELF, (220.0, 200.0, 380.0, 260.0)]
+        expanded, reason = self._widen(regions)
+        assert reason is None
+        assert expanded == (20.0, 100.0, 400.0, 130.0)
+
+    def test_refuses_when_self_region_spans_columns(self):
+        """自域在横向伸出框外（本段 + 邻栏被合并成一块）→ 放弃。"""
+        expanded, reason = self._widen([(20.0, 102.0, 380.0, 128.0)])
+        assert expanded is None
+        assert reason == layout_refine.SKIP_NO_SELF
+
+    def test_rejects_unknown_direction(self):
+        with pytest.raises(ValueError, match="方向"):
+            layout_refine.plan_widen_expansion(
+                self.BOX, [self.SELF], page_right=400.0, direction="up"
+            )
+
+
+class TestPlanNextPageFloatCore:
+    #: 只用 x 范围 20..200；下一页页高 300。
+    BOX = (20.0, 100.0, 200.0, 130.0)
+    PAGE_HEIGHT = 300.0
+
+    def _float(self, obstacles, required_height):
+        return layout_refine.plan_next_page_float_core(
+            self.BOX,
+            obstacles,
+            page_height=self.PAGE_HEIGHT,
+            required_height=required_height,
+        )
+
+    def test_floats_below_top_heading_top_aligned(self):
+        """顶端被标题占据 → 落到标题下方、顶对齐标题下沿。"""
+        heading = (20.0, 250.0, 200.0, 300.0)
+        floated = self._float([heading], required_height=40.0)
+        assert floated == (20.0, 210.0, 200.0, 250.0)
+
+    def test_picks_topmost_interval_that_fits(self):
+        """多个能容纳的区间 → 取最靠上的那个（顶对齐它的上沿）。"""
+        heading = (20.0, 250.0, 200.0, 300.0)
+        figure = (20.0, 100.0, 200.0, 140.0)
+        floated = self._float([heading, figure], required_height=30.0)
+        assert floated == (20.0, 220.0, 200.0, 250.0)
+
+    def test_returns_none_when_no_interval_fits(self):
+        obstacles = [(20.0, 250.0, 200.0, 300.0), (20.0, 0.0, 200.0, 180.0)]
+        assert self._float(obstacles, required_height=80.0) is None
+
+    def test_no_obstacles_floats_to_page_top(self):
+        """无障碍（异栏矩形不算）→ 贴页顶。"""
+        off_column = (250.0, 0.0, 450.0, 300.0)
+        assert self._float([], required_height=50.0) == (20.0, 250.0, 200.0, 300.0)
+        assert self._float([off_column], 50.0) == (20.0, 250.0, 200.0, 300.0)
+
+    def test_sticky_tolerance_on_x_projection(self):
+        """x 投影带 TOUCH_TOLERANCE 粘连：贴着的矩形算障碍，稍远的不算。"""
+        touching = (201.5, 0.0, 300.0, 300.0)
+        apart = (203.0, 0.0, 300.0, 300.0)
+        assert self._float([touching], 50.0) is None
+        assert self._float([apart], 50.0) == (20.0, 250.0, 200.0, 300.0)
+
+    def test_non_positive_required_height_returns_none(self):
+        assert self._float([], required_height=0.0) is None
+        assert self._float([], required_height=-3.0) is None
+
+
 class TestPageInkRects:
     BOX = TestPlanExpansion.BOX
     SELF = TestPlanExpansion.SELF
@@ -585,6 +711,27 @@ class TestPlanPageExpansion:
             )
         assert expanded == (20.0, 100.0, 200.0, 200.0)
         assert detector.pages == [0]
+
+
+class TestPlanNextPageFloat:
+    """薄封装：区域 + 精确墨迹并集作障碍；无区域 → None。"""
+
+    BOX = (20.0, 100.0, 200.0, 130.0)
+
+    def test_floats_below_region_on_next_page(self, tmp_path):
+        regions = [Region("text", 0.9, (20.0, 250.0, 200.0, 300.0))]
+        with pymupdf.open(_page_pdf(tmp_path, width=300, height=300)) as pdf:
+            floated = layout_refine.plan_next_page_float(
+                pdf[0], self.BOX, _StubDetector(regions), required_height=40.0
+            )
+        assert floated == (20.0, 210.0, 200.0, 250.0)
+
+    def test_no_regions_returns_none(self, tmp_path):
+        with pymupdf.open(_page_pdf(tmp_path)) as pdf:
+            floated = layout_refine.plan_next_page_float(
+                pdf[0], self.BOX, _StubDetector([]), required_height=40.0
+            )
+        assert floated is None
 
 
 # --------------------------------------------------------------------------- #

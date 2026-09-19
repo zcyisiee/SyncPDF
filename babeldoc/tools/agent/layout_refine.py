@@ -23,6 +23,12 @@
   压在 239pt 宽的段落上只有 18% 横向重叠，按框宽算会被当成另一栏，向上扩就直接
   跨过标题（区域检测本身也可能漏检，所以再加上精确墨迹托底）。
 - 检测器不可用（模型/依赖缺失）时返回空结果，调用方保持原行为。
+- **横向扩框与跨页整框迁移目前只是纯几何规划**（``plan_widen_expansion`` /
+  ``plan_next_page_float``）：同栏上下都没有净空时，前者把框向左/右延伸进相邻
+  空闲带，后者在下一页同 x 范围自上而下找第一个能容纳所需高度的空闲区间（顶
+  对齐）。横向扩的障碍按「任何纵向交叠」判定，不能用 ``X_OVERLAP_RATIO`` 那套
+  同栏比例——邻栏文字只要与框纵向轻微交叠，横向扩过去就是物理碰撞。两者尚未
+  接入编译编排（block_compile/渲染集成是后续任务）。
 """
 
 from __future__ import annotations
@@ -61,6 +67,9 @@ SKIP_NO_ROOM = "no-room"
 #: 扩框方向：``down`` 向下（先试）、``up`` 向上（向下无净空时才试）。
 DIRECTION_DOWN = "down"
 DIRECTION_UP = "up"
+#: 横向扩框方向：``right`` 向右、``left`` 向左（跨栏延伸进相邻空闲带）。
+DIRECTION_RIGHT = "right"
+DIRECTION_LEFT = "left"
 
 
 def refine_enabled() -> bool:
@@ -187,6 +196,116 @@ def _self_region(box, regions) -> Box | None:
             best_area = area
             best = (rx, ry, rx2, ry2)
     return best
+
+
+def plan_widen_expansion(
+    box,
+    regions,
+    *,
+    ink=(),
+    direction: str = DIRECTION_RIGHT,
+    page_left: float = 0.0,
+    page_right: float,
+) -> tuple[Box | None, str | None]:
+    """把 ``box`` 向左/右延伸进相邻空闲带。→ ``(新框 | None, 未扩原因)``。
+
+    IL 坐标（y 向上）：``box = (x, y_bottom, x2, y_top)``，y 范围保持不变。
+    ``direction`` 取 :data:`DIRECTION_RIGHT` / :data:`DIRECTION_LEFT`，规则对称：
+
+    1. 自身墨迹区域与 :func:`plan_expansion` 同一套判定（交集最大的同栏区域）；
+       它必须基本落在框的 x 范围内，否则多半是「本段 + 邻栏」被检测合并成一块，
+       无法区分自身墨迹 → 放弃；
+    2. 障碍（regions 与 ink 同规则）是**与框纵向交叠**的矩形。注意这里不能用
+       ``X_OVERLAP_RATIO`` 那套 25% 重叠比例判「同栏」：纵向扩框里轻微交叠的
+       邻栏可以忽略，横向扩框里邻栏文字只要与框纵向轻微交叠，扩过去就是物理
+       碰撞，必须按「任何纵向交叠」处理；纵向不交叠的矩形物理上碰不到，忽略；
+    3. 纵向交叠且与框横向交叠 → 框内已有别人墨迹 → 放弃（``SKIP_UNSAFE``）；
+    4. 完全在扩框一侧的矩形把边界收在它的近侧边缘，再加 ``EXPAND_GAP_PT``
+       净空；没有障碍时扩到页边；增量不足 ``MIN_GAIN_PT`` → ``SKIP_NO_ROOM``。
+    """
+    if direction not in (DIRECTION_RIGHT, DIRECTION_LEFT):
+        raise ValueError(f"未知扩框方向：{direction!r}")
+
+    x, y, x2, y2 = (float(value) for value in box)
+    if x2 - x <= 0 or y2 <= y:
+        return None, SKIP_NO_ROOM
+
+    self_region = _self_region(box, regions)
+    if self_region is None:
+        return None, SKIP_NO_SELF
+    if not (
+        self_region[0] >= x - TOUCH_TOLERANCE
+        and self_region[2] <= x2 + TOUCH_TOLERANCE
+    ):
+        # 与自己交集最大的区域在横向伸出框外：多半是「本段 + 邻栏」被合并成一块。
+        return None, SKIP_NO_SELF
+
+    rightward = direction == DIRECTION_RIGHT
+    limit = float(page_right) if rightward else float(page_left)
+    # 区域与精确墨迹同一条规则：纵向交叠 → 不安全或收边界；纵向不交叠 → 忽略。
+    for values in [*regions, *ink]:
+        rect = tuple(float(value) for value in values)
+        if rect == self_region:
+            continue
+        ry, ry2 = rect[1], rect[3]
+        if not (ry < y2 - TOUCH_TOLERANCE and ry2 > y + TOUCH_TOLERANCE):
+            # 纵向位置不同，物理上碰不到（对侧栏、页眉页脚同理）。
+            continue
+        rx, rx2 = rect[0], rect[2]
+        if rightward:
+            if rx >= x2 - TOUCH_TOLERANCE:
+                limit = min(limit, rx)
+            elif rx2 > x + TOUCH_TOLERANCE:
+                return None, SKIP_UNSAFE
+        elif rx2 <= x + TOUCH_TOLERANCE:
+            limit = max(limit, rx2)
+        elif rx < x2 - TOUCH_TOLERANCE:
+            return None, SKIP_UNSAFE
+
+    if rightward:
+        edge = float(page_right)
+        new_x2 = limit - EXPAND_GAP_PT if limit < edge else edge
+        if new_x2 - x2 < MIN_GAIN_PT:
+            return None, SKIP_NO_ROOM
+        return (x, y, new_x2, y2), None
+
+    edge = float(page_left)
+    new_x = limit + EXPAND_GAP_PT if limit > edge else edge
+    if x - new_x < MIN_GAIN_PT:
+        return None, SKIP_NO_ROOM
+    return (new_x, y, x2, y2), None
+
+
+def plan_next_page_float_core(box, obstacles, *, page_height, required_height) -> Box | None:
+    """跨页整框迁移的纯几何核心：在下一页同 x 范围找最靠上的落点。
+
+    ``obstacles`` 是与 ``box`` 的 x 范围有横向交叠的 IL 矩形（``_intersects``
+    的 x 投影，带 ``TOUCH_TOLERANCE`` 粘连）。``[0, page_height]`` 按它们的
+    y 区间切成空闲区间，**自上而下**找第一个高度 ≥ ``required_height`` 的区间
+    ``[a, b]``（b 是区间上沿），返回顶对齐的 ``(x, b - required_height, x2, b)``；
+    放不下（或 ``required_height <= 0``）→ None。
+    """
+    if required_height <= 0:
+        return None
+    x, _y, x2, _y2 = (float(value) for value in box)
+    lo, hi = x - TOUCH_TOLERANCE, x2 + TOUCH_TOLERANCE
+    page_height = float(page_height)
+    spans: list[list[float]] = []
+    for values in obstacles:
+        rx, ry, rx2, ry2 = (float(value) for value in values)
+        if min(rx2, hi) > max(rx, lo):
+            bottom, top = max(0.0, ry), min(page_height, ry2)
+            if top > bottom:
+                spans.append([bottom, top])
+    spans.sort()
+    cursor = page_height
+    for bottom, top in reversed(spans):  # 自上而下：先看最高障碍上方的净空
+        if cursor - top >= required_height:
+            return (x, cursor - required_height, x2, cursor)
+        cursor = min(cursor, bottom)
+    if cursor >= required_height:  # 最低障碍下方的整段净空（或无障碍）
+        return (x, cursor - required_height, x2, cursor)
+    return None
 
 
 def plan_downward_expansion(box, regions, *, page_bottom: float) -> Box | None:
@@ -413,6 +532,32 @@ def plan_page_expansion(
         direction=DIRECTION_UP,
         page_top=top,
     )[0]
+
+
+def plan_next_page_float(
+    next_page,
+    box,
+    detector: PaddleLayoutRegions,
+    *,
+    required_height: float,
+    page_height: float | None = None,
+) -> Box | None:
+    """下一页整框迁移的薄封装：区域 + 精确墨迹并集作障碍，调 core。
+
+    检测失败或无区域 → None（调用方保持原行为）；``page_height`` 缺省取
+    ``next_page.rect.height``（IL 坐标即页高）。
+    """
+    regions = _regions_il(next_page, detector)
+    if not regions:
+        return None
+    obstacles = [region.box for region in regions]
+    obstacles.extend(page_ink_rects(next_page))
+    height = (
+        float(page_height) if page_height is not None else float(next_page.rect.height)
+    )
+    return plan_next_page_float_core(
+        box, obstacles, page_height=height, required_height=required_height
+    )
 
 
 def _regions_il(page, detector: PaddleLayoutRegions) -> list[Region]:
