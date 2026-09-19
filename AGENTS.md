@@ -12,6 +12,7 @@
 | [docs/reference/pipeline.md](docs/reference/pipeline.md) | 阶段产物、协议、续跑与存储归谁负责 |
 | [docs/reference/http-api.md](docs/reference/http-api.md) | 上传、进度、编辑、编译的接口约定 |
 | [docs/design/online-translation.md](docs/design/online-translation.md) | 在线部署目标、存储约束与待决策项 |
+| [docs/issues/](docs/issues/index.md) | 已核实的重大缺陷：现象、证据、根因与候选方案 |
 
 ## 代码地图
 
