@@ -68,6 +68,9 @@ class ServeStreamPreview:
         # read-modify-write of the page patch state; different pages never contend.
         self.page_locks = [threading.Lock() for _ in range(self.workers)]
         self.pending = []
+        self.page_revisions = {}
+        self.page_records = {}
+        self.published = set()
 
     def _lock_for(self, pid: str) -> threading.Lock:
         return self.page_locks[_lock_index(pid, self.workers)]
@@ -95,7 +98,13 @@ class ServeStreamPreview:
         record.paragraph_id = pid
         record.revision = self.revision
         try:
-            self.compiler.compile(record)
+            result = self.compiler.compile_block_patch(record)
+            page = result["page"]
+            self.page_records[page] = record
+            self.page_revisions[page] = self.page_revisions.get(page, 0.0) + result["duration_s"]
+            if self._page_complete(page) and page not in self.published:
+                self.compiler.compose_page_asset(record, page, complete=True, duration_s=self.page_revisions[page])
+                self.published.add(page)
         except Exception as exc:
             # Preview failure is visible and retryable; it does not corrupt provider
             # output or turn a partially built PDF into a successful export.
@@ -107,9 +116,34 @@ class ServeStreamPreview:
                 block_id=pid,
             )
 
+    def _page_complete(self, page):
+        database = self.store.database
+        with database._lock:
+            row = database.connection.execute(
+                "SELECT COUNT(b.id), COUNT(tb.block_id), COUNT(cb.block_id) "
+                "FROM blocks b "
+                "LEFT JOIN translation_blocks tb ON tb.document_id=b.document_id "
+                "AND tb.block_id=b.id AND tb.job_id=? AND tb.revision=? "
+                "LEFT JOIN compile_blocks cb ON cb.document_id=b.document_id "
+                "AND cb.block_id=b.id AND cb.status='ok' "
+                "WHERE b.document_id=? AND b.page=?",
+                (self.job_id, self.revision, self.did, page),
+            ).fetchone()
+        return bool(row and row[0] > 0 and row[0] == row[1] == row[2])
+
     def close(self, *, failed=False):
         self.pool.shutdown(wait=True, cancel_futures=failed)
         for future in self.pending:
             if not future.cancelled():
                 future.result()
-        self.store.database.close()
+        try:
+            if not failed:
+                for page, record in self.page_records.items():
+                    if page not in self.published:
+                        self.compiler.compose_page_asset(record, page, complete=False, duration_s=self.page_revisions[page])
+                if self.page_records:
+                    self.compiler.compose_full_preview(next(iter(self.page_records.values())))
+        except Exception as exc:
+            self.store.database.append_event(self.job_id, self.did, "preview_failed", {"message": str(exc)})
+        finally:
+            self.store.database.close()

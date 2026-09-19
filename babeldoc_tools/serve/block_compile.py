@@ -534,7 +534,7 @@ class BlockCompiler:
                     page.set_contents(empty)
                     with pymupdf.open(assets.resolve(asset)) as patch:
                         page.show_pdf_page(page.rect, patch, 0)
-                pdf.save(path)
+                pdf.save(path, garbage=4, deflate=True)
             asset = assets.put(path, kind="export")
         with database._lock, database.connection:
             database.connection.execute("BEGIN IMMEDIATE")
@@ -557,14 +557,8 @@ class BlockCompiler:
             "compiled_blocks": len(dirty),
         }
 
-    def compile(self, record):
+    def compile_block_patch(self, record):
         import pymupdf
-        from babeldoc.format.pdf.document_il.backend.latex_bbox.overlay import (
-            LatexBboxOverlay,
-        )
-        from babeldoc.format.pdf.document_il.backend.latex_bbox.overlay import (
-            _links_by_signature,
-        )
 
         started = time.monotonic()
         did, pid, revision = record.did, record.paragraph_id, record.revision
@@ -673,6 +667,63 @@ class BlockCompiler:
                         "layout": edit.layout if edit else None,
                     },
                 }
+        input_hash = hashlib.sha256(
+            json.dumps(state, sort_keys=True).encode()
+        ).hexdigest()
+        with database._lock, database.connection:
+            database.connection.execute("BEGIN IMMEDIATE")
+            current = database.draft(did)
+            if (current or {"revision": 0})["revision"] != revision:
+                raise ToolError("stale_job", "草稿已更新，旧编译结果未发布")
+            if record.cancel_requested_at is not None or record.status != "running":
+                raise ToolError("stale_job", "任务已取消，编译结果未发布")
+            self._check_job(database, record)
+            database.connection.execute(
+                "INSERT OR REPLACE INTO local_pages VALUES (?,?,?)",
+                (did, row.page, json.dumps(state)),
+            )
+            database.connection.execute(
+                "INSERT OR REPLACE INTO compile_blocks(document_id,block_id,input_hash,patch_asset,status,target_size) VALUES (?,?,?,?,?,?)",
+                (did, pid, input_hash, stamp_asset, "ok", stamp.font_size),
+            )
+        result = {
+            "block_id": pid,
+            "page": row.page,
+            "revision": revision,
+            "asset": stamp_asset,
+            "cache_hit": hit,
+            "duration_s": time.monotonic() - started,
+        }
+        return result
+
+    def compose_page_asset(self, record, page_number, *, complete=True, duration_s=0.0):
+        import pymupdf
+        from babeldoc.format.pdf.document_il.backend.latex_bbox.overlay import (
+            LatexBboxOverlay,
+        )
+        from babeldoc.format.pdf.document_il.backend.latex_bbox.overlay import (
+            _links_by_signature,
+        )
+
+        started = time.monotonic()
+        did = record.did
+        database = self.store.database
+        assets = AssetStore(self.store.store_base, database)
+        with database._lock:
+            saved = database.connection.execute(
+                "SELECT payload FROM local_pages WHERE document_id=? AND page=?",
+                (did, page_number),
+            ).fetchone()
+        if saved is None:
+            raise ToolError("compile_failed", "页面没有可用 patch")
+        state = json.loads(saved[0])
+        temporary_root = self.store.store_base / "tmp"
+        temporary_root.mkdir(exist_ok=True)
+        with pymupdf.open(assets.resolve(state["base"])) as baseline:
+            index = page_number - 1
+            page = baseline[index]
+            with tempfile.TemporaryDirectory(prefix=record.job_id + "-page-", dir=temporary_root) as folder:
+                temporary = Path(folder)
                 # Start with the baseline page, redact each old/new area, then reinsert
                 # all cached patches. No other block invokes the renderer.
                 composed = pymupdf.open()
@@ -730,64 +781,72 @@ class BlockCompiler:
                     if not engine._verify_links(before, uris):
                         raise ToolError("compile_failed", "链接校验失败，已保留旧页面")
                     result_path = temporary / "page.pdf"
-                    composed.save(result_path)
+                    composed.save(result_path, deflate=True)
                     page_asset = assets.put(result_path, kind="page")
-                    with database._lock:
-                        latest = database.connection.execute(
-                            "SELECT asset_sha256 FROM local_previews WHERE document_id=?",
-                            (did,),
-                        ).fetchone()
-                    preview_base = assets.resolve(latest[0]) if latest else outputs[0]
-                    with pymupdf.open(preview_base) as preview_pdf:
-                        changed_page = preview_pdf[index]
-                        empty = preview_pdf.get_new_xref()
-                        preview_pdf.update_object(empty, "<<>>")
-                        preview_pdf.update_stream(empty, b"")
-                        changed_page.set_contents(empty)
-                        changed_page.show_pdf_page(changed_page.rect, composed, 0)
-                        preview_path = temporary / "preview.pdf"
-                        preview_pdf.save(preview_path)
-                    preview_asset = assets.put(preview_path, kind="preview")
                 finally:
                     composed.close()
-        input_hash = hashlib.sha256(
-            json.dumps(state, sort_keys=True).encode()
-        ).hexdigest()
+        state["page_revision"] = int(state.get("page_revision", 0)) + 1
         state["page_asset"] = page_asset
+        state["complete"] = complete
+        state["updated_at"] = utc_now()
+        input_hash = hashlib.sha256(json.dumps(state["patches"], sort_keys=True).encode()).hexdigest()
         with database._lock, database.connection:
             database.connection.execute("BEGIN IMMEDIATE")
-            current = database.draft(did)
-            if (current or {"revision": 0})["revision"] != revision:
-                raise ToolError("stale_job", "草稿已更新，旧编译结果未发布")
-            if record.cancel_requested_at is not None or record.status != "running":
-                raise ToolError("stale_job", "任务已取消，编译结果未发布")
+            if (database.draft(did) or {"revision": 0})["revision"] != record.revision:
+                raise ToolError("stale_job", "草稿已更新，旧页面未发布")
             self._check_job(database, record)
+            database.connection.execute("INSERT OR REPLACE INTO local_pages VALUES (?,?,?)", (did, page_number, json.dumps(state)))
             database.connection.execute(
-                "INSERT OR REPLACE INTO local_pages VALUES (?,?,?)",
-                (did, row.page, json.dumps(state)),
+                "INSERT OR REPLACE INTO pages(document_id,page,input_hash,page_asset,dirty,updated_at) VALUES (?,?,?,?,0,?)",
+                (did, page_number, input_hash, page_asset, state["updated_at"]),
             )
-            database.connection.execute(
-                "INSERT OR REPLACE INTO local_previews VALUES (?,?,?)",
-                (did, preview_asset, revision),
-            )
-            database.connection.execute(
-                "INSERT OR REPLACE INTO pages(document_id,page,input_hash,page_asset,dirty) VALUES (?,?,?,?,0)",
-                (did, row.page, input_hash, page_asset),
-            )
-            database.connection.execute(
-                "INSERT OR REPLACE INTO compile_blocks(document_id,block_id,input_hash,patch_asset,status,target_size) VALUES (?,?,?,?,?,?)",
-                (did, pid, input_hash, stamp_asset, "ok", stamp.font_size),
-            )
-        result = {
-            "block_id": pid,
-            "page": row.page,
-            "revision": revision,
-            "asset": page_asset,
-            "preview_asset": preview_asset,
-            "cache_hit": hit,
-            "duration_s": time.monotonic() - started,
-        }
-        database.append_event(
-            record.job_id, did, "preview_ready", result, block_id=pid, page=row.page
-        )
+        result = {"page": page_number, "asset": page_asset, "revision": record.revision,
+                  "complete": complete, "page_revision": state["page_revision"],
+                  "updated_at": state["updated_at"], "duration_s": duration_s + time.monotonic() - started}
+        database.append_event(record.job_id, did, "preview_ready", result, page=page_number)
+        return result
+
+    def compile(self, record, *, publish=True):
+        result = self.compile_block_patch(record)
+        if publish:
+            result.update(self.compose_page_asset(record, result["page"], duration_s=result["duration_s"]))
+            result["preview_asset"] = self.compose_full_preview(record)["asset"]
+        return result
+
+    def compose_full_preview(self, record):
+        import pymupdf
+
+        database = self.store.database
+        assets = AssetStore(self.store.store_base, database)
+        with database._lock:
+            rows = database.connection.execute(
+                "SELECT p.page,p.page_asset,l.payload FROM pages p JOIN local_pages l "
+                "ON p.document_id=l.document_id AND p.page=l.page WHERE p.document_id=? ORDER BY p.page",
+                (record.did,),
+            ).fetchall()
+        if not rows:
+            raise ToolError("export_not_ready", "尚无页面预览")
+        baseline = json.loads(rows[0][2])["base"]
+        temporary_root = self.store.store_base / "tmp"
+        with tempfile.TemporaryDirectory(prefix=record.job_id + "-full-", dir=temporary_root) as folder:
+            path = Path(folder) / "preview.pdf"
+            with pymupdf.open(assets.resolve(baseline)) as pdf:
+                for number, digest, _ in rows:
+                    page = pdf[number - 1]
+                    empty = pdf.get_new_xref()
+                    pdf.update_object(empty, "<<>>")
+                    pdf.update_stream(empty, b"")
+                    page.set_contents(empty)
+                    with pymupdf.open(assets.resolve(digest)) as patch:
+                        page.show_pdf_page(page.rect, patch, 0)
+                pdf.save(path, garbage=4, deflate=True)
+            asset = assets.put(path, kind="preview")
+        with database._lock, database.connection:
+            database.connection.execute("BEGIN IMMEDIATE")
+            if (database.draft(record.did) or {"revision": 0})["revision"] != record.revision:
+                raise ToolError("stale_job", "草稿已更新，完整预览未发布")
+            self._check_job(database, record)
+            database.connection.execute("INSERT OR REPLACE INTO local_previews VALUES (?,?,?)", (record.did, asset, record.revision))
+        result = {"asset": asset, "preview_asset": asset, "revision": record.revision, "full": True}
+        database.append_event(record.job_id, record.did, "preview_ready", result)
         return result

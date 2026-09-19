@@ -108,6 +108,30 @@ def _manifest(client: TestClient) -> list[dict]:
 # --------------------------------------------------------------------------- #
 # 清单
 # --------------------------------------------------------------------------- #
+def test_preview_pages_manifest_etag_and_asset_allowlist(root, client):
+    from babeldoc_tools.serve.asset_store import AssetStore
+    store = DocumentStore.for_root(root)
+    database = store.database
+    page_path = root / "page.pdf"
+    page_path.write_bytes(b"%PDF-page")
+    digest = AssetStore(root, database).put(page_path, kind="page")
+    with database._lock, database.connection:
+        database.connection.execute("INSERT OR IGNORE INTO papers(id) VALUES (?)", (DID,))
+        database.connection.execute("INSERT OR IGNORE INTO documents(id,paper_id) VALUES (?,?)", (DID, DID))
+        database.connection.execute("INSERT OR REPLACE INTO local_pages VALUES (?,?,?)", (DID, 1, '{"complete":true,"page_revision":2}'))
+        database.connection.execute("INSERT OR REPLACE INTO pages(document_id,page,page_asset,dirty) VALUES (?,?,?,0)", (DID, 1, digest))
+    first = client.get(f"{API_PREFIX}/documents/{DID}/preview-pages")
+    assert first.status_code == 200
+    assert first.json()["pages"][0]["asset"] == digest
+    assert first.json()["pages"][0]["complete"] is True
+    assert client.get(f"{API_PREFIX}/documents/{DID}/assets/{digest}").status_code == 200
+    assert client.get(f"{API_PREFIX}/documents/{DID}/preview-pages", headers={"If-None-Match": first.headers["etag"]}).status_code == 304
+    with database._lock, database.connection:
+        database.connection.execute("UPDATE local_pages SET payload=? WHERE document_id=? AND page=1", ('{"complete":false,"page_revision":3}', DID))
+    second = client.get(f"{API_PREFIX}/documents/{DID}/preview-pages", headers={"If-None-Match": first.headers["etag"]})
+    assert second.status_code == 200 and second.json()["pages"][0]["complete"] is False
+
+
 def test_artifacts_manifest_shape_and_whitelist(client):
     """清单恰好是白名单内存在的产物；name=path=workdir 相对路径；mtime 是 UTC。"""
     items = _manifest(client)

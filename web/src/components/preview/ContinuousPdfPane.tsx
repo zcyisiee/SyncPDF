@@ -7,7 +7,8 @@ import { useGeometry } from '../../lib/queries';
 import { readVisibility, useBboxStore } from '../../stores/bbox';
 import { useUiStore } from '../../stores/ui';
 import { BboxLayer, type PdfPointViewport, type ScreenViewport } from './BboxLayer';
-import { acquireDocument, PdfCanvas, type PdfPageInfo } from './PdfCanvas';
+import { TransitioningPdfPage } from './TransitioningPdfPage';
+import { acquireDocument, type PdfPageInfo } from './PdfCanvas';
 
 export interface BboxPaneData {
   mode: 'parse' | 'layout';
@@ -19,6 +20,7 @@ export interface ReaderPosition { pane: string; page: number; fraction: number }
 interface Props {
   did: string;
   url: string | null;
+  pageSources?: Record<number, string>;
   pageNumber: number;
   pageCount: number;
   navigation: { page: number; revision: number; pane?: string };
@@ -57,7 +59,7 @@ function PageLayer({ did, kind, page, viewport, bbox, recognition }: {
 
 /** Lightweight page slots preserve the scroll range; only the viewport and one
  * adjacent page on either side own canvases and geometry subscriptions. */
-export function ContinuousPdfPane({ did, url, pageNumber, pageCount, navigation, position,
+export function ContinuousPdfPane({ did, url, pageSources, pageNumber, pageCount, navigation, position,
   initialPosition, paneId, onPosition, geometryKind, bbox, recognition = false, overlay, odId, onPageInfo, onScale, emptyState }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 600, height: 800 });
@@ -210,10 +212,10 @@ export function ContinuousPdfPane({ did, url, pageNumber, pageCount, navigation,
           const viewport = info?.viewport.clone({ scale: metric.scale });
           return <div key={page} data-reader-page={page} data-od-id={odId}
             className="absolute bg-white" style={{ top: metric.top, left: Math.max(8, (size.width - metric.width) / 2), width: metric.width, height: metric.height }}>
-            <PdfCanvas url={url} pageNumber={page} scale={metric.scale} onPage={(next) => {
+            <TransitioningPdfPage url={pageSources?.[page] ?? url} pageNumber={pageSources?.[page] ? 1 : page} scale={metric.scale} onPage={(next) => {
               setInfos((previous) => previous[page]?.viewport.width === next.viewport.width && previous[page]?.viewport.height === next.viewport.height && previous[page]?.viewport.rotation === next.viewport.rotation ? previous : { ...previous, [page]: next });
-              setActualCount(next.numPages);
-              onPageInfo?.(next);
+              if (!pageSources?.[page]) setActualCount(next.numPages);
+              if (!pageSources?.[page]) onPageInfo?.(next);
             }} />
             {viewport ? <PageLayer recognition={recognition} did={did} kind={geometryKind} page={page} viewport={viewport}
               bbox={page === pageNumber ? bbox : null} /> : null}

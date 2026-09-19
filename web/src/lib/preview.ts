@@ -72,6 +72,10 @@ export function artifactUrl(did: string, name: string): string {
   return `${API_BASE}/documents/${encodeURIComponent(did)}/artifacts/${path}`;
 }
 
+export function assetUrl(did: string, digest: string): string {
+  return `${API_BASE}/documents/${encodeURIComponent(did)}/assets/${encodeURIComponent(digest)}`;
+}
+
 export function clampPage(page: number, pageCount: number): number {
   if (!Number.isFinite(page)) return 1;
   return Math.min(Math.max(Math.round(page), 1), Math.max(pageCount, 1));

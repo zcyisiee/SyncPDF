@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type {
   ArtifactItem,
+  PreviewPagesResponse,
   CandidateItem,
   CandidateJobAccepted,
   CandidateListResponse,
@@ -56,6 +57,7 @@ export const queryKeys = {
   documents: ['documents'] as const,
   document: (did: string) => ['documents', did] as const,
   artifacts: (did: string) => ['documents', did, 'artifacts'] as const,
+  previewPages: (did: string) => ['documents', did, 'preview-pages'] as const,
   geometry: (did: string, kind: BboxMode, page: number) =>
     ['documents', did, 'geometry', kind, page] as const,
   stageState: (did: string) => ['documents', did, 'stage-state'] as const,
@@ -114,6 +116,15 @@ export function useDocument(
 }
 
 /** 产物清单（`GET /documents/{did}/artifacts`）；预览用它判断有没有可渲染的 PDF。 */
+export function usePreviewPages(did: string | null) {
+  return useQuery({
+    queryKey: queryKeys.previewPages(did ?? ''),
+    queryFn: () => apiGet<PreviewPagesResponse>(`/documents/${encodeURIComponent(did ?? '')}/preview-pages`),
+    staleTime: 60_000,
+    enabled: did !== null && did !== '',
+  });
+}
+
 export function useArtifacts(did: string | null) {
   return useQuery({
     queryKey: queryKeys.artifacts(did ?? ''),

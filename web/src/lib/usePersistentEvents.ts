@@ -20,7 +20,24 @@ export function usePersistentEvents(did: string) {
       if (!Number.isSafeInteger(next) || next <= cursor) return;
       cursor = next;
       sessionStorage.setItem(key, String(cursor));
-      void client.invalidateQueries({ queryKey: keys.document(did) });
+      if (message.type === 'preview_ready') {
+        try {
+          const event = JSON.parse(message.data) as { data?: { page?: number; asset?: string; complete?: boolean; page_revision?: number; updated_at?: string }; page?: number; asset?: string; complete?: boolean; page_revision?: number; updated_at?: string };
+          const data = event.data ?? event;
+          if (data.page && data.asset) {
+            client.setQueryData(keys.previewPages(did), (previous: { did: string; revision: number; pages: Array<{ page: number; asset: string; complete: boolean; page_revision?: number; updated_at: string }> } | undefined) => {
+              if (!previous) return previous;
+              const current = previous.pages.find((item) => item.page === data.page);
+              if (current?.page_revision !== undefined && data.page_revision !== undefined && data.page_revision <= current.page_revision) return previous;
+              const pages = previous.pages.filter((item) => item.page !== data.page);
+              pages.push({ page: data.page!, asset: data.asset!, complete: data.complete ?? false, page_revision: data.page_revision, updated_at: data.updated_at ?? new Date().toISOString() });
+              pages.sort((a, b) => a.page - b.page);
+              return { ...previous, pages, revision: Math.max(previous.revision, data.page_revision ?? previous.revision) };
+            });
+          }
+        } catch { /* malformed event: normal invalidation below repairs the cache */ }
+      }
+      void client.invalidateQueries({ queryKey: keys.document(did), exact: true });
       void client.invalidateQueries({ queryKey: keys.jobs(did) });
       void client.invalidateQueries({ queryKey: keys.paragraphs(did) });
     };

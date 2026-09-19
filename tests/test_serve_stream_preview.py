@@ -12,7 +12,11 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
+from babeldoc_tools.serve.jobs import JobRecord
+from babeldoc_tools.serve.jobs import utc_now
+from babeldoc_tools.serve.store import DocumentStore
 from babeldoc_tools.serve.stream_preview import MAX_PREVIEW_WORKERS
+from babeldoc_tools.serve.stream_preview import ServeStreamPreview
 from babeldoc_tools.serve.stream_preview import _lock_index
 from babeldoc_tools.serve.stream_preview import _page_of
 from babeldoc_tools.serve.stream_preview import preview_workers_from_environ
@@ -329,3 +333,255 @@ def test_runner_passes_preview_workers_to_spawn(monkeypatch, tmp_path):
     )
     fake_spawn([], tmp_path, environment=environment_for(plain_record, None))
     assert "BDT_SERVE_PREVIEW_WORKERS" not in captured
+
+
+# --------------------------------------------------------------------------- #
+# ServeStreamPreview 编排行为：真实 SQLite + 可控 fake compiler
+#
+# 只替换需要 LaTeX/完整 IR 的 ``BlockCompiler``：调度、页完成判定、发布顺序、
+# close 冲刷、取消与异常事件全部走 ``stream_preview`` 的生产代码。
+# --------------------------------------------------------------------------- #
+
+
+class _FakeCompiler:
+    """可控假编译器：像真编译器那样往 ``compile_blocks`` 写 ok 行，其余听测试指挥。
+
+    ``gates[pid]`` 在编译前阻塞（测「立即启动」），``started[pid]`` 进入即 set
+    （测「不等 close 就开工」），``fail_on`` 让指定块抛异常（测 preview_failed）。
+    """
+
+    def __init__(self, database, *, fail_on=(), gates=None, started=None):
+        self.database = database
+        self.fail_on = set(fail_on)
+        self.gates = dict(gates or {})
+        self.started = dict(started or {})
+        self.compiled = []
+        self.page_composes = []
+        self.full_previews = []
+        self.log = []
+        self._log_lock = threading.Lock()
+
+    def _record(self, *entry):
+        with self._log_lock:
+            self.log.append(entry)
+
+    def compile_block_patch(self, record):
+        pid = record.paragraph_id
+        self._record("compile", pid)
+        event = self.started.get(pid)
+        if event is not None:
+            event.set()
+        gate = self.gates.get(pid)
+        if gate is not None and not gate.wait(timeout=10):
+            raise AssertionError(f"gate never released: {pid}")
+        if pid in self.fail_on:
+            raise RuntimeError(f"boom:{pid}")
+        with self.database._lock, self.database.connection:
+            self.database.connection.execute(
+                "INSERT OR REPLACE INTO compile_blocks"
+                "(document_id,block_id,input_hash,patch_asset,status)"
+                " VALUES (?,?,?,?, 'ok')",
+                (record.did, pid, "hash", "asset"),
+            )
+        self.compiled.append(pid)
+        return {"page": int(pid[1:3]), "duration_s": 0.25}
+
+    def compose_page_asset(self, record, page, *, complete=True, duration_s=0.0):
+        self._record("compose_page", page, complete)
+        self.page_composes.append((page, complete))
+        return {"page": page, "complete": complete}
+
+    def compose_full_preview(self, record):
+        self._record("compose_full", record.did)
+        self.full_previews.append(record.did)
+        return {"asset": "preview"}
+
+    def capability(self):
+        return None
+
+
+def _start_preview(
+    tmp_path,
+    monkeypatch,
+    *,
+    blocks,
+    translated,
+    cancel=False,
+    fail_on=(),
+    gates=None,
+    started=None,
+):
+    """建真实 DB（blocks/translation_blocks/job_snapshot）后起一个 ServeStreamPreview。"""
+    store = DocumentStore.for_root(tmp_path)
+    database = store.database
+    did, job_id, revision = "paper", "j-stream", 3
+    database.register_document(did, "sha-" + did, 128)
+    with database._lock, database.connection:
+        for page, pids in blocks.items():
+            for pid in pids:
+                database.connection.execute(
+                    "INSERT OR REPLACE INTO blocks(id,document_id,page,source)"
+                    " VALUES (?,?,?,?)",
+                    (pid, did, page, "source"),
+                )
+        for pid in translated:
+            database.connection.execute(
+                "INSERT OR REPLACE INTO translation_blocks"
+                "(document_id,block_id,job_id,revision,target) VALUES (?,?,?,?,?)",
+                (did, pid, job_id, revision, "译文"),
+            )
+    record = JobRecord(
+        job_id=job_id,
+        did=did,
+        action="run",
+        created_at=utc_now(),
+        status="running",
+        revision=revision,
+    )
+    if cancel:
+        record.cancel_requested_at = utc_now()
+    database.save_job(record.model_dump())
+
+    monkeypatch.setenv("BDT_SERVE_DOCUMENT", did)
+    monkeypatch.setenv("BDT_SERVE_JOB", job_id)
+    monkeypatch.setenv("BDT_SERVE_REVISION", str(revision))
+    monkeypatch.setenv("BDT_SERVE_DATABASE", str(tmp_path / "app.db"))
+    monkeypatch.setenv("BDT_SERVE_PREVIEW_WORKERS", "4")
+
+    preview = ServeStreamPreview(tmp_path, None)
+    fake = _FakeCompiler(
+        preview.store.database, fail_on=fail_on, gates=gates, started=started
+    )
+    preview.compiler = fake
+    return preview, fake, did, job_id
+
+
+def _drain(preview):
+    for future in list(preview.pending):
+        future.result(timeout=10)
+
+
+def test_first_block_starts_compiling_before_close(tmp_path, monkeypatch):
+    """提交首块后编译立刻开跑（不攒批、不等翻译结束），门未开时不算完成。"""
+    gate = threading.Event()
+    preview, fake, _did, _job = _start_preview(
+        tmp_path,
+        monkeypatch,
+        blocks={1: ["P01-001", "P01-002"]},
+        translated=["P01-001", "P01-002"],
+        gates={"P01-001": gate},
+        started={"P01-001": threading.Event()},
+    )
+    preview.submit("P01-001", "body", "text")
+    assert fake.started["P01-001"].wait(timeout=10), "提交后首块应立刻进入编译池"
+    assert fake.compiled == []
+    gate.set()
+    _drain(preview)
+    assert fake.compiled == ["P01-001"]
+    preview.close(failed=True)
+
+
+def test_page_publishes_only_after_last_block(tmp_path, monkeypatch):
+    """同页多块：前两块不发布，最后一块完成才发布一次 complete 页。"""
+    pids = ["P01-001", "P01-002", "P01-003"]
+    preview, fake, _did, _job = _start_preview(
+        tmp_path, monkeypatch, blocks={1: pids}, translated=pids
+    )
+    for pid in pids[:-1]:
+        preview.submit(pid, "body", "text")
+        _drain(preview)
+        assert fake.page_composes == [], f"{pid} 之后不该发布整页"
+    preview.submit(pids[-1], "body", "text")
+    _drain(preview)
+    assert sorted(fake.compiled) == sorted(pids)
+    assert fake.page_composes == [(1, True)]
+    preview.close(failed=False)
+    assert fake.page_composes == [(1, True)], "已发布页在 close 不应重复发布"
+    assert fake.full_previews == ["paper"]
+
+
+def test_single_block_page_publishes_immediately(tmp_path, monkeypatch):
+    """单块页：唯一块完成即发布 complete 页。"""
+    preview, fake, _did, _job = _start_preview(
+        tmp_path, monkeypatch, blocks={2: ["P02-001"]}, translated=["P02-001"]
+    )
+    preview.submit("P02-001", "body", "text")
+    _drain(preview)
+    assert fake.page_composes == [(2, True)]
+    assert fake.page_composes[0][1] is True
+    preview.close(failed=True)
+
+
+def test_close_flushes_incomplete_page_best_effort(tmp_path, monkeypatch):
+    """翻译结束仍缺块：正常 close 只补一次 complete=False 的页与完整预览。"""
+    preview, fake, _did, _job = _start_preview(
+        tmp_path,
+        monkeypatch,
+        blocks={3: ["P03-001", "P03-002"]},
+        translated=["P03-001"],
+    )
+    preview.submit("P03-001", "body", "text")
+    _drain(preview)
+    assert fake.page_composes == []
+    preview.close(failed=False)
+    assert fake.page_composes == [(3, False)]
+    assert fake.full_previews == ["paper"]
+
+
+def test_failed_close_does_not_flush(tmp_path, monkeypatch):
+    """failed close 不发布半成品页，也不合成完整预览。"""
+    preview, fake, _did, _job = _start_preview(
+        tmp_path,
+        monkeypatch,
+        blocks={3: ["P03-001", "P03-002"]},
+        translated=["P03-001"],
+    )
+    preview.submit("P03-001", "body", "text")
+    _drain(preview)
+    preview.close(failed=True)
+    assert fake.page_composes == []
+    assert fake.full_previews == []
+
+
+def test_cancel_requested_skips_compile_and_publish(tmp_path, monkeypatch):
+    """job 已请求取消：块不编译、不发预览事件、不发布页。"""
+    preview, fake, did, _job = _start_preview(
+        tmp_path,
+        monkeypatch,
+        blocks={1: ["P01-001", "P01-002"]},
+        translated=["P01-001", "P01-002"],
+        cancel=True,
+    )
+    preview.submit("P01-001", "body", "text")
+    preview.submit("P01-002", "body", "text")
+    _drain(preview)
+    assert fake.compiled == []
+    assert fake.page_composes == []
+    assert preview.store.database.events(did) == []
+    preview.close(failed=True)
+
+
+def test_compile_exception_records_preview_failed(tmp_path, monkeypatch):
+    """单块编译异常：记 preview_failed 事件、不发布页，同页其它块照常编译。"""
+    preview, fake, did, job_id = _start_preview(
+        tmp_path,
+        monkeypatch,
+        blocks={1: ["P01-001", "P01-002"]},
+        translated=["P01-001", "P01-002"],
+        fail_on=["P01-001"],
+    )
+    preview.submit("P01-001", "body", "text")
+    preview.submit("P01-002", "body", "text")
+    _drain(preview)
+    assert set(fake.compiled) == {"P01-002"}
+    assert fake.page_composes == []
+    failures = [
+        event
+        for event in preview.store.database.events(did)
+        if event["type"] == "preview_failed"
+    ]
+    assert len(failures) == 1
+    assert failures[0]["block_id"] == "P01-001"
+    assert failures[0]["job_id"] == job_id
+    assert "boom:P01-001" in failures[0]["data"]["message"]
+    preview.close(failed=True)

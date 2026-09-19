@@ -2,6 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes preview-page-reveal {
+  from { opacity: 0; filter: blur(8px); clip-path: inset(0 0 100% 0); }
+  to { opacity: 1; filter: blur(0); clip-path: inset(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; }
+}
+
 /*
  * 设计令牌与基础样式。Tailwind theme 里映射同一组值
  * （web/tailwind.config.ts）；这里保留 CSS 变量是为了给伪元素、关键帧、栅格模板与
@@ -162,4 +171,9 @@
   .pulse-dot {
     animation: none;
   }
+}
+
+.preview-page-reveal { animation: preview-page-reveal 420ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .preview-page-reveal { animation: none; filter: none; clip-path: none; }
 }

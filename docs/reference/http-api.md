@@ -28,7 +28,8 @@
 | `POST P/retranslate`、`GET P/candidates` | 生成、查看重译候选；`candidates.py` |
 | `POST P/candidates/{cid}/adopt`、`…/reject` | 采用写草稿，拒绝只改候选状态 |
 | `GET D/artifacts`、`GET/HEAD D/artifacts/{name}` | workdir 白名单下载，`name` 是相对路径，支持 Range；`artifacts.py` |
-| `GET D/assets/{digest}` | 经文档归属验证的本地资产下载 |
+| `GET D/preview-pages` | 当前页资产清单（页资产、完整标记、页版本）；ETag 随清单内容变化，304 表示无变化 | `routers/artifacts.py` |
+| `GET D/assets/{digest}` | 经文档归属验证的本地资产下载；当前 `pages.page_asset`、导出和兼容 `local_previews` 均可授权 |
 | `GET D/versions`、`D/versions/{revision}/pdf` | 旧全量编译版本归档；`versions.py` |
 | `GET/PUT /profiles` | 服务端提供方配置；`profiles.py` |
 | `GET/PUT /models`、`GET/DELETE /models/{model_id}`、`POST /models/{model_id}/test` | 已保存模型配置与连通测试；`models.py`；测试会实际调用提供方 |

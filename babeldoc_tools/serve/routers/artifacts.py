@@ -12,12 +12,17 @@ OpenAPI 是 GET 的重复描述，且 W02 的守卫测试断言全站 OpenAPI �
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter
 from fastapi import Path as PathParam
+from fastapi import Request
 from fastapi.responses import FileResponse
+from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 
 from babeldoc_tools.serve import artifacts
 from babeldoc_tools.serve.routers.documents import DOCUMENT_ID
@@ -39,6 +44,40 @@ ARTIFACT_PATH = "/documents/{did}/artifacts/{name:path}"
 def artifacts_router(store: DocumentStore) -> APIRouter:
     """按 store 生成产物路由（与其它只读路由同风格）。"""
     router = APIRouter(prefix=API_PREFIX, tags=["documents"])
+
+    @router.get("/documents/{did}/preview-pages")
+    def preview_pages(did: str, request: Request) -> JSONResponse:
+        """Return the current page assets without materializing a whole PDF."""
+        store.resolve(did)
+        database = store.database
+        with database._lock:
+            revision_row = database.connection.execute(
+                "SELECT revision FROM documents WHERE id=?", (did,)
+            ).fetchone()
+            rows = database.connection.execute(
+                "SELECT page,page_asset,updated_at FROM pages "
+                "WHERE document_id=? AND page_asset IS NOT NULL ORDER BY page",
+                (did,),
+            ).fetchall()
+            states = {
+                int(row[0]): json.loads(row[1])
+                for row in database.connection.execute(
+                    "SELECT page,payload FROM local_pages WHERE document_id=?", (did,)
+                )
+            }
+        revision = int(revision_row[0]) if revision_row else 0
+        payload = {"did": did, "revision": revision, "pages": [
+            {"page": int(row[0]), "asset": row[1],
+             "complete": states.get(int(row[0]), {}).get("complete", False),
+             "page_revision": states.get(int(row[0]), {}).get("page_revision", 0),
+             "updated_at": row[2]}
+            for row in rows
+        ]}
+        digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        etag = f'"{digest}"'
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers={"ETag": etag})
+        return JSONResponse(payload, headers={"ETag": etag})
 
     @router.get("/documents/{did}/assets/{digest}", response_class=FileResponse)
     def get_asset(did: str, digest: str) -> FileResponse:

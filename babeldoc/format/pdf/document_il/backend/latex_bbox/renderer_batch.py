@@ -1353,7 +1353,10 @@ def _extract_page(source: Path, page_index: int, out_path: Path) -> bool:
             return False
         doc.select([page_index])
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        doc.save(out_path)
+        if doc.page_count != 1:
+            logger.warning("抽取后页数异常: %s", doc.page_count)
+            return False
+        doc.save(out_path, garbage=3, deflate=True)
     except Exception:  # noqa: BLE001 - 抽取失败按归属失败处理
         logger.debug("抽取批编译页面失败", exc_info=True)
         return False

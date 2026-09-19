@@ -58,7 +58,7 @@ bdt run → parse → translate → apply → build → check → review → rep
        ← SSE / 任务查询 ← 诊断事件、持久事件与任务状态
 ```
 
-上传按内容哈希去重，上传本身不自动解析。任务执行阶段会保存可观察状态；翻译流可经 `ServeStreamPreview` 生成预览：完成的翻译块立即提交到一个并行编译池（`--preview-workers`/job 字段 `preview_workers`，1..8，缺省 8），同一页的块路由到同一 worker 串行编译（页 patch 状态不丢），不同页并行。LaTeX 能力探测与 `state.pkl` 反序列化按进程缓存。持久 SSE 读数据库事件，旧 SSE 读单次 run 的诊断归档，二者游标不同。
+上传按内容哈希去重，上传本身不自动解析。任务执行阶段会保存可观察状态；翻译流可经 `ServeStreamPreview` 生成预览：完成的翻译块立即提交到一个并行编译池（`--preview-workers`/job 字段 `preview_workers`，1..8，缺省 8），同一页的块路由到同一 worker 串行编译（页 patch 状态不丢），不同页并行。流式路径只写 immutable baseline 上的块 patch 和当前页 asset；页面全部块完成后发布一次页事件，翻译结束再由页 asset 合成完整预览写入 `local_previews`。LaTeX 能力探测与 `state.pkl` 反序列化按进程缓存。持久 SSE 读数据库事件，旧 SSE 读单次 run 的诊断归档，二者游标不同。
 
 ### 局部修改与交付
 

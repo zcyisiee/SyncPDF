@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { ApiError, describeApiError } from '../../lib/api';
 import {
   artifactUrl,
+  assetUrl,
   clampPage,
   geometryBboxes,
   pickPreviewArtifacts,
@@ -26,6 +27,7 @@ import {
 } from '../../lib/download';
 import {
   useArtifacts,
+  usePreviewPages,
   useDocument,
   useDraft,
   useGeometry,
@@ -59,6 +61,7 @@ function DocumentPreview({ did, streamArtifact }: PreviewProps) {
   const detailQuery = useDocument(did);
   // 文档本身不存在时不发产物请求：避免在「文档不存在」错误卡旁边再冒一个产物清单错误卡
   const artifactsQuery = useArtifacts(detailQuery.isSuccess ? did : null);
+  const previewPagesQuery = usePreviewPages(detailQuery.isSuccess ? did : null);
   const artifacts = artifactsQuery.data;
   // W10：草稿（选中段的 box 覆盖 + 编译状态条的草稿修订号）+ 活动 job（编辑只读判据）
   const draftQuery = useDraft(detailQuery.isSuccess ? did : null);
@@ -134,7 +137,10 @@ function DocumentPreview({ did, streamArtifact }: PreviewProps) {
           target.name === compileArtifactKey(compile) ? compileArtifactRevision(compile) : null,
         );
   const sourceUrl = source === null ? null : artifactUrl(did, source.name);
-  const primaryUrl = previewMode === 'source' ? sourceUrl : targetUrl;
+  const pageSources = useMemo(() => Object.fromEntries(
+    (previewPagesQuery.data?.pages ?? []).map((item) => [item.page, assetUrl(did, item.asset)]),
+  ) as Record<number, string>, [did, previewPagesQuery.data]);
+  const primaryUrl = previewMode === 'source' ? sourceUrl : targetUrl ?? sourceUrl;
 
   // PDF 的实际页数优先（源/译页数可能不同）；加载前以文档详情估计。
   const numPages = pdfPageInfo !== null && pdfPageInfo.url === primaryUrl ? pdfPageInfo.numPages : null;
@@ -371,8 +377,9 @@ function DocumentPreview({ did, streamArtifact }: PreviewProps) {
           />
         ) : null}
         <ContinuousPdfPane
-          key={`primary-${did}-${primaryUrl}`}
+          key={`primary-${did}`}
           url={primaryUrl}
+          pageSources={previewMode !== 'source' ? pageSources : undefined}
           pageNumber={page}
           did={did}
           pageCount={primaryPageCount}

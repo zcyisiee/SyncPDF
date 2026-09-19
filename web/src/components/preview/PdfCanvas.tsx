@@ -36,6 +36,8 @@ export interface PdfCanvasProps {
   scale: number;
   /** 每页加载完成后回调（父级据此算适宽与 bbox 换算）。 */
   onPage?: (info: PdfPageInfo) => void;
+  onRenderComplete?: () => void;
+  onError?: (cause: unknown) => void;
   className?: string;
 }
 
@@ -95,6 +97,8 @@ function PdfCanvasPage({
   pageNumber,
   scale,
   onPage,
+  onRenderComplete,
+  onError,
   className,
   onRetry,
 }: PdfCanvasPageProps) {
@@ -103,6 +107,9 @@ function PdfCanvasPage({
   const [page, setPage] = useState<PDFPageProxy | null>(null);
   const [error, setError] = useState<unknown>(null);
   const onPageRef = useLatest(onPage);
+  const onRenderCompleteRef = useLatest(onRenderComplete);
+  const onErrorRef = useLatest(onError);
+  useEffect(() => { if (error !== null) onErrorRef.current?.(error); }, [error, onErrorRef]);
 
   // 1) 加载文档：卸载/切换时销毁 loading task（中断进行中的 Range 请求）。
   useEffect(() => {
@@ -160,7 +167,10 @@ function PdfCanvasPage({
     });
     task.promise
       .then(() => {
-        if (!cancelled) setError(null);
+        if (!cancelled) {
+          setError(null);
+          onRenderCompleteRef.current?.();
+        }
       })
       .catch((cause: unknown) => {
         if (!cancelled && !isCancellation(cause)) setError(cause);
@@ -169,7 +179,7 @@ function PdfCanvasPage({
       cancelled = true;
       task.cancel();
     };
-  }, [page, scale]);
+  }, [page, scale, onRenderCompleteRef]);
 
   // Release decoded page resources when a virtualized page leaves the window.
   useEffect(() => () => { page?.cleanup(); }, [page]);
@@ -202,7 +212,7 @@ function PdfCanvasPage({
 }
 
 /** `url` 或重试计数器变化 → 内层重挂载（pdf.js 文档与渲染状态一起重置）。 */
-export function PdfCanvas({ url, pageNumber, scale, onPage, className }: PdfCanvasProps) {
+export function PdfCanvas({ url, pageNumber, scale, onPage, onRenderComplete, onError, className }: PdfCanvasProps) {
   const [attempt, setAttempt] = useState(0);
   return (
     <PdfCanvasPage
@@ -211,6 +221,8 @@ export function PdfCanvas({ url, pageNumber, scale, onPage, className }: PdfCanv
       pageNumber={pageNumber}
       scale={scale}
       onPage={onPage}
+      onRenderComplete={onRenderComplete}
+      onError={onError}
       className={className}
       onRetry={() => setAttempt((value) => value + 1)}
     />
