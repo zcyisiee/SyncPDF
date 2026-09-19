@@ -43,10 +43,12 @@
 `POST D/jobs` 当前接受 `run / check / compile`；即使 schema 的 action 枚举有 `retranslate`，这个通用端点也拒绝它，局部重译必须走段落候选端点。
 
 ```json
-{"action":"run","from":"parse","profile":"已配置的提供方 id","use_glossary":true}
+{"action":"run","from":"parse","profile":"已配置的提供方 id","use_glossary":true,"preview_workers":8}
 ```
 
 客户端传 profile id；执行命令在服务器解析，不能通过 job 请求传 translator/reviewer 命令或密钥。模型配置端点是独立的凭证输入边界，返回的是脱敏元信息。AI 审查是否运行由 reviewer 配置决定，不能根据翻译完成推断已审查。
+
+`preview_workers`（可选，1..8，缺省 8）只对会跑翻译阶段的 `run` 生效：翻译进行中的流式预览编译并行度。同一页的块仍串行编译，不同页并行；优先级为 job 字段 > `bdt serve --preview-workers` > 缺省。其余 action 给了该字段也不进记录（与 compile 带 profile 同口径）。
 
 提交成功为 202，响应 `status=queued` 是接收确认；真实状态读 `/jobs/{jid}`。状态包括 `queued / running / succeeded / failed / canceled / interrupted`。同一文档限制活动任务；全量 runner 与局部编译器各有本机并发控制，不能据此假定已支持多进程共享调度。服务重启会把残留任务收敛为中断，不自动恢复计算。
 

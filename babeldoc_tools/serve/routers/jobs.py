@@ -201,6 +201,10 @@ def jobs_router(
                 thinking=payload.thinking,
                 # 词表开关（W13）：客户端只给布尔，注入路径由服务端在 argv 构造时取。
                 use_glossary=payload.use_glossary,
+                # 并行预览编译数：客户端提交时选；registry 只对跑翻译的 run 保留。
+                preview_workers=(
+                    payload.preview_workers if payload.action == "run" else None
+                ),
             )
         response.headers["Location"] = f"{API_PREFIX}/jobs/{record.job_id}"
         return JobAccepted(job_id=record.job_id, action=payload.action)

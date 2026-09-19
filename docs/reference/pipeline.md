@@ -65,7 +65,7 @@ root 模式的 `store_base` 是服务根目录；workdir 模式则是工作目�
 
 ## 局部编译边界
 
-`serve/block_compile.py::BlockCompiler` 处理单段编译和导出：从当前草稿/翻译块与不可变解析输入生成页面补丁，记录资产、页面和 revision；发布前检查任务未取消且 revision 未过期。导出组合页面并记录 `exports`。流式译文通过 `ServeStreamPreview` 串行提交预览编译，与模型输出读取分离。
+`serve/block_compile.py::BlockCompiler` 处理单段编译和导出：从当前草稿/翻译块与不可变解析输入生成页面补丁，记录资产、页面和 revision；发布前检查任务未取消且 revision 未过期。导出组合页面并记录 `exports`。流式译文通过 `ServeStreamPreview` 提交预览编译，与模型输出读取分离：完成的块立即进入并行编译池（worker 数 1..8，缺省 8；来源优先级为 job 字段 `preview_workers` > `bdt serve --preview-workers` > 缺省），同一页的块按 pid 页号哈希到同一 worker 串行（页 patch 的读-改-写不会丢更新），不同页并行。`BlockCompiler` 实例缓存一次 LaTeX 能力探测（kpsewhich 子进程不再每段重复），`state.pkl` 反序列化按 workdir+mtime 进程内缓存。
 
 旧 `serve/compile.py::CompileService` 仍处理全量 `action=compile`：隔离副本 → 物化草稿 → `bdt run --from apply` → 校验产物 → 发布/版本归档。旧 PDF 在失败后仍可用，但必须显示旧 revision。`scope=pages` 在这条路径仍降级全量，不等于新段落编译接口。
 

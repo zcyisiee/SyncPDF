@@ -79,6 +79,16 @@ def add_parser(subparsers) -> argparse.ArgumentParser:
         action="store_true",
         help="启动前清理超过一天的临时文件与缓存；不删除 assets",
     )
+    parser.add_argument(
+        "--preview-workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "流式翻译预览的并行编译 worker 数（1..8，缺省 8）；"
+            "同一页的块仍串行编译，不同页并行"
+        ),
+    )
     return parser
 
 
@@ -164,7 +174,7 @@ _LOG_CONFIG = {
 }
 
 
-def _load_app(store: DocumentStore):
+def _load_app(store: DocumentStore, preview_workers: int | None = None):
     """延迟导入 web 依赖并建 app；缺依赖 → ``ToolError(web_extra_missing)``。"""
     try:
         import uvicorn
@@ -172,7 +182,7 @@ def _load_app(store: DocumentStore):
         from babeldoc_tools.serve import app as app_module
     except ImportError as exc:
         raise ToolError("web_extra_missing", WEB_EXTRA_HINT, missing=str(exc)) from exc
-    return app_module.create_app(store), uvicorn
+    return app_module.create_app(store, preview_workers=preview_workers), uvicorn
 
 
 def _open_browser(url: str) -> None:
@@ -182,6 +192,30 @@ def _open_browser(url: str) -> None:
             sys.stderr.write(f"bdt serve: 无法自动打开浏览器，请手动访问 {url}\n")
     except Exception as exc:  # noqa: BLE001 - 浏览器缺失不阻断服务
         sys.stderr.write(f"bdt serve: 打开浏览器失败（{exc}），请手动访问 {url}\n")
+
+
+def _preview_workers(args: argparse.Namespace) -> int | None:
+    """``--preview-workers`` 的校验：None（未给）或 1..8；越界 → ``invalid_port``
+    同级的启动失败（单行 JSON 错误信封，退出码 1）。"""
+    if args.preview_workers is None:
+        return None
+    from babeldoc_tools.serve.stream_preview import MAX_PREVIEW_WORKERS
+
+    if not 1 <= args.preview_workers <= MAX_PREVIEW_WORKERS:
+        _emit(
+            {
+                "ok": False,
+                "error": {
+                    "code": "invalid_preview_workers",
+                    "message": (
+                        f"--preview-workers 必须在 1..{MAX_PREVIEW_WORKERS} 之间："
+                        f"{args.preview_workers}"
+                    ),
+                },
+            }
+        )
+        return None
+    return args.preview_workers
 
 
 def run(args: argparse.Namespace) -> int:
@@ -196,6 +230,9 @@ def run(args: argparse.Namespace) -> int:
                 },
             }
         )
+        return 1
+    preview_workers = _preview_workers(args)
+    if args.preview_workers is not None and preview_workers is None:
         return 1
     try:
         store = _build_store(args)
@@ -215,7 +252,7 @@ def run(args: argparse.Namespace) -> int:
                 f"bdt serve: migrated {len(result['migrated'])} documents; "
                 f"skipped {len(result['skipped'])}\n"
             )
-        app, uvicorn = _load_app(store)
+        app, uvicorn = _load_app(store, preview_workers)
     except ToolError as exc:
         _emit(
             {
@@ -255,6 +292,7 @@ def run(args: argparse.Namespace) -> int:
                 "port": port,
                 "mode": store.mode,
                 "root": str(store.root),
+                "preview_workers": preview_workers,
                 "version": __version__,
                 "pid": os.getpid(),
             },

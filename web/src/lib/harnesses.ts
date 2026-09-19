@@ -3,31 +3,34 @@ import type { ProfileListItem } from '../api/types';
 
 export const HARNESS_DEFAULT_KEY = 'ieet.translation-default';
 
-function savedDefault(): { profile?: string; thinking?: string; dual?: boolean; useGlossary?: boolean; reviewer?: boolean } {
+function savedDefault(): { profile?: string; thinking?: string; dual?: boolean; useGlossary?: boolean; reviewer?: boolean; previewWorkers?: number } {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(HARNESS_DEFAULT_KEY) ?? '{}');
     return value && typeof value === 'object' ? value : {};
   } catch { return {}; }
 }
 
-/** job 提交用的默认偏好（模型/思考强度之外：dual、词表、AI 审校），存同一个 localStorage 键。 */
+/** job 提交用的默认偏好（模型/思考强度之外：dual、词表、AI 审校、预览并行数），存同一个 localStorage 键。 */
 export interface TranslationDefaults {
   profile?: string;
   thinking?: string;
   dual: boolean;
   useGlossary: boolean;
   reviewer: boolean;
+  previewWorkers: number;
 }
 
 /** 读 job 默认偏好：布尔字段带缺省（dual 关、词表开、审校关），坏了当没存过。 */
 export function readTranslationDefaults(): TranslationDefaults {
   const saved = savedDefault();
+  const workers = Number(saved.previewWorkers);
   return {
     profile: saved.profile,
     thinking: saved.thinking,
     dual: saved.dual === true,
     useGlossary: saved.useGlossary !== false,
     reviewer: saved.reviewer === true,
+    previewWorkers: Number.isInteger(workers) && workers >= 1 && workers <= 8 ? workers : 8,
   };
 }
 
@@ -40,6 +43,7 @@ export function saveTranslationDefaults(defaults: TranslationDefaults): boolean 
       dual: defaults.dual,
       useGlossary: defaults.useGlossary,
       reviewer: defaults.reviewer,
+      previewWorkers: defaults.previewWorkers,
     }));
     return true;
   } catch { return false; }
