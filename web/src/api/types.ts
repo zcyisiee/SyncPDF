@@ -14,7 +14,20 @@ export type DocumentDetail = components['schemas']['DocumentDetail'] & {
 };
 export type StageStateItem = components['schemas']['StageStateItem'];
 export type StageStateResponse = components['schemas']['StageStateResponse'];
-export type ParagraphItem = components['schemas']['ParagraphItem'];
+/**
+ * `GET /paragraphs` 的编译样式摘要（解析状态派生）。后端声明成宽松 dict，
+ * 这里收窄成前端认识的键（值都按「缺了也能渲染」处理，不编造）。
+ */
+export interface ParagraphStyle {
+  font_size?: number | null;
+  bold?: boolean;
+  italic?: boolean;
+  serif?: boolean;
+  font_name?: string | null;
+}
+export type ParagraphItem = components['schemas']['ParagraphItem'] & {
+  style?: ParagraphStyle | null;
+};
 export type GeometryResponse = components['schemas']['GeometryResponse'];
 export type CheckResponse = components['schemas']['CheckResponse'];
 export type EventsPage = components['schemas']['EventsPage'];
@@ -25,6 +38,8 @@ export type DocumentUploaded = components['schemas']['DocumentUploaded'];
 export type JobRecord = components['schemas']['JobRecord'];
 export type JobCreateRequest = components['schemas']['JobCreateRequest'] & { reviewer_profile?: string | null; thinking?: string | null };
 export type JobAccepted = components['schemas']['JobAccepted'];
+/** `POST /documents/{did}/blocks/compile` 的请求体（shift 多选批量编译）。 */
+export type BlocksCompileRequest = components['schemas']['BlocksCompileRequest'];
 export type ProfileListItem = components['schemas']['ProfileListItem'] & {
   builtin?: boolean; model?: string | null; thinking_levels?: string[]; default_thinking?: string | null;
 };

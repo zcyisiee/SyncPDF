@@ -6,6 +6,9 @@
  *   草稿里有覆盖 → 顶部「草稿已修改」chip + 「恢复」按钮（PATCH `target: null`）；
  * - 排版 = 四个数值覆盖（范围同 `layout_overrides.PARAGRAPH_FLOAT_KEYS`）+ 只读 `box`
  *   （`box` 只能在预览里拖拽，见 `BboxEditor`）；
+ * - 编译样式 = `GET /paragraphs` 的 `style` 只读摘要（源文字号/字体/加粗/斜体/衬线）+
+ *   三个三态覆盖下拉（跟随原文/开启/关闭 → 草稿 `layout.bold/italic/serif`，
+ *   跟随原文 = 删键），保存走同一条防抖链路；
  * - 保存 = 本地 1.5s 防抖（与服务端防抖叠加没关系：服务端才是真源）+ 失焦 / Cmd+S 立即存；
  *   **没有任何字段变化时不发 PATCH**（不白涨 revision）。
  *
@@ -23,9 +26,11 @@ import type { ParagraphItem } from '../../api/types';
 import { ApiError, describeApiError } from '../../lib/api';
 import {
   LAYOUT_FIELDS,
+  STYLE_FIELDS,
   boxSummary,
   draftParagraphOf,
   hasLayoutOverride,
+  layoutBool,
   layoutBox,
   layoutInputsOf,
   layoutNumber,
@@ -33,10 +38,13 @@ import {
   layoutValuesOf,
   paragraphTargetView,
   restoreEntry,
+  styleBoolsOf,
   targetPatch,
   validateLayoutInput,
   type LayoutFieldKey,
   type LayoutInputs,
+  type StyleBools,
+  type StyleFieldKey,
 } from '../../lib/draft';
 import { layoutBoxOfRow } from '../../lib/preview';
 import {
@@ -95,21 +103,25 @@ export function ParagraphEditor({
   const draftParagraph = draftParagraphOf(draft, paragraphId);
   const external = paragraphTargetView(paragraph?.target, draftParagraph);
   const draftLayout = draftParagraph?.layout ?? null;
+  /** 字号缩放覆盖（编译样式摘要里有 font_scale 覆盖时显示「× n」）。 */
+  const fontScale = layoutNumber(draftLayout, 'font_scale');
   /** 当前生效的框：草稿覆盖优先，否则基线（`GET /paragraphs` 的 layout 几何行）。 */
   const box = layoutBox(draftLayout) ?? layoutBoxOfRow(paragraph?.geometry);
   const modified = typeof draftParagraph?.target === 'string';
 
   const [text, setText] = useState(external.target);
   const [inputs, setInputs] = useState<LayoutInputs>(() => layoutInputsOf(draftLayout));
+  const [bools, setBools] = useState<StyleBools>(() => styleBoolsOf(draftLayout));
 
   // 服务端草稿变化（换段 / PATCH 回包 / 刷新）→ 用「外部值」重置本地输入：
   // 键包含外部值，所以用户正在输入时不会被自己的中间态触发重置。
-  const externalKey = `${paragraphId ?? ''}\u0000${external.target}\u0000${layoutInputsKey(draftLayout)}`;
+  const externalKey = `${paragraphId ?? ''}\u0000${external.target}\u0000${layoutInputsKey(draftLayout)}\u0000${styleBoolsKey(draftLayout)}`;
   const [lastKey, setLastKey] = useState(externalKey);
   if (externalKey !== lastKey) {
     setLastKey(externalKey);
     setText(external.target);
     setInputs(layoutInputsOf(draftLayout));
+    setBools(styleBoolsOf(draftLayout));
   }
 
   const errors = useMemo(
@@ -121,11 +133,11 @@ export function ParagraphEditor({
   );
   const fieldErrors = errors.filter(([, error]) => error !== null);
   const values = useMemo(() => layoutValuesOf(inputs), [inputs]);
-  const dirty = text !== external.target || layoutChanged(draftLayout, values);
+  const dirty = text !== external.target || layoutChanged(draftLayout, values) || styleChanged(draftLayout, bools);
 
   // 不用 useCallback：这个函数每次渲染重建即可（只有防抖定时器通过 `saveRef` 取它，
   // 不参与任何依赖数组 —— React Compiler 不允许把「派生的对象」当记忆依赖）。
-  const save = (nextText: string, nextInputs: LayoutInputs) => {
+  const save = (nextText: string, nextInputs: LayoutInputs, nextBools: StyleBools) => {
     if (paragraphId === null || draft === undefined) return;
     const invalidField = LAYOUT_FIELDS.find(
       (field) => validateLayoutInput(field.key, nextInputs[field.key]).error !== null,
@@ -134,9 +146,10 @@ export function ParagraphEditor({
     const entry: Record<string, unknown> = {};
     if (nextText !== external.target) entry.target = targetPatch(nextText, paragraph?.target).target;
     const nextValues = layoutValuesOf(nextInputs);
-    if (layoutChanged(draftLayout, nextValues)) {
-      // layout 是整对象替换：带上草稿里已有的 box 与不认识的键，避免静默丢数据
-      entry.layout = layoutPatch(nextValues, layoutBox(draftLayout), draftLayout);
+    if (layoutChanged(draftLayout, nextValues) || styleChanged(draftLayout, nextBools)) {
+      // layout 是整对象替换：带上草稿里已有的 box 与不认识的键，避免静默丢数据；
+      // 样式布尔也走 layoutPatch（未提供的样式键 = 删键 = 跟随原文）
+      entry.layout = layoutPatch(nextValues, layoutBox(draftLayout), draftLayout, nextBools);
     }
     if (Object.keys(entry).length === 0) return;
     patchMutation.mutate({ baseRevision: draft.revision, paragraphs: { [paragraphId]: entry } });
@@ -146,9 +159,9 @@ export function ParagraphEditor({
   // 自动保存：本地 1.5s 防抖（只在有改动、无非法值时排定时器）
   useEffect(() => {
     if (disabled || !dirty || fieldErrors.length > 0) return;
-    const timer = window.setTimeout(() => saveRef.current(text, inputs), SAVE_DEBOUNCE_MS);
+    const timer = window.setTimeout(() => saveRef.current(text, inputs, bools), SAVE_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [disabled, dirty, fieldErrors.length, inputs, saveRef, text]);
+  }, [bools, disabled, dirty, fieldErrors.length, inputs, saveRef, text]);
 
   if (paragraphId === null) {
     return (
@@ -224,12 +237,12 @@ export function ParagraphEditor({
             value={text}
             onChange={(event) => setText(event.target.value)}
             onBlur={() => {
-              if (!disabled) saveRef.current(text, inputs);
+              if (!disabled) saveRef.current(text, inputs, bools);
             }}
             onKeyDown={(event) => {
               if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 's') return;
               event.preventDefault();
-              saveRef.current(text, inputs);
+              saveRef.current(text, inputs, bools);
             }}
             className="mt-1 w-full resize-y rounded border border-hair-2 bg-ivory p-s3 font-serif text-body leading-[1.6] text-ink read-only:bg-parchment read-only:text-ink-3"
           />
@@ -259,7 +272,7 @@ export function ParagraphEditor({
                 disabled={disabled}
                 dirty={layoutNumber(draftLayout, field.key) !== values[field.key]}
                 onChange={(next) => setInputs((current) => ({ ...current, [field.key]: next }))}
-                onBlur={() => saveRef.current(text, inputs)}
+                onBlur={() => saveRef.current(text, inputs, bools)}
               />
             ))}
           </div>
@@ -272,11 +285,51 @@ export function ParagraphEditor({
           </p>
         </div>
 
+        <div className="mt-s4 border-t border-hair pt-s3" data-od-id="paragraph-style">
+          <p className="text-tiny text-ink-3">编译样式（源文派生 + 覆盖；本次局部编译生效）</p>
+          {paragraph?.style == null ? (
+            <p className="mt-2 text-tiny text-ink-4" data-od-id="paragraph-style-unavailable">
+              样式信息不可用（该段没有解析状态派生的样式摘要）。
+            </p>
+          ) : (
+            <>
+              <p className="mt-2 font-mono text-micro text-ink-4" data-od-id="paragraph-style-info">
+                字号 {fontSizeLabel(paragraph.style.font_size)}
+                {fontScale === null ? '' : ` × ${fontScale}`}
+                {' · '}
+                {paragraph.style.font_name ?? '字体未知'} · 加粗 {sourceBoolLabel(paragraph.style.bold)} ·
+                斜体 {sourceBoolLabel(paragraph.style.italic)} · 衬线 {sourceBoolLabel(paragraph.style.serif)}
+              </p>
+              <div className="mt-2 flex flex-col gap-[6px]">
+                {STYLE_FIELDS.map((field) => (
+                  <StyleRow
+                    key={field.key}
+                    fieldKey={field.key}
+                    label={field.label}
+                    value={bools[field.key] ?? null}
+                    sourceLabel={sourceBoolLabel(paragraph.style?.[field.key])}
+                    disabled={disabled}
+                    dirty={layoutBool(draftLayout, field.key) !== (bools[field.key] ?? null)}
+                    onChange={(next) =>
+                      setBools((current) => {
+                        const updated = { ...current };
+                        if (next === null) delete updated[field.key];
+                        else updated[field.key] = next;
+                        return updated;
+                      })
+                    }
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
         <div className="mt-s4 flex flex-wrap items-center gap-s2">
           <Button
             data-od-id="paragraph-save"
             disabled={disabled || !dirty || fieldErrors.length > 0 || patchMutation.isPending}
-            onClick={() => saveRef.current(text, inputs)}
+            onClick={() => saveRef.current(text, inputs, bools)}
           >
             保存
           </Button>
@@ -367,6 +420,12 @@ function layoutInputsKey(layout: Record<string, unknown> | null | undefined): st
   return LAYOUT_FIELDS.map((field) => `${field.key}=${layoutNumber(layout, field.key) ?? ''}`).join(',');
 }
 
+/** 草稿样式布尔的稳定指纹（与 `layoutInputsKey` 同一口径，拼进外部键）。 */
+function styleBoolsKey(layout: Record<string, unknown> | null | undefined): string {
+  if (layout === null || layout === undefined) return '';
+  return STYLE_FIELDS.map((field) => `${field.key}=${layoutBool(layout, field.key) ?? ''}`).join(',');
+}
+
 /** 用户输入的排版数值是否与草稿不同（缺省 = 没有覆盖，不是 0）。 */
 function layoutChanged(
   layout: Record<string, unknown> | null | undefined,
@@ -375,6 +434,25 @@ function layoutChanged(
   return LAYOUT_FIELDS.some(
     (field) => (layoutNumber(layout, field.key) ?? null) !== (values[field.key] ?? null),
   );
+}
+
+/** 样式布尔是否与草稿不同（本地状态里没有的键 = 跟随原文 = 草稿里也没有）。 */
+function styleChanged(layout: Record<string, unknown> | null | undefined, bools: StyleBools): boolean {
+  return STYLE_FIELDS.some(
+    (field) => (layoutBool(layout, field.key) ?? null) !== (bools[field.key] ?? null),
+  );
+}
+
+/** 源文字号文本（拿不到 → `—`，不编造默认值）。 */
+function fontSizeLabel(size: number | null | undefined): string {
+  return typeof size === 'number' && Number.isFinite(size) ? `${size}pt` : '—';
+}
+
+/** 源文派生的布尔文本：true → 是 / false → 否 / 缺 → —。 */
+function sourceBoolLabel(value: boolean | undefined): string {
+  if (value === true) return '是';
+  if (value === false) return '否';
+  return '—';
 }
 
 function LayoutRow({
@@ -422,6 +500,56 @@ function LayoutRow({
       />
       <span className={dirty ? 'font-mono text-micro text-accent' : 'font-mono text-micro text-ink-4'}>
         {error ?? (dirty ? '已改' : `${min}–${max}`)}
+      </span>
+    </label>
+  );
+}
+
+/**
+ * 三态样式覆盖行：`跟随原文`（值 null，草稿里删键） / `开启`（true） / `关闭`（false）。
+ * 变更只进本地状态，保存走与数值字段同一条防抖链路（select 没有有意义的失焦语义）。
+ */
+function StyleRow({
+  fieldKey,
+  label,
+  value,
+  sourceLabel,
+  disabled,
+  dirty,
+  onChange,
+}: {
+  fieldKey: StyleFieldKey;
+  label: string;
+  /** 当前覆盖值：null = 跟随原文（草稿里没有该键）。 */
+  value: boolean | null;
+  /** 源文派生值（只读行同款文本，右侧提示用）。 */
+  sourceLabel: string;
+  disabled: boolean;
+  dirty: boolean;
+  onChange: (next: boolean | null) => void;
+}) {
+  return (
+    <label className="grid grid-cols-[84px_1fr_auto] items-center gap-s2">
+      <span className="font-mono text-micro text-ink-3" title={`${label}覆盖（跟随原文 = 用源文样式）`}>
+        {label}
+      </span>
+      <select
+        data-od-id={`paragraph-style-${fieldKey}`}
+        aria-label={`${label}覆盖`}
+        disabled={disabled}
+        value={value === null ? '' : value ? 'on' : 'off'}
+        onChange={(event) => {
+          const next = event.target.value;
+          onChange(next === '' ? null : next === 'on');
+        }}
+        className="h-6 w-full rounded border border-hair-2 bg-ivory px-[6px] font-mono text-tiny text-ink disabled:opacity-45"
+      >
+        <option value="">跟随原文</option>
+        <option value="on">开启</option>
+        <option value="off">关闭</option>
+      </select>
+      <span className={dirty ? 'font-mono text-micro text-accent' : 'font-mono text-micro text-ink-4'}>
+        {dirty ? '已改' : `原文 ${sourceLabel}`}
       </span>
     </label>
   );

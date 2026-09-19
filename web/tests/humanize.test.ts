@@ -1,6 +1,7 @@
 /**
- * `lib/humanize.ts`：事件 kind 短标签（本仓库归档里真实出现过的 47 种 + W14 的虚拟 kind
- * `job_update`）、`formatDuration` 边界、列表页 running 判据。
+ * `lib/humanize.ts`：事件 kind 短标签（本仓库归档里真实出现过的 47 种 + 批量块编译的
+ * `block_compiled`/`compile_float` + W14 的虚拟 kind `job_update`）、`formatDuration`
+ * 边界、列表页 running 判据。
  */
 import { describe, expect, it } from 'vitest';
 
@@ -102,7 +103,16 @@ describe('kind 标签', () => {
     expect(EVENT_KINDS).toContain('job_update');
     // 47 种真 kind 一个没丢，也没有被虚拟 kind 顶掉
     expect(observedKinds).toHaveLength(47);
-    expect(EVENT_KINDS).toHaveLength(51);
+    expect(EVENT_KINDS).toHaveLength(53);
+  });
+
+  it('批量块编译的两种事件 kind（block_compiled / compile_float）有标签且进 SSE 清单', () => {
+    // 不补 EVENT_KINDS 就收不到：批量编译 job 每块完成发 block_compiled、
+    // 贴片浮动扩框/迁移发 compile_float（serve/block_compile.py）。
+    expect(kindLabel('block_compiled')).toBe('块已编译');
+    expect(kindLabel('compile_float')).toBe('贴片浮动');
+    expect(EVENT_KINDS).toContain('block_compiled');
+    expect(EVENT_KINDS).toContain('compile_float');
   });
 });
 

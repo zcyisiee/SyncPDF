@@ -6,6 +6,7 @@ import type { WorkbenchView } from '../../lib/routing';
 import { cn } from '../../lib/cn';
 import { useUiStore } from '../../stores/ui';
 import { ArchiveSummary } from '../archive/ArchiveSummary';
+import { BatchPanel } from '../edit/BatchPanel';
 import { ParagraphEditor } from '../edit/ParagraphEditor';
 import { EventStreamPanel } from '../events/EventStreamPanel';
 import type { EventFeed } from '../events/useEventWindow';
@@ -41,6 +42,7 @@ export function InspectorPanel({
 }) {
   const collapsed = useUiStore((state) => state.inspectorCollapsed);
   const selectedParagraphId = useUiStore((state) => state.selectedParagraphId);
+  const selectedParagraphIds = useUiStore((state) => state.selectedParagraphIds);
   const documentQuery = useDocument(did);
   const jobsQuery = useJobs(did);
   const compile = documentQuery.data?.compile ?? null;
@@ -97,13 +99,24 @@ export function InspectorPanel({
             )}
           </div>
           {tab === 'paragraph' ? (
-            <div role="tabpanel" aria-label="段落" className="min-h-0 flex-1">
-              <ParagraphEditor
-                did={did}
-                paragraphId={selectedParagraphId}
-                disabled={editingLocked}
-                disabledReason={editingLockedReason}
-              />
+            <div role="tabpanel" aria-label="段落" className="flex min-h-0 flex-1 flex-col">
+              {/* 多选 ≥2：批量编译面板压在段落编辑器上方（编辑器仍跟随主选中段）。 */}
+              {selectedParagraphIds.length > 1 ? (
+                <BatchPanel
+                  did={did}
+                  blockIds={selectedParagraphIds}
+                  disabled={editingLocked}
+                  disabledReason={editingLockedReason}
+                />
+              ) : null}
+              <div className="min-h-0 flex-1">
+                <ParagraphEditor
+                  did={did}
+                  paragraphId={selectedParagraphId}
+                  disabled={editingLocked}
+                  disabledReason={editingLockedReason}
+                />
+              </div>
             </div>
           ) : null}
           {tab === 'archive' ? (

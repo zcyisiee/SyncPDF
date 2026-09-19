@@ -188,6 +188,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{did}/preview-pages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Pages
+         * @description Return the current page assets without materializing a whole PDF.
+         */
+        get: operations["preview_pages_api_v1_documents__did__preview_pages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{did}/assets/{digest}": {
         parameters: {
             query?: never;
@@ -297,6 +317,26 @@ export interface paths {
         get: operations["latest_export_api_v1_documents__did__exports_latest_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{did}/blocks/compile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 批量编译多个 block
+         * @description shift 多选后的批量重新编译：一个 job 编一组 block，各自的草稿覆盖（target/layout 样式）互不影响。服务端同页串行、跨页并行编译，每个受影响页只合成一次。
+         */
+        post: operations["compile_blocks_api_v1_documents__did__blocks_compile_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -646,6 +686,26 @@ export interface components {
             size: number;
             /** Mtime */
             mtime: string;
+        };
+        /**
+         * BlocksCompileRequest
+         * @description ``POST /documents/{did}/blocks/compile`` 的请求体（shift 多选批量编译）。
+         *
+         *     ``block_ids`` 是要一起重新编译的段落清单（去重保序在路由层做）；每个块各自的
+         *     草稿覆盖（target/layout 样式）互不影响。服务端同页串行、跨页并行编译，
+         *     每个受影响页只合成一次。
+         */
+        BlocksCompileRequest: {
+            /**
+             * Base Revision
+             * @description 客户端期望的当前草稿 revision；与服务器不一致 → 409 revision_conflict
+             */
+            base_revision: number;
+            /**
+             * Block Ids
+             * @description 要批量编译的段落 id 清单（[A-Za-z0-9._-]{1,64}，去重保序）
+             */
+            block_ids: string[];
         };
         /** Body_upload_document_api_v1_documents_post */
         Body_upload_document_api_v1_documents_post: {
@@ -1310,6 +1370,8 @@ export interface components {
             trigger?: ("debounce" | "manual") | null;
             /** Paragraph Id */
             paragraph_id?: string | null;
+            /** Paragraph Ids */
+            paragraph_ids?: string[] | null;
             /** Candidate Id */
             candidate_id?: string | null;
             /** Run Id */
@@ -1352,6 +1414,10 @@ export interface components {
             target?: string | null;
             /** Geometry */
             geometry?: {
+                [key: string]: unknown;
+            } | null;
+            /** Style */
+            style?: {
                 [key: string]: unknown;
             } | null;
             /** Layout Status */
@@ -1949,6 +2015,37 @@ export interface operations {
             };
         };
     };
+    preview_pages_api_v1_documents__did__preview_pages_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                did: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_asset_api_v1_documents__did__assets__digest__get: {
         parameters: {
             query?: never;
@@ -2189,6 +2286,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compile_blocks_api_v1_documents__did__blocks_compile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文档 id：workdir 目录名（单段，解析结果必须在服务根目录内） */
+                did: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BlocksCompileRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobAccepted"];
                 };
             };
             /** @description Validation Error */

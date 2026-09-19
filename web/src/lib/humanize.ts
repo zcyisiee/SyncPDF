@@ -34,7 +34,9 @@ export const FINAL_STAGE: StageName = STAGE_NAMES[STAGE_NAMES.length - 1];
 /**
  * 事件 kind → 中文短标签（优先 ≤4 字）。表里有两类：
  *
- * 1. **归档里真实出现过的 47 种 kind**（`tmp/<did>/debug/runs/<run>/events.jsonl` 全量统计）；
+ * 1. **归档里真实出现过的 47 种 kind**（`tmp/<did>/debug/runs/<run>/events.jsonl` 全量统计）
+ *    + 批量块编译 job 发的两种事件 kind（`block_compiled` / `compile_float`，见
+ *    `serve/block_compile.py`：每块编译完成 / 贴片浮动扩框迁移）；
  * 2. 一个**虚拟 kind** `job_update`（W14：SSE 同一条流里的 job 状态变化通知，不在
  *    events.jsonl 里、没有 seq，见 api.md §1.4.1）—— 它进这张表只是为了有中文文案，
  *    并且 `EVENT_KINDS`（SSE 必须逐个 `addEventListener` 的清单）漏了它就收不到。
@@ -71,6 +73,9 @@ export const KIND_LABELS: Record<string, string> = {
   compile_fallback: '编译回退',
   compile_expand: '编译扩展',
   artifact_bundle: '产物打包',
+  // 局部编译（批量块编译 job 发的事件：每块一条 block_compiled，浮动扩框/迁移一条 compile_float）
+  block_compiled: '块已编译',
+  compile_float: '贴片浮动',
   // 解析 / 版面
   pdf_prepared: 'PDF 准备',
   page_frames: '页面框',
