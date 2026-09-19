@@ -243,6 +243,7 @@ class MinerUDocLayoutModel(DocLayoutModel):
         self,
         layout_json: dict[str, Any],
         total_pages: int,
+        mupdf_doc=None,
     ) -> dict[int, YoloResult]:
         page_results = {i: self._empty_result() for i in range(total_pages)}
         pdf_info = layout_json.get("pdf_info")
@@ -256,9 +257,30 @@ class MinerUDocLayoutModel(DocLayoutModel):
             if not isinstance(page_idx, int):
                 continue
             if 0 <= page_idx < total_pages:
-                page_results[page_idx] = self._build_page_yolo_result(page_info)
+                result = self._build_page_yolo_result(page_info)
+                if mupdf_doc is not None:
+                    pdf_page = mupdf_doc[page_idx]
+                    for box in result.boxes:
+                        box.xyxy = self._normalize_bbox(
+                            self._unrotate_bbox(box.xyxy, pdf_page)
+                        )
+                page_results[page_idx] = result
 
         return page_results
+
+    @staticmethod
+    def _unrotate_bbox(bbox, pdf_page):
+        """MinerU display-view points → unrotated MediaBox top-left points.
+
+        The prepared PDF has a normalized CropBox. Keep raw layout/cache data
+        unchanged; downstream layout, alignment and recognition share this frame.
+        """
+        if bbox is None:
+            return bbox
+        if not pdf_page.rotation:
+            return list(bbox)
+        rect = pymupdf.Rect(*(float(value) for value in bbox))
+        return list(rect * pdf_page.derotation_matrix)
 
     def _build_provider_document(self, layout_json: dict[str, Any]) -> None:
         """构建并缓存 provider IR（完整 block/line/span 树），失败不阻断解析。"""
@@ -667,12 +689,21 @@ class MinerUDocLayoutModel(DocLayoutModel):
             logger.warning("Failed to write MinerU raw layout JSON", exc_info=True)
 
     def _prepare_provider_ir(
-        self, layout_json: dict[str, Any], translate_config
+        self, layout_json: dict[str, Any], translate_config, mupdf_doc=None
     ) -> None:
         """构建并落盘 provider IR。IR 构建失败不阻断 YoloResult 路径。"""
         self._dump_raw_layout_json(layout_json, translate_config)
         try:
             self._build_provider_document(layout_json)
+            if mupdf_doc is not None:
+                for page in self.provider_document.pages:
+                    pdf_page = mupdf_doc[page.page_index]
+                    for block in page.iter_blocks(recursive=True):
+                        block.bbox = self._unrotate_bbox(block.bbox, pdf_page)
+                        for line in block.lines:
+                            line.bbox = self._unrotate_bbox(line.bbox, pdf_page)
+                            for span in line.spans:
+                                span.bbox = self._unrotate_bbox(span.bbox, pdf_page)
         except Exception:  # noqa: BLE001 - IR 是附加产物，不应影响布局解析
             self.provider_document = None
             logger.warning("Failed to build MinerU provider IR", exc_info=True)
@@ -691,7 +722,7 @@ class MinerUDocLayoutModel(DocLayoutModel):
         replay_path = os.environ.get("BABELDOC_MINERU_LAYOUT_JSON")
         if replay_path:
             layout_json = json.loads(Path(replay_path).read_text(encoding="utf-8"))
-            self._prepare_provider_ir(layout_json, translate_config)
+            self._prepare_provider_ir(layout_json, translate_config, mupdf_doc)
             requested_page_numbers = {
                 int(page.page_number) for page in pages if hasattr(page, "page_number")
             }
@@ -715,7 +746,7 @@ class MinerUDocLayoutModel(DocLayoutModel):
                 max(requested_page_numbers) + 1 if requested_page_numbers else 0
             )
             page_results = self._parse_layout_json_page_results(
-                layout_json, total_pages
+                layout_json, total_pages, mupdf_doc
             )
             for page in pages:
                 yield page, page_results.get(page.page_number, self._empty_result())
@@ -740,7 +771,7 @@ class MinerUDocLayoutModel(DocLayoutModel):
             layout_json = self._fetch_layout_json(pdf_path, translate_config)
             if cache_file is not None:
                 self._write_layout_cache(cache_file, layout_json)
-        self._prepare_provider_ir(layout_json, translate_config)
+        self._prepare_provider_ir(layout_json, translate_config, mupdf_doc)
         pdf_info = layout_json.get("pdf_info") or []
         requested_page_numbers = {
             int(page.page_number)
@@ -769,7 +800,7 @@ class MinerUDocLayoutModel(DocLayoutModel):
 
         total_pages = (max(requested_page_numbers) + 1) if requested_page_numbers else 0
         page_results = self._parse_layout_json_page_results(
-            layout_json, total_pages=total_pages
+            layout_json, total_pages=total_pages, mupdf_doc=mupdf_doc
         )
 
         for page in pages:

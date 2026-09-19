@@ -41,7 +41,7 @@ def local(tmp_path, monkeypatch):
     monkeypatch.setattr(compiler, "_rows", lambda _did: rows)
     calls = []
 
-    def render(_workdir, pid, target, box, temporary, _cache):
+    def render(_workdir, pid, target, box, temporary, _cache, **_kwargs):
         calls.append(pid)
         path = temporary / "stamp.pdf"
         with pymupdf.open() as pdf:
@@ -90,7 +90,7 @@ def test_shrunk_stamp_is_rerendered_with_expanded_box(local, monkeypatch):
 
     boxes: list[list[float]] = []
 
-    def render(_workdir, _pid, target, box, temporary, _cache):
+    def render(_workdir, _pid, target, box, temporary, _cache, **_kwargs):
         boxes.append(list(box))
         path = temporary / f"stamp-{len(boxes)}.pdf"
         with pymupdf.open() as pdf:
@@ -137,7 +137,7 @@ def test_upward_expansion_is_rerendered_with_raised_top(local, monkeypatch):
 
     boxes: list[list[float]] = []
 
-    def render(_workdir, _pid, target, box, temporary, _cache):
+    def render(_workdir, _pid, target, box, temporary, _cache, **_kwargs):
         boxes.append(list(box))
         path = temporary / f"stamp-{len(boxes)}.pdf"
         with pymupdf.open() as pdf:
@@ -184,7 +184,7 @@ def test_unshrunk_stamp_is_not_rerendered(local, monkeypatch):
 
     boxes: list[list[float]] = []
 
-    def render(_workdir, _pid, target, box, temporary, _cache):
+    def render(_workdir, _pid, target, box, temporary, _cache, **_kwargs):
         boxes.append(list(box))
         path = temporary / f"stamp-{len(boxes)}.pdf"
         with pymupdf.open() as pdf:
@@ -218,7 +218,7 @@ def test_failed_expansion_retry_keeps_original_stamp(local, monkeypatch):
 
     boxes: list[list[float]] = []
 
-    def render(_workdir, _pid, target, box, temporary, _cache):
+    def render(_workdir, _pid, target, box, temporary, _cache, **_kwargs):
         boxes.append(list(box))
         if len(boxes) == 2:
             raise ToolError("compile_failed", "重渲染失败")
@@ -262,7 +262,7 @@ def test_failed_stamp_preserves_page_and_previous_patch(local, monkeypatch):
         0
     ]
 
-    def fail(*_args):
+    def fail(*_args, **_kwargs):
         raise ToolError("compile_failed", "failed stamp")
 
     monkeypatch.setattr("babeldoc_tools.serve.block_compile.render_request", fail)
@@ -281,8 +281,8 @@ def test_revision_change_during_render_does_not_publish(local, monkeypatch):
 
     render = block_compile.render_request
 
-    def changed(*args):
-        result = render(*args)
+    def changed(*args, **kwargs):
+        result = render(*args, **kwargs)
         compiler.store.database.save_draft(
             "paper", {"revision": 1, "paragraphs": {}}, expected_revision=0
         )
@@ -381,7 +381,7 @@ def test_failed_dirty_export_keeps_previous_revision(local, monkeypatch):
     )
     job.revision = 1
 
-    def fail(*_args):
+    def fail(*_args, **_kwargs):
         raise ToolError("compile_failed", "stamp failed")
 
     monkeypatch.setattr("babeldoc_tools.serve.block_compile.render_request", fail)

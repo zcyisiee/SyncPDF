@@ -501,6 +501,16 @@ class JobCreateRequest(BaseModel):
             "词表为空或该 action 不跑翻译时一律不注入"
         ),
     )
+    preview_workers: int | None = Field(
+        default=None,
+        ge=1,
+        le=8,
+        description=(
+            "流式翻译预览的并行编译 worker 数（只对 action=run 且跑 translate 阶段有效）："
+            "1..8，缺省 8。同一页的块仍串行编译，不同页并行；"
+            "不跑翻译的 action 一律用缺省"
+        ),
+    )
 
     @model_validator(mode="after")
     def _require_profile_for_run_and_check(self) -> JobCreateRequest:

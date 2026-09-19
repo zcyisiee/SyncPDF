@@ -225,6 +225,10 @@ class JobRecord(BaseModel):
     #: 只有 ``action=run`` 才是 true（词表只约束翻译阶段）。它只是**开关**；词表内容与
     #: 注入用的文件路径全在服务端，客户端看不到也不传。
     use_glossary: bool = False
+    #: 流式翻译预览的并行编译 worker 数（只对跑 translate 的 ``run`` 有意义）：
+    #: 客户端提交时选（1..8）；``None`` = 没给，用子进程缺省。不进 argv，只随
+    #: ``BDT_SERVE_PREVIEW_WORKERS`` 环境变量传给翻译 job 的子进程。
+    preview_workers: int | None = None
     #: ``compile`` 的页级语义（api.md §3.4）：请求的 scope / 实际生效的 scope /
     #: 回退原因。v1 页级编译回退全量，所以 ``requested_scope="pages"`` 时
     #: ``effective_scope="full"`` 且 ``downgrade_reason`` 非空。
@@ -426,11 +430,13 @@ class JobRegistry:
         use_glossary: bool = False,
         reviewer_profile: str | None = None,
         thinking: str | None = None,
+        preview_workers: int | None = None,
     ) -> JobRecord:
         """新建 job 并入队（``queued``）；准入判断由调用方在 ``lock`` 内做。
 
         ``use_glossary`` 在这里归一：只有 ``action="run"``（= 真的会跑翻译阶段）才留
         true，其余 action 一律记 false —— 记录里的字段要么真生效，要么就别声称生效。
+        ``preview_workers`` 同理：只对会跑翻译的 ``run`` 保留，其余 action 记 ``None``。
         """
         record = JobRecord(
             job_id=new_job_id(),
@@ -444,6 +450,11 @@ class JobRegistry:
             pages=pages,
             dual=dual,
             use_glossary=bool(use_glossary) and action == "run",
+            preview_workers=(
+                preview_workers
+                if preview_workers is not None and action == "run"
+                else None
+            ),
             requested_scope=requested_scope,
             effective_scope=effective_scope,
             downgrade_reason=downgrade_reason,

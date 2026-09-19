@@ -170,12 +170,22 @@ def error_response(
     )
 
 
-def create_app(store: DocumentStore, *, api_prefix: str = API_PREFIX) -> FastAPI:
-    """组装 FastAPI 应用（工厂：不读环境变量、不起进程；恢复只改确实要改的状态）。"""
+def create_app(
+    store: DocumentStore,
+    *,
+    api_prefix: str = API_PREFIX,
+    preview_workers: int | None = None,
+) -> FastAPI:
+    """组装 FastAPI 应用（工厂：不读环境变量、不起进程；恢复只改确实要改的状态）。
+
+    ``preview_workers``：流式翻译预览的并行编译数（``bdt serve --preview-workers``）；
+    ``None`` = 用 :mod:`babeldoc_tools.serve.stream_preview` 的缺省。它只随翻译
+    job 的子进程环境（``BDT_SERVE_PREVIEW_WORKERS``）传下去，serve 进程自己不用。
+    """
     # 共享实例：job 注册表 / 草稿锁 / 编译调度 / 候选存储（路由们用同一份，见模块 docstring）。
     # 全局词表（W13）也是共享实例：``/glossary`` 路由写它，job 启动时从它取注入路径。
     glossary = GlossaryStore(store.store_base)
-    runner = JobRunner(store, glossary=glossary)
+    runner = JobRunner(store, glossary=glossary, preview_workers=preview_workers)
     # W14：job 状态变化 → 进程内广播（SSE 的 job_update）。订阅者订阅才有开销：
     # 没人连着事件流时 publish 直接丢弃（不积压、不落盘）。
     job_updates = JobUpdateHub()

@@ -485,12 +485,20 @@ export function useCancelJobMutation(did: string) {
   });
 }
 
-/** 提交/取消后让所有"受 job 影响"的视图重新取：job 列表 + 文档详情 + 列表卡片。 */
+/**
+ * 提交/取消后让所有"受 job 影响"的视图重新取：job 列表 + 文档详情 + 列表卡片 + 事件窗口。
+ *
+ * 事件窗口（尾部首拉 + 分页）必须一起失效：`run` job 会在真 workdir 里开一个**新 run
+ * 归档**，而事件面板订阅的 run 只由首拉决定（SSE 订阅的是首拉拿到的 run_id）。不失效
+ * 就只能等 5s 的兜底轮询，重新开始翻译后面板会继续显示上一个 run。
+ */
 function invalidateJobViews(client: ReturnType<typeof useQueryClient>, did: string): void {
   void client.invalidateQueries({ queryKey: queryKeys.jobs(did) });
   void client.invalidateQueries({ queryKey: queryKeys.document(did) });
   void client.invalidateQueries({ queryKey: queryKeys.stageState(did) });
   void client.invalidateQueries({ queryKey: queryKeys.documents });
+  // 前缀键：`eventTail` 与分页 `events` 都以它开头（见 `queryKeys`）。
+  void client.invalidateQueries({ queryKey: ['documents', did, 'events'] });
 }
 
 // --------------------------------------------------------------------------- #

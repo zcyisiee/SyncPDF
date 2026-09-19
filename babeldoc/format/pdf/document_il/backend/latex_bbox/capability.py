@@ -237,7 +237,13 @@ def probe_latex_capability(
     font_path: str | None = None,
     primary_font_family: str | None = None,
 ) -> LatexCapability:
-    """探测 XeLaTeX/宏包/字体能力。永不抛异常，只返回结构化结果。"""
+    """探测 XeLaTeX/宏包/字体能力。永不抛异常，只返回结构化结果。
+
+    每次调用都真的探测（kpsewhich/xelatex 子进程）：模块内部属性可被配置与
+    测试替换，进程级缓存会把这些变化冻结。需要摊薄成本的高频调用方（流式
+    预览的逐段编译）应在**调用方**按需缓存，见
+    :func:`babeldoc_tools.serve.block_compile.render_request`。
+    """
     capability = LatexCapability()
     try:
         import pymupdf  # noqa: F401

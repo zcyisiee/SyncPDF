@@ -8,6 +8,70 @@ import pytest
 _DUMMY_MINERU_ARG = "dummy"
 
 
+@pytest.mark.parametrize("mode", ["replay", "cache", "online"])
+@pytest.mark.parametrize(
+    ("rotation", "display_box"),
+    [(0, [20, 30, 80, 50]), (90, [250, 20, 270, 80]),
+     (180, [120, 250, 180, 270]), (270, [30, 120, 50, 180])],
+)
+def test_rotated_mineru_layout_and_provider_share_native_frame(
+    tmp_path, monkeypatch, mode, rotation, display_box
+):
+    import pymupdf
+    from babeldoc.docvision.mineru_doclayout import MinerUDocLayoutModel
+    from babeldoc.format.pdf.document_il import il_version_1 as il
+    from babeldoc.format.pdf.document_il.midend.layout_parser import LayoutParser
+    from babeldoc.format.pdf.translation_config import TranslationConfig
+    from babeldoc.progress_monitor import ProgressMonitor
+
+    raw = {"pdf_info": [{"page_idx": 0, "para_blocks": [{
+        "type": "list", "bbox": display_box, "blocks": [{
+            "type": "text", "bbox": display_box, "lines": [{
+                "bbox": display_box, "spans": [{
+                    "type": "inline_equation", "bbox": display_box, "content": "x",
+                }],
+            }],
+        }],
+    }]}]}
+    layout_path = tmp_path / "layout.json"
+    layout_path.write_text(json.dumps(raw))
+    model = MinerUDocLayoutModel(api_token=_DUMMY_MINERU_ARG)
+    if mode == "replay":
+        monkeypatch.setenv("BABELDOC_MINERU_LAYOUT_JSON", str(layout_path))
+    else:
+        monkeypatch.delenv("BABELDOC_MINERU_LAYOUT_JSON", raising=False)
+        monkeypatch.setattr(
+            model, "_layout_cache_path",
+            lambda _path: layout_path if mode == "cache" else None,
+        )
+        monkeypatch.setattr(model, "_fetch_layout_json", lambda *_args: raw)
+
+    config = TranslationConfig(
+        input_file="fixture.pdf", working_dir=tmp_path, doc_layout_model=model,
+        layout_coverage_threshold=0,
+        progress_monitor=ProgressMonitor([(LayoutParser.stage_name, 1.0)]),
+    )
+    char_box = il.Box(x=25, y=255, x2=30, y2=265)
+    docs = il.Document(page=[il.Page(page_number=0, pdf_character=[
+        il.PdfCharacter(char_unicode="x", box=char_box, visual_bbox=il.VisualBbox(box=char_box)),
+    ])])
+    with pymupdf.open() as pdf:
+        pdf.new_page(width=200, height=300).set_rotation(rotation)
+        LayoutParser(config).process(docs, pdf)
+        assert pdf[0].rotation == rotation
+    box = docs.page[0].page_layout[0].box
+    assert (box.x, box.y, box.x2, box.y2) == (19, 249, 81, 271)
+    provider = model.provider_document
+    for block in provider.pages[0].iter_blocks(recursive=True):
+        assert block.bbox == pytest.approx([20, 30, 80, 50])
+        for line in block.lines:
+            assert line.bbox == pytest.approx([20, 30, 80, 50])
+            assert line.spans[0].bbox == pytest.approx([20, 30, 80, 50])
+    persisted = json.loads(model._provider_ir_output_path(config).read_text())
+    assert persisted == provider.to_dict()
+    assert json.loads(layout_path.read_text()) == raw
+
+
 def _labels_from_result(result) -> set[str]:
     labels = set()
     for box in result.boxes:

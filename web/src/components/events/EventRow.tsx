@@ -1,7 +1,8 @@
 /**
  * 单条事件行（§4.6）：`[seq][时间戳][阶段 chip][级别圆点] 人话叙述`，点击整行展开原始 JSON。
  * 等宽字体 + `tabular-nums`（§2.1：事件流一律不用衬线）。
- * 时间戳显示归档里的 UTC 时刻（`HH:MM:SS`），完整 ISO 放 `title`（api.md §1：时间一律 UTC）。
+ * 时间戳按**北京时间**显示（`HH:MM:SS`），完整 ISO 放 `title`。
+ * 归档里的 `at` 是 UTC（`+00:00`），API 契约仍只发 UTC；这里是纯展示层换算。
  */
 import { cn } from '../../lib/cn';
 import { dataSummary, eventLevel, kindGroup, type EventLevel, type KindGroup, type RunEvent } from '../../lib/events';
@@ -25,10 +26,34 @@ const LEVEL_DOT: Record<EventLevel, string> = {
   err: 'bg-err',
 };
 
-/** 归档时刻 → `HH:MM:SS`（取 ISO 里的时间部分，不做时区换算）。 */
-export function eventTime(at: string): string {
-  const match = /(\d{2}:\d{2}:\d{2})/.exec(at);
-  return match === null ? '—' : match[1];
+/**
+ * 事件时刻 → 北京时间 `HH:MM:SS`。
+ *
+ * 归档时刻是带时区的 UTC ISO（`2026-09-19T09:16:25.710+00:00`），所以这里显式按
+ * `Asia/Shanghai` 换算，**不跟随浏览器本地时区**（看板是给人核对进度的，口径要固定）。
+ * 无时区的裸串按 UTC 解释（`job_events.created_at` 是 SQLite `CURRENT_TIMESTAMP`）；
+ * 解析失败 → `—`。
+ */
+const BEIJING_TIME = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  hour12: false,
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+});
+
+export function eventTime(at: string, region: 'utc' | 'beijing' = 'beijing'): string {
+  const text = at.trim();
+  if (text === '') return '—';
+  // 带时区偏移/`Z` → 本身就是绝对时刻；裸串（无时区）按 UTC 补上，避免被当成浏览器本地时间。
+  const absolute = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text) ? text : `${text}Z`;
+  const parsed = new Date(absolute);
+  if (Number.isNaN(parsed.getTime())) return '—';
+  if (region === 'utc') {
+    const match = /(\d{2}:\d{2}:\d{2})/.exec(text);
+    return match === null ? '—' : match[1];
+  }
+  return BEIJING_TIME.format(parsed);
 }
 
 export function EventRow({
@@ -57,7 +82,7 @@ export function EventRow({
         </span>
         <span
           className="font-mono text-micro text-ink-4 [font-variant-numeric:tabular-nums]"
-          title={event.at}
+          title={`${event.at}（UTC）· 北京时间 ${eventTime(event.at)}`}
         >
           {eventTime(event.at)}
         </span>

@@ -142,6 +142,8 @@ describe('JobControls（顶栏任务控制）', () => {
       profile: 'pi-deepseek-flash',
       thinking: 'high',
       use_glossary: false,
+      // 预览并行编译 worker 数取自设置屏默认偏好（1..8）
+      preview_workers: 8,
       // AI 审校默认开（设置屏保存过）→ 服务端字段
       reviewer_profile: 'pi-deepseek-flash',
     });

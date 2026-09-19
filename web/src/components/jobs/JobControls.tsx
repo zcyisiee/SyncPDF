@@ -90,6 +90,7 @@ export function JobControls({
       profile: selection.profile,
       thinking: selection.thinking,
       use_glossary: defaults.useGlossary,
+      preview_workers: defaults.previewWorkers,
       ...(defaults.reviewer ? { reviewer_profile: selection.profile } : {}),
     });
   };
@@ -107,6 +108,8 @@ export function JobControls({
         ...(latest.reviewer_profile ? { reviewer_profile: latest.reviewer_profile } : {}),
         // 重试沿用上一个 job 的词表开关（记录里的 use_glossary 已经是“生效后的值”）。
         use_glossary: latest.use_glossary,
+        // 预览并行度沿用记录里生效的值；老 job 没有该字段时用设置屏默认。
+        preview_workers: latest.preview_workers ?? readTranslationDefaults().previewWorkers,
       });
       return;
     }

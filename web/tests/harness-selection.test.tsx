@@ -71,6 +71,8 @@ it('settings exposes only four built-ins, supported thinking and saved defaults 
   fireEvent.click(screen.getByRole('button', { name: '设为默认' }));
   expect(JSON.parse(localStorage.getItem(HARNESS_DEFAULT_KEY)!)).toEqual({
     profile: 'pi-deepseek-v4-pro', thinking: 'high', dual: true, useGlossary: false, reviewer: false,
+    // 预览并行编译 worker 数（1..8，缺省 8）也在设置屏；不碰就是缺省。
+    previewWorkers: 8,
   });
   expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
 });
@@ -92,7 +94,13 @@ it('workbench start submits the saved default harness/thinking, with optional re
   fireEvent.click(submit);
   await waitFor(() => expect(fetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true));
   const body = JSON.parse(String(fetch.mock.calls.find(([, init]) => init?.method === 'POST')![1]!.body));
-  expect(body).toMatchObject({ profile: 'agy-gemini-3-8-flash', thinking: 'medium', use_glossary: true });
+  expect(body).toMatchObject({
+    profile: 'agy-gemini-3-8-flash',
+    thinking: 'medium',
+    use_glossary: true,
+    // 预览并行编译数也随提交发（设置屏默认 8）
+    preview_workers: 8,
+  });
   expect(body).not.toHaveProperty('reviewer_profile');
   expect(body).not.toHaveProperty('command');
 });

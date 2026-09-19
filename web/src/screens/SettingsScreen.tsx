@@ -16,6 +16,7 @@ import { ScreenFrame } from '../components/shell/ScreenFrame';
  *
  * - 翻译模型 + 思考强度（`useHarnessSelection`，只列内置且带 translator 的 profile）；
  * - 生成 dual（双语 PDF）/ 使用全局词表 / AI 审校 三个开关；
+ * - 预览并行编译 worker 数（1..8，只影响翻译进行中的流式预览）；
  * - 「设为默认」把整套偏好写进 `localStorage[ieet.translation-default]`（不调用模型，
  *   服务端在提交 job 时仍会校验 profile/thinking 组合）。
  */
@@ -27,6 +28,7 @@ export function SettingsScreen() {
   const [dual, setDual] = useState(initial.dual);
   const [useGlossary, setUseGlossary] = useState(initial.useGlossary);
   const [reviewer, setReviewer] = useState(initial.reviewer);
+  const [previewWorkers, setPreviewWorkers] = useState(initial.previewWorkers);
   const [status, setStatus] = useState('');
   const glossaryCount = glossary.data?.count ?? 0;
   const glossaryEmpty = glossary.data !== undefined && glossaryCount === 0;
@@ -74,6 +76,22 @@ export function SettingsScreen() {
               />
               AI 审校（使用相同模型与思考强度额外审查文本，不检查 PDF 视觉效果）
             </label>
+            <label className="flex items-center gap-2">
+              预览并行编译 worker 数
+              <select
+                data-od-id="settings-preview-workers"
+                value={previewWorkers}
+                onChange={(event) => setPreviewWorkers(Number(event.target.value))}
+                className="h-7 rounded border border-hair bg-ivory px-2 text-sm"
+              >
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((count) => (
+                  <option key={count} value={count}>{count}</option>
+                ))}
+              </select>
+              <span className="text-tiny text-ink-3">
+                （翻译时边译边编译预览的并行度；同一页仍串行，缺省 8）
+              </span>
+            </label>
           </div>
           <div>
             <Button
@@ -85,6 +103,7 @@ export function SettingsScreen() {
                   dual,
                   useGlossary,
                   reviewer,
+                  previewWorkers,
                 });
                 setStatus(ok ? '默认偏好已保存；未调用模型。' : '无法保存默认偏好，请检查浏览器存储权限。');
               }}

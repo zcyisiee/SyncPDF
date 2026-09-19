@@ -4,6 +4,7 @@
  * 性能红线：只渲染窗口里的行（默认 200，展开后 200 + 已载入的历史），3758 条 run 不做虚拟化也够
  * （§4.6 的精神：最多保留 N 条 + 溢出滚动）。
  * 排序：**最新在上**（§4.6）；所以「自动跟随」= 停在列表顶部，浮标是「↑ N 条新事件」（点击回顶）。
+ * 换 run（重新开始翻译）：滚动、浮标、展开行都按 run 重置，新 run 从第 1 条从头显示。
  * 面板结构留了 tab 位（W10 会加段落 tab）：当前只有一个 tab 头，不假装有多个页签。
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -47,11 +48,19 @@ function ConnectionLine({ status }: { status: SseStatus }) {
 
 export function EventStreamPanel({ did, feed }: { did: string; feed: EventFeed }) {
   const [group, setGroup] = useState<KindGroup | 'all'>('all');
-  const [expandedSeq, setExpandedSeq] = useState<number | null>(null);
-  const [pending, setPending] = useState(0);
+  // 面板的交互态按 **run** 归属（与 `useEventWindow` 的窗口/游标同口径）：换 run
+  // （重新开始翻译）后新的 seq 从 1 重新计数，旧的展开行、浮标、滚动位置都不再成立。
+  // 状态带 key 而不是用 effect 清空：换 run 的那一次渲染就已经是干净值。
+  const runKey = feed.runId ?? '';
+  const [expanded, setExpanded] = useState<{ run: string; seq: number | null }>({ run: '', seq: null });
+  const expandedSeq = expanded.run === runKey ? expanded.seq : null;
+  const [pending, setPending] = useState<{ run: string; count: number }>({ run: '', count: 0 });
+  const pendingCount = pending.run === runKey ? pending.count : 0;
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const atTopRef = useRef(true);
-  const headSeqRef = useRef(0);
+  // 已见最新 seq 也按 run 归属：新 run 的 seq 从 1 重新计数，拿旧 run 的最大 seq 做差
+  // 会算出负数，浮标与跟随判断就全错了。
+  const headRef = useRef<{ run: string; seq: number }>({ run: '', seq: 0 });
 
   // 显示顺序：窗口升序 → 反转成「最新在上」（§4.6）。
   const rows = useMemo(() => {
@@ -60,18 +69,29 @@ export function EventStreamPanel({ did, feed }: { did: string; feed: EventFeed }
     return [...visible].reverse();
   }, [feed.events, group]);
 
+  // 换 run：面板回到「跟随最新」——新 run 的事件从第 1 条开始显示，滚动贴住顶部。
+  useLayoutEffect(() => {
+    atTopRef.current = true;
+    const element = scrollRef.current;
+    if (element !== null) element.scrollTop = 0;
+  }, [runKey]);
+
   // 新事件到达：停在顶部就继续跟随（贴住最新），否则只累计浮标数（不打断阅读）。
   useEffect(() => {
     const newest = feed.events[feed.events.length - 1]?.seq ?? 0;
-    const delta = newest - headSeqRef.current;
-    headSeqRef.current = newest;
+    const seen = headRef.current.run === runKey ? headRef.current.seq : 0;
+    const delta = newest - seen;
+    headRef.current = { run: runKey, seq: newest };
     if (delta <= 0) return;
     if (atTopRef.current) {
-      setPending(0);
+      setPending({ run: runKey, count: 0 });
       return;
     }
-    setPending((current) => current + delta);
-  }, [feed.events]);
+    setPending((current) => ({
+      run: runKey,
+      count: (current.run === runKey ? current.count : 0) + delta,
+    }));
+  }, [feed.events, runKey]);
 
   // 滚动锚定由浏览器负责（不关 overflow-anchor）；只有「停在顶部」需要显式贴回 0。
   useLayoutEffect(() => {
@@ -85,19 +105,25 @@ export function EventStreamPanel({ did, feed }: { did: string; feed: EventFeed }
     if (element === null) return;
     const atTop = element.scrollTop <= 4;
     atTopRef.current = atTop;
-    if (atTop) setPending(0);
-  }, []);
+    if (atTop) setPending({ run: runKey, count: 0 });
+  }, [runKey]);
 
   const jumpToNewest = useCallback(() => {
     const element = scrollRef.current;
     if (element !== null) element.scrollTop = 0;
     atTopRef.current = true;
-    setPending(0);
-  }, []);
+    setPending({ run: runKey, count: 0 });
+  }, [runKey]);
 
-  const toggleRow = useCallback((seq: number) => {
-    setExpandedSeq((current) => (current === seq ? null : seq));
-  }, []);
+  const toggleRow = useCallback(
+    (seq: number) => {
+      setExpanded((current) => {
+        const previous = current.run === runKey ? current.seq : null;
+        return { run: runKey, seq: previous === seq ? null : seq };
+      });
+    },
+    [runKey],
+  );
 
   const body = () => {
     if (feed.isPending) {
@@ -204,14 +230,14 @@ export function EventStreamPanel({ did, feed }: { did: string; feed: EventFeed }
         >
           {body()}
         </div>
-        {pending > 0 ? (
+        {pendingCount > 0 ? (
           <button
             type="button"
             data-od-id="event-new-events"
             onClick={jumpToNewest}
             className="absolute left-1/2 top-s2 h-6 -translate-x-1/2 rounded border border-hair-2 bg-ivory px-s3 font-mono text-micro text-ink-2 shadow-lift"
           >
-            ↑ {pending} 条新事件
+            ↑ {pendingCount} 条新事件
           </button>
         ) : null}
       </div>

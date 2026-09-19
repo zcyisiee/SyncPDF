@@ -7,11 +7,13 @@ one StampRequest; page redaction/link restoration reuse the existing overlay cod
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 import math
 import pickle
 import tempfile
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,6 +25,57 @@ from babeldoc_tools.serve.jobs import EVENT_STARTED
 from babeldoc_tools.serve.jobs import utc_now
 from babeldoc_tools.serve.views import paragraphs
 from babeldoc_tools.serve.workdir import WorkdirReader
+
+#: 解析快照缓存：workdir → (state.pkl 的 mtime_ns, 反序列化后的 state)。
+#: 同一 job 的流式预览会按块反复读同一个 state.pkl（46MB 的 pickle，冷读约 0.6s），
+#: 翻译期间它不再变化；mtime 变了（重新 parse）就失效重读。进程内共享，跨 job 复用。
+_PARSE_STATE_CACHE: dict[str, tuple[int, dict]] = {}
+_PARSE_STATE_LOCK = threading.Lock()
+
+
+def _copy_page_shells(state: dict) -> dict:
+    """拷贝 ``state`` 的**可写外壳**：顶层 dict + 每页对象 + 每页 ``pdf_paragraph`` 列表。
+
+    ``render_request`` 会就地重写 ``page.pdf_paragraph``（只留当前 pid 那一段），而段落
+    对象本身只读。所以共享缓存必须给出可以各自改写的页面外壳，否则第一个块编译后就把
+    缓存里的 551 段裁成 1 段，后续块全部查不到 geometry（表现为「缺少译文或排版数据」），
+    并行 worker 之间也会互相踩。段落与其余字段按引用共享：无拷贝成本、也不被改写。
+    """
+    pages = []
+    for page in state["doc"].page:
+        shell = copy.copy(page)
+        shell.pdf_paragraph = list(page.pdf_paragraph)
+        pages.append(shell)
+    doc = copy.copy(state["doc"])
+    doc.page = pages
+    clone = dict(state)
+    clone["doc"] = doc
+    return clone
+
+
+def _load_parse_state(workdir: Path) -> dict:
+    """读 ``agent/state.pkl``，带 mtime 失效的进程内缓存。
+
+    返回的 state 是**可安全改写页面外壳**的副本（见 :func:`_copy_page_shells`）：调用方
+    可以重写 ``page.pdf_paragraph``，不会影响缓存与其它调用方。
+    """
+    state_path = workdir / "agent/state.pkl"
+    try:
+        stamp = state_path.stat().st_mtime_ns
+    except OSError:
+        # 让原有错误路径继续负责报错（下面的 open 会抛同样的异常）。
+        with state_path.open("rb") as handle:
+            return pickle.load(handle)  # noqa: S301 - private parser artifact
+    key = str(workdir)
+    with _PARSE_STATE_LOCK:
+        cached = _PARSE_STATE_CACHE.get(key)
+        if cached is not None and cached[0] == stamp:
+            return _copy_page_shells(cached[1])
+    with state_path.open("rb") as handle:
+        state = pickle.load(handle)  # noqa: S301 - trusted private parser artifact
+    with _PARSE_STATE_LOCK:
+        _PARSE_STATE_CACHE[key] = (stamp, state)
+    return _copy_page_shells(state)
 
 
 def document_blocks(store, did):
@@ -58,8 +111,7 @@ def document_blocks(store, did):
     if any(row.geometry is None for row in rows):
         state_path = store.resolve(did) / "agent/state.pkl"
         if state_path.is_file():
-            with state_path.open("rb") as handle:
-                parsed = pickle.load(handle)  # noqa: S301 - private parser artifact
+            parsed = _load_parse_state(store.resolve(did))
             geometry = {}
             for page in getattr(parsed.get("doc"), "page", []):
                 for paragraph in page.pdf_paragraph:
@@ -136,8 +188,12 @@ def hydrate_parse(workdir, temporary):
         database.close()
 
 
-def render_request(workdir, pid, target, box, temporary, cache_root):
-    """Restore parsed typography, apply only this translation in memory, then fuse."""
+def render_request(workdir, pid, target, box, temporary, cache_root, capability=None):
+    """Restore parsed typography, apply only this translation in memory, then fuse.
+
+    ``capability``：可选的已探测 LaTeX 能力（流式预览每段一编时由调用方缓存一次
+    传入）；``None`` = 现场探测（单段编辑编译的冷路径，语义与旧版一致）。
+    """
     import pymupdf
     from babeldoc.format.pdf.document_il.backend.latex_bbox import overlay
     from babeldoc.format.pdf.document_il.backend.latex_bbox.capability import (
@@ -157,8 +213,7 @@ def render_request(workdir, pid, target, box, temporary, cache_root):
     from babeldoc.tools.agent.prepared_pdf import resolve_source_pdf
 
     workdir = hydrate_parse(workdir, temporary)
-    with (workdir / "agent/state.pkl").open("rb") as handle:
-        state = pickle.load(handle)  # noqa: S301 - trusted private parser artifact
+    state = _load_parse_state(workdir)
     paragraph = next(
         (
             p
@@ -219,7 +274,8 @@ def render_request(workdir, pid, target, box, temporary, cache_root):
         body = r"{\bfseries " + body + "}"
     if italic:
         body = r"{\itshape " + body + "}"
-    capability = probe_latex_capability()
+    if capability is None:
+        capability = probe_latex_capability()
     if not capability.available:
         raise ToolError(
             "compile_failed", "LaTeX 编译环境不可用", reasons=capability.reasons
@@ -255,6 +311,22 @@ class BlockCompiler:
         self.store, self.runner = store, runner
         self.tasks = set()
         self.semaphore = asyncio.Semaphore(2)
+        #: LaTeX 能力探测缓存（首次用到时探测一次）：探测要起 kpsewhich 子进程，
+        #: 流式预览每段一编时不该重复付这笔钱。实例生命周期即缓存生命周期
+        #: （serve 进程的编译器常驻；流式预览的编译器每 job 一个）。
+        self._capability = None
+        self._capability_lock = threading.Lock()
+
+    def capability(self):
+        """按需探测并缓存的 LaTeX 能力（线程安全；多 worker 并发首编时只探一次）。"""
+        from babeldoc.format.pdf.document_il.backend.latex_bbox.capability import (
+            probe_latex_capability,
+        )
+
+        with self._capability_lock:
+            if self._capability is None:
+                self._capability = probe_latex_capability()
+            return self._capability
 
     async def shutdown(self):
         for record in self.runner.registry.records.values():
@@ -523,8 +595,7 @@ class BlockCompiler:
         if not outputs:
             from babeldoc.tools.agent.prepared_pdf import resolve_source_pdf
 
-            with (workdir / "agent/state.pkl").open("rb") as handle:
-                parsed = pickle.load(handle)  # noqa: S301
+            parsed = _load_parse_state(workdir)
             source = resolve_source_pdf(parsed, workdir)
             if source is None:
                 raise ToolError("compile_failed", "prepared PDF 不可用")
@@ -569,7 +640,13 @@ class BlockCompiler:
                 temporary = Path(folder)
                 cache_root = self.store.store_base / "cache/stamps"
                 stamp, hit = render_request(
-                    workdir, pid, target, box, temporary, cache_root
+                    workdir,
+                    pid,
+                    target,
+                    box,
+                    temporary,
+                    cache_root,
+                    capability=self.capability(),
                 )
                 # P6：被缩字就用中文译文页面的实际墨迹把框向下扩一段重渲染，
                 # 避免为了塞进原框而缩字号（serve 局部编译此前没有这一步）。

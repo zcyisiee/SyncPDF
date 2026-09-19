@@ -501,11 +501,19 @@ class JobRunner:
     """
 
     def __init__(
-        self, store: DocumentStore, *, glossary: GlossaryStore | None = None
+        self,
+        store: DocumentStore,
+        *,
+        glossary: GlossaryStore | None = None,
+        preview_workers: int | None = None,
     ) -> None:
         self.store = store
         self.registry = JobRegistry(store.store_base)
         self.drafts = DraftRegistry(store)
+        #: 流式翻译预览的并行编译数（``bdt serve --preview-workers``）；``None`` =
+        #: 子进程里 :mod:`babeldoc_tools.serve.stream_preview` 的缺省。只进翻译 job
+        #: 的子进程环境，serve 进程自己不做池化。
+        self.preview_workers = preview_workers
         #: 全局词表存储（W13）：翻译 job 的注入路径就取自它。缺省自建一份；
         #: :func:`babeldoc_tools.serve.app.create_app` 传进来的那一份与 ``/glossary`` 路由
         #: 共用（同一个文件 + 同一个模块级写锁）。
@@ -552,6 +560,7 @@ class JobRunner:
         use_glossary: bool = False,
         reviewer_profile: str | None = None,
         thinking: str | None = None,
+        preview_workers: int | None = None,
     ) -> JobRecord:
         """建 job（``queued``）→ 尽量立刻启动；同文档已有活动 job → 409 语义。
 
@@ -612,6 +621,7 @@ class JobRunner:
                 paragraph_id=paragraph_id,
                 candidate_id=candidate_id,
                 use_glossary=use_glossary,
+                preview_workers=preview_workers,
             )
         await self._pump()
         return record
@@ -790,16 +800,20 @@ class JobRunner:
                         self.store.database.connection.execute(
                             "DELETE FROM blocks WHERE document_id=?", (record.did,)
                         )
-            proc = spawn_job(
-                argv,
-                workdir,
-                environment={
-                    "BDT_SERVE_DATABASE": str(self.store.database.path),
-                    "BDT_SERVE_DOCUMENT": record.did,
-                    "BDT_SERVE_JOB": record.job_id,
-                    "BDT_SERVE_REVISION": str(record.revision),
-                },
-            )
+            environment = {
+                "BDT_SERVE_DATABASE": str(self.store.database.path),
+                "BDT_SERVE_DOCUMENT": record.did,
+                "BDT_SERVE_JOB": record.job_id,
+                "BDT_SERVE_REVISION": str(record.revision),
+            }
+            # 并行预览编译数：job 记录优先（客户端提交时选），serve 级缺省兜底；
+            # 都没给就不设，子进程用 stream_preview 的缺省。
+            workers = record.preview_workers
+            if workers is None:
+                workers = self.preview_workers
+            if workers is not None:
+                environment["BDT_SERVE_PREVIEW_WORKERS"] = str(workers)
+            proc = spawn_job(argv, workdir, environment=environment)
         except (ToolError, OSError) as exc:
             self.registry.mark_finished(
                 record,
