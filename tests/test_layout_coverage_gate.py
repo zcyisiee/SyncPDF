@@ -88,6 +88,28 @@ def test_coverage_counts_uncovered_chars_per_page():
     assert report["global"]["uncovered_ratio"] == pytest.approx(0.4)
 
 
+def test_coverage_ignores_uncovered_whitespace(tmp_path):
+    docs = _docs(
+        [_page(0, [_char(20, 0, " "), _char(0, 0, "a")], [_layout(-1, -1, 10, 20)])]
+    )
+    report = compute_layout_coverage(docs)
+    LayoutParser(_config(tmp_path, threshold=0))._enforce_layout_coverage(docs, report)
+    assert report["global"]["total_chars"] == 1
+    assert report["global"]["uncovered_chars"] == 0
+    assert report["global"]["ignored_whitespace_chars"] == 1
+    assert report["pages"][0]["uncovered_text_preview"] == ""
+
+
+def test_whitespace_cannot_dilute_real_missing_text(tmp_path):
+    chars = [_char(0, 0, " ") for _ in range(1000)] + [_char(20, 0, "x")]
+    docs = _docs([_page(0, chars, [_layout(-1, -1, 10, 20)])])
+    report = compute_layout_coverage(docs)
+    with pytest.raises(RuntimeError, match="layout_coverage_gate"):
+        LayoutParser(_config(tmp_path, threshold=0.005))._enforce_layout_coverage(docs, report)
+    assert report["global"]["uncovered_ratio"] == 1
+    assert report["pages"][0]["uncovered_text_preview"] == "x"
+
+
 def test_coverage_gate_raises_and_writes_artifact(tmp_path):
     # 4 个字符全部裸露 → uncovered_ratio = 1.0 > 0.005。
     # 走完整 process()：stub 模型不产出任何区域，字符全部裸露。

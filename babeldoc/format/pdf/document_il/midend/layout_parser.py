@@ -29,7 +29,7 @@ def _box_overlaps(box_a: il_version_1.Box, box_b: il_version_1.Box) -> bool:
 def compute_layout_coverage(docs: il_version_1.Document) -> dict:
     """统计原生字符落入 layout 区域的比例（布局覆盖率门禁的判据）。
 
-    口径：分母是该页全部原生字符（``page.pdf_character``）——必须在
+    口径：分母是该页具有 bbox 的非空白原生字符（``page.pdf_character``）——必须在
     ParagraphFinder 之前统计，因为之后该列表只剩被跳过的字符。
     “命中”指字符的 visual_bbox 与任一 ``page_layout`` box 有正面积交。
 
@@ -38,12 +38,21 @@ def compute_layout_coverage(docs: il_version_1.Document) -> dict:
     pages = []
     total_chars = 0
     total_uncovered = 0
+    total_whitespace = 0
     for page in docs.page:
         layouts = [layout.box for layout in page.page_layout if layout.box]
         page_total = 0
         page_uncovered = 0
+        page_whitespace = 0
         uncovered_samples = []
         for char in page.pdf_character:
+            # Whitespace glyphs often sit in inter-column gaps or line
+            # leading and are intentionally absent from provider regions. They
+            # do not represent translatable content and must not trip the
+            # missing-layout gate.
+            if (char.char_unicode or "").isspace():
+                page_whitespace += 1
+                continue
             char_box = char.visual_bbox.box if char.visual_bbox else char.box
             if char_box is None:
                 continue
@@ -60,11 +69,13 @@ def compute_layout_coverage(docs: il_version_1.Document) -> dict:
                 )
         total_chars += page_total
         total_uncovered += page_uncovered
+        total_whitespace += page_whitespace
         pages.append(
             {
                 "page_index": page.page_number,
                 "total_chars": page_total,
                 "uncovered_chars": page_uncovered,
+                "ignored_whitespace_chars": page_whitespace,
                 "coverage": (
                     1.0 if page_total == 0 else 1.0 - page_uncovered / page_total
                 ),
@@ -76,6 +87,7 @@ def compute_layout_coverage(docs: il_version_1.Document) -> dict:
         "global": {
             "total_chars": total_chars,
             "uncovered_chars": total_uncovered,
+            "ignored_whitespace_chars": total_whitespace,
             "uncovered_ratio": (
                 0.0 if total_chars == 0 else total_uncovered / total_chars
             ),
@@ -99,6 +111,8 @@ def _uncovered_preview(docs: il_version_1.Document, report: dict) -> dict:
         layouts = [layout.box for layout in page.page_layout if layout.box]
         preview = []
         for char in page.pdf_character:
+            if (char.char_unicode or "").isspace():
+                continue
             char_box = char.visual_bbox.box if char.visual_bbox else char.box
             if char_box is None:
                 continue
@@ -310,7 +324,7 @@ class LayoutParser:
             return
         raise RuntimeError(
             "layout_coverage_gate: "
-            f"未命中任何 layout 区域的原生字符占比 {uncovered_ratio:.4%} "
+            f"未命中任何 layout 区域的非空白原生字符占比 {uncovered_ratio:.4%} "
             f"超过阈值 {threshold:.4%} "
             f"（uncovered={report['global']['uncovered_chars']}/"
             f"{report['global']['total_chars']}）。"

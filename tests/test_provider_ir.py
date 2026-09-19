@@ -361,6 +361,14 @@ def _model_with_ir_dir(tmp_path):
     return model, translate_config, ir_dir / "source" / "mineru" / "provider_ir.json"
 
 
+class _UnrotatedPdfStub:
+    def __init__(self, page_count):
+        self.page_count = page_count
+
+    def __getitem__(self, page_index):
+        return SimpleNamespace(rotation=0)
+
+
 def test_handle_document_replay_builds_and_persists_provider_ir(tmp_path, monkeypatch):
     """BABELDOC_MINERU_LAYOUT_JSON 回放路径：构建 provider IR 并落盘。"""
     layout_json = _fixture_layout()
@@ -374,7 +382,7 @@ def test_handle_document_replay_builds_and_persists_provider_ir(tmp_path, monkey
     outputs = list(
         model.handle_document(
             pages,
-            mupdf_doc=SimpleNamespace(page_count=4),
+            mupdf_doc=_UnrotatedPdfStub(page_count=4),
             translate_config=translate_config,
             save_debug_image=None,
         )
@@ -416,7 +424,7 @@ def test_handle_document_cache_hit_builds_and_persists_provider_ir(
     outputs = list(
         model.handle_document(
             pages,
-            mupdf_doc=SimpleNamespace(page_count=7),
+            mupdf_doc=_UnrotatedPdfStub(page_count=7),
             translate_config=translate_config,
             save_debug_image=None,
         )
@@ -449,7 +457,7 @@ def test_handle_document_without_workdir_skips_persist(tmp_path, monkeypatch):
     list(
         model.handle_document(
             pages,
-            mupdf_doc=SimpleNamespace(page_count=4),
+            mupdf_doc=_UnrotatedPdfStub(page_count=4),
             translate_config=translate_config,
             save_debug_image=None,
         )
@@ -479,7 +487,7 @@ def test_handle_document_resets_provider_document_between_calls(tmp_path, monkey
     list(
         model.handle_document(
             full_pages,
-            mupdf_doc=SimpleNamespace(page_count=4),
+            mupdf_doc=_UnrotatedPdfStub(page_count=4),
             translate_config=translate_config,
             save_debug_image=None,
         )
@@ -497,7 +505,7 @@ def test_handle_document_resets_provider_document_between_calls(tmp_path, monkey
     list(
         model.handle_document(
             [SimpleNamespace(page_number=0)],
-            mupdf_doc=SimpleNamespace(page_count=1),
+            mupdf_doc=_UnrotatedPdfStub(page_count=1),
             translate_config=translate_config,
             save_debug_image=None,
         )
@@ -529,7 +537,7 @@ def test_handle_document_tolerates_broken_layout_json(tmp_path, monkeypatch):
         list(
             model.handle_document(
                 pages,
-                mupdf_doc=SimpleNamespace(page_count=1),
+                mupdf_doc=_UnrotatedPdfStub(page_count=1),
                 translate_config=translate_config,
                 save_debug_image=None,
             )

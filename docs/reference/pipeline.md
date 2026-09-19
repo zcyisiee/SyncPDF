@@ -18,6 +18,10 @@
 
 解析路径为原生字符 IR → 布局后端 → 公式保护/段落组织/样式提取 → Markdown。布局可选 MinerU（云 API 或缓存回放）与 Paddle（本地运行时），对应 `babeldoc/docvision/`。源链接/书签、提供方结构和对齐证据位于 `agent/source/` 等解析产物中；定位具体格式应查看写入模块，不把历史目录名当通用协议。
 
+MinerU 适配器在在线、缓存及回放路径中，将显示视图的 bbox 按 PDF 页旋转矩阵转换为未旋转 MediaBox 的左上坐标；布局区域与 provider IR 的 block/line/span 使用同一坐标系。原始布局 JSON 与缓存保持提供方坐标。Paddle 已输出未旋转坐标；共享 LayoutParser 只负责翻转 y 轴到 IL。
+
+布局覆盖率门禁在段落组织前统计具有 bbox 的非空白原生字符；纯空白不进入分子、分母与未覆盖预览，数量另记为 `ignored_whitespace_chars`。未识别 Unicode 的非空白字符仍参与门禁。默认未覆盖比例上限为 0.5%，审计文件始终写入 `<workdir>/<输入文件名去扩展名>/layout_coverage.json`。超限停止解析；阈值以内的未覆盖字符仍会记录，门禁通过不等于覆盖了所有内容。
+
 构建由 `document_il/midend/typesetting.py` 与 `backend/pdf_creater.py` 执行。默认启用 `backend/latex_bbox/`；可用时按段落渲染，不适用或失败时记录回退。`--render` 的页面图默认在 `output/render/`，实际文件名以返回 JSON 为准。PDF 已生成不表示质量检查通过。
 
 ## 文本协议
