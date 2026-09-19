@@ -20,6 +20,8 @@
 
 构建由 `document_il/midend/typesetting.py` 与 `backend/pdf_creater.py` 执行。默认启用 `backend/latex_bbox/`；可用时按段落渲染，不适用或失败时记录回退。`--render` 的页面图默认在 `output/render/`，实际文件名以返回 JSON 为准。PDF 已生成不表示质量检查通过。
 
+首遍产物里确实有段落被 LaTeX 缩字时，`bdt build` 会再跑一遍「编译后扩框」：用本地 PP-DocLayoutV3（ONNX + CoreML，热跑约 0.1s/页）识别译文 PDF 的版面区域，再加 pymupdf 的精确墨迹兜底（实测区域检测漏过一个小标题），把这些段的贴片矩形扩到相邻墨迹之间再重排。同一页先给所有目标**向下**扩，向下没净空的再**向上**扩；障碍集里带着刚扩过的框，相邻两段不会抢同一段净空。向上扩依赖「首行几何按原框量测」：`\topskip` 取「首行字顶 − 框顶」，这个差跟着新框顶一起涨就换不来任何可用高度（实测与不扩逐字节一致）。整个精修只改贴片矩形，擦除范围与源行量测仍按原框，不写 `layout_overrides.json`，也不改 Typesetting 输入框，因此续跑哈希与既有排版覆盖语义不变；结果记在 `reconstruct_report.json` 的 `latex_refine`。没有缩字段、模型/依赖缺失，或传 `--no-latex-refine` 时保持单遍（`BDT_LATEX_REFINE=0` 同样关闭，供测试/排查用）。这与既有 `overlay._expand_vertical_failures` 不冲突：后者仍只在源版面找净空、且只在第一遍内生效。
+
 ## 文本协议
 
 - 段落身份由本次解析分配，典型形式 `P01-001`（页号从 1 起）；模型和前端必须沿用原 id，不能自行重编号。

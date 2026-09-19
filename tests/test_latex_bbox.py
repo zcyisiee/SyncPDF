@@ -2175,6 +2175,77 @@ def test_prepare_without_space_below_skips_expansion(tmp_path, monkeypatch):
     assert heights == [60.0]
 
 
+def test_select_candidates_uses_refined_box_override(tmp_path):
+    """P6：精修框只替换贴片矩形；源行几何仍按原框量测，擦除只针对原框。"""
+    pdf, docs, config = _geometry_fixture(tmp_path)
+    # 原框下方再加一行源文：只有量测 clip 回到原框才不会把它算进源行几何。
+    pdf[0].insert_text((30, 130), "a line below the box", fontsize=9)
+    base_box = config.latex_bbox_state["paragraphs"]["P01-001"]["box"]
+    refined = [base_box[0], base_box[1] - 40.0, base_box[2], base_box[3]]
+    config.latex_bbox_box_overrides = {"P01-001": refined}
+
+    overlay = overlay_mod.LatexBboxOverlay(pdf, docs, config)
+    overlay._load_state()
+    overlay._init_decisions(overlay._paragraphs)
+    jobs, reasons = overlay._select_candidates(overlay._paragraphs, overlay._bodies)
+
+    assert reasons == []
+    job = jobs[0]
+    # 原 rect（页面坐标 y 向下）= (30, 50)-(300, 110)；精修框向下扩 40pt。
+    assert job["rect"] == pymupdf.Rect(30.0, 50.0, 300.0, 150.0)
+    assert job["width"] == pytest.approx(270.0)
+    assert job["height"] == pytest.approx(100.0)
+    # 擦除仍只覆盖原框：扩框区域不许连带删掉邻居在内容流里的译文。
+    assert job["redact_rect"] == pymupdf.Rect(30.0, 50.0, 300.0, 110.0)
+    # 源行几何按原框量测：下方新增的源行不计入 n_lines/行距。
+    assert job["row_geometry"]["n_lines"] == 2
+
+
+
+def test_select_candidates_upward_override_keeps_base_relative_ascent(tmp_path):
+    """P6 向上扩：首行几何仍按原框口径量。
+
+    ``\topskip`` = 首行字顶 − 框顶；若这个差跟着新框顶一起涨，向上扩出来的高度就
+    被首行 skip 吃掉（可用行数一点不变），向上扩等于白扩。
+    """
+    pdf, docs, config = _geometry_fixture(tmp_path)
+    base_overlay = overlay_mod.LatexBboxOverlay(pdf, docs, config)
+    base_overlay._load_state()
+    base_overlay._init_decisions(base_overlay._paragraphs)
+    base_jobs, _ = base_overlay._select_candidates(
+        base_overlay._paragraphs, base_overlay._bodies
+    )
+    base_geometry = dict(base_jobs[0]["row_geometry"])
+
+    base_box = config.latex_bbox_state["paragraphs"]["P01-001"]["box"]
+    config.latex_bbox_box_overrides = {
+        "P01-001": [base_box[0], base_box[1], base_box[2], base_box[3] + 40.0]
+    }
+    overlay = overlay_mod.LatexBboxOverlay(pdf, docs, config)
+    overlay._load_state()
+    overlay._init_decisions(overlay._paragraphs)
+    jobs, reasons = overlay._select_candidates(overlay._paragraphs, overlay._bodies)
+
+    assert reasons == []
+    job = jobs[0]
+    # 原 rect (30, 50)-(300, 110) → 向上扩 40pt 后顶边抬到 y=10。
+    assert job["rect"] == pymupdf.Rect(30.0, 10.0, 300.0, 110.0)
+    assert job["height"] == pytest.approx(100.0)
+    assert job["row_geometry"] == base_geometry
+    # 擦除仍只覆盖原框。
+    assert job["redact_rect"] == pymupdf.Rect(30.0, 50.0, 300.0, 110.0)
+
+
+def test_select_candidates_without_override_uses_captured_box(tmp_path):
+    """无精修框时行为不变：rect/redact_rect 都取捕获的源框。"""
+    pdf, docs, config = _geometry_fixture(tmp_path)
+    overlay = overlay_mod.LatexBboxOverlay(pdf, docs, config)
+    overlay._load_state()
+    overlay._init_decisions(overlay._paragraphs)
+    jobs, _reasons = overlay._select_candidates(overlay._paragraphs, overlay._bodies)
+    assert jobs[0]["rect"] == jobs[0]["redact_rect"]
+
+
 def test_decisions_record_lead_and_expansion(tmp_path, monkeypatch):
     """decisions 记录真实 lead（来自 renderer）与下扩高度。"""
     pdf, docs, config = _geometry_fixture(tmp_path, below=40.0)

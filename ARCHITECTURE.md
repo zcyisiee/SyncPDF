@@ -86,6 +86,7 @@ bdt run → parse → translate → apply → build → check → review → rep
 | 段落身份与样式/公式占位符受协议保护；修复与原文回退必须可观察 | `markdown_view.py`、`protocol.py`、`tests/test_markdown_format.py`、`test_agent_protocol.py` |
 | 续跑检查阶段依赖与记录哈希；过期输入不能静默复用 | `run.py::STAGE_INPUTS`、`tests/test_run_pipeline.py` |
 | 编译成功、预览可用、质量通过是不同状态；失败不得把旧产物标成当前 revision | `compile.py`、`block_compile.py`、`tests/test_serve_compile.py`、`test_serve_local_export.py` |
+| LaTeX 编译后精修框只替换贴片矩形；擦除范围与源行几何量测（含首行 ascent，向上扩因此才有效）仍按原框 | `latex_bbox/overlay.py`（`latex_bbox_box_overrides`）、`layout_refine.py`、`tests/test_latex_bbox.py` |
 | HTTP 文件访问经文档范围解析、产物白名单或资产归属校验 | `store.py`、`artifacts.py`、`routers/artifacts.py`、`tests/test_serve_artifacts.py` |
 | 测试证据写入仓库 `tmp/`，不得纳入版本控制 | `.gitignore`、`AGENTS.md` |
 

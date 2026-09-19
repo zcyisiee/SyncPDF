@@ -283,6 +283,7 @@ def reconstruct(
     latex_bbox_mode=None,
     debug_recorder=None,
     debug_recompile=False,
+    latex_box_overrides=None,
 ):
     """从写回后的 IR 重排并生成 PDF。返回输出路径 dict。
 
@@ -295,6 +296,10 @@ def reconstruct(
     失败自动回退现有渲染。传 ``latex_bbox=False``（CLI ``--no-latex-bbox``）
     关闭，关闭时仅使用原生排版（包括源主标题居中）。``latex_bbox_mode`` 可选
     ``"full"``（默认）/ ``"repair"``。
+
+    ``latex_box_overrides``（debug_id → IL box）是编译后精修通道：只替换 LaTeX
+    贴片矩形，不动 Typesetting 输入框，也不写 layout_overrides.json；调用方
+    （``layout.reconstruct_pdf``）按上一遍译文 PDF 的版面算出它再跑第二遍。
     """
     from babeldoc.format.pdf.document_il.backend.latex_bbox.source_geometry import (
         geometry_from_char_objects,
@@ -356,6 +361,7 @@ def reconstruct(
 
     if latex_bbox:
         config.enable_latex_bbox_layout = True
+        config.latex_bbox_box_overrides = dict(latex_box_overrides or {})
         if latex_bbox_mode:
             config.latex_bbox_mode = str(latex_bbox_mode)
         # 公式融合需要 provider IR（extract 时落在 <workdir>/agent；

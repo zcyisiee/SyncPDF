@@ -30,6 +30,8 @@ bdt report --workdir tmp/paper
 
 普通阶段命令输出单行 JSON，日志到 stderr。退出码为 `0` 成功、`1` 失败、`2` 参数用法错误；`check` 只有加 `--strict` 才因质量不通过返回 `1`。`--help` 输出帮助文本，`harness-call / model-call` 输出模型文本，`serve` 是长驻服务。
 
+`build` 默认启用 LaTeX bbox，并在首遍真的缩了字号时用本地 PP-DocLayoutV3 按译文版面再排一遍（先向下、再向上扩，详见 [管线参考](../reference/pipeline.md)）；`--no-latex-bbox` / `--no-latex-refine` 分别关闭两者，布局模型缺失时自动跳过。
+
 `run` 串联七阶段（包含 `review`）。例如显式选择只做本地质量检查：
 
 ```bash

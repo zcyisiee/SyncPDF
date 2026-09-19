@@ -23,6 +23,7 @@ def build_pdf(
     watermark: bool = False,
     latex_bbox: bool = True,
     latex_bbox_mode: str | None = None,
+    latex_refine: bool = True,
     render: str | None = None,
     stats: bool = True,
     debug_recorder=None,
@@ -30,7 +31,10 @@ def build_pdf(
 ) -> dict:
     """从 IR 重排生成 mono/dual PDF（应用 ``agent/layout_overrides.json``）。
 
-    可选 ``render``（``"1,2"`` / ``"1-3"``）在重建后把指定页渲染成 PNG。
+    可选 ``latex_refine``：首遍产物里确实有段落被缩字时，用本地 PP-DocLayoutV3
+    识别译文版面，把这些段的 LaTeX 贴片矩形向下扩到相邻墨迹之间，再重排一遍
+    （只改贴片矩形，不写覆盖文件）。可选 ``render``
+    （``"1,2"`` / ``"1-3"``）在重建后把指定页渲染成 PNG。
     返回 JSON 含 ``mono_pdf`` / ``dual_pdf`` / ``layout_geometry`` / ``images``。
     """
     workdir_path = common.require_workdir(workdir)
@@ -41,6 +45,7 @@ def build_pdf(
         {
             "latex_bbox": bool(latex_bbox),
             "latex_bbox_mode": latex_bbox_mode,
+            "latex_refine": bool(latex_refine),
             "dual": bool(dual),
             "watermark": bool(watermark),
             "debug_recompile": bool(debug_recompile),
@@ -54,6 +59,7 @@ def build_pdf(
                 watermark=watermark,
                 latex_bbox=latex_bbox,
                 latex_bbox_mode=latex_bbox_mode,
+                latex_refine=latex_refine,
                 stats=stats,
                 debug_recorder=debug_recorder,
                 debug_recompile=debug_recompile,
@@ -141,6 +147,7 @@ def reconstruct_pdf(
     watermark: bool = False,
     latex_bbox: bool = True,
     latex_bbox_mode: str | None = None,
+    latex_refine: bool = True,
     stats: bool = True,
     debug_recorder=None,
     debug_recompile: bool = False,
@@ -159,6 +166,33 @@ def reconstruct_pdf(
         debug_recorder=debug_recorder,
         debug_recompile=debug_recompile,
     )
+    refined = _refine_tight_boxes(
+        result, enabled=bool(latex_bbox) and bool(latex_refine)
+    )
+    if refined is not None and refined.overrides:
+        result = workflow.reconstruct(
+            str(workdir_path),
+            output_dir=resolved_output_dir,
+            no_dual=not dual,
+            watermark=bool(watermark),
+            latex_bbox=True,
+            latex_bbox_mode=latex_bbox_mode,
+            debug_recorder=debug_recorder,
+            debug_recompile=debug_recompile,
+            latex_box_overrides=refined.overrides,
+        )
+        result["latex_refine"] = {
+            "targets": refined.targets,
+            "expanded": len(refined.overrides),
+            "skipped": dict(refined.skipped),
+            "boxes": refined.overrides,
+        }
+    if refined is not None:
+        result.setdefault("latex_refine", {
+            "targets": refined.targets,
+            "expanded": 0,
+            "skipped": dict(refined.skipped),
+        })
     if stats:
         result["stats"] = {
             kind: _pdf_stats(path)
@@ -170,6 +204,44 @@ def reconstruct_pdf(
         }
     common.write_json(common.agent_dir(workdir_path) / "reconstruct_report.json", result)
     return result
+
+
+def _refine_tight_boxes(result: dict, *, enabled: bool):
+    """首遍产物里有缩字段时，按译文版面算一遍更大贴片框（P6）。
+
+    只读首遍的 ``latex_bbox_report.json`` / ``layout_geometry.json`` 与 mono
+    PDF；检测器不可用或无可扩段时返回 None，调用方保持单遍行为。
+    """
+    if not enabled:
+        return None
+    from babeldoc.docvision.paddle_layout_regions import PaddleLayoutRegions
+    from babeldoc.tools.agent import layout_refine
+
+    if not layout_refine.refine_enabled():
+        return None
+    pdf_path = result.get("mono_pdf") or result.get("dual_pdf")
+    report_path = result.get("latex_bbox_report")
+    if not pdf_path or not report_path:
+        return None
+    report = common.read_json(report_path, default=None)
+    if not isinstance(report, dict) or report.get("mode") == "repair":
+        return None
+    geometry = common.read_json(result.get("layout_geometry") or "", default=None)
+    detector = PaddleLayoutRegions()
+    if not detector.available:
+        return None
+    try:
+        return layout_refine.plan_build_refinement(
+            report=report,
+            geometry=geometry,
+            pdf_path=pdf_path,
+            detector=detector,
+        )
+    except Exception:  # noqa: BLE001 - 扩框失败不阻断构建
+        import logging
+
+        logging.getLogger(__name__).warning("编译后扩框失败，保留首遍版式", exc_info=True)
+        return None
 
 
 def _pdf_stats(pdf_path) -> dict:

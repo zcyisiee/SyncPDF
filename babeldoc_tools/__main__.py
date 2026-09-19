@@ -216,6 +216,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="LaTeX bbox 资格模式：full（默认）/ repair",
     )
+    p_build.add_argument(
+        "--no-latex-refine",
+        action="store_false",
+        dest="latex_refine",
+        default=True,
+        help="关闭编译后按译文版面扩框（默认开启；只影响被缩字段）",
+    )
     p_build.add_argument("--render", default=None, help="重建后渲染指定页为 PNG，如 1,2 或 1-3")
     p_build.add_argument("--watermark", action="store_true")
     p_build.add_argument(
@@ -347,6 +354,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-latex-bbox", action="store_false", dest="latex_bbox", default=True
     )
     p_run.add_argument("--latex-bbox-mode", choices=("full", "repair"), default=None)
+    p_run.add_argument(
+        "--no-latex-refine",
+        action="store_false",
+        dest="latex_refine",
+        default=True,
+        help="关闭编译后按译文版面扩框（默认开启；只影响被缩字段）",
+    )
     p_run.add_argument("--render", default=None, help="build 后渲染页，如 1,2 或 1-3")
     p_run.add_argument("--watermark", action="store_true")
     p_run.add_argument("--no-stats", action="store_false", dest="stats")
@@ -542,6 +556,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
                     "watermark": args.watermark,
                     "latex_bbox": args.latex_bbox,
                     "latex_bbox_mode": args.latex_bbox_mode,
+                    "latex_refine": args.latex_refine,
                     "render": args.render,
                     "debug_recompile": args.debug_recompile,
                 },
@@ -554,6 +569,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
                 watermark=args.watermark,
                 latex_bbox=args.latex_bbox,
                 latex_bbox_mode=args.latex_bbox_mode,
+                latex_refine=args.latex_refine,
                 render=args.render,
                 stats=args.stats,
                 debug_recorder=rec,
@@ -655,6 +671,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
                     watermark=args.watermark,
                     latex_bbox=args.latex_bbox,
                     latex_bbox_mode=args.latex_bbox_mode,
+                    latex_refine=args.latex_refine,
                     render=args.render,
                     stats=args.stats,
                     skip_pdf_checks=args.skip_pdf_checks,
@@ -693,6 +710,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
                     "watermark": args.watermark,
                     "latex_bbox": args.latex_bbox,
                     "latex_bbox_mode": args.latex_bbox_mode,
+                    "latex_refine": args.latex_refine,
                     "debug_recompile": args.debug_recompile,
                 },
             },

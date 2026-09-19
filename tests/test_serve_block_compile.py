@@ -82,6 +82,178 @@ def test_only_one_stamp_and_other_text_survives(local):
     assert calls == ["P1", "P2"]
 
 
+def test_shrunk_stamp_is_rerendered_with_expanded_box(local, monkeypatch):
+    """P6：贴片被缩字时按译文版面下扩一段重渲染，patch 记录扩后的 box。"""
+    compiler, _, _ = local
+    from babeldoc.tools.agent import layout_refine
+    from babeldoc_tools.serve import block_compile
+
+    boxes: list[list[float]] = []
+
+    def render(_workdir, _pid, target, box, temporary, _cache):
+        boxes.append(list(box))
+        path = temporary / f"stamp-{len(boxes)}.pdf"
+        with pymupdf.open() as pdf:
+            page = pdf.new_page(width=box[2] - box[0], height=box[3] - box[1])
+            page.insert_text((5, 20), target)
+            pdf.save(path)
+        first = len(boxes) == 1
+        return (
+            SimpleNamespace(
+                ok=True,
+                pdf_path=str(path),
+                font_size=11,
+                scale=0.8 if first else 1.0,
+            ),
+            False,
+        )
+
+    monkeypatch.setattr(block_compile, "render_request", render)
+    monkeypatch.setattr(
+        block_compile.BlockCompiler, "_layout_detector", lambda _self: object()
+    )
+    seen: list[tuple] = []
+
+    def fake_plan(_page, box, detector, **_kwargs):
+        seen.append((box, detector))
+        return (box[0], box[1] - 40.0, box[2], box[3])
+
+    monkeypatch.setattr(layout_refine, "plan_page_expansion", fake_plan)
+
+    result = compiler.compile(record())
+
+    assert len(boxes) == 2
+    assert boxes[0][1] == 320.0 and boxes[1][1] == 280.0
+    # 只有被缩字的那一次触发检测；重渲染后不再重复扩框。
+    assert len(seen) == 1
+    assert result["cache_hit"] is False
+
+
+def test_upward_expansion_is_rerendered_with_raised_top(local, monkeypatch):
+    """向上扩也算升级：重渲染用抬高上沿的新框，patch 记录新框。"""
+    compiler, _, _ = local
+    from babeldoc.tools.agent import layout_refine
+    from babeldoc_tools.serve import block_compile
+
+    boxes: list[list[float]] = []
+
+    def render(_workdir, _pid, target, box, temporary, _cache):
+        boxes.append(list(box))
+        path = temporary / f"stamp-{len(boxes)}.pdf"
+        with pymupdf.open() as pdf:
+            page = pdf.new_page(width=box[2] - box[0], height=box[3] - box[1])
+            page.insert_text((5, 20), target)
+            pdf.save(path)
+        return (
+            SimpleNamespace(ok=True, pdf_path=str(path), font_size=11, scale=0.8),
+            False,
+        )
+
+    monkeypatch.setattr(block_compile, "render_request", render)
+    monkeypatch.setattr(
+        block_compile.BlockCompiler, "_layout_detector", lambda _self: object()
+    )
+    monkeypatch.setattr(
+        layout_refine,
+        "plan_page_expansion",
+        lambda _page, box, _detector, **_kwargs: (
+            box[0],
+            box[1],
+            box[2],
+            box[3] + 20.0,
+        ),
+    )
+
+    result = compiler.compile(record())
+
+    assert len(boxes) == 2
+    assert boxes[0][3] == 370.0 and boxes[1][3] == 390.0
+    with compiler.store.database._lock:
+        row = compiler.store.database.connection.execute(
+            "SELECT payload FROM local_pages WHERE document_id='paper' AND page=1"
+        ).fetchone()
+    assert json.loads(row[0])["patches"]["P1"]["box"][3] == 390.0
+    assert result["asset"]
+
+
+def test_unshrunk_stamp_is_not_rerendered(local, monkeypatch):
+    """未缩字（scale=1.0）时不检测版面、不重渲染。"""
+    compiler, _, _ = local
+    from babeldoc.tools.agent import layout_refine
+    from babeldoc_tools.serve import block_compile
+
+    boxes: list[list[float]] = []
+
+    def render(_workdir, _pid, target, box, temporary, _cache):
+        boxes.append(list(box))
+        path = temporary / f"stamp-{len(boxes)}.pdf"
+        with pymupdf.open() as pdf:
+            page = pdf.new_page(width=box[2] - box[0], height=box[3] - box[1])
+            page.insert_text((5, 20), target)
+            pdf.save(path)
+        return (
+            SimpleNamespace(ok=True, pdf_path=str(path), font_size=11, scale=1.0),
+            False,
+        )
+
+    monkeypatch.setattr(block_compile, "render_request", render)
+    monkeypatch.setattr(
+        block_compile.BlockCompiler, "_layout_detector", lambda _self: object()
+    )
+    monkeypatch.setattr(
+        layout_refine,
+        "plan_page_expansion",
+        lambda *_args, **_kwargs: pytest.fail("未缩字不应扩框"),
+    )
+
+    compiler.compile(record())
+    assert len(boxes) == 1
+
+
+def test_failed_expansion_retry_keeps_original_stamp(local, monkeypatch):
+    """扩框重渲染失败（超时/TeX 错）不算升级：保留被缩字但可用的原贴片。"""
+    compiler, _, _ = local
+    from babeldoc.tools.agent import layout_refine
+    from babeldoc_tools.serve import block_compile
+
+    boxes: list[list[float]] = []
+
+    def render(_workdir, _pid, target, box, temporary, _cache):
+        boxes.append(list(box))
+        if len(boxes) == 2:
+            raise ToolError("compile_failed", "重渲染失败")
+        path = temporary / "stamp.pdf"
+        with pymupdf.open() as pdf:
+            page = pdf.new_page(width=box[2] - box[0], height=box[3] - box[1])
+            page.insert_text((5, 20), target)
+            pdf.save(path)
+        return (
+            SimpleNamespace(ok=True, pdf_path=str(path), font_size=11, scale=0.8),
+            False,
+        )
+
+    monkeypatch.setattr(block_compile, "render_request", render)
+    monkeypatch.setattr(
+        block_compile.BlockCompiler, "_layout_detector", lambda _self: object()
+    )
+    monkeypatch.setattr(
+        layout_refine,
+        "plan_page_expansion",
+        lambda _page, box, _detector, **_kwargs: (box[0], box[1] - 40.0, box[2], box[3]),
+    )
+
+    result = compiler.compile(record())
+
+    assert len(boxes) == 2
+    with compiler.store.database._lock:
+        row = compiler.store.database.connection.execute(
+            "SELECT payload FROM local_pages WHERE document_id='paper' AND page=1"
+        ).fetchone()
+    patch = json.loads(row[0])["patches"]["P1"]
+    assert patch["box"][1] == 320.0  # 原框，不是扩后的 280.0
+    assert result["asset"]
+
+
 def test_failed_stamp_preserves_page_and_previous_patch(local, monkeypatch):
     compiler, _, _ = local
     compiler.compile(record())

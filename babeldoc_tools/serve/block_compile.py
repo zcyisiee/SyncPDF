@@ -345,6 +345,42 @@ class BlockCompiler:
                 error_message=str(exc),
             )
 
+    def _layout_detector(self):
+        """懒加载 PP-DocLayoutV3 检测器；不可用时返回 None（不改变原行为）。"""
+        from babeldoc.docvision.paddle_layout_regions import PaddleLayoutRegions
+
+        detector = getattr(self, "_detector", None)
+        if detector is None:
+            detector = PaddleLayoutRegions()
+            self._detector = detector
+        return detector if detector.available else None
+
+    def _expand_if_shrunk(self, page, box, stamp):
+        """贴片被缩字/垂直溢出时，按当前译文页面的墨迹把框向外扩（先向下再向上）。
+
+        返回 ``(新框, 扩出的 pt)``；不扩时返回 ``(原框, 0.0)``。判定用 baseline
+        页（已完成的译文版式）；检测器不可用或没有净空时不扩。首行几何来自持久化
+        的源行量测（原框口径），所以两个方向都能真的换成可用高度。
+        """
+        from babeldoc.tools.agent import layout_refine
+
+        reason = layout_refine.expansion_reason(
+            scale=getattr(stamp, "scale", None),
+            ok=bool(getattr(stamp, "ok", False)),
+            reason=getattr(stamp, "reason", None),
+        )
+        if reason is None or not layout_refine.refine_enabled():
+            return box, 0.0
+        detector = self._layout_detector()
+        if detector is None:
+            return box, 0.0
+        expanded = layout_refine.plan_page_expansion(page, box, detector)
+        if expanded is None:
+            return box, 0.0
+        # 方向无关：向下扩涨在 y，向上扩涨在 y2，只可能有一个为正。
+        gain = max(float(box[1]) - float(expanded[1]), float(expanded[3]) - float(box[3]))
+        return list(expanded), round(gain, 3)
+
     def _outputs(self, did):
         workdir = self.store.resolve(did)
         outputs = sorted((workdir / "output").glob("*.mono.pdf"))
@@ -531,14 +567,23 @@ class BlockCompiler:
                 prefix=record.job_id + "-", dir=temporary_root
             ) as folder:
                 temporary = Path(folder)
+                cache_root = self.store.store_base / "cache/stamps"
                 stamp, hit = render_request(
-                    workdir,
-                    pid,
-                    target,
-                    box,
-                    temporary,
-                    self.store.store_base / "cache/stamps",
+                    workdir, pid, target, box, temporary, cache_root
                 )
+                # P6：被缩字就用中文译文页面的实际墨迹把框向下扩一段重渲染，
+                # 避免为了塞进原框而缩字号（serve 局部编译此前没有这一步）。
+                # 重渲染失败（超时/TeX 错）不算升级：保留原来可用的贴片。
+                expanded_box, expand_pt = self._expand_if_shrunk(page, box, stamp)
+                if expand_pt:
+                    try:
+                        retried, retry_hit = render_request(
+                            workdir, pid, target, expanded_box, temporary, cache_root
+                        )
+                    except ToolError:
+                        retried = None
+                    if retried is not None:
+                        box, stamp, hit = expanded_box, retried, retry_hit
                 stamp_asset = assets.put(Path(stamp.pdf_path), kind="stamp")
                 state["patches"][pid] = {
                     "asset": stamp_asset,

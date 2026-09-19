@@ -8,6 +8,12 @@
    已贴片段落的旧路径译文不再进内容流 —— 无双层文本靠构造保证；
 3. :meth:`LatexBboxOverlay.stamp` —— 内容流生成之后：把贴片落到 bbox 矩形。
 
+可选第四步（P6 编译后扩框）：``config.latex_bbox_box_overrides``
+（debug_id → IL box）只替换贴片矩形，不动 Typesetting 输入框也不写
+``layout_overrides.json``；由 ``layout.reconstruct_pdf`` 在首遍产物里有缩字段时
+按译文 PDF 的 PP-DocLayoutV3 区域算出，再跑第二遍。扩框只向下，擦除仍只针对
+原框（扩框区域不再擦除，否则会连带删掉邻居在内容流里的译文）。
+
 redaction 只在「stamp rect 内仍有文本层」时兜底（正常流程下为空）：擦除必须走
 ``apply_redactions`` 物理移除（禁止白矩形 ``draw_rect`` 假擦除——那会留下双层
 文本污染，架构原则 4 / FINAL.md §6）。redaction 会连带删除区域内 Link 注记：
@@ -532,6 +538,12 @@ def _box_expanded_beyond(current_box, source_box) -> bool:
     )
 
 
+def _page_rect(box, page_rect) -> pymupdf.Rect:
+    """IL box（y 向上）→ pymupdf 页面矩形（y 向下）。"""
+    x0, y0, x1, y1 = (float(value) for value in box)
+    return pymupdf.Rect(x0, page_rect.height - y1, x1, page_rect.height - y0)
+
+
 def _boxes_overlap(first, second, tolerance: float = _BOX_TOUCH_TOLERANCE) -> bool:
     """两个 IL box 是否实质重叠（相接不算）。"""
     if first is None or second is None:
@@ -641,6 +653,15 @@ class LatexBboxOverlay:
         #: 页面查表缓存。
         self._pages_by_number: dict[int, object] | None = None
         self._paragraphs_by_page: dict[int, dict[str, object]] | None = None
+        #: P6 编译后精修框（debug_id → IL box）：来自
+        #: ``config.latex_bbox_box_overrides``，由 layout_refine 按译文版面算出。
+        #: 只替换贴片矩形；源行几何仍按原框量测。
+        self._box_overrides: dict[str, tuple] = {
+            key: tuple(float(value) for value in box)
+            for key, box in (
+                getattr(config, "latex_bbox_box_overrides", None) or {}
+            ).items()
+        }
         self._watermark_rects_cache: dict[int, list[pymupdf.Rect]] = {}
         #: 印章内标记链接（``bdoclink://l<N>``）映射回的页面矩形：
         #: {page_index: {link_index: [页面坐标 Rect, ...]}}。
@@ -1512,7 +1533,10 @@ class LatexBboxOverlay:
             self._decide(debug_id, reason)
 
         for debug_id, meta in paragraphs.items():
-            box = meta["box"]
+            base_box = meta["box"]
+            # P6：编译后按译文版面算出的精修框只替换贴片矩形（见 _box_overrides）。
+            override = self._box_overrides.get(debug_id)
+            box = list(override) if override else base_box
             page_index = meta["page"]
             label = meta.get("layout_label")
             if full_mode and label not in _BODY_LABELS:
@@ -1578,9 +1602,16 @@ class LatexBboxOverlay:
             self._decide(debug_id, fill_before=metrics["min_body_fill"])
             # 源行几何（P3）：优先用源**页面文本行**（prepare 时页面仍是源文），
             # 比 IL 字符聚类稳定；无文本行时用 capture 的 IL 几何兵底。
+            # 精修框改的是贴片矩形：首行量测一律回**原框**口径。clip 回原框，
+            # 否则会把邻居源行并进 n_lines/行距；first_line_dx/ascent_top 也相对
+            # 原框算，否则 ``\topskip`` 会跟着新框顶一起涨，向上扩出来的高度被首行
+            # skip 吃掉（可用行数一点不变）—— 向上扩只钉住口径才真的让出高度。
             row_geometry = None
             if full_mode:
-                row_geometry = _rows_geometry(measure_source_rows(page, rect), rect)
+                measure_rect = _page_rect(base_box, page_rect)
+                row_geometry = _rows_geometry(
+                    measure_source_rows(page, measure_rect), measure_rect
+                )
                 if row_geometry:
                     self._decide(
                         debug_id,
@@ -1615,6 +1646,9 @@ class LatexBboxOverlay:
                     "debug_id": debug_id,
                     "page": page_index,
                     "rect": rect,
+                    # 擦除只针对**原**框：扩框后的区域只贴片，擦除它会连带删掉
+                    # 邻居在内容流里的译文（精修框与邻居框重叠、但不与墨迹重叠）。
+                    "redact_rect": _page_rect(base_box, page_rect),
                     "width": width,
                     "height": height,
                     "font_size": font_size,
@@ -1652,9 +1686,9 @@ class LatexBboxOverlay:
             links_before = page.get_links()
             # 只擦除「区域内确有文本层」的矩形：full 模式预选跳过后通常为空。
             redact_rects = [
-                job["rect"] + (-0.2, -0.2, 0.2, 0.2)
+                job.get("redact_rect", job["rect"]) + (-0.2, -0.2, 0.2, 0.2)
                 for job in page_jobs
-                if page.get_text("text", clip=job["rect"]).strip()
+                if page.get_text("text", clip=job.get("redact_rect", job["rect"])).strip()
             ]
             if redact_rects:
                 # 预判：与任一 redaction 矩形相交的链接会被删除，需重插。

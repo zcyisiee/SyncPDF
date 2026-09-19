@@ -532,6 +532,9 @@ class TranslationConfig:
         # 公式对象按对象身份（id()）对应——Typesetting 原地重定位公式对象但
         # 保持身份，与 link_remap 的字符身份机制同一假设。
         self.latex_bbox_state: dict = {}
+        # 编译后精修框（debug_id → [x, y, x2, y2]，IL 坐标）：由 layout_refine
+        # 按上一遍译文 PDF 的版面算出，只替换 LaTeX 贴片矩形（P6）。
+        self.latex_bbox_box_overrides: dict = {}
         # LaTeX bbox overlay 的统计（PDFCreater 写入）：
         # attempted/applied/fallback/failed + 原因/耗时/字号缩放明细。
         self.latex_bbox_stats: dict = {}
