@@ -20,6 +20,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 from pathlib import Path
 
 from babeldoc_tools.common import ToolError
@@ -32,6 +34,12 @@ STATE_DIR = ".bdt-serve"
 
 #: 目录名不允许的字符/形式（单段 did 规则）。
 _FORBIDDEN_DID = {".", ".."}
+_TEST_WORKDIR = re.compile(
+    r"^(?:w\d+(?:-|$)|bbox-|pytest-|test-|smoke-|e2e-|debug-|"
+    r"(?:.*-)?agy-|bdt-dbg-|acceptance-|serve-smoke(?:-|$)|ccs\d+-|cloudtest-|"
+    r"deepseek-|pi-e2e-)",
+    re.I,
+)
 
 
 def _validate_did(did: str) -> str:
@@ -131,16 +139,42 @@ class DocumentStore:
     # ---------------------------------------------------------------- public
     def list_dids(self) -> list[str]:
         """可见文档的 did（排序稳定）；与 :meth:`resolve` 用同一套校验。"""
-        dids: list[str] = []
+        candidates: list[tuple[str, Path]] = []
         for did in self._candidates():
+            # serve --root tmp 时，测试运行目录不应污染文件库。
+            if self.allowed is None and _TEST_WORKDIR.search(did):
+                continue
             try:
-                self.resolve(did)
+                path = self.resolve(did)
             except ToolError as exc:
                 if exc.code == "root_missing":
                     raise  # 运行期根目录消失：宁可报错，不返回被截断的列表
                 continue  # 文件 / 隐藏名 / 符号链接越界 / 已消失 → 不是文档
-            dids.append(did)
-        return dids
+            candidates.append((did, path))
+
+        # 同一份源 PDF 可能被多次运行复制到不同 workdir；文件库只展示最近的一份。
+        latest: dict[str, tuple[str, Path, float]] = {}
+        for did, path in candidates:
+            pdf = next(
+                (p for name in ("source.pdf", "input.pdf")
+                 for p in (path / name,) if p.is_file()),
+                None,
+            )
+            if pdf is None:
+                outputs = sorted((path / "output").glob("*.pdf"))
+                pdf = outputs[-1] if outputs else None
+            # 直接把仓库 ``tmp`` 作为 serve 根目录时，状态/日志目录不是文档。
+            if pdf is None and self.root.name == "tmp":
+                continue
+            if pdf is None:
+                latest[f"did:{did}"] = (did, path, path.stat().st_mtime)
+                continue
+            digest = hashlib.sha256(pdf.read_bytes()).hexdigest()
+            stamp = max(path.stat().st_mtime, pdf.stat().st_mtime)
+            previous = latest.get(digest)
+            if previous is None or stamp > previous[2]:
+                latest[digest] = (did, path, stamp)
+        return sorted(item[0] for item in latest.values())
 
     def resolve(self, did: str) -> Path:
         """did → workdir 绝对路径；这是读取文档产物的唯一入口。

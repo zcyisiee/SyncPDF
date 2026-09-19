@@ -96,15 +96,40 @@ export function JobControls({
 
   const retry = () => {
     if (latest === null) return;
-    createJob.mutate({
-      action: latest.action,
-      from: latest.from_stage ?? undefined,
-      pages: latest.pages ?? undefined,
-      dual: latest.dual,
-      profile: latest.profile,
-      // 重试沿用上一个 job 的词表开关（记录里的 use_glossary 已经是“生效后的值”）。
-      use_glossary: latest.use_glossary,
-    });
+    if (latest.action === 'run') {
+      createJob.mutate({
+        action: 'run',
+        from: latest.from_stage ?? undefined,
+        pages: latest.pages ?? undefined,
+        dual: latest.dual,
+        profile: latest.profile,
+        thinking: latest.thinking,
+        ...(latest.reviewer_profile ? { reviewer_profile: latest.reviewer_profile } : {}),
+        // 重试沿用上一个 job 的词表开关（记录里的 use_glossary 已经是“生效后的值”）。
+        use_glossary: latest.use_glossary,
+      });
+      return;
+    }
+    if (latest.action === 'check') {
+      // check 的 from/pages/dual 都由服务端固定，带上它们会被 422 forbidden_field 拒绝。
+      createJob.mutate({
+        action: 'check',
+        profile: latest.profile,
+        thinking: latest.thinking,
+        dual: false,
+        use_glossary: false,
+      });
+      return;
+    }
+    if (latest.action === 'compile') {
+      // compile 不调用模型；重试针对当前草稿，scope 只复用用户上次请求的范围。
+      createJob.mutate({
+        action: 'compile',
+        scope: latest.requested_scope === 'pages' ? 'pages' : 'full',
+        dual: false,
+        use_glossary: false,
+      });
+    }
   };
 
   const describe = createJob.error

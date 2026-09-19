@@ -13,7 +13,7 @@
 唯一安装命令是 `bdt`，由 [pyproject.toml](pyproject.toml) 注册到 [babeldoc_tools/__main__.py](babeldoc_tools/__main__.py)。
 
 - `bdt run`：完整编排；`parse / translate / apply / build / check / layout-set / report`：分步操作。
-- `bdt serve`：启动 FastAPI 服务与可选的 `web/dist` 静态站点；默认 `127.0.0.1`、端口 `0`（绑定后返回真实端口）。HTTP 前缀 `/api/v1`，接口 schema 由 `/openapi.json` 提供。
+- `bdt serve`：启动 FastAPI 服务与可选的 `web/dist` 静态站点；默认 `127.0.0.1`、端口 `0`（绑定后返回真实端口）。HTTP 前缀 `/api/v1`，接口 schema 由 `/openapi.json` 提供。根目录枚举会跳过测试/调试工作目录，并按源 PDF 内容去重、保留最近版本。
 - `bdt debug` 与阶段命令的 `--debug`：诊断归档及查看器。
 - `bdt harness-call / model-call`：模型适配子命令，读 stdin 提示词、写 stdout 文本；仍属于同一个入口。
 

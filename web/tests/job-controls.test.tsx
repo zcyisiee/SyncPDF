@@ -244,7 +244,8 @@ describe('JobControls（顶栏任务控制）', () => {
         jsonResponse([
           makeJob({
             did: DID, job_id: 'j_fail', status: 'failed', error_code: 'translator_crash',
-            error_message: '模型超时', profile: 'pi-deepseek-flash', dual: true, use_glossary: true,
+            error_message: '模型超时', profile: 'pi-deepseek-flash', reviewer_profile: 'pi-deepseek-flash',
+            thinking: 'high', dual: true, use_glossary: true,
           }),
         ]),
       '/api/v1/jobs/j_01M2RDB312K20Q280DHCTX7N19/cancel': () =>
@@ -256,7 +257,7 @@ describe('JobControls（顶栏任务控制）', () => {
         did={DID}
         document={makeDocument()}
         jobs={[
-          makeJob({ did: DID, job_id: 'j_fail', status: 'failed', error_code: 'translator_crash', error_message: '模型超时', profile: 'pi-deepseek-flash', dual: true, use_glossary: true }),
+          makeJob({ did: DID, job_id: 'j_fail', status: 'failed', error_code: 'translator_crash', error_message: '模型超时', profile: 'pi-deepseek-flash', reviewer_profile: 'pi-deepseek-flash', thinking: 'high', dual: true, use_glossary: true }),
         ]}
       />,
     );
@@ -266,7 +267,8 @@ describe('JobControls（顶栏任务控制）', () => {
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0].body).toMatchObject({
-      action: 'run', profile: 'pi-deepseek-flash', dual: true, use_glossary: true,
+      action: 'run', profile: 'pi-deepseek-flash', reviewer_profile: 'pi-deepseek-flash',
+      thinking: 'high', dual: true, use_glossary: true,
     });
   });
 
@@ -281,5 +283,32 @@ describe('JobControls（顶栏任务控制）', () => {
     );
     expect(await screen.findByText(/在段落面板重试/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '重试' })).toBeNull();
+  });
+
+  it('check/compile 失败重试不携带只对 run 有效的字段', async () => {
+    const { calls } = interceptSubmit();
+    const check = renderWithQuery(
+      <JobControls
+        did={DID}
+        document={makeDocument()}
+        jobs={[makeJob({ did: DID, action: 'check', status: 'failed', profile: 'pi-deepseek-flash', thinking: 'high', from_stage: 'check' })]}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: '重试' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ action: 'check', profile: 'pi-deepseek-flash', thinking: 'high', dual: false, use_glossary: false });
+    check.unmount();
+
+    calls.length = 0;
+    renderWithQuery(
+      <JobControls
+        did={DID}
+        document={makeDocument()}
+        jobs={[makeJob({ did: DID, action: 'compile', status: 'failed', requested_scope: 'pages', from_stage: 'apply' })]}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: '重试' }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].body).toEqual({ action: 'compile', scope: 'pages', dual: false, use_glossary: false });
   });
 });
