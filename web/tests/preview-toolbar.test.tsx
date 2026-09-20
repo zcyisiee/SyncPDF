@@ -1,5 +1,5 @@
 /** `PreviewToolbar`：模式切换、原文模式禁用态与 tooltip、翻页按钮 + 页码提交、缩放控件、
- * bbox 三态（原文框 / 译文框 / 关）与下载槽。 */
+ * bbox 三态（原文框 / 译文框 / 关）。导出/下载不在工具条上（在右栏归档 tab）。 */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -143,12 +143,15 @@ describe('PreviewToolbar', () => {
     expect(screen.getByText('313%')).toBeInTheDocument();
   });
 
-  it('bbox 三态与下载槽直接平铺（不再藏在《更多》里）；工具条单行不换行', () => {
-    renderToolbar({ download: <a href="#dl">下载 PDF</a> });
+  it('bbox 三态直接平铺（不再藏在《更多》里）；工具条单行不换行、没有下载槽', () => {
+    renderToolbar();
     expect(screen.getByRole('group', { name: 'bbox 图层' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '原文框' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('link', { name: '下载 PDF' })).toBeInTheDocument();
     expect(screen.queryByText('更多')).toBeNull();
+    // 导出/下载入口在右栏归档 tab（用户决策 E），工具条上不再有下载槽
+    expect(screen.queryByRole('link', { name: /下载/ })).toBeNull();
+    expect(document.querySelector('[data-od-id="download-group"]')).toBeNull();
+    expect(document.querySelector('[data-od-id="download-button"]')).toBeNull();
     // 悬停说明（title）在：简洁标签 + 完整解释
     expect(screen.getByRole('button', { name: '译文框' })).toHaveAttribute(
       'title',
@@ -180,7 +183,7 @@ describe('PreviewToolbar', () => {
     // brief 指定的排印：可收缩/截断 + 衬线 + md + ink
     expect(title.className).toBe('min-w-0 max-w-[24ch] truncate font-serif text-md text-ink');
     expect(document.querySelector('[data-od-id="toolbar-status"]')?.textContent).toBe('已完成');
-    // 顺序：文档名 / 状态 / 翻页组 / bbox 图层 …… 下载槽在最右
+    // 顺序：文档名 / 状态 / 翻页组 / bbox 图层 ……（无右侧内容时不给占位元素）
     const toolbar = screen.getByRole('toolbar', { name: '预览工具条' });
     const order = Array.from(toolbar.children).map((node) =>
       node.getAttribute('data-od-id') ?? node.getAttribute('role') ?? node.className,

@@ -1,15 +1,17 @@
 /**
- * 预览工具条：翻页、缩放、源/译/对照、bbox 图层与下载。
+ * 预览工具条：翻页、缩放、源/译/对照、bbox 图层。
  *
  * 单行不换行（`flex-nowrap` + `overflow-x-auto`），各组 `flex-none`，宽度不够时整条横向滚动：
- * 翻页组（‹ 页码 ›）+ 缩放组（− 百分比 ＋ 适宽）+ 模式分段 + bbox 分段 + 最右的下载槽。
+ * 翻页组（‹ 页码 ›）+ 缩放组（− 百分比 ＋ 适宽）+ 模式分段 + bbox 分段。
  * 触控板捏合 / Ctrl(⌘)+滚轮 仍直接缩放（`ContinuousPdfPane` 的 wheel/gesture 监听），
  * 工具条上的 −/＋/适宽 是同一份 `previewZoom` 的显式入口（`null` = 适宽）。
  *
  * 按钮文案保持简洁，把完整解释放进 tooltip（悬停才展开）：
  * - 「原文/译文/对照」是分段控件，语义自明；
- * - bbox 图层用「原文框 / 译文框 / 关」（识别 IR 框 = 原文侧，套版几何框 = 译文侧），悬停给完整解释；
- * - 下载按钮由 `DownloadButton` 提供（修订号 + 质量徽标 + 悬停说明）。
+ * - bbox 图层用「原文框 / 译文框 / 关」（识别 IR 框 = 原文侧，套版几何框 = 译文侧），悬停给完整解释。
+ *
+ * 导出/下载（`ExportButton` / `DownloadButton`）不在工具条上：它们是与版本列表同屏的右栏
+ * 归档 tab 入口（用户决策 E）。
  */
 import { useState } from 'react';
 import type { ReactNode } from 'react';
@@ -110,8 +112,6 @@ export interface PreviewToolbarProps {
   title?: string | null;
   /** 文档状态徽标（紧随文档名）；不传则不渲染。 */
   status?: ReactNode;
-  /** 工具条最右侧的下载按钮槽（W10：修订号 + 质量徽标，见 `DownloadButton`）。 */
-  download?: ReactNode;
   className?: string;
 }
 
@@ -124,7 +124,6 @@ export function PreviewToolbar({
   onBboxModeChange,
   title,
   status,
-  download,
   className,
 }: PreviewToolbarProps) {
   const previewMode = useUiStore((state) => state.previewMode);
@@ -273,7 +272,9 @@ export function PreviewToolbar({
           </Button>
         </Tooltip>
       ) : null}
-      <div className="ml-auto flex flex-none items-center gap-s2">{download}</div>
+      {/* 下载槽（原在最右）随导出/下载一起移到右栏归档 tab：这里保留原来的 `ml-auto` 位置，
+       *  组的顺序与单行不换行（`flex-nowrap` + 横向滚动）不变。 */}
+      <span className="ml-auto" />
     </div>
   );
 }

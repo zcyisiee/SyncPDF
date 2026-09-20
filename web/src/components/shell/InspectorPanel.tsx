@@ -8,15 +8,18 @@ import type { WorkbenchView } from '../../lib/routing';
 import { cn } from '../../lib/cn';
 import { useUiStore } from '../../stores/ui';
 import { ArchiveSummary } from '../archive/ArchiveSummary';
+import { VersionList } from '../archive/VersionList';
 import { BatchPanel } from '../edit/BatchPanel';
 import { ParagraphEditor } from '../edit/ParagraphEditor';
 import { EventStreamPanel } from '../events/EventStreamPanel';
 import { JobControls } from '../jobs/JobControls';
+import { DownloadButton } from '../preview/DownloadButton';
+import { ExportButton } from '../preview/ExportButton';
 import { Button } from '../ui/Button';
 import type { EventFeed } from '../events/useEventWindow';
 import type { PersistentEvent } from '../../lib/usePersistentEvents';
 
-/** 面板 tab：`paragraph` = W10 段落编辑器，`events` = W06 事件流，`archive` = W12 归档摘要。 */
+/** 面板 tab：`paragraph` = W10 段落编辑器，`events` = W06 事件流，`archive` = 版本归档（W12）。 */
 type InspectorTab = 'paragraph' | 'events' | 'archive';
 
 /** tab → 文案（tab 栏渲染的唯一来源）。 */
@@ -35,6 +38,10 @@ const TABS: readonly InspectorTab[] = ['paragraph', 'events', 'archive'];
  *
  * 编辑只读判据与服务端一致（api.md §3.3）：`compile.status=running` 或该文档有活动 job 时
  * 草稿写端点会 409 `document_busy`，所以这里提前把编辑器置只读并说明原因。
+ *
+ * 归档 tab 是**版本与导出的唯一入口**（用户决策）：导出/下载按钮 + 归档摘要 + 版本列表
+ * （`GET D/versions`）。`view==='archive'`（`#/d/:did/archive`）不再换中栏内容，只是让这里
+ * 默认选中归档 tab。
  *
  * 面板最底是**操作区**（`action-bar`）：左任务控制（`JobControls`：开始翻译 / 取消 / 重试
  * + 状态徽标），右「编译全文」。它在三个 tab 下都常驻（恒在），所以是文档任务控制的唯一入口。
@@ -67,7 +74,7 @@ export function InspectorPanel({
       ? undefined
       : `该文档有活动任务 ${busyJob.job_id}（${busyJob.action}），任务期间草稿只读`;
 
-  // 默认 tab：归档视图给归档摘要（与预览区的版本列表同屏），其余给段落编辑器。
+  // 默认 tab：archive 视图（旧链接/下载按钮的「历史版本」）给归档 tab，其余给段落编辑器。
   const [tab, setTab] = useState<InspectorTab>(view === 'archive' ? 'archive' : 'paragraph');
 
   return (
@@ -138,8 +145,28 @@ export function InspectorPanel({
           </div>
         ) : null}
         {tab === 'archive' ? (
-          <div role="tabpanel" aria-label="归档" className="min-h-0 flex-1">
-            <ArchiveSummary did={did} />
+          <div
+            role="tabpanel"
+            aria-label="归档"
+            data-od-id="archive-tab"
+            className="min-h-0 flex-1 overflow-auto"
+          >
+            {/* 右栏只有 340px 档宽：行距紧凑，导出/下载并排（窄时换行）。 */}
+            <div className="flex flex-col gap-s4 p-s5">
+              <div
+                className="flex flex-wrap items-center gap-s2"
+                data-od-id="archive-actions"
+              >
+                <ExportButton did={did} />
+                <DownloadButton
+                  did={did}
+                  compile={compile}
+                  quality={documentQuery.data?.quality ?? null}
+                />
+              </div>
+              <ArchiveSummary did={did} />
+              <VersionList did={did} compile={compile} />
+            </div>
           </div>
         ) : null}
         {tab === 'events' ? (
