@@ -302,3 +302,34 @@ describe('reader session choices', () => {
     expect(store.getState().compareLinked).toBe(false);
   });
 });
+
+describe('事件流 → 预览定位桥（locateInPreview）', () => {
+  it('nonce 自增（同页重复点击也触发）、page clamp 到 ≥1 的整数、paragraphId 缺了就 null', () => {
+    const store = createUiStore();
+    expect(store.getState().locate).toBeNull();
+
+    store.getState().locateInPreview(5, 'P02-003');
+    expect(store.getState().locate).toEqual({ nonce: 1, page: 5, paragraphId: 'P02-003' });
+
+    // 同一页再点一次：值是新的，nonce 变了 → PreviewArea 的 effect 会再滚一次
+    store.getState().locateInPreview(5, 'P02-003');
+    expect(store.getState().locate).toEqual({ nonce: 2, page: 5, paragraphId: 'P02-003' });
+
+    store.getState().locateInPreview(3.6);
+    expect(store.getState().locate).toEqual({ nonce: 3, page: 4, paragraphId: null });
+    store.getState().locateInPreview(0);
+    expect(store.getState().locate).toEqual({ nonce: 4, page: 1, paragraphId: null });
+    store.getState().locateInPreview(5, '');
+    expect(store.getState().locate).toEqual({ nonce: 5, page: 5, paragraphId: null });
+  });
+
+  it('坏页数（NaN/Infinity）不写状态；locate 不持久化', () => {
+    const store = createUiStore();
+    store.getState().locateInPreview(Number.NaN);
+    store.getState().locateInPreview(Number.POSITIVE_INFINITY);
+    expect(store.getState().locate).toBeNull();
+
+    store.getState().locateInPreview(7);
+    expect(window.localStorage.length).toBe(0);
+  });
+});

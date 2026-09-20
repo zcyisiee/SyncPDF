@@ -73,6 +73,19 @@ export interface ParagraphSelectOptions {
   extend?: boolean;
 }
 
+/**
+ * 事件流「在预览中定位」的请求（**不**持久化，只活在会话里）：
+ * 事件节点上是 `page`/`paragraph_id` 这类真实数据，点击后由 `PreviewArea` 订阅它跳页。
+ * `nonce` 自增：订阅方按它判断「新的一次定位」，所以同一页连点两次也能重新滚过去。
+ */
+export interface PreviewLocate {
+  nonce: number;
+  /** 目标页码（1 基）。 */
+  page: number;
+  /** 目标段落 id（事件里没有 → null；有就一并选中）。 */
+  paragraphId: string | null;
+}
+
 /** 文件库卡片的右键菜单位置（`did` + 视口坐标，`position: fixed` 用）。 */
 export interface LibraryMenu {
   did: string;
@@ -113,6 +126,10 @@ export interface UiState {
   selectedParagraphId: string | null;
   /** W11 重译候选：上次用过的 profile id（会话内记忆，**不**持久化；换文档不丢）。 */
   retranslateProfile: string | null;
+  /** 事件节点 → 预览的定位请求（**不**持久化）；null = 从没点过。 */
+  locate: PreviewLocate | null;
+  /** 事件节点「在预览中定位」：页码必填，段落 id 有就带上（同页重复点击靠 nonce 触发）。 */
+  locateInPreview: (page: number, paragraphId?: string) => void;
   /** 正在拖拽的分隔条（用于 `is-drag` 视觉态）。 */
   dragging: GutterId | null;
   /**
@@ -226,6 +243,18 @@ export function createUiStore(): StoreApi<UiState> {
     selectedParagraphIds: [],
     selectedParagraphId: null,
     retranslateProfile: null,
+    locate: null,
+    locateInPreview: (page, paragraphId) => {
+      // 页数不可解析（NaN/Infinity）不该把预览跳到一个瞎猜的位置
+      if (!Number.isFinite(page)) return;
+      set((state) => ({
+        locate: {
+          nonce: (state.locate?.nonce ?? 0) + 1,
+          page: Math.max(1, Math.round(page)),
+          paragraphId: paragraphId === undefined || paragraphId === '' ? null : paragraphId,
+        },
+      }));
+    },
     dragging: null,
     libraryMenu: null,
     openLibraryMenu: (did, at) => set({ libraryMenu: { did, x: at.x, y: at.y } }),
