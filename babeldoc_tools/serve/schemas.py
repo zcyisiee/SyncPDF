@@ -26,6 +26,8 @@ from pydantic import BaseModel
 from pydantic import Field
 from pydantic import model_validator
 
+from babeldoc_tools.serve.limits import MAX_PREVIEW_WORKERS
+
 #: 全部端点前缀（唯一拼写来源：路由、CLI banner、api.md）。
 API_PREFIX = "/api/v1"
 
@@ -508,11 +510,11 @@ class JobCreateRequest(BaseModel):
     preview_workers: int | None = Field(
         default=None,
         ge=1,
-        le=8,
+        le=MAX_PREVIEW_WORKERS,
         description=(
             "流式翻译预览的并行编译 worker 数（只对 action=run 且跑 translate 阶段有效）："
-            "1..8，缺省 8。同一页的块仍串行编译，不同页并行；"
-            "不跑翻译的 action 一律用缺省"
+            f"1..{MAX_PREVIEW_WORKERS}，缺省取上限（随本机核数）。"
+            "同一页的块仍串行编译，不同页并行；不跑翻译的 action 一律用缺省"
         ),
     )
 

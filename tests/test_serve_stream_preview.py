@@ -26,11 +26,19 @@ def test_preview_workers_env_parsing():
     default = {"BDT_SERVE_PREVIEW_WORKERS": None}
     assert preview_workers_from_environ(default) == MAX_PREVIEW_WORKERS
     assert preview_workers_from_environ({"BDT_SERVE_PREVIEW_WORKERS": "3"}) == 3
-    # 越界夹到 [1, 8]，非法值回缺省：环境变量来自启动脚本，坏值不炸翻译。
-    assert preview_workers_from_environ({"BDT_SERVE_PREVIEW_WORKERS": "99"}) == 8
+    # 越界夹到 [1, 上限]，非法值回缺省：环境变量来自启动脚本，坏值不炸翻译。
+    # 上限随机器核数走（见 MAX_PREVIEW_WORKERS），所以断言语义而不是写死 8。
+    assert preview_workers_from_environ({"BDT_SERVE_PREVIEW_WORKERS": "99"}) == (
+        MAX_PREVIEW_WORKERS
+    )
     assert preview_workers_from_environ({"BDT_SERVE_PREVIEW_WORKERS": "0"}) == 1
-    assert preview_workers_from_environ({"BDT_SERVE_PREVIEW_WORKERS": "abc"}) == 8
-    assert preview_workers_from_environ({"BDT_SERVE_PREVIEW_WORKERS": " "}) == 8
+    assert preview_workers_from_environ({"BDT_SERVE_PREVIEW_WORKERS": "abc"}) == (
+        MAX_PREVIEW_WORKERS
+    )
+    assert preview_workers_from_environ({"BDT_SERVE_PREVIEW_WORKERS": " "}) == (
+        MAX_PREVIEW_WORKERS
+    )
+    assert 1 <= MAX_PREVIEW_WORKERS <= 16
 
 
 def test_pid_page_extraction():
@@ -101,6 +109,53 @@ def test_concurrent_page_compile_keeps_all_patches(tmp_path):
         ).fetchone()[0]
     assert set(json.loads(payload)["patches"]) == set(pids)
     database.close()
+
+
+def test_same_page_blocks_serialize_without_blocking_other_pages():
+    """回归：同页串行不能再靠「共享池 + 页锁」实现，否则会头阻塞。
+
+    翻译按页顺序到达，同一页十几个块会同时被池里所有线程取走：一个持锁编译，
+    其余全部堵在同一把锁上，别的页明明有活也没线程去做（实测 355 对相邻块里
+    301 对落在同一槽位）。改成每槽位一条单线程队列后，堵住的页不再占用其它页
+    的执行资源。这里断言：一页在编译时，另一页能同时前进。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    workers = 8
+    pools = [
+        ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"p{i}")
+        for i in range(workers)
+    ]
+    try:
+        # 第 1 页占住它那条队列；第 2 页必须能在此期间跑完。
+        holding = threading.Event()
+        release = threading.Event()
+        other_done = threading.Event()
+
+        def page_one(_pid):
+            holding.set()
+            assert release.wait(timeout=5)
+
+        def page_two(_pid):
+            other_done.set()
+
+        first = [
+            pools[_lock_index("P01-001", workers)].submit(page_one, "P01-001"),
+            pools[_lock_index("P01-002", workers)].submit(page_one, "P01-002"),
+        ]
+        assert holding.wait(timeout=5)
+        pools[_lock_index("P02-001", workers)].submit(page_two, "P02-001")
+        # 第 1 页还卡着，第 2 页已经完成 → 没有头阻塞。
+        assert other_done.wait(timeout=5)
+        release.set()
+        for future in first:
+            future.result(timeout=5)
+    finally:
+        for pool in pools:
+            pool.shutdown(wait=True)
+
+    # 同页恒同槽（即同一条单线程队列）→ 页 patch 的读-改-写仍然串行。
+    assert _lock_index("P01-001", workers) == _lock_index("P01-999", workers)
 
 
 def test_block_compiler_caches_capability_probe(tmp_path, monkeypatch):
