@@ -40,6 +40,7 @@ import { BboxLegend } from './BboxLegend';
 import { useUiStore } from '../../stores/ui';
 import { Button } from '../ui/Button';
 import { ErrorCard } from '../ui/ErrorCard';
+import { DocumentStatusBadge } from '../ui/StatusBadge';
 import { BboxEditor } from '../edit/BboxEditor';
 import { pdfToScreen, type PdfPointViewport, type ScreenViewport } from './BboxLayer';
 import { CompileBar } from './CompileBar';
@@ -262,6 +263,11 @@ function DocumentPreview({ did }: PreviewProps) {
       paged={primaryUrl !== null}
       onPageChange={navigate}
       onBboxModeChange={chooseBboxMode}
+      // 文档名 + 阶段状态徽标住工具条最左（中栏的临时文档头行已删除）。这里只给
+      // `stage_summary` 的终态判断：live/queued 由任务控制（actionbar 的 JobControls）
+      // 自身徽标承担，两处不抢同一句话。
+      title={detailQuery.data?.title ?? did}
+      status={<DocumentStatusBadge stageSummary={detailQuery.data?.stage_summary} />}
       download={<>
         <ExportButton did={did} />
         <DownloadButton did={did} compile={compile} quality={detailQuery.data?.quality ?? null} />

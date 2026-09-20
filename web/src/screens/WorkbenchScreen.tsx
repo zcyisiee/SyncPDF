@@ -8,10 +8,8 @@ import type { WorkbenchView } from '../lib/routing';
 import { Button, LinkButton } from '../components/ui/Button';
 import { ErrorCard } from '../components/ui/ErrorCard';
 import { ScrollArea } from '../components/ui/ScrollArea';
-import { DocumentStatusBadge } from '../components/ui/StatusBadge';
 import { Gutter } from '../components/shell/Gutter';
 import { InspectorPanel } from '../components/shell/InspectorPanel';
-import { JobControls } from '../components/jobs/JobControls';
 import { ArchiveView } from '../components/archive/ArchiveView';
 import { PreviewArea } from '../components/preview/PreviewArea';
 import { useEventWindow } from '../components/events/useEventWindow';
@@ -26,10 +24,9 @@ const STAGE_STATE_LIVE_REFETCH_MS = 2_000;
 /**
  * `#/d/:did/*` 工作台的中栏 + 右栏（左栏论文导航由 App 常驻，不在这里）。
  *
- * 内层 `.wb-grid`：中栏 = 一行文档头（文档名 + 状态徽标 + 任务控制）+ 预览区（占满剩余），
- * 然后 gutter + 右侧面板（段落 / 事件流 / 归档）。底部时间线已删除：阶段状态由文档头的
- * `DocumentStatusBadge` 与事件流 tab 承担，`useTimelineStages` 只剩「live 判据」用途
- * （驱动 badge 与 2s 轮询）。
+ * 中栏只有**预览区**（工具条 + 画布：文档名与阶段徽标在工具条最左，T2 的临时文档头行已删除）；
+ * 任务控制（开始翻译 / 取消 / 重试）与「编译全文」住右栏底部的操作区（`InspectorPanel`）。阶段状态
+ * 另由事件流 tab 承担；`useTimelineStages` 只剩「live 判据」用途（驱动详情轮询）。
  */
 export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchView }) {
   const persistent = usePersistentEvents(did);
@@ -40,7 +37,6 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
   const jobsQuery = useJobs(did, { quietSinceMs: jobUpdates.pushedAtMs });
   const cardMode = jobCardMode(jobsQuery.data);
   const latestJob = activeJob(jobsQuery.data) ?? jobsQuery.data?.[0] ?? null;
-  const queued = cardMode === 'active' && latestJob?.status === 'queued';
   // 事件窗口（首拉 + SSE）：事件流的 live 与 stage-state 的轮询都由它裁决。
   // 有活动 job 时首拉按 5s 重拉：新 run 归档只能这样被发现（SSE 订阅的是首拉拿到的 run）。
   const feed = useEventWindow(did, {
@@ -53,7 +49,7 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
   const eventsLive = isRunLive(feed.events);
   const fastRefetch = eventsLive || cardMode === 'active';
   // stage-state 的轮询用「事件流是否还在增长」（isRunLive；归档截断时会多轮询，
-  // 但 live 一律由基线裁决，见 lib/timeline.ts 的注释）。`live` 给文档头徽标用。
+  // 但 live 一律由基线裁决，见 lib/timeline.ts 的注释）。
   const timeline = useTimelineStages(did, feed.events, {
     refetchMs: fastRefetch ? STAGE_STATE_LIVE_REFETCH_MS : 0,
     // job 驱动的那一段：新 run 的 stage-state 还没落盘时，只有 job 记录说“阶段在跑”。
@@ -102,25 +98,6 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
         aria-label="中栏内容"
         className="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col bg-canvas"
       >
-        <div
-          data-od-id="doc-header"
-          className="flex h-10 flex-none items-center gap-s3 overflow-hidden border-b border-hair bg-parchment px-s4"
-        >
-          <span className="min-w-0 flex-1 truncate font-serif text-md text-ink-2">
-            {doc === undefined ? did : (doc.title ?? doc.did)}
-          </span>
-          {doc === undefined ? null : (
-            <>
-              <DocumentStatusBadge
-                stageSummary={doc.stage_summary}
-                live={timeline.live}
-                queued={queued}
-              />
-              <JobControls did={did} document={doc} jobs={jobsQuery.data} />
-            </>
-          )}
-        </div>
-
         <div className="min-h-0 flex-1" data-od-id="stage">
           {view === 'archive' ? (
             // 归档视图：预览区换成版本列表（右侧面板给同一份数据的摘要）。

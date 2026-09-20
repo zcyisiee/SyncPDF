@@ -180,12 +180,12 @@ describe('App 三栏外壳（hash 路由）', () => {
     });
     renderWithQuery(<App />);
 
-    // 工作台 = 中栏 doc-header（文档名 + 徽标 + 任务控制）+ 右栏检查器（三 tab）
-    const header = (await screen.findByText('已完成')).closest(
-      '[data-od-id="doc-header"]',
-    ) as HTMLElement;
-    expect(header).not.toBeNull();
-    expect(within(header).getByText('Attention Is All You Need')).toBeInTheDocument();
+    // 工作台 = 中栏工具条（文档名 + 阶段徽标）+ 预览/画布 + 右栏检查器（三 tab + 底部操作区）
+    const title = await screen.findByText('Attention Is All You Need');
+    expect(title.closest('[data-od-id="toolbar-title"]')).not.toBeNull();
+    expect(screen.getByText('已完成').closest('[data-od-id="toolbar-status"]')).not.toBeNull();
+    // T2 的临时文档头行已溶解（标题与徽标进工具条，任务控制进右栏操作区）
+    expect(document.querySelector('[data-od-id="doc-header"]')).toBeNull();
     const inspector = document.querySelector('[data-od-id="inspector"]') as HTMLElement;
     expect(inspector).not.toBeNull();
     const tablist = within(inspector).getByRole('tablist', { name: '右侧面板' });
