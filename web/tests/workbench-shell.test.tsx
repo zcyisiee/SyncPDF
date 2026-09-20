@@ -279,41 +279,56 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
     await waitFor(() =>
       expect(document.querySelector('[data-od-id="event-stream"]')).not.toBeNull(),
     );
-    // W12 的归档摘要也是这个面板的 tab：切过去能直接看到版本摘要与「查看全部」
+    // 归档也是这个面板的 tab：切过去直接看到导出/下载入口 + 摘要 + 完整版本列表
     fireEvent.click(screen.getByRole('tab', { name: '归档' }));
     await waitFor(() =>
       expect(document.querySelector('[data-od-id="archive-summary-count"]')?.textContent).toBe(
         '2 个版本',
       ),
     );
+    const archiveTab = document.querySelector('[data-od-id="archive-tab"]') as HTMLElement;
+    expect(archiveTab).not.toBeNull();
+    expect(
+      await screen.findByRole('button', { name: /导出最新 PDF/ }),
+    ).toBeInTheDocument();
+    expect(archiveTab.querySelector('[data-od-id="download-button"]')).not.toBeNull();
+    expect(archiveTab.querySelectorAll('[data-od-id="archive-row"]')).toHaveLength(2);
     expect(document.querySelector('[data-od-id="archive-summary-all"] a')).toHaveAttribute(
       'href',
       `#/d/${DID}/archive`,
     );
+    // 中栏还是预览区（不再变成版本列表）
+    expect(document.querySelector('[data-od-id="preview-toolbar"]')).not.toBeNull();
+    expect(document.querySelector('[data-od-id="archive-panel"]')).toBeNull();
   });
 
-  it('归档视图接真（W12）：版本列表 + 当前版本高亮 + 右侧面板归档摘要', async () => {
+  it('view=archive 仍解析，但中栏恒为预览区；右栏默认选中归档 tab（版本+导出入口）', async () => {
     mockDetailAndArtifacts([], mockVersions());
     renderWithQuery(<WorkbenchScreen did={DID} view="archive" />);
 
-    // 预览区换成版本列表（不再是 W04 占位）
-    expect(await screen.findByText('共 2 个版本')).toBeInTheDocument();
-    expect(document.querySelector('[data-od-id="archive-panel"]')).not.toBeNull();
-    expect(document.querySelector('[data-od-id="view-placeholder"]')).toBeNull();
-    const items = document.querySelectorAll('[data-od-id="archive-row"]');
-    expect(items).toHaveLength(2);
-    expect(items[0].getAttribute('data-current')).toBe('true');
-    expect(
-      items[1].querySelector('[data-od-id="archive-row-download"]')?.getAttribute('href'),
-    ).toBe(`/api/v1/documents/${DID}/versions/2/pdf`);
+    // 中栏不再换成版本列表：预览区在（无产物 → 占位卡），archive-panel 分支已删
+    expect(await screen.findByText('无产物 PDF')).toBeInTheDocument();
+    expect(document.querySelector('[data-od-id="archive-panel"]')).toBeNull();
+    expect(document.querySelector('[data-od-id="preview-toolbar"]')).not.toBeNull();
 
-    // 右侧面板：归档摘要在前（默认 tab），带「查看全部」链接
-    expect(document.querySelector('[data-od-id="archive-summary"]')).not.toBeNull();
-    expect(document.querySelector('[data-od-id="archive-summary-all"] a')).toHaveAttribute(
+    // 右栏：归档 tab 默认选中，摘要 + 版本列表都在这里
+    expect(screen.getByRole('tab', { name: '归档' })).toHaveAttribute('aria-selected', 'true');
+    const archiveTab = document.querySelector('[data-od-id="archive-tab"]') as HTMLElement;
+    expect(archiveTab).not.toBeNull();
+    expect(archiveTab.querySelector('[data-od-id="archive-summary"]')).not.toBeNull();
+    expect(archiveTab.querySelector('[data-od-id="archive-summary-all"] a')).toHaveAttribute(
       'href',
       `#/d/${DID}/archive`,
     );
-    expect(screen.getByRole('tab', { name: '归档' })).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() =>
+      expect(archiveTab.querySelectorAll('[data-od-id="archive-row"]')).toHaveLength(2),
+    );
+    expect(
+      archiveTab
+        .querySelectorAll('[data-od-id="archive-row"]')[1]
+        .querySelector('[data-od-id="archive-row-download"]')
+        ?.getAttribute('href'),
+    ).toBe(`/api/v1/documents/${DID}/versions/2/pdf`);
     // 事件流退为次要 tab：不选它就不挂面板
     expect(document.querySelector('[data-od-id="event-stream"]')).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: '事件流' }));
@@ -322,17 +337,16 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
     );
   });
 
-  it('归档视图的空态：从来没编译成功过 → 引导去翻译视图', async () => {
+  it('归档 tab 的空态：从来没编译成功过 → 「还没有全量编译版本」（不是错误，也不冒充有版本）', async () => {
     mockDetailAndArtifacts(
       [],
       mockVersions({ did: DID, current_revision: 0, stale: false, items: [] }),
     );
     renderWithQuery(<WorkbenchScreen did={DID} view="archive" />);
 
-    expect(await screen.findByText('还没有版本归档')).toBeInTheDocument();
-    expect(
-      document.querySelector('[data-od-id="archive-empty-cta"] a')?.getAttribute('href'),
-    ).toBe(`#/d/${DID}`);
+    expect(await screen.findByText('还没有全量编译版本')).toBeInTheDocument();
+    expect(document.querySelector('[data-od-id="archive-tab"]')).not.toBeNull();
+    expect(document.querySelectorAll('[data-od-id="archive-row"]')).toHaveLength(0);
   });
 
   it('did 不存在：错误卡 + 返回文件库（不留白屏）', async () => {
@@ -564,7 +578,7 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
     );
   });
 
-  it('归档视图：预览区换版本列表；任务控制在右栏操作区（所有视图一致）', async () => {
+  it('view=archive：任务控制在右栏操作区（所有视图一致）；中栏仍是预览区', async () => {
     mockApiFetch({
       [`/api/v1/documents/${DID}`]: () => jsonResponse(DETAIL),
       [`/api/v1/documents/${DID}/artifacts`]: () => jsonResponse([]),
@@ -574,12 +588,17 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
       ...mockVersions(),
     });
     renderWithQuery(<WorkbenchScreen did={DID} view="archive" />);
-    await screen.findByText('共 2 个版本');
+    await screen.findByText('无产物 PDF');
     // 旧版「进度视图才有 job 面板」的区分已删除：预览区没有 job 面板，任务控制在右栏操作区
     expect(document.querySelector('[data-od-id="job-panel-rail"]')).toBeNull();
     expect(
       document.querySelector('[data-od-id="action-bar"] [data-od-id="job-controls"]'),
     ).not.toBeNull();
     expect(document.querySelector('[data-od-id="doc-header"]')).toBeNull();
+    // 归档 tab 里能看到版本行（旧链接带来的 archive 视图只是默认选中该 tab）
+    const archiveTab = document.querySelector('[data-od-id="archive-tab"]') as HTMLElement;
+    await waitFor(() =>
+      expect(archiveTab.querySelectorAll('[data-od-id="archive-row"]')).toHaveLength(2),
+    );
   });
 });

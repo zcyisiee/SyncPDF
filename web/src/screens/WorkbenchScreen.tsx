@@ -10,7 +10,6 @@ import { ErrorCard } from '../components/ui/ErrorCard';
 import { ScrollArea } from '../components/ui/ScrollArea';
 import { Gutter } from '../components/shell/Gutter';
 import { InspectorPanel } from '../components/shell/InspectorPanel';
-import { ArchiveView } from '../components/archive/ArchiveView';
 import { PreviewArea } from '../components/preview/PreviewArea';
 import { useEventWindow } from '../components/events/useEventWindow';
 import { useJobUpdates } from '../components/events/useJobUpdates';
@@ -27,6 +26,9 @@ const STAGE_STATE_LIVE_REFETCH_MS = 2_000;
  * 中栏只有**预览区**（工具条 + 画布：文档名与阶段徽标在工具条最左，T2 的临时文档头行已删除）；
  * 任务控制（开始翻译 / 取消 / 重试）与「编译全文」住右栏底部的操作区（`InspectorPanel`）。阶段状态
  * 另由事件流 tab 承担；`useTimelineStages` 只剩「live 判据」用途（驱动详情轮询）。
+ *
+ * `#/d/:did/archive` 仍解析（旧链接不死链），但中栏不再换成版本列表：版本与导出都在右栏的
+ * 归档 tab；archive 视图只让 `InspectorPanel` 默认选中那个 tab（`view` 原样传下去）。
  */
 export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchView }) {
   const persistent = usePersistentEvents(did);
@@ -62,7 +64,6 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
     refetchWhen: (doc) =>
       timeline.live || cardMode === 'active' || compileUnsettled(doc?.compile),
   });
-  const doc = documentQuery.data;
   const inspectorWidth = useUiStore((state) => state.inspectorWidth);
 
   if (documentQuery.isError) {
@@ -99,16 +100,9 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
         className="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col bg-canvas"
       >
         <div className="min-h-0 flex-1" data-od-id="stage">
-          {view === 'archive' ? (
-            // 归档视图：预览区换成版本列表（右侧面板给同一份数据的摘要）。
-            <div className="h-full min-h-0" data-od-id="archive-panel">
-              <ArchiveView did={did} compile={doc?.compile} />
-            </div>
-          ) : (
-            <div className="h-full min-h-0">
-              <PreviewArea did={did} />
-            </div>
-          )}
+          <div className="h-full min-h-0">
+            <PreviewArea did={did} />
+          </div>
         </div>
       </section>
 

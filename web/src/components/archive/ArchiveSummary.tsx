@@ -1,9 +1,10 @@
 /**
- * 右侧面板「归档」tab（W12）：版本归档的**简单摘要** + 「查看全部」跳到归档视图（§3.7）。
+ * 右侧面板「归档」tab 的版本归档**简单摘要**：条数、最新一版（r 徽标 + 触发原因 + 质量徽标
+ * + 时间 + 大小）、stale 提示，以及一条 `…/versions/<r>/pdf` 的直达下载。
  *
- * 只做摘要，不重复列表：条数、最新一版（r 徽标 + 触发原因 + 质量徽标 + 时间 + 大小）、
- * stale 提示，以及一条 `…/versions/<r>/pdf` 的直达下载。完整清单（含每一版）在归档视图。
- * 数据与归档视图**同一个 query key**（`useVersions`），切 tab 不会多打一次请求。
+ * 只做摘要，不重复列表：同 tab 的 `VersionList` 给完整清单（含每一版）。
+ * 数据与版本列表**同一个 query key**（`useVersions`），同屏两份消费也只打一次请求。
+ * 自己不滚动、不控 padding：滚动与内边距由归档 tab 容器给（避免嵌套滚动区）。
  */
 import { humanizeUpdatedAt } from '../../lib/humanize';
 import { useVersions } from '../../lib/queries';
@@ -18,7 +19,7 @@ export function ArchiveSummary({ did }: { did: string }) {
   const summary = archiveSummary(did, versionsQuery.data);
 
   return (
-    <div className="h-full overflow-auto p-s5" data-od-id="archive-summary">
+    <div className="flex flex-col" data-od-id="archive-summary">
       <header className="flex items-baseline gap-s2">
         <p className="font-serif text-md font-medium leading-[1.4] text-ink-2">版本归档</p>
         <span className="ml-auto font-mono text-micro text-ink-4" data-od-id="archive-summary-count">

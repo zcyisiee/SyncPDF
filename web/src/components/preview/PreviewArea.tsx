@@ -44,8 +44,6 @@ import { DocumentStatusBadge } from '../ui/StatusBadge';
 import { BboxEditor } from '../edit/BboxEditor';
 import { pdfToScreen, type PdfPointViewport, type ScreenViewport } from './BboxLayer';
 import { CompileBar } from './CompileBar';
-import { ExportButton } from './ExportButton';
-import { DownloadButton } from './DownloadButton';
 import { ContinuousPdfPane, type BboxPaneData, type ReaderPosition } from './ContinuousPdfPane';
 import type { PdfPageInfo } from './PdfCanvas';
 import { PreviewToolbar } from './PreviewToolbar';
@@ -284,10 +282,6 @@ function DocumentPreview({ did }: PreviewProps) {
       // 自身徽标承担，两处不抢同一句话。
       title={detailQuery.data?.title ?? did}
       status={<DocumentStatusBadge stageSummary={detailQuery.data?.stage_summary} />}
-      download={<>
-        <ExportButton did={did} />
-        <DownloadButton did={did} compile={compile} quality={detailQuery.data?.quality ?? null} />
-      </>}
     />
   );
 
