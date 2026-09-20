@@ -67,7 +67,9 @@ root 模式的 `store_base` 是服务根目录；workdir 模式则是工作目�
 
 ## 局部编译边界
 
-`serve/block_compile.py::BlockCompiler` 处理单段编译和导出：从当前草稿/翻译块与不可变解析输入生成页面补丁，记录资产、页面和 revision；发布前检查任务未取消且 revision 未过期。导出组合页面并记录 `exports`。流式译文通过 `ServeStreamPreview` 提交预览编译，与模型输出读取分离：完成的块立即进入并行编译池（worker 数 1..8，缺省 8；来源优先级为 job 字段 `preview_workers` > `bdt serve --preview-workers` > 缺省），同一页的块按 pid 页号哈希到同一 worker 串行（页 patch 的读-改-写不会丢更新），不同页并行。`BlockCompiler` 实例缓存一次 LaTeX 能力探测（kpsewhich 子进程不再每段重复），`state.pkl` 反序列化按 workdir+mtime 进程内缓存。
+`serve/block_compile.py::BlockCompiler` 处理单段编译和导出：从当前草稿/翻译块与不可变解析输入生成页面补丁，记录资产、页面和 revision；发布前检查任务未取消且 revision 未过期。导出组合页面并记录 `exports`。流式译文通过 `ServeStreamPreview` 提交预览编译，与模型输出读取分离：完成的块立即进入并行编译池（worker 数 1..`MAX_PREVIEW_WORKERS`，上限 = `min(16, cpu_count-2)`，缺省取上限；来源优先级为 job 字段 `preview_workers` > `bdt serve --preview-workers` > 缺省）。池是每槽位一条独占单线程队列：同一页的块按 pid 页号取模到同一槽位串行（页 patch 的读-改-写不会丢更新），不同页并行，且同页积压不会占住其它页可用的线程。`BlockCompiler` 实例缓存一次 LaTeX 能力探测（kpsewhich 子进程不再每段重复），`state.pkl` 反序列化按 workdir+mtime 进程内缓存，`ILTranslator` 按语言对进程内缓存（`post_translate_paragraph` 只依赖占位符正则），版面检测按页缓存（`PageLayoutCache`），贴片编译缓存跨文档共享（`<store_base>/cache/stamps`，经 `BDT_LATEX_STAMP_CACHE` 传给 job 子进程）。
+
+贴片 fit 不过时的有界阶梯（源字号+源行距 → 行距 ×1.1/×0.9 → 字号 ×0.95^k，≤12 步、下限 4pt）由 `BboxStampRenderer` 批编译：首选档单独编一次，未过则剩余候选压进**一次** xelatex（`build_ladder_tex` 一档一页），按同一优先级选档，选出的字号行距与逐档顺序编译完全一致；快路前提不成立（编译失败、标记/页数不符）退回顺序阶梯。缩字/溢出贴片的浮动（同栏扩 → 跨栏扩 → 跨页迁移）把已落定的兄弟贴片（`FloatReservations`，按落点页登记）并入障碍集，同页并发浮动不会各自占用同一块净空。
 
 旧 `serve/compile.py::CompileService` 仍处理全量 `action=compile`：隔离副本 → 物化草稿 → `bdt run --from apply` → 校验产物 → 发布/版本归档。旧 PDF 在失败后仍可用，但必须显示旧 revision。`scope=pages` 在这条路径仍降级全量，不等于新段落编译接口。
 
