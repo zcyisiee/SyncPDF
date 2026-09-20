@@ -1,6 +1,6 @@
 /**
  * W15 集成验收：**一条贯穿全旅程**的真浏览器用例 —— 静态构建 → 上传 → 真 job 的实时进度
- * （事件流 / 时间线 live 段 / `job_update` 推送）→ 手改译文与 bbox → 候选重译与采用 →
+ * （事件流 / 阶段条 live 段 / `job_update` 推送）→ 手改译文与 bbox → 候选重译与采用 →
  * 编译链路 → 版本归档 → **下载 PDF 的字节级校验**。
  *
  * 与既有 e2e 的分工：单点语义各自有专属 spec（上传 `upload.spec.ts`、点段编辑与**真编译**
@@ -462,7 +462,9 @@ test('全旅程：静态构建 → 上传 → 实时进度 → 编辑/bbox → �
   // 阶段 1：文件库（静态构建的前端）+ 词表屏 + 真上传
   // ========================================================================= #
   await page.goto(`${serveOrigin}/`);
-  await expect(page.locator('[data-od-id="dropzone"]')).toBeVisible({ timeout: 30_000 });
+  // 左栏论文导航常驻所有路由（独立文件库屏已删，中栏是「选择或上传一篇论文」空态）
+  await expect(page.locator('[data-od-id="nav-rail"]')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('[data-od-id="library-empty"]')).toBeVisible();
   await shot(page, 'w15-01-library-static');
 
   await page.goto(`${serveOrigin}/#/glossary`);
@@ -482,7 +484,7 @@ test('全旅程：静态构建 → 上传 → 实时进度 → 编辑/bbox → �
   await shot(page, 'w15-02-glossary');
 
   await page.goto(`${serveOrigin}/#/library`);
-  await expect(page.locator('[data-od-id="dropzone"]')).toBeVisible();
+  await expect(page.locator('[data-od-id="nav-rail"]')).toBeVisible();
   await page.locator('[data-od-id="upload-input"]').setInputFiles(SAMPLE_PDF);
   await expect
     .poll(
@@ -496,7 +498,8 @@ test('全旅程：静态构建 → 上传 → 实时进度 → 编辑/bbox → �
       { timeout: 30_000, message: '上传后 root 下应出现新的 up-sample-* 文档' },
     )
     .not.toBe('');
-  const card = page.locator(`[data-od-id="doc-card"][data-did="${did}"]`);
+  // 上传后左栏列表出现新的论文卡（`paper-<did>`）
+  const card = page.locator(`[data-od-id="paper-${did}"]`);
   await expect(card).toBeVisible({ timeout: 20_000 });
   const uploadedArtifacts = await apiJson<{ name: string }[]>(
     request,
@@ -539,7 +542,7 @@ test('全旅程：静态构建 → 上传 → 实时进度 → 编辑/bbox → �
   expect(running.dual).toBe(true);
   expect(running.use_glossary).toBe(true);
 
-  // ---- 实时进度：运行中状态 + 事件流条目 + 时间线 live 段 ---------------------
+  // ---- 实时进度：运行中状态 + 事件流条目 + 阶段条 live 段 ---------------------
   await expect(page.locator('[data-od-id="active-job-status"]')).toHaveAttribute(
     'data-status',
     'running',
@@ -561,11 +564,11 @@ test('全旅程：静态构建 → 上传 → 实时进度 → 编辑/bbox → �
     { timeout: 30_000 },
   );
   await expect(
-    page.locator('[data-od-id="timeline-stage-translate"][data-state="live"]'),
-    '运行中的 run job 应让 translate 段显示为 live',
+    page.locator('[data-od-id="stage-strip-segment"][data-stage="translate"][data-state="live"]'),
+    '运行中的 run job 应让 translate 段在阶段条里显示为 live',
   ).toBeVisible({ timeout: 30_000 });
   await shot(page, 'w15-05-running');
-  console.log('[w15] 运行中：active-job=running、事件流有条目、时间线 translate=live、草稿 409');
+  console.log('[w15] 运行中：active-job=running、事件流有条目、阶段条 translate=live、草稿 409');
 
   // ---- 终态：如实失败（apply/build 需要真 IR）-------------------------------
   await expect
@@ -578,7 +581,8 @@ test('全旅程：静态构建 → 上传 → 实时进度 → 编辑/bbox → �
   const finished = await latestJob(request);
   expect(finished.status, '本 spec 的 fixture 没有真 IR：run 应如实失败').toBe('failed');
   expect(finished.error_code, '失败必须带 error_code（不是静默）').toBeTruthy();
-  // 失败态的顶栏徽标 tooltip 带结果文案（旧 active-job-outcome 条已并入 JobControls）
+  // 失败态的**任务状态徽标**（右栏操作区的 JobControls）tooltip 带结果文案
+  // （旧 active-job-outcome 条已并入）
   await expect(page.locator('[data-od-id="active-job-status"] [data-tip]')).toContainText(
     finished.error_code ?? '',
     { timeout: 30_000 },
@@ -824,15 +828,6 @@ test('全旅程：静态构建 → 上传 → 实时进度 → 编辑/bbox → �
     'ok',
     { timeout: 30_000 },
   );
-  await expect(page.locator('[data-od-id="compile-bar"]')).toContainText(`已更新到 r${draftRevision}`);
-  const downloadLink = page.locator('[data-od-id="download-button"]');
-  await expect(downloadLink).toHaveAttribute('data-enabled', 'true');
-  await expect(downloadLink).toHaveAttribute('download', `paper.mono.r${draftRevision}.pdf`);
-  await expect(downloadLink).toHaveAttribute('href', new RegExp(`r=${draftRevision}$`));
-  await expect(page.locator('[data-od-id="compile-revision-badge"]')).toContainText(
-    `最新 · r${draftRevision}`,
-  );
-  await expect(page.locator('[data-od-id="quality-badge"]')).toContainText('检查通过');
   // 预览按新修订重新取字节（同名产物原地替换，没有 `?r=` 就会显示旧 PDF）
   await expect
     .poll(
@@ -842,6 +837,21 @@ test('全旅程：静态构建 → 上传 → 实时进度 → 编辑/bbox → �
     .toBe(true);
   await expect(page.locator('[data-od-id="preview-canvas"] canvas')).toBeVisible({ timeout: 30_000 });
   await shot(page, 'w15-11-compiled-ok');
+
+  // ---- 归档 tab：导出/下载槽 + 当前版本高亮 + 历史版本可下载 -------------------
+  // 修订号/质量徽标与下载按钮都在右栏归档 tab 里（工具条下载槽已随归档收口删除）。
+  await page.locator('[data-od-id="inspector-tab-archive"]').click();
+  await expect(page.locator('[data-od-id="archive-tab"]')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('[data-od-id="archive-tab"] [data-od-id="archive-actions"]')).toBeVisible();
+
+  const downloadLink = page.locator('[data-od-id="archive-tab"] [data-od-id="download-button"]');
+  await expect(downloadLink).toHaveAttribute('data-enabled', 'true');
+  await expect(downloadLink).toHaveAttribute('download', `paper.mono.r${draftRevision}.pdf`);
+  await expect(downloadLink).toHaveAttribute('href', new RegExp(`r=${draftRevision}$`));
+  await expect(page.locator('[data-od-id="compile-revision-badge"]')).toContainText(
+    `最新 · r${draftRevision}`,
+  );
+  await expect(page.locator('[data-od-id="quality-badge"]')).toContainText('检查通过');
 
   // ---- 下载：字节必须等于磁盘上那一版（浏览器真下载）------------------------
   const [mainDownload] = await Promise.all([
@@ -857,7 +867,7 @@ test('全旅程：静态构建 → 上传 → 实时进度 → 编辑/bbox → �
   );
   expect(downloadedMain.length).toBe(MONO_BYTES.length);
 
-  // ---- 归档视图：当前版本高亮 + 历史版本可下载（字节同样是历史那一版）------
+  // ---- 版本列表：当前版本高亮 + 历史版本可下载（字节同样是历史那一版）------
   const versions = await apiJson<{
     current_revision: number;
     stale: boolean;
@@ -867,8 +877,10 @@ test('全旅程：静态构建 → 上传 → 实时进度 → 编辑/bbox → �
   expect(versions.stale).toBe(false);
   expect(versions.items.map((row) => row.revision)).toEqual([draftRevision, draftRevision - 1]);
 
+  // 「历史版本」链接仍在下载槽里（跳到同一归档 tab，不变死链）
   await page.locator('[data-od-id="download-history"]').click();
-  await expect(page.locator('[data-od-id="archive-panel"]')).toBeVisible({ timeout: 30_000 });
+  await expect(page).toHaveURL(new RegExp(`#/d/${did}/archive$`));
+  await expect(page.locator('[data-od-id="archive-tab"]')).toBeVisible({ timeout: 30_000 });
   const rows = page.locator('[data-od-id="archive-row"]');
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(0)).toHaveAttribute('data-revision', String(draftRevision));

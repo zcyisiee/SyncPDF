@@ -11,7 +11,7 @@
  *
  * 真编译只跑**一次**（改译文 → 保存 → 等 ok → revision/stale 断言）：第二次编译（拖完 bbox
  * 之后服务端防抖触发）只断言到“进 running + 编辑禁用”，随即取消——不让 e2e 跑十分钟。
- * stale / 手动编译按钮 / 失败态的 UI 分支由 `tests/compile-bar.test.tsx` 用替身数据覆盖。
+ * stale / 未选中段时的编译入口 / 失败态的 UI 分支由 `tests/compile-bar.test.tsx` 用替身数据覆盖。
  */
 import { expect, test } from '@playwright/test';
 import type { APIRequestContext } from '@playwright/test';
@@ -115,7 +115,7 @@ test('改译文 → 真编译 → 拖 bbox 更新草稿（真 serve + 真产物�
   const targetId = target?.id as string;
   const baselineBox = target?.layout_box as number[];
 
-  // 版面框图层（拖拽编辑层只在 pdf_native 几何上出现）；旧链接 /translate 合并后仍解析
+  // 译文框图层（拖拽编辑层只在 pdf_native 几何上出现）；旧链接 /translate 合并后仍解析
   await page.addInitScript(() => localStorage.setItem('ieet.bboxMode', 'layout'));
   await page.goto(`/#/d/${COPY_DID}/translate`);
   await expect(page.locator('[data-od-id="preview-canvas"] canvas')).toBeVisible({ timeout: 30_000 });
@@ -128,11 +128,17 @@ test('改译文 → 真编译 → 拖 bbox 更新草稿（真 serve + 真产物�
   await expect(page.locator('[data-od-id^="bbox-handle-"]')).toHaveCount(8);
   await page.screenshot({ path: join(SHOT_DIR, 'e2e-edit-selected.png') });
 
-  // 未编译时下载按钮必须是禁用的（不许把 fixture 里 `bdt run` 的旧 PDF 冒充下载产物）
+  // 未编译时下载按钮必须是禁用的（不许把 fixture 里 `bdt run` 的旧 PDF 冒充下载产物）。
+  // 下载槽已收口到右栏归档 tab（工具条上不再有）：切过去看那个按钮的状态。
+  await page.locator('[data-od-id="inspector-tab-archive"]').click();
+  await expect(page.locator('[data-od-id="archive-tab"]')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('[data-od-id="download-button"]')).toHaveAttribute(
     'data-enabled',
     'false',
   );
+  // 回到段落 tab（后面要编辑该段译文）
+  await page.locator('[data-od-id="inspector-tab-paragraph"]').click();
+  await expect(page.locator('[data-od-id="paragraph-editor"]')).toBeVisible();
 
   // ---- 2) 改译文 → 保存（Cmd+S 立即存）--------------------------------------------
   const paragraphs = await apiJson<{ id: string; target: string | null }[]>(
@@ -191,18 +197,17 @@ test('改译文 → 真编译 → 拖 bbox 更新草稿（真 serve + 真产物�
   const published = await apiJson<{ name: string }[]>(request, `/documents/${COPY_DID}/artifacts`);
   expect(published.some((item) => item.name === `output/${detail.compile.artifact?.name}`)).toBe(true);
 
-  // UI 侧：状态条 → ok；下载按钮启用且文件名带 r1；预览按新修订重新取字节
-  await expect(page.locator('[data-od-id="compile-bar"]')).toHaveAttribute(
-    'data-compile-status',
-    'ok',
-    { timeout: 30_000 },
-  );
-  await expect(page.locator('[data-od-id="compile-bar"]')).toContainText('已更新到 r1');
+  // UI 侧：状态条 → ok（ok 且不 stale 时不渲染 compile-bar 本身，修订号在下载徽标上）；
+  // 下载按钮启用且文件名带 r1；预览按新修订重新取字节
+  await page.locator('[data-od-id="inspector-tab-archive"]').click();
+  await expect(page.locator('[data-od-id="archive-tab"]')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('[data-od-id="compile-revision-badge"]')).toContainText('最新 · r1', {
+    timeout: 30_000,
+  });
   const download = page.locator('[data-od-id="download-button"]');
   await expect(download).toHaveAttribute('data-enabled', 'true');
   await expect(download).toHaveAttribute('download', /\.r1\.pdf$/);
   await expect(download).toHaveAttribute('href', /\/artifacts\/output\/.+\.pdf\?r=1$/);
-  await expect(page.locator('[data-od-id="compile-revision-badge"]')).toContainText('最新 · r1');
   // 质量徽标不许冒充通过：pipeline_ok=true 才绿；本 fixture 的门禁结论按服务端为准
   const qualityBadge = page.locator('[data-od-id="quality-badge"]');
   if (detail.quality.pipeline_ok) {

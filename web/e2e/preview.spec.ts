@@ -147,8 +147,8 @@ test('进度页：真 PDF 渲染 + 两套 bbox 换算对齐 + 点框选中联动
   await expect(page.locator('[data-bbox-id="P01-001"]')).toHaveAttribute('aria-pressed', 'true');
   await page.screenshot({ path: join(SHOT_DIR, 'e2e-preview-selected.png') });
 
-  // 版面框（pdf_native）：同一段落必须换算到同一矩形
-  await page.getByRole('button', { name: '版面框', exact: true }).click();
+  // 译文框（pdf_native）：同一段落必须换算到同一矩形
+  await page.getByRole('button', { name: '译文框', exact: true }).click();
   const layoutRect = await bboxRect(page, 'P01-001');
   expect(Math.abs(layoutRect.x - parseRect.x)).toBeLessThan(0.6);
   expect(Math.abs(layoutRect.y - parseRect.y)).toBeLessThan(0.6);
@@ -161,7 +161,7 @@ test('进度页：真 PDF 渲染 + 两套 bbox 换算对齐 + 点框选中联动
   const parsePage2 = await (
     await request.get(`/api/v1/documents/${DID}/geometry?kind=parse&page=2`)
   ).json();
-  await page.getByRole('button', { name: '段落框', exact: true }).click();
+  await page.getByRole('button', { name: '原文框', exact: true }).click();
   const switchStarted = Date.now();
   // 上一页/下一页按钮已删除：跳页用页码输入（滚动/触控板负责连续翻页）
   const pageInput = page.getByRole('spinbutton', { name: '页码' });
