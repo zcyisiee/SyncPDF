@@ -17,37 +17,45 @@
  * 行内栅格变量（--vrw/--inspw/--tlh）提供唯一拼写来源。
  */
 :root {
-  --parchment: #f5f4ed;
-  --ivory: #faf9f5;
-  --sand: #e8e6dc;
-  --sand-2: #e5e3d8;
-  --fg: #141413;
-  --fg-2: #3d3d3a;
-  --fg-3: #504e49;
-  --fg-4: #6b6a64;
+  /* 1. 色彩令牌 — 暖纸 / 墨 / 单一红棕强调色 */
+  --parchment: oklch(97.6% 0.006 92);
+  --ivory: oklch(99.5% 0.003 95);
+  --sand: oklch(96.2% 0.007 90);
+  --sand-2: oklch(97.9% 0.005 92);
+  --canvas: oklch(94.6% 0.008 90);
+  --paper: oklch(99.8% 0.002 95);
+  --fg: oklch(22% 0.016 70);
+  --fg-2: oklch(35% 0.015 70);
+  --fg-3: oklch(48% 0.012 70);
+  --fg-4: oklch(58% 0.010 72);
 
-  --hair: color-mix(in oklch, var(--fg) 11%, transparent);
-  --hair-2: color-mix(in oklch, var(--fg) 22%, transparent);
+  --hair: oklch(90% 0.006 95);
+  --hair-2: oklch(83% 0.008 92);
 
-  --accent: #1b365d;
-  --accent-soft: #e4ecf5;
-  --on-accent: #f7f6f0;
+  --accent: oklch(52% 0.10 28);
+  --accent-strong: oklch(44% 0.105 28);
+  --accent-soft: oklch(95.6% 0.014 32);
+  --on-accent: oklch(99.8% 0.002 95);
+  --accent-line: oklch(86% 0.032 30);
   --tint: color-mix(in oklch, var(--accent) 8%, transparent);
   --tint-2: color-mix(in oklch, var(--accent) 14%, transparent);
 
-  --run: #b7791f;
-  --run-soft: color-mix(in oklch, var(--run) 13%, var(--ivory));
+  --run: oklch(48% 0.082 245);
+  --run-soft: oklch(95.4% 0.018 245);
   --run-ink: color-mix(in oklch, var(--run) 66%, var(--fg));
-  --pass: #2f6b4f;
-  --pass-soft: color-mix(in oklch, var(--pass) 12%, var(--ivory));
+  --pass: oklch(46% 0.085 155);
+  --pass-soft: oklch(95.2% 0.021 155);
   --pass-ink: color-mix(in oklch, var(--pass) 78%, var(--fg));
-  --err: #a63d2f;
-  --err-soft: color-mix(in oklch, var(--err) 11%, var(--ivory));
+  --err: oklch(45% 0.14 25);
+  --err-soft: oklch(95.4% 0.026 25);
   --err-ink: color-mix(in oklch, var(--err) 78%, var(--fg));
+  --warn: oklch(52% 0.10 72);
+  --warn-soft: oklch(95.8% 0.028 80);
+  --warn-ink: color-mix(in oklch, var(--warn) 66%, var(--fg));
 
-  --serif: Charter, 'Source Han Serif SC', 'Noto Serif SC', Georgia, 'Songti SC', 'SimSun', serif;
-  --sans: Inter, system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --serif: 'Iowan Old Style', Charter, 'Source Han Serif SC', 'Noto Serif SC', Georgia, 'Songti SC', 'SimSun', serif;
+  --sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Segoe UI', system-ui, sans-serif;
+  --mono: 'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace;
 
   --s1: 4px;
   --s2: 6px;
@@ -61,8 +69,8 @@
 
   /* 工作台栏宽（实际值由 src/components/shell 写在容器行内 style 上） */
   --gw: 6px;
-  --inspw: 360px;
-  --tlh: 96px;
+  --navw: 280px;
+  --inspw: 340px;
 }
 
 @layer base {
@@ -101,14 +109,26 @@
 }
 
 @layer components {
-  /* 工作台栅格：图标栏在栅格外（ScreenFrame 的 flex 行），这里只排预览区/右侧面板/时间线。
-   * 旧版的 220px 视图栏已删除：预览区占满除右栏外的全部宽度（二级视图合并成同一个工作台）。 */
-  .wb-grid {
+  /* 三栏骨架：左栏论文列表 + 中栏预览 + 右栏检查器。
+   * --navw / --inspw 由容器行内 style 写入（Gutter 拖拽更新 stores/ui）。 */
+  .app-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) var(--gw) var(--inspw);
-    grid-template-rows: minmax(0, 1fr) var(--gw) var(--tlh);
+    grid-template-columns: var(--navw) var(--gw) minmax(0, 1fr) var(--gw) var(--inspw);
+    grid-template-rows: minmax(0, 1fr);
     min-height: 0;
     min-width: 0;
+    height: 100vh;
+    overflow: hidden;
+    background: var(--parchment);
+  }
+
+  /* 中栏内部：工具条 + 画布 */
+  .work-grid {
+    display: grid;
+    grid-template-rows: 40px minmax(0, 1fr);
+    min-height: 0;
+    min-width: 0;
+    background: var(--canvas, var(--sand));
   }
 
   /* 禁用态 tooltip（§4.1）：`content: attr(data-tip)` 只能用 CSS 表达 */

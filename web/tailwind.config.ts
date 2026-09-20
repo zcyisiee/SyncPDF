@@ -1,42 +1,56 @@
 import type { Config } from 'tailwindcss';
 
 // 设计令牌映射（参见 src/app/globals.css）。
-// 颜色、字体、圆角、阴影、间距在此定义；与 CSS 变量同步修改。
+// 颜色走 CSS 变量（唯一拼写来源在 globals.css），Tailwind 只做别名映射。
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        parchment: '#f5f4ed',
-        ivory: '#faf9f5',
-        sand: { DEFAULT: '#e8e6dc', 2: '#e5e3d8' },
-        ink: { DEFAULT: '#141413', 2: '#3d3d3a', 3: '#504e49', 4: '#6b6a64' },
-        // §1.1 派生发丝线（不新增灰阶）
-        hair: {
-          DEFAULT: 'color-mix(in oklch, #141413 11%, transparent)',
-          2: 'color-mix(in oklch, #141413 22%, transparent)',
+        parchment: 'var(--parchment)',
+        ivory: 'var(--ivory)',
+        canvas: 'var(--canvas)',
+        paper: 'var(--paper)',
+        sand: { DEFAULT: 'var(--sand)', 2: 'var(--sand-2)' },
+        ink: {
+          DEFAULT: 'var(--fg)',
+          2: 'var(--fg-2)',
+          3: 'var(--fg-3)',
+          4: 'var(--fg-4)',
         },
-        accent: { DEFAULT: '#1B365D', soft: '#E4ECF5', on: '#f7f6f0' },
-        // §1.1 bbox 数据编码色（墨蓝 8% / 14%，来自 globals.css 的 --tint / --tint-2）
+        hair: { DEFAULT: 'var(--hair)', 2: 'var(--hair-2)' },
+        accent: {
+          DEFAULT: 'var(--accent)',
+          strong: 'var(--accent-strong)',
+          soft: 'var(--accent-soft)',
+          on: 'var(--on-accent)',
+          line: 'var(--accent-line)',
+        },
         tint: { DEFAULT: 'var(--tint)', 2: 'var(--tint-2)' },
         run: {
-          DEFAULT: '#B7791F',
-          soft: 'color-mix(in oklch, #B7791F 13%, #faf9f5)',
-          ink: 'color-mix(in oklch, #B7791F 66%, #141413)',
+          DEFAULT: 'var(--run)',
+          soft: 'var(--run-soft)',
+          ink: 'var(--run-ink)',
         },
         pass: {
-          DEFAULT: '#2F6B4F',
-          soft: 'color-mix(in oklch, #2F6B4F 12%, #faf9f5)',
-          ink: 'color-mix(in oklch, #2F6B4F 78%, #141413)',
+          DEFAULT: 'var(--pass)',
+          soft: 'var(--pass-soft)',
+          ink: 'var(--pass-ink)',
         },
         err: {
-          DEFAULT: '#A63D2F',
-          soft: 'color-mix(in oklch, #A63D2F 11%, #faf9f5)',
-          ink: 'color-mix(in oklch, #A63D2F 78%, #141413)',
+          DEFAULT: 'var(--err)',
+          soft: 'var(--err-soft)',
+          ink: 'var(--err-ink)',
+        },
+        warn: {
+          DEFAULT: 'var(--warn)',
+          soft: 'var(--warn-soft)',
+          ink: 'var(--warn-ink)',
         },
       },
       fontFamily: {
         serif: [
+          "'Iowan Old Style'",
           'Charter',
           '"Source Han Serif SC"',
           '"Noto Serif SC"',
@@ -46,18 +60,18 @@ export default {
           'serif',
         ],
         sans: [
-          'Inter',
-          'system-ui',
           '-apple-system',
-          '"Segoe UI"',
+          'BlinkMacSystemFont',
           '"PingFang SC"',
-          '"Microsoft YaHei"',
+          '"Hiragino Sans GB"',
+          '"Segoe UI"',
+          'system-ui',
           'sans-serif',
         ],
         mono: [
-          '"JetBrains Mono"',
+          '"SF Mono"',
           'ui-monospace',
-          'SFMono-Regular',
+          '"JetBrains Mono"',
           'Menlo',
           'Consolas',
           'monospace',
@@ -76,7 +90,7 @@ export default {
       },
       borderRadius: { DEFAULT: '4px', card: '6px' },
       boxShadow: {
-        ring: '0 0 0 1px color-mix(in oklch, #141413 11%, transparent)',
+        ring: '0 0 0 1px var(--hair)',
         lift: '0 4px 24px rgba(0,0,0,.05)',
         modal: '0 4px 24px rgba(0,0,0,.14)',
       },
