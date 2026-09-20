@@ -245,6 +245,47 @@ describe('ui store 段落多选（shift 语义）', () => {
   });
 });
 
+describe('ui store focusParagraph（多选块切换 chips）', () => {
+  it('把集合里的某段挑到末尾（主选中段随之切换）', () => {
+    const store = createUiStore();
+    store.getState().selectParagraph('P01-001', { extend: true });
+    store.getState().selectParagraph('P01-002', { extend: true });
+    store.getState().selectParagraph('P01-003', { extend: true });
+    store.getState().focusParagraph('P01-001');
+    expect(store.getState().selectedParagraphIds).toEqual(['P01-002', 'P01-003', 'P01-001']);
+    expect(store.getState().selectedParagraphId).toBe('P01-001');
+  });
+
+  it('不在集合中的 id 被忽略（不抛错、不改选中）', () => {
+    const store = createUiStore();
+    store.getState().selectParagraph('P01-001', { extend: true });
+    store.getState().selectParagraph('P01-002', { extend: true });
+    const before = store.getState().selectedParagraphIds;
+    store.getState().focusParagraph('P09-009');
+    expect(store.getState().selectedParagraphIds).toBe(before);
+    expect(store.getState().selectedParagraphId).toBe('P01-002');
+  });
+
+  it('已在末尾（已是主选中段）：不 set（集合引用不变）', () => {
+    const store = createUiStore();
+    store.getState().selectParagraph('P01-001', { extend: true });
+    store.getState().selectParagraph('P01-002', { extend: true });
+    const before = store.getState().selectedParagraphIds;
+    store.getState().focusParagraph('P01-002');
+    expect(store.getState().selectedParagraphIds).toBe(before);
+  });
+
+  it('单选集合里 focus 自身也保持原集合引用（chips 只在多选时渲染，但语义不依赖它）', () => {
+    const store = createUiStore();
+    store.getState().selectParagraph('P01-001');
+    const before = store.getState().selectedParagraphIds;
+    store.getState().focusParagraph('P01-001');
+    expect(store.getState().selectedParagraphIds).toBe(before);
+    store.getState().focusParagraph('P02-002'); // 不在集合里 → 忽略
+    expect(store.getState().selectedParagraphIds).toBe(before);
+  });
+});
+
 describe('reader session choices', () => {
   it('zoom clamps invalid/extreme values, fit resets, compare links by default', () => {
     const store = createUiStore();

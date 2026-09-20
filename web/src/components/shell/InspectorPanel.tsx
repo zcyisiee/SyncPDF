@@ -47,6 +47,7 @@ export function InspectorPanel({
 }) {
   const selectedParagraphId = useUiStore((state) => state.selectedParagraphId);
   const selectedParagraphIds = useUiStore((state) => state.selectedParagraphIds);
+  const focusParagraph = useUiStore((state) => state.focusParagraph);
   const documentQuery = useDocument(did);
   const jobsQuery = useJobs(did);
   const compile = documentQuery.data?.compile ?? null;
@@ -103,14 +104,21 @@ export function InspectorPanel({
         </div>
         {tab === 'paragraph' ? (
           <div role="tabpanel" aria-label="段落" className="flex min-h-0 flex-1 flex-col">
-            {/* 多选 ≥2：批量编译面板压在段落编辑器上方（编辑器仍跟随主选中段）。 */}
+            {/* 多选 ≥2：块切换 chips + 批量编译面板压在段落编辑器上方（编辑器跟随主选中段）。 */}
             {selectedParagraphIds.length > 1 ? (
-              <BatchPanel
-                did={did}
-                blockIds={selectedParagraphIds}
-                disabled={editingLocked}
-                disabledReason={editingLockedReason}
-              />
+              <>
+                <ParagraphChips
+                  blockIds={selectedParagraphIds}
+                  activeId={selectedParagraphId}
+                  onFocus={(id) => focusParagraph(id)}
+                />
+                <BatchPanel
+                  did={did}
+                  blockIds={selectedParagraphIds}
+                  disabled={editingLocked}
+                  disabledReason={editingLockedReason}
+                />
+              </>
             ) : null}
             <div className="min-h-0 flex-1">
               <ParagraphEditor
@@ -134,6 +142,44 @@ export function InspectorPanel({
         ) : null}
       </div>
     </aside>
+  );
+}
+
+/**
+ * 多选（≥2 段）时的块切换 chips：每段一个 chip，当前主选中段（编辑器跟随的那段）高亮；
+ * 点 chip → `focusParagraph(id)`（把该段挪到集合末尾，编辑器随之切过去）。
+ * 集合只有一段时不渲染（单选没有可切换的对象）。
+ */
+function ParagraphChips({
+  blockIds,
+  activeId,
+  onFocus,
+}: {
+  blockIds: string[];
+  activeId: string | null;
+  onFocus: (id: string) => void;
+}) {
+  return (
+    <div
+      data-od-id="paragraph-chips"
+      className="flex flex-none flex-wrap items-center gap-s2 border-b border-hair bg-ivory px-s3 py-[6px]"
+    >
+      {blockIds.map((id) => (
+        <button
+          key={id}
+          type="button"
+          data-od-id={`paragraph-chip-${id}`}
+          aria-pressed={id === activeId}
+          onClick={() => onFocus(id)}
+          className={cn(
+            'h-[19px] rounded-[3px] px-[6px] font-mono text-micro leading-none tracking-[0.03em] transition-colors',
+            id === activeId ? 'bg-accent-soft text-accent' : 'bg-sand text-ink-3 hover:text-ink',
+          )}
+        >
+          {id}
+        </button>
+      ))}
+    </div>
   );
 }
 

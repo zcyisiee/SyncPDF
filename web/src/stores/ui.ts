@@ -134,6 +134,11 @@ export interface UiState {
   setBboxMode: (mode: BboxMode) => void;
   /** 统一选中入口：`extend` = shift 多选语义，否则重置为单选 `[id]`。 */
   selectParagraph: (id: string, opts?: ParagraphSelectOptions) => void;
+  /**
+   * 把多选集合里的某段挪到末尾（= 设为「主选中段」，编辑器随之跟随）；不在集合中则忽略，
+   * 已在末尾不 set（避免无谓重渲染）。用于段落 tab 的块切换 chips。
+   */
+  focusParagraph: (id: string) => void;
   /** 清空多选（`selectedParagraphId` 一并 → null）。 */
   clearParagraphSelection: () => void;
   /** 兼容入口（单选时代的调用方继续可用）：null → 清空，否则 `[id]`。 */
@@ -267,6 +272,12 @@ export function createUiStore(): StoreApi<UiState> {
     clearParagraphSelection: () => {
       if (get().selectedParagraphIds.length === 0) return;
       set(selectionPatch([]));
+    },
+    focusParagraph: (id) => {
+      const current = get().selectedParagraphIds;
+      if (!current.includes(id)) return;
+      if (current[current.length - 1] === id) return;
+      set(selectionPatch([...current.filter((item) => item !== id), id]));
     },
     setSelectedParagraph: (id) => {
       if (id === null) get().clearParagraphSelection();

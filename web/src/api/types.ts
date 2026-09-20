@@ -28,6 +28,16 @@ export interface ParagraphStyle {
 export type ParagraphItem = components['schemas']['ParagraphItem'] & {
   style?: ParagraphStyle | null;
 };
+/**
+ * `GET /fonts` 的一项：可选段落级中文字体族（后端注册表 `font_families.FONT_FAMILIES`）。
+ * `available=false` = 该族字体文件本机没有，**不可选**（选了也会回落默认族）。
+ */
+export interface FontFamilyItem {
+  id: string;
+  label: string;
+  serif: boolean;
+  available: boolean;
+}
 export type GeometryResponse = components['schemas']['GeometryResponse'];
 export type CheckResponse = components['schemas']['CheckResponse'];
 export type EventsPage = components['schemas']['EventsPage'];
