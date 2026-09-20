@@ -208,6 +208,8 @@ def test_delete_on_cold_start_bumps_from_zero(client):
         {"box": [10.0, 20.0, 30.0, 15.0]},  # y2 <= y
         {"box": [10.0, 20.0, 30.0]},  # 不是四元
         {"box": ["a", 1, 2, 3]},  # 非数字
+        {"font_family": "nope"},  # 未登记的中文字体族
+        {"font_family": 3},  # 类型
         {"nope": 1},  # 未知键
     ],
 )
@@ -229,6 +231,7 @@ def test_valid_layout_boundaries_are_accepted(client):
         "line_skip": 0.8,
         "box_scale": 0.3,
         "box": [10.0, 20.0, 30.0, 40.0],
+        "font_family": "lxgw-wenkai",
         "force_break_after_text": ["术语"],
         "force_break_after_offset": [3],
     }
@@ -237,6 +240,37 @@ def test_valid_layout_boundaries_are_accepted(client):
     )
     assert response.status_code == 200, response.text
     assert response.json()["paragraphs"][PID]["layout"] == layout
+
+
+def test_font_family_layout_roundtrips_through_draft(client):
+    """`layout.font_family` 合法 id → 200 并回读；非法 → 422 draft_invalid（不改盘）。"""
+    response = patch_draft(
+        client,
+        {"base_revision": 0, "paragraphs": {PID: {"layout": {"font_family": "maru-buri"}}}},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["paragraphs"][PID]["layout"] == {"font_family": "maru-buri"}
+    assert get_draft(client)["paragraphs"][PID]["layout"] == {"font_family": "maru-buri"}
+
+    bad = patch_draft(
+        client,
+        {"base_revision": 1, "paragraphs": {PID: {"layout": {"font_family": "nope"}}}},
+    )
+    assert bad.status_code == 422, bad.text
+    error = bad.json()["error"]
+    assert error["code"] == "draft_invalid"
+    assert any("未知字体族" in item for item in error["detail"]["errors"])
+    # 校验失败不改盘：revision 与上一版字体族都没变。
+    unchanged = get_draft(client)
+    assert unchanged["revision"] == 1
+    assert unchanged["paragraphs"][PID]["layout"] == {"font_family": "maru-buri"}
+
+    # 字段级 null 删掉该字段（与其它键同一语义：没其它覆盖时整段也没了）。
+    removed = patch_draft(
+        client, {"base_revision": 1, "paragraphs": {PID: {"layout": None}}}
+    )
+    assert removed.status_code == 200, removed.text
+    assert PID not in removed.json()["paragraphs"]
 
 
 @pytest.mark.parametrize(

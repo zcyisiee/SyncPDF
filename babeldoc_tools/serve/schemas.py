@@ -103,6 +103,7 @@ __all__ = [
     "ErrorBody",
     "ErrorEnvelope",
     "EventsPage",
+    "FontFamilyItem",
     "GeometryResponse",
     "HealthResponse",
     "JobAccepted",
@@ -841,3 +842,22 @@ class GlossaryUpdateRequest(BaseModel):
     """
 
     entries: list[GlossaryEntryModel]
+
+
+# --------------------------------------------------------------------------- #
+# 段落级中文字体族（``GET /fonts``）
+# --------------------------------------------------------------------------- #
+class FontFamilyItem(BaseModel):
+    """服务端登记的段落级中文字体族（``font_families.FONT_FAMILIES`` 的一项）。
+
+    ``id`` 是客户端唯一要说的值（写进草稿 ``layout.font_family``）；``label`` 是展示名。
+    ``serif`` 描述该族的学形：拉丁字形跟随它（除非用户另给了 ``serif`` 覆盖）。
+    ``available`` 是本机事实（字体文件是否探测到），**不是错误**：未探测到时请求该族
+    仍可提交，渲染侧回落默认族。
+    """
+
+    id: str
+    label: str
+    serif: bool
+    #: 本机是否探测到该族字体文件（false = 选它会回落默认族）。
+    available: bool

@@ -74,6 +74,7 @@ def test_validate_accepts_full_patch():
                 "bold": True,
                 "italic": False,
                 "serif": True,
+                "font_family": "lxgw-wenkai",
                 "force_break_after_text": ["（1）", "（2）"],
                 "force_break_after_offset": [23, 47],
             }
@@ -94,6 +95,9 @@ def test_validate_accepts_full_patch():
         ({"paragraphs": {"P1-1": {"bold": "yes"}}}, "布尔值"),
         ({"paragraphs": {"P1-1": {"italic": 1}}}, "布尔值"),
         ({"paragraphs": {"P1-1": {"serif": "true"}}}, "布尔值"),
+        ({"paragraphs": {"P1-1": {"font_family": "nope"}}}, "未知字体族"),
+        ({"paragraphs": {"P1-1": {"font_family": 3}}}, "未知字体族"),
+        ({"paragraphs": {"P1-1": {"font_family": None}}}, "未知字体族"),
         ({"paragraphs": {"P1-1": {"force_break_after_offset": [-1]}}}, "非负整数"),
         ({"paragraphs": {"P1-1": {"typo_key": 1}}}, "未知字段"),
         ({"pages": {"first": {"font_scale": 0.9}}}, "页码"),
@@ -118,6 +122,26 @@ def test_validate_allows_bool_none_deletion_and_style_flag():
     assert lo.style_flag(overrides, "P2-1", "bold") is None
     with pytest.raises(ValueError):
         lo.style_flag(overrides, "P1-1", "typo")
+
+
+def test_validate_accepts_registered_font_family_only():
+    """`font_family` 只收注册表里的 id（`font_families.FONT_FAMILY_IDS`）。"""
+    from babeldoc.format.pdf.document_il.backend.latex_bbox import font_families
+
+    assert lo.PARAGRAPH_FONT_FAMILY_KEY == "font_family"
+    for family_id in sorted(font_families.FONT_FAMILY_IDS):
+        patch = {"paragraphs": {"P1-1": {"font_family": family_id}}}
+        assert lo.validate(lo.normalize(patch)) == [], family_id
+
+    # 未知 id / 非字符串都不合法（不静默忽略，也不当删除）。
+    for bad in ("nope", "", "Source-Han-Serif", 3, True, ["lxgw-wenkai"], None):
+        errors = lo.validate(lo.normalize({"paragraphs": {"P1-1": {"font_family": bad}}}))
+        assert any("未知字体族" in error for error in errors), (bad, errors)
+    # allow_none 的 patch 里 null = 删除该键（与其它键同一语义）。
+    assert lo.validate(
+        lo.normalize({"paragraphs": {"P1-1": {"font_family": None}}}),
+        allow_none=True,
+    ) == []
 
 
 def test_patch_merge_diff_and_delete(tmp_path):

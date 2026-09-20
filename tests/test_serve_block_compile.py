@@ -531,6 +531,89 @@ def test_draft_layout_is_passed_to_render_request(tmp_path, monkeypatch):
     assert seen and seen[0].get("layout") == {"bold": True, "font_scale": 1.2}
 
 
+def test_draft_font_family_is_passed_to_render_request(tmp_path, monkeypatch):
+    """草稿的 `layout.font_family` 跟其它排版覆盖一样透传给 render_request。"""
+    from pathlib import Path
+
+    from babeldoc_tools.serve import block_compile
+
+    compiler, _rows = _multi_page_store(tmp_path, monkeypatch, pages=1)
+    layout = {"font_family": "lxgw-wenkai", "serif": True}
+    compiler.store.database.save_draft(
+        "paper",
+        {"revision": 1, "paragraphs": {"P1": {"layout": layout}}},
+        expected_revision=0,
+    )
+    seen: list[dict] = []
+
+    def render(_workdir, _pid, target, box, temporary, _cache, **kwargs):
+        seen.append(kwargs)
+        path = Path(temporary) / "stamp.pdf"
+        with pymupdf.open() as pdf:
+            page = pdf.new_page(width=box[2] - box[0], height=box[3] - box[1])
+            page.insert_text((5, 20), target)
+            pdf.save(path)
+        return (
+            SimpleNamespace(ok=True, pdf_path=str(path), font_size=11, scale=1.0),
+            False,
+        )
+
+    monkeypatch.setattr(block_compile, "render_request", render)
+    job = record()
+    job.revision = 1
+    compiler.compile_block_patch(job)
+
+    assert seen and seen[0].get("layout") == layout
+
+
+@pytest.mark.parametrize("family_serif", [True, False])
+def test_apply_font_family_writes_meta_and_latin_serif(family_serif):
+    """`render_request` 的 meta 写入：族 id 进 meta，拉丁 serif 跟随该族。
+
+    `render_request` 本体要跑真 XeLaTeX（拿不到编译环境），但它的元数据部分是一个
+    纯函数（`_apply_font_family`），直接单测这一层，并断言 meta 的形状正是
+    `overlay._stamp_request` 读的那些键。
+    """
+    from babeldoc.format.pdf.document_il.backend.latex_bbox import font_families
+    from babeldoc_tools.serve import block_compile
+
+    spec = next(
+        item for item in font_families.FONT_FAMILIES if item.serif is family_serif
+    )
+
+    # 用户没显式给 serif：拉丁字形改跟随字体族。
+    meta = {"serif": not family_serif}
+    block_compile._apply_font_family(meta, {"font_family": spec.id}, None)
+    assert meta == {"serif": family_serif, "font_family": spec.id}
+
+    # 同族：serif 已经是目标值，不多写一次（不动 meta 里无关键）。
+    meta = {"serif": family_serif, "font_scale": 0.9}
+    block_compile._apply_font_family(meta, {"font_family": spec.id}, None)
+    assert meta == {"serif": family_serif, "font_scale": 0.9, "font_family": spec.id}
+
+    # 用户显式给了 serif：以用户为准，只写 font_family。
+    meta = {"serif": not family_serif}
+    block_compile._apply_font_family(
+        meta, {"font_family": spec.id}, not family_serif
+    )
+    assert meta == {"serif": not family_serif, "font_family": spec.id}
+
+
+def test_apply_font_family_ignores_unknown_and_missing_ids():
+    """未登记的 id / 没给键 / 非字符串 → meta 一行不改（行为与改前一致）。"""
+    from babeldoc_tools.serve import block_compile
+
+    for layout in ({"font_family": "nope"}, {}, None, {"font_family": 3}):
+        meta = {"serif": False, "font_size": 10.0}
+        block_compile._apply_font_family(meta, layout, None)
+        assert meta == {"serif": False, "font_size": 10.0}, layout
+
+    # 显式 serif 覆盖时只写 font_family，不动调用方已经写好的 serif。
+    meta = {"serif": True, "font_size": 10.0}
+    block_compile._apply_font_family(meta, {"font_family": "lxgw-wenkai"}, True)
+    assert meta == {"serif": True, "font_size": 10.0, "font_family": "lxgw-wenkai"}
+
+
 def _patch(compiler, *, page):
     with compiler.store.database._lock:
         row = compiler.store.database.connection.execute(

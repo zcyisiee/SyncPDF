@@ -239,6 +239,29 @@ def hydrate_parse(workdir, temporary):
         database.close()
 
 
+def _apply_font_family(meta: dict, layout: dict | None, serif_override: bool | None) -> None:
+    """按草稿 ``layout.font_family`` 覆盖该段 meta（字体族 + 拉丁衬线属性）。
+
+    ``font_family`` 命中注册表（``font_families.FONT_FAMILY_IDS``）才写
+    ``meta["font_family"]``（:meth:`overlay.LatexBboxOverlay._stamp_request` 读它，
+    渲染器据此换中文主字体；该族在本机没探测到则渲染侧回落默认族）；该族的
+    ``serif`` 与段落派生值不同时拉丁字形也跟着换 Noto Serif/Sans——除非用户显式
+    给了 ``serif``（``serif_override`` 非 None，以用户为准）。认不出的 id 不改 meta
+    （草稿校验已拦非法值）。
+    """
+    from babeldoc.format.pdf.document_il.backend.latex_bbox.font_families import (
+        font_family_spec,
+    )
+
+    family_id = (layout or {}).get("font_family")
+    family_spec = font_family_spec(family_id) if isinstance(family_id, str) else None
+    if family_spec is None:
+        return
+    meta["font_family"] = family_spec.id
+    if serif_override is None and bool(meta.get("serif")) != family_spec.serif:
+        meta["serif"] = family_spec.serif
+
+
 def render_request(
     workdir, pid, target, box, temporary, cache_root, capability=None, layout=None
 ):
@@ -248,8 +271,11 @@ def render_request(
     传入）；``None`` = 现场探测（单段编辑编译的冷路径，语义与旧版一致）。
     ``layout``：该段草稿的排版覆盖（``layout_overrides`` 键）。局部编译消费其中
     的 ``font_scale``（字号乘数）、``line_skip``（行距系数）与 ``bold``/``italic``/
-    ``serif`` 三态样式覆盖（布尔；缺省 = 跟随源文派生值）；``box`` 由调用方
-    解析成 ``box`` 参数（含 ``box_scale``），这里不再重复应用。
+    ``serif`` 三态样式覆盖（布尔；缺省 = 跟随源文派生值）；``font_family`` 是
+    中文字体族 id（``font_families.FONT_FAMILY_IDS``），命中注册表时写进该段的
+    ``meta``：中文主字体用该族，拉丁字体的衬线属性跟随该族（除非用户同时也显式
+    给了 ``serif``，那以用户为准）。``box`` 由调用方解析成 ``box`` 参数
+    （含 ``box_scale``），这里不再重复应用。
     """
 
     import pymupdf
@@ -340,8 +366,10 @@ def render_request(
         body = r"{\bfseries " + body + "}"
     if italic:
         body = r"{\itshape " + body + "}"
-    if flag("serif") is not None:
-        meta["serif"] = flag("serif")
+    serif_override = flag("serif")
+    if serif_override is not None:
+        meta["serif"] = serif_override
+    _apply_font_family(meta, layout, serif_override)
     font_size = meta["font_size"]
     font_scale = (layout or {}).get("font_scale")
     if isinstance(font_scale, (int, float)) and not isinstance(font_scale, bool):
