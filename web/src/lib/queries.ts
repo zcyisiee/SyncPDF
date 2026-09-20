@@ -24,6 +24,7 @@ import type {
   DraftPatchRequest,
   DraftResponse,
   EventsPage,
+  FontFamilyItem,
   GeometryResponse,
   GlossaryResponse,
   GlossaryUpdateRequest,
@@ -74,6 +75,8 @@ export const queryKeys = {
   versions: (did: string) => ['documents', did, 'versions'] as const,
   /** W13 全局词表（只有一个，不带 did）。 */
   glossary: ['glossary'] as const,
+  /** 可选段落级中文字体族清单（`GET /fonts`，全局，不带 did）。 */
+  fonts: ['fonts'] as const,
 };
 
 /**
@@ -427,6 +430,18 @@ export function useProfiles() {
     queryKey: queryKeys.profiles,
     queryFn: () => apiGet<ProfileListItem[]>('/profiles'),
     staleTime: 60_000,
+  });
+}
+
+/**
+ * 可选段落级中文字体族清单（`GET /fonts`）：全局资源，一次会话内不变 → `staleTime: Infinity`。
+ * 失败可重试（TanStack 默认重试策略）：字体清单拿不到只是「这一项不可改」，不影响译文编辑。
+ */
+export function useFonts() {
+  return useQuery({
+    queryKey: queryKeys.fonts,
+    queryFn: () => apiGet<FontFamilyItem[]>('/fonts'),
+    staleTime: Infinity,
   });
 }
 

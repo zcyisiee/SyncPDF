@@ -1,7 +1,8 @@
 /**
  * `ParagraphEditor`：草稿优先显示、本地 1.5s 防抖保存、失焦/Cmd+S 立即保存、
  * 409 两分支（revision_conflict / document_busy）与 422 draft_invalid、编译中只读、
- * 恢复基线、排版参数范围校验，以及「编译样式」区（源文派生摘要 + 三态覆盖下拉）。
+ * 恢复基线、排版参数范围校验，「编译样式」区（源文派生摘要 + 三态覆盖下拉），
+ * 以及 `/fonts` 字体族下拉与「字号」pt 下拉（font_scale 换算）。
  */
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +13,13 @@ import { jsonResponse, mockApiFetch, renderWithQuery, resetUiStore } from './hel
 const DID = 'ccs3764-dyn';
 const PARAGRAPHS_PATH = `/api/v1/documents/${DID}/paragraphs`;
 const DRAFT_PATH = `/api/v1/documents/${DID}/draft`;
+const FONTS_PATH = '/api/v1/fonts';
+
+/** `GET /fonts` 的替身清单：一个可用（宋体）+ 一个不可用（文楷，本机没字体文件）。 */
+const FONTS = [
+  { id: 'source-han-serif', label: '思源宋体', serif: true, available: true },
+  { id: 'lxgw-wenkai', label: '霞鹜文楷', serif: true, available: false },
+];
 
 const PARAGRAPHS = [
   {
@@ -46,6 +54,8 @@ function mockEditor(options: {
   patch?: () => Response;
   paragraphsStatus?: number;
   paragraphs?: unknown;
+  fonts?: unknown;
+  fontsStatus?: number;
 } = {}) {
   const fetchMock = mockApiFetch({
     [PARAGRAPHS_PATH]: () =>
@@ -57,6 +67,13 @@ function mockEditor(options: {
           ),
     [DRAFT_PATH]: () => jsonResponse(options.draft ?? DRAFT_EMPTY),
     [`PATCH ${DRAFT_PATH}`]: options.patch ?? (() => jsonResponse({ ...DRAFT_EMPTY, revision: 1 })),
+    [FONTS_PATH]: () =>
+      options.fontsStatus === undefined
+        ? jsonResponse(options.fonts ?? FONTS)
+        : jsonResponse(
+            { error: { code: 'fonts_unavailable', message: '字体清单不可用' } },
+            options.fontsStatus,
+          ),
   });
   return fetchMock;
 }
@@ -278,6 +295,192 @@ describe('ParagraphEditor 编译样式区', () => {
     mockEditor({ draft: draftStyleOnly });
     renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
     expect(await screen.findByRole('button', { name: '恢复基线' })).toBeInTheDocument();
+  });
+});
+
+describe('ParagraphEditor 字体族与字号下拉', () => {
+  it('字体族下拉渲染 /fonts 选项（顺序同 API；不可用的族标「（不可用）」并 disabled）', async () => {
+    mockEditor();
+    renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
+    await screen.findByLabelText('译文');
+    const select = (await screen.findByLabelText('字体族覆盖')) as HTMLSelectElement;
+    const options = Array.from(select.options);
+    expect(options.map((option) => option.value)).toEqual(['', 'source-han-serif', 'lxgw-wenkai']);
+    expect(options[0]?.textContent).toBe('跟随默认');
+    expect(options[1]?.textContent).toBe('思源宋体');
+    expect(options[1]?.disabled).toBe(false);
+    expect(options[2]?.textContent).toBe('霞鹜文楷（不可用）');
+    expect(options[2]?.disabled).toBe(true);
+  });
+
+  it('字体清单加载失败：行内提示 + 只留「跟随默认」', async () => {
+    mockEditor({ fontsStatus: 500 });
+    renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
+    await screen.findByLabelText('译文');
+    expect(await screen.findByText('字体清单不可用（/fonts）')).toBeInTheDocument();
+    const select = document.querySelector(
+      '[data-od-id="paragraph-style-font-family"]',
+    ) as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(['']);
+  });
+
+  it('选字体族 → 防抖 PATCH 的 layout.font_family 写入（数值/样式键不丢）', async () => {
+    const fetchMock = mockEditor({ draft: DRAFT_WITH_OVERRIDE });
+    renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
+    await screen.findByLabelText('译文');
+    const select = (await screen.findByLabelText('字体族覆盖')) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'source-han-serif' } });
+    await act(async () => {
+      vi.advanceTimersByTime(SAVE_DEBOUNCE_MS + 50);
+    });
+    await waitFor(() => expect(patchBody(fetchMock).paragraphs['P05-002']).toBeTruthy());
+    expect(patchBody(fetchMock).paragraphs['P05-002']).toEqual({
+      // layout 整对象替换：带上草稿里已有的 font_scale 与 box
+      layout: { font_scale: 1.05, box: [70, 630, 522, 782], font_family: 'source-han-serif' },
+    });
+  });
+
+  it('草稿里已有 font_family，选「跟随默认」→ 补丁里删该键', async () => {
+    const draftWithFamily = {
+      ...DRAFT_WITH_OVERRIDE,
+      paragraphs: {
+        'P05-002': {
+          ...DRAFT_WITH_OVERRIDE.paragraphs['P05-002'],
+          layout: { font_scale: 1.05, box: [70, 630, 522, 782], font_family: 'source-han-serif' },
+        },
+      },
+    };
+    const fetchMock = mockEditor({ draft: draftWithFamily });
+    renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
+    const select = (await screen.findByLabelText('字体族覆盖')) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe('source-han-serif')); // 草稿覆盖先显示
+    fireEvent.change(select, { target: { value: '' } });
+    await act(async () => {
+      vi.advanceTimersByTime(SAVE_DEBOUNCE_MS + 50);
+    });
+    await waitFor(() => expect(patchBody(fetchMock).paragraphs['P05-002']).toBeTruthy());
+    const entry = patchBody(fetchMock).paragraphs['P05-002'] as { layout: Record<string, unknown> };
+    expect(entry.layout).toEqual({ font_scale: 1.05, box: [70, 630, 522, 782] });
+    expect('font_family' in entry.layout).toBe(false);
+  });
+
+  it('字体族覆盖也算排版覆盖：只有 font_family 的草稿也出现「恢复基线」', async () => {
+    mockEditor({
+      draft: {
+        revision: 2,
+        updated_at: null,
+        paragraphs: {
+          'P05-002': { layout: { font_family: 'lxgw-wenkai' }, updated_at: null },
+        },
+      },
+    });
+    renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
+    expect(await screen.findByRole('button', { name: '恢复基线' })).toBeInTheDocument();
+  });
+
+  it('字号下拉：默认跟随原文（带源文字号），选 15pt → font_scale = 15 / 10.5', async () => {
+    const fetchMock = mockEditor(); // style.font_size = 10.5
+    renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
+    await screen.findByLabelText('译文');
+    const select = (await screen.findByLabelText('字号覆盖')) as HTMLSelectElement;
+    expect(select.options[0]?.textContent).toBe('跟随原文（10.5pt）');
+    expect(select.value).toBe('');
+    fireEvent.change(select, { target: { value: '15' } });
+    // 同一个 state：高级区里的「字号缩放」输入框立刻同步（String(15 / 10.5)）
+    expect((screen.getByLabelText(/字号缩放/) as HTMLInputElement).value).toBe(
+      String(15 / 10.5),
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(SAVE_DEBOUNCE_MS + 50);
+    });
+    await waitFor(() => expect(patchBody(fetchMock).paragraphs['P05-002']).toBeTruthy());
+    expect(patchBody(fetchMock).paragraphs['P05-002']).toEqual({
+      layout: { font_scale: 15 / 10.5 },
+    });
+    // 回显取最接近 15pt 的档位
+    expect(select.value).toBe('15');
+  });
+
+  it('字号下拉：base=10 选 15pt → font_scale 1.5；档位回显取最接近当前值', async () => {
+    const fetchMock = mockEditor({
+      paragraphs: [{ ...PARAGRAPHS[0], style: { ...PARAGRAPHS[0].style, font_size: 10 } }],
+    });
+    renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
+    await screen.findByLabelText('译文');
+    const select = (await screen.findByLabelText('字号覆盖')) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: '15' } });
+    expect((screen.getByLabelText(/字号缩放/) as HTMLInputElement).value).toBe('1.5');
+    await act(async () => {
+      vi.advanceTimersByTime(SAVE_DEBOUNCE_MS + 50);
+    });
+    await waitFor(() => expect(patchBody(fetchMock).paragraphs['P05-002']).toBeTruthy());
+    expect(patchBody(fetchMock).paragraphs['P05-002']).toEqual({ layout: { font_scale: 1.5 } });
+  });
+
+  it('草稿里 font_scale=1.5（base 10）：下拉回显 15pt，选「跟随原文」删键', async () => {
+    const fetchMock = mockEditor({
+      paragraphs: [{ ...PARAGRAPHS[0], style: { ...PARAGRAPHS[0].style, font_size: 10 } }],
+      draft: {
+        revision: 4,
+        updated_at: null,
+        paragraphs: { 'P05-002': { layout: { font_scale: 1.5 }, updated_at: null } },
+      },
+    });
+    renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
+    const select = (await screen.findByLabelText('字号覆盖')) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe('15'));
+    fireEvent.change(select, { target: { value: '' } });
+    await act(async () => {
+      vi.advanceTimersByTime(SAVE_DEBOUNCE_MS + 50);
+    });
+    await waitFor(() => expect(patchBody(fetchMock).paragraphs['P05-002']).toBeTruthy());
+    expect(patchBody(fetchMock).paragraphs['P05-002']).toEqual({ layout: null });
+  });
+
+  it('源文字号不可用（style.font_size 缺）：整行禁用 + 行内提示', async () => {
+    mockEditor({
+      paragraphs: [{ ...PARAGRAPHS[0], style: { ...PARAGRAPHS[0].style, font_size: null } }],
+    });
+    renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
+    await screen.findByLabelText('译文');
+    const select = (await screen.findByLabelText('字号覆盖')) as HTMLSelectElement;
+    expect(select.disabled).toBe(true);
+    expect(select.options[0]?.textContent).toBe('跟随原文');
+    expect(
+      document.querySelector('[data-od-id="paragraph-style-font-size-unavailable"]')?.textContent,
+    ).toContain('源文字号不可用');
+  });
+
+  it('高级排版参数默认收起（summary 可展开）；有改动时 summary 带「·有改动」', async () => {
+    mockEditor();
+    renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
+    await screen.findByLabelText('译文');
+    const details = document.querySelector('[data-od-id="paragraph-advanced"]') as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    expect(details.querySelector('summary')?.textContent).toBe('高级排版参数（数值覆盖，留空 = 用默认）');
+    fireEvent.change(screen.getByLabelText(/行距倍数/), { target: { value: '1.2' } });
+    await waitFor(() =>
+      expect(details.querySelector('summary')?.textContent).toContain('·有改动'),
+    );
+  });
+
+  it('译文框下方的字数统计：去空白字符数', async () => {
+    mockEditor();
+    renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
+    const target = (await screen.findByLabelText('译文')) as HTMLTextAreaElement;
+    expect(document.querySelector('[data-od-id="paragraph-target-count"]')?.textContent).toBe('4 字');
+    fireEvent.change(target, { target: { value: 'a b\nc' } });
+    await waitFor(() =>
+      expect(document.querySelector('[data-od-id="paragraph-target-count"]')?.textContent).toBe('3 字'),
+    );
+  });
+
+  it('头部显示页码与 layout_label', async () => {
+    mockEditor();
+    renderWithQuery(<ParagraphEditor did={DID} paragraphId={'P05-002'} />);
+    await screen.findByLabelText('译文');
+    expect(document.querySelector('[data-od-id="paragraph-editor-page"]')?.textContent).toBe('第 5 页');
+    expect(document.querySelector('[data-od-id="paragraph-editor-label"]')?.textContent).toBe('text');
   });
 });
 

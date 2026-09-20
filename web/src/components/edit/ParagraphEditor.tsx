@@ -7,10 +7,17 @@
  * - 排版 = 四个数值覆盖（范围同 `layout_overrides.PARAGRAPH_FLOAT_KEYS`）+ 只读 `box`
  *   （`box` 只能在预览里拖拽，见 `BboxEditor`）；
  * - 编译样式 = `GET /paragraphs` 的 `style` 只读摘要（源文字号/字体/加粗/斜体/衬线）+
- *   三个三态覆盖下拉（跟随原文/开启/关闭 → 草稿 `layout.bold/italic/serif`，
+ *   覆盖下拉（加粗/斜体/衬线：跟随原文/开启/关闭 → 草稿 `layout.bold/italic/serif`，
  *   跟随原文 = 删键），保存走同一条防抖链路；
+ * - 段落级字体族 = `GET /fonts` 清单里的 id（`layout.font_family`，跟随默认 = 删键）；
+ *   清单加载失败只是这一项不可改，不影响译文与其它参数；
+ * - 「字号」pt 下拉是 `font_scale` 的另一种写法（`pt / style.font_size`），与高级区里的
+ *   「字号缩放」输入框共用同一个 state —— 两处永远同步；
  * - 保存 = 本地 1.5s 防抖（与服务端防抖叠加没关系：服务端才是真源）+ 失焦 / Cmd+S 立即存；
  *   **没有任何字段变化时不发 PATCH**（不白涨 revision）。
+ *
+ * 布局（设计稿 §2.4 的段落详情坞）：头部固定，下面是撑满剩余高度的「坞」——原文块定高可滚，
+ * 译文框吃掉剩余高度；样式 / 高级参数 / 按钮跟在坞后面，整体超出面板时才滚动。
  *
  * 冲突分支（服务端错误码，不匹配 message 文案）：
  * - `revision_conflict`（两个标签页）→ 提示 + 「刷新草稿」；
@@ -22,7 +29,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import type { ParagraphItem } from '../../api/types';
+import type { FontFamilyItem, ParagraphItem } from '../../api/types';
 import { ApiError, describeApiError } from '../../lib/api';
 import {
   LAYOUT_FIELDS,
@@ -32,6 +39,7 @@ import {
   hasLayoutOverride,
   layoutBool,
   layoutBox,
+  layoutFontFamily,
   layoutInputsOf,
   layoutNumber,
   layoutPatch,
@@ -50,6 +58,7 @@ import { layoutBoxOfRow } from '../../lib/preview';
 import {
   useCompileBlockMutation,
   useDraft,
+  useFonts,
   useParagraphs,
   usePatchDraftMutation,
 } from '../../lib/queries';
@@ -62,6 +71,9 @@ import { CandidatePanel } from './CandidatePanel';
 
 /** 本地自动保存防抖（与服务端 1.5s 防抖同量级；服务端才是真源）。 */
 export const SAVE_DEBOUNCE_MS = 1_500;
+
+/** 「字号」pt 下拉的常见档位（值是 pt；换算见 `scaleForFontSize`）。 */
+const PRESET_FONT_SIZES = [8, 9, 9.5, 10, 10.5, 11, 12, 14, 15, 16, 18, 20, 22, 24] as const;
 
 export interface ParagraphEditorProps {
   did: string;
@@ -89,6 +101,7 @@ export function ParagraphEditor({
 }: ParagraphEditorProps) {
   const paragraphsQuery = useParagraphs(did);
   const draftQuery = useDraft(did);
+  const fontsQuery = useFonts();
   const patchMutation = usePatchDraftMutation(did);
   const compileMutation = useCompileBlockMutation(did, paragraphId ?? '');
   // 拖拽编辑只在「版面框（pdf_native）」图层上有意义 → 提示里说清当前图层能不能拖
@@ -108,20 +121,27 @@ export function ParagraphEditor({
   /** 当前生效的框：草稿覆盖优先，否则基线（`GET /paragraphs` 的 layout 几何行）。 */
   const box = layoutBox(draftLayout) ?? layoutBoxOfRow(paragraph?.geometry);
   const modified = typeof draftParagraph?.target === 'string';
+  /** 源文字号（`字号` pt 下拉的换算基准；不可用 → 只能走高级区的 font_scale 输入）。 */
+  const baseFontSize = paragraph?.style?.font_size;
+  const baseSize = typeof baseFontSize === 'number' && Number.isFinite(baseFontSize) ? baseFontSize : null;
+  const fontFamilies: FontFamilyItem[] = fontsQuery.data ?? [];
 
   const [text, setText] = useState(external.target);
   const [inputs, setInputs] = useState<LayoutInputs>(() => layoutInputsOf(draftLayout));
   const [bools, setBools] = useState<StyleBools>(() => styleBoolsOf(draftLayout));
+  /** 字体族覆盖：`''` = 跟随默认（补丁里删 `font_family` 键）。 */
+  const [fontFamily, setFontFamily] = useState(() => layoutFontFamily(draftLayout) ?? '');
 
   // 服务端草稿变化（换段 / PATCH 回包 / 刷新）→ 用「外部值」重置本地输入：
   // 键包含外部值，所以用户正在输入时不会被自己的中间态触发重置。
-  const externalKey = `${paragraphId ?? ''}\u0000${external.target}\u0000${layoutInputsKey(draftLayout)}\u0000${styleBoolsKey(draftLayout)}`;
+  const externalKey = `${paragraphId ?? ''}\u0000${external.target}\u0000${layoutInputsKey(draftLayout)}\u0000${styleBoolsKey(draftLayout)}\u0000${layoutFontFamily(draftLayout) ?? ''}`;
   const [lastKey, setLastKey] = useState(externalKey);
   if (externalKey !== lastKey) {
     setLastKey(externalKey);
     setText(external.target);
     setInputs(layoutInputsOf(draftLayout));
     setBools(styleBoolsOf(draftLayout));
+    setFontFamily(layoutFontFamily(draftLayout) ?? '');
   }
 
   const errors = useMemo(
@@ -133,11 +153,21 @@ export function ParagraphEditor({
   );
   const fieldErrors = errors.filter(([, error]) => error !== null);
   const values = useMemo(() => layoutValuesOf(inputs), [inputs]);
-  const dirty = text !== external.target || layoutChanged(draftLayout, values) || styleChanged(draftLayout, bools);
+  const advancedDirty = layoutChanged(draftLayout, values);
+  const dirty =
+    text !== external.target ||
+    advancedDirty ||
+    styleChanged(draftLayout, bools) ||
+    fontFamilyChanged(draftLayout, fontFamily);
 
   // 不用 useCallback：这个函数每次渲染重建即可（只有防抖定时器通过 `saveRef` 取它，
   // 不参与任何依赖数组 —— React Compiler 不允许把「派生的对象」当记忆依赖）。
-  const save = (nextText: string, nextInputs: LayoutInputs, nextBools: StyleBools) => {
+  const save = (
+    nextText: string,
+    nextInputs: LayoutInputs,
+    nextBools: StyleBools,
+    nextFontFamily: string,
+  ) => {
     if (paragraphId === null || draft === undefined) return;
     const invalidField = LAYOUT_FIELDS.find(
       (field) => validateLayoutInput(field.key, nextInputs[field.key]).error !== null,
@@ -146,10 +176,20 @@ export function ParagraphEditor({
     const entry: Record<string, unknown> = {};
     if (nextText !== external.target) entry.target = targetPatch(nextText, paragraph?.target).target;
     const nextValues = layoutValuesOf(nextInputs);
-    if (layoutChanged(draftLayout, nextValues) || styleChanged(draftLayout, nextBools)) {
+    if (
+      layoutChanged(draftLayout, nextValues) ||
+      styleChanged(draftLayout, nextBools) ||
+      fontFamilyChanged(draftLayout, nextFontFamily)
+    ) {
       // layout 是整对象替换：带上草稿里已有的 box 与不认识的键，避免静默丢数据；
-      // 样式布尔也走 layoutPatch（未提供的样式键 = 删键 = 跟随原文）
-      entry.layout = layoutPatch(nextValues, layoutBox(draftLayout), draftLayout, nextBools);
+      // 样式布尔 / 字体族也走 layoutPatch（空值 = 删键 = 跟随原文/默认）
+      entry.layout = layoutPatch(
+        nextValues,
+        layoutBox(draftLayout),
+        draftLayout,
+        nextBools,
+        nextFontFamily,
+      );
     }
     if (Object.keys(entry).length === 0) return;
     patchMutation.mutate({ baseRevision: draft.revision, paragraphs: { [paragraphId]: entry } });
@@ -159,9 +199,12 @@ export function ParagraphEditor({
   // 自动保存：本地 1.5s 防抖（只在有改动、无非法值时排定时器）
   useEffect(() => {
     if (disabled || !dirty || fieldErrors.length > 0) return;
-    const timer = window.setTimeout(() => saveRef.current(text, inputs, bools), SAVE_DEBOUNCE_MS);
+    const timer = window.setTimeout(
+      () => saveRef.current(text, inputs, bools, fontFamily),
+      SAVE_DEBOUNCE_MS,
+    );
     return () => window.clearTimeout(timer);
-  }, [bools, disabled, dirty, fieldErrors.length, inputs, saveRef, text]);
+  }, [bools, disabled, dirty, fieldErrors.length, fontFamily, inputs, saveRef, text]);
 
   if (paragraphId === null) {
     return (
@@ -191,6 +234,11 @@ export function ParagraphEditor({
             <Chip>{paragraph.layout_label}</Chip>
           </span>
         )}
+        {paragraph?.page === null || paragraph?.page === undefined ? null : (
+          <span className="font-mono text-micro text-ink-4" data-od-id="paragraph-editor-page">
+            第 {paragraph.page} 页
+          </span>
+        )}
         <span className="ml-auto font-mono text-micro text-ink-4" data-od-id="draft-revision">
           草稿 r{revision}
         </span>
@@ -201,91 +249,68 @@ export function ParagraphEditor({
         ) : null}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto p-s4">
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto p-s4">
         {paragraphsQuery.isSuccess && paragraph === null ? (
-          <p className="mb-s3 text-tiny text-ink-4" data-od-id="paragraph-editor-missing">
+          <p className="mb-s3 flex-none text-tiny text-ink-4" data-od-id="paragraph-editor-missing">
             该 id 不在段落产物里（可能已被重新解析覆盖）——改选另一段。
           </p>
         ) : null}
 
-        <label className="block">
-          <span className="text-tiny text-ink-3">原文（只读）</span>
-          <pre
-            data-od-id="paragraph-source"
-            className="mt-1 max-h-[132px] overflow-auto whitespace-pre-wrap break-words rounded border border-hair bg-parchment p-s3 font-mono text-micro leading-[1.5] text-ink-3"
-          >
-            {paragraph?.source ?? '（该段没有原文产物）'}
-          </pre>
-        </label>
+        {/* 段落详情坞：原文块定高可滚，译文框吃掉剩余高度（面板整体超出时才滚外层）。 */}
+        <div className="flex flex-1 flex-col" data-od-id="paragraph-dock">
+          <label className="block flex-none">
+            <span className="text-tiny text-ink-3">原文（只读）</span>
+            <pre
+              data-od-id="paragraph-source"
+              className="mt-1 max-h-[150px] overflow-auto whitespace-pre-wrap break-words rounded border border-hair bg-parchment p-s3 font-serif text-sm italic leading-[1.75] text-ink-3"
+            >
+              {paragraph?.source ?? '（该段没有原文产物）'}
+            </pre>
+          </label>
 
-        <label className="mt-s4 block">
-          <span className="flex items-center gap-s2 text-tiny text-ink-3">
-            译文
-            {disabled ? (
-              <Tooltip content={disabledReason ?? '当前不可编辑'}>
-                <span className="font-mono text-micro text-run-ink" data-od-id="paragraph-editor-locked">
-                  只读
-                </span>
-              </Tooltip>
-            ) : null}
-          </span>
-          <textarea
-            data-od-id="paragraph-target"
-            aria-label="译文"
-            rows={6}
-            readOnly={disabled}
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            onBlur={() => {
-              if (!disabled) saveRef.current(text, inputs, bools);
-            }}
-            onKeyDown={(event) => {
-              if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 's') return;
-              event.preventDefault();
-              saveRef.current(text, inputs, bools);
-            }}
-            className="mt-1 w-full resize-y rounded border border-hair-2 bg-ivory p-s3 font-serif text-body leading-[1.6] text-ink read-only:bg-parchment read-only:text-ink-3"
-          />
-          <span className="mt-1 flex items-center gap-s2 font-mono text-micro text-ink-4">
-            {disabled
-              ? (disabledReason ?? '当前不可编辑')
-              : patchMutation.isPending
-                ? '正在保存…'
-                : dirty
-                  ? '有未保存改动（1.5s 后自动保存，Cmd+S 立即）'
-                  : `已保存（r${revision}）`}
-          </span>
-        </label>
-
-        <div className="mt-s4 border-t border-hair pt-s3">
-          <p className="text-tiny text-ink-3">排版参数（覆盖，留空 = 用默认）</p>
-          <div className="mt-2 flex flex-col gap-[6px]">
-            {LAYOUT_FIELDS.map((field) => (
-              <LayoutRow
-                key={field.key}
-                fieldKey={field.key}
-                label={field.label}
-                min={field.min}
-                max={field.max}
-                value={inputs[field.key]}
-                error={validateLayoutInput(field.key, inputs[field.key]).error}
-                disabled={disabled}
-                dirty={layoutNumber(draftLayout, field.key) !== values[field.key]}
-                onChange={(next) => setInputs((current) => ({ ...current, [field.key]: next }))}
-                onBlur={() => saveRef.current(text, inputs, bools)}
-              />
-            ))}
-          </div>
-          <p className="mt-s3 text-tiny text-ink-4" data-od-id="paragraph-box">
-            box（PDF y 向上）: <span className="font-mono">{boxSummary(box)}</span> ——{' '}
-            {bboxMode === 'layout'
-              ? '在预览中拖拽段落框的 8 个手柄调整'
-              : '把预览的 bbox 图层切到「版面框」就能在预览里拖拽调整'}
-            （无需在这里输入）。
-          </p>
+          <label className="mt-s4 flex flex-1 flex-col">
+            <span className="flex flex-none items-center gap-s2 text-tiny text-ink-3">
+              译文
+              {disabled ? (
+                <Tooltip content={disabledReason ?? '当前不可编辑'}>
+                  <span className="font-mono text-micro text-run-ink" data-od-id="paragraph-editor-locked">
+                    只读
+                  </span>
+                </Tooltip>
+              ) : null}
+            </span>
+            <textarea
+              data-od-id="paragraph-target"
+              aria-label="译文"
+              readOnly={disabled}
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              onBlur={() => {
+                if (!disabled) saveRef.current(text, inputs, bools, fontFamily);
+              }}
+              onKeyDown={(event) => {
+                if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 's') return;
+                event.preventDefault();
+                saveRef.current(text, inputs, bools, fontFamily);
+              }}
+              className="mt-1 min-h-[120px] w-full flex-1 resize-none rounded border border-hair-2 bg-ivory p-s3 font-serif text-body leading-[1.6] text-ink read-only:bg-parchment read-only:text-ink-3"
+            />
+            <span className="mt-1 flex flex-none items-center gap-s2 font-mono text-micro text-ink-4">
+              <span className="min-w-0 flex-1 truncate">
+                {disabled
+                  ? (disabledReason ?? '当前不可编辑')
+                  : patchMutation.isPending
+                    ? '正在保存…'
+                    : dirty
+                      ? '有未保存改动（1.5s 后自动保存，Cmd+S 立即）'
+                      : `已保存（r${revision}）`}
+              </span>
+              <span data-od-id="paragraph-target-count">{characterCount(text)} 字</span>
+            </span>
+          </label>
         </div>
 
-        <div className="mt-s4 border-t border-hair pt-s3" data-od-id="paragraph-style">
+        <div className="mt-s4 flex-none border-t border-hair pt-s3" data-od-id="paragraph-style">
           <p className="text-tiny text-ink-3">编译样式（源文派生 + 覆盖；本次局部编译生效）</p>
           {paragraph?.style == null ? (
             <p className="mt-2 text-tiny text-ink-4" data-od-id="paragraph-style-unavailable">
@@ -301,6 +326,22 @@ export function ParagraphEditor({
                 斜体 {sourceBoolLabel(paragraph.style.italic)} · 衬线 {sourceBoolLabel(paragraph.style.serif)}
               </p>
               <div className="mt-2 flex flex-col gap-[6px]">
+                <FontFamilyRow
+                  value={fontFamily}
+                  families={fontFamilies}
+                  listFailed={fontsQuery.isError}
+                  disabled={disabled}
+                  dirty={fontFamilyChanged(draftLayout, fontFamily)}
+                  onChange={setFontFamily}
+                />
+                <FontSizeRow
+                  base={baseSize}
+                  scale={inputs.font_scale}
+                  disabled={disabled}
+                  dirty={layoutNumber(draftLayout, 'font_scale') !== values.font_scale}
+                  error={validateLayoutInput('font_scale', inputs.font_scale).error}
+                  onChange={(next) => setInputs((current) => ({ ...current, font_scale: next }))}
+                />
                 {STYLE_FIELDS.map((field) => (
                   <StyleRow
                     key={field.key}
@@ -325,11 +366,41 @@ export function ParagraphEditor({
           )}
         </div>
 
-        <div className="mt-s4 flex flex-wrap items-center gap-s2">
+        <details className="mt-s4 flex-none border-t border-hair pt-s3" data-od-id="paragraph-advanced">
+          <summary className="cursor-pointer select-none text-tiny text-ink-3">
+            高级排版参数（数值覆盖，留空 = 用默认）{advancedDirty ? '·有改动' : ''}
+          </summary>
+          <div className="mt-2 flex flex-col gap-[6px]">
+            {LAYOUT_FIELDS.map((field) => (
+              <LayoutRow
+                key={field.key}
+                fieldKey={field.key}
+                label={field.label}
+                min={field.min}
+                max={field.max}
+                value={inputs[field.key]}
+                error={validateLayoutInput(field.key, inputs[field.key]).error}
+                disabled={disabled}
+                dirty={layoutNumber(draftLayout, field.key) !== values[field.key]}
+                onChange={(next) => setInputs((current) => ({ ...current, [field.key]: next }))}
+                onBlur={() => saveRef.current(text, inputs, bools, fontFamily)}
+              />
+            ))}
+          </div>
+          <p className="mt-s3 text-tiny text-ink-4" data-od-id="paragraph-box">
+            box（PDF y 向上）: <span className="font-mono">{boxSummary(box)}</span> ——{' '}
+            {bboxMode === 'layout'
+              ? '在预览中拖拽段落框的 8 个手柄调整'
+              : '把预览的 bbox 图层切到「版面框」就能在预览里拖拽调整'}
+            （无需在这里输入）。
+          </p>
+        </details>
+
+        <div className="mt-s4 flex flex-none flex-wrap items-center gap-s2">
           <Button
             data-od-id="paragraph-save"
             disabled={disabled || !dirty || fieldErrors.length > 0 || patchMutation.isPending}
-            onClick={() => saveRef.current(text, inputs, bools)}
+            onClick={() => saveRef.current(text, inputs, bools, fontFamily)}
           >
             保存
           </Button>
@@ -443,6 +514,14 @@ function styleChanged(layout: Record<string, unknown> | null | undefined, bools:
   );
 }
 
+/** 本地字体族是否与草稿不同（`''` = 跟随默认 = 草稿里删键）。 */
+function fontFamilyChanged(
+  layout: Record<string, unknown> | null | undefined,
+  fontFamily: string,
+): boolean {
+  return (layoutFontFamily(layout) ?? '') !== fontFamily;
+}
+
 /** 源文字号文本（拿不到 → `—`，不编造默认值）。 */
 function fontSizeLabel(size: number | null | undefined): string {
   return typeof size === 'number' && Number.isFinite(size) ? `${size}pt` : '—';
@@ -453,6 +532,23 @@ function sourceBoolLabel(value: boolean | undefined): string {
   if (value === true) return '是';
   if (value === false) return '否';
   return '—';
+}
+
+/** 译文框下方的字数（去空白字符数，与设计稿 ed-meta 同口径）。 */
+function characterCount(text: string): number {
+  return text.replace(/\s/g, '').length;
+}
+
+/** 目标 pt → `font_scale` 输入文本（`pt / 源文字号`；不四舍五入，保住回显时的档位对应）。 */
+function scaleForFontSize(size: number, base: number): string {
+  return String(size / base);
+}
+
+/** `font_scale` → 最接近的档位（用于 pt 下拉回显；档位表见 `PRESET_FONT_SIZES`）。 */
+function nearestFontSize(size: number): number {
+  return PRESET_FONT_SIZES.reduce((best, candidate) =>
+    Math.abs(candidate - size) < Math.abs(best - size) ? candidate : best,
+  );
 }
 
 function LayoutRow({
@@ -501,6 +597,129 @@ function LayoutRow({
       <span className={dirty ? 'font-mono text-micro text-accent' : 'font-mono text-micro text-ink-4'}>
         {error ?? (dirty ? '已改' : `${min}–${max}`)}
       </span>
+    </label>
+  );
+}
+
+/**
+ * 段落级字体族覆盖：`跟随默认`（值 `''`，补丁里删 `font_family` 键）或 `GET /fonts` 里的一个
+ * family id。`available=false` 的族**不可选**（字体文件本机没有，选了后端也回落默认族）；
+ * 清单加载失败 → 只留「跟随默认」+ 行内提示（译文编辑不受影响）。
+ */
+function FontFamilyRow({
+  value,
+  families,
+  listFailed,
+  disabled,
+  dirty,
+  onChange,
+}: {
+  /** 当前覆盖的 family id；`''` = 跟随默认。 */
+  value: string;
+  families: FontFamilyItem[];
+  listFailed: boolean;
+  disabled: boolean;
+  dirty: boolean;
+  onChange: (next: string) => void;
+}) {
+  // 草稿里的族不在清单里（换机器 / 族被摘掉）：照样回显并保留，不然会静默显示成「跟随默认」
+  const missing = value !== '' && !families.some((family) => family.id === value);
+  return (
+    <label className="grid grid-cols-[84px_1fr_auto] items-center gap-s2 gap-y-1">
+      <span className="font-mono text-micro text-ink-3" title="font_family 覆盖（跟随默认 = 删键）">
+        字体族
+      </span>
+      <select
+        data-od-id="paragraph-style-font-family"
+        aria-label="字体族覆盖"
+        disabled={disabled}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-6 w-full rounded border border-hair-2 bg-ivory px-[6px] font-mono text-tiny text-ink disabled:opacity-45"
+      >
+        <option value="">跟随默认</option>
+        {missing ? <option value={value}>{value}（不在清单里）</option> : null}
+        {families.map((family) => (
+          <option key={family.id} value={family.id} disabled={!family.available}>
+            {family.available ? family.label : `${family.label}（不可用）`}
+          </option>
+        ))}
+      </select>
+      <span className={dirty ? 'font-mono text-micro text-accent' : 'font-mono text-micro text-ink-4'}>
+        {listFailed ? '清单不可用' : dirty ? '已改' : '默认'}
+      </span>
+      {listFailed ? (
+        <span
+          className="col-span-3 font-mono text-micro text-warn-ink"
+          data-od-id="paragraph-style-font-family-error"
+        >
+          字体清单不可用（/fonts）
+        </span>
+      ) : null}
+    </label>
+  );
+}
+
+/**
+ * 「字号」pt 下拉：`font_scale` 的另一种写法，和高级区里的「字号缩放」输入框共用同一个 state。
+ * 基准是源文字号 `style.font_size`：`跟随原文（{base}pt）` = 删 `font_scale` 键；
+ * 选档位 pt → `font_scale = pt / base`。base 拿不到 → 整行禁用（只能用 font_scale 输入）。
+ */
+function FontSizeRow({
+  base,
+  scale,
+  error,
+  disabled,
+  dirty,
+  onChange,
+}: {
+  /** 源文字号 pt；null = 不可用（整行禁用）。 */
+  base: number | null;
+  /** 当前 `font_scale` 输入文本（`''` = 没有覆盖）。 */
+  scale: string;
+  error: string | null;
+  disabled: boolean;
+  dirty: boolean;
+  onChange: (next: string) => void;
+}) {
+  const target = base === null ? null : scale.trim() === '' ? null : base * Number(scale);
+  const value =
+    target === null || !Number.isFinite(target) ? '' : String(nearestFontSize(target));
+  return (
+    <label className="grid grid-cols-[84px_1fr_auto] items-center gap-s2 gap-y-1">
+      <span className="font-mono text-micro text-ink-3" title="字号覆盖（跟随原文 = 删 font_scale 键）">
+        字号
+      </span>
+      <select
+        data-od-id="paragraph-style-font-size"
+        aria-label="字号覆盖"
+        disabled={disabled || base === null}
+        value={value}
+        onChange={(event) => {
+          const next = event.target.value;
+          if (next === '' || base === null) onChange('');
+          else onChange(scaleForFontSize(Number(next), base));
+        }}
+        className="h-6 w-full rounded border border-hair-2 bg-ivory px-[6px] font-mono text-tiny text-ink disabled:opacity-45"
+      >
+        <option value="">{base === null ? '跟随原文' : `跟随原文（${base}pt）`}</option>
+        {PRESET_FONT_SIZES.map((size) => (
+          <option key={size} value={String(size)}>
+            {size}pt
+          </option>
+        ))}
+      </select>
+      <span className={dirty ? 'font-mono text-micro text-accent' : 'font-mono text-micro text-ink-4'}>
+        {error ?? (dirty ? '已改' : base === null ? '不可用' : `原文 ${base}pt`)}
+      </span>
+      {base === null ? (
+        <span
+          className="col-span-3 font-mono text-micro text-warn-ink"
+          data-od-id="paragraph-style-font-size-unavailable"
+        >
+          源文字号不可用，按 pt 选字号不可用（可在下方「高级排版参数」里改字号缩放）。
+        </span>
+      ) : null}
     </label>
   );
 }
