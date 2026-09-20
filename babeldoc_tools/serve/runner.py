@@ -40,6 +40,10 @@ from pathlib import Path
 from typing import Any
 from typing import NamedTuple
 
+from babeldoc.format.pdf.document_il.backend.latex_bbox.stamp_cache import (
+    SHARED_CACHE_ENV,
+)
+
 from babeldoc_tools.common import ToolError
 from babeldoc_tools.serve import candidates as candidates_mod
 from babeldoc_tools.serve import compile as compile_mod
@@ -845,6 +849,10 @@ class JobRunner:
                 "BDT_SERVE_DOCUMENT": record.did,
                 "BDT_SERVE_JOB": record.job_id,
                 "BDT_SERVE_REVISION": str(record.revision),
+                # 共享 XeLaTeX 贴片缓存根：build 阶段与流式预览用同一份，否则
+                # build 会把预览刚编好的几百个贴片原封不动重编一遍。命名空间
+                # （模板版本 + 字体签名）在目录名里，跨文档共享是安全的。
+                SHARED_CACHE_ENV: str(self.store.store_base / "cache/stamps"),
             }
             # 并行预览编译数：job 记录优先（客户端提交时选），serve 级缺省兜底；
             # 都没给就不设，子进程用 stream_preview 的缺省。

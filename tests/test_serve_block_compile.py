@@ -455,6 +455,61 @@ def test_float_to_next_page_moves_stamp(tmp_path, monkeypatch):
     assert "New block one" in _page_text(compiler.store, 2)
 
 
+def test_float_obstacles_include_settled_sibling_stamps(tmp_path, monkeypatch):
+    """回归：兄弟贴片的落点必须进下一个块的障碍集，否则两个贴片会叠在一起。
+
+    真实故障（58 页论文）：浮动规划只看原文 baseline 页，看不见已落定的贴片，
+    于是 84 个跨页迁移**全部**顶对齐到落点页同一条顶部净空，产生 119 对肉眼
+    可见的重叠。这里断言第二个块规划时确实收到了第一个块的框。
+    """
+    from babeldoc.tools.agent import layout_refine
+    from babeldoc_tools.serve import block_compile
+
+    compiler, rows = _multi_page_store(tmp_path, monkeypatch, pages=2)
+    rows.append(
+        SimpleNamespace(
+            id="P2", page=1, target="New block two", geometry={"src_box": [210, 320, 380, 370]}
+        )
+    )
+    # 每次编译都返回「被缩字」的贴片，两个块都会走浮动阶梯。
+    def render(_workdir, _pid, target, box, temporary, _cache, **_kwargs):
+        path = temporary / f"stamp-{_pid}.pdf"
+        with pymupdf.open() as pdf:
+            page = pdf.new_page(width=box[2] - box[0], height=box[3] - box[1])
+            page.insert_text((5, 20), target)
+            pdf.save(path)
+        return SimpleNamespace(ok=True, pdf_path=str(path), font_size=11, scale=0.7), False
+
+    monkeypatch.setattr(block_compile, "render_request", render)
+    monkeypatch.setattr(
+        block_compile.BlockCompiler,
+        "_layout_cache",
+        lambda _self: SimpleNamespace(
+            detector=object(), evidence=lambda _page, _number: ([(0, 0, 1, 1)], [])
+        ),
+    )
+    monkeypatch.setattr(layout_refine, "plan_page_expansion", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        layout_refine, "plan_widen_page_expansion", lambda *_a, **_k: None
+    )
+    seen: list[list] = []
+    landing = (20.0, 300.0, 200.0, 350.0)
+
+    def plan(_page, _box, _detector, *, reserved=(), **_kw):
+        seen.append([list(item) for item in reserved])
+        return landing
+
+    monkeypatch.setattr(layout_refine, "plan_next_page_float", plan)
+
+    compiler.compile(record())
+    compiler.compile(record(pid="P2"))
+
+    # 第一个块规划时落点页还空着（只有 P2 的原文框，它在第 1 页 → 不算障碍）。
+    assert landing not in [tuple(box) for box in seen[0]]
+    # 第二个块必须看见 P1 已经占住的那块地。
+    assert list(landing) in seen[1]
+
+
 def test_float_back_home_erases_old_foreign_stamp(tmp_path, monkeypatch):
     """迁移后再编译回主页：下一页上的旧贴片要被擦掉（上一版落点页重合成）。"""
     from babeldoc.tools.agent import layout_refine

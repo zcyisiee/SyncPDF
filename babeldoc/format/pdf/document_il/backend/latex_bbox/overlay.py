@@ -30,8 +30,10 @@ overlay 前快照页内链接，redaction 后按原矩形重新插入，再交�
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import logging
+import os
 import re
 import tempfile
 import threading
@@ -468,6 +470,22 @@ def crop_fragment_pdf(
     finally:
         out.close()
     return out_path.is_file()
+
+
+def _shared_fragment_dir() -> str | None:
+    """共享片段目录：贴片缓存根下的 ``fragments/``；未配置共享根时 None。
+
+    与 stamp 缓存同根，一起被 ``--cleanup`` 覆盖；片段路径进 LaTeX body，所以
+    必须跨进程稳定（见 :meth:`LatexBboxOverlay._fragment_path`）。
+    """
+    from babeldoc.format.pdf.document_il.backend.latex_bbox.stamp_cache import (
+        SHARED_CACHE_ENV,
+    )
+
+    root = os.environ.get(SHARED_CACHE_ENV)
+    if not root or not str(root).strip():
+        return None
+    return str(Path(str(root).strip()) / "fragments")
 
 
 def _rect_key(rect) -> tuple:
@@ -1195,7 +1213,15 @@ class LatexBboxOverlay:
             source.close()
 
     def _crop_fragment(self, source, tmpdir: Path, key: str) -> str | None:
-        """裁一个片段并返回可用于 ``\\includegraphics`` 的绝对路径。"""
+        """裁一个片段并返回可用于 ``\\includegraphics`` 的绝对路径。
+
+        落点目录优先用 ``config.latex_fragment_dir``（内容寻址的稳定目录）：片段
+        的绝对路径会进 body，而 body 是 :attr:`StampRequest.cache_key` 的第一项，
+        所以路径必须对「同一片段」跨进程稳定——否则每次编译都是新 key，持久
+        stamp 缓存对**所有含行内公式的段落**永久失效（实测该类段落占比约一半）。
+        文件名取几何 + 源 PDF 身份的摘要：内容相同就是同一个文件，可安全复用，
+        已存在时连裁剪都省掉。没有配置该目录时退回 ``tmpdir``（旧行为）。
+        """
         ref = self._fragments.get(key)
         if not ref:
             return None
@@ -1217,8 +1243,6 @@ class LatexBboxOverlay:
             box[2] + expand,
             page_height - box[1] + expand,
         )
-        safe = re.sub(r"[^0-9A-Za-z_-]", "_", key)
-        out_path = tmpdir / f"frag-{safe}.pdf"
         fragment = FragmentRef(
             key=key,
             page=page_index,
@@ -1226,13 +1250,62 @@ class LatexBboxOverlay:
             y_offset=float(ref.get("y_offset") or 0.0),
             height=height,
         )
+        out_path = self._fragment_path(tmpdir, key, page_index, rect)
         try:
-            if not crop_fragment_pdf(source, page_index, rect, out_path):
+            if not out_path.is_file() and not crop_fragment_pdf(
+                source, page_index, rect, out_path
+            ):
                 return None
         except Exception:  # noqa: BLE001 - 裁剪失败按片段不可用处理
             logger.debug("片段裁剪失败 key=%s", key, exc_info=True)
             return None
         return render_fragment_latex(fragment, str(out_path))
+
+    def _fragment_path(
+        self, tmpdir: Path, key: str, page_index: int, rect: pymupdf.Rect
+    ) -> Path:
+        """片段裁剪的落点：内容寻址的共享目录，或退回 ``tmpdir``。
+
+        身份 = 源 PDF（路径 + 大小 + mtime）+ 页号 + 裁剪矩形；片段内容只由这
+        些决定。摘要进文件名，所以同一片段在任何进程里都解析到同一路径。
+        """
+        safe = re.sub(r"[^0-9A-Za-z_-]", "_", key)
+        shared = getattr(self.config, "latex_fragment_dir", None) or _shared_fragment_dir()
+        if not shared:
+            return tmpdir / f"frag-{safe}.pdf"
+        digest = hashlib.sha1(  # noqa: S324 - 非密码学用途，仅作内容寻址文件名
+            "|".join(
+                (
+                    self._fragment_source_identity(),
+                    str(page_index),
+                    *(f"{value:.3f}" for value in _rect_key(rect)),
+                )
+            ).encode("utf-8")
+        ).hexdigest()[:20]
+        directory = Path(shared)
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            # 共享目录不可写只是失去跨运行复用，不该让整段回退。
+            logger.debug("片段共享目录不可用，回退临时目录", exc_info=True)
+            return tmpdir / f"frag-{safe}.pdf"
+        return directory / f"frag-{digest}.pdf"
+
+    def _fragment_source_identity(self) -> str:
+        """源 PDF 的身份串（路径 + 大小 + mtime），用于片段内容寻址。"""
+        cached = getattr(self, "_fragment_identity", None)
+        if cached is not None:
+            return cached
+        source_path = _source_pdf_path(self.config)
+        identity = str(source_path or "")
+        try:
+            if source_path is not None:
+                stat = Path(source_path).stat()
+                identity = f"{source_path}|{stat.st_size}|{stat.st_mtime_ns}"
+        except OSError:
+            pass
+        self._fragment_identity = identity
+        return identity
 
     def _page_height(self, page_index: int) -> float:
         page = self._docs_pages().get(page_index)

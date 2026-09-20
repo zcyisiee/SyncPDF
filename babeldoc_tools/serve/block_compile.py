@@ -37,6 +37,133 @@ _PARSE_STATE_LOCK = threading.Lock()
 MAX_BATCH_WORKERS = 8
 _DEFAULT_BATCH_WORKERS = 4
 
+#: 段落行缓存的存活时间（秒）。几何在一次 job 内不变，译文会变；见 ``_rows``。
+_ROWS_CACHE_TTL_S = 5.0
+
+#: 回写译文用的 ``ILTranslator``：按语言对缓存（进程内）。
+#: 构造一次要 ~0.5s，绝大部分花在 ``FontMapper``（扫字体文件）；而局部编译只用
+#: ``post_translate_paragraph``，它整条调用链只碰三个预编译占位符正则
+#: （``_formula_placeholder_pattern`` / ``_style_{left,right}_placeholder_pattern``），
+#: 既不读 ``font_mapper`` 也不读 ``translation_config``。这些正则只由 translate
+#: engine 的类决定，因此按 ``(lang_in, lang_out)`` 缓存是安全的——每块重建一个
+#: 等于给每个段落白付 0.5s（实测 356 块 ≈ 178 核秒）。
+_IL_TRANSLATOR_CACHE: dict[tuple[str, str], object] = {}
+_IL_TRANSLATOR_LOCK = threading.Lock()
+
+
+def _shared_il_translator(lang_in: str, lang_out: str, config):
+    """按语言对复用 ``ILTranslator``（只用于 ``post_translate_paragraph``）。"""
+    from babeldoc.tools.agent import workflow
+
+    key = (lang_in, lang_out)
+    with _IL_TRANSLATOR_LOCK:
+        cached = _IL_TRANSLATOR_CACHE.get(key)
+        if cached is not None:
+            return cached
+    translator = workflow.ILTranslator(
+        workflow.SheetProtocolTranslator(lang_in, lang_out, True), config
+    )
+    with _IL_TRANSLATOR_LOCK:
+        return _IL_TRANSLATOR_CACHE.setdefault(key, translator)
+
+
+class PageLayoutCache:
+    """每页一次的版面证据（PP-DocLayoutV3 区域 + 精确墨迹），按页缓存。
+
+    浮动阶梯（同栏扩 → 跨栏扩 → 跨页迁移）原本每一级都各自 ``detect_page``
+    一次同一张页面：一次检测 = 渲染位图 + ONNX 推理，实测约 0.37s，一个缩字块
+    最多付 4 次。证据只取决于 baseline 页内容（整个 job 期间不变），所以按
+    ``page_number`` 缓存一次即可，命中后浮动阶梯零检测开销。
+
+    线程安全：每页一把构建锁，多 worker 并发首次命中同一页时只检测一次。
+    """
+
+    def __init__(self, detector):
+        self.detector = detector
+        self._entries: dict[int, tuple[list, list]] = {}
+        self._guard = threading.Lock()
+        self._page_locks: dict[int, threading.Lock] = {}
+
+    def _lock_for(self, page_number: int) -> threading.Lock:
+        with self._guard:
+            return self._page_locks.setdefault(page_number, threading.Lock())
+
+    def evidence(self, page, page_number: int) -> tuple[list, list]:
+        """→ ``(regions, ink)``；``regions`` 空表示检测不可用（调用方不扩框）。"""
+        with self._guard:
+            cached = self._entries.get(page_number)
+        if cached is not None:
+            return cached
+        with self._lock_for(page_number):
+            with self._guard:
+                cached = self._entries.get(page_number)
+            if cached is not None:
+                return cached
+            from babeldoc.tools.agent import layout_refine
+
+            regions = [
+                region.box for region in layout_refine._regions_il(page, self.detector)
+            ]
+            ink = layout_refine.page_ink_rects(page) if regions else []
+            entry = (regions, ink)
+            with self._guard:
+                self._entries[page_number] = entry
+            return entry
+
+
+class FloatReservations:
+    """已落定贴片矩形的登记簿：让同页的浮动决策**互相可见**。
+
+    浮动规划的障碍集原先只有 baseline 页的版面区域和源文墨迹，而 baseline 是
+    原文页——兄弟贴片浮到哪里它一概不知。于是每个缩字块都以为落点页的顶部空白
+    带是空的，实测 84 个跨页迁移**全部**顶对齐到同一条带子，产生 119 对肉眼可见
+    的贴片重叠。这里把每个已定框按落点页登记，后续规划把它们并入障碍集，语义
+    与一次性编译路径的 ``plan_build_refinement``（``obstacles.append(expanded)``）
+    一致。
+
+    ``reserve`` 同时是**先到先得的占位**：并发 worker 落在不同页时互不影响，落在
+    同一页时由页锁串行，登记顺序即决策顺序。
+    """
+
+    def __init__(self):
+        self._by_page: dict[int, dict[str, list[float]]] = {}
+        self._lock = threading.Lock()
+
+    def load(self, page_number: int, patches: dict) -> None:
+        """把某页已持久化的 patch 框灌进登记簿（重启/续跑后的既有状态）。"""
+        with self._lock:
+            slot = self._by_page.setdefault(page_number, {})
+            for pid, patch in (patches or {}).items():
+                box = patch.get("box")
+                if box and int(patch.get("page", page_number)) == page_number:
+                    slot[pid] = [float(value) for value in box]
+
+    def obstacles(self, page_number: int, *, exclude: str) -> list[list[float]]:
+        """落在该页、且不属于 ``exclude`` 段的已定贴片框。"""
+        with self._lock:
+            return [
+                list(box)
+                for pid, box in self._by_page.get(page_number, {}).items()
+                if pid != exclude
+            ]
+
+    def reserved_ids(self) -> set[str]:
+        """全部已登记的段落 id（**不分页**）。
+
+        已登记的段落一律用它登记的贴片框当障碍，不再用原文框：它可能已经迁到
+        别的页，home 页那块原文脚印在合成时会被擦掉，继续当障碍会白挡净空。
+        """
+        with self._lock:
+            return {pid for slot in self._by_page.values() for pid in slot}
+
+    def reserve(self, pid: str, page_number: int, box) -> None:
+        """登记 ``pid`` 的最终落点（同段重复登记即覆盖，含迁回主页）。"""
+        values = [float(value) for value in box]
+        with self._lock:
+            for slot in self._by_page.values():
+                slot.pop(pid, None)
+            self._by_page.setdefault(page_number, {})[pid] = values
+
 
 def batch_workers_from_environ(environ=None) -> int:
     """解析 ``BDT_SERVE_BATCH_WORKERS``：缺省 4，非法值夹到 [1, 8]。"""
@@ -326,10 +453,7 @@ def render_request(
     config = workflow._base_config(
         str(source), temporary, state["lang_in"], state["lang_out"]
     )
-    translator = workflow.ILTranslator(
-        workflow.SheetProtocolTranslator(state["lang_in"], state["lang_out"], True),
-        config,
-    )
+    translator = _shared_il_translator(state["lang_in"], state["lang_out"], config)
     tracker = workflow.PageTranslateTracker()
     translator.post_translate_paragraph(
         paragraph, tracker.new_paragraph(), source_input, target
@@ -337,6 +461,10 @@ def render_request(
     config.provider_ir_dir = workdir / "agent"
     config.latex_source_pdf_path = str(source)
     config.latex_source_geometry = state.get("source_line_geometry") or {}
+    # 行内公式片段裁到与 stamp 缓存同级的稳定目录（内容寻址）：片段的绝对路径
+    # 会进 LaTeX body，而 body 是 stamp 缓存键的第一项；用临时目录会让含行内公式
+    # 的段落永远不命中缓存（每次运行都是新路径）。见 overlay._fragment_path。
+    config.latex_fragment_dir = str(cache_root / "fragments")
     # Capture only the affected paragraph; no other block is fused or compiled.
     for page in state["doc"].page:
         page.pdf_paragraph = [p for p in page.pdf_paragraph if p.debug_id == pid]
@@ -421,6 +549,14 @@ class BlockCompiler:
         #: （serve 进程的编译器常驻；流式预览的编译器每 job 一个）。
         self._capability = None
         self._capability_lock = threading.Lock()
+        #: 检测器与每页版面证据缓存（浮动阶梯四级复用同一份检测结果）。
+        self._detector_lock = threading.Lock()
+        self._page_layout_cache = None
+        #: 已落定贴片矩形登记簿：浮动决策据此互相避让（见 FloatReservations）。
+        self.reservations = FloatReservations()
+        #: 段落行缓存：did → (取用时刻, rows)。见 :meth:`_rows`。
+        self._rows_cache: dict[str, tuple[float, list]] = {}
+        self._rows_lock = threading.Lock()
 
     def capability(self):
         """按需探测并缓存的 LaTeX 能力（线程安全；多 worker 并发首编时只探一次）。"""
@@ -456,7 +592,24 @@ class BlockCompiler:
             raise ToolError("stale_job", "任务已结束或取消，结果未发布")
 
     def _rows(self, did):
-        return document_blocks(self.store, did)
+        """段落行（几何 + 译文），带短 TTL 的进程内缓存。
+
+        每个块编译都要全量段落表来做「与邻居重叠」判定和取 geometry，而
+        :func:`document_blocks` 每次都要重解 ``anchors.json``（535KB）+
+        ``layout_geometry.json`` 等产物，实测约 0.48s——按块付费就是 356 × 0.48s
+        ≈ 3 分钟纯 JSON 解析。几何在一次 job 内不变；``target`` 会随翻译推进变化，
+        但调用方只用它判重叠/取几何，真正要编译的译文另走 ``draft``/``record``。
+        所以给一个很短的 TTL：既省掉重复解析，也不会让新翻译的块长时间看不见。
+        """
+        now = time.monotonic()
+        with self._rows_lock:
+            cached = self._rows_cache.get(did)
+            if cached is not None and now - cached[0] < _ROWS_CACHE_TTL_S:
+                return cached[1]
+        rows = document_blocks(self.store, did)
+        with self._rows_lock:
+            self._rows_cache[did] = (time.monotonic(), rows)
+        return rows
 
     async def submit(self, did, pid, revision):
         workdir = self.store.resolve(did)
@@ -562,19 +715,39 @@ class BlockCompiler:
         """懒加载 PP-DocLayoutV3 检测器；不可用时返回 None（不改变原行为）。"""
         from babeldoc.docvision.paddle_layout_regions import PaddleLayoutRegions
 
-        detector = getattr(self, "_detector", None)
+        with self._detector_lock:
+            detector = getattr(self, "_detector", None)
+            if detector is None:
+                detector = PaddleLayoutRegions()
+                self._detector = detector
+            return detector if detector.available else None
+
+    def _layout_cache(self):
+        """本编译器的每页版面证据缓存；检测器不可用时返回 None。"""
+        with self._detector_lock:
+            cache = getattr(self, "_page_layout_cache", None)
+            if cache is not None:
+                return cache
+        detector = self._layout_detector()
         if detector is None:
-            detector = PaddleLayoutRegions()
-            self._detector = detector
-        return detector if detector.available else None
+            return None
+        with self._detector_lock:
+            if getattr(self, "_page_layout_cache", None) is None:
+                self._page_layout_cache = PageLayoutCache(detector)
+            return self._page_layout_cache
 
     def _float_if_shrunk(self, doc, page_number, rows, pid, box, stamp):
         """缩字/溢出贴片的浮动阶梯：同栏下/上扩 → 跨栏横向扩 → 跨页整框迁移。
 
         返回 ``(新框, 贴片页码, 浮动方式)``；无可行方案时 ``(原框, page_number, None)``。
         判定用 baseline 页的 PP-DocLayoutV3 区域 + 精确墨迹（与既有扩框同一套数据，
-        见 :mod:`babeldoc.tools.agent.layout_refine`）。跨页迁移保持 x 范围不变，
-        在下一页自上而下找第一个能容纳 ``原框高 / scale`` 的空闲区间（顶对齐）。
+        见 :mod:`babeldoc.tools.agent.layout_refine`），**并含同页已落定的兄弟贴片
+        框**（``self.reservations`` 登记簿）：baseline 是原文页，只看它的话每个块都
+        以为落点是空的，实测会让全部跨页迁移叠在同一条顶部净空里。每页的检测证据
+        按页缓存一次，浮动阶梯四级复用同一份。
+
+        跨页迁移保持 x 范围不变，在下一页自上而下找第一个能容纳
+        ``原框高 / scale`` 的空闲区间（顶对齐）。
         """
         from babeldoc.tools.agent import layout_refine
 
@@ -585,16 +758,26 @@ class BlockCompiler:
         )
         if reason is None or not layout_refine.refine_enabled():
             return box, page_number, None
-        detector = self._layout_detector()
-        if detector is None:
+        cache = self._layout_cache()
+        if cache is None:
             return box, page_number, None
+        detector = cache.detector
         page = doc[page_number - 1]
-        expanded = layout_refine.plan_page_expansion(page, box, detector)
+        evidence = cache.evidence(page, page_number)
+        reserved = self._page_obstacles(rows, pid, page_number)
+        expanded = layout_refine.plan_page_expansion(
+            page, box, detector, evidence=evidence, reserved=reserved
+        )
         if expanded is not None:
             return list(expanded), page_number, "expand"
         for direction in ("right", "left"):
             widened = layout_refine.plan_widen_page_expansion(
-                page, box, detector, direction=direction
+                page,
+                box,
+                detector,
+                direction=direction,
+                evidence=evidence,
+                reserved=reserved,
             )
             if widened is not None and self._float_box_is_clear(
                 rows, pid, page_number, widened
@@ -608,18 +791,46 @@ class BlockCompiler:
         required = (box[3] - box[1]) / min(max(float(scale), 0.05), 1.0) if scale else (
             box[3] - box[1]
         ) * 1.2
+        landing = next_index + 1
         moved = layout_refine.plan_next_page_float(
-            doc[next_index], box, detector, required_height=required
+            doc[next_index],
+            box,
+            detector,
+            required_height=required,
+            evidence=cache.evidence(doc[next_index], landing),
+            reserved=self._page_obstacles(rows, pid, landing),
         )
-        if moved is not None and self._float_box_is_clear(
-            rows, pid, next_index + 1, moved
-        ):
-            return list(moved), next_index + 1, "next-page"
+        if moved is not None and self._float_box_is_clear(rows, pid, landing, moved):
+            return list(moved), landing, "next-page"
         return box, page_number, None
 
-    @staticmethod
-    def _float_box_is_clear(rows, pid, page_number, box):
-        """浮动框不与目标页上其它 block 的版面框相交（区域/墨迹之外的第二道保险）。"""
+    def _page_obstacles(self, rows, pid, page_number):
+        """浮动规划的「兄弟」障碍集：已定贴片框 + 尚未编译的段落原文框。
+
+        只看已定贴片还不够：流式预览里兄弟段可能**还没编译**，此时它在版面上
+        仍占着原文框那块地（合成时基线原文就画在那里）。区域检测虽然多半能覆盖
+        这些墨迹，但它是启发式的——实测会把相邻小段并成一块或漏检，导致扩框
+        吃掉邻居 1pt 左右。把原文框显式并进来，判定就不依赖检测器的召回率。
+        """
+        obstacles = self.reservations.obstacles(page_number, exclude=pid)
+        reserved_ids = self.reservations.reserved_ids()
+        for other in rows:
+            if other.id == pid or other.id in reserved_ids:
+                continue
+            if other.page != page_number:
+                continue
+            geometry = other.geometry or {}
+            other_box = geometry.get("layout_box") or geometry.get("src_box")
+            if other_box:
+                obstacles.append([float(value) for value in other_box])
+        return obstacles
+
+    def _float_box_is_clear(self, rows, pid, page_number, box):
+        """浮动框不与目标页上的**原文版面框或已定贴片**相交（第二道保险）。
+
+        原实现只查 ``rows`` 的原文 layout 框，对「兄弟贴片浮到同一处」完全无感
+        （原文空白区里两个贴片可以互相完全覆盖）。这里同时查登记簿。
+        """
         import pymupdf
 
         rect = pymupdf.Rect(box)
@@ -630,6 +841,9 @@ class BlockCompiler:
                 other.geometry or {}
             ).get("src_box")
             if other_box and rect.intersects(pymupdf.Rect(other_box)):
+                return False
+        for reserved in self.reservations.obstacles(page_number, exclude=pid):
+            if rect.intersects(pymupdf.Rect(reserved)):
                 return False
         return True
 
@@ -795,6 +1009,9 @@ class BlockCompiler:
             if previous
             else {"base": assets.put(outputs[0], kind="baseline"), "patches": {}}
         )
+        # 已持久化的本页 patch 进登记簿：重启/续跑/单段重编时，浮动决策同样要看见
+        # 既有贴片（登记簿是进程内的，数据库才是跨进程的权威状态）。
+        self.reservations.load(row.page, state.get("patches") or {})
         with pymupdf.open(assets.resolve(state["base"])) as baseline:
             index = row.page - 1
             if index < 0 or index >= baseline.page_count:
@@ -867,6 +1084,9 @@ class BlockCompiler:
                         box, stamp, hit = float_box, retried, retry_hit
                     else:
                         float_box, stamp_page, floated = box, row.page, None
+                # 登记最终落点（含未浮动/浮动失败回退原框的情形）：后续块的浮动
+                # 规划要把它当障碍，才不会叠上来。
+                self.reservations.reserve(pid, stamp_page, box)
                 stamp_asset = assets.put(Path(stamp.pdf_path), kind="stamp")
                 state["patches"][pid] = {
                     "asset": stamp_asset,

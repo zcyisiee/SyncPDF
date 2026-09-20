@@ -630,6 +630,45 @@ def test_build_stamp_cache_requires_working_dir(tmp_path):
     assert cache.cache_dir.name == "latex_cache"
 
 
+def test_build_stamp_cache_prefers_shared_root(tmp_path, monkeypatch):
+    """回归：共享缓存根优先于 workdir，否则 build 会把预览编好的贴片全部重编。
+
+    真实故障：流式预览写 ``<store_base>/cache/stamps``、build 写
+    ``<workdir>/latex_cache``，两边键集交集为 0（实测 build 437 次 miss / 59 次
+    命中）。命名空间（模板版本 + 字体签名）在目录名里，所以共享根可以跨文档。
+    """
+    from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
+        cache_namespace,
+    )
+    from babeldoc.format.pdf.document_il.backend.latex_bbox.stamp_cache import (
+        SHARED_CACHE_ENV,
+    )
+
+    shared = tmp_path / "shared"
+    namespace = cache_namespace(_CAPABILITY).replace("/", "_").replace(":", "_")
+
+    class _Config:
+        working_dir = str(tmp_path / "workdir")
+
+    monkeypatch.setenv(SHARED_CACHE_ENV, str(shared))
+    cache = batch_build_cache(_Config())
+    assert cache is not None
+    assert cache.cache_dir == shared / namespace
+
+    # 显式的 config 值优先于环境变量。
+    explicit = tmp_path / "explicit"
+
+    class _ConfigExplicit:
+        working_dir = str(tmp_path / "workdir")
+        latex_stamp_cache_dir = str(explicit)
+
+    assert batch_build_cache(_ConfigExplicit()).cache_dir == explicit / namespace
+
+    # 未配置共享根时回到旧行为。
+    monkeypatch.delenv(SHARED_CACHE_ENV, raising=False)
+    assert batch_build_cache(_Config()).cache_dir.name == "latex_cache"
+
+
 def batch_build_cache(config):
     from babeldoc.format.pdf.document_il.backend.latex_bbox.stamp_cache import (
         build_stamp_cache,
