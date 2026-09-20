@@ -155,10 +155,10 @@ test('归档视图：列表（新 → 旧）+ 当前版本高亮 + stale 提示 
   const artifacts = await apiJson<{ name: string }[]>(request, `/documents/${DID}/artifacts`);
   expect(artifacts.some((item) => item.name.includes('versions'))).toBe(false);
 
-  // ---- 3) 归档视图渲染 ----------------------------------------------------------
+  // ---- 3) 归档 tab 渲染（右栏；archive 路由默认选中该 tab）-----------------------
   await page.goto(`/#/d/${DID}/archive`);
-  await expect(page.locator('[data-od-id="archive-panel"]')).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator('[data-od-id="archive-count"]')).toHaveText('共 2 个版本');
+  await expect(page.locator('[data-od-id="archive-tab"]')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('[data-od-id="archive-tab"] [data-od-id="archive-actions"]')).toBeVisible();
 
   const rows = page.locator('[data-od-id="archive-row"]');
   await expect(rows).toHaveCount(2);
@@ -179,11 +179,11 @@ test('归档视图：列表（新 → 旧）+ 当前版本高亮 + stale 提示 
   await expect(download).toHaveAttribute('href', `${API}/documents/${DID}/versions/1/pdf`);
   await expect(download).toHaveAttribute('download', 'paper.mono.r1.pdf');
 
-  // ---- 4) stale 提示条（草稿有未编译修改）----------------------------------------
-  await expect(page.locator('[data-od-id="archive-stale"]')).toBeVisible();
-  await expect(page.locator('[data-od-id="archive-stale"]')).toContainText('草稿有未编译修改');
+  // ---- 4) stale 提示（归档摘要里：草稿有未编译修改）------------------------------
+  await expect(page.locator('[data-od-id="archive-summary-stale"]')).toBeVisible();
+  await expect(page.locator('[data-od-id="archive-summary-stale"]')).toContainText('草稿有未编译修改');
 
-  // ---- 5) 右侧面板的归档摘要在前（默认 tab）+ 「查看全部」------------------------
+  // ---- 5) 归档摘要（版本数 + 最新版下载 + 「查看全部」）---------------------------
   await expect(page.locator('[data-od-id="archive-summary"]')).toBeVisible();
   await expect(page.locator('[data-od-id="archive-summary-count"]')).toHaveText('2 个版本');
   await expect(page.locator('[data-od-id="archive-summary-all"] a')).toHaveAttribute(
@@ -211,11 +211,7 @@ test('归档视图：列表（新 → 旧）+ 当前版本高亮 + stale 提示 
   // ---- 7) 空态（从没编译成功过）不报错，给引导 -----------------------------------
   await page.goto(`/#/d/${EMPTY_DID}/archive`);
   await expect(page.locator('[data-od-id="archive-empty"]')).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator('[data-od-id="archive-empty"]')).toContainText('还没有版本归档');
-  await expect(page.locator('[data-od-id="archive-empty-cta"] a')).toHaveAttribute(
-    'href',
-    `#/d/${EMPTY_DID}/translate`,
-  );
+  await expect(page.locator('[data-od-id="archive-empty"]')).toContainText('还没有全量编译版本');
   await page.screenshot({ path: join(SHOT_DIR, 'e2e-w12-empty.png') });
 
   expect(pageErrors, '页面不应有未捕获异常').toEqual([]);
