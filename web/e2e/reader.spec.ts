@@ -29,7 +29,7 @@ function pdf(pages: number, source: boolean): Buffer {
 }
 
 async function fixture(page: Page, compilable = false) {
-  // 合并视图后不再按视图切 bbox 默认值：这个 fixture 的拖拽编辑层需要版面框（pdf_native）
+  // 合并视图后不再按视图切 bbox 默认值：这个 fixture 的拖拽编辑层需要译文框（pdf_native）
   await page.addInitScript(() => localStorage.setItem('ieet.bboxMode', 'layout'));
   let revision = 1;
   const target = pdf(40, false);
@@ -134,7 +134,7 @@ test('continuous reading, navigation, zoom alignment, scoped gestures and narrow
   expect(await toolbar.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   // bbox 三态与下载已从《更多》移出，直接平铺（不需要点开任何菜单）
   await expect(page.getByRole('group', { name: 'bbox 图层' })).toBeVisible();
-  await expect(page.getByRole('button', { name: '版面框', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '译文框', exact: true })).toBeVisible();
   await page.getByRole('spinbutton', { name: '页码', exact: true }).fill('20');
   await page.getByRole('spinbutton', { name: '页码', exact: true }).press('Enter');
   await expect(pane.locator('[data-reader-page="20"] canvas')).toBeVisible();
@@ -244,8 +244,10 @@ test('compiled revision remount restores an unlinked pane without moving its pee
   await page.getByRole('button', { name: '解除联动' }).click();
   await scrollToPage(page, 'primary', 3, 0.25);
   await expect(page.getByRole('spinbutton', { name: '页码', exact: true })).toHaveValue('3');
+  // 全文编译入口在右栏操作区（工具条上的下载槽与旧「手动编译」按钮均已删除）：
+  // 提交后产物修订号变化 → 预览按 `?r=2` 重新取字节
   const refreshed = page.waitForRequest((request) => request.url().includes('/artifacts/') && new URL(request.url()).searchParams.get('r') === '2');
-  await page.getByRole('button', { name: '手动编译', exact: true }).click();
+  await page.locator('[data-od-id="action-bar"] [data-od-id="compile-full"]').click();
   await refreshed;
   await expect.poll(async () => (await readingPosition(page, 'primary')).page).toBe(3);
   await expect.poll(async () => (await readingPosition(page, 'primary')).fraction).toBeCloseTo(0.25, 1);

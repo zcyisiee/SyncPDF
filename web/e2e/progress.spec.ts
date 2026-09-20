@@ -1,10 +1,11 @@
 /**
- * W06 真用例：事件流面板（真 SSE + 真分页）+ 真数据时间线（stage-state 基线）。
+ * W06 真用例：事件流面板（真 SSE + 真分页）+ 真数据阶段条（stage-state 基线）。
  *
  * fixture：`tmp/ccs3764-dyn`（同 `preview.spec.ts`；21 页、事件归档 12 条、7 段全 ok）。
  * 断言重点：
  * - 事件面板渲染出真归档里的行（≥10 行、seq 与 kind 来自服务端 events.jsonl，不是造的）；
- * - 时间线 7 段全是 `data-state=ok` + 真实耗时（stage-state 的 duration_s）+ 总用时 chip；
+ * - 阶段条（`stage-strip`，在事件流 tab 顶部）7 段全是 `data-state=ok`，段 title 带真实耗时
+ *   （stage-state 的 duration_s）+ 右端「7 阶段完成」结论；
  * - 页面全程无 console error / pageerror（SSE 连接与 EventSource 生命周期不报错）。
  *
  * SSE **增量**（进行中的 run）不在 e2e 里做：W07 有真 job 之后由 W15 的集成验收覆盖；
@@ -31,7 +32,7 @@ test.beforeAll(async ({ request }) => {
   ).toBe(200);
 });
 
-test('进度视图：事件面板真事件 + 时间线真阶段耗时 + 无 console error', async ({ page, request }) => {
+test('进度视图：事件面板真事件 + 阶段条真阶段耗时 + 无 console error', async ({ page, request }) => {
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   page.on('console', (message) => {
@@ -81,38 +82,37 @@ test('进度视图：事件面板真事件 + 时间线真阶段耗时 + 无 cons
   await expect(page.locator('[data-od-id="event-row-json"]')).toContainText('"kind"');
   await page.locator('[data-od-id="event-row"] button').first().click();
 
-  // 时间线：7 段全 ok + 真实耗时（stage-state 的 duration_s + formatDuration 口径）
+  // 阶段条：7 段全 ok（真 stage-state 基线），段 title 里是真实耗时（不造假百分比）
   for (const stage of STAGES) {
     const state = stageState.stages.find((item: { stage: string }) => item.stage === stage);
     expect(state, `stage-state 缺 ${stage}`).toBeTruthy();
     expect(state.status).toBe('ok');
-    await expect(page.locator(`[data-od-id="timeline-stage-${stage}"]`)).toHaveAttribute(
+    await expect(page.locator(`[data-od-id="stage-strip-segment"][data-stage="${stage}"]`)).toHaveAttribute(
       'data-state',
       'ok',
     );
   }
-  // 最长段 translate（248.93s → 4m 8s）与最短段 report（0s → 刚启动）
-  await expect(page.locator('[data-od-id="timeline-stage-translate"]')).toContainText('4m 8s');
-  await expect(page.locator('[data-od-id="timeline-stage-parse"]')).toContainText('15s');
-  const total = page.locator('[data-od-id="timeline-total"]');
-  await expect(total).toContainText(/总用时 \d/);
-  // 总用时 == 服务端 7 段 duration_s 之和（同一口径：floor 到秒）
-  const totalSeconds = stageState.stages.reduce(
-    (sum: number, item: { duration_s: number | null }) => sum + (item.duration_s ?? 0),
-    0,
+  // 最长段 translate（248.93s → 4m 8s）与最短段 report（0s → 0s）的耗时如实写进段 title
+  await expect(page.locator('[data-od-id="stage-strip-segment"][data-stage="translate"]')).toHaveAttribute(
+    'title',
+    /4m 8s/,
   );
-  const minutes = Math.floor(Math.floor(totalSeconds) / 60);
-  await expect(total).toContainText(`${minutes}m`);
+  await expect(page.locator('[data-od-id="stage-strip-segment"][data-stage="parse"]')).toHaveAttribute(
+    'title',
+    /15s/,
+  );
+  // 全 ok 的结论文案（旧底部时间线的「总用时」chip 已随时间线删除）
+  await expect(page.locator('[data-od-id="stage-strip-status"]')).toContainText('7 阶段完成');
 
-  // 段不可点击（视图合并后时间线只是状态图，不再是链接）
-  await expect(page.locator('[data-od-id="timeline-stage-check"] a')).toHaveCount(0);
+  // 段只是状态图，不是链接（旧版点击跳视图已随视图合并移除）
+  await expect(page.locator('[data-od-id="stage-strip"] a')).toHaveCount(0);
 
   await page.screenshot({ path: join(SHOT_DIR, 'e2e-progress.png'), fullPage: false });
   await page.locator('[data-od-id="event-stream"]').screenshot({
     path: join(SHOT_DIR, 'e2e-progress-events.png'),
   });
-  await page.locator('[data-od-id="timeline"]').screenshot({
-    path: join(SHOT_DIR, 'e2e-progress-timeline.png'),
+  await page.locator('[data-od-id="stage-strip"]').screenshot({
+    path: join(SHOT_DIR, 'e2e-progress-stage-strip.png'),
   });
 
   expect(pageErrors).toEqual([]);

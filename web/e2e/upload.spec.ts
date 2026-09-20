@@ -2,7 +2,7 @@
  * W08 真用例：上传 → 开始翻译 → 取消（真 `bdt serve --root tmp` + 真 multipart + 真子进程）。
  *
  * 三条链路：
- * 1. 文件库拖/选上传（`POST /documents`）→ 列表出现新卡（did 前缀 `up-sample-`）→ 进工作台；
+ * 1. 左栏拖/选上传（`POST /documents`）→ 左栏列表出现新论文卡（did 前缀 `up-sample-`）→ 进工作台；
  * 2. 点「开始翻译」（`from=parse`：上传的文档只有 `source.pdf`）→ job 进 running（服务环境有
  *    MinerU token 时）**或**诚实失败且 error_code 非空（没有 token / MinerU 不可用）——
  *    两个分支都算通过，但会在 annotation 里写明环境分支；不做"必成功"的假断言；
@@ -130,7 +130,9 @@ test('上传 PDF → 列表出现新文档 → 开始翻译（from=parse，诚�
   });
 
   await page.goto('/#/library');
-  await expect(page.locator('[data-od-id="dropzone"]')).toBeVisible();
+  // 左栏论文导航常驻（中栏是「选择或上传一篇论文」空态，不再有独立的文件库屏）
+  await expect(page.locator('[data-od-id="nav-rail"]')).toBeVisible();
+  await expect(page.locator('[data-od-id="library-empty"]')).toBeVisible();
 
   // 本次上传之前的文档集合：upload 之后只认**新出现**的那个 did
   // （tmp/ 里可能还留着上一次 e2e 跑出来的 up-sample-* 文档，不能按前缀取第一个）
@@ -155,27 +157,26 @@ test('上传 PDF → 列表出现新文档 → 开始翻译（from=parse，诚�
     )
     .not.toBe('');
 
-  const card = page.locator(`[data-od-id="doc-card"][data-did="${did}"]`);
+  const card = page.locator(`[data-od-id="paper-${did}"]`);
   await expect(card).toBeVisible({ timeout: 20_000 });
   // 服务端真建了 source.pdf（W03 白名单里的 kind=source）
   const artifacts = await (await request.get(`${API}/documents/${did}/artifacts`)).json();
   expect(artifacts.map((item: { name: string }) => item.name)).toContain('source.pdf');
   // 不自动跳转（用户自己点卡片）
   await expect(page).toHaveURL(/#\/library$/);
-
   await card.click();
   await expect(page).toHaveURL(new RegExp(`#/d/${did}/progress$`));
   await expect(page.locator('[data-od-id="workbench"]')).toBeVisible();
 
   // 上传的文档没有 parse 产物 → job 会从 parse 起（起点自动判断，不再有下拉）；
-  // 模型等配置在设置屏设默认，顶栏只剩「开始翻译」
+  // 模型等配置在设置屏设默认，任务控制（开始翻译）在右栏底部操作区，状态徽标同处
   const startButton = page.locator('[data-od-id="start-job-submit"]');
   await expect(startButton).toBeEnabled({ timeout: 20_000 });
   await startButton.click();
   await page.screenshot({ path: join(SHOT_DIR, 'w08-e2e-start.png'), fullPage: false });
 
   // 诚实断言：要么真跑起来（running），要么失败且 error_code 非空（无 MinerU 环境）。
-  // 失败态的顶栏徽标带 data-tip=「error_code：message」（旧 active-job-outcome 条已并入）。
+  // 失败态的任务状态徽标带 data-tip=「error_code：message」（旧 active-job-outcome 条已并入）。
   const status = page.locator('[data-od-id="active-job-status"]');
   await expect(status).toBeVisible({ timeout: 30_000 });
   const running = page.locator('[data-od-id="active-job-status"][data-status="running"]');

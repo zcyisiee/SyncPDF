@@ -30,7 +30,7 @@
 | 布局提供方与字符对齐 | `babeldoc/docvision/`、`document_il/utils/provider_alignment.py` |
 | HTTP 路由、任务、草稿、全量编译与候选 | `babeldoc_tools/serve/{app,runner,jobs,draft,compile,candidates}.py`、`routers/` |
 | 元数据、资产、局部/批量编译、迁移与清理 | `babeldoc_tools/serve/{database,asset_store,block_compile,migrate,cleanup}.py` |
-| 工作台、API 消费、预览与事件订阅 | `web/src/{screens,components,lib,api}/` |
+| 工作台、API 消费、预览与事件订阅 | `web/src/{screens,components,lib,api}/`（三栏外壳：左栏 `PaperNav` 常驻，中栏按路由，工作台右栏 `InspectorPanel`） |
 | 模型调用与提示词 | `babeldoc_tools/harnesses.py`、`serve/models.py`、`skills/document-translate/agents/`、`scripts/` |
 | 质量检查与回归证据 | `tests/`、`babeldoc/tools/agent/{quality_checks,layout_geometry,link_audit}.py`、仓库 `tmp/` |
 
@@ -68,7 +68,9 @@ bdt run → parse → translate → apply → build → check → review → rep
 
 贴片渲染的 fit 判定对水平方向使用 2.5pt 容差（垂直 0.5pt）：TeX/PyMuPDF 的宽度口径是 advance 盒，轻微超宽不触发缩字号。贴片仍被缩字或溢出时自动**浮动**：`block_compile._float_if_shrunk` 用 PP-DocLayoutV3 对编译后的译文页重识别版面（`PaddleLayoutRegions`，缺 `BDT_PADDLE_DEVICE` 环境时 auto，CoreML 运行期失败自动降级 CPU），按 同栏下/上扩 → 跨栏横向扩 → 跨页整框迁移 找净空并重渲染；跨页迁移的贴片在 patch 里记 `page` 落点页，`compose_page_asset` 负责擦 home 页脚印、把外来贴片盖到落点页。
 
-`GET /paragraphs` 每段带解析状态派生的 `style` 摘要（字号/衬线/加粗/斜体/字体名）；草稿 `layout` 新增 `bold/italic/serif` 布尔覆盖并在局部编译注入 LaTeX（`font_scale`/`line_skip` 同路径生效）。前端段落面板提供三态下拉，多选时提供批量编译面板。
+`GET /paragraphs` 每段带解析状态派生的 `style` 摘要（字号/衬线/加粗/斜体/字体名）；草稿 `layout` 新增 `bold/italic/serif` 布尔覆盖与中文字体族 `font_family`（值是 `GET /fonts` 的 id），并在局部编译注入 LaTeX（`font_scale`/`line_skip` 同路径生效）。前端段落面板提供字体族与字号下拉、三态样式下拉，多选时提供批量编译面板。
+
+工作台界面是三栏骨架：左栏 `PaperNav`（论文卡列表、搜索、上传、底部词表/设置入口）在所有路由常驻；中栏按路由渲染，工作台里只有预览区（工具条最左是文档名与阶段徽标，其次是翻页组与缩放组）；右栏 `InspectorPanel` 是段落 / 事件流 / 归档三个 tab，底部常驻操作区（任务控制 + 编译全文）。没有顶栏、图标栏或底部时间线：阶段状态在事件流 tab 的阶段条里，历史版本在归档 tab。
 
 原文识别叠加层经 `serve/recognition.py` 读取已持久化的 provider IR，展示原始 block/span 框（含行内公式）和全文实际 label 清单；旧 parse 段落快照仍供兼容与段落选择使用。span 是只读预览实体，不参与草稿/编译身份，也不叠加到译文页。接口字段与回退语义见 [HTTP 参考](docs/reference/http-api.md#识别框与-label-筛选)。
 
