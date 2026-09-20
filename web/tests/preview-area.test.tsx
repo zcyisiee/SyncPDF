@@ -192,7 +192,7 @@ describe('PreviewArea bbox 降级与模式', () => {
       </>,
     );
     await screen.findAllByText('正在加载 PDF…');
-    expect(screen.getByText(/点击预览里的段落框查看该段/)).toBeInTheDocument();
+    expect(screen.getByText(/点击预览里的原文框查看该段/)).toBeInTheDocument();
 
     act(() => uiStore.getState().setSelectedParagraph('P01-001'));
     // 选中段落 id 显示在右侧面板头部（tab 行右侧，旧版「已选中段落」独立条已合并）

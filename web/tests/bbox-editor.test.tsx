@@ -91,7 +91,7 @@ describe('BboxEditor 渲染', () => {
   });
 
   it('根 svg 不抢命中（pointer-events-none），命中只落在框体/手柄上', () => {
-    // 真浏览器冒烟发现的回归：svg 根的 fill 默认黑色 = painted，会盖住**其它**段落框的点击
+    // 真浏览器冒烟发现的回归：svg 根的 fill 默认黑色 = painted，会盖住**其它**框的点击
     const { view } = renderEditor();
     const svg = view.container.querySelector('svg') as SVGSVGElement;
     expect(svg.getAttribute('class')).toContain('pointer-events-none');

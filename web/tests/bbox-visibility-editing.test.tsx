@@ -28,7 +28,7 @@ it('hiding a selected category removes its editor even when selected from elsewh
       coord_system: 'pdf_native', paragraphs: [{ id: 'p1', layout_label: 'title', layout_box: [1, 2, 10, 20] }],
     }),
   });
-  // 版面框图层（几何 mock 是 pdf_native）：合并视图后没有按视图切默认值，显式选 layout
+  // 译文框图层（几何 mock 是 pdf_native）：合并视图后没有按视图切默认值，显式选 layout
   act(() => uiStore.getState().setBboxMode('layout'));
   renderWithQuery(<PreviewArea did="local" />);
   await screen.findByLabelText('title');

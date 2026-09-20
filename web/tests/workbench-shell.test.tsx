@@ -268,7 +268,7 @@ describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
     await screen.findByText('无产物 PDF');
     // 默认 tab = 段落（未选中段 → 空态提示）
     expect(document.querySelector('[data-od-id="paragraph-editor-empty"]')).not.toBeNull();
-    expect(screen.getByText(/点击预览里的段落框查看该段/)).toBeInTheDocument();
+    expect(screen.getByText(/点击预览里的原文框查看该段/)).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '段落' })).toHaveAttribute('aria-selected', 'true');
     // 事件流退为次要 tab：不选它就不挂事件流面板
     expect(document.querySelector('[data-od-id="event-stream"]')).toBeNull();
