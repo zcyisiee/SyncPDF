@@ -8,7 +8,6 @@ import { useGlossary as useGlossaryQuery, useProfiles } from '../lib/queries';
 import { HarnessSelect } from '../components/jobs/HarnessSelect';
 import { Button, LinkButton } from '../components/ui/Button';
 import { ScrollArea } from '../components/ui/ScrollArea';
-import { ScreenFrame } from '../components/shell/ScreenFrame';
 
 /**
  * `#/settings` 设置屏：翻译的全部默认偏好都在这里设好（工作台顶栏的「开始翻译」直接用），
@@ -32,8 +31,8 @@ export function SettingsScreen() {
   const [status, setStatus] = useState('');
   const glossaryCount = glossary.data?.count ?? 0;
   const glossaryEmpty = glossary.data !== undefined && glossaryCount === 0;
-  return <ScreenFrame>
-    <ScrollArea className="h-full">
+  return (
+    <ScrollArea className="h-full" data-od-id="screen-settings">
       <div className="w-full max-w-[900px] px-s7 pb-12 pt-s7">
         <h1 className="font-serif text-h1 font-medium text-ink">设置</h1>
         <h2 className="mt-s2 text-body font-medium text-ink-2">翻译偏好</h2>
@@ -120,5 +119,5 @@ export function SettingsScreen() {
         <p className="mt-s5"><LinkButton href="#/library">返回文件库</LinkButton></p>
       </div>
     </ScrollArea>
-  </ScreenFrame>;
+  );
 }

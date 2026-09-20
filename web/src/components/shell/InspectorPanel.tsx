@@ -31,6 +31,8 @@ const TABS: readonly InspectorTab[] = ['paragraph', 'events', 'archive'];
  *
  * 编辑只读判据与服务端一致（api.md §3.3）：`compile.status=running` 或该文档有活动 job 时
  * 草稿写端点会 409 `document_busy`，所以这里提前把编辑器置只读并说明原因。
+ *
+ * 栏宽（`--inspw`）由外壳的 `.wb-grid` 管，本面板不控自己宽度。
  */
 export function InspectorPanel({
   did,
@@ -43,7 +45,6 @@ export function InspectorPanel({
   feed: EventFeed;
   compileEvents: PersistentEvent[];
 }) {
-  const collapsed = useUiStore((state) => state.inspectorCollapsed);
   const selectedParagraphId = useUiStore((state) => state.selectedParagraphId);
   const selectedParagraphIds = useUiStore((state) => state.selectedParagraphIds);
   const documentQuery = useDocument(did);
@@ -67,73 +68,71 @@ export function InspectorPanel({
       data-od-id="inspector"
       className="col-start-3 row-start-1 min-h-0 overflow-hidden border-l border-hair bg-ivory"
     >
-      {collapsed ? null : (
-        <div className="flex h-full min-h-0 flex-col" data-od-id="inspector-body">
-          <div
-            role="tablist"
-            aria-label="右侧面板"
-            data-od-id="inspector-tabs"
-            className="flex flex-none items-center gap-s2 border-b border-hair bg-ivory px-s3 py-[4px]"
-          >
-            {TABS.map((item) => (
-              <TabButton
-                key={item}
-                odId={`inspector-tab-${item}`}
-                active={tab === item}
-                onClick={() => setTab(item)}
-              >
-                {TAB_LABELS[item]}
-              </TabButton>
-            ))}
-            {selectedParagraphId === null ? null : (
-              <span className="ml-auto flex min-w-0 items-center gap-s2">
-                {editingLocked ? (
-                  <span className="font-mono text-micro text-run-ink" data-od-id="editor-locked">
-                    只读（{compileRunning ? '编译中' : '有任务在跑'}）
-                  </span>
-                ) : null}
-                <span
-                  className="truncate font-mono text-micro text-ink-3"
-                  data-od-id="selected-paragraph-id"
-                >
-                  {selectedParagraphId}
+      <div className="flex h-full min-h-0 flex-col" data-od-id="inspector-body">
+        <div
+          role="tablist"
+          aria-label="右侧面板"
+          data-od-id="inspector-tabs"
+          className="flex flex-none items-center gap-s2 border-b border-hair bg-ivory px-s3 py-[4px]"
+        >
+          {TABS.map((item) => (
+            <TabButton
+              key={item}
+              odId={`inspector-tab-${item}`}
+              active={tab === item}
+              onClick={() => setTab(item)}
+            >
+              {TAB_LABELS[item]}
+            </TabButton>
+          ))}
+          {selectedParagraphId === null ? null : (
+            <span className="ml-auto flex min-w-0 items-center gap-s2">
+              {editingLocked ? (
+                <span className="font-mono text-micro text-run-ink" data-od-id="editor-locked">
+                  只读（{compileRunning ? '编译中' : '有任务在跑'}）
                 </span>
-              </span>
-            )}
-          </div>
-          {tab === 'paragraph' ? (
-            <div role="tabpanel" aria-label="段落" className="flex min-h-0 flex-1 flex-col">
-              {/* 多选 ≥2：批量编译面板压在段落编辑器上方（编辑器仍跟随主选中段）。 */}
-              {selectedParagraphIds.length > 1 ? (
-                <BatchPanel
-                  did={did}
-                  blockIds={selectedParagraphIds}
-                  disabled={editingLocked}
-                  disabledReason={editingLockedReason}
-                />
               ) : null}
-              <div className="min-h-0 flex-1">
-                <ParagraphEditor
-                  did={did}
-                  paragraphId={selectedParagraphId}
-                  disabled={editingLocked}
-                  disabledReason={editingLockedReason}
-                />
-              </div>
-            </div>
-          ) : null}
-          {tab === 'archive' ? (
-            <div role="tabpanel" aria-label="归档" className="min-h-0 flex-1">
-              <ArchiveSummary did={did} />
-            </div>
-          ) : null}
-          {tab === 'events' ? (
-            <div role="tabpanel" aria-label="事件流" className="min-h-0 flex-1">
-              <EventStreamPanel did={did} feed={feed} compileEvents={compileEvents} />
-            </div>
-          ) : null}
+              <span
+                className="truncate font-mono text-micro text-ink-3"
+                data-od-id="selected-paragraph-id"
+              >
+                {selectedParagraphId}
+              </span>
+            </span>
+          )}
         </div>
-      )}
+        {tab === 'paragraph' ? (
+          <div role="tabpanel" aria-label="段落" className="flex min-h-0 flex-1 flex-col">
+            {/* 多选 ≥2：批量编译面板压在段落编辑器上方（编辑器仍跟随主选中段）。 */}
+            {selectedParagraphIds.length > 1 ? (
+              <BatchPanel
+                did={did}
+                blockIds={selectedParagraphIds}
+                disabled={editingLocked}
+                disabledReason={editingLockedReason}
+              />
+            ) : null}
+            <div className="min-h-0 flex-1">
+              <ParagraphEditor
+                did={did}
+                paragraphId={selectedParagraphId}
+                disabled={editingLocked}
+                disabledReason={editingLockedReason}
+              />
+            </div>
+          </div>
+        ) : null}
+        {tab === 'archive' ? (
+          <div role="tabpanel" aria-label="归档" className="min-h-0 flex-1">
+            <ArchiveSummary did={did} />
+          </div>
+        ) : null}
+        {tab === 'events' ? (
+          <div role="tabpanel" aria-label="事件流" className="min-h-0 flex-1">
+            <EventStreamPanel did={did} feed={feed} compileEvents={compileEvents} />
+          </div>
+        ) : null}
+      </div>
     </aside>
   );
 }

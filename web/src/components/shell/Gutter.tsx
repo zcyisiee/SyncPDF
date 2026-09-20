@@ -4,8 +4,8 @@ import { cn } from '../../lib/cn';
 import { LAYOUT_SPECS, useUiStore, widthFromDelta, type GutterId } from '../../stores/ui';
 
 /**
- * 可拖分隔条（DESIGN.md §8.2）：固定 6px，Pointer Events + `setPointerCapture`，
- * `role="separator"` + 方向键可达（列 16px / 时间线 8px）。宽度变量与范围在 stores/ui.ts。
+ * 可拖分隔条：固定 6px，Pointer Events + `setPointerCapture`，
+ * `role="separator"` + 方向键可达（列 16px）。宽度变量与范围在 stores/ui.ts。
  * 放置（grid 列/行）由调用方通过 className 决定。
  */
 export function Gutter({ id, className }: { id: GutterId; className?: string }) {

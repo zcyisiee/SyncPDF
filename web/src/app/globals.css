@@ -14,7 +14,7 @@
 /*
  * 设计令牌与基础样式。Tailwind theme 里映射同一组值
  * （web/tailwind.config.ts）；这里保留 CSS 变量是为了给伪元素、关键帧、栅格模板与
- * 行内栅格变量（--vrw/--inspw/--tlh）提供唯一拼写来源。
+ * 行内栅格变量（--navw/--inspw）提供唯一拼写来源。
  */
 :root {
   /* 1. 色彩令牌 — 暖纸 / 墨 / 单一红棕强调色 */
@@ -67,7 +67,7 @@
   --r: 4px;
   --r2: 6px;
 
-  /* 工作台栏宽（实际值由 src/components/shell 写在容器行内 style 上） */
+  /* 三栏宽度（实际值由 App / WorkbenchScreen 写在容器行内 style 上） */
   --gw: 6px;
   --navw: 280px;
   --inspw: 340px;
@@ -109,11 +109,11 @@
 }
 
 @layer components {
-  /* 三栏骨架：左栏论文列表 + 中栏预览 + 右栏检查器。
-   * --navw / --inspw 由容器行内 style 写入（Gutter 拖拽更新 stores/ui）。 */
+  /* 外壳骨架（App 级）：左栏论文导航 + 分隔条 + 中栏内容。
+   * --navw 由 App 行内 style 写入（Gutter 拖拽更新 stores/ui）。 */
   .app-grid {
     display: grid;
-    grid-template-columns: var(--navw) var(--gw) minmax(0, 1fr) var(--gw) var(--inspw);
+    grid-template-columns: var(--navw) var(--gw) minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
     min-height: 0;
     min-width: 0;
@@ -122,13 +122,14 @@
     background: var(--parchment);
   }
 
-  /* 中栏内部：工具条 + 画布 */
-  .work-grid {
+  /* 工作台内层（仅 workbench 路由）：中栏内容 + 分隔条 + 右栏检查器。
+   * --inspw 由 WorkbenchScreen 行内 style 写入。 */
+  .wb-grid {
     display: grid;
-    grid-template-rows: 40px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) var(--gw) var(--inspw);
+    grid-template-rows: minmax(0, 1fr);
     min-height: 0;
     min-width: 0;
-    background: var(--canvas, var(--sand));
   }
 
   /* 禁用态 tooltip（§4.1）：`content: attr(data-tip)` 只能用 CSS 表达 */
