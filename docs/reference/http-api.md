@@ -56,7 +56,7 @@
 
 客户端传 profile id；执行命令在服务器解析，不能通过 job 请求传 translator/reviewer 命令或密钥。模型配置端点是独立的凭证输入边界，返回的是脱敏元信息。AI 审查是否运行由 reviewer 配置决定，不能根据翻译完成推断已审查。
 
-`preview_workers`（可选，1..`MAX_PREVIEW_WORKERS`，缺省取上限）只对会跑翻译阶段的 `run` 生效：翻译进行中的流式预览编译并行度。上限 = `min(16, cpu_count-2)`，随服务所在机器核数走（`serve/limits.py`）；越界值 422。同一页的块仍串行编译，不同页并行；优先级为 job 字段 > `bdt serve --preview-workers` > 缺省。其余 action 给了该字段也不进记录（与 compile 带 profile 同口径）。
+`preview_workers`（可选，1..`MAX_PREVIEW_WORKERS`，缺省取上限）只对会跑翻译阶段的 `run` 生效：翻译进行中的流式预览编译并行度。上限 = `min(16, cpu_count-2)`，随服务所在机器核数走（`serve/limits.py`）；越界值 422。贴片渲染全部并行，同一页的块只在页状态提交时串行；优先级为 job 字段 > `bdt serve --preview-workers` > 缺省。其余 action 给了该字段也不进记录（与 compile 带 profile 同口径）。
 
 提交成功为 202，响应 `status=queued` 是接收确认；真实状态读 `/jobs/{jid}`。状态包括 `queued / running / succeeded / failed / canceled / interrupted`。同一文档限制活动任务；全量 runner 与局部编译器各有本机并发控制，不能据此假定已支持多进程共享调度。服务重启会把残留任务收敛为中断，不自动恢复计算。
 
@@ -75,7 +75,7 @@
 | 操作 | 调用 | 成功产物 |
 |---|---|---|
 | 看一段的局部排版 | `POST D/blocks/{block_id}/compile`，带 `base_revision` | 局部页面/预览资产；不等于最终导出 |
-| 多段一起重排（shift 多选） | `POST D/blocks/compile`，`{"base_revision":n,"block_ids":[…]}`（去重保序、1..200 项） | 一个 job（`effective_scope=blocks`，`paragraph_ids` 回链）；各块草稿覆盖互不影响，同页串行、跨页并行编译，每个受影响页只合成一次 |
+| 多段一起重排（shift 多选） | `POST D/blocks/compile`，`{"base_revision":n,"block_ids":[…]}`（去重保序、1..200 项） | 一个 job（`effective_scope=blocks`，`paragraph_ids` 回链）；各块草稿覆盖互不影响，渲染并行、同页提交串行，每个受影响页只合成一次 |
 | 下载当前修订 | `POST D/export`，带 `base_revision` | 数据库 `exports` 记录与导出资产 |
 | 兼容全量重建 | `POST D/jobs`，`action=compile`、`base_revision` | 隔离重建后发布到 output，并进入旧版本归档 |
 
