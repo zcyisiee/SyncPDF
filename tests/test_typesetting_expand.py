@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import types as py_types
 
+import pytest
+
 from babeldoc.format.pdf.document_il import Box
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.midend.typesetting import (
@@ -55,6 +57,30 @@ def make_paragraph(box: Box, debug_id: str = "P01-001") -> il_version_1.PdfParag
 
 
 class TestExpandedBox:
+    @pytest.mark.parametrize("with_figure", [False, True])
+    def test_p02_011_top_whitespace_does_not_pull_text_to_page_top(self, with_figure):
+        target = Box(306.865, 369.345, 348.155, 376.813)
+        page = make_page(
+            paragraphs=[make_paragraph(target, "P02-011")],
+            characters=[
+                il_version_1.PdfCharacter(
+                    char_unicode=" ", box=Box(x, 752.428, x + 2, 758.804)
+                )
+                for x in range(308, 348, 2)
+            ],
+        )
+        if with_figure:
+            page.page_layout = [
+                il_version_1.PageLayout(
+                    class_name="figure", box=Box(308, 410, 553, 740)
+                )
+            ]
+        assert not page.pdf_figure
+        expanded = Typesetting._expanded_box(make_typesetting(), target, page)
+        assert expanded is not None
+        assert expanded.y2 == (410 - EXPAND_VERTICAL_GAP if with_figure else target.y2)
+        assert expanded.y == target.y
+
     def test_pulls_to_neighbors_with_gap(self):
         # 目标框 (100, 620, 300, 650)；上方邻居底边 700、下方邻居顶边 600。
         target = Box(x=100, y=620, x2=300, y2=650)
