@@ -36,6 +36,7 @@
 | `GET/PUT /profiles` | 服务端提供方配置；`profiles.py` |
 | `GET/PUT /models`、`GET/DELETE /models/{model_id}`、`POST /models/{model_id}/test` | 已保存模型配置与连通测试；`models.py`；测试会实际调用提供方 |
 | `GET/PUT/DELETE /glossary` | JSON 词表条目，服务端复用 CSV 编解码；`glossary.py` |
+| `GET /fonts` | 段落级中文字体族清单（id/label/serif/available）；`routers/fonts.py` |
 
 下载不要自行拼文件系统路径。普通产物白名单和哈希资产的授权规则不同，前端应使用服务端返回的清单/引用。完整响应字段不在这里复制，避免维护第二份 schema。
 
@@ -65,7 +66,7 @@
 {"base_revision":3,"paragraphs":{"P01-001":{"target":"修改后的译文"}}}
 ```
 
-`PATCH D/draft` 成功递增 revision；`DELETE` 清空也递增。字段 `null` 可删除对应覆盖，整段 `null` 删除该段全部覆盖。`target` 使用 canonical 占位符（如 `<style id='1'>`、`{v3}`），不要直接传 Markdown 短锚点。`layout` 的合法键与数值范围由 `draft.py` 和 `babeldoc/tools/agent/layout_overrides.py` 校验：四个数值键（`scale_cap/font_scale/line_skip/box_scale`）、`box`、强制换行键，以及三个样式布尔键 `bold/italic/serif`（`true/false` 覆盖，缺省或删键 = 跟随源文派生值；`font_scale` 与样式键在局部块编译时真正生效）。
+`PATCH D/draft` 成功递增 revision；`DELETE` 清空也递增。字段 `null` 可删除对应覆盖，整段 `null` 删除该段全部覆盖。`target` 使用 canonical 占位符（如 `<style id='1'>`、`{v3}`），不要直接传 Markdown 短锚点。`layout` 的合法键与数值范围由 `draft.py` 和 `babeldoc/tools/agent/layout_overrides.py` 校验：四个数值键（`scale_cap/font_scale/line_skip/box_scale`）、`box`、强制换行键、三个样式布尔键 `bold/italic/serif`（`true/false` 覆盖，缺省或删键 = 跟随源文派生值），以及中文字体族键 `font_family`（值是 `GET /fonts` 返回的 `id`；非法 id → 422 `draft_invalid`）。`font_scale`、三个样式键与 `font_family` 在局部块编译时真正生效；`font_family` 只影响局部块编译（拉丁字形跟随该族的 `serif`，除非同时显式给了 `serif`），全量编译路径不消费它。
 
 `GET D/paragraphs` 的每个段落带 `style` 摘要（`font_size/bold/italic/serif/font_name`，由解析状态派生；解析状态不可用为 `null`），前端据此显示"当前 bbox 的编译样式"并提供三态覆盖下拉。
 
