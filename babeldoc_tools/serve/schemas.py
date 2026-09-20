@@ -604,6 +604,19 @@ class DocumentUploaded(BaseModel):
     source: Literal["source.pdf"] = "source.pdf"
 
 
+class DocumentDeleted(BaseModel):
+    """``DELETE /documents/{did}`` 的 200 响应。
+
+    删除是**破坏性**操作：workdir 目录树被删掉，数据库里该文档的行被清空（资产文件
+    按内容寻址、可能被其它文档共用，保留给 ``bdt serve --cleanup`` 回收）。
+    ``rows`` 是各表删除行数（诊断用，不承诺字段稳定）。
+    """
+
+    did: str
+    deleted: bool = True
+    rows: dict[str, int] = {}
+
+
 class ProfileListItem(BaseModel):
     """``GET /profiles`` 的条目 / ``PUT /profiles`` 的响应（api.md §3.5）。
 

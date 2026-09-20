@@ -19,9 +19,12 @@ from fastapi import Path as PathParam
 from fastapi import Query
 from fastapi import UploadFile
 
+from babeldoc_tools.common import ToolError
 from babeldoc_tools.serve import views
+from babeldoc_tools.serve.runner import JobRunner
 from babeldoc_tools.serve.schemas import API_PREFIX
 from babeldoc_tools.serve.schemas import CheckResponse
+from babeldoc_tools.serve.schemas import DocumentDeleted
 from babeldoc_tools.serve.schemas import DocumentDetail
 from babeldoc_tools.serve.schemas import DocumentListItem
 from babeldoc_tools.serve.schemas import DocumentUploaded
@@ -44,8 +47,14 @@ UPLOAD_FILE = (
 )
 
 
-def documents_router(store: DocumentStore) -> APIRouter:
-    """按 store 生成只读路由（与 :func:`babeldoc_tools.serve.app.create_app` 同风格）。"""
+def documents_router(
+    store: DocumentStore, runner: JobRunner | None = None
+) -> APIRouter:
+    """按 store 生成路由（与 :func:`babeldoc_tools.serve.app.create_app` 同风格）。
+
+    ``runner`` 只被 ``DELETE /documents/{did}`` 用到：删除前要确认该文档没有活动
+    job（子进程还在写它的 workdir）。为 ``None`` 时跳过这项检查（测试/嵌入场景）。
+    """
     router = APIRouter(prefix=API_PREFIX, tags=["documents"])
 
     def reader(did: str) -> WorkdirReader:
@@ -88,6 +97,37 @@ def documents_router(store: DocumentStore) -> APIRouter:
     )
     def list_documents() -> list[DocumentListItem]:
         return [views.document_summary(reader(did), did) for did in store.list_dids()]
+
+    @router.delete(
+        "/documents/{did}",
+        response_model=DocumentDeleted,
+        summary="删除文档",
+        description=(
+            "**破坏性**：删除该文档的 workdir 目录树与数据库行（草稿、页面、任务事件等）。"
+            "按内容寻址的资产文件保留（可能被其它文档共用），回收交给 `bdt serve --cleanup`。"
+            "有活动 job（queued/running）时拒绝（`document_busy`）；workdir 模式不支持删除"
+            "（`delete_not_allowed`）。"
+        ),
+        responses={
+            404: {"description": "document_not_found：文档不存在或不在服务范围内"},
+            409: {"description": "document_busy：该文档有排队或运行中的任务"},
+            400: {"description": "delete_not_allowed：workdir 模式只暴露单个文档"},
+        },
+    )
+    def delete_document(
+        did: Annotated[str, PathParam(description=DOCUMENT_ID)],
+    ) -> DocumentDeleted:
+        # 有活动任务时拒绝：子进程仍在该 workdir 里读写，删目录会让它写进空气里。
+        active = runner.registry.active_for_did(did) if runner is not None else None
+        if active is not None:
+            raise ToolError(
+                "document_busy",
+                f"该文档有活动任务（{active.status}），先取消或等它结束再删",
+                job_id=active.job_id,
+                status=active.status,
+            )
+        result = store.delete_document(did)
+        return DocumentDeleted(did=result["did"], rows=result["rows"])
 
     @router.get(
         "/documents/{did}",

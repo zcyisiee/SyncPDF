@@ -341,3 +341,93 @@ describe('文件库屏（真数据 /documents）', () => {
     expect(within(alert).getByText('HTTP 503 · root_missing')).toBeInTheDocument();
   });
 });
+
+/** 删除文档（右键菜单）：菜单出现、确认后发 DELETE、失败按错误码分类展示。 */
+describe('文件库右键删除（DELETE /documents/{did}）', () => {
+  it('右键弹出菜单；确认后发 DELETE 并从列表刷新', async () => {
+    let documents = DOCUMENTS;
+    const fetchMock = mockApiFetch({
+      '/api/v1/documents': () => jsonResponse(documents),
+      'DELETE /api/v1/documents/ccs3764-dyn': () => {
+        documents = DOCUMENTS.filter((doc) => doc.did !== 'ccs3764-dyn');
+        return jsonResponse({ did: 'ccs3764-dyn', deleted: true, rows: { documents: 1 } });
+      },
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderWithQuery(<LibraryScreen />);
+
+    const card = (await screen.findByText('ccs3764-dyn')).closest('a');
+    expect(card).not.toBeNull();
+    fireEvent.contextMenu(card!);
+
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: /删除此文档/ })).toBeInTheDocument();
+    // 菜单出现时浏览器原生菜单被抑制（preventDefault 由 contextMenu 处理）→ 只断言我们的菜单在
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /删除此文档/ }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/documents/ccs3764-dyn'),
+        expect.objectContaining({ method: 'DELETE' }),
+      );
+    });
+    // 列表刷新后卡片消失
+    await waitFor(() => expect(screen.queryByText('ccs3764-dyn')).toBeNull());
+    expect(screen.getByText('Attention Is All You Need')).toBeInTheDocument();
+  });
+
+  it('取消确认时不发请求', async () => {
+    const fetchMock = mockApiFetch({ '/api/v1/documents': () => jsonResponse(DOCUMENTS) });
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    renderWithQuery(<LibraryScreen />);
+
+    const card = (await screen.findByText('ccs3764-dyn')).closest('a');
+    fireEvent.contextMenu(card!);
+    fireEvent.click(await screen.findByRole('menuitem', { name: /删除此文档/ }));
+
+    // 只发生了列表 GET，没有任何 DELETE
+    expect(
+      fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE'),
+    ).toHaveLength(0);
+    expect(screen.getByText('ccs3764-dyn')).toBeInTheDocument();
+  });
+
+  it('有活动任务时展示服务端原文（document_busy）', async () => {
+    mockApiFetch({
+      '/api/v1/documents': () => jsonResponse(DOCUMENTS),
+      'DELETE /api/v1/documents/ccs3764-dyn': () =>
+        jsonResponse(
+          {
+            error: {
+              code: 'document_busy',
+              message: '该文档有活动任务（running），先取消或等它结束再删',
+            },
+          },
+          409,
+        ),
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderWithQuery(<LibraryScreen />);
+
+    const card = (await screen.findByText('ccs3764-dyn')).closest('a');
+    fireEvent.contextMenu(card!);
+    fireEvent.click(await screen.findByRole('menuitem', { name: /删除此文档/ }));
+
+    const error = await screen.findByText(/该文档有活动任务/);
+    expect(error).toHaveAttribute('data-od-id', 'doc-card-delete-error');
+    // 失败不清列表：卡片还在
+    expect(screen.getByText('ccs3764-dyn')).toBeInTheDocument();
+  });
+
+  it('Esc 关闭菜单', async () => {
+    mockApiFetch({ '/api/v1/documents': () => jsonResponse(DOCUMENTS) });
+    renderWithQuery(<LibraryScreen />);
+
+    const card = (await screen.findByText('ccs3764-dyn')).closest('a');
+    fireEvent.contextMenu(card!);
+    expect(await screen.findByRole('menu')).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+  });
+});

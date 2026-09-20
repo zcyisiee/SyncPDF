@@ -756,16 +756,19 @@ def test_error_codes_are_stable_across_endpoints(client):
 
 
 def test_openapi_lists_document_subresources_as_get_only(client):
-    """文档的只读子资源仍然只有 GET（``/documents`` 本身 W08 多了上传的 POST）。"""
+    """文档的只读子资源仍然只有 GET（``/documents`` 本身 W08 多了上传的 POST）。
+
+    ``/documents/{did}`` 是例外：它多了破坏性的 DELETE（删除文档）。
+    """
     schema = client.get("/openapi.json").json()
     for path in (
-        f"{DOCUMENTS}/{{did}}",
         f"{DOCUMENTS}/{{did}}/stage-state",
         f"{DOCUMENTS}/{{did}}/paragraphs",
         f"{DOCUMENTS}/{{did}}/geometry",
         f"{DOCUMENTS}/{{did}}/check",
     ):
         assert set(schema["paths"][path]) == {"get"}, path
+    assert set(schema["paths"][f"{DOCUMENTS}/{{did}}"]) == {"get", "delete"}
     # ``POST /documents`` 是 W08 的上传：写端点白名单（helper 是唯一来源）放行它
     assert set(schema["paths"][DOCUMENTS]) == {"get", "post"}
     assert_no_unexpected_write_routes(schema)
@@ -926,3 +929,75 @@ def test_geometry_corrupt_provider_falls_back_and_reads_new_results(
     body = client.get(GEOMETRY, params={"kind": "parse"}).json()
     assert body["recognition_entities"] == []
     assert body["labels"] == []
+
+
+# --------------------------------------------------------------------------- #
+# 删除文档（破坏性端点）
+# --------------------------------------------------------------------------- #
+def test_delete_document_removes_workdir_and_rows(client, root, workdir):
+    """删除：workdir 目录树消失、列表里没了、数据库行清空、资产文件保留。"""
+    store = DocumentStore.for_root(root)
+    store.database.register_document(DID, "a" * 64, 10)
+    store.database.save_draft(DID, {"revision": 1, "paragraphs": {}}, expected_revision=0)
+    asset = root / "assets" / "aa" / ("a" * 64)
+    asset.parent.mkdir(parents=True)
+    asset.write_bytes(b"%PDF-fake")
+
+    response = client.delete(f"{DOCUMENTS}/{DID}")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["did"] == DID and body["deleted"] is True
+    assert body["rows"]["documents"] >= 1
+    assert body["rows"]["drafts"] >= 1
+    # 目录树与数据库行都没了，但按内容寻址的资产文件保留（可能被别的文档共用）。
+    assert not workdir.exists()
+    assert asset.is_file()
+    assert [item["did"] for item in client.get(DOCUMENTS).json()] == [BARE]
+    with store.database._lock:
+        remaining = store.database.connection.execute(
+            "SELECT COUNT(*) FROM documents WHERE id=?", (DID,)
+        ).fetchone()[0]
+        paragraphs = store.database.connection.execute(
+            "SELECT COUNT(*) FROM blocks WHERE document_id=?", (DID,)
+        ).fetchone()[0]
+    assert remaining == 0 and paragraphs == 0
+
+
+def test_delete_document_rejects_unknown_and_workdir_mode(client, workdir):
+    """不存在的文档 404；workdir 模式明确拒绝（不删自己的根）。"""
+    missing = client.delete(f"{DOCUMENTS}/nope")
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "document_not_found"
+    # workdir 模式：只暴露一个文档，删除等于删服务自己的根。
+    with TestClient(
+        create_app(DocumentStore.for_workdir(workdir))
+    ) as single:
+        denied = single.delete(f"{DOCUMENTS}/{DID}")
+    assert denied.status_code == 400
+    assert denied.json()["error"]["code"] == "delete_not_allowed"
+    assert workdir.is_dir()
+
+
+def test_delete_document_rejects_active_job(root, workdir):
+    """有活动 job 时拒绝（子进程还在写这个 workdir）。
+
+    走真实链路：``create_app`` 造出的 registry 里塞一条 running 记录（模拟"任务正在跑"），
+    而不是另建一个 runner —— 路由用的是 create_app 自己那个 registry。
+    """
+    from babeldoc_tools.serve.jobs import JobRecord
+    from babeldoc_tools.serve.jobs import utc_now
+
+    store = DocumentStore.for_root(root)
+    with TestClient(create_app(store)) as busy:
+        busy.app.state.runner.registry.records["j-x"] = JobRecord(
+            job_id="j-x",
+            did=DID,
+            action="run",
+            status="running",
+            created_at=utc_now(),
+        )
+        blocked = busy.delete(f"{DOCUMENTS}/{DID}")
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "document_busy"
+    assert workdir.is_dir()

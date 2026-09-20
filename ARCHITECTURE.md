@@ -60,6 +60,8 @@ bdt run → parse → translate → apply → build → check → review → rep
 
 上传按内容哈希去重，上传本身不自动解析。任务执行阶段会保存可观察状态；翻译流可经 `ServeStreamPreview` 生成预览：完成的翻译块立即提交到一个并行编译池（`--preview-workers`/job 字段 `preview_workers`，1..8，缺省 8），同一页的块路由到同一 worker 串行编译（页 patch 状态不丢），不同页并行。流式路径只写 immutable baseline 上的块 patch 和当前页 asset；页面全部块完成后发布一次页事件，翻译结束再由页 asset 合成完整预览写入 `local_previews`。LaTeX 能力探测与 `state.pkl` 反序列化按进程缓存。持久 SSE 读数据库事件，旧 SSE 读单次 run 的诊断归档，二者游标不同。
 
+`DELETE /documents/{did}` 删除文档（workdir 目录树 + 数据库行，资产文件保留给 `--cleanup`）；有活动 job 时拒绝，workdir 模式不支持。子进程无收尾信封失败时，job 的 `error_message` 附上脱敏后的 stderr 末三行，避免 `envelope_unparsed` 掩盖真实原因。
+
 ### 局部修改与交付
 
 草稿保存带 `base_revision`，写入 SQLite 并保留兼容 JSON。**保存不自动编译**：当前 `CompileService.schedule` 只取消旧计时器。用户可显式编译单段（`BlockCompiler`，更新页面/预览资产），或 shift 多选多段走 `POST /blocks/compile` 批量编译（一个 job；同页串行、跨页并行的线程池，每个受影响页只合成一次，各块草稿覆盖互不影响），再导出当前 revision。局部发布会检查 revision 和任务状态，避免过期结果覆盖新编辑。

@@ -282,6 +282,92 @@ class MetadataDB:
             ).fetchall()
             return [{**dict(row), "data": json.loads(row["data"])} for row in rows]
 
+    #: 每张带 ``document_id`` 的表（删除文档时逐表清行）。``job_snapshots`` 是
+    #: 按 payload JSON 存的，单独处理。新增表必须同步加进来，否则删除会留下孤儿行。
+    DOCUMENT_TABLES = (
+        "translation_blocks",
+        "local_previews",
+        "local_pages",
+        "drafts",
+        "parse_results",
+        "blocks",
+        "block_edits",
+        "compile_blocks",
+        "pages",
+        "jobs",
+        "job_events",
+        "exports",
+    )
+
+    def delete_document(self, did: str) -> dict[str, int]:
+        """删除该文档的全部数据库行（**不删资产文件**）；→ 各表删除行数。
+
+        资产（``assets`` 表 + ``assets/<hash>`` 文件）按内容寻址、可能被其它文档共用，
+        这里既不删文件也不删 ``assets`` 行（回收交给 ``bdt serve --cleanup``）。
+        ``papers`` 行只在该 doc 是其最后引用者时删掉。
+
+        单事务（``BEGIN IMMEDIATE``）：要么全删要么全不删，不留"删了一半"的文档。
+        """
+        counts: dict[str, int] = {}
+        with self._lock, self._connection:
+            self._connection.execute("BEGIN IMMEDIATE")
+            paragraph_scope = self._document_paper(did)
+            for table in self.DOCUMENT_TABLES:
+                cursor = self._connection.execute(
+                    f"DELETE FROM {table} WHERE document_id=?",  # noqa: S608 - 表名是模块常量
+                    (did,),
+                )
+                counts[table] = cursor.rowcount or 0
+            # job_snapshots 没有 document_id 列：读 payload 里的 did 过滤。
+            snapshots = [
+                row["id"]
+                for row in self._connection.execute(
+                    "SELECT id,payload FROM job_snapshots"
+                ).fetchall()
+                if _snapshot_did(row["payload"]) == did
+            ]
+            for job_id in snapshots:
+                self._connection.execute(
+                    "DELETE FROM job_snapshots WHERE id=?", (job_id,)
+                )
+            counts["job_snapshots"] = len(snapshots)
+            counts["documents"] = (
+                self._connection.execute(
+                    "DELETE FROM documents WHERE id=?", (did,)
+                ).rowcount
+                or 0
+            )
+            if paragraph_scope is not None:
+                remaining = self._connection.execute(
+                    "SELECT COUNT(*) FROM documents WHERE paper_id=?",
+                    (paragraph_scope,),
+                ).fetchone()[0]
+                if not remaining:
+                    counts["papers"] = (
+                        self._connection.execute(
+                            "DELETE FROM papers WHERE id=?", (paragraph_scope,)
+                        ).rowcount
+                        or 0
+                    )
+        return counts
+
+    def _document_paper(self, did: str) -> str | None:
+        """该文档引用的 paper id（没有 documents 行 → None）。"""
+        row = self._connection.execute(
+            "SELECT paper_id FROM documents WHERE id=?", (did,)
+        ).fetchone()
+        return row["paper_id"] if row else None
+
+
+def _snapshot_did(payload: str) -> str | None:
+    """job 快照 payload 里的 did；解析失败 → None（不匹配任何文档）。"""
+    try:
+        data = json.loads(payload)
+    except (TypeError, ValueError):
+        return None
+    did = data.get("did") if isinstance(data, dict) else None
+    return str(did) if did else None
+
 
 def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> tuple[str, int]:
     digest = hashlib.sha256()

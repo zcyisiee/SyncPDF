@@ -62,7 +62,11 @@ export interface paths {
         get: operations["get_document_api_v1_documents__did__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * 删除文档
+         * @description **破坏性**：删除该文档的 workdir 目录树与数据库行（草稿、页面、任务事件等）。按内容寻址的资产文件保留（可能被其它文档共用），回收交给 `bdt serve --cleanup`。有活动 job（queued/running）时拒绝（`document_busy`）；workdir 模式不支持删除（`delete_not_allowed`）。
+         */
+        delete: operations["delete_document_api_v1_documents__did__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -895,6 +899,30 @@ export interface components {
             layout_lint: boolean;
             /** Link Audit */
             link_audit: boolean;
+        };
+        /**
+         * DocumentDeleted
+         * @description ``DELETE /documents/{did}`` 的 200 响应。
+         *
+         *     删除是**破坏性**操作：workdir 目录树被删掉，数据库里该文档的行被清空（资产文件
+         *     按内容寻址、可能被其它文档共用，保留给 ``bdt serve --cleanup`` 回收）。
+         *     ``rows`` 是各表删除行数（诊断用，不承诺字段稳定）。
+         */
+        DocumentDeleted: {
+            /** Did */
+            did: string;
+            /**
+             * Deleted
+             * @default true
+             */
+            deleted: boolean;
+            /**
+             * Rows
+             * @default {}
+             */
+            rows: {
+                [key: string]: number;
+            };
         };
         /**
          * DocumentDetail
@@ -1783,6 +1811,59 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DocumentDetail"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_document_api_v1_documents__did__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文档 id：workdir 目录名（单段，解析结果必须在服务根目录内） */
+                did: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentDeleted"];
+                };
+            };
+            /** @description delete_not_allowed：workdir 模式只暴露单个文档 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description document_not_found：文档不存在或不在服务范围内 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description document_busy：该文档有排队或运行中的任务 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

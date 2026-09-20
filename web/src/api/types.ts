@@ -35,6 +35,7 @@ export type ArtifactItem = components['schemas']['ArtifactItem'];
 export interface PreviewPage { page: number; asset: string; complete: boolean; page_revision?: number; updated_at: string; }
 export interface PreviewPagesResponse { did: string; revision: number; pages: PreviewPage[]; }
 export type DocumentUploaded = components['schemas']['DocumentUploaded'];
+export type DocumentDeleted = components['schemas']['DocumentDeleted'];
 export type JobRecord = components['schemas']['JobRecord'];
 export type JobCreateRequest = components['schemas']['JobCreateRequest'] & { reviewer_profile?: string | null; thinking?: string | null };
 export type JobAccepted = components['schemas']['JobAccepted'];

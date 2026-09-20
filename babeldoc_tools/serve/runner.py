@@ -381,6 +381,28 @@ def stdout_envelope(stdout: str) -> tuple[str, dict] | None:
     return None
 
 
+def scrub_text(text: str, profile: Profile) -> str:
+    """服务端日志文本的脱敏（子进程 stderr → job 记录前必须过一遍）。
+
+    与 :func:`sanitize_envelope` 同一套规则：profile 命令（含 JSON 转义形式）换成
+    profile id、带 token 的 URL 换成占位符。**只做文本替换，不改结构**。
+    """
+    return _scrub_secrets(text, profile)
+
+
+def stderr_diagnostic(stderr: str, profile: Profile, limit: int = 400) -> str | None:
+    """无信封失败时的诊断片段：子进程 stderr 末几行（已脱敏、已截断）。
+
+    没有它，"子进程 stdout 没有可解析的 JSON 信封" 会把真实原因（导入失败、参数
+    错误、崩溃栈）全部吞掉——排查只能靠手工复现。``None`` = stderr 为空（不编造）。
+    """
+    lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
+    if not lines:
+        return None
+    tail = scrub_text(" / ".join(lines[-3:]), profile)
+    return tail[-limit:]
+
+
 class JobOutcome(NamedTuple):
     """终态判定结果（:func:`classify_exit` 的返回值）。"""
 
@@ -1057,6 +1079,13 @@ class JobRunner:
                 status = outcome.status
                 error_code = outcome.error_code
                 error_message = outcome.error_message
+            if envelope is None and status == "failed":
+                # 无信封 = 子进程根本没跑起来或崩溃（导入失败、参数错误、段错误…）。
+                # 把 stderr 末几行（已脱敏）附进 message：否则真实原因被
+                # "没有可解析的 JSON 信封" 完全吞掉，排查只能手工复现。
+                hint = stderr_diagnostic(running.capture.stderr, running.profile)
+                if hint:
+                    error_message = f"{error_message}；stderr：{hint}"
             # 落盘前脱敏：信封可能带 profile 命令（含密钥）与 debug 查看器 token URL。
             text = sanitize_envelope(envelope[0], running.profile) if envelope else None
             self.registry.mark_finished(

@@ -92,6 +92,9 @@ _TOOL_ERROR_STATUS = {
     "invalid_document_id": 400,
     "path_escape": 400,
     "document_not_found": 404,
+    # 删除文档：workdir 模式只暴露一个文档，删除等于删服务自己的根 → 400（不是权限 403：
+    # 这是"这个模式没有这个能力"，与凭证无关）。
+    "delete_not_allowed": 400,
     # 产物不存在（不是空数组假成功）：parse 快照 / layout 几何 / 全部段落产物
     "snapshot_unavailable": 404,
     "geometry_unavailable": 404,
@@ -215,6 +218,8 @@ def create_app(
     )
     # job_update 广播挂在 app.state 上（路由层拿到的是同一个实例；也方便诊断/测试）
     app.state.job_updates = job_updates
+    # 同一个原因挂 runner：删除文档要查它的活动 job，测试要能注入"正在跑"的记录。
+    app.state.runner = runner
     # 不注册 CORSMiddleware：v1 只服务 loopback 同源/开发代理，禁止任意来源跨域。
 
     @app.exception_handler(ToolError)
@@ -280,7 +285,7 @@ def create_app(
             documents=len(store.list_dids()),
         )
 
-    app.include_router(documents_router(store))
+    app.include_router(documents_router(store, runner))
     app.include_router(events_router(store, job_updates))
     app.include_router(artifacts_router(store))
     app.include_router(jobs_router(store, runner, compiles))

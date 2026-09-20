@@ -19,6 +19,7 @@
 | `GET /health` | 服务根可用性与文档数；`app.py` |
 | `GET /documents`、`POST /documents` | 列表、上传；`routers/documents.py`、`uploads.py` |
 | `GET D`、`D/stage-state`、`D/paragraphs`、`D/geometry`、`D/check` | 元信息、七阶段状态、段落、几何、质量；`views.py` |
+| `DELETE D` | 删除文档（**破坏性**）：workdir 目录树 + 数据库行；`document_busy`(409) / `delete_not_allowed`(400) |
 | `GET D/events`、`D/events/stream` | 诊断分页与两种 SSE；`routers/events.py` |
 | `POST D/jobs`、`GET D/jobs` | 全量任务提交/列表；`routers/jobs.py`、`runner.py` |
 | `GET /jobs/{jid}`、`POST /jobs/{jid}/cancel` | 任务状态与取消；任务详情不在文档路径下面 |
@@ -41,6 +42,10 @@
 ## 上传与任务
 
 上传为 multipart 的 `file` 字段；服务端校验文件名、`%PDF-` 文件头和 200 MiB 大小上限，流式落盘，按 SHA-256 去重。重复 PDF 可返回已有 `did`。上传只保存并登记文件，不会自动创建解析结果或启动翻译。
+
+`DELETE D` 删除文档（前端在文件库卡片上右键）：workdir 目录树与数据库行（草稿、页面、任务事件等）一起删；按内容寻址的资产文件**保留**（可能被其它文档共用），回收交给 `bdt serve --cleanup`。有活动 job 时拒绝（409 `document_busy`，子进程还在写这个 workdir）；`bdt serve --workdir` 模式拒绝（400 `delete_not_allowed`，那等于删服务自己的根）。删除顺序是"先数据库行、后目录树"，目录删除失败会留下可重试的孤儿目录，不会出现"数据库说没有、磁盘上还在"的不一致。
+
+子进程失败而 stdout 没有收尾 JSON 信封时（通常是导入失败/参数错误/崩溃），job 的 `error_message` 会附上子进程 stderr 的末三行（已脱敏、截断到 400 字符）。没有这个片段时 `envelope_unparsed` 会把真实原因完全吞掉。
 
 `POST D/jobs` 当前接受 `run / check / compile`；即使 schema 的 action 枚举有 `retranslate`，这个通用端点也拒绝它，局部重译必须走段落候选端点。
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shutil
 from pathlib import Path
 
 from babeldoc_tools.common import ToolError
@@ -203,3 +204,41 @@ class DocumentStore:
         if not candidate.is_dir():
             raise ToolError("document_not_found", f"文档不存在：{did}", did=did)
         return candidate
+
+    def delete_document(self, did: str) -> dict:
+        """删除一个文档：workdir 目录树 + 该文档的 SQLite 行（资产文件保留）。
+
+        **只允许 root 模式**：workdir 模式（``bdt serve --workdir``）是"只暴露一个
+        文档"的只读视图，删除它等于删掉服务自己的根，明确拒绝。
+
+        删除顺序（先数据库后目录，且全部在 ``resolve`` 校验之后）：
+        1. ``resolve`` 校验 did（非法/越界/不存在都会抛，绝不落到 rmtree）；
+        2. 删除该文档的数据库行（草稿/页面/资产引用/任务事件等；资产文件按 SHA-256
+           寻址且可能被其它文档共用，**不删文件**，交由 ``bdt serve --cleanup`` 回收）；
+        3. ``shutil.rmtree`` 删 workdir 目录树。
+
+        第 3 步失败（权限/占用）时数据库行已删 —— 目录会变成"孤儿 workdir"，
+        下次 ``list_dids`` 仍会枚举到它（没有 parse_results 行），可重试删除。
+        这是刻意的取舍：宁可留下可重试的目录，也不留"数据库说没有、磁盘上还在"的
+        不一致状态。返回删除摘要（供响应与诊断用）。
+        """
+        if self.allowed is not None:
+            raise ToolError(
+                "delete_not_allowed",
+                "workdir 模式不支持删除文档（服务只暴露这一个文档）",
+                did=did,
+            )
+        workdir = self.resolve(did)
+        # 目录名必须与 did 完全一致：resolve 已挡掉符号链接越界，这里再防"解析后的
+        # 真实路径与请求 did 不同名"（例如大小写不敏感文件系统上的变体）。
+        if workdir.name != did:
+            raise ToolError(
+                "path_escape",
+                f"文档 {did!r} 的解析路径名与请求不一致",
+                did=did,
+                resolved=str(workdir),
+            )
+        database = self.database
+        removed_rows = database.delete_document(did)
+        shutil.rmtree(workdir, ignore_errors=False)
+        return {"did": did, "rows": removed_rows}

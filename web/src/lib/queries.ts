@@ -18,6 +18,7 @@ import type {
   CandidateJobAccepted,
   CandidateListResponse,
   DocumentDetail,
+  DocumentDeleted,
   DocumentListItem,
   DocumentUploaded,
   DraftPatchRequest,
@@ -465,6 +466,28 @@ export function useUploadMutation() {
   return useMutation({
     mutationFn: (file: File) => apiUpload<DocumentUploaded>('/documents', file),
     onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.documents });
+    },
+  });
+}
+
+/**
+ * 删除一个文档（`DELETE /documents/{did}`，破坏性：workdir 目录树 + 数据库行）。
+ *
+ * 成功后把该文档的所有缓存清掉（详情/草稿/任务/几何都指向已经不存在的 workdir），
+ * 再让文件库列表失效。失败由调用方展示：`document_busy`（有活动任务，409）与
+ * `delete_not_allowed`（workdir 模式，400）是两类可预期拒绝。
+ */
+export function useDeleteDocumentMutation() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (did: string) =>
+      apiDelete<DocumentDeleted>(`/documents/${encodeURIComponent(did)}`),
+    onSuccess: (_result, did) => {
+      client.removeQueries({ queryKey: queryKeys.document(did) });
+      client.removeQueries({ queryKey: queryKeys.draft(did) });
+      client.removeQueries({ queryKey: queryKeys.jobs(did) });
+      client.removeQueries({ queryKey: queryKeys.artifacts(did) });
       void client.invalidateQueries({ queryKey: queryKeys.documents });
     },
   });

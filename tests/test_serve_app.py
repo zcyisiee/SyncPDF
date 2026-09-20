@@ -160,6 +160,8 @@ def test_preflight_not_enabled(client):
 ALLOWED_WRITE_ROUTES = frozenset(
     {
         ("post", f"{API_PREFIX}/documents"),
+        # 删除文档（破坏性：workdir 目录树 + 数据库行）。
+        ("delete", f"{API_PREFIX}/documents/{{did}}"),
         ("post", f"{API_PREFIX}/documents/{{did}}/jobs"),
         ("post", f"{API_PREFIX}/documents/{{did}}/blocks/compile"),
         ("post", f"{API_PREFIX}/documents/{{did}}/blocks/{{block_id}}/compile"),

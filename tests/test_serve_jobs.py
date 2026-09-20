@@ -45,6 +45,7 @@ from babeldoc_tools.serve.runner import JobRunner  # noqa: E402
 from babeldoc_tools.serve.runner import build_job_argv  # noqa: E402
 from babeldoc_tools.serve.runner import classify_exit  # noqa: E402
 from babeldoc_tools.serve.runner import sanitize_envelope  # noqa: E402
+from babeldoc_tools.serve.runner import stderr_diagnostic  # noqa: E402
 from babeldoc_tools.serve.runner import stdout_envelope  # noqa: E402
 from babeldoc_tools.serve.schemas import API_PREFIX as API  # noqa: E402
 from babeldoc_tools.serve.store import STATE_DIR  # noqa: E402
@@ -982,6 +983,36 @@ def test_stdout_envelope_takes_the_last_json_line():
     assert text == '{"ok": false, "error": {"code": "x"}}'
     # 末尾的日志行不算信封（只认真实 JSON 行）；取的是最后一个 JSON 行
     assert stdout_envelope('{"ok": true}\ntail log')[1] == {"ok": True}
+
+
+def test_stderr_diagnostic_exposes_real_reason_without_secrets():
+    """无信封失败的 stderr 摘要：末三行拼接、已脱敏、空输入不编造。"""
+    profile = Profile(id="p", translator=COMMAND_WITH_FAKE_KEY)
+    assert stderr_diagnostic("", profile) is None
+    assert stderr_diagnostic("   \n  \n", profile) is None
+
+    stderr = (
+        "Traceback (most recent call last):\n"
+        "ModuleNotFoundError: No module named 'babeldoc_tools'\n"
+        f"cmd was {COMMAND_WITH_FAKE_KEY}\n"
+        f"viewer {VIEWER_URL}\n"
+    )
+    hint = stderr_diagnostic(stderr, profile)
+    assert hint is not None
+    # 真实原因在摘要里（否则 envelope_unparsed 会把一切吞掉）
+    assert "ModuleNotFoundError" in hint
+    # 密钥与 token URL 都不许出现
+    assert "sk-xxx" not in hint
+    assert "deadbeef" not in hint
+    assert "<profile:p>" in hint and "<redacted-url>" in hint
+    # 只取末尾三行
+    assert "Traceback" not in hint
+
+
+def test_stderr_diagnostic_truncates_long_output():
+    profile = Profile(id="p")
+    hint = stderr_diagnostic("\n".join(["x" * 400] * 5), profile, limit=120)
+    assert hint is not None and len(hint) <= 120
 
 
 # --------------------------------------------------------------------------- #
