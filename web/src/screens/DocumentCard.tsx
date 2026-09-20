@@ -1,32 +1,35 @@
 /**
  * 文件库文档卡（§4.4：ivory + 1px hair + r6，hover 才加 lift 阴影）。点击进工作台进度视图。
  *
- * 右键（contextmenu）弹出删除菜单：删除是**破坏性**操作，所以菜单里的「删除」需要二次
- * 确认（原生 `confirm`，与顶栏取消任务同一口径），且失败原因按服务端错误码分类展示
- * （`document_busy` = 有活动任务；`delete_not_allowed` = workdir 模式不支持）。
+ * 右键（contextmenu）弹出删除菜单。菜单状态放在 ui store（`libraryMenu`）而不是卡片自己的
+ * state：**同一时刻只允许一个菜单**——卡片各自持 state 时右键第二张卡会同时开出两个菜单。
  *
- * 菜单在卡片内是绝对定位的小浮层：点任意处/按 Esc/滚动都关掉，不做全局单例菜单
- * （卡片数量小，每个卡片自带一个更简单，也不会出现"菜单属于哪个卡片"的状态同步）。
+ * 删除是破坏性操作：菜单里的「删除」先弹原生 `confirm` 二次确认；失败原因按服务端错误码
+ * 分类展示（`document_busy` = 有活动任务；`delete_not_allowed` = workdir 模式不支持）。
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { DocumentListItem } from '../api/types';
 import { ApiError, describeApiError } from '../lib/api';
 import { countLabel, humanizeUpdatedAt, STAGE_NAMES } from '../lib/humanize';
 import { useDeleteDocumentMutation } from '../lib/queries';
+import { useUiStore } from '../stores/ui';
 import { StageBadge } from '../components/ui/StatusBadge';
 
 export function DocumentCard({ doc }: { doc: DocumentListItem }) {
   const title = doc.title ?? doc.did;
-  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const menu = useUiStore((state) => state.libraryMenu);
+  const openLibraryMenu = useUiStore((state) => state.openLibraryMenu);
+  const closeLibraryMenu = useUiStore((state) => state.closeLibraryMenu);
   const [error, setError] = useState<string | null>(null);
-  const cardRef = useRef<HTMLAnchorElement>(null);
   const deleteMutation = useDeleteDocumentMutation();
 
-  // 菜单打开时：Esc / 滚动 / 点别处都关掉（不引入全局监听：只挂当前卡片的那一次）
+  const menuOpen = menu !== null && menu.did === doc.did;
+
+  // 菜单打开时：Esc / 滚动都关掉（不引入常驻全局监听：只在开着的时候挂）
   useEffect(() => {
-    if (menuAt === null) return;
-    const close = () => setMenuAt(null);
+    if (!menuOpen) return;
+    const close = () => closeLibraryMenu();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') close();
     };
@@ -36,10 +39,10 @@ export function DocumentCard({ doc }: { doc: DocumentListItem }) {
       window.removeEventListener('scroll', close, true);
       window.removeEventListener('keydown', onKey);
     };
-  }, [menuAt]);
+  }, [closeLibraryMenu, menuOpen]);
 
   const confirmDelete = () => {
-    setMenuAt(null);
+    closeLibraryMenu();
     // 破坏性且不可撤销（workdir 目录树会被删）：先确认再发请求。
     const ok = window.confirm(
       `删除文档「${title}」？\n\n这会删除它的解析产物、译文草稿与任务记录，无法撤销。(${doc.did})`,
@@ -49,7 +52,7 @@ export function DocumentCard({ doc }: { doc: DocumentListItem }) {
     deleteMutation.mutate(doc.did, {
       onError: (exc) => {
         const described = describeApiError(exc);
-        // 两类可预期拒绝用服务端原文（它已经说清了下一步）；其余用统一文案。
+        // 两类可预期拒绝用服务端原文（它已说清下一步）；其余套统一前缀。
         const code = exc instanceof ApiError ? exc.code : null;
         setError(
           code === 'document_busy' || code === 'delete_not_allowed'
@@ -64,14 +67,13 @@ export function DocumentCard({ doc }: { doc: DocumentListItem }) {
   return (
     <div className="relative">
       <a
-        ref={cardRef}
         href={`#/d/${encodeURIComponent(doc.did)}/progress`}
         data-od-id="doc-card"
         data-did={doc.did}
         onContextMenu={(event) => {
           event.preventDefault();
           // 固定定位 + 视口坐标：卡片会被列表滚动裁切，absolute 菜单会跟着跑。
-          setMenuAt({ x: event.clientX, y: event.clientY });
+          openLibraryMenu(doc.did, { x: event.clientX, y: event.clientY });
           setError(null);
         }}
         aria-busy={deleting}
@@ -100,22 +102,24 @@ export function DocumentCard({ doc }: { doc: DocumentListItem }) {
         </div>
       </a>
 
-      {menuAt === null ? null : (
+      {!menuOpen || menu === null ? null : (
         <>
-          {/* 点击任意处关掉菜单（透明遮罩在最上层，不吃卡片的点击语义） */}
+          {/* 点击任意处关掉菜单。遮罩覆盖全屏，所以右键另一张卡片也先落在它上面：
+              那一格只关菜单，用户的下一次右键才在新卡片上开（一次一个菜单）。 */}
           <div
             className="fixed inset-0 z-40"
-            onClick={() => setMenuAt(null)}
+            onClick={() => closeLibraryMenu()}
             onContextMenu={(event) => {
               event.preventDefault();
-              setMenuAt(null);
+              closeLibraryMenu();
             }}
             aria-hidden="true"
           />
           <div
             role="menu"
             data-od-id="doc-card-menu"
-            style={{ left: menuAt.x, top: menuAt.y }}
+            data-did={doc.did}
+            style={{ left: menu.x, top: menu.y }}
             className="fixed z-50 min-w-[132px] rounded border border-hair-2 bg-ivory py-1 shadow-lift"
           >
             <button

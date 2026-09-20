@@ -74,6 +74,13 @@ export interface ParagraphSelectOptions {
   extend?: boolean;
 }
 
+/** 文件库卡片的右键菜单位置（`did` + 视口坐标，`position: fixed` 用）。 */
+export interface LibraryMenu {
+  did: string;
+  x: number;
+  y: number;
+}
+
 export interface UiState {
   screen: ScreenId;
   inspectorWidth: number;
@@ -103,6 +110,14 @@ export interface UiState {
   retranslateProfile: string | null;
   /** 正在拖拽的分隔条（用于 `is-drag` 视觉态）。 */
   dragging: GutterId | null;
+  /**
+   * 文件库卡片的右键菜单（`did` + 视口坐标）；**同一时刻最多一个**。
+   * 放在全局 store 而不是每张卡片自己的 state：卡片各自持菜单会同时开出好几个
+   * （右键第二张卡片时第一张的还开着），既没有交互意义也难收拾。
+   */
+  libraryMenu: LibraryMenu | null;
+  openLibraryMenu: (did: string, at: { x: number; y: number }) => void;
+  closeLibraryMenu: () => void;
   setScreen: (screen: ScreenId) => void;
   /** 拖拽/键盘统一入口：clamp 到 §8.2 范围并持久化。 */
   setLayoutWidth: (id: GutterId, next: number) => void;
@@ -215,6 +230,13 @@ export function createUiStore(): StoreApi<UiState> {
     selectedParagraphId: null,
     retranslateProfile: null,
     dragging: null,
+    libraryMenu: null,
+    openLibraryMenu: (did, at) => set({ libraryMenu: { did, x: at.x, y: at.y } }),
+    closeLibraryMenu: () => {
+      // 已经是关的就别 set（避免订阅方无谓重渲染）
+      if (get().libraryMenu === null) return;
+      set({ libraryMenu: null });
+    },
     setScreen: (screen) => {
       writeStored(STORAGE_KEYS.screen, screen);
       set({ screen });

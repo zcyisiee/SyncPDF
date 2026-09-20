@@ -431,3 +431,22 @@ describe('文件库右键删除（DELETE /documents/{did}）', () => {
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
   });
 });
+
+describe('文件库右键菜单是单一实例', () => {
+  it('右键第二张卡片时只保留一个菜单', async () => {
+    mockApiFetch({ '/api/v1/documents': () => jsonResponse(DOCUMENTS) });
+    renderWithQuery(<LibraryScreen />);
+
+    const first = (await screen.findByText('ccs3764-dyn')).closest('a');
+    const second = screen.getByText('Attention Is All You Need').closest('a');
+
+    fireEvent.contextMenu(first!);
+    expect(await screen.findAllByRole('menu')).toHaveLength(1);
+
+    // 第二张卡片再右键：仍然只有一个菜单，且属于第二张（store 里是同一个字段）
+    fireEvent.contextMenu(second!);
+    const menus = screen.getAllByRole('menu');
+    expect(menus).toHaveLength(1);
+    expect(menus[0]).toHaveAttribute('data-did', 'W01-entry-smoke-20260918-001933');
+  });
+});
