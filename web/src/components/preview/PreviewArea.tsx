@@ -49,13 +49,13 @@ import { ContinuousPdfPane, type BboxPaneData, type ReaderPosition } from './Con
 import type { PdfPageInfo } from './PdfCanvas';
 import { PreviewToolbar } from './PreviewToolbar';
 
-type PreviewProps = { did: string; streamArtifact?: string | null };
+type PreviewProps = { did: string };
 
-export function PreviewArea({ did, streamArtifact }: PreviewProps) {
-  return <DocumentPreview key={did} did={did} streamArtifact={streamArtifact} />;
+export function PreviewArea({ did }: PreviewProps) {
+  return <DocumentPreview key={did} did={did} />;
 }
 
-function DocumentPreview({ did, streamArtifact }: PreviewProps) {
+function DocumentPreview({ did }: PreviewProps) {
   const bboxPreferences = useBboxStore();
   const visibility = useMemo(() => bboxPreferences.documents[did] ?? readVisibility(did), [bboxPreferences.documents, did]);
   const detailQuery = useDocument(did);
@@ -128,7 +128,7 @@ function DocumentPreview({ did, streamArtifact }: PreviewProps) {
   }, [did, resetPreviewForDocument]);
 
   const localPreview = detailQuery.data?.preview_asset;
-  const targetUrl = localPreview ? `/api/v1/documents/${encodeURIComponent(did)}/assets/${localPreview}` : streamArtifact ? artifactUrl(did, streamArtifact) :
+  const targetUrl = localPreview ? `/api/v1/documents/${encodeURIComponent(did)}/assets/${localPreview}` :
     target === null
       ? null
       : withArtifactRevision(
@@ -407,7 +407,7 @@ function DocumentPreview({ did, streamArtifact }: PreviewProps) {
     <div className="flex h-full min-h-0 min-w-0 flex-col" data-od-id="preview-area">
       {toolbar}
       {compileBar}
-      {streamArtifact ? <p data-od-id="stream-preview-note" className="px-s5 py-1 text-tiny text-run-ink">实时翻译预览 · 未完成段落保留原文，最终结果仍在生成</p> : null}
+      {busyJob !== null && (previewPagesQuery.data?.pages.length ?? 0) > 0 ? <p data-od-id="stream-preview-note" className="px-s5 py-1 text-tiny text-run-ink">实时翻译预览 · 未完成段落保留原文，最终结果仍在生成</p> : null}
       {patchNotice}
       {geometryKind !== null ? <BboxLegend did={did} boxes={bboxData?.boxes ?? []} labels={legendLabels?.length ? legendLabels : undefined} /> : null}
       {bboxUnavailable ? (

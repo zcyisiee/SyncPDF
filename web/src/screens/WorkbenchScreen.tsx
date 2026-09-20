@@ -34,7 +34,7 @@ const STAGE_STATE_LIVE_REFETCH_MS = 2_000;
  * 事件流也只有一份：正在跑的 run 与历史归档共用同一个窗口，不再区分「进行中/已完成」。
  */
 export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchView }) {
-  usePersistentEvents(did);
+  const persistent = usePersistentEvents(did);
   // job_update（W14）：收到就立刻失效对应查询，并把“刚推过”的时间戳交给 useJobs 做轮询节流。
   const jobUpdates = useJobUpdates(did);
   // jobs 轮询（W08/W14）：有 queued/running 时 5s（SSE 的 job_update 是快路径），否则 30s；
@@ -49,10 +49,8 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
     onJobUpdate: jobUpdates.onJobUpdate,
     activeJob: cardMode === 'active',
   });
-  const preview = [...feed.events].reverse().find((event) => event.kind === 'preview_ready')?.data;
-  // 翻译进行中的实时预览产物（服务端边翻边出的 preview/*.pdf）。
-  const streamArtifact = cardMode === 'active' && typeof preview?.artifact === 'string' &&
-    /^preview\/[A-Za-z0-9-]+\.pdf$/.test(preview.artifact) ? preview.artifact : null;
+  // 实时逐页预览不走 run 归档事件流：preview_ready 在持久事件流里（见
+  // usePersistentEvents），页面刷新由它直接更新 previewPages 缓存驱动。
   // 两路并存、任一 live 就快轮询：事件流还在增长，或有活动 job（前者要 run 归档才活）。
   const eventsLive = isRunLive(feed.events);
   const fastRefetch = eventsLive || cardMode === 'active';
@@ -135,12 +133,12 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
             </div>
           ) : (
             <div className="min-h-0 flex-1">
-              <PreviewArea did={did} streamArtifact={streamArtifact} />
+              <PreviewArea did={did} />
             </div>
           )}
         </section>
         <Gutter id="inspector" className="col-start-2 row-start-1" />
-        <InspectorPanel did={did} view={view} feed={feed} />
+        <InspectorPanel did={did} view={view} feed={feed} compileEvents={persistent.events} />
         {!timelineCollapsed ? <Gutter id="timeline" className="col-span-full row-start-2" /> : null}
         <Timeline did={did} segments={timeline.segments} events={feed.events} queued={queued} unavailable={timeline.isError} />
       </div>

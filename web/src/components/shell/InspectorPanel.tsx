@@ -10,6 +10,7 @@ import { BatchPanel } from '../edit/BatchPanel';
 import { ParagraphEditor } from '../edit/ParagraphEditor';
 import { EventStreamPanel } from '../events/EventStreamPanel';
 import type { EventFeed } from '../events/useEventWindow';
+import type { PersistentEvent } from '../../lib/usePersistentEvents';
 
 /** 面板 tab：`paragraph` = W10 段落编辑器，`events` = W06 事件流，`archive` = W12 归档摘要。 */
 type InspectorTab = 'paragraph' | 'events' | 'archive';
@@ -35,10 +36,12 @@ export function InspectorPanel({
   did,
   view,
   feed,
+  compileEvents,
 }: {
   did: string;
   view: WorkbenchView;
   feed: EventFeed;
+  compileEvents: PersistentEvent[];
 }) {
   const collapsed = useUiStore((state) => state.inspectorCollapsed);
   const selectedParagraphId = useUiStore((state) => state.selectedParagraphId);
@@ -126,7 +129,7 @@ export function InspectorPanel({
           ) : null}
           {tab === 'events' ? (
             <div role="tabpanel" aria-label="事件流" className="min-h-0 flex-1">
-              <EventStreamPanel did={did} feed={feed} />
+              <EventStreamPanel did={did} feed={feed} compileEvents={compileEvents} />
             </div>
           ) : null}
         </div>

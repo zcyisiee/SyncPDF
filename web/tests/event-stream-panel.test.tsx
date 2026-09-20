@@ -73,6 +73,7 @@ describe('EventStreamPanel', () => {
     render(
       <EventStreamPanel
         did={DID}
+        compileEvents={[]}
         feed={makeEventFeed({ events: windowOf(EVENTS_WINDOW_SIZE), runId: RUN_ID })}
       />,
     );
@@ -91,7 +92,7 @@ describe('EventStreamPanel', () => {
       makeEvent(2, { kind: 'cache_miss' }),
       makeEvent(3, { kind: 'candidate_evaluated' }),
     ];
-    render(<EventStreamPanel did={DID} feed={makeEventFeed({ events, runId: RUN_ID })} />);
+    render(<EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ events, runId: RUN_ID })} />);
     expect(document.querySelectorAll('[data-od-id="event-row"]')).toHaveLength(3);
 
     fireEvent.change(screen.getByLabelText('事件分组'), { target: { value: 'cache' } });
@@ -108,7 +109,7 @@ describe('EventStreamPanel', () => {
 
   it('点击行展开原始 JSON（再点收起）', () => {
     render(
-      <EventStreamPanel did={DID} feed={makeEventFeed({ events: windowOf(2), runId: RUN_ID })} />,
+      <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ events: windowOf(2), runId: RUN_ID })} />,
     );
     const row = document.querySelector('[data-od-id="event-row"] button') as HTMLElement;
     expect(document.querySelector('[data-od-id="event-row-json"]')).toBeNull();
@@ -123,19 +124,19 @@ describe('EventStreamPanel', () => {
 
   it('空态三态：加载中 / 没有 run 归档 / 还没有事件', () => {
     const { unmount } = render(
-      <EventStreamPanel did={DID} feed={makeEventFeed({ isPending: true, hasArchive: false })} />,
+      <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ isPending: true, hasArchive: false })} />,
     );
     expect(screen.getByText('正在加载事件…')).toBeInTheDocument();
     unmount();
 
     const { unmount: unmountArchive } = render(
-      <EventStreamPanel did={DID} feed={makeEventFeed({ hasArchive: false })} />,
+      <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ hasArchive: false })} />,
     );
     expect(screen.getByText(/该文档没有 run 归档/)).toBeInTheDocument();
     unmountArchive();
 
     render(
-      <EventStreamPanel did={DID} feed={makeEventFeed({ events: [], hasArchive: true })} />,
+      <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ events: [], hasArchive: true })} />,
     );
     expect(screen.getByText(/这个 run 还没有事件/)).toBeInTheDocument();
   });
@@ -145,6 +146,7 @@ describe('EventStreamPanel', () => {
     render(
       <EventStreamPanel
         did={DID}
+        compileEvents={[]}
         feed={makeEventFeed({ hasArchive: false, error: new Error('boom'), retry })}
       />,
     );
@@ -155,26 +157,26 @@ describe('EventStreamPanel', () => {
 
   it('SSE 状态行：open「实时」带脉冲；断线/关闭/不支持各有文案且不给脉冲', () => {
     const { unmount } = render(
-      <EventStreamPanel did={DID} feed={makeEventFeed({ connection: 'open' })} />,
+      <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ connection: 'open' })} />,
     );
     expect(screen.getByText('实时').querySelector('.pulse-dot')).not.toBeNull();
     unmount();
 
     const { unmount: unmountBroken } = render(
-      <EventStreamPanel did={DID} feed={makeEventFeed({ connection: 'reconnecting' })} />,
+      <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ connection: 'reconnecting' })} />,
     );
     const status = screen.getByText('连接断开，重试中').closest('[data-od-id="event-stream-status"]');
     expect(status).toHaveAttribute('data-status', 'reconnecting');
     unmountBroken();
 
     const { unmount: unmountClosed } = render(
-      <EventStreamPanel did={DID} feed={makeEventFeed({ connection: 'closed' })} />,
+      <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ connection: 'closed' })} />,
     );
     expect(screen.getByText('连接已关闭')).toBeInTheDocument();
     unmountClosed();
 
     render(
-      <EventStreamPanel did={DID} feed={makeEventFeed({ connection: 'unsupported' })} />,
+      <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ connection: 'unsupported' })} />,
     );
     expect(screen.getByText('此环境不支持实时推送')).toBeInTheDocument();
     expect(document.querySelectorAll('.pulse-dot')).toHaveLength(0);
@@ -185,6 +187,7 @@ describe('EventStreamPanel', () => {
     const { unmount } = render(
       <EventStreamPanel
         did={DID}
+        compileEvents={[]}
         feed={makeEventFeed({ events: windowOf(3), hasEarlier: false, loadEarlier })}
       />,
     );
@@ -194,6 +197,7 @@ describe('EventStreamPanel', () => {
     render(
       <EventStreamPanel
         did={DID}
+        compileEvents={[]}
         feed={makeEventFeed({ events: windowOf(3), hasEarlier: true, loadEarlier })}
       />,
     );
@@ -204,7 +208,7 @@ describe('EventStreamPanel', () => {
   it('新事件到达：停在顶部不加浮标；滚走后累计「↑ N 条新事件」并点击回顶', async () => {
     const events = windowOf(3);
     const { rerender } = render(
-      <EventStreamPanel did={DID} feed={makeEventFeed({ events, runId: RUN_ID })} />,
+      <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ events, runId: RUN_ID })} />,
     );
     const scroll = document.querySelector('[data-od-id="event-stream-scroll"]') as HTMLElement;
 
@@ -213,6 +217,7 @@ describe('EventStreamPanel', () => {
     rerender(
       <EventStreamPanel
         did={DID}
+        compileEvents={[]}
         feed={makeEventFeed({ events: [...events, makeEvent(4), makeEvent(5)], runId: RUN_ID })}
       />,
     );
@@ -226,7 +231,7 @@ describe('EventStreamPanel', () => {
   it('换 run（重新开始翻译）：滚动贴回顶部、浮标清零、展开行收起、seq 从头显示', async () => {
     const first = windowOf(3);
     const { rerender } = render(
-      <EventStreamPanel did={DID} feed={makeEventFeed({ events: first, runId: RUN_ID })} />,
+      <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ events: first, runId: RUN_ID })} />,
     );
     const scroll = document.querySelector('[data-od-id="event-stream-scroll"]') as HTMLElement;
 
@@ -238,6 +243,7 @@ describe('EventStreamPanel', () => {
     rerender(
       <EventStreamPanel
         did={DID}
+        compileEvents={[]}
         feed={makeEventFeed({ events: [...first, makeEvent(4)], runId: RUN_ID })}
       />,
     );
@@ -246,7 +252,7 @@ describe('EventStreamPanel', () => {
     // 新 run：seq 从 1 重新计数（同一份 windowOf 只是换了 run_id）。
     const NEW_RUN = '20260920T010000Z-000200';
     rerender(
-      <EventStreamPanel did={DID} feed={makeEventFeed({ events: windowOf(2), runId: NEW_RUN })} />,
+      <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ events: windowOf(2), runId: NEW_RUN })} />,
     );
 
     expect(screen.getByText(new RegExp(NEW_RUN))).toBeInTheDocument();
@@ -461,5 +467,40 @@ describe('useEventWindow', () => {
     const { result } = renderHook(() => useEventWindow(DID), { wrapper });
     await waitFor(() => expect(result.current.error).not.toBeNull());
     expect(result.current.hasArchive).toBe(false);
+  });
+});
+
+describe('编译时间线（右列，持久事件流窗口）', () => {
+  it('渲染编译侧事件：最新在上，计数行给出块/页合计', () => {
+    const compileEvents = [
+      { seq: 11, type: 'translation_block_completed', blockId: 'P01-001', page: null, at: null, data: { index: 1, total: 187 } },
+      { seq: 12, type: 'translation_block_completed', blockId: 'P01-002', page: null, at: null, data: { index: 2, total: 187 } },
+      { seq: 13, type: 'preview_ready', blockId: null, page: null, at: null, data: { page: 1, asset: 'sha-1', complete: true } },
+      { seq: 14, type: 'compile_float', blockId: 'P02-011', page: null, at: null, data: { paragraph_id: 'P02-011', kind: 'expand', page: 2 } },
+      { seq: 15, type: 'preview_failed', blockId: 'P02-012', page: null, at: null, data: { message: '单块编译失败' } },
+    ];
+    render(
+      wrapper({
+        children: (
+          <EventStreamPanel did={DID} compileEvents={compileEvents} feed={makeEventFeed({ events: windowOf(1), runId: RUN_ID })} />
+        ),
+      }),
+    );
+    const rows = document.querySelectorAll('[data-od-id="compile-timeline-row"]');
+    expect(rows).toHaveLength(5);
+    // 最新在上：第一行是最后到达的 preview_failed。
+    expect(rows[0].getAttribute('data-type')).toBe('preview_failed');
+    expect(rows[0].textContent).toContain('P02-012');
+    expect(rows[2].textContent).toContain('第 1 页');
+    expect(screen.getByText(/块 2 · 页 1/)).toBeInTheDocument();
+  });
+
+  it('没有编译事件时空态说明（不是错误）', () => {
+    render(
+      wrapper({
+        children: <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ events: windowOf(1), runId: RUN_ID })} />,
+      }),
+    );
+    expect(document.querySelector('[data-od-id="compile-timeline-empty"]')).not.toBeNull();
   });
 });

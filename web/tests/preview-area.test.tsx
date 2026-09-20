@@ -69,6 +69,8 @@ function mockPreview(options: {
   artifacts?: unknown;
   artifactsStatus?: number;
   geometry?: () => Response;
+  previewPages?: unknown;
+  busy?: boolean;
 } = {}) {
   const artifacts = options.artifacts ?? [MONO];
   return mockApiFetch({
@@ -77,6 +79,14 @@ function mockPreview(options: {
       options.artifactsStatus === undefined
         ? jsonResponse(artifacts)
         : jsonResponse(artifacts, options.artifactsStatus),
+    [`/api/v1/documents/${DID}/preview-pages`]: () =>
+      jsonResponse({ did: DID, revision: 0, pages: options.previewPages ?? [] }),
+    [`/api/v1/documents/${DID}/jobs`]: () =>
+      jsonResponse(
+        options.busy
+          ? [{ job_id: 'j-busy', did: DID, action: 'run', status: 'running', created_at: '2026-09-20T00:00:00.000Z' }]
+          : [],
+      ),
     [`/api/v1/documents/${DID}/geometry?kind=parse&page=1`]: () =>
       options.geometry?.() ?? jsonResponse(PARSE_GEOMETRY),
   });
@@ -106,12 +116,16 @@ describe('PreviewArea 产物与空态', () => {
     expect(document.querySelector('[data-od-id="pdf-canvas"]')).toBeNull();
   });
 
-  it('当前任务的增量预览可在正式产物产生前显示，并标为临时预览', async () => {
-    mockPreview({ artifacts: [] });
-    renderWithQuery(<PreviewArea did={DID} streamArtifact="preview/current-1.pdf" />);
-    expect((await screen.findAllByText('正在加载 PDF…')).length).toBeGreaterThan(0);
-    expect(screen.queryByText('无产物 PDF')).toBeNull();
-    expect(screen.getByText(/实时翻译预览/)).toBeInTheDocument();
+  it('任务进行中且已有成页资产时标注临时预览；无成页资产时不标', async () => {
+    mockPreview({ previewPages: [{ page: 1, asset: 'sha-page-1', complete: true, updated_at: '2026-09-20T00:00:00Z' }], busy: true });
+    const { unmount } = renderWithQuery(<PreviewArea did={DID} />);
+    expect(await screen.findByText(/实时翻译预览/)).toBeInTheDocument();
+    unmount();
+
+    mockPreview({ busy: true });
+    renderWithQuery(<PreviewArea did={DID} />);
+    await screen.findAllByText('正在加载 PDF…');
+    expect(screen.queryByText(/实时翻译预览/)).toBeNull();
   });
 
   it('产物清单 500 → 错误卡 + 重试', async () => {
@@ -174,7 +188,7 @@ describe('PreviewArea bbox 降级与模式', () => {
     renderWithQuery(
       <>
         <PreviewArea did={DID} />
-        <InspectorPanel did={DID} view="progress" feed={makeEventFeed()} />
+        <InspectorPanel did={DID} view="progress" feed={makeEventFeed()} compileEvents={[]} />
       </>,
     );
     await screen.findAllByText('正在加载 PDF…');
