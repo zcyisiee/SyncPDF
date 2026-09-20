@@ -17,7 +17,6 @@ from __future__ import annotations
 import types as py_types
 
 import pytest
-
 from babeldoc.format.pdf.document_il import Box
 from babeldoc.format.pdf.document_il import il_version_1
 from babeldoc.format.pdf.document_il.midend.typesetting import (
