@@ -22,6 +22,7 @@ import webbrowser
 from babeldoc_tools import __version__
 from babeldoc_tools.common import ToolError
 from babeldoc_tools.serve.schemas import API_PREFIX
+from babeldoc_tools.serve.store import DEFAULT_LIBRARY
 from babeldoc_tools.serve.store import DocumentStore
 
 __all__ = ["add_parser", "run"]
@@ -48,13 +49,17 @@ def add_parser(subparsers) -> argparse.ArgumentParser:
         description=(
             "启动本地只读 HTTP 服务：枚举 <root>/<did>/ 下的文档 workdir，"
             "或只公开 --workdir 指定的那一个（兄弟目录不可见）。"
+            "两个参数都不给时用共享文档库 ~/.sp（跨 worktree 共用，没有则创建）。"
             "默认只监听 loopback；W01 无认证，绑定非 loopback 地址前请自行确认网络环境。"
         ),
     )
-    target = parser.add_mutually_exclusive_group(required=True)
+    target = parser.add_mutually_exclusive_group()
     target.add_argument(
         "--root",
-        help="文档根目录：其下每个子目录 = 一个文档（did = 目录名）",
+        help=(
+            "文档根目录：其下每个子目录 = 一个文档（did = 目录名）。"
+            f"缺省用共享文档库 {DEFAULT_LIBRARY}"
+        ),
     )
     target.add_argument(
         "--workdir",
@@ -136,7 +141,11 @@ def _bind_socket(host: str, port: int) -> socket.socket:
 def _build_store(args: argparse.Namespace) -> DocumentStore:
     if args.root:
         return DocumentStore.for_root(args.root)
-    return DocumentStore.for_workdir(args.workdir)
+    if args.workdir:
+        return DocumentStore.for_workdir(args.workdir)
+    # 都没给：共享文档库（跨 worktree 共用同一份上传/草稿/任务历史），没有则创建。
+    DEFAULT_LIBRARY.mkdir(parents=True, exist_ok=True)
+    return DocumentStore.for_root(DEFAULT_LIBRARY)
 
 
 #: uvicorn 日志全部改走 stderr（默认 access log 会写 stdout，污染 bdt 的单行 JSON 约定）。

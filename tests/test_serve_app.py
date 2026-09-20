@@ -220,14 +220,23 @@ def test_factory_does_not_touch_filesystem_beyond_reading(root):
 # --------------------------------------------------------------------------- #
 # CLI 接入（bdt serve 是唯一入口）
 # --------------------------------------------------------------------------- #
-def test_serve_target_is_required_and_exclusive(capsys):
-    """``--root`` / ``--workdir`` 二选一且必填（argparse 用法错误 = exit 2）。"""
+def test_serve_target_is_exclusive_and_defaults_to_shared_library(capsys, tmp_path, monkeypatch):
+    """``--root`` / ``--workdir`` 互斥但仍可都省略：缺省共享文档库（跨 worktree）。"""
     parser = _build_parser()
-    for argv in (["serve"], ["serve", "--root", "a", "--workdir", "b"]):
-        with pytest.raises(SystemExit) as excinfo:
-            parser.parse_args(argv)
-        assert excinfo.value.code == 2
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(["serve", "--root", "a", "--workdir", "b"])
+    assert excinfo.value.code == 2
     assert capsys.readouterr().err
+
+    args = parser.parse_args(["serve"])
+    assert args.root is None and args.workdir is None
+
+    from babeldoc_tools.serve import cli as serve_cli
+
+    monkeypatch.setattr(serve_cli, "DEFAULT_LIBRARY", tmp_path / "shared")
+    store = serve_cli._build_store(args)
+    assert store.root == (tmp_path / "shared").resolve()
+    assert (tmp_path / "shared").is_dir()  # 共享库不存在时创建，不报 invalid_root
 
 
 def test_serve_defaults_are_loopback_and_auto_port():

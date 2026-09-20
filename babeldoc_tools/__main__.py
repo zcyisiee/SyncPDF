@@ -15,7 +15,7 @@
     bdt report --workdir tmp/wd
     bdt run <pdf> --workdir tmp/wd [--from build] [--markdown self] \
         [--translator <cmd>] [--reviewer <cmd>] [--glossaries <csv>]
-    bdt serve (--root <dir> | --workdir <dir>) [--host 127.0.0.1] [--port 0] [--open]
+    bdt serve [--root <dir> | --workdir <dir>] [--host 127.0.0.1] [--port 0] [--open]
 
 约定：
 

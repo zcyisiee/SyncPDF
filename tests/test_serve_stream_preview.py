@@ -411,19 +411,23 @@ def _start_preview(
     gates=None,
     started=None,
 ):
-    """建真实 DB（blocks/translation_blocks/job_snapshot）后起一个 ServeStreamPreview。"""
+    """建真实 DB（translation_blocks/job_snapshot）+ document.md 翻译范围后起 ServeStreamPreview。
+
+    ``blocks`` 索引表**故意不插**：生产里它只在 job 成功后由 ``_sync_metadata``
+    回填，流式编译期间恒为空（线上事故根因之一）；成页判定只认 document.md 的范围。
+    """
     store = DocumentStore.for_root(tmp_path)
     database = store.database
     did, job_id, revision = "paper", "j-stream", 3
     database.register_document(did, "sha-" + did, 128)
+    agent = tmp_path / "agent"
+    agent.mkdir(exist_ok=True)
+    lines = ["<!-- babeldoc-markdown v1 -->"]
+    for pids in blocks.values():
+        for pid in pids:
+            lines.append(f"<!-- id={pid} label=text -->\noriginal text")
+    (agent / "document.md").write_text("\n".join(lines), encoding="utf-8")
     with database._lock, database.connection:
-        for page, pids in blocks.items():
-            for pid in pids:
-                database.connection.execute(
-                    "INSERT OR REPLACE INTO blocks(id,document_id,page,source)"
-                    " VALUES (?,?,?,?)",
-                    (pid, did, page, "source"),
-                )
         for pid in translated:
             database.connection.execute(
                 "INSERT OR REPLACE INTO translation_blocks"
@@ -562,7 +566,9 @@ def test_cancel_requested_skips_compile_and_publish(tmp_path, monkeypatch):
 
 
 def test_compile_exception_records_preview_failed(tmp_path, monkeypatch):
-    """单块编译异常：记 preview_failed 事件、不发布页，同页其它块照常编译。"""
+    """单块编译异常：记 preview_failed 事件并落 ``preview_failed`` 状态；该块算
+    **落定**（回退基线原文），同页其余块齐了照常发布整页——一个坏块不能让
+    整页永远不出（线上事故：每页各一个失败块 → 全程零 preview_ready）。"""
     preview, fake, did, job_id = _start_preview(
         tmp_path,
         monkeypatch,
@@ -574,7 +580,7 @@ def test_compile_exception_records_preview_failed(tmp_path, monkeypatch):
     preview.submit("P01-002", "body", "text")
     _drain(preview)
     assert set(fake.compiled) == {"P01-002"}
-    assert fake.page_composes == []
+    assert fake.page_composes == [(1, True)]
     failures = [
         event
         for event in preview.store.database.events(did)
@@ -584,4 +590,58 @@ def test_compile_exception_records_preview_failed(tmp_path, monkeypatch):
     assert failures[0]["block_id"] == "P01-001"
     assert failures[0]["job_id"] == job_id
     assert "boom:P01-001" in failures[0]["data"]["message"]
+    with preview.store.database._lock:
+        status = preview.store.database.connection.execute(
+            "SELECT status FROM compile_blocks WHERE document_id=? AND block_id='P01-001'",
+            (did,),
+        ).fetchone()[0]
+    assert status == "preview_failed"
+    preview.close(failed=False)
+    assert fake.page_composes == [(1, True)], "已发布页在 close 不应重复发布"
+
+
+def test_page_composes_with_blocks_index_empty_and_extra_native_paragraphs(
+    tmp_path, monkeypatch
+):
+    """回归（线上根因）：``blocks`` 索引表为空（job 成功前无人回填）、页上还有
+    不参与翻译的原生段落时，成页判定只认 ``document.md`` 的翻译范围。"""
+    preview, fake, did, _job = _start_preview(
+        tmp_path,
+        monkeypatch,
+        blocks={1: ["P01-001", "P01-002"]},
+        translated=["P01-001", "P01-002"],
+    )
+    # 页眉/页脚类原生段落：不在 document.md 范围里，也不该有 translation_blocks 行。
+    with preview.store.database._lock, preview.store.database.connection:
+        preview.store.database.connection.execute(
+            "INSERT OR REPLACE INTO blocks(id,document_id,page,source) VALUES (?,?,?,?)",
+            ("P01-900", did, 1, "footer"),
+        )
+    for pid in ("P01-001", "P01-002"):
+        preview.submit(pid, "body", "text")
+    _drain(preview)
+    assert fake.page_composes == [(1, True)]
+    with preview.store.database._lock:
+        indexed = preview.store.database.connection.execute(
+            "SELECT COUNT(*) FROM blocks WHERE document_id=?", (did,)
+        ).fetchone()[0]
+    assert indexed == 1, "翻译块的 blocks 行只能由 _sync_metadata 成功后回填"
     preview.close(failed=True)
+
+
+def test_missing_document_md_never_publishes_but_close_flushes(tmp_path, monkeypatch):
+    """``document.md`` 不可读（异常现场）：流式期间不发布，close 兜底合成。"""
+    preview, fake, _did, _job = _start_preview(
+        tmp_path,
+        monkeypatch,
+        blocks={1: ["P01-001"]},
+        translated=["P01-001"],
+    )
+    (tmp_path / "agent" / "document.md").unlink()
+    preview._scope_by_page = {}
+    preview.submit("P01-001", "body", "text")
+    _drain(preview)
+    assert fake.page_composes == []
+    preview.close(failed=False)
+    assert fake.page_composes == [(1, False)]
+    assert fake.full_previews == ["paper"]

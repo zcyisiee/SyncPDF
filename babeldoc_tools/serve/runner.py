@@ -104,6 +104,15 @@ PROFILE_PLACEHOLDER = "<profile:{}>"
 #: 带 token 的 debug 查看器 URL（兜底路径用：``?token=...`` 整段抹掉）。
 _TOKEN_URL_RE = re.compile(r"https?://[^\s\"'<>]*\?token=[^\s\"'<>]*")
 
+#: serve 进程正在运行的源码树根（``babeldoc_tools`` 包的**父**目录：runner.py 在
+#: ``<root>/babeldoc_tools/serve/`` 下，取三层 parent）。子进程用
+#: ``sys.executable -m babeldoc_tools`` 起，而它的 cwd 是 workdir：serve 靠
+#: "从仓库根启动（cwd 在 sys.path 首位）" 才 import 到包时，workdir 下没有任何
+#: 路径能找到 ``babeldoc_tools``（editable 安装失效或根本没装都会这样）。把它
+#: 显式放进 PYTHONPATH 首位，子进程与 serve 永远跑同一份代码（``babeldoc`` 引擎
+#: 包也在同一目录下，一并覆盖）。
+_SOURCE_ROOT = str(Path(__file__).resolve().parents[2])
+
 
 def job_timeout_seconds(action: str) -> float:
     """该 action 的 job 级超时：``check`` 600s，``run`` 3600s。"""
@@ -272,11 +281,20 @@ def spawn_job(
     自己拉起的 translator/reviewer 孙进程都留在同一组里（``os.killpg`` 才能一网打尽）。
     stdout/stderr 都走管道（读干由 :class:`PipeCapture` 负责）；stdin 给 ``DEVNULL``
     （``bdt run`` 不从 stdin 读输入，翻译命令的提示词走它自己的管道）。
+
+    环境在 ``os.environ`` 基础上合并 ``environment``，再把 :data:`_SOURCE_ROOT`
+    前置到 ``PYTHONPATH``：子进程 ``-m babeldoc_tools`` 的 import 不再依赖 cwd
+    （workdir 里没有包；见 :data:`_SOURCE_ROOT` 的注释）。
     """
+    env = {**os.environ, **(environment or {})}
+    inherited = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        f"{_SOURCE_ROOT}{os.pathsep}{inherited}" if inherited else _SOURCE_ROOT
+    )
     return subprocess.Popen(  # noqa: S603 - argv 由服务端构造，不经 shell
         argv,
         cwd=str(workdir),
-        env={**os.environ, **(environment or {})},
+        env=env,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -1134,10 +1152,12 @@ class JobRunner:
                     for item in paragraphs(WorkdirReader(workdir), None)
                 ],
             )
-        except Exception:
-            # Metadata is an index; the filesystem artifacts remain authoritative for
-            # legacy documents and can be indexed again on the next successful job.
-            return
+        except Exception as exc:  # noqa: BLE001 - 元数据是索引，失败不推翻 job 结果
+            # 但不能无声：blocks 索引长期空着会让依赖它的查询（段落列表、迁移）
+            # 静默退化，排查只能靠猜。写 stderr（serve 日志），下次成功 job 会重试。
+            sys.stderr.write(
+                f"bdt serve: _sync_metadata({did}) failed: {type(exc).__name__}: {exc}\n"
+            )
 
     def _compile_outcome(
         self,

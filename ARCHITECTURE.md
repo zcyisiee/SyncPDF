@@ -13,7 +13,7 @@
 唯一安装命令是 `bdt`，由 [pyproject.toml](pyproject.toml) 注册到 [babeldoc_tools/__main__.py](babeldoc_tools/__main__.py)。
 
 - `bdt run`：完整编排；`parse / translate / apply / build / check / layout-set / report`：分步操作。
-- `bdt serve`：启动 FastAPI 服务与可选的 `web/dist` 静态站点；默认 `127.0.0.1`、端口 `0`（绑定后返回真实端口）。HTTP 前缀 `/api/v1`，接口 schema 由 `/openapi.json` 提供。根目录枚举会跳过测试/调试工作目录，并按源 PDF 内容去重、保留最近版本。
+- `bdt serve`：启动 FastAPI 服务与可选的 `web/dist` 静态站点；默认 `127.0.0.1`、端口 `0`（绑定后返回真实端口）。不带 `--root`/`--workdir` 时使用共享文档库 `~/.sp`（跨 worktree 共用，没有则创建）。HTTP 前缀 `/api/v1`，接口 schema 由 `/openapi.json` 提供。根目录枚举会跳过测试/调试工作目录，并按源 PDF 内容去重、保留最近版本。
 - `bdt debug` 与阶段命令的 `--debug`：诊断归档及查看器。
 - `bdt harness-call / model-call`：模型适配子命令，读 stdin 提示词、写 stdout 文本；仍属于同一个入口。
 
@@ -84,7 +84,9 @@ bdt run → parse → translate → apply → build → check → review → rep
 | `<store_base>/.bdt-serve/`、`<workdir>/.bdt-serve/` | 服务配置、兼容任务/草稿文件、候选、全量编译状态及版本 |
 | `<workdir>/debug/runs/` | 按运行归档的诊断事件、快照与产物副本 |
 
-`store_base` 在 root 模式是服务根目录，在 workdir 模式是所选工作目录。SQLite 和文件目前并存；不是已经完成数据库替换，也不能只备份其中一边。
+`store_base` 在 root 模式是服务根目录，在 workdir 模式是所选工作目录；root 模式缺省根是 `~/.sp`（跨 worktree 共享的文档库）。SQLite 和文件目前并存；不是已经完成数据库替换，也不能只备份其中一边。
+
+job 子进程由 serve 以 `sys.executable -m babeldoc_tools` 起，serve 会把它正在运行的源码树根前置进子进程 `PYTHONPATH`：子进程的 import 不依赖其 cwd（workdir 下没有包），也保证父子进程跑同一份代码。
 
 ## 5. 不可随意破坏的边界
 

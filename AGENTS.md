@@ -30,10 +30,15 @@
 - 委派前必须阅读 [子代理委派规范](docs/guide/delegation.md)：仅主控分工，叶子直接执行；主控亲自审 diff 和验证。
 - 完成前按 [验证说明](docs/guide/cli.md) 运行适用检查；不能把已有失败当作通过，也不要顺手扩大修复范围。
 
+## 环境与共享存储
+
+- 全局环境是 conda env `bdt`（`~/miniconda3/envs/bdt`，editable 安装自某个 worktree）：所有 worktree 共用，不再各自建 `.venv`。在 worktree 根目录用 `python -m babeldoc_tools ...` 运行本地代码（cwd 优先于 editable 目标）；从任意目录可用 `bdt`（走 editable 指向的那份代码）。切换默认代码树：在目标 worktree 里 `~/miniconda3/envs/bdt/bin/pip install -e '.[web]' paddlex==3.7.2`。
+- 文档库统一在 `~/.sp`（`app.db`、`assets/`、各文档 workdir）：`bdt serve` 不带 `--root`/`--workdir` 时就是它。不要在 worktree 的 `tmp/` 下再建 library。
+
 ```bash
-export PATH="$PWD/.venv/bin:$PATH"
-.venv/bin/python -m pytest --basetemp="tmp/pytest-$(date +%Y%m%d-%H%M%S)"
+PY=~/miniconda3/envs/bdt/bin/python
+$PY -m pytest --basetemp="tmp/pytest-$(date +%Y%m%d-%H%M%S)"
 # 仅对改动的 Python 文件运行：
-.venv/bin/ruff check <files>
+~/miniconda3/envs/bdt/bin/ruff check <files>
 git diff --check
 ```

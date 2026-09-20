@@ -27,11 +27,16 @@ from pathlib import Path
 
 from babeldoc_tools.common import ToolError
 
-__all__ = ["STATE_DIR", "DocumentStore"]
+__all__ = ["DEFAULT_LIBRARY", "STATE_DIR", "DocumentStore"]
 
 #: 服务自己的状态目录名（job 持久化 / profiles），放在 :attr:`DocumentStore.store_base` 下。
 #: 以 ``.`` 开头，因此永远不是合法 did：既不会被枚举成文档，也不会被越界解析。
 STATE_DIR = ".bdt-serve"
+
+#: 默认共享文档库根（``bdt serve`` 不带 ``--root``/``--workdir`` 时）。放在用户主目录
+#: 而不是仓库 ``tmp/``：同一份文档库与 ``app.db`` 要跨 worktree / 跨仓库检出共享，
+#: 每个 worktree 各建一套库会让上传记录、草稿与任务历史互相看不见。
+DEFAULT_LIBRARY = Path.home() / ".sp"
 
 #: 目录名不允许的字符/形式（单段 did 规则）。
 _FORBIDDEN_DID = {".", ".."}

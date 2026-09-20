@@ -1217,3 +1217,45 @@ def test_job_ids_are_monotonic_and_ulid_shaped():
     second = new_job_id(now_ms=1_700_000_000_000, entropy=b"\x00" * 10)
     assert first < second
     assert new_job_id(now_ms=1_700_000_001_000) > second
+
+
+# --------------------------------------------------------------------------- #
+# 子进程 import 边界（源码树运行时 workdir 下找不到包的回归）
+# --------------------------------------------------------------------------- #
+def test_spawn_job_child_imports_package_from_any_cwd(tmp_path, monkeypatch):
+    """``spawn_job`` 的子进程在**非仓库** cwd 下也能 ``import babeldoc_tools``。
+
+    回归：serve 从源码树启动（editable 安装失效/没装）时，job 子进程的 cwd 是
+    workdir，``-m babeldoc_tools`` 直接 ``ModuleNotFoundError`` 秒退 —— run 归档
+    从未创建，前端只能看到"没有 run 归档"。``spawn_job`` 必须把 serve 正在跑的
+    源码树根前置进子进程 ``PYTHONPATH``，import 不依赖 cwd。
+    """
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    proc = runner_module.spawn_job(
+        [
+            sys.executable,
+            "-c",
+            "import babeldoc_tools, os, sys;"
+            "print(babeldoc_tools.__file__);"
+            "print(os.environ.get('PYTHONPATH', ''))",
+        ],
+        tmp_path,  # cwd 不在仓库里：import 只能靠注入的 PYTHONPATH
+    )
+    stdout, _ = proc.communicate(timeout=30)
+    assert proc.returncode == 0, stdout
+    package_file, pythonpath = stdout.splitlines()[:2]
+    assert package_file.startswith(str(runner_module._SOURCE_ROOT))
+    assert pythonpath.split(os.pathsep)[0] == runner_module._SOURCE_ROOT
+
+
+def test_spawn_job_prepends_source_root_to_inherited_pythonpath(tmp_path, monkeypatch):
+    """已继承的 ``PYTHONPATH`` 不被覆盖：源码树根在前，原值在后。"""
+    monkeypatch.setenv("PYTHONPATH", "/somewhere/else")
+    proc = runner_module.spawn_job(
+        [sys.executable, "-c", "import os; print(os.environ['PYTHONPATH'])"],
+        tmp_path,
+    )
+    stdout, _ = proc.communicate(timeout=30)
+    parts = stdout.strip().split(os.pathsep)
+    assert parts[0] == runner_module._SOURCE_ROOT
+    assert parts[-1] == "/somewhere/else"
