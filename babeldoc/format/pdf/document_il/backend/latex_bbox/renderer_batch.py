@@ -19,7 +19,7 @@ r"""整文档轮次制批编译（``BatchStampRenderer``）。
   溢出一律以 ``_measure_fit`` 的墨迹/文本为准。
 - ``fontspec`` 的 ``\\setmainfont`` 只能在导言区使用（实测正文里调用报
   ``Can be used only in preamble`` 并把参数当正文排出）→ 一块内的请求按
-  ``serif`` 分组，字体在导言区一次性声明。
+  ``(serif, font_family)`` 分组，字体在导言区一次性声明。
 - ``-interaction=nonstopmode`` **不加** ``-halt-on-error``：单段错误不停机
   （实测错误段之后的段落照常排版），坏段由逐段归属 + 超时二分隔离；
 - 段前后 ``\message{@@S n@@}``/``\message{@@E n@@}`` 标记 + ``at lines X--Y``
@@ -314,11 +314,15 @@ class BatchStampRenderer:
     ) -> dict[str, StampResult]:
         """本轮所有待定段的候选档位按块编译（块间并行，块内一份 tex）。"""
         # 一轮内的候选项（每段可多页）：按轮次取阶梯档位。
-        # 按 serif 分组：``\setmainfont`` 只能在导言区声明（实测正文里调用报
-        # “Can be used only in preamble”），因此一块内字体必须一致。
-        groups: dict[bool, list[str]] = {}
+        # 按 (serif, font_family) 分组：``\setmainfont``/``\setCJKmainfont`` 只能在
+        # 导言区声明（实测正文里调用报 “Can be used only in preamble”），因此一块
+        # 内字体必须一致。
+        groups: dict[tuple[bool, str | None], list[str]] = {}
         for key in pending:
-            groups.setdefault(bool(pending[key][0].serif), []).append(key)
+            request = pending[key][0]
+            groups.setdefault(
+                (bool(request.serif), request.font_family), []
+            ).append(key)
         blocks: list[list[str]] = []
         for group in groups.values():
             blocks.extend(
@@ -803,9 +807,14 @@ class BatchStampRenderer:
             ),
         ]
         header.extend(
-            (TEX_COMMON % {"fontsetup": font_setup_clauses(self._capability, first.serif)}).split(
-                "\n"
-            )
+            (
+                TEX_COMMON
+                % {
+                    "fontsetup": font_setup_clauses(
+                        self._capability, first.serif, first.font_family
+                    )
+                }
+            ).split("\n")
         )
         header.append("\\begin{document}")
         lines: list[str] = list(header)
@@ -842,7 +851,11 @@ class BatchStampRenderer:
                 ),
             ]
             topskip = topskip_clause(
-                self._capability, request.serif, request.font_size, request.ascent_top
+                self._capability,
+                request.serif,
+                request.font_size,
+                request.ascent_top,
+                request.font_family,
             )
             if topskip:
                 block.append(topskip.rstrip("\n"))
@@ -1135,7 +1148,7 @@ class BatchStampRenderer:
             batch_id=batch_id,
             pdf_page_index=pdf_page_index,
             tex_line_range=tex_line_range,
-            font={"serif": bool(request.serif)},
+            font={"serif": bool(request.serif), "font_family": request.font_family},
             status=status,
             fit=fit or {},
             reason=reason,

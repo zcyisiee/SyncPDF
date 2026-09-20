@@ -1000,6 +1000,10 @@ class LatexBboxOverlay:
             geometry = meta.get("source_geometry") or {}
         font_size = job["font_size"]
         lead = derive_lead(font_size, geometry.get("baseline_pitch"))
+        # 段落级中文字体族（serve 端写入 meta）；非字符串视为未指定。
+        font_family = meta.get("font_family")
+        if not isinstance(font_family, str):
+            font_family = None
         return StampRequest(
             key=job["debug_id"],
             body=job["body"],
@@ -1015,6 +1019,7 @@ class LatexBboxOverlay:
                 else None
             ),
             serif=bool(meta.get("serif", _DEFAULT_SERIF)),
+            font_family=font_family,
         )
 
     def _expand_vertical_failures(

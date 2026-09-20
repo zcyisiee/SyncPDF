@@ -117,6 +117,10 @@ def font_signature(capability) -> str:
         capability.cjk_sans_fonts or {},
     ):
         parts.extend(f"{key}={value}" for key, value in sorted(group.items()))
+    # 可选字体族（段落级 font_family）：族文件变了同样要失效。
+    for family_id, files in sorted((capability.cjk_family_fonts or {}).items()):
+        parts.append(f"family={family_id}")
+        parts.extend(f"{key}={value}" for key, value in sorted(files.items()))
     if capability.font_path:
         parts.append(f"explicit={capability.font_path}")
     if capability.bold_font_path:
@@ -155,7 +159,9 @@ def _font_ascent_ratio(font_path: str) -> float:
         return _DEFAULT_ASCENT_RATIO
 
 
-def regular_font_paths(capability, serif: bool) -> list[str]:
+def regular_font_paths(
+    capability, serif: bool, font_family: str | None = None
+) -> list[str]:
     """实际会用到的正体字体路径（算 ``\topskip`` 的 ascender）。"""
     paths: list[str] = []
     latin = capability.latin_fonts(serif)
@@ -165,6 +171,10 @@ def regular_font_paths(capability, serif: bool) -> list[str]:
         if capability.font_path:
             paths.append(capability.font_path)
         return paths
+    family = _family_cjk_fonts(capability, font_family)
+    if family is not None:
+        paths.append(family["regular"])
+        return paths
     cjk = capability.cjk_fonts(serif)
     if cjk and cjk.get("regular"):
         paths.append(cjk["regular"])
@@ -173,11 +183,22 @@ def regular_font_paths(capability, serif: bool) -> list[str]:
     return paths
 
 
-def font_setup_clauses(capability, serif: bool) -> str:
+def _family_cjk_fonts(capability, font_family: str | None) -> dict[str, str] | None:
+    """请求的段落级字体族（未命中/未探测到/显式字体优先时返回 None）。"""
+    if capability.font_explicit:
+        return None
+    return capability.cjk_family(font_family)
+
+
+def font_setup_clauses(
+    capability, serif: bool, font_family: str | None = None
+) -> str:
     """字体声明：与产品一致（拉丁 Noto Serif/Sans，中文 Source Han Serif/Sans）。
 
     显式 ``--latex-cjk-font-path`` 优先（用户指定则只设中文主字体，拉丁
-    仍尽力用产品字体）；拉丁字体缺失时不声明 → 退回 Latin Modern。
+    仍尽力用产品字体）；段落级 ``font_family`` 命中注册表且已探测到时用该族
+    的中文主字体（拉丁仍按 ``serif`` 选）；拉丁字体缺失时不声明 → 退回
+    Latin Modern。
     """
     clauses: list[str] = []
     latin = capability.latin_fonts(serif)
@@ -188,6 +209,10 @@ def font_setup_clauses(capability, serif: bool) -> str:
         if capability.bold_font_path:
             explicit["bold"] = capability.bold_font_path
         clauses.append(_face_clause("setCJKmainfont", explicit))
+        return "\n".join(clauses)
+    family = _family_cjk_fonts(capability, font_family)
+    if family is not None:
+        clauses.append(_face_clause("setCJKmainfont", family))
         return "\n".join(clauses)
     cjk = capability.cjk_fonts(serif) or capability.cjk_fonts(not serif)
     if cjk is None and capability.font_path:
@@ -200,12 +225,21 @@ def font_setup_clauses(capability, serif: bool) -> str:
     return "\n".join(clauses)
 
 
-def topskip_clause(capability, serif: bool, font_size: float, topskip: float | None) -> str:
+def topskip_clause(
+    capability,
+    serif: bool,
+    font_size: float,
+    topskip: float | None,
+    font_family: str | None = None,
+) -> str:
     """``\topskip`` 声明：源首行字顶余量 + 字体 ascender（不裁剪首行墨迹）。"""
     if topskip is None:
         return ""
     ascent_ratio = max(
-        (_font_ascent_ratio(path) for path in regular_font_paths(capability, serif)),
+        (
+            _font_ascent_ratio(path)
+            for path in regular_font_paths(capability, serif, font_family)
+        ),
         default=_DEFAULT_ASCENT_RATIO,
     )
     value = max(0.0, float(topskip)) + (ascent_ratio + _TOPSKIP_HEADROOM_EM) * font_size
@@ -252,6 +286,9 @@ class StampRequest:
     ascent_top: float | None = None
     #: 段落主字体是否衬线（决定拉丁/中文用 Noto Serif/Source Han Serif 还是 Sans）。
     serif: bool = True
+    #: 段落级中文字体族 id（``font_families.FONT_FAMILY_IDS``）；None = 按
+    #: ``serif`` 用产品默认族，行为与历史版本完全一致。
+    font_family: str | None = None
     #: 诊断专用：上一次失败编译的候选 id（扩框/回退重试的父节点）。
     #: 只进证据链，不进 ``cache_key``、不影响任何排版语义。
     debug_parent: str | None = None
@@ -280,6 +317,7 @@ class StampRequest:
             round(float(self.first_line_dx or 0.0), 3),
             None if self.ascent_top is None else round(float(self.ascent_top), 3),
             bool(self.serif),
+            self.font_family,
         )
 
 
@@ -519,6 +557,7 @@ class BboxStampRenderer:
         hangindent: float = 0.0,
         topskip: float | None = None,
         serif: bool = True,
+        font_family: str | None = None,
     ) -> str:
         effective_lead = float(lead) if lead else font_size * _DEFAULT_LEAD_RATIO
         hang_clause = ""
@@ -533,24 +572,26 @@ class BboxStampRenderer:
         return TEX_HEADER % {
             "w": width,
             "h": height,
-            "fontsetup": self._font_setup(serif),
+            "fontsetup": self._font_setup(serif, font_family),
             "fs": font_size,
             "lead": effective_lead,
             "parindent": parindent,
             "hangindent": hang_clause,
             "topskip": topskip_clause(
-                self._capability, serif, font_size, topskip
+                self._capability, serif, font_size, topskip, font_family
             ),
             "body": body,
         }
 
-    def _regular_font_paths(self, serif: bool) -> list[str]:
+    def _regular_font_paths(
+        self, serif: bool, font_family: str | None = None
+    ) -> list[str]:
         """实际会用到的正体字体路径（算 ``\topskip`` 的 ascender）。"""
-        return regular_font_paths(self._capability, serif)
+        return regular_font_paths(self._capability, serif, font_family)
 
-    def _font_setup(self, serif: bool) -> str:
+    def _font_setup(self, serif: bool, font_family: str | None = None) -> str:
         """字体声明（委托 :func:`font_setup_clauses`，与批编译共用）。"""
-        return font_setup_clauses(self._capability, serif)
+        return font_setup_clauses(self._capability, serif, font_family)
 
     def render_one(self, request: StampRequest, workdir: Path) -> StampResult:
         """编译单个请求（含缓存与有界缩小）。调用方负责 workdir 生命周期。"""
@@ -653,6 +694,7 @@ class BboxStampRenderer:
                     hangindent=hangindent,
                     topskip=request.ascent_top,
                     serif=request.serif,
+                    font_family=request.font_family,
                 )
                 outcome = self._compile_tex(
                     tex, attempt_dir, stem, font_size, debug_candidate=candidate_id
@@ -944,7 +986,7 @@ class BboxStampRenderer:
             font_size=round(float(font_size), 3),
             lead=round(float(lead), 3),
             parent_id=parent_id,
-            font={"serif": bool(request.serif)},
+            font={"serif": bool(request.serif), "font_family": request.font_family},
             status=status,
             fit=fit or {},
             selected=selected,

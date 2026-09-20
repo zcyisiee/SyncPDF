@@ -21,6 +21,21 @@ import pytest
 from babeldoc.format.pdf.document_il.backend.latex_bbox import (
     capability as capability_mod,
 )
+from babeldoc.format.pdf.document_il.backend.latex_bbox.font_families import (
+    FONT_FAMILIES,
+)
+from babeldoc.format.pdf.document_il.backend.latex_bbox.font_families import (
+    FONT_FAMILY_ID_PATTERN,
+)
+from babeldoc.format.pdf.document_il.backend.latex_bbox.font_families import (
+    FONT_FAMILY_IDS,
+)
+from babeldoc.format.pdf.document_il.backend.latex_bbox.font_families import (
+    font_family_spec,
+)
+from babeldoc.format.pdf.document_il.backend.latex_bbox.font_families import (
+    is_valid_font_family,
+)
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
     BboxStampRenderer,
 )
@@ -95,6 +110,93 @@ def test_capability_reports_font_sets():
     assert "latin_serif_fonts" in payload and "cjk_sans_fonts" in payload
     assert _CAPABILITY.latin_fonts(True) == _CAPABILITY.latin_serif_fonts
     assert _CAPABILITY.cjk_fonts(False) == _CAPABILITY.cjk_sans_fonts
+
+
+# --------------------------------------------------------------------------- #
+# 段落级中文字体族（font_family）
+# --------------------------------------------------------------------------- #
+def test_font_family_registry_shapes():
+    ids = [spec.id for spec in FONT_FAMILIES]
+    assert len(ids) == len(set(ids))
+    for spec in FONT_FAMILIES:
+        assert FONT_FAMILY_ID_PATTERN.fullmatch(spec.id), spec.id
+        assert spec.label
+        assert isinstance(spec.serif, bool)
+        assert spec.regular
+        assert spec.bold is None or spec.bold != spec.regular
+    assert FONT_FAMILY_IDS == frozenset(ids)
+    assert is_valid_font_family("source-han-serif") is True
+    assert is_valid_font_family("nope") is False
+    assert is_valid_font_family(None) is False
+    assert font_family_spec("nope") is None
+    assert font_family_spec(None) is None
+    assert font_family_spec("source-han-serif") in FONT_FAMILIES
+
+
+def test_capability_probes_font_families():
+    families = _CAPABILITY.cjk_family_fonts
+    assert isinstance(families, dict)
+    for family_id, files in families.items():
+        assert is_valid_font_family(family_id), family_id
+        assert pathlib.Path(files["regular"]).is_file()
+        if files.get("bold"):
+            assert pathlib.Path(files["bold"]).is_file()
+        assert _CAPABILITY.cjk_family(family_id) == files
+    assert _CAPABILITY.cjk_family(None) is None
+    assert _CAPABILITY.cjk_family("nope") is None
+    # 探测结果进报告（serve/验收要能看到可用族）。
+    payload = _CAPABILITY.to_dict()
+    assert payload["cjk_family_fonts"] == families
+
+
+def test_template_uses_requested_font_family():
+    families = _CAPABILITY.cjk_family_fonts
+    if not families:
+        pytest.skip("没有探测到可选中文字体族")
+    family_id = sorted(families)[0]
+    stem = pathlib.Path(families[family_id]["regular"]).stem
+    tex = _renderer().build_tex(
+        "正文", 200.0, 60.0, 9.0, serif=True, font_family=family_id
+    )
+    assert stem in tex
+    assert f"UprightFont={stem}" in tex
+    bold = families[family_id].get("bold")
+    if bold:
+        assert f"BoldFont={pathlib.Path(bold).stem}" in tex
+
+    default = _CAPABILITY.cjk_fonts(True) or {}
+    default_stem = (
+        pathlib.Path(default["regular"]).stem if default.get("regular") else None
+    )
+    if stem != default_stem:
+        # font_family=None 仍是历史行为：不用该族字样（默认族另算）。
+        assert stem not in _renderer().build_tex("正文", 200.0, 60.0, 9.0)
+
+
+def test_template_falls_back_to_default_family_for_unknown_id():
+    unknown = _renderer().build_tex(
+        "正文", 200.0, 60.0, 9.0, serif=True, font_family="not-a-font"
+    )
+    assert unknown == _renderer().build_tex("正文", 200.0, 60.0, 9.0, serif=True)
+
+
+def test_stamp_request_cache_key_includes_font_family():
+    plain = StampRequest(
+        key="a", body="x", width=100.0, height=50.0, font_size=9.0
+    )
+    family = StampRequest(
+        key="a",
+        body="x",
+        width=100.0,
+        height=50.0,
+        font_size=9.0,
+        font_family="lxgw-wenkai",
+    )
+
+    assert plain.cache_key != family.cache_key
+    # 键末项就是字体族（None 保持 None，与 None 兼容的旧键不冲突）。
+    assert plain.cache_key[-1] is None
+    assert family.cache_key[-1] == "lxgw-wenkai"
 
 
 # --------------------------------------------------------------------------- #
