@@ -169,6 +169,32 @@ describe('PreviewToolbar', () => {
     expect(document.querySelector('[data-od-id="page-count"]')).not.toBeNull();
     expect(window.localStorage.getItem(STORAGE_KEYS.bboxMode)).toBeNull();
   });
+
+  it('文档名与状态徽标住翻页组左侧；两者都不给就不渲染占位', () => {
+    const { unmount } = renderToolbar({
+      title: 'Attention Is All You Need',
+      status: <span>已完成</span>,
+    });
+    const title = document.querySelector('[data-od-id="toolbar-title"]') as HTMLElement;
+    expect(title.textContent).toBe('Attention Is All You Need');
+    // brief 指定的排印：可收缩/截断 + 衬线 + md + ink
+    expect(title.className).toBe('min-w-0 max-w-[24ch] truncate font-serif text-md text-ink');
+    expect(document.querySelector('[data-od-id="toolbar-status"]')?.textContent).toBe('已完成');
+    // 顺序：文档名 / 状态 / 翻页组 / bbox 图层 …… 下载槽在最右
+    const toolbar = screen.getByRole('toolbar', { name: '预览工具条' });
+    const order = Array.from(toolbar.children).map((node) =>
+      node.getAttribute('data-od-id') ?? node.getAttribute('role') ?? node.className,
+    );
+    expect(order[0]).toBe('toolbar-title');
+    expect(order[1]).toBe('toolbar-status');
+    expect(order.indexOf('toolbar-status')).toBeLessThan(order.indexOf('group'));
+    unmount();
+
+    // 缺省：标题与徽标都不渲染（不留空壳）
+    renderToolbar();
+    expect(document.querySelector('[data-od-id="toolbar-title"]')).toBeNull();
+    expect(document.querySelector('[data-od-id="toolbar-status"]')).toBeNull();
+  });
 });
 
 describe('reader controls', () => {

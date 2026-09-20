@@ -23,6 +23,9 @@ import { Icon } from '../icons';
 import { Button } from '../ui/Button';
 import { Tooltip } from '../ui/Tooltip';
 
+/* 工具条最左的文档头槽（`title` / `status`）：中栏临时文档头行已删除，文档名与阶段状态
+ * 徽标住在这里；两者都由调用方给，缺省就完全不渲染（不留空壳）。 */
+
 interface SegmentedOption<T extends string> {
   value: T;
   label: string;
@@ -103,6 +106,10 @@ export interface PreviewToolbarProps {
   paged: boolean;
   onPageChange: (page: number) => void;
   onBboxModeChange: (mode: BboxMode) => void;
+  /** 文档名（工具条最左，翻页组之前）；`null`/`undefined` 不渲染。 */
+  title?: string | null;
+  /** 文档状态徽标（紧随文档名）；不传则不渲染。 */
+  status?: ReactNode;
   /** 工具条最右侧的下载按钮槽（W10：修订号 + 质量徽标，见 `DownloadButton`）。 */
   download?: ReactNode;
   className?: string;
@@ -115,6 +122,8 @@ export function PreviewToolbar({
   paged,
   onPageChange,
   onBboxModeChange,
+  title,
+  status,
   download,
   className,
 }: PreviewToolbarProps) {
@@ -163,6 +172,16 @@ export function PreviewToolbar({
         className,
       )}
     >
+      {title ? (
+        <span data-od-id="toolbar-title" className="min-w-0 max-w-[24ch] truncate font-serif text-md text-ink">
+          {title}
+        </span>
+      ) : null}
+      {status ? (
+        <span data-od-id="toolbar-status" className="flex flex-none items-center">
+          {status}
+        </span>
+      ) : null}
       <div
         role="group"
         aria-label="翻页"
