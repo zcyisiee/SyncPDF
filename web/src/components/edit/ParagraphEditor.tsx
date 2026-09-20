@@ -104,7 +104,7 @@ export function ParagraphEditor({
   const fontsQuery = useFonts();
   const patchMutation = usePatchDraftMutation(did);
   const compileMutation = useCompileBlockMutation(did, paragraphId ?? '');
-  // 拖拽编辑只在「版面框（pdf_native）」图层上有意义 → 提示里说清当前图层能不能拖
+  // 拖拽编辑只在「译文框（pdf_native）」图层上有意义 → 提示里说清当前图层能不能拖
   const bboxMode = useUiStore((state) => state.bboxMode);
   const draft = draftQuery.data;
   const revision = draft?.revision ?? 0;
@@ -211,7 +211,7 @@ export function ParagraphEditor({
       <div className="p-s5" data-od-id="paragraph-editor-empty">
         <p className="font-serif text-md font-medium leading-[1.4] text-ink-2">段落属性</p>
         <p className="mt-s2 text-tiny text-ink-4">
-          点击预览里的段落框查看该段：选中后在这里改译文与排版参数（翻译视图默认叠版面框）。
+          点击预览里的原文框查看该段：选中后在这里改译文与排版参数（默认叠原文框）。
         </p>
       </div>
     );
@@ -390,8 +390,8 @@ export function ParagraphEditor({
           <p className="mt-s3 text-tiny text-ink-4" data-od-id="paragraph-box">
             box（PDF y 向上）: <span className="font-mono">{boxSummary(box)}</span> ——{' '}
             {bboxMode === 'layout'
-              ? '在预览中拖拽段落框的 8 个手柄调整'
-              : '把预览的 bbox 图层切到「版面框」就能在预览里拖拽调整'}
+              ? '在预览中拖拽译文框的 8 个手柄调整'
+              : '把预览的 bbox 图层切到「译文框」就能在预览里拖拽调整'}
             （无需在这里输入）。
           </p>
         </details>

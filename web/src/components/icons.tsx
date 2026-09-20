@@ -25,6 +25,14 @@ const ICON_PATHS = {
   ],
   upload: ['M12 19V6M7 11l5-5 5 5'],
   drop: ['M12 16V5M8 9l4-4 4 4', 'M4.5 15v3.5h15V15'],
+  chevronLeft: ['M14 5.5L8.5 12l5.5 6.5'],
+  chevronRight: ['M10 5.5L15.5 12 10 18.5'],
+  minus: ['M5 12h14'],
+  plus: ['M12 5v14M5 12h14'],
+  fitWidth: [
+    'M3.5 8.5V5.5A1.5 1.5 0 0 1 5 4h3M16 4h3a1.5 1.5 0 0 1 1.5 1.5v3M20.5 15.5v3a1.5 1.5 0 0 1-1.5 1.5h-3M8 20H5a1.5 1.5 0 0 1-1.5-1.5v-3',
+    'M7 12h10M9.5 9.5 7 12l2.5 2.5M14.5 9.5 17 12l-2.5 2.5',
+  ],
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;

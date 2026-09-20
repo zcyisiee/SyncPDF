@@ -217,7 +217,7 @@ function DocumentPreview({ did }: PreviewProps) {
   );
 
   /**
-   * 选中段的可拖拽编辑层：只在**版面框（`pdf_native`）+ 译文侧**开（源侧没有可写的 box）。
+   * 选中段的可拖拽编辑层：只在**译文框（`pdf_native`）+ 译文侧**开（源侧没有可写的 box）。
    * box 优先用草稿覆盖（拖动后的值），否则用该页几何基线；屏幕矩形交给 `pdfToScreen`。
    */
   const buildOverlay = useCallback(
@@ -293,7 +293,7 @@ function DocumentPreview({ did }: PreviewProps) {
               ? '编译中，稍后再试：活动任务期间草稿只读（409 document_busy）'
               : patchError instanceof ApiError && patchError.code === 'revision_conflict'
                 ? '草稿已被其它会话改动：刷新后重新拖拽（409 revision_conflict）'
-                : `保存段落框失败：${describeApiError(patchError).message}`}
+                : `保存译文框失败：${describeApiError(patchError).message}`}
           </p>
         );
 

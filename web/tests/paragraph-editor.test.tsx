@@ -103,7 +103,7 @@ describe('ParagraphEditor 显示口径', () => {
   it('无选中段：空态提示（不显示输入框）', async () => {
     mockEditor();
     renderWithQuery(<ParagraphEditor did={DID} paragraphId={null} />);
-    expect(screen.getByText(/点击预览里的段落框查看该段/)).toBeInTheDocument();
+    expect(screen.getByText(/点击预览里的原文框查看该段/)).toBeInTheDocument();
     expect(document.querySelector('[data-od-id="paragraph-editor-empty"]')).not.toBeNull();
     expect(document.querySelector('[data-od-id="paragraph-target"]')).toBeNull();
   });

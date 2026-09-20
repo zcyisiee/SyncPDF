@@ -132,7 +132,7 @@ describe('BboxLayer', () => {
     expect(container.querySelector('svg')).toBeNull();
   });
 
-  it('layout 模式用 pdf_native 换算（同一段落框与 parse 重合）', () => {
+  it('layout 模式用 pdf_native 换算（同一段的译文框与原文框重合）', () => {
     const { container } = renderLayer({
       mode: 'layout',
       boxes: [{ id: 'P01-001', box: [66.585, 672.353, 544.64, 713.59], label: 'title' }],
