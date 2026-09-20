@@ -1,5 +1,5 @@
 /**
- * 右侧面板的「进度」tab（W06）：**双时间线**。
+ * 右侧面板的「进度」tab（W06）：**双时间线** + 顶部单行阶段条。
  *
  * 翻译与编译/成页是并行的两条流水（流式预览），一条串行事件流只能看到翻译、
  * 看不到页面在什么时候出来：
@@ -9,6 +9,10 @@
  *   translation_block_completed / preview_ready / preview_failed / compile_float），
  *   只显示（用户可读的）编译侧事件，同样最新在上。
  *
+ * 阶段条（`stage-strip`）在双列之上：7 段真实状态（`useTimelineStages`：stage-state 基线 +
+ * 事件流的 live 段），右侧是 live 秒表或上一次结论。它是**同一份查询**的第二个订阅方，
+ * 不新起请求口径、也不做假百分比/假 ETA。
+ *
  * 性能红线：两列各自只渲染窗口里的行（翻译 200 + 编译 200），3758 条 run 不做
  * 虚拟化也够（§4.6 的精神：最多保留 N 条 + 溢出滚动）。
  * 换 run（重新开始翻译）：左列滚动/浮标/展开行按 run 重置；右列游标是文档级
@@ -17,12 +21,25 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { describeApiError } from '../../lib/api';
+import { cn } from '../../lib/cn';
 import { EVENTS_WINDOW_SIZE, KIND_GROUPS, kindGroup, type KindGroup, type RunEvent } from '../../lib/events';
+import {
+  formatDuration,
+  formatStageDuration,
+  STAGE_LABELS,
+  stageStatusLabel,
+} from '../../lib/humanize';
+import { activeJob } from '../../lib/jobs';
+import { useJobs } from '../../lib/queries';
+import type { SegmentState } from '../../lib/timeline';
 import type { PersistentEvent } from '../../lib/usePersistentEvents';
+import { Icon } from '../icons';
 import { Button } from '../ui/Button';
-import { EventRow } from './EventRow';
+import { Chip } from '../ui/Chip';
+import { EventRow, LocateLink } from './EventRow';
 import type { EventFeed } from './useEventWindow';
 import type { SseStatus } from './useEventStream';
+import { useTimelineStages, type TimelineData } from './useTimelineStages';
 
 /** SSE 状态行文案（§4.6：头部标注「实时」脉冲点或错误态）。 */
 const CONNECTION_TEXT: Record<SseStatus, string> = {
@@ -54,6 +71,107 @@ function ConnectionLine({ status }: { status: SseStatus }) {
   );
 }
 
+/**
+ * 阶段条每段的填充色（§1 令牌，不新增颜色）：ok=pass / err=err / live=run+脉冲 / not_run=hair-2。
+ * 段宽均分——**不**按耗时比例造假（真实耗时的比例尺在底部时间线里）。
+ */
+const SEGMENT_FILL: Record<SegmentState, string> = {
+  ok: 'bg-pass',
+  err: 'bg-err',
+  live: 'bg-run pulse-dot',
+  not_run: 'bg-hair-2',
+};
+
+/** 段 title 的耗时文案：live 用秒表（刚起步 → 「刚启动」），其余用实测耗时（拿不到 → 「—」）。 */
+function segmentDurationText(state: SegmentState, durationS: number | null, elapsedS: number | null): string {
+  return state === 'live' ? formatDuration(elapsedS) : formatStageDuration(durationS);
+}
+
+/**
+ * 单行阶段条（§2.7 头部）：左 7 段状态色，右**动态状态**。
+ * 非 live 的结论按「失败 > 全部完成 > 未在运行」定序（失败优先，全 ok 才说完成）。
+ */
+function StageStrip({ timeline }: { timeline: TimelineData }) {
+  if (timeline.isError) {
+    return (
+      <p
+        data-od-id="stage-strip"
+        className="flex h-7 flex-none items-center border-b border-hair px-s3 font-mono text-micro text-ink-4"
+      >
+        阶段状态不可用
+      </p>
+    );
+  }
+  const live = timeline.segments.find((segment) => segment.state === 'live') ?? null;
+  const failed = timeline.segments.find((segment) => segment.state === 'err') ?? null;
+  const allOk = timeline.segments.every((segment) => segment.state === 'ok');
+
+  let tone = 'text-ink-4';
+  let status = '未在运行';
+  if (live !== null) {
+    tone = 'text-run-ink';
+    // 拿不到起点（stage-state 没有 started_at）就不编造秒数
+    status = live.elapsedS === null
+      ? `${STAGE_LABELS[live.stage]}中`
+      : `${STAGE_LABELS[live.stage]}中 · ${live.elapsedS}s`;
+  } else if (failed !== null) {
+    tone = 'text-err-ink';
+    status = `${STAGE_LABELS[failed.stage]}失败`;
+  } else if (allOk) {
+    tone = 'text-pass-ink';
+    status = `${timeline.segments.length} 阶段完成`;
+  }
+
+  return (
+    <div
+      data-od-id="stage-strip"
+      className="flex h-7 flex-none items-center gap-s2 border-b border-hair px-s3"
+    >
+      <span className="flex min-w-0 flex-1 items-center gap-[2px]">
+        {timeline.segments.map((segment) => (
+          <span
+            key={segment.stage}
+            data-od-id="stage-strip-segment"
+            data-stage={segment.stage}
+            data-state={segment.state}
+            title={`${STAGE_LABELS[segment.stage]} · ${stageStatusLabel(segment.status)} · ${segmentDurationText(
+              segment.state,
+              segment.durationS,
+              segment.elapsedS,
+            )}`}
+            className={cn('h-[7px] min-w-[6px] flex-1 rounded-[1px]', SEGMENT_FILL[segment.state])}
+          />
+        ))}
+      </span>
+      <span
+        data-od-id="stage-strip-status"
+        data-live={live !== null}
+        className={cn('flex flex-none items-center gap-[5px] font-mono text-micro', tone)}
+      >
+        {live === null ? null : (
+          <span aria-hidden="true" className="pulse-dot h-[5px] w-[5px] flex-none rounded-full bg-current" />
+        )}
+        {status}
+      </span>
+    </div>
+  );
+}
+
+/** 编译侧事件类型 → 节点圆标语气色（ok=成页 / err=预览失败 / idle=其余）。 */
+const COMPILE_MARK: Record<'ok' | 'err' | 'info', string> = {
+  ok: 'border-pass',
+  err: 'border-err bg-err',
+  info: 'border-hair-2',
+};
+
+/** 编译侧事件类型 → 类型 chip（§2.7 `.tl-type`）。 */
+const COMPILE_LABEL: Record<string, string> = {
+  translation_block_completed: '译文提交',
+  preview_ready: '成页',
+  preview_failed: '预览失败',
+  compile_float: '贴片浮动',
+};
+
 /** 编译时间线一行的可读摘要（右列）：把持久事件压成一行人话 + 语气色。 */
 function compileLine(event: PersistentEvent): { text: string; tone: 'ok' | 'err' | 'info' } {
   const data = event.data ?? {};
@@ -74,6 +192,18 @@ function compileLine(event: PersistentEvent): { text: string; tone: 'ok' | 'err'
     default:
       return { text: event.type, tone: 'info' };
   }
+}
+
+/** 编译侧事件的定位目标：只有真数字 `page` 才算（没有就不渲染链接，不猜）。 */
+function compileLocate(event: PersistentEvent): { page: number; paragraphId: string | null } | null {
+  const data = event.data ?? {};
+  const page = typeof data.page === 'number' ? data.page : event.page;
+  if (typeof page !== 'number' || !Number.isFinite(page)) return null;
+  const paragraph = data.paragraph_id;
+  return {
+    page,
+    paragraphId: typeof paragraph === 'string' && paragraph !== '' ? paragraph : null,
+  };
 }
 
 function CompileTimeline({ events }: { events: PersistentEvent[] }) {
@@ -98,10 +228,14 @@ function CompileTimeline({ events }: { events: PersistentEvent[] }) {
     atTopRef.current = element.scrollTop <= 4;
   }, []);
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col border-l border-hair" data-od-id="compile-timeline">
+    <div
+      className="tl-col-compile flex min-h-0 min-w-0 flex-1 flex-col border-l border-hair"
+      data-od-id="compile-timeline"
+    >
       <div className="flex flex-none items-center gap-s2 border-b border-hair px-s2 py-[6px]">
+        <Icon name="archive" className="h-[13px] w-[13px] text-ink-4" />
         <span className="font-serif text-sm font-medium leading-[1.35] text-ink-2">编译</span>
-        <span className="font-mono text-micro text-ink-4 [font-variant-numeric:tabular-nums]">
+        <span className="ml-auto flex-none font-mono text-micro text-ink-4 [font-variant-numeric:tabular-nums]">
           块 {blocksDone} · 页 {pagesReady}
         </span>
       </div>
@@ -119,17 +253,38 @@ function CompileTimeline({ events }: { events: PersistentEvent[] }) {
           <ul className="flex flex-col">
             {rows.map((event) => {
               const line = compileLine(event);
+              const locate = compileLocate(event);
               return (
                 <li
                   key={event.seq}
                   data-od-id="compile-timeline-row"
                   data-type={event.type}
                   title={event.at ?? undefined}
-                  className={`border-b border-hair px-s2 py-[3px] font-mono text-micro leading-[1.5] ${
-                    line.tone === 'ok' ? 'text-run-ink' : line.tone === 'err' ? 'text-err-ink' : 'text-ink-3'
-                  }`}
+                  className={cn(
+                    'relative border-b border-hair py-[4px] pl-[24px] pr-s2 font-mono text-micro leading-[1.5]',
+                    line.tone === 'ok' ? 'text-run-ink' : line.tone === 'err' ? 'text-err-ink' : 'text-ink-3',
+                  )}
                 >
-                  {line.text}
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      'absolute left-0 top-[4px] h-4 w-4 rounded-full border bg-ivory',
+                      COMPILE_MARK[line.tone],
+                    )}
+                  />
+                  <span className="flex min-w-0 items-center gap-s2">
+                    <Chip
+                      title={event.type}
+                      tone={line.tone === 'ok' ? 'pass' : line.tone === 'err' ? 'err' : 'default'}
+                      className="flex-none"
+                    >
+                      {COMPILE_LABEL[event.type] ?? event.type}
+                    </Chip>
+                    <span className="min-w-0 break-words">{line.text}</span>
+                  </span>
+                  {locate === null ? null : (
+                    <LocateLink page={locate.page} paragraphId={locate.paragraphId} />
+                  )}
                 </li>
               );
             })}
@@ -163,6 +318,12 @@ export function EventStreamPanel({
   // 已见最新 seq 也按 run 归属：新 run 的 seq 从 1 重新计数，拿旧 run 的最大 seq 做差
   // 会算出负数，浮标与跟随判断就全错了。
   const headRef = useRef<{ run: string; seq: number }>({ run: '', seq: 0 });
+
+  // 阶段条的数据：同一份 stage-state / jobs 查询（key 与 WorkbenchScreen 相同 → 共用缓存，
+  // 数据由那边 2s 轮询刷新并传播到这里），只把新 run 的“job 驱动 live”接进来
+  // （新 run 的 stage-state 还没落盘时，只有 job 记录说“这个阶段在跑”，口径见 lib/timeline.ts）。
+  const jobs = useJobs(did, { refetchMs: 0 });
+  const timeline = useTimelineStages(did, feed.events, { job: activeJob(jobs.data) });
 
   // 显示顺序：窗口升序 → 反转成「最新在上」（§4.6）。
   const rows = useMemo(() => {
@@ -265,7 +426,7 @@ export function EventStreamPanel({
       );
     }
     return (
-      <ul className="flex flex-col">
+      <ul className="flex flex-col pt-[6px]">
         {rows.map((event: RunEvent) => (
           <EventRow
             key={event.seq}
@@ -315,6 +476,7 @@ export function EventStreamPanel({
           </Button>
         </div>
       </div>
+      <StageStrip timeline={timeline} />
       <div className="flex flex-none items-center gap-s2 border-b border-hair px-s3 py-[3px] font-mono text-micro text-ink-4">
         <span className="min-w-0 truncate" data-od-id="event-run-id" title={feed.runId ?? ''}>
           翻译 run {feed.runId ?? '—'}
@@ -323,28 +485,40 @@ export function EventStreamPanel({
           显示 {rows.length}/{feed.events.length} · 窗口 {EVENTS_WINDOW_SIZE} 条
         </span>
       </div>
-      <div className="relative flex min-h-0 flex-1">
-        <div className="relative min-h-0 min-w-0 flex-1">
-          <div
-            ref={scrollRef}
-            onScroll={onScroll}
-            data-od-id="event-stream-scroll"
-            className="h-full overflow-auto"
-          >
-            {body()}
+      {/* 面板拖窄时（容器 < 320px）双列退回一列：容器查询见 globals.css 的 `.tl-two-col`。 */}
+      <div style={{ containerType: 'inline-size' }} className="flex min-h-0 flex-1">
+        <div className="tl-two-col grid min-h-0 min-w-0 flex-1 grid-cols-2 grid-rows-[minmax(0,1fr)]">
+          <div className="flex min-h-0 min-w-0 flex-col">
+            <div className="flex flex-none items-center gap-s2 border-b border-hair px-s2 py-[6px]">
+              <Icon name="translate" className="h-[13px] w-[13px] text-ink-4" />
+              <span className="font-serif text-sm font-medium leading-[1.35] text-ink-2">翻译</span>
+              <span className="ml-auto flex-none font-mono text-micro text-ink-4 [font-variant-numeric:tabular-nums]">
+                {rows.length} 条
+              </span>
+            </div>
+            <div className="relative min-h-0 min-w-0 flex-1">
+              <div
+                ref={scrollRef}
+                onScroll={onScroll}
+                data-od-id="event-stream-scroll"
+                className="h-full overflow-auto"
+              >
+                {body()}
+              </div>
+              {pendingCount > 0 ? (
+                <button
+                  type="button"
+                  data-od-id="event-new-events"
+                  onClick={jumpToNewest}
+                  className="absolute left-1/2 top-s2 h-6 -translate-x-1/2 rounded border border-hair-2 bg-ivory px-s3 font-mono text-micro text-ink-2 shadow-lift"
+                >
+                  ↑ {pendingCount} 条新事件
+                </button>
+              ) : null}
+            </div>
           </div>
-          {pendingCount > 0 ? (
-            <button
-              type="button"
-              data-od-id="event-new-events"
-              onClick={jumpToNewest}
-              className="absolute left-1/2 top-s2 h-6 -translate-x-1/2 rounded border border-hair-2 bg-ivory px-s3 font-mono text-micro text-ink-2 shadow-lift"
-            >
-              ↑ {pendingCount} 条新事件
-            </button>
-          ) : null}
+          <CompileTimeline events={compileEvents} />
         </div>
-        <CompileTimeline events={compileEvents} />
       </div>
       <p className="flex-none border-t border-hair px-s3 py-[3px] font-mono text-micro text-ink-4">
         {did} · 左：翻译 run 归档 · 右：编译/成页（文档级游标）

@@ -1,5 +1,6 @@
 /**
- * 单条事件行（§4.6）：`[seq][时间戳][阶段 chip][级别圆点] 人话叙述`，点击整行展开原始 JSON。
+ * 单条事件**节点**（§4.6 + 设计稿 §2.7 `.tl-node`）：`[级别圆标] [类型 chip][北京时间][seq]`、
+ * 一行叙述（`阶段 · data 摘要`）、「展开详情」切换原始 JSON；事件里带 `page` 时给「在预览中定位」。
  * 等宽字体 + `tabular-nums`（§2.1：事件流一律不用衬线）。
  * 时间戳按**北京时间**显示（`HH:MM:SS`），完整 ISO 放 `title`。
  * 归档里的 `at` 是 UTC（`+00:00`），API 契约仍只发 UTC；这里是纯展示层换算。
@@ -7,6 +8,7 @@
 import { cn } from '../../lib/cn';
 import { dataSummary, eventLevel, kindGroup, type EventLevel, type KindGroup, type RunEvent } from '../../lib/events';
 import { kindLabel, stageLabel } from '../../lib/humanize';
+import { useUiStore } from '../../stores/ui';
 import { Chip } from '../ui/Chip';
 
 /** kind 分组的文字色（§1 令牌，不新增颜色）。 */
@@ -19,11 +21,14 @@ const GROUP_TEXT: Record<KindGroup, string> = {
   other: 'text-ink-4',
 };
 
-/** §4.6 级别圆点：info = hair-2 / warn = run / err = err（run 级别的脉冲只给面板头部的「实时」）。 */
-const LEVEL_DOT: Record<EventLevel, string> = {
-  info: 'bg-hair-2',
-  warn: 'bg-run',
-  err: 'bg-err',
+/**
+ * §4.6 节点圆标（20px 描边圆，替换旧版的行首小圆点）：
+ * info = hair-2 描边 / warn = run 描边 / err = err 填充。级别只改颜色，不换形状。
+ */
+const LEVEL_MARK: Record<EventLevel, string> = {
+  info: 'border-hair-2',
+  warn: 'border-run',
+  err: 'border-err bg-err',
 };
 
 /**
@@ -56,6 +61,38 @@ export function eventTime(at: string, region: 'utc' | 'beijing' = 'beijing'): st
   return BEIJING_TIME.format(parsed);
 }
 
+/**
+ * 事件 data 里的定位目标：`page` 是数字才算（有的 kind 没有页概念）。
+ * 段落 id 有就给（没有不猜：不拿 `index`/`seq` 冒充段落 id）。
+ */
+export function eventLocateTarget(
+  data: Record<string, unknown>,
+): { page: number; paragraphId: string | null } | null {
+  const page = data.page;
+  if (typeof page !== 'number' || !Number.isFinite(page)) return null;
+  const paragraph = data.paragraph_id;
+  return { page, paragraphId: typeof paragraph === 'string' && paragraph !== '' ? paragraph : null };
+}
+
+/**
+ * 「在预览中定位」（带 `page` 的事件节点）：经 ui store 的定位桥让预览滚到那一页，
+ * 段落 id 有就一并选中。翻译列与编译列共用（同一个控件、同一个 `data-od-id`）。
+ */
+export function LocateLink({ page, paragraphId }: { page: number; paragraphId: string | null }) {
+  const locateInPreview = useUiStore((state) => state.locateInPreview);
+  return (
+    <button
+      type="button"
+      data-od-id="event-locate"
+      title={`在预览中定位第 ${page} 页${paragraphId === null ? '' : `（${paragraphId}）`}`}
+      onClick={() => locateInPreview(page, paragraphId ?? undefined)}
+      className="mt-[5px] block font-mono text-micro text-ink-4 underline-offset-2 hover:text-accent hover:underline"
+    >
+      在预览中定位
+    </button>
+  );
+}
+
 export function EventRow({
   event,
   expanded,
@@ -66,54 +103,66 @@ export function EventRow({
   onToggle: (seq: number) => void;
 }) {
   const group = kindGroup(event.kind);
+  const locate = eventLocateTarget(event.data);
+  const summary = dataSummary(event.data);
   return (
-    <li data-od-id="event-row" data-seq={event.seq} data-kind-group={group}>
+    // 节点底纹/连接线走 CSS：`before:` 画竖向流水线（最后一个节点不画）。
+    <li
+      data-od-id="event-row"
+      data-seq={event.seq}
+      data-kind-group={group}
+      className={cn(
+        'relative pb-s3 pl-[26px] pr-s2 pt-[2px] last:pb-[4px]',
+        'before:absolute before:bottom-0 before:left-[10px] before:top-[22px] before:w-px before:bg-hair before:content-[""]',
+        'last:before:hidden',
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          'absolute left-0 top-[2px] h-5 w-5 rounded-full border bg-ivory',
+          LEVEL_MARK[eventLevel(event)],
+        )}
+      />
       <button
         type="button"
         aria-expanded={expanded}
         onClick={() => onToggle(event.seq)}
         className={cn(
-          'grid w-full min-w-0 grid-cols-[40px_54px_auto_5px_minmax(0,1fr)] items-start gap-s2 px-s3 py-[3px] text-left transition-colors hover:bg-sand',
+          'block w-full min-w-0 rounded-[2px] text-left transition-colors hover:bg-sand',
           expanded && 'bg-sand',
         )}
       >
-        <span className="text-right font-mono text-micro text-ink-4 [font-variant-numeric:tabular-nums]">
-          {event.seq}
-        </span>
-        <span
-          className="font-mono text-micro text-ink-4 [font-variant-numeric:tabular-nums]"
-          title={`${event.at}（UTC）· 北京时间 ${eventTime(event.at)}`}
-        >
-          {eventTime(event.at)}
-        </span>
-        <span className="flex-none">
-          <Chip title={event.stage === '' ? '（没有阶段）' : event.stage}>
-            {event.stage === '' ? '—' : stageLabel(event.stage)}
+        <span className="flex min-w-0 items-center gap-s2">
+          <Chip title={event.kind} className={GROUP_TEXT[group]}>
+            {kindLabel(event.kind)}
           </Chip>
-        </span>
-        <span
-          aria-hidden="true"
-          className={cn('mt-[7px] h-[5px] w-[5px] flex-none rounded-full', LEVEL_DOT[eventLevel(event)])}
-        />
-        <span className="min-w-0">
-          <span className="flex min-w-0 items-baseline gap-[6px]">
-            <span className={cn('flex-none font-mono text-micro', GROUP_TEXT[group])} title={event.kind}>
-              {kindLabel(event.kind)}
-            </span>
-            <span className="min-w-0 truncate font-mono text-micro text-ink-3">
-              {dataSummary(event.data)}
-            </span>
+          <span
+            className="flex-none font-mono text-micro text-ink-4 [font-variant-numeric:tabular-nums]"
+            title={`${event.at}（UTC）· 北京时间 ${eventTime(event.at)}`}
+          >
+            {eventTime(event.at)}
+          </span>
+          <span className="ml-auto flex-none font-mono text-micro text-ink-4 [font-variant-numeric:tabular-nums]">
+            {event.seq}
           </span>
         </span>
-        {expanded ? (
-          <pre
-            data-od-id="event-row-json"
-            className="col-span-full mt-s1 max-h-[220px] overflow-auto rounded-[3px] border border-hair bg-parchment p-s2 font-mono text-micro leading-[1.5] text-ink-2"
-          >
-            {JSON.stringify(event, null, 2)}
-          </pre>
-        ) : null}
+        <span className="mt-[3px] block min-w-0 break-words font-mono text-micro text-ink-3">
+          {event.stage === '' ? summary : `${stageLabel(event.stage)} · ${summary}`}
+        </span>
+        <span className="mt-[5px] block font-mono text-micro text-ink-4">
+          {expanded ? '收起详情' : '展开详情'}
+        </span>
       </button>
+      {locate === null ? null : <LocateLink page={locate.page} paragraphId={locate.paragraphId} />}
+      {expanded ? (
+        <pre
+          data-od-id="event-row-json"
+          className="mt-s1 max-h-[220px] overflow-auto rounded-[3px] border border-hair bg-parchment p-s2 font-mono text-micro leading-[1.5] text-ink-2"
+        >
+          {JSON.stringify(event, null, 2)}
+        </pre>
+      ) : null}
     </li>
   );
 }

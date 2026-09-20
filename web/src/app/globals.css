@@ -197,3 +197,19 @@
 @media (prefers-reduced-motion: reduce) {
   .preview-page-reveal { animation: none; filter: none; clip-path: none; }
 }
+
+/*
+ * 事件流面板的双流水列（§2.7）：右栏拖到最窄时两列每列只剩不到 110px，
+ * 所以按**容器宽度**（不是视口宽度）退回一列。容器查询需要祖先上有 container-type，
+ * 由 `EventStreamPanel` 的包裹层写行内 `container-type: inline-size`。
+ */
+@container (max-width: 320px) {
+  .tl-two-col {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .tl-two-col .tl-col-compile {
+    border-top: 1px solid var(--hair);
+    border-left: 0;
+  }
+}

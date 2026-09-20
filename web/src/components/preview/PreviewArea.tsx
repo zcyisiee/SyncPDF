@@ -1,5 +1,5 @@
 /** Continuous PDF reader with per-page viewport-aligned geometry and draft editing. */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { ApiError, describeApiError } from '../../lib/api';
@@ -96,12 +96,14 @@ function DocumentPreview({ did }: PreviewProps) {
   const linked = useUiStore((state) => state.compareLinked);
   const [position, setPosition] = useState<ReaderPosition | null>(null);
   const [navigation, setNavigation] = useState<{ page: number; revision: number; pane?: string }>({ page: 1, revision: 0 });
-  const navigate = (next: number) => {
-    setPosition({ pane: position?.pane ?? 'primary', page: next, fraction: 0 });
+  const navigate = useCallback((next: number) => {
+    // pane 取当前 active pane（对照模式未联动时决定滚哪一侧）；只在它变化时重建本回调
+    const pane = position?.pane ?? 'primary';
+    setPosition({ pane, page: next, fraction: 0 });
     setPreviewPage(next);
     setNavigation((previous) => ({ page: next, revision: previous.revision + 1,
-      pane: !linked && previewMode === 'compare' ? position?.pane ?? 'primary' : undefined }));
-  };
+      pane: !linked && previewMode === 'compare' ? pane : undefined }));
+  }, [position?.pane, setPreviewPage, linked, previewMode]);
   const onPosition = useCallback((next: ReaderPosition, programmatic = false) => {
     setPanePositions((previous) => {
       const saved = previous[next.pane];
@@ -116,6 +118,20 @@ function DocumentPreview({ did }: PreviewProps) {
   }, [setPreviewPage]);
 
   useEffect(() => { if (position) setPreviewPage(position.page); }, [position, setPreviewPage]);
+
+  // 事件流「在预览中定位」（`stores/ui.ts` 的定位桥）：nonce 每次点击自增，所以同一页连点
+  // 两次也会重新滚过去。挂载时先记下当前 nonce 当基线：**已经存在**的旧定位不重放
+  // （换文档会重挂载 PreviewArea，不该被上一份文档的定位跳到那一页）。
+  const locate = useUiStore((state) => state.locate);
+  const appliedLocate = useRef<number | null>(null);
+  useEffect(() => {
+    const nonce = locate?.nonce ?? 0;
+    const previous = appliedLocate.current;
+    appliedLocate.current = nonce;
+    if (previous === null || locate === null || nonce <= previous) return;
+    navigate(locate.page);
+    if (locate.paragraphId !== null) selectParagraph(locate.paragraphId);
+  }, [locate, navigate, selectParagraph]);
 
   const { target, source } = useMemo(
     () => pickPreviewArtifacts(artifacts ?? []),
