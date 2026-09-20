@@ -35,7 +35,6 @@ import {
 } from '../lib/queries';
 import { Button } from '../components/ui/Button';
 import { ScrollArea } from '../components/ui/ScrollArea';
-import { ScreenFrame } from '../components/shell/ScreenFrame';
 
 const INPUT_CLASS =
   'h-7 w-full rounded border border-hair bg-ivory px-2 text-sm text-ink-2 ' +
@@ -146,183 +145,181 @@ export function GlossaryScreen() {
   const failure = replaceGlossary.error ?? clearGlossary.error;
 
   return (
-    <ScreenFrame>
-      <ScrollArea className="h-full" data-od-id="screen-glossary">
-        <div className="w-full max-w-[1220px] px-s7 pb-12 pt-s7">
-          <div className="flex flex-wrap items-end justify-between gap-s3">
-            <div>
-              <h1 className="font-serif text-h1 font-medium leading-[1.3] text-ink">词表</h1>
-              <p className="mt-s2 text-body text-ink-2">
-                全局术语表：翻译时按「源词 → 指定译名」约束译文。
-                <span className="font-mono text-tiny text-ink-4">
+    <ScrollArea className="h-full" data-od-id="screen-glossary">
+      <div className="w-full max-w-[1220px] px-s7 pb-12 pt-s7">
+        <div className="flex flex-wrap items-end justify-between gap-s3">
+          <div>
+            <h1 className="font-serif text-h1 font-medium leading-[1.3] text-ink">词表</h1>
+            <p className="mt-s2 text-body text-ink-2">
+              全局术语表：翻译时按「源词 → 指定译名」约束译文。
+              <span className="font-mono text-tiny text-ink-4">
+                {' '}
+                · {entries.length} 条
+              </span>
+              {dirty ? (
+                <span className="text-run-ink" data-od-id="glossary-dirty">
                   {' '}
-                  · {entries.length} 条
+                  · 有未保存的修改
                 </span>
-                {dirty ? (
-                  <span className="text-run-ink" data-od-id="glossary-dirty">
-                    {' '}
-                    · 有未保存的修改
-                  </span>
-                ) : null}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-s2">
-              <Button data-od-id="glossary-add-row" onClick={addRow}>
-                添加行
-              </Button>
-              <Button
-                data-od-id="glossary-import"
-                onClick={() => fileInputRef.current?.click()}
-                title="导入 CSV（列 source,target,note）——解析在本浏览器里做"
-              >
-                导入 CSV
-              </Button>
-              <Button
-                data-od-id="glossary-export"
-                onClick={exportCsv}
-                disabled={rows.length === 0}
-                title="导出当前表（含未保存的编辑）为 CSV"
-              >
-                导出 CSV
-              </Button>
-              <Button
-                variant="danger"
-                data-od-id="glossary-clear"
-                onClick={clearAll}
-                disabled={entries.length === 0 || clearGlossary.isPending}
-              >
-                {clearGlossary.isPending ? '正在清空…' : '清空'}
-              </Button>
-              <Button data-od-id="glossary-discard" onClick={discard} disabled={!dirty}>
-                放弃
-              </Button>
-              <Button
-                variant="primary"
-                data-od-id="glossary-save"
-                onClick={save}
-                disabled={!canSave}
-                title={invalidCount > 0 ? '有不合法的行：先改掉再保存' : '整表替换（PUT /glossary）'}
-              >
-                {replaceGlossary.isPending ? '正在保存…' : '保存'}
-              </Button>
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv,text/csv"
-              data-od-id="glossary-import-input"
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                // 同一个文件连续导入两次也要触发 change：读走之后清空 value。
-                event.target.value = '';
-                if (file) void importCsv(file);
-              }}
-            />
+              ) : null}
+            </p>
           </div>
-
-          <p
-            data-od-id="glossary-no-retro"
-            className="mt-s4 rounded-none border border-hair border-l-[3px] border-l-run bg-run-soft px-s4 py-s3 text-body text-ink-2"
-          >
-            <strong className="font-medium text-run-ink">对已翻译段落无追溯效果。</strong>{' '}
-            词表只约束<b>之后新跑</b>的翻译：改完保存不会自动重翻任何已有译文，重新跑一次翻译才生效。
-          </p>
-
-          {glossaryQuery.isError ? (
-            <ErrorCard className="mt-s4" data-od-id="glossary-load-error" error={glossaryQuery.error} />
-          ) : null}
-
-          {invalidCount > 0 ? (
-            <p className="mt-s3 text-tiny text-err" data-od-id="glossary-row-error-count">
-              有 {invalidCount} 行不合法（见行内提示）：source/target 都不能为空，且各不超过 200 字符。
-            </p>
-          ) : null}
-          {csvError === null ? null : (
-            <ErrorCard
-              className="mt-s3"
-              data-od-id="glossary-csv-error"
-              title="CSV 导入失败"
-              message={csvError}
-            />
-          )}
-          {failure == null ? null : (
-            <ErrorCard className="mt-s3" data-od-id="glossary-save-error" error={failure} />
-          )}
-
-          {glossaryQuery.isPending ? (
-            <p className="mt-s5 text-body text-ink-3" data-od-id="glossary-loading">
-              正在读取词表…
-            </p>
-          ) : rows.length === 0 ? (
-            <p className="mt-s5 text-body text-ink-3" data-od-id="glossary-empty">
-              还没有词表。点「添加行」或「导入 CSV」开始；词表为空时翻译不会注入任何术语。
-            </p>
-          ) : (
-            <table
-              data-od-id="glossary-table"
-              className="mt-s5 w-full border-collapse text-left"
+          <div className="flex flex-wrap items-center gap-s2">
+            <Button data-od-id="glossary-add-row" onClick={addRow}>
+              添加行
+            </Button>
+            <Button
+              data-od-id="glossary-import"
+              onClick={() => fileInputRef.current?.click()}
+              title="导入 CSV（列 source,target,note）——解析在本浏览器里做"
             >
-              <thead>
-                <tr>
-                  {COLUMNS.map((column) => (
-                    <th
-                      key={column.key}
-                      scope="col"
-                      className="border-b border-hair px-s2 py-s2 text-tiny font-medium text-ink-3"
-                    >
-                      {column.label}
-                    </th>
-                  ))}
-                  <th scope="col" className="w-[72px] border-b border-hair px-s2 py-s2" />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, index) => {
-                  const error = rowErrors[row.key];
-                  return (
-                    <tr key={row.key} data-od-id="glossary-row" data-row-key={row.key}>
-                      {COLUMNS.map((column) => (
-                        <td key={column.key} className="border-b border-hair px-s2 py-s2 align-top">
-                          <input
-                            aria-label={`第 ${index + 1} 行 ${column.label}`}
-                            data-od-id={`glossary-cell-${column.key}`}
-                            value={row[column.key]}
-                            placeholder={column.placeholder}
-                            onChange={(event) => patchRow(row.key, { [column.key]: event.target.value })}
-                            className={cn(INPUT_CLASS, error && column.key === 'source' && 'border-err')}
-                          />
-                          {/* 行级错误只占源词格下方一行：表格结构不变（不插额外列） */}
-                          {error && column.key === 'source' ? (
-                            <span className="mt-1 block text-tiny text-err" data-od-id="glossary-row-error">
-                              {error}
-                            </span>
-                          ) : null}
-                        </td>
-                      ))}
-                      <td className="border-b border-hair px-s2 py-s2 align-top">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          data-od-id="glossary-delete-row"
-                          aria-label={`删除第 ${index + 1} 行`}
-                          onClick={() => removeRow(row.key)}
-                        >
-                          删除
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-
-          <p className="mt-s4 font-mono text-tiny text-ink-4">
-            保存 = 整表替换（PUT /api/v1/glossary）；服务端按 source 排序去重（同 source 以后者为准）。
-          </p>
+              导入 CSV
+            </Button>
+            <Button
+              data-od-id="glossary-export"
+              onClick={exportCsv}
+              disabled={rows.length === 0}
+              title="导出当前表（含未保存的编辑）为 CSV"
+            >
+              导出 CSV
+            </Button>
+            <Button
+              variant="danger"
+              data-od-id="glossary-clear"
+              onClick={clearAll}
+              disabled={entries.length === 0 || clearGlossary.isPending}
+            >
+              {clearGlossary.isPending ? '正在清空…' : '清空'}
+            </Button>
+            <Button data-od-id="glossary-discard" onClick={discard} disabled={!dirty}>
+              放弃
+            </Button>
+            <Button
+              variant="primary"
+              data-od-id="glossary-save"
+              onClick={save}
+              disabled={!canSave}
+              title={invalidCount > 0 ? '有不合法的行：先改掉再保存' : '整表替换（PUT /glossary）'}
+            >
+              {replaceGlossary.isPending ? '正在保存…' : '保存'}
+            </Button>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            data-od-id="glossary-import-input"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              // 同一个文件连续导入两次也要触发 change：读走之后清空 value。
+              event.target.value = '';
+              if (file) void importCsv(file);
+            }}
+          />
         </div>
-      </ScrollArea>
-    </ScreenFrame>
+
+        <p
+          data-od-id="glossary-no-retro"
+          className="mt-s4 rounded-none border border-hair border-l-[3px] border-l-run bg-run-soft px-s4 py-s3 text-body text-ink-2"
+        >
+          <strong className="font-medium text-run-ink">对已翻译段落无追溯效果。</strong>{' '}
+          词表只约束<b>之后新跑</b>的翻译：改完保存不会自动重翻任何已有译文，重新跑一次翻译才生效。
+        </p>
+
+        {glossaryQuery.isError ? (
+          <ErrorCard className="mt-s4" data-od-id="glossary-load-error" error={glossaryQuery.error} />
+        ) : null}
+
+        {invalidCount > 0 ? (
+          <p className="mt-s3 text-tiny text-err" data-od-id="glossary-row-error-count">
+            有 {invalidCount} 行不合法（见行内提示）：source/target 都不能为空，且各不超过 200 字符。
+          </p>
+        ) : null}
+        {csvError === null ? null : (
+          <ErrorCard
+            className="mt-s3"
+            data-od-id="glossary-csv-error"
+            title="CSV 导入失败"
+            message={csvError}
+          />
+        )}
+        {failure == null ? null : (
+          <ErrorCard className="mt-s3" data-od-id="glossary-save-error" error={failure} />
+        )}
+
+        {glossaryQuery.isPending ? (
+          <p className="mt-s5 text-body text-ink-3" data-od-id="glossary-loading">
+            正在读取词表…
+          </p>
+        ) : rows.length === 0 ? (
+          <p className="mt-s5 text-body text-ink-3" data-od-id="glossary-empty">
+            还没有词表。点「添加行」或「导入 CSV」开始；词表为空时翻译不会注入任何术语。
+          </p>
+        ) : (
+          <table
+            data-od-id="glossary-table"
+            className="mt-s5 w-full border-collapse text-left"
+          >
+            <thead>
+              <tr>
+                {COLUMNS.map((column) => (
+                  <th
+                    key={column.key}
+                    scope="col"
+                    className="border-b border-hair px-s2 py-s2 text-tiny font-medium text-ink-3"
+                  >
+                    {column.label}
+                  </th>
+                ))}
+                <th scope="col" className="w-[72px] border-b border-hair px-s2 py-s2" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => {
+                const error = rowErrors[row.key];
+                return (
+                  <tr key={row.key} data-od-id="glossary-row" data-row-key={row.key}>
+                    {COLUMNS.map((column) => (
+                      <td key={column.key} className="border-b border-hair px-s2 py-s2 align-top">
+                        <input
+                          aria-label={`第 ${index + 1} 行 ${column.label}`}
+                          data-od-id={`glossary-cell-${column.key}`}
+                          value={row[column.key]}
+                          placeholder={column.placeholder}
+                          onChange={(event) => patchRow(row.key, { [column.key]: event.target.value })}
+                          className={cn(INPUT_CLASS, error && column.key === 'source' && 'border-err')}
+                        />
+                        {/* 行级错误只占源词格下方一行：表格结构不变（不插额外列） */}
+                        {error && column.key === 'source' ? (
+                          <span className="mt-1 block text-tiny text-err" data-od-id="glossary-row-error">
+                            {error}
+                          </span>
+                        ) : null}
+                      </td>
+                    ))}
+                    <td className="border-b border-hair px-s2 py-s2 align-top">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        data-od-id="glossary-delete-row"
+                        aria-label={`删除第 ${index + 1} 行`}
+                        onClick={() => removeRow(row.key)}
+                      >
+                        删除
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+
+        <p className="mt-s4 font-mono text-tiny text-ink-4">
+          保存 = 整表替换（PUT /api/v1/glossary）；服务端按 source 排序去重（同 source 以后者为准）。
+        </p>
+      </div>
+    </ScrollArea>
   );
 }

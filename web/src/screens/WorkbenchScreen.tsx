@@ -11,8 +11,6 @@ import { ScrollArea } from '../components/ui/ScrollArea';
 import { DocumentStatusBadge } from '../components/ui/StatusBadge';
 import { Gutter } from '../components/shell/Gutter';
 import { InspectorPanel } from '../components/shell/InspectorPanel';
-import { ScreenFrame } from '../components/shell/ScreenFrame';
-import { Timeline } from '../components/shell/Timeline';
 import { JobControls } from '../components/jobs/JobControls';
 import { ArchiveView } from '../components/archive/ArchiveView';
 import { PreviewArea } from '../components/preview/PreviewArea';
@@ -26,12 +24,12 @@ import type { CSSProperties } from 'react';
 const STAGE_STATE_LIVE_REFETCH_MS = 2_000;
 
 /**
- * `#/d/:did/*` 工作台（页面合并后的唯一工作台）：
- * 预览区（占满除右栏外的全部宽度）→ gutter → 右侧面板（段落 / 事件流 / 归档）→ gutter → 时间线。
+ * `#/d/:did/*` 工作台的中栏 + 右栏（左栏论文导航由 App 常驻，不在这里）。
  *
- * 旧版的 220px 视图栏与 识别/翻译/检查 二级视图已删除：那些页面几乎相同，所有信息都在
- * 右侧面板与时间线里；「开始翻译 / 取消 / 重试」收进顶栏（`JobControls`，配置在设置屏）。
- * 事件流也只有一份：正在跑的 run 与历史归档共用同一个窗口，不再区分「进行中/已完成」。
+ * 内层 `.wb-grid`：中栏 = 一行文档头（文档名 + 状态徽标 + 任务控制）+ 预览区（占满剩余），
+ * 然后 gutter + 右侧面板（段落 / 事件流 / 归档）。底部时间线已删除：阶段状态由文档头的
+ * `DocumentStatusBadge` 与事件流 tab 承担，`useTimelineStages` 只剩「live 判据」用途
+ * （驱动 badge 与 2s 轮询）。
  */
 export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchView }) {
   const persistent = usePersistentEvents(did);
@@ -43,7 +41,7 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
   const cardMode = jobCardMode(jobsQuery.data);
   const latestJob = activeJob(jobsQuery.data) ?? jobsQuery.data?.[0] ?? null;
   const queued = cardMode === 'active' && latestJob?.status === 'queued';
-  // 事件窗口（首拉 + SSE）→ 时间线段（stage-state 基线 + 事件流 live + job 驱动 live）。
+  // 事件窗口（首拉 + SSE）：事件流的 live 与 stage-state 的轮询都由它裁决。
   // 有活动 job 时首拉按 5s 重拉：新 run 归档只能这样被发现（SSE 订阅的是首拉拿到的 run）。
   const feed = useEventWindow(did, {
     onJobUpdate: jobUpdates.onJobUpdate,
@@ -55,7 +53,7 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
   const eventsLive = isRunLive(feed.events);
   const fastRefetch = eventsLive || cardMode === 'active';
   // stage-state 的轮询用「事件流是否还在增长」（isRunLive；归档截断时会多轮询，
-  // 但时间线/徽标的 live 一律由基线裁决，见 lib/timeline.ts 的注释）。
+  // 但 live 一律由基线裁决，见 lib/timeline.ts 的注释）。`live` 给文档头徽标用。
   const timeline = useTimelineStages(did, feed.events, {
     refetchMs: fastRefetch ? STAGE_STATE_LIVE_REFETCH_MS : 0,
     // job 驱动的那一段：新 run 的 stage-state 还没落盘时，只有 job 记录说“阶段在跑”。
@@ -70,78 +68,75 @@ export function WorkbenchScreen({ did, view }: { did: string; view: WorkbenchVie
   });
   const doc = documentQuery.data;
   const inspectorWidth = useUiStore((state) => state.inspectorWidth);
-  const timelineHeight = useUiStore((state) => state.timelineHeight);
-  const timelineCollapsed = useUiStore((state) => state.timelineCollapsed);
-  const inspectorCollapsed = useUiStore((state) => state.inspectorCollapsed);
-
-  // 顶栏：文档名 + 状态徽标 + 任务控制（开始翻译 / 取消 / 重试）。
-  const meta =
-    doc === undefined ? null : (
-      <>
-        <span className="max-w-[34ch] truncate font-serif text-sm text-ink-2">
-          {doc.title ?? doc.did}
-        </span>
-        <DocumentStatusBadge stageSummary={doc.stage_summary} live={timeline.live} queued={queued} />
-        <JobControls did={did} document={doc} jobs={jobsQuery.data} />
-      </>
-    );
 
   if (documentQuery.isError) {
     const described = describeApiError(documentQuery.error);
     return (
-      <ScreenFrame>
-        <ScrollArea className="p-s7">
-          <ErrorCard
-            data-od-id="error-card"
-            title={described.title}
-            message={`${described.message}（did: ${did}）`}
-            detail={described.detail}
-          >
-            <Button onClick={() => void documentQuery.refetch()} disabled={documentQuery.isFetching}>
-              重试
-            </Button>
-            <LinkButton href="#/library">返回文件库</LinkButton>
-          </ErrorCard>
-        </ScrollArea>
-      </ScreenFrame>
+      <ScrollArea className="h-full p-s7" data-od-id="workbench-error">
+        <ErrorCard
+          data-od-id="error-card"
+          title={described.title}
+          message={`${described.message}（did: ${did}）`}
+          detail={described.detail}
+        >
+          <Button onClick={() => void documentQuery.refetch()} disabled={documentQuery.isFetching}>
+            重试
+          </Button>
+          <LinkButton href="#/library">返回文件库</LinkButton>
+        </ErrorCard>
+      </ScrollArea>
     );
   }
 
-  const layoutStyle = {
-    '--inspw': inspectorCollapsed ? '0px' : `${inspectorWidth}px`,
-    '--tlh': timelineCollapsed ? '28px' : `${timelineHeight}px`,
-  } as CSSProperties;
+  const layoutStyle = { '--inspw': `${inspectorWidth}px` } as CSSProperties;
 
   return (
-    <ScreenFrame meta={meta}>
-      <div
-        className="wb-grid h-full"
-        style={layoutStyle}
-        data-od-id="workbench"
-        data-view={view}
-        data-did={did}
+    <div
+      className="wb-grid h-full"
+      style={layoutStyle}
+      data-od-id="workbench"
+      data-view={view}
+      data-did={did}
+    >
+      <section
+        aria-label="中栏内容"
+        className="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col bg-canvas"
       >
-        <section
-          aria-label="预览区"
-          data-od-id="stage"
-          className="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col"
+        <div
+          data-od-id="doc-header"
+          className="flex h-10 flex-none items-center gap-s3 overflow-hidden border-b border-hair bg-parchment px-s4"
         >
+          <span className="min-w-0 flex-1 truncate font-serif text-md text-ink-2">
+            {doc === undefined ? did : (doc.title ?? doc.did)}
+          </span>
+          {doc === undefined ? null : (
+            <>
+              <DocumentStatusBadge
+                stageSummary={doc.stage_summary}
+                live={timeline.live}
+                queued={queued}
+              />
+              <JobControls did={did} document={doc} jobs={jobsQuery.data} />
+            </>
+          )}
+        </div>
+
+        <div className="min-h-0 flex-1" data-od-id="stage">
           {view === 'archive' ? (
-            // 归档视图（W12）：预览区换成版本列表（右侧面板给同一份数据的摘要）。
-            <div className="min-h-0 flex-1" data-od-id="archive-panel">
+            // 归档视图：预览区换成版本列表（右侧面板给同一份数据的摘要）。
+            <div className="h-full min-h-0" data-od-id="archive-panel">
               <ArchiveView did={did} compile={doc?.compile} />
             </div>
           ) : (
-            <div className="min-h-0 flex-1">
+            <div className="h-full min-h-0">
               <PreviewArea did={did} />
             </div>
           )}
-        </section>
-        <Gutter id="inspector" className="col-start-2 row-start-1" />
-        <InspectorPanel did={did} view={view} feed={feed} compileEvents={persistent.events} />
-        {!timelineCollapsed ? <Gutter id="timeline" className="col-span-full row-start-2" /> : null}
-        <Timeline did={did} segments={timeline.segments} events={feed.events} queued={queued} unavailable={timeline.isError} />
-      </div>
-    </ScreenFrame>
+        </div>
+      </section>
+
+      <Gutter id="inspector" className="col-start-2 row-start-1" />
+      <InspectorPanel did={did} view={view} feed={feed} compileEvents={persistent.events} />
+    </div>
   );
 }

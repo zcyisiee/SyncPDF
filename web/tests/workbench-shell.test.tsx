@@ -5,7 +5,6 @@ import { queryKeys } from '../src/lib/queries';
 import type { StageStateResponse } from '../src/api/types';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { STAGE_LABELS, STAGE_NAMES } from '../src/lib/humanize';
 import { WorkbenchScreen } from '../src/screens/WorkbenchScreen';
 import { uiStore } from '../src/stores/ui';
 import { jsonResponse, makeJob, mockApiFetch, renderWithQuery, resetUiStore } from './helpers';
@@ -146,7 +145,7 @@ function mockVersions(body: unknown = VERSIONS) {
 beforeEach(() => {
   resetUiStore();
 });
-describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
+describe('工作台（中栏预览 + 右栏检查器）', () => {
   it('视图栏已删除：预览区占满整行，右侧面板三个 tab 常驻（段落/事件流/归档）', async () => {
     mockDetail();
     renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
@@ -165,7 +164,7 @@ describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
     expect(document.querySelector('[data-od-id="selected-paragraph-id"]')).toBeNull();
   });
 
-  it('顶栏显示当前文档名 + 阶段状态徽标 + 任务控制，且无真实 running 时不带脉冲', async () => {
+  it('文档头显示当前文档名 + 阶段状态徽标 + 任务控制，且无真实 running 时不带脉冲', async () => {
     mockApiFetch({
       [`/api/v1/documents/${DID}`]: () => jsonResponse(DETAIL),
       [`/api/v1/documents/${DID}/artifacts`]: () => jsonResponse([]),
@@ -175,75 +174,51 @@ describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
     });
     renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
 
-    const topbar = screen.getByRole('banner');
-    await within(topbar).findByText(DID);
-    expect(within(topbar).getByText('已完成')).toBeInTheDocument();
+    const header = document.querySelector('[data-od-id="doc-header"]') as HTMLElement;
+    // 详情到达前文档头只有 did：等状态徽标出现，说明 doc 已经渲染
+    expect(await within(header).findByText('已完成')).toBeInTheDocument();
+    expect(within(header).getByText(DID)).toBeInTheDocument();
     expect(document.querySelectorAll('.pulse-dot')).toHaveLength(0);
-    // 任务控制收进顶栏（旧版在进度视图顶部）
-    expect(within(topbar).getByRole('button', { name: '开始翻译' })).toBeInTheDocument();
+    // 任务控制收进文档头（旧版在顶栏/进度视图顶部）
+    expect(within(header).getByRole('button', { name: '开始翻译' })).toBeInTheDocument();
+    expect(document.querySelector('[data-od-id="job-controls"]')).not.toBeNull();
+    // 旧外壳（顶栏/图标栏/时间线）彻底不在了
+    expect(screen.queryByRole('banner')).toBeNull();
+    expect(document.querySelector('[data-od-id="app-topbar"]')).toBeNull();
+    expect(document.querySelector('[data-od-id="icon-rail"]')).toBeNull();
+    expect(document.querySelector('[data-od-id="timeline"]')).toBeNull();
   });
 
-  it('两条分隔条 role=separator + §8.2 范围与默认值（视图栏分隔条已随视图栏删除）', () => {
+  it('一条分隔条（右栏）+ 中栏预览占满其余宽度（时间线分隔条已删除）', () => {
     mockDetail();
     renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
 
     const separators = screen.getAllByRole('separator');
-    expect(separators).toHaveLength(2);
-    const byName = (name: RegExp) => screen.getByRole('separator', { name });
-    expect(byName(/右侧面板宽度/)).toHaveAttribute('aria-valuenow', '360');
-    expect(byName(/时间线高度/)).toHaveAttribute('aria-valuenow', '96');
-    for (const id of ['inspector', 'timeline']) {
-      expect(document.querySelector(`[data-od-id="gutter-${id}"]`)).not.toBeNull();
-    }
-    expect(document.querySelector('[data-od-id="gutter-viewrail"]')).toBeNull();
+    expect(separators).toHaveLength(1);
+    const gutter = screen.getByRole('separator', { name: /右侧面板宽度/ });
+    expect(gutter).toHaveAttribute('aria-valuenow', '340');
+    expect(document.querySelector('[data-od-id="gutter-inspector"]')).not.toBeNull();
+    expect(document.querySelector('[data-od-id="gutter-timeline"]')).toBeNull();
+    expect(document.querySelector('[data-od-id="gutter-nav"]')).toBeNull();
   });
 
-  it('栏宽写进 CSS 变量（--inspw / --tlh；--vrw 已随视图栏删除），键盘可调', async () => {
+  it('栏宽写进 CSS 变量（--inspw），键盘可调', async () => {
     mockDetail();
     renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
     const grid = document.querySelector('[data-od-id="workbench"]') as HTMLElement;
-    expect(grid.style.getPropertyValue('--vrw')).toBe('');
-    expect(grid.style.getPropertyValue('--inspw')).toBe('360px');
-    expect(grid.style.getPropertyValue('--tlh')).toBe('96px');
+    expect(grid.style.getPropertyValue('--inspw')).toBe('340px');
 
     // 右侧面板分隔条：ArrowLeft = 分隔条左移 = 面板变宽
     fireEvent.keyDown(screen.getByRole('separator', { name: /右侧面板宽度/ }), {
       key: 'ArrowLeft',
     });
-    await waitFor(() => expect(grid.style.getPropertyValue('--inspw')).toBe('376px'));
-    expect(uiStore.getState().inspectorWidth).toBe(376);
-    expect(window.localStorage.getItem('ieet.inspw')).toBe('376');
+    await waitFor(() => expect(grid.style.getPropertyValue('--inspw')).toBe('356px'));
+    expect(uiStore.getState().inspectorWidth).toBe(356);
+    expect(window.localStorage.getItem('ieet.inspw')).toBe('356');
     expect(screen.getByRole('separator', { name: /右侧面板宽度/ })).toHaveAttribute(
       'aria-valuenow',
-      '376',
+      '356',
     );
-  });
-
-  it('右侧面板折叠时 --inspw 归零，分隔条仍可拖回', async () => {
-    mockDetail();
-    renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
-    await screen.findByText(DID);
-    // 默认 tab 是段落；切到事件流后事件流面板挂载
-    fireEvent.click(screen.getByRole('tab', { name: '事件流' }));
-    await waitFor(() =>
-      expect(document.querySelector('[data-od-id="event-stream"]')).not.toBeNull(),
-    );
-
-    // 折叠态由 store 驱动（生产里由交互触发），store 变更会重渲染订阅组件
-    act(() => uiStore.getState().setInspectorCollapsed(true));
-    await waitFor(() =>
-      expect(document.querySelector('[data-od-id="event-stream"]')).toBeNull(),
-    );
-    const grid = document.querySelector('[data-od-id="workbench"]') as HTMLElement;
-    expect(grid.style.getPropertyValue('--inspw')).toBe('0px');
-
-    // 分隔条在预览区右侧：ArrowLeft = 分隔条左移 = 面板变宽并展开
-    fireEvent.keyDown(screen.getByRole('separator', { name: /右侧面板宽度/ }), {
-      key: 'ArrowLeft',
-    });
-    await waitFor(() => expect(grid.style.getPropertyValue('--inspw')).toBe('376px'));
-    expect(uiStore.getState().inspectorCollapsed).toBe(false);
-    expect(document.querySelector('[data-od-id="event-stream"]')).not.toBeNull();
   });
 
   it('预览区接 W05 真预览：工具条 + 无产物占位卡', async () => {
@@ -332,29 +307,6 @@ describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
     ).toBe(`#/d/${DID}`);
   });
 
-  it('时间线是真数据：7 段 + 真实耗时条 + 总用时 chip', async () => {
-    mockDetail();
-    renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
-    const timeline = document.querySelector('[data-od-id="timeline"]') as HTMLElement;
-    expect(timeline).not.toBeNull();
-    for (const stage of STAGE_NAMES) {
-      expect(within(timeline).getByText(STAGE_LABELS[stage])).toBeInTheDocument();
-      expect(timeline.querySelector(`[data-od-id="timeline-stage-${stage}"]`)).not.toBeNull();
-    }
-    // 等 stage-state 到达：全 ok（不能用「静态占位」那一套）
-    await waitFor(() =>
-      expect(
-        timeline.querySelector('[data-od-id="timeline-stage-parse"]')?.getAttribute('data-state'),
-      ).toBe('ok'),
-    );
-    expect(within(timeline).getByText('15s')).toBeInTheDocument();
-    expect(within(timeline).queryByText(/静态占位/)).toBeNull();
-    const total = timeline.querySelector('[data-od-id="timeline-total"]');
-    expect(total?.textContent).toMatch(/总用时 \d/);
-    // 段不可点击（视图合并后没有跳转目标）：不再渲染链接
-    expect(timeline.querySelector('[data-od-id="timeline-stage-parse"] a')).toBeNull();
-  });
-
   it('did 不存在：错误卡 + 返回文件库（不留白屏）', async () => {
     mockDetail('nope', { error: { code: 'document_not_found', message: '文档不存在' } }, 404);
     renderWithQuery(<WorkbenchScreen did="nope" view="progress" />);
@@ -393,33 +345,33 @@ describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
     });
   }
 
-  it('顶栏（W08）：无活动 job + 有产物 → 「开始翻译」可用；工作台不再有配置表单', async () => {
+  it('文档头（W08）：无活动 job + 有产物 → 「开始翻译」可用；工作台不再有配置表单', async () => {
     mockWorkbench({ [`/api/v1/documents/${DID}/jobs`]: () => jsonResponse([]) });
     renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
 
-    // 任务控制收进顶栏；翻译配置（模型/思考/dual/词表/审校）在设置屏，不在工作台重复展示
-    const topbar = screen.getByRole('banner');
-    const submit = await within(topbar).findByRole('button', { name: '开始翻译' });
+    // 任务控制收进中栏文档头；翻译配置（模型/思考/dual/词表/审校）在设置屏，不在工作台重复展示
+    const header = document.querySelector('[data-od-id="doc-header"]') as HTMLElement;
+    const submit = await within(header).findByRole('button', { name: '开始翻译' });
     await waitFor(() => expect(submit).toBeEnabled());
     expect(screen.queryByLabelText('起点阶段')).toBeNull();
     expect(screen.queryByLabelText(/页码范围/)).toBeNull();
     expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
   });
 
-  it('顶栏（W08）：有活动 job → 徽标 + 取消按钮替换「开始翻译」', async () => {
+  it('文档头（W08）：有活动 job → 徽标 + 取消按钮替换「开始翻译」', async () => {
     mockWorkbench({
       [`/api/v1/documents/${DID}/jobs`]: () =>
         jsonResponse([makeJob({ did: DID, status: 'running', profile: 'echo-t' })]),
     });
     renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
 
-    const topbar = screen.getByRole('banner');
-    expect(await within(topbar).findByRole('button', { name: '取消' })).toBeInTheDocument();
+    const header = document.querySelector('[data-od-id="doc-header"]') as HTMLElement;
+    expect(await within(header).findByRole('button', { name: '取消' })).toBeInTheDocument();
     expect(document.querySelector('[data-od-id="active-job-status"]')).toHaveAttribute('data-status', 'running');
-    expect(within(topbar).queryByRole('button', { name: '开始翻译' })).toBeNull();
+    expect(within(header).queryByRole('button', { name: '开始翻译' })).toBeNull();
   });
 
-  it('顶栏（W08）：最近一次失败 → 徽标 + 重试（同参数再发一个新 job）', async () => {
+  it('文档头（W08）：最近一次失败 → 徽标 + 重试（同参数再发一个新 job）', async () => {
     const fetchMock = mockWorkbench({
       [`/api/v1/documents/${DID}/jobs`]: () =>
         jsonResponse([
@@ -433,9 +385,9 @@ describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
     });
     renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
 
-    const topbar = screen.getByRole('banner');
-    expect(await within(topbar).findByRole('button', { name: '重试' })).toBeInTheDocument();
-    fireEvent.click(within(topbar).getByRole('button', { name: '重试' }));
+    const header = document.querySelector('[data-od-id="doc-header"]') as HTMLElement;
+    expect(await within(header).findByRole('button', { name: '重试' })).toBeInTheDocument();
+    fireEvent.click(within(header).getByRole('button', { name: '重试' }));
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(
@@ -472,28 +424,37 @@ describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
     });
     const client = createQueryClient();
     render(<QueryClientProvider client={client}><WorkbenchScreen did={DID} view="progress" /></QueryClientProvider>);
-    const timeline = document.querySelector('[data-od-id="timeline"]') as HTMLElement;
-    await waitFor(() => expect(within(timeline).getByText('已完成')).toBeInTheDocument());
+    const header = document.querySelector('[data-od-id="doc-header"]') as HTMLElement;
+    // 基线：全 ok → 文档头徽标「已完成」（不靠假占位）
+    await waitFor(() => expect(within(header).getByText('已完成')).toBeInTheDocument());
     const submit = await screen.findByRole('button', { name: '开始翻译' });
     await waitFor(() => expect(submit).toBeEnabled());
     fireEvent.click(submit);
-    await waitFor(() => expect(within(timeline).getByText('排队中')).toBeInTheDocument());
-    expect(document.querySelector('[data-od-id="active-job-status"]')).toHaveAttribute('data-status', 'queued');
-    expect(document.querySelector('[data-od-id="timeline-stage-parse"]')).toHaveAttribute('data-state', 'ok');
-    expect(document.querySelector('[data-od-id="timeline-stage-translate"]')).toHaveAttribute('data-state', 'not_run');
-    expect(document.querySelector('[data-od-id="timeline-stage-build"]')).toHaveAttribute('data-state', 'not_run');
-    // 单一事件流：旧 run 的归档事件本来就在窗口里（不再做「进行中/已完成」区分）
-    expect(within(timeline).getAllByText(/条事件/).length).toBeGreaterThan(0);
+
+    // 提交后立即进入排队：job 徽标与文档头徽标都说「排队中」（不等慢查询返回/旧归档）
+    await waitFor(() =>
+      expect(document.querySelector('[data-od-id="active-job-status"]')).toHaveAttribute(
+        'data-status',
+        'queued',
+      ),
+    );
+    // 文档头徽标与 job 徽标同时说「排队中」（两处都是真状态，不是重复渲染）
+    expect(within(header).getAllByText('排队中').length).toBeGreaterThan(0);
     // 事件面板在段落 tab 下不挂载（要看事件流就切 tab）
     expect(document.querySelectorAll('[data-od-id="event-row"]')).toHaveLength(0);
 
-    // Even a temporarily unordered list must pick the active job, not the old success.
+    // 慢查询返回时列表乱序也必须选活动 job，而不是上一条成功记录
     await act(async () => { resolveJobs(jsonResponse([oldJob, newJob])); });
-    await waitFor(() => expect(document.querySelector('[data-od-id="active-job-status"]')).toHaveAttribute('data-status', 'running'));
-    expect(within(timeline).getByText('翻译中')).toBeInTheDocument();
-    expect(document.querySelector('[data-od-id="timeline-stage-translate"]')).toHaveAttribute('data-state', 'live');
-    expect(document.querySelector('[data-od-id="timeline-stage-report"]')).toHaveAttribute('data-state', 'not_run');
+    await waitFor(() =>
+      expect(document.querySelector('[data-od-id="active-job-status"]')).toHaveAttribute(
+        'data-status',
+        'running',
+      ),
+    );
+    // stage-state 还没落盘时，「翻译中」由 job 驱动（useTimelineStages 的 job 分支）
+    await waitFor(() => expect(within(header).getByText('翻译中')).toBeInTheDocument());
 
+    // 新 run 的 stage-state 落盘：translate=ok / apply=running → 徽标仍为 live，旧 run 的阶段让位
     stageState = {
       ...STAGE_STATE, run_id: 'new-run',
       stages: STAGE_STATE.stages.map((item) => item.stage === 'translate'
@@ -501,12 +462,14 @@ describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
         : item.stage === 'apply' ? { ...item, status: 'running', started_at: '2026-10-01T00:00:01.000Z' } : item),
     };
     await act(async () => { await client.invalidateQueries({ queryKey: queryKeys.stageState(DID) }); });
-    await waitFor(() => expect(document.querySelector('[data-od-id="timeline-stage-translate"]')).toHaveAttribute('data-state', 'ok'));
-    expect(document.querySelector('[data-od-id="timeline-stage-apply"]')).toHaveAttribute('data-state', 'live');
-    expect(document.querySelector('[data-od-id="timeline-stage-build"]')).toHaveAttribute('data-state', 'not_run');
+    await waitFor(() => expect(within(header).getByText('翻译中')).toBeInTheDocument());
+    expect(document.querySelector('[data-od-id="active-job-status"]')).toHaveAttribute(
+      'data-status',
+      'running',
+    );
   });
 
-  it('归档视图：预览区换版本列表；任务控制在顶栏（所有视图一致）', async () => {
+  it('归档视图：预览区换版本列表；任务控制在中栏文档头（所有视图一致）', async () => {
     mockApiFetch({
       [`/api/v1/documents/${DID}`]: () => jsonResponse(DETAIL),
       [`/api/v1/documents/${DID}/artifacts`]: () => jsonResponse([]),
@@ -517,8 +480,10 @@ describe('工作台壳（三栏 + 时间线真数据 + 事件面板）', () => {
     });
     renderWithQuery(<WorkbenchScreen did={DID} view="archive" />);
     await screen.findByText('共 2 个版本');
-    // 旧版「进度视图才有 job 面板」的区分已删除：预览区没有 job 面板，任务控制在顶栏
+    // 旧版「进度视图才有 job 面板」的区分已删除：预览区没有 job 面板，任务控制在中栏文档头
     expect(document.querySelector('[data-od-id="job-panel-rail"]')).toBeNull();
-    expect(document.querySelector('[data-od-id="job-controls"]')).not.toBeNull();
+    expect(
+      document.querySelector('[data-od-id="doc-header"] [data-od-id="job-controls"]'),
+    ).not.toBeNull();
   });
 });
