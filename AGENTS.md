@@ -13,6 +13,7 @@
 | [docs/reference/http-api.md](docs/reference/http-api.md) | 上传、进度、编辑、编译的接口约定 |
 | [docs/design/online-translation.md](docs/design/online-translation.md) | 在线部署目标、存储约束与待决策项 |
 | [docs/issues/](docs/issues/index.md) | 已核实的重大缺陷：现象、证据、根因与候选方案 |
+| [web/design/README.md](web/design/README.md) | 工作台界面设计稿：如何打开、`#state=` 评审状态、版式约定 |
 
 ## 代码地图
 
@@ -20,13 +21,15 @@
 - `babeldoc/tools/agent/`：内部 Markdown/IR 协议、重建与质量检查，无独立 CLI。
 - `babeldoc/format/pdf/`、`babeldoc/docvision/`：PDF 引擎与布局后端。
 - `babeldoc_tools/serve/`：HTTP、任务、草稿、SQLite 元数据与文件资产。
-- `web/src/`：工作台；`skills/document-translate/agents/`：模型提示词；`tests/`：行为守卫。
+- `web/src/`：工作台（React）；`skills/document-translate/agents/`：模型提示词；`tests/`：行为守卫。
+- `web/design/index.html`：工作台界面设计稿（静态单文件原型，内联示例数据）；不是应用的一部分。
 
 ## 必守边界与验收
 
 - 对外入口只有 `bdt`；新增能力只能是其子命令或参数，不增加并行入口或第二个工具包。见 `tests/test_single_entry.py`。
 - 翻译测试、截图、日志和验证产物保留在本仓库 `tmp/`（已忽略），每次 pytest 使用新的 `--basetemp`。
 - 改架构同步更新 `ARCHITECTURE.md`；改行为同步更新对应参考文档与必要的行为测试。
+- 界面改版先改 `web/design/index.html` 定稿，再接入 `web/src`。设计稿不参与 `vite build` / `tsc` / vitest / e2e，也不进文档站；对应能力接入 `web/src` 后删除该目录。
 - 委派前必须阅读 [子代理委派规范](docs/guide/delegation.md)：仅主控分工，叶子直接执行；主控亲自审 diff 和验证。
 - 完成前按 [验证说明](docs/guide/cli.md) 运行适用检查；不能把已有失败当作通过，也不要顺手扩大修复范围。
 

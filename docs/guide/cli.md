@@ -72,6 +72,15 @@ bdt serve --workdir tmp/paper
 
 不传 `--root`/`--workdir` 时使用**共享文档库** `~/.sp`（没有则创建）：上传记录、草稿、任务历史与 `app.db` 都在那里，跨 worktree / 跨仓库检出共用同一份，不再随每个 worktree 的 `tmp/` 各建一套。显式使用端口 8787 才能访问 `http://127.0.0.1:8787`；不传 `--port` 时端口自动分配，以启动 JSON 中的 `url` 为准。`--root` 支持上传，`--workdir` 只暴露一个文档。`--preview-workers N`（1..8，缺省 8）设置流式翻译预览的并行编译数（同一页仍串行）；单次任务也可以在提交 job 时用 `preview_workers` 字段覆盖。前端开发运行 `cd web && pnpm dev`，代理端口通过 `BDT_SERVE_PORT` 指定。
 
+界面改版先在高保真静态原型 `web/design/index.html` 上定稿，再接入 `web/src`：原型是单文件 HTML（内联 CSS/JS 与示例数据），**不参与** `vite build`、`tsc`、vitest 与 e2e，也不进文档站。在浏览器里看：
+
+```bash
+cd web/design && python3 -m http.server 8899 --bind 127.0.0.1
+# http://127.0.0.1:8899/index.html，可用 #state=default|events|archive|compile|draft|retry|running|empty 直接进到要评审的状态
+```
+
+原型状态会写进浏览器 `localStorage['ieet.v1']`；带 `#state=` 打开时以 hash 为准，回到初始态就在控制台 `localStorage.removeItem('ieet.v1')` 后刷新。评审状态清单、版式约定与验收要点见 `web/design/README.md`；对应能力接入 `web/src` 后删除该目录。
+
 serve 的**启动环境会被 job 子进程继承**：MinerU 布局需要 `MINERU_API_TOKEN`（或 `--mineru-token`），如果它只写在 `~/.zshrc` 里，用 `nohup`/systemd 之类的非交互方式启动就会丢掉它——此时 parse 会在 `debug_stage` 之前抛 `mineru_token_missing`，任务 1 秒内失败且 **run 归档里一条事件都没有**（事件流因此显示「这个 run 还没有事件」，那是失败的后果，不是事件流坏了）。要确认服务进程是否真的带上了 token：
 
 ```bash
