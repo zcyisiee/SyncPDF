@@ -80,6 +80,69 @@ class TestExpandedBox:
         assert expanded.y2 == (410 - EXPAND_VERTICAL_GAP if with_figure else target.y2)
         assert expanded.y == target.y
 
+    @pytest.mark.parametrize("text", [None, "", " ", "\t\n", "\u3000"])
+    def test_empty_or_whitespace_characters_are_not_obstacles(self, text):
+        target = Box(100, 600, 300, 650)
+        page = make_page(characters=[
+            il_version_1.PdfCharacter(char_unicode=text, box=Box(100, 700, 300, 710)),
+            il_version_1.PdfCharacter(char_unicode="墨", box=None),
+        ])
+        expanded = Typesetting._expanded_box(make_typesetting(), target, page)
+        assert expanded.y2 == target.y2
+
+    def test_non_whitespace_orphan_remains_an_obstacle(self):
+        target = Box(100, 600, 300, 650)
+        page = make_page(characters=[
+            il_version_1.PdfCharacter(char_unicode="墨", box=Box(100, 700, 110, 710))
+        ])
+        expanded = Typesetting._expanded_box(make_typesetting(), target, page)
+        assert expanded.y2 == 700 - EXPAND_VERTICAL_GAP
+
+    @pytest.mark.parametrize("label", ["figure", "table", "formula", "isolate_formula"])
+    def test_semantic_regions_block_expansion_without_pdf_figures(self, label):
+        target = Box(100, 600, 300, 650)
+        page = make_page()
+        page.page_layout = [il_version_1.PageLayout(
+            class_name=label, box=Box(100, 700, 300, 780)
+        )]
+        expanded = Typesetting._expanded_box(make_typesetting(), target, page)
+        assert expanded.y2 == 700 - EXPAND_VERTICAL_GAP
+
+    @pytest.mark.parametrize("label", [
+        "figure_caption", "figure_text", "table_caption", "table_text",
+        "table_footnote", "text", "plain text", None,
+    ])
+    def test_text_regions_do_not_add_whole_region_obstacles(self, label):
+        target = Box(100, 600, 300, 650)
+        page = make_page()
+        page.page_layout = [il_version_1.PageLayout(
+            class_name=label, box=Box(100, 700, 300, 780)
+        )]
+        expanded = Typesetting._expanded_box(make_typesetting(), target, page)
+        assert expanded.y2 == target.y2
+
+    def test_missing_region_attributes_are_ignored(self):
+        target = Box(100, 600, 300, 650)
+        page = make_page()
+        page.page_layout = [
+            py_types.SimpleNamespace(box=Box(100, 700, 300, 780)),
+            py_types.SimpleNamespace(class_name="figure"),
+            il_version_1.PageLayout(class_name="figure", box=None),
+        ]
+        expanded = Typesetting._expanded_box(make_typesetting(), target, page)
+        assert expanded.y2 == target.y2
+
+    def test_legacy_and_duplicate_figure_sources_give_same_boundary(self):
+        target = Box(100, 600, 300, 650)
+        obstacle = Box(100, 700, 300, 780)
+        page = make_page(figures=[il_version_1.PdfFigure(box=obstacle)])
+        legacy = Typesetting._expanded_box(make_typesetting(), target, page)
+        assert legacy.y2 == 700 - EXPAND_VERTICAL_GAP
+        page.page_layout = [
+            il_version_1.PageLayout(class_name="figure", box=Box(100, 700, 300, 780))
+        ]
+        assert Typesetting._expanded_box(make_typesetting(), target, page) == legacy
+
     def test_pulls_to_neighbors_with_gap(self):
         # 目标框 (100, 620, 300, 650)；上方邻居底边 700、下方邻居顶边 600。
         target = Box(x=100, y=620, x2=300, y2=650)
