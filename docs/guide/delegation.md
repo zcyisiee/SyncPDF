@@ -53,6 +53,27 @@ agent -p --force \
 
 主控保留任务进程的标识与日志。任务中断、超时或改由主控接手时，先确认旧 worker 已停止写入，再继续修改同一工作树。
 
+## Pi 自带 `subagent` 工具
+
+除上面的外部 harness 外，也可以用 Pi 的 `subagent` 工具派发叶子 worker。以下行为已实测核实，不要再现场猜测：
+
+- **并行派发用一次调用**：单次 `subagent({ workflowScript, async: true })`，脚本里用 `await runs.all([...])`。每个 child 可以带**自己的 `cwd`**（实测两个 child 各自 `pwd` 回到自己的 worktree）。
+- 文档里 "there is no per-step `cwd`" 是 **`runs.host` 步骤专属**的限制，不适用于 `runs.run` / `runs.all` 的 child。不要因此以为必须把四个任务拆成四个互不相干的顶层调用。
+- 每个 child 单独指定 `model`（如 `CNB/deepseek-v4.1-flash:high`）、`context: "fork"`、`worktree: false`（worktree 由 orca 预先建好，不用工具自带隔离）。
+- `async: true` 的 child 在 `runs.all` 里返回的是**启动回执**：`state: "running"`、`ok: false`、`output` 为空。完成靠运行时按 runId 通知，不能把回执当结果。
+- 派发前先校验，避免白跑：`subagent({ action: "models" })` 核对模型名，`subagent({ action: "list", capabilities: true })` 看可用 agent，`subagent({ action: "validate", workflowScript })` 空跑脚本语法。
+
+### Orca worktree 准备（已核实）
+
+- PATH 上的 `orca` 是 root 所有的软链（`/usr/local/bin/orca` → `lrwx------`），普通用户调用会 `Permission denied` / `Unable to determine Orca.app path from symlink`。**必须用绝对路径** `/Applications/Orca.app/Contents/Resources/bin/orca`。
+- 建 worktree：`orca worktree create --name <name> --parent-worktree active --base-branch <当前分支> --setup skip --json`。
+- 新建的 worktree 里 `web/node_modules` 不存在，不要重装；从主工作树软链后自检：
+
+```bash
+ln -s <主工作树>/web/node_modules <新 worktree>/web/node_modules
+(cd <新 worktree>/web && npx tsc --noEmit -p tsconfig.json)
+```
+
 ## 执行 brief
 
 通常使用以下结构；标题与正文用中文，括号中的键对应原规范的概念：
