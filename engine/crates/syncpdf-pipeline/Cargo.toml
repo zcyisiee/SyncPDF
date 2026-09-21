@@ -1,0 +1,27 @@
+[package]
+name = "syncpdf-pipeline"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+syncpdf-core = { workspace = true }
+syncpdf-protocol = { workspace = true }
+syncpdf-pdf = { workspace = true }
+syncpdf-font = { workspace = true }
+syncpdf-layout = { workspace = true }
+syncpdf-translate = { workspace = true }
+syncpdf-typeset = { workspace = true }
+syncpdf-store = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+rayon = { workspace = true }
+crossbeam-channel = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

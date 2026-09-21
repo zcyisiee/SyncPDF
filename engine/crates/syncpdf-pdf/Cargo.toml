@@ -1,0 +1,21 @@
+[package]
+name = "syncpdf-pdf"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+syncpdf-core = { workspace = true }
+syncpdf-font = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+pdfium-render = { workspace = true }
+lopdf = { workspace = true }
+pdf-writer = { workspace = true }
+smallvec = { workspace = true }
+crossbeam-channel = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

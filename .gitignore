@@ -74,3 +74,15 @@ temp.jpg
 
 # Local model credentials (owner-only files; never version control)
 **/.bdt-serve/model-credentials/
+
+/hjfy-architecture
+# SyncPDF engine
+engine/target/
+engine/fixtures/*.pdf
+engine/models/*
+!engine/models/README.md
+!engine/**/*.json
+
+engine/vendor/
+
+engine/vendor/

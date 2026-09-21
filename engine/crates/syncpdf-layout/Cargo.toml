@@ -1,0 +1,19 @@
+[package]
+name = "syncpdf-layout"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+syncpdf-core = { workspace = true }
+syncpdf-pdf = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+ort = { workspace = true }
+ndarray = { workspace = true }
+image = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

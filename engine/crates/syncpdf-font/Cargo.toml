@@ -1,0 +1,21 @@
+[package]
+name = "syncpdf-font"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+syncpdf-core = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+skrifa = { workspace = true }
+harfrust = { workspace = true }
+subsetter = { workspace = true }
+fontdb = { workspace = true }
+unicode-bidi = { workspace = true }
+unicode-script = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

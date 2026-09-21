@@ -1,0 +1,87 @@
+[workspace]
+resolver = "2"
+members = ["crates/*", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/zhengcaiyi/syncpdf"
+
+[workspace.dependencies]
+# workspace crates
+syncpdf-core = { path = "crates/syncpdf-core" }
+syncpdf-protocol = { path = "crates/syncpdf-protocol" }
+syncpdf-pdf = { path = "crates/syncpdf-pdf" }
+syncpdf-font = { path = "crates/syncpdf-font" }
+syncpdf-layout = { path = "crates/syncpdf-layout" }
+syncpdf-translate = { path = "crates/syncpdf-translate" }
+syncpdf-typeset = { path = "crates/syncpdf-typeset" }
+syncpdf-store = { path = "crates/syncpdf-store" }
+syncpdf-pipeline = { path = "crates/syncpdf-pipeline" }
+
+# serialization / errors / logging
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ciborium = "0.2"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+smallvec = { version = "1", features = ["serde"] }
+sha2 = "0.10"
+hex = "0.4"
+
+# pdf
+pdfium-render = "0.9"
+lopdf = "0.45"
+pdf-writer = "0.15"
+
+# fonts
+skrifa = "0.47"
+harfrust = "0.13"
+subsetter = "0.2"
+fontdb = "0.24"
+unicode-bidi = "0.3"
+unicode-script = "0.5"
+
+# text
+icu_segmenter = "2"
+hypher = "0.1"
+
+# image
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+tiny-skia = "0.12"
+
+# ml
+ort = { version = "=2.0.0-rc.13", default-features = false }
+ndarray = "0.16"
+
+# llm / net
+genai = "0.6"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-std", "io-util", "time", "process"] }
+async-trait = "0.1"
+
+# storage
+rusqlite = { version = "0.40", features = ["bundled", "serde_json"] }
+zstd = "0.14"
+
+# concurrency
+rayon = "1"
+crossbeam-channel = "0.5"
+
+# cli
+clap = { version = "4", features = ["derive"] }
+
+# dev
+tempfile = "3"
+insta = { version = "1", features = ["json"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 2

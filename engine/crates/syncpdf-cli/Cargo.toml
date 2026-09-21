@@ -1,0 +1,23 @@
+[package]
+name = "syncpdf-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+syncpdf-core = { workspace = true }
+syncpdf-protocol = { workspace = true }
+syncpdf-pipeline = { workspace = true }
+syncpdf-pdf = { workspace = true }
+syncpdf-font = { workspace = true }
+syncpdf-typeset = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
