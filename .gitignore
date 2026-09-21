@@ -83,6 +83,6 @@ engine/models/*
 !engine/models/README.md
 !engine/**/*.json
 
-engine/vendor/
+engine/vendor
 
-engine/vendor/
+engine/vendor
