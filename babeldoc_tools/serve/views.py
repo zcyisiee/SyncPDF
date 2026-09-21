@@ -725,6 +725,60 @@ def geometry_layout(
     )
 
 
+def geometry_target(
+    reader: WorkdirReader, did: str, page: int | None = None
+) -> GeometryResponse:
+    """``geometry?kind=target``：**译文侧**重新识别的 provider 框（``pdf_topleft``）。
+
+    来源是编译后对译文 mono PDF 重新识别一次的产物（``agent/target/provider/
+    provider_ir.json``，见 :mod:`babeldoc_tools.target_layout`）。
+
+    三种情况分得很清，不和稀泥：
+
+    - 连识别清单（``agent/target_recognition.json``）都没有 → 404
+      ``target_layout_unavailable``：这个 workdir 从未跑过译文侧识别，与源侧几何无关；
+    - 清单在但 ``status != ok``（``skipped`` / ``failed``）→ 200，``recognition_entities``
+      为 **null**（不是空数组）且 ``recognition`` 带上 ``reason``：前端能说清"为什么
+      没识别"，也不会把"没数据"当成"数据是空的"；
+    - 识别成功 → 200 + 该页识别框。
+
+    **绝不**在产物缺失时回退到源侧 IR 或 ``layout_geometry.json`` —— 那正是「译文框
+    显示原文框」的成因。没有段落快照可比对，所以 ``entities`` / ``relations`` 恒为空
+    （译文侧的 block 不携带可编辑的段落身份）。
+    """
+    manifest = reader.target_recognition()
+    if manifest is None:
+        raise ToolError(
+            "target_layout_unavailable",
+            f"文档 {did} 没有译文侧版面识别产物（agent/target_recognition.json）："
+            "请先编译（bdt build 默认在 mineru 后端下执行这一步）",
+            did=did,
+        )
+    provider = reader.target_provider_ir()
+    if provider is None:
+        return GeometryResponse(
+            did=did,
+            kind="target",
+            coord_system=COORD_SYSTEM_PARSE,
+            page=page,
+            recognition_entities=None,
+            recognition=manifest,
+        )
+    recognition = provider_entities(provider, [])
+    labels = label_inventory(recognition)
+    if page is not None:
+        recognition = [row for row in recognition if row["page"] == page]
+    return GeometryResponse(
+        did=did,
+        kind="target",
+        coord_system=COORD_SYSTEM_PARSE,
+        page=page,
+        recognition_entities=recognition,
+        labels=labels,
+        recognition=manifest,
+    )
+
+
 # --------------------------------------------------------------------------- #
 # 检查
 # --------------------------------------------------------------------------- #

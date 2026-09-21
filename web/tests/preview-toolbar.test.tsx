@@ -52,13 +52,15 @@ describe('PreviewToolbar', () => {
     expect(uiStore.getState().previewMode).toBe('target');
   });
 
-  it('bbox 图层三态（原文框 / 译文框 / 关）回调父级', () => {
+  it('bbox 图层四态（原文框 / 译文框 / 排版框 / 关）回调父级', () => {
     const onBboxModeChange = vi.fn();
     renderToolbar({ onBboxModeChange });
     expect(screen.getByRole('button', { name: '原文框' })).toHaveAttribute('aria-pressed', 'true');
+    // 「译文框」= 编译后对译文 PDF 重新识别（只读）；「排版框」= 套版几何（可拖拽）
     fireEvent.click(screen.getByRole('button', { name: '译文框' }));
+    fireEvent.click(screen.getByRole('button', { name: '排版框' }));
     fireEvent.click(screen.getByRole('button', { name: '关' }));
-    expect(onBboxModeChange.mock.calls).toEqual([['layout'], ['off']]);
+    expect(onBboxModeChange.mock.calls).toEqual([['target'], ['layout'], ['off']]);
   });
 
   it('翻页按钮：首/末页禁用，点击翻页走 clampPage 后的页码', () => {
@@ -143,7 +145,7 @@ describe('PreviewToolbar', () => {
     expect(screen.getByText('313%')).toBeInTheDocument();
   });
 
-  it('bbox 三态直接平铺（不再藏在《更多》里）；工具条单行不换行、没有下载槽', () => {
+  it('bbox 四态直接平铺（不再藏在《更多》里）；工具条单行不换行、没有下载槽', () => {
     renderToolbar();
     expect(screen.getByRole('group', { name: 'bbox 图层' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '原文框' })).toHaveAttribute('aria-pressed', 'true');
@@ -152,10 +154,15 @@ describe('PreviewToolbar', () => {
     expect(screen.queryByRole('link', { name: /下载/ })).toBeNull();
     expect(document.querySelector('[data-od-id="download-group"]')).toBeNull();
     expect(document.querySelector('[data-od-id="download-button"]')).toBeNull();
-    // 悬停说明（title）在：简洁标签 + 完整解释
-    expect(screen.getByRole('button', { name: '译文框' })).toHaveAttribute(
+    // 悬停说明（title）在：简洁标签 + 完整解释。两档必须说清不是同一种东西：
+    // 可拖拽的只有「排版框」（套版几何），「译文框」是只读的译文侧识别结果。
+    expect(screen.getByRole('button', { name: '排版框' })).toHaveAttribute(
       'title',
       expect.stringContaining('拖拽'),
+    );
+    expect(screen.getByRole('button', { name: '译文框' })).toHaveAttribute(
+      'title',
+      expect.stringContaining('只读'),
     );
     const toolbar = screen.getByRole('toolbar', { name: '预览工具条' });
     expect(toolbar.className).toContain('flex-nowrap');

@@ -177,6 +177,23 @@ function DocumentPreview({ did }: PreviewProps) {
   const legendLabels = previewMode === 'target' && geometryKind === 'parse' ? coords?.paragraph_labels : legendCoords?.labels;
   const bboxUnavailable = geometryKind !== null && geometryQuery.isSuccess && coords === null;
 
+  /**
+   * 「译文框」缺产物时的说明。只在这一档挂：其他档位没有「译文侧识别」这个概念。
+   *
+   * - `coords === null`（连识别清单都没有，从没编译过）→ 走下面的通用缺失提示；
+   * - `coords !== null` 但 `recognition_entities` 为 **null** → 服务端明确说「没识别成」
+   *   （跳过/失败），带上 `reason` 说清为什么。
+   *
+   * 注意 `recognition_entities === []` 是“识别了、这页真没框”，不是失败：不能提示。
+   */
+  const targetNotice = useMemo(() => {
+    if (geometryKind !== 'target' || coords === null || coords.recognition_entities != null) return null;
+    const recognition = coords.recognition;
+    const reason = typeof recognition?.reason === 'string' && recognition.reason !== '' ? recognition.reason : null;
+    const status = typeof recognition?.status === 'string' && recognition.status !== '' ? recognition.status : null;
+    return { reason: reason ?? '服务端没有给出原因', status: status ?? 'unknown' };
+  }, [geometryKind, coords]);
+
   // 普通点击单选、shift 点击进出多选集合（store 里维护集合与主选中段）
   const handleSelect = useCallback(
     (id: string, opts?: { shift?: boolean }) => selectParagraph(id, { extend: opts?.shift }),
@@ -198,8 +215,10 @@ function DocumentPreview({ did }: PreviewProps) {
     [setBboxMode],
   );
 
-  // 转换用的坐标系取自服务端标注（`coord_system`），不由前端猜
-  const layerMode: 'parse' | 'layout' = bboxData?.coordSystem === 'pdf_native' ? 'layout' : 'parse';
+  // 转换用的坐标系取自服务端标注（`coord_system`），不由前端猜。
+  // 三档共两套坐标：只有 `排版框`（layout）是 pdf_native，其余都是 pdf_topleft。
+  const layerMode: 'parse' | 'layout' | 'target' =
+    bboxData?.coordSystem === 'pdf_native' ? 'layout' : geometryKind === 'target' ? 'target' : 'parse';
 
   const buildBbox = useCallback(
     (withLayer: boolean): BboxPaneData | null =>
@@ -431,7 +450,17 @@ function DocumentPreview({ did }: PreviewProps) {
           data-od-id="preview-bbox-unavailable"
           className="flex-none border-b border-hair bg-sand px-s5 py-[5px] text-tiny text-ink-3"
         >
-          该页无{geometryKind === 'layout' ? '版面' : '解析'}数据（产物缺失），预览本身仍可用。
+          {geometryKind === 'target'
+            ? '译文版面尚未识别（还没有编译产出译文侧识别产物），预览本身仍可用。'
+            : `该页无${geometryKind === 'layout' ? '版面' : '解析'}数据（产物缺失），预览本身仍可用。`}
+        </p>
+      ) : null}
+      {targetNotice !== null ? (
+        <p
+          data-od-id="preview-target-layout-unrecognized"
+          className="flex-none border-b border-hair bg-sand px-s5 py-[5px] text-tiny text-ink-3"
+        >
+          {`译文版面尚未识别（${targetNotice.status}）：${targetNotice.reason}。`}
         </p>
       ) : null}
       <div className="flex min-h-0 min-w-0 flex-1">{content}</div>

@@ -106,6 +106,8 @@ job 子进程由 serve 以 `sys.executable -m babeldoc_tools` 起，serve 会把
 | 并发浮动共享同一份落点账本；同页两个块不得各自占用同一块净空 | `block_compile.py`（`FloatReservations`）、`tests/test_serve_block_compile.py` |
 | 正文段整块搬走不得在原位留空白；跨页迁移缺省关闭且四道门禁全过才生效 | `layout_refine.next_page_float_enabled/eligible`、`block_compile._home_stays_occupied`、`tests/test_serve_block_compile.py`、`tests/test_layout_refine.py` |
 | 同页块渲染并行、页状态提交串行：同页并发提交不得丢 patch，外来贴片落到已发布页必须重合成；共享库连接在 worker 起来前建好、懒建线程安全 | `stream_preview.py`（`PageLocks`）、`block_compile.py`（`compile_block_patch(page_lock=)`）、`store.py`（`DocumentStore.database`）、`tests/test_serve_stream_preview.py`、`tests/test_serve_block_compile.py` |
+| bbox 坐标的坐标系由服务端**只标注不转换**（`coord_system`），换算点只有前端 `BboxLayer.pdfToScreen`；预览四档各有固定数据源，只有「排版框」（`pdf_native`，对应草稿 `layout.box`）可拖拽编辑，译文侧识别框是只读的 | `views.py::geometry_*`、`schemas.py`（`COORD_SYSTEM_*`）、`web/src/lib/preview.ts`、`BboxLayer.tsx`、`tests/preview-coords.test.ts`、`tests/bbox-visibility-editing.test.tsx` |
+| 译文侧版面识别是**编译后的附加产物**：不能阻断 build，没识别成功不得拿源侧 IR / `layout_geometry.json` 冒充译文框，也不得留下上一轮 IR | `target_layout.py`、`mineru_doclayout.py`、`views.py::geometry_target`、`tests/test_target_layout.py`、`tests/test_serve_documents.py` |
 | HTTP 文件访问经文档范围解析、产物白名单或资产归属校验 | `store.py`、`artifacts.py`、`routers/artifacts.py`、`tests/test_serve_artifacts.py` |
 | 测试证据写入仓库 `tmp/`，不得纳入版本控制 | `.gitignore`、`AGENTS.md` |
 

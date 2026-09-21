@@ -5,8 +5,19 @@
 import type { ArtifactItem, GeometryResponse } from '../api/types';
 import { API_BASE } from './api';
 
-/** bbox 图层三态：识别框（parse 快照）/ 版面框（layout 几何）/ 关。 */
-export type BboxMode = 'parse' | 'layout' | 'off';
+/**
+ * bbox 图层四态：
+ *
+ * - `parse` → 源侧识别框（`pdf_topleft`），点击选中段落；
+ * - `layout` → 译文贴片的套版几何（`pdf_native`），**唯一可拖拽编辑**的一档；
+ * - `target` → 编译后对译文 PDF **重新识别**得到的版面框（`pdf_topleft`，只读）；
+ * - `off` → 不叠任何框。
+ *
+ * `layout` 与 `target` 是两套不同的东西：前者是「贴片应该落在哪」的布局语义、与草稿的
+ * `layout.box` 一一对应；后者是「译文 PDF 上实际长什么样」的识别结果。不要把一档的框
+ * 换成另一档的数据源——拖拽写回的坐标语义会跟着错。
+ */
+export type BboxMode = 'parse' | 'layout' | 'target' | 'off';
 
 /** geometry 的坐标系标注（api.md §3.1：服务端不转换，换算在前端）。 */
 export type CoordSystem = 'pdf_topleft' | 'pdf_native';
@@ -47,7 +58,7 @@ export interface PreviewArtifacts {
   source: ArtifactItem | null;
 }
 
-/** bbox 图层模式 → 坐标系标注（唯一映射点：`parse` 永远配 `pdf_topleft`）。 */
+/** bbox 图层模式 → 坐标系标注（唯一映射点：只有 `layout` 配 `pdf_native`）。 */
 export function coordSystemOfMode(mode: Exclude<BboxMode, 'off'>): CoordSystem {
   return mode === 'layout' ? 'pdf_native' : 'pdf_topleft';
 }
@@ -146,6 +157,10 @@ export function layoutBoxOfRow(row: Record<string, unknown> | null | undefined):
  * `GET /geometry` 响应 → 该页 bbox 列表。`kind`/`coord_system` 由服务端标注，本函数
  * 按 `coord_system` 选字段；原文优先 recognition_entities，旧数据/译文兼容 entities，
  * layout 使用 paragraphs。recognition=false 时不把原文 span 叠到译文。**不做换算**。
+ *
+ * `kind=target`（译文侧识别）与服务端约定得很明确：识别成功才给
+ * `recognition_entities`（可能为空数组 = 这页没框），未识别/失败给 **null**。两种情况
+ * 都走 `pdf_topleft` 的实体解析，调用方按 `recognition.status` 区分。
  */
 export function geometryBboxes(response: GeometryResponse, recognition = true): GeometryBboxes {
   const coordSystem = response.coord_system;

@@ -35,6 +35,8 @@ bdt report --workdir tmp/paper
 
 `build` 默认启用 LaTeX bbox，并在首遍真的缩了字号时用本地 PP-DocLayoutV3 按译文版面再排一遍（先向下、再向上扩，详见 [管线参考](../reference/pipeline.md)）；`--no-latex-bbox` / `--no-latex-refine` 分别关闭两者，布局模型缺失时自动跳过。
 
+`build` 与 `run` 还接受一对译文侧版面识别开关：`--target-layout` 强制对译文 PDF 跑一次 MinerU 识别（产出前端「译文框」用的 `agent/target/provider/provider_ir.json`），`--no-target-layout` 明确关闭（不发网络请求，前端译文框提示产物缺失）。不传时默认在解析布局后端为 `mineru` 且 `MINERU_API_TOKEN` 可用时执行；识别失败只记清单不影响 build。
+
 `run` 串联七阶段（包含 `review`）。例如显式选择只做本地质量检查：
 
 ```bash

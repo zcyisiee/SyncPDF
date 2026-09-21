@@ -11,6 +11,7 @@ from pathlib import Path
 
 from babeldoc_tools import common
 from babeldoc_tools import debug_runtime
+from babeldoc_tools import target_layout as target_layout_tool
 
 SEV_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
@@ -24,6 +25,7 @@ def build_pdf(
     latex_bbox: bool = True,
     latex_bbox_mode: str | None = None,
     latex_refine: bool = True,
+    target_layout: bool | None = None,
     render: str | None = None,
     stats: bool = True,
     debug_recorder=None,
@@ -33,9 +35,12 @@ def build_pdf(
 
     可选 ``latex_refine``：首遍产物里确实有段落被缩字时，用本地 PP-DocLayoutV3
     识别译文版面，把这些段的 LaTeX 贴片矩形向下扩到相邻墨迹之间，再重排一遍
-    （只改贴片矩形，不写覆盖文件）。可选 ``render``
+    （只改贴片矩形，不写覆盖文件）。可选 ``target_layout``：build 成功后再对译文
+    mono PDF 跑一次 MinerU，把**译文侧** provider IR 落到 ``agent/target/provider/``
+    （前端「译文框」的数据源；默认在布局后端为 mineru 且 token 可用时执行，识别
+    失败只记清单，不阻断 build）。可选 ``render``
     （``"1,2"`` / ``"1-3"``）在重建后把指定页渲染成 PNG。
-    返回 JSON 含 ``mono_pdf`` / ``dual_pdf`` / ``layout_geometry`` / ``images``。
+    返回 JSON 含 ``mono_pdf`` / ``dual_pdf`` / ``layout_geometry`` / ``target_layout`` / ``images``。
     """
     workdir_path = common.require_workdir(workdir)
     resolved_output_dir = output_dir or str(workdir_path / "output")
@@ -46,6 +51,7 @@ def build_pdf(
             "latex_bbox": bool(latex_bbox),
             "latex_bbox_mode": latex_bbox_mode,
             "latex_refine": bool(latex_refine),
+            "target_layout": target_layout,
             "dual": bool(dual),
             "watermark": bool(watermark),
             "debug_recompile": bool(debug_recompile),
@@ -103,6 +109,9 @@ def build_pdf(
                 )
             raise
         result.setdefault("images", [])
+        result["target_layout"] = target_layout_tool.recognize_target_layout(
+            workdir_path, result, enabled=target_layout
+        )
         if render:
             rendered = render_pages(
                 result.get("mono_pdf") or result.get("dual_pdf"),
@@ -126,6 +135,32 @@ def build_pdf(
                 artifact = agent / name
                 if artifact.exists():
                     debug_recorder.archive_file("build", name, artifact)
+            # 译文侧识别是 build 的附加产物：清单与 IR 一起归档，失败现场（只有
+            # 清单里的 reason）在 debug run 里也看得到。
+            recount = result.get("target_layout") or {}
+            for name, artifact in (
+                (
+                    "target_recognition.json",
+                    target_layout_tool.manifest_path(workdir_path),
+                ),
+                (
+                    "target/provider/provider_ir.json",
+                    target_layout_tool.provider_ir_path(workdir_path),
+                ),
+            ):
+                if artifact.exists():
+                    debug_recorder.archive_file("build", name, artifact)
+            debug_recorder.record_event(
+                "build",
+                "target_layout",
+                {
+                    "status": recount.get("status"),
+                    "reason": recount.get("reason"),
+                    "provider": recount.get("provider"),
+                    "page_count": recount.get("page_count"),
+                    "pdf": recount.get("pdf"),
+                },
+            )
             stats_map = result.get("stats") or {}
             debug_recorder.record_event(
                 "build",

@@ -16,7 +16,8 @@ import type { ScreenId } from '../lib/routing';
 export type GutterId = 'nav' | 'inspector';
 export type PreviewMode = 'source' | 'target' | 'compare';
 
-const BBOX_MODES: readonly BboxMode[] = ['parse', 'layout', 'off'];
+/** 所有合法档位；`readStoredBboxMode` 用它校验 localStorage，漏一档会让该档刷新后被丢掉。 */
+const BBOX_MODES: readonly BboxMode[] = ['parse', 'target', 'layout', 'off'];
 
 export const STORAGE_KEYS = {
   nav: 'ieet.navw',

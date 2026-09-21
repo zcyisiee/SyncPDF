@@ -140,8 +140,12 @@ export interface BboxLayerProps {
   boxes: readonly BboxItem[];
   /** 该页渲染 viewport（与 canvas 共用同一个，保证叠加层像素对齐）。 */
   viewport: ScreenViewport;
-  /** `parse` = 识别框（pdf_topleft）/ `layout` = 版面框（pdf_native）。 */
-  mode: 'parse' | 'layout';
+  /**
+   * 叠加层语义（也是 ``data-bbox-mode`` 与无障碍名的来源）：
+   * `parse` = 源侧识别框（`pdf_topleft`）/ `layout` = 译文套版几何框（`pdf_native`，可拖拽）
+   * / `target` = 译文侧重新识别的版面框（`pdf_topleft`，只读）。
+   */
+  mode: 'parse' | 'layout' | 'target';
   cropbox?: CropBox | null;
   /** 单选判定（多选集合未传时的回退路径，样式与旧版一致）。 */
   selectedId?: string | null;
@@ -181,7 +185,8 @@ export function BboxLayer({
     rect: pdfToScreen(item.box, viewport, coordSystem, cropbox),
   }));
   if (rects.length === 0) return null;
-  const layerLabel = mode === 'parse' ? '识别框' : '版面框';
+  const layerLabel =
+    mode === 'layout' ? '版面框' : mode === 'target' ? '译文识别框' : '识别框';
   // 主选中 = 多选集合的最后一个（与 store 的 selectedParagraphId 同步）；未传集合时单选即主选中
   const primaryId = selectedIds !== undefined ? selectedIds[selectedIds.length - 1] ?? null : selectedId;
   const multi = selectedIds !== undefined && selectedIds.length > 1;

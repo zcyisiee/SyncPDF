@@ -12,6 +12,7 @@ import type { GeometryResponse } from '../src/api/types';
 import {
   artifactUrl,
   clampPage,
+  coordSystemOfMode,
   geometryBboxes,
   pickPreviewArtifacts,
 } from '../src/lib/preview';
@@ -194,6 +195,72 @@ describe('geometryBboxes：响应 → bbox 输入（不换算）', () => {
       layouted.cropbox,
     );
     expectRectClose(parseRect, layoutRect);
+  });
+});
+
+describe('bbox 档位 → 坐标系映射（四档，两套坐标）', () => {
+  it('只有排版框（layout）是 pdf_native；原文框与译文框都是 pdf_topleft', () => {
+    expect(coordSystemOfMode('layout')).toBe('pdf_native');
+    expect(coordSystemOfMode('parse')).toBe('pdf_topleft');
+    expect(coordSystemOfMode('target')).toBe('pdf_topleft');
+  });
+});
+
+/** 译文侧识别响应（``kind=target``）：coord_system 是 pdf_topleft，MinerU 原生坐标。 */
+function targetResponse(): GeometryResponse {
+  return {
+    did: 'up-vns-20260921-022426',
+    kind: 'target',
+    coord_system: 'pdf_topleft',
+    page: 1,
+    recognition_entities: [
+      {
+        id: 'provider:block:p0-b0',
+        kind: 'block',
+        label: 'title',
+        page: 1,
+        box: { x0: 70.5, y0: 90.25, x1: 500.75, y1: 130 },
+        parent_id: null,
+        paragraph_id: null,
+      },
+    ],
+    recognition: {
+      status: 'ok',
+      reason: null,
+      provider: 'mineru',
+      page_count: 12,
+      pdf: 'output/source.no_watermark.zh.mono.pdf',
+    },
+    entities: [],
+    relations: [],
+    paragraphs: [],
+    page_info: [],
+  };
+}
+
+describe('geometryBboxes：译文框（kind=target）', () => {
+  it('读 recognition_entities、按 pdf_topleft 换算，不做额外变换', () => {
+    const parsed = geometryBboxes(targetResponse());
+    expect(parsed.coordSystem).toBe('pdf_topleft');
+    expect(parsed.boxes).toEqual([
+      {
+        id: 'provider:block:p0-b0',
+        box: [70.5, 90.25, 500.75, 130],
+        label: 'title',
+        kind: 'block',
+        parentId: null,
+        paragraphId: null,
+      },
+    ]);
+    // 换算点仍只在 pdfToScreen：y 向下直接用（不被当成 pdf_native 翻转）
+    const rect = pdfToScreen(parsed.boxes[0].box, makeViewport({ scale: 1 }), parsed.coordSystem);
+    expectRectClose(rect, { x: 70.5, y: 90.25, width: 430.25, height: 39.75 });
+  });
+
+  it('未识别（recognition_entities 为 null）→ 空框，不抛错、不报成有数据', () => {
+    const parsed = geometryBboxes({ ...targetResponse(), recognition_entities: null });
+    expect(parsed.boxes).toEqual([]);
+    expect(parsed.coordSystem).toBe('pdf_topleft');
   });
 });
 

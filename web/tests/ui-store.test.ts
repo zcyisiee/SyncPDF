@@ -150,6 +150,16 @@ describe('ui store 预览页 / bbox 图层 / 选中段落（W05）', () => {
     expect(readStoredBboxMode()).toBeNull();
   });
 
+  it('bboxMode 四档都能持久化（`target` 不能刷新后被丢回默认）', () => {
+    for (const mode of ['parse', 'target', 'layout', 'off'] as const) {
+      window.localStorage.setItem(STORAGE_KEYS.bboxMode, mode);
+      expect(readStoredBboxMode()).toBe(mode);
+      const store = createUiStore();
+      store.getState().setBboxMode(mode);
+      expect(store.getState().bboxMode).toBe(mode);
+    }
+  });
+
   it('冷启动读回 ieet.bboxMode（用户显式选择跨会话保留）', () => {
     window.localStorage.setItem(STORAGE_KEYS.bboxMode, 'layout');
     expect(createUiStore().getState().bboxMode).toBe('layout');

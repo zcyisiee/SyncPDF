@@ -18,6 +18,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from babeldoc_tools import target_layout
+
 __all__ = ["AGENT_DIR", "RUNS_DIR", "RUN_ID_RE", "WorkdirReader", "list_run_ids"]
 
 #: 产物目录名（与 ``babeldoc_tools.common.AGENT_DIR`` 一致）。
@@ -167,11 +169,36 @@ class WorkdirReader:
         return payload if isinstance(payload, dict) else None
 
     def provider_ir(self) -> dict | None:
-        """当前解析的 block/line/span IR；兼容 MinerU 与通用 provider 路径。"""
+        """**源侧**解析的 block/line/span IR；兼容 MinerU 与通用 provider 路径。"""
         from babeldoc.docvision.provider_paths import provider_artifact_path
 
         path = provider_artifact_path(self.agent_dir, self.workdir, existing=True)
-        if path is None:
+        return self._provider_payload(path)
+
+    def target_provider_ir(self) -> dict | None:
+        """**译文侧** provider IR（``agent/target/provider/provider_ir.json``）；没有 → ``None``。
+
+        这是编译后对译文 mono PDF 重新识别一次的产物（``bdt build`` 的
+        ``target_layout`` 步骤），坐标是 MinerU 原生 ``pdf_topleft``。没有这个文件
+        就说明尚未识别（未编译 / 未开启 / 无 token / 识别失败）—— 调用方必须
+        如实报缺，**不得**回退到源侧 IR 或 ``layout_geometry.json`` 冒充。
+        """
+        from babeldoc.docvision.provider_paths import target_provider_artifact_path
+
+        path = target_provider_artifact_path(self.agent_dir, self.workdir)
+        return self._provider_payload(path)
+
+    def target_recognition(self) -> dict | None:
+        """``agent/target_recognition.json``（译文侧识别清单）；不可用 → ``None``。
+
+        ``status`` 为 ``ok`` / ``skipped`` / ``failed``，``reason`` 写未识别的原因。
+        """
+        payload = self._read_json_at(self._agent(target_layout.MANIFEST_NAME))
+        return payload if isinstance(payload, dict) else None
+
+    def _provider_payload(self, path: Path | None) -> dict | None:
+        """provider IR 文件 → dict；路径为空 / 不可读 / 外形不符 → ``None``。"""
+        if path is None or not path.is_file():
             return None
         payload = self._read_json_at(path)
         if not isinstance(payload, dict) or not isinstance(payload.get("pages"), list):

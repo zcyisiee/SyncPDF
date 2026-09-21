@@ -95,7 +95,16 @@ const PREVIEW_MODE_OPTIONS = [
 
 const BBOX_MODE_OPTIONS = [
   { value: 'parse', label: '原文框', title: '叠加原文侧识别出的段落框（点击可选中段落）' },
-  { value: 'layout', label: '译文框', title: '叠加译文侧套版几何框；选中后可拖拽调整' },
+  {
+    value: 'target',
+    label: '译文框',
+    title: '对编译后的译文 PDF 重新识别得到的版面框（只读；未识别时按服务端给的原因提示）',
+  },
+  {
+    value: 'layout',
+    label: '排版框',
+    title: '叠加译文侧套版几何框；选中后可拖拽调整',
+  },
   { value: 'off', label: '关', title: '不显示任何框，只看干净页面' },
 ] as const satisfies readonly SegmentedOption<BboxMode>[];
 

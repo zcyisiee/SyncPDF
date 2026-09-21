@@ -120,8 +120,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * bbox 几何（parse 快照 / layout 几何）
-         * @description kind=parse 返回当前 provider IR 的 recognition_entities（原始 block/span 框），并保留最新 run 的 entities/relations（兼容段落快照）；box 是 pdf_topleft（y 向下）。labels 是全文 label 清单，不受 page 过滤影响。kind=layout 读 layout_geometry.json，box 是 pdf_native（y 向上）并附 page_info 的 cropbox。两套坐标系统**不做转换**，由前端按 coord_system 换算。parse 的 IR 与快照均缺失或 layout 产物缺失时返回 404（snapshot_unavailable / geometry_unavailable），不用空数组冒充成功。
+         * bbox 几何（parse 快照 / layout 几何 / target 译文识别）
+         * @description kind=parse 返回当前 provider IR 的 recognition_entities（原始 block/span 框），并保留最新 run 的 entities/relations（兼容段落快照）；box 是 pdf_topleft（y 向下）。labels 是全文 label 清单，不受 page 过滤影响。kind=layout 读 layout_geometry.json，box 是 pdf_native（y 向上）并附 page_info 的 cropbox。kind=target 读**译文侧**重新识别的 provider IR（agent/target/provider/provider_ir.json，编译后对译文 mono PDF 跑一次 MinerU 的产物），box 是 pdf_topleft，recognition 透传 agent/target_recognition.json（status/reason/provider/page_count）。三套坐标系统**不做转换**，由前端按 coord_system 换算。parse 的 IR 与快照均缺失、layout 产物缺失、或译文侧识别产物尚未生成时返回 404（snapshot_unavailable / geometry_unavailable / target_layout_unavailable），不用空数组冒充成功，也不用原文 layout 冒充译文版面。
          */
         get: operations["get_geometry_api_v1_documents__did__geometry_get"];
         put?: never;
@@ -1118,8 +1118,10 @@ export interface components {
          * @description ``GET /api/v1/documents/{did}/geometry``：bbox 数据。
          *
          *     ``kind=parse`` 用 ``run_id``/``entities``/``relations``（快照，``pdf_topleft``）；
-         *     ``kind=layout`` 用 ``pages``/``paragraphs``/``page_info``（几何产物，``pdf_native``）。
-         *     两类的 box 坐标系不同且**不做转换**，前端按 ``coord_system`` 自行换算。
+         *     ``kind=layout`` 用 ``pages``/``paragraphs``/``page_info``（几何产物，``pdf_native``）；
+         *     ``kind=target`` 用 ``recognition_entities``/``recognition``（**译文侧**重新识别的
+         *     provider IR，``pdf_topleft``）。三类的 box 坐标系不同且**不做转换**，前端按
+         *     ``coord_system`` 自行换算。
          */
         GeometryResponse: {
             /** Did */
@@ -1128,7 +1130,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "parse" | "layout";
+            kind: "parse" | "layout" | "target";
             /**
              * Coord System
              * @enum {string}
@@ -1176,6 +1178,10 @@ export interface components {
             page_info: {
                 [key: string]: unknown;
             }[];
+            /** Recognition */
+            recognition?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * GlossaryEntryModel
@@ -1950,8 +1956,8 @@ export interface operations {
     get_geometry_api_v1_documents__did__geometry_get: {
         parameters: {
             query: {
-                /** @description parse = 识别/原文 bbox；layout = 译文排版 bbox */
-                kind: "parse" | "layout";
+                /** @description parse = 源侧识别 bbox；layout = 译文套版几何 bbox（可拖拽编辑的草稿语义）；target = 编译后对译文 PDF 重新识别的 bbox（只读） */
+                kind: "parse" | "layout" | "target";
                 /** @description 页码过滤（1 基 PDF 页码） */
                 page?: number | null;
             };
