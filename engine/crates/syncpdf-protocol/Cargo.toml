@@ -10,6 +10,4 @@ syncpdf-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-
-[dev-dependencies]
-tempfile = { workspace = true }
+schemars = "1.2.2"
