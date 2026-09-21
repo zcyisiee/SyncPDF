@@ -10,7 +10,7 @@ import type { ReactElement, ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createQueryClient } from '../src/app/App';
-import { EventRow, eventTime } from '../src/components/events/EventRow';
+import { EventRow, eventTime, TL_ROW_CLASS } from '../src/components/events/EventRow';
 import { EventStreamPanel } from '../src/components/events/EventStreamPanel';
 import { useEventStream, type EventSourceLike } from '../src/components/events/useEventStream';
 import { useEventWindow } from '../src/components/events/useEventWindow';
@@ -689,5 +689,69 @@ describe('编译时间线（右列，持久事件流窗口）', () => {
       }),
     );
     expect(document.querySelector('[data-od-id="compile-timeline-empty"]')).not.toBeNull();
+  });
+});
+
+/**
+ * 两列样式统一（W06 收尾）：节点圆标、行容器与滚动容器都必须是**同一套**呈现，
+ * 不再出现「左列 20px 描边圆 / 右列 16px」「右列逐行横线」这类分叉。
+ * jsdom 不过 Tailwind 样式表，所以断言的是 className 本身（唯一拼写来源 = EventRow
+ * 导出的 `TL_ROW_CLASS` / `TlNode`）。
+ */
+describe('双时间线：样式统一与独立滚动', () => {
+  function renderBoth() {
+    return renderPanel(
+      <EventStreamPanel
+        did={DID}
+        compileEvents={[
+          { seq: 11, type: 'translation_block_completed', blockId: 'P01-001', page: null, at: null, data: {} },
+          { seq: 12, type: 'preview_failed', blockId: 'P02-012', page: null, at: null, data: { message: '单块编译失败' } },
+        ]}
+        feed={makeEventFeed({ events: windowOf(3), runId: RUN_ID })}
+      />,
+    );
+  }
+
+  it('两个滚动容器都在，且各自 overflow-auto（不靠外层裁切）', () => {
+    renderBoth();
+    const left = document.querySelector('[data-od-id="event-stream-scroll"]') as HTMLElement;
+    const right = document.querySelector('[data-od-id="compile-timeline-scroll"]') as HTMLElement;
+    expect(left).not.toBeNull();
+    expect(right).not.toBeNull();
+    for (const column of [left, right]) {
+      expect(column.className).toContain('overflow-auto');
+      // 高度必须由 flex 收缩约束（min-h-0 + flex-1），否则子节点会长到内容高度、滚动条出现不了。
+      expect(column.className).toContain('min-h-0');
+      expect(column.className).toContain('flex-1');
+    }
+    // 两列是兄弟滚动容器（互不嵌套）——滚一列不会带动另一列。
+    expect(left.contains(right)).toBe(false);
+    expect(right.contains(left)).toBe(false);
+  });
+
+  it('两列的行容器用同一份 TL_ROW_CLASS（无逐行横线），节点圆标尺寸完全一致', () => {
+    renderBoth();
+    const rows = [
+      ...document.querySelectorAll('[data-od-id="event-row"]'),
+      ...document.querySelectorAll('[data-od-id="compile-timeline-row"]'),
+    ];
+    expect(rows.length).toBeGreaterThan(2);
+    for (const row of rows) {
+      // 行几何必须逐字来自共享常量（行内再加语气文字色）。
+      expect(row.className).toContain(TL_ROW_CLASS);
+      // 稀疏横线：只留竖向连接线（before:），不再逐行 border-b。
+      expect(row.className).not.toContain('border-b');
+      expect(row.className).toContain('before:bg-hair');
+    }
+
+    const nodes = document.querySelectorAll('[data-od-id="tl-node"]');
+    expect(nodes).toHaveLength(rows.length);
+    for (const node of nodes) {
+      // 8px 实心小圆：尺寸 class 只有一处拼写，两列不许各写一套。
+      expect(node.className).toContain('h-2');
+      expect(node.className).toContain('w-2');
+      expect(node.className).toContain('rounded-full');
+      expect(node.className).not.toMatch(/h-4|w-4|h-5|w-5|border/);
+    }
   });
 });

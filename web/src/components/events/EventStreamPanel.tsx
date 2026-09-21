@@ -15,6 +15,7 @@
  *
  * 性能红线：两列各自只渲染窗口里的行（翻译 200 + 编译 200），3758 条 run 不做
  * 虚拟化也够（§4.6 的精神：最多保留 N 条 + 溢出滚动）。
+ * 两列的行几何与高度约束链由 `EventRow.tsx` 的 `TL_ROW_CLASS` / `TL_COL_*` 共享。
  * 换 run（重新开始翻译）：左列滚动/浮标/展开行按 run 重置；右列游标是文档级
  * 持久游标，跨 run 连续累计，不重置。
  */
@@ -36,7 +37,7 @@ import type { PersistentEvent } from '../../lib/usePersistentEvents';
 import { Icon } from '../icons';
 import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';
-import { EventRow, LocateLink } from './EventRow';
+import { EventRow, LocateLink, TL_COL_BODY_CLASS, TL_COL_CLASS, TL_COL_SCROLL_CLASS, TL_ROW_CLASS, TlNode, TlTime, type TlMark } from './EventRow';
 import type { EventFeed } from './useEventWindow';
 import type { SseStatus } from './useEventStream';
 import { useTimelineStages, type TimelineData } from './useTimelineStages';
@@ -157,11 +158,14 @@ function StageStrip({ timeline }: { timeline: TimelineData }) {
   );
 }
 
-/** 编译侧事件类型 → 节点圆标语气色（ok=成页 / err=预览失败 / idle=其余）。 */
-const COMPILE_MARK: Record<'ok' | 'err' | 'info', string> = {
-  ok: 'border-pass',
-  err: 'border-err bg-err',
-  info: 'border-hair-2',
+/**
+ * 编译侧事件类型 → 节点语气色（两列共用 `TlNode`：ok=成页 / err=预览失败 / idle=其余）。
+ * 原来这里是自定义的 `border-*` 描边色，与左列 `bg-*` 填充色两套写法 → 统一成语义名。
+ */
+const COMPILE_MARK: Record<'ok' | 'err' | 'info', TlMark> = {
+  ok: 'ok',
+  err: 'err',
+  info: 'idle',
 };
 
 /** 编译侧事件类型 → 类型 chip（§2.7 `.tl-type`）。 */
@@ -233,7 +237,7 @@ function CompileTimeline({ events }: { events: PersistentEvent[] }) {
   }, []);
   return (
     <div
-      className="tl-col-compile flex min-h-0 min-w-0 flex-1 flex-col border-l border-hair"
+      className={cn(TL_COL_CLASS, 'tl-col-compile border-l border-hair')}
       data-od-id="compile-timeline"
     >
       <div className="flex flex-none items-center gap-s2 border-b border-hair px-s2 py-[6px]">
@@ -247,14 +251,14 @@ function CompileTimeline({ events }: { events: PersistentEvent[] }) {
         ref={scrollRef}
         onScroll={onScroll}
         data-od-id="compile-timeline-scroll"
-        className="min-h-0 flex-1 overflow-auto"
+        className={TL_COL_SCROLL_CLASS}
       >
         {rows.length === 0 ? (
           <p className="px-s2 py-s2 text-micro text-ink-4" data-od-id="compile-timeline-empty">
             还没有编译/成页事件（翻译提交后这里逐块出现）
           </p>
         ) : (
-          <ul className="flex flex-col">
+          <ul className="flex flex-col pt-[6px]">
             {rows.map((event) => {
               const line = compileLine(event);
               const locate = compileLocate(event);
@@ -265,17 +269,11 @@ function CompileTimeline({ events }: { events: PersistentEvent[] }) {
                   data-type={event.type}
                   title={event.at ?? undefined}
                   className={cn(
-                    'relative border-b border-hair py-[4px] pl-[24px] pr-s2 font-mono text-micro leading-[1.5]',
+                    TL_ROW_CLASS,
                     line.tone === 'ok' ? 'text-run-ink' : line.tone === 'err' ? 'text-err-ink' : 'text-ink-3',
                   )}
                 >
-                  <span
-                    aria-hidden="true"
-                    className={cn(
-                      'absolute left-0 top-[4px] h-4 w-4 rounded-full border bg-ivory',
-                      COMPILE_MARK[line.tone],
-                    )}
-                  />
+                  <TlNode mark={COMPILE_MARK[line.tone]} />
                   <span className="flex min-w-0 items-center gap-s2">
                     <Chip
                       title={event.type}
@@ -285,6 +283,11 @@ function CompileTimeline({ events }: { events: PersistentEvent[] }) {
                       {COMPILE_LABEL[event.type] ?? event.type}
                     </Chip>
                     <span className="min-w-0 break-words">{line.text}</span>
+                  </span>
+                  {/* 第二行：时间戳 + 行尾 seq（seq 原来只有左列有，两列口径统一）。 */}
+                  <span className="mt-[2px] flex min-w-0 items-center gap-s2 text-ink-4">
+                    <TlTime at={event.at} />
+                    <span className="ml-auto flex-none [font-variant-numeric:tabular-nums]">{event.seq}</span>
                   </span>
                   {locate === null ? null : (
                     <LocateLink page={locate.page} paragraphId={locate.paragraphId} />
@@ -492,7 +495,7 @@ export function EventStreamPanel({
       {/* 面板拖窄时（容器 < 320px）双列退回一列：容器查询见 globals.css 的 `.tl-two-col`。 */}
       <div style={{ containerType: 'inline-size' }} className="flex min-h-0 flex-1">
         <div className="tl-two-col grid min-h-0 min-w-0 flex-1 grid-cols-2 grid-rows-[minmax(0,1fr)]">
-          <div className="flex min-h-0 min-w-0 flex-col">
+          <div className={TL_COL_CLASS}>
             <div className="flex flex-none items-center gap-s2 border-b border-hair px-s2 py-[6px]">
               <Icon name="translate" className="h-[13px] w-[13px] text-ink-4" />
               <span className="font-serif text-sm font-medium leading-[1.35] text-ink-2">翻译</span>
@@ -500,12 +503,12 @@ export function EventStreamPanel({
                 {rows.length} 条
               </span>
             </div>
-            <div className="relative min-h-0 min-w-0 flex-1">
+            <div className={TL_COL_BODY_CLASS}>
               <div
                 ref={scrollRef}
                 onScroll={onScroll}
                 data-od-id="event-stream-scroll"
-                className="h-full overflow-auto"
+                className={TL_COL_SCROLL_CLASS}
               >
                 {body()}
               </div>
