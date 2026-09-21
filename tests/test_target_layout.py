@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pymupdf
 import pytest
@@ -44,11 +45,32 @@ def _workdir(tmp_path, *, layout="mineru", lang_out="zh"):
 FAKE_TOKEN = "fixture-token"  # noqa: S105 - 测试替身，不是凭据
 
 
+#: 替身客户端返回的 IR（默认为最小结构；测试可换成 fixture 的真实识别结果）。
+DEFAULT_IR: dict = {
+    "page_count": 2,
+    "pages": [
+        {
+            "page_index": 0,
+            "blocks": [
+                {
+                    "block_id": "p0-b0",
+                    "type": "text",
+                    "bbox": [10, 10, 100, 30],
+                    "lines": [],
+                }
+            ],
+        },
+        {"page_index": 1, "blocks": []},
+    ],
+}
+
+
 class _FakeModel:
-    """替身识别客户端：记录调用参数，按 ``fail`` 决定抛错还是写一份最小 IR。"""
+    """替身识别客户端：记录调用参数，按 ``fail`` 决定抛错还是写一份 IR。"""
 
     calls: list[dict] = []
     fail: str | None = None
+    ir: dict = DEFAULT_IR
 
     def __init__(self, *, api_token=None, language=None):
         self.has_token = bool(api_token)
@@ -66,28 +88,7 @@ class _FakeModel:
         if _FakeModel.fail is not None:
             raise RuntimeError(_FakeModel.fail)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(
-            json.dumps(
-                {
-                    "page_count": 2,
-                    "pages": [
-                        {
-                            "page_index": 0,
-                            "blocks": [
-                                {
-                                    "block_id": "p0-b0",
-                                    "type": "text",
-                                    "bbox": [10, 10, 100, 30],
-                                    "lines": [],
-                                }
-                            ],
-                        },
-                        {"page_index": 1, "blocks": []},
-                    ],
-                }
-            ),
-            encoding="utf-8",
-        )
+        output_path.write_text(json.dumps(self.ir), encoding="utf-8")
         return None
 
 
@@ -97,6 +98,7 @@ def fake_model(monkeypatch):
 
     _FakeModel.calls = []
     _FakeModel.fail = None
+    _FakeModel.ir = DEFAULT_IR
     monkeypatch.setattr(mineru_mod, "MinerUDocLayoutModel", _FakeModel)
     monkeypatch.setenv("MINERU_API_TOKEN", FAKE_TOKEN)
     return _FakeModel
@@ -291,3 +293,94 @@ def test_ir_keeps_mineru_topleft_coordinates_verbatim(tmp_path):
 
     ir = json.loads(target_layout.provider_ir_path(workdir).read_text())
     assert ir["pages"][0]["blocks"][0]["bbox"] == [10, 10, 100, 30]
+
+
+# --------------------------------------------------------------------------- #
+# 端到端接缝（离线：用真实识别结果的 fixture + 一张自造的译文 PDF）
+# --------------------------------------------------------------------------- #
+TARGET_FIXTURE = Path("tests/fixtures/target_layout_page3.json")
+
+
+def _translated_pdf(path):
+    """造一页「译文 PDF」：文字落在真实识别框的位置上（MinerU 坐标 y 向下）。"""
+    blocks = json.loads(TARGET_FIXTURE.read_text(encoding="utf-8"))["blocks"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with pymupdf.open() as doc:
+        page = doc.new_page(width=595, height=794)
+        for index, block in enumerate(blocks):
+            x0, y0, _x1, y1 = block["bbox"]
+            # 基线落在框底附近（pymupdf 的 y 原点也在左上，可直接用）。
+            # 用 ASCII 标记：默认字体不能内嵌 CJK，标记文本本身不是被测对象。
+            page.insert_text((x0, y1 - 2), f"BLOCK-{index} translated", fontsize=8)
+        doc.save(path)
+    return path
+
+
+@pytest.fixture
+def fixture_ir(fake_model):
+    """把替身客户端的结果换成真实识别结果的 fixture（第 3 页前 5 个块）。"""
+    blocks = json.loads(TARGET_FIXTURE.read_text(encoding="utf-8"))["blocks"]
+    fake_model.ir = {"page_count": 1, "pages": [{"page_index": 0, "blocks": blocks}]}
+    return blocks
+
+
+@pytest.mark.usefixtures("fixture_ir")
+def test_recognized_boxes_land_on_translated_text(tmp_path):
+    """识别产物必须描述**译文 PDF 的版面**，不是源文档的。
+
+    用真实识别结果的框坐标当 fixture：把译文文字插在那些框里，再按框取文字，
+    应当取到对应的译文。若拿的是源侧几何（本任务之前的实际行为），同一位置取到的
+    是错位的别段文字 —— 这正是「译文框显示原文框」的可观察形态。
+    """
+    workdir = _workdir(tmp_path)
+    pdf = _translated_pdf(workdir / "output" / "out.mono.pdf")
+
+    target_layout.recognize_target_layout(workdir, {"mono_pdf": str(pdf)})
+
+    ir = json.loads(target_layout.provider_ir_path(workdir).read_text())
+    blocks = list(ir["pages"][0]["blocks"])
+    assert blocks, "识别产物没有 block"
+    expected = json.loads(TARGET_FIXTURE.read_text(encoding="utf-8"))["blocks"]
+    # 坐标原样保留（服务端/管线不做换算），框的位置就是真实识别出来的位置
+    assert [b["bbox"] for b in blocks] == [b["bbox"] for b in expected]
+    with pymupdf.open(pdf) as doc:
+        page = doc[0]
+        hits = 0
+        for block in blocks:
+            x0, y0, x1, y1 = block["bbox"]
+            text = page.get_text("text", clip=pymupdf.Rect(x0, y0, x1, y1)).strip()
+            if text.startswith("BLOCK-"):
+                hits += 1
+        assert hits == len(blocks), f"{hits}/{len(blocks)} 个框落在了译文文字上"
+
+
+@pytest.mark.usefixtures("fixture_ir")
+def test_target_ir_is_not_source_ir(tmp_path):
+    """译文侧产物里不含源侧 block 的坐标：两者是两份不同的识别。"""
+    workdir = _workdir(tmp_path)
+    pdf = _translated_pdf(workdir / "output" / "out.mono.pdf")
+    target_layout.recognize_target_layout(workdir, {"mono_pdf": str(pdf)})
+
+    target_boxes = {
+        tuple(block["bbox"])
+        for page in json.loads(target_layout.provider_ir_path(workdir).read_text())["pages"]
+        for block in page["blocks"]
+    }
+    fixture_boxes = {
+        tuple(block["bbox"])
+        for block in json.loads(TARGET_FIXTURE.read_text(encoding="utf-8"))["blocks"]
+    }
+    assert target_boxes == fixture_boxes
+    # 源侧 fixture（tests/fixtures/mineru/layout_v275_s41586_excerpt.json）是另一份文档，
+    # 两者的框不可能一致 —— 说明产物确实来自「对译文 PDF 的重新识别」这条链路
+    source = json.loads(
+        Path("tests/fixtures/mineru/layout_v275_s41586_excerpt.json").read_text()
+    )
+    source_boxes = {
+        tuple(block["bbox"])
+        for page in source.get("pdf_info", [])
+        for block in page.get("para_blocks", [])
+        if isinstance(block.get("bbox"), list)
+    }
+    assert source_boxes
+    assert target_boxes & source_boxes == set()
