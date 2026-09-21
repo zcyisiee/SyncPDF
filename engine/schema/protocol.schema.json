@@ -1,0 +1,730 @@
+{
+  "$defs": {
+    "CoordSystemSchema": {
+      "description": "镜像 `syncpdf_core::CoordSystem` 的 JSON 形态。",
+      "enum": [
+        "pdf_user",
+        "image_top_left"
+      ],
+      "type": "string"
+    },
+    "Event": {
+      "description": "stdout 事件（不含 `seq`/`ts` 信封字段）。",
+      "oneOf": [
+        {
+          "description": "任务开始。",
+          "properties": {
+            "doc_id": {
+              "type": "string"
+            },
+            "engine_version": {
+              "type": "string"
+            },
+            "pages": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "run_started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "protocol_version",
+            "engine_version",
+            "doc_id",
+            "pages"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "阶段开始。",
+          "properties": {
+            "stage": {
+              "$ref": "#/$defs/Stage"
+            },
+            "type": {
+              "const": "stage_started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "stage"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "阶段结束（`elapsed_ms` 为该阶段耗时）。",
+          "properties": {
+            "elapsed_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "stage": {
+              "$ref": "#/$defs/Stage"
+            },
+            "type": {
+              "const": "stage_finished",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "stage",
+            "elapsed_ms"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "进度（不编造 ETA）。",
+          "properties": {
+            "done": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "stage": {
+              "$ref": "#/$defs/Stage"
+            },
+            "total": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "progress",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "stage",
+            "done",
+            "total"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "段落状态更新。",
+          "properties": {
+            "boxes": {
+              "description": "`None` = 未识别；`Some([])` = 识别了但无框（规约 #12/#13）。",
+              "items": {
+                "$ref": "#/$defs/RectSchema"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "coord_system": {
+              "$ref": "#/$defs/CoordSystemSchema"
+            },
+            "page": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "paragraph_id": {
+              "$ref": "#/$defs/ParagraphIdSchema"
+            },
+            "status": {
+              "$ref": "#/$defs/ParagraphStatusSchema"
+            },
+            "translated_html": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "paragraph",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "paragraph_id",
+            "page",
+            "status",
+            "coord_system"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "一页完成（可选增量预览）。",
+          "properties": {
+            "page": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "preview_path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "page_ready",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "page",
+            "revision"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "问题报告。",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "page": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "paragraph_id": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ParagraphIdSchema"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "severity": {
+              "$ref": "#/$defs/Severity"
+            },
+            "type": {
+              "const": "issue",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "severity",
+            "code",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "文档完成。",
+          "properties": {
+            "output": {
+              "type": "string"
+            },
+            "stats": {
+              "$ref": "#/$defs/Stats"
+            },
+            "type": {
+              "const": "document_finished",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "output",
+            "stats"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "任务结束。",
+          "properties": {
+            "elapsed_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "type": {
+              "const": "run_finished",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "ok",
+            "elapsed_ms"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "错误（`fatal` = 任务无法继续）。",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "fatal": {
+              "type": "boolean"
+            },
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "const": "error",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "fatal",
+            "code",
+            "message"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Mode": {
+      "description": "输出模式：整页替换或双语对照。",
+      "oneOf": [
+        {
+          "const": "full",
+          "description": "整页替换（默认）。",
+          "type": "string"
+        },
+        {
+          "const": "bilingual",
+          "description": "双语对照。",
+          "type": "string"
+        }
+      ]
+    },
+    "ParagraphIdSchema": {
+      "description": "镜像 `syncpdf_core::ParagraphId` 的 JSON 形态（字符串，`P{page:02}-{seq:03}`）。",
+      "type": "string"
+    },
+    "ParagraphStatusSchema": {
+      "description": "镜像 `syncpdf_core::ir::ParagraphStatus` 的 JSON 形态。",
+      "enum": [
+        "pending",
+        "translated",
+        "typeset",
+        "not_replaced",
+        "fallback"
+      ],
+      "type": "string"
+    },
+    "RectSchema": {
+      "description": "镜像 `syncpdf_core::Rect` 的 JSON 形态。",
+      "properties": {
+        "x0": {
+          "format": "float",
+          "type": "number"
+        },
+        "x1": {
+          "format": "float",
+          "type": "number"
+        },
+        "y0": {
+          "format": "float",
+          "type": "number"
+        },
+        "y1": {
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x0",
+        "y0",
+        "x1",
+        "y1"
+      ],
+      "type": "object"
+    },
+    "Request": {
+      "description": "stdin 请求。首条必须是 `Configure`；`Run` 启动任务；其余作用于当前文档。",
+      "oneOf": [
+        {
+          "description": "全局配置（首条；api_key 只在此出现）。",
+          "properties": {
+            "api_key": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Secret"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "base_url": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cache_dir": {
+              "type": "string"
+            },
+            "concurrency": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "model": {
+              "type": "string"
+            },
+            "provider": {
+              "$ref": "#/$defs/TranslateProvider",
+              "description": "LLM 通道（http / pi）；决定 `translator` 字段里哪个分支生效。"
+            },
+            "translator": {
+              "$ref": "#/$defs/TranslatorKind"
+            },
+            "type": {
+              "const": "configure",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "provider",
+            "model",
+            "concurrency",
+            "cache_dir",
+            "translator"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "启动翻译任务。",
+          "properties": {
+            "doc_id": {
+              "type": "string"
+            },
+            "font_profile": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "input": {
+              "type": "string"
+            },
+            "mode": {
+              "$ref": "#/$defs/Mode"
+            },
+            "output": {
+              "type": "string"
+            },
+            "pages": {
+              "description": "1 基页号子集；`None` = 全部页。",
+              "items": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "source_lang": {
+              "type": "string"
+            },
+            "target_lang": {
+              "type": "string"
+            },
+            "terminology": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "run",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "doc_id",
+            "input",
+            "output",
+            "source_lang",
+            "target_lang",
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "局部重译。",
+          "properties": {
+            "doc_id": {
+              "type": "string"
+            },
+            "paragraph_ids": {
+              "items": {
+                "$ref": "#/$defs/ParagraphIdSchema"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "retranslate",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "doc_id",
+            "paragraph_ids"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "手动编辑 → 重排版 + 局部回写；`base_revision` 不匹配返回 conflict。",
+          "properties": {
+            "base_revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "doc_id": {
+              "type": "string"
+            },
+            "paragraph_id": {
+              "$ref": "#/$defs/ParagraphIdSchema"
+            },
+            "translated_html": {
+              "type": "string"
+            },
+            "type": {
+              "const": "apply_edit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "doc_id",
+            "paragraph_id",
+            "translated_html",
+            "base_revision"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "发布。",
+          "properties": {
+            "doc_id": {
+              "type": "string"
+            },
+            "mode": {
+              "$ref": "#/$defs/Mode"
+            },
+            "output": {
+              "type": "string"
+            },
+            "type": {
+              "const": "export",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "doc_id",
+            "output",
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "取消当前任务。",
+          "properties": {
+            "type": {
+              "const": "cancel",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Secret": {
+      "description": "不落日志、不进 argv 的密钥。`Debug`/`Display` 打码为 `***`；serde 按普通字符串。",
+      "type": "string"
+    },
+    "Severity": {
+      "description": "issue 严重级别。",
+      "oneOf": [
+        {
+          "const": "info",
+          "description": "提示性信息（不影响产物）。",
+          "type": "string"
+        },
+        {
+          "const": "warning",
+          "description": "可恢复问题（回退 / 降级已发生）。",
+          "type": "string"
+        },
+        {
+          "const": "error",
+          "description": "阻断该段或该页的问题。",
+          "type": "string"
+        }
+      ]
+    },
+    "Stage": {
+      "description": "处理阶段名（snake_case，与 hjfy 事件语义一致）。",
+      "enum": [
+        "preflight",
+        "source_analysis",
+        "layout_analysis",
+        "paragraph_analysis",
+        "translating",
+        "typesetting",
+        "validating",
+        "publishing"
+      ],
+      "type": "string"
+    },
+    "Stats": {
+      "description": "`document_finished` 的统计（§9.3：字体数、膨胀比、fallback 数）。",
+      "properties": {
+        "expansion_ratio": {
+          "description": "输出 / 输入字节数之比。",
+          "format": "double",
+          "type": "number"
+        },
+        "fallbacks": {
+          "description": "回退原文的段落数。",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "fonts": {
+          "description": "嵌入的目标字体数。",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "fonts",
+        "expansion_ratio",
+        "fallbacks"
+      ],
+      "type": "object"
+    },
+    "TranslateProvider": {
+      "description": "LLM 提供方。当前两种通道：OpenAI 兼容 HTTP、pi CLI（本地子进程）。",
+      "oneOf": [
+        {
+          "const": "http",
+          "description": "OpenAI 兼容端点（`base_url` + `model`），经 `TranslatorKind::Http`。",
+          "type": "string"
+        },
+        {
+          "const": "pi",
+          "description": "pi CLI 子进程（`TranslatorKind::Pi`）。",
+          "type": "string"
+        }
+      ]
+    },
+    "TranslatorKind": {
+      "description": "翻译器配置（`configure` 请求的 `translator` 字段）。",
+      "oneOf": [
+        {
+          "description": "pi CLI：`program` 可执行路径（默认 `pi`）、模型、thinking 档位。",
+          "properties": {
+            "kind": {
+              "const": "pi",
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "program": {
+              "type": "string"
+            },
+            "thinking": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "program",
+            "model",
+            "thinking"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "假翻译器（测试与基准）：`echo` / `stretch:1.4` / `shrink:0.6` / `cjk` /\n`fail-every:n` / `slow:ms`。",
+          "properties": {
+            "kind": {
+              "const": "fake",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "OpenAI 兼容 HTTP 端点（`provider`/`base_url`/`model`/`api_key`）。",
+          "properties": {
+            "kind": {
+              "const": "http",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "syncpdf-protocol 请求与事件的 JSON Schema（JSONL，每行一个对象，type 字段做 tag）",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Request"
+    },
+    {
+      "$ref": "#/$defs/Event"
+    }
+  ],
+  "title": "SyncPDF protocol"
+}
