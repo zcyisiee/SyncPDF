@@ -959,10 +959,14 @@ class BlockCompiler:
         见 :mod:`babeldoc.tools.agent.layout_refine`），**并含同页已落定的兄弟贴片
         框**（``self.reservations`` 登记簿）：baseline 是原文页，只看它的话每个块都
         以为落点是空的，实测会让全部跨页迁移叠在同一条顶部净空里。每页的检测证据
-        按页缓存一次，浮动阶梯四级复用同一份。
+        按页缓存一次，浮动阶梯多级复用同一份。
 
         跨页迁移保持 x 范围不变，在下一页自上而下找第一个能容纳
-        ``原框高 / scale`` 的空闲区间（顶对齐）。
+        ``原框高 / scale`` 的空闲区间（顶对齐）。这一级**缺省关闭**，开启后还须过
+        :func:`layout_refine.next_page_float_eligible` 的四道资格门禁：把正文段整块
+        搬走会在原位留一块空白（界面观感等同于「这段渲染丢了」），代价大于「字被
+        缩小」。任一不合格就保持原位。实测故障见
+        ``docs/reports/2026-09-21-next-page-float-blank-home.md``。
         """
         from babeldoc.tools.agent import layout_refine
 
@@ -998,7 +1002,11 @@ class BlockCompiler:
                 rows, pid, page_number, widened
             ):
                 return list(widened), page_number, f"widen-{direction}"
-        # 跨页迁移：仅当下一页存在且未旋转；所需高度按缩字比例放大回原字号。
+        # 跨页迁移：缺省关闭（见 ``layout_refine.next_page_float_enabled``）——把正文段
+        # 整块搬到下一页会在原位留一块空白，代价大于「字被缩小」。开启后还要过
+        # ``next_page_float_eligible`` 的四道资格门禁。
+        if not layout_refine.next_page_float_enabled():
+            return box, page_number, None
         next_index = page_number  # 1 基页码正好是下一页的 0 基下标
         if next_index >= doc.page_count or doc[next_index].rotation:
             return box, page_number, None
@@ -1017,9 +1025,52 @@ class BlockCompiler:
             evidence=cache.evidence(doc[next_index], landing),
             reserved=self._page_obstacles(rows, pid, landing),
         )
-        if moved is not None and self._float_box_is_clear(rows, pid, landing, moved):
-            return list(moved), landing, "next-page"
-        return box, page_number, None
+        if moved is None or not self._float_box_is_clear(rows, pid, landing, moved):
+            return box, page_number, None
+        ineligible = layout_refine.next_page_float_eligible(
+            scale=scale,
+            landing=moved,
+            page_height=float(doc[next_index].rect.height),
+            home_occupied=self._home_stays_occupied(rows, pid, page_number, box),
+        )
+        if ineligible is not None:
+            return box, page_number, None
+        return list(moved), landing, "next-page"
+
+    def _home_stays_occupied(self, rows, pid, page_number, box):
+        """迁走后本段原位上是否仍有可见内容（跨页迁移的第 4 道门禁）。
+
+        ``False`` = 原位会成空白 → 不允许搬。原位口径与 ``compose_page_asset`` 要
+        擦掉的脚印一致（``rendered_box`` / ``layout_box`` / ``src_box``）；本段自己
+        的贴片不算（它正在被搬走），只有**别的**段落版面框或**别的**已定贴片覆盖
+        原位才算「原位还有东西」。
+
+        实测故障 ``P03-011``：原位只有它自己的贴片，搬走后第 3 页原框里取文本为
+        空字符串，界面上就是一颗空白——门禁这一条就是不让它发生。
+        """
+        import pymupdf
+
+        row = next((item for item in rows if item.id == pid), None)
+        geometry = (row.geometry or {}) if row is not None else {}
+        home = (
+            geometry.get("rendered_box")
+            or geometry.get("layout_box")
+            or geometry.get("src_box")
+            or box
+        )
+        rect = pymupdf.Rect(home)
+        for other in rows:
+            if other.id == pid or other.page != page_number:
+                continue
+            other_box = (other.geometry or {}).get("layout_box") or (
+                other.geometry or {}
+            ).get("src_box")
+            if other_box and rect.intersects(pymupdf.Rect(other_box)):
+                return True
+        for reserved in self.reservations.obstacles(page_number, exclude=pid):
+            if rect.intersects(pymupdf.Rect(reserved)):
+                return True
+        return False
 
     def _page_obstacles(self, rows, pid, page_number):
         """浮动规划的「兄弟」障碍集：已定贴片框 + 尚未编译的段落原文框。

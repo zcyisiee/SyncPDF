@@ -83,7 +83,7 @@
 
 不是每个块都会被 LaTeX 重排：`layout_label` 不属于正文本体标签（如 `title`）、或**源文**只有一行的块**按设计不替换**，保留基线原文。这类块记 `compile_blocks.status='not_replaced'` 并发中性事件 `block_not_replaced`（`{paragraph_id, reason}`，`reason` 为 `label-not-eligible` / `single-line`），**不是** `preview_failed`——原文就是它们的正确结果。它与 `ok`、`preview_failed` 同属「落定」状态，流式预览据此判定整页是否可以合成。判定口径与一次性全量编译（`LatexBboxOverlay._select_candidates`）一致；源文行数量的是**源 PDF**，不是贴片 baseline（baseline 在文档跑过一轮后已经是译文页）。
 
-局部编译（单段与批量）在贴片被缩字/溢出时自动"浮动"：用 PP-DocLayoutV3 对编译后的译文页重识别版面，按 同栏向下/向上扩 → 跨栏横向扩 → 跨页整框迁移 的顺序找净空并重渲染；成功发 `compile_float` 事件（`kind=expand/widen-right/widen-left/next-page`，含落点页与框），失败保留原贴片。批量编译每块完成发 `block_compiled` 事件。fit 判定对水平方向放宽到 2.5pt 容差（垂直仍 0.5pt），轻微超宽不再触发缩字号。
+局部编译（单段与批量）在贴片被缩字/溢出时自动"浮动"：用 PP-DocLayoutV3 对编译后的译文页重识别版面，按 同栏向下/向上扩 → 跨栏横向扩 → 跨页整框迁移 的顺序找净空并重渲染；成功发 `compile_float` 事件（`kind=expand/widen-right/widen-left/next-page`，含落点页与框），失败保留原贴片。**第三级「跨页整框迁移」缺省关闭**（`BDT_NEXT_PAGE_FLOAT=1/true/yes/on` 才开）：把正文段整块搬到下一页会在原位留一块空白（界面上就是「这段没渲染出来」），阅读顺序也断在下一页页底，而它要解决的只是「字被缩小了」。即使开启还要四道资格门禁同时满足——同页确无净空（前两级失败即证明）、缩字严重（`scale ≤ 0.75`，≈ 缩放阶梯 5.6 步）、落点在页面上半部、**原位不留空白**（本段原位必须有别的段落框或别的已定贴片覆盖，只有本段自己的贴片不算）；任一条不合格就保持原位，宁可缩字也不留空白。批量编译每块完成发 `block_compiled` 事件。fit 判定对水平方向放宽到 2.5pt 容差（垂直仍 0.5pt），轻微超宽不再触发缩字号。
 
 全量 compile 的 `scope=pages` 仍回退全量并记录原因。局部编译和导出不是它的同义参数。
 
