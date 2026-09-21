@@ -68,7 +68,7 @@ bdt run → parse → translate → apply → build → check → review → rep
 
 贴片渲染的 fit 判定对水平方向使用 2.5pt 容差（垂直 0.5pt）：TeX/PyMuPDF 的宽度口径是 advance 盒，轻微超宽不触发缩字号。fit 不过时走**有界阶梯**：源字号+源行距 → 行距 ×1.1/×0.9 → 字号 ×0.95^k（≤12 步、下限 4pt）。一次 xelatex 的成本几乎全在进程启动与导言区加载（fontspec/xeCJK 不能 `\dump` 预编译格式，这个下限压不掉），排版 15 个候选与排版 1 个几乎等价，所以首选档未过时剩余候选由 `BboxStampRenderer.build_ladder_tex` 压进**一次**编译（一档一页、`\vsize` 取大常量保证不被分页截断、`@@S/@@E` 标记归属日志），按同一优先级顺序选档——**选出的字号行距与逐档顺序编译完全一致**，省掉的只是被丢弃候选的进程开销。快路任一前提不成立（编译失败、标记数或页数不符）即返回 `None` 原样退回顺序阶梯。
 
-贴片仍被缩字或溢出时自动**浮动**：`block_compile._float_if_shrunk` 用 PP-DocLayoutV3 对编译后的译文页重识别版面（`PaddleLayoutRegions`，缺 `BDT_PADDLE_DEVICE` 环境时 auto，CoreML 运行期失败自动降级 CPU），按 同栏下/上扩 → 跨栏横向扩 → 跨页整框迁移 找净空并重渲染；跨页迁移的贴片在 patch 里记 `page` 落点页，`compose_page_asset` 负责擦 home 页脚印、把外来贴片盖到落点页。并发浮动必须看见彼此：`FloatReservations` 把已选中的落点框登记到数据库，后来的块把它当障碍避让，否则同页两个块会各自算出同一块净空而互相压字。版面检测结果按页进 `PageLayoutCache`，同页多个块不重复推理；缩字块在进页锁前先预取证据，锁内只剩纯几何规划。检测器的 ONNX Runtime 线程数夹到 4：十几个 xelatex 进程并存时，铺满核数的线程池只会互相抢核（实测 0.78s → 0.43s/次）。
+贴片仍被缩字或溢出时自动**浮动**：`block_compile._float_if_shrunk` 用 PP-DocLayoutV3 对编译后的译文页重识别版面（`PaddleLayoutRegions`，缺 `BDT_PADDLE_DEVICE` 环境时 auto，CoreML 运行期失败自动降级 CPU），按 同栏下/上扩 → 跨栏横向扩 → 跨页整框迁移 找净空并重渲染；跨页迁移的贴片在 patch 里记 `page` 落点页，`compose_page_asset` 负责擦 home 页脚印、把外来贴片盖到落点页。**第三级跨页整框迁移缺省关闭**（`BDT_NEXT_PAGE_FLOAT=1` 才开，且须过 `layout_refine.next_page_float_eligible` 的四道门禁：缩字 ≤ 0.75、落点在页面上半部、**原位不留空白**、同页确无净空）：搬走正文段会在原位留一块空白，而那只是「字被缩小了」——代价大于收益。并发浮动必须看见彼此：`FloatReservations` 把已选中的落点框登记到数据库，后来的块把它当障碍避让，否则同页两个块会各自算出同一块净空而互相压字。版面检测结果按页进 `PageLayoutCache`，同页多个块不重复推理；缩字块在进页锁前先预取证据，锁内只剩纯几何规划。检测器的 ONNX Runtime 线程数夹到 4：十几个 xelatex 进程并存时，铺满核数的线程池只会互相抢核（实测 0.78s → 0.43s/次）。
 
 `GET /paragraphs` 每段带解析状态派生的 `style` 摘要（字号/衬线/加粗/斜体/字体名）；草稿 `layout` 新增 `bold/italic/serif` 布尔覆盖与中文字体族 `font_family`（值是 `GET /fonts` 的 id），并在局部编译注入 LaTeX（`font_scale`/`line_skip` 同路径生效）。前端段落面板提供字体族与字号下拉、三态样式下拉，多选时提供批量编译面板。
 
@@ -104,6 +104,7 @@ job 子进程由 serve 以 `sys.executable -m babeldoc_tools` 起，serve 会把
 | LaTeX 编译后精修框只替换贴片矩形；擦除范围与源行几何量测（含首行 ascent，向上扩因此才有效）仍按原框 | `latex_bbox/overlay.py`（`latex_bbox_box_overrides`）、`layout_refine.py`、`tests/test_latex_bbox.py` |
 | 编译提速只许省进程，不许改选档：批阶梯与逐档顺序编译必须选出同一字号行距，快路不成立时退回顺序；诊断采集仍按档记候选（父链、逐档 fit 原因、页号/行号区间），不因批编译少记 | `latex_bbox/renderer.py`（`build_ladder_tex`/`_try_ladder_batch`）、`tests/test_latex_bbox.py`、`tests/test_debug_build_capture.py` |
 | 并发浮动共享同一份落点账本；同页两个块不得各自占用同一块净空 | `block_compile.py`（`FloatReservations`）、`tests/test_serve_block_compile.py` |
+| 正文段整块搬走不得在原位留空白；跨页迁移缺省关闭且四道门禁全过才生效 | `layout_refine.next_page_float_enabled/eligible`、`block_compile._home_stays_occupied`、`tests/test_serve_block_compile.py`、`tests/test_layout_refine.py` |
 | 同页块渲染并行、页状态提交串行：同页并发提交不得丢 patch，外来贴片落到已发布页必须重合成；共享库连接在 worker 起来前建好、懒建线程安全 | `stream_preview.py`（`PageLocks`）、`block_compile.py`（`compile_block_patch(page_lock=)`）、`store.py`（`DocumentStore.database`）、`tests/test_serve_stream_preview.py`、`tests/test_serve_block_compile.py` |
 | HTTP 文件访问经文档范围解析、产物白名单或资产归属校验 | `store.py`、`artifacts.py`、`routers/artifacts.py`、`tests/test_serve_artifacts.py` |
 | 测试证据写入仓库 `tmp/`，不得纳入版本控制 | `.gitignore`、`AGENTS.md` |
