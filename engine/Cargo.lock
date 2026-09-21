@@ -2246,7 +2246,6 @@ dependencies = [
  "icu_segmenter",
  "serde",
  "syncpdf-core",
- "syncpdf-font",
  "tempfile",
  "thiserror",
  "tracing",
