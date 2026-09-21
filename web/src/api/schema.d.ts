@@ -975,6 +975,10 @@ export interface components {
             did: string;
             /** Title */
             title?: string | null;
+            /** Authors */
+            authors?: string | null;
+            /** First Author */
+            first_author?: string | null;
             /** Pages */
             pages?: number | null;
             /** Paragraph Count */

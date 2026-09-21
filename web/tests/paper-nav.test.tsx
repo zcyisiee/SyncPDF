@@ -39,6 +39,8 @@ const DOCUMENTS: DocumentListItem[] = [
   {
     did: 'ccs3764-dyn',
     title: 'Attention Is All You Need',
+    authors: 'Ashish Vaswani; Noam Shazeer',
+    first_author: 'Ashish Vaswani',
     pages: 21,
     paragraph_count: 420,
     translated_count: 206,
@@ -48,6 +50,9 @@ const DOCUMENTS: DocumentListItem[] = [
   {
     did: 'W01-entry-smoke-20260918-001933',
     title: 'Transformer 综述',
+    // 没有作者行（老文档/IR 里没抽到）：副标题整行不渲染，不显示 null/undefined
+    authors: null,
+    first_author: null,
     pages: null,
     paragraph_count: null,
     translated_count: null,
@@ -79,6 +84,9 @@ describe('PaperNav 论文卡（真数据 /documents）', () => {
     expect(screen.getByText('论文 · 2')).toBeInTheDocument();
 
     const first = cardOf('ccs3764-dyn');
+    // 副标题是一作姓名（不是 did：标题与 did 是两回事）
+    expect(first.querySelector('[data-od-id="paper-author"]')?.textContent).toBe('Ashish Vaswani');
+    expect(within(first).queryByText('ccs3764-dyn')).toBeNull();
     expect(within(first).getByText(/21 页/)).toBeInTheDocument();
     expect(within(first).getByText(/420 段/)).toBeInTheDocument();
     expect(within(first).getByText(/已译 206 段/)).toBeInTheDocument();
@@ -90,6 +98,8 @@ describe('PaperNav 论文卡（真数据 /documents）', () => {
 
     // 产物缺失的计数是 null（不是 0）：逐项显示 — ；分母缺失 → 不画进度条
     const second = cardOf('W01-entry-smoke-20260918-001933');
+    // 没有一作 → 整个副标题 span 不渲染（不是渲染成 "null"）
+    expect(second.querySelector('[data-od-id="paper-author"]')).toBeNull();
     const meta = within(second).getByText((text) => text.includes('已译 —'));
     expect(meta.textContent).toContain('— · —');
     expect(second.querySelector('[data-od-id="paper-progress"]')).toBeNull();

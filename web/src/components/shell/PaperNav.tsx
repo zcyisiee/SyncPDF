@@ -6,6 +6,10 @@
  * 去点自己的 input，避免出现第二个文件选择器与第二套队列状态（上传串行、魔数预检、
  * 失败行内错误卡的口径只有一份）。
  *
+ * 工作台路由（`activeDid !== null`）时，列底还挂**文档操作区**（`data-od-id="action-bar"`，
+ * 本文件的 `DocumentActionBar`：任务控制 + 编译全文），它在所有视图下常驻 ——
+ * 任务控制的唯一入口。它自己 `flex-none`，所以论文列表再长也挤不掉它。
+ *
  * 右键删除：菜单状态放在 ui store（`libraryMenu`）而不是卡片自己的 state ——
  * **同一时刻只允许一个菜单**（卡片各自持 state 时右键第二张卡会同时开出两个菜单）。
  */
@@ -25,6 +29,7 @@ import {
   readPdfMagic,
 } from '../../lib/uploads';
 import { useUiStore } from '../../stores/ui';
+import { DocumentActionBar } from './DocumentActionBar';
 import { Icon } from '../icons';
 import { Button } from '../ui/Button';
 import { ErrorCard } from '../ui/ErrorCard';
@@ -318,9 +323,12 @@ export function PaperNav({ activeDid, route }: { activeDid: string | null; route
                     <span className="line-clamp-2 block text-sm leading-[1.45] text-ink">
                       {doc.title ?? doc.did}
                     </span>
-                    {doc.title === null || doc.title === undefined ? null : (
-                      <span className="mt-[2px] block truncate font-mono text-micro text-ink-4">
-                        {doc.did}
+                    {doc.first_author === null || doc.first_author === undefined ? null : (
+                      <span
+                        data-od-id="paper-author"
+                        className="mt-[2px] block truncate text-tiny text-ink-3"
+                      >
+                        {doc.first_author}
                       </span>
                     )}
                     <span className="mt-s1 block font-mono text-micro leading-[1.5] text-ink-4 [font-variant-numeric:tabular-nums]">
@@ -425,6 +433,8 @@ export function PaperNav({ activeDid, route }: { activeDid: string | null; route
           </div>
         )}
       </ScrollArea>
+
+      {activeDid === null ? null : <DocumentActionBar did={activeDid} />}
 
       <nav
         data-od-id="nav-foot"
