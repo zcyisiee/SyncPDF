@@ -303,14 +303,9 @@ class MinerUDocLayoutModel(DocLayoutModel):
             return None
         return Path(working_dir) / "agent" / "source" / "mineru" / "provider_ir.json"
 
-    def _persist_provider_document(self, translate_config) -> None:
-        """落盘 provider IR（规范化产物）。落盘失败只 warning，不影响 YoloResult 路径。"""
-        document = self.provider_document
-        if document is None:
-            return
-        output_path = self._provider_ir_output_path(translate_config)
-        if output_path is None:
-            return
+    @staticmethod
+    def _write_provider_document(document: ProviderDocument, output_path: Path) -> None:
+        """原子写一份 provider IR（同目录 tmp + ``replace``）。落盘失败只 warning。"""
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = output_path.with_suffix(".tmp")
@@ -319,6 +314,16 @@ class MinerUDocLayoutModel(DocLayoutModel):
             logger.info("MinerU provider IR written: %s", output_path)
         except OSError:
             logger.warning("Failed to write MinerU provider IR", exc_info=True)
+
+    def _persist_provider_document(self, translate_config) -> None:
+        """落盘 provider IR（规范化产物）。落盘失败只 warning，不影响 YoloResult 路径。"""
+        document = self.provider_document
+        if document is None:
+            return
+        output_path = self._provider_ir_output_path(translate_config)
+        if output_path is None:
+            return
+        self._write_provider_document(document, output_path)
 
     def _headers(self) -> dict[str, str]:
         if not self.api_token:
@@ -688,6 +693,19 @@ class MinerUDocLayoutModel(DocLayoutModel):
         except OSError:
             logger.warning("Failed to write MinerU raw layout JSON", exc_info=True)
 
+    def _unrotate_provider_document(self, mupdf_doc) -> None:
+        """把 provider IR 的 bbox 从 MinerU 显示视图换算回未旋转的 MediaBox 坐标系。"""
+        if mupdf_doc is None:
+            return
+        for page in self.provider_document.pages:
+            pdf_page = mupdf_doc[page.page_index]
+            for block in page.iter_blocks(recursive=True):
+                block.bbox = self._unrotate_bbox(block.bbox, pdf_page)
+                for line in block.lines:
+                    line.bbox = self._unrotate_bbox(line.bbox, pdf_page)
+                    for span in line.spans:
+                        span.bbox = self._unrotate_bbox(span.bbox, pdf_page)
+
     def _prepare_provider_ir(
         self, layout_json: dict[str, Any], translate_config, mupdf_doc=None
     ) -> None:
@@ -695,20 +713,46 @@ class MinerUDocLayoutModel(DocLayoutModel):
         self._dump_raw_layout_json(layout_json, translate_config)
         try:
             self._build_provider_document(layout_json)
-            if mupdf_doc is not None:
-                for page in self.provider_document.pages:
-                    pdf_page = mupdf_doc[page.page_index]
-                    for block in page.iter_blocks(recursive=True):
-                        block.bbox = self._unrotate_bbox(block.bbox, pdf_page)
-                        for line in block.lines:
-                            line.bbox = self._unrotate_bbox(line.bbox, pdf_page)
-                            for span in line.spans:
-                                span.bbox = self._unrotate_bbox(span.bbox, pdf_page)
+            self._unrotate_provider_document(mupdf_doc)
         except Exception:  # noqa: BLE001 - IR 是附加产物，不应影响布局解析
             self.provider_document = None
             logger.warning("Failed to build MinerU provider IR", exc_info=True)
             return
         self._persist_provider_document(translate_config)
+
+    def fetch_layout_json(self, pdf_path, translate_config=None) -> dict[str, Any]:
+        """PDF → MinerU ``layout.json``：先查内容哈希缓存，未命中才打 API 并回写缓存。
+
+        与 :meth:`handle_document` 用的是同一份缓存（``~/.cache/babeldoc/
+        mineru-layout.v1/<sha256>.json``），所以对同一个 PDF 重复识别不会重复计费。
+        """
+        pdf_path = Path(pdf_path)
+        cache_file = self._layout_cache_path(pdf_path)
+        if cache_file is not None and cache_file.exists():
+            logger.info("MinerU layout cache hit: %s", cache_file)
+            return json.loads(cache_file.read_text(encoding="utf-8"))
+        layout_json = self._fetch_layout_json(pdf_path, translate_config)
+        if cache_file is not None:
+            self._write_layout_cache(cache_file, layout_json)
+        return layout_json
+
+    def recognize_pdf_provider_ir(
+        self, pdf_path, output_path, *, translate_config=None
+    ) -> ProviderDocument:
+        """对**任意** PDF 跑一次版面识别，把 provider IR 写到显式路径。
+
+        源侧解析走 :meth:`handle_document`（落盘路径由 ``translate_config`` 决定）；
+        本方法是给"编译器之后的第二次识别"（译文 mono PDF）用的：同一条上传/轮询/
+        合并/缓存链路，只是落点由调用方给定。构建成功即返回 IR，写盘失败不抛。
+        """
+        pdf_path = Path(pdf_path)
+        layout_json = self.fetch_layout_json(pdf_path, translate_config)
+        self.provider_document = None
+        self._build_provider_document(layout_json)
+        with pymupdf.open(pdf_path) as mupdf_doc:
+            self._unrotate_provider_document(mupdf_doc)
+        self._write_provider_document(self.provider_document, Path(output_path))
+        return self.provider_document
 
     def handle_document(
         self,
@@ -768,9 +812,7 @@ class MinerUDocLayoutModel(DocLayoutModel):
             ):
                 layout_json = json.loads(cache_file.read_text(encoding="utf-8"))
         else:
-            layout_json = self._fetch_layout_json(pdf_path, translate_config)
-            if cache_file is not None:
-                self._write_layout_cache(cache_file, layout_json)
+            layout_json = self.fetch_layout_json(pdf_path, translate_config)
         self._prepare_provider_ir(layout_json, translate_config, mupdf_doc)
         pdf_info = layout_json.get("pdf_info") or []
         requested_page_numbers = {
