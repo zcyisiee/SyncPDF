@@ -1429,6 +1429,9 @@ class BlockCompiler:
         if not pids:
             raise ToolError("compile_failed", "批量编译缺少 block 清单")
         workers = batch_workers_from_environ()
+        # 进池前先把共享库建好：worker 里 read_draft 会各自开连接，库若在此刻
+        # 才由某个线程首次创建，其余线程的建库脚本会撞上它的锁。
+        database = self.store.database
         page_locks: dict[int, threading.Lock] = {}
         lock_guard = threading.Lock()
         results: dict[str, dict] = {}

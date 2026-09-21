@@ -689,6 +689,30 @@ def _batch_record(pids):
     return job
 
 
+def test_store_database_lazy_init_is_thread_safe(tmp_path):
+    """并发首次访问共享库只建一条连接、不报 database is locked。"""
+    import threading
+
+    store = DocumentStore.for_root(tmp_path)
+    seen, errors = [], []
+    barrier = threading.Barrier(8)
+
+    def touch():
+        try:
+            barrier.wait()
+            seen.append(store.database)
+        except Exception as exc:  # noqa: BLE001 - 测试要收集失败
+            errors.append(exc)
+
+    threads = [threading.Thread(target=touch) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not errors
+    assert len({id(item) for item in seen}) == 1
+
+
 def test_batch_compile_composes_each_page_once(local, monkeypatch):
     compiler, calls, _rows = local
     compose_calls: list[int] = []

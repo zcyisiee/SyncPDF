@@ -741,15 +741,25 @@ class BboxStampRenderer:
         workdir: Path,
         rungs: list[tuple[float, float]],
         stem: str,
+        *,
+        priority_base: int = 1,
+        request_id: str | None = None,
+        parent_id: str | None = None,
     ) -> dict | None:
         """一次编译评完 ``rungs`` 全部候选，按优先级返回首个通过者。
 
         返回 ``None`` 表示这条快路不可用（编译失败/页数或标记归属不符），调用方
         必须回退到逐档顺序编译——批编译只是省进程，不改变可达的结果集。
 
-        返回 dict：``{"index", "pdf_path", "reason", "attempts", "logs"}``；
-        ``index`` 是 ``rungs`` 内下标，``index is None`` 表示全部候选都不通过
-        （附 ``terminal`` 说明是否为内容级失败，与顺序阶梯同样不再重试）。
+        返回 dict：``{"index", "pdf_path", "reason", "attempts", "logs",
+        "candidate_id"}``；``index`` 是 ``rungs`` 内下标，``index is None``
+        表示全部候选都不通过（附 ``terminal`` 说明是否为内容级失败，与顺序阶梯
+        同样不再重试）。
+
+        诊断口径与顺序阶梯一致：**每评一档记一条** ``candidate_evaluated``
+        （优先级 ``priority_base + index``、父链逐档相接、逐档 fit 原因），
+        产物是整轮合并的 TeX/PDF/日志 + 该档的页号与行号区间（同批渲染器）；
+        ``candidate_id`` 是最后记录的候选，供调用方续接父链。
         """
         from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer_batch import (
             _attribute_log,
@@ -763,8 +773,10 @@ class BboxStampRenderer:
         batch_dir = workdir / f"{stem}_ladder"
         batch_dir.mkdir(parents=True, exist_ok=True)
         tex, ranges = self.build_ladder_tex(request, rungs)
+        recorder = self._debug_recorder
+        batch_id = recorder.new_id("batch") if recorder else None
         outcome = self._compile_tex(
-            tex, batch_dir, f"{stem}_ladder", rungs[0][0]
+            tex, batch_dir, f"{stem}_ladder", rungs[0][0], batch_id=batch_id
         )
         pdf_path = batch_dir / f"{stem}_ladder.pdf"
         if not outcome["compiled"] or not pdf_path.is_file():
@@ -783,14 +795,43 @@ class BboxStampRenderer:
             if doc.page_count != len(rungs):
                 return None
         segments = attribution.get("segments") or {}
+        artifacts = self._archive_ladder_artifacts(
+            request, batch_id, tex, batch_dir, f"{stem}_ladder"
+        )
         reasons: list[str] = []
         logs: list[str] = []
+
+        def record(index, fits, fit_reason, *, selected=False):
+            nonlocal parent_id
+            font_size, lead = rungs[index]
+            parent_id = self._record_candidate(
+                request,
+                request_id=request_id,
+                candidate_id=recorder.new_id("candidate") if recorder else None,
+                priority=priority_base + index,
+                font_size=font_size,
+                lead=lead,
+                parent_id=parent_id,
+                tex=tex,
+                attempt_dir=batch_dir,
+                stem=f"{stem}_ladder",
+                status="ok" if fits else "failed",
+                reason=fit_reason,
+                selected=selected,
+                fit={"fits": bool(fits), "reason": fit_reason},
+                batch_id=batch_id,
+                pdf_page_index=index,
+                tex_line_range=list(ranges[index]),
+                artifacts=artifacts,
+            )
+
         for index, (font_size, _lead) in enumerate(rungs):
             bucket = segments.get(index) or {}
             errors = bucket.get("errors") or []
             logs.extend(errors[:1])
             if errors:
                 reasons.append(f"b{index}:compile-failed")
+                record(index, False, "compile-failed")
                 continue
             fits, fit_reason, _ = _measure_fit(
                 pdf_path,
@@ -807,6 +848,7 @@ class BboxStampRenderer:
                 out_path = batch_dir / f"{stem}_b{index}.pdf"
                 if not _extract_page(pdf_path, index, out_path):
                     return None
+                record(index, True, fit_reason, selected=True)
                 return {
                     "index": index,
                     "pdf_path": out_path,
@@ -814,8 +856,10 @@ class BboxStampRenderer:
                     "reason": "ok",
                     "attempts": index + 1,
                     "logs": logs,
+                    "candidate_id": parent_id,
                 }
             reasons.append(f"b{index}:{fit_reason}")
+            record(index, False, fit_reason)
             if fit_reason in ("text-mismatch", "no-extractable-text"):
                 # 内容级失败：缩字号修不了，与顺序阶梯一样立刻停。
                 return {
@@ -824,6 +868,7 @@ class BboxStampRenderer:
                     "reason": ";".join(reasons),
                     "attempts": index + 1,
                     "logs": logs,
+                    "candidate_id": parent_id,
                 }
         return {
             "index": None,
@@ -831,7 +876,32 @@ class BboxStampRenderer:
             "reason": ";".join(reasons),
             "attempts": len(rungs),
             "logs": logs,
+            "candidate_id": parent_id,
         }
+
+    def _archive_ladder_artifacts(
+        self, request: StampRequest, batch_id: str | None, tex: str, batch_dir: Path, stem: str
+    ) -> dict | None:
+        """归档批阶梯的整轮证据：一份 tex/pdf/log 供该轮全部档位候选共享引用。"""
+        recorder = self._debug_recorder
+        if not recorder or not batch_id:
+            return None
+        safe_key = re.sub(r"[^0-9A-Za-z_-]", "_", str(request.key))[:24]
+        artifacts = {
+            "tex": recorder.archive_text(
+                "build", f"compile/{safe_key}/{batch_id}.tex", tex
+            )
+        }
+        for suffix in ("pdf", "log"):
+            path = batch_dir / f"{stem}.{suffix}"
+            artifacts[suffix] = (
+                recorder.archive_file(
+                    "build", f"compile/{safe_key}/{batch_id}.{suffix}", path
+                )
+                if path.is_file()
+                else None
+            )
+        return artifacts
 
     def _render_uncached(
         self, request: StampRequest, workdir: Path, *, request_id: str | None = None
@@ -874,11 +944,18 @@ class BboxStampRenderer:
                     # 首选档没过 → 剩余候选一次编完（见 build_ladder_tex）。
                     # 快路不可用时返回 None，下面的顺序阶梯原样兜底。
                     batched = self._try_ladder_batch(
-                        request, workdir, ladder[1:], stem
+                        request,
+                        workdir,
+                        ladder[1:],
+                        stem,
+                        priority_base=1,
+                        request_id=request_id,
+                        parent_id=parent_id,
                     )
                     if batched is not None:
                         logs.extend(batched.get("logs") or [])
                         result.compile_attempts = 1 + int(batched["attempts"])
+                        parent_id = batched.get("candidate_id") or parent_id
                         hit = batched.get("index")
                         if hit is not None:
                             picked_size, picked_lead = ladder[1 + hit]
@@ -889,26 +966,6 @@ class BboxStampRenderer:
                             result.lead = picked_lead
                             result.reason = "ok"
                             result.log_excerpt = logs
-                            parent_id = self._record_candidate(
-                                request,
-                                request_id=request_id,
-                                candidate_id=(
-                                    self._debug_recorder.new_id("candidate")
-                                    if self._debug_recorder
-                                    else None
-                                ),
-                                priority=1 + hit,
-                                font_size=picked_size,
-                                lead=picked_lead,
-                                parent_id=parent_id,
-                                tex="",
-                                attempt_dir=Path(batched["pdf_path"]).parent,
-                                stem=stem,
-                                status="ok",
-                                reason="ok",
-                                selected=True,
-                                fit={"fits": True, "reason": "ok"},
-                            )
                             result.debug_ref = {
                                 "candidate_id": parent_id,
                                 "request_id": request_id,
@@ -1043,6 +1100,7 @@ class BboxStampRenderer:
         font_size: float,
         *,
         debug_candidate: str | None = None,
+        **debug_context,
     ) -> dict:
         tex_path = workdir / f"{stem}.tex"
         tex_path.write_text(tex, encoding="utf-8")
@@ -1061,6 +1119,7 @@ class BboxStampRenderer:
                 argv,
                 timeout=self._timeout,
                 candidate=debug_candidate,
+                **debug_context,
             )
             if recorder
             else contextlib.nullcontext()
@@ -1200,30 +1259,37 @@ class BboxStampRenderer:
         reason: str | None,
         selected: bool = False,
         fit: dict | None = None,
+        batch_id: str | None = None,
+        pdf_page_index: int | None = None,
+        tex_line_range: list[int] | None = None,
+        artifacts: dict | None = None,
     ) -> str | None:
         """归档候选的 TeX/PDF/日志并发布 ``candidate_evaluated`` 事件。
 
         返回该候选 id（供父链传递）；recorder 关闭时原样返回 ``parent_id``。
-        缺失产物（如超时无 PDF）如实记 ``None``，不伪造。
+        缺失产物（如超时无 PDF）如实记 ``None``，不伪造。批阶梯的档位候选传入
+        整轮共享的 ``artifacts``（不再逐档归档）并带 ``batch_id`` / 页号 / 行号
+        区间，口径同批渲染器。
         """
         recorder = self._debug_recorder
         if not recorder or not candidate_id:
             return parent_id
-        safe_key = re.sub(r"[^0-9A-Za-z_-]", "_", str(request.key))[:24]
-        artifacts = {
-            "tex": recorder.archive_text(
-                "build", f"compile/{safe_key}/{candidate_id}.tex", tex
-            )
-        }
-        for suffix in ("pdf", "log"):
-            path = attempt_dir / f"{stem}.{suffix}"
-            artifacts[suffix] = (
-                recorder.archive_file(
-                    "build", f"compile/{safe_key}/{candidate_id}.{suffix}", path
+        if artifacts is None:
+            safe_key = re.sub(r"[^0-9A-Za-z_-]", "_", str(request.key))[:24]
+            artifacts = {
+                "tex": recorder.archive_text(
+                    "build", f"compile/{safe_key}/{candidate_id}.tex", tex
                 )
-                if path.is_file()
-                else None
-            )
+            }
+            for suffix in ("pdf", "log"):
+                path = attempt_dir / f"{stem}.{suffix}"
+                artifacts[suffix] = (
+                    recorder.archive_file(
+                        "build", f"compile/{safe_key}/{candidate_id}.{suffix}", path
+                    )
+                    if path.is_file()
+                    else None
+                )
         record = CompileCandidate(
             id=candidate_id,
             paragraph_id=str(request.key),
@@ -1237,12 +1303,15 @@ class BboxStampRenderer:
             font_size=round(float(font_size), 3),
             lead=round(float(lead), 3),
             parent_id=parent_id,
+            batch_id=batch_id,
+            pdf_page_index=pdf_page_index,
+            tex_line_range=tex_line_range,
             font={"serif": bool(request.serif), "font_family": request.font_family},
             status=status,
             fit=fit or {},
             selected=selected,
             reason=reason,
-            artifacts=artifacts,
+            artifacts=dict(artifacts),
         )
         payload = record.to_dict()
         snapshot = recorder.write_snapshot(

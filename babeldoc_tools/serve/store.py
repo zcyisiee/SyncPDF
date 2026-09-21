@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import re
 import shutil
+import threading
 from pathlib import Path
 
 from babeldoc_tools.common import ToolError
@@ -80,6 +81,7 @@ class DocumentStore:
             )
         self.root = resolved
         self._database = None
+        self._database_lock = threading.Lock()
         #: ``None`` = 枚举根目录全部子目录；否则只允许这些 did。
         self.allowed = allowed
         self.mode: str = "workdir" if allowed is not None else "root"
@@ -118,10 +120,19 @@ class DocumentStore:
 
     @property
     def database(self):
+        """共享的 :class:`MetadataDB`（懒建、线程安全）。
+
+        多个编译线程可能同时首次访问：不加锁会各建一条连接并**并发跑建库脚本**，
+        新库上 ``journal_mode=WAL`` 切换与建表互相撞锁，直接报 "database is
+        locked"。同页块并行渲染后这条竞态在批编译里必现（此前整块串行只是恰好
+        掩盖了它）。
+        """
         from babeldoc_tools.serve.database import MetadataDB
 
         if self._database is None:
-            self._database = MetadataDB(self.store_base)
+            with self._database_lock:
+                if self._database is None:
+                    self._database = MetadataDB(self.store_base)
         return self._database
 
     # ------------------------------------------------------------- internals

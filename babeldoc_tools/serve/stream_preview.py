@@ -107,6 +107,8 @@ class ServeStreamPreview:
             Path(os.environ["BDT_SERVE_DATABASE"]).parent
         )
         self.compiler = BlockCompiler(self.store, None)
+        # 在任何 worker 线程起来之前把共享库连接建好（见 DocumentStore.database）。
+        self.database = self.store.database
         self.workers = preview_workers_from_environ()
         # 一个共享池 + 每页一把锁。锁只包住依赖页状态的两小段（浮动规划/占位、
         # patch 读-改-写提交，见 BlockCompiler.compile_block_patch），xelatex 渲染
