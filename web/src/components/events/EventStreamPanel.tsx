@@ -169,6 +169,7 @@ const COMPILE_LABEL: Record<string, string> = {
   translation_block_completed: '译文提交',
   preview_ready: '成页',
   preview_failed: '预览失败',
+  block_not_replaced: '保留原文',
   compile_float: '贴片浮动',
 };
 
@@ -187,6 +188,9 @@ function compileLine(event: PersistentEvent): { text: string; tone: 'ok' | 'err'
       };
     case 'preview_failed':
       return { text: `${block ?? '?'} 预览失败`, tone: 'err' };
+    case 'block_not_replaced':
+      // 按设计不替换（标题/单行）：原文就是正确结果，不是错误。
+      return { text: `${block ?? '?'} 保留原文`, tone: 'info' };
     case 'compile_float':
       return { text: `${block ?? '?'} 贴片浮动 → 第 ${page ?? '?'} 页`, tone: 'info' };
     default:

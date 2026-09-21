@@ -239,7 +239,12 @@ def test_failed_expansion_retry_keeps_original_stamp(local, monkeypatch):
     monkeypatch.setattr(
         layout_refine,
         "plan_page_expansion",
-        lambda _page, box, _detector, **_kwargs: (box[0], box[1] - 40.0, box[2], box[3]),
+        lambda _page, box, _detector, **_kwargs: (
+            box[0],
+            box[1] - 40.0,
+            box[2],
+            box[3],
+        ),
     )
 
     result = compiler.compile(record())
@@ -403,9 +408,7 @@ def test_float_widen_rerenders_with_wider_box(tmp_path, monkeypatch):
     monkeypatch.setattr(
         block_compile.BlockCompiler, "_layout_detector", lambda _self: object()
     )
-    monkeypatch.setattr(
-        layout_refine, "plan_page_expansion", lambda *_a, **_k: None
-    )
+    monkeypatch.setattr(layout_refine, "plan_page_expansion", lambda *_a, **_k: None)
     monkeypatch.setattr(
         layout_refine,
         "plan_widen_page_expansion",
@@ -433,16 +436,12 @@ def test_float_to_next_page_moves_stamp(tmp_path, monkeypatch):
     monkeypatch.setattr(
         block_compile.BlockCompiler, "_layout_detector", lambda _self: object()
     )
-    monkeypatch.setattr(
-        layout_refine, "plan_page_expansion", lambda *_a, **_k: None
-    )
+    monkeypatch.setattr(layout_refine, "plan_page_expansion", lambda *_a, **_k: None)
     monkeypatch.setattr(
         layout_refine, "plan_widen_page_expansion", lambda *_a, **_k: None
     )
     moved = (20.0, 300.0, 200.0, 350.0)
-    monkeypatch.setattr(
-        layout_refine, "plan_next_page_float", lambda *_a, **_k: moved
-    )
+    monkeypatch.setattr(layout_refine, "plan_next_page_float", lambda *_a, **_k: moved)
 
     result = compiler.compile(record())
 
@@ -468,9 +467,13 @@ def test_float_obstacles_include_settled_sibling_stamps(tmp_path, monkeypatch):
     compiler, rows = _multi_page_store(tmp_path, monkeypatch, pages=2)
     rows.append(
         SimpleNamespace(
-            id="P2", page=1, target="New block two", geometry={"src_box": [210, 320, 380, 370]}
+            id="P2",
+            page=1,
+            target="New block two",
+            geometry={"src_box": [210, 320, 380, 370]},
         )
     )
+
     # 每次编译都返回「被缩字」的贴片，两个块都会走浮动阶梯。
     def render(_workdir, _pid, target, box, temporary, _cache, **_kwargs):
         path = temporary / f"stamp-{_pid}.pdf"
@@ -478,7 +481,9 @@ def test_float_obstacles_include_settled_sibling_stamps(tmp_path, monkeypatch):
             page = pdf.new_page(width=box[2] - box[0], height=box[3] - box[1])
             page.insert_text((5, 20), target)
             pdf.save(path)
-        return SimpleNamespace(ok=True, pdf_path=str(path), font_size=11, scale=0.7), False
+        return SimpleNamespace(
+            ok=True, pdf_path=str(path), font_size=11, scale=0.7
+        ), False
 
     monkeypatch.setattr(block_compile, "render_request", render)
     monkeypatch.setattr(
@@ -521,23 +526,17 @@ def test_float_back_home_erases_old_foreign_stamp(tmp_path, monkeypatch):
     monkeypatch.setattr(
         block_compile.BlockCompiler, "_layout_detector", lambda _self: object()
     )
-    monkeypatch.setattr(
-        layout_refine, "plan_page_expansion", lambda *_a, **_k: None
-    )
+    monkeypatch.setattr(layout_refine, "plan_page_expansion", lambda *_a, **_k: None)
     monkeypatch.setattr(
         layout_refine, "plan_widen_page_expansion", lambda *_a, **_k: None
     )
     moved = (20.0, 300.0, 200.0, 350.0)
-    monkeypatch.setattr(
-        layout_refine, "plan_next_page_float", lambda *_a, **_k: moved
-    )
+    monkeypatch.setattr(layout_refine, "plan_next_page_float", lambda *_a, **_k: moved)
     compiler.compile(record())
     assert "New block one" in _page_text(compiler.store, 2)
 
     # 第二次编译不再浮动（贴片不缩字），贴片回主页。
-    monkeypatch.setattr(
-        layout_refine, "plan_next_page_float", lambda *_a, **_k: None
-    )
+    monkeypatch.setattr(layout_refine, "plan_next_page_float", lambda *_a, **_k: None)
     second: list[list[float]] = []
     monkeypatch.setattr(
         block_compile, "render_request", _stamp_render(second, scale=1.0)
@@ -648,9 +647,7 @@ def test_apply_font_family_writes_meta_and_latin_serif(family_serif):
 
     # 用户显式给了 serif：以用户为准，只写 font_family。
     meta = {"serif": not family_serif}
-    block_compile._apply_font_family(
-        meta, {"font_family": spec.id}, not family_serif
-    )
+    block_compile._apply_font_family(meta, {"font_family": spec.id}, not family_serif)
     assert meta == {"serif": not family_serif, "font_family": spec.id}
 
 
@@ -868,3 +865,104 @@ def test_failed_dirty_export_keeps_previous_revision(local, monkeypatch):
         )["revision"]
         == 1
     )
+
+
+def test_freshly_committed_translation_is_compiled_not_starved(local):
+    """回归（线上根因）：译文刚落 ``translation_blocks`` 就提交编译，必须编得出来。
+
+    ``translate.py`` 是「``commit_translation`` 之后原地 ``preview.submit``」——两件事
+    发生在同一瞬间。此前编译读的是 ``_rows`` 的 5s 缓存快照，快照里永远还没有这一块，
+    于是整条流式预览被 ``缺少译文或排版数据`` 卡死（用户实测 151 块只成了 33 块，
+    成功的那些恰好卡在缓存过期的节拍上）。译文必须按主键现查。
+    """
+    compiler, calls, rows = local
+    # 快照里这一块「还没翻译」——正是提交那一刻 _rows 缓存的真实样子。
+    rows[0].target = None
+    database = compiler.store.database
+    with database._lock, database.connection:
+        database.connection.execute(
+            "INSERT OR REPLACE INTO translation_blocks"
+            "(document_id,block_id,job_id,revision,target) VALUES (?,?,?,?,?)",
+            ("paper", "P1", "j-local", 0, "Freshly committed target"),
+        )
+    result = compiler.compile_block_patch(record())
+    assert calls == ["P1"]
+    from babeldoc_tools.serve.asset_store import AssetStore
+
+    assets = AssetStore(compiler.store.store_base, database)
+    with pymupdf.open(assets.resolve(result["asset"])) as pdf:
+        assert "Freshly committed target" in pdf[0].get_text()
+
+
+def test_committed_translation_wins_over_stale_row_snapshot(local):
+    """同一块的库内译文比行快照新时以库为准（快照只负责几何）。"""
+    compiler, _calls, rows = local
+    rows[0].target = "Stale snapshot target"
+    database = compiler.store.database
+    with database._lock, database.connection:
+        database.connection.execute(
+            "INSERT OR REPLACE INTO translation_blocks"
+            "(document_id,block_id,job_id,revision,target) VALUES (?,?,?,?,?)",
+            ("paper", "P1", "j-local", 0, "Latest target"),
+        )
+    result = compiler.compile_block_patch(record())
+    from babeldoc_tools.serve.asset_store import AssetStore
+
+    assets = AssetStore(compiler.store.store_base, database)
+    with pymupdf.open(assets.resolve(result["asset"])) as pdf:
+        text = pdf[0].get_text()
+        assert "Latest target" in text
+        assert "Stale snapshot target" not in text
+
+
+def test_title_block_is_not_replaced_and_never_renders(local):
+    """标题（``layout_label`` 不在 ``_BODY_LABELS``）按设计不替换：抛 NotReplaced。
+
+    流式预览此前没有这道门禁，把单行标题当正文编译：缩一档字号 →
+    ``expansion_reason`` 判定要扩框 → 浮动阶梯向上吃掉净空，标题整体上移
+    （用户实测顶边被抬高 26.6pt）。它是 ``NotReplaced`` 而不是失败——保留原文
+    就是标题的正确结果。
+    """
+    from babeldoc_tools.serve.block_compile import NotReplaced
+
+    compiler, calls, rows = local
+    rows[0].layout_label = "title"
+    with pytest.raises(NotReplaced) as caught:
+        compiler.compile_block_patch(record())
+    assert caught.value.reason == "label-not-eligible"
+    assert calls == [], "不合格的块不该起 xelatex"
+
+
+def test_single_line_source_block_is_not_replaced(local, monkeypatch):
+    """源文只有一行的正文块同样不替换（与一次性编译 ``single-line`` 同口径）。
+
+    行数量的是**源** PDF，不是贴片 baseline：文档跑过一轮后 baseline 已经是
+    ``output/*.mono.pdf``（译文页），在它上面量出来的是译文行数。
+    """
+    from babeldoc_tools.serve.block_compile import NotReplaced
+
+    compiler, calls, rows = local
+    rows[0].layout_label = "text"
+    monkeypatch.setattr(BlockCompiler, "_source_n_lines", lambda _self, _did, _row: 1)
+    with pytest.raises(NotReplaced) as caught:
+        compiler.compile_block_patch(record())
+    assert caught.value.reason == "single-line"
+    assert calls == []
+
+
+def test_multi_line_body_block_still_compiles(local, monkeypatch):
+    """回归护栏：多行正文块不受门禁影响，照常渲染贴片。"""
+    compiler, calls, rows = local
+    rows[0].layout_label = "text"
+    monkeypatch.setattr(BlockCompiler, "_source_n_lines", lambda _self, _did, _row: 4)
+    compiler.compile_block_patch(record())
+    assert calls == ["P1"]
+
+
+def test_unmeasurable_source_lines_do_not_block_compile(local):
+    """源 PDF 量不到行数（``local`` 夹具就没有源文件）时不拦：门禁只在有据可依时否决。"""
+    compiler, calls, rows = local
+    rows[0].layout_label = "text"
+    assert compiler._source_n_lines("paper", rows[0]) is None
+    compiler.compile_block_patch(record())
+    assert calls == ["P1"]

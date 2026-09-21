@@ -53,6 +53,7 @@ export const KIND_LABELS: Record<string, string> = {
   paragraph_done: '段落已翻译',
   preview_ready: '增量预览已更新',
   preview_failed: '增量预览失败',
+  block_not_replaced: '保留原文',
   call_started: '调用开始',
   call_finished: '调用完成',
   provider_artifacts: '调用产物',
