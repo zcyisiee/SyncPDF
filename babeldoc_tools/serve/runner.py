@@ -1145,6 +1145,7 @@ class JobRunner:
     def _sync_metadata(self, did: str) -> None:
         """Import the latest derived block view after a successful job."""
         try:
+            from babeldoc_tools.serve.paper_meta import resolve_paper_meta
             from babeldoc_tools.serve.views import paragraphs
             from babeldoc_tools.serve.workdir import WorkdirReader
 
@@ -1153,12 +1154,13 @@ class JobRunner:
                 from babeldoc_tools.serve.migrate import migrate_root
 
                 migrate_root(self.store.root, document_ids=[did])
+            reader = WorkdirReader(workdir)
+            # 论文标题/一作：识别完成后 provider IR 已落盘，这时候抽一次就定了
+            # （读路径也会懒回填，两条路都是 set_paper_meta 的「只填空」语义）。
+            resolve_paper_meta(self.store.database, reader, did)
             self.store.database.upsert_blocks(
                 did,
-                [
-                    item.model_dump()
-                    for item in paragraphs(WorkdirReader(workdir), None)
-                ],
+                [item.model_dump() for item in paragraphs(reader, None)],
             )
         except Exception as exc:  # noqa: BLE001 - 元数据是索引，失败不推翻 job 结果
             # 但不能无声：blocks 索引长期空着会让依赖它的查询（段落列表、迁移）

@@ -348,13 +348,20 @@ def test_documents_list_shape(client):
     assert set(item) == {
         "did",
         "title",
+        "authors",
+        "first_author",
         "pages",
         "paragraph_count",
         "translated_count",
         "stage_summary",
         "updated_at",
     }
+    # 标题/一作来自 ``papers`` 表（源 PDF metadata → provider IR）；本 fixture 的
+    # ``source.pdf`` 是个只有 ``%PDF-1.4`` 头的最小文件，两列都是 NULL → 标题回退
+    # 文件名、作者字段保持 None（不是空串，也不拿文件名冒充作者）。
     assert item["title"] == "paper-final"  # run_state.pdf 的文件名（去扩展名）
+    assert item["authors"] is None
+    assert item["first_author"] is None
     assert item["pages"] == 2
     assert item["paragraph_count"] == 3
     assert item["translated_count"] == 2
@@ -370,6 +377,8 @@ def test_documents_list_reports_missing_products_as_null(client):
     bare = body[0]
     assert bare["did"] == BARE
     assert bare["title"] is None
+    assert bare["authors"] is None
+    assert bare["first_author"] is None
     assert bare["pages"] is None
     assert bare["paragraph_count"] is None
     assert bare["translated_count"] is None

@@ -28,6 +28,7 @@ from typing import Any
 from typing import Literal
 
 from babeldoc_tools.common import ToolError
+from babeldoc_tools.serve import paper_meta
 from babeldoc_tools.serve.compile import compile_status
 from babeldoc_tools.serve.recognition import label_inventory
 from babeldoc_tools.serve.recognition import provider_entities
@@ -263,10 +264,14 @@ def _counts(reader: WorkdirReader) -> tuple[int | None, int | None, int | None]:
 
 
 def _title(state: dict, manifest: dict | None) -> str | None:
-    """文档标题 = 源 PDF 文件名（不含扩展名）；取不到就 ``None``（不造假）。
+    """标题的**最后回退**：源 PDF 文件名（不含扩展名）；取不到就 ``None``（不造假）。
+
+    真正的标题在 ``papers.title``（:mod:`babeldoc_tools.serve.paper_meta` 抽取）；
+    只有那里也空（还没抽到 / 是本地产物都没有的新文档）时，才用文件名当标题，
+    避免卡片上出现空白主标题。
 
     来源顺序：``run_state.pdf``（``bdt run`` 收到的 ``--pdf``）→ 最新 run 的
-    ``manifest.input.pdf.path``（recorder 记录的输入）。产物里没有真正的标题字段。
+    ``manifest.input.pdf.path``（recorder 记录的输入）。
     """
     candidates = [state.get("pdf")]
     inputs = manifest.get("input") if isinstance(manifest, dict) else None
@@ -293,14 +298,35 @@ def _updated_at(state: dict, manifest: dict | None) -> str | None:
     return _utc_iso(state.get("updated_at"))
 
 
-def document_summary(reader: WorkdirReader, did: str) -> DocumentListItem:
-    """``GET /api/v1/documents`` 的一项。"""
+def _with_paper_meta(
+    item: DocumentListItem, meta: paper_meta.PaperMeta
+) -> DocumentListItem:
+    """列表项 → 用抽取到的标题/作者覆盖（标题空时保留 :func:`_title` 的文件名回退）。"""
+    return item.model_copy(
+        update={
+            "title": meta.title or item.title,
+            "authors": meta.authors,
+            "first_author": meta.first_author,
+        }
+    )
+
+
+def document_summary(
+    reader: WorkdirReader,
+    did: str,
+    meta: paper_meta.PaperMeta | None = None,
+) -> DocumentListItem:
+    """``GET /api/v1/documents`` 的一项（标题/作者读 ``papers`` 表，缺则懒回填）。
+
+    ``meta`` 为空（调用方自己给了就不重复解析）时，按 :mod:`babeldoc_tools.serve.paper_meta`
+    的口径从库 + 产物解析；路由层靠这个保证一次列表请求只读一遍 provider IR。
+    """
     state = reader.run_state()
     recorded, _, manifest_stages = _recorded_stages(reader)
     latest = reader.latest_manifest()
     manifest = latest[1] if latest is not None else None
     pages, paragraph_count, translated_count = _counts(reader)
-    return DocumentListItem(
+    item = DocumentListItem(
         did=did,
         title=_title(state, manifest),
         pages=pages,
@@ -309,6 +335,9 @@ def document_summary(reader: WorkdirReader, did: str) -> DocumentListItem:
         stage_summary=_stage_summary(recorded, manifest_stages),
         updated_at=_updated_at(state, manifest),
     )
+    if meta is None:
+        return item
+    return _with_paper_meta(item, meta)
 
 
 def _pdf_outputs(reader: WorkdirReader, state: dict) -> list[PdfOutput]:
@@ -434,13 +463,17 @@ def _quality(reader: WorkdirReader, state: dict) -> QualityStatus:
     )
 
 
-def document_detail(reader: WorkdirReader, did: str) -> DocumentDetail:
+def document_detail(
+    reader: WorkdirReader,
+    did: str,
+    meta: paper_meta.PaperMeta | None = None,
+) -> DocumentDetail:
     """``GET /api/v1/documents/{did}``：只报能从现有产物推导的字段。"""
     state = reader.run_state()
     latest = reader.latest_manifest()
     manifest = latest[1] if latest is not None else None
     recorded, _, manifest_stages = _recorded_stages(reader)
-    summary = document_summary(reader, did)
+    summary = document_summary(reader, did, meta)
     snapshot = reader.parse_snapshot()
     anchors = reader.anchors()
     return DocumentDetail(

@@ -20,6 +20,7 @@ from fastapi import Query
 from fastapi import UploadFile
 
 from babeldoc_tools.common import ToolError
+from babeldoc_tools.serve import paper_meta
 from babeldoc_tools.serve import views
 from babeldoc_tools.serve.runner import JobRunner
 from babeldoc_tools.serve.schemas import API_PREFIX
@@ -61,6 +62,21 @@ def documents_router(
         """did → workdir 的产物读取器（路径校验全在 store 里）。"""
         return WorkdirReader(store.resolve(did))
 
+    def paper_meta_of(did: str) -> paper_meta.PaperMeta:
+        """did → 论文标题/作者（库里有就用库里的，缺字段时从产物抽取并只填空地回填）。
+
+        先 ``store.database``：``app.db`` 不存在时会就地建库，而列表端点以前从
+        不碰数据库（旧行为）。但它只影响本服务自己的状态目录，且是写入的唯一入口，
+        所以与 ``GET /documents/{did}``（早就读 ``local_previews``/``exports``）
+        同为一致口径；读失败（磁盘只读等）就只报产物里的字段，不让列表 500。
+        """
+        reader_for_did = reader(did)
+        try:
+            database = store.database
+        except Exception:  # noqa: BLE001 - 元数据是索引，写不了不影响列表可用性
+            return paper_meta.extract_paper_meta(reader_for_did)
+        return paper_meta.resolve_paper_meta(database, reader_for_did, did)
+
     @router.post(
         "/documents",
         response_model=DocumentUploaded,
@@ -91,12 +107,17 @@ def documents_router(
         response_model=list[DocumentListItem],
         summary="文档列表",
         description=(
-            "枚举可见 workdir 的概要：阶段状态、页数/段数/已译段数、最近活动时间。"
-            "产物缺失的字段为 null（不是 0），坏产物不影响其它文档。"
+            "枚举可见 workdir 的概要：阶段状态、页数/段数/已译段数、真实标题与一作、"
+            "最近活动时间。标题取 `papers.title`（源 PDF metadata → provider IR 首页 "
+            "title 块），抽不到才退回源文件名；产物缺失的字段为 null（不是 0），"
+            "坏产物不影响其它文档。"
         ),
     )
     def list_documents() -> list[DocumentListItem]:
-        return [views.document_summary(reader(did), did) for did in store.list_dids()]
+        return [
+            views.document_summary(reader(did), did, paper_meta_of(did))
+            for did in store.list_dids()
+        ]
 
     @router.delete(
         "/documents/{did}",
@@ -143,7 +164,7 @@ def documents_router(
     def get_document(
         did: Annotated[str, PathParam(description=DOCUMENT_ID)],
     ) -> DocumentDetail:
-        detail = views.document_detail(reader(did), did)
+        detail = views.document_detail(reader(did), did, paper_meta_of(did))
         from babeldoc_tools.serve.draft import read_draft
 
         detail.revision = read_draft(store.resolve(did)).revision
