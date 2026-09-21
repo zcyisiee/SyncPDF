@@ -228,6 +228,15 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
     expect(
       (document.querySelector('[data-od-id="inspector"]') as HTMLElement).contains(actionbar),
     ).toBe(false);
+    // 它在**滚动列表之外**（列表滚到 35171px 也把它挤不掉），且在列表之后、全局导航之前
+    const list = navRail.querySelector('.overflow-auto') as HTMLElement;
+    expect(list.contains(actionbar)).toBe(false);
+    expect(list.compareDocumentPosition(actionbar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      actionbar.compareDocumentPosition(
+        document.querySelector('[data-od-id="nav-foot"]') as HTMLElement,
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(await within(actionbar).findByRole('button', { name: '开始翻译' })).toBeInTheDocument();
     expect(
       actionbar.querySelector('[data-od-id="job-controls"] [data-od-id="start-job-submit"]'),
