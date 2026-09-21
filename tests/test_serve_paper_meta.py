@@ -16,7 +16,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from babeldoc_tools.serve.paper_meta import PaperMeta
 from babeldoc_tools.serve.paper_meta import extract_paper_meta
 from babeldoc_tools.serve.paper_meta import first_author_of

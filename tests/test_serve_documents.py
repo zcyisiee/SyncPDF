@@ -789,6 +789,52 @@ def test_workdir_mode_only_serves_that_document(root: Path):
         assert test_client.get(f"{DOCUMENTS}/{BARE}").status_code == 404
 
 
+def test_read_endpoints_do_not_create_app_db(root: Path):
+    """读端点不建 ``app.db``（``--workdir`` 模式不能往被伺服的目录里写东西）。
+
+    ``title``/``authors`` 的回填要读 ``papers`` 表，但库不存在时只能退成纯产物抽取：
+    只要碰到一次数据库就会在 ``store_base`` 下建库，而 ``--workdir`` 的 ``store_base``
+    就是那个（可能很旧的）只读 workdir。
+    """
+    served = root / DID
+    with TestClient(create_app(DocumentStore.for_workdir(served))) as test_client:
+        assert test_client.get(DOCUMENTS).status_code == 200
+        assert test_client.get(DETAIL).status_code == 200
+        assert test_client.get(PARAGRAPHS).status_code == 200
+    assert not (served / "app.db").exists()
+    assert not (root / "app.db").exists()
+
+
+def test_documents_list_reports_real_title_from_pdf_metadata(root: Path):
+    """有库时：列表标题取 ``papers.title``（源 PDF metadata），不再是文件名。"""
+    served = root / DID
+    import pymupdf
+
+    document = pymupdf.open()
+    document.new_page()
+    document.set_metadata({"title": "Real Paper Title", "author": "Real Author; Second"})
+    document.save(served / "source.pdf")
+    document.close()
+
+    with TestClient(create_app(DocumentStore.for_root(root))) as test_client:
+        # 第一次读：从源 PDF metadata 抽取并只填空地回填
+        item = next(
+            row for row in test_client.get(DOCUMENTS).json() if row["did"] == DID
+        )
+        assert item["title"] == "Real Paper Title"
+        assert item["authors"] == "Real Author; Second"
+        assert item["first_author"] == "Real Author"
+        # 第二次读：库里的值已经就位（结果幂等）
+        again = next(
+            row for row in test_client.get(DOCUMENTS).json() if row["did"] == DID
+        )
+        assert again["title"] == "Real Paper Title"
+        # 详情端点带同样的字段
+        detail = test_client.get(DETAIL).json()
+        assert detail["title"] == "Real Paper Title"
+        assert detail["first_author"] == "Real Author"
+
+
 @pytest.fixture
 def recognition_ir(workdir):
     """Nested, discarded and unknown labels must survive without a whitelist."""

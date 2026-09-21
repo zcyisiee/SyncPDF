@@ -44,6 +44,8 @@
 
 上传为 multipart 的 `file` 字段；服务端校验文件名、`%PDF-` 文件头和 200 MiB 大小上限，流式落盘，按 SHA-256 去重。重复 PDF 可返回已有 `did`。上传只保存并登记文件，不会自动创建解析结果或启动翻译。
 
+`GET /documents` 与 `GET D` 的标题与作者字段来自本地抽取，不走网络也不调模型：`title` 优先取源 PDF metadata 的 `title`，其次取 provider IR 首页第一个 `type == "title"` 块的文本；`authors` 取 metadata 的 `author`，其次取紧随 title 块的第一个 `type == "text"` 块（形如 `Jack Brimberg <sup>a</sup>, Said Salhi <sup>b</sup>`，入库时剥掉 `<sup>` 单位上标）。两者**各自独立回退**，抽不到保持 `null`。`first_author` 是 `authors` 的第一个条目。结果落在 `papers.title` / `papers.authors` 两列（只填空的幂等写），读取时缺字段就懒回填，所以老文档不重跑 pipeline 也会显示真实标题；`title` 仍为 `null` 时前端卡片才退回源文件名。
+
 `DELETE D` 删除文档（前端在文件库卡片上右键）：workdir 目录树与数据库行（草稿、页面、任务事件等）一起删；按内容寻址的资产文件**保留**（可能被其它文档共用），回收交给 `bdt serve --cleanup`。有活动 job 时拒绝（409 `document_busy`，子进程还在写这个 workdir）；`bdt serve --workdir` 模式拒绝（400 `delete_not_allowed`，那等于删服务自己的根）。删除顺序是"先数据库行、后目录树"，目录删除失败会留下可重试的孤儿目录，不会出现"数据库说没有、磁盘上还在"的不一致。
 
 子进程失败而 stdout 没有收尾 JSON 信封时（通常是导入失败/参数错误/崩溃），job 的 `error_message` 会附上子进程 stderr 的末三行（已脱敏、截断到 400 字符）。没有这个片段时 `envelope_unparsed` 会把真实原因完全吞掉。

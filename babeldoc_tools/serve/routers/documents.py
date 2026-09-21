@@ -65,17 +65,17 @@ def documents_router(
     def paper_meta_of(did: str) -> paper_meta.PaperMeta:
         """did → 论文标题/作者（库里有就用库里的，缺字段时从产物抽取并只填空地回填）。
 
-        先 ``store.database``：``app.db`` 不存在时会就地建库，而列表端点以前从
-        不碰数据库（旧行为）。但它只影响本服务自己的状态目录，且是写入的唯一入口，
-        所以与 ``GET /documents/{did}``（早就读 ``local_previews``/``exports``）
-        同为一致口径；读失败（磁盘只读等）就只报产物里的字段，不让列表 500。
+        只在 ``app.db`` **已经存在**时才碰数据库，与 ``GET /documents/{did}``（读
+        ``local_previews``/``exports``）同一个门卫：``bdt serve --workdir`` 是「只暴露
+        一个（可能很旧的）只读 workdir」的视图，而它的 ``store_base`` 就是那个 workdir
+        自己 —— 不加这道门卫就会往被伺服目录里丢一个 ``app.db``。没有库（或磁盘只读）
+        就退成纯产物抽取：标题/一作照常返回，只是不回填（建库的显式入口是
+        ``bdt serve --migrate``）。
         """
         reader_for_did = reader(did)
-        try:
-            database = store.database
-        except Exception:  # noqa: BLE001 - 元数据是索引，写不了不影响列表可用性
+        if not (store.store_base / "app.db").is_file():
             return paper_meta.extract_paper_meta(reader_for_did)
-        return paper_meta.resolve_paper_meta(database, reader_for_did, did)
+        return paper_meta.resolve_paper_meta(store.database, reader_for_did, did)
 
     @router.post(
         "/documents",
