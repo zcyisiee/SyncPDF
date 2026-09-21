@@ -1,0 +1,55 @@
+/* 全局样式：token 两套主题 + codicons + 工作台骨架基础。 */
+@import './tokens.css';
+@import './codicons.css';
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-size: 13px;
+  /* 自绘标题栏：不可系统选中/拖拽出选区 */
+  user-select: none;
+}
+
+body {
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--vscode-scrollbarSlider-background);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* allotment 分栏拖动手柄 */
+.allotment-slot {
+  --separator-border: var(--syncpdf-gutter);
+  --focus-border: var(--vscode-focusBorder);
+  --separator-hit-area: 6px;
+}
+
+/* 滚动容器通用 */
+.syncpdf-scroll {
+  overflow: auto;
+}
