@@ -45,20 +45,6 @@ pub fn pdfium_lib_dir() -> Option<PathBuf> {
     p.is_dir().then_some(p)
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn dir_points_into_engine() {
-        assert!(super::dir().ends_with("fixtures"));
-    }
-
-    #[test]
-    fn ci_fixture_present_or_skipped() {
-        let p = crate::require_fixture!("ci-test.pdf");
-        assert!(p.metadata().unwrap().len() > 0);
-    }
-}
-
 fn env_or_vendor(var: &str, sub: &str) -> Option<PathBuf> {
     if let Some(p) = std::env::var_os(var) {
         let p = PathBuf::from(p);
@@ -80,4 +66,18 @@ pub fn fonts_dir() -> Option<PathBuf> {
 /// 模型目录：`SYNCPDF_MODELS`，否则 `engine/vendor/models`。
 pub fn models_dir() -> Option<PathBuf> {
     env_or_vendor("SYNCPDF_MODELS", "models")
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn dir_points_into_engine() {
+        assert!(super::dir().ends_with("fixtures"));
+    }
+
+    #[test]
+    fn ci_fixture_present_or_skipped() {
+        let p = crate::require_fixture!("ci-test.pdf");
+        assert!(p.metadata().unwrap().len() > 0);
+    }
 }
