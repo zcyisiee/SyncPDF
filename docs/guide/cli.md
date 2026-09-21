@@ -70,7 +70,7 @@ bdt serve --root /path/to/library --port 8787
 bdt serve --workdir tmp/paper
 ```
 
-不传 `--root`/`--workdir` 时使用**共享文档库** `~/.sp`（没有则创建）：上传记录、草稿、任务历史与 `app.db` 都在那里，跨 worktree / 跨仓库检出共用同一份，不再随每个 worktree 的 `tmp/` 各建一套。显式使用端口 8787 才能访问 `http://127.0.0.1:8787`；不传 `--port` 时端口自动分配，以启动 JSON 中的 `url` 为准。`--root` 支持上传，`--workdir` 只暴露一个文档。`--preview-workers N`（1..8，缺省 8）设置流式翻译预览的并行编译数（同一页仍串行）；单次任务也可以在提交 job 时用 `preview_workers` 字段覆盖。前端开发运行 `cd web && pnpm dev`，代理端口通过 `BDT_SERVE_PORT` 指定。
+不传 `--root`/`--workdir` 时使用**共享文档库** `~/.sp`（没有则创建）：上传记录、草稿、任务历史与 `app.db` 都在那里，跨 worktree / 跨仓库检出共用同一份，不再随每个 worktree 的 `tmp/` 各建一套。显式使用端口 8787 才能访问 `http://127.0.0.1:8787`；不传 `--port` 时端口自动分配，以启动 JSON 中的 `url` 为准。`--root` 支持上传，`--workdir` 只暴露一个文档。`--preview-workers N`（1..`min(16, cpu_count-2)`，缺省取上限）设置流式翻译预览的并行编译数（贴片渲染全部并行，同页块只在提交页状态时串行；xelatex 是独立子进程，上限随核数走）；单次任务也可以在提交 job 时用 `preview_workers` 字段覆盖。前端开发运行 `cd web && pnpm dev`，代理端口通过 `BDT_SERVE_PORT` 指定。
 
 serve 的**启动环境会被 job 子进程继承**：MinerU 布局需要 `MINERU_API_TOKEN`（或 `--mineru-token`），如果它只写在 `~/.zshrc` 里，用 `nohup`/systemd 之类的非交互方式启动就会丢掉它——此时 parse 会在 `debug_stage` 之前抛 `mineru_token_missing`，任务 1 秒内失败且 **run 归档里一条事件都没有**（事件流因此显示「这个 run 还没有事件」，那是失败的后果，不是事件流坏了）。要确认服务进程是否真的带上了 token：
 

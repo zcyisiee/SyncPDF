@@ -1,5 +1,5 @@
 /** Continuous PDF reader with per-page viewport-aligned geometry and draft editing. */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { ApiError, describeApiError } from '../../lib/api';
@@ -40,11 +40,10 @@ import { BboxLegend } from './BboxLegend';
 import { useUiStore } from '../../stores/ui';
 import { Button } from '../ui/Button';
 import { ErrorCard } from '../ui/ErrorCard';
+import { DocumentStatusBadge } from '../ui/StatusBadge';
 import { BboxEditor } from '../edit/BboxEditor';
 import { pdfToScreen, type PdfPointViewport, type ScreenViewport } from './BboxLayer';
 import { CompileBar } from './CompileBar';
-import { ExportButton } from './ExportButton';
-import { DownloadButton } from './DownloadButton';
 import { ContinuousPdfPane, type BboxPaneData, type ReaderPosition } from './ContinuousPdfPane';
 import type { PdfPageInfo } from './PdfCanvas';
 import { PreviewToolbar } from './PreviewToolbar';
@@ -96,12 +95,14 @@ function DocumentPreview({ did }: PreviewProps) {
   const linked = useUiStore((state) => state.compareLinked);
   const [position, setPosition] = useState<ReaderPosition | null>(null);
   const [navigation, setNavigation] = useState<{ page: number; revision: number; pane?: string }>({ page: 1, revision: 0 });
-  const navigate = (next: number) => {
-    setPosition({ pane: position?.pane ?? 'primary', page: next, fraction: 0 });
+  const navigate = useCallback((next: number) => {
+    // pane 取当前 active pane（对照模式未联动时决定滚哪一侧）；只在它变化时重建本回调
+    const pane = position?.pane ?? 'primary';
+    setPosition({ pane, page: next, fraction: 0 });
     setPreviewPage(next);
     setNavigation((previous) => ({ page: next, revision: previous.revision + 1,
-      pane: !linked && previewMode === 'compare' ? position?.pane ?? 'primary' : undefined }));
-  };
+      pane: !linked && previewMode === 'compare' ? pane : undefined }));
+  }, [position?.pane, setPreviewPage, linked, previewMode]);
   const onPosition = useCallback((next: ReaderPosition, programmatic = false) => {
     setPanePositions((previous) => {
       const saved = previous[next.pane];
@@ -116,6 +117,20 @@ function DocumentPreview({ did }: PreviewProps) {
   }, [setPreviewPage]);
 
   useEffect(() => { if (position) setPreviewPage(position.page); }, [position, setPreviewPage]);
+
+  // 事件流「在预览中定位」（`stores/ui.ts` 的定位桥）：nonce 每次点击自增，所以同一页连点
+  // 两次也会重新滚过去。挂载时先记下当前 nonce 当基线：**已经存在**的旧定位不重放
+  // （换文档会重挂载 PreviewArea，不该被上一份文档的定位跳到那一页）。
+  const locate = useUiStore((state) => state.locate);
+  const appliedLocate = useRef<number | null>(null);
+  useEffect(() => {
+    const nonce = locate?.nonce ?? 0;
+    const previous = appliedLocate.current;
+    appliedLocate.current = nonce;
+    if (previous === null || locate === null || nonce <= previous) return;
+    navigate(locate.page);
+    if (locate.paragraphId !== null) selectParagraph(locate.paragraphId);
+  }, [locate, navigate, selectParagraph]);
 
   const { target, source } = useMemo(
     () => pickPreviewArtifacts(artifacts ?? []),
@@ -217,7 +232,7 @@ function DocumentPreview({ did }: PreviewProps) {
   );
 
   /**
-   * 选中段的可拖拽编辑层：只在**版面框（`pdf_native`）+ 译文侧**开（源侧没有可写的 box）。
+   * 选中段的可拖拽编辑层：只在**译文框（`pdf_native`）+ 译文侧**开（源侧没有可写的 box）。
    * box 优先用草稿覆盖（拖动后的值），否则用该页几何基线；屏幕矩形交给 `pdfToScreen`。
    */
   const buildOverlay = useCallback(
@@ -262,10 +277,11 @@ function DocumentPreview({ did }: PreviewProps) {
       paged={primaryUrl !== null}
       onPageChange={navigate}
       onBboxModeChange={chooseBboxMode}
-      download={<>
-        <ExportButton did={did} />
-        <DownloadButton did={did} compile={compile} quality={detailQuery.data?.quality ?? null} />
-      </>}
+      // 文档名 + 阶段状态徽标住工具条最左（中栏的临时文档头行已删除）。这里只给
+      // `stage_summary` 的终态判断：live/queued 由任务控制（actionbar 的 JobControls）
+      // 自身徽标承担，两处不抢同一句话。
+      title={detailQuery.data?.title ?? did}
+      status={<DocumentStatusBadge stageSummary={detailQuery.data?.stage_summary} />}
     />
   );
 
@@ -293,7 +309,7 @@ function DocumentPreview({ did }: PreviewProps) {
               ? '编译中，稍后再试：活动任务期间草稿只读（409 document_busy）'
               : patchError instanceof ApiError && patchError.code === 'revision_conflict'
                 ? '草稿已被其它会话改动：刷新后重新拖拽（409 revision_conflict）'
-                : `保存段落框失败：${describeApiError(patchError).message}`}
+                : `保存译文框失败：${describeApiError(patchError).message}`}
           </p>
         );
 

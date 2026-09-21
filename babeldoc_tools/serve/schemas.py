@@ -26,6 +26,8 @@ from pydantic import BaseModel
 from pydantic import Field
 from pydantic import model_validator
 
+from babeldoc_tools.serve.limits import MAX_PREVIEW_WORKERS
+
 #: 全部端点前缀（唯一拼写来源：路由、CLI banner、api.md）。
 API_PREFIX = "/api/v1"
 
@@ -103,6 +105,7 @@ __all__ = [
     "ErrorBody",
     "ErrorEnvelope",
     "EventsPage",
+    "FontFamilyItem",
     "GeometryResponse",
     "HealthResponse",
     "JobAccepted",
@@ -507,11 +510,11 @@ class JobCreateRequest(BaseModel):
     preview_workers: int | None = Field(
         default=None,
         ge=1,
-        le=8,
+        le=MAX_PREVIEW_WORKERS,
         description=(
             "流式翻译预览的并行编译 worker 数（只对 action=run 且跑 translate 阶段有效）："
-            "1..8，缺省 8。同一页的块仍串行编译，不同页并行；"
-            "不跑翻译的 action 一律用缺省"
+            f"1..{MAX_PREVIEW_WORKERS}，缺省取上限（随本机核数）。"
+            "同一页的块仍串行编译，不同页并行；不跑翻译的 action 一律用缺省"
         ),
     )
 
@@ -841,3 +844,22 @@ class GlossaryUpdateRequest(BaseModel):
     """
 
     entries: list[GlossaryEntryModel]
+
+
+# --------------------------------------------------------------------------- #
+# 段落级中文字体族（``GET /fonts``）
+# --------------------------------------------------------------------------- #
+class FontFamilyItem(BaseModel):
+    """服务端登记的段落级中文字体族（``font_families.FONT_FAMILIES`` 的一项）。
+
+    ``id`` 是客户端唯一要说的值（写进草稿 ``layout.font_family``）；``label`` 是展示名。
+    ``serif`` 描述该族的学形：拉丁字形跟随它（除非用户另给了 ``serif`` 覆盖）。
+    ``available`` 是本机事实（字体文件是否探测到），**不是错误**：未探测到时请求该族
+    仍可提交，渲染侧回落默认族。
+    """
+
+    id: str
+    label: str
+    serif: bool
+    #: 本机是否探测到该族字体文件（false = 选它会回落默认族）。
+    available: bool

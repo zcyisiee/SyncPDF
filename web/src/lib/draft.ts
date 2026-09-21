@@ -89,10 +89,21 @@ export function styleBoolsOf(layout: DraftLayout | null | undefined): StyleBools
   return bools;
 }
 
-/** 该段草稿里有没有排版覆盖（四个数值键或三个样式布尔任一存在，或 box 存在）。 */
+/**
+ * 草稿里的段落级字体族 id（`layout.font_family`）；没有 / 非字符串 → null（跟随默认族）。
+ * 合法值由后端注册表（`GET /fonts`）决定，前端只读不校验。
+ */
+export function layoutFontFamily(layout: DraftLayout | null | undefined): string | null {
+  if (layout === null || layout === undefined) return null;
+  const value = layout.font_family;
+  return typeof value === 'string' ? value : null;
+}
+
+/** 该段草稿里有没有排版覆盖（四个数值键、三个样式布尔或字体族任一存在，或 box 存在）。 */
 export function hasLayoutOverride(layout: DraftLayout | null | undefined): boolean {
   if (layout === null || layout === undefined) return false;
   if (layoutBox(layout) !== null) return true;
+  if (layoutFontFamily(layout) !== null) return true;
   if (LAYOUT_FIELDS.some((field) => layoutNumber(layout, field.key) !== null)) return true;
   return STYLE_FIELDS.some((field) => layoutBool(layout, field.key) !== null);
 }
@@ -141,13 +152,18 @@ export function layoutValuesOf(inputs: LayoutInputs): Partial<Record<LayoutField
  * 认识的键按当前输入写，`extra` 里不认识的键（如 `force_break_after_text`）原样保留；
  * `bools`（给了才管样式键）：`true/false` 写入键，**没给的样式键从补丁里删掉**
  * （删键 = 跟随原文）；`bools === undefined` 时样式键按「不认识的键」原样保留
- * （老调用方不传 bools 的行为不变）。结果为空对象 → `null`（删掉该段的排版覆盖）。
+ * （老调用方不传 bools 的行为不变）。
+ * `fontFamily`（给了才管字体族）：非空字符串 → 写 `font_family`；`null`（或空串）→ 删键
+ * （跟随默认族）；`undefined` 时 `font_family` 同样按「不认识的键」原样保留
+ * （预览拖框的 `PreviewArea` 不传它，不能因此丢掉已选的族）。
+ * 结果为空对象 → `null`（删掉该段的排版覆盖）。
  */
 export function layoutPatch(
   values: Partial<Record<LayoutFieldKey, number>>,
   box: Box | null,
   extra: DraftLayout | null | undefined = undefined,
   bools: StyleBools | undefined = undefined,
+  fontFamily: string | null | undefined = undefined,
 ): DraftLayout | null {
   const out: DraftLayout = {};
   if (extra !== null && extra !== undefined) {
@@ -155,12 +171,16 @@ export function layoutPatch(
       if (key === 'box') continue;
       if (LAYOUT_FIELDS.some((field) => field.key === key)) continue;
       if (bools !== undefined && STYLE_FIELDS.some((field) => field.key === key)) continue;
+      if (fontFamily !== undefined && key === 'font_family') continue;
       out[key] = value;
     }
   }
   for (const [key, value] of Object.entries(values)) out[key] = value;
   if (bools !== undefined) {
     for (const [key, value] of Object.entries(bools)) out[key] = value;
+  }
+  if (fontFamily !== undefined && fontFamily !== null && fontFamily !== '') {
+    out.font_family = fontFamily;
   }
   if (box !== null) out.box = [...box];
   return Object.keys(out).length === 0 ? null : out;

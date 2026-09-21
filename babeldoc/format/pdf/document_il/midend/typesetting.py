@@ -1822,8 +1822,22 @@ class Typesetting:
             if para.box is None or para.box == current_box:
                 continue
             boxes.append(para.box)
-        boxes.extend(char.box for char in page.pdf_character if char.box is not None)
+        # 未归入段落的空白没有墨迹，不能将页顶空格变成远处的扩容边界。
+        boxes.extend(
+            char.box
+            for char in page.pdf_character
+            if char.box is not None
+            and char.char_unicode
+            and not char.char_unicode.isspace()
+        )
         boxes.extend(figure.box for figure in page.pdf_figure if figure.box is not None)
+        # 使用归一化后的 IL 标签；caption/text 是文本区，不是整块保护区域。
+        # Paddle 的独立公式映射为 isolate_formula，MinerU 使用 formula。
+        for region in page.page_layout or []:
+            name = getattr(region, "class_name", None)
+            box = getattr(region, "box", None)
+            if name in {"figure", "table", "formula", "isolate_formula"} and box is not None:
+                boxes.append(box)
 
         for obstacle in boxes:
             horizontally_overlaps = not (

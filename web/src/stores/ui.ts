@@ -1,11 +1,11 @@
 /**
- * 工作台外壳的 UI 状态：屏/视图路由镜像、栏宽、分隔条拖拽态、预览模式与 bbox 图层。
- * 宽度、折叠态、屏幕与 bbox 图层持久化到 localStorage，键名按 DESIGN.md §8.2 冻结
- * （`ieet.inspw`/`ieet.tlh`/`ieet.inspCollapsed`/`ieet.screen`/`ieet.bboxMode`），
- * 范围也按 §8.2 表 clamp；预览页码与选中段落只活在会话里（不持久化）。
+ * 三栏外壳的 UI 状态：屏路由镜像、左右栏宽、分隔条拖拽态、预览模式与 bbox 图层。
+ * 栏宽、屏幕与 bbox 图层持久化到 localStorage（`ieet.navw`/`ieet.inspw`/`ieet.screen`/
+ * `ieet.bboxMode`），范围按 LAYOUT_SPECS clamp；预览页码与选中段落只活在会话里（不持久化）。
  *
- * 注：旧版的 220px 视图栏（`ieet.vrw`）已删除 —— 二级视图合并成同一个工作台，
- * 预览占满除右栏/时间线外的全部宽度；预览模式与 bbox 图层也不再按视图记默认值。
+ * 注：旧版的顶栏/图标栏/时间线外壳已删除 —— 时间线不再占一条横栏，左栏宽度（`ieet.navw`）
+ * 取而代之；`ieet.tlh`/`ieet.timelineCollapsed`/`ieet.inspCollapsed` 随之作废（右栏折叠态由
+ * 外壳的 `--inspw` 决定，不再由 store 记）。视图栏（`ieet.vrw`）在更早的版本已删除。
  */
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
@@ -13,65 +13,77 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { BboxMode } from '../lib/preview';
 import type { ScreenId } from '../lib/routing';
 
-export type GutterId = 'inspector' | 'timeline';
+export type GutterId = 'nav' | 'inspector';
 export type PreviewMode = 'source' | 'target' | 'compare';
 
 const BBOX_MODES: readonly BboxMode[] = ['parse', 'layout', 'off'];
 
 export const STORAGE_KEYS = {
+  nav: 'ieet.navw',
   inspector: 'ieet.inspw',
-  timeline: 'ieet.tlh',
-  timelineCollapsed: 'ieet.timelineCollapsed',
-  inspectorCollapsed: 'ieet.inspCollapsed',
   screen: 'ieet.screen',
   bboxMode: 'ieet.bboxMode',
 } as const;
 
 export interface LayoutSpec {
   /** 该栏宽度在本 store 里的字段名。 */
-  key: 'inspectorWidth' | 'timelineHeight';
+  key: 'navWidth' | 'inspectorWidth';
   storageKey: string;
-  /** 分隔条拖拽轴：x = 竖条（调列宽），y = 横条（调行高）。 */
+  /** 分隔条拖拽轴：x = 竖条（调列宽），y = 横条（调行高）。当前两栏都是 x。 */
   axis: 'x' | 'y';
   /** true = 指针朝轴正向移动时该栏变窄（右侧面板 / 时间线分隔条都在被调栏的右/下方）。 */
   invert: boolean;
   default: number;
   min: number;
   max: number;
-  /** 键盘方向键步长（§8.2：列 16px / 时间线 8px）。 */
+  /** 键盘方向键步长（列 16px）。 */
   step: number;
   label: string;
 }
 
-/** §8.2 表：默认 / 范围 / 轴 / localStorage 键，逐项照抄。 */
+/** 默认 / 范围 / 轴 / localStorage 键（与设计稿 §2 的 --nav-w / --insp-w 一致）。 */
 export const LAYOUT_SPECS = {
+  nav: {
+    key: 'navWidth',
+    storageKey: STORAGE_KEYS.nav,
+    axis: 'x',
+    // 左栏在左侧：分隔条往右拖 → 左栏变宽，所以不取反。
+    invert: false,
+    default: 280,
+    min: 220,
+    max: 420,
+    step: 16,
+    label: '调整左侧导航栏宽度（220–420）',
+  },
   inspector: {
     key: 'inspectorWidth',
     storageKey: STORAGE_KEYS.inspector,
     axis: 'x',
     invert: true,
-    default: 360,
+    default: 340,
     min: 280,
     max: 560,
     step: 16,
     label: '调整右侧面板宽度（280–560）',
-  },
-  timeline: {
-    key: 'timelineHeight',
-    storageKey: STORAGE_KEYS.timeline,
-    axis: 'y',
-    invert: true,
-    default: 96,
-    min: 72,
-    max: 160,
-    step: 8,
-    label: '调整时间线高度（72–160）',
   },
 } as const satisfies Record<GutterId, LayoutSpec>;
 
 export interface ParagraphSelectOptions {
   /** shift 语义：已在集合中 → 移除，否则追加；移除后主选中 = 剩余最后一个。 */
   extend?: boolean;
+}
+
+/**
+ * 事件流「在预览中定位」的请求（**不**持久化，只活在会话里）：
+ * 事件节点上是 `page`/`paragraph_id` 这类真实数据，点击后由 `PreviewArea` 订阅它跳页。
+ * `nonce` 自增：订阅方按它判断「新的一次定位」，所以同一页连点两次也能重新滚过去。
+ */
+export interface PreviewLocate {
+  nonce: number;
+  /** 目标页码（1 基）。 */
+  page: number;
+  /** 目标段落 id（事件里没有 → null；有就一并选中）。 */
+  paragraphId: string | null;
 }
 
 /** 文件库卡片的右键菜单位置（`did` + 视口坐标，`position: fixed` 用）。 */
@@ -83,10 +95,16 @@ export interface LibraryMenu {
 
 export interface UiState {
   screen: ScreenId;
+  /** 左栏（PaperNav）宽度（持久化 `ieet.navw`）。 */
+  navWidth: number;
   inspectorWidth: number;
-  timelineHeight: number;
-  timelineCollapsed: boolean;
-  inspectorCollapsed: boolean;
+  /**
+   * library 空态的「上传 PDF」→ 左栏上传 input 的自增触发器（不持久化）：
+   * 上传队列与那个 `<input type=file>` 只有一份，长在 `PaperNav` 里；其他入口
+   * （路由为空态时的中栏按钮）通过 `requestUpload` 让 PaperNav 去点自己的 input。
+   */
+  uploadRequest: number;
+  requestUpload: () => void;
   previewMode: PreviewMode;
   previewZoom: number | null;
   compareLinked: boolean;
@@ -108,6 +126,10 @@ export interface UiState {
   selectedParagraphId: string | null;
   /** W11 重译候选：上次用过的 profile id（会话内记忆，**不**持久化；换文档不丢）。 */
   retranslateProfile: string | null;
+  /** 事件节点 → 预览的定位请求（**不**持久化）；null = 从没点过。 */
+  locate: PreviewLocate | null;
+  /** 事件节点「在预览中定位」：页码必填，段落 id 有就带上（同页重复点击靠 nonce 触发）。 */
+  locateInPreview: (page: number, paragraphId?: string) => void;
   /** 正在拖拽的分隔条（用于 `is-drag` 视觉态）。 */
   dragging: GutterId | null;
   /**
@@ -119,12 +141,9 @@ export interface UiState {
   openLibraryMenu: (did: string, at: { x: number; y: number }) => void;
   closeLibraryMenu: () => void;
   setScreen: (screen: ScreenId) => void;
-  /** 拖拽/键盘统一入口：clamp 到 §8.2 范围并持久化。 */
+  /** 拖拽/键盘统一入口：clamp 到该栏范围并持久化。 */
   setLayoutWidth: (id: GutterId, next: number) => void;
   setDragging: (id: GutterId | null) => void;
-  setTimelineCollapsed: (collapsed: boolean) => void;
-  /** 折叠右侧面板（`--inspw:0`）与 `ieet.inspCollapsed`。 */
-  setInspectorCollapsed: (collapsed: boolean) => void;
   setPreviewMode: (mode: PreviewMode) => void;
   setPreviewPage: (page: number) => void;
   /** did 变化时重置会话内预览状态（页码回 1 + 清空选中）；同一 did 重复调用无副作用。 */
@@ -132,6 +151,11 @@ export interface UiState {
   setBboxMode: (mode: BboxMode) => void;
   /** 统一选中入口：`extend` = shift 多选语义，否则重置为单选 `[id]`。 */
   selectParagraph: (id: string, opts?: ParagraphSelectOptions) => void;
+  /**
+   * 把多选集合里的某段挪到末尾（= 设为「主选中段」，编辑器随之跟随）；不在集合中则忽略，
+   * 已在末尾不 set（避免无谓重渲染）。用于段落 tab 的块切换 chips。
+   */
+  focusParagraph: (id: string) => void;
   /** 清空多选（`selectedParagraphId` 一并 → null）。 */
   clearParagraphSelection: () => void;
   /** 兼容入口（单选时代的调用方继续可用）：null → 清空，否则 `[id]`。 */
@@ -145,9 +169,8 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-/**
- * 分隔条位移 → 新宽度：先按该栏的 axis 方向（invert）定符号，再按 §8.2 范围 clamp。
- * 指针拖拽与方向键共用本函数（Gutter 负责把 clientX/Y 或按键转换成位移）。
+/** 分隔条位移 → 新宽度：先按该栏的 axis 方向（invert）定符号，再按该栏 min/max clamp。
+ * 指针拖拽与方向键共用本函数（Gutter 负责把 clientX 或按键转换成位移）。
  */
 export function widthFromDelta(id: GutterId, base: number, delta: number): number {
   const spec = LAYOUT_SPECS[id];
@@ -164,15 +187,6 @@ function readStoredNumber(spec: LayoutSpec): number {
     return clamp(Math.round(value), spec.min, spec.max);
   } catch {
     return spec.default;
-  }
-}
-
-function readStoredFlag(key: string, fallback: boolean): boolean {
-  try {
-    const raw = window.localStorage.getItem(key);
-    return raw === null ? fallback : raw === '1';
-  } catch {
-    return fallback;
   }
 }
 
@@ -214,10 +228,10 @@ function selectionPatch(ids: string[]): Pick<UiState, 'selectedParagraphId' | 's
 export function createUiStore(): StoreApi<UiState> {
   return createStore<UiState>()((set, get) => ({
     screen: readStoredScreen() ?? 'library',
+    navWidth: readStoredNumber(LAYOUT_SPECS.nav),
     inspectorWidth: readStoredNumber(LAYOUT_SPECS.inspector),
-    timelineHeight: readStoredNumber(LAYOUT_SPECS.timeline),
-    timelineCollapsed: readStoredFlag(STORAGE_KEYS.timelineCollapsed, false),
-    inspectorCollapsed: readStoredFlag(STORAGE_KEYS.inspectorCollapsed, false),
+    uploadRequest: 0,
+    requestUpload: () => set((state) => ({ uploadRequest: state.uploadRequest + 1 })),
     previewMode: 'target',
     previewZoom: null,
     compareLinked: true,
@@ -229,6 +243,18 @@ export function createUiStore(): StoreApi<UiState> {
     selectedParagraphIds: [],
     selectedParagraphId: null,
     retranslateProfile: null,
+    locate: null,
+    locateInPreview: (page, paragraphId) => {
+      // 页数不可解析（NaN/Infinity）不该把预览跳到一个瞎猜的位置
+      if (!Number.isFinite(page)) return;
+      set((state) => ({
+        locate: {
+          nonce: (state.locate?.nonce ?? 0) + 1,
+          page: Math.max(1, Math.round(page)),
+          paragraphId: paragraphId === undefined || paragraphId === '' ? null : paragraphId,
+        },
+      }));
+    },
     dragging: null,
     libraryMenu: null,
     openLibraryMenu: (did, at) => set({ libraryMenu: { did, x: at.x, y: at.y } }),
@@ -245,24 +271,9 @@ export function createUiStore(): StoreApi<UiState> {
       const spec = LAYOUT_SPECS[id];
       const value = clamp(Math.round(next), spec.min, spec.max);
       writeStored(spec.storageKey, String(value));
-      if (id === 'inspector') {
-        // 折叠态（--inspw:0）下拖分隔条只在宽度真变化时展开：避免「拖回原宽度才意外展开」。
-        const collapsed = get().inspectorCollapsed && value === get().inspectorWidth;
-        if (!collapsed) writeStored(STORAGE_KEYS.inspectorCollapsed, '0');
-        set({ inspectorWidth: value, inspectorCollapsed: collapsed });
-        return;
-      }
-      set({ timelineHeight: value });
+      set({ [spec.key]: value });
     },
     setDragging: (dragging) => set({ dragging }),
-    setTimelineCollapsed: (collapsed: boolean) => {
-      writeStored(STORAGE_KEYS.timelineCollapsed, collapsed ? '1' : '0');
-      set({ timelineCollapsed: collapsed });
-    },
-    setInspectorCollapsed: (collapsed) => {
-      writeStored(STORAGE_KEYS.inspectorCollapsed, collapsed ? '1' : '0');
-      set({ inspectorCollapsed: collapsed });
-    },
     setPreviewMode: (previewMode) => set({ previewMode }),
     setPreviewPage: (page) => set({ previewPage: Number.isFinite(page) ? Math.max(1, Math.round(page)) : 1 }),
     resetPreviewForDocument: (did) => {
@@ -290,6 +301,12 @@ export function createUiStore(): StoreApi<UiState> {
     clearParagraphSelection: () => {
       if (get().selectedParagraphIds.length === 0) return;
       set(selectionPatch([]));
+    },
+    focusParagraph: (id) => {
+      const current = get().selectedParagraphIds;
+      if (!current.includes(id)) return;
+      if (current[current.length - 1] === id) return;
+      set(selectionPatch([...current.filter((item) => item !== id), id]));
     },
     setSelectedParagraph: (id) => {
       if (id === null) get().clearParagraphSelection();

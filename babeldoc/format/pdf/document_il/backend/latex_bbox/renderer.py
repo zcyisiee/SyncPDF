@@ -93,6 +93,9 @@ _LEAD_RATIO_MIN = 1.3
 _LEAD_RATIO_MAX = 1.6
 #: 字号缩小前先试的行距系数（相对推导出的源行距）。
 _LEAD_TRIAL_RATIOS = (1.1, 0.9)
+#: 阶梯批编译的每页 ``\vsize``（bp）：取大常量，保证一个候选 = 一页，
+#: 溢出的内容不会被 TeX 分页截断（口径同 :mod:`renderer_batch`）。
+_LADDER_VSIZE_BP = 6000.0
 #: 字体 ascender 探测失败时的保守上限（首行墨迹不会被裁）。
 _DEFAULT_ASCENT_RATIO = 1.15
 #: ``\topskip`` 额外余量（em）：行内数学的上标会把墨迹抬到字体 ascender 之上。
@@ -117,6 +120,10 @@ def font_signature(capability) -> str:
         capability.cjk_sans_fonts or {},
     ):
         parts.extend(f"{key}={value}" for key, value in sorted(group.items()))
+    # 可选字体族（段落级 font_family）：族文件变了同样要失效。
+    for family_id, files in sorted((capability.cjk_family_fonts or {}).items()):
+        parts.append(f"family={family_id}")
+        parts.extend(f"{key}={value}" for key, value in sorted(files.items()))
     if capability.font_path:
         parts.append(f"explicit={capability.font_path}")
     if capability.bold_font_path:
@@ -155,7 +162,9 @@ def _font_ascent_ratio(font_path: str) -> float:
         return _DEFAULT_ASCENT_RATIO
 
 
-def regular_font_paths(capability, serif: bool) -> list[str]:
+def regular_font_paths(
+    capability, serif: bool, font_family: str | None = None
+) -> list[str]:
     """实际会用到的正体字体路径（算 ``\topskip`` 的 ascender）。"""
     paths: list[str] = []
     latin = capability.latin_fonts(serif)
@@ -165,6 +174,10 @@ def regular_font_paths(capability, serif: bool) -> list[str]:
         if capability.font_path:
             paths.append(capability.font_path)
         return paths
+    family = _family_cjk_fonts(capability, font_family)
+    if family is not None:
+        paths.append(family["regular"])
+        return paths
     cjk = capability.cjk_fonts(serif)
     if cjk and cjk.get("regular"):
         paths.append(cjk["regular"])
@@ -173,11 +186,22 @@ def regular_font_paths(capability, serif: bool) -> list[str]:
     return paths
 
 
-def font_setup_clauses(capability, serif: bool) -> str:
+def _family_cjk_fonts(capability, font_family: str | None) -> dict[str, str] | None:
+    """请求的段落级字体族（未命中/未探测到/显式字体优先时返回 None）。"""
+    if capability.font_explicit:
+        return None
+    return capability.cjk_family(font_family)
+
+
+def font_setup_clauses(
+    capability, serif: bool, font_family: str | None = None
+) -> str:
     """字体声明：与产品一致（拉丁 Noto Serif/Sans，中文 Source Han Serif/Sans）。
 
     显式 ``--latex-cjk-font-path`` 优先（用户指定则只设中文主字体，拉丁
-    仍尽力用产品字体）；拉丁字体缺失时不声明 → 退回 Latin Modern。
+    仍尽力用产品字体）；段落级 ``font_family`` 命中注册表且已探测到时用该族
+    的中文主字体（拉丁仍按 ``serif`` 选）；拉丁字体缺失时不声明 → 退回
+    Latin Modern。
     """
     clauses: list[str] = []
     latin = capability.latin_fonts(serif)
@@ -188,6 +212,10 @@ def font_setup_clauses(capability, serif: bool) -> str:
         if capability.bold_font_path:
             explicit["bold"] = capability.bold_font_path
         clauses.append(_face_clause("setCJKmainfont", explicit))
+        return "\n".join(clauses)
+    family = _family_cjk_fonts(capability, font_family)
+    if family is not None:
+        clauses.append(_face_clause("setCJKmainfont", family))
         return "\n".join(clauses)
     cjk = capability.cjk_fonts(serif) or capability.cjk_fonts(not serif)
     if cjk is None and capability.font_path:
@@ -200,12 +228,21 @@ def font_setup_clauses(capability, serif: bool) -> str:
     return "\n".join(clauses)
 
 
-def topskip_clause(capability, serif: bool, font_size: float, topskip: float | None) -> str:
+def topskip_clause(
+    capability,
+    serif: bool,
+    font_size: float,
+    topskip: float | None,
+    font_family: str | None = None,
+) -> str:
     """``\topskip`` 声明：源首行字顶余量 + 字体 ascender（不裁剪首行墨迹）。"""
     if topskip is None:
         return ""
     ascent_ratio = max(
-        (_font_ascent_ratio(path) for path in regular_font_paths(capability, serif)),
+        (
+            _font_ascent_ratio(path)
+            for path in regular_font_paths(capability, serif, font_family)
+        ),
         default=_DEFAULT_ASCENT_RATIO,
     )
     value = max(0.0, float(topskip)) + (ascent_ratio + _TOPSKIP_HEADROOM_EM) * font_size
@@ -252,6 +289,9 @@ class StampRequest:
     ascent_top: float | None = None
     #: 段落主字体是否衬线（决定拉丁/中文用 Noto Serif/Source Han Serif 还是 Sans）。
     serif: bool = True
+    #: 段落级中文字体族 id（``font_families.FONT_FAMILY_IDS``）；None = 按
+    #: ``serif`` 用产品默认族，行为与历史版本完全一致。
+    font_family: str | None = None
     #: 诊断专用：上一次失败编译的候选 id（扩框/回退重试的父节点）。
     #: 只进证据链，不进 ``cache_key``、不影响任何排版语义。
     debug_parent: str | None = None
@@ -280,6 +320,7 @@ class StampRequest:
             round(float(self.first_line_dx or 0.0), 3),
             None if self.ascent_top is None else round(float(self.ascent_top), 3),
             bool(self.serif),
+            self.font_family,
         )
 
 
@@ -359,6 +400,11 @@ def _is_subsequence(expected: str, extracted: str) -> bool:
         if index < len(expected) and ch == expected[index]:
             index += 1
     return index == len(expected)
+
+
+def _tex_line_count(text: str) -> int:
+    """一段 tex 片段占用的行数（含末尾换行）。"""
+    return text.count("\n") + 1
 
 
 def _measure_fit(
@@ -486,7 +532,11 @@ class BboxStampRenderer:
         max_workers: int = 2,
         cache=None,
         debug_recorder=None,
+        batch_ladder: bool = True,
     ):
+        #: 首选档未通过时，剩余候选是否压进一次 xelatex（见 build_ladder_tex）。
+        #: 关掉即退回逐档顺序编译，结果集不变，只是慢。
+        self._batch_ladder = bool(batch_ladder)
         self._capability = capability
         self._timeout = max(5.0, float(timeout_seconds))
         self._max_workers = max(1, int(max_workers))
@@ -519,6 +569,7 @@ class BboxStampRenderer:
         hangindent: float = 0.0,
         topskip: float | None = None,
         serif: bool = True,
+        font_family: str | None = None,
     ) -> str:
         effective_lead = float(lead) if lead else font_size * _DEFAULT_LEAD_RATIO
         hang_clause = ""
@@ -533,24 +584,26 @@ class BboxStampRenderer:
         return TEX_HEADER % {
             "w": width,
             "h": height,
-            "fontsetup": self._font_setup(serif),
+            "fontsetup": self._font_setup(serif, font_family),
             "fs": font_size,
             "lead": effective_lead,
             "parindent": parindent,
             "hangindent": hang_clause,
             "topskip": topskip_clause(
-                self._capability, serif, font_size, topskip
+                self._capability, serif, font_size, topskip, font_family
             ),
             "body": body,
         }
 
-    def _regular_font_paths(self, serif: bool) -> list[str]:
+    def _regular_font_paths(
+        self, serif: bool, font_family: str | None = None
+    ) -> list[str]:
         """实际会用到的正体字体路径（算 ``\topskip`` 的 ascender）。"""
-        return regular_font_paths(self._capability, serif)
+        return regular_font_paths(self._capability, serif, font_family)
 
-    def _font_setup(self, serif: bool) -> str:
+    def _font_setup(self, serif: bool, font_family: str | None = None) -> str:
         """字体声明（委托 :func:`font_setup_clauses`，与批编译共用）。"""
-        return font_setup_clauses(self._capability, serif)
+        return font_setup_clauses(self._capability, serif, font_family)
 
     def render_one(self, request: StampRequest, workdir: Path) -> StampResult:
         """编译单个请求（含缓存与有界缩小）。调用方负责 workdir 生命周期。"""
@@ -598,6 +651,258 @@ class BboxStampRenderer:
                 results[key] = future.result()
         return results
 
+    def build_ladder_tex(
+        self,
+        request: StampRequest,
+        rungs: list[tuple[float, float]],
+    ) -> tuple[str, list[tuple[int, int]]]:
+        """把若干候选档位拼成「一档一页」的 TeX；返回 (tex, 每档的行号区间)。
+
+        一次 xelatex 的成本几乎全在进程启动 + 导言区加载（实测本机 ~0.85s），
+        排版 15 个候选与排版 1 个几乎等价（实测 0.83s vs 0.83s）。顺序阶梯
+        每档一个进程，最坏要付 15 次启动；这里把「首选档之外的全部候选」压进
+        一次编译，最坏 2 次启动。选档顺序与顺序阶梯完全一致，因此**选出的字号
+        与行距不变**（质量等价），省掉的只是被丢弃候选的进程开销。
+
+        版心与单档模板同构（``TEX_HEADER``），只有 ``\\vsize`` 取
+        :data:`_LADDER_VSIZE_BP` 大常量：一档必须正好占一页，溢出的行不能被
+        分页吃掉，否则后续档位的页号会错位。溢出判定改由墨迹测量承担
+        （``_measure_page_fit`` 比 ``ink.y1`` 与 box 高度），口径同批编译。
+        """
+        parindent, hangindent = request.indentation
+        header = [
+            "\\documentclass{article}",
+            (
+                f"\\usepackage[paperwidth={request.width:.4f}bp,"
+                f"paperheight={request.height:.4f}bp,margin=0pt]{{geometry}}"
+            ),
+        ]
+        header.extend(
+            (
+                TEX_COMMON
+                % {"fontsetup": self._font_setup(request.serif, request.font_family)}
+            ).split("\n")
+        )
+        header.append("\\begin{document}")
+        lines: list[str] = list(header)
+        line_no = _tex_line_count("\n".join(header))
+        ranges: list[tuple[int, int]] = []
+        for index, (font_size, lead) in enumerate(rungs):
+            if index:
+                lines.append("\\newpage")
+                line_no += 1
+            start = line_no + 1
+            block = [
+                f"\\message{{@@S {index}@@}}",
+                (
+                    f"\\pdfpagewidth={request.width:.4f}bp "
+                    f"\\pdfpageheight={request.height:.4f}bp"
+                ),
+                (
+                    f"\\hsize={request.width:.4f}bp "
+                    f"\\vsize={_LADDER_VSIZE_BP:.4f}bp "
+                    f"\\textwidth={request.width:.4f}bp "
+                    f"\\textheight={request.height:.4f}bp "
+                    f"\\columnwidth={request.width:.4f}bp "
+                    f"\\linewidth={request.width:.4f}bp"
+                ),
+                (
+                    f"\\setlength{{\\parindent}}{{{parindent:.4f}bp}}"
+                    "\\setlength{\\parskip}{0pt}"
+                ),
+            ]
+            topskip = topskip_clause(
+                self._capability,
+                request.serif,
+                font_size,
+                request.ascent_top,
+                request.font_family,
+            )
+            if topskip:
+                block.append(topskip.rstrip("\n"))
+            block.append(
+                f"\\fontsize{{{font_size:.4f}bp}}{{{lead:.4f}bp}}\\selectfont"
+            )
+            if hangindent:
+                block.append(
+                    f"\\setlength{{\\hangindent}}{{{hangindent:.4f}bp}}\\hangafter=1"
+                )
+            block.extend([request.body, f"\\message{{@@E {index}@@}}"])
+            for line in block:
+                lines.append(line)
+                line_no += _tex_line_count(line)
+            ranges.append((start, line_no))
+        lines.append("\\end{document}")
+        return "\n".join(lines) + "\n", ranges
+
+    def _try_ladder_batch(
+        self,
+        request: StampRequest,
+        workdir: Path,
+        rungs: list[tuple[float, float]],
+        stem: str,
+        *,
+        priority_base: int = 1,
+        request_id: str | None = None,
+        parent_id: str | None = None,
+    ) -> dict | None:
+        """一次编译评完 ``rungs`` 全部候选，按优先级返回首个通过者。
+
+        返回 ``None`` 表示这条快路不可用（编译失败/页数或标记归属不符），调用方
+        必须回退到逐档顺序编译——批编译只是省进程，不改变可达的结果集。
+
+        返回 dict：``{"index", "pdf_path", "reason", "attempts", "logs",
+        "candidate_id"}``；``index`` 是 ``rungs`` 内下标，``index is None``
+        表示全部候选都不通过（附 ``terminal`` 说明是否为内容级失败，与顺序阶梯
+        同样不再重试）。
+
+        诊断口径与顺序阶梯一致：**每评一档记一条** ``candidate_evaluated``
+        （优先级 ``priority_base + index``、父链逐档相接、逐档 fit 原因），
+        产物是整轮合并的 TeX/PDF/日志 + 该档的页号与行号区间（同批渲染器）；
+        ``candidate_id`` 是最后记录的候选，供调用方续接父链。
+        """
+        from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer_batch import (
+            _attribute_log,
+        )
+        from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer_batch import (
+            _extract_page,
+        )
+
+        if not rungs:
+            return None
+        batch_dir = workdir / f"{stem}_ladder"
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        tex, ranges = self.build_ladder_tex(request, rungs)
+        recorder = self._debug_recorder
+        batch_id = recorder.new_id("batch") if recorder else None
+        outcome = self._compile_tex(
+            tex, batch_dir, f"{stem}_ladder", rungs[0][0], batch_id=batch_id
+        )
+        pdf_path = batch_dir / f"{stem}_ladder.pdf"
+        if not outcome["compiled"] or not pdf_path.is_file():
+            # ``-halt-on-error`` 下任一档 TeX 报错会掐掉整轮：交回顺序阶梯，
+            # 让它按原语义逐档判定（首选档已单独编过，通常不会走到这里）。
+            return None
+        attribution = _attribute_log(outcome.get("log") or "", ranges)
+        if attribution.get("preamble_error"):
+            return None
+        if len(attribution.get("starts") or ()) != len(rungs):
+            # 标记数与档位数不符 → 归属不可信，不能按页号选档。
+            return None
+        import pymupdf
+
+        with pymupdf.open(pdf_path) as doc:
+            if doc.page_count != len(rungs):
+                return None
+        segments = attribution.get("segments") or {}
+        artifacts = self._archive_ladder_artifacts(
+            request, batch_id, tex, batch_dir, f"{stem}_ladder"
+        )
+        reasons: list[str] = []
+        logs: list[str] = []
+
+        def record(index, fits, fit_reason, *, selected=False):
+            nonlocal parent_id
+            font_size, lead = rungs[index]
+            parent_id = self._record_candidate(
+                request,
+                request_id=request_id,
+                candidate_id=recorder.new_id("candidate") if recorder else None,
+                priority=priority_base + index,
+                font_size=font_size,
+                lead=lead,
+                parent_id=parent_id,
+                tex=tex,
+                attempt_dir=batch_dir,
+                stem=f"{stem}_ladder",
+                status="ok" if fits else "failed",
+                reason=fit_reason,
+                selected=selected,
+                fit={"fits": bool(fits), "reason": fit_reason},
+                batch_id=batch_id,
+                pdf_page_index=index,
+                tex_line_range=list(ranges[index]),
+                artifacts=artifacts,
+            )
+
+        for index, (font_size, _lead) in enumerate(rungs):
+            bucket = segments.get(index) or {}
+            errors = bucket.get("errors") or []
+            logs.extend(errors[:1])
+            if errors:
+                reasons.append(f"b{index}:compile-failed")
+                record(index, False, "compile-failed")
+                continue
+            fits, fit_reason, _ = _measure_fit(
+                pdf_path,
+                request.width,
+                request.height,
+                request.expected_text,
+                page_index=index,
+            )
+            if bucket.get("overfull_hbox"):
+                fits, fit_reason = False, "overfull-hbox"
+            if bucket.get("overfull_vbox"):
+                fits, fit_reason = False, "overfull-vbox"
+            if fits:
+                out_path = batch_dir / f"{stem}_b{index}.pdf"
+                if not _extract_page(pdf_path, index, out_path):
+                    return None
+                record(index, True, fit_reason, selected=True)
+                return {
+                    "index": index,
+                    "pdf_path": out_path,
+                    "font_size": font_size,
+                    "reason": "ok",
+                    "attempts": index + 1,
+                    "logs": logs,
+                    "candidate_id": parent_id,
+                }
+            reasons.append(f"b{index}:{fit_reason}")
+            record(index, False, fit_reason)
+            if fit_reason in ("text-mismatch", "no-extractable-text"):
+                # 内容级失败：缩字号修不了，与顺序阶梯一样立刻停。
+                return {
+                    "index": None,
+                    "terminal": True,
+                    "reason": ";".join(reasons),
+                    "attempts": index + 1,
+                    "logs": logs,
+                    "candidate_id": parent_id,
+                }
+        return {
+            "index": None,
+            "terminal": False,
+            "reason": ";".join(reasons),
+            "attempts": len(rungs),
+            "logs": logs,
+            "candidate_id": parent_id,
+        }
+
+    def _archive_ladder_artifacts(
+        self, request: StampRequest, batch_id: str | None, tex: str, batch_dir: Path, stem: str
+    ) -> dict | None:
+        """归档批阶梯的整轮证据：一份 tex/pdf/log 供该轮全部档位候选共享引用。"""
+        recorder = self._debug_recorder
+        if not recorder or not batch_id:
+            return None
+        safe_key = re.sub(r"[^0-9A-Za-z_-]", "_", str(request.key))[:24]
+        artifacts = {
+            "tex": recorder.archive_text(
+                "build", f"compile/{safe_key}/{batch_id}.tex", tex
+            )
+        }
+        for suffix in ("pdf", "log"):
+            path = batch_dir / f"{stem}.{suffix}"
+            artifacts[suffix] = (
+                recorder.archive_file(
+                    "build", f"compile/{safe_key}/{batch_id}.{suffix}", path
+                )
+                if path.is_file()
+                else None
+            )
+        return artifacts
+
     def _render_uncached(
         self, request: StampRequest, workdir: Path, *, request_id: str | None = None
     ) -> StampResult:
@@ -635,6 +940,48 @@ class BboxStampRenderer:
         parent_id = request.debug_parent
         try:
             for step, (font_size, lead) in enumerate(ladder):
+                if step == 1 and self._batch_ladder:
+                    # 首选档没过 → 剩余候选一次编完（见 build_ladder_tex）。
+                    # 快路不可用时返回 None，下面的顺序阶梯原样兜底。
+                    batched = self._try_ladder_batch(
+                        request,
+                        workdir,
+                        ladder[1:],
+                        stem,
+                        priority_base=1,
+                        request_id=request_id,
+                        parent_id=parent_id,
+                    )
+                    if batched is not None:
+                        logs.extend(batched.get("logs") or [])
+                        result.compile_attempts = 1 + int(batched["attempts"])
+                        parent_id = batched.get("candidate_id") or parent_id
+                        hit = batched.get("index")
+                        if hit is not None:
+                            picked_size, picked_lead = ladder[1 + hit]
+                            result.ok = True
+                            result.pdf_path = str(batched["pdf_path"])
+                            result.font_size = picked_size
+                            result.scale = picked_size / request.font_size
+                            result.lead = picked_lead
+                            result.reason = "ok"
+                            result.log_excerpt = logs
+                            result.debug_ref = {
+                                "candidate_id": parent_id,
+                                "request_id": request_id,
+                            }
+                            self._record_selected(
+                                request, parent_id, 1 + hit, request_id=request_id
+                            )
+                            return result
+                        reasons.append(batched["reason"])
+                        result.reason = ";".join(reasons)
+                        result.log_excerpt = logs
+                        result.debug_ref = {
+                            "candidate_id": parent_id,
+                            "request_id": request_id,
+                        }
+                        return result
                 result.compile_attempts = step + 1
                 attempt_dir = workdir / f"{stem}_s{step}"
                 attempt_dir.mkdir(parents=True, exist_ok=True)
@@ -653,6 +1000,7 @@ class BboxStampRenderer:
                     hangindent=hangindent,
                     topskip=request.ascent_top,
                     serif=request.serif,
+                    font_family=request.font_family,
                 )
                 outcome = self._compile_tex(
                     tex, attempt_dir, stem, font_size, debug_candidate=candidate_id
@@ -752,6 +1100,7 @@ class BboxStampRenderer:
         font_size: float,
         *,
         debug_candidate: str | None = None,
+        **debug_context,
     ) -> dict:
         tex_path = workdir / f"{stem}.tex"
         tex_path.write_text(tex, encoding="utf-8")
@@ -770,6 +1119,7 @@ class BboxStampRenderer:
                 argv,
                 timeout=self._timeout,
                 candidate=debug_candidate,
+                **debug_context,
             )
             if recorder
             else contextlib.nullcontext()
@@ -805,6 +1155,8 @@ class BboxStampRenderer:
             "overfull_hbox": overfull,
             "overfull_vbox": overfull_vbox,
             "errors": errors,
+            # 原始日志：阶梯批编译要按 @@S n@@ 标记把 overfull 归属到具体档位。
+            "log": log,
         }
 
     # ------------------------------------------------------------------
@@ -907,30 +1259,37 @@ class BboxStampRenderer:
         reason: str | None,
         selected: bool = False,
         fit: dict | None = None,
+        batch_id: str | None = None,
+        pdf_page_index: int | None = None,
+        tex_line_range: list[int] | None = None,
+        artifacts: dict | None = None,
     ) -> str | None:
         """归档候选的 TeX/PDF/日志并发布 ``candidate_evaluated`` 事件。
 
         返回该候选 id（供父链传递）；recorder 关闭时原样返回 ``parent_id``。
-        缺失产物（如超时无 PDF）如实记 ``None``，不伪造。
+        缺失产物（如超时无 PDF）如实记 ``None``，不伪造。批阶梯的档位候选传入
+        整轮共享的 ``artifacts``（不再逐档归档）并带 ``batch_id`` / 页号 / 行号
+        区间，口径同批渲染器。
         """
         recorder = self._debug_recorder
         if not recorder or not candidate_id:
             return parent_id
-        safe_key = re.sub(r"[^0-9A-Za-z_-]", "_", str(request.key))[:24]
-        artifacts = {
-            "tex": recorder.archive_text(
-                "build", f"compile/{safe_key}/{candidate_id}.tex", tex
-            )
-        }
-        for suffix in ("pdf", "log"):
-            path = attempt_dir / f"{stem}.{suffix}"
-            artifacts[suffix] = (
-                recorder.archive_file(
-                    "build", f"compile/{safe_key}/{candidate_id}.{suffix}", path
+        if artifacts is None:
+            safe_key = re.sub(r"[^0-9A-Za-z_-]", "_", str(request.key))[:24]
+            artifacts = {
+                "tex": recorder.archive_text(
+                    "build", f"compile/{safe_key}/{candidate_id}.tex", tex
                 )
-                if path.is_file()
-                else None
-            )
+            }
+            for suffix in ("pdf", "log"):
+                path = attempt_dir / f"{stem}.{suffix}"
+                artifacts[suffix] = (
+                    recorder.archive_file(
+                        "build", f"compile/{safe_key}/{candidate_id}.{suffix}", path
+                    )
+                    if path.is_file()
+                    else None
+                )
         record = CompileCandidate(
             id=candidate_id,
             paragraph_id=str(request.key),
@@ -944,12 +1303,15 @@ class BboxStampRenderer:
             font_size=round(float(font_size), 3),
             lead=round(float(lead), 3),
             parent_id=parent_id,
-            font={"serif": bool(request.serif)},
+            batch_id=batch_id,
+            pdf_page_index=pdf_page_index,
+            tex_line_range=tex_line_range,
+            font={"serif": bool(request.serif), "font_family": request.font_family},
             status=status,
             fit=fit or {},
             selected=selected,
             reason=reason,
-            artifacts=artifacts,
+            artifacts=dict(artifacts),
         )
         payload = record.to_dict()
         snapshot = recorder.write_snapshot(

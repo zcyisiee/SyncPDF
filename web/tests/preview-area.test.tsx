@@ -192,7 +192,7 @@ describe('PreviewArea bbox 降级与模式', () => {
       </>,
     );
     await screen.findAllByText('正在加载 PDF…');
-    expect(screen.getByText(/点击预览里的段落框查看该段/)).toBeInTheDocument();
+    expect(screen.getByText(/点击预览里的原文框查看该段/)).toBeInTheDocument();
 
     act(() => uiStore.getState().setSelectedParagraph('P01-001'));
     // 选中段落 id 显示在右侧面板头部（tab 行右侧，旧版「已选中段落」独立条已合并）
@@ -205,7 +205,7 @@ describe('PreviewArea bbox 降级与模式', () => {
     ).not.toBeNull();
   });
 
-  it('编译产物存在：工具条右侧的下载链接带名字里的修订号 + 状态条显示最新', async () => {
+  it('工具条不再有导出/下载槽（入口移到右栏归档 tab）；ok 不 stale 时也没有常驻状态条', async () => {
     mockApiFetch({
       [`/api/v1/documents/${DID}`]: () =>
         jsonResponse({
@@ -230,28 +230,21 @@ describe('PreviewArea bbox 降级与模式', () => {
     renderWithQuery(<PreviewArea did={DID} />);
 
     await screen.findAllByText('正在加载 PDF…');
-    const link = (await waitFor(() => {
-      const node = document.querySelector('[data-od-id="download-button"]');
-      expect(node?.getAttribute('data-enabled')).toBe('true');
-      return node;
-    })) as HTMLAnchorElement;
-    expect(link.getAttribute('download')).toBe('paper.mono.r7.pdf');
-    // 服务端下载键 = output/<裸文件名>（带 ?r= 保证取到该修订的字节）
-    expect(link.getAttribute('href')).toBe(
-      `/api/v1/documents/${DID}/artifacts/output/paper.mono.pdf?r=7`,
-    );
-    // ok 且不 stale 的常驻状态条已删除（修订号在下载按钮上）
+    const toolbar = screen.getByRole('toolbar', { name: '预览工具条' });
+    // 用户决策 E：下载与导出都不在工具条上（它们在归档 tab，与版本列表同屏）
+    expect(toolbar.querySelector('[data-od-id="download-group"]')).toBeNull();
+    expect(toolbar.querySelector('[data-od-id="download-button"]')).toBeNull();
+    expect(toolbar.querySelector('[data-od-id="download-history"]')).toBeNull();
+    expect(within(toolbar).queryByRole('button', { name: /导出/ })).toBeNull();
+    // ok 且不 stale 的常驻状态条也不渲染（修订号只在下拉/工具条之外的地方）
     expect(document.querySelector('[data-od-id="compile-bar"]')).toBeNull();
   });
 
-  it('没有可下载产物：下载按钮禁用；无产物时状态条不渲染', async () => {
+  it('没有可下载产物：预览区不受影响（无下载按钮可禁用），无产物时状态条也不渲染', async () => {
     mockPreview();
     renderWithQuery(<PreviewArea did={DID} />);
     await screen.findAllByText('正在加载 PDF…');
-    expect(document.querySelector('[data-od-id="download-button"]')).toHaveAttribute(
-      'data-enabled',
-      'false',
-    );
+    expect(document.querySelector('[data-od-id="download-button"]')).toBeNull();
     expect(document.querySelector('[data-od-id="compile-bar"]')).toBeNull();
   });
 });

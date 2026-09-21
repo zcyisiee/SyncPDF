@@ -45,7 +45,7 @@ describe('CompileBar 状态', () => {
     uiStore.setState({ selectedParagraphId: null });
     renderWithQuery(<CompileBar did={DID} compile={{ status: 'ok', revision: 1, stale: true }} draftRevision={2} />);
     expect(screen.getByRole('button', { name: '编译选中块' })).toBeDisabled();
-    expect(screen.getByText(/请先选中一个段落框/)).toBeInTheDocument();
+    expect(screen.getByText(/请先选中一个译文框/)).toBeInTheDocument();
   });
   it('running：编译中 + 脉冲 + 编辑已禁用（不发任何请求也看得见）', async () => {
     mockBar();

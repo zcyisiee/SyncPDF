@@ -1,14 +1,16 @@
 """Serve-side streaming preview: worker pool sizing, page routing, spawn env.
 
-Guards the parallel preview compile path: blocks on the same PDF page must
-serialize (no lost page patch), the worker count comes from
-``BDT_SERVE_PREVIEW_WORKERS`` bounded to 1..8, and the job runner injects the
-variable into the translation subprocess environment.
+Guards the parallel preview compile path: blocks on the same PDF page render
+concurrently but commit their page patch under one page lock (no lost page
+patch), the worker count comes from ``BDT_SERVE_PREVIEW_WORKERS`` bounded to
+1..MAX_PREVIEW_WORKERS, and the job runner injects the variable into the
+translation subprocess environment.
 """
 
 import json
 import pickle
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
@@ -16,8 +18,8 @@ from babeldoc_tools.serve.jobs import JobRecord
 from babeldoc_tools.serve.jobs import utc_now
 from babeldoc_tools.serve.store import DocumentStore
 from babeldoc_tools.serve.stream_preview import MAX_PREVIEW_WORKERS
+from babeldoc_tools.serve.stream_preview import PageLocks
 from babeldoc_tools.serve.stream_preview import ServeStreamPreview
-from babeldoc_tools.serve.stream_preview import _lock_index
 from babeldoc_tools.serve.stream_preview import _page_of
 from babeldoc_tools.serve.stream_preview import preview_workers_from_environ
 
@@ -26,11 +28,19 @@ def test_preview_workers_env_parsing():
     default = {"BDT_SERVE_PREVIEW_WORKERS": None}
     assert preview_workers_from_environ(default) == MAX_PREVIEW_WORKERS
     assert preview_workers_from_environ({"BDT_SERVE_PREVIEW_WORKERS": "3"}) == 3
-    # 越界夹到 [1, 8]，非法值回缺省：环境变量来自启动脚本，坏值不炸翻译。
-    assert preview_workers_from_environ({"BDT_SERVE_PREVIEW_WORKERS": "99"}) == 8
+    # 越界夹到 [1, 上限]，非法值回缺省：环境变量来自启动脚本，坏值不炸翻译。
+    # 上限随机器核数走（见 MAX_PREVIEW_WORKERS），所以断言语义而不是写死 8。
+    assert preview_workers_from_environ({"BDT_SERVE_PREVIEW_WORKERS": "99"}) == (
+        MAX_PREVIEW_WORKERS
+    )
     assert preview_workers_from_environ({"BDT_SERVE_PREVIEW_WORKERS": "0"}) == 1
-    assert preview_workers_from_environ({"BDT_SERVE_PREVIEW_WORKERS": "abc"}) == 8
-    assert preview_workers_from_environ({"BDT_SERVE_PREVIEW_WORKERS": " "}) == 8
+    assert preview_workers_from_environ({"BDT_SERVE_PREVIEW_WORKERS": "abc"}) == (
+        MAX_PREVIEW_WORKERS
+    )
+    assert preview_workers_from_environ({"BDT_SERVE_PREVIEW_WORKERS": " "}) == (
+        MAX_PREVIEW_WORKERS
+    )
+    assert 1 <= MAX_PREVIEW_WORKERS <= 16
 
 
 def test_pid_page_extraction():
@@ -39,20 +49,17 @@ def test_pid_page_extraction():
     assert _page_of("not-a-pid") is None
 
 
-def test_same_page_blocks_share_one_lock():
-    """同页块必须路由到同一个 worker 槽：BlockCompiler.compile 对页状态是
-    读-改-写，两个同页块并行会互相覆盖 patch。"""
-    assert _lock_index("P01-001", 8) == _lock_index("P01-999", 8)
-    assert _lock_index("P01-001", 8) != _lock_index("P02-001", 8)
-    # 前 8 页在 8 worker 下互不共槽（页数 ≤ worker 数时全并行）。
-    assert len({_lock_index(f"P{n:02d}-001", 8) for n in range(1, 9)}) == 8
-    # worker=1 退化为全串行（旧行为）。
-    assert len({_lock_index(f"P{n:02d}-001", 1) for n in range(1, 9)}) == 1
+def test_page_locks_same_page_same_lock():
+    """同页恒同一把锁、不同页各自一把：页 patch 状态的读-改-写靠它串行。"""
+    locks = PageLocks()
+    assert locks.get(1) is locks.get(1)
+    assert locks.get(1) is not locks.get(2)
+    assert len({id(locks.get(n)) for n in range(1, 9)}) == 8
 
 
 def test_concurrent_page_compile_keeps_all_patches(tmp_path):
     """端到端守卫：同页多个块并发提交（各自加页锁后做读-改-写），
-    local_pages 的 patch 一个不丢。锁路由与 ServeStreamPreview._compile 一致。"""
+    local_pages 的 patch 一个不丢。锁路由与 ServeStreamPreview 一致。"""
     from babeldoc_tools.serve.store import DocumentStore
 
     store = DocumentStore.for_root(tmp_path)
@@ -63,7 +70,7 @@ def test_concurrent_page_compile_keeps_all_patches(tmp_path):
         )
 
     workers = 8
-    locks = [threading.Lock() for _ in range(workers)]
+    locks = PageLocks()
     # 读-改-写窗口故意拉宽：所有线程都读到旧 state 后才允许写回，
     # 不加锁时并行提交必然互相覆盖。
     loaded = threading.Barrier(workers)
@@ -75,7 +82,7 @@ def test_concurrent_page_compile_keeps_all_patches(tmp_path):
             ).fetchone()
             state = json.loads(row[0]) if row else {"patches": {}}
         loaded.wait(timeout=5)  # 所有线程都持有旧 state 后才写回
-        with locks[_lock_index(pid, workers)]:
+        with locks.get(_page_of(pid)):
             with database._lock, database.connection:
                 fresh = database.connection.execute(
                     "SELECT payload FROM local_pages"
@@ -103,6 +110,63 @@ def test_concurrent_page_compile_keeps_all_patches(tmp_path):
     database.close()
 
 
+def test_same_page_blocks_render_concurrently(tmp_path, monkeypatch):
+    """回归：同页块的贴片渲染必须并行，只有页状态段才串行。
+
+    此前同页块整块串行（每槽位一条单线程队列）：58 页文档里一页 21 个块要排
+    21 × 6s 的长队，页合成最慢 89s、均值 41s，而单块 p50 只有 4.6s——是流式
+    预览尾部最大的等待来源。现在编译器拿到的是**页锁**而不是队列：这里断言
+    同页两个块能同时进入编译（都在门内等着），且拿到的是同一把锁。
+    """
+    pids = ["P01-001", "P01-002"]
+    gates = {pid: threading.Event() for pid in pids}
+    started = {pid: threading.Event() for pid in pids}
+    preview, fake, _did, _job = _start_preview(
+        tmp_path,
+        monkeypatch,
+        blocks={1: pids},
+        translated=pids,
+        gates=gates,
+        started=started,
+    )
+    for pid in pids:
+        preview.submit(pid, "body", "text")
+    # 两块同时在编译中（第二块没有等第一块放行）。
+    assert all(started[pid].wait(timeout=10) for pid in pids)
+    assert fake.compiled == []
+    for gate in gates.values():
+        gate.set()
+    _drain(preview)
+    assert sorted(fake.compiled) == pids
+    lock_a, lock_b = (fake.page_locks_seen[pid] for pid in pids)
+    assert lock_a is not None and lock_a is lock_b, "同页块必须共用同一把页锁"
+    assert fake.page_composes == [(1, True)]
+    preview.close(failed=True)
+
+
+def test_foreign_stamp_republishes_already_published_page(tmp_path, monkeypatch):
+    """回归：跨页浮动贴片落到已发布页上时，该页必须重新合成。
+
+    落点页自己的块早就编完并发布了，此前 ``published`` 一刀切跳过，外来贴片
+    在预览里就是丢失的（实测 58 页文档 16 处，页资产里找不到贴片文字）。
+    """
+    preview, fake, _did, _job = _start_preview(
+        tmp_path,
+        monkeypatch,
+        blocks={1: ["P01-001"], 2: ["P02-001"]},
+        translated=["P01-001", "P02-001"],
+    )
+    preview.submit("P02-001", "body", "text")
+    _drain(preview)
+    assert fake.page_composes == [(2, True)]
+    # 第 1 页的块浮到第 2 页：主页发布一次，落点页（已发布）再合成一次。
+    fake.stamp_pages["P01-001"] = 2
+    preview.submit("P01-001", "body", "text")
+    _drain(preview)
+    assert sorted(fake.page_composes) == [(1, True), (2, True), (2, True)]
+    preview.close(failed=True)
+
+
 def test_block_compiler_caches_capability_probe(tmp_path, monkeypatch):
     """LaTeX 能力探测每实例只跑一次（kpsewhich 子进程很贵，流式预览每段一编
     不能重复探测）；线程并发首编时也只探一次。"""
@@ -124,9 +188,7 @@ def test_block_compiler_caches_capability_probe(tmp_path, monkeypatch):
     compiler = block_compile.BlockCompiler(DocumentStore.for_root(tmp_path), None)
     results = []
     with ThreadPoolExecutor(max_workers=4) as pool:
-        for future in [
-            pool.submit(compiler.capability) for _ in range(8)
-        ]:
+        for future in [pool.submit(compiler.capability) for _ in range(8)]:
             results.append(future.result())
     assert calls == [1]
     assert all(result is results[0] for result in results)
@@ -356,6 +418,8 @@ class _FakeCompiler:
         self.gates = dict(gates or {})
         self.started = dict(started or {})
         self.compiled = []
+        self.page_locks_seen = {}
+        self.stamp_pages = {}
         self.page_composes = []
         self.full_previews = []
         self.log = []
@@ -365,9 +429,10 @@ class _FakeCompiler:
         with self._log_lock:
             self.log.append(entry)
 
-    def compile_block_patch(self, record):
+    def compile_block_patch(self, record, *, page_lock=None):
         pid = record.paragraph_id
         self._record("compile", pid)
+        self.page_locks_seen[pid] = page_lock
         event = self.started.get(pid)
         if event is not None:
             event.set()
@@ -384,7 +449,12 @@ class _FakeCompiler:
                 (record.did, pid, "hash", "asset"),
             )
         self.compiled.append(pid)
-        return {"page": int(pid[1:3]), "duration_s": 0.25}
+        home = int(pid[1:3])
+        return {
+            "page": home,
+            "stamp_page": self.stamp_pages.get(pid, home),
+            "duration_s": 0.25,
+        }
 
     def compose_page_asset(self, record, page, *, complete=True, duration_s=0.0):
         self._record("compose_page", page, complete)
@@ -645,3 +715,84 @@ def test_missing_document_md_never_publishes_but_close_flushes(tmp_path, monkeyp
     preview.close(failed=False)
     assert fake.page_composes == [(1, False)]
     assert fake.full_previews == ["paper"]
+
+
+def test_shared_il_translator_built_once_under_contention(monkeypatch):
+    """16 个 worker 同时首编时 ``ILTranslator`` 只构造一次（构造期间持锁）。
+
+    此前先放锁再构造：每个线程都各建一份（实测 16 × 2.2s），既白付核时，也让
+    每个 worker 的首块各慢 2s。
+    """
+    from babeldoc.tools.agent import workflow
+    from babeldoc_tools.serve import block_compile
+
+    built = []
+    entered = threading.Barrier(8, timeout=5)
+
+    class SlowTranslator:
+        def __init__(self, _translator, _config):
+            built.append(1)
+            time.sleep(0.05)
+
+    monkeypatch.setattr(workflow, "ILTranslator", SlowTranslator)
+    monkeypatch.setattr(workflow, "SheetProtocolTranslator", lambda *_a, **_k: object())
+    monkeypatch.setattr(block_compile, "_IL_TRANSLATOR_CACHE", {})
+
+    def worker():
+        entered.wait()
+        return block_compile._shared_il_translator("en", "zh-test", None)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = [
+            future.result() for future in [pool.submit(worker) for _ in range(8)]
+        ]
+    assert built == [1]
+    assert all(result is results[0] for result in results)
+
+
+def test_hydrate_parse_lookup_is_cached(tmp_path, monkeypatch):
+    """没有解析快照的文档，``hydrate_parse`` 不该每次编译都新开数据库查一遍。
+
+    每次查找 = 新建 ``MetadataDB``（建表脚本 + commit），实测 512 次 × 0.21s；
+    答案（用 workdir）在一次 job 内不会变，短 TTL 缓存即可。
+    """
+    from babeldoc_tools.serve import block_compile
+    from babeldoc_tools.serve.database import MetadataDB
+
+    root = tmp_path / "root"
+    workdir = root / "paper"
+    workdir.mkdir(parents=True)
+    MetadataDB(root).close()
+    opened = []
+
+    class CountingDB(MetadataDB):
+        def __init__(self, base):
+            opened.append(1)
+            super().__init__(base)
+
+    monkeypatch.setattr("babeldoc_tools.serve.database.MetadataDB", CountingDB)
+    monkeypatch.setattr(block_compile, "_HYDRATE_CACHE", {})
+    for _ in range(5):
+        assert block_compile.hydrate_parse(workdir, tmp_path / "tmp") == workdir
+    assert opened == [1]
+
+
+def test_layout_detector_bounds_ort_threads(tmp_path, monkeypatch):
+    """预览编译里的版面检测器把 ORT intra-op 线程数夹住（不与 xelatex 抢核）。"""
+    from babeldoc.docvision import paddle_layout_regions
+    from babeldoc_tools.serve import block_compile
+    from babeldoc_tools.serve.store import DocumentStore
+
+    seen = {}
+
+    class FakeDetector:
+        available = True
+
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+    monkeypatch.setattr(paddle_layout_regions, "PaddleLayoutRegions", FakeDetector)
+    compiler = block_compile.BlockCompiler(DocumentStore.for_root(tmp_path), None)
+    assert compiler._layout_detector() is not None
+    assert seen["threads"] == block_compile._LAYOUT_DETECT_THREADS
+    assert 1 <= block_compile._LAYOUT_DETECT_THREADS <= 8

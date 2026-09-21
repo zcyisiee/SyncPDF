@@ -52,9 +52,8 @@ export function resetUiStore(): void {
   const fresh = createUiStore().getState();
   uiStore.setState({
     screen: 'library',
+    navWidth: fresh.navWidth,
     inspectorWidth: fresh.inspectorWidth,
-    timelineHeight: fresh.timelineHeight,
-    inspectorCollapsed: fresh.inspectorCollapsed,
     previewMode: 'target',
     previewZoom: null,
     compareLinked: true,
@@ -64,6 +63,8 @@ export function resetUiStore(): void {
     selectedParagraphIds: [],
     selectedParagraphId: null,
     dragging: null,
+    libraryMenu: null,
+    uploadRequest: 0,
   });
 }
 

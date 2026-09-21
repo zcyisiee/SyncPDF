@@ -7,6 +7,7 @@ one StampRequest; page redaction/link restoration reuse the existing overlay cod
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import hashlib
 import json
@@ -36,6 +37,140 @@ _PARSE_STATE_LOCK = threading.Lock()
 #: 批量块编译并行 worker 数上限（xelatex 是 CPU 密集进程；与流式预览同量级）。
 MAX_BATCH_WORKERS = 8
 _DEFAULT_BATCH_WORKERS = 4
+
+#: 段落行缓存的存活时间（秒）。几何在一次 job 内不变，译文会变；见 ``_rows``。
+_ROWS_CACHE_TTL_S = 5.0
+
+#: 版面检测（ONNX Runtime）的 intra-op 线程数上限。0 = 让 ORT 自己按核数铺满，
+#: 单独跑最快；但预览编译同时挂着十几个 xelatex 进程，铺满的线程池只会互相
+#: 抢核（实测 16 进程负载下 0 → 0.78s/次，4 → 0.43s/次，空载 0.33s）。
+_LAYOUT_DETECT_THREADS = 4
+
+#: 回写译文用的 ``ILTranslator``：按语言对缓存（进程内）。
+#: 构造一次要 ~0.5s，绝大部分花在 ``FontMapper``（扫字体文件）；而局部编译只用
+#: ``post_translate_paragraph``，它整条调用链只碰三个预编译占位符正则
+#: （``_formula_placeholder_pattern`` / ``_style_{left,right}_placeholder_pattern``），
+#: 既不读 ``font_mapper`` 也不读 ``translation_config``。这些正则只由 translate
+#: engine 的类决定，因此按 ``(lang_in, lang_out)`` 缓存是安全的——每块重建一个
+#: 等于给每个段落白付 0.5s（实测 356 块 ≈ 178 核秒）。
+_IL_TRANSLATOR_CACHE: dict[tuple[str, str], object] = {}
+_IL_TRANSLATOR_LOCK = threading.Lock()
+
+
+def _shared_il_translator(lang_in: str, lang_out: str, config):
+    """按语言对复用 ``ILTranslator``（只用于 ``post_translate_paragraph``）。"""
+    from babeldoc.tools.agent import workflow
+
+    key = (lang_in, lang_out)
+    # 构造期间**持锁**：16 个 worker 同时首编时若先放锁再构造，每个都会各建一份
+    # （实测 16 次 × 2.2s），既白付核时，也让每个 worker 的首块各慢 2s。后到的
+    # 线程在锁上等一份现成的，比各自再建一份便宜得多。
+    with _IL_TRANSLATOR_LOCK:
+        cached = _IL_TRANSLATOR_CACHE.get(key)
+        if cached is None:
+            cached = workflow.ILTranslator(
+                workflow.SheetProtocolTranslator(lang_in, lang_out, True), config
+            )
+            _IL_TRANSLATOR_CACHE[key] = cached
+        return cached
+
+
+class PageLayoutCache:
+    """每页一次的版面证据（PP-DocLayoutV3 区域 + 精确墨迹），按页缓存。
+
+    浮动阶梯（同栏扩 → 跨栏扩 → 跨页迁移）原本每一级都各自 ``detect_page``
+    一次同一张页面：一次检测 = 渲染位图 + ONNX 推理，实测约 0.37s，一个缩字块
+    最多付 4 次。证据只取决于 baseline 页内容（整个 job 期间不变），所以按
+    ``page_number`` 缓存一次即可，命中后浮动阶梯零检测开销。
+
+    线程安全：每页一把构建锁，多 worker 并发首次命中同一页时只检测一次。
+    """
+
+    def __init__(self, detector):
+        self.detector = detector
+        self._entries: dict[int, tuple[list, list]] = {}
+        self._guard = threading.Lock()
+        self._page_locks: dict[int, threading.Lock] = {}
+
+    def _lock_for(self, page_number: int) -> threading.Lock:
+        with self._guard:
+            return self._page_locks.setdefault(page_number, threading.Lock())
+
+    def evidence(self, page, page_number: int) -> tuple[list, list]:
+        """→ ``(regions, ink)``；``regions`` 空表示检测不可用（调用方不扩框）。"""
+        with self._guard:
+            cached = self._entries.get(page_number)
+        if cached is not None:
+            return cached
+        with self._lock_for(page_number):
+            with self._guard:
+                cached = self._entries.get(page_number)
+            if cached is not None:
+                return cached
+            from babeldoc.tools.agent import layout_refine
+
+            regions = [
+                region.box for region in layout_refine._regions_il(page, self.detector)
+            ]
+            ink = layout_refine.page_ink_rects(page) if regions else []
+            entry = (regions, ink)
+            with self._guard:
+                self._entries[page_number] = entry
+            return entry
+
+
+class FloatReservations:
+    """已落定贴片矩形的登记簿：让同页的浮动决策**互相可见**。
+
+    浮动规划的障碍集原先只有 baseline 页的版面区域和源文墨迹，而 baseline 是
+    原文页——兄弟贴片浮到哪里它一概不知。于是每个缩字块都以为落点页的顶部空白
+    带是空的，实测 84 个跨页迁移**全部**顶对齐到同一条带子，产生 119 对肉眼可见
+    的贴片重叠。这里把每个已定框按落点页登记，后续规划把它们并入障碍集，语义
+    与一次性编译路径的 ``plan_build_refinement``（``obstacles.append(expanded)``）
+    一致。
+
+    ``reserve`` 同时是**先到先得的占位**：并发 worker 落在不同页时互不影响，落在
+    同一页时由页锁串行，登记顺序即决策顺序。
+    """
+
+    def __init__(self):
+        self._by_page: dict[int, dict[str, list[float]]] = {}
+        self._lock = threading.Lock()
+
+    def load(self, page_number: int, patches: dict) -> None:
+        """把某页已持久化的 patch 框灌进登记簿（重启/续跑后的既有状态）。"""
+        with self._lock:
+            slot = self._by_page.setdefault(page_number, {})
+            for pid, patch in (patches or {}).items():
+                box = patch.get("box")
+                if box and int(patch.get("page", page_number)) == page_number:
+                    slot[pid] = [float(value) for value in box]
+
+    def obstacles(self, page_number: int, *, exclude: str) -> list[list[float]]:
+        """落在该页、且不属于 ``exclude`` 段的已定贴片框。"""
+        with self._lock:
+            return [
+                list(box)
+                for pid, box in self._by_page.get(page_number, {}).items()
+                if pid != exclude
+            ]
+
+    def reserved_ids(self) -> set[str]:
+        """全部已登记的段落 id（**不分页**）。
+
+        已登记的段落一律用它登记的贴片框当障碍，不再用原文框：它可能已经迁到
+        别的页，home 页那块原文脚印在合成时会被擦掉，继续当障碍会白挡净空。
+        """
+        with self._lock:
+            return {pid for slot in self._by_page.values() for pid in slot}
+
+    def reserve(self, pid: str, page_number: int, box) -> None:
+        """登记 ``pid`` 的最终落点（同段重复登记即覆盖，含迁回主页）。"""
+        values = [float(value) for value in box]
+        with self._lock:
+            for slot in self._by_page.values():
+                slot.pop(pid, None)
+            self._by_page.setdefault(page_number, {})[pid] = values
 
 
 def batch_workers_from_environ(environ=None) -> int:
@@ -203,6 +338,48 @@ def valid_box(box, width, height):
     return list(box)
 
 
+#: ``hydrate_parse`` 的快照查找缓存：workdir → (查找时刻, base, (snapshot, prepared) | None)。
+_HYDRATE_CACHE: dict[str, tuple[float, Path | None, tuple[str, str] | None]] = {}
+_HYDRATE_CACHE_LOCK = threading.Lock()
+_HYDRATE_CACHE_TTL_S = 5.0
+
+
+def _hydrate_lookup(workdir) -> tuple[Path | None, tuple[str, str] | None]:
+    """查 ``parse_results`` 有没有可还原的解析快照，带短 TTL 的进程内缓存。
+
+    每次查找都要新开一个 ``MetadataDB``（建表脚本 + commit，WAL 争用下要 fsync），
+    而流式预览每块编译调 1–2 次：实测 512 次 × 0.21s ≈ 109 核秒，绝大多数文档
+    根本没有快照、答案恒为「用 workdir」。快照状态只在重新解析时变（runner 置
+    ``pending``），几秒的 TTL 足够及时。
+    """
+    from babeldoc_tools.serve.database import MetadataDB
+
+    key = str(workdir)
+    now = time.monotonic()
+    with _HYDRATE_CACHE_LOCK:
+        cached = _HYDRATE_CACHE.get(key)
+        if cached is not None and now - cached[0] < _HYDRATE_CACHE_TTL_S:
+            return cached[1], cached[2]
+    base = next(
+        (p for p in (workdir, workdir.parent) if (p / "app.db").is_file()), None
+    )
+    found = None
+    if base is not None:
+        database = MetadataDB(base)
+        try:
+            row = database.connection.execute(
+                "SELECT snapshot_asset,prepared_pdf_asset FROM parse_results WHERE document_id=? AND status='ready'",
+                (workdir.name,),
+            ).fetchone()
+        finally:
+            database.close()
+        if row and row[0] and row[1]:
+            found = (str(row[0]), str(row[1]))
+    with _HYDRATE_CACHE_LOCK:
+        _HYDRATE_CACHE[key] = (time.monotonic(), base, found)
+    return base, found
+
+
 def hydrate_parse(workdir, temporary):
     """Resolve migrated immutable parser inputs without any legacy absolute path."""
     import shutil
@@ -211,19 +388,12 @@ def hydrate_parse(workdir, temporary):
     from babeldoc_tools.serve.database import MetadataDB
     from babeldoc_tools.serve.migrate import SNAPSHOT_FILES
 
-    base = next(
-        (p for p in (workdir, workdir.parent) if (p / "app.db").is_file()), None
-    )
-    if base is None:
+    base, found = _hydrate_lookup(workdir)
+    if base is None or found is None:
         return workdir
     database = MetadataDB(base)
     try:
-        row = database.connection.execute(
-            "SELECT snapshot_asset,prepared_pdf_asset FROM parse_results WHERE document_id=? AND status='ready'",
-            (workdir.name,),
-        ).fetchone()
-        if not row or not row[0] or not row[1]:
-            return workdir
+        row = found
         assets = AssetStore(base, database)
         restored = temporary / "parse"
         (restored / "agent").mkdir(parents=True, exist_ok=True)
@@ -239,6 +409,29 @@ def hydrate_parse(workdir, temporary):
         database.close()
 
 
+def _apply_font_family(meta: dict, layout: dict | None, serif_override: bool | None) -> None:
+    """按草稿 ``layout.font_family`` 覆盖该段 meta（字体族 + 拉丁衬线属性）。
+
+    ``font_family`` 命中注册表（``font_families.FONT_FAMILY_IDS``）才写
+    ``meta["font_family"]``（:meth:`overlay.LatexBboxOverlay._stamp_request` 读它，
+    渲染器据此换中文主字体；该族在本机没探测到则渲染侧回落默认族）；该族的
+    ``serif`` 与段落派生值不同时拉丁字形也跟着换 Noto Serif/Sans——除非用户显式
+    给了 ``serif``（``serif_override`` 非 None，以用户为准）。认不出的 id 不改 meta
+    （草稿校验已拦非法值）。
+    """
+    from babeldoc.format.pdf.document_il.backend.latex_bbox.font_families import (
+        font_family_spec,
+    )
+
+    family_id = (layout or {}).get("font_family")
+    family_spec = font_family_spec(family_id) if isinstance(family_id, str) else None
+    if family_spec is None:
+        return
+    meta["font_family"] = family_spec.id
+    if serif_override is None and bool(meta.get("serif")) != family_spec.serif:
+        meta["serif"] = family_spec.serif
+
+
 def render_request(
     workdir, pid, target, box, temporary, cache_root, capability=None, layout=None
 ):
@@ -248,8 +441,11 @@ def render_request(
     传入）；``None`` = 现场探测（单段编辑编译的冷路径，语义与旧版一致）。
     ``layout``：该段草稿的排版覆盖（``layout_overrides`` 键）。局部编译消费其中
     的 ``font_scale``（字号乘数）、``line_skip``（行距系数）与 ``bold``/``italic``/
-    ``serif`` 三态样式覆盖（布尔；缺省 = 跟随源文派生值）；``box`` 由调用方
-    解析成 ``box`` 参数（含 ``box_scale``），这里不再重复应用。
+    ``serif`` 三态样式覆盖（布尔；缺省 = 跟随源文派生值）；``font_family`` 是
+    中文字体族 id（``font_families.FONT_FAMILY_IDS``），命中注册表时写进该段的
+    ``meta``：中文主字体用该族，拉丁字体的衬线属性跟随该族（除非用户同时也显式
+    给了 ``serif``，那以用户为准）。``box`` 由调用方解析成 ``box`` 参数
+    （含 ``box_scale``），这里不再重复应用。
     """
 
     import pymupdf
@@ -300,10 +496,7 @@ def render_request(
     config = workflow._base_config(
         str(source), temporary, state["lang_in"], state["lang_out"]
     )
-    translator = workflow.ILTranslator(
-        workflow.SheetProtocolTranslator(state["lang_in"], state["lang_out"], True),
-        config,
-    )
+    translator = _shared_il_translator(state["lang_in"], state["lang_out"], config)
     tracker = workflow.PageTranslateTracker()
     translator.post_translate_paragraph(
         paragraph, tracker.new_paragraph(), source_input, target
@@ -311,6 +504,10 @@ def render_request(
     config.provider_ir_dir = workdir / "agent"
     config.latex_source_pdf_path = str(source)
     config.latex_source_geometry = state.get("source_line_geometry") or {}
+    # 行内公式片段裁到与 stamp 缓存同级的稳定目录（内容寻址）：片段的绝对路径
+    # 会进 LaTeX body，而 body 是 stamp 缓存键的第一项；用临时目录会让含行内公式
+    # 的段落永远不命中缓存（每次运行都是新路径）。见 overlay._fragment_path。
+    config.latex_fragment_dir = str(cache_root / "fragments")
     # Capture only the affected paragraph; no other block is fused or compiled.
     for page in state["doc"].page:
         page.pdf_paragraph = [p for p in page.pdf_paragraph if p.debug_id == pid]
@@ -340,8 +537,10 @@ def render_request(
         body = r"{\bfseries " + body + "}"
     if italic:
         body = r"{\itshape " + body + "}"
-    if flag("serif") is not None:
-        meta["serif"] = flag("serif")
+    serif_override = flag("serif")
+    if serif_override is not None:
+        meta["serif"] = serif_override
+    _apply_font_family(meta, layout, serif_override)
     font_size = meta["font_size"]
     font_scale = (layout or {}).get("font_scale")
     if isinstance(font_scale, (int, float)) and not isinstance(font_scale, bool):
@@ -393,6 +592,14 @@ class BlockCompiler:
         #: （serve 进程的编译器常驻；流式预览的编译器每 job 一个）。
         self._capability = None
         self._capability_lock = threading.Lock()
+        #: 检测器与每页版面证据缓存（浮动阶梯四级复用同一份检测结果）。
+        self._detector_lock = threading.Lock()
+        self._page_layout_cache = None
+        #: 已落定贴片矩形登记簿：浮动决策据此互相避让（见 FloatReservations）。
+        self.reservations = FloatReservations()
+        #: 段落行缓存：did → (取用时刻, rows)。见 :meth:`_rows`。
+        self._rows_cache: dict[str, tuple[float, list]] = {}
+        self._rows_lock = threading.Lock()
 
     def capability(self):
         """按需探测并缓存的 LaTeX 能力（线程安全；多 worker 并发首编时只探一次）。"""
@@ -428,7 +635,24 @@ class BlockCompiler:
             raise ToolError("stale_job", "任务已结束或取消，结果未发布")
 
     def _rows(self, did):
-        return document_blocks(self.store, did)
+        """段落行（几何 + 译文），带短 TTL 的进程内缓存。
+
+        每个块编译都要全量段落表来做「与邻居重叠」判定和取 geometry，而
+        :func:`document_blocks` 每次都要重解 ``anchors.json``（535KB）+
+        ``layout_geometry.json`` 等产物，实测约 0.48s——按块付费就是 356 × 0.48s
+        ≈ 3 分钟纯 JSON 解析。几何在一次 job 内不变；``target`` 会随翻译推进变化，
+        但调用方只用它判重叠/取几何，真正要编译的译文另走 ``draft``/``record``。
+        所以给一个很短的 TTL：既省掉重复解析，也不会让新翻译的块长时间看不见。
+        """
+        now = time.monotonic()
+        with self._rows_lock:
+            cached = self._rows_cache.get(did)
+            if cached is not None and now - cached[0] < _ROWS_CACHE_TTL_S:
+                return cached[1]
+        rows = document_blocks(self.store, did)
+        with self._rows_lock:
+            self._rows_cache[did] = (time.monotonic(), rows)
+        return rows
 
     async def submit(self, did, pid, revision):
         workdir = self.store.resolve(did)
@@ -534,19 +758,39 @@ class BlockCompiler:
         """懒加载 PP-DocLayoutV3 检测器；不可用时返回 None（不改变原行为）。"""
         from babeldoc.docvision.paddle_layout_regions import PaddleLayoutRegions
 
-        detector = getattr(self, "_detector", None)
+        with self._detector_lock:
+            detector = getattr(self, "_detector", None)
+            if detector is None:
+                detector = PaddleLayoutRegions(threads=_LAYOUT_DETECT_THREADS)
+                self._detector = detector
+            return detector if detector.available else None
+
+    def _layout_cache(self):
+        """本编译器的每页版面证据缓存；检测器不可用时返回 None。"""
+        with self._detector_lock:
+            cache = getattr(self, "_page_layout_cache", None)
+            if cache is not None:
+                return cache
+        detector = self._layout_detector()
         if detector is None:
-            detector = PaddleLayoutRegions()
-            self._detector = detector
-        return detector if detector.available else None
+            return None
+        with self._detector_lock:
+            if getattr(self, "_page_layout_cache", None) is None:
+                self._page_layout_cache = PageLayoutCache(detector)
+            return self._page_layout_cache
 
     def _float_if_shrunk(self, doc, page_number, rows, pid, box, stamp):
         """缩字/溢出贴片的浮动阶梯：同栏下/上扩 → 跨栏横向扩 → 跨页整框迁移。
 
         返回 ``(新框, 贴片页码, 浮动方式)``；无可行方案时 ``(原框, page_number, None)``。
         判定用 baseline 页的 PP-DocLayoutV3 区域 + 精确墨迹（与既有扩框同一套数据，
-        见 :mod:`babeldoc.tools.agent.layout_refine`）。跨页迁移保持 x 范围不变，
-        在下一页自上而下找第一个能容纳 ``原框高 / scale`` 的空闲区间（顶对齐）。
+        见 :mod:`babeldoc.tools.agent.layout_refine`），**并含同页已落定的兄弟贴片
+        框**（``self.reservations`` 登记簿）：baseline 是原文页，只看它的话每个块都
+        以为落点是空的，实测会让全部跨页迁移叠在同一条顶部净空里。每页的检测证据
+        按页缓存一次，浮动阶梯四级复用同一份。
+
+        跨页迁移保持 x 范围不变，在下一页自上而下找第一个能容纳
+        ``原框高 / scale`` 的空闲区间（顶对齐）。
         """
         from babeldoc.tools.agent import layout_refine
 
@@ -557,16 +801,26 @@ class BlockCompiler:
         )
         if reason is None or not layout_refine.refine_enabled():
             return box, page_number, None
-        detector = self._layout_detector()
-        if detector is None:
+        cache = self._layout_cache()
+        if cache is None:
             return box, page_number, None
+        detector = cache.detector
         page = doc[page_number - 1]
-        expanded = layout_refine.plan_page_expansion(page, box, detector)
+        evidence = cache.evidence(page, page_number)
+        reserved = self._page_obstacles(rows, pid, page_number)
+        expanded = layout_refine.plan_page_expansion(
+            page, box, detector, evidence=evidence, reserved=reserved
+        )
         if expanded is not None:
             return list(expanded), page_number, "expand"
         for direction in ("right", "left"):
             widened = layout_refine.plan_widen_page_expansion(
-                page, box, detector, direction=direction
+                page,
+                box,
+                detector,
+                direction=direction,
+                evidence=evidence,
+                reserved=reserved,
             )
             if widened is not None and self._float_box_is_clear(
                 rows, pid, page_number, widened
@@ -580,18 +834,46 @@ class BlockCompiler:
         required = (box[3] - box[1]) / min(max(float(scale), 0.05), 1.0) if scale else (
             box[3] - box[1]
         ) * 1.2
+        landing = next_index + 1
         moved = layout_refine.plan_next_page_float(
-            doc[next_index], box, detector, required_height=required
+            doc[next_index],
+            box,
+            detector,
+            required_height=required,
+            evidence=cache.evidence(doc[next_index], landing),
+            reserved=self._page_obstacles(rows, pid, landing),
         )
-        if moved is not None and self._float_box_is_clear(
-            rows, pid, next_index + 1, moved
-        ):
-            return list(moved), next_index + 1, "next-page"
+        if moved is not None and self._float_box_is_clear(rows, pid, landing, moved):
+            return list(moved), landing, "next-page"
         return box, page_number, None
 
-    @staticmethod
-    def _float_box_is_clear(rows, pid, page_number, box):
-        """浮动框不与目标页上其它 block 的版面框相交（区域/墨迹之外的第二道保险）。"""
+    def _page_obstacles(self, rows, pid, page_number):
+        """浮动规划的「兄弟」障碍集：已定贴片框 + 尚未编译的段落原文框。
+
+        只看已定贴片还不够：流式预览里兄弟段可能**还没编译**，此时它在版面上
+        仍占着原文框那块地（合成时基线原文就画在那里）。区域检测虽然多半能覆盖
+        这些墨迹，但它是启发式的——实测会把相邻小段并成一块或漏检，导致扩框
+        吃掉邻居 1pt 左右。把原文框显式并进来，判定就不依赖检测器的召回率。
+        """
+        obstacles = self.reservations.obstacles(page_number, exclude=pid)
+        reserved_ids = self.reservations.reserved_ids()
+        for other in rows:
+            if other.id == pid or other.id in reserved_ids:
+                continue
+            if other.page != page_number:
+                continue
+            geometry = other.geometry or {}
+            other_box = geometry.get("layout_box") or geometry.get("src_box")
+            if other_box:
+                obstacles.append([float(value) for value in other_box])
+        return obstacles
+
+    def _float_box_is_clear(self, rows, pid, page_number, box):
+        """浮动框不与目标页上的**原文版面框或已定贴片**相交（第二道保险）。
+
+        原实现只查 ``rows`` 的原文 layout 框，对「兄弟贴片浮到同一处」完全无感
+        （原文空白区里两个贴片可以互相完全覆盖）。这里同时查登记簿。
+        """
         import pymupdf
 
         rect = pymupdf.Rect(box)
@@ -602,6 +884,9 @@ class BlockCompiler:
                 other.geometry or {}
             ).get("src_box")
             if other_box and rect.intersects(pymupdf.Rect(other_box)):
+                return False
+        for reserved in self.reservations.obstacles(page_number, exclude=pid):
+            if rect.intersects(pymupdf.Rect(reserved)):
                 return False
         return True
 
@@ -709,7 +994,46 @@ class BlockCompiler:
             "compiled_blocks": len(dirty),
         }
 
-    def compile_block_patch(self, record):
+    def _page_state(self, database, did, page_number, *, base):
+        """当前页的 patch 状态（数据库权威）；尚无行时用 ``base`` 起一份空状态。"""
+        with database._lock:
+            previous = database.connection.execute(
+                "SELECT payload FROM local_pages WHERE document_id=? AND page=?",
+                (did, page_number),
+            ).fetchone()
+        return json.loads(previous[0]) if previous else {"base": base, "patches": {}}
+
+    def _prefetch_float_evidence(self, doc, page_number, stamp):
+        """缩字贴片在进页锁**之前**先把浮动要用的版面证据算好（ORT 推理 ~0.4–1s）。
+
+        证据只取决于 baseline 页，按页缓存；在锁外算意味着同页后续块的规划
+        直接命中缓存，页锁内只剩纯几何规划。检测不可用时什么也不做。
+        """
+        from babeldoc.tools.agent import layout_refine
+
+        reason = layout_refine.expansion_reason(
+            scale=getattr(stamp, "scale", None),
+            ok=bool(getattr(stamp, "ok", False)),
+            reason=getattr(stamp, "reason", None),
+        )
+        if reason is None or not layout_refine.refine_enabled():
+            return
+        cache = self._layout_cache()
+        if cache is None:
+            return
+        cache.evidence(doc[page_number - 1], page_number)
+        if page_number < doc.page_count and not doc[page_number].rotation:
+            cache.evidence(doc[page_number], page_number + 1)
+
+    def compile_block_patch(self, record, *, page_lock=None):
+        """编译一个块的贴片并写入该页 patch 状态。
+
+        ``page_lock``：调用方提供的**页锁**（同页块并发时必传）。贴片渲染本身只
+        取决于译文与框，不持锁并行跑；只有依赖页状态的三段持锁：读 patch 状态
+        + 浮动规划/占位、以及最后的读-改-写提交。此前整个函数都在页锁（或同页
+        单线程队列）里串行，一页二十个块要排 20 × 6s 的长队，是流式预览尾部
+        最大的等待来源。
+        """
         import pymupdf
 
         started = time.monotonic()
@@ -756,18 +1080,14 @@ class BlockCompiler:
             if source is None:
                 raise ToolError("compile_failed", "prepared PDF 不可用")
             outputs = [source]
+        lock = page_lock if page_lock is not None else contextlib.nullcontext()
         # Capture base once. Subsequent local edits always compose from immutable pages.
-        with database._lock:
-            previous = database.connection.execute(
-                "SELECT payload FROM local_pages WHERE document_id=? AND page=?",
-                (did, row.page),
-            ).fetchone()
-        state = (
-            json.loads(previous[0])
-            if previous
-            else {"base": assets.put(outputs[0], kind="baseline"), "patches": {}}
-        )
-        with pymupdf.open(assets.resolve(state["base"])) as baseline:
+        # 资产按内容寻址：同页两个块并发首编各 put 一次 baseline 也只落一份。
+        state = self._page_state(database, did, row.page, base=None)
+        if state["base"] is None:
+            state["base"] = assets.put(outputs[0], kind="baseline")
+        base = state["base"]
+        with pymupdf.open(assets.resolve(base)) as baseline:
             index = row.page - 1
             if index < 0 or index >= baseline.page_count:
                 raise ToolError("bbox_invalid", "block 页码与 PDF 不一致")
@@ -790,14 +1110,12 @@ class BlockCompiler:
                         )
             temporary_root = self.store.store_base / "tmp"
             temporary_root.mkdir(exist_ok=True)
-            prev_stamp_page = int(
-                (state["patches"].get(pid) or {}).get("page", row.page)
-            )
             with tempfile.TemporaryDirectory(
                 prefix=record.job_id + "-", dir=temporary_root
             ) as folder:
                 temporary = Path(folder)
                 cache_root = self.store.store_base / "cache/stamps"
+                # 不持页锁：贴片只取决于译文与框，同页块可以并行渲染。
                 stamp, hit = render_request(
                     workdir,
                     pid,
@@ -808,13 +1126,26 @@ class BlockCompiler:
                     capability=self.capability(),
                     layout=layout,
                 )
+                self._prefetch_float_evidence(baseline, row.page, stamp)
                 # P6+浮动：被缩字/溢出时按当前译文版面找净空——同栏下/上扩、
                 # 跨栏横向扩、跨页整框迁移（PP-DocLayoutV3 对译文页重识别），
-                # 避免为了塞进原框而缩字号。重渲染失败（超时/TeX 错）不算升级：
-                # 保留原来可用的贴片。
-                float_box, stamp_page, floated = self._float_if_shrunk(
-                    baseline, row.page, rows, pid, box, stamp
-                )
+                # 避免为了塞进原框而缩字号。规划依赖同页已落定的贴片，持页锁；
+                # 选中的落点先占位再放锁重渲染，兄弟块规划时已能避开它。
+                with lock:
+                    state = self._page_state(database, did, row.page, base=base)
+                    # 已持久化的本页 patch 进登记簿：重启/续跑/单段重编时，浮动
+                    # 决策同样要看见既有贴片（登记簿是进程内的，数据库才是跨进程
+                    # 的权威状态）。
+                    self.reservations.load(row.page, state.get("patches") or {})
+                    prev_stamp_page = int(
+                        (state["patches"].get(pid) or {}).get("page", row.page)
+                    )
+                    float_box, stamp_page, floated = self._float_if_shrunk(
+                        baseline, row.page, rows, pid, box, stamp
+                    )
+                    if floated:
+                        self.reservations.reserve(pid, stamp_page, float_box)
+                # 重渲染失败（超时/TeX 错）不算升级：保留原来可用的贴片。
                 if floated:
                     try:
                         if stamp_page != row.page:
@@ -840,50 +1171,58 @@ class BlockCompiler:
                     else:
                         float_box, stamp_page, floated = box, row.page, None
                 stamp_asset = assets.put(Path(stamp.pdf_path), kind="stamp")
-                state["patches"][pid] = {
-                    "asset": stamp_asset,
-                    "box": box,
-                    "page": stamp_page,
-                    "old_box": geometry.get("rendered_box")
-                    or geometry.get("layout_box")
-                    or geometry.get("src_box"),
-                    "input": {
-                        "target": target,
-                        "layout": edit.layout if edit else None,
-                    },
-                }
-                if floated:
-                    self.store.database.append_event(
-                        record.job_id,
-                        did,
-                        "compile_float",
-                        {
-                            "paragraph_id": pid,
-                            "kind": floated,
-                            "page": stamp_page,
-                            "box": [round(float(v), 2) for v in box],
+                with lock:
+                    # 登记最终落点（含未浮动/浮动失败回退原框的情形）：后续块的
+                    # 浮动规划要把它当障碍，才不会叠上来。
+                    self.reservations.reserve(pid, stamp_page, box)
+                    state = self._page_state(database, did, row.page, base=base)
+                    state["patches"][pid] = {
+                        "asset": stamp_asset,
+                        "box": box,
+                        "page": stamp_page,
+                        "old_box": geometry.get("rendered_box")
+                        or geometry.get("layout_box")
+                        or geometry.get("src_box"),
+                        "input": {
+                            "target": target,
+                            "layout": edit.layout if edit else None,
                         },
-                        block_id=pid,
-                    )
-        input_hash = hashlib.sha256(
-            json.dumps(state, sort_keys=True).encode()
-        ).hexdigest()
-        with database._lock, database.connection:
-            database.connection.execute("BEGIN IMMEDIATE")
-            current = database.draft(did)
-            if (current or {"revision": 0})["revision"] != revision:
-                raise ToolError("stale_job", "草稿已更新，旧编译结果未发布")
-            if record.cancel_requested_at is not None or record.status != "running":
-                raise ToolError("stale_job", "任务已取消，编译结果未发布")
-            self._check_job(database, record)
-            database.connection.execute(
-                "INSERT OR REPLACE INTO local_pages VALUES (?,?,?)",
-                (did, row.page, json.dumps(state)),
-            )
-            database.connection.execute(
-                "INSERT OR REPLACE INTO compile_blocks(document_id,block_id,input_hash,patch_asset,status,target_size) VALUES (?,?,?,?,?,?)",
-                (did, pid, input_hash, stamp_asset, "ok", stamp.font_size),
-            )
+                    }
+                    if floated:
+                        self.store.database.append_event(
+                            record.job_id,
+                            did,
+                            "compile_float",
+                            {
+                                "paragraph_id": pid,
+                                "kind": floated,
+                                "page": stamp_page,
+                                "box": [round(float(v), 2) for v in box],
+                            },
+                            block_id=pid,
+                        )
+                    input_hash = hashlib.sha256(
+                        json.dumps(state, sort_keys=True).encode()
+                    ).hexdigest()
+                    with database._lock, database.connection:
+                        database.connection.execute("BEGIN IMMEDIATE")
+                        current = database.draft(did)
+                        if (current or {"revision": 0})["revision"] != revision:
+                            raise ToolError("stale_job", "草稿已更新，旧编译结果未发布")
+                        if (
+                            record.cancel_requested_at is not None
+                            or record.status != "running"
+                        ):
+                            raise ToolError("stale_job", "任务已取消，编译结果未发布")
+                        self._check_job(database, record)
+                        database.connection.execute(
+                            "INSERT OR REPLACE INTO local_pages VALUES (?,?,?)",
+                            (did, row.page, json.dumps(state)),
+                        )
+                        database.connection.execute(
+                            "INSERT OR REPLACE INTO compile_blocks(document_id,block_id,input_hash,patch_asset,status,target_size) VALUES (?,?,?,?,?,?)",
+                            (did, pid, input_hash, stamp_asset, "ok", stamp.font_size),
+                        )
         result = {
             "block_id": pid,
             "page": row.page,
@@ -1071,7 +1410,7 @@ class BlockCompiler:
         return result
 
     def compile_blocks(self, record):
-        """批量块编译：同页串行、跨页并行的贴片编译，最后每页只合成一次。
+        """批量块编译：渲染并行、同页提交串行，最后每页只合成一次。
 
         每个块各自读当前草稿的 target/layout 覆盖（样式可以不一致）；单个块失败
         不中断其它块（失败清单进 error detail），全部完成后按受影响页各合成一次
@@ -1090,6 +1429,9 @@ class BlockCompiler:
         if not pids:
             raise ToolError("compile_failed", "批量编译缺少 block 清单")
         workers = batch_workers_from_environ()
+        # 进池前先把共享库建好：worker 里 read_draft 会各自开连接，库若在此刻
+        # 才由某个线程首次创建，其余线程的建库脚本会撞上它的锁。
+        database = self.store.database
         page_locks: dict[int, threading.Lock] = {}
         lock_guard = threading.Lock()
         results: dict[str, dict] = {}
@@ -1103,37 +1445,37 @@ class BlockCompiler:
 
         def one(pid):
             row = rows[pid]
-            with page_lock(row.page):
-                if record.cancel_requested_at is not None:
-                    return
-                worker = record.model_copy()
-                worker.paragraph_id = pid
-                try:
-                    result = self.compile_block_patch(worker)
-                    results[pid] = result
-                    self.store.database.append_event(
-                        record.job_id,
-                        did,
-                        "block_compiled",
-                        {
-                            "paragraph_id": pid,
-                            "page": result["page"],
-                            "duration_s": round(result["duration_s"], 3),
-                        },
-                        block_id=pid,
-                    )
-                except ToolError as exc:
-                    failures.append(
-                        {
-                            "block_id": pid,
-                            "code": exc.code,
-                            "message": str(exc),
-                        }
-                    )
-                except Exception as exc:  # noqa: BLE001 - 单块失败不拖垮整批
-                    failures.append(
-                        {"block_id": pid, "code": "compile_failed", "message": str(exc)}
-                    )
+            if record.cancel_requested_at is not None:
+                return
+            worker = record.model_copy()
+            worker.paragraph_id = pid
+            try:
+                # 页锁交给编译器：只有依赖页状态的规划与提交持锁，渲染并行。
+                result = self.compile_block_patch(worker, page_lock=page_lock(row.page))
+                results[pid] = result
+                self.store.database.append_event(
+                    record.job_id,
+                    did,
+                    "block_compiled",
+                    {
+                        "paragraph_id": pid,
+                        "page": result["page"],
+                        "duration_s": round(result["duration_s"], 3),
+                    },
+                    block_id=pid,
+                )
+            except ToolError as exc:
+                failures.append(
+                    {
+                        "block_id": pid,
+                        "code": exc.code,
+                        "message": str(exc),
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001 - 单块失败不拖垮整批
+                failures.append(
+                    {"block_id": pid, "code": "compile_failed", "message": str(exc)}
+                )
 
         with ThreadPoolExecutor(
             max_workers=workers, thread_name_prefix="block-batch"

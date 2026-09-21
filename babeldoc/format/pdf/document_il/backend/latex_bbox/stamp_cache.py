@@ -189,20 +189,49 @@ class StampCache:
                     logger.debug("清理 stamp 缓存临时文件失败", exc_info=True)
 
 
+#: 共享 stamp 缓存根目录的环境变量（serve 设置）。见 :func:`shared_cache_dir`。
+SHARED_CACHE_ENV = "BDT_LATEX_STAMP_CACHE"
+
+
+def shared_cache_dir(namespace: str, root=None) -> Path | None:
+    """共享 stamp 缓存目录：``<root>/<命名空间>``；未配置时 None。
+
+    ``root`` 缺省读 :data:`SHARED_CACHE_ENV`。命名空间已含模板版本与字体签名，
+    所以同一台机器上所有文档、所有阶段共用一个根是安全的（模板或字体一变，
+    目录自然分家）。目录名里的 ``/``、``:`` 做转义，与 serve 侧一致。
+    """
+    base = root if root is not None else os.environ.get(SHARED_CACHE_ENV)
+    if not base or not str(base).strip():
+        return None
+    return Path(str(base).strip()) / namespace.replace("/", "_").replace(":", "_")
+
+
 def build_stamp_cache(config, capability) -> StampCache | None:
-    """按配置构造 ``<working_dir>/latex_cache`` 缓存；无 working_dir 时不落盘。
+    """构造持久 stamp 缓存；无处落盘时返回 None。
+
+    目录优先取共享根（``config.latex_stamp_cache_dir`` 或 :data:`SHARED_CACHE_ENV`），
+    否则退回 ``<working_dir>/latex_cache``。**共享根很重要**：流式预览在
+    ``<store_base>/cache/stamps`` 下编好的贴片，build 阶段若只看 workdir 就会把
+    同样的东西重编一遍（实测 437 次 cache_miss / 59 次命中）。命名空间保证不同
+    模板或字体的产物不会串用。
 
     ``config.latex_debug_recompile``（``--debug-recompile``）→ 冷读绕过历史
     条目；``config.debug_recorder`` → 缓存生命周期事件。
     """
-    working_dir = getattr(config, "working_dir", None)
-    if not working_dir:
-        return None
+    namespace = cache_namespace(capability)
+    directory = shared_cache_dir(
+        namespace, getattr(config, "latex_stamp_cache_dir", None)
+    )
+    if directory is None:
+        working_dir = getattr(config, "working_dir", None)
+        if not working_dir:
+            return None
+        directory = Path(working_dir) / CACHE_DIR_NAME
     from babeldoc.debug_recorder import get_current
 
     return StampCache(
-        Path(working_dir) / CACHE_DIR_NAME,
-        namespace=cache_namespace(capability),
+        directory,
+        namespace=namespace,
         bypass_reads=bool(getattr(config, "latex_debug_recompile", False)),
         debug_recorder=getattr(config, "debug_recorder", None) or get_current(),
     )

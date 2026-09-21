@@ -121,7 +121,7 @@ export function CompileBar({ did, compile, draftRevision, busyJobId = null }: Co
       >
         <span aria-hidden="true" className="h-[6px] w-[6px] flex-none rounded-full bg-current" />
         草稿比当前 PDF 新（PDF 修订 r{revision}，草稿 r{draftRevision ?? '?'}）。
-        {selectedId ? `只编译选中块 ${selectedId}；使用已保存的内容。` : '请先选中一个段落框。'}
+        {selectedId ? `只编译选中块 ${selectedId}；使用已保存的内容。` : '请先选中一个译文框。'}
         {busyJobId === null ? null : (
           <Tooltip content={`文档有活动 job ${busyJobId}：任务期间草稿只读`}>
             <span className="font-mono text-micro text-ink-4">（有任务在跑）</span>

@@ -1,5 +1,5 @@
-/** `PreviewToolbar`：模式切换、原文模式禁用态与 tooltip、页码提交、bbox 三态与下载槽。
- * 缩放控件已删除（触控板捏合 / Ctrl+滚轮直接缩放），bbox 与下载从《更多》移出平铺。 */
+/** `PreviewToolbar`：模式切换、原文模式禁用态与 tooltip、翻页按钮 + 页码提交、缩放控件、
+ * bbox 三态（原文框 / 译文框 / 关）。导出/下载不在工具条上（在右栏归档 tab）。 */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -52,16 +52,42 @@ describe('PreviewToolbar', () => {
     expect(uiStore.getState().previewMode).toBe('target');
   });
 
-  it('bbox 图层三态（段落框 / 版面框 / 关）回调父级', () => {
+  it('bbox 图层三态（原文框 / 译文框 / 关）回调父级', () => {
     const onBboxModeChange = vi.fn();
     renderToolbar({ onBboxModeChange });
-    expect(screen.getByRole('button', { name: '段落框' })).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByRole('button', { name: '版面框' }));
+    expect(screen.getByRole('button', { name: '原文框' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '译文框' }));
     fireEvent.click(screen.getByRole('button', { name: '关' }));
     expect(onBboxModeChange.mock.calls).toEqual([['layout'], ['off']]);
   });
 
-  it('页码输入：合法值提交、越界 clamp、非法值回退（没有上一页/下一页按钮，滚轮/触控板翻页）', () => {
+  it('翻页按钮：首/末页禁用，点击翻页走 clampPage 后的页码', () => {
+    const onPageChange = vi.fn();
+    renderToolbar({ page: 3, onPageChange });
+    fireEvent.click(screen.getByRole('button', { name: '上一页' }));
+    expect(onPageChange).toHaveBeenLastCalledWith(2);
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    expect(onPageChange).toHaveBeenLastCalledWith(4);
+  });
+
+  it('翻页按钮的禁用条件：第 1 页禁上一页、末页禁下一页、无产物两个都禁、无产物页码也禁', () => {
+    const first = renderToolbar({ page: 1 });
+    expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled();
+    first.unmount();
+
+    const last = renderToolbar({ page: 21 });
+    expect(screen.getByRole('button', { name: '上一页' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+    last.unmount();
+
+    renderToolbar({ paged: false, page: 1 });
+    expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
+    expect(screen.getByRole('spinbutton', { name: '页码' })).toBeDisabled();
+  });
+
+  it('页码输入：合法值提交、越界 clamp、非法值回退', () => {
     const onPageChange = vi.fn();
     renderToolbar({ onPageChange });
     const input = screen.getByRole('spinbutton', { name: '页码' });
@@ -79,44 +105,103 @@ describe('PreviewToolbar', () => {
     expect(onPageChange).toHaveBeenCalledTimes(2);
     expect((input as HTMLInputElement).value).toBe('1');
 
-    // 上一页/下一页按钮已删除（触控板滚动即可连续翻页；Windows 按住右键拖滚轮同理）
-    expect(screen.queryByRole('button', { name: '上一页' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '下一页' })).toBeNull();
     expect(screen.getByText('/ 21 页')).toBeInTheDocument();
   });
 
-  it('没有缩放控件（触控板捏合 / Ctrl+滚轮缩放）；无产物时页码禁用', () => {
-    renderToolbar({ paged: false });
-    expect(screen.queryByRole('button', { name: '放大' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '缩小' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '适宽' })).toBeNull();
-    expect(screen.queryByRole('spinbutton', { name: '缩放百分比' })).toBeNull();
-    expect(screen.getByRole('spinbutton', { name: '页码' })).toBeDisabled();
+  it('缩放：默认适宽；点 ＋ 从 1 起步 ×1.25 → 125%；点 − 回 100%；适宽按钮回 null', () => {
+    renderToolbar();
+    expect(screen.getByText('适宽')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '适合宽度' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    expect(uiStore.getState().previewZoom).toBe(1.25);
+    expect(screen.getByText('125%')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '适合宽度' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '缩小' }));
+    expect(uiStore.getState().previewZoom).toBe(1);
+    expect(screen.getByText('100%')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '适合宽度' }));
+    expect(uiStore.getState().previewZoom).toBeNull();
+    expect(screen.getByText('适宽')).toBeInTheDocument();
   });
 
-  it('bbox 三态与下载槽直接平铺（不再藏在《更多》里）', () => {
-    renderToolbar({ download: <a href="#dl">下载 PDF</a> });
+  it('缩放步进基于当前值（当前 200%：两次 ＋ 后是 313%）', () => {
+    uiStore.setState({ previewZoom: 2 });
+    renderToolbar();
+    fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    expect(uiStore.getState().previewZoom).toBe(2.5);
+    fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    expect(uiStore.getState().previewZoom).toBe(3.125);
+    expect(screen.getByText('313%')).toBeInTheDocument();
+  });
+
+  it('bbox 三态直接平铺（不再藏在《更多》里）；工具条单行不换行、没有下载槽', () => {
+    renderToolbar();
     expect(screen.getByRole('group', { name: 'bbox 图层' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '段落框' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('link', { name: '下载 PDF' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '原文框' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByText('更多')).toBeNull();
+    // 导出/下载入口在右栏归档 tab（用户决策 E），工具条上不再有下载槽
+    expect(screen.queryByRole('link', { name: /下载/ })).toBeNull();
+    expect(document.querySelector('[data-od-id="download-group"]')).toBeNull();
+    expect(document.querySelector('[data-od-id="download-button"]')).toBeNull();
     // 悬停说明（title）在：简洁标签 + 完整解释
-    expect(screen.getByRole('button', { name: '版面框' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: '译文框' })).toHaveAttribute(
       'title',
       expect.stringContaining('拖拽'),
     );
+    const toolbar = screen.getByRole('toolbar', { name: '预览工具条' });
+    expect(toolbar.className).toContain('flex-nowrap');
+    expect(toolbar.className).not.toContain('flex-wrap');
   });
 
-  it('工具条带 data-od-id（§7.9）', () => {
+  it('工具条带 data-od-id（§7.9）与三组 od-id', () => {
     renderToolbar();
     const toolbar = screen.getByRole('toolbar', { name: '预览工具条' });
     expect(toolbar).toHaveAttribute('data-od-id', 'preview-toolbar');
+    expect(document.querySelector('[data-od-id="page-nav"]')).not.toBeNull();
+    expect(document.querySelector('[data-od-id="zoom-controls"]')).not.toBeNull();
+    expect(document.querySelector('[data-od-id="zoom-level"]')).not.toBeNull();
+    expect(document.querySelector('[data-od-id="page-count"]')).not.toBeNull();
     expect(window.localStorage.getItem(STORAGE_KEYS.bboxMode)).toBeNull();
+  });
+
+  it('文档名与状态徽标住翻页组左侧；两者都不给就不渲染占位', () => {
+    const { unmount } = renderToolbar({
+      title: 'Attention Is All You Need',
+      status: <span>已完成</span>,
+    });
+    const title = document.querySelector('[data-od-id="toolbar-title"]') as HTMLElement;
+    expect(title.textContent).toBe('Attention Is All You Need');
+    // brief 指定的排印：可收缩/截断 + 衬线 + md + ink
+    expect(title.className).toBe('min-w-0 max-w-[24ch] truncate font-serif text-md text-ink');
+    expect(document.querySelector('[data-od-id="toolbar-status"]')?.textContent).toBe('已完成');
+    // 顺序：文档名 / 状态 / 翻页组 / bbox 图层 ……（无右侧内容时不给占位元素）
+    const toolbar = screen.getByRole('toolbar', { name: '预览工具条' });
+    const order = Array.from(toolbar.children).map((node) =>
+      node.getAttribute('data-od-id') ?? node.getAttribute('role') ?? node.className,
+    );
+    expect(order[0]).toBe('toolbar-title');
+    expect(order[1]).toBe('toolbar-status');
+    expect(order.indexOf('toolbar-status')).toBeLessThan(order.indexOf('group'));
+    unmount();
+
+    // 缺省：标题与徽标都不渲染（不留空壳）
+    renderToolbar();
+    expect(document.querySelector('[data-od-id="toolbar-title"]')).toBeNull();
+    expect(document.querySelector('[data-od-id="toolbar-status"]')).toBeNull();
   });
 });
 
 describe('reader controls', () => {
-  it('compare link toggle updates session state (zoom lives on the trackpad/ctrl-wheel)', () => {
+  it('compare link toggle updates session state (trackpad/ctrl-wheel zoom still applies)', () => {
     renderToolbar();
     fireEvent.click(screen.getByRole('button', { name: '对照' }));
     fireEvent.click(screen.getByRole('button', { name: '解除联动' }));

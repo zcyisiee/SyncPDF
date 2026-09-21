@@ -1,9 +1,10 @@
 """Parallel local previews decoupled from provider stdout consumption.
 
-Completed blocks are dispatched immediately to a worker pool. Blocks on the
-same PDF page hash to the same worker, so page patch state stays serial
-(no lost updates between concurrent compiles of one page); different pages
-compile in parallel up to the configured worker count.
+Completed blocks are dispatched immediately to a shared worker pool. Stamp
+rendering (xelatex) runs fully parallel — even for blocks on the same PDF
+page; only the page-state sections (float planning against settled siblings
+and the patch read-modify-write commit) take that page's lock, so page patch
+state stays serial without serialising the expensive part.
 
 A page composes (``preview_ready``) as soon as every **in-scope** block on it
 has settled. Scope = the paragraph ids in ``agent/document.md`` (the translate
@@ -26,10 +27,16 @@ from pathlib import Path
 
 from babeldoc_tools.serve.block_compile import BlockCompiler
 from babeldoc_tools.serve.jobs import JobRecord
+from babeldoc_tools.serve.limits import MAX_PREVIEW_WORKERS
 from babeldoc_tools.serve.store import DocumentStore
 
-#: 并行预览编译 worker 数上限：xelatex 是 CPU 密集进程，8 已是单机上限。
-MAX_PREVIEW_WORKERS = 8
+__all__ = [
+    "MAX_PREVIEW_WORKERS",
+    "PageLocks",
+    "ServeStreamPreview",
+    "preview_workers_from_environ",
+    "scope_by_page",
+]
 
 #: ``P<page>-<seq>``（``markdown_view._deterministic_ids``）：页号是路由键。
 _PID_PAGE_RE = re.compile(r"^P(\d+)-")
@@ -42,7 +49,7 @@ _SETTLED_STATUSES = ("ok", "preview_failed")
 
 
 def preview_workers_from_environ(environ=None) -> int:
-    """解析 ``BDT_SERVE_PREVIEW_WORKERS``：缺省 8，非法值夹到 [1, 8]。"""
+    """解析 ``BDT_SERVE_PREVIEW_WORKERS``：缺省 = 上限，非法值夹到 [1, 上限]。"""
     raw = (environ or os.environ).get("BDT_SERVE_PREVIEW_WORKERS")
     if raw is None or not str(raw).strip():
         return MAX_PREVIEW_WORKERS
@@ -56,13 +63,6 @@ def preview_workers_from_environ(environ=None) -> int:
 def _page_of(pid: str) -> int | None:
     match = _PID_PAGE_RE.match(pid)
     return int(match.group(1)) if match else None
-
-
-def _lock_index(pid: str, workers: int) -> int:
-    """页号 → worker 槽位：同页恒同槽（串行），不同页尽量分散。"""
-    page = _page_of(pid)
-    key = page if page is not None else hash(pid)
-    return key % workers
 
 
 def scope_by_page(workdir) -> dict[int, set[str]]:
@@ -84,6 +84,18 @@ def scope_by_page(workdir) -> dict[int, set[str]]:
     return scope
 
 
+class PageLocks:
+    """按页号发锁：同页恒同一把锁，不同页各自一把（懒创建，线程安全）。"""
+
+    def __init__(self):
+        self._locks: dict[object, threading.Lock] = {}
+        self._guard = threading.Lock()
+
+    def get(self, key) -> threading.Lock:
+        with self._guard:
+            return self._locks.setdefault(key, threading.Lock())
+
+
 class ServeStreamPreview:
     def __init__(self, workdir, recorder):
         self.workdir = workdir
@@ -95,31 +107,30 @@ class ServeStreamPreview:
             Path(os.environ["BDT_SERVE_DATABASE"]).parent
         )
         self.compiler = BlockCompiler(self.store, None)
+        # 在任何 worker 线程起来之前把共享库连接建好（见 DocumentStore.database）。
+        self.database = self.store.database
         self.workers = preview_workers_from_environ()
+        # 一个共享池 + 每页一把锁。锁只包住依赖页状态的两小段（浮动规划/占位、
+        # patch 读-改-写提交，见 BlockCompiler.compile_block_patch），xelatex 渲染
+        # 本身不持锁——同页十几个块可以同时渲染。此前是「每槽位一条单线程队列、
+        # 整块编译串行」：一页 21 个块要排 21 × 6s 的长队，是 58 页文档尾部最大
+        # 的等待来源（页合成最慢 89s，均值 41s，而单块 p50 只有 4.6s）。
         self.pool = ThreadPoolExecutor(
             max_workers=self.workers, thread_name_prefix="block-preview"
         )
-        # Per-worker page locks: blocks on the same PDF page serialize their
-        # read-modify-write of the page patch state; different pages never contend.
-        self.page_locks = [threading.Lock() for _ in range(self.workers)]
+        self.page_locks = PageLocks()
         self.pending = []
         self.page_revisions = {}
         self.page_records = {}
         self.published = set()
+        self._state_lock = threading.Lock()
         #: 翻译范围（``agent/document.md`` 的 id），成页判定只看它（见模块 docstring）。
         self._scope_by_page = scope_by_page(workdir)
-
-    def _lock_for(self, pid: str) -> threading.Lock:
-        return self.page_locks[_lock_index(pid, self.workers)]
 
     def submit(self, pid, _body, _label):
         self.pending.append(self.pool.submit(self._compile, pid))
 
     def _compile(self, pid):
-        with self._lock_for(pid):
-            self._compile_locked(pid)
-
-    def _compile_locked(self, pid):
         database = self.store.database
         raw = next(
             (row for row in database.job_snapshots() if row["job_id"] == self.job_id),
@@ -136,15 +147,19 @@ class ServeStreamPreview:
         record.revision = self.revision
         home = _page_of(pid)
         if home is not None:
-            self.page_records.setdefault(home, record)
+            with self._state_lock:
+                self.page_records.setdefault(home, record)
         landing = None
         try:
-            result = self.compiler.compile_block_patch(record)
-            landing = result.get("page")
+            result = self.compiler.compile_block_patch(
+                record, page_lock=self.page_locks.get(home)
+            )
+            landing = result.get("stamp_page") or result.get("page")
             if home is not None:
-                self.page_revisions[home] = (
-                    self.page_revisions.get(home, 0.0) + result.get("duration_s", 0.0)
-                )
+                with self._state_lock:
+                    self.page_revisions[home] = self.page_revisions.get(
+                        home, 0.0
+                    ) + result.get("duration_s", 0.0)
         except Exception as exc:
             # Preview failure is visible and retryable; it does not corrupt provider
             # output or turn a partially built PDF into a successful export. The
@@ -164,16 +179,35 @@ class ServeStreamPreview:
                 {"paragraph_id": pid, "message": str(exc)},
                 block_id=pid,
             )
-        for page in ({home, landing} - {None}):
-            if page in self.published or not self._page_complete(page):
-                continue
+        for page in {home, landing} - {None}:
+            self._publish_if_complete(page, record, foreign=page != home)
+
+    def _publish_if_complete(self, page, record, *, foreign):
+        """该页所有块落定即合成发布；已发布页只在**外来贴片**新落上来时重合成。
+
+        跨页浮动的贴片可能落到一页已经发布过的页上（落点页自己的块早就编完）：
+        不重合成的话它在预览里就是丢失的（实测 58 页文档 16 处）。合成与该页
+        的 patch 提交共用页锁，二者对 ``local_pages`` 都是读-改-写。
+        """
+        with self.page_locks.get(page):
+            with self._state_lock:
+                already = page in self.published
+            if already and not foreign:
+                return
+            # 落点页不在翻译范围（没有自己的块）时没有「全部落定」可等：外来
+            # 贴片一到就合成，否则它永远发不出去。
+            if not self._page_complete(page) and not (
+                foreign and not self._scope_by_page.get(page)
+            ):
+                return
+            with self._state_lock:
+                owner = self.page_records.get(page) or record
+                duration = self.page_revisions.get(page, 0.0)
             self.compiler.compose_page_asset(
-                self.page_records.get(page) or record,
-                page,
-                complete=True,
-                duration_s=self.page_revisions.get(page, 0.0),
+                owner, page, complete=True, duration_s=duration
             )
-            self.published.add(page)
+            with self._state_lock:
+                self.published.add(page)
 
     def _page_complete(self, page):
         """该页所有**在翻译范围内**的块都已提交译文且编译落定（ok 或 preview_failed）。"""
@@ -211,10 +245,19 @@ class ServeStreamPreview:
             if not failed:
                 for page, record in self.page_records.items():
                     if page not in self.published:
-                        self.compiler.compose_page_asset(record, page, complete=False, duration_s=self.page_revisions[page])
+                        self.compiler.compose_page_asset(
+                            record,
+                            page,
+                            complete=False,
+                            duration_s=self.page_revisions[page],
+                        )
                 if self.page_records:
-                    self.compiler.compose_full_preview(next(iter(self.page_records.values())))
+                    self.compiler.compose_full_preview(
+                        next(iter(self.page_records.values()))
+                    )
         except Exception as exc:
-            self.store.database.append_event(self.job_id, self.did, "preview_failed", {"message": str(exc)})
+            self.store.database.append_event(
+                self.job_id, self.did, "preview_failed", {"message": str(exc)}
+            )
         finally:
             self.store.database.close()

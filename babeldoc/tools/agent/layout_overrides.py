@@ -13,6 +13,9 @@
  * ``box``         显式指定 ``[x, y, x2, y2]``（PDF 坐标，y 向上），优先于 box_scale。
  * ``bold`` / ``italic`` / ``serif``  渲染样式三态覆盖（布尔；缺省 = 跟随源文派生值）。
    由 serve 局部编译（``render_request``）消费；一次性全量编译路径暂不应用。
+ * ``font_family`` 中文字体族 id（见 :mod:`font_families` 的 ``FONT_FAMILIES``；
+   缺省 = 按 ``serif`` 用产品默认族）。仅 serve 局部编译消费：拉丁字体的衬线属性
+   跟随该族，除非同时显式给了 ``serif``。
  * ``force_break_after_text`` / ``force_break_after_offset``
     在渲染文本的指定位置强制换行（前者子串锚定，抗文本改动；后者按字符偏移精确兜底）。
 - 页级 ``pages[<n>].font_scale`` 作用于该页所有段落，段落级 font_scale 再叠乘。
@@ -38,6 +41,8 @@ PARAGRAPH_FLOAT_KEYS = {
 PARAGRAPH_LIST_KEYS = ("force_break_after_text", "force_break_after_offset")
 #: 渲染样式布尔键（serve 局部编译消费；True/False 覆盖，缺省跟随源文）。
 PARAGRAPH_BOOL_KEYS = ("bold", "italic", "serif")
+#: 段落级中文字体族键：值必须是 ``font_families.FONT_FAMILY_IDS`` 里的 id。
+PARAGRAPH_FONT_FAMILY_KEY = "font_family"
 PAGE_FLOAT_KEYS = {"font_scale": (0.2, 5.0)}
 HISTORY_LIMIT = 200
 _ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -98,6 +103,20 @@ def save_overrides(workdir, data: dict) -> Path:
 # --------------------------------------------------------------------------- #
 # 校验与 patch
 # --------------------------------------------------------------------------- #
+def _is_valid_font_family(value: object) -> bool:
+    """是否为注册表里的中文字体族 id（延迟导入，理由见下）。
+
+    ``font_families`` 自身是纯数据模块，但它的包 ``latex_bbox/__init__`` 会拉起
+    pymupdf/overlay 等重依赖；本模块（排版覆盖校验）不该为此付 import 成本，
+    只在校验真出现 ``font_family`` 时才导入。
+    """
+    from babeldoc.format.pdf.document_il.backend.latex_bbox.font_families import (
+        is_valid_font_family,
+    )
+
+    return is_valid_font_family(value)
+
+
 def validate(data: dict, allow_none: bool = False) -> list[str]:
     """返回错误清单（空 = 合法）。
 
@@ -139,6 +158,9 @@ def validate(data: dict, allow_none: bool = False) -> list[str]:
             elif key in PARAGRAPH_BOOL_KEYS:
                 if not isinstance(value, bool):
                     errors.append(f"{where}: 必须是布尔值")
+            elif key == PARAGRAPH_FONT_FAMILY_KEY:
+                if not _is_valid_font_family(value):
+                    errors.append(f"{where}: 未知字体族 {value!r}")
             elif key == "force_break_after_text":
                 if (
                     not isinstance(value, list)

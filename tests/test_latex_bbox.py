@@ -107,8 +107,12 @@ class _FakeConfig:
     def __init__(self, **kwargs):
         self.latex_bbox_state = kwargs.get("latex_bbox_state", {})
         self.enable_latex_bbox_layout = kwargs.get("enable_latex_bbox_layout", True)
-        self.latex_xelatex_path = kwargs.get("latex_xelatex_path", _CAPABILITY.xelatex_path)
-        self.latex_cjk_font_path = kwargs.get("latex_cjk_font_path", _CAPABILITY.font_path)
+        self.latex_xelatex_path = kwargs.get(
+            "latex_xelatex_path", _CAPABILITY.xelatex_path
+        )
+        self.latex_cjk_font_path = kwargs.get(
+            "latex_cjk_font_path", _CAPABILITY.font_path
+        )
         self.latex_compile_timeout_seconds = kwargs.get(
             "latex_compile_timeout_seconds", 45.0
         )
@@ -120,7 +124,9 @@ class _FakeConfig:
         self.latex_bbox_stats = {}
 
 
-def _make_stamp_pdf(path: pathlib.Path, width: float, height: float, text="中文贴片内容"):
+def _make_stamp_pdf(
+    path: pathlib.Path, width: float, height: float, text="中文贴片内容"
+):
     doc = pymupdf.open()
     page = doc.new_page(width=width, height=height)
     page.insert_text((2, min(12, height - 2)), text, fontsize=8)
@@ -200,7 +206,9 @@ def test_parse_segments_unbalanced_returns_none():
 
 
 def test_fuse_paragraph_plain_text_ok():
-    paragraph = _translated_paragraph("P01-001", "这是一段纯中文译文。", il_version_1.Box(0, 0, 200, 40))
+    paragraph = _translated_paragraph(
+        "P01-001", "这是一段纯中文译文。", il_version_1.Box(0, 0, 200, 40)
+    )
     result = fusion.fuse_paragraph(paragraph, 0, {"F1": None}, None)
     assert result.ok is True
     assert result.body == "这是一段纯中文译文。"
@@ -209,7 +217,9 @@ def test_fuse_paragraph_plain_text_ok():
 
 def test_fuse_paragraph_placeholder_count_mismatch():
     """译文有 {v1} 但 composition 无公式 → 不可替换。"""
-    paragraph = _translated_paragraph("P01-002", "前 {v1} 后", il_version_1.Box(0, 0, 200, 40))
+    paragraph = _translated_paragraph(
+        "P01-002", "前 {v1} 后", il_version_1.Box(0, 0, 200, 40)
+    )
     index = fusion.FormulaLatexIndex({0: [((10, 10, 20, 20), "x")]})
     result = fusion.fuse_paragraph(paragraph, 0, {}, index)
     assert result.ok is False
@@ -415,13 +425,7 @@ def test_fuse_paragraph_plain_text_unresolved_style_falls_back():
 def test_formula_index_requires_exact_box_identity():
     """保护区与 MinerU span 必须 box 完全相等才建立映射（不做 IoU 近似）。"""
     index = fusion.FormulaLatexIndex(
-        {
-            0: {
-                7: fusion.ProtectedFormula(
-                    span_id="s1", latex="a+b", text="a+b"
-                )
-            }
-        }
+        {0: {7: fusion.ProtectedFormula(span_id="s1", latex="a+b", text="a+b")}}
     )
     assert index.total_spans == 1
     assert index.resolve(0, frozenset({7}), set()).latex == "a+b"
@@ -471,9 +475,7 @@ def test_formula_index_from_documents_requires_matching_region(tmp_path):
             ]
         }
     )
-    (agent_dir / "provider_ir.json").write_text(
-        provider.to_json(), encoding="utf-8"
-    )
+    (agent_dir / "provider_ir.json").write_text(provider.to_json(), encoding="utf-8")
 
     # MinerU y 向下（10..25）→ IL y 向上、页高 792 → (62, 767)-(100, 782)
     matching = il_version_1.PageLayout(
@@ -483,7 +485,9 @@ def test_formula_index_from_documents_requires_matching_region(tmp_path):
         conf=1.0,
     )
     shifted = il_version_1.PageLayout(
-        id=8, box=il_version_1.Box(63, 792 - 25, 100, 792 - 10), class_name="formula",
+        id=8,
+        box=il_version_1.Box(63, 792 - 25, 100, 792 - 10),
+        class_name="formula",
         conf=1.0,
     )
     docs = _il_doc([_il_page(0, [], width=612, height=792)])
@@ -546,7 +550,9 @@ def test_formula_index_ambiguous_duplicate_span_box_is_skipped(tmp_path):
             conf=1.0,
         )
     ]
-    index = fusion.FormulaLatexIndex.from_documents(docs, _FakeConfig(working_dir=tmp_path))
+    index = fusion.FormulaLatexIndex.from_documents(
+        docs, _FakeConfig(working_dir=tmp_path)
+    )
     assert index is not None
     assert index.total_spans == 0
     assert index.resolve(0, frozenset({7}), set()) is None
@@ -695,12 +701,7 @@ def test_count_overfull_hbox_ignores_minor_overflow():
             r"Overfull \hbox (2.4pt too wide) detected at line 40",
         ]
     )
-    assert (
-        renderer_mod._count_overfull_hbox(
-            log, renderer_mod._WIDTH_TOLERANCE
-        )
-        == 0
-    )
+    assert renderer_mod._count_overfull_hbox(log, renderer_mod._WIDTH_TOLERANCE) == 0
 
 
 def test_count_overfull_hbox_counts_major_overflow():
@@ -711,12 +712,7 @@ def test_count_overfull_hbox_counts_major_overflow():
             r"Overfull \hbox (12.00003pt too wide) in paragraph at lines 51--53",
         ]
     )
-    assert (
-        renderer_mod._count_overfull_hbox(
-            log, renderer_mod._WIDTH_TOLERANCE
-        )
-        == 2
-    )
+    assert renderer_mod._count_overfull_hbox(log, renderer_mod._WIDTH_TOLERANCE) == 2
 
 
 def test_count_overfull_hbox_counts_unparseable_lines():
@@ -727,12 +723,7 @@ def test_count_overfull_hbox_counts_unparseable_lines():
             r"Overfull \hbox",
         ]
     )
-    assert (
-        renderer_mod._count_overfull_hbox(
-            log, renderer_mod._WIDTH_TOLERANCE
-        )
-        == 2
-    )
+    assert renderer_mod._count_overfull_hbox(log, renderer_mod._WIDTH_TOLERANCE) == 2
 
 
 def test_count_overfull_hbox_mixed_lines():
@@ -746,12 +737,7 @@ def test_count_overfull_hbox_mixed_lines():
             r"Underfull \hbox (badness 1000) in paragraph at lines 40--42",
         ]
     )
-    assert (
-        renderer_mod._count_overfull_hbox(
-            log, renderer_mod._WIDTH_TOLERANCE
-        )
-        == 2
-    )
+    assert renderer_mod._count_overfull_hbox(log, renderer_mod._WIDTH_TOLERANCE) == 2
 
 
 def test_measure_page_fit_tolerates_minor_horizontal_overflow():
@@ -920,9 +906,7 @@ def test_capture_fuses_inline_formula_from_provider_ir(tmp_path):
             ]
         }
     )
-    (agent_dir / "provider_ir.json").write_text(
-        provider.to_json(), encoding="utf-8"
-    )
+    (agent_dir / "provider_ir.json").write_text(provider.to_json(), encoding="utf-8")
 
     style = _style()
     formula = _formula_with_chars(
@@ -995,6 +979,42 @@ def test_capture_records_fragment_ref_and_stats(tmp_path):
     assert fusion.FRAGMENT_MACRO in state["bodies"]["P01-101"]
 
 
+def test_fragment_path_is_stable_across_runs(tmp_path):
+    """回归：片段路径必须内容寻址，否则含公式的段落永不命中 stamp 缓存。
+
+    片段的绝对路径会进 LaTeX body，而 body 是 ``StampRequest.cache_key`` 的第一
+    项。原实现把片段裁到每次都不同的 ``TemporaryDirectory``，于是同一段落每次
+    编译都产生新缓存键——实测该文档 49% 的段落（含行内公式）持久缓存全失效。
+    """
+    source = tmp_path / "source.pdf"
+    with pymupdf.open() as pdf:
+        page = pdf.new_page(width=612, height=792)
+        page.insert_text((50, 480), "caf")
+        pdf.save(source)
+    shared = tmp_path / "fragments"
+    fragments = {"F1": {"page": 0, "box": [50.0, 300.0, 70.0, 315.0], "height": 15.0}}
+
+    def body_for(run_index: int) -> str:
+        config = _FakeConfig(working_dir=tmp_path)
+        config.latex_source_pdf_path = str(source)
+        config.latex_fragment_dir = str(shared)
+        with pymupdf.open(source) as pdf:
+            engine = overlay_mod.LatexBboxOverlay(pdf, _il_doc([]), config)
+            engine._fragments = fragments
+            scratch = tmp_path / f"run-{run_index}"
+            scratch.mkdir()
+            jobs = engine._substitute_fragments(
+                [{"debug_id": "P01-101", "body": r"见 \bdocfrag{F1}。"}], scratch
+            )
+        return jobs[0]["body"]
+
+    first, second = body_for(1), body_for(2)
+    assert first == second, "同一片段在两次运行里必须解析到同一路径"
+    assert str(shared) in first
+    # 片段确实落在共享目录里，且只裁了一份（第二次复用）。
+    assert len(list(shared.glob("*.pdf"))) == 1
+
+
 # --------------------------------------------------------------------------- #
 # overlay：链接安全
 # --------------------------------------------------------------------------- #
@@ -1036,9 +1056,16 @@ def _make_link_pdf(tmp_path: pathlib.Path, box: pymupdf.Rect):
 
 
 def _overlay_fixture(tmp_path, monkeypatch, *, with_links=True, min_fill=1.01):
-    src = _make_link_pdf(tmp_path, pymupdf.Rect()) if with_links else _pdf_with_text(
-        tmp_path,
-        [(30, 70, "Original paragraph line one", 9), (30, 90, "second line here", 9)],
+    src = (
+        _make_link_pdf(tmp_path, pymupdf.Rect())
+        if with_links
+        else _pdf_with_text(
+            tmp_path,
+            [
+                (30, 70, "Original paragraph line one", 9),
+                (30, 90, "second line here", 9),
+            ],
+        )
     )
     pdf = pymupdf.open(src) if with_links else pymupdf.open(src)
     page = pdf[0]
@@ -1065,7 +1092,9 @@ def _overlay_fixture(tmp_path, monkeypatch, *, with_links=True, min_fill=1.01):
         "fusion_failures": {},
         "provider_inline_spans": 1,
     }
-    config = _FakeConfig(latex_bbox_state=state, latex_min_line_fill=min_fill, working_dir=tmp_path)
+    config = _FakeConfig(
+        latex_bbox_state=state, latex_min_line_fill=min_fill, working_dir=tmp_path
+    )
 
     stamp_dir = tmp_path / "stamps"
     stamp_dir.mkdir(exist_ok=True)
@@ -1167,7 +1196,9 @@ def test_verify_links_detects_missing_link(tmp_path):
     """门禁本体：链接被删/多出时返回 False，一致时返回 True。"""
     src = _make_link_pdf(tmp_path, pymupdf.Rect())
     pdf = pymupdf.open(src)
-    overlay = overlay_mod.LatexBboxOverlay(pdf, _il_doc([_il_page(0, [])]), _FakeConfig())
+    overlay = overlay_mod.LatexBboxOverlay(
+        pdf, _il_doc([_il_page(0, [])]), _FakeConfig()
+    )
 
     actual = overlay_mod._links_by_signature(pdf[0].get_links())
     uris = overlay._uri_set(pdf)
@@ -1286,9 +1317,7 @@ def test_overlay_skips_box_expanded_after_typesetting(tmp_path, monkeypatch):
     assert stats["fallback_reasons"].get("box-expanded-after-typesetting") == 1
 
 
-def test_overlay_allows_expanded_box_without_other_paragraphs(
-    tmp_path, monkeypatch
-):
+def test_overlay_allows_expanded_box_without_other_paragraphs(tmp_path, monkeypatch):
     """扩后 box 干净 → full 模式允许（字符已不进内容流，无双层文本风险）。"""
     pdf, docs, config = _overlay_fixture(tmp_path, monkeypatch)
     docs.page[0].pdf_paragraph[0].box = il_version_1.Box(30, 100, 300, 280)
@@ -1397,9 +1426,7 @@ def test_measure_line_fill_detects_watermark(tmp_path):
     )
     doc = pymupdf.open(path)
     try:
-        metrics = overlay_mod.measure_line_fill(
-            doc[0], pymupdf.Rect(0, 0, 400, 300)
-        )
+        metrics = overlay_mod.measure_line_fill(doc[0], pymupdf.Rect(0, 0, 400, 300))
     finally:
         doc.close()
     assert metrics["watermark"] is True
@@ -1412,9 +1439,7 @@ def test_measure_line_fill_reports_min_body_fill(tmp_path):
     )
     doc = pymupdf.open(path)
     try:
-        metrics = overlay_mod.measure_line_fill(
-            doc[0], pymupdf.Rect(0, 0, 400, 300)
-        )
+        metrics = overlay_mod.measure_line_fill(doc[0], pymupdf.Rect(0, 0, 400, 300))
     finally:
         doc.close()
     assert metrics["n_lines"] == 2
@@ -1511,7 +1536,11 @@ def test_enabled_write_invokes_overlay_once(tmp_path, monkeypatch):
         config.cleanup_temp_files()
     assert calls["prepare"] == 1
     assert calls["stamp"] == 1
-    assert creater.latex_bbox_stats == {"enabled": True, "applied": 0, "available": False}
+    assert creater.latex_bbox_stats == {
+        "enabled": True,
+        "applied": 0,
+        "available": False,
+    }
     assert result.mono_pdf_path is not None
 
 
@@ -1595,6 +1624,121 @@ def test_renderer_bounded_shrink_uses_multiple_attempts(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# 批阶梯（首选档未过时，剩余候选压进一次 xelatex）
+# --------------------------------------------------------------------------- #
+def _ladder_request(key="ladder", body=None, width=120.0, height=30.0):
+    text = body if body is not None else "这是一段用于阶梯验证的中文正文。" * 4
+    # expected_text 必填：溢出页面底部的行会被 PyMuPDF 静默裁掉，只有「无丢字」
+    # 校验能把它判成不合格，进而真正驱动阶梯往下走（口径同产品链路）。
+    return StampRequest(
+        key=key,
+        body=text,
+        expected_text=text,
+        width=width,
+        height=height,
+        font_size=10.0,
+        lead=13.5,
+    )
+
+
+def test_build_ladder_tex_one_rung_per_page():
+    """每档一页：档间 ``\\newpage``、段前后标记、``\\vsize`` 取大常量。"""
+    renderer = BboxStampRenderer(_CAPABILITY, batch_ladder=True)
+    request = _ladder_request()
+    rungs = [(10.0, 14.85), (10.0, 12.15), (9.5, 12.825)]
+    tex, ranges = renderer.build_ladder_tex(request, rungs)
+
+    lines = tex.split("\n")
+    assert tex.count("\\newpage") == len(rungs) - 1
+    # 一档必须正好一页：``\vsize`` 放大到大常量，溢出的行不被 TeX 分页吃掉，
+    # 否则后续档位的页号会错位（选档按页号取）。
+    assert tex.count(f"\\vsize={renderer_mod._LADDER_VSIZE_BP:.4f}bp") == len(rungs)
+    for index, (font_size, lead) in enumerate(rungs):
+        assert f"\\message{{@@S {index}@@}}" in tex
+        assert f"\\message{{@@E {index}@@}}" in tex
+        assert f"\\fontsize{{{font_size:.4f}bp}}{{{lead:.4f}bp}}" in tex
+    # 行号区间要真的框住本档：日志归属（``at lines X--Y``）按它判 Overfull 属谁。
+    assert len(ranges) == len(rungs)
+    for index, (start, end) in enumerate(ranges):
+        assert start <= end
+        chunk = lines[start - 1 : end]
+        assert f"\\message{{@@S {index}@@}}" in chunk
+        assert f"\\message{{@@E {index}@@}}" in chunk
+
+
+@requires_latex
+def test_ladder_batch_picks_same_rung_as_sequential(tmp_path):
+    """批阶梯与顺序阶梯选出**同一档**：省的是进程，不是质量。"""
+    request = _ladder_request(body="这是一段较长的中文译文用于触发缩字档位。" * 6)
+
+    batched = BboxStampRenderer(_CAPABILITY, timeout_seconds=60.0, batch_ladder=True)
+    sequential = BboxStampRenderer(
+        _CAPABILITY, timeout_seconds=60.0, batch_ladder=False
+    )
+    hot = batched.render_one(request, tmp_path / "batched")
+    cold = sequential.render_one(request, tmp_path / "sequential")
+
+    assert hot.ok == cold.ok
+    assert hot.font_size == pytest.approx(cold.font_size)
+    assert hot.lead == pytest.approx(cold.lead)
+    assert hot.scale == pytest.approx(cold.scale)
+    if hot.ok:
+        assert pathlib.Path(hot.pdf_path).is_file()
+
+
+@requires_latex
+def test_ladder_batch_spends_fewer_xelatex_processes(tmp_path):
+    """首选档没过时，批阶梯最多 2 次 xelatex；顺序阶梯要付每档一次。"""
+    request = _ladder_request(body="这是一段较长的中文译文用于触发缩字档位。" * 6)
+
+    def _count_calls(renderer, workdir):
+        calls = []
+        original = renderer._compile_tex
+
+        def _spy(*args, **kwargs):
+            calls.append(1)
+            return original(*args, **kwargs)
+
+        renderer._compile_tex = _spy
+        renderer.render_one(request, workdir)
+        return len(calls)
+
+    hot = _count_calls(
+        BboxStampRenderer(_CAPABILITY, timeout_seconds=60.0, batch_ladder=True),
+        tmp_path / "batched",
+    )
+    cold = _count_calls(
+        BboxStampRenderer(_CAPABILITY, timeout_seconds=60.0, batch_ladder=False),
+        tmp_path / "sequential",
+    )
+    assert hot <= 2
+    assert hot < cold
+
+
+@requires_latex
+def test_ladder_batch_falls_back_to_sequential(tmp_path, monkeypatch):
+    """快路不可用（返回 None）时原样退回逐档编译，结果集不变。"""
+    request = _ladder_request(body="这是一段较长的中文译文用于触发缩字档位。" * 6)
+
+    renderer = BboxStampRenderer(_CAPABILITY, timeout_seconds=60.0, batch_ladder=True)
+    monkeypatch.setattr(
+        BboxStampRenderer, "_try_ladder_batch", lambda *_a, **_k: None, raising=True
+    )
+    fallback = renderer.render_one(request, tmp_path / "fallback")
+
+    sequential = BboxStampRenderer(
+        _CAPABILITY, timeout_seconds=60.0, batch_ladder=False
+    )
+    expected = sequential.render_one(request, tmp_path / "sequential")
+
+    assert fallback.ok == expected.ok
+    assert fallback.font_size == pytest.approx(expected.font_size)
+    assert fallback.lead == pytest.approx(expected.lead)
+    # 回退路径是顺序阶梯本身：尝试次数按档位计数，而不是批编译的 1+N。
+    assert fallback.compile_attempts == expected.compile_attempts
+
+
+# --------------------------------------------------------------------------- #
 # 逐段决策报告（decisions[]）
 # --------------------------------------------------------------------------- #
 def _make_two_line_stamp_pdf(path: pathlib.Path, width: float, height: float):
@@ -1611,7 +1755,10 @@ def _decisions_fixture(tmp_path, monkeypatch):
     """三个正文/非正文段落：一个 applied、一个 box-too-small、一个 page_number。"""
     src = _pdf_with_text(
         tmp_path,
-        [(30, 70, "line one of the original paragraph", 9), (30, 90, "line two here", 9)],
+        [
+            (30, 70, "line one of the original paragraph", 9),
+            (30, 90, "line two here", 9),
+        ],
         width=400,
         height=300,
     )
@@ -1680,12 +1827,13 @@ def _decisions_fixture(tmp_path, monkeypatch):
     stamp_dir = tmp_path / "stamps"
     stamp_dir.mkdir(exist_ok=True)
     stamp_path = _make_two_line_stamp_pdf(
-        stamp_dir / "stamp.pdf", applied_box[2] - applied_box[0], applied_box[3] - applied_box[1]
+        stamp_dir / "stamp.pdf",
+        applied_box[2] - applied_box[0],
+        applied_box[3] - applied_box[1],
     )
 
-    def fake_render_many(
-        self, requests  # noqa: ARG001 - 与 BboxStampRenderer.render_many 同签名
-    ):
+    def fake_render_many(self, requests):
+        _ = self
         results = {}
         for request, _workdir in requests:
             ok = request.key == "P01-001"
@@ -1738,7 +1886,9 @@ def test_report_decisions_written_to_working_dir(tmp_path, monkeypatch):
 
     overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
 
-    report = json.loads((tmp_path / "latex_bbox_report.json").read_text(encoding="utf-8"))
+    report = json.loads(
+        (tmp_path / "latex_bbox_report.json").read_text(encoding="utf-8")
+    )
     reasons = {row["debug_id"]: row["reason"] for row in report["decisions"]}
     assert reasons == {"P01-001": "applied", "P01-002": "box-too-small"}
 
@@ -1776,7 +1926,9 @@ def test_report_records_capability_unavailable_reason(tmp_path, monkeypatch):
     monkeypatch.setattr(
         overlay_mod,
         "probe_latex_capability",
-        lambda **_kwargs: capability.LatexCapability(available=False, reasons=["no-xelatex"]),
+        lambda **_kwargs: capability.LatexCapability(
+            available=False, reasons=["no-xelatex"]
+        ),
     )
 
     _result, stats = overlay_mod.apply_latex_bbox_overlay(pdf, docs, config)
@@ -1813,7 +1965,9 @@ def _typeset_paragraph(debug_id: str, text: str, box, size: float = 9.0):
         il_version_1.PdfParagraphComposition(
             pdf_character=il_version_1.PdfCharacter(
                 char_unicode=char,
-                box=il_version_1.Box(box.x + index * 5, box.y, box.x + index * 5 + 5, box.y2),
+                box=il_version_1.Box(
+                    box.x + index * 5, box.y, box.x + index * 5 + 5, box.y2
+                ),
                 pdf_character_id=ord(char) % 100,
                 pdf_style=style,
                 xobj_id=0,
@@ -2026,7 +2180,9 @@ def test_stamp_exception_regenerates_affected_pages(tmp_path, monkeypatch):
     assert regenerated == [[0]]
     assert overlay.stats["reverted"] is True
     assert overlay.stats["applied"] == 0
-    assert overlay.stats["error"] and "simulated-stamp-failure" in overlay.stats["error"]
+    assert (
+        overlay.stats["error"] and "simulated-stamp-failure" in overlay.stats["error"]
+    )
     assert (tmp_path / "latex_bbox_report.json").exists()
 
 
@@ -2320,7 +2476,6 @@ def test_select_candidates_uses_refined_box_override(tmp_path):
     assert job["row_geometry"]["n_lines"] == 2
 
 
-
 def test_select_candidates_upward_override_keeps_base_relative_ascent(tmp_path):
     """P6 向上扩：首行几何仍按原框口径量。
 
@@ -2426,9 +2581,7 @@ def test_paragraph_serif_follows_primary_font_family():
     serif_font = type("F", (), {"serif": True, "font_id": "F1"})()
     sans_font = type("F", (), {"serif": False, "font_id": "F1"})()
 
-    assert (
-        overlay_mod._paragraph_serif(paragraph, {"F1": sans_font}, "serif") is True
-    )
+    assert overlay_mod._paragraph_serif(paragraph, {"F1": sans_font}, "serif") is True
     assert (
         overlay_mod._paragraph_serif(paragraph, {"F1": serif_font}, "sans-serif")
         is False
@@ -2442,7 +2595,11 @@ def test_measure_source_rows_groups_spans_and_derives_geometry(tmp_path):
     """源页面文本行 → n_lines/pitch/首行缩进（prepare 时页面仍是源文）。"""
     path = _pdf_with_text(
         tmp_path,
-        [(88, 70, "第一行文本", 9), (70, 90, "第二行文本", 9), (70, 110, "第三行文本", 9)],
+        [
+            (88, 70, "第一行文本", 9),
+            (70, 90, "第二行文本", 9),
+            (70, 110, "第三行文本", 9),
+        ],
         width=400,
         height=300,
     )
@@ -2534,11 +2691,15 @@ def test_expand_does_not_overlap_watermark(tmp_path, monkeypatch):
     mark = pymupdf.Rect(30, 100, 300, 130)  # box 底边之下的水印区
     monkeypatch.setattr(overlay, "_watermark_rects", lambda _p: [mark])
     job = overlay_mod.LatexBboxOverlay._StampJob = type(
-        "_Job", (), {"page": page, "rect": pymupdf.Rect(30, 50, 300, 100), "height": 50.0}
+        "_Job",
+        (),
+        {"page": page, "rect": pymupdf.Rect(30, 50, 300, 100), "height": 50.0},
     )
     assert overlay._strip_is_clear(page, pymupdf.Rect(30, 50, 300, 100), 40.0) is False
     # 水印在远处时应允许扩
-    monkeypatch.setattr(overlay, "_watermark_rects", lambda _p: [pymupdf.Rect(30, 200, 300, 230)])
+    monkeypatch.setattr(
+        overlay, "_watermark_rects", lambda _p: [pymupdf.Rect(30, 200, 300, 230)]
+    )
     assert overlay._strip_is_clear(page, pymupdf.Rect(30, 50, 300, 100), 40.0) is True
 
 

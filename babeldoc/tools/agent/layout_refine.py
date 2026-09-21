@@ -507,18 +507,20 @@ def plan_page_expansion(
     *,
     page_bottom: float = 0.0,
     page_top: float | None = None,
+    evidence: tuple[list, list] | None = None,
+    reserved=(),
 ) -> Box | None:
     """serve 局部编译用：对一张（已合成）页面算单段扩框（先向下，再向上）。
 
-    两个方向共用同一次检测；``page_top`` 缺省取页高（IL 坐标）。
+    两个方向共用同一次检测；``page_top`` 缺省取页高（IL 坐标）。``evidence``
+    是调用方已备好的 ``(regions, ink)``（按页缓存，省掉重复检测）；``reserved``
+    是同页上**已定的兄弟贴片框**，与区域/墨迹同权并入障碍集——否则相邻两段会
+    各自扩进同一段净空并重叠。
     """
-    if not detector.available:
-        return None
-    regions = _regions_il(page, detector)
+    regions, ink = _page_evidence(page, detector, evidence)
     if not regions:
         return None
-    boxes = [region.box for region in regions]
-    ink = page_ink_rects(page)
+    boxes = [*regions, *(tuple(float(v) for v in item) for item in reserved)]
     expanded, _ = plan_expansion(
         box, boxes, ink=foreign_ink(ink, box), page_bottom=page_bottom
     )
@@ -534,6 +536,18 @@ def plan_page_expansion(
     )[0]
 
 
+def _page_evidence(page, detector, evidence) -> tuple[list, list]:
+    """版面证据：调用方给了就用（按页缓存），否则现场检测一次。"""
+    if evidence is not None:
+        return evidence
+    if detector is None or not detector.available:
+        return [], []
+    regions = [region.box for region in _regions_il(page, detector)]
+    if not regions:
+        return [], []
+    return regions, page_ink_rects(page)
+
+
 def plan_next_page_float(
     next_page,
     box,
@@ -541,17 +555,21 @@ def plan_next_page_float(
     *,
     required_height: float,
     page_height: float | None = None,
+    evidence: tuple[list, list] | None = None,
+    reserved=(),
 ) -> Box | None:
     """下一页整框迁移的薄封装：区域 + 精确墨迹并集作障碍，调 core。
 
     检测失败或无区域 → None（调用方保持原行为）；``page_height`` 缺省取
-    ``next_page.rect.height``（IL 坐标即页高）。
+    ``next_page.rect.height``（IL 坐标即页高）。``evidence`` 是按页缓存的
+    ``(regions, ink)``；``reserved`` 是**已经迁到该页的兄弟贴片框**，必须并入
+    障碍集——否则所有迁移都会顶对齐到同一条顶部净空并叠在一起。
     """
-    regions = _regions_il(next_page, detector)
+    regions, ink = _page_evidence(next_page, detector, evidence)
     if not regions:
         return None
-    obstacles = [region.box for region in regions]
-    obstacles.extend(page_ink_rects(next_page))
+    obstacles = [*regions, *ink]
+    obstacles.extend(tuple(float(value) for value in item) for item in reserved)
     height = (
         float(page_height) if page_height is not None else float(next_page.rect.height)
     )
@@ -568,19 +586,20 @@ def plan_widen_page_expansion(
     direction: str,
     page_left: float = 0.0,
     page_right: float | None = None,
+    evidence: tuple[list, list] | None = None,
+    reserved=(),
 ) -> Box | None:
     """serve 局部编译用：对一张（已合成）页面把 ``box`` 向左/右横向扩框。
 
     与 :func:`plan_page_expansion` 同一套数据（PP-DocLayoutV3 区域 + 精确墨迹，
-    已排除本段自身）；检测不可用或没有区域 → None。
+    已排除本段自身）；检测不可用或没有区域 → None。``evidence`` 按页缓存，
+    ``reserved`` 是同页已定的兄弟贴片框（并入障碍集，避免横向扩进邻居）。
     """
-    if not detector.available:
-        return None
-    regions = _regions_il(page, detector)
+    regions, raw_ink = _page_evidence(page, detector, evidence)
     if not regions:
         return None
-    boxes = [region.box for region in regions]
-    ink = foreign_ink(page_ink_rects(page), box)
+    boxes = [*regions, *(tuple(float(v) for v in item) for item in reserved)]
+    ink = foreign_ink(raw_ink, box)
     right = float(page.rect.width) if page_right is None else float(page_right)
     return plan_widen_expansion(
         box, boxes, ink=ink, direction=direction, page_left=page_left, page_right=right

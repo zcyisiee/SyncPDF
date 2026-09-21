@@ -14,6 +14,13 @@ from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
 
+from babeldoc.format.pdf.document_il.backend.latex_bbox.font_families import (
+    FONT_FAMILIES,
+)
+from babeldoc.format.pdf.document_il.backend.latex_bbox.font_families import (
+    FontFamilySpec,
+)
+
 logger = logging.getLogger(__name__)
 
 #: xelatex 必需宏包（tex 文件 \usepackage 依赖）。
@@ -105,6 +112,9 @@ class LatexCapability:
     #: 中文正文两套（serif/sans，各含 regular/bold）。
     cjk_serif_fonts: dict[str, str] | None = None
     cjk_sans_fonts: dict[str, str] | None = None
+    #: 可选字体族（``font_families.FONT_FAMILIES``）：``{family_id: {regular, bold?}}``，
+    #: 只收录探测到 regular 的族；缺失即「该族不可用」，请求回落默认族。
+    cjk_family_fonts: dict[str, dict[str, str]] = field(default_factory=dict)
     #: 非致命提示（例如拉丁字体缺失）。
     notes: list[str] = field(default_factory=list)
     #: 中文字体是否由调用方显式指定（显式时只设中文主字体，不用候选族）。
@@ -123,6 +133,10 @@ class LatexCapability:
             "latin_sans_fonts": self.latin_sans_fonts,
             "cjk_serif_fonts": self.cjk_serif_fonts,
             "cjk_sans_fonts": self.cjk_sans_fonts,
+            "cjk_family_fonts": {
+                family_id: dict(files)
+                for family_id, files in self.cjk_family_fonts.items()
+            },
             "notes": list(self.notes),
             "font_explicit": self.font_explicit,
         }
@@ -134,6 +148,12 @@ class LatexCapability:
     def cjk_fonts(self, serif: bool) -> dict[str, str] | None:
         """按 serif 标志取中文 regular/bold（缺失返回 None）。"""
         return self.cjk_serif_fonts if serif else self.cjk_sans_fonts
+
+    def cjk_family(self, family_id: str | None) -> dict[str, str] | None:
+        """按字体族 id 取中文 regular/bold（未知/未探测到该族返回 None）。"""
+        if not family_id:
+            return None
+        return self.cjk_family_fonts.get(family_id)
 
 
 def _find_xelatex(explicit: str | None) -> str | None:
@@ -211,6 +231,20 @@ def _cjk_face_files(dirs: list[Path], names: tuple[str, str]) -> dict[str, str] 
     return result
 
 
+def _family_face_files(
+    dirs: list[Path], spec: FontFamilySpec
+) -> dict[str, str] | None:
+    """可选字体族的 regular/bold（缺 regular 视为该族不可用）。"""
+    regular = _find_face(dirs, spec.regular)
+    if regular is None:
+        return None
+    result = {"regular": str(regular)}
+    bold = _find_face(dirs, spec.bold) if spec.bold else None
+    if bold is not None:
+        result["bold"] = str(bold)
+    return result
+
+
 def _missing_packages(xelatex_path: str) -> list[str]:
     kpsewhich = Path(xelatex_path).parent / "kpsewhich"
     if not kpsewhich.is_file():
@@ -275,6 +309,11 @@ def probe_latex_capability(
     )
     capability.cjk_serif_fonts = _cjk_face_files(font_dirs, _CJK_FAMILY_FILES["serif"])
     capability.cjk_sans_fonts = _cjk_face_files(font_dirs, _CJK_FAMILY_FILES["sans"])
+    # 可选字体族：逐族探测（缺文件的族不进表，请求回落默认族）。
+    for spec in FONT_FAMILIES:
+        files = _family_face_files(font_dirs, spec)
+        if files is not None:
+            capability.cjk_family_fonts[spec.id] = files
     if capability.latin_serif_fonts is None and capability.latin_sans_fonts is None:
         capability.notes.append(
             f"未找到拉丁字体（查找 {', '.join(str(d) for d in font_dirs)}），"

@@ -10,30 +10,47 @@ import {
 } from '../src/stores/ui';
 
 describe('分隔条位移 → 新宽度（widthFromDelta：方向 + clamp）', () => {
-  it('右侧面板 / 时间线：轴正向位移变窄（invert），两端 clamp', () => {
-    expect(widthFromDelta('inspector', 360, -40)).toBe(400);
-    expect(widthFromDelta('inspector', 360, 40)).toBe(320);
-    expect(widthFromDelta('inspector', 360, -400)).toBe(560);
-    expect(widthFromDelta('inspector', 360, 400)).toBe(280);
-    expect(widthFromDelta('timeline', 96, 20)).toBe(76);
-    expect(widthFromDelta('timeline', 96, 100)).toBe(72);
-    expect(widthFromDelta('timeline', 96, -100)).toBe(160);
+  it('右侧面板：轴正向位移变窄（invert），两端 clamp', () => {
+    expect(widthFromDelta('inspector', 340, -40)).toBe(380);
+    expect(widthFromDelta('inspector', 340, 40)).toBe(300);
+    expect(widthFromDelta('inspector', 340, -400)).toBe(560);
+    expect(widthFromDelta('inspector', 340, 400)).toBe(280);
+  });
+
+  it('左侧导航栏：轴正向位移变宽（左栏不反转），两端 clamp', () => {
+    expect(widthFromDelta('nav', 280, 40)).toBe(320);
+    expect(widthFromDelta('nav', 280, -40)).toBe(240);
+    expect(widthFromDelta('nav', 280, 400)).toBe(420);
+    expect(widthFromDelta('nav', 280, -400)).toBe(220);
   });
 });
 
-describe('ui store 三栏宽度（DESIGN.md §8.2）', () => {
-  it('默认值与设计表一致（旧版视图栏已删除，没有 viewrail）', () => {
+describe('ui store 三栏宽度', () => {
+  it('默认值与设计稿一致（旧时间线高度/折叠态字段已删除）', () => {
     const state = createUiStore().getState();
-    expect(state.inspectorWidth).toBe(360);
-    expect(state.timelineHeight).toBe(96);
-    expect(state.inspectorCollapsed).toBe(false);
-    expect('viewrail' in LAYOUT_SPECS).toBe(false);
+    expect(state.navWidth).toBe(280);
+    expect(state.inspectorWidth).toBe(340);
+    expect('timelineHeight' in state).toBe(false);
+    expect('timelineCollapsed' in state).toBe(false);
+    expect('inspectorCollapsed' in state).toBe(false);
     expect('viewrailWidth' in state).toBe(false);
   });
 
-  it('spec 默认/范围与 §8.2 表逐项一致', () => {
-    expect(LAYOUT_SPECS.inspector).toMatchObject({ default: 360, min: 280, max: 560, step: 16 });
-    expect(LAYOUT_SPECS.timeline).toMatchObject({ default: 96, min: 72, max: 160, step: 8 });
+  it('spec 默认/范围与设计稿一致', () => {
+    expect(LAYOUT_SPECS.nav).toMatchObject({
+      default: 280,
+      min: 220,
+      max: 420,
+      step: 16,
+      invert: false,
+    });
+    expect(LAYOUT_SPECS.inspector).toMatchObject({
+      default: 340,
+      min: 280,
+      max: 560,
+      step: 16,
+      invert: true,
+    });
   });
 
   it('setLayoutWidth 按范围 clamp（超上限/超下限/小数）', () => {
@@ -42,54 +59,28 @@ describe('ui store 三栏宽度（DESIGN.md §8.2）', () => {
     expect(store.getState().inspectorWidth).toBe(560);
     store.getState().setLayoutWidth('inspector', 0);
     expect(store.getState().inspectorWidth).toBe(280);
-    store.getState().setLayoutWidth('timeline', 1000);
-    expect(store.getState().timelineHeight).toBe(160);
-    store.getState().setLayoutWidth('timeline', 1);
-    expect(store.getState().timelineHeight).toBe(72);
-    store.getState().setLayoutWidth('timeline', 99.6);
-    expect(store.getState().timelineHeight).toBe(100);
+    store.getState().setLayoutWidth('nav', 1000);
+    expect(store.getState().navWidth).toBe(420);
+    store.getState().setLayoutWidth('nav', 1);
+    expect(store.getState().navWidth).toBe(220);
+    store.getState().setLayoutWidth('nav', 300.4);
+    expect(store.getState().navWidth).toBe(300);
   });
 
-  it('写入 localStorage 的键名按 §8.2（ieet.inspw / ieet.tlh）', () => {
+  it('写入 localStorage 的键名（ieet.inspw / ieet.navw）', () => {
     const store = createUiStore();
     store.getState().setLayoutWidth('inspector', 420);
-    store.getState().setLayoutWidth('timeline', 120);
+    store.getState().setLayoutWidth('nav', 320);
     expect(window.localStorage.getItem(STORAGE_KEYS.inspector)).toBe('420');
-    expect(window.localStorage.getItem(STORAGE_KEYS.timeline)).toBe('120');
+    expect(window.localStorage.getItem(STORAGE_KEYS.nav)).toBe('320');
   });
 
   it('冷启动读回持久化值，并把越界/坏值退回默认', () => {
     window.localStorage.setItem(STORAGE_KEYS.inspector, '9999');
-    window.localStorage.setItem(STORAGE_KEYS.timeline, 'abc');
+    window.localStorage.setItem(STORAGE_KEYS.nav, 'abc');
     const state = createUiStore().getState();
     expect(state.inspectorWidth).toBe(560);
-    expect(state.timelineHeight).toBe(96);
-  });
-
-  it('拖右侧分隔条只在宽度真变化时展开折叠的面板，并同步持久化', () => {
-    const store = createUiStore();
-    store.getState().setInspectorCollapsed(true);
-    expect(store.getState().inspectorCollapsed).toBe(true);
-    expect(window.localStorage.getItem(STORAGE_KEYS.inspectorCollapsed)).toBe('1');
-
-    // 拖到与折叠前相同的宽度：状态不变，不意外展开
-    store.getState().setLayoutWidth('inspector', 360);
-    expect(store.getState().inspectorCollapsed).toBe(true);
-    expect(window.localStorage.getItem(STORAGE_KEYS.inspectorCollapsed)).toBe('1');
-
-    store.getState().setLayoutWidth('inspector', 420);
-    expect(store.getState().inspectorWidth).toBe(420);
-    expect(store.getState().inspectorCollapsed).toBe(false);
-    expect(window.localStorage.getItem(STORAGE_KEYS.inspectorCollapsed)).toBe('0');
-  });
-
-  it('setInspectorCollapsed 持久化 ieet.inspCollapsed（折叠 = --inspw:0）', () => {
-    const store = createUiStore();
-    store.getState().setInspectorCollapsed(true);
-    expect(store.getState().inspectorCollapsed).toBe(true);
-    store.getState().setInspectorCollapsed(false);
-    expect(store.getState().inspectorCollapsed).toBe(false);
-    expect(window.localStorage.getItem(STORAGE_KEYS.inspectorCollapsed)).toBe('0');
+    expect(state.navWidth).toBe(280);
   });
 });
 
@@ -109,8 +100,8 @@ describe('ui store 屏 / 预览模式 / 拖拽态', () => {
     expect(store.getState().previewMode).toBe('target');
     store.getState().setPreviewMode('compare');
     expect(store.getState().previewMode).toBe('compare');
-    store.getState().setDragging('timeline');
-    expect(store.getState().dragging).toBe('timeline');
+    store.getState().setDragging('nav');
+    expect(store.getState().dragging).toBe('nav');
     store.getState().setDragging(null);
     expect(store.getState().dragging).toBeNull();
   });
@@ -254,6 +245,47 @@ describe('ui store 段落多选（shift 语义）', () => {
   });
 });
 
+describe('ui store focusParagraph（多选块切换 chips）', () => {
+  it('把集合里的某段挑到末尾（主选中段随之切换）', () => {
+    const store = createUiStore();
+    store.getState().selectParagraph('P01-001', { extend: true });
+    store.getState().selectParagraph('P01-002', { extend: true });
+    store.getState().selectParagraph('P01-003', { extend: true });
+    store.getState().focusParagraph('P01-001');
+    expect(store.getState().selectedParagraphIds).toEqual(['P01-002', 'P01-003', 'P01-001']);
+    expect(store.getState().selectedParagraphId).toBe('P01-001');
+  });
+
+  it('不在集合中的 id 被忽略（不抛错、不改选中）', () => {
+    const store = createUiStore();
+    store.getState().selectParagraph('P01-001', { extend: true });
+    store.getState().selectParagraph('P01-002', { extend: true });
+    const before = store.getState().selectedParagraphIds;
+    store.getState().focusParagraph('P09-009');
+    expect(store.getState().selectedParagraphIds).toBe(before);
+    expect(store.getState().selectedParagraphId).toBe('P01-002');
+  });
+
+  it('已在末尾（已是主选中段）：不 set（集合引用不变）', () => {
+    const store = createUiStore();
+    store.getState().selectParagraph('P01-001', { extend: true });
+    store.getState().selectParagraph('P01-002', { extend: true });
+    const before = store.getState().selectedParagraphIds;
+    store.getState().focusParagraph('P01-002');
+    expect(store.getState().selectedParagraphIds).toBe(before);
+  });
+
+  it('单选集合里 focus 自身也保持原集合引用（chips 只在多选时渲染，但语义不依赖它）', () => {
+    const store = createUiStore();
+    store.getState().selectParagraph('P01-001');
+    const before = store.getState().selectedParagraphIds;
+    store.getState().focusParagraph('P01-001');
+    expect(store.getState().selectedParagraphIds).toBe(before);
+    store.getState().focusParagraph('P02-002'); // 不在集合里 → 忽略
+    expect(store.getState().selectedParagraphIds).toBe(before);
+  });
+});
+
 describe('reader session choices', () => {
   it('zoom clamps invalid/extreme values, fit resets, compare links by default', () => {
     const store = createUiStore();
@@ -268,5 +300,36 @@ describe('reader session choices', () => {
     expect(store.getState().previewZoom).toBeNull();
     store.getState().setCompareLinked(false);
     expect(store.getState().compareLinked).toBe(false);
+  });
+});
+
+describe('事件流 → 预览定位桥（locateInPreview）', () => {
+  it('nonce 自增（同页重复点击也触发）、page clamp 到 ≥1 的整数、paragraphId 缺了就 null', () => {
+    const store = createUiStore();
+    expect(store.getState().locate).toBeNull();
+
+    store.getState().locateInPreview(5, 'P02-003');
+    expect(store.getState().locate).toEqual({ nonce: 1, page: 5, paragraphId: 'P02-003' });
+
+    // 同一页再点一次：值是新的，nonce 变了 → PreviewArea 的 effect 会再滚一次
+    store.getState().locateInPreview(5, 'P02-003');
+    expect(store.getState().locate).toEqual({ nonce: 2, page: 5, paragraphId: 'P02-003' });
+
+    store.getState().locateInPreview(3.6);
+    expect(store.getState().locate).toEqual({ nonce: 3, page: 4, paragraphId: null });
+    store.getState().locateInPreview(0);
+    expect(store.getState().locate).toEqual({ nonce: 4, page: 1, paragraphId: null });
+    store.getState().locateInPreview(5, '');
+    expect(store.getState().locate).toEqual({ nonce: 5, page: 5, paragraphId: null });
+  });
+
+  it('坏页数（NaN/Infinity）不写状态；locate 不持久化', () => {
+    const store = createUiStore();
+    store.getState().locateInPreview(Number.NaN);
+    store.getState().locateInPreview(Number.POSITIVE_INFINITY);
+    expect(store.getState().locate).toBeNull();
+
+    store.getState().locateInPreview(7);
+    expect(window.localStorage.length).toBe(0);
   });
 });

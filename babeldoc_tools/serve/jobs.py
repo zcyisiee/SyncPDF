@@ -226,7 +226,7 @@ class JobRecord(BaseModel):
     #: 注入用的文件路径全在服务端，客户端看不到也不传。
     use_glossary: bool = False
     #: 流式翻译预览的并行编译 worker 数（只对跑 translate 的 ``run`` 有意义）：
-    #: 客户端提交时选（1..8）；``None`` = 没给，用子进程缺省。不进 argv，只随
+    #: 客户端提交时选（1..MAX_PREVIEW_WORKERS）；``None`` = 没给，用子进程缺省。不进 argv，只随
     #: ``BDT_SERVE_PREVIEW_WORKERS`` 环境变量传给翻译 job 的子进程。
     preview_workers: int | None = None
     #: ``compile`` 的页级语义（api.md §3.4）：请求的 scope / 实际生效的 scope /

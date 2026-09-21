@@ -56,8 +56,12 @@ def _request(key="P01-001"):
     return StampRequest(key=key, body="fit", width=200, height=50, font_size=10, lead=15, expected_text="fit")
 
 
-def _compiler(monkeypatch, *, fail_calls=0, timeout=False, attribution=True):
+def _compiler(monkeypatch, *, fail_calls=0, fail_rungs=None, timeout=False, attribution=True):
+    """假 xelatex。``fail_calls``：前 N 次**调用**整体 overfull（批渲染器口径）；
+    ``fail_rungs``：按 ``@@S n@@`` 标记数的**全局档位计数**，前 N 档 overfull——
+    单段阶梯批编译一次调用评多档，逐档失败只能用它来建模。"""
     calls = []
+    rungs = {"seen": 0}
 
     def run(argv, **kwargs):
         tex_path = Path(argv[-1])
@@ -69,7 +73,15 @@ def _compiler(monkeypatch, *, fail_calls=0, timeout=False, attribution=True):
         pages = len(starts) or 1
         _pdf(tex_path.with_suffix(".pdf"), pages=pages)
         overflow = "Overfull \\hbox (6pt too wide)\n" if len(calls) <= fail_calls else ""
-        log = "\n".join(f"@@S {index}@@\n{overflow}@@E {index}@@" for index in starts) if starts else overflow
+        if fail_rungs is not None:
+            per_rung = []
+            for _ in range(pages):
+                per_rung.append("Overfull \\hbox (6pt too wide)\n" if rungs["seen"] < fail_rungs else "")
+                rungs["seen"] += 1
+            overflow = per_rung[0]
+            log = "\n".join(f"@@S {index}@@\n{per_rung[position]}@@E {index}@@" for position, index in enumerate(starts)) if starts else overflow
+        else:
+            log = "\n".join(f"@@S {index}@@\n{overflow}@@E {index}@@" for index in starts) if starts else overflow
         if not attribution:
             log = "unattributed compiler output"
         tex_path.with_suffix(".log").write_text(log)
@@ -85,9 +97,10 @@ def _observable_pdf(path):
 
 
 def test_single_candidate_order_fit_and_raw_artifacts_match_normal_run(tmp_path, monkeypatch, recorder):
-    plain_calls = _compiler(monkeypatch, fail_calls=2)
+    # 首选档单独一次调用 + 剩余档位一次批编译：前两档 overfull，第三档通过。
+    plain_calls = _compiler(monkeypatch, fail_rungs=2)
     plain = BboxStampRenderer(CAPABILITY).render_one(_request(), tmp_path / "plain")
-    observed_calls = _compiler(monkeypatch, fail_calls=2)
+    observed_calls = _compiler(monkeypatch, fail_rungs=2)
     observed = BboxStampRenderer(CAPABILITY, debug_recorder=recorder).render_one(_request(), tmp_path / "observed")
     assert [item["tex"] for item in plain_calls] == [item["tex"] for item in observed_calls]
     assert (plain.ok, plain.font_size, plain.lead, plain.scale, plain.compile_attempts, plain.reason) == (observed.ok, observed.font_size, observed.lead, observed.scale, observed.compile_attempts, observed.reason)
@@ -97,7 +110,16 @@ def test_single_candidate_order_fit_and_raw_artifacts_match_normal_run(tmp_path,
     assert [item["lead"] for item in candidates] == [15, 16.5, 13.5]
     assert candidates[1]["parent_id"] == candidates[0]["id"]
     assert candidates[2]["parent_id"] == candidates[1]["id"]
-    assert len(_events(recorder, "call_finished")) == 3
+    assert [item["fit"]["reason"] for item in candidates] == ["overfull-hbox", "overfull-hbox", "ok"]
+    assert [item["selected"] for item in candidates] == [False, False, True]
+    # 两次真实调用：首选档 + 整轮批阶梯；批阶梯的档位候选共享一份整轮产物并带页号/行号。
+    assert len(_events(recorder, "call_finished")) == 2
+    assert candidates[0]["batch_id"] is None and candidates[0]["pdf_page_index"] is None
+    assert candidates[1]["batch_id"] == candidates[2]["batch_id"] and candidates[1]["batch_id"]
+    assert [item["pdf_page_index"] for item in candidates[1:]] == [0, 1]
+    assert all(len(item["tex_line_range"]) == 2 for item in candidates[1:])
+    assert candidates[1]["artifacts"] == candidates[2]["artifacts"]
+    assert candidates[0]["artifacts"] != candidates[1]["artifacts"]
     selected = _events(recorder, "candidate_selected")
     assert [item["id"] for item in selected] == [candidates[-1]["id"]]
     for candidate in candidates:
@@ -105,6 +127,21 @@ def test_single_candidate_order_fit_and_raw_artifacts_match_normal_run(tmp_path,
         assert candidate["artifacts"]["pdf"]
         assert (recorder.run_dir / candidate["artifacts"]["log"]).is_file()
     assert recorder.capture_status == {"ok": True}
+
+
+def test_single_ladder_exhausted_records_every_rung(tmp_path, monkeypatch, recorder):
+    """全部档位都不过：每档一条候选（父链相接、逐档原因），无 candidate_selected。"""
+    _compiler(monkeypatch, fail_rungs=10_000)
+    result = BboxStampRenderer(CAPABILITY, debug_recorder=recorder).render_one(_request(), tmp_path)
+    assert not result.ok
+    candidates = _events(recorder, "candidate_evaluated")
+    assert len(candidates) == result.compile_attempts >= 3
+    assert [item["priority"] for item in candidates] == list(range(len(candidates)))
+    assert all(item["fit"]["reason"] == "overfull-hbox" and not item["selected"] for item in candidates)
+    assert [item["parent_id"] for item in candidates[1:]] == [item["id"] for item in candidates[:-1]]
+    assert len({item["batch_id"] for item in candidates[1:]}) == 1
+    assert not _events(recorder, "candidate_selected")
+    assert result.debug_ref["candidate_id"] == candidates[-1]["id"]
 
 
 def test_batch_keeps_all_candidates_and_only_one_pdf_per_real_call(tmp_path, monkeypatch, recorder):

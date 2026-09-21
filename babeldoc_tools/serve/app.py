@@ -21,6 +21,8 @@
   :mod:`babeldoc_tools.serve.routers.versions`）
 - ``GET/PUT/DELETE /api/v1/glossary``（W13 全局词表，见
   :mod:`babeldoc_tools.serve.routers.glossary`）
+- ``GET /api/v1/fonts``（段落级中文字体族清单，见
+  :mod:`babeldoc_tools.serve.routers.fonts`）
 - ``GET /openapi.json`` / ``GET /docs``（FastAPI 自带）
 - ``GET /`` 及其下的前端静态资源（W15，见 :mod:`babeldoc_tools.serve.static`）：
   ``web/dist`` 存在时同一个端口伺候 SPA（含前端路由回退），没构建过就静默跳过
@@ -61,6 +63,7 @@ from babeldoc_tools.serve.routers.documents import documents_router
 from babeldoc_tools.serve.routers.draft import draft_router
 from babeldoc_tools.serve.routers.events import JobUpdateHub
 from babeldoc_tools.serve.routers.events import events_router
+from babeldoc_tools.serve.routers.fonts import fonts_router
 from babeldoc_tools.serve.routers.glossary import glossary_router
 from babeldoc_tools.serve.routers.jobs import jobs_router
 from babeldoc_tools.serve.routers.models import models_router
@@ -295,6 +298,7 @@ def create_app(
     app.include_router(profiles_router(store))
     app.include_router(models_router(store))
     app.include_router(glossary_router(glossary))
+    app.include_router(fonts_router(runner))
     # 前端静态资源最后挂（`/{path:path}` 接住所有未被接口认领的路径）：没跑过
     # `pnpm build` 时静默跳过，只伺服 API —— 不报错、也不改启动信封。
     mount_frontend(app)

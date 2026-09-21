@@ -30,7 +30,7 @@
 | 布局提供方与字符对齐 | `babeldoc/docvision/`、`document_il/utils/provider_alignment.py` |
 | HTTP 路由、任务、草稿、全量编译与候选 | `babeldoc_tools/serve/{app,runner,jobs,draft,compile,candidates}.py`、`routers/` |
 | 元数据、资产、局部/批量编译、迁移与清理 | `babeldoc_tools/serve/{database,asset_store,block_compile,migrate,cleanup}.py` |
-| 工作台、API 消费、预览与事件订阅 | `web/src/{screens,components,lib,api}/` |
+| 工作台、API 消费、预览与事件订阅 | `web/src/{screens,components,lib,api}/`（三栏外壳：左栏 `PaperNav` 常驻，中栏按路由，工作台右栏 `InspectorPanel`） |
 | 模型调用与提示词 | `babeldoc_tools/harnesses.py`、`serve/models.py`、`skills/document-translate/agents/`、`scripts/` |
 | 质量检查与回归证据 | `tests/`、`babeldoc/tools/agent/{quality_checks,layout_geometry,link_audit}.py`、仓库 `tmp/` |
 
@@ -58,17 +58,21 @@ bdt run → parse → translate → apply → build → check → review → rep
        ← SSE / 任务查询 ← 诊断事件、持久事件与任务状态
 ```
 
-上传按内容哈希去重，上传本身不自动解析。任务执行阶段会保存可观察状态；翻译流可经 `ServeStreamPreview` 生成预览：完成的翻译块立即提交到一个并行编译池（`--preview-workers`/job 字段 `preview_workers`，1..8，缺省 8），同一页的块路由到同一 worker 串行编译（页 patch 状态不丢），不同页并行。流式路径只写 immutable baseline 上的块 patch 和当前页 asset；页面全部块完成后发布一次页事件，翻译结束再由页 asset 合成完整预览写入 `local_previews`。LaTeX 能力探测与 `state.pkl` 反序列化按进程缓存。持久 SSE 读数据库事件，旧 SSE 读单次 run 的诊断归档，二者游标不同。
+上传按内容哈希去重，上传本身不自动解析。任务执行阶段会保存可观察状态；翻译流可经 `ServeStreamPreview` 生成预览：完成的翻译块立即提交到并行编译池（`--preview-workers`/job 字段 `preview_workers`，1..`MAX_PREVIEW_WORKERS`，缺省取上限；上限随机器核数走 = `min(16, cpu_count-2)`，因为 xelatex 是独立子进程、不受 GIL 约束）。池是一个共享线程池 + **每页一把锁**（`PageLocks`）：xelatex 渲染不持锁，同页十几个块可以同时渲染；只有依赖页状态的两小段——浮动规划/占位、patch 读-改-写提交——持该页的锁串行（页 patch 状态不丢）。整块串行的旧做法让一页 21 个块排 21×6s 的长队，是 58 页文档尾部最大的等待来源。跨页浮动的贴片落到**已发布**的页上时，该页重新合成一次，否则外来贴片在预览里丢失。流式路径只写 immutable baseline 上的块 patch 和当前页 asset；页面全部块完成后发布一次页事件，翻译结束再由页 asset 合成完整预览写入 `local_previews`。LaTeX 能力探测与 `state.pkl` 反序列化按进程缓存。持久 SSE 读数据库事件，旧 SSE 读单次 run 的诊断归档，二者游标不同。
 
 `DELETE /documents/{did}` 删除文档（workdir 目录树 + 数据库行，资产文件保留给 `--cleanup`）；有活动 job 时拒绝，workdir 模式不支持。子进程无收尾信封失败时，job 的 `error_message` 附上脱敏后的 stderr 末三行，避免 `envelope_unparsed` 掩盖真实原因。
 
 ### 局部修改与交付
 
-草稿保存带 `base_revision`，写入 SQLite 并保留兼容 JSON。**保存不自动编译**：当前 `CompileService.schedule` 只取消旧计时器。用户可显式编译单段（`BlockCompiler`，更新页面/预览资产），或 shift 多选多段走 `POST /blocks/compile` 批量编译（一个 job；同页串行、跨页并行的线程池，每个受影响页只合成一次，各块草稿覆盖互不影响），再导出当前 revision。局部发布会检查 revision 和任务状态，避免过期结果覆盖新编辑。
+草稿保存带 `base_revision`，写入 SQLite 并保留兼容 JSON。**保存不自动编译**：当前 `CompileService.schedule` 只取消旧计时器。用户可显式编译单段（`BlockCompiler`，更新页面/预览资产），或 shift 多选多段走 `POST /blocks/compile` 批量编译（一个 job；渲染并行、同页提交经页锁串行的线程池，每个受影响页只合成一次，各块草稿覆盖互不影响），再导出当前 revision。局部发布会检查 revision 和任务状态，避免过期结果覆盖新编辑。
 
-贴片渲染的 fit 判定对水平方向使用 2.5pt 容差（垂直 0.5pt）：TeX/PyMuPDF 的宽度口径是 advance 盒，轻微超宽不触发缩字号。贴片仍被缩字或溢出时自动**浮动**：`block_compile._float_if_shrunk` 用 PP-DocLayoutV3 对编译后的译文页重识别版面（`PaddleLayoutRegions`，缺 `BDT_PADDLE_DEVICE` 环境时 auto，CoreML 运行期失败自动降级 CPU），按 同栏下/上扩 → 跨栏横向扩 → 跨页整框迁移 找净空并重渲染；跨页迁移的贴片在 patch 里记 `page` 落点页，`compose_page_asset` 负责擦 home 页脚印、把外来贴片盖到落点页。
+贴片渲染的 fit 判定对水平方向使用 2.5pt 容差（垂直 0.5pt）：TeX/PyMuPDF 的宽度口径是 advance 盒，轻微超宽不触发缩字号。fit 不过时走**有界阶梯**：源字号+源行距 → 行距 ×1.1/×0.9 → 字号 ×0.95^k（≤12 步、下限 4pt）。一次 xelatex 的成本几乎全在进程启动与导言区加载（fontspec/xeCJK 不能 `\dump` 预编译格式，这个下限压不掉），排版 15 个候选与排版 1 个几乎等价，所以首选档未过时剩余候选由 `BboxStampRenderer.build_ladder_tex` 压进**一次**编译（一档一页、`\vsize` 取大常量保证不被分页截断、`@@S/@@E` 标记归属日志），按同一优先级顺序选档——**选出的字号行距与逐档顺序编译完全一致**，省掉的只是被丢弃候选的进程开销。快路任一前提不成立（编译失败、标记数或页数不符）即返回 `None` 原样退回顺序阶梯。
 
-`GET /paragraphs` 每段带解析状态派生的 `style` 摘要（字号/衬线/加粗/斜体/字体名）；草稿 `layout` 新增 `bold/italic/serif` 布尔覆盖并在局部编译注入 LaTeX（`font_scale`/`line_skip` 同路径生效）。前端段落面板提供三态下拉，多选时提供批量编译面板。
+贴片仍被缩字或溢出时自动**浮动**：`block_compile._float_if_shrunk` 用 PP-DocLayoutV3 对编译后的译文页重识别版面（`PaddleLayoutRegions`，缺 `BDT_PADDLE_DEVICE` 环境时 auto，CoreML 运行期失败自动降级 CPU），按 同栏下/上扩 → 跨栏横向扩 → 跨页整框迁移 找净空并重渲染；跨页迁移的贴片在 patch 里记 `page` 落点页，`compose_page_asset` 负责擦 home 页脚印、把外来贴片盖到落点页。并发浮动必须看见彼此：`FloatReservations` 把已选中的落点框登记到数据库，后来的块把它当障碍避让，否则同页两个块会各自算出同一块净空而互相压字。版面检测结果按页进 `PageLayoutCache`，同页多个块不重复推理；缩字块在进页锁前先预取证据，锁内只剩纯几何规划。检测器的 ONNX Runtime 线程数夹到 4：十几个 xelatex 进程并存时，铺满核数的线程池只会互相抢核（实测 0.78s → 0.43s/次）。
+
+`GET /paragraphs` 每段带解析状态派生的 `style` 摘要（字号/衬线/加粗/斜体/字体名）；草稿 `layout` 新增 `bold/italic/serif` 布尔覆盖与中文字体族 `font_family`（值是 `GET /fonts` 的 id），并在局部编译注入 LaTeX（`font_scale`/`line_skip` 同路径生效）。前端段落面板提供字体族与字号下拉、三态样式下拉，多选时提供批量编译面板。
+
+工作台界面是三栏骨架：左栏 `PaperNav`（论文卡列表、搜索、上传、底部词表/设置入口）在所有路由常驻；中栏按路由渲染，工作台里只有预览区（工具条最左是文档名与阶段徽标，其次是翻页组与缩放组）；右栏 `InspectorPanel` 是段落 / 事件流 / 归档三个 tab，底部常驻操作区（任务控制 + 编译全文）。没有顶栏、图标栏或底部时间线：阶段状态在事件流 tab 的阶段条里，历史版本在归档 tab。
 
 原文识别叠加层经 `serve/recognition.py` 读取已持久化的 provider IR，展示原始 block/span 框（含行内公式）和全文实际 label 清单；旧 parse 段落快照仍供兼容与段落选择使用。span 是只读预览实体，不参与草稿/编译身份，也不叠加到译文页。接口字段与回退语义见 [HTTP 参考](docs/reference/http-api.md#识别框与-label-筛选)。
 
@@ -82,6 +86,7 @@ bdt run → parse → translate → apply → build → check → review → rep
 | `<store_base>/app.db` | SQLite（WAL）：文档、草稿、任务快照/事件、段落、页面、资产引用、导出 |
 | `<store_base>/assets/<哈希前缀>/` | 按 SHA-256 寻址的本地文件；数据库不保存 PDF 二进制 |
 | `<store_base>/.bdt-serve/`、`<workdir>/.bdt-serve/` | 服务配置、兼容任务/草稿文件、候选、全量编译状态及版本 |
+| `<store_base>/cache/stamps/` | 跨文档共享的贴片编译缓存（`StampCache`）；serve 经 `BDT_LATEX_STAMP_CACHE` 传给 job 子进程，缺省才退回 workdir 内的私有缓存。缓存键含模板版本与字体签名，模板或字体变更自动失效 |
 | `<workdir>/debug/runs/` | 按运行归档的诊断事件、快照与产物副本 |
 
 `store_base` 在 root 模式是服务根目录，在 workdir 模式是所选工作目录；root 模式缺省根是 `~/.sp`（跨 worktree 共享的文档库）。SQLite 和文件目前并存；不是已经完成数据库替换，也不能只备份其中一边。
@@ -97,6 +102,9 @@ job 子进程由 serve 以 `sys.executable -m babeldoc_tools` 起，serve 会把
 | 续跑检查阶段依赖与记录哈希；过期输入不能静默复用 | `run.py::STAGE_INPUTS`、`tests/test_run_pipeline.py` |
 | 编译成功、预览可用、质量通过是不同状态；失败不得把旧产物标成当前 revision | `compile.py`、`block_compile.py`、`tests/test_serve_compile.py`、`test_serve_local_export.py` |
 | LaTeX 编译后精修框只替换贴片矩形；擦除范围与源行几何量测（含首行 ascent，向上扩因此才有效）仍按原框 | `latex_bbox/overlay.py`（`latex_bbox_box_overrides`）、`layout_refine.py`、`tests/test_latex_bbox.py` |
+| 编译提速只许省进程，不许改选档：批阶梯与逐档顺序编译必须选出同一字号行距，快路不成立时退回顺序；诊断采集仍按档记候选（父链、逐档 fit 原因、页号/行号区间），不因批编译少记 | `latex_bbox/renderer.py`（`build_ladder_tex`/`_try_ladder_batch`）、`tests/test_latex_bbox.py`、`tests/test_debug_build_capture.py` |
+| 并发浮动共享同一份落点账本；同页两个块不得各自占用同一块净空 | `block_compile.py`（`FloatReservations`）、`tests/test_serve_block_compile.py` |
+| 同页块渲染并行、页状态提交串行：同页并发提交不得丢 patch，外来贴片落到已发布页必须重合成；共享库连接在 worker 起来前建好、懒建线程安全 | `stream_preview.py`（`PageLocks`）、`block_compile.py`（`compile_block_patch(page_lock=)`）、`store.py`（`DocumentStore.database`）、`tests/test_serve_stream_preview.py`、`tests/test_serve_block_compile.py` |
 | HTTP 文件访问经文档范围解析、产物白名单或资产归属校验 | `store.py`、`artifacts.py`、`routers/artifacts.py`、`tests/test_serve_artifacts.py` |
 | 测试证据写入仓库 `tmp/`，不得纳入版本控制 | `.gitignore`、`AGENTS.md` |
 

@@ -22,7 +22,7 @@ MinerU 适配器在在线、缓存及回放路径中，将显示视图的 bbox �
 
 布局覆盖率门禁在段落组织前统计具有 bbox 的非空白原生字符；纯空白不进入分子、分母与未覆盖预览，数量另记为 `ignored_whitespace_chars`。未识别 Unicode 的非空白字符仍参与门禁。默认未覆盖比例上限为 0.5%，审计文件始终写入 `<workdir>/<输入文件名去扩展名>/layout_coverage.json`。超限停止解析；阈值以内的未覆盖字符仍会记录，门禁通过不等于覆盖了所有内容。
 
-构建由 `document_il/midend/typesetting.py` 与 `backend/pdf_creater.py` 执行。默认启用 `backend/latex_bbox/`；可用时按段落渲染，不适用或失败时记录回退。`--render` 的页面图默认在 `output/render/`，实际文件名以返回 JSON 为准。PDF 已生成不表示质量检查通过。
+构建由 `document_il/midend/typesetting.py` 与 `backend/pdf_creater.py` 执行。首遍 Typesetting 在译文放不进源框时先扩框再缩字：障碍包括段落、有效的非空白孤立字符、既有 `pdf_figure`，以及 `page_layout` 中的 `figure`、`table`、`formula`/`isolate_formula` 语义区域；未归入段落的纯空白字符不作为障碍。这样可避免页眉或页顶空格把段落扩到页面顶部，同时保留上下间距、横向容差和页边界规则。默认启用 `backend/latex_bbox/`；可用时按段落渲染，不适用或失败时记录回退。`--render` 的页面图默认在 `output/render/`，实际文件名以返回 JSON 为准。PDF 已生成不表示质量检查通过。
 
 首遍产物里确实有段落被 LaTeX 缩字时，`bdt build` 会再跑一遍「编译后扩框」：用本地 PP-DocLayoutV3（ONNX + CoreML，热跑约 0.1s/页）识别译文 PDF 的版面区域，再加 pymupdf 的精确墨迹兜底（实测区域检测漏过一个小标题），把这些段的贴片矩形扩到相邻墨迹之间再重排。同一页先给所有目标**向下**扩，向下没净空的再**向上**扩；障碍集里带着刚扩过的框，相邻两段不会抢同一段净空。向上扩依赖「首行几何按原框量测」：`\topskip` 取「首行字顶 − 框顶」，这个差跟着新框顶一起涨就换不来任何可用高度（实测与不扩逐字节一致）。整个精修只改贴片矩形，擦除范围与源行量测仍按原框，不写 `layout_overrides.json`，也不改 Typesetting 输入框，因此续跑哈希与既有排版覆盖语义不变；结果记在 `reconstruct_report.json` 的 `latex_refine`。没有缩字段、模型/依赖缺失，或传 `--no-latex-refine` 时保持单遍（`BDT_LATEX_REFINE=0` 同样关闭，供测试/排查用）。这与既有 `overlay._expand_vertical_failures` 不冲突：后者仍只在源版面找净空、且只在第一遍内生效。
 
@@ -67,7 +67,9 @@ root 模式的 `store_base` 是服务根目录；workdir 模式则是工作目�
 
 ## 局部编译边界
 
-`serve/block_compile.py::BlockCompiler` 处理单段编译和导出：从当前草稿/翻译块与不可变解析输入生成页面补丁，记录资产、页面和 revision；发布前检查任务未取消且 revision 未过期。导出组合页面并记录 `exports`。流式译文通过 `ServeStreamPreview` 提交预览编译，与模型输出读取分离：完成的块立即进入并行编译池（worker 数 1..8，缺省 8；来源优先级为 job 字段 `preview_workers` > `bdt serve --preview-workers` > 缺省），同一页的块按 pid 页号哈希到同一 worker 串行（页 patch 的读-改-写不会丢更新），不同页并行。`BlockCompiler` 实例缓存一次 LaTeX 能力探测（kpsewhich 子进程不再每段重复），`state.pkl` 反序列化按 workdir+mtime 进程内缓存。
+`serve/block_compile.py::BlockCompiler` 处理单段编译和导出：从当前草稿/翻译块与不可变解析输入生成页面补丁，记录资产、页面和 revision；发布前检查任务未取消且 revision 未过期。导出组合页面并记录 `exports`。流式译文通过 `ServeStreamPreview` 提交预览编译，与模型输出读取分离：完成的块立即进入并行编译池（worker 数 1..`MAX_PREVIEW_WORKERS`，上限 = `min(16, cpu_count-2)`，缺省取上限；来源优先级为 job 字段 `preview_workers` > `bdt serve --preview-workers` > 缺省）。池是一个共享线程池加每页一把锁（`PageLocks`）：贴片渲染（xelatex）不持锁、同页块并行；只有浮动规划/占位与 patch 读-改-写提交持该页的锁（读-改-写不丢更新）。跨页浮动贴片落到已发布页时该页重新合成一次。批量编译 `compile_blocks` 同样只把页锁交给编译器，不再把整块编译包在锁里。`BlockCompiler` 实例缓存一次 LaTeX 能力探测（kpsewhich 子进程不再每段重复），`state.pkl` 反序列化按 workdir+mtime 进程内缓存，`ILTranslator` 按语言对进程内缓存且构造期间持锁（并发首编只建一份；`post_translate_paragraph` 只依赖占位符正则），解析快照查找（`hydrate_parse`）带 5s TTL 缓存，版面检测按页缓存（`PageLayoutCache`，ONNX Runtime 线程夹到 4），贴片编译缓存跨文档共享（`<store_base>/cache/stamps`，经 `BDT_LATEX_STAMP_CACHE` 传给 job 子进程）。
+
+贴片 fit 不过时的有界阶梯（源字号+源行距 → 行距 ×1.1/×0.9 → 字号 ×0.95^k，≤12 步、下限 4pt）由 `BboxStampRenderer` 批编译：首选档单独编一次，未过则剩余候选压进**一次** xelatex（`build_ladder_tex` 一档一页），按同一优先级选档，选出的字号行距与逐档顺序编译完全一致；快路前提不成立（编译失败、标记/页数不符）退回顺序阶梯。挂诊断 recorder 时批阶梯仍按档各记一条 `candidate_evaluated`（共享整轮 TeX/PDF/日志，带 `batch_id`、页号与行号区间），`call_finished` 按真实进程数计。缩字/溢出贴片的浮动（同栏扩 → 跨栏扩 → 跨页迁移）把已落定的兄弟贴片（`FloatReservations`，按落点页登记）并入障碍集，同页并发浮动不会各自占用同一块净空。
 
 旧 `serve/compile.py::CompileService` 仍处理全量 `action=compile`：隔离副本 → 物化草稿 → `bdt run --from apply` → 校验产物 → 发布/版本归档。旧 PDF 在失败后仍可用，但必须显示旧 revision。`scope=pages` 在这条路径仍降级全量，不等于新段落编译接口。
 

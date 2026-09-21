@@ -90,7 +90,7 @@ def add_parser(subparsers) -> argparse.ArgumentParser:
         default=None,
         metavar="N",
         help=(
-            "流式翻译预览的并行编译 worker 数（1..8，缺省 8）；"
+            "流式翻译预览的并行编译 worker 数（1..min(16, cpu-2)，缺省取上限）；"
             "同一页的块仍串行编译，不同页并行"
         ),
     )
@@ -204,7 +204,7 @@ def _open_browser(url: str) -> None:
 
 
 def _preview_workers(args: argparse.Namespace) -> int | None:
-    """``--preview-workers`` 的校验：None（未给）或 1..8；越界 → ``invalid_port``
+    """``--preview-workers`` 的校验：None（未给）或 1..MAX_PREVIEW_WORKERS；越界 → ``invalid_port``
     同级的启动失败（单行 JSON 错误信封，退出码 1）。"""
     if args.preview_workers is None:
         return None

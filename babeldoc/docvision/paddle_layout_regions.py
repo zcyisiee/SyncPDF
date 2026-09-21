@@ -81,6 +81,12 @@ class PaddleLayoutRegions:
         self._engine = None
         self._engine_error: str | None = None
         self._build_lock = threading.Lock()
+        #: 是否已做过一次小图预热（CoreML 运行期兼容性探测，见 :meth:`_warmup`）。
+        #: 预热有独立的锁：多 worker 并发首次检测时只让**一个**线程去探，其余等
+        #: 它探完直接用已定型的引擎（实测 16 worker 无锁时 5 个线程各自撞一次
+        #: CoreML 失败、各自重建一次引擎）。
+        self._warmed = False
+        self._warm_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     @property
@@ -126,6 +132,26 @@ class PaddleLayoutRegions:
                 logger.warning("PP-DocLayoutV3 检测器不可用，跳过扩框", exc_info=True)
             return self._engine
 
+    def _warmup(self) -> None:
+        """用一张小图先试一次推理，把 CoreML 的运行期不兼容在这里暴露掉。
+
+        部分 macOS/模型组合下 CoreML EP 会在**真正推理时**才抛 ReduceMax 兼容
+        错误（构建阶段看不出来）。原来每个新进程都要先拿一页真实页面撞一次墙、
+        付一次失败推理 + 重建引擎的代价（实测约 6.5s）。这里用 32×32 的图做同样
+        的探测：失败路径与 :meth:`_predict` 共用（降级 CPU 并记住），代价可忽略。
+        """
+        if self._predictor is not None:
+            return
+        with self._warm_lock:
+            if self._warmed:
+                return
+            probe = np.zeros((32, 32, 3), dtype=np.uint8)
+            try:
+                self._predict(probe)
+            except Exception:  # noqa: BLE001 - 探测本身失败不该让检测不可用
+                logger.debug("布局检测预热失败", exc_info=True)
+            self._warmed = True
+
     # ------------------------------------------------------------------
     def detect_page(self, page) -> list[Region]:
         """检测一页（pymupdf Page）的版面区域；不可用或无区域时返回 []。"""
@@ -154,6 +180,8 @@ class PaddleLayoutRegions:
         """
         if image is None or image.size == 0:
             return []
+        # 首次检测前先用小图探一次 EP 兼容性，避免拿整页去撞 CoreML 的运行期错误。
+        self._warmup()
         raw = self._predict(image)
         if not raw:
             return []
@@ -195,19 +223,24 @@ class PaddleLayoutRegions:
         engine = self._build()
         if engine is None:
             return []
+        # 记下本次用的是哪个 device：并发时别的线程可能已经把 self.device 改成
+        # cpu，本线程失败的仍是旧的 CoreML 引擎，不能据此误判成「CPU 也失败」。
+        attempted = self.device
         try:
             result = next(iter(engine([image])))
         except Exception:  # noqa: BLE001 - CoreML 运行期兼容问题：降级 CPU 重试
-            if self.device == "cpu":
+            if attempted == "cpu":
                 raise
             logger.warning(
-                "布局检测运行失败（device=%s），降级 CPU EP 重试一次", self.device,
+                "布局检测运行失败（device=%s），降级 CPU EP 重试一次", attempted,
                 exc_info=True,
             )
             with self._build_lock:
-                self.device = "cpu"
-                self._engine = None
-                self._engine_error = None
+                # 只有第一个失败者重建引擎；其余并发失败者直接复用降级后的引擎。
+                if self.device != "cpu":
+                    self.device = "cpu"
+                    self._engine = None
+                    self._engine_error = None
             engine = self._build()
             if engine is None:
                 return []

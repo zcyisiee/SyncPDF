@@ -6,8 +6,8 @@
  */
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
-import type { ReactNode } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import type { ReactElement, ReactNode } from 'react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createQueryClient } from '../src/app/App';
 import { EventRow, eventTime } from '../src/components/events/EventRow';
@@ -15,13 +15,55 @@ import { EventStreamPanel } from '../src/components/events/EventStreamPanel';
 import { useEventStream, type EventSourceLike } from '../src/components/events/useEventStream';
 import { useEventWindow } from '../src/components/events/useEventWindow';
 import { EVENTS_WINDOW_SIZE, type RunEvent } from '../src/lib/events';
+import { STAGE_NAMES } from '../src/lib/humanize';
+import { uiStore } from '../src/stores/ui';
 import { jsonResponse, makeEvent, makeEventFeed, mockApiFetch } from './helpers';
 
 const DID = 'ccs3764-dyn';
 const RUN_ID = '20260916T132829Z-000183';
+const STAGE_STATE_URL = `/api/v1/documents/${DID}/stage-state`;
+const JOBS_URL = `/api/v1/documents/${DID}/jobs`;
 
 function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={createQueryClient()}>{children}</QueryClientProvider>;
+}
+
+/**
+ * 面板的渲染入口：阶段条是 stage-state 的第二个订阅方（与 WorkbenchScreen 共用同一份
+ * 查询），所以渲染前先 mock 这两个端点；未 mock 的路径返回 404 会落到「阶段状态不可用」。
+ */
+function renderPanel(ui: ReactElement, routes: Record<string, () => Response> = {}) {
+  mockApiFetch({
+    [STAGE_STATE_URL]: () => jsonResponse(stageStateOf([])),
+    [JOBS_URL]: () => jsonResponse([]),
+    ...routes,
+  });
+  const result = render(wrapper({ children: ui }));
+  // 重渲染必须保住 QueryClientProvider（阶段条/任务查询都靠它）
+  return { ...result, rerender: (next: ReactElement) => result.rerender(wrapper({ children: next })) };
+}
+
+/** `GET /stage-state` 的替身：`entries` 里给的阶段用该状态与耗时，其余 `not_run`。 */
+function stageStateOf(entries: [stage: string, status: string, durationS?: number][]) {
+  const byStage = new Map<string, string>(entries.map(([stage, status]) => [stage, status]));
+  const durations = new Map<string, number>(
+    entries.flatMap(([stage, , durationS]) =>
+      durationS === undefined ? [] : ([[stage, durationS]] as const),
+    ),
+  );
+  return {
+    did: DID,
+    run_id: RUN_ID,
+    stages: STAGE_NAMES.map((stage) => ({
+      stage,
+      status: byStage.get(stage) ?? 'not_run',
+      ok: byStage.get(stage) === 'ok',
+      started_at: '2026-09-16T13:28:29.000Z',
+      finished_at: '2026-09-16T13:28:29.000Z',
+      duration_s: durations.get(stage) ?? null,
+      timing_source: 'manifest',
+    })),
+  };
 }
 
 /** 事件窗口的替身：按 seq 升序造 `n` 条，最后一条是 `stage_finished`/`report`（run 收尾）。 */
@@ -33,6 +75,22 @@ function windowOf(n: number, offset = 0): RunEvent[] {
     }),
   );
 }
+
+// 定位桥（`locate`）是全局 store 的会话态：每个用例都从「没点过」开始。
+beforeEach(() => {
+  uiStore.setState({ locate: null });
+});
+
+/** 7 段全 ok 的 stage-state（阶段条「N 阶段完成」的口径来源）。 */
+const STAGE_STATES_ALL_OK: [stage: string, status: string, durationS: number][] = [
+  ['parse', 'ok', 15.83],
+  ['translate', 'ok', 248.93],
+  ['apply', 'ok', 4.07],
+  ['build', 'ok', 23.85],
+  ['check', 'ok', 25.23],
+  ['review', 'ok', 0.32],
+  ['report', 'ok', 0],
+];
 
 describe('eventTime（北京时间显示）', () => {
   it('带时区的 UTC 归档时刻按 Asia/Shanghai 换算（+8h），不跟浏览器本地时区', () => {
@@ -70,7 +128,7 @@ describe('eventTime（北京时间显示）', () => {
 
 describe('EventStreamPanel', () => {
   it('窗口里的行全部渲染（默认 200 条上限）且最新在上', () => {
-    render(
+    renderPanel(
       <EventStreamPanel
         did={DID}
         compileEvents={[]}
@@ -92,7 +150,7 @@ describe('EventStreamPanel', () => {
       makeEvent(2, { kind: 'cache_miss' }),
       makeEvent(3, { kind: 'candidate_evaluated' }),
     ];
-    render(<EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ events, runId: RUN_ID })} />);
+    renderPanel(<EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ events, runId: RUN_ID })} />);
     expect(document.querySelectorAll('[data-od-id="event-row"]')).toHaveLength(3);
 
     fireEvent.change(screen.getByLabelText('事件分组'), { target: { value: 'cache' } });
@@ -108,7 +166,7 @@ describe('EventStreamPanel', () => {
   });
 
   it('点击行展开原始 JSON（再点收起）', () => {
-    render(
+    renderPanel(
       <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ events: windowOf(2), runId: RUN_ID })} />,
     );
     const row = document.querySelector('[data-od-id="event-row"] button') as HTMLElement;
@@ -123,19 +181,19 @@ describe('EventStreamPanel', () => {
   });
 
   it('空态三态：加载中 / 没有 run 归档 / 还没有事件', () => {
-    const { unmount } = render(
+    const { unmount } = renderPanel(
       <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ isPending: true, hasArchive: false })} />,
     );
     expect(screen.getByText('正在加载事件…')).toBeInTheDocument();
     unmount();
 
-    const { unmount: unmountArchive } = render(
+    const { unmount: unmountArchive } = renderPanel(
       <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ hasArchive: false })} />,
     );
     expect(screen.getByText(/该文档没有 run 归档/)).toBeInTheDocument();
     unmountArchive();
 
-    render(
+    renderPanel(
       <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ events: [], hasArchive: true })} />,
     );
     expect(screen.getByText(/这个 run 还没有事件/)).toBeInTheDocument();
@@ -143,7 +201,7 @@ describe('EventStreamPanel', () => {
 
   it('首拉真错误 → 错误文案 + 重试按钮', () => {
     const retry = vi.fn();
-    render(
+    renderPanel(
       <EventStreamPanel
         did={DID}
         compileEvents={[]}
@@ -156,26 +214,26 @@ describe('EventStreamPanel', () => {
   });
 
   it('SSE 状态行：open「实时」带脉冲；断线/关闭/不支持各有文案且不给脉冲', () => {
-    const { unmount } = render(
+    const { unmount } = renderPanel(
       <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ connection: 'open' })} />,
     );
     expect(screen.getByText('实时').querySelector('.pulse-dot')).not.toBeNull();
     unmount();
 
-    const { unmount: unmountBroken } = render(
+    const { unmount: unmountBroken } = renderPanel(
       <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ connection: 'reconnecting' })} />,
     );
     const status = screen.getByText('连接断开，重试中').closest('[data-od-id="event-stream-status"]');
     expect(status).toHaveAttribute('data-status', 'reconnecting');
     unmountBroken();
 
-    const { unmount: unmountClosed } = render(
+    const { unmount: unmountClosed } = renderPanel(
       <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ connection: 'closed' })} />,
     );
     expect(screen.getByText('连接已关闭')).toBeInTheDocument();
     unmountClosed();
 
-    render(
+    renderPanel(
       <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ connection: 'unsupported' })} />,
     );
     expect(screen.getByText('此环境不支持实时推送')).toBeInTheDocument();
@@ -184,7 +242,7 @@ describe('EventStreamPanel', () => {
 
   it('「载入更早」按 hasEarlier 禁用，点击回调一次', () => {
     const loadEarlier = vi.fn();
-    const { unmount } = render(
+    const { unmount } = renderPanel(
       <EventStreamPanel
         did={DID}
         compileEvents={[]}
@@ -194,7 +252,7 @@ describe('EventStreamPanel', () => {
     expect(screen.getByRole('button', { name: '载入更早' })).toBeDisabled();
     unmount();
 
-    render(
+    renderPanel(
       <EventStreamPanel
         did={DID}
         compileEvents={[]}
@@ -207,7 +265,7 @@ describe('EventStreamPanel', () => {
 
   it('新事件到达：停在顶部不加浮标；滚走后累计「↑ N 条新事件」并点击回顶', async () => {
     const events = windowOf(3);
-    const { rerender } = render(
+    const { rerender } = renderPanel(
       <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ events, runId: RUN_ID })} />,
     );
     const scroll = document.querySelector('[data-od-id="event-stream-scroll"]') as HTMLElement;
@@ -230,7 +288,7 @@ describe('EventStreamPanel', () => {
 
   it('换 run（重新开始翻译）：滚动贴回顶部、浮标清零、展开行收起、seq 从头显示', async () => {
     const first = windowOf(3);
-    const { rerender } = render(
+    const { rerender } = renderPanel(
       <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ events: first, runId: RUN_ID })} />,
     );
     const scroll = document.querySelector('[data-od-id="event-stream-scroll"]') as HTMLElement;
@@ -263,6 +321,135 @@ describe('EventStreamPanel', () => {
     expect(rows).toHaveLength(2);
     expect(rows[0].getAttribute('data-seq')).toBe('2');
     expect(rows[1].getAttribute('data-seq')).toBe('1');
+  });
+});
+
+describe('阶段条头部（stage-strip）', () => {
+  it('渲染 7 段（顺序 = STAGE_NAMES）且逐段带状态色钩子；全 ok → 「7 阶段完成」', async () => {
+    renderPanel(
+      <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ events: windowOf(2), runId: RUN_ID })} />,
+      {
+        [STAGE_STATE_URL]: () => jsonResponse(stageStateOf(STAGE_STATES_ALL_OK)),
+      },
+    );
+    await waitFor(() => expect(screen.getByText('7 阶段完成')).toBeInTheDocument());
+    const segments = document.querySelectorAll('[data-od-id="stage-strip-segment"]');
+    expect(segments).toHaveLength(7);
+    expect([...segments].map((node) => node.getAttribute('data-stage'))).toEqual([...STAGE_NAMES]);
+    expect([...segments].map((node) => node.getAttribute('data-state'))).toEqual(
+      Array.from({ length: 7 }, () => 'ok'),
+    );
+    // 均分（不按耗时造假比例）：title 里给真实的阶段 / 状态 / 实测耗时
+    expect(segments[0].getAttribute('title')).toBe('解析 · 已完成 · 15s');
+    // 非 live 不给脉冲（全站唯一动效只出现在真正运行中时；SSE 状态行的点不算）
+    const strip = document.querySelector('[data-od-id="stage-strip"]') as HTMLElement;
+    expect(strip.querySelectorAll('.pulse-dot')).toHaveLength(0);
+  });
+
+  it('有失败阶段 → 「{阶段}失败」红字；live 段 → 脉冲点 + 「{阶段}中」', async () => {
+    const failed = renderPanel(
+      <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ events: windowOf(2), runId: RUN_ID })} />,
+      {
+        [STAGE_STATE_URL]: () =>
+          jsonResponse(
+            stageStateOf([
+              ['parse', 'ok', 15.83],
+              ['translate', 'failed', 12.4],
+            ]),
+          ),
+      },
+    );
+    const failedStatus = await screen.findByText('翻译失败');
+    expect(failedStatus.getAttribute('data-live')).toBe('false');
+    failed.unmount();
+
+    renderPanel(
+      <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ events: windowOf(2), runId: RUN_ID })} />,
+      {
+        [STAGE_STATE_URL]: () => jsonResponse(stageStateOf([['translate', 'running']])),
+      },
+    );
+    const liveStatus = await screen.findByText(/^翻译中/);
+    expect(liveStatus.getAttribute('data-live')).toBe('true');
+    expect(liveStatus.querySelector('.pulse-dot')).not.toBeNull();
+  });
+
+  it('stage-state 读不到 → 整条替换为「阶段状态不可用」微字', async () => {
+    renderPanel(
+      <EventStreamPanel did={DID} compileEvents={[]} feed={makeEventFeed({ events: windowOf(1), runId: RUN_ID })} />,
+      {
+        [STAGE_STATE_URL]: () => jsonResponse({ error: { code: 'internal_error', message: '炸了' } }, 500),
+      },
+    );
+    expect(await screen.findByText('阶段状态不可用')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-od-id="stage-strip-segment"]')).toHaveLength(0);
+  });
+});
+
+describe('节点重排 + 在预览中定位', () => {
+  it('节点 = 类型 chip + seq 右对齐 + 叙述行 + 展开详情；全量保留 od-id', () => {
+    renderPanel(
+      <EventStreamPanel
+        did={DID}
+        compileEvents={[]}
+        feed={makeEventFeed({
+          events: [makeEvent(1, { kind: 'stage_finished', stage: 'parse', data: { status: 'ok' } })],
+          runId: RUN_ID,
+        })}
+      />,
+    );
+    const row = document.querySelector('[data-od-id="event-row"]') as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(row.textContent).toContain('阶段完成'); // kind chip 人话标签
+    expect(row.textContent).toContain('解析');
+    expect(row.textContent).toContain('展开详情');
+    fireEvent.click(row.querySelector('button') as HTMLElement);
+    expect(document.querySelector('[data-od-id="event-row-json"]')?.textContent).toContain(
+      '"kind": "stage_finished"',
+    );
+  });
+
+  it('事件带 page → 渲染「在预览中定位」并带 paragraph_id 写进 store；无 page 不渲染', () => {
+    renderPanel(
+      <EventStreamPanel
+        did={DID}
+        compileEvents={[]}
+        feed={makeEventFeed({
+          events: [
+            makeEvent(1, { kind: 'paragraph_done', data: { page: 5, paragraph_id: 'P02-003' } }),
+            makeEvent(2, { kind: 'call_started', data: { attempt: 1 } }),
+          ],
+          runId: RUN_ID,
+        })}
+      />,
+    );
+    const links = document.querySelectorAll('[data-od-id="event-locate"]');
+    expect(links).toHaveLength(1);
+    fireEvent.click(links[0]);
+    expect(uiStore.getState().locate).toMatchObject({ nonce: 1, page: 5, paragraphId: 'P02-003' });
+
+    // 同页重复点击也要能再触发一次（nonce 自增，不是同值短路）
+    fireEvent.click(links[0]);
+    expect(uiStore.getState().locate).toMatchObject({ nonce: 2, page: 5 });
+  });
+
+  it('编译列：带 page 的行有定位链接（无 page 的没有），且计数行保留', () => {
+    renderPanel(
+      <EventStreamPanel
+        did={DID}
+        compileEvents={[
+          { seq: 13, type: 'preview_ready', blockId: null, page: null, at: null, data: { page: 1, asset: 'a' } },
+          { seq: 15, type: 'preview_failed', blockId: 'P02-012', page: null, at: null, data: { message: '单块编译失败' } },
+        ]}
+        feed={makeEventFeed({ events: windowOf(1), runId: RUN_ID })}
+      />,
+    );
+    const rows = document.querySelectorAll('[data-od-id="compile-timeline-row"]');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].querySelector('[data-od-id="event-locate"]')).toBeNull();
+    expect(rows[1].querySelector('[data-od-id="event-locate"]')).not.toBeNull();
+    fireEvent.click(rows[1].querySelector('[data-od-id="event-locate"]') as HTMLElement);
+    expect(uiStore.getState().locate).toMatchObject({ nonce: 1, page: 1 });
   });
 });
 

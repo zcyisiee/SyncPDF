@@ -13,12 +13,18 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import Path
+
 import pymupdf
 import pytest
 from babeldoc.format.pdf.document_il.backend.latex_bbox import capability
 from babeldoc.format.pdf.document_il.backend.latex_bbox import renderer as renderer_mod
 from babeldoc.format.pdf.document_il.backend.latex_bbox import (
     renderer_batch as batch_mod,
+)
+from babeldoc.format.pdf.document_il.backend.latex_bbox.font_families import (
+    FONT_FAMILY_IDS,
 )
 from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
     BboxStampRenderer,
@@ -117,6 +123,65 @@ def test_batch_tex_keeps_font_setup_in_preamble():
     assert "\\setmainfont" not in tex[document_start:] or tex.index(
         "\\setmainfont"
     ) < document_start
+
+
+def test_batch_tex_uses_requested_font_family_in_preamble():
+    """段落级 font_family：批 tex 导言区用该族的中文主字体。"""
+    families = _CAPABILITY.cjk_family_fonts
+    if not families:
+        pytest.skip("没有探测到可选中文字体族")
+    family_id = sorted(families)[0]
+    stem = Path(families[family_id]["regular"]).stem
+    renderer = BatchStampRenderer(_CAPABILITY)
+    tex, _ranges = renderer.build_batch_tex(
+        [replace(_request("a"), font_family=family_id), _request("b")]
+    )
+
+    assert stem in tex[: tex.index("\\begin{document}")]
+
+
+# --------------------------------------------------------------------------- #
+# 块分组（字体只能在导言区声明）
+# --------------------------------------------------------------------------- #
+def test_compile_blocks_are_homogeneous_in_font_family(tmp_path, monkeypatch):
+    """``\\setCJKmainfont`` 只能在导言区：一块内 (serif, font_family) 必须一致。"""
+    first_id, second_id = "lxgw-wenkai", "klee-one"
+    assert {first_id, second_id} <= FONT_FAMILY_IDS
+    renderer = BatchStampRenderer(_CAPABILITY, max_workers=1)
+    blocks: list[list[tuple[bool, str | None]]] = []
+
+    def fake_compile_block(
+        _self, items, _workdir, _attempt, _base_by_key, _depth=0, **_kwargs
+    ):
+        blocks.append(
+            [
+                (bool(request.serif), request.font_family)
+                for _key, request, _priority in items
+            ]
+        )
+        return {
+            key: StampResult(key=key, ok=False, reason="timeout")
+            for key, _request, _priority in items
+        }
+
+    monkeypatch.setattr(BatchStampRenderer, "_compile_block", fake_compile_block)
+    renderer.render_many(
+        [
+            (_request("plain-a"), tmp_path),
+            (replace(_request("wenkai"), font_family=first_id), tmp_path),
+            (_request("plain-b"), tmp_path),
+            (replace(_request("klee"), font_family=second_id), tmp_path),
+        ]
+    )
+
+    # 三种字体配置 → 三块；每块字体配置唯一。
+    assert len(blocks) == 3
+    assert all(len(set(block)) == 1 for block in blocks)
+    assert sorted(blocks, key=len) == [
+        [(True, first_id)],
+        [(True, second_id)],
+        [(True, None), (True, None)],
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -563,6 +628,45 @@ def test_build_stamp_cache_requires_working_dir(tmp_path):
     cache = batch_build_cache(_ConfigWithDir())
     assert cache is not None
     assert cache.cache_dir.name == "latex_cache"
+
+
+def test_build_stamp_cache_prefers_shared_root(tmp_path, monkeypatch):
+    """回归：共享缓存根优先于 workdir，否则 build 会把预览编好的贴片全部重编。
+
+    真实故障：流式预览写 ``<store_base>/cache/stamps``、build 写
+    ``<workdir>/latex_cache``，两边键集交集为 0（实测 build 437 次 miss / 59 次
+    命中）。命名空间（模板版本 + 字体签名）在目录名里，所以共享根可以跨文档。
+    """
+    from babeldoc.format.pdf.document_il.backend.latex_bbox.renderer import (
+        cache_namespace,
+    )
+    from babeldoc.format.pdf.document_il.backend.latex_bbox.stamp_cache import (
+        SHARED_CACHE_ENV,
+    )
+
+    shared = tmp_path / "shared"
+    namespace = cache_namespace(_CAPABILITY).replace("/", "_").replace(":", "_")
+
+    class _Config:
+        working_dir = str(tmp_path / "workdir")
+
+    monkeypatch.setenv(SHARED_CACHE_ENV, str(shared))
+    cache = batch_build_cache(_Config())
+    assert cache is not None
+    assert cache.cache_dir == shared / namespace
+
+    # 显式的 config 值优先于环境变量。
+    explicit = tmp_path / "explicit"
+
+    class _ConfigExplicit:
+        working_dir = str(tmp_path / "workdir")
+        latex_stamp_cache_dir = str(explicit)
+
+    assert batch_build_cache(_ConfigExplicit()).cache_dir == explicit / namespace
+
+    # 未配置共享根时回到旧行为。
+    monkeypatch.delenv(SHARED_CACHE_ENV, raising=False)
+    assert batch_build_cache(_Config()).cache_dir.name == "latex_cache"
 
 
 def batch_build_cache(config):
