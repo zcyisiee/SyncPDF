@@ -2126,7 +2126,11 @@ version = "0.1.0"
 dependencies = [
  "fontdb",
  "harfrust",
+ "lopdf",
+ "pdf-writer",
+ "read-fonts 0.44.0",
  "serde",
+ "serde_json",
  "skrifa 0.47.0",
  "subsetter",
  "syncpdf-core",
