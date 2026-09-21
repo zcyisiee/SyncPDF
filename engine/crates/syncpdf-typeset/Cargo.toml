@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 syncpdf-core = { workspace = true }
-syncpdf-font = { workspace = true }
+
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
