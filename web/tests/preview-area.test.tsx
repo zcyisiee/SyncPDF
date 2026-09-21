@@ -300,3 +300,86 @@ describe('PreviewArea 段落多选（shift）', () => {
     expect(screen.getByRole('button', { name: /P01-002/ })).toHaveAttribute('aria-pressed', 'true');
   });
 });
+
+/**
+ * 「译文框」缺少译文侧识别产物时，必须**明说是「尚未识别」并给出原因**，
+ * 绝不能静默回退到原文 layout 几何（那正是本任务要修的 bug）。
+ */
+describe('PreviewArea 译文框（kind=target）降级', () => {
+  function mockTarget(handler: () => Response) {
+    return mockApiFetch({
+      [`/api/v1/documents/${DID}`]: () => jsonResponse(DETAIL),
+      [`/api/v1/documents/${DID}/artifacts`]: () => jsonResponse([MONO]),
+      [`/api/v1/documents/${DID}/preview-pages`]: () =>
+        jsonResponse({ did: DID, revision: 0, pages: [] }),
+      [`/api/v1/documents/${DID}/jobs`]: () => jsonResponse([]),
+      [`/api/v1/documents/${DID}/geometry?kind=target&page=1`]: handler,
+      // 源侧几何是**可用**的：回退到它才是错误行为，所以这里刻意让它能回 200
+      [`/api/v1/documents/${DID}/geometry?kind=layout&page=1`]: () =>
+        jsonResponse({ did: DID, kind: 'layout', coord_system: 'pdf_native', page: 1,
+          paragraphs: [{ id: 'P01-001', layout_label: 'title', layout_box: [1, 2, 10, 20] }],
+          page_info: [{ page: 1, cropbox: [0, 0, 612, 792] }] }),
+    });
+  }
+
+  it('清单说 skipped → 提示「尚未识别」+ 服务端原因，且不画任何框', async () => {
+    window.localStorage.setItem(STORAGE_KEYS.bboxMode, 'target');
+    uiStore.setState({ bboxMode: 'target' });
+    mockTarget(() =>
+      jsonResponse({
+        did: DID, kind: 'target', coord_system: 'pdf_topleft', page: 1,
+        recognition_entities: null,
+        recognition: { status: 'skipped', reason: '环境变量 MINERU_API_TOKEN 缺失，无法调用 MinerU 识别译文版面' },
+      }),
+    );
+    renderWithQuery(<PreviewArea did={DID} />);
+    const notice = await screen.findByText(/译文版面尚未识别/);
+    expect(notice).toBeInTheDocument();
+    expect(screen.getByText(/MINERU_API_TOKEN/)).toBeInTheDocument();
+    expect(document.querySelector('[data-od-id="preview-target-layout-unrecognized"]')).not.toBeNull();
+    // 关键：没有回退到 layout 几何，也没有画任何框
+    expect(document.querySelector('[data-od-id="bbox-layer"]')).toBeNull();
+  });
+
+  it('清单说 failed → 提示里带失败原因', async () => {
+    window.localStorage.setItem(STORAGE_KEYS.bboxMode, 'target');
+    uiStore.setState({ bboxMode: 'target' });
+    mockTarget(() =>
+      jsonResponse({
+        did: DID, kind: 'target', coord_system: 'pdf_topleft', page: 1,
+        recognition_entities: null,
+        recognition: { status: 'failed', reason: 'httpx.ConnectTimeout: 连接超时' },
+      }),
+    );
+    renderWithQuery(<PreviewArea did={DID} />);
+    expect(await screen.findByText(/译文版面尚未识别/)).toBeInTheDocument();
+    expect(screen.getByText(/ConnectTimeout/)).toBeInTheDocument();
+  });
+
+  it('连清单都没有（404）→ 走通用提示，不提示成「识别失败」', async () => {
+    window.localStorage.setItem(STORAGE_KEYS.bboxMode, 'target');
+    uiStore.setState({ bboxMode: 'target' });
+    mockTarget(() =>
+      jsonResponse({ error: { code: 'target_layout_unavailable', message: '没有识别产物' } }, 404),
+    );
+    renderWithQuery(<PreviewArea did={DID} />);
+    expect(await screen.findByText(/译文版面尚未识别（还没有编译产出译文侧识别产物）/))
+      .toBeInTheDocument();
+    expect(document.querySelector('[data-od-id="preview-target-layout-unrecognized"]')).toBeNull();
+  });
+
+  it('识别成功但该页无框（recognition_entities=[]）→ 不提示「尚未识别」', async () => {
+    window.localStorage.setItem(STORAGE_KEYS.bboxMode, 'target');
+    uiStore.setState({ bboxMode: 'target' });
+    mockTarget(() =>
+      jsonResponse({
+        did: DID, kind: 'target', coord_system: 'pdf_topleft', page: 1,
+        recognition_entities: [], recognition: { status: 'ok', reason: null },
+      }),
+    );
+    renderWithQuery(<PreviewArea did={DID} />);
+    await screen.findAllByText('正在加载 PDF…');
+    expect(screen.queryByText(/译文版面尚未识别/)).toBeNull();
+    expect(document.querySelector('[data-od-id="preview-target-layout-unrecognized"]')).toBeNull();
+  });
+});

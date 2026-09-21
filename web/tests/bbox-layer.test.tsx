@@ -142,4 +142,39 @@ describe('BboxLayer', () => {
     expect(Number(rect?.getAttribute('y'))).toBeCloseTo(78.41, 6);
     expect(container.querySelector('svg')?.getAttribute('data-bbox-mode')).toBe('layout');
   });
+
+  it('target 模式用 pdf_topleft 换算，且与 layout 档位是两个不同的层语义', () => {
+    // 同一个 box 值在 target（pdf_topleft）与 layout（pdf_native）下必须落在不同屏幕位置：
+    // 若两者算出同一个矩形，说明坐标系选错了（这正是「译文框显示原文框」那类 bug 的形状）。
+    const box: [number, number, number, number] = [100, 200, 300, 260];
+    const target = renderLayer({ mode: 'target', boxes: [{ id: 'b', box, label: 'text' }] });
+    const targetRect = target.container.querySelector('rect');
+    expect(Number(targetRect?.getAttribute('y'))).toBeCloseTo(200, 6);
+    expect(target.container.querySelector('svg')?.getAttribute('data-bbox-mode')).toBe('target');
+    target.unmount();
+
+    const layout = renderLayer({ mode: 'layout', boxes: [{ id: 'b', box, label: 'text' }] });
+    const layoutRect = layout.container.querySelector('rect');
+    // pdf_native 是 y 向上：y2=260 换算到屏幕 = 792 - 260
+    expect(Number(layoutRect?.getAttribute('y'))).toBeCloseTo(792 - 260, 6);
+  });
+
+  it('target 的只读 provider 框可聚焦但不可选中（不假装能编辑）', () => {
+    renderLayer({
+      mode: 'target',
+      boxes: [
+        {
+          id: 'provider:block:p0-b0',
+          box: [100, 200, 300, 260],
+          label: 'text',
+          kind: 'block',
+          parentId: null,
+          paragraphId: null,
+        },
+      ],
+    });
+    const rect = screen.getByRole('img', { name: /block/ });
+    expect(rect).not.toHaveAttribute('aria-pressed');
+    expect(rect).toHaveAttribute('data-bbox-kind', 'block');
+  });
 });

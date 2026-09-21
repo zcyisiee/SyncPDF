@@ -11,7 +11,7 @@ import { TransitioningPdfPage } from './TransitioningPdfPage';
 import { acquireDocument, type PdfPageInfo } from './PdfCanvas';
 
 export interface BboxPaneData {
-  mode: 'parse' | 'layout';
+  mode: 'parse' | 'layout' | 'target';
   data: GeometryBboxes;
   /** 主选中段（多选集合的最后一个；右栏编辑器跟随它）。 */
   selectedId: string | null;
@@ -31,7 +31,7 @@ interface Props {
   initialPosition: ReaderPosition | null;
   paneId: string;
   onPosition: (position: ReaderPosition, programmatic?: boolean) => void;
-  geometryKind: 'parse' | 'layout' | null;
+  geometryKind: 'parse' | 'layout' | 'target' | null;
   bbox: BboxPaneData | null;
   recognition?: boolean;
   overlay?: (viewport: ScreenViewport & PdfPointViewport) => ReactNode;
