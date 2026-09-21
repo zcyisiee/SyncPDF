@@ -25,6 +25,20 @@ from babeldoc.docvision.provider_ir import ProviderDocument
 logger = logging.getLogger(__name__)
 
 
+def _raise_if_cancelled(translate_config) -> None:
+    """协作式取消钩子；没有 config 时 no-op。
+
+    ``handle_document`` 是解析阶段调的，总能拿到带 ``raise_if_cancelled`` 的 config。
+    但本客户端现在也被编译器之后的译文侧识别复用（``recognize_pdf_provider_ir``），
+    那条路径上没有 ``TranslationConfig``（build 不进解析阶段的取消上下文）——build 的
+    取消走 serve 杀进程组，不靠这个回调。所以这里只是把"没有取消上下文"表达清楚，
+    不是把取消能力关掉。
+    """
+    if translate_config is None:
+        return
+    translate_config.raise_if_cancelled()
+
+
 def _wait_span(translate_config, origin: str, *, label: str | None = None, **context):
     """远端等待型工作的耗时片段；未开启 debug 采集时 no-op。
 
@@ -401,7 +415,7 @@ class MinerUDocLayoutModel(DocLayoutModel):
         deadline = time.monotonic() + float(self.timeout_seconds)
         last_trace_id = None
         while time.monotonic() < deadline:
-            translate_config.raise_if_cancelled()
+            _raise_if_cancelled(translate_config)
             response = client.get(
                 f"{self.base_url}/api/v4/extract-results/batch/{batch_id}",
                 headers={
@@ -846,5 +860,5 @@ class MinerUDocLayoutModel(DocLayoutModel):
         )
 
         for page in pages:
-            translate_config.raise_if_cancelled()
+            _raise_if_cancelled(translate_config)
             yield page, page_results.get(page.page_number, self._empty_result())
