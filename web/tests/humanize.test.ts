@@ -103,7 +103,9 @@ describe('kind 标签', () => {
     expect(EVENT_KINDS).toContain('job_update');
     // 47 种真 kind 一个没丢，也没有被虚拟 kind 顶掉
     expect(observedKinds).toHaveLength(47);
-    expect(EVENT_KINDS).toHaveLength(53);
+    // 54 = 53 + `block_not_replaced`（保留原文，e36c8683 随流式编译资格门禁一起加入
+    // KIND_LABELS，但当时漏改这条数量断言）。
+    expect(EVENT_KINDS).toHaveLength(54);
   });
 
   it('批量块编译的两种事件 kind（block_compiled / compile_float）有标签且进 SSE 清单', () => {

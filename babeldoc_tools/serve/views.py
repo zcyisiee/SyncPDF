@@ -28,6 +28,7 @@ from typing import Any
 from typing import Literal
 
 from babeldoc_tools.common import ToolError
+from babeldoc_tools.serve import paper_meta
 from babeldoc_tools.serve.compile import compile_status
 from babeldoc_tools.serve.recognition import label_inventory
 from babeldoc_tools.serve.recognition import provider_entities
@@ -263,10 +264,14 @@ def _counts(reader: WorkdirReader) -> tuple[int | None, int | None, int | None]:
 
 
 def _title(state: dict, manifest: dict | None) -> str | None:
-    """文档标题 = 源 PDF 文件名（不含扩展名）；取不到就 ``None``（不造假）。
+    """标题的**最后回退**：源 PDF 文件名（不含扩展名）；取不到就 ``None``（不造假）。
+
+    真正的标题在 ``papers.title``（:mod:`babeldoc_tools.serve.paper_meta` 抽取）；
+    只有那里也空（还没抽到 / 是本地产物都没有的新文档）时，才用文件名当标题，
+    避免卡片上出现空白主标题。
 
     来源顺序：``run_state.pdf``（``bdt run`` 收到的 ``--pdf``）→ 最新 run 的
-    ``manifest.input.pdf.path``（recorder 记录的输入）。产物里没有真正的标题字段。
+    ``manifest.input.pdf.path``（recorder 记录的输入）。
     """
     candidates = [state.get("pdf")]
     inputs = manifest.get("input") if isinstance(manifest, dict) else None
@@ -293,14 +298,35 @@ def _updated_at(state: dict, manifest: dict | None) -> str | None:
     return _utc_iso(state.get("updated_at"))
 
 
-def document_summary(reader: WorkdirReader, did: str) -> DocumentListItem:
-    """``GET /api/v1/documents`` 的一项。"""
+def _with_paper_meta(
+    item: DocumentListItem, meta: paper_meta.PaperMeta
+) -> DocumentListItem:
+    """列表项 → 用抽取到的标题/作者覆盖（标题空时保留 :func:`_title` 的文件名回退）。"""
+    return item.model_copy(
+        update={
+            "title": meta.title or item.title,
+            "authors": meta.authors,
+            "first_author": meta.first_author,
+        }
+    )
+
+
+def document_summary(
+    reader: WorkdirReader,
+    did: str,
+    meta: paper_meta.PaperMeta | None = None,
+) -> DocumentListItem:
+    """``GET /api/v1/documents`` 的一项（标题/作者读 ``papers`` 表，缺则懒回填）。
+
+    ``meta`` 为空（调用方自己给了就不重复解析）时，按 :mod:`babeldoc_tools.serve.paper_meta`
+    的口径从库 + 产物解析；路由层靠这个保证一次列表请求只读一遍 provider IR。
+    """
     state = reader.run_state()
     recorded, _, manifest_stages = _recorded_stages(reader)
     latest = reader.latest_manifest()
     manifest = latest[1] if latest is not None else None
     pages, paragraph_count, translated_count = _counts(reader)
-    return DocumentListItem(
+    item = DocumentListItem(
         did=did,
         title=_title(state, manifest),
         pages=pages,
@@ -309,6 +335,9 @@ def document_summary(reader: WorkdirReader, did: str) -> DocumentListItem:
         stage_summary=_stage_summary(recorded, manifest_stages),
         updated_at=_updated_at(state, manifest),
     )
+    if meta is None:
+        return item
+    return _with_paper_meta(item, meta)
 
 
 def _pdf_outputs(reader: WorkdirReader, state: dict) -> list[PdfOutput]:
@@ -434,13 +463,17 @@ def _quality(reader: WorkdirReader, state: dict) -> QualityStatus:
     )
 
 
-def document_detail(reader: WorkdirReader, did: str) -> DocumentDetail:
+def document_detail(
+    reader: WorkdirReader,
+    did: str,
+    meta: paper_meta.PaperMeta | None = None,
+) -> DocumentDetail:
     """``GET /api/v1/documents/{did}``：只报能从现有产物推导的字段。"""
     state = reader.run_state()
     latest = reader.latest_manifest()
     manifest = latest[1] if latest is not None else None
     recorded, _, manifest_stages = _recorded_stages(reader)
-    summary = document_summary(reader, did)
+    summary = document_summary(reader, did, meta)
     snapshot = reader.parse_snapshot()
     anchors = reader.anchors()
     return DocumentDetail(
@@ -689,6 +722,60 @@ def geometry_layout(
         paragraphs=paragraphs_rows,
         labels=labels,
         page_info=page_info,
+    )
+
+
+def geometry_target(
+    reader: WorkdirReader, did: str, page: int | None = None
+) -> GeometryResponse:
+    """``geometry?kind=target``：**译文侧**重新识别的 provider 框（``pdf_topleft``）。
+
+    来源是编译后对译文 mono PDF 重新识别一次的产物（``agent/target/provider/
+    provider_ir.json``，见 :mod:`babeldoc_tools.target_layout`）。
+
+    三种情况分得很清，不和稀泥：
+
+    - 连识别清单（``agent/target_recognition.json``）都没有 → 404
+      ``target_layout_unavailable``：这个 workdir 从未跑过译文侧识别，与源侧几何无关；
+    - 清单在但 ``status != ok``（``skipped`` / ``failed``）→ 200，``recognition_entities``
+      为 **null**（不是空数组）且 ``recognition`` 带上 ``reason``：前端能说清"为什么
+      没识别"，也不会把"没数据"当成"数据是空的"；
+    - 识别成功 → 200 + 该页识别框。
+
+    **绝不**在产物缺失时回退到源侧 IR 或 ``layout_geometry.json`` —— 那正是「译文框
+    显示原文框」的成因。没有段落快照可比对，所以 ``entities`` / ``relations`` 恒为空
+    （译文侧的 block 不携带可编辑的段落身份）。
+    """
+    manifest = reader.target_recognition()
+    if manifest is None:
+        raise ToolError(
+            "target_layout_unavailable",
+            f"文档 {did} 没有译文侧版面识别产物（agent/target_recognition.json）："
+            "请先编译（bdt build 默认在 mineru 后端下执行这一步）",
+            did=did,
+        )
+    provider = reader.target_provider_ir()
+    if provider is None:
+        return GeometryResponse(
+            did=did,
+            kind="target",
+            coord_system=COORD_SYSTEM_PARSE,
+            page=page,
+            recognition_entities=None,
+            recognition=manifest,
+        )
+    recognition = provider_entities(provider, [])
+    labels = label_inventory(recognition)
+    if page is not None:
+        recognition = [row for row in recognition if row["page"] == page]
+    return GeometryResponse(
+        did=did,
+        kind="target",
+        coord_system=COORD_SYSTEM_PARSE,
+        page=page,
+        recognition_entities=recognition,
+        labels=labels,
+        recognition=manifest,
     )
 
 

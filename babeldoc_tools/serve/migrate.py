@@ -72,6 +72,11 @@ def migrate_root(
                     source.stat().st_size,
                     assets.resolve(digest).relative_to(base).as_posix(),
                 )
+                # 论文标题/一作：`--migrate` 也是老文档的回填入口（与读路径的懒回填
+                # 同一实现，`set_paper_meta` 只填空，重复跑不会把已有值抹成 NULL）。
+                from babeldoc_tools.serve.paper_meta import resolve_paper_meta
+
+                resolve_paper_meta(database, WorkdirReader(workdir), did)
                 draft = read_draft(workdir)
                 if database.draft(did) is None:
                     database.save_draft(

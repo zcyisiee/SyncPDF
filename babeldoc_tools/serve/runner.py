@@ -1065,14 +1065,17 @@ class JobRunner:
                 sanitize_payload(envelope[1], running.profile)
             canceled = record.cancel_requested_at is not None
             payload = envelope[1] if envelope else None
+            target_layout_manifest: dict | None = None
             if running.plan is not None:
-                status, error_code, error_message = self._compile_outcome(
-                    running.plan,
-                    action=record.action,
-                    envelope=payload,
-                    exit_code=exit_code,
-                    timed_out=timed_out,
-                    canceled=canceled,
+                status, error_code, error_message, target_layout_manifest = (
+                    self._compile_outcome(
+                        running.plan,
+                        action=record.action,
+                        envelope=payload,
+                        exit_code=exit_code,
+                        timed_out=timed_out,
+                        canceled=canceled,
+                    )
                 )
             elif running.retranslate is not None:
                 # 候选生成的账：终态判定仍走既有规则（classify_exit），候选侧（填/删
@@ -1131,6 +1134,8 @@ class JobRunner:
             )
             if status == "succeeded" and record.action in ("run", "compile"):
                 self._sync_metadata(record.did)
+            if running.plan is not None and target_layout_manifest is not None:
+                self._announce_target_layout(record, target_layout_manifest)
         except Exception as exc:  # noqa: BLE001 - 监控自身出错也必须落终态
             self.registry.mark_finished(
                 record,
@@ -1142,9 +1147,26 @@ class JobRunner:
             self._running.pop(record.job_id, None)
             await self._pump()
 
+    def _announce_target_layout(self, record: JobRecord, manifest: dict) -> None:
+        """把「译文侧版面识别已就绪」写成一条 job 事件（前端据此刷新译文框）。
+
+        只在产物真的发布到真 workdir 后才发。事件内容带上清单的关键字段，所以取不到
+        清单文件的前端也能从事件里知道是识成了还是跳过了。
+        """
+        self.registry.append_event(
+            "target_layout",
+            record,
+            layout_status=manifest.get("status"),
+            reason=manifest.get("reason"),
+            provider=manifest.get("provider"),
+            page_count=manifest.get("page_count"),
+            pdf=manifest.get("pdf"),
+        )
+
     def _sync_metadata(self, did: str) -> None:
         """Import the latest derived block view after a successful job."""
         try:
+            from babeldoc_tools.serve.paper_meta import resolve_paper_meta
             from babeldoc_tools.serve.views import paragraphs
             from babeldoc_tools.serve.workdir import WorkdirReader
 
@@ -1153,12 +1175,13 @@ class JobRunner:
                 from babeldoc_tools.serve.migrate import migrate_root
 
                 migrate_root(self.store.root, document_ids=[did])
+            reader = WorkdirReader(workdir)
+            # 论文标题/一作：识别完成后 provider IR 已落盘，这时候抽一次就定了
+            # （读路径也会懒回填，两条路都是 set_paper_meta 的「只填空」语义）。
+            resolve_paper_meta(self.store.database, reader, did)
             self.store.database.upsert_blocks(
                 did,
-                [
-                    item.model_dump()
-                    for item in paragraphs(WorkdirReader(workdir), None)
-                ],
+                [item.model_dump() for item in paragraphs(reader, None)],
             )
         except Exception as exc:  # noqa: BLE001 - 元数据是索引，失败不推翻 job 结果
             # 但不能无声：blocks 索引长期空着会让依赖它的查询（段落列表、迁移）
@@ -1176,12 +1199,13 @@ class JobRunner:
         exit_code: int | None,
         timed_out: bool,
         canceled: bool,
-    ) -> tuple[str, str | None, str | None]:
-        """``compile`` job 的 ``(status, error_code, error_message)``。
+    ) -> tuple[str, str | None, str | None, dict | None]:
+        """``compile`` job 的 ``(status, error_code, error_message, target_layout)``。
 
         发布成功（build ok 且副本里确实有新 PDF）→ ``succeeded``，即使子进程因
         check/review 质量门禁 exit 1 —— "编译成功 ≠ 质量通过"。未发布则按普通的退出码/
-        信封规则如实报失败（信封里保留门禁/构建的 error_code）。
+        信封规则如实报失败（信封里保留门禁/构建的 error_code）。最后一个元素是
+        已发布的译文侧识别清单（没有/未成功 → ``None``）。
         """
         settled = compile_mod.settle_compile(
             plan,
@@ -1191,7 +1215,7 @@ class JobRunner:
             canceled=canceled,
         )
         if settled.published:
-            return "succeeded", None, None
+            return "succeeded", None, None, settled.target_layout
         outcome = classify_exit(
             action=action,
             cancel_requested=canceled,
@@ -1205,11 +1229,13 @@ class JobRunner:
                 "failed",
                 settled.error_code or "build_output_missing",
                 "build 阶段未产出可发布的 PDF（隔离副本 output/ 为空）",
+                settled.target_layout,
             )
         return (
             outcome.status,
             settled.error_code or outcome.error_code,
             outcome.error_message,
+            settled.target_layout,
         )
 
     async def _wait_exit(self, running: _RunningJob) -> tuple[int | None, bool]:

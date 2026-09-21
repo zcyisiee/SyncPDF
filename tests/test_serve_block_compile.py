@@ -239,7 +239,12 @@ def test_failed_expansion_retry_keeps_original_stamp(local, monkeypatch):
     monkeypatch.setattr(
         layout_refine,
         "plan_page_expansion",
-        lambda _page, box, _detector, **_kwargs: (box[0], box[1] - 40.0, box[2], box[3]),
+        lambda _page, box, _detector, **_kwargs: (
+            box[0],
+            box[1] - 40.0,
+            box[2],
+            box[3],
+        ),
     )
 
     result = compiler.compile(record())
@@ -392,6 +397,22 @@ def _page_text(store, page_number):
         return pdf[0].get_text()
 
 
+def _page_text_if_composed(store, page_number):
+    """该页已发布过的文本；未合成（如未浮动的落点页）→ ``None``。"""
+    with store.database._lock:
+        row = store.database.connection.execute(
+            "SELECT page_asset FROM pages WHERE document_id='paper' AND page=?",
+            (page_number,),
+        ).fetchone()
+    if row is None:
+        return None
+    from babeldoc_tools.serve.asset_store import AssetStore
+
+    assets = AssetStore(store.store_base, store.database)
+    with pymupdf.open(assets.resolve(row[0])) as pdf:
+        return pdf[0].get_text()
+
+
 def test_float_widen_rerenders_with_wider_box(tmp_path, monkeypatch):
     """同栏无净空、右邻栏空闲：横向扩框重渲染，贴片仍在本页。"""
     from babeldoc.tools.agent import layout_refine
@@ -403,9 +424,7 @@ def test_float_widen_rerenders_with_wider_box(tmp_path, monkeypatch):
     monkeypatch.setattr(
         block_compile.BlockCompiler, "_layout_detector", lambda _self: object()
     )
-    monkeypatch.setattr(
-        layout_refine, "plan_page_expansion", lambda *_a, **_k: None
-    )
+    monkeypatch.setattr(layout_refine, "plan_page_expansion", lambda *_a, **_k: None)
     monkeypatch.setattr(
         layout_refine,
         "plan_widen_page_expansion",
@@ -422,8 +441,13 @@ def test_float_widen_rerenders_with_wider_box(tmp_path, monkeypatch):
     assert "New block one" in _page_text(compiler.store, 1)
 
 
-def test_float_to_next_page_moves_stamp(tmp_path, monkeypatch):
-    """同栏/跨栏都无净空：整框迁到下一页空闲区间，两页都重新合成。"""
+def test_float_to_next_page_keeps_stamp_on_home_by_default(tmp_path, monkeypatch):
+    """回归（`P03-011`）：同栏/跨栏都无净空 + 贴片被缩字，**不**把正文段搬到下一页。
+
+    跨页整框迁移缺省关闭：搬走会在原位留一块空白（界面观感等同于「没渲染出来」），
+    而它要解决的只是「字被缩小了」。这里即使 ``plan_next_page_float`` 给了落点，
+    也要断言贴片留在本页、原位仍有译文、不发 ``compile_float`` 事件。
+    """
     from babeldoc.tools.agent import layout_refine
     from babeldoc_tools.serve import block_compile
 
@@ -433,15 +457,125 @@ def test_float_to_next_page_moves_stamp(tmp_path, monkeypatch):
     monkeypatch.setattr(
         block_compile.BlockCompiler, "_layout_detector", lambda _self: object()
     )
-    monkeypatch.setattr(
-        layout_refine, "plan_page_expansion", lambda *_a, **_k: None
-    )
+    monkeypatch.setattr(layout_refine, "plan_page_expansion", lambda *_a, **_k: None)
     monkeypatch.setattr(
         layout_refine, "plan_widen_page_expansion", lambda *_a, **_k: None
     )
     moved = (20.0, 300.0, 200.0, 350.0)
+    monkeypatch.setattr(layout_refine, "plan_next_page_float", lambda *_a, **_k: moved)
+    monkeypatch.delenv("BDT_NEXT_PAGE_FLOAT", raising=False)
+
+    result = compiler.compile(record())
+
+    # 只渲染一次（没有为落点重渲染），贴片仍在主页。
+    assert len(boxes) == 1
+    assert result["stamp_page"] == 1 and result["previous_stamp_page"] == 1
+    patch = _patch(compiler, page=1)["P1"]
+    assert patch["page"] == 1
+    assert "New block one" in _page_text(compiler.store, 1)
+    # 落点页从未被触碰（没合成过），这是「没搬」的第二个证据。
+    assert _page_text_if_composed(compiler.store, 2) is None
+    with compiler.store.database._lock:
+        floats = compiler.store.database.connection.execute(
+            "SELECT COUNT(*) FROM job_events WHERE type='compile_float'"
+        ).fetchone()[0]
+    assert floats == 0
+
+
+def test_next_page_float_keeps_home_when_home_would_be_blank(tmp_path, monkeypatch):
+    """门禁不变量：开启跨页迁移后，若原位会成空白则仍不搬（宁可缩字）。
+
+    段落版面框互不重叠，本段原位通常只有本段自己的贴片 → ``_home_stays_occupied``
+    为假（这里**不**打植第 4 道门禁，走真实现）。总开关打开、其余三道门禁都满足，
+    只靠第 4 道把迁移拦下来，断言仍然留在原位。
+    """
+    from babeldoc.tools.agent import layout_refine
+    from babeldoc_tools.serve import block_compile
+
+    compiler, rows = _multi_page_store(tmp_path, monkeypatch, pages=2)
+    boxes: list[list[float]] = []
+    monkeypatch.setattr(block_compile, "render_request", _stamp_render(boxes))
     monkeypatch.setattr(
-        layout_refine, "plan_next_page_float", lambda *_a, **_k: moved
+        block_compile.BlockCompiler, "_layout_detector", lambda _self: object()
+    )
+    monkeypatch.setattr(layout_refine, "plan_page_expansion", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        layout_refine, "plan_widen_page_expansion", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        layout_refine,
+        "plan_next_page_float",
+        lambda *_a, **_k: (20.0, 300.0, 200.0, 350.0),
+    )
+    monkeypatch.setenv("BDT_NEXT_PAGE_FLOAT", "1")
+    # 前提：该段原位确实只有它自己（别的段落框都不在第 1 页）。
+    assert compiler._home_stays_occupied(rows, "P1", 1, [20, 320, 200, 370]) is False
+
+    result = compiler.compile(record())
+
+    assert len(boxes) == 1
+    assert result["stamp_page"] == 1
+    assert "New block one" in _page_text(compiler.store, 1)
+
+
+def test_home_stays_occupied_detects_neighbour_footprint(tmp_path, monkeypatch):
+    """``_home_stays_occupied`` 的判据：别的段落框或别的已定贴片压在本段原位才算真。
+
+    这是第 4 道门禁的唯一数据源，单独盖两层：
+
+    - 只有本段自己的贴片/框 → False（→ 不允许搬，这是 P03-011 的情形）；
+    - 别的段落的 layout_box 与原位相交 → True；
+    - 别的已定贴片（FloatReservations）压在原位 → True。
+    """
+    compiler, rows = _multi_page_store(tmp_path, monkeypatch, pages=1)
+    home = [20, 320, 200, 370]
+
+    assert compiler._home_stays_occupied(rows, "P1", 1, home) is False
+
+    rows.append(
+        SimpleNamespace(
+            id="P2",
+            page=1,
+            target="Other",
+            geometry={"layout_box": [20, 300, 200, 350]},  # 与原位相交
+        )
+    )
+    assert rows[-1].geometry["layout_box"][3] > home[1]
+    assert compiler._home_stays_occupied(rows, "P1", 1, home) is True
+    rows.pop()
+
+    # 别的已定贴片压在原位：登记簿里只有「别的段」的框才算。
+    compiler.reservations.reserve("P9", 1, [30, 330, 150, 360])
+    assert compiler._home_stays_occupied(rows, "P1", 1, home) is True
+    compiler.reservations = type(compiler.reservations)()
+    compiler.reservations.reserve("P1", 1, [30, 330, 150, 360])
+    assert compiler._home_stays_occupied(rows, "P1", 1, home) is False
+
+
+def test_next_page_float_moves_stamp_when_gate_passes(tmp_path, monkeypatch):
+    """总开关打开且四道门禁全过时，跨页迁移的既有机制仍然可用。
+
+    保留这条而不是删掉整个阶梯：foreign patch 账本（落点页合成、迁回主页时擦旧贴片）
+    仍靠它存在，门禁只是把默认路径关掉。
+    """
+    from babeldoc.tools.agent import layout_refine
+    from babeldoc_tools.serve import block_compile
+
+    compiler, _rows = _multi_page_store(tmp_path, monkeypatch, pages=2)
+    boxes: list[list[float]] = []
+    monkeypatch.setattr(block_compile, "render_request", _stamp_render(boxes))
+    monkeypatch.setattr(
+        block_compile.BlockCompiler, "_layout_detector", lambda _self: object()
+    )
+    monkeypatch.setattr(layout_refine, "plan_page_expansion", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        layout_refine, "plan_widen_page_expansion", lambda *_a, **_k: None
+    )
+    moved = (20.0, 300.0, 200.0, 350.0)
+    monkeypatch.setattr(layout_refine, "plan_next_page_float", lambda *_a, **_k: moved)
+    monkeypatch.setenv("BDT_NEXT_PAGE_FLOAT", "1")
+    monkeypatch.setattr(
+        block_compile.BlockCompiler, "_home_stays_occupied", lambda *_a, **_k: True
     )
 
     result = compiler.compile(record())
@@ -468,9 +602,13 @@ def test_float_obstacles_include_settled_sibling_stamps(tmp_path, monkeypatch):
     compiler, rows = _multi_page_store(tmp_path, monkeypatch, pages=2)
     rows.append(
         SimpleNamespace(
-            id="P2", page=1, target="New block two", geometry={"src_box": [210, 320, 380, 370]}
+            id="P2",
+            page=1,
+            target="New block two",
+            geometry={"src_box": [210, 320, 380, 370]},
         )
     )
+
     # 每次编译都返回「被缩字」的贴片，两个块都会走浮动阶梯。
     def render(_workdir, _pid, target, box, temporary, _cache, **_kwargs):
         path = temporary / f"stamp-{_pid}.pdf"
@@ -478,7 +616,9 @@ def test_float_obstacles_include_settled_sibling_stamps(tmp_path, monkeypatch):
             page = pdf.new_page(width=box[2] - box[0], height=box[3] - box[1])
             page.insert_text((5, 20), target)
             pdf.save(path)
-        return SimpleNamespace(ok=True, pdf_path=str(path), font_size=11, scale=0.7), False
+        return SimpleNamespace(
+            ok=True, pdf_path=str(path), font_size=11, scale=0.7
+        ), False
 
     monkeypatch.setattr(block_compile, "render_request", render)
     monkeypatch.setattr(
@@ -500,6 +640,12 @@ def test_float_obstacles_include_settled_sibling_stamps(tmp_path, monkeypatch):
         return landing
 
     monkeypatch.setattr(layout_refine, "plan_next_page_float", plan)
+    # 跨页迁移缺省关闭、且第 4 道门禁（原位不留空白）在正常段落上不成立。这条测的是
+    # 「迁移路径开启时兄弟贴片账本仍互见」，所以显式开门禁。
+    monkeypatch.setenv("BDT_NEXT_PAGE_FLOAT", "1")
+    monkeypatch.setattr(
+        block_compile.BlockCompiler, "_home_stays_occupied", lambda *_a, **_k: True
+    )
 
     compiler.compile(record())
     compiler.compile(record(pid="P2"))
@@ -511,7 +657,11 @@ def test_float_obstacles_include_settled_sibling_stamps(tmp_path, monkeypatch):
 
 
 def test_float_back_home_erases_old_foreign_stamp(tmp_path, monkeypatch):
-    """迁移后再编译回主页：下一页上的旧贴片要被擦掉（上一版落点页重合成）。"""
+    """迁移后再编译回主页：下一页上的旧贴片要被擦掉（上一版落点页重合成）。
+
+    跨页迁移缺省关闭，这里显式开门禁（开关 + 第 4 道）——测的是 foreign patch 账本
+    （`_foreign_patches` / 落点页重合成），它在迁移真的发生时才是活的。
+    """
     from babeldoc.tools.agent import layout_refine
     from babeldoc_tools.serve import block_compile
 
@@ -521,23 +671,21 @@ def test_float_back_home_erases_old_foreign_stamp(tmp_path, monkeypatch):
     monkeypatch.setattr(
         block_compile.BlockCompiler, "_layout_detector", lambda _self: object()
     )
-    monkeypatch.setattr(
-        layout_refine, "plan_page_expansion", lambda *_a, **_k: None
-    )
+    monkeypatch.setattr(layout_refine, "plan_page_expansion", lambda *_a, **_k: None)
     monkeypatch.setattr(
         layout_refine, "plan_widen_page_expansion", lambda *_a, **_k: None
     )
     moved = (20.0, 300.0, 200.0, 350.0)
+    monkeypatch.setattr(layout_refine, "plan_next_page_float", lambda *_a, **_k: moved)
+    monkeypatch.setenv("BDT_NEXT_PAGE_FLOAT", "1")
     monkeypatch.setattr(
-        layout_refine, "plan_next_page_float", lambda *_a, **_k: moved
+        block_compile.BlockCompiler, "_home_stays_occupied", lambda *_a, **_k: True
     )
     compiler.compile(record())
     assert "New block one" in _page_text(compiler.store, 2)
 
     # 第二次编译不再浮动（贴片不缩字），贴片回主页。
-    monkeypatch.setattr(
-        layout_refine, "plan_next_page_float", lambda *_a, **_k: None
-    )
+    monkeypatch.setattr(layout_refine, "plan_next_page_float", lambda *_a, **_k: None)
     second: list[list[float]] = []
     monkeypatch.setattr(
         block_compile, "render_request", _stamp_render(second, scale=1.0)
@@ -648,9 +796,7 @@ def test_apply_font_family_writes_meta_and_latin_serif(family_serif):
 
     # 用户显式给了 serif：以用户为准，只写 font_family。
     meta = {"serif": not family_serif}
-    block_compile._apply_font_family(
-        meta, {"font_family": spec.id}, not family_serif
-    )
+    block_compile._apply_font_family(meta, {"font_family": spec.id}, not family_serif)
     assert meta == {"serif": not family_serif, "font_family": spec.id}
 
 
@@ -868,3 +1014,104 @@ def test_failed_dirty_export_keeps_previous_revision(local, monkeypatch):
         )["revision"]
         == 1
     )
+
+
+def test_freshly_committed_translation_is_compiled_not_starved(local):
+    """回归（线上根因）：译文刚落 ``translation_blocks`` 就提交编译，必须编得出来。
+
+    ``translate.py`` 是「``commit_translation`` 之后原地 ``preview.submit``」——两件事
+    发生在同一瞬间。此前编译读的是 ``_rows`` 的 5s 缓存快照，快照里永远还没有这一块，
+    于是整条流式预览被 ``缺少译文或排版数据`` 卡死（用户实测 151 块只成了 33 块，
+    成功的那些恰好卡在缓存过期的节拍上）。译文必须按主键现查。
+    """
+    compiler, calls, rows = local
+    # 快照里这一块「还没翻译」——正是提交那一刻 _rows 缓存的真实样子。
+    rows[0].target = None
+    database = compiler.store.database
+    with database._lock, database.connection:
+        database.connection.execute(
+            "INSERT OR REPLACE INTO translation_blocks"
+            "(document_id,block_id,job_id,revision,target) VALUES (?,?,?,?,?)",
+            ("paper", "P1", "j-local", 0, "Freshly committed target"),
+        )
+    result = compiler.compile_block_patch(record())
+    assert calls == ["P1"]
+    from babeldoc_tools.serve.asset_store import AssetStore
+
+    assets = AssetStore(compiler.store.store_base, database)
+    with pymupdf.open(assets.resolve(result["asset"])) as pdf:
+        assert "Freshly committed target" in pdf[0].get_text()
+
+
+def test_committed_translation_wins_over_stale_row_snapshot(local):
+    """同一块的库内译文比行快照新时以库为准（快照只负责几何）。"""
+    compiler, _calls, rows = local
+    rows[0].target = "Stale snapshot target"
+    database = compiler.store.database
+    with database._lock, database.connection:
+        database.connection.execute(
+            "INSERT OR REPLACE INTO translation_blocks"
+            "(document_id,block_id,job_id,revision,target) VALUES (?,?,?,?,?)",
+            ("paper", "P1", "j-local", 0, "Latest target"),
+        )
+    result = compiler.compile_block_patch(record())
+    from babeldoc_tools.serve.asset_store import AssetStore
+
+    assets = AssetStore(compiler.store.store_base, database)
+    with pymupdf.open(assets.resolve(result["asset"])) as pdf:
+        text = pdf[0].get_text()
+        assert "Latest target" in text
+        assert "Stale snapshot target" not in text
+
+
+def test_title_block_is_not_replaced_and_never_renders(local):
+    """标题（``layout_label`` 不在 ``_BODY_LABELS``）按设计不替换：抛 NotReplaced。
+
+    流式预览此前没有这道门禁，把单行标题当正文编译：缩一档字号 →
+    ``expansion_reason`` 判定要扩框 → 浮动阶梯向上吃掉净空，标题整体上移
+    （用户实测顶边被抬高 26.6pt）。它是 ``NotReplaced`` 而不是失败——保留原文
+    就是标题的正确结果。
+    """
+    from babeldoc_tools.serve.block_compile import NotReplaced
+
+    compiler, calls, rows = local
+    rows[0].layout_label = "title"
+    with pytest.raises(NotReplaced) as caught:
+        compiler.compile_block_patch(record())
+    assert caught.value.reason == "label-not-eligible"
+    assert calls == [], "不合格的块不该起 xelatex"
+
+
+def test_single_line_source_block_is_not_replaced(local, monkeypatch):
+    """源文只有一行的正文块同样不替换（与一次性编译 ``single-line`` 同口径）。
+
+    行数量的是**源** PDF，不是贴片 baseline：文档跑过一轮后 baseline 已经是
+    ``output/*.mono.pdf``（译文页），在它上面量出来的是译文行数。
+    """
+    from babeldoc_tools.serve.block_compile import NotReplaced
+
+    compiler, calls, rows = local
+    rows[0].layout_label = "text"
+    monkeypatch.setattr(BlockCompiler, "_source_n_lines", lambda _self, _did, _row: 1)
+    with pytest.raises(NotReplaced) as caught:
+        compiler.compile_block_patch(record())
+    assert caught.value.reason == "single-line"
+    assert calls == []
+
+
+def test_multi_line_body_block_still_compiles(local, monkeypatch):
+    """回归护栏：多行正文块不受门禁影响，照常渲染贴片。"""
+    compiler, calls, rows = local
+    rows[0].layout_label = "text"
+    monkeypatch.setattr(BlockCompiler, "_source_n_lines", lambda _self, _did, _row: 4)
+    compiler.compile_block_patch(record())
+    assert calls == ["P1"]
+
+
+def test_unmeasurable_source_lines_do_not_block_compile(local):
+    """源 PDF 量不到行数（``local`` 夹具就没有源文件）时不拦：门禁只在有据可依时否决。"""
+    compiler, calls, rows = local
+    rows[0].layout_label = "text"
+    assert compiler._source_n_lines("paper", rows[0]) is None
+    compiler.compile_block_patch(record())
+    assert calls == ["P1"]

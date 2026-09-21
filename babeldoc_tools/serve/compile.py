@@ -57,6 +57,8 @@ from babeldoc_tools.serve.store import STATE_DIR
 from babeldoc_tools.serve.store import DocumentStore
 from babeldoc_tools.serve.versions import TRIGGER_DEBOUNCE
 from babeldoc_tools.serve.versions import TRIGGER_MANUAL
+from babeldoc_tools.target_layout import MANIFEST_NAME
+from babeldoc_tools.target_layout import PROVIDER_IR_RELATIVE
 from babeldoc_tools.translate import merge_translated_markdown
 
 if TYPE_CHECKING:
@@ -445,6 +447,8 @@ class CompileOutcome(NamedTuple):
     revision: int
     artifact: dict | None
     error_code: str | None
+    #: 译文侧识别清单（已发布到真 workdir 的那一份）；未识别/未成功 → None。
+    target_layout: dict | None = None
 
 
 def build_stage_ok(envelope: dict | None) -> bool:
@@ -558,6 +562,43 @@ def _publish(plan: CompilePlan, pdfs: list[Path]) -> dict:
     return artifact
 
 
+def _publish_target_layout(plan: CompilePlan) -> dict | None:
+    """把副本里的译文侧识别产物搬回真 workdir（前端「译文框」的数据源）。
+
+    ``bdt build`` 的 ``target_layout`` 步骤（见 :mod:`babeldoc_tools.target_layout`）
+    在隔离副本里写 ``agent/target_recognition.json`` 与
+    ``agent/target/provider/provider_ir.json``。它们和 PDF 一样属于本次编译的产物，
+    不搬回真 workdir 前端就永远看不到（只发布 PDF 会让「译文框」一直提示未识别）。
+
+    顺序：先 IR 再清单（清单是"已识别完毕"的标记，写在最后）——识别中途被 kill
+    时宁可只留 IR 也不留下一个声称成功的清单。**尽力而为**：拷贝失败只记 stderr，
+    不推翻已经完成的 PDF 发布。没有清单（未识别/跳过）→ ``None``。
+    """
+    manifest_source = plan.isolated / AGENT_DIR_NAME / MANIFEST_NAME
+    if not manifest_source.is_file():
+        return None
+    ir_source = plan.isolated / AGENT_DIR_NAME / PROVIDER_IR_RELATIVE
+    ir_target = plan.workdir / AGENT_DIR_NAME / PROVIDER_IR_RELATIVE
+    manifest_target = plan.workdir / AGENT_DIR_NAME / MANIFEST_NAME
+    try:
+        if ir_source.is_file():
+            ir_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ir_source, ir_target)
+        manifest_target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(manifest_source, manifest_target)
+    except OSError as exc:
+        _log(
+            f"译文侧版面产物发布失败 {plan.did} r{plan.revision}："
+            f"{type(exc).__name__}: {exc}（PDF 已发布，译文框继续提示未识别）"
+        )
+        return None
+    try:
+        payload = json.loads(manifest_target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _archive_version(plan: CompilePlan, artifact: dict) -> None:
     """把刚发布的那一版归档成历史版本（W12，``docs/reference/http-api.md``）。
 
@@ -635,8 +676,11 @@ def settle_compile(
                 message="草稿已更新：过期编译结果未发布，请编译当前 revision",
             )
         artifact = _publish(plan, pdfs)
+        target_layout_manifest = _publish_target_layout(plan)
         _archive_version(plan, artifact)
-        return CompileOutcome(True, "ok", plan.revision, artifact, None)
+        return CompileOutcome(
+            True, "ok", plan.revision, artifact, None, target_layout_manifest
+        )
     except Exception as exc:  # noqa: BLE001 - 收尾自身出错也必须落终态
         with contextlib.suppress(Exception):
             return _write_failure(

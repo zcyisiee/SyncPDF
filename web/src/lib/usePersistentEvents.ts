@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { API_BASE } from './api';
 import { queryKeys as keys } from './queries';
 
-const kinds = ['translation_block_completed', 'preview_ready', 'preview_failed', 'compile_float',
+const kinds = ['translation_block_completed', 'preview_ready', 'preview_failed', 'block_not_replaced',
+  'compile_float',
   'job_queued', 'job_started', 'job_finished', 'job_failed', 'job_canceled', 'job_interrupted'];
 
 /** 持久事件流里属于「编译/成页」时间线的事件类型（翻译时间线走 run 归档窗口）。 */
@@ -12,6 +13,7 @@ export const COMPILE_EVENT_KINDS = [
   'translation_block_completed',
   'preview_ready',
   'preview_failed',
+  'block_not_replaced',
   'compile_float',
 ] as const;
 

@@ -52,6 +52,9 @@ PID = "P05-002"
 PDF_NAME = "paper.no_watermark.zh.mono.pdf"
 PDF_OK = b"PDF-ok\n"
 PDF_QUALITY = b"PDF-quality\n"
+#: 译文侧识别的两个产物（stub 在副本里写，发布后应出现在真 workdir）。
+TARGET_IR = b'{"pages": [{"page_index": 0, "blocks": []}], "page_count": 2}\n'
+TARGET_IR_V2 = b'{"pages": [{"page_index": 0, "blocks": []}], "page_count": 3}\n'
 
 #: 编译 stub（argv 层面替换 ``bdt run``；不联网、不编译，只模拟收尾行为）。
 COMPILE_STUB = """#!/bin/sh
@@ -71,6 +74,29 @@ case "$mode" in
   quality_fail)
     printf 'PDF-quality\\n' > "$wd/output/paper.no_watermark.zh.mono.pdf"
     emit '{"ok": false, "error": {"code": "check_needs_fix", "message": "check verdict=needs_fix"}, "data": {"stages": [{"stage": "apply", "status": "ok"}, {"stage": "build", "status": "ok"}, {"stage": "check", "status": "ok"}]}}'
+    exit 1
+    ;;
+  target_layout)
+    printf 'PDF-ok\n' > "$wd/output/paper.no_watermark.zh.mono.pdf"
+    mkdir -p "$wd/agent/target/provider"
+    printf '{"pages": [{"page_index": 0, "blocks": []}], "page_count": 2}\n' > "$wd/agent/target/provider/provider_ir.json"
+    printf '{"status": "ok", "reason": null, "pdf": "OUTPUT-PDF", "provider": "mineru", "page_count": 2, "provider_ir": "target/provider/provider_ir.json"}\n' > "$wd/agent/target_recognition.json"
+    emit '{"ok": true, "data": {"stages": [{"stage": "apply", "status": "ok"}, {"stage": "build", "status": "ok"}]}}'
+    exit 0
+    ;;
+  target_layout_v2)
+    printf 'PDF-ok\n' > "$wd/output/paper.no_watermark.zh.mono.pdf"
+    mkdir -p "$wd/agent/target/provider"
+    printf '{"pages": [{"page_index": 0, "blocks": []}], "page_count": 3}\n' > "$wd/agent/target/provider/provider_ir.json"
+    printf '{"status": "ok", "reason": null, "pdf": "OUTPUT-PDF", "provider": "mineru", "page_count": 3, "provider_ir": "target/provider/provider_ir.json"}\n' > "$wd/agent/target_recognition.json"
+    emit '{"ok": true, "data": {"stages": [{"stage": "apply", "status": "ok"}, {"stage": "build", "status": "ok"}]}}'
+    exit 0
+    ;;
+  target_layout_build_fail)
+    mkdir -p "$wd/agent/target/provider"
+    printf '{"pages": [{"page_index": 0, "blocks": []}], "page_count": 2}\n' > "$wd/agent/target/provider/provider_ir.json"
+    printf '{"status": "ok", "reason": null, "pdf": "OUTPUT-PDF"}\n' > "$wd/agent/target_recognition.json"
+    emit '{"ok": false, "error": {"code": "tool_exception", "message": "build 期间崩了"}, "data": {"stages": [{"stage": "apply", "status": "ok"}, {"stage": "build", "status": "failed"}]}}'
     exit 1
     ;;
   build_fail)
@@ -450,6 +476,96 @@ def test_stale_isolated_dirs_are_swept(client, root):
     patch_draft(client, base=0)
     wait_job(client, start_compile(client), {"succeeded"})
     assert not leftover.exists()
+
+
+# --------------------------------------------------------------------------- #
+# 译文侧识别产物的发布（build 后新增的一步）
+# --------------------------------------------------------------------------- #
+def _job_events(root: Path, did: str = "alpha") -> list[dict]:
+    """``job_events`` 表里该文档的全部事件（按 id 升序）。"""
+    store = DocumentStore.for_root(root)
+    rows = store.database.connection.execute(
+        "SELECT type, data FROM job_events WHERE document_id=? ORDER BY id", (did,)
+    ).fetchall()
+    return [{"type": row[0], "data": json.loads(row[1])} for row in rows]
+
+
+def test_compile_publishes_target_layout_artifacts_and_announces_them(
+    client, root, control
+):
+    """译文侧识别产物随编译发布回真 workdir，并发一条 ``target_layout`` 事件。
+
+    识别跑在隔离副本里；只发布 PDF 会让「译文框」永远停在"尚未识别"。
+    """
+    set_mode(control, "target_layout")
+    job_id = start_compile(client)
+    record = wait_job(client, job_id, {"succeeded"})
+
+    agent = workdir(root) / "agent"
+    # IR 与清单都搬回来了（IR 先、清单后：清单是"已识别完毕"的标记）
+    assert (agent / "target/provider/provider_ir.json").read_bytes() == TARGET_IR
+    manifest = json.loads((agent / "target_recognition.json").read_text())
+    assert manifest["status"] == "ok"
+    assert manifest["page_count"] == 2
+    # 事件带上了清单的关键字段（没读清单文件的前端也能知道结果）
+    events = [e for e in _job_events(root) if e["type"] == "target_layout"]
+    assert events, "没有 target_layout 事件"
+    assert events[-1]["data"]["layout_status"] == "ok"
+    assert events[-1]["data"]["provider"] == "mineru"
+    assert events[-1]["data"]["page_count"] == 2
+    assert events[-1]["data"]["job_id"] == record["job_id"]
+
+
+def test_compile_without_target_layout_publishes_no_manifest(client, root, control):
+    """没跑译文侧识别（--no-target-layout / 非 mineru 后端）→ 真 workdir 不留清单。"""
+    set_mode(control, "ok")
+    wait_job(client, start_compile(client), {"succeeded"})
+
+    agent = workdir(root) / "agent"
+    assert not (agent / "target_recognition.json").exists()
+    assert not (agent / "target/provider/provider_ir.json").exists()
+    # 也不发事件（不能报一个没发生的识别）
+    assert [e for e in _job_events(root) if e["type"] == "target_layout"] == []
+
+
+def test_failed_compile_publishes_no_target_layout(client, root, control):
+    """build 失败 → 不发布任何识别产物（清单描述的是已发布 PDF，不能偷跑）。"""
+    set_mode(control, "target_layout_build_fail")
+    wait_job(client, start_compile(client), {"failed"})
+
+    agent = workdir(root) / "agent"
+    assert not (agent / "target_recognition.json").exists()
+    assert not (agent / "target/provider/provider_ir.json").exists()
+    assert [e for e in _job_events(root) if e["type"] == "target_layout"] == []
+
+
+def test_stale_target_ir_is_replaced_on_next_publish(client, root, control):
+    """下一次编译的译文侧 IR 覆盖上一轮（不能拿旧修订的框叠新 PDF）。"""
+    set_mode(control, "target_layout")
+    wait_job(client, start_compile(client), {"succeeded"})
+    ir = workdir(root) / "agent/target/provider/provider_ir.json"
+    assert ir.read_bytes() == TARGET_IR
+
+    set_mode(control, "target_layout_v2")
+    wait_job(client, start_compile(client), {"succeeded"})
+
+    assert ir.read_bytes() == TARGET_IR_V2
+    assert json.loads((workdir(root) / "agent/target_recognition.json").read_text())[
+        "page_count"
+    ] == 3
+
+
+def test_published_target_layout_is_served_by_the_geometry_endpoint(client, control):
+    """端到端接缝：发布后的产物能被 ``geometry?kind=target`` 读到（服务端不换算）。"""
+    set_mode(control, "target_layout")
+    wait_job(client, start_compile(client), {"succeeded"})
+
+    body = client.get(
+        f"{API}/documents/alpha/geometry", params={"kind": "target"}
+    ).json()
+    assert body["kind"] == "target"
+    assert body["coord_system"] == "pdf_topleft"
+    assert body["recognition"]["provider"] == "mineru"
 
 
 # --------------------------------------------------------------------------- #

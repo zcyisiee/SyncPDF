@@ -42,6 +42,7 @@ from babeldoc_tools import parse
 from babeldoc_tools import registry
 from babeldoc_tools import report as report_tool
 from babeldoc_tools import review
+from babeldoc_tools import target_layout
 from babeldoc_tools import translate
 
 #: 显式阶段列表；``review`` 由 :func:`_run_review_stage` 在 check 之后执行。
@@ -67,11 +68,15 @@ STAGE_INPUTS: dict[str, tuple[str, ...]] = {
     "report": ("translated_md", "layout_overrides"),
 }
 
-#: 阶段完成后写入 state 的关键产物（label → workdir 相对路径）。
+#: build 阶段完成时额外记录的产物（label → workdir 相对路径）；只在文件真的落盘时记。
 STAGE_ARTIFACTS = {
     "parse": {"document_md": ("agent", "document.md"), "anchors": ("agent", "anchors.json")},
     "translate": {"translated_md": ("agent", "translated.md")},
     "apply": {"apply_report": ("agent", "apply_report.json")},
+    "build": {
+        "target_recognition": ("agent", target_layout.MANIFEST_NAME),
+        "target_provider_ir": ("agent", *target_layout.PROVIDER_IR_RELATIVE.split("/")),
+    },
     "check": {
         "review_verdict": ("agent", "review_verdict.json"),
         "layout_lint": ("agent", "layout_lint.json"),
@@ -364,6 +369,7 @@ def _run_stage(stage: str, workdir: Path, cfg: dict) -> dict:
             latex_bbox=cfg["latex_bbox"],
             latex_bbox_mode=cfg["latex_bbox_mode"],
             latex_refine=cfg["latex_refine"],
+            target_layout=cfg["target_layout"],
             render=cfg["render"],
             stats=cfg["stats"],
             debug_recorder=recorder,
@@ -402,7 +408,7 @@ def _stage_artifacts(stage: str, workdir: Path, data: dict, cfg: dict) -> dict:
     artifacts = {
         label: _rel(workdir, workdir.joinpath(*parts))
         for label, parts in STAGE_ARTIFACTS.get(stage, {}).items()
-        # check 的子项产物按需生成（not_available 时不存在）：只记真实落盘的。
+        # build 的译文侧识别产物与 check 的子项一样按需生成：只记真实落盘的。
         if workdir.joinpath(*parts).exists()
     }
     if stage == "build":
@@ -751,6 +757,7 @@ def run_pipeline(
     latex_bbox: bool = True,
     latex_bbox_mode: str | None = None,
     latex_refine: bool = True,
+    target_layout: bool | None = None,
     render: str | None = None,
     stats: bool = True,
     skip_pdf_checks: bool = False,
@@ -811,6 +818,8 @@ def run_pipeline(
         "latex_bbox": latex_bbox,
         "latex_bbox_mode": latex_bbox_mode,
         "latex_refine": bool(latex_refine),
+        #: 译文侧版面识别开关：``None`` = 自动（布局后端为 mineru 且 token 可用时执行）。
+        "target_layout": target_layout,
         "render": render,
         "stats": stats,
         "skip_pdf_checks": skip_pdf_checks,

@@ -102,6 +102,9 @@ _TOOL_ERROR_STATUS = {
     "snapshot_unavailable": 404,
     "geometry_unavailable": 404,
     "paragraphs_unavailable": 404,
+    # 译文侧版面识别：连清单都没有（从未跑过译文侧识别）→ 404。清单在但没识别成
+    # （skipped/failed）是 200 + reason，不走错误路径。
+    "target_layout_unavailable": 404,
     # 事件：没有任何 run 归档 / 指定的 run 不存在（不拿空数组冒充"没有事件"）
     "events_unavailable": 404,
     # 产物下载：不在白名单内 / 不存在 / 路径或符号链接越界（同一个码，不泄露存在性）

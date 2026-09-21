@@ -85,6 +85,31 @@ class MetadataDB:
                 (digest, relative_path, "source", size),
             )
 
+    def paper_meta(self, did: str) -> tuple[str | None, str | None]:
+        """``papers`` 表的 ``(title, authors)``；没有该行 → ``(None, None)``。"""
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT title,authors FROM papers WHERE id=?", (did,)
+            ).fetchone()
+        return (row[0], row[1]) if row else (None, None)
+
+    def set_paper_meta(
+        self, did: str, title: str | None, authors: str | None
+    ) -> None:
+        """写 ``papers.title`` / ``papers.authors``，**只填空**。
+
+        产物读不到（PDF 损坏、IR 还没落盘）不等于论文没有标题：``COALESCE`` 保证已有的
+        非空值不会被一次 ``None`` 抹掉，重复调用是幂等的。该行不存在时先补一行。
+        """
+        with self._lock, self._connection:
+            self._connection.execute(
+                "INSERT OR IGNORE INTO papers(id) VALUES (?)", (did,)
+            )
+            self._connection.execute(
+                "UPDATE papers SET title=COALESCE(?,title), authors=COALESCE(?,authors) WHERE id=?",
+                (title, authors, did),
+            )
+
     def save_draft(self, did: str, payload: dict, *, expected_revision: int) -> None:
         from babeldoc_tools.common import ToolError
 

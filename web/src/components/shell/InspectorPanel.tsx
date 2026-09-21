@@ -1,9 +1,7 @@
 import { useState } from 'react';
 
-import type { JobRecord } from '../../api/types';
-import { describeApiError } from '../../lib/api';
 import { activeJob } from '../../lib/jobs';
-import { useCompileDraftMutation, useDocument, useDraft, useJobs } from '../../lib/queries';
+import { useDocument, useJobs } from '../../lib/queries';
 import type { WorkbenchView } from '../../lib/routing';
 import { cn } from '../../lib/cn';
 import { useUiStore } from '../../stores/ui';
@@ -12,10 +10,8 @@ import { VersionList } from '../archive/VersionList';
 import { BatchPanel } from '../edit/BatchPanel';
 import { ParagraphEditor } from '../edit/ParagraphEditor';
 import { EventStreamPanel } from '../events/EventStreamPanel';
-import { JobControls } from '../jobs/JobControls';
 import { DownloadButton } from '../preview/DownloadButton';
 import { ExportButton } from '../preview/ExportButton';
-import { Button } from '../ui/Button';
 import type { EventFeed } from '../events/useEventWindow';
 import type { PersistentEvent } from '../../lib/usePersistentEvents';
 
@@ -43,8 +39,9 @@ const TABS: readonly InspectorTab[] = ['paragraph', 'events', 'archive'];
  * （`GET D/versions`）。`view==='archive'`（`#/d/:did/archive`）不再换中栏内容，只是让这里
  * 默认选中归档 tab。
  *
- * 面板最底是**操作区**（`action-bar`）：左任务控制（`JobControls`：开始翻译 / 取消 / 重试
- * + 状态徽标），右「编译全文」。它在三个 tab 下都常驻（恒在），所以是文档任务控制的唯一入口。
+ * 文档任务控制（开始翻译 / 取消 / 重试 / 编译全文）**不在本面板**：它住左栏论文导航底部的
+ * 操作区（`PaperNav` → `DocumentActionBar`，`data-od-id="action-bar"`），在那里所有视图与
+ * 所有 tab 下都常驻。
  *
  * 栏宽（`--inspw`）由外壳的 `.wb-grid` 管，本面板不控自己宽度。
  */
@@ -170,68 +167,16 @@ export function InspectorPanel({
           </div>
         ) : null}
         {tab === 'events' ? (
-          <div role="tabpanel" aria-label="事件流" className="min-h-0 flex-1">
+          /* `EventStreamPanel` 根节点用 `flex-1` 撑高：容器必须是 flex 列，否则
+             块级容器里 `flex-1` 失效，时间线按内容高度无限长大（实测 35171px），
+             内层 `overflow-auto` 的 clientHeight == scrollHeight → 两栏都滚不动，
+             超出 818px 的部分被 `inspector` 的 `overflow-hidden` 直接裁掉。 */
+          <div role="tabpanel" aria-label="事件流" className="flex min-h-0 flex-1 flex-col">
             <EventStreamPanel did={did} feed={feed} compileEvents={compileEvents} />
           </div>
         ) : null}
-        <div
-          data-od-id="action-bar"
-          className="flex flex-none flex-wrap items-center gap-s2 border-t border-hair bg-ivory px-s3 py-s2"
-        >
-          {documentQuery.data === undefined ? (
-            // `JobControls` 要完整 `DocumentDetail`（起点阶段等）：详情没到就给占位，
-            // 不拿半个对象硬渲染。
-            <span className="text-tiny text-ink-4">读取文档…</span>
-          ) : (
-            <JobControls did={did} document={documentQuery.data} jobs={jobsQuery.data} />
-          )}
-          <span className="ml-auto flex items-center gap-s2">
-            <CompileFullButton did={did} jobs={jobsQuery.data} />
-          </span>
-        </div>
       </div>
     </aside>
-  );
-}
-
-/**
- * 操作区右侧的「编译全文」：按**当前草稿 revision** 发 `action=compile & scope=full`
- * （`useCompileDraftMutation`），不碰段落文本、不调翻译模型。
- *
- * 禁用三态：草稿没加载完（拿不到 `base_revision`）/ 该文档有活动 job（服务端会 409
- * `document_busy`，这里提前挡住）/ 本次提交还在飞。逐块编译仍在段落 tab（`CompileBar`）。
- */
-function CompileFullButton({ did, jobs }: { did: string; jobs: readonly JobRecord[] | undefined }) {
-  const draftQuery = useDraft(did);
-  const compileFull = useCompileDraftMutation(did);
-  const revision = draftQuery.data?.revision;
-  const disabled = revision === undefined || activeJob(jobs) !== null || compileFull.isPending;
-  // react-query 无错时 `error` 是 **null**（不是 undefined）：两者都当「没有错误」。
-  const error =
-    compileFull.error === null || compileFull.error === undefined
-      ? null
-      : describeApiError(compileFull.error);
-
-  return (
-    <>
-      {error === null ? null : (
-        <span data-od-id="compile-full-error" className="font-mono text-micro text-err">
-          {error.title}：{error.message}
-        </span>
-      )}
-      <Button
-        size="sm"
-        data-od-id="compile-full"
-        disabled={disabled}
-        title="基于当前草稿全文重排版（scope=full）；逐块编译在段落 tab"
-        onClick={() => {
-          if (revision === undefined) return;
-          compileFull.mutate(revision);
-        }}
-      >
-        {compileFull.isPending ? '正在提交…' : '编译全文'}
-      </Button>
-    </>
   );
 }
 

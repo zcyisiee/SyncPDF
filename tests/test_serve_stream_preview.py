@@ -14,6 +14,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
+from babeldoc_tools.serve.block_compile import BlockCompiler
+from babeldoc_tools.serve.block_compile import NotReplaced
 from babeldoc_tools.serve.jobs import JobRecord
 from babeldoc_tools.serve.jobs import utc_now
 from babeldoc_tools.serve.store import DocumentStore
@@ -412,9 +414,12 @@ class _FakeCompiler:
     （测「不等 close 就开工」），``fail_on`` 让指定块抛异常（测 preview_failed）。
     """
 
-    def __init__(self, database, *, fail_on=(), gates=None, started=None):
+    def __init__(
+        self, database, *, fail_on=(), not_replace_on=(), gates=None, started=None
+    ):
         self.database = database
         self.fail_on = set(fail_on)
+        self.not_replace_on = set(not_replace_on)
         self.gates = dict(gates or {})
         self.started = dict(started or {})
         self.compiled = []
@@ -441,6 +446,8 @@ class _FakeCompiler:
             raise AssertionError(f"gate never released: {pid}")
         if pid in self.fail_on:
             raise RuntimeError(f"boom:{pid}")
+        if pid in self.not_replace_on:
+            raise NotReplaced("single-line")
         with self.database._lock, self.database.connection:
             self.database.connection.execute(
                 "INSERT OR REPLACE INTO compile_blocks"
@@ -469,6 +476,13 @@ class _FakeCompiler:
     def capability(self):
         return None
 
+    #: 「按设计不替换」的落定写入走生产实现（状态/事件口径必须与真编译器一致）。
+    _mark_not_replaced = BlockCompiler._mark_not_replaced
+
+    @property
+    def store(self):
+        return SimpleNamespace(database=self.database)
+
 
 def _start_preview(
     tmp_path,
@@ -478,6 +492,7 @@ def _start_preview(
     translated,
     cancel=False,
     fail_on=(),
+    not_replace_on=(),
     gates=None,
     started=None,
 ):
@@ -524,7 +539,11 @@ def _start_preview(
 
     preview = ServeStreamPreview(tmp_path, None)
     fake = _FakeCompiler(
-        preview.store.database, fail_on=fail_on, gates=gates, started=started
+        preview.store.database,
+        fail_on=fail_on,
+        not_replace_on=not_replace_on,
+        gates=gates,
+        started=started,
     )
     preview.compiler = fake
     return preview, fake, did, job_id
@@ -668,6 +687,42 @@ def test_compile_exception_records_preview_failed(tmp_path, monkeypatch):
     assert status == "preview_failed"
     preview.close(failed=False)
     assert fake.page_composes == [(1, True)], "已发布页在 close 不应重复发布"
+
+
+def test_not_replaced_block_settles_page_without_failure(tmp_path, monkeypatch):
+    """按设计不替换的块（标题/单行）：落 ``not_replaced``、发中性事件、整页照常发布。
+
+    它**不是**预览失败——基线原文就是这类块的正确结果。用 ``preview_failed`` 记它
+    会在界面上刷出满屏假报错（用户实测：123 个块 118 条「预览失败」）。
+    """
+    preview, fake, did, job_id = _start_preview(
+        tmp_path,
+        monkeypatch,
+        blocks={1: ["P01-001", "P01-002"]},
+        translated=["P01-001", "P01-002"],
+        not_replace_on=["P01-001"],
+    )
+    for pid in ("P01-001", "P01-002"):
+        preview.submit(pid, "body", "text")
+    _drain(preview)
+    assert set(fake.compiled) == {"P01-002"}
+    assert fake.page_composes == [(1, True)], "不替换的块必须算落定，否则整页等不到成页"
+    events = preview.store.database.events(did)
+    assert [
+        event["type"] for event in events if event["type"] == "preview_failed"
+    ] == []
+    neutral = [event for event in events if event["type"] == "block_not_replaced"]
+    assert len(neutral) == 1
+    assert neutral[0]["block_id"] == "P01-001"
+    assert neutral[0]["job_id"] == job_id
+    assert neutral[0]["data"]["reason"] == "single-line"
+    with preview.store.database._lock:
+        status = preview.store.database.connection.execute(
+            "SELECT status FROM compile_blocks WHERE document_id=? AND block_id='P01-001'",
+            (did,),
+        ).fetchone()[0]
+    assert status == "not_replaced"
+    preview.close(failed=False)
 
 
 def test_page_composes_with_blocks_index_empty_and_extra_native_paragraphs(

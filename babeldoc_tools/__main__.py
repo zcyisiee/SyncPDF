@@ -223,6 +223,22 @@ def _build_parser() -> argparse.ArgumentParser:
         default=True,
         help="关闭编译后按译文版面扩框（默认开启；只影响被缩字段）",
     )
+    p_build.add_argument(
+        "--target-layout",
+        action="store_true",
+        dest="target_layout",
+        default=None,
+        help=(
+            "强制对译文 PDF 跑一次版面识别（默认在布局后端为 mineru 且 "
+            "MINERU_API_TOKEN 可用时自动执行）"
+        ),
+    )
+    p_build.add_argument(
+        "--no-target-layout",
+        action="store_false",
+        dest="target_layout",
+        help="不对译文 PDF 做版面识别（不发网络请求；前端译文框将提示产物缺失）",
+    )
     p_build.add_argument("--render", default=None, help="重建后渲染指定页为 PNG，如 1,2 或 1-3")
     p_build.add_argument("--watermark", action="store_true")
     p_build.add_argument(
@@ -360,6 +376,22 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="latex_refine",
         default=True,
         help="关闭编译后按译文版面扩框（默认开启；只影响被缩字段）",
+    )
+    p_run.add_argument(
+        "--target-layout",
+        action="store_true",
+        dest="target_layout",
+        default=None,
+        help=(
+            "强制对译文 PDF 跑一次版面识别（默认在布局后端为 mineru 且 "
+            "MINERU_API_TOKEN 可用时自动执行）"
+        ),
+    )
+    p_run.add_argument(
+        "--no-target-layout",
+        action="store_false",
+        dest="target_layout",
+        help="不对译文 PDF 做版面识别（不发网络请求；前端译文框将提示产物缺失）",
     )
     p_run.add_argument("--render", default=None, help="build 后渲染页，如 1,2 或 1-3")
     p_run.add_argument("--watermark", action="store_true")
@@ -557,6 +589,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
                     "latex_bbox": args.latex_bbox,
                     "latex_bbox_mode": args.latex_bbox_mode,
                     "latex_refine": args.latex_refine,
+                    "target_layout": args.target_layout,
                     "render": args.render,
                     "debug_recompile": args.debug_recompile,
                 },
@@ -570,6 +603,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
                 latex_bbox=args.latex_bbox,
                 latex_bbox_mode=args.latex_bbox_mode,
                 latex_refine=args.latex_refine,
+                target_layout=args.target_layout,
                 render=args.render,
                 stats=args.stats,
                 debug_recorder=rec,
@@ -672,6 +706,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
                     latex_bbox=args.latex_bbox,
                     latex_bbox_mode=args.latex_bbox_mode,
                     latex_refine=args.latex_refine,
+                    target_layout=args.target_layout,
                     render=args.render,
                     stats=args.stats,
                     skip_pdf_checks=args.skip_pdf_checks,

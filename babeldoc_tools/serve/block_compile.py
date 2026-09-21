@@ -320,6 +320,20 @@ def paragraph_styles(workdir):
     return styles
 
 
+class NotReplaced(Exception):  # noqa: N818 - 不是错误，是「按设计不替换」的落定信号
+    """该块按设计不做 LaTeX 替换（标签不合格 / 源文单行），保留基线原文。
+
+    与 ``ToolError("compile_failed", ...)`` 的区别是**语义**：这不是失败，不该让用户
+    看到「预览失败」。一次性编译路径把同样的判定记作 ``label-not-eligible`` /
+    ``single-line`` 的 fallback（见 :meth:`overlay.LatexBboxOverlay._select_candidates`），
+    流式预览此前没有这两道门禁，把单行标题当正文编译，缩字触发浮动扩框，标题整块上移。
+    """
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
 def valid_box(box, width, height):
     if (
         not isinstance(box, (list, tuple))
@@ -409,7 +423,9 @@ def hydrate_parse(workdir, temporary):
         database.close()
 
 
-def _apply_font_family(meta: dict, layout: dict | None, serif_override: bool | None) -> None:
+def _apply_font_family(
+    meta: dict, layout: dict | None, serif_override: bool | None
+) -> None:
     """按草稿 ``layout.font_family`` 覆盖该段 meta（字体族 + 拉丁衬线属性）。
 
     ``font_family`` 命中注册表（``font_families.FONT_FAMILY_IDS``）才写
@@ -482,9 +498,14 @@ def render_request(
         None,
     )
     source_input = state["inputs"].get(pid)
-    source_fonts = next(({font.font_id: font for font in page.pdf_font}
-                         for page in state["doc"].page
-                         if paragraph in page.pdf_paragraph), {})
+    source_fonts = next(
+        (
+            {font.font_id: font for font in page.pdf_font}
+            for page in state["doc"].page
+            if paragraph in page.pdf_paragraph
+        ),
+        {},
+    )
     if paragraph is None or source_input is None:
         raise ToolError("block_not_found", "解析状态中没有该 block")
     violations = protocol.check_placeholders(pid, source_input.unicode, target)
@@ -600,6 +621,9 @@ class BlockCompiler:
         #: 段落行缓存：did → (取用时刻, rows)。见 :meth:`_rows`。
         self._rows_cache: dict[str, tuple[float, list]] = {}
         self._rows_lock = threading.Lock()
+        #: 源文行数缓存：(did, pid) → n_lines。见 :meth:`_source_n_lines`。
+        self._source_lines: dict[tuple[str, str], int | None] = {}
+        self._source_lines_lock = threading.Lock()
 
     def capability(self):
         """按需探测并缓存的 LaTeX 能力（线程安全；多 worker 并发首编时只探一次）。"""
@@ -635,14 +659,18 @@ class BlockCompiler:
             raise ToolError("stale_job", "任务已结束或取消，结果未发布")
 
     def _rows(self, did):
-        """段落行（几何 + 译文），带短 TTL 的进程内缓存。
+        """段落行，带短 TTL 的进程内缓存——**只保几何，不保译文**。
 
         每个块编译都要全量段落表来做「与邻居重叠」判定和取 geometry，而
         :func:`document_blocks` 每次都要重解 ``anchors.json``（535KB）+
         ``layout_geometry.json`` 等产物，实测约 0.48s——按块付费就是 356 × 0.48s
-        ≈ 3 分钟纯 JSON 解析。几何在一次 job 内不变；``target`` 会随翻译推进变化，
-        但调用方只用它判重叠/取几何，真正要编译的译文另走 ``draft``/``record``。
-        所以给一个很短的 TTL：既省掉重复解析，也不会让新翻译的块长时间看不见。
+        ≈ 3 分钟纯 JSON 解析。几何在一次 job 内不变，缓存它是安全的。
+
+        ``row.target`` **不可信**：流式预览每块都是「译文刚落库就 submit」
+        （见 :mod:`babeldoc_tools.translate` 的 ``completed``），缓存里的快照必然
+        还没有这一块的译文。曾经按 ``row.target`` 编译，结果一个 TTL 窗口只有第一个
+        到达的块能编出来，同窗口其余块全部「缺少译文或排版数据」——实测 151 块只成
+        33 块。要编译的译文一律走 :meth:`_target`（权威单行查询）。
         """
         now = time.monotonic()
         with self._rows_lock:
@@ -653,6 +681,135 @@ class BlockCompiler:
         with self._rows_lock:
             self._rows_cache[did] = (time.monotonic(), rows)
         return rows
+
+    def _target(self, did, pid):
+        """该块当前的权威译文：``translation_blocks`` 单行查询（主键命中）。
+
+        不走 :meth:`_rows` 的缓存：那份快照的 ``target`` 永远落后于「刚落库就编译」
+        的流式预览（见 :meth:`_rows`）。这里按 ``(document_id, block_id)`` 主键查一行，
+        开销是微秒级，且没有任何时间窗口假设。
+        """
+        database = self.store.database
+        with database._lock:
+            row = database.connection.execute(
+                "SELECT target FROM translation_blocks WHERE document_id=? AND block_id=?",
+                (did, pid),
+            ).fetchone()
+        return row[0] if row else None
+
+    def _mark_not_replaced(self, did, pid, job_id, reason="label-not-eligible"):
+        """把「按设计不替换」记成落定状态 + 一条中性事件。
+
+        状态用 ``not_replaced``（≠ ``preview_failed``）：既让 ``_page_complete`` 把该块
+        算作已落定（否则整页永远等不到成页），又不在界面上报成预览失败——这类块显示
+        基线原文就是正确结果。
+        """
+        database = self.store.database
+        with database._lock, database.connection:
+            database.connection.execute(
+                "INSERT OR REPLACE INTO compile_blocks"
+                "(document_id,block_id,input_hash,patch_asset,status,target_size,error)"
+                " VALUES (?,?,NULL,NULL,'not_replaced',NULL,?)",
+                (did, pid, reason),
+            )
+        if job_id:
+            database.append_event(
+                job_id,
+                did,
+                "block_not_replaced",
+                {"paragraph_id": pid, "reason": reason},
+                block_id=pid,
+            )
+
+    def _source_pdf(self, did):
+        """**源文** PDF（prepared 优先，回退 parse 记录的输入文件）；拿不到 → None。
+
+        刻意不走 :meth:`_outputs`：那里第一顺位是 ``output/*.mono.pdf``，文档跑过一轮
+        之后它已经是译文页。贴片 baseline 用它没问题（就是要往最新成品上贴），但
+        **量源文行数**用它就是量译文，口径全错。
+        """
+        database = self.store.database
+        with database._lock:
+            row = database.connection.execute(
+                "SELECT prepared_pdf_asset FROM parse_results"
+                " WHERE document_id=? AND status='ready'",
+                (did,),
+            ).fetchone()
+        if row and row[0]:
+            return AssetStore(self.store.store_base, database).resolve(row[0])
+        from babeldoc.tools.agent.prepared_pdf import resolve_source_pdf
+
+        workdir = self.store.resolve(did)
+        return resolve_source_pdf(_load_parse_state(workdir), workdir)
+
+    def _source_n_lines(self, did, row) -> int | None:
+        """该块在源 PDF 上的文本行数（``overlay.measure_line_fill`` 同一函数）。
+
+        按 ``(did, pid)`` 记忆：同一块重编不再开第二次 PDF。量不到（源文件缺失、
+        页码越界、没有框）→ ``None``，由调用方按「无据不拦」处理。
+
+        不用 parse 落盘的 ``n_lines``：``geometry`` 是 apply 之后的排版几何，它的
+        ``n_lines`` 是**译文**排完的行数；``state.pkl`` 的 ``source_line_geometry``
+        虽是源文侧，但与全量路径的判定实测对不齐（本文档 13 条判定里错 8 条）。
+        现量现算才是同口径——实测与全量路径的 ``latex_candidates.rejected`` 逐条一致。
+        """
+        import pymupdf
+
+        key = (did, row.id)
+        with self._source_lines_lock:
+            if key in self._source_lines:
+                return self._source_lines[key]
+        geometry = row.geometry or {}
+        box = geometry.get("src_box") or geometry.get("layout_box")
+        value = None
+        # 量不到就是量不到（源文件缺失/不可解析）：由调用方按「无据不拦」处理，
+        # 绝不让门禁本身把一次本可以成功的编译变成失败。
+        with contextlib.suppress(Exception):
+            source = self._source_pdf(did) if box and row.page else None
+            if source is not None:
+                from babeldoc.format.pdf.document_il.backend.latex_bbox.overlay import (
+                    measure_line_fill,
+                )
+
+                with pymupdf.open(source) as doc:
+                    if 0 <= row.page - 1 < doc.page_count:
+                        page = doc[row.page - 1]
+                        height = page.rect.height
+                        clip = pymupdf.Rect(
+                            box[0], height - box[3], box[2], height - box[1]
+                        )
+                        value = int(measure_line_fill(page, clip)["n_lines"])
+        with self._source_lines_lock:
+            self._source_lines[key] = value
+        return value
+
+    def _ineligible_reason(self, did, row) -> str | None:
+        """与一次性编译同口径的贴片资格门禁 → 不合格原因 / None。
+
+        对齐 :meth:`overlay.LatexBboxOverlay._select_candidates` 的两道判定：
+
+        1. ``layout_label`` 必须是正文本体标签（``overlay._BODY_LABELS``，直接复用不
+           复制常量）。``title`` 不在其中：标题本来就不该由 LaTeX 重排。
+        2. 源文行数 ≥ 2（见 :meth:`_source_n_lines`）。
+
+        流式预览缺这两道门禁时，单行标题会被当正文编译；它在源字号档放不下而被缩一档，
+        ``layout_refine.expansion_reason``（scale < 0.995）随即判定要扩框，浮动阶梯就把
+        框向上扩掉上一行的净空——实测标题顶边被抬高 26.6pt，就是用户看到的「标题上移」。
+
+        依据缺失（``layout_label`` 未物化的迁移文档 / 源 PDF 量不到）时跳过对应那道，
+        不拦：门禁只在有据可依时否决。
+        """
+        from babeldoc.format.pdf.document_il.backend.latex_bbox.overlay import (
+            _BODY_LABELS,
+        )
+
+        label = getattr(row, "layout_label", None)
+        if label is not None and label not in _BODY_LABELS:
+            return "label-not-eligible"
+        n_lines = self._source_n_lines(did, row)
+        if n_lines is not None and n_lines < 2:
+            return "single-line"
+        return None
 
     async def submit(self, did, pid, revision):
         workdir = self.store.resolve(did)
@@ -743,6 +900,21 @@ class BlockCompiler:
             self.runner.registry.mark_finished(
                 record, status="succeeded", envelope=json.dumps(result)
             )
+        except NotReplaced as exc:
+            # 手动单块编译命中资格门禁：不是失败，据实说明该块保留基线原文。
+            self._mark_not_replaced(
+                record.did, record.paragraph_id, record.job_id, exc.reason
+            )
+            self.runner.registry.mark_finished(
+                record,
+                status="succeeded",
+                envelope=json.dumps(
+                    {
+                        "block_id": record.paragraph_id,
+                        "not_replaced": exc.reason,
+                    }
+                ),
+            )
         except Exception as exc:
             canceled = record.cancel_requested_at is not None
             self.runner.registry.mark_finished(
@@ -787,10 +959,14 @@ class BlockCompiler:
         见 :mod:`babeldoc.tools.agent.layout_refine`），**并含同页已落定的兄弟贴片
         框**（``self.reservations`` 登记簿）：baseline 是原文页，只看它的话每个块都
         以为落点是空的，实测会让全部跨页迁移叠在同一条顶部净空里。每页的检测证据
-        按页缓存一次，浮动阶梯四级复用同一份。
+        按页缓存一次，浮动阶梯多级复用同一份。
 
         跨页迁移保持 x 范围不变，在下一页自上而下找第一个能容纳
-        ``原框高 / scale`` 的空闲区间（顶对齐）。
+        ``原框高 / scale`` 的空闲区间（顶对齐）。这一级**缺省关闭**，开启后还须过
+        :func:`layout_refine.next_page_float_eligible` 的四道资格门禁：把正文段整块
+        搬走会在原位留一块空白（界面观感等同于「这段渲染丢了」），代价大于「字被
+        缩小」。任一不合格就保持原位。实测故障见
+        ``docs/reports/2026-09-21-next-page-float-blank-home.md``。
         """
         from babeldoc.tools.agent import layout_refine
 
@@ -826,14 +1002,20 @@ class BlockCompiler:
                 rows, pid, page_number, widened
             ):
                 return list(widened), page_number, f"widen-{direction}"
-        # 跨页迁移：仅当下一页存在且未旋转；所需高度按缩字比例放大回原字号。
+        # 跨页迁移：缺省关闭（见 ``layout_refine.next_page_float_enabled``）——把正文段
+        # 整块搬到下一页会在原位留一块空白，代价大于「字被缩小」。开启后还要过
+        # ``next_page_float_eligible`` 的四道资格门禁。
+        if not layout_refine.next_page_float_enabled():
+            return box, page_number, None
         next_index = page_number  # 1 基页码正好是下一页的 0 基下标
         if next_index >= doc.page_count or doc[next_index].rotation:
             return box, page_number, None
         scale = getattr(stamp, "scale", None)
-        required = (box[3] - box[1]) / min(max(float(scale), 0.05), 1.0) if scale else (
-            box[3] - box[1]
-        ) * 1.2
+        required = (
+            (box[3] - box[1]) / min(max(float(scale), 0.05), 1.0)
+            if scale
+            else (box[3] - box[1]) * 1.2
+        )
         landing = next_index + 1
         moved = layout_refine.plan_next_page_float(
             doc[next_index],
@@ -843,9 +1025,52 @@ class BlockCompiler:
             evidence=cache.evidence(doc[next_index], landing),
             reserved=self._page_obstacles(rows, pid, landing),
         )
-        if moved is not None and self._float_box_is_clear(rows, pid, landing, moved):
-            return list(moved), landing, "next-page"
-        return box, page_number, None
+        if moved is None or not self._float_box_is_clear(rows, pid, landing, moved):
+            return box, page_number, None
+        ineligible = layout_refine.next_page_float_eligible(
+            scale=scale,
+            landing=moved,
+            page_height=float(doc[next_index].rect.height),
+            home_occupied=self._home_stays_occupied(rows, pid, page_number, box),
+        )
+        if ineligible is not None:
+            return box, page_number, None
+        return list(moved), landing, "next-page"
+
+    def _home_stays_occupied(self, rows, pid, page_number, box):
+        """迁走后本段原位上是否仍有可见内容（跨页迁移的第 4 道门禁）。
+
+        ``False`` = 原位会成空白 → 不允许搬。原位口径与 ``compose_page_asset`` 要
+        擦掉的脚印一致（``rendered_box`` / ``layout_box`` / ``src_box``）；本段自己
+        的贴片不算（它正在被搬走），只有**别的**段落版面框或**别的**已定贴片覆盖
+        原位才算「原位还有东西」。
+
+        实测故障 ``P03-011``：原位只有它自己的贴片，搬走后第 3 页原框里取文本为
+        空字符串，界面上就是一颗空白——门禁这一条就是不让它发生。
+        """
+        import pymupdf
+
+        row = next((item for item in rows if item.id == pid), None)
+        geometry = (row.geometry or {}) if row is not None else {}
+        home = (
+            geometry.get("rendered_box")
+            or geometry.get("layout_box")
+            or geometry.get("src_box")
+            or box
+        )
+        rect = pymupdf.Rect(home)
+        for other in rows:
+            if other.id == pid or other.page != page_number:
+                continue
+            other_box = (other.geometry or {}).get("layout_box") or (
+                other.geometry or {}
+            ).get("src_box")
+            if other_box and rect.intersects(pymupdf.Rect(other_box)):
+                return True
+        for reserved in self.reservations.obstacles(page_number, exclude=pid):
+            if rect.intersects(pymupdf.Rect(reserved)):
+                return True
+        return False
 
     def _page_obstacles(self, rows, pid, page_number):
         """浮动规划的「兄弟」障碍集：已定贴片框 + 尚未编译的段落原文框。
@@ -936,16 +1161,22 @@ class BlockCompiler:
                 raise ToolError("block_not_found", f"block 不存在：{pid}")
             edit = draft.paragraphs.get(pid)
             expected = {
+                # 与 compile_block_patch 同一口径的权威译文（见 _target）：用 _rows
+                # 缓存里的 target 会把「译文已更新」误判成 clean，整块漏编。
                 "target": edit.target
                 if edit and edit.target is not None
-                else row.target,
+                else self._target(record.did, pid),
                 "layout": edit.layout if edit else None,
             }
             if patches.get(pid, {}).get("input") != expected:
                 dirty.append(pid)
         for pid in sorted(dirty):
             record.paragraph_id = pid
-            self.compile(record)
+            try:
+                self.compile(record)
+            except NotReplaced:
+                # 按设计不替换的块（标题/单行）保留基线原文，不该让导出失败。
+                continue
         record.paragraph_id = None
         outputs = self._outputs(record.did)
         if not outputs:
@@ -1051,16 +1282,30 @@ class BlockCompiler:
         if box is None:
             box = geometry.get("layout_box") or geometry.get("src_box")
             box_scale = (layout or {}).get("box_scale")
-            if box and isinstance(box_scale, (int, float)) and not isinstance(
-                box_scale, bool
+            if (
+                box
+                and isinstance(box_scale, (int, float))
+                and not isinstance(box_scale, bool)
             ):
                 # 与 layout_overrides.scale_box 同语义：锚定左上角向右/向下生长。
                 x, y, x2, y2 = (float(v) for v in box)
                 factor = float(box_scale)
                 box = [x, y2 - (y2 - y) * factor, x + (x2 - x) * factor, y2]
-        target = edit.target if edit and edit.target is not None else row.target
+        # 译文优先级：草稿改写 > 库里的权威单行（见 _target）> 行快照。
+        # 中间这层是关键：_rows 的快照对「刚落库就编译」的流式预览永远是旧的；
+        # 库里没有该块时（迁移文档、上一轮的产物）才退回快照，行为与改动前一致。
+        target = edit.target if edit and edit.target is not None else None
+        if target is None:
+            target = self._target(did, pid)
+        if target is None:
+            target = row.target
         if target is None or row.page is None or box is None:
             raise ToolError("compile_failed", "缺少译文或排版数据")
+        # 资格门禁与一次性编译同口径：不合格的块保留基线原文，不是失败。只看 row，
+        # 所以在开 PDF、起 xelatex 之前就判掉。
+        ineligible = self._ineligible_reason(did, row)
+        if ineligible is not None:
+            raise NotReplaced(ineligible)
         database = self.store.database
         assets = AssetStore(self.store.store_base, database)
         outputs = self._outputs(did)
@@ -1293,7 +1538,9 @@ class BlockCompiler:
         with pymupdf.open(assets.resolve(state["base"])) as baseline:
             index = page_number - 1
             page = baseline[index]
-            with tempfile.TemporaryDirectory(prefix=record.job_id + "-page-", dir=temporary_root) as folder:
+            with tempfile.TemporaryDirectory(
+                prefix=record.job_id + "-page-", dir=temporary_root
+            ) as folder:
                 temporary = Path(folder)
                 # Start with the baseline page, redact each old/new area, then reinsert
                 # all cached patches. No other block invokes the renderer.
@@ -1372,21 +1619,34 @@ class BlockCompiler:
         state["page_asset"] = page_asset
         state["complete"] = complete
         state["updated_at"] = utc_now()
-        input_hash = hashlib.sha256(json.dumps(state["patches"], sort_keys=True).encode()).hexdigest()
+        input_hash = hashlib.sha256(
+            json.dumps(state["patches"], sort_keys=True).encode()
+        ).hexdigest()
         with database._lock, database.connection:
             database.connection.execute("BEGIN IMMEDIATE")
             if (database.draft(did) or {"revision": 0})["revision"] != record.revision:
                 raise ToolError("stale_job", "草稿已更新，旧页面未发布")
             self._check_job(database, record)
-            database.connection.execute("INSERT OR REPLACE INTO local_pages VALUES (?,?,?)", (did, page_number, json.dumps(state)))
+            database.connection.execute(
+                "INSERT OR REPLACE INTO local_pages VALUES (?,?,?)",
+                (did, page_number, json.dumps(state)),
+            )
             database.connection.execute(
                 "INSERT OR REPLACE INTO pages(document_id,page,input_hash,page_asset,dirty,updated_at) VALUES (?,?,?,?,0,?)",
                 (did, page_number, input_hash, page_asset, state["updated_at"]),
             )
-        result = {"page": page_number, "asset": page_asset, "revision": record.revision,
-                  "complete": complete, "page_revision": state["page_revision"],
-                  "updated_at": state["updated_at"], "duration_s": duration_s + time.monotonic() - started}
-        database.append_event(record.job_id, did, "preview_ready", result, page=page_number)
+        result = {
+            "page": page_number,
+            "asset": page_asset,
+            "revision": record.revision,
+            "complete": complete,
+            "page_revision": state["page_revision"],
+            "updated_at": state["updated_at"],
+            "duration_s": duration_s + time.monotonic() - started,
+        }
+        database.append_event(
+            record.job_id, did, "preview_ready", result, page=page_number
+        )
         return result
 
     def compile(self, record, *, publish=True):
@@ -1403,7 +1663,9 @@ class BlockCompiler:
             for number in ordered:
                 result.update(
                     self.compose_page_asset(
-                        record, number, duration_s=result["duration_s"] if number == home else 0.0
+                        record,
+                        number,
+                        duration_s=result["duration_s"] if number == home else 0.0,
                     )
                 )
             result["preview_asset"] = self.compose_full_preview(record)["asset"]
@@ -1464,6 +1726,9 @@ class BlockCompiler:
                     },
                     block_id=pid,
                 )
+            except NotReplaced:
+                # 按设计不替换（标签不合格/源文单行）：保留基线原文，不算失败。
+                self._mark_not_replaced(did, pid, record.job_id)
             except ToolError as exc:
                 failures.append(
                     {
@@ -1484,9 +1749,7 @@ class BlockCompiler:
         if record.cancel_requested_at is not None:
             raise ToolError("canceled", "任务已取消，批量编译结果未发布")
         if not results:
-            raise ToolError(
-                "compile_failed", "批量编译全部失败", failures=failures
-            )
+            raise ToolError("compile_failed", "批量编译全部失败", failures=failures)
         # 受影响页 = 每块的主页/贴片页/上一版贴片页；每页只合成一次。
         affected: set[int] = set()
         for result in results.values():
@@ -1527,7 +1790,9 @@ class BlockCompiler:
             raise ToolError("export_not_ready", "尚无页面预览")
         baseline = json.loads(rows[0][2])["base"]
         temporary_root = self.store.store_base / "tmp"
-        with tempfile.TemporaryDirectory(prefix=record.job_id + "-full-", dir=temporary_root) as folder:
+        with tempfile.TemporaryDirectory(
+            prefix=record.job_id + "-full-", dir=temporary_root
+        ) as folder:
             path = Path(folder) / "preview.pdf"
             with pymupdf.open(assets.resolve(baseline)) as pdf:
                 for number, digest, _ in rows:
@@ -1542,10 +1807,20 @@ class BlockCompiler:
             asset = assets.put(path, kind="preview")
         with database._lock, database.connection:
             database.connection.execute("BEGIN IMMEDIATE")
-            if (database.draft(record.did) or {"revision": 0})["revision"] != record.revision:
+            if (database.draft(record.did) or {"revision": 0})[
+                "revision"
+            ] != record.revision:
                 raise ToolError("stale_job", "草稿已更新，完整预览未发布")
             self._check_job(database, record)
-            database.connection.execute("INSERT OR REPLACE INTO local_previews VALUES (?,?,?)", (record.did, asset, record.revision))
-        result = {"asset": asset, "preview_asset": asset, "revision": record.revision, "full": True}
+            database.connection.execute(
+                "INSERT OR REPLACE INTO local_previews VALUES (?,?,?)",
+                (record.did, asset, record.revision),
+            )
+        result = {
+            "asset": asset,
+            "preview_asset": asset,
+            "revision": record.revision,
+            "full": True,
+        }
         database.append_event(record.job_id, record.did, "preview_ready", result)
         return result

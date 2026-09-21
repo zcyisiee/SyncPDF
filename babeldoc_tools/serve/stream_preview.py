@@ -26,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from babeldoc_tools.serve.block_compile import BlockCompiler
+from babeldoc_tools.serve.block_compile import NotReplaced
 from babeldoc_tools.serve.jobs import JobRecord
 from babeldoc_tools.serve.limits import MAX_PREVIEW_WORKERS
 from babeldoc_tools.serve.store import DocumentStore
@@ -44,8 +45,10 @@ _PID_PAGE_RE = re.compile(r"^P(\d+)-")
 #: ``document.md`` 的段落标记注释（``<!-- id=P01-003 label=text -->``）。
 _SCOPE_ID_RE = re.compile(r"<!--\s*id=(P\d+-\d+)\b")
 
-#: 编译落定状态：ok（贴片可用）或 preview_failed（该块回退基线原文）。
-_SETTLED_STATUSES = ("ok", "preview_failed")
+#: 编译落定状态：ok（贴片可用）、preview_failed（编译失败，回退基线原文）或
+#: not_replaced（按设计不替换——标签不合格/源文单行，基线原文就是正确结果）。
+#: 三者都算「落定」，否则该页永远等不到成页。
+_SETTLED_STATUSES = ("ok", "preview_failed", "not_replaced")
 
 
 def preview_workers_from_environ(environ=None) -> int:
@@ -160,6 +163,9 @@ class ServeStreamPreview:
                     self.page_revisions[home] = self.page_revisions.get(
                         home, 0.0
                     ) + result.get("duration_s", 0.0)
+        except NotReplaced as exc:
+            # 按设计不替换（标签不合格/源文单行）：落定但不报失败，该块显示基线原文。
+            self.compiler._mark_not_replaced(self.did, pid, self.job_id, exc.reason)
         except Exception as exc:
             # Preview failure is visible and retryable; it does not corrupt provider
             # output or turn a partially built PDF into a successful export. The
@@ -215,6 +221,7 @@ class ServeStreamPreview:
         if not ids:
             return False
         marks = ",".join("?" for _ in ids)
+        settled = ",".join("?" for _ in _SETTLED_STATUSES)
         database = self.store.database
         with database._lock:
             # marks 只是按 id 数量生成的 ? 占位符，值全部走参数绑定（S608 误报）。
@@ -223,7 +230,7 @@ class ServeStreamPreview:
                 f"(SELECT COUNT(*) FROM translation_blocks WHERE job_id=? AND revision=?"
                 f"  AND document_id=? AND block_id IN ({marks})),"
                 f"(SELECT COUNT(*) FROM compile_blocks WHERE document_id=?"
-                f"  AND block_id IN ({marks}) AND status IN (?,?))",
+                f"  AND block_id IN ({marks}) AND status IN ({settled}))",
                 (
                     self.job_id,
                     self.revision,

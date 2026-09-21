@@ -20,6 +20,7 @@ from fastapi import Query
 from fastapi import UploadFile
 
 from babeldoc_tools.common import ToolError
+from babeldoc_tools.serve import paper_meta
 from babeldoc_tools.serve import views
 from babeldoc_tools.serve.runner import JobRunner
 from babeldoc_tools.serve.schemas import API_PREFIX
@@ -61,6 +62,21 @@ def documents_router(
         """did → workdir 的产物读取器（路径校验全在 store 里）。"""
         return WorkdirReader(store.resolve(did))
 
+    def paper_meta_of(did: str) -> paper_meta.PaperMeta:
+        """did → 论文标题/作者（库里有就用库里的，缺字段时从产物抽取并只填空地回填）。
+
+        只在 ``app.db`` **已经存在**时才碰数据库，与 ``GET /documents/{did}``（读
+        ``local_previews``/``exports``）同一个门卫：``bdt serve --workdir`` 是「只暴露
+        一个（可能很旧的）只读 workdir」的视图，而它的 ``store_base`` 就是那个 workdir
+        自己 —— 不加这道门卫就会往被伺服目录里丢一个 ``app.db``。没有库（或磁盘只读）
+        就退成纯产物抽取：标题/一作照常返回，只是不回填（建库的显式入口是
+        ``bdt serve --migrate``）。
+        """
+        reader_for_did = reader(did)
+        if not (store.store_base / "app.db").is_file():
+            return paper_meta.extract_paper_meta(reader_for_did)
+        return paper_meta.resolve_paper_meta(store.database, reader_for_did, did)
+
     @router.post(
         "/documents",
         response_model=DocumentUploaded,
@@ -91,12 +107,17 @@ def documents_router(
         response_model=list[DocumentListItem],
         summary="文档列表",
         description=(
-            "枚举可见 workdir 的概要：阶段状态、页数/段数/已译段数、最近活动时间。"
-            "产物缺失的字段为 null（不是 0），坏产物不影响其它文档。"
+            "枚举可见 workdir 的概要：阶段状态、页数/段数/已译段数、真实标题与一作、"
+            "最近活动时间。标题取 `papers.title`（源 PDF metadata → provider IR 首页 "
+            "title 块），抽不到才退回源文件名；产物缺失的字段为 null（不是 0），"
+            "坏产物不影响其它文档。"
         ),
     )
     def list_documents() -> list[DocumentListItem]:
-        return [views.document_summary(reader(did), did) for did in store.list_dids()]
+        return [
+            views.document_summary(reader(did), did, paper_meta_of(did))
+            for did in store.list_dids()
+        ]
 
     @router.delete(
         "/documents/{did}",
@@ -143,7 +164,7 @@ def documents_router(
     def get_document(
         did: Annotated[str, PathParam(description=DOCUMENT_ID)],
     ) -> DocumentDetail:
-        detail = views.document_detail(reader(did), did)
+        detail = views.document_detail(reader(did), did, paper_meta_of(did))
         from babeldoc_tools.serve.draft import read_draft
 
         detail.revision = read_draft(store.resolve(did)).revision
@@ -205,28 +226,40 @@ def documents_router(
     @router.get(
         "/documents/{did}/geometry",
         response_model=GeometryResponse,
-        summary="bbox 几何（parse 快照 / layout 几何）",
+        summary="bbox 几何（parse 快照 / layout 几何 / target 译文识别）",
         description=(
             "kind=parse 返回当前 provider IR 的 recognition_entities（原始 block/span 框），"
             "并保留最新 run 的 entities/relations（兼容段落快照）；box 是 pdf_topleft（y 向下）。"
             "labels 是全文 label 清单，不受 page 过滤影响。"
             "kind=layout 读 layout_geometry.json，box 是 pdf_native（y 向上）并附 "
-            "page_info 的 cropbox。两套坐标系统**不做转换**，由前端按 coord_system 换算。"
-            "parse 的 IR 与快照均缺失或 layout 产物缺失时返回 404（snapshot_unavailable / geometry_unavailable），"
-            "不用空数组冒充成功。"
+            "page_info 的 cropbox。"
+            "kind=target 读**译文侧**重新识别的 provider IR（agent/target/provider/provider_ir.json，"
+            "编译后对译文 mono PDF 跑一次 MinerU 的产物），box 是 pdf_topleft，"
+            "recognition 透传 agent/target_recognition.json（status/reason/provider/page_count）。"
+            "三套坐标系统**不做转换**，由前端按 coord_system 换算。"
+            "parse 的 IR 与快照均缺失、layout 产物缺失、或译文侧识别产物尚未生成时返回 404"
+            "（snapshot_unavailable / geometry_unavailable / target_layout_unavailable），"
+            "不用空数组冒充成功，也不用原文 layout 冒充译文版面。"
         ),
     )
     def get_geometry(
         did: Annotated[str, PathParam(description=DOCUMENT_ID)],
         kind: Annotated[
-            Literal["parse", "layout"],
-            Query(description="parse = 识别/原文 bbox；layout = 译文排版 bbox"),
+            Literal["parse", "layout", "target"],
+            Query(
+                description=(
+                    "parse = 源侧识别 bbox；layout = 译文套版几何 bbox（可拖拽编辑的草稿语义）；"
+                    "target = 编译后对译文 PDF 重新识别的 bbox（只读）"
+                )
+            ),
         ],
         page: Annotated[int | None, Query(ge=1, description=PAGE_QUERY)] = None,
     ) -> GeometryResponse:
         workdir_reader = reader(did)
         if kind == "parse":
             return views.geometry_parse(workdir_reader, did, page)
+        if kind == "target":
+            return views.geometry_target(workdir_reader, did, page)
         return views.geometry_layout(workdir_reader, did, page)
 
     @router.get(
