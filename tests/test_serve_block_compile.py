@@ -485,13 +485,14 @@ def test_float_to_next_page_keeps_stamp_on_home_by_default(tmp_path, monkeypatch
 def test_next_page_float_keeps_home_when_home_would_be_blank(tmp_path, monkeypatch):
     """门禁不变量：开启跨页迁移后，若原位会成空白则仍不搬（宁可缩字）。
 
-    段落版面框互不重叠，本段原位通常只有本段自己的贴片 → ``home_occupied`` 为假。
-    这里把总开关打开、其余三道门禁都满足，只留第 4 道不成立，断言仍然留在原位。
+    段落版面框互不重叠，本段原位通常只有本段自己的贴片 → ``_home_stays_occupied``
+    为假（这里**不**打植第 4 道门禁，走真实现）。总开关打开、其余三道门禁都满足，
+    只靠第 4 道把迁移拦下来，断言仍然留在原位。
     """
     from babeldoc.tools.agent import layout_refine
     from babeldoc_tools.serve import block_compile
 
-    compiler, _rows = _multi_page_store(tmp_path, monkeypatch, pages=2)
+    compiler, rows = _multi_page_store(tmp_path, monkeypatch, pages=2)
     boxes: list[list[float]] = []
     monkeypatch.setattr(block_compile, "render_request", _stamp_render(boxes))
     monkeypatch.setattr(
@@ -507,15 +508,48 @@ def test_next_page_float_keeps_home_when_home_would_be_blank(tmp_path, monkeypat
         lambda *_a, **_k: (20.0, 300.0, 200.0, 350.0),
     )
     monkeypatch.setenv("BDT_NEXT_PAGE_FLOAT", "1")
-    monkeypatch.setattr(
-        block_compile.BlockCompiler, "_home_stays_occupied", lambda *_a, **_k: False
-    )
+    # 前提：该段原位确实只有它自己（别的段落框都不在第 1 页）。
+    assert compiler._home_stays_occupied(rows, "P1", 1, [20, 320, 200, 370]) is False
 
     result = compiler.compile(record())
 
     assert len(boxes) == 1
     assert result["stamp_page"] == 1
     assert "New block one" in _page_text(compiler.store, 1)
+
+
+def test_home_stays_occupied_detects_neighbour_footprint(tmp_path, monkeypatch):
+    """``_home_stays_occupied`` 的判据：别的段落框或别的已定贴片压在本段原位才算真。
+
+    这是第 4 道门禁的唯一数据源，单独盖两层：
+
+    - 只有本段自己的贴片/框 → False（→ 不允许搬，这是 P03-011 的情形）；
+    - 别的段落的 layout_box 与原位相交 → True；
+    - 别的已定贴片（FloatReservations）压在原位 → True。
+    """
+    compiler, rows = _multi_page_store(tmp_path, monkeypatch, pages=1)
+    home = [20, 320, 200, 370]
+
+    assert compiler._home_stays_occupied(rows, "P1", 1, home) is False
+
+    rows.append(
+        SimpleNamespace(
+            id="P2",
+            page=1,
+            target="Other",
+            geometry={"layout_box": [20, 300, 200, 350]},  # 与原位相交
+        )
+    )
+    assert rows[-1].geometry["layout_box"][3] > home[1]
+    assert compiler._home_stays_occupied(rows, "P1", 1, home) is True
+    rows.pop()
+
+    # 别的已定贴片压在原位：登记簿里只有「别的段」的框才算。
+    compiler.reservations.reserve("P9", 1, [30, 330, 150, 360])
+    assert compiler._home_stays_occupied(rows, "P1", 1, home) is True
+    compiler.reservations = type(compiler.reservations)()
+    compiler.reservations.reserve("P1", 1, [30, 330, 150, 360])
+    assert compiler._home_stays_occupied(rows, "P1", 1, home) is False
 
 
 def test_next_page_float_moves_stamp_when_gate_passes(tmp_path, monkeypatch):
