@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 syncpdf-core = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 skrifa = { workspace = true }
 harfrust = { workspace = true }
@@ -16,6 +17,9 @@ fontdb = { workspace = true }
 unicode-bidi = { workspace = true }
 unicode-script = { workspace = true }
 tracing = { workspace = true }
+pdf-writer = { workspace = true }
+read-fonts = "0.44"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+lopdf = { workspace = true }
