@@ -11,9 +11,13 @@ syncpdf-pdf = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-ort = { workspace = true }
+# download-binaries：pyke 预编译 onnxruntime（macOS arm64 为 +coreml 构建，CPU EP 执行）；
+# std/tls-native 是 download-binaries 的硬性要求（ureq 下载器）；ndarray 不启用（ort 内置
+# 0.17 与 workspace 0.16 不同版本，用 (shape, &[T]) 元组 API 传张量即可）。
+ort = { workspace = true, features = ["std", "download-binaries", "tls-native"] }
 ndarray = { workspace = true }
 image = { workspace = true }
 
 [dev-dependencies]
+syncpdf-core = { workspace = true }
 tempfile = { workspace = true }
