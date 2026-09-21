@@ -734,6 +734,90 @@ class TestPlanNextPageFloat:
         assert floated is None
 
 
+class TestNextPageFloatGate:
+    """跨页整框迁移的资格门禁：缺省关闭，开启后四道条件必须同时满足。
+
+    背景（实测故障 `P03-011`）：该段被缩字后浮动阶梯走到跨页迁移，整块搬到下一页
+    页底（y2 = 51.67pt / 页高 793.7pt），第 3 页原位取文本为空字符串——界面上就是
+    一颗空白，而它要解决的问题只是「字被缩小了」。
+    """
+
+    def test_disabled_by_default(self, monkeypatch):
+        monkeypatch.delenv("BDT_NEXT_PAGE_FLOAT", raising=False)
+        assert layout_refine.next_page_float_enabled() is False
+
+    @pytest.mark.parametrize("raw", ["1", "true", "TRUE", "yes", "on", " on "])
+    def test_explicit_opt_in(self, monkeypatch, raw):
+        monkeypatch.setenv("BDT_NEXT_PAGE_FLOAT", raw)
+        assert layout_refine.next_page_float_enabled() is True
+
+    @pytest.mark.parametrize("raw", ["", "0", "false", "no", "off", "maybe"])
+    def test_non_opt_in_values_stay_off(self, monkeypatch, raw):
+        monkeypatch.setenv("BDT_NEXT_PAGE_FLOAT", raw)
+        assert layout_refine.next_page_float_enabled() is False
+
+    def test_severe_shrink_on_top_of_page_with_occupied_home_passes(self):
+        assert (
+            layout_refine.next_page_float_eligible(
+                scale=0.5,
+                landing=(20.0, 600.0, 200.0, 700.0),
+                page_height=800.0,
+                home_occupied=True,
+            )
+            is None
+        )
+
+    def test_real_fault_landing_is_rejected(self):
+        """实测故障的落点（页底 y2=51.67 / 页高 793.7）必须被拦下。"""
+        assert (
+            layout_refine.next_page_float_eligible(
+                scale=0.5,
+                landing=(35.75, 16.34, 290.54, 51.67),
+                page_height=793.7,
+                home_occupied=True,
+            )
+            == "landing-not-top"
+        )
+
+    def test_blank_home_is_rejected(self):
+        """原位会成空白就不许搬——宁可缩字，也不留空白。"""
+        assert (
+            layout_refine.next_page_float_eligible(
+                scale=0.5,
+                landing=(20.0, 600.0, 200.0, 700.0),
+                page_height=800.0,
+                home_occupied=False,
+            )
+            == "home-would-be-blank"
+        )
+
+    @pytest.mark.parametrize("scale", [0.76, 0.9, 1.0])
+    def test_mild_shrink_is_rejected(self, scale):
+        """缩字不严重（> 0.75，≈ 缩放阶梯 5.6 步）就不值得搬。"""
+        assert (
+            layout_refine.next_page_float_eligible(
+                scale=scale,
+                landing=(20.0, 600.0, 200.0, 700.0),
+                page_height=800.0,
+                home_occupied=True,
+            )
+            == "shrink-not-severe"
+        )
+
+    @pytest.mark.parametrize("scale", [None, "0.5", True])
+    def test_missing_shrink_evidence_is_rejected(self, scale):
+        """量不到缩放比就没有「严重缩字」的证据，按不搬处理。"""
+        assert (
+            layout_refine.next_page_float_eligible(
+                scale=scale,
+                landing=(20.0, 600.0, 200.0, 700.0),
+                page_height=800.0,
+                home_occupied=True,
+            )
+            == "shrink-unknown"
+        )
+
+
 # --------------------------------------------------------------------------- #
 # 排版工具层的第二遍接线
 # --------------------------------------------------------------------------- #

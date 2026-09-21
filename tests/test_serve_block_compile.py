@@ -397,6 +397,22 @@ def _page_text(store, page_number):
         return pdf[0].get_text()
 
 
+def _page_text_if_composed(store, page_number):
+    """该页已发布过的文本；未合成（如未浮动的落点页）→ ``None``。"""
+    with store.database._lock:
+        row = store.database.connection.execute(
+            "SELECT page_asset FROM pages WHERE document_id='paper' AND page=?",
+            (page_number,),
+        ).fetchone()
+    if row is None:
+        return None
+    from babeldoc_tools.serve.asset_store import AssetStore
+
+    assets = AssetStore(store.store_base, store.database)
+    with pymupdf.open(assets.resolve(row[0])) as pdf:
+        return pdf[0].get_text()
+
+
 def test_float_widen_rerenders_with_wider_box(tmp_path, monkeypatch):
     """同栏无净空、右邻栏空闲：横向扩框重渲染，贴片仍在本页。"""
     from babeldoc.tools.agent import layout_refine
@@ -425,8 +441,13 @@ def test_float_widen_rerenders_with_wider_box(tmp_path, monkeypatch):
     assert "New block one" in _page_text(compiler.store, 1)
 
 
-def test_float_to_next_page_moves_stamp(tmp_path, monkeypatch):
-    """同栏/跨栏都无净空：整框迁到下一页空闲区间，两页都重新合成。"""
+def test_float_to_next_page_keeps_stamp_on_home_by_default(tmp_path, monkeypatch):
+    """回归（`P03-011`）：同栏/跨栏都无净空 + 贴片被缩字，**不**把正文段搬到下一页。
+
+    跨页整框迁移缺省关闭：搬走会在原位留一块空白（界面观感等同于「没渲染出来」），
+    而它要解决的只是「字被缩小了」。这里即使 ``plan_next_page_float`` 给了落点，
+    也要断言贴片留在本页、原位仍有译文、不发 ``compile_float`` 事件。
+    """
     from babeldoc.tools.agent import layout_refine
     from babeldoc_tools.serve import block_compile
 
@@ -442,6 +463,86 @@ def test_float_to_next_page_moves_stamp(tmp_path, monkeypatch):
     )
     moved = (20.0, 300.0, 200.0, 350.0)
     monkeypatch.setattr(layout_refine, "plan_next_page_float", lambda *_a, **_k: moved)
+    monkeypatch.delenv("BDT_NEXT_PAGE_FLOAT", raising=False)
+
+    result = compiler.compile(record())
+
+    # 只渲染一次（没有为落点重渲染），贴片仍在主页。
+    assert len(boxes) == 1
+    assert result["stamp_page"] == 1 and result["previous_stamp_page"] == 1
+    patch = _patch(compiler, page=1)["P1"]
+    assert patch["page"] == 1
+    assert "New block one" in _page_text(compiler.store, 1)
+    # 落点页从未被触碰（没合成过），这是「没搬」的第二个证据。
+    assert _page_text_if_composed(compiler.store, 2) is None
+    with compiler.store.database._lock:
+        floats = compiler.store.database.connection.execute(
+            "SELECT COUNT(*) FROM job_events WHERE type='compile_float'"
+        ).fetchone()[0]
+    assert floats == 0
+
+
+def test_next_page_float_keeps_home_when_home_would_be_blank(tmp_path, monkeypatch):
+    """门禁不变量：开启跨页迁移后，若原位会成空白则仍不搬（宁可缩字）。
+
+    段落版面框互不重叠，本段原位通常只有本段自己的贴片 → ``home_occupied`` 为假。
+    这里把总开关打开、其余三道门禁都满足，只留第 4 道不成立，断言仍然留在原位。
+    """
+    from babeldoc.tools.agent import layout_refine
+    from babeldoc_tools.serve import block_compile
+
+    compiler, _rows = _multi_page_store(tmp_path, monkeypatch, pages=2)
+    boxes: list[list[float]] = []
+    monkeypatch.setattr(block_compile, "render_request", _stamp_render(boxes))
+    monkeypatch.setattr(
+        block_compile.BlockCompiler, "_layout_detector", lambda _self: object()
+    )
+    monkeypatch.setattr(layout_refine, "plan_page_expansion", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        layout_refine, "plan_widen_page_expansion", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        layout_refine,
+        "plan_next_page_float",
+        lambda *_a, **_k: (20.0, 300.0, 200.0, 350.0),
+    )
+    monkeypatch.setenv("BDT_NEXT_PAGE_FLOAT", "1")
+    monkeypatch.setattr(
+        block_compile.BlockCompiler, "_home_stays_occupied", lambda *_a, **_k: False
+    )
+
+    result = compiler.compile(record())
+
+    assert len(boxes) == 1
+    assert result["stamp_page"] == 1
+    assert "New block one" in _page_text(compiler.store, 1)
+
+
+def test_next_page_float_moves_stamp_when_gate_passes(tmp_path, monkeypatch):
+    """总开关打开且四道门禁全过时，跨页迁移的既有机制仍然可用。
+
+    保留这条而不是删掉整个阶梯：foreign patch 账本（落点页合成、迁回主页时擦旧贴片）
+    仍靠它存在，门禁只是把默认路径关掉。
+    """
+    from babeldoc.tools.agent import layout_refine
+    from babeldoc_tools.serve import block_compile
+
+    compiler, _rows = _multi_page_store(tmp_path, monkeypatch, pages=2)
+    boxes: list[list[float]] = []
+    monkeypatch.setattr(block_compile, "render_request", _stamp_render(boxes))
+    monkeypatch.setattr(
+        block_compile.BlockCompiler, "_layout_detector", lambda _self: object()
+    )
+    monkeypatch.setattr(layout_refine, "plan_page_expansion", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        layout_refine, "plan_widen_page_expansion", lambda *_a, **_k: None
+    )
+    moved = (20.0, 300.0, 200.0, 350.0)
+    monkeypatch.setattr(layout_refine, "plan_next_page_float", lambda *_a, **_k: moved)
+    monkeypatch.setenv("BDT_NEXT_PAGE_FLOAT", "1")
+    monkeypatch.setattr(
+        block_compile.BlockCompiler, "_home_stays_occupied", lambda *_a, **_k: True
+    )
 
     result = compiler.compile(record())
 
@@ -505,6 +606,12 @@ def test_float_obstacles_include_settled_sibling_stamps(tmp_path, monkeypatch):
         return landing
 
     monkeypatch.setattr(layout_refine, "plan_next_page_float", plan)
+    # 跨页迁移缺省关闭、且第 4 道门禁（原位不留空白）在正常段落上不成立。这条测的是
+    # 「迁移路径开启时兄弟贴片账本仍互见」，所以显式开门禁。
+    monkeypatch.setenv("BDT_NEXT_PAGE_FLOAT", "1")
+    monkeypatch.setattr(
+        block_compile.BlockCompiler, "_home_stays_occupied", lambda *_a, **_k: True
+    )
 
     compiler.compile(record())
     compiler.compile(record(pid="P2"))
@@ -516,7 +623,11 @@ def test_float_obstacles_include_settled_sibling_stamps(tmp_path, monkeypatch):
 
 
 def test_float_back_home_erases_old_foreign_stamp(tmp_path, monkeypatch):
-    """迁移后再编译回主页：下一页上的旧贴片要被擦掉（上一版落点页重合成）。"""
+    """迁移后再编译回主页：下一页上的旧贴片要被擦掉（上一版落点页重合成）。
+
+    跨页迁移缺省关闭，这里显式开门禁（开关 + 第 4 道）——测的是 foreign patch 账本
+    （`_foreign_patches` / 落点页重合成），它在迁移真的发生时才是活的。
+    """
     from babeldoc.tools.agent import layout_refine
     from babeldoc_tools.serve import block_compile
 
@@ -532,6 +643,10 @@ def test_float_back_home_erases_old_foreign_stamp(tmp_path, monkeypatch):
     )
     moved = (20.0, 300.0, 200.0, 350.0)
     monkeypatch.setattr(layout_refine, "plan_next_page_float", lambda *_a, **_k: moved)
+    monkeypatch.setenv("BDT_NEXT_PAGE_FLOAT", "1")
+    monkeypatch.setattr(
+        block_compile.BlockCompiler, "_home_stays_occupied", lambda *_a, **_k: True
+    )
     compiler.compile(record())
     assert "New block one" in _page_text(compiler.store, 2)
 
