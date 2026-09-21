@@ -88,15 +88,23 @@
 
 ### 单元守卫（改前全部失败）
 
-把两份实现回退到 `6d408b32`（只留测试）→ **24 failed**：
+把两份实现回退到 `6d408b32`（只留测试）→ **28 failed, 93 passed**：
 
 - `tests/test_serve_block_compile.py::test_float_to_next_page_keeps_stamp_on_home_by_default`
   —— 缺省时即使规划给了落点也不搬：只渲染一次、贴片在主页、落点页从未合成、
   **不发 `compile_float` 事件**（这是 `P03-011` 的直接回归守卫）；
 - `::test_next_page_float_keeps_home_when_home_would_be_blank` —— 开启开关后第 4 道单独不成立仍不搬；
+- `::test_home_stays_occupied_detects_neighbour_footprint` —— 第 4 道判据的三类情形
+  （只有本段自己的框/贴片 → 假；别的段落框或别的已定贴片压原位 → 真）；
 - `::test_next_page_float_moves_stamp_when_gate_passes` —— 四道全过时迁移机制仍可用；
+- `::test_float_obstacles_include_settled_sibling_stamps` /
+  `::test_float_back_home_erases_old_foreign_stamp` —— 既有机制改显式开门禁后再断言；
 - `tests/test_layout_refine.py::TestNextPageFloatGate` —— 门禁纯函数 19 例（开关取值、
   0.75 缩字门槛、**实测故障落点必须被拦**、原位空白、缩放比量不到）。
+
+带修复后 `tests/test_serve_block_compile.py` + `test_layout_refine.py` +
+`test_serve_stream_preview.py` **146 passed**；全量 `1456 passed, 1 failed`（唯一失败是
+基线就有的 `test_bdt_console_script_is_installed`，环境性、与本任务无关）。
 
 检测器一律是 stub，不依赖 PP-DocLayoutV3 可用。
 
