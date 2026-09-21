@@ -18,8 +18,7 @@
 |---|---|
 | `GET /health` | 服务根可用性与文档数；`app.py` |
 | `GET /documents`、`POST /documents` | 列表、上传；`routers/documents.py`、`uploads.py` |
-| `GET D`、`D/stage-state`、`D/paragraphs`、`D/geometry`、`D/check` | 元信息、七阶段状态、段落、几何、质量；`views.py` |
-| `DELETE D` | 删除文档（**破坏性**）：workdir 目录树 + 数据库行；`document_busy`(409) / `delete_not_allowed`(400) |
+| `GET D`、`D/stage-state`、`D/paragraphs`、`D/geometry`、`D/check` | 元信息、七阶段状态、段落、几何、质量；`views.py` || `DELETE D` | 删除文档（**破坏性**）：workdir 目录树 + 数据库行；`document_busy`(409) / `delete_not_allowed`(400) |
 | `GET D/events`、`D/events/stream` | 诊断分页与两种 SSE；`routers/events.py` |
 | `POST D/jobs`、`GET D/jobs` | 全量任务提交/列表；`routers/jobs.py`、`runner.py` |
 | `GET /jobs/{jid}`、`POST /jobs/{jid}/cancel` | 任务状态与取消；任务详情不在文档路径下面 |
@@ -83,6 +82,8 @@
 
 局部编译（单段与批量）在贴片被缩字/溢出时自动"浮动"：用 PP-DocLayoutV3 对编译后的译文页重识别版面，按 同栏向下/向上扩 → 跨栏横向扩 → 跨页整框迁移 的顺序找净空并重渲染；成功发 `compile_float` 事件（`kind=expand/widen-right/widen-left/next-page`，含落点页与框），失败保留原贴片。批量编译每块完成发 `block_compiled` 事件。fit 判定对水平方向放宽到 2.5pt 容差（垂直仍 0.5pt），轻微超宽不再触发缩字号。
 
+全量 `compile` job 成功后，如果本次编译顺带产出了译文侧版面识别产物（见[管线参考](pipeline.md#译文侧版面识别build-之后的附加产物)），会发一条持久事件 `target_layout`，data 为 `{layout_status, reason, provider, page_count, pdf}`（`layout_status` 是清单的 `status`，字段名避开事件自身的 `status`）。没识别成功（`skipped` / `failed` / 未开启）不发这条事件，也不发布产物 —— 不能报一个没发生的识别；要区分「没发过事件」与「识别失败」，读 `agent/target_recognition.json` 或 `geometry?kind=target` 的 `recognition`。
+
 全量 compile 的 `scope=pages` 仍回退全量并记录原因。局部编译和导出不是它的同义参数。
 
 `GET D/exports/latest` 默认要求最近记录成功且匹配当前草稿 revision，否则报 `export_not_ready`；可通过 `allow_previous=true` 明确请求旧记录对应文件。当前实现查询最近一条记录，不能承诺遍历所有失败记录寻找任意历史成功版。
@@ -113,5 +114,32 @@
 `labels:[{label,count}]` 汇总整份几何产物，`page` 只过滤几何，不过滤此清单。parse 优先统计 provider 框，`paragraph_labels` 单独统计旧段落快照；layout 统计排版段落。provider IR 缺失/损坏时 `recognition_entities=null`，回退旧快照；合法空 IR 返回 `[]`。仅有 IR、未开 debug 也能显示识别框。IR 和快照都不可用才返回 `snapshot_unavailable`。
 
 工作台的类别区只列 label 复选框，选中显示、取消隐藏，选择按文档保存在浏览器并跨页保留。原文模式与对照模式的原文侧显示原始 block/span；译文侧继续使用段落/排版几何，避免把原文 span 坐标当成译文位置。可见 block 已包住的 text span 不重复描边；隐藏父框后，仍选中的 text span 可独立显示。公式等非 text span 始终独立显示。框采用类别固定颜色、圆角描边与浅色填充，未知 label 使用稳定散列颜色。旧 workdir 没有 provider IR 时无法凭空补出行内公式框。
+
+### 译文侧识别框（`kind=target`）
+
+`GET D/geometry?kind=target` 返回**对编译后的译文 PDF 重新识别**得到的框，数据源是 `agent/target/provider/provider_ir.json`（见[管线参考](pipeline.md#译文侧版面识别build-之后的附加产物)），`coord_system` 固定为 `pdf_topleft`（MinerU 原生坐标，服务端**不做换算**，换算点在前端 `BboxLayer.pdfToScreen`）。译文侧没有段落身份可比对，所以 `entities` / `relations` 恒为空，只用 `recognition_entities`；`run_id` 为 null。
+
+三种状态分得很清，不和稀泥：
+
+| 服务端状态 | 响应 | 前端表现 |
+|---|---|---|
+| 连 `agent/target_recognition.json` 都没有 | 404 `target_layout_unavailable` | 提示「译文版面尚未识别（还没有编译产出译文侧识别产物）」 |
+| 清单在，`status` 是 `skipped` / `failed` | 200，`recognition_entities` 为 **`null`**（不是 `[]`），`recognition` 带 `status` 与 `reason` | 提示「译文版面尚未识别（<status>）：<reason>」 |
+| 清单在，识别成功 | 200，`recognition_entities` 是该页识别框（可能为 `[]` = 这页真没框） | 正常叠加；`null` 与 `[]` 的区别就是“没识别”与“识别了但这页没框” |
+
+`recognition` 是识别清单原样透传（`status` / `reason` / `provider` / `page_count` / `pdf` / `pdf_sha256`）。**产物缺失时绝不回退到源侧 IR 或 `layout_geometry.json`** —— 那正是「译文框显示源文框」的成因。
+
+### 预览 bbox 图层四档
+
+工具条上的 bbox 图层有四档，数据源与是否可编辑各不相同，不要当成同一种东西的皮肤：
+
+| 档位 | `kind` | 坐标系 | 数据源 | 可拖拽编辑 |
+|---|---|---|---|---|
+| 原文框 | `parse` | `pdf_topleft` | `agent/source/provider/provider_ir.json` | 否（可点选中段落） |
+| 译文框 | `target` | `pdf_topleft` | `agent/target/provider/provider_ir.json`（编译后重新识别） | 否 |
+| 排版框 | `layout` | `pdf_native` | `agent/layout_geometry.json` | **是**（写回草稿 `layout.box`） |
+| 关 | — | — | 不发 geometry 请求 | 否 |
+
+只有「排版框」可编辑：它的框与草稿 `layout.box` 一一对应，拖拽写回的就是那套坐标。把译文侧识别框接到拖拽上会让“拖的框”和“看到的框”按两套坐标语义解释，所以译文框是只读的（前端拖拽层准入条件 `layerMode === 'layout'`）。
 
 当前仓库 `provider_ir.py` 声明 **27 个已知 block 类型、6 个已知 span 类型，去重后 28 个 label**。其中 span 包含 `text / inline_equation / interline_equation / image / table / chart`。这不是 MinerU 所有版本和后端的固定上限；例如新返回的未知 label 仍会进入清单，实际数量以本次响应的 `labels` 为准。
