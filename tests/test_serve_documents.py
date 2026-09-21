@@ -697,6 +697,217 @@ def test_geometry_layout_without_product_is_404(client, workdir):
     assert response.json()["error"]["code"] == "geometry_unavailable"
 
 
+# --------------------------------------------------------------------------- #
+# 几何：kind=target（译文侧重新识别）
+# --------------------------------------------------------------------------- #
+#: 译文侧识别清单（与 ``babeldoc_tools.target_layout`` 写的形状一致）。
+_TARGET_MANIFEST = {
+    "status": "ok",
+    "reason": None,
+    "pdf": "output/paper.no_watermark.zh.mono.pdf",
+    "pdf_sha256": "b" * 64,
+    "provider": "mineru",
+    "page_count": 2,
+    "provider_ir": "target/provider/provider_ir.json",
+    "created_at": "2026-09-21T12:00:00+00:00",
+}
+
+
+@pytest.fixture
+def target_layout_artifacts(workdir):
+    """译文侧识别的两个产物：清单 + ``target/provider/provider_ir.json``。
+
+    IR 故意用与源侧 fixture **不同**的坐标，这样「译文框拿到的是译文侧数据而不是
+    原文几何」是可断言的，而不是只能靠读代码相信。
+    """
+    agent = workdir / "agent"
+    _write_json(agent / "target_recognition.json", _TARGET_MANIFEST)
+    _write_json(
+        agent / "target" / "provider" / "provider_ir.json",
+        {
+            "page_count": 2,
+            "pages": [
+                {
+                    "page_index": 0,
+                    "blocks": [
+                        {
+                            "block_id": "p0-b0",
+                            "type": "title",
+                            "bbox": [70.5, 90.25, 500.75, 130.0],
+                            "lines": [],
+                        },
+                        {
+                            "block_id": "p0-b1",
+                            "type": "text",
+                            "bbox": [70.5, 140.25, 500.75, 210.5],
+                            "lines": [],
+                        },
+                    ],
+                },
+                {
+                    "page_index": 1,
+                    "blocks": [
+                        {
+                            "block_id": "p1-b0",
+                            "type": "text",
+                            "bbox": [70.5, 95.5, 500.75, 180.0],
+                            "lines": [],
+                        }
+                    ],
+                },
+            ],
+        },
+    )
+    return agent
+
+
+@pytest.mark.usefixtures("target_layout_artifacts")
+def test_geometry_target_marks_coord_system_and_returns_recognition(client):
+    body = client.get(GEOMETRY, params={"kind": "target"}).json()
+    assert body["kind"] == "target"
+    # 坐标契约：MinerU 原生左上原点 y 向下，服务端只标注不换算
+    assert body["coord_system"] == "pdf_topleft"
+    assert body["recognition"] == _TARGET_MANIFEST
+    assert [row["id"] for row in body["recognition_entities"]] == [
+        "provider:block:p0-b0",
+        "provider:block:p0-b1",
+        "provider:block:p1-b0",
+    ]
+    assert body["recognition_entities"][0]["box"] == {
+        "x0": 70.5,
+        "y0": 90.25,
+        "x1": 500.75,
+        "y1": 130.0,
+    }
+    assert {row["label"]: row["count"] for row in body["labels"]} == {
+        "text": 2,
+        "title": 1,
+    }
+    # 译文侧没有段落身份可比对：entities/relations 不得被原文快照填上
+    assert body["entities"] == []
+    assert body["relations"] == []
+    assert body["run_id"] is None
+
+
+@pytest.mark.usefixtures("target_layout_artifacts")
+def test_geometry_target_page_filter(client):
+    body = client.get(GEOMETRY, params={"kind": "target", "page": 2}).json()
+    assert body["page"] == 2
+    assert [row["id"] for row in body["recognition_entities"]] == [
+        "provider:block:p1-b0"
+    ]
+    # labels 是全文清单，不受 page 过滤影响
+    assert {row["label"] for row in body["labels"]} == {"text", "title"}
+
+
+@pytest.mark.usefixtures("target_layout_artifacts", "recognition_ir")
+def test_geometry_target_does_not_leak_source_geometry(client):
+    """译文框的框必须来自译文侧识别，不能用源侧识别框或 layout 几何充数。
+
+    两个 fixture 的 block id 故意同形（真实产物都是从 ``p{page}-b{n}`` 编的，id 相同
+    不能证明数据同源），所以断言落在**框坐标**上：译文侧 fixture 的坐标与源侧、与
+    layout 几何都不同。
+    """
+    target = client.get(GEOMETRY, params={"kind": "target"}).json()
+    parse = client.get(GEOMETRY, params={"kind": "parse"}).json()
+    layout = client.get(GEOMETRY, params={"kind": "layout"}).json()
+    target_boxes = {tuple(sorted(row["box"].items())) for row in target["recognition_entities"]}
+    parse_boxes = {tuple(sorted(row["box"].items())) for row in parse["recognition_entities"]}
+    assert target_boxes and parse_boxes
+    assert target_boxes.isdisjoint(parse_boxes)
+    # layout 走 paragraphs、target 走 recognition_entities：字段不互相流用
+    assert layout["paragraphs"] and target["paragraphs"] == []
+    assert target["recognition_entities"] and layout["recognition_entities"] is None
+    # layout 的段落框（pdf_native）与译文侧识别框（pdf_topleft）不是同一个几何
+    assert [row["layout_box"] for row in layout["paragraphs"]] != [
+        sorted(row["box"].values(), key=lambda value: list(row["box"].values()).index(value))
+        for row in target["recognition_entities"]
+    ]
+
+
+@pytest.mark.usefixtures("workdir")
+def test_geometry_target_without_manifest_is_404(client):
+    """连清单都没有（从未编译或旧 workdir）→ 404，不拿源侧产物冒充。"""
+    response = client.get(GEOMETRY, params={"kind": "target"})
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "target_layout_unavailable"
+
+
+def test_geometry_target_skipped_reports_reason_without_bboxes(client, workdir):
+    """清单在但没识别成（无 token / 显式关闭）→ 200 + recognition 带原因 + 框为 null。
+
+    ``null``（不是空数组）是故意区分「没识别」与「识别了但这页没框」。
+    """
+    _write_json(
+        workdir / "agent" / "target_recognition.json",
+        {
+            "status": "skipped",
+            "reason": "环境变量 MINERU_API_TOKEN 缺失，无法调用 MinerU 识别译文版面",
+            "pdf": "output/paper.no_watermark.zh.mono.pdf",
+            "pdf_sha256": "c" * 64,
+            "provider": "mineru",
+            "page_count": 2,
+            "provider_ir": None,
+            "created_at": "2026-09-21T12:00:00+00:00",
+        },
+    )
+    body = client.get(GEOMETRY, params={"kind": "target"}).json()
+    assert body["recognition_entities"] is None
+    assert body["recognition"]["status"] == "skipped"
+    assert "MINERU_API_TOKEN" in body["recognition"]["reason"]
+    assert body["labels"] is None
+
+
+def test_geometry_target_failed_recognition_reports_reason(client, workdir):
+    _write_json(
+        workdir / "agent" / "target_recognition.json",
+        {
+            "status": "failed",
+            "reason": "httpx.ConnectTimeout: 连接超时",
+            "pdf": "output/paper.no_watermark.zh.mono.pdf",
+            "pdf_sha256": "d" * 64,
+            "provider": "mineru",
+            "page_count": 2,
+            "provider_ir": None,
+            "created_at": "2026-09-21T12:00:00+00:00",
+        },
+    )
+    body = client.get(GEOMETRY, params={"kind": "target"}).json()
+    assert body["recognition_entities"] is None
+    assert body["recognition"]["status"] == "failed"
+    assert "ConnectTimeout" in body["recognition"]["reason"]
+
+
+def test_geometry_target_corrupt_ir_degrades_without_error(client, workdir):
+    """清单 ok 但 IR 损坏 → 不 500、不谎报成空数组：框为 null 且状态仍可见。"""
+    _write_json(workdir / "agent" / "target_recognition.json", _TARGET_MANIFEST)
+    path = workdir / "agent" / "target" / "provider" / "provider_ir.json"
+    path.parent.mkdir(parents=True)
+    path.write_text("{{{ not json", encoding="utf-8")
+    response = client.get(GEOMETRY, params={"kind": "target"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recognition_entities"] is None
+    assert body["recognition"]["status"] == "ok"
+
+
+@pytest.mark.usefixtures("target_layout_artifacts", "recognition_ir")
+def test_geometry_target_requires_no_parse_snapshot(client, workdir):
+    """译文侧端点不依赖 parse 快照/源侧 IR：删光它们仍然可用。"""
+    (workdir / "debug/runs" / RUN_ID / "snapshots/parse/paragraphs.json").unlink()
+    (workdir / "agent/source/mineru/provider_ir.json").unlink()
+    body = client.get(GEOMETRY, params={"kind": "target"}).json()
+    assert len(body["recognition_entities"]) == 3
+    assert client.get(GEOMETRY, params={"kind": "parse"}).status_code == 404
+
+
+def test_geometry_rejects_unknown_kind(client):
+    """kind 是受约束的枚举（服务端不猜客户端意图）。"""
+    response = client.get(GEOMETRY, params={"kind": "targets"})
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+
+
 def test_geometry_requires_kind(client):
     response = client.get(GEOMETRY)
     assert response.status_code == 422

@@ -345,12 +345,14 @@ class GeometryResponse(BaseModel):
     """``GET /api/v1/documents/{did}/geometry``：bbox 数据。
 
     ``kind=parse`` 用 ``run_id``/``entities``/``relations``（快照，``pdf_topleft``）；
-    ``kind=layout`` 用 ``pages``/``paragraphs``/``page_info``（几何产物，``pdf_native``）。
-    两类的 box 坐标系不同且**不做转换**，前端按 ``coord_system`` 自行换算。
+    ``kind=layout`` 用 ``pages``/``paragraphs``/``page_info``（几何产物，``pdf_native``）；
+    ``kind=target`` 用 ``recognition_entities``/``recognition``（**译文侧**重新识别的
+    provider IR，``pdf_topleft``）。三类的 box 坐标系不同且**不做转换**，前端按
+    ``coord_system`` 自行换算。
     """
 
     did: str
-    kind: Literal["parse", "layout"]
+    kind: Literal["parse", "layout", "target"]
     coord_system: Literal["pdf_topleft", "pdf_native"]
     #: 请求里的页码过滤（1 基）；没过滤 → null。
     page: int | None = None
@@ -358,7 +360,8 @@ class GeometryResponse(BaseModel):
     run_id: str | None = None
     #: kind=parse：段落实体（``{id, kind, label, page, box:{x0,y0,x1,y1}, attrs}``）。
     entities: list[dict[str, Any]] = []
-    #: 当前 provider IR 的原始 block/span 框；缺失为 null，旧客户端仍可读 entities。
+    #: provider IR 的原始 block/span 框；缺失为 null，旧客户端仍可读 entities。
+    #: ``kind=target`` 时只从这里出框。
     recognition_entities: list[dict[str, Any]] | None = None
     #: 整份文档的实际 label 清单，不受 page 过滤影响。
     labels: list[GeometryLabel] | None = None
@@ -372,6 +375,9 @@ class GeometryResponse(BaseModel):
     paragraphs: list[dict[str, Any]] = []
     #: kind=layout：每页 cropbox / layout_regions，供前端做坐标换算。
     page_info: list[dict[str, Any]] = []
+    #: kind=target：译文侧识别清单（``agent/target_recognition.json`` 原样透传：
+    #: ``status``/``reason``/``provider``/``page_count``/``pdf``/``pdf_sha256``）。
+    recognition: dict[str, Any] | None = None
 
 
 class CheckAvailability(BaseModel):

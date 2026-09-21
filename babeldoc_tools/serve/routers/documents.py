@@ -205,28 +205,40 @@ def documents_router(
     @router.get(
         "/documents/{did}/geometry",
         response_model=GeometryResponse,
-        summary="bbox 几何（parse 快照 / layout 几何）",
+        summary="bbox 几何（parse 快照 / layout 几何 / target 译文识别）",
         description=(
             "kind=parse 返回当前 provider IR 的 recognition_entities（原始 block/span 框），"
             "并保留最新 run 的 entities/relations（兼容段落快照）；box 是 pdf_topleft（y 向下）。"
             "labels 是全文 label 清单，不受 page 过滤影响。"
             "kind=layout 读 layout_geometry.json，box 是 pdf_native（y 向上）并附 "
-            "page_info 的 cropbox。两套坐标系统**不做转换**，由前端按 coord_system 换算。"
-            "parse 的 IR 与快照均缺失或 layout 产物缺失时返回 404（snapshot_unavailable / geometry_unavailable），"
-            "不用空数组冒充成功。"
+            "page_info 的 cropbox。"
+            "kind=target 读**译文侧**重新识别的 provider IR（agent/target/provider/provider_ir.json，"
+            "编译后对译文 mono PDF 跑一次 MinerU 的产物），box 是 pdf_topleft，"
+            "recognition 透传 agent/target_recognition.json（status/reason/provider/page_count）。"
+            "三套坐标系统**不做转换**，由前端按 coord_system 换算。"
+            "parse 的 IR 与快照均缺失、layout 产物缺失、或译文侧识别产物尚未生成时返回 404"
+            "（snapshot_unavailable / geometry_unavailable / target_layout_unavailable），"
+            "不用空数组冒充成功，也不用原文 layout 冒充译文版面。"
         ),
     )
     def get_geometry(
         did: Annotated[str, PathParam(description=DOCUMENT_ID)],
         kind: Annotated[
-            Literal["parse", "layout"],
-            Query(description="parse = 识别/原文 bbox；layout = 译文排版 bbox"),
+            Literal["parse", "layout", "target"],
+            Query(
+                description=(
+                    "parse = 源侧识别 bbox；layout = 译文套版几何 bbox（可拖拽编辑的草稿语义）；"
+                    "target = 编译后对译文 PDF 重新识别的 bbox（只读）"
+                )
+            ),
         ],
         page: Annotated[int | None, Query(ge=1, description=PAGE_QUERY)] = None,
     ) -> GeometryResponse:
         workdir_reader = reader(did)
         if kind == "parse":
             return views.geometry_parse(workdir_reader, did, page)
+        if kind == "target":
+            return views.geometry_target(workdir_reader, did, page)
         return views.geometry_layout(workdir_reader, did, page)
 
     @router.get(
