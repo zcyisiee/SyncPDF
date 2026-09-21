@@ -102,9 +102,9 @@ job 子进程由 serve 以 `sys.executable -m babeldoc_tools` 起，serve 会把
 | 续跑检查阶段依赖与记录哈希；过期输入不能静默复用 | `run.py::STAGE_INPUTS`、`tests/test_run_pipeline.py` |
 | 编译成功、预览可用、质量通过是不同状态；失败不得把旧产物标成当前 revision | `compile.py`、`block_compile.py`、`tests/test_serve_compile.py`、`test_serve_local_export.py` |
 | LaTeX 编译后精修框只替换贴片矩形；擦除范围与源行几何量测（含首行 ascent，向上扩因此才有效）仍按原框 | `latex_bbox/overlay.py`（`latex_bbox_box_overrides`）、`layout_refine.py`、`tests/test_latex_bbox.py` |
-| 编译提速只许省进程，不许改选档：批阶梯与逐档顺序编译必须选出同一字号行距，快路不成立时退回顺序 | `latex_bbox/renderer.py`（`build_ladder_tex`/`_try_ladder_batch`）、`tests/test_latex_bbox.py` |
+| 编译提速只许省进程，不许改选档：批阶梯与逐档顺序编译必须选出同一字号行距，快路不成立时退回顺序；诊断采集仍按档记候选（父链、逐档 fit 原因、页号/行号区间），不因批编译少记 | `latex_bbox/renderer.py`（`build_ladder_tex`/`_try_ladder_batch`）、`tests/test_latex_bbox.py`、`tests/test_debug_build_capture.py` |
 | 并发浮动共享同一份落点账本；同页两个块不得各自占用同一块净空 | `block_compile.py`（`FloatReservations`）、`tests/test_serve_block_compile.py` |
-| 同页块渲染并行、页状态提交串行：同页并发提交不得丢 patch，外来贴片落到已发布页必须重合成 | `stream_preview.py`（`PageLocks`）、`block_compile.py`（`compile_block_patch(page_lock=)`）、`tests/test_serve_stream_preview.py` |
+| 同页块渲染并行、页状态提交串行：同页并发提交不得丢 patch，外来贴片落到已发布页必须重合成；共享库连接在 worker 起来前建好、懒建线程安全 | `stream_preview.py`（`PageLocks`）、`block_compile.py`（`compile_block_patch(page_lock=)`）、`store.py`（`DocumentStore.database`）、`tests/test_serve_stream_preview.py`、`tests/test_serve_block_compile.py` |
 | HTTP 文件访问经文档范围解析、产物白名单或资产归属校验 | `store.py`、`artifacts.py`、`routers/artifacts.py`、`tests/test_serve_artifacts.py` |
 | 测试证据写入仓库 `tmp/`，不得纳入版本控制 | `.gitignore`、`AGENTS.md` |
 
