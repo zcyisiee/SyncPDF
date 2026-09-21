@@ -170,7 +170,11 @@ export function InspectorPanel({
           </div>
         ) : null}
         {tab === 'events' ? (
-          <div role="tabpanel" aria-label="事件流" className="min-h-0 flex-1">
+          /* `EventStreamPanel` 根节点用 `flex-1` 撑高：容器必须是 flex 列，否则
+             块级容器里 `flex-1` 失效，时间线按内容高度无限长大（实测 35171px），
+             内层 `overflow-auto` 的 clientHeight == scrollHeight → 两栏都滚不动，
+             超出 818px 的部分被 `inspector` 的 `overflow-hidden` 直接裁掉。 */
+          <div role="tabpanel" aria-label="事件流" className="flex min-h-0 flex-1 flex-col">
             <EventStreamPanel did={did} feed={feed} compileEvents={compileEvents} />
           </div>
         ) : null}
