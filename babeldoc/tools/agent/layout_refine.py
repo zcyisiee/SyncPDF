@@ -23,12 +23,12 @@
   压在 239pt 宽的段落上只有 18% 横向重叠，按框宽算会被当成另一栏，向上扩就直接
   跨过标题（区域检测本身也可能漏检，所以再加上精确墨迹托底）。
 - 检测器不可用（模型/依赖缺失）时返回空结果，调用方保持原行为。
-- **横向扩框与跨页整框迁移目前只是纯几何规划**（``plan_widen_expansion`` /
-  ``plan_next_page_float``）：同栏上下都没有净空时，前者把框向左/右延伸进相邻
-  空闲带，后者在下一页同 x 范围自上而下找第一个能容纳所需高度的空闲区间（顶
-  对齐）。横向扩的障碍按「任何纵向交叠」判定，不能用 ``X_OVERLAP_RATIO`` 那套
-  同栏比例——邻栏文字只要与框纵向轻微交叠，横向扩过去就是物理碰撞。两者尚未
-  接入编译编排（block_compile/渲染集成是后续任务）。
+- **横向扩框与跨页整框迁移都可被编译编排调用**：``plan_widen_page_expansion`` 是
+  ``serve`` 浮动阶梯的第二级；``plan_next_page_float`` 是第三级，但受
+  ``next_page_float_eligible`` 的四道资格门禁约束（见该函数）——**把正文段整块
+  搬到下一页默认不生效**。横向扩的障碍按「任何纵向交叠」判定，不能用
+  ``X_OVERLAP_RATIO`` 那套同栏比例——邻栏文字只要与框纵向轻微交叠，横向扩过去
+  就是物理碰撞。
 """
 
 from __future__ import annotations
@@ -72,12 +72,37 @@ DIRECTION_RIGHT = "right"
 DIRECTION_LEFT = "left"
 
 
+#: 跨页整框迁移的缩字门槛：``stamp.scale`` 高于它就不迁移。缩放阶梯每步 ×0.95
+#: （``renderer._SHRINK_FACTOR``，≤12 步），0.75 ≈ 5.6 步——字号被压到源字号的 3/4
+#: 以下才认为「原位确实放不下、缩放已经影响可读性」，值得考虑搬走。
+NEXT_PAGE_FLOAT_MAX_SCALE = 0.75
+#: 跨页落点必须落在**页面上半部**（IL 坐标，取落点上边 y2 / 页高 ≥ 该比例）才算正常
+#: 阅读位置。实测故障：落点 y2 = 51.67pt / 页高 793.7pt（页底 6.5%），把段落丢到
+#: 版心之外的角落，比留在原位缩字更糟。
+NEXT_PAGE_FLOAT_TOP_BAND_RATIO = 0.5
+
+
 def refine_enabled() -> bool:
     """扩框总开关：``BDT_LATEX_REFINE=0/false/no/off`` 关闭（测试与排查用）。"""
     raw = os.environ.get("BDT_LATEX_REFINE")
     if raw is None:
         return True
     return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
+def next_page_float_enabled() -> bool:
+    """跨页整框迁移总开关：``BDT_NEXT_PAGE_FLOAT=1/true/yes/on`` 打开；**缺省关闭**。
+
+    同页的两级（同栏下/上扩、跨栏横向扩）已能处理「旁边还有净空」的绝大多数情形；
+    把**正文段整块**搬到下一页是另一种代价：原位被掏空成一块空白（界面上就是「这段
+    没渲染出来」），阅读顺序也断在下一页页底，而它要解决的问题只是「字被缩小了」。
+    实测故障见 ``docs/reports/2026-09-21-next-page-float-blank-home.md``；真要用它
+    先看 :func:`next_page_float_eligible` 的四道资格门禁。
+    """
+    raw = os.environ.get("BDT_NEXT_PAGE_FLOAT")
+    if raw is None:
+        return False
+    return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
 @dataclass(frozen=True)
@@ -576,6 +601,39 @@ def plan_next_page_float(
     return plan_next_page_float_core(
         box, obstacles, page_height=height, required_height=required_height
     )
+
+
+def next_page_float_eligible(
+    *, scale, landing, page_height, home_occupied
+) -> str | None:
+    """跨页整框迁移的资格门禁 → 不合格原因 / None（合格）。
+
+    把**正文段整块**搬到下一页的代价远大于收益：原位会被掏空一块空白（版面上就是
+    「这段渲染丢了」，用户观感等同于渲染失败），阅读顺序也被打断（正文跑到下一页
+    页底）；而它要解决的问题只是「字被缩小了」。所以四道条件必须**同时**满足，任一
+    不满足就保持原位——宁可缩字，也不留空白：
+
+    1. 同页确实一点净空都没有：由调用方保证（只有阶梯前两级都失败才会走到这里）；
+    2. 缩字严重：``scale <= NEXT_PAGE_FLOAT_MAX_SCALE``（依据见常量注释）；
+    3. 落点在页面上半部（``landing`` 是 IL 坐标，取它的上边 y2）；
+    4. 原位不留空白：``home_occupied``。
+
+    第 4 条是这一级在正常文档里**几乎恒不成立**的原因：段落版面框互不重叠（重叠在
+    ``compile_block_patch`` 开编前就被拦下），本段原位只可能有本段自己的贴片，搬走
+    后就是空白——要它成立得是「别的贴片恰好压在本段原位上」这种版面异常。所以跨页
+    迁移缺省还叠了一道总开关 :func:`next_page_float_enabled`。判据由调用方给（它
+    看得见 ``FloatReservations`` 登记簿）。
+    """
+    if not isinstance(scale, (int, float)) or isinstance(scale, bool):
+        # 量不到缩放比就没有「严重缩字」的证据，按不搬处理。
+        return "shrink-unknown"
+    if float(scale) > NEXT_PAGE_FLOAT_MAX_SCALE:
+        return "shrink-not-severe"
+    if float(landing[3]) < float(page_height) * NEXT_PAGE_FLOAT_TOP_BAND_RATIO:
+        return "landing-not-top"
+    if not home_occupied:
+        return "home-would-be-blank"
+    return None
 
 
 def plan_widen_page_expansion(
