@@ -72,7 +72,7 @@ bdt run → parse → translate → apply → build → check → review → rep
 
 `GET /paragraphs` 每段带解析状态派生的 `style` 摘要（字号/衬线/加粗/斜体/字体名）；草稿 `layout` 新增 `bold/italic/serif` 布尔覆盖与中文字体族 `font_family`（值是 `GET /fonts` 的 id），并在局部编译注入 LaTeX（`font_scale`/`line_skip` 同路径生效）。前端段落面板提供字体族与字号下拉、三态样式下拉，多选时提供批量编译面板。
 
-工作台界面是三栏骨架：左栏 `PaperNav`（论文卡列表、搜索、上传、底部词表/设置入口）在所有路由常驻；中栏按路由渲染，工作台里只有预览区（工具条最左是文档名与阶段徽标，其次是翻页组与缩放组）；右栏 `InspectorPanel` 是段落 / 事件流 / 归档三个 tab，底部常驻操作区（任务控制 + 编译全文）。没有顶栏、图标栏或底部时间线：阶段状态在事件流 tab 的阶段条里，历史版本在归档 tab。
+工作台界面是三栏骨架：左栏 `PaperNav`（论文卡列表、搜索、上传、列底操作区、底部词表/设置入口）在所有路由常驻；中栏按路由渲染，工作台里只有预览区（工具条最左是文档名与阶段徽标，其次是翻页组与缩放组）；右栏 `InspectorPanel` 是段落 / 事件流 / 归档三个 tab。文档操作区（任务控制 + 编译全文）挂在左栏列底（`PaperNav` → `DocumentActionBar` 的 `data-od-id="action-bar"`，只在工作台路由且 `activeDid !== null` 时挂载），因为左栏是唯一在所有路由都常驻的栏。没有顶栏、图标栏或底部时间线：阶段状态在事件流 tab 的阶段条里，历史版本在归档 tab。
 
 原文识别叠加层经 `serve/recognition.py` 读取已持久化的 provider IR，展示原始 block/span 框（含行内公式）和全文实际 label 清单；旧 parse 段落快照仍供兼容与段落选择使用。span 是只读预览实体，不参与草稿/编译身份，也不叠加到译文页。接口字段与回退语义见 [HTTP 参考](docs/reference/http-api.md#识别框与-label-筛选)。
 

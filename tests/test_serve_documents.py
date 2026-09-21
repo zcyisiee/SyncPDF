@@ -348,13 +348,20 @@ def test_documents_list_shape(client):
     assert set(item) == {
         "did",
         "title",
+        "authors",
+        "first_author",
         "pages",
         "paragraph_count",
         "translated_count",
         "stage_summary",
         "updated_at",
     }
+    # 标题/一作来自 ``papers`` 表（源 PDF metadata → provider IR）；本 fixture 的
+    # ``source.pdf`` 是个只有 ``%PDF-1.4`` 头的最小文件，两列都是 NULL → 标题回退
+    # 文件名、作者字段保持 None（不是空串，也不拿文件名冒充作者）。
     assert item["title"] == "paper-final"  # run_state.pdf 的文件名（去扩展名）
+    assert item["authors"] is None
+    assert item["first_author"] is None
     assert item["pages"] == 2
     assert item["paragraph_count"] == 3
     assert item["translated_count"] == 2
@@ -370,6 +377,8 @@ def test_documents_list_reports_missing_products_as_null(client):
     bare = body[0]
     assert bare["did"] == BARE
     assert bare["title"] is None
+    assert bare["authors"] is None
+    assert bare["first_author"] is None
     assert bare["pages"] is None
     assert bare["paragraph_count"] is None
     assert bare["translated_count"] is None
@@ -778,6 +787,52 @@ def test_workdir_mode_only_serves_that_document(root: Path):
     with TestClient(create_app(DocumentStore.for_workdir(root / DID))) as test_client:
         assert [item["did"] for item in test_client.get(DOCUMENTS).json()] == [DID]
         assert test_client.get(f"{DOCUMENTS}/{BARE}").status_code == 404
+
+
+def test_read_endpoints_do_not_create_app_db(root: Path):
+    """读端点不建 ``app.db``（``--workdir`` 模式不能往被伺服的目录里写东西）。
+
+    ``title``/``authors`` 的回填要读 ``papers`` 表，但库不存在时只能退成纯产物抽取：
+    只要碰到一次数据库就会在 ``store_base`` 下建库，而 ``--workdir`` 的 ``store_base``
+    就是那个（可能很旧的）只读 workdir。
+    """
+    served = root / DID
+    with TestClient(create_app(DocumentStore.for_workdir(served))) as test_client:
+        assert test_client.get(DOCUMENTS).status_code == 200
+        assert test_client.get(DETAIL).status_code == 200
+        assert test_client.get(PARAGRAPHS).status_code == 200
+    assert not (served / "app.db").exists()
+    assert not (root / "app.db").exists()
+
+
+def test_documents_list_reports_real_title_from_pdf_metadata(root: Path):
+    """有库时：列表标题取 ``papers.title``（源 PDF metadata），不再是文件名。"""
+    served = root / DID
+    import pymupdf
+
+    document = pymupdf.open()
+    document.new_page()
+    document.set_metadata({"title": "Real Paper Title", "author": "Real Author; Second"})
+    document.save(served / "source.pdf")
+    document.close()
+
+    with TestClient(create_app(DocumentStore.for_root(root))) as test_client:
+        # 第一次读：从源 PDF metadata 抽取并只填空地回填
+        item = next(
+            row for row in test_client.get(DOCUMENTS).json() if row["did"] == DID
+        )
+        assert item["title"] == "Real Paper Title"
+        assert item["authors"] == "Real Author; Second"
+        assert item["first_author"] == "Real Author"
+        # 第二次读：库里的值已经就位（结果幂等）
+        again = next(
+            row for row in test_client.get(DOCUMENTS).json() if row["did"] == DID
+        )
+        assert again["title"] == "Real Paper Title"
+        # 详情端点带同样的字段
+        detail = test_client.get(DETAIL).json()
+        assert detail["title"] == "Real Paper Title"
+        assert detail["first_author"] == "Real Author"
 
 
 @pytest.fixture

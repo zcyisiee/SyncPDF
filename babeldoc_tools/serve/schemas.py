@@ -165,8 +165,14 @@ class DocumentListItem(BaseModel):
     """
 
     did: str
-    #: 源 PDF 文件名（不含扩展名）。产物里没有真正的标题字段，拿不到就 ``None``。
+    #: 论文真实标题：``papers.title``（源 PDF metadata → provider IR 首页 title 块）；
+    #: 抽不到时**退回源 PDF 文件名**（不含扩展名），仍取不到才是 ``None``。
     title: str | None = None
+    #: 作者整串（``papers.authors``，原样保留并已去掉 ``<sup>`` 单位上标）；没有 → ``null``。
+    authors: str | None = None
+    #: 一作姓名（:func:`babeldoc_tools.serve.paper_meta.first_author_of` 取作者整串首项）；
+    #: 缺作者行 → ``null``（前端不渲染这一行，不显示 ``null``）。
+    first_author: str | None = None
     #: 页数（``layout_geometry.pages``，缺则快照最大页码）。
     pages: int | None = None
     #: 段落数（``layout_geometry.paragraphs`` 条数，缺则快照实体数）。

@@ -2,9 +2,11 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { QueryClientProvider } from '@tanstack/react-query';
 import { createQueryClient } from '../src/app/App';
 import { queryKeys } from '../src/lib/queries';
-import type { StageStateResponse } from '../src/api/types';
+import { parseHash } from '../src/lib/routing';
+import type { DocumentListItem, StageStateResponse } from '../src/api/types';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { PaperNav } from '../src/components/shell/PaperNav';
 import { WorkbenchScreen } from '../src/screens/WorkbenchScreen';
 import { uiStore } from '../src/stores/ui';
 import { jsonResponse, makeJob, mockApiFetch, renderWithQuery, resetUiStore } from './helpers';
@@ -142,6 +144,39 @@ function mockVersions(body: unknown = VERSIONS) {
   return { [`/api/v1/documents/${DID}/versions`]: () => jsonResponse(body) };
 }
 
+/** 左栏论文列表里那一项（`PaperNav` 要它才渲染出卡片与操作区宿主）。 */
+const DOCUMENT_ITEM: DocumentListItem = {
+  did: DID,
+  title: 'Attention Is All You Need',
+  authors: 'Ashish Vaswani',
+  first_author: 'Ashish Vaswani',
+  pages: 21,
+  paragraph_count: 420,
+  translated_count: 206,
+  stage_summary: DETAIL.stage_summary,
+  updated_at: '2026-09-16T13:28:29.000Z',
+};
+
+/**
+ * 完整外壳：左栏 `PaperNav` + 中栏预览 + 右栏检查器（结构同 `AppRoutes`，但用本用例
+ * 自己的 QueryClient —— `App` 用的是模块级单例，跨用例会串缓存）。
+ *
+ * 操作区（`action-bar`）2026-09 迁到**左栏**列底，所以它的行为只能在连左栏一起渲染时
+ * 才看得到；只渲染 `WorkbenchScreen` 的用例看不到它（那是另一条边界）。
+ */
+function renderShell(view: 'progress' | 'archive' = 'progress') {
+  const hash = `#/d/${DID}/${view}`;
+  window.location.hash = hash;
+  return renderWithQuery(
+    <div className="app-grid">
+      <PaperNav activeDid={DID} route={parseHash(hash)} />
+      <main data-od-id="app-main">
+        <WorkbenchScreen did={DID} view={view} />
+      </main>
+    </div>,
+  );
+}
+
 beforeEach(() => {
   resetUiStore();
 });
@@ -164,15 +199,16 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
     expect(document.querySelector('[data-od-id="selected-paragraph-id"]')).toBeNull();
   });
 
-  it('文档名 + 阶段徽标住工具条最左，任务控制住右栏操作区（临时文档头行已删除，无真实 running 不带脉冲）', async () => {
+  it('文档名 + 阶段徽标住工具条最左，任务控制住左栏列底操作区（临时文档头行已删除，无真实 running 不带脉冲）', async () => {
     mockApiFetch({
+      '/api/v1/documents': () => jsonResponse([DOCUMENT_ITEM]),
       [`/api/v1/documents/${DID}`]: () => jsonResponse(DETAIL),
       [`/api/v1/documents/${DID}/artifacts`]: () => jsonResponse([]),
       '/api/v1/profiles': () => jsonResponse([]),
       [`/api/v1/documents/${DID}/stage-state`]: () => jsonResponse(STAGE_STATE),
       [`/api/v1/documents/${DID}/events?after_seq=0&limit=2000`]: () => jsonResponse(EVENTS_PAGE),
     });
-    renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
+    renderShell();
 
     // 中栏只有工具条 + 画布：T2 的临时文档头行已被溶解
     expect(document.querySelector('[data-od-id="doc-header"]')).toBeNull();
@@ -184,8 +220,23 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
     expect(await within(toolbar).findByText('已完成')).toBeInTheDocument();
     expect(document.querySelector('[data-od-id="toolbar-status"]')).not.toBeNull();
     expect(document.querySelectorAll('.pulse-dot')).toHaveLength(0);
-    // 任务控制收进右栏底部操作区（所有 tab 都常驻的唯一入口）
+    // 任务控制在**左栏列底**的操作区（所有视图下都常驻的唯一入口）：它住在 nav-rail 里，
+    // 而不在右栏检查器里（右栏没有操作区）。
     const actionbar = document.querySelector('[data-od-id="action-bar"]') as HTMLElement;
+    const navRail = document.querySelector('[data-od-id="nav-rail"]') as HTMLElement;
+    expect(navRail.contains(actionbar)).toBe(true);
+    expect(
+      (document.querySelector('[data-od-id="inspector"]') as HTMLElement).contains(actionbar),
+    ).toBe(false);
+    // 它在**滚动列表之外**（列表滚到 35171px 也把它挤不掉），且在列表之后、全局导航之前
+    const list = navRail.querySelector('.overflow-auto') as HTMLElement;
+    expect(list.contains(actionbar)).toBe(false);
+    expect(list.compareDocumentPosition(actionbar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      actionbar.compareDocumentPosition(
+        document.querySelector('[data-od-id="nav-foot"]') as HTMLElement,
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(await within(actionbar).findByRole('button', { name: '开始翻译' })).toBeInTheDocument();
     expect(
       actionbar.querySelector('[data-od-id="job-controls"] [data-od-id="start-job-submit"]'),
@@ -202,12 +253,13 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
 
   it('操作区：文档详情未到时给占位（不拿半个 DocumentDetail 硬渲染）', async () => {
     mockApiFetch({
+      '/api/v1/documents': () => jsonResponse([DOCUMENT_ITEM]),
       // 详情永远不 resolve（首屏加载中）：其余路由照常
       [`/api/v1/documents/${DID}`]: () => new Promise<Response>(() => {}),
       [`/api/v1/documents/${DID}/stage-state`]: () => jsonResponse(STAGE_STATE),
       [`/api/v1/documents/${DID}/events?after_seq=0&limit=2000`]: () => jsonResponse(EVENTS_PAGE),
     });
-    renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
+    renderShell();
 
     const actionbar = document.querySelector('[data-od-id="action-bar"]') as HTMLElement;
     expect(within(actionbar).getByText('读取文档…')).toBeInTheDocument();
@@ -215,6 +267,14 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
     // 工具条：标题回退到 did，状态徽标还挂得上（`stage_summary` undefined → 未运行）
     expect(document.querySelector('[data-od-id="toolbar-title"]')?.textContent).toBe(DID);
     expect(document.querySelector('[data-od-id="toolbar-status"]')?.textContent).toBe('未运行');
+  });
+
+  it('左栏没有当前文档时不挂操作区（文件库/词表/设置屏没有可操作的文档）', async () => {
+    mockApiFetch({ '/api/v1/documents': () => jsonResponse([DOCUMENT_ITEM]) });
+    renderWithQuery(<PaperNav activeDid={null} route={parseHash('#/library')} />);
+    await screen.findByText('Attention Is All You Need');
+    expect(document.querySelector('[data-od-id="action-bar"]')).toBeNull();
+    expect(document.querySelector('[data-od-id="nav-rail"]')).not.toBeNull();
   });
 
   it('一条分隔条（右栏）+ 中栏预览占满其余宽度（时间线分隔条已删除）', () => {
@@ -366,6 +426,7 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
   /** W08 用到的固定 mock：详情 + 有产物的清单 + 指定 job 列表 + profiles。 */
   function mockWorkbench(extra: Record<string, unknown>) {
     return mockApiFetch({
+      '/api/v1/documents': () => jsonResponse([DOCUMENT_ITEM]),
       [`/api/v1/documents/${DID}`]: () => jsonResponse(DETAIL),
       [`/api/v1/documents/${DID}/artifacts`]: () =>
         jsonResponse([
@@ -389,9 +450,9 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
 
   it('操作区（W08）：无活动 job + 有产物 → 「开始翻译」可用；工作台不再有配置表单', async () => {
     mockWorkbench({ [`/api/v1/documents/${DID}/jobs`]: () => jsonResponse([]) });
-    renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
+    renderShell();
 
-    // 任务控制收进右栏底部操作区；翻译配置（模型/思考/dual/词表/审校）在设置屏，不在工作台重复展示
+    // 任务控制住左栏列底操作区；翻译配置（模型/思考/dual/词表/审校）在设置屏，不在工作台重复展示
     const actionbar = document.querySelector('[data-od-id="action-bar"]') as HTMLElement;
     const submit = await within(actionbar).findByRole('button', { name: '开始翻译' });
     await waitFor(() => expect(submit).toBeEnabled());
@@ -405,7 +466,7 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
       [`/api/v1/documents/${DID}/jobs`]: () =>
         jsonResponse([makeJob({ did: DID, status: 'running', profile: 'echo-t' })]),
     });
-    renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
+    renderShell();
 
     const actionbar = document.querySelector('[data-od-id="action-bar"]') as HTMLElement;
     expect(await within(actionbar).findByRole('button', { name: '取消' })).toBeInTheDocument();
@@ -425,7 +486,7 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
       [`POST /api/v1/documents/${DID}/jobs`]: () =>
         jsonResponse({ job_id: 'j_new', status: 'queued', action: 'run' }, 202),
     });
-    renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
+    renderShell();
 
     const actionbar = document.querySelector('[data-od-id="action-bar"]') as HTMLElement;
     expect(await within(actionbar).findByRole('button', { name: '重试' })).toBeInTheDocument();
@@ -453,7 +514,7 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
       [`POST /api/v1/documents/${DID}/jobs`]: () =>
         jsonResponse({ job_id: 'j_compile', status: 'queued', action: 'compile' }, 202),
     });
-    renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
+    renderShell();
 
     const actionbar = document.querySelector('[data-od-id="action-bar"]') as HTMLElement;
     const compileFull = await within(actionbar).findByRole('button', { name: '编译全文' });
@@ -480,7 +541,7 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
       [`/api/v1/documents/${DID}/draft`]: () =>
         jsonResponse({ revision: 7, updated_at: null, paragraphs: {} }),
     });
-    renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
+    renderShell();
 
     const actionbar = document.querySelector('[data-od-id="action-bar"]') as HTMLElement;
     // 任务控制自己说「取消」；编译全文不可点，不产生必然 409 的请求
@@ -498,7 +559,7 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
       [`POST /api/v1/documents/${DID}/jobs`]: () =>
         jsonResponse({ error: { code: 'document_busy', message: '这个文档已有任务在跑' } }, 409),
     });
-    renderWithQuery(<WorkbenchScreen did={DID} view="progress" />);
+    renderShell();
 
     const compileFull = await screen.findByRole('button', { name: '编译全文' });
     await waitFor(() => expect(compileFull).toBeEnabled());
@@ -531,7 +592,17 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
       [`/api/v1/documents/${DID}/stage-state`]: () => jsonResponse(stageState),
     });
     const client = createQueryClient();
-    render(<QueryClientProvider client={client}><WorkbenchScreen did={DID} view="progress" /></QueryClientProvider>);
+    window.location.hash = `#/d/${DID}/progress`;
+    render(
+      <QueryClientProvider client={client}>
+        <div className="app-grid">
+          <PaperNav activeDid={DID} route={parseHash(`#/d/${DID}/progress`)} />
+          <main data-od-id="app-main">
+            <WorkbenchScreen did={DID} view="progress" />
+          </main>
+        </div>
+      </QueryClientProvider>,
+    );
     const badge = document.querySelector('[data-od-id="toolbar-status"]') as HTMLElement;
     // 基线：全 ok → 工具条徽标「已完成」（不靠假占位）
     await waitFor(() => expect(within(badge).getByText('已完成')).toBeInTheDocument());
@@ -578,8 +649,9 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
     );
   });
 
-  it('view=archive：任务控制在右栏操作区（所有视图一致）；中栏仍是预览区', async () => {
+  it('view=archive：任务控制在左栏操作区（所有视图一致）；中栏仍是预览区', async () => {
     mockApiFetch({
+      '/api/v1/documents': () => jsonResponse([DOCUMENT_ITEM]),
       [`/api/v1/documents/${DID}`]: () => jsonResponse(DETAIL),
       [`/api/v1/documents/${DID}/artifacts`]: () => jsonResponse([]),
       [`/api/v1/documents/${DID}/jobs`]: () => jsonResponse([makeJob({ did: DID })]),
@@ -587,9 +659,9 @@ describe('工作台（中栏预览 + 右栏检查器）', () => {
       [`/api/v1/documents/${DID}/events?after_seq=0&limit=2000`]: () => jsonResponse(EVENTS_PAGE),
       ...mockVersions(),
     });
-    renderWithQuery(<WorkbenchScreen did={DID} view="archive" />);
+    renderShell('archive');
     await screen.findByText('无产物 PDF');
-    // 旧版「进度视图才有 job 面板」的区分已删除：预览区没有 job 面板，任务控制在右栏操作区
+    // 旧版「进度视图才有 job 面板」的区分已删除：预览区没有 job 面板，任务控制在左栏操作区
     expect(document.querySelector('[data-od-id="job-panel-rail"]')).toBeNull();
     expect(
       document.querySelector('[data-od-id="action-bar"] [data-od-id="job-controls"]'),
