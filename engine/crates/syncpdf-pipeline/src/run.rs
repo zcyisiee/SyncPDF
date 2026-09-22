@@ -282,8 +282,12 @@ impl Pipeline {
         emit_stage_started(sink, Stage::SourceAnalysis);
         let t = Instant::now();
         check_cancelled(cancel)?;
-        let mut doc = load_lopdf(fields.input)?;
-        let pages_ir = stages::source_analysis(worker, &mut doc, selected, cancel)?;
+        let doc = load_lopdf(fields.input)?;
+        let bound_pages =
+            stages::source_analysis(worker, pf.doc, &doc, selected, cancel, |d, n| {
+                tracing::debug!(done = d, total = n, "source_analysis 进度");
+            })?;
+        let pages_ir = stages::source::page_irs(&bound_pages);
         emit_stage_finished(sink, Stage::SourceAnalysis, t);
 
         // ── 2. layout_analysis（结果入阶段缓存）────────────────────────

@@ -9,6 +9,7 @@
 pub mod layout;
 pub mod paragraph;
 pub mod preflight;
+pub mod source;
 pub mod translate;
 pub mod typeset;
 
@@ -20,6 +21,7 @@ pub use preflight::{preflight, Preflight};
 // 步骤 5-8 就位后逐个解注释：
 pub use layout::{apply_coverage_fallback, detect_regions, regions_from_detections, LayoutOpts};
 pub use paragraph::analyze_page;
+pub use source::source_analysis;
 pub use translate::{
     fake_from_name, glyph_text_lookup, make_translator, translate_all, translate_with_dyn,
     DynTranslator,
@@ -150,21 +152,6 @@ pub fn check_cancelled(cancel: &crate::cancel::CancellationToken) -> Result<(), 
 /// 每源文件的阶段缓存键：输入文件字节的 sha256（规约 #4）。
 pub fn source_key(bytes: &[u8]) -> Sha256Hash {
     Sha256Hash::of(bytes)
-}
-
-/// source_analysis 阶段：每页 `bind_page` → [`syncpdf_core::ir::PageIR`]。
-///
-/// **阶段 2 接线点**：`syncpdf_pdf::bind::bind_page(&mut lopdf::Document, page)`
-/// （或等价入口）——需先把 PDF 用 lopdf 载入以拿到内容流与对象号。
-/// 签名里的 `doc` 即该 lopdf 文档；每个 `PageIR` 由 rayon 并行绑定，
-/// 但 pdfium 相关调用（如有）必须串行走 `worker`。
-pub fn source_analysis(
-    _worker: &syncpdf_pdf::pdfium::PdfiumWorker,
-    _doc: &mut lopdf::Document,
-    _pages: &[u32],
-    _cancel: &crate::cancel::CancellationToken,
-) -> Result<Vec<syncpdf_core::ir::PageIR>, PipelineError> {
-    Err(PipelineError::NotYetAvailable("writeback::bind_page"))
 }
 
 /// 页回写：对一页做 `PatchSet.apply` + `Writer.write_paragraphs`，返回新快照路径。
