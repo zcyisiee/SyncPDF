@@ -24,7 +24,9 @@ pub use translate::{
     fake_from_name, glyph_text_lookup, make_translator, translate_all, translate_with_dyn,
     DynTranslator,
 };
-// pub use typeset::{inlines_from_parsed, spec_for, typeset_one, typeset_paragraph, StoreShaper};
+pub use typeset::{
+    inlines_from_parsed, load_fonts, spec_for, typeset_one, typeset_paragraph, StoreShaper,
+};
 
 /// 阶段/编排层错误。
 #[derive(Debug, thiserror::Error)]
