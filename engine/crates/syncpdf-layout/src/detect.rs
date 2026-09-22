@@ -2,6 +2,7 @@
 
 use syncpdf_core::ir::RegionKind;
 use syncpdf_core::Rect;
+use syncpdf_pdf::pdfium::PageInfo;
 
 use crate::labels;
 use crate::postprocess;
@@ -96,7 +97,7 @@ impl LayoutModel {
         let tensor = preprocess(img, nw, nh);
         let scale_h = nh as f32 / ih as f32;
         let scale_w = nw as f32 / iw as f32;
-        let rows = self.run_raw(&tensor, ih as f32, iw as f32, scale_h, scale_w)?;
+        let rows = self.run_raw(&tensor, scale_h, scale_w)?;
 
         let mut cands: Vec<Detection> = Vec::new();
         for r in rows {
@@ -143,15 +144,20 @@ impl LayoutModel {
     }
 }
 
-/// 像素→网络输入：双线性缩放到 `(nw, nh)`，RGB（丢 alpha），/255。
-/// 实测该模型无 mean/std（仅 /255），见 session.rs 模块注释。
+/// 像素→网络输入：双线性缩放到 `(nw, nh)`，**BGR**（丢 alpha），/255。
+///
+/// 官方图输入是 BGR（PaddleX `ReadImage` / cv2 语义，旧 Python 后端同），
+/// 见 session.rs 模块注释；对以黑白为主的论文页 BGR/RGB 输出几乎一致，
+/// 但契约按官方对齐。
 fn preprocess(img: &RawImage<'_>, nw: u32, nh: u32) -> Vec<f32> {
     let (iw, ih) = (img.width as usize, img.height as usize);
     let (nw, nh) = (nw as usize, nh as usize);
-    // 源坐标中心对齐（与 PaddleX resize 行为一致的近似）。
+    // 源坐标中心对齐（与 PaddleX/cv2 resize 行为一致的近似）。
     let sx = iw as f32 / nw as f32;
     let sy = ih as f32 / nh as f32;
     let mut out = vec![0.0f32; nw * nh * 3];
+    // 输出通道 0..2 依次是 B、G、R，即源 RGBA 的 +2、+1、+0。
+    const CHAN: [usize; 3] = [2, 1, 0];
     for y in 0..nh {
         // 双线性：上下两行源采样
         let fy = (y as f32 + 0.5) * sy - 0.5;
@@ -163,11 +169,11 @@ fn preprocess(img: &RawImage<'_>, nw: u32, nh: u32) -> Vec<f32> {
             let x0 = fx.floor().clamp(0.0, (iw - 1) as f32) as usize;
             let x1 = (x0 + 1).min(iw - 1);
             let wx = (fx - x0 as f32).clamp(0.0, 1.0);
-            for c in 0..3 {
-                let p00 = img.rgba[(y0 * iw + x0) * 4 + c] as f32;
-                let p01 = img.rgba[(y0 * iw + x1) * 4 + c] as f32;
-                let p10 = img.rgba[(y1 * iw + x0) * 4 + c] as f32;
-                let p11 = img.rgba[(y1 * iw + x1) * 4 + c] as f32;
+            for (c, &src) in CHAN.iter().enumerate() {
+                let p00 = img.rgba[(y0 * iw + x0) * 4 + src] as f32;
+                let p01 = img.rgba[(y0 * iw + x1) * 4 + src] as f32;
+                let p10 = img.rgba[(y1 * iw + x0) * 4 + src] as f32;
+                let p11 = img.rgba[(y1 * iw + x1) * 4 + src] as f32;
                 let top = p00 + (p01 - p00) * wx;
                 let bottom = p10 + (p11 - p10) * wx;
                 out[(c * nh + y) * nw + x] = (top + (bottom - top) * wy) / 255.0;
@@ -192,6 +198,47 @@ pub fn to_pdf_space(d: &Detection, img_w: u32, img_h: u32, page_w_pt: f32, page_
         b.x1 * kx,
         page_h_pt - b.y0 * ky,
     )
+}
+
+/// 渲染位图像素框（左上原点，可视页面，含 `/Rotate` 效果）→ PDF 用户空间
+/// （左下原点、**未旋转**、MediaBox 原点系——与 pdfium 字形框同一空间）。
+///
+/// pdfium 实测（见 tests/repair_layout_coords.rs）：
+/// - `render_page` 位图是 `/Rotate` 后的可视页面，尺寸对应 CropBox（含旋转交换）；
+/// - `PageInfo::width/height` 也是旋转后的 CropBox 尺寸；
+/// - 字形框（`FPDFText_GetLooseCharBox`）在未旋转、MediaBox 原点的用户空间。
+///
+/// 因此映射需要：像素 → 可视 pt（等比缩放 + y 翻转）→ 按 `/Rotate` 逆转 →
+/// 加 CropBox 原点偏移。`rotation` 只接受 0/90/180/270（pdfium 枚举只会给这四个；
+/// 其它值按 0 处理并告警，不假装支持）。
+pub fn px_to_user_space(b: Rect, img_w: u32, img_h: u32, info: &PageInfo) -> Rect {
+    if img_w == 0 || img_h == 0 || info.width <= 0.0 || info.height <= 0.0 {
+        return b;
+    }
+    let rotation = info.rotation;
+    if !(0..=270).contains(&rotation) || rotation % 90 != 0 {
+        tracing::warn!(rotation, "非 90° 倍数的页旋转，按未旋转处理");
+    }
+    // 可视页面 pt 坐标（左下原点）。
+    let kx = info.width / img_w as f32;
+    let ky = info.height / img_h as f32;
+    let vx0 = b.x0 * kx;
+    let vx1 = b.x1 * kx;
+    let vy0 = info.height - b.y1 * ky;
+    let vy1 = info.height - b.y0 * ky;
+    let (cx0, cy0, cx1, cy1) = (
+        info.crop_box.x0,
+        info.crop_box.y0,
+        info.crop_box.x1,
+        info.crop_box.y1,
+    );
+    // 逆转 `/Rotate`（顺时针）后再平移到 CropBox 原点；框的 x0/y0 仍取小值。
+    match rotation {
+        90 => Rect::new(cx1 - vy1, cy0 + vx0, cx1 - vy0, cy0 + vx1),
+        180 => Rect::new(cx1 - vx1, cy1 - vy1, cx1 - vx0, cy1 - vy0),
+        270 => Rect::new(cx0 + vy0, cy1 - vx1, cx0 + vy1, cy1 - vx0),
+        _ => Rect::new(cx0 + vx0, cy0 + vy0, cx0 + vx1, cy0 + vy1),
+    }
 }
 
 #[cfg(test)]
@@ -253,7 +300,7 @@ mod tests {
 
     #[test]
     fn preprocess_identity_and_scale() {
-        // 2x2 图放大到 2x2：数据不变
+        // 2x2 图放大到 2x2：数据不变。左上黑、右上红、左下绿、右下白。
         let img = RawImage {
             width: 2,
             height: 2,
@@ -262,15 +309,18 @@ mod tests {
             ],
         };
         let t = preprocess(&img, 2, 2);
-        // 左上像素黑、右上红（R=255）、左下绿、右下白
-        assert_eq!(t[0], 0.0); // R of (0,0)
-        let r_of = |x: usize, y: usize| t[y * 2 + x];
-        assert!((r_of(1, 0) - 1.0).abs() < 1e-6);
-        assert!((r_of(0, 1) - 0.0).abs() < 1e-6);
-        assert!((r_of(1, 1) - 1.0).abs() < 1e-6);
-        // G of (0,1) = 255
-        let g_of = |x: usize, y: usize| t[4 + y * 2 + x];
-        assert!((g_of(0, 1) - 1.0).abs() < 1e-6);
-        assert!((g_of(1, 0) - 0.0).abs() < 1e-6);
+        // 输出通道序是 B、G、R（官方图输入是 BGR，见 session.rs 模块注释）。
+        let at = |c: usize, x: usize, y: usize| t[c * 4 + y * 2 + x];
+        assert_eq!(t[0], 0.0, "B(0,0) 黑 = 0");
+        // B 通道：只有白（1,1）为 1。
+        assert!((at(0, 1, 1) - 1.0).abs() < 1e-6);
+        assert!(at(0, 1, 0).abs() < 1e-6, "红像素 B=0");
+        assert!(at(0, 0, 1).abs() < 1e-6, "绿像素 B=0");
+        // G 通道：绿（0,1）与白（1,1）为 1。
+        assert!((at(1, 0, 1) - 1.0).abs() < 1e-6);
+        assert!(at(1, 1, 0).abs() < 1e-6, "红像素 G=0");
+        // R 通道：红（1,0）与白（1,1）为 1。
+        assert!((at(2, 1, 0) - 1.0).abs() < 1e-6);
+        assert!(at(2, 0, 1).abs() < 1e-6, "绿像素 R=0");
     }
 }

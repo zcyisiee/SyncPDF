@@ -1,12 +1,16 @@
 //! ort session 封装：加载 PP-DocLayoutV3 ONNX 模型并报告输入尺寸。
 //!
-//! 模型 I/O（对 `vendor/models/pp_doc_layoutv3.onnx` 实测）：
-//! - 输入 `image [N,3,800,800] f32`：RGB、/255 归一化（无 mean/std，oar-ocr 0.9.2 的
-//!   `pp_doclayout` 预处理配置：scale=1/255、mean=[0,0,0]、std=[1,1,1]）。
-//! - 输入 `im_shape [N,2] f32`：原图 `(H, W)`（像素）。
-//! - 输入 `scale_factor [N,2] f32`：`网络输入 / 原图` 的 `(ratio_h, ratio_w)`。
+//! 模型 I/O（对 `vendor/models/pp_doc_layoutv3.onnx` 实测，并用旧 Python 后端
+//! `babeldoc/docvision/paddle_runtime.py`（PaddleX 官方预处理）作 oracle 验证）：
+//! - 输入 `image [N,3,800,800] f32`：**BGR**、/255 归一化（无 mean/std；官方
+//!   PaddleX `ReadImage` 给 BGR，旧后端直接喂 BGR，见 paddle_runtime.py 的
+//!   "Input is BGR from PaddleX ReadImage"）。
+//! - 输入 `im_shape [N,2] f32`：**网络输入尺寸 (800, 800)**，不是原图 (H, W)。
+//!   两者会让输出落在不同坐标空间（原图 vs 原图×原图/800，已实测）。
+//! - 输入 `scale_factor [N,2] f32`：`(ratio_h, ratio_w) = 网络输入/原图`。
 //! - 输出 `fetch_name_0 [300,7] f32`：`(class, score, x1, y1, x2, y2, reading_order)`，
-//!   框为**原图像素坐标**（左上原点）。
+//!   框已由图内后处理换算回**原图像素坐标**（左上原点）；PaddleX 的
+//!   `LayoutAnalysisProcess` 对它只做阈值/NMS/过滤，不再缩放。
 //! - 输出 `fetch_name_1 [1] i32`：框数（对导出图恒为 300，低分框靠 score 过滤）。
 //! - 输出 `fetch_name_2 [300,200,200] i32`：阅读顺序掩码图（本 crate 不使用）。
 
@@ -82,18 +86,21 @@ impl LayoutModel {
         self.input_size
     }
 
-    /// 内部：跑一次推理。`image_chw` 为已按 `input_size` 缩放的 NCHW 数据。
+    /// 内部：跑一次推理。`image_chw` 为已按 `input_size` 缩放的 NCHW 数据（BGR）。
+    ///
+    /// `im_shape` 传**网络输入尺寸**（不是原图尺寸）：该导出图的内部后处理按
+    /// `im_shape`/`scale_factor` 组合决定输出坐标空间，只有官方组合
+    /// （im_shape=网络尺寸、scale_factor=网络/原图）才把框换算回原图像素，
+    /// 传原图尺寸会把框额外放大 `原图/800` 倍（实测，见模块注释）。
     pub(crate) fn run_raw(
         &mut self,
         image_chw: &[f32],
-        orig_h: f32,
-        orig_w: f32,
         scale_h: f32,
         scale_w: f32,
     ) -> Result<Vec<[f32; 7]>, SessionError> {
         use ort::value::TensorRef;
         let (h, w) = (self.input_size.1 as usize, self.input_size.0 as usize);
-        let im_shape = [orig_h, orig_w];
+        let im_shape = [h as f32, w as f32];
         let scale = [scale_h, scale_w];
         let outputs = self.session.run(ort::inputs! {
             "image" => TensorRef::from_array_view(([1usize, 3, h, w], image_chw))?,
