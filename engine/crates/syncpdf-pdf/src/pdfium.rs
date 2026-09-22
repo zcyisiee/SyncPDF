@@ -178,6 +178,8 @@ pub struct TextObject {
     pub font_name: String,
     /// 字号，已乘上文本对象矩阵的缩放（即页面上的视觉字号）。
     pub font_size: f32,
+    /// `Tf` 原始字号（不含 Tm/CTM 缩放）。`font_size` 是视觉字号。
+    pub unscaled_font_size: f32,
     /// 字体是否内嵌。
     pub is_embedded: bool,
     /// 字体标志位。
@@ -544,6 +546,7 @@ fn build_text_object(
         form_path: form_path.to_vec(),
         font_name,
         font_size: object.scaled_font_size().value,
+        unscaled_font_size: object.unscaled_font_size().value,
         is_embedded,
         font_flags,
         fill,
