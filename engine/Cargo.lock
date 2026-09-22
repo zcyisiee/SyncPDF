@@ -2165,6 +2165,7 @@ dependencies = [
  "pdf-writer",
  "pdfium-render",
  "serde",
+ "skrifa 0.47.0",
  "smallvec",
  "syncpdf-core",
  "syncpdf-font",

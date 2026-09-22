@@ -15,6 +15,7 @@ pdfium-render = { workspace = true }
 lopdf = { workspace = true }
 pdf-writer = { workspace = true }
 smallvec = { workspace = true }
+skrifa = { workspace = true }
 crossbeam-channel = { workspace = true }
 
 [dev-dependencies]
