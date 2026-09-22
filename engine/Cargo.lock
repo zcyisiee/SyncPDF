@@ -1937,12 +1937,14 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "hex",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "syncpdf-core",
  "tempfile",
  "thiserror",
+ "tokio",
  "tracing",
 ]
 
