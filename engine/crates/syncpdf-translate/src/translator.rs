@@ -6,8 +6,10 @@
 //! 流程（one-shot + 流式）：
 //! 1. 缓存命中的单元直接 `on_block` 交付，**不进提示词**；
 //! 2. 其余单元走 `build_document_prompts`（能一片就一片，超限按页切）；
-//! 3. 逐片 `translate`，delta 喂 `BlockStream`；每凑齐一个块立刻 `validate`，
-//!    通过则写缓存并 `on_block`（上游据此边译边排版）；
+//! 3. 逐片 `translate`，delta 喂 `BlockStream`；每个块一**闭合**就在 delta
+//!    回调里 `validate`，通过即 `on_block`（上游据此边译边排版，不等响应
+//!    结束）；Ok 块的缓存写按块记录、片末统一落库——`Cache`（rusqlite
+//!    `Connection`）不是 `Sync`，进不了必须 `Send` 的 delta 回调；
 //! 4. 失败块 + 漏译块按 §5.4 二分拆分重试，最多 `max_retry_rounds`（默认 3）轮；
 //! 5. 仍失败 → `Fallback`（html = 原文）；空译 → `Empty`；未知 id → `extra_ids`。
 //!
@@ -20,7 +22,7 @@ use syncpdf_core::ParagraphId;
 
 use crate::cache::Cache;
 use crate::prompt::{build_document_prompts, DocumentPrompt, PromptSpec};
-use crate::stream::BlockStream;
+use crate::stream::{BlockStream, RawBlock};
 use crate::unit::Unit;
 use crate::validate::{validate, ValidateCtx, Violation, DEFAULT_EXPANSION_LIMIT};
 
@@ -377,6 +379,16 @@ impl<T: Translator> Engine<T> {
     }
 
     /// 发一片提示词，把流式块逐个校验并交付。
+    ///
+    /// 真·段落级流式：每个 `<p id=…>…</p>` 一闭合就在 delta 回调里校验并
+    /// `on_block`，**不等整片响应结束**——模型还在吐后面的段落时，上游已经
+    /// 可以排版前面落定的段。
+    ///
+    /// 错误语义：`translate` 失败时错误原样上抛，部分成功绝不冒充全篇成功；
+    /// 此前已交付的块**不撤回**（上游可能已排版），其缓存写也照常落库——
+    /// 完整收到且校验通过的块不因晚到的尾部失败被追溯否定。残缺响应里未
+    /// 闭合的半个块只留在 residue，不交付、不入缓存。漏译/违规块的有界
+    /// 重试由 `translate_document` 对「未落定单元」统一驱动，这里不重发。
     #[allow(clippy::too_many_arguments)]
     async fn run_prompt(
         &self,
@@ -392,17 +404,80 @@ impl<T: Translator> Engine<T> {
         st: &mut Stats,
         on_block: &mut (impl FnMut(TranslatedBlock) + Send),
     ) -> Result<(), TranslateError> {
-        // 先把整片流成块收下来，再统一裁决：`translate` 的回调不能借 `done`。
         let mut stream = BlockStream::new();
-        let mut raw = Vec::new();
-        {
-            let mut sink = |d: &str| raw.extend(stream.push(d));
-            self.translator.translate(prompt, &mut sink).await?;
+        // `Cache`（rusqlite `Connection`）不是 `Sync`，捕不进必须 `Send` 的
+        // delta 回调；Ok 块的缓存写先按块记录，片末统一落库。
+        let mut cache_puts: Vec<(String, String)> = Vec::new();
+        let sent = {
+            let mut sink = |d: &str| {
+                let blocks = stream.push(d);
+                self.settle(
+                    blocks,
+                    spec,
+                    ctx,
+                    by_id,
+                    known,
+                    &mut *done,
+                    &mut *extra_ids,
+                    &mut *last_violations,
+                    &mut *st,
+                    &mut *on_block,
+                    &mut cache_puts,
+                );
+            };
+            self.translator.translate(prompt, &mut sink).await
+        };
+        if sent.is_ok() {
+            // `drain` 在每次 push 后已穷尽，这里通常补不出新块；调用 `finish`
+            // 是为了让「未闭合的半个块」留在 residue 语义里，不进交付。
+            let (tail, _residue) = stream.finish();
+            self.settle(
+                tail,
+                spec,
+                ctx,
+                by_id,
+                known,
+                &mut *done,
+                &mut *extra_ids,
+                &mut *last_violations,
+                &mut *st,
+                &mut *on_block,
+                &mut cache_puts,
+            );
         }
-        let (tail, _residue) = stream.finish();
-        raw.extend(tail);
+        if let Some(c) = cache {
+            for (source_html, translated_html) in &cache_puts {
+                let _ = c.put(
+                    &spec.source_lang,
+                    &spec.target_lang,
+                    self.translator.name(),
+                    source_html,
+                    translated_html,
+                );
+            }
+        }
+        sent.map(|_| ())
+    }
 
-        for block in raw {
+    /// 裁决一批已闭合的原始块：未知/重复 id 丢弃并记账，其余逐块校验，
+    /// 通过即交付。delta 回调与 `finish()` 尾巴共用同一条路径，两条路的
+    /// 交付语义完全一致。
+    #[allow(clippy::too_many_arguments)]
+    fn settle(
+        &self,
+        blocks: Vec<RawBlock>,
+        spec: &PromptSpec,
+        ctx: &ContextMap,
+        by_id: &HashMap<ParagraphId, &Unit>,
+        known: &HashSet<ParagraphId>,
+        done: &mut HashMap<ParagraphId, TranslatedBlock>,
+        extra_ids: &mut Vec<ParagraphId>,
+        last_violations: &mut HashMap<ParagraphId, Vec<Violation>>,
+        st: &mut Stats,
+        on_block: &mut (impl FnMut(TranslatedBlock) + Send),
+        cache_puts: &mut Vec<(String, String)>,
+    ) {
+        for block in blocks {
             if !known.contains(&block.id) {
                 // 规约 #1：段外 id 一律不采用。
                 extra_ids.push(block.id.clone());
@@ -430,15 +505,7 @@ impl<T: Translator> Engine<T> {
                             from_cache: false,
                         }
                     } else {
-                        if let Some(c) = cache {
-                            let _ = c.put(
-                                &spec.source_lang,
-                                &spec.target_lang,
-                                self.translator.name(),
-                                &u.html,
-                                &block.html,
-                            );
-                        }
+                        cache_puts.push((u.html.clone(), block.html.clone()));
                         TranslatedBlock {
                             id: block.id.clone(),
                             html: block.html.clone(),
@@ -462,7 +529,6 @@ impl<T: Translator> Engine<T> {
                 }
             }
         }
-        Ok(())
     }
 }
 
