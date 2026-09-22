@@ -2106,9 +2106,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "lopdf",
  "serde_json",
  "syncpdf-core",
  "syncpdf-font",
+ "syncpdf-layout",
  "syncpdf-pdf",
  "syncpdf-pipeline",
  "syncpdf-protocol",
