@@ -7,7 +7,7 @@
 use syncpdf_core::ir::{PageIR, Region, RegionKind};
 use syncpdf_core::{PageId, Rect};
 use syncpdf_layout::{
-    coverage, to_pdf_space, xy_cut_order, DetectOpts, Detection, LayoutModel, RawImage,
+    coverage, px_to_user_space, xy_cut_order, DetectOpts, Detection, LayoutModel, RawImage,
 };
 use syncpdf_pdf::pdfium::{DocId, PageInfo, PdfiumWorker};
 
@@ -73,6 +73,11 @@ pub fn detect_regions(
 }
 
 /// 把检测结果变成区域（纯函数，便于单测）。
+///
+/// 检测框是渲染位图像素坐标（左上原点、含 `/Rotate` 的可视页面）；
+/// [`px_to_user_space`] 把它换到与字形框同一空间：未旋转、左下原点、
+/// MediaBox 原点系（含 CropBox 原点偏移与旋转逆转，实测见
+/// syncpdf-layout 的 tests/repair_layout_coords.rs）。
 pub fn regions_from_detections(
     detections: &[Detection],
     img_w: u32,
@@ -82,10 +87,11 @@ pub fn regions_from_detections(
 ) -> Vec<Region> {
     let boxes: Vec<Rect> = detections
         .iter()
-        .map(|d| to_pdf_space(d, img_w, img_h, info.width, info.height))
+        .map(|d| px_to_user_space(d.bbox_px, img_w, img_h, info))
         .collect();
     // 阅读顺序：优先用模型自带的 order，缺省时用 XY-cut。
-    let orders = xy_cut_order(&boxes, info.height);
+    // 页顶参考是用户空间 CropBox 的 y1（旋转后区域的 y 已在未旋转空间）。
+    let orders = xy_cut_order(&boxes, info.crop_box.y1);
     detections
         .iter()
         .enumerate()
@@ -385,6 +391,89 @@ mod tests {
         ];
         apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
         assert_eq!(regions.last().unwrap().index, 6);
+    }
+
+    #[test]
+    fn regions_from_detections_full_bitmap_maps_to_crop_box_all_rotations() {
+        use syncpdf_layout::Detection;
+        // 整幅位图无论旋转多少度，都应恰好映射回 CropBox（用户空间）。
+        let crop = Rect::new(61.0, 79.0, 551.0, 713.0);
+        for rot in [0, 90, 180, 270] {
+            let (w, h) = if rot % 180 == 0 {
+                (crop.x1 - crop.x0, crop.y1 - crop.y0)
+            } else {
+                (crop.y1 - crop.y0, crop.x1 - crop.x0)
+            };
+            let info = PageInfo {
+                width: w,
+                height: h,
+                media_box: Rect::new(0.0, 0.0, 612.0, 792.0),
+                crop_box: crop,
+                rotation: rot,
+            };
+            let det = Detection {
+                kind: RegionKind::Text,
+                raw_label: 22,
+                score: 0.9,
+                bbox_px: Rect::new(0.0, 0.0, w, h),
+                order: None,
+            };
+            let regions = regions_from_detections(&[det], w as u32, h as u32, &info, 0);
+            assert_eq!(regions.len(), 1);
+            let b = regions[0].bbox;
+            assert!(
+                (b.x0 - crop.x0).abs() < 1e-3
+                    && (b.y0 - crop.y0).abs() < 1e-3
+                    && (b.x1 - crop.x1).abs() < 1e-3
+                    && (b.y1 - crop.y1).abs() < 1e-3,
+                "rot {rot}: {b:?} != {crop:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn regions_from_detections_rot90_orders_in_user_space() {
+        use syncpdf_layout::Detection;
+        // rot 90：可视页 200x300（未旋转 300x200）。逆转公式
+        //（见 syncpdf_layout::px_to_user_space）：user_x = cx1 - vy，user_y = cy0 + vx。
+        // 框 A：px (10,10)-(60,60) → user (10,10)-(60,60)，未旋转页**左下**；
+        // 框 B：px (140,240)-(190,290) → user (240,140)-(290,190)，未旋转页**右上**。
+        // 阅读顺序应在用户空间排：左列（A）先于右列（B）。
+        let info = PageInfo {
+            width: 200.0,
+            height: 300.0,
+            media_box: Rect::new(0.0, 0.0, 300.0, 200.0),
+            crop_box: Rect::new(0.0, 0.0, 300.0, 200.0),
+            rotation: 90,
+        };
+        let dets = vec![
+            Detection {
+                kind: RegionKind::Text,
+                raw_label: 22,
+                score: 0.9,
+                bbox_px: Rect::new(10.0, 10.0, 60.0, 60.0),
+                order: None,
+            },
+            Detection {
+                kind: RegionKind::Text,
+                raw_label: 22,
+                score: 0.9,
+                bbox_px: Rect::new(140.0, 240.0, 190.0, 290.0),
+                order: None,
+            },
+        ];
+        let regions = regions_from_detections(&dets, 200, 300, &info, 0);
+        let (a, b) = (regions[0].bbox, regions[1].bbox);
+        assert!(
+            (a.x0 - 10.0).abs() < 1e-3 && (a.y0 - 10.0).abs() < 1e-3,
+            "{a:?}"
+        );
+        assert!(
+            (b.x0 - 240.0).abs() < 1e-3 && (b.y0 - 140.0).abs() < 1e-3,
+            "{b:?}"
+        );
+        assert_eq!(regions[0].order, 0, "用户空间左列（A）先读");
+        assert_eq!(regions[1].order, 1, "用户空间右列（B）后读");
     }
 
     #[test]
