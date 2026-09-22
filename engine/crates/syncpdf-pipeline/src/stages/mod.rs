@@ -18,7 +18,7 @@ use syncpdf_core::hash::Sha256Hash;
 
 pub use preflight::{preflight, Preflight};
 // 步骤 5-8 就位后逐个解注释：
-// pub use layout::{apply_coverage_fallback, detect_regions, LayoutOpts};
+pub use layout::{apply_coverage_fallback, detect_regions, regions_from_detections, LayoutOpts};
 // pub use paragraph::analyze_page;
 // pub use translate::{fake_from_name, glyph_text_lookup, make_translator, translate_all, DynTranslator};
 // pub use typeset::{inlines_from_parsed, spec_for, typeset_one, typeset_paragraph, StoreShaper};
@@ -109,6 +109,12 @@ impl PipelineError {
 
 impl From<syncpdf_layout::LayoutError> for PipelineError {
     fn from(e: syncpdf_layout::LayoutError) -> Self {
+        Self::Layout(e.to_string())
+    }
+}
+
+impl From<syncpdf_layout::DetectError> for PipelineError {
+    fn from(e: syncpdf_layout::DetectError) -> Self {
         Self::Layout(e.to_string())
     }
 }
