@@ -22,6 +22,10 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 rayon = { workspace = true }
 crossbeam-channel = { workspace = true }
+lopdf = { workspace = true }
+sha2 = { workspace = true }
+regex = "1"
+async-trait = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
