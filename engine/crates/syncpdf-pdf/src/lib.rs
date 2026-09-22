@@ -11,3 +11,11 @@ pub mod links;
 pub mod patch;
 pub mod validate;
 pub mod writer;
+
+// 便捷再导出（上游 crate 对接用）。
+pub use bind::{bind_page, BindError, BindStats, BoundPage, FormDo};
+pub use embed::{embed_font_lopdf, EmbedError, EmbeddedFontObj};
+pub use links::links_check;
+pub use patch::{PatchError, PatchSet, PatchStats};
+pub use validate::{self_check, Report, ValidateError};
+pub use writer::{save, FontStats, WriteError, Writer};
