@@ -33,7 +33,11 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Command {
     /// 读 stdin JSONL 请求（configure → run）并输出事件 JSONL。
-    Run,
+    Run {
+        /// 前端（Electron）约定的协议版本；只支持 1，其它值报致命错误并退出码 2。
+        #[arg(long, default_value_t = 1)]
+        protocol: u32,
+    },
     /// 便捷入口：翻译一份 PDF。
     Translate {
         /// 输入 PDF。
@@ -64,7 +68,7 @@ enum Command {
         #[arg(long)]
         cache_dir: Option<PathBuf>,
     },
-    /// 打印 preflight 信息与每页几何（调试用）。
+    /// 打印 preflight 信息、每页几何与段落摘要（调试用）。
     Inspect {
         /// 输入 PDF。
         #[arg(long)]
@@ -72,6 +76,13 @@ enum Command {
         /// 只看某一页（1 基）；缺省打印全部页。
         #[arg(long)]
         page: Option<u32>,
+        /// 布局模型路径；缺省用 `engine/vendor/models/pp_doc_layoutv3.onnx`。
+        /// 模型缺失时跳过 layout，用「整页一个区域」兜底。
+        #[arg(long)]
+        model: Option<PathBuf>,
+        /// 只打印 id/kind/bbox/前 40 字符/translatable。
+        #[arg(long)]
+        paragraphs: bool,
     },
     /// 打印版本与构建信息。
     Version,
@@ -88,7 +99,21 @@ fn main() -> anyhow::Result<()> {
             println!("syncpdf-cli {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
-        Command::Run => rt.block_on(cmd_run()),
+        Command::Run { protocol } => {
+            // 前端启动命令是 `syncpdf-cli run --protocol 1`。协议版本不对时只能
+            // 说「这条连接用不了」：发一条致命 error 事件（前端按 JSONL 解析），
+            // 然后以退出码 2 结束，不做任何后续工作。
+            if protocol != 1 {
+                SharedSink::new(StdoutSink::new()).emit(Event::Error {
+                    fatal: true,
+                    code: "protocol_unsupported".to_string(),
+                    message: format!("不支持的协议版本 {protocol}（本引擎只支持 --protocol 1）"),
+                });
+                eprintln!("syncpdf-cli: 不支持的协议版本 {protocol}（只支持 1）");
+                std::process::exit(2);
+            }
+            rt.block_on(cmd_run())
+        }
         Command::Translate {
             input,
             output,
@@ -110,7 +135,12 @@ fn main() -> anyhow::Result<()> {
             pages,
             cache_dir,
         )),
-        Command::Inspect { input, page } => cmd_inspect(input, page),
+        Command::Inspect {
+            input,
+            page,
+            model,
+            paragraphs,
+        } => cmd_inspect(input, page, model, paragraphs),
     }
 }
 
@@ -260,35 +290,148 @@ async fn cmd_translate(
     }
 }
 
-/// `inspect`：阶段 1 只打印 preflight 信息（`PageIR` 摘要待阶段 2）。
-fn cmd_inspect(input: PathBuf, page: Option<u32>) -> anyhow::Result<()> {
+/// `inspect`：preflight → 每页 bind → （模型可用时）layout → 段落摘要。
+///
+/// 输出走 **stdout**（这是调试工具，不是 sidecar 的 JSONL 通道）。模型缺失时
+/// 跳过 layout，用「整页一个区域」兜底，保证段落摘要仍然可看。
+fn cmd_inspect(
+    input: PathBuf,
+    page: Option<u32>,
+    model: Option<PathBuf>,
+    only_paragraphs: bool,
+) -> anyhow::Result<()> {
+    use syncpdf_core::ir::{PageIR, Region};
+    use syncpdf_pipeline::stages::{analyze_page, apply_coverage_fallback, LayoutOpts};
+
     let worker = syncpdf_pdf::pdfium::PdfiumWorker::spawn()
         .map_err(|e| anyhow::anyhow!("pdfium 不可用：{e}"))?;
     let pf = preflight(&worker, &input).map_err(|e: PipelineError| anyhow::anyhow!("{e}"))?;
-    println!(
-        "{}: {} 页, 加密={}, 签名={}, sha256={}",
-        input.display(),
-        pf.pages,
-        pf.encrypted,
-        pf.signed,
-        pf.source_sha.to_hex()
-    );
+    if !only_paragraphs {
+        println!(
+            "{}: {} 页, 加密={}, 签名={}, sha256={}",
+            input.display(),
+            pf.pages,
+            pf.encrypted,
+            pf.signed,
+            pf.source_sha.to_hex()
+        );
+    }
+    let lo = lopdf::Document::load(&input)
+        .map_err(|e| anyhow::anyhow!("lopdf 载入 {} 失败：{e}", input.display()))?;
+
+    // 模型路径：显式给了就用，否则探 `engine/vendor/models`。
+    let model_path = model.or_else(|| {
+        let p = syncpdf_core::fixtures::models_dir()?.join("pp_doc_layoutv3.onnx");
+        p.is_file().then_some(p)
+    });
+    let mut layout_model = match &model_path {
+        Some(p) => match syncpdf_layout::LayoutModel::load(p, 2) {
+            Ok(m) => Some(m),
+            Err(e) => {
+                eprintln!("syncpdf-cli: 布局模型载入失败（改用整页兜底区域）：{e}");
+                None
+            }
+        },
+        None => {
+            eprintln!("syncpdf-cli: 未找到布局模型（改用整页兜底区域）");
+            None
+        }
+    };
+
     let one_based = page.unwrap_or(0);
+    if one_based != 0 && one_based > pf.pages {
+        anyhow::bail!("页号 {one_based} 越界（共 {} 页）", pf.pages);
+    }
+    let opts = LayoutOpts::default();
     for (i, info) in pf.page_infos.iter().enumerate() {
         let n = i as u32 + 1;
         if one_based != 0 && n != one_based {
             continue;
         }
-        println!(
-            "  第 {n} 页: {:.1}×{:.1} pt, rotate={}, media={:?}, crop={:?}",
-            info.width, info.height, info.rotation, info.media_box, info.crop_box
-        );
-    }
-    if one_based != 0 && one_based as usize > pf.page_infos.len() {
-        anyhow::bail!("页号 {one_based} 越界（共 {} 页）", pf.pages);
+        let bound = syncpdf_pdf::bind::bind_page(&worker, pf.doc, &lo, n)
+            .map_err(|e| anyhow::anyhow!("第 {n} 页 bind_page 失败：{e}"))?;
+        let ir: PageIR = bound.ir.clone();
+        if !only_paragraphs {
+            println!(
+                "  第 {n} 页: {:.1}×{:.1} pt, rotate={}, media={:?}, crop={:?}",
+                info.width, info.height, info.rotation, info.media_box, info.crop_box
+            );
+            println!(
+                "    字形={} 文本对象={} 匹配={} 降级={} 长度={:?}",
+                ir.glyphs().count(),
+                bound.stats.text_objects,
+                bound.stats.matched,
+                bound.stats.degraded,
+                ir.media_box
+            );
+            for issue in &bound.issues {
+                println!("    [bind issue] {issue}");
+            }
+        }
+
+        // 区域：模型可用则检测 + 覆盖门禁，否则整页一个区域。
+        let mut regions: Vec<Region> = match &mut layout_model {
+            Some(m) => match syncpdf_pipeline::stages::detect_regions(
+                m, &worker, pf.doc, i as u32, info, &opts,
+            ) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("syncpdf-cli: 第 {n} 页 layout 失败（改用整页兜底区域）：{e}");
+                    vec![full_page_region(i as u32, info)]
+                }
+            },
+            None => vec![full_page_region(i as u32, info)],
+        };
+        let report = apply_coverage_fallback(&mut regions, &ir, i as u32, opts.coverage_limit);
+        if !only_paragraphs {
+            println!("    区域={} 未覆盖比例={:.4}", regions.len(), report.ratio);
+        }
+
+        let paras = analyze_page(&ir, &regions);
+        println!("    段落={}", paras.len());
+        for p in &paras {
+            let head: String = p.text.chars().take(40).collect();
+            let kind = format!("{:?}", p.kind);
+            println!(
+                "      [{}] 第{}页#{} kind={} bbox=({:.1},{:.1})-({:.1},{:.1}) \
+                 align={:?} 缩进={:.1} 行高={:.1} 可译={:?} text={:?}",
+                p.id,
+                p.id.page,
+                p.region,
+                kind,
+                p.bbox.x0,
+                p.bbox.y0,
+                p.bbox.x1,
+                p.bbox.y1,
+                p.align,
+                p.first_indent,
+                p.line_height,
+                p.translatable,
+                head
+            );
+        }
     }
     worker.close(pf.doc);
     Ok(())
+}
+
+/// 整页兜底区域：模型缺失 / 检测失败时用，保证段落分析仍有区域可切。
+fn full_page_region(page: u32, info: &syncpdf_pdf::pdfium::PageInfo) -> syncpdf_core::ir::Region {
+    use syncpdf_core::ir::{Region, RegionKind};
+    use syncpdf_core::{PageId, Rect};
+    Region {
+        page: PageId(page),
+        index: 0,
+        kind: RegionKind::Text,
+        bbox: Rect {
+            x0: 0.0,
+            y0: 0.0,
+            x1: info.width,
+            y1: info.height,
+        },
+        score: 0.0,
+        order: 0,
+    }
 }
 
 /// `--pages` 解析：`1-3` / `1,3,5` / `1-3,7`（1 基，输出 0 基）。
@@ -381,8 +524,14 @@ fn tag_of(req: &Request) -> &'static str {
 /// 汇总打到 stderr（stdout 只走 JSONL）。
 fn print_summary(s: &RunSummary) {
     eprintln!(
-        "syncpdf-cli: 完成 ok={} 页={} 段={} 耗时={}ms",
-        s.ok, s.pages, s.paragraphs, s.elapsed_ms
+        "syncpdf-cli: 完成 ok={} 页={} 段={} 耗时={}ms 字体={} 膨胀比={:.3} 回退={}",
+        s.ok,
+        s.pages,
+        s.paragraphs,
+        s.elapsed_ms,
+        s.stats.fonts,
+        s.stats.expansion_ratio,
+        s.stats.fallbacks
     );
 }
 

@@ -4,33 +4,53 @@
 //! preflight → source_analysis → layout_analysis → paragraph_analysis →
 //! translating → typesetting → validating → publishing。
 //!
-//! **流式编译**：翻译阶段每交付一个已校验段落就立刻排版、写入该页；
-//! 一页的段落全部落定（或翻译结束回退）时立即回写并发 `page_ready`。
+//! **流式编译**：翻译阶段每交付一个已校验段落就立刻排版；一页的段落全部落定
+//! （或翻译结束回退）时立刻回写并发 `page_ready`。
 //!
-//! 阶段 1 现状：`source_analysis` 依赖尚未合入的 `syncpdf-pdf::bind_page`，
-//! 因此端到端会在此处提前返回 `NotYetAvailable`；但
-//! `run_started` / `stage_started` / `error` / `run_finished{ok:false}`
-//! 的事件序列仍然完整且合法。
+//! # 快照策略（关键设计 #3）
+//!
+//! 全程只有**一份**主 `lopdf::Document`：它是原文减去已删字形，**不写译文**。
+//! 每次某页就绪时：对该页 `delete_translated`（删除成功段落的原字形），然后
+//! `render_snapshot` 克隆主文档、重放**全部已就绪页**的译文、`finalize`、
+//! 原子保存到 `output`。最终发布再走一次同样的路径并记 `FontStats`。
+//!
+//! # 记忆体
+//!
+//! `BoundPage` 含整页 `PageIR`，而删字形（`PatchSet::delete_glyphs`）必须用到
+//! `PageIR`，因此各页 `BoundPage` 在 run 期间常驻。up-vns（12 页）无压力；
+//! 篇幅很大的文档（如 up-2602，58 页）会占用较多记忆体，见回报的已知缺口。
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
-use syncpdf_core::ir::Paragraph;
-use syncpdf_protocol::{Event, Request, Stage, Stats, PROTOCOL_VERSION};
+use syncpdf_core::ir::{
+    PageIR, Paragraph, ParagraphStatus, Region, Translatable, TypesetParagraph,
+};
+use syncpdf_core::ParagraphId;
+use syncpdf_font::{FontProfile, FontStore, Role};
+use syncpdf_pdf::bind::BoundPage;
+use syncpdf_pdf::writer::FontStats;
+use syncpdf_protocol::{Event, Request, Severity, Stage, Stats, PROTOCOL_VERSION};
 use syncpdf_store::Store;
+use syncpdf_typeset::{Obstacles, TypesetIssue};
 
 use crate::cancel::CancellationToken;
 use crate::events::{event_kind, SharedSink};
 use crate::schedule::PageSchedule;
 use crate::stages::{
-    self, apply_coverage_fallback, check_cancelled, detect_regions, load_fonts, make_translator,
-    preflight, preflight::Preflight, regions_from_detections, LayoutOpts, PipelineError,
+    self, analyze_page, apply_coverage_fallback, check_cancelled, delete_translated,
+    detect_regions, load_fonts, make_translator, preflight, preflight::Preflight, render_snapshot,
+    typeset_one, DynTranslator, LayoutOpts, PipelineError, StoreShaper,
 };
 
+/// 源解析阶段的缓存键（阶段缓存）。
+const STAGE_SOURCE: &str = "source_analysis";
+/// 取消轮询间隔（`tokio::select!` 的 tick）。
+const CANCEL_POLL: Duration = Duration::from_millis(100);
+
 /// 一次 run 的配置：`configure`（通道 / 缓存目录）+ `run`（输入输出 / 语言）。
-///
-/// 两个字段保留原始协议请求，方便阶段 2 从里面取 `translator`、`cache_dir`、
-/// `font_profile` 等；阶段 1 只读其中一部分。
 #[derive(Debug, Clone)]
 pub struct RunConfig {
     /// 首条 `configure` 请求（必须是 `Request::Configure`）。
@@ -148,6 +168,8 @@ pub struct RunSummary {
     pub paragraphs: u32,
     /// 总耗时（毫秒）。
     pub elapsed_ms: u64,
+    /// 发布统计（与 `document_finished` 一致）。
+    pub stats: Stats,
 }
 
 /// 编排器：持有字体 / 模型目录与阶段缓存的路径。
@@ -175,7 +197,7 @@ impl Default for Pipeline {
 }
 
 impl Pipeline {
-    /// 用默认目录构造。
+    /// 用给定目录构造。
     pub fn new(fonts_dir: PathBuf, models_dir: PathBuf, store_path: PathBuf) -> Self {
         Self {
             fonts_dir,
@@ -207,9 +229,8 @@ impl Pipeline {
             }
         };
 
-        // run_started 必须是首个事件；页数在 preflight 前未知，先用请求里
-        // 选定的页数（`pages` 子集时即是子集大小，全篇时是 0，preflight 后
-        // 再用真实页数纠正为 `progress` 的 total）。
+        // `run_started` 必须是首个事件；真实页数要 preflight 后才知道，这里先
+        // 用请求里选定的页数（`pages` 为子集时即子集大小，全篇记 0）。
         let declared_pages = fields.pages.map_or(0, |p| p.len() as u32);
         sink.emit(Event::RunStarted {
             protocol_version: PROTOCOL_VERSION,
@@ -218,7 +239,7 @@ impl Pipeline {
             pages: declared_pages,
         });
 
-        let pf = match self.stage_preflight(&mut sink, &worker, fields.input, &cancel, started) {
+        let pf = match self.stage_preflight(&mut sink, &worker, fields.input, &cancel) {
             Ok(pf) => pf,
             Err(e) => {
                 fail(&mut sink, &e, started);
@@ -226,7 +247,7 @@ impl Pipeline {
             }
         };
 
-        // 选定的页（0 基）；`None` = 全部页。
+        // 选定的页（**0 基**）；`None` = 全部页。
         let selected: Vec<u32> = match fields.pages {
             Some(ps) => ps.to_vec(),
             None => (0..pf.pages).collect(),
@@ -234,7 +255,7 @@ impl Pipeline {
 
         let result = self
             .run_stages(
-                &mut sink, &worker, &pf, &fields, &cancel, &selected, started,
+                &mut sink, &worker, &pf, &fields, cfg, &cancel, &selected, started,
             )
             .await;
 
@@ -248,6 +269,7 @@ impl Pipeline {
             }
         }
     }
+
     /// preflight 阶段（发 stage_started/stage_finished）。
     fn stage_preflight(
         &self,
@@ -255,18 +277,16 @@ impl Pipeline {
         worker: &syncpdf_pdf::pdfium::PdfiumWorker,
         input: &Path,
         cancel: &CancellationToken,
-        started: Instant,
     ) -> Result<Preflight, PipelineError> {
         emit_stage_started(sink, Stage::Preflight);
         let t = Instant::now();
         check_cancelled(cancel)?;
         let pf = preflight(worker, input)?;
         emit_stage_finished(sink, Stage::Preflight, t);
-        let _ = started;
         Ok(pf)
     }
 
-    /// 其余阶段：源解析 → 版面 → 段落 → 翻译 → 排版 → 校验 → 发布。
+    /// 其余阶段：源解析 → 版面 → 段落 → 翻译（流式排版/回写）→ 校验 → 发布。
     #[allow(clippy::too_many_arguments)]
     async fn run_stages(
         &self,
@@ -274,47 +294,90 @@ impl Pipeline {
         worker: &syncpdf_pdf::pdfium::PdfiumWorker,
         pf: &Preflight,
         fields: &RunFields<'_>,
+        cfg: &RunConfig,
         cancel: &CancellationToken,
         selected: &[u32],
         started: Instant,
     ) -> Result<RunSummary, PipelineError> {
-        // ── 1. source_analysis（阶段 2 接线点）──────────────────────────
+        // ── 1. source_analysis（结果入阶段缓存）────────────────────────
         emit_stage_started(sink, Stage::SourceAnalysis);
         let t = Instant::now();
         check_cancelled(cancel)?;
-        let mut doc = load_lopdf(fields.input)?;
-        let pages_ir = stages::source_analysis(worker, &mut doc, selected, cancel)?;
+        let main_doc = load_lopdf(fields.input)?;
+        let store = open_store(&self.store_path)?;
+        let bound_pages =
+            stages::source_analysis(worker, pf.doc, &main_doc, selected, cancel, |d, n| {
+                tracing::debug!(done = d, total = n, "source_analysis 进度");
+            })?;
+        let pages_ir = stages::source::page_irs(&bound_pages);
+        for b in &bound_pages {
+            emit_bind_issues(sink, b);
+        }
+        // 阶段缓存只在**全篇** run（`pages` 未指定）时读写：页子集的结果不能
+        // 覆盖全篇缓存，否则后续全篇 run 会拿到缺页的缓存。命中时只发
+        // `stage_cached`，**不回写**（免得把子集结果固化成「缓存命中」）。
+        let full_doc = fields.pages.is_none();
+        if full_doc {
+            match store.get_stage::<Vec<PageIR>>(&pf.source_sha, STAGE_SOURCE) {
+                Ok(Some(hit)) => sink.emit(Event::Issue {
+                    severity: Severity::Info,
+                    code: "stage_cached".into(),
+                    paragraph_id: None,
+                    page: None,
+                    message: format!(
+                        "source_analysis 命中阶段缓存（{} 页，sha256={}）",
+                        hit.len(),
+                        pf.source_sha.to_hex()
+                    ),
+                }),
+                Ok(None) => {
+                    if let Err(e) = store.put_stage(&pf.source_sha, STAGE_SOURCE, &pages_ir) {
+                        tracing::warn!(error = %e, "写 source_analysis 缓存失败");
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "读 source_analysis 缓存失败，按未命中处理"),
+            }
+        }
         emit_stage_finished(sink, Stage::SourceAnalysis, t);
 
         // ── 2. layout_analysis（结果入阶段缓存）────────────────────────
         emit_stage_started(sink, Stage::LayoutAnalysis);
         let t = Instant::now();
-        let store = open_store(&self.store_path)?;
         let model_path = self.models_dir.join("pp_doc_layoutv3.onnx");
         let mut model = syncpdf_layout::LayoutModel::load(&model_path, 2)
             .map_err(|e| PipelineError::Layout(e.to_string()))?;
-        let mut per_page_regions = Vec::new();
+        let mut per_page_regions: Vec<(u32, Vec<Region>)> = Vec::new();
         for (i, page_ir) in pages_ir.iter().enumerate() {
             check_cancelled(cancel)?;
             let page = page_ir.page.0;
-            let key = pf.source_sha;
-            let cache_key = format!("layout:{}", page);
-            let mut regions: Vec<syncpdf_core::ir::Region> = match store.get_stage::<Vec<
-                syncpdf_core::ir::Region,
-            >>(
-                &key, &cache_key
-            )? {
-                Some(cached) => cached,
-                None => {
-                    let info = pf
-                        .page_infos
-                        .get(page as usize)
-                        .copied()
-                        .ok_or_else(|| PipelineError::Protocol("页号越界".into()))?;
-                    let regions =
-                        detect_regions(&mut model, worker, pf.doc, page, &info, &self.layout_opts)?;
-                    store.put_stage(&key, &cache_key, &regions)?;
+            let cache_key = format!("layout:{page}");
+            let mut regions: Vec<Region> = match store
+                .get_stage::<Vec<Region>>(&pf.source_sha, &cache_key)
+            {
+                Ok(Some(cached)) => {
+                    if full_doc {
+                        sink.emit(Event::Issue {
+                            severity: Severity::Info,
+                            code: "stage_cached".into(),
+                            paragraph_id: None,
+                            page: Some(page + 1),
+                            message: format!("layout_analysis 命中阶段缓存（第 {} 页）", page + 1),
+                        });
+                    }
+                    cached
+                }
+                Ok(None) => {
+                    let regions = self.detect_page(&mut model, worker, pf, page)?;
+                    if full_doc {
+                        if let Err(e) = store.put_stage(&pf.source_sha, &cache_key, &regions) {
+                            tracing::warn!(error = %e, "写 layout 缓存失败");
+                        }
+                    }
                     regions
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "读 layout 缓存失败，按未命中处理");
+                    self.detect_page(&mut model, worker, pf, page)?
                 }
             };
             let report = apply_coverage_fallback(
@@ -325,7 +388,7 @@ impl Pipeline {
             );
             if report.ratio > self.layout_opts.coverage_limit {
                 sink.emit(Event::Issue {
-                    severity: syncpdf_protocol::Severity::Warning,
+                    severity: Severity::Warning,
                     code: "coverage_gap".into(),
                     paragraph_id: None,
                     page: Some(page + 1),
@@ -340,7 +403,7 @@ impl Pipeline {
                 done: i as u32 + 1,
                 total: pages_ir.len() as u32,
             });
-            per_page_regions.push((page_ir.page, regions, report));
+            per_page_regions.push((page, regions));
         }
         emit_stage_finished(sink, Stage::LayoutAnalysis, t);
 
@@ -348,19 +411,19 @@ impl Pipeline {
         emit_stage_started(sink, Stage::ParagraphAnalysis);
         let t = Instant::now();
         let mut all_paras: Vec<Paragraph> = Vec::new();
-        for (page, regions, _) in &per_page_regions {
+        for (page, regions) in &per_page_regions {
             check_cancelled(cancel)?;
             let ir = pages_ir
                 .iter()
-                .find(|p| p.page == *page)
-                .expect("区域来自本页 IR");
-            all_paras.extend(stages::analyze_page(ir, regions));
+                .find(|p| p.page.0 == *page)
+                .ok_or_else(|| PipelineError::Protocol("区域所属页缺少 IR".into()))?;
+            all_paras.extend(analyze_page(ir, regions));
         }
         for p in &all_paras {
             sink.emit(Event::Paragraph {
                 paragraph_id: p.id.clone(),
                 page: p.id.page,
-                status: syncpdf_core::ir::ParagraphStatus::Pending,
+                status: ParagraphStatus::Pending,
                 boxes: Some(vec![p.bbox]),
                 coord_system: syncpdf_core::CoordSystem::PdfUser,
                 translated_html: None,
@@ -368,48 +431,606 @@ impl Pipeline {
         }
         emit_stage_finished(sink, Stage::ParagraphAnalysis, t);
 
-        // ── 4. translating（流式；阶段 1 到不了这里）────────────────────
+        // 不可译段落（原子/数字/单字符）不参与翻译，直接落定 `not_replaced`。
+        let (translatable, not_replaced): (Vec<Paragraph>, Vec<Paragraph>) = all_paras
+            .iter()
+            .cloned()
+            .partition(|p| matches!(p.translatable, Translatable::Yes));
+        for p in &not_replaced {
+            sink.emit(Event::Paragraph {
+                paragraph_id: p.id.clone(),
+                page: p.id.page,
+                status: ParagraphStatus::NotReplaced,
+                boxes: Some(vec![p.bbox]),
+                coord_system: syncpdf_core::CoordSystem::PdfUser,
+                translated_html: None,
+            });
+        }
+
+        // ── 4. translating + typesetting（流式）────────────────────────
         emit_stage_started(sink, Stage::Translating);
         let t = Instant::now();
-        let translatable: Vec<Paragraph> = all_paras
-            .iter()
-            .filter(|p| matches!(p.translatable, syncpdf_core::ir::Translatable::Yes))
-            .cloned()
-            .collect();
-        let mut schedule =
-            PageSchedule::new(translatable.iter().map(|p| (p.id.page, p.id.clone())));
-        schedule.add_all_pages(selected.len() as u32);
 
         let (font_store, font_profile) = load_fonts(&self.fonts_dir, fields.target_lang)?;
-        let shaper = stages::StoreShaper::new(&font_store, &font_profile);
-        let kind = cfg_translator(fields, pf)?;
-        let _translator = make_translator(&kind)?;
+        let kind = cfg
+            .translator_kind()
+            .cloned()
+            .ok_or_else(|| PipelineError::Protocol("configure 里缺少 translator".into()))?;
+        let translator = make_translator(&kind)?;
 
-        // 排版 → 回写 → 页就绪（阶段 2 前不会真正执行到这里）。
-        let _ = &shaper;
-        let _ = &mut schedule;
-        let _ = regions_from_detections;
+        // 页就绪表（**1 基**页号）：先登记可译段落，再把选定页全部补进 expected。
+        let mut schedule =
+            PageSchedule::new(translatable.iter().map(|p| (p.id.page, p.id.clone())));
+        for p in selected {
+            schedule.add_page(p + 1);
+        }
+
+        let bound: BTreeMap<u32, BoundPage> =
+            bound_pages.into_iter().map(|b| (b.ir.page.0, b)).collect();
+        let page_heights: BTreeMap<u32, f32> = bound
+            .iter()
+            .map(|(p, b)| (*p, b.ir.media_box.height()))
+            .collect();
+
+        let state = Arc::new(Mutex::new(RunState {
+            doc: main_doc,
+            bound,
+            typeset_by_page: BTreeMap::new(),
+            page_heights,
+            pars: all_paras
+                .iter()
+                .map(|p| (p.id.clone(), p.clone()))
+                .collect(),
+            font_store,
+            font_profile,
+            schedule,
+            output: fields.output.to_path_buf(),
+            src_chars: 0,
+            tgt_chars: 0,
+            fallbacks: 0,
+            settled: 0,
+            settled_ids: BTreeSet::new(),
+            ready: Vec::new(),
+            revision: 0,
+            font_stats: None,
+        }));
+
+        // 无段落的选定页（含只有不可译段落的页）先转就绪并回写。
+        {
+            let mut s = lock_state(&state);
+            let empty = {
+                let selected_1based: Vec<u32> = selected.iter().map(|p| p + 1).collect();
+                s.schedule.pages_without_paragraphs(&selected_1based)
+            };
+            for p in empty {
+                if s.schedule.mark_page(p).is_some() {
+                    writeback_page(&mut s, p - 1, sink);
+                }
+            }
+        }
+
+        let cache = open_cache(cfg.cache_dir());
+        let total = translatable.len() as u32;
+        let spec = syncpdf_translate::PromptSpec::new(fields.source_lang, fields.target_lang);
+        let lookup = stages::glyph_text_lookup(&pages_ir);
+
+        let on_block = {
+            let state = state.clone();
+            let sink = sink.clone();
+            let cancel = cancel.clone();
+            move |block: syncpdf_translate::TranslatedBlock| {
+                if cancel.is_cancelled() {
+                    return;
+                }
+                let mut s = lock_state(&state);
+                handle_block(&mut s, &sink, block, total);
+            }
+        };
+
+        let translated = tokio::select! {
+            biased;
+            () = cancel_watch(cancel) => Err(PipelineError::Cancelled),
+            r = stages::translate_all(
+                DynTranslator::new(translator),
+                &spec,
+                &translatable,
+                lookup,
+                cache.as_ref(),
+                on_block,
+            ) => r,
+        };
+        drop(pages_ir);
+        check_cancelled(cancel)?;
+        translated?;
         emit_stage_finished(sink, Stage::Translating, t);
 
-        // 阶段 2 会继续 typesetting / validating / publishing 并在最后
-        // 发 document_finished + run_finished{ok:true}。
-        let e = PipelineError::NotYetAvailable("writeback::bind_page");
-        let _ = started;
-        Err(e)
+        // ── 4b. typesetting：兜底把未凑齐的页转 ready 并回写 ────────────
+        emit_stage_started(sink, Stage::Typesetting);
+        let t = Instant::now();
+        {
+            let mut s = lock_state(&state);
+            // 漏译（引擎没吐、或回调里被取消跳过）的段落补发 fallback。
+            let missing: Vec<ParagraphId> = translatable
+                .iter()
+                .map(|p| p.id.clone())
+                .filter(|id| !s.settled_ids.contains(id))
+                .collect();
+            for id in missing {
+                if let Some(p) = s.pars.get(&id).cloned() {
+                    s.fallbacks += 1;
+                    let n = p.text.chars().count() as u64;
+                    s.src_chars += n;
+                    s.tgt_chars += n;
+                    s.settled += 1;
+                    s.settled_ids.insert(id.clone());
+                    sink.emit(Event::Issue {
+                        severity: Severity::Warning,
+                        code: "translate_missing".into(),
+                        paragraph_id: Some(id.clone()),
+                        page: Some(id.page),
+                        message: "翻译未交付该段，回退原文".into(),
+                    });
+                    sink.emit(Event::Paragraph {
+                        paragraph_id: id.clone(),
+                        page: id.page,
+                        status: ParagraphStatus::Fallback,
+                        boxes: Some(vec![p.bbox]),
+                        coord_system: syncpdf_core::CoordSystem::PdfUser,
+                        translated_html: None,
+                    });
+                }
+                s.schedule.mark(&id);
+            }
+            let rest = s.schedule.force_ready_rest();
+            for p in rest {
+                writeback_page(&mut s, p - 1, sink);
+            }
+        }
+        emit_stage_finished(sink, Stage::Typesetting, t);
+
+        // ── 5. validating：对已完成的输出做 self_check + 链接对照 ───────
+        emit_stage_started(sink, Stage::Validating);
+        let t = Instant::now();
+        let ready_pages: Vec<u32> = lock_state(&state).ready.iter().map(|p| p + 1).collect();
+        validate_output(sink, fields.output, &ready_pages, fields.input);
+        emit_stage_finished(sink, Stage::Validating, t);
+
+        // ── 6. publishing：最终保存 + document_finished ─────────────────
+        emit_stage_started(sink, Stage::Publishing);
+        let t = Instant::now();
+        let (summary_stats, settled) = {
+            let mut s = lock_state(&state);
+            let fs = render_snapshot(
+                &s.doc,
+                &s.font_store,
+                &s.typeset_by_page,
+                &s.page_heights,
+                &s.output,
+            )?;
+            s.font_stats = Some(fs);
+            (s.stats(), s.settled)
+        };
+        sink.emit(Event::DocumentFinished {
+            output: fields.output.to_path_buf(),
+            stats: summary_stats,
+        });
+        emit_stage_finished(sink, Stage::Publishing, t);
+
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        sink.emit(Event::RunFinished {
+            ok: true,
+            elapsed_ms,
+        });
+        Ok(RunSummary {
+            ok: true,
+            pages: selected.len() as u32,
+            paragraphs: settled,
+            elapsed_ms,
+            stats: summary_stats,
+        })
+    }
+
+    /// 检测单页版面区域（`pf.page_infos` 是 0 基，`detect_regions` 收 0 基）。
+    fn detect_page(
+        &self,
+        model: &mut syncpdf_layout::LayoutModel,
+        worker: &syncpdf_pdf::pdfium::PdfiumWorker,
+        pf: &Preflight,
+        page: u32,
+    ) -> Result<Vec<Region>, PipelineError> {
+        let info = pf
+            .page_infos
+            .get(page as usize)
+            .copied()
+            .ok_or_else(|| PipelineError::Protocol(format!("页号越界：{page}")))?;
+        detect_regions(model, worker, pf.doc, page, &info, &self.layout_opts)
     }
 }
 
-/// 拆 `configure` 里的翻译器；`run` 的 `translator` 字段不在，故只能这样取。
-fn cfg_translator(
-    _fields: &RunFields<'_>,
-    _pf: &Preflight,
-) -> Result<syncpdf_protocol::TranslatorKind, PipelineError> {
-    Err(PipelineError::Protocol(
-        "translator 需从 configure 请求读取（阶段 2 接线）".into(),
-    ))
+/// run 期间共享的可变状态（流式回调与主流程都经 `Arc<Mutex<..>>` 访问）。
+///
+/// 放进一个结构里，是为了让 `on_block` 闭包只捕获 `Arc` + `SharedSink` +
+/// `CancellationToken`（都必然 `Send`）；字体、输出路径、页就绪表等随状态自身
+/// 走，不必跨闭包借用。
+struct RunState {
+    /// 主文档：原文减去已删字形，**不写译文**（关键设计 #3）。
+    doc: lopdf::Document,
+    /// 页号（0 基）→ 绑定结果（删字形需要 `PageIR` 与 Form `Do` 记录）。
+    bound: BTreeMap<u32, BoundPage>,
+    /// 页号（0 基）→ 该页译文段落（按到达顺序）。
+    typeset_by_page: BTreeMap<u32, Vec<TypesetParagraph>>,
+    /// 页号（0 基）→ 页高（pt）。
+    page_heights: BTreeMap<u32, f32>,
+    /// 段落 id → 段落本体。
+    pars: BTreeMap<ParagraphId, Paragraph>,
+    /// 内置字体存储（`Writer` 需要的 `&FontStore`）。
+    font_store: FontStore,
+    /// 目标语言的默认字体 profile。
+    font_profile: FontProfile,
+    /// 页就绪判定（页号 1 基）。
+    schedule: PageSchedule,
+    /// 输出路径（每次快照都覆盖它）。
+    output: PathBuf,
+    /// 参与的原文总字符数（`expansion_ratio` 的分母）。
+    src_chars: u64,
+    /// 译文总字符数（回退段计入原文，分子）。
+    tgt_chars: u64,
+    /// 回退原文的段落数。
+    fallbacks: u32,
+    /// 已落定（译文通过或回退）的段落数。
+    settled: u32,
+    /// 已落定的段落 id（用于补齐漏译）。
+    settled_ids: BTreeSet<ParagraphId>,
+    /// 已就绪页（0 基，升序）。
+    ready: Vec<u32>,
+    /// `page_ready` 的 `revision` 计数。
+    revision: u64,
+    /// 最终发布的字体统计。
+    font_stats: Option<FontStats>,
 }
 
-/// 用 lopdf 载入 PDF（阶段 2 的 bind_page 需要）。
+impl RunState {
+    /// `document_finished` 的统计。
+    ///
+    /// `expansion_ratio` 按 brief 取「译文总字符 / 原文总字符」（与
+    /// `syncpdf_protocol::Stats` 的字段注释「输出/输入字节数之比」不一致，
+    /// 见回报「已知缺口」）。
+    fn stats(&self) -> Stats {
+        let expansion_ratio = if self.src_chars == 0 {
+            1.0
+        } else {
+            self.tgt_chars as f64 / self.src_chars as f64
+        };
+        Stats {
+            fonts: self.font_stats.map_or(0, |f| f.fonts),
+            expansion_ratio,
+            fallbacks: self.fallbacks,
+        }
+    }
+}
+
+/// 锁住 `RunState`；中毒时取回内层（回调里 panic 不该连带整轮 run 失败）。
+fn lock_state(state: &Arc<Mutex<RunState>>) -> MutexGuard<'_, RunState> {
+    match state.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+/// 每 100ms 检查一次取消令牌（`tokio::select!` 的另一臂）。
+async fn cancel_watch(cancel: &CancellationToken) {
+    loop {
+        if cancel.is_cancelled() {
+            return;
+        }
+        tokio::time::sleep(CANCEL_POLL).await;
+    }
+}
+
+/// 打开翻译缓存（`cache_dir/translate.db`）；失败只记日志，按无缓存继续。
+fn open_cache(dir: Option<&Path>) -> Option<syncpdf_translate::Cache> {
+    let dir = dir?;
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        tracing::warn!(error = %e, "缓存目录建不出来，按无缓存继续");
+        return None;
+    }
+    match syncpdf_translate::Cache::open(&dir.join("translate.db")) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            tracing::warn!(error = %e, "翻译缓存打不开，按无缓存继续");
+            None
+        }
+    }
+}
+
+/// 一个已落定块的处理：排版 + 事件 + 页就绪回写（关键设计 #2）。
+///
+/// 校验通过的块解析 HTML 后排版，存入 `typeset_by_page`（它的字形会在该页就绪
+/// 时被删除）；解析失败/校验回退/空译一律**保留原文**（不删字形），并报 `issue`。
+/// 每个块都会 `schedule.mark`，返回页号时立刻回写。
+fn handle_block(
+    state: &mut RunState,
+    sink: &SharedSink,
+    block: syncpdf_translate::TranslatedBlock,
+    total: u32,
+) {
+    let id = block.id.clone();
+    let Some(para) = state.pars.get(&id).cloned() else {
+        tracing::warn!(para = %id, "收到未知段落的译文块，忽略");
+        return;
+    };
+    let src_len = para.text.chars().count() as u64;
+    let mut fallback: Option<(&'static str, Option<String>, String)> = None;
+    let mut out: Option<(String, Vec<syncpdf_core::Rect>)> = None;
+
+    if block.status.is_ok() {
+        match syncpdf_translate::parse_unit_html(&block.html) {
+            Ok(parsed) => {
+                let shaper =
+                    StoreShaper::new(&state.font_store, &state.font_profile).with_role(Role::Body);
+                let result = typeset_one(&shaper, &para, &parsed, &Obstacles::default());
+                for issue in &result.issues {
+                    match issue {
+                        TypesetIssue::MinScaleHit => sink.emit(Event::Issue {
+                            severity: Severity::Warning,
+                            code: "typeset_min_scale".into(),
+                            paragraph_id: Some(id.clone()),
+                            page: Some(id.page),
+                            message: "字号已降到下限，仍未能放下".into(),
+                        }),
+                        TypesetIssue::Overflow { lines } => sink.emit(Event::Issue {
+                            severity: Severity::Warning,
+                            code: "typeset_overflow".into(),
+                            paragraph_id: Some(id.clone()),
+                            page: Some(id.page),
+                            message: format!("译文溢出 {lines} 行"),
+                        }),
+                        TypesetIssue::Widened { by } => {
+                            tracing::debug!(para = %id, by, "排版加宽生效");
+                        }
+                    }
+                }
+                if result.paragraph.lines.is_empty() {
+                    fallback = Some(("typeset_failed", None, "译文排不出任何行，回退原文".into()));
+                } else {
+                    let boxes = result.paragraph.lines.iter().map(|l| l.bbox).collect();
+                    state
+                        .typeset_by_page
+                        .entry(id.page - 1)
+                        .or_default()
+                        .push(result.paragraph);
+                    state.src_chars += src_len;
+                    state.tgt_chars += block.html.chars().count() as u64;
+                    out = Some((block.html.clone(), boxes));
+                }
+            }
+            Err(e) => {
+                fallback = Some((
+                    "translate_invalid_html",
+                    None,
+                    format!("译文 HTML 解析失败：{e}"),
+                ));
+            }
+        }
+    } else {
+        match &block.status {
+            syncpdf_translate::BlockStatus::Fallback { violations } if violations.is_empty() => {
+                fallback = Some(("translate_missing", None, "模型没有返回该段译文".into()));
+            }
+            syncpdf_translate::BlockStatus::Fallback { violations } => {
+                let codes: Vec<String> = violations.iter().map(|v| v.code().to_string()).collect();
+                fallback = Some((
+                    "translate_fallback",
+                    Some(codes.join(",")),
+                    format!("校验未通过（{} 个违规）", violations.len()),
+                ));
+            }
+            syncpdf_translate::BlockStatus::Empty => {
+                fallback = Some(("translate_empty", None, "空译".into()));
+            }
+            syncpdf_translate::BlockStatus::Ok => {}
+        }
+    }
+
+    match out {
+        Some((html, boxes)) => sink.emit(Event::Paragraph {
+            paragraph_id: id.clone(),
+            page: id.page,
+            status: ParagraphStatus::Typeset,
+            boxes: Some(boxes),
+            coord_system: syncpdf_core::CoordSystem::PdfUser,
+            translated_html: Some(html),
+        }),
+        None => {
+            let (code, detail, msg) =
+                fallback.unwrap_or(("translate_fallback", None, "回退原文".into()));
+            state.fallbacks += 1;
+            state.src_chars += src_len;
+            state.tgt_chars += src_len;
+            let mut message = format!("{msg}，回退原文");
+            if let Some(d) = detail {
+                message.push_str(&format!("（违规：{d}）"));
+            }
+            sink.emit(Event::Issue {
+                severity: Severity::Warning,
+                code: code.into(),
+                paragraph_id: Some(id.clone()),
+                page: Some(id.page),
+                message,
+            });
+            sink.emit(Event::Paragraph {
+                paragraph_id: id.clone(),
+                page: id.page,
+                status: ParagraphStatus::Fallback,
+                boxes: Some(vec![para.bbox]),
+                coord_system: syncpdf_core::CoordSystem::PdfUser,
+                translated_html: None,
+            });
+        }
+    }
+
+    state.settled += 1;
+    state.settled_ids.insert(id.clone());
+    sink.emit(Event::Progress {
+        stage: Stage::Translating,
+        done: state.settled,
+        total,
+    });
+
+    if let Some(page) = state.schedule.mark(&id) {
+        writeback_page(state, page - 1, sink);
+    }
+}
+
+/// 页就绪回写：删除该页成功段落的原字形，然后重放全部就绪页 → 快照 → 事件。
+fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) {
+    if state.ready.contains(&page) {
+        return;
+    }
+    let RunState {
+        doc,
+        bound,
+        typeset_by_page,
+        page_heights,
+        pars,
+        font_store,
+        output,
+        ready,
+        revision,
+        ..
+    } = state;
+    let Some(b) = bound.get(&page) else {
+        tracing::warn!(page, "就绪页缺少绑定结果，跳过回写");
+        return;
+    };
+    // 只删「译文排版成功」段落的字形；回退/未替换的段落保留原文。
+    let ids: Vec<ParagraphId> = typeset_by_page
+        .get(&page)
+        .map(|v| v.iter().map(|t| t.id.clone()).collect())
+        .unwrap_or_default();
+    let paras: Vec<&Paragraph> = ids.iter().filter_map(|i| pars.get(i)).collect();
+    match delete_translated(doc, b, &paras) {
+        Ok(stats) => tracing::debug!(
+            page,
+            streams = stats.streams_touched,
+            forms = stats.forms_cloned,
+            "已删原字形"
+        ),
+        Err(e) => {
+            tracing::error!(page, error = %e, "删除原字形失败，该页按未回写处理");
+            return;
+        }
+    }
+    match render_snapshot(doc, font_store, typeset_by_page, page_heights, output) {
+        Ok(fs) => {
+            *revision += 1;
+            ready.push(page);
+            ready.sort_unstable();
+            sink.emit(Event::PageReady {
+                page: page + 1,
+                preview_path: None,
+                revision: *revision,
+            });
+            tracing::debug!(page, fonts = fs.fonts, "快照已保存");
+        }
+        Err(e) => tracing::error!(page, error = %e, "快照写入失败"),
+    }
+}
+
+/// bind 阶段的问题转 `issue`；文本对象数与 text-show 操作数不符另报一条。
+fn emit_bind_issues(sink: &mut SharedSink, bound: &BoundPage) {
+    let page = bound.ir.page.number();
+    for msg in &bound.issues {
+        sink.emit(Event::Issue {
+            severity: Severity::Warning,
+            code: "bind_degraded".into(),
+            paragraph_id: None,
+            page: Some(page),
+            message: msg.clone(),
+        });
+    }
+    if bound.stats.text_objects != bound.stats.text_ops {
+        sink.emit(Event::Issue {
+            severity: Severity::Warning,
+            code: "bind_mismatch".into(),
+            paragraph_id: None,
+            page: Some(page),
+            message: format!(
+                "pdfium 文本对象 {} 个、内容流 text-show 操作 {} 个，数量不符",
+                bound.stats.text_objects, bound.stats.text_ops
+            ),
+        });
+    }
+}
+
+/// 输出校验：`self_check`（problems→Error / warnings→Warning）+ 链接对照。
+fn validate_output(sink: &mut SharedSink, output: &Path, ready_pages: &[u32], input: &Path) {
+    // `self_check` 的 `expect_cjk_on_pages` 收 **1 基**页号。
+    match syncpdf_pdf::validate::self_check(output, ready_pages) {
+        Ok(report) => {
+            for p in &report.problems {
+                sink.emit(Event::Issue {
+                    severity: Severity::Error,
+                    code: "self_check".into(),
+                    paragraph_id: None,
+                    page: None,
+                    message: p.clone(),
+                });
+            }
+            for w in &report.warnings {
+                sink.emit(Event::Issue {
+                    severity: Severity::Warning,
+                    code: "self_check".into(),
+                    paragraph_id: None,
+                    page: None,
+                    message: w.clone(),
+                });
+            }
+        }
+        Err(e) => sink.emit(Event::Issue {
+            severity: Severity::Error,
+            code: "self_check".into(),
+            paragraph_id: None,
+            page: None,
+            message: format!("self_check 无法执行：{e}"),
+        }),
+    }
+
+    let (doc_in, doc_out) = match (lopdf::Document::load(input), lopdf::Document::load(output)) {
+        (Ok(a), Ok(b)) => (a, b),
+        (Err(e), _) => {
+            sink.emit(Event::Issue {
+                severity: Severity::Warning,
+                code: "links_check".into(),
+                paragraph_id: None,
+                page: None,
+                message: format!("原文载入失败，跳过链接对照：{e}"),
+            });
+            return;
+        }
+        (_, Err(e)) => {
+            sink.emit(Event::Issue {
+                severity: Severity::Warning,
+                code: "links_check".into(),
+                paragraph_id: None,
+                page: None,
+                message: format!("输出载入失败，跳过链接对照：{e}"),
+            });
+            return;
+        }
+    };
+    for p in syncpdf_pdf::links::links_check(&doc_in, &doc_out) {
+        sink.emit(Event::Issue {
+            severity: Severity::Warning,
+            code: "links_check".into(),
+            paragraph_id: None,
+            page: None,
+            message: p,
+        });
+    }
+}
+
+/// 用 lopdf 载入 PDF（`bind_page` 与回写都需要）。
 fn load_lopdf(path: &Path) -> Result<lopdf::Document, PipelineError> {
     lopdf::Document::load(path).map_err(|e| PipelineError::Protocol(format!("lopdf 载入失败：{e}")))
 }
@@ -439,25 +1060,18 @@ fn fail(sink: &mut SharedSink, err: &PipelineError, started: Instant) {
     });
 }
 
-/// `document_finished` 的统计占位（阶段 2 用真实值）。
-pub fn stats_placeholder() -> Stats {
-    Stats::default()
-}
-
 /// 事件类型名（转发，便于 cli 断言）。
 pub fn kind_of(e: &Event) -> &'static str {
     event_kind(e)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
     use syncpdf_core::require_fixture;
 
-    fn vec_sink_path() -> PathBuf {
+    fn tmp_path(ext: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
-            "syncpdf-pipeline-test-{}-{}.db",
+            "syncpdf-pipeline-run-{}-{}.{ext}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -475,6 +1089,21 @@ mod tests {
         }
     }
 
+    /// pdfium / 模型 / 字体任一缺失就跳过（返回 None）。
+    fn env_ready() -> Option<()> {
+        if syncpdf_pdf::pdfium::PdfiumWorker::spawn().is_err() {
+            eprintln!("SKIP: pdfium 不可用");
+            return None;
+        }
+        let models = syncpdf_core::fixtures::models_dir()?;
+        if !models.join("pp_doc_layoutv3.onnx").is_file() {
+            eprintln!("SKIP: 布局模型缺失：{models:?}");
+            return None;
+        }
+        syncpdf_core::fixtures::fonts_dir()?;
+        Some(())
+    }
+
     #[test]
     fn run_config_rejects_wrong_request_order() {
         let cancel = Request::Cancel;
@@ -488,67 +1117,6 @@ mod tests {
         assert!(cfg.translator_kind().is_some());
         assert!(cfg.cache_dir().is_some());
         assert_eq!(cfg.run_fields().unwrap().target_lang, "zh-CN");
-    }
-
-    #[tokio::test]
-    async fn run_emits_legal_event_sequence_on_ci_test() {
-        let input = require_fixture!("ci-test.pdf");
-        let out = vec_sink_path();
-        let log: Arc<Mutex<Vec<(u64, Event)>>> = Arc::new(Mutex::new(Vec::new()));
-        let shared = SharedSink::new(RunRecorder::new(log.clone()));
-        let cfg = RunConfig::with_fake("cjk", input, out.clone()).unwrap();
-        let p = pipeline(vec_sink_path());
-        let result = p.run(&cfg, shared.clone(), CancellationToken::new()).await;
-
-        // 阶段 1：source_analysis 未就绪 → 必定是 Err。
-        assert!(result.is_err(), "阶段 1 应在 source_analysis 处失败");
-        assert!(!out.exists(), "阶段 1 不应写出任何输出文件：{out:?}");
-
-        let events = log.lock().unwrap().clone();
-        assert!(!events.is_empty(), "至少要有事件");
-        assert_eq!(
-            crate::events::event_kind(&events[0].1),
-            "run_started",
-            "首个事件必须是 run_started"
-        );
-        assert_eq!(
-            crate::events::event_kind(&events.last().unwrap().1),
-            "run_finished",
-            "末个事件必须是 run_finished"
-        );
-        match &events.last().unwrap().1 {
-            Event::RunFinished { ok, .. } => assert!(!ok, "阶段 1 必须以 ok:false 收尾"),
-            other => panic!("期望 run_finished，得到 {other:?}"),
-        }
-        // seq 单调递增且从 1 起。
-        assert_eq!(events[0].0, 1);
-        assert!(events.windows(2).all(|w| w[0].0 < w[1].0), "seq 必须单调");
-        // 出现过 preflight 阶段与致命 error。
-        assert!(
-            events.iter().any(|(_, e)| matches!(
-                e,
-                Event::StageStarted {
-                    stage: Stage::Preflight
-                }
-            )),
-            "应有 StageStarted{{Preflight}}"
-        );
-        assert!(
-            events.iter().any(|(_, e)| matches!(
-                e,
-                Event::StageFinished {
-                    stage: Stage::Preflight,
-                    ..
-                }
-            )),
-            "preflight 应正常结束"
-        );
-        assert!(
-            events
-                .iter()
-                .any(|(_, e)| matches!(e, Event::Error { fatal: true, .. })),
-            "应有致命 error 事件"
-        );
     }
 
     /// 记录 `(seq, event)` 的汇；`seq` 由自身维护，与 `SharedSink` 一致。
@@ -569,6 +1137,105 @@ mod tests {
             self.seq += 1;
             self.log.lock().expect("测试锁").push((self.seq, event));
         }
+    }
+
+    /// 端到端跑一次 ci-test：事件序列合法 + 输出存在 + 每页一次 `page_ready`。
+    #[tokio::test]
+    async fn run_emits_legal_event_sequence_on_ci_test() {
+        if env_ready().is_none() {
+            return;
+        }
+        let input = require_fixture!("ci-test.pdf");
+        let out = tmp_path("pdf");
+        let log: Arc<Mutex<Vec<(u64, Event)>>> = Arc::new(Mutex::new(Vec::new()));
+        let shared = SharedSink::new(RunRecorder::new(log.clone()));
+        let cfg = RunConfig::with_fake("cjk", input, out.clone()).unwrap();
+        let p = pipeline(tmp_path("db"));
+        let result = p.run(&cfg, shared.clone(), CancellationToken::new()).await;
+        assert!(result.is_ok(), "端到端应成功：{result:?}");
+        assert!(out.exists(), "输出文件应存在：{out:?}");
+
+        let events = log.lock().unwrap().clone();
+        assert!(!events.is_empty(), "至少要有事件");
+        assert_eq!(
+            crate::events::event_kind(&events[0].1),
+            "run_started",
+            "首个事件必须是 run_started"
+        );
+        assert_eq!(
+            crate::events::event_kind(&events.last().unwrap().1),
+            "run_finished",
+            "末个事件必须是 run_finished"
+        );
+        match &events.last().unwrap().1 {
+            Event::RunFinished { ok, .. } => assert!(ok, "应以 ok:true 收尾"),
+            other => panic!("期望 run_finished，得到 {other:?}"),
+        }
+        // seq 从 1 起且单调递增。
+        assert_eq!(events[0].0, 1);
+        assert!(events.windows(2).all(|w| w[0].0 < w[1].0), "seq 必须单调");
+        // 关键阶段事件齐全。
+        assert!(events.iter().any(|(_, e)| matches!(
+            e,
+            Event::StageFinished {
+                stage: Stage::Preflight,
+                ..
+            }
+        )));
+        assert!(
+            events
+                .iter()
+                .any(|(_, e)| matches!(e, Event::DocumentFinished { .. })),
+            "应有 document_finished"
+        );
+        let summary = result.unwrap();
+        let ready: Vec<u32> = events
+            .iter()
+            .filter_map(|(_, e)| match e {
+                Event::PageReady { page, .. } => Some(*page),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ready.len() as u32, summary.pages, "每页恰发一次 page_ready");
+        assert_eq!(ready, vec![1], "ci-test 只有 1 页");
+    }
+
+    /// 取消：`fake:slow` + 立刻取消 → `run_finished{ok:false}`，且有 cancelled 事件。
+    #[tokio::test]
+    async fn cancellation_yields_run_finished_false() {
+        if env_ready().is_none() {
+            return;
+        }
+        let input = require_fixture!("ci-test.pdf");
+        let out = tmp_path("pdf");
+        let log: Arc<Mutex<Vec<(u64, Event)>>> = Arc::new(Mutex::new(Vec::new()));
+        let shared = SharedSink::new(RunRecorder::new(log.clone()));
+        let cfg = RunConfig::with_fake("slow:500", input, out.clone()).unwrap();
+        let p = pipeline(tmp_path("db"));
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let result = p.run(&cfg, shared.clone(), cancel).await;
+        assert!(result.is_err(), "取消后应是 Err：{result:?}");
+        let events = log.lock().unwrap().clone();
+        assert_eq!(
+            crate::events::event_kind(&events.last().unwrap().1),
+            "run_finished"
+        );
+        match &events.last().unwrap().1 {
+            Event::RunFinished { ok, .. } => assert!(!ok, "取消应以 ok:false 收尾"),
+            other => panic!("期望 run_finished，得到 {other:?}"),
+        }
+        assert!(
+            events.iter().any(|(_, e)| matches!(
+                e,
+                Event::Error {
+                    fatal: false,
+                    code,
+                    ..
+                } if code == "cancelled"
+            )),
+            "应有 cancelled 错误事件"
+        );
     }
 
     #[test]
