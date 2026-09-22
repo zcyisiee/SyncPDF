@@ -347,7 +347,14 @@ fn utf16be_bom(text: &str) -> Vec<u8> {
 /// 保存文档：先压缩再写临时文件后改名（避免半成品）。
 pub fn save(doc: &mut Document, path: &Path) -> Result<()> {
     doc.compress();
-    let tmp = path.with_extension("pdf.tmp");
+    // 先写同目录临时文件再 rename，避免半截文件。
+    let mut tmp = path.to_path_buf();
+    let tmp_name = format!(
+        ".{}.tmp",
+        path.file_name()
+            .map_or_else(|| "out.pdf".into(), |n| n.to_string_lossy().into_owned())
+    );
+    tmp.set_file_name(tmp_name);
     doc.save(&tmp)
         .map_err(|e| WriteError::Lopdf(lopdf::Error::IO(e)))?;
     std::fs::rename(&tmp, path).map_err(|e| WriteError::Lopdf(lopdf::Error::IO(e)))?;

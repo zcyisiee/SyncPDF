@@ -25,8 +25,10 @@ pub struct Report {
     pub ok: bool,
     /// 页数。
     pub pages: u32,
-    /// 问题描述。
+    /// 问题描述（会导致 `ok == false`）。
     pub problems: Vec<String>,
+    /// 非致命告警（例如 qpdf 的 exit 3 对象号空洞警告），不影响 `ok`。
+    pub warnings: Vec<String>,
     /// 是否实际跑了 qpdf。
     pub qpdf_checked: bool,
     /// 每页文本前 40 字符（pdfium 可读时）。
@@ -86,6 +88,7 @@ pub fn self_check(path: &Path, expect_cjk_on_pages: &[u32]) -> Result<Report> {
     }
 
     // 4) qpdf --check。
+    let mut warnings: Vec<String> = Vec::new();
     let mut qpdf_checked = false;
     let qpdf = Path::new(QPDF);
     if qpdf.is_file() {
@@ -96,11 +99,20 @@ pub fn self_check(path: &Path, expect_cjk_on_pages: &[u32]) -> Result<Report> {
             .output()
         {
             Ok(out) if out.status.success() => {}
-            Ok(out) => problems.push(format!(
-                "qpdf --check exit {:?}: {}",
-                out.status.code(),
-                String::from_utf8_lossy(&out.stderr).trim()
-            )),
+            Ok(out) => {
+                // qpdf 退出码 2 = 错误，3 = 仅警告（"operation succeeded with warnings"）。
+                // lopdf 重写对象表后对象号会留空洞，qpdf 为此报 exit 3 警告但文件仍可正常读取，
+                // 故仅退出码 2 视为硬失败，其余记入 `warnings`。
+                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                if out.status.code() == Some(2) {
+                    problems.push(format!("qpdf --check exit 2: {stderr}"));
+                } else {
+                    warnings.push(format!(
+                        "qpdf --check exit {:?}: {stderr}",
+                        out.status.code()
+                    ));
+                }
+            }
             Err(e) => problems.push(format!("qpdf run failed: {e}")),
         }
     }
@@ -139,6 +151,7 @@ pub fn self_check(path: &Path, expect_cjk_on_pages: &[u32]) -> Result<Report> {
         ok: problems.is_empty(),
         pages: page_count,
         problems,
+        warnings,
         qpdf_checked,
         text_sample,
     })

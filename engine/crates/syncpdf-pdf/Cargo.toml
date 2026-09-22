@@ -20,3 +20,4 @@ crossbeam-channel = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+syncpdf-typeset = { workspace = true }
