@@ -12,6 +12,7 @@ pub mod preflight;
 pub mod source;
 pub mod translate;
 pub mod typeset;
+pub mod writeback;
 
 use std::path::Path;
 
@@ -29,6 +30,7 @@ pub use translate::{
 pub use typeset::{
     inlines_from_parsed, load_fonts, spec_for, typeset_one, typeset_paragraph, StoreShaper,
 };
+pub use writeback::{delete_translated, render_snapshot, replay_into};
 
 /// 阶段/编排层错误。
 #[derive(Debug, thiserror::Error)]
