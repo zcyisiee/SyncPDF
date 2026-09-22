@@ -75,9 +75,18 @@ describe('SidecarManager × fake-sidecar', () => {
     // 段落数：12 页 × 3 段 = 36
     const paragraphs = events.filter((event) => event.type === 'paragraph');
     expect(paragraphs.length).toBe(36);
-    // 页就绪 12 页
+    // 页就绪 12 页（M2-06 起每页一次、preview_path=null，publishing 不再发 final 预览）
     const pageReady = events.filter((event) => event.type === 'page_ready');
-    expect(pageReady.length).toBe(13); // 12 页 + publishing 阶段 1 条 final
+    expect(pageReady.length).toBe(12);
+    for (const ready of pageReady) {
+      // 就地重写 output：preview_path 显式 null（渲染进程回落到重读 output）
+      expect((ready as { preview_path: unknown }).preview_path).toBeNull();
+      // 页号 1..12 各一次
+      expect(ready.page).toBeGreaterThanOrEqual(1);
+      expect(ready.page).toBeLessThanOrEqual(12);
+    }
+    const readyPages = new Set(pageReady.map((event) => event.page));
+    expect(readyPages.size).toBe(12);
 
     // stop：stdin EOF → fake-sidecar 退出（长驻 sidecar 靠 EOF/cancel 收尾）
     await manager.stop();

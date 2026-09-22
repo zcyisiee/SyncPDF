@@ -158,8 +158,12 @@ export interface ParagraphEvent extends EngineEventBase {
 export interface PageReadyEvent extends EngineEventBase {
   type: 'page_ready';
   page: number;
-  /** 可选增量预览 PDF 路径。 */
-  preview_path?: string;
+  /**
+   * 可选增量预览 PDF 路径。
+   * 引擎就地重写 output（无独立预览产物）时发 `null`——语义同缺省：
+   * 前端回落到重新加载 output 文件的该页（M2-06）。
+   */
+  preview_path?: string | null;
 }
 
 /** 问题等级。 */

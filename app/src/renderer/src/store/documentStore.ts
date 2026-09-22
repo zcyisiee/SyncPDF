@@ -5,6 +5,13 @@
  * 事件 reducer 处理：run_started / stage_started / stage_finished / progress /
  * paragraph / page_ready / issue / document_finished / run_finished / error。
  * seq 续传（§9.3）：`lastSeq` 记录已消费的最大事件序号，重复 / 回退事件丢弃。
+ *
+ * M2-06 增补：
+ * - `revision`：译文文档修订号。每次 `page_ready` / `document_finished` +1，
+ *   作为 `apply_edit.base_revision` 与 pdf.js 文档缓存的失效键；
+ * - `pageRevisions`：页 → 该页最后一次就绪时的 revision（Map 语义，用普通对象
+ *   保持不可变更新；译文栏只重渲染 revision 变了的那一页）；
+ * - `selectedParagraphId`：段落框 / 段落树 / 段落编辑器三方联动的唯一选中源。
  */
 import { createStore } from 'zustand/vanilla';
 import type {
@@ -56,7 +63,10 @@ export interface ErrorRecord {
 /** 页就绪记录（page_ready 事件；previewPath 可选）。 */
 export interface PageReadyRecord {
   page: number;
+  /** 增量预览 PDF 路径；引擎就地重写 output 时为 undefined（事件里是 null/缺省）。 */
   previewPath: string | undefined;
+  /** 该页就绪时的文档修订号。 */
+  revision: number;
 }
 
 export type RunState =
@@ -81,6 +91,16 @@ export interface DocumentState {
   paragraphOrder: string[];
   issues: IssueRecord[];
   pagesReady: Record<number, PageReadyRecord>;
+  /** 源 PDF 绝对路径（openDocument 设置；渲染进程经 readFileBytes 读字节）。 */
+  sourcePath: string | null;
+  /** 译文 PDF 绝对路径（run 请求的 output；document_finished 会再确认一次）。 */
+  targetPath: string | null;
+  /** 译文文档修订号：page_ready / document_finished 递增，0 = 尚无译文。 */
+  revision: number;
+  /** 页 → 该页最后就绪时的 revision（Map 语义的普通对象）。 */
+  pageRevisions: Record<number, number>;
+  /** 当前选中段落 id（三方联动的唯一来源）。 */
+  selectedParagraphId: string | null;
   /** 输出与统计（document_finished）。 */
   output: string | null;
   stats: DocumentFinishedEvent['stats'] | null;
@@ -96,6 +116,10 @@ export interface DocumentActions {
   applyEvent: (event: EngineEvent) => void;
   /** 换文档 / 关闭文档：清空全部状态。 */
   reset: (docId: string | null) => void;
+  /** 打开文档：设置源 / 译文路径并清空上一次运行的快照。 */
+  openDocument: (paths: { sourcePath: string; targetPath: string; docId?: string }) => void;
+  /** 选中段落（null = 取消选中）。 */
+  selectParagraph: (id: string | null) => void;
 }
 
 export type DocumentStore = DocumentState & DocumentActions;
@@ -111,6 +135,11 @@ export const initialDocumentState: DocumentState = {
   paragraphOrder: [],
   issues: [],
   pagesReady: {},
+  sourcePath: null,
+  targetPath: null,
+  revision: 0,
+  pageRevisions: {},
+  selectedParagraphId: null,
   output: null,
   stats: null,
   lastError: null,
@@ -143,6 +172,14 @@ function reduceParagraph(
   };
 }
 
+/**
+ * `preview_path` 归一：引擎可能发 `null`（就地重写 output）或空串。
+ * 只有非空字符串才算独立预览产物，其余一律 undefined（前端回落读 output）。
+ */
+export function normalizePreviewPath(value: string | null | undefined): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
 /** `P05-002` → 5；解析失败 → null。 */
 export function pageNumberFromId(id: string): number | null {
   const match = /^P(\d+)-/.exec(id);
@@ -167,6 +204,9 @@ export function reduceEvent(state: DocumentState, event: EngineEvent): Partial<D
         paragraphOrder: [],
         issues: [],
         pagesReady: {},
+        revision: 0,
+        pageRevisions: {},
+        selectedParagraphId: null,
         output: null,
         stats: null,
         stage: null,
@@ -193,12 +233,21 @@ export function reduceEvent(state: DocumentState, event: EngineEvent): Partial<D
       return { ...base, ...reduceParagraph(state, event as ParagraphEvent) };
     case 'page_ready': {
       const pageEvent = event as PageReadyEvent;
+      // 每页就绪 = 译文文档内容变了一次：修订号 +1，并记到该页上，
+      // 译文栏据此只重渲染这一页（其余页沿用缓存的 canvas）。
+      const revision = state.revision + 1;
       return {
         ...base,
+        revision,
         pagesReady: {
           ...state.pagesReady,
-          [pageEvent.page]: { page: pageEvent.page, previewPath: pageEvent.preview_path },
+          [pageEvent.page]: {
+            page: pageEvent.page,
+            previewPath: normalizePreviewPath(pageEvent.preview_path),
+            revision,
+          },
         },
+        pageRevisions: { ...state.pageRevisions, [pageEvent.page]: revision },
       };
     }
     case 'issue': {
@@ -220,7 +269,14 @@ export function reduceEvent(state: DocumentState, event: EngineEvent): Partial<D
     }
     case 'document_finished': {
       const finished = event as DocumentFinishedEvent;
-      return { ...base, output: finished.output, stats: finished.stats };
+      // 终稿落盘同样是一次修订（整册重载）
+      return {
+        ...base,
+        output: finished.output,
+        targetPath: finished.output,
+        stats: finished.stats,
+        revision: state.revision + 1,
+      };
     }
     case 'run_finished': {
       const runFinished = event as RunFinishedEvent;
@@ -256,6 +312,15 @@ export function createDocumentStore() {
     reset: (docId) => {
       set({ ...initialDocumentState, docId });
     },
+    openDocument: ({ sourcePath, targetPath, docId }) => {
+      set({
+        ...initialDocumentState,
+        docId: docId ?? get().docId,
+        sourcePath,
+        targetPath,
+      });
+    },
+    selectParagraph: (selectedParagraphId) => set({ selectedParagraphId }),
   }));
 }
 

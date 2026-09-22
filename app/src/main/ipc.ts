@@ -9,6 +9,7 @@ import type { EngineEvent, Request } from '../shared/protocol';
 import type { SidecarManager } from './sidecar';
 import type { AllowedRoots } from './protocol-handler';
 import { readCredentials, writeCredentials, type Credentials } from './credentials';
+import { readAllowedFileBytes } from './file-bytes';
 
 export const ENGINE_EVENT_CHANNEL = 'engine:event';
 
@@ -96,8 +97,14 @@ export function registerIpc(deps: IpcDeps): void {
     });
     if (result.canceled || result.filePaths.length === 0) return null;
     const path = result.filePaths[0];
+    // 用户明示打开的文件：其所在目录进白名单（syncpdf-file:// 与 readFileBytes 共用）
     roots.add(dirnameOf(path));
     return path;
+  });
+
+  // 渲染进程读 PDF 字节（pdf.js `getDocument({ data })`）。白名单校验在 file-bytes.ts。
+  ipcMain.handle('app:readFileBytes', async (_event, path: unknown) => {
+    return readAllowedFileBytes(path, roots);
   });
 
   ipcMain.handle('credentials:read', () => readCredentials());
