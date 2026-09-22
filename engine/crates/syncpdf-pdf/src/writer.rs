@@ -9,13 +9,15 @@
 //! ```text
 //! q
 //! /Span <</ActualText <FEFF...>>> BDC
-//! BT /SPF<n> <size> Tf <r> <g> <b> rg 1 0 0 1 <x> <y> Tm <gidhex> Tj ... ET
+//! BT /SPF<n> <size> Tf <r> <g> <b> rg <scale_x> 0 0 1 <x> <y> Tm <gidhex> Tj ... ET
 //! EMC
 //! Q
 //! ```
 //!
 //! `ActualText` 是该段译文的 UTF-16BE（带 BOM），保证复制/无障碍读取到译文。
-//! 为正确优先，**每个字形单独 `Tm` + `Tj`**（`scale_x != 1` 时把缩放并入 `Tm`）。
+//! 为正确优先，**每个字形单独 `Tm` + `Tj`**；字号只进 `Tf`，`Tm` 的 `a` 承担
+//! `scale_x` 横向缩放、`d` 恒为 1（视觉字号 = `Tf` × `Tm` 缩放，字号若同时
+//! 乘进两处会被平方）。
 //!
 //! # cid 登记
 //!
@@ -167,28 +169,23 @@ impl<'a> Writer<'a> {
                     bytes.push(b'q');
                     bytes.push(b'\n');
                     // 字体：不同字形可能来自不同字体，每字形重设 Tf。
-                    let size = g.size;
-                    // scale_x != 1 → 把缩放并入 Tm 的 a。
-                    let (a, d) = if (g.scale_x - 1.0).abs() > 1e-4 {
-                        (size * g.scale_x, size)
-                    } else {
-                        (size, size)
-                    };
-                    let tf_size = if (g.scale_x - 1.0).abs() > 1e-4 {
-                        1.0
-                    } else {
-                        size
-                    };
+                    //
+                    // 单位约定：`g.size` 是字号（PDF 用户空间 pt）；`g.scale_x` 是
+                    // 无量纲横向缩放（1 = 不缩放）；`g.x`/`g.y` 是字形基线原点
+                    // （用户空间 pt）。
+                    //
+                    // 视觉字号 = Tf 字号 × Tm 的 a/d 缩放。字号只乘进 Tf，
+                    // Tm 的 a 只承载 scale_x（d 恒 1），两条 scale_x 分支语义
+                    // 一致；若把字号也乘进 Tm，视觉字号会变成 size²。
                     bytes.extend_from_slice(
                         format!(
-                            "BT /{} {} Tf {} {} {} rg {} 0 0 {} {} {} Tm <{:04X}> Tj ET\n",
+                            "BT /{} {} Tf {} {} {} rg {} 0 0 1 {} {} Tm <{:04X}> Tj ET\n",
                             name,
-                            fmt_num(tf_size),
+                            fmt_num(g.size),
                             fmt_num(f32::from(r) / 255.0),
                             fmt_num(f32::from(gg) / 255.0),
                             fmt_num(f32::from(b) / 255.0),
-                            fmt_num(a),
-                            fmt_num(d),
+                            fmt_num(g.scale_x),
                             fmt_num(g.x),
                             fmt_num(g.y),
                             cid
