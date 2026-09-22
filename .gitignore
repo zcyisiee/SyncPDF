@@ -86,3 +86,9 @@ engine/models/*
 engine/vendor
 
 engine/vendor
+
+# SyncPDF 桌面端：JSON 配置需要入库（覆盖上面的 *.json 全局忽略）
+!app/package.json
+!app/tsconfig.json
+!app/tsconfig.node.json
+!app/tsconfig.web.json

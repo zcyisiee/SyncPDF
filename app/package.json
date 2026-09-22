@@ -1,0 +1,49 @@
+{
+  "name": "syncpdf-app",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SyncPDF 桌面壳（Electron + React + VSCode 视觉系统）",
+  "main": "out/main/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
+    "typecheck:web": "tsc -p tsconfig.web.json --noEmit"
+  },
+  "dependencies": {
+    "@vscode-elements/elements": "2.5.1",
+    "@vscode/codicons": "0.0.45",
+    "allotment": "1.20.5",
+    "pdfjs-dist": "6.3.289",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "zustand": "5.0.15"
+  },
+  "devDependencies": {
+    "@electron-toolkit/tsconfig": "2.0.0",
+    "@eslint/js": "9.39.5",
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/react": "16.3.3",
+    "@types/node": "24.13.6",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "5.2.0",
+    "electron": "44.4.3",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
+    "eslint": "9.39.5",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.12.0",
+    "jsdom": "30.1.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.70.1",
+    "vite": "7.3.6",
+    "vitest": "5.0.1"
+  }
+}
