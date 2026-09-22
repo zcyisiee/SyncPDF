@@ -1,10 +1,12 @@
 /**
- * 编辑器区（§12.1）：三栏（源 PDF / 译文 PDF / 段落编辑）。
- * pdf.js viewer 是下一任务（M2-06），本任务预留容器与标题头。
+ * 编辑器区（§12.1）：三栏——源 PDF / 译文 PDF / 段落编辑（M2-06）。
+ * 三栏共享 documentStore 的选中段落；PDF 渲染在 `src/renderer/src/pdf/`。
  */
 import { Allotment } from 'allotment';
 import { useDocumentStore } from '../store/documentStoreStoreHooks';
 import { ParagraphEditor } from '../views/ParagraphEditor';
+import { SourcePdfView } from '../views/SourcePdfView';
+import { TargetPdfView } from '../views/TargetPdfView';
 
 const Pane = Allotment.Pane;
 
@@ -15,21 +17,27 @@ export interface EditorAreaProps {
 }
 
 export function EditorArea({ sizes, onSizesChange }: EditorAreaProps): JSX.Element {
+  const sourcePath = useDocumentStore((state) => state.sourcePath);
+  const targetPath = useDocumentStore((state) => state.targetPath);
   const docId = useDocumentStore((state) => state.docId);
 
   return (
-    <Allotment proportionalLayout={false} defaultSizes={[...sizes, Math.max(0, 100 - sizes[0] - sizes[1])]} onDragEnd={onSizesChange}>
-      <Pane minSize={120}>
-        <EditorPane title="源 PDF" empty={docId === null}>
-          <div />
-        </EditorPane>
-      </Pane>
-      <Pane minSize={120}>
-        <EditorPane title="译文 PDF" empty={docId === null}>
-          <div />
+    <Allotment
+      proportionalLayout={false}
+      defaultSizes={[...sizes, Math.max(0, 100 - sizes[0] - sizes[1])]}
+      onDragEnd={onSizesChange}
+    >
+      <Pane minSize={160}>
+        <EditorPane title="源 PDF" empty={sourcePath === null}>
+          <SourcePdfView />
         </EditorPane>
       </Pane>
       <Pane minSize={160}>
+        <EditorPane title="译文 PDF" empty={targetPath === null}>
+          <TargetPdfView />
+        </EditorPane>
+      </Pane>
+      <Pane minSize={200}>
         <EditorPane title="段落编辑" empty={docId === null}>
           <ParagraphEditor />
         </EditorPane>
@@ -78,10 +86,12 @@ function EditorPane({ title, empty, children }: EditorPaneProps): JSX.Element {
               inset: 0,
               display: 'grid',
               placeItems: 'center',
-              opacity: 0.5,
+              opacity: 0.4,
+              gap: 8,
+              fontSize: 12,
             }}
           >
-            <span className="codicon codicon-file" style={{ fontSize: 40 }} />
+            <span className="codicon codicon-file-pdf" style={{ fontSize: 40 }} />
           </div>
         ) : (
           children

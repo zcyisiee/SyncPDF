@@ -152,4 +152,207 @@ describe('fake-sidecar', () => {
     expect(types).not.toContain('run_finished');
     expect(types).not.toContain('document_finished');
   });
+
+  it('run 事件序列含 page_ready 恰好 12 次（每页一次、preview_path=null、页号 1..12）', async () => {
+    const result = await new Promise<RunResult>((resolve, reject) => {
+      const child = spawn(process.execPath, [FAKE_SIDECAR]);
+      const events: unknown[] = [];
+      const rl = createInterface({ input: child.stdout });
+      rl.on('line', (line) => {
+        if (line.trim() === '') return;
+        events.push(JSON.parse(line));
+        if ((JSON.parse(line) as { type: string }).type === 'run_finished') {
+          child.stdin.write(`${JSON.stringify({ type: 'cancel' })}\n`);
+        }
+      });
+      child.on('error', reject);
+      child.on('exit', (code) => resolve({ events, code }));
+      child.stdin.write(
+        `${JSON.stringify({
+          type: 'run',
+          doc_id: 'd12',
+          input: '/tmp/in.pdf',
+          output: '/tmp/out.pdf',
+          source_lang: 'en',
+          target_lang: 'zh',
+          mode: 'full',
+        })}\n`,
+      );
+    });
+    expect(result.code).toBe(0);
+
+    const pageReady = result.events.filter(
+      (event) => (event as { type: string }).type === 'page_ready',
+    );
+    // 12 页，每页恰好一次
+    expect(pageReady).toHaveLength(12);
+    const pages = pageReady.map((event) => (event as { page: number }).page);
+    expect(pages).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    // preview_path 显式 null（就地重写 output，无独立预览产物）
+    for (const ready of pageReady) {
+      expect((ready as { preview_path: unknown }).preview_path).toBeNull();
+    }
+    // 所有事件（含 page_ready）都过协议判别
+    for (const event of result.events) {
+      expect(isEngineEvent(event), JSON.stringify(event).slice(0, 80)).toBe(true);
+    }
+
+    // page_ready 之前该页段落都已发出（译文栏刷新时数据齐备）
+    const types = result.events.map((event) => (event as { type: string }).type);
+    for (let page = 1; page <= 12; page += 1) {
+      // 找该页的 page_ready（第 page 次出现的 page_ready）
+      let seen = 0;
+      let readyAt = -1;
+      for (let i = 0; i < types.length; i += 1) {
+        if (types[i] === 'page_ready') {
+          seen += 1;
+          if (seen === page) {
+            readyAt = i;
+            break;
+          }
+        }
+      }
+      expect(readyAt).toBeGreaterThanOrEqual(0);
+      // 该页 3 段都在它前面
+      for (let index = 1; index <= 3; index += 1) {
+        const id = `P${String(page).padStart(2, '0')}-${String(index).padStart(3, '0')}`;
+        const paragraphEvents = result.events.filter(
+          (event) =>
+            (event as { type: string }).type === 'paragraph' &&
+            (event as { paragraph_id: string }).paragraph_id === id,
+        );
+        expect(paragraphEvents).toHaveLength(1);
+        const paragraphAt = result.events.indexOf(paragraphEvents[0]);
+        expect(paragraphAt).toBeLessThan(readyAt);
+      }
+    }
+  });
+
+  it('apply_edit：base_revision 匹配 → paragraph + page_ready；不匹配 → error{conflict}', async () => {
+    const run = JSON.stringify({
+      type: 'run',
+      doc_id: 'd-edit',
+      input: '/tmp/in.pdf',
+      output: '/tmp/out.pdf',
+      source_lang: 'en',
+      target_lang: 'zh',
+      mode: 'full',
+    });
+    const result = await new Promise<RunResult>((resolve, reject) => {
+      const child = spawn(process.execPath, [FAKE_SIDECAR]);
+      const events: unknown[] = [];
+      const rl = createInterface({ input: child.stdout });
+      let finished = false;
+      rl.on('line', (line) => {
+        if (line.trim() === '') return;
+        const event = JSON.parse(line);
+        events.push(event);
+        if (event.type === 'run_finished' && !finished) {
+          finished = true;
+          // run 结束时 fake-sidecar 的 revision = 12(page_ready) + 1(document_finished) = 13。
+          // 先发一条 base_revision 过期的（=12，已过期）→ conflict；
+          // 再发一条匹配的（=13）→ paragraph + page_ready。
+          child.stdin.write(
+            `${JSON.stringify({
+              type: 'apply_edit',
+              doc_id: 'd-edit',
+              paragraph_id: 'P01-001',
+              translated_html: '<p>手改</p>',
+              base_revision: 12,
+            })}\n`,
+          );
+          child.stdin.write(
+            `${JSON.stringify({
+              type: 'apply_edit',
+              doc_id: 'd-edit',
+              paragraph_id: 'P01-001',
+              translated_html: '<p>手改</p>',
+              base_revision: 13,
+            })}\n`,
+          );
+          // 等两条回执都到了再退出
+          setTimeout(() => {
+            child.stdin.write(`${JSON.stringify({ type: 'cancel' })}\n`);
+          }, 200);
+        }
+      });
+      child.on('error', reject);
+      child.on('exit', (code) => resolve({ events, code }));
+      child.stdin.write(`${run}\n`);
+    });
+    expect(result.code).toBe(0);
+
+    const after = result.events.filter((event) => {
+      const index = result.events.indexOf(event);
+      const runFinishedAt = result.events.findIndex(
+        (item) => (item as { type: string }).type === 'run_finished',
+      );
+      return index > runFinishedAt;
+    });
+    const types = after.map((event) => (event as { type: string }).type);
+    // 过期 base_revision：conflict；匹配：paragraph + page_ready（共 3 条回执）
+    expect(types).toEqual(['error', 'paragraph', 'page_ready']);
+    expect((after[0] as { code: string }).code).toBe('conflict');
+    const paragraph = after[1] as { paragraph_id: string; translated_html: string; status: string };
+    expect(paragraph.paragraph_id).toBe('P01-001');
+    expect(paragraph.translated_html).toBe('<p>手改</p>');
+    expect((after[2] as { page: number }).page).toBe(1);
+    expect((after[2] as { preview_path: unknown }).preview_path).toBeNull();
+  });
+
+  it('retranslate：重发段落 + 相关页 page_ready', async () => {
+    const run = JSON.stringify({
+      type: 'run',
+      doc_id: 'd-rt',
+      input: '/tmp/in.pdf',
+      output: '/tmp/out.pdf',
+      source_lang: 'en',
+      target_lang: 'zh',
+      mode: 'full',
+    });
+    const result = await new Promise<RunResult>((resolve, reject) => {
+      const child = spawn(process.execPath, [FAKE_SIDECAR]);
+      const events: unknown[] = [];
+      const rl = createInterface({ input: child.stdout });
+      let finished = false;
+      rl.on('line', (line) => {
+        if (line.trim() === '') return;
+        const event = JSON.parse(line);
+        events.push(event);
+        if (event.type === 'run_finished' && !finished) {
+          finished = true;
+          child.stdin.write(
+            `${JSON.stringify({
+              type: 'retranslate',
+              doc_id: 'd-rt',
+              paragraph_ids: ['P02-001', 'P05-002'],
+            })}\n`,
+          );
+          setTimeout(() => {
+            child.stdin.write(`${JSON.stringify({ type: 'cancel' })}\n`);
+          }, 200);
+        }
+      });
+      child.on('error', reject);
+      child.on('exit', (code) => resolve({ events, code }));
+      child.stdin.write(`${run}\n`);
+    });
+    expect(result.code).toBe(0);
+
+    const runFinishedAt = result.events.findIndex(
+      (item) => (item as { type: string }).type === 'run_finished',
+    );
+    const after = result.events.slice(runFinishedAt + 1).map((event) => event as { type: string; paragraph_id?: string; page?: number });
+    // 两段重发 + 两次 page_ready（页 2、5 各一次，升序）
+    expect(after.map((event) => event.type)).toEqual([
+      'paragraph',
+      'paragraph',
+      'page_ready',
+      'page_ready',
+    ]);
+    expect(after[0].paragraph_id).toBe('P02-001');
+    expect(after[1].paragraph_id).toBe('P05-002');
+    expect(after[2].page).toBe(2);
+    expect(after[3].page).toBe(5);
+  });
 });
