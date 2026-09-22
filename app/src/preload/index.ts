@@ -36,6 +36,15 @@ const api = {
   /** 系统文件选择框（PDF）。 */
   openFile: (): Promise<string | null> => ipcRenderer.invoke('app:openFile'),
 
+  /**
+   * 读白名单内文件的字节（pdf.js 用）。白名单外的路径主进程直接拒绝。
+   * 主进程回 Uint8Array（结构化克隆），这里统一成 ArrayBuffer 交给 pdf.js。
+   */
+  readFileBytes: async (path: string): Promise<ArrayBuffer> => {
+    const bytes: Uint8Array = await ipcRenderer.invoke('app:readFileBytes', path);
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  },
+
   readCredentials: (): Promise<{
     provider: string;
     base_url: string;

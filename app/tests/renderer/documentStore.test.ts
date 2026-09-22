@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createDocumentStore,
+  normalizePreviewPath,
   pageNumberFromId,
   reduceEvent,
   initialDocumentState,
@@ -108,6 +109,55 @@ describe('reduceEvent', () => {
     expect(Object.keys(state.pagesReady)).toEqual(['3']);
   });
 
+  it('page_ready 推进 revision 并记到 pageRevisions（M2-06）', () => {
+    let state = { ...initialDocumentState, lastSeq: 0 };
+    expect(state.revision).toBe(0);
+    state = { ...state, ...reduceEvent(state, event({ seq: 1, ts: 1, type: 'page_ready', page: 1, preview_path: null }))! };
+    expect(state.revision).toBe(1);
+    expect(state.pageRevisions).toEqual({ 1: 1 });
+    expect(state.pagesReady[1]).toEqual({ page: 1, previewPath: undefined, revision: 1 });
+
+    state = { ...state, ...reduceEvent(state, event({ seq: 2, ts: 1, type: 'page_ready', page: 2 }))! };
+    expect(state.revision).toBe(2);
+    expect(state.pageRevisions).toEqual({ 1: 1, 2: 2 });
+
+    // 同一页再次就绪（重译 / 应用编辑）：只有这一页的 revision 变
+    state = { ...state, ...reduceEvent(state, event({ seq: 3, ts: 1, type: 'page_ready', page: 1 }))! };
+    expect(state.revision).toBe(3);
+    expect(state.pageRevisions).toEqual({ 1: 3, 2: 2 });
+  });
+
+  it('document_finished 也推进 revision 并确认 targetPath', () => {
+    let state: typeof initialDocumentState = { ...initialDocumentState, lastSeq: 0, revision: 4, targetPath: '/tmp/guess.pdf' };
+    state = {
+      ...state,
+      ...reduceEvent(
+        state,
+        event({ seq: 1, ts: 1, type: 'document_finished', output: '/tmp/final.pdf', stats: { fonts: 1, expansion_ratio: 1, fallback_count: 0 } }),
+      )!,
+    };
+    expect(state.revision).toBe(5);
+    expect(state.targetPath).toBe('/tmp/final.pdf');
+    expect(state.output).toBe('/tmp/final.pdf');
+  });
+
+  it('run_started 把 revision / pageRevisions / 选中清零', () => {
+    let state: typeof initialDocumentState = {
+      ...initialDocumentState,
+      lastSeq: 1,
+      revision: 7,
+      pageRevisions: { 1: 3, 2: 7 },
+      selectedParagraphId: 'P01-001',
+    };
+    state = {
+      ...state,
+      ...reduceEvent(state, event({ seq: 2, ts: 1, type: 'run_started', protocol_version: 1, engine_version: 'e', doc_id: 'd', pages: 3 }))!,
+    };
+    expect(state.revision).toBe(0);
+    expect(state.pageRevisions).toEqual({});
+    expect(state.selectedParagraphId).toBeNull();
+  });
+
   it('issue 追加、document_finished / run_finished 落定', () => {
     let state: typeof initialDocumentState = { ...initialDocumentState, lastSeq: 0, runState: 'running' };
     state = { ...state, ...reduceEvent(state, event({ seq: 1, ts: 1, type: 'issue', severity: 'error', code: 'x', paragraph_id: 'P01-001', message: 'm' }))! };
@@ -158,6 +208,62 @@ describe('createDocumentStore', () => {
     expect(store.getState().docId).toBeNull();
     expect(store.getState().paragraphOrder).toEqual([]);
     expect(store.getState().lastSeq).toBe(0);
+  });
+});
+
+describe('documentStore 选中与打开文档（M2-06）', () => {
+  it('openDocument 设置源 / 译文路径并清空上一轮快照', () => {
+    const store = createDocumentStore();
+    store.getState().applyEvent({
+      seq: 1,
+      ts: 1,
+      type: 'paragraph',
+      paragraph_id: 'P01-001',
+      status: 'translated',
+      boxes: null,
+      coord_system: 'pdf_native',
+      translated_html: 'x',
+    } as EngineEvent);
+    expect(store.getState().paragraphOrder).toHaveLength(1);
+
+    store.getState().openDocument({ sourcePath: '/a/in.pdf', targetPath: '/a/in.zh.pdf', docId: 'in.pdf' });
+    const snapshot = store.getState();
+    expect(snapshot.sourcePath).toBe('/a/in.pdf');
+    expect(snapshot.targetPath).toBe('/a/in.zh.pdf');
+    expect(snapshot.docId).toBe('in.pdf');
+    expect(snapshot.paragraphOrder).toEqual([]);
+    expect(snapshot.revision).toBe(0);
+    expect(snapshot.lastSeq).toBe(0);
+  });
+
+  it('selectParagraph 单一来源；reset 清空', () => {
+    const store = createDocumentStore();
+    store.getState().selectParagraph('P02-003');
+    expect(store.getState().selectedParagraphId).toBe('P02-003');
+    store.getState().selectParagraph(null);
+    expect(store.getState().selectedParagraphId).toBeNull();
+    store.getState().selectParagraph('P02-003');
+    store.getState().reset(null);
+    expect(store.getState().selectedParagraphId).toBeNull();
+  });
+
+  it('page_ready 序列在 store 上累计 revision（译文栏增量刷新的依据）', () => {
+    const store = createDocumentStore();
+    store.getState().applyEvent({ seq: 1, ts: 1, type: 'run_started', protocol_version: 1, engine_version: 'f', doc_id: 'd', pages: 3 } as EngineEvent);
+    for (let page = 1; page <= 3; page += 1) {
+      store.getState().applyEvent({ seq: 1 + page, ts: 1, type: 'page_ready', page, preview_path: null } as unknown as EngineEvent);
+    }
+    expect(store.getState().revision).toBe(3);
+    expect(store.getState().pageRevisions).toEqual({ 1: 1, 2: 2, 3: 3 });
+  });
+});
+
+describe('normalizePreviewPath', () => {
+  it('null / undefined / 空串 → undefined；非空字符串原样', () => {
+    expect(normalizePreviewPath(null)).toBeUndefined();
+    expect(normalizePreviewPath(undefined)).toBeUndefined();
+    expect(normalizePreviewPath('')).toBeUndefined();
+    expect(normalizePreviewPath('/tmp/p.pdf')).toBe('/tmp/p.pdf');
   });
 });
 

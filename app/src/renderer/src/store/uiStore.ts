@@ -87,8 +87,14 @@ export interface UiState {
   layout: LayoutSizes;
   /** 面板激活的 tab。 */
   panelTab: PanelTab;
-  /** 当前选中段落（主选中；多选后续任务扩展）。 */
+  /**
+   * 当前选中段落（主选中；多选后续任务扩展）。
+   * @deprecated M2-06 起选中的唯一来源是 documentStore.selectedParagraphId；
+   * 本字段仅保留给尚未迁移的调用方，新代码不要用。
+   */
   selectedParagraphId: string | null;
+  /** 源栏 / 译文栏滚动同步开关。 */
+  scrollSyncEnabled: boolean;
   /** 编辑器三栏当前激活的栏（段落编辑器滚动定位用）。 */
   activeEditor: 'source' | 'target' | 'paragraph';
   setView: (view: ViewId) => void;
@@ -97,6 +103,7 @@ export interface UiState {
   setLayout: (patch: Partial<LayoutSizes>) => void;
   selectParagraph: (id: string | null) => void;
   setActiveEditor: (editor: UiState['activeEditor']) => void;
+  setScrollSync: (enabled: boolean) => void;
 }
 
 export function createUiStore(): StoreApi<UiState> {
@@ -106,6 +113,7 @@ export function createUiStore(): StoreApi<UiState> {
     layout: readLayout(),
     panelTab: 'issues',
     selectedParagraphId: null,
+    scrollSyncEnabled: true,
     activeEditor: 'source',
     setView: (view) => set({ view }),
     setTheme: (theme) => set({ theme }),
@@ -117,6 +125,7 @@ export function createUiStore(): StoreApi<UiState> {
     },
     selectParagraph: (selectedParagraphId) => set({ selectedParagraphId }),
     setActiveEditor: (activeEditor) => set({ activeEditor }),
+    setScrollSync: (scrollSyncEnabled) => set({ scrollSyncEnabled }),
   }));
 }
 

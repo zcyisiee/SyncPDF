@@ -14,6 +14,7 @@ import 'allotment/dist/style.css';
 
 const Pane = Allotment.Pane;
 import { TitleBar } from './TitleBar';
+import { Toolbar } from './Toolbar';
 import { ActivityBar } from './ActivityBar';
 import { SideBar } from './SideBar';
 import { EditorArea } from './EditorArea';
@@ -48,6 +49,7 @@ export function Workbench(): JSX.Element {
       }}
     >
       <TitleBar />
+      <Toolbar />
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <ActivityBar />
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
