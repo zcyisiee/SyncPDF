@@ -136,6 +136,17 @@ impl From<syncpdf_store::StoreError> for PipelineError {
 // 签名已按设计文档 §3/§9 固定，阶段 2 只需把函数体接上，不用改签名。
 // ---------------------------------------------------------------------------
 
+/// 阶段边界检查取消；已取消返回 [`PipelineError::Cancelled`]。
+///
+/// 每个阶段的开始（与流式回调的每次迭代）都应先调它。
+pub fn check_cancelled(cancel: &crate::cancel::CancellationToken) -> Result<(), PipelineError> {
+    if cancel.is_cancelled() {
+        Err(PipelineError::Cancelled)
+    } else {
+        Ok(())
+    }
+}
+
 /// 每源文件的阶段缓存键：输入文件字节的 sha256（规约 #4）。
 pub fn source_key(bytes: &[u8]) -> Sha256Hash {
     Sha256Hash::of(bytes)
@@ -176,8 +187,23 @@ pub fn writeback_page(
 /// validating 阶段：对生成流做 `self_check`。
 ///
 /// **阶段 2 接线点**：`syncpdf_pdf::validate::self_check`。
+/// 阶段 2 应在这里把 `self_check` 的报告转成 `issue` 事件（`docs` 里的
+/// 规约 #12/#13：识别了但无框 = `Some([])`）。
 pub fn validate_output(_bytes: &[u8]) -> Result<(), PipelineError> {
     Err(PipelineError::NotYetAvailable("writeback::self_check"))
+}
+
+/// publishing 阶段：finalize（完整保存一次）+ 输出原子落盘。
+///
+/// **阶段 2 接线点**：`Writer.finalize()`（对全量字体做一次子集化 + 写
+/// `/W`、ToUnicode、CMap）→ 序列化到临时文件 → `fs::rename` 到 `output`。
+/// 中间快照（每页 ready 时）走 `writeback_page(..., finalize=false)`。
+pub fn publish_output(
+    _doc: &mut lopdf::Document,
+    _output: &Path,
+    _finalize: bool,
+) -> Result<(), PipelineError> {
+    Err(PipelineError::NotYetAvailable("writeback::finalize/rename"))
 }
 
 #[cfg(test)]
@@ -205,6 +231,31 @@ mod tests {
             }
             other => panic!("期望 error 事件，得到 {other:?}"),
         }
+    }
+
+    #[test]
+    fn stage2_shells_report_not_yet_available() {
+        let bytes = b"%PDF-1.5 fake";
+        let e = validate_output(bytes).unwrap_err();
+        assert_eq!(e.code(), "not_yet_available");
+        assert!(e.fatal());
+
+        let out = Path::new("/tmp/should-not-be-written.pdf");
+        let mut doc = lopdf::Document::with_version("1.5");
+        let e = publish_output(&mut doc, out, true).unwrap_err();
+        assert!(matches!(e, PipelineError::NotYetAvailable(_)), "{e:?}");
+        // 壳绝不能顺手写出文件。
+        assert!(!out.exists(), "阶段 1 不应产出任何文件");
+    }
+
+    #[test]
+    fn check_cancelled_maps_to_cancelled_error() {
+        let c = crate::cancel::CancellationToken::new();
+        assert!(check_cancelled(&c).is_ok());
+        c.cancel();
+        let e = check_cancelled(&c).unwrap_err();
+        assert!(matches!(e, PipelineError::Cancelled));
+        assert_eq!(e.code(), "cancelled");
     }
 
     #[test]
