@@ -12,8 +12,8 @@ use syncpdf_core::ir::{PageIR, Paragraph};
 use syncpdf_core::GlyphId;
 use syncpdf_protocol::TranslatorKind;
 use syncpdf_translate::{
-    build_unit, Cache, ContextMap, DeltaSink, DocumentPrompt, DocumentResult, Engine, FakeTranslator,
-    PiTranslator, PromptSpec, TranslateError, TranslatedBlock, Translator, Unit,
+    build_unit, Cache, ContextMap, DeltaSink, DocumentPrompt, DocumentResult, Engine,
+    FakeTranslator, PiTranslator, PromptSpec, TranslateError, TranslatedBlock, Translator, Unit,
 };
 
 use super::PipelineError;
@@ -38,7 +38,9 @@ impl DynTranslator {
 
 impl std::fmt::Debug for DynTranslator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("DynTranslator").field(&self.0.name()).finish()
+        f.debug_tuple("DynTranslator")
+            .field(&self.0.name())
+            .finish()
     }
 }
 
@@ -116,9 +118,7 @@ pub fn fake_from_name(name: &str) -> Option<FakeTranslator> {
 /// 建字形取文闭包：`GlyphId` → 解码文本。
 ///
 /// 段落里的字形来自多页，闭包必须能跨页查表，因此这里一次性建全量索引。
-pub fn glyph_text_lookup(
-    pages: &[PageIR],
-) -> impl Fn(GlyphId) -> Option<String> + '_ {
+pub fn glyph_text_lookup(pages: &[PageIR]) -> impl Fn(GlyphId) -> Option<String> + '_ {
     let mut map: HashMap<GlyphId, String> = HashMap::new();
     for page in pages {
         for g in page.glyphs() {
@@ -162,7 +162,15 @@ pub async fn translate_with_dyn(
     cache: Option<&Cache>,
     on_block: impl FnMut(TranslatedBlock) + Send,
 ) -> Result<DocumentResult, PipelineError> {
-    translate_all(TranslatorRef(translator), spec, paras, lookup, cache, on_block).await
+    translate_all(
+        TranslatorRef(translator),
+        spec,
+        paras,
+        lookup,
+        cache,
+        on_block,
+    )
+    .await
 }
 
 /// 把 `&dyn Translator` 借成 `Translator`。
@@ -185,7 +193,9 @@ impl Translator for TranslatorRef<'_> {
 
 impl std::fmt::Debug for TranslatorRef<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("TranslatorRef").field(&self.0.name()).finish()
+        f.debug_tuple("TranslatorRef")
+            .field(&self.0.name())
+            .finish()
     }
 }
 
@@ -193,7 +203,7 @@ impl std::fmt::Debug for TranslatorRef<'_> {
 mod tests {
     use super::*;
     use syncpdf_core::ir::{Align, Atom, AtomKind, Line, RegionKind, StyleRun, Translatable};
-    use syncpdf_core::{Color, OpKey, ObjRef, PageId, Rect, StyleId};
+    use syncpdf_core::{Color, ObjRef, OpKey, PageId, Rect, StyleId};
 
     fn paragraph(id: &str, text: &str) -> Paragraph {
         Paragraph {
@@ -242,8 +252,17 @@ mod tests {
     #[test]
     fn fake_from_name_rejects_garbage() {
         for bad in [
-            "", "nope", "stretch", "stretch:x", "stretch:0", "stretch:-1",
-            "shrink:abc", "fail-every:0", "fail-every:", "slow:", "slow:-5",
+            "",
+            "nope",
+            "stretch",
+            "stretch:x",
+            "stretch:0",
+            "stretch:-1",
+            "shrink:abc",
+            "fail-every:0",
+            "fail-every:",
+            "slow:",
+            "slow:-5",
             "truncate:2",
         ] {
             assert_eq!(fake_from_name(bad), None, "{bad:?} 应被拒");
@@ -252,10 +271,7 @@ mod tests {
 
     #[test]
     fn make_translator_dispatches_and_reports_unsupported() {
-        let fake = make_translator(&TranslatorKind::Fake {
-            name: "cjk".into(),
-        })
-        .unwrap();
+        let fake = make_translator(&TranslatorKind::Fake { name: "cjk".into() }).unwrap();
         assert_eq!(fake.name(), "fake/cjk");
         let err = match make_translator(&TranslatorKind::Fake {
             name: "nope".into(),
@@ -273,7 +289,7 @@ mod tests {
 
     #[test]
     fn glyph_text_lookup_indexes_all_pages() {
-        use syncpdf_core::ir::{DisplayItem, Glyph, GlyphFlags, GlyphSource, FontRef};
+        use syncpdf_core::ir::{DisplayItem, FontRef, Glyph, GlyphFlags, GlyphSource};
         let mk = |ord: u16, ch: char| Glyph {
             id: GlyphId {
                 page: PageId(0),
@@ -321,15 +337,9 @@ mod tests {
             ordinal: 0,
         };
         assert_eq!(lookup(id0).as_deref(), Some("A"));
-        let id1 = GlyphId {
-            ordinal: 1,
-            ..id0
-        };
+        let id1 = GlyphId { ordinal: 1, ..id0 };
         assert_eq!(lookup(id1).as_deref(), Some("中"));
-        let missing = GlyphId {
-            ordinal: 99,
-            ..id0
-        };
+        let missing = GlyphId { ordinal: 99, ..id0 };
         assert_eq!(lookup(missing), None);
     }
 
@@ -365,16 +375,9 @@ mod tests {
         let paras = vec![paragraph("P01-001", "alpha")];
         let translator = FakeTranslator::Broken;
         let spec = PromptSpec::new("en", "zh-CN");
-        let err = translate_all(
-            translator.clone(),
-            &spec,
-            &paras,
-            |_| None,
-            None,
-            |_| {},
-        )
-        .await
-        .unwrap_err();
+        let err = translate_all(translator.clone(), &spec, &paras, |_| None, None, |_| {})
+            .await
+            .unwrap_err();
         assert!(matches!(err, PipelineError::Translate(_)), "{err:?}");
         assert_eq!(err.code(), "translate");
     }

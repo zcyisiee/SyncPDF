@@ -6,7 +6,9 @@
 
 use syncpdf_core::ir::{PageIR, Region, RegionKind};
 use syncpdf_core::{PageId, Rect};
-use syncpdf_layout::{coverage, to_pdf_space, xy_cut_order, Detection, DetectOpts, LayoutModel, RawImage};
+use syncpdf_layout::{
+    coverage, to_pdf_space, xy_cut_order, DetectOpts, Detection, LayoutModel, RawImage,
+};
 use syncpdf_pdf::pdfium::{DocId, PageInfo, PdfiumWorker};
 
 use super::PipelineError;
@@ -165,10 +167,18 @@ pub fn is_white_glyph(g: &syncpdf_core::ir::Glyph) -> bool {
 mod tests {
     use super::*;
     use syncpdf_core::ir::{DisplayItem, Glyph, GlyphFlags, GlyphSource};
-    use syncpdf_core::{Matrix, PageId};
     use syncpdf_core::require_fixture;
+    use syncpdf_core::{Matrix, PageId};
 
-    fn mk_glyph(ordinal: u16, text: &str, x: f32, y: f32, w: f32, h: f32, flags: GlyphFlags) -> Glyph {
+    fn mk_glyph(
+        ordinal: u16,
+        text: &str,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        flags: GlyphFlags,
+    ) -> Glyph {
         Glyph {
             id: syncpdf_core::GlyphId {
                 page: PageId(0),
@@ -233,8 +243,12 @@ mod tests {
         assert_eq!(fb.order, u32::MAX);
         assert_eq!(fb.index, 1, "index 续编");
         // 兜底框覆盖两个未覆盖字形。
-        assert!(fb.bbox.contains(Rect::new(10.0, 700.0, 18.0, 710.0).center()));
-        assert!(fb.bbox.contains(Rect::new(20.0, 700.0, 28.0, 710.0).center()));
+        assert!(fb
+            .bbox
+            .contains(Rect::new(10.0, 700.0, 18.0, 710.0).center()));
+        assert!(fb
+            .bbox
+            .contains(Rect::new(20.0, 700.0, 28.0, 710.0).center()));
     }
 
     #[test]
@@ -310,7 +324,11 @@ mod tests {
         let mut regions = vec![region(0, Rect::new(0.0, 0.0, 150.0, 200.0))];
         let report = apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
         assert_eq!(report.uncovered, 1);
-        assert!(report.ratio > 0.005 && report.ratio < 0.02, "{}", report.ratio);
+        assert!(
+            report.ratio > 0.005 && report.ratio < 0.02,
+            "{}",
+            report.ratio
+        );
         assert_eq!(regions.len(), 2);
     }
 

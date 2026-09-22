@@ -119,7 +119,12 @@ fn indented_line_starts_a_new_paragraph() {
     g.extend(line(5, "World", 70.0, 686.0, 10.0, 0));
     let ir = page_ir(g, vec![mk_font("F1", false, false)]);
     let paras = analyze_page(&ir, &full_region(RegionKind::Text));
-    assert_eq!(paras.len(), 2, "{:?}", paras.iter().map(|p| &p.text).collect::<Vec<_>>());
+    assert_eq!(
+        paras.len(),
+        2,
+        "{:?}",
+        paras.iter().map(|p| &p.text).collect::<Vec<_>>()
+    );
     assert_eq!(paras[0].text, "Hello");
     assert_eq!(paras[1].text, "World");
 }
@@ -139,7 +144,10 @@ fn style_runs_split_by_font_size_and_bold() {
     // 同一行内：字号 10 → 12，字体 0 → 1（粗），切出两个 run。
     let mut g = line(0, "ab", 50.0, 700.0, 10.0, 0);
     g.extend(line(2, "cd", 62.0, 700.0, 12.0, 1));
-    let ir = page_ir(g, vec![mk_font("F1", false, false), mk_font("F2", true, false)]);
+    let ir = page_ir(
+        g,
+        vec![mk_font("F1", false, false), mk_font("F2", true, false)],
+    );
     let paras = analyze_page(&ir, &full_region(RegionKind::Text));
     assert_eq!(paras.len(), 1);
     let runs = &paras[0].style_runs;

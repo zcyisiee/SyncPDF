@@ -24,7 +24,7 @@ use crate::events::{event_kind, SharedSink};
 use crate::schedule::PageSchedule;
 use crate::stages::{
     self, apply_coverage_fallback, check_cancelled, detect_regions, load_fonts, make_translator,
-    preflight, regions_from_detections, preflight::Preflight, LayoutOpts, PipelineError,
+    preflight, preflight::Preflight, regions_from_detections, LayoutOpts, PipelineError,
 };
 
 /// 一次 run 的配置：`configure`（通道 / 缓存目录）+ `run`（输入输出 / 语言）。
@@ -233,7 +233,9 @@ impl Pipeline {
         };
 
         let result = self
-            .run_stages(&mut sink, &worker, &pf, &fields, &cancel, &selected, started)
+            .run_stages(
+                &mut sink, &worker, &pf, &fields, &cancel, &selected, started,
+            )
             .await;
 
         worker.close(pf.doc);
@@ -297,27 +299,24 @@ impl Pipeline {
             let page = page_ir.page.0;
             let key = pf.source_sha;
             let cache_key = format!("layout:{}", page);
-            let mut regions: Vec<syncpdf_core::ir::Region> =
-                match store.get_stage::<Vec<syncpdf_core::ir::Region>>(&key, &cache_key)? {
-                    Some(cached) => cached,
-                    None => {
-                        let info = pf
-                            .page_infos
-                            .get(page as usize)
-                            .copied()
-                            .ok_or_else(|| PipelineError::Protocol("页号越界".into()))?;
-                        let regions = detect_regions(
-                            &mut model,
-                            worker,
-                            pf.doc,
-                            page,
-                            &info,
-                            &self.layout_opts,
-                        )?;
-                        store.put_stage(&key, &cache_key, &regions)?;
-                        regions
-                    }
-                };
+            let mut regions: Vec<syncpdf_core::ir::Region> = match store.get_stage::<Vec<
+                syncpdf_core::ir::Region,
+            >>(
+                &key, &cache_key
+            )? {
+                Some(cached) => cached,
+                None => {
+                    let info = pf
+                        .page_infos
+                        .get(page as usize)
+                        .copied()
+                        .ok_or_else(|| PipelineError::Protocol("页号越界".into()))?;
+                    let regions =
+                        detect_regions(&mut model, worker, pf.doc, page, &info, &self.layout_opts)?;
+                    store.put_stage(&key, &cache_key, &regions)?;
+                    regions
+                }
+            };
             let report = apply_coverage_fallback(
                 &mut regions,
                 page_ir,
@@ -377,11 +376,8 @@ impl Pipeline {
             .filter(|p| matches!(p.translatable, syncpdf_core::ir::Translatable::Yes))
             .cloned()
             .collect();
-        let mut schedule = PageSchedule::new(
-            translatable
-                .iter()
-                .map(|p| (p.id.page, p.id.clone())),
-        );
+        let mut schedule =
+            PageSchedule::new(translatable.iter().map(|p| (p.id.page, p.id.clone())));
         schedule.add_all_pages(selected.len() as u32);
 
         let (font_store, font_profile) = load_fonts(&self.fonts_dir, fields.target_lang)?;
@@ -488,8 +484,7 @@ mod tests {
 
     #[test]
     fn run_config_with_fake_builds_valid_pair() {
-        let cfg =
-            RunConfig::with_fake("cjk", "/in.pdf".into(), "/out.pdf".into()).unwrap();
+        let cfg = RunConfig::with_fake("cjk", "/in.pdf".into(), "/out.pdf".into()).unwrap();
         assert!(cfg.translator_kind().is_some());
         assert!(cfg.cache_dir().is_some());
         assert_eq!(cfg.run_fields().unwrap().target_lang, "zh-CN");
@@ -503,9 +498,7 @@ mod tests {
         let shared = SharedSink::new(RunRecorder::new(log.clone()));
         let cfg = RunConfig::with_fake("cjk", input, out.clone()).unwrap();
         let p = pipeline(vec_sink_path());
-        let result = p
-            .run(&cfg, shared.clone(), CancellationToken::new())
-            .await;
+        let result = p.run(&cfg, shared.clone(), CancellationToken::new()).await;
 
         // 阶段 1：source_analysis 未就绪 → 必定是 Err。
         assert!(result.is_err(), "阶段 1 应在 source_analysis 处失败");

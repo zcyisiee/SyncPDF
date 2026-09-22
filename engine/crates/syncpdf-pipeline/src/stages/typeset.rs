@@ -8,8 +8,8 @@ use syncpdf_core::{AtomId, Color, Rect, StyleId};
 use syncpdf_font::{FontId, FontProfile, FontStore, Role};
 use syncpdf_translate::{ParsedUnit, Segment};
 use syncpdf_typeset::{
-    FitOptions, FontMetrics, Inline, Lang, Obstacles, ParagraphSpec, ShapedGlyph, Shaper, StyleSpec,
-    Typeset, TypesetResult,
+    FitOptions, FontMetrics, Inline, Lang, Obstacles, ParagraphSpec, ShapedGlyph, Shaper,
+    StyleSpec, Typeset, TypesetResult,
 };
 
 use super::PipelineError;
@@ -190,11 +190,7 @@ pub fn spec_for(para: &Paragraph) -> ParagraphSpec {
             )
         })
         .collect();
-    let color: Color = para
-        .style_runs
-        .first()
-        .map(|r| r.color)
-        .unwrap_or_default();
+    let color: Color = para.style_runs.first().map(|r| r.color).unwrap_or_default();
     ParagraphSpec {
         bbox: para.bbox,
         font_size: dominant_font_size(para),
@@ -247,8 +243,12 @@ pub fn typeset_one(
 }
 
 /// 加载内置字体包 + 建目标语言的默认 profile。
-pub fn load_fonts(fonts_dir: &std::path::Path, target_lang: &str) -> Result<(FontStore, FontProfile), PipelineError> {
-    let store = FontStore::load_builtin(fonts_dir).map_err(|e| PipelineError::Font(e.to_string()))?;
+pub fn load_fonts(
+    fonts_dir: &std::path::Path,
+    target_lang: &str,
+) -> Result<(FontStore, FontProfile), PipelineError> {
+    let store =
+        FontStore::load_builtin(fonts_dir).map_err(|e| PipelineError::Font(e.to_string()))?;
     let profile = syncpdf_font::default_profile(&store, target_lang);
     Ok((store, profile))
 }
@@ -369,21 +369,29 @@ mod tests {
 
     #[test]
     fn inlines_from_parsed_expands_styles_and_atoms() {
-        let parsed =
-            parse_unit_html(r#"<p id="P01-001">A <span data-style="1">BC</span>{{KEEP_1}}<br>D</p>"#)
-                .unwrap();
+        let parsed = parse_unit_html(
+            r#"<p id="P01-001">A <span data-style="1">BC</span>{{KEEP_1}}<br>D</p>"#,
+        )
+        .unwrap();
         let para = paragraph("P01-001", "A BC D", Rect::new(0.0, 0.0, 200.0, 40.0));
         let inlines = inlines_from_parsed(&parsed, &para);
         // Text("A ") + Style(1) → Text("BC") + Atom + Br + Text("D")
         assert!(
-            inlines.iter().any(|i| matches!(i, Inline::Text { style, .. } if style.0 == 1)),
+            inlines
+                .iter()
+                .any(|i| matches!(i, Inline::Text { style, .. } if style.0 == 1)),
             "{inlines:?}"
         );
         assert!(
-            inlines.iter().any(|i| matches!(i, Inline::Atom { id, .. } if id.0 == 1)),
+            inlines
+                .iter()
+                .any(|i| matches!(i, Inline::Atom { id, .. } if id.0 == 1)),
             "{inlines:?}"
         );
-        assert!(inlines.iter().any(|i| matches!(i, Inline::Br)), "{inlines:?}");
+        assert!(
+            inlines.iter().any(|i| matches!(i, Inline::Br)),
+            "{inlines:?}"
+        );
     }
 
     #[test]
@@ -468,7 +476,11 @@ mod tests {
             "{:?}",
             tp.used_bbox
         );
-        assert!(result.scale > 0.0 && result.scale <= 1.0, "{}", result.scale);
+        assert!(
+            result.scale > 0.0 && result.scale <= 1.0,
+            "{}",
+            result.scale
+        );
     }
 
     #[test]

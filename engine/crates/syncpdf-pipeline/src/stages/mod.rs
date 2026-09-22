@@ -214,10 +214,7 @@ mod tests {
     fn error_codes_and_fatality_are_stable() {
         assert_eq!(PipelineError::Cancelled.code(), "cancelled");
         assert!(!PipelineError::Cancelled.fatal());
-        assert_eq!(
-            PipelineError::Encrypted("x".into()).code(),
-            "encrypted_pdf"
-        );
+        assert_eq!(PipelineError::Encrypted("x".into()).code(), "encrypted_pdf");
         assert_eq!(
             PipelineError::NotYetAvailable("writeback").code(),
             "not_yet_available"

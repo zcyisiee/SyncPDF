@@ -73,11 +73,8 @@ struct Row {
 
 /// 行聚类结果 → 段落的行分组。
 fn merge_lines(line_ids: &[Vec<GlyphId>], glyphs: &[&syncpdf_core::ir::Glyph]) -> Vec<Vec<Row>> {
-    let index_of: std::collections::HashMap<GlyphId, usize> = glyphs
-        .iter()
-        .enumerate()
-        .map(|(i, g)| (g.id, i))
-        .collect();
+    let index_of: std::collections::HashMap<GlyphId, usize> =
+        glyphs.iter().enumerate().map(|(i, g)| (g.id, i)).collect();
 
     let rows: Vec<Row> = line_ids
         .iter()
@@ -183,9 +180,7 @@ fn build_paragraph(
     let char_map = char_map(&rows, glyphs, &text);
     let style_runs = style_runs(&rows, glyphs, &ir.fonts);
     let atoms = detect_atoms(&text, &char_map);
-    let bbox = rows
-        .iter()
-        .fold(rows[0].bbox, |acc, r| acc.union(&r.bbox));
+    let bbox = rows.iter().fold(rows[0].bbox, |acc, r| acc.union(&r.bbox));
     let size = dominant_size(&rows, glyphs);
     let align = detect_align(&rows, &region.bbox);
     let first_indent = detect_first_indent(&rows, glyphs);
@@ -275,9 +270,10 @@ fn char_map(rows: &[Row], glyphs: &[&syncpdf_core::ir::Glyph], text: &str) -> Ve
 fn char_span_to_glyphs(map: &[u32], nchars: usize, s: usize, e: usize) -> (u32, u32) {
     let starts = &map[..nchars];
     let ends = &map[nchars..];
-    let gs = starts.get(s).copied().unwrap_or_else(|| {
-        ends.last().copied().unwrap_or(0)
-    });
+    let gs = starts
+        .get(s)
+        .copied()
+        .unwrap_or_else(|| ends.last().copied().unwrap_or(0));
     let ge = if e == 0 {
         gs
     } else {
@@ -395,7 +391,10 @@ fn regexes() -> &'static [RegexDef] {
     RES.get_or_init(|| {
         let defs: [(&str, AtomKind); 5] = [
             (r"https?://\S+|www\.\S+", AtomKind::Url),
-            (r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", AtomKind::Other),
+            (
+                r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}",
+                AtomKind::Other,
+            ),
             (r"\[\d+(?:,\s*\d+)*\]", AtomKind::Other),
             (
                 r"\d+(?:\.\d+)?\s?(?:%|mm|cm|kg|ms|Hz|GHz|MHz|nm|μm|px|pt|s)",
@@ -507,10 +506,7 @@ fn detect_first_indent(rows: &[Row], glyphs: &[&syncpdf_core::ir::Glyph]) -> f32
     }
     let x_of = |r: &Row| glyphs[r.glyphs[0] as usize].bbox.x0;
     let first = x_of(&rows[0]);
-    let rest_min = rows[1..]
-        .iter()
-        .map(x_of)
-        .fold(f32::INFINITY, f32::min);
+    let rest_min = rows[1..].iter().map(x_of).fold(f32::INFINITY, f32::min);
     (first - rest_min).max(0.0)
 }
 

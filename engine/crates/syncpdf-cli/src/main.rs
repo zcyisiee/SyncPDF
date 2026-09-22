@@ -264,8 +264,7 @@ async fn cmd_translate(
 fn cmd_inspect(input: PathBuf, page: Option<u32>) -> anyhow::Result<()> {
     let worker = syncpdf_pdf::pdfium::PdfiumWorker::spawn()
         .map_err(|e| anyhow::anyhow!("pdfium 不可用：{e}"))?;
-    let pf = preflight(&worker, &input)
-        .map_err(|e: PipelineError| anyhow::anyhow!("{e}"))?;
+    let pf = preflight(&worker, &input).map_err(|e: PipelineError| anyhow::anyhow!("{e}"))?;
     println!(
         "{}: {} 页, 加密={}, 签名={}, sha256={}",
         input.display(),
@@ -302,12 +301,14 @@ fn parse_pages(spec: &str) -> anyhow::Result<Vec<u32>> {
         }
         match part.split_once('-') {
             Some((a, b)) => {
-                let a: u32 = a.trim().parse().map_err(|_| {
-                    anyhow::anyhow!("页号区间起点非法：{a:?}")
-                })?;
-                let b: u32 = b.trim().parse().map_err(|_| {
-                    anyhow::anyhow!("页号区间终点非法：{b:?}")
-                })?;
+                let a: u32 = a
+                    .trim()
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("页号区间起点非法：{a:?}"))?;
+                let b: u32 = b
+                    .trim()
+                    .parse()
+                    .map_err(|_| anyhow::anyhow!("页号区间终点非法：{b:?}"))?;
                 if a == 0 || b < a {
                     anyhow::bail!("页号区间非法：{part}");
                 }

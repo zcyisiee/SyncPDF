@@ -175,9 +175,8 @@ mod tests {
 
     #[test]
     fn page_readies_only_after_all_its_paragraphs_arrive() {
-        let mut s = PageSchedule::new(
-            vec![(1, pid(1, 1)), (1, pid(1, 2)), (2, pid(2, 1))].into_iter(),
-        );
+        let mut s =
+            PageSchedule::new(vec![(1, pid(1, 1)), (1, pid(1, 2)), (2, pid(2, 1))].into_iter());
         assert_eq!(s.mark(&pid(1, 1)), None);
         assert_eq!(s.mark(&pid(2, 1)), Some(2));
         assert_eq!(s.mark(&pid(1, 2)), Some(1));
@@ -207,9 +206,8 @@ mod tests {
 
     #[test]
     fn force_ready_rest_drains_in_ascending_order() {
-        let mut s = PageSchedule::new(
-            vec![(5, pid(5, 1)), (3, pid(3, 1)), (9, pid(9, 1))].into_iter(),
-        );
+        let mut s =
+            PageSchedule::new(vec![(5, pid(5, 1)), (3, pid(3, 1)), (9, pid(9, 1))].into_iter());
         assert_eq!(s.mark(&pid(3, 1)), Some(3));
         assert_eq!(s.force_ready_rest(), vec![5, 9]);
         assert_eq!(s.force_ready_rest(), Vec::<u32>::new());
@@ -241,7 +239,10 @@ mod tests {
     #[test]
     fn multiple_paragraphs_same_page_ready_once() {
         let mut s = PageSchedule::new(
-            (1..=4).map(|i| (1u32, pid(1, i))).collect::<Vec<_>>().into_iter(),
+            (1..=4)
+                .map(|i| (1u32, pid(1, i)))
+                .collect::<Vec<_>>()
+                .into_iter(),
         );
         let mut readied = Vec::new();
         for i in 1..=4 {
