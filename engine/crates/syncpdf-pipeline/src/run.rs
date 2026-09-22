@@ -818,8 +818,7 @@ fn handle_block(
                 fallback = Some(("translate_missing", None, "模型没有返回该段译文".into()));
             }
             syncpdf_translate::BlockStatus::Fallback { violations } => {
-                let codes: Vec<String> =
-                    violations.iter().map(|v| v.code().to_string()).collect();
+                let codes: Vec<String> = violations.iter().map(|v| v.code().to_string()).collect();
                 fallback = Some((
                     "translate_fallback",
                     Some(codes.join(",")),
