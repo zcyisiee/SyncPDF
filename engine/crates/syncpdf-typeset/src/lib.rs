@@ -13,6 +13,7 @@
 
 pub mod breaks;
 pub mod fit;
+pub mod knuth_plass;
 pub mod layout;
 pub mod shaper;
 pub mod widen;
