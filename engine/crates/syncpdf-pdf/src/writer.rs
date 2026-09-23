@@ -282,6 +282,12 @@ impl<'a> Writer<'a> {
                 if let Ok(obj) = doc.get_object(em.font_dict).cloned() {
                     doc.set_object(slot, obj);
                     doc.objects.remove(&em.font_dict);
+                    // 搬走并删除了刚分配的最高对象。表式 xref 的 /Size 直接由
+                    // max_id 得出；保留旧值会让 qpdf 报最高对象号不一致。
+                    // 仅回收本次嵌入的尾号，不重排原文档对象或其它预留 ID。
+                    if doc.max_id == em.font_dict.0 {
+                        doc.max_id -= 1;
+                    }
                 }
             }
             stats.fonts += 1;
@@ -501,6 +507,11 @@ mod tests {
 
     #[test]
     fn save_roundtrip_and_qpdf() {
+        check_roundtrip_and_qpdf(lopdf::xref::XrefType::CrossReferenceStream);
+        check_roundtrip_and_qpdf(lopdf::xref::XrefType::CrossReferenceTable);
+    }
+
+    fn check_roundtrip_and_qpdf(xref_type: lopdf::xref::XrefType) {
         let Some(s) = store() else {
             eprintln!("SKIP: font package missing");
             return;
@@ -529,6 +540,7 @@ mod tests {
             })
             .collect();
         let (mut doc, _page) = doc_with_page();
+        doc.reference_table.cross_reference_type = xref_type;
         let mut w = Writer::new(&s);
         w.write_paragraphs(&mut doc, 1, &[para(glyphs)], 842.0)
             .unwrap();
