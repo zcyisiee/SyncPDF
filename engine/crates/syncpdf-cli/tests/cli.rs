@@ -99,7 +99,7 @@ fn run_emits_run_started_first_and_run_finished_last() {
     );
 
     let (stdout, stderr, code) = run_with_stdin(&["run"], &stdin);
-    assert_eq!(code, 0, "run 应以 0 退出；stderr:\n{stderr}");
+    assert_ne!(code, 0, "stdin EOF 取消应非零退出；stderr:\n{stderr}");
 
     let events: Vec<&str> = stdout.lines().filter(|l| !l.trim().is_empty()).collect();
     assert!(!events.is_empty(), "stdout 应有事件；stderr:\n{stderr}");
@@ -197,7 +197,7 @@ fn inspect_missing_input_fails_cleanly() {
 }
 
 /// `run --protocol 1`（前端约定的版本）必须正常：喂 configure + run 后关 stdin，
-/// 事件序列合法且以 0 退出。
+/// 事件序列合法；本测试随后关闭 stdin，因此取消并非零退出。
 #[test]
 fn run_protocol_1_is_accepted() {
     let Some(input) = syncpdf_core::fixtures::path("ci-test.pdf") else {
@@ -208,7 +208,10 @@ fn run_protocol_1_is_accepted() {
     let _ = std::fs::remove_file(&output);
     let stdin = configure_plus_run_stdin(&input, &output, "echo", Some(vec![0]));
     let (stdout, stderr, code) = run_with_stdin(&["run", "--protocol", "1"], &stdin);
-    assert_eq!(code, 0, "--protocol 1 应以 0 退出；stderr:\n{stderr}");
+    assert_ne!(
+        code, 0,
+        "--protocol 1 已接受，但 EOF 取消应非零退出；stderr:\n{stderr}"
+    );
     let kinds: Vec<String> = stdout
         .lines()
         .filter(|l| !l.trim().is_empty())
@@ -311,11 +314,7 @@ fn stdin_eof_cancels_running_task() {
         "EOF 后应在 5s 内退出，实际 {:?}；事件：{lines:?}",
         elapsed
     );
-    assert_eq!(
-        status.code(),
-        Some(0),
-        "EOF 取消仍应以 0 退出（run 内部已发事件）"
-    );
+    assert!(!status.success(), "EOF 取消必须非零退出，与 ok:false 一致");
     let last = lines.last().expect("应至少有 run_started/run_finished");
     assert_eq!(
         kind_of(last),
@@ -385,4 +384,37 @@ fn decode_roundtrip_matches_protocol() {
         decode_request(&line),
         Ok(Request::Configure { .. })
     ));
+}
+
+#[test]
+fn translate_save_failure_exits_nonzero_and_does_not_publish_success() {
+    let input = syncpdf_core::fixtures::path("ci-test.pdf").expect("ci-test fixture required");
+    let dir = tempfile::tempdir().unwrap();
+    let previous = dir.path().join("previous.pdf");
+    std::fs::write(&previous, b"previous output").unwrap();
+    let out = Command::new(BIN)
+        .arg("translate")
+        .arg("--input")
+        .arg(input)
+        .arg("--output")
+        .arg(previous.join("blocked.pdf"))
+        .arg("--cache-dir")
+        .arg(dir.path().join("cache"))
+        .arg("--translator")
+        .arg("fake:echo")
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert_eq!(std::fs::read(previous).unwrap(), b"previous output");
+    let events: Vec<serde_json::Value> = String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .filter(|s| !s.is_empty())
+        .map(|s| serde_json::from_str(s).unwrap())
+        .collect();
+    assert_eq!(events.last().unwrap()["type"], "run_finished");
+    assert_eq!(events.last().unwrap()["ok"], false);
+    assert!(!events
+        .iter()
+        .any(|e| e["type"] == "page_ready" || e["type"] == "document_finished"));
 }

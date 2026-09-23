@@ -223,12 +223,12 @@ async fn cmd_run() -> anyhow::Result<()> {
     match result {
         Ok(s) => {
             print_summary(&s);
+            anyhow::ensure!(s.ok, "已保存部分结果，但翻译未完整完成；详见 issue 事件");
             Ok(())
         }
         Err(e) => {
             // `run` 内部已经发过 error/run_finished，这里只在 stderr 留痕。
-            eprintln!("syncpdf-cli: 任务失败：{e}");
-            Ok(())
+            Err(e.into())
         }
     }
 }
@@ -281,12 +281,10 @@ async fn cmd_translate(
     match pipeline.run(&cfg, sink, CancellationToken::new()).await {
         Ok(s) => {
             print_summary(&s);
+            anyhow::ensure!(s.ok, "已保存部分结果，但翻译未完整完成；详见 issue 事件");
             Ok(())
         }
-        Err(e) => {
-            eprintln!("syncpdf-cli: 任务失败：{e}");
-            Ok(())
-        }
+        Err(e) => Err(e.into()),
     }
 }
 

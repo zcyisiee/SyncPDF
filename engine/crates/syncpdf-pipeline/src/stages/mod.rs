@@ -60,6 +60,9 @@ pub enum PipelineError {
     /// 协议层失败（请求字段非法）。
     #[error("协议错误：{0}")]
     Protocol(String),
+    /// 输出校验未通过，不能宣告完整成功。
+    #[error("输出校验失败：{0}")]
+    Validation(String),
     /// 请求的翻译通道尚未支持。
     #[error("暂不支持的翻译器：{0}")]
     UnsupportedTranslator(String),
@@ -88,6 +91,7 @@ impl PipelineError {
             Self::Font(_) => "font",
             Self::Store(_) => "store",
             Self::Protocol(_) => "protocol",
+            Self::Validation(_) => "validation",
             Self::UnsupportedTranslator(_) => "unsupported_translator",
             Self::Cancelled => "cancelled",
         }

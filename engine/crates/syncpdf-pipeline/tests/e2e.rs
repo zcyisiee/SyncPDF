@@ -225,12 +225,27 @@ async fn up_vns_first_three_pages_preserve_unfit_blocks() {
     let summary = pipeline("upvns")
         .run(&cfg, sink, CancellationToken::new())
         .await
-        .expect("up-vns 前三页应成功");
-    assert!(summary.ok);
+        .expect("up-vns 部分结果应成功保存");
+    assert!(!summary.ok, "发生回退不能报完整成功");
+    assert!(summary.stats.fallbacks > 0);
     assert_eq!(summary.pages, 3);
 
     let events = log.lock().unwrap().clone();
     assert_legal_sequence(&events);
+    assert!(matches!(
+        events.last().unwrap().1,
+        Event::RunFinished { ok: false, .. }
+    ));
+    assert!(
+        !events.iter().any(|(_, e)| matches!(
+            e,
+            Event::Issue {
+                severity: syncpdf_protocol::Severity::Error,
+                ..
+            }
+        )),
+        "回退不应触发虚假的无中文自检错误"
+    );
     // 页就绪顺序 = 各页最后一个段落落定的顺序（流式），**不保证按页号**：
     // 第 2、3 页段落少，实测先于第 1 页就绪。
     let mut ready = ready_pages(&events);

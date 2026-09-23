@@ -160,7 +160,7 @@ pub struct RunFields<'a> {
 /// run 结束时的汇总（对应 `run_finished` 与 `document_finished`）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunSummary {
-    /// 任务是否成功完成。
+    /// 是否完整完成；已保存的部分结果（含翻译/排版回退）为 false。
     pub ok: bool,
     /// 处理的页数。
     pub pages: u32,
@@ -347,6 +347,7 @@ impl Pipeline {
         let mut model = syncpdf_layout::LayoutModel::load(&model_path, 2)
             .map_err(|e| PipelineError::Layout(e.to_string()))?;
         let mut per_page_regions: Vec<(u32, Vec<Region>)> = Vec::new();
+        let mut coverage_gaps = 0u32;
         for (i, page_ir) in pages_ir.iter().enumerate() {
             check_cancelled(cancel)?;
             let page = page_ir.page.0;
@@ -387,6 +388,7 @@ impl Pipeline {
                 self.layout_opts.coverage_limit,
             );
             if report.ratio > self.layout_opts.coverage_limit {
+                coverage_gaps += 1;
                 sink.emit(Event::Issue {
                     severity: Severity::Warning,
                     code: "coverage_gap".into(),
@@ -437,14 +439,17 @@ impl Pipeline {
             .cloned()
             .partition(|p| matches!(p.translatable, Translatable::Yes));
         for p in &not_replaced {
-            if matches!(&p.translatable, Translatable::No { reason } if reason == "protected_source_overlap")
+            if matches!(&p.translatable, Translatable::No { reason } if matches!(reason.as_str(), "protected_source_overlap" | "rotated_source_text" | "translatable_region_overlap"))
             {
                 sink.emit(Event::Issue {
                     severity: Severity::Warning,
-                    code: "protected_source_overlap".into(),
+                    code: match &p.translatable {
+                        Translatable::No { reason } => reason.clone(),
+                        _ => unreachable!(),
+                    },
                     paragraph_id: Some(p.id.clone()),
                     page: Some(p.id.page),
-                    message: "段落与公式、图表或其他保留区域重叠，已保留原文".into(),
+                    message: "源段落的重叠归属或旋转方向尚未可靠处理，已保留原文".into(),
                 });
             }
             sink.emit(Event::Paragraph {
@@ -503,6 +508,7 @@ impl Pipeline {
             ready: Vec::new(),
             revision: 0,
             font_stats: None,
+            callback_error: None,
         }));
 
         // 无段落的选定页（含只有不可译段落的页）先转就绪并回写。
@@ -514,7 +520,7 @@ impl Pipeline {
             };
             for p in empty {
                 if s.schedule.mark_page(p).is_some() {
-                    writeback_page(&mut s, p - 1, sink);
+                    writeback_page(&mut s, p - 1, sink)?;
                 }
             }
         }
@@ -524,22 +530,32 @@ impl Pipeline {
         let spec = syncpdf_translate::PromptSpec::new(fields.source_lang, fields.target_lang);
         let lookup = stages::glyph_text_lookup(&pages_ir);
 
+        let callback_failed = CancellationToken::new();
         let on_block = {
             let state = state.clone();
             let sink = sink.clone();
             let cancel = cancel.clone();
+            let callback_failed = callback_failed.clone();
             move |block: syncpdf_translate::TranslatedBlock| {
                 if cancel.is_cancelled() {
                     return;
                 }
                 let mut s = lock_state(&state);
-                handle_block(&mut s, &sink, block, total);
+                if s.callback_error.is_some() {
+                    return;
+                }
+                if let Err(error) = handle_block(&mut s, &sink, block, total) {
+                    s.callback_error = Some(error);
+                    callback_failed.cancel();
+                }
             }
         };
 
         let translated = tokio::select! {
             biased;
             () = cancel_watch(cancel) => Err(PipelineError::Cancelled),
+            () = cancel_watch(&callback_failed) => Err(lock_state(&state).callback_error.take()
+                .expect("callback_failed 只在保存错误后触发")),
             r = stages::translate_all(
                 DynTranslator::new(translator),
                 &spec,
@@ -551,6 +567,9 @@ impl Pipeline {
         };
         drop(pages_ir);
         check_cancelled(cancel)?;
+        if let Some(error) = lock_state(&state).callback_error.take() {
+            return Err(error);
+        }
         translated?;
         emit_stage_finished(sink, Stage::Translating, t);
 
@@ -589,11 +608,17 @@ impl Pipeline {
                         translated_html: None,
                     });
                 }
-                s.schedule.mark(&id);
+                if let Some(page) = s.schedule.mark(&id) {
+                    writeback_page(&mut s, page - 1, sink)?;
+                }
             }
             let rest = s.schedule.force_ready_rest();
             for p in rest {
-                writeback_page(&mut s, p - 1, sink);
+                writeback_page(&mut s, p - 1, sink)?;
+            }
+            let expected: BTreeSet<u32> = selected.iter().copied().collect();
+            if s.ready.iter().copied().collect::<BTreeSet<_>>() != expected {
+                return Err(PipelineError::Protocol("部分选定页尚未成功保存".into()));
             }
         }
         emit_stage_finished(sink, Stage::Typesetting, t);
@@ -601,25 +626,31 @@ impl Pipeline {
         // ── 5. validating：对已完成的输出做 self_check + 链接对照 ───────
         emit_stage_started(sink, Stage::Validating);
         let t = Instant::now();
-        let ready_pages: Vec<u32> = lock_state(&state).ready.iter().map(|p| p + 1).collect();
-        validate_output(sink, fields.output, &ready_pages, fields.input);
+        let cjk_pages = lock_state(&state).cjk_pages();
+        validate_output(sink, fields.output, &cjk_pages, fields.input)?;
         emit_stage_finished(sink, Stage::Validating, t);
 
-        // ── 6. publishing：最终保存 + document_finished ─────────────────
+        // ── 6. publishing：发布最后一个已保存并通过校验的快照 ───────────
         emit_stage_started(sink, Stage::Publishing);
         let t = Instant::now();
         let (summary_stats, settled) = {
-            let mut s = lock_state(&state);
-            let fs = render_snapshot(
-                &s.doc,
-                &s.font_store,
-                &s.typeset_by_page,
-                &s.page_heights,
-                &s.output,
-            )?;
-            s.font_stats = Some(fs);
+            let s = lock_state(&state);
             (s.stats(), s.settled)
         };
+        // 按策略保留的 reference/脚注等不是回退；保护冲突阻断的可译内容则未完成。
+        let protected = not_replaced.iter().filter(|p| {
+            matches!(&p.translatable, Translatable::No { reason } if matches!(reason.as_str(), "protected_source_overlap" | "rotated_source_text" | "translatable_region_overlap"))
+        }).count();
+        let ok = summary_stats.fallbacks == 0 && protected == 0 && coverage_gaps == 0;
+        if !ok {
+            sink.emit(Event::Issue {
+                severity: Severity::Warning,
+                code: "translation_incomplete".into(),
+                paragraph_id: None,
+                page: None,
+                message: format!("已保存部分结果：{} 段回退、{protected} 段源区域冲突、{coverage_gaps} 页覆盖缺口", summary_stats.fallbacks),
+            });
+        }
         sink.emit(Event::DocumentFinished {
             output: fields.output.to_path_buf(),
             stats: summary_stats,
@@ -627,12 +658,9 @@ impl Pipeline {
         emit_stage_finished(sink, Stage::Publishing, t);
 
         let elapsed_ms = started.elapsed().as_millis() as u64;
-        sink.emit(Event::RunFinished {
-            ok: true,
-            elapsed_ms,
-        });
+        sink.emit(Event::RunFinished { ok, elapsed_ms });
         Ok(RunSummary {
-            ok: true,
+            ok,
             pages: selected.len() as u32,
             paragraphs: settled,
             elapsed_ms,
@@ -697,9 +725,26 @@ struct RunState {
     revision: u64,
     /// 最终发布的字体统计。
     font_stats: Option<FontStats>,
+    /// 流式回调的首个回写错误；跨回调传播到主任务，后续块停止处理。
+    callback_error: Option<PipelineError>,
 }
 
 impl RunState {
+    fn cjk_pages(&self) -> Vec<u32> {
+        self.ready
+            .iter()
+            .filter(|page| {
+                self.typeset_by_page.get(page).is_some_and(|paras| {
+                    paras
+                        .iter()
+                        .flat_map(|p| &p.lines)
+                        .flat_map(|l| &l.glyphs)
+                        .any(|g| g.text.chars().any(|c| matches!(c as u32, 0x4e00..=0x9fff)))
+                })
+            })
+            .map(|page| page + 1)
+            .collect()
+    }
     /// `document_finished` 的统计。
     ///
     /// `expansion_ratio` 按 brief 取「译文总字符 / 原文总字符」（与
@@ -763,19 +808,36 @@ fn handle_block(
     sink: &SharedSink,
     block: syncpdf_translate::TranslatedBlock,
     total: u32,
-) {
+) -> Result<(), PipelineError> {
     let id = block.id.clone();
+    if state.settled_ids.contains(&id) {
+        return Ok(());
+    }
     let Some(para) = state.pars.get(&id).cloned() else {
-        tracing::warn!(para = %id, "收到未知段落的译文块，忽略");
-        return;
+        return Err(PipelineError::Protocol(format!("收到未知段落：{id}")));
     };
+    if !matches!(para.translatable, Translatable::Yes) {
+        return Err(PipelineError::Protocol(format!("不可译段落收到译文：{id}")));
+    }
     let src_len = para.text.chars().count() as u64;
     let mut fallback: Option<(&'static str, Option<String>, String)> = None;
     let mut out: Option<(String, Vec<syncpdf_core::Rect>)> = None;
 
-    if block.status.is_ok() {
+    if !para.atoms.is_empty() {
+        fallback = Some((
+            "atom_source_unplaced",
+            None,
+            "行内原子源绘制尚未可靠放置，保留原文".into(),
+        ));
+    } else if block.status.is_ok() {
         match syncpdf_translate::parse_unit_html(&block.html) {
             Ok(parsed) => {
+                if parsed.id != id {
+                    return Err(PipelineError::Protocol(format!(
+                        "译文块身份不一致：{id} / {}",
+                        parsed.id
+                    )));
+                }
                 let shaper =
                     StoreShaper::new(&state.font_store, &state.font_profile).with_role(Role::Body);
                 let result = typeset_one(&shaper, &para, &parsed, &Obstacles::default());
@@ -811,7 +873,7 @@ fn handle_block(
                         .or_default()
                         .push(result.paragraph);
                     state.src_chars += src_len;
-                    state.tgt_chars += block.html.chars().count() as u64;
+                    state.tgt_chars += parsed.text().chars().count() as u64;
                     out = Some((block.html.clone(), boxes));
                 }
             }
@@ -889,14 +951,15 @@ fn handle_block(
     });
 
     if let Some(page) = state.schedule.mark(&id) {
-        writeback_page(state, page - 1, sink);
+        writeback_page(state, page - 1, sink)?;
     }
+    Ok(())
 }
 
 /// 页就绪回写：删除该页成功段落的原字形，然后重放全部就绪页 → 快照 → 事件。
-fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) {
+fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) -> Result<(), PipelineError> {
     if state.ready.contains(&page) {
-        return;
+        return Ok(());
     }
     let RunState {
         doc,
@@ -908,44 +971,43 @@ fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) {
         output,
         ready,
         revision,
+        font_stats,
         ..
     } = state;
-    let Some(b) = bound.get(&page) else {
-        tracing::warn!(page, "就绪页缺少绑定结果，跳过回写");
-        return;
-    };
+    let b = bound
+        .get(&page)
+        .ok_or_else(|| PipelineError::Protocol(format!("就绪页 {} 缺少绑定结果", page + 1)))?;
     // 只删「译文排版成功」段落的字形；回退/未替换的段落保留原文。
     let ids: Vec<ParagraphId> = typeset_by_page
         .get(&page)
         .map(|v| v.iter().map(|t| t.id.clone()).collect())
         .unwrap_or_default();
-    let paras: Vec<&Paragraph> = ids.iter().filter_map(|i| pars.get(i)).collect();
-    match delete_translated(doc, b, &paras) {
-        Ok(stats) => tracing::debug!(
-            page,
-            streams = stats.streams_touched,
-            forms = stats.forms_cloned,
-            "已删原字形"
-        ),
-        Err(e) => {
-            tracing::error!(page, error = %e, "删除原字形失败，该页按未回写处理");
-            return;
-        }
-    }
-    match render_snapshot(doc, font_store, typeset_by_page, page_heights, output) {
-        Ok(fs) => {
-            *revision += 1;
-            ready.push(page);
-            ready.sort_unstable();
-            sink.emit(Event::PageReady {
-                page: page + 1,
-                preview_path: None,
-                revision: *revision,
-            });
-            tracing::debug!(page, fonts = fs.fonts, "快照已保存");
-        }
-        Err(e) => tracing::error!(page, error = %e, "快照写入失败"),
-    }
+    let paras: Vec<&Paragraph> = ids
+        .iter()
+        .map(|id| {
+            pars.get(id)
+                .ok_or_else(|| PipelineError::Protocol(format!("已排版段 {id} 缺少源段落")))
+        })
+        .collect::<Result<_, _>>()?;
+    let mut candidate = doc.clone();
+    delete_translated(&mut candidate, b, &paras)?;
+    let published: BTreeMap<_, _> = typeset_by_page
+        .iter()
+        .filter(|(p, _)| **p == page || ready.contains(p))
+        .map(|(p, paras)| (*p, paras.clone()))
+        .collect();
+    let fs = render_snapshot(&candidate, font_store, &published, page_heights, output)?;
+    *doc = candidate;
+    *font_stats = Some(fs);
+    *revision += 1;
+    ready.push(page);
+    ready.sort_unstable();
+    sink.emit(Event::PageReady {
+        page: page + 1,
+        preview_path: None,
+        revision: *revision,
+    });
+    Ok(())
 }
 
 /// bind 阶段的问题转 `issue`；文本对象数与 text-show 操作数不符另报一条。
@@ -975,9 +1037,14 @@ fn emit_bind_issues(sink: &mut SharedSink, bound: &BoundPage) {
 }
 
 /// 输出校验：`self_check`（problems→Error / warnings→Warning）+ 链接对照。
-fn validate_output(sink: &mut SharedSink, output: &Path, ready_pages: &[u32], input: &Path) {
-    // `self_check` 的 `expect_cjk_on_pages` 收 **1 基**页号。
-    match syncpdf_pdf::validate::self_check(output, ready_pages) {
+fn validate_output(
+    sink: &mut SharedSink,
+    output: &Path,
+    cjk_pages: &[u32],
+    input: &Path,
+) -> Result<(), PipelineError> {
+    let mut problems = Vec::new();
+    match syncpdf_pdf::validate::self_check(output, cjk_pages) {
         Ok(report) => {
             for p in &report.problems {
                 sink.emit(Event::Issue {
@@ -988,56 +1055,48 @@ fn validate_output(sink: &mut SharedSink, output: &Path, ready_pages: &[u32], in
                     message: p.clone(),
                 });
             }
-            for w in &report.warnings {
+            problems.extend(report.problems);
+            for w in report.warnings {
                 sink.emit(Event::Issue {
                     severity: Severity::Warning,
                     code: "self_check".into(),
                     paragraph_id: None,
                     page: None,
-                    message: w.clone(),
+                    message: w,
                 });
             }
         }
-        Err(e) => sink.emit(Event::Issue {
-            severity: Severity::Error,
-            code: "self_check".into(),
-            paragraph_id: None,
-            page: None,
-            message: format!("self_check 无法执行：{e}"),
-        }),
+        Err(e) => {
+            let message = format!("self_check 无法执行：{e}");
+            sink.emit(Event::Issue {
+                severity: Severity::Error,
+                code: "self_check".into(),
+                paragraph_id: None,
+                page: None,
+                message: message.clone(),
+            });
+            problems.push(message);
+        }
     }
-
-    let (doc_in, doc_out) = match (lopdf::Document::load(input), lopdf::Document::load(output)) {
-        (Ok(a), Ok(b)) => (a, b),
-        (Err(e), _) => {
-            sink.emit(Event::Issue {
-                severity: Severity::Warning,
-                code: "links_check".into(),
-                paragraph_id: None,
-                page: None,
-                message: format!("原文载入失败，跳过链接对照：{e}"),
-            });
-            return;
-        }
-        (_, Err(e)) => {
-            sink.emit(Event::Issue {
-                severity: Severity::Warning,
-                code: "links_check".into(),
-                paragraph_id: None,
-                page: None,
-                message: format!("输出载入失败，跳过链接对照：{e}"),
-            });
-            return;
-        }
+    let links = match (lopdf::Document::load(input), lopdf::Document::load(output)) {
+        (Ok(a), Ok(b)) => syncpdf_pdf::links::links_check(&a, &b),
+        (Err(e), _) => vec![format!("链接对照无法载入原文：{e}")],
+        (_, Err(e)) => vec![format!("链接对照无法载入输出：{e}")],
     };
-    for p in syncpdf_pdf::links::links_check(&doc_in, &doc_out) {
+    for message in &links {
         sink.emit(Event::Issue {
-            severity: Severity::Warning,
+            severity: Severity::Error,
             code: "links_check".into(),
             paragraph_id: None,
             page: None,
-            message: p,
+            message: message.clone(),
         });
+    }
+    problems.extend(links);
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(PipelineError::Validation(problems.join("；")))
     }
 }
 
@@ -1132,13 +1191,13 @@ mod tests {
 
     /// 记录 `(seq, event)` 的汇；`seq` 由自身维护，与 `SharedSink` 一致。
     #[derive(Debug)]
-    struct RunRecorder {
+    pub(super) struct RunRecorder {
         seq: u64,
         log: Arc<Mutex<Vec<(u64, Event)>>>,
     }
 
     impl RunRecorder {
-        fn new(log: Arc<Mutex<Vec<(u64, Event)>>>) -> Self {
+        pub(super) fn new(log: Arc<Mutex<Vec<(u64, Event)>>>) -> Self {
             Self { seq: 0, log }
         }
     }
@@ -1340,6 +1399,7 @@ mod tests {
             ready: Vec::new(),
             revision: 0,
             font_stats: None,
+            callback_error: None,
         };
         let log = Arc::new(Mutex::new(Vec::new()));
         let sink = SharedSink::new(RunRecorder::new(log.clone()));
@@ -1353,7 +1413,8 @@ mod tests {
                 from_cache: false,
             },
             2,
-        );
+        )
+        .unwrap();
         assert!(
             state.typeset_by_page.is_empty(),
             "溢出段不得进入删除原文队列"
@@ -1379,3 +1440,7 @@ mod tests {
         )));
     }
 }
+
+#[cfg(test)]
+#[path = "run/transaction_tests.rs"]
+mod transaction_tests;

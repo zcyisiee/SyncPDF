@@ -63,7 +63,7 @@ pub fn delete_translated(
 
 /// 生成一份快照：克隆 `base` → 重放全部就绪页译文 → `finalize` → 原子保存。
 ///
-/// * `typeset_by_page`：页（**0 基**）→ 该页译文段落（按到达顺序）。
+/// * `typeset_by_page`：页（**0 基**）→ 该页译文段落（内部按稳定 ID 排序）。
 /// * `page_heights`：页（0 基）→ 页高（pt，来自 `PageIR.media_box`）；
 ///   当前 `Writer::write_paragraphs` 不用于翻页，但签名要求，故照传。
 /// * 页按 key 升序重放，保证同一个 `cid` 登记顺序稳定、快照可复现。
@@ -97,8 +97,10 @@ pub fn replay_into(
             continue;
         }
         let h = page_heights.get(page).copied().unwrap_or(792.0);
+        let mut ordered = paras.clone();
+        ordered.sort_by(|a, b| a.id.cmp(&b.id));
         writer
-            .write_paragraphs(doc, page + 1, paras, h)
+            .write_paragraphs(doc, page + 1, &ordered, h)
             .map_err(write_error)?;
     }
     writer.finalize(doc).map_err(write_error)
