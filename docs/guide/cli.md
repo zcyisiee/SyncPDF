@@ -89,12 +89,12 @@ bdt check --workdir tmp/paper --strict
 ```bash
 ~/miniconda3/envs/bdt/bin/python -m babeldoc_tools rust-translate paper.pdf \
   --workdir tmp/rust-paper-dual --cached-from tmp/rust-paper-001 \
-  --font-scale 0.9 --line-height 1.3 --layout-device coreml --dual
+  --font-scale 1.0 --line-height 1.5 --layout-device coreml --dual
 ```
 
 双语文件在单语输出校验后由 Rust 生成并自检；请求导出却生成失败或缺文件时不能报告成功。`result.json` 增加 `dual_requested`、`dual_output_exists`；请求双语时 `artifacts` 中包含 `dual.pdf`。部分翻译仍保持原有非零退出状态，双语文件不代表漏译已补齐。不传 `--dual` 时只生成单语文件；已有运行目录不能覆盖，使用新 workdir。
 
-全局调整译文字号与相对行距：追加`--font-scale 0.9 --line-height 1.3`。前者将每个译文样式字号乘0.9，保持标题/正文/小字的相对层级；后者指定**基线间距=缩放后的段落主字号×1.3**，是无量纲倍数，不是pt或额外空隙。源公式保留原尺寸；若其上下标/分式会撞相邻行，仅增加该处必需的行距。默认font-scale=1、line-height不覆盖（沿用源行距/字号比例）；只改字号时行距也按原比例联动。两值须为有限正数，实际设置记录在`result.json`的`typography`中。源IR、译文缓存键和保护原文不改；无法容纳不会再自动降低字号/行距，仍为部分结果。页保存前现会按已接受译文墨迹重算同栏垂直净空，最多3轮；不跨栏、不扩大表格单元格，也不再次调用布局模型。
+全局调整译文字号与相对行距：追加`--font-scale 0.9 --line-height 1.3`。前者将每个译文样式字号乘0.9，保持标题/正文/小字的相对层级；后者指定**基线间距=缩放后的段落主字号×1.3**，是无量纲倍数，不是pt或额外空隙。源公式保留原尺寸；若其上下标/分式会撞相邻行，仅增加该处必需的行距。默认font-scale=1、line-height不覆盖（沿用源行距/字号比例）；只改字号时行距也按原比例联动。两值须为有限正数，实际设置记录在`result.json`的`typography`中。源IR、译文缓存键和保护原文不改；无法容纳不会再自动降低字号/行距，仍为部分结果。页保存前最多3轮按已接受译文墨迹回收上下净空、利用至右侧实际障碍前的空隙；必要时与紧邻下方已译段联排，保持顺序、字号/行距和原段间距，两段都通过才移动。横向受原页文字边界限制；不跨页、不扩大表格单元格，也不再次调用布局模型。CCS样本已验证`--font-scale 1.0 --line-height 1.5`全文190块完整写入，见[浮动排版验收](../reports/2026-09-22-rust-electron-rewrite/12-MVP真实翻译验收.md#typography-local-float)。
 
 ## Web 工作台
 

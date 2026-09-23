@@ -1,13 +1,13 @@
 # Rust PDF 后端修复 · 唯一 Task state
 
 > 更新：2026-09-23；仅用户和主 Agent 可修改。主树 `feat/desktop-develop`。本轮“应译正文漏译与公式保护”修复及CCS样本验收已完成；完整Rust产品目标仍有后续工作。
-> **最新标题适配验收：21页、190块全部写入，0回退、0送译前冲突、0覆盖缺口；原193块中的3对标题各合成1块，源字形覆盖不变。** [标题验收](12-MVP真实翻译验收.md#heading-adaptive-layout) · [验收报告](12-MVP真实翻译验收.md#inline-formula-coverage) · [经验总结](../../lessons/pdf-binding-and-render-evidence.md#inline-formula-ownership) · [缺陷及历史误报](../../issues/rust-inline-formula-coverage.md)。
+> **最新浮动排版验收：1.0字号/1.5行距，21页、190块全部写入，0回退、0送译前冲突、0覆盖缺口；最新产物typography-float-v3，见[浮动验收](12-MVP真实翻译验收.md#typography-local-float)。** [标题验收](12-MVP真实翻译验收.md#heading-adaptive-layout) · [验收报告](12-MVP真实翻译验收.md#inline-formula-coverage) · [经验总结](../../lessons/pdf-binding-and-render-evidence.md#inline-formula-ownership) · [缺陷及历史误报](../../issues/rust-inline-formula-coverage.md)。
 
 ## 用户意图与边界
 
 - 修复Rust核心翻译后端：所有应译正文实际送译并正确编译，作者/机构/脚注/图片文字/reference等保持保护。用户已开放全部权限继续完成；本轮主 Agent 单独执行，不启动旧worker。
 - YAGNI、先实测后优化；用户指定样本为主树 `ccs2026b-paper3764.pdf`。不做UI/Electron，不重复p19绑定调查，不用额外重构延迟实测。
-- 源字号×0.9、普通基线间距=目标主字号×1.3，保持样式层级；公式保持原尺寸，仅在发生碰撞处增加所需行距。不通过缩字号/压行距/扩大碰撞容差求通过。
+- 用户最新反馈当前行距太紧，希望至少1.5倍行距，并寻找合适字号；原0.9字号/1.3行距仅为历史基线。已用浮动空间修复支持1.0字号/1.5行距，保持样式层级；公式保持原尺寸，仅在发生碰撞处增加所需行距。不通过缩字号/压行距/扩大碰撞容差求通过。
 - Markdown one-shot，首个闭合有效块立即编译；主请求/补救分别计数。真实缓存复排不能冒充新的模型测试，不伪造译文缓存。
 - R6用户决定继续有效：允许模型换序/拆合/复用/省略已知样式，删除目标语言字符比例门槛；保留块/KEEP/数字身份及PDF写回安全。
 - PP-DocLayout-V3、CoreML CPUAndGPU；生产不调用LaTeX。唯一对外入口 `bdt`，Rust binary仅内部sidecar。
@@ -62,9 +62,19 @@ pipeline167通过/0失败/4ignored；最后加强新编号守卫后专项1通过
 
 相关Rust281通过/0失败/4ignored，门禁专项1及流读取dual专项2通过；CLI/单入口39pytest通过；Clippy/fmt/Ruff/release/diff-check通过。strict docs仅既有HTTP锚点警告。导出失败不覆盖输入/伪报成功；任意交互批注/表单/标签阅读树未认证。详细[验收](12-MVP真实翻译验收.md#a3-dual-export)及[经验](../../lessons/pdf-binding-and-render-evidence.md#dual-page-geometry)已同步。产物和日志均在tmp/backend-repair/dual-*。功能代码提交2b3493a4，文档另批提交，未push；既有cache保持未跟踪。
 
+## 1.0字号 / 1.5行距与浮动bbox（2026-09-23，已完成）
+
+用户要求行距至少1.5，并追问既有浮动bbox能否支持原字号。三档初测：0.9/1.5为190/0，0.95/1.5为189/1（P09-017），1.0/1.5为188/2（另P14-114）；均190真实缓存命中/0模型请求。0.9版本完整保护审计通过，仅作为比较基线，不能以缩字号代替浮动空间修复。
+
+旧Python已有同栏/跨栏和条件跨页；Rust之前只做最多3轮同栏上下回收，固定横向宽度且不能让相邻已译段让位。本次在原页文字右边界内尝试向右扩展，重新核对全高障碍；还支持与紧邻下方已译段保持顺序、原段间距联排，两段都通过才一起更新。
+
+真实v2：1.0字号/1.5行距、21页190/0，0送译前冲突/覆盖缺口，190缓存/0模型，31.768秒。P09-017实际是图4说明（此前称正文不精确），加宽21.662pt后断行成功、首基线下移0.298pt；P14-114附录标题和P14-115下方正文各下移1.617/6.459pt，两行标题保持栏宽。v1也190/0，但标题侵入右页边距，目视拒绝；v2约束原页文字边界后修正。没有跨页，不改默认字号/行距。
+
+v2保护字符36,327变化0、94公式参考墨迹53,384缺失0、图3像素相同；638双语链接及28书签/180命名目标通过。原矩形链接审计将首页跨两行DOI的联合Rect内邻文误报为错误标签，逐行QuadPoints精查仅含完整URL且目标正确，证据wrapped-link-audit.json；下一轮使用逐行区域审计，不能把旧误报忽略不报。最终v3：21页190/0、32.113秒、0模型请求，两份PDF与v2 SHA一致；逐行链接标签0错误，单语/dual完整审计及qpdf通过。pipeline单元172+集成7项，共179通过/0失败/5ignored，Clippy/fmt/release通过；strict docs仍仅既存HTTP锚点警告。产物tmp/backend-repair/typography-float-v3/{translated.pdf,dual.pdf}。详细[验收](12-MVP真实翻译验收.md#typography-local-float)和[经验](../../lessons/pdf-binding-and-render-evidence.md#local-float-and-leading)已同步。修复代码提交4567c253，文档另批提交，未push。对比图仍在typography-comparison，未更新的1.0标签指修复前结果。本轮检测到用户同步修改AGENTS.md，保持其改动且不纳入本次提交；cache仍未跟踪。
+
 ## 状态与下一步
 
-本次漏译修复、表18/19断行、标题适配及A3双语导出均完成并通过对应验收。已将经验提炼到上述lessons链接，架构/参考/CLI/issue/验收同步。代码按逻辑提交：`67958e9c`（源公式/正文/子标题）、`898ca829`（闭合坏块有界补译）、`d306583e`（完整覆盖统计）；文档另批提交。运行缓存与产物不提交，未push。
+本次漏译修复、表18/19断行、标题适配、A3双语导出及1.0字号/1.5行距浮动排版均完成并通过对应验收。已将经验提炼到上述lessons链接，架构/参考/CLI/issue/验收同步。代码按逻辑提交：`67958e9c`（源公式/正文/子标题）、`898ca829`（闭合坏块有界补译）、`d306583e`（完整覆盖统计）；文档另批提交。运行缓存与产物不提交，未push。
 
 后续产品范围仍待用户安排：中文目录/书签、逐块字体/字号/译文编辑与原子revision重编译。任意公式布局、任意语言/注释格式、RTL ActualText仍未全面认证。CoreML原生stdout偶发污染风险未在本轮处理。旧23页论文R6后重译未完成，本次CCS结论不能套用旧样本。
 
@@ -78,7 +88,7 @@ cargo build --manifest-path engine/Cargo.toml --release -p syncpdf-cli
 ~/miniconda3/envs/bdt/bin/python -m babeldoc_tools rust-translate \
   ccs2026b-paper3764.pdf --workdir tmp/backend-repair/<新目录> \
   --cached-from tmp/backend-repair/title-adapt-v2 \
-  --layout-device coreml --font-scale 0.9 --line-height 1.3
+  --layout-device coreml --font-scale 1.0 --line-height 1.5 --dual
 ```
 
 上面仅缓存复排；新真实翻译去掉`--cached-from`。ORT只读库仍在 `../repair-r1-layout/tmp/backend-repair/ortlib`，不能删该树。开发日志 `tmp/backend-repair/inline-{tests,protocol-tests,pytest,clippy,build5,docs}.log`；审计脚本 `inline-audit.py`。
