@@ -1398,6 +1398,8 @@ mod tests {
                 color: Color::default(),
                 bold: false,
                 italic: false,
+                serif: false,
+                mono: false,
             }],
             atoms: Vec::new(),
             text: "Source".into(),

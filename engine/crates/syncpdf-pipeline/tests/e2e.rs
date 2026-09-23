@@ -270,11 +270,11 @@ async fn up_vns_first_three_pages_preserve_unfit_blocks() {
         .collect();
     assert!(!typeset_pages.is_empty(), "至少一页实际写入可容纳的译文");
     assert!(
-        !typeset_pages.contains(&2),
-        "本夹具第2页的fake译文固定字号放不下"
+        typeset_pages.contains(&2),
+        "行距pt转换修复后第2页已有可容纳译文"
     );
     assert!(events.iter().any(|(_, e)| matches!(e,
-        Event::Issue { code, page: Some(2), paragraph_id: Some(_), message, .. }
+        Event::Issue { code, page: Some(_), paragraph_id: Some(_), message, .. }
         if code == "typeset_overflow" && message.contains("字号"))));
     // 仅实际写入的页要求CJK；完全未替换页应与源文逐字形相同。
     let worker = syncpdf_pdf::pdfium::PdfiumWorker::spawn().expect("pdfium");
@@ -290,6 +290,40 @@ async fn up_vns_first_three_pages_preserve_unfit_blocks() {
                 worker.page_text_objects(doc, page).unwrap(),
                 worker.page_text_objects(source, page).unwrap(),
                 "未替换页保持源字形与位置"
+            );
+        }
+        // 不能依赖某一页永远全回退：排版修复后，同页可以同时有成功和失败块。
+        // 对每个回退框逐字核对原始可见字形仍位于原坐标。
+        let fallback_boxes: Vec<_> = events
+            .iter()
+            .filter_map(|(_, e)| match e {
+                Event::Paragraph {
+                    page: p,
+                    status: syncpdf_core::ir::ParagraphStatus::Fallback,
+                    boxes: Some(boxes),
+                    ..
+                } if *p == page + 1 => Some(boxes),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        let source_objects = worker.page_text_objects(source, page).unwrap();
+        let target_objects = worker.page_text_objects(doc, page).unwrap();
+        let target_chars: Vec<_> = target_objects.iter().flat_map(|o| &o.chars).collect();
+        for ch in source_objects.iter().flat_map(|o| &o.chars).filter(|ch| {
+            ch.unicode
+                .as_ref()
+                .is_some_and(|s| s.chars().any(|c| !c.is_whitespace()))
+                && fallback_boxes.iter().any(|b| b.contains(ch.bbox.center()))
+        }) {
+            assert!(
+                target_chars.iter().any(|got| got.unicode == ch.unicode
+                    && (got.origin.x - ch.origin.x).abs() < 0.01
+                    && (got.origin.y - ch.origin.y).abs() < 0.01),
+                "page {} fallback source glyph {:?} at {:?} was lost",
+                page + 1,
+                ch.unicode,
+                ch.origin
             );
         }
     }

@@ -25,12 +25,22 @@ pub struct FontMetrics {
 }
 
 /// 样式描述：从段落 `styles` 表查得，用于挑选字体。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct StyleSpec {
     pub bold: bool,
     pub italic: bool,
     pub mono: bool,
     pub script: bool,
+    #[serde(default)]
+    pub serif: bool,
+    /// Exact requested run size; None inherits the paragraph size.
+    #[serde(default)]
+    pub size: Option<f32>,
+    #[serde(default)]
+    pub color: Option<syncpdf_core::Color>,
+    /// Explicit font override, used by backend edits after validation.
+    #[serde(default)]
+    pub font: Option<u32>,
 }
 
 /// 塑形器抽象：真实实现由字体 crate 适配（harfrust）。

@@ -85,7 +85,30 @@ impl Shaper for StoreShaper<'_> {
     }
 
     fn font_for(&self, style: &StyleSpec) -> u32 {
+        if let Some(font) = style.font {
+            return font;
+        }
         let role = if style.mono { Role::Mono } else { self.role };
+        if style.serif && !style.mono {
+            use syncpdf_font::loader::Script;
+            let script = match self.profile.target_lang.as_str() {
+                "zh-CN" | "zh-SG" => Script::HanSC,
+                "zh-TW" | "zh-HK" => Script::HanTC,
+                "ja" => Script::Kana,
+                "ko" => Script::Hangul,
+                "ar" => Script::Arabic,
+                _ => Script::Latin,
+            };
+            if let Some(font) = self.store.find(&syncpdf_font::FontQuery {
+                serif: true,
+                weight: if style.bold { 700 } else { 400 },
+                italic: style.italic,
+                script,
+                ..Default::default()
+            }) {
+                return font.0;
+            }
+        }
         self.profile.pick(role, style.bold, style.italic).0
     }
 }
@@ -156,21 +179,32 @@ fn para_glyph_bbox(_para: &Paragraph, _gid: syncpdf_core::GlyphId) -> Option<Rec
     None
 }
 
-/// 段的主字号：样式 run 里出现最多的字号；无 run 时 12pt。
+/// 按源字形数量加权的中位字号；样式节点数量不改变主字号。
 pub fn dominant_font_size(para: &Paragraph) -> f32 {
-    let sizes: Vec<f32> = para
+    let mut sizes: Vec<(f32, u32)> = para
         .style_runs
         .iter()
-        .map(|r| r.size)
-        .filter(|s| *s > 0.0)
+        .filter(|r| r.size.is_finite() && r.size > 0.0)
+        .map(|r| {
+            (
+                r.size,
+                r.glyph_range.1.saturating_sub(r.glyph_range.0).max(1),
+            )
+        })
         .collect();
     if sizes.is_empty() {
         return 12.0;
     }
-    // 取中位数，避免标题里偶发的超大字号拉偏。
-    let mut sorted = sizes;
-    sorted.sort_by(f32::total_cmp);
-    sorted[sorted.len() / 2]
+    sizes.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let middle = sizes.iter().map(|(_, n)| u64::from(*n)).sum::<u64>() / 2;
+    let mut seen = 0u64;
+    for (size, n) in sizes {
+        seen += u64::from(n);
+        if seen > middle {
+            return size;
+        }
+    }
+    unreachable!("nonempty weighted size list")
 }
 
 /// 段落 → `ParagraphSpec`。
@@ -184,8 +218,12 @@ pub fn spec_for(para: &Paragraph) -> ParagraphSpec {
                 StyleSpec {
                     bold: r.bold,
                     italic: r.italic,
-                    mono: false,
+                    mono: r.mono,
                     script: false,
+                    serif: r.serif,
+                    size: Some(r.size),
+                    color: Some(r.color),
+                    font: None,
                 },
             )
         })
@@ -194,7 +232,7 @@ pub fn spec_for(para: &Paragraph) -> ParagraphSpec {
     ParagraphSpec {
         bbox: para.bbox,
         font_size: dominant_font_size(para),
-        line_height: para.line_height.max(1.0),
+        line_height: para.line_height / dominant_font_size(para),
         align: para.align,
         first_indent: para.first_indent,
         is_rtl: para.is_rtl,
@@ -236,7 +274,11 @@ pub fn typeset_one(
     parsed: &ParsedUnit,
     obstacles: &Obstacles,
 ) -> TypesetResult {
-    let spec = spec_for(para);
+    let mut spec = spec_for(para);
+    // Break and spacing policy follows translated text, not the source language.
+    if parsed.text().chars().any(is_cjk) {
+        spec.lang = Lang::Zh;
+    }
     let inlines = inlines_from_parsed(parsed, para);
     let typeset = Typeset::new(shaper, FitOptions::default());
     typeset.layout(para.id.clone(), &spec, &inlines, obstacles)
@@ -288,6 +330,8 @@ mod tests {
                 color: Color::default(),
                 bold: false,
                 italic: false,
+                serif: false,
+                mono: false,
             }],
             atoms: vec![],
             text: text.into(),
@@ -428,6 +472,8 @@ mod tests {
                 color: Color::default(),
                 bold: false,
                 italic: false,
+                serif: false,
+                mono: false,
             },
             StyleRun {
                 id: StyleId(2),
@@ -437,13 +483,15 @@ mod tests {
                 color: Color::default(),
                 bold: true,
                 italic: false,
+                serif: false,
+                mono: false,
             },
         ];
         let spec = spec_for(&para);
         assert_eq!(spec.styles.len(), 2);
         assert_eq!(spec.styles[0].0, StyleId(1));
         assert!(spec.styles[1].1.bold);
-        assert!((spec.font_size - 14.0).abs() < 0.01, "{}", spec.font_size);
+        assert!((spec.font_size - 10.0).abs() < 0.01, "{}", spec.font_size);
         assert_eq!(spec.bbox, para.bbox);
         assert_eq!(spec.lang, Lang::En);
     }
@@ -540,5 +588,31 @@ mod tests {
         assert_eq!(r.paragraph.id, ParagraphId::new(PageId(0), 1));
         let _ = ObjRef::new(1, 0);
         let _ = OpKey::new(ObjRef::new(1, 0), 0);
+    }
+    #[test]
+    fn source_line_spacing_is_in_points_and_run_sizes_colors_survive() {
+        let mut para = paragraph("P01-001", "source", Rect::new(0.0, 0.0, 200.0, 45.0));
+        para.line_height = 12.5;
+        para.style_runs[0].size = 9.963;
+        para.style_runs[0].color = Color::rgb(0.2, 0.3, 0.4);
+        let mut second = para.style_runs[0].clone();
+        second.id = StyleId(2);
+        second.size = 13.125;
+        second.color = Color::rgb(0.7, 0.1, 0.2);
+        para.style_runs.push(second);
+        let parsed = parse_unit_html("<p id=\"P01-001\"><span data-style=\"1\">abc</span><br><span data-style=\"2\">def</span></p>").unwrap();
+        let shaper = syncpdf_typeset::shaper::MonoShaper;
+        let result = typeset_paragraph(&shaper, &para, &parsed, &Obstacles::default());
+        assert!(!result.paragraph.overflow);
+        assert_eq!(result.scale, 1.0);
+        assert_eq!(result.paragraph.lines.len(), 2);
+        let lines = &result.paragraph.lines;
+        assert!((lines[0].baseline_y - lines[1].baseline_y - 12.5).abs() < 1e-4);
+        for (line, run) in lines.iter().zip(&para.style_runs) {
+            assert!(line
+                .glyphs
+                .iter()
+                .all(|g| g.size == run.size && g.color == Some(run.color)));
+        }
     }
 }

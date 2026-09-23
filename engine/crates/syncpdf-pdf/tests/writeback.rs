@@ -507,6 +507,7 @@ fn placed_glyph_fields_contract() {
         size: 10.0,
         scale_x: 1.0,
         style: StyleId(1),
+        color: None,
     };
     assert_eq!(g.gid, 1);
 }

@@ -205,6 +205,8 @@ mod tests {
                 color: Color::BLACK,
                 bold: false,
                 italic: false,
+                serif: false,
+                mono: false,
             }],
             atoms: Vec::new(),
             text: "original".into(),

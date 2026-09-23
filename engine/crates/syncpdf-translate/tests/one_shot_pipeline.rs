@@ -58,6 +58,8 @@ fn rich_paragraph(id: &str) -> Paragraph {
         color: Default::default(),
         bold: true,
         italic: false,
+        serif: false,
+        mono: false,
     }];
     p.atoms = vec![Atom {
         id: AtomId(1),

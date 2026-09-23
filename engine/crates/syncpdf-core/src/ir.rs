@@ -170,6 +170,10 @@ pub struct StyleRun {
     pub color: Color,
     pub bold: bool,
     pub italic: bool,
+    #[serde(default)]
+    pub serif: bool,
+    #[serde(default)]
+    pub mono: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -235,6 +239,7 @@ pub struct Paragraph {
     pub text: String,
     pub align: Align,
     pub first_indent: f32,
+    /// Source baseline spacing in PDF points (not an em multiplier).
     pub line_height: f32,
     pub is_rtl: bool,
     pub translatable: Translatable,
@@ -253,6 +258,9 @@ pub struct PlacedGlyph {
     pub size: f32,
     pub scale_x: f32,
     pub style: StyleId,
+    /// Per-run color; absent in older IR means the paragraph color.
+    #[serde(default)]
+    pub color: Option<Color>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

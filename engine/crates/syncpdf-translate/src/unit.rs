@@ -639,6 +639,8 @@ pub(crate) mod tests {
             color: Default::default(),
             bold: false,
             italic: false,
+            serif: false,
+            mono: false,
         }
     }
 

@@ -651,3 +651,23 @@ fn title_region_is_translatable() {
     assert_eq!(paras[0].translatable, Translatable::Yes);
     assert_eq!(paras[0].kind, RegionKind::Title);
 }
+
+#[test]
+fn source_run_sizes_and_colors_are_not_quantized() {
+    let mut a = mk_glyph(0, 'A', 30.0, 100.0, 9.963, 0);
+    let mut b = mk_glyph(1, 'B', 36.0, 100.0, 10.037, 0);
+    a.fill = Color::rgb(0.201, 0.3, 0.4);
+    b.fill = Color::rgb(0.202, 0.3, 0.4);
+    let mut font = mk_font("SourceSerif", false, false);
+    font.is_serif = true;
+    let ir = page_ir(vec![a, b], vec![font]);
+    let paragraphs = analyze_page(&ir, &full_region(RegionKind::Text));
+    assert_eq!(paragraphs.len(), 1);
+    let runs = &paragraphs[0].style_runs;
+    assert_eq!(runs.len(), 2);
+    assert_eq!(runs[0].size, 9.963);
+    assert_eq!(runs[1].size, 10.037);
+    assert_eq!(runs[0].color.r, 0.201);
+    assert_eq!(runs[1].color.r, 0.202);
+    assert!(runs.iter().all(|r| r.serif));
+}

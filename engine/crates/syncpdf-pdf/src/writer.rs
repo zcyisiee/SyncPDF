@@ -165,7 +165,8 @@ impl<'a> Writer<'a> {
                     let cid = self.cid_for(g.font, g.gid, &g.text);
                     self.glyph_written += 1;
                     let name = self.resource_name(g.font);
-                    let [r, gg, b] = para.color.to_rgb8();
+                    let color = g.color.unwrap_or(para.color);
+                    let [r, gg, b] = [color.r, color.g, color.b];
                     bytes.push(b'q');
                     bytes.push(b'\n');
                     // 字体：不同字形可能来自不同字体，每字形重设 Tf。
@@ -182,9 +183,9 @@ impl<'a> Writer<'a> {
                             "BT /{} {} Tf {} {} {} rg {} 0 0 1 {} {} Tm <{:04X}> Tj ET\n",
                             name,
                             fmt_num(g.size),
-                            fmt_num(f32::from(r) / 255.0),
-                            fmt_num(f32::from(gg) / 255.0),
-                            fmt_num(f32::from(b) / 255.0),
+                            fmt_num(r),
+                            fmt_num(gg),
+                            fmt_num(b),
                             fmt_num(g.scale_x),
                             fmt_num(g.x),
                             fmt_num(g.y),
@@ -468,6 +469,7 @@ mod tests {
                 size: 12.0,
                 scale_x: 1.0,
                 style: StyleId(1),
+                color: None,
             })
             .collect();
 
@@ -547,6 +549,7 @@ mod tests {
                 size: 12.0,
                 scale_x: 1.0,
                 style: StyleId(1),
+                color: None,
             })
             .collect();
         let (mut doc, _page) = doc_with_page();
@@ -612,6 +615,7 @@ mod tests {
             size: 10.0,
             scale_x: 1.0,
             style: StyleId(1),
+            color: None,
         }]);
         w.write_paragraphs(&mut doc, 1, &[p], 842.0).unwrap();
         assert!(matches!(

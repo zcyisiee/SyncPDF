@@ -429,7 +429,7 @@ fn glyph_total(map: &[u32], nchars: usize) -> u32 {
     map[nchars..].iter().copied().max().unwrap_or(0)
 }
 
-/// 按 (font, size 四舍五入 0.5, bold, italic, color) 切样式 run，`StyleId` 从 1 编。
+/// 按 (font, exact size, bold, italic, color) 切样式 run，`StyleId` 从 1 编。
 ///
 /// 粗斜体取自 `PageIR::fonts[glyph.font]`（`FontRef::is_bold` / `is_italic`），
 /// 字形本身只存字体下标。
@@ -441,10 +441,10 @@ fn style_runs(
     #[derive(Clone, Copy, PartialEq, Eq)]
     struct Key {
         font: u32,
-        size_half: i32,
+        size_bits: u32,
         bold: bool,
         italic: bool,
-        color: [u8; 3],
+        color: [u32; 3],
     }
 
     let key_of = |i: u32| -> Key {
@@ -452,10 +452,10 @@ fn style_runs(
         let (bold, italic) = font_flags(fonts, g.font);
         Key {
             font: g.font,
-            size_half: (g.size * 2.0).round() as i32,
+            size_bits: g.size.to_bits(),
             bold,
             italic,
-            color: g.fill.to_rgb8(),
+            color: [g.fill.r.to_bits(), g.fill.g.to_bits(), g.fill.b.to_bits()],
         }
     };
 
@@ -474,10 +474,12 @@ fn style_runs(
             id: StyleId(next_id),
             glyph_range: (start as u32, end as u32),
             font: k.font,
-            size: k.size_half as f32 / 2.0,
+            size: f32::from_bits(k.size_bits),
             color: glyphs[flat[start] as usize].fill,
             bold,
             italic,
+            serif: fonts.get(k.font as usize).is_some_and(|f| f.is_serif),
+            mono: fonts.get(k.font as usize).is_some_and(|f| f.is_fixed_pitch),
         });
         next_id += 1;
         start = end;

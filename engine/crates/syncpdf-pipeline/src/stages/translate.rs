@@ -438,6 +438,8 @@ mod tests {
             color: Color::default(),
             bold: false,
             italic: false,
+            serif: false,
+            mono: false,
         }];
         let unit = build_unit(&p, |_| None);
         assert!(unit.html.contains("{{KEEP_1}}"), "{}", unit.html);

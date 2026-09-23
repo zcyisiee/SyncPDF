@@ -82,6 +82,7 @@ fn glyph_para(font: u32, gid: u16, size: f32, scale_x: f32) -> TypesetParagraph 
                 size,
                 scale_x,
                 style: StyleId(1),
+                color: None,
             }],
             kept_atoms: Vec::new(),
         }],
@@ -335,4 +336,40 @@ fn font_size_linear_and_scale_x_horizontal_only() {
 
     std::fs::write(ev.join("measurements.txt"), &report).expect("写 measurements.txt");
     eprintln!("\n{report}");
+}
+
+#[test]
+fn mixed_run_exact_sizes_and_colors_are_visible_in_pdfium() {
+    let (store, font) = inter_font().expect("real builtin font required");
+    let worker = PdfiumWorker::spawn().expect("real PDFium required");
+    let loaded = store.get(syncpdf_font::FontId(font)).unwrap();
+    let gid = syncpdf_font::shape(loaded, "H", 12.0, false, &[])[0].gid;
+    let mut p = glyph_para(font, gid, 9.963, 1.0);
+    let first = &mut p.lines[0].glyphs[0];
+    first.color = Some(Color::rgb(0.2, 0.3, 0.4));
+    let mut second = first.clone();
+    second.x += 30.0;
+    second.size = 13.125;
+    second.color = Some(Color::rgb(0.7, 0.1, 0.2));
+    p.lines[0].glyphs.push(second);
+    let expected = p.lines[0].glyphs.clone();
+    let (mut doc, _) = doc_with_page();
+    let mut writer = Writer::new(&store);
+    writer.write_paragraphs(&mut doc, 1, &[p], 842.0).unwrap();
+    writer.finalize(&mut doc).unwrap();
+    let path = evidence_dir().join("mixed-run-style.pdf");
+    save(&mut doc, &path).unwrap();
+    let handle = worker.open(&path).unwrap();
+    let objects = worker.page_text_objects(handle, 0).unwrap();
+    worker.close(handle);
+    assert_eq!(objects.len(), 2);
+    for (object, glyph) in objects.iter().zip(&expected) {
+        assert!((object.font_size - glyph.size).abs() < 1e-3);
+        assert_eq!(object.fill.to_rgb8(), glyph.color.unwrap().to_rgb8());
+        // ActualText spans can attach all logical chars to the first object;
+        // object matrices still independently identify both paint origins.
+        let origin = object.object_bounds.as_ref().unwrap().origin;
+        assert!((origin.x - glyph.x).abs() < 1e-3);
+        assert!((origin.y - glyph.y).abs() < 1e-3);
+    }
 }

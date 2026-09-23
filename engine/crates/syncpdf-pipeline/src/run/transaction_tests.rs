@@ -60,6 +60,8 @@ fn state(dir: &Path) -> (RunState, PathBuf) {
                 color: Color::BLACK,
                 bold: false,
                 italic: false,
+                serif: false,
+                mono: false,
             }],
             atoms: vec![],
             text: "Source".into(),

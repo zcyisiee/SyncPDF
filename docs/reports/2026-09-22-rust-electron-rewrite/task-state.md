@@ -40,11 +40,12 @@
 
 ## 4. 当前问题与唯一下一步
 
-- **R2工程验收通过**：[09验收](09-R2源文本与Markdown验收.md)。共享core `3e6838db`、事务/状态 `ce4b6e2b`、Markdown模块 `63e6e741`、源文本映射 `6209a3ee`、作者机构保护 `77e5e70d`已提交；主控Markdown接线提交见git log。主树workspace **591通过、0失败、5 ignored**；随后 metadata 5项和真实首页probe分别通过，strict Clippy/fmt/release通过。已有无文本夹具早退不算真实文本验收。
+- **R2工程验收通过**：[09验收](09-R2源文本与Markdown验收.md)。共享core `3e6838db`、事务/状态 `ce4b6e2b`、Markdown模块 `63e6e741`、源文本映射 `6209a3ee`、作者机构保护 `77e5e70d`已提交；主控Markdown接线 `0301c237`。主树workspace **591通过、0失败、5 ignored**；随后 metadata 5项和真实首页probe分别通过，strict Clippy/fmt/release通过。已有无文本夹具早退不算真实文本验收。
 - **真实23页 release** `r2-markdown-safe-all`：32.47秒；主请求1/补救0/缓存0；99 overflow、63 atom_source_unplaced、40 protected_source_overlap、1 rotated_source_text；仍无成功译文。23页源文本及144dpi像素完全相同，qpdf exit0，自检无误报，RunFinished ok:false / CLI exit1，正确标明部分结果。fake只能证明工程行为，完整质量仍失败。
 - **新增行为已独立举证**：闭合Markdown块在模型返回前交付；坏尾部/半块上抛且先前有效块可缓存；保存失败不改文档/revision/已有文件；未ready页不重放待排译文；未知/重复身份不计完整成功。行内atom尚未真放置，整段回退只是保护。
 - **源文本**：几何生成空格与真实GlyphID分开；ligature/空映射/显式空格测试通过；最终真实首页“Training neural networks is costly”正确恢复。首页4段作者/机构/邮箱保留，标题/摘要/正文可译。几何启发式仍有边界，源p1控制字符等未声称修复。
-- **下一批R3**：先冻结样式、fallback字体与cluster、实际排版框接口；并行纯Knuth–Plass模块及独立字体塑形窄修，主控负责共享IR/排版接线和验收。固定原/用户字号，不能自动缩小；容纳失败继续明确提示。随后逐项接原子绘制、链接、A3 dual、中文目录、编辑重编译，再做真实LLM全文与视觉验收。
+- **当前R3分工**：新Orca树 `codex-r3-knuth` 实现纯box/glue/penalty最优断行模块；`codex-r3-shaping` 修字体grapheme/fallback/cluster范围；`codex-r3-frame-probe` 只读量测首页排版框/基线。三份brief已冻结独立API；均gpt-6-sol:high新叶子，前两项30分钟/2轮、probe20分钟。主控负责共享IR、逐run字号/颜色及layout接线和验收。固定原/用户字号，不能自动缩小；容纳失败继续明确提示。随后逐项接原子绘制、链接、A3 dual、中文目录、编辑重编译，再做真实LLM全文与视觉验收。
+- **R3首个窄修已验证（本批未完）**：源line_height为绝对pt，旧typeset适配误作字号倍数再乘size；另源样式字号曾按0.5pt取整、整段字号取run数中位而非源字形加权。主控已接精确run字号/颜色、字体角色与pt转换，127项pipeline unit、33项typeset、真实混合字号/颜色PDFium专项及strict Clippy通过。up-vns第2页已出现可容纳译文，旧全页必须回退断言被更强的逐回退框源字形/坐标保护取代并通过。宽高/实际ink与Knuth–Plass未接，不算R3通过。
 - 已结束的 `r2_source` / `r2_markdown` / `r2_metadata` 和所有R1 worker不重启；Orca独立树保留且clean。新分工严格gpt-6-sol:high/fresh/独立Orca worktree，task-state仅主控写。
 - **R1基础验收**见[08](08-R1布局与固定字号验收.md)：567 passed /0 failed/4 ignored；strict Clippy/fmt/release及23页coverage probe通过。p7/p15可见字形缺口0，其余21页分区不变；错误扩大Caption/Code候选被拒绝。字体原始像素跨两次选页/全篇稳定，qpdf全过。R1旧全回退仍ok:true及错误自检已由R2修正。
 - **禁止重复调查p19**：绑定集成与目标自身单code对象证据窄修已完成，详见06/历史handoff。共享/嵌套Form、未知编码等不支持边界仍保留；不以放宽门禁取得通过。

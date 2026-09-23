@@ -96,33 +96,32 @@ impl BreaksCache {
         inlines: &[Inline],
     ) -> FontMetrics {
         *self.font_metrics.get_or_init(|| {
-            let mut fonts = std::collections::BTreeSet::new();
+            let mut metrics = FontMetrics {
+                ascent: 0.0,
+                descent: 0.0,
+            };
             for inline in inlines {
                 if let Inline::Text { text, style } = inline {
-                    if !text.is_empty() {
-                        let spec = input
-                            .styles
-                            .iter()
-                            .find(|(id, _)| id == style)
-                            .map(|(_, spec)| *spec)
-                            .unwrap_or_default();
-                        fonts.insert(shaper.font_for(&spec));
+                    if text.is_empty() {
+                        continue;
                     }
+                    let spec = input
+                        .styles
+                        .iter()
+                        .find(|(id, _)| id == style)
+                        .map(|(_, spec)| *spec)
+                        .unwrap_or_default();
+                    let font = spec.font.unwrap_or_else(|| shaper.font_for(&spec));
+                    let size = spec.size.unwrap_or(input.font_size);
+                    let m = shaper.metrics(font);
+                    metrics.ascent = metrics.ascent.max(m.ascent * size / input.font_size);
+                    metrics.descent = metrics.descent.max(m.descent * size / input.font_size);
                 }
             }
-            if fonts.is_empty() {
-                fonts.insert(shaper.font_for(&StyleSpec::default()));
+            if metrics.ascent + metrics.descent == 0.0 {
+                return shaper.metrics(shaper.font_for(&StyleSpec::default()));
             }
-            fonts.into_iter().map(|font| shaper.metrics(font)).fold(
-                FontMetrics {
-                    ascent: 0.0,
-                    descent: 0.0,
-                },
-                |acc, metrics| FontMetrics {
-                    ascent: acc.ascent.max(metrics.ascent),
-                    descent: acc.descent.max(metrics.descent),
-                },
-            )
+            metrics
         })
     }
 }
@@ -291,7 +290,8 @@ fn shape_inlines(
             }
             Inline::Text { text, style } => {
                 let spec = spec_of(*style);
-                let font = shaper.font_for(&spec);
+                let font = spec.font.unwrap_or_else(|| shaper.font_for(&spec));
+                let size = spec.size.unwrap_or(size);
                 for chunk in reorder(text, input.is_rtl) {
                     let glyphs = shaper.shape(font, &chunk.text, size, chunk.is_rtl);
                     // cluster → 字符映射（cluster 为 chunk 内字节偏移）。
@@ -637,11 +637,16 @@ fn place_line(
                     font: *font,
                     gid: glyph.gid,
                     text: text.to_string(),
-                    x,
+                    x: x + glyph.x_offset,
                     y: baseline_y + glyph.y_offset,
                     size: *size,
                     scale_x: 1.0,
                     style: *style,
+                    color: input
+                        .styles
+                        .iter()
+                        .find(|(id, _)| id == style)
+                        .and_then(|(_, s)| s.color),
                 });
                 x += glyph.x_advance;
             }
