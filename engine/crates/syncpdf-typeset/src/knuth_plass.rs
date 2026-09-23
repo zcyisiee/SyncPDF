@@ -195,7 +195,6 @@ pub fn solve(nodes: &[Node], widths: &[f32], tolerance: f32) -> Result<Solution,
     for (bi, point) in breaks.iter().enumerate() {
         let (previous_states, current_and_later) = states.split_at_mut(bi);
         let current = &mut current_and_later[0];
-        let breakpoints = &breaks;
         let Some(last) = last_box[point.at] else {
             continue;
         };
@@ -206,33 +205,23 @@ pub fn solve(nodes: &[Node], widths: &[f32], tolerance: f32) -> Result<Solution,
         let min_start = min_prefix[end] + point.append_width - max_width;
         let lower =
             breaks[..bi].partition_point(|p| min_prefix[next_box[p.next]] < min_start - 1e-9);
-        let candidates = std::iter::once((None, 0, 0.0, None, false, 0)).chain(
-            previous_states
-                .iter()
-                .enumerate()
-                .skip(lower)
-                .flat_map(|(pi, by_slot)| {
-                    by_slot.iter().enumerate().flat_map(move |(slot, classes)| {
-                        classes
-                            .iter()
-                            .enumerate()
-                            .filter_map(move |(fitness, state)| {
-                                state.as_ref().map(|state| {
-                                    (
-                                        Some((pi, slot, fitness)),
-                                        breakpoints[pi].next,
-                                        state.demerits,
-                                        Some(fitness),
-                                        breakpoints[pi].flagged,
-                                        slot,
-                                    )
-                                })
-                            })
-                    })
-                }),
-        );
-        for (prev, from, previous_demerits, previous_fitness, previous_flagged, slot) in candidates
-        {
+        let initial = [
+            Some(State {
+                demerits: 0.0,
+                prev: None,
+                line: Line {
+                    start: 0,
+                    end: 0,
+                    break_at: 0,
+                    ratio: 0.0,
+                },
+            }),
+            None,
+            None,
+            None,
+        ];
+        for previous in std::iter::once(None).chain((lower..bi).map(Some)) {
+            let from = previous.map_or(0, |pi| breaks[pi].next);
             if from >= point.at && point.at != n {
                 continue;
             }
@@ -243,91 +232,105 @@ pub fn solve(nodes: &[Node], widths: &[f32], tolerance: f32) -> Result<Solution,
             if start > last {
                 continue;
             }
-            let target = f64::from(widths[slot]);
-            let body_width = natural[end] - natural[start] + point.append_width;
-            let is_terminal = box_count[n] == box_count[point.next]
-                && forced_count[n] == forced_count[point.next];
-            let single_word_ragged = !point.mandatory
-                && !is_terminal
-                && matches!(nodes.get(point.at), Some(Node::Penalty { .. }))
-                && stretch[end] == stretch[start]
-                && shrink[end] == shrink[start]
-                && body_width <= target;
-            let ragged = point.mandatory || is_terminal || single_word_ragged;
-            let ratio = if ragged {
-                if body_width > target {
+            for slot in 0..previous.map_or(1, |_| slots) {
+                let classes = previous.map_or(&initial, |pi| &previous_states[pi][slot]);
+                if classes.iter().all(Option::is_none) {
                     continue;
                 }
-                0.0
-            } else {
-                let delta = target - body_width;
-                let adjust = if delta >= 0.0 {
-                    stretch[end] - stretch[start]
-                } else {
-                    shrink[end] - shrink[start]
-                };
-                if adjust == 0.0 {
-                    if delta != 0.0 {
+                let target = f64::from(widths[slot]);
+                let body_width = natural[end] - natural[start] + point.append_width;
+                let is_terminal = box_count[n] == box_count[point.next]
+                    && forced_count[n] == forced_count[point.next];
+                let single_word_ragged = !point.mandatory
+                    && !is_terminal
+                    && matches!(nodes.get(point.at), Some(Node::Penalty { .. }))
+                    && stretch[end] == stretch[start]
+                    && shrink[end] == shrink[start]
+                    && body_width <= target;
+                let ragged = point.mandatory || is_terminal || single_word_ragged;
+                let ratio = if ragged {
+                    if body_width > target {
                         continue;
                     }
                     0.0
                 } else {
-                    delta / adjust
+                    let delta = target - body_width;
+                    let adjust = if delta >= 0.0 {
+                        stretch[end] - stretch[start]
+                    } else {
+                        shrink[end] - shrink[start]
+                    };
+                    if adjust == 0.0 {
+                        if delta != 0.0 {
+                            continue;
+                        }
+                        0.0
+                    } else {
+                        delta / adjust
+                    }
+                };
+                if !ratio.is_finite() || ratio.abs() > f64::from(tolerance) || ratio < -1.0 {
+                    continue;
                 }
-            };
-            if !ratio.is_finite() || ratio.abs() > f64::from(tolerance) || ratio < -1.0 {
-                continue;
-            }
-            let fitness = fitness_class(ratio);
-            let badness_ratio = if single_word_ragged {
-                (target - body_width) / target
-            } else {
-                ratio.abs()
-            };
-            let badness = 100.0 * badness_ratio.powi(3);
-            let base = 10.0 + badness;
-            let penalty = if point.mandatory {
-                0.0
-            } else {
-                f64::from(point.penalty)
-            };
-            let line_demerits = if penalty >= 0.0 {
-                base.powi(2) + penalty.powi(2)
-            } else {
-                base.powi(2) - penalty.powi(2)
-            };
-            let fitness_demerits = previous_fitness.map_or(0.0, |old| {
-                if old.abs_diff(fitness) > 1 {
-                    100.0
+                let fitness = fitness_class(ratio);
+                let badness_ratio = if single_word_ragged {
+                    (target - body_width) / target
                 } else {
+                    ratio.abs()
+                };
+                let badness = 100.0 * badness_ratio.powi(3);
+                let base = 10.0 + badness;
+                let penalty = if point.mandatory {
                     0.0
+                } else {
+                    f64::from(point.penalty)
+                };
+                let line_demerits = if penalty >= 0.0 {
+                    base.powi(2) + penalty.powi(2)
+                } else {
+                    base.powi(2) - penalty.powi(2)
+                };
+                for (old_fitness, old_state) in classes.iter().enumerate() {
+                    let Some(old_state) = old_state else {
+                        continue;
+                    };
+                    let prev = previous.map(|pi| (pi, slot, old_fitness));
+                    let previous_demerits = old_state.demerits;
+                    let fitness_demerits =
+                        if previous.is_some() && old_fitness.abs_diff(fitness) > 1 {
+                            100.0
+                        } else {
+                            0.0
+                        };
+                    let flagged_demerits =
+                        if previous.is_some_and(|pi| breaks[pi].flagged) && point.flagged {
+                            100.0
+                        } else {
+                            0.0
+                        };
+                    let score =
+                        previous_demerits + line_demerits + fitness_demerits + flagged_demerits;
+                    if !score.is_finite() {
+                        continue;
+                    }
+                    let line = Line {
+                        start,
+                        end,
+                        break_at: point.at,
+                        ratio: ratio as f32,
+                    };
+                    let next_slot = (slot + 1).min(slots - 1);
+                    if current[next_slot][fitness]
+                        .as_ref()
+                        .is_none_or(|existing| score < existing.demerits)
+                    {
+                        current[next_slot][fitness] = Some(State {
+                            demerits: score,
+                            prev,
+                            line,
+                        });
+                    }
                 }
-            });
-            let flagged_demerits = if previous_flagged && point.flagged {
-                100.0
-            } else {
-                0.0
-            };
-            let score = previous_demerits + line_demerits + fitness_demerits + flagged_demerits;
-            if !score.is_finite() {
-                continue;
-            }
-            let line = Line {
-                start,
-                end,
-                break_at: point.at,
-                ratio: ratio as f32,
-            };
-            let next_slot = (slot + 1).min(slots - 1);
-            if current[next_slot][fitness]
-                .as_ref()
-                .is_none_or(|existing| score < existing.demerits)
-            {
-                current[next_slot][fitness] = Some(State {
-                    demerits: score,
-                    prev,
-                    line,
-                });
             }
         }
         if box_count[n] == box_count[point.next] && forced_count[n] == forced_count[point.next] {
