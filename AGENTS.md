@@ -2,6 +2,15 @@
 
 非小改动先读 [当前架构](ARCHITECTURE.md)，再按任务查下表。代码是行为证据；发现文档与代码不符时核实并修正文档。未来方案不得写成已实现功能。
 
+## 任务状态（开始与恢复时必读）
+
+- `AGENTS.md`、`ARCHITECTURE.md`、`docs/` 是长期 **project state**；每个具体任务另维护唯一的 **task state**：默认 `.plan/<任务>/task-state.md`。已有计划目录可原地维护，不重复建副本。
+- `task-state.md` 只允许**用户和主 Agent**修改；subagent 只读。记录用户意图/偏好、专项知识、进度与验收、当前问题/下一步，保持简短，细节链接到计划和证据。
+- 主控在任务开始、compact/接管恢复、委派前先读 task state；偏好、决策、验收或阻断变化时及时更新。brief 必须指定其唯一文件的绝对路径，子 worktree 不另建可写副本。
+- 完成后由主控把可复用经验提炼到 [`docs/lessons/`](docs/lessons/index.md)，再将 task state 标记完成并链接总结；不得把未实现方案升格成事实。完整生命周期见 [文档维护](docs/index.md#任务状态生命周期)。
+
+当前 Rust 后端修复的唯一状态：[task-state.md](docs/reports/2026-09-22-rust-electron-rewrite/task-state.md)。
+
 ## 文档导航
 
 | 文件 | 回答的问题 |

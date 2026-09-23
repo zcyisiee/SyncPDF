@@ -2,6 +2,8 @@
 
 本文描述仓库现有实现，核对日期：2026-09-19。在线部署目标和未决定的存储方案见 [在线翻译设计](docs/design/online-translation.md)；运行与验证见 [CLI 指南](docs/guide/cli.md)。
 
+工程上下文分为两层：本文件与 `AGENTS.md`、`docs/` 维护长期项目事实；具体任务的用户偏好、阶段验收和阻断由其计划目录内唯一的 `task-state.md` 维护，不混入已实现架构。任务状态仅用户和主 Agent 可修改，恢复与委派均须读取；生命周期与完成后的经验升格见 [文档维护](docs/index.md#task-state-lifecycle)。
+
 ## 1. 目的
 
 把 PDF 解析为带段落身份、样式和公式锚点的可译文本，调用模型翻译，再重建译文 PDF，并允许用户查看进度、修改局部译文和重新编译。输入是 PDF、语言与布局配置、翻译/审查提供方；输出包括单语 PDF、可选双语 PDF、工作目录和质量报告。保真程度由检查与人工复核判断。
@@ -116,3 +118,9 @@ job 子进程由 serve 以 `sys.executable -m babeldoc_tools` 起，serve 会把
 - 双轨存储与两套编译/事件协议仍并存；统一迁移和旧路径退役时间未定。旧注释和部分测试还保留自动防抖编译的预期，判断行为应追到执行函数。
 - `bdt serve --cleanup` 仅清理服务根下过期的 `tmp/`、`cache/` 文件；没有对全部 workdir、debug、历史版本和资产的容量预算/自动淘汰闭环。
 - 尚未量化真实云服务器的磁盘峰值、并发与恢复目标。数据库和远端资产后端选型保持待定；不得从本机实现推断公网部署已就绪。
+
+## 7. 开发中的 Rust PDF 后端
+
+`engine/` 已包含 Rust PDF 解析、布局、翻译、排版与写回 crate，以及内部 `syncpdf-cli` sidecar。其生产排版路径不调用 LaTeX；旧 Python/bdt 路径仍按上文运行。Rust 后端尚未通过全篇翻译质量验收，不能将它与现有产品交付能力等同。
+
+源处理将 PDFium 几何与 lopdf 内容流操作绑定，source 和公共删除 API 执行替换门禁；已准备段落合成一个页级 PatchSet，私有候选完成共享流隔离后才替换文档。绑定保存页 Contents/源流快照，写前拒绝过期来源。页级失败原子性不代表整条 pipeline 发布事务已完成。当前契约、不支持范围与已知缺口见 [Rust PDF 后端参考](docs/reference/rust-pdf-backend.md)，阶段验收仍由唯一 task state 维护。

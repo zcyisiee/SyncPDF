@@ -14,6 +14,13 @@
 
 worker 必须从实际实施任务的仓库或 worktree 启动。并行实现任务使用独立 git worktree，避免共享工作树相互覆盖。每个任务使用新会话，不继承其它任务的执行上下文。
 
+## Task state 是必读的只读输入
+
+- 主控委派前先更新并读取该任务唯一的 `task-state.md`；具体维护规则见 [任务状态生命周期](../index.md#task-state-lifecycle)。
+- 每份 brief 必须给出该文件的**绝对路径**，以及本轮允许范围、验收和停止条件。叶子开工先读状态，再读专项计划；旧 worktree 没有最新文件时，跨树只读主控指定的 canonical 文件，不自建副本。
+- 只有用户和主 Agent 可修改 task state；writer 的源码修改权限不包含此文件。发现偏好冲突、新阻断或事实变化，通过 supervisor/交付报告提出，由主控核实更新。
+- compact/接管后的主控先读状态并核对实际 run、dirty 和验收证据；不得把旧“正在运行”记录当作当前进程事实。任务收尾的经验升格仍由主控负责。
+
 ## 支持的 harness
 
 以下示例使用 `task-001.md` 表示已准备好的 brief，执行时替换为真实路径。brief、日志和验收证据可放在对应工作树的 `tmp/` 下。命令中的无人值守选项只免除交互确认，不扩大 brief 授权的范围。
@@ -82,6 +89,9 @@ ln -s <主工作树>/web/node_modules <新 worktree>/web/node_modules
 # 任务（Task）
 简洁标题。
 
+## 必读状态（Task state）
+唯一 task-state.md 的绝对路径；叶子只读，不修改、不另建副本。
+
 ## 目标（Objective）
 期望达到的可观察状态。
 
@@ -108,7 +118,7 @@ ln -s <主工作树>/web/node_modules <新 worktree>/web/node_modules
 
 - 主控亲自检查新增、修改、删除文件及完整 diff，确认符合任务范围；再运行相关测试，核实 worker 的报告。不能只引用 worker 的“已完成”。
 - 对外产品入口只有 `bdt`。新增能力必须作为其子命令或参数，不恢复 `babeldoc.tools.agent` 内部 CLI、`experiments/*_translate.py` 翻译脚本入口或第二个 `babeldoc_tools` 包；守卫在 `tests/test_single_entry.py`。
-- 翻译测试结果保存在当前仓库的 `tmp/`，该目录必须被 `.gitignore` 忽略。使用仓库 `.venv/bin/python -m pytest`；完整回归把 `.venv/bin` 加入 `PATH`，供测试调用 `bdt`。
-- 每次 pytest 使用新目录 `--basetemp="tmp/pytest-$(date +%Y%m%d-%H%M%S)"`，避免清空上一轮证据。改动的 Python 文件运行 `.venv/bin/ruff check <files>`；提交前运行 `git diff --check`。
+- 翻译测试结果保存在当前仓库的 `tmp/`，该目录必须被 `.gitignore` 忽略。所有 worktree 共用 conda env `bdt`，不再各建 `.venv`；在 worktree 根目录用 `~/miniconda3/envs/bdt/bin/python -m pytest`。测试若调用 `bdt`，需确认 editable 安装目标与本次验证代码树一致，不能把其它 worktree 的运行结果算成本树验证。
+- 每次 pytest 使用新目录 `--basetemp="tmp/pytest-$(date +%Y%m%d-%H%M%S)"`，避免清空上一轮证据。改动的 Python 文件运行 `~/miniconda3/envs/bdt/bin/ruff check <files>`；提交前运行 `git diff --check`。
 
 完整验证命令与交付口径见 [运行与验证](cli.md)。上述 harness 命令属于开发委派工具，不构成项目新的产品入口。
