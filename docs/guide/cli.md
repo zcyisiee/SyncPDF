@@ -72,7 +72,7 @@ bdt check --workdir tmp/paper --strict
   --model deepseek/deepseek-flash --thinking low --layout-device coreml
 ```
 
-省略 `--pages` 会处理全文；`--source-lang` 默认 `auto`，`--target-lang` 默认 `zh-CN`，`--layout-device` 可选 `auto`、`cpu`、`coreml`。命令将 Rust 事件逐条保存到 `<workdir>/events.jsonl`，引擎日志保存到 `stderr.log`，运行结果保存到 `result.json`；译文可用时还会有 `translated.pdf`。stdout 仍只有一行 JSON，简短阶段和页面进度走 stderr。`result.json` 记录已保存页中的成功块、已排版块、已保存页数、未成功块、未替换块及产物路径；typeset完成但所在页尚未保存的不计入成功块。`run_finished.ok=false`、引擎非零退出、缺最终事件或缺 PDF 均返回失败，即使已有部分译文 PDF。已有运行日志/产物时拒绝复用目录；请指定新 workdir。输入 PDF 不能是该目录的 `translated.pdf`。
+省略 `--pages` 会处理全文；`--source-lang` 默认 `auto`，`--target-lang` 默认 `zh-CN`，`--layout-device` 可选 `auto`、`cpu`、`coreml`。命令将 Rust 事件逐条保存到 `<workdir>/events.jsonl`，引擎日志保存到 `stderr.log`，运行结果保存到 `result.json`；译文可用时还会有 `translated.pdf`。stdout 仍只有一行 JSON，简短阶段和页面进度走 stderr。`result.json` 记录已保存页中的成功块、已排版块、已保存页数、未成功块、送译前冲突块数（`blocked_before_translation`）、覆盖缺口页（`coverage_gap_pages`）、未替换块及产物路径；typeset完成但所在页尚未保存的不计入成功块。`run_finished.ok=false`、引擎非零退出、缺最终事件或缺 PDF 均返回失败，即使已有部分译文 PDF。已有运行日志/产物时拒绝复用目录；请指定新 workdir。输入 PDF 不能是该目录的 `translated.pdf`。
 
 仅调整排版代码后，可用已有真实译文重新编译，无模型请求；未命中或校验失败的块保留原文并列为未完成：
 
@@ -84,7 +84,7 @@ bdt check --workdir tmp/paper --strict
 
 `--cached-from` 只读复制原运行目录的译文数据库到新目录，仍按源文本、语言与协议版本核对并校验内容；不要改变目标语言后假定旧缓存仍命中。它是缓存重编译入口，尚未提供逐块字体/字号编辑接口。
 
-全局调整译文字号与相对行距：追加`--font-scale 0.9 --line-height 1.3`。前者将每个译文样式字号乘0.9，保持标题/正文/小字的相对层级；后者指定**基线间距=缩放后的段落主字号×1.3**，是无量纲倍数，不是pt或额外空隙。默认font-scale=1、line-height不覆盖（沿用源行距/字号比例）；只改字号时行距也按原比例联动。两值须为有限正数，实际设置记录在`result.json`的`typography`中。源IR、译文缓存键和保护原文不改；无法容纳不会再自动降低字号/行距，仍为部分结果。页保存前现会按已接受译文墨迹重算同栏垂直净空，最多3轮；不跨栏、不扩大表格单元格，也不再次调用布局模型。
+全局调整译文字号与相对行距：追加`--font-scale 0.9 --line-height 1.3`。前者将每个译文样式字号乘0.9，保持标题/正文/小字的相对层级；后者指定**基线间距=缩放后的段落主字号×1.3**，是无量纲倍数，不是pt或额外空隙。源公式保留原尺寸；若其上下标/分式会撞相邻行，仅增加该处必需的行距。默认font-scale=1、line-height不覆盖（沿用源行距/字号比例）；只改字号时行距也按原比例联动。两值须为有限正数，实际设置记录在`result.json`的`typography`中。源IR、译文缓存键和保护原文不改；无法容纳不会再自动降低字号/行距，仍为部分结果。页保存前现会按已接受译文墨迹重算同栏垂直净空，最多3轮；不跨栏、不扩大表格单元格，也不再次调用布局模型。
 
 ## Web 工作台
 

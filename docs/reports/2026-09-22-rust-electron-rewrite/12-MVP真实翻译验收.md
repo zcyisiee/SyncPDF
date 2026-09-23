@@ -103,6 +103,8 @@ source tmp/backend-repair/codex-r1-integration/env.sh
 
 ## R7：链接、数学字形与有限动态bbox（2026-09-23）
 
+> **用户复核后的验收纠正：正文翻译覆盖不通过。** 下述3回退只统计157个已送译块；另40个候选块因源区域冲突在翻译前被阻断，另1页有覆盖缺口。第2页P02-009/011/017/024含行内公式，整个正文块被标为not_replaced，均未送给模型；不是模型漏译，也不是排版回退。此前突出“剩余3段”会误导，应以[完整缺陷及逐块证据](../../issues/rust-inline-formula-coverage.md)为准。
+
 按用户顺序直接实施，不重跑模型、不改界面。最终样张：`tmp/backend-repair/ccs3764-final/translated.pdf`；沿用157段真实DeepSeek缓存，源字号×0.9、行距1.3倍、CoreML。**154写入/3回退**，相对88/69新增66成功、既有成功回退0；21页全保存，19.671秒，主请求0/补救0。625策略/源保护不替换仍单列；不能把这些内容当作已翻译。
 
 - **链接与URL**：精确KEEP锚点、可消歧的普通交叉引用与目标字形关联；内部样式标记只用于排版，不改缓存/Markdown。页候选内更新原注释Rect/QuadPoints，Dest/A不改；歧义与不支持注释仍回退。HTTP(S) URL要求精确源span。原35个原子/链接回退本批均解除；319链接、180命名目标、28书签保留，233点击框更新，保存后全部链接标签对应检查通过，原22错位消除。外部模板DOI仅保留，不认证网络可达。
@@ -114,3 +116,42 @@ source tmp/backend-repair/codex-r1-integration/env.sh
 验收：57,225个保留字符的位置/字号/颜色变化0，无KEEP泄漏，qpdf通过；目视p3/p20及数学放大图。pipeline库158 passed/0 failed/3 ignored，字体/排版专项、两个PDF裁剪回归、35pytest通过；之前读取所有历史fallback的E2E断言改为最终段状态后单独复跑通过。相关四crate严格Clippy、fmt、release与diff-check通过，**未跑完整workspace，不沿用R5全绿数字**。证据在`ccs3764-final/{audit.json,math-and-figure-audit.json,events.jsonl,result.json}`及`ccs3764-fix/`日志/脚本。
 
 中间`ccs3764-optimized/`虽154/3，但CoreML原生诊断污染stdout，桥接正确报`engine_events_invalid`，不能算通过；保留失败产物，随后独立复跑及最终目录事件流正常。此原生输出隔离风险未修复。最终仍为`engine_incomplete`、RunFinished=false、exit1；保护内容中仍含英文、页面留白及语义翻译质量未全面验收，非完整产品交付。
+
+
+<a id="inline-formula-coverage"></a>
+
+## 行内公式与正文完整覆盖修复（2026-09-23）
+
+**本轮最终产物：`tmp/backend-repair/inline-full-v5/translated.pdf`。** 此节取代R7样本的未完成结论；历史失败和错误报告保留，不把它们改成成功。
+
+### 实现与实跑
+
+- 公式建立独立源字形归属、bbox/基线和KEEP原子；上下标规范分行，原字体/内容流/分式路径按原尺寸重放。页候选内删除旧字形、裁去旧路径，再原子保存。嵌套图片Form仅在公式私有副本中去掉无关文本，原图片保持。
+- 可译区域重叠按较小框唯一分配字形；单位正则补词界。第20页漏检子标题凭标签/单行/邻近面板证据恢复，居中排版使用面板宽度。公式内链接同步移动。
+- `inline-page2-v2`真实主请求1次，18块送译，16写入/2公式行间碰撞；局部增加必要行距后`inline-page2-v3`复排18写入/0回退。原先第2页四个缺缓存块已经实际送译。
+- `inline-full-v1`在公式副本处理嵌套图片Form时失败；修复后`inline-full-v2`达到193候选、187写入/6回退。随后修正5个子标题的宽度和1个公式引用链接。
+- `inline-full-v3`的182缓存块均排版成功，但单位词界修复后的真实补译遇非法Markdown中止；`inline-full-v4`额外完整真实请求也遇到非法正文转义中止。新增闭合坏块的有界补译守卫，保留流截断/通道错误的失败行为，不接受坏译文。
+- `inline-full-v5`合并v3/v4的真实缓存，按原source hash和原译文`INSERT OR IGNORE`，没有手填译文或伪造缓存。最终1主请求/0补救/183缓存，真实补译剩余10块，65.989秒。播种来源保存在`cache-provenance.json`。
+
+### 最终 PDF 核验
+
+| 项目 | 结果 |
+|---|---|
+| 保存页 / 应译块 | 21页 / 193块全部写入 |
+| 回退 / 送译前冲突 / 覆盖缺口 | 0 / 0 / 0；RunFinished=true、bdt exit0 |
+| 正常保留实体 | 576个；不将公式/表格/参考文献等实体数当成独立正文段数 |
+| 字号 / 行距 | 源字号×0.9；普通基线间距为目标字号×1.3；仅高公式所需位置增加间距 |
+| 公式原绘制 | 94个源公式，53,384参考墨迹像素，缺失0（4倍渲染，1像素抗锯齿位置容差） |
+| 保护内容 | 成功段源框外36,327字符位置/字号/颜色变化0；第3页图片区域像素相同 |
+| 链接 / 书签 / 命名目标 | 319 / 28 / 180保留；314点击框移动，全部目标及点击标签核对通过 |
+| PDF与泄漏 | qpdf通过；无KEEP残留 |
+
+主控目视p1/2/3/4/5/9/20；确认第2页四块正文中文、数学上下标与分式可见、图中文字保留、第20页六个子标题均译出。译文仍按源段落锚定，因此可有较大留白；此次证明该样本的覆盖/安全写回，不宣称任意PDF或翻译措辞均已全面认证。此样本匿名，作者保护另有已有前置信息行为守卫。
+
+证据：最终目录的`result.json`、`events.jsonl`、`audit.json`、`qpdf.log`及页面PNG；审计脚本`tmp/backend-repair/inline-audit.py`。PDF SHA-256：`ec4ba55722162f974236dfc60b8f553ca20cf35c37c15fd5a99e0ae90a621ced`。
+
+### 工程验证
+
+相关core/pdf/typeset/translate/pipeline共528项通过、0失败、8 ignored；随后协议补译改动重新跑translate：115通过、0失败、2 ignored。包含公式原字号/行间碰撞、源字形唯一归属、图片嵌套Form不重复提取、公式引用点击框、流式坏块补译及截断失败等守卫。CLI/单入口36 pytest通过。五crate全target严格Clippy、release构建、fmt、Ruff、diff-check通过。未额外运行全workspace或未改动的前端测试。
+
+日志：`tmp/backend-repair/inline-{tests,protocol-tests,pytest,clippy,build5,docs}.log`。严格文档构建仍有既存HTTP参考的中文锚点警告，不能记为通过。实现边界见[后端参考](../../reference/rust-pdf-backend.md)，经验见[源公式归属](../../lessons/pdf-binding-and-render-evidence.md#inline-formula-ownership)。
