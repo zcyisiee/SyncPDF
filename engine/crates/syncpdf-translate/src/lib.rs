@@ -22,6 +22,7 @@
 
 pub mod cache;
 pub mod fake;
+pub mod markdown;
 pub mod pi;
 pub mod prompt;
 pub mod stream;
