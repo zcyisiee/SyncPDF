@@ -4,6 +4,7 @@
 //! 设计基准：02-技术路径与架构.md §3（阶段表）与 §6（执行流程）。
 //! 每阶段一个子模块、一个入口函数；端到端编排在 `run.rs`。
 
+pub mod frame;
 pub mod layout;
 pub mod paragraph;
 pub mod preflight;

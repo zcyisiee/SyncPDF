@@ -177,11 +177,19 @@ fn merge_lines(line_ids: &[Vec<GlyphId>], glyphs: &[&syncpdf_core::ir::Glyph]) -
                     .total_cmp(&glyphs[*b as usize].bbox.x0)
             });
             let mut bbox = glyphs[gs[0] as usize].bbox;
-            let mut baseline = glyphs[gs[0] as usize].bbox.y0;
+            let mut baselines: Vec<f32> = gs
+                .iter()
+                .map(|i| glyphs[*i as usize].matrix.f)
+                .filter(|y| y.is_finite())
+                .collect();
+            baselines.sort_by(f32::total_cmp);
+            let baseline = baselines
+                .get(baselines.len() / 2)
+                .copied()
+                .unwrap_or(bbox.y0);
             for &g in &gs[1..] {
                 let gl = glyphs[g as usize];
                 bbox = bbox.union(&gl.bbox);
-                baseline = baseline.min(gl.bbox.y0);
             }
             Some(Row {
                 glyphs: gs,

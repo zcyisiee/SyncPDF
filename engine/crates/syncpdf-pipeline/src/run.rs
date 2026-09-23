@@ -42,7 +42,7 @@ use crate::schedule::PageSchedule;
 use crate::stages::{
     self, analyze_page, apply_coverage_fallback, check_cancelled, delete_translated,
     detect_regions, load_fonts, make_translator, preflight, preflight::Preflight, render_snapshot,
-    typeset_one, DynTranslator, LayoutOpts, PipelineError, StoreShaper,
+    DynTranslator, LayoutOpts, PipelineError, StoreShaper,
 };
 
 /// 源解析阶段的缓存键（阶段缓存）。
@@ -489,9 +489,17 @@ impl Pipeline {
             .map(|(p, b)| (*p, b.ir.media_box.height()))
             .collect();
 
+        let mut frames = BTreeMap::new();
+        for (page, b) in &bound {
+            if let Some((_, regions)) = per_page_regions.iter().find(|(p, _)| p == page) {
+                frames.extend(stages::frame::page_frames(&b.ir, regions, &all_paras));
+            }
+        }
+
         let state = Arc::new(Mutex::new(RunState {
             doc: main_doc,
             bound,
+            frames,
             typeset_by_page: BTreeMap::new(),
             page_heights,
             pars: all_paras
@@ -735,6 +743,7 @@ struct RunState {
     page_heights: BTreeMap<u32, f32>,
     /// 段落 id → 段落本体。
     pars: BTreeMap<ParagraphId, Paragraph>,
+    frames: BTreeMap<ParagraphId, stages::frame::LayoutFrame>,
     /// 内置字体存储（`Writer` 需要的 `&FontStore`）。
     font_store: FontStore,
     /// 目标语言的默认字体 profile。
@@ -863,6 +872,12 @@ fn handle_block(
             None,
             "行内原子源绘制尚未可靠放置，保留原文".into(),
         ));
+    } else if !state.frames.contains_key(&id) {
+        fallback = Some((
+            "layout_frame_missing",
+            None,
+            "无法确认安全排版框和源基线".into(),
+        ));
     } else if block.status.is_ok() {
         match syncpdf_translate::parse_unit_html(&block.html) {
             Ok(parsed) => {
@@ -874,7 +889,13 @@ fn handle_block(
                 }
                 let shaper =
                     StoreShaper::new(&state.font_store, &state.font_profile).with_role(Role::Body);
-                let result = typeset_one(&shaper, &para, &parsed, &Obstacles::default());
+                let result = stages::typeset::typeset_with_frame(
+                    &shaper,
+                    &para,
+                    &parsed,
+                    &Obstacles::default(),
+                    state.frames.get(&id),
+                );
                 for issue in &result.issues {
                     match issue {
                         TypesetIssue::MinScaleHit => sink.emit(Event::Issue {
@@ -1420,6 +1441,16 @@ mod tests {
         let mut state = RunState {
             doc: lopdf::Document::new(),
             bound: BTreeMap::new(),
+            frames: [(
+                id.clone(),
+                stages::frame::LayoutFrame {
+                    bbox: para.bbox,
+                    first_baseline: para.bbox.y1 - 10.0,
+                    obstacles: vec![],
+                },
+            )]
+            .into_iter()
+            .collect(),
             typeset_by_page: BTreeMap::new(),
             page_heights: BTreeMap::new(),
             pars: [(id.clone(), para)].into_iter().collect(),

@@ -284,14 +284,35 @@ pub fn typeset_one(
     parsed: &ParsedUnit,
     obstacles: &Obstacles,
 ) -> TypesetResult {
+    typeset_with_frame(shaper, para, parsed, obstacles, None)
+}
+
+pub fn typeset_with_frame(
+    shaper: &dyn Shaper,
+    para: &Paragraph,
+    parsed: &ParsedUnit,
+    obstacles: &Obstacles,
+    frame: Option<&super::frame::LayoutFrame>,
+) -> TypesetResult {
     let mut spec = spec_for(para);
+    if let Some(frame) = frame {
+        spec.bbox = frame.bbox;
+        spec.first_baseline = Some(frame.first_baseline);
+    }
     // Break and spacing policy follows translated text, not the source language.
     if parsed.text().chars().any(is_cjk) {
         spec.lang = Lang::Zh;
     }
     let inlines = inlines_from_parsed(parsed, para);
     let typeset = Typeset::new(shaper, FitOptions::default());
-    typeset.layout(para.id.clone(), &spec, &inlines, obstacles)
+    let mut result = typeset.layout(para.id.clone(), &spec, &inlines, obstacles);
+    if frame.is_some_and(|f| super::frame::collides(f, &result.paragraph.lines)) {
+        result.paragraph.overflow = true;
+        result
+            .issues
+            .push(syncpdf_typeset::TypesetIssue::Overflow { lines: 0 });
+    }
+    result
 }
 
 /// 加载内置字体包 + 建目标语言的默认 profile。

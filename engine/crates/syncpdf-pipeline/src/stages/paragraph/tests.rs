@@ -17,7 +17,7 @@ fn mk_glyph(seq: u16, ch: char, x: f32, y: f32, size: f32, font: u32) -> Glyph {
         code: seq as u32,
         font,
         size,
-        matrix: Matrix::new(1.0, 0.0, 0.0, 1.0, 0.0, 0.0),
+        matrix: Matrix::new(1.0, 0.0, 0.0, 1.0, x, y),
         bbox: Rect::new(x, y, x + w, y + size),
         advance: w,
         fill: Color::default(),
@@ -670,4 +670,25 @@ fn source_run_sizes_and_colors_are_not_quantized() {
     assert_eq!(runs[0].color.r, 0.201);
     assert_eq!(runs[1].color.r, 0.202);
     assert!(runs.iter().all(|r| r.serif));
+}
+
+#[test]
+fn baseline_and_spacing_follow_text_matrix_not_variable_ink_bottom() {
+    let mut first = line(0, "abg", 50.0, 700.0, 10.0, 0);
+    let mut second = line(10, "XYZ", 50.0, 688.0, 10.0, 0);
+    first[2].bbox.y0 -= 3.0;
+    second[0].bbox.y0 += 2.0;
+    first.append(&mut second);
+    let ir = page_ir(first, vec![mk_font("F1", false, false)]);
+    let paragraphs = analyze_page(&ir, &full_region(RegionKind::Text));
+    assert_eq!(paragraphs.len(), 1);
+    assert_eq!(
+        paragraphs[0]
+            .lines
+            .iter()
+            .map(|l| l.baseline_y)
+            .collect::<Vec<_>>(),
+        [700.0, 688.0]
+    );
+    assert_eq!(paragraphs[0].line_height, 12.0);
 }

@@ -78,10 +78,24 @@ fn state(dir: &Path) -> (RunState, PathBuf) {
     let (font_store, font_profile) =
         load_fonts(&syncpdf_core::fixtures::fonts_dir().unwrap(), "zh-CN").unwrap();
     let schedule = PageSchedule::new(pars.keys().map(|id| (id.page, id.clone())));
+    let frames = pars
+        .iter()
+        .map(|(id, para)| {
+            (
+                id.clone(),
+                stages::frame::LayoutFrame {
+                    bbox: para.bbox,
+                    first_baseline: 700.0,
+                    obstacles: vec![],
+                },
+            )
+        })
+        .collect();
     (
         RunState {
             doc,
             bound,
+            frames,
             pars,
             font_store,
             font_profile,
@@ -252,4 +266,21 @@ fn output_validation_checks_actual_target_expectation_and_returns_errors() {
         Err(PipelineError::Validation(_))
     ));
     assert!(log.lock().unwrap().iter().any(|(_, e)| matches!(e, Event::Issue { severity: Severity::Error, code, .. } if code == "self_check")));
+}
+
+#[test]
+fn missing_safe_frame_preserves_source_and_reports_reason() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut s, input) = state(dir.path());
+    s.frames.clear();
+    let (sink, log) = recorder();
+    handle_block(&mut s, &sink, block(1), 2).unwrap();
+    assert!(s.typeset_by_page.is_empty());
+    assert_eq!(text(&s.output, 0), text(&input, 0));
+    assert!(log
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(_, e)| matches!(e, Event::Issue { code, .. } if code == "layout_frame_missing")));
+    assert_eq!(s.fallbacks, 1);
 }

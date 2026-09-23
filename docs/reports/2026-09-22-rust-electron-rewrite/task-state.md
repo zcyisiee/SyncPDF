@@ -36,7 +36,7 @@
 
 - 最终主树代码`d2a4d4ad`主控复验：workspace **553项通过、0失败、3 ignored**（manual原件probe在绑定合并后另显式通过，另2项doctest）；fmt/strict clippy/release通过。旧无文本夹具早退仍单列。证据在`tmp/backend-repair/codex-r1-integration/`，完整结论见[集成验收](06-R1绑定集成验收.md)。
 - 真实 `up-vns` 12 页删除/非目标页保护保持通过；主控独立 probe 核对指定论文 **23 页、78508 字形，全部绑定门禁通过**。仅 p19 新增 1 个对象几何来源；52 个既有 Unicode fallback 仍单列。p19 实际删除与独立定点删除在三档 dpi 逐像素一致，其余22页不变；这不是完整译文质量或 R1 整批验收。
-- 重复/嵌套目标 Form、旧绑定重复 apply 等仍有不支持边界；R2及后续排版/公式/链接/全篇视觉未完成。文档strict构建仍因既有HTTP→pipeline锚点告警失败（当前与干净HEAD同样失败），不计通过，详情见交接。
+- 重复/嵌套目标 Form、旧绑定重复 apply 等仍有不支持边界；R2工程已验收，后续排版/公式/链接/全篇视觉未完成。文档strict构建仍因既有HTTP→pipeline锚点告警失败（当前与干净HEAD同样失败），不计通过，详情见交接。
 
 ## 4. 当前问题与唯一下一步
 
@@ -44,9 +44,10 @@
 - **真实23页 release** `r2-markdown-safe-all`：32.47秒；主请求1/补救0/缓存0；99 overflow、63 atom_source_unplaced、40 protected_source_overlap、1 rotated_source_text；仍无成功译文。23页源文本及144dpi像素完全相同，qpdf exit0，自检无误报，RunFinished ok:false / CLI exit1，正确标明部分结果。fake只能证明工程行为，完整质量仍失败。
 - **新增行为已独立举证**：闭合Markdown块在模型返回前交付；坏尾部/半块上抛且先前有效块可缓存；保存失败不改文档/revision/已有文件；未ready页不重放待排译文；未知/重复身份不计完整成功。行内atom尚未真放置，整段回退只是保护。
 - **源文本**：几何生成空格与真实GlyphID分开；ligature/空映射/显式空格测试通过；最终真实首页“Training neural networks is costly”正确恢复。首页4段作者/机构/邮箱保留，标题/摘要/正文可译。几何启发式仍有边界，源p1控制字符等未声称修复。
-- **当前R3分工**：新Orca树 `codex-r3-knuth` 实现纯box/glue/penalty最优断行模块；`codex-r3-shaping` 修字体grapheme/fallback/cluster范围；`codex-r3-frame-probe` 只读量测首页排版框/基线。三份brief已冻结独立API；均gpt-6-sol:high新叶子，前两项30分钟/2轮、probe20分钟。主控负责共享IR、逐run字号/颜色及layout接线和验收。前三项叶子均已结束，不重启；shaping合入`6e3cb076`并主树31测试通过；Knuth模块合入`aba2cc52`，主控修正正penalty为base²+p²及Glue收缩上限后10测试通过；新完整layout接线任务待准备。固定原/用户字号，不能自动缩小；容纳失败继续明确提示。随后逐项接原子绘制、链接、A3 dual、中文目录、编辑重编译，再做真实LLM全文与视觉验收。
+- **当前R3分工**：新Orca树 `codex-r3-knuth` 实现纯box/glue/penalty最优断行模块；`codex-r3-shaping` 修字体grapheme/fallback/cluster范围；`codex-r3-frame-probe` 只读量测首页排版框/基线。三份brief已冻结独立API；均gpt-6-sol:high新叶子，前两项30分钟/2轮、probe20分钟。主控负责共享IR、逐run字号/颜色及layout接线和验收。前三项叶子均已结束，不重启；shaping合入`6e3cb076`并主树31测试通过；Knuth模块合入`aba2cc52`，主控修正正penalty为base²+p²及Glue收缩上限后10测试通过；新Orca `codex-r3-layout-wire` 正由gpt-6-sol:high/fresh接真实Knuth/cluster/ink布局（30分钟2轮）；主控同步实现同页安全frame/obstacles和source baseline。固定原/用户字号，不能自动缩小；容纳失败继续明确提示。随后逐项接原子绘制、链接、A3 dual、中文目录、编辑重编译，再做真实LLM全文与视觉验收。
 - **R3首个窄修已验证（本批未完）**：源line_height为绝对pt，旧typeset适配误作字号倍数再乘size；另源样式字号曾按0.5pt取整、整段字号取run数中位而非源字形加权。主控`f05b8ac6`已接精确run字号/颜色、字体角色与pt转换，127项pipeline unit、33项typeset、真实混合字号/颜色PDFium专项及strict Clippy通过。up-vns第2页已出现可容纳译文，旧全页必须回退断言被更强的逐回退框源字形/坐标保护取代并通过。宽高/实际ink与Knuth–Plass未接，不算R3通过。
 - **R3共享接口就绪（未完整layout）**：typeset `ShapedGlyph`已有actual font/cluster_end，StoreShaper调用directional API，新增真实`glyph_bounds`，ParagraphSpec新增可选first_baseline；workspace check与font/typeset strict Clippy通过，真实adapter专项通过。首页frame报告在`../codex-r3-frame-probe/tmp/backend-repair/frame-probe/report.md`，证明全局metrics导致短标题假溢出、source matrix.f基线对独立原件误差≤0.00003pt。
+- **R3当前主控进展（待集成）**：同页frame按相邻源内容/绘制净空分配，源matrix.f首基线固定；缺frame明确回退；frame几何3项通过、基线修正后pipeline unit129通过/2 ignored。solver软hyphen窄边界已修并增加前驱上下宽度界剪枝，12项含135例穷举oracle通过；100×350中文纯solver debug约0.30秒。layout候选正在验收cluster覆盖、NBSP禁断、真实ink和性能，旧500ms排版守卫暂有失败，未计整批通过。
 - 已结束的 `r2_source` / `r2_markdown` / `r2_metadata` 和所有R1 worker不重启；Orca独立树保留且clean。新分工严格gpt-6-sol:high/fresh/独立Orca worktree，task-state仅主控写。
 - **R1基础验收**见[08](08-R1布局与固定字号验收.md)：567 passed /0 failed/4 ignored；strict Clippy/fmt/release及23页coverage probe通过。p7/p15可见字形缺口0，其余21页分区不变；错误扩大Caption/Code候选被拒绝。字体原始像素跨两次选页/全篇稳定，qpdf全过。R1旧全回退仍ok:true及错误自检已由R2修正。
 - **禁止重复调查p19**：绑定集成与目标自身单code对象证据窄修已完成，详见06/历史handoff。共享/嵌套Form、未知编码等不支持边界仍保留；不以放宽门禁取得通过。
