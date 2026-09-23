@@ -8,7 +8,7 @@
 
 use crate::breaks::Lang;
 use crate::layout::{self, BreaksCache, LayoutInput, LayoutOut};
-use crate::shaper::{Shaper, StyleSpec};
+use crate::shaper::{FontMetrics, Shaper, StyleSpec};
 use crate::widen;
 use syncpdf_core::ir::Align;
 use syncpdf_core::{AtomId, Color, ParagraphId, Rect, StyleId};
@@ -154,8 +154,7 @@ impl<'a> Typeset<'a> {
     }
 
     /// 与 layout::layout 相同的容量公式：首行占 ascent+descent，其后每行 line_h。
-    fn capacity(&self, bbox: &Rect, size: f32, line_height_mult: f32) -> f32 {
-        let m = self.shaper.metrics(0);
+    fn capacity(&self, bbox: &Rect, size: f32, line_height_mult: f32, m: FontMetrics) -> f32 {
         let first = (m.ascent + m.descent) * size;
         let line_h = size * line_height_mult;
         if line_h <= f32::EPSILON || bbox.height() + 1e-3 < first {
@@ -197,7 +196,14 @@ impl<'a> Typeset<'a> {
                     continue;
                 }
                 let lines = first_out.as_ref().map_or(0, |o| o.lines);
-                if lines as f32 > self.capacity(bbox, input.font_size * scale, lh * lh_step) {
+                if lines as f32
+                    > self.capacity(
+                        bbox,
+                        input.font_size * scale,
+                        lh * lh_step,
+                        cache.metrics(self.shaper, input, inlines),
+                    )
+                {
                     continue;
                 }
                 let out = layout::layout(

@@ -9,7 +9,7 @@
 //! （script 感知：CJK 由查询脚本选 ttc face），因为内置包的 family 命名
 //! 不足以表达 "同一 ttc 的不同 regional face"。
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -107,7 +107,8 @@ struct ResourcesJson {
     #[serde(rename = "schema_version")]
     #[allow(dead_code)]
     schema_version: u32,
-    fonts: HashMap<String, HashMap<String, FaceSpec>>,
+    // manifest 成员顺序及 HashMap 随机种子不能改变字体句柄或同分候选。
+    fonts: BTreeMap<String, BTreeMap<String, FaceSpec>>,
 }
 
 /// 单个变体条目。

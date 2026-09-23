@@ -9,7 +9,7 @@
 
 use crate::breaks::{break_opportunities, is_forbidden_line_end, is_forbidden_line_start, Lang};
 use crate::fit::Inline;
-use crate::shaper::{is_cjk_char, ShapedGlyph, Shaper, StyleSpec};
+use crate::shaper::{is_cjk_char, FontMetrics, ShapedGlyph, Shaper, StyleSpec};
 use syncpdf_core::ir::Align;
 use syncpdf_core::ir::{LineBox, PlacedGlyph, TypesetParagraph};
 use syncpdf_core::{AtomId, Color, ParagraphId, Rect, StyleId};
@@ -80,11 +80,50 @@ impl Item {
 pub(crate) struct BreaksCache {
     items_base: std::cell::OnceCell<Vec<Item>>,
     breaks: std::cell::OnceCell<Vec<BreakAt>>,
+    font_metrics: std::cell::OnceCell<FontMetrics>,
 }
 
 impl BreaksCache {
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// 容量与基线使用实际段内样式选择的字体，不依赖字体表的加载序号。
+    pub(crate) fn metrics(
+        &self,
+        shaper: &dyn Shaper,
+        input: &LayoutInput<'_>,
+        inlines: &[Inline],
+    ) -> FontMetrics {
+        *self.font_metrics.get_or_init(|| {
+            let mut fonts = std::collections::BTreeSet::new();
+            for inline in inlines {
+                if let Inline::Text { text, style } = inline {
+                    if !text.is_empty() {
+                        let spec = input
+                            .styles
+                            .iter()
+                            .find(|(id, _)| id == style)
+                            .map(|(_, spec)| *spec)
+                            .unwrap_or_default();
+                        fonts.insert(shaper.font_for(&spec));
+                    }
+                }
+            }
+            if fonts.is_empty() {
+                fonts.insert(shaper.font_for(&StyleSpec::default()));
+            }
+            fonts.into_iter().map(|font| shaper.metrics(font)).fold(
+                FontMetrics {
+                    ascent: 0.0,
+                    descent: 0.0,
+                },
+                |acc, metrics| FontMetrics {
+                    ascent: acc.ascent.max(metrics.ascent),
+                    descent: acc.descent.max(metrics.descent),
+                },
+            )
+        })
     }
 }
 
@@ -140,7 +179,7 @@ pub(crate) fn layout(
     let profiling = std::env::var("SYNCPDF_TYPESET_PROFILE").is_ok();
     let t_start = std::time::Instant::now();
     let size = input.font_size * scale;
-    let metrics = shaper.metrics(0);
+    let metrics = breaks_cache.metrics(shaper, input, inlines);
     let ascent = metrics.ascent * size;
     let descent = metrics.descent * size;
     let line_h = size * line_height_mult;
