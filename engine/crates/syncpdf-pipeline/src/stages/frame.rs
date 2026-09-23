@@ -1,7 +1,7 @@
 //! Deterministic same-page layout frames, allocated before streaming translation.
 //! Glyph identities define ownership; neighbors and retained drawing constrain space.
 use std::collections::{BTreeMap, BTreeSet};
-use syncpdf_core::ir::{DisplayItem, PageIR, Paragraph, Region, Translatable};
+use syncpdf_core::ir::{Align, DisplayItem, PageIR, Paragraph, Region, RegionKind, Translatable};
 use syncpdf_core::{GlyphId, ParagraphId, Rect};
 
 #[derive(Debug, Clone)]
@@ -10,6 +10,39 @@ pub struct LayoutFrame {
     pub first_baseline: f32,
     /// Visible source content outside this paragraph plus nontext paint.
     pub obstacles: Vec<Rect>,
+}
+
+/// Source text bounds locate a heading; the surrounding text column supplies its
+/// target measure. Only a page-centered document title may span the page's columns.
+fn heading_container(ir: &PageIR, regions: &[Region], para: &Paragraph) -> Option<Rect> {
+    if !matches!(para.kind, RegionKind::Title | RegionKind::ParagraphTitle) {
+        return None;
+    }
+    let body: Vec<_> = regions
+        .iter()
+        .filter(|r| {
+            r.page == ir.page
+                && matches!(r.kind, RegionKind::Text | RegionKind::Abstract)
+                && r.bbox.y1 <= para.bbox.y0
+        })
+        .collect();
+    let bounds = if para.kind == RegionKind::Title
+        && para.align == Align::Center
+        && (para.bbox.center().x - ir.crop_box.center().x).abs() < 2.0
+    {
+        body.iter().map(|r| r.bbox).reduce(|a, b| a.union(&b))?
+    } else {
+        body.iter()
+            .filter(|r| (r.bbox.x0 - para.bbox.x0).abs() <= 4.0 && r.bbox.x1 >= para.bbox.x1)
+            .max_by(|a, b| a.bbox.y1.total_cmp(&b.bbox.y1))?
+            .bbox
+    };
+    Some(Rect::new(
+        bounds.x0.min(para.bbox.x0).max(ir.crop_box.x0),
+        para.bbox.y0,
+        bounds.x1.max(para.bbox.x1).min(ir.crop_box.x1),
+        para.bbox.y1,
+    ))
 }
 
 /// Allocate disjoint neighboring text frames using midpoints of measured blank gaps.
@@ -82,6 +115,13 @@ pub fn page_frames(
         }
         .max(ir.crop_box.x0);
         bbox.x1 = bbox.x1.min(ir.crop_box.x1);
+        let container = heading_container(ir, regions, para);
+        if let Some(container) = container {
+            if para.align == Align::Center {
+                bbox.x0 = container.x0;
+            }
+            bbox.x1 = container.x1;
+        }
         let obstacles: Vec<Rect> = glyphs
             .iter()
             .filter(|g| {
@@ -99,12 +139,12 @@ pub fn page_frames(
         // therefore cannot depend on overlap with this paragraph's source y range.
         // This conservative bound spends only the blank gap between source extents.
         for other in &obstacles {
-            if para.kind == syncpdf_core::ir::RegionKind::Caption
-                && para.align == syncpdf_core::ir::Align::Center
+            if (container.is_some()
+                || (para.kind == RegionKind::Caption && para.align == Align::Center))
                 && (other.y1 <= source.y0 || other.y0 >= source.y1)
             {
-                // The detected panel proves horizontal ownership. Its table cells
-                // and plot labels on other rows do not constrain caption width.
+                // A detected text column or panel supplies horizontal ownership.
+                // Glyphs on its other rows do not narrow the heading/caption.
                 continue;
             }
             if other.x1 <= source.x0 {
@@ -268,6 +308,88 @@ mod tests {
         assert!(collides(f, &[line(Rect::new(20.0, 99.0, 30.0, 115.0))]));
         assert!(!collides(f, &[line(Rect::new(20.0, 120.0, 80.0, 130.0))]));
     }
+    #[test]
+    fn title_uses_body_container_and_reflows_at_requested_size() {
+        let a = glyph(0, Rect::new(80.0, 160.0, 120.0, 170.0), 163.5);
+        let mut para = paragraph(&a);
+        para.kind = RegionKind::Title;
+        para.align = Align::Center;
+        let ir = page(vec![a]);
+        let regions = [
+            region(1, RegionKind::Text, Rect::new(20.0, 20.0, 90.0, 100.0)),
+            region(2, RegionKind::Text, Rect::new(110.0, 20.0, 180.0, 100.0)),
+        ];
+        let frames = page_frames(&ir, &regions, std::slice::from_ref(&para));
+        let frame = &frames[&para.id];
+        assert_eq!((frame.bbox.x0, frame.bbox.x1), (20.0, 180.0));
+        assert_eq!(frame.first_baseline, 163.5);
+        assert_eq!(para.bbox, Rect::new(80.0, 160.0, 120.0, 170.0));
+        for (count, font_scale, one_line) in [(10, 1.0, true), (35, 1.0, false), (10, 2.0, false)] {
+            let parsed = syncpdf_translate::parse_unit_html(&format!(
+                "<p id=\"{}\">{}</p>",
+                para.id,
+                "中".repeat(count)
+            ))
+            .unwrap();
+            let result = crate::stages::typeset::typeset_with_typography(
+                &syncpdf_typeset::shaper::MonoShaper,
+                &para,
+                &parsed,
+                &syncpdf_typeset::Obstacles::default(),
+                Some(frame),
+                crate::stages::typeset::Typography::new(font_scale, Some(1.3)).unwrap(),
+            );
+            assert!(!result.paragraph.overflow);
+            assert_eq!(result.scale, 1.0);
+            assert_eq!(result.paragraph.lines.len() == 1, one_line);
+            for line in &result.paragraph.lines {
+                assert!(line.bbox.x0 >= 19.99 && line.bbox.x1 <= 180.01);
+                assert!((line.bbox.center().x - 100.0).abs() < 0.01);
+                assert!(line
+                    .glyphs
+                    .iter()
+                    .all(|g| g.size
+                        == crate::stages::typeset::dominant_font_size(&para) * font_scale));
+            }
+        }
+        let fallback = page_frames(&ir, &[], std::slice::from_ref(&para));
+        assert_eq!(fallback[&para.id].bbox.width(), 40.0);
+    }
+
+    fn region(index: u32, kind: RegionKind, bbox: Rect) -> Region {
+        Region {
+            page: PageId(0),
+            index,
+            kind,
+            bbox,
+            score: 1.0,
+            order: index,
+        }
+    }
+
+    #[test]
+    fn section_heading_stays_in_column_and_respects_retained_neighbor() {
+        let a = glyph(0, Rect::new(20.0, 150.0, 50.0, 160.0), 153.5);
+        let b = glyph(1, Rect::new(110.0, 100.0, 180.0, 110.0), 103.5);
+        let mut para = paragraph(&a);
+        para.kind = RegionKind::ParagraphTitle;
+        let mut ir = page(vec![a, b]);
+        let regions = [
+            region(2, RegionKind::Text, Rect::new(20.0, 80.0, 90.0, 140.0)),
+            region(3, RegionKind::Text, Rect::new(110.0, 80.0, 180.0, 110.0)),
+        ];
+        let frames = page_frames(&ir, &regions, std::slice::from_ref(&para));
+        assert_eq!(
+            (frames[&para.id].bbox.x0, frames[&para.id].bbox.x1),
+            (20.0, 90.0)
+        );
+        ir.items.push(DisplayItem::Image {
+            bbox: Rect::new(70.0, 150.0, 100.0, 170.0),
+        });
+        let frames = page_frames(&ir, &regions, std::slice::from_ref(&para));
+        assert_eq!(frames[&para.id].bbox.x1, 60.0);
+    }
+
     #[test]
     fn missing_source_baseline_never_invents_a_frame() {
         let a = glyph(0, Rect::new(20.0, 120.0, 80.0, 130.0), f32::NAN);

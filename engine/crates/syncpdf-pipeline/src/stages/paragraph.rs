@@ -7,6 +7,7 @@
 //! 段落切分规则（按区域 `order` 依次处理，`seq` 跨区域连续）：
 //! 1. 相邻两行 x 范围重叠 **且** 基线差 < 1.8×字号 → 同段；
 //! 2. 当前行首字形 x 比前一行首字形 x 大 ≥ 1.5×字号（首行缩进）→ 新段；
+//!    同标题区内、字号相近且共用中心轴或对齐编号后正文的续行不按缩进拆段；
 //! 3. 否则新段。
 
 use std::sync::OnceLock;
@@ -79,7 +80,7 @@ pub fn analyze_page(ir: &PageIR, regions: &[Region]) -> Vec<Paragraph> {
             continue;
         }
         let lines = group_lines(&in_region, &region.bbox);
-        for group in merge_lines(&lines, &glyphs) {
+        for group in merge_lines(&lines, &glyphs, region.kind) {
             seq += 1;
             let mut paragraph = build_paragraph(ir, region, group, &glyphs, seq);
             inline_formula::attach(&mut paragraph, &formulas);
@@ -176,7 +177,11 @@ struct Row {
 }
 
 /// 行聚类结果 → 段落的行分组。
-fn merge_lines(line_ids: &[Vec<GlyphId>], glyphs: &[&syncpdf_core::ir::Glyph]) -> Vec<Vec<Row>> {
+fn merge_lines(
+    line_ids: &[Vec<GlyphId>],
+    glyphs: &[&syncpdf_core::ir::Glyph],
+    kind: RegionKind,
+) -> Vec<Vec<Row>> {
     let index_of: std::collections::HashMap<GlyphId, usize> =
         glyphs.iter().enumerate().map(|(i, g)| (g.id, i)).collect();
 
@@ -225,7 +230,7 @@ fn merge_lines(line_ids: &[Vec<GlyphId>], glyphs: &[&syncpdf_core::ir::Glyph]) -
             None => true,
             Some(prev) => {
                 let last = prev.last().expect("组内至少一行");
-                !same_paragraph(last, &row, glyphs)
+                !same_paragraph(last, &row, glyphs, kind)
             }
         };
         if start_new {
@@ -238,7 +243,12 @@ fn merge_lines(line_ids: &[Vec<GlyphId>], glyphs: &[&syncpdf_core::ir::Glyph]) -
 }
 
 /// 判定当前行是否接续前一行（同一段）。
-fn same_paragraph(prev: &Row, cur: &Row, glyphs: &[&syncpdf_core::ir::Glyph]) -> bool {
+fn same_paragraph(
+    prev: &Row,
+    cur: &Row,
+    glyphs: &[&syncpdf_core::ir::Glyph],
+    kind: RegionKind,
+) -> bool {
     let size = row_size(cur, glyphs);
     let gap = (prev.baseline_y - cur.baseline_y).abs();
     if gap >= PARAGRAPH_GAP_RATIO * size {
@@ -248,6 +258,24 @@ fn same_paragraph(prev: &Row, cur: &Row, glyphs: &[&syncpdf_core::ir::Glyph]) ->
     if !(prev.bbox.x0 < cur.bbox.x1 && cur.bbox.x0 < prev.bbox.x1) {
         return false;
     }
+    if matches!(kind, RegionKind::Title | RegionKind::ParagraphTitle) {
+        let previous_size = row_size(prev, glyphs);
+        if (previous_size - size).abs() > size * 0.1 {
+            return false;
+        }
+        // A centered continuation has a different left edge because it is shorter,
+        // not because it starts a new paragraph. Preserve the whole semantic title.
+        if (prev.bbox.center().x - cur.bbox.center().x).abs() < 2.0 {
+            return true;
+        }
+        // Numbered headings often hang continuation rows at the first word after
+        // the section label. That is one title, not a new indented paragraph.
+        if numbered_heading_body_x(prev, glyphs).is_some_and(|x| (cur.bbox.x0 - x).abs() < 2.0)
+            && numbered_heading_body_x(cur, glyphs).is_none()
+        {
+            return true;
+        }
+    }
     // 首行缩进：本行起点明显右移 → 新段。
     let prev_x0 = glyphs[prev.glyphs[0] as usize].bbox.x0;
     let cur_x0 = glyphs[cur.glyphs[0] as usize].bbox.x0;
@@ -255,6 +283,17 @@ fn same_paragraph(prev: &Row, cur: &Row, glyphs: &[&syncpdf_core::ir::Glyph]) ->
         return false;
     }
     true
+}
+
+fn numbered_heading_body_x(row: &Row, glyphs: &[&syncpdf_core::ir::Glyph]) -> Option<f32> {
+    static LABEL: OnceLock<Regex> = OnceLock::new();
+    let label =
+        LABEL.get_or_init(|| Regex::new(r"^(?:[A-Z]|[0-9]+)(?:\.[0-9]+)*[.)]?\s+(\S)").unwrap());
+    let reading = read_source(std::slice::from_ref(row), glyphs);
+    let body = label.captures(&reading.text)?.get(1)?;
+    let char_index = reading.text[..body.start()].chars().count();
+    let glyph_index = reading.char_map[char_index] as usize;
+    Some(glyphs[row.glyphs[glyph_index] as usize].bbox.x0)
 }
 
 /// 一行代表字号：行内字形字号的中位数。
@@ -294,7 +333,11 @@ fn build_paragraph(
     let bbox = rows.iter().fold(rows[0].bbox, |acc, r| acc.union(&r.bbox));
     let size = dominant_size(&rows, glyphs);
     let align = detect_align(&rows, region, &ir.crop_box);
-    let first_indent = detect_first_indent(&rows, glyphs);
+    let first_indent = if align == Align::Center {
+        0.0
+    } else {
+        detect_first_indent(&rows, glyphs)
+    };
     let line_height = detect_line_height(&rows, size);
 
     let translatable = judge_translatable(region.kind, &reading.text, &atoms);
@@ -662,6 +705,21 @@ fn detect_align(rows: &[Row], region: &Region, crop: &Rect) -> Align {
             return Align::Center;
         }
         return Align::Left;
+    }
+    if matches!(region.kind, RegionKind::Title | RegionKind::ParagraphTitle) {
+        let widest = rows
+            .iter()
+            .max_by(|a, b| a.bbox.width().total_cmp(&b.bbox.width()))
+            .unwrap();
+        let centered = rows
+            .iter()
+            .all(|r| (r.bbox.center().x - widest.bbox.center().x).abs() < 2.0);
+        let varied_width = rows
+            .iter()
+            .any(|r| widest.bbox.width() - r.bbox.width() > CENTER_MIN_MARGIN * 2.0);
+        if centered && (varied_width || (widest.bbox.center().x - crop.center().x).abs() < 2.0) {
+            return Align::Center;
+        }
     }
     let region = &region.bbox;
     let left_aligned = rows

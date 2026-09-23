@@ -187,6 +187,86 @@ fn two_lines_merge_into_one_paragraph() {
 }
 
 #[test]
+fn centered_title_continuation_stays_one_semantic_unit() {
+    for (first, second) in [("Towards Model", "Merging"), ("Merging", "Towards Model")] {
+        let centered_line =
+            |seq, text: &str, y| line(seq, text, 306.0 - text.len() as f32 * 6.0, y, 20.0, 0);
+        let mut g = centered_line(0, first, 700.0);
+        g.extend(centered_line(30, second, 676.0));
+        let ir = page_ir(g, vec![mk_font("F1", true, false)]);
+        // Tight detected bounds must not turn the widest centered row into Left.
+        let mut regions = full_region(RegionKind::Title);
+        regions[0].bbox = Rect::new(228.0, 675.0, 384.0, 721.0);
+        let paras = analyze_page(&ir, &regions);
+        assert_eq!(paras.len(), 1);
+        let p = &paras[0];
+        assert_eq!(p.text, format!("{first} {second}"));
+        assert_eq!(p.align, Align::Center);
+        assert_eq!(p.first_indent, 0.0);
+        assert_eq!(p.lines.len(), 2);
+        assert_eq!(p.glyphs.len(), first.len() + second.len());
+        let unit = syncpdf_translate::build_unit(p, |_| None);
+        assert_eq!(unit.plain_text(), p.text);
+    }
+}
+
+#[test]
+fn centered_title_does_not_merge_distinct_size_gap_or_region() {
+    for (size, y, separate_region) in [
+        (12.0, 678.0, false),
+        (20.0, 650.0, false),
+        (20.0, 676.0, true),
+    ] {
+        let mut g = line(0, "Towards Model", 228.0, 700.0, 20.0, 0);
+        g.extend(line(30, "Merging", 306.0 - 7.0 * size * 0.3, y, size, 0));
+        let ir = page_ir(g, vec![mk_font("F1", true, false)]);
+        let mut regions = full_region(RegionKind::Title);
+        if separate_region {
+            regions[0].bbox.y0 = 699.0;
+            let mut second = regions[0].clone();
+            second.index = 1;
+            second.order = 1;
+            second.bbox.y0 = 650.0;
+            second.bbox.y1 = 699.0;
+            regions.push(second);
+        }
+        assert_eq!(analyze_page(&ir, &regions).len(), 2);
+    }
+}
+
+#[test]
+fn numbered_title_hanging_continuation_is_not_a_new_paragraph() {
+    for label in ["A", "A.2", "2.1"] {
+        for explicit_space in [false, true] {
+            let body_x = 50.0 + label.len() as f32 * 6.0 + 12.0;
+            let mut g = line(0, label, 50.0, 700.0, 10.0, 0);
+            if explicit_space {
+                g.push(mk_glyph(20, ' ', body_x - 12.0, 700.0, 10.0, 0));
+            }
+            g.extend(line(30, "General defenses", body_x, 700.0, 10.0, 0));
+            g.extend(line(60, "adapted to merging", body_x, 687.0, 10.0, 0));
+            let ir = page_ir(g, vec![mk_font("F1", true, false)]);
+            let paras = analyze_page(&ir, &full_region(RegionKind::ParagraphTitle));
+            assert_eq!(paras.len(), 1);
+            assert_eq!(
+                paras[0].text,
+                format!("{label} General defenses adapted to merging")
+            );
+            assert_eq!(paras[0].align, Align::Left);
+            assert_eq!(paras[0].first_indent, 0.0);
+        }
+    }
+    let mut g = line(0, "A", 50.0, 700.0, 10.0, 0);
+    g.extend(line(2, "Title", 68.0, 700.0, 10.0, 0));
+    g.extend(line(20, "B New title", 68.0, 687.0, 10.0, 0));
+    let ir = page_ir(g, vec![mk_font("F1", true, false)]);
+    assert_eq!(
+        analyze_page(&ir, &full_region(RegionKind::ParagraphTitle)).len(),
+        2
+    );
+}
+
+#[test]
 fn large_line_gap_splits_paragraphs() {
     // 行距 30pt > 1.8×10 → 两段。
     let mut g = line(0, "Hello", 50.0, 700.0, 10.0, 0);
