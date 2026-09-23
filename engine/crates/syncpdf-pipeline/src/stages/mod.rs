@@ -9,6 +9,7 @@ pub mod paragraph;
 pub mod preflight;
 mod ruled_code;
 pub mod source;
+pub mod source_policy;
 pub mod translate;
 pub mod typeset;
 pub mod writeback;
