@@ -1,14 +1,15 @@
 # Rust PDF 后端修复 · Task state
 
 > 唯一维护者：用户与主 Agent；subagent 只读，不得另建副本。更新：2026-09-23；Codex 主控维护。
-> 状态：**完整后端目标持续active。上一轮已完成绑定集成及stale/CID/Size修复（有效进展）；R1基础工程验收通过；R2源文本、事务状态与Markdown工程验收通过；R3固定字号/排版工程验收通过；正接V3 Apple GPU，随后R4公式/链接/交付。整体未完成。**
+> 状态：**完整后端目标持续active。上一轮已完成绑定集成及stale/CID/Size修复（有效进展）；R1基础工程验收通过；R2源文本、事务状态与Markdown工程验收通过；R3固定字号/排版工程验收通过；V3 Apple GPU全篇工程验收通过；按用户新指令优先交付真实翻译MVP，随后逐项完善公式/链接/交付。整体未完成。**
 
 ## 1. 用户意图与任务偏好
 
+- **2026-09-23 最新推进偏好**：快速做出可试用MVP，让用户直接看真实译文PDF并指导后续；当前修复收尾即接真实翻译，暂缓扩大专项调查。不降低固定字号、源内容保护或错误显式上报标准。先真实闭环，剩余公式/链接/dual/目录/编辑清楚列为待办。
 - **当前优先打通输入 PDF → 输出译文 PDF 的后端链路**，不转去做界面。继承 hjfy 内容流级翻译路线，持续推进到真实全篇质量验收，不把局部测试通过当作完成。
 - **用户最新完整目标**：译文样式对应原文；dual每页A3横向、左原文右译文；目录中文；超链接正确保留；作者、地址、脚注、图片、reference等无关内容不翻译；**Markdown one-shot**翻译，首个闭合译文块即开始编译；Knuth–Plass两端对齐；字体/字号/定位稳定；后端提供按layout块修改字体、字号并重新编译/导出的能力。目标不可缩成局部测试通过，逐项真实验证后才能完成。
 - **用户已明确确认字号策略**：保持原文或用户指定字号，容纳失败时明确提示，禁止自动缩字号；适用于首次翻译及二次编辑。默认fit已固定字号/行距（`d23dac3a`）；`1adeea67`溢出块保留原文并定位提示，`c3850be6`真实夹具验证。逐run字号保真已接并专项验证；编辑覆盖仍待接线。
-- **用户新增布局要求（2026-09-23）**：必须使用PP-DocLayout-V3，并利用本地Apple GPU加速；用户提出MPS，本机实际PaddleX/ONNX路径需核实CoreML能力。现Rust已经V3但仅注册CPU EP；conda bdt有PaddleX3.7.2、ONNX Runtime1.30.0及本地V3模型，无torch/paddlepaddle。新只读Orca `codex-v3-gpu-probe`（gpt-6-sol:high/fresh/15分钟）已实测本地bbox V3 CoreML执行64节点/CPU416节点，暖态0.10–0.21秒；vendor旧图CoreML建session失败，不能只注册EP。新Orca `codex-v3-coreml-session`（gpt-6-sol:high/fresh/20分钟2轮）独占layout session API及专项测试，主控负责已验证模型供给、pipeline接线与真实验收。
+- **用户新增布局要求（2026-09-23）**：必须使用PP-DocLayout-V3和Apple GPU。本机实际采用CoreML MLProgram CPUAndGPU，非PyTorch MPS；锁定本地bbox V3 SHA，Rust链接ORT1.23.2。session候选主控review合入`8a843766`，主树模型选择、缓存隔离和回退事件已完成。[11验收](11-V3-GPU验收.md)：严格CoreML全23页28.80秒，复用编译目录27.49秒；推理中位约99ms/页，Apple M5 Pro GPU参与已由计算计划和profile举证。与CPU全文字符一致，最大位置差0.0004pt。启动优化暂缓，优先真实翻译MVP。两项GPU叶子已结束，不重启。
 - **生产不调用 LaTeX**；断行、美观程度接近 LaTeX，保留原文对应关系、公式、样式、图形与超链接，最终质量不逊于旧 bdt。TeX/旧 bdt 只作质量 oracle。
 - 先后端，不改 Electron、旧 bdt 行为；不增加新的产品入口。质量与安全先于速度，不以跳过样本、放宽断言或压低 warning 伪装修复。
 - **用户在 Codex 接手时更新：后续 subagent 固定 `gpt-6-sol:high`，fresh context，使用 orca-cli 准备独立 worktree。**主控拆小任务、冻结共享接口、亲自审 diff/复跑/合并；叶子不委派、不 push/merge。
@@ -48,7 +49,8 @@
 - **当前R3分工**：新Orca树 `codex-r3-knuth` 实现纯box/glue/penalty最优断行模块；`codex-r3-shaping` 修字体grapheme/fallback/cluster范围；`codex-r3-frame-probe` 只读量测首页排版框/基线。三份brief已冻结独立API；均gpt-6-sol:high新叶子，前两项30分钟/2轮、probe20分钟。主控负责共享IR、逐run字号/颜色及layout接线和验收。前三项叶子均已结束，不重启；shaping合入`6e3cb076`并主树31测试通过；Knuth模块合入`aba2cc52`，主控修正正penalty为base²+p²及Glue收缩上限后10测试通过；`codex-r3-layout-wire` 已结束，候选`68ec3a75`由主控review并合入`d30c73a5`；主树typeset56项、pipeline133unit及5项E2E通过；主控同步实现同页安全frame/obstacles和source baseline。固定原/用户字号，不能自动缩小；容纳失败继续明确提示。随后逐项接原子绘制、链接、A3 dual、中文目录、编辑重编译，再做真实LLM全文与视觉验收。
 - **R3首个窄修已验证（本批未完）**：源line_height为绝对pt，旧typeset适配误作字号倍数再乘size；另源样式字号曾按0.5pt取整、整段字号取run数中位而非源字形加权。主控`f05b8ac6`已接精确run字号/颜色、字体角色与pt转换，127项pipeline unit、33项typeset、真实混合字号/颜色PDFium专项及strict Clippy通过。up-vns第2页已出现可容纳译文，旧全页必须回退断言被更强的逐回退框源字形/坐标保护取代并通过。宽高/实际ink与Knuth–Plass未接，不算R3通过。
 - **R3共享接口就绪（未完整layout）**：typeset `ShapedGlyph`已有actual font/cluster_end，StoreShaper调用directional API，新增真实`glyph_bounds`，ParagraphSpec新增可选first_baseline；workspace check与font/typeset strict Clippy通过，真实adapter专项通过。首页frame报告在`../codex-r3-frame-probe/tmp/backend-repair/frame-probe/report.md`，证明全局metrics导致短标题假溢出、source matrix.f基线对独立原件误差≤0.00003pt。
-- **R3工程验收通过**：[10验收](10-R3固定字号与排版验收.md)。主树workspace641通过/0失败/6 ignored，strict Clippy/release通过；随后109 pdf unit+6真实PDF通过。frame/actual-ink/Knuth–Plass/固定基线、字号、颜色已接。首页短标题/摘要保持17.2154/11.9552pt与源基线，3525其它字形不变，已渲染复核。最终审查错行双栏越界、p14 TJ保留字符偏移均已修并补回归；最后23页fake `r3-retention-fixed-all`34.91秒：50成功译块/49overflow/63atom回退，83910保留字符位置字号颜色0变化，23快照未ready页CJK0污染，qpdf通过，RunFinished false/CLI1明确部分结果。fake仍不是完整质量。
+- **R3工程验收通过**（修复提交`8f3bcd84`）：[10验收](10-R3固定字号与排版验收.md)。主树workspace641通过/0失败/6 ignored，strict Clippy/release通过；随后109 pdf unit+6真实PDF通过。frame/actual-ink/Knuth–Plass/固定基线、字号、颜色已接。首页短标题/摘要保持17.2154/11.9552pt与源基线，3525其它字形不变，已渲染复核。最终审查错行双栏越界、p14 TJ保留字符偏移均已修并补回归；最后23页fake `r3-retention-fixed-all`34.91秒：50成功译块/49overflow/63atom回退，83910保留字符位置字号颜色0变化，23快照未ready页CJK0污染，qpdf通过，RunFinished false/CLI1明确部分结果。fake仍不是完整质量。
+- **GPU与source状态收尾已通过**：q/Q字体/字距/缩放/leading恢复含跨Contents流真实8例通过；pdf+pipeline305项通过，strict workspace Clippy/release通过。V3严格CoreML全23页cold28.80秒、复用编译缓存27.49秒；83910保留字符0变化，23快照无未ready污染，qpdf通过。warm启动改善有限，暂不继续性能专项。源状态修复已提交`1ef8ba22`；主控立即跑真实LLM，fresh叶子`codex-mvp-provider-check`（gpt-6-sol:high/Orca独立树/10分钟）只读核对现有pi/provider启动配置，禁止打印密钥，不改产品入口。
 - **R3宽度安全边界**：未知简单字体宽度不再猜1000；无Widths（含部分Standard14）拒绝删除且不发布候选。Type3仅可靠水平matrix。width审查与partial/final audit叶子均结束，不重启。主控已审partial候选`87467650`并合入`926150aa`，再修bind/patch并添加quote、缺宽度拒绝守卫。相关原因/证据见10报告。
 - 已结束的 `r2_source` / `r2_markdown` / `r2_metadata` 和所有R1 worker不重启；Orca独立树保留且clean。新分工严格gpt-6-sol:high/fresh/独立Orca worktree，task-state仅主控写。
 - **R1基础验收**见[08](08-R1布局与固定字号验收.md)：567 passed /0 failed/4 ignored；strict Clippy/fmt/release及23页coverage probe通过。p7/p15可见字形缺口0，其余21页分区不变；错误扩大Caption/Code候选被拒绝。字体原始像素跨两次选页/全篇稳定，qpdf全过。R1旧全回退仍ok:true及错误自检已由R2修正。

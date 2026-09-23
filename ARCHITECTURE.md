@@ -126,3 +126,5 @@ job 子进程由 serve 以 `sys.executable -m babeldoc_tools` 起，serve 会把
 源处理将 PDFium 几何与 lopdf 内容流操作绑定，source 和公共删除 API 执行替换门禁；已准备段落合成一个页级 PatchSet，私有候选完成共享流隔离后才替换文档。绑定保存页 Contents/源流快照，写前拒绝过期来源。pipeline 页提交在私有候选删除并重放已就绪页，原子保存成功后才更新主文档/revision；最终发布使用通过自检的最后快照。部分回退明确标为未完整完成，CLI 非零退出；编辑修订事务尚未实现。当前契约、不支持范围与已知缺口见 [Rust PDF 后端参考](docs/reference/rust-pdf-backend.md)，阶段验收仍由唯一 task state 维护。
 
 Rust pipeline 在翻译开始前按不可变源页分配 `LayoutFrame`：保留源首行基线，以相邻文字/图形净空限制译文区域。源字号和颜色按run传递，默认fit保持字号与行距；缺frame或容纳失败均保留原文并提示。实际ink、最优断行和整篇质量的集成验收进度见唯一task state。
+
+Rust布局使用PP-DocLayout-V3，模型按SHA-256校验并优先采用已锁定bbox导出图；macOS生产路径可自动选择CoreML的CPUAndGPU配置，显式CPU/CoreML覆盖用于诊断。CoreML建会话或推理失败时，Auto记录原因后改用CPU；严格CoreML不静默回退。模型编译缓存按权重哈希隔离，区域缓存包含模型哈希、provider与检测参数；GPU是否真正参与需以ORT profile和Apple计算计划验证。资产与运行选项见[模型说明](engine/models/README.md)。

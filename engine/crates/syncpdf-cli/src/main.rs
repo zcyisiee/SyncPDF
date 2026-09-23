@@ -319,8 +319,10 @@ fn cmd_inspect(
 
     // 模型路径：显式给了就用，否则探 `engine/vendor/models`。
     let model_path = model.or_else(|| {
-        let p = syncpdf_core::fixtures::models_dir()?.join("pp_doc_layoutv3.onnx");
-        p.is_file().then_some(p)
+        let dir = syncpdf_core::fixtures::models_dir()?;
+        syncpdf_pipeline::stages::layout_model::resolve(&dir)
+            .ok()
+            .map(|asset| asset.path)
     });
     let mut layout_model = match &model_path {
         Some(p) => match syncpdf_layout::LayoutModel::load(p, 2) {

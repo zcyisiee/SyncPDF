@@ -343,15 +343,45 @@ impl Pipeline {
         // ── 2. layout_analysis（结果入阶段缓存）────────────────────────
         emit_stage_started(sink, Stage::LayoutAnalysis);
         let t = Instant::now();
-        let model_path = self.models_dir.join("pp_doc_layoutv3.onnx");
-        let mut model = syncpdf_layout::LayoutModel::load(&model_path, 2)
+        let asset = stages::layout_model::resolve(&self.models_dir)?;
+        let device = stages::layout_model::parse_device(
+            std::env::var("SYNCPDF_LAYOUT_DEVICE").ok().as_deref(),
+        )?;
+        let options = syncpdf_layout::session::LayoutOptions {
+            threads: 2,
+            device,
+            cache_dir: cfg
+                .cache_dir()
+                .map(|dir| dir.join("layout-coreml").join(&asset.sha256)),
+            profile_path: std::env::var_os("SYNCPDF_LAYOUT_PROFILE").map(PathBuf::from),
+        };
+        let mut model = syncpdf_layout::LayoutModel::load_with_options(&asset.path, options)
             .map_err(|e| PipelineError::Layout(e.to_string()))?;
+        sink.emit(Event::Issue {
+            severity: Severity::Info,
+            code: "layout_backend".into(),
+            paragraph_id: None,
+            page: None,
+            message: format!(
+                "PP-DocLayout-V3 sha256={}；requested={device:?}；configured={:?}；model={}",
+                asset.sha256,
+                model.configured_device(),
+                asset.path.display()
+            ),
+        });
+        let mut fallback_reported = false;
         let mut per_page_regions: Vec<(u32, Vec<Region>)> = Vec::new();
         let mut coverage_gaps = 0u32;
         for (i, page_ir) in pages_ir.iter().enumerate() {
             check_cancelled(cancel)?;
             let page = page_ir.page.0;
-            let cache_key = format!("layout:{page}");
+            let cache_key = format!(
+                "layout-v3:{}:{:?}:{}:{}:{page}",
+                asset.sha256,
+                model.configured_device(),
+                self.layout_opts.dpi,
+                self.layout_opts.score_threshold
+            );
             let mut regions: Vec<Region> = match store
                 .get_stage::<Vec<Region>>(&pf.source_sha, &cache_key)
             {
@@ -381,6 +411,18 @@ impl Pipeline {
                     self.detect_page(&mut model, worker, pf, page)?
                 }
             };
+            if !fallback_reported {
+                if let Some(reason) = model.fallback_reason() {
+                    sink.emit(Event::Issue {
+                        severity: Severity::Warning,
+                        code: "layout_backend_fallback".into(),
+                        paragraph_id: None,
+                        page: Some(page + 1),
+                        message: format!("CoreML不可用，本次后续布局使用CPU：{reason}"),
+                    });
+                    fallback_reported = true;
+                }
+            }
             let report = apply_coverage_fallback(
                 &mut regions,
                 page_ir,
@@ -406,6 +448,12 @@ impl Pipeline {
                 total: pages_ir.len() as u32,
             });
             per_page_regions.push((page, regions));
+        }
+        if let Some(profile) = model
+            .end_profiling()
+            .map_err(|e| PipelineError::Layout(e.to_string()))?
+        {
+            tracing::info!(path = %profile.display(), "layout execution profile saved");
         }
         emit_stage_finished(sink, Stage::LayoutAnalysis, t);
 

@@ -6,6 +6,7 @@
 
 pub mod frame;
 pub mod layout;
+pub mod layout_model;
 pub mod paragraph;
 pub mod preflight;
 mod ruled_code;
