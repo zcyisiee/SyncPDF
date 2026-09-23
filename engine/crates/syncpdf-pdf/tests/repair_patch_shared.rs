@@ -63,21 +63,6 @@ fn shared_contents_and_resources_are_page_local() {
                 doc.save(&input).unwrap();
                 let pdf = worker.open(&input).unwrap();
                 let bound = bind_page(&worker, pdf, &doc, 1).unwrap();
-                if form && inherited {
-                    // Existing binder does not resolve inherited XObject resources.
-                    // Keep the gate intact rather than inventing a trusted binding.
-                    assert_eq!(bound.stats.text_objects, 1);
-                    assert_eq!(bound.stats.text_ops, 0);
-                    let before = format!("{:?}", doc.objects);
-                    let mut patch = PatchSet::new();
-                    assert!(matches!(
-                        patch.delete_glyphs(&bound, &[]),
-                        Err(PatchError::UnsafeBinding(_))
-                    ));
-                    assert_eq!(format!("{:?}", doc.objects), before);
-                    worker.close(pdf);
-                    continue;
-                }
                 bound.check_replacement().unwrap();
                 assert_eq!(bound.ir.glyphs().count(), 3);
                 let other_before = format!("{:?}", worker.page_text_objects(pdf, 1).unwrap());

@@ -301,6 +301,20 @@ struct Ctx {
     font_size: f32,
     /// 当前流作用域的资源字典（页级或 Form 级）。
     resources: Dictionary,
+    /// q/Q can span consecutive page Contents streams. Text-state parameters
+    /// are part of the saved graphics state; source geometry still comes from PDFium.
+    saved: Vec<SavedTextState>,
+}
+
+#[derive(Debug, Clone)]
+struct SavedTextState {
+    ctm: Matrix,
+    leading: f32,
+    char_spacing: f32,
+    word_spacing: f32,
+    h_scale: f32,
+    font_name: String,
+    font_size: f32,
 }
 
 impl Ctx {
@@ -316,6 +330,7 @@ impl Ctx {
             font_name: String::new(),
             font_size: 0.0,
             resources,
+            saved: Vec::new(),
         }
     }
 }
@@ -896,16 +911,28 @@ fn sub_dict(doc: &Document, d: &Dictionary, key: &[u8]) -> DictMap {
 
 type DictMap = BTreeMap<String, ObjectId>;
 
-/// 页的资源字典（继承 `/Resources`，不做父链合并——pdfium 已按父链解析）。
-fn page_resources(doc: &Document, page_id: ObjectId) -> Dictionary {
-    let Some(d) = deref_dict(doc, page_id) else {
-        return Dictionary::new();
-    };
-    match d.get(b"Resources").ok() {
-        Some(Object::Dictionary(x)) => x.clone(),
-        Some(Object::Reference(id)) => deref_dict(doc, *id).cloned().unwrap_or_default(),
-        _ => Dictionary::new(),
+/// Resolve the nearest inherited Resources dictionary; resource dictionaries
+/// are inherited as a whole, never merged across page-tree ancestors.
+fn page_resources(doc: &Document, mut page_id: ObjectId) -> Dictionary {
+    let mut visited = BTreeSet::new();
+    while visited.insert(page_id) {
+        let Some(d) = deref_dict(doc, page_id) else {
+            break;
+        };
+        match d.get(b"Resources").ok() {
+            Some(Object::Dictionary(x)) => return x.clone(),
+            Some(Object::Reference(id)) => {
+                return deref_dict(doc, *id).cloned().unwrap_or_default()
+            }
+            Some(_) => break,
+            None => {}
+        }
+        let Some(parent) = d.get(b"Parent").ok().and_then(|p| p.as_reference().ok()) else {
+            break;
+        };
+        page_id = parent;
     }
+    Dictionary::new()
 }
 
 fn page_box(doc: &Document, page_id: ObjectId, key: &[u8]) -> Option<Rect> {
@@ -964,16 +991,29 @@ fn walk_stream(
         }
     };
     let sref = ObjRef::new(stream_id.0, stream_id.1);
-    let mut ctm_stack: Vec<Matrix> = Vec::new();
     let mut path_pts: Vec<Point> = Vec::new();
 
     for (op_index, op) in ops.iter().enumerate() {
         let key = OpKey::new(sref, op_index as u32);
         match op.operator.as_str() {
-            "q" => ctm_stack.push(ctx.ctm),
+            "q" => ctx.saved.push(SavedTextState {
+                ctm: ctx.ctm,
+                leading: ctx.leading,
+                char_spacing: ctx.char_spacing,
+                word_spacing: ctx.word_spacing,
+                h_scale: ctx.h_scale,
+                font_name: ctx.font_name.clone(),
+                font_size: ctx.font_size,
+            }),
             "Q" => {
-                if let Some(m) = ctm_stack.pop() {
-                    ctx.ctm = m;
+                if let Some(saved) = ctx.saved.pop() {
+                    ctx.ctm = saved.ctm;
+                    ctx.leading = saved.leading;
+                    ctx.char_spacing = saved.char_spacing;
+                    ctx.word_spacing = saved.word_spacing;
+                    ctx.h_scale = saved.h_scale;
+                    ctx.font_name = saved.font_name;
+                    ctx.font_size = saved.font_size;
                 }
             }
             "cm" => {
@@ -1181,6 +1221,7 @@ fn handle_do(
     child.ctm = form_matrix.then(&ctx.ctm);
     child.font_name = ctx.font_name.clone();
     child.font_size = ctx.font_size;
+    child.leading = ctx.leading;
     child.char_spacing = ctx.char_spacing;
     child.word_spacing = ctx.word_spacing;
     child.h_scale = ctx.h_scale;
@@ -2498,6 +2539,40 @@ endcmap";
                 ],
             );
         assert!(font_widths(&doc, font).width_1000(65).is_nan());
+    }
+
+    #[test]
+    fn inherited_resources_take_nearest_dictionary_and_reject_cycles() {
+        let mut doc = Document::new();
+        let parent = doc
+            .add_object(lopdf::dictionary! { "Resources" => lopdf::dictionary! { "Marker" => 1 } });
+        let child = doc.add_object(lopdf::dictionary! { "Parent" => parent });
+        assert_eq!(
+            page_resources(&doc, child)
+                .get(b"Marker")
+                .unwrap()
+                .as_i64()
+                .unwrap(),
+            1
+        );
+        doc.get_object_mut(child)
+            .unwrap()
+            .as_dict_mut()
+            .unwrap()
+            .set("Resources", Dictionary::new());
+        assert!(
+            page_resources(&doc, child).is_empty(),
+            "an explicit empty dictionary stops inheritance"
+        );
+        doc.get_object_mut(child)
+            .unwrap()
+            .as_dict_mut()
+            .unwrap()
+            .remove(b"Resources");
+        let p = doc.get_object_mut(parent).unwrap().as_dict_mut().unwrap();
+        p.remove(b"Resources");
+        p.set("Parent", child);
+        assert!(page_resources(&doc, child).is_empty());
     }
 
     #[test]

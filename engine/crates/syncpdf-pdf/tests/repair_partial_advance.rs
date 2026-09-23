@@ -13,6 +13,10 @@ struct CharGeometry {
 }
 
 fn source_pdf(content: &[u8]) -> Document {
+    source_pdf_streams(&[content])
+}
+
+fn source_pdf_streams(contents: &[&[u8]]) -> Document {
     let mut doc = Document::with_version("1.7");
     let pages = doc.new_object_id();
     // Standard Helvetica AFM widths in 1/1000 em, codes 32..=68.
@@ -29,12 +33,17 @@ fn source_pdf(content: &[u8]) -> Document {
         "Encoding" => "WinAnsiEncoding", "FirstChar" => 32, "LastChar" => 68,
         "Widths" => widths,
     });
-    let stream = doc.add_object(Stream::new(Dictionary::new(), content.to_vec()));
+    let streams: Vec<Object> = contents
+        .iter()
+        .map(|content| {
+            Object::Reference(doc.add_object(Stream::new(Dictionary::new(), content.to_vec())))
+        })
+        .collect();
     let page = doc.add_object(dictionary! {
         "Type" => "Page", "Parent" => pages,
         "MediaBox" => vec![0.into(), 0.into(), 400.into(), 300.into()],
         "Resources" => dictionary! { "Font" => dictionary! { "F1" => font } },
-        "Contents" => stream,
+        "Contents" => streams,
     });
     doc.objects.insert(
         pages,
@@ -67,10 +76,13 @@ fn geometry(worker: &PdfiumWorker, pdf: syncpdf_pdf::pdfium::DocId) -> Vec<CharG
 }
 
 fn assert_survivors(content: &[u8], deleted: &[char], expected_before: &str) {
+    assert_survivors_document(source_pdf(content), deleted, expected_before);
+}
+
+fn assert_survivors_document(mut doc: Document, deleted: &[char], expected_before: &str) {
     let dir = tempfile::tempdir().expect("temporary PDF directory");
     let source = dir.path().join("source.pdf");
     let result = dir.path().join("result.pdf");
-    let mut doc = source_pdf(content);
     doc.save(&source).expect("save source");
     // Mandatory real PDFium integration; an unavailable worker fails this guard.
     let worker = PdfiumWorker::spawn().expect("PDFium worker required");
@@ -211,4 +223,22 @@ fn missing_simple_font_widths_rejects_without_guessing_or_mutation() {
     ));
     assert_eq!(doc.objects, before);
     worker.close(pdf);
+}
+
+#[test]
+fn graphics_restore_restores_font_and_character_spacing_for_deletion() {
+    assert_survivors(
+        b"BT /F1 15 Tf 1.3 Tc 2.1 Tw 83 Tz 1 0 0 1 42 210 Tm q /F1 25 Tf 9 Tc 8 Tw (A) Tj Q (B C) Tj (D) Tj ET",
+        &['B', ' '],
+        "AB CD",
+    );
+}
+
+#[test]
+fn graphics_restore_crosses_page_contents_stream_boundaries() {
+    let source = source_pdf_streams(&[
+        b"BT /F1 15 Tf 1.3 Tc 2.1 Tw 83 Tz 1 0 0 1 42 210 Tm q /F1 25 Tf 9 Tc 8 Tw (A) Tj ",
+        b"Q (B C) Tj (D) Tj ET",
+    ]);
+    assert_survivors_document(source, &['B', ' '], "AB CD");
 }
