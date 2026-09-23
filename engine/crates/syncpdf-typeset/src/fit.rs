@@ -1,10 +1,5 @@
-//! fit 阶梯与加宽调度。设计基准：02-技术路径与架构.md §8.2 步骤 4-6；
-//! typeset.md「fit.rs：阶梯搜索」。
-//!
-//! 单一实现，无快路（规约 #10）：
-//! scale 从 1.0 按 step 递减到 min_scale，每个 scale 依次试 line_height_steps；
-//! 首个「行数 × 行高 <= 框高」的档位胜出；都不行 → 加宽再试；
-//! 仍不行 → 允许溢出 allow_overflow_lines 行并记 Overflow；最终回到 min_scale 档。
+//! 容纳判断与邻接空隙扩框。默认保持请求字号与行距，无法容纳时返回 Overflow。
+//! 显式传入较小 min_scale 的库调用仍可使用阶梯，但生产默认不自动缩字号。
 
 use crate::breaks::Lang;
 use crate::layout::{self, BreaksCache, LayoutInput, LayoutOut};
@@ -16,23 +11,23 @@ use syncpdf_core::{AtomId, Color, ParagraphId, Rect, StyleId};
 /// fit 阶梯选项。
 #[derive(Debug, Clone, PartialEq)]
 pub struct FitOptions {
-    /// 最小字号缩放（默认 0.6）。
+    /// 最小字号缩放（默认1.0：保持请求字号）。
     pub min_scale: f32,
     /// 缩放步长（默认 0.05）。
     pub scale_step: f32,
-    /// 行距倍数阶梯（默认 `[1.0, 0.95, 0.9]`）。
+    /// 行距倍数阶梯（默认 `[1.0]`：保持请求行距）。
     pub line_height_steps: Vec<f32>,
-    /// 允许溢出的行数（默认 1）。
+    /// 兼容字段；溢出始终报告，不作为成功容纳（默认0）。
     pub allow_overflow_lines: u32,
 }
 
 impl Default for FitOptions {
     fn default() -> Self {
         Self {
-            min_scale: 0.6,
+            min_scale: 1.0,
             scale_step: 0.05,
-            line_height_steps: vec![1.0, 0.95, 0.9],
-            allow_overflow_lines: 1,
+            line_height_steps: vec![1.0],
+            allow_overflow_lines: 0,
         }
     }
 }
@@ -49,7 +44,7 @@ pub struct Obstacles {
 /// 排版问题。
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypesetIssue {
-    /// 溢出 `lines` 行（已按最小档放置）。
+    /// 溢出 `lines` 行；默认仍保持请求字号。
     Overflow { lines: u32 },
     /// 字号缩到 min_scale 仍未完整放下（无溢出配置时的兜底）。
     MinScaleHit,
@@ -149,7 +144,9 @@ impl<'a> Typeset<'a> {
 
         // 3. 溢出：min_scale 档、阶梯内行距，报告溢出行数。
         let (out, mut issues) = self.overflow_layout(&input, inlines, &spec.bbox, lh, &cache);
-        issues.push(TypesetIssue::MinScaleHit);
+        if self.opts.min_scale < 1.0 {
+            issues.push(TypesetIssue::MinScaleHit);
+        }
         self.finish(out, None, issues)
     }
 

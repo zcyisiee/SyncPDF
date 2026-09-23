@@ -69,8 +69,7 @@ fn english_exact_fit_scale_1() {
 }
 
 #[test]
-fn shrink_when_text_grows() {
-    // 同样的框，文本 ×1.5 → scale < 1.0 且行数增加。
+fn text_growth_preserves_requested_size_and_reports_overflow() {
     let bbox = Rect::new(0.0, 0.0, 100.0, 12.0);
     let s = spec(bbox, 10.0, 1.0, Align::Left);
     let t = typeset_default();
@@ -80,12 +79,22 @@ fn shrink_when_text_grows() {
     let grown = format!("{base} {} {}", base, base);
     let r_grown = t.layout(pid(), &s, &[text_inline(&grown)], &Obstacles::default());
 
-    assert!(
-        r_grown.scale < r_base.scale,
-        "base={} grown={}",
-        r_base.scale,
-        r_grown.scale
-    );
+    assert_eq!(r_base.scale, 1.0);
+    assert_eq!(r_grown.scale, 1.0);
+    assert!(r_grown.paragraph.overflow);
+    assert!(r_grown
+        .paragraph
+        .lines
+        .iter()
+        .flat_map(|l| &l.glyphs)
+        .all(|g| g.size == 10.0));
+    assert!(r_grown
+        .issues
+        .iter()
+        .any(|i| matches!(i, syncpdf_typeset::TypesetIssue::Overflow { .. })));
+    assert!(!r_grown
+        .issues
+        .contains(&syncpdf_typeset::TypesetIssue::MinScaleHit));
     assert!(
         r_grown.paragraph.lines.len() > r_base.paragraph.lines.len(),
         "base={} grown={}",
@@ -234,7 +243,7 @@ fn justify_first_line_increasing_x_and_last_glyph_near_right() {
 
 #[test]
 fn widen_uses_neighbor_gap() {
-    // 原框高 20（min_scale 也放不下），下方邻居留 20pt 空隙。
+    // 原框高20，下方邻居留20pt空隙；整个过程保持指定10pt字号。
     let bbox = Rect::new(0.0, 100.0, 100.0, 120.0);
     let neighbor = Rect::new(0.0, 60.0, 100.0, 80.0); // 原框底 100 与邻居顶 80 之间 20pt
     let mut s = spec(bbox, 10.0, 1.2, Align::Left);
@@ -244,9 +253,8 @@ fn widen_uses_neighbor_gap() {
         rects: vec![],
         neighbors: vec![neighbor],
     };
-    // 文本量：65 个 CJK 字符。原框（高 20）连 min_scale 都放不下；
-    // 加宽 20pt（高 40）后 min_scale 档放得下（5 行 × 6.48pt）。
-    let text = "一二三四五六七八九十".repeat(6) + "一二三四五";
+    // 25个CJK字符需要3行，原框放不下，加高至40pt后可容纳。
+    let text = "一二三四五六七八九十".repeat(2) + "一二三四五";
     let r = t.layout(pid(), &s, &[text_inline(&text)], &obstacles);
     assert!(r.widened.is_some(), "应加宽，issues={:?}", r.issues);
     let w = r.widened.unwrap();
@@ -257,7 +265,8 @@ fn widen_uses_neighbor_gap() {
         w.y0,
         neighbor.y1
     );
-    assert!(r.paragraph.lines.len() >= 4);
+    assert_eq!(r.paragraph.lines.len(), 3);
+    assert_eq!(r.scale, 1.0);
     assert!(r
         .issues
         .iter()
@@ -265,7 +274,7 @@ fn widen_uses_neighbor_gap() {
 }
 
 #[test]
-fn overflow_long_text_reports_issue_and_min_scale() {
+fn overflow_long_text_reports_issue_at_requested_size() {
     let bbox = Rect::new(0.0, 0.0, 100.0, 20.0);
     let s = spec(bbox, 10.0, 1.2, Align::Left);
     let t = typeset_default();
@@ -278,8 +287,16 @@ fn overflow_long_text_reports_issue_and_min_scale() {
         "issues={:?}",
         r.issues
     );
-    let min_scale = FitOptions::default().min_scale;
-    assert!((r.scale - min_scale).abs() < 1e-6, "scale={}", r.scale);
+    assert_eq!(r.scale, 1.0);
+    assert!(r
+        .paragraph
+        .lines
+        .iter()
+        .flat_map(|l| &l.glyphs)
+        .all(|g| g.size == s.font_size));
+    assert!(!r
+        .issues
+        .contains(&syncpdf_typeset::TypesetIssue::MinScaleHit));
     assert!(r.paragraph.overflow);
 }
 

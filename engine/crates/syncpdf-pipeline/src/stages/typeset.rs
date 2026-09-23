@@ -498,6 +498,13 @@ mod tests {
         let para = paragraph("P01-001", &text, bbox);
         let result = typeset_one(&shaper, &para, &parsed, &Obstacles::default());
         assert!(result.paragraph.overflow, "{:?}", result.issues);
+        assert_eq!(result.scale, 1.0, "不得用自动缩字号掩盖容纳失败");
+        assert!(result
+            .paragraph
+            .lines
+            .iter()
+            .flat_map(|l| &l.glyphs)
+            .all(|g| g.size == dominant_font_size(&para)));
     }
 
     #[test]
