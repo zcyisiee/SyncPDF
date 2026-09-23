@@ -1,9 +1,7 @@
-//! 译文校验器：hjfy 的 17 条错误码 + 段外 id 的第 18 条。
+//! 译文结构与内容完整性校验器。
 //!
-//! 设计基准：02-技术路径与架构.md §5.3；码表来源 research/02-hjfy-engine-deep-dive.md §8.4。
-//! 现版规约 #1/#2/#3（research/01-current-project-audit.md §7.1）在这里落成：
 //! 多 id 拒（`duplicated_text_slots` / `unknown_paragraph`）、占位符多重集相等而
-//! **顺序自由**、样式 span 数量一一对应而顺序自由。
+//! 顺序自由。样式只校验引用可解析，不强制片段数量/非空/源位置；不检查目标语比例。
 //!
 //! 所有检查都是确定性的纯函数，不联网、不看日志、不改输入。
 
@@ -15,11 +13,8 @@ use syncpdf_core::{AtomId, StyleId};
 /// 译文 / 原文字符数比的默认上限（§5.3）。
 pub const DEFAULT_EXPANSION_LIMIT: f32 = 3.0;
 
-/// 目标语言字符占比的下限：低于此值判 `insufficient_target_language`。
-const MIN_TARGET_RATIO: f32 = 0.5;
-
-/// 低于这个字符数的段落不做比例类检查（短段噪声太大）。
-const MIN_CHARS_FOR_RATIO: usize = 8;
+/// 低于这个字符数的源段落不做长度膨胀检查（短段噪声太大）。
+const MIN_SOURCE_CHARS_FOR_EXPANSION: usize = 8;
 
 /// 邻段泄漏检测的滑窗长度与步长（字符）。
 const CONTEXT_WINDOW: usize = 16;
@@ -43,12 +38,8 @@ pub enum Violation {
     AtomHintLeakage,
     /// 源文里的 URL / 邮箱字面量在译文里丢了或被改了。
     LinkLabelChanged,
-    /// span 数量不等。
-    StyleCount,
-    /// 出现源文没有的 `data-style`。
+    /// 出现源文没有的 `data-style`（无法解析到字体/字号元数据）。
     UnknownStyle,
-    /// 出现内容为空（或只含占位符）的 span。
-    EmptyStyle,
     /// 含 U+202A–202E 等双向嵌入/覆盖控制符。
     UnsafeBidiControl,
     /// FSI/LRI/RLI 与 PDI 不配对。
@@ -63,8 +54,6 @@ pub enum Violation {
     ProtectedLiteralCount,
     /// 译文 / 原文长度比超过 `expansion_limit`。
     ExcessiveTargetExpansion,
-    /// 目标语言字符占比过低。
-    InsufficientTargetLanguage,
     /// 目标语言非日文却残留假名。
     ResidualJapanese,
     /// 回包里的段 id 不是本单元的 id（段外 id）。
@@ -80,9 +69,7 @@ impl Violation {
             Violation::UnknownPlaceholder => "unknown_placeholder",
             Violation::AtomHintLeakage => "atom_hint_leakage",
             Violation::LinkLabelChanged => "link_label_changed",
-            Violation::StyleCount => "style_count",
             Violation::UnknownStyle => "unknown_style",
-            Violation::EmptyStyle => "empty_style",
             Violation::UnsafeBidiControl => "unsafe_bidi_control",
             Violation::UnbalancedBidiIsolate => "unbalanced_bidi_isolate",
             Violation::DuplicatedTextSlots => "duplicated_text_slots",
@@ -90,13 +77,12 @@ impl Violation {
             Violation::PathologicalTextRepetition => "pathological_text_repetition",
             Violation::ProtectedLiteralCount => "protected_literal_count",
             Violation::ExcessiveTargetExpansion => "excessive_target_expansion",
-            Violation::InsufficientTargetLanguage => "insufficient_target_language",
             Violation::ResidualJapanese => "residual_japanese",
             Violation::UnknownParagraph => "unknown_paragraph",
         }
     }
 
-    /// 全部 18 条码，供上游枚举统计。
+    /// 当前全部违规码，供上游枚举统计。
     pub fn all() -> &'static [Violation] {
         use Violation::*;
         &[
@@ -105,9 +91,7 @@ impl Violation {
             UnknownPlaceholder,
             AtomHintLeakage,
             LinkLabelChanged,
-            StyleCount,
             UnknownStyle,
-            EmptyStyle,
             UnsafeBidiControl,
             UnbalancedBidiIsolate,
             DuplicatedTextSlots,
@@ -115,7 +99,6 @@ impl Violation {
             PathologicalTextRepetition,
             ProtectedLiteralCount,
             ExcessiveTargetExpansion,
-            InsufficientTargetLanguage,
             ResidualJapanese,
             UnknownParagraph,
         ]
@@ -226,32 +209,14 @@ pub fn validate(
         v.insert(Violation::LinkLabelChanged);
     }
 
-    // ── 5. 样式 span（多重集相等，顺序自由）──────────────────────────────
-    let mut src_styles = source.style_ids();
-    let mut tgt_styles = target.style_ids();
-    src_styles.sort_unstable();
-    tgt_styles.sort_unstable();
-    if src_styles.len() != tgt_styles.len() || src_styles != tgt_styles {
-        v.insert(Violation::StyleCount);
-    }
-    let src_style_set: BTreeSet<StyleId> = src_styles.iter().copied().collect();
-    if tgt_styles.iter().any(|s| !src_style_set.contains(s)) {
+    // ── 5. 样式引用必须可解析；模型可重排、拆合、复用或省略已知样式 ──────
+    let src_style_set: BTreeSet<StyleId> = source.style_ids().into_iter().collect();
+    if target
+        .style_ids()
+        .iter()
+        .any(|s| !src_style_set.contains(s))
+    {
         v.insert(Violation::UnknownStyle);
-    }
-
-    // ── 6. 空 span（只含占位符也算空）────────────────────────────────────
-    let empty_src = source
-        .style_texts()
-        .iter()
-        .filter(|(_, t)| t.trim().is_empty())
-        .count();
-    let empty_tgt = target
-        .style_texts()
-        .iter()
-        .filter(|(_, t)| t.trim().is_empty())
-        .count();
-    if empty_tgt > empty_src {
-        v.insert(Violation::EmptyStyle);
     }
 
     // ── 7. 双向控制符 ───────────────────────────────────────────────────
@@ -292,25 +257,11 @@ pub fn validate(
     // ── 12. 膨胀比 ──────────────────────────────────────────────────────
     let src_chars = src_text.chars().count();
     let tgt_chars = tgt_text.chars().count();
-    if src_chars >= MIN_CHARS_FOR_RATIO
+    if src_chars >= MIN_SOURCE_CHARS_FOR_EXPANSION
         && ctx.expansion_limit > 0.0
         && tgt_chars as f32 > src_chars as f32 * ctx.expansion_limit
     {
         v.insert(Violation::ExcessiveTargetExpansion);
-    }
-
-    // ── 13. 目标语言占比 ────────────────────────────────────────────────
-    if let Some(matches_target) = target_script(ctx.target_lang) {
-        let alphabetic = tgt_text.chars().filter(|c| c.is_alphabetic()).count();
-        if alphabetic >= MIN_CHARS_FOR_RATIO {
-            let hit = tgt_text
-                .chars()
-                .filter(|c| c.is_alphabetic() && matches_target(*c))
-                .count();
-            if (hit as f32) < alphabetic as f32 * MIN_TARGET_RATIO {
-                v.insert(Violation::InsufficientTargetLanguage);
-            }
-        }
     }
 
     // ── 14. 残留假名 ────────────────────────────────────────────────────
@@ -409,18 +360,6 @@ fn is_kana(c: char) -> bool {
     matches!(c, '\u{3041}'..='\u{3096}' | '\u{309D}'..='\u{309F}' | '\u{30A1}'..='\u{30FA}' | '\u{30FD}'..='\u{30FF}')
 }
 
-fn is_han(c: char) -> bool {
-    matches!(c, '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}' | '\u{F900}'..='\u{FAFF}' | '\u{20000}'..='\u{2A6DF}')
-}
-
-fn is_hangul(c: char) -> bool {
-    matches!(c, '\u{1100}'..='\u{11FF}' | '\u{3130}'..='\u{318F}' | '\u{AC00}'..='\u{D7A3}')
-}
-
-fn is_latin(c: char) -> bool {
-    c.is_ascii_alphabetic() || matches!(c, '\u{00C0}'..='\u{024F}' | '\u{1E00}'..='\u{1EFF}')
-}
-
 /// BCP-47 的主语言子标签（小写）。
 fn primary_lang(lang: &str) -> String {
     lang.split(['-', '_'])
@@ -428,28 +367,6 @@ fn primary_lang(lang: &str) -> String {
         .unwrap_or("")
         .trim()
         .to_ascii_lowercase()
-}
-
-/// 目标语言对应的书写系统判定；未知语言返回 `None`（跳过该检查）。
-fn target_script(lang: &str) -> Option<fn(char) -> bool> {
-    let f: fn(char) -> bool = match primary_lang(lang).as_str() {
-        "zh" | "yue" | "wuu" => is_han,
-        "ja" => |c| is_han(c) || is_kana(c),
-        "ko" => is_hangul,
-        "ru" | "uk" | "be" | "bg" | "sr" | "mk" | "kk" => |c| matches!(c, '\u{0400}'..='\u{04FF}'),
-        "ar" | "fa" | "ur" | "ps" => {
-            |c| matches!(c, '\u{0600}'..='\u{06FF}' | '\u{0750}'..='\u{077F}' | '\u{FB50}'..='\u{FDFF}')
-        }
-        "he" | "yi" => |c| matches!(c, '\u{0590}'..='\u{05FF}'),
-        "el" => |c| matches!(c, '\u{0370}'..='\u{03FF}' | '\u{1F00}'..='\u{1FFF}'),
-        "th" => |c| matches!(c, '\u{0E00}'..='\u{0E7F}'),
-        "hi" | "mr" | "ne" | "sa" => |c| matches!(c, '\u{0900}'..='\u{097F}'),
-        "en" | "fr" | "de" | "es" | "pt" | "it" | "nl" | "sv" | "da" | "nb" | "no" | "fi"
-        | "pl" | "cs" | "sk" | "hu" | "ro" | "tr" | "vi" | "id" | "ms" | "ca" | "hr" | "sl"
-        | "et" | "lv" | "lt" | "af" | "sw" | "tl" => is_latin,
-        _ => return None,
-    };
-    Some(f)
 }
 
 /// 邻段上下文是否漏进了译文：用滑窗在译文里找上下文片段，且该片段不在源文里。
@@ -546,9 +463,9 @@ mod tests {
     #[test]
     fn all_codes_are_unique_snake_case() {
         let all = Violation::all();
-        assert_eq!(all.len(), 18);
+        assert_eq!(all.len(), 15);
         let set: BTreeSet<&str> = all.iter().map(|v| v.code()).collect();
-        assert_eq!(set.len(), 18);
+        assert_eq!(set.len(), all.len());
         for c in set {
             assert!(
                 c.chars().all(|ch| ch.is_ascii_lowercase() || ch == '_'),
@@ -652,9 +569,9 @@ mod tests {
         .contains(&"link_label_changed"));
     }
 
-    // ── style_count / unknown_style / empty_style ───────────────────────
+    // ── flexible style layout / resolvable style references ─────────────
     #[test]
-    fn style_count() {
+    fn known_style_occurrences_may_change() {
         let u = Unit {
             id: "P01-001".parse().unwrap(),
             html: r#"<p id="P01-001">a <span data-style="1">bold</span> and <span data-style="2">italic</span> text</p>"#.into(),
@@ -668,11 +585,11 @@ mod tests {
             r#"<p id="P01-001">a <span data-style="2">italic</span> and <span data-style="1">bold</span> text</p>"#
         )
         .is_ok());
-        assert!(codes(validate(
+        assert!(validate(
             &ctx(&u, "en"),
             r#"<p id="P01-001">a <span data-style="1">bold</span> and italic text</p>"#
-        ))
-        .contains(&"style_count"));
+        )
+        .is_ok());
     }
 
     #[test]
@@ -693,7 +610,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_style() {
+    fn empty_style_is_not_a_translation_failure() {
         let u = Unit {
             id: "P01-001".parse().unwrap(),
             html: r#"<p id="P01-001">a <span data-style="1">bold</span> word here</p>"#.into(),
@@ -701,12 +618,12 @@ mod tests {
             atoms: vec![],
             breaks: 0,
         };
-        assert!(!codes(validate(&ctx(&u, "en"), &u.html)).contains(&"empty_style"));
-        assert!(codes(validate(
+        assert!(validate(&ctx(&u, "en"), &u.html).is_ok());
+        assert!(validate(
             &ctx(&u, "en"),
             r#"<p id="P01-001">a bold<span data-style="1"> </span> word here</p>"#
-        ))
-        .contains(&"empty_style"));
+        )
+        .is_ok());
     }
 
     // ── unsafe_bidi_control / unbalanced_bidi_isolate ───────────────────
@@ -816,25 +733,27 @@ mod tests {
         assert!(codes(validate(&ctx(&u, "en"), &html)).contains(&"excessive_target_expansion"));
     }
 
-    // ── insufficient_target_language ────────────────────────────────────
     #[test]
-    fn insufficient_target_language() {
+    fn target_script_percentage_is_not_required() {
         let u = src_unit("P01-001", "Deep learning models achieve strong results");
-        assert!(!codes(validate(
+        assert!(validate(
             &ctx(&u, "zh-CN"),
             r#"<p id="P01-001">深度学习模型取得了很强的效果</p>"#
-        ))
-        .contains(&"insufficient_target_language"));
-        // 目标是中文却整段还是英文。
-        assert!(
-            codes(validate(&ctx(&u, "zh-CN"), &u.html)).contains(&"insufficient_target_language")
-        );
+        )
+        .is_ok());
+        for lang in ["zh-CN", "ja", "ko", "ar", "ru", "en", "xx"] {
+            assert!(validate(&ctx(&u, lang), &u.html).is_ok(), "{lang}");
+        }
     }
 
     #[test]
-    fn unknown_target_language_skips_the_ratio_check() {
-        let u = src_unit("P01-001", "Deep learning models achieve strong results");
-        assert!(!codes(validate(&ctx(&u, "xx"), &u.html)).contains(&"insufficient_target_language"));
+    fn english_method_names_do_not_disqualify_chinese_headings() {
+        let u = src_unit("P19-018", "G Evading Neural Cleanse");
+        assert!(validate(
+            &ctx(&u, "zh-CN"),
+            r#"<p id="P19-018">G 规避 Neural Cleanse</p>"#,
+        )
+        .is_ok());
     }
 
     // ── residual_japanese ───────────────────────────────────────────────

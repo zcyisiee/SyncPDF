@@ -54,7 +54,7 @@ pub struct DocumentPrompt {
 impl DocumentPrompt {
     pub fn with_repair_note(mut self, codes: &[&str]) -> Self {
         if !codes.is_empty() {
-            self.text = format!("The previous response was invalid. Repair requirement: {}\nReturn the same restricted Markdown blocks; preserve all style identities, atom markers and hard breaks.\n\n{}", codes.join(", "), self.text);
+            self.text = format!("The previous response was invalid. Repair requirement: {}\nReturn the same restricted Markdown block IDs; use only known style IDs and preserve atom markers and hard breaks.\n\n{}", codes.join(", "), self.text);
         }
         self
     }
@@ -80,10 +80,10 @@ pub fn system_prompt(spec: &PromptSpec) -> String {
         source_clause(&spec.source_lang),
         r#"The input is one complete document of restricted Markdown blocks. Return only the translated blocks in the same order, with no code fences, explanations, or surrounding prose.
 Each block begins with an exclusive line <!-- syncpdf:block P01-001 --> and ends with an exclusive line <!-- syncpdf:end P01-001 -->. Copy each source block ID exactly, including matching end ID. Never merge, split, omit, duplicate or invent blocks. Output each complete block as soon as translated.
-Source styles use [text]{style=1}. Preserve each style ID and its occurrence count, including adjacent repeated style nodes. Translate all text within its own source style. Do not add bold, italic, headings, links or HTML tags; the backend retains source typography. A style containing only an atom marker is not a substitute for its original prose.
-Preserve every {{KEEP_N}} atom marker exactly once in original order. ATOM_HINTS is read-only context, never substitute its value for a marker. Do not translate code, addresses or URLs.
+Source styles use [text]{style=1}. Use only style IDs supplied in that source block. Choose style placement to suit the translated meaning and word order: you may reorder, split, merge, reuse or omit style spans. Style occurrence counts need not match the source; atom-only or empty style spans are allowed. Do not add Markdown bold, italic, headings, links or HTML tags; known style IDs provide font and size metadata.
+Preserve every {{KEEP_N}} atom marker exactly once; markers may move with their referents and may enter a different known style span when the translated word order calls for it. ATOM_HINTS is read-only context, never substitute its value for a marker. Do not translate code, addresses or URLs.
 A backslash at the end of a line represents a hard break; keep the same number. Ordinary newlines are text whitespace. Escape literal Markdown punctuation with a backslash, especially brackets, braces, backslashes, angle brackets, asterisks, underscores and backticks. Keep already escaped literals escaped.
-Follow the target writing system and regional standard. Preserve meaning, numbers, email addresses and URLs. Keep text already in the target language unless writing-standard conversion is needed. Do not report detected languages."#
+Translate prose into the target language and regional standard. Preserve conventional proper names and technical terms in English or their original language when appropriate, including short labels; there is no target-language character percentage requirement. Preserve meaning, numbers, email addresses and URLs. Keep text already in the target language unless writing-standard conversion is needed. Do not report detected languages."#
     )
 }
 fn source_clause(source_lang: &str) -> String {
@@ -243,13 +243,21 @@ pub(crate) mod tests {
         let prompt = build_document_prompts(&spec, &units, &hints)
             .unwrap()
             .remove(0)
-            .with_repair_note(&["style_count"]);
+            .with_repair_note(&["placeholder_count"]);
         assert!(prompt.system.contains("dominant source language is en"));
         assert!(prompt.system.contains("zh-CN"));
         assert!(prompt.system.contains(crate::markdown::TRANSPORT_VERSION));
         assert!(prompt.text.contains("- transformer => 变换器"));
         assert!(prompt.text.contains("- P01-003 {{KEEP_1}} = x^2"));
         assert!(prompt.text.contains("<!-- syncpdf:block P01-003 -->"));
-        assert!(prompt.text.contains("Repair requirement: style_count"));
+        assert!(prompt
+            .text
+            .contains("Repair requirement: placeholder_count"));
+        assert!(prompt
+            .system
+            .contains("Style occurrence counts need not match"));
+        assert!(prompt
+            .system
+            .contains("no target-language character percentage requirement"));
     }
 }

@@ -89,7 +89,7 @@ impl ParsedUnit {
         n
     }
 
-    /// 每个 span 的纯文本（顺序即出现顺序），供 `empty_style` 判定。
+    /// 每个 span 的纯文本（顺序即出现顺序），用于样式内容检查/展示。
     pub fn style_texts(&self) -> Vec<(StyleId, String)> {
         let mut out = Vec::new();
         collect_style_texts(&self.segments, &mut out);

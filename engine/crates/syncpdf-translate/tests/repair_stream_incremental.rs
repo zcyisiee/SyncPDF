@@ -370,9 +370,9 @@ async fn bad_markup_is_a_transport_error_without_delivery() {
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
-/// 非标记类校验失败（多出 span）：同样走有界重试后回退，不进排版。
+/// 无法解析的样式引用仍走有界重试后回退；不是因span数量变化而失败。
 #[tokio::test]
-async fn style_violation_falls_back_after_bounded_retry() {
+async fn unknown_style_falls_back_after_bounded_retry() {
     let us = vec![unit(1)];
     let bad = format!(
         "<p id=\"P01-001\">{} <span data-style=\"7\">extra</span></p>",
@@ -385,15 +385,32 @@ async fn style_violation_falls_back_after_bounded_retry() {
     assert_eq!(r.fallback_ids, vec![pid(1)]);
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0].html, us[0].html, "回退必须是原文");
-    // 源文无 span、译文多一个 span → 结构合法但校验不过。
-    assert_eq!(
-        r.stats.violations.get("style_count"),
-        Some(&2),
-        "{:?}",
-        r.stats.violations
-    );
+    // 源文没有样式7的元数据，不能解释该引用；数量本身不再阻止译文。
+    assert!(!r.stats.violations.contains_key("style_count"));
     assert_eq!(r.stats.violations.get("unknown_style"), Some(&2));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+/// 已知样式的拆合/省略不阻止闭合块立即交付，也不会产生多余补救请求。
+#[tokio::test]
+async fn reordered_known_styles_deliver_immediately_without_retry() {
+    let us = vec![Unit {
+        id: pid(1),
+        html: r#"<p id="P01-001">G <span data-style="1">Evading</span> <span data-style="2">Neural Cleanse</span></p>"#.into(),
+        styles: 2, atoms: vec![], breaks: 0,
+    }];
+    let target = r#"<p id="P01-001">G 规避 <span data-style="2">Neural</span> <span data-style="2">Cleanse</span></p>"#;
+    let script = Script::ok(vec![format!("{}\n", markdown(target)), "\n".into()]);
+    let (result, seen, _, snapshots, calls) = run_scripted(vec![script], &us, None, Some(1)).await;
+    let r = result.unwrap();
+    assert!(r.fallback_ids.is_empty());
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].html, target);
+    assert!(seen[0].status.is_ok());
+    assert_eq!(snapshots.lock().unwrap().as_slice(), &[1, 1]);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(r.stats.primary_prompts, 1);
+    assert_eq!(r.stats.retry_prompts, 0);
 }
 
 /// 缓存命中：先于任何模型输出交付；结果仍按输入序；新块照常入缓存。
