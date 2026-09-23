@@ -683,6 +683,31 @@ mod tests {
         assert_eq!(glyphs, shaper.shape(inter.0, "A中B", 12.0, false));
     }
     #[test]
+    fn mathematical_unicode_uses_real_ink_without_character_normalization() {
+        let (store, profile) = fonts().expect("builtin font fixture");
+        let shaper = StoreShaper::new(&store, &profile);
+        let para = paragraph("P01-001", "source", Rect::new(0.0, 0.0, 200.0, 40.0));
+        let text = "∗ 𝜆 𝛼 𝑠 𝜖";
+        let parsed = parse_unit_html(&format!("<p id=\"P01-001\">{text}</p>")).unwrap();
+        let result = typeset_one(&shaper, &para, &parsed, &Obstacles::default());
+        assert!(!result.paragraph.overflow);
+        let glyphs: Vec<_> = result
+            .paragraph
+            .lines
+            .iter()
+            .flat_map(|l| &l.glyphs)
+            .collect();
+        assert!(glyphs.iter().all(|g| g.gid != 0));
+        assert_eq!(
+            glyphs.iter().map(|g| g.text.as_str()).collect::<String>(),
+            text
+        );
+        for g in glyphs.iter().filter(|g| !g.text.trim().is_empty()) {
+            let ink = shaper.glyph_bounds(g.font, g.gid, g.size).unwrap();
+            assert!(ink.width() > 0.0 && ink.height() > 0.0);
+        }
+    }
+    #[test]
     fn missing_glyph_never_publishes_a_notdef_replacement() {
         let (store, profile) = fonts().expect("builtin font fixture");
         let shaper = StoreShaper::new(&store, &profile);

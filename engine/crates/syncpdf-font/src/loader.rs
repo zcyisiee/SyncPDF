@@ -136,6 +136,18 @@ impl FontStore {
                 dir.display()
             )));
         }
+        // Bundled OFL math fallback: no system-font or TeX runtime dependency.
+        let id = FontId(store.fonts.len() as u32);
+        store.index_family("math", id.0);
+        store.fonts.push(LoadedFont {
+            id,
+            path: PathBuf::from("embedded:STIXTwoMath-Regular.otf"),
+            face_index: 0,
+            family: "STIX Two Math".into(),
+            weight: 400,
+            italic: false,
+            data: Arc::new(include_bytes!("../assets/STIXTwoMath-Regular.otf").to_vec()),
+        });
         Ok(store)
     }
 
@@ -473,7 +485,14 @@ mod tests {
         for id in s.ids() {
             let f = s.get(id).unwrap();
             assert!(!f.data.is_empty());
-            assert!(f.path.is_file() || f.path.exists());
+            if f.path == Path::new("embedded:STIXTwoMath-Regular.otf") {
+                assert_eq!(
+                    f.data.as_slice(),
+                    include_bytes!("../assets/STIXTwoMath-Regular.otf")
+                );
+            } else {
+                assert!(f.path.is_file());
+            }
         }
     }
 
