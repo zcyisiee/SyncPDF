@@ -358,16 +358,45 @@ async fn unknown_and_duplicate_ids_never_reach_layout() {
     );
 }
 
-/// 传输语法损坏必须明确失败，不能悄悄当成完整合法回包。
+/// 已闭合坏块有界补译，耗尽后明确回退，不得缓存或当成功。
 #[tokio::test]
-async fn bad_markup_is_a_transport_error_without_delivery() {
+async fn bad_closed_markup_falls_back_after_bounded_retry() {
     let us = vec![unit(1)];
     let bad = "<!-- syncpdf:block P01-001 -->\n<bad>\n<!-- syncpdf:end P01-001 -->";
+    let script = Script::ok(vec![bad.into()]);
+    let cache = Cache::open_in_memory().unwrap();
     let (result, seen, _, _, calls) =
-        run_scripted(vec![Script::ok(vec![bad.into()])], &us, None, Some(1)).await;
-    assert!(matches!(result, Err(TranslateError::Transport(_))));
-    assert!(seen.is_empty());
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+        run_scripted(vec![script.clone(), script], &us, Some(&cache), Some(1)).await;
+    let result = result.unwrap();
+    assert_eq!(result.fallback_ids, vec![pid(1)]);
+    assert_eq!(result.stats.violations.get("invalid_markup"), Some(&2));
+    assert_eq!(seen.len(), 1);
+    assert!(!seen[0].status.is_ok());
+    assert_eq!(seen[0].html, us[0].html);
+    assert!(cache.get("en", "en", &us[0].html).unwrap().is_none());
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn bad_closed_body_retries_without_losing_later_valid_blocks() {
+    let us = vec![unit(1), unit(2), unit(3)];
+    let bad = "<!-- syncpdf:block P01-002 -->\n\\math{bad}\n<!-- syncpdf:end P01-002 -->";
+    let first = Script::ok(vec![format!("{}\n{bad}\n{}\n", wire(1), wire(3))]);
+    let retry = Script::ok(vec![wire(2)]);
+    let cache = Cache::open_in_memory().unwrap();
+    let (result, seen, _, snapshots, calls) =
+        run_scripted(vec![first, retry], &us, Some(&cache), None).await;
+    let result = result.unwrap();
+    assert_eq!(ids(&seen), vec![pid(1), pid(3), pid(2)]);
+    assert!(result.blocks.iter().all(|block| block.status.is_ok()));
+    assert_eq!(result.stats.violations.get("invalid_markup"), Some(&1));
+    assert_eq!(result.stats.primary_prompts, 1);
+    assert_eq!(result.stats.retry_prompts, 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(*snapshots.lock().unwrap(), vec![2, 3]);
+    for unit in us {
+        assert_eq!(cache.get("en", "en", &unit.html).unwrap(), Some(unit.html));
+    }
 }
 
 /// 无法解析的样式引用仍走有界重试后回退；不是因span数量变化而失败。

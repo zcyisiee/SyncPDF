@@ -18,6 +18,9 @@ pub const TRANSPORT_VERSION: &str = "syncpdf-markdown-v1";
 pub struct MarkdownError {
     pub offset: usize,
     pub message: String,
+    /// Only present for invalid body syntax inside a correctly closed block.
+    /// Framing errors cannot safely be attributed to a single paragraph.
+    pub block_id: Option<ParagraphId>,
 }
 
 impl MarkdownError {
@@ -25,6 +28,7 @@ impl MarkdownError {
         Self {
             offset,
             message: message.into(),
+            block_id: None,
         }
     }
 }
@@ -244,7 +248,11 @@ fn parse_body(mut active: Active) -> Result<ParsedUnit, MarkdownError> {
         ));
     }
     active.body.pop();
-    let segments = parse_segments(&active.body, active.body_offset, false)?;
+    let segments =
+        parse_segments(&active.body, active.body_offset, false).map_err(|mut error| {
+            error.block_id = Some(active.id.clone());
+            error
+        })?;
     Ok(ParsedUnit {
         id: active.id,
         segments,
