@@ -70,6 +70,80 @@ fn english_exact_fit_scale_1() {
 }
 
 #[test]
+fn mixed_script_captions_do_not_choose_unnecessary_short_middle_lines() {
+    let captions = [
+        (Align::Left, "表 18： MergeGuard 对后门任务数量的敏感性，固定 6 任务池：Cars、MNIST、RESISC45、SUN397、CIFAR100 和 EuroSAT。子表（a）：仅 Cars 被植入后门。子表（b）：Cars、MNIST 和 RESISC45 被植入后门。子表（c）：Cars、MNIST、RESISC45、SUN397 和 CIFAR100 被植入后门。红色上标星号∗ 标记后门任务。子表（a）仅报告 BadMerging，因为 MergeBackdoor 被设计为仅当至少两个后门模型参与合并过程时才激活；其他子表报告两种攻击。"),
+        (Align::Justify, "表19： MergeGuard 对总任务数的敏感性。子表(a)合并四个任务（RESISC45和SUN397被植入后门；CIFAR100和EuroSAT干净）。子表(b)和(c)合并从Cars、MNIST、RESISC45、SUN397、CIFAR10、SVHN、GTSRB、DTD中选取的八个任务：在(b)中，四个被植入后门（CIFAR10、MNIST、RESISC45、SUN397）；在(c)中，又增加了一个（Cars）。"),
+    ];
+    for (align, text) in captions {
+        let mut s = spec(Rect::new(0.0, 0.0, 244.0, 200.0), 8.0, 1.3, align);
+        s.lang = Lang::Zh;
+        let r = typeset_default().layout(pid(), &s, &[text_inline(text)], &Obstacles::default());
+        assert!(!r.paragraph.overflow, "{align:?}: {:?}", r.issues);
+        for line in &r.paragraph.lines[..r.paragraph.lines.len() - 1] {
+            let words: String = line.glyphs.iter().map(|g| g.text.as_str()).collect();
+            assert!(
+                line.bbox.width() > s.bbox.width() * 0.7,
+                "unnecessary short line: {words}"
+            );
+            assert!(line.glyphs.iter().all(|g| g.size == 8.0));
+        }
+        let actual: String = r
+            .paragraph
+            .lines
+            .iter()
+            .flat_map(|l| &l.glyphs)
+            .map(|g| g.text.as_str())
+            .collect();
+        if align == Align::Left {
+            assert!(r.paragraph.lines.last().unwrap().bbox.width() > s.bbox.width() * 0.3);
+        }
+        let compact = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+        assert_eq!(compact(&actual), compact(text));
+    }
+}
+
+#[test]
+fn automatic_break_does_not_strand_one_cjk_letter_but_hard_break_can() {
+    let mut s = spec(Rect::new(0.0, 0.0, 50.0, 100.0), 10.0, 1.3, Align::Left);
+    s.lang = Lang::Zh;
+    let r = typeset_default().layout(
+        pid(),
+        &s,
+        &[text_inline("甲乙丙丁戊己。")],
+        &Obstacles::default(),
+    );
+    assert!(!r.paragraph.overflow);
+    let last: String = r
+        .paragraph
+        .lines
+        .last()
+        .unwrap()
+        .glyphs
+        .iter()
+        .map(|g| g.text.as_str())
+        .collect();
+    assert!(last.ends_with("戊己。"), "last line: {last}");
+    let explicit = typeset_default().layout(
+        pid(),
+        &s,
+        &[text_inline("甲乙丙丁戊"), Inline::Br, text_inline("己。")],
+        &Obstacles::default(),
+    );
+    assert_eq!(explicit.paragraph.lines.len(), 2);
+    let last: String = explicit
+        .paragraph
+        .lines
+        .last()
+        .unwrap()
+        .glyphs
+        .iter()
+        .map(|g| g.text.as_str())
+        .collect();
+    assert_eq!(last, "己。");
+}
+
+#[test]
 fn text_growth_preserves_requested_size_and_reports_overflow() {
     let bbox = Rect::new(0.0, 0.0, 100.0, 12.0);
     let s = spec(bbox, 10.0, 1.0, Align::Left);

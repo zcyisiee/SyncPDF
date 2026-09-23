@@ -113,6 +113,36 @@ fn exhaustive_oracle(nodes: &[Node], widths: &[f32], tolerance: f32) -> Option<(
                     && stretch == 0.0
                     && shrink == 0.0
                     && natural <= width;
+                if single_word_ragged
+                    && candidates.iter().any(|&next| {
+                        if next <= at
+                            || nodes[from..next].iter().any(
+                                |n| matches!(n, Node::Penalty { cost, .. } if *cost <= -10_000),
+                            )
+                        {
+                            return false;
+                        }
+                        let Some(end) =
+                            (start..next).rfind(|&i| matches!(nodes[i], Node::Box { .. }))
+                        else {
+                            return false;
+                        };
+                        let extra = match nodes.get(next) {
+                            Some(Node::Penalty { width, .. }) => f64::from(*width),
+                            _ => 0.0,
+                        };
+                        let measured: f64 = nodes[start..=end]
+                            .iter()
+                            .map(|n| match n {
+                                Node::Box { width } | Node::Glue { width, .. } => f64::from(*width),
+                                _ => 0.0,
+                            })
+                            .sum();
+                        end > last && measured + extra <= width
+                    })
+                {
+                    continue;
+                }
                 let ratio = if mandatory || terminal || single_word_ragged {
                     if natural > width {
                         continue;

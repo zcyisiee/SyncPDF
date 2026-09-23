@@ -250,12 +250,30 @@ fn rows(
             continue;
         }
         let opps = break_opportunities(&seg.text, input.lang);
+        // Do not strand one CJK letter (plus closing punctuation) on the last
+        // line. Explicit hard breaks remain authoritative.
+        let mut letters = seg
+            .text
+            .char_indices()
+            .rev()
+            .filter(|(_, c)| c.is_alphanumeric());
+        let lone_tail = letters
+            .next()
+            .filter(|(_, c)| is_cjk_char(*c))
+            .map(|(last, _)| (letters.next().map(|(previous, _)| previous), last));
         let starts: std::collections::HashSet<usize> = seg.items.iter().map(Item::start).collect();
         let ends: std::collections::HashSet<usize> = seg.items.iter().map(Item::end).collect();
         let mut at: std::collections::HashMap<usize, (bool, bool)> =
             std::collections::HashMap::new();
         for opp in opps {
             let byte = opp.byte as usize;
+            if !opp.mandatory
+                && lone_tail.is_some_and(|(previous, last)| {
+                    previous.is_some_and(|previous| previous < byte) && byte <= last
+                })
+            {
+                continue;
+            }
             if byte < seg.text.len() && ends.contains(&byte) && starts.contains(&byte) {
                 let entry = at.entry(byte).or_insert((false, false));
                 entry.0 |= opp.mandatory;
@@ -375,7 +393,7 @@ fn rows(
             };
         let widths = [measure, width];
         let solution = if measure > 0.0 && width > 0.0 {
-            knuth_plass::solve(&nodes, &widths, 10.0).ok()
+            knuth_plass::solve_aligned(&nodes, &widths, 10.0, input.align == Align::Justify).ok()
         } else {
             None
         };
@@ -594,12 +612,17 @@ fn place(
             }
         }
     }
-    // Negative side bearings are ink, not overflow: place the ink origin inside
-    // the requested left edge. Never shrink, clip, or relax collision tolerances.
+    // Side bearings are ink, not advance: translate a line that fits in full back
+    // inside either edge. Never shrink, clip, or relax collision tolerances.
     if matches!(input.align, Align::Left | Align::Justify) && atoms.is_empty() {
         if let Some(b) = bounds {
-            let dx = (bbox.x0 + indent - b.x0).max(0.0);
-            if dx > 0.0 && b.x1 + dx <= bbox.x1 {
+            let left = bbox.x0 + indent;
+            let dx = if b.x0 < left {
+                left - b.x0
+            } else {
+                (bbox.x1 - b.x1).min(0.0)
+            };
+            if dx != 0.0 && b.x0 + dx >= left && b.x1 + dx <= bbox.x1 {
                 for g in &mut glyphs {
                     g.x += dx;
                 }

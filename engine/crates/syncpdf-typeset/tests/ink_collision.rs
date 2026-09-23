@@ -21,10 +21,14 @@ impl Shaper for InkShaper {
         };
         let left = if gid == b'j' as u16 || gid == b'W' as u16 {
             -0.046875
+        } else if gid == b'R' as u16 {
+            0.1
         } else {
             0.0
         };
-        let right = if gid == b'W' as u16 {
+        let right = if gid == b'R' as u16 {
+            100.03125
+        } else if gid == b'W' as u16 {
             100.0
         } else {
             size * 0.4
@@ -76,6 +80,18 @@ fn negative_side_bearing_repositions_ink_without_shrinking_or_clipping() {
     assert_eq!(result.paragraph.lines[0].bbox.x0, 0.0);
     assert_eq!(result.paragraph.lines[0].glyphs[0].x, 0.046875);
     assert_eq!(result.paragraph.lines[0].glyphs[0].size, 10.0);
+    assert!(layout(&[text("W")]).paragraph.overflow);
+}
+
+#[test]
+fn right_side_bearing_uses_available_left_space_without_shrinking() {
+    let result = layout(&[text("R")]);
+    assert!(!result.paragraph.overflow);
+    let line = &result.paragraph.lines[0];
+    assert_eq!(line.bbox.x1, 100.0);
+    assert!(line.bbox.x0 >= 0.0);
+    assert_eq!(line.glyphs[0].x, -0.03125);
+    assert_eq!(line.glyphs[0].size, 10.0);
     assert!(layout(&[text("W")]).paragraph.overflow);
 }
 
