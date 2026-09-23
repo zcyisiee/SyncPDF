@@ -393,7 +393,7 @@ impl Pipeline {
                     paragraph_id: None,
                     page: Some(page + 1),
                     message: format!(
-                        "未覆盖字形比例 {:.4} 超过门禁 {:.4}（已追加兜底区域）",
+                        "未覆盖字形比例 {:.4} 超过门禁 {:.4}，无法证明区域归属的字形保留原文",
                         report.ratio, self.layout_opts.coverage_limit
                     ),
                 });

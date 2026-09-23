@@ -2,7 +2,7 @@
 //!
 //! 设计基准：02-技术路径与架构.md §3（layout_analysis 行）与 §6。
 //! 门禁：未被任何区域覆盖的非白字形比例 > `coverage_limit`（默认 0.5%）时，
-//! 把「未覆盖字形并集框」追加成一个兜底区域，避免整段文字漏译。
+//! 只拆出能够证明属于同一正文物理行的遗漏续行；无法归属的字形仍报告缺口。
 
 use syncpdf_core::ir::{PageIR, Region, RegionKind};
 use syncpdf_core::{PageId, Rect};
@@ -47,7 +47,7 @@ impl LayoutOpts {
 /// 渲染一页 → 检测 → 转 PDF 用户空间 → 按 XY-cut 定阅读顺序。
 ///
 /// 返回的区域 `index` 按检测序编（与 `order` 无关），`order` 为阅读顺序。
-/// 调用方接着应调 [`apply_coverage_fallback`] 补兜底区域。
+/// 调用方接着应调 [`apply_coverage_fallback`] 核查区域边界。
 pub fn detect_regions(
     model: &mut LayoutModel,
     worker: &PdfiumWorker,
@@ -106,17 +106,12 @@ pub fn regions_from_detections(
         .collect()
 }
 
-/// 覆盖率门禁：未覆盖比例 > `limit` 时追加「兜底区域」。
-///
-/// 兜底区域 = 未被任何区域覆盖的非白字形 bbox 并集，`kind = Text`、
-/// `index` 续编、`order = u32::MAX`（永远排在最后）。
-///
-/// 返回覆盖率报告；`regions` 未变时返回的也仍是报告（供 issue 事件用）。
-/// 不修改 `regions` 的情形：无未覆盖字形，或比例未超限。
+/// 覆盖率门禁：超限时修正与现有文本类区域相邻的遗漏行。
+/// 返回修正后的报告；真正漏检或归属不明时保留缺口供 issue 事件报告。
 pub fn apply_coverage_fallback(
     regions: &mut Vec<Region>,
     page_ir: &PageIR,
-    page: u32,
+    _page: u32,
     limit: f32,
 ) -> syncpdf_layout::CoverageReport {
     let glyph_boxes: Vec<(Rect, bool)> = page_ir
@@ -129,39 +124,168 @@ pub fn apply_coverage_fallback(
     if report.ratio <= limit {
         return report;
     }
-    if let Some(union) = uncovered_union(&glyph_boxes, &covers) {
-        let index = regions.iter().map(|r| r.index).max().map_or(0, |m| m + 1);
-        regions.push(Region {
-            page: PageId(page),
-            index,
-            kind: RegionKind::Text,
-            bbox: union,
-            score: 0.0,
-            order: u32::MAX,
-        });
-    }
-    report
+    repair_boundary_lines(regions, &glyph_boxes);
+    let repaired: Vec<Rect> = regions.iter().map(|r| r.bbox).collect();
+    coverage(&glyph_boxes, &repaired)
 }
 
-/// 未覆盖非白字形的并集框。
-fn uncovered_union(glyph_boxes: &[(Rect, bool)], covers: &[Rect]) -> Option<Rect> {
-    let mut acc: Option<Rect> = None;
-    for (bbox, is_white) in glyph_boxes {
-        if *is_white {
-            continue;
+fn repair_boundary_lines(regions: &mut Vec<Region>, glyphs: &[(Rect, bool)]) {
+    let mut missed: Vec<Rect> = glyphs
+        .iter()
+        .filter(|(b, white)| !*white && !regions.iter().any(|r| r.bbox.contains(b.center())))
+        .map(|(b, _)| *b)
+        .collect();
+    missed.sort_by(|a, b| {
+        b.center()
+            .y
+            .total_cmp(&a.center().y)
+            .then(a.x0.total_cmp(&b.x0))
+    });
+    let mut rows: Vec<Vec<Rect>> = Vec::new();
+    for b in missed {
+        if let Some(row) = rows.last_mut() {
+            let first = row[0];
+            if (b.center().y - first.center().y).abs() <= first.height().min(b.height()) * 0.35 {
+                row.push(b);
+                continue;
+            }
         }
-        let c = bbox.center();
-        let covered = covers
-            .iter()
-            .any(|r| c.x >= r.x0 && c.x <= r.x1 && c.y >= r.y0 && c.y <= r.y1);
-        if !covered {
-            acc = Some(match acc {
-                Some(a) => a.union(bbox),
-                None => *bbox,
-            });
+        rows.push(vec![b]);
+    }
+    for mut row in rows {
+        row.sort_by(|a, b| a.x0.total_cmp(&b.x0));
+        let mut start = 0;
+        while start < row.len() {
+            let mut end = start + 1;
+            while end < row.len() && row[end].x0 - row[end - 1].x1 <= row[end - 1].height() * 1.5 {
+                end += 1;
+            }
+            repair_one_line(regions, glyphs, &row[start..end]);
+            start = end;
         }
     }
-    acc
+}
+
+fn repair_one_line(regions: &mut Vec<Region>, glyphs: &[(Rect, bool)], line: &[Rect]) {
+    if line.len() < 2 {
+        return;
+    }
+    let span = line.iter().skip(1).fold(line[0], |acc, b| acc.union(b));
+    if span.width() < span.height() * 3.0 {
+        return;
+    }
+    // 连续的物理行：用所有可见字形找与遗漏段同一基线、同一水平连通分量。
+    let mut row: Vec<Rect> = glyphs
+        .iter()
+        .filter(|(b, white)| {
+            !*white
+                && (b.center().y - span.center().y).abs() <= b.height().min(span.height()) * 0.35
+        })
+        .map(|(b, _)| *b)
+        .collect();
+    row.sort_by(|a, b| a.x0.total_cmp(&b.x0));
+    let mut component: Option<&[Rect]> = None;
+    let mut start = 0;
+    while start < row.len() {
+        let mut end = start + 1;
+        while end < row.len() && row[end].x0 - row[end - 1].x1 <= row[end - 1].height() * 1.5 {
+            end += 1;
+        }
+        if row[start].x0 <= span.x0 && row[end - 1].x1 >= span.x1 {
+            if component.is_some() {
+                return;
+            }
+            component = Some(&row[start..end]);
+        }
+        start = end;
+    }
+    let Some(component) = component else {
+        return;
+    };
+    let whole = component
+        .iter()
+        .skip(1)
+        .fold(component[0], |acc, b| acc.union(b));
+    let mut source: Option<usize> = None;
+    let mut covered = 0;
+    let mut seen_missed = false;
+    for b in component {
+        let owners: Vec<usize> = regions
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.bbox.contains(b.center()))
+            .map(|(i, _)| i)
+            .collect();
+        match owners.as_slice() {
+            [] => seen_missed = true,
+            [i] if !seen_missed && regions[*i].kind == RegionKind::Text => {
+                if source.is_some_and(|s| s != *i) {
+                    return;
+                }
+                source = Some(*i);
+                covered += 1;
+            }
+            _ => return,
+        }
+    }
+    if covered < 2 || !seen_missed {
+        return;
+    }
+    let Some(i) = source else {
+        return;
+    };
+    // 只能拆检测框底部的一行，且下一行与它有可见空隙。
+    let old = regions[i].bbox;
+    let y = whole.center().y;
+    let mut next: Option<f32> = None;
+    for (b, _) in glyphs {
+        let c = b.center();
+        if old.contains(c) && c.y < y - whole.height() * 0.35 {
+            return;
+        }
+        if old.contains(c) && c.y > y + whole.height() * 0.35 {
+            next = Some(next.map_or(c.y, |n| n.min(c.y)));
+        }
+    }
+    let Some(next) = next else {
+        return;
+    };
+    let cut = (y + next) * 0.5;
+    if cut <= whole.y1 || cut >= next || cut >= old.y1 {
+        return;
+    }
+    // 新窄框只能收这一行；旧框裁掉的每个字形都必须被新框接走。
+    for (b, white) in glyphs {
+        let c = b.center();
+        if old.contains(c) && c.y < cut && !whole.contains(c) {
+            return;
+        }
+        if whole.contains(c) {
+            if (c.y - y).abs() > whole.height() * 0.35 {
+                return;
+            }
+            if !*white && !component.contains(b) {
+                return;
+            }
+            if regions
+                .iter()
+                .enumerate()
+                .any(|(j, r)| j != i && r.bbox.contains(c))
+            {
+                return;
+            }
+        }
+    }
+    let new_region = Region {
+        page: regions[i].page,
+        index: regions.iter().map(|r| r.index).max().map_or(0, |m| m + 1),
+        kind: RegionKind::Text,
+        bbox: whole,
+        score: regions[i].score,
+        order: regions[i].order.saturating_add(1),
+    };
+    regions[i].bbox.y0 = cut;
+    regions.push(new_region);
 }
 
 /// 白字形判定：纯空白（空格）或不可见渲染模式、裁掉的字形。
@@ -175,6 +299,126 @@ mod tests {
     use syncpdf_core::ir::{DisplayItem, Glyph, GlyphFlags, GlyphSource};
     use syncpdf_core::require_fixture;
     use syncpdf_core::{Matrix, PageId};
+
+    #[test]
+    #[ignore = "manual 23-page probe: set SYNCPDF_TARGET_PDF"]
+    fn target_paper_coverage_boundaries_all_pages() {
+        let path = std::path::PathBuf::from(
+            std::env::var_os("SYNCPDF_TARGET_PDF").expect("set SYNCPDF_TARGET_PDF"),
+        );
+        let path = path.as_path();
+        if !path.is_file() {
+            eprintln!("SKIP: target PDF missing");
+            return;
+        }
+        let Some(models) = syncpdf_core::fixtures::models_dir() else {
+            eprintln!("SKIP: model dir missing");
+            return;
+        };
+        let model_path = models.join("pp_doc_layoutv3.onnx");
+        if !model_path.is_file() {
+            eprintln!("SKIP: model missing");
+            return;
+        }
+        let worker = PdfiumWorker::spawn().expect("pdfium");
+        let doc = worker.open(path).expect("open");
+        let lo = lopdf::Document::load(path).expect("lopdf");
+        let mut model = LayoutModel::load(&model_path, 2).expect("model");
+        for page in 0..23 {
+            let bound = syncpdf_pdf::bind::bind_page(&worker, doc, &lo, page + 1).expect("bind");
+            let info = worker.page_info(doc, page).expect("info");
+            let regions = detect_regions(
+                &mut model,
+                &worker,
+                doc,
+                page,
+                &info,
+                &LayoutOpts::default(),
+            )
+            .expect("detect");
+            let boxes: Vec<_> = regions.iter().map(|r| r.bbox).collect();
+            let glyphs: Vec<_> = bound
+                .ir
+                .glyphs()
+                .filter(|g| !g.flags.invisible && !g.flags.outside_clip && !is_white_glyph(g))
+                .collect();
+            let missed: Vec<_> = glyphs
+                .iter()
+                .filter(|g| !boxes.iter().any(|b| b.contains(g.bbox.center())))
+                .collect();
+            eprintln!(
+                "PAGE {} glyphs={} missed={} ratio={:.4} regions={}",
+                page + 1,
+                glyphs.len(),
+                missed.len(),
+                missed.len() as f32 / glyphs.len() as f32,
+                regions.len()
+            );
+            if page == 6 || page == 14 {
+                for (i, r) in regions.iter().enumerate() {
+                    eprintln!(
+                        "R {i} {:?} {:?} order={} {:.1},{:.1},{:.1},{:.1}",
+                        r.kind, r.score, r.order, r.bbox.x0, r.bbox.y0, r.bbox.x1, r.bbox.y1
+                    );
+                }
+                for g in missed {
+                    eprintln!(
+                        "G {:?} {:.1},{:.1},{:.1},{:.1}",
+                        g.unicode.iter().collect::<String>(),
+                        g.bbox.x0,
+                        g.bbox.y0,
+                        g.bbox.x1,
+                        g.bbox.y1
+                    );
+                }
+                if page == 6 {
+                    let mut rows: std::collections::BTreeMap<i32, (usize, Rect, String)> =
+                        std::collections::BTreeMap::new();
+                    for g in &glyphs {
+                        if g.bbox.center().y < 100.0 && g.bbox.center().y > 60.0 {
+                            let key = (g.bbox.center().y * 10.0).round() as i32;
+                            let entry = rows.entry(key).or_insert((0, g.bbox, String::new()));
+                            entry.0 += 1;
+                            entry.1 = entry.1.union(&g.bbox);
+                            entry.2.extend(&g.unicode);
+                        }
+                    }
+                    for (key, (n, b, s)) in rows {
+                        eprintln!("ROW {key} n={n} {:?} {s}", b);
+                    }
+                }
+            }
+            let mut repaired = regions.clone();
+            let report = apply_coverage_fallback(&mut repaired, &bound.ir, page, 0.005);
+            eprintln!(
+                "AFTER {} missed={} ratio={:.4}",
+                page + 1,
+                report.uncovered,
+                report.ratio
+            );
+            for (old, new) in regions.iter().zip(&repaired) {
+                if old.bbox != new.bbox {
+                    eprintln!("EXPAND {} {:?} -> {:?}", old.index, old.bbox, new.bbox);
+                }
+            }
+            if page == 6 {
+                assert_eq!(report.uncovered, 0);
+                assert_eq!(repaired.len(), regions.len() + 1);
+                let line = repaired.last().unwrap();
+                assert_eq!(line.kind, RegionKind::Text);
+                assert!(line.bbox.x0 < 109.0 && line.bbox.x1 > 503.0);
+                assert!(line.bbox.y0 > 69.0 && line.bbox.y1 < 80.0);
+                assert_eq!(repaired[9].kind, RegionKind::Text);
+                assert!(repaired[9].bbox.y0 > line.bbox.y1);
+            } else if page == 14 {
+                assert_eq!(report.uncovered, 30, "右侧说明标题仍缺可证明的独立类别");
+                assert_eq!(repaired, regions, "不能并入左侧 Code 框");
+            } else {
+                assert_eq!(repaired, regions, "page {} 不应变更", page + 1);
+            }
+        }
+        worker.close(doc);
+    }
 
     fn mk_glyph(
         ordinal: u16,
@@ -232,7 +476,7 @@ mod tests {
     }
 
     #[test]
-    fn fallback_added_when_uncovered_ratio_exceeds_limit() {
+    fn distant_uncovered_text_remains_reported() {
         // 两个字形都在区域外 → 比例 1.0 > 0.005。
         let ir = page_ir(vec![
             mk_glyph(0, "A", 10.0, 700.0, 8.0, 10.0, GlyphFlags::default()),
@@ -243,18 +487,7 @@ mod tests {
         assert_eq!(report.total_glyphs, 2);
         assert_eq!(report.uncovered, 2);
         assert!((report.ratio - 1.0).abs() < 1e-6);
-        assert_eq!(regions.len(), 2);
-        let fb = regions.last().unwrap();
-        assert_eq!(fb.kind, RegionKind::Text);
-        assert_eq!(fb.order, u32::MAX);
-        assert_eq!(fb.index, 1, "index 续编");
-        // 兜底框覆盖两个未覆盖字形。
-        assert!(fb
-            .bbox
-            .contains(Rect::new(10.0, 700.0, 18.0, 710.0).center()));
-        assert!(fb
-            .bbox
-            .contains(Rect::new(20.0, 700.0, 28.0, 710.0).center()));
+        assert_eq!(regions.len(), 1, "真正遗漏不能用大框掩盖");
     }
 
     #[test]
@@ -335,7 +568,7 @@ mod tests {
             "{}",
             report.ratio
         );
-        assert_eq!(regions.len(), 2);
+        assert_eq!(regions.len(), 1);
     }
 
     #[test]
@@ -375,7 +608,7 @@ mod tests {
     }
 
     #[test]
-    fn fallback_index_continues_after_existing_max() {
+    fn unresolved_glyph_does_not_create_region() {
         let ir = page_ir(vec![mk_glyph(
             0,
             "A",
@@ -390,7 +623,164 @@ mod tests {
             region(5, Rect::new(20.0, 20.0, 30.0, 30.0)),
         ];
         apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
-        assert_eq!(regions.last().unwrap().index, 6);
+        assert_eq!(regions.len(), 2);
+        assert_eq!(regions.last().unwrap().index, 5);
+    }
+
+    #[test]
+    fn adjacent_caption_without_same_line_source_stays_uncovered() {
+        let glyphs = (0..10)
+            .map(|i| {
+                mk_glyph(
+                    i,
+                    "a",
+                    240.0 + i as f32 * 8.0,
+                    68.0,
+                    7.0,
+                    10.0,
+                    GlyphFlags::default(),
+                )
+            })
+            .collect();
+        let ir = page_ir(glyphs);
+        let mut left = region(0, Rect::new(100.0, 60.0, 230.0, 230.0));
+        left.kind = RegionKind::Text;
+        let mut caption = region(1, Rect::new(235.0, 82.0, 330.0, 160.0));
+        caption.kind = RegionKind::Caption;
+        let mut regions = vec![left.clone(), caption.clone()];
+        let report = apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
+        assert_eq!(report.uncovered, 10);
+        assert_eq!(regions[0].bbox, left.bbox);
+        assert_eq!(regions[1].kind, RegionKind::Caption);
+        assert_eq!(regions[1].bbox, caption.bbox);
+        assert_eq!(regions.len(), 2);
+    }
+
+    fn continuation_fixture(extra_row: bool) -> PageIR {
+        let mut glyphs = Vec::new();
+        for i in 0..4 {
+            glyphs.push(mk_glyph(
+                i,
+                "a",
+                100.0 + i as f32 * 8.0,
+                70.0,
+                7.0,
+                10.0,
+                GlyphFlags::default(),
+            ));
+            glyphs.push(mk_glyph(
+                i + 4,
+                "b",
+                100.0 + i as f32 * 8.0,
+                82.0,
+                7.0,
+                10.0,
+                GlyphFlags::default(),
+            ));
+        }
+        for i in 0..6 {
+            glyphs.push(mk_glyph(
+                i + 8,
+                "c",
+                132.0 + i as f32 * 8.0,
+                70.0,
+                7.0,
+                10.0,
+                GlyphFlags::default(),
+            ));
+            if extra_row {
+                glyphs.push(mk_glyph(
+                    i + 14,
+                    "d",
+                    132.0 + i as f32 * 8.0,
+                    58.0,
+                    7.0,
+                    10.0,
+                    GlyphFlags::default(),
+                ));
+            }
+        }
+        page_ir(glyphs)
+    }
+
+    #[test]
+    fn same_physical_text_line_is_split_without_enlarging_column() {
+        let ir = continuation_fixture(false);
+        let mut regions = vec![region(0, Rect::new(95.0, 68.0, 132.0, 130.0))];
+        let report = apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
+        assert_eq!(report.uncovered, 0);
+        assert_eq!(regions.len(), 2);
+        assert_eq!(regions[0].bbox.x1, 132.0, "旧列不能横扩过空白");
+        assert!(regions[0].bbox.y0 > regions[1].bbox.y1);
+        assert_eq!(regions[1].bbox, Rect::new(100.0, 70.0, 179.0, 80.0));
+        assert_eq!(regions[1].kind, RegionKind::Text);
+    }
+
+    #[test]
+    fn second_unowned_row_cannot_cascade_from_split_line() {
+        let ir = continuation_fixture(true);
+        let mut regions = vec![region(0, Rect::new(95.0, 68.0, 132.0, 130.0))];
+        let report = apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
+        assert_eq!(report.uncovered, 6);
+        assert_eq!(regions.len(), 2);
+    }
+
+    #[test]
+    fn row_with_two_source_regions_is_ambiguous() {
+        let ir = continuation_fixture(false);
+        let mut regions = vec![
+            region(0, Rect::new(95.0, 68.0, 115.0, 130.0)),
+            region(1, Rect::new(115.0, 68.0, 132.0, 130.0)),
+        ];
+        let before = regions.clone();
+        let report = apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
+        assert_eq!(report.uncovered, 6);
+        assert_eq!(regions, before);
+    }
+
+    #[test]
+    fn column_and_figure_gaps_are_not_absorbed() {
+        let glyphs = (0..8)
+            .map(|i| {
+                mk_glyph(
+                    i,
+                    "a",
+                    260.0 + i as f32 * 8.0,
+                    68.0,
+                    7.0,
+                    10.0,
+                    GlyphFlags::default(),
+                )
+            })
+            .collect();
+        let ir = page_ir(glyphs);
+        let left = region(0, Rect::new(100.0, 60.0, 230.0, 230.0));
+        let mut figure = region(1, Rect::new(250.0, 82.0, 340.0, 160.0));
+        figure.kind = RegionKind::Figure;
+        let mut regions = vec![left.clone(), figure.clone()];
+        let report = apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
+        assert_eq!(report.uncovered, 8);
+        assert_eq!(regions[0].bbox, left.bbox);
+        assert_eq!(regions[1].bbox, figure.bbox);
+    }
+
+    #[test]
+    fn expansion_rejects_duplicate_assignment_to_neighbor() {
+        let glyphs = vec![
+            mk_glyph(0, "a", 230.0, 68.0, 7.0, 10.0, GlyphFlags::default()),
+            mk_glyph(1, "b", 238.0, 68.0, 7.0, 10.0, GlyphFlags::default()),
+            mk_glyph(2, "c", 246.0, 68.0, 7.0, 10.0, GlyphFlags::default()),
+            mk_glyph(3, "d", 254.0, 68.0, 7.0, 10.0, GlyphFlags::default()),
+            mk_glyph(4, "e", 250.0, 75.0, 7.0, 10.0, GlyphFlags::default()),
+        ];
+        let ir = page_ir(glyphs);
+        let mut regions = vec![
+            region(0, Rect::new(248.0, 78.0, 260.0, 90.0)),
+            region(1, Rect::new(228.0, 82.0, 265.0, 160.0)),
+        ];
+        let before = regions.clone();
+        apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
+        assert_eq!(regions[1].bbox, before[1].bbox);
     }
 
     #[test]
