@@ -53,6 +53,7 @@ from babeldoc_tools import registry
 from babeldoc_tools import report
 from babeldoc_tools import review
 from babeldoc_tools import run as run_tool
+from babeldoc_tools import rust_backend
 from babeldoc_tools import translate
 from babeldoc_tools.serve import cli as serve_cli
 
@@ -443,6 +444,17 @@ def _build_parser() -> argparse.ArgumentParser:
     p_model.add_argument("--model-profile", required=True)
     p_run.add_argument("--skip-ai-review", action="store_true", help="Skip optional AI review; keep local checks")
 
+    p_rust = sub.add_parser("rust-translate", help="用 Rust 后端和 pi 翻译 PDF")
+    p_rust.add_argument("pdf", help="源 PDF 路径")
+    p_rust.add_argument("--workdir", required=True, help="本次运行的全新产物目录")
+    p_rust.add_argument("--pages", help="页子集，如 1-3 或 1,3,5")
+    p_rust.add_argument("--model", default="deepseek/deepseek-flash")
+    p_rust.add_argument("--thinking", default="low")
+    p_rust.add_argument("--source-lang", default="auto")
+    p_rust.add_argument("--target-lang", default="zh-CN")
+    p_rust.add_argument("--layout-device", choices=("auto", "cpu", "coreml"), default="auto")
+    p_rust.add_argument("--engine", help="syncpdf-cli 可执行文件；默认本仓库 release 构建")
+
     # ---- serve ----------------------------------------------------------- #
     # Web 前端入口；只 import 标准库 + store/schemas，缺 web extra 也能 --help。
     serve_cli.add_parser(sub)
@@ -502,6 +514,18 @@ def _invoke_with_debug(args, *, config: dict, input_pdf=None, call) -> dict:
 
 def _dispatch(args: argparse.Namespace) -> dict:
     command = args.command
+    if command == "rust-translate":
+        return rust_backend.translate_pdf(
+            pdf=args.pdf,
+            workdir=args.workdir,
+            pages=args.pages,
+            model=args.model,
+            thinking=args.thinking,
+            source_lang=args.source_lang,
+            target_lang=args.target_lang,
+            layout_device=args.layout_device,
+            engine=args.engine,
+        )
     if command == "parse":
         return _invoke_with_debug(
             args,

@@ -61,6 +61,19 @@ bdt check --workdir tmp/paper --strict
 
 已有 `run_state.json` 的任务可以用 `bdt run --workdir <目录> --from <阶段>` 续跑。它会核验被跳过阶段的输入哈希；发生失效时按错误提示回到应重跑的阶段。不要假定手改任何文件后都能从 `build` 继续，详见 [恢复语义](../reference/pipeline.md)。
 
+## Rust 后端试用入口
+
+`bdt rust-translate` 使用现有 `syncpdf-cli translate --translator pi` 翻译一份 PDF。先自行构建 `engine/target/release/syncpdf-cli`，或用 `--engine` 指向已有可执行文件；本命令不会构建引擎、安装模型或修改 pi 提供方配置。pi 及所选模型需要在运行环境中预先可用。
+
+```bash
+# 在本仓库根目录运行；每次使用新的 workdir
+~/miniconda3/envs/bdt/bin/python -m babeldoc_tools rust-translate paper.pdf \
+  --workdir tmp/rust-paper-001 --pages 1-3 \
+  --model deepseek/deepseek-flash --thinking low --layout-device coreml
+```
+
+省略 `--pages` 会处理全文；`--source-lang` 默认 `auto`，`--target-lang` 默认 `zh-CN`，`--layout-device` 可选 `auto`、`cpu`、`coreml`。命令将 Rust 事件逐条保存到 `<workdir>/events.jsonl`，引擎日志保存到 `stderr.log`，运行结果保存到 `result.json`；译文可用时还会有 `translated.pdf`。stdout 仍只有一行 JSON，简短阶段和页面进度走 stderr。`result.json` 记录已排版成功块、未成功块、未替换块及产物路径。`run_finished.ok=false`、引擎非零退出、缺最终事件或缺 PDF 均返回失败，即使已有部分译文 PDF。已有运行日志/产物时拒绝复用目录；请指定新 workdir。输入 PDF 不能是该目录的 `translated.pdf`。
+
 ## Web 工作台
 
 ```bash
