@@ -18,7 +18,7 @@ pub use coverage::{coverage, CoverageReport};
 pub use detect::{px_to_user_space, to_pdf_space, DetectError, DetectOpts, Detection, RawImage};
 pub use order::xy_cut_order;
 pub use paragraph::group_lines;
-pub use session::{LayoutModel, SessionError, INPUT_SIZE};
+pub use session::{LayoutDevice, LayoutModel, LayoutOptions, SessionError, INPUT_SIZE};
 
 /// 本 crate 统一错误。
 #[derive(Debug, thiserror::Error)]
