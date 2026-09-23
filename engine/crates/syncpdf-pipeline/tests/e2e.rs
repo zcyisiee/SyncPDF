@@ -210,9 +210,9 @@ async fn ci_test_full_run_succeeds() {
     assert_eq!(summary.paragraphs, 0, "ci-test 无可译段落");
 }
 
-/// up-vns 前三页：3 次 `page_ready`（revision 递增）+ 译文页含 CJK。
+/// up-vns 前三页：固定字号能容纳的块写入译文；全页回退时原文字形保持。
 #[tokio::test]
-async fn up_vns_first_three_pages_succeed() {
+async fn up_vns_first_three_pages_preserve_unfit_blocks() {
     if env_ready().is_none() {
         return;
     }
@@ -220,7 +220,7 @@ async fn up_vns_first_three_pages_succeed() {
     let out = tmp_path("upvns", "pdf");
     let log: Arc<Mutex<Vec<(u64, Event)>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = SharedSink::new(Recorder::new(log.clone()));
-    let mut cfg = RunConfig::with_fake("cjk", input, out.clone()).unwrap();
+    let mut cfg = RunConfig::with_fake("cjk", input.clone(), out.clone()).unwrap();
     select_pages(&mut cfg, vec![0, 1, 2]);
     let summary = pipeline("upvns")
         .run(&cfg, sink, CancellationToken::new())
@@ -242,13 +242,43 @@ async fn up_vns_first_three_pages_succeed() {
         "revision 从 1 起严格递增"
     );
 
-    // 译文页应能提取到 CJK。
+    let typeset_pages: std::collections::BTreeSet<u32> = events
+        .iter()
+        .filter_map(|(_, e)| match e {
+            Event::Paragraph {
+                page,
+                status: syncpdf_core::ir::ParagraphStatus::Typeset,
+                ..
+            } => Some(*page),
+            _ => None,
+        })
+        .collect();
+    assert!(!typeset_pages.is_empty(), "至少一页实际写入可容纳的译文");
+    assert!(
+        !typeset_pages.contains(&2),
+        "本夹具第2页的fake译文固定字号放不下"
+    );
+    assert!(events.iter().any(|(_, e)| matches!(e,
+        Event::Issue { code, page: Some(2), paragraph_id: Some(_), message, .. }
+        if code == "typeset_overflow" && message.contains("字号"))));
+    // 仅实际写入的页要求CJK；完全未替换页应与源文逐字形相同。
     let worker = syncpdf_pdf::pdfium::PdfiumWorker::spawn().expect("pdfium");
     let doc = worker.open(&out).expect("打开输出");
+    let source = worker.open(&input).expect("打开源文");
     for page in 0..3u32 {
         let text = page_text(&worker, doc, page);
-        assert!(has_cjk(&text), "第 {} 页应含 CJK 译文：{text:?}", page + 1);
+        if typeset_pages.contains(&(page + 1)) {
+            assert!(has_cjk(&text), "第 {} 页应含 CJK 译文：{text:?}", page + 1);
+        } else {
+            assert_eq!(text, page_text(&worker, source, page), "未替换页保留原文");
+            assert_eq!(
+                worker.page_text_objects(doc, page).unwrap(),
+                worker.page_text_objects(source, page).unwrap(),
+                "未替换页保持源字形与位置"
+            );
+        }
     }
+    worker.close(source);
     worker.close(doc);
 }
 
