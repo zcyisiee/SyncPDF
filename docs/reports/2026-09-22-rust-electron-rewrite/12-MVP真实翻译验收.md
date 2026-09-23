@@ -180,3 +180,41 @@ v1复排为192/1（上述侧承问题），v2恢复193/0但末行仍仅“攻击
 排版+pipeline单元/集成234通过、0失败、5 ignored；最后加入末行余量评分后typeset重新65通过。严格Clippy、fmt、release、diff-check通过；未重跑未改动Python/UI测试。严格文档构建仍仅有既存HTTP参考锚点警告。
 
 证据：`caption-break-v3/{audit.json,caption-comparison.json,captions.png,page-20.png,result.json,events.jsonl,qpdf.log}`；脚本 `caption-break-audit/compare.py` 与 `inline-audit.py`；日志 `caption-break-{final-tests,balanced-tests2,final-clippy,build3}.log`，均位于仓库tmp/backend-repair。经验见[断行代价](../../lessons/pdf-binding-and-render-evidence.md#mixed-script-break-cost)。
+
+
+<a id="heading-adaptive-layout"></a>
+
+## 标题语义合段与自适应行宽（2026-09-23）
+
+用户要求提交上一轮更新，并解决短标题被迫换行。前轮断行代码/文档已提交6245d0f5和8dbb6836；本轮最新样张为 `tmp/backend-repair/title-adapt-v2/translated.pdf`。
+
+### 原因与实现
+
+首页源标题在同一个Title区域内，却因短续行“Merging”左缘右移约206pt而触发正文首行缩进规则，被拆成两个翻译单元。第一块已有479.8pt宽，扩大bbox无法将两个独立译文合回完整标题。附录A和A.2也因编号后悬挂缩进拆段，分别留下孤立的“Succeeds”和“adapted to merging”。
+
+同标题区先核对字号和行距；共用中心轴的居中续行，或与编号后正文起点对齐且没有新编号的悬挂续行，合为完整语义单元。居中标题根据行中心识别对齐并取消错误首行缩进。源bbox、字形身份及删除依据保持独立；目标Frame在有下方Text/Abstract证据时取页/栏宽度。主标题可使用页正文整体宽度，章节标题只使用左缘匹配的邻近正文栏；同排文字/图片和垂直/实际墨迹碰撞继续限制空间，无证据时使用原规则。没有自动缩字号或放松碰撞容差。
+
+| 标题 | 原翻译单元 | 新翻译单元 / 实际行数 | 目标宽度 |
+|---|---|---|---|
+| 首页完整标题 | 2块 | 1块 / 1行 | 510.8pt |
+| 附录A | 2块 | 1块 / 2行 | 242.2pt |
+| 附录A.2 | 2块 | 1块 / 1行 | 234.1pt |
+
+附录A真实译文较长，两个输出行的墨迹宽度之和约258pt，超过242.2pt栏宽，因此正常重排为两行。最初审计脚本将三处都断言为一行，实测失败后纠正了该错误验收预期，没有修改译文或缩字强行通过。三处初始基线及请求字号不变；短译文、长译文和增大字号的单元测试同时保留。
+
+### 实跑与保存后验收
+
+v1先修首页：21页192/0、179缓存+13真实补译，1主请求/0补救、60.823秒，保护/公式/链接/qpdf通过。随后逐标题审查发现附录两处误切；v2再次真实补译，最终21页190/0、176缓存+14真实补译，1主请求/0补救、56.255秒。两次均只读备份上次真实缓存，未修改缓存行或ID；新源单元未命中时实际请求模型。来源分别保存于运行目录的`cache-provenance.json`。
+
+- 190块全部写入，0回退、0送译前冲突、0覆盖缺口，576策略保留实体；RunFinished=true、bdt exit0。
+- 与前轮193块相比，3对标题各合成1块；66,916个参与翻译的源字形身份/数量完全相同且各归属一次，减少块数不代表漏译。
+- 重新翻译涉及第1/14/15页；其余18页156块target HTML和保存PDF非空白字符多重集均与前轮一致。
+- 94处源公式、53,384参考墨迹像素缺失0；36,327保护字符位置/字号/颜色变化0；第3页图片像素相同。
+- 319链接目标/标签、28书签、180命名目标保留；314点击框移动且标签正确。qpdf通过，无KEEP残留。匿名样本的作者保护仍由已有前置信息行为测试覆盖。
+- 主控目视首页及附录A/A.2截图；保留源段落锚定仍可能形成留白，不宣称整页重新流式排版或任意文档认证。
+
+最终PDF SHA-256：`eca2839a19847df8585a2e4b115820f76cc22382ffc79bbb10747c05da33ca98`。
+
+pipeline单元/集成167通过、0失败、4 ignored；最后加强新编号不误合断言后专项1通过。另运行真实缓存inventory审计1项通过。严格Clippy、fmt、release、diff-check通过；未重跑未修改的Python/UI。严格文档构建仍有既存HTTP参考中文锚点警告，不计为通过。
+
+证据：`title-adapt-v2/{audit.json,title-comparison.json,title-p*-before.png,title-p*-after.png,result.json,events.jsonl,qpdf.log}`；脚本`title-adapt-audit/compare.py`和`inline-audit.py`；新inventory在`title-adapt-audit-v2/atom-inventory.json`；日志`title-adapt-{tests2,hanging-test,clippy2,build2,inventory2,comparison,audit2,docs}.log`，均位于仓库tmp/backend-repair。经验见[标题语义与容器](../../lessons/pdf-binding-and-render-evidence.md#heading-semantic-container)。

@@ -1,7 +1,7 @@
 # Rust PDF 后端修复 · 唯一 Task state
 
 > 更新：2026-09-23；仅用户和主 Agent 可修改。主树 `feat/desktop-develop`。本轮“应译正文漏译与公式保护”修复及CCS样本验收已完成；完整Rust产品目标仍有后续工作。
-> **最终：21页、193块全部写入，0回退、0送译前冲突、0覆盖缺口。** [验收报告](12-MVP真实翻译验收.md#inline-formula-coverage) · [经验总结](../../lessons/pdf-binding-and-render-evidence.md#inline-formula-ownership) · [缺陷及历史误报](../../issues/rust-inline-formula-coverage.md)。
+> **最新标题适配验收：21页、190块全部写入，0回退、0送译前冲突、0覆盖缺口；原193块中的3对标题各合成1块，源字形覆盖不变。** [标题验收](12-MVP真实翻译验收.md#heading-adaptive-layout) · [验收报告](12-MVP真实翻译验收.md#inline-formula-coverage) · [经验总结](../../lessons/pdf-binding-and-render-evidence.md#inline-formula-ownership) · [缺陷及历史误报](../../issues/rust-inline-formula-coverage.md)。
 
 ## 用户意图与边界
 
@@ -44,9 +44,19 @@
 
 234相关Rust单元/集成通过/5ignored；末行评分最后一处更改后typeset重跑65通过；Clippy/fmt/release/diff-check通过。文档仍有既存HTTP锚点警告。v1的192/1及v2收尾仍短的中间证据保留，不冒充最终结果。详细[验收](12-MVP真实翻译验收.md#caption-line-breaks)和[经验](../../lessons/pdf-binding-and-render-evidence.md#mixed-script-break-cost)已同步。修复代码提交 `6245d0f5`，文档另批提交，未push。恢复复排优先使用最新样张目录；inline-full-v5缓存文本未改变，仍可复用。
 
+## 标题语义与自适应宽度（2026-09-23，已完成）
+
+用户要求commit前轮更新并继续解决短标题被迫换行。前轮6245d0f5/8dbb6836已提交。首页两个标题块同属Title区域，居中短续行Merging因左缘缩进误切；附录A/A.2又因编号后的悬挂缩进误切。已按同区、相近字号/行距及中心轴或编号后正文对齐证据合段，整段真实翻译。目标Frame从下方正文确定页/栏宽度，同排邻块/图片及实际墨迹继续阻挡，缺证据沿用原框；不改源IR、不缩字。
+
+**最新样张：`tmp/backend-repair/title-adapt-v2/translated.pdf`。** 首页完整标题与A.2各一行；附录A完整译文超过栏宽，正常两行。21页190/0、0源冲突/覆盖缺口、176缓存+14真实补译、1主请求/0补救、56.255秒。此前v1仅修首页为192/0、179缓存+13真实补译、60.823秒；不把v1当最终全部标题验收。缓存只读备份，变更ID未篡改命中。
+
+66,916应译源字形身份/数量不变且唯一归属；第1/14/15页以外156译文HTML及保存文本不变。94公式/53,384参考墨迹像素缺失0、36,327保护字符变化0，第3页图片像素相同；319链接/28书签/180命名目标正确，qpdf通过。已目视首页和附录两标题；仍保留源段落锚定空白。
+
+pipeline167通过/0失败/4ignored；最后加强新编号守卫后专项1通过；真实inventory1通过。Clippy/fmt/release/diff-check通过，strict docs仍有既存HTTP锚点警告，未跑未改动Python/UI。首次比较脚本错误要求附录A也一行，实测译文较长后纠正验收预期，没有改译文/缩字求通过。详细[验收](12-MVP真实翻译验收.md#heading-adaptive-layout)及[经验](../../lessons/pdf-binding-and-render-evidence.md#heading-semantic-container)已同步。证据和日志均在tmp/backend-repair/title-adapt-*，缓存复排请使用v2。代码提交98782120，文档另批提交；未push。
+
 ## 状态与下一步
 
-本次漏译修复及后续表18/19断行修复、完整编译和保护内容验收已完成。已将经验提炼到上述lessons链接，架构/参考/CLI/issue/验收同步。代码按逻辑提交：`67958e9c`（源公式/正文/子标题）、`898ca829`（闭合坏块有界补译）、`d306583e`（完整覆盖统计）；文档另批提交。运行缓存与产物不提交，未push。
+本次漏译修复、表18/19断行及标题语义/行宽适配、完整编译和保护内容验收已完成。已将经验提炼到上述lessons链接，架构/参考/CLI/issue/验收同步。代码按逻辑提交：`67958e9c`（源公式/正文/子标题）、`898ca829`（闭合坏块有界补译）、`d306583e`（完整覆盖统计）；文档另批提交。运行缓存与产物不提交，未push。
 
 后续产品范围仍待用户安排：A3横向dual、中文目录/书签、逐块字体/字号/译文编辑与原子revision重编译。任意公式布局、任意语言/注释格式、RTL ActualText仍未全面认证。CoreML原生stdout偶发污染风险未在本轮处理。旧23页论文R6后重译未完成，本次CCS结论不能套用旧样本。
 
@@ -59,7 +69,7 @@ source tmp/backend-repair/codex-r1-integration/env.sh
 cargo build --manifest-path engine/Cargo.toml --release -p syncpdf-cli
 ~/miniconda3/envs/bdt/bin/python -m babeldoc_tools rust-translate \
   ccs2026b-paper3764.pdf --workdir tmp/backend-repair/<新目录> \
-  --cached-from tmp/backend-repair/inline-full-v5 \
+  --cached-from tmp/backend-repair/title-adapt-v2 \
   --layout-device coreml --font-scale 0.9 --line-height 1.3
 ```
 
