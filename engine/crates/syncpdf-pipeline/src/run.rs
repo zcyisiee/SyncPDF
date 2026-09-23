@@ -1088,11 +1088,14 @@ fn handle_block(
     Ok(())
 }
 
+mod refinement;
+
 /// 页就绪回写：删除该页成功段落的原字形，然后重放全部就绪页 → 快照 → 事件。
 fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) -> Result<(), PipelineError> {
     if state.ready.contains(&page) {
         return Ok(());
     }
+    refinement::refine_page(state, page, sink);
     let RunState {
         doc,
         bound,

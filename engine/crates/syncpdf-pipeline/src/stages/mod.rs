@@ -10,6 +10,7 @@ pub mod layout_model;
 pub(crate) mod link_text;
 pub mod paragraph;
 pub mod preflight;
+pub(crate) mod refine;
 mod ruled_code;
 pub mod source;
 pub mod source_policy;
