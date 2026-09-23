@@ -241,7 +241,15 @@ pub fn dominant_font_size(para: &Paragraph) -> f32 {
     let mut sizes: Vec<(f32, u32)> = para
         .style_runs
         .iter()
-        .filter(|r| r.size.is_finite() && r.size > 0.0)
+        .filter(|r| {
+            r.size.is_finite()
+                && r.size > 0.0
+                && (r.glyph_range.1 > r.glyph_range.0
+                    || para
+                        .style_runs
+                        .iter()
+                        .all(|r| r.glyph_range.0 == r.glyph_range.1))
+        })
         .map(|r| {
             (
                 r.size,

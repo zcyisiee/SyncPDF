@@ -7,6 +7,7 @@
 pub mod frame;
 pub mod layout;
 pub mod layout_model;
+pub(crate) mod link_text;
 pub mod paragraph;
 pub mod preflight;
 mod ruled_code;
