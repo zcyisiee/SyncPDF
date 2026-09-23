@@ -114,6 +114,7 @@ pub fn apply_coverage_fallback(
     _page: u32,
     limit: f32,
 ) -> syncpdf_layout::CoverageReport {
+    super::ruled_code::refine_ruled_code_sidebars(regions, page_ir);
     let glyph_boxes: Vec<(Rect, bool)> = page_ir
         .glyphs()
         .filter(|g| !g.flags.invisible && !g.flags.outside_clip)
@@ -411,8 +412,34 @@ mod tests {
                 assert_eq!(repaired[9].kind, RegionKind::Text);
                 assert!(repaired[9].bbox.y0 > line.bbox.y1);
             } else if page == 14 {
-                assert_eq!(report.uncovered, 30, "右侧说明标题仍缺可证明的独立类别");
-                assert_eq!(repaired, regions, "不能并入左侧 Code 框");
+                assert_eq!(report.uncovered, 0);
+                let code = repaired
+                    .iter()
+                    .find(|r| r.kind == RegionKind::Code)
+                    .unwrap();
+                let sidebar = repaired.last().unwrap();
+                assert_eq!(sidebar.kind, RegionKind::Text);
+                assert!(code.bbox.x1 > 340.0 && code.bbox.x1 < 344.0);
+                assert!(sidebar.bbox.x0 > code.bbox.x1 && sidebar.bbox.y1 > 551.0);
+                assert!(sidebar.bbox.y0 > 290.0 && sidebar.bbox.y0 < 300.0);
+                let paragraphs = super::super::paragraph::analyze_page(&bound.ir, &repaired);
+                let protected: std::collections::BTreeSet<_> = bound
+                    .ir
+                    .glyphs()
+                    .filter(|g| {
+                        repaired
+                            .iter()
+                            .any(|r| !r.kind.translatable() && r.bbox.contains(g.bbox.center()))
+                    })
+                    .map(|g| g.id)
+                    .collect();
+                assert!(
+                    paragraphs
+                        .iter()
+                        .filter(|p| matches!(p.translatable, syncpdf_core::ir::Translatable::Yes))
+                        .all(|p| p.glyphs.iter().all(|id| !protected.contains(id))),
+                    "算法/公式源字形不可经可译段重复消费"
+                );
             } else {
                 assert_eq!(repaired, regions, "page {} 不应变更", page + 1);
             }

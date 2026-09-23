@@ -437,6 +437,16 @@ impl Pipeline {
             .cloned()
             .partition(|p| matches!(p.translatable, Translatable::Yes));
         for p in &not_replaced {
+            if matches!(&p.translatable, Translatable::No { reason } if reason == "protected_source_overlap")
+            {
+                sink.emit(Event::Issue {
+                    severity: Severity::Warning,
+                    code: "protected_source_overlap".into(),
+                    paragraph_id: Some(p.id.clone()),
+                    page: Some(p.id.page),
+                    message: "段落与公式、图表或其他保留区域重叠，已保留原文".into(),
+                });
+            }
             sink.emit(Event::Paragraph {
                 paragraph_id: p.id.clone(),
                 page: p.id.page,

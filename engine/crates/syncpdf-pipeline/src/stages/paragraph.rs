@@ -35,6 +35,17 @@ pub fn analyze_page(ir: &PageIR, regions: &[Region]) -> Vec<Paragraph> {
     regions.sort_by_key(|r| (r.order, r.index));
 
     let glyphs: Vec<&syncpdf_core::ir::Glyph> = ir.glyphs().collect();
+    // 保留区域的源字形不能经重叠正文再次进入替换集合。
+    // 可靠的行内原子放置尚未接通时，保留整个相交段并显式报告。
+    let protected: std::collections::BTreeSet<GlyphId> = glyphs
+        .iter()
+        .filter(|g| {
+            regions
+                .iter()
+                .any(|r| !r.kind.translatable() && r.bbox.contains(g.bbox.center()))
+        })
+        .map(|g| g.id)
+        .collect();
     let mut out: Vec<Paragraph> = Vec::new();
     let mut seq: u32 = 0;
 
@@ -57,7 +68,15 @@ pub fn analyze_page(ir: &PageIR, regions: &[Region]) -> Vec<Paragraph> {
         let lines = group_lines(&in_region, &region.bbox);
         for group in merge_lines(&lines, &glyphs) {
             seq += 1;
-            out.push(build_paragraph(ir, region, group, &glyphs, seq));
+            let mut paragraph = build_paragraph(ir, region, group, &glyphs, seq);
+            if matches!(paragraph.translatable, Translatable::Yes)
+                && paragraph.glyphs.iter().any(|id| protected.contains(id))
+            {
+                paragraph.translatable = Translatable::No {
+                    reason: "protected_source_overlap".into(),
+                };
+            }
+            out.push(paragraph);
         }
     }
     out

@@ -86,6 +86,45 @@ fn text_region(index: u32, bbox: Rect, order: u32) -> Region {
 }
 
 #[test]
+fn preserved_region_glyphs_cannot_enter_a_translatable_paragraph() {
+    let mut glyphs = line(0, "First formula", 50.0, 700.0, 10.0, 0);
+    glyphs.extend(line(20, "Separate prose", 50.0, 600.0, 10.0, 0));
+    let ir = page_ir(glyphs, vec![mk_font("F1", false, false)]);
+    for kind in [
+        RegionKind::Formula,
+        RegionKind::Figure,
+        RegionKind::Table,
+        RegionKind::Code,
+        RegionKind::Reference,
+    ] {
+        let mut regions = full_region(RegionKind::Text);
+        let mut protected = text_region(1, Rect::new(80.0, 699.0, 129.0, 711.0), 1);
+        protected.kind = kind;
+        regions.push(protected.clone());
+        let paragraphs = analyze_page(&ir, &regions);
+        assert!(paragraphs.iter().any(|p| matches!(&p.translatable,
+            Translatable::No { reason } if reason == "protected_source_overlap")));
+        assert!(paragraphs
+            .iter()
+            .any(|p| p.text == "Separate prose" && matches!(p.translatable, Translatable::Yes)));
+        let protected_ids: Vec<_> = ir
+            .glyphs()
+            .filter(|g| protected.bbox.contains(g.bbox.center()))
+            .map(|g| g.id)
+            .collect();
+        for p in paragraphs
+            .iter()
+            .filter(|p| matches!(p.translatable, Translatable::Yes))
+        {
+            assert!(
+                p.glyphs.iter().all(|id| !protected_ids.contains(id)),
+                "{kind:?}: 保留字形不能被可译段消费"
+            );
+        }
+    }
+}
+
+#[test]
 fn two_lines_merge_into_one_paragraph() {
     // 行距 14pt、字号 10pt（14 < 1.8×10）→ 同段。
     let mut g = line(0, "Hello", 50.0, 700.0, 10.0, 0);

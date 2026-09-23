@@ -18,6 +18,8 @@ PDFium 去重后缺少字符的对象，仅在严格匹配的单 code `Tj`、自
 
 ## 译文字形与字体嵌入
 
+布局后处理仅凭可核实的物理行或源框线修正分区：同栏正文末行的漏出续文归入独立 Text 行；算法标题、三条源横线及贯通栏缝共同支持时，拆开 Code 与右侧说明。证据不足时保持原分区并报告 coverage gap，不以扩大不可译区域消除统计缺口。可译段与 Formula、Code、Table 等保留区域共享字形时，暂时保留整个段并发 `protected_source_overlap` 提示；这是源绘制保护，完整行内原子排版仍未实现。
+
 Writer 为每个字体按原 GID 首次出现顺序分配 CID，内容流使用 CID。finalize 在同一次子集化后把 CID→原 GID 转成显式 CID→子集 GID；Encoding、宽度表与 ToUnicode 均以内容 CID 索引。字号只写入 `Tf`，`Tm` 保留无量纲横向缩放，避免字号平方。字体 Type0 字典搬入预留资源槽后，删除其临时尾对象时同步回收该最高对象号，保证表式 xref 的 Size 一致。
 
 ActualText/ToUnicode 的文本检查不能证明实际字形正确；内置 Noto CJK CFF 与 PT Sans TTF 已用原字体独立渲染对照。此项不认证任意字体或完整排版质量。

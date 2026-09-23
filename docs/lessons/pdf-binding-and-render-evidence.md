@@ -30,3 +30,5 @@ R1 累积review构造 `ABC → XBC` 的同ID流修改，旧补丁仍成功删掉
 后续定位到字体资源从HashMap随机分配编号，而基线和容纳判断固定读取`metrics(0)`，与实际选中字形字体无关。改为稳定加载顺序并使用段内实际字体度量后，两次独立选页与全篇运行的p1/p3原始144dpi像素一致。守卫分别位于`syncpdf-font/tests/stable_font_ids.rs`和`syncpdf-typeset/tests/font_metrics.rs`；真实证据在主树`tmp/backend-repair/font-stability/real-cross-run.json`。
 
 容纳策略变化还会改变合法的端到端预期。固定字号后，旧fake长译文不能再靠缩字号或溢出写入满足“每页出现中文”。对应测试应同时证明可容纳块真正写入、不能容纳块明确提示且源字形/位置不变，不能只删掉中文断言或把全回退当作翻译质量通过。
+
+coverage 数字归零不能证明分区正确。本次首次候选把 p7 正文续行并入 Caption、p15 算法右侧说明并入 Code，主控查看源页后拒绝。最终只接受完整物理行或源框线/标题/贯通栏缝共同支持的窄修，并核对其余 21 页分区不变。新 Text 与已有 Formula 重叠还会重复消费源字形，必须在翻译/删除前保护；不能仅检查覆盖率。

@@ -7,6 +7,7 @@
 pub mod layout;
 pub mod paragraph;
 pub mod preflight;
+mod ruled_code;
 pub mod source;
 pub mod translate;
 pub mod typeset;
