@@ -329,7 +329,14 @@ fn manual_source_paragraph_page_one_probe() {
         crate::stages::detect_regions(&mut model, &worker, pf.doc, 0, &pf.page_infos[0], &opts)
             .expect("layout page one");
     crate::stages::apply_coverage_fallback(&mut regions, &bound.ir, 0, opts.coverage_limit);
-    let paras = analyze_page(&bound.ir, &regions);
+    let mut paras = analyze_page(&bound.ir, &regions);
+    let protected =
+        crate::stages::source_policy::protect_front_matter(&bound.ir, &regions, &mut paras);
+    assert_eq!(protected.len(), 4, "指定论文姓名/机构/邮箱四段须保留");
+    assert!(paras
+        .iter()
+        .any(|p| p.text.starts_with("Training neural networks")
+            && matches!(p.translatable, Translatable::Yes)));
     let glyph_text: std::collections::HashMap<_, _> = bound
         .ir
         .glyphs()

@@ -5,8 +5,8 @@
 //!
 //! 流程（one-shot + 流式）：
 //! 1. 缓存命中的单元直接 `on_block` 交付，**不进提示词**；
-//! 2. 其余单元走 `build_document_prompts`（能一片就一片，超限按页切）；
-//! 3. 逐片 `translate`，delta 喂 `BlockStream`；每个块一**闭合**就在 delta
+//! 2. 其余单元走 `build_document_prompts`（一个主请求，显式容量超限报错）；
+//! 3. 逐片 `translate`，delta 喂 `MarkdownStream`；每个块一**闭合**就在 delta
 //!    回调里 `validate`，通过即 `on_block`（上游据此边译边排版，不等响应
 //!    结束）；Ok 块的缓存写按块记录、片末统一落库——`Cache`（rusqlite
 //!    `Connection`）不是 `Sync`，进不了必须 `Send` 的 delta 回调；
@@ -21,8 +21,9 @@ use async_trait::async_trait;
 use syncpdf_core::ParagraphId;
 
 use crate::cache::Cache;
+use crate::markdown::MarkdownStream;
 use crate::prompt::{build_document_prompts, DocumentPrompt, PromptSpec};
-use crate::stream::{BlockStream, RawBlock};
+use crate::stream::RawBlock;
 use crate::unit::Unit;
 use crate::validate::{validate, ValidateCtx, Violation, DEFAULT_EXPANSION_LIMIT};
 
@@ -32,6 +33,10 @@ pub enum TranslateError {
     /// 外部 CLI / HTTP 通道失败（退出码非 0、启动失败、回包不可解析）。
     #[error("translation harness failed: {0}")]
     HarnessFailed(String),
+    #[error(transparent)]
+    Prompt(#[from] crate::prompt::PromptError),
+    #[error("invalid Markdown transport: {0}")]
+    Transport(String),
     /// 通道未就绪（可执行文件不存在、未登录）。
     #[error("translation harness unavailable: {0}")]
     Unavailable(String),
@@ -126,6 +131,10 @@ pub struct Stats {
     pub cache_hits: usize,
     /// 实际发出的提示词片数（含重试片）。
     pub prompts: usize,
+    /// 主请求数（0或1）；不含补救重试。
+    pub primary_prompts: usize,
+    /// 显式计数的补救重试请求。
+    pub retry_prompts: usize,
     /// 实际执行的拆分重试轮数。
     pub retry_rounds: u32,
     /// 违规码 → 次数（含重试中被修好的）。
@@ -224,6 +233,11 @@ impl<T: Translator> Engine<T> {
             ..Stats::default()
         };
         let known: HashSet<ParagraphId> = units.iter().map(|u| u.id.clone()).collect();
+        if known.len() != units.len() {
+            return Err(TranslateError::Transport(
+                "duplicate input block IDs".into(),
+            ));
+        }
         let by_id: HashMap<ParagraphId, &Unit> = units.iter().map(|u| (u.id.clone(), u)).collect();
         let mut done: HashMap<ParagraphId, TranslatedBlock> = HashMap::new();
         let mut extra_ids: Vec<ParagraphId> = Vec::new();
@@ -235,7 +249,14 @@ impl<T: Translator> Engine<T> {
         for u in &units {
             let hit = cache
                 .and_then(|c| c.get(&spec.source_lang, &spec.target_lang, &u.html).ok())
-                .flatten();
+                .flatten()
+                .filter(|html| {
+                    validate(
+                        &ctx.ctx_for(u, &spec.target_lang, self.expansion_limit),
+                        html,
+                    )
+                    .is_ok()
+                });
             match hit {
                 Some(html) => {
                     st.cache_hits += 1;
@@ -252,9 +273,10 @@ impl<T: Translator> Engine<T> {
             }
         }
 
-        // ── 2. 首轮：整文档 one-shot（超限按页切） ───────────────────────
+        // ── 2. 首轮：整文档 Markdown one-shot ───────────────────────
         if !pending.is_empty() {
-            for p in build_document_prompts(spec, &pending, &ctx.hints) {
+            for p in build_document_prompts(spec, &pending, &ctx.hints)? {
+                st.primary_prompts += 1;
                 st.prompts += 1;
                 self.run_prompt(
                     &p,
@@ -294,9 +316,11 @@ impl<T: Translator> Engine<T> {
             for g in groups {
                 for half in split_in_half(g) {
                     let codes: Vec<&str> = collect_codes(&half, &last_violations);
-                    for p in build_document_prompts(spec, &half, &ctx.hints) {
+                    for p in build_document_prompts(spec, &half, &ctx.hints)? {
+                        st.retry_prompts += 1;
                         st.prompts += 1;
                         let p = p.with_repair_note(&codes);
+                        p.check_capacity(spec.max_chars)?;
                         self.run_prompt(
                             &p,
                             spec,
@@ -380,14 +404,14 @@ impl<T: Translator> Engine<T> {
 
     /// 发一片提示词，把流式块逐个校验并交付。
     ///
-    /// 真·段落级流式：每个 `<p id=…>…</p>` 一闭合就在 delta 回调里校验并
+    /// 真·段落级流式：每个 Markdown 块一闭合就在 delta 回调里校验并
     /// `on_block`，**不等整片响应结束**——模型还在吐后面的段落时，上游已经
     /// 可以排版前面落定的段。
     ///
     /// 错误语义：`translate` 失败时错误原样上抛，部分成功绝不冒充全篇成功；
     /// 此前已交付的块**不撤回**（上游可能已排版），其缓存写也照常落库——
     /// 完整收到且校验通过的块不因晚到的尾部失败被追溯否定。残缺响应里未
-    /// 闭合的半个块只留在 residue，不交付、不入缓存。漏译/违规块的有界
+    /// 闭合的半块不交付、不入缓存；正常EOF时仍有半块则报传输错误。漏译/违规块的有界
     /// 重试由 `translate_document` 对「未落定单元」统一驱动，这里不重发。
     #[allow(clippy::too_many_arguments)]
     async fn run_prompt(
@@ -404,46 +428,44 @@ impl<T: Translator> Engine<T> {
         st: &mut Stats,
         on_block: &mut (impl FnMut(TranslatedBlock) + Send),
     ) -> Result<(), TranslateError> {
-        let mut stream = BlockStream::new();
-        // `Cache`（rusqlite `Connection`）不是 `Sync`，捕不进必须 `Send` 的
-        // delta 回调；Ok 块的缓存写先按块记录，片末统一落库。
+        let mut stream = MarkdownStream::new();
+        let mut transport_error = None;
         let mut cache_puts: Vec<(String, String)> = Vec::new();
-        let sent = {
-            let mut sink = |d: &str| {
-                let blocks = stream.push(d);
-                self.settle(
-                    blocks,
-                    spec,
-                    ctx,
-                    by_id,
-                    known,
-                    &mut *done,
-                    &mut *extra_ids,
-                    &mut *last_violations,
-                    &mut *st,
-                    &mut *on_block,
-                    &mut cache_puts,
-                );
+        let mut consume =
+            |results: Vec<Result<crate::unit::ParsedUnit, crate::markdown::MarkdownError>>| {
+                for result in results {
+                    if transport_error.is_some() {
+                        break;
+                    }
+                    match result {
+                        Ok(parsed) => self.settle(
+                            vec![RawBlock {
+                                id: parsed.id.clone(),
+                                html: parsed.to_html(),
+                            }],
+                            spec,
+                            ctx,
+                            by_id,
+                            known,
+                            &mut *done,
+                            &mut *extra_ids,
+                            &mut *last_violations,
+                            &mut *st,
+                            &mut *on_block,
+                            &mut cache_puts,
+                        ),
+                        Err(error) => {
+                            transport_error = Some(TranslateError::Transport(error.to_string()))
+                        }
+                    }
+                }
             };
-            self.translator.translate(prompt, &mut sink).await
-        };
+        let sent = self
+            .translator
+            .translate(prompt, &mut |d| consume(stream.push(d)))
+            .await;
         if sent.is_ok() {
-            // `drain` 在每次 push 后已穷尽，这里通常补不出新块；调用 `finish`
-            // 是为了让「未闭合的半个块」留在 residue 语义里，不进交付。
-            let (tail, _residue) = stream.finish();
-            self.settle(
-                tail,
-                spec,
-                ctx,
-                by_id,
-                known,
-                &mut *done,
-                &mut *extra_ids,
-                &mut *last_violations,
-                &mut *st,
-                &mut *on_block,
-                &mut cache_puts,
-            );
+            consume(stream.finish());
         }
         if let Some(c) = cache {
             for (source_html, translated_html) in &cache_puts {
@@ -456,7 +478,11 @@ impl<T: Translator> Engine<T> {
                 );
             }
         }
-        sent.map(|_| ())
+        sent?;
+        match transport_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     /// 裁决一批已闭合的原始块：未知/重复 id 丢弃并记账，其余逐块校验，
@@ -637,7 +663,7 @@ mod tests {
         );
         assert_eq!(r.stats.retry_rounds, DEFAULT_MAX_RETRY_ROUNDS);
         assert!(r.stats.prompts > 1, "应该发生了拆分重试");
-        assert!(r.stats.violations.contains_key("invalid_markup"));
+        assert!(r.stats.violations.contains_key("unknown_style"));
         for b in &r.blocks {
             let u = us.iter().find(|u| u.id == b.id).unwrap();
             match &b.status {
@@ -739,9 +765,9 @@ mod tests {
         // 缓存命中的单元不在提示词里。
         let seen = engine.translator().recorded();
         assert_eq!(seen.len(), 1);
-        assert!(!seen[0].contains("<p id=\"P01-002\">"));
-        assert!(seen[0].contains("<p id=\"P01-001\">"));
-        assert!(seen[0].contains("<p id=\"P01-003\">"));
+        assert!(!seen[0].contains("<!-- syncpdf:block P01-002 -->"));
+        assert!(seen[0].contains("<!-- syncpdf:block P01-001 -->"));
+        assert!(seen[0].contains("<!-- syncpdf:block P01-003 -->"));
     }
 
     #[tokio::test]
@@ -772,6 +798,57 @@ mod tests {
         assert!(r.blocks.is_empty());
         assert!(seen.is_empty());
         assert_eq!(r.stats.prompts, 0);
+    }
+
+    #[tokio::test]
+    async fn explicit_capacity_rejects_without_sending_and_retries_are_separate() {
+        let us = units(3);
+        let engine = Engine::new(RecordingTranslator::new(FakeTranslator::Echo));
+        let mut constrained = spec();
+        constrained.max_chars = 1;
+        let result = engine
+            .translate_document(
+                &constrained,
+                us.clone(),
+                ContextMap::from_units(&us),
+                None,
+                |_| {},
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(TranslateError::Prompt(
+                crate::prompt::PromptError::Capacity { .. }
+            ))
+        ));
+        assert!(engine.translator().recorded().is_empty());
+        let (result, _) = run(FakeTranslator::Truncate(1), us, None).await;
+        assert_eq!(result.stats.primary_prompts, 1);
+        assert!(result.stats.retry_prompts > 0);
+        assert_eq!(
+            result.stats.prompts,
+            result.stats.primary_prompts + result.stats.retry_prompts
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_cached_identity_is_revalidated_before_delivery() {
+        let us = units(1);
+        let cache = Cache::open_in_memory().unwrap();
+        cache
+            .put(
+                "en",
+                "en",
+                "corrupt",
+                &us[0].html,
+                "<p id=\"P99-999\">wrong identity</p>",
+            )
+            .unwrap();
+        let (result, seen) = run(FakeTranslator::Echo, us.clone(), Some(&cache)).await;
+        assert_eq!(result.stats.cache_hits, 0);
+        assert_eq!(result.stats.primary_prompts, 1);
+        assert_eq!(seen[0].id, us[0].id);
+        assert_eq!(seen[0].html, us[0].html);
     }
 
     #[test]

@@ -145,7 +145,19 @@ pub async fn translate_all<T: Translator>(
     on_block: impl FnMut(TranslatedBlock) + Send,
 ) -> Result<DocumentResult, PipelineError> {
     let units: Vec<Unit> = paras.iter().map(|p| build_unit(p, &lookup)).collect();
-    let ctx = ContextMap::from_units(&units);
+    let mut ctx = ContextMap::from_units(&units);
+    for para in paras {
+        let mut hints = Vec::new();
+        for atom in &para.atoms {
+            if atom.id.0 > 0 {
+                hints.resize(hints.len().max(atom.id.0 as usize), String::new());
+                hints[atom.id.0 as usize - 1] = atom.text.clone();
+            }
+        }
+        if !hints.is_empty() {
+            ctx.hints.insert(para.id.clone(), hints);
+        }
+    }
     let engine = Engine::new(translator);
     engine
         .translate_document(spec, units, ctx, cache, on_block)

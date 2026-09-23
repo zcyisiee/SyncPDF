@@ -1,7 +1,7 @@
 //! 假翻译器：不联网、不调外部进程，但输出格式与真实模型**完全一致**。
 //!
-//! 每个变体都：从提示词正文里认出源块 → 按变体规则变换 → 带着 ``` 围栏和说明
-//! 文字、**逐块且块中间切开**地流式吐出。这样 `BlockStream` / `validate` /
+//! 每个变体都：从提示词正文里认出源块 → 按变体规则变换 →
+//! **逐块且块中间切开**地流式吐出Markdown。这样 `MarkdownStream` / `validate` /
 //! `Engine` 的测试走的就是真实模型会走的路径。
 
 use std::sync::Mutex;
@@ -10,10 +10,12 @@ use std::time::Duration;
 use async_trait::async_trait;
 use syncpdf_core::ParagraphId;
 
+use crate::markdown::{self, MarkdownStream};
 use crate::prompt::{DocumentPrompt, DOCUMENT_MARKER};
-use crate::stream::BlockStream;
 use crate::translator::{DeltaSink, TranslateError, Translator};
-use crate::unit::{parse_unit_html, ParsedUnit, Segment};
+#[cfg(test)]
+use crate::unit::parse_unit_html;
+use crate::unit::{ParsedUnit, Segment};
 
 /// 流式分片大小（字符）。故意取个小质数，保证切点落在标签中间。
 const CHUNK_CHARS: usize = 9;
@@ -106,10 +108,10 @@ impl Translator for FakeTranslator {
 }
 
 impl FakeTranslator {
-    /// 拼出完整回包（含模型常见的围栏与寒暄，用于压测 `BlockStream`）。
+    /// 拼出严格 Markdown 回包。非法传输由专用测试覆盖。
     fn render(&self, prompt: &DocumentPrompt) -> String {
         let sources = source_blocks(prompt);
-        let mut out = String::from("Sure, here are the translated blocks:\n```html\n");
+        let mut out = String::new();
         if let FakeTranslator::DuplicateFirst = self {
             if let Some(first) = sources.first() {
                 out.push_str(&self.transform(first));
@@ -125,9 +127,13 @@ impl FakeTranslator {
             out.push('\n');
         }
         if let FakeTranslator::ExtraBlock = self {
-            out.push_str("<p id=\"P42-999\">A paragraph nobody asked for</p>\n");
+            out.push_str(&markdown::serialize(&ParsedUnit {
+                id: "P42-999".parse().unwrap(),
+                segments: vec![Segment::Text("A paragraph nobody asked for".into())],
+            }));
+            out.push('\n');
         }
-        out.push_str("```\nHope this helps.");
+
         out
     }
 
@@ -135,15 +141,24 @@ impl FakeTranslator {
     fn transform(&self, u: &ParsedUnit) -> String {
         match self {
             FakeTranslator::FailEvery(n) if *n > 0 && u.id.seq % *n == 0 => {
-                // 非法标签 → invalid_markup，且与分组无关，重试救不回来。
-                format!("<p id=\"{}\"><b>{}</b></p>", u.id, u.text())
+                // 未知样式 → unknown_style，且与分组无关，重试救不回来。
+                markdown::serialize(&ParsedUnit {
+                    id: u.id.clone(),
+                    segments: vec![Segment::Style {
+                        id: syncpdf_core::StyleId(999),
+                        inner: vec![Segment::Text(u.text())],
+                    }],
+                })
             }
-            FakeTranslator::EmptyBody => format!("<p id=\"{}\"> </p>", u.id),
+            FakeTranslator::EmptyBody => markdown::serialize(&ParsedUnit {
+                id: u.id.clone(),
+                segments: vec![Segment::Text(" ".into())],
+            }),
             FakeTranslator::Stretch(f) => rebuilt(u, |t| stretch(t, *f)),
             FakeTranslator::Shrink(f) => rebuilt(u, |t| shrink(t, *f)),
             FakeTranslator::Cjk => rebuilt(u, cjk),
             // Echo / Slow / FailEvery(非倍数) / Truncate / ExtraBlock / DuplicateFirst
-            _ => u.to_html(),
+            _ => markdown::serialize(u),
         }
     }
 }
@@ -155,23 +170,22 @@ fn source_blocks(prompt: &DocumentPrompt) -> Vec<ParsedUnit> {
         .split_once(DOCUMENT_MARKER)
         .map(|(_, b)| b)
         .unwrap_or(&prompt.text);
-    let mut s = BlockStream::new();
+    let mut s = MarkdownStream::new();
     let mut raw = s.push(body);
-    raw.extend(s.finish().0);
+    raw.extend(s.finish());
     let want: Vec<&ParagraphId> = prompt.unit_ids.iter().collect();
-    raw.iter()
+    raw.into_iter()
+        .filter_map(Result::ok)
         .filter(|b| want.contains(&&b.id))
-        .filter_map(|b| parse_unit_html(&b.html).ok())
         .collect()
 }
 
 /// 映射所有文本节点后重新序列化。
 fn rebuilt(u: &ParsedUnit, mut f: impl FnMut(&str) -> String) -> String {
-    ParsedUnit {
+    markdown::serialize(&ParsedUnit {
         id: u.id.clone(),
         segments: map_text(&u.segments, &mut f),
-    }
-    .to_html()
+    })
 }
 
 fn map_text(segments: &[Segment], f: &mut impl FnMut(&str) -> String) -> Vec<Segment> {
@@ -298,23 +312,25 @@ mod tests {
     }
 
     fn prompt(units: &[Unit]) -> DocumentPrompt {
-        build_document_prompts(&PromptSpec::new("en", "zh-CN"), units, &HashMap::new()).remove(0)
+        build_document_prompts(&PromptSpec::new("en", "zh-CN"), units, &HashMap::new())
+            .unwrap()
+            .remove(0)
     }
 
     /// 走完整的流式路径，返回 (块, 完整文本)。
     async fn stream(t: &FakeTranslator, units: &[Unit]) -> (Vec<String>, String) {
         let p = prompt(units);
-        let mut s = BlockStream::new();
+        let mut s = MarkdownStream::new();
         let mut blocks = Vec::new();
         let mut deltas = 0usize;
         let full = {
             let mut sink = |d: &str| {
                 deltas += 1;
-                blocks.extend(s.push(d).into_iter().map(|b| b.html));
+                blocks.extend(s.push(d).into_iter().map(|b| b.unwrap().to_html()));
             };
             t.translate(&p, &mut sink).await.unwrap()
         };
-        blocks.extend(s.finish().0.into_iter().map(|b| b.html));
+        blocks.extend(s.finish().into_iter().map(|b| b.unwrap().to_html()));
         assert!(deltas > 1, "假翻译器必须真的分多次流式输出");
         (blocks, full)
     }
@@ -338,8 +354,8 @@ mod tests {
         let us = vec![unit("P01-001", "alpha beta gamma delta epsilon zeta")];
         let (blocks, full) = stream(&FakeTranslator::Echo, &us).await;
         assert_eq!(blocks.len(), 1);
-        assert!(full.contains("```html"), "要带围栏才算像真实模型");
-        assert!(full.ends_with("Hope this helps."));
+        assert!(full.starts_with("<!-- syncpdf:block P01-001 -->"));
+        assert!(full.ends_with("<!-- syncpdf:end P01-001 -->\n"));
     }
 
     #[tokio::test]
@@ -384,12 +400,21 @@ mod tests {
         let (blocks, _) = stream(&FakeTranslator::FailEvery(2), &us).await;
         assert_eq!(blocks.len(), 4);
         assert!(parse_unit_html(&blocks[0]).is_ok());
-        assert!(parse_unit_html(&blocks[1]).is_err(), "P01-002 应当非法");
+        assert_eq!(
+            parse_unit_html(&blocks[1]).unwrap().style_ids(),
+            vec![syncpdf_core::StyleId(999)]
+        );
         assert!(parse_unit_html(&blocks[2]).is_ok());
-        assert!(parse_unit_html(&blocks[3]).is_err(), "P01-004 应当非法");
+        assert_eq!(
+            parse_unit_html(&blocks[3]).unwrap().style_ids(),
+            vec![syncpdf_core::StyleId(999)]
+        );
         // 单独重试 P01-002 仍然失败（与分组无关）。
         let (again, _) = stream(&FakeTranslator::FailEvery(2), &us[1..2]).await;
-        assert!(parse_unit_html(&again[0]).is_err());
+        assert_eq!(
+            parse_unit_html(&again[0]).unwrap().style_ids(),
+            vec![syncpdf_core::StyleId(999)]
+        );
     }
 
     #[tokio::test]
@@ -432,7 +457,7 @@ mod tests {
         let mut sink = |_: &str| {};
         r.translate(&p, &mut sink).await.unwrap();
         assert_eq!(r.recorded().len(), 1);
-        assert!(r.recorded()[0].contains("<p id=\"P01-001\">"));
+        assert!(r.recorded()[0].contains("<!-- syncpdf:block P01-001 -->"));
         assert_eq!(r.name(), "fake/echo");
     }
 
@@ -442,13 +467,13 @@ mod tests {
         let us = vec![unit("P01-001", "one")];
         let mut p = prompt(&us);
         p.text = format!("<p id=\"P99-001\">not a source block</p>\n{}", p.text);
-        let mut s = BlockStream::new();
+        let mut s = MarkdownStream::new();
         let mut got = Vec::new();
         {
-            let mut sink = |d: &str| got.extend(s.push(d).into_iter().map(|b| b.id));
+            let mut sink = |d: &str| got.extend(s.push(d).into_iter().map(|b| b.unwrap().id));
             FakeTranslator::Echo.translate(&p, &mut sink).await.unwrap();
         }
-        got.extend(s.finish().0.into_iter().map(|b| b.id));
+        got.extend(s.finish().into_iter().map(|b| b.unwrap().id));
         assert_eq!(got, vec!["P01-001".parse::<ParagraphId>().unwrap()]);
     }
 }

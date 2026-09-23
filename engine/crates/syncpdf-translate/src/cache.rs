@@ -1,12 +1,16 @@
 //! 翻译缓存（SQLite）。表结构照 02-技术路径与架构.md §5.5 / hjfy 共享缓存。
 //!
-//! 键是 `(source_language, target_language, sha256(source_html))`；命中即跳过 LLM。
+//! 键是 `(source_language, target_language, sha256(transport_version + source_html))`；命中即跳过 LLM。
 //! 用户手工编辑的译文写回同表并标 `origin='manual'`，优先级最高（`put_manual`）。
 
 use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use syncpdf_core::hash::Sha256Hash;
+
+fn transport_key(source_html: &str) -> Sha256Hash {
+    Sha256Hash::of(format!("{}\0{source_html}", crate::markdown::TRANSPORT_VERSION).as_bytes())
+}
 
 /// 手工编辑译文的 origin 标记；命中后不会被自动翻译覆盖。
 pub const ORIGIN_MANUAL: &str = "manual";
@@ -74,7 +78,7 @@ impl Cache {
 
     /// 查缓存。命中返回译文 HTML。
     pub fn get(&self, src_lang: &str, tgt_lang: &str, source_html: &str) -> Result<Option<String>> {
-        let h = Sha256Hash::of(source_html.as_bytes());
+        let h = transport_key(source_html);
         let found = self
             .0
             .query_row(
@@ -98,7 +102,7 @@ impl Cache {
         source_html: &str,
         translated_html: &str,
     ) -> Result<()> {
-        let h = Sha256Hash::of(source_html.as_bytes());
+        let h = transport_key(source_html);
         let now = now_unix();
         self.0.execute(
             UPSERT,
@@ -140,7 +144,7 @@ impl Cache {
         tgt_lang: &str,
         source_html: &str,
     ) -> Result<Option<String>> {
-        let h = Sha256Hash::of(source_html.as_bytes());
+        let h = transport_key(source_html);
         Ok(self
             .0
             .query_row(
@@ -175,6 +179,28 @@ fn now_unix() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_transport_hash_cannot_hit_markdown_cache() {
+        let cache = Cache::open_in_memory().unwrap();
+        let source = "<p id=\"P01-001\">source</p>";
+        let legacy = Sha256Hash::of(source.as_bytes());
+        cache
+            .0
+            .execute(
+                "INSERT INTO translations VALUES (?1, ?2, ?3, 'legacy', ?4, 'old translation', 0)",
+                params!["en", "zh-CN", &legacy.as_bytes()[..], source],
+            )
+            .unwrap();
+        assert!(cache.get("en", "zh-CN", source).unwrap().is_none());
+        cache
+            .put("en", "zh-CN", "markdown", source, "new translation")
+            .unwrap();
+        assert_eq!(
+            cache.get("en", "zh-CN", source).unwrap().as_deref(),
+            Some("new translation")
+        );
+    }
 
     #[test]
     fn miss_then_hit() {

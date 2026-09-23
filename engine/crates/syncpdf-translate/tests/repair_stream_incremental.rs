@@ -8,7 +8,7 @@
 //!   严格超时把死锁变成确定性失败——证明的是时序，不是最终顺序，也不靠 sleep。
 //! - 脚本通道在每个 delta 发完时快照「已交付块数」，把交付时刻钉死在
 //!   delta 边界上：覆盖标签跨 delta、一个 delta 多块、未知/重复 id、
-//!   坏 HTML、非标记类校验失败、缓存命中、尾部模型错误与重试只补漏。
+//!   坏 Markdown、非标记类校验失败、缓存命中、尾部模型错误与重试只补漏。
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -17,7 +17,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use syncpdf_core::ParagraphId;
 use syncpdf_translate::{
-    BlockStatus, Cache, ContextMap, DeltaSink, DocumentPrompt, DocumentResult, Engine, PromptSpec,
+    Cache, ContextMap, DeltaSink, DocumentPrompt, DocumentResult, Engine, PromptSpec,
     TranslateError, TranslatedBlock, Translator, Unit,
 };
 use tokio::sync::Notify;
@@ -48,6 +48,14 @@ fn body(i: u32) -> String {
 
 fn block_html(i: u32) -> String {
     format!("<p id=\"P01-{i:03}\">{}</p>", body(i))
+}
+
+fn wire(i: u32) -> String {
+    markdown(&block_html(i))
+}
+
+fn markdown(html: &str) -> String {
+    syncpdf_translate::markdown::serialize(&syncpdf_translate::parse_unit_html(html).unwrap())
 }
 
 fn unit(i: u32) -> Unit {
@@ -92,10 +100,10 @@ impl Translator for GatedTranslator {
         _prompt: &DocumentPrompt,
         on_delta: DeltaSink<'_>,
     ) -> Result<String, TranslateError> {
-        let mut text = String::from("Sure:\n```html\n");
+        let mut text = String::new();
         // 第一块：开标签与正文故意切开（跨 delta）。
-        let a = "<p id=\"P0";
-        let b = format!("1-001\">{}</p>\n", body(1));
+        let a = "<!-- syncpdf:block P0";
+        let b = format!("1-001 -->\n{}\n<!-- syncpdf:end P01-001 -->\n", body(1));
         for d in [a, b.as_str()] {
             text.push_str(d);
             on_delta(d);
@@ -111,10 +119,7 @@ impl Translator for GatedTranslator {
                     .into(),
             ));
         }
-        let second = [
-            format!("<p id=\"P01-002\">{}</p>\n", body(2)),
-            "```\nDone.".to_string(),
-        ];
+        let second = [format!("{}\n", wire(2))];
         for d in &second {
             text.push_str(d);
             on_delta(d);
@@ -282,20 +287,22 @@ async fn gated_translator_waits_for_first_block_delivery() {
 async fn delivery_follows_delta_boundaries_with_split_tags_and_multi_blocks() {
     let us = vec![unit(1), unit(2), unit(3)];
     let script = Script::ok(vec![
-        // 开标签只吐一半。
-        "Sure:\n```html\n<p id=".to_string(),
-        // 补全开标签并闭合第一块；随后切开第二块的开标签。
-        format!("\"P01-001\">{}</p>\n<p id=\"P01-002\">The beta", body(1)),
-        // 一个 delta 里闭合第二块 **和** 整个第三块。
-        format!(" paragraph of the sample document</p>\n{}", block_html(3)),
-        // 收尾围栏：块外垃圾。
-        "\n```\nDone.".to_string(),
+        "<!-- syncpdf:block P0".to_string(),
+        format!(
+            "1-001 -->\n{}\n<!-- syncpdf:end P01-001 -->\n<!-- syncpdf:block P01-002 -->\nThe beta",
+            body(1)
+        ),
+        format!(
+            " paragraph of the sample document\n<!-- syncpdf:end P01-002 -->\n{}",
+            wire(3)
+        ),
+        "\n".to_string(),
     ]);
     let (result, seen, _delivered, snapshots, calls) =
         run_scripted(vec![script], &us, None, None).await;
     let r = result.expect("脚本合法，不该失败");
     // 每个 delta 发完时的已交付块数：0（未闭合）→ 1（第一块闭合）→
-    // 3（同 delta 闭合两块）→ 3（围栏无块）。
+    // 3（同 delta 闭合两块）→ 3（空白无块）。
     let snaps = snapshots.lock().expect("snapshot mutex").clone();
     assert_eq!(snaps, vec![0, 1, 3, 3], "交付必须紧跟 delta 边界");
     assert_eq!(ids(&seen), [pid(1), pid(2), pid(3)]);
@@ -311,13 +318,16 @@ async fn unknown_and_duplicate_ids_never_reach_layout() {
     let us = vec![unit(1), unit(2)];
     let script = Script::ok(vec![
         // 段外 id：一律不采用。
-        "<p id=\"P42-999\">A paragraph nobody asked for</p>\n".to_string(),
+        format!(
+            "{}\n",
+            markdown("<p id=\"P42-999\">A paragraph nobody asked for</p>")
+        ),
         // 合法第一块。
-        format!("{}\n", block_html(1)),
+        format!("{}\n", wire(1)),
         // 重复 id：后到的丢弃。
-        format!("{}\n", block_html(1)),
+        format!("{}\n", wire(1)),
         // 合法第二块收尾。
-        format!("{}\n```\n", block_html(2)),
+        format!("{}\n", wire(2)),
     ]);
     let (result, seen, _delivered, snapshots, calls) =
         run_scripted(vec![script], &us, None, None).await;
@@ -348,28 +358,16 @@ async fn unknown_and_duplicate_ids_never_reach_layout() {
     );
 }
 
-/// 坏 HTML：校验失败 → 有界拆分重试 → 仍失败回退原文，只交付一次。
+/// 传输语法损坏必须明确失败，不能悄悄当成完整合法回包。
 #[tokio::test]
-async fn bad_markup_falls_back_after_bounded_retry() {
+async fn bad_markup_is_a_transport_error_without_delivery() {
     let us = vec![unit(1)];
-    let bad = format!("<p id=\"P01-001\"><b>{}</b></p>", body(1));
-    let script = Script::ok(vec![format!("```html\n{bad}\n```\n")]);
-    let (result, seen, _delivered, _snapshots, calls) =
-        run_scripted(vec![script.clone(), script], &us, None, Some(1)).await;
-    let r = result.expect("校验失败以 Fallback 收场，不是 Err");
-    assert_eq!(r.fallback_ids, vec![pid(1)]);
-    assert_eq!(seen.len(), 1, "回退块只交付一次");
-    assert!(matches!(&seen[0].status, BlockStatus::Fallback { .. }));
-    assert_eq!(seen[0].html, us[0].html, "回退必须是原文");
-    assert_eq!(
-        r.stats.violations.get("invalid_markup"),
-        Some(&2),
-        "首轮 + 1 轮重试各失败一次：{:?}",
-        r.stats.violations
-    );
-    assert_eq!(r.stats.retry_rounds, 1);
-    assert_eq!(r.stats.prompts, 2);
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    let bad = "<!-- syncpdf:block P01-001 -->\n<bad>\n<!-- syncpdf:end P01-001 -->";
+    let (result, seen, _, _, calls) =
+        run_scripted(vec![Script::ok(vec![bad.into()])], &us, None, Some(1)).await;
+    assert!(matches!(result, Err(TranslateError::Transport(_))));
+    assert!(seen.is_empty());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
 /// 非标记类校验失败（多出 span）：同样走有界重试后回退，不进排版。
@@ -380,7 +378,7 @@ async fn style_violation_falls_back_after_bounded_retry() {
         "<p id=\"P01-001\">{} <span data-style=\"7\">extra</span></p>",
         body(1)
     );
-    let script = Script::ok(vec![format!("```html\n{bad}\n```\n")]);
+    let script = Script::ok(vec![format!("{}\n", markdown(&bad))]);
     let (result, seen, _delivered, _snapshots, calls) =
         run_scripted(vec![script.clone(), script], &us, None, Some(1)).await;
     let r = result.expect("校验失败以 Fallback 收场，不是 Err");
@@ -406,7 +404,7 @@ async fn cache_hit_delivers_first_and_result_keeps_input_order() {
     let cached = "<p id=\"P01-002\">cached translation of the second paragraph</p>";
     cache.put_manual("en", "en", &us[1].html, cached).unwrap();
 
-    let script = Script::ok(vec![format!("```html\n{}\n```\n", block_html(1))]);
+    let script = Script::ok(vec![format!("{}\n", wire(1))]);
     let (result, seen, _delivered, snapshots, calls) =
         run_scripted(vec![script], &us, Some(&cache), None).await;
     let r = result.expect("缓存 + 单块合法，不该失败");
@@ -442,10 +440,10 @@ async fn tail_model_error_returns_err_but_keeps_delivered_blocks() {
     let script = Script::err(
         vec![
             // 第一块跨两个 delta 闭合。
-            "```html\n<p id=\"P0".to_string(),
-            format!("1-001\">{}</p>\n", body(1)),
+            "<!-- syncpdf:block P0".to_string(),
+            format!("1-001 -->\n{}\n<!-- syncpdf:end P01-001 -->\n", body(1)),
             // 第二块只吐一半就死：不闭合，绝不能交付。
-            "<p id=\"P01-002\">hal".to_string(),
+            "<!-- syncpdf:block P01-002 -->\nhal".to_string(),
         ],
         TranslateError::HarnessFailed("model died mid-response".into()),
     );
@@ -484,13 +482,9 @@ async fn tail_model_error_returns_err_but_keeps_delivered_blocks() {
 #[tokio::test]
 async fn retry_only_settles_missing_blocks_without_redelivery() {
     let us = vec![unit(1), unit(2)];
-    let first = Script::ok(vec![format!("```html\n{}\n```\n", block_html(1))]);
+    let first = Script::ok(vec![format!("{}\n", wire(1))]);
     // 重试片：模型把已交付的第一块又吐一遍，再补上漏掉的第二块。
-    let retry = Script::ok(vec![format!(
-        "```html\n{}\n{}\n```\n",
-        block_html(1),
-        block_html(2)
-    )]);
+    let retry = Script::ok(vec![format!("{}\n{}\n", wire(1), wire(2))]);
     let (result, seen, _delivered, snapshots, calls) =
         run_scripted(vec![first, retry], &us, None, None).await;
     let r = result.expect("重试补漏后应当全 Ok");
@@ -510,4 +504,20 @@ async fn retry_only_settles_missing_blocks_without_redelivery() {
         snapshots.lock().expect("snapshot mutex").clone(),
         vec![1, 2]
     );
+}
+
+#[tokio::test]
+async fn malformed_tail_keeps_prior_closed_block_but_fails_the_document() {
+    let us = vec![unit(1), unit(2)];
+    let script = Script::ok(vec![
+        format!("{}\n", wire(1)),
+        "<!-- syncpdf:block P01-002 -->\nhalf".into(),
+    ]);
+    let cache = Cache::open_in_memory().unwrap();
+    let (result, seen, _, _, calls) = run_scripted(vec![script], &us, Some(&cache), None).await;
+    assert!(matches!(result, Err(TranslateError::Transport(_))));
+    assert_eq!(ids(&seen), vec![pid(1)]);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(cache.get("en", "en", &us[0].html).unwrap().is_some());
+    assert!(cache.get("en", "en", &us[1].html).unwrap().is_none());
 }

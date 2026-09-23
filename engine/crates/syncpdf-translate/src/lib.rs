@@ -4,8 +4,8 @@
 //! 设计基准：docs/reports/2026-09-22-rust-electron-rewrite/02-技术路径与架构.md §5。
 //!
 //! 产品核心是 **one-shot + 流式**：整份文档的全部翻译单元放进一个提示词一次发给
-//! 模型（超过 `max_chars` 才按页边界切成尽量少的几片）；模型流式输出时，每凑齐一个
-//! `<p id>…</p>` 块就立刻校验并通过回调交给上游，上游据此立即排版回写该段。
+//! 模型（调用方显式容量上限超出时返回错误）；模型流式输出时，每凑齐一个
+//! 完整 Markdown 块就立刻校验并通过回调交给上游，上游据此立即排版回写该段。
 //!
 //! ```ignore
 //! let units: Vec<Unit> = paragraphs.iter().map(|p| build_unit(p, &glyph_text)).collect();
@@ -33,7 +33,7 @@ pub mod validate;
 pub use cache::{Cache, CacheError, ORIGIN_MANUAL};
 pub use fake::{FakeTranslator, RecordingTranslator};
 pub use pi::PiTranslator;
-pub use prompt::{build_document_prompts, system_prompt, DocumentPrompt, PromptSpec};
+pub use prompt::{build_document_prompts, system_prompt, DocumentPrompt, PromptError, PromptSpec};
 pub use stream::{BlockStream, RawBlock};
 pub use translator::{
     BlockStatus, ContextMap, DeltaSink, DocumentResult, Engine, Stats, TranslateError,

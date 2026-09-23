@@ -1,7 +1,7 @@
 # Rust PDF 后端修复 · Task state
 
-> 唯一维护者：用户与主 Agent；subagent 只读，不得另建副本。更新：2026-09-22，Codex接管、累积review和主树集成验收已完成。
-> 状态：**完整后端目标持续active。上一轮已完成绑定集成及stale/CID/Size修复（有效进展）；R1基础工程验收通过；当前进入R2源文本/发布一致性及Markdown实施。整体未完成。**
+> 唯一维护者：用户与主 Agent；subagent 只读，不得另建副本。更新：2026-09-23；Codex 主控维护。
+> 状态：**完整后端目标持续active。上一轮已完成绑定集成及stale/CID/Size修复（有效进展）；R1基础工程验收通过；R2源文本、事务状态与Markdown工程验收通过；下一批R3排版。整体未完成。**
 
 ## 1. 用户意图与任务偏好
 
@@ -21,7 +21,7 @@
 - 主链：PDFium 几何 + lopdf 源操作 → 布局/段落 → 带样式、原子与链接身份的翻译单元 → 流式结构校验 → 排版 → 精确回写/发布。公式图形优先保留源绘制，不重绘整页替代内容流编辑。
 - code、Unicode、字符、glyph/cluster 并非一一对应；TJ 生成空格、连字、空映射、UTF-16、Form 调用实例必须区分。`matched` 数量不证明源操作、字节与几何同源。
 - PDFium 与 lopdf 必须来自同一不可变输入版本；先绑定再修改。共享 Contents/Resources/Form 需隔离；不能借邻居几何补洞。已知不可信输入先拒绝，不能删除失败后仍叠加译文并报成功。
-- 流式交付要在块闭合且校验通过时发生，不等 EOF；页快照与最终发布的事务/幂等、错误传播仍需后续完善。
+- 流式交付在块闭合且校验通过时发生，不等 EOF；页快照、保存事务、幂等与错误传播已实现，二次编辑revision事务仍待实现。
 - 优化次序：可靠绑定/坐标/字号/流式 → 段落与事务状态 → Knuth–Plass 类 box/glue/penalty、cluster 安全、中文禁则与字体策略 → 公式/链接接线、容纳与视觉验收 → 性能。链接要随译文重建点击框，不只是保留 `/Annots`。
 
 ## 3. 已验收进度与未完成范围
@@ -40,19 +40,15 @@
 
 ## 4. 当前问题与唯一下一步
 
-- p19 历史阻断已解除：PDFium 对重叠重复字符去重；目标仍绘制，`stream264/op165/code7`→对象108/path[0]→真实 font271:0→Differences `/four`→`'4'`。独立删除仍可见11/27/68像素变化，不是跳过空白。
-- **已实现并局部验收的窄契约**：仅严格匹配的单code `Tj` 缺字符时，取原对象 `GetRotatedBounds` 四角经祖先Form变换后的页AABB及自身matrix的origin；Unicode来自可验证ToUnicode/Encoding。独立只读证据/统计携带真实font_id及身份，门禁复核，不冒充loose-char bbox、不借邻居。
-- 新支路简单字体1字节、Type0仅Identity-H 2字节；Identity-V、未知/变长CMap、多code、空/冲突映射、无效几何继续拒绝。普通字符解码的继承边界未因此获认证。本轮仅改pdfium/bind及专属测试。
-- **当前分工**：此前所有 worker 均已结束、证据与 dirty 保留，不重启。主控完成 p7/p15 分区及固定字号整批工程验收（不是全篇翻译质量验收），详见 [08基础验收](08-R1布局与固定字号验收.md)。本批已按 [07接口契约](07-后续接口契约.md) 新增 `SourceTextSpan/Paragraph.text_spans`（serde默认、旧数据兼容）并保护 FootNote，workspace含测试check及core20项通过。已启动 `/root/r2_source`（Orca树 `codex-r2-source`）及 `/root/r2_markdown`（`codex-r2-markdown`），均gpt-6-sol:high/fresh/30分钟限时；Markdown worker已结束提交`69521bc9`，主控完整review通过，待复跑及接线，并行实施逻辑源文与 Markdown 模块；主控负责发布事务/错误传播及跨模块接线；当前实现候选含快照筛页/先保存后提交、回调错误传播、重复块幂等、仅实际译文页要求CJK、部分结果ok:false与CLI非零、未放置atom源保护。主控5项真实PDF事务测试、pipeline/CLI共130项测试（另1ignored）、strict Clippy通过；新增CLI保存失败测试另通过，等待Markdown/源文合并后整批真实验收。
-- **本批主树 gate**：workspace 567 passed / 0 failed / 4 ignored，strict Clippy / fmt / release、显式真实23页覆盖 probe 均通过；p7/p15 缺口0，其余21页分区不变。首次错误扩大 Caption/Code 的候选已拒绝；最终依据物理行或真实算法框线修复。源保护整段保留只是临时安全前置，不是行内公式翻译完成。
-- **最新全篇 release 结果**：`r1-final-safe-all` 共169 overflow、40 protected overlap、1翻译回退，没有成功译文；23页源文字与144dpi像素均完全保持，qpdf exit0。错误自检仍23条且ok:true/CLI0，R2必须修正；本次全回退不能证明快照泄漏已修。证据`layout-final-review/`及`codex-r1-integration/r1-final-safe-all/`。
-- **字体稳定性已复验**：`20c1242b`稳定资源编号，段落基线/fit用实际字体度量。63项font/typeset测试通过，旧代码red证据保留。`d23dac3a`固定字号后139项pipeline/typeset测试、strict clippy、release通过；真实论文两次1/3页和全23页运行的p1/p3在144dpi原始像素完全相同（无坐标归一化），其余21页未动，3份PDF均qpdf exit0。证据`tmp/backend-repair/font-stability/real-cross-run.json`。全篇fake仍209次overflow、2coverage gap、3self_check，整体质量未通过。
-- **固定字号失败保护已接线**：指定论文p1/p3的26个overflow块全部fallback、qpdf exit0；该fake选页没有成功译文，不能算翻译完成。up-vns前三页测试同时证明能放下的块有中文和整页回退时源字形/位置完全保持；旧“每页CJK”断言在新策略下失败，已改为真实结果对应的双向守卫，证据`font-stability/overflow-{pipeline,e2e}-green.log`（前者记录首次失败，后者修正后通过）。整条错误传播/发布仍待R2。后续共享合同已写[07接口契约](07-后续接口契约.md)，未实施项明确标为待实现。
-- 字体窄修`72d47b62`已完整review并合入；主控重新编译专属回归、原字体独立渲染对照，Noto CJK CFF与PT Sans TTF共7字墨迹IoU均1.0000。`../codex-r1-fontmap` worker已结束，树clean；该树旧论文fixture缺失的早退不算通过，主树完整夹具复验为准。
-- 主控另定位并修复字体对象搬移后的trailer Size不一致；`b48001c1`。qpdf回归扩到table+stream，旧table模式red、新两模式green；最终真实1/3页和全23页PDF均qpdf exit0、无警告。
-- **历史失败基线（已被后续窄修部分更新）**：早期fake重跑并逐页查看：选择1/3页时其余21页文字与像素不变；全23页仍有p7/p15 coverage gap（0.0134/0.0086）、159次overflow+min_scale、p1链接label fallback、未ready的p1提前写入19个快照、3个参考文献页无CJK的自检error仍报ok。R2/后续遗留单列，不能算全篇质量通过。跨选页同页尚有Tm纵向漂移；仅诊断副本对齐Tm后p1/p3像素完全一致，生产未归一化，根因未认证。
-- 新 stale guard：绑定时私有记录源页Contents有序ID与遍历到的页/Form/Do父流字节；同页不同快照不可混排，apply前整批比对。主控复现旧ABC→XBC误删并确认修复后拒绝、XBC不变；4项专项复验通过。它不认证字体/资源语义变更，调用层仍须保证两套解析器读同一不可变原件。
-- 旧Orca树`codex-r1-review`及`codex-r1-fontmap`所有worker已结束；保留证据，不重启。新树brief均在各树`tmp/backend-repair/brief.md`，target/runtime各自独立、vendor/fixtures只读。
+- **R2工程验收通过**：[09验收](09-R2源文本与Markdown验收.md)。共享core `3e6838db`、事务/状态 `ce4b6e2b`、Markdown模块 `63e6e741`、源文本映射 `6209a3ee`、作者机构保护 `77e5e70d`已提交；主控Markdown接线提交见git log。主树workspace **591通过、0失败、5 ignored**；随后 metadata 5项和真实首页probe分别通过，strict Clippy/fmt/release通过。已有无文本夹具早退不算真实文本验收。
+- **真实23页 release** `r2-markdown-safe-all`：32.47秒；主请求1/补救0/缓存0；99 overflow、63 atom_source_unplaced、40 protected_source_overlap、1 rotated_source_text；仍无成功译文。23页源文本及144dpi像素完全相同，qpdf exit0，自检无误报，RunFinished ok:false / CLI exit1，正确标明部分结果。fake只能证明工程行为，完整质量仍失败。
+- **新增行为已独立举证**：闭合Markdown块在模型返回前交付；坏尾部/半块上抛且先前有效块可缓存；保存失败不改文档/revision/已有文件；未ready页不重放待排译文；未知/重复身份不计完整成功。行内atom尚未真放置，整段回退只是保护。
+- **源文本**：几何生成空格与真实GlyphID分开；ligature/空映射/显式空格测试通过；最终真实首页“Training neural networks is costly”正确恢复。首页4段作者/机构/邮箱保留，标题/摘要/正文可译。几何启发式仍有边界，源p1控制字符等未声称修复。
+- **下一批R3**：先冻结样式、fallback字体与cluster、实际排版框接口；并行纯Knuth–Plass模块及独立字体塑形窄修，主控负责共享IR/排版接线和验收。固定原/用户字号，不能自动缩小；容纳失败继续明确提示。随后逐项接原子绘制、链接、A3 dual、中文目录、编辑重编译，再做真实LLM全文与视觉验收。
+- 已结束的 `r2_source` / `r2_markdown` / `r2_metadata` 和所有R1 worker不重启；Orca独立树保留且clean。新分工严格gpt-6-sol:high/fresh/独立Orca worktree，task-state仅主控写。
+- **R1基础验收**见[08](08-R1布局与固定字号验收.md)：567 passed /0 failed/4 ignored；strict Clippy/fmt/release及23页coverage probe通过。p7/p15可见字形缺口0，其余21页分区不变；错误扩大Caption/Code候选被拒绝。字体原始像素跨两次选页/全篇稳定，qpdf全过。R1旧全回退仍ok:true及错误自检已由R2修正。
+- **禁止重复调查p19**：绑定集成与目标自身单code对象证据窄修已完成，详见06/历史handoff。共享/嵌套Form、未知编码等不支持边界仍保留；不以放宽门禁取得通过。
+- docs strict构建既有HTTP→pipeline锚点告警仍失败，不计通过，不扩大修复范围。
 
 ## 5. 恢复入口与证据（详情不在本文件复制）
 

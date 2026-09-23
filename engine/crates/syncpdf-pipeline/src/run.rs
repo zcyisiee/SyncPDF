@@ -419,7 +419,9 @@ impl Pipeline {
                 .iter()
                 .find(|p| p.page.0 == *page)
                 .ok_or_else(|| PipelineError::Protocol("区域所属页缺少 IR".into()))?;
-            all_paras.extend(analyze_page(ir, regions));
+            let mut paragraphs = analyze_page(ir, regions);
+            stages::source_policy::protect_front_matter(ir, regions, &mut paragraphs);
+            all_paras.extend(paragraphs);
         }
         for p in &all_paras {
             sink.emit(Event::Paragraph {
@@ -570,7 +572,36 @@ impl Pipeline {
         if let Some(error) = lock_state(&state).callback_error.take() {
             return Err(error);
         }
-        translated?;
+        let translated = translated?;
+        sink.emit(Event::Issue {
+            severity: Severity::Info,
+            code: "translation_requests".into(),
+            paragraph_id: None,
+            page: None,
+            message: format!(
+                "Markdown 主请求 {} 次，补救请求 {} 次，缓存命中 {} 段",
+                translated.stats.primary_prompts,
+                translated.stats.retry_prompts,
+                translated.stats.cache_hits
+            ),
+        });
+        let identity_errors = !translated.extra_ids.is_empty()
+            || translated
+                .stats
+                .violations
+                .get("duplicated_text_slots")
+                .copied()
+                .unwrap_or(0)
+                > 0;
+        if identity_errors {
+            sink.emit(Event::Issue {
+                severity: Severity::Warning,
+                code: "translation_identity".into(),
+                paragraph_id: None,
+                page: None,
+                message: "模型输出含未知或重复块，相关额外输出未采用".into(),
+            });
+        }
         emit_stage_finished(sink, Stage::Translating, t);
 
         // ── 4b. typesetting：兜底把未凑齐的页转 ready 并回写 ────────────
@@ -641,7 +672,10 @@ impl Pipeline {
         let protected = not_replaced.iter().filter(|p| {
             matches!(&p.translatable, Translatable::No { reason } if matches!(reason.as_str(), "protected_source_overlap" | "rotated_source_text" | "translatable_region_overlap"))
         }).count();
-        let ok = summary_stats.fallbacks == 0 && protected == 0 && coverage_gaps == 0;
+        let ok = summary_stats.fallbacks == 0
+            && protected == 0
+            && coverage_gaps == 0
+            && !identity_errors;
         if !ok {
             sink.emit(Event::Issue {
                 severity: Severity::Warning,

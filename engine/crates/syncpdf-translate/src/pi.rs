@@ -312,7 +312,9 @@ mod tests {
 
     fn prompt() -> DocumentPrompt {
         let us = vec![unit("P01-001", "one"), unit("P01-002", "two")];
-        build_document_prompts(&PromptSpec::new("en", "zh-CN"), &us, &HashMap::new()).remove(0)
+        build_document_prompts(&PromptSpec::new("en", "zh-CN"), &us, &HashMap::new())
+            .unwrap()
+            .remove(0)
     }
 
     #[test]

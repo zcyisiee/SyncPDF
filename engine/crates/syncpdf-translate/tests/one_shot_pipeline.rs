@@ -119,11 +119,11 @@ async fn one_shot_pipeline_streams_blocks_and_fills_the_cache() {
     // 预录回包：前两段译出（P01-001 保留 span/原子），第三段被模型漏掉。
     // delta 故意切在标签与属性中间。
     let deltas = [
-        "Here you go:\n```html\n<p id=\"P0",
-        "1-001\">深度<span data-sty",
-        "le=\"1\">学习</span> {{KEEP_1",
-        "}}</p>\n<p id=\"P01-0",
-        "02\">文档的第二段</p>\n```\nDone.",
+        "<!-- syncpdf:bloc",
+        "k P01-001 -->\n深度[学",
+        "习]{style=1} {{KEEP_1",
+        "}}\n<!-- syncpdf:end P01-001 -->\n<!-- syncpdf:block P01-0",
+        "02 -->\n文档的第二段\n<!-- syncpdf:end P01-002 -->\n",
     ];
     let dir = tempfile::tempdir().unwrap();
     let exe = fake_pi(dir.path(), &deltas);
@@ -236,8 +236,9 @@ fn document_prompts_are_one_shot_until_the_limit() {
         })
         .collect();
     let spec = PromptSpec::new("en", "zh-CN");
-    let prompts = syncpdf_translate::build_document_prompts(&spec, &units, &HashMap::new());
-    assert_eq!(prompts.len(), 1, "60k 上限下整份文档只发一片");
+    let prompts =
+        syncpdf_translate::build_document_prompts(&spec, &units, &HashMap::new()).unwrap();
+    assert_eq!(prompts.len(), 1, "整份文档只发一个主请求");
     assert_eq!(prompts[0].unit_ids.len(), 30);
     assert!(prompts[0].system.contains("zh-CN"));
 }
