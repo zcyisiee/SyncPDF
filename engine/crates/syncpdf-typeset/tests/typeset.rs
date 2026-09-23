@@ -311,7 +311,7 @@ fn first_indent_applies_to_first_line_only() {
     let r = t.layout(
         pid(),
         &s,
-        &[text_inline("aaaaaaaaaaaaaaaaaaaa")],
+        &[text_inline("aaaa bbbb cccc dddd")],
         &Obstacles::default(),
     );
     assert!(r.paragraph.lines.len() >= 2);
@@ -416,6 +416,14 @@ fn soft_hyphen_breaks_long_word() {
     // 确认断行机会里确实有软断点。
     let opps = break_opportunities("extraordinariness", Lang::En);
     assert!(opps.iter().any(|o| o.soft_hyphen), "{opps:?}");
+    assert!(
+        r.paragraph
+            .lines
+            .iter()
+            .take(r.paragraph.lines.len().saturating_sub(1))
+            .any(|line| line.glyphs.last().is_some_and(|g| g.text == "-")),
+        "selected soft break must draw its hyphen"
+    );
 }
 
 #[test]
@@ -434,7 +442,8 @@ fn performance_100_paragraphs_under_500ms_debug() {
             page: 1,
             seq: i + 1,
         };
-        let r = t.layout(id, &s, &[text_inline(&text)], &obstacles);
+        let unique = format!("{i}{text}");
+        let r = t.layout(id, &s, &[text_inline(&unique)], &obstacles);
         assert!(!r.paragraph.lines.is_empty());
     }
     let elapsed = t0.elapsed();

@@ -3,7 +3,7 @@
 
 use crate::breaks::Lang;
 use crate::layout::{self, BreaksCache, LayoutInput, LayoutOut};
-use crate::shaper::{FontMetrics, Shaper, StyleSpec};
+use crate::shaper::{Shaper, StyleSpec};
 use crate::widen;
 use syncpdf_core::ir::Align;
 use syncpdf_core::{AtomId, Color, ParagraphId, Rect, StyleId};
@@ -131,37 +131,38 @@ impl<'a> Typeset<'a> {
         let lh = spec.line_height;
         let cache = BreaksCache::new();
 
-        // 1. 原框阶梯。
-        if let Some(out) = self.try_ladder(&input, inlines, &spec.bbox, lh, &cache) {
+        // 1. 原框阶梯。保留最终失败档，避免为报告 Overflow 重排同一段。
+        let mut failed_out = None;
+        if let Some(out) = self.try_ladder(&input, inlines, &spec.bbox, lh, &cache, &mut failed_out)
+        {
             return self.finish(out, None, Vec::new());
         }
 
         // 2. 加宽后再走一遍阶梯。
-        if let Some(widened_rect) = widen::widen(&spec.bbox, &obstacles.neighbors, &obstacles.rects)
-        {
-            if let Some(out) = self.try_ladder(&input, inlines, &widened_rect, lh, &cache) {
-                let by = widened_rect.union(&spec.bbox).height() - spec.bbox.height();
-                return self.finish(out, Some(widened_rect), vec![TypesetIssue::Widened { by }]);
+        if spec.first_baseline.is_none() {
+            if let Some(widened_rect) =
+                widen::widen(&spec.bbox, &obstacles.neighbors, &obstacles.rects)
+            {
+                if let Some(out) =
+                    self.try_ladder(&input, inlines, &widened_rect, lh, &cache, &mut None)
+                {
+                    let by = widened_rect.union(&spec.bbox).height() - spec.bbox.height();
+                    return self.finish(
+                        out,
+                        Some(widened_rect),
+                        vec![TypesetIssue::Widened { by }],
+                    );
+                }
             }
         }
 
         // 3. 溢出：min_scale 档、阶梯内行距，报告溢出行数。
-        let (out, mut issues) = self.overflow_layout(&input, inlines, &spec.bbox, lh, &cache);
+        let (out, mut issues) =
+            self.overflow_layout(&input, inlines, &spec.bbox, lh, &cache, failed_out);
         if self.opts.min_scale < 1.0 {
             issues.push(TypesetIssue::MinScaleHit);
         }
         self.finish(out, None, issues)
-    }
-
-    /// 与 layout::layout 相同的容量公式：首行占 ascent+descent，其后每行 line_h。
-    fn capacity(&self, bbox: &Rect, size: f32, line_height_mult: f32, m: FontMetrics) -> f32 {
-        let first = (m.ascent + m.descent) * size;
-        let line_h = size * line_height_mult;
-        if line_h <= f32::EPSILON || bbox.height() + 1e-3 < first {
-            0.0
-        } else {
-            1.0 + ((bbox.height() - first) / line_h).floor()
-        }
     }
 
     /// 阶梯搜索：返回首个放得下的档位。
@@ -172,40 +173,11 @@ impl<'a> Typeset<'a> {
         bbox: &Rect,
         lh: f32,
         cache: &BreaksCache,
+        failed_out: &mut Option<LayoutOut>,
     ) -> Option<LayoutOut> {
         let mut scale = 1.0f32;
         loop {
-            // 行数只取决于宽度与字号，与行距无关：同一 scale 下只排一次，
-            // 其余行距档先用容量公式判定，命中才真正重排（结果与逐档相同）。
-            let mut first_out: Option<LayoutOut> = None;
-            for (k, &lh_step) in self.opts.line_height_steps.iter().enumerate() {
-                if k == 0 {
-                    let out = layout::layout(
-                        self.shaper,
-                        input,
-                        inlines,
-                        bbox,
-                        scale,
-                        lh * lh_step,
-                        cache,
-                    );
-                    if !out.overflowed {
-                        return Some(out);
-                    }
-                    first_out = Some(out);
-                    continue;
-                }
-                let lines = first_out.as_ref().map_or(0, |o| o.lines);
-                if lines as f32
-                    > self.capacity(
-                        bbox,
-                        input.font_size * scale,
-                        lh * lh_step,
-                        cache.metrics(self.shaper, input, inlines),
-                    )
-                {
-                    continue;
-                }
+            for &lh_step in &self.opts.line_height_steps {
                 let out = layout::layout(
                     self.shaper,
                     input,
@@ -217,6 +189,13 @@ impl<'a> Typeset<'a> {
                 );
                 if !out.overflowed {
                     return Some(out);
+                }
+                if scale <= self.opts.min_scale + 1e-6
+                    && failed_out
+                        .as_ref()
+                        .is_none_or(|saved| out.paragraph.line_height < saved.paragraph.line_height)
+                {
+                    *failed_out = Some(out);
                 }
             }
             if scale <= self.opts.min_scale + 1e-6 {
@@ -234,6 +213,7 @@ impl<'a> Typeset<'a> {
         bbox: &Rect,
         lh: f32,
         cache: &BreaksCache,
+        failed_out: Option<LayoutOut>,
     ) -> (LayoutOut, Vec<TypesetIssue>) {
         let scale = self.opts.min_scale;
         // 行数与行距无关：最紧的行距档（最小值）溢出行数最少，直接选它。
@@ -244,20 +224,22 @@ impl<'a> Typeset<'a> {
             .copied()
             .fold(f32::INFINITY, f32::min);
         let lh_step = if lh_step.is_finite() { lh_step } else { 1.0 };
-        let out = layout::layout(
-            self.shaper,
-            input,
-            inlines,
-            bbox,
-            scale,
-            lh * lh_step,
-            cache,
-        );
+        let out = failed_out.unwrap_or_else(|| {
+            layout::layout(
+                self.shaper,
+                input,
+                inlines,
+                bbox,
+                scale,
+                lh * lh_step,
+                cache,
+            )
+        });
         let capacity = out.line_capacity;
         let over = ((out.lines as f32 - capacity).ceil().max(0.0)) as u32;
         let mut issues = Vec::new();
-        if over > 0 {
-            issues.push(TypesetIssue::Overflow { lines: over });
+        if out.overflowed {
+            issues.push(TypesetIssue::Overflow { lines: over.max(1) });
         }
         (out, issues)
     }

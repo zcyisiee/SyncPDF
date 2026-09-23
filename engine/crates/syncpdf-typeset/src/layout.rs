@@ -1,27 +1,18 @@
-//! 单档排版：断行、放置、对齐。设计基准：02-技术路径与架构.md §8.2。
-//!
-//! 给定 (scale, line_height) 的一档，把 inlines 排进 bbox：
-//! 1. Text run 塑形为字形流（bidi 视觉重排）；Atom 作为不可断整体；Br 强制换行。
-//! 2. 依据 break_opportunities 贪心断行（first_indent 收窄首行可用宽）。
-//! 3. 行从框顶向下放：首行基线 y = bbox.y1 - ascent·size。
-//! 4. 对齐：Justify 拉丁词间空格拉伸 / CJK 字距均分（标点不参与），末行左对齐；
-//!    Center / Right 平移；Left 不动。
+//! Cluster-safe paragraph layout using Knuth–Plass and actual glyph ink.
 
 use crate::breaks::{break_opportunities, is_forbidden_line_end, is_forbidden_line_start, Lang};
 use crate::fit::Inline;
-use crate::shaper::{is_cjk_char, FontMetrics, ShapedGlyph, Shaper, StyleSpec};
-use syncpdf_core::ir::Align;
-use syncpdf_core::ir::{LineBox, PlacedGlyph, TypesetParagraph};
+use crate::knuth_plass::{self, Node};
+use crate::shaper::{is_cjk_char, ShapedGlyph, Shaper, StyleSpec};
+use syncpdf_core::ir::{Align, LineBox, PlacedGlyph, TypesetParagraph};
 use syncpdf_core::{AtomId, Color, ParagraphId, Rect, StyleId};
 use unicode_bidi::BidiInfo;
 
-/// 排版输入（不随档位变化的参数）。
 pub(crate) struct LayoutInput<'a> {
     pub id: ParagraphId,
     pub font_size: f32,
     pub first_baseline: Option<f32>,
     pub align: Align,
-    /// 首行缩进（pt，正值为右侧缩进）。
     pub first_indent: f32,
     pub is_rtl: bool,
     pub color: Color,
@@ -29,144 +20,553 @@ pub(crate) struct LayoutInput<'a> {
     pub styles: &'a [(StyleId, StyleSpec)],
 }
 
-/// 单档排版输出。
 pub(crate) struct LayoutOut {
     pub paragraph: TypesetParagraph,
     pub scale: f32,
     pub lines: usize,
-    /// 框能容纳的行数（首行含 descent 之后的整数容量）。
     pub line_capacity: f32,
     pub overflowed: bool,
 }
 
-/// 字形槽：断行与放置的最小单位。
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 enum Item {
-    Glyph {
-        glyph: ShapedGlyph,
-        text: char,
+    Cluster {
+        glyphs: Vec<ShapedGlyph>,
+        text: String,
         size: f32,
-        font: u32,
         style: StyleId,
-        is_space: bool,
-        is_cjk: bool,
-        is_cjk_punct: bool,
+        width: f32,
+        start: usize,
+        end: usize,
     },
-    /// 原子占位：不可断整体，宽度固定。
-    Atom { id: AtomId, width: f32, height: f32 },
+    Atom {
+        id: AtomId,
+        width: f32,
+        height: f32,
+        start: usize,
+        end: usize,
+    },
 }
 
 impl Item {
     fn width(&self) -> f32 {
         match self {
-            Item::Glyph { glyph, .. } => glyph.x_advance,
-            Item::Atom { width, .. } => *width,
+            Self::Cluster { width, .. } | Self::Atom { width, .. } => *width,
         }
     }
-
-    fn is_space(&self) -> bool {
-        matches!(self, Item::Glyph { is_space: true, .. })
+    fn start(&self) -> usize {
+        match self {
+            Self::Cluster { start, .. } | Self::Atom { start, .. } => *start,
+        }
     }
-
-    fn is_glyph(&self) -> bool {
-        matches!(self, Item::Glyph { .. })
+    fn end(&self) -> usize {
+        match self {
+            Self::Cluster { end, .. } | Self::Atom { end, .. } => *end,
+        }
+    }
+    fn space(&self) -> bool {
+        matches!(self, Self::Cluster { text, .. } if text.chars().all(char::is_whitespace))
     }
 }
 
-/// 同一段落多档尝试之间复用的中间结果：
-/// - `items_base`：按 `input.font_size`（scale = 1）塑形的 items；塑形结果对字号线性，
-///   其他档位按 scale 等比缩放即可得到与直接塑形相同的结果；
-/// - `breaks`：断点只取决于文本与 items 下标，与字号/行距无关。
 #[derive(Default)]
 pub(crate) struct BreaksCache {
-    items_base: std::cell::OnceCell<Vec<Item>>,
-    breaks: std::cell::OnceCell<Vec<BreakAt>>,
-    font_metrics: std::cell::OnceCell<FontMetrics>,
+    segments: std::cell::OnceCell<Vec<Segment>>,
 }
-
 impl BreaksCache {
     pub(crate) fn new() -> Self {
         Self::default()
     }
+}
 
-    /// 容量与基线使用实际段内样式选择的字体，不依赖字体表的加载序号。
-    pub(crate) fn metrics(
-        &self,
-        shaper: &dyn Shaper,
-        input: &LayoutInput<'_>,
-        inlines: &[Inline],
-    ) -> FontMetrics {
-        *self.font_metrics.get_or_init(|| {
-            let mut metrics = FontMetrics {
-                ascent: 0.0,
-                descent: 0.0,
-            };
-            for inline in inlines {
-                if let Inline::Text { text, style } = inline {
-                    if text.is_empty() {
-                        continue;
+#[derive(Clone, Default)]
+struct Segment {
+    text: String,
+    items: Vec<Item>,
+}
+
+fn spec(input: &LayoutInput<'_>, style: StyleId) -> StyleSpec {
+    input
+        .styles
+        .iter()
+        .find(|(id, _)| *id == style)
+        .map_or(StyleSpec::default(), |(_, s)| *s)
+}
+
+fn segments(shaper: &dyn Shaper, input: &LayoutInput<'_>, inlines: &[Inline]) -> Vec<Segment> {
+    let mut result = vec![Segment::default()];
+    for inline in inlines {
+        if matches!(inline, Inline::Br) {
+            result.push(Segment::default());
+            continue;
+        }
+        let seg = result.last_mut().expect("segment exists");
+        match inline {
+            Inline::Atom { id, width, height } => {
+                let start = seg.text.len();
+                seg.text.push('\u{FFFC}');
+                seg.items.push(Item::Atom {
+                    id: *id,
+                    width: *width,
+                    height: *height,
+                    start,
+                    end: seg.text.len(),
+                });
+            }
+            Inline::Text { text, style } => {
+                if text.is_empty() {
+                    continue;
+                }
+                let s = spec(input, *style);
+                let font = s.font.unwrap_or_else(|| shaper.font_for(&s));
+                let size = s.size.unwrap_or(input.font_size);
+                let base = seg.text.len();
+                seg.text.push_str(text);
+                // Shape directional logical runs. The shaper itself emits visual glyph order.
+                let bidi = BidiInfo::new(text, None);
+                let mut runs: Vec<(std::ops::Range<usize>, bool)> = Vec::new();
+                if let Some(para) = bidi.paragraphs.first() {
+                    let (levels, visual) = bidi.visual_runs(para, para.range.clone());
+                    for run in visual {
+                        if run.start < run.end
+                            && text.is_char_boundary(run.start)
+                            && text.is_char_boundary(run.end)
+                        {
+                            runs.push((run.clone(), levels[run.start].is_rtl()));
+                        }
                     }
-                    let spec = input
-                        .styles
-                        .iter()
-                        .find(|(id, _)| id == style)
-                        .map(|(_, spec)| *spec)
-                        .unwrap_or_default();
-                    let font = spec.font.unwrap_or_else(|| shaper.font_for(&spec));
-                    let size = spec.size.unwrap_or(input.font_size);
-                    let m = shaper.metrics(font);
-                    metrics.ascent = metrics.ascent.max(m.ascent * size / input.font_size);
-                    metrics.descent = metrics.descent.max(m.descent * size / input.font_size);
+                }
+                if runs.is_empty() {
+                    runs.push((0..text.len(), input.is_rtl));
+                }
+                runs.sort_by_key(|(range, _)| range.start);
+                for (range, rtl) in runs {
+                    let part = &text[range.clone()];
+                    let glyphs = shaper.shape(font, part, size, rtl);
+                    let mut groups: std::collections::BTreeMap<(usize, usize), Vec<ShapedGlyph>> =
+                        std::collections::BTreeMap::new();
+                    for glyph in glyphs {
+                        let a = glyph.cluster as usize;
+                        let b = glyph.cluster_end as usize;
+                        if a < b
+                            && b <= part.len()
+                            && part.is_char_boundary(a)
+                            && part.is_char_boundary(b)
+                        {
+                            groups.entry((a, b)).or_default().push(glyph);
+                        }
+                    }
+                    for ((a, b), glyphs) in groups {
+                        let width = glyphs.iter().map(|g| g.x_advance).sum();
+                        seg.items.push(Item::Cluster {
+                            glyphs,
+                            text: part[a..b].to_owned(),
+                            size,
+                            style: *style,
+                            width,
+                            start: base + range.start + a,
+                            end: base + range.start + b,
+                        });
+                    }
                 }
             }
-            if metrics.ascent + metrics.descent == 0.0 {
-                return shaper.metrics(shaper.font_for(&StyleSpec::default()));
+            Inline::Br => unreachable!(),
+        }
+    }
+    result
+}
+
+fn scaled(base: &Segment, scale: f32) -> Segment {
+    let mut seg = base.clone();
+    for item in &mut seg.items {
+        if let Item::Cluster {
+            glyphs,
+            size,
+            width,
+            ..
+        } = item
+        {
+            *size *= scale;
+            *width *= scale;
+            for g in glyphs {
+                g.x_advance *= scale;
+                g.x_offset *= scale;
+                g.y_offset *= scale;
             }
-            metrics
+        }
+    }
+    seg
+}
+
+#[derive(Clone)]
+struct Row {
+    items: Vec<Item>,
+    ratio: f32,
+    hyphen: Option<Item>,
+    first: bool,
+    last: bool,
+    cjk_glue: Vec<usize>,
+    space_glue: Vec<usize>,
+}
+
+fn rows(
+    shaper: &dyn Shaper,
+    input: &LayoutInput<'_>,
+    segments: &[Segment],
+    width: f32,
+    scale: f32,
+) -> (Vec<Row>, bool) {
+    let mut out = Vec::new();
+    let mut failed = false;
+    for base in segments {
+        let seg = scaled(base, scale);
+        if seg.items.is_empty() {
+            // Explicit Br retains empty lines; a completely empty paragraph is rejected later.
+            if segments.len() > 1 {
+                out.push(Row {
+                    items: Vec::new(),
+                    ratio: 0.0,
+                    hyphen: None,
+                    first: out.is_empty(),
+                    last: true,
+                    cjk_glue: Vec::new(),
+                    space_glue: Vec::new(),
+                });
+            }
+            continue;
+        }
+        let opps = break_opportunities(&seg.text, input.lang);
+        let starts: std::collections::HashSet<usize> = seg.items.iter().map(Item::start).collect();
+        let ends: std::collections::HashSet<usize> = seg.items.iter().map(Item::end).collect();
+        let mut at: std::collections::HashMap<usize, (bool, bool)> =
+            std::collections::HashMap::new();
+        for opp in opps {
+            let byte = opp.byte as usize;
+            if byte < seg.text.len() && ends.contains(&byte) && starts.contains(&byte) {
+                let entry = at.entry(byte).or_insert((false, false));
+                entry.0 |= opp.mandatory;
+                entry.1 |= opp.soft_hyphen;
+            }
+        }
+        let mut nodes = Vec::new();
+        let mut mapping = Vec::new();
+        let mut hyphens: std::collections::HashMap<usize, Item> = std::collections::HashMap::new();
+        let mut cjk_glue = Vec::new();
+        let mut space_glue = Vec::new();
+        for (i, item) in seg.items.iter().enumerate() {
+            let next = seg.items.get(i + 1);
+            if item.space() && at.contains_key(&item.end()) && i > 0 && !seg.items[i - 1].space() {
+                // A ragged first line can end before its only interword space.
+                nodes.push(Node::Penalty {
+                    width: 0.0,
+                    cost: 50,
+                    flagged: false,
+                });
+                mapping.push(None);
+            }
+            if item.space() && at.contains_key(&item.end()) {
+                let w = item.width().max(0.0);
+                nodes.push(Node::Glue {
+                    width: w,
+                    stretch: w.max(1.0) * 4.0,
+                    shrink: if input.align == Align::Justify {
+                        w
+                    } else {
+                        0.0
+                    },
+                });
+                space_glue.push(item.end());
+            } else {
+                nodes.push(Node::Box {
+                    width: item.width().max(0.0),
+                });
+            }
+            mapping.push(Some(i));
+            if let Some(next) = next {
+                if next.start() != item.end() {
+                    continue;
+                }
+                if let Some(&(mandatory, soft)) = at.get(&item.end()) {
+                    if item.space() {
+                        continue;
+                    }
+                    if soft {
+                        if let Item::Cluster {
+                            glyphs,
+                            size,
+                            style,
+                            ..
+                        } = item
+                        {
+                            let font = glyphs
+                                .last()
+                                .map_or_else(|| shaper.font_for(&spec(input, *style)), |g| g.font);
+                            let hy = shaper.shape(font, "-", *size, false);
+                            if !hy.is_empty() {
+                                let w = hy.iter().map(|g| g.x_advance).sum();
+                                hyphens.insert(
+                                    nodes.len(),
+                                    Item::Cluster {
+                                        glyphs: hy,
+                                        text: "-".into(),
+                                        size: *size,
+                                        style: *style,
+                                        width: w,
+                                        start: item.end(),
+                                        end: item.end(),
+                                    },
+                                );
+                                nodes.push(Node::Penalty {
+                                    width: w,
+                                    cost: 100,
+                                    flagged: true,
+                                });
+                                mapping.push(None);
+                            }
+                        }
+                    } else if mandatory {
+                        nodes.push(Node::Penalty {
+                            width: 0.0,
+                            cost: -10_000,
+                            flagged: false,
+                        });
+                        mapping.push(None);
+                    } else if input.lang.is_cjk()
+                        && matches!((item, next), (Item::Cluster { text: a, .. }, Item::Cluster { text: b, .. }) if a.chars().any(is_cjk_char) && b.chars().any(is_cjk_char) && !a.chars().any(is_forbidden_line_end) && !b.chars().any(is_forbidden_line_start))
+                    {
+                        // Legal CJK tracking is adjustable glue, never a split through a cluster.
+                        nodes.push(Node::Glue {
+                            width: 0.0,
+                            stretch: input.font_size * scale * 0.05,
+                            shrink: 0.0,
+                        });
+                        mapping.push(None);
+                        cjk_glue.push(item.end());
+                    } else {
+                        nodes.push(Node::Penalty {
+                            width: 0.0,
+                            cost: 0,
+                            flagged: false,
+                        });
+                        mapping.push(None);
+                    }
+                }
+            }
+        }
+        let measure = width
+            - if out.is_empty() {
+                input.first_indent.max(0.0)
+            } else {
+                0.0
+            };
+        let widths = [measure, width];
+        let solution = if measure > 0.0 && width > 0.0 {
+            knuth_plass::solve(&nodes, &widths, 10.0).ok()
+        } else {
+            None
+        };
+        if let Some(solution) = solution {
+            let n = solution.lines.len();
+            for (li, line) in solution.lines.iter().enumerate() {
+                let items: Vec<Item> = (line.start..line.end)
+                    .filter_map(|j| mapping[j].map(|i| seg.items[i].clone()))
+                    .collect();
+                let first = items.first().map_or(0, Item::start);
+                let end = items.last().map_or(0, Item::end);
+                let cjk = cjk_glue
+                    .iter()
+                    .copied()
+                    .filter(|b| *b > first && *b < end)
+                    .collect();
+                let spaces = space_glue
+                    .iter()
+                    .copied()
+                    .filter(|b| *b > first && *b < end)
+                    .collect();
+                out.push(Row {
+                    items,
+                    ratio: line.ratio,
+                    hyphen: hyphens.get(&line.break_at).cloned(),
+                    first: out.is_empty(),
+                    last: li + 1 == n,
+                    cjk_glue: cjk,
+                    space_glue: spaces,
+                });
+            }
+        } else {
+            failed = true;
+            out.push(Row {
+                items: seg.items,
+                ratio: 0.0,
+                hyphen: None,
+                first: out.is_empty(),
+                last: true,
+                cjk_glue: Vec::new(),
+                space_glue: Vec::new(),
+            });
+        }
+    }
+    (out, failed)
+}
+
+fn visual_items(row: &Row, rtl: bool) -> Vec<Item> {
+    if row.items.is_empty() {
+        return Vec::new();
+    }
+    let text: String = row
+        .items
+        .iter()
+        .map(|i| match i {
+            Item::Cluster { text, .. } => text.as_str(),
+            Item::Atom { .. } => "\u{FFFC}",
         })
+        .collect();
+    let bidi = BidiInfo::new(&text, None);
+    let Some(para) = bidi.paragraphs.first() else {
+        return row.items.clone();
+    };
+    let (levels, runs) = bidi.visual_runs(para, para.range.clone());
+    let mut offsets = Vec::with_capacity(row.items.len());
+    let mut pos = 0;
+    for item in &row.items {
+        let len = match item {
+            Item::Cluster { text, .. } => text.len(),
+            Item::Atom { .. } => 3,
+        };
+        offsets.push((pos, pos + len));
+        pos += len;
+    }
+    let mut result = Vec::new();
+    for run in runs {
+        let mut part: Vec<_> = row
+            .items
+            .iter()
+            .zip(&offsets)
+            .filter(|(_, (a, b))| *a >= run.start && *b <= run.end)
+            .map(|(item, _)| item.clone())
+            .collect();
+        if levels.get(run.start).is_some_and(|l| l.is_rtl()) {
+            part.reverse();
+        }
+        result.extend(part);
+    }
+    if result.len() == row.items.len() {
+        result
+    } else if rtl {
+        row.items.iter().rev().cloned().collect()
+    } else {
+        row.items.clone()
     }
 }
 
-fn scaled_items(base: &[Item], scale: f32) -> Vec<Item> {
-    if (scale - 1.0).abs() < 1e-6 {
-        return base.to_vec();
-    }
-    base.iter()
-        .map(|it| match it {
-            Item::Glyph {
-                glyph,
+fn ink(shaper: &dyn Shaper, g: &PlacedGlyph, advance: f32) -> Rect {
+    let b = shaper
+        .glyph_bounds(g.font, g.gid, g.size)
+        .unwrap_or_else(|| {
+            let m = shaper.metrics(g.font);
+            Rect::new(
+                0.0,
+                -m.descent * g.size,
+                advance.max(0.0),
+                m.ascent * g.size,
+            )
+        });
+    Rect::new(g.x + b.x0, g.y + b.y0, g.x + b.x1, g.y + b.y1)
+}
+
+fn place(
+    shaper: &dyn Shaper,
+    input: &LayoutInput<'_>,
+    row: &Row,
+    bbox: &Rect,
+    baseline: f32,
+    scale: f32,
+) -> LineBox {
+    let items = visual_items(row, input.is_rtl);
+    let indent = if row.first {
+        input.first_indent.max(0.0)
+    } else {
+        0.0
+    };
+    let natural: f32 =
+        items.iter().map(Item::width).sum::<f32>() + row.hyphen.as_ref().map_or(0.0, Item::width);
+    let available = bbox.width() - indent;
+    let dx = match input.align {
+        Align::Center => (available - natural) / 2.0,
+        Align::Right => available - natural,
+        _ => 0.0,
+    };
+    let mut x = bbox.x0 + indent + dx;
+    let mut glyphs = Vec::new();
+    let mut atoms = Vec::new();
+    let mut bounds: Option<Rect> = None;
+    let adjust = input.align == Align::Justify && !row.last;
+
+    for item in items.iter().chain(row.hyphen.iter()) {
+        match item {
+            Item::Cluster {
+                glyphs: shaped,
                 text,
                 size,
-                font,
                 style,
-                is_space,
-                is_cjk,
-                is_cjk_punct,
-            } => Item::Glyph {
-                glyph: ShapedGlyph {
-                    x_advance: glyph.x_advance * scale,
-                    x_offset: glyph.x_offset * scale,
-                    y_offset: glyph.y_offset * scale,
-                    ..*glyph
-                },
-                text: *text,
-                size: size * scale,
-                font: *font,
-                style: *style,
-                is_space: *is_space,
-                is_cjk: *is_cjk,
-                is_cjk_punct: *is_cjk_punct,
-            },
-            Item::Atom { id, width, height } => Item::Atom {
-                id: *id,
-                width: *width,
-                height: *height,
-            },
-        })
-        .collect()
+                ..
+            } => {
+                let mut first = true;
+                for g in shaped {
+                    let placed = PlacedGlyph {
+                        font: g.font,
+                        gid: g.gid,
+                        text: if first { text.clone() } else { String::new() },
+                        x: x + g.x_offset,
+                        y: baseline + g.y_offset,
+                        size: *size,
+                        scale_x: 1.0,
+                        style: *style,
+                        color: spec(input, *style).color,
+                    };
+                    first = false;
+                    if !text.chars().all(char::is_whitespace) {
+                        let rect = ink(shaper, &placed, g.x_advance);
+                        bounds = Some(bounds.map_or(rect, |b| b.union(&rect)));
+                    }
+                    glyphs.push(placed);
+                    x += g.x_advance;
+                }
+                if adjust && row.space_glue.contains(&item.end()) {
+                    x += row.ratio
+                        * if row.ratio >= 0.0 {
+                            item.width().max(1.0) * 4.0
+                        } else {
+                            item.width()
+                        };
+                }
+                if adjust && row.cjk_glue.contains(&item.end()) {
+                    x += row.ratio * input.font_size * scale * 0.05;
+                }
+            }
+            Item::Atom {
+                id, width, height, ..
+            } => {
+                let rect = Rect::new(x, baseline, x + *width, baseline + *height);
+                bounds = Some(bounds.map_or(rect, |b| b.union(&rect)));
+                atoms.push(*id);
+                x += *width;
+            }
+        }
+    }
+    LineBox {
+        bbox: bounds.unwrap_or(Rect::new(
+            bbox.x0 + indent,
+            baseline,
+            bbox.x0 + indent,
+            baseline,
+        )),
+        baseline_y: baseline,
+        glyphs,
+        kept_atoms: atoms,
+    }
 }
 
-/// 单档排版主函数。
 pub(crate) fn layout(
     shaper: &dyn Shaper,
     input: &LayoutInput<'_>,
@@ -174,625 +574,145 @@ pub(crate) fn layout(
     bbox: &Rect,
     scale: f32,
     line_height_mult: f32,
-    breaks_cache: &BreaksCache,
+    cache: &BreaksCache,
 ) -> LayoutOut {
-    let profiling = std::env::var("SYNCPDF_TYPESET_PROFILE").is_ok();
-    let t_start = std::time::Instant::now();
-    let size = input.font_size * scale;
-    let metrics = breaks_cache.metrics(shaper, input, inlines);
-    let ascent = metrics.ascent * size;
-    let descent = metrics.descent * size;
-    let line_h = size * line_height_mult;
-
-    // 1. 塑形 + bidi 视觉序。
-    let items = scaled_items(
-        breaks_cache
-            .items_base
-            .get_or_init(|| shape_inlines(shaper, input, inlines, input.font_size)),
-        scale,
-    );
-
-    let t_shape = t_start.elapsed();
-    // 2. 断点集合（items 下标）。
-    // 断点只取决于文本与 items 下标，与字号/行距无关：跨阶梯档位复用。
-    let breaks = breaks_cache
-        .breaks
-        .get_or_init(|| compute_breaks(input, inlines, &items));
-    let t_breaks = t_start.elapsed();
-
-    // 3. 贪心断行。
-    let lines = break_lines(&items, breaks, input, bbox.width(), size);
-    let t_lines = t_start.elapsed();
-
-    // 4. 容量：首行占 ascent+descent，其后每行 line_h。
-    let capacity = if line_h <= f32::EPSILON {
-        0.0
-    } else {
-        let first = ascent + descent;
-        if bbox.height() + 1e-3 < first {
-            0.0
-        } else {
-            1.0 + ((bbox.height() - first) / line_h).floor()
+    let valid = [bbox.x0, bbox.y0, bbox.x1, bbox.y1]
+        .into_iter()
+        .all(f32::is_finite)
+        && bbox.width().is_finite()
+        && bbox.height().is_finite()
+        && bbox.width() > 0.0
+        && bbox.height() > 0.0
+        && input.font_size.is_finite()
+        && input.font_size > 0.0
+        && input.first_indent.is_finite()
+        && input.first_baseline.is_none_or(f32::is_finite)
+        && input
+            .styles
+            .iter()
+            .all(|(_, style)| style.size.is_none_or(|size| size.is_finite() && size > 0.0))
+        && scale.is_finite()
+        && scale > 0.0
+        && line_height_mult.is_finite()
+        && line_height_mult > 0.0;
+    if !valid {
+        return LayoutOut {
+            paragraph: TypesetParagraph {
+                id: input.id.clone(),
+                lines: Vec::new(),
+                font_scale: scale,
+                line_height: 0.0,
+                color: input.color,
+                used_bbox: *bbox,
+                overflow: true,
+            },
+            scale,
+            lines: 0,
+            line_capacity: 0.0,
+            overflowed: true,
+        };
+    }
+    let base = cache
+        .segments
+        .get_or_init(|| segments(shaper, input, inlines));
+    let (rows, failed) = rows(shaper, input, base, bbox.width(), scale);
+    let line_h = input.font_size * scale * line_height_mult;
+    let mut lines = Vec::with_capacity(rows.len());
+    let mut used: Option<Rect> = None;
+    let mut overflow = !valid || failed || (rows.is_empty() && !inlines.is_empty());
+    let first_top = rows
+        .first()
+        .map(|row| place(shaper, input, row, bbox, 0.0, scale).bbox.y1)
+        .unwrap_or(0.0);
+    let first_baseline = input.first_baseline.unwrap_or(bbox.y1 - first_top);
+    for (i, row) in rows.iter().enumerate() {
+        let advance: f32 = row.items.iter().map(Item::width).sum::<f32>()
+            + row.hyphen.as_ref().map_or(0.0, Item::width);
+        if advance
+            > bbox.width()
+                - if row.first {
+                    input.first_indent.max(0.0)
+                } else {
+                    0.0
+                }
+                + 0.01
+            && (input.align != Align::Justify || row.ratio >= 0.0)
+        {
+            overflow = true;
         }
-    };
-
-    // 5. 放置。
-    let n = lines.len();
-    let mut line_boxes: Vec<LineBox> = Vec::with_capacity(n);
-    let mut used = if n == 0 {
-        *bbox
+        let baseline = first_baseline - i as f32 * line_h;
+        let line = place(shaper, input, row, bbox, baseline, scale);
+        let b = line.bbox;
+        if b.x0 < bbox.x0 - 0.01
+            || b.x1 > bbox.x1 + 0.01
+            || b.y0 < bbox.y0 - 0.01
+            || b.y1 > bbox.y1 + 0.01
+        {
+            overflow = true;
+        }
+        if let Some(previous) = lines.last().map(|l: &LineBox| l.bbox) {
+            if previous.x0 < b.x1 - 0.01
+                && previous.x1 > b.x0 + 0.01
+                && previous.y0 < b.y1 - 0.01
+                && previous.y1 > b.y0 + 0.01
+            {
+                overflow = true;
+            }
+        }
+        used = Some(used.map_or(b, |u| u.union(&b)));
+        lines.push(line);
+    }
+    if inlines.is_empty()
+        || base.iter().any(|s| {
+            let mut end = 0;
+            let mut complete = true;
+            for item in &s.items {
+                if item.start() != end || item.end() <= end {
+                    complete = false;
+                }
+                end = item.end();
+            }
+            !complete
+                || end != s.text.len()
+                || s.items.iter().any(|i| match i {
+                    Item::Cluster {
+                        glyphs,
+                        size,
+                        width,
+                        ..
+                    } => {
+                        glyphs.is_empty()
+                            || !size.is_finite()
+                            || *size <= 0.0
+                            || !width.is_finite()
+                            || *width < 0.0
+                    }
+                    Item::Atom { width, height, .. } => {
+                        !width.is_finite() || !height.is_finite() || *width < 0.0 || *height < 0.0
+                    }
+                })
+        })
+    {
+        overflow = true;
+    }
+    let capacity = if line_h > 0.0 {
+        (bbox.height() / line_h).floor()
     } else {
-        Rect::new(bbox.x1, bbox.y1, bbox.x0, bbox.y0)
+        0.0
     };
-    for (i, line) in lines.iter().enumerate() {
-        let baseline_y = input.first_baseline.unwrap_or(bbox.y1 - ascent) - (i as f32) * line_h;
-        let lb = place_line(line, input, bbox, baseline_y, i + 1 == n, ascent, descent);
-        used = used.union(&lb.bbox);
-        line_boxes.push(lb);
-    }
-
-    let overflowed = (n as f32) > capacity + 1e-4;
-
-    if profiling {
-        eprintln!(
-            "layout: shape={:?} breaks={:?} lines={:?} place={:?} total={:?} n_items={}",
-            t_shape,
-            t_breaks - t_shape,
-            t_lines - t_breaks,
-            t_start.elapsed() - t_lines,
-            t_start.elapsed(),
-            items.len()
-        );
-    }
     LayoutOut {
         paragraph: TypesetParagraph {
             id: input.id.clone(),
-            lines: line_boxes,
+            lines,
             font_scale: scale,
             line_height: line_h,
             color: input.color,
-            used_bbox: used,
-            overflow: overflowed,
+            used_bbox: used.unwrap_or(*bbox),
+            overflow,
         },
         scale,
-        lines: n,
+        lines: rows.len(),
         line_capacity: capacity,
-        overflowed,
-    }
-}
-
-/// 塑形全部 inlines，产出视觉序字形槽流。
-fn shape_inlines(
-    shaper: &dyn Shaper,
-    input: &LayoutInput<'_>,
-    inlines: &[Inline],
-    size: f32,
-) -> Vec<Item> {
-    let mut items: Vec<Item> = Vec::new();
-    let spec_of = |sid: StyleId| -> StyleSpec {
-        input
-            .styles
-            .iter()
-            .find(|(id, _)| *id == sid)
-            .map(|(_, s)| *s)
-            .unwrap_or_default()
-    };
-
-    for inline in inlines {
-        match inline {
-            // Br 不产生 item；断点在 compute_breaks 以 mandatory 记录。
-            Inline::Br => {}
-            Inline::Atom { id, width, height } => {
-                items.push(Item::Atom {
-                    id: *id,
-                    width: *width,
-                    height: *height,
-                });
-            }
-            Inline::Text { text, style } => {
-                let spec = spec_of(*style);
-                let font = spec.font.unwrap_or_else(|| shaper.font_for(&spec));
-                let size = spec.size.unwrap_or(size);
-                for chunk in reorder(text, input.is_rtl) {
-                    let glyphs = shaper.shape(font, &chunk.text, size, chunk.is_rtl);
-                    // cluster → 字符映射（cluster 为 chunk 内字节偏移）。
-                    let mut chars: Vec<char> = chunk.text.chars().collect();
-                    let mut byte_pos: Vec<usize> = {
-                        let mut v = Vec::with_capacity(chars.len() + 1);
-                        let mut b = 0;
-                        v.push(0);
-                        for c in &chars {
-                            b += c.len_utf8();
-                            v.push(b);
-                        }
-                        v
-                    };
-                    // RTL 视觉序下字符已反转；glyph 顺序与 chunk.text 顺序一致，
-                    // 因此直接按 cluster 定位。
-                    for g in glyphs {
-                        let ci = byte_pos
-                            .iter()
-                            .position(|&b| b as u32 == g.cluster)
-                            .unwrap_or(chars.len().saturating_sub(1));
-                        let c = chars.get(ci).copied().unwrap_or(' ');
-                        items.push(Item::Glyph {
-                            glyph: g,
-                            text: c,
-                            size,
-                            font: g.font,
-                            style: *style,
-                            is_space: c == ' ',
-                            is_cjk: is_cjk_char(c),
-                            is_cjk_punct: is_forbidden_line_start(c) || is_forbidden_line_end(c),
-                        });
-                    }
-                    let _ = (&mut chars, &mut byte_pos);
-                }
-            }
-        }
-    }
-    items
-}
-
-/// bidi 视觉重排：无 RTL 字符时原样返回。
-fn reorder(text: &str, _is_rtl: bool) -> Vec<VisualChunk> {
-    let ltr = VisualChunk {
-        text: text.to_string(),
-        is_rtl: false,
-    };
-    if !text.chars().any(is_rtl_char) {
-        return vec![ltr];
-    }
-    let bidi = BidiInfo::new(text, None);
-    let Some(para) = bidi.paragraphs.first() else {
-        return vec![ltr];
-    };
-    let (levels, runs) = bidi.visual_runs(para, para.range.clone());
-    let mut chunks = Vec::with_capacity(runs.len());
-    for run in runs {
-        if run.is_empty() || !text.is_char_boundary(run.start) || !text.is_char_boundary(run.end) {
-            continue;
-        }
-        let run_rtl = levels.get(run.start).map(|l| l.is_rtl()).unwrap_or(false);
-        let mut piece = text[run.start..run.end].to_string();
-        if run_rtl {
-            piece = piece.chars().rev().collect();
-        }
-        chunks.push(VisualChunk {
-            text: piece,
-            is_rtl: run_rtl,
-        });
-    }
-    if chunks.is_empty() {
-        vec![ltr]
-    } else {
-        chunks
-    }
-}
-
-struct VisualChunk {
-    text: String,
-    is_rtl: bool,
-}
-
-fn is_rtl_char(c: char) -> bool {
-    matches!(
-        c,
-        '\u{0590}'..='\u{05FF}'
-            | '\u{0600}'..='\u{06FF}'
-            | '\u{0700}'..='\u{074F}'
-            | '\u{0750}'..='\u{077F}'
-            | '\u{08A0}'..='\u{08FF}'
-            | '\u{FB50}'..='\u{FDFF}'
-            | '\u{FE70}'..='\u{FEFF}'
-    )
-}
-
-/// 断点：items 下标 `after` 之后可断。
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct BreakAt {
-    after: usize,
-    mandatory: bool,
-}
-
-/// 计算断点集合，映射到 items 下标。
-///
-/// 下标对齐规则：shape_inlines 按视觉序展开 Text（字符集合不变，仅顺序可能变），
-/// 断点字节偏移按字符序号对齐视觉序（RTL 段的断行在视觉序上进行，
-/// 即先重排、再按视觉序断行 —— 与 hjfy 的 LogicalParagraph→visual 一致）。
-fn compute_breaks(input: &LayoutInput<'_>, inlines: &[Inline], items: &[Item]) -> Vec<BreakAt> {
-    let mut breaks: Vec<BreakAt> = Vec::new();
-    let mut idx = 0usize;
-
-    let mut prev_text_end: Option<usize> = None; // 上一个 Text 结束后的 items 下标
-    for inline in inlines {
-        match inline {
-            Inline::Br => {
-                if idx > 0 {
-                    breaks.push(BreakAt {
-                        after: idx - 1,
-                        mandatory: true,
-                    });
-                }
-            }
-            Inline::Atom { .. } => {
-                // 原子前可断（若前面有内容）。
-                if let Some(end) = prev_text_end {
-                    if end == idx {
-                        breaks.push(BreakAt {
-                            after: idx - 1,
-                            mandatory: false,
-                        });
-                    }
-                }
-                idx += 1;
-                breaks.push(BreakAt {
-                    after: idx - 1,
-                    mandatory: false,
-                });
-            }
-            Inline::Text { text, style: _ } => {
-                // 视觉序文本：与 shape_inlines 相同的重排。
-                let visual: String = reorder(text, input.is_rtl)
-                    .iter()
-                    .map(|c| c.text.as_str())
-                    .collect();
-                let opps = break_opportunities(&visual, input.lang);
-                // 字节偏移 → 视觉序字符序号（一次建表，二分查找）。
-                let char_starts: Vec<u32> = visual.char_indices().map(|(b, _)| b as u32).collect();
-                for opp in opps {
-                    let ci = char_starts.partition_point(|&b| b < opp.byte);
-                    if ci > 0 {
-                        breaks.push(BreakAt {
-                            after: idx + ci - 1,
-                            mandatory: opp.mandatory,
-                        });
-                    }
-                }
-                idx += visual.chars().count();
-                prev_text_end = Some(idx);
-            }
-        }
-    }
-    // 尾部：items 结束不需要断点。
-    breaks.sort_by_key(|b| b.after);
-    // 同一下标去重：mandatory 优先（Br 与文本断点重合时按强制换行处理）。
-    // dedup_by 的闭包参数 a 为当前待比较元素、b 为已保留元素，无法把 a 的
-    // mandatory 转移给 b，故用前向扫描重建。
-    let mut merged: Vec<BreakAt> = Vec::with_capacity(breaks.len());
-    for b in breaks.drain(..) {
-        match merged.last_mut() {
-            Some(prev) if prev.after == b.after => prev.mandatory |= b.mandatory,
-            _ => merged.push(b),
-        }
-    }
-    let max = items.len().saturating_sub(1);
-    merged.retain(|b| b.after <= max);
-    merged
-}
-
-/// 一行（items 切片 + 首行标记）。
-struct Line<'a> {
-    items: &'a [Item],
-    first: bool,
-}
-
-/// 贪心断行（含软断点回退与禁则兜底）。
-fn break_lines<'a>(
-    items: &'a [Item],
-    breaks: &[BreakAt],
-    input: &LayoutInput<'_>,
-    width: f32,
-    size: f32,
-) -> Vec<Line<'a>> {
-    let mut lines: Vec<Line<'a>> = Vec::new();
-    if items.is_empty() {
-        return lines;
-    }
-    let _ = size;
-    let indent = input.first_indent.max(0.0);
-    // 断点查表：after -> 是否断点 / 是否强制。
-    use std::collections::HashMap;
-    let mut break_map: HashMap<usize, bool> = HashMap::with_capacity(breaks.len());
-    for b in breaks {
-        break_map.insert(b.after, b.mandatory);
-    }
-    let can_break_after = |i: usize| break_map.contains_key(&i);
-
-    let mut start = 0usize;
-    let mut first = true;
-
-    'outer: loop {
-        let avail = (width - if first { indent } else { 0.0 }).max(1.0);
-        let mut w = 0.0f32;
-        let mut i = start;
-        let mut best_end: Option<usize> = None; // 最后一个可用断点之后的位置
-        let mut last_fit = start; // 能放下的最大位置（硬切兜底）
-
-        while i < items.len() {
-            let iw = items[i].width();
-            if i > start && w + iw > avail + 1e-3 {
-                break;
-            }
-            w += iw;
-            if w > avail + 1e-3 {
-                // 首个 item 就放不下：仍放入（不可断原子/超长串）。
-                last_fit = i + 1;
-                i += 1;
-                continue;
-            }
-            last_fit = i + 1;
-            if can_break_after(i) {
-                best_end = Some(i + 1);
-            }
-            if break_map.get(&i) == Some(&true) {
-                // 强制换行：行止于 i（含）。
-                let slice = trim_trailing_spaces(&items[start..i + 1]);
-                if !slice.is_empty() || lines.is_empty() {
-                    lines.push(Line {
-                        items: slice,
-                        first,
-                    });
-                    first = false;
-                }
-                let mut next = i + 1;
-                while next < items.len() && items[next].is_space() {
-                    next += 1;
-                }
-                if next >= items.len() {
-                    break 'outer;
-                }
-                start = next;
-                continue 'outer;
-            }
-            i += 1;
-        }
-
-        // 自然结束或宽度耗尽。
-        if i >= items.len() {
-            // 剩余全部放得下（或无断点直到结尾）。
-            if start < items.len() {
-                lines.push(Line {
-                    items: trim_trailing_spaces(&items[start..]),
-                    first,
-                });
-            }
-            break;
-        }
-
-        // 宽度耗尽：取最后一个断点。
-        let end = match best_end {
-            Some(e) if e > start => e,
-            _ => last_fit.max(start + 1),
-        };
-        // 禁则兜底：行首是禁首标点 → 回退一个字符。
-        let mut end = end.min(items.len());
-        while end > start + 1
-            && matches!(&items[end - 1], Item::Glyph { text, .. } if is_forbidden_line_end_inline(*text))
-        {
-            end -= 1;
-        }
-        while end < items.len()
-            && matches!(&items[end], Item::Glyph { text, .. } if is_forbidden_line_start(*text))
-        {
-            end += 1;
-        }
-        lines.push(Line {
-            items: trim_trailing_spaces(&items[start..end]),
-            first,
-        });
-        first = false;
-        start = end;
-        while start < items.len() && items[start].is_space() {
-            start += 1;
-        }
-        if start >= items.len() {
-            break;
-        }
-    }
-    lines
-}
-
-fn is_forbidden_line_end_inline(c: char) -> bool {
-    is_forbidden_line_end(c)
-}
-
-fn trim_trailing_spaces(items: &[Item]) -> &[Item] {
-    let mut end = items.len();
-    while end > 0 && items[end - 1].is_space() {
-        end -= 1;
-    }
-    &items[..end]
-}
-
-/// 放置一行：先自然宽排，再按对齐方式调整。
-fn place_line(
-    line: &Line<'_>,
-    input: &LayoutInput<'_>,
-    bbox: &Rect,
-    baseline_y: f32,
-    is_last: bool,
-    ascent: f32,
-    descent: f32,
-) -> LineBox {
-    let indent = if line.first { input.first_indent } else { 0.0 };
-    let x_start = bbox.x0 + indent;
-    let right_edge = bbox.x1;
-
-    // 自然序放置。
-    let mut glyphs: Vec<PlacedGlyph> = Vec::new();
-    let mut kept_atoms: Vec<AtomId> = Vec::new();
-    let mut atom_spans: Vec<(f32, f32, f32)> = Vec::new(); // (x, width, height)
-    let mut x = x_start;
-    for item in line.items {
-        match item {
-            Item::Glyph {
-                glyph,
-                text,
-                size,
-                font,
-                style,
-                ..
-            } => {
-                glyphs.push(PlacedGlyph {
-                    font: *font,
-                    gid: glyph.gid,
-                    text: text.to_string(),
-                    x: x + glyph.x_offset,
-                    y: baseline_y + glyph.y_offset,
-                    size: *size,
-                    scale_x: 1.0,
-                    style: *style,
-                    color: input
-                        .styles
-                        .iter()
-                        .find(|(id, _)| id == style)
-                        .and_then(|(_, s)| s.color),
-                });
-                x += glyph.x_advance;
-            }
-            Item::Atom {
-                id, width, height, ..
-            } => {
-                atom_spans.push((x, *width, *height));
-                kept_atoms.push(*id);
-                x += *width;
-            }
-        }
-    }
-    let content_w = x - x_start;
-    let slack = right_edge - (x_start + content_w);
-
-    match input.align {
-        Align::Justify if !is_last && slack > 0.01 => {
-            justify_line(&mut glyphs, line, slack);
-        }
-        Align::Center => {
-            let dx = slack / 2.0;
-            for g in &mut glyphs {
-                g.x += dx;
-            }
-        }
-        Align::Right => {
-            for g in &mut glyphs {
-                g.x += slack;
-            }
-        }
-        _ => {}
-    }
-
-    // 行 bbox。
-    let mut b = Rect::new(
-        x_start,
-        baseline_y - descent,
-        x_start + content_w,
-        baseline_y + ascent,
-    );
-    for g in &glyphs {
-        b = b.union(&Rect::new(
-            g.x,
-            g.y - 0.2 * g.size,
-            g.x + 0.5 * g.size,
-            g.y + 0.8 * g.size,
-        ));
-    }
-    for &(ax, aw, ah) in &atom_spans {
-        // 原子按原字形几何原地保留：以基线为底向上排。
-        b = b.union(&Rect::new(
-            ax,
-            baseline_y - descent.min(ah * 0.3),
-            ax + aw,
-            baseline_y + ah,
-        ));
-    }
-
-    LineBox {
-        bbox: b,
-        baseline_y,
-        glyphs,
-        kept_atoms,
-    }
-}
-
-/// Justify：拉丁按词间空格拉伸；CJK（无空格）按字距均分，标点不参与。
-fn justify_line(glyphs: &mut [PlacedGlyph], line: &Line<'_>, slack: f32) {
-    // glyphs 与 line.items 中 Glyph 的出现顺序一一对应。
-    let space_glyph_idx: Vec<usize> = line
-        .items
-        .iter()
-        .enumerate()
-        .filter(|(_, it)| it.is_space())
-        .map(|(i, _)| i)
-        .collect();
-
-    // 可分摊的空格数（行首/行尾空格已被 trim，这里全部参与）。
-    if !space_glyph_idx.is_empty() {
-        let per = slack / space_glyph_idx.len() as f32;
-        // glyph 下标 = items 中第 k 个 Glyph。
-        let mut glyph_of_item: Vec<Option<usize>> = Vec::with_capacity(line.items.len());
-        let mut gi = 0usize;
-        for it in line.items.iter() {
-            if it.is_glyph() {
-                glyph_of_item.push(Some(gi));
-                gi += 1;
-            } else {
-                glyph_of_item.push(None);
-            }
-        }
-        for &item_i in &space_glyph_idx {
-            let Some(g) = glyph_of_item[item_i] else {
-                continue;
-            };
-            // 该空格及其后所有字形右移 per。
-            for gg in &mut glyphs[g..] {
-                gg.x += per;
-            }
-        }
-        return;
-    }
-
-    // CJK 字距均分：统计非标点 CJK 锚点，每两个相邻锚点之间插 slack/gaps；
-    // 任一字形的位移 = 它前面「已完成的锚点间隙数」× per。
-    let anchor_count = line
-        .items
-        .iter()
-        .filter(|it| {
-            matches!(
-                it,
-                Item::Glyph {
-                    is_cjk: true,
-                    is_cjk_punct: false,
-                    ..
-                }
-            )
-        })
-        .count();
-    if anchor_count < 2 {
-        return;
-    }
-    let gaps = anchor_count - 1;
-    let per = slack / gaps as f32;
-    let mut anchors_seen = 0usize;
-    let mut glyph_i = 0usize; // glyphs 内的当前下标（只数 Glyph item）
-    for it in line.items.iter() {
-        if !it.is_glyph() {
-            continue;
-        }
-        // 当前字形的位移 = 它前面的锚点间隙数 × per。
-        let gaps_before = anchors_seen.min(gaps);
-        if let Some(g) = glyphs.get_mut(glyph_i) {
-            g.x += gaps_before as f32 * per;
-        }
-        if matches!(
-            it,
-            Item::Glyph {
-                is_cjk: true,
-                is_cjk_punct: false,
-                ..
-            }
-        ) {
-            anchors_seen += 1;
-        }
-        glyph_i += 1;
+        overflowed: overflow,
     }
 }
