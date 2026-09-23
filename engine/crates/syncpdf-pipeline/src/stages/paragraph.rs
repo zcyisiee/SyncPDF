@@ -273,7 +273,7 @@ fn build_paragraph(
     let atoms = detect_atoms(&reading.text, &reading.char_map);
     let bbox = rows.iter().fold(rows[0].bbox, |acc, r| acc.union(&r.bbox));
     let size = dominant_size(&rows, glyphs);
-    let align = detect_align(&rows, &region.bbox);
+    let align = detect_align(&rows, region, &ir.crop_box);
     let first_indent = detect_first_indent(&rows, glyphs);
     let line_height = detect_line_height(&rows, size);
 
@@ -621,11 +621,22 @@ fn is_cjk(c: char) -> bool {
 /// 边距相对**区域框**度量（行相对区域左右两侧的留白）：
 /// - 居中：每行左右边距都 > 3pt，且同一行的左右边距差 < 2pt；
 /// - 两端对齐：各行左端（±1pt）与右端（±1pt）都齐；
-/// - 其余 → 左对齐。单行段一律 Left。
-fn detect_align(rows: &[Row], region: &Rect) -> Align {
+/// - 单行标题：源左右边距相对页面对称时居中；其余单行保持 Left。
+fn detect_align(rows: &[Row], region: &Region, crop: &Rect) -> Align {
     if rows.len() == 1 {
+        let bbox = rows[0].bbox;
+        let left = bbox.x0 - crop.x0;
+        let right = crop.x1 - bbox.x1;
+        if matches!(region.kind, RegionKind::Title | RegionKind::ParagraphTitle)
+            && left > CENTER_MIN_MARGIN
+            && right > CENTER_MIN_MARGIN
+            && (left - right).abs() < 2.0
+        {
+            return Align::Center;
+        }
         return Align::Left;
     }
+    let region = &region.bbox;
     let left_aligned = rows
         .iter()
         .all(|r| (r.bbox.x0 - rows[0].bbox.x0).abs() <= ALIGN_TOL);

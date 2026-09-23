@@ -682,6 +682,12 @@ pub(crate) fn layout(
                         ..
                     } => {
                         glyphs.is_empty()
+                            || glyphs.iter().any(|g| {
+                                g.gid == 0
+                                    || !g.x_advance.is_finite()
+                                    || !g.x_offset.is_finite()
+                                    || !g.y_offset.is_finite()
+                            })
                             || !size.is_finite()
                             || *size <= 0.0
                             || !width.is_finite()

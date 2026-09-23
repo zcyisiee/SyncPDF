@@ -94,6 +94,12 @@ pub fn page_frames(
                 }
             }
         }
+        if para.align == syncpdf_core::ir::Align::Center {
+            let center = source.center().x;
+            let half = (center - bbox.x0).min(bbox.x1 - center);
+            bbox.x0 = center - half;
+            bbox.x1 = center + half;
+        }
         bbox.y0 = ir.crop_box.y0;
         bbox.y1 = ir.crop_box.y1;
         for other in &obstacles {

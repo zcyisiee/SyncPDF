@@ -692,3 +692,19 @@ fn baseline_and_spacing_follow_text_matrix_not_variable_ink_bottom() {
     );
     assert_eq!(paragraphs[0].line_height, 12.0);
 }
+
+#[test]
+fn single_line_title_centers_only_with_symmetric_page_margins() {
+    for (x, expected) in [(288.0, Align::Center), (50.0, Align::Left)] {
+        let ir = page_ir(
+            line(0, "Header", x, 700.0, 10.0, 0),
+            vec![mk_font("F1", true, false)],
+        );
+        for kind in [RegionKind::Title, RegionKind::ParagraphTitle] {
+            let mut region = text_region(0, Rect::new(x - 1.0, 699.0, x + 37.0, 711.0), 0);
+            region.kind = kind;
+            let paras = analyze_page(&ir, &[region]);
+            assert_eq!(paras[0].align, expected);
+        }
+    }
+}

@@ -243,7 +243,14 @@ pub fn spec_for(para: &Paragraph) -> ParagraphSpec {
         font_size: dominant_font_size(para),
         first_baseline: None,
         line_height: para.line_height / dominant_font_size(para),
-        align: para.align,
+        // Target body text uses paragraph-wide justification; headings retain source alignment.
+        align: if para.kind == syncpdf_core::ir::RegionKind::Text
+            && para.align == syncpdf_core::ir::Align::Left
+        {
+            syncpdf_core::ir::Align::Justify
+        } else {
+            para.align
+        },
         first_indent: para.first_indent,
         is_rtl: para.is_rtl,
         color,
@@ -674,5 +681,14 @@ mod tests {
         let m = shaper.metrics(glyphs[1].font);
         assert!(ink.height() < (m.ascent + m.descent) * 12.0);
         assert_eq!(glyphs, shaper.shape(inter.0, "A中B", 12.0, false));
+    }
+    #[test]
+    fn missing_glyph_never_publishes_a_notdef_replacement() {
+        let (store, profile) = fonts().expect("builtin font fixture");
+        let shaper = StoreShaper::new(&store, &profile);
+        let para = paragraph("P01-001", "source", Rect::new(0.0, 0.0, 200.0, 40.0));
+        let parsed = parse_unit_html("<p id=\"P01-001\">中\u{10ffff}文</p>").unwrap();
+        let result = typeset_one(&shaper, &para, &parsed, &Obstacles::default());
+        assert!(result.paragraph.overflow);
     }
 }
