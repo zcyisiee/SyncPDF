@@ -1,89 +1,75 @@
 # Rust PDF 后端修复 · 唯一 Task state
 
-> 更新：2026-09-23，主控维护；只允许用户和当前主 Agent 修改，叶子只读，不另建副本。
-> **交接就绪：用户要求由下一位 Agent 继续，本会话停在文档交付处。后端整体未完成。** R1/R2/R3工程与V3 GPU已验收，真实MVP可查看但明确为部分译文。当前入口：[最新交接](handoff-next-agent.md)。
+> 更新：2026-09-23；仅用户和主Agent可修改，子代理只读。主树 `feat/desktop-develop`，起始HEAD `6e61bb19`；R4/R5/R6/R7已按逻辑拆分提交，既有`cache/`保留且不入库。
+> **本轮R7完成：按用户要求先修链接/数学字符，再补有限动态bbox。CCS由88写入/69回退改善到154写入/3回退，原成功段无退化，原22点击框错位消除。仍是部分结果，后端整体未完成。** [验收报告](12-MVP真实翻译验收.md#ccs3764-r7) · [可复用经验](../../lessons/pdf-binding-and-render-evidence.md#先分清非空间失败再回收译后净空)。
 
-## 1. 用户目标与不可改变的偏好
+## 用户意图与不可改变的边界
 
-- 优先后端，不做界面、不改Electron；快速迭代真实可看的MVP，让用户依据PDF指导后续。最新反馈是“为什么回退原文、能否修复”，下一轮首要减少整段不翻译。
-- 完整目标：译文样式对应原文；每页A3横向dual，左原文右译文；中文目录/书签；超链接正确保留；作者、机构/地址、脚注、图片、reference等按策略保护。
-- Markdown one-shot；首个闭合、通过校验的译块立即编译；主请求/补救分别计数，不能拿fake冒充真实模型。
-- Knuth–Plass正文两端对齐，字体/位置稳定。**保持原文或用户指定字号，禁止自动缩字号；容纳失败明确提示。**当前也不自动缩行距；二次编辑适用同样规则。
-- 后端最终须支持按layout块修改字体、字号、可选译文并重新编译/导出，revision与失败原子性可靠。目前编辑接口未完成。
-- 必须PP-DocLayout-V3与Apple GPU。本机已通过CoreML CPUAndGPU实现，非PyTorch MPS。生产不调用LaTeX；旧bdt/TeX仅作质量对照。
-- 对外唯一入口bdt；`syncpdf-cli`是内部sidecar，不增加第二工具包。现有`bdt rust-translate`是获准子命令；旧Python路径保持原行为。
-- 保留全部dirty/untracked，特别是既有`cache/`；不reset/clean/stash/覆盖他人改动。不重启已结束worker，**不重复p19绑定调查**。
-- 若委派，遵循用户指定的 **gpt-6-sol:high、fresh context、Orca独立worktree**；主控分工、亲审完整diff/复验/集成。叶子不委派、不写task-state、不push/merge；一树一writer，默认2轮/30分钟、提前5分钟checkpoint。先读`docs/guide/delegation.md`。
+- 用户要求按逻辑分批提交，使用`fix`、`feat`、`docs`等分类和简洁清晰的中文说明；不提交运行缓存或验证产物。本批R4–R7已按上述要求整理提交，不改写已有提交历史。
+- **YAGNI、先实测后优化、快速完成。** 当前样本为主树`ccs2026b-paper3764.pdf`；不做界面/Electron，不用通用重构拖延样张，不重复p19绑定调查，不恢复已结束worker。
+- 先链接回退和数学字符，再动态bbox；首个闭合且校验通过的译块立即编译，Markdown one-shot，主请求/补救分别计数。缓存复排不能冒充新的真实模型测试。
+- 源字号×0.9、行距=目标主字号×1.3，保留标题/正文/小字层级；不以失败后无限缩字、压行距或扩大碰撞容差求通过。源作者/机构/脚注/图片/reference等保护不动。
+- R6用户决定：信任模型按目标语序调整已知样式，允许拆合/复用/省略和文本原子跨相邻样式；彻底删除目标语言字符比例门槛。保留块/KEEP/数字身份、已知样式和PDF安全。
+- PP-DocLayout-V3，Apple GPU通过CoreML CPUAndGPU，非PyTorch MPS；生产不调用LaTeX。对外入口只有`bdt`，`syncpdf-cli`仅内部sidecar。
+- 完整产品仍需A3横向dual、中文目录/书签、按块字体/字号/译文编辑与原子revision重编译；这些不能当已实现。
+- 保留全部dirty/untracked，尤其既有`cache/`；禁止reset/clean/stash或覆盖他人工作。不改共享conda，不以`~/.sp`作测试库，测试产物只放本仓库`tmp/`。
+- 若以后委派：先读`docs/guide/delegation.md`；用户指定gpt-6-sol:high、fresh context、Orca独立worktree，一树一writer；主控分工和验收，叶子不委派/不写本文件/不push。brief指定本文件唯一绝对路径，子树不另建状态。
 
-## 2. 当前主树、活动状态与恢复入口
+## 当前交付与验收
 
-主树：`/Users/zhengcaiyi/orca/workspaces/ieeTranslater/桌面端`，分支`feat/desktop-develop`。
+**最终样张：`tmp/backend-repair/ccs3764-final/translated.pdf`。** 同目录有事件、result、`audit.json`、`math-and-figure-audit.json`及截图；脚本/构建测试日志在`tmp/backend-repair/ccs3764-fix/`。
 
-- 交接文档前HEAD `e0abcea8`，最新实现`9939ed9b`；本次交接文档提交在其后，以git log/status为准，不能reset到快照。
-- 本次交接开工时只有`?? cache/`，无未提交源码；本次只修改交接/状态文档，独立提交。
-- `../repair-r1-bind` HEAD `b47c7283`、干净；候选已完成累计review/保全/集成（`3f70cc2c`），旧交接第5节已过时。
-- 无活跃子代理、syncpdf-cli、cargo/rustc任务；所有R1/R2/R3/GPU/MVP叶子已结束，不用等待或恢复。`codex-mvp-provider-check`和`codex-mvp-bdt-bridge`已由主控验收结束。
-- `../repair-r1-layout/tmp/backend-repair/ortlib`仍是本机ORT库只读位置，不能删该树。各树target/runtime独立，不跨树并发共享写入。
-- 唯一状态绝对路径即本文件；brief必须指定此路径，子树不得另建可写状态。
+- 21页全保存，**154实际写入/3回退**，另625策略/源保护不替换；新增66成功、原88成功无退化。
+- 复用`ccs3764-real-v2`的157段真实DeepSeek缓存；0主请求/0补救，19.671秒。RunFinished=false、exit1、`engine_incomplete`，没有伪装完整成功。
+- 319链接（317内部、2URI）、180命名目标、28书签保留；233点击框移动，全部保存后点击标签对应检查通过，原22错位消除。模板DOI仅保留，不认证网络可访问。
+- 57,225个保留源字符位置/字号/颜色变化0，无KEEP泄漏，qpdf通过。30个数学字形与完整原字体独立渲染对照，3,272参考墨迹像素缺失0；第3页保留图区域像素完全相同。
+- 同栏动态bbox第1轮救回P20-014/P20-015，基线分别上移约3.674/7.358pt。只是垂直净空重算，不是译后模型重检测，不跨栏/扩单元格/改字号。
+- 最后3段为狭窄表格子标题：P05-007 `（a）MergeGuard`；P20-005 `（b）6 个中有 3 个后门。`；P20-021 `（b）8 个中有 4 个后门。`。两行译文会撞保留文字/框线，纵向空间不足，继续保留原文。
+- pipeline库158 passed/0 failed/3 ignored；字体、typeset专项、两个PDF裁剪回归、35pytest通过；E2E的历史fallback断言改为最终状态后单独复跑通过。相关四crate严格Clippy、fmt、release、diff-check通过。**没有完成本轮全workspace验收**，不用R5全绿数字替代。
+- `ccs3764-optimized/`中途曾有CoreML原生诊断污染stdout，正确返回`engine_events_invalid`；失败日志保留，后续独立复跑和最终目录事件流正常。原生stdout隔离风险尚未修复。
 
-## 3. 已验证的实际能力
+## 提交整理（完成）
 
-- PDFium/lopdf同一不可变来源的绑定、CMap/code边界、共享流隔离、stale门禁、页候选原子发布；继承Resources及q/Q字体/字距/缩放/leading恢复，含跨Contents流。
-- 精确TJ名义推进（原数值、Tc/Tw、引号）、字体CID/GID映射和xref Size修复；未知简单字体宽度不猜1000/墨迹宽，保留拒绝边界。
-- 源阅读序空格与真实glyph身份分开；作者/机构/脚注等保护；Markdown闭合块流式交付、错误传播；快照不重放未就绪页，失败不修改已有revision/文档。
-- 精确逐run字号/颜色/源字体角色、源首行基线、实际font ink、cluster/fallback、Knuth–Plass与安全frame/栏归属；固定字号不可容纳则保留原文。
-- V3锁定bbox模型+CoreML已通过真实Apple M5 Pro计算计划/ORT profile举证。Rust实际ORT1.23.2；全篇推理中位约99ms/页，初始化仍明显，不优先再做性能专项。
-- `bdt rust-translate`通过本机pi真实翻译；`--cached-from`只读复制旧译文缓存、重新校验、跳过全部模型请求，缺失块回退并完成所有页保存/自检/发布。成功块统计需PageReady，typeset准备好不等于写入。
-- 普通Number原子仅在源范围/单一样式明确、段落无注释相交条件下按原文回填。公式、引用、URL等尚未完整放置，不能把Number支持说成完整公式支持。
+- 从`6e61bb19`起按依赖顺序拆为5个`fix`（校验、墨迹、字体、PDF裁剪、文本原子与链接）、2个`feat`（字号/行距、动态bbox）及1个`docs`，标题均用简洁中文；共享文件分块暂存，没有整包混提。
+- 代码和字体二进制散列与提交前一致；仅清理许可文本行尾空格，并修正CLI指南中“尚未动态回收空白”的过时说明。`cache/`、`tmp/`未提交，未push。
+- 本次重新通过35项CLI/单入口pytest、Rust fmt及整批diff-check；未重新翻译或重跑完整Rust workspace，先前样张和验收范围不变。
 
-当前行为与边界详见[参考](../../reference/rust-pdf-backend.md)；实施计划不等于现有功能，见[接口契约](07-后续接口契约.md)。
+## 本轮实现与代码入口
 
-## 4. 当前交付与回退基线
+- `syncpdf-font/{assets,src/loader.rs,src/profile.rs}`：内嵌STIX Two Math 2.12 b168/OFL，追加fallback链，精确Unicode，不依赖系统字体或TeX。
+- `syncpdf-typeset/src/layout.rs`：负侧承起笔纠正；已有逐glyph行间碰撞复核保留，容差不变。
+- `syncpdf-pipeline/src/stages/text_atoms.rs`：数字/严格数字引用和精确HTTP(S) URL恢复；公式/不支持Other仍拒绝。
+- `stages/link_text.rs`：有atom/无atom统一处理；KEEP精确锚点，旧缓存普通引用只接受唯一或上下文可消歧匹配，拒绝模糊/不支持注释。内部临时样式传递到实际目标字形，按行生成Rect/QuadPoints，Dest/A不动。`run.rs`在页候选内更新，保存失败不提交源文档/链接/revision。
+- `syncpdf-pdf/src/bind.rs`：`n`清空未绘路径；Form入口CTM下BBox限制子绘图，修正第3页巨型假障碍。Rect会归一化端点，空交在构造前判断。
+- `stages/refine.rs`、`run/refinement.rs`：源障碍减去真正被替换字形、加已接受译文墨迹；页保存前最多3轮，没改善即停。只重试合法但未排入的目标，不重绑修改后PDF。
+- **事件消费变化**：PageReady前初始fallback可被精修typeset取代，按段ID取最新状态；保存后不再重排。重复模型块幂等与页原子发布边界保持。
+- R6放宽校验仍在`syncpdf-translate/{validate,prompt,unit}.rs`；R5显式Typography仍只改变目标规格，不改翻译单元/缓存身份。
 
-**用户已收到** `tmp/backend-repair/mvp-20260923/`：`translated.pdf`（23页）、`preview-3-pages.pdf`、`README.md`未成功清单、events/result/review-summary/source-retention JSON和PNG。
+## 下一步与已知限制
 
-- **107块实际写入、55块回退**：40原子未放置、12固定字号排版失败、3缺有效译文。
-- 另40源区域重叠、1旋转侧注提前保留，不算上述55；作者/脚注/reference等策略保护不是失败。
-- 158段真实缓存命中，0主请求/0补救；18.993秒，23个PageReady，0 error事件，完成最终发布。
-- 62,943个保留字符位置/字号/颜色变化0，qpdf通过；已目视重点页，但仍有中英混排与留白。**未通过完整论文质量验收**。
-- RunFinished false / bdt exit1正确表示部分结果，不能为了“通过”改状态或压低warning。
+本轮用户指定优化已完成并交付部分样张；若继续优化剩余3段，先针对子标题验证**真实单元格/同栏横向净空**或更简洁译文，不能任意越框或直接改缓存内容。可见留白、中英混排和语义翻译质量未全面验收。
 
-真实历史：
+- 625不替换包含正常策略以及38 `protected_source_overlap`、2 `translatable_region_overlap`等；这些在157翻译块/3回退之外。不能以少回退宣称整篇已译完。
+- 通用公式源绘制、任意语言/注释格式链接、RTL ActualText等仍未认证。`links_check()`本身仍只检查数量和目标，必须加保存后点击几何验证。
+- 数字单位正则会把`2 shows`/`250 samples`词首s识别为单位；本轮未改。修复会改变单元/缓存hash，须明确失效或重译受影响块，不能伪造缓存命中。
+- 旧23页论文R5为147/15；R6后的旧论文重编译与4段缺缓存补译未做，不能把CCS改善套用旧样本。失败历史回包没有保存，错误码不能重建原译文。
+- 现存strict docs构建有4处旧锚点警告，未当通过，不顺手扩修。源阶段旧诊断缓存可含修正前绘图障碍；最终生产运行重新绑定源页，验收以最终PDF/事件为准。
 
-| 目录（`tmp/backend-repair/`下） | 事实 |
-|---|---|
-| `mvp-real-p1-3` | pi63.10秒，16成功/14回退，1主/0补救 |
-| `mvp-real-full-v1` | pi352.39秒，90成功/72回退，1主/10补救；**当前复排用此真实缓存** |
-| `mvp-real-full-v2` | 数字修复后107块准备好，但补救返回unknown escape，4块未落定；不是最终发布 |
-| `mvp-20260923` | 缓存重编译最终交付，107写入/55回退 |
+## 环境、恢复与历史证据
 
-主请求中的首个typeset133.50秒、首页落盘136.10秒，翻译阶段351.94秒才结束，已验证边译边编译。4个缓存未命中中的1个先记原子回退，所以translate_missing只有3，勿误报数字。
+主树：`/Users/zhengcaiyi/orca/workspaces/ieeTranslater/桌面端`；唯一状态即本文件。当前没有活跃子代理、翻译或cargo任务；不恢复旧worker。R4–R7代码与文档已分批提交；既有`cache/`仍保留在工作区、未入库。
 
-## 5. 唯一下一步与验收方式
+```bash
+source tmp/backend-repair/codex-r1-integration/env.sh
+cargo build --manifest-path engine/Cargo.toml --release -p syncpdf-cli
+~/miniconda3/envs/bdt/bin/python -m babeldoc_tools rust-translate \
+  "$PWD/ccs2026b-paper3764.pdf" --workdir tmp/backend-repair/<新目录> \
+  --cached-from tmp/backend-repair/ccs3764-real-v2 \
+  --layout-device coreml --font-scale 0.9 --line-height 1.3
+```
 
-下一位主控从**减少整段回退**开始，优先常见引用及其链接几何，再扩展公式源绘制；随后处理区域归属和排版误判，尽快提供改进后的PDF。此次仅交接文档，尚未开始新R4实现。
+ORT只读库仍在`../repair-r1-layout/tmp/backend-repair/ortlib`，不能删该树；各树target/runtime独立。macOS nohup可能清除DYLD变量，真实测试记录器曾在Python子进程环境恢复路径。
 
-- 40原子回退需按kind/链接关联细分，不能全部当数学公式。一个引用导致整个正文段不译是当前最大缺口。不得直接删除保护分支。
-- 40源区域重叠需可靠glyph归属/行内分割，不放宽coverage或扩大不译区域消统计。
-- 12 overflow还未逐块归因：可能为frame、actual ink、碰撞、shaping等；先修误判，真空间不足保持字号并提示。
-- 缺有效译文涉及模型输出协议/字面量/语言校验；不要盲目重试或放宽校验。修排版先用真实cache-only，不重复花模型时间。
-- 原子几何仍有估算：`typeset.rs::para_glyph_bbox`返回None，LineBox.kept_atoms只存ID；缺真实源绘制/目标位置接口。`links.rs`尚无译文Rect/QuadPoints重建。具体陷阱与入口见[交接第5节](handoff-next-agent.md#5-下一个具体任务减少整段回退)。
-- A3 dual、中文目录、链接重排、字体/字号编辑及revision重编译、打包分发仍未完成；RTL ActualText等通用PDF边界也不能泛化宣称支持。
-- 每批主控审diff、必要行为测试、真实PDF内容/渲染/链接验收；不要只看测试数或文件存在。保留旧失败及MVP，用新tmp目录做对比。
+历史：原CCS `ccs3764-real-v2/`为88/69、22错位；1主请求/0补救，157缓存，首块149.009秒、首页153.060秒、翻译200.659秒结束，已证明真实流式。`ccs3764-test/`保留源清单、流式快照、链接错位反例，`ccs3764-diagnosis/`保留69回退分类。R7先141/16（链接/数学）、再153/4（初次净空/裁剪）、最终154/3；中间失败和样张全部保留。
 
-## 6. 验证与证据索引
-
-| 阶段 | 有效结果/文档 |
-|---|---|
-| 绑定集成 | [06](06-R1绑定集成验收.md)，原dirty已保全；p19已修，无需重做 |
-| R1基础 | [08](08-R1布局与固定字号验收.md)，567/0/4 ignored |
-| R2源文/Markdown/事务 | [09](09-R2源文本与Markdown验收.md)，591/0/5 ignored及真实probe |
-| R3固定字号/排版 | [10](10-R3固定字号与排版验收.md)，641/0/6 ignored，随后宽度/qQ专项 |
-| V3 GPU | [11](11-V3-GPU验收.md)，接线后workspace648/0/7 ignored（MVP前快照） |
-| 最新MVP | [12](12-MVP真实翻译验收.md)，相关Rust269/0/5 ignored，strict Clippy/fmt/release；bdt26pytest/Ruff；真实PDF保护通过 |
-
-最新日志在`tmp/backend-repair/mvp-runner/`；GPU/R3在`tmp/backend-repair/layout-final-review/`、`tmp/backend-repair/codex-r1-integration/`。最新269不是全workspace数字；已有无文本夹具早退/ignored不当有效真实覆盖。文档strict构建旧HTTP→pipeline中文锚点告警仍失败，不能计通过，不扩大修复范围。
-
-本机输入：`/Users/zhengcaiyi/Downloads/2106.04690v2.pdf`。从主树先`source tmp/backend-repair/codex-r1-integration/env.sh`；Python用`~/miniconda3/envs/bdt/bin/python -m babeldoc_tools`。完整可复跑命令、缺动态库/Node处理见[最新交接](handoff-next-agent.md#6-本机环境与最快复现)。不改共享conda、不碰`~/.sp`或既有cache。
-
-本任务可复用经验已经进入[PDF绑定与渲染经验](../../lessons/pdf-binding-and-render-evidence.md)。任务尚未完成，不因交接而标完成；用户自行启动下一位Agent后，由新主控继续维护本文件。
+旧样本`/Users/zhengcaiyi/Downloads/2106.04690v2.pdf`：`mvp-20260923`107/55，R4 `mvp-r4-20260923`144/18，R5 `mvp-r5-typography`147/15。R4/R5完整workspace数字仅属于历史；细节与命令见[累计验收](12-MVP真实翻译验收.md)、[参考](../../reference/rust-pdf-backend.md)、[经验总结](../../lessons/pdf-binding-and-render-evidence.md)。A3 dual、中文目录、编辑及整体质量仍待完成。
