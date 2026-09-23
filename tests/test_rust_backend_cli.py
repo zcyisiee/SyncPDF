@@ -42,6 +42,8 @@ def fake_engine(tmp_path: Path) -> Path:
         "if mode != 'no_final':\n"
         "    emit(type='run_finished', ok=(mode in ('success', 'false_success')))\n"
         "out.write_bytes(b'%PDF-fake')\n"
+        "if '--dual-output' in args and mode != 'missing_dual':\n"
+        "    pathlib.Path(args[args.index('--dual-output') + 1]).write_bytes(b'%PDF-dual')\n"
         "print('engine stderr', file=sys.stderr)\n"
         "sys.exit(0 if mode != 'partial' else 1)\n",
         encoding="utf-8",
@@ -88,6 +90,8 @@ def test_success_keeps_one_json_envelope_and_engine_events(tmp_path: Path, fake_
     assert payload["data"]["typography"] == {"font_scale": 1.0, "line_height": None}
     assert "--font-scale" not in invocation["args"]
     assert "--line-height" not in invocation["args"]
+    assert "--dual-output" not in invocation["args"]
+    assert "dual.pdf" not in payload["data"]["artifacts"]
     assert invocation["args"][:1] == ["translate"]
     assert invocation["args"][invocation["args"].index("--translator") + 1] == "pi"
     assert invocation["args"][invocation["args"].index("--pages") + 1] == "1-3"
@@ -157,6 +161,49 @@ def test_existing_run_logs_are_not_overwritten(tmp_path: Path, fake_engine: Path
     assert completed.returncode == 1
     assert payload["error"]["code"] == "workdir_used"
     assert (workdir / "events.jsonl").read_text() == "keep\n"
+
+
+def test_dual_export_is_optional_and_both_artifacts_are_reported(tmp_path: Path, fake_engine: Path) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    workdir = tmp_path / "dual-run"
+    completed, payload = _run(pdf, workdir, fake_engine, extra_args=("--dual",))
+    assert completed.returncode == 0
+    args = json.loads((workdir / "invocation.json").read_text())["args"]
+    assert args[args.index("--dual-output") + 1] == str(workdir / "dual.pdf")
+    assert payload["data"]["dual_requested"] is True
+    assert payload["data"]["dual_output_exists"] is True
+    for name in ("translated.pdf", "dual.pdf"):
+        assert Path(payload["data"]["artifacts"][name]).is_file()
+    assert pdf.read_bytes() == b"%PDF-input"
+
+
+def test_requested_dual_missing_is_failure(tmp_path: Path, fake_engine: Path) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    # Simulate an engine that reports success but omits the requested artifact.
+    fake_engine.write_text(fake_engine.read_text().replace("'success', 'false_success'", "'success', 'false_success', 'missing_dual'")
+                           .replace("mode == 'success' else", "mode in ('success', 'missing_dual') else"))
+    completed, payload = _run(pdf, tmp_path / "missing-dual", fake_engine, mode="missing_dual", extra_args=("--dual",))
+    assert completed.returncode == 1
+    assert payload["error"]["code"] == "dual_output_missing"
+    assert payload["error"]["output_exists"] is True
+
+
+def test_existing_dual_is_not_overwritten(tmp_path: Path, fake_engine: Path) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    workdir = tmp_path / "run"
+    workdir.mkdir()
+    dual = workdir / "dual.pdf"
+    dual.write_bytes(b"keep dual")
+    completed, payload = _run(pdf, workdir, fake_engine, extra_args=("--dual",))
+    assert completed.returncode == 1
+    assert payload["error"]["code"] == "workdir_used"
+    assert dual.read_bytes() == b"keep dual"
+    completed, payload = _run(dual, workdir, fake_engine, extra_args=("--dual",))
+    assert payload["error"]["code"] == "input_output_conflict"
+    assert dual.read_bytes() == b"keep dual"
 
 
 def test_workdir_io_error_is_a_json_failure(tmp_path: Path, fake_engine: Path) -> None:

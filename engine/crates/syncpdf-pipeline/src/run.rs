@@ -61,6 +61,8 @@ pub struct RunConfig {
     pub cache_only: bool,
     /// Explicit target-only scale/relative leading (source typography by default).
     pub typography: stages::typeset::Typography,
+    /// Optional additional A3 comparison export, produced after mono validation.
+    pub dual_output: Option<PathBuf>,
 }
 
 impl RunConfig {
@@ -77,6 +79,7 @@ impl RunConfig {
             run,
             cache_only: false,
             typography: stages::typeset::Typography::default(),
+            dual_output: None,
         })
     }
 
@@ -227,6 +230,15 @@ impl Pipeline {
         let fields = cfg
             .run_fields()
             .ok_or_else(|| PipelineError::Protocol("缺少 run 请求".into()))?;
+        if cfg
+            .dual_output
+            .as_deref()
+            .is_some_and(|path| path == fields.input || path == fields.output)
+        {
+            return Err(PipelineError::Protocol(
+                "双语输出不能覆盖原文或单语译文".into(),
+            ));
+        }
 
         // ── 0. 打开文档（preflight）────────────────────────────────────
         let worker = match syncpdf_pdf::pdfium::PdfiumWorker::spawn() {
@@ -751,6 +763,32 @@ impl Pipeline {
                 paragraph_id: None,
                 page: None,
                 message: format!("已保存部分结果：{} 段回退、{protected} 段源区域冲突、{coverage_gaps} 页覆盖缺口", summary_stats.fallbacks),
+            });
+        }
+        if let Some(output) = &cfg.dual_output {
+            check_cancelled(cancel)?;
+            syncpdf_pdf::dual::export(fields.input, fields.output, output)
+                .map_err(|e| PipelineError::Validation(e.to_string()))?;
+            let report = syncpdf_pdf::self_check(output, &cjk_pages)
+                .map_err(|e| PipelineError::Validation(e.to_string()))?;
+            if !report.ok {
+                return Err(PipelineError::Validation(report.problems.join("; ")));
+            }
+            for message in report.warnings {
+                sink.emit(Event::Issue {
+                    severity: Severity::Warning,
+                    code: "dual_self_check".into(),
+                    paragraph_id: None,
+                    page: None,
+                    message,
+                });
+            }
+            sink.emit(Event::Issue {
+                severity: Severity::Info,
+                code: "dual_exported".into(),
+                paragraph_id: None,
+                page: None,
+                message: format!("A3 横向双语 PDF（左原文、右译文）：{}", output.display()),
             });
         }
         sink.emit(Event::DocumentFinished {
@@ -1366,11 +1404,22 @@ mod tests {
         let out = tmp_path("pdf");
         let log: Arc<Mutex<Vec<(u64, Event)>>> = Arc::new(Mutex::new(Vec::new()));
         let shared = SharedSink::new(RunRecorder::new(log.clone()));
-        let cfg = RunConfig::with_fake("cjk", input, out.clone()).unwrap();
+        let mut cfg = RunConfig::with_fake("cjk", input, out.clone()).unwrap();
+        let dual = tmp_path("pdf");
+        cfg.dual_output = Some(dual.clone());
         let p = pipeline(tmp_path("db"));
         let result = p.run(&cfg, shared.clone(), CancellationToken::new()).await;
         assert!(result.is_ok(), "端到端应成功：{result:?}");
         assert!(out.exists(), "输出文件应存在：{out:?}");
+        assert!(dual.exists(), "请求的双语文件应在完成事件前保存");
+        let doc = lopdf::Document::load(&dual).unwrap();
+        let page = doc.get_dictionary(doc.get_pages()[&1]).unwrap();
+        assert_eq!(
+            page.get(b"MediaBox").unwrap().as_array().unwrap()[2]
+                .as_float()
+                .unwrap(),
+            syncpdf_pdf::dual::A3_WIDTH
+        );
 
         let events = log.lock().unwrap().clone();
         assert!(!events.is_empty(), "至少要有事件");

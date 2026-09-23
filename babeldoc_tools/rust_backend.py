@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-_ARTIFACTS = ("translated.pdf", "events.jsonl", "stderr.log", "result.json")
+_ARTIFACTS = ("translated.pdf", "dual.pdf", "events.jsonl", "stderr.log", "result.json")
 _ENGINE = Path(__file__).resolve().parents[1] / "engine/target/release/syncpdf-cli"
 
 
@@ -50,6 +50,7 @@ def _translate_pdf(
     cached_from: str | None = None,
     font_scale: float = 1.0,
     line_height: float | None = None,
+    dual: bool = False,
 ) -> dict:
     """Run the Rust CLI once, retaining its events and incomplete-result semantics."""
     for name, value in (("font_scale", font_scale), ("line_height", line_height)):
@@ -59,13 +60,14 @@ def _translate_pdf(
     destination = Path(workdir).expanduser().resolve()
     binary = Path(engine).expanduser().resolve() if engine else _ENGINE
     output = destination / "translated.pdf"
+    dual_output = destination / "dual.pdf"
 
     if not source.is_file():
         return _error("input_missing", f"输入 PDF 不存在：{source}")
     if source.suffix.lower() != ".pdf":
         return _error("input_not_pdf", f"输入文件不是 PDF：{source}")
-    if source == output.resolve():
-        return _error("input_output_conflict", "输入 PDF 不能是 workdir/translated.pdf")
+    if source in (output.resolve(), dual_output.resolve()):
+        return _error("input_output_conflict", "输入 PDF 不能是 workdir/translated.pdf 或 dual.pdf")
     if not binary.is_file() or not os.access(binary, os.X_OK):
         return _error(
             "engine_missing",
@@ -82,7 +84,7 @@ def _translate_pdf(
     destination.mkdir(parents=True, exist_ok=True)
     temporary = destination / "tmp"
     temporary.mkdir(exist_ok=True)
-    paths = {name: str(destination / name) for name in _ARTIFACTS}
+    paths = {name: str(destination / name) for name in _ARTIFACTS if name != "dual.pdf" or dual}
     command = [
         str(binary), "translate", "--input", str(source), "--output", str(output),
         "--translator", "pi", "--model", model, "--thinking", thinking,
@@ -106,6 +108,8 @@ def _translate_pdf(
         command.extend(("--font-scale", str(font_scale)))
     if line_height is not None:
         command.extend(("--line-height", str(line_height)))
+    if dual:
+        command.extend(("--dual-output", str(dual_output)))
     child_env = os.environ.copy()
     child_env["SYNCPDF_LAYOUT_DEVICE"] = layout_device
     child_env["TMPDIR"] = str(temporary)
@@ -205,6 +209,8 @@ def _translate_pdf(
         "run_finished_ok": finished,
         "artifacts": paths,
         "output_exists": output.is_file(),
+        "dual_requested": dual,
+        "dual_output_exists": dual_output.is_file() if dual else False,
     }
     if launch_error:
         code, message = "engine_launch_failed", "Rust 引擎启动失败；详见 stderr.log"
@@ -216,6 +222,8 @@ def _translate_pdf(
         code, message = "engine_incomplete", "Rust 引擎未完整翻译；部分结果和事件已保留"
     elif not output.is_file():
         code, message = "output_missing", "Rust 引擎报告成功，但译文 PDF 不存在"
+    elif dual and not dual_output.is_file():
+        code, message = "dual_output_missing", "Rust 引擎报告成功，但双语 PDF 不存在"
     else:
         code, message = "", ""
     result = {"ok": not code, "data": data} if not code else _error(code, message, **data)

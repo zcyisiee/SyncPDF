@@ -3,6 +3,7 @@
 #![warn(missing_debug_implementations, rust_2018_idioms)]
 
 pub mod content;
+pub mod dual;
 pub mod pdfium;
 
 pub mod bind;

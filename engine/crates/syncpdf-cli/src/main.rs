@@ -46,6 +46,9 @@ enum Command {
         /// 输出 PDF。
         #[arg(long)]
         output: PathBuf,
+        /// 额外输出 A3 横向双语 PDF（左原文、右译文）。
+        #[arg(long)]
+        dual_output: Option<PathBuf>,
         /// 翻译器：`fake:echo` / `fake:cjk` / `fake:slow:500` / `pi`。
         #[arg(long, default_value = "fake:echo")]
         translator: String,
@@ -126,6 +129,7 @@ fn main() -> anyhow::Result<()> {
         Command::Translate {
             input,
             output,
+            dual_output,
             translator,
             model,
             thinking,
@@ -139,6 +143,7 @@ fn main() -> anyhow::Result<()> {
         } => rt.block_on(cmd_translate(
             input,
             output,
+            dual_output,
             translator,
             model,
             thinking,
@@ -253,6 +258,7 @@ async fn cmd_run() -> anyhow::Result<()> {
 async fn cmd_translate(
     input: PathBuf,
     output: PathBuf,
+    dual_output: Option<PathBuf>,
     translator: String,
     model: Option<String>,
     thinking: Option<String>,
@@ -297,6 +303,7 @@ async fn cmd_translate(
     let mut cfg = RunConfig::new(configure, run)?;
     cfg.cache_only = cache_only;
     cfg.typography = typography;
+    cfg.dual_output = dual_output;
     let sink = SharedSink::new(StdoutSink::new());
     let pipeline = Pipeline::default();
     match pipeline.run(&cfg, sink, CancellationToken::new()).await {
