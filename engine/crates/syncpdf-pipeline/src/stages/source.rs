@@ -6,8 +6,7 @@
 //! 逐页串行绑定，不做 rayon 并行；要并行的是每个页面里不碰 pdfium 的部分，
 //! 目前 `bind_page` 已把两者合在一起，收益有限（见回报「已知缺口」）。
 //!
-//! 每页开始前检查取消令牌；`bind_page` 的 `issues` 不构成失败，由 `run.rs`
-//! 转成 `issue` 事件。
+//! 每页开始前检查取消令牌；已知不可信绑定在返回翻译输入前作为 Protocol 拒绝。
 
 use syncpdf_core::ir::PageIR;
 use syncpdf_pdf::bind::{bind_page, BindError, BoundPage};
@@ -37,13 +36,9 @@ pub fn source_analysis(
         check_cancelled(cancel)?;
         // `bind_page` 收 1 基页号（`PageIR.page` 是 0 基，见 `bind.rs`）。
         let bound = bind_page(worker, doc, lo, page + 1).map_err(bind_error)?;
-        if bound.stats.degraded > 0 {
-            tracing::debug!(
-                page,
-                degraded = bound.stats.degraded,
-                "bind_page 走了降级路径"
-            );
-        }
+        bound.check_replacement().map_err(|e| {
+            PipelineError::Protocol(format!("page {} replacement rejected: {e}", page + 1))
+        })?;
         out.push(bound);
         on_progress(i as u32 + 1, total);
     }

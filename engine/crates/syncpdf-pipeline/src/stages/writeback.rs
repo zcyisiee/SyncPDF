@@ -39,28 +39,25 @@ use super::PipelineError;
 ///
 /// 调用方（`run.rs`）只应传入**已就绪且译文校验通过**的段落；这里不再过滤状态，
 /// 只删除 `Paragraph::glyphs`。`bound` 提供页内的 Form `Do` 记录（
-/// `PatchSet::with_forms`），使 Form XObject 内的字形也能删除（克隆 Form 流）。
+/// `PatchSet::delete_glyphs`），使 Form XObject 内的字形也能删除（克隆 Form 流）。
 ///
-/// 页号取 `bound.ir.page.number()`（0 基）+ 1。
+/// 页号取 `bound.ir.page.number()`（1 基）。
 /// 无删除时返回全零 [`PatchStats`] 且**不碰文档**。
 pub fn delete_translated(
     doc: &mut Document,
     bound: &BoundPage,
     paras: &[&Paragraph],
 ) -> Result<PatchStats, PipelineError> {
-    let mut ps = PatchSet::new().with_forms(bound);
-    let mut any = false;
-    for para in paras {
-        if para.glyphs.is_empty() {
-            continue;
-        }
-        ps.delete_glyphs(&bound.ir, &para.glyphs);
-        any = true;
-    }
-    if !any || ps.is_empty() {
+    let ids: Vec<_> = paras
+        .iter()
+        .flat_map(|para| para.glyphs.iter().copied())
+        .collect();
+    if ids.is_empty() {
         return Ok(PatchStats::default());
     }
-    let page = bound.ir.page.number() + 1;
+    let mut ps = PatchSet::new();
+    ps.delete_glyphs(bound, &ids).map_err(patch_error)?;
+    let page = bound.ir.page.number();
     ps.apply(doc, page).map_err(patch_error)
 }
 
