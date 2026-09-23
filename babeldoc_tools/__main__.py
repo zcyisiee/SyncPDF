@@ -453,6 +453,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_rust.add_argument("--source-lang", default="auto")
     p_rust.add_argument("--target-lang", default="zh-CN")
     p_rust.add_argument("--layout-device", choices=("auto", "cpu", "coreml"), default="auto")
+    p_rust.add_argument("--cached-from", help="仅重编译已有运行目录的译文缓存，不调用模型")
     p_rust.add_argument("--engine", help="syncpdf-cli 可执行文件；默认本仓库 release 构建")
 
     # ---- serve ----------------------------------------------------------- #
@@ -525,6 +526,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
             target_lang=args.target_lang,
             layout_device=args.layout_device,
             engine=args.engine,
+            cached_from=args.cached_from,
         )
     if command == "parse":
         return _invoke_with_debug(

@@ -12,6 +12,7 @@ pub mod preflight;
 mod ruled_code;
 pub mod source;
 pub mod source_policy;
+pub(crate) mod text_atoms;
 pub mod translate;
 pub mod typeset;
 pub mod writeback;

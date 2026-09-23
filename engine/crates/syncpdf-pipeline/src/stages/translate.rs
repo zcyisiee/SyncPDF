@@ -144,6 +144,18 @@ pub async fn translate_all<T: Translator>(
     cache: Option<&Cache>,
     on_block: impl FnMut(TranslatedBlock) + Send,
 ) -> Result<DocumentResult, PipelineError> {
+    translate_all_with_cache_policy(translator, spec, paras, lookup, cache, on_block, false).await
+}
+
+pub async fn translate_all_with_cache_policy<T: Translator>(
+    translator: T,
+    spec: &PromptSpec,
+    paras: &[Paragraph],
+    lookup: impl Fn(GlyphId) -> Option<String>,
+    cache: Option<&Cache>,
+    on_block: impl FnMut(TranslatedBlock) + Send,
+    cache_only: bool,
+) -> Result<DocumentResult, PipelineError> {
     let units: Vec<Unit> = paras.iter().map(|p| build_unit(p, &lookup)).collect();
     let mut ctx = ContextMap::from_units(&units);
     for para in paras {
@@ -158,7 +170,7 @@ pub async fn translate_all<T: Translator>(
             ctx.hints.insert(para.id.clone(), hints);
         }
     }
-    let engine = Engine::new(translator);
+    let engine = Engine::new(translator).with_cache_only(cache_only);
     engine
         .translate_document(spec, units, ctx, cache, on_block)
         .await

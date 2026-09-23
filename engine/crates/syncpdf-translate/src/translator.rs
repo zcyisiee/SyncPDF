@@ -184,6 +184,7 @@ pub struct Engine<T: Translator> {
     translator: T,
     expansion_limit: f32,
     max_retry_rounds: u32,
+    cache_only: bool,
 }
 
 impl<T: Translator> std::fmt::Debug for Engine<T> {
@@ -192,6 +193,7 @@ impl<T: Translator> std::fmt::Debug for Engine<T> {
             .field("translator", &self.translator.name())
             .field("expansion_limit", &self.expansion_limit)
             .field("max_retry_rounds", &self.max_retry_rounds)
+            .field("cache_only", &self.cache_only)
             .finish()
     }
 }
@@ -202,6 +204,7 @@ impl<T: Translator> Engine<T> {
             translator,
             expansion_limit: DEFAULT_EXPANSION_LIMIT,
             max_retry_rounds: DEFAULT_MAX_RETRY_ROUNDS,
+            cache_only: false,
         }
     }
 
@@ -212,6 +215,12 @@ impl<T: Translator> Engine<T> {
 
     pub fn with_max_retry_rounds(mut self, rounds: u32) -> Self {
         self.max_retry_rounds = rounds;
+        self
+    }
+
+    /// Recompile validated cached translations without sending any model request.
+    pub fn with_cache_only(mut self, enabled: bool) -> Self {
+        self.cache_only = enabled;
         self
     }
 
@@ -274,7 +283,7 @@ impl<T: Translator> Engine<T> {
         }
 
         // ── 2. 首轮：整文档 Markdown one-shot ───────────────────────
-        if !pending.is_empty() {
+        if !self.cache_only && !pending.is_empty() {
             for p in build_document_prompts(spec, &pending, &ctx.hints)? {
                 st.primary_prompts += 1;
                 st.prompts += 1;
@@ -309,7 +318,7 @@ impl<T: Translator> Engine<T> {
             }
         };
         let mut round = 0u32;
-        while round < self.max_retry_rounds && !groups.is_empty() {
+        while !self.cache_only && round < self.max_retry_rounds && !groups.is_empty() {
             round += 1;
             st.retry_rounds = round;
             let mut next: Vec<Vec<Unit>> = Vec::new();
@@ -628,6 +637,38 @@ mod tests {
             .await
             .unwrap();
         (r, seen)
+    }
+
+    #[tokio::test]
+    async fn cached_recompile_never_calls_model_and_preserves_missing_sources() {
+        let us = units(3);
+        let cache = Cache::open_in_memory().unwrap();
+        cache
+            .put("en", "en", "real-model", &us[0].html, &us[0].html)
+            .unwrap();
+        // An invalid cached identity must not bypass validation.
+        cache
+            .put(
+                "en",
+                "en",
+                "real-model",
+                &us[1].html,
+                "<p id=\"P99-001\">wrong</p>",
+            )
+            .unwrap();
+        let engine =
+            Engine::new(RecordingTranslator::new(FakeTranslator::Echo)).with_cache_only(true);
+        let ctx = ContextMap::from_units(&us);
+        let result = engine
+            .translate_document(&spec(), us.clone(), ctx, Some(&cache), |_| {})
+            .await
+            .unwrap();
+        assert_eq!(result.stats.cache_hits, 1);
+        assert_eq!(result.stats.primary_prompts, 0);
+        assert_eq!(result.stats.retry_prompts, 0);
+        assert_eq!(result.fallback_ids.len(), 2);
+        assert_eq!(result.blocks[2].html, us[2].html);
+        assert!(engine.translator().recorded().is_empty());
     }
 
     #[tokio::test]

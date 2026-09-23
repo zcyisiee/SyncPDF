@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -23,10 +25,17 @@ def _progress(event: dict) -> None:
     elif kind == "page_ready":
         page = event.get("page")
         if isinstance(page, int):
-            sys.stderr.write(f"rust-translate: page {page + 1} ready\n")
+            sys.stderr.write(f"rust-translate: page {page} ready\n")
 
 
-def translate_pdf(
+def translate_pdf(**kwargs: object) -> dict:
+    try:
+        return _translate_pdf(**kwargs)
+    except OSError as exc:
+        return _error("artifact_io", f"无法创建或写入本次运行产物：{exc}")
+
+
+def _translate_pdf(
     *,
     pdf: str,
     workdir: str,
@@ -37,6 +46,7 @@ def translate_pdf(
     target_lang: str,
     layout_device: str,
     engine: str | None,
+    cached_from: str | None = None,
 ) -> dict:
     """Run the Rust CLI once, retaining its events and incomplete-result semantics."""
     source = Path(pdf).expanduser().resolve()
@@ -58,6 +68,11 @@ def translate_pdf(
     if any((destination / name).exists() for name in _ARTIFACTS):
         return _error("workdir_used", f"运行产物已存在，请指定新的 --workdir：{destination}")
 
+    cached_db = Path(cached_from).expanduser().resolve() / "cache/translate.db" if cached_from else None
+    if cached_db is not None and not cached_db.is_file():
+        return _error("translation_cache_missing", f"找不到已保存译文缓存：{cached_db}")
+    if cached_db is not None and cached_db == (destination / "cache/translate.db").resolve():
+        return _error("cache_output_conflict", "缓存来源与本次运行目录不能相同")
     destination.mkdir(parents=True, exist_ok=True)
     temporary = destination / "tmp"
     temporary.mkdir(exist_ok=True)
@@ -68,6 +83,17 @@ def translate_pdf(
         "--source-lang", source_lang, "--target-lang", target_lang,
         "--cache-dir", str(destination / "cache"),
     ]
+    if cached_db is not None:
+        if (destination / "cache/translate.db").exists():
+            return _error("workdir_used", "本次运行目录已有译文缓存，请指定新的目录")
+        (destination / "cache").mkdir(exist_ok=True)
+        try:
+            with sqlite3.connect(cached_db.as_uri() + "?mode=ro", uri=True) as previous:
+                with sqlite3.connect(destination / "cache/translate.db") as copied:
+                    previous.backup(copied)
+        except sqlite3.Error:
+            return _error("translation_cache_invalid", "无法只读复制已有译文缓存")
+        command.append("--cache-only")
     if pages is not None:
         command.extend(("--pages", pages))
     child_env = os.environ.copy()
@@ -75,6 +101,8 @@ def translate_pdf(
     child_env["TMPDIR"] = str(temporary)
 
     status_by_id: dict[str, str] = {}
+    paragraph_pages: dict[str, int] = {}
+    ready_pages: set[int] = set()
     finished: bool | None = None
     event_error = False
     exit_code: int | None = None
@@ -93,6 +121,7 @@ def translate_pdf(
                     encoding="utf-8",
                     errors="replace",
                     env=child_env,
+                    start_new_session=True,
                 )
             except OSError as exc:
                 errors.write(f"启动 Rust 引擎失败：{exc}\n")
@@ -118,22 +147,35 @@ def translate_pdf(
                             status = event.get("status")
                             if isinstance(paragraph_id, str) and isinstance(status, str):
                                 status_by_id[paragraph_id] = status
+                                if isinstance(event.get("page"), int):
+                                    paragraph_pages[paragraph_id] = event["page"]
+                        elif kind == "page_ready" and isinstance(event.get("page"), int):
+                            ready_pages.add(event["page"])
                         elif kind == "run_finished":
                             finished = event.get("ok") if isinstance(event.get("ok"), bool) else None
-                except KeyboardInterrupt:
-                    process.terminate()
-                    process.wait()
+                except (KeyboardInterrupt, OSError):
+                    # The sidecar owns a pi child; interrupt the whole isolated job.
+                    os.killpg(process.pid, signal.SIGTERM)
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait()
                     raise
                 exit_code = process.wait()
     except FileExistsError:
         return _error("workdir_used", f"运行日志已存在，请指定新的 --workdir：{destination}")
 
-    successful = sum(status == "typeset" for status in status_by_id.values())
-    unsuccessful = sum(
-        status not in ("typeset", "not_replaced") for status in status_by_id.values()
+    prepared = sum(status == "typeset" for status in status_by_id.values())
+    successful = sum(
+        status == "typeset" and paragraph_pages.get(pid) in ready_pages
+        for pid, status in status_by_id.items()
     )
+    unsuccessful = sum(status != "not_replaced" for status in status_by_id.values()) - successful
     data = {
         "successful_blocks": successful,
+        "typeset_blocks": prepared,
+        "saved_pages": len(ready_pages),
         "unsuccessful_blocks": unsuccessful,
         "not_replaced_blocks": sum(status == "not_replaced" for status in status_by_id.values()),
         "engine_exit_code": exit_code,
@@ -147,7 +189,7 @@ def translate_pdf(
         code, message = "engine_events_invalid", "Rust 引擎输出含无效事件；详见 events.jsonl"
     elif finished is None:
         code, message = "engine_result_missing", "Rust 引擎未发出有效 run_finished 事件"
-    elif not finished or exit_code != 0:
+    elif not finished or exit_code != 0 or unsuccessful:
         code, message = "engine_incomplete", "Rust 引擎未完整翻译；部分结果和事件已保留"
     elif not output.is_file():
         code, message = "output_missing", "Rust 引擎报告成功，但译文 PDF 不存在"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -27,14 +28,16 @@ def fake_engine(tmp_path: Path) -> Path:
         "def emit(**event):\n"
         "    print(json.dumps(event), flush=True)\n"
         "emit(type='stage_started', stage='preflight')\n"
-        "emit(type='paragraph', paragraph_id='P1', status='pending')\n"
-        "emit(type='paragraph', paragraph_id='P1', status='typeset')\n"
-        "emit(type='paragraph', paragraph_id='P2', status='fallback')\n"
-        "emit(type='paragraph', paragraph_id='P3', status='not_replaced')\n"
-        "emit(type='page_ready', page=0)\n"
+        "emit(type='paragraph', paragraph_id='P1', page=1, status='pending')\n"
+        "emit(type='paragraph', paragraph_id='P1', page=1, status='typeset')\n"
+        "mode = os.getenv('FAKE_MODE', 'success')\n"
+        "emit(type='paragraph', paragraph_id='P2', page=1, status='typeset' if mode == 'success' else 'fallback')\n"
+        "emit(type='paragraph', paragraph_id='P3', page=1, status='not_replaced')\n"
+        "if mode != 'unready':\n"
+        "    emit(type='page_ready', page=1)\n"
         "mode = os.getenv('FAKE_MODE', 'success')\n"
         "if mode != 'no_final':\n"
-        "    emit(type='run_finished', ok=(mode == 'success'))\n"
+        "    emit(type='run_finished', ok=(mode in ('success', 'false_success')))\n"
         "out.write_bytes(b'%PDF-fake')\n"
         "print('engine stderr', file=sys.stderr)\n"
         "sys.exit(0 if mode != 'partial' else 1)\n",
@@ -70,8 +73,8 @@ def test_success_keeps_one_json_envelope_and_engine_events(tmp_path: Path, fake_
     assert completed.returncode == 0
     assert len(completed.stdout.splitlines()) == 1
     assert payload["ok"] is True
-    assert payload["data"]["successful_blocks"] == 1
-    assert payload["data"]["unsuccessful_blocks"] == 1
+    assert payload["data"]["successful_blocks"] == 2
+    assert payload["data"]["unsuccessful_blocks"] == 0
     assert payload["data"]["not_replaced_blocks"] == 1
     assert (workdir / "events.jsonl").read_text().count("\n") == 7
     assert (workdir / "stderr.log").read_text().strip() == "engine stderr"
@@ -90,7 +93,7 @@ def test_success_keeps_one_json_envelope_and_engine_events(tmp_path: Path, fake_
 
 @pytest.mark.parametrize(
     ("mode", "code"),
-    [("partial", "engine_incomplete"), ("no_final", "engine_result_missing")],
+    [("partial", "engine_incomplete"), ("no_final", "engine_result_missing"), ("false_success", "engine_incomplete")],
 )
 def test_incomplete_results_are_failures(
     tmp_path: Path, fake_engine: Path, mode: str, code: str
@@ -135,3 +138,49 @@ def test_existing_run_logs_are_not_overwritten(tmp_path: Path, fake_engine: Path
     assert completed.returncode == 1
     assert payload["error"]["code"] == "workdir_used"
     assert (workdir / "events.jsonl").read_text() == "keep\n"
+
+
+def test_workdir_io_error_is_a_json_failure(tmp_path: Path, fake_engine: Path) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    workdir = tmp_path / "file-not-directory"
+    workdir.write_text("keep")
+    completed, payload = _run(pdf, workdir, fake_engine)
+    assert completed.returncode == 1
+    assert payload["error"]["code"] == "artifact_io"
+    assert workdir.read_text() == "keep"
+
+
+def test_cached_from_copies_database_without_writing_source(tmp_path: Path, fake_engine: Path) -> None:
+    from babeldoc_tools import rust_backend
+
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"%PDF-input")
+    previous = tmp_path / "previous"
+    (previous / "cache").mkdir(parents=True)
+    db = previous / "cache/translate.db"
+    with sqlite3.connect(db) as connection:
+        connection.execute("CREATE TABLE marker (value TEXT)")
+        connection.execute("INSERT INTO marker VALUES ('real translation')")
+    original = db.read_bytes()
+    workdir = tmp_path / "recompile"
+    result = rust_backend.translate_pdf(
+        pdf=str(source), workdir=str(workdir), pages=None, model="unused", thinking="low",
+        source_lang="auto", target_lang="zh-CN", layout_device="cpu", engine=str(fake_engine),
+        cached_from=str(previous),
+    )
+    assert result["ok"]
+    assert "--cache-only" in json.loads((workdir / "invocation.json").read_text())["args"]
+    with sqlite3.connect(workdir / "cache/translate.db") as connection:
+        assert connection.execute("SELECT value FROM marker").fetchone() == ("real translation",)
+    assert db.read_bytes() == original
+
+
+def test_typeset_without_saved_page_is_not_reported_as_written(tmp_path: Path, fake_engine: Path) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    completed, payload = _run(pdf, tmp_path / "run", fake_engine, mode="unready")
+    assert completed.returncode == 1
+    assert payload["error"]["successful_blocks"] == 0
+    assert payload["error"]["typeset_blocks"] == 1
+    assert payload["error"]["saved_pages"] == 0

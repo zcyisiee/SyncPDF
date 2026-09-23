@@ -57,6 +57,8 @@ pub struct RunConfig {
     pub configure: Request,
     /// `run` 请求（必须是 `Request::Run`）。
     pub run: Request,
+    /// Recompile verified cached blocks; missing blocks remain source.
+    pub cache_only: bool,
 }
 
 impl RunConfig {
@@ -68,7 +70,11 @@ impl RunConfig {
         if !matches!(run, Request::Run { .. }) {
             return Err(PipelineError::Protocol("第二条请求必须是 run".into()));
         }
-        Ok(Self { configure, run })
+        Ok(Self {
+            configure,
+            run,
+            cache_only: false,
+        })
     }
 
     /// 便捷构造：只要 `run`，`configure` 用给定翻译器名。
@@ -614,13 +620,14 @@ impl Pipeline {
             () = cancel_watch(cancel) => Err(PipelineError::Cancelled),
             () = cancel_watch(&callback_failed) => Err(lock_state(&state).callback_error.take()
                 .expect("callback_failed 只在保存错误后触发")),
-            r = stages::translate_all(
+            r = stages::translate::translate_all_with_cache_policy(
                 DynTranslator::new(translator),
                 &spec,
                 &translatable,
                 lookup,
                 cache.as_ref(),
                 on_block,
+                cfg.cache_only,
             ) => r,
         };
         drop(pages_ir);
@@ -914,7 +921,12 @@ fn handle_block(
     let mut fallback: Option<(&'static str, Option<String>, String)> = None;
     let mut out: Option<(String, Vec<syncpdf_core::Rect>)> = None;
 
-    if !para.atoms.is_empty() {
+    let parsed_result = syncpdf_translate::parse_unit_html(&block.html);
+    let resolved = parsed_result
+        .as_ref()
+        .ok()
+        .and_then(|parsed| stages::text_atoms::resolve(&para, parsed, &state.doc));
+    if !para.atoms.is_empty() && resolved.is_none() {
         fallback = Some((
             "atom_source_unplaced",
             None,
@@ -927,8 +939,9 @@ fn handle_block(
             "无法确认安全排版框和源基线".into(),
         ));
     } else if block.status.is_ok() {
-        match syncpdf_translate::parse_unit_html(&block.html) {
-            Ok(parsed) => {
+        match parsed_result {
+            Ok(_) => {
+                let parsed = resolved.expect("atom-free or verified textual atoms");
                 if parsed.id != id {
                     return Err(PipelineError::Protocol(format!(
                         "译文块身份不一致：{id} / {}",
@@ -977,7 +990,7 @@ fn handle_block(
                         .push(result.paragraph);
                     state.src_chars += src_len;
                     state.tgt_chars += parsed.text().chars().count() as u64;
-                    out = Some((block.html.clone(), boxes));
+                    out = Some((parsed.to_html(), boxes));
                 }
             }
             Err(e) => {
