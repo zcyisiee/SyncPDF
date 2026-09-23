@@ -14,7 +14,7 @@
 - 按逻辑分批提交，使用fix/feat/docs分类和简洁中文说明；不改写历史、不push。既有 `cache/` 保留且不入库；不reset/clean/stash。运行产物仅在仓库tmp，不改共享conda，不用 `~/.sp` 作测试库。
 - 若以后委派，先读委派规范；原偏好为gpt-6-sol:high、fresh context、Orca独立worktree，一树一writer，叶子不委派/不写本文件/不push。用户未要求本轮新增委派。
 
-## 当前交付与验收
+## 正文覆盖修复验收（最新断行样张见下节）
 
 **样张：`tmp/backend-repair/inline-full-v5/translated.pdf`。** 同目录保存事件、result、audit、qpdf日志、重点页PNG及cache来源；详细过程/失败尝试见验收报告。
 
@@ -36,9 +36,17 @@
 - `markdown.rs` / `translator.rs`：只有正确闭合且ID可识别的坏正文进入既有最多3轮补译，不交付/缓存坏块，后续有效块照常流式交付；半块/边界损坏/通道失败仍报错。
 - `rust_backend.py`：结果增加 `blocked_before_translation` / `coverage_gap_pages`，源冲突计入unsuccessful，覆盖缺口不能完整成功。
 
+## 表18/19断行复核（2026-09-23，已完成）
+
+用户指出表18/19断行不自然。已证实译文无换行/br；根因是无glue片段的短行代价过低及左对齐仍按justify选择断点，末行不计余量又留下孤字短尾。已按实际对齐评分、限制短行兜底、均衡ragged末行并避免自动单字末行；保留显式硬换行。新断行暴露的0.031pt右侧墨迹越界，仅用另一侧空隙平移纠正，没有缩字或放宽容差。
+
+**最新样张：`tmp/backend-repair/caption-break-v3/translated.pdf`。** 21页193/0，0源冲突/覆盖缺口；193缓存命中/0模型请求，28.095秒。表18从9行→8行、最短中间行40.9%→78.0%；表19从7行→6行、14.3%→97.8%。193译文HTML和保存PDF非空白字符总量/身份不变。94公式、保护字符、图片、链接和qpdf全部通过；已目视第20页说明段。
+
+234相关Rust单元/集成通过/5ignored；末行评分最后一处更改后typeset重跑65通过；Clippy/fmt/release/diff-check通过。文档仍有既存HTTP锚点警告。v1的192/1及v2收尾仍短的中间证据保留，不冒充最终结果。详细[验收](12-MVP真实翻译验收.md#caption-line-breaks)和[经验](../../lessons/pdf-binding-and-render-evidence.md#mixed-script-break-cost)已同步。修复代码提交 `6245d0f5`，文档另批提交，未push。恢复复排优先使用最新样张目录；inline-full-v5缓存文本未改变，仍可复用。
+
 ## 状态与下一步
 
-本次用户要求的漏译修复、真实补译、完整编译和保护内容验收已完成。已将经验提炼到上述lessons链接，架构/参考/CLI/issue/验收同步。代码按逻辑提交：`67958e9c`（源公式/正文/子标题）、`898ca829`（闭合坏块有界补译）、`d306583e`（完整覆盖统计）；文档另批提交。运行缓存与产物不提交，未push。
+本次漏译修复及后续表18/19断行修复、完整编译和保护内容验收已完成。已将经验提炼到上述lessons链接，架构/参考/CLI/issue/验收同步。代码按逻辑提交：`67958e9c`（源公式/正文/子标题）、`898ca829`（闭合坏块有界补译）、`d306583e`（完整覆盖统计）；文档另批提交。运行缓存与产物不提交，未push。
 
 后续产品范围仍待用户安排：A3横向dual、中文目录/书签、逐块字体/字号/译文编辑与原子revision重编译。任意公式布局、任意语言/注释格式、RTL ActualText仍未全面认证。CoreML原生stdout偶发污染风险未在本轮处理。旧23页论文R6后重译未完成，本次CCS结论不能套用旧样本。
 

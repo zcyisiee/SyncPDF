@@ -155,3 +155,28 @@ source tmp/backend-repair/codex-r1-integration/env.sh
 相关core/pdf/typeset/translate/pipeline共528项通过、0失败、8 ignored；随后协议补译改动重新跑translate：115通过、0失败、2 ignored。包含公式原字号/行间碰撞、源字形唯一归属、图片嵌套Form不重复提取、公式引用点击框、流式坏块补译及截断失败等守卫。CLI/单入口36 pytest通过。五crate全target严格Clippy、release构建、fmt、Ruff、diff-check通过。未额外运行全workspace或未改动的前端测试。
 
 日志：`tmp/backend-repair/inline-{tests,protocol-tests,pytest,clippy,build5,docs}.log`。严格文档构建仍有既存HTTP参考的中文锚点警告，不能记为通过。实现边界见[后端参考](../../reference/rust-pdf-backend.md)，经验见[源公式归属](../../lessons/pdf-binding-and-render-evidence.md#inline-formula-ownership)。
+
+
+<a id="caption-line-breaks"></a>
+
+## 表18/19中英混排断行修复（2026-09-23）
+
+用户复核指出表18/19说明段断行不自然。最终产物更新为 `tmp/backend-repair/caption-break-v3/translated.pdf`；先前inline-full-v5仍作为覆盖修复基线保留。
+
+**原因已用原缓存和实际行框证实：** P20-001/017译文没有换行/br。断行器对没有可伸缩glue的英文片段给了过低的ragged代价，使其主动选择能继续放字却提前换行的方案。表18识别为Caption/Left，但选断点仍用justify代价；表19识别为Text并按justify绘制，同样受短行兜底影响。末行未计入ragged余量代价又让表18留下“击。”孤行。
+
+修复：按实际对齐选择评分，左/中/右对齐考虑包含末行的自然宽度余量；无glue短行只在后续合法断点无法容纳时兜底。自动断行避免单个CJK字加标点成为末行，显式硬换行保持。新断行暴露P14-118右侧墨迹越界0.031pt；在整行实际墨迹可容纳时利用左侧空隙平移纠正，字号/行距/碰撞容差不改。
+
+| 实测 | 表18 | 表19 |
+|---|---|---|
+| 说明段行数 | 9 → 8 | 7 → 6 |
+| 最短中间行占栏宽 | 40.9% → 78.0% | 14.3% → 97.8% |
+| 原异常 | 数据集列表多次提前断行，末行“击。” | “CIFAR10、”独占一行 |
+
+v1复排为192/1（上述侧承问题），v2恢复193/0但末行仍仅“攻击。”，v3将ragged末行余量纳入评分后收尾均匀。失败及中间样张保留。新增孤字测试最初写死“戊己。”，均衡末行后实际为“丁戊己。”；改为验证至少保留两字而不限定唯一断点，另保留显式硬换行允许“己。”的断言。
+
+最终21页、193写入/0回退/0源冲突/0覆盖缺口，28.095秒，exit0；193缓存命中，0模型请求。193块target HTML与旧样张完全相同，保存PDF的非空白字符多重集相同。94公式/53,384参考墨迹像素缺失0，36,327保留字符变化0，第3页图片像素相同；319链接目标/点击标签、28书签、180命名目标保留，qpdf通过。
+
+排版+pipeline单元/集成234通过、0失败、5 ignored；最后加入末行余量评分后typeset重新65通过。严格Clippy、fmt、release、diff-check通过；未重跑未改动Python/UI测试。严格文档构建仍仅有既存HTTP参考锚点警告。
+
+证据：`caption-break-v3/{audit.json,caption-comparison.json,captions.png,page-20.png,result.json,events.jsonl,qpdf.log}`；脚本 `caption-break-audit/compare.py` 与 `inline-audit.py`；日志 `caption-break-{final-tests,balanced-tests2,final-clippy,build3}.log`，均位于仓库tmp/backend-repair。经验见[断行代价](../../lessons/pdf-binding-and-render-evidence.md#mixed-script-break-cost)。
