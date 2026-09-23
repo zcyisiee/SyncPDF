@@ -19,6 +19,7 @@ use unicode_bidi::BidiInfo;
 pub(crate) struct LayoutInput<'a> {
     pub id: ParagraphId,
     pub font_size: f32,
+    pub first_baseline: Option<f32>,
     pub align: Align,
     /// 首行缩进（pt，正值为右侧缩进）。
     pub first_indent: f32,
@@ -224,7 +225,7 @@ pub(crate) fn layout(
         Rect::new(bbox.x1, bbox.y1, bbox.x0, bbox.y0)
     };
     for (i, line) in lines.iter().enumerate() {
-        let baseline_y = bbox.y1 - ascent - (i as f32) * line_h;
+        let baseline_y = input.first_baseline.unwrap_or(bbox.y1 - ascent) - (i as f32) * line_h;
         let lb = place_line(line, input, bbox, baseline_y, i + 1 == n, ascent, descent);
         used = used.union(&lb.bbox);
         line_boxes.push(lb);
@@ -318,7 +319,7 @@ fn shape_inlines(
                             glyph: g,
                             text: c,
                             size,
-                            font,
+                            font: g.font,
                             style: *style,
                             is_space: c == ' ',
                             is_cjk: is_cjk_char(c),

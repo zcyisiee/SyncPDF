@@ -22,6 +22,7 @@ fn spec(bbox: Rect, font_size: f32, line_height: f32, align: Align) -> Paragraph
         color: Color::BLACK,
         styles: vec![(StyleId(1), StyleSpec::default())],
         lang: Lang::En,
+        first_baseline: None,
     }
 }
 
@@ -116,6 +117,7 @@ fn cjk_no_forbidden_punct_at_line_start() {
         color: Color::BLACK,
         styles: vec![(StyleId(1), StyleSpec::default())],
         lang: Lang::Zh,
+        first_baseline: None,
     };
     let text = "这是一个测试段落，用来验证禁则处理是否正确。（括号内容）「引号内容」结束。";
     let t = typeset_default();

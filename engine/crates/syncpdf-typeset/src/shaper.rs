@@ -12,6 +12,10 @@ use serde::{Deserialize, Serialize};
 pub struct ShapedGlyph {
     pub gid: u16,
     pub cluster: u32,
+    /// Exclusive UTF-8 cluster end, relative to the complete shape input.
+    pub cluster_end: u32,
+    /// Actual font used for this glyph, including fallback.
+    pub font: u32,
     pub x_advance: f32,
     pub x_offset: f32,
     pub y_offset: f32,
@@ -48,6 +52,12 @@ pub trait Shaper {
     /// 塑形一段纯文本。`size` 为字号（pt）；`rtl` 提示段落方向。
     /// 返回按视觉顺序排列的字形（cluster 值为文本内字节偏移）。
     fn shape(&self, font: u32, text: &str, size: f32, rtl: bool) -> Vec<ShapedGlyph>;
+
+    /// Actual unhinted ink bounds relative to baseline, in pt.
+    /// None uses conservative global metrics. Whitespace can return an empty rect.
+    fn glyph_bounds(&self, _font: u32, _gid: u16, _size: f32) -> Option<syncpdf_core::Rect> {
+        None
+    }
 
     /// 字体度量（1pt 字号下的比例）。
     fn metrics(&self, font: u32) -> FontMetrics;
@@ -109,12 +119,14 @@ impl MonoShaper {
 }
 
 impl Shaper for MonoShaper {
-    fn shape(&self, _font: u32, text: &str, size: f32, _rtl: bool) -> Vec<ShapedGlyph> {
+    fn shape(&self, font: u32, text: &str, size: f32, _rtl: bool) -> Vec<ShapedGlyph> {
         let mut out = Vec::with_capacity(text.len());
         for (byte, c) in text.char_indices() {
             out.push(ShapedGlyph {
                 gid: (c as u32 & 0xFFFF) as u16,
                 cluster: byte as u32,
+                cluster_end: (byte + c.len_utf8()) as u32,
+                font,
                 x_advance: Self::em(c) * size,
                 x_offset: 0.0,
                 y_offset: 0.0,

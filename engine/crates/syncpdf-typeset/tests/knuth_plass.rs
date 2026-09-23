@@ -140,7 +140,7 @@ fn exhaustive_oracle(nodes: &[Node], widths: &[f32], tolerance: f32) -> Option<(
                 let base = 10.0 + 100.0 * ratio.abs().powi(3);
                 let cost = if mandatory { 0.0 } else { f64::from(penalty) };
                 let mut extra = if cost >= 0.0 {
-                    (base + cost).powi(2)
+                    base.powi(2) + cost.powi(2)
                 } else {
                     base.powi(2) - cost.powi(2)
                 };
@@ -266,7 +266,7 @@ fn stretch_shrink_and_trimmed_edges() {
     let stretch_nodes = [
         g(9.0, 0.0, 0.0),
         b(3.0),
-        g(1.0, 2.0, 2.0),
+        g(1.0, 2.0, 1.0),
         b(3.0),
         g(9.0, 0.0, 0.0),
         b(2.0),
@@ -275,7 +275,7 @@ fn stretch_shrink_and_trimmed_edges() {
     assert_eq!((stretched.lines[0].start, stretched.lines[0].end), (1, 4));
     assert_eq!(stretched.lines[0].break_at, 4);
     assert!((stretched.lines[0].ratio - 0.5).abs() < 1e-6);
-    let shrunk = solve(&stretch_nodes, &[6.0, 8.0], 2.0).unwrap();
+    let shrunk = solve(&stretch_nodes, &[6.5, 8.0], 2.0).unwrap();
     assert!((shrunk.lines[0].ratio + 0.5).abs() < 1e-6);
     assert_eq!(
         solve(&stretch_nodes, &[8.0, 8.0], 0.25),
@@ -337,10 +337,10 @@ fn exhaustive_small_paragraphs_match_global_optimum() {
                 for first in 3..=7 {
                     let nodes = [
                         b(a as f32),
-                        g(1.0, 2.0, 2.0),
+                        g(1.0, 2.0, 1.0),
                         b(b_width as f32),
                         p(0.5, 20, false),
-                        g(1.0, 2.0, 2.0),
+                        g(1.0, 2.0, 1.0),
                         b(c as f32),
                     ];
                     let widths = [first as f32, 5.0];
@@ -359,4 +359,14 @@ fn exhaustive_small_paragraphs_match_global_optimum() {
         }
     }
     assert_eq!(checked, 135);
+}
+
+#[test]
+fn penalty_cost_is_additive_and_glue_cannot_shrink_below_zero() {
+    let solution = solve(&[b(1.0), p(0.0, 20, false), b(1.0)], &[1.0], 0.0).unwrap();
+    assert_eq!(solution.demerits, 600.0); // (10^2 + 20^2) + 10^2
+    assert!(matches!(
+        solve(&[b(1.0), g(1.0, 2.0, 2.0), b(1.0)], &[2.0], 1.0),
+        Err(BreakError::InvalidInput(_))
+    ));
 }

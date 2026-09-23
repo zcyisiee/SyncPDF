@@ -40,6 +40,7 @@ fn spec(height: f32) -> ParagraphSpec {
     ParagraphSpec {
         bbox: Rect::new(0.0, 0.0, 100.0, height),
         font_size: 10.0,
+        first_baseline: None,
         line_height: 1.6,
         align: Align::Left,
         first_indent: 0.0,

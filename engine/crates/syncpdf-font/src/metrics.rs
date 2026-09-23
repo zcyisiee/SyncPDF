@@ -104,6 +104,22 @@ pub fn advance(font: &LoadedFont, gid: u16, size: f32) -> f32 {
         .unwrap_or(0.0)
 }
 
+/// Actual unhinted glyph ink in PDF points, relative to the glyph baseline.
+/// Empty glyphs (spaces) return an empty rectangle; invalid data returns None.
+pub fn glyph_bounds(font: &LoadedFont, gid: u16, size: f32) -> Option<syncpdf_core::Rect> {
+    use skrifa::MetadataProvider;
+    if !size.is_finite() || size <= 0.0 {
+        return None;
+    }
+    let face = skrifa::FontRef::from_index(&font.data, font.face_index).ok()?;
+    let metrics = face.glyph_metrics(
+        skrifa::instance::Size::new(size),
+        skrifa::instance::LocationRef::default(),
+    );
+    let b = metrics.bounds(skrifa::GlyphId::from(gid as u32))?;
+    Some(syncpdf_core::Rect::new(b.x_min, b.y_min, b.x_max, b.y_max))
+}
+
 /// 字体是否有某字符的 cmap 映射（glyph id 非 0）。
 pub fn has_char(font: &LoadedFont, c: char) -> bool {
     gid_for(font, c).is_some()

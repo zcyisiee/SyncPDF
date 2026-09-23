@@ -37,6 +37,8 @@ impl Shaper for StoreShaper<'_> {
             .map(|g| ShapedGlyph {
                 gid: g.gid,
                 cluster: g.cluster,
+                cluster_end: g.cluster_end,
+                font: self.font.0,
                 x_advance: g.x_advance,
                 x_offset: g.x_offset,
                 y_offset: g.y_offset,
@@ -138,6 +140,7 @@ fn typeset_into(
         color: Color::BLACK,
         styles: vec![(StyleId(1), StyleSpec::default())],
         lang: Lang::Zh,
+        first_baseline: None,
     };
     let inlines = [Inline::Text {
         text: text.to_string(),

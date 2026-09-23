@@ -44,26 +44,35 @@ impl<'a> StoreShaper<'a> {
 
 impl Shaper for StoreShaper<'_> {
     fn shape(&self, font: u32, text: &str, size: f32, rtl: bool) -> Vec<ShapedGlyph> {
-        // `shape_runs` 内部按 unicode-script 判方向；RTL 段落此处不必额外处理
-        // （阿拉伯文段落的 `is_rtl` 目前恒为 false，见 paragraph_analysis）。
-        let _ = rtl;
         let primary = FontId(font);
-        let Some(loaded) = self.store.get(primary) else {
-            tracing::warn!(font, "塑形时字体句柄不存在，返回空结果");
+        if self.store.get(primary).is_none() {
             return Vec::new();
-        };
-        let fallbacks = self.profile.fallbacks();
-        syncpdf_font::shape_runs(self.store, text, size, loaded.id, &fallbacks)
-            .into_iter()
-            .flat_map(|(_fid, gs)| gs)
-            .map(|g| ShapedGlyph {
+        }
+        syncpdf_font::shape_runs_directional(
+            self.store,
+            text,
+            size,
+            primary,
+            &self.profile.fallbacks(),
+            rtl,
+        )
+        .into_iter()
+        .flat_map(|(fid, gs)| {
+            gs.into_iter().map(move |g| ShapedGlyph {
                 gid: g.gid,
                 cluster: g.cluster,
+                cluster_end: g.cluster_end,
+                font: fid.0,
                 x_advance: g.x_advance,
                 x_offset: g.x_offset,
                 y_offset: g.y_offset,
             })
-            .collect()
+        })
+        .collect()
+    }
+
+    fn glyph_bounds(&self, font: u32, gid: u16, size: f32) -> Option<Rect> {
+        syncpdf_font::metrics::glyph_bounds(self.store.get(FontId(font))?, gid, size)
     }
 
     fn metrics(&self, font: u32) -> FontMetrics {
@@ -232,6 +241,7 @@ pub fn spec_for(para: &Paragraph) -> ParagraphSpec {
     ParagraphSpec {
         bbox: para.bbox,
         font_size: dominant_font_size(para),
+        first_baseline: None,
         line_height: para.line_height / dominant_font_size(para),
         align: para.align,
         first_indent: para.first_indent,
@@ -614,5 +624,34 @@ mod tests {
                 .iter()
                 .all(|g| g.size == run.size && g.color == Some(run.color)));
         }
+    }
+    #[test]
+    fn adapter_keeps_actual_fallback_font_cluster_range_and_ink() {
+        let dir = syncpdf_core::fixtures::fonts_dir().expect("builtin fonts required");
+        let (store, profile) = load_fonts(&dir, "en").unwrap();
+        let shaper = StoreShaper::new(&store, &profile);
+        let inter = store
+            .find(&syncpdf_font::FontQuery {
+                family: Some("Inter".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        let glyphs = shaper.shape(inter.0, "A中B", 12.0, false);
+        assert_eq!(glyphs.len(), 3);
+        assert_eq!(
+            glyphs
+                .iter()
+                .map(|g| (g.cluster, g.cluster_end))
+                .collect::<Vec<_>>(),
+            [(0, 1), (1, 4), (4, 5)]
+        );
+        assert_ne!(glyphs[1].font, inter.0);
+        let ink = shaper
+            .glyph_bounds(glyphs[1].font, glyphs[1].gid, 12.0)
+            .unwrap();
+        assert!(ink.width() > 0.0 && ink.height() > 0.0);
+        let m = shaper.metrics(glyphs[1].font);
+        assert!(ink.height() < (m.ascent + m.descent) * 12.0);
+        assert_eq!(glyphs, shaper.shape(inter.0, "A中B", 12.0, false));
     }
 }

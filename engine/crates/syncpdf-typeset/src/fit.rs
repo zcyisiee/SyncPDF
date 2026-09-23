@@ -66,6 +66,8 @@ pub struct TypesetResult {
 pub struct ParagraphSpec {
     pub bbox: Rect,
     pub font_size: f32,
+    /// Stable source/requested first baseline; None anchors using glyph metrics.
+    pub first_baseline: Option<f32>,
     /// 行距倍数（相对字号）。
     pub line_height: f32,
     pub align: Align,
@@ -118,6 +120,7 @@ impl<'a> Typeset<'a> {
         let input = LayoutInput {
             id,
             font_size: spec.font_size,
+            first_baseline: spec.first_baseline,
             align: spec.align,
             first_indent: spec.first_indent,
             is_rtl: spec.is_rtl,

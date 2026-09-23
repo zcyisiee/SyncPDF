@@ -15,7 +15,7 @@
 //! at its exact natural width. Final and mandatory lines are ragged left with
 //! ratio zero and must fit at natural width, without shrinking boxes or glue.
 //!
-//! Badness is `100 * abs(ratio)^3`. A line costs `(10 + badness + penalty)^2`
+//! Badness is `100 * abs(ratio)^3`. A line costs `(10 + badness)^2 + penalty^2`
 //! for nonnegative penalties, or `(10 + badness)^2 - penalty^2` for negative
 //! penalties. Forced penalties (cost <= -10000) have zero penalty cost; forbidden
 //! penalties (cost >= 10000) are never breaks. Adjacent fitness classes differing
@@ -91,6 +91,7 @@ struct State {
 ///
 /// Empty nodes return an empty solution after validating widths and tolerance.
 /// All dimensions must be finite and nonnegative; line widths must be positive.
+/// Glue shrink may not exceed its natural width (spacing cannot turn negative).
 /// A nonempty paragraph with no drawable box, or one that cannot fit without
 /// violating its fixed box widths, returns [`BreakError::NoSolution`].
 pub fn solve(nodes: &[Node], widths: &[f32], tolerance: f32) -> Result<Solution, BreakError> {
@@ -269,7 +270,7 @@ pub fn solve(nodes: &[Node], widths: &[f32], tolerance: f32) -> Result<Solution,
                 f64::from(point.penalty)
             };
             let line_demerits = if penalty >= 0.0 {
-                (base + penalty).powi(2)
+                base.powi(2) + penalty.powi(2)
             } else {
                 base.powi(2) - penalty.powi(2)
             };
@@ -374,9 +375,12 @@ fn validate(nodes: &[Node], widths: &[f32], tolerance: f32) -> Result<(), BreakE
                 width,
                 stretch,
                 shrink,
-            } => [width, stretch, shrink]
-                .into_iter()
-                .all(|value| value.is_finite() && value >= 0.0),
+            } => {
+                shrink <= width
+                    && [width, stretch, shrink]
+                        .into_iter()
+                        .all(|value| value.is_finite() && value >= 0.0)
+            }
         };
         if !valid {
             return Err(BreakError::InvalidInput(
