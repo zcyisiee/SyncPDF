@@ -67,6 +67,49 @@ pub fn embed_font_lopdf(
     resource_name: &str,
     cid_to_gid: Option<&[u16]>,
 ) -> Result<EmbeddedFontObj> {
+    embed_font_impl(
+        doc,
+        font,
+        gids,
+        to_unicode,
+        resource_name,
+        cid_to_gid.map(CidMap::Subset),
+    )
+}
+
+/// Writer's registration-order CIDs mapped to original font GIDs. Subset remapping
+/// happens inside the same embedding pass, including composite glyph closure.
+pub fn embed_font_lopdf_with_orig_cids(
+    doc: &mut Document,
+    font: &LoadedFont,
+    gids: &[u16],
+    to_unicode: &[(u16, String)],
+    resource_name: &str,
+    cid_to_orig_gid: &[u16],
+) -> Result<EmbeddedFontObj> {
+    embed_font_impl(
+        doc,
+        font,
+        gids,
+        to_unicode,
+        resource_name,
+        Some(CidMap::Original(cid_to_orig_gid)),
+    )
+}
+
+enum CidMap<'a> {
+    Subset(&'a [u16]),
+    Original(&'a [u16]),
+}
+
+fn embed_font_impl(
+    doc: &mut Document,
+    font: &LoadedFont,
+    gids: &[u16],
+    to_unicode: &[(u16, String)],
+    resource_name: &str,
+    cid_map: Option<CidMap<'_>>,
+) -> Result<EmbeddedFontObj> {
     let m = metrics(font);
     if m.upem == 0 {
         return Err(EmbedError::Unusable(
@@ -87,6 +130,40 @@ pub fn embed_font_lopdf(
     let new_gids: Vec<u16> = sub.gid_map.values().copied().collect();
     // 新 gid → 原 gid 反查（取宽度用）。
     let new_to_old: BTreeMap<u16, u16> = sub.gid_map.iter().map(|(o, n)| (*n, *o)).collect();
+
+    // Explicit maps are indexed by the CIDs already written in the content stream.
+    // Resolve original GIDs only after subsetting, so the embedded font is subset once.
+    let explicit: Option<(Vec<u16>, Vec<u16>)> = match cid_map {
+        None => None,
+        Some(CidMap::Subset(map)) => {
+            let old = map
+                .iter()
+                .map(|gid| {
+                    new_to_old.get(gid).copied().ok_or_else(|| {
+                        EmbedError::Unusable(
+                            font.family.clone(),
+                            format!("subset GID {gid} absent from font"),
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Some((map.to_vec(), old))
+        }
+        Some(CidMap::Original(map)) => {
+            let remapped = map
+                .iter()
+                .map(|gid| {
+                    sub.gid_map.get(gid).copied().ok_or_else(|| {
+                        EmbedError::Unusable(
+                            font.family.clone(),
+                            format!("original GID {gid} absent from subset"),
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Some((remapped, map.to_vec()))
+        }
+    };
 
     let base_font = postscript_name(font);
     let widths = glyph_widths_1000(font);
@@ -146,13 +223,25 @@ pub fn embed_font_lopdf(
     cid.set("CIDSystemInfo", csi);
     cid.set("FontDescriptor", Object::Reference(descriptor));
     cid.set("DW", 1000);
-    // /W：按子集内新 gid 写宽度。
-    cid.set("W", build_w_array(&new_gids, &new_to_old, &widths));
-    match cid_to_gid {
+    // /W is indexed by content CID, never by the descendant's subset GID.
+    let width_orig: BTreeMap<u16, u16> = match &explicit {
+        None => new_to_old.clone(),
+        Some((_, originals)) => originals
+            .iter()
+            .enumerate()
+            .map(|(cid, &gid)| (cid as u16, gid))
+            .collect(),
+    };
+    let content_cids: Vec<u16> = match &explicit {
+        None => new_gids.clone(),
+        Some((map, _)) => (0..map.len()).map(|cid| cid as u16).collect(),
+    };
+    cid.set("W", build_w_array(&content_cids, &width_orig, &widths));
+    match &explicit {
         None => {
             cid.set("CIDToGIDMap", Object::Name(b"Identity".to_vec()));
         }
-        Some(map) => {
+        Some((map, _)) => {
             let mut bytes = Vec::with_capacity(map.len() * 2);
             for g in map {
                 bytes.extend_from_slice(&g.to_be_bytes());
@@ -164,7 +253,7 @@ pub fn embed_font_lopdf(
     let cid_id = doc.add_object(cid);
 
     // ---- 4) 自定义编码 CMap ----
-    let cmap_bytes = build_encoding_cmap(&new_gids);
+    let cmap_bytes = build_encoding_cmap(&content_cids);
     let mut cmap_dict = Dictionary::new();
     cmap_dict.set("Type", Object::Name(b"CMap".to_vec()));
     cmap_dict.set("CMapName", Object::Name(b"SPFEncoding".to_vec()));
@@ -268,17 +357,17 @@ fn glyph_widths_1000(font: &LoadedFont) -> BTreeMap<u16, f32> {
     map
 }
 
-/// `/W` 数组：连号且同宽的 gid 合并成 `first last w`，否则 `first [w...]`。
+/// `/W` 数组：连号且同宽的 cid 合并成 `first last w`，否则 `first [w...]`。
 fn build_w_array(
-    new_gids: &[u16],
-    new_to_old: &BTreeMap<u16, u16>,
+    cids: &[u16],
+    cid_to_old: &BTreeMap<u16, u16>,
     widths: &BTreeMap<u16, f32>,
 ) -> Object {
-    let entries: Vec<(u16, f32)> = new_gids
+    let entries: Vec<(u16, f32)> = cids
         .iter()
-        .map(|&new| {
-            let old = new_to_old.get(&new).copied().unwrap_or(0);
-            (new, widths.get(&old).copied().unwrap_or(1000.0))
+        .map(|&cid| {
+            let old = cid_to_old.get(&cid).copied().unwrap_or(0);
+            (cid, widths.get(&old).copied().unwrap_or(1000.0))
         })
         .collect();
 
@@ -325,8 +414,8 @@ fn build_w_array(
     Object::Array(out)
 }
 
-/// 自定义编码 CMap 文本（`code = cid = 子集内新 gid`）。
-fn build_encoding_cmap(gids: &[u16]) -> Vec<u8> {
+/// 自定义编码 CMap 文本（`code = cid`）。
+fn build_encoding_cmap(cids: &[u16]) -> Vec<u8> {
     let mut s = String::new();
     s.push_str("%!PS-Adobe-3.0 Resource-CMap\n");
     s.push_str("%%DocumentNeededResources: procset CIDInit\n");
@@ -349,7 +438,7 @@ fn build_encoding_cmap(gids: &[u16]) -> Vec<u8> {
     s.push_str("1 begincodespacerange\n");
     s.push_str("<0000> <FFFF>\n");
     s.push_str("endcodespacerange\n");
-    for chunk in gids.chunks(100) {
+    for chunk in cids.chunks(100) {
         s.push_str(&format!("{} begincidchar\n", chunk.len()));
         for &g in chunk {
             s.push_str(&format!("<{g:04X}> {g}\n"));
