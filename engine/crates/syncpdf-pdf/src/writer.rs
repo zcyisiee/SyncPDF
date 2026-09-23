@@ -37,7 +37,7 @@ use lopdf::{Dictionary, Document, Object, ObjectId, Stream};
 use syncpdf_core::ir::TypesetParagraph;
 use syncpdf_font::{FontId, FontStore};
 
-use crate::embed::embed_font_lopdf;
+use crate::embed::embed_font_lopdf_with_orig_cids;
 
 /// 字体统计。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -274,7 +274,17 @@ impl<'a> Writer<'a> {
                 .iter()
                 .map(|(c, t)| (*c, t.clone()))
                 .collect();
-            let em = embed_font_lopdf(doc, font, &orig_gids, &tu, &self.resource_name(*fid), None)?;
+            let mut cid_to_orig_gid = Vec::with_capacity(orig_gids.len() + 1);
+            cid_to_orig_gid.push(0); // CID 0 is .notdef.
+            cid_to_orig_gid.extend_from_slice(&orig_gids);
+            let em = embed_font_lopdf_with_orig_cids(
+                doc,
+                font,
+                &orig_gids,
+                &tu,
+                &self.resource_name(*fid),
+                &cid_to_orig_gid,
+            )?;
             // 把真正的 Type0 字典搬进占位槽，槽本身即字体对象。
             // （内容流的 Tf 资源名不变，页资源引用也不变。）
             let slot = self.font_slots[fid];
