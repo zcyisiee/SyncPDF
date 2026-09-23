@@ -33,6 +33,9 @@ def fake_engine(tmp_path: Path) -> Path:
         "mode = os.getenv('FAKE_MODE', 'success')\n"
         "emit(type='paragraph', paragraph_id='P2', page=1, status='typeset' if mode == 'success' else 'fallback')\n"
         "emit(type='paragraph', paragraph_id='P3', page=1, status='not_replaced')\n"
+        "if mode == 'coverage':\n"
+        "    emit(type='issue', code='protected_source_overlap', paragraph_id='P3', page=1)\n"
+        "    emit(type='issue', code='coverage_gap', page=1)\n"
         "if mode != 'unready':\n"
         "    emit(type='page_ready', page=1)\n"
         "mode = os.getenv('FAKE_MODE', 'success')\n"
@@ -131,6 +134,17 @@ def test_missing_engine_and_output_conflict(tmp_path: Path, fake_engine: Path) -
     assert conflict.returncode == 1
     assert conflict_payload["error"]["code"] == "input_output_conflict"
     assert translated.read_bytes() == b"%PDF-input"
+
+
+def test_pretranslation_block_is_counted_as_incomplete(tmp_path: Path, fake_engine: Path) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    completed, payload = _run(pdf, tmp_path / "run", fake_engine, mode="coverage")
+    assert completed.returncode == 1
+    result = payload["error"]
+    assert result["blocked_before_translation"] == 1
+    assert result["coverage_gap_pages"] == [1]
+    assert result["unsuccessful_blocks"] == 2  # one layout failure plus one pretranslation block
 
 
 def test_existing_run_logs_are_not_overwritten(tmp_path: Path, fake_engine: Path) -> None:
