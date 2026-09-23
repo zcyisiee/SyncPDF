@@ -12,7 +12,7 @@ pub(crate) fn obstacles(
     paragraphs: &BTreeMap<ParagraphId, Paragraph>,
     placed: &[TypesetParagraph],
     shaper: &dyn Shaper,
-    displaced: Option<&ParagraphId>,
+    displaced: &[&ParagraphId],
 ) -> Vec<Rect> {
     let mut removed: BTreeSet<GlyphId> = para.glyphs.iter().copied().collect();
     for laid in placed {
@@ -62,7 +62,7 @@ pub(crate) fn obstacles(
             }),
     );
     for laid in placed {
-        if displaced == Some(&laid.id) {
+        if displaced.contains(&&laid.id) {
             continue;
         }
         for line in &laid.lines {
@@ -160,38 +160,48 @@ pub(crate) fn wider_measure(
     Some(frame)
 }
 
-/// Allocate a failed paragraph and its immediately following accepted neighbor
-/// as one vertical group. Preserve their reading order, widths and source gap.
-pub(crate) fn pair_frames(
-    first: (&Paragraph, &LayoutFrame, Rect),
-    next: (&Paragraph, &LayoutFrame, Rect),
+/// Repack a contiguous group in its existing column. Retain each measure,
+/// source paragraph gap and reading order, and never jump across a fixed obstacle.
+pub(crate) fn group_frames(
+    group: &[(&Paragraph, &LayoutFrame, Rect)],
     crop: Rect,
     obstacles: &[Rect],
-) -> Vec<(LayoutFrame, LayoutFrame)> {
-    let (para, initial, used) = first;
-    let (neighbor, next_initial, next_used) = next;
-    let gap = (para.bbox.y0 - neighbor.bbox.y1).max(0.25);
-    let mut group = initial.clone();
-    group.bbox.x0 = initial.bbox.x0.min(next_initial.bbox.x0);
-    group.bbox.x1 = initial.bbox.x1.max(next_initial.bbox.x1);
-    let group_used = Rect::new(
-        group.bbox.x0,
-        used.y0 - gap - next_used.height(),
-        group.bbox.x1,
-        used.y1,
-    );
-    free_frames(para, &group, group_used, crop, obstacles)
+) -> Vec<Vec<LayoutFrame>> {
+    let Some(&(para, initial, used)) = group.first() else {
+        return Vec::new();
+    };
+    let mut measure = initial.clone();
+    let mut height = used.height();
+    for (index, (p, frame, ink)) in group.iter().enumerate().skip(1) {
+        measure.bbox.x0 = measure.bbox.x0.min(frame.bbox.x0);
+        measure.bbox.x1 = measure.bbox.x1.max(frame.bbox.x1);
+        height += (group[index - 1].0.bbox.y0 - p.bbox.y1).max(0.25) + ink.height();
+    }
+    let combined = Rect::new(measure.bbox.x0, used.y1 - height, measure.bbox.x1, used.y1);
+    free_frames(para, &measure, combined, crop, obstacles)
         .into_iter()
+        .filter(|space| {
+            group
+                .iter()
+                .all(|(p, _, _)| space.bbox.y1 > p.bbox.y0 && space.bbox.y0 < p.bbox.y1)
+        })
         .map(|space| {
-            let shift = space.first_baseline - initial.first_baseline;
-            let mut a = space.clone();
-            a.bbox.x0 = initial.bbox.x0;
-            a.bbox.x1 = initial.bbox.x1;
-            let mut b = space;
-            b.bbox.x0 = next_initial.bbox.x0;
-            b.bbox.x1 = next_initial.bbox.x1;
-            b.first_baseline = used.y0 + shift - gap - (next_used.y1 - next_initial.first_baseline);
-            (a, b)
+            let mut top = used.y1 + space.first_baseline - initial.first_baseline;
+            group
+                .iter()
+                .enumerate()
+                .map(|(index, (p, frame, ink))| {
+                    if index > 0 {
+                        top -= (group[index - 1].0.bbox.y0 - p.bbox.y1).max(0.25);
+                    }
+                    let mut placed = space.clone();
+                    placed.bbox.x0 = frame.bbox.x0;
+                    placed.bbox.x1 = frame.bbox.x1;
+                    placed.first_baseline = top - (ink.y1 - frame.first_baseline);
+                    top -= ink.height();
+                    placed
+                })
+                .collect()
         })
         .collect()
 }
@@ -286,14 +296,13 @@ mod tests {
         ];
         let used = Rect::new(20., 60., 80., 119.);
         let next_used = Rect::new(20., 45., 80., 70.);
-        let pairs = pair_frames(
-            (&para, &initial, used),
-            (&neighbor, &next, next_used),
+        let pairs = group_frames(
+            &[(&para, &initial, used), (&neighbor, &next, next_used)],
             crop,
             &obstacles,
         );
         assert_eq!(pairs.len(), 1);
-        let (a, b) = &pairs[0];
+        let (a, b) = (&pairs[0][0], &pairs[0][1]);
         assert_eq!(a.first_baseline, 110.);
         assert_eq!(b.first_baseline, 45.);
         assert_eq!(
@@ -306,21 +315,70 @@ mod tests {
         // An intervening protected rule prevents the group from being repacked.
         let mut blocked = obstacles.to_vec();
         blocked.push(Rect::new(20., 75., 80., 75.5));
-        assert!(pair_frames(
-            (&para, &initial, used),
-            (&neighbor, &next, next_used),
+        assert!(group_frames(
+            &[(&para, &initial, used), (&neighbor, &next, next_used)],
             crop,
             &blocked
         )
         .is_empty());
         // Insufficient total clearance also fails without changing either input.
-        assert!(pair_frames(
-            (&para, &initial, used),
-            (&neighbor, &next, next_used),
+        assert!(group_frames(
+            &[(&para, &initial, used), (&neighbor, &next, next_used)],
             Rect::new(0., 50., 200., 200.),
             &obstacles
         )
         .is_empty());
         assert_eq!(next.first_baseline, 65.);
+        // Even abundant space above a separator cannot justify dragging a source
+        // paragraph from below that separator into the preceding section.
+        assert!(group_frames(
+            &[(&para, &initial, used), (&neighbor, &next, next_used)],
+            Rect::new(0., 0., 200., 500.),
+            &[Rect::new(20., 75., 80., 75.5)],
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn longer_group_can_reuse_space_after_all_successive_neighbors() {
+        let (para, initial) = fixture();
+        let mut middle = para.clone();
+        middle.bbox = Rect::new(20., 30., 80., 70.);
+        let middle_frame = LayoutFrame {
+            first_baseline: 65.,
+            ..initial.clone()
+        };
+        let mut last = para.clone();
+        last.bbox = Rect::new(20., 0., 80., 20.);
+        let last_frame = LayoutFrame {
+            first_baseline: 15.,
+            ..initial.clone()
+        };
+        let used = Rect::new(20., 60., 80., 119.);
+        let middle_used = Rect::new(20., 45., 80., 70.);
+        let last_used = Rect::new(20., 10., 80., 20.);
+        let crop = Rect::new(0., -20., 200., 200.);
+        let fixed = [Rect::new(20., 120., 80., 130.)];
+        let first_two = [
+            (&para, &initial, used),
+            (&middle, &middle_frame, middle_used),
+        ];
+        let mut occupied = fixed.to_vec();
+        occupied.push(Rect::new(20., 22., 80., 32.));
+        assert!(group_frames(&first_two, crop, &occupied).is_empty());
+        let frames = group_frames(
+            &[first_two[0], first_two[1], (&last, &last_frame, last_used)],
+            crop,
+            &fixed,
+        );
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].len(), 3);
+        let group = &frames[0];
+        assert!(group[0].first_baseline > group[1].first_baseline);
+        assert!(group[1].first_baseline > group[2].first_baseline);
+        let middle_top = middle_used.y1 + group[1].first_baseline - middle_frame.first_baseline;
+        let last_top = last_used.y1 + group[2].first_baseline - last_frame.first_baseline;
+        assert!((used.y0 - middle_top - 10.).abs() < 0.001);
+        assert!((middle_top - middle_used.height() - last_top - 10.).abs() < 0.001);
     }
 }

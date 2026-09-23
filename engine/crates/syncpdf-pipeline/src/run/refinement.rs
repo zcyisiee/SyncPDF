@@ -96,7 +96,7 @@ pub(super) fn refine_page(state: &mut RunState, page: u32, sink: &SharedSink) {
                 continue;
             };
             let obstacles =
-                stages::refine::obstacles(&bound.ir, para, &state.pars, placed, &shaper, None);
+                stages::refine::obstacles(&bound.ir, para, &state.pars, placed, &shaper, &[]);
             let wider = stages::refine::wider_measure(para, initial, text_area, &obstacles);
             let mut accepted = Vec::new();
             for measure in std::iter::once(initial).chain(wider.as_ref()) {
@@ -116,9 +116,10 @@ pub(super) fn refine_page(state: &mut RunState, page: u32, sink: &SharedSink) {
                 }
             }
             if accepted.is_empty() {
-                // Only the next accepted paragraph with the same column anchor can
-                // yield space. Fixed content and every other translation stay solid.
-                let neighbor = placed
+                // Grow the contiguous same-column group only while needed.
+                // The page's finite accepted paragraphs bound this search; fixed
+                // source content still prevents a group from crossing an obstacle.
+                let mut neighbors: Vec<_> = placed
                     .iter()
                     .filter(|p| {
                         let other = &state.pars[&p.id];
@@ -127,44 +128,55 @@ pub(super) fn refine_page(state: &mut RunState, page: u32, sink: &SharedSink) {
                             && (other.bbox.x1.min(para.bbox.x1) - other.bbox.x0.max(para.bbox.x0))
                                 > 0.8 * other.bbox.width().min(para.bbox.width())
                     })
-                    .max_by(|a, b| {
-                        state.pars[&a.id]
-                            .bbox
-                            .y1
-                            .total_cmp(&state.pars[&b.id].bbox.y1)
-                    });
-                if let Some(neighbor) = neighbor {
-                    if let (Some(next_target), Some(next_frame), Some(measured)) = (
-                        state.targets.get(&neighbor.id),
-                        state.frames.get(&neighbor.id),
-                        probe(target, initial, crop, &shaper, state.typography),
-                    ) {
+                    .collect();
+                neighbors.sort_by(|a, b| {
+                    state.pars[&b.id]
+                        .bbox
+                        .y1
+                        .total_cmp(&state.pars[&a.id].bbox.y1)
+                });
+                if let Some(measured) = probe(target, initial, crop, &shaper, state.typography) {
+                    let mut group = vec![(para, initial, measured.used_bbox)];
+                    let mut displaced = Vec::new();
+                    for neighbor in neighbors {
+                        let Some(frame) = state.frames.get(&neighbor.id) else {
+                            break;
+                        };
+                        if !state.targets.contains_key(&neighbor.id) {
+                            break;
+                        }
+                        group.push((&state.pars[&neighbor.id], frame, neighbor.used_bbox));
+                        displaced.push(&neighbor.id);
                         let obstacles = stages::refine::obstacles(
                             &bound.ir,
                             para,
                             &state.pars,
                             placed,
                             &shaper,
-                            Some(&neighbor.id),
+                            &displaced,
                         );
-                        for (a, b) in stages::refine::pair_frames(
-                            (para, initial, measured.used_bbox),
-                            (&state.pars[&neighbor.id], next_frame, neighbor.used_bbox),
-                            crop,
-                            &obstacles,
-                        ) {
-                            let (Some(first), Some(next)) = (
-                                fit(target, &a, &shaper, state.typography),
-                                fit(next_target, &b, &shaper, state.typography),
-                            ) else {
+                        for frames in stages::refine::group_frames(&group, crop, &obstacles) {
+                            let results: Option<Vec<_>> = group
+                                .iter()
+                                .zip(frames)
+                                .map(|((p, _, _), frame)| {
+                                    fit(&state.targets[&p.id], &frame, &shaper, state.typography)
+                                        .map(|laid| (frame, laid))
+                                })
+                                .collect();
+                            let Some(results) = results else {
                                 continue;
                             };
-                            // Both must succeed before moving either. Geometry of
-                            // the actual two layouts must retain their vertical gap.
-                            if first.used_bbox.y0 - next.used_bbox.y1 < 0.24 {
+                            if results
+                                .windows(2)
+                                .any(|p| p[0].1.used_bbox.y0 - p[1].1.used_bbox.y1 < 0.24)
+                            {
                                 continue;
                             }
-                            accepted.extend([(a, first), (b, next)]);
+                            accepted = results;
+                            break;
+                        }
+                        if !accepted.is_empty() {
                             break;
                         }
                     }
@@ -173,7 +185,7 @@ pub(super) fn refine_page(state: &mut RunState, page: u32, sink: &SharedSink) {
             if accepted.is_empty() {
                 continue;
             }
-            let paired = accepted.len() == 2;
+            let group_size = accepted.len();
             for (frame, paragraph) in accepted {
                 let changed_id = paragraph.id.clone();
                 let old = &state.frames[&changed_id];
@@ -186,7 +198,7 @@ pub(super) fn refine_page(state: &mut RunState, page: u32, sink: &SharedSink) {
                     code: "layout_refined".into(),
                     paragraph_id: Some(changed_id.clone()), page: Some(page + 1),
                     message: format!(
-                        "局部动态bbox第{round}轮（相邻段联排={paired}）：{:?} → {:?}，首基线 {:.3} → {:.3}；字号/行距不变",
+                        "局部动态bbox第{round}轮（联排段数={group_size}）：{:?} → {:?}，首基线 {:.3} → {:.3}；字号/行距不变",
                         old.bbox, frame.bbox, old.first_baseline, frame.first_baseline
                     ),
                 });

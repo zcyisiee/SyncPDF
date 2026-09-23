@@ -524,6 +524,43 @@ fn place(
     baseline: f32,
     scale: f32,
 ) -> PlacedLine {
+    let placed = place_row(shaper, input, row, bbox, baseline, scale);
+    let available = bbox.width()
+        - if row.first {
+            input.first_indent.max(0.0)
+        } else {
+            0.0
+        };
+    // Justification stretches advances; serif ink can extend past those advances.
+    // Spend less added glue when natural ink already fits, preserving every glyph
+    // size and the chosen breaks. Never compress below natural spacing here.
+    if input.align == Align::Justify
+        && !row.last
+        && row.ratio > 0.0
+        && placed.line.bbox.width() > available
+    {
+        let mut adjusted = row.clone();
+        adjusted.ratio = 0.0;
+        let natural = place_row(shaper, input, &adjusted, bbox, baseline, scale);
+        let width = natural.line.bbox.width();
+        if width <= available {
+            adjusted.ratio = row.ratio
+                * ((available - width - 0.001) / (placed.line.bbox.width() - width))
+                    .clamp(0.0, 1.0);
+            return place_row(shaper, input, &adjusted, bbox, baseline, scale);
+        }
+    }
+    placed
+}
+
+fn place_row(
+    shaper: &dyn Shaper,
+    input: &LayoutInput<'_>,
+    row: &Row,
+    bbox: &Rect,
+    baseline: f32,
+    scale: f32,
+) -> PlacedLine {
     let items = visual_items(row, input.is_rtl);
     let indent = if row.first {
         input.first_indent.max(0.0)

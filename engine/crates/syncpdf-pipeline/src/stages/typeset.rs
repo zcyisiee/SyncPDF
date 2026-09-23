@@ -283,7 +283,10 @@ pub fn dominant_font_size(para: &Paragraph) -> f32 {
 
 /// 段落 → `ParagraphSpec`。
 pub fn spec_for(para: &Paragraph) -> ParagraphSpec {
-    let styles: Vec<(StyleId, StyleSpec)> = para
+    // Text uses the target script's serif family (Noto Serif CJK SC for zh-CN).
+    // Other semantic regions and explicit monospace runs retain their selection.
+    let body_serif = para.kind == syncpdf_core::ir::RegionKind::Text;
+    let mut styles: Vec<(StyleId, StyleSpec)> = para
         .style_runs
         .iter()
         .map(|r| {
@@ -294,7 +297,7 @@ pub fn spec_for(para: &Paragraph) -> ParagraphSpec {
                     italic: r.italic,
                     mono: r.mono,
                     script: false,
-                    serif: r.serif,
+                    serif: r.serif || body_serif,
                     size: Some(r.size),
                     color: Some(r.color),
                     font: None,
@@ -302,6 +305,16 @@ pub fn spec_for(para: &Paragraph) -> ParagraphSpec {
             )
         })
         .collect();
+    // Unstyled translated text is StyleId(0), even if source runs start at 1.
+    if body_serif && !styles.iter().any(|(id, _)| *id == StyleId(0)) {
+        styles.push((
+            StyleId(0),
+            StyleSpec {
+                serif: true,
+                ..Default::default()
+            },
+        ));
+    }
     let color: Color = para.style_runs.first().map(|r| r.color).unwrap_or_default();
     ParagraphSpec {
         bbox: para.bbox,
@@ -636,6 +649,86 @@ mod tests {
     }
 
     #[test]
+    fn only_text_uses_serif_for_styled_and_unstyled_translation() {
+        let Some((store, profile)) = fonts() else {
+            return;
+        };
+        let shaper = StoreShaper::new(&store, &profile);
+        let parsed =
+            parse_unit_html(r#"<p id="P01-001">正文<span data-style="1">强调</span></p>"#).unwrap();
+        for kind in [
+            RegionKind::Text,
+            RegionKind::Abstract,
+            RegionKind::Caption,
+            RegionKind::Title,
+            RegionKind::ParagraphTitle,
+            RegionKind::List,
+        ] {
+            let mut para = paragraph("P01-001", "source", Rect::new(0., 0., 200., 100.));
+            para.kind = kind;
+            para.style_runs[0].bold = true;
+            let result = typeset_one(&shaper, &para, &parsed, &Obstacles::default());
+            assert!(!result.paragraph.overflow);
+            let family = if kind == RegionKind::Text {
+                "Noto Serif CJK SC"
+            } else {
+                "Noto Sans CJK SC"
+            };
+            for glyph in result.paragraph.lines.iter().flat_map(|l| &l.glyphs) {
+                let font = store.get(FontId(glyph.font)).unwrap();
+                assert_eq!(font.family, family, "{kind:?}: {}", glyph.text);
+                assert_eq!(font.weight >= 600, glyph.style == StyleId(1));
+                assert_eq!(glyph.size, 10.);
+            }
+            assert!(
+                !para.style_runs[0].serif,
+                "target policy must not change source IR"
+            );
+        }
+    }
+
+    #[test]
+    fn text_font_policy_preserves_run_properties_and_monospace_selection() {
+        let Some((store, profile)) = fonts() else {
+            return;
+        };
+        let shaper = StoreShaper::new(&store, &profile);
+        for mono in [false, true] {
+            let mut para = paragraph("P01-001", "source", Rect::new(0., 0., 200., 100.));
+            let run = &mut para.style_runs[0];
+            run.bold = true;
+            run.italic = true;
+            run.mono = mono;
+            run.size = 8.;
+            run.color = Color {
+                r: 0.5,
+                g: 0.1,
+                b: 0.2,
+            };
+            let body = spec_for(&para);
+            para.kind = RegionKind::Caption;
+            let other = spec_for(&para);
+            let mut expected = other.styles[0].1;
+            expected.serif = true;
+            assert_eq!(body.styles[0].1, expected);
+            assert_eq!(body.font_size, other.font_size);
+            assert_eq!(body.line_height, other.line_height);
+            if mono {
+                assert_eq!(
+                    shaper.font_for(&body.styles[0].1),
+                    shaper.font_for(&other.styles[0].1)
+                );
+            } else {
+                let font = store
+                    .get(FontId(shaper.font_for(&body.styles[0].1)))
+                    .unwrap();
+                assert_eq!(font.family, "Noto Serif CJK SC");
+                assert!(font.weight >= 600);
+            }
+        }
+    }
+
+    #[test]
     fn store_shaper_unknown_font_degrades_gracefully() {
         let Some((store, profile)) = fonts() else {
             eprintln!("SKIP: 字体包缺失");
@@ -725,7 +818,7 @@ mod tests {
             },
         ];
         let spec = spec_for(&para);
-        assert_eq!(spec.styles.len(), 2);
+        assert_eq!(spec.styles.len(), 3); // two source runs plus unstyled target text
         assert_eq!(spec.styles[0].0, StyleId(1));
         assert!(spec.styles[1].1.bold);
         assert!((spec.font_size - 10.0).abs() < 0.01, "{}", spec.font_size);
