@@ -59,3 +59,12 @@ pipeline 的页提交先克隆候选主文档，删除该页成功段落，并�
 ## MVP 调用
 
 `bdt rust-translate <pdf> --workdir <新目录>` 调用已有Rust sidecar和pi真实模型；可指定页范围、模型及CoreML。最终JSON与事件保存在workdir，部分结果继续返回非零退出码。它不执行旧Python排版流程，不调用LaTeX，也不新增UI。`--cached-from` 只读复制既有译文缓存，并令本地RunConfig.cache_only模式跳过主请求和补救请求；未命中/校验失败块明确回退，仍完成页级保存与最终自检。使用说明见[CLI指南](../guide/cli.md)。
+
+
+## A3 双语导出
+
+`bdt rust-translate --dual` 将可选目标路径传入内部 sidecar 的 `--dual-output` / `RunConfig.dual_output`；未扩展尚待实现的编辑/Export请求协议。单语译文校验后，publishing阶段调用`syncpdf-pdf::dual::export`并执行保存后自检，成功发`dual_exported`事件，再发最终完成事件。默认不导出；请求失败仍保留单语文件并报告失败。两输入PDF不修改，输出经同目录临时文件原子保存。
+
+每张A3横向纸固定420×297mm，一一配对原文/译文的同页。源MediaBox/CropBox、继承资源和0/90/180/270度旋转共同确定可见页面；左右各在半页内等比居中。页面内容流及字体/图片资源封装为独立Form，不截图栅格化，也不重新翻译或修改段落字号配置。整页适配A3的比例与段落font-scale是两层不同变换。
+
+导入译文对象前重编号，避免跨PDF对象和资源冲突；复制页面透明度Group。Link Rect/QuadPoints及本地目的地随所属页面矩阵转换。右侧命名链接先解析为显式目的地，避免与左侧同名目标冲突；URI保持。沿用左侧原文目录和命名目标，不复制第二套目录。Fit/FitB改为对应半页FitR，FitH/FitV系列改为变换后的XYZ锚点。页数不一致、无效页面尺寸/旋转及无法解析的已用命名目标明确报错，不输出假成功。已验证普通论文文字/图形和链接；任意表单、交互批注外观、标签阅读树等尚未认证。

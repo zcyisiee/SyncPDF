@@ -84,6 +84,16 @@ bdt check --workdir tmp/paper --strict
 
 `--cached-from` 只读复制原运行目录的译文数据库到新目录，仍按源文本、语言与协议版本核对并校验内容；不要改变目标语言后假定旧缓存仍命中。它是缓存重编译入口，尚未提供逐块字体/字号编辑接口。
 
+追加 `--dual` 会同时生成 `translated.pdf` 和 `dual.pdf`。双语 PDF 每页为 **420×297 mm 的 A3 横向**，左侧原文、右侧对应译文；各页按可见裁剪框和旋转方向等比例适配半页并居中，不裁切内容。文字/图形保留为 PDF 矢量内容，可选择文字；链接点击框及本地跳转位置随拼页转换，右侧内部链接仍跳到右侧。书签沿用原文目录。`--pages` 只限定翻译页，双语文件与单语文件一样保留完整页数，未选页右侧仍是原文。
+
+```bash
+~/miniconda3/envs/bdt/bin/python -m babeldoc_tools rust-translate paper.pdf \
+  --workdir tmp/rust-paper-dual --cached-from tmp/rust-paper-001 \
+  --font-scale 0.9 --line-height 1.3 --layout-device coreml --dual
+```
+
+双语文件在单语输出校验后由 Rust 生成并自检；请求导出却生成失败或缺文件时不能报告成功。`result.json` 增加 `dual_requested`、`dual_output_exists`；请求双语时 `artifacts` 中包含 `dual.pdf`。部分翻译仍保持原有非零退出状态，双语文件不代表漏译已补齐。不传 `--dual` 时只生成单语文件；已有运行目录不能覆盖，使用新 workdir。
+
 全局调整译文字号与相对行距：追加`--font-scale 0.9 --line-height 1.3`。前者将每个译文样式字号乘0.9，保持标题/正文/小字的相对层级；后者指定**基线间距=缩放后的段落主字号×1.3**，是无量纲倍数，不是pt或额外空隙。源公式保留原尺寸；若其上下标/分式会撞相邻行，仅增加该处必需的行距。默认font-scale=1、line-height不覆盖（沿用源行距/字号比例）；只改字号时行距也按原比例联动。两值须为有限正数，实际设置记录在`result.json`的`typography`中。源IR、译文缓存键和保护原文不改；无法容纳不会再自动降低字号/行距，仍为部分结果。页保存前现会按已接受译文墨迹重算同栏垂直净空，最多3轮；不跨栏、不扩大表格单元格，也不再次调用布局模型。
 
 ## Web 工作台

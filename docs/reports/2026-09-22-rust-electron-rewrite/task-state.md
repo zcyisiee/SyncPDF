@@ -54,11 +54,19 @@
 
 pipeline167通过/0失败/4ignored；最后加强新编号守卫后专项1通过；真实inventory1通过。Clippy/fmt/release/diff-check通过，strict docs仍有既存HTTP锚点警告，未跑未改动Python/UI。首次比较脚本错误要求附录A也一行，实测译文较长后纠正验收预期，没有改译文/缩字求通过。详细[验收](12-MVP真实翻译验收.md#heading-adaptive-layout)及[经验](../../lessons/pdf-binding-and-render-evidence.md#heading-semantic-container)已同步。证据和日志均在tmp/backend-repair/title-adapt-*，缓存复排请使用v2。代码提交98782120，文档另批提交；未push。
 
+## A3双语导出（2026-09-23，已完成）
+
+用户要求commit现有更新并新增可选dual PDF：每页A3横向，左原文、右译文。前轮标题代码98782120/文档d819cffa已提交。本轮`bdt rust-translate --dual`经Rust生成额外`dual.pdf`，保留`translated.pdf`；PDF内容流/Form矢量拼页，按CropBox/旋转等比适配半页并居中。链接坐标/目的地同步变换，右侧同名目标解析为右侧显式目标，保留一套原文目录；发布前自检及请求产物存在门禁生效。未做UI/新并行入口/编辑Export协议。
+
+**最终样张：`tmp/backend-repair/dual-v2/dual.pdf`。** CCS21页，每页420×297mm；190真实缓存命中、0模型请求、31.510秒，190/0、0源冲突/覆盖缺口。左右分别101,080/61,110非空白字符逐页与两输入相同；638链接点击框/目标/坐标、28书签、180命名目标通过，qpdf/保存后自检通过。已目视首页、公式页、表18/19；v1与补充门禁后的v2双语文件SHA相同。
+
+相关Rust281通过/0失败/4ignored，门禁专项1及流读取dual专项2通过；CLI/单入口39pytest通过；Clippy/fmt/Ruff/release/diff-check通过。strict docs仅既有HTTP锚点警告。导出失败不覆盖输入/伪报成功；任意交互批注/表单/标签阅读树未认证。详细[验收](12-MVP真实翻译验收.md#a3-dual-export)及[经验](../../lessons/pdf-binding-and-render-evidence.md#dual-page-geometry)已同步。产物和日志均在tmp/backend-repair/dual-*。功能代码提交2b3493a4，文档另批提交，未push；既有cache保持未跟踪。
+
 ## 状态与下一步
 
-本次漏译修复、表18/19断行及标题语义/行宽适配、完整编译和保护内容验收已完成。已将经验提炼到上述lessons链接，架构/参考/CLI/issue/验收同步。代码按逻辑提交：`67958e9c`（源公式/正文/子标题）、`898ca829`（闭合坏块有界补译）、`d306583e`（完整覆盖统计）；文档另批提交。运行缓存与产物不提交，未push。
+本次漏译修复、表18/19断行、标题适配及A3双语导出均完成并通过对应验收。已将经验提炼到上述lessons链接，架构/参考/CLI/issue/验收同步。代码按逻辑提交：`67958e9c`（源公式/正文/子标题）、`898ca829`（闭合坏块有界补译）、`d306583e`（完整覆盖统计）；文档另批提交。运行缓存与产物不提交，未push。
 
-后续产品范围仍待用户安排：A3横向dual、中文目录/书签、逐块字体/字号/译文编辑与原子revision重编译。任意公式布局、任意语言/注释格式、RTL ActualText仍未全面认证。CoreML原生stdout偶发污染风险未在本轮处理。旧23页论文R6后重译未完成，本次CCS结论不能套用旧样本。
+后续产品范围仍待用户安排：中文目录/书签、逐块字体/字号/译文编辑与原子revision重编译。任意公式布局、任意语言/注释格式、RTL ActualText仍未全面认证。CoreML原生stdout偶发污染风险未在本轮处理。旧23页论文R6后重译未完成，本次CCS结论不能套用旧样本。
 
 ## 环境与恢复
 

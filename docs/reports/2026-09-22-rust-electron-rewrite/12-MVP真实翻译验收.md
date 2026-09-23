@@ -218,3 +218,41 @@ v1先修首页：21页192/0、179缓存+13真实补译，1主请求/0补救、60
 pipeline单元/集成167通过、0失败、4 ignored；最后加强新编号不误合断言后专项1通过。另运行真实缓存inventory审计1项通过。严格Clippy、fmt、release、diff-check通过；未重跑未修改的Python/UI。严格文档构建仍有既存HTTP参考中文锚点警告，不计为通过。
 
 证据：`title-adapt-v2/{audit.json,title-comparison.json,title-p*-before.png,title-p*-after.png,result.json,events.jsonl,qpdf.log}`；脚本`title-adapt-audit/compare.py`和`inline-audit.py`；新inventory在`title-adapt-audit-v2/atom-inventory.json`；日志`title-adapt-{tests2,hanging-test,clippy2,build2,inventory2,comparison,audit2,docs}.log`，均位于仓库tmp/backend-repair。经验见[标题语义与容器](../../lessons/pdf-binding-and-render-evidence.md#heading-semantic-container)。
+
+
+<a id="a3-dual-export"></a>
+
+## A3横向双语导出（2026-09-23）
+
+用户要求可选导出每页A3、左原文右译文。新增`bdt rust-translate --dual`，仍从唯一bdt入口调用Rust；输出额外`dual.pdf`并保留`translated.pdf`。不传选项时行为不变。内部为RunConfig可选导出路径及publishing阶段，未扩展UI或尚未实现的编辑/Export协议。
+
+### 实现和边界
+
+- `syncpdf-pdf::dual`将两份PDF同页各封装为Form，保留文字/字体/图片/透明度Group；先重编号再合并资源，不截图。源文件和单语文件均只读。
+- A3固定420×297mm；每页可见CropBox与继承MediaBox/Resources、0/90/180/270度旋转共同决定等比适配，左右半页分别居中。这是整页展示缩放，不改翻译段落字号或重新断行。
+- 链接Rect/QuadPoints与目的地分别按所在页和目标页的矩阵变换。右侧同名目标先解析成显式目标，左侧目录和命名目标保留，URI不变。Fit系列按半页视区或变换后的锚点处理。
+- 保存使用临时文件+rename；页数不一致、无效几何、内容流解码失败等明确报错。双语PDF自检通过后才发`dual_exported`和完成事件；桥接对请求产物缺失另报`dual_output_missing`。部分翻译仍保留非零退出语义。
+- `--pages`限定翻译页，导出一一配对完整单语文件，未选页右侧仍为原文。普通论文内容和链接已验证；任意表单/交互批注外观/标签阅读树未认证。
+
+### 用户样本验证
+
+最终：`tmp/backend-repair/dual-v2/dual.pdf`。使用CCS 3764和title-adapt-v2真实译文缓存，190缓存命中，0模型/补救请求；31.510秒，21页190块全部写入，0回退/送译前冲突/覆盖缺口，exit0。v1首轮真实导出同样通过；补充发布阶段自检及严格流解码后，v2再次从产品命令完整验证，两次dual文件SHA-256完全相同。
+
+| 保存后检查 | 结果 |
+|---|---|
+| 页面 | 21页，每页420×297mm A3横向，原文左/译文右 |
+| 可选择文字 | 左101,080、右61,110个非空白字符；每页每侧分别与原PDF/单语PDF的字符多重集相同 |
+| 链接 | 638个；两侧各319个，全部点击框、目标页及变换后目的地坐标/URI一致 |
+| 导航 | 原28书签、180命名目标保留，命名目标页/坐标正确 |
+| PDF结构 | qpdf通过；生产保存后自检通过 |
+| 目视 | 首页、第2页公式、第20页表18/19左右配对正确，文字清晰、公式与图表可见 |
+
+审计最初直接比较了命名/显式链接的kind与坐标，因右侧命名链接转换为显式链接而失败。两者可能使用不同的坐标口径，已统一到页面坐标再检查实际目标；没有因此修改目标或放宽坐标阈值。
+
+PDF SHA-256：`d932f9b2b0cd3028d5165e3435658daa0ff0c0f38ae0465fa954254d8f52a576`。证据：`dual-v2/{dual-audit.json,dual-page-*.png,qpdf-dual.log,events.jsonl,result.json}`；审计脚本`dual-audit/check.py`，均位于tmp/backend-repair。
+
+### 工程验证
+
+相关pdf+pipeline共281通过、0失败、4ignored；随后新增发布自检门禁专项1通过，严格流读取后dual专项2通过。测试覆盖四种旋转、继承裁剪框/资源、矢量文本配对、命名内部链接及URI、页数不匹配、输出覆盖保护。CLI/单入口39 pytest通过，包括默认不开启、显式转发并报告两份产物、缺双语文件不能假成功和既有产物不覆盖。严格Clippy、fmt、Ruff、release、diff-check通过。未运行未修改的UI或全workspace。
+
+严格文档构建仍有既存HTTP参考中文锚点警告，不计通过。日志`dual-{related-tests,publish-test,tests-final,pytest,ruff,clippy-final,build-final,docs}.log`在tmp/backend-repair。经验见[拼页导航几何](../../lessons/pdf-binding-and-render-evidence.md#dual-page-geometry)。
