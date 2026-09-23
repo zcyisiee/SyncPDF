@@ -107,7 +107,13 @@ fn exhaustive_oracle(nodes: &[Node], widths: &[f32], tolerance: f32) -> Option<(
                             || matches!(node, Node::Penalty { cost, .. } if *cost <= -10_000)
                     });
                 let width = f64::from(widths[line_number.min(widths.len() - 1)]);
-                let ratio = if mandatory || terminal {
+                let single_word_ragged = !mandatory
+                    && !terminal
+                    && matches!(nodes.get(at), Some(Node::Penalty { .. }))
+                    && stretch == 0.0
+                    && shrink == 0.0
+                    && natural <= width;
+                let ratio = if mandatory || terminal || single_word_ragged {
                     if natural > width {
                         continue;
                     }
@@ -137,7 +143,12 @@ fn exhaustive_oracle(nodes: &[Node], widths: &[f32], tolerance: f32) -> Option<(
                 } else {
                     3
                 };
-                let base = 10.0 + 100.0 * ratio.abs().powi(3);
+                let badness_ratio = if single_word_ragged {
+                    (width - natural) / width
+                } else {
+                    ratio.abs()
+                };
+                let base = 10.0 + 100.0 * badness_ratio.powi(3);
                 let cost = if mandatory { 0.0 } else { f64::from(penalty) };
                 let mut extra = if cost >= 0.0 {
                     base.powi(2) + cost.powi(2)
@@ -369,4 +380,32 @@ fn penalty_cost_is_additive_and_glue_cannot_shrink_below_zero() {
         solve(&[b(1.0), g(1.0, 2.0, 2.0), b(1.0)], &[2.0], 1.0),
         Err(BreakError::InvalidInput(_))
     ));
+}
+
+#[test]
+fn discretionary_hyphen_allows_ragged_single_word_and_counts_width() {
+    let nodes = [b(3.0), p(1.0, 50, true), b(4.0)];
+    let result = solve(&nodes, &[5.0], 0.0).unwrap();
+    assert_eq!(
+        result.lines.iter().map(|l| l.break_at).collect::<Vec<_>>(),
+        [1, 3]
+    );
+    assert_eq!(result.lines[0].ratio, 0.0);
+    assert!((result.demerits - (10.8_f64.powi(2) + 2500.0 + 100.0)).abs() < 1e-7);
+    assert_eq!(solve(&nodes, &[3.5], 1.0), Err(BreakError::NoSolution));
+}
+
+#[test]
+fn long_cjk_pruning_keeps_exact_breaks_without_quadratic_scan() {
+    let mut nodes = Vec::new();
+    for _ in 0..350 {
+        nodes.extend([b(10.0), g(0.0, 5.0, 0.0)]);
+    }
+    let start = std::time::Instant::now();
+    for _ in 0..100 {
+        let out = solve(&nodes, &[300.0], 3.0).unwrap();
+        assert_eq!(out.lines.len(), 12);
+        assert_eq!(out.lines[0].break_at, 59);
+    }
+    eprintln!("100 CJK solves: {:?}", start.elapsed());
 }

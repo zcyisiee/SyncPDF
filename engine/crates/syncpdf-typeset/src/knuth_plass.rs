@@ -12,7 +12,9 @@
 //! Later lines use `widths[min(line_index, widths.len() - 1)]`. `tolerance` is the
 //! maximum absolute glue adjustment ratio; shrinking is additionally bounded
 //! by -1. A nonfinal, nonmandatory line with no adjustable glue is feasible only
-//! at its exact natural width. Final and mandatory lines are ragged left with
+//! at its exact natural width, except a selected penalty may leave ragged space
+//! when both stretch and shrink are zero (e.g. a hyphenated single word). Its
+//! badness uses fractional unused width. Final and mandatory lines are ragged left with
 //! ratio zero and must fit at natural width, without shrinking boxes or glue.
 //!
 //! Badness is `100 * abs(ratio)^3`. A line costs `(10 + badness)^2 + penalty^2`
@@ -188,14 +190,27 @@ pub fn solve(nodes: &[Node], widths: &[f32], tolerance: f32) -> Result<Solution,
         .map(|_| (0..slots).map(|_| std::array::from_fn(|_| None)).collect())
         .collect();
     let mut terminal: Option<(f64, usize, usize, usize)> = None;
+    let max_width = widths.iter().copied().fold(0.0_f32, f32::max) as f64;
+    let min_prefix: Vec<f64> = natural.iter().zip(&shrink).map(|(w, s)| w - s).collect();
     for (bi, point) in breaks.iter().enumerate() {
         let (previous_states, current_and_later) = states.split_at_mut(bi);
         let current = &mut current_and_later[0];
         let breakpoints = &breaks;
+        let Some(last) = last_box[point.at] else {
+            continue;
+        };
+        let end = last + 1;
+        // Even maximum permitted shrink cannot fit earlier starts. Since every
+        // Box and (Glue.width - Glue.shrink) is nonnegative, this prefix bound
+        // is monotone. Pruning is exact, independent of tolerance or DP cost.
+        let min_start = min_prefix[end] + point.append_width - max_width;
+        let lower =
+            breaks[..bi].partition_point(|p| min_prefix[next_box[p.next]] < min_start - 1e-9);
         let candidates = std::iter::once((None, 0, 0.0, None, false, 0)).chain(
             previous_states
                 .iter()
                 .enumerate()
+                .skip(lower)
                 .flat_map(|(pi, by_slot)| {
                     by_slot.iter().enumerate().flat_map(move |(slot, classes)| {
                         classes
@@ -225,18 +240,20 @@ pub fn solve(nodes: &[Node], widths: &[f32], tolerance: f32) -> Result<Solution,
                 continue;
             }
             let start = next_box[from];
-            let Some(last) = last_box[point.at] else {
-                continue;
-            };
             if start > last {
                 continue;
             }
-            let end = last + 1;
             let target = f64::from(widths[slot]);
             let body_width = natural[end] - natural[start] + point.append_width;
             let is_terminal = box_count[n] == box_count[point.next]
                 && forced_count[n] == forced_count[point.next];
-            let ragged = point.mandatory || is_terminal;
+            let single_word_ragged = !point.mandatory
+                && !is_terminal
+                && matches!(nodes.get(point.at), Some(Node::Penalty { .. }))
+                && stretch[end] == stretch[start]
+                && shrink[end] == shrink[start]
+                && body_width <= target;
+            let ragged = point.mandatory || is_terminal || single_word_ragged;
             let ratio = if ragged {
                 if body_width > target {
                     continue;
@@ -262,7 +279,12 @@ pub fn solve(nodes: &[Node], widths: &[f32], tolerance: f32) -> Result<Solution,
                 continue;
             }
             let fitness = fitness_class(ratio);
-            let badness = 100.0 * ratio.abs().powi(3);
+            let badness_ratio = if single_word_ragged {
+                (target - body_width) / target
+            } else {
+                ratio.abs()
+            };
+            let badness = 100.0 * badness_ratio.powi(3);
             let base = 10.0 + badness;
             let penalty = if point.mandatory {
                 0.0
