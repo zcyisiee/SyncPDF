@@ -23,7 +23,7 @@ pub use embed::{embed_font, encode_gids, EmbeddedFont};
 pub use loader::{FontId, FontQuery, FontStore, LoadedFont};
 pub use metrics::{advance, gid_for, has_char, metrics, Metrics};
 pub use profile::{default_profile, FontProfile, Role};
-pub use shape::{shape, shape_runs, ShapedGlyph};
+pub use shape::{shape, shape_runs, shape_runs_directional, ShapedGlyph};
 pub use subset::{subset, SubsetResult};
 
 /// 本 crate 错误类型。

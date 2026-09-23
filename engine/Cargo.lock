@@ -2140,6 +2140,7 @@ version = "0.1.0"
 dependencies = [
  "fontdb",
  "harfrust",
+ "icu_segmenter",
  "lopdf",
  "pdf-writer",
  "read-fonts 0.44.0",

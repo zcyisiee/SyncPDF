@@ -1,18 +1,23 @@
 //! 塑形（harfrust）。
 //!
-//! 单一字体单 run：[`shape`]；混合脚本 + 缺字回退：[`shape_runs`]。
+//! 单一字体单 run：[`shape`]；已分好 bidi 方向的 run 用
+//! [`shape_runs_directional`]；兼容自动方向入口为 [`shape_runs`]。
 //! 输出单位 pt（harfrust 不带字号，本模块按 `size / upem` 缩放整数
 //! design-unit 位置，保持 harfbuzz 的定点语义）。
 
 use crate::loader::{FontId, FontStore, LoadedFont};
+use icu_segmenter::GraphemeClusterSegmenter;
+use unicode_script::Script as UnicodeScript;
 
 /// 单个塑形结果字形。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShapedGlyph {
     /// 字形 id。
     pub gid: u16,
-    /// 输入 `&str` 的字节偏移（harfrust cluster，cluster level = Characters）。
+    /// 相对完整输入 `&str` 的 UTF-8 字节起点。
     pub cluster: u32,
+    /// 同一 cluster 的 UTF-8 半开结束；连字覆盖全部输入字符。
+    pub cluster_end: u32,
     /// x 步进（pt）。
     pub x_advance: f32,
     /// y 步进（pt，水平排版为 0）。
@@ -36,6 +41,17 @@ pub fn shape(
     rtl: bool,
     features: &[(&str, u32)],
 ) -> Vec<ShapedGlyph> {
+    shape_with_script(font, text, size, rtl, features, None)
+}
+
+fn shape_with_script(
+    font: &LoadedFont,
+    text: &str,
+    size: f32,
+    rtl: bool,
+    features: &[(&str, u32)],
+    script_override: Option<harfrust::Script>,
+) -> Vec<ShapedGlyph> {
     if text.is_empty() {
         return Vec::new();
     }
@@ -50,13 +66,13 @@ pub fn shape(
 
     let mut buffer = harfrust::UnicodeBuffer::new();
     buffer.push_str(text);
-    buffer.set_cluster_level(harfrust::BufferClusterLevel::Characters);
+    buffer.set_cluster_level(harfrust::BufferClusterLevel::MonotoneGraphemes);
     buffer.set_direction(if rtl {
         harfrust::Direction::RightToLeft
     } else {
         harfrust::Direction::LeftToRight
     });
-    let script = script_for_text(text, rtl);
+    let script = script_override.unwrap_or_else(|| script_for_text(text, rtl));
     buffer.set_script(script);
     if let Some(lang) = language_for_script(script) {
         buffer.set_language(lang);
@@ -79,29 +95,53 @@ pub fn shape(
     let output = shaper.shape(buffer, options);
     let to_pt = |v: i32| v as f32 / 65536.0;
 
+    // HarfBuzz 将连字的多个字符归为同一 cluster。先按逻辑字节顺序
+    // 找下一个 cluster 起点，再把边界扩到完整 Unicode grapheme。
+    let mut starts: Vec<u32> = output
+        .glyph_infos()
+        .iter()
+        .map(|info| info.cluster)
+        .collect();
+    starts.sort_unstable();
+    starts.dedup();
+    let boundaries: Vec<usize> = GraphemeClusterSegmenter::new().segment_str(text).collect();
+    let range_for = |cluster: u32| {
+        let start_idx = boundaries.partition_point(|&b| b <= cluster as usize) - 1;
+        let cluster_idx = starts
+            .binary_search(&cluster)
+            .expect("output cluster in starts");
+        let next = starts
+            .get(cluster_idx + 1)
+            .map_or(text.len(), |&s| s as usize);
+        let end_idx = boundaries.partition_point(|&b| b < next);
+        let start = boundaries[start_idx];
+        let end = boundaries[end_idx];
+        (start as u32, end as u32)
+    };
+
     output
         .glyph_infos()
         .iter()
         .zip(output.glyph_positions())
-        .map(|(info, pos)| ShapedGlyph {
-            gid: info.glyph_id as u16,
-            cluster: info.cluster,
-            x_advance: to_pt(pos.x_advance),
-            y_advance: to_pt(pos.y_advance),
-            x_offset: to_pt(pos.x_offset),
-            y_offset: to_pt(pos.y_offset),
+        .map(|(info, pos)| {
+            let (cluster, cluster_end) = range_for(info.cluster);
+            ShapedGlyph {
+                gid: info.glyph_id as u16,
+                cluster,
+                cluster_end,
+                x_advance: to_pt(pos.x_advance),
+                y_advance: to_pt(pos.y_advance),
+                x_offset: to_pt(pos.x_offset),
+                y_offset: to_pt(pos.y_offset),
+            }
         })
         .collect()
 }
 
-/// 混排切 run：按脚本 + 缺字回退选择字体。
+/// 兼容自动方向入口：每个脚本 run 自行选择 RTL/LTR，按逻辑 run 顺序返回。
 ///
-/// 逻辑（hjfy 同款降级序）：
-/// 1. 逐字符确定 [`Script`](unicode_script::Script)；
-/// 2. 主字体能显示 → 主字体 run；
-/// 3. 否则依次尝试 fallbacks，全部失败用主字体（.notdef）；
-/// 4. 相邻字符字体相同则合并 run；
-/// 5. RTL 脚本段落内调用 `shape(rtl=true)`，输出仍按视觉序拼接。
+/// 混合方向的完整 bidi 重排由调用方负责；已经完成 bidi 切分的调用方
+/// 应使用 [`shape_runs_directional`]，其返回值是视觉字形顺序。
 pub fn shape_runs(
     store: &FontStore,
     text: &str,
@@ -109,120 +149,172 @@ pub fn shape_runs(
     primary: FontId,
     fallbacks: &[FontId],
 ) -> Vec<(FontId, Vec<ShapedGlyph>)> {
+    emit_segments(
+        store,
+        text,
+        size,
+        segments(store, text, primary, fallbacks),
+        None,
+    )
+}
+
+/// 对一个上层已划定的 logical bidi run 塑形，按视觉字形顺序返回。
+///
+/// `rtl` 只控制 run 方向，输入 `text` 不需要也不能预先逆序。
+/// 每个 grapheme 整体选字体，cluster 范围始终相对完整 `text`。
+pub fn shape_runs_directional(
+    store: &FontStore,
+    text: &str,
+    size: f32,
+    primary: FontId,
+    fallbacks: &[FontId],
+    rtl: bool,
+) -> Vec<(FontId, Vec<ShapedGlyph>)> {
+    let mut spans = segments(store, text, primary, fallbacks);
+    if rtl {
+        spans.reverse();
+    }
+    emit_segments(store, text, size, spans, Some(rtl))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Segment {
+    start: usize,
+    end: usize,
+    font: FontId,
+    script: UnicodeScript,
+}
+
+fn segments(store: &FontStore, text: &str, primary: FontId, fallbacks: &[FontId]) -> Vec<Segment> {
     if text.is_empty() {
         return Vec::new();
     }
-    let primary_font = store.get(primary);
-    let mut runs: Vec<(FontId, Vec<ShapedGlyph>)> = Vec::new();
-    let mut segments: Vec<(FontId, &str)> = Vec::new();
-
-    // 1) 逐字符分段（同字体相邻合并）。
-    let mut cur_start = 0usize;
-    let mut cur_font: Option<FontId> = None;
-    for (i, c) in text.char_indices() {
-        let f = pick_font_for_char(store, c, primary, fallbacks, primary_font);
-        if let Some(cf) = cur_font {
-            if cf != f {
-                segments.push((cf, &text[cur_start..i]));
-                cur_start = i;
+    let boundaries: Vec<usize> = GraphemeClusterSegmenter::new().segment_str(text).collect();
+    let mut clusters: Vec<Segment> = boundaries
+        .windows(2)
+        .map(|w| Segment {
+            start: w[0],
+            end: w[1],
+            font: pick_font_for_cluster(store, &text[w[0]..w[1]], primary, fallbacks),
+            script: text[w[0]..w[1]]
+                .chars()
+                .map(UnicodeScript::from)
+                .find(|s| !matches!(s, UnicodeScript::Common | UnicodeScript::Inherited))
+                .unwrap_or(UnicodeScript::Common),
+        })
+        .collect();
+    // Common/Inherited 附着相邻的强脚本；前导中性簇继承右侧。
+    let mut previous = None;
+    for cluster in &mut clusters {
+        if cluster.script == UnicodeScript::Common {
+            if let Some(script) = previous {
+                cluster.script = script;
+            }
+        } else {
+            previous = Some(cluster.script);
+        }
+    }
+    let mut next = UnicodeScript::Latin;
+    for cluster in clusters.iter_mut().rev() {
+        if cluster.script == UnicodeScript::Common {
+            cluster.script = next;
+        } else {
+            next = cluster.script;
+        }
+    }
+    let mut spans: Vec<Segment> = Vec::new();
+    for cluster in clusters {
+        if let Some(last) = spans.last_mut() {
+            if last.font == cluster.font && last.script == cluster.script {
+                last.end = cluster.end;
+                continue;
             }
         }
-        cur_font = Some(f);
+        spans.push(cluster);
     }
-    if let Some(cf) = cur_font {
-        segments.push((cf, &text[cur_start..]));
-    }
+    spans
+}
 
-    // 2) 逐段塑形。每段内部再按 bidi 方向统一处理：段落脚本决定 rtl。
-    //    cluster 重新定位为相对**整段输入**的字节偏移（brief 语义）。
-    for (fid, seg) in segments {
-        let Some(f) = store.get(fid) else {
+fn pick_font_for_cluster(
+    store: &FontStore,
+    text: &str,
+    primary: FontId,
+    fallbacks: &[FontId],
+) -> FontId {
+    std::iter::once(&primary)
+        .chain(fallbacks.iter())
+        .copied()
+        .find(|id| {
+            store.get(*id).is_some_and(|font| {
+                text.chars()
+                    .all(|c| crate::metrics::gid_for(font, c).is_some())
+            })
+        })
+        .unwrap_or(primary)
+}
+
+fn emit_segments(
+    store: &FontStore,
+    text: &str,
+    size: f32,
+    spans: Vec<Segment>,
+    direction: Option<bool>,
+) -> Vec<(FontId, Vec<ShapedGlyph>)> {
+    let mut runs: Vec<(FontId, Vec<ShapedGlyph>)> = Vec::new();
+    for span in spans {
+        let Some(font) = store.get(span.font) else {
             continue;
         };
-        let seg_start = seg.as_ptr() as usize - text.as_ptr() as usize;
-        let rtl = is_rtl_text(seg);
-        let mut glyphs = shape(f, seg, size, rtl, &[]);
-        for g in &mut glyphs {
-            g.cluster += seg_start as u32;
+        let rtl = direction.unwrap_or(matches!(
+            span.script,
+            UnicodeScript::Arabic | UnicodeScript::Hebrew
+        ));
+        let script = harfrust_script(span.script).unwrap_or(harfrust::script::LATIN);
+        let mut glyphs = shape_with_script(
+            font,
+            &text[span.start..span.end],
+            size,
+            rtl,
+            &[],
+            Some(script),
+        );
+        if glyphs.is_empty() {
+            continue;
         }
-        push_run(&mut runs, fid, glyphs);
+        for glyph in &mut glyphs {
+            glyph.cluster += span.start as u32;
+            glyph.cluster_end += span.start as u32;
+        }
+        if let Some((last_id, last_glyphs)) = runs.last_mut() {
+            if *last_id == span.font {
+                last_glyphs.extend(glyphs);
+                continue;
+            }
+        }
+        runs.push((span.font, glyphs));
     }
     runs
 }
 
-/// 单字符选字体：主 → fallbacks → 主（.notdef）。
-fn pick_font_for_char(
-    store: &FontStore,
-    c: char,
-    primary: FontId,
-    fallbacks: &[FontId],
-    primary_font: Option<&LoadedFont>,
-) -> FontId {
-    if let Some(pf) = primary_font {
-        if crate::metrics::gid_for(pf, c).is_some() {
-            return primary;
-        }
-    }
-    for fb in fallbacks {
-        if let Some(f) = store.get(*fb) {
-            if crate::metrics::gid_for(f, c).is_some() {
-                return *fb;
-            }
-        }
-    }
-    primary
-}
-
-/// 追加 run（与上一 run 同字体则合并）。
-fn push_run(runs: &mut Vec<(FontId, Vec<ShapedGlyph>)>, fid: FontId, glyphs: Vec<ShapedGlyph>) {
-    if glyphs.is_empty() {
-        return;
-    }
-    if let Some((last_id, last_glyphs)) = runs.last_mut() {
-        if *last_id == fid {
-            last_glyphs.extend(glyphs);
-            return;
-        }
-    }
-    runs.push((fid, glyphs));
-}
-
-/// 段落是否含 RTL 脚本（阿拉伯/希伯来）。
-fn is_rtl_text(text: &str) -> bool {
-    text.chars().any(|c| {
-        matches!(
-            unicode_script::Script::from(c),
-            unicode_script::Script::Arabic | unicode_script::Script::Hebrew
-        )
-    })
-}
-
 /// 从文本首个非 Common 脚本推导 harfrust `Script`。
-fn script_for_text(text: &str, rtl: bool) -> harfrust::Script {
-    if rtl {
-        return harfrust::script::ARABIC;
-    }
+fn script_for_text(text: &str, _rtl: bool) -> harfrust::Script {
     for c in text.chars() {
-        let s = unicode_script::Script::from(c);
-        let tag = match s {
-            unicode_script::Script::Latin => b"Latn",
-            unicode_script::Script::Han => b"Hani",
-            unicode_script::Script::Hiragana => b"Hira",
-            unicode_script::Script::Katakana => b"Kana",
-            unicode_script::Script::Hangul => b"Hang",
-            unicode_script::Script::Arabic => b"Arab",
-            unicode_script::Script::Greek => b"Grek",
-            unicode_script::Script::Cyrillic => b"Cyrl",
-            unicode_script::Script::Hebrew => b"Hebr",
-            unicode_script::Script::Thai => b"Thai",
-            _ => continue,
-        };
-        let t = harfrust::Tag::new(&[tag[0], tag[1], tag[2], tag[3]]);
-        if let Some(s) = harfrust::Script::from_iso15924_tag(t) {
-            return s;
+        if let Some(script) = harfrust_script(UnicodeScript::from(c)) {
+            return script;
         }
     }
     harfrust::script::LATIN
+}
+
+fn harfrust_script(script: UnicodeScript) -> Option<harfrust::Script> {
+    if matches!(
+        script,
+        UnicodeScript::Common | UnicodeScript::Inherited | UnicodeScript::Unknown
+    ) {
+        return None;
+    }
+    let tag = harfrust::Tag::new_checked(script.short_name().as_bytes()).ok()?;
+    harfrust::Script::from_iso15924_tag(tag)
 }
 
 /// 脚本对应塑形语言（影响 liga/locl）。
@@ -376,5 +468,123 @@ mod tests {
         let id = s.ids()[0];
         assert!(shape(s.get(id).unwrap(), "", 10.0, false, &[]).is_empty());
         assert!(shape_runs(&s, "", 10.0, id, &[]).is_empty());
+    }
+
+    #[test]
+    fn real_font_ligature_and_combining_clusters() {
+        let s = store().expect("built-in font fixture required");
+        let id = s
+            .find(&FontQuery {
+                family: Some("PT Serif".into()),
+                ..Default::default()
+            })
+            .expect("PT Serif fixture required");
+        let font = s.get(id).unwrap();
+        let ligature = shape(font, "office", 12.0, false, &[]);
+        assert!(
+            ligature
+                .iter()
+                .any(|g| g.cluster == 2 && g.cluster_end == 4),
+            "fixture should form fi ligature: {ligature:?}"
+        );
+        let combining = shape(font, "a\u{0301}b", 12.0, false, &[]);
+        assert!(combining
+            .iter()
+            .any(|g| g.cluster == 0 && g.cluster_end == 3));
+        assert!(combining.iter().all(|g| {
+            (g.cluster == 0 && g.cluster_end == 3) || (g.cluster == 3 && g.cluster_end == 4)
+        }));
+    }
+
+    #[test]
+    fn directional_fallback_keeps_absolute_clusters_and_font_identity() {
+        let s = store().expect("built-in font fixture required");
+        let inter = s
+            .find(&FontQuery {
+                family: Some("Inter".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        let cjk = s
+            .find(&FontQuery {
+                script: Script::HanSC,
+                ..Default::default()
+            })
+            .unwrap();
+        let text = "A中B";
+        let runs = shape_runs_directional(&s, text, 12.0, inter, &[cjk], false);
+        assert_eq!(
+            runs.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            [inter, cjk, inter]
+        );
+        let clusters = runs
+            .iter()
+            .flat_map(|(_, glyphs)| glyphs.iter().map(|g| (g.cluster, g.cluster_end)))
+            .collect::<Vec<_>>();
+        assert_eq!(clusters, [(0, 1), (1, 4), (4, 5)]);
+        assert_eq!(
+            runs,
+            shape_runs_directional(&s, text, 12.0, inter, &[cjk], false)
+        );
+
+        // No font covers the entire extended grapheme: keep it in one font,
+        // with a real .notdef for the unsupported combining mark.
+        let mixed = shape_runs_directional(&s, "a\u{0651}", 12.0, inter, &[cjk], false);
+        assert_eq!(mixed.len(), 1);
+        assert_eq!(mixed[0].0, inter);
+        assert!(mixed[0].1.iter().any(|g| g.gid == 0), "{mixed:?}");
+        assert!(mixed[0]
+            .1
+            .iter()
+            .all(|g| (g.cluster, g.cluster_end) == (0, 3)));
+    }
+
+    #[test]
+    fn directional_arabic_matches_single_font_without_reversing_input() {
+        let s = store().expect("built-in font fixture required");
+        let id = s
+            .find(&FontQuery {
+                script: Script::Arabic,
+                ..Default::default()
+            })
+            .expect("Arabic fixture required");
+        let text = "السلام";
+        let actual = shape_runs_directional(&s, text, 18.0, id, &[], true);
+        assert_eq!(
+            actual,
+            vec![(id, shape(s.get(id).unwrap(), text, 18.0, true, &[]))]
+        );
+        assert_eq!(
+            actual,
+            shape_runs_directional(&s, text, 18.0, id, &[], true)
+        );
+
+        let inter = s
+            .find(&FontQuery {
+                family: Some("Inter".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        let cluster = shape_runs_directional(&s, "ب\u{0651}", 18.0, inter, &[id], true);
+        assert_eq!(cluster.len(), 1);
+        assert_eq!(cluster[0].0, id);
+        assert!(cluster[0]
+            .1
+            .iter()
+            .all(|g| (g.cluster, g.cluster_end) == (0, 4) && g.gid != 0));
+
+        let mixed = shape_runs_directional(&s, "Aب", 18.0, inter, &[id], true);
+        assert_eq!(
+            mixed.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            [id, inter]
+        );
+        assert_eq!(mixed[0].1[0].cluster, 1);
+        assert_eq!(mixed[1].1[0].cluster, 0);
+    }
+
+    #[test]
+    fn hebrew_rtl_uses_hebrew_script() {
+        assert_eq!(script_for_text("שלום", true), harfrust::script::HEBREW);
+        assert_eq!(script_for_text("السَّلَام", true), harfrust::script::ARABIC);
     }
 }
