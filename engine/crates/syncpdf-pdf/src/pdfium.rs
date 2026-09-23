@@ -21,7 +21,7 @@ use pdfium_render::prelude::{
     Pdfium, PdfiumError as RenderError, Pixels,
 };
 use serde::{Deserialize, Serialize};
-use syncpdf_core::{Color, Point, Rect};
+use syncpdf_core::{Color, Matrix, Point, Rect};
 
 /// 递归进入 Form XObject 的最大深度，防御病态嵌套。
 const MAX_FORM_DEPTH: u32 = 16;
@@ -167,12 +167,77 @@ pub struct TextChar {
     pub is_generated: bool,
 }
 
+/// Page-space geometry derived from this object's rotated bounds, not text-page characters.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ObjectBounds {
+    pub origin: Point,
+    pub bbox: Rect,
+}
+
+fn reliable_matrix(m: Matrix) -> Option<Matrix> {
+    (m.as_array().iter().all(|v| v.is_finite())
+        && m.determinant().is_finite()
+        && m.determinant().abs() > 1e-12)
+        .then_some(m)
+}
+
+fn core_matrix(m: pdfium_render::prelude::PdfMatrix) -> Option<Matrix> {
+    reliable_matrix(Matrix::new(m.a(), m.b(), m.c(), m.d(), m.e(), m.f()))
+}
+
+fn object_bounds(
+    object: &PdfPageTextObject<'_>,
+    ancestors: Option<Matrix>,
+) -> Option<ObjectBounds> {
+    let ancestors = ancestors?;
+    let own = core_matrix(object.matrix().ok()?)?;
+    let q = object.bounds().ok()?;
+    // PDFium has already applied the object's own matrix to these four corners.
+    let corners = [
+        (q.x1(), q.y1()),
+        (q.x2(), q.y2()),
+        (q.x3(), q.y3()),
+        (q.x4(), q.y4()),
+    ];
+    let mut points = Vec::with_capacity(4);
+    for (x, y) in corners {
+        if !x.value.is_finite() || !y.value.is_finite() {
+            return None;
+        }
+        points.push(ancestors.apply(Point::new(x.value, y.value)));
+    }
+    let area = (points[1].x - points[0].x) * (points[3].y - points[0].y)
+        - (points[1].y - points[0].y) * (points[3].x - points[0].x);
+    if !area.is_finite() || area == 0.0 {
+        return None;
+    }
+    let origin = ancestors.apply(own.apply(Point::new(0.0, 0.0)));
+    if !origin.x.is_finite()
+        || !origin.y.is_finite()
+        || points.iter().any(|p| !p.x.is_finite() || !p.y.is_finite())
+    {
+        return None;
+    }
+    let bbox = Rect::new(
+        points.iter().map(|p| p.x).fold(f32::INFINITY, f32::min),
+        points.iter().map(|p| p.y).fold(f32::INFINITY, f32::min),
+        points.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max),
+        points.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max),
+    );
+    (bbox.width().is_finite()
+        && bbox.height().is_finite()
+        && bbox.width() > 0.0
+        && bbox.height() > 0.0)
+        .then_some(ObjectBounds { origin, bbox })
+}
+
 /// 一个文本绘制对象（内容流里的一段 `BT … ET` 文本），按内容流顺序编号。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TextObject {
     /// 页内文本对象序号，从 0 开始，按内容流顺序（含嵌套 Form XObject 内的）。
     pub index: u32,
-    /// 嵌套 Form XObject 的对象序号路径；空表示页级对象。
+    /// 嵌套 Form XObject 的序号路径；空表示页级对象。每层分量是该层 Form
+    /// 的进入序号（只数 Form XObject，从 0 开始），与 `bind.rs` 的编号一致。
     pub form_path: Vec<u32>,
     /// pdfium 报告的字体名（通常是 BaseFont，可能带子集前缀）。
     pub font_name: String,
@@ -190,6 +255,8 @@ pub struct TextObject {
     pub render_mode: u8,
     /// 该对象内的字符。
     pub chars: Vec<TextChar>,
+    /// Independent object geometry; never a loose-character bounding box.
+    pub object_bounds: Option<ObjectBounds>,
 }
 
 // ---------------------------------------------------------------------------
@@ -410,7 +477,15 @@ impl PdfiumWorker {
             let mut out = Vec::new();
             let mut form_path = Vec::new();
             let mut next_index = 0u32;
-            visit_objects(level, &mut form_path, &text, &mut out, &mut next_index, 0)?;
+            visit_objects(
+                level,
+                &mut form_path,
+                &text,
+                &mut out,
+                &mut next_index,
+                0,
+                Some(Matrix::IDENTITY),
+            )?;
             Ok(out)
         })?
     }
@@ -461,6 +536,10 @@ fn to_rect(r: PdfRect) -> Rect {
 }
 
 /// 递归遍历一层页面对象，收集文本对象。`level` 必须按内容流顺序排列。
+///
+/// `form_path` 的每一层分量是本层 Form XObject 的**进入序号**（只数 Form，
+/// 不含其它对象），与 `bind.rs` 的 `form_seq` 编号一致；这样两侧才能按路径分组配对。
+#[allow(clippy::too_many_arguments)]
 fn visit_objects<'a>(
     level: Vec<PdfPageObject<'a>>,
     form_path: &mut Vec<u32>,
@@ -468,11 +547,14 @@ fn visit_objects<'a>(
     out: &mut Vec<TextObject>,
     next_index: &mut u32,
     depth: u32,
+    ancestors: Option<Matrix>,
 ) -> Result<()> {
-    for (i, object) in level.into_iter().enumerate() {
+    let mut form_seq = 0u32;
+    for object in level.into_iter() {
         match object {
             PdfPageObject::Text(text_object) => {
-                let built = build_text_object(&text_object, text, *next_index, form_path)?;
+                let built =
+                    build_text_object(&text_object, text, *next_index, form_path, ancestors)?;
                 *next_index += 1;
                 out.push(built);
             }
@@ -485,8 +567,20 @@ fn visit_objects<'a>(
                 for j in 0..form.len() {
                     children.push(form.get(j)?);
                 }
-                form_path.push(i as u32);
-                let result = visit_objects(children, form_path, text, out, next_index, depth + 1);
+                form_path.push(form_seq);
+                form_seq += 1;
+                let transform = ancestors.and_then(|a| {
+                    core_matrix(form.matrix().ok()?).and_then(|m| reliable_matrix(m.then(&a)))
+                });
+                let result = visit_objects(
+                    children,
+                    form_path,
+                    text,
+                    out,
+                    next_index,
+                    depth + 1,
+                    transform,
+                );
                 form_path.pop();
                 result?;
             }
@@ -501,6 +595,7 @@ fn build_text_object(
     text: &PdfPageText<'_>,
     index: u32,
     form_path: &[u32],
+    ancestors: Option<Matrix>,
 ) -> Result<TextObject> {
     let font = object.font();
     let font_flags = FontFlags {
@@ -552,6 +647,7 @@ fn build_text_object(
         fill,
         render_mode: render_mode_to_u8(object.render_mode()),
         chars: collected,
+        object_bounds: object_bounds(object, ancestors),
     })
 }
 
@@ -583,6 +679,15 @@ fn render_mode_to_u8(mode: PdfPageTextRenderMode) -> u8 {
 mod tests {
     use super::*;
     use pdfium_render::prelude::PdfPoints;
+
+    #[test]
+    fn object_bounds_reject_unreliable_ancestor_matrices() {
+        assert!(reliable_matrix(Matrix::IDENTITY).is_some());
+        assert!(reliable_matrix(Matrix::scale(0.0, 1.0)).is_none());
+        assert!(reliable_matrix(Matrix::translate(f32::NAN, 0.0)).is_none());
+        assert!(reliable_matrix(Matrix::scale(f32::INFINITY, 1.0)).is_none());
+        assert!(reliable_matrix(Matrix::scale(f32::MAX, f32::MAX)).is_none());
+    }
 
     #[test]
     fn render_mode_covers_pdf_tr_values() {

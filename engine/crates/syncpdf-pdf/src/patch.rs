@@ -26,7 +26,7 @@ use lopdf::{Dictionary, Document, Object, ObjectId};
 use syncpdf_core::ir::{DisplayItem, Glyph, PageIR};
 use syncpdf_core::{GlyphId, ObjRef, OpKey};
 
-use crate::bind::FormDo;
+use crate::bind::{BoundPage, FormDo, ReplacementError, SourceSnapshot};
 use crate::content::{parse_content, write_content, Op, Operand};
 
 /// 补丁统计。
@@ -45,6 +45,16 @@ pub struct PatchStats {
 /// 补丁错误。
 #[derive(Debug, thiserror::Error)]
 pub enum PatchError {
+    #[error(transparent)]
+    UnsafeBinding(#[from] ReplacementError),
+    #[error("unknown or cross-page glyph: {0}")]
+    UnknownGlyph(GlyphId),
+    #[error("patch target does not match bound page")]
+    PageIdentity,
+
+    #[error("unsupported or stale patch path: {0}")]
+    UnsupportedPath(&'static str),
+
     /// lopdf 侧错误。
     #[error("lopdf: {0}")]
     Lopdf(#[from] lopdf::Error),
@@ -73,8 +83,10 @@ pub struct PatchSet {
     deleted: BTreeMap<OpKey, BTreeSet<u16>>,
     /// `OpKey` → 该操作的字形快照（序号 → advance/size）。
     snaps: BTreeMap<OpKey, Vec<GlyphSnap>>,
-    /// 当前页的 Form `Do` 记录（由 [`PatchSet::with_forms`] 注入）。
+    /// 当前页的 Form `Do` 记录（由已校验绑定注入）。
     forms: Vec<FormDo>,
+    page: Option<(u32, ObjectId)>,
+    source_snapshot: Option<SourceSnapshot>,
 }
 
 impl PatchSet {
@@ -83,14 +95,35 @@ impl PatchSet {
         Self::default()
     }
 
-    /// 注入 `bind_page` 得到的 Form `Do` 记录（Form 克隆改名需要）。
-    pub fn with_forms(mut self, bound: &crate::bind::BoundPage) -> Self {
+    /// Validate the entire request before enqueueing any deletion.
+    pub fn delete_glyphs(&mut self, bound: &BoundPage, ids: &[GlyphId]) -> Result<()> {
+        bound.check_replacement()?;
+        let page = (bound.ir.page.number(), bound.page_id);
+        if self.page.is_some_and(|existing| existing != page) {
+            return Err(PatchError::PageIdentity);
+        }
+        if self
+            .source_snapshot
+            .as_ref()
+            .is_some_and(|old| old != bound.source_snapshot())
+        {
+            return Err(PatchError::UnsupportedPath("mixed source snapshots"));
+        }
+        let known: BTreeSet<_> = bound.ir.glyphs().map(|g| g.id).collect();
+        for id in ids {
+            if !known.contains(id) {
+                return Err(PatchError::UnknownGlyph(*id));
+            }
+        }
+        self.page = Some(page);
+        self.source_snapshot = Some(bound.source_snapshot().clone());
         self.forms = bound.form_dos.clone();
-        self
+        self.enqueue_glyphs(&bound.ir, ids);
+        Ok(())
     }
 
-    /// 标记删除一批字形。`ids` 中不属于 `ir` 的会被忽略。
-    pub fn delete_glyphs(&mut self, ir: &PageIR, ids: &[GlyphId]) {
+    // Private rewrite helper; production callers must pass the bound-page gate.
+    fn enqueue_glyphs(&mut self, ir: &PageIR, ids: &[GlyphId]) {
         // 先按 op 归集要删的序号。
         let mut want: BTreeMap<OpKey, BTreeSet<u16>> = BTreeMap::new();
         for id in ids {
@@ -110,6 +143,11 @@ impl PatchSet {
     }
 
     /// 应用补丁到文档第 `page`（1 基）页。
+    ///
+    /// Page contents and resource containers are copied before writing. Bindings
+    /// from before a successful apply are stale: enqueue all paragraphs together,
+    /// or rebind against the saved result before another apply. Nested/repeated
+    /// Form instances are rejected before mutation (OpKey lacks instance identity).
     pub fn apply(&self, doc: &mut Document, page: u32) -> Result<PatchStats> {
         let pages = doc.get_pages();
         let count = pages.len() as u32;
@@ -117,6 +155,12 @@ impl PatchSet {
             return Err(PatchError::PageOutOfRange { page, count });
         };
 
+        if self
+            .page
+            .is_some_and(|expected| expected != (page, page_id))
+        {
+            return Err(PatchError::PageIdentity);
+        }
         let mut stats = PatchStats::default();
 
         // 按流分组待改操作。
@@ -131,10 +175,75 @@ impl PatchSet {
                 .insert(key.op_index, ords.clone());
         }
 
+        if by_stream.is_empty() {
+            return Ok(stats);
+        }
+        if self
+            .source_snapshot
+            .as_ref()
+            .is_some_and(|snapshot| !snapshot.matches(doc, page_id))
+        {
+            return Err(PatchError::UnsupportedPath("stale source stream binding"));
+        }
+        let contents = doc.get_page_contents(page_id);
+        let mut resources = page_resources(doc, page_id)?;
+        let mut xobjects = match resources.get(b"XObject") {
+            Ok(obj) => resolved_dict(doc, obj)?,
+            Err(_) => Dictionary::new(),
+        };
+        // OpKey has no instance identity. Only a unique, top-level invocation
+        // can be redirected safely; reject nested/ambiguous/stale paths first.
+        for sref in by_stream.keys() {
+            let id = (sref.obj, sref.gen);
+            if is_form_stream(doc, id) {
+                let calls: Vec<_> = self.forms.iter().filter(|f| f.target == *sref).collect();
+                if calls.len() != 1 || !calls[0].form_path.is_empty() {
+                    return Err(PatchError::UnsupportedPath("nested or repeated Form"));
+                }
+                let call = calls[0];
+                if !contents.contains(&(call.do_op.stream.obj, call.do_op.stream.gen))
+                    || xobjects.get(call.name.as_bytes())?.as_reference()? != id
+                {
+                    return Err(PatchError::UnsupportedPath("stale Form binding"));
+                }
+                let bytes = stream_bytes(doc, (call.do_op.stream.obj, call.do_op.stream.gen))?;
+                let ops = parse_content(&bytes).map_err(|e| PatchError::Parse {
+                    stream: call.do_op.stream.obj,
+                    msg: e.to_string(),
+                })?;
+                if !ops.get(call.do_op.op_index as usize).is_some_and(|op| {
+                    op.operator == "Do"
+                        && op.operands.first().and_then(Operand::as_name)
+                            == Some(call.name.as_str())
+                }) {
+                    return Err(PatchError::UnsupportedPath("stale Do operation"));
+                }
+            } else if !contents.contains(&id) {
+                return Err(PatchError::UnsupportedPath("stale page content binding"));
+            }
+        }
+        // Work on a private candidate: parse/compression errors must not publish
+        // a half-redirected page. Original stream/resource objects stay intact.
+        let mut candidate = doc.clone();
+        let mut content_clones = BTreeMap::new();
+        for id in &contents {
+            let stream = candidate.get_object(*id)?.as_stream()?.clone();
+            let new_id = candidate.add_object(stream);
+            content_clones.insert(*id, new_id);
+        }
+        candidate.get_object_mut(page_id)?.as_dict_mut()?.set(
+            "Contents",
+            contents
+                .iter()
+                .map(|id| Object::Reference(content_clones[id]))
+                .collect::<Vec<_>>(),
+        );
+        let doc_candidate = &mut candidate;
         // Form 流需要克隆：先决定哪些 stream 是 Form。
         let mut form_clones: BTreeMap<ObjRef, ObjectId> = BTreeMap::new();
 
         for (sref, ops_map) in &by_stream {
+            let doc = &mut *doc_candidate;
             let stream_id = (sref.obj, sref.gen);
             let is_form = is_form_stream(doc, stream_id);
             let target_id = if is_form {
@@ -152,7 +261,7 @@ impl PatchSet {
                     new_id
                 }
             } else {
-                stream_id
+                content_clones[&stream_id]
             };
 
             let bytes = match doc.get_object(target_id) {
@@ -204,18 +313,39 @@ impl PatchSet {
 
             // Form 克隆：改名并改页级 Do。
             if is_form {
-                let new_name = format!("SPfX{}", form_clones.len() - 1);
-                let old_name = self
+                let mut index = 0;
+                let new_name = loop {
+                    let name = format!("SPfX{index}");
+                    if !xobjects.has(name.as_bytes()) {
+                        break name;
+                    }
+                    index += 1;
+                };
+                let call = self
                     .forms
                     .iter()
-                    .find(|f| f.target.obj == sref.obj)
-                    .map(|f| f.name.clone());
-                if let Some(old_name) = old_name {
-                    rename_xobject(doc, page_id, &old_name, &new_name, target_id);
-                }
+                    .find(|f| f.target == *sref)
+                    .expect("preflight");
+                xobjects.set(new_name.as_bytes(), Object::Reference(target_id));
+                let sid = content_clones[&(call.do_op.stream.obj, call.do_op.stream.gen)];
+                let bytes = stream_bytes(doc, sid)?;
+                let mut ops = parse_content(&bytes).map_err(|e| PatchError::Parse {
+                    stream: sid.0,
+                    msg: e.to_string(),
+                })?;
+                let op = &mut ops[call.do_op.op_index as usize];
+                op.operands[0] = Operand::Name(new_name);
+                op.mark_dirty();
+                write_stream_content(doc, sid, write_content(&bytes, &ops))?;
             }
         }
 
+        resources.set("XObject", xobjects);
+        candidate
+            .get_object_mut(page_id)?
+            .as_dict_mut()?
+            .set("Resources", resources);
+        *doc = candidate;
         Ok(stats)
     }
 }
@@ -382,97 +512,36 @@ fn is_form_stream(doc: &Document, id: ObjectId) -> bool {
     }
 }
 
-/// 在页（或 Form）`/Resources/XObject` 里加新键并改对应 `Do`。
-fn rename_xobject(
-    doc: &mut Document,
-    page_id: ObjectId,
-    old_name: &str,
-    new_name: &str,
-    new_obj: ObjectId,
-) {
-    // 1) 资源里加键。页级资源可能是指向字典的引用。
-    if let Ok(res) = doc.get_or_create_resources(page_id) {
-        if let Ok(rd) = res.as_dict_mut() {
-            let xobj = match rd.get_mut(b"XObject") {
-                Ok(o) => o,
-                Err(_) => {
-                    rd.set("XObject", Dictionary::new());
-                    rd.get_mut(b"XObject").expect("just set")
-                }
-            };
-            if let Ok(xd) = xobj.as_dict_mut() {
-                xd.set(new_name.as_bytes().to_vec(), Object::Reference(new_obj));
-            }
-        }
-    }
-    // 2) 改内容流里对应那次 `Do`。Form 的 Do 在页内容流或父 Form 流里，
-    //    这里按 /Contents 与页 XObject 里的 Form 流逐个尝试。
-    let mut streams: Vec<ObjectId> = doc.get_page_contents(page_id);
-    // 父 Form 流（Do 记录里 form_path 非空时目标在 Form 内）。
-    for (_, id) in xobject_forms(doc, page_id) {
-        streams.push(id);
-    }
-    for sid in streams {
-        let Ok(Object::Stream(s)) = doc.get_object(sid) else {
-            continue;
-        };
-        let bytes = s
-            .decompressed_content()
-            .unwrap_or_else(|_| s.content.clone());
-        let Ok(mut ops) = parse_content(&bytes) else {
-            continue;
-        };
-        let mut changed = false;
-        for op in ops.iter_mut() {
-            if op.operator == "Do"
-                && op.operands.first().and_then(Operand::as_name) == Some(old_name)
-            {
-                op.operands[0] = Operand::Name(new_name.to_string());
-                op.mark_dirty();
-                changed = true;
-            }
-        }
-        if changed {
-            let new_bytes = write_content(&bytes, &ops);
-            let _ = write_stream_content(doc, sid, new_bytes);
-        }
+fn stream_bytes(doc: &Document, id: ObjectId) -> Result<Vec<u8>> {
+    let stream = doc.get_object(id)?.as_stream()?;
+    Ok(stream
+        .decompressed_content()
+        .unwrap_or_else(|_| stream.content.clone()))
+}
+
+fn resolved_dict(doc: &Document, obj: &Object) -> Result<Dictionary> {
+    match obj {
+        Object::Reference(id) => Ok(doc.get_dictionary(*id)?.clone()),
+        _ => Ok(obj.as_dict()?.clone()),
     }
 }
 
-/// 页 `/Resources/XObject` 里全部 Form 流对象。
-fn xobject_forms(doc: &Document, page_id: ObjectId) -> Vec<(String, ObjectId)> {
-    let mut out = Vec::new();
-    let Ok((_, _)) = doc.get_page_resources(page_id) else {
-        return out;
-    };
-    let res = match doc.get_object(page_id).and_then(Object::as_dict) {
-        Ok(d) => d.clone(),
-        Err(_) => return out,
-    };
-    let rd = match res.get(b"Resources") {
-        Ok(Object::Dictionary(d)) => d.clone(),
-        Ok(Object::Reference(id)) => match doc.get_dictionary(*id) {
-            Ok(d) => d.clone(),
-            Err(_) => return out,
-        },
-        _ => return out,
-    };
-    let xd = match rd.get(b"XObject") {
-        Ok(Object::Dictionary(d)) => d.clone(),
-        Ok(Object::Reference(id)) => match doc.get_dictionary(*id) {
-            Ok(d) => d.clone(),
-            Err(_) => return out,
-        },
-        _ => return out,
-    };
-    for (k, v) in xd.iter() {
-        if let Ok(id) = v.as_reference() {
-            if is_form_stream(doc, id) {
-                out.push((String::from_utf8_lossy(k).into_owned(), id));
-            }
+/// Materialize inherited/indirect resources on the target page, never on its parent.
+fn page_resources(doc: &Document, mut id: ObjectId) -> Result<Dictionary> {
+    let mut seen = BTreeSet::new();
+    loop {
+        if !seen.insert(id) {
+            return Err(PatchError::UnsupportedPath("cyclic page inheritance"));
+        }
+        let dict = doc.get_dictionary(id)?;
+        if let Ok(obj) = dict.get(b"Resources") {
+            return resolved_dict(doc, obj);
+        }
+        match dict.get(b"Parent") {
+            Ok(parent) => id = parent.as_reference()?,
+            Err(_) => return Ok(Dictionary::new()),
         }
     }
-    out
 }
 
 // ---------------------------------------------------------------------------
@@ -570,12 +639,12 @@ mod tests {
         ]);
         let mut ps = PatchSet::new();
         let ids: Vec<GlyphId> = ir.glyphs().map(|g| g.id).collect();
-        ps.delete_glyphs(&ir, &ids);
+        ps.enqueue_glyphs(&ir, &ids);
         let stats = ps.apply(&mut doc, 1).unwrap();
         assert_eq!(stats.ops_deleted, 1);
         assert_eq!(stats.streams_touched, 1);
 
-        let out = content_bytes(&doc, content);
+        let out = content_bytes(&doc, doc.get_page_contents(doc.get_pages()[&1])[0]);
         let text = String::from_utf8_lossy(&out);
         assert!(text.contains("TJ"), "应为 TJ：{text}");
         // 3 × 5pt @10pt = 1500 → -1500
@@ -599,11 +668,11 @@ mod tests {
             ir.glyphs().nth(1).unwrap().id,
             ir.glyphs().nth(2).unwrap().id,
         ];
-        ps.delete_glyphs(&ir, &ids);
+        ps.enqueue_glyphs(&ir, &ids);
         let stats = ps.apply(&mut doc, 1).unwrap();
         assert_eq!(stats.ops_rewritten, 1);
 
-        let out = content_bytes(&doc, content);
+        let out = content_bytes(&doc, doc.get_page_contents(doc.get_pages()[&1])[0]);
         let text = String::from_utf8_lossy(&out);
         assert!(text.contains("A"), "首字节保留：{text}");
         assert!(text.contains("D"), "末字节保留：{text}");
@@ -622,7 +691,7 @@ mod tests {
         let ir = ir_with(vec![glyph(op, 0, 5.0, 10.0)]);
         let mut ps = PatchSet::new();
         let id = ir.glyphs().next().unwrap().id;
-        ps.delete_glyphs(&ir, &[id]);
+        ps.enqueue_glyphs(&ir, &[id]);
         let stats = ps.apply(&mut doc, 1).unwrap();
         assert_eq!(stats.streams_touched, 0);
         assert_eq!(content_bytes(&doc, content), src, "未命中时字节不变");
@@ -645,9 +714,9 @@ mod tests {
             ir.glyphs().nth(1).unwrap().id,
             ir.glyphs().nth(2).unwrap().id,
         ];
-        ps.delete_glyphs(&ir, &ids);
+        ps.enqueue_glyphs(&ir, &ids);
         ps.apply(&mut doc, 1).unwrap();
-        let out = content_bytes(&doc, content);
+        let out = content_bytes(&doc, doc.get_page_contents(doc.get_pages()[&1])[0]);
         let text = String::from_utf8_lossy(&out);
         assert!(text.contains("TJ"));
         assert!(text.contains("(A)") && text.contains("(D)"), "{text}");
@@ -664,6 +733,45 @@ mod tests {
         let stats = ps.apply(&mut doc, 1).unwrap();
         assert_eq!(stats, PatchStats::default());
         assert_eq!(content_bytes(&doc, content), b"BT (AB) Tj ET");
+    }
+
+    #[test]
+    fn nested_and_repeated_form_paths_reject_without_mutation() {
+        for nested in [false, true] {
+            let (mut doc, page, content) = doc_with_content(b"/Shared Do");
+            let mut dict = Dictionary::new();
+            dict.set("Subtype", Object::Name(b"Form".to_vec()));
+            let form = doc.add_object(Stream::new(dict, b"BT (A) Tj ET".to_vec()));
+            let mut xobjects = Dictionary::new();
+            xobjects.set("Shared", form);
+            let mut resources = Dictionary::new();
+            resources.set("XObject", xobjects);
+            doc.get_object_mut(page)
+                .unwrap()
+                .as_dict_mut()
+                .unwrap()
+                .set("Resources", resources);
+            let op = OpKey::new(ObjRef::new(form.0, form.1), 1);
+            let ir = ir_with(vec![glyph(op, 0, 5.0, 10.0)]);
+            let mut patch = PatchSet::new();
+            patch.enqueue_glyphs(&ir, &[ir.glyphs().next().unwrap().id]);
+            let call = FormDo {
+                form_path: if nested { vec![0] } else { vec![] },
+                do_op: OpKey::new(ObjRef::new(content.0, content.1), 0),
+                name: "Shared".into(),
+                target: ObjRef::new(form.0, form.1),
+            };
+            patch.forms.push(call.clone());
+            if !nested {
+                patch.forms.push(call);
+            }
+            let before = format!("{:?}", doc.objects);
+            assert!(matches!(
+                patch.apply(&mut doc, 1),
+                Err(PatchError::UnsupportedPath("nested or repeated Form"))
+            ));
+            assert_eq!(format!("{:?}", doc.objects), before);
+        }
     }
 
     #[test]

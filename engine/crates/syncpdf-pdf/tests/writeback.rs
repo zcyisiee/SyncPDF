@@ -231,7 +231,7 @@ fn run_one(worker: &PdfiumWorker, store: &FontStore, fid: FontId, path: &Path, n
     );
 
     // 若该页没有任何文本（例如 ci-test），退化为只写译文。
-    let mut ps = PatchSet::new().with_forms(&bound);
+    let mut ps = PatchSet::new();
     let mut region = Rect::new(72.0, 600.0, 400.0, 700.0);
     // 首个 Text 区域内的文本，用于挑选一个"删除后应消失"的词。
     let mut region_word: Option<String> = None;
@@ -264,7 +264,7 @@ fn run_one(worker: &PdfiumWorker, store: &FontStore, fid: FontId, path: &Path, n
                 .collect();
             region_word = inside.into_iter().find(|w| !rest.contains(w.as_str()));
         }
-        ps.delete_glyphs(&bound.ir, &ids);
+        ps.delete_glyphs(&bound, &ids).expect("trusted binding");
     }
     eprintln!("{name}: 首个区域独有词 = {region_word:?}");
     let patch_stats = ps.apply(&mut lo, 1).expect("patch apply");
@@ -316,7 +316,18 @@ fn run_one(worker: &PdfiumWorker, store: &FontStore, fid: FontId, path: &Path, n
 }
 
 #[test]
-fn writeback_up_vns_all_pages_delete_and_placeholder() {
+fn writeback_up_vns_prebound_all_pages_delete_and_placeholder() {
+    writeback_up_vns_all_pages(false);
+}
+
+#[test]
+fn writeback_up_vns_rebinding_mutated_document_rejects_page_three() {
+    writeback_up_vns_all_pages(true);
+}
+
+// The mutated-document case deliberately mixes original PDFium evidence with
+// rewritten lopdf streams. Rejection is not a claim that original up-vns is unsafe.
+fn writeback_up_vns_all_pages(rebind_mutated: bool) {
     if !pdfium_available() {
         eprintln!("SKIP: pdfium library unavailable");
         return;
@@ -331,11 +342,67 @@ fn writeback_up_vns_all_pages_delete_and_placeholder() {
     let page_count = lo.get_pages().len() as u32;
     let docid = worker.open(&path).unwrap();
 
+    let original = lo.clone();
+    let bounds: Vec<_> = (1..=page_count)
+        .map(|page| {
+            let b = bind_page(&worker, docid, &original, page).unwrap();
+            b.check_replacement().unwrap();
+            b
+        })
+        .collect();
+    if rebind_mutated {
+        // Deliberately create mismatched versions, independently of PatchSet:
+        // PDFium keeps the original while lopdf loses two page-three shows.
+        let page_id = lo.get_pages()[&3];
+        let mut remaining = 2;
+        for sid in lo.get_page_contents(page_id) {
+            let stream = lo.get_object_mut(sid).unwrap().as_stream_mut().unwrap();
+            let bytes = stream
+                .decompressed_content()
+                .unwrap_or_else(|_| stream.content.clone());
+            let mut content = lopdf::content::Content::decode(&bytes).unwrap();
+            content.operations.retain(|op| {
+                if remaining > 0 && matches!(op.operator.as_str(), "Tj" | "TJ" | "'" | "\"") {
+                    remaining -= 1;
+                    false
+                } else {
+                    true
+                }
+            });
+            stream.set_plain_content(content.encode().unwrap());
+            if remaining == 0 {
+                break;
+            }
+        }
+        assert_eq!(remaining, 0);
+    }
     let started = Instant::now();
     let mut total_glyphs = 0usize;
     for page in 1..=page_count {
-        let bound = bind_page(&worker, docid, &lo, page).expect("bind");
-        let mut ps = PatchSet::new().with_forms(&bound);
+        let bound = if rebind_mutated {
+            bind_page(&worker, docid, &lo, page).expect("bind")
+        } else {
+            bounds[(page - 1) as usize].clone()
+        };
+        if rebind_mutated && page == 3 {
+            use syncpdf_pdf::bind::ReplacementError;
+            use syncpdf_pdf::patch::PatchError;
+            assert_eq!(bounds[2].stats.text_ops, 512);
+            assert_eq!(bound.stats.text_objects, 512);
+            assert_eq!(bound.stats.text_ops, 510);
+            let before = format!("{:?}", lo.objects);
+            let mut ps = PatchSet::new();
+            let ids: Vec<_> = bound.ir.glyphs().map(|g| g.id).collect();
+            assert!(
+                matches!(ps.delete_glyphs(&bound, &ids), Err(PatchError::UnsafeBinding(ReplacementError::Statistics(s))) if s == bound.stats)
+            );
+            assert!(ps.is_empty());
+            ps.apply(&mut lo, page).unwrap();
+            assert_eq!(format!("{:?}", lo.objects), before);
+            worker.close(docid);
+            return;
+        }
+        let mut ps = PatchSet::new();
         let mut regions: Vec<Rect> = Vec::new();
         for it in &bound.ir.items {
             if let DisplayItem::Text { glyphs } = it {
@@ -352,10 +419,40 @@ fn writeback_up_vns_all_pages_delete_and_placeholder() {
                 }
                 total_glyphs += glyphs.len();
                 let ids: Vec<_> = glyphs.iter().map(|g| g.id).collect();
-                ps.delete_glyphs(&bound.ir, &ids);
+                ps.delete_glyphs(&bound, &ids).expect("trusted binding");
             }
         }
+        // Only the prebound success path promises cross-page isolation. The
+        // rebinding case intentionally creates contaminated evidence to test rejection.
+        let next_page_content = if !rebind_mutated && page < page_count {
+            Some(lo.get_page_content(lo.get_pages()[&(page + 1)]))
+        } else {
+            None
+        };
         ps.apply(&mut lo, page).expect("patch apply");
+        if let Some(bytes) = next_page_content {
+            let next_id = lo.get_pages()[&(page + 1)];
+            let after = lo.get_page_content(next_id);
+            assert!(after == bytes,
+                "deleting page {page} changed page {} content; target streams={:?}; next streams={:?}; before prefix={:?}; after prefix={:?}",
+                page + 1, lo.get_page_contents(bound.page_id), lo.get_page_contents(next_id),
+                String::from_utf8_lossy(&bytes[..bytes.len().min(100)]),
+                String::from_utf8_lossy(&after[..after.len().min(100)]));
+        }
+
+        // Reopen the deletion result before adding placeholders: isolation must
+        // not turn this into a no-op that merely passes the next-page assertion.
+        if !rebind_mutated {
+            let check_dir = tempfile::tempdir().unwrap();
+            let deleted_path = check_dir.path().join("deleted.pdf");
+            lo.save(&deleted_path).unwrap();
+            let deleted_doc = worker.open(&deleted_path).unwrap();
+            assert!(
+                page_text(&worker, deleted_doc, page - 1).trim().is_empty(),
+                "page {page} still contains source text after deletion"
+            );
+            worker.close(deleted_doc);
+        }
 
         // 每区域写一行占位译文。
         let mut paras: Vec<TypesetParagraph> = Vec::new();
