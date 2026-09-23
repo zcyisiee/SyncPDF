@@ -73,7 +73,14 @@ pub fn page_frames(
             .map_or(source, |r| r.bbox);
         let mut bbox = source.union(&region);
         // Preserve the source left anchor; model padding is not text indentation.
-        bbox.x0 = source.x0.max(ir.crop_box.x0);
+        bbox.x0 = if para.kind == syncpdf_core::ir::RegionKind::Caption
+            && para.align == syncpdf_core::ir::Align::Center
+        {
+            region.x0
+        } else {
+            source.x0
+        }
+        .max(ir.crop_box.x0);
         bbox.x1 = bbox.x1.min(ir.crop_box.x1);
         let obstacles: Vec<Rect> = glyphs
             .iter()
@@ -82,12 +89,24 @@ pub fn page_frames(
                     && (g.unicode.is_empty() || g.unicode.iter().any(|c| !c.is_whitespace()))
             })
             .map(|g| g.bbox)
-            .chain(paint.iter().copied())
+            .chain(paint.iter().copied().filter(|b| {
+                !para.atoms.iter().filter_map(|a| a.source).any(|s| {
+                    s.bbox.x0 <= b.x0 && b.x1 <= s.bbox.x1 && s.bbox.y0 <= b.y0 && b.y1 <= s.bbox.y1
+                })
+            }))
             .collect();
         // A neighboring column can start on a different row. Horizontal ownership
         // therefore cannot depend on overlap with this paragraph's source y range.
         // This conservative bound spends only the blank gap between source extents.
         for other in &obstacles {
+            if para.kind == syncpdf_core::ir::RegionKind::Caption
+                && para.align == syncpdf_core::ir::Align::Center
+                && (other.y1 <= source.y0 || other.y0 >= source.y1)
+            {
+                // The detected panel proves horizontal ownership. Its table cells
+                // and plot labels on other rows do not constrain caption width.
+                continue;
+            }
             if other.x1 <= source.x0 {
                 bbox.x0 = bbox.x0.max((source.x0 + other.x1) * 0.5);
             }
@@ -244,6 +263,7 @@ mod tests {
             baseline_y: 123.5,
             glyphs: vec![],
             kept_atoms: vec![],
+            placed_atoms: Vec::new(),
         };
         assert!(collides(f, &[line(Rect::new(20.0, 99.0, 30.0, 115.0))]));
         assert!(!collides(f, &[line(Rect::new(20.0, 120.0, 80.0, 130.0))]));

@@ -1128,6 +1128,8 @@ fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) -> Result<
         .collect::<Result<_, _>>()?;
     let mut candidate = doc.clone();
     delete_translated(&mut candidate, b, &paras)?;
+    syncpdf_pdf::source_atom::install(&mut candidate, doc, b, &paras)
+        .map_err(|e| PipelineError::Protocol(format!("公式源绘制保存失败：{e}")))?;
     let shaper = StoreShaper::new(font_store, font_profile);
     for laid in typeset_by_page.get(&page).into_iter().flatten() {
         if let Some(target) = targets.get(&laid.id) {

@@ -49,6 +49,7 @@ fn para(font: u32, gid: u16, text: &str, x: f32) -> TypesetParagraph {
                 color: None,
             }],
             kept_atoms: vec![],
+            placed_atoms: Vec::new(),
         }],
         font_scale: 1.0,
         line_height: 58.0,

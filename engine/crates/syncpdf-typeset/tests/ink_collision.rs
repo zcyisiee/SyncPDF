@@ -122,3 +122,32 @@ fn atom_rectangles_still_participate_in_collision_check() {
     ]);
     assert!(result.paragraph.overflow);
 }
+
+#[test]
+fn source_formula_retains_geometry_and_gets_only_necessary_leading() {
+    let source = syncpdf_core::ir::SourceAtom {
+        bbox: Rect::new(5.0, 17.0, 15.0, 30.0),
+        baseline: 20.0,
+    };
+    let result = layout(&[
+        Inline::SourceAtom {
+            id: AtomId(1),
+            source,
+        },
+        Inline::Br,
+        text("T"),
+        Inline::Br,
+        text("a"),
+    ]);
+    assert!(!result.paragraph.overflow);
+    let lines = &result.paragraph.lines;
+    let formula = &lines[0].placed_atoms[0];
+    assert_eq!(formula.source, source.bbox);
+    assert_eq!(formula.bbox.width(), 10.0);
+    assert_eq!(formula.bbox.height(), 13.0);
+    assert_eq!(lines[0].baseline_y, 40.0);
+    assert!(lines[0].baseline_y - lines[1].baseline_y > 10.0);
+    assert!((lines[1].baseline_y - lines[2].baseline_y - 10.0).abs() < 0.001);
+    assert!(lines[1].bbox.y1 <= formula.bbox.y0);
+    assert!(lines.iter().flat_map(|l| &l.glyphs).all(|g| g.size == 10.0));
+}

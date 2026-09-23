@@ -1,5 +1,6 @@
 //! Exact numbers, citations and HTTP(S) URLs use normal shaping. Link identity
-//! and relocation are verified separately in link_text; formulas remain protected.
+//! and relocation are verified separately in link_text. Proven source formulas
+//! remain atoms and are replayed using their original PDF drawing.
 #[cfg(test)]
 use lopdf::{Document, Object};
 use syncpdf_core::ir::{Atom, AtomKind, Paragraph};
@@ -22,7 +23,8 @@ pub(super) fn resolve_text(para: &Paragraph, parsed: &ParsedUnit) -> Option<Pars
         return Some(parsed.clone());
     }
     if para.atoms.iter().any(|a| {
-        !supported_text_atom(para, a)
+        !(supported_text_atom(para, a)
+            || (a.kind == AtomKind::Formula && a.source.is_some() && exact_source_text(para, a)))
             || a.text.is_empty()
             || a.glyph_range.0 >= a.glyph_range.1
             || a.glyph_range.1 as usize > para.glyphs.len()
@@ -51,6 +53,9 @@ pub(super) fn resolve_text(para: &Paragraph, parsed: &ParsedUnit) -> Option<Pars
                         return None;
                     }
                     let a = para.atoms.iter().find(|a| a.id == *id)?;
+                    if a.source.is_some() {
+                        continue;
+                    }
                     let text = Segment::Text(a.text.clone());
                     *segment = match style {
                         Some(_) => text,
@@ -223,6 +228,7 @@ mod tests {
                 mono: false,
             }],
             atoms: vec![Atom {
+                source: None,
                 id: AtomId(1),
                 glyph_range: (0, 3),
                 kind: AtomKind::Number,

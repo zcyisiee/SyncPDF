@@ -191,6 +191,15 @@ fn push_segment(seg: &Segment, style: StyleId, para: &Paragraph, out: &mut Vec<I
             }
         }
         Segment::Atom(id) => {
+            if let Some(source) = para
+                .atoms
+                .iter()
+                .find(|a| a.id == *id)
+                .and_then(|a| a.source)
+            {
+                out.push(Inline::SourceAtom { id: *id, source });
+                return;
+            }
             let (w, h) = atom_size(para, *id);
             out.push(Inline::Atom {
                 id: *id,
@@ -671,6 +680,7 @@ mod tests {
         let parsed = parse_unit_html(r#"<p id="P01-001">x{{KEEP_1}}y</p>"#).unwrap();
         let mut para = paragraph("P01-001", "x{{KEEP_1}}y", Rect::new(0.0, 0.0, 100.0, 20.0));
         para.atoms = vec![Atom {
+            source: None,
             id: AtomId(1),
             glyph_range: (0, 3),
             kind: AtomKind::Formula,

@@ -31,25 +31,40 @@ pub(crate) fn frames(
         })
         .map(|g| g.bbox)
         .collect();
-    obstacles.extend(ir.items.iter().filter_map(|i| match i {
-        DisplayItem::Image { bbox } | DisplayItem::InlineImage { bbox } => Some(*bbox),
-        DisplayItem::Path {
-            bbox,
-            is_fill,
-            is_stroke,
-        } if *is_fill || *is_stroke => {
-            let pad = if *is_stroke { 0.5 } else { 0.0 };
-            Some(Rect::new(
-                bbox.x0 - pad,
-                bbox.y0 - pad,
-                bbox.x1 + pad,
-                bbox.y1 + pad,
-            ))
-        }
-        _ => None,
-    }));
+    let moved_atoms: Vec<_> = std::iter::once(para)
+        .chain(placed.iter().filter_map(|p| paragraphs.get(&p.id)))
+        .flat_map(|p| &p.atoms)
+        .filter_map(|a| a.source)
+        .collect();
+    obstacles.extend(
+        ir.items
+            .iter()
+            .filter_map(|i| match i {
+                DisplayItem::Image { bbox } | DisplayItem::InlineImage { bbox } => Some(*bbox),
+                DisplayItem::Path {
+                    bbox,
+                    is_fill,
+                    is_stroke,
+                } if *is_fill || *is_stroke => {
+                    let pad = if *is_stroke { 0.5 } else { 0.0 };
+                    Some(Rect::new(
+                        bbox.x0 - pad,
+                        bbox.y0 - pad,
+                        bbox.x1 + pad,
+                        bbox.y1 + pad,
+                    ))
+                }
+                _ => None,
+            })
+            .filter(|b| {
+                !moved_atoms.iter().any(|s| {
+                    s.bbox.x0 <= b.x0 && b.x1 <= s.bbox.x1 && s.bbox.y0 <= b.y0 && b.y1 <= s.bbox.y1
+                })
+            }),
+    );
     for laid in placed {
         for line in &laid.lines {
+            obstacles.extend(line.placed_atoms.iter().map(|a| a.bbox));
             for g in &line.glyphs {
                 if g.text.chars().all(char::is_whitespace) {
                     continue;

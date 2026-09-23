@@ -11,6 +11,8 @@
 
 use std::sync::OnceLock;
 
+mod inline_formula;
+
 use regex::Regex;
 use syncpdf_core::ir::{
     Align, Atom, AtomKind, Line, PageIR, Paragraph, Region, RegionKind, SourceTextSpan, StyleRun,
@@ -36,8 +38,7 @@ pub fn analyze_page(ir: &PageIR, regions: &[Region]) -> Vec<Paragraph> {
     regions.sort_by_key(|r| (r.order, r.index));
 
     let glyphs: Vec<&syncpdf_core::ir::Glyph> = ir.glyphs().collect();
-    // 保留区域的源字形不能经重叠正文再次进入替换集合。
-    // 可靠的行内原子放置尚未接通时，保留整个相交段并显式报告。
+    // Protected glyphs require proven inline formula ownership before replacement.
     let protected: std::collections::BTreeSet<GlyphId> = glyphs
         .iter()
         .filter(|g| {
@@ -47,10 +48,11 @@ pub fn analyze_page(ir: &PageIR, regions: &[Region]) -> Vec<Paragraph> {
         })
         .map(|g| g.id)
         .collect();
+    let formulas = inline_formula::sources(ir, &regions);
     let mut out: Vec<Paragraph> = Vec::new();
     let mut seq: u32 = 0;
 
-    for region in regions {
+    for region in &regions {
         let in_region: Vec<(GlyphId, Rect)> = glyphs
             .iter()
             .filter(|g| !g.flags.invisible && !g.flags.outside_clip)
@@ -61,7 +63,17 @@ pub fn analyze_page(ir: &PageIR, regions: &[Region]) -> Vec<Paragraph> {
                     && c.y >= region.bbox.y0
                     && c.y <= region.bbox.y1
             })
-            .map(|g| (g.id, g.bbox))
+            .filter(|g| {
+                !region.kind.translatable()
+                    || !regions.iter().any(|other| {
+                        other.kind.translatable()
+                            && other.index != region.index
+                            && other.bbox.contains(g.bbox.center())
+                            && (other.bbox.width() * other.bbox.height(), other.index)
+                                < (region.bbox.width() * region.bbox.height(), region.index)
+                    })
+            })
+            .map(|g| (g.id, inline_formula::line_box(g, &formulas)))
             .collect();
         if in_region.is_empty() {
             continue;
@@ -70,8 +82,16 @@ pub fn analyze_page(ir: &PageIR, regions: &[Region]) -> Vec<Paragraph> {
         for group in merge_lines(&lines, &glyphs) {
             seq += 1;
             let mut paragraph = build_paragraph(ir, region, group, &glyphs, seq);
+            inline_formula::attach(&mut paragraph, &formulas);
             if matches!(paragraph.translatable, Translatable::Yes)
-                && paragraph.glyphs.iter().any(|id| protected.contains(id))
+                && paragraph.glyphs.iter().enumerate().any(|(i, id)| {
+                    protected.contains(id)
+                        && !paragraph.atoms.iter().any(|a| {
+                            a.source.is_some()
+                                && a.glyph_range.0 <= i as u32
+                                && (i as u32) < a.glyph_range.1
+                        })
+                })
             {
                 paragraph.translatable = Translatable::No {
                     reason: "protected_source_overlap".into(),
@@ -519,6 +539,7 @@ fn detect_atoms(text: &str, char_map: &[u32]) -> Vec<Atom> {
         let text: String = chars[s..e].iter().collect();
         let (gs, ge) = char_span_to_glyphs(char_map, chars.len(), s, e);
         out.push(Atom {
+            source: None,
             id: AtomId(next_id),
             glyph_range: (gs, ge),
             kind,
@@ -549,7 +570,7 @@ fn regexes() -> &'static [RegexDef] {
             ),
             (r"\[\d+(?:,\s*\d+)*\]", AtomKind::Other),
             (
-                r"\d+(?:\.\d+)?\s?(?:%|mm|cm|kg|ms|Hz|GHz|MHz|nm|μm|px|pt|s)",
+                r"\d+(?:\.\d+)?\s?(?:%|(?:mm|cm|kg|ms|Hz|GHz|MHz|nm|μm|px|pt|s)\b)",
                 AtomKind::Number,
             ),
             (r"[∑∫∂√±×÷≤≥≠≈∞αβγδθλμπσω]{2,}", AtomKind::Formula),
@@ -625,6 +646,12 @@ fn is_cjk(c: char) -> bool {
 fn detect_align(rows: &[Row], region: &Region, crop: &Rect) -> Align {
     if rows.len() == 1 {
         let bbox = rows[0].bbox;
+        if region.kind == RegionKind::Caption
+            && region.bbox.width() > bbox.width() + CENTER_MIN_MARGIN * 2.0
+            && (region.bbox.center().x - bbox.center().x).abs() < bbox.height() * 0.5
+        {
+            return Align::Center;
+        }
         let left = bbox.x0 - crop.x0;
         let right = crop.x1 - bbox.x1;
         if matches!(region.kind, RegionKind::Title | RegionKind::ParagraphTitle)

@@ -14,6 +14,7 @@ pub(crate) struct Target {
     pub parsed: ParsedUnit,
     pub html: String,
     links: Vec<(ObjectId, Vec<StyleId>)>,
+    atom_links: Vec<(ObjectId, AtomId, Rect)>,
 }
 fn object<'a>(doc: &'a Document, o: &'a Object) -> Option<&'a Object> {
     match o {
@@ -47,6 +48,10 @@ fn expanded(
             Segment::Br => {}
             Segment::Atom(id) => {
                 let a = p.atoms.iter().find(|a| a.id == *id)?;
+                if a.source.is_some() {
+                    // Source drawings occupy no bytes in ParsedUnit::text().
+                    continue;
+                }
                 let start = text.len();
                 text.push_str(&a.text);
                 atoms.insert(*id, (start, text.len()));
@@ -124,6 +129,7 @@ pub(crate) fn prepare(
         html: resolved.to_html(),
         parsed: resolved,
         links: vec![],
+        atom_links: vec![],
     };
     let page = *doc.get_pages().get(&para.id.page)?;
     let page = doc.get_dictionary(page).ok()?;
@@ -191,6 +197,10 @@ pub(crate) fn prepare(
                 .all(|i| a.glyph_range.0 <= *i && *i < a.glyph_range.1)
         });
         if let Some(a) = atom {
+            if a.source.is_some() {
+                target.atom_links.push((id, a.id, r));
+                continue;
+            }
             let src_start = spans
                 .iter()
                 .find(|(_, _, (s, e))| *s <= a.glyph_range.0 && a.glyph_range.0 < *e)?
@@ -334,7 +344,7 @@ pub(crate) fn geometry(
     laid: &TypesetParagraph,
     shaper: &dyn Shaper,
 ) -> Option<Vec<(ObjectId, Vec<Rect>)>> {
-    target
+    let mut plans = target
         .links
         .iter()
         .map(|(id, tags)| {
@@ -356,7 +366,30 @@ pub(crate) fn geometry(
                 Some((*id, boxes))
             }
         })
-        .collect()
+        .collect::<Option<Vec<_>>>()?;
+    for (annotation, id, source_rect) in &target.atom_links {
+        let mut matches = laid
+            .lines
+            .iter()
+            .flat_map(|l| &l.placed_atoms)
+            .filter(|a| a.id == *id);
+        let atom = matches.next()?;
+        if matches.next().is_some() {
+            return None;
+        }
+        let dx = atom.bbox.x0 - atom.source.x0;
+        let dy = atom.bbox.y0 - atom.source.y0;
+        plans.push((
+            *annotation,
+            vec![Rect::new(
+                source_rect.x0 + dx,
+                source_rect.y0 + dy,
+                source_rect.x1 + dx,
+                source_rect.y1 + dy,
+            )],
+        ));
+    }
+    Some(plans)
 }
 
 pub(crate) fn apply(

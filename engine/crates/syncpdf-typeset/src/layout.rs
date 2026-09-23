@@ -40,6 +40,7 @@ enum Item {
         end: usize,
     },
     Atom {
+        source: Option<syncpdf_core::ir::SourceAtom>,
         id: AtomId,
         width: f32,
         height: f32,
@@ -106,9 +107,22 @@ fn segments(shaper: &dyn Shaper, input: &LayoutInput<'_>, inlines: &[Inline]) ->
                 let start = seg.text.len();
                 seg.text.push('\u{FFFC}');
                 seg.items.push(Item::Atom {
+                    source: None,
                     id: *id,
                     width: *width,
                     height: *height,
+                    start,
+                    end: seg.text.len(),
+                });
+            }
+            Inline::SourceAtom { id, source } => {
+                let start = seg.text.len();
+                seg.text.push('\u{FFFC}');
+                seg.items.push(Item::Atom {
+                    id: *id,
+                    source: Some(*source),
+                    width: source.bbox.width(),
+                    height: source.bbox.height(),
                     start,
                     end: seg.text.len(),
                 });
@@ -509,6 +523,7 @@ fn place(
     let mut x = bbox.x0 + indent + dx;
     let mut glyphs = Vec::new();
     let mut atoms = Vec::new();
+    let mut placed_atoms = Vec::new();
     let mut ink_boxes = Vec::new();
     let mut bounds: Option<Rect> = None;
     let adjust = input.align == Align::Justify && !row.last;
@@ -557,9 +572,21 @@ fn place(
                 }
             }
             Item::Atom {
-                id, width, height, ..
+                id,
+                width,
+                height,
+                source,
+                ..
             } => {
-                let rect = Rect::new(x, baseline, x + *width, baseline + *height);
+                let bottom = baseline + source.map_or(0.0, |s| s.bbox.y0 - s.baseline);
+                let rect = Rect::new(x, bottom, x + *width, bottom + *height);
+                if let Some(source) = source {
+                    placed_atoms.push(syncpdf_core::ir::PlacedAtom {
+                        id: *id,
+                        source: source.bbox,
+                        bbox: rect,
+                    });
+                }
                 ink_boxes.push(rect);
                 bounds = Some(bounds.map_or(rect, |b| b.union(&rect)));
                 atoms.push(*id);
@@ -595,6 +622,7 @@ fn place(
             baseline_y: baseline,
             glyphs,
             kept_atoms: atoms,
+            placed_atoms,
         },
         ink: ink_boxes,
     }
@@ -658,7 +686,7 @@ pub(crate) fn layout(
         .map(|row| place(shaper, input, row, bbox, 0.0, scale).line.bbox.y1)
         .unwrap_or(0.0);
     let first_baseline = input.first_baseline.unwrap_or(bbox.y1 - first_top);
-    for (i, row) in rows.iter().enumerate() {
+    for row in &rows {
         let advance: f32 = row.items.iter().map(Item::width).sum::<f32>()
             + row.hyphen.as_ref().map_or(0.0, Item::width);
         if advance
@@ -673,8 +701,29 @@ pub(crate) fn layout(
         {
             overflow = true;
         }
-        let baseline = first_baseline - i as f32 * line_h;
-        let line = place(shaper, input, row, bbox, baseline, scale);
+        let mut baseline = lines
+            .last()
+            .map_or(first_baseline, |l| l.line.baseline_y - line_h);
+        let mut line = place(shaper, input, row, bbox, baseline, scale);
+        // Source formulas retain their full superscript/subscript ink. The requested
+        // leading is a minimum: spend only the extra space their actual ink needs.
+        let extra = lines
+            .iter()
+            .filter(|previous| {
+                !previous.line.placed_atoms.is_empty() || !line.line.placed_atoms.is_empty()
+            })
+            .flat_map(|previous| {
+                previous.ink.iter().flat_map(|a| {
+                    line.ink
+                        .iter()
+                        .filter_map(move |b| (intersects(*a, *b)).then_some(b.y1 - a.y0 + 0.02))
+                })
+            })
+            .fold(0.0_f32, f32::max);
+        if extra > 0.0 {
+            baseline -= extra;
+            line = place(shaper, input, row, bbox, baseline, scale);
+        }
         let b = line.line.bbox;
         if b.x0 < bbox.x0 - 0.01
             || b.x1 > bbox.x1 + 0.01

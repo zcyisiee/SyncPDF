@@ -239,6 +239,7 @@ fn atom_without_drawing_placement_keeps_source_and_is_explicit_fallback() {
     let (mut s, input) = state(dir.path());
     let id = ParagraphId { page: 1, seq: 1 };
     s.pars.get_mut(&id).unwrap().atoms.push(Atom {
+        source: None,
         id: AtomId(1),
         glyph_range: (0, 1),
         kind: AtomKind::Formula,
@@ -333,6 +334,48 @@ fn plain_link_moves_with_glyphs_and_keeps_action() {
         link.get(b"QuadPoints").unwrap().as_array().unwrap().len(),
         8
     );
+}
+
+#[test]
+fn link_inside_source_formula_moves_with_the_original_glyphs() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut s, annot, old_rect) = linked_state(dir.path());
+    let id = ParagraphId { page: 1, seq: 1 };
+    let glyphs: Vec<_> = s.bound[&0].ir.glyphs().collect();
+    let bbox = glyphs[6..]
+        .iter()
+        .fold(glyphs[6].bbox, |b, g| b.union(&g.bbox));
+    s.pars.get_mut(&id).unwrap().atoms.push(Atom {
+        id: AtomId(1),
+        glyph_range: (6, 11),
+        kind: AtomKind::Formula,
+        text: "Alpha".into(),
+        source: Some(syncpdf_core::ir::SourceAtom {
+            bbox,
+            baseline: glyphs[6].matrix.f,
+        }),
+    });
+    let action = s
+        .doc
+        .get_dictionary(annot)
+        .unwrap()
+        .get(b"A")
+        .unwrap()
+        .clone();
+    let mut translated = linked_block();
+    translated.html = "<p id=\"P01-001\">中文 {{KEEP_1}}</p>".into();
+    let (sink, _) = recorder();
+    handle_block(&mut s, &sink, translated, 2).unwrap();
+    assert_eq!(s.fallbacks, 0);
+    let saved = Document::load(&s.output).unwrap();
+    let link = saved.get_dictionary(annot).unwrap();
+    assert_ne!(link.get(b"Rect").unwrap(), &old_rect);
+    assert_eq!(link.get(b"A").unwrap(), &action);
+    let atom = &s.typeset_by_page[&0][0].lines[0].placed_atoms[0];
+    let r = link.get(b"Rect").unwrap().as_array().unwrap();
+    assert!((r[0].as_float().unwrap() - atom.bbox.x0).abs() < 0.01);
+    assert!((r[1].as_float().unwrap() - atom.bbox.y0).abs() < 0.01);
+    assert_eq!(text(&s.output, 0).matches("Alpha").count(), 1);
 }
 #[test]
 fn ambiguous_unmarked_link_preserves_source_instead_of_guessing() {

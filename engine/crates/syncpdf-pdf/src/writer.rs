@@ -151,6 +151,23 @@ impl<'a> Writer<'a> {
 
         for para in paras {
             for line in &para.lines {
+                for atom in &line.placed_atoms {
+                    any = true;
+                    let s = atom.source;
+                    let dx = atom.bbox.x0 - s.x0;
+                    let dy = atom.bbox.y0 - s.y0;
+                    bytes.extend_from_slice(
+                        format!(
+                            "q 1 0 0 1 {dx} {dy} cm {} {} {} {} re W n /{} Do Q\n",
+                            s.x0,
+                            s.y0,
+                            s.width(),
+                            s.height(),
+                            crate::source_atom::resource(&para.id, atom.id)
+                        )
+                        .as_bytes(),
+                    );
+                }
                 if line.glyphs.is_empty() {
                     continue;
                 }
@@ -417,6 +434,7 @@ mod tests {
                 baseline_y: 10.0,
                 glyphs,
                 kept_atoms: Vec::new(),
+                placed_atoms: Vec::new(),
             }],
             font_scale: 1.0,
             line_height: 20.0,

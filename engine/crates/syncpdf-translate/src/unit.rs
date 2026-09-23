@@ -680,6 +680,7 @@ pub(crate) mod tests {
         // 字形 1..3 是样式 1；字形 3..5 是一个原子。
         p.style_runs = vec![run(1, (1, 3))];
         p.atoms = vec![Atom {
+            source: None,
             id: AtomId(1),
             glyph_range: (3, 5),
             kind: AtomKind::Formula,
@@ -732,6 +733,7 @@ pub(crate) mod tests {
         let mut p = paragraph_of("P01-005", &["2", "5", "m", "s", "X"]);
         p.text = "25 ms X".into();
         p.atoms = vec![Atom {
+            source: None,
             id: AtomId(1),
             glyph_range: (0, 4),
             kind: AtomKind::Number,
