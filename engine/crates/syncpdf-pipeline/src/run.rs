@@ -1296,6 +1296,7 @@ mod tests {
             bbox: Rect::new(0.0, 0.0, 20.0, 12.0),
             lines: Vec::new(),
             glyphs: Vec::new(),
+            text_spans: Vec::new(),
             style_runs: vec![StyleRun {
                 id: StyleId(0),
                 glyph_range: (0, 1),

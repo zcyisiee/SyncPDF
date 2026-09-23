@@ -28,6 +28,7 @@ fn paragraph(id: &str, text: &str) -> Paragraph {
         bbox: Rect::new(0.0, 0.0, 100.0, 20.0),
         lines: vec![],
         glyphs: (0..text.chars().count() as u32).map(glyph).collect(),
+        text_spans: Vec::new(),
         style_runs: vec![],
         atoms: vec![],
         text: text.into(),

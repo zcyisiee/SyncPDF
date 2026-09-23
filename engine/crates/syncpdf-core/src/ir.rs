@@ -136,7 +136,6 @@ impl RegionKind {
                 | RegionKind::ParagraphTitle
                 | RegionKind::List
                 | RegionKind::Caption
-                | RegionKind::FootNote
                 | RegionKind::Abstract
         )
     }
@@ -210,6 +209,14 @@ pub enum Translatable {
     No { reason: String },
 }
 
+/// 阅读序文本与真实源字形的映射，范围是段内字形索引的半开区间。
+/// 零长度范围表示由几何证据生成的空格/换行，不对应可删除的源字节。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceTextSpan {
+    pub text: String,
+    pub glyph_range: (u32, u32),
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Paragraph {
     pub id: ParagraphId,
@@ -220,9 +227,11 @@ pub struct Paragraph {
     pub lines: Vec<Line>,
     /// 段内字形（顺序即阅读顺序）。
     pub glyphs: Vec<GlyphId>,
+    #[serde(default)]
+    pub text_spans: Vec<SourceTextSpan>,
     pub style_runs: Vec<StyleRun>,
     pub atoms: Vec<Atom>,
-    /// 纯文本（原子替换为 `{{KEEP_n}}`）。
+    /// 逻辑源文本；旧数据可能含原子占位，优先使用 text_spans 映射。
     pub text: String,
     pub align: Align,
     pub first_indent: f32,
@@ -292,6 +301,7 @@ mod tests {
             bbox: Rect::new(0.0, 0.0, 100.0, 20.0),
             lines: vec![],
             glyphs: vec![],
+            text_spans: Vec::new(),
             style_runs: vec![],
             atoms: vec![Atom {
                 id: AtomId(1),
@@ -309,6 +319,12 @@ mod tests {
         let json = serde_json::to_string(&p).unwrap();
         assert!(json.contains("\"P01-001\""));
         assert_eq!(serde_json::from_str::<Paragraph>(&json).unwrap(), p);
+        let mut legacy = serde_json::to_value(&p).unwrap();
+        legacy.as_object_mut().unwrap().remove("text_spans");
+        assert!(serde_json::from_value::<Paragraph>(legacy)
+            .unwrap()
+            .text_spans
+            .is_empty());
     }
 
     #[test]
@@ -316,5 +332,6 @@ mod tests {
         assert!(RegionKind::Text.translatable());
         assert!(!RegionKind::Table.translatable());
         assert!(!RegionKind::Formula.translatable());
+        assert!(!RegionKind::FootNote.translatable());
     }
 }

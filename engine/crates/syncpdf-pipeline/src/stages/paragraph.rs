@@ -222,6 +222,7 @@ fn build_paragraph(
             })
             .collect(),
         glyphs: seg_glyphs,
+        text_spans: Vec::new(),
         style_runs,
         atoms,
         text,

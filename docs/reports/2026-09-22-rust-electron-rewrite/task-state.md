@@ -43,7 +43,7 @@
 - p19 历史阻断已解除：PDFium 对重叠重复字符去重；目标仍绘制，`stream264/op165/code7`→对象108/path[0]→真实 font271:0→Differences `/four`→`'4'`。独立删除仍可见11/27/68像素变化，不是跳过空白。
 - **已实现并局部验收的窄契约**：仅严格匹配的单code `Tj` 缺字符时，取原对象 `GetRotatedBounds` 四角经祖先Form变换后的页AABB及自身matrix的origin；Unicode来自可验证ToUnicode/Encoding。独立只读证据/统计携带真实font_id及身份，门禁复核，不冒充loose-char bbox、不借邻居。
 - 新支路简单字体1字节、Type0仅Identity-H 2字节；Identity-V、未知/变长CMap、多code、空/冲突映射、无效几何继续拒绝。普通字符解码的继承边界未因此获认证。本轮仅改pdfium/bind及专属测试。
-- **当前分工**：此前所有 worker 均已结束、证据与 dirty 保留，不重启。主控完成 p7/p15 分区及固定字号整批工程验收（不是全篇翻译质量验收），详见 [08基础验收](08-R1布局与固定字号验收.md)。下一批按 [07接口契约](07-后续接口契约.md) 冻结 core 源文本映射后，Orca 独立树并行实施逻辑源文与 Markdown 模块；主控负责发布事务/错误传播及跨模块接线。
+- **当前分工**：此前所有 worker 均已结束、证据与 dirty 保留，不重启。主控完成 p7/p15 分区及固定字号整批工程验收（不是全篇翻译质量验收），详见 [08基础验收](08-R1布局与固定字号验收.md)。本批已按 [07接口契约](07-后续接口契约.md) 新增 `SourceTextSpan/Paragraph.text_spans`（serde默认、旧数据兼容）并保护 FootNote，workspace含测试check及core20项通过。准备新Orca树 `codex-r2-source` 和 `codex-r2-markdown`，并行实施逻辑源文与 Markdown 模块；主控负责发布事务/错误传播及跨模块接线。
 - **本批主树 gate**：workspace 567 passed / 0 failed / 4 ignored，strict Clippy / fmt / release、显式真实23页覆盖 probe 均通过；p7/p15 缺口0，其余21页分区不变。首次错误扩大 Caption/Code 的候选已拒绝；最终依据物理行或真实算法框线修复。源保护整段保留只是临时安全前置，不是行内公式翻译完成。
 - **最新全篇 release 结果**：`r1-final-safe-all` 共169 overflow、40 protected overlap、1翻译回退，没有成功译文；23页源文字与144dpi像素均完全保持，qpdf exit0。错误自检仍23条且ok:true/CLI0，R2必须修正；本次全回退不能证明快照泄漏已修。证据`layout-final-review/`及`codex-r1-integration/r1-final-safe-all/`。
 - **字体稳定性已复验**：`20c1242b`稳定资源编号，段落基线/fit用实际字体度量。63项font/typeset测试通过，旧代码red证据保留。`d23dac3a`固定字号后139项pipeline/typeset测试、strict clippy、release通过；真实论文两次1/3页和全23页运行的p1/p3在144dpi原始像素完全相同（无坐标归一化），其余21页未动，3份PDF均qpdf exit0。证据`tmp/backend-repair/font-stability/real-cross-run.json`。全篇fake仍209次overflow、2coverage gap、3self_check，整体质量未通过。

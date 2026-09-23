@@ -52,6 +52,7 @@ fn paragraph(bound: &BoundPage, ids: Vec<GlyphId>) -> Paragraph {
         bbox: bound.ir.media_box,
         lines: vec![],
         glyphs: ids,
+        text_spans: Vec::new(),
         style_runs: vec![],
         atoms: vec![],
         text: "source".into(),

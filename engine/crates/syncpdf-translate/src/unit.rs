@@ -539,6 +539,7 @@ pub(crate) mod tests {
             bbox: Rect::new(0.0, 0.0, 100.0, 20.0),
             lines: vec![],
             glyphs: (0..chars.len() as u32).map(glyph).collect(),
+            text_spans: Vec::new(),
             style_runs: vec![],
             atoms: vec![],
             text: chars.concat(),

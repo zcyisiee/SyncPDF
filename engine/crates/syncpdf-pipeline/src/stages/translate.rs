@@ -214,6 +214,7 @@ mod tests {
             bbox: Rect::new(0.0, 0.0, 200.0, 20.0),
             lines: vec![],
             glyphs: vec![],
+            text_spans: Vec::new(),
             style_runs: vec![],
             atoms: vec![],
             text: text.into(),
