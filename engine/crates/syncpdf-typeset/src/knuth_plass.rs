@@ -192,6 +192,12 @@ pub fn solve(nodes: &[Node], widths: &[f32], tolerance: f32) -> Result<Solution,
     let mut terminal: Option<(f64, usize, usize, usize)> = None;
     let max_width = widths.iter().copied().fold(0.0_f32, f32::max) as f64;
     let min_prefix: Vec<f64> = natural.iter().zip(&shrink).map(|(w, s)| w - s).collect();
+    let min_width = widths.iter().copied().fold(f32::INFINITY, f32::min) as f64;
+    let max_prefix: Vec<f64> = natural
+        .iter()
+        .zip(&stretch)
+        .map(|(w, s)| w + f64::from(tolerance) * s)
+        .collect();
     for (bi, point) in breaks.iter().enumerate() {
         let (previous_states, current_and_later) = states.split_at_mut(bi);
         let current = &mut current_and_later[0];
@@ -205,6 +211,16 @@ pub fn solve(nodes: &[Node], widths: &[f32], tolerance: f32) -> Result<Solution,
         let min_start = min_prefix[end] + point.append_width - max_width;
         let lower =
             breaks[..bi].partition_point(|p| min_prefix[next_box[p.next]] < min_start - 1e-9);
+        let terminal_line =
+            box_count[n] == box_count[point.next] && forced_count[n] == forced_count[point.next];
+        // A nonterminal glue break also needs enough material even at maximum
+        // allowed stretch. Penalties may be ragged, so they keep the full window.
+        let upper = if !terminal_line && matches!(nodes.get(point.at), Some(Node::Glue { .. })) {
+            let max_start = max_prefix[end] - min_width;
+            breaks[..bi].partition_point(|p| max_prefix[next_box[p.next]] <= max_start + 1e-9)
+        } else {
+            bi
+        };
         let initial = [
             Some(State {
                 demerits: 0.0,
@@ -220,7 +236,7 @@ pub fn solve(nodes: &[Node], widths: &[f32], tolerance: f32) -> Result<Solution,
             None,
             None,
         ];
-        for previous in std::iter::once(None).chain((lower..bi).map(Some)) {
+        for previous in std::iter::once(None).chain((lower..upper.max(lower)).map(Some)) {
             let from = previous.map_or(0, |pi| breaks[pi].next);
             if from >= point.at && point.at != n {
                 continue;
