@@ -197,6 +197,8 @@ fn collect_breaks(segs: &[Segment], out: &mut u32) {
 pub fn build_unit(p: &Paragraph, glyph_text: impl Fn(GlyphId) -> Option<String>) -> Unit {
     let body = if p.glyphs.is_empty() {
         escape_text(&p.text)
+    } else if !p.text_spans.is_empty() {
+        build_body_from_spans(p)
     } else {
         build_body_from_glyphs(p, glyph_text)
     };
@@ -216,6 +218,81 @@ pub fn build_unit(p: &Paragraph, glyph_text: impl Fn(GlyphId) -> Option<String>)
         atoms,
         breaks,
     }
+}
+
+/// Source spans carry both genuine glyph text and zero-length generated separators.
+/// Process a separator before the glyph at its boundary, then account for atoms using
+/// only real glyph ranges. This prevents a generated space from consuming a glyph.
+fn build_body_from_spans(p: &Paragraph) -> String {
+    let n = p.glyphs.len() as u32;
+    let breaks = hard_break_indices(p);
+    let mut out = String::new();
+    let mut open = None;
+    let mut span_index = 0usize;
+    let mut i = 0u32;
+    while i <= n {
+        let hard_break = breaks.contains(&i);
+        if hard_break {
+            switch_style(&mut out, &mut open, None);
+            out.push_str("<br>");
+        }
+        while let Some(span) = p.text_spans.get(span_index) {
+            if span.glyph_range != (i, i) {
+                break;
+            }
+            // A hard line break supersedes a soft separator at the same boundary.
+            if !(hard_break && span.text.chars().all(char::is_whitespace)) {
+                let next_style = if i < n { style_at(p, i) } else { None };
+                if open != next_style {
+                    switch_style(&mut out, &mut open, None);
+                }
+                out.push_str(&escape_text(&span.text));
+            }
+            span_index += 1;
+        }
+        if i == n {
+            break;
+        }
+        if let Some(atom) = atom_at(p, i) {
+            switch_style(&mut out, &mut open, style_at(p, i));
+            out.push_str(&format!("{{{{KEEP_{}}}}}", atom.id.0));
+            i = atom.glyph_range.1.max(i + 1).min(n);
+            while p
+                .text_spans
+                .get(span_index)
+                .is_some_and(|s| s.glyph_range.0 < i)
+            {
+                span_index += 1;
+            }
+            continue;
+        }
+        switch_style(&mut out, &mut open, style_at(p, i));
+        if let Some(span) = p.text_spans.get(span_index) {
+            if span.glyph_range.0 == i && span.glyph_range.1 > i {
+                out.push_str(&escape_text(&span.text));
+                i = span.glyph_range.1.min(n);
+                span_index += 1;
+                continue;
+            }
+        }
+        // A real glyph with no Unicode has no source span, but still owns an index.
+        i += 1;
+    }
+    switch_style(&mut out, &mut open, None);
+    out
+}
+
+fn switch_style(out: &mut String, open: &mut Option<StyleId>, want: Option<StyleId>) {
+    if *open == want {
+        return;
+    }
+    if open.is_some() {
+        out.push_str("</span>");
+    }
+    if let Some(id) = want {
+        out.push_str(&format!("<span data-style=\"{}\">", id.0));
+    }
+    *open = want;
 }
 
 /// 逐字形拼 body：样式 run 包 span、原子折叠成 `{{KEEP_n}}`、硬换行插 `<br>`。
@@ -518,7 +595,9 @@ fn parse_span_open(rest: &str) -> Option<(StyleId, usize)> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use syncpdf_core::ir::{Align, Atom, AtomKind, Line, RegionKind, StyleRun, Translatable};
+    use syncpdf_core::ir::{
+        Align, Atom, AtomKind, Line, RegionKind, SourceTextSpan, StyleRun, Translatable,
+    };
     use syncpdf_core::{OpKey, PageId, Rect};
 
     pub(crate) fn glyph(i: u32) -> GlyphId {
@@ -612,6 +691,83 @@ pub(crate) mod tests {
         assert_eq!(u.styles, 1);
         assert_eq!(u.atoms, vec![AtomId(1)]);
         assert_eq!(u.plain_text(), "ABCF");
+    }
+
+    #[test]
+    fn mapped_source_space_stays_between_glyphs_and_styles() {
+        let mut p = paragraph_of("P01-004", &["A", "B", "C", "D"]);
+        p.text = "AB CD".into();
+        p.style_runs = vec![run(1, (0, 2)), run(2, (2, 4))];
+        p.text_spans = vec![
+            SourceTextSpan {
+                text: "A".into(),
+                glyph_range: (0, 1),
+            },
+            SourceTextSpan {
+                text: "B".into(),
+                glyph_range: (1, 2),
+            },
+            SourceTextSpan {
+                text: " ".into(),
+                glyph_range: (2, 2),
+            },
+            SourceTextSpan {
+                text: "C".into(),
+                glyph_range: (2, 3),
+            },
+            SourceTextSpan {
+                text: "D".into(),
+                glyph_range: (3, 4),
+            },
+        ];
+        let unit = build_unit(&p, |_| Some("wrong".into()));
+        assert_eq!(unit.html, "<p id=\"P01-004\"><span data-style=\"1\">AB</span> <span data-style=\"2\">CD</span></p>");
+        assert_eq!(unit.plain_text(), "AB CD");
+    }
+
+    #[test]
+    fn mapped_atom_owns_only_its_true_glyph_range() {
+        let mut p = paragraph_of("P01-005", &["2", "5", "m", "s", "X"]);
+        p.text = "25 ms X".into();
+        p.atoms = vec![Atom {
+            id: AtomId(1),
+            glyph_range: (0, 4),
+            kind: AtomKind::Number,
+            text: "25 ms".into(),
+        }];
+        p.text_spans = vec![
+            SourceTextSpan {
+                text: "2".into(),
+                glyph_range: (0, 1),
+            },
+            SourceTextSpan {
+                text: "5".into(),
+                glyph_range: (1, 2),
+            },
+            SourceTextSpan {
+                text: " ".into(),
+                glyph_range: (2, 2),
+            },
+            SourceTextSpan {
+                text: "m".into(),
+                glyph_range: (2, 3),
+            },
+            SourceTextSpan {
+                text: "s".into(),
+                glyph_range: (3, 4),
+            },
+            SourceTextSpan {
+                text: " ".into(),
+                glyph_range: (4, 4),
+            },
+            SourceTextSpan {
+                text: "X".into(),
+                glyph_range: (4, 5),
+            },
+        ];
+        let unit = build_unit(&p, |_| Some("wrong".into()));
+        assert_eq!(unit.html, "<p id=\"P01-005\">{{KEEP_1}} X</p>");
+        assert_eq!(unit.atoms, vec![AtomId(1)]);
     }
 
     #[test]

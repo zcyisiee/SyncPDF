@@ -13,7 +13,8 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 use syncpdf_core::ir::{
-    Align, Atom, AtomKind, Line, PageIR, Paragraph, Region, RegionKind, StyleRun, Translatable,
+    Align, Atom, AtomKind, Line, PageIR, Paragraph, Region, RegionKind, SourceTextSpan, StyleRun,
+    Translatable,
 };
 use syncpdf_core::{AtomId, GlyphId, PageId, ParagraphId, Rect, StyleId};
 use syncpdf_layout::group_lines;
@@ -76,10 +77,74 @@ pub fn analyze_page(ir: &PageIR, regions: &[Region]) -> Vec<Paragraph> {
                     reason: "protected_source_overlap".into(),
                 };
             }
+            if matches!(paragraph.translatable, Translatable::Yes)
+                && group_is_rotated(&paragraph, &glyphs)
+            {
+                paragraph.translatable = Translatable::No {
+                    reason: "rotated_source_text".into(),
+                };
+            }
             out.push(paragraph);
         }
     }
+    // A rotated source paragraph can also intersect an ordinary text region.
+    // Keep every candidate that contains any of those source glyphs.
+    let rotated: std::collections::BTreeSet<GlyphId> = out
+        .iter()
+        .filter(|p| matches!(&p.translatable, Translatable::No { reason } if reason == "rotated_source_text"))
+        .flat_map(|p| p.glyphs.iter().copied())
+        .collect();
+    for p in &mut out {
+        if matches!(p.translatable, Translatable::Yes)
+            && p.glyphs.iter().any(|id| rotated.contains(id))
+        {
+            p.translatable = Translatable::No {
+                reason: "rotated_source_text".into(),
+            };
+        }
+    }
+    // 重叠的可译区域可能各自产出同一源字形。整段保留，避免双重删除。
+    let mut counts = std::collections::HashMap::<GlyphId, u32>::new();
+    for p in &out {
+        if matches!(p.translatable, Translatable::Yes) {
+            for id in &p.glyphs {
+                *counts.entry(*id).or_default() += 1;
+            }
+        }
+    }
+    for p in &mut out {
+        if matches!(p.translatable, Translatable::Yes)
+            && p.glyphs
+                .iter()
+                .any(|id| counts.get(id).copied().unwrap_or(0) > 1)
+        {
+            p.translatable = Translatable::No {
+                reason: "translatable_region_overlap".into(),
+            };
+        }
+    }
     out
+}
+
+fn group_is_rotated(p: &Paragraph, glyphs: &[&syncpdf_core::ir::Glyph]) -> bool {
+    // The binder currently stores a translation-only glyph matrix, so PDF text drawn
+    // vertically also needs a geometric guard. A narrow stack of mostly single-glyph
+    // rows is not a horizontal paragraph even when each glyph box is axis-aligned.
+    if p.lines.len() >= 4
+        && p.lines.iter().all(|line| line.glyphs.len() <= 2)
+        && p.bbox.height() > p.bbox.width() * 2.0
+    {
+        return true;
+    }
+    let by_id: std::collections::HashMap<GlyphId, &syncpdf_core::ir::Glyph> =
+        glyphs.iter().map(|g| (g.id, *g)).collect();
+    p.glyphs.iter().any(|id| {
+        by_id.get(id).is_some_and(|g| {
+            let m = g.matrix;
+            let horizontal = (m.a * m.a + m.b * m.b).sqrt();
+            horizontal > 0.0 && m.b.abs() > horizontal * 0.25
+        })
+    })
 }
 
 /// 一行：字形序号（段内 0 基）+ 基线 y。
@@ -195,17 +260,16 @@ fn build_paragraph(
         }
     }
 
-    let text = concat_text(&rows, glyphs);
-    let char_map = char_map(&rows, glyphs, &text);
+    let reading = read_source(&rows, glyphs);
     let style_runs = style_runs(&rows, glyphs, &ir.fonts);
-    let atoms = detect_atoms(&text, &char_map);
+    let atoms = detect_atoms(&reading.text, &reading.char_map);
     let bbox = rows.iter().fold(rows[0].bbox, |acc, r| acc.union(&r.bbox));
     let size = dominant_size(&rows, glyphs);
     let align = detect_align(&rows, &region.bbox);
     let first_indent = detect_first_indent(&rows, glyphs);
     let line_height = detect_line_height(&rows, size);
 
-    let translatable = judge_translatable(region.kind, &text, &atoms);
+    let translatable = judge_translatable(region.kind, &reading.text, &atoms);
 
     Paragraph {
         id: ParagraphId::new(PageId(ir.page.0), seq),
@@ -222,10 +286,10 @@ fn build_paragraph(
             })
             .collect(),
         glyphs: seg_glyphs,
-        text_spans: Vec::new(),
+        text_spans: reading.spans,
         style_runs,
         atoms,
-        text,
+        text: reading.text,
         align,
         first_indent,
         line_height,
@@ -234,56 +298,114 @@ fn build_paragraph(
     }
 }
 
-/// 行间拼文本：行间加空格；行尾是连字符 `-` 时去掉连字符且不加空格。
-fn concat_text(rows: &[Row], glyphs: &[&syncpdf_core::ir::Glyph]) -> String {
-    let mut out = String::new();
-    for (ri, row) in rows.iter().enumerate() {
-        if ri > 0 {
-            if !out.ends_with('-') {
-                out.push(' ');
-            } else {
-                out.pop();
-            }
-        }
-        for &i in &row.glyphs {
-            for c in &glyphs[i as usize].unicode {
-                out.push(*c);
-            }
-        }
-    }
-    out
+struct SourceReading {
+    text: String,
+    spans: Vec<SourceTextSpan>,
+    /// char starts followed by char ends; generated text uses a zero length range.
+    char_map: Vec<u32>,
 }
 
-/// 文本 char 序号 → 字形序号（一个字形可能贡献多个 char）。
-///
-/// 下标 i 对应「第 i 个 char 由哪个字形产生」；末尾额外放一个 = 字形数的哨兵，
-/// 便于把「char 区间」转成「字形区间」。
-fn char_map(rows: &[Row], glyphs: &[&syncpdf_core::ir::Glyph], text: &str) -> Vec<u32> {
-    // `start[i]` = 产生第 i 个 char 的首个字形序号；`end[i]` = 最后一个
-    // 产生第 i 个 char 的字形序号 + 1（一个字形可能贡献多个 char）。
-    // 于是 `[s, e)` 的字形区间 = `(start[s], end[e - 1])`。
-    let nchars = text.chars().count();
-    let mut start: Vec<u32> = Vec::with_capacity(nchars);
-    let mut end: Vec<u32> = Vec::with_capacity(nchars);
-    let mut glyph_idx: u32 = 0;
+/// One traversal owns the logical text and every character's source interval.
+fn read_source(rows: &[Row], glyphs: &[&syncpdf_core::ir::Glyph]) -> SourceReading {
+    let mut text = String::new();
+    let mut spans = Vec::new();
+    let mut starts = Vec::new();
+    let mut ends = Vec::new();
+    let mut index = 0u32;
+    let mut previous: Option<&syncpdf_core::ir::Glyph> = None;
     for (ri, row) in rows.iter().enumerate() {
         if ri > 0 {
-            // 与 `concat_text` 一致：插行间空格（连字符不回退）。
-            let owner = glyph_idx.saturating_sub(1);
-            start.push(owner);
-            end.push(owner + 1);
+            // A line boundary is genuine spacing unless the source already supplies it or
+            // punctuation/CJK joins naturally. Preserve terminal hyphens verbatim.
+            let next = glyphs[row.glyphs[0] as usize];
+            if previous.is_some_and(|prev| should_join_with_space(prev, next, true)) {
+                emit(
+                    " ",
+                    (index, index),
+                    &mut text,
+                    &mut spans,
+                    &mut starts,
+                    &mut ends,
+                );
+            }
+            previous = None;
         }
         for &i in &row.glyphs {
-            let nc = glyphs[i as usize].unicode.len().max(1);
-            for _ in 0..nc {
-                start.push(glyph_idx);
-                end.push(glyph_idx + 1);
+            let g = glyphs[i as usize];
+            if previous.is_some_and(|prev| should_join_with_space(prev, g, false)) {
+                emit(
+                    " ",
+                    (index, index),
+                    &mut text,
+                    &mut spans,
+                    &mut starts,
+                    &mut ends,
+                );
             }
-            glyph_idx += 1;
+            let glyph_text: String = g.unicode.iter().collect();
+            if !glyph_text.is_empty() {
+                emit(
+                    &glyph_text,
+                    (index, index + 1),
+                    &mut text,
+                    &mut spans,
+                    &mut starts,
+                    &mut ends,
+                );
+            }
+            index += 1;
+            previous = Some(g);
         }
     }
-    start.extend(end);
-    start
+    starts.extend(ends);
+    SourceReading {
+        text,
+        spans,
+        char_map: starts,
+    }
+}
+
+fn emit(
+    text_part: &str,
+    range: (u32, u32),
+    text: &mut String,
+    spans: &mut Vec<SourceTextSpan>,
+    starts: &mut Vec<u32>,
+    ends: &mut Vec<u32>,
+) {
+    text.push_str(text_part);
+    spans.push(SourceTextSpan {
+        text: text_part.into(),
+        glyph_range: range,
+    });
+    for _ in text_part.chars() {
+        starts.push(range.0);
+        ends.push(range.1);
+    }
+}
+
+fn should_join_with_space(
+    prev: &syncpdf_core::ir::Glyph,
+    next: &syncpdf_core::ir::Glyph,
+    line_boundary: bool,
+) -> bool {
+    let Some(last) = prev.unicode.last().copied() else {
+        return false;
+    };
+    let Some(first) = next.unicode.first().copied() else {
+        return false;
+    };
+    if last.is_whitespace() || first.is_whitespace() || last == '-' || last == '\u{00ad}' {
+        return false;
+    }
+    if is_cjk(last) || is_cjk(first) || !first.is_alphanumeric() {
+        return false;
+    }
+    let word_end = last.is_alphanumeric() || matches!(last, ',' | '.' | ';' | ':' | '!' | '?');
+    if !word_end {
+        return false;
+    }
+    line_boundary || next.bbox.x0 - prev.bbox.x1 > prev.size.min(next.size).max(1.0) * 0.12
 }
 
 /// `[s, e)` char 区间 → 字形区间 `(gs, ge)`（`e` 为排他端）。

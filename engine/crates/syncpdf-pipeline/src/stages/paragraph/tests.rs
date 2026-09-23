@@ -175,7 +175,196 @@ fn hyphen_at_line_end_is_joined_without_space() {
     let ir = page_ir(g, vec![mk_font("F1", false, false)]);
     let paras = analyze_page(&ir, &full_region(RegionKind::Text));
     assert_eq!(paras.len(), 1);
-    assert_eq!(paras[0].text, "example");
+    assert_eq!(paras[0].text, "exam-ple");
+    assert_eq!(paras[0].text_spans[4].text, "-");
+}
+
+#[test]
+fn geometric_word_gap_has_a_zero_length_source_span() {
+    let mut g = line(0, "Hello", 50.0, 700.0, 10.0, 0);
+    g.extend(line(5, "world", 84.0, 700.0, 10.0, 0));
+    let p = analyze_page(
+        &page_ir(g, vec![mk_font("F1", false, false)]),
+        &full_region(RegionKind::Text),
+    );
+    assert_eq!(p.len(), 1);
+    assert_eq!(p[0].text, "Hello world");
+    assert_eq!(p[0].text_spans[5].text, " ");
+    assert_eq!(p[0].text_spans[5].glyph_range, (5, 5));
+    let unit = syncpdf_translate::build_unit(&p[0], |_| Some("bad fallback".into()));
+    assert_eq!(unit.plain_text(), "Hello world");
+}
+
+#[test]
+fn explicit_space_ligature_and_cjk_punctuation_are_preserved() {
+    let mut g = line(0, "A B", 50.0, 700.0, 10.0, 0);
+    // One actual glyph contributes two Unicode characters.
+    let mut ligature = mk_glyph(3, 'f', 68.0, 700.0, 10.0, 0);
+    ligature.unicode = ['f', 'i'].into_iter().collect();
+    g.push(ligature);
+    let p = analyze_page(
+        &page_ir(g, vec![mk_font("F1", false, false)]),
+        &full_region(RegionKind::Text),
+    );
+    assert_eq!(p[0].text, "A Bfi");
+    assert_eq!(p[0].text_spans.iter().filter(|s| s.text == " ").count(), 1);
+    assert_eq!(p[0].text_spans[3].glyph_range, (3, 4));
+
+    let g = line(0, "中文，测试。", 50.0, 700.0, 10.0, 0);
+    let p = analyze_page(
+        &page_ir(g, vec![mk_font("F1", false, false)]),
+        &full_region(RegionKind::Text),
+    );
+    assert_eq!(p[0].text, "中文，测试。");
+    assert!(p[0]
+        .text_spans
+        .iter()
+        .all(|s| s.glyph_range.0 < s.glyph_range.1));
+}
+
+#[test]
+fn generated_line_gap_keeps_multiline_atom_range_and_styles() {
+    let mut g = line(0, "rate 25", 50.0, 700.0, 10.0, 0);
+    g.extend(line(7, "ms now", 50.0, 686.0, 10.0, 1));
+    let p = analyze_page(
+        &page_ir(
+            g,
+            vec![mk_font("F1", false, false), mk_font("F2", true, false)],
+        ),
+        &full_region(RegionKind::Text),
+    );
+    assert_eq!(p.len(), 1);
+    assert_eq!(p[0].text, "rate 25 ms now");
+    assert_eq!(p[0].text_spans[7].glyph_range, (7, 7));
+    assert_eq!(p[0].atoms[0].text, "25 ms");
+    assert_eq!(p[0].atoms[0].glyph_range, (5, 9));
+    assert_eq!(p[0].style_runs[0].glyph_range, (0, 7));
+    assert_eq!(p[0].style_runs[1].glyph_range, (7, 13));
+}
+
+#[test]
+fn rotated_source_is_kept_with_reason() {
+    let mut g = line(0, "Side note", 50.0, 700.0, 10.0, 0);
+    for glyph in &mut g {
+        glyph.matrix = Matrix::new(0.0, 1.0, -1.0, 0.0, 0.0, 0.0);
+    }
+    let p = analyze_page(
+        &page_ir(g, vec![mk_font("F1", false, false)]),
+        &full_region(RegionKind::Text),
+    );
+    assert!(p.iter().all(|p| matches!(&p.translatable, Translatable::No { reason } if reason == "rotated_source_text")));
+}
+
+#[test]
+fn vertical_side_note_geometry_is_kept_even_with_translation_only_matrices() {
+    let g: Vec<_> = "VERTICAL"
+        .chars()
+        .enumerate()
+        .map(|(i, c)| mk_glyph(i as u16, c, 50.0, 700.0 - i as f32 * 8.0, 10.0, 0))
+        .collect();
+    let p = analyze_page(
+        &page_ir(g, vec![mk_font("F1", false, false)]),
+        &full_region(RegionKind::Text),
+    );
+    assert!(p.iter().all(|p| matches!(&p.translatable, Translatable::No { reason } if reason == "rotated_source_text")), "{p:?}");
+}
+
+#[test]
+fn punctuation_at_line_boundary_retains_source_and_gets_word_space() {
+    let mut g = line(0, "Hello,", 50.0, 700.0, 10.0, 0);
+    g.extend(line(6, "world", 50.0, 686.0, 10.0, 0));
+    let p = analyze_page(
+        &page_ir(g, vec![mk_font("F1", false, false)]),
+        &full_region(RegionKind::Text),
+    );
+    assert_eq!(p[0].text, "Hello, world");
+    assert_eq!(p[0].text_spans[6].glyph_range, (6, 6));
+}
+
+#[test]
+fn overlapping_translatable_regions_keep_all_shared_source() {
+    let g = line(0, "Shared prose", 50.0, 700.0, 10.0, 0);
+    let ir = page_ir(g, vec![mk_font("F1", false, false)]);
+    let regions = vec![
+        text_region(0, Rect::new(40.0, 690.0, 150.0, 720.0), 0),
+        text_region(1, Rect::new(45.0, 690.0, 155.0, 720.0), 1),
+    ];
+    let p = analyze_page(&ir, &regions);
+    assert_eq!(p.len(), 2);
+    assert!(p.iter().all(|p| matches!(&p.translatable, Translatable::No { reason } if reason == "translatable_region_overlap")));
+    assert_eq!(p[0].glyphs, p[1].glyphs);
+}
+
+#[test]
+fn ordinary_region_cannot_translate_rotated_source_glyphs() {
+    let mut g = line(0, "Side note", 50.0, 700.0, 10.0, 0);
+    for glyph in &mut g {
+        glyph.matrix = Matrix::new(0.0, 1.0, -1.0, 0.0, 0.0, 0.0);
+    }
+    let ir = page_ir(g, vec![mk_font("F1", false, false)]);
+    let regions = vec![
+        text_region(0, Rect::new(40.0, 690.0, 150.0, 720.0), 0),
+        text_region(1, Rect::new(45.0, 690.0, 155.0, 720.0), 1),
+    ];
+    let p = analyze_page(&ir, &regions);
+    assert_eq!(p.len(), 2);
+    assert!(p.iter().all(|p| matches!(&p.translatable, Translatable::No { reason } if reason == "rotated_source_text")));
+}
+
+#[test]
+#[ignore = "manual read-only source/paragraph probe for a specified PDF page"]
+fn manual_source_paragraph_page_one_probe() {
+    let path = std::env::var("R2_SOURCE_PROBE_PDF").expect("set R2_SOURCE_PROBE_PDF");
+    let output = std::env::var("R2_SOURCE_PROBE_OUTPUT").expect("set R2_SOURCE_PROBE_OUTPUT");
+    let worker = syncpdf_pdf::pdfium::PdfiumWorker::spawn().expect("pdfium");
+    let pf = crate::stages::preflight(&worker, std::path::Path::new(&path)).expect("preflight");
+    let lo = lopdf::Document::load(&path).expect("source PDF");
+    let bound = syncpdf_pdf::bind::bind_page(&worker, pf.doc, &lo, 1).expect("bind page one");
+    let model_path = syncpdf_core::fixtures::models_dir()
+        .expect("models directory")
+        .join("pp_doc_layoutv3.onnx");
+    let mut model = syncpdf_layout::LayoutModel::load(&model_path, 2).expect("layout model");
+    let opts = crate::stages::LayoutOpts::default();
+    let mut regions =
+        crate::stages::detect_regions(&mut model, &worker, pf.doc, 0, &pf.page_infos[0], &opts)
+            .expect("layout page one");
+    crate::stages::apply_coverage_fallback(&mut regions, &bound.ir, 0, opts.coverage_limit);
+    let paras = analyze_page(&bound.ir, &regions);
+    let glyph_text: std::collections::HashMap<_, _> = bound
+        .ir
+        .glyphs()
+        .map(|g| (g.id, g.unicode.iter().collect::<String>()))
+        .collect();
+    let records: Vec<_> = paras
+        .iter()
+        .map(|p| {
+            let mut old = String::new();
+            for (i, line) in p.lines.iter().enumerate() {
+                if i > 0 {
+                    if old.ends_with('-') {
+                        old.pop();
+                    } else {
+                        old.push(' ');
+                    }
+                }
+                for id in &line.glyphs {
+                    old.push_str(glyph_text.get(id).expect("source glyph"));
+                }
+            }
+            serde_json::json!({
+                "id": p.id.to_string(),
+                "reason": format!("{:?}", p.translatable),
+                "old": old,
+                "new": p.text,
+                "generated": p.text_spans.iter().filter(|s| s.glyph_range.0 == s.glyph_range.1).map(|s| serde_json::json!({"text": s.text, "range": s.glyph_range})).take(12).collect::<Vec<_>>(),
+                "first_spans": p.text_spans.iter().take(12).map(|s| serde_json::json!({"text": s.text, "range": s.glyph_range})).collect::<Vec<_>>(),
+                "atoms": p.atoms.iter().take(8).map(|a| serde_json::json!({"text": a.text, "range": a.glyph_range})).collect::<Vec<_>>()
+            })
+        })
+        .collect();
+    std::fs::write(output, serde_json::to_vec_pretty(&records).expect("json"))
+        .expect("probe evidence");
+    worker.close(pf.doc);
 }
 
 #[test]
