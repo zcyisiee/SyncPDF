@@ -63,7 +63,7 @@ bdt check --workdir tmp/paper --strict
 
 ## Rust 后端试用入口
 
-`bdt rust-translate` 使用现有 `syncpdf-cli translate --translator pi` 翻译一份 PDF。先自行构建 `engine/target/release/syncpdf-cli`，或用 `--engine` 指向已有可执行文件；本命令不会构建引擎、安装模型或修改 pi 提供方配置。pi 及所选模型需要在运行环境中预先可用。
+`bdt rust-translate` 使用现有 `syncpdf-cli translate --translator pi` 翻译一份 PDF。先自行构建 `engine/target/release/syncpdf-cli`，或用 `--engine` 指向已有可执行文件；本命令不会构建引擎、安装模型或修改 pi 提供方配置。pi 及所选模型需要在运行环境中预先可用。动态链接的ONNX Runtime/PDFium也须可被当前引擎找到；本机开发验收环境可先执行 `source tmp/backend-repair/codex-r1-integration/env.sh`（配置库路径，未安装依赖）。
 
 ```bash
 # 在本仓库根目录运行；每次使用新的 workdir
@@ -72,7 +72,17 @@ bdt check --workdir tmp/paper --strict
   --model deepseek/deepseek-flash --thinking low --layout-device coreml
 ```
 
-省略 `--pages` 会处理全文；`--source-lang` 默认 `auto`，`--target-lang` 默认 `zh-CN`，`--layout-device` 可选 `auto`、`cpu`、`coreml`。命令将 Rust 事件逐条保存到 `<workdir>/events.jsonl`，引擎日志保存到 `stderr.log`，运行结果保存到 `result.json`；译文可用时还会有 `translated.pdf`。stdout 仍只有一行 JSON，简短阶段和页面进度走 stderr。`result.json` 记录已排版成功块、未成功块、未替换块及产物路径。`run_finished.ok=false`、引擎非零退出、缺最终事件或缺 PDF 均返回失败，即使已有部分译文 PDF。已有运行日志/产物时拒绝复用目录；请指定新 workdir。输入 PDF 不能是该目录的 `translated.pdf`。
+省略 `--pages` 会处理全文；`--source-lang` 默认 `auto`，`--target-lang` 默认 `zh-CN`，`--layout-device` 可选 `auto`、`cpu`、`coreml`。命令将 Rust 事件逐条保存到 `<workdir>/events.jsonl`，引擎日志保存到 `stderr.log`，运行结果保存到 `result.json`；译文可用时还会有 `translated.pdf`。stdout 仍只有一行 JSON，简短阶段和页面进度走 stderr。`result.json` 记录已保存页中的成功块、已排版块、已保存页数、未成功块、未替换块及产物路径；typeset完成但所在页尚未保存的不计入成功块。`run_finished.ok=false`、引擎非零退出、缺最终事件或缺 PDF 均返回失败，即使已有部分译文 PDF。已有运行日志/产物时拒绝复用目录；请指定新 workdir。输入 PDF 不能是该目录的 `translated.pdf`。
+
+仅调整排版代码后，可用已有真实译文重新编译，无模型请求；未命中或校验失败的块保留原文并列为未完成：
+
+```bash
+~/miniconda3/envs/bdt/bin/python -m babeldoc_tools rust-translate paper.pdf \
+  --workdir tmp/rust-paper-recompiled --cached-from tmp/rust-paper-001 \
+  --layout-device coreml
+```
+
+`--cached-from` 只读复制原运行目录的译文数据库到新目录，仍按源文本、语言与协议版本核对并校验内容；不要改变目标语言后假定旧缓存仍命中。它是缓存重编译入口，尚未提供逐块字体/字号编辑接口。
 
 ## Web 工作台
 

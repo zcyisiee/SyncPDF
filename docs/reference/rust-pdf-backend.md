@@ -24,7 +24,7 @@ Writer 为每个字体按原 GID 首次出现顺序分配 CID，内容流使用 
 
 ActualText/ToUnicode 的文本检查不能证明实际字形正确；内置 Noto CJK CFF 与 PT Sans TTF 已用原字体独立渲染对照。此项不认证任意字体或完整排版质量。
 
-字体包按资源名排序分配字体编号；段落基线与容纳计算使用段内实际字体的度量，不读取无关的固定编号字体。默认排版保持请求字号与行距，容纳失败返回 `Overflow`，不自动缩小字号。显式配置旧阶梯的库调用仍保留兼容性；生产 pipeline 使用固定字号默认值。溢出段不进入删除/译文写入集合，保留原文并发带页号和段落ID的 `typeset_overflow` 提示。源StyleRun保留精确字号和颜色，排版/Writer逐run传递；源行距以pt保存，在typeset适配处转为字号倍数。源serif/mono角色参与目标字体选择，编辑覆盖仍需后续接线。真实fallback身份、cluster安全和实际墨迹容纳仍待接线验收。
+字体包按资源名排序分配字体编号；段落基线与容纳计算使用段内实际字体的度量，不读取无关的固定编号字体。默认排版保持请求字号与行距，容纳失败返回 `Overflow`，不自动缩小字号。显式配置旧阶梯的库调用仍保留兼容性；生产 pipeline 使用固定字号默认值。溢出段不进入删除/译文写入集合，保留原文并发带页号和段落ID的 `typeset_overflow` 提示。源StyleRun保留精确字号和颜色，排版/Writer逐run传递；源行距以pt保存，在typeset适配处转为字号倍数。源serif/mono角色参与目标字体选择，编辑覆盖仍需后续接线。真实fallback身份、cluster安全和实际墨迹容纳已接，并由R3工程验收验证；完整论文质量仍需逐项评估。
 
 ## 源文本与 Markdown 传输
 
@@ -38,8 +38,12 @@ ActualText/ToUnicode 的文本检查不能证明实际字形正确；内置 Noto
 
 pipeline 的页提交先克隆候选主文档，删除该页成功段落，并仅重放已提交页与当前页的译文；原子保存成功后才替换主文档、更新 revision 和发 PageReady。重复落定块幂等；未知块、缺绑定、删除/保存错误传播并停止后续处理。输出自检只对实际写入 CJK 的页要求 CJK；自检/链接对照错误阻止发布完成事件，最终发布沿用已验证的最后快照。
 
-部分段落回退、源区域归属冲突或 coverage gap 时，保存可读的部分结果并发 `translation_incomplete`，RunFinished/RunSummary 的 ok=false，CLI 非零退出。reference/脚注等按策略保留的内容不算失败。含尚未可靠放置源绘制的行内 atom 时，暂时整段保留并提示 `atom_source_unplaced`；该保护不能代替完整公式排版。
+部分段落回退、源区域归属冲突或 coverage gap 时，保存可读的部分结果并发 `translation_incomplete`，RunFinished/RunSummary 的 ok=false，CLI 非零退出。reference/脚注等按策略保留的内容不算失败。单一样式的普通数字原子现在以准确原文和源样式排版，段落与任何注释框相交或注释几何不可信时仍拒绝移动；公式、引用、URL及跨样式原子尚未可靠放置时，暂时整段保留并提示 `atom_source_unplaced`；该保护不能代替完整公式排版。
 
 段落空格/阅读序、逐 run 样式、公式可见性和链接重建仍需各自验收。生产 Rust 排版不调用 LaTeX；TeX/旧 bdt 可用于质量对照。
 
 验证命令与证据保存在专项交接和 task state。所有测试缓存、截图、日志保留在仓库 `tmp/`；不使用用户文档库 `~/.sp` 作测试库。
+
+## MVP 调用
+
+`bdt rust-translate <pdf> --workdir <新目录>` 调用已有Rust sidecar和pi真实模型；可指定页范围、模型及CoreML。最终JSON与事件保存在workdir，部分结果继续返回非零退出码。它不执行旧Python排版流程，不调用LaTeX，也不新增UI。`--cached-from` 只读复制既有译文缓存，并令本地RunConfig.cache_only模式跳过主请求和补救请求；未命中/校验失败块明确回退，仍完成页级保存与最终自检。使用说明见[CLI指南](../guide/cli.md#rust-后端试用入口)。

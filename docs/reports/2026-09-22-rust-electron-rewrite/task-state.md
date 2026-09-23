@@ -1,7 +1,7 @@
 # Rust PDF 后端修复 · Task state
 
 > 唯一维护者：用户与主 Agent；subagent 只读，不得另建副本。更新：2026-09-23；Codex 主控维护。
-> 状态：**完整后端目标持续active。上一轮已完成绑定集成及stale/CID/Size修复（有效进展）；R1基础工程验收通过；R2源文本、事务状态与Markdown工程验收通过；R3固定字号/排版工程验收通过；V3 Apple GPU全篇工程验收通过；按用户新指令优先交付真实翻译MVP，随后逐项完善公式/链接/交付。整体未完成。**
+> 状态：**完整后端目标持续active。上一轮已完成绑定集成及stale/CID/Size修复（有效进展）；R1基础工程验收通过；R2源文本、事务状态与Markdown工程验收通过；R3固定字号/排版工程验收通过；V3 Apple GPU验收通过；已交付可试用真实翻译MVP（23页、107成功块，明确部分结果），随后按用户反馈完善公式/链接/交付。整体未完成。**
 
 ## 1. 用户意图与任务偏好
 
@@ -42,6 +42,9 @@
 
 ## 4. 当前问题与唯一下一步
 
+- **当前最新：真实MVP已交付**：[12验收](12-MVP真实翻译验收.md)。`tmp/backend-repair/mvp-20260923/`有完整23页PDF、前3页预览、未成功清单和JSON。真实pi全文首次352.39秒（1主/10补救），数字原子修复后以158段真实缓存重编译18.993秒（0主/0补救），全部23页保存/验证/发布：107成功、55回退，另41源区域/旋转保护，明确ok=false/CLI1。保留字符核对0变化、qpdf通过，未声称完整质量。v2坏转义失败历史保留；不要把失败快照当最终交付。用户要快速MVP反馈，后续优先修复样张中公式/引用与区域归属，随后dual/目录/链接/编辑，不回到无止境专项审查。
+- **MVP可复跑入口**：`bdt rust-translate <pdf> --workdir <新目录> [--cached-from <旧运行目录>]`；cache-only只读复制、重新校验，无模型请求，缺失块保留原文。普通Number原子可按源文本/单一样式回填；任何注释相交、公式/引用/URL/跨样式仍保护。Rust相关269/0/5 ignored，strict Clippy/fmt/release；bdt26pytest/Ruff通过。两个MVP叶子已结束并完成主控验收，不重启。动态库仍需本机开发env，打包未完成。
+
 - **R2工程验收通过**：[09验收](09-R2源文本与Markdown验收.md)。共享core `3e6838db`、事务/状态 `ce4b6e2b`、Markdown模块 `63e6e741`、源文本映射 `6209a3ee`、作者机构保护 `77e5e70d`已提交；主控Markdown接线 `0301c237`。主树workspace **591通过、0失败、5 ignored**；随后 metadata 5项和真实首页probe分别通过，strict Clippy/fmt/release通过。已有无文本夹具早退不算真实文本验收。
 - **真实23页 release** `r2-markdown-safe-all`：32.47秒；主请求1/补救0/缓存0；99 overflow、63 atom_source_unplaced、40 protected_source_overlap、1 rotated_source_text；仍无成功译文。23页源文本及144dpi像素完全相同，qpdf exit0，自检无误报，RunFinished ok:false / CLI exit1，正确标明部分结果。fake只能证明工程行为，完整质量仍失败。
 - **新增行为已独立举证**：闭合Markdown块在模型返回前交付；坏尾部/半块上抛且先前有效块可缓存；保存失败不改文档/revision/已有文件；未ready页不重放待排译文；未知/重复身份不计完整成功。行内atom尚未真放置，整段回退只是保护。
@@ -50,7 +53,7 @@
 - **R3首个窄修已验证（本批未完）**：源line_height为绝对pt，旧typeset适配误作字号倍数再乘size；另源样式字号曾按0.5pt取整、整段字号取run数中位而非源字形加权。主控`f05b8ac6`已接精确run字号/颜色、字体角色与pt转换，127项pipeline unit、33项typeset、真实混合字号/颜色PDFium专项及strict Clippy通过。up-vns第2页已出现可容纳译文，旧全页必须回退断言被更强的逐回退框源字形/坐标保护取代并通过。宽高/实际ink与Knuth–Plass未接，不算R3通过。
 - **R3共享接口就绪（未完整layout）**：typeset `ShapedGlyph`已有actual font/cluster_end，StoreShaper调用directional API，新增真实`glyph_bounds`，ParagraphSpec新增可选first_baseline；workspace check与font/typeset strict Clippy通过，真实adapter专项通过。首页frame报告在`../codex-r3-frame-probe/tmp/backend-repair/frame-probe/report.md`，证明全局metrics导致短标题假溢出、source matrix.f基线对独立原件误差≤0.00003pt。
 - **R3工程验收通过**（修复提交`8f3bcd84`）：[10验收](10-R3固定字号与排版验收.md)。主树workspace641通过/0失败/6 ignored，strict Clippy/release通过；随后109 pdf unit+6真实PDF通过。frame/actual-ink/Knuth–Plass/固定基线、字号、颜色已接。首页短标题/摘要保持17.2154/11.9552pt与源基线，3525其它字形不变，已渲染复核。最终审查错行双栏越界、p14 TJ保留字符偏移均已修并补回归；最后23页fake `r3-retention-fixed-all`34.91秒：50成功译块/49overflow/63atom回退，83910保留字符位置字号颜色0变化，23快照未ready页CJK0污染，qpdf通过，RunFinished false/CLI1明确部分结果。fake仍不是完整质量。
-- **GPU与source状态收尾已通过**：q/Q字体/字距/缩放/leading恢复含跨Contents流真实8例通过；pdf+pipeline305项通过，strict workspace Clippy/release通过。V3严格CoreML全23页cold28.80秒、复用编译缓存27.49秒；83910保留字符0变化，23快照无未ready污染，qpdf通过。warm启动改善有限，暂不继续性能专项。源状态修复已提交`1ef8ba22`；主控立即跑真实LLM，fresh叶子`codex-mvp-provider-check`（gpt-6-sol:high/Orca独立树/10分钟）只读核对现有pi/provider启动配置，禁止打印密钥，不改产品入口。
+- **GPU与source状态收尾已通过**：q/Q字体/字距/缩放/leading恢复含跨Contents流真实8例通过；pdf+pipeline305项通过，strict workspace Clippy/release通过。V3严格CoreML全23页cold28.80秒、复用编译缓存27.49秒；83910保留字符0变化，23快照无未ready污染，qpdf通过。warm启动改善有限，暂不继续性能专项。源状态修复已提交`1ef8ba22`；主控已完成真实LLM样张，只读叶子`codex-mvp-provider-check`已结束，现有pi0.87.1与deepseek/deepseek-flash配置可用（仅确认配置存在，不打印密钥）。真实MVP和bdt薄封装均已由主控验收；维持唯一bdt产品入口与部分结果非成功语义。
 - **R3宽度安全边界**：未知简单字体宽度不再猜1000；无Widths（含部分Standard14）拒绝删除且不发布候选。Type3仅可靠水平matrix。width审查与partial/final audit叶子均结束，不重启。主控已审partial候选`87467650`并合入`926150aa`，再修bind/patch并添加quote、缺宽度拒绝守卫。相关原因/证据见10报告。
 - 已结束的 `r2_source` / `r2_markdown` / `r2_metadata` 和所有R1 worker不重启；Orca独立树保留且clean。新分工严格gpt-6-sol:high/fresh/独立Orca worktree，task-state仅主控写。
 - **R1基础验收**见[08](08-R1布局与固定字号验收.md)：567 passed /0 failed/4 ignored；strict Clippy/fmt/release及23页coverage probe通过。p7/p15可见字形缺口0，其余21页分区不变；错误扩大Caption/Code候选被拒绝。字体原始像素跨两次选页/全篇稳定，qpdf全过。R1旧全回退仍ok:true及错误自检已由R2修正。

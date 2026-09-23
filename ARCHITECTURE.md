@@ -121,7 +121,7 @@ job 子进程由 serve 以 `sys.executable -m babeldoc_tools` 起，serve 会把
 
 ## 7. 开发中的 Rust PDF 后端
 
-`engine/` 已包含 Rust PDF 解析、布局、翻译、排版与写回 crate，以及内部 `syncpdf-cli` sidecar。其生产排版路径不调用 LaTeX；模型传输使用 Markdown one-shot，闭合块立即交付排版，HTML只作内部兼容格式。旧 Python/bdt 路径仍按上文运行。Rust 后端尚未通过全篇翻译质量验收，不能将它与现有产品交付能力等同。
+`engine/` 已包含 Rust PDF 解析、布局、翻译、排版与写回 crate，以及内部 `syncpdf-cli` sidecar。其生产排版路径不调用 LaTeX；模型传输使用 Markdown one-shot，闭合块立即交付排版，HTML只作内部兼容格式。`bdt rust-translate`已提供薄封装用于真实模型MVP试用，记录事件、产物和部分结果；旧 Python/bdt 路径仍按上文运行。Rust 后端尚未通过全篇翻译质量验收，不能将它与现有产品交付能力等同。
 
 源处理将 PDFium 几何与 lopdf 内容流操作绑定，source 和公共删除 API 执行替换门禁；已准备段落合成一个页级 PatchSet，私有候选完成共享流隔离后才替换文档。绑定保存页 Contents/源流快照，写前拒绝过期来源。pipeline 页提交在私有候选删除并重放已就绪页，原子保存成功后才更新主文档/revision；最终发布使用通过自检的最后快照。部分回退明确标为未完整完成，CLI 非零退出；编辑修订事务尚未实现。当前契约、不支持范围与已知缺口见 [Rust PDF 后端参考](docs/reference/rust-pdf-backend.md)，阶段验收仍由唯一 task state 维护。
 
