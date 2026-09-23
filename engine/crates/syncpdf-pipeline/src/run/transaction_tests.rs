@@ -96,6 +96,7 @@ fn state(dir: &Path) -> (RunState, PathBuf) {
             doc,
             bound,
             frames,
+            typography: stages::typeset::Typography::default(),
             pars,
             font_store,
             font_profile,

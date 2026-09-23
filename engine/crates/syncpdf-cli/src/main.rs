@@ -70,6 +70,12 @@ enum Command {
         /// 只重新编译已通过校验的缓存译文；不调用模型，缺失块保留原文。
         #[arg(long)]
         cache_only: bool,
+        /// 译文字号相对源字号的倍数；保留样式层级，不自动缩字。
+        #[arg(long, default_value_t = 1.0)]
+        font_scale: f32,
+        /// 行距/译文段落字号的倍数，如 1.3（非 pt）；缺省保留源比例。
+        #[arg(long)]
+        line_height: Option<f32>,
     },
     /// 打印 preflight 信息、每页几何与段落摘要（调试用）。
     Inspect {
@@ -128,6 +134,8 @@ fn main() -> anyhow::Result<()> {
             pages,
             cache_dir,
             cache_only,
+            font_scale,
+            line_height,
         } => rt.block_on(cmd_translate(
             input,
             output,
@@ -139,6 +147,8 @@ fn main() -> anyhow::Result<()> {
             pages,
             cache_dir,
             cache_only,
+            font_scale,
+            line_height,
         )),
         Command::Inspect {
             input,
@@ -251,7 +261,10 @@ async fn cmd_translate(
     pages: Option<String>,
     cache_dir: Option<PathBuf>,
     cache_only: bool,
+    font_scale: f32,
+    line_height: Option<f32>,
 ) -> anyhow::Result<()> {
+    let typography = syncpdf_pipeline::stages::typeset::Typography::new(font_scale, line_height)?;
     let pages = match pages.as_deref() {
         Some(spec) => Some(parse_pages(spec)?),
         None => None,
@@ -283,6 +296,7 @@ async fn cmd_translate(
     };
     let mut cfg = RunConfig::new(configure, run)?;
     cfg.cache_only = cache_only;
+    cfg.typography = typography;
     let sink = SharedSink::new(StdoutSink::new());
     let pipeline = Pipeline::default();
     match pipeline.run(&cfg, sink, CancellationToken::new()).await {

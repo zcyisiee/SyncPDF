@@ -47,14 +47,16 @@ def fake_engine(tmp_path: Path) -> Path:
     return script
 
 
-def _run(pdf: Path, workdir: Path, engine: Path, *, mode: str = "success") -> tuple:
+def _run(
+    pdf: Path, workdir: Path, engine: Path, *, mode: str = "success", extra_args: tuple[str, ...] = ()
+) -> tuple:
     env = os.environ.copy()
     env["FAKE_MODE"] = mode
     completed = subprocess.run(  # noqa: S603 - fixed Python executable and argv list
         [
             sys.executable, "-m", "babeldoc_tools", "rust-translate", str(pdf),
             "--workdir", str(workdir), "--engine", str(engine), "--pages", "1-3",
-            "--layout-device", "coreml",
+            "--layout-device", "coreml", *extra_args,
         ],
         cwd=REPO,
         env=env,
@@ -80,6 +82,9 @@ def test_success_keeps_one_json_envelope_and_engine_events(tmp_path: Path, fake_
     assert (workdir / "stderr.log").read_text().strip() == "engine stderr"
     assert (workdir / "result.json").is_file()
     invocation = json.loads((workdir / "invocation.json").read_text())
+    assert payload["data"]["typography"] == {"font_scale": 1.0, "line_height": None}
+    assert "--font-scale" not in invocation["args"]
+    assert "--line-height" not in invocation["args"]
     assert invocation["args"][:1] == ["translate"]
     assert invocation["args"][invocation["args"].index("--translator") + 1] == "pi"
     assert invocation["args"][invocation["args"].index("--pages") + 1] == "1-3"
@@ -184,3 +189,34 @@ def test_typeset_without_saved_page_is_not_reported_as_written(tmp_path: Path, f
     assert payload["error"]["successful_blocks"] == 0
     assert payload["error"]["typeset_blocks"] == 1
     assert payload["error"]["saved_pages"] == 0
+
+
+def test_explicit_typography_forwards_multipliers_and_records_them(
+    tmp_path: Path, fake_engine: Path
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    workdir = tmp_path / "run"
+    completed, payload = _run(
+        pdf, workdir, fake_engine, extra_args=("--font-scale", "0.9", "--line-height", "1.3")
+    )
+    assert completed.returncode == 0
+    args = json.loads((workdir / "invocation.json").read_text())["args"]
+    assert args[args.index("--font-scale") + 1] == "0.9"
+    assert args[args.index("--line-height") + 1] == "1.3"
+    assert payload["data"]["typography"] == {"font_scale": 0.9, "line_height": 1.3}
+    assert json.loads((workdir / "result.json").read_text()) == payload
+
+
+@pytest.mark.parametrize("flag", ["--font-scale", "--line-height"])
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+def test_invalid_typography_rejected_before_launch_or_artifacts(
+    tmp_path: Path, fake_engine: Path, flag: str, value: str
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    workdir = tmp_path / "run"
+    completed, payload = _run(pdf, workdir, fake_engine, extra_args=(f"{flag}={value}",))
+    assert completed.returncode == 1
+    assert payload["error"]["code"] == "invalid_typography"
+    assert not workdir.exists()

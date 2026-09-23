@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import signal
 import sqlite3
@@ -47,8 +48,13 @@ def _translate_pdf(
     layout_device: str,
     engine: str | None,
     cached_from: str | None = None,
+    font_scale: float = 1.0,
+    line_height: float | None = None,
 ) -> dict:
     """Run the Rust CLI once, retaining its events and incomplete-result semantics."""
+    for name, value in (("font_scale", font_scale), ("line_height", line_height)):
+        if value is not None and (not math.isfinite(value) or value <= 0):
+            return _error("invalid_typography", f"{name} 必须是有限正数倍数")
     source = Path(pdf).expanduser().resolve()
     destination = Path(workdir).expanduser().resolve()
     binary = Path(engine).expanduser().resolve() if engine else _ENGINE
@@ -96,6 +102,10 @@ def _translate_pdf(
         command.append("--cache-only")
     if pages is not None:
         command.extend(("--pages", pages))
+    if font_scale != 1.0:
+        command.extend(("--font-scale", str(font_scale)))
+    if line_height is not None:
+        command.extend(("--line-height", str(line_height)))
     child_env = os.environ.copy()
     child_env["SYNCPDF_LAYOUT_DEVICE"] = layout_device
     child_env["TMPDIR"] = str(temporary)
@@ -173,6 +183,7 @@ def _translate_pdf(
     )
     unsuccessful = sum(status != "not_replaced" for status in status_by_id.values()) - successful
     data = {
+        "typography": {"font_scale": font_scale, "line_height": line_height},
         "successful_blocks": successful,
         "typeset_blocks": prepared,
         "saved_pages": len(ready_pages),

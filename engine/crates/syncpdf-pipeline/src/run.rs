@@ -59,6 +59,8 @@ pub struct RunConfig {
     pub run: Request,
     /// Recompile verified cached blocks; missing blocks remain source.
     pub cache_only: bool,
+    /// Explicit target-only scale/relative leading (source typography by default).
+    pub typography: stages::typeset::Typography,
 }
 
 impl RunConfig {
@@ -74,6 +76,7 @@ impl RunConfig {
             configure,
             run,
             cache_only: false,
+            typography: stages::typeset::Typography::default(),
         })
     }
 
@@ -554,6 +557,7 @@ impl Pipeline {
             doc: main_doc,
             bound,
             frames,
+            typography: cfg.typography,
             typeset_by_page: BTreeMap::new(),
             page_heights,
             pars: all_paras
@@ -799,6 +803,7 @@ struct RunState {
     /// 段落 id → 段落本体。
     pars: BTreeMap<ParagraphId, Paragraph>,
     frames: BTreeMap<ParagraphId, stages::frame::LayoutFrame>,
+    typography: stages::typeset::Typography,
     /// 内置字体存储（`Writer` 需要的 `&FontStore`）。
     font_store: FontStore,
     /// 目标语言的默认字体 profile。
@@ -950,12 +955,13 @@ fn handle_block(
                 }
                 let shaper =
                     StoreShaper::new(&state.font_store, &state.font_profile).with_role(Role::Body);
-                let result = stages::typeset::typeset_with_frame(
+                let result = stages::typeset::typeset_with_typography(
                     &shaper,
                     &para,
                     &parsed,
                     &Obstacles::default(),
                     state.frames.get(&id),
+                    state.typography,
                 );
                 for issue in &result.issues {
                     match issue {
@@ -1502,6 +1508,7 @@ mod tests {
         let mut state = RunState {
             doc: lopdf::Document::new(),
             bound: BTreeMap::new(),
+            typography: stages::typeset::Typography::default(),
             frames: [(
                 id.clone(),
                 stages::frame::LayoutFrame {

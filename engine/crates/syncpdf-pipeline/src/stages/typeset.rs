@@ -14,6 +14,54 @@ use syncpdf_typeset::{
 
 use super::PipelineError;
 
+/// Explicit target typography; never mutates source IR or translation cache keys.
+/// Leading is a dimensionless multiplier of the scaled paragraph font size.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Typography {
+    font_scale: f32,
+    line_height: Option<f32>,
+}
+
+impl Default for Typography {
+    fn default() -> Self {
+        Self {
+            font_scale: 1.0,
+            line_height: None,
+        }
+    }
+}
+
+impl Typography {
+    pub fn new(font_scale: f32, line_height: Option<f32>) -> Result<Self, PipelineError> {
+        for (name, value) in [
+            ("font_scale", Some(font_scale)),
+            ("line_height", line_height),
+        ] {
+            if value.is_some_and(|v| !v.is_finite() || v <= 0.0) {
+                return Err(PipelineError::Protocol(format!(
+                    "{name} 必须是有限正数倍数"
+                )));
+            }
+        }
+        Ok(Self {
+            font_scale,
+            line_height,
+        })
+    }
+
+    fn apply(self, spec: &mut ParagraphSpec) {
+        spec.font_size *= self.font_scale;
+        for (_, style) in &mut spec.styles {
+            if let Some(size) = &mut style.size {
+                *size *= self.font_scale;
+            }
+        }
+        if let Some(multiplier) = self.line_height {
+            spec.line_height = multiplier;
+        }
+    }
+}
+
 /// 把 `syncpdf-font` 的字体存储 + 角色 profile 适配成 `Shaper`。
 ///
 /// - `font: u32` 是 `FontId.0`（`TypesetParagraph` 里记的字体句柄）；
@@ -274,7 +322,7 @@ fn is_cjk(c: char) -> bool {
             | 0xFF00..=0xFF60)
 }
 
-/// 排一段：默认 fit 阶梯。
+/// 排一段：默认保持源字号与行距，不自动缩字。
 pub fn typeset_paragraph(
     shaper: &dyn Shaper,
     para: &Paragraph,
@@ -301,7 +349,27 @@ pub fn typeset_with_frame(
     obstacles: &Obstacles,
     frame: Option<&super::frame::LayoutFrame>,
 ) -> TypesetResult {
+    typeset_with_typography(
+        shaper,
+        para,
+        parsed,
+        obstacles,
+        frame,
+        Typography::default(),
+    )
+}
+
+/// Apply a user-selected scale once; fit still cannot shrink unsuccessful paragraphs.
+pub fn typeset_with_typography(
+    shaper: &dyn Shaper,
+    para: &Paragraph,
+    parsed: &ParsedUnit,
+    obstacles: &Obstacles,
+    frame: Option<&super::frame::LayoutFrame>,
+    typography: Typography,
+) -> TypesetResult {
     let mut spec = spec_for(para);
+    typography.apply(&mut spec);
     if let Some(frame) = frame {
         spec.bbox = frame.bbox;
         spec.first_baseline = Some(frame.first_baseline);
@@ -386,6 +454,119 @@ mod tests {
         let store = FontStore::load_builtin(&dir).ok()?;
         let profile = syncpdf_font::default_profile(&store, "zh-CN");
         Some((store, profile))
+    }
+
+    #[test]
+    fn typography_rejects_invalid_multipliers() {
+        for value in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(Typography::new(value, None).is_err());
+            assert!(Typography::new(1.0, Some(value)).is_err());
+        }
+    }
+
+    #[test]
+    fn typography_scales_all_runs_but_preserves_style_hierarchy_and_source() {
+        let mut para = paragraph("P01-001", "body", Rect::new(0.0, 0.0, 200.0, 200.0));
+        let mut small = para.style_runs[0].clone();
+        small.id = StyleId(2);
+        small.size = 7.0;
+        small.bold = true;
+        small.italic = true;
+        small.color = Color {
+            r: 1.0,
+            g: 0.0,
+            b: 0.0,
+        };
+        para.style_runs.push(small);
+        let original = spec_for(&para);
+        let mut spec = original.clone();
+        Typography::new(0.9, Some(1.3)).unwrap().apply(&mut spec);
+        assert_eq!(spec.font_size, 9.0);
+        assert_eq!(spec.line_height, 1.3);
+        assert_eq!(spec.styles[0].1.size, Some(9.0));
+        assert!((spec.styles[1].1.size.unwrap() - 6.3).abs() < 0.0001);
+        for ((_, before), (_, after)) in original.styles.iter().zip(&spec.styles) {
+            assert_eq!(before.bold, after.bold);
+            assert_eq!(before.italic, after.italic);
+            assert_eq!(before.color, after.color);
+            assert_eq!(before.font, after.font);
+        }
+        assert_eq!(spec_for(&para), original, "source IR must remain immutable");
+        let mut unchanged = original.clone();
+        Typography::default().apply(&mut unchanged);
+        assert_eq!(unchanged, original);
+        let mut scaled_source_ratio = original;
+        Typography::new(0.9, None)
+            .unwrap()
+            .apply(&mut scaled_source_ratio);
+        assert!(
+            (scaled_source_ratio.font_size * scaled_source_ratio.line_height - 10.8).abs() < 0.0001
+        );
+    }
+
+    #[test]
+    fn relative_leading_follows_size_and_does_not_change_source_baseline() {
+        let para = paragraph("P01-001", "body", Rect::new(0.0, 0.0, 200.0, 200.0));
+        let parsed =
+            parse_unit_html(r#"<p id="P01-001"><span data-style="1">甲乙丙<br>丁戊己</span></p>"#)
+                .unwrap();
+        let frame = super::super::frame::LayoutFrame {
+            bbox: para.bbox,
+            first_baseline: 180.0,
+            obstacles: vec![],
+        };
+        for scale in [0.8, 0.9, 1.1] {
+            let result = typeset_with_typography(
+                &syncpdf_typeset::shaper::MonoShaper,
+                &para,
+                &parsed,
+                &Obstacles::default(),
+                Some(&frame),
+                Typography::new(scale, Some(1.3)).unwrap(),
+            );
+            assert!(!result.paragraph.overflow);
+            assert_eq!(result.scale, 1.0);
+            let lines = &result.paragraph.lines;
+            assert_eq!(lines.len(), 2);
+            assert_eq!(lines[0].baseline_y, 180.0);
+            let size = 10.0 * scale;
+            assert!((lines[0].baseline_y - lines[1].baseline_y - size * 1.3).abs() < 0.0001);
+            assert!((result.paragraph.line_height - size * 1.3).abs() < 0.0001);
+            assert!(lines
+                .iter()
+                .flat_map(|l| &l.glyphs)
+                .all(|g| (g.size - size).abs() < 0.0001));
+        }
+    }
+
+    #[test]
+    fn overflow_does_not_reduce_explicit_size_or_leading() {
+        let para = paragraph("P01-001", "body", Rect::new(0.0, 0.0, 20.0, 10.0));
+        let parsed =
+            parse_unit_html(r#"<p id="P01-001"><span data-style="1">甲乙丙丁戊己庚辛</span></p>"#)
+                .unwrap();
+        let frame = super::super::frame::LayoutFrame {
+            bbox: para.bbox,
+            first_baseline: 8.0,
+            obstacles: vec![],
+        };
+        let result = typeset_with_typography(
+            &syncpdf_typeset::shaper::MonoShaper,
+            &para,
+            &parsed,
+            &Obstacles::default(),
+            Some(&frame),
+            Typography::new(0.9, Some(1.3)).unwrap(),
+        );
+        assert!(result.paragraph.overflow);
+        assert_eq!(result.scale, 1.0);
+        assert!((result.paragraph.line_height - 11.7).abs() < 0.0001);
+        assert!(result
+            .paragraph
+            .lines
+            .iter()
+            .flat_map(|l| &l.glyphs)
+            .all(|g| g.size == 9.0));
     }
 
     #[test]
