@@ -1,5 +1,7 @@
 # Codex 接手：Rust PDF 后端修复
 
+> **历史快照，已被后续实施取代。** 下一位 Agent 请读 [2026-09-23 最新交接](handoff-next-agent.md) 和唯一 [task-state.md](task-state.md)。本文件第5节绑定集成已完成；旧模型偏好、dirty清单、待办及字号阶梯不能作为当前指令。
+
 交接日期：2026-09-22。原主控宿主是 Pi；用户要求当前子任务结束、主控验收后转到 Codex。**本文件是交接快照，最新状态仍只维护在 [task-state.md](task-state.md)，不要复制第二份 task state。**
 
 ## 0. 先看结论
