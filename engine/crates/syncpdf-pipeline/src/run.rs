@@ -778,19 +778,20 @@ fn handle_block(
                             page: Some(id.page),
                             message: "字号已降到下限，仍未能放下".into(),
                         }),
-                        TypesetIssue::Overflow { lines } => sink.emit(Event::Issue {
-                            severity: Severity::Warning,
-                            code: "typeset_overflow".into(),
-                            paragraph_id: Some(id.clone()),
-                            page: Some(id.page),
-                            message: format!("译文溢出 {lines} 行"),
-                        }),
+                        // 溢出在下方作为未替换结果处理，不登记为可删除原文的成功段。
+                        TypesetIssue::Overflow { .. } => {}
                         TypesetIssue::Widened { by } => {
                             tracing::debug!(para = %id, by, "排版加宽生效");
                         }
                     }
                 }
-                if result.paragraph.lines.is_empty() {
+                if result.paragraph.overflow {
+                    fallback = Some((
+                        "typeset_overflow",
+                        None,
+                        "保持原文或指定字号时译文无法容纳，请调整译文或块的排版设置".into(),
+                    ));
+                } else if result.paragraph.lines.is_empty() {
                     fallback = Some(("typeset_failed", None, "译文排不出任何行，回退原文".into()));
                 } else {
                     let boxes = result.paragraph.lines.iter().map(|l| l.bbox).collect();
@@ -1270,5 +1271,100 @@ mod tests {
             }),
             "error"
         );
+    }
+
+    #[test]
+    fn oversized_translation_preserves_source_and_reports_fixed_size_failure() {
+        use syncpdf_core::ir::{Align, RegionKind, StyleRun};
+        use syncpdf_core::{Color, PageId, Rect, StyleId};
+        let id = ParagraphId { page: 1, seq: 1 };
+        let para = Paragraph {
+            id: id.clone(),
+            page: PageId(0),
+            region: 0,
+            kind: RegionKind::Text,
+            bbox: Rect::new(0.0, 0.0, 20.0, 12.0),
+            lines: Vec::new(),
+            glyphs: Vec::new(),
+            style_runs: vec![StyleRun {
+                id: StyleId(0),
+                glyph_range: (0, 1),
+                font: 0,
+                size: 10.0,
+                color: Color::default(),
+                bold: false,
+                italic: false,
+            }],
+            atoms: Vec::new(),
+            text: "Source".into(),
+            align: Align::Left,
+            first_indent: 0.0,
+            line_height: 12.0,
+            is_rtl: false,
+            translatable: Translatable::Yes,
+        };
+        let fonts = syncpdf_core::fixtures::fonts_dir().expect("字体夹具必需");
+        let (font_store, font_profile) = load_fonts(&fonts, "zh-CN").unwrap();
+        // 另一段尚未到达：直接观察溢出块是否进入删除/写入队列。
+        let schedule = PageSchedule::new(
+            [id.clone(), ParagraphId { page: 1, seq: 2 }]
+                .into_iter()
+                .map(|id| (1, id)),
+        );
+        let mut state = RunState {
+            doc: lopdf::Document::new(),
+            bound: BTreeMap::new(),
+            typeset_by_page: BTreeMap::new(),
+            page_heights: BTreeMap::new(),
+            pars: [(id.clone(), para)].into_iter().collect(),
+            font_store,
+            font_profile,
+            schedule,
+            output: tmp_path("pdf"),
+            src_chars: 0,
+            tgt_chars: 0,
+            fallbacks: 0,
+            settled: 0,
+            settled_ids: BTreeSet::new(),
+            ready: Vec::new(),
+            revision: 0,
+            font_stats: None,
+        };
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let sink = SharedSink::new(RunRecorder::new(log.clone()));
+        handle_block(
+            &mut state,
+            &sink,
+            syncpdf_translate::TranslatedBlock {
+                id: id.clone(),
+                html: format!("<p id=\"{id}\">{}</p>", "译文".repeat(40)),
+                status: syncpdf_translate::BlockStatus::Ok,
+                from_cache: false,
+            },
+            2,
+        );
+        assert!(
+            state.typeset_by_page.is_empty(),
+            "溢出段不得进入删除原文队列"
+        );
+        assert_eq!(state.fallbacks, 1);
+        assert!(state.settled_ids.contains(&id));
+        assert_eq!(state.revision, 0);
+        assert!(!state.output.exists());
+        let log = log.lock().unwrap();
+        assert!(log.iter().any(|(_, event)| matches!(event,
+            Event::Issue { code, paragraph_id: Some(p), message, .. }
+            if code == "typeset_overflow" && p == &id
+                && message.contains("字号") && message.contains("回退原文"))));
+        assert!(log.iter().any(|(_, event)| matches!(event,
+            Event::Paragraph { paragraph_id, status: ParagraphStatus::Fallback, translated_html: None, .. }
+            if paragraph_id == &id)));
+        assert!(!log.iter().any(|(_, event)| matches!(
+            event,
+            Event::Paragraph {
+                status: ParagraphStatus::Typeset,
+                ..
+            }
+        )));
     }
 }
