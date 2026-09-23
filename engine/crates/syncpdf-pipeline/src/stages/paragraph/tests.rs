@@ -91,7 +91,6 @@ fn preserved_region_glyphs_cannot_enter_a_translatable_paragraph() {
     glyphs.extend(line(20, "Separate prose", 50.0, 600.0, 10.0, 0));
     let ir = page_ir(glyphs, vec![mk_font("F1", false, false)]);
     for kind in [
-        RegionKind::Formula,
         RegionKind::Figure,
         RegionKind::Table,
         RegionKind::Code,
@@ -122,6 +121,56 @@ fn preserved_region_glyphs_cannot_enter_a_translatable_paragraph() {
             );
         }
     }
+}
+
+#[test]
+fn inline_formula_is_owned_once_and_prose_is_translatable() {
+    let mut glyphs = line(0, "Value x then", 50.0, 700.0, 10.0, 0);
+    // Isolate x using measured glyph geometry; protect all other kinds as before.
+    let formula_box = glyphs[6].bbox;
+    glyphs[6].bbox.y0 -= 2.0;
+    let ir = page_ir(glyphs, vec![mk_font("F1", false, false)]);
+    let mut regions = full_region(RegionKind::Text);
+    let mut formula = text_region(1, formula_box, 1);
+    formula.kind = RegionKind::Formula;
+    regions.push(formula);
+    let paragraphs = analyze_page(&ir, &regions);
+    let p = paragraphs
+        .iter()
+        .find(|p| p.kind == RegionKind::Text)
+        .unwrap();
+    assert!(matches!(p.translatable, Translatable::Yes));
+    let atom = p
+        .atoms
+        .iter()
+        .find(|a| a.kind == AtomKind::Formula)
+        .unwrap();
+    assert_eq!(atom.text, "x");
+    assert!(atom.source.is_some());
+    assert_eq!(atom.glyph_range.1 - atom.glyph_range.0, 1);
+}
+
+#[test]
+#[ignore = "requires local source/layout evidence and writes an audit inventory"]
+fn inline_formula_document_inventory() {
+    let root = std::path::PathBuf::from(std::env::var("SYNCPDF_SOURCE_AUDIT").unwrap());
+    let pages: Vec<PageIR> =
+        serde_json::from_slice(&std::fs::read(root.join("source.json")).unwrap()).unwrap();
+    let mut all = Vec::new();
+    for ir in pages {
+        let regions: Vec<Region> = serde_json::from_slice(
+            &std::fs::read(root.join(format!("regions-{}.json", ir.page.0))).unwrap(),
+        )
+        .unwrap();
+        let mut paragraphs = analyze_page(&ir, &regions);
+        crate::stages::source_policy::protect_front_matter(&ir, &regions, &mut paragraphs);
+        all.extend(paragraphs);
+    }
+    std::fs::write(
+        std::env::var("SYNCPDF_INVENTORY").unwrap(),
+        serde_json::to_vec_pretty(&all).unwrap(),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -282,7 +331,7 @@ fn punctuation_at_line_boundary_retains_source_and_gets_word_space() {
 }
 
 #[test]
-fn overlapping_translatable_regions_keep_all_shared_source() {
+fn overlapping_translatable_regions_have_one_source_owner() {
     let g = line(0, "Shared prose", 50.0, 700.0, 10.0, 0);
     let ir = page_ir(g, vec![mk_font("F1", false, false)]);
     let regions = vec![
@@ -290,9 +339,9 @@ fn overlapping_translatable_regions_keep_all_shared_source() {
         text_region(1, Rect::new(45.0, 690.0, 155.0, 720.0), 1),
     ];
     let p = analyze_page(&ir, &regions);
-    assert_eq!(p.len(), 2);
-    assert!(p.iter().all(|p| matches!(&p.translatable, Translatable::No { reason } if reason == "translatable_region_overlap")));
-    assert_eq!(p[0].glyphs, p[1].glyphs);
+    assert_eq!(p.len(), 1);
+    assert!(matches!(p[0].translatable, Translatable::Yes));
+    assert_eq!(p[0].glyphs.len(), ir.glyphs().count());
 }
 
 #[test]
@@ -307,7 +356,7 @@ fn ordinary_region_cannot_translate_rotated_source_glyphs() {
         text_region(1, Rect::new(45.0, 690.0, 155.0, 720.0), 1),
     ];
     let p = analyze_page(&ir, &regions);
-    assert_eq!(p.len(), 2);
+    assert_eq!(p.len(), 1);
     assert!(p.iter().all(|p| matches!(&p.translatable, Translatable::No { reason } if reason == "rotated_source_text")));
 }
 
@@ -442,6 +491,17 @@ fn reference_marker_and_number_unit_become_atoms() {
         paras[0].atoms[0].glyph_range.0 < paras[0].atoms[1].glyph_range.0,
         "原子按位置排序"
     );
+}
+
+#[test]
+fn unit_atom_does_not_capture_the_start_of_a_prose_word() {
+    let ir = page_ir(
+        line(0, "2 shows 250 samples 25 ms 5s 90%", 50.0, 700.0, 10.0, 0),
+        vec![mk_font("F1", false, false)],
+    );
+    let paras = analyze_page(&ir, &full_region(RegionKind::Text));
+    let atoms: Vec<_> = paras[0].atoms.iter().map(|a| a.text.as_str()).collect();
+    assert_eq!(atoms, vec!["25 ms", "5s", "90%"]);
 }
 
 #[test]

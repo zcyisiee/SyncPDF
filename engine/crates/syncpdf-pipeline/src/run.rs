@@ -59,6 +59,8 @@ pub struct RunConfig {
     pub run: Request,
     /// Recompile verified cached blocks; missing blocks remain source.
     pub cache_only: bool,
+    /// Explicit target-only scale/relative leading (source typography by default).
+    pub typography: stages::typeset::Typography,
 }
 
 impl RunConfig {
@@ -74,6 +76,7 @@ impl RunConfig {
             configure,
             run,
             cache_only: false,
+            typography: stages::typeset::Typography::default(),
         })
     }
 
@@ -554,6 +557,8 @@ impl Pipeline {
             doc: main_doc,
             bound,
             frames,
+            targets: BTreeMap::new(),
+            typography: cfg.typography,
             typeset_by_page: BTreeMap::new(),
             page_heights,
             pars: all_paras
@@ -799,6 +804,8 @@ struct RunState {
     /// 段落 id → 段落本体。
     pars: BTreeMap<ParagraphId, Paragraph>,
     frames: BTreeMap<ParagraphId, stages::frame::LayoutFrame>,
+    targets: BTreeMap<ParagraphId, stages::link_text::Target>,
+    typography: stages::typeset::Typography,
     /// 内置字体存储（`Writer` 需要的 `&FontStore`）。
     font_store: FontStore,
     /// 目标语言的默认字体 profile。
@@ -922,15 +929,19 @@ fn handle_block(
     let mut out: Option<(String, Vec<syncpdf_core::Rect>)> = None;
 
     let parsed_result = syncpdf_translate::parse_unit_html(&block.html);
-    let resolved = parsed_result
-        .as_ref()
-        .ok()
-        .and_then(|parsed| stages::text_atoms::resolve(&para, parsed, &state.doc));
-    if !para.atoms.is_empty() && resolved.is_none() {
+    let prepared = parsed_result.as_ref().ok().and_then(|parsed| {
+        let bound = state.bound.get(&(id.page - 1))?;
+        stages::link_text::prepare(&para, &bound.ir, &state.doc, parsed)
+    });
+    if parsed_result.is_ok() && block.status.is_ok() && prepared.is_none() {
         fallback = Some((
-            "atom_source_unplaced",
+            if para.atoms.is_empty() {
+                "link_target_unplaced"
+            } else {
+                "atom_source_unplaced"
+            },
             None,
-            "行内原子源绘制尚未可靠放置，保留原文".into(),
+            "原子或链接目标无法唯一定位，保留原文".into(),
         ));
     } else if !state.frames.contains_key(&id) {
         fallback = Some((
@@ -941,21 +952,23 @@ fn handle_block(
     } else if block.status.is_ok() {
         match parsed_result {
             Ok(_) => {
-                let parsed = resolved.expect("atom-free or verified textual atoms");
-                if parsed.id != id {
+                let target = prepared.expect("verified text and link anchors");
+                if target.parsed.id != id {
                     return Err(PipelineError::Protocol(format!(
                         "译文块身份不一致：{id} / {}",
-                        parsed.id
+                        target.parsed.id
                     )));
                 }
+                state.targets.insert(id.clone(), target.clone());
                 let shaper =
                     StoreShaper::new(&state.font_store, &state.font_profile).with_role(Role::Body);
-                let result = stages::typeset::typeset_with_frame(
+                let result = stages::typeset::typeset_with_typography(
                     &shaper,
-                    &para,
-                    &parsed,
+                    &target.para,
+                    &target.parsed,
                     &Obstacles::default(),
                     state.frames.get(&id),
+                    state.typography,
                 );
                 for issue in &result.issues {
                     match issue {
@@ -979,6 +992,9 @@ fn handle_block(
                         None,
                         "保持原文或指定字号时译文无法容纳，请调整译文或块的排版设置".into(),
                     ));
+                } else if stages::link_text::geometry(&target, &result.paragraph, &shaper).is_none()
+                {
+                    fallback = Some(("link_target_unplaced", None, "链接缺少目标字形几何".into()));
                 } else if result.paragraph.lines.is_empty() {
                     fallback = Some(("typeset_failed", None, "译文排不出任何行，回退原文".into()));
                 } else {
@@ -989,8 +1005,8 @@ fn handle_block(
                         .or_default()
                         .push(result.paragraph);
                     state.src_chars += src_len;
-                    state.tgt_chars += parsed.text().chars().count() as u64;
-                    out = Some((parsed.to_html(), boxes));
+                    state.tgt_chars += target.parsed.text().chars().count() as u64;
+                    out = Some((target.html, boxes));
                 }
             }
             Err(e) => {
@@ -1072,15 +1088,20 @@ fn handle_block(
     Ok(())
 }
 
+mod refinement;
+
 /// 页就绪回写：删除该页成功段落的原字形，然后重放全部就绪页 → 快照 → 事件。
 fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) -> Result<(), PipelineError> {
     if state.ready.contains(&page) {
         return Ok(());
     }
+    refinement::refine_page(state, page, sink);
     let RunState {
         doc,
         bound,
         typeset_by_page,
+        targets,
+        font_profile,
         page_heights,
         pars,
         font_store,
@@ -1107,6 +1128,16 @@ fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) -> Result<
         .collect::<Result<_, _>>()?;
     let mut candidate = doc.clone();
     delete_translated(&mut candidate, b, &paras)?;
+    syncpdf_pdf::source_atom::install(&mut candidate, doc, b, &paras)
+        .map_err(|e| PipelineError::Protocol(format!("公式源绘制保存失败：{e}")))?;
+    let shaper = StoreShaper::new(font_store, font_profile);
+    for laid in typeset_by_page.get(&page).into_iter().flatten() {
+        if let Some(target) = targets.get(&laid.id) {
+            let plans = stages::link_text::geometry(target, laid, &shaper)
+                .ok_or_else(|| PipelineError::Validation("链接缺少目标几何".into()))?;
+            stages::link_text::apply(&mut candidate, &plans)?;
+        }
+    }
     let published: BTreeMap<_, _> = typeset_by_page
         .iter()
         .filter(|(p, _)| **p == page || ready.contains(p))
@@ -1499,9 +1530,14 @@ mod tests {
                 .into_iter()
                 .map(|id| (1, id)),
         );
+        let dir = tmp_path("oversized-fixture");
+        std::fs::create_dir_all(&dir).unwrap();
+        let (fixture, _) = transaction_tests::state(&dir);
         let mut state = RunState {
-            doc: lopdf::Document::new(),
-            bound: BTreeMap::new(),
+            doc: fixture.doc,
+            bound: fixture.bound,
+            targets: BTreeMap::new(),
+            typography: stages::typeset::Typography::default(),
             frames: [(
                 id.clone(),
                 stages::frame::LayoutFrame {

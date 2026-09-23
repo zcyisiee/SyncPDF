@@ -85,6 +85,11 @@ pub enum Inline {
     Text { text: String, style: StyleId },
     /// 原子占位：按原字形几何原地保留，不塑形。width/height 为 pt。
     Atom { id: AtomId, width: f32, height: f32 },
+    /// A source PDF drawing placed with its original baseline and dimensions.
+    SourceAtom {
+        id: AtomId,
+        source: syncpdf_core::ir::SourceAtom,
+    },
     /// 硬换行。
     Br,
 }

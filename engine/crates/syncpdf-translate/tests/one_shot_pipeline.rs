@@ -62,6 +62,7 @@ fn rich_paragraph(id: &str) -> Paragraph {
         mono: false,
     }];
     p.atoms = vec![Atom {
+        source: None,
         id: AtomId(1),
         glyph_range: (14, 20),
         kind: AtomKind::Formula,

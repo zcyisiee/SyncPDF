@@ -121,10 +121,12 @@ job 子进程由 serve 以 `sys.executable -m babeldoc_tools` 起，serve 会把
 
 ## 7. 开发中的 Rust PDF 后端
 
-`engine/` 已包含 Rust PDF 解析、布局、翻译、排版与写回 crate，以及内部 `syncpdf-cli` sidecar。其生产排版路径不调用 LaTeX；模型传输使用 Markdown one-shot，闭合块立即交付排版，HTML只作内部兼容格式。`bdt rust-translate`已提供薄封装用于真实模型MVP试用，记录事件、产物和部分结果；旧 Python/bdt 路径仍按上文运行。Rust 后端尚未通过全篇翻译质量验收，不能将它与现有产品交付能力等同。
+`engine/` 已包含 Rust PDF 解析、布局、翻译、排版与写回 crate，以及内部 `syncpdf-cli` sidecar。其生产排版路径不调用 LaTeX；模型传输使用 Markdown one-shot，闭合块立即交付排版，HTML只作内部兼容格式。`bdt rust-translate`已提供薄封装用于真实模型MVP试用，记录事件、产物和部分结果；旧 Python/bdt 路径仍按上文运行。CCS 3764样本已通过21页正文覆盖、源内容保护及PDF写回验收；通用论文质量、编辑和完整产品能力仍需分别验收。
 
 源处理将 PDFium 几何与 lopdf 内容流操作绑定，source 和公共删除 API 执行替换门禁；已准备段落合成一个页级 PatchSet，私有候选完成共享流隔离后才替换文档。绑定保存页 Contents/源流快照，写前拒绝过期来源。pipeline 页提交在私有候选删除并重放已就绪页，原子保存成功后才更新主文档/revision；最终发布使用通过自检的最后快照。部分回退明确标为未完整完成，CLI 非零退出；编辑修订事务尚未实现。当前契约、不支持范围与已知缺口见 [Rust PDF 后端参考](docs/reference/rust-pdf-backend.md)，阶段验收仍由唯一 task state 维护。
 
-Rust pipeline 在翻译开始前按不可变源页分配 `LayoutFrame`：保留源首行基线，以相邻文字/图形净空限制译文区域。源字号和颜色按run传递，默认fit保持字号与行距；缺frame或容纳失败均保留原文并提示。实际ink、最优断行和整篇质量的集成验收进度见唯一task state。
+Rust pipeline 先按不可变源页分配 `LayoutFrame`，初始化采用源首行基线。页内译块落定后、保存前，对失败段最多3轮同栏垂直净空重算：以已接受译文字形墨迹替换其源障碍，保留其它文字、图片和框线，必要时受控移动首基线；无改善即停，不跨栏、不缩字，也不额外调用布局模型。`--font-scale`/`--line-height`只修改目标字号与字号倍数行距，不改源IR或翻译缓存身份。行间碰撞以整行框初筛、逐字形墨迹复核，容差不放宽；左负侧承通过实际平移起笔纠正，数学Unicode使用内嵌OFL STIX Two Math回退字体。源绘图障碍正确消费`n`并受Form BBox限制，避免把裁剪背景误当巨型障碍。
+
+数字、严格数字引用及精确HTTP(S) URL可按源span回填。链接准备同时覆盖有atom/无atom段：KEEP提供精确锚点；旧缓存未标记引用仅接受唯一匹配，或目的地一致/中英文表节等上下文可消歧的匹配。锚点通过内部样式标记传至目标字形，页候选原子更新Rect/QuadPoints，保留Dest/A；不确定时回退，不全局猜重复数字。行内公式只在完整源归属与独立裁剪证明成立时作为KEEP送译，使用原字体/内容流按原尺寸重放；上下标按正文基线分行，必要时仅增加局部行距。公式内链接随实际位移更新。其它保护内容仍拒绝共享替换，任意公式/链接语义未全面认证。译文不再要求样式片段数量/非空一致或目标语字符比例；块/占位符/数值身份与已知样式引用仍校验。可译区域重叠按较小区域唯一分配源字形，图表外带标签的居中单行子标题按可靠几何补检并使用面板宽度。闭合块正文格式错误进入有界补译，流边界/通道失败仍上抛。CLI分别报告送译前阻断与覆盖缺口。最新CCS实际193块写入/0回退/0源冲突/0覆盖缺口，94个行内公式、保护内容和链接通过保存后核验；修复及历史误报见[问题记录](docs/issues/rust-inline-formula-coverage.md)和唯一task state。
 
 Rust布局使用PP-DocLayout-V3，模型按SHA-256校验并优先采用已锁定bbox导出图；macOS生产路径可自动选择CoreML的CPUAndGPU配置，显式CPU/CoreML覆盖用于诊断。CoreML建会话或推理失败时，Auto记录原因后改用CPU；严格CoreML不静默回退。模型编译缓存按权重哈希隔离，区域缓存包含模型哈希、provider与检测参数；GPU是否真正参与需以ORT profile和Apple计算计划验证。资产与运行选项见[模型说明](engine/models/README.md)。

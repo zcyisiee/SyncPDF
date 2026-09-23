@@ -294,9 +294,18 @@ async fn up_vns_first_three_pages_preserve_unfit_blocks() {
         }
         // 不能依赖某一页永远全回退：排版修复后，同页可以同时有成功和失败块。
         // 对每个回退框逐字核对原始可见字形仍位于原坐标。
-        let fallback_boxes: Vec<_> = events
+        // Bounded page refinement may recover an initial layout fallback before
+        // PageReady. Only the latest paragraph state describes saved source ink.
+        let final_paragraphs: std::collections::BTreeMap<_, _> = events
             .iter()
             .filter_map(|(_, e)| match e {
+                Event::Paragraph { paragraph_id, .. } => Some((paragraph_id, e)),
+                _ => None,
+            })
+            .collect();
+        let fallback_boxes: Vec<_> = final_paragraphs
+            .values()
+            .filter_map(|e| match e {
                 Event::Paragraph {
                     page: p,
                     status: syncpdf_core::ir::ParagraphStatus::Fallback,

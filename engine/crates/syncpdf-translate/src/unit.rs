@@ -89,7 +89,7 @@ impl ParsedUnit {
         n
     }
 
-    /// 每个 span 的纯文本（顺序即出现顺序），供 `empty_style` 判定。
+    /// 每个 span 的纯文本（顺序即出现顺序），用于样式内容检查/展示。
     pub fn style_texts(&self) -> Vec<(StyleId, String)> {
         let mut out = Vec::new();
         collect_style_texts(&self.segments, &mut out);
@@ -680,6 +680,7 @@ pub(crate) mod tests {
         // 字形 1..3 是样式 1；字形 3..5 是一个原子。
         p.style_runs = vec![run(1, (1, 3))];
         p.atoms = vec![Atom {
+            source: None,
             id: AtomId(1),
             glyph_range: (3, 5),
             kind: AtomKind::Formula,
@@ -732,6 +733,7 @@ pub(crate) mod tests {
         let mut p = paragraph_of("P01-005", &["2", "5", "m", "s", "X"]);
         p.text = "25 ms X".into();
         p.atoms = vec![Atom {
+            source: None,
             id: AtomId(1),
             glyph_range: (0, 4),
             kind: AtomKind::Number,

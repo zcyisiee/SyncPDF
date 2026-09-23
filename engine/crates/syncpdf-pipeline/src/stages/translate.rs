@@ -437,6 +437,7 @@ mod tests {
     fn paragraph_with_atoms_builds_units_with_keep_tokens() {
         let mut p = paragraph("P01-001", "see {{KEEP_1}} here");
         p.atoms = vec![Atom {
+            source: None,
             id: syncpdf_core::AtomId(1),
             glyph_range: (4, 5),
             kind: AtomKind::Formula,

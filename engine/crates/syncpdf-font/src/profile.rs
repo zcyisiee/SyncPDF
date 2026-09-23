@@ -169,6 +169,7 @@ pub fn default_profile(store: &FontStore, target_lang: &str) -> FontProfile {
         push_fb(store.find_by_family("sans-kr", 400, false), &mut fallbacks);
     }
     push_fb(store.find_by_family("sans", 400, false), &mut fallbacks);
+    push_fb(store.find_by_family("math", 400, false), &mut fallbacks);
 
     // 各角色链。
     let chain_for = |base: Option<FontId>, weight_base: u16| -> Chain {

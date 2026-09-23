@@ -115,6 +115,7 @@ pub fn apply_coverage_fallback(
     limit: f32,
 ) -> syncpdf_layout::CoverageReport {
     super::ruled_code::refine_ruled_code_sidebars(regions, page_ir);
+    recover_subcaptions(regions, page_ir);
     let glyph_boxes: Vec<(Rect, bool)> = page_ir
         .glyphs()
         .filter(|g| !g.flags.invisible && !g.flags.outside_clip)
@@ -128,6 +129,91 @@ pub fn apply_coverage_fallback(
     repair_boundary_lines(regions, &glyph_boxes);
     let repaired: Vec<Rect> = regions.iter().map(|r| r.bbox).collect();
     coverage(&glyph_boxes, &repaired)
+}
+
+/// A short labeled line centered immediately above/below a detected table/figure
+/// is a subcaption. Recover missed lines and give existing ones their panel width.
+fn recover_subcaptions(regions: &mut Vec<Region>, ir: &PageIR) {
+    use syncpdf_core::ir::RegionKind;
+    let glyphs: Vec<_> = ir
+        .glyphs()
+        .filter(|g| !g.flags.invisible && !g.flags.outside_clip)
+        .collect();
+    let missed: Vec<_> = glyphs
+        .iter()
+        .filter(|g| !regions.iter().any(|r| r.bbox.contains(g.bbox.center())))
+        .map(|g| (g.id, g.bbox))
+        .collect();
+    let mut candidates: Vec<(Option<usize>, Vec<syncpdf_core::GlyphId>)> = regions
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.kind == RegionKind::Caption)
+        .map(|(i, r)| {
+            (
+                Some(i),
+                glyphs
+                    .iter()
+                    .filter(|g| r.bbox.contains(g.bbox.center()))
+                    .map(|g| g.id)
+                    .collect(),
+            )
+        })
+        .collect();
+    candidates.extend(
+        syncpdf_layout::group_lines(&missed, &ir.crop_box)
+            .into_iter()
+            .map(|ids| (None, ids)),
+    );
+    let label = regex::Regex::new(r"^\([a-zA-Z]\).*[A-Za-z]{2}").expect("subcaption pattern");
+    for (index, ids) in candidates {
+        let mut row: Vec<_> = glyphs
+            .iter()
+            .filter(|g| ids.contains(&g.id))
+            .copied()
+            .collect();
+        row.sort_by(|a, b| a.bbox.x0.total_cmp(&b.bbox.x0));
+        let Some(first) = row.first() else { continue };
+        let bbox = row.iter().fold(first.bbox, |b, g| b.union(&g.bbox));
+        let text: String = row.iter().flat_map(|g| g.unicode.iter()).collect();
+        if !label.is_match(&text) || bbox.height() > first.size * 1.8 {
+            continue;
+        }
+        let panel = regions
+            .iter()
+            .filter(|r| matches!(r.kind, RegionKind::Table | RegionKind::Figure))
+            .filter(|r| {
+                r.bbox.x0 <= bbox.x0
+                    && bbox.x1 <= r.bbox.x1
+                    && (r.bbox.center().x - bbox.center().x).abs() < r.bbox.width() * 0.15
+            })
+            .filter_map(|r| {
+                let gap = if r.bbox.y0 >= bbox.y1 {
+                    r.bbox.y0 - bbox.y1
+                } else if bbox.y0 >= r.bbox.y1 {
+                    bbox.y0 - r.bbox.y1
+                } else {
+                    return None;
+                };
+                (gap < first.size * 2.0).then_some((gap, r.bbox))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, b)| b);
+        let Some(panel) = panel else { continue };
+        let frame = Rect::new(panel.x0, bbox.y0, panel.x1, bbox.y1);
+        if let Some(i) = index {
+            regions[i].bbox = frame;
+        } else {
+            let next = regions.iter().map(|r| r.index).max().unwrap_or(0) + 1;
+            regions.push(Region {
+                page: ir.page,
+                index: next,
+                kind: RegionKind::Caption,
+                bbox: frame,
+                score: 1.0,
+                order: next,
+            });
+        }
+    }
 }
 
 fn repair_boundary_lines(regions: &mut Vec<Region>, glyphs: &[(Rect, bool)]) {
@@ -515,6 +601,58 @@ mod tests {
         assert_eq!(report.uncovered, 2);
         assert!((report.ratio - 1.0).abs() < 1e-6);
         assert_eq!(regions.len(), 1, "真正遗漏不能用大框掩盖");
+    }
+
+    #[test]
+    fn recover_only_labeled_subcaption_outside_a_detected_panel() {
+        let mut glyphs: Vec<_> = "(a) Two tasks"
+            .chars()
+            .enumerate()
+            .map(|(i, c)| {
+                mk_glyph(
+                    i as u16,
+                    &c.to_string(),
+                    120.0 + i as f32 * 5.0,
+                    410.0,
+                    5.0,
+                    8.0,
+                    GlyphFlags::default(),
+                )
+            })
+            .collect();
+        glyphs.push(mk_glyph(
+            99,
+            "PlotLabel",
+            130.0,
+            380.0,
+            45.0,
+            8.0,
+            GlyphFlags::default(),
+        ));
+        glyphs.push(mk_glyph(
+            100,
+            "Author",
+            120.0,
+            520.0,
+            45.0,
+            8.0,
+            GlyphFlags::default(),
+        ));
+        let ir = page_ir(glyphs);
+        let mut panel = region(0, Rect::new(100.0, 300.0, 200.0, 400.0));
+        panel.kind = RegionKind::Figure;
+        let mut regions = vec![panel.clone()];
+        recover_subcaptions(&mut regions, &ir);
+        assert_eq!(regions.len(), 2);
+        assert_eq!(regions[0], panel);
+        assert_eq!(regions[1].kind, RegionKind::Caption);
+        assert_eq!(regions[1].bbox, Rect::new(100.0, 410.0, 200.0, 418.0));
+        assert!(!regions[1]
+            .bbox
+            .contains(syncpdf_core::Point::new(140.0, 384.0)));
+        assert!(!regions[1]
+            .bbox
+            .contains(syncpdf_core::Point::new(140.0, 524.0)));
     }
 
     #[test]

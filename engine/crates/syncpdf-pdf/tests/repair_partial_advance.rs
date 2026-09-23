@@ -242,3 +242,147 @@ fn graphics_restore_crosses_page_contents_stream_boundaries() {
     ]);
     assert_survivors_document(source, &['B', ' '], "AB CD");
 }
+
+#[test]
+fn source_formula_moves_once_without_copying_nested_figure_text() {
+    use syncpdf_core::ir::{
+        Align, Atom, AtomKind, LineBox, Paragraph, PlacedAtom, RegionKind, SourceAtom,
+        Translatable, TypesetParagraph,
+    };
+    use syncpdf_core::{AtomId, Color, Rect};
+    let mut original = source_pdf(b"BT /F1 12 Tf 1 0 0 1 40 200 Tm (AB) Tj ET /Plot Do");
+    let page = original.get_pages()[&1];
+    let res = original
+        .get_dictionary(page)
+        .unwrap()
+        .get(b"Resources")
+        .unwrap()
+        .as_dict()
+        .unwrap()
+        .clone();
+    let inner=original.add_object(Stream::new(dictionary! {
+        "Type"=>"XObject", "Subtype"=>"Form", "BBox"=>vec![0.into(),0.into(),400.into(),300.into()],
+        "Resources"=>res.clone(),
+    },b"BT /F1 12 Tf 1 0 0 1 200 100 Tm (C) Tj ET 190 95 30 1 re f".to_vec()));
+    let outer=original.add_object(Stream::new(dictionary! {
+        "Type"=>"XObject", "Subtype"=>"Form", "BBox"=>vec![0.into(),0.into(),400.into(),300.into()],
+        "Resources"=>dictionary!{"XObject"=>dictionary!{"Inner"=>inner}},
+    },b"/Inner Do".to_vec()));
+    original
+        .get_dictionary_mut(page)
+        .unwrap()
+        .get_mut(b"Resources")
+        .unwrap()
+        .as_dict_mut()
+        .unwrap()
+        .set("XObject", dictionary! {"Plot"=>outer});
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("source.pdf");
+    original.save(&path).unwrap();
+    let worker = PdfiumWorker::spawn().unwrap();
+    let pdf = worker.open(&path).unwrap();
+    let before = geometry(&worker, pdf);
+    let bound = bind_page(&worker, pdf, &original, 1).unwrap();
+    let a = bound
+        .ir
+        .glyphs()
+        .find(|g| g.unicode.as_slice() == ['A'])
+        .unwrap();
+    let source = SourceAtom {
+        bbox: a.bbox,
+        baseline: a.matrix.f,
+    };
+    let para = Paragraph {
+        id: "P01-001".parse().unwrap(),
+        page: bound.ir.page,
+        region: 0,
+        kind: RegionKind::Text,
+        bbox: a.bbox,
+        lines: vec![],
+        glyphs: vec![a.id],
+        text_spans: vec![],
+        style_runs: vec![],
+        atoms: vec![Atom {
+            id: AtomId(1),
+            glyph_range: (0, 1),
+            kind: AtomKind::Formula,
+            text: "A".into(),
+            source: Some(source),
+        }],
+        text: "A".into(),
+        align: Align::Left,
+        first_indent: 0.0,
+        line_height: 12.0,
+        is_rtl: false,
+        translatable: Translatable::Yes,
+    };
+    let mut candidate = original.clone();
+    let mut patch = PatchSet::new();
+    patch.delete_glyphs(&bound, &[a.id]).unwrap();
+    patch.apply(&mut candidate, 1).unwrap();
+    syncpdf_pdf::source_atom::install(&mut candidate, &original, &bound, &[&para]).unwrap();
+    let moved = Rect::new(
+        a.bbox.x0 + 40.0,
+        a.bbox.y0 - 30.0,
+        a.bbox.x1 + 40.0,
+        a.bbox.y1 - 30.0,
+    );
+    let laid = TypesetParagraph {
+        id: para.id,
+        lines: vec![LineBox {
+            bbox: moved,
+            baseline_y: 170.0,
+            glyphs: vec![],
+            kept_atoms: vec![AtomId(1)],
+            placed_atoms: vec![PlacedAtom {
+                id: AtomId(1),
+                source: a.bbox,
+                bbox: moved,
+            }],
+        }],
+        font_scale: 1.0,
+        line_height: 12.0,
+        color: Color::BLACK,
+        used_bbox: moved,
+        overflow: false,
+    };
+    let fonts =
+        syncpdf_font::FontStore::load_builtin(&syncpdf_core::fixtures::fonts_dir().unwrap())
+            .unwrap();
+    let mut writer = syncpdf_pdf::Writer::new(&fonts);
+    writer
+        .write_paragraphs(&mut candidate, 1, &[laid], 300.0)
+        .unwrap();
+    writer.finalize(&mut candidate).unwrap();
+    let output = dir.path().join("output.pdf");
+    candidate.save(&output).unwrap();
+    let result = worker.open(&output).unwrap();
+    let after = geometry(&worker, result);
+    assert_eq!(
+        after.len(),
+        before.len(),
+        "formula copied once; figure text never duplicated"
+    );
+    for old in before {
+        let new = after.iter().find(|g| g.text == old.text).unwrap();
+        let (dx, dy) = if old.text == "A" {
+            (40.0, -30.0)
+        } else {
+            (0.0, 0.0)
+        };
+        assert!((new.x - old.x - dx).abs() < 0.03);
+        assert!((new.y - old.y - dy).abs() < 0.03);
+        assert!((new.size - old.size).abs() < 0.03);
+    }
+    assert_eq!(
+        original
+            .get_object(inner)
+            .unwrap()
+            .as_stream()
+            .unwrap()
+            .content,
+        b"BT /F1 12 Tf 1 0 0 1 200 100 Tm (C) Tj ET 190 95 30 1 re f"
+    );
+    worker.close(pdf);
+    worker.close(result);
+}

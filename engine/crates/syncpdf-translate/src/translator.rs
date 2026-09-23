@@ -440,35 +440,51 @@ impl<T: Translator> Engine<T> {
         let mut stream = MarkdownStream::new();
         let mut transport_error = None;
         let mut cache_puts: Vec<(String, String)> = Vec::new();
-        let mut consume =
-            |results: Vec<Result<crate::unit::ParsedUnit, crate::markdown::MarkdownError>>| {
-                for result in results {
-                    if transport_error.is_some() {
-                        break;
-                    }
-                    match result {
-                        Ok(parsed) => self.settle(
-                            vec![RawBlock {
-                                id: parsed.id.clone(),
-                                html: parsed.to_html(),
-                            }],
-                            spec,
-                            ctx,
-                            by_id,
-                            known,
-                            &mut *done,
-                            &mut *extra_ids,
-                            &mut *last_violations,
-                            &mut *st,
-                            &mut *on_block,
-                            &mut cache_puts,
-                        ),
-                        Err(error) => {
-                            transport_error = Some(TranslateError::Transport(error.to_string()))
+        let mut consume = |results: Vec<
+            Result<crate::unit::ParsedUnit, crate::markdown::MarkdownError>,
+        >| {
+            for result in results {
+                if transport_error.is_some() {
+                    break;
+                }
+                match result {
+                    Ok(parsed) => self.settle(
+                        vec![RawBlock {
+                            id: parsed.id.clone(),
+                            html: parsed.to_html(),
+                        }],
+                        spec,
+                        ctx,
+                        by_id,
+                        known,
+                        &mut *done,
+                        &mut *extra_ids,
+                        &mut *last_violations,
+                        &mut *st,
+                        &mut *on_block,
+                        &mut cache_puts,
+                    ),
+                    Err(error) => {
+                        if let Some(id) = error.block_id {
+                            // A closed block with bad body syntax can use the same
+                            // bounded retry as a block that failed validation.
+                            // Keep delivering later valid blocks immediately.
+                            if !known.contains(&id) {
+                                extra_ids.push(id);
+                                bump(st, Violation::UnknownParagraph);
+                            } else if done.contains_key(&id) {
+                                bump(st, Violation::DuplicatedTextSlots);
+                            } else {
+                                bump(st, Violation::InvalidMarkup);
+                                last_violations.insert(id, vec![Violation::InvalidMarkup]);
+                            }
+                        } else {
+                            transport_error = Some(TranslateError::Transport(error.to_string()));
                         }
                     }
                 }
-            };
+            }
+        };
         let sent = self
             .translator
             .translate(prompt, &mut |d| consume(stream.push(d)))

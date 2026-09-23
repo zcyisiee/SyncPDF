@@ -40,6 +40,7 @@ enum Item {
         end: usize,
     },
     Atom {
+        source: Option<syncpdf_core::ir::SourceAtom>,
         id: AtomId,
         width: f32,
         height: f32,
@@ -106,9 +107,22 @@ fn segments(shaper: &dyn Shaper, input: &LayoutInput<'_>, inlines: &[Inline]) ->
                 let start = seg.text.len();
                 seg.text.push('\u{FFFC}');
                 seg.items.push(Item::Atom {
+                    source: None,
                     id: *id,
                     width: *width,
                     height: *height,
+                    start,
+                    end: seg.text.len(),
+                });
+            }
+            Inline::SourceAtom { id, source } => {
+                let start = seg.text.len();
+                seg.text.push('\u{FFFC}');
+                seg.items.push(Item::Atom {
+                    id: *id,
+                    source: Some(*source),
+                    width: source.bbox.width(),
+                    height: source.bbox.height(),
                     start,
                     end: seg.text.len(),
                 });
@@ -474,6 +488,16 @@ fn ink(shaper: &dyn Shaper, g: &PlacedGlyph, advance: f32) -> Rect {
     Rect::new(g.x + b.x0, g.y + b.y0, g.x + b.x1, g.y + b.y1)
 }
 
+struct PlacedLine {
+    line: LineBox,
+    /// Non-whitespace glyph ink (or conservative metrics) and atom rectangles.
+    ink: Vec<Rect>,
+}
+
+fn intersects(a: Rect, b: Rect) -> bool {
+    a.x1.min(b.x1) - a.x0.max(b.x0) > 0.01 && a.y1.min(b.y1) - a.y0.max(b.y0) > 0.01
+}
+
 fn place(
     shaper: &dyn Shaper,
     input: &LayoutInput<'_>,
@@ -481,7 +505,7 @@ fn place(
     bbox: &Rect,
     baseline: f32,
     scale: f32,
-) -> LineBox {
+) -> PlacedLine {
     let items = visual_items(row, input.is_rtl);
     let indent = if row.first {
         input.first_indent.max(0.0)
@@ -499,6 +523,8 @@ fn place(
     let mut x = bbox.x0 + indent + dx;
     let mut glyphs = Vec::new();
     let mut atoms = Vec::new();
+    let mut placed_atoms = Vec::new();
+    let mut ink_boxes = Vec::new();
     let mut bounds: Option<Rect> = None;
     let adjust = input.align == Align::Justify && !row.last;
 
@@ -527,6 +553,7 @@ fn place(
                     first = false;
                     if !text.chars().all(char::is_whitespace) {
                         let rect = ink(shaper, &placed, g.x_advance);
+                        ink_boxes.push(rect);
                         bounds = Some(bounds.map_or(rect, |b| b.union(&rect)));
                     }
                     glyphs.push(placed);
@@ -545,25 +572,59 @@ fn place(
                 }
             }
             Item::Atom {
-                id, width, height, ..
+                id,
+                width,
+                height,
+                source,
+                ..
             } => {
-                let rect = Rect::new(x, baseline, x + *width, baseline + *height);
+                let bottom = baseline + source.map_or(0.0, |s| s.bbox.y0 - s.baseline);
+                let rect = Rect::new(x, bottom, x + *width, bottom + *height);
+                if let Some(source) = source {
+                    placed_atoms.push(syncpdf_core::ir::PlacedAtom {
+                        id: *id,
+                        source: source.bbox,
+                        bbox: rect,
+                    });
+                }
+                ink_boxes.push(rect);
                 bounds = Some(bounds.map_or(rect, |b| b.union(&rect)));
                 atoms.push(*id);
                 x += *width;
             }
         }
     }
-    LineBox {
-        bbox: bounds.unwrap_or(Rect::new(
-            bbox.x0 + indent,
-            baseline,
-            bbox.x0 + indent,
-            baseline,
-        )),
-        baseline_y: baseline,
-        glyphs,
-        kept_atoms: atoms,
+    // Negative side bearings are ink, not overflow: place the ink origin inside
+    // the requested left edge. Never shrink, clip, or relax collision tolerances.
+    if matches!(input.align, Align::Left | Align::Justify) && atoms.is_empty() {
+        if let Some(b) = bounds {
+            let dx = (bbox.x0 + indent - b.x0).max(0.0);
+            if dx > 0.0 && b.x1 + dx <= bbox.x1 {
+                for g in &mut glyphs {
+                    g.x += dx;
+                }
+                for ink in &mut ink_boxes {
+                    ink.x0 += dx;
+                    ink.x1 += dx;
+                }
+                bounds = Some(Rect::new(b.x0 + dx, b.y0, b.x1 + dx, b.y1));
+            }
+        }
+    }
+    PlacedLine {
+        line: LineBox {
+            bbox: bounds.unwrap_or(Rect::new(
+                bbox.x0 + indent,
+                baseline,
+                bbox.x0 + indent,
+                baseline,
+            )),
+            baseline_y: baseline,
+            glyphs,
+            kept_atoms: atoms,
+            placed_atoms,
+        },
+        ink: ink_boxes,
     }
 }
 
@@ -617,15 +678,15 @@ pub(crate) fn layout(
         .get_or_init(|| segments(shaper, input, inlines));
     let (rows, failed) = rows(shaper, input, base, bbox.width(), scale);
     let line_h = input.font_size * scale * line_height_mult;
-    let mut lines = Vec::with_capacity(rows.len());
+    let mut lines: Vec<PlacedLine> = Vec::with_capacity(rows.len());
     let mut used: Option<Rect> = None;
     let mut overflow = !valid || failed || (rows.is_empty() && !inlines.is_empty());
     let first_top = rows
         .first()
-        .map(|row| place(shaper, input, row, bbox, 0.0, scale).bbox.y1)
+        .map(|row| place(shaper, input, row, bbox, 0.0, scale).line.bbox.y1)
         .unwrap_or(0.0);
     let first_baseline = input.first_baseline.unwrap_or(bbox.y1 - first_top);
-    for (i, row) in rows.iter().enumerate() {
+    for row in &rows {
         let advance: f32 = row.items.iter().map(Item::width).sum::<f32>()
             + row.hyphen.as_ref().map_or(0.0, Item::width);
         if advance
@@ -640,9 +701,30 @@ pub(crate) fn layout(
         {
             overflow = true;
         }
-        let baseline = first_baseline - i as f32 * line_h;
-        let line = place(shaper, input, row, bbox, baseline, scale);
-        let b = line.bbox;
+        let mut baseline = lines
+            .last()
+            .map_or(first_baseline, |l| l.line.baseline_y - line_h);
+        let mut line = place(shaper, input, row, bbox, baseline, scale);
+        // Source formulas retain their full superscript/subscript ink. The requested
+        // leading is a minimum: spend only the extra space their actual ink needs.
+        let extra = lines
+            .iter()
+            .filter(|previous| {
+                !previous.line.placed_atoms.is_empty() || !line.line.placed_atoms.is_empty()
+            })
+            .flat_map(|previous| {
+                previous.ink.iter().flat_map(|a| {
+                    line.ink
+                        .iter()
+                        .filter_map(move |b| (intersects(*a, *b)).then_some(b.y1 - a.y0 + 0.02))
+                })
+            })
+            .fold(0.0_f32, f32::max);
+        if extra > 0.0 {
+            baseline -= extra;
+            line = place(shaper, input, row, bbox, baseline, scale);
+        }
+        let b = line.line.bbox;
         if b.x0 < bbox.x0 - 0.01
             || b.x1 > bbox.x1 + 0.01
             || b.y0 < bbox.y0 - 0.01
@@ -650,14 +732,17 @@ pub(crate) fn layout(
         {
             overflow = true;
         }
-        if let Some(previous) = lines.last().map(|l: &LineBox| l.bbox) {
-            if previous.x0 < b.x1 - 0.01
-                && previous.x1 > b.x0 + 0.01
-                && previous.y0 < b.y1 - 0.01
-                && previous.y1 > b.y0 + 0.01
-            {
-                overflow = true;
-            }
+        // Union boxes may overlap when a descender and an ascender lie at
+        // different x positions. Only actual glyph/atom rectangles prove a
+        // collision; keep the same tolerance, size, baselines and line spacing.
+        if lines.iter().any(|previous| {
+            intersects(previous.line.bbox, b)
+                && previous
+                    .ink
+                    .iter()
+                    .any(|a| line.ink.iter().any(|b| intersects(*a, *b)))
+        }) {
+            overflow = true;
         }
         used = Some(used.map_or(b, |u| u.union(&b)));
         lines.push(line);
@@ -709,7 +794,7 @@ pub(crate) fn layout(
     LayoutOut {
         paragraph: TypesetParagraph {
             id: input.id.clone(),
-            lines,
+            lines: lines.into_iter().map(|placed| placed.line).collect(),
             font_scale: scale,
             line_height: line_h,
             color: input.color,

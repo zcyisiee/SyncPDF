@@ -9,6 +9,7 @@ pub mod bind;
 pub mod embed;
 pub mod links;
 pub mod patch;
+pub mod source_atom;
 pub mod validate;
 pub mod writer;
 

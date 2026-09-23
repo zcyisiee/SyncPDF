@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import signal
 import sqlite3
@@ -47,8 +48,13 @@ def _translate_pdf(
     layout_device: str,
     engine: str | None,
     cached_from: str | None = None,
+    font_scale: float = 1.0,
+    line_height: float | None = None,
 ) -> dict:
     """Run the Rust CLI once, retaining its events and incomplete-result semantics."""
+    for name, value in (("font_scale", font_scale), ("line_height", line_height)):
+        if value is not None and (not math.isfinite(value) or value <= 0):
+            return _error("invalid_typography", f"{name} 必须是有限正数倍数")
     source = Path(pdf).expanduser().resolve()
     destination = Path(workdir).expanduser().resolve()
     binary = Path(engine).expanduser().resolve() if engine else _ENGINE
@@ -96,6 +102,10 @@ def _translate_pdf(
         command.append("--cache-only")
     if pages is not None:
         command.extend(("--pages", pages))
+    if font_scale != 1.0:
+        command.extend(("--font-scale", str(font_scale)))
+    if line_height is not None:
+        command.extend(("--line-height", str(line_height)))
     child_env = os.environ.copy()
     child_env["SYNCPDF_LAYOUT_DEVICE"] = layout_device
     child_env["TMPDIR"] = str(temporary)
@@ -103,6 +113,8 @@ def _translate_pdf(
     status_by_id: dict[str, str] = {}
     paragraph_pages: dict[str, int] = {}
     ready_pages: set[int] = set()
+    blocked_ids: set[str] = set()
+    coverage_gap_pages: set[int] = set()
     finished: bool | None = None
     event_error = False
     exit_code: int | None = None
@@ -151,6 +163,13 @@ def _translate_pdf(
                                     paragraph_pages[paragraph_id] = event["page"]
                         elif kind == "page_ready" and isinstance(event.get("page"), int):
                             ready_pages.add(event["page"])
+                        elif kind == "issue":
+                            if event.get("code") in {
+                                "protected_source_overlap", "translatable_region_overlap", "rotated_source_text",
+                            } and isinstance(event.get("paragraph_id"), str):
+                                blocked_ids.add(event["paragraph_id"])
+                            if event.get("code") == "coverage_gap" and isinstance(event.get("page"), int):
+                                coverage_gap_pages.add(event["page"])
                         elif kind == "run_finished":
                             finished = event.get("ok") if isinstance(event.get("ok"), bool) else None
                 except (KeyboardInterrupt, OSError):
@@ -171,12 +190,16 @@ def _translate_pdf(
         status == "typeset" and paragraph_pages.get(pid) in ready_pages
         for pid, status in status_by_id.items()
     )
-    unsuccessful = sum(status != "not_replaced" for status in status_by_id.values()) - successful
+    blocked = sum(status_by_id.get(pid) == "not_replaced" for pid in blocked_ids)
+    unsuccessful = sum(status != "not_replaced" for status in status_by_id.values()) - successful + blocked
     data = {
+        "typography": {"font_scale": font_scale, "line_height": line_height},
         "successful_blocks": successful,
         "typeset_blocks": prepared,
         "saved_pages": len(ready_pages),
         "unsuccessful_blocks": unsuccessful,
+        "blocked_before_translation": blocked,
+        "coverage_gap_pages": sorted(coverage_gap_pages),
         "not_replaced_blocks": sum(status == "not_replaced" for status in status_by_id.values()),
         "engine_exit_code": exit_code,
         "run_finished_ok": finished,
@@ -189,7 +212,7 @@ def _translate_pdf(
         code, message = "engine_events_invalid", "Rust 引擎输出含无效事件；详见 events.jsonl"
     elif finished is None:
         code, message = "engine_result_missing", "Rust 引擎未发出有效 run_finished 事件"
-    elif not finished or exit_code != 0 or unsuccessful:
+    elif not finished or exit_code != 0 or unsuccessful or coverage_gap_pages:
         code, message = "engine_incomplete", "Rust 引擎未完整翻译；部分结果和事件已保留"
     elif not output.is_file():
         code, message = "output_missing", "Rust 引擎报告成功，但译文 PDF 不存在"

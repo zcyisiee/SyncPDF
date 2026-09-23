@@ -1110,6 +1110,9 @@ fn walk_stream(
                     path_pts.push(Point::new((x + w) as f32, (y + h) as f32));
                 }
             }
+            // End-path without painting also consumes clipping paths (W/W* n).
+            // Otherwise the next painted path inherits a phantom page-sized bbox.
+            "n" => path_pts.clear(),
             "f" | "F" | "f*" | "B" | "B*" | "b" | "b*" | "S" | "s" => {
                 if !path_pts.is_empty() {
                     let bbox = points_bbox(&path_pts, &ctx.ctm);
@@ -1233,6 +1236,8 @@ fn handle_do(
         let content = s
             .decompressed_content()
             .unwrap_or_else(|_| s.content.clone());
+        let item_start = out.items.len();
+        let clip = form_clip(fdict, &child.ctm);
         walk_stream(
             doc,
             target_id,
@@ -1243,8 +1248,58 @@ fn handle_do(
             &mut 0, // Each child Form starts a new object-list numbering scope.
             out,
         );
+        // A Form implicitly clips all paint to its transformed BBox. Its content
+        // may deliberately draw a much larger background under that clip.
+        if let Some(clip) = clip {
+            let children = out.items.split_off(item_start);
+            out.items.extend(
+                children
+                    .into_iter()
+                    .filter_map(|item| clip_paint(item, clip)),
+            );
+        }
     }
     out.items.push(DisplayItem::FormEnd);
+}
+
+fn form_clip(dict: &Dictionary, ctm: &Matrix) -> Option<Rect> {
+    let a = dict.get(b"BBox").ok()?.as_array().ok()?;
+    if a.len() != 4 {
+        return None;
+    }
+    let v: Vec<_> = a.iter().map(|n| n.as_float().ok()).collect::<Option<_>>()?;
+    if v.iter().any(|n| !n.is_finite()) {
+        return None;
+    }
+    Some(points_bbox(
+        &[
+            Point::new(v[0], v[1]),
+            Point::new(v[2], v[1]),
+            Point::new(v[0], v[3]),
+            Point::new(v[2], v[3]),
+        ],
+        ctm,
+    ))
+}
+fn clip_paint(mut item: DisplayItem, clip: Rect) -> Option<DisplayItem> {
+    let bbox = match &mut item {
+        DisplayItem::Path { bbox, .. }
+        | DisplayItem::Image { bbox }
+        | DisplayItem::InlineImage { bbox } => bbox,
+        _ => return Some(item),
+    };
+    let (x0, y0, x1, y1) = (
+        bbox.x0.max(clip.x0),
+        bbox.y0.max(clip.y0),
+        bbox.x1.min(clip.x1),
+        bbox.y1.min(clip.y1),
+    );
+    // Rect::new normalizes reversed endpoints; test disjointness BEFORE it.
+    if x1 < x0 || y1 < y0 {
+        return None;
+    }
+    *bbox = Rect::new(x0, y0, x1, y1);
+    Some(item)
 }
 
 /// Form 的 `/Resources`（缺省回退到空字典）。
@@ -2250,6 +2305,54 @@ fn collect_form_fonts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn form_bbox_limits_paint_even_when_content_draws_beyond_it() {
+        let clip = form_clip(
+            &lopdf::dictionary! { "BBox" => vec![0.into(),0.into(),100.into(),200.into()] },
+            &Matrix::translate(300.0, 500.0),
+        )
+        .unwrap();
+        let item = DisplayItem::Path {
+            bbox: Rect::new(0.0, 0.0, 1200.0, 800.0),
+            is_fill: true,
+            is_stroke: false,
+        };
+        assert!(
+            matches!(clip_paint(item,clip),Some(DisplayItem::Path{bbox,..}) if bbox==Rect::new(300.0,500.0,400.0,700.0))
+        );
+        assert!(clip_paint(
+            DisplayItem::Image {
+                bbox: Rect::new(0.0, 0.0, 20.0, 20.0)
+            },
+            clip
+        )
+        .is_none());
+    }
+    #[test]
+    fn clipping_end_path_is_not_painted_by_next_shape() {
+        let mut out = WalkOut {
+            flat_text: vec![],
+            items: vec![],
+            form_dos: vec![],
+            issues: vec![],
+            stream_bytes: BTreeMap::new(),
+        };
+        walk_stream(
+            &Document::new(),
+            (1, 0),
+            b"0 0 1200 800 re W n 400 500 10 20 re f",
+            &mut Ctx::new(Dictionary::new()),
+            &[],
+            0,
+            &mut 0,
+            &mut out,
+        );
+        assert_eq!(out.items.len(), 1);
+        assert!(
+            matches!(out.items[0], DisplayItem::Path { bbox, is_fill: true, is_stroke: false } if bbox == Rect::new(400.0,500.0,410.0,520.0))
+        );
+    }
 
     fn empty_mapping_steps(source: &[u32], observed: &[(Option<&str>, f32)]) -> Vec<AlignStep> {
         let mut map = ToUnicodeMap::default();

@@ -194,6 +194,22 @@ pub struct Atom {
     pub kind: AtomKind,
     /// 原文，用于 ATOM_HINTS。
     pub text: String,
+    /// Exact source drawing, captured before deleting translated text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<SourceAtom>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SourceAtom {
+    pub bbox: Rect,
+    pub baseline: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlacedAtom {
+    pub id: AtomId,
+    pub source: Rect,
+    pub bbox: Rect,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -268,8 +284,10 @@ pub struct LineBox {
     pub bbox: Rect,
     pub baseline_y: f32,
     pub glyphs: Vec<PlacedGlyph>,
-    /// 行内原子按原字形几何原地保留（不重绘）。
+    /// Atom identities retained by this line.
     pub kept_atoms: Vec<AtomId>,
+    #[serde(default)]
+    pub placed_atoms: Vec<PlacedAtom>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -312,6 +330,7 @@ mod tests {
             text_spans: Vec::new(),
             style_runs: vec![],
             atoms: vec![Atom {
+                source: None,
                 id: AtomId(1),
                 glyph_range: (0, 3),
                 kind: AtomKind::Formula,
