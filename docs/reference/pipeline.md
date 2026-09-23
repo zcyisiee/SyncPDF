@@ -87,3 +87,12 @@ root 模式的 `store_base` 是服务根目录；workdir 模式则是工作目�
 旧 `serve/compile.py::CompileService` 仍处理全量 `action=compile`：隔离副本 → 物化草稿 → `bdt run --from apply` → 校验产物 → 发布/版本归档。旧 PDF 在失败后仍可用，但必须显示旧 revision。`scope=pages` 在这条路径仍降级全量，不等于新段落编译接口。
 
 保存草稿和采用重译候选都调用 `schedule`，但当前该函数不会启动编译。不要照抄残留的“1.5 秒防抖自动编译”注释。两条路径的接口与状态口径见 [HTTP 参考](http-api.md)。
+
+
+## 开发中的 Rust 排版与删除边界
+
+`engine/` 的 Markdown 闭合块交付后调用 Knuth–Plass 排版；正文默认两端对齐、末行左对齐，标题保留源对齐。逐run使用原始或用户指定字号、字体角色、颜色；容纳失败保留原文并报告 `typeset_overflow`，不自动缩字号。排版使用实际字形墨迹、cluster边界和固定源首行基线；同页其它源文字及图形限制扩框，错行双栏也受水平栏界限制。
+
+内容流删除保留原 `TJ` 数值位移，按绑定的源code字节边界替换待删字形，推进含 `Tc` 和单字节空格的 `Tw`。`'` / `"` 的换行和间距状态继续生效。简单字体间接 `/Widths`、Type0 后代CID字体的 `/W` / `/DW` 会解析；Type3明确水平 `FontMatrix` 的宽度按其缩放解释。未知名义宽度（包括当前未支持的无 `/Widths` 简单字体）、不可信字节边界或非有限推进拒绝发布候选，不能用墨迹宽或1000代替。失败不修改原文档。
+
+该Rust路径仍在开发中，公式原子、链接几何、dual与编辑重编译的完成情况以[唯一任务状态](../reports/2026-09-22-rust-electron-rewrite/task-state.md)为准；旧Python管线的字号阶梯行为见上文。

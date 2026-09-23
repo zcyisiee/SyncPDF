@@ -333,6 +333,8 @@ struct FlatTextOp {
     /// 该操作所在流的文本状态快照。
     font_name: String,
     font_size: f32,
+    char_spacing: f32,
+    word_spacing: f32,
     /// 当前 `/Resources/Font` 里 `font_name` 对应的对象 id。
     font_id: Option<ObjectId>,
 }
@@ -390,6 +392,8 @@ pub struct FontWidths {
     pub first_char: i64,
     /// 简单字体 `/Widths`。
     pub widths: Vec<f32>,
+    /// Explicit FontDescriptor /MissingWidth; absent metrics are not guessed.
+    pub missing_width: Option<f32>,
     /// 是否 Type0。
     pub is_type0: bool,
     /// 是否 Identity 编码（Type0 默认按 Identity 处理）。
@@ -413,7 +417,7 @@ impl FontWidths {
                     return *w;
                 }
             }
-            1000.0
+            self.missing_width.unwrap_or(f32::NAN)
         }
     }
 
@@ -425,38 +429,37 @@ impl FontWidths {
 
 /// 解析 `/W` 数组（`c [w...]` 与 `cfirst clast w` 两种形式）。
 fn parse_w_array(arr: &[Object], out: &mut Vec<(u32, f32)>) {
-    let mut i = 0usize;
+    let mut i = 0;
     while i < arr.len() {
-        match &arr[i] {
-            Object::Array(ws) => {
-                let start = if i == 0 {
-                    0u32
-                } else {
-                    arr[i - 1].as_i64().unwrap_or(0).max(0) as u32
+        let Ok(start) = arr[i].as_i64() else {
+            break;
+        };
+        let Ok(start) = u32::try_from(start) else {
+            break;
+        };
+        match arr.get(i + 1) {
+            Some(Object::Array(widths)) => {
+                for (offset, width) in widths.iter().enumerate() {
+                    if let Some(code) = start.checked_add(offset as u32) {
+                        out.push((code, width.as_float().unwrap_or(f32::NAN)));
+                    }
+                }
+                i += 2;
+            }
+            Some(Object::Integer(end)) => {
+                let Some(width) = arr.get(i + 2) else {
+                    break;
                 };
-                for (k, w) in ws.iter().enumerate() {
-                    if let Ok(v) = w.as_float() {
-                        out.push((start.saturating_add(k as u32), v));
-                    }
+                let Ok(end) = u32::try_from(*end) else {
+                    break;
+                };
+                // Valid CIDs fit in two bytes; cap malformed ranges defensively.
+                for code in start..=end.min(start.saturating_add(65535)) {
+                    out.push((code, width.as_float().unwrap_or(f32::NAN)));
                 }
-                i += 1;
+                i += 3;
             }
-            Object::Integer(cfirst) => {
-                if i + 2 < arr.len() {
-                    if let (Ok(clast), Ok(w)) = (arr[i + 1].as_i64(), arr[i + 2].as_float()) {
-                        let a = (*cfirst).max(0) as u32;
-                        let b = clast.max(0) as u32;
-                        // 展开上限，防止病态范围耗尽内存。
-                        for c in a..=b.min(a.saturating_add(65535)) {
-                            out.push((c, w));
-                        }
-                    }
-                    i += 3;
-                    continue;
-                }
-                i += 1;
-            }
-            _ => i += 1,
+            _ => break,
         }
     }
 }
@@ -467,27 +470,94 @@ pub fn font_widths(doc: &Document, font_id: ObjectId) -> FontWidths {
     let Some(d) = deref_dict(doc, font_id) else {
         return out;
     };
-    let subtype = d.get(b"Subtype").ok().and_then(name_of);
-    out.is_type0 = subtype.as_deref() == Some("Type0");
-    if out.is_type0 {
-        out.dw = d
-            .get(b"DW")
+    out.is_type0 = d.get(b"Subtype").ok().and_then(name_of).as_deref() == Some("Type0");
+    let resolve = |o: &Object| doc.dereference(o).ok().map(|(_, value)| value.clone());
+    let number = |d: &Dictionary, key: &[u8]| {
+        d.get(key)
             .ok()
+            .and_then(resolve)
             .and_then(|o| o.as_float().ok())
-            .unwrap_or(1000.0);
-        // Identity-H/V 是编码名；内联 CMap 也按双字节处理。
+    };
+    if out.is_type0 {
         out.identity = true;
-        if let Ok(arr) = d.get(b"W").and_then(|o| o.as_array()) {
-            parse_w_array(arr, &mut out.w);
+        let descendant = d
+            .get(b"DescendantFonts")
+            .ok()
+            .and_then(resolve)
+            .and_then(|o| o.as_array().ok().and_then(|a| a.first().cloned()))
+            .and_then(|o| resolve(&o))
+            .and_then(|o| o.as_dict().ok().cloned());
+        if let Some(cid) = descendant.as_ref() {
+            out.dw = number(cid, b"DW").unwrap_or(1000.0);
+            if let Some(Object::Array(arr)) = cid.get(b"W").ok().and_then(resolve) {
+                let arr: Vec<_> = arr
+                    .iter()
+                    .map(|o| match resolve(o) {
+                        Some(Object::Array(widths)) => Object::Array(
+                            widths
+                                .iter()
+                                .map(|w| resolve(w).unwrap_or(Object::Null))
+                                .collect(),
+                        ),
+                        Some(value) => value,
+                        None => Object::Null,
+                    })
+                    .collect();
+                parse_w_array(&arr, &mut out.w);
+            }
+        } else {
+            out.dw = f32::NAN;
         }
     } else {
-        out.first_char = d
-            .get(b"FirstChar")
+        out.first_char = number(d, b"FirstChar").unwrap_or(0.0) as i64;
+        if let Some(Object::Array(arr)) = d.get(b"Widths").ok().and_then(resolve) {
+            // Keep indices even for invalid values; never shift later code widths.
+            out.widths = arr
+                .iter()
+                .map(|o| {
+                    resolve(o)
+                        .and_then(|v| v.as_float().ok())
+                        .unwrap_or(f32::NAN)
+                })
+                .collect();
+        }
+        if d.get(b"Widths")
             .ok()
-            .and_then(|o| o.as_i64().ok())
-            .unwrap_or(0);
-        if let Ok(arr) = d.get(b"Widths").and_then(|o| o.as_array()) {
-            out.widths = arr.iter().filter_map(|o| o.as_float().ok()).collect();
+            .and_then(resolve)
+            .is_some_and(|o| matches!(o, Object::Array(_)))
+        {
+            out.missing_width = Some(
+                d.get(b"FontDescriptor")
+                    .ok()
+                    .and_then(resolve)
+                    .and_then(|o| o.as_dict().ok().and_then(|d| number(d, b"MissingWidth")))
+                    .unwrap_or(0.0),
+            );
+        }
+        if d.get(b"Subtype").ok().and_then(name_of).as_deref() == Some("Type3") {
+            // Type3 widths live in glyph space, transformed by FontMatrix.
+            // Horizontal replacement only supports a finite positive x scale.
+            let scale = d
+                .get(b"FontMatrix")
+                .ok()
+                .and_then(resolve)
+                .and_then(|o| o.as_array().ok().cloned())
+                .filter(|a| a.len() == 6)
+                .and_then(|a| {
+                    let m: Option<Vec<_>> = a.iter().map(|o| o.as_float().ok()).collect();
+                    let m = m?;
+                    (m.iter().all(|v| v.is_finite())
+                        && m[0] > 0.0
+                        && m[3] != 0.0
+                        && m[1] == 0.0
+                        && m[2] == 0.0)
+                        .then_some(m[0] * 1000.0)
+                })
+                .unwrap_or(f32::NAN);
+            for width in &mut out.widths {
+                *width = (*width * scale).round();
+            }
+            out.missing_width = out.missing_width.map(|w| (w * scale).round());
         }
     }
     out
@@ -1016,6 +1086,10 @@ fn walk_stream(
             }
             _ => {
                 if op.is_text_show() {
+                    if op.operator == "\"" {
+                        set_f32(&op.operands, 0, &mut ctx.word_spacing);
+                        set_f32(&op.operands, 1, &mut ctx.char_spacing);
+                    }
                     let strings: Vec<Vec<u8>> =
                         op.text_strings().into_iter().map(|s| s.to_vec()).collect();
                     out.flat_text.push(FlatTextOp {
@@ -1026,6 +1100,8 @@ fn walk_stream(
                         element_indices: element_indices_of(op),
                         font_name: ctx.font_name.clone(),
                         font_size: ctx.font_size,
+                        char_spacing: ctx.char_spacing,
+                        word_spacing: ctx.word_spacing,
                         font_id: font_map(doc, &ctx.resources).get(&ctx.font_name).copied(),
                     });
                     out.items.push(DisplayItem::Text { glyphs: Vec::new() });
@@ -1105,6 +1181,9 @@ fn handle_do(
     child.ctm = form_matrix.then(&ctx.ctm);
     child.font_name = ctx.font_name.clone();
     child.font_size = ctx.font_size;
+    child.char_spacing = ctx.char_spacing;
+    child.word_spacing = ctx.word_spacing;
+    child.h_scale = ctx.h_scale;
 
     let mut child_path = form_path.to_vec();
     child_path.push(seq);
@@ -1749,10 +1828,15 @@ fn bind_glyphs(
                             .unwrap_or(Point::new(bbox.x0, bbox.y0));
                         let advance = match &enc.widths {
                             Some(w) => w.advance_pt(*code, fop.font_size),
-                            None => geom
-                                .map(|c| c.width * fop.font_size / 1000.0)
-                                .unwrap_or(0.0),
+                            None => f32::NAN,
                         };
+                        let advance = advance
+                            + fop.char_spacing
+                            + if matches!(enc.kind, EncodingKind::Single) && *code == 32 {
+                                fop.word_spacing
+                            } else {
+                                0.0
+                            };
                         let matrix = Matrix::translate(origin.x, origin.y);
                         let is_space = unicode.first().is_some_and(|c: &char| c.is_whitespace());
                         let (fill, render_mode) = (obj.fill, obj.render_mode);
@@ -2310,7 +2394,10 @@ endcmap";
         };
         assert_eq!(w.width_1000(65), 500.0);
         assert_eq!(w.width_1000(66), 600.0);
-        assert_eq!(w.width_1000(200), 1000.0);
+        assert!(
+            w.width_1000(200).is_nan(),
+            "unknown width cannot be used for deletion"
+        );
         assert_eq!(w.advance_pt(65, 10.0), 5.0);
     }
 
@@ -2343,6 +2430,74 @@ endcmap";
         let mut out = Vec::new();
         parse_w_array(&arr, &mut out);
         assert_eq!(out, vec![(3, 250.0), (4, 250.0), (5, 250.0)]);
+    }
+
+    #[test]
+    fn font_widths_resolve_descendant_and_mixed_cid_width_forms() {
+        let mut doc = Document::new();
+        let indirect_width = doc.add_object(Object::Integer(600));
+        let widths = doc.add_object(Object::Array(vec![500.into(), indirect_width.into()]));
+        let mixed = doc.add_object(Object::Array(vec![
+            10.into(),
+            widths.into(),
+            20.into(),
+            22.into(),
+            750.into(),
+        ]));
+        let descendant = doc.add_object(lopdf::dictionary! { "DW" => 900, "W" => mixed });
+        let descendants = doc.add_object(Object::Array(vec![descendant.into()]));
+        let font = doc.add_object(
+            lopdf::dictionary! { "Subtype" => "Type0", "DescendantFonts" => descendants },
+        );
+        let widths = font_widths(&doc, font);
+        for (code, expected) in [
+            (10, 500.0),
+            (11, 600.0),
+            (20, 750.0),
+            (22, 750.0),
+            (23, 900.0),
+        ] {
+            assert_eq!(widths.width_1000(code), expected, "CID {code}");
+        }
+    }
+
+    #[test]
+    fn simple_invalid_width_does_not_shift_later_codes() {
+        let mut doc = Document::new();
+        let widths = doc.add_object(Object::Array(vec![500.into(), Object::Null, 700.into()]));
+        let font = doc.add_object(
+            lopdf::dictionary! { "Subtype" => "Type1", "FirstChar" => 65, "Widths" => widths },
+        );
+        let widths = font_widths(&doc, font);
+        assert_eq!(widths.width_1000(65), 500.0);
+        assert!(widths.width_1000(66).is_nan());
+        assert_eq!(widths.width_1000(67), 700.0);
+    }
+
+    #[test]
+    fn type3_explicit_horizontal_matrix_scales_and_rounds_widths() {
+        let mut doc = Document::new();
+        let font = doc.add_object(lopdf::dictionary! {
+            "Subtype" => "Type3", "FirstChar" => 65, "Widths" => vec![Object::Real(501.25)],
+            "FontMatrix" => vec![0.002.into(), 0.into(), 0.into(), 0.001.into(), 0.into(), 0.into()]
+        });
+        assert_eq!(font_widths(&doc, font).width_1000(65), 1003.0);
+        doc.get_object_mut(font)
+            .unwrap()
+            .as_dict_mut()
+            .unwrap()
+            .set(
+                "FontMatrix",
+                vec![
+                    0.002.into(),
+                    0.001.into(),
+                    0.into(),
+                    0.001.into(),
+                    0.into(),
+                    0.into(),
+                ],
+            );
+        assert!(font_widths(&doc, font).width_1000(65).is_nan());
     }
 
     #[test]

@@ -164,3 +164,51 @@ fn deleting_entire_tj_preserves_next_show_on_same_text_matrix() {
         "ABCD",
     );
 }
+
+#[test]
+fn partial_single_quote_keeps_line_motion_and_following_show() {
+    assert_survivors(
+        b"BT /F1 15 Tf 20 TL 1.3 Tc 2.1 Tw 83 Tz 1 0 0 1 42 210 Tm (A) Tj (B C) ' (D) Tj ET",
+        &['B', ' '],
+        "AB CD",
+    );
+}
+
+#[test]
+fn partial_double_quote_keeps_new_spacing_and_following_show() {
+    assert_survivors(
+        b"BT /F1 15 Tf 20 TL 83 Tz 1 0 0 1 42 210 Tm (A) Tj 2.1 1.3 (B C) \" (D) Tj ET",
+        &['B', ' '],
+        "AB CD",
+    );
+}
+
+#[test]
+fn missing_simple_font_widths_rejects_without_guessing_or_mutation() {
+    let mut doc = source_pdf(b"BT /F1 15 Tf 42 210 Td (ABC) Tj ET");
+    for object in doc.objects.values_mut() {
+        if let Ok(dict) = object.as_dict_mut() {
+            if dict.get(b"Type").ok().and_then(|o| o.as_name().ok()) == Some(b"Font") {
+                dict.remove(b"Widths");
+            }
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("unknown-widths.pdf");
+    doc.save(&input).unwrap();
+    let worker = PdfiumWorker::spawn().unwrap();
+    let pdf = worker.open(&input).unwrap();
+    let bound = bind_page(&worker, pdf, &doc, 1).unwrap();
+    bound.check_replacement().unwrap();
+    let mut patch = PatchSet::new();
+    patch
+        .delete_glyphs(&bound, &[bound.ir.glyphs().next().unwrap().id])
+        .unwrap();
+    let before = doc.objects.clone();
+    assert!(matches!(
+        patch.apply(&mut doc, 1),
+        Err(syncpdf_pdf::patch::PatchError::UnsupportedPath(_))
+    ));
+    assert_eq!(doc.objects, before);
+    worker.close(pdf);
+}

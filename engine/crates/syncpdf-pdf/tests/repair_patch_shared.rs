@@ -9,7 +9,7 @@ use syncpdf_pdf::{
 fn shared_document(form: bool, array: bool, inherited: bool) -> Document {
     let mut doc = Document::with_version("1.7");
     let pages = doc.new_object_id();
-    let font = doc.add_object(dictionary! {"Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica", "Encoding" => "WinAnsiEncoding"});
+    let font = doc.add_object(dictionary! {"Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier", "Encoding" => "WinAnsiEncoding", "FirstChar" => 32, "LastChar" => 126, "Widths" => vec![Object::Integer(600); 95]});
     let fonts = dictionary! {"F1" => font};
     let text = b"BT /F1 12 Tf 1 0 0 1 30 100 Tm (ABC) Tj ET";
     let mut resources = dictionary! {"Font" => fonts.clone()};

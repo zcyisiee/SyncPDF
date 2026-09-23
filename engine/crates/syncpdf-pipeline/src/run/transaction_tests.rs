@@ -9,7 +9,7 @@ use syncpdf_translate::{BlockStatus, TranslatedBlock};
 fn source() -> Document {
     let mut doc = Document::with_version("1.7");
     let pages = doc.new_object_id();
-    let font = doc.add_object(dictionary! {"Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica", "Encoding" => "WinAnsiEncoding"});
+    let font = doc.add_object(dictionary! {"Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier", "Encoding" => "WinAnsiEncoding", "FirstChar" => 32, "LastChar" => 126, "Widths" => vec![Object::Integer(600); 95]});
     let mut kids = Vec::new();
     for text in ["SourceAlpha", "SourceBeta"] {
         let content = doc.add_object(Stream::new(

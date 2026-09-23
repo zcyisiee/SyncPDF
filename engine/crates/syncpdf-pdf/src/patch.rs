@@ -6,10 +6,9 @@
 //!
 //! 补丁以 [`OpKey`]（流对象 + 操作序号）为键，值为该操作内被删字形的序号集合。
 //!
-//! - **同一 Op 内全部字形被删**：把该操作改写为等宽 kerning 的 `TJ` 数值
-//!   （`-(advance 之和)*1000/size`），这样后续字形位置保持不变；advance 和为 0
-//!   时直接删除该操作。
-//! - **部分删除**：重建字符串操作数，被删的连续段替换为等宽 kerning 数值。
+//! - **全部或部分删除**：按绑定的源 code 字节边界，将待删 code 换成
+//!   `-advance*1000/size` 的 `TJ` 数值；保留原 `TJ` 的全部位移数值和未删字节。
+//!   advance 含 `Tc` / 单字节空格的 `Tw`；未知宽度或非有限值拒绝发布。
 //!   `Tj` 升级为 `TJ`；`'` / `"` 先拆成 `T*`（或 `Tw Tc`）+ 处理。
 //!
 //! 孤立的前置 `Td`/`Tm`/`Tf` 一律保留（安全优先，不做无用指令消除）。
@@ -74,6 +73,7 @@ pub type Result<T, E = PatchError> = std::result::Result<T, E>;
 struct GlyphSnap {
     advance: f32,
     size: f32,
+    code_bytes: usize,
 }
 
 /// 待应用的补丁集合。
@@ -276,6 +276,7 @@ impl PatchSet {
             })?;
 
             let mut touched = false;
+            let mut prefixes = BTreeMap::<usize, Vec<Op>>::new();
             for (op_index, ords) in ops_map {
                 let Some(op) = ops.get_mut(*op_index as usize) else {
                     continue;
@@ -285,7 +286,23 @@ impl PatchSet {
                     .get(&OpKey::new(*sref, *op_index))
                     .cloned()
                     .unwrap_or_default();
-                if rewrite_show_op(op, ords, &snaps) {
+                let mut prefix = Vec::new();
+                if op.operator == "\"" {
+                    if op.operands.len() != 3
+                        || op.operands[..2]
+                            .iter()
+                            .any(|o| o.as_f64().is_none_or(|n| !n.is_finite()))
+                    {
+                        return Err(PatchError::UnsupportedPath("invalid quote text state"));
+                    }
+                    prefix.push(Op::new("Tw", vec![op.operands[0].clone()]));
+                    prefix.push(Op::new("Tc", vec![op.operands[1].clone()]));
+                }
+                if matches!(op.operator.as_str(), "'" | "\"") {
+                    prefix.push(Op::new("T*", vec![]));
+                }
+                if rewrite_show_op(op, ords, &snaps)? {
+                    prefixes.insert(*op_index as usize, prefix);
                     touched = true;
                     if ords.len() >= snaps.len().max(1) && ords.len() * 2 >= snaps.len().max(1) {
                         // 全部删除的启发式：ordinal 覆盖了所有快照。
@@ -307,7 +324,12 @@ impl PatchSet {
             if !touched {
                 continue;
             }
-            let new_bytes = write_content(&bytes, &ops);
+            let mut expanded = Vec::new();
+            for (index, op) in ops.into_iter().enumerate() {
+                expanded.extend(prefixes.remove(&index).unwrap_or_default());
+                expanded.push(op);
+            }
+            let new_bytes = write_content(&bytes, &expanded);
             write_stream_content(doc, target_id, new_bytes)?;
             stats.streams_touched += 1;
 
@@ -333,7 +355,16 @@ impl PatchSet {
                     stream: sid.0,
                     msg: e.to_string(),
                 })?;
-                let op = &mut ops[call.do_op.op_index as usize];
+                let op = ops
+                    .iter_mut()
+                    .find(|op| {
+                        op.operator == "Do"
+                            && op.operands.first().and_then(Operand::as_name)
+                                == Some(call.name.as_str())
+                    })
+                    .ok_or(PatchError::UnsupportedPath(
+                        "missing unique Form invocation",
+                    ))?;
                 op.operands[0] = Operand::Name(new_name);
                 op.mark_dirty();
                 write_stream_content(doc, sid, write_content(&bytes, &ops))?;
@@ -371,6 +402,7 @@ fn record_snaps(
             GlyphSnap {
                 advance: 0.0,
                 size: 0.0,
+                code_bytes: 0,
             },
         );
     }
@@ -378,6 +410,8 @@ fn record_snaps(
         entry[i] = GlyphSnap {
             advance: g.advance,
             size: g.size,
+            code_bytes: (g.source.string_operand_range.1 - g.source.string_operand_range.0)
+                as usize,
         };
     }
     let del = deleted.entry(op).or_default();
@@ -389,104 +423,76 @@ fn record_snaps(
 }
 
 /// 改写一个 text-show 操作；返回是否发生改动。
-fn rewrite_show_op(op: &mut Op, ords: &BTreeSet<u16>, snaps: &[GlyphSnap]) -> bool {
+fn rewrite_show_op(op: &mut Op, ords: &BTreeSet<u16>, snaps: &[GlyphSnap]) -> Result<bool> {
     if ords.is_empty() {
-        return false;
+        return Ok(false);
     }
-    let all_deleted = !snaps.is_empty()
-        && snaps
-            .iter()
-            .enumerate()
-            .all(|(i, _)| ords.contains(&(i as u16)));
-    if all_deleted {
-        let total = total_advance(ords, snaps);
-        if total.abs() < 1e-6 {
-            // 无推进：退化为空操作（改用 TJ 空数组，保持操作符存在）。
-            op.operator = "TJ".to_string();
-            op.operands = vec![Operand::Array(Vec::new())];
-        } else {
-            op.operator = "TJ".to_string();
-            op.operands = vec![Operand::Array(vec![Operand::Real(-total as f64)])];
+    let invalid = || PatchError::UnsupportedPath("invalid text advance or source code boundary");
+    if ords.iter().any(|i| usize::from(*i) >= snaps.len()) {
+        return Err(invalid());
+    }
+    let elements = if op.operator == "TJ" {
+        match op.operands.first() {
+            Some(Operand::Array(a)) => a.clone(),
+            _ => return Err(invalid()),
         }
-        op.mark_dirty();
-        return true;
-    }
-
-    // 部分删除：重建字符串数组。
-    let strings = op
-        .text_strings()
-        .into_iter()
-        .map(|s| s.to_vec())
-        .collect::<Vec<_>>();
-    if strings.is_empty() {
-        return false;
-    }
-    // 该操作的 code 切分宽度：由字形数 / 总字节数推断。
-    let total_bytes: usize = strings.iter().map(Vec::len).sum();
-    let n_glyphs = snaps.len().max(1);
-    let width = if total_bytes % n_glyphs == 0 && total_bytes / n_glyphs >= 1 {
-        (total_bytes / n_glyphs).clamp(1, 2)
     } else {
-        1
+        op.text_strings()
+            .into_iter()
+            .map(|s| Operand::Str(s.to_vec()))
+            .collect()
     };
-
-    // 逐字符串按 code 切分，被删 code 换成 kerning 数值。
-    let mut arr: Vec<Operand> = Vec::new();
-    let mut ordinal = 0u16;
-    for s in &strings {
-        let mut cur: Vec<u8> = Vec::new();
-        let mut pending: Vec<u8> = Vec::new(); // 累积待输出的当前串
-        let mut i = 0usize;
-        while i < s.len() {
-            let end = (i + width).min(s.len());
-            let chunk = &s[i..end];
-            if ords.contains(&ordinal) {
-                // 冲刷当前串。
-                if !pending.is_empty() {
-                    cur.extend_from_slice(&pending);
-                    arr.push(Operand::Str(std::mem::take(&mut cur)));
-                    pending.clear();
+    let mut arr = Vec::new();
+    let mut ordinal = 0usize;
+    for element in elements {
+        let Operand::Str(bytes) = element else {
+            // Original TJ adjustments are independent of glyph widths and survive.
+            if element.as_f64().is_none_or(|n| !n.is_finite()) {
+                return Err(invalid());
+            }
+            arr.push(element);
+            continue;
+        };
+        let mut pending = Vec::new();
+        let mut offset = 0;
+        while offset < bytes.len() {
+            let snap = snaps.get(ordinal).ok_or_else(invalid)?;
+            if snap.code_bytes == 0 || snap.code_bytes > bytes.len() - offset {
+                return Err(invalid());
+            }
+            let end = offset + snap.code_bytes;
+            if ords.contains(&(ordinal as u16)) {
+                if !snap.advance.is_finite()
+                    || !snap.size.is_finite()
+                    || (snap.size.abs() <= 1e-6 && snap.advance.abs() > 1e-6)
+                {
+                    return Err(invalid());
                 }
-                let adv = snaps
-                    .get(ordinal as usize)
-                    .map(|g| g.advance)
-                    .unwrap_or(0.0);
-                let size = snaps.get(ordinal as usize).map(|g| g.size).unwrap_or(0.0);
-                if size.abs() > 1e-6 && adv.abs() > 1e-6 {
-                    let kern = -(adv as f64) * 1000.0 / (size as f64);
-                    arr.push(Operand::Real(kern));
+                if !pending.is_empty() {
+                    arr.push(Operand::Str(std::mem::take(&mut pending)));
+                }
+                if snap.size.abs() > 1e-6 {
+                    arr.push(Operand::Real(
+                        -f64::from(snap.advance) * 1000.0 / f64::from(snap.size),
+                    ));
                 }
             } else {
-                pending.extend_from_slice(chunk);
+                pending.extend_from_slice(&bytes[offset..end]);
             }
             ordinal += 1;
-            i = end;
+            offset = end;
         }
         if !pending.is_empty() {
-            cur.extend_from_slice(&pending);
-            arr.push(Operand::Str(cur));
+            arr.push(Operand::Str(pending));
         }
     }
-    if arr.is_empty() {
-        arr.push(Operand::Str(Vec::new()));
+    if ordinal != snaps.len() {
+        return Err(invalid());
     }
-    op.operator = "TJ".to_string();
+    op.operator = "TJ".into();
     op.operands = vec![Operand::Array(arr)];
     op.mark_dirty();
-    true
-}
-
-/// 被删字形的 advance 之和（1000 单位）。
-fn total_advance(ords: &BTreeSet<u16>, snaps: &[GlyphSnap]) -> f32 {
-    let mut sum = 0.0f32;
-    for &o in ords {
-        if let Some(s) = snaps.get(o as usize) {
-            if s.size.abs() > 1e-6 {
-                sum += s.advance * 1000.0 / s.size;
-            }
-        }
-    }
-    sum
+    Ok(true)
 }
 
 /// 写回解压后的流内容（重新用 FlateDecode 压缩，必要时）。
@@ -647,8 +653,21 @@ mod tests {
         let out = content_bytes(&doc, doc.get_page_contents(doc.get_pages()[&1])[0]);
         let text = String::from_utf8_lossy(&out);
         assert!(text.contains("TJ"), "应为 TJ：{text}");
-        // 3 × 5pt @10pt = 1500 → -1500
-        assert!(text.contains("-1500"), "应含等宽 kerning -1500：{text}");
+        // 3 × 5pt @10pt = 1500; individual displacements must sum to -1500.
+        let ops = parse_content(&out).unwrap();
+        let show = ops.iter().find(|op| op.operator == "TJ").unwrap();
+        let Operand::Array(items) = &show.operands[0] else {
+            panic!("TJ array");
+        };
+        let total: f64 = items
+            .iter()
+            .map(|item| match item {
+                Operand::Real(n) => *n,
+                Operand::Int(n) => *n as f64,
+                _ => panic!("all source codes must be removed"),
+            })
+            .sum();
+        assert_eq!(total, -1500.0, "same text-matrix advance: {text}");
         assert!(!text.contains("ABC"), "原字符串应已删除：{text}");
     }
 
@@ -723,6 +742,10 @@ mod tests {
         assert!(!text.contains("(AB)") && !text.contains("(CD)"), "{text}");
         // 每个被删 code 5pt@10pt = 500。
         assert!(text.contains("-500"), "应有 -500 kerning：{text}");
+        assert!(
+            text.contains("-100"),
+            "original TJ adjustment survives: {text}"
+        );
     }
 
     #[test]
@@ -733,6 +756,26 @@ mod tests {
         let stats = ps.apply(&mut doc, 1).unwrap();
         assert_eq!(stats, PatchStats::default());
         assert_eq!(content_bytes(&doc, content), b"BT (AB) Tj ET");
+    }
+
+    #[test]
+    fn invalid_advance_rejects_without_publishing_candidate() {
+        for advance in [f32::NAN, f32::INFINITY] {
+            let (mut doc, _, content) = doc_with_content(b"BT /F1 10 Tf (AB) Tj ET");
+            let op = OpKey::new(ObjRef::new(content.0, content.1), 2);
+            let ir = ir_with(vec![glyph(op, 0, advance, 10.0), glyph(op, 1, 5.0, 10.0)]);
+            let mut patch = PatchSet::new();
+            patch.enqueue_glyphs(&ir, &[ir.glyphs().next().unwrap().id]);
+            let before = doc.objects.clone();
+            assert!(matches!(
+                patch.apply(&mut doc, 1),
+                Err(PatchError::UnsupportedPath(_))
+            ));
+            assert_eq!(
+                doc.objects, before,
+                "invalid width must not publish any object"
+            );
+        }
     }
 
     #[test]

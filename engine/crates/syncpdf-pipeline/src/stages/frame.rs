@@ -72,7 +72,8 @@ pub fn page_frames(
             .find(|r| r.index == para.region)
             .map_or(source, |r| r.bbox);
         let mut bbox = source.union(&region);
-        bbox.x0 = bbox.x0.max(ir.crop_box.x0);
+        // Preserve the source left anchor; model padding is not text indentation.
+        bbox.x0 = source.x0.max(ir.crop_box.x0);
         bbox.x1 = bbox.x1.min(ir.crop_box.x1);
         let obstacles: Vec<Rect> = glyphs
             .iter()
@@ -83,15 +84,15 @@ pub fn page_frames(
             .map(|g| g.bbox)
             .chain(paint.iter().copied())
             .collect();
-        // Preserve column ownership even if a model region is slightly too wide.
+        // A neighboring column can start on a different row. Horizontal ownership
+        // therefore cannot depend on overlap with this paragraph's source y range.
+        // This conservative bound spends only the blank gap between source extents.
         for other in &obstacles {
-            if other.y1 > source.y0 && other.y0 < source.y1 {
-                if other.x1 <= source.x0 {
-                    bbox.x0 = bbox.x0.max((source.x0 + other.x1) * 0.5);
-                }
-                if other.x0 >= source.x1 {
-                    bbox.x1 = bbox.x1.min((source.x1 + other.x0) * 0.5);
-                }
+            if other.x1 <= source.x0 {
+                bbox.x0 = bbox.x0.max((source.x0 + other.x1) * 0.5);
+            }
+            if other.x0 >= source.x1 {
+                bbox.x1 = bbox.x1.min((source.x1 + other.x0) * 0.5);
             }
         }
         if para.align == syncpdf_core::ir::Align::Center {
@@ -143,7 +144,7 @@ mod tests {
     use syncpdf_core::ir::{Align, Glyph, GlyphFlags, GlyphSource, Line, LineBox, RegionKind};
     use syncpdf_core::{Color, Matrix, ObjRef, OpKey, PageId};
 
-    fn glyph(ordinal: u16, bbox: Rect, baseline: f32) -> Glyph {
+    pub(super) fn glyph(ordinal: u16, bbox: Rect, baseline: f32) -> Glyph {
         Glyph {
             id: GlyphId {
                 page: PageId(0),
@@ -167,7 +168,7 @@ mod tests {
             flags: GlyphFlags::default(),
         }
     }
-    fn paragraph(g: &Glyph) -> Paragraph {
+    pub(super) fn paragraph(g: &Glyph) -> Paragraph {
         Paragraph {
             id: ParagraphId::new(PageId(0), u32::from(g.id.ordinal) + 1),
             page: PageId(0),
@@ -191,7 +192,7 @@ mod tests {
             translatable: Translatable::Yes,
         }
     }
-    fn page(glyphs: Vec<Glyph>) -> PageIR {
+    pub(super) fn page(glyphs: Vec<Glyph>) -> PageIR {
         PageIR {
             page: PageId(0),
             media_box: Rect::new(0.0, 0.0, 200.0, 200.0),
@@ -251,5 +252,50 @@ mod tests {
     fn missing_source_baseline_never_invents_a_frame() {
         let a = glyph(0, Rect::new(20.0, 120.0, 80.0, 130.0), f32::NAN);
         assert!(page_frames(&page(vec![a.clone()]), &[], &[paragraph(&a)]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod staggered_column_tests {
+    use super::*;
+    #[test]
+    fn staggered_column_limits_frame_even_without_vertical_source_overlap() {
+        // The full geometry fixture lives in the sibling module; here use its
+        // constructors to exercise the actual frame→typeset placement path.
+        let a = super::tests::glyph(0, Rect::new(20.0, 120.0, 80.0, 130.0), 123.5);
+        let b = super::tests::glyph(1, Rect::new(120.0, 90.0, 180.0, 100.0), 93.5);
+        let para = super::tests::paragraph(&a);
+        let ir = super::tests::page(vec![a, b]);
+        let region = Region {
+            page: ir.page,
+            index: 0,
+            kind: syncpdf_core::ir::RegionKind::Text,
+            bbox: Rect::new(10.0, 110.0, 190.0, 140.0),
+            score: 1.0,
+            order: 0,
+        };
+        let frames = page_frames(&ir, &[region], std::slice::from_ref(&para));
+        let frame = &frames[&para.id];
+        assert_eq!(frame.bbox.x0, 20.0);
+        assert_eq!(frame.bbox.x1, 100.0);
+        let parsed = syncpdf_translate::parse_unit_html(&format!(
+            "<p id=\"{}\">{}</p>",
+            para.id,
+            "中".repeat(15)
+        ))
+        .unwrap();
+        let result = crate::stages::typeset::typeset_with_frame(
+            &syncpdf_typeset::shaper::MonoShaper,
+            &para,
+            &parsed,
+            &syncpdf_typeset::Obstacles::default(),
+            Some(frame),
+        );
+        assert!(!result.paragraph.overflow);
+        assert!(result.paragraph.lines.len() > 1);
+        assert!(
+            result.paragraph.lines.iter().all(|l| l.bbox.x1 <= 100.01),
+            "cannot spend adjacent-column blank space"
+        );
     }
 }

@@ -21,7 +21,7 @@ fn document(empty_mapping: bool) -> Document {
         let unicode = doc.add_object(Stream::new(dictionary! {}, cmap.to_vec()));
         doc.add_object(dictionary! {"Type" => "Font", "Subtype" => "Type0", "BaseFont" => "FakeCJK", "Encoding" => "Identity-H", "DescendantFonts" => vec![Object::Reference(cid)], "ToUnicode" => unicode})
     } else {
-        doc.add_object(dictionary! {"Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica", "Encoding" => "WinAnsiEncoding"})
+        doc.add_object(dictionary! {"Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier", "Encoding" => "WinAnsiEncoding", "FirstChar" => 32, "LastChar" => 126, "Widths" => vec![Object::Integer(600); 95]})
     };
     let mut kids = Vec::new();
     for text in ["ABC", "XYZ"] {
