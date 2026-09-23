@@ -1,7 +1,7 @@
 # Rust PDF 后端修复 · 唯一 Task state
 
 > 更新：2026-09-23；仅用户和主 Agent 可修改。主树 `feat/desktop-develop`。本轮“应译正文漏译与公式保护”修复及CCS样本验收已完成；完整Rust产品目标仍有后续工作。
-> **最新浮动排版验收：1.0字号/1.5行距，21页、190块全部写入，0回退、0送译前冲突、0覆盖缺口；最新产物typography-float-v3，见[浮动验收](12-MVP真实翻译验收.md#typography-local-float)。** [标题验收](12-MVP真实翻译验收.md#heading-adaptive-layout) · [验收报告](12-MVP真实翻译验收.md#inline-formula-coverage) · [经验总结](../../lessons/pdf-binding-and-render-evidence.md#inline-formula-ownership) · [缺陷及历史误报](../../issues/rust-inline-formula-coverage.md)。
+> **最新浮动排版验收：1.0字号/1.5行距，21页、190块全部写入，0回退、0送译前冲突、0覆盖缺口；最新Text宋体产物text-serif-v3，见[宋体验收](12-MVP真实翻译验收.md#text-serif-font)。** [标题验收](12-MVP真实翻译验收.md#heading-adaptive-layout) · [验收报告](12-MVP真实翻译验收.md#inline-formula-coverage) · [经验总结](../../lessons/pdf-binding-and-render-evidence.md#inline-formula-ownership) · [缺陷及历史误报](../../issues/rust-inline-formula-coverage.md)。
 
 ## 用户意图与边界
 
@@ -72,9 +72,19 @@ pipeline167通过/0失败/4ignored；最后加强新编号守卫后专项1通过
 
 v2保护字符36,327变化0、94公式参考墨迹53,384缺失0、图3像素相同；638双语链接及28书签/180命名目标通过。原矩形链接审计将首页跨两行DOI的联合Rect内邻文误报为错误标签，逐行QuadPoints精查仅含完整URL且目标正确，证据wrapped-link-audit.json；下一轮使用逐行区域审计，不能把旧误报忽略不报。最终v3：21页190/0、32.113秒、0模型请求，两份PDF与v2 SHA一致；逐行链接标签0错误，单语/dual完整审计及qpdf通过。pipeline单元172+集成7项，共179通过/0失败/5ignored，Clippy/fmt/release通过；strict docs仍仅既存HTTP锚点警告。产物tmp/backend-repair/typography-float-v3/{translated.pdf,dual.pdf}。详细[验收](12-MVP真实翻译验收.md#typography-local-float)和[经验](../../lessons/pdf-binding-and-render-evidence.md#local-float-and-leading)已同步。修复代码提交4567c253，文档另批提交，未push。对比图仍在typography-comparison，未更新的1.0标签指修复前结果。本轮检测到用户同步修改AGENTS.md，保持其改动且不纳入本次提交；cache仍未跟踪。
 
+## Text正文改思源宋体（2026-09-23，已完成）
+
+用户明确要求仅Text部分使用思源宋体，其余字体样式不变。目标spec对Text选择衬线，并包含未标记样式StyleId(0)；全局Body字体链/源IR/缓存不改。保持1.0字号/1.5行距及bold/italic/mono/颜色，标题、Abstract、Caption等保留原字体。
+
+首轮v1为187/3：P05-047/P11-024因两端对齐按advance拉伸，衬线实际墨迹超过框边；仅减少新增字距拉伸（不低于自然字距），不缩字。P14-114标题联排受此前“只连一个邻段”限制；扩为同栏连续段逐段纳入，保持各自宽度、原段间距和顺序，全组通过才更新，禁止跨固定障碍。实际第14页4段联合排入。v2为189/1且遇已知CoreML原生stdout日志污染，不能当成功；v3正常。
+
+最终样张`tmp/backend-repair/text-serif-v3/{translated.pdf,dual.pdf}`：21页190/0、0送译前冲突/覆盖缺口，190真实缓存/0模型，32.257秒。字体审计117个Text的23,123个Noto字符仅族名Sans→Serif，粗细/字号/颜色/字符身份不变；73个非Text块字体样式字符计数全部相同。94公式、36,327保护字符、图3、319单语/638双语链接、28书签/180目标及qpdf全部通过。已目视第2/14页，保留布局锚定空白。
+
+修复代码提交493d2734，文档另批提交，未push。相关typeset/pipeline248通过、0失败、5ignored；Clippy/fmt/release通过，strict docs仍有既存HTTP锚点警告。详细[验收](12-MVP真实翻译验收.md#text-serif-font)及[经验](../../lessons/pdf-binding-and-render-evidence.md#semantic-font-and-ink)已同步。开始时AGENTS.md为用户未提交更改，TRANSLATE.md/untitled.md/cache为既有未跟踪文件，均保持且不纳入本次提交。
+
 ## 状态与下一步
 
-本次漏译修复、表18/19断行、标题适配、A3双语导出及1.0字号/1.5行距浮动排版均完成并通过对应验收。已将经验提炼到上述lessons链接，架构/参考/CLI/issue/验收同步。代码按逻辑提交：`67958e9c`（源公式/正文/子标题）、`898ca829`（闭合坏块有界补译）、`d306583e`（完整覆盖统计）；文档另批提交。运行缓存与产物不提交，未push。
+本次漏译修复、表18/19断行、标题适配、A3双语导出、1.0字号/1.5行距浮动排版及Text宋体切换均完成并通过对应验收。已将经验提炼到上述lessons链接，架构/参考/CLI/issue/验收同步。代码按逻辑提交：`67958e9c`（源公式/正文/子标题）、`898ca829`（闭合坏块有界补译）、`d306583e`（完整覆盖统计）；文档另批提交。运行缓存与产物不提交，未push。
 
 后续产品范围仍待用户安排：中文目录/书签、逐块字体/字号/译文编辑与原子revision重编译。任意公式布局、任意语言/注释格式、RTL ActualText仍未全面认证。CoreML原生stdout偶发污染风险未在本轮处理。旧23页论文R6后重译未完成，本次CCS结论不能套用旧样本。
 

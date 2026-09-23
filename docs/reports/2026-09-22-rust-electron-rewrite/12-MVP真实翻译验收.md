@@ -297,3 +297,31 @@ v1已190/0，但目视发现标题扩到纸张右边缘，拒绝作为交付；v
 pipeline单元172项与集成7项通过，合计179通过、0失败、5ignored；含新增横向避障、相邻联排/保护框线、事务失败保持邻段与计数、测量越页底后回移守卫。严格Clippy、fmt、release通过；未重跑未修改的Python/UI。严格文档构建仍有既存HTTP参考中文锚点警告，不计通过。
 
 PDF SHA-256：单语`09c64167437d2451c71456e5b801c4ce02f7ed0d559bba30798c07a4478eddc6`，dual`7746c660d873ba6f8515fa7704d86cd60974dfe4f26bc8b710ecfa5ce86dd791`。证据包括`typography-float-v3/{audit.json,dual-audit.json,result.json,events.jsonl,qpdf*.log,page-*.png,dual-page-*.png}`，脚本`inline-audit-quads.py`与`dual-audit/check.py`，日志`typography-float-{tests-final,integration,clippy,fmt,build-final,docs-final}.log`，均在tmp/backend-repair。经验见[局部净空与联合排版](../../lessons/pdf-binding-and-render-evidence.md#local-float-and-leading)。
+
+
+<a id="text-serif-font"></a>
+
+## Text正文改用思源宋体（2026-09-23）
+
+用户要求仅`Text`区域改为思源宋体，其余字体样式不变。`stages::typeset::spec_for`只在目标spec给Text选择serif，zh-CN实际字体为`NotoSerifCJKsc-Regular/Bold`；未标记样式的StyleId(0)也生效。保留源粗斜体、字号、颜色及mono优先级，不修改源IR、全局Body字体链或真实译文缓存。Title/ParagraphTitle/Abstract/Caption/List等其它区域不切换字体。
+
+### 真实换字体后暴露的容纳问题
+
+首轮v1为187写入/3回退。P05-047/P11-024两端对齐时根据advance增加字距，宋体墨迹比advance稍宽；旧平移只能处理完整墨迹能放下的行，不能解决两端都已撑满的情况。修正为：自然墨迹可容纳时，只减少新增glue拉伸，再按原容差核对；保持断点、字号、字形宽度及行距，也不压到自然字距以下。守卫同时验证自然墨迹本来放不下时仍失败。
+
+P14-114附录标题虽仍用黑体，下方正文换宋体后由6行变7行，旧“两段联排”仍不足。现按源顺序逐段纳入同栏连续已译段，找到可容纳组即停，全部通过才提交位置；保留各自宽度、顺序和原段间距。每个源框须与共同净空带相交，不能将隔着图片/规则线的另一段拖到障碍上方。真实第14页P14-114至117四段联排，首基线分别下移约1.617、6.474、11.499、11.246pt；没有跨页或缩字。
+
+v2为189/1，且CoreML在stdout追加一条`Unable to load MPSGraphExecutable`原生日志，CLI正确报告`engine_events_invalid`；此既存风险未在字体任务扩修，也未当成成功。v3正常完成全部流程，无事件污染。
+
+### 最终样张和验证
+
+**交付：`tmp/backend-repair/text-serif-v3/{translated.pdf,dual.pdf}`。** CCS21页190写入/0回退/0送译前冲突/0覆盖缺口；576正常保护实体；190真实缓存命中、0模型/补救请求，32.257秒，exit0。字号仍1.0倍、行距1.5倍。
+
+- 保存后逐块字体审计：117个Text中的23,123个Noto字符（Regular 21,841、Bold 1,282）仅字体族从Sans变为Serif；字符/字号/颜色和粗细身份完全匹配。73个非Text块的Noto字体、字符、字号和颜色多重集均与typography-float-v3相同，无未归属字体字符。审计按字符推进框与实际行墨迹的相交关系定位，避免标点侧承使字形原点/中心落在墨迹外造成误报；未放宽字体/样式比对。
+- 36,327保护字符变化0；94公式、53,384参考墨迹像素缺失0；第3页图像像素相同；无KEEP残留。
+- 单语319链接、314移动区域，逐行标签与目标正确；双语638链接坐标/目标正确。28书签、180命名目标保留，双语21页420×297mm，左右101,080/61,110个非空白字符逐页与输入相同。两份PDF均通过qpdf及生产自检。
+- 目视第2页正文宋体与黑体标题、第14页连续联排；保护参考文献/算法保持原样。依旧可能有源段锚定留白，不将本样本推及任意文档。
+
+相关typeset/pipeline共248通过、0失败、5ignored；覆盖语义区域字体、未标记样式、粗斜体/颜色/等宽保持、衬线对齐墨迹、连续联排及固定障碍。Clippy/fmt/release/diff-check通过。strict docs仍有既存HTTP参考中文锚点警告；未测试未修改的Python/UI。
+
+SHA-256：单语`eca7ce1dcd7ea44fdb21323e2c09667c735ea68c5fbacd80bd9a8afd7dbec229`，dual`eb26b0046e48afd716fd0c43262098e90c69b6587ddd0e09593a6c5065605167`。证据`text-serif-v3/{font-audit.json,audit.json,dual-audit.json,events.jsonl,result.json,qpdf*.log,serif-page-*.png}`；脚本`text-serif-font-audit.py`，日志`text-serif-{final-tests,final-clippy,final-fmt,build3,docs}.log`均位于tmp/backend-repair。经验见[字体语义范围与墨迹](../../lessons/pdf-binding-and-render-evidence.md#semantic-font-and-ink)。
