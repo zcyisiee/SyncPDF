@@ -6,7 +6,7 @@
 
 - 用户完整目标：按根目录 `TRANSLATE.md` 更新翻译要求；先 DeepSeek_V41_Tech_Report.pdf，再 TRC时变（核心）.pdf、算法相关综述（ALNS可快速了解方法）.pdf、算法相关综述（VNS，可快速了解方法）.pdf，最后 `/Users/zhengcaiyi/Downloads/2604.03136v6.pdf`。每篇翻译→主控审查→根因定位→委派修复→主控验收；完成一篇自动推进下一篇，不等批准。
 - 翻译使用 agy `gemini-3.8-flash-low`；断联后才改 pi `CNB/deepseek-v4-pro:high`。当前 registry 未列 CNB pro，未发生断联，尚未改用其他模型。
-- 工程委派允许且指定 `CNB/deepseek-v4.1-flash:high`，fork 上下文、Orca 独立 worktree，强约束叶子不委派，主控亲审 diff/测试。旧“不委派/fresh/gpt-6-sol”不适用于本轮。
+- **最新工程委派要求覆盖旧模型/fork偏好**：外部subagent调用本机`devin --model swe-2-high -p`；每项任务新会话，禁止fork/继承主控对话、禁止resume/continue。用户提示256k上下文，brief必须精简自足、明确目标/证据/权限/验收/停止条件。仍用Orca独立worktree、一树一writer、叶子不委派，主控亲审diff与独立测试；翻译模型不变。已联网读取官方commands并实查devin3000.11.1及models list中的swe-2-high，证据`tmp/paper-iteration/devin-cli-research/`。
 - 先根因分析，修缺陷类别并加回归；不硬编码论文，不降低覆盖/写回门禁，不缩字/压行距求通过。沿用 Text宋体、1.0字号/1.5行距，输出单语及dual便于审阅；不改UI。
 - 用户新增要求：每完成一个阶段性任务，必须按逻辑使用中文提交commit，并简要汇报后继续。此次已开始分批提交；不把未验证worker交付混入，也不提交用户既有脏文件。
 - 计划和验收：[13-五篇论文迭代.md](13-五篇论文迭代.md)。全部实测证据在 `tmp/paper-iteration/`，不用 ~/.sp，不改用户未提交 AGENTS.md / untitled.md / cache。
@@ -46,6 +46,8 @@
 - 标点worker `608ee358-ff5b-483b-a6fa-f7796f797f89` 已返回冻结的未完成交付：只改inline_formula.rs，无测试，最后改动未编译；报告称接到截止提醒。该增量**未整合主树、未提交**，须先保存diff/核实再处理，不能当已修复。
 - 主控可见控制字形保护已红→绿，3单元+1真实P20 inventory通过；源归属/墨迹冲突时明确阻断，Python计入blocked。提交前相关7个Rust crate共666通过/16ignored，Python入口44通过、Ruff通过。另审计发现ruled_code在新增PathStroke后错误仅接受None，补元数据不影响算法横线识别回归红→绿（专项4通过），7crate严格Clippy通过。控制符/算法横线补丁尚待下一次真实模型PDF验证，不套用v12产物。
 - 中文分批代码提交：782581d8源墨迹/绘制事务；8652a9a9 agy/学术规则；eea96cb7边界错误有界补译；58f89f53源内容归属/目录引用下划线根式；2a99aa31可见控制字形保护。无push；用户AGENTS.md、TRANSLATE.md、untitled.md、cache保持原状。
+- 文档提交87dca9fa；随后修run.rs一处rustfmt换行（尚未提交）。`deepseek-v13-opaque`已真实1主请求/0补译/350缓存：350/1、51页单语+dual、0送译前冲突/缺口；唯一最终失败P20-002 `atom_source_unplaced`。RCA已定位：source_opaque产生Symbol源原子，但text_atoms::resolve_text只准Formula源重放，分类接缝未贯通。不能把源inventory专项冒充端到端成功；新Devin叶子将修此门禁接缝并复测。
+- 新Orca树均以87dca9fa为基线且新会话：`../iterate-devin-opaque`只修控制字形源重放接缝；`../iterate-devin-punctuation`只修公式外层标点范围。旧608ee358 run已complete/停写但验收rejected，其未测试候选只作只读参考，不整体继承或恢复旧模型。首发workflow `537cf996-9aed-4266-87f3-de034c55c45d` 已failed：child cwd未发现仅存主树的project agent `devin-swe2`，Devin进程/工程子任务均未启动。两树核实干净、仍87dca9fa；已复制相同runner配置到各树`.pi/agents/`并核对哈希/发现结果，作为主控预置只读基线；只按相同external-cli协议重试，不换harness。第二workflow `d99d9a5b-db4a-43ed-8375-d4f6de60ee58` 的smoke `91047754`已真实返回READY；但opaque `294ea9df-b001-40f9-b4a3-f27eadb247c2`、punctuation `c3c57061-ff6e-4713-bcdf-dfce5ca569c9`均在约143秒后provider `unavailable/retryable:true`失败，进程已终止，git核实仅主控预置.pi文件，无源码diff。实际runner argv=swe-2-high、forkContext=false；不是agy断联。保留原状态/日志，同模型同协议串行重试workflow=`dd948bdd-2165-4b6b-b21b-51e0302b8b2e`（mission cdbb9246）：先opaque，成功才启动punctuation；每项仍新会话，不能把探针通过当工程完成。
 - 最终仍需完整真实重译、术语与逐页语义/版面/链接审核及最终整合检查。之后按顺序自动进入余四篇，尚未验收任何论文。
 
 > **最新浮动排版验收：1.0字号/1.5行距，21页、190块全部写入，0回退、0送译前冲突、0覆盖缺口；最新Text宋体产物text-serif-v3，见[宋体验收](12-MVP真实翻译验收.md#text-serif-font)。** [标题验收](12-MVP真实翻译验收.md#heading-adaptive-layout) · [验收报告](12-MVP真实翻译验收.md#inline-formula-coverage) · [经验总结](../../lessons/pdf-binding-and-render-evidence.md#inline-formula-ownership) · [缺陷及历史误报](../../issues/rust-inline-formula-coverage.md)。

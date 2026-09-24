@@ -38,6 +38,22 @@ agy -p "$(cat task-001.md)
 
 Antigravity headless 默认使用新的对话上下文。`--dangerously-skip-permissions` 允许 worker 无需交互批准即可调用工具，`--print-timeout 30m` 限制本次等待时间。
 
+### Devin CLI（SWE-2 High）
+
+本机命令为 `devin`，不是 `devin-cli`。先用 `devin --version`、`devin models list` 核实安装和模型；显式指定 `swe-2-high`，不要依赖默认模型。官方[命令参考](https://docs.devin.ai/cli/reference/commands)与本机帮助已核对。
+
+```bash
+devin --model swe-2-high \
+  --prompt-file task-001.md -p \
+  --permission-mode dangerous \
+  --respect-workspace-trust false
+```
+
+- 从任务实际 worktree 启动，每个任务新建会话，**不传 `-c/--continue`、`-r/--resume`，不 fork 或附带主控对话历史**。SWE-2 上下文约256K；brief应精简自足，只给必要代码/证据路径、明确目标、可写范围、验证及停止条件，按需读取而非倾倒日志。
+- `-p` 是一次性非交互模式；`--prompt-file`从文件读取任务。`dangerous`免除工具交互批准，`--respect-workspace-trust false`跳过非交互无法展示的工作树信任对话；二者仅用于已授权的隔离开发任务，不扩大brief权限，不允许额外写主树/全局配置或嵌套委派。
+- 本项目可通过[外部runner配置](../../.pi/agents/devin-swe2.md)用Pi `subagent`管理Devin进程、超时、日志与完成通知。模型固定在runner argv，不传Pi原生的`model/context/toolBudget/acceptance`等不受支持选项。project agent按child实际cwd发现，故新worktree必须包含同一`.pi/agents/devin-swe2.md`（未提交的主树配置不会自动出现）。先做无工具启动探针；探针成功不是工程验收，仍需主控审diff并独立测试。
+- 外部runner不支持Pi原生steer/resume。brief必须写明自行收束的时间和修正轮数，外层另设硬超时。中断后先确认进程已退出并保存差异，再以新会话作有边界的后续任务；不得静默换模型/harness。
+
 ### Pi
 
 ```bash
