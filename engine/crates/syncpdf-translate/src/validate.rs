@@ -413,6 +413,16 @@ fn max_immediate_repeat(text: &str) -> u32 {
     best
 }
 
+/// 与 `validate` 第 11 步同源的源块数字字面量多重集：
+/// `parse_unit_html` → `text()` → `number_literals`（跨 style 片段取文本，
+/// 不含原子占位、样式号与块 id）。只读提取，供数字补救提示词附逐块清单。
+pub(crate) fn unit_number_literals(unit: &Unit) -> Vec<String> {
+    match parse_unit_html(&unit.html) {
+        Ok(parsed) => number_literals(&parsed.text()),
+        Err(_) => Vec::new(),
+    }
+}
+
 /// 受保护字面量：数字串（允许内部 `.`/`,` 分隔）。
 fn number_literals(text: &str) -> Vec<String> {
     let c: Vec<char> = text.chars().collect();

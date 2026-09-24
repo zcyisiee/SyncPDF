@@ -54,13 +54,28 @@ pub struct DocumentPrompt {
     pub unit_ids: Vec<ParagraphId>,
 }
 impl DocumentPrompt {
-    pub fn with_repair_note(mut self, codes: &[&str]) -> Self {
+    /// `numeric`：`protected_literal_count` 违规块 → 与 `validate` 同源的源数字
+    /// 字面量多重集；作为只读上下文附在补救说明里，不得进入译文。
+    pub fn with_repair_note(
+        mut self,
+        codes: &[&str],
+        numeric: &[(ParagraphId, Vec<String>)],
+    ) -> Self {
         if !codes.is_empty() {
-            let numeric_note = if codes.contains(&"protected_literal_count") {
-                "\nNumeric repair: preserve the exact source digit sequences and their occurrence counts, including numbers inside technical names. Do not add digits when translating spelled-out quantities: use target-language number words instead (for example, 'three' → '三', not '3'). Do not convert numeric units, or repeat a numbered technical name in an added English gloss. KEEP markers already carry their numbers; never repeat their values in prose."
-            } else {
-                ""
-            };
+            let mut numeric_note = String::new();
+            if codes.contains(&"protected_literal_count") {
+                numeric_note.push_str(
+                    "\nNumeric repair: reproduce the exact source digit sequences and their occurrence counts, including numbers inside technical names. Do not rescale magnitudes: 'N million' keeps the digits N unchanged and only the unit word is translated. Do not add digits when translating spelled-out quantities or spelled-out month names: they become target-language words, never new digits. Do not convert numeric units, or repeat a numbered technical name in an added English gloss. KEEP markers already carry their numbers; never repeat their values in prose.",
+                );
+                if !numeric.is_empty() {
+                    numeric_note.push_str(
+                        "\nRequired source digit multiset per block (read-only context; never emit it in the translation):",
+                    );
+                    for (id, lits) in numeric {
+                        numeric_note.push_str(&format!("\n- {id}: {}", literal_multiset(lits)));
+                    }
+                }
+            }
             self.text = format!("The previous response was invalid. Repair requirement: {}\nReturn the same restricted Markdown block IDs; use only known style IDs and preserve atom markers and hard breaks.{}\n\n{}", codes.join(", "), numeric_note, self.text);
         }
         self
@@ -94,6 +109,31 @@ Translate prose into the target language and regional standard. Preserve convent
         ACADEMIC_RULES,
     )
 }
+/// 数字字面量多重集展示：按首次出现顺序，重复项标次数（`0.95 ×2`）；空集 `(none)`。
+fn literal_multiset(lits: &[String]) -> String {
+    if lits.is_empty() {
+        return "(none)".into();
+    }
+    let mut counts: Vec<(&str, usize)> = Vec::new();
+    for l in lits {
+        match counts.iter_mut().find(|(s, _)| *s == l.as_str()) {
+            Some(e) => e.1 += 1,
+            None => counts.push((l.as_str(), 1)),
+        }
+    }
+    counts
+        .into_iter()
+        .map(|(s, n)| {
+            if n > 1 {
+                format!("{s} ×{n}")
+            } else {
+                s.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn source_clause(source_lang: &str) -> String {
     let s = source_lang.trim();
     if s.is_empty() || s.eq_ignore_ascii_case("auto") {
@@ -221,7 +261,7 @@ pub(crate) mod tests {
         assert!(!prompt.system.contains("[[S"));
         assert!(!prompt.system.contains("<!-- id="));
         let original_system = prompt.system.clone();
-        let repaired = prompt.with_repair_note(&["placeholder_count"]);
+        let repaired = prompt.with_repair_note(&["placeholder_count"], &[]);
         assert_eq!(repaired.system, original_system);
         assert!(repaired.text.contains("<!-- syncpdf:block P01-001 -->"));
         // Target language remains a request parameter, not hardcoded to Chinese.
@@ -252,16 +292,21 @@ pub(crate) mod tests {
             .unwrap()
             .remove(0);
         assert!(!prompt.text.contains("Numeric repair:"));
+        let numeric = vec![(
+            "P01-001".parse().unwrap(),
+            vec!["0.95".to_string(), "100.6".to_string(), "0.95".to_string()],
+        )];
         let repaired = prompt
             .clone()
-            .with_repair_note(&["protected_literal_count"]);
+            .with_repair_note(&["protected_literal_count"], &numeric);
         assert_eq!(repaired.system, prompt.system);
         assert!(repaired.text.ends_with(&prompt.text));
         assert!(repaired.text.contains("spelled-out quantities"));
         assert!(repaired.text.contains("occurrence counts"));
         assert!(repaired.text.contains("KEEP markers"));
+        assert!(repaired.text.contains("- P01-001: 0.95 ×2, 100.6"));
         assert!(!prompt
-            .with_repair_note(&["placeholder_count"])
+            .with_repair_note(&["placeholder_count"], &[])
             .text
             .contains("Numeric repair:"));
     }
@@ -316,7 +361,7 @@ pub(crate) mod tests {
         let prompt = build_document_prompts(&spec, &units, &hints)
             .unwrap()
             .remove(0)
-            .with_repair_note(&["placeholder_count"]);
+            .with_repair_note(&["placeholder_count"], &[]);
         assert!(prompt.system.contains("dominant source language is en"));
         assert!(prompt.system.contains("zh-CN"));
         assert!(prompt.system.contains(crate::markdown::TRANSPORT_VERSION));

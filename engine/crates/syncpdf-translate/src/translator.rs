@@ -325,10 +325,11 @@ impl<T: Translator> Engine<T> {
             for g in groups {
                 for half in split_in_half(g) {
                     let codes: Vec<&str> = collect_codes(&half, &last_violations);
+                    let numeric = numeric_inventory(&half, &last_violations);
                     for p in build_document_prompts(spec, &half, &ctx.hints)? {
                         st.retry_prompts += 1;
                         st.prompts += 1;
-                        let p = p.with_repair_note(&codes);
+                        let p = p.with_repair_note(&codes, &numeric);
                         p.check_capacity(spec.max_chars)?;
                         self.run_prompt(
                             &p,
@@ -624,6 +625,22 @@ fn collect_codes(units: &[Unit], last: &HashMap<ParagraphId, Vec<Violation>>) ->
         }
     }
     set.into_iter().map(|v| v.code()).collect()
+}
+
+/// 组内 `protected_literal_count` 违规块的源数字字面量多重集
+///（`validate` 同源提取），作为补救提示词的只读上下文。
+fn numeric_inventory(
+    units: &[Unit],
+    last: &HashMap<ParagraphId, Vec<Violation>>,
+) -> Vec<(ParagraphId, Vec<String>)> {
+    units
+        .iter()
+        .filter(|u| {
+            last.get(&u.id)
+                .is_some_and(|vs| vs.contains(&Violation::ProtectedLiteralCount))
+        })
+        .map(|u| (u.id.clone(), crate::validate::unit_number_literals(u)))
+        .collect()
 }
 
 /// §5.4 按段二分；单段组不再切（进入「整段重试」），交由轮数上限兜底。

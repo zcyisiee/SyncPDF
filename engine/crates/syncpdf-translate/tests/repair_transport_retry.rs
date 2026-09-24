@@ -338,6 +338,8 @@ async fn late_boundary_damage_preserves_earlier_numeric_repair_reason() {
     assert!(prompts[1].text.contains("Numeric repair:"));
     assert!(prompts[1].text.contains("protected_literal_count"));
     assert!(prompts[1].text.contains("invalid_markup"));
+    // 晚到的边界错误不覆盖数字提示：清单仍给出该块的源字面量。
+    assert!(prompts[1].text.contains("- P01-001: 7"));
 }
 
 /// 补译响应里的未知样式仍被既有校验拒绝：结构修补路径不放宽身份门禁。
