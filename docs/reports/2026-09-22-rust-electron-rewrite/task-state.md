@@ -1,6 +1,20 @@
 # Rust PDF 后端修复 · 唯一 Task state
 
-> 更新：2026-09-24；仅用户和主 Agent 可修改。主树 `feat/desktop-develop`。当前任务：五篇真实论文顺序翻译与迭代修复，**进行中**。此前CCS验收属于历史，不是本轮成功证据。
+> 更新：2026-09-24；仅用户和主 Agent 可修改。主树 `feat/desktop-develop`。当前任务：五篇真实论文顺序验证 Rust 编译后端，**进行中**。此前CCS验收属于历史，不是本轮成功证据。
+
+## 最新用户范围澄清（优先）
+
+### 本次恢复与执行计划
+- 用户要求继续，主控仅负责方向、拆解、亲审与简洁验收命令；RCA/测试/开发委派fresh `devin-swe2`，沿用Orca隔离树。每个验收阶段立即中文commit，无需批准自动进入下一篇。
+- 阶段A已完成：亲审9文件diff后，仅撤出Agent自有未提交的review-feedback/提示候选；完整patch及新增测试移存`tmp/paper-iteration/deferred-translation/`。已恢复HEAD编译源码，用户AGENTS.md/TRANSLATE.md/untitled.md/cache原样保留。主控独立translate148通过/2ignored，Python入口49通过。后续必须重建release，旧二进制含已撤出候选；旧v18–20规则hash不可移植，复排优先v17同规则缓存，源身份变化走真实补译，不伪造hash。
+- 阶段B进行中：冒号候选4f0729bb已核实complete/terminal observed。主控已读完整2文件diff，需补核下方等式真实墨迹/未知字形、检测框漏项/间隔内容及最终owner反例，尚不整合。fresh Devin run `3c247166-0472-4632-80c9-4747b5a8a9b6`（mission `3d58274c-3af9-450b-8289-868f600d903d`）在既有Orca `../iterate-devin-colon` 收窄验证，brief=`tmp/paper-iteration/devin-colon-review-followup.md`。60秒attention已核实仍running，外部runner无tool事件，不发不支持的steer/resume。
+- 阶段C：61条点击标签差异只读归因→当前编译版本完整复排和51页版面审查；纯模型缺陷不阻塞编译侧验收、不再新建翻译功能。DeepSeek编译侧验收后立即TRC→ALNS→VNS→2604.03136v6。未完成的检查不报通过。
+
+- Goal 模式已关闭。用户本次要求汇报，并明确：**本轮目标是完善编译侧；纯翻译侧问题无需修改。** 不再为漏译主句、跨块语序、倍数措辞或术语漂移开发提示词/人工语义补译功能，也不以这些纯翻译缺陷代替编译问题。
+- 仍须修源解析/公式与正文边界、字形和原子保护、排版、链接及PDF写回；保留所有数字/KEEP/覆盖/碰撞门禁，模型违规只记录，不靠放宽校验求通过。
+- review-feedback 链路及未提交academic_rules/prompt候选属于翻译侧扩展，**已备份撤出主树，不提交、不计入编译侧成果**。历史v20-review-34为7/0、1主/0补救/6缓存，仅证明翻译反馈效果，不是编译缺陷修复；完整历史证据保留。
+- 冒号叶子重试4f0729bb已complete/terminal observed，2文件冻结快照devin-colon-owned.diff / devin-colon-frozen-status.txt。尚未整合或独立验收；它属于编译前源原子边界缺陷，仍在本轮范围。闭括号已验收提交cdf81bfe。
+- 第一篇完整编译/版面验收仍未结束；61项点击标签差异待归因、逐页视觉复核未完成。其余四篇尚未开始。
 
 ## 当前任务：五篇顺序实测（优先于下方历史偏好）
 
@@ -69,6 +83,9 @@
 - 闭括号叶子c3b557e7已complete/terminal observed、冻结2文件，主控整合后用反例证实三缺口：配对借用另一最终段、开括号无墨迹、找到两词即提前返回漏查后续保护内容。已红→绿加固，记录完整配对字形并验证最终owner；又实证字体变化会把单词片段当两个完整词，改复用严格正文词证明。补未知下标字形不能被基线过滤漏过和真实P09精确GlyphId/clip回归。主控pipeline254单元+9集成通过（16ignored，相关真实项另跑）、真实闭括号/三逗号/根式、Clippy/fmt/release通过。847段独立对比仅P09-003 atom1变化，W成对括号原子不变；证据closeparen-controller-*。
 - `deepseek-v19-page-9`只读复制v18并删除已过时自动P09-003行，真实1主/0补救/7缓存、8/0。亲看第9页，正文闭括号已脱离KEEP且无重复；11原子无缺墨迹、132,473保护字/410目标不变，dual两侧135,607/133,737字、0错误及qpdf通过。最后完整单词加固后的closeparen-final-replay为8/0、0模型，51页1.5×像素与前一真译产物完全相同，审计/qpdf再次通过。这只验收闭括号类别，不包含冒号/全篇语义。经验已提炼至lessons/pdf-binding-and-render-evidence。
 - 随后逐页仅删除一条已知错误自动缓存，v19-page-1/29/34/35均真实1主（第1页另1补救），缓存4/10/6/6；P01比例正确为4分之一/437分之一，P35不再借主句，但P34主句直接遗漏，P29冒号仍卡在KEEP定语内。逐页隔离不是泛化修复，不能盲重试；最新完整缓存在v19-page-35，未手写任何目标。候选academic_rules/prompt仍未提交，规则不构成质量保证。后续需修冒号源边界，并研究如何把明确人工审查反馈交给真实模型而不是无反馈重采样。
+- 闭括号已提交cdf81bfe。下一冒号叶子：Orca `../iterate-devin-colon`，cdf81bfe干净基线；brief=devin-colon-brief.md。仅inline_formula/tests证明段末冒号引出紧邻独立公式，仍须严格末字形/完整正文词/配对/墨迹/最终归属证据，不能泛化数学比例/映射冒号；不安全则停写报告。20分钟自停/25分钟硬限，fresh外部Devin swe-2-high；私有target由已停止closeparen树搬入并touch源码。主控只读后将独立验收，同期研究人工语义反馈接缝，不改该叶子源码。首run=54a9aab3-2516-4ef2-8f2f-5d851e26a81e、mission dae88c06已在约401秒后provider unavailable/retryable失败，terminal observed；核实该Orca树仍cdf81bfe、源码干净，快照devin-colon-failed-*。不是agy断联；同harness/模型新会话重试一次，不resume或换执行方式。重试run=4f0729bb-b9ae-440a-971f-98f0f25f8596、mission4f22d982已启动；注意力告警后status仍running/terminal pending，不向一次性runner发steer。
+- 人工反馈RCA实测：v19-page-34真实请求明确包含完整主句`Its performance remains robust`，不是源解析漏文；Rust只有数字/格式自动repair反馈，没有人工逐块语义反馈入口。用既有`bdt harness-call`的agy Flash/low profile做两次隔离诊断（feedback-diagnostic{,-v2}，未入缓存/未生成PDF）：仅提醒漏主句时模型补出了源块没有的“发生变化”，还把end写在同一行；进一步诊断要求保持原主从句顺序、尾部仍是未完名词短语后，模型保留了主句且未编造续句，边界正确。不是通用可靠性或最终PDF验收，不据此放宽门禁。
+- 下一主控实现方案（尚未实现）：给现有bdt/Rust链路增加源绑定的逐块审查反馈，而非继续全局改规则/盲采样。候选JSON记录id、精确source_html、message；验证所有ID/源一致、拒绝manual目标与cache-only后才使已指明的自动缓存失效，真实重译沿用全部门禁/既有补救次数。反馈只作同一源规则下的一次修复诊断，不是新翻译规则，不伪造新hash或手写目标；成功译文按原规则/术语身份正常入缓存，后续无反馈可复排。需验证当前源绑定、手工保护、无反馈兼容、主/补救请求作用域、容量上限、失败前不发送/不误交付，再用P34真实入口检验。若改为持久翻译约束，则必须进入缓存身份；不能混淆两种语义。
 - 最终仍需完整真实重译、术语与逐页语义/版面/链接审核及最终整合检查。之后按顺序自动进入余四篇，尚未验收任何论文。
 
 > **最新浮动排版验收：1.0字号/1.5行距，21页、190块全部写入，0回退、0送译前冲突、0覆盖缺口；最新Text宋体产物text-serif-v3，见[宋体验收](12-MVP真实翻译验收.md#text-serif-font)。** [标题验收](12-MVP真实翻译验收.md#heading-adaptive-layout) · [验收报告](12-MVP真实翻译验收.md#inline-formula-coverage) · [经验总结](../../lessons/pdf-binding-and-render-evidence.md#inline-formula-ownership) · [缺陷及历史误报](../../issues/rust-inline-formula-coverage.md)。
