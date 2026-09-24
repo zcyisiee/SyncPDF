@@ -222,9 +222,16 @@ fn type3_differences_and_tounicode_are_explicit_sources() {
     assert!(b.check_replacement().is_err());
 }
 
+/// 一个门禁用例：名称、是否 Type3、字体 Encoding、可选 CMap 流、内容流字节。
+type GateCase = (&'static str, bool, Object, Option<Vec<u8>>, Vec<u8>);
+
+/// O4：不可证明操作按「几何可取与否」分流——取得到几何的成为操作级不可删除
+/// 墨迹（门禁放行该页其余内容），取不到的仍按页级 fail-closed 拒绝。
 #[test]
-fn unknown_empty_conflicting_and_multicode_stay_closed() {
-    let cases = [
+fn unprovable_ops_split_into_page_closed_and_undeletable_ink() {
+    // 页级 fail-closed：pdfium 侧取不到可用的对象几何，无从记录墨迹。
+    let closed: [GateCase; 3] = [
+        // 差异表指向不存在的字形名 → 对象本身不可解码。
         (
             "unknown-name",
             true,
@@ -232,6 +239,32 @@ fn unknown_empty_conflicting_and_multicode_stay_closed() {
             None,
             duplicate("07", 0.0),
         ),
+        // Type3 CharProc 缺失 → 同上。
+        (
+            "missing-charproc",
+            true,
+            differences("six"),
+            None,
+            duplicate("07", 0.0),
+        ),
+        // 对象边界退化（零宽/零高）→ 墨迹矩形无意义。
+        (
+            "degenerate",
+            false,
+            "WinAnsiEncoding".into(),
+            None,
+            b"BT /F 16 Tf 0 0 0 0 20 40 Tm (A) Tj ET".to_vec(),
+        ),
+    ];
+    for (name, t3, enc, cm, text) in closed {
+        let (b, _) = fixture(name, &text, t3, enc, cm.as_deref(), false);
+        assert!(b.check_replacement().is_err(), "{name}: {:?}", b.stats);
+        assert!(b.object_geometry_evidence().is_empty(), "{name}");
+        assert!(b.unproven_source_ops().is_empty(), "{name}");
+    }
+
+    // 操作级：pdfium 对象边界可取 → 记为不可删除源墨迹，门禁不再拒绝整页。
+    let op_level = [
         (
             "unknown-encoding",
             false,
@@ -278,13 +311,6 @@ fn unknown_empty_conflicting_and_multicode_stay_closed() {
             duplicate("41", 0.0),
         ),
         (
-            "missing-charproc",
-            true,
-            differences("six"),
-            None,
-            duplicate("07", 0.0),
-        ),
-        (
             "conflicting-differences",
             true,
             Object::Dictionary(
@@ -300,18 +326,24 @@ fn unknown_empty_conflicting_and_multicode_stay_closed() {
             None,
             duplicate("4142", 0.0),
         ),
-        (
-            "degenerate",
-            false,
-            "WinAnsiEncoding".into(),
-            None,
-            b"BT /F 16 Tf 0 0 0 0 20 40 Tm (A) Tj ET".to_vec(),
-        ),
     ];
-    for (name, t3, enc, cm, text) in cases {
+    for (name, t3, enc, cm, text) in op_level {
         let (b, _) = fixture(name, &text, t3, enc, cm.as_deref(), false);
-        assert!(b.check_replacement().is_err(), "{name}: {:?}", b.stats);
+        b.check_replacement()
+            .unwrap_or_else(|e| panic!("{name}: 操作级降级不应拒绝整页：{e}"));
         assert!(b.object_geometry_evidence().is_empty(), "{name}");
+        let ink = b.unproven_source_ops();
+        assert_eq!(
+            ink.len() as u32,
+            b.stats.degraded,
+            "{name}: 每个降级操作都应有墨迹记录：{:?}",
+            b.stats
+        );
+        assert!(
+            ink.iter()
+                .all(|u| u.ink.width() > 0.0 && u.ink.height() > 0.0),
+            "{name}: 墨迹几何非退化"
+        );
     }
 }
 
@@ -399,6 +431,8 @@ fn type0_requires_complete_identity_h_source_code() {
     let cm = String::from_utf8(cmap("1 beginbfchar <0041> <0041> endbfchar"))
         .unwrap()
         .replace("<00> <FF>", "<0000> <FFFF>");
+    // accepted = 走对象几何绑定；otherwise 操作级降级（O4：记墨迹放行）或
+    // 页级拒绝（码不完整时 pdfium 解不出对象几何）。
     for (name, encoding, code, accepted) in [
         ("identity-h", "Identity-H", "0041", true),
         ("identity-v", "Identity-V", "0041", false),
@@ -417,9 +451,17 @@ fn type0_requires_complete_identity_h_source_code() {
             assert!(objects[1].chars.is_empty());
             assert_eq!(b.stats.object_geometry_bound_ops, 1);
             b.check_replacement().unwrap();
-        } else {
-            assert!(b.object_geometry_evidence().is_empty(), "{name}");
+        } else if name == "partial-identity-h" {
+            // 码不完整 → 无对象几何可记 → 页级 fail-closed。
             assert!(b.check_replacement().is_err(), "{name}: {:?}", b.stats);
+            assert!(b.unproven_source_ops().is_empty(), "{name}");
+        } else {
+            // Identity-V / 未知 CMap：不按对象几何绑定，但对象边界可取 →
+            // 操作级不可删除墨迹，门禁放行。
+            assert!(b.object_geometry_evidence().is_empty(), "{name}");
+            assert_eq!(b.unproven_source_ops().len(), 1, "{name}: {:?}", b.stats);
+            b.check_replacement()
+                .unwrap_or_else(|e| panic!("{name}: 操作级降级不应拒绝整页：{e}"));
         }
     }
 }

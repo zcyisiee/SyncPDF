@@ -36,6 +36,8 @@ def fake_engine(tmp_path: Path) -> Path:
         "if mode in ('coverage', 'opaque'):\n"
         "    emit(type='issue', code='unmapped_source_glyph' if mode == 'opaque' else 'protected_source_overlap', paragraph_id='P3', page=1)\n"
         "    emit(type='issue', code='coverage_gap', page=1)\n"
+        "if mode == 'page_unreliable':\n"
+        "    emit(type='issue', code='bind_page_unreliable', paragraph_id='P3', page=1)\n"
         "if mode != 'unready':\n"
         "    emit(type='page_ready', page=1)\n"
         "mode = os.getenv('FAKE_MODE', 'success')\n"
@@ -155,6 +157,19 @@ def test_pretranslation_block_is_counted_as_incomplete(tmp_path: Path, fake_engi
     assert result["blocked_before_translation"] == 1
     assert result["coverage_gap_pages"] == [1]
     assert result["unsuccessful_blocks"] == 2  # one layout failure plus one pretranslation block
+
+
+def test_bind_unreliable_page_kept_source_counts_as_incomplete(tmp_path: Path, fake_engine: Path) -> None:
+    """源绑定页级不可信的段落保留原文：计入 blocked，不冒充成功。"""
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    completed, payload = _run(pdf, tmp_path / "run", fake_engine, mode="page_unreliable")
+    assert completed.returncode == 1
+    result = payload["error"]
+    assert result["code"] == "engine_incomplete"
+    assert result["blocked_before_translation"] == 1
+    assert result["coverage_gap_pages"] == []  # 页保留原文不是布局覆盖缺口
+    assert result["unsuccessful_blocks"] == 2  # one layout failure plus one kept-source page block
 
 
 def test_existing_run_logs_are_not_overwritten(tmp_path: Path, fake_engine: Path) -> None:

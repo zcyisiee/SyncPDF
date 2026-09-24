@@ -8,9 +8,9 @@ Unix `run`/`translate`在原生组件加载前用安全FD API保留原stdout为J
 
 ## 解析与绑定
 
-PDFium 提供对象/字符几何，lopdf 提供源操作与字节。调用方必须保证两者读取同一不可变输入版本；先全页绑定，再修改 lopdf 文档。`BoundPage::check_replacement` 在 source 返回翻译输入前和公共删除 API 中检查已知异常、重复源操作、页身份与完整源跨度。
+PDFium 提供对象/字符几何，lopdf 提供源操作与字节。调用方必须保证两者读取同一不可变输入版本；先全页绑定，再修改 lopdf 文档。`BoundPage::check_replacement` 在 source 返回翻译输入前和公共删除 API 中检查已知异常、重复源操作、页身份与完整源跨度；source 拒绝的页不再中止整份文档，而是标记页级不可信、整页保留原文（`bind_page_unreliable`），其它页照常。
 
-真实源 code 与提取字符不一一对应：generated 空格不具有可删除字节；连字可包含多个 Unicode 字符；折叠空格保留源 code；明确空映射无法得到可信几何时拒绝替换。CMap 支持 bfchar/bfrange 与 UTF-16 代理对。通过门禁不代表未知编码、所有 fallback 或全部 PDF 已获认证。
+真实源 code 与提取字符不一一对应：generated 空格不具有可删除字节；连字可包含多个 Unicode 字符；折叠空格保留源 code。对齐降级（degraded/unbound）的操作按对象级处理：pdfium 对象边界可取时记为不可删除源墨迹（`UnprovenSourceOp`，页面坐标），与该墨迹相交或含其字形的段落保留原文（`unmapped_source_glyph`），其字形永不删除（`PatchSet` 拒绝含它们的删除请求）；取不到对象几何时 fail closed 为页级不可信，不猜。CMap 支持 bfchar/bfrange 与 UTF-16 代理对。通过门禁不代表未知编码、所有 fallback 或全部 PDF 已获认证。
 
 PDFium 去重后缺少字符的对象，仅在严格匹配的单 code `Tj`、自身有效 rotated bounds/matrix、有明确 ToUnicode/Encoding 证据时恢复。对象几何与字符几何分开记证据和统计；Type0 恢复仅支持完整 Identity-H 双字节 code。多 code、TJ、Identity-V、未知/冲突映射继续拒绝。
 

@@ -490,6 +490,14 @@ impl Pipeline {
                 .find(|p| p.page.0 == *page)
                 .ok_or_else(|| PipelineError::Protocol("区域所属页缺少 IR".into()))?;
             let mut paragraphs = analyze_page(ir, regions);
+            if let Some(b) = bound_pages.iter().find(|b| b.ir.page.0 == *page) {
+                // 不可证明源墨迹/页级不可信 → 段落保留原文（单一接入点）。
+                stages::source_unproven::protect(
+                    &mut paragraphs,
+                    b.reliability,
+                    b.unproven_source_ops(),
+                );
+            }
             stages::source_policy::protect_front_matter(ir, regions, &mut paragraphs);
             stages::source_opaque::protect(&mut paragraphs, ir);
             stages::source_decoration::claim(ir, &mut paragraphs);
@@ -516,19 +524,28 @@ impl Pipeline {
             .cloned()
             .partition(|p| matches!(p.translatable, Translatable::Yes));
         for p in &not_replaced {
-            if matches!(&p.translatable, Translatable::No { reason } if matches!(reason.as_str(), "protected_source_overlap" | "rotated_source_text" | "translatable_region_overlap" | "unmapped_source_glyph"))
-            {
-                sink.emit(Event::Issue {
-                    severity: Severity::Warning,
-                    code: match &p.translatable {
-                        Translatable::No { reason } => reason.clone(),
-                        _ => unreachable!(),
-                    },
-                    paragraph_id: Some(p.id.clone()),
-                    page: Some(p.id.page),
-                    message: "源段落的重叠归属、旋转方向或未映射字形尚未可靠处理，已保留原文"
-                        .into(),
-                });
+            if let Translatable::No { reason } = &p.translatable {
+                let message = match reason.as_str() {
+                    "protected_source_overlap"
+                    | "rotated_source_text"
+                    | "translatable_region_overlap"
+                    | "unmapped_source_glyph" => {
+                        Some("源段落的重叠归属、旋转方向或未映射字形尚未可靠处理，已保留原文")
+                    }
+                    "bind_page_unreliable" => {
+                        Some("源绑定结构错误，整页保留原文，不删除该页任何字形")
+                    }
+                    _ => None,
+                };
+                if let Some(message) = message {
+                    sink.emit(Event::Issue {
+                        severity: Severity::Warning,
+                        code: reason.clone(),
+                        paragraph_id: Some(p.id.clone()),
+                        page: Some(p.id.page),
+                        message: message.into(),
+                    });
+                }
             }
             sink.emit(Event::Paragraph {
                 paragraph_id: p.id.clone(),
@@ -765,7 +782,7 @@ impl Pipeline {
         };
         // 按策略保留的 reference/脚注等不是回退；保护冲突阻断的可译内容则未完成。
         let protected = not_replaced.iter().filter(|p| {
-            matches!(&p.translatable, Translatable::No { reason } if matches!(reason.as_str(), "protected_source_overlap" | "rotated_source_text" | "translatable_region_overlap" | "unmapped_source_glyph"))
+            matches!(&p.translatable, Translatable::No { reason } if matches!(reason.as_str(), "protected_source_overlap" | "rotated_source_text" | "translatable_region_overlap" | "unmapped_source_glyph" | "bind_page_unreliable"))
         }).count();
         let ok = summary_stats.fallbacks == 0
             && protected == 0
@@ -1262,7 +1279,7 @@ fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) -> Result<
     Ok(())
 }
 
-/// bind 阶段的问题转 `issue`；文本对象数与 text-show 操作数不符另报一条。
+/// bind 阶段的问题转 `issue`；操作级不可证明墨迹、页级不可信、对象数不符各报。
 fn emit_bind_issues(sink: &mut SharedSink, bound: &BoundPage) {
     let page = bound.ir.page.number();
     for msg in &bound.issues {
@@ -1272,6 +1289,27 @@ fn emit_bind_issues(sink: &mut SharedSink, bound: &BoundPage) {
             paragraph_id: None,
             page: Some(page),
             message: msg.clone(),
+        });
+    }
+    for u in bound.unproven_source_ops() {
+        sink.emit(Event::Issue {
+            severity: Severity::Warning,
+            code: "bind_degraded".into(),
+            paragraph_id: None,
+            page: Some(page),
+            message: format!(
+                "unprovable source op ink kept (paragraphs overlapping {:?} stay source): {}",
+                u.ink, u.note
+            ),
+        });
+    }
+    if bound.reliability.is_unreliable() {
+        sink.emit(Event::Issue {
+            severity: Severity::Warning,
+            code: "bind_page_unreliable".into(),
+            paragraph_id: None,
+            page: Some(page),
+            message: "源绑定结构错误，整页保留原文".into(),
         });
     }
     if bound.stats.text_objects != bound.stats.text_ops {

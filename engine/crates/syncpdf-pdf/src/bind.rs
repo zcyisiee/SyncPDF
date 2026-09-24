@@ -119,6 +119,43 @@ pub struct ObjectGeometryEvidence {
     pub unicode_source: ObjectUnicodeSource,
 }
 
+/// 一个操作级不可证明的源操作及其不可删除的页面墨迹。
+///
+/// 来源：`bind_glyphs` 的降级分支（对齐不可解释 / unbound 字形），且该操作
+/// 的 pdfium 对象边界可取（经 Form/CTM 变换到页面坐标）。该操作的字形**永不
+/// 删除**（§7 不变量）；与之相交的段落不送译、保留原文（原因码
+/// `unmapped_source_glyph`）。取不到几何的降级操作不进本结构，而是留在
+/// `issues` 里让门禁按页级拒绝。
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnprovenSourceOp {
+    /// 不可证明的源操作（其字形永不删除）。
+    pub op: OpKey,
+    /// 页面坐标下的 pdfium 对象边界：不可删除源墨迹。
+    pub ink: Rect,
+    /// 降级原因（诊断字符串，进事件）。
+    pub note: String,
+}
+
+/// 页级绑定可靠性：`check_replacement` 拒绝（结构错误）时整页保留原文。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PageReliability {
+    /// 门禁通过（可能带操作级 [`UnprovenSourceOp`] 记录，按段落粒度处理）。
+    #[default]
+    Reliable,
+    /// 页级结构错误：该页不删除任何字形、全部段落保留原文。
+    Unreliable,
+}
+
+impl PageReliability {
+    pub fn is_reliable(&self) -> bool {
+        matches!(self, Self::Reliable)
+    }
+
+    pub fn is_unreliable(&self) -> bool {
+        matches!(self, Self::Unreliable)
+    }
+}
+
 /// 绑定结果。
 #[derive(Debug, Clone)]
 pub struct BoundPage {
@@ -131,9 +168,12 @@ pub struct BoundPage {
     pub form_dos: Vec<FormDo>,
     /// 页对象 id。
     pub page_id: ObjectId,
+    /// 页级可靠性（source 阶段在 `check_replacement` 拒绝后标记）。
+    pub reliability: PageReliability,
     // Expected code/byte coverage from parsed source operations, independent of IR assembly.
     source_spans: Vec<(OpKey, u32, u32)>,
     object_geometry_evidence: Vec<ObjectGeometryEvidence>,
+    unproven_ops: Vec<UnprovenSourceOp>,
     source_snapshot: SourceSnapshot,
 }
 
@@ -188,8 +228,32 @@ impl BoundPage {
         &self.object_geometry_evidence
     }
 
+    /// 操作级不可证明（且有几何记录）的源操作墨迹。
+    pub fn unproven_source_ops(&self) -> &[UnprovenSourceOp] {
+        &self.unproven_ops
+    }
+
+    /// 该操作是否操作级不可证明（其字形永不删除）。
+    pub fn is_unproven_op(&self, op: &OpKey) -> bool {
+        self.unproven_ops.iter().any(|u| &u.op == op)
+    }
+
+    /// source 阶段在 `check_replacement` 拒绝后调用：整页保留原文。
+    ///
+    /// 拒绝原因进 `issues`（随事件上报），之后该页不删除任何字形、
+    /// 全部段落保留原文（原因码 `bind_page_unreliable`）。
+    pub fn mark_page_unreliable(&mut self, reason: String) {
+        self.reliability = PageReliability::Unreliable;
+        self.issues.push(reason);
+    }
+
     /// Fail closed on reported anomalies and ambiguous/missing source identities.
     /// This only rejects known unsafe bindings; it does not certify the aligner.
+    ///
+    /// 操作级降级（有 [`UnprovenSourceOp`] 几何记录）不算失败：这些操作的
+    /// 字形永不删除、相交段落保留原文，页面其余部分照常替换。任何没有几何
+    /// 记录的降级操作（无 pdfium 对象、对象边界不可取）都会在这里 fail
+    /// closed，按页级拒绝——不猜。
     pub fn check_replacement(&self) -> Result<(), ReplacementError> {
         let mut source_ops = BTreeSet::new();
         for &(op, _, _) in &self.source_spans {
@@ -198,14 +262,17 @@ impl BoundPage {
             }
         }
         let s = self.stats;
-        if s.degraded != 0
-            || s.unbound_glyphs != 0
-            || s.text_objects != s.text_ops
+        // `degraded` 计入恒等式；且每个降级操作都必须有几何记录。
+        // `unbound_glyphs` 只住在降级操作里：降级为 0 而未绑定字形非 0 即矛盾。
+        if s.text_objects != s.text_ops
             || u64::from(s.matched)
                 + u64::from(s.space_collapsed)
                 + u64::from(s.object_geometry_bound_ops)
+                + u64::from(s.degraded)
                 != u64::from(s.text_ops)
             || s.object_geometry_bound_ops as usize != self.object_geometry_evidence.len()
+            || s.degraded as usize != self.unproven_ops.len()
+            || (s.degraded == 0 && s.unbound_glyphs != 0)
         {
             return Err(ReplacementError::Statistics(s));
         }
@@ -1917,6 +1984,7 @@ fn bind_glyphs(
     stats: &mut BindStats,
     issues: &mut Vec<String>,
     evidence: &mut Vec<ObjectGeometryEvidence>,
+    unproven: &mut Vec<UnprovenSourceOp>,
 ) -> GlyphGroups {
     let mut out = GlyphGroups::new();
     for (path, ops) in ops_by_group {
@@ -2133,7 +2201,7 @@ fn bind_glyphs(
                     } else {
                         stats.degraded += 1;
                         stats.unbound_glyphs += n_unbound;
-                        issues.push(format!(
+                        let note = format!(
                             "align op={} stream={} codes={} clusters={} collapsed={} unbound={} leftover={} to_unicode_mismatch={}",
                             fop.key.op_index,
                             fop.key.stream.obj,
@@ -2143,12 +2211,23 @@ fn bind_glyphs(
                             n_unbound,
                             leftovers,
                             n_mismatch
-                        ));
+                        );
+                        // 操作级降级：几何可取 → 记录不可删除墨迹（段落按此排除）；
+                        // 几何不可取 → 保持 fail-closed（issues 非空 → 门禁按页级拒绝）。
+                        match obj.object_bounds {
+                            Some(bounds) => unproven.push(UnprovenSourceOp {
+                                op: fop.key,
+                                ink: bounds.bbox,
+                                note,
+                            }),
+                            None => issues.push(format!("{note}; no object bounds")),
+                        }
                     }
                     glyphs
                 }
                 None => {
                     // 降级：无 pdfium 对象，自行解码计数，无 unicode / 空 bbox。
+                    // 无对象即无几何 → 页级 fail-closed（不进 unproven 记录）。
                     stats.degraded += 1;
                     stats.unbound_glyphs += codes.len() as u32;
                     issues.push(format!(
@@ -2307,6 +2386,7 @@ pub fn bind_page(worker: &PdfiumWorker, doc: DocId, lo: &Document, page: u32) ->
     }
 
     let mut object_geometry_evidence = Vec::new();
+    let mut unproven_ops = Vec::new();
     let groups = bind_glyphs(
         lo,
         &ops_by_group,
@@ -2315,6 +2395,7 @@ pub fn bind_page(worker: &PdfiumWorker, doc: DocId, lo: &Document, page: u32) ->
         &mut stats,
         &mut out.issues,
         &mut object_geometry_evidence,
+        &mut unproven_ops,
     );
     let keys: Vec<_> = out.flat_text.iter().map(|op| op.key).collect();
     assign_glyphs(&mut out.items, &keys, groups, &mut out.issues);
@@ -2356,8 +2437,10 @@ pub fn bind_page(worker: &PdfiumWorker, doc: DocId, lo: &Document, page: u32) ->
         issues: out.issues,
         form_dos: out.form_dos,
         page_id,
+        reliability: PageReliability::Reliable,
         source_spans,
         object_geometry_evidence,
+        unproven_ops,
         source_snapshot: SourceSnapshot {
             contents,
             streams: out.stream_bytes,

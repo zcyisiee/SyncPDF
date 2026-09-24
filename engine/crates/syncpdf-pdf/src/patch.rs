@@ -48,6 +48,8 @@ pub enum PatchError {
     UnsafeBinding(#[from] ReplacementError),
     #[error("unknown or cross-page glyph: {0}")]
     UnknownGlyph(GlyphId),
+    #[error("unproven source glyph {0:?}: its operation lacks proof, deletion forbidden")]
+    UnprovenGlyph(GlyphId),
     #[error("patch target does not match bound page")]
     PageIdentity,
 
@@ -115,6 +117,10 @@ impl PatchSet {
         for id in ids {
             if !known.contains(id) {
                 return Err(PatchError::UnknownGlyph(*id));
+            }
+            // §7：操作级不可证明的字形永不删除（门禁放行该页其余字形）。
+            if bound.is_unproven_op(&id.op) {
+                return Err(PatchError::UnprovenGlyph(*id));
             }
         }
         self.page = Some(page);
