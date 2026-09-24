@@ -157,9 +157,19 @@ impl Shaper for StoreShaper<'_> {
         rtl: bool,
     ) -> Vec<ShapedGlyph> {
         let slot = FontId(font);
+        // 等宽 run 的回退链以黑体打头（等宽包只有拉丁字形，CJK 由
+        // Noto Sans CJK 承担），并绕开斜体真面重排——等宽链的主字体
+        // 已是真斜体面。
+        if style.mono {
+            let chain = self.profile.mono_fallbacks();
+            return self.shape_with_chain(slot, &chain, Some(style), text, size, rtl);
+        }
         let mut chain = self.profile.fallbacks();
         let primary = if style.italic && !self.is_italic_face(slot) {
-            let serif = style.serif && !style.mono;
+            // 斜体 run：有真斜体面的脚本（拉丁）排到真面，主槽面退为首个
+            // 回退；serif 与否跟随角色选字结果（正文角色的主槽即衬线面，
+            // 拉丁真斜体也应对应衬线族），源 run 的 serif 标志不再参与。
+            let serif = self.role == Role::Body;
             match syncpdf_font::resolve_variant(
                 self.store,
                 serif,
@@ -204,22 +214,12 @@ impl Shaper for StoreShaper<'_> {
         if let Some(font) = style.font {
             return font;
         }
+        // 等宽 run 优先于区域角色（正文里的代码 run 仍用等宽面）。
         let role = if style.mono { Role::Mono } else { self.role };
-        let variant = FontVariant::of(style.bold, style.italic);
-        let face = if style.serif && !style.mono {
-            // Text 区域正文策略：目标脚本衬线族，与角色槽共用同一套
-            // 真斜体/合成判定；衬线查询完全无候选时回落角色槽。
-            syncpdf_font::resolve_variant(
-                self.store,
-                true,
-                syncpdf_font::profile::lang_script(&self.profile.target_lang),
-                variant,
-            )
-            .unwrap_or_else(|| self.profile.pick_variant(role, variant))
-        } else {
-            self.profile.pick_variant(role, variant)
-        };
-        face.font.0
+        self.profile
+            .pick_variant(role, FontVariant::of(style.bold, style.italic))
+            .font
+            .0
     }
 }
 
@@ -334,11 +334,20 @@ pub fn dominant_font_size(para: &Paragraph) -> f32 {
     unreachable!("nonempty weighted size list")
 }
 
+/// 区域类别 → 字体角色（角色选字的唯一映射，见 `StoreShaper::font_for`）：
+/// 文档/段落标题用无衬线标题面，其余一切区域（含 Caption/Abstract/List/Code）
+/// 都按正文角色选字；`style.mono` 的等宽 run 在 `font_for` 内优先于本角色。
+pub fn role_for_region(kind: syncpdf_core::ir::RegionKind) -> Role {
+    use syncpdf_core::ir::RegionKind;
+    match kind {
+        RegionKind::Title => Role::DocTitle,
+        RegionKind::ParagraphTitle => Role::ParagraphTitle,
+        _ => Role::Body,
+    }
+}
+
 /// 段落 → `ParagraphSpec`。
 pub fn spec_for(para: &Paragraph) -> ParagraphSpec {
-    // Text uses the target script's serif family (Noto Serif CJK SC for zh-CN).
-    // Other semantic regions and explicit monospace runs retain their selection.
-    let body_serif = para.kind == syncpdf_core::ir::RegionKind::Text;
     let mut styles: Vec<(StyleId, StyleSpec)> = para
         .style_runs
         .iter()
@@ -350,7 +359,7 @@ pub fn spec_for(para: &Paragraph) -> ParagraphSpec {
                     italic: r.italic,
                     mono: r.mono,
                     script: false,
-                    serif: r.serif || body_serif,
+                    serif: r.serif,
                     size: Some(r.size),
                     color: Some(r.color),
                     font: None,
@@ -374,14 +383,8 @@ pub fn spec_for(para: &Paragraph) -> ParagraphSpec {
         })
         .collect();
     // Unstyled translated text is StyleId(0), even if source runs start at 1.
-    if body_serif && !styles.iter().any(|(id, _)| *id == StyleId(0)) {
-        styles.push((
-            StyleId(0),
-            StyleSpec {
-                serif: true,
-                ..Default::default()
-            },
-        ));
+    if !styles.iter().any(|(id, _)| *id == StyleId(0)) {
+        styles.push((StyleId(0), StyleSpec::default()));
     }
     let color: Color = para.style_runs.first().map(|r| r.color).unwrap_or_default();
     ParagraphSpec {
@@ -789,6 +792,7 @@ mod tests {
         let shaper = StoreShaper::new(&store, &profile);
         let mut para = paragraph("P01-001", "source", Rect::new(0.0, 0.0, 400.0, 100.0));
         para.kind = RegionKind::Title;
+        let shaper = shaper.with_role(role_for_region(para.kind));
         para.style_runs[0].bold = true;
         para.style_runs[0].italic = true;
         let parsed =
@@ -851,82 +855,257 @@ mod tests {
         }
     }
 
+    /// 角色映射（唯一映射点）：Title→DocTitle、ParagraphTitle→ParagraphTitle、
+    /// 其余一切区域（含 Text/Caption/List/Abstract/Code/Reference 等）→Body。
     #[test]
-    fn only_text_uses_serif_for_styled_and_unstyled_translation() {
+    fn role_for_region_maps_kinds_to_roles() {
+        assert_eq!(
+            role_for_region(RegionKind::Title),
+            Role::DocTitle,
+            "文档标题"
+        );
+        assert_eq!(
+            role_for_region(RegionKind::ParagraphTitle),
+            Role::ParagraphTitle,
+            "段落标题"
+        );
+        for kind in [
+            RegionKind::Text,
+            RegionKind::List,
+            RegionKind::Caption,
+            RegionKind::Table,
+            RegionKind::Figure,
+            RegionKind::Formula,
+            RegionKind::Header,
+            RegionKind::Footer,
+            RegionKind::FootNote,
+            RegionKind::Reference,
+            RegionKind::Code,
+            RegionKind::Abstract,
+            RegionKind::Other,
+        ] {
+            assert_eq!(role_for_region(kind), Role::Body, "{kind:?}");
+        }
+    }
+
+    /// 角色选字：一切非标题区域（含 Caption/Abstract/List）→ 思源宋体；
+    /// 标题角色 → 黑体。源 run 是衬线字体的标题仍用黑体（角色优先于源
+    /// serif 标志）。反例：非标题区域的任何字形都不落黑体。
+    #[test]
+    fn role_selects_serif_body_and_heiti_headings() {
         let Some((store, profile)) = fonts() else {
+            eprintln!("SKIP: 字体包缺失");
             return;
         };
-        let shaper = StoreShaper::new(&store, &profile);
         let parsed =
             parse_unit_html(r#"<p id="P01-001">正文<span data-style="1">强调</span></p>"#).unwrap();
         for kind in [
             RegionKind::Text,
             RegionKind::Abstract,
             RegionKind::Caption,
+            RegionKind::List,
             RegionKind::Title,
             RegionKind::ParagraphTitle,
-            RegionKind::List,
         ] {
             let mut para = paragraph("P01-001", "source", Rect::new(0., 0., 200., 100.));
             para.kind = kind;
             para.style_runs[0].bold = true;
+            // 源衬线标志不得改变角色选字（标题仍黑体、正文仍按角色）。
+            para.style_runs[0].serif = true;
+            let shaper = StoreShaper::new(&store, &profile).with_role(role_for_region(kind));
             let result = typeset_one(&shaper, &para, &parsed, &Obstacles::default());
-            assert!(!result.paragraph.overflow);
-            let family = if kind == RegionKind::Text {
-                "Noto Serif CJK SC"
-            } else {
+            assert!(!result.paragraph.overflow, "{kind:?}");
+            let heading = matches!(kind, RegionKind::Title | RegionKind::ParagraphTitle);
+            let family = if heading {
                 "Noto Sans CJK SC"
+            } else {
+                "Noto Serif CJK SC"
             };
             for glyph in result.paragraph.lines.iter().flat_map(|l| &l.glyphs) {
                 let font = store.get(FontId(glyph.font)).unwrap();
                 assert_eq!(font.family, family, "{kind:?}: {}", glyph.text);
-                assert_eq!(font.weight >= 600, glyph.style == StyleId(1));
+                // 源粗体只对正文角色改变字重；标题角色槽本身即粗面锚点。
+                if !heading {
+                    assert_eq!(font.weight >= 600, glyph.style == StyleId(1));
+                } else {
+                    assert!(font.weight >= 600, "标题面为粗面：{}", font.weight);
+                }
                 assert_eq!(glyph.size, 10.);
             }
             assert!(
-                !para.style_runs[0].serif,
+                para.style_runs[0].serif,
                 "target policy must not change source IR"
             );
         }
     }
 
     #[test]
-    fn text_font_policy_preserves_run_properties_and_monospace_selection() {
+    fn role_policy_preserves_run_properties_and_monospace_precedence() {
         let Some((store, profile)) = fonts() else {
+            eprintln!("SKIP: 字体包缺失");
             return;
         };
         let shaper = StoreShaper::new(&store, &profile);
-        for mono in [false, true] {
-            let mut para = paragraph("P01-001", "source", Rect::new(0., 0., 200., 100.));
-            let run = &mut para.style_runs[0];
-            run.bold = true;
-            run.italic = true;
-            run.mono = mono;
-            run.size = 8.;
-            run.color = Color {
-                r: 0.5,
-                g: 0.1,
-                b: 0.2,
-            };
-            let body = spec_for(&para);
-            para.kind = RegionKind::Caption;
-            let other = spec_for(&para);
-            let mut expected = other.styles[0].1;
-            expected.serif = true;
-            assert_eq!(body.styles[0].1, expected);
-            assert_eq!(body.font_size, other.font_size);
-            assert_eq!(body.line_height, other.line_height);
-            if mono {
+        let mut para = paragraph("P01-001", "source", Rect::new(0., 0., 200., 100.));
+        let run = &mut para.style_runs[0];
+        run.bold = true;
+        run.italic = true;
+        run.mono = false;
+        run.size = 8.;
+        run.color = Color {
+            r: 0.5,
+            g: 0.1,
+            b: 0.2,
+        };
+        let body = spec_for(&para);
+        para.kind = RegionKind::Caption;
+        let other = spec_for(&para);
+        // 角色策略不按区域 kind 写死 serif：两份 spec 的样式表完全一致。
+        assert_eq!(body.styles, other.styles);
+        assert_eq!(body.font_size, other.font_size);
+        assert_eq!(body.line_height, other.line_height);
+        // 正文角色（Caption → Body）粗斜体 → 思源宋体 bold 面。
+        let caption = shaper.with_role(role_for_region(RegionKind::Caption));
+        let font = store
+            .get(FontId(caption.font_for(&body.styles[0].1)))
+            .unwrap();
+        assert_eq!(font.family, "Noto Serif CJK SC");
+        assert!(font.weight >= 600);
+        // mono 优先于区域角色：同一 spec 换成 mono → JetBrains Mono 粗斜体面。
+        let mut mono_style = body.styles[0].1;
+        mono_style.mono = true;
+        let mfont = store.get(FontId(caption.font_for(&mono_style))).unwrap();
+        assert_eq!(mfont.family, "JetBrains Mono");
+        assert!(mfont.italic, "真斜体面");
+        assert!(mfont.weight >= 600, "BoldItalic 面");
+    }
+
+    /// 等宽 run：拉丁全部落在 JetBrains Mono 且 advance 一致、正体无剪切；
+    /// mono 优先于区域角色（正文里的代码 run 仍用等宽面）。
+    #[test]
+    fn monospace_run_uses_jetbrains_mono_with_uniform_advances() {
+        let Some((store, profile)) = fonts() else {
+            eprintln!("SKIP: 字体包缺失");
+            return;
+        };
+        let shaper =
+            StoreShaper::new(&store, &profile).with_role(role_for_region(RegionKind::Text));
+        let style = StyleSpec {
+            mono: true,
+            ..Default::default()
+        };
+        let font = shaper.font_for(&style);
+        assert_eq!(
+            store.get(FontId(font)).unwrap().family,
+            "JetBrains Mono",
+            "mono 优先于正文角色"
+        );
+        let glyphs = shaper.shape_styled(font, &style, "int main() { return 0; }", 10.0, false);
+        assert!(!glyphs.is_empty());
+        let first = glyphs[0].x_advance;
+        for g in &glyphs {
+            assert_eq!(g.font, font, "拉丁字形应留在等宽面");
+            assert!(g.x_advance > 0.0);
+            assert!(
+                (g.x_advance - first).abs() < 1e-6,
+                "等宽 advance 应一致：{}",
+                g.x_advance
+            );
+            assert_eq!(g.shear_x, 0.0, "正体无剪切");
+        }
+    }
+
+    /// 等宽 run 的 CJK 回退黑体（Noto Sans CJK），正体无剪切。
+    #[test]
+    fn monospace_run_cjk_falls_back_to_sans_without_shear() {
+        let Some((store, profile)) = fonts() else {
+            eprintln!("SKIP: 字体包缺失");
+            return;
+        };
+        let shaper =
+            StoreShaper::new(&store, &profile).with_role(role_for_region(RegionKind::Text));
+        let mut para = paragraph("P01-001", "source", Rect::new(0.0, 0.0, 400.0, 100.0));
+        para.kind = RegionKind::Text;
+        para.style_runs[0].mono = true;
+        let parsed =
+            parse_unit_html(r#"<p id="P01-001"><span data-style="1">代码 code 混排 42</span></p>"#)
+                .unwrap();
+        let result = typeset_one(&shaper, &para, &parsed, &Obstacles::default());
+        assert!(!result.paragraph.overflow, "{:?}", result.issues);
+        let mut saw_cjk = false;
+        let mut saw_latin = false;
+        for g in result.paragraph.lines.iter().flat_map(|l| &l.glyphs) {
+            let font = store.get(FontId(g.font)).unwrap();
+            if is_cjk_text(&g.text) {
+                saw_cjk = true;
                 assert_eq!(
-                    shaper.font_for(&body.styles[0].1),
-                    shaper.font_for(&other.styles[0].1)
+                    font.family, "Noto Sans CJK SC",
+                    "mono 的 CJK 回退是黑体：{}",
+                    g.text
                 );
+                assert_eq!(g.shear_x, 0.0, "正体 CJK 无剪切");
             } else {
-                let font = store
-                    .get(FontId(shaper.font_for(&body.styles[0].1)))
-                    .unwrap();
-                assert_eq!(font.family, "Noto Serif CJK SC");
-                assert!(font.weight >= 600);
+                saw_latin = true;
+                assert_eq!(font.family, "JetBrains Mono", "{}", g.text);
+            }
+        }
+        assert!(saw_cjk && saw_latin, "混排两端都应有字形");
+    }
+
+    /// 等宽斜体：JetBrains Mono 有真斜体面，不用合成剪切。
+    #[test]
+    fn monospace_italic_uses_true_jetbrains_face_without_shear() {
+        let Some((store, profile)) = fonts() else {
+            eprintln!("SKIP: 字体包缺失");
+            return;
+        };
+        let shaper = StoreShaper::new(&store, &profile);
+        for bold in [false, true] {
+            let style = StyleSpec {
+                mono: true,
+                italic: true,
+                bold,
+                ..Default::default()
+            };
+            let font = shaper.font_for(&style);
+            let f = store.get(FontId(font)).unwrap();
+            assert_eq!(f.family, "JetBrains Mono");
+            assert!(f.italic, "真斜体面（bold={bold}）");
+            assert_eq!(f.weight >= 600, bold);
+            let glyphs = shaper.shape_styled(font, &style, "return x;", 10.0, false);
+            assert!(!glyphs.is_empty());
+            for g in &glyphs {
+                assert_eq!(g.shear_x, 0.0, "真斜体面不剪切（bold={bold}）");
+                assert!(store.get(FontId(g.font)).unwrap().italic);
+            }
+        }
+    }
+
+    /// 反例：非等宽 run（各角色 × 各变体）永远不落等宽面。
+    #[test]
+    fn non_monospace_run_never_uses_monospace_face() {
+        let Some((store, profile)) = fonts() else {
+            eprintln!("SKIP: 字体包缺失");
+            return;
+        };
+        for kind in [
+            RegionKind::Text,
+            RegionKind::Caption,
+            RegionKind::Title,
+            RegionKind::ParagraphTitle,
+        ] {
+            let shaper = StoreShaper::new(&store, &profile).with_role(role_for_region(kind));
+            for (bold, italic) in [(false, false), (true, false), (false, true), (true, true)] {
+                let style = StyleSpec {
+                    bold,
+                    italic,
+                    ..Default::default()
+                };
+                let font = store.get(FontId(shaper.font_for(&style))).unwrap();
+                assert_ne!(
+                    font.family, "JetBrains Mono",
+                    "{kind:?} bold={bold} italic={italic}"
+                );
             }
         }
     }

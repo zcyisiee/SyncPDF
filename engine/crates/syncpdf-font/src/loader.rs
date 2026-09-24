@@ -127,7 +127,7 @@ impl FontStore {
             fonts: Vec::new(),
             by_family: HashMap::new(),
         };
-        for sub in ["notocjk", "inter", "pt", "arabic"] {
+        for sub in ["notocjk", "inter", "pt", "arabic", "mono"] {
             store.load_package(&dir.join(sub))?;
         }
         if store.fonts.is_empty() {

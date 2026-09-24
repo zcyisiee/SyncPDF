@@ -139,6 +139,8 @@ pub struct FontProfile {
     raster: VariantSlots,
     /// 回退顺序（所有可用字体，脚本感知排序）。
     fallbacks: Vec<FontId>,
+    /// 等宽 run 的 CJK 回退链（黑体在前；等宽包无 CJK 字形）。
+    mono_cjk_fallbacks: Vec<FontId>,
 }
 
 /// 单角色四变体槽。
@@ -160,10 +162,45 @@ impl VariantSlots {
         }
     }
 
-    /// 解析四槽。`base` 是正体槽的显式锚点（标题角色用粗面、mono 用
-    /// PT Sans 占位）；斜体槽由 [`resolve_variant`] 决定真面或合成。
-    fn build(store: &FontStore, script: Script, base: Option<FontId>) -> Self {
-        let resolve = |variant: FontVariant| resolve_variant(store, false, script, variant);
+    /// 按 family 别名构建四槽（mono 角色）：四个变体都从该 family 内按
+    /// 字重/斜体评分取面（[`FontStore::find_by_family`] 对斜体匹配加权），
+    /// 绕开通用查询的 CJK 族过滤——等宽包不含 CJK 字形，其 CJK 回退由
+    /// [`FontProfile::mono_fallbacks`] 承担，不参与槽解析。
+    /// 缺等宽包时返回 `None`，由调用方走 sans 占位路径。
+    fn build_family_anchored(store: &FontStore, family: &str) -> Option<Self> {
+        let pick = |weight: u16, italic: bool| -> Option<VariantFace> {
+            store
+                .find_by_family(family, weight, italic)
+                .map(|font| VariantFace {
+                    font,
+                    // 该 family 有真斜体面（如 JetBrains Mono 四面）；合成标记
+                    // 以 `LoadedFont::italic` 证实，缺真面时按正体 + 合成处理。
+                    synthetic_italic: italic && !store.get(font).is_some_and(|f| f.italic),
+                })
+        };
+        let regular = pick(400, false)?;
+        let bold = pick(700, false).unwrap_or(regular);
+        let italic = pick(400, true).unwrap_or(VariantFace {
+            font: regular.font,
+            synthetic_italic: true,
+        });
+        let bold_italic = pick(700, true).unwrap_or(VariantFace {
+            font: bold.font,
+            synthetic_italic: true,
+        });
+        Some(Self {
+            regular,
+            bold,
+            italic,
+            bold_italic,
+        })
+    }
+
+    /// 解析四槽。`base` 是正体槽的显式锚点（标题角色用粗面）；`serif`
+    /// 决定槽内变体按衬线族还是无衬线族解析；斜体槽由 [`resolve_variant`]
+    /// 决定真面或合成。
+    fn build(store: &FontStore, script: Script, serif: bool, base: Option<FontId>) -> Self {
+        let resolve = |variant: FontVariant| resolve_variant(store, serif, script, variant);
         // 每槽必有面：通用查询也落空时用库内任一字体兜底
         // （`default_profile` 只对非空库构造）。
         let fallback = store
@@ -215,6 +252,18 @@ impl FontProfile {
         self.fallbacks.clone()
     }
 
+    /// 等宽 run 的缺字回退链：CJK 黑体在前（等宽包只含拉丁，CJK 字形须由
+    /// Noto Sans CJK 承担），其余沿用全局链去重。
+    pub fn mono_fallbacks(&self) -> Vec<FontId> {
+        let mut chain = self.mono_cjk_fallbacks.clone();
+        for id in &self.fallbacks {
+            if !chain.contains(id) {
+                chain.push(*id);
+            }
+        }
+        chain
+    }
+
     fn slots(&self, role: Role) -> &VariantSlots {
         match role {
             Role::Body => &self.body,
@@ -240,15 +289,15 @@ pub fn lang_script(lang: &str) -> Script {
 
 /// 按目标语言构建默认 profile。
 ///
-/// 字体选择：
-/// - zh-CN/zh-TW：正文 Noto Sans CJK（region face）；标题 Noto Sans CJK
-///   Bold 亦可（hjfy 行为：标题用同族 bold）；
-/// - en：正文 Inter、标题 Inter、raster PT Sans；
-/// - ja/ko：Noto Sans CJK 对应 face；
-/// - ar：Noto Sans Arabic（拉丁部分回退 Inter）。
+/// 角色字面策略（目标字体，不再依赖源字体 flags）：
+/// - Body（一切非标题区域，含 Caption/Abstract/List）：衬线族——CJK →
+///   Noto Serif CJK（思源宋体），拉丁沿用既有衬线链（PTSerif）；
+/// - DocTitle/ParagraphTitle：无衬线族——CJK → Noto Sans CJK（黑体），
+///   拉丁沿用 Inter/PT Sans 链；
+/// - Mono：内置 JetBrains Mono 包（`mono` family，四变体真面）；
+/// - en：正文 Inter（无衬线即正文字体）、标题 Inter；ar：Noto Sans Arabic。
 ///
-/// serif 匹配由调用方（typeset 拿源字体 flags 后）通过 `find` 二次覆盖；
-/// 本函数产出 sans 基线。
+/// 缺真斜体面时由 [`VariantSlots::build`] 标记合成剪切；mono 有真斜体面。
 pub fn default_profile(store: &FontStore, target_lang: &str) -> FontProfile {
     let script = lang_script(target_lang);
     let find = |serif: bool, weight: u16, italic: bool| -> Option<FontId> {
@@ -262,17 +311,21 @@ pub fn default_profile(store: &FontStore, target_lang: &str) -> FontProfile {
         })
     };
 
-    // 主字体：CJK → Noto Sans CJK（region）；ar → Noto Sans Arabic；
-    // en → Inter。serif 由源字体 flags 决定，默认 sans。
+    // 正文锚点：CJK/拉丁衬线族优先（zh → Noto Serif CJK；en 无 CJK 概念，
+    // 拉丁衬线查询回落 Inter 仍由 find 分数决定）。en/ar 目标保留原 sans
+    // 基线（Inter/Arabic 即该语言的正文字体）。
     let body_sans = find(false, 400, false);
     let body_serif = find(true, 400, false);
-    let body = body_sans.or(body_serif);
-    let title_weight = 700u16;
-
     let cjk = matches!(
         script,
         Script::HanSC | Script::HanTC | Script::Kana | Script::Hangul
     );
+    let body = if cjk {
+        body_serif.or(body_sans)
+    } else {
+        body_sans.or(body_serif)
+    };
+    let title_weight = 700u16;
 
     let mut fallbacks: Vec<FontId> = Vec::new();
     let push_fb = |id: Option<FontId>, out: &mut Vec<FontId>| {
@@ -314,17 +367,32 @@ pub fn default_profile(store: &FontStore, target_lang: &str) -> FontProfile {
     push_fb(store.find_by_family("sans", 400, false), &mut fallbacks);
     push_fb(store.find_by_family("math", 400, false), &mut fallbacks);
 
+    // 等宽 run 的 CJK 回退链：黑体（region face）在前，其余由全局链补足。
+    let mut mono_cjk_fallbacks: Vec<FontId> = Vec::new();
+    push_fb(find(false, 400, false), &mut mono_cjk_fallbacks);
+    push_fb(find(false, 700, false), &mut mono_cjk_fallbacks);
+
     // 各角色槽：正体锚点 + 真斜体/合成判定（见 VariantSlots::build）。
     let title_base = find(false, title_weight, false);
-    // mono：内置包无等宽 → 用 PT Sans 占位（上层可接系统 mono）。
+    // mono 槽四面从等宽包取（真斜体面，无合成剪切）；缺包时回落 sans
+    // 占位（与裁剪发行版兼容）。
+    let mono = VariantSlots::build_family_anchored(store, "mono").unwrap_or_else(|| {
+        VariantSlots::build(
+            store,
+            script,
+            false,
+            store.find_by_family("sans", 400, false),
+        )
+    });
     FontProfile {
         target_lang: target_lang.to_string(),
-        body: VariantSlots::build(store, script, body),
-        doc_title: VariantSlots::build(store, script, title_base),
-        paragraph_title: VariantSlots::build(store, script, title_base),
-        mono: VariantSlots::build(store, script, store.find_by_family("sans", 400, false)),
-        raster: VariantSlots::build(store, script, body),
+        body: VariantSlots::build(store, script, cjk, body),
+        doc_title: VariantSlots::build(store, script, false, title_base),
+        paragraph_title: VariantSlots::build(store, script, false, title_base),
+        mono,
+        raster: VariantSlots::build(store, script, cjk, body),
         fallbacks,
+        mono_cjk_fallbacks,
     }
 }
 
@@ -347,10 +415,18 @@ mod tests {
         let p = default_profile(&s, "zh-CN");
         let body = p.pick_variant(Role::Body, FontVariant::Regular);
         let f = s.get(body.font).unwrap();
-        assert!(f.family.contains("SC"), "got {}", f.family);
+        assert!(
+            f.family.contains("Serif") && f.family.contains("SC"),
+            "正文角色应为思源宋体，got {}",
+            f.family
+        );
         let bold = p.pick_variant(Role::Body, FontVariant::Bold);
         let fb = s.get(bold.font).unwrap();
         assert!(fb.weight >= 600, "bold weight {}", fb.weight);
+        assert!(
+            s.get(bold.font).unwrap().family.contains("Serif"),
+            "粗体仍在衬线族"
+        );
         // 回退链非空且含拉丁字体。
         let fbs = p.fallbacks();
         assert!(fbs.len() >= 2);
@@ -358,6 +434,78 @@ mod tests {
             fbs.iter()
                 .any(|&id| s.get(id).unwrap().family.contains("Inter")),
             "latin fallback missing"
+        );
+    }
+
+    /// 标题角色用黑体（Noto Sans CJK）；CJK 目标下全部角色均如此。
+    #[test]
+    fn profile_heading_roles_use_sans_for_cjk() {
+        let Some(s) = store() else {
+            eprintln!("SKIP: font package missing");
+            return;
+        };
+        let p = default_profile(&s, "zh-CN");
+        for role in [Role::DocTitle, Role::ParagraphTitle] {
+            let face = p.pick_variant(role, FontVariant::Regular);
+            let f = s.get(face.font).unwrap();
+            assert!(
+                f.family.contains("Sans") && f.family.contains("SC"),
+                "{role:?} 应为黑体，got {}",
+                f.family
+            );
+        }
+        // 反例：正文角色不落黑体。
+        let body = s
+            .get(p.pick_variant(Role::Body, FontVariant::Regular).font)
+            .unwrap();
+        assert!(
+            body.family.contains("Serif"),
+            "正文不落黑体：{}",
+            body.family
+        );
+    }
+
+    /// mono 角色四槽指向 JetBrains Mono（真斜体面，无合成剪切）。
+    #[test]
+    fn profile_mono_slots_are_jetbrains_mono() {
+        let Some(s) = store() else {
+            eprintln!("SKIP: font package missing");
+            return;
+        };
+        let p = default_profile(&s, "zh-CN");
+        for (variant, italic, weight_min) in [
+            (FontVariant::Regular, false, 400),
+            (FontVariant::Bold, false, 600),
+            (FontVariant::Italic, true, 400),
+            (FontVariant::BoldItalic, true, 600),
+        ] {
+            let face = p.pick_variant(Role::Mono, variant);
+            let f = s.get(face.font).unwrap();
+            assert_eq!(f.family, "JetBrains Mono", "{variant:?}");
+            assert_eq!(f.italic, italic, "{variant:?}");
+            assert!(f.weight >= weight_min, "{variant:?}: {}", f.weight);
+            assert!(
+                !face.synthetic_italic,
+                "JetBrains Mono 有真斜体面，{variant:?} 不应合成"
+            );
+        }
+    }
+
+    /// mono 角色的 CJK 回退链以 Noto Sans CJK 打头（等宽包不含 CJK 字形）。
+    #[test]
+    fn profile_mono_fallbacks_start_with_cjk_sans() {
+        let Some(s) = store() else {
+            eprintln!("SKIP: font package missing");
+            return;
+        };
+        let p = default_profile(&s, "zh-CN");
+        let fbs = p.mono_fallbacks();
+        assert!(!fbs.is_empty());
+        let head = s.get(fbs[0]).unwrap();
+        assert!(
+            head.family.contains("Sans") && head.family.contains("SC"),
+            "mono CJK 回退首个应是黑体，got {}",
+            head.family
         );
     }
 
