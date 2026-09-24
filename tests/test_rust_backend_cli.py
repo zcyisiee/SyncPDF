@@ -97,6 +97,7 @@ def test_success_keeps_one_json_envelope_and_engine_events(tmp_path: Path, fake_
     # 缺省不转发模型/档位：由 Rust 按通道选，避免两处各有一份默认值。
     assert "--model" not in invocation["args"]
     assert "--thinking" not in invocation["args"]
+    assert "--terminology" not in invocation["args"]
     assert payload["data"]["translator"] == "pi"
     assert invocation["args"][invocation["args"].index("--pages") + 1] == "1-3"
     assert invocation["layout"] == "coreml"
@@ -348,3 +349,96 @@ def test_invalid_typography_rejected_before_launch_or_artifacts(
     assert completed.returncode == 1
     assert payload["error"]["code"] == "invalid_typography"
     assert not workdir.exists()
+
+
+def test_glossaries_are_normalized_and_forwarded_as_internal_sidecar(
+    tmp_path: Path, fake_engine: Path
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    csv = tmp_path / "terms.csv"
+    csv.write_text(
+        "source,target,note\n beta , 乙 ,\nalpha,甲,\nalpha,甲,\n", encoding="utf-8"
+    )
+    workdir = tmp_path / "run"
+    completed, payload = _run(
+        pdf, workdir, fake_engine, extra_args=("--glossaries", str(csv))
+    )
+    assert completed.returncode == 0
+    assert payload["ok"] is True
+    args = json.loads((workdir / "invocation.json").read_text())["args"]
+    sidecar = Path(args[args.index("--terminology") + 1])
+    assert sidecar == workdir / "tmp" / "terminology.json"
+    # 规范化在 Python 侧完成：去空白、同 source 后者覆盖、按 source 排序。
+    assert json.loads(sidecar.read_text(encoding="utf-8")) == [
+        ["alpha", "甲"],
+        ["beta", "乙"],
+    ]
+
+
+def test_missing_glossary_fails_before_launch_and_artifacts(
+    tmp_path: Path, fake_engine: Path
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    workdir = tmp_path / "run"
+    completed, payload = _run(
+        pdf,
+        workdir,
+        fake_engine,
+        extra_args=("--glossaries", str(tmp_path / "missing.csv")),
+    )
+    assert completed.returncode == 1
+    assert payload["error"]["code"] == "glossary_missing"
+    assert not workdir.exists()
+
+
+def test_invalid_glossary_csv_fails_before_launch(
+    tmp_path: Path, fake_engine: Path
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    csv = tmp_path / "terms.csv"
+    csv.write_text("foo,bar\na,b\n", encoding="utf-8")
+    workdir = tmp_path / "run"
+    completed, payload = _run(
+        pdf, workdir, fake_engine, extra_args=("--glossaries", str(csv))
+    )
+    assert completed.returncode == 1
+    assert payload["error"]["code"] == "glossary_invalid"
+    assert not workdir.exists()
+
+
+def test_glossary_note_is_rejected_instead_of_dropped(
+    tmp_path: Path, fake_engine: Path
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    csv = tmp_path / "terms.csv"
+    csv.write_text("source,target,note\nalpha,甲,首字母小写\n", encoding="utf-8")
+    workdir = tmp_path / "run"
+    completed, payload = _run(
+        pdf, workdir, fake_engine, extra_args=("--glossaries", str(csv))
+    )
+    assert completed.returncode == 1
+    assert payload["error"]["code"] == "glossary_note_unsupported"
+    assert "note" in payload["error"]["message"]
+    assert not workdir.exists()
+
+
+def test_empty_glossary_still_terminates_with_empty_sidecar(
+    tmp_path: Path, fake_engine: Path
+) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    csv = tmp_path / "terms.csv"
+    csv.write_text("source,target,note\n", encoding="utf-8")
+    workdir = tmp_path / "run"
+    completed, payload = _run(
+        pdf, workdir, fake_engine, extra_args=("--glossaries", str(csv))
+    )
+    assert completed.returncode == 0
+    assert payload["ok"] is True
+    args = json.loads((workdir / "invocation.json").read_text())["args"]
+    sidecar = Path(args[args.index("--terminology") + 1])
+    assert json.loads(sidecar.read_text(encoding="utf-8")) == []

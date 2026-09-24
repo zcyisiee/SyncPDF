@@ -229,6 +229,23 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn factor_guidance_preserves_the_source_digit_inventory() {
+        let mut source = unit("P01-001", 1);
+        source.html = "<p id=\"P01-001\">Storage is reduced by a factor of 7.</p>".into();
+        let ctx = crate::validate::ValidateCtx::new(&source, "zh-CN");
+        assert!(crate::validate::validate(
+            &ctx,
+            "<p id=\"P01-001\">存储量降至原来的 7 分之一。</p>"
+        )
+        .is_ok());
+        let bad = crate::validate::validate(&ctx, "<p id=\"P01-001\">存储量降至原来的 1/7。</p>")
+            .unwrap_err();
+        assert!(bad.contains(&crate::validate::Violation::ProtectedLiteralCount));
+        assert!(ACADEMIC_RULES.contains("不增加源文未出现的阿拉伯数字"));
+        assert!(!ACADEMIC_RULES.contains("1/N"));
+    }
+
+    #[test]
     fn numeric_repair_explains_literal_counts_without_mutating_source() {
         let source = unit("P01-001", 12);
         let prompt = build_document_prompts(&PromptSpec::default(), &[source], &HashMap::new())

@@ -63,7 +63,7 @@ bdt check --workdir tmp/paper --strict
 
 ## Rust 后端试用入口
 
-`bdt rust-translate` 使用现有 `syncpdf-cli translate --translator pi` 翻译一份 PDF。先自行构建 `engine/target/release/syncpdf-cli`，或用 `--engine` 指向已有可执行文件；本命令不会构建引擎、安装模型或修改 pi 提供方配置。pi 及所选模型需要在运行环境中预先可用。动态链接的ONNX Runtime/PDFium也须可被当前引擎找到；本机开发验收环境可先执行 `source tmp/backend-repair/codex-r1-integration/env.sh`（配置库路径，未安装依赖）。
+`bdt rust-translate` 调用现有Rust sidecar翻译一份PDF，默认`--translator pi`，也支持`--translator agy --model gemini-3.8-flash-low`。先自行构建引擎，或用`--engine`指向已有可执行文件；隔离worktree验证必须使用各自私有Cargo target，不能误用其它树二进制。本命令不会构建引擎、安装模型或修改提供方配置；对应CLI/模型以及ONNX Runtime/PDFium须预先可用。本轮本机验收环境为`source tmp/paper-iteration/env.sh`（再覆盖为当前树的私有`CARGO_TARGET_DIR`）；历史env含已删除worktree路径，不直接复用。
 
 ```bash
 # 在本仓库根目录运行；每次使用新的 workdir
@@ -74,6 +74,8 @@ bdt check --workdir tmp/paper --strict
 
 省略 `--pages` 会处理全文；`--source-lang` 默认 `auto`，`--target-lang` 默认 `zh-CN`，`--layout-device` 可选 `auto`、`cpu`、`coreml`。命令将 Rust 事件逐条保存到 `<workdir>/events.jsonl`，引擎日志保存到 `stderr.log`，运行结果保存到 `result.json`；译文可用时还会有 `translated.pdf`。stdout 仍只有一行 JSON，简短阶段和页面进度走 stderr。`result.json` 记录已保存页中的成功块、已排版块、已保存页数、未成功块、送译前冲突块数（`blocked_before_translation`）、覆盖缺口页（`coverage_gap_pages`）、未替换块及产物路径；typeset完成但所在页尚未保存的不计入成功块。`run_finished.ok=false`、引擎非零退出、缺最终事件或缺 PDF 均返回失败，即使已有部分译文 PDF。已有运行日志/产物时拒绝复用目录；请指定新 workdir。输入 PDF 不能是该目录的 `translated.pdf`。
 
+可追加`--glossaries terms.csv`统一术语。CSV必须含`source,target`列，共享loader负责去空白、重复源词后者覆盖及排序；`note`列可空，非空备注目前明确拒绝。词表进入主请求和补救请求，整个规范化词表参与翻译缓存身份；修改词表或从无表改为有表不会误用旧译文。内部JSON sidecar由bdt生成，无需用户维护。提示约束不等于语义已验收，仍需人工核对。
+
 仅调整排版代码后，可用已有真实译文重新编译，无模型请求；未命中或校验失败的块保留原文并列为未完成：
 
 ```bash
@@ -82,7 +84,7 @@ bdt check --workdir tmp/paper --strict
   --layout-device coreml
 ```
 
-`--cached-from` 只读复制原运行目录的译文数据库到新目录，仍按源文本、语言与协议版本核对并校验内容；不要改变目标语言后假定旧缓存仍命中。它是缓存重编译入口，尚未提供逐块字体/字号编辑接口。
+`--cached-from` 只读复制原运行目录的译文数据库到新目录，仍按源文本、语言、协议、学术规则及术语表核对并校验内容；须传入与原运行相同的`--glossaries`（如原运行用了词表），不要改变上述身份后假定旧缓存仍命中。它是缓存重编译入口，尚未提供逐块字体/字号编辑接口。
 
 追加 `--dual` 会同时生成 `translated.pdf` 和 `dual.pdf`。双语 PDF 每页为 **420×297 mm 的 A3 横向**，左侧原文、右侧对应译文；各页按可见裁剪框和旋转方向等比例适配半页并居中，不裁切内容。文字/图形保留为 PDF 矢量内容，可选择文字；链接点击框及本地跳转位置随拼页转换，右侧内部链接仍跳到右侧。书签沿用原文目录。`--pages` 只限定翻译页，双语文件与单语文件一样保留完整页数，未选页右侧仍是原文。
 

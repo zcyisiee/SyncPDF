@@ -1,23 +1,14 @@
 //! 翻译缓存（SQLite）。表结构照 02-技术路径与架构.md §5.5 / hjfy 共享缓存。
 //!
-//! 键是 `(source_language, target_language, sha256(transport_version + academic_rules + source_html))`；命中即跳过 LLM。
+//! 键是 `(source_language, target_language, sha256(transport_version + academic_rules + [glossary] + source_html))`；命中即跳过 LLM。
+//! 词表身份只在有术语约束时进键：无词表的键与旧缓存一致；有词表不复用
+//! 无词表或不同词表的译文，同一规范化映射（乱序/重复输入也规范成同键）可命中。
 //! 用户手工编辑的译文写回同表并标 `origin='manual'`，优先级最高（`put_manual`）。
 
 use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use syncpdf_core::hash::Sha256Hash;
-
-fn transport_key(source_html: &str) -> Sha256Hash {
-    Sha256Hash::of(
-        format!(
-            "{}\0{}\0{source_html}",
-            crate::markdown::TRANSPORT_VERSION,
-            crate::prompt::ACADEMIC_RULES,
-        )
-        .as_bytes(),
-    )
-}
 
 /// 手工编辑译文的 origin 标记；命中后不会被自动翻译覆盖。
 pub const ORIGIN_MANUAL: &str = "manual";
@@ -60,7 +51,11 @@ WHERE (translations.translated_html <> excluded.translated_html
 
 /// 翻译缓存连接。单线程持有；跨线程用各自的连接打开同一文件。
 #[derive(Debug)]
-pub struct Cache(Connection);
+pub struct Cache {
+    conn: Connection,
+    /// 术语约束的规范化序列化；空 = 无词表（键与旧缓存一致）。
+    glossary_key: String,
+}
 
 impl Cache {
     /// 打开（必要时创建）缓存库。
@@ -80,14 +75,46 @@ impl Cache {
         conn.execute_batch("PRAGMA synchronous=NORMAL;")?;
         conn.execute_batch(SCHEMA)?;
         conn.pragma_update(None, "user_version", 1)?;
-        Ok(Self(conn))
+        Ok(Self {
+            conn,
+            glossary_key: String::new(),
+        })
+    }
+
+    /// 记录本次运行的术语约束身份，此后 get/put/origin_of 都按它隔离键。
+    ///
+    /// 空表 = 无词表，键保持与旧缓存一致；非空表排序去重后作 JSON 序列化
+    /// （无歧义），同一规范化映射无论输入顺序都得到同一键。
+    pub fn set_terminology(&mut self, terms: &[(String, String)]) {
+        if terms.is_empty() {
+            self.glossary_key = String::new();
+            return;
+        }
+        let mut sorted = terms.to_vec();
+        sorted.sort();
+        sorted.dedup();
+        self.glossary_key = serde_json::to_string(&sorted).expect("(String,String) 序列化不会失败");
+    }
+
+    fn transport_key(&self, source_html: &str) -> Sha256Hash {
+        let base = format!(
+            "{}\0{}",
+            crate::markdown::TRANSPORT_VERSION,
+            crate::prompt::ACADEMIC_RULES,
+        );
+        let material = if self.glossary_key.is_empty() {
+            format!("{base}\0{source_html}")
+        } else {
+            format!("{base}\0{}\0{source_html}", self.glossary_key)
+        };
+        Sha256Hash::of(material.as_bytes())
     }
 
     /// 查缓存。命中返回译文 HTML。
     pub fn get(&self, src_lang: &str, tgt_lang: &str, source_html: &str) -> Result<Option<String>> {
-        let h = transport_key(source_html);
+        let h = self.transport_key(source_html);
         let found = self
-            .0
+            .conn
             .query_row(
                 "SELECT translated_html FROM translations \
                  WHERE source_language=?1 AND target_language=?2 AND source_hash=?3",
@@ -109,9 +136,9 @@ impl Cache {
         source_html: &str,
         translated_html: &str,
     ) -> Result<()> {
-        let h = transport_key(source_html);
+        let h = self.transport_key(source_html);
         let now = now_unix();
-        self.0.execute(
+        self.conn.execute(
             UPSERT,
             params![
                 src_lang,
@@ -151,9 +178,9 @@ impl Cache {
         tgt_lang: &str,
         source_html: &str,
     ) -> Result<Option<String>> {
-        let h = transport_key(source_html);
+        let h = self.transport_key(source_html);
         Ok(self
-            .0
+            .conn
             .query_row(
                 "SELECT origin FROM translations \
                  WHERE source_language=?1 AND target_language=?2 AND source_hash=?3",
@@ -166,7 +193,7 @@ impl Cache {
     /// 行数，测试与报告用。
     pub fn len(&self) -> Result<u64> {
         let n: i64 = self
-            .0
+            .conn
             .query_row("SELECT COUNT(*) FROM translations", [], |r| r.get(0))?;
         Ok(n.max(0) as u64)
     }
@@ -193,7 +220,7 @@ mod tests {
         let source = "<p id=\"P01-001\">source</p>";
         let legacy = Sha256Hash::of(source.as_bytes());
         cache
-            .0
+            .conn
             .execute(
                 "INSERT INTO translations VALUES (?1, ?2, ?3, 'legacy', ?4, 'old translation', 0)",
                 params!["en", "zh-CN", &legacy.as_bytes()[..], source],
@@ -216,7 +243,7 @@ mod tests {
         let previous =
             Sha256Hash::of(format!("{}\0{source}", crate::markdown::TRANSPORT_VERSION).as_bytes());
         cache
-            .0
+            .conn
             .execute(
                 "INSERT INTO translations VALUES (?1, ?2, ?3, 'pi/old', ?4, 'old translation', 0)",
                 params!["en", "zh-CN", &previous.as_bytes()[..], source],
@@ -308,5 +335,53 @@ mod tests {
         }
         let c = Cache::open(&path).unwrap();
         assert_eq!(c.get("en", "zh", src).unwrap().as_deref(), Some("你好"));
+    }
+
+    fn terms(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(s, t)| (s.to_string(), t.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn glossary_isolates_entries_and_same_mapping_hits() {
+        let mut c = Cache::open_in_memory().unwrap();
+        let src = "<p id=\"P01-001\">hello</p>";
+        // 旧无词表译文入库。
+        c.put("en", "zh", "agy/old", src, "旧译").unwrap();
+        // 带词表运行不得命中无词表旧译文。
+        c.set_terminology(&terms(&[("alpha", "甲"), ("beta", "乙")]));
+        assert_eq!(c.get("en", "zh", src).unwrap(), None);
+        c.put("en", "zh", "agy/gloss", src, "词表译").unwrap();
+        assert_eq!(c.get("en", "zh", src).unwrap().as_deref(), Some("词表译"));
+        // 同一规范化映射（乱序 + 重复输入规范成同键）命中。
+        c.set_terminology(&terms(&[("beta", "乙"), ("alpha", "甲"), ("alpha", "甲")]));
+        assert_eq!(c.get("en", "zh", src).unwrap().as_deref(), Some("词表译"));
+        // 换表不命中，也不复用无词表旧译文。
+        c.set_terminology(&terms(&[("alpha", "丙")]));
+        assert_eq!(c.get("en", "zh", src).unwrap(), None);
+        // 回到无词表：命中旧无词表译文（向后兼容），不命中词表译文。
+        c.set_terminology(&[]);
+        assert_eq!(c.get("en", "zh", src).unwrap().as_deref(), Some("旧译"));
+        assert_eq!(c.len().unwrap(), 2);
+    }
+
+    #[test]
+    fn manual_origin_survives_glossary_scoped_keys() {
+        let mut c = Cache::open_in_memory().unwrap();
+        let src = "<p id=\"P01-001\">hello</p>";
+        c.set_terminology(&terms(&[("alpha", "甲")]));
+        c.put_manual("en", "zh", src, "手工").unwrap();
+        c.put("en", "zh", "agy/gloss", src, "自动").unwrap();
+        assert_eq!(c.get("en", "zh", src).unwrap().as_deref(), Some("手工"));
+        assert_eq!(
+            c.origin_of("en", "zh", src).unwrap().as_deref(),
+            Some(ORIGIN_MANUAL)
+        );
+        // manual 行同样按词表隔离：无词表运行时不可见。
+        c.set_terminology(&[]);
+        assert_eq!(c.get("en", "zh", src).unwrap(), None);
+        assert_eq!(c.origin_of("en", "zh", src).unwrap(), None);
     }
 }

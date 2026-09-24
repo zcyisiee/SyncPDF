@@ -31,6 +31,7 @@ struct Cli {
 }
 
 #[derive(Subcommand, Debug)]
+#[allow(clippy::large_enum_variant)] // clap 子命令枚举按值持有参数结构是常态
 enum Command {
     /// 读 stdin JSONL 请求（configure → run）并输出事件 JSONL。
     Run {
@@ -79,6 +80,10 @@ enum Command {
         /// 行距/译文段落字号的倍数，如 1.3（非 pt）；缺省保留源比例。
         #[arg(long)]
         line_height: Option<f32>,
+        /// 内部参数：规范化术语对表 JSON（`[["source","target"],...]`），由
+        /// `bdt rust-translate --glossaries` 生成在工作目录下。
+        #[arg(long)]
+        terminology: Option<PathBuf>,
     },
     /// 打印 preflight 信息、每页几何与段落摘要（调试用）。
     Inspect {
@@ -140,6 +145,7 @@ fn main() -> anyhow::Result<()> {
             cache_only,
             font_scale,
             line_height,
+            terminology,
         } => rt.block_on(cmd_translate(
             input,
             output,
@@ -154,6 +160,7 @@ fn main() -> anyhow::Result<()> {
             cache_only,
             font_scale,
             line_height,
+            terminology,
         )),
         Command::Inspect {
             input,
@@ -269,6 +276,7 @@ async fn cmd_translate(
     cache_only: bool,
     font_scale: f32,
     line_height: Option<f32>,
+    terminology: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let typography = syncpdf_pipeline::stages::typeset::Typography::new(font_scale, line_height)?;
     let pages = match pages.as_deref() {
@@ -298,7 +306,7 @@ async fn cmd_translate(
         target_lang,
         pages,
         font_profile: None,
-        terminology: None,
+        terminology,
         mode: Mode::Full,
     };
     let mut cfg = RunConfig::new(configure, run)?;

@@ -613,9 +613,17 @@ impl Pipeline {
             }
         }
 
-        let cache = open_cache(cfg.cache_dir());
+        let mut cache = open_cache(cfg.cache_dir());
         let total = translatable.len() as u32;
-        let spec = syncpdf_translate::PromptSpec::new(fields.source_lang, fields.target_lang);
+        let mut spec = syncpdf_translate::PromptSpec::new(fields.source_lang, fields.target_lang);
+        // 内部术语 sidecar（`bdt rust-translate --glossaries` 生成的规范化
+        // [[source,target],...] JSON）。装载失败在任何模型调用之前明确报错。
+        if let Some(path) = fields.terminology {
+            spec.terminology = load_terminology(path)?;
+        }
+        if let Some(c) = cache.as_mut() {
+            c.set_terminology(&spec.terminology);
+        }
         let lookup = stages::glyph_text_lookup(&pages_ir);
 
         let callback_failed = CancellationToken::new();
@@ -930,6 +938,48 @@ async fn cancel_watch(cancel: &CancellationToken) {
         }
         tokio::time::sleep(CANCEL_POLL).await;
     }
+}
+
+/// 装载内部术语 sidecar：`bdt` 把规范化后的「源词 → 译名」对写成
+/// `workdir/tmp/terminology.json`（JSON 数组，元素为 `[source, target]`），
+/// `Request::Run.terminology` 携带其路径。这里只装载与校验，不做词条推断。
+///
+/// 文件不可读 → `Io`；JSON 形状不对、空字段或同一 source 对应多个 target
+/// → `Protocol`（在任何模型调用之前明确失败）。返回按 source 排序去重的表，
+/// 保证同一映射的缓存键可复现。
+fn load_terminology(path: &Path) -> Result<Vec<(String, String)>, PipelineError> {
+    let text = std::fs::read_to_string(path).map_err(|source| PipelineError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let raw: Vec<(String, String)> = serde_json::from_str(&text).map_err(|e| {
+        PipelineError::Protocol(format!(
+            "术语文件不是 [[\"source\",\"target\"],...] JSON：{}：{e}",
+            path.display()
+        ))
+    })?;
+    for (source, target) in &raw {
+        if source.trim().is_empty() || target.trim().is_empty() {
+            return Err(PipelineError::Protocol(format!(
+                "术语文件 {} 含空 source/target 条目",
+                path.display()
+            )));
+        }
+    }
+    let mut terms = raw;
+    terms.sort();
+    terms.dedup();
+    if let Some(dup) = terms
+        .windows(2)
+        .find(|w| w[0].0 == w[1].0)
+        .map(|w| w[0].0.clone())
+    {
+        return Err(PipelineError::Protocol(format!(
+            "术语文件 {} 中同一 source 对应多个 target：{dup}",
+            path.display()
+        )));
+    }
+    Ok(terms)
 }
 
 /// 打开翻译缓存（`cache_dir/translate.db`）；失败只记日志，按无缓存继续。
@@ -1670,6 +1720,86 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    fn write_terms(dir: &tempfile::TempDir, json: &str) -> PathBuf {
+        let path = dir.path().join("terminology.json");
+        std::fs::write(&path, json).unwrap();
+        path
+    }
+
+    #[test]
+    fn terminology_sidecar_loads_sorted_unique_pairs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_terms(&dir, r#"[["beta","乙"],["alpha","甲"],["beta","乙"]]"#);
+        assert_eq!(
+            load_terminology(&path).unwrap(),
+            vec![
+                ("alpha".to_string(), "甲".to_string()),
+                ("beta".to_string(), "乙".to_string()),
+            ]
+        );
+        let empty = write_terms(&dir, "[]");
+        assert_eq!(load_terminology(&empty).unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn terminology_sidecar_rejects_bad_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("none.json");
+        assert!(matches!(
+            load_terminology(&missing),
+            Err(PipelineError::Io { .. })
+        ));
+        for bad in [
+            "not json",
+            r#"{"alpha":"甲"}"#,
+            r#"[["alpha"]]"#,
+            r#"[["","甲"]]"#,
+            r#"[["alpha","  "]]"#,
+            r#"[["a","甲"],["a","乙"]]"#,
+        ] {
+            let path = write_terms(&dir, bad);
+            assert!(
+                matches!(load_terminology(&path), Err(PipelineError::Protocol(_))),
+                "应拒绝：{bad}"
+            );
+        }
+    }
+
+    /// 术语文件经 `load_terminology` 进 `PromptSpec` 后，主请求与补救请求
+    /// 的提示词都带同一词表段（RecordingTranslator 捕获实际发送文本）。
+    #[tokio::test]
+    async fn terminology_reaches_primary_and_repair_prompts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_terms(&dir, r#"[["model-in-the-loop","模型在回路"]]"#);
+        let mut spec = syncpdf_translate::PromptSpec::new("en", "zh-CN");
+        spec.terminology = load_terminology(&path).unwrap();
+        let unit = |id: &str| syncpdf_translate::Unit {
+            id: id.parse().unwrap(),
+            html: format!("<p id=\"{id}\">text of {id}</p>"),
+            styles: 0,
+            atoms: vec![],
+            breaks: 0,
+        };
+        let units = vec![unit("P01-001"), unit("P01-002")];
+        let ctx = syncpdf_translate::ContextMap::from_units(&units);
+        // 首个请求只回一块：另一块进入有界补译，产生第二个提示词。
+        let engine = syncpdf_translate::Engine::new(syncpdf_translate::RecordingTranslator::new(
+            syncpdf_translate::FakeTranslator::Truncate(1),
+        ));
+        let result = engine
+            .translate_document(&spec, units, ctx, None, |_| {})
+            .await
+            .unwrap();
+        assert_eq!(result.stats.primary_prompts, 1);
+        assert!(result.stats.retry_prompts >= 1, "漏译块应触发补救请求");
+        let seen = engine.translator().recorded();
+        assert!(seen.len() >= 2, "主请求与补译都应实际发出：{seen:?}");
+        for text in &seen {
+            assert!(text.contains("TERMINOLOGY:"), "提示词缺术语段：{text}");
+            assert!(text.contains("- model-in-the-loop => 模型在回路"));
+        }
     }
 }
 

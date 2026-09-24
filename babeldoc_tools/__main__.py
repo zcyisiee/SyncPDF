@@ -464,6 +464,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p_rust.add_argument("--target-lang", default="zh-CN")
     p_rust.add_argument("--layout-device", choices=("auto", "cpu", "coreml"), default="auto")
     p_rust.add_argument("--cached-from", help="仅重编译已有运行目录的译文缓存，不调用模型")
+    p_rust.add_argument(
+        "--glossaries",
+        default=None,
+        help=(
+            "术语表 CSV 路径（列 source,target[,note]，note 暂不支持）："
+            "规范化后经内部 sidecar 注入主/补救提示词并隔离翻译缓存。缺省 = 不用词表"
+        ),
+    )
     p_rust.add_argument("--dual", action="store_true", help="额外导出 A3 横向 dual.pdf，左原文、右译文")
     p_rust.add_argument("--font-scale", type=float, default=1.0, help="译文字号相对源字号的倍数，默认1；保持样式层级")
     p_rust.add_argument("--line-height", type=float, help="行距/译文段落字号的倍数，如1.3（不是pt）；默认保留源比例")
@@ -544,6 +552,7 @@ def _dispatch(args: argparse.Namespace) -> dict:
             dual=args.dual,
             font_scale=args.font_scale,
             line_height=args.line_height,
+            glossaries=args.glossaries,
         )
     if command == "parse":
         return _invoke_with_debug(

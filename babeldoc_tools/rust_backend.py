@@ -11,6 +11,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from babeldoc_tools import glossary
+from babeldoc_tools.common import ToolError
+
 _ARTIFACTS = ("translated.pdf", "dual.pdf", "events.jsonl", "stderr.log", "result.json")
 _ENGINE = Path(__file__).resolve().parents[1] / "engine/target/release/syncpdf-cli"
 
@@ -52,6 +55,7 @@ def _translate_pdf(
     line_height: float | None = None,
     dual: bool = False,
     translator: str = "pi",
+    glossaries: str | None = None,
 ) -> dict:
     """Run the Rust CLI once, retaining its events and incomplete-result semantics."""
     for name, value in (("font_scale", font_scale), ("line_height", line_height)):
@@ -82,6 +86,23 @@ def _translate_pdf(
         return _error("translation_cache_missing", f"找不到已保存译文缓存：{cached_db}")
     if cached_db is not None and cached_db == (destination / "cache/translate.db").resolve():
         return _error("cache_output_conflict", "缓存来源与本次运行目录不能相同")
+
+    # 词表在创建运行产物之前装载校验：失效文件/内容必须在任何模型调用前明确失败。
+    terminology: list[list[str]] | None = None
+    if glossaries is not None:
+        try:
+            entries = glossary.load_entries(glossaries)
+        except ToolError as exc:
+            return _error(exc.code, exc.message, **exc.extra)
+        # Rust 提示词协议只有 source→target 二元映射；带 note 会静默丢备注，明确拒绝。
+        if any(entry.note for entry in entries):
+            return _error(
+                "glossary_note_unsupported",
+                "rust-translate 的词表提示只携带 source→target 映射，带 note 的条目"
+                "会丢备注；请改用无 note 列内容的词表",
+            )
+        terminology = [[entry.source, entry.target] for entry in entries]
+
     destination.mkdir(parents=True, exist_ok=True)
     temporary = destination / "tmp"
     temporary.mkdir(exist_ok=True)
@@ -116,6 +137,13 @@ def _translate_pdf(
         command.extend(("--line-height", str(line_height)))
     if dual:
         command.extend(("--dual-output", str(dual_output)))
+    if terminology is not None:
+        # 内部 sidecar：规范化对表 JSON（[["source","target"],...]），CSV 仍是唯一对外格式。
+        sidecar = temporary / "terminology.json"
+        sidecar.write_text(
+            json.dumps(terminology, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        command.extend(("--terminology", str(sidecar)))
     child_env = os.environ.copy()
     child_env["SYNCPDF_LAYOUT_DEVICE"] = layout_device
     child_env["TMPDIR"] = str(temporary)
