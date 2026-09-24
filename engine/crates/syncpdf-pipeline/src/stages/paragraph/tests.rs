@@ -175,6 +175,395 @@ fn inline_formula_document_inventory() {
 }
 
 #[test]
+fn proven_body_font_trailing_comma_leaves_formula_atom() {
+    // Real P12-031 shape: the Formula box swallows a body-font comma after math H.
+    let mut glyphs = line(0, "In", 50.0, 700.0, 10.0, 0);
+    glyphs.extend(line(2, "H", 64.0, 700.0, 10.0, 1));
+    let mut comma = mk_glyph(3, ',', 71.0, 700.0, 10.0, 0);
+    comma.ink = Some(Rect::new(71.1, 700.0, 74.0, 703.0));
+    let comma_id = comma.id;
+    let comma_ink = comma.ink.unwrap();
+    glyphs.push(comma);
+    glyphs.extend(line(4, "the total", 80.0, 700.0, 10.0, 0));
+    let ir = page_ir(
+        glyphs,
+        vec![mk_font("Body", false, false), mk_font("Math", false, true)],
+    );
+    let mut regions = full_region(RegionKind::Text);
+    let mut formula = text_region(1, Rect::new(63.0, 695.0, 76.0, 712.0), 1);
+    formula.kind = RegionKind::Formula;
+    regions.push(formula);
+    let paragraphs = analyze_page(&ir, &regions);
+    let p = paragraphs
+        .iter()
+        .find(|p| p.kind == RegionKind::Text)
+        .unwrap();
+    assert!(
+        matches!(p.translatable, Translatable::Yes),
+        "{:?}",
+        p.translatable
+    );
+    assert_eq!(p.text, "In H, the total");
+    let atom = p
+        .atoms
+        .iter()
+        .find(|a| a.kind == AtomKind::Formula)
+        .unwrap();
+    assert_eq!(atom.text, "H");
+    assert!(atom.source.is_some());
+    let comma_index = p.glyphs.iter().position(|&id| id == comma_id).unwrap() as u32;
+    assert_eq!(atom.glyph_range, (2, 3));
+    assert!(comma_index >= atom.glyph_range.1);
+    // The replay clip must not touch the released comma's ink.
+    let clip = atom.source.unwrap().bbox;
+    assert!(clip.x1 <= comma_ink.x0 || clip.x0 >= comma_ink.x1);
+}
+
+#[test]
+fn wrapped_line_trailing_comma_is_released_by_next_row_prose() {
+    // P13-008 shape: comma ends its physical line and prose continues below.
+    let mut glyphs = line(0, "of", 50.0, 700.0, 10.0, 0);
+    glyphs.extend(line(2, "A", 70.0, 700.0, 10.0, 1));
+    let mut comma = mk_glyph(3, ',', 76.5, 700.0, 10.0, 0);
+    comma.ink = Some(Rect::new(76.6, 700.0, 79.4, 703.0));
+    glyphs.push(comma);
+    glyphs.extend(line(4, "so it", 50.0, 686.0, 10.0, 0));
+    let ir = page_ir(
+        glyphs,
+        vec![mk_font("Body", false, false), mk_font("Math", false, true)],
+    );
+    let mut regions = full_region(RegionKind::Text);
+    let mut formula = text_region(1, Rect::new(69.0, 695.0, 80.0, 712.0), 1);
+    formula.kind = RegionKind::Formula;
+    regions.push(formula);
+    let paragraphs = analyze_page(&ir, &regions);
+    let p = paragraphs
+        .iter()
+        .find(|p| p.kind == RegionKind::Text)
+        .unwrap();
+    assert!(
+        matches!(p.translatable, Translatable::Yes),
+        "{:?}",
+        p.translatable
+    );
+    assert_eq!(p.text, "of A, so it");
+    let atom = p
+        .atoms
+        .iter()
+        .find(|a| a.kind == AtomKind::Formula)
+        .unwrap();
+    assert_eq!(atom.text, "A");
+    assert_eq!(atom.glyph_range, (2, 3));
+}
+
+#[test]
+fn unclosed_delimiter_keeps_trailing_comma_inside_atom() {
+    // "(x," keeps an unclosed math delimiter: the comma may separate arguments.
+    let mut glyphs = line(0, "see", 50.0, 700.0, 10.0, 0);
+    glyphs.extend(line(3, "(x", 75.0, 700.0, 10.0, 1));
+    let mut comma = mk_glyph(5, ',', 88.0, 700.0, 10.0, 0);
+    comma.ink = Some(Rect::new(88.1, 700.0, 91.0, 703.0));
+    glyphs.push(comma);
+    glyphs.extend(line(6, "now", 97.0, 700.0, 10.0, 0));
+    let ir = page_ir(
+        glyphs,
+        vec![mk_font("Body", false, false), mk_font("Math", false, true)],
+    );
+    let mut regions = full_region(RegionKind::Text);
+    let mut formula = text_region(1, Rect::new(74.0, 695.0, 92.0, 712.0), 1);
+    formula.kind = RegionKind::Formula;
+    regions.push(formula);
+    let paragraphs = analyze_page(&ir, &regions);
+    let p = paragraphs
+        .iter()
+        .find(|p| p.kind == RegionKind::Text)
+        .unwrap();
+    assert!(
+        matches!(p.translatable, Translatable::Yes),
+        "{:?}",
+        p.translatable
+    );
+    let atom = p
+        .atoms
+        .iter()
+        .find(|a| a.kind == AtomKind::Formula)
+        .unwrap();
+    assert_eq!(atom.text, "(x,");
+    assert_eq!(atom.glyph_range, (3, 6));
+}
+
+#[test]
+fn math_font_trailing_comma_stays_inside_atom() {
+    // No font boundary: a math-font comma can be a math separator.
+    let mut glyphs = line(0, "a", 50.0, 700.0, 10.0, 0);
+    glyphs.extend(line(1, "x", 60.0, 700.0, 10.0, 1));
+    let mut comma = mk_glyph(2, ',', 66.0, 700.0, 10.0, 1);
+    comma.ink = Some(Rect::new(66.1, 700.0, 69.0, 703.0));
+    glyphs.push(comma);
+    glyphs.extend(line(3, "y", 76.0, 700.0, 10.0, 0));
+    let ir = page_ir(
+        glyphs,
+        vec![mk_font("Body", false, false), mk_font("Math", false, true)],
+    );
+    let mut regions = full_region(RegionKind::Text);
+    let mut formula = text_region(1, Rect::new(59.0, 695.0, 73.0, 712.0), 1);
+    formula.kind = RegionKind::Formula;
+    regions.push(formula);
+    let paragraphs = analyze_page(&ir, &regions);
+    let p = paragraphs
+        .iter()
+        .find(|p| p.kind == RegionKind::Text)
+        .unwrap();
+    assert!(matches!(p.translatable, Translatable::Yes));
+    let atom = p
+        .atoms
+        .iter()
+        .find(|a| a.kind == AtomKind::Formula)
+        .unwrap();
+    assert_eq!(atom.text, "x,");
+}
+
+#[test]
+fn trailing_comma_without_tight_ink_stays_inside_atom() {
+    let mut glyphs = line(0, "In", 50.0, 700.0, 10.0, 0);
+    glyphs.extend(line(2, "H", 64.0, 700.0, 10.0, 1));
+    glyphs.push(mk_glyph(3, ',', 71.0, 700.0, 10.0, 0));
+    glyphs.extend(line(4, "the", 80.0, 700.0, 10.0, 0));
+    let ir = page_ir(
+        glyphs,
+        vec![mk_font("Body", false, false), mk_font("Math", false, true)],
+    );
+    let mut regions = full_region(RegionKind::Text);
+    let mut formula = text_region(1, Rect::new(63.0, 695.0, 76.0, 712.0), 1);
+    formula.kind = RegionKind::Formula;
+    regions.push(formula);
+    let paragraphs = analyze_page(&ir, &regions);
+    let p = paragraphs
+        .iter()
+        .find(|p| p.kind == RegionKind::Text)
+        .unwrap();
+    assert!(matches!(p.translatable, Translatable::Yes));
+    let atom = p
+        .atoms
+        .iter()
+        .find(|a| a.kind == AtomKind::Formula)
+        .unwrap();
+    assert_eq!(atom.text, "H,");
+}
+
+#[test]
+fn comma_shared_with_another_preserved_region_stays_inside_atom() {
+    // A second Formula region also covering the comma makes ownership ambiguous.
+    let mut glyphs = line(0, "In", 50.0, 700.0, 10.0, 0);
+    glyphs.extend(line(2, "H", 64.0, 700.0, 10.0, 1));
+    let mut comma = mk_glyph(3, ',', 71.0, 700.0, 10.0, 0);
+    comma.ink = Some(Rect::new(71.1, 700.0, 74.0, 703.0));
+    glyphs.push(comma);
+    glyphs.extend(line(4, "the", 80.0, 700.0, 10.0, 0));
+    let ir = page_ir(
+        glyphs,
+        vec![mk_font("Body", false, false), mk_font("Math", false, true)],
+    );
+    let mut regions = full_region(RegionKind::Text);
+    let mut formula = text_region(1, Rect::new(63.0, 695.0, 76.0, 712.0), 1);
+    formula.kind = RegionKind::Formula;
+    let mut second = text_region(2, Rect::new(70.0, 695.0, 90.0, 712.0), 2);
+    second.kind = RegionKind::Formula;
+    regions.push(formula);
+    regions.push(second);
+    let paragraphs = analyze_page(&ir, &regions);
+    let p = paragraphs
+        .iter()
+        .find(|p| p.kind == RegionKind::Text)
+        .unwrap();
+    // Ambiguous ownership stays fail-closed: the comma is never free prose.
+    assert!(
+        !matches!(p.translatable, Translatable::Yes)
+            || p.atoms
+                .iter()
+                .any(|a| a.kind == AtomKind::Formula && a.text.ends_with(',')),
+        "{:?} {:?}",
+        p.translatable,
+        p.atoms.iter().map(|a| &a.text).collect::<Vec<_>>()
+    );
+}
+
+fn comma_context_fixture(prefix: &str, math: &str, suffix: &str) -> (PageIR, Vec<Region>, GlyphId) {
+    let mut glyphs = line(0, prefix, 50.0, 700.0, 10.0, 0);
+    let n = glyphs.len() as u16;
+    glyphs.extend(line(n, math, 64.0, 700.0, 10.0, 1));
+    let n = glyphs.len() as u16;
+    let x = 65.0 + math.chars().count() as f32 * 6.0;
+    let mut comma = mk_glyph(n, ',', x, 700.0, 10.0, 0);
+    comma.ink = Some(Rect::new(x + 0.1, 700.0, x + 3.0, 703.0));
+    let id = comma.id;
+    glyphs.push(comma);
+    glyphs.extend(line(n + 1, suffix, x + 9.0, 700.0, 10.0, 0));
+    let ir = page_ir(
+        glyphs,
+        vec![mk_font("Body", false, false), mk_font("Math", false, true)],
+    );
+    let mut regions = full_region(RegionKind::Text);
+    let mut formula = text_region(1, Rect::new(63.0, 695.0, x + 5.0, 712.0), 1);
+    formula.kind = RegionKind::Formula;
+    regions.push(formula);
+    (ir, regions, id)
+}
+
+fn assert_comma_not_released(ir: &PageIR, regions: &[Region], comma: GlyphId) {
+    let refs: Vec<_> = regions.iter().collect();
+    let formulas = inline_formula::sources(ir, &refs);
+    assert!(
+        formulas.iter().all(|f| !f.released.contains(&comma)),
+        "ambiguous comma was released"
+    );
+}
+
+#[test]
+fn trailing_comma_single_roman_variable_is_not_prose() {
+    let (ir, regions, comma) = comma_context_fixture("In", "H", "y");
+    assert_comma_not_released(&ir, &regions, comma);
+}
+
+#[test]
+fn trailing_comma_external_open_delimiter_stays_protected() {
+    let (ir, regions, comma) = comma_context_fixture("f(", "H", "the maximum");
+    assert_comma_not_released(&ir, &regions, comma);
+}
+
+#[test]
+fn trailing_comma_mismatched_delimiters_stay_protected() {
+    let (ir, regions, comma) = comma_context_fixture("In", "(H]", "the total");
+    assert_comma_not_released(&ir, &regions, comma);
+}
+
+#[test]
+fn trailing_comma_nonfinite_ink_is_not_evidence() {
+    let (mut ir, regions, comma) = comma_context_fixture("In", "H", "the total");
+    for item in &mut ir.items {
+        if let DisplayItem::Text { glyphs } = item {
+            for g in glyphs {
+                if g.id == comma {
+                    g.ink.as_mut().unwrap().x0 = f32::NAN;
+                }
+            }
+        }
+    }
+    assert_comma_not_released(&ir, &regions, comma);
+}
+
+#[test]
+fn trailing_comma_unknown_successor_is_not_skipped() {
+    let (mut ir, regions, comma) = comma_context_fixture("In", "H", "the total");
+    for item in &mut ir.items {
+        if let DisplayItem::Text { glyphs } = item {
+            let next = glyphs
+                .iter_mut()
+                .find(|g| g.id.ordinal == comma.ordinal + 1)
+                .unwrap();
+            next.unicode.clear();
+            next.ink = Some(next.bbox);
+        }
+    }
+    assert_comma_not_released(&ir, &regions, comma);
+}
+
+#[test]
+fn trailing_comma_cannot_borrow_another_paragraphs_formula() {
+    let (ir, mut regions, comma) = comma_context_fixture("In", "H", "the total");
+    // A smaller prose region owns only the comma and continuation, not H.
+    regions.push(text_region(2, Rect::new(70.5, 695.0, 104.0, 712.0), 2));
+    let paragraphs = analyze_page(&ir, &regions);
+    let owner = paragraphs
+        .iter()
+        .find(|p| p.kind == RegionKind::Text && p.glyphs.contains(&comma))
+        .unwrap();
+    assert!(
+        !matches!(owner.translatable, Translatable::Yes),
+        "released ownership crossed paragraph: {:?}",
+        owner
+    );
+}
+
+#[test]
+#[ignore = "requires saved real source/region evidence for the DeepSeek pages"]
+fn real_formula_trailing_commas_are_released_to_prose() {
+    let root = std::path::PathBuf::from(
+        std::env::var("SYNCPDF_FORMULA_AUDIT").expect("SYNCPDF_FORMULA_AUDIT"),
+    );
+    let pages: Vec<PageIR> =
+        serde_json::from_slice(&std::fs::read(root.join("source.json")).unwrap()).unwrap();
+    let cases = ["P12-029", "P12-031", "P13-008"];
+    let mut found = 0;
+    let mut all_paragraphs = Vec::new();
+    for ir in &pages {
+        let page = ir.page.0;
+        let regions: Vec<Region> = serde_json::from_slice(
+            &std::fs::read(root.join(format!("regions-{page}.json"))).unwrap(),
+        )
+        .unwrap();
+        let refs: Vec<_> = regions.iter().collect();
+        let formulas = inline_formula::sources(ir, &refs);
+        let mut paragraphs = analyze_page(ir, &regions);
+        crate::stages::source_policy::protect_front_matter(ir, &regions, &mut paragraphs);
+        for p in paragraphs {
+            all_paragraphs.push(p.clone());
+            if !cases.contains(&p.id.to_string().as_str()) {
+                continue;
+            }
+            found += 1;
+            assert!(
+                matches!(p.translatable, Translatable::Yes),
+                "{}: {:?}",
+                p.id,
+                p.translatable
+            );
+            let formula_atoms: Vec<_> = p
+                .atoms
+                .iter()
+                .filter(|a| a.kind == AtomKind::Formula)
+                .collect();
+            assert!(
+                formula_atoms.iter().all(|a| !a.text.ends_with(',')),
+                "{}: {:?}",
+                p.id,
+                formula_atoms.iter().map(|a| &a.text).collect::<Vec<_>>()
+            );
+            for a in formula_atoms {
+                eprintln!(
+                    "{} atom text={:?} range={:?} bbox={:?}",
+                    p.id,
+                    a.text,
+                    a.glyph_range,
+                    a.source.unwrap().bbox
+                );
+            }
+            let released = inline_formula::released_for(&p, &formulas);
+            assert_eq!(released.len(), 1, "{} exact transferred ownership", p.id);
+            let id = released.first().unwrap();
+            let i = p.glyphs.iter().position(|g| g == id).unwrap();
+            let expected = match p.id.to_string().as_str() {
+                "P12-029" => (98, 665),
+                "P12-031" => (3, 697),
+                _ => (33, 202),
+            };
+            assert_eq!((i, id.op.op_index), expected);
+            let g = ir.glyphs().find(|g| g.id == *id).unwrap();
+            assert_eq!(g.unicode.as_slice(), [',']);
+            assert!(p.atoms.iter().all(|a| {
+                !(a.glyph_range.0 <= i as u32 && (i as u32) < a.glyph_range.1)
+                    && a.source.is_none_or(|s| !s.bbox.intersects(&g.ink.unwrap()))
+            }));
+            eprintln!("{} proven released comma {:?} index {}", p.id, id, i);
+        }
+    }
+    assert_eq!(found, 3, "all three real paragraphs must be produced");
+    if let Ok(output) = std::env::var("SYNCPDF_FORMULA_AUDIT_OUTPUT") {
+        std::fs::write(output, serde_json::to_vec(&all_paragraphs).unwrap()).unwrap();
+    }
+}
+
+#[test]
 fn two_lines_merge_into_one_paragraph() {
     // 行距 14pt、字号 10pt（14 < 1.8×10）→ 同段。
     let mut g = line(0, "Hello", 50.0, 700.0, 10.0, 0);

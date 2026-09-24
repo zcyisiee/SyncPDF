@@ -84,9 +84,11 @@ pub fn analyze_page(ir: &PageIR, regions: &[Region]) -> Vec<Paragraph> {
             seq += 1;
             let mut paragraph = build_paragraph(ir, region, group, &glyphs, seq);
             inline_formula::attach(&mut paragraph, &formulas);
+            let released = inline_formula::released_for(&paragraph, &formulas);
             if matches!(paragraph.translatable, Translatable::Yes)
                 && paragraph.glyphs.iter().enumerate().any(|(i, id)| {
                     protected.contains(id)
+                        && !released.contains(id)
                         && !paragraph.atoms.iter().any(|a| {
                             a.source.is_some()
                                 && a.glyph_range.0 <= i as u32

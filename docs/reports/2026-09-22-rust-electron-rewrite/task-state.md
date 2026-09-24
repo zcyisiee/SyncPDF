@@ -62,6 +62,7 @@
 - stdout叶子c4d9e549已complete/terminal observed，6文件快照`devin-stdout-owned.diff`，主控整合后发现普通dup会让模型子进程继承事件FD。独立CLOEXEC回归真实红→绿，改为原子fcntl_dupfd_cloexec；Unix专用Event测试import也已cfg内置。CLI15、events7、Python49通过，7crate696通过/18ignored；首链240秒超时发生在Clippy阶段，独立重跑七crate Clippy与fmt通过。保持forbid unsafe、错误传播和Python严格门禁。
 - `semantic-scope-probe-v1`仅从数字probe只读备份失效P01-007/P34-007/P35-021三条自动缓存，真实1主+1补救/16缓存、3页19/0。P01倍数已变4分之一/437分之一；P34→P35主句迁移仍在，说明缩短请求本身不能解决，不能盲重试或当已验收。
 - 最新`deepseek-v17-cached-integrated`全51页CoreML复排351/0、351缓存/0模型，2395行事件全合法，单语+dual存在；88源绘图无缺墨迹、34,545保护字/410目标不变、dual135,607/76,105字及820链接审计无误、两PDF qpdf通过。本次未出现原生噪声，FD隔离机制由子进程噪声回归证明，不宣称本次触发了E5问题。仍有括号/冒号边界、跨块语义及全51页视觉审阅，未验收首篇。
+- 主控847段全源inventory独立比对通过：仅P12-029/P12-031/P13-008的atoms变化，其余字段/字形/归属不变（comma-controller-inventory-diff.json）。首轮比较因测试遗漏front-matter策略造成P01作者段假差异，按生产补同策略后重比，非产品改动。三处实际释放精确GlyphId、源clip不碰逗号墨迹；v17全部源原子审计及已亲看的12/13页证明端到端尾逗号修复。经验见[最终归属与stdout隔离](../../lessons/pdf-binding-and-render-evidence.md)。stdout提交797fcd6d，数字2bcede98；尾逗号将单独提交。括号/冒号仍不在本修复覆盖内。
 - 最终仍需完整真实重译、术语与逐页语义/版面/链接审核及最终整合检查。之后按顺序自动进入余四篇，尚未验收任何论文。
 
 > **最新浮动排版验收：1.0字号/1.5行距，21页、190块全部写入，0回退、0送译前冲突、0覆盖缺口；最新Text宋体产物text-serif-v3，见[宋体验收](12-MVP真实翻译验收.md#text-serif-font)。** [标题验收](12-MVP真实翻译验收.md#heading-adaptive-layout) · [验收报告](12-MVP真实翻译验收.md#inline-formula-coverage) · [经验总结](../../lessons/pdf-binding-and-render-evidence.md#inline-formula-ownership) · [缺陷及历史误报](../../issues/rust-inline-formula-coverage.md)。
