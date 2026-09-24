@@ -2,6 +2,10 @@
 
 `engine/` 是正在开发的 Rust 后端；`syncpdf-cli` 用作内部 sidecar 与开发验收。产品入口约束仍是 `bdt`。这里描述代码现有行为，不表示已完成全篇翻译质量验收；专项进度见 [Rust 后端 task state](../reports/2026-09-22-rust-electron-rewrite/task-state.md)。
 
+## 事件通道
+
+Unix `run`/`translate`在原生组件加载前用安全FD API保留原stdout为JSONL专用writer，并将fd1重定向至stderr；重定向不恢复，覆盖运行结束后的原生库日志。副本原子设置close-on-exec，避免翻译子进程继承事件管道、拖延EOF；隔离失败传播错误。事件仍逐行flush、保持seq/时间戳，Python继续严格拒绝任何无效事件。非Unix不改FD；inspect/help/version行为不变，此隔离不修复CoreML自身缓存/模型警告。
+
 ## 解析与绑定
 
 PDFium 提供对象/字符几何，lopdf 提供源操作与字节。调用方必须保证两者读取同一不可变输入版本；先全页绑定，再修改 lopdf 文档。`BoundPage::check_replacement` 在 source 返回翻译输入前和公共删除 API 中检查已知异常、重复源操作、页身份与完整源跨度。

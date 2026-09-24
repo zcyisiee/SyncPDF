@@ -25,19 +25,59 @@ pub fn now_ts() -> f64 {
         .unwrap_or(0.0)
 }
 
+/// The event pipe must not escape into translator children: inherited writers
+/// could keep the protocol connection alive after this engine exits.
+#[cfg(unix)]
+fn duplicate_event_stdout() -> std::io::Result<std::fs::File> {
+    Ok(std::fs::File::from(rustix::io::fcntl_dupfd_cloexec(
+        std::io::stdout(),
+        3,
+    )?))
+}
+
 /// 写 stdout 的 JSONL 汇：每行一个 `Envelope`，写完立刻 flush。
-#[derive(Debug)]
 pub struct StdoutSink {
     seq: u64,
-    out: std::io::Stdout,
+    out: Box<dyn Write + Send>,
+}
+
+impl std::fmt::Debug for StdoutSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StdoutSink")
+            .field("seq", &self.seq)
+            .finish_non_exhaustive()
+    }
 }
 
 impl StdoutSink {
     pub fn new() -> Self {
+        Self::with_writer(std::io::stdout())
+    }
+
+    /// 用指定 writer 作事件出口；其余行为与 `new` 一致。
+    pub fn with_writer(out: impl Write + Send + 'static) -> Self {
         Self {
             seq: 0,
-            out: std::io::stdout(),
+            out: Box::new(out),
         }
+    }
+
+    /// Unix：dup 原 stdout(fd1) 作事件专用 writer，再把 fd1 重定向到 stderr 的
+    /// 目标。此后原生组件（CoreML/ORT 等）绕过 tracing 直接写 stdout 的日志
+    /// 落到 stderr，事件 JSONL 仍走原 stdout；重定向持续到进程退出，覆盖
+    /// `run_finished` 之后与析构阶段的滞后日志。失败向上传播——静默回退会让
+    /// 事件通道重新被污染。非 Unix 平台不改 fd，行为同 `new`。
+    #[cfg(unix)]
+    pub fn isolated() -> std::io::Result<Self> {
+        let events = duplicate_event_stdout()?;
+        rustix::stdio::dup2_stdout(std::io::stderr())?;
+        Ok(Self::with_writer(events))
+    }
+
+    /// 非 Unix：无 fd 重定向，保持原行为。
+    #[cfg(not(unix))]
+    pub fn isolated() -> std::io::Result<Self> {
+        Ok(Self::new())
     }
 
     /// 已交付的事件数（即最后一个 `seq`）。
@@ -63,8 +103,11 @@ impl EventSink for StdoutSink {
         let mut line = encode_line(&env);
         line.push('\n');
         // 事件通道打不开就只能放弃：stdout 是唯一的事件出口，日志在 stderr。
-        let mut lock = self.out.lock();
-        if let Err(e) = lock.write_all(line.as_bytes()).and_then(|()| lock.flush()) {
+        if let Err(e) = self
+            .out
+            .write_all(line.as_bytes())
+            .and_then(|()| self.out.flush())
+        {
             tracing::error!(error = %e, "写 stdout 事件失败");
         }
     }
@@ -166,6 +209,15 @@ mod tests {
     use super::*;
     use syncpdf_protocol::Stage;
     use syncpdf_protocol::PROTOCOL_VERSION;
+
+    #[cfg(unix)]
+    #[test]
+    fn event_stdout_descriptor_does_not_leak_into_exec() {
+        let file = duplicate_event_stdout().unwrap();
+        assert!(rustix::io::fcntl_getfd(&file)
+            .unwrap()
+            .contains(rustix::io::FdFlags::CLOEXEC));
+    }
 
     fn started() -> Event {
         Event::RunStarted {

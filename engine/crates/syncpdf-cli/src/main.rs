@@ -117,11 +117,14 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Run { protocol } => {
+            // 在任何原生组件加载前隔离 stdout：事件 JSONL 走 dup 出的专用 fd，
+            // 原生 fd1 重定向到 stderr 目标（见 `StdoutSink::isolated`）。
+            let sink = SharedSink::new(StdoutSink::isolated()?);
             // 前端启动命令是 `syncpdf-cli run --protocol 1`。协议版本不对时只能
             // 说「这条连接用不了」：发一条致命 error 事件（前端按 JSONL 解析），
             // 然后以退出码 2 结束，不做任何后续工作。
             if protocol != 1 {
-                SharedSink::new(StdoutSink::new()).emit(Event::Error {
+                sink.emit(Event::Error {
                     fatal: true,
                     code: "protocol_unsupported".to_string(),
                     message: format!("不支持的协议版本 {protocol}（本引擎只支持 --protocol 1）"),
@@ -129,7 +132,7 @@ fn main() -> anyhow::Result<()> {
                 eprintln!("syncpdf-cli: 不支持的协议版本 {protocol}（只支持 1）");
                 std::process::exit(2);
             }
-            rt.block_on(cmd_run())
+            rt.block_on(cmd_run(sink))
         }
         Command::Translate {
             input,
@@ -147,6 +150,7 @@ fn main() -> anyhow::Result<()> {
             line_height,
             terminology,
         } => rt.block_on(cmd_translate(
+            SharedSink::new(StdoutSink::isolated()?),
             input,
             output,
             dual_output,
@@ -183,8 +187,7 @@ fn init_tracing() {
 }
 
 /// `run`：stdin JSONL → configure/run → Pipeline；EOF 或 cancel 都触发取消。
-async fn cmd_run() -> anyhow::Result<()> {
-    let sink = SharedSink::new(StdoutSink::new());
+async fn cmd_run(sink: SharedSink) -> anyhow::Result<()> {
     let cancel = CancellationToken::new();
 
     // stdin 的所有权交给读线程（`Stdin` 是 Send），读到的行经 channel 送回。
@@ -263,6 +266,7 @@ async fn cmd_run() -> anyhow::Result<()> {
 /// `translate`：用同样的事件通道跑一遍（内部构造 configure+run）。
 #[allow(clippy::too_many_arguments)]
 async fn cmd_translate(
+    sink: SharedSink,
     input: PathBuf,
     output: PathBuf,
     dual_output: Option<PathBuf>,
@@ -313,7 +317,6 @@ async fn cmd_translate(
     cfg.cache_only = cache_only;
     cfg.typography = typography;
     cfg.dual_output = dual_output;
-    let sink = SharedSink::new(StdoutSink::new());
     let pipeline = Pipeline::default();
     match pipeline.run(&cfg, sink, CancellationToken::new()).await {
         Ok(s) => {

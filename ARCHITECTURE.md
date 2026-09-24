@@ -123,6 +123,8 @@ job 子进程由 serve 以 `sys.executable -m babeldoc_tools` 起，serve 会把
 
 `engine/` 已包含 Rust PDF 解析、布局、翻译、排版与写回 crate，以及内部 `syncpdf-cli` sidecar。其生产排版路径不调用 LaTeX；模型传输使用 Markdown one-shot，闭合块立即交付排版，HTML只作内部兼容格式。学术翻译规则由根目录`TRANSLATE.md`适配为编译内嵌的`academic_rules.md`（Rust块/style/KEEP语法），保持忠实简洁和术语一致；规则全文进入缓存身份，旧规则缓存不冒充新翻译。`--glossaries`复用Python共享CSV加载/校验，经工作目录内规范化JSON sidecar注入Rust主/补救提示；非空备注明确拒绝，不静默丢失。非空规范化术语映射也进入缓存身份，改表不会复用旧译文；空表保持既有无表键格式。`bdt rust-translate`已提供薄封装用于真实模型MVP试用，记录事件、产物和部分结果；旧 Python/bdt 路径仍按上文运行。CCS 3764样本已通过21页正文覆盖、源内容保护及PDF写回验收；通用论文质量、编辑和完整产品能力仍需分别验收。
 
+Unix侧的Rust `run`/`translate`在加载原生组件前复制stdout为仅供JSONL的、close-on-exec事件writer，再将原生fd1导向stderr直到进程退出，隔离CoreML等库绕过tracing输出及析构日志；失败直接上抛。非Unix保留旧路径，inspect/help不改。上层继续严格拒绝无效事件，不靠忽略日志行恢复成功。
+
 源处理将 PDFium 几何与 lopdf 内容流操作绑定，source 和公共删除 API 执行替换门禁；已准备段落合成一个页级 PatchSet，私有候选完成共享流隔离后才替换文档。绑定保存页 Contents/源流快照，写前拒绝过期来源。pipeline 页提交在私有候选删除并重放已就绪页，原子保存成功后才更新主文档/revision；最终发布使用通过自检的最后快照。部分回退明确标为未完整完成，CLI 非零退出；编辑修订事务尚未实现。当前契约、不支持范围与已知缺口见 [Rust PDF 后端参考](docs/reference/rust-pdf-backend.md)，阶段验收仍由唯一 task state 维护。
 
 `bdt rust-translate --dual`可额外导出A3横向双语PDF：左原文、右对应译文，完整页面等比适配半页并居中。Rust的`syncpdf-pdf::dual`复用源内容流/资源为Form，保持文字可选择；链接坐标及本地目的地同步变换，右侧同名目标先解析，原文目录保留。导出和自检在单语校验后的publishing阶段完成，请求导出失败不得标记成功；输入与单语文件不修改。
