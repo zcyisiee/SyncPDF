@@ -2113,26 +2113,40 @@ fn bind_glyphs(
                             .map(|r| r.0.origin)
                             .or_else(|| geom.map(|c| c.origin))
                             .unwrap_or(Point::new(bbox.x0, bbox.y0));
-                        let advance = match &enc.widths {
-                            Some(w) => w.advance_pt(*code, fop.font_size),
-                            None => f32::NAN,
-                        };
-                        let advance = advance
-                            + fop.char_spacing
-                            + if matches!(enc.kind, EncodingKind::Single) && *code == 32 {
-                                fop.word_spacing
-                            } else {
-                                0.0
-                            };
                         let matrix = Matrix::translate(origin.x, origin.y);
                         let is_space = unicode.first().is_some_and(|c: &char| c.is_whitespace());
                         let (fill, render_mode) = (obj.fill, obj.render_mode);
-                        // pdfium 的正式字号（Tf 原值）优先；快照字号兜底。
-                        let size = if obj.unscaled_font_size > 0.0 {
+                        // 有效字号（视觉字号，已含 Tm/CTM 缩放）优先。`Glyph.size`
+                        // 的契约是「已含文本矩阵与 CTM 的缩放」；Tf 原值与快照字号
+                        // 只是 pdfium 缺席时的兜底。字号藏在 CTM 里（`Tf 1` + `cm`
+                        // 缩放）的文档按 Tf 原值绑定会把整段正文当 1pt 字号。
+                        let size = if obj.font_size > 0.0 {
+                            obj.font_size
+                        } else if obj.unscaled_font_size > 0.0 {
                             obj.unscaled_font_size
                         } else {
                             fop.font_size
                         };
+                        // 字宽按同一有效字号折算：`advance_pt` 的尺寸参数必须与
+                        // `size` 同一语义（视觉 pt），否则 Tz/CTM 缩放文档的宽度
+                        // 与字号不同度量。Tc/Tw 是文本空间常量，同步乘上
+                        // `size / fop.font_size`（pdfium 对象缺席时为 1）。
+                        let size_scale = if fop.font_size > 0.0 {
+                            size / fop.font_size
+                        } else {
+                            1.0
+                        };
+                        let advance = match &enc.widths {
+                            Some(w) => w.advance_pt(*code, fop.font_size) * size_scale,
+                            None => f32::NAN,
+                        };
+                        let advance = advance
+                            + fop.char_spacing * size_scale
+                            + if matches!(enc.kind, EncodingKind::Single) && *code == 32 {
+                                fop.word_spacing * size_scale
+                            } else {
+                                0.0
+                            };
                         if step.cluster.is_none() && recovery.is_none() {
                             if step.collapsed {
                                 n_collapsed += 1;
