@@ -29,7 +29,7 @@ use syncpdf_core::ir::{
     PageIR, Paragraph, ParagraphStatus, Region, Translatable, TypesetParagraph,
 };
 use syncpdf_core::ParagraphId;
-use syncpdf_font::{FontProfile, FontStore, Role};
+use syncpdf_font::{FontProfile, FontStore};
 use syncpdf_pdf::bind::BoundPage;
 use syncpdf_pdf::writer::FontStats;
 use syncpdf_protocol::{Event, Request, Severity, Stage, Stats, PROTOCOL_VERSION};
@@ -1091,8 +1091,8 @@ fn handle_block(
                     )));
                 }
                 state.targets.insert(id.clone(), target.clone());
-                let shaper =
-                    StoreShaper::new(&state.font_store, &state.font_profile).with_role(Role::Body);
+                let shaper = StoreShaper::new(&state.font_store, &state.font_profile)
+                    .with_role(stages::typeset::role_for_region(target.para.kind));
                 let result = stages::typeset::typeset_with_typography(
                     &shaper,
                     &target.para,

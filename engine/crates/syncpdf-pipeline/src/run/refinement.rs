@@ -75,7 +75,8 @@ pub(super) fn refine_page(state: &mut RunState, page: u32, sink: &SharedSink) {
         .reduce(f32::max)
         .unwrap_or(crop.x1)
         .min(crop.x1);
-    let shaper = StoreShaper::new(&state.font_store, &state.font_profile).with_role(Role::Body);
+    // 角色按各 target 的区域类别决定（只影响选字；obstacles/几何只用
+    // glyph_bounds），candidates 循环内逐 target 重建。
     let candidates: Vec<_> = state
         .targets
         .keys()
@@ -91,6 +92,8 @@ pub(super) fn refine_page(state: &mut RunState, page: u32, sink: &SharedSink) {
                 continue;
             }
             let target = &state.targets[id];
+            let shaper = StoreShaper::new(&state.font_store, &state.font_profile)
+                .with_role(stages::typeset::role_for_region(target.para.kind));
             let para = &state.pars[id];
             let Some(initial) = state.frames.get(id) else {
                 continue;
