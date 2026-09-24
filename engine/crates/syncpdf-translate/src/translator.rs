@@ -419,9 +419,16 @@ impl<T: Translator> Engine<T> {
     ///
     /// 错误语义：`translate` 失败时错误原样上抛，部分成功绝不冒充全篇成功；
     /// 此前已交付的块**不撤回**（上游可能已排版），其缓存写也照常落库——
-    /// 完整收到且校验通过的块不因晚到的尾部失败被追溯否定。残缺响应里未
-    /// 闭合的半块不交付、不入缓存；正常EOF时仍有半块则报传输错误。漏译/违规块的有界
-    /// 重试由 `translate_document` 对「未落定单元」统一驱动，这里不重发。
+    /// 完整收到且校验通过的块不因晚到的尾部失败被追溯否定。通道失败时残缺响应里
+    /// 未闭合的半块不交付、不入缓存。
+    ///
+    /// 结构性传输损坏（块边界错误、EOF 半块、块外非空白）在**通道本身明确
+    /// 成功**时不再一律 fatal：损坏之后的全部后缀都丢弃，不采纳、不入缓存；
+    /// 若本请求仍有未落定的源 id，就把该损坏记为这些 id 的 `invalid_markup`
+    /// 原因，交给 `translate_document` 既有的有界补译重新请求——只有新一轮
+    /// 严格闭合且完整校验通过的内容才会落定。若本请求的源 id 已全部落定，
+    /// 损坏无法归因到任何源单元，仍按传输错误 fatal。通道失败（断联、EOF 缺
+    /// 终态、超时）始终优先原样上抛，不重试、不换通道。
     #[allow(clippy::too_many_arguments)]
     async fn run_prompt(
         &self,
@@ -438,53 +445,54 @@ impl<T: Translator> Engine<T> {
         on_block: &mut (impl FnMut(TranslatedBlock) + Send),
     ) -> Result<(), TranslateError> {
         let mut stream = MarkdownStream::new();
-        let mut transport_error = None;
+        // 结构损坏：与通道错误分开记账，二者的处置不同（见函数文档）。
+        let mut structural_error = None;
         let mut cache_puts: Vec<(String, String)> = Vec::new();
-        let mut consume = |results: Vec<
-            Result<crate::unit::ParsedUnit, crate::markdown::MarkdownError>,
-        >| {
-            for result in results {
-                if transport_error.is_some() {
-                    break;
-                }
-                match result {
-                    Ok(parsed) => self.settle(
-                        vec![RawBlock {
-                            id: parsed.id.clone(),
-                            html: parsed.to_html(),
-                        }],
-                        spec,
-                        ctx,
-                        by_id,
-                        known,
-                        &mut *done,
-                        &mut *extra_ids,
-                        &mut *last_violations,
-                        &mut *st,
-                        &mut *on_block,
-                        &mut cache_puts,
-                    ),
-                    Err(error) => {
-                        if let Some(id) = error.block_id {
-                            // A closed block with bad body syntax can use the same
-                            // bounded retry as a block that failed validation.
-                            // Keep delivering later valid blocks immediately.
-                            if !known.contains(&id) {
-                                extra_ids.push(id);
-                                bump(st, Violation::UnknownParagraph);
-                            } else if done.contains_key(&id) {
-                                bump(st, Violation::DuplicatedTextSlots);
+        let mut consume =
+            |results: Vec<Result<crate::unit::ParsedUnit, crate::markdown::MarkdownError>>| {
+                for result in results {
+                    if structural_error.is_some() {
+                        // 结构损坏之后的整个后缀（即使看起来合法）一律丢弃。
+                        break;
+                    }
+                    match result {
+                        Ok(parsed) => self.settle(
+                            vec![RawBlock {
+                                id: parsed.id.clone(),
+                                html: parsed.to_html(),
+                            }],
+                            spec,
+                            ctx,
+                            by_id,
+                            known,
+                            &mut *done,
+                            &mut *extra_ids,
+                            &mut *last_violations,
+                            &mut *st,
+                            &mut *on_block,
+                            &mut cache_puts,
+                        ),
+                        Err(error) => {
+                            if let Some(id) = error.block_id {
+                                // A closed block with bad body syntax can use the same
+                                // bounded retry as a block that failed validation.
+                                // Keep delivering later valid blocks immediately.
+                                if !known.contains(&id) {
+                                    extra_ids.push(id);
+                                    bump(st, Violation::UnknownParagraph);
+                                } else if done.contains_key(&id) {
+                                    bump(st, Violation::DuplicatedTextSlots);
+                                } else {
+                                    bump(st, Violation::InvalidMarkup);
+                                    last_violations.insert(id, vec![Violation::InvalidMarkup]);
+                                }
                             } else {
-                                bump(st, Violation::InvalidMarkup);
-                                last_violations.insert(id, vec![Violation::InvalidMarkup]);
+                                structural_error = Some(error);
                             }
-                        } else {
-                            transport_error = Some(TranslateError::Transport(error.to_string()));
                         }
                     }
                 }
-            }
-        };
+            };
         let sent = self
             .translator
             .translate(prompt, &mut |d| consume(stream.push(d)))
@@ -503,11 +511,31 @@ impl<T: Translator> Engine<T> {
                 );
             }
         }
+        // 通道失败优先：断联/超时不因结构损坏降级为可重试。
         sent?;
-        match transport_error {
-            Some(error) => Err(error),
-            None => Ok(()),
+        if let Some(error) = structural_error {
+            let pending: Vec<ParagraphId> = prompt
+                .unit_ids
+                .iter()
+                .filter(|id| !done.contains_key(*id))
+                .cloned()
+                .collect();
+            if pending.is_empty() {
+                // 没有可重新请求的源 id：损坏无法归因，不得吞掉。
+                return Err(TranslateError::Transport(error.to_string()));
+            }
+            tracing::warn!(%error, pending = pending.len(), "discarding malformed response suffix; retrying unresolved source blocks");
+            // Keep earlier validation evidence (e.g. numeric repair guidance),
+            // rather than replacing it with the later structural failure.
+            bump(st, Violation::InvalidMarkup);
+            for id in pending {
+                let violations = last_violations.entry(id).or_default();
+                if !violations.contains(&Violation::InvalidMarkup) {
+                    violations.push(Violation::InvalidMarkup);
+                }
+            }
         }
+        Ok(())
     }
 
     /// 裁决一批已闭合的原始块：未知/重复 id 丢弃并记账，其余逐块校验，
