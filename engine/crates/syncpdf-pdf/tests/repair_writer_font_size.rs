@@ -81,6 +81,7 @@ fn glyph_para(font: u32, gid: u16, size: f32, scale_x: f32) -> TypesetParagraph 
                 y: 700.0,
                 size,
                 scale_x,
+                shear_x: 0.0,
                 style: StyleId(1),
                 color: None,
             }],

@@ -1,9 +1,11 @@
-//! 角色字体链（profile）。
+//! 角色字体链（profile）：角色 × 变体槽。
 //!
 //! 设计文档 §7：角色 `body / doc_title / paragraph_title / mono / raster`，
-//! 每角色 regular / bold / italic / bold-italic 四变体链；CJK 由目标语言
-//! 选 ttc face。缺变体时的降级：italic 缺失 → regular（上层用 italic_shear
-//! 合成）；bold 缺失 → regular（上层用描边伪粗）。
+//! 每角色 regular / bold / italic / bold-italic 四变体槽（与 hjfy
+//! `FileFontFamily` 的 `{regular, bold, italic, bold-italic, face-index}`
+//! 同构）；CJK 由目标语言选 ttc face。缺真斜体字面时不静默丢斜体：槽位
+//! 显式标记 [`VariantFace::synthetic_italic`]，由排版层对字形施加合成剪切
+//! （[`SYNTHETIC_ITALIC_SHEAR_DEGREES`]，对应 hjfy `italic_shear_degrees`）。
 
 use crate::loader::{FontId, FontQuery, FontStore, Script};
 
@@ -22,49 +24,190 @@ pub enum Role {
     Raster,
 }
 
-/// 一个角色 → 四变体的字体链。
+/// 变体槽：一个角色下按 (bold, italic) 组合的字形风格。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FontVariant {
+    /// 常规正体。
+    Regular,
+    /// 粗体正体。
+    Bold,
+    /// 常规斜体。
+    Italic,
+    /// 粗斜体。
+    BoldItalic,
+}
+
+impl FontVariant {
+    /// 由样式的 (bold, italic) 取槽位。
+    pub fn of(bold: bool, italic: bool) -> Self {
+        match (bold, italic) {
+            (false, false) => Self::Regular,
+            (true, false) => Self::Bold,
+            (false, true) => Self::Italic,
+            (true, true) => Self::BoldItalic,
+        }
+    }
+
+    fn wants_italic(self) -> bool {
+        matches!(self, Self::Italic | Self::BoldItalic)
+    }
+
+    /// 期望字重（内置包只有 400/700 两档）。
+    fn weight(self) -> u16 {
+        if matches!(self, Self::Bold | Self::BoldItalic) {
+            700
+        } else {
+            400
+        }
+    }
+}
+
+/// 一个变体槽的选字结果。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VariantFace {
+    /// 选中的字体。
+    pub font: FontId,
+    /// `true` = 库内没有该槽的真斜体字面，斜体由正体面 + 排版层合成剪切
+    /// 表达（CJK 家族即此情况）；`false` = 真斜体面，无需剪切。
+    pub synthetic_italic: bool,
+}
+
+/// 合成斜体的默认剪切角（度），对应 hjfy `italic_shear_degrees`。
+/// 集中定义一处；排版/写回不得散落魔数。
+pub const SYNTHETIC_ITALIC_SHEAR_DEGREES: f32 = 10.0;
+
+/// 合成斜体的剪切量（tan 值；正值 = 向右倾斜）。
+pub fn synthetic_italic_shear() -> f32 {
+    SYNTHETIC_ITALIC_SHEAR_DEGREES.to_radians().tan()
+}
+
+/// 按查询条件解析一个变体槽；角色槽与 serif 覆盖路径共用同一判定。
+///
+/// 真斜体槽必须以 `LoadedFont::italic` 证实——[`FontStore::find`] 对没有
+/// 斜体面的家族会返回非斜体的降级候选。证不实时回落同字重正体面并标记
+/// 合成。库内完全无候选时返回 `None`，由调用方走角色槽或回退链。
+pub fn resolve_variant(
+    store: &FontStore,
+    serif: bool,
+    script: Script,
+    variant: FontVariant,
+) -> Option<VariantFace> {
+    let query = |weight: u16, italic: bool| {
+        store.find(&FontQuery {
+            family: None,
+            serif,
+            mono: false,
+            weight,
+            italic,
+            script,
+        })
+    };
+    if !variant.wants_italic() {
+        return query(variant.weight(), false)
+            .or_else(|| query(400, false))
+            .map(|font| VariantFace {
+                font,
+                synthetic_italic: false,
+            });
+    }
+    let true_face =
+        query(variant.weight(), true).filter(|&id| store.get(id).is_some_and(|f| f.italic));
+    if let Some(font) = true_face {
+        return Some(VariantFace {
+            font,
+            synthetic_italic: false,
+        });
+    }
+    // 缺真斜体面：italic 槽 = regular 面 + 剪切；bold-italic 槽 = bold 面 + 剪切。
+    query(variant.weight(), false)
+        .or_else(|| query(400, false))
+        .map(|font| VariantFace {
+            font,
+            synthetic_italic: true,
+        })
+}
+
+/// 一个角色 → 四变体槽。
 #[derive(Debug, Clone)]
 pub struct FontProfile {
     /// 目标语言（zh-CN/zh-TW/ja/ko/en/ar）。
     pub target_lang: String,
-    body: Chain,
-    doc_title: Chain,
-    paragraph_title: Chain,
-    mono: Chain,
-    raster: Chain,
+    body: VariantSlots,
+    doc_title: VariantSlots,
+    paragraph_title: VariantSlots,
+    mono: VariantSlots,
+    raster: VariantSlots,
     /// 回退顺序（所有可用字体，脚本感知排序）。
     fallbacks: Vec<FontId>,
 }
 
-/// 单角色四变体链。
-#[derive(Debug, Clone, Default)]
-struct Chain {
-    regular: Option<FontId>,
-    bold: Option<FontId>,
-    italic: Option<FontId>,
-    bold_italic: Option<FontId>,
+/// 单角色四变体槽。
+#[derive(Debug, Clone)]
+struct VariantSlots {
+    regular: VariantFace,
+    bold: VariantFace,
+    italic: VariantFace,
+    bold_italic: VariantFace,
+}
+
+impl VariantSlots {
+    fn pick(&self, variant: FontVariant) -> VariantFace {
+        match variant {
+            FontVariant::Regular => self.regular,
+            FontVariant::Bold => self.bold,
+            FontVariant::Italic => self.italic,
+            FontVariant::BoldItalic => self.bold_italic,
+        }
+    }
+
+    /// 解析四槽。`base` 是正体槽的显式锚点（标题角色用粗面、mono 用
+    /// PT Sans 占位）；斜体槽由 [`resolve_variant`] 决定真面或合成。
+    fn build(store: &FontStore, script: Script, base: Option<FontId>) -> Self {
+        let resolve = |variant: FontVariant| resolve_variant(store, false, script, variant);
+        // 每槽必有面：通用查询也落空时用库内任一字体兜底
+        // （`default_profile` 只对非空库构造）。
+        let fallback = store
+            .ids()
+            .first()
+            .copied()
+            .expect("字体库非空（load_builtin 拒绝空库）");
+        let upright = |variant: FontVariant| VariantFace {
+            font: resolve(variant).map(|face| face.font).unwrap_or(fallback),
+            synthetic_italic: false,
+        };
+        let regular = base.map_or_else(
+            || upright(FontVariant::Regular),
+            |font| VariantFace {
+                font,
+                synthetic_italic: false,
+            },
+        );
+        let bold = upright(FontVariant::Bold);
+        // 斜体槽：resolve 已按真面/合成判定；完全无候选时回落正体槽 + 合成。
+        let italic = resolve(FontVariant::Italic).unwrap_or(VariantFace {
+            font: regular.font,
+            synthetic_italic: true,
+        });
+        let bold_italic = resolve(FontVariant::BoldItalic).unwrap_or(VariantFace {
+            font: bold.font,
+            synthetic_italic: true,
+        });
+        Self {
+            regular,
+            bold,
+            italic,
+            bold_italic,
+        }
+    }
 }
 
 impl FontProfile {
-    /// 按角色 + 粗斜体取字体；缺变体逐级降级：
-    /// bold_italic → (bold|italic) → regular。
+    /// 按角色 + 变体槽取字体面。
     ///
-    /// 恒有值：`default_profile` 保证每角色链非空；极端情况（字体包全缺）
-    /// 用回退链首字体兜底。
-    pub fn pick(&self, role: Role, bold: bool, italic: bool) -> FontId {
-        let chain = self.chain(role);
-        match (bold, italic) {
-            (false, false) => chain.regular,
-            (true, false) => chain.bold.or(chain.regular),
-            (false, true) => chain.italic.or(chain.regular),
-            (true, true) => chain
-                .bold_italic
-                .or(chain.bold)
-                .or(chain.italic)
-                .or(chain.regular),
-        }
-        .or_else(|| self.fallbacks.first().copied())
-        .expect("FontProfile 恒有可用字体（default_profile 保证）")
+    /// 恒有值：`default_profile` 保证每角色槽非空；极端情况（字体包全缺）
+    /// 已在槽构建时用库内字体兜底。
+    pub fn pick_variant(&self, role: Role, variant: FontVariant) -> VariantFace {
+        self.slots(role).pick(variant)
     }
 
     /// 全部回退字体（去重，主字体在前）。
@@ -72,7 +215,7 @@ impl FontProfile {
         self.fallbacks.clone()
     }
 
-    fn chain(&self, role: Role) -> &Chain {
+    fn slots(&self, role: Role) -> &VariantSlots {
         match role {
             Role::Body => &self.body,
             Role::DocTitle => &self.doc_title,
@@ -84,7 +227,7 @@ impl FontProfile {
 }
 
 /// 目标语言 → 脚本。
-fn lang_script(lang: &str) -> Script {
+pub fn lang_script(lang: &str) -> Script {
     match lang {
         "zh-CN" | "zh-SG" => Script::HanSC,
         "zh-TW" | "zh-HK" => Script::HanTC,
@@ -171,39 +314,16 @@ pub fn default_profile(store: &FontStore, target_lang: &str) -> FontProfile {
     push_fb(store.find_by_family("sans", 400, false), &mut fallbacks);
     push_fb(store.find_by_family("math", 400, false), &mut fallbacks);
 
-    // 各角色链。
-    let chain_for = |base: Option<FontId>, weight_base: u16| -> Chain {
-        let mut c = Chain::default();
-        if base.is_some() {
-            c.regular = base;
-            c.bold = find(false, weight_base, false);
-            c.italic = find(false, 400, true);
-            c.bold_italic = find(false, weight_base, true);
-            // Inter/PT 有真斜体；CJK 无 → italic 链留 regular 供降级。
-            if cjk {
-                c.italic = c.italic.or(base);
-                c.bold_italic = c.bold_italic.or(c.bold).or(base);
-            }
-        }
-        c
-    };
-
-    let body_chain = chain_for(body, 700);
+    // 各角色槽：正体锚点 + 真斜体/合成判定（见 VariantSlots::build）。
     let title_base = find(false, title_weight, false);
-    let title_chain = chain_for(title_base, 700);
-    let title_chain2 = chain_for(title_base, 700);
     // mono：内置包无等宽 → 用 PT Sans 占位（上层可接系统 mono）。
-    let mono_chain = chain_for(store.find_by_family("sans", 400, false), 700);
-    // raster：同 body。
-    let raster_chain = chain_for(body, 700);
-
     FontProfile {
         target_lang: target_lang.to_string(),
-        body: body_chain,
-        doc_title: title_chain,
-        paragraph_title: title_chain2,
-        mono: mono_chain,
-        raster: raster_chain,
+        body: VariantSlots::build(store, script, body),
+        doc_title: VariantSlots::build(store, script, title_base),
+        paragraph_title: VariantSlots::build(store, script, title_base),
+        mono: VariantSlots::build(store, script, store.find_by_family("sans", 400, false)),
+        raster: VariantSlots::build(store, script, body),
         fallbacks,
     }
 }
@@ -225,15 +345,12 @@ mod tests {
             return;
         };
         let p = default_profile(&s, "zh-CN");
-        let body = p.pick(Role::Body, false, false);
-        let f = s.get(body).unwrap();
+        let body = p.pick_variant(Role::Body, FontVariant::Regular);
+        let f = s.get(body.font).unwrap();
         assert!(f.family.contains("SC"), "got {}", f.family);
-        let bold = p.pick(Role::Body, true, false);
-        let fb = s.get(bold).unwrap();
+        let bold = p.pick_variant(Role::Body, FontVariant::Bold);
+        let fb = s.get(bold.font).unwrap();
         assert!(fb.weight >= 600, "bold weight {}", fb.weight);
-        // CJK 无斜体 → italic 降级到 regular。
-        let it = p.pick(Role::Body, false, true);
-        assert_eq!(it, body);
         // 回退链非空且含拉丁字体。
         let fbs = p.fallbacks();
         assert!(fbs.len() >= 2);
@@ -251,8 +368,8 @@ mod tests {
             return;
         };
         let p = default_profile(&s, "zh-TW");
-        let body = p.pick(Role::Body, false, false);
-        assert!(s.get(body).unwrap().family.contains("TC"));
+        let body = p.pick_variant(Role::Body, FontVariant::Regular);
+        assert!(s.get(body.font).unwrap().family.contains("TC"));
     }
 
     #[test]
@@ -262,13 +379,8 @@ mod tests {
             return;
         };
         let p = default_profile(&s, "en");
-        let body = p.pick(Role::Body, false, false);
-        assert!(s.get(body).unwrap().family.contains("Inter"));
-        let it = p.pick(Role::Body, false, true);
-        assert!(s.get(it).unwrap().italic, "Inter 有真斜体");
-        let bi = p.pick(Role::Body, true, true);
-        assert!(s.get(bi).unwrap().italic);
-        assert!(s.get(bi).unwrap().weight >= 600);
+        let body = p.pick_variant(Role::Body, FontVariant::Regular);
+        assert!(s.get(body.font).unwrap().family.contains("Inter"));
     }
 
     #[test]
@@ -278,12 +390,93 @@ mod tests {
             return;
         };
         let p = default_profile(&s, "ar");
-        let body = p.pick(Role::Body, false, false);
+        let body = p.pick_variant(Role::Body, FontVariant::Regular);
         assert!(
-            s.get(body).unwrap().family.contains("Arabic"),
+            s.get(body.font).unwrap().family.contains("Arabic"),
             "got {}",
-            s.get(body).unwrap().family
+            s.get(body.font).unwrap().family
         );
+    }
+
+    /// 选字层：缺真斜体面 → 正体面 + 合成标记；拉丁（en）→ 真斜体面；
+    /// 正体/粗体槽永不合成（反例）。
+    #[test]
+    fn variant_slots_split_synthetic_italic_from_true_faces() {
+        let Some(s) = store() else {
+            eprintln!("SKIP: font package missing");
+            return;
+        };
+        let zh = default_profile(&s, "zh-CN");
+        // CJK 家族无斜体面：italic 槽 = regular 面 + 合成，bold-italic = bold 面 + 合成。
+        let regular = zh.pick_variant(Role::Body, FontVariant::Regular);
+        let italic = zh.pick_variant(Role::Body, FontVariant::Italic);
+        assert_eq!(italic.font, regular.font, "CJK italic 槽回落 regular 面");
+        assert!(italic.synthetic_italic, "CJK italic 槽应标记合成斜体");
+        assert!(!s.get(italic.font).unwrap().italic);
+        let bold = zh.pick_variant(Role::Body, FontVariant::Bold);
+        let bold_italic = zh.pick_variant(Role::Body, FontVariant::BoldItalic);
+        assert_eq!(
+            bold_italic.font, bold.font,
+            "CJK bold-italic 槽回落 bold 面"
+        );
+        assert!(bold_italic.synthetic_italic);
+        assert!(s.get(bold_italic.font).unwrap().weight >= 600);
+        // 标题角色同样按字面可用性合成（不同形态正例）。
+        for role in [Role::DocTitle, Role::ParagraphTitle, Role::Raster] {
+            assert!(
+                zh.pick_variant(role, FontVariant::Italic).synthetic_italic,
+                "{role:?} italic"
+            );
+            assert!(
+                zh.pick_variant(role, FontVariant::BoldItalic)
+                    .synthetic_italic,
+                "{role:?} bold-italic"
+            );
+        }
+        // 拉丁目标：真斜体面，不合成。
+        let en = default_profile(&s, "en");
+        let it = en.pick_variant(Role::Body, FontVariant::Italic);
+        assert!(!it.synthetic_italic, "Inter 有真斜体");
+        assert!(s.get(it.font).unwrap().italic);
+        let bi = en.pick_variant(Role::Body, FontVariant::BoldItalic);
+        assert!(!bi.synthetic_italic);
+        assert!(s.get(bi.font).unwrap().italic);
+        assert!(s.get(bi.font).unwrap().weight >= 600);
+        // 反例：正体/粗体槽永不合成。
+        for p in [&zh, &en] {
+            for variant in [FontVariant::Regular, FontVariant::Bold] {
+                assert!(
+                    !p.pick_variant(Role::Body, variant).synthetic_italic,
+                    "{variant:?}"
+                );
+            }
+        }
+    }
+
+    /// serif 覆盖路径（Text 区域正文）与角色槽使用同一套真斜体/合成判定。
+    #[test]
+    fn resolve_variant_applies_same_italic_rule_for_serif_override() {
+        let Some(s) = store() else {
+            eprintln!("SKIP: font package missing");
+            return;
+        };
+        // CJK serif：无真斜体面 → NotoSerifCJK regular + 合成。
+        let cjk = resolve_variant(&s, true, Script::HanSC, FontVariant::Italic)
+            .expect("CJK serif 面应存在");
+        assert!(cjk.synthetic_italic);
+        assert!(!s.get(cjk.font).unwrap().italic);
+        assert!(s.get(cjk.font).unwrap().family.contains("Serif"));
+        // 拉丁 serif：PTSerif-Italic 真面。
+        let latin = resolve_variant(&s, true, Script::Latin, FontVariant::Italic)
+            .expect("PTSerif-Italic 应存在");
+        assert!(!latin.synthetic_italic);
+        assert!(s.get(latin.font).unwrap().italic);
+        assert!(s.get(latin.font).unwrap().family.contains("Serif"));
+        let bi = resolve_variant(&s, true, Script::Latin, FontVariant::BoldItalic)
+            .expect("PTSerif-BoldItalic 应存在");
+        assert!(!bi.synthetic_italic);
+        assert!(s.get(bi.font).unwrap().italic);
+        assert!(s.get(bi.font).unwrap().weight >= 600);
     }
 
     #[test]
@@ -301,11 +494,16 @@ mod tests {
                 Role::Mono,
                 Role::Raster,
             ] {
-                for (b, i) in [(false, false), (true, false), (false, true), (true, true)] {
-                    let picked = p.pick(role, b, i);
+                for variant in [
+                    FontVariant::Regular,
+                    FontVariant::Bold,
+                    FontVariant::Italic,
+                    FontVariant::BoldItalic,
+                ] {
+                    let picked = p.pick_variant(role, variant);
                     assert!(
-                        s.get(picked).is_some(),
-                        "{lang} {role:?} bold={b} italic={i} 无字体"
+                        s.get(picked.font).is_some(),
+                        "{lang} {role:?} {variant:?} 无字体"
                     );
                 }
             }

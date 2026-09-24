@@ -320,10 +320,18 @@ pub struct PlacedGlyph {
     pub y: f32,
     pub size: f32,
     pub scale_x: f32,
+    /// 合成斜体的水平剪切量（tan 值，正值 = 向右倾斜），施加在写回文本矩阵
+    /// 的 c 分量；正体与真斜体面为 0。
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub shear_x: f32,
     pub style: StyleId,
     /// Per-run color; absent in older IR means the paragraph color.
     #[serde(default)]
     pub color: Option<Color>,
+}
+
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
