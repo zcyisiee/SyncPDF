@@ -9,6 +9,8 @@ pub(super) struct Formula {
     ids: BTreeSet<GlyphId>,
     /// Prose glyphs the detected box swallowed but which stay translatable.
     pub(super) released: BTreeSet<GlyphId>,
+    /// Context proving the punctuation is prose must belong to its final paragraph too.
+    release_context: BTreeSet<GlyphId>,
     source: SourceAtom,
     row: Rect,
 }
@@ -50,14 +52,16 @@ pub(super) fn sources(ir: &PageIR, regions: &[&Region]) -> Vec<Formula> {
         }
         // A detected Formula box is often wider than the real math and swallows a
         // prose comma after the last math glyph; freezing it into the KEEP atom
-        // leaves punctuation the translation cannot reorder ("在H,中"). Release
-        // it only with the full evidence chain; anything ambiguous keeps the old
-        // protection.
+        // leaves punctuation the translation cannot reorder ("在H,中"). The same
+        // happens to the `)` closing a prose paren pair whose `(` and words sit
+        // outside the box. Release either only with the full evidence chain;
+        // anything ambiguous keeps the old protection.
+        let candidate = prose_trailing_comma(&owned, r, parent, regions, &glyphs)
+            .map(|g| (g, BTreeSet::new()))
+            .or_else(|| prose_trailing_close_paren(&owned, r, parent, regions, &glyphs));
         let mut released: BTreeSet<GlyphId> =
-            prose_trailing_comma(&owned, r, parent, regions, &glyphs)
-                .map(|g| g.id)
-                .into_iter()
-                .collect();
+            candidate.as_ref().map(|(g, _)| g.id).into_iter().collect();
+        let mut release_context = candidate.map(|(_, context)| context).unwrap_or_default();
         loop {
             let kept: Vec<&Glyph> = owned
                 .iter()
@@ -146,11 +150,13 @@ pub(super) fn sources(ir: &PageIR, regions: &[&Region]) -> Vec<Formula> {
                     break;
                 }
                 released.clear();
+                release_context.clear();
                 continue;
             }
             out.push(Formula {
                 ids,
                 released: std::mem::take(&mut released),
+                release_context: std::mem::take(&mut release_context),
                 source: SourceAtom {
                     bbox: clip,
                     baseline: neighbor.matrix.f,
@@ -250,6 +256,186 @@ fn prose_trailing_comma<'a>(
     }
     prose_successor(comma, parent, regions, glyphs)?;
     Some(comma)
+}
+
+/// The same swallow happens to a prose `)`: "(i.e., the decoder, 𝑙>𝐿/2)" keeps
+/// the real math but its closing paren lands inside the detected box, so the
+/// atom reads "𝑙>𝐿/2)" and the paragraph adds a second prose `)`. Release it
+/// only when the pairing is proven end to end; anything ambiguous keeps it:
+/// - it is the rightmost owned glyph, a lone `)` with finite positive tight
+///   ink, on the formula's main baseline;
+/// - the remaining glyphs still balance their own delimiters;
+/// - walking the owner's reading order backwards pairs it with a `(` that no
+///   Formula or preserved region claims (a math `f(x)`/`(x,y)` opener inside
+///   the box, or one owned by an earlier formula atom, is not a prose opener);
+/// - the pair encloses at least two complete prose words outside every Formula
+///   region, in the close paren's own font and size, with no unknown glyphs;
+/// - no other preserved region also claims the close paren.
+fn prose_trailing_close_paren<'a>(
+    owned: &[&'a Glyph],
+    region: &Region,
+    parent: &Region,
+    regions: &[&Region],
+    glyphs: &[&'a Glyph],
+) -> Option<(&'a Glyph, BTreeSet<GlyphId>)> {
+    let close = owned.iter().copied().max_by(|a, b| {
+        a.bbox
+            .x0
+            .total_cmp(&b.bbox.x0)
+            .then(a.bbox.x1.total_cmp(&b.bbox.x1))
+    })?;
+    let ink = close.ink?;
+    if close.unicode.as_slice() != [')']
+        || ![ink.x0, ink.y0, ink.x1, ink.y1, close.matrix.f, close.size]
+            .into_iter()
+            .all(f32::is_finite)
+        || ink.width() <= 0.0
+        || ink.height() <= 0.0
+        || close.size <= 0.0
+    {
+        return None;
+    }
+    let rest: Vec<&Glyph> = owned.iter().copied().filter(|g| g.id != close.id).collect();
+    if rest.is_empty() {
+        return None;
+    }
+    // Same baseline as the largest (main-row) glyph, not a sub/superscript tail.
+    let base = rest.iter().max_by(|a, b| a.size.total_cmp(&b.size))?;
+    if (close.matrix.f - base.matrix.f).abs() > 0.5 {
+        return None;
+    }
+    // The remaining math must still balance its own delimiters.
+    let mut sorted: Vec<&Glyph> = rest.clone();
+    sorted.sort_by(|a, b| a.bbox.x0.total_cmp(&b.bbox.x0));
+    if !balanced_delimiters(&sorted) {
+        return None;
+    }
+    // The pair proof: a prose `(` opener and real prose words inside.
+    let context = prose_paren_pair(close, parent, regions, glyphs)?;
+    // No other preserved region may also claim the close paren.
+    if regions.iter().any(|p| {
+        !p.kind.translatable() && p.index != region.index && p.bbox.contains(close.bbox.center())
+    }) {
+        return None;
+    }
+    Some((close, context))
+}
+
+/// Walk the owner's reading order backwards from `close` to the opener it
+/// pairs with. Every glyph inside the pair must have known unicode and every
+/// nested pair must type-match, or the pairing is unprovable. The opener must
+/// be a `(` that no Formula or preserved region claims, in the same body font
+/// and size as the close paren, and the pair must enclose at least two
+/// complete prose words outside every Formula region.
+fn prose_paren_pair(
+    close: &Glyph,
+    parent: &Region,
+    regions: &[&Region],
+    glyphs: &[&Glyph],
+) -> Option<BTreeSet<GlyphId>> {
+    // Unknown sub/superscript glyphs must not disappear through baseline filtering.
+    if glyphs
+        .iter()
+        .any(|g| parent.bbox.contains(g.bbox.center()) && g.unicode.is_empty())
+    {
+        return None;
+    }
+    let mut prefix: Vec<&Glyph> = glyphs
+        .iter()
+        .copied()
+        .filter(|g| {
+            g.id != close.id
+                && parent.bbox.contains(g.bbox.center())
+                && (g.matrix.f > close.matrix.f + 0.5
+                    || ((g.matrix.f - close.matrix.f).abs() <= 0.5 && g.bbox.x0 < close.bbox.x0))
+        })
+        .collect();
+    prefix.sort_by(|a, b| {
+        b.matrix
+            .f
+            .total_cmp(&a.matrix.f)
+            .then(a.bbox.x0.total_cmp(&b.bbox.x0))
+    });
+    let mut stack: Vec<char> = Vec::new();
+    let mut open_index = None;
+    for (i, g) in prefix.iter().enumerate().rev() {
+        if g.unicode.is_empty() {
+            return None;
+        }
+        for &c in g.unicode.iter().rev() {
+            match c {
+                ')' | ']' | '}' => stack.push(c),
+                '(' | '[' | '{' => match stack.pop() {
+                    None => {
+                        let ink = g.ink?;
+                        if ![ink.x0, ink.y0, ink.x1, ink.y1, g.matrix.f, g.size]
+                            .into_iter()
+                            .all(f32::is_finite)
+                            || ink.width() <= 0.0
+                            || ink.height() <= 0.0
+                            || g.unicode.as_slice() != ['(']
+                            || c != '('
+                            || g.font != close.font
+                            || (g.size - close.size).abs() > 0.05
+                            || regions
+                                .iter()
+                                .any(|r| !r.kind.translatable() && r.bbox.contains(g.bbox.center()))
+                        {
+                            return None;
+                        }
+                        open_index = Some(i);
+                        break;
+                    }
+                    Some(closer) => {
+                        let want = match closer {
+                            ')' => '(',
+                            ']' => '[',
+                            _ => '{',
+                        };
+                        if c != want {
+                            return None;
+                        }
+                    }
+                },
+                _ => {}
+            }
+        }
+        if open_index.is_some() {
+            break;
+        }
+    }
+    let i = open_index?;
+    // Check the WHOLE pair before accepting any word witnesses. Font changes
+    // do not create word boundaries: reuse the strict body-word proof, starting
+    // only after evidenced whitespace/punctuation or a geometric word gap.
+    let inside = &prefix[i + 1..];
+    if inside.iter().any(|g| {
+        g.unicode.is_empty()
+            || regions.iter().any(|r| {
+                !r.kind.translatable()
+                    && r.kind != RegionKind::Formula
+                    && r.bbox.contains(g.bbox.center())
+            })
+    }) {
+        return None;
+    }
+    let prose = prefix[i..].windows(2).any(|pair| {
+        let (prev, start) = (pair[0], pair[1]);
+        let boundary = prev
+            .unicode
+            .iter()
+            .all(|c| c.is_whitespace() || matches!(c, '(' | '.' | ',' | ';' | ':' | '!' | '?'))
+            || ((prev.matrix.f - start.matrix.f).abs() <= 0.5
+                && start.bbox.x0 - prev.bbox.x1 > 0.15 * close.size);
+        boundary && body_word_pair(start, close, parent, regions, inside)
+    });
+    prose.then(|| {
+        prefix[i..]
+            .iter()
+            .map(|g| g.id)
+            .chain(std::iter::once(close.id))
+            .collect()
+    })
 }
 
 fn balanced_delimiters(glyphs: &[&Glyph]) -> bool {
@@ -558,6 +744,7 @@ fn radical_sources(ir: &PageIR, regions: &[&Region], glyphs: &[&Glyph], out: &mu
         out.push(Formula {
             ids,
             released: BTreeSet::new(),
+            release_context: BTreeSet::new(),
             source: SourceAtom {
                 bbox: clip,
                 baseline: line,
@@ -594,6 +781,7 @@ pub(super) fn line_box(g: &Glyph, formulas: &[Formula]) -> Rect {
 pub(super) fn released_for(p: &Paragraph, formulas: &[Formula]) -> BTreeSet<GlyphId> {
     formulas
         .iter()
+        .filter(|f| f.release_context.iter().all(|id| p.glyphs.contains(id)))
         .filter(|f| {
             p.atoms.iter().any(|a| {
                 a.kind == AtomKind::Formula

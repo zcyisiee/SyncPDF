@@ -563,6 +563,335 @@ fn real_formula_trailing_commas_are_released_to_prose() {
     }
 }
 
+/// `prefix`（含正文 `(`）、`math`（数学字体）与 `suffix` 同一行；检测框覆盖
+/// math 与尾随的正文 `)`。返回该 `)` 的 GlyphId 与 tight ink。
+fn close_paren_fixture(
+    prefix: &str,
+    math: &str,
+    suffix: &str,
+) -> (PageIR, Vec<Region>, GlyphId, Rect) {
+    let mut glyphs = line(0, prefix, 50.0, 700.0, 10.0, 0);
+    for g in &mut glyphs {
+        if g.unicode.as_slice() == ['('] {
+            g.ink = Some(g.bbox);
+        }
+    }
+    let n = glyphs.len() as u16;
+    let math_x = 60.0 + prefix.chars().count() as f32 * 6.0;
+    glyphs.extend(line(n, math, math_x, 700.0, 10.0, 1));
+    let n = glyphs.len() as u16;
+    let x = math_x + math.chars().count() as f32 * 6.0 + 0.5;
+    let mut close = mk_glyph(n, ')', x, 700.0, 10.0, 0);
+    close.ink = Some(Rect::new(x + 0.1, 700.0, x + 3.0, 710.0));
+    let id = close.id;
+    let ink = close.ink.unwrap();
+    glyphs.push(close);
+    glyphs.extend(line(n + 1, suffix, x + 9.0, 700.0, 10.0, 0));
+    let ir = page_ir(
+        glyphs,
+        vec![mk_font("Body", false, false), mk_font("Math", false, true)],
+    );
+    let mut regions = full_region(RegionKind::Text);
+    let mut formula = text_region(1, Rect::new(math_x - 1.0, 695.0, x + 5.0, 712.0), 1);
+    formula.kind = RegionKind::Formula;
+    regions.push(formula);
+    (ir, regions, id, ink)
+}
+
+fn assert_close_not_released(ir: &PageIR, regions: &[Region], close: GlyphId) {
+    let refs: Vec<_> = regions.iter().collect();
+    let formulas = inline_formula::sources(ir, &refs);
+    assert!(
+        formulas.iter().all(|f| !f.released.contains(&close)),
+        "ambiguous close paren was released"
+    );
+}
+
+#[test]
+fn prose_close_paren_swallowed_by_formula_is_released() {
+    // Real P09-003 shape: "(i.e., the decoder, l>L/2)" — the detected box
+    // swallows the prose `)` whose `(` and two full words sit outside it.
+    let (ir, regions, close, ink) = close_paren_fixture("in (i.e., the decoder,", "x", ", so it");
+    let refs: Vec<_> = regions.iter().collect();
+    let formulas = inline_formula::sources(&ir, &refs);
+    assert!(formulas.iter().any(|f| f.released.contains(&close)));
+    let paragraphs = analyze_page(&ir, &regions);
+    let p = paragraphs
+        .iter()
+        .find(|p| p.kind == RegionKind::Text)
+        .unwrap();
+    assert!(
+        matches!(p.translatable, Translatable::Yes),
+        "{:?}",
+        p.translatable
+    );
+    assert_eq!(p.text, "in (i.e., the decoder, x), so it");
+    let atom = p
+        .atoms
+        .iter()
+        .find(|a| a.kind == AtomKind::Formula)
+        .unwrap();
+    assert_eq!(atom.text, "x");
+    // The replay clip must not touch the released paren's ink.
+    let clip = atom.source.unwrap().bbox;
+    assert!(clip.x1 <= ink.x0 || clip.x0 >= ink.x1);
+    let released = inline_formula::released_for(p, &formulas);
+    assert!(released.contains(&close));
+}
+
+#[test]
+fn close_paren_cannot_borrow_pairing_from_another_final_paragraph() {
+    let (mut ir, regions, close, _) = close_paren_fixture("in (the decoder,", "x", ", so it");
+    for item in &mut ir.items {
+        if let DisplayItem::Text { glyphs } = item {
+            for g in glyphs.iter_mut().take("in (the decoder,".len()) {
+                g.matrix.f += 45.0;
+                g.bbox.y0 += 45.0;
+                g.bbox.y1 += 45.0;
+                if let Some(ink) = &mut g.ink {
+                    ink.y0 += 45.0;
+                    ink.y1 += 45.0;
+                }
+            }
+        }
+    }
+    let paragraphs = analyze_page(&ir, &regions);
+    let p = paragraphs
+        .iter()
+        .find(|p| p.glyphs.contains(&close))
+        .unwrap();
+    let index = p.glyphs.iter().position(|g| *g == close).unwrap() as u32;
+    assert!(
+        matches!(p.translatable, Translatable::No { .. })
+            || p.atoms
+                .iter()
+                .any(|a| a.source.is_some() && a.glyph_range.0 <= index && index < a.glyph_range.1),
+        "pairing borrowed from another paragraph: {p:?}"
+    );
+}
+
+#[test]
+fn close_paren_missing_opener_ink_is_not_pairing_evidence() {
+    let (mut ir, regions, close, _) = close_paren_fixture("in (the decoder,", "x", ", so it");
+    for item in &mut ir.items {
+        if let DisplayItem::Text { glyphs } = item {
+            glyphs
+                .iter_mut()
+                .find(|g| g.unicode.as_slice() == ['('])
+                .unwrap()
+                .ink = None;
+        }
+    }
+    assert_close_not_released(&ir, &regions, close);
+}
+
+#[test]
+fn close_paren_cannot_ignore_protected_text_after_word_witnesses() {
+    let (ir, mut regions, close, _) = close_paren_fixture("in (the decoder, abcd,", "x", ", so it");
+    let glyph = ir.glyphs().find(|g| g.unicode.as_slice() == ['b']).unwrap();
+    let mut protected = text_region(2, glyph.bbox, 2);
+    protected.kind = RegionKind::Table;
+    regions.push(protected);
+    assert_close_not_released(&ir, &regions, close);
+}
+
+#[test]
+fn close_paren_font_changes_do_not_make_two_complete_words() {
+    let (mut ir, regions, close, _) = close_paren_fixture("in (abCde,", "x", ", so it");
+    for item in &mut ir.items {
+        if let DisplayItem::Text { glyphs } = item {
+            glyphs
+                .iter_mut()
+                .find(|g| g.unicode.as_slice() == ['C'])
+                .unwrap()
+                .font = 1;
+        }
+    }
+    assert_close_not_released(&ir, &regions, close);
+}
+
+#[test]
+fn close_paren_unknown_lowered_glyph_is_not_skipped() {
+    let (mut ir, regions, close, _) = close_paren_fixture("in (the decoder,", "x", ", so it");
+    for item in &mut ir.items {
+        if let DisplayItem::Text { glyphs } = item {
+            let g = glyphs
+                .iter_mut()
+                .find(|g| g.unicode.as_slice() == [','])
+                .unwrap();
+            g.unicode.clear();
+            g.matrix.f -= 3.0;
+            g.bbox.y0 -= 3.0;
+            g.bbox.y1 -= 3.0;
+            g.ink = Some(g.bbox);
+        }
+    }
+    assert_close_not_released(&ir, &regions, close);
+}
+
+#[test]
+#[ignore = "requires saved real source/region evidence"]
+fn real_prose_close_paren_releases_only_owned_boundary() {
+    let root = std::path::PathBuf::from(std::env::var("SYNCPDF_FORMULA_AUDIT").unwrap());
+    let pages: Vec<PageIR> =
+        serde_json::from_slice(&std::fs::read(root.join("source.json")).unwrap()).unwrap();
+    let ir = pages.iter().find(|p| p.page.0 == 8).unwrap();
+    let regions: Vec<Region> =
+        serde_json::from_slice(&std::fs::read(root.join("regions-8.json")).unwrap()).unwrap();
+    let refs: Vec<_> = regions.iter().collect();
+    let formulas = inline_formula::sources(ir, &refs);
+    let paragraphs = analyze_page(ir, &regions);
+    let p = paragraphs
+        .iter()
+        .find(|p| p.id.to_string() == "P09-003")
+        .unwrap();
+    assert!(matches!(p.translatable, Translatable::Yes));
+    let a = p
+        .atoms
+        .iter()
+        .find(|a| a.kind == AtomKind::Formula)
+        .unwrap();
+    assert_eq!(a.text, "𝑙>𝐿/2");
+    assert_eq!(a.glyph_range, (119, 124));
+    let released = inline_formula::released_for(p, &formulas);
+    assert_eq!(released.len(), 1);
+    let id = *released.first().unwrap();
+    assert_eq!(p.glyphs[124], id);
+    assert_eq!((id.op.op_index, id.ordinal), (51, 0));
+    let close = ir.glyphs().find(|g| g.id == id).unwrap();
+    assert_eq!(close.unicode.as_slice(), [')']);
+    assert!(!a.source.unwrap().bbox.intersects(&close.ink.unwrap()));
+    assert_eq!(p.atoms[2].text, "(𝑊𝑙𝐾𝑉");
+    assert_eq!(p.atoms[3].text, "𝑊𝑙𝑍)");
+}
+
+#[test]
+fn math_function_close_paren_stays_inside_atom() {
+    // "f(x)" math: the `(` lives inside the same box, no prose pair exists.
+    let (ir, regions, close, _) = close_paren_fixture("call f", "(x", " now");
+    assert_close_not_released(&ir, &regions, close);
+}
+
+#[test]
+fn math_tuple_close_paren_stays_inside_atom() {
+    let (ir, regions, close, _) = close_paren_fixture("at ", "(x,y", " now");
+    assert_close_not_released(&ir, &regions, close);
+}
+
+#[test]
+fn open_ended_math_paren_keeps_close_paren() {
+    // "g(x" is unclosed math; a trailing `)` cannot close a prose pair for it.
+    let (ir, regions, close, _) = close_paren_fixture("(see the note,", "g(x", " end");
+    assert_close_not_released(&ir, &regions, close);
+}
+
+#[test]
+fn close_paren_without_prose_words_stays_inside_atom() {
+    // "(a x+y)": a prose `(` but no complete word inside the pair — the box may
+    // have missed the real math opener, so the `)` stays protected.
+    let (ir, regions, close, _) = close_paren_fixture("(a", "x+y", " end");
+    assert_close_not_released(&ir, &regions, close);
+}
+
+#[test]
+fn unpaired_close_paren_stays_inside_atom() {
+    // Words but no `(` anywhere before it: the pairing is unprovable.
+    let (ir, regions, close, _) = close_paren_fixture("the decoder,", "x", " end");
+    assert_close_not_released(&ir, &regions, close);
+}
+
+#[test]
+fn mismatched_open_bracket_keeps_close_paren() {
+    // A `[` cannot close a `)`; type mismatch keeps the protection.
+    let (ir, regions, close, _) = close_paren_fixture("[see the note,", "x", " end");
+    assert_close_not_released(&ir, &regions, close);
+}
+
+#[test]
+fn close_paren_unknown_glyph_in_pair_stays_inside_atom() {
+    let (mut ir, regions, close, _) = close_paren_fixture("in (i.e., the decoder,", "x", ", so it");
+    for item in &mut ir.items {
+        if let DisplayItem::Text { glyphs } = item {
+            let g = glyphs
+                .iter_mut()
+                .find(|g| g.unicode.as_slice() == ['e'] && g.font == 0)
+                .unwrap();
+            g.unicode.clear();
+            g.ink = Some(g.bbox);
+        }
+    }
+    assert_close_not_released(&ir, &regions, close);
+}
+
+#[test]
+fn close_paren_without_tight_ink_stays_inside_atom() {
+    let (mut ir, regions, close, _) = close_paren_fixture("in (i.e., the decoder,", "x", ", so it");
+    for item in &mut ir.items {
+        if let DisplayItem::Text { glyphs } = item {
+            for g in glyphs {
+                if g.id == close {
+                    g.ink = None;
+                }
+            }
+        }
+    }
+    assert_close_not_released(&ir, &regions, close);
+}
+
+#[test]
+fn close_paren_nonfinite_ink_stays_inside_atom() {
+    let (mut ir, regions, close, _) = close_paren_fixture("in (i.e., the decoder,", "x", ", so it");
+    for item in &mut ir.items {
+        if let DisplayItem::Text { glyphs } = item {
+            for g in glyphs {
+                if g.id == close {
+                    g.ink.as_mut().unwrap().x0 = f32::NAN;
+                }
+            }
+        }
+    }
+    assert_close_not_released(&ir, &regions, close);
+}
+
+#[test]
+fn close_paren_shared_formula_region_stays_inside_atom() {
+    // A second Formula region also covering the `)` makes ownership ambiguous.
+    let (ir, mut regions, close, _) = close_paren_fixture("in (i.e., the decoder,", "x", ", so it");
+    let mut second = text_region(2, Rect::new(180.0, 695.0, 220.0, 712.0), 2);
+    second.kind = RegionKind::Formula;
+    regions.push(second);
+    assert_close_not_released(&ir, &regions, close);
+}
+
+#[test]
+fn cross_atom_paren_pair_keeps_close_paren() {
+    // "(W_A and more W_B)" split across two detected boxes: the `(` is owned by
+    // an earlier Formula atom, so it is not a prose opener for this `)`.
+    let mut glyphs = line(0, "with ", 50.0, 700.0, 10.0, 0);
+    let mut open = mk_glyph(5, '(', 80.0, 700.0, 10.0, 0);
+    open.ink = Some(Rect::new(80.1, 700.0, 83.0, 710.0));
+    glyphs.push(open);
+    glyphs.extend(line(6, "W", 86.0, 700.0, 10.0, 1));
+    glyphs.extend(line(7, " and more ", 95.0, 700.0, 10.0, 0));
+    glyphs.extend(line(17, "W", 160.0, 700.0, 10.0, 1));
+    let mut close = mk_glyph(18, ')', 166.5, 700.0, 10.0, 0);
+    close.ink = Some(Rect::new(166.6, 700.0, 169.4, 710.0));
+    let close_id = close.id;
+    glyphs.push(close);
+    let ir = page_ir(
+        glyphs,
+        vec![mk_font("Body", false, false), mk_font("Math", false, true)],
+    );
+    let mut regions = full_region(RegionKind::Text);
+    let mut first = text_region(1, Rect::new(79.0, 695.0, 93.0, 712.0), 1);
+    first.kind = RegionKind::Formula;
+    let mut second = text_region(2, Rect::new(159.0, 695.0, 174.0, 712.0), 2);
+    second.kind = RegionKind::Formula;
+    regions.push(first);
+    regions.push(second);
+    assert_close_not_released(&ir, &regions, close_id);
+}
+
 #[test]
 fn two_lines_merge_into_one_paragraph() {
     // 行距 14pt、字号 10pt（14 < 1.8×10）→ 同段。
