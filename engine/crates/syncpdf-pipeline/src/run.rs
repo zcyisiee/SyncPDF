@@ -526,7 +526,8 @@ impl Pipeline {
                     },
                     paragraph_id: Some(p.id.clone()),
                     page: Some(p.id.page),
-                    message: "源段落的重叠归属、旋转方向或未映射字形尚未可靠处理，已保留原文".into(),
+                    message: "源段落的重叠归属、旋转方向或未映射字形尚未可靠处理，已保留原文"
+                        .into(),
                 });
             }
             sink.emit(Event::Paragraph {
