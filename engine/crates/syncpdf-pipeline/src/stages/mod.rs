@@ -15,6 +15,7 @@ mod ruled_code;
 pub mod source;
 pub(crate) mod source_citations;
 pub(crate) mod source_decoration;
+pub(crate) mod source_opaque;
 pub mod source_policy;
 pub(crate) mod source_toc;
 pub(crate) mod text_atoms;

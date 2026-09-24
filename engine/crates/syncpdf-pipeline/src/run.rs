@@ -491,6 +491,7 @@ impl Pipeline {
                 .ok_or_else(|| PipelineError::Protocol("区域所属页缺少 IR".into()))?;
             let mut paragraphs = analyze_page(ir, regions);
             stages::source_policy::protect_front_matter(ir, regions, &mut paragraphs);
+            stages::source_opaque::protect(&mut paragraphs, ir);
             stages::source_decoration::claim(ir, &mut paragraphs);
             stages::source_decoration::mark_styles(ir, &mut paragraphs);
             stages::source_citations::protect(&mut paragraphs, ir, &main_doc);
@@ -515,7 +516,7 @@ impl Pipeline {
             .cloned()
             .partition(|p| matches!(p.translatable, Translatable::Yes));
         for p in &not_replaced {
-            if matches!(&p.translatable, Translatable::No { reason } if matches!(reason.as_str(), "protected_source_overlap" | "rotated_source_text" | "translatable_region_overlap"))
+            if matches!(&p.translatable, Translatable::No { reason } if matches!(reason.as_str(), "protected_source_overlap" | "rotated_source_text" | "translatable_region_overlap" | "unmapped_source_glyph"))
             {
                 sink.emit(Event::Issue {
                     severity: Severity::Warning,
@@ -525,7 +526,7 @@ impl Pipeline {
                     },
                     paragraph_id: Some(p.id.clone()),
                     page: Some(p.id.page),
-                    message: "源段落的重叠归属或旋转方向尚未可靠处理，已保留原文".into(),
+                    message: "源段落的重叠归属、旋转方向或未映射字形尚未可靠处理，已保留原文".into(),
                 });
             }
             sink.emit(Event::Paragraph {
@@ -755,7 +756,7 @@ impl Pipeline {
         };
         // 按策略保留的 reference/脚注等不是回退；保护冲突阻断的可译内容则未完成。
         let protected = not_replaced.iter().filter(|p| {
-            matches!(&p.translatable, Translatable::No { reason } if matches!(reason.as_str(), "protected_source_overlap" | "rotated_source_text" | "translatable_region_overlap"))
+            matches!(&p.translatable, Translatable::No { reason } if matches!(reason.as_str(), "protected_source_overlap" | "rotated_source_text" | "translatable_region_overlap" | "unmapped_source_glyph"))
         }).count();
         let ok = summary_stats.fallbacks == 0
             && protected == 0
