@@ -534,3 +534,70 @@ fn empty_paragraph_produces_no_lines() {
     assert!(r.paragraph.lines.is_empty());
     assert!((r.scale - 1.0).abs() < 1e-6);
 }
+
+#[test]
+fn cjk_justify_spreads_slack_evenly_across_spaces_and_cjk_gaps() {
+    // 中英混排行：两个西文空格与 CJK 字距是等价的两端对齐点，
+    // slack 不能被空格吞掉（空格断行 stretch ≈ 字距的 20 倍）。
+    let bbox = Rect::new(0.0, 0.0, 107.0, 60.0);
+    let mut s = spec(bbox, 10.0, 1.2, Align::Justify);
+    s.lang = Lang::Zh;
+    let t = typeset_default();
+    let text = "一二三四 ab 五六七八九十一二三四五六七八";
+    let r = t.layout(pid(), &s, &[text_inline(text)], &Obstacles::default());
+    assert!(r.paragraph.lines.len() >= 2);
+    let l0 = &r.paragraph.lines[0];
+    let at = |c: &str| l0.glyphs.iter().position(|g| g.text == c).unwrap();
+    let (si, ai, wi) = (at("四"), at("a"), at("五"));
+    let cjk_extra = l0.glyphs[1].x - l0.glyphs[0].x - 10.0;
+    assert!(cjk_extra > 0.2, "cjk gaps must take slack: {cjk_extra}");
+    // 空格 2.5pt、"ab" 10pt：空格处的额外距离与字距额外量相同。
+    let space_extra = l0.glyphs[ai].x - l0.glyphs[si].x - 10.0 - 2.5;
+    let space2_extra = l0.glyphs[wi].x - l0.glyphs[ai].x - 10.0 - 2.5;
+    assert!(
+        (space_extra - cjk_extra).abs() < 0.1,
+        "space={space_extra} cjk={cjk_extra}"
+    );
+    assert!(
+        (space2_extra - cjk_extra).abs() < 0.1,
+        "space={space2_extra} cjk={cjk_extra}"
+    );
+    let last = l0.glyphs.last().unwrap();
+    assert!(
+        (last.x + 10.0 - bbox.x1).abs() < 1.0,
+        "right={}",
+        last.x + 10.0
+    );
+}
+
+#[test]
+fn latin_justify_without_cjk_gaps_keeps_space_stretch() {
+    // 无 CJK 字距的行：slack 只落在空格上，行为不变。
+    let bbox = Rect::new(0.0, 0.0, 60.0, 60.0);
+    let mut s = spec(bbox, 10.0, 1.2, Align::Justify);
+    s.lang = Lang::Zh;
+    let t = typeset_default();
+    let r = t.layout(
+        pid(),
+        &s,
+        &[text_inline("aaa bbb ccc ddd eee fff ggg")],
+        &Obstacles::default(),
+    );
+    let l0 = &r.paragraph.lines[0];
+    let last = l0
+        .glyphs
+        .iter()
+        .rev()
+        .find(|g| !g.text.trim().is_empty())
+        .unwrap();
+    assert!(
+        (last.x + 5.0 - bbox.x1).abs() < 1.0,
+        "right={}",
+        last.x + 5.0
+    );
+    let a = l0.glyphs.iter().position(|g| g.text == "a").unwrap();
+    assert!(
+        (l0.glyphs[a + 1].x - l0.glyphs[a].x - 5.0).abs() < 1e-3,
+        "letters keep natural advance"
+    );
+}

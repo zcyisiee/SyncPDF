@@ -586,6 +586,19 @@ fn place_row(
     let mut underline_for: Vec<Option<UnderlineStyle>> = Vec::new();
     let mut bounds: Option<Rect> = None;
     let adjust = input.align == Align::Justify && !row.last;
+    // In a row with CJK tracking, interword spaces and CJK gaps are equal
+    // justification opportunities: the breaker's stretch is kept for choosing
+    // breaks, but the resulting slack is spread evenly so a few Latin spaces
+    // do not absorb it (a space's stretch is ~80x one CJK gap's).
+    let even_stretch = (adjust && row.ratio > 0.0 && !row.cjk_glue.is_empty()).then(|| {
+        let spaces: f32 = items
+            .iter()
+            .filter(|i| row.space_glue.contains(&i.end()))
+            .map(|i| i.width().max(1.0) * 4.0)
+            .sum();
+        let total = spaces + row.cjk_glue.len() as f32 * input.font_size * scale * 0.05;
+        row.ratio * total / (row.space_glue.len() + row.cjk_glue.len()) as f32
+    });
 
     for item in items.iter().chain(row.hyphen.iter()) {
         match item {
@@ -622,15 +635,17 @@ fn place_row(
                     x += g.x_advance;
                 }
                 if adjust && row.space_glue.contains(&item.end()) {
-                    x += row.ratio
-                        * if row.ratio >= 0.0 {
-                            item.width().max(1.0) * 4.0
-                        } else {
-                            item.width()
-                        };
+                    x += even_stretch.unwrap_or_else(|| {
+                        row.ratio
+                            * if row.ratio >= 0.0 {
+                                item.width().max(1.0) * 4.0
+                            } else {
+                                item.width()
+                            }
+                    });
                 }
                 if adjust && row.cjk_glue.contains(&item.end()) {
-                    x += row.ratio * input.font_size * scale * 0.05;
+                    x += even_stretch.unwrap_or(row.ratio * input.font_size * scale * 0.05);
                 }
             }
             Item::Atom {
