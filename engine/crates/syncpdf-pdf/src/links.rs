@@ -111,43 +111,64 @@ fn dest_resolvable(doc: &Document, dest: &Object) -> bool {
     }
 }
 
-/// 命名目标是否在文档里存在（`/Names /Dests` 或 catalog 的 `/Dests`）。
+/// 命名目标是否在文档里存在：catalog `/Names /Dests` 名字树（PDF 1.2+），
+/// 或 catalog 的 `/Dests` 字典（PDF 1.1）。
 fn named_dest_exists(doc: &Document, dest: &Object) -> bool {
-    let key: Vec<u8> = match dest {
-        Object::String(s, _) => s.clone(),
-        Object::Name(n) => n.clone(),
+    let key: &[u8] = match dest {
+        Object::String(s, _) => s,
+        Object::Name(n) => n,
         _ => return false,
     };
-    // catalog → /Names → /Dests → /Names 数组（key value 交替）。
     let Some(catalog) = doc.catalog().ok() else {
         return false;
     };
-    let dests = catalog
+    let tree = catalog
         .get(b"Names")
         .ok()
         .and_then(|o| resolve(doc, o))
         .and_then(|o| o.as_dict().ok())
         .and_then(|d| d.get(b"Dests").ok())
         .and_then(|o| resolve(doc, o))
-        .and_then(|o| o.as_dict().ok())
-        .and_then(|d| d.get(b"Names").ok())
-        .and_then(|o| resolve(doc, o))
-        .and_then(|o| o.as_array().ok());
-    let Some(dests) = dests else {
-        return false;
-    };
-    let mut i = 0;
-    while i + 1 < dests.len() {
-        if dests[i]
-            .as_str()
-            .map(|s| s == key.as_slice())
-            .unwrap_or(false)
-        {
-            return true;
-        }
-        i += 2;
+        .and_then(|o| o.as_dict().ok());
+    if tree.is_some_and(|t| name_tree_contains(doc, t, key, 0)) {
+        return true;
     }
-    false
+    catalog
+        .get(b"Dests")
+        .ok()
+        .and_then(|o| resolve(doc, o))
+        .and_then(|o| o.as_dict().ok())
+        .is_some_and(|d| d.has(key))
+}
+
+/// 名字树深度上限：防御 `/Kids` 环；真实文档的树只有几层。
+const NAME_TREE_MAX_DEPTH: usize = 32;
+
+/// 在名字树节点中查找 key：叶节点查 `/Names`（key value 交替），
+/// 中间节点递归 `/Kids`（大文档会把名字拆到多个子节点）。
+fn name_tree_contains(doc: &Document, node: &Dictionary, key: &[u8], depth: usize) -> bool {
+    if depth > NAME_TREE_MAX_DEPTH {
+        return false;
+    }
+    let array = |name: &[u8]| {
+        node.get(name)
+            .ok()
+            .and_then(|o| resolve(doc, o))
+            .and_then(|o| o.as_array().ok())
+    };
+    if array(b"Names").is_some_and(|names| {
+        names
+            .chunks(2)
+            .any(|pair| pair[0].as_str().is_ok_and(|s| s == key))
+    }) {
+        return true;
+    }
+    array(b"Kids").is_some_and(|kids| {
+        kids.iter()
+            .filter_map(|k| resolve(doc, k))
+            .filter_map(|k| k.as_dict().ok())
+            .any(|k| name_tree_contains(doc, k, key, depth + 1))
+    })
 }
 
 #[cfg(test)]
@@ -269,6 +290,97 @@ mod tests {
         let d = b.get_object_mut(aid).unwrap().as_dict_mut().unwrap();
         d.remove(b"Dest");
         let p = links_check(&a, &b);
+        assert!(p.iter().any(|s| s.contains("neither")), "{p:?}");
+    }
+
+    /// 把唯一 Link 的目标换成命名目标 `name`。
+    fn set_named_dest(doc: &mut Document, name: &str) {
+        let pid = doc.get_pages()[&1];
+        let aid = doc
+            .get_dictionary(pid)
+            .unwrap()
+            .get(b"Annots")
+            .unwrap()
+            .as_array()
+            .unwrap()[0]
+            .as_reference()
+            .unwrap();
+        let d = doc.get_dictionary_mut(aid).unwrap();
+        d.set("Dest", Object::string_literal(name));
+    }
+
+    fn set_catalog(doc: &mut Document, key: &str, value: Object) {
+        let cat = doc.trailer.get(b"Root").unwrap().as_reference().unwrap();
+        doc.get_dictionary_mut(cat).unwrap().set(key, value);
+    }
+
+    fn names_leaf(doc: &mut Document, names: &[&str]) -> Object {
+        let pairs: Vec<Object> = names
+            .iter()
+            .flat_map(|n| [Object::string_literal(*n), vec![Object::Integer(0)].into()])
+            .collect();
+        Object::Reference(doc.add_object(lopdf::dictionary! { "Names" => pairs }))
+    }
+
+    fn named_dest_problems(doc: &Document) -> Vec<String> {
+        links_check(doc, doc)
+    }
+
+    #[test]
+    fn named_dest_in_flat_name_tree_resolves() {
+        let mut doc = doc_with_links(1, 0);
+        set_named_dest(&mut doc, "sec.1");
+        let leaf = names_leaf(&mut doc, &["fig.1", "sec.1"]);
+        set_catalog(
+            &mut doc,
+            "Names",
+            lopdf::dictionary! { "Dests" => leaf }.into(),
+        );
+        assert!(named_dest_problems(&doc).is_empty());
+    }
+
+    #[test]
+    fn named_dest_in_name_tree_kids_resolves() {
+        // 大文档把名字树拆成 /Kids 子节点（例：Elsevier 的 af005/cor1）。
+        let mut doc = doc_with_links(1, 0);
+        set_named_dest(&mut doc, "cor1");
+        let a = names_leaf(&mut doc, &["af005", "af010"]);
+        let b = names_leaf(&mut doc, &["bib1", "cor1"]);
+        let mid = Object::Reference(doc.add_object(lopdf::dictionary! { "Kids" => vec![b] }));
+        let root = doc.add_object(lopdf::dictionary! { "Kids" => vec![a, mid] });
+        set_catalog(
+            &mut doc,
+            "Names",
+            lopdf::dictionary! { "Dests" => Object::Reference(root) }.into(),
+        );
+        assert!(named_dest_problems(&doc).is_empty());
+    }
+
+    #[test]
+    fn named_dest_in_legacy_catalog_dests_resolves() {
+        // PDF 1.1：catalog 的 /Dests 字典按名字索引。
+        let mut doc = doc_with_links(1, 0);
+        set_named_dest(&mut doc, "intro");
+        set_catalog(
+            &mut doc,
+            "Dests",
+            lopdf::dictionary! { "intro" => vec![Object::Integer(0)] }.into(),
+        );
+        assert!(named_dest_problems(&doc).is_empty());
+    }
+
+    #[test]
+    fn unknown_named_dest_is_reported() {
+        let mut doc = doc_with_links(1, 0);
+        set_named_dest(&mut doc, "missing");
+        let a = names_leaf(&mut doc, &["af005"]);
+        let root = doc.add_object(lopdf::dictionary! { "Kids" => vec![a] });
+        set_catalog(
+            &mut doc,
+            "Names",
+            lopdf::dictionary! { "Dests" => Object::Reference(root) }.into(),
+        );
+        let p = named_dest_problems(&doc);
         assert!(p.iter().any(|s| s.contains("neither")), "{p:?}");
     }
 }
