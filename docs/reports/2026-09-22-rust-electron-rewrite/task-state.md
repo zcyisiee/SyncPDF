@@ -7,14 +7,15 @@
 ### 本次恢复与执行计划
 - 用户要求继续，主控仅负责方向、拆解、亲审与简洁验收命令；RCA/测试/开发委派fresh `devin-swe2`，沿用Orca隔离树。每个验收阶段立即中文commit，无需批准自动进入下一篇。
 - 阶段A已完成：亲审9文件diff后，仅撤出Agent自有未提交的review-feedback/提示候选；完整patch及新增测试移存`tmp/paper-iteration/deferred-translation/`。已恢复HEAD编译源码，用户AGENTS.md/TRANSLATE.md/untitled.md/cache原样保留。主控独立translate148通过/2ignored，Python入口49通过。后续必须重建release，旧二进制含已撤出候选；旧v18–20规则hash不可移植，复排优先v17同规则缓存，源身份变化走真实补译，不伪造hash。
-- 阶段B进行中：冒号候选4f0729bb已核实complete/terminal observed。主控已读完整2文件diff，需补核下方等式真实墨迹/未知字形、检测框漏项/间隔内容及最终owner反例，尚不整合。fresh Devin run `3c247166-0472-4632-80c9-4747b5a8a9b6`（mission `3d58274c-3af9-450b-8289-868f600d903d`）在既有Orca `../iterate-devin-colon` 收窄验证，brief=`tmp/paper-iteration/devin-colon-review-followup.md`。60秒attention已核实仍running，外部runner无tool事件，不发不支持的steer/resume。
-- 阶段C：61条点击标签差异只读归因→当前编译版本完整复排和51页版面审查；纯模型缺陷不阻塞编译侧验收、不再新建翻译功能。DeepSeek编译侧验收后立即TRC→ALNS→VNS→2604.03136v6。未完成的检查不报通过。
+- 阶段B进行中：冒号候选4f0729bb已核实complete/terminal observed。主控已读完整2文件diff，需补核下方等式真实墨迹/未知字形、检测框漏项/间隔内容及最终owner反例，尚不整合。fresh Devin run `3c247166-0472-4632-80c9-4747b5a8a9b6`（mission `3d58274c-3af9-450b-8289-868f600d903d`）在既有Orca `../iterate-devin-colon` 收窄验证，brief=`tmp/paper-iteration/devin-colon-review-followup.md`。该run在25分钟硬限超时，已核实failed/terminal observed及PID退出；2文件650+/5-完整diff与status已快照`devin-colon-followup-timeout*`。留下validate.sh及日志（worker报告正常284项+真实4项通过）；主控尚未独立复验，不当完成，不resume。
+- 阶段C：Orca `../iterate-devin-link-audit`已创建，cdf81bfe干净基线；只读61条点击标签差异归因，brief=`tmp/paper-iteration/devin-link-audit-brief.md`，不改源码。之后当前编译版本完整复排和51页版面审查；纯模型缺陷不阻塞编译侧验收、不再新建翻译功能。DeepSeek编译侧验收后立即TRC→ALNS→VNS→2604.03136v6。未完成的检查不报通过。
 
 - Goal 模式已关闭。用户本次要求汇报，并明确：**本轮目标是完善编译侧；纯翻译侧问题无需修改。** 不再为漏译主句、跨块语序、倍数措辞或术语漂移开发提示词/人工语义补译功能，也不以这些纯翻译缺陷代替编译问题。
 - 仍须修源解析/公式与正文边界、字形和原子保护、排版、链接及PDF写回；保留所有数字/KEEP/覆盖/碰撞门禁，模型违规只记录，不靠放宽校验求通过。
 - review-feedback 链路及未提交academic_rules/prompt候选属于翻译侧扩展，**已备份撤出主树，不提交、不计入编译侧成果**。历史v20-review-34为7/0、1主/0补救/6缓存，仅证明翻译反馈效果，不是编译缺陷修复；完整历史证据保留。
-- 冒号叶子重试4f0729bb已complete/terminal observed，2文件冻结快照devin-colon-owned.diff / devin-colon-frozen-status.txt。尚未整合或独立验收；它属于编译前源原子边界缺陷，仍在本轮范围。闭括号已验收提交cdf81bfe。
-- 第一篇完整编译/版面验收仍未结束；61项点击标签差异待归因、逐页视觉复核未完成。其余四篇尚未开始。
+- 冒号阶段已验收：超时followup的两文件已主控亲审整合，独立脚本/主树pipeline284通过（17ignored），真实四专项通过，clippy/fmt/release通过。847段独立比较仅P29-014 atom2的text/range/source变化。经验已提炼至`docs/lessons/pdf-binding-and-render-evidence.md`。
+- 最新整篇`deepseek-v22-compile`：沿用已提交规则/原15条词表、v17只读缓存备份，真实agy 1主/0补救/349缓存，351/0、0源冲突/覆盖缺口。88源原子缺墨迹0，34,545保护字/410目标不变，dual两侧135607/76110字及820链接无错，qpdf两份通过；主控已目视第29页，冒号已成为正文句末且公式完整。v21启动误写binary及agy独立thinking参数错误已留证，无模型调用。
+- 第一篇完整编译/版面验收仍未结束；v22有60条标签差异、全51页视觉复核未完成。只读link audit run=`7fcbb395-c7cc-4fc9-879f-7761882551c5`（mission979497cd）针对历史v18的61条归因，树`../iterate-devin-link-audit`，目前running；不能套用历史结果冒充v22验收。其余四篇尚未开始。
 
 ## 当前任务：五篇顺序实测（优先于下方历史偏好）
 

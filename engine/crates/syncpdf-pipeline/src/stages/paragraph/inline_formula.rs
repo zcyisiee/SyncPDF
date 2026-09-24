@@ -11,6 +11,8 @@ pub(super) struct Formula {
     pub(super) released: BTreeSet<GlyphId>,
     /// Context proving the punctuation is prose must belong to its final paragraph too.
     release_context: BTreeSet<GlyphId>,
+    /// The released glyph must also be the final paragraph's last glyph.
+    release_tail: bool,
     source: SourceAtom,
     row: Rect,
 }
@@ -54,11 +56,20 @@ pub(super) fn sources(ir: &PageIR, regions: &[&Region]) -> Vec<Formula> {
         // prose comma after the last math glyph; freezing it into the KEEP atom
         // leaves punctuation the translation cannot reorder ("在H,中"). The same
         // happens to the `)` closing a prose paren pair whose `(` and words sit
-        // outside the box. Release either only with the full evidence chain;
-        // anything ambiguous keeps the old protection.
-        let candidate = prose_trailing_comma(&owned, r, parent, regions, &glyphs)
-            .map(|g| (g, BTreeSet::new()))
-            .or_else(|| prose_trailing_close_paren(&owned, r, parent, regions, &glyphs));
+        // outside the box, and to the `:` introducing a display equation below.
+        // Release any of them only with the full evidence chain; anything
+        // ambiguous keeps the old protection.
+        let (candidate, mut release_tail) =
+            match prose_trailing_comma(&owned, r, parent, regions, &glyphs)
+                .map(|g| (g, BTreeSet::new()))
+                .or_else(|| prose_trailing_close_paren(&owned, r, parent, regions, &glyphs))
+            {
+                Some(c) => (Some(c), false),
+                None => (
+                    prose_trailing_colon(ir, &owned, r, parent, regions, &glyphs),
+                    true,
+                ),
+            };
         let mut released: BTreeSet<GlyphId> =
             candidate.as_ref().map(|(g, _)| g.id).into_iter().collect();
         let mut release_context = candidate.map(|(_, context)| context).unwrap_or_default();
@@ -151,12 +162,14 @@ pub(super) fn sources(ir: &PageIR, regions: &[&Region]) -> Vec<Formula> {
                 }
                 released.clear();
                 release_context.clear();
+                release_tail = false;
                 continue;
             }
             out.push(Formula {
                 ids,
                 released: std::mem::take(&mut released),
                 release_context: std::mem::take(&mut release_context),
+                release_tail,
                 source: SourceAtom {
                     bbox: clip,
                     baseline: neighbor.matrix.f,
@@ -436,6 +449,225 @@ fn prose_paren_pair(
             .chain(std::iter::once(close.id))
             .collect()
     })
+}
+
+/// A detected box can also swallow the body colon that introduces a display
+/// equation: "...response 𝑧_b,j:" keeps `:` inside the KEEP atom, so the
+/// paragraph can never end with it. Release it only when the whole evidence
+/// chain holds; anything ambiguous keeps the old protection:
+/// - the same rightmost/lone-glyph, finite tight-ink, main-baseline,
+///   font-boundary and balanced-delimiter evidence as the other releases;
+/// - no unknown glyph inside the owner region, and two complete body words in
+///   the colon's own font and size precede it on its own row;
+/// - it is the last visible glyph of its owner region and — checked again in
+///   `released_for` through `release_tail` — of the final paragraph;
+/// - the nearest region directly below its row, inside the parent's reading
+///   column, is a unique Formula region separated by an empty gap and holding
+///   a verifiable `=` with real glyphs on both sides: the display equation the
+///   colon introduces. Internal math colons (maps, ratios, slices) never
+///   reach this point because they are not the paragraph's last glyph.
+fn prose_trailing_colon<'a>(
+    ir: &PageIR,
+    owned: &[&'a Glyph],
+    region: &Region,
+    parent: &Region,
+    regions: &[&Region],
+    glyphs: &[&'a Glyph],
+) -> Option<(&'a Glyph, BTreeSet<GlyphId>)> {
+    let colon = owned.iter().copied().max_by(|a, b| {
+        a.bbox
+            .x0
+            .total_cmp(&b.bbox.x0)
+            .then(a.bbox.x1.total_cmp(&b.bbox.x1))
+    })?;
+    let ink = colon.ink?;
+    if colon.unicode.as_slice() != [':']
+        || ![ink.x0, ink.y0, ink.x1, ink.y1, colon.matrix.f, colon.size]
+            .into_iter()
+            .all(f32::is_finite)
+        || ink.width() <= 0.0
+        || ink.height() <= 0.0
+        || colon.size <= 0.0
+    {
+        return None;
+    }
+    let rest: Vec<&Glyph> = owned.iter().copied().filter(|g| g.id != colon.id).collect();
+    if rest.is_empty() || rest.iter().any(|g| g.unicode.is_empty()) {
+        return None;
+    }
+    // Same baseline as the largest (main-row) glyph, not a sub/superscript tail.
+    let base = rest.iter().max_by(|a, b| a.size.total_cmp(&b.size))?;
+    if (colon.matrix.f - base.matrix.f).abs() > 0.5 {
+        return None;
+    }
+    // The glyph the colon attaches to must carry a different (math) font.
+    let prev = rest.iter().max_by(|a, b| a.bbox.x0.total_cmp(&b.bbox.x0))?;
+    if colon.font == prev.font {
+        return None;
+    }
+    // The remaining math must still balance its own delimiters.
+    let mut sorted: Vec<&Glyph> = rest.clone();
+    sorted.sort_by(|a, b| a.bbox.x0.total_cmp(&b.bbox.x0));
+    if !balanced_delimiters(&sorted) {
+        return None;
+    }
+    let in_formula = |c: syncpdf_core::Point| {
+        regions
+            .iter()
+            .any(|r| r.kind == RegionKind::Formula && r.bbox.contains(c))
+    };
+    // Unknown glyphs inside the owner region make the boundary unprovable;
+    // formula-owned glyphs keep their own protection instead.
+    if glyphs.iter().any(|g| {
+        parent.bbox.contains(g.bbox.center())
+            && !in_formula(g.bbox.center())
+            && g.unicode.is_empty()
+    }) {
+        return None;
+    }
+    let visible = |g: &Glyph| g.unicode.is_empty() || g.unicode.iter().any(|c| !c.is_whitespace());
+    // The colon must be the owner's last visible glyph: nothing to its right on
+    // its own row and no lower row inside the parent region. Formula-owned
+    // glyphs (e.g. another atom's subscripts below the baseline) are not prose
+    // continuation and do not count.
+    if glyphs.iter().any(|g| {
+        g.id != colon.id
+            && parent.bbox.contains(g.bbox.center())
+            && !in_formula(g.bbox.center())
+            && visible(g)
+            && (g.matrix.f < colon.matrix.f - 0.5
+                || ((g.matrix.f - colon.matrix.f).abs() <= 0.5 && g.bbox.x0 > colon.bbox.x0))
+    }) {
+        return None;
+    }
+    // Two complete body words in the colon's own font and size must precede it
+    // on its row; a font-change fragment is not a word boundary.
+    let mut prefix: Vec<&Glyph> = glyphs
+        .iter()
+        .copied()
+        .filter(|g| {
+            parent.bbox.contains(g.bbox.center())
+                && (g.matrix.f - colon.matrix.f).abs() <= 0.5
+                && g.bbox.x0 < colon.bbox.x0
+        })
+        .collect();
+    prefix.sort_by(|a, b| a.bbox.x0.total_cmp(&b.bbox.x0));
+    let prose = prefix.windows(2).any(|pair| {
+        let (prev, start) = (pair[0], pair[1]);
+        let boundary = prev
+            .unicode
+            .iter()
+            .all(|c| c.is_whitespace() || matches!(c, '(' | '.' | ',' | ';' | ':' | '!' | '?'))
+            || ((prev.matrix.f - start.matrix.f).abs() <= 0.5
+                && start.bbox.x0 - prev.bbox.x1 > 0.15 * colon.size);
+        boundary && body_word_pair(start, colon, parent, regions, glyphs)
+    });
+    if !prose {
+        return None;
+    }
+    // The colon must introduce the nearest region directly below its row: a
+    // unique display formula in the parent's reading column. Another region at
+    // the same depth, or anything else nearer, keeps it protected.
+    let row_bottom = prefix.iter().fold(colon.bbox, |b, g| b.union(&g.bbox)).y0;
+    let in_column = |r: &&&Region| {
+        let c = r.bbox.center();
+        parent.bbox.x0 <= c.x && c.x <= parent.bbox.x1
+    };
+    let below = regions
+        .iter()
+        .filter(|r| r.index != region.index && in_column(r) && r.bbox.y1 <= row_bottom + 0.5)
+        .max_by(|a, b| a.bbox.y1.total_cmp(&b.bbox.y1))?;
+    if below.kind != RegionKind::Formula
+        || parent.bbox.contains(below.bbox.center())
+        || row_bottom - below.bbox.y1 > 2.5 * colon.size
+        || regions.iter().any(|r| {
+            r.index != below.index && in_column(&r) && (r.bbox.y1 - below.bbox.y1).abs() <= 0.5
+        })
+    {
+        return None;
+    }
+    // Nothing may sit in the gap between the row and the equation. Exempt only
+    // what is already proven: the equation below and the same-line formulas —
+    // detected boxes that own a glyph on the colon's own row (the owner and
+    // neighbouring atoms whose subscripts legitimately dip into the gap).
+    // Content inside any other detected formula is still foreign.
+    let same_line: BTreeSet<u32> = regions
+        .iter()
+        .filter(|r| r.kind == RegionKind::Formula)
+        .filter(|r| {
+            glyphs.iter().any(|g| {
+                r.bbox.contains(g.bbox.center()) && (g.matrix.f - colon.matrix.f).abs() <= 0.5
+            })
+        })
+        .map(|r| r.index)
+        .collect();
+    let proven = |c: syncpdf_core::Point| {
+        below.bbox.contains(c)
+            || regions
+                .iter()
+                .any(|r| same_line.contains(&r.index) && r.bbox.contains(c))
+    };
+    let band = Rect::new(parent.bbox.x0, below.bbox.y1, parent.bbox.x1, row_bottom);
+    if glyphs.iter().any(|g| {
+        !owned.iter().any(|o| o.id == g.id)
+            && (g.matrix.f - colon.matrix.f).abs() > 0.5
+            && !proven(g.bbox.center())
+            && overlaps(band, ink_or_box(g))
+    }) || ir.items.iter().any(|item| match item {
+        DisplayItem::Image { bbox } | DisplayItem::InlineImage { bbox } => {
+            !proven(bbox.center()) && overlaps(band, *bbox)
+        }
+        DisplayItem::Path {
+            bbox,
+            is_fill,
+            is_stroke,
+            ..
+        } if *is_fill || *is_stroke => !proven(bbox.center()) && overlaps(band, *bbox),
+        _ => false,
+    }) {
+        return None;
+    }
+    // The equation must be verifiable: a `=` carrying real ink with a complete
+    // (non-empty unicode, finite positive ink) glyph on each side. Other
+    // equation glyphs may be control codes that print nothing; they are not
+    // required as witnesses.
+    let solid = |g: &Glyph| {
+        !g.unicode.is_empty()
+            && g.ink.is_some_and(|i| {
+                [i.x0, i.y0, i.x1, i.y1].into_iter().all(f32::is_finite)
+                    && i.width() > 0.0
+                    && i.height() > 0.0
+            })
+    };
+    let equation: Vec<&Glyph> = glyphs
+        .iter()
+        .copied()
+        .filter(|g| below.bbox.contains(g.bbox.center()) && visible(g))
+        .collect();
+    if !equation.iter().any(|e| {
+        e.unicode.as_slice() == ['=']
+            && solid(e)
+            && equation
+                .iter()
+                .any(|l| l.id != e.id && solid(l) && l.bbox.x1 <= e.bbox.x0 + 0.5)
+            && equation
+                .iter()
+                .any(|r| r.id != e.id && solid(r) && r.bbox.x0 >= e.bbox.x1 - 0.5)
+    }) {
+        return None;
+    }
+    // No other preserved region may also claim the colon.
+    if regions.iter().any(|p| {
+        !p.kind.translatable() && p.index != region.index && p.bbox.contains(colon.bbox.center())
+    }) {
+        return None;
+    }
+    let context = prefix
+        .iter()
+        .map(|g| g.id)
+        .chain(std::iter::once(colon.id))
+        .collect();
+    Some((colon, context))
 }
 
 fn balanced_delimiters(glyphs: &[&Glyph]) -> bool {
@@ -745,6 +977,7 @@ fn radical_sources(ir: &PageIR, regions: &[&Region], glyphs: &[&Glyph], out: &mu
             ids,
             released: BTreeSet::new(),
             release_context: BTreeSet::new(),
+            release_tail: false,
             source: SourceAtom {
                 bbox: clip,
                 baseline: line,
@@ -782,6 +1015,7 @@ pub(super) fn released_for(p: &Paragraph, formulas: &[Formula]) -> BTreeSet<Glyp
     formulas
         .iter()
         .filter(|f| f.release_context.iter().all(|id| p.glyphs.contains(id)))
+        .filter(|f| !f.release_tail || p.glyphs.last().is_some_and(|id| f.released.contains(id)))
         .filter(|f| {
             p.atoms.iter().any(|a| {
                 a.kind == AtomKind::Formula

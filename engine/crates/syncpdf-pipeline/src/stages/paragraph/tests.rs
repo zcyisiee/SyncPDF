@@ -892,6 +892,417 @@ fn cross_atom_paren_pair_keeps_close_paren() {
     assert_close_not_released(&ir, &regions, close_id);
 }
 
+/// 段末冒号引出下方独立公式：正文行 `reward of response` + 数学 `z` + 正文 `:`，
+/// 检测框吞入冒号；下方独立 Formula 区域含 `a=b`。返回冒号 GlyphId 与 ink。
+fn colon_fixture() -> (PageIR, Vec<Region>, GlyphId, Rect) {
+    let mut glyphs = line(0, "reward of response", 50.0, 700.0, 10.0, 0);
+    let n = glyphs.len() as u16;
+    glyphs.extend(line(n, "z", 164.0, 700.0, 10.0, 1));
+    let mut colon = mk_glyph(n + 1, ':', 170.5, 700.0, 10.0, 0);
+    colon.ink = Some(Rect::new(170.6, 701.0, 173.0, 708.0));
+    let id = colon.id;
+    let ink = colon.ink.unwrap();
+    glyphs.push(colon);
+    // 下方独立展示公式 "a=b"（自带 Formula 区域，不属于正文区）。
+    glyphs.extend(line(n + 2, "a", 80.0, 681.0, 10.0, 2));
+    glyphs.extend(line(n + 3, "=", 90.0, 681.0, 10.0, 0));
+    glyphs.extend(line(n + 4, "b", 100.0, 681.0, 10.0, 2));
+    // 真实提取的等式字形带有 tight ink；等号与两侧证据都必须有正墨迹。
+    for g in glyphs.iter_mut().skip(n as usize + 2) {
+        g.ink = Some(Rect::new(
+            g.bbox.x0 + 0.3,
+            g.bbox.y0 + 1.0,
+            g.bbox.x1 - 0.3,
+            g.bbox.y1 - 1.0,
+        ));
+    }
+    let ir = page_ir(
+        glyphs,
+        vec![
+            mk_font("Body", false, false),
+            mk_font("Math", false, true),
+            mk_font("MathB", false, true),
+        ],
+    );
+    let mut regions = vec![text_region(0, Rect::new(40.0, 696.0, 220.0, 715.0), 0)];
+    let mut formula = text_region(1, Rect::new(163.0, 695.0, 178.0, 712.0), 1);
+    formula.kind = RegionKind::Formula;
+    let mut equation = text_region(2, Rect::new(70.0, 675.0, 110.0, 688.0), 2);
+    equation.kind = RegionKind::Formula;
+    regions.push(formula);
+    regions.push(equation);
+    (ir, regions, id, ink)
+}
+
+fn assert_colon_not_released(ir: &PageIR, regions: &[Region], colon: GlyphId) {
+    let refs: Vec<_> = regions.iter().collect();
+    let formulas = inline_formula::sources(ir, &refs);
+    assert!(
+        formulas.iter().all(|f| !f.released.contains(&colon)),
+        "ambiguous colon was released"
+    );
+}
+
+#[test]
+fn intro_colon_swallowed_by_formula_is_released() {
+    let (ir, regions, colon, ink) = colon_fixture();
+    let refs: Vec<_> = regions.iter().collect();
+    let formulas = inline_formula::sources(&ir, &refs);
+    assert!(formulas.iter().any(|f| f.released.contains(&colon)));
+    let paragraphs = analyze_page(&ir, &regions);
+    let p = paragraphs
+        .iter()
+        .find(|p| p.glyphs.contains(&colon))
+        .unwrap();
+    assert!(
+        matches!(p.translatable, Translatable::Yes),
+        "{:?}",
+        p.translatable
+    );
+    assert_eq!(p.text, "reward of response z:");
+    assert_eq!(p.glyphs.last(), Some(&colon));
+    let atom = p
+        .atoms
+        .iter()
+        .find(|a| a.kind == AtomKind::Formula)
+        .unwrap();
+    assert_eq!(atom.text, "z");
+    // The replay clip must not touch the released colon's ink.
+    let clip = atom.source.unwrap().bbox;
+    assert!(clip.x1 <= ink.x0 || clip.x0 >= ink.x1);
+    let released = inline_formula::released_for(p, &formulas);
+    assert_eq!(released.len(), 1);
+    assert!(released.contains(&colon));
+}
+
+#[test]
+fn math_internal_colon_stays_inside_atom() {
+    // "a:b" all in the math font inside one box: a ratio/map colon, not prose.
+    let mut glyphs = line(0, "see", 50.0, 700.0, 10.0, 0);
+    glyphs.extend(line(3, "a", 75.0, 700.0, 10.0, 1));
+    let mut colon = mk_glyph(4, ':', 81.0, 700.0, 10.0, 1);
+    colon.ink = Some(Rect::new(81.1, 701.0, 84.0, 708.0));
+    let id = colon.id;
+    glyphs.push(colon);
+    glyphs.extend(line(5, "b", 87.0, 700.0, 10.0, 1));
+    glyphs.extend(line(6, "now", 100.0, 700.0, 10.0, 0));
+    let ir = page_ir(
+        glyphs,
+        vec![mk_font("Body", false, false), mk_font("Math", false, true)],
+    );
+    let mut regions = vec![text_region(0, Rect::new(40.0, 690.0, 200.0, 715.0), 0)];
+    let mut formula = text_region(1, Rect::new(74.0, 695.0, 94.0, 712.0), 1);
+    formula.kind = RegionKind::Formula;
+    regions.push(formula);
+    assert_colon_not_released(&ir, &regions, id);
+}
+
+#[test]
+fn intro_colon_followed_by_prose_stays_inside_atom() {
+    // A trailing prose word after the colon means it is not the paragraph tail.
+    let (mut ir, regions, colon, _) = colon_fixture();
+    if let DisplayItem::Text { glyphs } = &mut ir.items[0] {
+        glyphs.extend(line(50, "then", 185.0, 700.0, 10.0, 0));
+    }
+    assert_colon_not_released(&ir, &regions, colon);
+}
+
+#[test]
+fn intro_colon_next_line_in_same_region_stays_inside_atom() {
+    // The owner region continues on a lower row fully inside it: the colon is
+    // not its end.
+    let (mut ir, regions, colon, _) = colon_fixture();
+    if let DisplayItem::Text { glyphs } = &mut ir.items[0] {
+        glyphs.extend(line(50, "and more", 50.0, 698.0, 10.0, 0));
+    }
+    assert_colon_not_released(&ir, &regions, colon);
+}
+
+#[test]
+fn intro_colon_without_display_formula_stays_inside_atom() {
+    // No region below the row at all: nothing is introduced.
+    let (ir, mut regions, colon, _) = colon_fixture();
+    regions.retain(|r| r.index != 2);
+    assert_colon_not_released(&ir, &regions, colon);
+}
+
+#[test]
+fn intro_colon_text_region_below_stays_inside_atom() {
+    // The nearest region below is prose, not a display formula.
+    let (ir, mut regions, colon, _) = colon_fixture();
+    regions.iter_mut().find(|r| r.index == 2).unwrap().kind = RegionKind::Text;
+    assert_colon_not_released(&ir, &regions, colon);
+}
+
+#[test]
+fn intro_colon_equation_without_equals_stays_inside_atom() {
+    // A formula region below but no verifiable `=` equation.
+    let (mut ir, regions, colon, _) = colon_fixture();
+    if let DisplayItem::Text { glyphs } = &mut ir.items[0] {
+        glyphs
+            .iter_mut()
+            .find(|g| g.unicode.as_slice() == ['='])
+            .unwrap()
+            .unicode = ['+'].into_iter().collect();
+    }
+    assert_colon_not_released(&ir, &regions, colon);
+}
+
+#[test]
+fn intro_colon_foreign_glyph_in_gap_stays_inside_atom() {
+    // A stray glyph between the row and the equation is foreign content.
+    let (mut ir, regions, colon, _) = colon_fixture();
+    if let DisplayItem::Text { glyphs } = &mut ir.items[0] {
+        let mut stray = mk_glyph(60, 'x', 150.0, 690.0, 10.0, 0);
+        stray.ink = Some(stray.bbox);
+        glyphs.push(stray);
+    }
+    assert_colon_not_released(&ir, &regions, colon);
+}
+
+#[test]
+fn intro_colon_tied_formula_regions_stay_inside_atom() {
+    // Two formula regions at the same depth make "the equation" ambiguous.
+    let (ir, mut regions, colon, _) = colon_fixture();
+    let mut second = regions.iter().find(|r| r.index == 2).unwrap().clone();
+    second.index = 3;
+    second.bbox = Rect::new(130.0, 675.0, 160.0, 688.0);
+    regions.push(second);
+    assert_colon_not_released(&ir, &regions, colon);
+}
+
+#[test]
+fn intro_colon_unbalanced_delimiter_stays_inside_atom() {
+    // "(z:" keeps an unclosed math delimiter inside the box.
+    let (mut ir, regions, colon, _) = colon_fixture();
+    if let DisplayItem::Text { glyphs } = &mut ir.items[0] {
+        glyphs
+            .iter_mut()
+            .find(|g| g.unicode.as_slice() == ['z'])
+            .unwrap()
+            .unicode = ['('].into_iter().collect();
+    }
+    assert_colon_not_released(&ir, &regions, colon);
+}
+
+#[test]
+fn intro_colon_without_tight_ink_stays_inside_atom() {
+    let (mut ir, regions, colon, _) = colon_fixture();
+    if let DisplayItem::Text { glyphs } = &mut ir.items[0] {
+        glyphs.iter_mut().find(|g| g.id == colon).unwrap().ink = None;
+    }
+    assert_colon_not_released(&ir, &regions, colon);
+}
+
+#[test]
+fn intro_colon_without_two_body_words_stays_inside_atom() {
+    // Only a single-letter fragment before the math: not a prose context.
+    let (mut ir, regions, colon, _) = colon_fixture();
+    if let DisplayItem::Text { glyphs } = &mut ir.items[0] {
+        for g in glyphs.iter_mut().take("reward of response".len()) {
+            g.unicode = ['x'].into_iter().collect();
+        }
+    }
+    assert_colon_not_released(&ir, &regions, colon);
+}
+
+#[test]
+fn intro_colon_shared_formula_region_stays_inside_atom() {
+    // A second Formula region also covering the colon makes ownership ambiguous.
+    let (ir, mut regions, colon, _) = colon_fixture();
+    let mut second = text_region(3, Rect::new(169.0, 695.0, 182.0, 712.0), 3);
+    second.kind = RegionKind::Formula;
+    regions.push(second);
+    assert_colon_not_released(&ir, &regions, colon);
+}
+
+#[test]
+fn intro_colon_equation_without_equals_ink_stays_inside_atom() {
+    // The `=` itself has no ink: the display equation is not proven, so the
+    // colon keeps its protection.
+    let (mut ir, regions, colon, _) = colon_fixture();
+    if let DisplayItem::Text { glyphs } = &mut ir.items[0] {
+        glyphs
+            .iter_mut()
+            .find(|g| g.unicode.as_slice() == ['='])
+            .unwrap()
+            .ink = None;
+    }
+    assert_colon_not_released(&ir, &regions, colon);
+}
+
+#[test]
+fn intro_colon_equation_unknown_flank_stays_inside_atom() {
+    // The left-hand side of `=` is an unknown glyph: there is no complete
+    // operand evidence on that side.
+    let (mut ir, regions, colon, _) = colon_fixture();
+    if let DisplayItem::Text { glyphs } = &mut ir.items[0] {
+        glyphs
+            .iter_mut()
+            .find(|g| g.font == 2 && g.unicode.as_slice() == ['a'])
+            .unwrap()
+            .unicode = Vec::new().into_iter().collect();
+    }
+    assert_colon_not_released(&ir, &regions, colon);
+}
+
+#[test]
+fn intro_colon_foreign_formula_in_gap_stays_inside_atom() {
+    // An unrelated detected formula overlaps the gap between the row and the
+    // equation; its glyphs are foreign content, not proof the gap is empty.
+    let (mut ir, mut regions, colon, _) = colon_fixture();
+    if let DisplayItem::Text { glyphs } = &mut ir.items[0] {
+        let mut stray = mk_glyph(60, 'x', 150.0, 690.0, 10.0, 1);
+        stray.ink = Some(stray.bbox);
+        glyphs.push(stray);
+    }
+    // The stray's own Formula box reaches into the gap but above the row's
+    // bottom edge: it is not "the nearest region below", only foreign content.
+    let mut foreign = text_region(3, Rect::new(140.0, 690.0, 160.0, 703.0), 3);
+    foreign.kind = RegionKind::Formula;
+    regions.push(foreign);
+    assert_colon_not_released(&ir, &regions, colon);
+}
+
+#[test]
+fn intro_colon_before_later_atom_is_not_paragraph_tail() {
+    // Another detected formula follows the colon on the same row: region-level
+    // evidence can still mark the colon, but the final-owner gate must refuse
+    // it because the paragraph's last glyph is the later atom.
+    let (mut ir, mut regions, colon, _) = colon_fixture();
+    if let DisplayItem::Text { glyphs } = &mut ir.items[0] {
+        glyphs.extend(line(60, "w", 185.0, 700.0, 10.0, 1));
+    }
+    let mut second = text_region(3, Rect::new(183.0, 695.0, 196.0, 712.0), 3);
+    second.kind = RegionKind::Formula;
+    regions.push(second);
+    let refs: Vec<_> = regions.iter().collect();
+    let formulas = inline_formula::sources(&ir, &refs);
+    let paragraphs = analyze_page(&ir, &regions);
+    let p = paragraphs
+        .iter()
+        .find(|p| p.glyphs.contains(&colon))
+        .unwrap();
+    assert_ne!(p.glyphs.last(), Some(&colon));
+    let released = inline_formula::released_for(p, &formulas);
+    assert!(!released.contains(&colon));
+}
+
+#[test]
+fn intro_colon_trailing_space_is_not_paragraph_tail() {
+    // An invisible trailing space after the colon must never be treated as
+    // part of the math atom; the tail gate decides by the real last glyph.
+    let (mut ir, regions, colon, _) = colon_fixture();
+    if let DisplayItem::Text { glyphs } = &mut ir.items[0] {
+        glyphs.extend(line(60, " ", 178.0, 700.0, 10.0, 0));
+    }
+    let refs: Vec<_> = regions.iter().collect();
+    let formulas = inline_formula::sources(&ir, &refs);
+    let paragraphs = analyze_page(&ir, &regions);
+    let p = paragraphs
+        .iter()
+        .find(|p| p.glyphs.contains(&colon))
+        .unwrap();
+    let released = inline_formula::released_for(p, &formulas);
+    assert_eq!(released.contains(&colon), p.glyphs.last() == Some(&colon));
+}
+
+#[test]
+fn intro_colon_mismatched_delimiter_stays_inside_atom() {
+    // "(x]:" — the remaining math has a mismatched delimiter, so the colon
+    // cannot be proven prose.
+    let mut glyphs = line(0, "see", 50.0, 700.0, 10.0, 0);
+    glyphs.extend(line(3, "(x]", 75.0, 700.0, 10.0, 1));
+    let mut colon = mk_glyph(6, ':', 93.0, 700.0, 10.0, 0);
+    colon.ink = Some(Rect::new(93.1, 701.0, 95.5, 708.0));
+    let id = colon.id;
+    glyphs.push(colon);
+    let ir = page_ir(
+        glyphs,
+        vec![mk_font("Body", false, false), mk_font("Math", false, true)],
+    );
+    let mut regions = vec![text_region(0, Rect::new(40.0, 690.0, 200.0, 715.0), 0)];
+    let mut formula = text_region(1, Rect::new(74.0, 695.0, 100.0, 712.0), 1);
+    formula.kind = RegionKind::Formula;
+    regions.push(formula);
+    assert_colon_not_released(&ir, &regions, id);
+}
+
+#[test]
+fn intro_colon_inside_set_builder_stays_inside_atom() {
+    // "{x:x>0}" — an interior set-builder colon (same class as a:b, f:X→Y).
+    let mut glyphs = line(0, "see", 50.0, 700.0, 10.0, 0);
+    glyphs.extend(line(3, "{x:x>0}", 75.0, 700.0, 10.0, 1));
+    glyphs.extend(line(10, "now", 130.0, 700.0, 10.0, 0));
+    let colon = glyphs
+        .iter()
+        .find(|g| g.unicode.as_slice() == [':'])
+        .unwrap()
+        .id;
+    let ir = page_ir(
+        glyphs,
+        vec![mk_font("Body", false, false), mk_font("Math", false, true)],
+    );
+    let mut regions = vec![text_region(0, Rect::new(40.0, 690.0, 200.0, 715.0), 0)];
+    let mut formula = text_region(1, Rect::new(74.0, 695.0, 118.0, 712.0), 1);
+    formula.kind = RegionKind::Formula;
+    regions.push(formula);
+    assert_colon_not_released(&ir, &regions, colon);
+}
+
+#[test]
+fn intro_colon_undetected_math_below_stays_inside_atom() {
+    // A math glyph on a lower row inside the owner region that detection
+    // missed: the colon is not the region's last visible glyph.
+    let (mut ir, regions, colon, _) = colon_fixture();
+    if let DisplayItem::Text { glyphs } = &mut ir.items[0] {
+        let mut stray = mk_glyph(60, 'y', 150.0, 698.0, 10.0, 1);
+        stray.ink = Some(stray.bbox);
+        glyphs.push(stray);
+    }
+    assert_colon_not_released(&ir, &regions, colon);
+}
+
+#[test]
+#[ignore = "requires saved real source/region evidence"]
+fn real_page29_intro_colon_releases_only_owned_boundary() {
+    let root = std::path::PathBuf::from(std::env::var("SYNCPDF_FORMULA_AUDIT").unwrap());
+    let pages: Vec<PageIR> =
+        serde_json::from_slice(&std::fs::read(root.join("source.json")).unwrap()).unwrap();
+    let ir = pages.iter().find(|p| p.page.0 == 28).unwrap();
+    let regions: Vec<Region> =
+        serde_json::from_slice(&std::fs::read(root.join("regions-28.json")).unwrap()).unwrap();
+    let refs: Vec<_> = regions.iter().collect();
+    let formulas = inline_formula::sources(ir, &refs);
+    let paragraphs = analyze_page(ir, &regions);
+    let p = paragraphs
+        .iter()
+        .find(|p| p.id.to_string() == "P29-014")
+        .unwrap();
+    assert!(matches!(p.translatable, Translatable::Yes));
+    let a = p
+        .atoms
+        .iter()
+        .find(|a| a.kind == AtomKind::Formula && a.glyph_range.0 == 391)
+        .unwrap();
+    // The released colon leaves the math atom as 𝑧𝑏,𝑗 (inner subscript comma kept).
+    assert_eq!(a.text, "𝑧𝑏,𝑗");
+    assert_eq!(a.glyph_range, (391, 395));
+    let released = inline_formula::released_for(p, &formulas);
+    assert_eq!(released.len(), 1);
+    let id = *released.first().unwrap();
+    assert_eq!(p.glyphs[395], id);
+    assert_eq!(p.glyphs.len(), 396);
+    assert_eq!((id.op.op_index, id.ordinal), (217, 0));
+    let colon = ir.glyphs().find(|g| g.id == id).unwrap();
+    assert_eq!(colon.unicode.as_slice(), [':']);
+    assert!(!a.source.unwrap().bbox.intersects(&colon.ink.unwrap()));
+    assert!(p.text.ends_with(':'), "{}", p.text);
+    // The other formula atom is untouched.
+    assert_eq!(p.atoms[0].text, "𝑟𝑏le,𝑗n");
+    assert_eq!(p.atoms[0].glyph_range, (363, 370));
+}
+
 #[test]
 fn two_lines_merge_into_one_paragraph() {
     // 行距 14pt、字号 10pt（14 < 1.8×10）→ 同段。
