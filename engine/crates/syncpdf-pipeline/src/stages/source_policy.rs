@@ -129,6 +129,62 @@ pub fn protect_front_matter(
     changed
 }
 
+/// Protect structured name rosters under an explicit author-list heading,
+/// including continuations on later pages. Narrative author-contribution prose
+/// is still translatable; the next section heading closes the roster scope.
+pub fn protect_author_lists(paragraphs: &mut [Paragraph]) -> Vec<ParagraphId> {
+    let heading = regex::Regex::new(
+        r"(?i)^(?:(?:[a-z]|[0-9]+(?:\.[0-9]+)*)[.)]?\s+)?(?:author list|authors|contributors)$",
+    )
+    .expect("author heading pattern");
+    let mut in_roster = false;
+    let mut changed = Vec::new();
+    for p in paragraphs {
+        if matches!(p.kind, RegionKind::Title | RegionKind::ParagraphTitle) {
+            in_roster = heading.is_match(p.text.trim());
+            continue;
+        }
+        if !in_roster || p.kind != RegionKind::Text || p.translatable != Translatable::Yes {
+            continue;
+        }
+        let names = p
+            .text
+            .split_once(':')
+            .map_or(p.text.as_str(), |(label, rest)| {
+                if label.len() <= 80 {
+                    rest
+                } else {
+                    p.text.as_str()
+                }
+            });
+        let entries: Vec<_> = names
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
+        if entries.len() < 2 || !entries.iter().all(|entry| roster_name(entry)) {
+            continue;
+        }
+        p.translatable = Translatable::No {
+            reason: REASON.into(),
+        };
+        changed.push(p.id.clone());
+    }
+    changed
+}
+
+fn roster_name(text: &str) -> bool {
+    let words: Vec<_> = text.split_whitespace().collect();
+    (2..=6).contains(&words.len())
+        && words.iter().all(|word| {
+            let word = word.trim_matches(|c: char| "*†‡".contains(c));
+            word.chars().next().is_some_and(char::is_uppercase)
+                && word
+                    .chars()
+                    .all(|c| c.is_alphabetic() || ".-'’".contains(c))
+        })
+}
+
 fn rotated(
     p: &Paragraph,
     glyphs: &std::collections::HashMap<GlyphId, &syncpdf_core::ir::Glyph>,
@@ -322,6 +378,51 @@ mod tests {
             })
             .collect();
         (page, regions, paragraphs)
+    }
+
+    #[test]
+    fn author_rosters_require_a_heading_and_names_not_contribution_prose() {
+        let bbox = Rect::new(50.0, 60.0, 500.0, 100.0);
+        let make = |n, kind, text| paragraph(n, kind, text, bbox);
+        let mut ps = vec![
+            make(1, RegionKind::Text, "Ada Lovelace, Grace Hopper"),
+            make(2, RegionKind::ParagraphTitle, "A. Author List"),
+            make(
+                3,
+                RegionKind::Text,
+                "Authors are listed alphabetically by their first name.",
+            ),
+            make(
+                4,
+                RegionKind::Text,
+                "Research: Ada Lovelace*, G. Hopper, Alan Turing,",
+            ),
+            make(5, RegionKind::Footer, "46"),
+            make(6, RegionKind::Text, "Edsger Dijkstra, Donald Knuth"),
+            make(
+                7,
+                RegionKind::Text,
+                "Ada Lovelace developed the method, Grace Hopper evaluated it.",
+            ),
+            make(8, RegionKind::ParagraphTitle, "B. Evaluation Details"),
+            make(9, RegionKind::Text, "Ada Lovelace, Grace Hopper"),
+        ];
+        ps[5].page = PageId(1);
+        ps[5].id = ParagraphId::new(PageId(1), 1);
+        let before = ps.clone();
+        assert_eq!(
+            protect_author_lists(&mut ps),
+            vec![before[3].id.clone(), before[5].id.clone()]
+        );
+        for (index, p) in ps.iter().enumerate() {
+            assert_eq!(p.text, before[index].text);
+            assert_eq!(p.bbox, before[index].bbox);
+            assert_eq!(p.glyphs, before[index].glyphs);
+            assert_eq!(
+                p.translatable == Translatable::Yes,
+                ![3, 5].contains(&index)
+            );
+        }
     }
 
     #[test]

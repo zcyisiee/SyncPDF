@@ -7,6 +7,7 @@ use syncpdf_core::ir::{Paragraph, TypesetParagraph};
 use syncpdf_core::{AtomId, Color, Rect, StyleId};
 use syncpdf_font::{FontId, FontProfile, FontStore, Role};
 use syncpdf_translate::{ParsedUnit, Segment};
+use syncpdf_typeset::shaper::UnderlineStyle;
 use syncpdf_typeset::{
     FitOptions, FontMetrics, Inline, Lang, Obstacles, ParagraphSpec, ShapedGlyph, Shaper,
     StyleSpec, Typeset, TypesetResult,
@@ -301,6 +302,21 @@ pub fn spec_for(para: &Paragraph) -> ParagraphSpec {
                     size: Some(r.size),
                     color: Some(r.color),
                     font: None,
+                    // Geometry comes from the claimed source line, so a run is
+                    // decorated only when that line was really attributed to it.
+                    underline: para
+                        .decorations
+                        .iter()
+                        .find(|d| {
+                            r.underline
+                                && d.glyph_range.0 < r.glyph_range.1
+                                && r.glyph_range.0 < d.glyph_range.1
+                        })
+                        .map(|d| UnderlineStyle {
+                            width: d.stroke.width,
+                            offset: d.offset,
+                            color: d.stroke.color,
+                        }),
                 },
             )
         })
@@ -469,6 +485,8 @@ mod tests {
                 italic: false,
                 serif: false,
                 mono: false,
+
+                underline: false,
             }],
             atoms: vec![],
             text: text.into(),
@@ -805,6 +823,8 @@ mod tests {
                 italic: false,
                 serif: false,
                 mono: false,
+
+                underline: false,
             },
             StyleRun {
                 id: StyleId(2),
@@ -816,6 +836,8 @@ mod tests {
                 italic: false,
                 serif: false,
                 mono: false,
+
+                underline: false,
             },
         ];
         let spec = spec_for(&para);

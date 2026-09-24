@@ -468,6 +468,7 @@ impl Pipeline {
                 done: i as u32 + 1,
                 total: pages_ir.len() as u32,
             });
+            stages::source_toc::refine(&mut regions, page_ir, &main_doc);
             per_page_regions.push((page, regions));
         }
         if let Some(profile) = model
@@ -490,8 +491,12 @@ impl Pipeline {
                 .ok_or_else(|| PipelineError::Protocol("区域所属页缺少 IR".into()))?;
             let mut paragraphs = analyze_page(ir, regions);
             stages::source_policy::protect_front_matter(ir, regions, &mut paragraphs);
+            stages::source_decoration::claim(ir, &mut paragraphs);
+            stages::source_decoration::mark_styles(ir, &mut paragraphs);
+            stages::source_citations::protect(&mut paragraphs, ir, &main_doc);
             all_paras.extend(paragraphs);
         }
+        stages::source_policy::protect_author_lists(&mut all_paras);
         for p in &all_paras {
             sink.emit(Event::Paragraph {
                 paragraph_id: p.id.clone(),
@@ -980,6 +985,16 @@ fn handle_block(
             },
             None,
             "原子或链接目标无法唯一定位，保留原文".into(),
+        ));
+    } else if block.status.is_ok()
+        && prepared.as_ref().is_some_and(|target| {
+            !stages::source_decoration::anchored(&target.para, &target.parsed)
+        })
+    {
+        fallback = Some((
+            "source_decoration_unanchored",
+            None,
+            "译文缺少原文下划线的非空样式锚点，保留原文及其装饰".into(),
         ));
     } else if !state.frames.contains_key(&id) {
         fallback = Some((

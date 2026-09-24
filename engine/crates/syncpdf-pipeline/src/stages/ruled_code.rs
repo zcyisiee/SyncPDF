@@ -54,6 +54,7 @@ fn split_candidate(region: &Region, regions: &[Region], ir: &PageIR) -> Option<(
                 bbox,
                 is_fill: false,
                 is_stroke: true,
+                ..
             } if bbox.height().abs() <= 0.1
                 && bbox.width() >= 8.0 * em
                 && bbox.x0 >= old.x0 - 0.5
@@ -261,6 +262,22 @@ mod tests {
         let first = regions.clone();
         assert_eq!(refine_ruled_code_sidebars(&mut regions, &ir), 0);
         assert_eq!(regions, first, "重复后处理不继续切块");
+    }
+
+    #[test]
+    fn known_stroke_metadata_does_not_hide_algorithm_rules() {
+        let (mut regions, mut ir) = fixture();
+        for (index, item) in ir.items.iter_mut().enumerate() {
+            if let DisplayItem::Path { stroke, .. } = item {
+                *stroke = Some(syncpdf_core::ir::PathStroke {
+                    op: OpKey::new(ObjRef::new(1, 0), index as u32),
+                    width: 0.4,
+                    color: Color::BLACK,
+                });
+            }
+        }
+        assert_eq!(refine_ruled_code_sidebars(&mut regions, &ir), 1);
+        assert_eq!(regions[1].kind, RegionKind::Text);
     }
 
     #[test]

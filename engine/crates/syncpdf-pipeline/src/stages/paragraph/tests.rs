@@ -849,3 +849,355 @@ fn single_line_title_centers_only_with_symmetric_page_margins() {
         }
     }
 }
+
+// ── 漏检行内根式：源绘制归属 + 阅读序 ────────────────────────────────
+//
+// 真实 RCA（DeepSeek 第 14 页 P14-006）：`√` 的 loose bbox 高 18pt 而真实墨迹只有
+// ~10.9pt。这个跨行字盒让 group_lines 把上下两行桥接成同一行，随后按 x 排序把两行
+// 交织成乱码。下面按真实度量构造同一几何。
+
+const RAD_SIZE: f32 = 10.9091;
+
+/// 显式 bbox/基线/墨迹的手工字形。
+fn measured_glyph(seq: u16, ch: char, bbox: Rect, baseline: f32, ink: Option<Rect>) -> Glyph {
+    let mut g = mk_glyph(seq, ch, bbox.x0, bbox.y0, RAD_SIZE, 0);
+    g.bbox = bbox;
+    g.matrix = Matrix::new(1.0, 0.0, 0.0, 1.0, bbox.x0, baseline);
+    g.ink = ink;
+    g.advance = bbox.width();
+    g
+}
+
+/// 一行等宽正文；行盒高 10.876pt（真实论文度量）。
+fn prose_row(seq: u16, text: &str, x: f32, baseline: f32) -> Vec<Glyph> {
+    let adv = RAD_SIZE * 0.6;
+    let (y0, y1) = (baseline - 3.076, baseline + 7.8);
+    text.chars()
+        .enumerate()
+        .map(|(i, c)| {
+            let x0 = x + i as f32 * adv;
+            measured_glyph(
+                seq + i as u16,
+                c,
+                Rect::new(x0, y0, x0 + adv, y1),
+                baseline,
+                Some(Rect::new(x0 + 0.1, y0 + 0.5, x0 + adv - 0.1, y1 - 0.8)),
+            )
+        })
+        .collect()
+}
+
+/// 横线画笔路径。
+fn bar_item(bar: Rect, op_index: u32) -> DisplayItem {
+    DisplayItem::Path {
+        bbox: bar,
+        is_fill: false,
+        is_stroke: true,
+        stroke: Some(syncpdf_core::ir::PathStroke {
+            op: OpKey::new(ObjRef::new(50, 0), op_index),
+            width: 0.605,
+            color: Color::default(),
+        }),
+    }
+}
+
+/// 一个漏检根式：`√`（跨行 loose 盒 + 真实墨迹）+ 横线 + 横线下的被开方字形。
+/// `loose_extra` 是 loose 盒相对墨迹额外向上凸出的高度。
+fn undetected_radical(
+    seq: u16,
+    ink: Rect,
+    bar: Rect,
+    radicand_baseline: f32,
+    radicand: &str,
+    loose_extra: f32,
+) -> (Vec<Glyph>, DisplayItem) {
+    let mut glyphs = vec![measured_glyph(
+        seq,
+        '\u{221a}',
+        Rect::new(
+            ink.x0,
+            ink.y1 - (ink.height() + loose_extra),
+            ink.x1,
+            ink.y1 + loose_extra,
+        ),
+        ink.y1 - 0.611,
+        Some(ink),
+    )];
+    let adv = RAD_SIZE * 0.5;
+    for (j, c) in radicand.chars().enumerate() {
+        let x0 = bar.x0 + j as f32 * adv;
+        let (y0, y1) = (radicand_baseline - 3.076, radicand_baseline + 7.8);
+        glyphs.push(measured_glyph(
+            seq + 1 + j as u16,
+            c,
+            Rect::new(x0, y0, x0 + adv, y1),
+            radicand_baseline,
+            Some(Rect::new(x0 + 0.1, y0 + 0.5, x0 + adv - 0.1, y1 - 0.8)),
+        ));
+    }
+    (glyphs, bar_item(bar, 102))
+}
+
+fn page_with_prose_and_radical() -> PageIR {
+    let mut glyphs = prose_row(0, "is approx one", 70.0, 328.463);
+    glyphs.extend(prose_row(20, "most approx", 70.0, 314.913));
+    glyphs.extend(prose_row(40, "channels after", 70.0, 301.364));
+    let ink = Rect::new(173.147, 313.877, 180.488, 324.775);
+    let bar = Rect::new(180.161, 324.467, 196.525, 324.467);
+    let (rad, item) = undetected_radical(60, ink, bar, 314.913, "512", 3.55);
+    glyphs.extend(rad);
+    let mut ir = page_ir(glyphs, vec![mk_font("F1", false, false)]);
+    ir.items.push(item);
+    ir
+}
+
+#[test]
+fn undetected_radical_is_owned_and_restores_reading_order() {
+    let ir = page_with_prose_and_radical();
+    let paragraphs = analyze_page(&ir, &full_region(RegionKind::Text));
+    let p = paragraphs
+        .iter()
+        .find(|p| p.kind == RegionKind::Text)
+        .expect("prose paragraph");
+    assert_eq!(p.lines.len(), 3, "三行必须仍是三行：{}", p.text);
+    let at = p.text.find('\u{221a}').expect("根号仍应在文本里");
+    let after: String = p.text[at..].chars().take(4).collect();
+    assert_eq!(after, "\u{221a}512", "根号必须紧邻其被开方字：{}", p.text);
+    assert!(p.text.starts_with("is approx one"), "{}", p.text);
+    let atom = p
+        .atoms
+        .iter()
+        .find(|a| a.kind == AtomKind::Formula && a.source.is_some())
+        .expect("漏检根式必须成为 SourceAtom");
+    assert_eq!(atom.text, "\u{221a}512");
+    assert_eq!(atom.glyph_range.1 - atom.glyph_range.0, 4);
+}
+
+/// 墨迹证据缺失时必须保守：不认领、不删除，源顺序保持原状而非被修复。
+#[test]
+fn radical_without_ink_evidence_is_not_claimed() {
+    let mut ir = page_with_prose_and_radical();
+    for item in &mut ir.items {
+        if let DisplayItem::Text { glyphs } = item {
+            for g in glyphs.iter_mut() {
+                if g.unicode.iter().collect::<String>() == "\u{221a}" {
+                    g.ink = None;
+                }
+            }
+        }
+    }
+    let paragraphs = analyze_page(&ir, &full_region(RegionKind::Text));
+    let p = &paragraphs[0];
+    assert!(
+        !p.atoms.iter().any(|a| a.source.is_some()),
+        "无墨迹证据不得产生源原子"
+    );
+    assert!(matches!(p.translatable, Translatable::Yes), "不得删段");
+}
+
+/// 横线不是紧贴上缘 / 被开方字不在横线下 / 被开方字跨出横线 → 全部拒绝。
+#[test]
+fn non_adjoining_or_oversized_bar_is_rejected() {
+    let ink = Rect::new(173.147, 313.877, 180.488, 324.775);
+    let cases: [(&str, Rect, f32); 4] = [
+        // 横线远离 `√` 顶部
+        (
+            "far bar",
+            Rect::new(180.161, 336.9, 196.525, 336.9),
+            314.913,
+        ),
+        // 横线整体在根号右侧（不与其墨迹相接）
+        (
+            "bar not touching",
+            Rect::new(196.0, 324.467, 212.0, 324.467),
+            314.913,
+        ),
+        // 横线极短，覆盖不了被开方字
+        (
+            "short bar",
+            Rect::new(180.161, 324.467, 181.0, 324.467),
+            314.913,
+        ),
+        // 被开方字不在横线下方
+        (
+            "radicand above",
+            Rect::new(180.161, 324.467, 196.525, 324.467),
+            328.463,
+        ),
+    ];
+    for (name, bar, radicand_baseline) in cases {
+        let mut glyphs = prose_row(0, "most approx", 70.0, 314.913);
+        let (rad, item) = undetected_radical(60, ink, bar, radicand_baseline, "512", 3.55);
+        glyphs.extend(rad);
+        let mut ir = page_ir(glyphs, vec![mk_font("F1", false, false)]);
+        ir.items.push(item);
+        let paragraphs = analyze_page(&ir, &full_region(RegionKind::Text));
+        assert!(
+            !paragraphs
+                .iter()
+                .flat_map(|p| &p.atoms)
+                .any(|a| a.source.is_some()),
+            "{name} 缺证据不得认领"
+        );
+    }
+}
+
+#[test]
+fn radical_requires_complete_ink_and_exclusive_paint() {
+    for case in [
+        "unknown glyph",
+        "competing bar",
+        "unowned fill",
+        "missing radicand ink",
+        "thick pen",
+    ] {
+        let mut ir = page_with_prose_and_radical();
+        match case {
+            "unknown glyph" => {
+                let mut glyph = measured_glyph(
+                    200,
+                    '?',
+                    Rect::new(176.0, 318.0, 178.0, 320.0),
+                    310.0,
+                    Some(Rect::new(176.0, 318.0, 178.0, 320.0)),
+                );
+                glyph.unicode.clear();
+                ir.items.push(DisplayItem::Text {
+                    glyphs: vec![glyph],
+                });
+            }
+            "competing bar" => ir
+                .items
+                .push(bar_item(Rect::new(180.161, 324.467, 196.525, 324.467), 103)),
+            "unowned fill" => ir.items.push(DisplayItem::Path {
+                bbox: Rect::new(176.0, 318.0, 178.0, 320.0),
+                is_fill: true,
+                is_stroke: false,
+                stroke: None,
+            }),
+            "missing radicand ink" => {
+                for item in &mut ir.items {
+                    if let DisplayItem::Text { glyphs } = item {
+                        for g in glyphs {
+                            if g.unicode.as_slice() == ['5'] {
+                                g.ink = None;
+                            }
+                        }
+                    }
+                }
+            }
+            "thick pen" => {
+                for item in &mut ir.items {
+                    if let DisplayItem::Path {
+                        stroke: Some(stroke),
+                        ..
+                    } = item
+                    {
+                        stroke.width = 10.0;
+                    }
+                }
+            }
+            _ => unreachable!(),
+        }
+        let regions = full_region(RegionKind::Text);
+        let formulas = inline_formula::sources(&ir, &regions.iter().collect::<Vec<_>>());
+        assert!(
+            formulas.is_empty(),
+            "{case}: ambiguous ink must not be claimed"
+        );
+    }
+}
+
+/// 已有显式 Formula 区域的根式仍走原路径，且不会被新候选重复认领。
+#[test]
+fn detected_formula_region_still_wins() {
+    let ir = page_with_prose_and_radical();
+    let root = ir
+        .items
+        .iter()
+        .find_map(|item| match item {
+            DisplayItem::Text { glyphs } => glyphs
+                .iter()
+                .find(|g| g.unicode.iter().collect::<String>() == "\u{221a}")
+                .cloned(),
+            _ => None,
+        })
+        .unwrap();
+    // A detected formula region covers the whole formula, radicand included.
+    let cover = Rect::new(
+        root.ink.unwrap().x0,
+        root.ink.unwrap().y0,
+        root.bbox.x1 + 18.0,
+        root.ink.unwrap().y1,
+    );
+    let mut regions = full_region(RegionKind::Text);
+    let mut formula = text_region(1, cover, 1);
+    formula.kind = RegionKind::Formula;
+    regions.push(formula);
+    let paragraphs = analyze_page(&ir, &regions);
+    let formula_atoms: Vec<_> = paragraphs
+        .iter()
+        .flat_map(|p| &p.atoms)
+        .filter(|a| a.source.is_some())
+        .collect();
+    assert_eq!(formula_atoms.len(), 1, "有显式区域时不得再多认领一次");
+    assert_eq!(
+        formula_atoms[0].text, "\u{221a}512",
+        "显式区域仍完整拥有根式"
+    );
+    let mut owned: Vec<_> = paragraphs
+        .iter()
+        .flat_map(|p| &p.atoms)
+        .filter(|a| a.source.is_some())
+        .flat_map(|a| a.glyph_range.0..a.glyph_range.1)
+        .collect();
+    owned.sort_unstable();
+    let unique = owned.len();
+    owned.dedup();
+    assert_eq!(owned.len(), unique, "同一个源字形不得被两个原子重复拥有");
+}
+
+/// 真实证据回归：DeepSeek 第 14 页（IR page 13）漏检两个根式的段落。
+/// 只读已保存的 source IR 与 regions，不重跑模型/PDF 绑定。
+#[test]
+#[ignore = "requires saved real source/layout inventory (SYNCPDF_RADICAL_AUDIT)"]
+fn real_page_radicals_restore_reading_order() {
+    let root = std::path::PathBuf::from(std::env::var("SYNCPDF_RADICAL_AUDIT").unwrap());
+    let pages: Vec<PageIR> =
+        serde_json::from_slice(&std::fs::read(root.join("source.json")).unwrap()).unwrap();
+    let ir = &pages[13];
+    let regions: Vec<Region> =
+        serde_json::from_slice(&std::fs::read(root.join("regions-13.json")).unwrap()).unwrap();
+    let paragraphs = analyze_page(ir, &regions);
+    // 该段是唯一同时含两个 `√` 且间距很大的源段。
+    let p = paragraphs
+        .iter()
+        .find(|p| {
+            p.text.matches('\u{221a}').count() == 2 && matches!(p.translatable, Translatable::Yes)
+        })
+        .expect("含两个根号的真实段落");
+    assert!(
+        p.text
+            .contains("is approximately 1. After RMS normalization"),
+        "阅读序必须恢复：{}",
+        p.text
+    );
+    assert!(
+        p.text
+            .contains("most approximately\u{221a}512. RoPE preserves this norm"),
+        "第一个根式必须紧邻 512：{}",
+        p.text
+    );
+    assert!(
+        p.text.contains("bounded by approximately\u{221a}512"),
+        "第二个根式必须紧邻 512：{}",
+        p.text
+    );
+    let atoms: Vec<_> = p
+        .atoms
+        .iter()
+        .filter(|a| a.kind == AtomKind::Formula && a.source.is_some())
+        .collect();
+    assert_eq!(atoms.len(), 2, "两个根式都必须成为源原子");
+    assert!(atoms.iter().all(|a| a.text == "\u{221a}512"));
+}

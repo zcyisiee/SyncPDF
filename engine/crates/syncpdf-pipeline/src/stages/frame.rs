@@ -2,7 +2,7 @@
 //! Glyph identities define ownership; neighbors and retained drawing constrain space.
 use std::collections::{BTreeMap, BTreeSet};
 use syncpdf_core::ir::{Align, DisplayItem, PageIR, Paragraph, Region, RegionKind, Translatable};
-use syncpdf_core::{GlyphId, ParagraphId, Rect};
+use syncpdf_core::{GlyphId, OpKey, ParagraphId, Rect};
 
 #[derive(Debug, Clone)]
 pub struct LayoutFrame {
@@ -30,13 +30,14 @@ fn heading_container(ir: &PageIR, regions: &[Region], para: &Paragraph) -> Optio
         && para.align == Align::Center
         && (para.bbox.center().x - ir.crop_box.center().x).abs() < 2.0
     {
-        body.iter().map(|r| r.bbox).reduce(|a, b| a.union(&b))?
+        body.iter().map(|r| r.bbox).reduce(|a, b| a.union(&b))
     } else {
         body.iter()
             .filter(|r| (r.bbox.x0 - para.bbox.x0).abs() <= 4.0 && r.bbox.x1 >= para.bbox.x1)
-            .max_by(|a, b| a.bbox.y1.total_cmp(&b.bbox.y1))?
-            .bbox
-    };
+            .max_by(|a, b| a.bbox.y1.total_cmp(&b.bbox.y1))
+            .map(|r| r.bbox)
+    }
+    .or_else(|| super::source_toc::heading_measure(ir, regions, para))?;
     Some(Rect::new(
         bounds.x0.min(para.bbox.x0).max(ir.crop_box.x0),
         para.bbox.y0,
@@ -56,23 +57,24 @@ pub fn page_frames(
         .glyphs()
         .filter(|g| !g.flags.invisible && !g.flags.outside_clip)
         .collect();
-    let paint: Vec<Rect> = ir
+    // Paint is paired with its paint op so a paragraph can set aside only the
+    // stroke it certainly owns; every other source line stays an obstacle.
+    let paint: Vec<(Rect, Option<OpKey>)> = ir
         .items
         .iter()
         .filter_map(|item| match item {
-            DisplayItem::Image { bbox } | DisplayItem::InlineImage { bbox } => Some(*bbox),
+            DisplayItem::Image { bbox } | DisplayItem::InlineImage { bbox } => Some((*bbox, None)),
             DisplayItem::Path {
                 bbox,
                 is_fill,
                 is_stroke,
+                stroke,
             } if *is_fill || *is_stroke => {
                 // A stroked rule can have zero geometric height/width.
                 let pad = if *is_stroke { 0.5 } else { 0.0 };
-                Some(Rect::new(
-                    bbox.x0 - pad,
-                    bbox.y0 - pad,
-                    bbox.x1 + pad,
-                    bbox.y1 + pad,
+                Some((
+                    Rect::new(bbox.x0 - pad, bbox.y0 - pad, bbox.x1 + pad, bbox.y1 + pad),
+                    stroke.map(|s| s.op),
                 ))
             }
             _ => None,
@@ -122,6 +124,7 @@ pub fn page_frames(
             }
             bbox.x1 = container.x1;
         }
+        let own_ops: BTreeSet<OpKey> = super::source_decoration::owned_ops(para).collect();
         let obstacles: Vec<Rect> = glyphs
             .iter()
             .filter(|g| {
@@ -129,11 +132,20 @@ pub fn page_frames(
                     && (g.unicode.is_empty() || g.unicode.iter().any(|c| !c.is_whitespace()))
             })
             .map(|g| g.bbox)
-            .chain(paint.iter().copied().filter(|b| {
-                !para.atoms.iter().filter_map(|a| a.source).any(|s| {
-                    s.bbox.x0 <= b.x0 && b.x1 <= s.bbox.x1 && s.bbox.y0 <= b.y0 && b.y1 <= s.bbox.y1
-                })
-            }))
+            .chain(
+                paint
+                    .iter()
+                    .filter(|(b, op)| {
+                        !op.is_some_and(|o| own_ops.contains(&o))
+                            && !para.atoms.iter().filter_map(|a| a.source).any(|s| {
+                                s.bbox.x0 <= b.x0
+                                    && b.x1 <= s.bbox.x1
+                                    && s.bbox.y0 <= b.y0
+                                    && b.y1 <= s.bbox.y1
+                            })
+                    })
+                    .map(|(b, _)| *b),
+            )
             .collect();
         // A neighboring column can start on a different row. Horizontal ownership
         // therefore cannot depend on overlap with this paragraph's source y range.
@@ -307,6 +319,7 @@ mod tests {
             glyphs: vec![],
             kept_atoms: vec![],
             placed_atoms: Vec::new(),
+            underlines: Vec::new(),
         };
         assert!(collides(f, &[line(Rect::new(20.0, 99.0, 30.0, 115.0))]));
         assert!(!collides(f, &[line(Rect::new(20.0, 120.0, 80.0, 130.0))]));
@@ -391,6 +404,37 @@ mod tests {
         });
         let frames = page_frames(&ir, &regions, std::slice::from_ref(&para));
         assert_eq!(frames[&para.id].bbox.x1, 60.0);
+    }
+
+    #[test]
+    fn toc_heading_uses_blank_label_measure_without_claiming_the_page_number() {
+        let a = glyph(0, Rect::new(20., 120., 60., 130.), 123.);
+        let mut page_number = glyph(1, Rect::new(180., 120., 190., 130.), 123.);
+        page_number.unicode = vec!['9'].into();
+        let other_row = glyph(2, Rect::new(65., 90., 160., 100.), 93.);
+        let mut p = paragraph(&a);
+        p.kind = RegionKind::ParagraphTitle;
+        let ir = page(vec![a, page_number, other_row]);
+        let mut regions = vec![
+            region(
+                0,
+                RegionKind::ParagraphTitle,
+                Rect::new(20., 120., 180., 130.),
+            ),
+            region(1, RegionKind::Other, Rect::new(180., 120., 190., 130.)),
+        ];
+        let frames = page_frames(&ir, &regions, std::slice::from_ref(&p));
+        // Nearby indented rows no longer cap the heading to 42.5 pt. The protected
+        // page column still limits the expanded measure to half the blank gap.
+        assert_eq!(frames[&p.id].bbox.x1, 120.);
+        assert_eq!(p.bbox.x1, 60.);
+        regions[1].kind = RegionKind::Text;
+        assert_eq!(
+            page_frames(&ir, &regions, std::slice::from_ref(&p))[&p.id]
+                .bbox
+                .x1,
+            62.5
+        );
     }
 
     #[test]

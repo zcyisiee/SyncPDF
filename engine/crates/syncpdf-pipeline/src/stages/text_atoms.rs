@@ -98,6 +98,7 @@ fn first_source_style(para: &Paragraph, atom: &Atom) -> Option<StyleId> {
 fn supported_text_atom(para: &Paragraph, atom: &Atom) -> bool {
     match atom.kind {
         AtomKind::Number => true,
+        AtomKind::Citation => exact_source_text(para, atom),
         AtomKind::Url => {
             (atom.text.starts_with("https://") || atom.text.starts_with("http://"))
                 && exact_source_text(para, atom)

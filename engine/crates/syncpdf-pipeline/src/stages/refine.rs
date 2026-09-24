@@ -3,7 +3,7 @@
 use super::frame::LayoutFrame;
 use std::collections::{BTreeMap, BTreeSet};
 use syncpdf_core::ir::{DisplayItem, PageIR, Paragraph, TypesetParagraph};
-use syncpdf_core::{GlyphId, ParagraphId, Rect};
+use syncpdf_core::{GlyphId, OpKey, ParagraphId, Rect};
 use syncpdf_typeset::Shaper;
 
 pub(crate) fn obstacles(
@@ -30,6 +30,10 @@ pub(crate) fn obstacles(
         })
         .map(|g| g.bbox)
         .collect();
+    let own_ops: BTreeSet<OpKey> = std::iter::once(para)
+        .chain(placed.iter().filter_map(|p| paragraphs.get(&p.id)))
+        .flat_map(super::source_decoration::owned_ops)
+        .collect();
     let moved_atoms: Vec<_> = std::iter::once(para)
         .chain(placed.iter().filter_map(|p| paragraphs.get(&p.id)))
         .flat_map(|p| &p.atoms)
@@ -44,7 +48,14 @@ pub(crate) fn obstacles(
                     bbox,
                     is_fill,
                     is_stroke,
+                    stroke,
+                    ..
                 } if *is_fill || *is_stroke => {
+                    // Only an owner that already holds its underline anchor may
+                    // set its own source line aside; every other line is paint.
+                    if stroke.is_some_and(|s| own_ops.contains(&s.op)) {
+                        return None;
+                    }
                     let pad = if *is_stroke { 0.5 } else { 0.0 };
                     Some(Rect::new(
                         bbox.x0 - pad,
@@ -67,8 +78,9 @@ pub(crate) fn obstacles(
         }
         for line in &laid.lines {
             obstacles.extend(line.placed_atoms.iter().map(|a| a.bbox));
+            obstacles.extend(line.underlines.iter().map(|u| u.bbox));
             for g in &line.glyphs {
-                if g.text.chars().all(char::is_whitespace) {
+                if !g.text.is_empty() && g.text.chars().all(char::is_whitespace) {
                     continue;
                 }
                 let b = shaper
