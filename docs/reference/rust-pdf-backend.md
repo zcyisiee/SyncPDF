@@ -24,7 +24,7 @@ PDFium 去重后缺少字符的对象，仅在严格匹配的单 code `Tj`、自
 
 漏检行内根式仅在单个√、唯一直接实线overbar、完整同基线被开方字及唯一正文归属都有证据时恢复源原子；要求tight ink、已知细笔画和无竞争绘制。字形分行使用被开方行盒，避免过高loose根号盒桥接相邻行。无证据、多条竞争横线或复杂嵌套形状不猜测。
 
-可见非空白控制码字形不作为普通Unicode重新排字：独占归属、tight ink、源span及行基线可靠且无邻字/路径/图片冲突时，保留为源绘制`Symbol` KEEP，不猜替代字符。无法证明时发`unmapped_source_glyph`、保留源段并计入未完成；已有源绘制原子不重复认领。此保护不是通用字体编码修复。
+可见非空白控制码字形不作为普通Unicode重新排字：独占归属、tight ink、源span及行基线可靠且无邻字/路径/图片冲突时，保留为源绘制`Symbol` KEEP，不猜替代字符。无法证明时发`unmapped_source_glyph`、保留源段并计入未完成；已有源绘制原子不重复认领。下游`text_atoms::resolve_text`同时接受具有源绘制及精确源span的`Formula`/`Symbol`，保留KEEP直至原尺寸重放，不扩展到无source的Symbol或任意Other；非法范围、缺样式或文本不符仍拒绝。回归覆盖保护→解析→prepare接缝及真实缓存复排。此保护不是通用字体编码修复。
 
 `Glyph.ink`保存PDFium tight bounds，不替代用于布局/归属的loose bbox；簇中任一字符缺墨迹证据时整个簇为None。旧IR缺字段可读取但仍保守使用loose盒，生产重新绑定页面提取新证据。公式擦除/重放clip与碰撞检查使用同一墨迹及已归属路径范围，不能用tight通过碰撞后再按更大的loose盒擦除。安全侧承平移可连同SourceAtom目标框刚性移动，源框和原尺寸保持。
 

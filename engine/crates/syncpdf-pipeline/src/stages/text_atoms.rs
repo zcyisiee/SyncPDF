@@ -1,6 +1,7 @@
 //! Exact numbers, citations and HTTP(S) URLs use normal shaping. Link identity
-//! and relocation are verified separately in link_text. Proven source formulas
-//! remain atoms and are replayed using their original PDF drawing.
+//! and relocation are verified separately in link_text. Proven source drawings
+//! (formulas, visible control-code symbols) remain atoms and are replayed using
+//! their original PDF drawing.
 #[cfg(test)]
 use lopdf::{Document, Object};
 use syncpdf_core::ir::{Atom, AtomKind, Paragraph};
@@ -24,7 +25,9 @@ pub(super) fn resolve_text(para: &Paragraph, parsed: &ParsedUnit) -> Option<Pars
     }
     if para.atoms.iter().any(|a| {
         !(supported_text_atom(para, a)
-            || (a.kind == AtomKind::Formula && a.source.is_some() && exact_source_text(para, a)))
+            || (matches!(a.kind, AtomKind::Formula | AtomKind::Symbol)
+                && a.source.is_some()
+                && exact_source_text(para, a)))
             || a.text.is_empty()
             || a.glyph_range.0 >= a.glyph_range.1
             || a.glyph_range.1 as usize > para.glyphs.len()
@@ -449,6 +452,152 @@ mod tests {
             })],
         );
         assert!(resolve(&p, &parsed, &doc).is_some());
+    }
+
+    /// A visible control glyph whose only identity is its proven source drawing.
+    fn symbol_para() -> Paragraph {
+        let (mut p, _, _) = case();
+        p.text = "x\u{2}y".into();
+        p.text_spans = ["x", "\u{2}", "y"]
+            .into_iter()
+            .enumerate()
+            .map(|(i, t)| syncpdf_core::ir::SourceTextSpan {
+                text: t.into(),
+                glyph_range: (i as u32, i as u32 + 1),
+            })
+            .collect();
+        p.atoms = vec![Atom {
+            source: Some(syncpdf_core::ir::SourceAtom {
+                bbox: Rect::new(20.0, 10.0, 24.0, 20.0),
+                baseline: 12.0,
+            }),
+            id: AtomId(1),
+            glyph_range: (1, 2),
+            kind: AtomKind::Symbol,
+            text: "\u{2}".into(),
+        }];
+        p
+    }
+
+    #[test]
+    fn source_backed_symbol_replays_its_drawing_instead_of_rejecting() {
+        let p = symbol_para();
+        let parsed =
+            syncpdf_translate::parse_unit_html("<p id=\"P01-001\">前{{KEEP_1}}后</p>").unwrap();
+        let out = resolve_text(&p, &parsed).expect("evidenced symbol KEEP replays its source");
+        assert_eq!(out.atom_ids(), vec![AtomId(1)]);
+        assert_eq!(out.text(), "前后");
+    }
+
+    #[test]
+    fn symbol_without_source_or_exact_span_stays_fail_closed() {
+        let parsed =
+            syncpdf_translate::parse_unit_html("<p id=\"P01-001\">前{{KEEP_1}}后</p>").unwrap();
+        let mut p = symbol_para();
+        p.atoms[0].source = None;
+        assert!(resolve_text(&p, &parsed).is_none(), "no source, no replay");
+        let mut p = symbol_para();
+        p.text_spans[1].text = "?".into();
+        assert!(resolve_text(&p, &parsed).is_none(), "span text must match");
+        let mut p = symbol_para();
+        p.atoms[0].glyph_range = (1, 3);
+        assert!(
+            resolve_text(&p, &parsed).is_none(),
+            "range must not swallow a neighbor glyph"
+        );
+        let mut p = symbol_para();
+        p.atoms[0].glyph_range = (1, 9);
+        assert!(resolve_text(&p, &parsed).is_none(), "out of glyph bounds");
+        let mut p = symbol_para();
+        p.atoms[0].text.clear();
+        assert!(resolve_text(&p, &parsed).is_none(), "empty identity");
+        let mut p = symbol_para();
+        p.style_runs[0].glyph_range = (0, 1);
+        assert!(resolve_text(&p, &parsed).is_none(), "unstyled source span");
+    }
+
+    #[test]
+    fn unrelated_kinds_with_source_are_not_released_wholesale() {
+        let parsed =
+            syncpdf_translate::parse_unit_html("<p id=\"P01-001\">前{{KEEP_1}}后</p>").unwrap();
+        for kind in [AtomKind::Code, AtomKind::Other] {
+            let mut p = symbol_para();
+            p.atoms[0].kind = kind;
+            assert!(
+                resolve_text(&p, &parsed).is_none(),
+                "{kind:?} must not ride the source-replay path"
+            );
+        }
+    }
+
+    /// v13 evidence: P20-002's two visible parens only map to U+0002/U+0003 and
+    /// carry a proven source drawing; the cached model block is real output, not
+    /// a new model call.
+    #[test]
+    #[ignore = "requires OPAQUE_INVENTORY (source.json/all-paragraphs.json) and OPAQUE_CACHE (v13 translate.db)"]
+    fn real_opaque_symbols_resolve_and_prepare() {
+        let root = std::path::PathBuf::from(std::env::var("OPAQUE_INVENTORY").unwrap());
+        let pages: Vec<syncpdf_core::ir::PageIR> =
+            serde_json::from_slice(&std::fs::read(root.join("source.json")).unwrap()).unwrap();
+        let mut ps: Vec<Paragraph> =
+            serde_json::from_slice(&std::fs::read(root.join("all-paragraphs.json")).unwrap())
+                .unwrap();
+        ps.retain(|p| p.page == PageId(19));
+        let ir = pages.iter().find(|p| p.page == PageId(19)).unwrap();
+        crate::stages::source_opaque::protect(&mut ps, ir);
+        let p = ps.iter().find(|p| p.id.to_string() == "P20-002").unwrap();
+        assert_eq!(p.atoms.len(), 4);
+        assert_eq!(p.atoms[2].kind, AtomKind::Symbol);
+        assert_eq!(p.atoms[2].text, "\u{2}");
+        assert_eq!(p.atoms[3].kind, AtomKind::Symbol);
+        assert_eq!(p.atoms[3].text, "\u{3}");
+        let unit = syncpdf_translate::build_unit(p, |id| {
+            ir.glyphs()
+                .find(|g| g.id == id)
+                .map(|g| g.unicode.iter().collect())
+        });
+        assert!(unit.html.contains("{{KEEP_3}}") && unit.html.contains("{{KEEP_4}}"));
+        let tmp = tempfile::tempdir().unwrap();
+        let copy = tmp.path().join("translate.db");
+        std::fs::copy(
+            std::path::PathBuf::from(std::env::var("OPAQUE_CACHE").unwrap()),
+            &copy,
+        )
+        .unwrap();
+        let cache = syncpdf_translate::Cache::open(&copy).unwrap();
+        let html = cache
+            .get("auto", "zh-CN", &unit.html)
+            .unwrap()
+            .expect("v13 cached block for the protected unit");
+        let parsed = syncpdf_translate::parse_unit_html(&html).unwrap();
+        let resolved = resolve_text(p, &parsed).expect("real protected atoms must resolve");
+        assert_eq!(
+            resolved.atom_ids(),
+            vec![AtomId(1), AtomId(2), AtomId(3), AtomId(4)]
+        );
+        // `prepare` is the seam that emitted atom_source_unplaced in v13.
+        let target = crate::stages::link_text::prepare(p, ir, &paged_doc(20), &parsed)
+            .expect("prepare must accept evidenced Symbol KEEP atoms");
+        assert_eq!(target.parsed.atom_ids().len(), 4);
+    }
+
+    fn paged_doc(n: i64) -> Document {
+        let mut doc = Document::new();
+        let pages = doc.new_object_id();
+        let kids: Vec<Object> = (0..n)
+            .map(|_| {
+                Object::Reference(
+                    doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages }),
+                )
+            })
+            .collect();
+        doc.objects.insert(
+            pages,
+            Object::Dictionary(dictionary! { "Type" => "Pages", "Kids" => kids, "Count" => n }),
+        );
+        let root = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages });
+        doc.trailer.set("Root", root);
+        doc
     }
 
     #[test]
