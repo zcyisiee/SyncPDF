@@ -844,45 +844,35 @@ fn to_unicode_of(doc: &Document, font_id: ObjectId) -> ToUnicodeMap {
 }
 
 /// 由 `/FontDescriptor` 与名字推断字体特征：`(serif, fixed_pitch, italic, bold)`。
+///
+/// 只做 FontDescriptor 度量与名字的提取；判定逻辑（hjfy 的
+/// Flags → 度量 → 名字三层融合，见任务 T1）在 [`crate::font_traits`]。
 fn font_traits(doc: &Document, d: &Dictionary, base_font: &str) -> (bool, bool, bool, bool) {
-    let (mut serif, mut fixed, mut italic, mut bold) = (false, false, false, false);
-    if let Some(fd) = dict_ref(d, b"FontDescriptor").and_then(|id| deref_dict(doc, id)) {
-        if let Ok(flags) = fd.get(b"Flags").and_then(|o| o.as_i64()) {
-            serif = flags & 2 != 0;
-            fixed = flags & 1 != 0;
-            italic = flags & 64 != 0;
-            bold = flags & (1 << 18) != 0;
-        }
-        if let Ok(v) = fd.get(b"StemV").and_then(|o| o.as_float()) {
-            if v > 120.0 {
-                bold = true;
-            }
-        }
-        if let Ok(v) = fd.get(b"ItalicAngle").and_then(|o| o.as_float()) {
-            if v.abs() > 0.01 {
-                italic = true;
-            }
-        }
-        if let Ok(o) = fd.get(b"FontName") {
-            if let Some(n) = name_of(o) {
-                let flat = n.rsplit('+').next().unwrap_or(&n).to_ascii_lowercase();
-                if flat.contains("bold") {
-                    bold = true;
-                }
-                if flat.contains("italic") || flat.contains("oblique") {
-                    italic = true;
-                }
-            }
-        }
-    }
-    let lower = base_font.to_ascii_lowercase();
-    if lower.contains("bold") {
-        bold = true;
-    }
-    if lower.contains("italic") || lower.contains("oblique") {
-        italic = true;
-    }
-    (serif, fixed, italic, bold)
+    use crate::font_traits::{infer, Metrics};
+
+    let Some(fd) = dict_ref(d, b"FontDescriptor").and_then(|id| deref_dict(doc, id)) else {
+        let t = infer(Metrics::default(), &[base_font]);
+        return (t.serif, t.fixed_pitch, t.italic, t.bold);
+    };
+    let num = |key: &[u8]| {
+        fd.get(key)
+            .ok()
+            .and_then(|o| o.as_float().ok())
+            .map(f64::from)
+    };
+    let metrics = Metrics {
+        flags: fd.get(b"Flags").ok().and_then(|o| o.as_i64().ok()),
+        font_weight: num(b"FontWeight"),
+        italic_angle: num(b"ItalicAngle"),
+        stem_v: num(b"StemV"),
+    };
+    let descriptor_name = fd.get(b"FontName").ok().and_then(name_of);
+    let names: Vec<&str> = match &descriptor_name {
+        Some(n) => vec![base_font, n.as_str()],
+        None => vec![base_font],
+    };
+    let t = infer(metrics, &names);
+    (t.serif, t.fixed_pitch, t.italic, t.bold)
 }
 
 // ---------------------------------------------------------------------------
@@ -2831,6 +2821,152 @@ endcmap";
         assert_eq!(strip_subset_prefix("Helvetica"), "Helvetica");
         assert_eq!(strip_subset_prefix("abc+NotBold"), "abc+NotBold");
         assert_eq!(strip_subset_prefix("BOLD+No"), "BOLD+No");
+    }
+
+    /// 构造「字体字典 → FontDescriptor 引用」的自造夹具，返回 font_traits 四维判定。
+    fn traits_of(descriptor: Dictionary, base_font: &str) -> (bool, bool, bool, bool) {
+        let mut doc = Document::new();
+        let fd_id = doc.add_object(descriptor);
+        let font_id = doc.add_object(lopdf::dictionary! { "FontDescriptor" => fd_id });
+        let d = doc.get_object(font_id).unwrap().as_dict().unwrap();
+        font_traits(&doc, d, base_font)
+    }
+
+    #[test]
+    fn font_traits_tex_flags4_palladio_boldital_is_serif_bold_italic() {
+        // DeepSeek p8 实例：TeX 系 Flags=4（仅 Symbolic），四维只能靠度量与名字层。
+        let fd = lopdf::dictionary! {
+            "Flags" => 4,
+            "ItalicAngle" => -9.0,
+            "FontName" => Object::Name(b"ABCDEF+URWPalladioL-BoldItal".to_vec())
+        };
+        assert_eq!(
+            traits_of(fd, "ABCDEF+URWPalladioL-BoldItal"),
+            (true, false, true, true)
+        );
+    }
+
+    #[test]
+    fn font_traits_tex_flags4_lmmono_is_fixed_pitch() {
+        // DeepSeek p29 实例：LMMono10 Flags=4，名字层需救回等宽。
+        let fd = lopdf::dictionary! {
+            "Flags" => 4,
+            "FontName" => Object::Name(b"LMMono10-Regular".to_vec())
+        };
+        assert_eq!(
+            traits_of(fd, "LMMono10-Regular"),
+            (false, true, false, false)
+        );
+    }
+
+    #[test]
+    fn font_traits_cm_short_names() {
+        // hjfy 的 CM 短名特判：cmtt→mono、cmbx→serif+bold、cmti→serif+italic。
+        let fd = Dictionary::new();
+        assert_eq!(traits_of(fd.clone(), "CMTT10"), (false, true, false, false));
+        let fd = Dictionary::new();
+        assert_eq!(traits_of(fd.clone(), "CMBX12"), (true, false, false, true));
+        let fd = Dictionary::new();
+        assert_eq!(traits_of(fd, "CMTI10"), (true, false, true, false));
+    }
+
+    #[test]
+    fn font_traits_weight_700_implies_bold_without_name_clue() {
+        let fd = lopdf::dictionary! {
+            "FontWeight" => 700.0,
+            "FontName" => Object::Name(b"XYZQuux-Regular".to_vec())
+        };
+        assert_eq!(
+            traits_of(fd, "XYZQuux-Regular"),
+            (false, false, false, true)
+        );
+    }
+
+    #[test]
+    fn font_traits_times_italic_with_proper_flags_does_not_regress() {
+        // Word 系 Flags 位正确：serif(bit2)/italic(bit7) 保持，不依赖名字层。
+        let fd = lopdf::dictionary! {
+            "Flags" => 2 | 64,
+            "FontName" => Object::Name(b"TimesNewRomanPS-ItalicMT".to_vec())
+        };
+        assert_eq!(
+            traits_of(fd, "TimesNewRomanPS-ItalicMT"),
+            (true, false, true, false)
+        );
+    }
+
+    #[test]
+    fn font_traits_sans_families_are_not_serif() {
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd.clone(), "Helvetica-Bold"),
+            (false, false, false, true)
+        );
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd.clone(), "ArialMT"),
+            (false, false, false, false)
+        );
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd, "LMSans10-Regular"),
+            (false, false, false, false)
+        );
+    }
+
+    #[test]
+    fn font_traits_ordinary_fonts_are_not_mono() {
+        // Times 是衬线家族（名字层判 serif 正确），但不是 mono；Helvetica 全 false。
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd.clone(), "TimesNewRomanPSMT"),
+            (true, false, false, false)
+        );
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(traits_of(fd, "Helvetica"), (false, false, false, false));
+    }
+
+    #[test]
+    fn font_traits_unknown_family_keeps_flags() {
+        // 未知家族 + Flags=4：四维全 false；Flags 显式 serif/fixed 的位保持。
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd.clone(), "XYZFoo-Regular"),
+            (false, false, false, false)
+        );
+        let fd = lopdf::dictionary! { "Flags" => 2 | 1 };
+        assert_eq!(traits_of(fd, "XYZBar"), (true, true, false, false));
+    }
+
+    #[test]
+    fn font_traits_real_sample_shapes() {
+        // 2604/TRC 的真实形态：URW 的 roma 正体记号、Courier 关键词、STIX 家族。
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd.clone(), "URXHTJ+URWPalladioL-Roma"),
+            (true, false, false, false)
+        );
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd.clone(), "CourierNewPS-ItalicMT"),
+            (false, true, true, false)
+        );
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(traits_of(fd, "STIX-Regular"), (true, false, false, false));
+    }
+
+    #[test]
+    fn font_traits_style_words_bold_and_slanted() {
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd.clone(), "SomeFont-Black"),
+            (false, false, false, true)
+        );
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd, "SomeFont-Slanted"),
+            (false, false, true, false)
+        );
     }
 
     #[test]
