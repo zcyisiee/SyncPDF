@@ -1397,6 +1397,37 @@ fn numbered_title_hanging_continuation_is_not_a_new_paragraph() {
 }
 
 #[test]
+fn ctm_scaled_glyphs_with_body_line_pitch_merge_into_one_paragraph() {
+    // TRC 形态：字号在 CTM 里（Tf=1，绑定后 size=7.97），行距 10.45 ≈ 1.31×字号。
+    // 行距判定按有效字号 → 同段；按 Tf 原值 1 会误判 10.45 ≥ 1.8×1 → 每行一段。
+    let mut g = line(0, "under limited", 50.0, 700.0, 7.9701, 0);
+    g.extend(line(20, "road supply", 50.0, 689.55, 7.9701, 0));
+    g.extend(line(40, "is insufficient", 50.0, 679.1, 7.9701, 0));
+    let ir = page_ir(g, vec![mk_font("F1", false, false)]);
+    let paras = analyze_page(&ir, &full_region(RegionKind::Text));
+    assert_eq!(
+        paras.len(),
+        1,
+        "{:?}",
+        paras.iter().map(|p| &p.text).collect::<Vec<_>>()
+    );
+    assert_eq!(paras[0].lines.len(), 3);
+    assert_eq!(paras[0].text, "under limited road supply is insufficient");
+}
+
+#[test]
+fn true_paragraph_break_still_splits_ctm_scaled_lines() {
+    // 反例（同形态不同结果）：行距远超 1.8×7.97（例如 2.5 倍）→ 仍分两段。
+    let mut g = line(0, "under limited", 50.0, 700.0, 7.9701, 0);
+    g.extend(line(20, "road supply", 50.0, 680.0, 7.9701, 0));
+    let ir = page_ir(g, vec![mk_font("F1", false, false)]);
+    let paras = analyze_page(&ir, &full_region(RegionKind::Text));
+    assert_eq!(paras.len(), 2);
+    assert_eq!(paras[0].text, "under limited");
+    assert_eq!(paras[1].text, "road supply");
+}
+
+#[test]
 fn large_line_gap_splits_paragraphs() {
     // 行距 30pt > 1.8×10 → 两段。
     let mut g = line(0, "Hello", 50.0, 700.0, 10.0, 0);
