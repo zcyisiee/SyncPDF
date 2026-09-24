@@ -6,7 +6,8 @@
 //! 逐页串行绑定，不做 rayon 并行；要并行的是每个页面里不碰 pdfium 的部分，
 //! 目前 `bind_page` 已把两者合在一起，收益有限（见回报「已知缺口」）。
 //!
-//! 每页开始前检查取消令牌；已知不可信绑定在返回翻译输入前作为 Protocol 拒绝。
+//! 每页开始前检查取消令牌；门禁拒绝的页标记为「不可信」（整页保留原文），
+//! 不再中止整份文档——失败粒度与不可证明内容的实际影响范围一致。
 
 use syncpdf_core::ir::PageIR;
 use syncpdf_pdf::bind::{bind_page, BindError, BoundPage};
@@ -22,6 +23,9 @@ use super::{check_cancelled, PipelineError};
 /// 一致）；`syncpdf_pdf::bind::bind_page` 要 1 基页号，内部会 `+1`。
 /// `on_progress(done, total)` 在每页完成后调用一次。
 /// 取消命中时返回 [`PipelineError::Cancelled`]（已绑定的页丢弃）。
+///
+/// `check_replacement` 拒绝的页（结构错误）以 `PageReliability::Unreliable`
+/// 标记后照常返回：该页整页保留原文、不删除任何字形，其它页照常翻译。
 pub fn source_analysis(
     worker: &PdfiumWorker,
     doc: DocId,
@@ -35,10 +39,11 @@ pub fn source_analysis(
     for (i, page) in pages.iter().copied().enumerate() {
         check_cancelled(cancel)?;
         // `bind_page` 收 1 基页号（`PageIR.page` 是 0 基，见 `bind.rs`）。
-        let bound = bind_page(worker, doc, lo, page + 1).map_err(bind_error)?;
-        bound.check_replacement().map_err(|e| {
-            PipelineError::Protocol(format!("page {} replacement rejected: {e}", page + 1))
-        })?;
+        let mut bound = bind_page(worker, doc, lo, page + 1).map_err(bind_error)?;
+        if let Err(e) = bound.check_replacement() {
+            // 页级结构错误：只保留该页（整页不删、不送译），文档继续。
+            bound.mark_page_unreliable(format!("page {} replacement rejected: {e}", page + 1));
+        }
         out.push(bound);
         on_progress(i as u32 + 1, total);
     }

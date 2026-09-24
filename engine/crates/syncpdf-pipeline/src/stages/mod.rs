@@ -18,6 +18,7 @@ pub(crate) mod source_decoration;
 pub(crate) mod source_opaque;
 pub mod source_policy;
 pub(crate) mod source_toc;
+pub mod source_unproven;
 pub(crate) mod text_atoms;
 pub mod translate;
 pub mod typeset;

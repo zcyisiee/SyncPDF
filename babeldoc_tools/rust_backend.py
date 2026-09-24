@@ -204,7 +204,7 @@ def _translate_pdf(
                         elif kind == "issue":
                             if event.get("code") in {
                                 "protected_source_overlap", "translatable_region_overlap", "rotated_source_text",
-                                "unmapped_source_glyph",
+                                "unmapped_source_glyph", "bind_page_unreliable",
                             } and isinstance(event.get("paragraph_id"), str):
                                 blocked_ids.add(event["paragraph_id"])
                             if event.get("code") == "coverage_gap" and isinstance(event.get("page"), int):
