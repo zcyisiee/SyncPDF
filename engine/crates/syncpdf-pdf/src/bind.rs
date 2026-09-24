@@ -113,6 +113,8 @@ pub struct ObjectGeometryEvidence {
     /// Font resolved in the source operation's resource scope, including generation.
     pub font_id: ObjRef,
     pub byte_range: (u32, u32),
+    /// 该字符串操作数在 TJ 数组里的元素下标（Tj/'/" 恒为 0）。
+    pub element_index: u32,
     /// Derived from this object's rotated bounds transformed through ancestor Forms.
     pub object_bounds: ObjectBounds,
     pub unicode: Vec<char>,
@@ -222,7 +224,7 @@ impl BoundPage {
                 || e.byte_range.0 != 0
                 || g.is_none_or(|g| {
                     g.code != e.code
-                        || g.source.element_index != 0
+                        || g.source.element_index != e.element_index
                         || g.source.string_operand_range != e.byte_range
                         || g.bbox != e.object_bounds.bbox
                         || g.matrix
@@ -355,7 +357,6 @@ impl Ctx {
 /// 一条扁平化的 text-show 操作（未配对前）。
 #[derive(Debug, Clone)]
 struct FlatTextOp {
-    is_tj: bool,
     form_path: Vec<u32>,
     key: OpKey,
     /// 显示操作携带的字符串（`TJ` 为数组里的全部字符串，按出现次序）。
@@ -1222,7 +1223,6 @@ fn walk_stream(
                     let strings: Vec<Vec<u8>> =
                         op.text_strings().into_iter().map(|s| s.to_vec()).collect();
                     out.flat_text.push(FlatTextOp {
-                        is_tj: op.operator == "Tj",
                         form_path: form_path.to_vec(),
                         key,
                         strings,
@@ -1948,8 +1948,9 @@ fn bind_glyphs(
                     let real: Vec<&TextChar> =
                         obj.chars.iter().filter(|c| !c.is_generated).collect();
                     stats.generated_chars += (obj.chars.len() - real.len()) as u32;
+                    // 单字符串、单 code、串长恰为 code 宽度：Tj/TJ/'/" 在
+                    // 字形身份上等价，统一按结构性质准入（不看操作符字面）。
                     let recovery = if real.is_empty()
-                        && fop.is_tj
                         && codes.len() == 1
                         && fop.strings.len() == 1
                         && fop.strings[0].len() == w
@@ -2120,6 +2121,7 @@ fn bind_glyphs(
                             code: codes[0].0,
                             font_id,
                             byte_range: codes[0].2,
+                            element_index: codes[0].1,
                             object_bounds,
                             unicode,
                             unicode_source,
