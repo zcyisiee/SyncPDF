@@ -1,6 +1,53 @@
 # Rust PDF 后端修复 · 唯一 Task state
 
-> 更新：2026-09-23；仅用户和主 Agent 可修改。主树 `feat/desktop-develop`。本轮“应译正文漏译与公式保护”修复及CCS样本验收已完成；完整Rust产品目标仍有后续工作。
+> 更新：2026-09-24；仅用户和主 Agent 可修改。主树 `feat/desktop-develop`。当前任务：五篇真实论文顺序翻译与迭代修复，**进行中**。此前CCS验收属于历史，不是本轮成功证据。
+
+## 当前任务：五篇顺序实测（优先于下方历史偏好）
+
+- 用户完整目标：按根目录 `TRANSLATE.md` 更新翻译要求；先 DeepSeek_V41_Tech_Report.pdf，再 TRC时变（核心）.pdf、算法相关综述（ALNS可快速了解方法）.pdf、算法相关综述（VNS，可快速了解方法）.pdf，最后 `/Users/zhengcaiyi/Downloads/2604.03136v6.pdf`。每篇翻译→主控审查→根因定位→委派修复→主控验收；完成一篇自动推进下一篇，不等批准。
+- 翻译使用 agy `gemini-3.8-flash-low`；断联后才改 pi `CNB/deepseek-v4-pro:high`。当前 registry 未列 CNB pro，未发生断联，尚未改用其他模型。
+- 工程委派允许且指定 `CNB/deepseek-v4.1-flash:high`，fork 上下文、Orca 独立 worktree，强约束叶子不委派，主控亲审 diff/测试。旧“不委派/fresh/gpt-6-sol”不适用于本轮。
+- 先根因分析，修缺陷类别并加回归；不硬编码论文，不降低覆盖/写回门禁，不缩字/压行距求通过。沿用 Text宋体、1.0字号/1.5行距，输出单语及dual便于审阅；不改UI。
+- 用户新增要求：每完成一个阶段性任务，必须按逻辑使用中文提交commit，并简要汇报后继续。此次已开始分批提交；不把未验证worker交付混入，也不提交用户既有脏文件。
+- 计划和验收：[13-五篇论文迭代.md](13-五篇论文迭代.md)。全部实测证据在 `tmp/paper-iteration/`，不用 ~/.sp，不改用户未提交 AGENTS.md / untitled.md / cache。
+- 初始核实：HEAD 43b54bc2；Rust CLI及bdt适配硬编码pi；TRANSLATE.md为旧Python [[S/F]]/id-label协议，不能原样用于Rust。主控负责提示词语义适配；独立worker负责agy通道，互不写同文件。
+- agy worker `1220754a-0bda-4929-a4bf-5504c0d67e9f` 已complete、停止写入，Orca树`../iterate-agy-channel`。已快照整合通道并release实跑；主控补畸形status fail-closed和tool/tool_calls拒绝，保留闭合Markdown块即时交付测试。worker最终新增的Python转发测试已整合，最终全量整合检查待跑，不套用worker测试数。
+- 环境根因：旧 `../repair-r1-layout` 被移除，旧env导致dyld缺ORT1.23.2退出134。已下载Microsoft官方相同版本到主树`tmp/paper-iteration/runtime/onnxruntime-osx-arm64-1.23.2/lib`，新环境`source tmp/paper-iteration/env.sh`；用新库DeepSeek 51页inspect成功。不要再用下方历史env。
+- DeepSeek首轮真实全文`tmp/paper-iteration/deepseek-v1`已结束：agy/指定模型，1.0/1.5+dual，exit1、244成功/79回退/3送译前冲突，36/50页覆盖缺口。1主请求+14补救、0缓存命中；不是断联，不换模型。其余四篇未开始。
+- 主控初审：410链接目标未变、44点击框移动、保护字符67235变化0、58公式墨迹缺失0、0KEEP泄漏；仅证明已写部分的这些守卫，不是完整验收。证据`deepseek-v1/audit.json`，重建inventory在`deepseek-inventory-v1/`，内部page为0基。
+- RCA：59条link_target_unplaced中存在两类：普通引用prepare成功但geometry失败（正在核实空白字形无ink）；目录标题已中文但源标签literal匹配失败，不能猜位置放行。3源冲突来自inline_formula用loose字形盒判clip重叠：既有3e-5pt接边误差，也有分数/根号loose盒覆盖邻行的假墨迹，必须用实际ink证据而非放宽容差。36页缺33字为图标题、50页缺24字为图例，二者源Form内且检测Figure框裁掉顶部，不能归为漏译正文。
+- 三worker已启动：workflow `ad1fe373-7d32-43bc-935c-b5ddda53e7b8`（mission da8cc56a），link=`fc715e59-21cf-4df3-b8ae-f71831609f77`、figure=`74d7f1df-51a3-4bbf-b3c0-f85b3e55c0dd`、formula=`debbc561-053a-4d96-aa8a-52bcef7d54e5`；Orca树分别`../iterate-link-geometry`、`../iterate-figure-coverage`、`../iterate-formula-ink`。brief在tmp/paper-iteration；曾共享target，后发现跨树产物污染（新增测试编译后执行0test）。已APFS clone成各树私有target，主控为tmp/paper-iteration/main-target并touch本树.rs强制重编；旧共享数字撤销，不clean共享目录。
+- 主控补译实测已证实：one million→100万新增数字触发严格literal门禁；邻段window把同一专名外沿空白当泄漏。已加numeric repair明确数字字面数量（不放宽校验）及window trim源文匹配与回归。`validation-probe-v2`10页真实1主+5补救+53缓存，原11invalid全部通过翻译校验；仍6链接+2原子定位失败/36页gap，不能称全篇成功。capture-bin仅诊断tee，真实agy请求/响应保存在captured。
+- 目录RCA：多条TOC行被合成1段，点线/页码和链接标题混合。主控已实现source_toc：仅完整明确本地Link+页码栏行拆分，点线/页码保持Other保护；真实inventory第2/3页变为32/23个单行应译标题。已授权link worker新增仅“精确拥有整段全部源字形”可映射整个目标块的分支，部分链接不允许扩大，等待交付。
+- 作者名录已修：明确Author List标题范围内严格逗号分隔姓名列表保护，叙述/后续章节不误保护。`author-roster-v1`第46/47页缓存复排6/0、0模型、姓名/保护字符变化0，单语+dual存在；不是全文验收。
+- figure worker已交付冻结并整合。主控补“全页Form不构成面板独占证据”守卫/回归；26专项+真实inventory通过，第36/50页57漏字归Figure、其它页区域不变，仍待全文保存审计。
+- formula worker已交付冻结并整合，但主控发现并修正3点：Option字段缺失不会自动反序列化失败（旧IR保守None，生产每次重绑定）；簇中部分字符缺ink不能仅并已有盒；擦除/重放clip必须与碰撞box一致，否则tight碰撞通过却loose擦除伤邻字。新回归红→绿，3真实阻断段已可译；PDF像素验收待做。
+- 余下排版RCA：P12-007/P16-033微小右越界是side-bearing平移排除了含SourceAtom的行。已允许整行连源原子刚性平移（源框/尺寸不改、无空隙仍拒绝），67 typeset测试通过；`atom-nudge-v1`零模型复排P16-033写入，P12-007排版通过后暴露已知link几何失败。P11-014/015、P25-004、P48-010障碍是原文下划线路径（样张已确认），不能降低碰撞门禁或删格式凑通过，待精确归属/重绘修复。
+- 私有target五crate整合581通过/13ignored（wave-integrated-tests.log），release成功；闭合块测试曾2秒启动超时，保留握手证明并将测试限时15秒后重跑通过。全局diff-check仍报用户AGENTS.md既有EOF空行，不擅改。
+- `deepseek-v2`明确仅缓存复排（--cached-from强制cache-only）：254/99，其中57未命中。随后SQLite只读备份到v3正常调用agy，`deepseek-v3`真实1主/0补救/296缓存、新译57块：256成功/97回退，0送译前冲突、0覆盖缺口，90link+3atom+4最终overflow；67公式缺墨迹0、59433保护字符变化0、410链接目标变化0。P09-003/P20-011已保存，P15-012暴露atom定位失败。不是论文验收。
+- 下划线lane运行`c52c6ca0-60da-4843-9967-13939a05fc04`（mission fcfdd0c4），Orca树`../iterate-text-decoration`，brief `tmp/paper-iteration/decoration-brief.md`。已通过supervisor设计门批准：精确源paint OpKey归属，单纯S/s→n去原线，样式驱动目标重绘；无锚点/未知几何回退，禁止丢格式。主控补充tight-ink边界、同y多线不能直接判表格、原线宽/颜色保护约束。private target预clone，不共享；主控保留link/KEEP。
+- 第一波workflow `ad1fe373`超时3600000ms，link子run `fc715e59` failed（3599946ms），其它两路complete。link已停写/无cargo进程；源码在其Orca树、branch zcyisiee/iterate-link-geometry、HEAD43b54bc2，差异已保存main tmp/paper-iteration/link-timeout-{all,owned}.patch与status.txt。按同协议恢复`c21445b8`只收取交付，现已完成冻结；主控审后整合link_text.rs并补空text continuation glyph仍有ink的回归，10专项通过。`deepseek-v4`零模型全文330/23，0送译前冲突/覆盖缺口；目录与普通空白link改善74块，但22链接准备失败+1最终overflow仍未完成。诊断`link-diagnosis-v4.log`证明重复作者/年份及换行名字链接失去身份；主控正在用源cite.*本地链接精确归属创建Citation KEEP，禁止猜候选位置。
+- Citation源锚点主控已实现并通过2个专项：仅明确本地cite.*、连续精确源span、无跨段共享，创建Citation KEEP；非citation/未知仍走旧fail-closed。`deepseek-v5`真实1主+2修复+307缓存，352/1、0送译前冲突/coverage gap/link或atom定位失败，最终只P48-010排版回退；保存两PDF。其它3下划线段虽复排成功，源线格式仍待专修/像素验收，不算完整成功。
+- 下划线worker第一交付partial未整合（只有cargo check）。恢复`30537de4`补闭环时compact后401(no body) failed；源树/branch zcyisiee/iterate-text-decoration /HEAD43b54bc2不变。已保存main tmp/paper-iteration/decoration-401-{all.patch,status.txt,source.rs}，同协议原模型重试，不切harness。要求不能全局去掉尚未成功翻译owner的路径障碍。同协议重试run=`a3d5cf3f-2bc0-42d2-9365-42e764e6aeb8`已完成冻结交付；主控已选择性整合owned patch和3个新文件，没有整体覆盖其脏基线。
+- 主控完成Citation同源样式守卫（3专项）、目录目标measure（8 frame专项）；目录第2/3页55/0零模型，P03-035不再误折两行。全篇v6零模型353缓存仍352/1；34787保护字变化0、84公式缺墨迹0、410目的地不变；dual820链接、两侧全部字符身份/样式/位置通过，qpdf两PDF通过。详细误报修正和证据见计划账本。
+- 下划线主控审查修正：W/n后裁剪状态不能清空；只绑定已知画笔/同尺度CTM下直接m/l/S路径，拒绝虚线/透明/未知效果；每个源下划线范围需非空锚点，link内部tag保留范围；目标线加入真实墨迹盒与后续障碍。回归实际红→绿，保留R6普通样式自由。`decoration-v1`真实补译4段，3页25/0，但目视发现3条空格短线残留，按同owner/同画笔/两端连续证据补归属，不扩大字形匹配。
+- `deepseek-v7`全文352/1：P48已修复；新P20-011是公式分数线被误判下划线。现排除已由SourceAtom裁剪/重放负责的路径，回归通过。修正DECOR_ALL诊断原先只遍历3页的bug后，真实51页查到17笔归5段（另P24-001说明词underlined），源标签全部合理；证据`decoration-full-inventory/`。公式内线不能被重复拥有，混合源绘图原子与另加下划线仍保守拒绝。
+- 最新五crate整合607通过/14ignored（`decoration-integrated-tests.log`）；release正常。`deepseek-v8-fresh`与`v9-fresh`均0旧缓存真实整篇请求，但模型分别将P19-006/P35-015的end写为下一块ID，后者还漏下一block行；捕获证明源输入边界正确、agy终态SUCCESS，是模型协议错误而非断联，未切提供方。门禁正确终止，均非成功PDF。已在规则中明确逐块自核end与当前block匹配，规则仍进入cache hash，下一次真实重译待跑。
+- 加强提示后`deepseek-v10-fresh`仍在P12-029→P12-031处写错end，374.477s失败。三次均agy终态SUCCESS、无断联；重复盲重译未解决。RCA：严格parser正确拒绝坏边界，但run_prompt在成功完成的模型响应中也直接返回Transport，阻断已有有界补译。已实现并验证：只在provider明确Ok时丢弃损坏块及其后缀，已严格通过的前缀照常交付/缓存；对本请求仍未落定的源ID走既有最多3轮补译，不改parser、不猜/修ID、不接受损坏内容。provider Err仍原样上抛；若全部请求ID已落定却尾随坏数据，仍fatal，不能吞错误。达到上限回退/非完整成功，不扩上下文或新增分片入口。
+- transport-repair叶子`8d618479-ee00-4fc7-b351-481f519c5000`（mission12c61adc，CNB指定模型/fork）已冻结/主控选择性整合3文件：Orca树`../iterate-transport-repair`，branch zcyisiee/iterate-transport-repair，HEAD43b54bc2；只写translator.rs与专项测试，main负责提示词/文档/最终验收。独占target=`该树/tmp/paper-iteration/transport-target`，已clone并touch源码。brief=`tmp/paper-iteration/transport-brief.md`，继承基线=`transport-base.patch`，不能整树合并。
+- 主控补transport回归：晚到边界错误不得覆盖先前numeric错误与针对性repair note，红→绿。translate139通过/2ignored，release成功。另五crateClippy通过、CLI/protocol44通过、Python入口43通过、Ruff通过。v7历史产物：17源下划线移除且非owner水平线不变，10目标线对应文字（audit-decoration.py）；保护35187字变化0、410目的地不变、81公式缺墨迹0，dual两侧135607/77203字和820链接无误，qpdf通过；这不是完整论文验收。
+- `deepseek-v11-fresh`0旧缓存真实全文1主+8补译，约465s走完，352/1、51页已保存，0源冲突/coverage gap。主响应P30-002/endP30-003错界之后109未落定项被严格丢弃并真实补译；所有块最终翻译校验通过。唯一最终排版fallback=P14-006。下划线/旧P48/P20无最终失败，但仍待本版全页审计。
+- 新RCA（不是排版太长）：P14-006源已乱序为`imcshoaaspnt...`。PDF源三行基线328.463/314.913/301.364；两个√的loose高度18pt（font10.909），tight仅10.898pt，loose跨行并使group_lines按最后字形重叠链合成一行、按x交织。该页这两处无Formula检测区域，故inline_formula未归属/正规化。源输入乱码不能靠模型猜译或缩字绕过。证据`deepseek-inventory-v11/{source.json,atom-inventory.json,regions-13.json}`及`deepseek-v11-fresh/render/source-14.png`。
+- 下一叶子范围：为带已证明overbar与完整根号/被开方字符的漏检行内根式恢复SourceAtom，复用原子墨迹/裁剪/邻行归属安全门禁，在行聚类前归一几何，既修阅读顺序又保留源根式（不能只Unicode重排而留下旧横线）。Orca树`../iterate-inline-radical`，HEAD43b54bc2，私有target=`该树/tmp/paper-iteration/radical-target`；基线`radical-base.patch`。只可改paragraph相关代码/测试，不改group_lines通用API、门禁、模型、CLI；方案不能安全落地则supervisor具体提问，不扩scope。主控负责文档/语义审计，冻结后才合并。
+- radical worker `2bb6da38-3b79-4403-8948-9d1c5316a3f9` 已冻结交付，仅inline_formula.rs/tests.rs两文件增量；报告213单元通过/9ignored及真实P14回归通过，主控尚未独立验证。观察到66 tool calls超过brief40次，已要求立即冻结；没有另开harness。主控审diff发现候选横线路径身份、竞争路径、空Unicode墨迹与radicand缺ink需要强化，不直接套用worker结论。
+- v11主控语义对照已读1–42页应译块（非全页图像验收），待修清单在`tmp/paper-iteration/deepseek-v11-fresh/semantic-review.md`：除根式源乱序，Formula框卷入正文标点；P20-002两端可见括号映射U+0002/3未受KEEP保护而丢失；P29两段KEEP数量/变量角色交换；model-in-the-loop误作人在回路；两处错字/跨页漏义。不得以格式门禁通过或保护像素审计替代语义验收。后续源修复改变身份的块真实补译，明确不合格模型块仅失效旧缓存并真正重译，不手写替代译文。
+- radical主控加固已红→绿：仅唯一精确overbar OpKey可豁免，拒绝竞争路径/未知有墨迹字形/缺radicand ink/过粗笔，限定局部基线与完整被开方字符。真实P14专项1通过；paragraph专项通过、release完成。`deepseek-v12-radical`从v11只读SQLite备份后真实补译变更块（未cache-only），351/0、51页单语+dual、0冲突/缺口、exit0；根式段源合并减少2块。尚有已知其它语义/符号问题，不能接受整篇。
+- 下一最小叶子：只修Formula源范围卷入外层正文标点，复用冻结Orca树`../iterate-inline-radical`，已同步主控根式版为新基线；brief=`tmp/paper-iteration/punctuation-brief.md`，限inline_formula.rs/tests.rs，不动radical_sources。主控同期独占独立source_opaque.rs/run.rs处理可见控制字形保护，并继续审计。新worker限30工具/2纠正轮/15分钟；必须冻结后再整合。
+- 标点worker `608ee358-ff5b-483b-a6fa-f7796f797f89` 已返回冻结的未完成交付：只改inline_formula.rs，无测试，最后改动未编译；报告称接到截止提醒。该增量**未整合主树、未提交**，须先保存diff/核实再处理，不能当已修复。
+- 主控可见控制字形保护已红→绿，3单元+1真实P20 inventory通过；源归属/墨迹冲突时明确阻断，Python计入blocked。提交前相关7个Rust crate共666通过/16ignored，Python入口44通过、Ruff通过。另审计发现ruled_code在新增PathStroke后错误仅接受None，补元数据不影响算法横线识别回归红→绿（专项4通过），7crate严格Clippy通过。控制符/算法横线补丁尚待下一次真实模型PDF验证，不套用v12产物。
+- 中文分批代码提交：782581d8源墨迹/绘制事务；8652a9a9 agy/学术规则；eea96cb7边界错误有界补译；58f89f53源内容归属/目录引用下划线根式；2a99aa31可见控制字形保护。无push；用户AGENTS.md、TRANSLATE.md、untitled.md、cache保持原状。
+- 最终仍需完整真实重译、术语与逐页语义/版面/链接审核及最终整合检查。之后按顺序自动进入余四篇，尚未验收任何论文。
+
 > **最新浮动排版验收：1.0字号/1.5行距，21页、190块全部写入，0回退、0送译前冲突、0覆盖缺口；最新Text宋体产物text-serif-v3，见[宋体验收](12-MVP真实翻译验收.md#text-serif-font)。** [标题验收](12-MVP真实翻译验收.md#heading-adaptive-layout) · [验收报告](12-MVP真实翻译验收.md#inline-formula-coverage) · [经验总结](../../lessons/pdf-binding-and-render-evidence.md#inline-formula-ownership) · [缺陷及历史误报](../../issues/rust-inline-formula-coverage.md)。
 
 ## 用户意图与边界
