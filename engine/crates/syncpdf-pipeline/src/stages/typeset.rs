@@ -5,7 +5,8 @@
 
 use syncpdf_core::ir::{Paragraph, TypesetParagraph};
 use syncpdf_core::{AtomId, Color, Rect, StyleId};
-use syncpdf_font::{FontId, FontProfile, FontStore, Role};
+use syncpdf_font::loader::Script;
+use syncpdf_font::{FontId, FontProfile, FontStore, FontVariant, Role};
 use syncpdf_translate::{ParsedUnit, Segment};
 use syncpdf_typeset::shaper::UnderlineStyle;
 use syncpdf_typeset::{
@@ -89,35 +90,92 @@ impl<'a> StoreShaper<'a> {
         self.role = role;
         self
     }
+
+    fn is_italic_face(&self, font: FontId) -> bool {
+        self.store.get(font).is_some_and(|f| f.italic)
+    }
+
+    /// 以 `primary` + 回退链塑形。样式要斜体而实际字形面不是斜体时，
+    /// 该字形携带合成剪切量（不影响 advance 与断行）。
+    fn shape_with_chain(
+        &self,
+        primary: FontId,
+        chain: &[FontId],
+        style: Option<&StyleSpec>,
+        text: &str,
+        size: f32,
+        rtl: bool,
+    ) -> Vec<ShapedGlyph> {
+        if self.store.get(primary).is_none() {
+            return Vec::new();
+        }
+        syncpdf_font::shape_runs_directional(self.store, text, size, primary, chain, rtl)
+            .into_iter()
+            .flat_map(|(fid, gs)| {
+                let shear = match style {
+                    Some(s) if s.italic && !self.is_italic_face(fid) => {
+                        syncpdf_font::synthetic_italic_shear()
+                    }
+                    _ => 0.0,
+                };
+                gs.into_iter().map(move |g| ShapedGlyph {
+                    gid: g.gid,
+                    cluster: g.cluster,
+                    cluster_end: g.cluster_end,
+                    font: fid.0,
+                    x_advance: g.x_advance,
+                    x_offset: g.x_offset,
+                    y_offset: g.y_offset,
+                    shear_x: shear,
+                })
+            })
+            .collect()
+    }
 }
 
 impl Shaper for StoreShaper<'_> {
     fn shape(&self, font: u32, text: &str, size: f32, rtl: bool) -> Vec<ShapedGlyph> {
-        let primary = FontId(font);
-        if self.store.get(primary).is_none() {
-            return Vec::new();
-        }
-        syncpdf_font::shape_runs_directional(
-            self.store,
+        self.shape_with_chain(
+            FontId(font),
+            &self.profile.fallbacks(),
+            None,
             text,
             size,
-            primary,
-            &self.profile.fallbacks(),
             rtl,
         )
-        .into_iter()
-        .flat_map(|(fid, gs)| {
-            gs.into_iter().map(move |g| ShapedGlyph {
-                gid: g.gid,
-                cluster: g.cluster,
-                cluster_end: g.cluster_end,
-                font: fid.0,
-                x_advance: g.x_advance,
-                x_offset: g.x_offset,
-                y_offset: g.y_offset,
-            })
-        })
-        .collect()
+    }
+
+    /// 按样式塑形。斜体样式落到非斜体面（CJK 无真斜体字面）时，先把有真
+    /// 斜体面的脚本（拉丁）排到真面、主槽面退为首个回退，主槽覆盖不了的
+    /// 字形仍由它承担并带合成剪切量返回。
+    fn shape_styled(
+        &self,
+        font: u32,
+        style: &StyleSpec,
+        text: &str,
+        size: f32,
+        rtl: bool,
+    ) -> Vec<ShapedGlyph> {
+        let slot = FontId(font);
+        let mut chain = self.profile.fallbacks();
+        let primary = if style.italic && !self.is_italic_face(slot) {
+            let serif = style.serif && !style.mono;
+            match syncpdf_font::resolve_variant(
+                self.store,
+                serif,
+                Script::Latin,
+                FontVariant::of(style.bold, style.italic),
+            ) {
+                Some(face) if !face.synthetic_italic => {
+                    chain.insert(0, slot);
+                    face.font
+                }
+                _ => slot,
+            }
+        } else {
+            slot
+        };
+        self.shape_with_chain(primary, &chain, Some(style), text, size, rtl)
     }
 
     fn glyph_bounds(&self, font: u32, gid: u16, size: f32) -> Option<Rect> {
@@ -147,27 +205,21 @@ impl Shaper for StoreShaper<'_> {
             return font;
         }
         let role = if style.mono { Role::Mono } else { self.role };
-        if style.serif && !style.mono {
-            use syncpdf_font::loader::Script;
-            let script = match self.profile.target_lang.as_str() {
-                "zh-CN" | "zh-SG" => Script::HanSC,
-                "zh-TW" | "zh-HK" => Script::HanTC,
-                "ja" => Script::Kana,
-                "ko" => Script::Hangul,
-                "ar" => Script::Arabic,
-                _ => Script::Latin,
-            };
-            if let Some(font) = self.store.find(&syncpdf_font::FontQuery {
-                serif: true,
-                weight: if style.bold { 700 } else { 400 },
-                italic: style.italic,
-                script,
-                ..Default::default()
-            }) {
-                return font.0;
-            }
-        }
-        self.profile.pick(role, style.bold, style.italic).0
+        let variant = FontVariant::of(style.bold, style.italic);
+        let face = if style.serif && !style.mono {
+            // Text 区域正文策略：目标脚本衬线族，与角色槽共用同一套
+            // 真斜体/合成判定；衬线查询完全无候选时回落角色槽。
+            syncpdf_font::resolve_variant(
+                self.store,
+                true,
+                syncpdf_font::profile::lang_script(&self.profile.target_lang),
+                variant,
+            )
+            .unwrap_or_else(|| self.profile.pick_variant(role, variant))
+        } else {
+            self.profile.pick_variant(role, variant)
+        };
+        face.font.0
     }
 }
 
@@ -660,11 +712,143 @@ mod tests {
             bold: true,
             ..Default::default()
         });
-        assert_eq!(regular, profile.pick(Role::Body, false, false).0);
-        assert_eq!(bold, profile.pick(Role::Body, true, false).0);
+        assert_eq!(
+            regular,
+            profile
+                .pick_variant(Role::Body, FontVariant::Regular)
+                .font
+                .0
+        );
+        assert_eq!(
+            bold,
+            profile.pick_variant(Role::Body, FontVariant::Bold).font.0
+        );
         // 两个句柄都必须能查到字体。
         assert!(store.get(FontId(regular)).is_some());
         assert!(store.get(FontId(bold)).is_some());
+    }
+
+    fn is_cjk_text(s: &str) -> bool {
+        s.chars()
+            .any(|c| matches!(c as u32, 0x2E80..=0x9FFF | 0xF900..=0xFAFF | 0xFF00..=0xFF60))
+    }
+
+    /// 排版层（Text 正文 serif，正例一）：italic run 中 CJK 片段用正体面 +
+    /// 合成剪切，拉丁片段用真斜体面、无剪切。
+    #[test]
+    fn italic_cjk_gets_synthetic_shear_while_latin_uses_true_italic_face() {
+        let Some((store, profile)) = fonts() else {
+            eprintln!("SKIP: 字体包缺失");
+            return;
+        };
+        let shaper = StoreShaper::new(&store, &profile);
+        let mut para = paragraph("P01-001", "source", Rect::new(0.0, 0.0, 400.0, 100.0));
+        para.kind = RegionKind::Text;
+        para.style_runs[0].italic = true;
+        let parsed = parse_unit_html(
+            r#"<p id="P01-001"><span data-style="1">自回归pre-training微调</span></p>"#,
+        )
+        .unwrap();
+        let result = typeset_one(&shaper, &para, &parsed, &Obstacles::default());
+        assert!(!result.paragraph.overflow, "{:?}", result.issues);
+        let shear = 10f32.to_radians().tan();
+        let mut saw_cjk = false;
+        let mut saw_latin = false;
+        for g in result.paragraph.lines.iter().flat_map(|l| &l.glyphs) {
+            if g.text.is_empty() {
+                continue;
+            }
+            let font = store.get(FontId(g.font)).unwrap();
+            if is_cjk_text(&g.text) {
+                saw_cjk = true;
+                assert!(
+                    (g.shear_x - shear).abs() < 1e-4,
+                    "CJK 字形应带合成剪切：{} shear={}",
+                    g.text,
+                    g.shear_x
+                );
+                assert_eq!(font.family, "Noto Serif CJK SC", "{}", g.text);
+                assert!(!font.italic, "CJK 无真斜体面");
+            } else {
+                saw_latin = true;
+                assert_eq!(g.shear_x, 0.0, "真斜体面不剪切：{} {}", g.text, font.family);
+                assert!(font.italic, "拉丁应命中真斜体面：{}", font.family);
+            }
+        }
+        assert!(saw_cjk && saw_latin, "混排两端都应有字形");
+    }
+
+    /// 排版层（正例二，不同形态）：无衬线标题区粗斜体 → CJK 用 bold 面 +
+    /// 剪切、数字用真 BoldItalic 面。
+    #[test]
+    fn bold_italic_title_shears_cjk_and_keeps_bold_face() {
+        let Some((store, profile)) = fonts() else {
+            eprintln!("SKIP: 字体包缺失");
+            return;
+        };
+        let shaper = StoreShaper::new(&store, &profile);
+        let mut para = paragraph("P01-001", "source", Rect::new(0.0, 0.0, 400.0, 100.0));
+        para.kind = RegionKind::Title;
+        para.style_runs[0].bold = true;
+        para.style_runs[0].italic = true;
+        let parsed =
+            parse_unit_html(r#"<p id="P01-001"><span data-style="1">2.1.1 多模态架构</span></p>"#)
+                .unwrap();
+        let result = typeset_one(&shaper, &para, &parsed, &Obstacles::default());
+        assert!(!result.paragraph.overflow, "{:?}", result.issues);
+        let shear = 10f32.to_radians().tan();
+        let mut saw_cjk = false;
+        let mut saw_digit = false;
+        for g in result.paragraph.lines.iter().flat_map(|l| &l.glyphs) {
+            if g.text.is_empty() {
+                continue;
+            }
+            let font = store.get(FontId(g.font)).unwrap();
+            if is_cjk_text(&g.text) {
+                saw_cjk = true;
+                assert!(
+                    (g.shear_x - shear).abs() < 1e-4,
+                    "标题 CJK 粗斜体应剪切：{}",
+                    g.text
+                );
+                assert_eq!(font.family, "Noto Sans CJK SC", "{}", g.text);
+                assert!(font.weight >= 600, "粗体保持：{}", font.weight);
+            } else {
+                saw_digit = true;
+                assert_eq!(g.shear_x, 0.0);
+                assert!(font.italic, "数字用真斜体面：{}", font.family);
+                assert!(font.weight >= 600, "真 BoldItalic：{}", font.weight);
+            }
+        }
+        assert!(saw_cjk && saw_digit);
+    }
+
+    /// 反例：正体 run（常规与粗体）任何字形都不携带剪切，也不误选斜体面。
+    #[test]
+    fn upright_runs_never_carry_shear() {
+        let Some((store, profile)) = fonts() else {
+            eprintln!("SKIP: 字体包缺失");
+            return;
+        };
+        let shaper = StoreShaper::new(&store, &profile);
+        for bold in [false, true] {
+            let mut para = paragraph("P01-001", "source", Rect::new(0.0, 0.0, 400.0, 100.0));
+            para.kind = RegionKind::Text;
+            para.style_runs[0].bold = bold;
+            let parsed = parse_unit_html(
+                r#"<p id="P01-001"><span data-style="1">自回归pre-training微调</span></p>"#,
+            )
+            .unwrap();
+            let result = typeset_one(&shaper, &para, &parsed, &Obstacles::default());
+            assert!(!result.paragraph.overflow, "{:?}", result.issues);
+            for g in result.paragraph.lines.iter().flat_map(|l| &l.glyphs) {
+                assert_eq!(g.shear_x, 0.0, "正体不得剪切（bold={bold}）：{}", g.text);
+                if !g.text.is_empty() && !is_cjk_text(&g.text) {
+                    let font = store.get(FontId(g.font)).unwrap();
+                    assert!(!font.italic, "正体不得误选斜体面：{}", font.family);
+                }
+            }
+        }
     }
 
     #[test]

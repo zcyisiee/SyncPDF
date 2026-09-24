@@ -156,7 +156,7 @@ fn segments(shaper: &dyn Shaper, input: &LayoutInput<'_>, inlines: &[Inline]) ->
                 runs.sort_by_key(|(range, _)| range.start);
                 for (range, rtl) in runs {
                     let part = &text[range.clone()];
-                    let glyphs = shaper.shape(font, part, size, rtl);
+                    let glyphs = shaper.shape_styled(font, &s, part, size, rtl);
                     let mut groups: std::collections::BTreeMap<(usize, usize), Vec<ShapedGlyph>> =
                         std::collections::BTreeMap::new();
                     for glyph in glyphs {
@@ -333,7 +333,8 @@ fn rows(
                             let font = glyphs
                                 .last()
                                 .map_or_else(|| shaper.font_for(&spec(input, *style)), |g| g.font);
-                            let hy = shaper.shape(font, "-", *size, false);
+                            let hy =
+                                shaper.shape_styled(font, &spec(input, *style), "-", *size, false);
                             if !hy.is_empty() {
                                 let w = hy.iter().map(|g| g.x_advance).sum();
                                 hyphens.insert(
@@ -605,6 +606,8 @@ fn place_row(
                         y: baseline + g.y_offset,
                         size: *size,
                         scale_x: 1.0,
+                        // 合成斜体按片段携带；剪切不改变 advance/断行（见模块文档）。
+                        shear_x: g.shear_x,
                         style: *style,
                         color: spec(input, *style).color,
                     };

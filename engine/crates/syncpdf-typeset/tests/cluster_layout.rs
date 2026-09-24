@@ -28,6 +28,7 @@ impl Shaper for Controlled {
                 x_advance: width,
                 x_offset: if c == 'Ω' { 1.0 } else { 0.0 },
                 y_offset: if c == 'Ω' { 2.0 } else { 0.0 },
+                shear_x: 0.0,
             });
         }
         if text == "fi" {
@@ -39,6 +40,7 @@ impl Shaper for Controlled {
                 x_advance: size,
                 x_offset: 0.0,
                 y_offset: 0.0,
+                shear_x: 0.0,
             }];
         } else if text == "e\u{301}" {
             result = vec![
@@ -50,6 +52,7 @@ impl Shaper for Controlled {
                     x_advance: size * 0.5,
                     x_offset: 0.0,
                     y_offset: 0.0,
+                    shear_x: 0.0,
                 },
                 ShapedGlyph {
                     gid: 602,
@@ -59,6 +62,7 @@ impl Shaper for Controlled {
                     x_advance: 0.0,
                     x_offset: -2.0,
                     y_offset: 3.0,
+                    shear_x: 0.0,
                 },
             ];
         }

@@ -17,7 +17,9 @@
 //! `ActualText` 是该段译文的 UTF-16BE（带 BOM），保证复制/无障碍读取到译文。
 //! 为正确优先，**每个字形单独 `Tm` + `Tj`**；字号只进 `Tf`，`Tm` 的 `a` 承担
 //! `scale_x` 横向缩放、`d` 恒为 1（视觉字号 = `Tf` × `Tm` 缩放，字号若同时
-//! 乘进两处会被平方）。
+//! 乘进两处会被平方）。`Tm` 的 `c` 分量承载合成斜体剪切 `shear_x`
+//! （`x' = x + c·y`，正值 = 字形上部向右倾斜）：只改字形形状，不影响
+//! 排版层给出的位置与步进；正体（`shear_x = 0`）输出字节与无剪切时一致。
 //!
 //! # cid 登记
 //!
@@ -218,13 +220,14 @@ impl<'a> Writer<'a> {
                     // 一致；若把字号也乘进 Tm，视觉字号会变成 size²。
                     bytes.extend_from_slice(
                         format!(
-                            "BT /{} {} Tf {} {} {} rg {} 0 0 1 {} {} Tm <{:04X}> Tj ET\n",
+                            "BT /{} {} Tf {} {} {} rg {} 0 {} 1 {} {} Tm <{:04X}> Tj ET\n",
                             name,
                             fmt_num(g.size),
                             fmt_num(r),
                             fmt_num(gg),
                             fmt_num(b),
                             fmt_num(g.scale_x),
+                            fmt_num(g.shear_x),
                             fmt_num(g.x),
                             fmt_num(g.y),
                             cid
@@ -509,6 +512,7 @@ mod tests {
                 y: 700.0,
                 size: 12.0,
                 scale_x: 1.0,
+                shear_x: 0.0,
                 style: StyleId(1),
                 color: None,
             })
@@ -589,6 +593,7 @@ mod tests {
                 y: 700.0,
                 size: 12.0,
                 scale_x: 1.0,
+                shear_x: 0.0,
                 style: StyleId(1),
                 color: None,
             })
@@ -655,6 +660,7 @@ mod tests {
             y: 0.0,
             size: 10.0,
             scale_x: 1.0,
+            shear_x: 0.0,
             style: StyleId(1),
             color: None,
         }]);

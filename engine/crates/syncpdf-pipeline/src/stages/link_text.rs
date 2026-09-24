@@ -616,6 +616,7 @@ mod tests {
             y,
             size: 10.0,
             scale_x: 1.0,
+            shear_x: 0.0,
             style: StyleId(style),
             color: None,
         }

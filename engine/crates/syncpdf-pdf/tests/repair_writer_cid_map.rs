@@ -45,6 +45,7 @@ fn para(font: u32, gid: u16, text: &str, x: f32) -> TypesetParagraph {
                 y: 200.0,
                 size: 48.0,
                 scale_x: 1.0,
+                shear_x: 0.0,
                 style: StyleId(1),
                 color: None,
             }],
