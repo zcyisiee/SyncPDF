@@ -241,6 +241,7 @@ mod tests {
             text_spans: Vec::new(),
             style_runs: vec![],
             atoms: vec![],
+            decorations: Vec::new(),
             text: text.into(),
             align: Align::Left,
             first_indent: 0.0,
@@ -327,6 +328,7 @@ mod tests {
             size: 10.0,
             matrix: Default::default(),
             bbox: Rect::new(0.0, 0.0, 6.0, 10.0),
+            ink: None,
             advance: 6.0,
             fill: Color::default(),
             render_mode: 0,
@@ -453,6 +455,7 @@ mod tests {
             italic: false,
             serif: false,
             mono: false,
+            underline: false,
         }];
         let unit = build_unit(&p, |_| None);
         assert!(unit.html.contains("{{KEEP_1}}"), "{}", unit.html);

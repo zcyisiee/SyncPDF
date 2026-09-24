@@ -360,6 +360,7 @@ fn build_paragraph(
         text_spans: reading.spans,
         style_runs,
         atoms,
+        decorations: Vec::new(),
         text: reading.text,
         align,
         first_indent,
@@ -551,6 +552,8 @@ fn style_runs(
             italic,
             serif: fonts.get(k.font as usize).is_some_and(|f| f.is_serif),
             mono: fonts.get(k.font as usize).is_some_and(|f| f.is_fixed_pitch),
+            // Underline is decided later from claimed source decorations.
+            underline: false,
         });
         next_id += 1;
         start = end;

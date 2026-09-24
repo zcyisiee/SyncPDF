@@ -151,6 +151,27 @@ impl<'a> Writer<'a> {
 
         for para in paras {
             for line in &para.lines {
+                for u in &line.underlines {
+                    any = true;
+                    let [r, g, b] = [u.color.r, u.color.g, u.color.b];
+                    // Stroke with the original source width and color: the
+                    // decoration keeps its source appearance.
+                    let y = u.bbox.y0 + u.bbox.height() * 0.5;
+                    bytes.extend_from_slice(
+                        format!(
+                            "q 0 J 0 j [] 0 d {} {} {} RG {} w {} {} m {} {} l S Q\n",
+                            fmt_num(r),
+                            fmt_num(g),
+                            fmt_num(b),
+                            fmt_num(u.width),
+                            fmt_num(u.bbox.x0),
+                            fmt_num(y),
+                            fmt_num(u.bbox.x1),
+                            fmt_num(y),
+                        )
+                        .as_bytes(),
+                    );
+                }
                 for atom in &line.placed_atoms {
                     any = true;
                     let s = atom.source;
@@ -435,6 +456,8 @@ mod tests {
                 glyphs,
                 kept_atoms: Vec::new(),
                 placed_atoms: Vec::new(),
+
+                underlines: Vec::new(),
             }],
             font_scale: 1.0,
             line_height: 20.0,

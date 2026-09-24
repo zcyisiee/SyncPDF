@@ -23,6 +23,8 @@ impl Shaper for InkShaper {
             -0.046875
         } else if gid == b'R' as u16 {
             0.1
+        } else if gid == b'g' as u16 || gid == b's' as u16 {
+            0.4
         } else {
             0.0
         };
@@ -30,6 +32,10 @@ impl Shaper for InkShaper {
             100.03125
         } else if gid == b'W' as u16 {
             100.0
+        } else if gid == b'g' as u16 {
+            size * 0.5
+        } else if gid == b's' as u16 {
+            size * 0.5 + 0.2
         } else {
             size * 0.4
         };
@@ -74,6 +80,58 @@ fn text(t: &str) -> Inline {
 }
 
 #[test]
+fn target_underline_is_real_ink_for_bounds_and_collision() {
+    let spec = ParagraphSpec {
+        bbox: Rect::new(0.0, 0.0, 100.0, 50.0),
+        first_baseline: Some(40.0),
+        font_size: 10.0,
+        line_height: 1.5,
+        align: Align::Left,
+        first_indent: 0.0,
+        is_rtl: false,
+        color: Color::BLACK,
+        styles: vec![(
+            StyleId(0),
+            StyleSpec {
+                underline: Some(syncpdf_typeset::shaper::UnderlineStyle {
+                    width: 0.4,
+                    offset: 3.0,
+                    color: Color::BLACK,
+                }),
+                ..StyleSpec::default()
+            },
+        )],
+        lang: Lang::En,
+    };
+    let engine = Typeset::new(&InkShaper, FitOptions::default());
+    let result = engine.layout(
+        "P01-001".parse().unwrap(),
+        &spec,
+        &[text("a")],
+        &Obstacles::default(),
+    );
+    assert!(!result.paragraph.overflow);
+    let line = &result.paragraph.lines[0];
+    assert_eq!(line.underlines.len(), 1);
+    assert!(
+        line.bbox.y0 <= line.underlines[0].bbox.y0,
+        "underline omitted from line bounds"
+    );
+    let mut narrow = spec.clone();
+    narrow.bbox.y0 = 37.0;
+    let result = engine.layout(
+        "P01-001".parse().unwrap(),
+        &narrow,
+        &[text("a")],
+        &Obstacles::default(),
+    );
+    assert!(
+        result.paragraph.overflow,
+        "text fits, but its underline crosses the frame"
+    );
+}
+
+#[test]
 fn negative_side_bearing_repositions_ink_without_shrinking_or_clipping() {
     let result = layout(&[text("j")]);
     assert!(!result.paragraph.overflow);
@@ -93,6 +151,48 @@ fn right_side_bearing_uses_available_left_space_without_shrinking() {
     assert_eq!(line.glyphs[0].x, -0.03125);
     assert_eq!(line.glyphs[0].size, 10.0);
     assert!(layout(&[text("W")]).paragraph.overflow);
+}
+
+#[test]
+fn side_bearing_nudge_moves_source_atoms_with_text_without_resizing() {
+    let source = syncpdf_core::ir::SourceAtom {
+        bbox: Rect::new(10.0, 20.0, 100.0, 23.0),
+        baseline: 20.0,
+    };
+    let result = layout(&[
+        text("g"),
+        Inline::SourceAtom {
+            id: AtomId(1),
+            source,
+        },
+        text("s"),
+    ]);
+    assert!(!result.paragraph.overflow);
+    assert_eq!(result.paragraph.lines.len(), 1);
+    let line = &result.paragraph.lines[0];
+    assert!(line.bbox.x0 >= 0.0 && line.bbox.x1 <= 100.0);
+    let atom = &line.placed_atoms[0];
+    assert_eq!(atom.source, source.bbox);
+    assert_eq!(atom.bbox.width(), source.bbox.width());
+    assert_eq!(atom.bbox.height(), source.bbox.height());
+    assert_eq!(line.kept_atoms, vec![AtomId(1)]);
+    assert!((line.glyphs[0].x + 0.2).abs() < 0.001);
+    assert!((atom.bbox.x0 - 4.8).abs() < 0.001);
+    assert!((line.glyphs[1].x - 94.8).abs() < 0.001);
+    assert_eq!(line.baseline_y, 40.0);
+    assert!(line
+        .glyphs
+        .iter()
+        .all(|g| g.size == 10.0 && g.scale_x == 1.0));
+    // A leading source atom consumes the left margin, so no safe nudge exists.
+    let unfit = layout(&[
+        Inline::SourceAtom {
+            id: AtomId(1),
+            source,
+        },
+        text("gs"),
+    ]);
+    assert!(unfit.paragraph.overflow);
 }
 
 #[test]

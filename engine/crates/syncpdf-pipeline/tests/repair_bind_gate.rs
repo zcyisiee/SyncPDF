@@ -55,6 +55,7 @@ fn paragraph(bound: &BoundPage, ids: Vec<GlyphId>) -> Paragraph {
         text_spans: Vec::new(),
         style_runs: vec![],
         atoms: vec![],
+        decorations: Vec::new(),
         text: "source".into(),
         align: Align::Left,
         first_indent: 0.0,

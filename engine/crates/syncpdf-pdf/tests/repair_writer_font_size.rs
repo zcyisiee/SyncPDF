@@ -86,6 +86,7 @@ fn glyph_para(font: u32, gid: u16, size: f32, scale_x: f32) -> TypesetParagraph 
             }],
             kept_atoms: Vec::new(),
             placed_atoms: Vec::new(),
+            underlines: Vec::new(),
         }],
         font_scale: 1.0,
         line_height: size * 1.2,

@@ -19,6 +19,7 @@ fn mk_glyph(seq: u16, ch: char, x: f32, y: f32, size: f32, font: u32) -> Glyph {
         size,
         matrix: Matrix::new(1.0, 0.0, 0.0, 1.0, x, y),
         bbox: Rect::new(x, y, x + w, y + size),
+        ink: None,
         advance: w,
         fill: Color::default(),
         render_mode: 0,

@@ -216,6 +216,7 @@ mod tests {
             size: 10.0,
             matrix: Matrix::new(1.0, 0.0, 0.0, 1.0, bbox.x0, baseline),
             bbox,
+            ink: None,
             advance: bbox.width(),
             fill: Color::BLACK,
             render_mode: 0,
@@ -243,6 +244,7 @@ mod tests {
             text_spans: vec![],
             style_runs: vec![],
             atoms: vec![],
+            decorations: Vec::new(),
             text: "x".into(),
             align: Align::Left,
             first_indent: 0.0,
@@ -284,6 +286,7 @@ mod tests {
             bbox: Rect::new(10.0, 150.0, 90.0, 150.0),
             is_fill: false,
             is_stroke: true,
+            stroke: None,
         });
         let regions = [Region {
             page: PageId(0),

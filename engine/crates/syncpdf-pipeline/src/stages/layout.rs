@@ -554,6 +554,7 @@ mod tests {
             size: h,
             matrix: Matrix::new(1.0, 0.0, 0.0, 1.0, 0.0, 0.0),
             bbox: Rect::new(x, y, x + w, y + h),
+            ink: None,
             advance: w,
             fill: Default::default(),
             render_mode: 0,

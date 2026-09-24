@@ -221,6 +221,7 @@ mod tests {
             text_spans: vec![],
             style_runs: vec![],
             atoms: vec![],
+            decorations: Vec::new(),
             text: "x".into(),
             align: syncpdf_core::ir::Align::Left,
             first_indent: 0.,

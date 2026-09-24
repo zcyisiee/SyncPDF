@@ -216,6 +216,7 @@ mod tests {
                 })
                 .collect(),
             text_spans: vec![],
+            decorations: Vec::new(),
             style_runs: vec![StyleRun {
                 id: StyleId(1),
                 glyph_range: (0, 3),
@@ -226,6 +227,7 @@ mod tests {
                 italic: false,
                 serif: true,
                 mono: false,
+                underline: false,
             }],
             atoms: vec![Atom {
                 source: None,

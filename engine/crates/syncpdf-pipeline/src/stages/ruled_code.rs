@@ -192,6 +192,7 @@ mod tests {
                 size: 10.0,
                 matrix: Matrix::IDENTITY,
                 bbox: Rect::new(x + i as f32 * 5.0, y, x + i as f32 * 5.0 + 4.0, y + 8.0),
+                ink: None,
                 advance: 5.0,
                 fill: Color::BLACK,
                 render_mode: 0,
@@ -220,6 +221,7 @@ mod tests {
                 bbox: Rect::new(20.0, y, 150.0, y),
                 is_fill: false,
                 is_stroke: true,
+                stroke: None,
             });
         }
         text(&mut ir, "Algorithm 1", 20.0, 183.0);
@@ -293,6 +295,7 @@ mod tests {
             bbox: Rect::new(140.0, 70.0, 180.0, 70.0),
             is_fill: false,
             is_stroke: true,
+            stroke: None,
         });
         let mut second_frame = base;
         for y in [193.0, 178.0, 28.0] {
@@ -300,6 +303,7 @@ mod tests {
                 bbox: Rect::new(25.0, y, 145.0, y),
                 is_fill: false,
                 is_stroke: true,
+                stroke: None,
             });
         }
         for ir in [crossing_text, crossing_rule, second_frame] {

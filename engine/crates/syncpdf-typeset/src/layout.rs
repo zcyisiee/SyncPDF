@@ -3,8 +3,8 @@
 use crate::breaks::{break_opportunities, is_forbidden_line_end, is_forbidden_line_start, Lang};
 use crate::fit::Inline;
 use crate::knuth_plass::{self, Node};
-use crate::shaper::{is_cjk_char, ShapedGlyph, Shaper, StyleSpec};
-use syncpdf_core::ir::{Align, LineBox, PlacedGlyph, TypesetParagraph};
+use crate::shaper::{is_cjk_char, ShapedGlyph, Shaper, StyleSpec, UnderlineStyle};
+use syncpdf_core::ir::{Align, LineBox, PlacedGlyph, TypesetParagraph, Underline};
 use syncpdf_core::{AtomId, Color, ParagraphId, Rect, StyleId};
 use unicode_bidi::BidiInfo;
 
@@ -580,6 +580,9 @@ fn place_row(
     let mut atoms = Vec::new();
     let mut placed_atoms = Vec::new();
     let mut ink_boxes = Vec::new();
+    // Parallel to `ink_boxes`: the source-evidenced underline style, if any, so
+    // the decoration is drawn from the translated glyphs' real ink.
+    let mut underline_for: Vec<Option<UnderlineStyle>> = Vec::new();
     let mut bounds: Option<Rect> = None;
     let adjust = input.align == Align::Justify && !row.last;
 
@@ -606,9 +609,10 @@ fn place_row(
                         color: spec(input, *style).color,
                     };
                     first = false;
-                    if !text.chars().all(char::is_whitespace) {
+                    if text.is_empty() || !text.chars().all(char::is_whitespace) {
                         let rect = ink(shaper, &placed, g.x_advance);
                         ink_boxes.push(rect);
+                        underline_for.push(spec(input, *style).underline);
                         bounds = Some(bounds.map_or(rect, |b| b.union(&rect)));
                     }
                     glyphs.push(placed);
@@ -643,6 +647,8 @@ fn place_row(
                     });
                 }
                 ink_boxes.push(rect);
+                // Atoms keep their own source drawing; they carry no underline.
+                underline_for.push(None);
                 bounds = Some(bounds.map_or(rect, |b| b.union(&rect)));
                 atoms.push(*id);
                 x += *width;
@@ -651,7 +657,7 @@ fn place_row(
     }
     // Side bearings are ink, not advance: translate a line that fits in full back
     // inside either edge. Never shrink, clip, or relax collision tolerances.
-    if matches!(input.align, Align::Left | Align::Justify) && atoms.is_empty() {
+    if matches!(input.align, Align::Left | Align::Justify) && atoms.len() == placed_atoms.len() {
         if let Some(b) = bounds {
             let left = bbox.x0 + indent;
             let dx = if b.x0 < left {
@@ -667,9 +673,20 @@ fn place_row(
                     ink.x0 += dx;
                     ink.x1 += dx;
                 }
+                // Source drawings move rigidly with their line; the immutable
+                // source rectangle and original dimensions are unchanged.
+                for atom in &mut placed_atoms {
+                    atom.bbox.x0 += dx;
+                    atom.bbox.x1 += dx;
+                }
                 bounds = Some(Rect::new(b.x0 + dx, b.y0, b.x1 + dx, b.y1));
             }
         }
+    }
+    let underlines = underlines(baseline, &ink_boxes, &underline_for);
+    for underline in &underlines {
+        ink_boxes.push(underline.bbox);
+        bounds = Some(bounds.map_or(underline.bbox, |b| b.union(&underline.bbox)));
     }
     PlacedLine {
         line: LineBox {
@@ -683,8 +700,54 @@ fn place_row(
             glyphs,
             kept_atoms: atoms,
             placed_atoms,
+            underlines,
         },
         ink: ink_boxes,
+    }
+}
+
+/// Group consecutive decorated ink into underline segments under their baseline.
+///
+/// Geometry comes from the *translated* ink boxes, so wraps produce one segment
+/// per line and a run that spans a line break draws on both lines. Width, offset
+/// and color are the claimed source values; nothing is inferred.
+fn underlines(baseline: f32, ink: &[Rect], styles: &[Option<UnderlineStyle>]) -> Vec<Underline> {
+    let mut out: Vec<Underline> = Vec::new();
+    let mut group: Option<(UnderlineStyle, Rect)> = None;
+    for (box_, style) in ink.iter().zip(styles) {
+        match (style, group) {
+            (Some(style), Some((current, span))) if current == *style => {
+                group = Some((current, span.union(box_)));
+            }
+            (Some(style), existing) => {
+                if let Some((current, span)) = existing {
+                    out.push(segment(current, span, baseline));
+                }
+                group = Some((*style, *box_));
+            }
+            (None, Some((current, span))) => {
+                out.push(segment(current, span, baseline));
+                group = None;
+            }
+            (None, None) => {}
+        }
+    }
+    if let Some((current, span)) = group {
+        out.push(segment(current, span, baseline));
+    }
+    out.retain(|u| u.bbox.width() > 0.0);
+    out
+}
+
+/// One underline segment: it spans the decorated ink and sits at the claimed
+/// offset below the line's baseline.
+fn segment(style: UnderlineStyle, span: Rect, baseline: f32) -> Underline {
+    let y = baseline - style.offset;
+    let half = (style.width * 0.5).max(0.01);
+    Underline {
+        bbox: Rect::new(span.x0, y - half, span.x1, y + half),
+        color: style.color,
+        width: style.width,
     }
 }
 

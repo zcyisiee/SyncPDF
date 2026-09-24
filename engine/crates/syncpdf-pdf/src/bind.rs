@@ -43,6 +43,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lopdf::{Dictionary, Document, Object, ObjectId};
 use smallvec::{smallvec, SmallVec};
+use syncpdf_core::ir::PathStroke;
 use syncpdf_core::ir::{DisplayItem, FontRef, Glyph, GlyphFlags, GlyphSource, PageIR};
 use syncpdf_core::{Color, GlyphId, Matrix, ObjRef, OpKey, PageId, Point, Rect};
 
@@ -304,6 +305,14 @@ struct Ctx {
     /// q/Q can span consecutive page Contents streams. Text-state parameters
     /// are part of the saved graphics state; source geometry still comes from PDFium.
     saved: Vec<SavedTextState>,
+    /// Stroke color inherited by the next paint op. `None` means the color space
+    /// is unknown (e.g. a pattern), so the line can never be a faithful decoration.
+    stroke_color: Option<Color>,
+    line_width: f32,
+    stroke_plain: bool,
+    /// A `W`/`W*` in this graphics-state scope means later paint may be clip
+    /// construction rather than visible ink; such lines are never decorations.
+    clipped: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -315,6 +324,10 @@ struct SavedTextState {
     h_scale: f32,
     font_name: String,
     font_size: f32,
+    stroke_color: Option<Color>,
+    line_width: f32,
+    stroke_plain: bool,
+    clipped: bool,
 }
 
 impl Ctx {
@@ -329,6 +342,10 @@ impl Ctx {
             h_scale: 1.0,
             font_name: String::new(),
             font_size: 0.0,
+            stroke_color: Some(Color::BLACK),
+            line_width: 1.0,
+            stroke_plain: true,
+            clipped: false,
             resources,
             saved: Vec::new(),
         }
@@ -1004,6 +1021,10 @@ fn walk_stream(
                 h_scale: ctx.h_scale,
                 font_name: ctx.font_name.clone(),
                 font_size: ctx.font_size,
+                stroke_color: ctx.stroke_color,
+                line_width: ctx.line_width,
+                clipped: ctx.clipped,
+                stroke_plain: ctx.stroke_plain,
             }),
             "Q" => {
                 if let Some(saved) = ctx.saved.pop() {
@@ -1014,8 +1035,34 @@ fn walk_stream(
                     ctx.h_scale = saved.h_scale;
                     ctx.font_name = saved.font_name;
                     ctx.font_size = saved.font_size;
+                    ctx.stroke_color = saved.stroke_color;
+                    ctx.line_width = saved.line_width;
+                    ctx.clipped = saved.clipped;
+                    ctx.stroke_plain = saved.stroke_plain;
                 }
             }
+            "w" => {
+                if let Some(v) = op.operands.first().and_then(Operand::as_f64) {
+                    ctx.line_width = v as f32;
+                }
+            }
+            // Device color only: a pattern/ICC space cannot be reproduced as a
+            // solid decoration, so the color becomes unknown and stays rejected.
+            // Stroke color only. Fill-only ops (`g`/`rg`/`k`) leave the stroke
+            // color untouched; unknown color spaces make it unknown (rejected).
+            // Unsupported pen effects cannot be represented by width + RGB.
+            // Keep the refusal until Q restores a known enclosing state.
+            "gs" => ctx.stroke_plain = false,
+            "J" | "j" => {
+                ctx.stroke_plain &= op.operands.first().and_then(Operand::as_f64) == Some(0.0);
+            }
+            "d" => {
+                ctx.stroke_plain &=
+                    matches!(op.operands.first(), Some(Operand::Array(a)) if a.is_empty());
+            }
+            "G" => ctx.stroke_color = gray(&op.operands),
+            "RG" => ctx.stroke_color = rgb(&op.operands),
+            "K" | "CS" | "SC" | "SCN" => ctx.stroke_color = None,
             "cm" => {
                 if let Some(m) = matrix_from_array(&op.operands) {
                     ctx.ctm = m.then(&ctx.ctm);
@@ -1112,17 +1159,56 @@ fn walk_stream(
             }
             // End-path without painting also consumes clipping paths (W/W* n).
             // Otherwise the next painted path inherits a phantom page-sized bbox.
-            "n" => path_pts.clear(),
+            "n" => path_pts.clear(), // Ends the path, NOT the active clipping scope.
+            "W" | "W*" => ctx.clipped = true,
             "f" | "F" | "f*" | "B" | "B*" | "b" | "b*" | "S" | "s" => {
                 if !path_pts.is_empty() {
                     let bbox = points_bbox(&path_pts, &ctx.ctm);
                     let o = op.operator.as_str();
                     let is_fill = matches!(o, "f" | "F" | "f*" | "B" | "B*" | "b" | "b*");
                     let is_stroke = matches!(o, "B" | "B*" | "b" | "b*" | "S" | "s");
+                    // Only a plain `S`/`s` over a single unclipped two-point segment
+                    // can be a text underline. Composite fill+stroke paths, multi-
+                    // segment paths, clip construction, unknown colors and Form-
+                    // internal lines are left unbound and keep being opaque artwork.
+                    let m = ctx.ctm;
+                    let scale = m.a.hypot(m.b);
+                    let conformal = scale.is_finite()
+                        && scale > 0.0
+                        && (scale - m.c.hypot(m.d)).abs() <= 1e-5 * scale
+                        && (m.a * m.c + m.b * m.d).abs() <= 1e-5 * scale * scale;
+                    let width = ctx.line_width * scale;
+                    let simple = matches!(o, "S" | "s")
+                        && path_pts.len() == 2
+                        && op_index >= 2
+                        && ops[op_index - 2].operator == "m"
+                        && ops[op_index - 1].operator == "l"
+                        && conformal
+                        && width.is_finite()
+                        && width > 0.0
+                        && ctx.stroke_plain
+                        && !ctx.clipped
+                        && ctx.stroke_color.is_some()
+                        && form_path.is_empty()
+                        && [bbox.x0, bbox.y0, bbox.x1, bbox.y1]
+                            .iter()
+                            .all(|v| v.is_finite())
+                        && bbox.width() > 0.0
+                        && bbox.height() <= 0.01;
+                    let stroke = simple.then(|| PathStroke {
+                        op: key,
+                        width,
+                        color: ctx.stroke_color.unwrap_or_default(),
+                    });
+                    let stroke = match (stroke, ctx.stroke_color) {
+                        (Some(s), Some(_)) => Some(s),
+                        _ => None,
+                    };
                     out.items.push(DisplayItem::Path {
                         bbox,
                         is_fill,
                         is_stroke,
+                        stroke,
                     });
                     path_pts.clear();
                 }
@@ -1260,6 +1346,23 @@ fn handle_do(
         }
     }
     out.items.push(DisplayItem::FormEnd);
+}
+
+/// Device gray stroke (`G`); a non-finite operand is unknown, not black.
+fn gray(operands: &[Operand]) -> Option<Color> {
+    let v = operands.first().and_then(Operand::as_f64)? as f32;
+    v.is_finite().then(|| Color::rgb(v, v, v))
+}
+
+/// Device RGB stroke (`RG`); anything else leaves the stroke color unknown.
+fn rgb(operands: &[Operand]) -> Option<Color> {
+    let c: Vec<f32> = operands
+        .iter()
+        .take(3)
+        .filter_map(|o| o.as_f64())
+        .map(|v| v as f32)
+        .collect();
+    (c.len() == 3 && c.iter().all(|v| v.is_finite())).then(|| Color::rgb(c[0], c[1], c[2]))
 }
 
 fn form_clip(dict: &Dictionary, ctm: &Matrix) -> Option<Rect> {
@@ -1463,6 +1566,15 @@ fn cluster_by_origin<'c>(real: &'c [&'c TextChar]) -> Vec<&'c [&'c TextChar]> {
         }
     }
     out
+}
+
+/// A partial set of character boxes is not evidence for the whole glyph.
+fn cluster_ink(cluster: &[&TextChar]) -> Option<Rect> {
+    let first = cluster.first()?.ink?;
+    cluster
+        .iter()
+        .skip(1)
+        .try_fold(first, |bbox, c| Some(bbox.union(&c.ink?)))
 }
 
 /// 簇的 Unicode 拼接（无映射字符贡献空串）。
@@ -1917,6 +2029,16 @@ fn bind_glyphs(
                             .map(|r| r.0.bbox)
                             .or_else(|| geom.map(|c| c.bbox))
                             .unwrap_or_default();
+                        // 墨迹证据：本 code 消费的簇里所有字符 tight box 的并集。
+                        // 无簇证据 / 全部退化时为 `None`，调用方沿用 `bbox` 保守语义。
+                        let ink = step
+                            .cluster
+                            .or(if step.collapsed {
+                                last_ws_cluster
+                            } else {
+                                None
+                            })
+                            .and_then(|ki| cluster_ink(clusters[ki]));
                         let origin = recovery
                             .as_ref()
                             .map(|r| r.0.origin)
@@ -1964,6 +2086,7 @@ fn bind_glyphs(
                             size,
                             matrix,
                             bbox,
+                            ink,
                             advance,
                             fill,
                             render_mode,
@@ -2052,6 +2175,8 @@ fn bind_glyphs(
                             size: fop.font_size,
                             matrix: Matrix::IDENTITY,
                             bbox: Rect::default(),
+                            // 无 pdfium 对象：没有墨迹证据。
+                            ink: None,
                             advance,
                             fill: Color::BLACK,
                             render_mode: 0,
@@ -2317,6 +2442,7 @@ mod tests {
             bbox: Rect::new(0.0, 0.0, 1200.0, 800.0),
             is_fill: true,
             is_stroke: false,
+            stroke: None,
         };
         assert!(
             matches!(clip_paint(item,clip),Some(DisplayItem::Path{bbox,..}) if bbox==Rect::new(300.0,500.0,400.0,700.0))
@@ -2350,7 +2476,7 @@ mod tests {
         );
         assert_eq!(out.items.len(), 1);
         assert!(
-            matches!(out.items[0], DisplayItem::Path { bbox, is_fill: true, is_stroke: false } if bbox == Rect::new(400.0,500.0,410.0,520.0))
+            matches!(out.items[0], DisplayItem::Path { bbox, is_fill: true, is_stroke: false, .. } if bbox == Rect::new(400.0,500.0,410.0,520.0))
         );
     }
 
@@ -2363,6 +2489,7 @@ mod tests {
             .map(|(unicode, x)| TextChar {
                 unicode: unicode.map(str::to_string),
                 bbox: Rect::default(),
+                ink: None,
                 origin: Point::new(*x, 700.0),
                 width: 12.0,
                 angle: 0.0,
@@ -2373,6 +2500,26 @@ mod tests {
         let clusters = cluster_by_origin(&real);
         let codes: Vec<_> = source.iter().map(|c| (*c, 0, (0, 2))).collect();
         align_codes_to_clusters(&codes, EncodingKind::Double, &map, &clusters)
+    }
+
+    #[test]
+    fn incomplete_cluster_ink_is_unknown_not_a_partial_box() {
+        let mut a = TextChar {
+            unicode: Some("f".into()),
+            bbox: Rect::new(0., 0., 12., 12.),
+            ink: Some(Rect::new(1., 1., 5., 10.)),
+            origin: Point::new(0., 0.),
+            width: 12.,
+            angle: 0.,
+            is_generated: false,
+        };
+        let mut b = a.clone();
+        b.ink = Some(Rect::new(5., 1., 10., 10.));
+        assert_eq!(cluster_ink(&[&a, &b]), Some(Rect::new(1., 1., 10., 10.)));
+        a.ink = None;
+        assert_eq!(cluster_ink(&[&a, &b]), None);
+        assert_eq!(cluster_ink(&[&b, &a]), None);
+        assert_eq!(cluster_ink(&[]), None);
     }
 
     #[test]

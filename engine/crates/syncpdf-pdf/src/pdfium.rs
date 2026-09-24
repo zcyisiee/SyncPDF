@@ -157,6 +157,8 @@ pub struct TextChar {
     /// 字形外接框。优先取 pdfium 的 loose char box（含字体上下沿），
     /// 失败时回退到 tight char box（仅墨迹）。
     pub bbox: Rect,
+    /// pdfium tight char box（仅墨迹）；退化或不可用时为 `None`。
+    pub ink: Option<Rect>,
     /// 字符原点（基线起点）。
     pub origin: Point,
     /// 推进宽度的近似值，等于 `bbox.width()`。
@@ -617,11 +619,13 @@ fn build_text_object(
     let mut collected = Vec::with_capacity(chars.len());
     for i in 0..chars.len() {
         let ch = chars.get(i)?;
-        let bbox = ch
-            .loose_bounds()
-            .or_else(|_| ch.tight_bounds())
-            .map(to_rect)
-            .unwrap_or_default();
+        let loose = ch.loose_bounds().ok().map(to_rect);
+        let tight = ch.tight_bounds().ok().map(to_rect);
+        let bbox = loose.or(tight).unwrap_or_default();
+        // 只有非退化几何才算墨迹证据；空格与 pdfium 算不出的字符没有可靠 ink。
+        let ink = tight.filter(|r| {
+            r.width().is_finite() && r.height().is_finite() && r.width() > 0.0 && r.height() > 0.0
+        });
         let origin = ch
             .origin()
             .map(|(x, y)| Point::new(x.value, y.value))
@@ -629,6 +633,7 @@ fn build_text_object(
         collected.push(TextChar {
             unicode: ch.unicode_string(),
             bbox,
+            ink,
             origin,
             width: bbox.width(),
             angle: ch.angle_degrees().unwrap_or(0.0),

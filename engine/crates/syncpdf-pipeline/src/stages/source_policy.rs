@@ -235,6 +235,7 @@ mod tests {
             text_spans: Vec::new(),
             style_runs: Vec::new(),
             atoms: Vec::new(),
+            decorations: Vec::new(),
             text: text.into(),
             align: Align::Center,
             first_indent: 0.0,

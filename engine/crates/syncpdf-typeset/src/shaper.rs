@@ -45,6 +45,20 @@ pub struct StyleSpec {
     /// Explicit font override, used by backend edits after validation.
     #[serde(default)]
     pub font: Option<u32>,
+    /// Source-evidenced underline for this run. `None` means no redraw: the
+    /// style carries no attributed source line, so nothing is guessed.
+    #[serde(default)]
+    pub underline: Option<UnderlineStyle>,
+}
+
+/// Redraw parameters taken from the claimed source underline itself.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct UnderlineStyle {
+    /// Original `/w` line width in pt.
+    pub width: f32,
+    /// Distance below the text baseline, measured from the source glyphs' ink.
+    pub offset: f32,
+    pub color: syncpdf_core::Color,
 }
 
 /// 塑形器抽象：真实实现由字体 crate 适配（harfrust）。
