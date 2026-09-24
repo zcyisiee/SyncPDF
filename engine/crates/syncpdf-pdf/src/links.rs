@@ -2,7 +2,7 @@
 //!
 //! 我们不删除页面对象、不动 `/Annots`，因此 `/Link` 注释天然保留；
 //! 本模块只做**输出对照**：比较输入与输出文档每页 `/Annots` 数量，
-//! 并确认每个 `/Link` 的 `/Dest` 或 `/A` 仍能解析。
+//! 并确认每个 `/Link` 的 `/Dest` 或 `/A` 仍能解析（源里已悬空的继承链接不报）。
 
 use lopdf::{Dictionary, Document, Object, ObjectId};
 
@@ -32,29 +32,21 @@ pub fn links_check(doc_in: &Document, doc_out: &Document) -> Vec<String> {
                 annots_out.len()
             ));
         }
-        // 逐个检查输出侧 Link 的可解析性。
-        for aid in &annots_out {
+        // 逐个检查输出侧 Link 的可解析性；源文档里本就无法解析的链接（悬空命名
+        // 目标等）是继承缺陷而非本次输出造成的，按 /Annots 同序对照后不报。
+        for (i, aid) in annots_out.iter().enumerate() {
             let Ok(d) = dict_of(doc_out, *aid) else {
                 problems.push(format!("page {num}: annot {} unreadable", aid.0));
                 continue;
             };
-            let subtype = d.get(b"Subtype").ok().and_then(|o| o.as_name().ok());
-            if subtype != Some(b"Link") {
+            if link_resolvable(doc_out, d) != Some(false) {
                 continue;
             }
-            let dest_ok = d
-                .get(b"Dest")
-                .ok()
-                .map(|o| dest_resolvable(doc_out, o))
-                .unwrap_or(false);
-            let action_ok = d
-                .get(b"A")
-                .ok()
-                .and_then(|o| resolve(doc_out, o))
-                .and_then(|o| o.as_dict().ok())
-                .map(|a| a.get(b"S").is_ok())
-                .unwrap_or(false);
-            if !dest_ok && !action_ok {
+            let inherited = annots_in
+                .get(i)
+                .and_then(|id| dict_of(doc_in, *id).ok())
+                .is_some_and(|d| link_resolvable(doc_in, d) == Some(false));
+            if !inherited {
                 problems.push(format!(
                     "page {num}: link {} has neither resolvable /Dest nor /A",
                     aid.0
@@ -63,6 +55,21 @@ pub fn links_check(doc_in: &Document, doc_out: &Document) -> Vec<String> {
         }
     }
     problems
+}
+
+/// `/Link` 注释的 `/Dest` 或 `/A` 是否可解析；非 Link 注释返回 `None`。
+fn link_resolvable(doc: &Document, d: &Dictionary) -> Option<bool> {
+    if d.get(b"Subtype").ok().and_then(|o| o.as_name().ok()) != Some(b"Link") {
+        return None;
+    }
+    let dest_ok = d.get(b"Dest").ok().is_some_and(|o| dest_resolvable(doc, o));
+    let action_ok = d
+        .get(b"A")
+        .ok()
+        .and_then(|o| resolve(doc, o))
+        .and_then(|o| o.as_dict().ok())
+        .is_some_and(|a| a.get(b"S").is_ok());
+    Some(dest_ok || action_ok)
 }
 
 /// 页的 `/Annots` 里的注释对象 id 列表。
@@ -369,10 +376,10 @@ mod tests {
         assert!(named_dest_problems(&doc).is_empty());
     }
 
-    #[test]
-    fn unknown_named_dest_is_reported() {
+    /// 名字树只含 `af005` 的文档，唯一 Link 指向命名目标 `dest`。
+    fn doc_with_named_dest(dest: &str) -> Document {
         let mut doc = doc_with_links(1, 0);
-        set_named_dest(&mut doc, "missing");
+        set_named_dest(&mut doc, dest);
         let a = names_leaf(&mut doc, &["af005"]);
         let root = doc.add_object(lopdf::dictionary! { "Kids" => vec![a] });
         set_catalog(
@@ -380,7 +387,23 @@ mod tests {
             "Names",
             lopdf::dictionary! { "Dests" => Object::Reference(root) }.into(),
         );
-        let p = named_dest_problems(&doc);
+        doc
+    }
+
+    #[test]
+    fn unknown_named_dest_is_reported() {
+        // 源里能解析、输出里悬空：是本次输出造成的回归。
+        let p = links_check(
+            &doc_with_named_dest("af005"),
+            &doc_with_named_dest("missing"),
+        );
         assert!(p.iter().any(|s| s.contains("neither")), "{p:?}");
+    }
+
+    #[test]
+    fn dangling_link_inherited_from_source_is_not_reported() {
+        // 源 PDF 自身的悬空命名目标（出版社遗留）原样保留，不算输出缺陷。
+        let doc = doc_with_named_dest("missing");
+        assert!(links_check(&doc, &doc).is_empty());
     }
 }
