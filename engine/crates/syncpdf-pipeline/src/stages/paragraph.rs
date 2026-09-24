@@ -253,7 +253,12 @@ fn same_paragraph(
 ) -> bool {
     let size = row_size(cur, glyphs);
     let gap = (prev.baseline_y - cur.baseline_y).abs();
-    if gap >= PARAGRAPH_GAP_RATIO * size {
+    // 含高大行内公式的行，排版器会加大前后行距（行距随行高走，TRC p9
+    // 实测 10.45 → 15.2），固定倍数会把这一拉伸误判为分段。分段阈值在
+    // 常规倍数之上，最多再容纳「前行行高超出常规倍数」的部分——行高
+    // 证据来自行的 loose 盒并集，墨迹不会凭空长高。
+    let tall_allowance = (prev.bbox.height() - PARAGRAPH_GAP_RATIO * size).max(0.0);
+    if gap >= PARAGRAPH_GAP_RATIO * size + tall_allowance {
         return false;
     }
     // x 范围无重叠 → 不同段（跨栏 / 换块）。
