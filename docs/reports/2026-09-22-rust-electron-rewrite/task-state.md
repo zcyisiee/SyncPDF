@@ -7,7 +7,7 @@
 ### 本次恢复与执行计划
 - 用户要求继续，主控仅负责方向、拆解、亲审与简洁验收命令；RCA/测试/开发委派fresh `devin-swe2`，沿用Orca隔离树。每个验收阶段立即中文commit，无需批准自动进入下一篇。
 - 阶段A已完成：亲审9文件diff后，仅撤出Agent自有未提交的review-feedback/提示候选；完整patch及新增测试移存`tmp/paper-iteration/deferred-translation/`。已恢复HEAD编译源码，用户AGENTS.md/TRANSLATE.md/untitled.md/cache原样保留。主控独立translate148通过/2ignored，Python入口49通过。后续必须重建release，旧二进制含已撤出候选；旧v18–20规则hash不可移植，复排优先v17同规则缓存，源身份变化走真实补译，不伪造hash。
-- 阶段B进行中：冒号候选4f0729bb已核实complete/terminal observed。主控已读完整2文件diff，需补核下方等式真实墨迹/未知字形、检测框漏项/间隔内容及最终owner反例，尚不整合。fresh Devin run `3c247166-0472-4632-80c9-4747b5a8a9b6`（mission `3d58274c-3af9-450b-8289-868f600d903d`）在既有Orca `../iterate-devin-colon` 收窄验证，brief=`tmp/paper-iteration/devin-colon-review-followup.md`。该run在25分钟硬限超时，已核实failed/terminal observed及PID退出；2文件650+/5-完整diff与status已快照`devin-colon-followup-timeout*`。留下validate.sh及日志（worker报告正常284项+真实4项通过）；主控尚未独立复验，不当完成，不resume。
+- 阶段B已完成并提交825bef82：冒号followup run3c247166虽在硬限超时，但资产完整且进程已退出；主控亲审后独立验证、整合并真实v22验收（详见下方）。完整超时diff/status及脚本日志保留，不resume旧会话。
 - 阶段C：Orca `../iterate-devin-link-audit`已创建，cdf81bfe干净基线；只读61条点击标签差异归因，brief=`tmp/paper-iteration/devin-link-audit-brief.md`，不改源码。之后当前编译版本完整复排和51页版面审查；纯模型缺陷不阻塞编译侧验收、不再新建翻译功能。DeepSeek编译侧验收后立即TRC→ALNS→VNS→2604.03136v6。未完成的检查不报通过。
 
 - Goal 模式已关闭。用户本次要求汇报，并明确：**本轮目标是完善编译侧；纯翻译侧问题无需修改。** 不再为漏译主句、跨块语序、倍数措辞或术语漂移开发提示词/人工语义补译功能，也不以这些纯翻译缺陷代替编译问题。
@@ -15,7 +15,7 @@
 - review-feedback 链路及未提交academic_rules/prompt候选属于翻译侧扩展，**已备份撤出主树，不提交、不计入编译侧成果**。历史v20-review-34为7/0、1主/0补救/6缓存，仅证明翻译反馈效果，不是编译缺陷修复；完整历史证据保留。
 - 冒号阶段已验收：超时followup的两文件已主控亲审整合，独立脚本/主树pipeline284通过（17ignored），真实四专项通过，clippy/fmt/release通过。847段独立比较仅P29-014 atom2的text/range/source变化。经验已提炼至`docs/lessons/pdf-binding-and-render-evidence.md`。
 - 最新整篇`deepseek-v22-compile`：沿用已提交规则/原15条词表、v17只读缓存备份，真实agy 1主/0补救/349缓存，351/0、0源冲突/覆盖缺口。88源原子缺墨迹0，34,545保护字/410目标不变，dual两侧135607/76110字及820链接无错，qpdf两份通过；主控已目视第29页，冒号已成为正文句末且公式完整。v21启动误写binary及agy独立thinking参数错误已留证，无模型调用。
-- 第一篇完整编译/版面验收仍未结束；v22有60条标签差异、全51页视觉复核未完成。只读link audit run=`7fcbb395-c7cc-4fc9-879f-7761882551c5`（mission979497cd）针对历史v18的61条归因，树`../iterate-devin-link-audit`，目前running；不能套用历史结果冒充v22验收。其余四篇尚未开始。
+- 第一篇完整编译/版面验收仍未结束；v22有60条标签差异、全51页视觉复核未完成。只读link audit run=`7fcbb395-c7cc-4fc9-879f-7761882551c5`（mission979497cd）针对历史v18的61条归因，树`../iterate-devin-link-audit`，现已complete/terminal observed、源码干净。worker将v18归为49正常TOC/10空白差异/2疑似右括号点击缺失；主控重跑v22为49/9/2。主控否决其未经证明的trim根因：prepare_labeled失败后可走whole-block且geometry用ink，字符advance框中心可在点击框外但墨迹仍全覆盖。新fresh只读run=`c2d8830f-2d26-44ea-9742-51c55936748e`（mission124fafc1）沿用已停写link-audit树，只核实这两处真实墨迹/实际分支；brief=`devin-link-ink-challenge.md`，15分钟收束/20分钟硬限。该run已complete/terminal observed、源码未改。实测两处是全角advance盒中心导致误报，whole-block墨迹点击范围正确；主控已看带框图并独立自测/重跑，v22为49TOC/9空白/2ink-covered。诊断脚本像素坐标使用clip原点而非pix.x/y，亚像素数值需矫正后再冻结，不以未经修正的0.007pt作精确结论。最终证据准备run=`4516b453-b9bd-401d-a721-071190e89f9a`（missione57bbfce）已在同一停写Orca树fresh启动，brief=`devin-final-visual-evidence.md`：矫正tmp审计坐标并准备v22全部51页带页码联系图/单页图，10分钟收束/15分钟硬限，供主控最终逐页审查，不改产品。链接误报经验已提炼至lessons/pdf-binding-and-render-evidence.md。其余四篇尚未开始。
 
 ## 当前任务：五篇顺序实测（优先于下方历史偏好）
 
