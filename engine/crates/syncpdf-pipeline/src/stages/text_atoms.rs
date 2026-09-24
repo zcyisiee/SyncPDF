@@ -19,7 +19,8 @@ pub fn resolve(para: &Paragraph, parsed: &ParsedUnit, doc: &Document) -> Option<
 }
 
 /// Annotation relocation is proved separately by link_text before publication.
-pub(super) fn resolve_text(para: &Paragraph, parsed: &ParsedUnit) -> Option<ParsedUnit> {
+/// Also probed by run to attribute a `prepare` failure to the atom or link seam.
+pub(crate) fn resolve_text(para: &Paragraph, parsed: &ParsedUnit) -> Option<ParsedUnit> {
     if para.atoms.is_empty() {
         return Some(parsed.clone());
     }
