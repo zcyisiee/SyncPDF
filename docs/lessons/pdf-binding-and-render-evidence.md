@@ -6,7 +6,7 @@
 
 全角右括号的墨迹可只占advance盒左侧；按字符框中心落点提取链接标签，会误报其未被点击区域覆盖。DeepSeek v22两个目录标题实测属于此类：主控查看带框渲染并重跑含真正截断墨迹反例的诊断，确认产品无需修改。另49条差异是目录翻译、9条是空白/折行差异，不能单看标签字符串不同判链接损坏。
 
-根因审查要证明实际分支：本例英文源标签无法literal匹配中文标题，转入whole-block墨迹并集，不是`prepare_labeled`的trim造成标点丢失。像素测量使用实际Pixmap整数原点除缩放，不能把未取整clip原点直接当像素原点；量测容差不等于放宽产品门禁。证据在`tmp/paper-iteration/link-ink-controller-v22`及隔离树`tmp/paper-iteration/link-ink/`；全页视觉验收另行记录。
+根因审查要证明实际分支：本例英文源标签无法literal匹配中文标题，转入whole-block墨迹并集，不是`prepare_labeled`的trim造成标点丢失。像素测量使用实际Pixmap整数原点除缩放，不能把未取整clip原点直接当像素原点；量测容差不等于放宽产品门禁。修正后主控独立复跑，小数clip原点自测与真正截断反例均通过，两处括号quad外solid/faint及最大越界均为0。最终证据在`tmp/paper-iteration/link-ink-final-v22/`，不采用旧未修正坐标的0.007pt数值。51页渲染manifest独立核对PDF哈希、唯一页覆盖和尺寸后，再目视全部联系图并放大重点页；渲染成功/页数齐全不能冒充视觉验收。全页验收记录见[五篇论文账本](../reports/2026-09-22-rust-electron-rewrite/13-五篇论文迭代.md)。
 
 ## 段尾标点与相邻公式证据（2026-09-24）
 
