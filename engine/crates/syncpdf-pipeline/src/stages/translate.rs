@@ -12,8 +12,9 @@ use syncpdf_core::ir::{PageIR, Paragraph};
 use syncpdf_core::GlyphId;
 use syncpdf_protocol::TranslatorKind;
 use syncpdf_translate::{
-    build_unit, Cache, ContextMap, DeltaSink, DocumentPrompt, DocumentResult, Engine,
-    FakeTranslator, PiTranslator, PromptSpec, TranslateError, TranslatedBlock, Translator, Unit,
+    build_unit, AgyTranslator, Cache, ContextMap, DeltaSink, DocumentPrompt, DocumentResult,
+    Engine, FakeTranslator, PiTranslator, PromptSpec, TranslateError, TranslatedBlock, Translator,
+    Unit,
 };
 
 use super::PipelineError;
@@ -62,6 +63,7 @@ impl Translator for DynTranslator {
 /// 由 `configure` 的 [`TranslatorKind`] 构造通道。
 ///
 /// - `Pi` → [`PiTranslator`]（真实子进程；测试不调用）
+/// - `Agy` → [`AgyTranslator`]（真实子进程；测试不调用）
 /// - `Fake` → [`fake_from_name`]
 /// - `Http` → 尚未支持
 pub fn make_translator(kind: &TranslatorKind) -> Result<Box<dyn Translator>, PipelineError> {
@@ -75,6 +77,9 @@ pub fn make_translator(kind: &TranslatorKind) -> Result<Box<dyn Translator>, Pip
             model.clone(),
             thinking.clone(),
         ))),
+        TranslatorKind::Agy { program, model } => {
+            Ok(Box::new(AgyTranslator::new(program.clone(), model.clone())))
+        }
         TranslatorKind::Fake { name } => fake_from_name(name)
             .map(|f| Box::new(f) as Box<dyn Translator>)
             .ok_or_else(|| PipelineError::UnsupportedTranslator(format!("fake:{name}"))),
@@ -299,6 +304,20 @@ mod tests {
     fn make_translator_dispatches_and_reports_unsupported() {
         let fake = make_translator(&TranslatorKind::Fake { name: "cjk".into() }).unwrap();
         assert_eq!(fake.name(), "fake/cjk");
+        // 真实子进程通道只构造，不运行：名字足以证明分支选对了。
+        let agy = make_translator(&TranslatorKind::Agy {
+            program: "agy".into(),
+            model: "gemini-3.8-flash-low".into(),
+        })
+        .unwrap();
+        assert_eq!(agy.name(), "agy/gemini-3.8-flash-low");
+        let pi = make_translator(&TranslatorKind::Pi {
+            program: "pi".into(),
+            model: "deepseek/deepseek-flash".into(),
+            thinking: "low".into(),
+        })
+        .unwrap();
+        assert_eq!(pi.name(), "pi/deepseek-flash");
         let err = match make_translator(&TranslatorKind::Fake {
             name: "nope".into(),
         }) {

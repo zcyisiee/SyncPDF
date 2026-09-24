@@ -155,7 +155,7 @@ mod tests {
             );
         }
         // 翻译器分支与模式
-        for word in ["pi", "fake", "http", "full", "bilingual"] {
+        for word in ["pi", "agy", "fake", "http", "full", "bilingual"] {
             assert!(text.contains(&format!("\"{word}\"")), "schema 缺少 {word}");
         }
         // 段落状态与坐标系

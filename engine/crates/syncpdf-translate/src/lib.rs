@@ -20,6 +20,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations, rust_2018_idioms)]
 
+pub mod agy;
 pub mod cache;
 pub mod fake;
 pub mod markdown;
@@ -30,6 +31,7 @@ pub mod translator;
 pub mod unit;
 pub mod validate;
 
+pub use agy::AgyTranslator;
 pub use cache::{Cache, CacheError, ORIGIN_MANUAL};
 pub use fake::{FakeTranslator, RecordingTranslator};
 pub use pi::PiTranslator;

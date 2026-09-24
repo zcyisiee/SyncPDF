@@ -6,6 +6,7 @@
 //!   首行 `run_started`、末行 `run_finished`，且 `seq` 单调递增。
 
 use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -242,6 +243,31 @@ fn run_protocol_2_exits_nonzero() {
 }
 
 /// `translate` 没有 `--protocol` 参数：传了应被 clap 拒绝（非 0 退出）。
+#[test]
+fn translate_agy_rejects_thinking_before_running_anything() {
+    // agy 的档位在模型名里；传 --thinking 必须在启动任何进程前报错，
+    // 否则会默默丢掉档位设置。
+    let out = Command::new(BIN)
+        .args([
+            "translate",
+            "--input",
+            "/nonexistent.pdf",
+            "--output",
+            "/tmp/never.pdf",
+            "--translator",
+            "agy",
+            "--thinking",
+            "low",
+        ])
+        .output()
+        .expect("运行 translate 失败");
+    assert!(!out.status.success(), "agy + --thinking 应报错退出");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("agy"), "stderr: {stderr}");
+    assert!(stderr.contains("thinking"), "stderr: {stderr}");
+    assert!(!Path::new("/tmp/never.pdf").exists());
+}
+
 #[test]
 fn translate_rejects_unknown_flag() {
     let out = Command::new(BIN)

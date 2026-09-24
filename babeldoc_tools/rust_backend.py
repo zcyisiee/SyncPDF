@@ -41,8 +41,8 @@ def _translate_pdf(
     pdf: str,
     workdir: str,
     pages: str | None,
-    model: str,
-    thinking: str,
+    model: str | None,
+    thinking: str | None,
     source_lang: str,
     target_lang: str,
     layout_device: str,
@@ -51,6 +51,7 @@ def _translate_pdf(
     font_scale: float = 1.0,
     line_height: float | None = None,
     dual: bool = False,
+    translator: str = "pi",
 ) -> dict:
     """Run the Rust CLI once, retaining its events and incomplete-result semantics."""
     for name, value in (("font_scale", font_scale), ("line_height", line_height)):
@@ -87,10 +88,15 @@ def _translate_pdf(
     paths = {name: str(destination / name) for name in _ARTIFACTS if name != "dual.pdf" or dual}
     command = [
         str(binary), "translate", "--input", str(source), "--output", str(output),
-        "--translator", "pi", "--model", model, "--thinking", thinking,
+        "--translator", translator,
         "--source-lang", source_lang, "--target-lang", target_lang,
         "--cache-dir", str(destination / "cache"),
     ]
+    # 模型/档位缺省交给 Rust 按通道选；只有显式给了才转发。
+    if model is not None:
+        command.extend(("--model", model))
+    if thinking is not None:
+        command.extend(("--thinking", thinking))
     if cached_db is not None:
         if (destination / "cache/translate.db").exists():
             return _error("workdir_used", "本次运行目录已有译文缓存，请指定新的目录")
@@ -170,6 +176,7 @@ def _translate_pdf(
                         elif kind == "issue":
                             if event.get("code") in {
                                 "protected_source_overlap", "translatable_region_overlap", "rotated_source_text",
+                                "unmapped_source_glyph",
                             } and isinstance(event.get("paragraph_id"), str):
                                 blocked_ids.add(event["paragraph_id"])
                             if event.get("code") == "coverage_gap" and isinstance(event.get("page"), int):
@@ -198,6 +205,7 @@ def _translate_pdf(
     unsuccessful = sum(status != "not_replaced" for status in status_by_id.values()) - successful + blocked
     data = {
         "typography": {"font_scale": font_scale, "line_height": line_height},
+        "translator": translator,
         "successful_blocks": successful,
         "typeset_blocks": prepared,
         "saved_pages": len(ready_pages),

@@ -49,10 +49,10 @@ enum Command {
         /// 额外输出 A3 横向双语 PDF（左原文、右译文）。
         #[arg(long)]
         dual_output: Option<PathBuf>,
-        /// 翻译器：`fake:echo` / `fake:cjk` / `fake:slow:500` / `pi`。
+        /// 翻译器：`fake:echo` / `fake:cjk` / `fake:slow:500` / `pi` / `agy`。
         #[arg(long, default_value = "fake:echo")]
         translator: String,
-        /// 模型名（`pi` 通道用）。
+        /// 模型名（`pi` / `agy` 通道用）。
         #[arg(long)]
         model: Option<String>,
         /// thinking 档位（`pi` 通道用）。
@@ -280,6 +280,7 @@ async fn cmd_translate(
     let configure = Request::Configure {
         provider: match kind {
             TranslatorKind::Pi { .. } => TranslateProvider::Pi,
+            TranslatorKind::Agy { .. } => TranslateProvider::Agy,
             _ => TranslateProvider::Http,
         },
         base_url: None,
@@ -501,7 +502,7 @@ fn parse_pages(spec: &str) -> anyhow::Result<Vec<u32>> {
     Ok(out)
 }
 
-/// `--translator` 解析：`pi` / `fake:<name>`。
+/// `--translator` 解析：`pi` / `agy` / `fake:<name>`。
 fn translator_kind(
     spec: &str,
     model: Option<String>,
@@ -513,11 +514,23 @@ fn translator_kind(
             model: model.unwrap_or_else(|| "deepseek/deepseek-flash".into()),
             thinking: thinking.unwrap_or_else(|| "low".into()),
         }),
+        // agy 的模型名自带档位（`gemini-3.8-flash-low`），没有独立 thinking 参数。
+        "agy" => {
+            if thinking.is_some() {
+                anyhow::bail!(
+                    "agy 通道不支持 --thinking：请用带档位的模型名，如 gemini-3.8-flash-low"
+                );
+            }
+            Ok(TranslatorKind::Agy {
+                program: PathBuf::from("agy"),
+                model: model.unwrap_or_else(|| "gemini-3.8-flash-low".into()),
+            })
+        }
         other => {
             let name = other.strip_prefix("fake:").unwrap_or(other);
             if syncpdf_pipeline::stages::fake_from_name(name).is_none() {
                 anyhow::bail!(
-                    "未知翻译器 {other:?}；可用：pi, fake:echo, fake:cjk, fake:stretch:1.4, \
+                    "未知翻译器 {other:?}；可用：pi, agy, fake:echo, fake:cjk, fake:stretch:1.4, \
                      fake:shrink:0.6, fake:fail-every:3, fake:slow:500"
                 );
             }
@@ -565,3 +578,52 @@ fn print_summary(s: &RunSummary) {
 
 /// 供测试断言用的协议版本导出。
 pub const CLI_PROTOCOL_VERSION: u32 = PROTOCOL_VERSION;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn translator_kind_defaults_per_channel_and_rejects_bad_input() {
+        // pi 默认不变。
+        assert_eq!(
+            translator_kind("pi", None, None).unwrap(),
+            TranslatorKind::Pi {
+                program: PathBuf::from("pi"),
+                model: "deepseek/deepseek-flash".into(),
+                thinking: "low".into(),
+            }
+        );
+        assert_eq!(
+            translator_kind("pi", Some("m".into()), Some("high".into())).unwrap(),
+            TranslatorKind::Pi {
+                program: PathBuf::from("pi"),
+                model: "m".into(),
+                thinking: "high".into(),
+            }
+        );
+        // agy 缺省模型就是用户指定的 gemini 档位；agy 没有独立 thinking。
+        assert_eq!(
+            translator_kind("agy", None, None).unwrap(),
+            TranslatorKind::Agy {
+                program: PathBuf::from("agy"),
+                model: "gemini-3.8-flash-low".into(),
+            }
+        );
+        assert_eq!(
+            translator_kind("agy", Some("gemini-3.7-flash-low".into()), None).unwrap(),
+            TranslatorKind::Agy {
+                program: PathBuf::from("agy"),
+                model: "gemini-3.7-flash-low".into(),
+            }
+        );
+        let err = translator_kind("agy", None, Some("low".into())).unwrap_err();
+        assert!(err.to_string().contains("thinking"), "{err}");
+        // 未知翻译器仍报错，fake 前缀行为不变。
+        assert!(translator_kind("nope", None, None).is_err());
+        assert_eq!(
+            translator_kind("fake:cjk", None, None).unwrap(),
+            TranslatorKind::Fake { name: "cjk".into() }
+        );
+    }
+}

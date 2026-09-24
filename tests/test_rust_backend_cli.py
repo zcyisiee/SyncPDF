@@ -33,8 +33,8 @@ def fake_engine(tmp_path: Path) -> Path:
         "mode = os.getenv('FAKE_MODE', 'success')\n"
         "emit(type='paragraph', paragraph_id='P2', page=1, status='typeset' if mode == 'success' else 'fallback')\n"
         "emit(type='paragraph', paragraph_id='P3', page=1, status='not_replaced')\n"
-        "if mode == 'coverage':\n"
-        "    emit(type='issue', code='protected_source_overlap', paragraph_id='P3', page=1)\n"
+        "if mode in ('coverage', 'opaque'):\n"
+        "    emit(type='issue', code='unmapped_source_glyph' if mode == 'opaque' else 'protected_source_overlap', paragraph_id='P3', page=1)\n"
         "    emit(type='issue', code='coverage_gap', page=1)\n"
         "if mode != 'unready':\n"
         "    emit(type='page_ready', page=1)\n"
@@ -94,6 +94,10 @@ def test_success_keeps_one_json_envelope_and_engine_events(tmp_path: Path, fake_
     assert "dual.pdf" not in payload["data"]["artifacts"]
     assert invocation["args"][:1] == ["translate"]
     assert invocation["args"][invocation["args"].index("--translator") + 1] == "pi"
+    # 缺省不转发模型/档位：由 Rust 按通道选，避免两处各有一份默认值。
+    assert "--model" not in invocation["args"]
+    assert "--thinking" not in invocation["args"]
+    assert payload["data"]["translator"] == "pi"
     assert invocation["args"][invocation["args"].index("--pages") + 1] == "1-3"
     assert invocation["layout"] == "coreml"
     assert invocation["tmpdir"] == str(workdir / "tmp")
@@ -140,10 +144,11 @@ def test_missing_engine_and_output_conflict(tmp_path: Path, fake_engine: Path) -
     assert translated.read_bytes() == b"%PDF-input"
 
 
-def test_pretranslation_block_is_counted_as_incomplete(tmp_path: Path, fake_engine: Path) -> None:
+@pytest.mark.parametrize("mode", ["coverage", "opaque"])
+def test_pretranslation_block_is_counted_as_incomplete(tmp_path: Path, fake_engine: Path, mode: str) -> None:
     pdf = tmp_path / "source.pdf"
     pdf.write_bytes(b"%PDF-input")
-    completed, payload = _run(pdf, tmp_path / "run", fake_engine, mode="coverage")
+    completed, payload = _run(pdf, tmp_path / "run", fake_engine, mode=mode)
     assert completed.returncode == 1
     result = payload["error"]
     assert result["blocked_before_translation"] == 1
@@ -215,6 +220,68 @@ def test_workdir_io_error_is_a_json_failure(tmp_path: Path, fake_engine: Path) -
     assert completed.returncode == 1
     assert payload["error"]["code"] == "artifact_io"
     assert workdir.read_text() == "keep"
+
+
+def test_agy_channel_and_model_are_forwarded(tmp_path: Path, fake_engine: Path) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    workdir = tmp_path / "agy-run"
+    completed, payload = _run(
+        pdf, workdir, fake_engine, extra_args=("--translator", "agy", "--model", "gemini-3.8-flash-low")
+    )
+    assert completed.returncode == 0
+    args = json.loads((workdir / "invocation.json").read_text())["args"]
+    assert args[args.index("--translator") + 1] == "agy"
+    assert args[args.index("--model") + 1] == "gemini-3.8-flash-low"
+    assert "--thinking" not in args
+    assert payload["data"]["translator"] == "agy"
+
+
+def test_unknown_translator_is_rejected_before_launch(tmp_path: Path, fake_engine: Path) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    workdir = tmp_path / "run"
+    completed = subprocess.run(  # noqa: S603 - fixed Python executable and argv list
+        [
+            sys.executable, "-m", "babeldoc_tools", "rust-translate", str(pdf),
+            "--workdir", str(workdir), "--engine", str(fake_engine), "--translator", "nope",
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 2
+    assert not workdir.exists()
+
+
+def test_explicit_pi_model_and_thinking_are_forwarded(tmp_path: Path, fake_engine: Path) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    workdir = tmp_path / "pi-run"
+    completed, payload = _run(
+        pdf,
+        workdir,
+        fake_engine,
+        extra_args=("--translator", "pi", "--model", "m", "--thinking", "medium"),
+    )
+    assert completed.returncode == 0
+    args = json.loads((workdir / "invocation.json").read_text())["args"]
+    assert args[args.index("--model") + 1] == "m"
+    assert args[args.index("--thinking") + 1] == "medium"
+    assert payload["data"]["translator"] == "pi"
+
+
+def test_agy_default_model_is_left_to_the_engine(tmp_path: Path, fake_engine: Path) -> None:
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    workdir = tmp_path / "agy-default"
+    completed, payload = _run(pdf, workdir, fake_engine, extra_args=("--translator", "agy"))
+    assert completed.returncode == 0
+    args = json.loads((workdir / "invocation.json").read_text())["args"]
+    assert "--model" not in args
+    assert "--thinking" not in args
+    assert payload["data"]["translator"] == "agy"
 
 
 def test_cached_from_copies_database_without_writing_source(tmp_path: Path, fake_engine: Path) -> None:

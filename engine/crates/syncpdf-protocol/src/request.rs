@@ -36,7 +36,7 @@ impl fmt::Display for Secret {
     }
 }
 
-/// LLM 提供方。当前两种通道：OpenAI 兼容 HTTP、pi CLI（本地子进程）。
+/// LLM 提供方。当前三种通道：OpenAI 兼容 HTTP、pi CLI、agy CLI（均为本地子进程）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TranslateProvider {
@@ -44,6 +44,8 @@ pub enum TranslateProvider {
     Http,
     /// pi CLI 子进程（`TranslatorKind::Pi`）。
     Pi,
+    /// agy CLI 子进程（`TranslatorKind::Agy`）。
+    Agy,
 }
 
 /// 翻译器配置（`configure` 请求的 `translator` 字段）。
@@ -55,6 +57,12 @@ pub enum TranslatorKind {
         program: PathBuf,
         model: String,
         thinking: String,
+    },
+    /// agy CLI：print + stream-json；`program` 可执行路径（默认 `agy`）、模型。
+    Agy {
+        program: PathBuf,
+        /// 模型名本身已带档位（如 `gemini-3.8-flash-low`）。
+        model: String,
     },
     /// 假翻译器（测试与基准）：`echo` / `stretch:1.4` / `shrink:0.6` / `cjk` /
     /// `fail-every:n` / `slow:ms`。
@@ -168,6 +176,36 @@ mod tests {
                 thinking: "low".into(),
             },
         });
+    }
+
+    #[test]
+    fn request_configure_agy_roundtrip() {
+        roundtrip(Request::Configure {
+            provider: TranslateProvider::Agy,
+            base_url: None,
+            model: String::new(),
+            api_key: None,
+            concurrency: 1,
+            cache_dir: "/tmp/syncpdf-cache".into(),
+            translator: TranslatorKind::Agy {
+                program: "agy".into(),
+                model: "gemini-3.8-flash-low".into(),
+            },
+        });
+        let json = serde_json::to_string(&Request::Configure {
+            provider: TranslateProvider::Agy,
+            base_url: None,
+            model: String::new(),
+            api_key: None,
+            concurrency: 1,
+            cache_dir: "/tmp/c".into(),
+            translator: TranslatorKind::Agy {
+                program: "agy".into(),
+                model: "gemini-3.8-flash-low".into(),
+            },
+        })
+        .unwrap();
+        assert!(json.contains("\"kind\":\"agy\""), "{json}");
     }
 
     #[test]

@@ -380,7 +380,10 @@ fn leaks_context(context: &str, src_text: &str, tgt_text: &str) -> bool {
         let w: String = ctx[i..i + CONTEXT_WINDOW].iter().collect();
         if w.trim().chars().count() >= CONTEXT_WINDOW / 2
             && tgt_text.contains(&w)
-            && !src_text.contains(&w)
+            // Window edges can include typographic spaces next to a shared
+            // proper name. A comma/period at that edge in the source is not
+            // evidence that the name came from a neighboring paragraph.
+            && !src_text.contains(w.trim())
         {
             return true;
         }
@@ -693,6 +696,26 @@ mod tests {
             r#"<p id="P01-002">The previous paragraph discussed convergence rates in detail. This paragraph stands on its own</p>"#
         ))
         .contains(&"neighbor_context_leakage"));
+    }
+
+    #[test]
+    fn shared_name_with_different_surrounding_spacing_is_not_context_leakage() {
+        assert!(!leaks_context(
+            " FrontierSWE v2 ",
+            "On FrontierSWE v2, we report Mean@5.",
+            "在 FrontierSWE v2 上评估。",
+        ));
+        assert!(!leaks_context(
+            "Seek-V4.1-Flash ",
+            "Architecture of DeepSeek-V4.1-Flash.",
+            "DeepSeek-V4.1-Flash 总体架构。",
+        ));
+        // Removing edge spaces must not excuse copied substantive context.
+        assert!(leaks_context(
+            " the hidden secret benchmark failed ",
+            "We evaluated FrontierSWE v2.",
+            "结果： the hidden secret benchmark failed 。",
+        ));
     }
 
     // ── pathological_text_repetition ────────────────────────────────────

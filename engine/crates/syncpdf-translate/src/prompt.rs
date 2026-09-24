@@ -6,6 +6,8 @@ use syncpdf_core::ParagraphId;
 /// 默认不施加人为字符阈值；通道自身上下文容量错误仍明确传播。
 pub const DEFAULT_MAX_CHARS: usize = usize::MAX;
 pub const DOCUMENT_MARKER: &str = "DOCUMENT:";
+/// TRANSLATE.md 的学术要求，适配 Rust 块/样式/KEEP 协议；同时进入缓存身份。
+pub const ACADEMIC_RULES: &str = include_str!("academic_rules.md");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptSpec {
@@ -54,7 +56,12 @@ pub struct DocumentPrompt {
 impl DocumentPrompt {
     pub fn with_repair_note(mut self, codes: &[&str]) -> Self {
         if !codes.is_empty() {
-            self.text = format!("The previous response was invalid. Repair requirement: {}\nReturn the same restricted Markdown block IDs; use only known style IDs and preserve atom markers and hard breaks.\n\n{}", codes.join(", "), self.text);
+            let numeric_note = if codes.contains(&"protected_literal_count") {
+                "\nNumeric repair: preserve the exact source digit sequences and their occurrence counts, including numbers inside technical names. Do not add digits when translating spelled-out quantities: use target-language number words instead (for example, 'three' → '三', not '3'). Do not convert numeric units, or repeat a numbered technical name in an added English gloss. KEEP markers already carry their numbers; never repeat their values in prose."
+            } else {
+                ""
+            };
+            self.text = format!("The previous response was invalid. Repair requirement: {}\nReturn the same restricted Markdown block IDs; use only known style IDs and preserve atom markers and hard breaks.{}\n\n{}", codes.join(", "), numeric_note, self.text);
         }
         self
     }
@@ -74,7 +81,7 @@ impl DocumentPrompt {
 
 pub fn system_prompt(spec: &PromptSpec) -> String {
     format!(
-        "Transport: {}\nTranslate natural-language text into {}. {}\n{}",
+        "Transport: {}\nTranslate natural-language text into {}. {}\n{}\n\n{}",
         crate::markdown::TRANSPORT_VERSION,
         spec.target_lang,
         source_clause(&spec.source_lang),
@@ -83,7 +90,8 @@ Each block begins with an exclusive line <!-- syncpdf:block P01-001 --> and ends
 Source styles use [text]{style=1}. Use only style IDs supplied in that source block. Choose style placement to suit the translated meaning and word order: you may reorder, split, merge, reuse or omit style spans. Style occurrence counts need not match the source; atom-only or empty style spans are allowed. Do not add Markdown bold, italic, headings, links or HTML tags; known style IDs provide font and size metadata.
 Preserve every {{KEEP_N}} atom marker exactly once; markers may move with their referents and may enter a different known style span when the translated word order calls for it. ATOM_HINTS is read-only context, never substitute its value for a marker. Do not translate code, addresses or URLs.
 A backslash at the end of a line represents a hard break; keep the same number. Ordinary newlines are text whitespace. Escape literal Markdown punctuation with a backslash, especially brackets, braces, backslashes, angle brackets, asterisks, underscores and backticks. Keep already escaped literals escaped.
-Translate prose into the target language and regional standard. Preserve conventional proper names and technical terms in English or their original language when appropriate, including short labels; there is no target-language character percentage requirement. Preserve meaning, numbers, email addresses and URLs. Keep text already in the target language unless writing-standard conversion is needed. Do not report detected languages."#
+Translate prose into the target language and regional standard. Preserve conventional proper names and technical terms in English or their original language when appropriate, including short labels; there is no target-language character percentage requirement. Preserve meaning, numbers, email addresses and URLs. Keep text already in the target language unless writing-standard conversion is needed. Do not report detected languages."#,
+        ACADEMIC_RULES,
     )
 }
 fn source_clause(source_lang: &str) -> String {
@@ -191,6 +199,54 @@ pub(crate) mod tests {
             atoms: vec![],
             breaks: 0,
         }
+    }
+
+    #[test]
+    fn academic_rules_apply_to_primary_and_repair_without_changing_transport() {
+        let prompt = build_document_prompts(
+            &PromptSpec::new("en", "zh-CN"),
+            &[unit("P01-001", 12)],
+            &HashMap::new(),
+        )
+        .unwrap()
+        .remove(0);
+        assert!(prompt.system.contains(ACADEMIC_RULES));
+        assert!(prompt.system.contains("简洁优先"));
+        assert!(prompt.system.contains("全篇术语统一"));
+        assert!(prompt.system.contains("只复制当前尚未闭合的 block 行 ID"));
+        assert!(prompt.system.contains("每段都必须先有自己的 block 行"));
+        assert!(prompt.system.contains("一、引言"));
+        assert!(prompt.system.contains("① ② ③"));
+        assert!(prompt.system.contains("[文字]{style=N}"));
+        assert!(!prompt.system.contains("[[S"));
+        assert!(!prompt.system.contains("<!-- id="));
+        let original_system = prompt.system.clone();
+        let repaired = prompt.with_repair_note(&["placeholder_count"]);
+        assert_eq!(repaired.system, original_system);
+        assert!(repaired.text.contains("<!-- syncpdf:block P01-001 -->"));
+        // Target language remains a request parameter, not hardcoded to Chinese.
+        assert!(system_prompt(&PromptSpec::new("en", "ja")).contains("into ja"));
+    }
+
+    #[test]
+    fn numeric_repair_explains_literal_counts_without_mutating_source() {
+        let source = unit("P01-001", 12);
+        let prompt = build_document_prompts(&PromptSpec::default(), &[source], &HashMap::new())
+            .unwrap()
+            .remove(0);
+        assert!(!prompt.text.contains("Numeric repair:"));
+        let repaired = prompt
+            .clone()
+            .with_repair_note(&["protected_literal_count"]);
+        assert_eq!(repaired.system, prompt.system);
+        assert!(repaired.text.ends_with(&prompt.text));
+        assert!(repaired.text.contains("spelled-out quantities"));
+        assert!(repaired.text.contains("occurrence counts"));
+        assert!(repaired.text.contains("KEEP markers"));
+        assert!(!prompt
+            .with_repair_note(&["placeholder_count"])
+            .text
+            .contains("Numeric repair:"));
     }
 
     #[test]

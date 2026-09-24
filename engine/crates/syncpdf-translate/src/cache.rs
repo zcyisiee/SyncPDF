@@ -1,6 +1,6 @@
 //! 翻译缓存（SQLite）。表结构照 02-技术路径与架构.md §5.5 / hjfy 共享缓存。
 //!
-//! 键是 `(source_language, target_language, sha256(transport_version + source_html))`；命中即跳过 LLM。
+//! 键是 `(source_language, target_language, sha256(transport_version + academic_rules + source_html))`；命中即跳过 LLM。
 //! 用户手工编辑的译文写回同表并标 `origin='manual'`，优先级最高（`put_manual`）。
 
 use std::path::Path;
@@ -9,7 +9,14 @@ use rusqlite::{params, Connection, OptionalExtension};
 use syncpdf_core::hash::Sha256Hash;
 
 fn transport_key(source_html: &str) -> Sha256Hash {
-    Sha256Hash::of(format!("{}\0{source_html}", crate::markdown::TRANSPORT_VERSION).as_bytes())
+    Sha256Hash::of(
+        format!(
+            "{}\0{}\0{source_html}",
+            crate::markdown::TRANSPORT_VERSION,
+            crate::prompt::ACADEMIC_RULES,
+        )
+        .as_bytes(),
+    )
 }
 
 /// 手工编辑译文的 origin 标记；命中后不会被自动翻译覆盖。
@@ -200,6 +207,31 @@ mod tests {
             cache.get("en", "zh-CN", source).unwrap().as_deref(),
             Some("new translation")
         );
+    }
+
+    #[test]
+    fn pre_academic_rules_cache_is_not_reused() {
+        let cache = Cache::open_in_memory().unwrap();
+        let source = "<p id=\"P01-001\">source</p>";
+        let previous =
+            Sha256Hash::of(format!("{}\0{source}", crate::markdown::TRANSPORT_VERSION).as_bytes());
+        cache
+            .0
+            .execute(
+                "INSERT INTO translations VALUES (?1, ?2, ?3, 'pi/old', ?4, 'old translation', 0)",
+                params!["en", "zh-CN", &previous.as_bytes()[..], source],
+            )
+            .unwrap();
+        assert!(cache.get("en", "zh-CN", source).unwrap().is_none());
+        assert!(cache.origin_of("en", "zh-CN", source).unwrap().is_none());
+        cache
+            .put("en", "zh-CN", "agy/new", source, "新译文")
+            .unwrap();
+        assert_eq!(
+            cache.get("en", "zh-CN", source).unwrap().as_deref(),
+            Some("新译文")
+        );
+        assert_eq!(cache.len().unwrap(), 2); // 旧条目保留，但不冒充遵循新规则。
     }
 
     #[test]
