@@ -2,6 +2,15 @@
 //! KEEP anchors are exact. Legacy unmarked references require unambiguous matches;
 //! repeated unmarked labels may map by occurrence only when destinations agree.
 //!
+//! A translated cross-reference keeps its identity as "category + number": the
+//! literal label disappears when its category word is translated ("Table 15" →
+//! 「表 15」), so the surviving number tail relocates the anchor. A tail candidate
+//! must sit where the translated category word precedes it ("表 15", "见表15",
+//! "第4.2节" — the space is the translator's choice, not a signal); a bare
+//! same-number is never claimed just because the count matches. The fail-closed
+//! selection rules are unchanged: per-destination grouping, exact counts,
+//! otherwise the paragraph keeps its source text.
+//!
 //! Click geometry is ink-based: a whitespace glyph carries no ink, so it must not
 //! veto the rest of its label (CFF fonts report no bounds for a space, unlike
 //! TrueType's empty box). Any other glyph without ink evidence still fails closed.
@@ -107,34 +116,146 @@ fn matches(text: &str, label: &str) -> Vec<(usize, usize)> {
         })
         .collect()
 }
-fn contextual(text: &str, range: (usize, usize), dest: &str) -> bool {
-    let prefix: String = text[..range.0]
+fn contextual(text: &str, range: (usize, usize), kind: Option<RefKind>) -> bool {
+    let Some(kind) = kind else {
+        return false;
+    };
+    let prefix = prefix_of(text, range);
+    let after: String = text[range.1..].chars().take(12).collect();
+    kind.precedes_number(&prefix)
+        || (kind == RefKind::Section && after.trim_start().starts_with('节'))
+}
+
+/// Up to 80 chars of translated text right before a candidate range.
+fn prefix_of(text: &str, range: (usize, usize)) -> String {
+    text[..range.0]
         .chars()
         .rev()
         .take(80)
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
-        .collect();
-    let after: String = text[range.1..].chars().take(12).collect();
-    let kind = if dest.starts_with("table.") {
-        "(?:表|[Tt]ables?|[Tt]ab\\.)"
-    } else if dest.starts_with("figure.") {
-        "(?:图|[Ff]igures?|[Ff]igs?\\.)"
-    } else if dest.starts_with("equation.") {
-        "(?:式|公式|[Ee]quations?|[Ee]qs?\\.)"
-    } else if dest.starts_with("appendix.") {
-        "(?:附录|[Aa]ppendix|[Aa]ppendices)"
-    } else if dest.contains("section.") {
-        "(?:节|第|[Ss]ections?|[Ss]ec\\.)"
-    } else {
-        return false;
-    };
-    let re = regex::Regex::new(&format!(
-        r"{kind}\s*\(?\s*(?:[0-9.]+\s*[,、和及]\s*(?:and\s*)?)*$"
-    ))
-    .unwrap();
-    re.is_match(&prefix) || (dest.contains("section.") && after.trim_start().starts_with('节'))
+        .collect()
+}
+
+/// A cross-reference category: the generic structure of a labeled anchor like
+/// "Table 15" or "Figure 6" — a category word plus a number/letter tail. One
+/// concept with two evidence sources: the source label's own category word
+/// (works without hyperref-named destinations) and the destination namespace
+/// (`table.`/`figure.`/…). Conflicting sources suppress label decomposition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RefKind {
+    Table,
+    Figure,
+    Equation,
+    Appendix,
+    Section,
+}
+
+impl RefKind {
+    /// hyperref 风格命名目的地（section 允许 subsubsection 等包含形式，
+    /// 以及 `\section*` 生成的 `section*.` 星号变体）。
+    fn from_dest(dest: &str) -> Option<Self> {
+        if dest.starts_with("table.") {
+            Some(Self::Table)
+        } else if dest.starts_with("figure.") {
+            Some(Self::Figure)
+        } else if dest.starts_with("equation.") {
+            Some(Self::Equation)
+        } else if dest.starts_with("appendix.") {
+            Some(Self::Appendix)
+        } else if dest.contains("section.") || dest.contains("section*.") {
+            Some(Self::Section)
+        } else {
+            None
+        }
+    }
+
+    /// 源标签的类别词（学术引用惯例词与缩写，与译文侧词表同属一个类别概念）。
+    fn from_label_word(word: &str) -> Option<Self> {
+        match word.trim_end_matches('.').to_ascii_lowercase().as_str() {
+            "table" | "tables" | "tab" => Some(Self::Table),
+            "figure" | "figures" | "fig" | "figs" => Some(Self::Figure),
+            "equation" | "equations" | "eq" | "eqs" => Some(Self::Equation),
+            "appendix" | "appendices" => Some(Self::Appendix),
+            "section" | "sections" | "sec" => Some(Self::Section),
+            _ => None,
+        }
+    }
+
+    /// 类别词在译文中可能的形式（中文或保留英文）。
+    fn word_pattern(self) -> &'static str {
+        match self {
+            Self::Table => r"(?:表|[Tt]ables?|[Tt]ab\.)",
+            Self::Figure => r"(?:图|[Ff]igures?|[Ff]igs?\.)",
+            Self::Equation => r"(?:式|公式|[Ee]quations?|[Ee]qs?\.)",
+            Self::Appendix => r"(?:附录|[Aa]ppendix|[Aa]ppendices)",
+            Self::Section => r"(?:节|第|[Ss]ections?|[Ss]ec\.)",
+        }
+    }
+
+    /// Whether a word of this category sits right before the number, possibly
+    /// with an enumeration list ("表 18、19、20") in between.
+    fn precedes_number(self, prefix: &str) -> bool {
+        regex::Regex::new(&format!(
+            r"{}\s*\(?\s*(?:[0-9.]+\s*[,、和及]\s*(?:and\s*)?)*$",
+            self.word_pattern()
+        ))
+        .expect("category prefix regex")
+        .is_match(prefix)
+    }
+}
+
+/// Split a bare label into cross-reference structure: a leading category word
+/// plus a numeric ("15", "4.2") or single-letter ("B") tail. Labels without
+/// that structure (pure numbers, footnotes, "§I") keep the literal-only path.
+fn decompose(label: &str) -> Option<(RefKind, &str)> {
+    let label = label.trim_start();
+    let word_end = label
+        .find(|c: char| !c.is_ascii_alphabetic() && c != '.')
+        .unwrap_or(label.len());
+    let kind = RefKind::from_label_word(&label[..word_end])?;
+    let tail = label[word_end..].trim_start();
+    let numeric = tail.chars().any(|c| c.is_ascii_digit())
+        && tail.chars().all(|c| c.is_ascii_digit() || c == '.')
+        && !tail.starts_with('.')
+        && !tail.ends_with('.');
+    let letter = tail.len() == 1 && tail.chars().all(|c| c.is_ascii_alphabetic());
+    (numeric || letter).then_some((kind, tail))
+}
+
+/// Fail-closed selection per destination group: context-matched candidates
+/// when their count is exact, otherwise every candidate when the label has a
+/// single destination and counts still match exactly. `strict` drops the
+/// count-only fallback: candidates must carry the category context — used for
+/// number tails, where a bare same-number ("15 项特征") must never be claimed.
+fn select_by_destination(
+    candidates: &[(usize, usize)],
+    text: &str,
+    destinations: &BTreeMap<String, Vec<ObjectId>>,
+    multiple: bool,
+    strict: bool,
+    kind_of: impl Fn(&str) -> Option<RefKind>,
+) -> Option<Vec<((usize, usize), ObjectId)>> {
+    let mut out = Vec::new();
+    for (destination, ids) in destinations {
+        let context: Vec<_> = candidates
+            .iter()
+            .copied()
+            .filter(|r| contextual(text, *r, kind_of(destination)))
+            .collect();
+        let selected = if context.len() == ids.len() {
+            context
+        } else if !strict && !multiple && candidates.len() == ids.len() {
+            candidates.to_vec()
+        } else {
+            return None;
+        };
+        for (r, id) in selected.into_iter().zip(ids) {
+            out.push((r, *id));
+        }
+    }
+    Some(out)
 }
 
 pub(crate) fn prepare(
@@ -261,32 +382,52 @@ fn prepare_labeled(
         }
     }
     for (label, group) in bare {
-        let candidates: Vec<_> = matches(&text, &label)
+        let literal: Vec<_> = matches(&text, &label)
             .into_iter()
             .filter(|(s, e)| !atoms.values().any(|(a, b)| *s < *b && *a < *e))
             .collect();
         let mut destinations: BTreeMap<String, Vec<ObjectId>> = BTreeMap::new();
-        for (id, destination) in group {
-            destinations.entry(destination).or_default().push(id);
+        for (id, destination) in &group {
+            destinations
+                .entry(destination.clone())
+                .or_default()
+                .push(*id);
         }
         let multiple = destinations.len() > 1;
-        for (destination, ids) in destinations {
-            let context: Vec<_> = candidates
-                .iter()
-                .copied()
-                .filter(|r| contextual(&text, *r, &destination))
+        let mut selected = select_by_destination(
+            &literal,
+            &text,
+            &destinations,
+            multiple,
+            false,
+            RefKind::from_dest,
+        );
+        if selected.is_none() {
+            // The whole literal may be gone because its category word was
+            // translated: relocate by the surviving number tail, gated by the
+            // category concept. A destination namespace that disagrees with the
+            // label's category suppresses this — don't guess. Tail candidates
+            // must carry the category context (strict); a bare same-number is
+            // never claimed just because the count happens to match.
+            let decomposed = decompose(&label).filter(|(kind, _)| {
+                group
+                    .iter()
+                    .all(|(_, dest)| RefKind::from_dest(dest).is_none_or(|d| d == *kind))
+            });
+            let (kind, number) = decomposed?;
+            let tail: Vec<_> = matches(&text, number)
+                .into_iter()
+                .filter(|(s, e)| !atoms.values().any(|(a, b)| *s < *b && *a < *e))
+                .filter(|r| !literal.contains(r))
                 .collect();
-            let selected = if context.len() == ids.len() {
-                context
-            } else if !multiple && candidates.len() == ids.len() {
-                candidates.clone()
-            } else {
-                return None;
-            };
-            for ((s, e), id) in selected.into_iter().zip(ids) {
-                ranges.push((s, e, id));
-            }
+            let mut all = literal.clone();
+            all.extend(tail);
+            all.sort_unstable();
+            all.dedup();
+            selected =
+                select_by_destination(&all, &text, &destinations, multiple, true, |_| Some(kind));
         }
+        ranges.extend(selected?.into_iter().map(|((s, e), id)| (s, e, id)));
     }
     ranges.sort_by_key(|r| r.0);
     if ranges.windows(2).any(|w| w[0].1 > w[1].0) {
@@ -580,8 +721,35 @@ mod tests {
     #[test]
     fn reference_matches_do_not_confuse_numbers_or_sections() {
         assert_eq!(matches("表2，20和12，2.1；2。", "2").len(), 2);
-        assert!(contextual("见表 18、19、20", (12, 14), "table.caption.1"));
-        assert!(contextual("第5.1.4节", (3, 8), "subsubsection.5.1.4"));
+        assert!(contextual(
+            "见表 18、19、20",
+            (12, 14),
+            RefKind::from_dest("table.caption.1")
+        ));
+        assert!(contextual(
+            "第5.1.4节",
+            (3, 8),
+            RefKind::from_dest("subsubsection.5.1.4")
+        ));
+        // `\section*` 的星号命名空间同属 section 类别。
+        assert_eq!(RefKind::from_dest("section*.57"), Some(RefKind::Section));
+        // 类别概念的标签侧来源：没有 hyperref 命名 dest 也能推出类别。
+        assert_eq!(decompose("Table 15"), Some((RefKind::Table, "15")));
+        assert_eq!(decompose("Appendix B"), Some((RefKind::Appendix, "B")));
+        assert_eq!(decompose("Section 4.2"), Some((RefKind::Section, "4.2")));
+        assert_eq!(decompose("Fig. 6"), Some((RefKind::Figure, "6")));
+        // 无类别结构的标签不分解，保持纯字面路径。
+        for bare in ["15", "8", "B", "§I", "NarraBench"] {
+            assert_eq!(decompose(bare), None, "{bare} 不应分解");
+        }
+        // 类别语境只看编号前是否紧邻本类别词，与空格无关：真实模型常写
+        // 「见表15」「第4.2节」。枚举 "(1)" 与无类别词的孤立编号不算。
+        const T: Option<RefKind> = Some(RefKind::Table);
+        assert!(contextual("见表15", (6, 8), T));
+        assert!(contextual("见表 15", (7, 9), T));
+        assert!(contextual("第4.2节", (3, 6), Some(RefKind::Section)));
+        assert!(!contextual("三阶段(1)", (10, 11), T));
+        assert!(!contextual("这里 15 项特征", (7, 9), T));
     }
 
     /// CFF fonts report no bounds for a space glyph, while TrueType reports an
@@ -971,5 +1139,464 @@ mod tests {
             prepare(&para, &ir, &doc, &parsed).is_none(),
             "段外字形共享时必须拒绝"
         );
+    }
+
+    // ── 裸引用「类别 + 编号」重定位（Table 15 → 「表 15」） ────────────────
+
+    /// 裸引用段：源文本 `text`（每字符一个 span），每个 Link 覆盖 `links` 给出的
+    /// 字符区间并指向命名目的地，译文 HTML 为 `translated`。返回 prepare 四元组
+    /// 与 (注释 id, dest) 列表。
+    #[allow(clippy::type_complexity)]
+    fn ref_case(
+        id: &str,
+        text: &str,
+        links: &[(usize, usize, &str)],
+        translated: &str,
+    ) -> (
+        Paragraph,
+        PageIR,
+        Document,
+        ParsedUnit,
+        Vec<(ObjectId, String)>,
+    ) {
+        let glyphs: Vec<Glyph> = text
+            .chars()
+            .enumerate()
+            .map(|(i, c)| src_glyph(i as u16, c, i as f32 * 5.0))
+            .collect();
+        let para = Paragraph {
+            id: id.parse().unwrap(),
+            page: syncpdf_core::PageId(0),
+            region: 0,
+            kind: RegionKind::Text,
+            bbox: Rect::new(0.0, 10.0, text.chars().count() as f32 * 5.0 + 10.0, 20.0),
+            lines: vec![],
+            glyphs: glyphs.iter().map(|g| g.id).collect(),
+            text_spans: text
+                .chars()
+                .enumerate()
+                .map(|(i, c)| syncpdf_core::ir::SourceTextSpan {
+                    text: c.to_string(),
+                    glyph_range: (i as u32, i as u32 + 1),
+                })
+                .collect(),
+            decorations: vec![],
+            style_runs: vec![syncpdf_core::ir::StyleRun {
+                id: StyleId(1),
+                glyph_range: (0, text.chars().count() as u32),
+                underline: false,
+                font: 0,
+                size: 10.0,
+                color: syncpdf_core::Color::BLACK,
+                bold: false,
+                italic: false,
+                serif: false,
+                mono: false,
+            }],
+            atoms: vec![],
+            text: text.into(),
+            align: syncpdf_core::ir::Align::Left,
+            first_indent: 0.0,
+            line_height: 12.0,
+            is_rtl: false,
+            translatable: syncpdf_core::ir::Translatable::Yes,
+        };
+        let ir = PageIR {
+            page: syncpdf_core::PageId(0),
+            media_box: Rect::new(0.0, 0.0, 612.0, 792.0),
+            crop_box: Rect::new(0.0, 0.0, 612.0, 792.0),
+            rotation: 0,
+            fonts: vec![],
+            items: vec![DisplayItem::Text { glyphs }],
+        };
+        let parsed = syncpdf_translate::parse_unit_html(&format!(
+            r#"<p id="{id}"><span data-style="1">{translated}</span></p>"#
+        ))
+        .unwrap();
+        let mut doc = Document::new();
+        let pages = doc.new_object_id();
+        let page = doc.add_object(dictionary! { "Type" => "Page", "Parent" => pages });
+        doc.objects.insert(
+            pages,
+            Object::Dictionary(
+                dictionary! {"Type"=>"Pages","Kids"=>vec![Object::Reference(page)],"Count"=>1},
+            ),
+        );
+        let root = doc.add_object(dictionary! {"Type"=>"Catalog","Pages"=>pages});
+        doc.trailer.set("Root", root);
+        let mut annots = Vec::new();
+        let mut placed = Vec::new();
+        for (a, b, dest) in links {
+            let id = doc.add_object(dictionary! {
+                "Subtype" => "Link",
+                "Rect" => vec![(*a as f32 * 5.0).into(), 10.0.into(), (*b as f32 * 5.0).into(), 20.0.into()],
+                "Dest" => Object::string_literal(*dest),
+            });
+            annots.push(Object::Reference(id));
+            placed.push((id, (*dest).to_string()));
+        }
+        doc.get_dictionary_mut(page).unwrap().set("Annots", annots);
+        (para, ir, doc, parsed, placed)
+    }
+
+    /// 每个链接注释在译文中得到的锚定文本（按样式段收集）。
+    fn annotated_texts(target: &Target) -> Vec<(ObjectId, String)> {
+        fn walk(segs: &[Segment], style: Option<StyleId>, out: &mut Vec<(StyleId, String)>) {
+            for s in segs {
+                match s {
+                    Segment::Text(t) => {
+                        if let Some(id) = style {
+                            out.push((id, t.clone()));
+                        }
+                    }
+                    Segment::Style { id, inner } => walk(inner, Some(*id), out),
+                    _ => {}
+                }
+            }
+        }
+        let mut spans = Vec::new();
+        walk(&target.parsed.segments, None, &mut spans);
+        target
+            .links
+            .iter()
+            .map(|(ann, tags)| {
+                let text: String = spans
+                    .iter()
+                    .filter(|(id, _)| tags.contains(id))
+                    .map(|(_, t)| t.as_str())
+                    .collect();
+                (*ann, text)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn translated_category_word_relocates_bare_reference() {
+        // "Table 15"→「表 15」：类别词按正常翻译被译掉，整串字面消失；
+        // 锚点身份是「类别 + 编号」，按存活下来的编号重定位。
+        let text = "See Table 15 for details.";
+        let at = text.find("Table 15").unwrap();
+        let (para, ir, doc, parsed, placed) = ref_case(
+            "P01-011",
+            text,
+            &[(at, at + "Table 15".len(), "table.15")],
+            "见表 15 的细节。",
+        );
+        let target = prepare(&para, &ir, &doc, &parsed).expect("按类别+编号重定位");
+        assert!(target.whole.is_empty());
+        let ann = annotated_texts(&target);
+        assert_eq!(ann.len(), 1);
+        assert_eq!(ann[0].0, placed[0].0);
+        assert_eq!(ann[0].1, "15");
+    }
+
+    #[test]
+    fn same_paragraph_references_pair_by_destination() {
+        // 同段三链接 Table 14/15/16 → 按各自目标正确配对。
+        let text = "Compare Table 14, Table 15 and Table 16.";
+        let words = ["Table 14", "Table 15", "Table 16"];
+        let dests = ["table.14", "table.15", "table.16"];
+        let links: Vec<_> = words
+            .iter()
+            .zip(dests)
+            .map(|(w, d)| {
+                let at = text.find(w).unwrap();
+                (at, at + w.len(), d)
+            })
+            .collect();
+        let (para, ir, doc, parsed, placed) =
+            ref_case("P01-012", text, &links, "比较表 14、表 15 和表 16。");
+        let target = prepare(&para, &ir, &doc, &parsed).expect("三链接按目标配对");
+        let ann = annotated_texts(&target);
+        assert_eq!(ann.len(), 3);
+        for (obj, dest) in &placed {
+            let anchored = ann
+                .iter()
+                .find(|(o, _)| o == obj)
+                .unwrap_or_else(|| panic!("{dest} 没有锚点"));
+            let number = dest.trim_start_matches("table.");
+            assert_eq!(anchored.1, number, "{dest} 必须锚定在编号 {number} 上");
+        }
+    }
+
+    #[test]
+    fn figure_appendix_and_dotted_section_tails_relocate() {
+        // 不同形态的编号尾：图、附录字母尾、带点节号。
+        for (source, label, dest, translated) in [
+            (
+                "as shown in Figure 6",
+                "Figure 6",
+                "figure.6",
+                "如图 6 所示",
+            ),
+            ("see Appendix B", "Appendix B", "appendix.B", "见附录 B"),
+            (
+                "in Section 4.2",
+                "Section 4.2",
+                "section.4.2",
+                "在第 4.2 节",
+            ),
+        ] {
+            let at = source.find(label).unwrap();
+            let (para, ir, doc, parsed, _) = ref_case(
+                "P01-013",
+                source,
+                &[(at, at + label.len(), dest)],
+                translated,
+            );
+            let target = prepare(&para, &ir, &doc, &parsed)
+                .unwrap_or_else(|| panic!("{label} 必须能按类别+编号重定位"));
+            assert_eq!(annotated_texts(&target).len(), 1);
+        }
+    }
+
+    #[test]
+    fn ambiguous_isolated_numbers_without_category_fall_back() {
+        // 译文中只有孤立的同号数字（无类别词）且数量对不上：不得抢作锚点。
+        let text = "See Table 15 for details.";
+        let at = text.find("Table 15").unwrap();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-014",
+            text,
+            &[(at, at + "Table 15".len(), "table.15")],
+            "前 15 项与后 15 项特征都被保留。",
+        );
+        assert!(
+            prepare(&para, &ir, &doc, &parsed).is_none(),
+            "两个孤立 15 无法唯一定位，必须整段回退"
+        );
+    }
+
+    #[test]
+    fn foreign_category_word_rejects_the_candidate() {
+        // 源标签是 Table，译文却写成「图 15」：类别不符，不得借用。
+        let text = "See Table 15 for details.";
+        let at = text.find("Table 15").unwrap();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-015",
+            text,
+            &[(at, at + "Table 15".len(), "table.15")],
+            "见图 15 的细节。",
+        );
+        assert!(
+            prepare(&para, &ir, &doc, &parsed).is_none(),
+            "类别词与源类别不符必须回退"
+        );
+    }
+
+    #[test]
+    fn tail_count_mismatch_falls_back() {
+        // 同一标签两条链接、译文只有一个编号：数量不恰等，回退。
+        let text = "See Table 15 and again Table 15 here.";
+        let first = text.find("Table 15").unwrap();
+        let last = text.rfind("Table 15").unwrap();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-016",
+            text,
+            &[
+                (first, first + "Table 15".len(), "table.15"),
+                (last, last + "Table 15".len(), "table.15"),
+            ],
+            "见表 15，另见上文。",
+        );
+        assert!(
+            prepare(&para, &ir, &doc, &parsed).is_none(),
+            "编号数量与链接数不等必须回退"
+        );
+    }
+
+    #[test]
+    fn literal_label_still_present_uses_the_original_path() {
+        // 整串字面仍在：走原路径锚定整串字面，不启用编号分解候选。
+        let text = "See Table 15 for details.";
+        let at = text.find("Table 15").unwrap();
+        let (para, ir, doc, parsed, placed) = ref_case(
+            "P01-017",
+            text,
+            &[(at, at + "Table 15".len(), "table.15")],
+            "See Table 15 for details. 另有 15 项特征。",
+        );
+        let target = prepare(&para, &ir, &doc, &parsed).expect("字面在时走原路径");
+        let ann = annotated_texts(&target);
+        assert_eq!(ann.len(), 1);
+        assert_eq!(ann[0].0, placed[0].0);
+        assert_eq!(ann[0].1, "Table 15", "锚定整串字面而不是孤立编号");
+    }
+
+    #[test]
+    fn enumerated_numbers_are_not_reference_candidates() {
+        // 编号候选不得落在枚举 "(1)" 上；有类别语境「表 1」时锚定紧邻类别词
+        // 的编号，枚举数字不参与。
+        let text = "The pipeline has three stages; see Table 1.";
+        let at = text.find("Table 1").unwrap();
+        let (para, ir, doc, parsed, placed) = ref_case(
+            "P01-018",
+            text,
+            &[(at, at + "Table 1".len(), "table.1")],
+            "三个阶段（见表 1）：(1)第一步；(2)第二步。",
+        );
+        let target = prepare(&para, &ir, &doc, &parsed).expect("编号锚定在类别词之后");
+        let ann = annotated_texts(&target);
+        assert_eq!(ann.len(), 1);
+        assert_eq!(ann[0].0, placed[0].0);
+        assert_eq!(ann[0].1, "1");
+    }
+
+    #[test]
+    fn unrecognized_category_word_falls_back_even_with_exact_count() {
+        // 译文编号前是不属于任何类别词表的普通词（fake:cjk 的随机汉字）：
+        // 数量恰等也不选——类别语境不可辨认就回退。
+        let text = "The pipeline has three stages; see Table 1.";
+        let at = text.find("Table 1").unwrap();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-025",
+            text,
+            &[(at, at + "Table 1".len(), "table.1")],
+            "三个阶段（汉词 1）：(1)第一步；(2)第二步。",
+        );
+        assert!(
+            prepare(&para, &ir, &doc, &parsed).is_none(),
+            "类别词不可辨认时数量恰等也必须回退"
+        );
+    }
+
+    #[test]
+    fn conflicting_destination_category_suppresses_decomposition() {
+        // 标签类别（Table）与 dest 命名空间（figure.）冲突：不猜，回退。
+        let text = "See Table 15 for details.";
+        let at = text.find("Table 15").unwrap();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-019",
+            text,
+            &[(at, at + "Table 15".len(), "figure.6")],
+            "见表 15 的细节。",
+        );
+        assert!(
+            prepare(&para, &ir, &doc, &parsed).is_none(),
+            "类别来源冲突必须回退"
+        );
+    }
+
+    #[test]
+    fn isolated_same_number_with_exact_count_falls_back() {
+        // 反例：译文只有孤立的「15 项特征」，编号数量与链接数恰好相等，
+        // 但编号前没有类别词——数量巧合不构成锚点身份，回退。
+        let text = "See Table 15 for details.";
+        let at = text.find("Table 15").unwrap();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-020",
+            text,
+            &[(at, at + "Table 15".len(), "table.15")],
+            "这里有 15 项特征。",
+        );
+        assert!(
+            prepare(&para, &ir, &doc, &parsed).is_none(),
+            "无类别语境的孤立编号即使数量恰等也必须回退"
+        );
+    }
+
+    #[test]
+    fn section_sign_letter_without_literal_match_falls_back() {
+        // "§G"：链接只盖住字母。真实译文原样保留 §+字母时走整串字面路径；
+        // 字母被改写而字面消失时没有可辨认的编号结构，fail-closed 回退。
+        let text = "Details appear in appendix(see§G) here.";
+        let g = text.char_indices().position(|(_, c)| c == 'G').unwrap();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-021",
+            text,
+            &[(g, g + 1, "appendix.G")],
+            "细节见(果§深)。",
+        );
+        assert!(
+            prepare(&para, &ir, &doc, &parsed).is_none(),
+            "§ 字母被改写且无字面匹配时必须回退"
+        );
+    }
+
+    #[test]
+    fn same_tail_without_recognizable_category_words_falls_back() {
+        // 同段 "Table 4" 与 "Figure 4" 共用编号 4，译文类别词不可辨认：
+        // 按阅读顺序配对等于猜测（语序一换就配错目标），回退。
+        let text = "Compare Table 4 with Figure 4 here.";
+        let t4 = text.find("Table 4").unwrap();
+        let f4 = text.find("Figure 4").unwrap();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-022",
+            text,
+            &[
+                (t4, t4 + "Table 4".len(), "table.4"),
+                (f4, f4 + "Figure 4".len(), "figure.4"),
+            ],
+            "比较 某某 4 与 另某 4 这里。",
+        );
+        assert!(
+            prepare(&para, &ir, &doc, &parsed).is_none(),
+            "类别词不可辨认时不得按顺序猜测配对"
+        );
+    }
+
+    #[test]
+    fn category_word_glued_to_the_number_relocates() {
+        // 真实模型常不写空格：「见表15」。类别语境只看编号前是否紧邻本类别词，
+        // 与空格无关，必须仍然重定位。
+        for (source, label, dest, translated, anchored) in [
+            (
+                "See Table 15 for details.",
+                "Table 15",
+                "table.15",
+                "见表15的细节。",
+                "15",
+            ),
+            (
+                "in Section 4.2",
+                "Section 4.2",
+                "section.4.2",
+                "在第4.2节",
+                "4.2",
+            ),
+        ] {
+            let at = source.find(label).unwrap();
+            let (para, ir, doc, parsed, placed) = ref_case(
+                "P01-023",
+                source,
+                &[(at, at + label.len(), dest)],
+                translated,
+            );
+            let target = prepare(&para, &ir, &doc, &parsed)
+                .unwrap_or_else(|| panic!("{label} 无空格写法必须能重定位"));
+            let ann = annotated_texts(&target);
+            assert_eq!(ann.len(), 1);
+            assert_eq!(ann[0].0, placed[0].0);
+            assert_eq!(ann[0].1, anchored);
+        }
+    }
+
+    #[test]
+    fn swapped_category_references_pair_by_their_own_category() {
+        // 同段 "Table 4" 与 "Figure 4" 共用编号 4，译文语序互换：
+        // 每个编号由自己紧邻的类别词认领，各配自己的目的地。
+        let text = "Compare Table 4 with Figure 4 here.";
+        let t4 = text.find("Table 4").unwrap();
+        let f4 = text.find("Figure 4").unwrap();
+        let (para, ir, doc, parsed, placed) = ref_case(
+            "P01-024",
+            text,
+            &[
+                (t4, t4 + "Table 4".len(), "table.4"),
+                (f4, f4 + "Figure 4".len(), "figure.4"),
+            ],
+            "比较图 4 与表 4 这里。",
+        );
+        let target = prepare(&para, &ir, &doc, &parsed).expect("按各自类别配对");
+        let ann = annotated_texts(&target);
+        assert_eq!(ann.len(), 2);
+        // 按段落阅读顺序排列：译文里「图 4」在前、「表 4」在后，因此
+        // figure 的目标必须排在 table 的目标之前，两个编号各自认领。
+        assert_eq!(
+            ann.iter().map(|(o, _)| *o).collect::<Vec<_>>(),
+            vec![placed[1].0, placed[0].0],
+            "「图 4」的链接必须锚在译文中更靠前的「4」上"
+        );
+        assert!(ann.iter().all(|(_, t)| t == "4"));
     }
 }

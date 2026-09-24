@@ -1046,8 +1046,17 @@ fn handle_block(
         stages::link_text::prepare(&para, &bound.ir, &state.doc, parsed)
     });
     if parsed_result.is_ok() && block.status.is_ok() && prepared.is_none() {
+        // 按实际失败接缝归因：原子能在译文中重定位（resolve_text 通过）而
+        // prepare 失败，坏在链接侧；原子解析失败才是原子侧。
+        let atoms_placed = parsed_result.as_ref().is_ok_and(|parsed| {
+            state
+                .bound
+                .get(&(id.page - 1))
+                // 段落必来自已绑定页；bound 缺失属于协议异常，不改变归因。
+                .is_none_or(|_| stages::text_atoms::resolve_text(&para, parsed).is_some())
+        });
         fallback = Some((
-            if para.atoms.is_empty() {
+            if atoms_placed {
                 "link_target_unplaced"
             } else {
                 "atom_source_unplaced"
