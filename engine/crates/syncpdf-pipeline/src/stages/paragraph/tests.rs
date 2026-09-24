@@ -1427,6 +1427,191 @@ fn true_paragraph_break_still_splits_ctm_scaled_lines() {
     assert_eq!(paras[1].text, "road supply");
 }
 
+/// 堆叠上下标形态（TRC p14 N_iter^max 一类）：检测框吞掉前导空白，空白的
+/// loose 盒没有墨迹却回探到前一个正文字形的墨迹，令 blocked 门误触发。
+/// 碰撞与擦除证据必须量墨迹：空白是间距，不是碰撞。
+#[test]
+fn stacked_script_formula_blank_box_does_not_block_prose() {
+    // Prose "of" in body font 0; the formula owns a blank + `N` + stacked
+    // super/subscript in math font 1. The blank's loose box overlaps the
+    // prose `f` box by 0.5pt, the real math starts clear of it.
+    let mut glyphs = line(0, "of", 50.0, 700.0, 10.0, 0);
+    let blank = mk_glyph(10, ' ', 61.5, 700.0, 10.0, 0);
+    let base = mk_glyph(11, 'N', 68.0, 700.0, 10.0, 1);
+    let sup = mk_glyph(12, 'x', 74.0, 705.0, 6.0, 1);
+    let sub = mk_glyph(13, 'i', 75.0, 697.5, 6.0, 1);
+    glyphs.extend([blank, base, sup, sub]);
+    let ir = page_ir(
+        glyphs,
+        vec![mk_font("F1", false, false), mk_font("Math", false, false)],
+    );
+    let mut regions = full_region(RegionKind::Text);
+    let mut formula = text_region(1, Rect::new(61.0, 694.0, 80.0, 714.0), 1);
+    formula.kind = RegionKind::Formula;
+    regions.push(formula);
+    let paragraphs = analyze_page(&ir, &regions);
+    let p = paragraphs
+        .iter()
+        .find(|p| p.kind == RegionKind::Text)
+        .unwrap();
+    assert!(
+        matches!(p.translatable, Translatable::Yes),
+        "blank spacing must not block the paragraph: {:?}",
+        p.translatable
+    );
+    let atom = p
+        .atoms
+        .iter()
+        .find(|a| a.kind == AtomKind::Formula)
+        .expect("the formula must become an atom");
+    assert!(atom.source.is_some());
+    assert_eq!(atom.glyph_range, (2, 6));
+}
+
+/// 反例（fail-closed）：同样的吞框形态，但重叠来自数学字形自己的盒子——
+/// 碰撞是真实的，必须保留原文。
+#[test]
+fn real_math_ink_overlapping_prose_still_blocks_the_formula() {
+    let mut glyphs = line(0, "of", 50.0, 700.0, 10.0, 0);
+    let base = mk_glyph(10, 'N', 61.5, 700.0, 10.0, 1);
+    let sup = mk_glyph(11, 'x', 67.5, 706.0, 6.0, 1);
+    glyphs.extend([base, sup]);
+    let ir = page_ir(
+        glyphs,
+        vec![mk_font("F1", false, false), mk_font("Math", false, false)],
+    );
+    let mut regions = full_region(RegionKind::Text);
+    let mut formula = text_region(1, Rect::new(61.0, 694.0, 80.0, 714.0), 1);
+    formula.kind = RegionKind::Formula;
+    regions.push(formula);
+    let paragraphs = analyze_page(&ir, &regions);
+    assert!(paragraphs.iter().any(|p| matches!(&p.translatable,
+        Translatable::No { reason } if reason == "protected_source_overlap")));
+}
+
+/// 行首公式 + 句读收尾形态（TRC p9 t_i^opt−a_i−s_i. 一类）：公式开启段落
+/// 最后一行，同行唯一的非公式字形是句号。锚点证明的是「与正文同行」，
+/// 句读也是正文；只认字母会错杀这种行。
+#[test]
+fn formula_closing_a_line_with_punctuation_anchor_becomes_an_atom() {
+    let mut glyphs = line(0, "The bound is", 50.0, 700.0, 10.0, 0);
+    glyphs.extend(line(20, "ti", 50.0, 686.0, 10.0, 1));
+    glyphs.push(mk_glyph(23, '.', 64.0, 686.0, 10.0, 0));
+    let ir = page_ir(
+        glyphs,
+        vec![mk_font("F1", false, false), mk_font("Math", false, false)],
+    );
+    let mut regions = full_region(RegionKind::Text);
+    let mut formula = text_region(1, Rect::new(48.0, 684.0, 63.0, 698.0), 1);
+    formula.kind = RegionKind::Formula;
+    regions.push(formula);
+    let paragraphs = analyze_page(&ir, &regions);
+    let p = paragraphs
+        .iter()
+        .find(|p| p.kind == RegionKind::Text)
+        .unwrap();
+    assert!(
+        matches!(p.translatable, Translatable::Yes),
+        "a sentence period is a valid prose anchor: {:?}",
+        p.translatable
+    );
+    assert!(p
+        .atoms
+        .iter()
+        .any(|a| a.kind == AtomKind::Formula && a.source.is_some()));
+}
+
+/// 高墨迹行距形态（TRC p9 T_ij={...} 一类）：含高大行内公式的行会被排版器
+/// 加大行距（10.45 → 15.2），1.8×字号 的间隔规则把这一拉伸误判为分段。
+/// 段落间隔阈值必须容纳「行高超出本区域行高中位数」带来的额外行距。
+#[test]
+fn tall_inline_formula_line_does_not_split_the_paragraph() {
+    // Body rows: loose box 13.03 tall, baseline inside; pitch 10.45.
+    let body = |seq: u16, ch: char, x: f32, y: f32| {
+        let mut g = mk_glyph(seq, ch, x, y, 7.9701, 0);
+        g.bbox = Rect::new(x, y - 2.53, x + 7.9701 * 0.6, y + 10.5);
+        g
+    };
+    let row = |glyphs: &mut Vec<Glyph>, seq: u16, text: &str, x: f32, y: f32| {
+        for (i, ch) in text.chars().enumerate() {
+            glyphs.push(body(seq + i as u16, ch, x + i as f32 * 7.0, y));
+        }
+    };
+    let mut glyphs = Vec::new();
+    row(&mut glyphs, 0, "travel time", 50.0, 700.0);
+    row(&mut glyphs, 12, "is defined", 50.0, 689.55);
+    row(&mut glyphs, 24, "by the set", 50.0, 679.10);
+    // Tall inline formula on the 679.10 line: raw ink spans ~666..686.
+    glyphs.push(mk_glyph(100, 'T', 200.0, 676.0, 10.0, 1));
+    glyphs.push(mk_glyph(101, 'i', 206.0, 666.0, 6.0, 1));
+    // The compositor stretches the pitch after the tall line: 15.2 instead
+    // of 10.45, then back to normal.
+    row(&mut glyphs, 36, "for each", 50.0, 663.90);
+    row(&mut glyphs, 48, "arc pair", 50.0, 653.45);
+    let ir = page_ir(
+        glyphs,
+        vec![mk_font("F1", false, false), mk_font("Math", false, false)],
+    );
+    let mut regions = full_region(RegionKind::Text);
+    let mut formula = text_region(1, Rect::new(198.0, 664.0, 212.0, 688.0), 1);
+    formula.kind = RegionKind::Formula;
+    regions.push(formula);
+    let paragraphs = analyze_page(&ir, &regions);
+    let p = paragraphs
+        .iter()
+        .find(|p| p.kind == RegionKind::Text)
+        .unwrap();
+    assert_eq!(
+        p.lines.len(),
+        5,
+        "the stretched pitch after a tall inline formula is not a paragraph break"
+    );
+    assert!(matches!(p.translatable, Translatable::Yes));
+}
+
+/// 反例（同形态不同结果）：高墨迹行之后是真分段（间隔远超拉伸容差）→
+/// 仍分两段。
+#[test]
+fn real_paragraph_break_after_a_tall_formula_line_still_splits() {
+    let body = |seq: u16, ch: char, x: f32, y: f32| {
+        let mut g = mk_glyph(seq, ch, x, y, 7.9701, 0);
+        g.bbox = Rect::new(x, y - 2.53, x + 7.9701 * 0.6, y + 10.5);
+        g
+    };
+    let row = |glyphs: &mut Vec<Glyph>, seq: u16, text: &str, x: f32, y: f32| {
+        for (i, ch) in text.chars().enumerate() {
+            glyphs.push(body(seq + i as u16, ch, x + i as f32 * 7.0, y));
+        }
+    };
+    let mut glyphs = Vec::new();
+    row(&mut glyphs, 0, "travel time", 50.0, 700.0);
+    row(&mut glyphs, 12, "is defined", 50.0, 689.55);
+    row(&mut glyphs, 24, "by the set", 50.0, 679.10);
+    glyphs.push(mk_glyph(100, 'T', 200.0, 676.0, 10.0, 1));
+    glyphs.push(mk_glyph(101, 'i', 206.0, 666.0, 6.0, 1));
+    // A genuine break: 26pt of pitch, beyond even the stretched allowance.
+    row(&mut glyphs, 36, "New paragraph", 50.0, 653.10);
+    let ir = page_ir(
+        glyphs,
+        vec![mk_font("F1", false, false), mk_font("Math", false, false)],
+    );
+    let mut regions = full_region(RegionKind::Text);
+    let mut formula = text_region(1, Rect::new(198.0, 664.0, 212.0, 688.0), 1);
+    formula.kind = RegionKind::Formula;
+    regions.push(formula);
+    let paragraphs = analyze_page(&ir, &regions);
+    let text_paragraphs: Vec<_> = paragraphs
+        .iter()
+        .filter(|p| p.kind == RegionKind::Text)
+        .collect();
+    assert_eq!(
+        text_paragraphs.len(),
+        2,
+        "{:?}",
+        paragraphs.iter().map(|p| &p.text).collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn large_line_gap_splits_paragraphs() {
     // 行距 30pt > 1.8×10 → 两段。

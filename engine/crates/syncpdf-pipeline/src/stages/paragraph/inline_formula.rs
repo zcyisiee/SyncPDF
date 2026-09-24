@@ -85,9 +85,17 @@ pub(super) fn sources(ir: &PageIR, regions: &[&Region]) -> Vec<Formula> {
             let ids: BTreeSet<_> = kept.iter().map(|g| g.id).collect();
             let bbox = kept.iter().fold(seed.bbox, |b, g| b.union(&g.bbox));
             // 每个字形必须有完整墨迹证据，否则该字形退回保守 loose 盒。
+            // 空白字形除外：它没有墨迹可擦、也没有墨迹可撞，loose 盒只描述
+            // 间距；把间距算进碰撞裁剪会伸入邻字真实墨迹，误判 blocked。
             let formula_ink = kept
                 .iter()
-                .fold(ink_or_box(seed), |b: Rect, g| b.union(&ink_or_box(g)));
+                .filter(|g| !g.unicode.iter().all(|c| c.is_whitespace()))
+                .map(|g| ink_or_box(g))
+                .reduce(|a: Rect, b| a.union(&b))
+                .unwrap_or_else(|| {
+                    kept.iter()
+                        .fold(ink_or_box(seed), |b: Rect, g| b.union(&ink_or_box(g)))
+                });
             let Some(neighbor) = glyphs
                 .iter()
                 .filter(|g| {
@@ -96,7 +104,10 @@ pub(super) fn sources(ir: &PageIR, regions: &[&Region]) -> Vec<Formula> {
                         && !regions.iter().any(|r| {
                             r.kind == RegionKind::Formula && r.bbox.contains(g.bbox.center())
                         })
-                        && g.unicode.iter().any(|c| c.is_alphabetic())
+                        // 锚点证明的是「公式与正文同行」：父区域归属 + 同行
+                        // 几何。句读也是正文；只认字母会错杀行首/行末公式，
+                        // 但空白的字号不可靠，仍须排除。
+                        && !g.unicode.iter().all(|c| c.is_whitespace())
                         && (g.bbox.center().y - bbox.center().y).abs() < g.size
                 })
                 .min_by(|a, b| {
