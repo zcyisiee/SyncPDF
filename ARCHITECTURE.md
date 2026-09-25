@@ -1,6 +1,6 @@
 # 当前架构
 
-本文描述仓库现有实现，核对日期：2026-09-19。在线部署目标和未决定的存储方案见 [在线翻译设计](docs/design/online-translation.md)；运行与验证见 [CLI 指南](docs/guide/cli.md)。
+本文描述仓库现有实现，核对日期：2026-09-19（云端版部分 2026-09-25）。在线部署目标和未决定的存储方案见 [在线翻译设计](docs/design/online-translation.md)；运行与验证见 [CLI 指南](docs/guide/cli.md)。
 
 工程上下文分为两层：本文件与 `AGENTS.md`、`docs/` 维护长期项目事实；具体任务的用户偏好、阶段验收和阻断由其计划目录内唯一的 `task-state.md` 维护，不混入已实现架构。任务状态仅用户和主 Agent 可修改，恢复与委派均须读取；生命周期与完成后的经验升格见 [文档维护](docs/index.md#task-state-lifecycle)。
 
@@ -8,7 +8,7 @@
 
 把 PDF 解析为带段落身份、样式和公式锚点的可译文本，调用模型翻译，再重建译文 PDF，并允许用户查看进度、修改局部译文和重新编译。输入是 PDF、语言与布局配置、翻译/审查提供方；输出包括单语 PDF、可选双语 PDF、工作目录和质量报告。保真程度由检查与人工复核判断。
 
-当前产品由本地 CLI 和单机 Web 工作台组成。Web 已有上传、实时事件、草稿、段落编译与导出；尚无仓库内的多用户认证、跨机器任务队列或远端对象存储实现。
+当前产品由本地 CLI、单机 Web 工作台和云端版组成。工作台（`bdt serve` + `web/`）已有上传、实时事件、草稿、段落编译与导出，无用户认证。云端版（`bdt cloud` + `cloud-web/`）是面向多人的只读翻译站：邀请码登录、上传、排队、逐页预览、取消、下载译文/中英对照、跨用户共享缓存，调用 Rust 引擎，不提供段落编辑；单机单进程，没有跨机器队列或远端对象存储。
 
 ## 2. 入口
 
@@ -16,6 +16,7 @@
 
 - `bdt run`：完整编排；`parse / translate / apply / build / check / layout-set / report`：分步操作。
 - `bdt serve`：启动 FastAPI 服务与可选的 `web/dist` 静态站点；默认 `127.0.0.1`、端口 `0`（绑定后返回真实端口）。不带 `--root`/`--workdir` 时使用共享文档库 `~/.sp`（跨 worktree 共用，没有则创建）。HTTP 前缀 `/api/v1`，接口 schema 由 `/openapi.json` 提供。根目录枚举会跳过测试/调试工作目录，并按源 PDF 内容去重、保留最近版本。
+- `bdt cloud serve`：云端版 API（`/api`，默认 `127.0.0.1:8790`，数据根 `~/.bdt-cloud`），由 nginx 反代并托管 `cloud-web/dist`；`bdt cloud invite --name --quota`：生成邀请码。接口见 [云端版接口](docs/reference/cloud-api.md)。
 - `bdt debug` 与阶段命令的 `--debug`：诊断归档及查看器。
 - `bdt harness-call / model-call`：模型适配子命令，读 stdin 提示词、写 stdout 文本；仍属于同一个入口。
 
@@ -33,6 +34,8 @@
 | HTTP 路由、任务、草稿、全量编译与候选 | `babeldoc_tools/serve/{app,runner,jobs,draft,compile,candidates}.py`、`routers/` |
 | 元数据、资产、局部/批量编译、迁移与清理 | `babeldoc_tools/serve/{database,asset_store,block_compile,migrate,cleanup}.py` |
 | 工作台、API 消费、预览与事件订阅 | `web/src/{screens,components,lib,api}/`（三栏外壳：左栏 `PaperNav` 常驻，中栏按路由，工作台右栏 `InspectorPanel`） |
+| 云端版：鉴权、上传校验、缓存/额度/队列、Rust 运行与事件映射、预览/对照版、清理 | `babeldoc_tools/cloud/{app,auth,uploads,jobs,runner,files,cleanup,db}.py`、`tests/cloud/` |
+| 云端版前端（登录 / 首页 / 工作区三视图、历史抽屉） | `cloud-web/src/`；浏览器验收 `cloud-web/e2e/run.mjs`（真实 serve + 假引擎 `e2e/fake-engine.py`） |
 | 模型调用与提示词 | `babeldoc_tools/harnesses.py`、`serve/models.py`、`skills/document-translate/agents/`、`scripts/` |
 | 质量检查与回归证据 | `tests/`、`babeldoc/tools/agent/{quality_checks,layout_geometry,link_audit}.py`、仓库 `tmp/` |
 
@@ -63,6 +66,27 @@ bdt run → parse → translate → apply → build → check → review → rep
 上传按内容哈希去重，上传本身不自动解析。任务执行阶段会保存可观察状态；翻译流可经 `ServeStreamPreview` 生成预览：完成的翻译块立即提交到并行编译池（`--preview-workers`/job 字段 `preview_workers`，1..`MAX_PREVIEW_WORKERS`，缺省取上限；上限随机器核数走 = `min(16, cpu_count-2)`，因为 xelatex 是独立子进程、不受 GIL 约束）。池是一个共享线程池 + **每页一把锁**（`PageLocks`）：xelatex 渲染不持锁，同页十几个块可以同时渲染；只有依赖页状态的两小段——浮动规划/占位、patch 读-改-写提交——持该页的锁串行（页 patch 状态不丢）。整块串行的旧做法让一页 21 个块排 21×6s 的长队，是 58 页文档尾部最大的等待来源。跨页浮动的贴片落到**已发布**的页上时，该页重新合成一次，否则外来贴片在预览里丢失。流式路径只写 immutable baseline 上的块 patch 和当前页 asset；页面全部块完成后发布一次页事件，翻译结束再由页 asset 合成完整预览写入 `local_previews`。LaTeX 能力探测与 `state.pkl` 反序列化按进程缓存。持久 SSE 读数据库事件，旧 SSE 读单次 run 的诊断归档，二者游标不同。
 
 `DELETE /documents/{did}` 删除文档（workdir 目录树 + 数据库行，资产文件保留给 `--cleanup`）；有活动 job 时拒绝，workdir 模式不支持。子进程无收尾信封失败时，job 的 `error_message` 附上脱敏后的 stderr 末三行，避免 `envelope_unparsed` 掩盖真实原因。
+
+### 云端版翻译
+
+```text
+浏览器 → nginx（cloud-web/dist + /api 反代）→ bdt cloud serve
+       → POST /api/jobs → sources/<sha>.pdf + app.db（缓存键命中即完成）
+       → Runner 线程（一次一篇）→ rust_backend → syncpdf-cli translate（work/<tid>/）
+       ← SSE（job_events 回放 + 实时）← EventMapper（引擎事件 → 阶段/里程碑/页/提醒）
+```
+
+与工作台完全分开：独立子包 `babeldoc_tools/cloud/`、独立数据根 `~/.bdt-cloud`，不 import `babeldoc_tools/serve/`，也不走 Python 翻译管线。用户的历史记录是 `jobs`；同一缓存键（原文 sha256 + 模型 + 思考强度 + 引擎二进制 sha256）只对应一条 `translations`，多个用户的 job 共用它的译文和运行。runner 通过 `rust_backend._translate_pdf(on_event=, on_spawn=)` 逐行拿引擎事件并持有进程以便取消；`page_ready` 表示 `translated.pdf` 已按页原子落盘，预览按 `attempt.revision` 从 workdir 渲染。只长期保存原文和译文；预览 WebP、中英对照（`syncpdf-cli dual` 按需生成）和 gzip 事件都是有期限或有上限的缓存。
+
+| 位置（`~/.bdt-cloud/`） | 职责 |
+|---|---|
+| `app.db` | SQLite（WAL，单连接加锁）：users、sessions、sources、translations、jobs、job_events（只存面向用户的事件） |
+| `sources/<sha256>.pdf`、`translations/<tid>/translated.pdf` | 原文（按内容去重）与译文；不自动删除 |
+| `translations/<tid>/events.jsonl.gz` | 原始引擎事件，7 天 |
+| `work/<tid>/` | 运行中的引擎 workdir，结束或重启即删 |
+| `preview/`、`dual/`、`tmp/` | 预览（5GB 上限）、对照版（24h/2GB）、上传临时文件（1 天） |
+
+部署形态（zcy，端口 1515、systemd、nginx）见 [运行与验证](docs/guide/cli.md#云端版)。
 
 ### 局部修改与交付
 
@@ -111,13 +135,14 @@ job 子进程由 serve 以 `sys.executable -m babeldoc_tools` 起，serve 会把
 | bbox 坐标的坐标系由服务端**只标注不转换**（`coord_system`），换算点只有前端 `BboxLayer.pdfToScreen`；预览四档各有固定数据源，只有「排版框」（`pdf_native`，对应草稿 `layout.box`）可拖拽编辑，译文侧识别框是只读的 | `views.py::geometry_*`、`schemas.py`（`COORD_SYSTEM_*`）、`web/src/lib/preview.ts`、`BboxLayer.tsx`、`tests/preview-coords.test.ts`、`tests/bbox-visibility-editing.test.tsx` |
 | 译文侧版面识别是**编译后的附加产物**：不能阻断 build，没识别成功不得拿源侧 IR / `layout_geometry.json` 冒充译文框，也不得留下上一轮 IR | `target_layout.py`、`mineru_doclayout.py`、`views.py::geometry_target`、`tests/test_target_layout.py`、`tests/test_serve_documents.py` |
 | HTTP 文件访问经文档范围解析、产物白名单或资产归属校验 | `store.py`、`artifacts.py`、`routers/artifacts.py`、`tests/test_serve_artifacts.py` |
+| 云端版所有 job 接口只认本人未删除的记录，他人一律 404；缓存命中、取消、失败不占额度；同键不重复翻译 | `cloud/app.py::owned`、`cloud/jobs.py`、`tests/cloud/` |
 | 测试证据写入仓库 `tmp/`，不得纳入版本控制 | `.gitignore`、`AGENTS.md` |
 
 ## 6. 已知缺口
 
 - 双轨存储与两套编译/事件协议仍并存；统一迁移和旧路径退役时间未定。旧注释和部分测试还保留自动防抖编译的预期，判断行为应追到执行函数。
 - `bdt serve --cleanup` 仅清理服务根下过期的 `tmp/`、`cache/` 文件；没有对全部 workdir、debug、历史版本和资产的容量预算/自动淘汰闭环。
-- 尚未量化真实云服务器的磁盘峰值、并发与恢复目标。数据库和远端资产后端选型保持待定；不得从本机实现推断公网部署已就绪。
+- 云端版在 zcy（4 核 / 3.6GB）上的实测（2026-09-25）：同时只跑一篇；服务 cgroup 峰值约 2.4GB，系统可用内存最低约 1.0GB。每篇长期占用约 6MB（原文、译文、events.gz）；预览缓存约 30–40MB/篇（有上限 5GB）；对照版约 5MB（缓存 24h）。服务器出口约 120KB/s，是首屏与下载的主要瓶颈：预览每页约 270KB，4MB 译文下载约 33s。停服重启只重跑运行中那一篇。多篇并发、多机和远端资产仍未设计；工作台 `bdt serve` 没有公网部署形态。
 
 ## 7. 开发中的 Rust PDF 后端
 

@@ -8,6 +8,7 @@
 | [子代理委派规范](guide/delegation.md) | 完整委派约束、harness 用法、brief 与验收 | 主控委派前及叶子开始任务前 |
 | [管线与数据](reference/pipeline.md) | 当前阶段、协议、恢复与存储责任 | 修改解析、翻译、重建或持久化 |
 | [HTTP 与工作台](reference/http-api.md) | 当前接口、进度游标、草稿/编译/导出语义 | 修改服务或前端 |
+| [云端版接口](reference/cloud-api.md) | `bdt cloud` 的登录、上传、缓存、队列、SSE、预览与下载 | 修改云端后端或 `cloud-web/` |
 | [在线部署设计](design/online-translation.md) | 目标、约束、候选与未决事项 | 讨论下一步演进；不能据此假定已有功能 |
 | [已知重大问题](issues/index.md) | 已发现但未修复的严重缺陷：现象、证据、根因、候选方案 | 排查异常、评估风险或动手修之前 |
 | [修复报告](reports/2026-09-21-stream-preview-compile.md) | 已完成的重大修复：根因、改动、实测数据、遗留项 | 回顾某次修复的依据，或接手其遗留项 |

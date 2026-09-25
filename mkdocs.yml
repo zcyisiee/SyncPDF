@@ -53,4 +53,5 @@ nav:
   - 子代理委派规范: guide/delegation.md
   - 管线与数据: reference/pipeline.md
   - HTTP 与工作台: reference/http-api.md
+  - 云端版接口: reference/cloud-api.md
   - 在线部署设计: design/online-translation.md
