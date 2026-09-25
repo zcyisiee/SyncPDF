@@ -53,18 +53,12 @@ fn fit(
     .then_some(result.paragraph)
 }
 
-/// Refine only unsaved pages. All candidates are laid out from immutable source
-/// and cached parsed translations; publication still uses one cloned transaction.
-pub(super) fn refine_page(state: &mut RunState, page: u32, sink: &SharedSink) {
-    let Some(bound) = state.bound.get(&page) else {
-        return;
-    };
-    let crop = bound.ir.crop_box;
-    // Whitespace between columns can be reused; the paper's outer text margin
-    // remains a boundary even when the CropBox extends to the sheet edge.
-    let mut text_area = crop;
-    text_area.x1 = bound
-        .ir
+/// Whitespace between columns can be reused; the paper's outer text margin
+/// remains a boundary even when the CropBox extends to the sheet edge.
+fn text_area(ir: &syncpdf_core::ir::PageIR) -> Rect {
+    let crop = ir.crop_box;
+    let mut area = crop;
+    area.x1 = ir
         .glyphs()
         .filter(|g| {
             !g.flags.invisible
@@ -75,6 +69,17 @@ pub(super) fn refine_page(state: &mut RunState, page: u32, sink: &SharedSink) {
         .reduce(f32::max)
         .unwrap_or(crop.x1)
         .min(crop.x1);
+    area
+}
+
+/// Refine only unsaved pages. All candidates are laid out from immutable source
+/// and cached parsed translations; publication still uses one cloned transaction.
+pub(super) fn refine_page(state: &mut RunState, page: u32, sink: &SharedSink) {
+    let Some(bound) = state.bound.get(&page) else {
+        return;
+    };
+    let crop = bound.ir.crop_box;
+    let text_area = text_area(&bound.ir);
     // 角色按各 target 的区域类别决定（只影响选字；obstacles/几何只用
     // glyph_bounds），candidates 循环内逐 target 重建。
     let candidates: Vec<_> = state
@@ -120,7 +125,7 @@ pub(super) fn refine_page(state: &mut RunState, page: u32, sink: &SharedSink) {
                 }
             }
             if accepted.is_empty() {
-                accepted = reflow_column(state, bound, id, placed, crop, &shaper);
+                accepted = reflow_column(state, bound, id, placed, crop, text_area, &shaper);
             }
             if accepted.is_empty() {
                 continue;
@@ -189,7 +194,16 @@ fn restore_separation(state: &mut RunState, page: u32, sink: &SharedSink) {
         }
         let shaper = StoreShaper::new(&state.font_store, &state.font_profile)
             .with_role(stages::typeset::role_for_region(para.kind));
-        let accepted = reflow_column(state, &state.bound[&page], &id, placed, crop, &shaper);
+        let bound = &state.bound[&page];
+        let accepted = reflow_column(
+            state,
+            bound,
+            &id,
+            placed,
+            crop,
+            text_area(&bound.ir),
+            &shaper,
+        );
         if accepted.is_empty() {
             continue;
         }
@@ -259,6 +273,7 @@ fn reflow_column(
     id: &ParagraphId,
     placed: &[TypesetParagraph],
     crop: Rect,
+    text_area: Rect,
     shaper: &StoreShaper<'_>,
 ) -> Vec<(LayoutFrame, TypesetParagraph)> {
     let para = &state.pars[id];
@@ -267,19 +282,22 @@ fn reflow_column(
             && (other.bbox.x1.min(para.bbox.x1) - other.bbox.x0.max(para.bbox.x0))
                 > 0.8 * other.bbox.width().min(para.bbox.width())
     };
-    // A member's current frame and ink (its accepted placement, or a probe of
-    // its translation in the initial frame), and how much looser its target
-    // line pitch is than the source's.
-    let member = |pid: &ParagraphId| -> Option<(&LayoutFrame, Rect, f32)> {
-        let frame = state.frames.get(pid)?;
+    // A member's frame and ink: its accepted placement, or a probe of its
+    // translation in its initial (or widened) frame; plus how much looser its
+    // target line pitch is than the source's.
+    let member = |pid: &ParagraphId, wide: Option<&'_ LayoutFrame>| {
         let target = state.targets.get(pid)?;
         let source_pitch = state.pars[pid].line_height;
-        if let Some(laid) = placed.iter().find(|p| p.id == *pid) {
-            return Some((frame, laid.used_bbox, laid.line_height - source_pitch));
+        if wide.is_none() {
+            if let Some(laid) = placed.iter().find(|p| p.id == *pid) {
+                let frame = state.frames.get(pid)?.clone();
+                return Some((frame, laid.used_bbox, laid.line_height - source_pitch));
+            }
         }
+        let frame = wide.or(state.frames.get(pid))?.clone();
         let shaper = StoreShaper::new(&state.font_store, &state.font_profile)
             .with_role(stages::typeset::role_for_region(target.para.kind));
-        probe(target, frame, crop, &shaper, state.typography)
+        probe(target, &frame, crop, &shaper, state.typography)
             .map(|p| (frame, p.used_bbox, p.line_height - source_pitch))
     };
     let page_paras: Vec<&Paragraph> = state
@@ -351,15 +369,6 @@ fn reflow_column(
     if stack.len() < 2 {
         return Vec::new();
     }
-    let mut group = Vec::new();
-    let mut leading = Vec::new();
-    for p in &stack {
-        let Some((frame, used, lead)) = member(&p.id) else {
-            return Vec::new();
-        };
-        group.push((*p, frame, used));
-        leading.push(lead);
-    }
     // Vertical limits: the source edge where content lies beyond it, else the
     // body extent of the page (translatable paragraphs), never the margin.
     let top = stack[0].bbox.y1;
@@ -391,27 +400,53 @@ fn reflow_column(
         body_bottom
     };
     let limits = Rect::new(crop.x0, floor.max(crop.y0), crop.x1, ceiling.min(crop.y1));
-    for frames in stages::refine::group_frames(&group, &leading, limits, &obstacles) {
-        let results: Option<Vec<_>> = group
-            .iter()
-            .zip(frames)
-            .map(|((p, _, _), frame)| {
-                let target = &state.targets[&p.id];
-                let shaper = StoreShaper::new(&state.font_store, &state.font_profile)
-                    .with_role(stages::typeset::role_for_region(target.para.kind));
-                fit(target, &frame, &shaper, state.typography).map(|laid| (frame, laid))
-            })
-            .collect();
-        let Some(results) = results else {
-            continue;
-        };
-        if results
-            .windows(2)
-            .any(|p| p[0].1.used_bbox.y0 - p[1].1.used_bbox.y1 < 0.24)
-        {
-            continue;
+    // Each member keeps its own measure first. A stack still too tall may
+    // widen every member to the right, as a single paragraph may: a short
+    // source line's extent is not the column's measure.
+    let widened: Vec<Option<LayoutFrame>> = stack
+        .iter()
+        .map(|p| {
+            let frame = state.frames.get(&p.id)?;
+            stages::refine::wider_measure(p, frame, text_area, &obstacles)
+        })
+        .collect();
+    for widen in [false, true] {
+        if widen && widened.iter().all(Option::is_none) {
+            break;
         }
-        return results;
+        let mut group = Vec::new();
+        let mut leading = Vec::new();
+        for (p, wide) in stack.iter().zip(&widened) {
+            let wide = wide.as_ref().filter(|_| widen);
+            let Some((frame, used, lead)) = member(&p.id, wide) else {
+                return Vec::new();
+            };
+            group.push((*p, frame, used));
+            leading.push(lead);
+        }
+        let group: Vec<_> = group.iter().map(|(p, f, u)| (*p, f, *u)).collect();
+        for frames in stages::refine::group_frames(&group, &leading, limits, &obstacles) {
+            let results: Option<Vec<_>> = group
+                .iter()
+                .zip(frames)
+                .map(|((p, _, _), frame)| {
+                    let target = &state.targets[&p.id];
+                    let shaper = StoreShaper::new(&state.font_store, &state.font_profile)
+                        .with_role(stages::typeset::role_for_region(target.para.kind));
+                    fit(target, &frame, &shaper, state.typography).map(|laid| (frame, laid))
+                })
+                .collect();
+            let Some(results) = results else {
+                continue;
+            };
+            if results
+                .windows(2)
+                .any(|p| p[0].1.used_bbox.y0 - p[1].1.used_bbox.y1 < 0.24)
+            {
+                continue;
+            }
+            return results;
+        }
     }
     Vec::new()
 }
@@ -595,5 +630,106 @@ mod tests {
             stages::refine::free_frames(&state.pars[&id], &frame, measured.used_bbox, crop, &[]);
         assert_eq!(spaces.len(), 1);
         assert!(fit(&state.targets[&id], &spaces[0], &shaper, state.typography).is_some());
+    }
+
+    /// A (unplaced) needs a third line; B below is a short source line whose
+    /// translation wraps at its source extent but fits one line at the column
+    /// measure. The stack has room for A's third line only if B widens.
+    fn narrow_tail_state(dir: &Path, blocked_right: bool) -> RunState {
+        let (mut state, _) = super::super::transaction_tests::state(dir);
+        let a: ParagraphId = "P01-001".parse().unwrap();
+        let b: ParagraphId = "P01-002".parse().unwrap();
+        let crop = Rect::new(0., 0., 300., 300.);
+        state.bound.get_mut(&0).unwrap().ir.crop_box = crop;
+        let right = text_area(&state.bound[&0].ir).x1;
+        assert!(right >= 90., "fixture text area too narrow: {right}");
+        let mut first = state.pars[&a].clone();
+        first.bbox = Rect::new(20., 180., right, 215.);
+        let mut next = first.clone();
+        next.id = b.clone();
+        next.glyphs.clear();
+        next.bbox = Rect::new(20., 150., 56., 176.);
+        let prepare = |p: &Paragraph, text: &str| {
+            let html = format!("<p id=\"{}\">{text}</p>", p.id);
+            let parsed = syncpdf_translate::parse_unit_html(&html).unwrap();
+            stages::link_text::prepare(p, &state.bound[&0].ir, &state.doc, &parsed).unwrap()
+        };
+        let first_target = prepare(&first, "甲乙<br>丙丁<br>戊己");
+        let next_target = prepare(&next, "子丑寅卯辰");
+        let shaper = StoreShaper::new(&state.font_store, &state.font_profile);
+        let first_frame = LayoutFrame {
+            bbox: Rect::new(20., 0., right, 300.),
+            first_baseline: 200.,
+            obstacles: vec![],
+        };
+        let first_laid =
+            probe(&first_target, &first_frame, crop, &shaper, state.typography).unwrap();
+        let mut narrow = LayoutFrame {
+            bbox: Rect::new(20., 0., 56., 300.),
+            first_baseline: 160.,
+            obstacles: vec![],
+        };
+        let mut wide = narrow.clone();
+        wide.bbox.x1 = right;
+        let two = probe(&next_target, &narrow, crop, &shaper, state.typography).unwrap();
+        let one = probe(&next_target, &wide, crop, &shaper, state.typography).unwrap();
+        assert_eq!((two.lines.len(), one.lines.len()), (2, 1));
+        let sep = stages::refine::separation(
+            4.,
+            first_laid.line_height - first.line_height,
+            one.line_height - next.line_height,
+        );
+        // Room for A's three lines, the separation and B's single line only.
+        let floor = first_laid.used_bbox.y0 - sep - one.used_bbox.height() - 1.;
+        next.bbox.y0 = floor;
+        narrow.first_baseline += floor + 2. - two.used_bbox.y0;
+        let next_laid = probe(&next_target, &narrow, crop, &shaper, state.typography).unwrap();
+        state.frames.insert(a.clone(), first_frame);
+        state.frames.insert(b.clone(), narrow);
+        state.pars.insert(a.clone(), first);
+        state.pars.insert(b.clone(), next);
+        state.targets.insert(a, first_target);
+        state.targets.insert(b, next_target);
+        let ir = &mut state.bound.get_mut(&0).unwrap().ir;
+        ir.items.push(DisplayItem::Image {
+            bbox: Rect::new(0., first_laid.used_bbox.y1 + 0.25, 300., 300.),
+        });
+        ir.items.push(DisplayItem::Image {
+            bbox: Rect::new(0., 0., 300., floor),
+        });
+        if blocked_right {
+            ir.items.push(DisplayItem::Image {
+                bbox: Rect::new(58., floor + 1., 300., 175.),
+            });
+        }
+        state.typeset_by_page.insert(0, vec![next_laid]);
+        state.fallbacks = 1;
+        state
+    }
+
+    #[test]
+    fn stack_widens_a_short_source_line_to_the_column_to_make_room() {
+        for blocked_right in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut state = narrow_tail_state(dir.path(), blocked_right);
+            let sink = SharedSink::new(super::super::tests::RunRecorder::new(Arc::new(
+                Mutex::new(Vec::new()),
+            )));
+            refine_page(&mut state, 0, &sink);
+            let laid = &state.typeset_by_page[&0];
+            let find = |id: &str| laid.iter().find(|p| p.id.to_string() == id);
+            if blocked_right {
+                // Nothing to borrow on the right: A stays a fallback, B unchanged.
+                assert_eq!(state.fallbacks, 1);
+                assert!(find("P01-001").is_none());
+                assert_eq!(find("P01-002").unwrap().lines.len(), 2);
+            } else {
+                assert_eq!(state.fallbacks, 0);
+                assert_eq!(find("P01-001").unwrap().lines.len(), 3);
+                let next = find("P01-002").unwrap();
+                assert_eq!(next.lines.len(), 1);
+                assert!(next.used_bbox.x1 > 56.);
+            }
+        }
     }
 }
