@@ -1380,6 +1380,9 @@ fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) -> Result<
             stages::link_text::hide_dropped(&mut candidate, target)?;
         }
     }
+    // 主文档常驻：本页改动的流在这里压缩一次，之后每次快照只压缩重放的新流，
+    // 而不是把所有已就绪页的改动再压一遍。
+    candidate.compress();
     let published: BTreeMap<_, _> = typeset_by_page
         .iter()
         .filter(|(p, _)| **p == page || ready.contains(p))
