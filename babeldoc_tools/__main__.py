@@ -55,6 +55,7 @@ from babeldoc_tools import review
 from babeldoc_tools import run as run_tool
 from babeldoc_tools import rust_backend
 from babeldoc_tools import translate
+from babeldoc_tools.cloud import cli as cloud_cli
 from babeldoc_tools.serve import cli as serve_cli
 
 #: ``run`` 的续跑起点；顺序与 :data:`babeldoc_tools.run.STAGES` 一致。
@@ -480,6 +481,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # ---- serve ----------------------------------------------------------- #
     # Web 前端入口；只 import 标准库 + store/schemas，缺 web extra 也能 --help。
     serve_cli.add_parser(sub)
+    cloud_cli.add_parser(sub)
 
     return parser
 
@@ -927,6 +929,8 @@ def main(argv=None) -> int:
     if args.command == "serve":
         # 长驻服务：自己写启动信封（绑定端口后才知道真实 URL），不走单行 JSON 收尾。
         return serve_cli.run(args)
+    if args.command == "cloud":
+        return cloud_cli.run(args)
     # 实现函数/第三方库的 print 一律走 stderr，保证 stdout 只有最终 JSON。
     with contextlib.redirect_stdout(sys.stderr):
         payload = _dispatch(args)

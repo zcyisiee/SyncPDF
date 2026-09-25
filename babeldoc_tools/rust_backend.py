@@ -18,6 +18,11 @@ from babeldoc_tools.common import ToolError
 
 _ARTIFACTS = ("translated.pdf", "dual.pdf", "events.jsonl", "stderr.log", "result.json")
 _ENGINE = Path(__file__).resolve().parents[1] / "engine/target/release/syncpdf-cli"
+#: Issue codes that keep a paragraph in the source language before translation starts.
+BLOCKED_ISSUE_CODES = frozenset({
+    "protected_source_overlap", "translatable_region_overlap", "rotated_source_text",
+    "unmapped_source_glyph", "bind_page_unreliable",
+})
 
 
 def _error(code: str, message: str, **details: object) -> dict:
@@ -228,10 +233,9 @@ def _translate_pdf(
                         elif kind == "page_ready" and isinstance(event.get("page"), int):
                             ready_pages.add(event["page"])
                         elif kind == "issue":
-                            if event.get("code") in {
-                                "protected_source_overlap", "translatable_region_overlap", "rotated_source_text",
-                                "unmapped_source_glyph", "bind_page_unreliable",
-                            } and isinstance(event.get("paragraph_id"), str):
+                            if event.get("code") in BLOCKED_ISSUE_CODES and isinstance(
+                                event.get("paragraph_id"), str
+                            ):
                                 blocked_ids.add(event["paragraph_id"])
                             if event.get("code") == "coverage_gap" and isinstance(event.get("page"), int):
                                 coverage_gap_pages.add(event["page"])

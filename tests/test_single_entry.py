@@ -213,7 +213,7 @@ def test_run_without_reviewer_stops_waiting(tmp_path):
 
 
 def test_cli_help_lists_ten_subcommands():
-    """`bdt --help` 暴露 10 个固定子命令（含 debug/serve），没有 call/list/schema 元命令。"""
+    """`bdt --help` 暴露固定子命令（含 debug/serve/cloud），没有 call/list/schema 元命令。"""
     out = _cli("--help")
     assert out.returncode == 0, out.stderr
     for command in (
@@ -227,6 +227,7 @@ def test_cli_help_lists_ten_subcommands():
         "debug",
         "run",
         "serve",
+        "cloud",
     ):
         assert command in out.stdout
     for removed in ("call", "list", "schema"):
