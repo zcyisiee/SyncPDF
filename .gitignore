@@ -72,6 +72,8 @@ temp.jpg
 
 # web/ 前端工程的 JSON 配置（根 `*.json` 规则会误伤 package.json / tsconfig.json 等）
 !web/**/*.json
+!cloud-web/package.json
+!cloud-web/tsconfig.json
 
 # Local model credentials (owner-only files; never version control)
 **/.bdt-serve/model-credentials/

@@ -1,0 +1,26 @@
+{
+  "name": "synctranslate-cloud-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "镜译 SyncTranslate 云端版前端（Vite + React 18 + TS），接口见 docs/reference/cloud-api.md",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "e2e": "node e2e/run.mjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^5.2.0",
+    "playwright": "^1.63.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6"
+  }
+}
