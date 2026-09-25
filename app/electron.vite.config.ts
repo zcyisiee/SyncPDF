@@ -94,6 +94,10 @@ export default defineConfig({
       lib: {
         entry: resolve(__dirname, 'src/preload/index.ts'),
       },
+      // sandbox 渲染进程只能加载 CJS preload；package 是 type:module，须显式指定
+      rollupOptions: {
+        output: { format: 'cjs', entryFileNames: '[name].cjs' },
+      },
     },
     resolve: {
       alias: {

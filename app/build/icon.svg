@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- R3-a-charcoal. 左下英文标签经 S 形内容流改写为右上中文标签；配色取自 claude-cream -->
+  <rect x="30" y="16" width="64" height="94" rx="5" fill="#d8d2c3" transform="rotate(-10 62 63)"/>
+  <rect x="36" y="16" width="62" height="94" rx="5" fill="#2d2e2d"/>
+  <path d="M56 86C80 86 84 68 64 64S50 42 74 46" fill="none" stroke="#e6bf7a" stroke-width="4.5" stroke-linecap="round"/>
+  <rect x="14" y="80" width="52" height="20" rx="3" fill="#f8f7f2" stroke="#d8d2c3" stroke-width="1.5"/>
+  <text x="27" y="96" text-anchor="middle" font-family="Avenir Next, Helvetica Neue, Arial" font-weight="800" font-size="17" fill="#2d2e2d">A</text>
+  <rect x="38" y="85.5" width="21" height="3" rx="1.5" fill="#2d2e2d"/>
+  <rect x="38" y="91.5" width="14" height="3" rx="1.5" fill="#2d2e2d"/>
+  <rect x="62" y="28" width="52" height="20" rx="3" fill="#b7791f"/>
+  <rect x="69" y="33.5" width="14" height="3" rx="1.5" fill="#fff8f3"/>
+  <rect x="69" y="39.5" width="9" height="3" rx="1.5" fill="#fff8f3"/>
+  <text x="100" y="44" text-anchor="middle" font-family="PingFang SC, Hiragino Sans GB, sans-serif" font-weight="700" font-size="16" fill="#fff8f3">中</text>
+</svg>

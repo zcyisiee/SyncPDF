@@ -32,7 +32,7 @@ use syncpdf_core::ParagraphId;
 use syncpdf_font::{FontProfile, FontStore};
 use syncpdf_pdf::bind::BoundPage;
 use syncpdf_pdf::writer::FontStats;
-use syncpdf_protocol::{Event, Request, Severity, Stage, Stats, PROTOCOL_VERSION};
+use syncpdf_protocol::{BlockStyle, Event, Request, Severity, Stage, Stats, PROTOCOL_VERSION};
 use syncpdf_store::Store;
 use syncpdf_typeset::{Obstacles, TypesetIssue};
 
@@ -106,6 +106,7 @@ impl RunConfig {
             font_profile: None,
             terminology: None,
             mode: syncpdf_protocol::Mode::Full,
+            store: None,
         };
         Self::new(cfg, run)
     }
@@ -123,6 +124,7 @@ impl RunConfig {
                 font_profile,
                 terminology,
                 mode,
+                store,
             } => Some(RunFields {
                 doc_id,
                 input,
@@ -133,6 +135,7 @@ impl RunConfig {
                 font_profile: font_profile.as_deref(),
                 terminology: terminology.as_deref(),
                 mode: *mode,
+                store: store.as_deref(),
             }),
             _ => None,
         }
@@ -167,6 +170,8 @@ pub struct RunFields<'a> {
     pub font_profile: Option<&'a str>,
     pub terminology: Option<&'a Path>,
     pub mode: syncpdf_protocol::Mode,
+    /// 本篇阶段缓存库；`None` 用 `Pipeline::store_path`。
+    pub store: Option<&'a Path>,
 }
 
 /// run 结束时的汇总（对应 `run_finished` 与 `document_finished`）。
@@ -223,9 +228,22 @@ impl Pipeline {
     pub async fn run(
         &self,
         cfg: &RunConfig,
-        mut sink: SharedSink,
+        sink: SharedSink,
         cancel: CancellationToken,
     ) -> Result<RunSummary, PipelineError> {
+        self.run_retaining(cfg, sink, cancel, &mut None).await
+    }
+
+    /// 同 [`Self::run`]；成功时把排版状态留在 `retained`，供之后的编辑只重编
+    /// 被编辑的页（[`Retained::recompile`]）。
+    pub async fn run_retaining(
+        &self,
+        cfg: &RunConfig,
+        mut sink: SharedSink,
+        cancel: CancellationToken,
+        retained: &mut Option<Retained>,
+    ) -> Result<RunSummary, PipelineError> {
+        *retained = None;
         let started = Instant::now();
         let fields = cfg
             .run_fields()
@@ -276,7 +294,7 @@ impl Pipeline {
 
         let result = self
             .run_stages(
-                &mut sink, &worker, &pf, &fields, cfg, &cancel, &selected, started,
+                &mut sink, &worker, &pf, &fields, cfg, &cancel, &selected, started, retained,
             )
             .await;
 
@@ -319,13 +337,14 @@ impl Pipeline {
         cancel: &CancellationToken,
         selected: &[u32],
         started: Instant,
+        retained: &mut Option<Retained>,
     ) -> Result<RunSummary, PipelineError> {
         // ── 1. source_analysis（结果入阶段缓存）────────────────────────
         emit_stage_started(sink, Stage::SourceAnalysis);
         let t = Instant::now();
         check_cancelled(cancel)?;
         let main_doc = load_lopdf(fields.input)?;
-        let store = open_store(&self.store_path)?;
+        let store = open_store(fields.store.unwrap_or(&self.store_path))?;
         let bound_pages =
             stages::source_analysis(worker, pf.doc, &main_doc, selected, cancel, |d, n| {
                 tracing::debug!(done = d, total = n, "source_analysis 进度");
@@ -469,6 +488,10 @@ impl Pipeline {
                 total: pages_ir.len() as u32,
             });
             stages::source_toc::refine(&mut regions, page_ir, &main_doc);
+            sink.emit(Event::Layout {
+                page: page + 1,
+                regions: layout_regions(&regions),
+            });
             per_page_regions.push((page, regions));
         }
         if let Some(profile) = model
@@ -483,6 +506,7 @@ impl Pipeline {
         emit_stage_started(sink, Stage::ParagraphAnalysis);
         let t = Instant::now();
         let mut all_paras: Vec<Paragraph> = Vec::new();
+        let mut author_ids: Vec<ParagraphId> = Vec::new();
         for (page, regions) in &per_page_regions {
             check_cancelled(cancel)?;
             let ir = pages_ir
@@ -498,7 +522,11 @@ impl Pipeline {
                     b.unproven_source_ops(),
                 );
             }
-            stages::source_policy::protect_front_matter(ir, regions, &mut paragraphs);
+            author_ids.extend(stages::source_policy::protect_front_matter(
+                ir,
+                regions,
+                &mut paragraphs,
+            ));
             stages::source_opaque::protect(&mut paragraphs, ir);
             stages::source_opaque::keep_list_bullets(&mut paragraphs, ir);
             stages::source_decoration::claim(ir, &mut paragraphs);
@@ -507,15 +535,16 @@ impl Pipeline {
             all_paras.extend(paragraphs);
         }
         stages::source_policy::protect_author_lists(&mut all_paras);
+        if selected.contains(&0) {
+            sink.emit(doc_meta(&all_paras, &author_ids));
+        }
         for p in &all_paras {
-            sink.emit(Event::Paragraph {
-                paragraph_id: p.id.clone(),
-                page: p.id.page,
-                status: ParagraphStatus::Pending,
-                boxes: Some(vec![p.bbox]),
-                coord_system: syncpdf_core::CoordSystem::PdfUser,
-                translated_html: None,
-            });
+            sink.emit(paragraph_event(
+                p,
+                ParagraphStatus::Pending,
+                Some(vec![p.bbox]),
+                None,
+            ));
         }
         emit_stage_finished(sink, Stage::ParagraphAnalysis, t);
 
@@ -548,14 +577,12 @@ impl Pipeline {
                     });
                 }
             }
-            sink.emit(Event::Paragraph {
-                paragraph_id: p.id.clone(),
-                page: p.id.page,
-                status: ParagraphStatus::NotReplaced,
-                boxes: Some(vec![p.bbox]),
-                coord_system: syncpdf_core::CoordSystem::PdfUser,
-                translated_html: None,
-            });
+            sink.emit(paragraph_event(
+                p,
+                ParagraphStatus::NotReplaced,
+                Some(vec![p.bbox]),
+                None,
+            ));
         }
 
         // ── 4. translating + typesetting（流式）────────────────────────
@@ -593,6 +620,7 @@ impl Pipeline {
             }
         }
 
+        let edits = load_block_edits(&store, fields.doc_id, sink);
         let origin = descent::Origin {
             doc: main_doc.clone(),
             frames: frames.clone(),
@@ -608,22 +636,26 @@ impl Pipeline {
             page_heights,
             pars: all_paras
                 .iter()
-                .map(|p| (p.id.clone(), p.clone()))
+                .map(|p| {
+                    let mut p = p.clone();
+                    if let Some(align) = edits.styles.get(&p.id).and_then(|s| s.align) {
+                        p.align = stages::typeset::align_of(align);
+                    }
+                    (p.id.clone(), p)
+                })
                 .collect(),
             font_store,
             font_profile,
             schedule,
             output: fields.output.to_path_buf(),
-            src_chars: 0,
-            tgt_chars: 0,
-            fallbacks: 0,
-            settled: 0,
             settled_ids: BTreeSet::new(),
+            echoed: BTreeSet::new(),
             ready: Vec::new(),
             revision: 0,
             font_stats: None,
             callback_error: None,
             blocks: Vec::new(),
+            styles: edits.styles,
         }));
 
         // 无段落的选定页（含只有不可译段落的页）先转就绪并回写。
@@ -688,6 +720,7 @@ impl Pipeline {
                 cache.as_ref(),
                 on_block,
                 cfg.cache_only,
+                edits.overrides.clone(),
             ) => r,
         };
         drop(pages_ir);
@@ -696,6 +729,17 @@ impl Pipeline {
             return Err(error);
         }
         let translated = translated?;
+        // 重译拿到了模型新译文（已写进翻译缓存）：清掉待重译标记。
+        for block in &translated.blocks {
+            if edits.overrides.fresh.contains(&block.id)
+                && block.status.is_ok()
+                && !block.from_cache
+            {
+                if let Err(e) = store.clear_retranslate(fields.doc_id, &block.id) {
+                    tracing::warn!(error = %e, para = %block.id, "清除重译标记失败");
+                }
+            }
+        }
         sink.emit(Event::Issue {
             severity: Severity::Info,
             code: "translation_requests".into(),
@@ -754,7 +798,7 @@ impl Pipeline {
         let t = Instant::now();
         let (summary_stats, settled) = {
             let s = lock_state(&state);
-            (s.stats(), s.settled)
+            (s.stats(), s.settled())
         };
         // 按策略保留的 reference/脚注等不是回退；保护冲突阻断的可译内容则未完成。
         let protected = not_replaced.iter().filter(|p| {
@@ -807,6 +851,19 @@ impl Pipeline {
 
         let elapsed_ms = started.elapsed().as_millis() as u64;
         sink.emit(Event::RunFinished { ok, elapsed_ms });
+        // 流式回调已随翻译 future 释放，这里是状态的唯一持有者。
+        if let Ok(state) = Arc::try_unwrap(state) {
+            *retained = Some(Retained::new(
+                cfg,
+                fields.store.unwrap_or(&self.store_path).to_path_buf(),
+                state.into_inner().unwrap_or_else(|p| p.into_inner()),
+                origin,
+                translatable.iter().map(|p| p.id.clone()).collect(),
+                selected.to_vec(),
+                &all_paras,
+                protected > 0 || coverage_gaps > 0 || identity_errors,
+            ));
+        }
         Ok(RunSummary {
             ok,
             pages: selected.len() as u32,
@@ -860,16 +917,11 @@ struct RunState {
     schedule: PageSchedule,
     /// 输出路径（每次快照都覆盖它）。
     output: PathBuf,
-    /// 参与的原文总字符数（`expansion_ratio` 的分母）。
-    src_chars: u64,
-    /// 译文总字符数（回退段计入原文，分子）。
-    tgt_chars: u64,
-    /// 回退原文的段落数。
-    fallbacks: u32,
-    /// 已落定（译文通过或回退）的段落数。
-    settled: u32,
-    /// 已落定的段落 id（用于补齐漏译）。
+    /// 已落定（译文通过、回显或回退）的段落 id。统计由逐段结果推出而不是
+    /// 增减计数：局部重排和单页重编只改段落结果，计数不会漂移。
     settled_ids: BTreeSet<ParagraphId>,
+    /// 模型原样回显、保留原文字形的段落（不算回退）。
+    echoed: BTreeSet<ParagraphId>,
     /// 已就绪页（0 基，升序）。
     ready: Vec<u32>,
     /// `page_ready` 的 `revision` 计数。
@@ -880,9 +932,27 @@ struct RunState {
     callback_error: Option<PipelineError>,
     /// 按到达顺序保留的译文块：全文行距下调时据此重排，不再调用模型。
     blocks: Vec<syncpdf_translate::TranslatedBlock>,
+    /// 单块排版覆盖（本篇库 `block_edits`）；对齐已在构造时写进 `pars`。
+    styles: BTreeMap<ParagraphId, BlockStyle>,
 }
 
 impl RunState {
+    /// 段落的排版参数：单块覆盖优先，其余沿用整篇（含行距下调后的整篇值）。
+    fn typography_for(&self, id: &ParagraphId) -> stages::typeset::Typography {
+        match self.styles.get(id) {
+            Some(style) => self
+                .typography
+                .overridden(style.font_scale, style.line_height),
+            None => self.typography,
+        }
+    }
+
+    /// 段落的塑形器：字体族覆盖选衬线 / 无衬线角色，否则按区域类别。
+    fn shaper_for(&self, para: &Paragraph) -> StoreShaper<'_> {
+        let family = self.styles.get(&para.id).and_then(|s| s.font_family);
+        StoreShaper::new(&self.font_store, &self.font_profile)
+            .with_role(stages::typeset::role_for(para.kind, family))
+    }
     fn cjk_pages(&self) -> Vec<u32> {
         self.ready
             .iter()
@@ -904,16 +974,47 @@ impl RunState {
     /// `syncpdf_protocol::Stats` 的字段注释「输出/输入字节数之比」不一致，
     /// 见回报「已知缺口」）。
     fn stats(&self) -> Stats {
-        let expansion_ratio = if self.src_chars == 0 {
+        let (mut src_chars, mut tgt_chars) = (0u64, 0u64);
+        for id in &self.settled_ids {
+            let src = self
+                .pars
+                .get(id)
+                .map_or(0, |p| p.text.chars().count() as u64);
+            src_chars += src;
+            // 回退段与回显段计入原文。
+            tgt_chars += match self.targets.get(id) {
+                Some(t) if self.is_typeset(id) => t.parsed.text().chars().count() as u64,
+                _ => src,
+            };
+        }
+        let expansion_ratio = if src_chars == 0 {
             1.0
         } else {
-            self.tgt_chars as f64 / self.src_chars as f64
+            tgt_chars as f64 / src_chars as f64
         };
         Stats {
             fonts: self.font_stats.map_or(0, |f| f.fonts),
             expansion_ratio,
-            fallbacks: self.fallbacks,
+            fallbacks: self.fallbacks(),
         }
+    }
+
+    fn is_typeset(&self, id: &ParagraphId) -> bool {
+        self.typeset_by_page
+            .get(&(id.page - 1))
+            .is_some_and(|v| v.iter().any(|p| p.id == *id))
+    }
+
+    /// 已落定却既没排上译文、也不是回显的段落数。
+    fn fallbacks(&self) -> u32 {
+        self.settled_ids
+            .iter()
+            .filter(|id| !self.echoed.contains(*id) && !self.is_typeset(id))
+            .count() as u32
+    }
+
+    fn settled(&self) -> u32 {
+        self.settled_ids.len() as u32
     }
 }
 
@@ -1014,7 +1115,6 @@ fn handle_block(
     if !matches!(para.translatable, Translatable::Yes) {
         return Err(PipelineError::Protocol(format!("不可译段落收到译文：{id}")));
     }
-    let src_len = para.text.chars().count() as u64;
     let mut fallback: Option<(&'static str, Option<String>, String)> = None;
     let mut out: Option<(String, Vec<syncpdf_core::Rect>)> = None;
 
@@ -1079,15 +1179,14 @@ fn handle_block(
                     )));
                 }
                 state.targets.insert(id.clone(), target.clone());
-                let shaper = StoreShaper::new(&state.font_store, &state.font_profile)
-                    .with_role(stages::typeset::role_for_region(target.para.kind));
+                let shaper = state.shaper_for(&target.para);
                 let result = stages::typeset::typeset_with_typography(
                     &shaper,
                     &target.para,
                     &target.parsed,
                     &Obstacles::default(),
                     state.frames.get(&id),
-                    state.typography,
+                    state.typography_for(&id),
                 );
                 for issue in &result.issues {
                     match issue {
@@ -1123,8 +1222,6 @@ fn handle_block(
                         .entry(id.page - 1)
                         .or_default()
                         .push(result.paragraph);
-                    state.src_chars += src_len;
-                    state.tgt_chars += target.parsed.text().chars().count() as u64;
                     if !target.dropped.is_empty() {
                         let reasons: Vec<&str> =
                             target.dropped.iter().map(|(_, r)| r.as_str()).collect();
@@ -1173,31 +1270,23 @@ fn handle_block(
 
     match out {
         None if echoed => {
-            state.src_chars += src_len;
-            state.tgt_chars += src_len;
-            sink.emit(Event::Paragraph {
-                paragraph_id: id.clone(),
-                page: id.page,
-                status: ParagraphStatus::NotReplaced,
-                boxes: Some(vec![para.bbox]),
-                coord_system: syncpdf_core::CoordSystem::PdfUser,
-                translated_html: None,
-            });
+            state.echoed.insert(id.clone());
+            sink.emit(paragraph_event(
+                &para,
+                ParagraphStatus::NotReplaced,
+                Some(vec![para.bbox]),
+                None,
+            ));
         }
-        Some((html, boxes)) => sink.emit(Event::Paragraph {
-            paragraph_id: id.clone(),
-            page: id.page,
-            status: ParagraphStatus::Typeset,
-            boxes: Some(boxes),
-            coord_system: syncpdf_core::CoordSystem::PdfUser,
-            translated_html: Some(html),
-        }),
+        Some((html, boxes)) => sink.emit(paragraph_event(
+            &para,
+            ParagraphStatus::Typeset,
+            Some(boxes),
+            Some(html),
+        )),
         None => {
             let (code, detail, msg) =
                 fallback.unwrap_or(("translate_fallback", None, "回退原文".into()));
-            state.fallbacks += 1;
-            state.src_chars += src_len;
-            state.tgt_chars += src_len;
             let mut message = format!("{msg}，回退原文");
             if let Some(d) = detail {
                 message.push_str(&format!("（违规：{d}）"));
@@ -1209,22 +1298,19 @@ fn handle_block(
                 page: Some(id.page),
                 message,
             });
-            sink.emit(Event::Paragraph {
-                paragraph_id: id.clone(),
-                page: id.page,
-                status: ParagraphStatus::Fallback,
-                boxes: Some(vec![para.bbox]),
-                coord_system: syncpdf_core::CoordSystem::PdfUser,
-                translated_html: None,
-            });
+            sink.emit(paragraph_event(
+                &para,
+                ParagraphStatus::Fallback,
+                Some(vec![para.bbox]),
+                None,
+            ));
         }
     }
 
-    state.settled += 1;
     state.settled_ids.insert(id.clone());
     sink.emit(Event::Progress {
         stage: Stage::Translating,
-        done: state.settled,
+        done: state.settled(),
         total,
     });
 
@@ -1235,7 +1321,10 @@ fn handle_block(
 }
 
 mod descent;
+mod incremental;
 mod refinement;
+
+pub use incremental::Retained;
 
 /// 翻译结束后的落定：漏译段补发 fallback，未凑齐的页强制就绪并回写。
 fn settle_rest(
@@ -1252,11 +1341,6 @@ fn settle_rest(
         .collect();
     for id in missing {
         if let Some(p) = s.pars.get(&id).cloned() {
-            s.fallbacks += 1;
-            let n = p.text.chars().count() as u64;
-            s.src_chars += n;
-            s.tgt_chars += n;
-            s.settled += 1;
             s.settled_ids.insert(id.clone());
             sink.emit(Event::Issue {
                 severity: Severity::Warning,
@@ -1265,14 +1349,12 @@ fn settle_rest(
                 page: Some(id.page),
                 message: "翻译未交付该段，回退原文".into(),
             });
-            sink.emit(Event::Paragraph {
-                paragraph_id: id.clone(),
-                page: id.page,
-                status: ParagraphStatus::Fallback,
-                boxes: Some(vec![p.bbox]),
-                coord_system: syncpdf_core::CoordSystem::PdfUser,
-                translated_html: None,
-            });
+            sink.emit(paragraph_event(
+                &p,
+                ParagraphStatus::Fallback,
+                Some(vec![p.bbox]),
+                None,
+            ));
         }
         if let Some(page) = s.schedule.mark(&id) {
             writeback_page(s, page - 1, sink)?;
@@ -1338,6 +1420,9 @@ fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) -> Result<
             stages::link_text::hide_dropped(&mut candidate, target)?;
         }
     }
+    // 主文档常驻：本页改动的流在这里压缩一次，之后每次快照只压缩重放的新流，
+    // 而不是把所有已就绪页的改动再压一遍。
+    candidate.compress();
     let published: BTreeMap<_, _> = typeset_by_page
         .iter()
         .filter(|(p, _)| **p == page || ready.contains(p))
@@ -1357,28 +1442,125 @@ fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) -> Result<
     Ok(())
 }
 
-/// bind 阶段的问题转 `issue`；操作级不可证明墨迹、页级不可信、对象数不符各报。
+/// 版面区域 → `layout` 事件载荷。公式区域落在可译区域内即为行内公式——与
+/// `paragraph::inline_formula` 把它作为 KEEP 原子随正文移动的判据一致。
+fn layout_regions(regions: &[Region]) -> Vec<syncpdf_protocol::LayoutRegion> {
+    regions
+        .iter()
+        .map(|r| syncpdf_protocol::LayoutRegion {
+            kind: r.kind,
+            inline: r.kind == syncpdf_core::ir::RegionKind::Formula
+                && regions.iter().any(|p| {
+                    p.kind.translatable()
+                        && p.bbox.contains(r.bbox.center())
+                        && r.bbox
+                            .intersection(&p.bbox)
+                            .is_some_and(|i| i.area() >= r.bbox.area() * 0.9)
+                }),
+            bbox: r.bbox,
+        })
+        .collect()
+}
+
+/// 首页元数据：最上方的 Title 段落为标题；首页信息带中最上方的非机构 / 邮箱 / 地址行为作者。
+/// 信息带只剩元数据锚点行时不猜，交给 PDF Info。
+fn doc_meta(paras: &[Paragraph], author_ids: &[ParagraphId]) -> Event {
+    let first_page = |p: &&Paragraph| p.id.page == 1;
+    let top = |a: &&Paragraph, b: &&Paragraph| a.bbox.y1.total_cmp(&b.bbox.y1);
+    let text = |p: &Paragraph| {
+        let t = p.text.split_whitespace().collect::<Vec<_>>().join(" ");
+        (!t.is_empty()).then_some(t)
+    };
+    let title = paras
+        .iter()
+        .filter(first_page)
+        .filter(|p| p.kind == syncpdf_core::ir::RegionKind::Title)
+        .max_by(top)
+        .and_then(text);
+    let authors = paras
+        .iter()
+        .filter(first_page)
+        .filter(|p| author_ids.contains(&p.id))
+        .filter(|p| !stages::source_policy::metadata_anchor(&p.text))
+        .max_by(top)
+        .and_then(text);
+    Event::DocMeta { title, authors }
+}
+
+/// 段落状态事件：带上区域类别与源文本，前端据此着色与展示原文。
+pub(crate) fn paragraph_event(
+    p: &Paragraph,
+    status: ParagraphStatus,
+    boxes: Option<Vec<syncpdf_core::Rect>>,
+    translated_html: Option<String>,
+) -> Event {
+    Event::Paragraph {
+        paragraph_id: p.id.clone(),
+        page: p.id.page,
+        status,
+        boxes,
+        coord_system: syncpdf_core::CoordSystem::PdfUser,
+        translated_html,
+        kind: p.kind,
+        source_text: p.text.clone(),
+        source_bbox: p.bbox,
+    }
+}
+
+/// 每页每类诊断在 `issue` 里最多举几例；全部明细写引擎日志。
+const BIND_ISSUE_EXAMPLES: usize = 3;
+
+/// 同一页同一类诊断汇总成一条消息：条数 + 前几例。
+/// 逐条发会随内容流 / 操作数无界增长（一篇论文可达上万条），淹没问题列表。
+fn summarize_diagnostics(what: &str, messages: &[String]) -> String {
+    let examples = messages
+        .iter()
+        .take(BIND_ISSUE_EXAMPLES)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join("; ");
+    let more = messages.len().saturating_sub(BIND_ISSUE_EXAMPLES);
+    if more == 0 {
+        format!("{} {what}: {examples}", messages.len())
+    } else {
+        format!(
+            "{} {what}: {examples}; … (+{more}，明细见引擎日志)",
+            messages.len()
+        )
+    }
+}
+
+/// bind 阶段的问题转 `issue`：绑定诊断、不可证明墨迹各汇总成每页一条；
+/// 页级不可信、对象数不符各报。
 fn emit_bind_issues(sink: &mut SharedSink, bound: &BoundPage) {
     let page = bound.ir.page.number();
-    for msg in &bound.issues {
+    let unproven: Vec<String> = bound
+        .unproven_source_ops()
+        .iter()
+        .map(|u| format!("{:?}: {}", u.ink, u.note))
+        .collect();
+    let groups = [
+        ("bind diagnostics", &bound.issues),
+        (
+            "unprovable source op ink kept (overlapping paragraphs stay source)",
+            &unproven,
+        ),
+    ];
+    for (what, messages) in groups {
+        if messages.is_empty() {
+            continue;
+        }
+        if messages.len() > BIND_ISSUE_EXAMPLES {
+            for msg in messages {
+                tracing::warn!(page, "{what}: {msg}");
+            }
+        }
         sink.emit(Event::Issue {
             severity: Severity::Warning,
             code: "bind_degraded".into(),
             paragraph_id: None,
             page: Some(page),
-            message: msg.clone(),
-        });
-    }
-    for u in bound.unproven_source_ops() {
-        sink.emit(Event::Issue {
-            severity: Severity::Warning,
-            code: "bind_degraded".into(),
-            paragraph_id: None,
-            page: Some(page),
-            message: format!(
-                "unprovable source op ink kept (paragraphs overlapping {:?} stay source): {}",
-                u.ink, u.note
-            ),
+            message: summarize_diagnostics(what, messages),
         });
     }
     if bound.reliability.is_unreliable() {
@@ -1474,7 +1656,77 @@ fn load_lopdf(path: &Path) -> Result<lopdf::Document, PipelineError> {
 }
 
 /// 打开阶段缓存库。
-fn open_store(path: &Path) -> Result<Store, PipelineError> {
+/// 本篇库里的按段覆盖（桌面端编辑）。
+#[derive(Debug, Default)]
+struct BlockEdits {
+    overrides: syncpdf_translate::Overrides,
+    styles: BTreeMap<ParagraphId, BlockStyle>,
+}
+
+/// 读本篇按段覆盖。读库失败或单块排版不合法时报 `issue` 并忽略对应覆盖，
+/// 不中断翻译。
+fn load_block_edits(store: &Store, doc_id: &str, sink: &SharedSink) -> BlockEdits {
+    let mut out = BlockEdits::default();
+    let rows = match store.list_block_edits(doc_id) {
+        Ok(rows) => rows,
+        Err(e) => {
+            sink.emit(Event::Issue {
+                severity: Severity::Warning,
+                code: "block_edits_unreadable".into(),
+                paragraph_id: None,
+                page: None,
+                message: format!("读取本篇编辑失败，按无编辑处理：{e}"),
+            });
+            return out;
+        }
+    };
+    for row in rows {
+        let id = row.paragraph_id;
+        if let Some(html) = row.translated_html {
+            out.overrides.manual.insert(id.clone(), html);
+        }
+        if row.retranslate {
+            out.overrides.fresh.insert(id.clone());
+        }
+        let Some(json) = row.style else { continue };
+        match serde_json::from_str::<BlockStyle>(&json)
+            .map_err(|e| e.to_string())
+            .and_then(|style| stages::typeset::check_block_style(&style).map(|()| style))
+        {
+            Ok(style) => {
+                out.styles.insert(id, style);
+            }
+            Err(e) => sink.emit(Event::Issue {
+                severity: Severity::Warning,
+                code: "block_style_invalid".into(),
+                paragraph_id: Some(id.clone()),
+                page: Some(id.page),
+                message: format!("单块排版设置无效，已忽略：{e}"),
+            }),
+        }
+    }
+    let ids: BTreeSet<&ParagraphId> = out
+        .overrides
+        .manual
+        .keys()
+        .chain(out.styles.keys())
+        .collect();
+    let edits = ids
+        .into_iter()
+        .map(|id| syncpdf_protocol::BlockEditState {
+            paragraph_id: id.clone(),
+            manual: out.overrides.manual.contains_key(id),
+            style: out.styles.get(id).copied().unwrap_or_default(),
+        })
+        .collect();
+    sink.emit(Event::BlockEdits { edits });
+    out
+}
+
+pub(crate) fn open_store(path: &Path) -> Result<Store, PipelineError> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| PipelineError::Store(e.to_string()))?;
+    }
     Store::open(path).map_err(|e| PipelineError::Store(e.to_string()))
 }
 
@@ -1507,7 +1759,7 @@ mod tests {
     use super::*;
     use syncpdf_core::require_fixture;
 
-    fn tmp_path(ext: &str) -> PathBuf {
+    pub(super) fn tmp_path(ext: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "syncpdf-pipeline-run-{}-{}.{ext}",
             std::process::id(),
@@ -1518,7 +1770,7 @@ mod tests {
         ))
     }
 
-    fn pipeline(tmp_store: PathBuf) -> Pipeline {
+    pub(super) fn pipeline(tmp_store: PathBuf) -> Pipeline {
         Pipeline {
             fonts_dir: syncpdf_core::fixtures::fonts_dir().unwrap_or_default(),
             models_dir: syncpdf_core::fixtures::models_dir().unwrap_or_default(),
@@ -1528,7 +1780,7 @@ mod tests {
     }
 
     /// pdfium / 模型 / 字体任一缺失就跳过（返回 None）。
-    fn env_ready() -> Option<()> {
+    pub(super) fn env_ready() -> Option<()> {
         if syncpdf_pdf::pdfium::PdfiumWorker::spawn().is_err() {
             eprintln!("SKIP: pdfium 不可用");
             return None;
@@ -1540,6 +1792,139 @@ mod tests {
         }
         syncpdf_core::fixtures::fonts_dir()?;
         Some(())
+    }
+
+    fn region(index: u32, kind: syncpdf_core::ir::RegionKind, bbox: syncpdf_core::Rect) -> Region {
+        Region {
+            page: syncpdf_core::PageId(0),
+            index,
+            kind,
+            bbox,
+            score: 0.9,
+            order: index,
+        }
+    }
+
+    #[test]
+    fn layout_regions_mark_formulas_inside_prose_as_inline() {
+        use syncpdf_core::ir::RegionKind;
+        use syncpdf_core::Rect;
+        let regions = [
+            region(0, RegionKind::Text, Rect::new(50.0, 400.0, 300.0, 500.0)),
+            // 行内：整个落在正文区域里。
+            region(1, RegionKind::Formula, Rect::new(80.0, 450.0, 120.0, 462.0)),
+            // 独立公式：在正文外。
+            region(2, RegionKind::Formula, Rect::new(80.0, 300.0, 250.0, 340.0)),
+            // 落在不可译区域（表格）内的公式不是行内。
+            region(3, RegionKind::Table, Rect::new(50.0, 100.0, 300.0, 250.0)),
+            region(4, RegionKind::Formula, Rect::new(60.0, 120.0, 90.0, 130.0)),
+            // 只擦边正文的公式不是行内。
+            region(
+                5,
+                RegionKind::Formula,
+                Rect::new(280.0, 490.0, 340.0, 520.0),
+            ),
+        ];
+        let out = layout_regions(&regions);
+        let inline: Vec<bool> = out.iter().map(|r| r.inline).collect();
+        assert_eq!(inline, [false, true, false, false, false, false]);
+        assert_eq!(out[3].kind, RegionKind::Table);
+        assert_eq!(out[1].bbox, regions[1].bbox);
+    }
+
+    fn meta_para(
+        page: u32,
+        seq: u32,
+        kind: syncpdf_core::ir::RegionKind,
+        text: &str,
+        y: f32,
+    ) -> Paragraph {
+        use syncpdf_core::ir::Align;
+        Paragraph {
+            id: ParagraphId::new(syncpdf_core::PageId(page), seq),
+            page: syncpdf_core::PageId(page),
+            region: seq,
+            kind,
+            bbox: syncpdf_core::Rect::new(50.0, y, 500.0, y + 14.0),
+            lines: Vec::new(),
+            glyphs: Vec::new(),
+            text_spans: Vec::new(),
+            style_runs: Vec::new(),
+            atoms: Vec::new(),
+            decorations: Vec::new(),
+            text: text.into(),
+            align: Align::Center,
+            first_indent: 0.0,
+            line_height: 12.0,
+            is_rtl: false,
+            translatable: Translatable::Yes,
+        }
+    }
+
+    #[test]
+    fn doc_meta_uses_topmost_first_page_title_and_author_rows() {
+        use syncpdf_core::ir::RegionKind;
+        let paras = [
+            meta_para(0, 1, RegionKind::Title, "arXiv preprint", 760.0),
+            meta_para(0, 2, RegionKind::Title, "Deep\n  Learning  for PDFs", 700.0),
+            meta_para(0, 3, RegionKind::Text, "Ada Lovelace, Alan Turing", 660.0),
+            meta_para(0, 4, RegionKind::Text, "Some University", 640.0),
+            meta_para(1, 1, RegionKind::Title, "Not the title", 780.0),
+        ];
+        // 第二个 Title 在更低处；最上方的 Title 胜出（与 source_policy 一致取最上方）。
+        let authors = [paras[3].id.clone(), paras[2].id.clone()];
+        match doc_meta(&paras, &authors) {
+            Event::DocMeta { title, authors } => {
+                assert_eq!(title.as_deref(), Some("arXiv preprint"));
+                assert_eq!(authors.as_deref(), Some("Ada Lovelace, Alan Turing"));
+            }
+            other => panic!("{other:?}"),
+        }
+        // 回归：名字行不在信息带里时，机构 / 邮箱行曾被当成作者 → 跳过锚点行；只剩锚点则 None。
+        let band = [
+            meta_para(
+                0,
+                5,
+                RegionKind::Text,
+                "University of Maryland, {ada, alan}@umd.edu",
+                650.0,
+            ),
+            meta_para(
+                0,
+                6,
+                RegionKind::Text,
+                "Department of Physics, Some University",
+                630.0,
+            ),
+        ];
+        let ids: Vec<_> = band.iter().map(|p| p.id.clone()).collect();
+        match doc_meta(&band, &ids) {
+            Event::DocMeta { authors, .. } => assert!(authors.is_none(), "{authors:?}"),
+            other => panic!("{other:?}"),
+        }
+        let mixed = [band[0].clone(), band[1].clone(), paras[2].clone()];
+        let ids: Vec<_> = mixed.iter().map(|p| p.id.clone()).collect();
+        match doc_meta(&mixed, &ids) {
+            Event::DocMeta { authors, .. } => {
+                assert_eq!(authors.as_deref(), Some("Ada Lovelace, Alan Turing"))
+            }
+            other => panic!("{other:?}"),
+        }
+        // 无 Title、无作者证据 → 都是 None，不猜。
+        match doc_meta(&paras[2..4], &[]) {
+            Event::DocMeta { title, authors } => {
+                assert!(title.is_none());
+                assert!(authors.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+        // 空白规整。
+        match doc_meta(&paras[1..2], &[]) {
+            Event::DocMeta { title, .. } => {
+                assert_eq!(title.as_deref(), Some("Deep Learning for PDFs"))
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
@@ -1575,6 +1960,30 @@ mod tests {
             self.seq += 1;
             self.log.lock().expect("测试锁").push((self.seq, event));
         }
+    }
+
+    /// run 请求带 `store` 时阶段缓存落到该文件（父目录按需创建），不碰 Pipeline 默认库。
+    #[tokio::test]
+    async fn run_request_store_overrides_pipeline_store() {
+        if env_ready().is_none() {
+            return;
+        }
+        let input = require_fixture!("ci-test.pdf");
+        let dir = tempfile::tempdir().unwrap();
+        let doc_store = dir.path().join("docs").join("doc-a").join("store.db");
+        let default_store = dir.path().join("default.db");
+        let mut cfg = RunConfig::with_fake("cjk", input, dir.path().join("out.pdf")).unwrap();
+        match &mut cfg.run {
+            Request::Run { store, .. } => *store = Some(doc_store.clone()),
+            _ => unreachable!(),
+        }
+        let sink = SharedSink::new(RunRecorder::new(Arc::new(Mutex::new(Vec::new()))));
+        let result = pipeline(default_store.clone())
+            .run(&cfg, sink, CancellationToken::new())
+            .await;
+        assert!(result.is_ok(), "{result:?}");
+        assert!(doc_store.is_file(), "本篇缓存库应被创建：{doc_store:?}");
+        assert!(!default_store.exists(), "默认库不应被使用");
     }
 
     /// 端到端跑一次 ci-test：事件序列合法 + 输出存在 + 每页一次 `page_ready`。
@@ -1647,6 +2056,20 @@ mod tests {
             .collect();
         assert_eq!(ready.len() as u32, summary.pages, "每页恰发一次 page_ready");
         assert_eq!(ready, vec![1], "ci-test 只有 1 页");
+    }
+
+    /// 回归：绑定诊断逐条发 issue，一篇论文上万条淹没问题列表。
+    #[test]
+    fn bind_diagnostics_summarize_count_and_examples() {
+        let few: Vec<String> = vec!["a".into(), "b".into()];
+        assert_eq!(summarize_diagnostics("diag", &few), "2 diag: a; b");
+        let many: Vec<String> = (0..10).map(|i| format!("m{i}")).collect();
+        let summary = summarize_diagnostics("diag", &many);
+        assert!(
+            summary.starts_with("10 diag: m0; m1; m2; … (+7"),
+            "{summary}"
+        );
+        assert!(!summary.contains("m3"), "{summary}");
     }
 
     /// 取消：`fake:slow` + 立刻取消 → `run_finished{ok:false}`，且有 cancelled 事件。
@@ -1771,6 +2194,7 @@ mod tests {
             doc: fixture.doc,
             bound: fixture.bound,
             targets: BTreeMap::new(),
+            styles: BTreeMap::new(),
             typography: stages::typeset::Typography::default(),
             frames: [(
                 id.clone(),
@@ -1789,11 +2213,8 @@ mod tests {
             font_profile,
             schedule,
             output: tmp_path("pdf"),
-            src_chars: 0,
-            tgt_chars: 0,
-            fallbacks: 0,
-            settled: 0,
             settled_ids: BTreeSet::new(),
+            echoed: BTreeSet::new(),
             ready: Vec::new(),
             revision: 0,
             font_stats: None,
@@ -1824,7 +2245,7 @@ mod tests {
             state.typeset_by_page.is_empty(),
             "溢出段不得进入删除原文队列"
         );
-        assert_eq!(state.fallbacks, 1);
+        assert_eq!(state.fallbacks(), 1);
         assert!(state.settled_ids.contains(&id));
         assert_eq!(state.revision, 0);
         assert!(!state.output.exists());
@@ -1875,7 +2296,7 @@ mod tests {
             .unwrap();
             assert!(state.typeset_by_page.is_empty(), "{html}");
             assert!(state.settled_ids.contains(&id));
-            assert_eq!(state.fallbacks, u32::from(!echoed), "{html}");
+            assert_eq!(state.fallbacks(), u32::from(!echoed), "{html}");
             let log = log.lock().unwrap();
             let status = if echoed {
                 ParagraphStatus::NotReplaced

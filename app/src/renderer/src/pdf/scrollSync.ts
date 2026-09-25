@@ -1,5 +1,5 @@
 /**
- * 源栏 / 译文栏滚动同步（可开关，见 uiStore.scrollSyncEnabled）。
+ * 源栏 / 译文栏滚动同步（可开关，见 workbench store 的 `sync`）。
  *
  * 用"滚动比例"而不是绝对像素：两栏缩放倍率可能不同（译文页面尺寸一致，
  * 但栏宽不同 → fit-width 的 scale 不同），比例同步才对得上。
@@ -41,4 +41,34 @@ export function applyScrollRatio(element: HTMLElement, ratio: number): void {
   const max = element.scrollHeight - element.clientHeight;
   if (max <= 0) return;
   element.scrollTop = ratio * max;
+}
+
+/** 用户输入后这段时间内的滚动算用户滚动（惯性滚动会持续一小会儿）。 */
+export const USER_SCROLL_WINDOW_MS = 600;
+
+/**
+ * 判定一次 scroll 事件是否由用户发起。只有用户滚动才广播给对侧；
+ * 布局变化（译文重载、页面尺寸变化、scrollTop 被夹紧）、对侧同步、跳转
+ * 引起的滚动都不广播，否则两栏会互相拖动。
+ */
+export class UserScrollGate {
+  private until = 0;
+  private pointerDown = false;
+
+  constructor(private readonly now: () => number = () => performance.now()) {}
+
+  /** wheel / 键盘 / 触控输入。 */
+  noteInput(): void {
+    this.until = this.now() + USER_SCROLL_WINDOW_MS;
+  }
+
+  /** 按住滚动条拖动期间都算用户滚动。 */
+  setPointerDown(down: boolean): void {
+    this.pointerDown = down;
+    if (!down) this.noteInput();
+  }
+
+  isUserScroll(): boolean {
+    return this.pointerDown || this.now() < this.until;
+  }
 }

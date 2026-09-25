@@ -101,17 +101,15 @@ pub(super) fn state(dir: &Path) -> (RunState, PathBuf) {
             targets: BTreeMap::new(),
             typography: stages::typeset::Typography::default(),
             pars,
+            styles: BTreeMap::new(),
             font_store,
             font_profile,
             schedule,
             typeset_by_page: BTreeMap::new(),
             page_heights: [(0, 792.0), (1, 792.0)].into_iter().collect(),
             output: dir.join("output.pdf"),
-            src_chars: 0,
-            tgt_chars: 0,
-            fallbacks: 0,
-            settled: 0,
             settled_ids: BTreeSet::new(),
+            echoed: BTreeSet::new(),
             ready: vec![],
             revision: 0,
             font_stats: None,
@@ -187,7 +185,7 @@ fn snapshot_excludes_prepared_but_unready_page_and_duplicate_is_idempotent() {
     let output = std::fs::read(&s.output).unwrap();
     let events = log.lock().unwrap().len();
     handle_block(&mut s, &sink, block(2), 3).unwrap();
-    assert_eq!(s.settled, 2);
+    assert_eq!(s.settled(), 2);
     assert_eq!(s.revision, 1);
     assert_eq!(log.lock().unwrap().len(), events);
     assert_eq!(std::fs::read(&s.output).unwrap(), output);
@@ -250,7 +248,7 @@ fn atom_without_drawing_placement_keeps_source_and_is_explicit_fallback() {
     });
     let (sink, log) = recorder();
     handle_block(&mut s, &sink, block(1), 2).unwrap();
-    assert_eq!(s.fallbacks, 1);
+    assert_eq!(s.fallbacks(), 1);
     assert!(s.typeset_by_page.is_empty());
     assert!(s.cjk_pages().is_empty());
     assert_eq!(text(&s.output, 0), text(&input, 0));
@@ -328,7 +326,7 @@ fn plain_link_moves_with_glyphs_and_keeps_action() {
         .clone();
     let (sink, _) = recorder();
     handle_block(&mut s, &sink, linked_block(), 2).unwrap();
-    assert_eq!(s.fallbacks, 0);
+    assert_eq!(s.fallbacks(), 0);
     let saved = Document::load(&s.output).unwrap();
     let link = saved.get_dictionary(annot).unwrap();
     assert_ne!(link.get(b"Rect").unwrap(), &old_rect);
@@ -370,7 +368,7 @@ fn link_inside_source_formula_moves_with_the_original_glyphs() {
     translated.html = "<p id=\"P01-001\">中文 {{KEEP_1}}</p>".into();
     let (sink, _) = recorder();
     handle_block(&mut s, &sink, translated, 2).unwrap();
-    assert_eq!(s.fallbacks, 0);
+    assert_eq!(s.fallbacks(), 0);
     let saved = Document::load(&s.output).unwrap();
     let link = saved.get_dictionary(annot).unwrap();
     assert_ne!(link.get(b"Rect").unwrap(), &old_rect);
@@ -390,7 +388,7 @@ fn ambiguous_unmarked_link_keeps_translation_and_hides_link() {
     translated.html = "<p id=\"P01-001\">中文 Alpha 和 Alpha</p>".into();
     let (sink, log) = recorder();
     handle_block(&mut s, &sink, translated, 2).unwrap();
-    assert_eq!(s.fallbacks, 0);
+    assert_eq!(s.fallbacks(), 0);
     assert!(!s.typeset_by_page.is_empty());
     let saved = Document::load(&s.output).unwrap();
     let link = saved.get_dictionary(annot).unwrap();
@@ -430,7 +428,7 @@ fn missing_safe_frame_preserves_source_and_reports_reason() {
         .unwrap()
         .iter()
         .any(|(_, e)| matches!(e, Event::Issue { code, .. } if code == "layout_frame_missing")));
-    assert_eq!(s.fallbacks, 1);
+    assert_eq!(s.fallbacks(), 1);
 }
 
 /// A page whose paragraph cannot move: retained content fills the page above
@@ -478,9 +476,9 @@ fn document_leading_descends_until_the_overflowing_paragraph_fits() {
     let (mut s, origin, block) = fixed_page(dir.path(), 60);
     let (sink, log) = recorder();
     first_pass(&mut s, block, &sink);
-    assert_eq!(s.fallbacks, 1, "2.0 倍行距下必须溢出，否则本测试无意义");
+    assert_eq!(s.fallbacks(), 1, "2.0 倍行距下必须溢出，否则本测试无意义");
     descent::descend(&mut s, &origin, 1, &sink, settle).unwrap();
-    assert_eq!(s.fallbacks, 0);
+    assert_eq!(s.fallbacks(), 0);
     let leading = s.typography.describe();
     assert!(
         leading.as_str() < "2.00" && leading.as_str() >= "1.20",
@@ -510,10 +508,10 @@ fn document_leading_is_kept_when_no_lower_leading_recovers_anything() {
     let (mut s, origin, block) = fixed_page(dir.path(), 400);
     let (sink, log) = recorder();
     first_pass(&mut s, block, &sink);
-    assert_eq!(s.fallbacks, 1);
+    assert_eq!(s.fallbacks(), 1);
     let output = std::fs::read(&s.output).unwrap();
     descent::descend(&mut s, &origin, 1, &sink, settle).unwrap();
-    assert_eq!(s.fallbacks, 1);
+    assert_eq!(s.fallbacks(), 1);
     assert_eq!(s.typography.describe(), "2.00");
     assert_eq!(std::fs::read(&s.output).unwrap(), output);
     assert!(!dir.path().join("output.leading.pdf").exists());

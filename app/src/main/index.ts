@@ -1,12 +1,15 @@
 /**
- * SyncPDF 主进程入口：窗口、sidecar 生命周期、协议注册、凭据。
+ * SyncPDF 主进程入口：窗口、论文库、引擎会话 + 翻译队列、协议注册。
  */
 import { app, BrowserWindow, protocol, shell } from 'electron';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { SidecarManager } from './sidecar';
 import { AllowedRoots, FILE_PROTOCOL, registerFileProtocol } from './protocol-handler';
-import { registerIpc, broadcastEvent, type IpcDeps } from './ipc';
-import type { EngineEvent } from '../shared/protocol';
+import { pushDocChanged, pushEngineEvent, pushLog, registerIpc } from './ipc';
+import { Library } from './library';
+import { EngineQueue } from './engine';
+import type { ConfigureRequest } from '../shared/protocol';
 
 /** 开发模式判定（electron-vite 注入）。 */
 const isDev = !app.isPackaged;
@@ -19,6 +22,7 @@ protocol.registerSchemesAsPrivileged([
 /** 全局单例。 */
 let mainWindow: BrowserWindow | null = null;
 let sidecar: SidecarManager | null = null;
+let library: Library | null = null;
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -30,14 +34,14 @@ function createWindow(): void {
     // 自绘标题栏（§12.1）；红绿灯区域由系统交通灯占据
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
-    backgroundColor: '#1f1f1f',
+    backgroundColor: '#e5e0d4',
     webPreferences: {
       // 安全基线（§11）：渲染进程零 Node
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      // electron-vite 产物为 ESM（package type:module → out/preload/index.mjs）
-      preload: join(__dirname, '../preload/index.mjs'),
+      // sandbox 下 preload 必须是 CJS（见 electron.vite.config.ts）
+      preload: join(__dirname, '../preload/index.cjs'),
       spellcheck: false,
     },
   });
@@ -57,35 +61,59 @@ function createWindow(): void {
   }
 }
 
+/** 数据根目录：`SYNCPDF_HOME` 覆盖，缺省 `~/.sp`。 */
+function dataRoot(): string {
+  const override = process.env.SYNCPDF_HOME;
+  return override !== undefined && override !== '' ? override : join(homedir(), '.sp');
+}
+
 /**
- * sidecar 启动配置：
- * - 引擎二进制存在时跑 `syncpdf-cli run --protocol 1`；
- * - 引擎尚未构建（M1 未完成）时回退 fake-sidecar（dev 与测试）。
- * 环境变量 SYNCPDF_ENGINE 覆盖二进制路径。
+ * 引擎命令：`SYNCPDF_ENGINE` 指向 `syncpdf-cli` 时跑长驻会话 `run --protocol 1`；
+ * 未设置时回退 fake-sidecar（dev 与测试）。
  */
 function sidecarCommand(): { cmd: string; args: string[] } {
   const override = process.env.SYNCPDF_ENGINE;
   if (override !== undefined && override !== '') {
     return { cmd: override, args: ['run', '--protocol', '1'] };
   }
-  // fake-sidecar 用 node 运行（仓库 app/scripts/fake-sidecar.mjs）
   return { cmd: process.execPath, args: [join(app.getAppPath(), 'scripts', 'fake-sidecar.mjs')] };
 }
 
-function startSidecar(): SidecarManager {
+/** 翻译配置（设置页落地前的默认：agy + gemini-3.8-flash-low）。 */
+function configure(root: string): ConfigureRequest {
+  return {
+    type: 'configure',
+    provider: 'agy',
+    base_url: null,
+    model: 'gemini-3.8-flash-low',
+    api_key: null,
+    concurrency: 1,
+    cache_dir: join(root, 'cache'),
+    translator: { kind: 'agy', program: 'agy', model: 'gemini-3.8-flash-low' },
+  };
+}
+
+function startEngine(lib: Library): { manager: SidecarManager; queue: EngineQueue } {
+  const command = sidecarCommand();
+  // 队列与会话互相引用：会话事件进队列，队列经会话下发请求。
+  let queue: EngineQueue | null = null;
   const manager = new SidecarManager({
-    onEvent: (event: EngineEvent) => broadcastEvent(event),
-    onLog: (line) => {
-      // stderr 为引擎 tracing 日志（人读）；API key 不会出现在其中（§11）
-      console.log(`[sidecar] ${line}`);
-    },
-    onStateChange: (state) => {
-      console.log(`[sidecar] state=${state}`);
-    },
+    onEvent: (event) => queue?.handleEvent(event),
+    onLog: (line) => pushLog(line),
+    onStateChange: (state) => queue?.handleSessionState(state),
   });
-  const { cmd, args } = sidecarCommand();
-  void manager.start({ cmd, args });
-  return manager;
+  queue = new EngineQueue({
+    library: lib,
+    session: {
+      send: (request) => manager.send(request),
+      isRunning: () => manager.isRunning(),
+      start: () => manager.start(command),
+    },
+    configure: () => configure(lib.root),
+    onEvent: pushEngineEvent,
+    onDocChanged: pushDocChanged,
+  });
+  return { manager, queue };
 }
 
 // 单实例锁：第二个实例聚焦既有窗口
@@ -100,16 +128,21 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
+    // 打包后由 electron-builder 用 build/icon.png 生成应用图标；开发时 Dock 默认是 Electron 图标
+    if (isDev) app.dock?.setIcon(join(__dirname, '../../build/icon.png'));
+    library = new Library(dataRoot());
+    // 渲染进程只读论文库内的文件（原文 blob、译文）
     const roots = new AllowedRoots();
-    // 应用数据目录始终在白名单（预览产物、缓存）
-    roots.add(app.getPath('userData'));
-    roots.add(app.getPath('downloads'));
-
+    roots.add(library.root);
     registerFileProtocol(roots);
 
-    sidecar = startSidecar();
-    const deps: IpcDeps = { sidecar, roots };
-    registerIpc(deps);
+    const engine = startEngine(library);
+    sidecar = engine.manager;
+    registerIpc({ library, queue: engine.queue, roots });
+    // 上次退出时仍在排队 / 运行的论文重新排队
+    for (const doc of [...library.list()].reverse()) {
+      if (doc.status === 'queued' || doc.status === 'running') engine.queue.enqueue(doc.id);
+    }
 
     createWindow();
 
@@ -124,6 +157,10 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('before-quit', () => {
     void sidecar?.stop();
+  });
+
+  app.on('quit', () => {
+    library?.close();
   });
 }
 

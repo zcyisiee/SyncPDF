@@ -202,6 +202,8 @@ fn missing_simple_font_widths_rejects_without_guessing_or_mutation() {
         if let Ok(dict) = object.as_dict_mut() {
             if dict.get(b"Type").ok().and_then(|o| o.as_name().ok()) == Some(b"Font") {
                 dict.remove(b"Widths");
+                // 标准 14 字体缺 `/Widths` 时有内置度量；非标准字体才是真正未知。
+                dict.set("BaseFont", lopdf::Object::Name(b"UnknownSans".to_vec()));
             }
         }
     }
@@ -241,6 +243,121 @@ fn graphics_restore_crosses_page_contents_stream_boundaries() {
         b"Q (B C) Tj (D) Tj ET",
     ]);
     assert_survivors_document(source, &['B', ' '], "AB CD");
+}
+
+/// 同页多个公式各自隔离时，无关图表（含文字的 Form）去文字副本只做一份；
+/// 公式本身仍各有一个源绘制 Form。
+#[test]
+fn formulas_sharing_unrelated_forms_share_their_stripped_copies() {
+    use syncpdf_core::ir::{
+        Align, Atom, AtomKind, Paragraph, RegionKind, SourceAtom, Translatable,
+    };
+    use syncpdf_core::AtomId;
+    let mut original = source_pdf(b"BT /F1 12 Tf 1 0 0 1 40 200 Tm (AB) Tj ET /Plot Do");
+    let page = original.get_pages()[&1];
+    let res = original
+        .get_dictionary(page)
+        .unwrap()
+        .get(b"Resources")
+        .unwrap()
+        .as_dict()
+        .unwrap()
+        .clone();
+    let plot = original.add_object(Stream::new(
+        dictionary! {
+            "Type"=>"XObject", "Subtype"=>"Form", "BBox"=>vec![0.into(),0.into(),400.into(),300.into()],
+            "Resources"=>res,
+        },
+        b"BT /F1 12 Tf 1 0 0 1 200 100 Tm (C) Tj ET 190 95 30 1 re f".to_vec(),
+    ));
+    original
+        .get_dictionary_mut(page)
+        .unwrap()
+        .get_mut(b"Resources")
+        .unwrap()
+        .as_dict_mut()
+        .unwrap()
+        .set("XObject", dictionary! {"Plot"=>plot});
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("source.pdf");
+    original.save(&path).unwrap();
+    let worker = PdfiumWorker::spawn().unwrap();
+    let pdf = worker.open(&path).unwrap();
+    let bound = bind_page(&worker, pdf, &original, 1).unwrap();
+    let glyph = |c: char| {
+        bound
+            .ir
+            .glyphs()
+            .find(|g| g.unicode.as_slice() == [c])
+            .unwrap()
+            .clone()
+    };
+    let (a, b) = (glyph('A'), glyph('B'));
+    let atom = |id: u32, range: (u32, u32), g: &syncpdf_core::ir::Glyph| Atom {
+        id: AtomId(id),
+        glyph_range: range,
+        kind: AtomKind::Formula,
+        text: String::new(),
+        source: Some(SourceAtom {
+            bbox: g.bbox,
+            baseline: g.matrix.f,
+            advance: None,
+        }),
+    };
+    let para = Paragraph {
+        id: "P01-001".parse().unwrap(),
+        page: bound.ir.page,
+        region: 0,
+        kind: RegionKind::Text,
+        bbox: a.bbox.union(&b.bbox),
+        lines: vec![],
+        glyphs: vec![a.id, b.id],
+        text_spans: vec![],
+        style_runs: vec![],
+        decorations: vec![],
+        atoms: vec![atom(1, (0, 1), &a), atom(2, (1, 2), &b)],
+        text: "AB".into(),
+        align: Align::Left,
+        first_indent: 0.0,
+        line_height: 12.0,
+        is_rtl: false,
+        translatable: Translatable::Yes,
+    };
+    let mut candidate = original.clone();
+    syncpdf_pdf::source_atom::install(&mut candidate, &original, &bound, &[&para]).unwrap();
+    let forms_drawing = |needle: &[u8]| {
+        candidate
+            .objects
+            .values()
+            .filter_map(|o| o.as_stream().ok())
+            .filter(|s| s.dict.get(b"Subtype").and_then(|v| v.as_name()).ok() == Some(b"Form"))
+            .filter(|s| {
+                let bytes = s
+                    .decompressed_content()
+                    .unwrap_or_else(|_| s.content.clone());
+                bytes.windows(needle.len()).any(|w| w == needle)
+            })
+            .count()
+    };
+    // 原图 + 一份去文字副本（逐公式复制时是 1 + 2）。
+    assert_eq!(forms_drawing(b"190 95 30 1 re f"), 2);
+    // 每个公式一个源绘制 Form（它们各自引用去文字的图表副本）。
+    let atom_forms = candidate
+        .objects
+        .values()
+        .filter_map(|o| o.as_stream().ok())
+        .filter(|s| {
+            s.dict.get(b"Subtype").and_then(|v| v.as_name()).ok() == Some(b"Form")
+                && s.dict.get(b"BBox").is_ok()
+                && s.dict
+                    .get(b"Resources")
+                    .and_then(|r| r.as_dict())
+                    .is_ok_and(|r| r.get(b"Font").is_ok())
+                && s.content.windows(6).any(|w| w == b"/Plot ")
+        })
+        .count();
+    assert_eq!(atom_forms, 2);
+    worker.close(pdf);
 }
 
 #[test]

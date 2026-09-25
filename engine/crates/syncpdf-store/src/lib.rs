@@ -11,6 +11,7 @@ pub mod assets;
 pub mod db;
 pub mod documents;
 pub mod drafts;
+pub mod edits;
 pub mod paragraphs;
 pub mod runs;
 pub mod stages;
@@ -19,6 +20,7 @@ pub use assets::Assets;
 pub use db::Store;
 pub use documents::DocumentRow;
 pub use drafts::DraftError;
+pub use edits::BlockEdit;
 pub use paragraphs::ParagraphRow;
 pub use runs::RunId;
 

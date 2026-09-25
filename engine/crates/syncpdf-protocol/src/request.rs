@@ -82,6 +82,45 @@ pub enum Mode {
     Bilingual,
 }
 
+/// 字体族：衬线（宋体类）/ 无衬线（黑体类）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FontFamily {
+    Serif,
+    Sans,
+}
+
+/// 段落对齐。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockAlign {
+    Left,
+    Center,
+    Right,
+    Justify,
+}
+
+/// 单块排版覆盖；字段为 `None` 时沿用整篇设置 / 原文判定。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BlockStyle {
+    /// 译文字号相对原文的倍数。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_scale: Option<f32>,
+    /// 行距（字号的倍数）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_height: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_family: Option<FontFamily>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub align: Option<BlockAlign>,
+}
+
+impl BlockStyle {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// stdin 请求。首条必须是 `Configure`；`Run` 启动任务；其余作用于当前文档。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -109,20 +148,30 @@ pub enum Request {
         font_profile: Option<String>,
         terminology: Option<PathBuf>,
         mode: Mode,
+        /// 本篇阶段缓存库路径（桌面端：`~/.sp/docs/<id>/store.db`）；`None` = 引擎默认的共享临时库。
+        store: Option<PathBuf>,
     },
-    /// 局部重译。
+    /// 标记段落待重译：清掉手改译文，下一次 `run` 对这些段绕过翻译缓存。
+    /// 只写本篇库，不自己跑；调用方随后排一次 `run`。
     Retranslate {
         doc_id: String,
+        /// 与 `run.store` 相同的本篇库；`None` = 引擎默认的共享临时库。
+        store: Option<PathBuf>,
         #[schemars(with = "Vec<crate::schema::ParagraphIdSchema>")]
         paragraph_ids: Vec<ParagraphId>,
     },
-    /// 手动编辑 → 重排版 + 局部回写；`base_revision` 不匹配返回 conflict。
+    /// 保存单段覆盖（手改译文 + 单块排版），整体替换该段已有覆盖。
+    /// 只写本篇库，不自己跑；调用方随后排一次 `run`（其余段全走缓存）。
     ApplyEdit {
         doc_id: String,
+        /// 与 `run.store` 相同的本篇库；`None` = 引擎默认的共享临时库。
+        store: Option<PathBuf>,
         #[schemars(with = "crate::schema::ParagraphIdSchema")]
         paragraph_id: ParagraphId,
-        translated_html: String,
-        base_revision: u64,
+        /// 手改译文（受限 HTML，同 `paragraph.translated_html`）；`None` = 用模型译文。
+        translated_html: Option<String>,
+        #[serde(default)]
+        style: BlockStyle,
     },
     /// 发布。
     Export {
@@ -220,6 +269,7 @@ mod tests {
             font_profile: Some("serif".into()),
             terminology: Some("/terms.csv".into()),
             mode: Mode::Bilingual,
+            store: Some("/docs/doc-1/store.db".into()),
         });
         roundtrip(Request::Run {
             doc_id: "doc-2".into(),
@@ -231,6 +281,7 @@ mod tests {
             font_profile: None,
             terminology: None,
             mode: Mode::Full,
+            store: None,
         });
     }
 
@@ -238,6 +289,7 @@ mod tests {
     fn request_retranslate_roundtrip() {
         roundtrip(Request::Retranslate {
             doc_id: "doc-1".into(),
+            store: Some("/docs/doc-1/store.db".into()),
             paragraph_ids: vec!["P01-001".parse().unwrap(), "P02-017".parse().unwrap()],
         });
     }
@@ -246,11 +298,33 @@ mod tests {
     fn request_apply_edit_roundtrip() {
         roundtrip(Request::ApplyEdit {
             doc_id: "doc-1".into(),
+            store: Some("/docs/doc-1/store.db".into()),
             paragraph_id: "P03-005".parse().unwrap(),
-            translated_html: "<p id=\"P03-005\">改后的 <span data-style=\"1\">译文</span></p>"
-                .into(),
-            base_revision: 7,
+            translated_html: Some(
+                "<p id=\"P03-005\">改后的 <span data-style=\"1\">译文</span></p>".into(),
+            ),
+            style: BlockStyle {
+                font_scale: Some(0.9),
+                line_height: Some(1.4),
+                font_family: Some(FontFamily::Sans),
+                align: Some(BlockAlign::Justify),
+            },
         });
+        // 恢复模型译文 + 无排版覆盖：style 可省略
+        let req = decode_request(
+            r#"{"type":"apply_edit","doc_id":"d","store":null,"paragraph_id":"P01-001","translated_html":null}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            req,
+            Request::ApplyEdit {
+                doc_id: "d".into(),
+                store: None,
+                paragraph_id: "P01-001".parse().unwrap(),
+                translated_html: None,
+                style: BlockStyle::default(),
+            }
+        );
     }
 
     #[test]
@@ -270,6 +344,7 @@ mod tests {
             (
                 serde_json::to_string(&Request::Retranslate {
                     doc_id: "d".into(),
+                    store: None,
                     paragraph_ids: vec![],
                 })
                 .unwrap(),
@@ -278,9 +353,10 @@ mod tests {
             (
                 serde_json::to_string(&Request::ApplyEdit {
                     doc_id: "d".into(),
+                    store: None,
                     paragraph_id: "P01-001".parse().unwrap(),
-                    translated_html: String::new(),
-                    base_revision: 0,
+                    translated_html: None,
+                    style: BlockStyle::default(),
                 })
                 .unwrap(),
                 "apply_edit",

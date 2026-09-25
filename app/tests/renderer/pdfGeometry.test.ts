@@ -1,22 +1,21 @@
 /**
- * BoxLayer 坐标变换单测（M2-06 验收）：给定 pdf.js viewport 的 transform 矩阵，
- * 验证 pdf_native / pdf_topleft 两种坐标系都落到正确的画布像素位置。
+ * 坐标变换单测：给定 pdf.js viewport 的 transform 矩阵，
+ * 验证 pdf_user / image_top_left 两种坐标系都落到正确的画布像素位置。
  * @vitest-environment node
  */
 import { describe, expect, it } from 'vitest';
 import {
   applyTransform,
-  boxToViewRect,
   canvasPixelSize,
-  isValidBox,
-  normalizeBox,
+  rectToViewRect,
   toMatrix,
-  topLeftToNative,
+  topLeftToUser,
   unionRects,
   type ViewportLike,
 } from '../../src/renderer/src/pdf/geometry';
-import { layoutBoxes } from '../../src/renderer/src/pdf/BoxLayer';
-import type { Box } from '../../src/shared/protocol';
+import type { Rect } from '../../src/shared/protocol';
+
+const r = (x0: number, y0: number, x1: number, y1: number): Rect => ({ x0, y0, x1, y1 });
 
 /**
  * 复刻 pdf.js `PageViewport` 构造出的 transform（rotation=0 / 90 / 180 / 270）。
@@ -91,32 +90,32 @@ describe('applyTransform / toMatrix', () => {
   });
 });
 
-describe('boxToViewRect — pdf_native（y 由 transform 翻转）', () => {
+describe('rectToViewRect — pdf_user（y 由 transform 翻转）', () => {
   it('scale=1 的 Letter 页：transform 为 [1,0,0,-1,0,792]', () => {
     const viewport = makeViewport(LETTER, 1, 0);
     expect(viewport.transform).toEqual([1, 0, 0, -1, 0, 792]);
     // 用户空间 y=700..720（靠页面上方）→ 画布 top=72，高 20
-    const rect = boxToViewRect([72, 700, 540, 720], 'pdf_native', viewport);
+    const rect = rectToViewRect(r(72, 700, 540, 720), 'pdf_user', viewport);
     expect(rect).toEqual({ left: 72, top: 72, width: 468, height: 20 });
   });
 
   it('scale=2 时矩形等比放大', () => {
     const viewport = makeViewport(LETTER, 2, 0);
-    const rect = boxToViewRect([72, 700, 540, 720], 'pdf_native', viewport);
+    const rect = rectToViewRect(r(72, 700, 540, 720), 'pdf_user', viewport);
     expect(rect).toEqual({ left: 144, top: 144, width: 936, height: 40 });
   });
 
   it('框方向颠倒（y1 < y0）也得到非负宽高', () => {
     const viewport = makeViewport(LETTER, 1, 0);
-    const normal = boxToViewRect([72, 700, 540, 720], 'pdf_native', viewport);
-    const flipped = boxToViewRect([540, 720, 72, 700], 'pdf_native', viewport);
+    const normal = rectToViewRect(r(72, 700, 540, 720), 'pdf_user', viewport);
+    const flipped = rectToViewRect(r(540, 720, 72, 700), 'pdf_user', viewport);
     expect(flipped).toEqual(normal);
   });
 
   it('非零 viewBox 原点（裁剪框不在 0,0）', () => {
     const viewport = makeViewport([20, 30, 620, 830], 1, 0);
     // 页高 800；y=830 是页顶 → top=0
-    const rect = boxToViewRect([20, 830, 620, 730], 'pdf_native', viewport);
+    const rect = rectToViewRect(r(20, 830, 620, 730), 'pdf_user', viewport);
     expect(rect.left).toBeCloseTo(0, 6);
     expect(rect.top).toBeCloseTo(0, 6);
     expect(rect.width).toBeCloseTo(600, 6);
@@ -127,7 +126,7 @@ describe('boxToViewRect — pdf_native（y 由 transform 翻转）', () => {
     const viewport = makeViewport(LETTER, 1, 90);
     expect(viewport.width).toBe(792);
     expect(viewport.height).toBe(612);
-    const rect = boxToViewRect([72, 700, 540, 720], 'pdf_native', viewport);
+    const rect = rectToViewRect(r(72, 700, 540, 720), 'pdf_user', viewport);
     // 旋转 90° 后原来的"高 20 宽 468"变成"宽 20 高 468"
     expect(rect.width).toBeCloseTo(20, 6);
     expect(rect.height).toBeCloseTo(468, 6);
@@ -137,7 +136,7 @@ describe('boxToViewRect — pdf_native（y 由 transform 翻转）', () => {
     const viewport = makeViewport(LETTER, 1, 180);
     // transform = [-1,0,0,1,612,0]：x' = 612-x，y' = y
     expect(viewport.transform).toEqual([-1, 0, 0, 1, 612, 0]);
-    const rect = boxToViewRect([72, 700, 540, 720], 'pdf_native', viewport);
+    const rect = rectToViewRect(r(72, 700, 540, 720), 'pdf_user', viewport);
     expect(rect.left).toBeCloseTo(612 - 540, 6);
     // 未旋转时靠页顶的内容，倒过来后落在画布下方
     expect(rect.top).toBeCloseTo(700, 6);
@@ -146,23 +145,23 @@ describe('boxToViewRect — pdf_native（y 由 transform 翻转）', () => {
   });
 });
 
-describe('boxToViewRect — pdf_topleft（先折回用户空间）', () => {
-  it('页左上原点 y 向下：与等价的 pdf_native 框结果一致', () => {
+describe('rectToViewRect — image_top_left（先折回用户空间）', () => {
+  it('页左上原点 y 向下：与等价的 pdf_user 框结果一致', () => {
     const viewport = makeViewport(LETTER, 1, 0);
     // 同一块区域：topleft (72,72)-(540,92) ≡ native (72,720)-(540,700)
-    const topLeft = boxToViewRect([72, 72, 540, 92], 'pdf_topleft', viewport);
-    const native = boxToViewRect([72, 720, 540, 700], 'pdf_native', viewport);
+    const topLeft = rectToViewRect(r(72, 72, 540, 92), 'image_top_left', viewport);
+    const native = rectToViewRect(r(72, 720, 540, 700), 'pdf_user', viewport);
     expect(topLeft).toEqual(native);
     expect(topLeft).toEqual({ left: 72, top: 72, width: 468, height: 20 });
   });
 
-  it('topLeftToNative 用 viewBox 的 xMin/yMax 作原点', () => {
-    expect(topLeftToNative([0, 0, 10, 10], [20, 30, 620, 830])).toEqual([20, 830, 30, 820]);
+  it('topLeftToUser 用 viewBox 的 xMin/yMax 作原点', () => {
+    expect(topLeftToUser(r(0, 0, 10, 10), [20, 30, 620, 830])).toEqual(r(20, 830, 30, 820));
   });
 
   it('scale=1.5 的 topleft 框', () => {
     const viewport = makeViewport(LETTER, 1.5, 0);
-    const rect = boxToViewRect([100, 200, 300, 260], 'pdf_topleft', viewport);
+    const rect = rectToViewRect(r(100, 200, 300, 260), 'image_top_left', viewport);
     expect(rect.left).toBeCloseTo(150, 6);
     expect(rect.top).toBeCloseTo(300, 6);
     expect(rect.width).toBeCloseTo(300, 6);
@@ -171,17 +170,6 @@ describe('boxToViewRect — pdf_topleft（先折回用户空间）', () => {
 });
 
 describe('辅助函数', () => {
-  it('normalizeBox 排序坐标', () => {
-    expect(normalizeBox([5, 9, 1, 2])).toEqual([1, 2, 5, 9]);
-  });
-
-  it('isValidBox 拒绝 null / 长度不符 / NaN', () => {
-    expect(isValidBox(null)).toBe(false);
-    expect(isValidBox([1, 2, 3])).toBe(false);
-    expect(isValidBox([1, 2, 3, Number.NaN])).toBe(false);
-    expect(isValidBox([1, 2, 3, 4])).toBe(true);
-  });
-
   it('unionRects 求外接矩形', () => {
     expect(
       unionRects([
@@ -198,23 +186,5 @@ describe('辅助函数', () => {
     const huge = canvasPixelSize(5000, 5000, 3, 1_000_000);
     expect(huge.ratio).toBeLessThan(3);
     expect(huge.width * huge.height).toBeLessThanOrEqual(1_000_001);
-  });
-});
-
-describe('layoutBoxes（BoxLayer 输入 → 矩形）', () => {
-  it('过滤非法框与零面积框，保留段落对应关系', () => {
-    const viewport = makeViewport(LETTER, 1, 0);
-    const boxes: Box[] = [
-      [72, 700, 540, 720],
-      [72, 700, 72, 700], // 零面积
-      [1, 2, 3] as unknown as Box, // 非法
-    ];
-    const laid = layoutBoxes(
-      [{ id: 'P01-001', boxes, coordSystem: 'pdf_native', status: 'translated' }],
-      viewport,
-    );
-    expect(laid).toHaveLength(1);
-    expect(laid[0].paragraph.id).toBe('P01-001');
-    expect(laid[0].rects).toEqual([{ left: 72, top: 72, width: 468, height: 20 }]);
   });
 });

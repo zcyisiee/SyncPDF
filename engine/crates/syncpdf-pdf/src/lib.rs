@@ -6,6 +6,8 @@ pub mod content;
 pub mod dual;
 pub mod pdfium;
 
+pub mod base14;
+mod base14_widths;
 pub mod bind;
 pub mod embed;
 pub mod font_traits;

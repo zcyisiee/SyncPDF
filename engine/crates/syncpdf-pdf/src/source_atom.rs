@@ -59,6 +59,10 @@ pub fn install(
         .cloned()
         .unwrap_or_default();
     let mut clips = Vec::new();
+    // Text-stripped Form copies depend only on which Forms are unrelated: atoms
+    // sharing that set share the copies instead of duplicating whole plots.
+    let mut stripped: BTreeMap<BTreeSet<syncpdf_core::ObjRef>, BTreeMap<ObjectId, ObjectId>> =
+        BTreeMap::new();
     for (para, atom, geometry) in atoms {
         let name = resource(&para.id, atom.id);
         if xobjects.has(name.as_bytes()) {
@@ -92,7 +96,16 @@ pub fn install(
         let mut patch = PatchSet::new();
         patch.delete_glyphs(bound, &remove)?;
         patch.apply(&mut isolated, page)?;
-        strip_unrelated_form_text(&mut isolated, page_id, &unrelated_forms)?;
+        let replacements = match stripped.get(&unrelated_forms) {
+            Some(replacements) => replacements.clone(),
+            None => {
+                let replacements = strip_form_text(&mut isolated, &unrelated_forms)?;
+                stripped.insert(unrelated_forms, replacements.clone());
+                replacements
+            }
+        };
+        let res = remap_resources(&isolated, resources(&isolated, page_id)?, &replacements)?;
+        isolated.get_dictionary_mut(page_id)?.set("Resources", res);
         let form = Stream::new(
             dictionary! {
                 "Type" => "XObject", "Subtype" => "Form", "FormType" => 1,
@@ -140,39 +153,40 @@ pub fn install(
     Ok(())
 }
 
+fn remap_resources(
+    doc: &Document,
+    mut res: Dictionary,
+    replacements: &BTreeMap<ObjectId, ObjectId>,
+) -> lopdf::Result<Dictionary> {
+    if let Ok(objects) = res.get(b"XObject") {
+        let mut objects = match objects {
+            Object::Reference(id) => doc.get_dictionary(*id)?.clone(),
+            _ => objects.as_dict()?.clone(),
+        };
+        for (_, value) in objects.iter_mut() {
+            if let Object::Reference(id) = value {
+                if let Some(new) = replacements.get(id) {
+                    *id = *new;
+                }
+            }
+        }
+        res.set("XObject", objects);
+    }
+    Ok(res)
+}
+
 /// The source may contain deeply nested plots. We never patch their original
 /// drawing. In the isolated formula copy only, clone those Forms without text;
 /// paths/images remain available to the formula clip and source fonts stay shared.
-fn strip_unrelated_form_text(
+/// Returns original Form → stripped copy; the caller remaps page resources.
+fn strip_form_text(
     doc: &mut Document,
-    page: ObjectId,
     forms: &BTreeSet<syncpdf_core::ObjRef>,
-) -> crate::patch::Result<()> {
+) -> crate::patch::Result<BTreeMap<ObjectId, ObjectId>> {
     let replacements: BTreeMap<_, _> = forms
         .iter()
         .map(|r| ((r.obj, r.gen), doc.new_object_id()))
         .collect();
-    fn remap_resources(
-        doc: &Document,
-        mut res: Dictionary,
-        replacements: &BTreeMap<ObjectId, ObjectId>,
-    ) -> lopdf::Result<Dictionary> {
-        if let Ok(objects) = res.get(b"XObject") {
-            let mut objects = match objects {
-                Object::Reference(id) => doc.get_dictionary(*id)?.clone(),
-                _ => objects.as_dict()?.clone(),
-            };
-            for (_, value) in objects.iter_mut() {
-                if let Object::Reference(id) = value {
-                    if let Some(new) = replacements.get(id) {
-                        *id = *new;
-                    }
-                }
-            }
-            res.set("XObject", objects);
-        }
-        Ok(res)
-    }
     for (old, new) in &replacements {
         let mut stream = doc.get_object(*old)?.as_stream()?.clone();
         let bytes = stream
@@ -213,7 +227,5 @@ fn strip_unrelated_form_text(
         }
         doc.set_object(*new, stream);
     }
-    let res = remap_resources(doc, resources(doc, page)?, &replacements)?;
-    doc.get_dictionary_mut(page)?.set("Resources", res);
-    Ok(())
+    Ok(replacements)
 }

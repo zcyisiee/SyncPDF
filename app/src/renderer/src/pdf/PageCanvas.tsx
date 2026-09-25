@@ -4,7 +4,8 @@
  * - devicePixelRatio：画布位图尺寸 = CSS 尺寸 × DPR（上限见 `canvasPixelSize`），
  *   再把 DPR 作为 `transform` 传给 pdf.js，保证高倍屏不糊；
  * - 懒渲染：IntersectionObserver（rootMargin 让上下各预渲染一屏）；
- * - `revision` 变化 → 重新渲染本页（译文栏 `page_ready` 增量刷新走这条路）；
+ * - `revision` 是本页内容修订号：只有它变了才重画本页。译文 PDF 任一页回写都会重载
+ *   整个文件（`doc` 换新），但其它页内容没变，保留已画好的位图，不整篇闪烁；
  * - 卸载 / 参数变更时 `RenderTask.cancel()`，避免并发写同一画布。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -19,8 +20,10 @@ export interface PageCanvasProps {
   zoom: number | 'fit-width';
   /** 可用宽度（CSS px），fit-width 时用。 */
   containerWidth: number;
-  /** 内容修订号：变化即重渲染本页。 */
+  /** 本页内容修订号：变化即重渲染本页。 */
   revision?: number;
+  /** `doc` 反映到的修订号；低于 `revision` 说明新文件还没加载好，先不画。 */
+  docRevision?: number;
   /** 视口就绪回调（叠加层要用同一个 viewport 做换算）。 */
   onViewport?: (pageNumber: number, viewport: PageViewport | null) => void;
   /** 画布之上的叠加层（段落框）。 */
@@ -38,19 +41,24 @@ export function PageCanvas({
   zoom,
   containerWidth,
   revision = 0,
+  docRevision = 0,
   onViewport,
   renderOverlay,
   gutter = 24,
 }: PageCanvasProps): JSX.Element {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pageRef = useRef<PDFPageProxy | null>(null);
   const taskRef = useRef<RenderTask | null>(null);
-  const [page, setPage] = useState<PDFPageProxy | null>(null);
+  // 页对象连同所属 doc 一起记：doc 换新的那次渲染里旧页对象立即失效。
+  // 否则 effect 仍拿着旧页去画，而旧 doc 已被 loader 销毁 → render 同步抛错、整树卸载白屏。
+  const [loaded, setLoaded] = useState<{ doc: PDFDocumentProxy; page: PDFPageProxy } | null>(null);
+  const page = loaded?.doc === doc ? loaded.page : null;
   // 无 IntersectionObserver（jsdom / 老环境）时退化为"全部立即渲染"
   const [visible, setVisible] = useState(() => typeof IntersectionObserver === 'undefined');
   const [rendered, setRendered] = useState(-1);
   const [failure, setFailure] = useState<string | null>(null);
+  /** 画布上已完成的内容：修订号 + CSS 尺寸。 */
+  const drawnRef = useRef<{ revision: number; width: number; height: number } | null>(null);
 
   // 取页对象（一次），卸载时释放
   useEffect(() => {
@@ -62,16 +70,13 @@ export function PageCanvas({
           value.cleanup();
           return;
         }
-        pageRef.current = value;
-        setPage(value);
+        setLoaded({ doc, page: value });
       })
       .catch((error: unknown) => {
         if (!cancelled) setFailure(describe(error));
       });
     return () => {
       cancelled = true;
-      pageRef.current = null;
-      setPage(null);
     };
   }, [doc, pageNumber]);
 
@@ -109,15 +114,14 @@ export function PageCanvas({
     return () => observer.disconnect();
   }, []);
 
-  // 渲染：可见 + 视口就绪 + （首次 / revision 或 scale 变了）
-  const renderKey = `${revision}:${viewport?.width.toFixed(2) ?? ''}x${viewport?.height.toFixed(2) ?? ''}`;
-  const renderKeyRef = useRef<string>('');
-
+  // 渲染：可见 + 视口就绪；页面 / 视口（按 scale 记忆）/ revision 变了就重渲染。
+  // 去重只认**已完成**的渲染：cleanup 取消了在途任务时 drawn 没记上，重跑必须重新渲染，否则页面停在空白。
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!visible || page === null || viewport === null || canvas === null) return;
-    if (renderKeyRef.current === renderKey) return;
-    renderKeyRef.current = renderKey;
+    if (docRevision < revision) return;
+    const drawn = drawnRef.current;
+    if (drawn?.revision === revision && drawn.width === viewport.width && drawn.height === viewport.height) return;
 
     taskRef.current?.cancel();
     const { width, height, ratio } = canvasPixelSize(
@@ -134,40 +138,50 @@ export function PageCanvas({
       setFailure('无法获取 2d 上下文');
       return;
     }
-    const task = page.render({
-      canvas,
-      canvasContext: context,
-      viewport,
-      // DPR 缩放：viewport 用 CSS 尺寸，位图放大 ratio 倍
-      transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0],
-    });
+    let task: RenderTask | null = null;
+    let done: Promise<void>;
+    try {
+      task = page.render({
+        canvas,
+        canvasContext: context,
+        viewport,
+        // DPR 缩放：viewport 用 CSS 尺寸，位图放大 ratio 倍
+        transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0],
+      });
+      done = task.promise;
+    } catch (error: unknown) {
+      // 同步抛错（如 doc 已在 React 换上新 doc 之前被销毁）只记为本页失败，不能冒泡卸载整棵树
+      done = Promise.reject(error);
+    }
     taskRef.current = task;
-    task.promise
+    done
       .then(() => {
+        drawnRef.current = { revision, width: viewport.width, height: viewport.height };
         setFailure(null);
         setRendered(revision);
       })
       .catch((error: unknown) => {
-        // 取消是正常路径（快速滚动 / 参数变更）
-        if (isCancellation(error)) {
-          renderKeyRef.current = '';
-          return;
-        }
-        renderKeyRef.current = '';
-        setFailure(describe(error));
+        // 取消是正常路径（快速滚动 / 参数变更），接替的渲染由重跑的 effect 发起
+        if (!isCancellation(error)) setFailure(describe(error));
       });
     return () => {
-      task.cancel();
+      task?.cancel();
     };
-  }, [visible, page, viewport, renderKey, revision]);
+  }, [visible, page, viewport, revision, docRevision]);
 
-  const cssWidth = viewport?.width ?? Math.max(80, containerWidth - gutter);
-  const cssHeight = viewport?.height ?? cssWidth * 1.414;
+  // 重载期间（换 doc 对象）沿用上次的页面尺寸，避免整栏高度跳变把滚动位置夹走
+  const [lastSize, setLastSize] = useState<{ width: number; height: number } | null>(null);
+  if (viewport !== null && (lastSize?.width !== viewport.width || lastSize.height !== viewport.height)) {
+    setLastSize({ width: viewport.width, height: viewport.height });
+  }
+  const cssWidth = viewport?.width ?? lastSize?.width ?? Math.max(80, containerWidth - gutter);
+  const cssHeight = viewport?.height ?? lastSize?.height ?? cssWidth * 1.414;
 
   return (
     <div
       ref={wrapperRef}
       data-page={pageNumber}
+      data-scale={viewport === null ? undefined : scale}
       data-rendered={rendered >= 0 ? 'true' : 'false'}
       style={{
         position: 'relative',

@@ -1,50 +1,74 @@
 /**
- * SyncPDF JSONL 协议类型（手写；之后由 Rust `syncpdf-protocol` 导出的
- * `protocol.schema.json` 校验，字段严格按 02-技术路径与架构.md §9）。
+ * SyncPDF JSONL 协议类型。以 Rust `syncpdf-protocol`（request.rs / event.rs）与
+ * `syncpdf-core`（geom.rs / ir.rs）的 serde 形状为准，手写镜像 + 运行时守卫。
  *
- * - 请求：主进程 → 引擎 stdin，每行一个 JSON 对象；
- * - 事件：引擎 stdout → 主进程 → 渲染进程，每行一个 JSON 对象，`seq` 单调递增。
+ * - 请求：主进程 → 引擎 stdin，每行一个 JSON 对象，`type` 做 tag；
+ * - 事件：引擎 stdout → 主进程 → 渲染进程，`{seq, ts, type, ...}`。
  */
 
-// ---------- 基础 ----------
+// ---------- 基础（syncpdf-core） ----------
 
-/** 段落 id：`P{page:02}-{seq:03}`（与现版协议一致，模型可见）。 */
+/** 段落 id：`P{page:02}-{seq:03}`，页号 1 基。 */
 export type ParagraphId = string;
 
-/** 页索引（0 基）。 */
-export type PageId = number;
+/** 坐标系标注：引擎只标注不转换，前端 `geometry.boxToViewRect` 是唯一换算点。 */
+export type CoordSystem = 'pdf_user' | 'image_top_left';
 
-/**
- * 段落框坐标系标注。服务端不转换坐标，换算全部在前端
- * （`viewport.convertToViewportRectangle` 是唯一换算点，规约 #6）：
- * - `pdf_native`：PDF user space（左下原点、y 向上）；
- * - `pdf_topleft`：页左上原点、y 向下。
- */
-export type CoordSystem = 'pdf_native' | 'pdf_topleft';
-
-/** bbox 输入框：`[x0, y0, x1, y1]`，含义由 `CoordSystem` 决定。 */
-export type Box = [number, number, number, number];
-
-/** 翻译提供方类型。 */
-export type Provider = 'openai_compatible' | 'anthropic';
-
-/** 任务模式。 */
-export type RunMode = 'full' | 'bilingual';
-
-// ---------- 请求（stdin，§9.2） ----------
-
-/** 首条请求：下发引擎配置。api_key 只在此处出现，绝不写日志。 */
-export interface ConfigureRequest {
-  type: 'configure';
-  provider: Provider;
-  base_url: string;
-  model: string;
-  api_key: string;
-  concurrency: number;
-  cache_dir: string;
+/** `syncpdf_core::Rect`：归一化角点（x0<=x1, y0<=y1）。 */
+export interface Rect {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
 }
 
-/** 启动任务。 */
+/** `RegionKind`（PP-DocLayout 25 类归并后的 15 类）。 */
+export const REGION_KINDS = [
+  'text',
+  'title',
+  'paragraph_title',
+  'list',
+  'caption',
+  'table',
+  'figure',
+  'formula',
+  'header',
+  'footer',
+  'foot_note',
+  'reference',
+  'code',
+  'abstract',
+  'other',
+] as const;
+export type RegionKind = (typeof REGION_KINDS)[number];
+
+/** 段落状态（`not_replaced` 是落定，不是失败）。 */
+export type ParagraphStatus = 'pending' | 'translated' | 'typeset' | 'not_replaced' | 'fallback';
+
+// ---------- 请求（request.rs） ----------
+
+export type TranslateProvider = 'http' | 'pi' | 'agy';
+
+export type TranslatorKind =
+  | { kind: 'pi'; program: string; model: string; thinking: string }
+  | { kind: 'agy'; program: string; model: string }
+  | { kind: 'fake'; name: string }
+  | { kind: 'http' };
+
+export type Mode = 'full' | 'bilingual';
+
+/** 首条请求。api_key 只在此出现，绝不写日志。 */
+export interface ConfigureRequest {
+  type: 'configure';
+  provider: TranslateProvider;
+  base_url: string | null;
+  model: string;
+  api_key: string | null;
+  concurrency: number;
+  cache_dir: string;
+  translator: TranslatorKind;
+}
+
 export interface RunRequest {
   type: 'run';
   doc_id: string;
@@ -52,37 +76,60 @@ export interface RunRequest {
   output: string;
   source_lang: string;
   target_lang: string;
-  pages?: number[];
-  font_profile?: string;
-  terminology?: Record<string, string>;
-  mode: RunMode;
+  /** 页子集（引擎内部 0 基）；null = 全部页。 */
+  pages: number[] | null;
+  font_profile: string | null;
+  /** 规范化术语对 JSON 文件路径（`[["source","target"],...]`）。 */
+  terminology: string | null;
+  mode: Mode;
+  /** 本篇阶段缓存库路径；null = 引擎默认的共享临时库。 */
+  store: string | null;
 }
 
-/** 局部重译。 */
+/** 标记待重译：写本篇库，随后的 run 对这些段绕过翻译缓存。 */
 export interface RetranslateRequest {
   type: 'retranslate';
   doc_id: string;
+  store: string | null;
   paragraph_ids: ParagraphId[];
 }
 
-/** 手动编辑 → 重排版 + 局部回写。base_revision 不匹配返回 `error{code: conflict}`。 */
+export type FontFamily = 'serif' | 'sans';
+export type BlockAlign = 'left' | 'center' | 'right' | 'justify';
+
+/** 单块排版覆盖；缺省字段沿用整篇设置。 */
+export interface BlockStyle {
+  font_scale?: number;
+  line_height?: number;
+  font_family?: FontFamily;
+  align?: BlockAlign;
+}
+
+/** 一段的覆盖状态：`manual` = 译文为手改。 */
+export interface BlockEditState {
+  paragraph_id: ParagraphId;
+  manual: boolean;
+  style: BlockStyle;
+}
+
+/** 整体替换一段的覆盖（手改译文 + 单块排版），随后的 run 应用。 */
 export interface ApplyEditRequest {
   type: 'apply_edit';
   doc_id: string;
+  store: string | null;
   paragraph_id: ParagraphId;
-  translated_html: string;
-  base_revision: number;
+  /** null = 用模型译文。 */
+  translated_html: string | null;
+  style: BlockStyle;
 }
 
-/** 发布导出。 */
 export interface ExportRequest {
   type: 'export';
   doc_id: string;
   output: string;
-  mode: RunMode;
+  mode: Mode;
 }
 
-/** 取消当前任务（引擎 5s 内收尾退出；超时主进程 kill）。 */
 export interface CancelRequest {
   type: 'cancel';
 }
@@ -95,138 +142,14 @@ export type Request =
   | ExportRequest
   | CancelRequest;
 
-// ---------- 事件（stdout，§9.3） ----------
+// ---------- 事件（event.rs） ----------
 
-/** 事件公共字段：每行 `{"seq":n,"ts":…,"type":"…",…}`，seq 单调递增。 */
-export interface EngineEventBase {
+export interface EventEnvelope {
   seq: number;
   ts: number;
 }
 
-export interface RunStartedEvent extends EngineEventBase {
-  type: 'run_started';
-  protocol_version: number;
-  engine_version: string;
-  doc_id: string;
-  pages: number;
-}
-
-/** 阶段名（§3 数据流）：preflight → source_analysis → layout_analysis →
- * paragraph_analysis → translating → typesetting → validating → publishing。 */
-export type StageName =
-  | 'preflight'
-  | 'source_analysis'
-  | 'layout_analysis'
-  | 'paragraph_analysis'
-  | 'translating'
-  | 'typesetting'
-  | 'validating'
-  | 'publishing';
-
-export interface StageStartedEvent extends EngineEventBase {
-  type: 'stage_started';
-  stage: StageName;
-}
-
-export interface StageFinishedEvent extends EngineEventBase {
-  type: 'stage_finished';
-  stage: StageName;
-  /** 耗时（毫秒）。 */
-  elapsed_ms: number;
-}
-
-export interface ProgressEvent extends EngineEventBase {
-  type: 'progress';
-  stage: StageName;
-  done: number;
-  total: number;
-}
-
-/** 段落状态（§9.3 + 规约 #9：No(reason) → not_replaced）。 */
-export type ParagraphStatus = 'translated' | 'typeset' | 'not_replaced' | 'fallback';
-
-export interface ParagraphEvent extends EngineEventBase {
-  type: 'paragraph';
-  paragraph_id: ParagraphId;
-  status: ParagraphStatus;
-  /** 段落框为 null 表示未识别，[] 表示识别了但无框（规约 #12/#13）。 */
-  boxes: Box[] | null;
-  coord_system: CoordSystem;
-  translated_html: string;
-}
-
-export interface PageReadyEvent extends EngineEventBase {
-  type: 'page_ready';
-  page: number;
-  /**
-   * 可选增量预览 PDF 路径。
-   * 引擎就地重写 output（无独立预览产物）时发 `null`——语义同缺省：
-   * 前端回落到重新加载 output 文件的该页（M2-06）。
-   */
-  preview_path?: string | null;
-}
-
-/** 问题等级。 */
-export type IssueSeverity = 'info' | 'warning' | 'error';
-
-export interface IssueEvent extends EngineEventBase {
-  type: 'issue';
-  severity: IssueSeverity;
-  code: string;
-  paragraph_id?: ParagraphId;
-  page?: PageId;
-  message: string;
-}
-
-export interface DocumentFinishedEvent extends EngineEventBase {
-  type: 'document_finished';
-  output: string;
-  stats: {
-    fonts: number;
-    expansion_ratio: number;
-    fallback_count: number;
-  };
-}
-
-export interface RunFinishedEvent extends EngineEventBase {
-  type: 'run_finished';
-  ok: boolean;
-  /** 耗时（毫秒）。 */
-  elapsed_ms: number;
-}
-
-export interface ErrorEvent extends EngineEventBase {
-  type: 'error';
-  fatal: boolean;
-  code: string;
-  message: string;
-}
-
-export type EngineEvent =
-  | RunStartedEvent
-  | StageStartedEvent
-  | StageFinishedEvent
-  | ProgressEvent
-  | ParagraphEvent
-  | PageReadyEvent
-  | IssueEvent
-  | DocumentFinishedEvent
-  | RunFinishedEvent
-  | ErrorEvent;
-
-export type EngineEventType = EngineEvent['type'];
-
-// ---------- 类型守卫（供 fake-sidecar 与测试共用） ----------
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function hasString(value: Record<string, unknown>, key: string): boolean {
-  return typeof value[key] === 'string';
-}
-
-const STAGE_NAMES: readonly StageName[] = [
+export const STAGES = [
   'preflight',
   'source_analysis',
   'layout_analysis',
@@ -235,149 +158,234 @@ const STAGE_NAMES: readonly StageName[] = [
   'typesetting',
   'validating',
   'publishing',
-];
-
-export function isStageName(value: unknown): value is StageName {
-  return typeof value === 'string' && (STAGE_NAMES as readonly string[]).includes(value);
-}
-
-/** 校验事件公共字段：seq 非负整数、ts 有限数、type 已知。 */
-export function isEngineEventBase(value: unknown): value is EngineEventBase & { type: string } {
-  if (!isRecord(value)) return false;
-  if (!Number.isInteger(value.seq) || (value.seq as number) < 0) return false;
-  if (typeof value.ts !== 'number' || !Number.isFinite(value.ts)) return false;
-  return typeof value.type === 'string';
-}
-
-const EVENT_TYPES: readonly EngineEventType[] = [
-  'run_started',
-  'stage_started',
-  'stage_finished',
-  'progress',
-  'paragraph',
-  'page_ready',
-  'issue',
-  'document_finished',
-  'run_finished',
-  'error',
-];
-
-/** 完整事件判别：先公共字段，再按 type 校验各事件的必带字段。 */
-export function isEngineEvent(value: unknown): value is EngineEvent {
-  if (!isEngineEventBase(value)) return false;
-  const record = value as unknown as Record<string, unknown>;
-  const type: unknown = record.type;
-  if (typeof type !== 'string' || !(EVENT_TYPES as readonly string[]).includes(type)) return false;
-  switch (type) {
-    case 'run_started':
-      return (
-        Number.isInteger(record.protocol_version) &&
-        hasString(record, 'engine_version') &&
-        hasString(record, 'doc_id') &&
-        Number.isInteger(record.pages)
-      );
-    case 'stage_started':
-    case 'stage_finished':
-      return isStageName(record.stage);
-    case 'progress':
-      return (
-        isStageName(record.stage) &&
-        Number.isInteger(record.done) &&
-        Number.isInteger(record.total)
-      );
-    case 'paragraph': {
-      if (!hasString(record, 'paragraph_id') || !hasString(record, 'translated_html')) return false;
-      if (!(record.coord_system === 'pdf_native' || record.coord_system === 'pdf_topleft')) return false;
-      const status = record.status;
-      if (
-        status !== 'translated' &&
-        status !== 'typeset' &&
-        status !== 'not_replaced' &&
-        status !== 'fallback'
-      ) {
-        return false;
-      }
-      const boxes = record.boxes;
-      if (boxes !== null && !Array.isArray(boxes)) return false;
-      return true;
-    }
-    case 'page_ready':
-      return Number.isInteger(record.page);
-    case 'issue':
-      return (
-        hasString(record, 'code') &&
-        hasString(record, 'message') &&
-        (record.severity === 'info' || record.severity === 'warning' || record.severity === 'error')
-      );
-    case 'document_finished':
-      return hasString(record, 'output');
-    case 'run_finished':
-      return typeof record.ok === 'boolean';
-    case 'error':
-      return (
-        typeof record.fatal === 'boolean' &&
-        hasString(record, 'code') &&
-        hasString(record, 'message')
-      );
-    default:
-      return false;
-  }
-}
-
-const REQUEST_TYPES = [
-  'configure',
-  'run',
-  'retranslate',
-  'apply_edit',
-  'export',
-  'cancel',
 ] as const;
+export type Stage = (typeof STAGES)[number];
 
-/** 请求判别（主进程写 stdin 前自检；测试用）。 */
-export function isRequest(value: unknown): value is Request {
-  if (!isRecord(value)) return false;
-  const type = value.type;
-  switch (type) {
-    case 'configure':
-      return (
-        hasString(value, 'provider') &&
-        hasString(value, 'base_url') &&
-        hasString(value, 'model') &&
-        hasString(value, 'api_key') &&
-        Number.isInteger(value.concurrency) &&
-        hasString(value, 'cache_dir')
-      );
-    case 'run':
-      return (
-        hasString(value, 'doc_id') &&
-        hasString(value, 'input') &&
-        hasString(value, 'output') &&
-        hasString(value, 'source_lang') &&
-        hasString(value, 'target_lang') &&
-        (value.mode === 'full' || value.mode === 'bilingual')
-      );
-    case 'retranslate':
-      return (
-        hasString(value, 'doc_id') &&
-        Array.isArray(value.paragraph_ids) &&
-        (value.paragraph_ids as unknown[]).every((id) => typeof id === 'string')
-      );
-    case 'apply_edit':
-      return (
-        hasString(value, 'doc_id') &&
-        hasString(value, 'paragraph_id') &&
-        hasString(value, 'translated_html') &&
-        Number.isInteger(value.base_revision)
-      );
-    case 'export':
-      return hasString(value, 'doc_id') && hasString(value, 'output');
-    case 'cancel':
+export type Severity = 'info' | 'warning' | 'error';
+
+export interface Stats {
+  fonts: number;
+  expansion_ratio: number;
+  fallbacks: number;
+}
+
+/** 版面区域（layout_analysis 后按页发出）。 */
+export interface LayoutRegion {
+  kind: RegionKind;
+  /** 公式区域位于可译区域内（行内公式，按 KEEP 原子处理）。 */
+  inline: boolean;
+  bbox: Rect;
+}
+
+export type EngineEventBody =
+  | {
+      type: 'run_started';
+      protocol_version: number;
+      engine_version: string;
+      doc_id: string;
+      pages: number;
+    }
+  | { type: 'stage_started'; stage: Stage }
+  | { type: 'stage_finished'; stage: Stage; elapsed_ms: number }
+  | { type: 'progress'; stage: Stage; done: number; total: number }
+  | { type: 'layout'; page: number; regions: LayoutRegion[] }
+  | { type: 'doc_meta'; title: string | null; authors: string | null }
+  /** 本篇生效的单块覆盖（每次 run 整表发一次）。 */
+  | { type: 'block_edits'; edits: BlockEditState[] }
+  | {
+      type: 'paragraph';
+      paragraph_id: ParagraphId;
+      page: number;
+      status: ParagraphStatus;
+      /** null = 未识别；[] = 识别了但无框。 */
+      boxes: Rect[] | null;
+      coord_system: CoordSystem;
+      translated_html: string | null;
+      kind: RegionKind;
+      source_text: string;
+      /** 源段落外接框（pdf_user）；`boxes` 在译文发布后是译文行框。 */
+      source_bbox: Rect;
+    }
+  /** 编辑后单页重编开始：该页的问题与段落状态由随后的事件重新给出（不发 run_started）。 */
+  | { type: 'page_reopened'; page: number }
+  | { type: 'page_ready'; page: number; preview_path: string | null; revision: number }
+  | {
+      type: 'issue';
+      severity: Severity;
+      code: string;
+      paragraph_id: ParagraphId | null;
+      page: number | null;
+      message: string;
+    }
+  | { type: 'document_finished'; output: string; stats: Stats }
+  | { type: 'run_finished'; ok: boolean; elapsed_ms: number }
+  | { type: 'error'; fatal: boolean; code: string; message: string };
+
+export type EngineEvent = EventEnvelope & EngineEventBody;
+export type EngineEventType = EngineEvent['type'];
+export type EventOf<T extends EngineEventType> = Extract<EngineEvent, { type: T }>;
+
+// ---------- 守卫 ----------
+
+type Obj = Record<string, unknown>;
+
+const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
+const isStr = (v: unknown): v is string => typeof v === 'string';
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const isUint = (v: unknown): v is number => isNum(v) && Number.isInteger(v) && v >= 0;
+const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
+const orNull =
+  <T>(guard: (v: unknown) => v is T) =>
+  (v: unknown): v is T | null =>
+    v === null || guard(v);
+const arrayOf =
+  <T>(guard: (v: unknown) => v is T) =>
+  (v: unknown): v is T[] =>
+    Array.isArray(v) && v.every(guard);
+
+const PARAGRAPH_ID = /^P\d{2,}-\d{3,}$/;
+export const isParagraphId = (v: unknown): v is ParagraphId => isStr(v) && PARAGRAPH_ID.test(v);
+
+export function isRect(v: unknown): v is Rect {
+  return isObj(v) && isNum(v.x0) && isNum(v.y0) && isNum(v.x1) && isNum(v.y1);
+}
+
+export const isStage = (v: unknown): v is Stage => (STAGES as readonly unknown[]).includes(v);
+export const isRegionKind = (v: unknown): v is RegionKind =>
+  (REGION_KINDS as readonly unknown[]).includes(v);
+const isSeverity = (v: unknown): v is Severity => v === 'info' || v === 'warning' || v === 'error';
+const isCoordSystem = (v: unknown): v is CoordSystem => v === 'pdf_user' || v === 'image_top_left';
+const isStatus = (v: unknown): v is ParagraphStatus =>
+  v === 'pending' ||
+  v === 'translated' ||
+  v === 'typeset' ||
+  v === 'not_replaced' ||
+  v === 'fallback';
+const isLayoutRegion = (v: unknown): v is LayoutRegion =>
+  isObj(v) && isRegionKind(v.kind) && isBool(v.inline) && isRect(v.bbox);
+
+const BLOCK_STYLE_FIELDS: Record<keyof BlockStyle, (v: unknown) => boolean> = {
+  font_scale: (v) => typeof v === 'number' && Number.isFinite(v),
+  line_height: (v) => typeof v === 'number' && Number.isFinite(v),
+  font_family: (v) => v === 'serif' || v === 'sans',
+  align: (v) => v === 'left' || v === 'center' || v === 'right' || v === 'justify',
+};
+const isBlockStyle = (v: unknown): v is BlockStyle =>
+  isObj(v) &&
+  Object.entries(v).every(([key, value]) => {
+    const guard = (BLOCK_STYLE_FIELDS as Record<string, (v: unknown) => boolean>)[key];
+    return guard !== undefined && (value === undefined || guard(value));
+  });
+const isBlockEditState = (v: unknown): v is BlockEditState =>
+  isObj(v) && isParagraphId(v.paragraph_id) && isBool(v.manual) && isBlockStyle(v.style);
+
+/** 每种事件的字段守卫（除 seq/ts/type）。 */
+const EVENT_FIELDS: Record<EngineEventType, Record<string, (v: unknown) => boolean>> = {
+  run_started: {
+    protocol_version: isUint,
+    engine_version: isStr,
+    doc_id: isStr,
+    pages: isUint,
+  },
+  stage_started: { stage: isStage },
+  stage_finished: { stage: isStage, elapsed_ms: isUint },
+  progress: { stage: isStage, done: isUint, total: isUint },
+  layout: { page: isUint, regions: arrayOf(isLayoutRegion) },
+  doc_meta: { title: orNull(isStr), authors: orNull(isStr) },
+  block_edits: { edits: arrayOf(isBlockEditState) },
+  paragraph: {
+    paragraph_id: isParagraphId,
+    page: isUint,
+    status: isStatus,
+    boxes: orNull(arrayOf(isRect)),
+    coord_system: isCoordSystem,
+    translated_html: orNull(isStr),
+    kind: isRegionKind,
+    source_text: isStr,
+    source_bbox: isRect,
+  },
+  page_reopened: { page: isUint },
+  page_ready: { page: isUint, preview_path: orNull(isStr), revision: isUint },
+  issue: {
+    severity: isSeverity,
+    code: isStr,
+    paragraph_id: orNull(isParagraphId),
+    page: orNull(isUint),
+    message: isStr,
+  },
+  document_finished: {
+    output: isStr,
+    stats: (v) => isObj(v) && isUint(v.fonts) && isNum(v.expansion_ratio) && isUint(v.fallbacks),
+  },
+  run_finished: { ok: isBool, elapsed_ms: isUint },
+  error: { fatal: isBool, code: isStr, message: isStr },
+};
+
+export function isEngineEvent(value: unknown): value is EngineEvent {
+  if (!isObj(value) || !isUint(value.seq) || !isNum(value.ts) || !isStr(value.type)) return false;
+  const fields = (EVENT_FIELDS as Record<string, Record<string, (v: unknown) => boolean>>)[
+    value.type
+  ];
+  if (fields === undefined) return false;
+  return Object.entries(fields).every(([key, guard]) => guard(value[key]));
+}
+
+const isTranslatorKind = (v: unknown): v is TranslatorKind => {
+  if (!isObj(v)) return false;
+  switch (v.kind) {
+    case 'pi':
+      return isStr(v.program) && isStr(v.model) && isStr(v.thinking);
+    case 'agy':
+      return isStr(v.program) && isStr(v.model);
+    case 'fake':
+      return isStr(v.name);
+    case 'http':
       return true;
     default:
       return false;
   }
-}
+};
+const isMode = (v: unknown): v is Mode => v === 'full' || v === 'bilingual';
 
-export function isRequestType(value: unknown): value is Request['type'] {
-  return typeof value === 'string' && (REQUEST_TYPES as readonly string[]).includes(value);
+const REQUEST_FIELDS: Record<Request['type'], Record<string, (v: unknown) => boolean>> = {
+  configure: {
+    provider: (v) => v === 'http' || v === 'pi' || v === 'agy',
+    base_url: orNull(isStr),
+    model: isStr,
+    api_key: orNull(isStr),
+    concurrency: isUint,
+    cache_dir: isStr,
+    translator: isTranslatorKind,
+  },
+  run: {
+    doc_id: isStr,
+    input: isStr,
+    output: isStr,
+    source_lang: isStr,
+    target_lang: isStr,
+    pages: orNull(arrayOf(isUint)),
+    font_profile: orNull(isStr),
+    terminology: orNull(isStr),
+    mode: isMode,
+    store: orNull(isStr),
+  },
+  retranslate: { doc_id: isStr, store: orNull(isStr), paragraph_ids: arrayOf(isParagraphId) },
+  apply_edit: {
+    doc_id: isStr,
+    store: orNull(isStr),
+    paragraph_id: isParagraphId,
+    translated_html: orNull(isStr),
+    style: isBlockStyle,
+  },
+  export: { doc_id: isStr, output: isStr, mode: isMode },
+  cancel: {},
+};
+
+export function isRequest(value: unknown): value is Request {
+  if (!isObj(value) || !isStr(value.type)) return false;
+  const fields = (REQUEST_FIELDS as Record<string, Record<string, (v: unknown) => boolean>>)[
+    value.type
+  ];
+  if (fields === undefined) return false;
+  return Object.entries(fields).every(([key, guard]) => guard(value[key]));
 }

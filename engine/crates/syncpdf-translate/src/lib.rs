@@ -38,7 +38,7 @@ pub use pi::PiTranslator;
 pub use prompt::{build_document_prompts, system_prompt, DocumentPrompt, PromptError, PromptSpec};
 pub use stream::{BlockStream, RawBlock};
 pub use translator::{
-    BlockStatus, ContextMap, DeltaSink, DocumentResult, Engine, Stats, TranslateError,
+    BlockStatus, ContextMap, DeltaSink, DocumentResult, Engine, Overrides, Stats, TranslateError,
     TranslatedBlock, Translator,
 };
 pub use unit::{build_unit, parse_unit_html, ParsedUnit, Segment, Unit, UnitParseError};

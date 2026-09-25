@@ -90,3 +90,9 @@ pipeline 的页提交先克隆候选主文档，删除该页成功段落，并�
 导入译文对象前重编号，避免跨PDF对象和资源冲突；复制页面透明度Group。Link Rect/QuadPoints及本地目的地随所属页面矩阵转换。右侧命名链接先解析为显式目的地，避免与左侧同名目标冲突；URI保持。沿用左侧原文目录和命名目标，不复制第二套目录。Fit/FitB改为对应半页FitR，FitH/FitV系列改为变换后的XYZ锚点。页数不一致、无效页面尺寸/旋转及无法解析的已用命名目标明确报错，不输出假成功。已验证普通论文文字/图形和链接；任意表单、交互批注外观、标签阅读树等尚未认证。
 
 两端对齐按advance调整字距后，如果衬线或侧承墨迹略超可用宽度，先减少新增glue拉伸；自然字距仍放不下时，在断行器已允许的收缩上限（ratio -1）内按需收紧，再放置；保持断点、字号、行距和字形宽度，实际墨迹仍通过原容纳/碰撞门禁。真实Text字体切换及验收见[宋体验收](../reports/2026-09-22-rust-electron-rewrite/12-MVP真实翻译验收.md#text-serif-font)。
+
+## 会话内编辑：单页重编
+
+`syncpdf-cli run` 长驻会话保留上一轮成功 run 的排版状态（`Retained`：源文档、各页排版结果、帧、译文块）。`apply_edit` / `retranslate` 只写本篇 `block_edits`；随后的 `run` 若配置与上一轮相同（`configure`、run 请求、`cache_only`、typography 均等，且未请求双语导出）、所编辑段都属于上一轮可译段，则只重编这些段所在的页：不发 `run_started`，逐页发 `page_reopened{page}`，把该页文档对象、帧与状态回滚到源，再按缓存（手改覆盖、重译标记绕过缓存）重放该页段落并回写，最后发该页 `page_ready`、`document_finished`、`run_finished`。条件不满足（首次编辑、换配置、换论文）或单页重编出错时退回全篇 run（后者先发 `page_recompile_failed` 警告）。回归测试 `run::incremental::tests::edit_recompiles_only_its_page_and_matches_a_full_run` 要求结果与带同样编辑的全篇 run 逐像素一致、其它页不变。
+
+`paragraph` 事件的 `translated_html` 是**模型空间** HTML：受保护原子保持 `{{KEEP_n}}`。编辑器据此渲染胶囊，手改回传时与模型译文在同一空间校验；若发展开后的原子文本，含原子的段手改会因 `placeholder_count` 回退。

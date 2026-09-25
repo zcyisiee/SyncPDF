@@ -2062,6 +2062,77 @@ fn ragged_right_lines_are_left_aligned() {
 }
 
 #[test]
+fn justified_paragraph_with_indent_and_short_last_line_is_justified() {
+    // 回归：末行短、首行缩进的普通两端对齐段落（如摘要）曾被判为 Left，译文右边参差；
+    // 行尾连字符的字符突出使行端相差 ~0.17em（StoryScope 摘要 1.66pt @ 10pt）也仍是两端对齐。
+    let protruded: [&[(&str, f32)]; 2] = [
+        &[
+            ("aaaa", 56.0),
+            ("bbbbb", 50.0),
+            ("ccccc", 50.0),
+            ("dd", 50.0),
+        ],
+        &[
+            ("aaaaa", 50.0),
+            ("bbbbb", 51.7),
+            ("ccccc", 50.0),
+            ("dd", 50.0),
+        ],
+    ];
+    for kind in [RegionKind::Abstract, RegionKind::Caption] {
+        for rows in protruded {
+            assert_eq!(align_of(rows, kind), Align::Justify, "{kind:?} {rows:?}");
+        }
+    }
+}
+
+#[test]
+fn ragged_body_lines_stay_left_aligned() {
+    // 反例：中间行右端缩进一个字（0.6em，超出字符突出的幅度）→ Left；末行之前只有
+    // 一行时右端证据不足 → Left；首行比其余行更靠左（悬挂缩进）→ Left。
+    let cases: [&[(&str, f32)]; 4] = [
+        &[
+            ("aaaaa", 50.0),
+            ("bbbb", 50.0),
+            ("ccccc", 50.0),
+            ("dd", 50.0),
+        ],
+        &[
+            ("aaaaa", 50.0),
+            ("bbb", 50.0),
+            ("ccccc", 50.0),
+            ("dd", 50.0),
+        ],
+        &[("aaaaa", 50.0), ("dd", 50.0)],
+        &[
+            ("aaaaaa", 44.0),
+            ("bbbbb", 50.0),
+            ("ccccc", 50.0),
+            ("dd", 50.0),
+        ],
+    ];
+    for rows in cases {
+        assert_eq!(
+            align_of(rows, RegionKind::Abstract),
+            Align::Left,
+            "{rows:?}"
+        );
+    }
+}
+
+/// 逐行 (文本, 起点 x) 构造 10pt 段落，返回判定的对齐方式。
+fn align_of(rows: &[(&str, f32)], kind: RegionKind) -> Align {
+    let mut g = Vec::new();
+    let mut start = 0u16;
+    for (i, (text, x)) in rows.iter().enumerate() {
+        g.extend(line(start, text, *x, 700.0 - 14.0 * i as f32, 10.0, 0));
+        start += text.len() as u16;
+    }
+    let ir = page_ir(g, vec![mk_font("F1", false, false)]);
+    analyze_page(&ir, &full_region(kind))[0].align
+}
+
+#[test]
 fn first_indent_and_line_height_are_measured() {
     let mut g = line(0, "Hello", 60.0, 700.0, 10.0, 0);
     g.extend(line(5, "World", 50.0, 686.0, 10.0, 0));

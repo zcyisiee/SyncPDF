@@ -1,41 +1,50 @@
 /**
- * preload 白名单（§13）：只暴露这些方法，渲染进程零 Node 访问。
- * 事件经 `engine:event`（webContents.send）推入，`onEvent` 用 ipcRenderer.on 订阅。
+ * preload 白名单：只暴露这些方法，渲染进程零 Node 访问。
+ * 推送（engine:event / library:changed / library:removed / engine:log）用 `on*` 订阅，返回取消函数。
  */
-import { contextBridge, ipcRenderer } from 'electron';
-import type { EngineEvent } from '../shared/protocol';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import type { BlockEditRequest, DocEngineEvent, DocSnapshot, LibraryDoc } from '../shared/library';
+
+function subscribe<T>(channel: string, listener: (payload: T) => void): () => void {
+  const handler = (_event: Electron.IpcRendererEvent, payload: T): void => listener(payload);
+  ipcRenderer.on(channel, handler);
+  return () => {
+    ipcRenderer.removeListener(channel, handler);
+  };
+}
 
 const api = {
-  /** 下发 configure（api_key 只经此通道，不落渲染进程日志）。 */
-  configure: (request: {
-    provider: string;
-    base_url: string;
-    model: string;
-    api_key: string;
-    concurrency: number;
-    cache_dir: string;
-  }) => ipcRenderer.invoke('engine:configure', request),
-
-  startRun: (request: Record<string, unknown>) => ipcRenderer.invoke('engine:run', request),
-  retranslate: (request: Record<string, unknown>) => ipcRenderer.invoke('engine:retranslate', request),
-  applyEdit: (request: Record<string, unknown>) => ipcRenderer.invoke('engine:applyEdit', request),
-  exportDocument: (request: Record<string, unknown>) => ipcRenderer.invoke('engine:export', request),
-  cancel: () => ipcRenderer.invoke('engine:cancel'),
-
-  /** 订阅引擎事件流；返回取消订阅函数。 */
-  onEvent: (listener: (event: EngineEvent) => void): (() => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, payload: EngineEvent): void => {
-      listener(payload);
-    };
-    ipcRenderer.on('engine:event', handler);
-    return () => {
-      ipcRenderer.removeListener('engine:event', handler);
-    };
+  library: {
+    list: (): Promise<LibraryDoc[]> => ipcRenderer.invoke('library:list'),
+    snapshot: (id: string): Promise<DocSnapshot> => ipcRenderer.invoke('library:snapshot', id),
+    queue: (): Promise<{ current: string | null; queued: string[] }> =>
+      ipcRenderer.invoke('library:queue'),
+    /** 系统文件框选 PDF 并加入论文库。 */
+    pick: (): Promise<LibraryDoc[]> => ipcRenderer.invoke('library:pick'),
+    add: (paths: string[]): Promise<LibraryDoc[]> => ipcRenderer.invoke('library:add', paths),
+    remove: (id: string): Promise<boolean> => ipcRenderer.invoke('library:remove', id),
+    reveal: (id: string): Promise<void> => ipcRenderer.invoke('library:reveal', id),
+    markOpened: (id: string): Promise<void> => ipcRenderer.invoke('library:markOpened', id),
+    updateMeta: (
+      id: string,
+      meta: { title?: string | null; authors?: string | null },
+      source: 'pdf_info' | 'user',
+    ): Promise<void> => ipcRenderer.invoke('library:updateMeta', id, meta, source),
+    contextMenu: (id: string): Promise<void> => ipcRenderer.invoke('library:contextMenu', id),
+    onChanged: (listener: (doc: LibraryDoc) => void) => subscribe('library:changed', listener),
+    onRemoved: (listener: (id: string) => void) => subscribe('library:removed', listener),
   },
-
-  /** 系统文件选择框（PDF）。 */
-  openFile: (): Promise<string | null> => ipcRenderer.invoke('app:openFile'),
-
+  engine: {
+    enqueue: (id: string): Promise<void> => ipcRenderer.invoke('engine:enqueue', id),
+    cancel: (id: string): Promise<void> => ipcRenderer.invoke('engine:cancel', id),
+    /** 保存单块编辑并排一次走缓存的重跑。 */
+    edit: (id: string, requests: BlockEditRequest[]): Promise<void> =>
+      ipcRenderer.invoke('engine:edit', id, requests),
+    onEvent: (listener: (event: DocEngineEvent) => void) => subscribe('engine:event', listener),
+    onLog: (listener: (line: string) => void) => subscribe('engine:log', listener),
+  },
+  /** 拖放进来的 File → 本地路径（Electron 32+ 移除了 File.path）。 */
+  pathForFile: (file: File): string => webUtils.getPathForFile(file),
   /**
    * 读白名单内文件的字节（pdf.js 用）。白名单外的路径主进程直接拒绝。
    * 主进程回 Uint8Array（结构化克隆），这里统一成 ArrayBuffer 交给 pdf.js。
@@ -44,20 +53,6 @@ const api = {
     const bytes: Uint8Array = await ipcRenderer.invoke('app:readFileBytes', path);
     return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   },
-
-  readCredentials: (): Promise<{
-    provider: string;
-    base_url: string;
-    model: string;
-    api_key: string;
-  } | null> => ipcRenderer.invoke('credentials:read'),
-
-  writeCredentials: (credentials: {
-    provider: string;
-    base_url: string;
-    model: string;
-    api_key: string;
-  }) => ipcRenderer.invoke('credentials:write', credentials),
 };
 
 contextBridge.exposeInMainWorld('syncpdf', api);

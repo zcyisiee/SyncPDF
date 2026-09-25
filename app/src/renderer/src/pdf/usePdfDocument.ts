@@ -18,18 +18,21 @@ export const sharedPdfLoader = new PdfDocumentLoader({
 
 export interface PdfDocumentHandle {
   doc: PDFDocumentProxy | null;
+  /** `doc` 对应的修订号（重载期间仍是旧的）。 */
+  revision: number;
   loading: boolean;
   /** 加载失败信息（文件还没写完 / 非 PDF / 白名单外）。 */
   error: string | null;
 }
 
-const EMPTY: PdfDocumentHandle = { doc: null, loading: false, error: null };
+const EMPTY: PdfDocumentHandle = { doc: null, revision: 0, loading: false, error: null };
 
 interface LoadState {
   /** `path\0revision`，空串 = 还没加载过任何东西。 */
   key: string;
   path: string | null;
   doc: PDFDocumentProxy | null;
+  revision: number;
   error: string | null;
 }
 
@@ -46,7 +49,7 @@ export function loadKey(path: string | null, revision: number): string {
  */
 export function usePdfDocument(path: string | null, revision = 0): PdfDocumentHandle {
   const key = loadKey(path, revision);
-  const [state, setState] = useState<LoadState>({ key: '', path: null, doc: null, error: null });
+  const [state, setState] = useState<LoadState>({ key: '', path: null, doc: null, revision: 0, error: null });
 
   useEffect(() => {
     if (key === '' || path === null) return;
@@ -54,10 +57,19 @@ export function usePdfDocument(path: string | null, revision = 0): PdfDocumentHa
     sharedPdfLoader
       .load(path, revision)
       .then((doc) => {
-        if (!cancelled) setState({ key, path, doc, error: null });
+        if (!cancelled) setState({ key, path, doc, revision, error: null });
       })
       .catch((error: unknown) => {
-        if (!cancelled) setState({ key, path, doc: null, error: describeError(error) });
+        // 同一路径重载失败（引擎正在改写）时保留上一份可用的 doc
+        if (!cancelled) {
+          setState((prev) => ({
+            key,
+            path,
+            doc: prev.path === path ? prev.doc : null,
+            revision: prev.path === path ? prev.revision : 0,
+            error: describeError(error),
+          }));
+        }
       });
     return () => {
       cancelled = true;
@@ -68,6 +80,7 @@ export function usePdfDocument(path: string | null, revision = 0): PdfDocumentHa
   const samePath = state.path === path;
   return {
     doc: samePath ? state.doc : null,
+    revision: samePath ? state.revision : 0,
     loading: state.key !== key,
     error: state.key === key ? state.error : null,
   };

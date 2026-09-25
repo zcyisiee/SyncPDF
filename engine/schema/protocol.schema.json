@@ -1,5 +1,78 @@
 {
   "$defs": {
+    "BlockAlign": {
+      "description": "段落对齐。",
+      "enum": [
+        "left",
+        "center",
+        "right",
+        "justify"
+      ],
+      "type": "string"
+    },
+    "BlockEditState": {
+      "description": "一段的覆盖状态（`block_edits` 事件）。",
+      "properties": {
+        "manual": {
+          "description": "译文为手改（不是模型译文）。",
+          "type": "boolean"
+        },
+        "paragraph_id": {
+          "$ref": "#/$defs/ParagraphIdSchema"
+        },
+        "style": {
+          "$ref": "#/$defs/BlockStyle",
+          "default": {}
+        }
+      },
+      "required": [
+        "paragraph_id",
+        "manual"
+      ],
+      "type": "object"
+    },
+    "BlockStyle": {
+      "description": "单块排版覆盖；字段为 `None` 时沿用整篇设置 / 原文判定。",
+      "properties": {
+        "align": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlockAlign"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "font_family": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FontFamily"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "font_scale": {
+          "description": "译文字号相对原文的倍数。",
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "line_height": {
+          "description": "行距（字号的倍数）。",
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "CoordSystemSchema": {
       "description": "镜像 `syncpdf_core::CoordSystem` 的 JSON 形态。",
       "enum": [
@@ -114,6 +187,77 @@
           "type": "object"
         },
         {
+          "description": "一页的版面区域（layout_analysis 之后按页发出，页号 1 基）。",
+          "properties": {
+            "page": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "regions": {
+              "items": {
+                "$ref": "#/$defs/LayoutRegion"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "layout",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "page",
+            "regions"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "文档元数据：首页 Title 段落与作者行；识别不到为 `None`。",
+          "properties": {
+            "authors": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "doc_meta",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "本篇生效的单块覆盖（每次 run 应用前整表发一次，空表也发）。",
+          "properties": {
+            "edits": {
+              "items": {
+                "$ref": "#/$defs/BlockEditState"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "block_edits",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "edits"
+          ],
+          "type": "object"
+        },
+        {
           "description": "段落状态更新。",
           "properties": {
             "boxes": {
@@ -129,6 +273,10 @@
             "coord_system": {
               "$ref": "#/$defs/CoordSystemSchema"
             },
+            "kind": {
+              "$ref": "#/$defs/RegionKindSchema",
+              "description": "段落所在区域类别。"
+            },
             "page": {
               "format": "uint32",
               "minimum": 0,
@@ -136,6 +284,14 @@
             },
             "paragraph_id": {
               "$ref": "#/$defs/ParagraphIdSchema"
+            },
+            "source_bbox": {
+              "$ref": "#/$defs/RectSchema",
+              "description": "源段落外接框（原文侧几何；`boxes` 在译文发布后是译文行框）。"
+            },
+            "source_text": {
+              "description": "源文本（阅读顺序）。",
+              "type": "string"
             },
             "status": {
               "$ref": "#/$defs/ParagraphStatusSchema"
@@ -156,7 +312,29 @@
             "paragraph_id",
             "page",
             "status",
-            "coord_system"
+            "coord_system",
+            "kind",
+            "source_text",
+            "source_bbox"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "单页重编开始（编辑后只重编被编辑段所在的页，不发 `run_started`）：\n该页此前的段落结果与问题作废，随后重发；其余页不变。页号 1 基。",
+          "properties": {
+            "page": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "page_reopened",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "page"
           ],
           "type": "object"
         },
@@ -305,6 +483,35 @@
         }
       ]
     },
+    "FontFamily": {
+      "description": "字体族：衬线（宋体类）/ 无衬线（黑体类）。",
+      "enum": [
+        "serif",
+        "sans"
+      ],
+      "type": "string"
+    },
+    "LayoutRegion": {
+      "description": "版面区域（`layout` 事件）。坐标为 PDF 用户空间。",
+      "properties": {
+        "bbox": {
+          "$ref": "#/$defs/RectSchema"
+        },
+        "inline": {
+          "description": "公式区域落在可译区域内（行内公式，作为 KEEP 原子随正文移动）。",
+          "type": "boolean"
+        },
+        "kind": {
+          "$ref": "#/$defs/RegionKindSchema"
+        }
+      },
+      "required": [
+        "kind",
+        "inline",
+        "bbox"
+      ],
+      "type": "object"
+    },
     "Mode": {
       "description": "输出模式：整页替换或双语对照。",
       "oneOf": [
@@ -362,6 +569,27 @@
         "y1"
       ],
       "type": "object"
+    },
+    "RegionKindSchema": {
+      "description": "镜像 `syncpdf_core::ir::RegionKind` 的 JSON 形态。",
+      "enum": [
+        "text",
+        "title",
+        "paragraph_title",
+        "list",
+        "caption",
+        "table",
+        "figure",
+        "formula",
+        "header",
+        "footer",
+        "foot_note",
+        "reference",
+        "code",
+        "abstract",
+        "other"
+      ],
+      "type": "string"
     },
     "Request": {
       "description": "stdin 请求。首条必须是 `Configure`；`Run` 启动任务；其余作用于当前文档。",
@@ -454,6 +682,13 @@
             "source_lang": {
               "type": "string"
             },
+            "store": {
+              "description": "本篇阶段缓存库路径（桌面端：`~/.sp/docs/<id>/store.db`）；`None` = 引擎默认的共享临时库。",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "target_lang": {
               "type": "string"
             },
@@ -480,7 +715,7 @@
           "type": "object"
         },
         {
-          "description": "局部重译。",
+          "description": "标记段落待重译：清掉手改译文，下一次 `run` 对这些段绕过翻译缓存。\n只写本篇库，不自己跑；调用方随后排一次 `run`。",
           "properties": {
             "doc_id": {
               "type": "string"
@@ -490,6 +725,13 @@
                 "$ref": "#/$defs/ParagraphIdSchema"
               },
               "type": "array"
+            },
+            "store": {
+              "description": "与 `run.store` 相同的本篇库；`None` = 引擎默认的共享临时库。",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "type": {
               "const": "retranslate",
@@ -504,21 +746,31 @@
           "type": "object"
         },
         {
-          "description": "手动编辑 → 重排版 + 局部回写；`base_revision` 不匹配返回 conflict。",
+          "description": "保存单段覆盖（手改译文 + 单块排版），整体替换该段已有覆盖。\n只写本篇库，不自己跑；调用方随后排一次 `run`（其余段全走缓存）。",
           "properties": {
-            "base_revision": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
             "doc_id": {
               "type": "string"
             },
             "paragraph_id": {
               "$ref": "#/$defs/ParagraphIdSchema"
             },
+            "store": {
+              "description": "与 `run.store` 相同的本篇库；`None` = 引擎默认的共享临时库。",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "style": {
+              "$ref": "#/$defs/BlockStyle",
+              "default": {}
+            },
             "translated_html": {
-              "type": "string"
+              "description": "手改译文（受限 HTML，同 `paragraph.translated_html`）；`None` = 用模型译文。",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "type": {
               "const": "apply_edit",
@@ -528,9 +780,7 @@
           "required": [
             "type",
             "doc_id",
-            "paragraph_id",
-            "translated_html",
-            "base_revision"
+            "paragraph_id"
           ],
           "type": "object"
         },

@@ -3,8 +3,19 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use syncpdf_core::ir::ParagraphStatus;
+use syncpdf_core::ir::{ParagraphStatus, RegionKind};
 use syncpdf_core::{CoordSystem, ParagraphId, Rect};
+
+/// 一段的覆盖状态（`block_edits` 事件）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BlockEditState {
+    #[schemars(with = "crate::schema::ParagraphIdSchema")]
+    pub paragraph_id: ParagraphId,
+    /// 译文为手改（不是模型译文）。
+    pub manual: bool,
+    #[serde(default)]
+    pub style: crate::BlockStyle,
+}
 
 /// 当前协议版本（`run_started.protocol_version`）。
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -49,6 +60,17 @@ pub struct Stats {
     pub fallbacks: u32,
 }
 
+/// 版面区域（`layout` 事件）。坐标为 PDF 用户空间。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LayoutRegion {
+    #[schemars(with = "crate::schema::RegionKindSchema")]
+    pub kind: RegionKind,
+    /// 公式区域落在可译区域内（行内公式，作为 KEEP 原子随正文移动）。
+    pub inline: bool,
+    #[schemars(with = "crate::schema::RectSchema")]
+    pub bbox: Rect,
+}
+
 /// stdout 事件（不含 `seq`/`ts` 信封字段）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -66,6 +88,18 @@ pub enum Event {
     StageFinished { stage: Stage, elapsed_ms: u64 },
     /// 进度（不编造 ETA）。
     Progress { stage: Stage, done: u32, total: u32 },
+    /// 一页的版面区域（layout_analysis 之后按页发出，页号 1 基）。
+    Layout {
+        page: u32,
+        regions: Vec<LayoutRegion>,
+    },
+    /// 文档元数据：首页 Title 段落与作者行；识别不到为 `None`。
+    DocMeta {
+        title: Option<String>,
+        authors: Option<String>,
+    },
+    /// 本篇生效的单块覆盖（每次 run 应用前整表发一次，空表也发）。
+    BlockEdits { edits: Vec<BlockEditState> },
     /// 段落状态更新。
     Paragraph {
         #[schemars(with = "crate::schema::ParagraphIdSchema")]
@@ -79,7 +113,18 @@ pub enum Event {
         #[schemars(with = "crate::schema::CoordSystemSchema")]
         coord_system: CoordSystem,
         translated_html: Option<String>,
+        /// 段落所在区域类别。
+        #[schemars(with = "crate::schema::RegionKindSchema")]
+        kind: RegionKind,
+        /// 源文本（阅读顺序）。
+        source_text: String,
+        /// 源段落外接框（原文侧几何；`boxes` 在译文发布后是译文行框）。
+        #[schemars(with = "crate::schema::RectSchema")]
+        source_bbox: Rect,
     },
+    /// 单页重编开始（编辑后只重编被编辑段所在的页，不发 `run_started`）：
+    /// 该页此前的段落结果与问题作废，随后重发；其余页不变。页号 1 基。
+    PageReopened { page: u32 },
     /// 一页完成（可选增量预览）。
     PageReady {
         page: u32,
@@ -182,6 +227,9 @@ mod tests {
             boxes: None,
             coord_system: CoordSystem::PdfUser,
             translated_html: Some("<p id=\"P12-169\">你好</p>".into()),
+            kind: RegionKind::Text,
+            source_text: "Hello".into(),
+            source_bbox: Rect::new(0.0, 0.0, 1.0, 1.0),
         });
         // Some([]) = 识别了但无框 → JSON []
         let json = serde_json::to_string(&Event::Paragraph {
@@ -191,6 +239,9 @@ mod tests {
             boxes: Some(vec![]),
             coord_system: CoordSystem::PdfUser,
             translated_html: None,
+            kind: RegionKind::Text,
+            source_text: String::new(),
+            source_bbox: Rect::new(0.0, 0.0, 1.0, 1.0),
         })
         .unwrap();
         assert!(json.contains("\"boxes\":[]"), "{json}");
@@ -202,7 +253,61 @@ mod tests {
             boxes: Some(vec![Rect::new(10.0, 20.0, 110.0, 32.0)]),
             coord_system: CoordSystem::ImageTopLeft,
             translated_html: None,
+            kind: RegionKind::Text,
+            source_text: String::new(),
+            source_bbox: Rect::new(0.0, 0.0, 1.0, 1.0),
         });
+    }
+
+    #[test]
+    fn event_layout_and_doc_meta_roundtrip() {
+        roundtrip(Event::Layout {
+            page: 1,
+            regions: vec![
+                LayoutRegion {
+                    kind: RegionKind::ParagraphTitle,
+                    inline: false,
+                    bbox: Rect::new(10.0, 20.0, 110.0, 32.0),
+                },
+                LayoutRegion {
+                    kind: RegionKind::Formula,
+                    inline: true,
+                    bbox: Rect::new(40.0, 21.0, 60.0, 30.0),
+                },
+            ],
+        });
+        roundtrip(Event::DocMeta {
+            title: Some("Attention".into()),
+            authors: None,
+        });
+        roundtrip(Event::BlockEdits {
+            edits: vec![BlockEditState {
+                paragraph_id: "P01-002".parse().unwrap(),
+                manual: true,
+                style: crate::BlockStyle {
+                    font_scale: Some(0.9),
+                    ..Default::default()
+                },
+            }],
+        });
+        let json = serde_json::to_string(&Event::Layout {
+            page: 2,
+            regions: vec![LayoutRegion {
+                kind: RegionKind::FootNote,
+                inline: false,
+                bbox: Rect::new(0.0, 0.0, 1.0, 1.0),
+            }],
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            "{\"type\":\"layout\",\"page\":2,\"regions\":[{\"kind\":\"foot_note\",\"inline\":false,\"bbox\":{\"x0\":0.0,\"y0\":0.0,\"x1\":1.0,\"y1\":1.0}}]}"
+        );
+    }
+
+    #[test]
+    fn event_page_reopened_roundtrip() {
+        roundtrip(Event::PageReopened { page: 2 });
     }
 
     #[test]
@@ -324,6 +429,9 @@ mod tests {
             boxes: None,
             coord_system: CoordSystem::PdfUser,
             translated_html: None,
+            kind: RegionKind::Text,
+            source_text: String::new(),
+            source_bbox: Rect::new(0.0, 0.0, 1.0, 1.0),
         })
         .unwrap();
         assert!(null_boxes.contains("\"boxes\":null"), "{null_boxes}");
@@ -335,6 +443,9 @@ mod tests {
             boxes: Some(vec![]),
             coord_system: CoordSystem::PdfUser,
             translated_html: None,
+            kind: RegionKind::Text,
+            source_text: String::new(),
+            source_bbox: Rect::new(0.0, 0.0, 1.0, 1.0),
         })
         .unwrap();
         assert!(empty_boxes.contains("\"boxes\":[]"), "{empty_boxes}");

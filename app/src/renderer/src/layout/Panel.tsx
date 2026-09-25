@@ -1,88 +1,117 @@
 /**
- * 面板（§12.1）：底部 allotment 分栏——问题（issue 列表）/ 输出（引擎日志）。
+ * 圆角面板外框 + 面板头。所有区域（左栏 / 编辑区 / 右栏 / 底部面板）共用。
+ *
+ * 面板头照 VSCode 侧栏：多个视图时先是一排图标切换（选中 = 圆角底色，不画下划线），
+ * 再是加粗的视图标题行，右侧放该视图的图标操作。`inline` 把两行并成一行（底部面板用）。
  */
-import { useUiStore } from '../store/uiStore';
-import type { PanelTab } from '../store/uiStore';
-import { IssuesView } from '../views/IssuesView';
-import { OutputView } from '../views/OutputView';
+import type { ReactNode } from 'react';
 
-const TABS: ReadonlyArray<{ id: PanelTab; label: string }> = [
-  { id: 'issues', label: '问题' },
-  { id: 'output', label: '输出' },
-];
+export interface PanelView<T extends string> {
+  id: T;
+  title: string;
+  icon: string;
+  badge?: number;
+}
 
-export function Panel(): JSX.Element {
-  const panelTab = useUiStore((state) => state.panelTab);
-  const setPanelTab = useUiStore((state) => state.setPanelTab);
-  const setLayout = useUiStore((state) => state.setLayout);
-
+export function Panel({ children, className }: { children: ReactNode; className?: string }): JSX.Element {
   return (
-    <section
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        minWidth: 0,
-        background: 'var(--vscode-panel-background)',
-        borderTop: '1px solid var(--vscode-panel-border)',
-      }}
+    <div className="sp-slot">
+      <section className={`sp-panel ${className ?? ''}`}>{children}</section>
+    </div>
+  );
+}
+
+export function PanelHeader<T extends string>({
+  views,
+  active,
+  onSelect,
+  actions,
+  inline = false,
+}: {
+  views: PanelView<T>[];
+  active: T;
+  onSelect?: (id: T) => void;
+  actions?: ReactNode;
+  inline?: boolean;
+}): JSX.Element {
+  const current = views.find((view) => view.id === active) ?? views[0];
+  const switcher =
+    views.length > 1 ? (
+      <div className="sp-viewbar" role="tablist">
+        {views.map((view) => (
+          <button
+            key={view.id}
+            type="button"
+            role="tab"
+            title={view.title}
+            aria-label={view.title}
+            aria-selected={view.id === active}
+            className={`sp-view-tab ${view.id === active ? 'is-active' : ''}`}
+            onClick={() => onSelect?.(view.id)}
+          >
+            <i className={`codicon codicon-${view.icon}`} />
+            {view.badge !== undefined && view.badge > 0 && <span className="sp-view-badge">{view.badge}</span>}
+          </button>
+        ))}
+      </div>
+    ) : null;
+  const title = (
+    <>
+      <h2 className="sp-panel-title">{current.title}</h2>
+      <span className="sp-spacer" />
+      {actions !== undefined && <div className="sp-actionbar">{actions}</div>}
+    </>
+  );
+  if (inline) {
+    return (
+      <header className="sp-panel-header">
+        {switcher}
+        {title}
+      </header>
+    );
+  }
+  return (
+    <>
+      {switcher !== null && <header className="sp-panel-header">{switcher}</header>}
+      <header className="sp-panel-header">{title}</header>
+    </>
+  );
+}
+
+/**
+ * 只有图标的按钮（面板头 / 工具栏 / 标题栏）。`active` 表示开关或单选的选中态。
+ * `glyph`：codicon 里没有贴切图标的概念（原文 / 译文）直接用一个字作图标。
+ */
+export function IconButton({
+  icon,
+  glyph,
+  title,
+  onClick,
+  active,
+  disabled = false,
+  role,
+}: {
+  icon: string;
+  glyph?: string;
+  title: string;
+  onClick: () => void;
+  active?: boolean;
+  disabled?: boolean;
+  role?: 'radio';
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className={`sp-icon-button ${active === true ? 'is-active' : ''}`}
+      title={title}
+      aria-label={title}
+      role={role}
+      aria-pressed={role === undefined ? active : undefined}
+      aria-checked={role === 'radio' ? active : undefined}
+      disabled={disabled}
+      onClick={onClick}
     >
-      <div
-        role="tablist"
-        style={{
-          flex: '0 0 28px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          paddingLeft: 8,
-          fontSize: 11,
-          textTransform: 'uppercase',
-          letterSpacing: 0.5,
-        }}
-      >
-        {TABS.map((tab) => {
-          const active = tab.id === panelTab;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => setPanelTab(tab.id)}
-              style={{
-                border: 'none',
-                background: active ? 'var(--vscode-list-activeSelectionBackground)' : 'transparent',
-                color: active
-                  ? 'var(--vscode-list-activeSelectionForeground)'
-                  : 'inherit',
-                padding: '3px 10px',
-                cursor: 'pointer',
-              }}
-            >
-              {tab.label}
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          title="关闭面板"
-          aria-label="关闭面板"
-          onClick={() => setLayout({ panelVisible: false })}
-          style={{
-            marginLeft: 'auto',
-            border: 'none',
-            background: 'transparent',
-            color: 'inherit',
-            cursor: 'pointer',
-            padding: '2px 8px',
-          }}
-        >
-          <span className="codicon codicon-chrome-close" />
-        </button>
-      </div>
-      <div style={{ flex: 1, minHeight: 0 }}>
-        {panelTab === 'issues' ? <IssuesView /> : <OutputView />}
-      </div>
-    </section>
+      {glyph === undefined ? <i className={`codicon codicon-${icon}`} /> : <span className="sp-glyph-icon">{glyph}</span>}
+    </button>
   );
 }

@@ -1,321 +1,187 @@
 /**
- * PDF 栏（源栏 / 译文栏共用）：缩放工具条 + 竖向滚动的页列表 + 段落框叠加层。
- *
- * - 缩放：`fit-width`（默认，随栏宽实时重算）或固定倍率（25%–400%）；
- * - 懒渲染在 `PageCanvas` 内；本组件只负责布局、滚动与选中联动；
- * - 滚动同步：按比例广播 / 接收（`scrollSync`），由 uiStore 开关控制；
- * - 选中段落变化时把它所在页滚进视野。
+ * 一栏 PDF（原文或译文）：懒渲染页面 + 叠加框；双栏同步滚动（按滚动比例）；
+ * 响应跳转请求（滚到某页 / 某段）。原文栏负责上报当前页与总页数。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BoxLayer, type ParagraphBoxes } from './BoxLayer';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { ParagraphId } from '@shared/protocol';
+import { useLibrary } from '@/store/library';
+import { useWorkbench } from '@/store/workbench';
+import { BoxOverlay } from './BoxOverlay';
+import type { OverlayItem } from './overlay';
 import { PageCanvas } from './PageCanvas';
-import { usePdfDocument } from './usePdfDocument';
+import type { PageViewport } from './pdfjs';
+import { captureAnchor, pinchScale, renderedScale, restoreAnchor, type ZoomAnchor } from './pinchZoom';
 import {
   applyScrollRatio,
   publishScroll,
   scrollRatioOf,
   subscribeScroll,
+  UserScrollGate,
   type ScrollOrigin,
 } from './scrollSync';
-import type { PageViewport } from './pdfjs';
-
-/** 允许的固定倍率档位。 */
-export const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4] as const;
-
-export type ZoomValue = number | 'fit-width';
+import { usePdfDocument } from './usePdfDocument';
 
 export interface PdfPaneProps {
-  /** PDF 绝对路径（白名单内）。 */
-  path: string | null;
-  /** 整册修订号：变化 → 重新 `getDocument`。 */
-  revision?: number;
-  /** 页 → 该页修订号（变化 → 只重渲染该页）。 */
+  side: ScrollOrigin;
+  path: string;
+  /** 文件修订号：变化即重载文件。 */
+  revision: number;
+  /** 1 基页号 → 该页内容修订号；只重画变了的页。 */
   pageRevisions?: Record<number, number>;
-  /** 页号（1 基）→ 该页段落框。 */
-  boxesByPage?: Map<number, ParagraphBoxes[]>;
-  /** 选中段落 id。 */
-  selectedId?: string | null;
-  onSelect?: (id: string) => void;
-  /** 只读叠加层（译文栏：只高亮选中段，不接鼠标）。 */
-  readOnlyBoxes?: boolean;
-  /** 滚动同步身份。 */
-  origin: ScrollOrigin;
-  /** 是否参与滚动同步。 */
-  syncScroll: boolean;
-  /** 空状态文案。 */
-  emptyHint: string;
+  /** 左上角提示"待动态编译"的页（1 基）。 */
+  pendingPages?: ReadonlySet<number>;
+  itemsByPage: Map<number, OverlayItem[]>;
 }
 
-export function PdfPane({
-  path,
-  revision = 0,
-  pageRevisions,
-  boxesByPage,
-  selectedId = null,
-  onSelect,
-  readOnlyBoxes = false,
-  origin,
-  syncScroll,
-  emptyHint,
-}: PdfPaneProps): JSX.Element {
-  const { doc, loading, error } = usePdfDocument(path, revision);
+export function PdfPane({ side, path, revision, pageRevisions, pendingPages, itemsByPage }: PdfPaneProps): JSX.Element {
+  const { doc, revision: docRevision, error, loading } = usePdfDocument(path, revision);
+  const zoom = useWorkbench((s) => s.zoom[side]);
+  const showBoxes = useWorkbench((s) => s.showBoxes);
+  const selected = useLibrary((s) => s.selected);
+  const reveal = useLibrary((s) => s.reveal);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const [containerWidth, setContainerWidth] = useState(600);
-  const [zoom, setZoom] = useState<ZoomValue>('fit-width');
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const viewportsRef = useRef(new Map<number, PageViewport>());
-  /** 正在应用外部滚动：避免回灌成环。 */
-  const applyingRef = useRef(false);
+  /** 只广播用户发起的滚动（见 UserScrollGate）。 */
+  const [gate] = useState(() => new UserScrollGate());
+  const [width, setWidth] = useState(0);
 
-  // 栏宽（fit-width 依赖）
   useEffect(() => {
     const node = scrollRef.current;
     if (node === null) return;
-    const measure = (): void => setContainerWidth(node.clientWidth);
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
+    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
     observer.observe(node);
     return () => observer.disconnect();
-  }, [doc]);
-
-  // 滚动同步：接收
-  useEffect(() => {
-    if (!syncScroll) return;
-    return subscribeScroll((ratio, from) => {
-      if (from === origin) return;
-      const node = scrollRef.current;
-      if (node === null) return;
-      applyingRef.current = true;
-      applyScrollRatio(node, ratio);
-      // 下一帧再解锁（scroll 事件是异步派发的）
-      requestAnimationFrame(() => {
-        applyingRef.current = false;
-      });
-    });
-  }, [syncScroll, origin]);
-
-  // 滚动同步：广播
-  const onScroll = useCallback(() => {
-    if (!syncScroll || applyingRef.current) return;
-    const node = scrollRef.current;
-    if (node === null) return;
-    publishScroll(scrollRatioOf(node), origin);
-  }, [syncScroll, origin]);
-
-  // 选中段落 → 滚动到它所在页
-  useEffect(() => {
-    if (selectedId === null) return;
-    const node = scrollRef.current;
-    if (node === null) return;
-    const page = pageOfParagraph(selectedId, boxesByPage);
-    if (page === null) return;
-    const element = node.querySelector<HTMLElement>(`[data-page="${page}"]`);
-    element?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }, [selectedId, boxesByPage]);
-
-  const onViewport = useCallback((pageNumber: number, viewport: PageViewport | null) => {
-    if (viewport === null) viewportsRef.current.delete(pageNumber);
-    else viewportsRef.current.set(pageNumber, viewport);
   }, []);
 
-  const pageNumbers = useMemo(
-    () => (doc === null ? [] : Array.from({ length: doc.numPages }, (_value, index) => index + 1)),
-    [doc],
+  useEffect(() => {
+    if (side === 'source' && doc !== null) useLibrary.getState().setPageCount(doc.numPages);
+  }, [side, doc]);
+
+  // 双指缩放：必须是非 passive 监听才能 preventDefault；一帧合并一次，避免每个事件都重排全部页面
+  const pinchAnchor = useRef<ZoomAnchor | null>(null);
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (node === null) return;
+    let frame = 0;
+    let delta = 0;
+    let anchor: ZoomAnchor | null = null;
+    const onWheel = (event: WheelEvent): void => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      delta += event.deltaY;
+      anchor ??= captureAnchor(node, event.clientX, event.clientY);
+      if (frame !== 0) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const current = renderedScale(node);
+        const next = current === null ? null : pinchScale(current, delta);
+        if (next !== null && next !== current) {
+          pinchAnchor.current = anchor;
+          useWorkbench.getState().setZoom(side, next);
+        }
+        delta = 0;
+        anchor = null;
+      });
+    };
+    node.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      node.removeEventListener('wheel', onWheel);
+      cancelAnimationFrame(frame);
+    };
+  }, [side]);
+
+  useLayoutEffect(() => {
+    const node = scrollRef.current;
+    if (node !== null && pinchAnchor.current !== null) restoreAnchor(node, pinchAnchor.current);
+    pinchAnchor.current = null;
+  }, [zoom]);
+
+  useEffect(
+    () =>
+      subscribeScroll((ratio, origin) => {
+        const node = scrollRef.current;
+        if (origin === side || node === null || !useWorkbench.getState().sync) return;
+        applyScrollRatio(node, ratio);
+      }),
+    [side],
   );
 
-  const body = ((): JSX.Element => {
-    if (path === null || path === '') {
-      return <Hint text={emptyHint} icon="codicon-file-pdf" />;
-    }
-    if (error !== null) {
-      return <Hint text={`加载失败：${error}`} icon="codicon-error" tone="error" />;
-    }
-    if (doc === null) {
-      return <Hint text={loading ? '加载中…' : emptyHint} icon="codicon-loading" />;
-    }
-    return (
-      <>
-        {pageNumbers.map((pageNumber) => (
+  // 跳转：优先滚到段落框，其次页面
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (reveal === null || node === null) return;
+    const target =
+      (reveal.paragraphId === null ? null : node.querySelector(`[data-pid="${reveal.paragraphId}"]`)) ??
+      node.querySelector(`[data-page="${reveal.page}"]`);
+    target?.scrollIntoView({ block: reveal.paragraphId === null ? 'start' : 'center' });
+  }, [reveal]);
+
+  const onScroll = (): void => {
+    const node = scrollRef.current;
+    if (node === null) return;
+    if (side === 'source') useLibrary.getState().setCurrentPage(currentPageOf(node));
+    if (gate.isUserScroll() && useWorkbench.getState().sync) publishScroll(scrollRatioOf(node), side);
+  };
+
+  const onSelect = useCallback((id: ParagraphId) => useLibrary.getState().select(id), []);
+
+  const renderOverlay = useCallback(
+    (pageNumber: number) =>
+      function Overlay(viewport: PageViewport) {
+        const items = itemsByPage.get(pageNumber);
+        return (
+          <>
+            {showBoxes && items !== undefined && (
+              <BoxOverlay items={items} viewport={viewport} selected={selected} onSelect={onSelect} />
+            )}
+            {pendingPages?.has(pageNumber) === true && <div className="sp-page-badge">待动态编译</div>}
+          </>
+        );
+      },
+    [itemsByPage, showBoxes, selected, onSelect, pendingPages],
+  );
+
+  return (
+    <div
+      ref={scrollRef}
+      className="sp-pdf-scroll"
+      data-side={side}
+      tabIndex={-1}
+      onScroll={onScroll}
+      onWheel={() => gate.noteInput()}
+      onKeyDown={() => gate.noteInput()}
+      onTouchMove={() => gate.noteInput()}
+      onPointerDown={() => gate.setPointerDown(true)}
+      onPointerUp={() => gate.setPointerDown(false)}
+      onPointerCancel={() => gate.setPointerDown(false)}
+    >
+      {doc === null && (
+        <div className="sp-pane-message">{error !== null ? `无法打开 PDF：${error}` : loading ? '加载中…' : ''}</div>
+      )}
+      {doc !== null &&
+        width > 0 &&
+        Array.from({ length: doc.numPages }, (_, i) => i + 1).map((pageNumber) => (
           <PageCanvas
             key={pageNumber}
             doc={doc}
             pageNumber={pageNumber}
             zoom={zoom}
-            containerWidth={containerWidth}
+            containerWidth={width}
             revision={pageRevisions?.[pageNumber] ?? 0}
-            onViewport={onViewport}
-            renderOverlay={(viewport) => {
-              const paragraphs = boxesByPage?.get(pageNumber);
-              if (paragraphs === undefined || paragraphs.length === 0) return null;
-              return (
-                <BoxLayer
-                  viewport={viewport}
-                  paragraphs={paragraphs}
-                  selectedId={selectedId}
-                  hoveredId={hoveredId}
-                  onSelect={(id) => onSelect?.(id)}
-                  onHover={setHoveredId}
-                  readOnly={readOnlyBoxes}
-                />
-              );
-            }}
+            docRevision={docRevision}
+            renderOverlay={renderOverlay(pageNumber)}
           />
         ))}
-      </>
-    );
-  })();
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0 }}>
-      <ZoomBar
-        zoom={zoom}
-        onZoom={setZoom}
-        pageCount={doc?.numPages ?? 0}
-        busy={loading}
-      />
-      <div
-        ref={scrollRef}
-        className="syncpdf-scroll"
-        onScroll={onScroll}
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflow: 'auto',
-          padding: '12px 0',
-          background: 'var(--vscode-editorWidget-background, #252526)',
-        }}
-      >
-        {body}
-      </div>
     </div>
   );
 }
 
-/** 段落 id → 页号（1 基）；从 boxesByPage 反查，找不到退回 id 前缀。 */
-function pageOfParagraph(
-  id: string,
-  boxesByPage: Map<number, ParagraphBoxes[]> | undefined,
-): number | null {
-  if (boxesByPage !== undefined) {
-    for (const [page, list] of boxesByPage) {
-      if (list.some((item) => item.id === id)) return page;
-    }
+/** 视口上三分之一处所在的页。 */
+function currentPageOf(node: HTMLElement): number {
+  const probe = node.scrollTop + node.clientHeight / 3;
+  let page = 1;
+  for (const child of node.querySelectorAll<HTMLElement>('[data-page]')) {
+    if (child.offsetTop > probe) break;
+    page = Number(child.dataset.page);
   }
-  const match = /^P(\d+)-/.exec(id);
-  return match === null ? null : Number.parseInt(match[1], 10);
-}
-
-interface ZoomBarProps {
-  zoom: ZoomValue;
-  onZoom: (zoom: ZoomValue) => void;
-  pageCount: number;
-  busy: boolean;
-}
-
-function ZoomBar({ zoom, onZoom, pageCount, busy }: ZoomBarProps): JSX.Element {
-  const stepZoom = (direction: -1 | 1): void => {
-    const current = zoom === 'fit-width' ? 1 : zoom;
-    const index = ZOOM_STEPS.findIndex((step) => step >= current - 1e-6);
-    const next = ZOOM_STEPS[clampIndex(index + direction)];
-    onZoom(next);
-  };
-
-  return (
-    <div
-      style={{
-        flex: '0 0 26px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 4,
-        padding: '0 8px',
-        fontSize: 11,
-        borderBottom: '1px solid var(--vscode-editorGroup-border)',
-        color: 'var(--vscode-editor-foreground)',
-      }}
-    >
-      <IconButton label="缩小" icon="codicon-zoom-out" onClick={() => stepZoom(-1)} />
-      <button
-        type="button"
-        onClick={() => onZoom(zoom === 'fit-width' ? 1 : 'fit-width')}
-        title="切换 适应宽度 / 100%"
-        style={{
-          border: 'none',
-          background: 'transparent',
-          color: 'inherit',
-          cursor: 'pointer',
-          minWidth: 56,
-          fontSize: 11,
-        }}
-      >
-        {zoom === 'fit-width' ? '适应宽度' : `${Math.round(zoom * 100)}%`}
-      </button>
-      <IconButton label="放大" icon="codicon-zoom-in" onClick={() => stepZoom(1)} />
-      <span style={{ marginLeft: 'auto', opacity: 0.7 }}>
-        {busy ? '加载中…' : pageCount > 0 ? `${pageCount} 页` : ''}
-      </span>
-    </div>
-  );
-}
-
-function IconButton({
-  label,
-  icon,
-  onClick,
-}: {
-  label: string;
-  icon: string;
-  onClick: () => void;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      onClick={onClick}
-      style={{
-        border: 'none',
-        background: 'transparent',
-        color: 'inherit',
-        cursor: 'pointer',
-        padding: '2px 4px',
-        lineHeight: 1,
-      }}
-    >
-      <span className={`codicon ${icon}`} />
-    </button>
-  );
-}
-
-function clampIndex(index: number): number {
-  return Math.min(ZOOM_STEPS.length - 1, Math.max(0, index));
-}
-
-function Hint({
-  text,
-  icon,
-  tone,
-}: {
-  text: string;
-  icon: string;
-  tone?: 'error';
-}): JSX.Element {
-  return (
-    <div
-      style={{
-        display: 'grid',
-        placeItems: 'center',
-        height: '100%',
-        gap: 8,
-        opacity: tone === 'error' ? 1 : 0.55,
-        color: tone === 'error' ? 'var(--vscode-errorForeground)' : 'inherit',
-        fontSize: 12,
-        textAlign: 'center',
-        padding: 24,
-      }}
-    >
-      <span className={`codicon ${icon}`} style={{ fontSize: 32 }} />
-      <span>{text}</span>
-    </div>
-  );
+  return page;
 }
