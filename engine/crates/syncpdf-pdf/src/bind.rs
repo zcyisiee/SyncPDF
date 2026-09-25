@@ -494,6 +494,8 @@ pub struct FontWidths {
     pub widths: Vec<f32>,
     /// Explicit FontDescriptor /MissingWidth; absent metrics are not guessed.
     pub missing_width: Option<f32>,
+    /// 没有 `/Widths` 的标准 14 字体：字宽按字形 Unicode 查内置 AFM。
+    pub builtin: Option<crate::base14::Base14>,
     /// 是否 Type0。
     pub is_type0: bool,
     /// 是否 Identity 编码（Type0 默认按 Identity 处理）。
@@ -634,7 +636,15 @@ pub fn font_widths(doc: &Document, font_id: ObjectId) -> FontWidths {
                     .unwrap_or(0.0),
             );
         }
-        if d.get(b"Subtype").ok().and_then(name_of).as_deref() == Some("Type3") {
+        let is_type3 = d.get(b"Subtype").ok().and_then(name_of).as_deref() == Some("Type3");
+        if !is_type3 && out.missing_width.is_none() {
+            out.builtin = d
+                .get(b"BaseFont")
+                .ok()
+                .and_then(name_of)
+                .and_then(|n| crate::base14::Base14::find(&n));
+        }
+        if is_type3 {
             // Type3 widths live in glyph space, transformed by FontMatrix.
             // Horizontal replacement only supports a finite positive x scale.
             let scale = d
@@ -2130,6 +2140,17 @@ fn bind_glyphs(
                             1.0
                         };
                         let advance = match &enc.widths {
+                            Some(FontWidths {
+                                builtin: Some(b), ..
+                            }) => {
+                                unicode
+                                    .first()
+                                    .and_then(|c| b.width_1000(*c))
+                                    .unwrap_or(f32::NAN)
+                                    * fop.font_size
+                                    / 1000.0
+                                    * size_scale
+                            }
                             Some(w) => w.advance_pt(*code, fop.font_size) * size_scale,
                             None => f32::NAN,
                         };

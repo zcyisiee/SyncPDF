@@ -202,6 +202,8 @@ fn missing_simple_font_widths_rejects_without_guessing_or_mutation() {
         if let Ok(dict) = object.as_dict_mut() {
             if dict.get(b"Type").ok().and_then(|o| o.as_name().ok()) == Some(b"Font") {
                 dict.remove(b"Widths");
+                // 标准 14 字体缺 `/Widths` 时有内置度量；非标准字体才是真正未知。
+                dict.set("BaseFont", lopdf::Object::Name(b"UnknownSans".to_vec()));
             }
         }
     }
