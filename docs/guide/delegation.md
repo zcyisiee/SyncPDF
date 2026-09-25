@@ -105,6 +105,27 @@ ln -s <主工作树>/web/node_modules <新 worktree>/web/node_modules
 (cd <新 worktree>/web && npx tsc --noEmit -p tsconfig.json)
 ```
 
+### 外部 runner（`runner.type: external-cli`）注意项（已实测核实）
+
+用 Pi 的 `subagent` 托管外部 harness（`devin-swe2`、`paddle-progress-agy`、内置 `codex-exec` 等）时，下列行为与原生 Pi child **不同**，不要按原生经验处理。证据：run `1eea810b`（真实只读任务）、`357ab403`（默认配置探针）、`7ed2f077`（同任务 + `control` 覆盖）；观察版本 `pi-subagents@0.71.0`。
+
+- **只能异步启动**：外部 runner 传 `async: false` 会被直接拒绝。用默认 `async: true` 拿到 runId，完成靠运行时原生通知；`subagent({ action: "status", id })` 只作一次性查看，不要 sleep 轮询。
+- **能力边界固定**，每个 run 的 `meta.json` 里 `runner.capabilities` 可直接查：`stop=true`，而 `steer` / `resume` / `structuredOutput` / `toolEvents` / `supervisor` / `forkContext` / `extensionBindings` 全为 `false`（`nonResumableReason`：one-shot stdin adapter 没有可持久的外部会话身份）。因此 attention 通知里给的 `steer` 与 routed `resume` nudge 对外部 runner **无效**，发了也不会送达——唯一可用的实时控制是 `interrupt`/`stop`。中断后先确认进程已退出并保存 diff，再以**新会话**做有边界的后续任务（不 resume）。
+- **60 秒 `needs_attention` 是噪声，不是停工信号**：外部 runner 没有原生 tool/turn 事件，Pi 能观测到的唯一活动是子进程真正写出的 stdout/stderr 字节。devin 的 ACP 握手加首个模型响应天然静默超过 60 秒，所以**只要首次输出晚于 60 秒就必然在 60 秒处报一次** `needs attention (no observed activity for 60s)`。实测 run `357ab403`：第 60 秒时 `external-0.stdout.log` 为 **0 字节**、devin 进程存活、任务最终 `exitCode 0` 成功，全程仅此一条控制事件。成因是监控统计 `output-<n>.log` 的 mtime（`runs/background/subagent-runner.js` 的 `stepOutputActivityAt`），而外部 runner 的实时输出写在 `external-<n>.stdout.log`（`runs/shared/external-cli-runner.js`），前者要到进程退出后才生成。
+  - 处理口径：先 `status`，再看 `external-<n>.stdout.log` 是否在增长、进程是否还在，确认没卡就不要打断。
+  - 需要静默时，在**调用参数**里放宽窗口（已 A/B 实测：默认配置 1 条事件，覆盖后 0 条）：
+
+    ```js
+    subagent({ agent: "devin-swe2", task: "...", control: { needsAttentionAfterMs: 600000 } })
+    ```
+
+    `control` 只存在于工具调用参数：agent frontmatter 没有该字段，`subagents.agentOverrides.<name>` 也不接受它，所以无法做成 agent 级默认，只能逐次传参或改 pi-subagents 本体（改动会影响所有会话，且被包升级覆盖，须 owner 批准）。
+- **`structuredOutput` 不可用**：adapter 把 stdout 当**不可信文本**，不产出 Pi 结构化结果，也不产生原生 tool 事件。外部 agent 把 JSON（例如自带的 acceptance-report 围栏）混在自然语言里时 Pi 不会替你解析；要结构化就在 workflow 里自行解析 `output`，或配 typed gate。子进程往 stdout 吐的原生日志同样会污染结果。
+- **不要传 Pi 原生 child 选项**：`model` / `context` / `toolBudget` / `acceptance` / `fast` / `forkContext` / `skills` 对通用 external-cli 不生效。模型与档位必须钉在 runner argv 里（如 `.pi/agents/devin-swe2.md`），不要指望在调用处覆盖。
+- **不能当失败 lane 的隐式回退**：原生 `subagent` 失败后改走外部/前台/CLI runner 需要 owner 明确批准，并先记录失败 run 与 worktree 状态、确认工作树干净或保存部分 diff；不得静默换 harness。
+- **启动前提与探针的边界**：需要本地 CLI 已安装**且已认证**。`subagent({ action: "list", capabilities: true })` 里的 `runner.available` 只是被动 PATH 探测，不证明认证或启动兼容；先做无工具启动探针，但**探针成功不是工程验收**，仍须主控亲审 diff 并独立测试。
+- **project agent 按 child 的实际 cwd 发现**，因此新 worktree 必须自带同一份 `.pi/agents/*.md`（未提交的主树配置不会自动出现）。细则见上文 Devin 节。
+
 ## 执行 brief
 
 通常使用以下结构；标题与正文用中文，括号中的键对应原规范的概念：
