@@ -283,6 +283,13 @@ fn same_paragraph(
             return true;
         }
     }
+    // A list item hangs its marker: continuation rows align with the first
+    // word after it. A row that itself starts with a marker is the next item.
+    if list_body_x(prev, glyphs).is_some_and(|x| (cur.bbox.x0 - x).abs() < 2.0)
+        && list_body_x(cur, glyphs).is_none()
+    {
+        return true;
+    }
     // 首行缩进：本行起点明显右移 → 新段。
     let prev_x0 = glyphs[prev.glyphs[0] as usize].bbox.x0;
     let cur_x0 = glyphs[cur.glyphs[0] as usize].bbox.x0;
@@ -296,6 +303,24 @@ fn numbered_heading_body_x(row: &Row, glyphs: &[&syncpdf_core::ir::Glyph]) -> Op
     static LABEL: OnceLock<Regex> = OnceLock::new();
     let label =
         LABEL.get_or_init(|| Regex::new(r"^(?:[A-Z]|[0-9]+)(?:\.[0-9]+)*[.)]?\s+(\S)").unwrap());
+    label_body_x(row, glyphs, label)
+}
+
+/// Where the body starts after a list marker: `(ii)`, `12.`, `b)`, a bullet.
+/// Unlike a heading number, a bare word never counts as a marker here.
+fn list_body_x(row: &Row, glyphs: &[&syncpdf_core::ir::Glyph]) -> Option<f32> {
+    static LABEL: OnceLock<Regex> = OnceLock::new();
+    let label = LABEL.get_or_init(|| {
+        let ordinal = r"(?:[0-9]+|[A-Za-z]|[ivxlcdm]+|[IVXLCDM]+)";
+        Regex::new(&format!(
+            r"^(?:\({ordinal}\)|{ordinal}[.)]|[\u{{2022}}\u{{25E6}}\u{{25AA}}\u{{2023}}\u{{2219}}\u{{2013}}])\s*(\S)"
+        ))
+        .unwrap()
+    });
+    label_body_x(row, glyphs, label)
+}
+
+fn label_body_x(row: &Row, glyphs: &[&syncpdf_core::ir::Glyph], label: &Regex) -> Option<f32> {
     let reading = read_source(std::slice::from_ref(row), glyphs);
     let body = label.captures(&reading.text)?.get(1)?;
     let char_index = reading.text[..body.start()].chars().count();

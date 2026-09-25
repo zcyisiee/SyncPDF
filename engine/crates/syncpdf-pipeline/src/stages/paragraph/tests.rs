@@ -1397,6 +1397,45 @@ fn numbered_title_hanging_continuation_is_not_a_new_paragraph() {
 }
 
 #[test]
+fn list_item_hanging_continuation_is_not_a_new_paragraph() {
+    // 列表项首行带标号外挎，续行对齐标号后的正文起点：同一段。
+    for (label, space) in [
+        ("(ii)", false),
+        ("12.", true),
+        ("b)", true),
+        ("\u{2022}", true),
+    ] {
+        let body_x = 50.0 + label.chars().count() as f32 * 6.0 + if space { 6.0 } else { 0.0 };
+        let mut g = line(0, label, 50.0, 700.0, 10.0, 0);
+        if space {
+            g.push(mk_glyph(20, ' ', body_x - 6.0, 700.0, 10.0, 0));
+        }
+        g.extend(line(30, "Choose a number of", body_x, 700.0, 10.0, 0));
+        g.extend(line(60, "destructive moves", body_x, 687.0, 10.0, 0));
+        g.extend(line(90, "at the master level", body_x, 674.0, 10.0, 0));
+        let ir = page_ir(g, vec![mk_font("F1", false, false)]);
+        let paras = analyze_page(&ir, &full_region(RegionKind::Text));
+        assert_eq!(paras.len(), 1, "{label}");
+        assert!(
+            paras[0].text.ends_with("moves at the master level"),
+            "{label}"
+        );
+    }
+    let split = |first: &str, second: &str, x: f32| {
+        let mut g = line(0, first, 50.0, 700.0, 10.0, 0);
+        g.extend(line(40, second, x, 687.0, 10.0, 0));
+        let ir = page_ir(g, vec![mk_font("F1", false, false)]);
+        analyze_page(&ir, &full_region(RegionKind::Text)).len()
+    };
+    // 无标号的行：次行缩到第二个词下方仍是新段（首行缩进）。
+    assert_eq!(split("Note that it", "New paragraph", 80.0), 2);
+    // 有标号，但次行缩进不对齐标号后的正文。
+    assert_eq!(split("(ii) Choose it", "New paragraph", 68.0), 2);
+    // 次行本身又是一个标号项：嵌套列表的新项。
+    assert_eq!(split("(ii) Choose it", "(a) Nested item", 80.0), 2);
+}
+
+#[test]
 fn ctm_scaled_glyphs_with_body_line_pitch_merge_into_one_paragraph() {
     // TRC 形态：字号在 CTM 里（Tf=1，绑定后 size=7.97），行距 10.45 ≈ 1.31×字号。
     // 行距判定按有效字号 → 同段；按 Tf 原值 1 会误判 10.45 ≥ 1.8×1 → 每行一段。
