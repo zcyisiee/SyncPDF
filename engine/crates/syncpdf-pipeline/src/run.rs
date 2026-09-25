@@ -469,6 +469,10 @@ impl Pipeline {
                 total: pages_ir.len() as u32,
             });
             stages::source_toc::refine(&mut regions, page_ir, &main_doc);
+            sink.emit(Event::Layout {
+                page: page + 1,
+                regions: layout_regions(&regions),
+            });
             per_page_regions.push((page, regions));
         }
         if let Some(profile) = model
@@ -483,6 +487,7 @@ impl Pipeline {
         emit_stage_started(sink, Stage::ParagraphAnalysis);
         let t = Instant::now();
         let mut all_paras: Vec<Paragraph> = Vec::new();
+        let mut author_ids: Vec<ParagraphId> = Vec::new();
         for (page, regions) in &per_page_regions {
             check_cancelled(cancel)?;
             let ir = pages_ir
@@ -498,7 +503,11 @@ impl Pipeline {
                     b.unproven_source_ops(),
                 );
             }
-            stages::source_policy::protect_front_matter(ir, regions, &mut paragraphs);
+            author_ids.extend(stages::source_policy::protect_front_matter(
+                ir,
+                regions,
+                &mut paragraphs,
+            ));
             stages::source_opaque::protect(&mut paragraphs, ir);
             stages::source_opaque::keep_list_bullets(&mut paragraphs, ir);
             stages::source_decoration::claim(ir, &mut paragraphs);
@@ -507,15 +516,16 @@ impl Pipeline {
             all_paras.extend(paragraphs);
         }
         stages::source_policy::protect_author_lists(&mut all_paras);
+        if selected.contains(&0) {
+            sink.emit(doc_meta(&all_paras, &author_ids));
+        }
         for p in &all_paras {
-            sink.emit(Event::Paragraph {
-                paragraph_id: p.id.clone(),
-                page: p.id.page,
-                status: ParagraphStatus::Pending,
-                boxes: Some(vec![p.bbox]),
-                coord_system: syncpdf_core::CoordSystem::PdfUser,
-                translated_html: None,
-            });
+            sink.emit(paragraph_event(
+                p,
+                ParagraphStatus::Pending,
+                Some(vec![p.bbox]),
+                None,
+            ));
         }
         emit_stage_finished(sink, Stage::ParagraphAnalysis, t);
 
@@ -548,14 +558,12 @@ impl Pipeline {
                     });
                 }
             }
-            sink.emit(Event::Paragraph {
-                paragraph_id: p.id.clone(),
-                page: p.id.page,
-                status: ParagraphStatus::NotReplaced,
-                boxes: Some(vec![p.bbox]),
-                coord_system: syncpdf_core::CoordSystem::PdfUser,
-                translated_html: None,
-            });
+            sink.emit(paragraph_event(
+                p,
+                ParagraphStatus::NotReplaced,
+                Some(vec![p.bbox]),
+                None,
+            ));
         }
 
         // ── 4. translating + typesetting（流式）────────────────────────
@@ -1175,23 +1183,19 @@ fn handle_block(
         None if echoed => {
             state.src_chars += src_len;
             state.tgt_chars += src_len;
-            sink.emit(Event::Paragraph {
-                paragraph_id: id.clone(),
-                page: id.page,
-                status: ParagraphStatus::NotReplaced,
-                boxes: Some(vec![para.bbox]),
-                coord_system: syncpdf_core::CoordSystem::PdfUser,
-                translated_html: None,
-            });
+            sink.emit(paragraph_event(
+                &para,
+                ParagraphStatus::NotReplaced,
+                Some(vec![para.bbox]),
+                None,
+            ));
         }
-        Some((html, boxes)) => sink.emit(Event::Paragraph {
-            paragraph_id: id.clone(),
-            page: id.page,
-            status: ParagraphStatus::Typeset,
-            boxes: Some(boxes),
-            coord_system: syncpdf_core::CoordSystem::PdfUser,
-            translated_html: Some(html),
-        }),
+        Some((html, boxes)) => sink.emit(paragraph_event(
+            &para,
+            ParagraphStatus::Typeset,
+            Some(boxes),
+            Some(html),
+        )),
         None => {
             let (code, detail, msg) =
                 fallback.unwrap_or(("translate_fallback", None, "回退原文".into()));
@@ -1209,14 +1213,12 @@ fn handle_block(
                 page: Some(id.page),
                 message,
             });
-            sink.emit(Event::Paragraph {
-                paragraph_id: id.clone(),
-                page: id.page,
-                status: ParagraphStatus::Fallback,
-                boxes: Some(vec![para.bbox]),
-                coord_system: syncpdf_core::CoordSystem::PdfUser,
-                translated_html: None,
-            });
+            sink.emit(paragraph_event(
+                &para,
+                ParagraphStatus::Fallback,
+                Some(vec![para.bbox]),
+                None,
+            ));
         }
     }
 
@@ -1265,14 +1267,12 @@ fn settle_rest(
                 page: Some(id.page),
                 message: "翻译未交付该段，回退原文".into(),
             });
-            sink.emit(Event::Paragraph {
-                paragraph_id: id.clone(),
-                page: id.page,
-                status: ParagraphStatus::Fallback,
-                boxes: Some(vec![p.bbox]),
-                coord_system: syncpdf_core::CoordSystem::PdfUser,
-                translated_html: None,
-            });
+            sink.emit(paragraph_event(
+                &p,
+                ParagraphStatus::Fallback,
+                Some(vec![p.bbox]),
+                None,
+            ));
         }
         if let Some(page) = s.schedule.mark(&id) {
             writeback_page(s, page - 1, sink)?;
@@ -1355,6 +1355,68 @@ fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) -> Result<
         revision: *revision,
     });
     Ok(())
+}
+
+/// 版面区域 → `layout` 事件载荷。公式区域落在可译区域内即为行内公式——与
+/// `paragraph::inline_formula` 把它作为 KEEP 原子随正文移动的判据一致。
+fn layout_regions(regions: &[Region]) -> Vec<syncpdf_protocol::LayoutRegion> {
+    regions
+        .iter()
+        .map(|r| syncpdf_protocol::LayoutRegion {
+            kind: r.kind,
+            inline: r.kind == syncpdf_core::ir::RegionKind::Formula
+                && regions.iter().any(|p| {
+                    p.kind.translatable()
+                        && p.bbox.contains(r.bbox.center())
+                        && r.bbox
+                            .intersection(&p.bbox)
+                            .is_some_and(|i| i.area() >= r.bbox.area() * 0.9)
+                }),
+            bbox: r.bbox,
+        })
+        .collect()
+}
+
+/// 首页元数据：最上方的 Title 段落为标题，首页信息带识别出的最上方作者行为作者。
+fn doc_meta(paras: &[Paragraph], author_ids: &[ParagraphId]) -> Event {
+    let first_page = |p: &&Paragraph| p.id.page == 1;
+    let top = |a: &&Paragraph, b: &&Paragraph| a.bbox.y1.total_cmp(&b.bbox.y1);
+    let text = |p: &Paragraph| {
+        let t = p.text.split_whitespace().collect::<Vec<_>>().join(" ");
+        (!t.is_empty()).then_some(t)
+    };
+    let title = paras
+        .iter()
+        .filter(first_page)
+        .filter(|p| p.kind == syncpdf_core::ir::RegionKind::Title)
+        .max_by(top)
+        .and_then(text);
+    let authors = paras
+        .iter()
+        .filter(first_page)
+        .filter(|p| author_ids.contains(&p.id))
+        .max_by(top)
+        .and_then(text);
+    Event::DocMeta { title, authors }
+}
+
+/// 段落状态事件：带上区域类别与源文本，前端据此着色与展示原文。
+pub(crate) fn paragraph_event(
+    p: &Paragraph,
+    status: ParagraphStatus,
+    boxes: Option<Vec<syncpdf_core::Rect>>,
+    translated_html: Option<String>,
+) -> Event {
+    Event::Paragraph {
+        paragraph_id: p.id.clone(),
+        page: p.id.page,
+        status,
+        boxes,
+        coord_system: syncpdf_core::CoordSystem::PdfUser,
+        translated_html,
+        kind: p.kind,
+        source_text: p.text.clone(),
+    }
 }
 
 /// bind 阶段的问题转 `issue`；操作级不可证明墨迹、页级不可信、对象数不符各报。
@@ -1540,6 +1602,109 @@ mod tests {
         }
         syncpdf_core::fixtures::fonts_dir()?;
         Some(())
+    }
+
+    fn region(index: u32, kind: syncpdf_core::ir::RegionKind, bbox: syncpdf_core::Rect) -> Region {
+        Region {
+            page: syncpdf_core::PageId(0),
+            index,
+            kind,
+            bbox,
+            score: 0.9,
+            order: index,
+        }
+    }
+
+    #[test]
+    fn layout_regions_mark_formulas_inside_prose_as_inline() {
+        use syncpdf_core::ir::RegionKind;
+        use syncpdf_core::Rect;
+        let regions = [
+            region(0, RegionKind::Text, Rect::new(50.0, 400.0, 300.0, 500.0)),
+            // 行内：整个落在正文区域里。
+            region(1, RegionKind::Formula, Rect::new(80.0, 450.0, 120.0, 462.0)),
+            // 独立公式：在正文外。
+            region(2, RegionKind::Formula, Rect::new(80.0, 300.0, 250.0, 340.0)),
+            // 落在不可译区域（表格）内的公式不是行内。
+            region(3, RegionKind::Table, Rect::new(50.0, 100.0, 300.0, 250.0)),
+            region(4, RegionKind::Formula, Rect::new(60.0, 120.0, 90.0, 130.0)),
+            // 只擦边正文的公式不是行内。
+            region(
+                5,
+                RegionKind::Formula,
+                Rect::new(280.0, 490.0, 340.0, 520.0),
+            ),
+        ];
+        let out = layout_regions(&regions);
+        let inline: Vec<bool> = out.iter().map(|r| r.inline).collect();
+        assert_eq!(inline, [false, true, false, false, false, false]);
+        assert_eq!(out[3].kind, RegionKind::Table);
+        assert_eq!(out[1].bbox, regions[1].bbox);
+    }
+
+    fn meta_para(
+        page: u32,
+        seq: u32,
+        kind: syncpdf_core::ir::RegionKind,
+        text: &str,
+        y: f32,
+    ) -> Paragraph {
+        use syncpdf_core::ir::Align;
+        Paragraph {
+            id: ParagraphId::new(syncpdf_core::PageId(page), seq),
+            page: syncpdf_core::PageId(page),
+            region: seq,
+            kind,
+            bbox: syncpdf_core::Rect::new(50.0, y, 500.0, y + 14.0),
+            lines: Vec::new(),
+            glyphs: Vec::new(),
+            text_spans: Vec::new(),
+            style_runs: Vec::new(),
+            atoms: Vec::new(),
+            decorations: Vec::new(),
+            text: text.into(),
+            align: Align::Center,
+            first_indent: 0.0,
+            line_height: 12.0,
+            is_rtl: false,
+            translatable: Translatable::Yes,
+        }
+    }
+
+    #[test]
+    fn doc_meta_uses_topmost_first_page_title_and_author_rows() {
+        use syncpdf_core::ir::RegionKind;
+        let paras = [
+            meta_para(0, 1, RegionKind::Title, "arXiv preprint", 760.0),
+            meta_para(0, 2, RegionKind::Title, "Deep\n  Learning  for PDFs", 700.0),
+            meta_para(0, 3, RegionKind::Text, "Ada Lovelace, Alan Turing", 660.0),
+            meta_para(0, 4, RegionKind::Text, "Some University", 640.0),
+            meta_para(1, 1, RegionKind::Title, "Not the title", 780.0),
+        ];
+        // 第二个 Title 在更低处；最上方的 Title 胜出（与 source_policy 一致取最上方）。
+        let authors = [paras[3].id.clone(), paras[2].id.clone()];
+        match doc_meta(&paras, &authors) {
+            Event::DocMeta { title, authors } => {
+                assert_eq!(title.as_deref(), Some("arXiv preprint"));
+                assert_eq!(authors.as_deref(), Some("Ada Lovelace, Alan Turing"));
+            }
+            other => panic!("{other:?}"),
+        }
+        // 无 Title、无作者证据 → 都是 None，不猜。
+        match doc_meta(&paras[2..4], &[]) {
+            Event::DocMeta { title, authors } => {
+                assert!(title.is_none());
+                assert!(authors.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+        // 空白规整。
+        match doc_meta(&paras[1..2], &[]) {
+            Event::DocMeta { title, .. } => {
+                assert_eq!(title.as_deref(), Some("Deep Learning for PDFs"))
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

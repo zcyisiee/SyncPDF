@@ -248,14 +248,12 @@ fn commit(
                 old.bbox, frame.bbox, old.first_baseline, frame.first_baseline
             ),
         });
-        sink.emit(Event::Paragraph {
-            paragraph_id: changed_id.clone(),
-            page: page + 1,
-            status: ParagraphStatus::Typeset,
-            boxes: Some(boxes),
-            coord_system: syncpdf_core::CoordSystem::PdfUser,
-            translated_html: Some(state.targets[&changed_id].html.clone()),
-        });
+        sink.emit(super::paragraph_event(
+            &state.pars[&changed_id],
+            ParagraphStatus::Typeset,
+            Some(boxes),
+            Some(state.targets[&changed_id].html.clone()),
+        ));
         state.frames.insert(changed_id, frame);
     }
 }

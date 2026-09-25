@@ -114,6 +114,57 @@
           "type": "object"
         },
         {
+          "description": "一页的版面区域（layout_analysis 之后按页发出，页号 1 基）。",
+          "properties": {
+            "page": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "regions": {
+              "items": {
+                "$ref": "#/$defs/LayoutRegion"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "layout",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "page",
+            "regions"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "文档元数据：首页 Title 段落与作者行；识别不到为 `None`。",
+          "properties": {
+            "authors": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "doc_meta",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
           "description": "段落状态更新。",
           "properties": {
             "boxes": {
@@ -129,6 +180,10 @@
             "coord_system": {
               "$ref": "#/$defs/CoordSystemSchema"
             },
+            "kind": {
+              "$ref": "#/$defs/RegionKindSchema",
+              "description": "段落所在区域类别。"
+            },
             "page": {
               "format": "uint32",
               "minimum": 0,
@@ -136,6 +191,10 @@
             },
             "paragraph_id": {
               "$ref": "#/$defs/ParagraphIdSchema"
+            },
+            "source_text": {
+              "description": "源文本（阅读顺序）。",
+              "type": "string"
             },
             "status": {
               "$ref": "#/$defs/ParagraphStatusSchema"
@@ -156,7 +215,9 @@
             "paragraph_id",
             "page",
             "status",
-            "coord_system"
+            "coord_system",
+            "kind",
+            "source_text"
           ],
           "type": "object"
         },
@@ -305,6 +366,27 @@
         }
       ]
     },
+    "LayoutRegion": {
+      "description": "版面区域（`layout` 事件）。坐标为 PDF 用户空间。",
+      "properties": {
+        "bbox": {
+          "$ref": "#/$defs/RectSchema"
+        },
+        "inline": {
+          "description": "公式区域落在可译区域内（行内公式，作为 KEEP 原子随正文移动）。",
+          "type": "boolean"
+        },
+        "kind": {
+          "$ref": "#/$defs/RegionKindSchema"
+        }
+      },
+      "required": [
+        "kind",
+        "inline",
+        "bbox"
+      ],
+      "type": "object"
+    },
     "Mode": {
       "description": "输出模式：整页替换或双语对照。",
       "oneOf": [
@@ -362,6 +444,27 @@
         "y1"
       ],
       "type": "object"
+    },
+    "RegionKindSchema": {
+      "description": "镜像 `syncpdf_core::ir::RegionKind` 的 JSON 形态。",
+      "enum": [
+        "text",
+        "title",
+        "paragraph_title",
+        "list",
+        "caption",
+        "table",
+        "figure",
+        "formula",
+        "header",
+        "footer",
+        "foot_note",
+        "reference",
+        "code",
+        "abstract",
+        "other"
+      ],
+      "type": "string"
     },
     "Request": {
       "description": "stdin 请求。首条必须是 `Configure`；`Run` 启动任务；其余作用于当前文档。",

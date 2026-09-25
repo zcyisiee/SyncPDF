@@ -159,6 +159,8 @@ pub fn event_kind(e: &Event) -> &'static str {
         Event::StageStarted { .. } => "stage_started",
         Event::StageFinished { .. } => "stage_finished",
         Event::Progress { .. } => "progress",
+        Event::Layout { .. } => "layout",
+        Event::DocMeta { .. } => "doc_meta",
         Event::Paragraph { .. } => "paragraph",
         Event::PageReady { .. } => "page_ready",
         Event::Issue { .. } => "issue",

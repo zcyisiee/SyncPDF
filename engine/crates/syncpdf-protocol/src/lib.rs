@@ -14,7 +14,9 @@ pub mod event;
 pub mod request;
 pub mod schema;
 
-pub use event::{Envelope, Event, Severity, Stage, Stats, PROTOCOL_VERSION, PROTOCOL_VERSION_NAME};
+pub use event::{
+    Envelope, Event, LayoutRegion, Severity, Stage, Stats, PROTOCOL_VERSION, PROTOCOL_VERSION_NAME,
+};
 pub use request::{decode_request, encode_line, Mode, Request, TranslateProvider, TranslatorKind};
 
 /// JSONL 行解码/编码错误。

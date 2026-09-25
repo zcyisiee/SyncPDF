@@ -43,6 +43,27 @@ pub enum ParagraphStatusSchema {
     Fallback,
 }
 
+/// 镜像 `syncpdf_core::ir::RegionKind` 的 JSON 形态。
+#[derive(Debug, Clone, Copy, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RegionKindSchema {
+    Text,
+    Title,
+    ParagraphTitle,
+    List,
+    Caption,
+    Table,
+    Figure,
+    Formula,
+    Header,
+    Footer,
+    FootNote,
+    Reference,
+    Code,
+    Abstract,
+    Other,
+}
+
 /// 生成整个协议（请求 + 事件）的 JSON Schema 根文档。
 ///
 /// 返回 `{"$schema":…,"oneOf":[request,event],"$defs":{…}}`，可直接写为
@@ -126,6 +147,8 @@ mod tests {
             "stage_started",
             "stage_finished",
             "progress",
+            "layout",
+            "doc_meta",
             "paragraph",
             "page_ready",
             "issue",
