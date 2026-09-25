@@ -259,7 +259,9 @@ mod tests {
         let (mut p, ir, doc) = fixture("cite.");
         let ambiguous =
             syncpdf_translate::parse_unit_html("<p id=\"P01-001\">甲2026乙2026</p>").unwrap();
-        assert!(crate::stages::link_text::prepare(&p, &ir, &doc, &ambiguous).is_none());
+        // 两个同文不同目标的链接在改序译文中无法区分：不猜，全部移除并保留译文。
+        let dropped = crate::stages::link_text::prepare(&p, &ir, &doc, &ambiguous).unwrap();
+        assert_eq!(dropped.dropped.len(), 2);
         protect(std::slice::from_mut(&mut p), &ir, &doc);
         assert_eq!(p.atoms.len(), 2);
         assert_eq!(p.atoms[0].text, "2026");

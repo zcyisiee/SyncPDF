@@ -9,7 +9,14 @@
 //! "第4.2节" — the space is the translator's choice, not a signal); a bare
 //! same-number is never claimed just because the count matches. The fail-closed
 //! selection rules are unchanged: per-destination grouping, exact counts,
-//! otherwise the paragraph keeps its source text.
+//! otherwise the link is not placed.
+//!
+//! An unplaceable link does not cost the paragraph its translation: `prepare`
+//! first tries every owned link strictly; if that fails, it keeps each link
+//! that places on its own and still co-places, and records the rest in
+//! `Target::dropped` with a reason (label absent, repeated, or in conflict).
+//! A dropped link is hidden (annotation flag Hidden) rather than removed, so
+//! the page's annotation count is unchanged and nothing points at wrong text.
 //!
 //! The label is the exact text of the link's own glyphs — whitespace trimmed,
 //! punctuation kept ("(1)", "2018)", "Jeong et al.,") for the literal match;
@@ -51,6 +58,9 @@ pub(crate) struct Target {
     atom_links: Vec<(ObjectId, AtomId, Rect)>,
     /// Block-level anchors: clickable over the whole translated paragraph.
     whole: Vec<ObjectId>,
+    /// Links that could not be placed uniquely in the translation: hidden in
+    /// the output (the page keeps its annotation count), each with its reason.
+    pub dropped: Vec<(ObjectId, String)>,
 }
 fn object<'a>(doc: &'a Document, o: &'a Object) -> Option<&'a Object> {
     match o {
@@ -408,21 +418,107 @@ fn split_anchor(
     true
 }
 
+/// Keep the translation when a link cannot be placed: every link that places
+/// on its own is kept, the rest are dropped with a recorded reason. Only
+/// failures unrelated to link placement (atoms, parse invariants, non-Link
+/// annotations over the text) still return None and keep the source.
 pub(crate) fn prepare(
     para: &Paragraph,
     ir: &PageIR,
     doc: &Document,
     parsed: &ParsedUnit,
 ) -> Option<Target> {
-    prepare_labeled(para, ir, doc, parsed).or_else(|| prepare_whole_block(para, ir, doc, parsed))
+    if let Some(target) = prepare_strict(para, ir, doc, parsed) {
+        return Some(target);
+    }
+    let links = owned_links(para, ir, doc)?;
+    let kept: BTreeSet<ObjectId> = links
+        .iter()
+        .filter(|(id, _)| {
+            prepare_labeled(para, ir, doc, parsed, Some(&BTreeSet::from([*id]))).is_some()
+        })
+        .map(|(id, _)| *id)
+        .collect();
+    let mut target = prepare_labeled(para, ir, doc, parsed, Some(&kept))
+        .or_else(|| prepare_labeled(para, ir, doc, parsed, Some(&BTreeSet::new())))?;
+    let placed: BTreeSet<ObjectId> = target
+        .links
+        .iter()
+        .map(|(id, _)| *id)
+        .chain(target.atom_links.iter().map(|(id, _, _)| *id))
+        .collect();
+    let text = target.parsed.text();
+    target.dropped = links
+        .into_iter()
+        .filter(|(id, _)| !placed.contains(id))
+        .map(|(id, label)| {
+            let reason = match matches(&text, &label).len() {
+                0 => format!("「{label}」：译文中找不到链接文字"),
+                1 => format!("「{label}」：与段内其他链接冲突，无法唯一定位"),
+                n => format!("「{label}」：链接文字在译文中出现 {n} 次，无法唯一定位"),
+            };
+            (id, reason)
+        })
+        .collect();
+    Some(target)
+}
+
+/// All links must place uniquely, else None (the fail-closed placement rules).
+fn prepare_strict(
+    para: &Paragraph,
+    ir: &PageIR,
+    doc: &Document,
+    parsed: &ParsedUnit,
+) -> Option<Target> {
+    prepare_labeled(para, ir, doc, parsed, None)
+        .or_else(|| prepare_whole_block(para, ir, doc, parsed))
+}
+
+/// The Link annotations covering this paragraph's glyphs, with their source
+/// label (owned glyph text, whitespace trimmed).
+fn owned_links(para: &Paragraph, ir: &PageIR, doc: &Document) -> Option<Vec<(ObjectId, String)>> {
+    let page = *doc.get_pages().get(&para.id.page)?;
+    let page = doc.get_dictionary(page).ok()?;
+    let Ok(annots) = page.get(b"Annots") else {
+        return Some(vec![]);
+    };
+    let glyphs: BTreeMap<_, _> = ir.glyphs().map(|g| (g.id, g)).collect();
+    let mut out = Vec::new();
+    for o in object(doc, annots)?.as_array().ok()? {
+        let Ok(id) = o.as_reference() else { continue };
+        let Some(d) = object(doc, o).and_then(|o| o.as_dict().ok()) else {
+            continue;
+        };
+        if d.get(b"Subtype").ok().and_then(|s| s.as_name().ok()) != Some(b"Link") {
+            continue;
+        }
+        let Some(r) = d.get(b"Rect").ok().and_then(|r| rect(doc, r)) else {
+            continue;
+        };
+        let label: String = para
+            .glyphs
+            .iter()
+            .filter_map(|id| glyphs.get(id))
+            .filter(|g| r.contains(g.bbox.center()))
+            .flat_map(|g| g.unicode.iter())
+            .collect();
+        let label = label.trim();
+        if !label.is_empty() {
+            out.push((id, label.to_string()));
+        }
+    }
+    Some(out)
 }
 
 /// Relocate links by matching a literal source label inside the translation.
+/// `only` restricts relocation to the given links; the others are ignored
+/// here and reported as dropped by `prepare`.
 fn prepare_labeled(
     para: &Paragraph,
     ir: &PageIR,
     doc: &Document,
     parsed: &ParsedUnit,
+    only: Option<&BTreeSet<ObjectId>>,
 ) -> Option<Target> {
     let resolved = super::text_atoms::resolve_text(para, parsed)?;
     let mut target = Target {
@@ -432,6 +528,7 @@ fn prepare_labeled(
         links: vec![],
         atom_links: vec![],
         whole: vec![],
+        dropped: vec![],
     };
     let page = *doc.get_pages().get(&para.id.page)?;
     let page = doc.get_dictionary(page).ok()?;
@@ -476,6 +573,10 @@ fn prepare_labeled(
         if d.get(b"Subtype").ok()?.as_name().ok()? != b"Link" {
             return None;
         }
+        let id = o.as_reference().ok()?;
+        if only.is_some_and(|only| !only.contains(&id)) {
+            continue;
+        }
         // A shared annotation must not be rewritten by two paragraph owners.
         if ir.glyphs().any(|g| {
             r.contains(g.bbox.center())
@@ -484,7 +585,6 @@ fn prepare_labeled(
         }) {
             return None;
         }
-        let id = o.as_reference().ok()?;
         let selected: Vec<_> = spans
             .iter()
             .filter(|(_, _, (s, e))| owned.iter().any(|i| s <= i && i < e))
@@ -817,6 +917,7 @@ fn prepare_whole_block(
         links: vec![],
         atom_links: vec![],
         whole: vec![],
+        dropped: vec![],
     };
     // The same reconstruction invariant as the literal path: a mismatch is a parse
     // inconsistency, never a reason to widen the anchor.
@@ -1031,6 +1132,23 @@ pub(crate) fn geometry(
     Some(plans)
 }
 
+/// Hide dropped links (annotation flag bit 2, Hidden): no ink, no click, and
+/// the page keeps its annotation count.
+pub(crate) fn hide_dropped(
+    doc: &mut Document,
+    target: &Target,
+) -> Result<(), super::PipelineError> {
+    for (id, _) in &target.dropped {
+        let d = doc
+            .get_object_mut(*id)
+            .and_then(Object::as_dict_mut)
+            .map_err(|e| super::PipelineError::Validation(format!("link hide: {e}")))?;
+        let flags = d.get(b"F").ok().and_then(|f| f.as_i64().ok()).unwrap_or(0);
+        d.set("F", flags | 2);
+    }
+    Ok(())
+}
+
 pub(crate) fn apply(
     doc: &mut Document,
     plans: &[(ObjectId, Vec<Rect>)],
@@ -1219,6 +1337,7 @@ mod tests {
             links: vec![(annotation, vec![StyleId(1)])],
             atom_links: vec![],
             whole: vec![],
+            dropped: vec![],
         };
         let laid = TypesetParagraph {
             id: ParagraphId::new(syncpdf_core::PageId(0), 1),
@@ -1455,7 +1574,7 @@ mod tests {
         // 源「Introduction」与译文「1 引言」字面不同；整块 Link 仍必须成立。
         let all: Vec<u16> = (0.."Introduction".len() as u16).collect();
         let (para, ir, doc, parsed) = toc_case(&all, false);
-        let target = prepare(&para, &ir, &doc, &parsed).expect("whole-block anchor");
+        let target = prepare_strict(&para, &ir, &doc, &parsed).expect("whole-block anchor");
         assert_eq!(target.whole.len(), 1);
         assert!(target.links.is_empty(), "不得降级为部分标签锚点");
         let laid = toc_laid("1 引言");
@@ -1469,7 +1588,7 @@ mod tests {
         // 只覆盖前 3 个字形：既非整块，也不得被当成整段锚点。
         let (para, ir, doc, parsed) = toc_case(&[0, 1, 2], false);
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "部分拥有必须 fail closed"
         );
     }
@@ -1480,7 +1599,7 @@ mod tests {
         let all: Vec<u16> = (0.."Introduction".len() as u16).collect();
         let (para, ir, doc, parsed) = toc_case(&all, true);
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "多个链接冲突必须拒绝"
         );
     }
@@ -1506,7 +1625,7 @@ mod tests {
             .unwrap()
             .set("Annots", vec![Object::Reference(a)]);
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "段外字形共享时必须拒绝"
         );
     }
@@ -1652,12 +1771,56 @@ mod tests {
             &[(at, at + "Table 15".len(), "table.15")],
             "见表 15 的细节。",
         );
-        let target = prepare(&para, &ir, &doc, &parsed).expect("按类别+编号重定位");
+        let target = prepare_strict(&para, &ir, &doc, &parsed).expect("按类别+编号重定位");
         assert!(target.whole.is_empty());
         let ann = annotated_texts(&target);
         assert_eq!(ann.len(), 1);
         assert_eq!(ann[0].0, placed[0].0);
         assert_eq!(ann[0].1, "15");
+    }
+
+    #[test]
+    fn unplaceable_link_is_dropped_with_reason_and_others_kept() {
+        // 译文漏掉 Table 15：严格放回失败；放宽后保留 Table 14 的锚点，
+        // Table 15 记入 dropped 并带原因，而不是整段回退。
+        let text = "Compare Table 14 and Table 15.";
+        let links: Vec<_> = [("Table 14", "table.14"), ("Table 15", "table.15")]
+            .iter()
+            .map(|(w, d)| {
+                let at = text.find(w).unwrap();
+                (at, at + w.len(), *d)
+            })
+            .collect();
+        let (para, ir, doc, parsed, placed) =
+            ref_case("P01-013", text, &links, "比较表 14 与附表。");
+        assert!(prepare_strict(&para, &ir, &doc, &parsed).is_none());
+        let target = prepare(&para, &ir, &doc, &parsed).expect("保留译文");
+        let ann = annotated_texts(&target);
+        assert_eq!(ann.len(), 1);
+        assert_eq!(ann[0].0, placed[0].0);
+        assert_eq!(target.dropped.len(), 1);
+        assert_eq!(target.dropped[0].0, placed[1].0);
+        assert!(
+            target.dropped[0].1.contains("找不到"),
+            "{}",
+            target.dropped[0].1
+        );
+    }
+
+    #[test]
+    fn placeable_links_drop_nothing() {
+        // 反例：全部可放回时放宽路径不得丢任何链接。
+        let text = "See Table 15 for details.";
+        let at = text.find("Table 15").unwrap();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-014",
+            text,
+            &[(at, at + "Table 15".len(), "table.15")],
+            "见表 15 的细节。",
+        );
+        let target = prepare(&para, &ir, &doc, &parsed).unwrap();
+        assert!(target.dropped.is_empty());
+        assert_eq!(annotated_texts(&target).len(), 1);
     }
 
     #[test]
@@ -1676,7 +1839,7 @@ mod tests {
             .collect();
         let (para, ir, doc, parsed, placed) =
             ref_case("P01-012", text, &links, "比较表 14、表 15 和表 16。");
-        let target = prepare(&para, &ir, &doc, &parsed).expect("三链接按目标配对");
+        let target = prepare_strict(&para, &ir, &doc, &parsed).expect("三链接按目标配对");
         let ann = annotated_texts(&target);
         assert_eq!(ann.len(), 3);
         for (obj, dest) in &placed {
@@ -1714,7 +1877,7 @@ mod tests {
                 &[(at, at + label.len(), dest)],
                 translated,
             );
-            let target = prepare(&para, &ir, &doc, &parsed)
+            let target = prepare_strict(&para, &ir, &doc, &parsed)
                 .unwrap_or_else(|| panic!("{label} 必须能按类别+编号重定位"));
             assert_eq!(annotated_texts(&target).len(), 1);
         }
@@ -1732,7 +1895,7 @@ mod tests {
             "前 15 项与后 15 项特征都被保留。",
         );
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "两个孤立 15 无法唯一定位，必须整段回退"
         );
     }
@@ -1749,7 +1912,7 @@ mod tests {
             "见图 15 的细节。",
         );
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "类别词与源类别不符必须回退"
         );
     }
@@ -1770,7 +1933,7 @@ mod tests {
             "见表 15，另见上文。",
         );
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "编号数量与链接数不等必须回退"
         );
     }
@@ -1786,7 +1949,7 @@ mod tests {
             &[(at, at + "Table 15".len(), "table.15")],
             "See Table 15 for details. 另有 15 项特征。",
         );
-        let target = prepare(&para, &ir, &doc, &parsed).expect("字面在时走原路径");
+        let target = prepare_strict(&para, &ir, &doc, &parsed).expect("字面在时走原路径");
         let ann = annotated_texts(&target);
         assert_eq!(ann.len(), 1);
         assert_eq!(ann[0].0, placed[0].0);
@@ -1805,7 +1968,7 @@ mod tests {
             &[(at, at + "Table 1".len(), "table.1")],
             "三个阶段（见表 1）：(1)第一步；(2)第二步。",
         );
-        let target = prepare(&para, &ir, &doc, &parsed).expect("编号锚定在类别词之后");
+        let target = prepare_strict(&para, &ir, &doc, &parsed).expect("编号锚定在类别词之后");
         let ann = annotated_texts(&target);
         assert_eq!(ann.len(), 1);
         assert_eq!(ann[0].0, placed[0].0);
@@ -1825,7 +1988,7 @@ mod tests {
             "三个阶段（汉词 1）：(1)第一步；(2)第二步。",
         );
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "类别词不可辨认时数量恰等也必须回退"
         );
     }
@@ -1842,7 +2005,7 @@ mod tests {
             "见表 15 的细节。",
         );
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "类别来源冲突必须回退"
         );
     }
@@ -1860,7 +2023,7 @@ mod tests {
             "这里有 15 项特征。",
         );
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "无类别语境的孤立编号即使数量恰等也必须回退"
         );
     }
@@ -1878,7 +2041,7 @@ mod tests {
             "细节见(果§深)。",
         );
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "§ 字母被改写且无字面匹配时必须回退"
         );
     }
@@ -1900,7 +2063,7 @@ mod tests {
             "比较 某某 4 与 另某 4 这里。",
         );
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "类别词不可辨认时不得按顺序猜测配对"
         );
     }
@@ -1932,7 +2095,7 @@ mod tests {
                 &[(at, at + label.len(), dest)],
                 translated,
             );
-            let target = prepare(&para, &ir, &doc, &parsed)
+            let target = prepare_strict(&para, &ir, &doc, &parsed)
                 .unwrap_or_else(|| panic!("{label} 无空格写法必须能重定位"));
             let ann = annotated_texts(&target);
             assert_eq!(ann.len(), 1);
@@ -1957,7 +2120,7 @@ mod tests {
             ],
             "比较图 4 与表 4 这里。",
         );
-        let target = prepare(&para, &ir, &doc, &parsed).expect("按各自类别配对");
+        let target = prepare_strict(&para, &ir, &doc, &parsed).expect("按各自类别配对");
         let ann = annotated_texts(&target);
         assert_eq!(ann.len(), 2);
         // 按段落阅读顺序排列：译文里「图 4」在前、「表 4」在后，因此
@@ -2001,7 +2164,7 @@ mod tests {
                 &[(at, at + label.len(), dest)],
                 translated,
             );
-            let target = prepare(&para, &ir, &doc, &parsed)
+            let target = prepare_strict(&para, &ir, &doc, &parsed)
                 .unwrap_or_else(|| panic!("{label} 必须能按类别+字母数字尾重定位"));
             let ann = annotated_texts(&target);
             assert_eq!(ann.len(), 1);
@@ -2022,7 +2185,7 @@ mod tests {
             "特征 A1 与模式 A1 的对比。",
         );
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "无类别语境的孤立字母数字尾即使数量恰等也必须回退"
         );
     }
@@ -2039,7 +2202,7 @@ mod tests {
             "如表 A1 所示。",
         );
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "类别词与源类别不符必须回退"
         );
     }
@@ -2058,7 +2221,7 @@ mod tests {
             &[(at, at + "(1)".len(), "e0005")],
             "式(1) 中的目标函数被最小化。",
         );
-        let target = prepare(&para, &ir, &doc, &parsed).expect("精确标签含括号");
+        let target = prepare_strict(&para, &ir, &doc, &parsed).expect("精确标签含括号");
         let ann = annotated_texts(&target);
         assert_eq!(ann.len(), 1);
         assert_eq!(ann[0].0, placed[0].0);
@@ -2077,7 +2240,7 @@ mod tests {
             "式(1) 与式(1) 一致，二者均为枚举。",
         );
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "精确标签多次出现且无类别语境时必须回退"
         );
     }
@@ -2100,7 +2263,7 @@ mod tests {
             &[(a, b, "b1170"), (c, d, "b1170")],
             "比较 (Ropke and Pisinger, 2006a) 这里。",
         );
-        let target = prepare(&para, &ir, &doc, &parsed).expect("折断引文按合并标签重定位");
+        let target = prepare_strict(&para, &ir, &doc, &parsed).expect("折断引文按合并标签重定位");
         let ann = annotated_texts(&target);
         assert_eq!(ann.len(), 2, "两条注释都要有锚点");
         let mut ids: Vec<_> = ann.iter().map(|(o, _)| *o).collect();
@@ -2132,7 +2295,7 @@ mod tests {
             "参见 Ropke 和另见 2006a 再说。",
         );
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "不连续的同目的地链接不得合并"
         );
     }
@@ -2152,7 +2315,7 @@ mod tests {
             "比较 (Ropke 与 Pisinger，2006a) 这里。",
         );
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "合并标签不在译文中逐字存在时必须回退"
         );
     }
@@ -2218,7 +2381,7 @@ mod tests {
             ],
             tr,
         );
-        let target = prepare(&para, &ir, &doc, &parsed).expect("同数出现按序号配对");
+        let target = prepare_strict(&para, &ir, &doc, &parsed).expect("同数出现按序号配对");
         let first = anchored_range_at(&target, &placed, 0).expect("第一条注释有锚点");
         assert_eq!(first.0, tr.find(label).unwrap(), "第一条注释锚定第一次出现");
         let second = anchored_range_at(&target, &placed, 1).expect("第二条注释有锚点");
@@ -2246,7 +2409,7 @@ mod tests {
             "首次引用 (Santini et al., 2018) 之后又引用一次，结束。",
         );
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "出现次数不一致时必须回退"
         );
     }
@@ -2269,7 +2432,7 @@ mod tests {
             "首次引用 (Santini et al., 2018)，结束。",
         );
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "同一源文出现上的重复注释无法按序号配对，必须回退"
         );
     }
@@ -2297,7 +2460,7 @@ mod tests {
             ],
             tr,
         );
-        let target = prepare(&para, &ir, &doc, &parsed).expect("重复折断引文按序号配对");
+        let target = prepare_strict(&para, &ir, &doc, &parsed).expect("重复折断引文按序号配对");
         let r0 = anchored_range_at(&target, &placed, 0).expect("第一个链接有锚点");
         let w1 = tr.find(label).unwrap();
         assert!(
@@ -2333,7 +2496,7 @@ mod tests {
             "甲 (Ropke and Pisinger, 2006a) 与乙的引用完成。",
         );
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "折断引文出现数不一致时必须回退"
         );
     }
@@ -2355,7 +2518,8 @@ mod tests {
             &[(hyphen, rest, "b0305"), (rest, end, "b0305")],
             "引用 (Sacramento et al., 2019) 于前文。",
         );
-        let target = prepare(&para, &ir, &doc, &parsed).expect("软连字符按去连字符变体重定位");
+        let target =
+            prepare_strict(&para, &ir, &doc, &parsed).expect("软连字符按去连字符变体重定位");
         let ann = annotated_texts(&target);
         assert_eq!(ann.len(), 2, "两条注释都要有锚点");
         let mut ids: Vec<_> = ann.iter().map(|(o, _)| *o).collect();
@@ -2389,7 +2553,7 @@ mod tests {
         // 译文中既无逐字 "Con-Tardo"（字面路径失败）也无 "Contardo"
         // （大写后继不构造变体）：必须回退。
         assert!(
-            prepare(&para, &ir, &doc, &parsed).is_none(),
+            prepare_strict(&para, &ir, &doc, &parsed).is_none(),
             "连字符后为大写字母时不得构造去连字符变体"
         );
     }

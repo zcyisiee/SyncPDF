@@ -380,20 +380,23 @@ fn link_inside_source_formula_moves_with_the_original_glyphs() {
     assert_eq!(text(&s.output, 0).matches("Alpha").count(), 1);
 }
 #[test]
-fn ambiguous_unmarked_link_preserves_source_instead_of_guessing() {
+fn ambiguous_unmarked_link_keeps_translation_and_hides_link() {
+    // 链接文字在译文中出现两次：不猜位置。保留译文，隐藏该链接并记录原因。
     let dir = tempfile::tempdir().unwrap();
     let (mut s, annot, old_rect) = linked_state(dir.path());
     let mut translated = linked_block();
     translated.html = "<p id=\"P01-001\">中文 Alpha 和 Alpha</p>".into();
-    let (sink, _) = recorder();
+    let (sink, log) = recorder();
     handle_block(&mut s, &sink, translated, 2).unwrap();
-    assert_eq!(s.fallbacks, 1);
-    assert!(s.typeset_by_page.is_empty());
-    assert_eq!(
-        s.doc.get_dictionary(annot).unwrap().get(b"Rect").unwrap(),
-        &old_rect
-    );
-    assert!(text(&s.output, 0).contains("SourceAlpha"));
+    assert_eq!(s.fallbacks, 0);
+    assert!(!s.typeset_by_page.is_empty());
+    let saved = Document::load(&s.output).unwrap();
+    let link = saved.get_dictionary(annot).unwrap();
+    assert_eq!(link.get(b"Rect").unwrap(), &old_rect, "不得猜测新位置");
+    assert_eq!(link.get(b"F").unwrap().as_i64().unwrap() & 2, 2, "应隐藏");
+    assert!(!text(&s.output, 0).contains("SourceAlpha"));
+    assert!(log.lock().unwrap().iter().any(|(_, e)| matches!(e,
+        Event::Issue { code, message, .. } if code == "link_dropped" && message.contains("出现 2 次"))));
 }
 
 #[test]

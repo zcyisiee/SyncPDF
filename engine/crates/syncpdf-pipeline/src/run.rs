@@ -1137,6 +1137,21 @@ fn handle_block(
                         .push(result.paragraph);
                     state.src_chars += src_len;
                     state.tgt_chars += target.parsed.text().chars().count() as u64;
+                    if !target.dropped.is_empty() {
+                        let reasons: Vec<&str> =
+                            target.dropped.iter().map(|(_, r)| r.as_str()).collect();
+                        sink.emit(Event::Issue {
+                            severity: Severity::Warning,
+                            code: "link_dropped".into(),
+                            paragraph_id: Some(id.clone()),
+                            page: Some(id.page),
+                            message: format!(
+                                "保留译文，移除 {} 个无法定位的链接：{}",
+                                reasons.len(),
+                                reasons.join("；")
+                            ),
+                        });
+                    }
                     out = Some((target.html, boxes));
                 }
             }
@@ -1267,6 +1282,7 @@ fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) -> Result<
             let plans = stages::link_text::geometry(target, laid, &shaper)
                 .ok_or_else(|| PipelineError::Validation("链接缺少目标几何".into()))?;
             stages::link_text::apply(&mut candidate, &plans)?;
+            stages::link_text::hide_dropped(&mut candidate, target)?;
         }
     }
     let published: BTreeMap<_, _> = typeset_by_page
