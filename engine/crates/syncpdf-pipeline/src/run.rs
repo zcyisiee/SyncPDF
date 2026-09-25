@@ -32,7 +32,7 @@ use syncpdf_core::ParagraphId;
 use syncpdf_font::{FontProfile, FontStore};
 use syncpdf_pdf::bind::BoundPage;
 use syncpdf_pdf::writer::FontStats;
-use syncpdf_protocol::{Event, Request, Severity, Stage, Stats, PROTOCOL_VERSION};
+use syncpdf_protocol::{BlockStyle, Event, Request, Severity, Stage, Stats, PROTOCOL_VERSION};
 use syncpdf_store::Store;
 use syncpdf_typeset::{Obstacles, TypesetIssue};
 
@@ -606,6 +606,7 @@ impl Pipeline {
             }
         }
 
+        let edits = load_block_edits(&store, fields.doc_id, sink);
         let origin = descent::Origin {
             doc: main_doc.clone(),
             frames: frames.clone(),
@@ -621,7 +622,13 @@ impl Pipeline {
             page_heights,
             pars: all_paras
                 .iter()
-                .map(|p| (p.id.clone(), p.clone()))
+                .map(|p| {
+                    let mut p = p.clone();
+                    if let Some(align) = edits.styles.get(&p.id).and_then(|s| s.align) {
+                        p.align = stages::typeset::align_of(align);
+                    }
+                    (p.id.clone(), p)
+                })
                 .collect(),
             font_store,
             font_profile,
@@ -637,6 +644,7 @@ impl Pipeline {
             font_stats: None,
             callback_error: None,
             blocks: Vec::new(),
+            styles: edits.styles,
         }));
 
         // 无段落的选定页（含只有不可译段落的页）先转就绪并回写。
@@ -701,6 +709,7 @@ impl Pipeline {
                 cache.as_ref(),
                 on_block,
                 cfg.cache_only,
+                edits.overrides.clone(),
             ) => r,
         };
         drop(pages_ir);
@@ -709,6 +718,17 @@ impl Pipeline {
             return Err(error);
         }
         let translated = translated?;
+        // 重译拿到了模型新译文（已写进翻译缓存）：清掉待重译标记。
+        for block in &translated.blocks {
+            if edits.overrides.fresh.contains(&block.id)
+                && block.status.is_ok()
+                && !block.from_cache
+            {
+                if let Err(e) = store.clear_retranslate(fields.doc_id, &block.id) {
+                    tracing::warn!(error = %e, para = %block.id, "清除重译标记失败");
+                }
+            }
+        }
         sink.emit(Event::Issue {
             severity: Severity::Info,
             code: "translation_requests".into(),
@@ -893,9 +913,27 @@ struct RunState {
     callback_error: Option<PipelineError>,
     /// 按到达顺序保留的译文块：全文行距下调时据此重排，不再调用模型。
     blocks: Vec<syncpdf_translate::TranslatedBlock>,
+    /// 单块排版覆盖（本篇库 `block_edits`）；对齐已在构造时写进 `pars`。
+    styles: BTreeMap<ParagraphId, BlockStyle>,
 }
 
 impl RunState {
+    /// 段落的排版参数：单块覆盖优先，其余沿用整篇（含行距下调后的整篇值）。
+    fn typography_for(&self, id: &ParagraphId) -> stages::typeset::Typography {
+        match self.styles.get(id) {
+            Some(style) => self
+                .typography
+                .overridden(style.font_scale, style.line_height),
+            None => self.typography,
+        }
+    }
+
+    /// 段落的塑形器：字体族覆盖选衬线 / 无衬线角色，否则按区域类别。
+    fn shaper_for(&self, para: &Paragraph) -> StoreShaper<'_> {
+        let family = self.styles.get(&para.id).and_then(|s| s.font_family);
+        StoreShaper::new(&self.font_store, &self.font_profile)
+            .with_role(stages::typeset::role_for(para.kind, family))
+    }
     fn cjk_pages(&self) -> Vec<u32> {
         self.ready
             .iter()
@@ -1092,15 +1130,14 @@ fn handle_block(
                     )));
                 }
                 state.targets.insert(id.clone(), target.clone());
-                let shaper = StoreShaper::new(&state.font_store, &state.font_profile)
-                    .with_role(stages::typeset::role_for_region(target.para.kind));
+                let shaper = state.shaper_for(&target.para);
                 let result = stages::typeset::typeset_with_typography(
                     &shaper,
                     &target.para,
                     &target.parsed,
                     &Obstacles::default(),
                     state.frames.get(&id),
-                    state.typography,
+                    state.typography_for(&id),
                 );
                 for issue in &result.issues {
                     match issue {
@@ -1576,7 +1613,74 @@ fn load_lopdf(path: &Path) -> Result<lopdf::Document, PipelineError> {
 }
 
 /// 打开阶段缓存库。
-fn open_store(path: &Path) -> Result<Store, PipelineError> {
+/// 本篇库里的按段覆盖（桌面端编辑）。
+#[derive(Debug, Default)]
+struct BlockEdits {
+    overrides: syncpdf_translate::Overrides,
+    styles: BTreeMap<ParagraphId, BlockStyle>,
+}
+
+/// 读本篇按段覆盖。读库失败或单块排版不合法时报 `issue` 并忽略对应覆盖，
+/// 不中断翻译。
+fn load_block_edits(store: &Store, doc_id: &str, sink: &SharedSink) -> BlockEdits {
+    let mut out = BlockEdits::default();
+    let rows = match store.list_block_edits(doc_id) {
+        Ok(rows) => rows,
+        Err(e) => {
+            sink.emit(Event::Issue {
+                severity: Severity::Warning,
+                code: "block_edits_unreadable".into(),
+                paragraph_id: None,
+                page: None,
+                message: format!("读取本篇编辑失败，按无编辑处理：{e}"),
+            });
+            return out;
+        }
+    };
+    for row in rows {
+        let id = row.paragraph_id;
+        if let Some(html) = row.translated_html {
+            out.overrides.manual.insert(id.clone(), html);
+        }
+        if row.retranslate {
+            out.overrides.fresh.insert(id.clone());
+        }
+        let Some(json) = row.style else { continue };
+        match serde_json::from_str::<BlockStyle>(&json)
+            .map_err(|e| e.to_string())
+            .and_then(|style| stages::typeset::check_block_style(&style).map(|()| style))
+        {
+            Ok(style) => {
+                out.styles.insert(id, style);
+            }
+            Err(e) => sink.emit(Event::Issue {
+                severity: Severity::Warning,
+                code: "block_style_invalid".into(),
+                paragraph_id: Some(id.clone()),
+                page: Some(id.page),
+                message: format!("单块排版设置无效，已忽略：{e}"),
+            }),
+        }
+    }
+    let ids: BTreeSet<&ParagraphId> = out
+        .overrides
+        .manual
+        .keys()
+        .chain(out.styles.keys())
+        .collect();
+    let edits = ids
+        .into_iter()
+        .map(|id| syncpdf_protocol::BlockEditState {
+            paragraph_id: id.clone(),
+            manual: out.overrides.manual.contains_key(id),
+            style: out.styles.get(id).copied().unwrap_or_default(),
+        })
+        .collect();
+    sink.emit(Event::BlockEdits { edits });
+    out
+}
+
+pub(crate) fn open_store(path: &Path) -> Result<Store, PipelineError> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| PipelineError::Store(e.to_string()))?;
     }
@@ -2047,6 +2151,7 @@ mod tests {
             doc: fixture.doc,
             bound: fixture.bound,
             targets: BTreeMap::new(),
+            styles: BTreeMap::new(),
             typography: stages::typeset::Typography::default(),
             frames: [(
                 id.clone(),

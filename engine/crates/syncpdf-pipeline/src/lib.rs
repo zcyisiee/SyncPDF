@@ -3,6 +3,7 @@
 #![warn(missing_debug_implementations, rust_2018_idioms)]
 
 pub mod cancel;
+pub mod edits;
 pub mod events;
 pub mod run;
 pub mod schedule;

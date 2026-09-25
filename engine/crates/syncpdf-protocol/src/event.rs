@@ -6,6 +6,17 @@ use std::path::PathBuf;
 use syncpdf_core::ir::{ParagraphStatus, RegionKind};
 use syncpdf_core::{CoordSystem, ParagraphId, Rect};
 
+/// 一段的覆盖状态（`block_edits` 事件）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BlockEditState {
+    #[schemars(with = "crate::schema::ParagraphIdSchema")]
+    pub paragraph_id: ParagraphId,
+    /// 译文为手改（不是模型译文）。
+    pub manual: bool,
+    #[serde(default)]
+    pub style: crate::BlockStyle,
+}
+
 /// 当前协议版本（`run_started.protocol_version`）。
 pub const PROTOCOL_VERSION: u32 = 1;
 
@@ -87,6 +98,8 @@ pub enum Event {
         title: Option<String>,
         authors: Option<String>,
     },
+    /// 本篇生效的单块覆盖（每次 run 应用前整表发一次，空表也发）。
+    BlockEdits { edits: Vec<BlockEditState> },
     /// 段落状态更新。
     Paragraph {
         #[schemars(with = "crate::schema::ParagraphIdSchema")]
@@ -263,6 +276,16 @@ mod tests {
         roundtrip(Event::DocMeta {
             title: Some("Attention".into()),
             authors: None,
+        });
+        roundtrip(Event::BlockEdits {
+            edits: vec![BlockEditState {
+                paragraph_id: "P01-002".parse().unwrap(),
+                manual: true,
+                style: crate::BlockStyle {
+                    font_scale: Some(0.9),
+                    ..Default::default()
+                },
+            }],
         });
         let json = serde_json::to_string(&Event::Layout {
             page: 2,

@@ -1,5 +1,78 @@
 {
   "$defs": {
+    "BlockAlign": {
+      "description": "段落对齐。",
+      "enum": [
+        "left",
+        "center",
+        "right",
+        "justify"
+      ],
+      "type": "string"
+    },
+    "BlockEditState": {
+      "description": "一段的覆盖状态（`block_edits` 事件）。",
+      "properties": {
+        "manual": {
+          "description": "译文为手改（不是模型译文）。",
+          "type": "boolean"
+        },
+        "paragraph_id": {
+          "$ref": "#/$defs/ParagraphIdSchema"
+        },
+        "style": {
+          "$ref": "#/$defs/BlockStyle",
+          "default": {}
+        }
+      },
+      "required": [
+        "paragraph_id",
+        "manual"
+      ],
+      "type": "object"
+    },
+    "BlockStyle": {
+      "description": "单块排版覆盖；字段为 `None` 时沿用整篇设置 / 原文判定。",
+      "properties": {
+        "align": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BlockAlign"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "font_family": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FontFamily"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "font_scale": {
+          "description": "译文字号相对原文的倍数。",
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "line_height": {
+          "description": "行距（字号的倍数）。",
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "CoordSystemSchema": {
       "description": "镜像 `syncpdf_core::CoordSystem` 的 JSON 形态。",
       "enum": [
@@ -161,6 +234,26 @@
           },
           "required": [
             "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "本篇生效的单块覆盖（每次 run 应用前整表发一次，空表也发）。",
+          "properties": {
+            "edits": {
+              "items": {
+                "$ref": "#/$defs/BlockEditState"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "block_edits",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "edits"
           ],
           "type": "object"
         },
@@ -370,6 +463,14 @@
           "type": "object"
         }
       ]
+    },
+    "FontFamily": {
+      "description": "字体族：衬线（宋体类）/ 无衬线（黑体类）。",
+      "enum": [
+        "serif",
+        "sans"
+      ],
+      "type": "string"
     },
     "LayoutRegion": {
       "description": "版面区域（`layout` 事件）。坐标为 PDF 用户空间。",
@@ -595,7 +696,7 @@
           "type": "object"
         },
         {
-          "description": "局部重译。",
+          "description": "标记段落待重译：清掉手改译文，下一次 `run` 对这些段绕过翻译缓存。\n只写本篇库，不自己跑；调用方随后排一次 `run`。",
           "properties": {
             "doc_id": {
               "type": "string"
@@ -605,6 +706,13 @@
                 "$ref": "#/$defs/ParagraphIdSchema"
               },
               "type": "array"
+            },
+            "store": {
+              "description": "与 `run.store` 相同的本篇库；`None` = 引擎默认的共享临时库。",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "type": {
               "const": "retranslate",
@@ -619,21 +727,31 @@
           "type": "object"
         },
         {
-          "description": "手动编辑 → 重排版 + 局部回写；`base_revision` 不匹配返回 conflict。",
+          "description": "保存单段覆盖（手改译文 + 单块排版），整体替换该段已有覆盖。\n只写本篇库，不自己跑；调用方随后排一次 `run`（其余段全走缓存）。",
           "properties": {
-            "base_revision": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            },
             "doc_id": {
               "type": "string"
             },
             "paragraph_id": {
               "$ref": "#/$defs/ParagraphIdSchema"
             },
+            "store": {
+              "description": "与 `run.store` 相同的本篇库；`None` = 引擎默认的共享临时库。",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "style": {
+              "$ref": "#/$defs/BlockStyle",
+              "default": {}
+            },
             "translated_html": {
-              "type": "string"
+              "description": "手改译文（受限 HTML，同 `paragraph.translated_html`）；`None` = 用模型译文。",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "type": {
               "const": "apply_edit",
@@ -643,9 +761,7 @@
           "required": [
             "type",
             "doc_id",
-            "paragraph_id",
-            "translated_html",
-            "base_revision"
+            "paragraph_id"
           ],
           "type": "object"
         },

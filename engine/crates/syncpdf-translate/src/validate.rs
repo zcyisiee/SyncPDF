@@ -82,6 +82,24 @@ impl Violation {
         }
     }
 
+    /// 结构违规：译文无法按受限协议还原到源段（标记、占位符、样式、段 id、
+    /// 双向控制符）。其余是针对模型输出质量的启发式（膨胀、泄漏、重复、字面量），
+    /// 人工手改的译文只受结构约束。
+    pub fn is_structural(&self) -> bool {
+        use Violation::*;
+        matches!(
+            self,
+            InvalidMarkup
+                | PlaceholderCount
+                | UnknownPlaceholder
+                | UnknownStyle
+                | UnsafeBidiControl
+                | UnbalancedBidiIsolate
+                | DuplicatedTextSlots
+                | UnknownParagraph
+        )
+    }
+
     /// 当前全部违规码，供上游枚举统计。
     pub fn all() -> &'static [Violation] {
         use Violation::*;

@@ -435,3 +435,111 @@ fn pipeline_default_is_constructible() {
     assert!(!p.store_path.as_os_str().is_empty());
     let _ = Path::new("/x");
 }
+
+/// 每段最后一次 `paragraph` 事件：`(译文 html, 排版框)`。
+fn last_paragraphs(
+    events: &[(u64, Event)],
+) -> std::collections::BTreeMap<syncpdf_core::ParagraphId, (Option<String>, Vec<syncpdf_core::Rect>)>
+{
+    let mut out = std::collections::BTreeMap::new();
+    for (_, e) in events {
+        if let Event::Paragraph {
+            paragraph_id,
+            translated_html,
+            boxes,
+            ..
+        } = e
+        {
+            out.insert(
+                paragraph_id.clone(),
+                (translated_html.clone(), boxes.clone().unwrap_or_default()),
+            );
+        }
+    }
+    out
+}
+
+fn boxes_height(boxes: &[syncpdf_core::Rect]) -> f32 {
+    boxes.iter().map(|b| b.y1 - b.y0).sum()
+}
+
+/// 编辑请求写入本篇库后，下一次（走缓存的）run 应用：手改译文原样落定、
+/// 单块字号只影响该块，未编辑的块与上一轮一致。
+#[tokio::test]
+async fn saved_edits_apply_on_the_next_run_only_to_their_block() {
+    if env_ready().is_none() {
+        return;
+    }
+    let input = require_fixture!("up-vns.pdf");
+    let p = pipeline("edits");
+    let run_once = |p: Pipeline, input: PathBuf| async move {
+        let log: Arc<Mutex<Vec<(u64, Event)>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = SharedSink::new(Recorder::new(log.clone()));
+        let mut cfg = RunConfig::with_fake("cjk", input, tmp_path("edits", "pdf")).unwrap();
+        select_pages(&mut cfg, vec![0]);
+        p.run(&cfg, sink, CancellationToken::new())
+            .await
+            .expect("run 应成功");
+        let events = log.lock().unwrap().clone();
+        let edits: Vec<Vec<syncpdf_protocol::BlockEditState>> = events
+            .iter()
+            .filter_map(|(_, e)| match e {
+                Event::BlockEdits { edits } => Some(edits.clone()),
+                _ => None,
+            })
+            .collect();
+        (last_paragraphs(&events), edits)
+    };
+
+    let (before, edits) = run_once(p.clone(), input.clone()).await;
+    assert_eq!(edits, vec![vec![]], "无编辑时也发一次空表");
+    let mut translated = before
+        .iter()
+        .filter(|(_, (html, boxes))| html.is_some() && !boxes.is_empty());
+    let (edited_id, (html, _)) = translated.next().expect("首页应有已译段");
+    let (styled_id, (_, styled_boxes)) = translated.next().expect("首页应有第二个已译段");
+    let manual = html.as_deref().unwrap().replacen("</p>", "（手改）</p>", 1);
+
+    p.save_edit(&syncpdf_protocol::Request::ApplyEdit {
+        doc_id: "cli".into(),
+        store: None,
+        paragraph_id: edited_id.clone(),
+        translated_html: Some(manual.clone()),
+        style: Default::default(),
+    })
+    .unwrap();
+    p.save_edit(&syncpdf_protocol::Request::ApplyEdit {
+        doc_id: "cli".into(),
+        store: None,
+        paragraph_id: styled_id.clone(),
+        translated_html: None,
+        style: syncpdf_protocol::BlockStyle {
+            font_scale: Some(0.6),
+            ..Default::default()
+        },
+    })
+    .unwrap();
+
+    let (after, edits) = run_once(p.clone(), input.clone()).await;
+    let edits = &edits[0];
+    assert_eq!(edits.len(), 2, "{edits:?}");
+    let state = |id| edits.iter().find(|e| &e.paragraph_id == id).unwrap();
+    assert!(state(edited_id).manual && state(edited_id).style.is_empty());
+    assert!(!state(styled_id).manual && state(styled_id).style.font_scale == Some(0.6));
+    assert_eq!(after[edited_id].0.as_deref(), Some(manual.as_str()));
+    assert!(
+        boxes_height(&after[styled_id].1) < boxes_height(styled_boxes),
+        "缩小字号后该块排版总高应变小：{:?} → {:?}",
+        styled_boxes,
+        after[styled_id].1
+    );
+    for (id, para) in &before {
+        if id != edited_id && id != styled_id {
+            assert_eq!(
+                after.get(id).map(|p| &p.0),
+                Some(&para.0),
+                "{id} 不应受影响"
+            );
+        }
+    }
+}

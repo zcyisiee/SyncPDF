@@ -101,6 +101,7 @@ pub(super) fn state(dir: &Path) -> (RunState, PathBuf) {
             targets: BTreeMap::new(),
             typography: stages::typeset::Typography::default(),
             pars,
+            styles: BTreeMap::new(),
             font_store,
             font_profile,
             schedule,

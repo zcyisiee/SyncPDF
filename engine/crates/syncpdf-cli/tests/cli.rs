@@ -607,3 +607,42 @@ fn run_session_queues_runs_serially() {
     drop(stdin);
     assert!(child.wait().unwrap().success(), "空闲时 EOF 应正常退出");
 }
+
+/// 会话里的编辑请求写入指定的本篇库，不报 unsupported；非法排版只回一条
+/// 非致命 `edit_failed`，进程照常退出。
+#[test]
+fn session_saves_edits_and_reports_invalid_ones() {
+    let dir = std::env::temp_dir().join(format!("syncpdf-cli-edits-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let store = dir.join("store.db");
+    let edit = |line_height: Option<f32>| Request::ApplyEdit {
+        doc_id: "d".into(),
+        store: Some(store.clone()),
+        paragraph_id: "P01-001".parse().unwrap(),
+        translated_html: Some("<p id=\"P01-001\">改</p>".into()),
+        style: syncpdf_protocol::BlockStyle {
+            line_height,
+            ..Default::default()
+        },
+    };
+    let retranslate = Request::Retranslate {
+        doc_id: "d".into(),
+        store: Some(store.clone()),
+        paragraph_ids: vec!["P01-002".parse().unwrap()],
+    };
+    let stdin = [edit(None), retranslate, edit(Some(0.0))]
+        .iter()
+        .map(|r| format!("{}\n", syncpdf_protocol::encode_line(r)))
+        .collect::<String>();
+    let (stdout, stderr, code) = run_with_stdin(&["run"], &stdin);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    let errors: Vec<serde_json::Value> = stdout
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(errors.len(), 1, "只有非法那条报错：{stdout}");
+    assert_eq!(errors[0]["code"], "edit_failed");
+    assert_eq!(errors[0]["fatal"], false);
+    assert!(store.is_file(), "合法编辑应写入本篇库");
+}

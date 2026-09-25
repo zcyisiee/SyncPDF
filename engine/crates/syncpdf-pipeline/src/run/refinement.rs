@@ -98,8 +98,7 @@ pub(super) fn refine_page(state: &mut RunState, page: u32, sink: &SharedSink) {
             }
             let bound = &state.bound[&page];
             let target = &state.targets[id];
-            let shaper = StoreShaper::new(&state.font_store, &state.font_profile)
-                .with_role(stages::typeset::role_for_region(target.para.kind));
+            let shaper = state.shaper_for(&target.para);
             let para = &state.pars[id];
             let Some(initial) = state.frames.get(id) else {
                 continue;
@@ -109,13 +108,15 @@ pub(super) fn refine_page(state: &mut RunState, page: u32, sink: &SharedSink) {
             let wider = stages::refine::wider_measure(para, initial, text_area, &obstacles);
             let mut accepted = Vec::new();
             for measure in std::iter::once(initial).chain(wider.as_ref()) {
-                let Some(measured) = probe(target, measure, crop, &shaper, state.typography) else {
+                let Some(measured) =
+                    probe(target, measure, crop, &shaper, state.typography_for(id))
+                else {
                     continue;
                 };
                 for frame in
                     stages::refine::free_frames(para, measure, measured.used_bbox, crop, &obstacles)
                 {
-                    if let Some(result) = fit(target, &frame, &shaper, state.typography) {
+                    if let Some(result) = fit(target, &frame, &shaper, state.typography_for(id)) {
                         accepted.push((frame, result));
                         break;
                     }
@@ -192,8 +193,7 @@ fn restore_separation(state: &mut RunState, page: u32, sink: &SharedSink) {
         if laid.used_bbox.y0 - next.used_bbox.y1 >= required - 0.01 {
             continue;
         }
-        let shaper = StoreShaper::new(&state.font_store, &state.font_profile)
-            .with_role(stages::typeset::role_for_region(para.kind));
+        let shaper = state.shaper_for(para);
         let bound = &state.bound[&page];
         let accepted = reflow_column(
             state,
@@ -293,9 +293,8 @@ fn reflow_column(
             }
         }
         let frame = wide.or(state.frames.get(pid))?.clone();
-        let shaper = StoreShaper::new(&state.font_store, &state.font_profile)
-            .with_role(stages::typeset::role_for_region(target.para.kind));
-        probe(target, &frame, crop, &shaper, state.typography)
+        let shaper = state.shaper_for(&target.para);
+        probe(target, &frame, crop, &shaper, state.typography_for(pid))
             .map(|p| (frame, p.used_bbox, p.line_height - source_pitch))
     };
     let page_paras: Vec<&Paragraph> = state
@@ -429,9 +428,9 @@ fn reflow_column(
                 .zip(frames)
                 .map(|((p, _, _), frame)| {
                     let target = &state.targets[&p.id];
-                    let shaper = StoreShaper::new(&state.font_store, &state.font_profile)
-                        .with_role(stages::typeset::role_for_region(target.para.kind));
-                    fit(target, &frame, &shaper, state.typography).map(|laid| (frame, laid))
+                    let shaper = state.shaper_for(&target.para);
+                    fit(target, &frame, &shaper, state.typography_for(&p.id))
+                        .map(|laid| (frame, laid))
                 })
                 .collect();
             let Some(results) = results else {

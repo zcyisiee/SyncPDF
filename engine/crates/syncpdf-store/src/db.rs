@@ -53,6 +53,16 @@ CREATE TABLE IF NOT EXISTS paragraphs (
     PRIMARY KEY (doc_id, paragraph_id)
 );
 
+-- 按段覆盖（桌面端编辑）：手改译文、待重译标记、单块排版（BlockStyle JSON）
+CREATE TABLE IF NOT EXISTS block_edits (
+    doc_id          TEXT NOT NULL,
+    paragraph_id    TEXT NOT NULL,
+    translated_html TEXT,
+    retranslate     INTEGER NOT NULL DEFAULT 0,
+    style           TEXT,
+    PRIMARY KEY (doc_id, paragraph_id)
+);
+
 -- 阶段产物缓存：键 = 输入哈希 + stage 名；值为 CBOR+zstd BLOB
 CREATE TABLE IF NOT EXISTS stages (
     key_sha256 TEXT NOT NULL,

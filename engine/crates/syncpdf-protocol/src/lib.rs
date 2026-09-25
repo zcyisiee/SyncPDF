@@ -15,9 +15,13 @@ pub mod request;
 pub mod schema;
 
 pub use event::{
-    Envelope, Event, LayoutRegion, Severity, Stage, Stats, PROTOCOL_VERSION, PROTOCOL_VERSION_NAME,
+    BlockEditState, Envelope, Event, LayoutRegion, Severity, Stage, Stats, PROTOCOL_VERSION,
+    PROTOCOL_VERSION_NAME,
 };
-pub use request::{decode_request, encode_line, Mode, Request, TranslateProvider, TranslatorKind};
+pub use request::{
+    decode_request, encode_line, BlockAlign, BlockStyle, FontFamily, Mode, Request,
+    TranslateProvider, TranslatorKind,
+};
 
 /// JSONL 行解码/编码错误。
 #[derive(Debug, thiserror::Error)]

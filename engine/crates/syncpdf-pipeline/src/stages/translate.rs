@@ -13,8 +13,8 @@ use syncpdf_core::GlyphId;
 use syncpdf_protocol::TranslatorKind;
 use syncpdf_translate::{
     build_unit, AgyTranslator, Cache, ContextMap, DeltaSink, DocumentPrompt, DocumentResult,
-    Engine, FakeTranslator, PiTranslator, PromptSpec, TranslateError, TranslatedBlock, Translator,
-    Unit,
+    Engine, FakeTranslator, Overrides, PiTranslator, PromptSpec, TranslateError, TranslatedBlock,
+    Translator, Unit,
 };
 
 use super::PipelineError;
@@ -149,7 +149,17 @@ pub async fn translate_all<T: Translator>(
     cache: Option<&Cache>,
     on_block: impl FnMut(TranslatedBlock) + Send,
 ) -> Result<DocumentResult, PipelineError> {
-    translate_all_with_cache_policy(translator, spec, paras, lookup, cache, on_block, false).await
+    translate_all_with_cache_policy(
+        translator,
+        spec,
+        paras,
+        lookup,
+        cache,
+        on_block,
+        false,
+        Overrides::default(),
+    )
+    .await
 }
 
 pub async fn translate_all_with_cache_policy<T: Translator>(
@@ -160,6 +170,7 @@ pub async fn translate_all_with_cache_policy<T: Translator>(
     cache: Option<&Cache>,
     on_block: impl FnMut(TranslatedBlock) + Send,
     cache_only: bool,
+    overrides: Overrides,
 ) -> Result<DocumentResult, PipelineError> {
     let units: Vec<Unit> = paras.iter().map(|p| build_unit(p, &lookup)).collect();
     let mut ctx = ContextMap::from_units(&units);
@@ -175,7 +186,9 @@ pub async fn translate_all_with_cache_policy<T: Translator>(
             ctx.hints.insert(para.id.clone(), hints);
         }
     }
-    let engine = Engine::new(translator).with_cache_only(cache_only);
+    let engine = Engine::new(translator)
+        .with_cache_only(cache_only)
+        .with_overrides(overrides);
     engine
         .translate_document(spec, units, ctx, cache, on_block)
         .await

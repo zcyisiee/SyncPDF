@@ -161,6 +161,7 @@ pub fn event_kind(e: &Event) -> &'static str {
         Event::Progress { .. } => "progress",
         Event::Layout { .. } => "layout",
         Event::DocMeta { .. } => "doc_meta",
+        Event::BlockEdits { .. } => "block_edits",
         Event::Paragraph { .. } => "paragraph",
         Event::PageReady { .. } => "page_ready",
         Event::Issue { .. } => "issue",

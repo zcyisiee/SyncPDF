@@ -251,6 +251,13 @@ async fn cmd_run(sink: SharedSink) -> anyhow::Result<()> {
                 continue;
             }
             req @ Request::Run { .. } => req,
+            // 编辑只写本篇库，排在前面的 run 结束后才执行；随后的 run 应用它。
+            req @ (Request::ApplyEdit { .. } | Request::Retranslate { .. }) => {
+                if let Err(e) = Pipeline::default().save_edit(&req) {
+                    emit_error(&sink, "edit_failed", &format!("保存编辑失败：{e}"), false);
+                }
+                continue;
+            }
             other => {
                 emit_error(
                     &sink,

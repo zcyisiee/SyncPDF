@@ -67,6 +67,14 @@ impl Typography {
         })
     }
 
+    /// 单块覆盖：给出的字段替换整篇值（取值已在入口按 [`Typography::new`] 校验）。
+    pub fn overridden(self, font_scale: Option<f32>, line_height: Option<f32>) -> Self {
+        Self {
+            font_scale: font_scale.unwrap_or(self.font_scale),
+            line_height: line_height.or(self.line_height),
+        }
+    }
+
     pub fn describe(self) -> String {
         self.line_height
             .map_or_else(|| "原文".into(), |v| format!("{v:.2}"))
@@ -364,6 +372,41 @@ pub fn role_for_region(kind: syncpdf_core::ir::RegionKind) -> Role {
         RegionKind::Title => Role::DocTitle,
         RegionKind::ParagraphTitle => Role::ParagraphTitle,
         _ => Role::Body,
+    }
+}
+
+/// 协议对齐 → IR 对齐。
+pub fn align_of(align: syncpdf_protocol::BlockAlign) -> syncpdf_core::ir::Align {
+    use syncpdf_core::ir::Align;
+    use syncpdf_protocol::BlockAlign;
+    match align {
+        BlockAlign::Left => Align::Left,
+        BlockAlign::Center => Align::Center,
+        BlockAlign::Right => Align::Right,
+        BlockAlign::Justify => Align::Justify,
+    }
+}
+
+/// 单块排版的取值约束与整篇 [`Typography::new`] 相同。
+pub fn check_block_style(style: &syncpdf_protocol::BlockStyle) -> Result<(), String> {
+    Typography::new(style.font_scale.unwrap_or(1.0), style.line_height)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// 字体族覆盖下的角色：衬线走正文槽（CJK 正文即宋体类），无衬线走标题槽
+/// （黑体类）；未覆盖时按区域类别。
+pub fn role_for(
+    kind: syncpdf_core::ir::RegionKind,
+    family: Option<syncpdf_protocol::FontFamily>,
+) -> Role {
+    use syncpdf_core::ir::RegionKind;
+    use syncpdf_protocol::FontFamily;
+    match family {
+        None => role_for_region(kind),
+        Some(FontFamily::Serif) => Role::Body,
+        Some(FontFamily::Sans) if kind == RegionKind::Title => Role::DocTitle,
+        Some(FontFamily::Sans) => Role::ParagraphTitle,
     }
 }
 

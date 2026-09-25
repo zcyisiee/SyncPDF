@@ -124,11 +124,22 @@ impl ContextMap {
     }
 }
 
+/// 按段覆盖（桌面端编辑），由上游从本篇库读出。
+#[derive(Debug, Clone, Default)]
+pub struct Overrides {
+    /// 手改译文：只做结构校验，不进提示词、不读写缓存。
+    pub manual: HashMap<ParagraphId, String>,
+    /// 强制重译：跳过缓存命中，新译文照常写缓存。
+    pub fresh: HashSet<ParagraphId>,
+}
+
 /// 一次整文档翻译的统计。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Stats {
     pub units: usize,
     pub cache_hits: usize,
+    /// 采用的手改译文段数。
+    pub manual: usize,
     /// 实际发出的提示词片数（含重试片）。
     pub prompts: usize,
     /// 主请求数（0或1）；不含补救重试。
@@ -185,6 +196,7 @@ pub struct Engine<T: Translator> {
     expansion_limit: f32,
     max_retry_rounds: u32,
     cache_only: bool,
+    overrides: Overrides,
 }
 
 impl<T: Translator> std::fmt::Debug for Engine<T> {
@@ -205,6 +217,7 @@ impl<T: Translator> Engine<T> {
             expansion_limit: DEFAULT_EXPANSION_LIMIT,
             max_retry_rounds: DEFAULT_MAX_RETRY_ROUNDS,
             cache_only: false,
+            overrides: Overrides::default(),
         }
     }
 
@@ -221,6 +234,12 @@ impl<T: Translator> Engine<T> {
     /// Recompile validated cached translations without sending any model request.
     pub fn with_cache_only(mut self, enabled: bool) -> Self {
         self.cache_only = enabled;
+        self
+    }
+
+    /// 按段覆盖：手改段直接交付，强制重译段绕过缓存。
+    pub fn with_overrides(mut self, overrides: Overrides) -> Self {
+        self.overrides = overrides;
         self
     }
 
@@ -256,7 +275,36 @@ impl<T: Translator> Engine<T> {
         // ── 1. 缓存命中直接交付，不进提示词 ─────────────────────────────
         let mut pending: Vec<Unit> = Vec::new();
         for u in &units {
+            if let Some(html) = self.overrides.manual.get(&u.id) {
+                let ctx = ctx.ctx_for(u, &spec.target_lang, self.expansion_limit);
+                let structural: Vec<Violation> = match validate(&ctx, html) {
+                    Ok(_) => Vec::new(),
+                    Err(v) => v.into_iter().filter(Violation::is_structural).collect(),
+                };
+                let b = if structural.is_empty() {
+                    st.manual += 1;
+                    TranslatedBlock {
+                        id: u.id.clone(),
+                        html: html.clone(),
+                        status: BlockStatus::Ok,
+                        from_cache: false,
+                    }
+                } else {
+                    TranslatedBlock {
+                        id: u.id.clone(),
+                        html: u.html.clone(),
+                        status: BlockStatus::Fallback {
+                            violations: structural,
+                        },
+                        from_cache: false,
+                    }
+                };
+                done.insert(u.id.clone(), b.clone());
+                on_block(b);
+                continue;
+            }
             let hit = cache
+                .filter(|_| !self.overrides.fresh.contains(&u.id))
                 .and_then(|c| c.get(&spec.source_lang, &spec.target_lang, &u.html).ok())
                 .flatten()
                 .filter(|html| {
@@ -870,6 +918,77 @@ mod tests {
         assert!(!seen[0].contains("<!-- syncpdf:block P01-002 -->"));
         assert!(seen[0].contains("<!-- syncpdf:block P01-001 -->"));
         assert!(seen[0].contains("<!-- syncpdf:block P01-003 -->"));
+    }
+
+    #[tokio::test]
+    async fn manual_edits_skip_model_and_only_structure_is_enforced() {
+        let us = units(3);
+        let long = "很长的人工译文".repeat(40);
+        let mut overrides = Overrides::default();
+        // 远超膨胀上限（质量启发式）也照用：这是用户的选择。
+        overrides
+            .manual
+            .insert(us[0].id.clone(), format!("<p id=\"P01-001\">{long}</p>"));
+        // 结构违规（段外 id）回退原文并带违规码。
+        overrides
+            .manual
+            .insert(us[1].id.clone(), "<p id=\"P09-001\">错段</p>".into());
+        let engine =
+            Engine::new(RecordingTranslator::new(FakeTranslator::Echo)).with_overrides(overrides);
+        let ctx = ContextMap::from_units(&us);
+        let r = engine
+            .translate_document(&spec(), us.clone(), ctx, None, |_| {})
+            .await
+            .unwrap();
+        assert_eq!(r.stats.manual, 1);
+        assert!(r.blocks[0].status.is_ok());
+        assert!(r.blocks[0].html.contains(&long));
+        assert!(!r.blocks[0].from_cache);
+        match &r.blocks[1].status {
+            BlockStatus::Fallback { violations } => {
+                assert!(violations.contains(&Violation::UnknownParagraph));
+                assert!(violations.iter().all(Violation::is_structural));
+            }
+            other => panic!("结构违规应回退：{other:?}"),
+        }
+        assert_eq!(r.blocks[1].html, us[1].html);
+        // 只有未覆盖的第 3 段进了提示词。
+        let seen = engine.translator().recorded();
+        assert_eq!(seen.len(), 1);
+        assert!(!seen[0].contains("syncpdf:block P01-001"));
+        assert!(!seen[0].contains("syncpdf:block P01-002"));
+        assert!(seen[0].contains("syncpdf:block P01-003"));
+    }
+
+    #[tokio::test]
+    async fn fresh_blocks_bypass_the_cache_and_refresh_it() {
+        let us = units(2);
+        let cache = Cache::open_in_memory().unwrap();
+        for u in &us {
+            let cached = u.html.replace("paragraph", "cached");
+            cache.put("en", "en", "old", &u.html, &cached).unwrap();
+        }
+        let mut overrides = Overrides::default();
+        overrides.fresh.insert(us[1].id.clone());
+        let engine =
+            Engine::new(RecordingTranslator::new(FakeTranslator::Echo)).with_overrides(overrides);
+        let ctx = ContextMap::from_units(&us);
+        let r = engine
+            .translate_document(&spec(), us.clone(), ctx, Some(&cache), |_| {})
+            .await
+            .unwrap();
+        assert_eq!(r.stats.cache_hits, 1);
+        assert!(r.blocks[0].from_cache);
+        assert!(!r.blocks[1].from_cache);
+        assert_eq!(r.blocks[1].html, us[1].html, "Echo 的新译文");
+        let seen = engine.translator().recorded();
+        assert!(seen[0].contains("syncpdf:block P01-002"));
+        assert!(!seen[0].contains("syncpdf:block P01-001"));
+        // 新译文写回缓存，下一次普通 run 直接命中它。
+        assert_eq!(
+            cache.get("en", "en", &us[1].html).unwrap().as_deref(),
+            Some(us[1].html.as_str())
+        );
     }
 
     #[tokio::test]
