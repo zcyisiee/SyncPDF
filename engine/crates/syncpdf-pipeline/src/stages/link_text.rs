@@ -53,6 +53,8 @@ use syncpdf_typeset::Shaper;
 pub(crate) struct Target {
     pub para: Paragraph,
     pub parsed: ParsedUnit,
+    /// Model-space HTML (`{{KEEP_n}}` intact): what editors show and what a
+    /// manual override is validated against.
     pub html: String,
     links: Vec<(ObjectId, Vec<StyleId>)>,
     atom_links: Vec<(ObjectId, AtomId, Rect)>,
@@ -523,7 +525,7 @@ fn prepare_labeled(
     let resolved = super::text_atoms::resolve_text(para, parsed)?;
     let mut target = Target {
         para: para.clone(),
-        html: resolved.to_html(),
+        html: parsed.to_html(),
         parsed: resolved,
         links: vec![],
         atom_links: vec![],
@@ -912,7 +914,7 @@ fn prepare_whole_block(
     let resolved = super::text_atoms::resolve_text(para, parsed)?;
     let mut target = Target {
         para: para.clone(),
-        html: resolved.to_html(),
+        html: parsed.to_html(),
         parsed: resolved,
         links: vec![],
         atom_links: vec![],

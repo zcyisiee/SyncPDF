@@ -109,6 +109,12 @@ impl PageSchedule {
         }
     }
 
+    /// 重开一页：清掉已到达的段与就绪标记（单页重编前调用）。
+    pub fn reopen(&mut self, page: u32) {
+        self.arrived.remove(&page);
+        self.ready.remove(&page);
+    }
+
     /// 翻译结束后兜底：未凑齐的页全部转 ready，返回新就绪页（升序）。
     ///
     /// 已 ready 的页不在返回值里。

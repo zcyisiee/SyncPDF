@@ -11,17 +11,20 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::BTreeSet;
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use clap::{Parser, Subcommand};
+use syncpdf_core::ParagraphId;
 use syncpdf_pipeline::cancel::CancellationToken;
 use syncpdf_pipeline::events::{SharedSink, StdoutSink};
-use syncpdf_pipeline::run::{Pipeline, RunConfig, RunSummary};
+use syncpdf_pipeline::run::{Pipeline, Retained, RunConfig, RunSummary};
 use syncpdf_pipeline::stages::{preflight, PipelineError};
 use syncpdf_protocol::{
-    decode_request, Event, Mode, Request, TranslateProvider, TranslatorKind, PROTOCOL_VERSION,
+    decode_request, Event, Mode, Request, Severity, TranslateProvider, TranslatorKind,
+    PROTOCOL_VERSION,
 };
 
 #[derive(Parser, Debug)]
@@ -244,6 +247,9 @@ async fn cmd_run(sink: SharedSink) -> anyhow::Result<()> {
 
     let mut configure: Option<Request> = None;
     let mut failed = false;
+    // 上一次 run 的排版状态与此后编辑过的段：随后同配置的 run 只重编这些段所在的页。
+    let mut retained: Option<Retained> = None;
+    let mut edited: BTreeSet<ParagraphId> = BTreeSet::new();
     while let Some(req) = rx.recv().await {
         let run_req = match req {
             req @ Request::Configure { .. } => {
@@ -253,8 +259,17 @@ async fn cmd_run(sink: SharedSink) -> anyhow::Result<()> {
             req @ Request::Run { .. } => req,
             // 编辑只写本篇库，排在前面的 run 结束后才执行；随后的 run 应用它。
             req @ (Request::ApplyEdit { .. } | Request::Retranslate { .. }) => {
-                if let Err(e) = Pipeline::default().save_edit(&req) {
-                    emit_error(&sink, "edit_failed", &format!("保存编辑失败：{e}"), false);
+                match Pipeline::default().save_edit(&req) {
+                    Ok(()) => match req {
+                        Request::ApplyEdit { paragraph_id, .. } => {
+                            edited.insert(paragraph_id);
+                        }
+                        Request::Retranslate { paragraph_ids, .. } => edited.extend(paragraph_ids),
+                        _ => {}
+                    },
+                    Err(e) => {
+                        emit_error(&sink, "edit_failed", &format!("保存编辑失败：{e}"), false)
+                    }
                 }
                 continue;
             }
@@ -288,9 +303,32 @@ async fn cmd_run(sink: SharedSink) -> anyhow::Result<()> {
             }
             state.running = Some(cancel.clone());
         }
-        let result = Pipeline::default()
-            .run(&cfg, sink.clone(), cancel.clone())
-            .await;
+        let edited_now = std::mem::take(&mut edited);
+        let mut result = None;
+        if let Some(mut r) = retained.take().filter(|r| r.covers(&cfg, &edited_now)) {
+            match r.recompile(&edited_now, sink.clone(), &cancel).await {
+                Ok(s) => {
+                    retained = Some(r);
+                    result = Some(Ok(s));
+                }
+                Err(e @ PipelineError::Cancelled) => result = Some(Err(e)),
+                Err(e) => sink.emit(Event::Issue {
+                    severity: Severity::Warning,
+                    code: "page_recompile_failed".into(),
+                    paragraph_id: None,
+                    page: None,
+                    message: format!("单页重编失败，改为全篇重编：{e}"),
+                }),
+            }
+        }
+        let result = match result {
+            Some(result) => result,
+            None => {
+                Pipeline::default()
+                    .run_retaining(&cfg, sink.clone(), cancel.clone(), &mut retained)
+                    .await
+            }
+        };
         session.lock().expect("session 锁").running = None;
         if cancel.is_cancelled() {
             eprintln!("syncpdf-cli: 任务已取消");

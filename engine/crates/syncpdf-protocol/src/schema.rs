@@ -150,6 +150,7 @@ mod tests {
             "layout",
             "doc_meta",
             "paragraph",
+            "page_reopened",
             "page_ready",
             "issue",
             "document_finished",

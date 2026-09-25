@@ -15,11 +15,8 @@ struct Pass {
     typeset_by_page: BTreeMap<u32, Vec<TypesetParagraph>>,
     schedule: PageSchedule,
     output: PathBuf,
-    src_chars: u64,
-    tgt_chars: u64,
-    fallbacks: u32,
-    settled: u32,
     settled_ids: BTreeSet<ParagraphId>,
+    echoed: BTreeSet<ParagraphId>,
     ready: Vec<u32>,
     font_stats: Option<FontStats>,
 }
@@ -33,11 +30,8 @@ impl Pass {
         std::mem::swap(&mut self.typeset_by_page, &mut s.typeset_by_page);
         std::mem::swap(&mut self.schedule, &mut s.schedule);
         std::mem::swap(&mut self.output, &mut s.output);
-        std::mem::swap(&mut self.src_chars, &mut s.src_chars);
-        std::mem::swap(&mut self.tgt_chars, &mut s.tgt_chars);
-        std::mem::swap(&mut self.fallbacks, &mut s.fallbacks);
-        std::mem::swap(&mut self.settled, &mut s.settled);
         std::mem::swap(&mut self.settled_ids, &mut s.settled_ids);
+        std::mem::swap(&mut self.echoed, &mut s.echoed);
         std::mem::swap(&mut self.ready, &mut s.ready);
         std::mem::swap(&mut self.font_stats, &mut s.font_stats);
     }
@@ -105,7 +99,11 @@ pub(super) fn descend(
     sink: &SharedSink,
     settle: impl Fn(&mut RunState, &SharedSink) -> Result<(), PipelineError>,
 ) -> Result<(), PipelineError> {
-    while state.fallbacks > 0 {
+    loop {
+        let fallbacks = state.fallbacks();
+        if fallbacks == 0 {
+            break;
+        }
         let Some(lower) = state.typography.lowered() else {
             break;
         };
@@ -120,11 +118,8 @@ pub(super) fn descend(
             typeset_by_page: BTreeMap::new(),
             schedule: origin.schedule.clone(),
             output: trial_output.clone(),
-            src_chars: 0,
-            tgt_chars: 0,
-            fallbacks: 0,
-            settled: 0,
             settled_ids: BTreeSet::new(),
+            echoed: BTreeSet::new(),
             ready: Vec::new(),
             font_stats: None,
         };
@@ -140,7 +135,7 @@ pub(super) fn descend(
             let _ = std::fs::remove_file(&trial_output);
             return Err(error);
         }
-        if state.fallbacks >= previous.fallbacks {
+        if state.fallbacks() >= fallbacks {
             previous.swap(state);
             let _ = std::fs::remove_file(&trial_output);
             break;
@@ -157,8 +152,8 @@ pub(super) fn descend(
                 "全文行距 {} → {}：回退段 {} → {}；以下段落状态以本次重排为准",
                 previous.typography.describe(),
                 state.typography.describe(),
-                previous.fallbacks,
-                state.fallbacks
+                fallbacks,
+                state.fallbacks()
             ),
         });
         let events = std::mem::take(&mut *events.lock().expect("buffer lock"));

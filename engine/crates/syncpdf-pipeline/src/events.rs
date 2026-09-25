@@ -163,6 +163,7 @@ pub fn event_kind(e: &Event) -> &'static str {
         Event::DocMeta { .. } => "doc_meta",
         Event::BlockEdits { .. } => "block_edits",
         Event::Paragraph { .. } => "paragraph",
+        Event::PageReopened { .. } => "page_reopened",
         Event::PageReady { .. } => "page_ready",
         Event::Issue { .. } => "issue",
         Event::DocumentFinished { .. } => "document_finished",

@@ -212,8 +212,8 @@ fn restore_separation(state: &mut RunState, page: u32, sink: &SharedSink) {
     }
 }
 
-/// Publish one accepted group: replace members' placements and frames, and
-/// count every member that had no placement as a recovered fallback.
+/// Publish one accepted group: replace members' placements and frames. A
+/// member that had no placement stops counting as a fallback by being placed.
 fn commit(
     state: &mut RunState,
     page: u32,
@@ -224,16 +224,6 @@ fn commit(
     let group_size = accepted.len();
     for (frame, paragraph) in accepted {
         let changed_id = paragraph.id.clone();
-        // Every member that had no placement is a recovered fallback.
-        let recovered = !state
-            .typeset_by_page
-            .get(&page)
-            .is_some_and(|v| v.iter().any(|p| p.id == changed_id));
-        if recovered {
-            state.fallbacks -= 1;
-            state.tgt_chars = state.tgt_chars - state.pars[&changed_id].text.chars().count() as u64
-                + state.targets[&changed_id].parsed.text().chars().count() as u64;
-        }
         let old = &state.frames[&changed_id];
         let boxes = paragraph.lines.iter().map(|l| l.bbox).collect();
         let placements = state.typeset_by_page.entry(page).or_default();
@@ -489,8 +479,8 @@ mod tests {
         state.frames.insert(a.clone(), frame);
         state.pars.insert(a.clone(), first);
         state.pars.insert(b.clone(), next);
-        state.targets.insert(a, first_target);
-        state.targets.insert(b, next_target);
+        state.targets.insert(a.clone(), first_target);
+        state.targets.insert(b.clone(), next_target);
         // Cap upward movement. A's current two lines overlap B by 4pt; only
         // moving both in order can succeed. A solid lower obstacle removes that option.
         let ir = &mut state.bound.get_mut(&0).unwrap().ir;
@@ -503,8 +493,7 @@ mod tests {
             });
         }
         state.typeset_by_page.insert(0, vec![next_laid]);
-        state.fallbacks = 1;
-        state.tgt_chars = 100;
+        state.settled_ids.extend([a, b]);
         state
     }
 
@@ -517,7 +506,7 @@ mod tests {
             Vec::new(),
         ))));
         refine_page(&mut state, 0, &sink);
-        assert_eq!(state.fallbacks, 0);
+        assert_eq!(state.fallbacks(), 0);
         let laid = &state.typeset_by_page[&0];
         assert_eq!(laid.len(), 2);
         let next = laid.iter().find(|p| p.id == before.id).unwrap();
@@ -541,8 +530,7 @@ mod tests {
         refine_page(&mut state, 0, &sink);
         assert_eq!(state.typeset_by_page[&0], before);
         assert_eq!(state.frames[&before[0].id].first_baseline, baseline);
-        assert_eq!(state.fallbacks, 1);
-        assert_eq!(state.tgt_chars, 100);
+        assert_eq!(state.fallbacks(), 1);
     }
 
     /// Both paragraphs placed, the lower one's ink 0.5pt under the upper one's
@@ -574,7 +562,6 @@ mod tests {
             });
         }
         state.typeset_by_page.insert(0, vec![first, next]);
-        state.fallbacks = 0;
         state
     }
 
@@ -593,7 +580,7 @@ mod tests {
         let sink = SharedSink::new(super::super::tests::RunRecorder::new(log.clone()));
         restore_separation(&mut state, 0, &sink);
         assert!(ink_gap(&state) >= 4. - 0.01, "{}", ink_gap(&state));
-        assert_eq!(state.fallbacks, 0);
+        assert_eq!(state.fallbacks(), 0);
         assert_eq!(state.typeset_by_page[&0].len(), 2);
         assert!(log.lock().unwrap().iter().any(|(_, e)| matches!(e,
             Event::Issue { code, .. } if code == "layout_refined")));
@@ -685,8 +672,8 @@ mod tests {
         state.frames.insert(b.clone(), narrow);
         state.pars.insert(a.clone(), first);
         state.pars.insert(b.clone(), next);
-        state.targets.insert(a, first_target);
-        state.targets.insert(b, next_target);
+        state.targets.insert(a.clone(), first_target);
+        state.targets.insert(b.clone(), next_target);
         let ir = &mut state.bound.get_mut(&0).unwrap().ir;
         ir.items.push(DisplayItem::Image {
             bbox: Rect::new(0., first_laid.used_bbox.y1 + 0.25, 300., 300.),
@@ -700,7 +687,7 @@ mod tests {
             });
         }
         state.typeset_by_page.insert(0, vec![next_laid]);
-        state.fallbacks = 1;
+        state.settled_ids.extend([a, b]);
         state
     }
 
@@ -717,11 +704,11 @@ mod tests {
             let find = |id: &str| laid.iter().find(|p| p.id.to_string() == id);
             if blocked_right {
                 // Nothing to borrow on the right: A stays a fallback, B unchanged.
-                assert_eq!(state.fallbacks, 1);
+                assert_eq!(state.fallbacks(), 1);
                 assert!(find("P01-001").is_none());
                 assert_eq!(find("P01-002").unwrap().lines.len(), 2);
             } else {
-                assert_eq!(state.fallbacks, 0);
+                assert_eq!(state.fallbacks(), 0);
                 assert_eq!(find("P01-001").unwrap().lines.len(), 3);
                 let next = find("P01-002").unwrap();
                 assert_eq!(next.lines.len(), 1);

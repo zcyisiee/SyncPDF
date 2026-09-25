@@ -320,6 +320,25 @@
           "type": "object"
         },
         {
+          "description": "单页重编开始（编辑后只重编被编辑段所在的页，不发 `run_started`）：\n该页此前的段落结果与问题作废，随后重发；其余页不变。页号 1 基。",
+          "properties": {
+            "page": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "page_reopened",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "page"
+          ],
+          "type": "object"
+        },
+        {
           "description": "一页完成（可选增量预览）。",
           "properties": {
             "page": {

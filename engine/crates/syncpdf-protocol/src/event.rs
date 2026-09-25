@@ -122,6 +122,9 @@ pub enum Event {
         #[schemars(with = "crate::schema::RectSchema")]
         source_bbox: Rect,
     },
+    /// 单页重编开始（编辑后只重编被编辑段所在的页，不发 `run_started`）：
+    /// 该页此前的段落结果与问题作废，随后重发；其余页不变。页号 1 基。
+    PageReopened { page: u32 },
     /// 一页完成（可选增量预览）。
     PageReady {
         page: u32,
@@ -300,6 +303,11 @@ mod tests {
             json,
             "{\"type\":\"layout\",\"page\":2,\"regions\":[{\"kind\":\"foot_note\",\"inline\":false,\"bbox\":{\"x0\":0.0,\"y0\":0.0,\"x1\":1.0,\"y1\":1.0}}]}"
         );
+    }
+
+    #[test]
+    fn event_page_reopened_roundtrip() {
+        roundtrip(Event::PageReopened { page: 2 });
     }
 
     #[test]

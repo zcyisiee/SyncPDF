@@ -228,9 +228,22 @@ impl Pipeline {
     pub async fn run(
         &self,
         cfg: &RunConfig,
-        mut sink: SharedSink,
+        sink: SharedSink,
         cancel: CancellationToken,
     ) -> Result<RunSummary, PipelineError> {
+        self.run_retaining(cfg, sink, cancel, &mut None).await
+    }
+
+    /// 同 [`Self::run`]；成功时把排版状态留在 `retained`，供之后的编辑只重编
+    /// 被编辑的页（[`Retained::recompile`]）。
+    pub async fn run_retaining(
+        &self,
+        cfg: &RunConfig,
+        mut sink: SharedSink,
+        cancel: CancellationToken,
+        retained: &mut Option<Retained>,
+    ) -> Result<RunSummary, PipelineError> {
+        *retained = None;
         let started = Instant::now();
         let fields = cfg
             .run_fields()
@@ -281,7 +294,7 @@ impl Pipeline {
 
         let result = self
             .run_stages(
-                &mut sink, &worker, &pf, &fields, cfg, &cancel, &selected, started,
+                &mut sink, &worker, &pf, &fields, cfg, &cancel, &selected, started, retained,
             )
             .await;
 
@@ -324,6 +337,7 @@ impl Pipeline {
         cancel: &CancellationToken,
         selected: &[u32],
         started: Instant,
+        retained: &mut Option<Retained>,
     ) -> Result<RunSummary, PipelineError> {
         // ── 1. source_analysis（结果入阶段缓存）────────────────────────
         emit_stage_started(sink, Stage::SourceAnalysis);
@@ -634,11 +648,8 @@ impl Pipeline {
             font_profile,
             schedule,
             output: fields.output.to_path_buf(),
-            src_chars: 0,
-            tgt_chars: 0,
-            fallbacks: 0,
-            settled: 0,
             settled_ids: BTreeSet::new(),
+            echoed: BTreeSet::new(),
             ready: Vec::new(),
             revision: 0,
             font_stats: None,
@@ -787,7 +798,7 @@ impl Pipeline {
         let t = Instant::now();
         let (summary_stats, settled) = {
             let s = lock_state(&state);
-            (s.stats(), s.settled)
+            (s.stats(), s.settled())
         };
         // 按策略保留的 reference/脚注等不是回退；保护冲突阻断的可译内容则未完成。
         let protected = not_replaced.iter().filter(|p| {
@@ -840,6 +851,19 @@ impl Pipeline {
 
         let elapsed_ms = started.elapsed().as_millis() as u64;
         sink.emit(Event::RunFinished { ok, elapsed_ms });
+        // 流式回调已随翻译 future 释放，这里是状态的唯一持有者。
+        if let Ok(state) = Arc::try_unwrap(state) {
+            *retained = Some(Retained::new(
+                cfg,
+                fields.store.unwrap_or(&self.store_path).to_path_buf(),
+                state.into_inner().unwrap_or_else(|p| p.into_inner()),
+                origin,
+                translatable.iter().map(|p| p.id.clone()).collect(),
+                selected.to_vec(),
+                &all_paras,
+                protected > 0 || coverage_gaps > 0 || identity_errors,
+            ));
+        }
         Ok(RunSummary {
             ok,
             pages: selected.len() as u32,
@@ -893,16 +917,11 @@ struct RunState {
     schedule: PageSchedule,
     /// 输出路径（每次快照都覆盖它）。
     output: PathBuf,
-    /// 参与的原文总字符数（`expansion_ratio` 的分母）。
-    src_chars: u64,
-    /// 译文总字符数（回退段计入原文，分子）。
-    tgt_chars: u64,
-    /// 回退原文的段落数。
-    fallbacks: u32,
-    /// 已落定（译文通过或回退）的段落数。
-    settled: u32,
-    /// 已落定的段落 id（用于补齐漏译）。
+    /// 已落定（译文通过、回显或回退）的段落 id。统计由逐段结果推出而不是
+    /// 增减计数：局部重排和单页重编只改段落结果，计数不会漂移。
     settled_ids: BTreeSet<ParagraphId>,
+    /// 模型原样回显、保留原文字形的段落（不算回退）。
+    echoed: BTreeSet<ParagraphId>,
     /// 已就绪页（0 基，升序）。
     ready: Vec<u32>,
     /// `page_ready` 的 `revision` 计数。
@@ -955,16 +974,47 @@ impl RunState {
     /// `syncpdf_protocol::Stats` 的字段注释「输出/输入字节数之比」不一致，
     /// 见回报「已知缺口」）。
     fn stats(&self) -> Stats {
-        let expansion_ratio = if self.src_chars == 0 {
+        let (mut src_chars, mut tgt_chars) = (0u64, 0u64);
+        for id in &self.settled_ids {
+            let src = self
+                .pars
+                .get(id)
+                .map_or(0, |p| p.text.chars().count() as u64);
+            src_chars += src;
+            // 回退段与回显段计入原文。
+            tgt_chars += match self.targets.get(id) {
+                Some(t) if self.is_typeset(id) => t.parsed.text().chars().count() as u64,
+                _ => src,
+            };
+        }
+        let expansion_ratio = if src_chars == 0 {
             1.0
         } else {
-            self.tgt_chars as f64 / self.src_chars as f64
+            tgt_chars as f64 / src_chars as f64
         };
         Stats {
             fonts: self.font_stats.map_or(0, |f| f.fonts),
             expansion_ratio,
-            fallbacks: self.fallbacks,
+            fallbacks: self.fallbacks(),
         }
+    }
+
+    fn is_typeset(&self, id: &ParagraphId) -> bool {
+        self.typeset_by_page
+            .get(&(id.page - 1))
+            .is_some_and(|v| v.iter().any(|p| p.id == *id))
+    }
+
+    /// 已落定却既没排上译文、也不是回显的段落数。
+    fn fallbacks(&self) -> u32 {
+        self.settled_ids
+            .iter()
+            .filter(|id| !self.echoed.contains(*id) && !self.is_typeset(id))
+            .count() as u32
+    }
+
+    fn settled(&self) -> u32 {
+        self.settled_ids.len() as u32
     }
 }
 
@@ -1065,7 +1115,6 @@ fn handle_block(
     if !matches!(para.translatable, Translatable::Yes) {
         return Err(PipelineError::Protocol(format!("不可译段落收到译文：{id}")));
     }
-    let src_len = para.text.chars().count() as u64;
     let mut fallback: Option<(&'static str, Option<String>, String)> = None;
     let mut out: Option<(String, Vec<syncpdf_core::Rect>)> = None;
 
@@ -1173,8 +1222,6 @@ fn handle_block(
                         .entry(id.page - 1)
                         .or_default()
                         .push(result.paragraph);
-                    state.src_chars += src_len;
-                    state.tgt_chars += target.parsed.text().chars().count() as u64;
                     if !target.dropped.is_empty() {
                         let reasons: Vec<&str> =
                             target.dropped.iter().map(|(_, r)| r.as_str()).collect();
@@ -1223,8 +1270,7 @@ fn handle_block(
 
     match out {
         None if echoed => {
-            state.src_chars += src_len;
-            state.tgt_chars += src_len;
+            state.echoed.insert(id.clone());
             sink.emit(paragraph_event(
                 &para,
                 ParagraphStatus::NotReplaced,
@@ -1241,9 +1287,6 @@ fn handle_block(
         None => {
             let (code, detail, msg) =
                 fallback.unwrap_or(("translate_fallback", None, "回退原文".into()));
-            state.fallbacks += 1;
-            state.src_chars += src_len;
-            state.tgt_chars += src_len;
             let mut message = format!("{msg}，回退原文");
             if let Some(d) = detail {
                 message.push_str(&format!("（违规：{d}）"));
@@ -1264,11 +1307,10 @@ fn handle_block(
         }
     }
 
-    state.settled += 1;
     state.settled_ids.insert(id.clone());
     sink.emit(Event::Progress {
         stage: Stage::Translating,
-        done: state.settled,
+        done: state.settled(),
         total,
     });
 
@@ -1279,7 +1321,10 @@ fn handle_block(
 }
 
 mod descent;
+mod incremental;
 mod refinement;
+
+pub use incremental::Retained;
 
 /// 翻译结束后的落定：漏译段补发 fallback，未凑齐的页强制就绪并回写。
 fn settle_rest(
@@ -1296,11 +1341,6 @@ fn settle_rest(
         .collect();
     for id in missing {
         if let Some(p) = s.pars.get(&id).cloned() {
-            s.fallbacks += 1;
-            let n = p.text.chars().count() as u64;
-            s.src_chars += n;
-            s.tgt_chars += n;
-            s.settled += 1;
             s.settled_ids.insert(id.clone());
             sink.emit(Event::Issue {
                 severity: Severity::Warning,
@@ -1719,7 +1759,7 @@ mod tests {
     use super::*;
     use syncpdf_core::require_fixture;
 
-    fn tmp_path(ext: &str) -> PathBuf {
+    pub(super) fn tmp_path(ext: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "syncpdf-pipeline-run-{}-{}.{ext}",
             std::process::id(),
@@ -1730,7 +1770,7 @@ mod tests {
         ))
     }
 
-    fn pipeline(tmp_store: PathBuf) -> Pipeline {
+    pub(super) fn pipeline(tmp_store: PathBuf) -> Pipeline {
         Pipeline {
             fonts_dir: syncpdf_core::fixtures::fonts_dir().unwrap_or_default(),
             models_dir: syncpdf_core::fixtures::models_dir().unwrap_or_default(),
@@ -1740,7 +1780,7 @@ mod tests {
     }
 
     /// pdfium / 模型 / 字体任一缺失就跳过（返回 None）。
-    fn env_ready() -> Option<()> {
+    pub(super) fn env_ready() -> Option<()> {
         if syncpdf_pdf::pdfium::PdfiumWorker::spawn().is_err() {
             eprintln!("SKIP: pdfium 不可用");
             return None;
@@ -2173,11 +2213,8 @@ mod tests {
             font_profile,
             schedule,
             output: tmp_path("pdf"),
-            src_chars: 0,
-            tgt_chars: 0,
-            fallbacks: 0,
-            settled: 0,
             settled_ids: BTreeSet::new(),
+            echoed: BTreeSet::new(),
             ready: Vec::new(),
             revision: 0,
             font_stats: None,
@@ -2208,7 +2245,7 @@ mod tests {
             state.typeset_by_page.is_empty(),
             "溢出段不得进入删除原文队列"
         );
-        assert_eq!(state.fallbacks, 1);
+        assert_eq!(state.fallbacks(), 1);
         assert!(state.settled_ids.contains(&id));
         assert_eq!(state.revision, 0);
         assert!(!state.output.exists());
@@ -2259,7 +2296,7 @@ mod tests {
             .unwrap();
             assert!(state.typeset_by_page.is_empty(), "{html}");
             assert!(state.settled_ids.contains(&id));
-            assert_eq!(state.fallbacks, u32::from(!echoed), "{html}");
+            assert_eq!(state.fallbacks(), u32::from(!echoed), "{html}");
             let log = log.lock().unwrap();
             let status = if echoed {
                 ParagraphStatus::NotReplaced
