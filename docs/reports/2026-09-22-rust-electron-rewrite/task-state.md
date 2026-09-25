@@ -2,14 +2,77 @@
 
 > 更新：2026-09-24；仅用户和主 Agent 可修改。主树 `feat/desktop-develop`。当前任务：五篇真实论文顺序验证 Rust 编译后端，**进行中**。此前CCS验收属于历史，不是本轮成功证据。
 
-## 最新用户范围澄清（优先）
+## 最新执行约定（覆盖下方旧顺序与预先重构计划）
+
+- 用户明确禁止单样本打地鼠式修复，允许按字体、几何、区域、Elsevier/ICML等真实模板特征工程化；保持架构清晰可读。不因允许模板处理就预建路由基础设施。
+- 下一篇改为主树 `/Users/zhengcaiyi/orca/workspaces/ieeTranslater/桌面端/2604.03136v6.pdf`，先真实翻译再按失败证据修复，之后继续根目录其余paper。DeepSeek已验收产物保留；TRC阻断暂存，不优先继续旧RCA。方案14作为候选，不预先整套执行。
+- 主控仅组织、审查和独立验收；具体bug定位/开发按delegation.md委派**只用 sonnet**（Claude Code Agent 工具 `model: sonnet`，fresh 会话，无60秒噪声监控）；sonnet 失联则暂停任务，不换模型/harness。写代码的任务用独立worktree，一树一writer；只读RCA可在主树。
+- 每项修复先说明缺陷类别与根因层，按通用特征分类，必须提供不同形态正例和反例；不以当前字符/关键词/巧合坐标立特例。纯模型漏译等翻译质量不修，只记录。沿用agy指定模型、宋体1.0/1.5及dual。
+- 保留用户已有文档与未提交方案，不混入阶段提交。
+
+### 2604 进度（2026-09-24）
+
+- `2604-v1`：0.45s 在 source_analysis 整份中止，`page 2 replacement rejected: unsafe binding statistics`（386 ops、2 degraded/2 unbound），未请求模型。与 TRC p22 同类：页级绑定门禁让整份文档中止（方案14 O4）。
+- sonnet RCA（`tmp/paper-iteration/sonnet-bind-rca/report.md`，主控已核对 bind.rs:1225/1952）：两处均为图内单串单码 `TJ`，pdfium 零真实字符（2604：Type3 零墨迹字形；TRC：同位置重复绘制）。对象几何恢复准入按字面 `Tj` 判断，TJ 被挡；2604 op 79888 另因 ToUnicode 含控制字符不可证明（保持拒绝）。
+- 并行两项修复（各一 sonnet writer，Orca 树基于 c31dd9b9）：
+  - A `bind-tj-recovery`：恢复准入改为结构判据（单串单码 Tj/TJ/'/"）。brief `tmp/paper-iteration/sonnet-tj-recovery-brief.md`。
+  - B `bind-degraded-scope`：O4 失败粒度下沉——不可证明操作只让相交段落保留原文，页级结构错误只保留该页。brief `tmp/paper-iteration/sonnet-degraded-scope-brief.md`。
+  - A 已完成并经主控复验：审 diff（bind.rs ±10，证据新增 element_index 且校验按实际下标比对），`cargo test -p syncpdf-pdf` 全绿，TRC p22 真实门禁 `degraded 0 / object_geometry_bound 2 / Ok`；分支提交 `8c4d9a55`，待与 B 一起合入。2604 p2 两 op 因 pdfium 对零墨迹 Type3 对象不给 object_bounds 仍 degraded，靠 B 局部化。
+  - 合并后主控用 fake:cjk 验证再真实 agy 跑 `2604-v2`。
+  - **B 完成并已合入**：主控审 diff（新增 `UnprovenSourceOp`/`PageReliability`、单一接入点 `stages/source_unproven.rs::protect`、`PatchSet` 拒删不可证明字形；无几何的降级仍页级 fail-closed），顺手把重复的 overlap 改用 `Rect::intersects`。分支提交 `0d0a9146`；A、B 以 `--no-ff` 合入 `feat/desktop-develop`（`9d69a468`、`cad015bc`，自动合并无冲突），主树 pdf+pipeline 462 测试全绿、clippy/fmt 通过，release 已重建到 `main-target`。fake:cjk：2604 全 30 页出件，仅 p2 页级保留（5 段 `bind_page_unreliable`，零墨迹 Type3 无对象边界）；TRC p22 操作级，零可译段落受影响，但 TRC 暴露输出侧 `links_check` 254 条（修复前从未跑到校验阶段），待 TRC 轮次定位。
+  - `2604-v2` 真实 agy 完成（303s，exit 1，`engine_incomplete`）：30 页全出件含 dual；112 段排版成功、30 段回退、p2 页级 6 段保留、p29 coverage_gap 3.4%。回退分类：`atom_source_unplaced` 12、`link_target_unplaced` 12（p25 含 Table/Figure 内部链接的正文整段回退，肉眼可见）、`typeset_overflow` 4、`protected_literal_count` 校验 2（翻译侧，不修）。atom/link 两类 24 段待 sonnet 只读 RCA（brief `tmp/paper-iteration/sonnet-atom-link-rca-brief.md`，T1 完成后派，控制并发≤2）。
+- **已恢复（2026-09-25，用户确认额度重置）**：B 以新 sonnet 会话续做（brief 末尾追加"续做说明"），字体差距分析重新派发，两者并行。
+- 历史·暂停（2026-09-24 20:54）：sonnet 触发 5 小时用量上限（429，重置于 2026-09-25 01:30:45），按用户规则暂停，不换模型。B 中途停止：工作树 `bind-degraded-scope` 留有未完成改动（7 改 + 新增 `source_unproven.rs`、`tests/repair_bind_degraded.rs`），快照 `tmp/paper-iteration/sonnet-degraded-scope/partial-ratelimit.diff`，未验收、未测完（停在 `repair_partial_advance` 因缺 `SYNCPDF_FONTS` 环境变量失败，非 diff 问题）。字体差距分析未产出报告。恢复时：B 以新 sonnet 会话接续该树（brief 同前，附"先审阅已有未提交改动再续做"），字体分析重新派发；注意 worktree 测试需 `SYNCPDF_FONTS=<主树>/engine/vendor/fonts`。
+- 用户新要求（2026-09-24）：字体样式保留按 hjfy 方式——pdfium/源阶段保留四维 FontTraits 并贯通到译文字体选择；用户认为当前后端不如 hjfy。先 sonnet 只读差距分析（brief `tmp/paper-iteration/sonnet-font-traits-gap-brief.md`，报告 `sonnet-font-traits-gap/report.md`），有决策点先问用户再实施。
+  - 差距报告已产出（会话写完报告后才被 429 截断），主控抽查 typeset.rs:149/289、profile.rs、hjfy font_catalog.c 属实。结论：bold 完好；serif/mono 解析层缺名字回退（TeX 字体 Flags=4）；italic 选字层降级 regular、无 hjfy 合成剪切；mono 链是比例字体 PT Sans；生产恒 Role::Body，标题角色由 `RegionKind::Text` 硬编码近似。DeepSeek v22 三处实证（p8/p23/p29）。
+  - T1 解析层名字回退/家族类别（不依赖决策）已派 sonnet，树 `font-traits-parse`，brief `tmp/paper-iteration/sonnet-font-traits-parse-brief.md`；单独合入前须等 T2 的 mono 处理，避免代码块被路由到 PT Sans。
+  - 用户决策（2026-09-24）：① CJK 斜体按 hjfy 合成剪切（约10°，出对比图后定；拉丁优先真斜体字面）；② 引入 OFL 等宽拉丁字体（JetBrains Mono/DejaVu Sans Mono 类），CJK 回退黑体；③ 标题按 hjfy 角色默认：正文宋体、doc/paragraph title 黑体，显式角色替换 `RegionKind::Text` 硬编码。
+  - T2 拆分：T2a 变体槽 + 合成剪切斜体（typeset→写回）；T2b 角色接线 + 等宽字体。为控制 sonnet 用量，B 完成后再派 T2a。
+  - T2a 已派 sonnet（树 `font-variant-shear`，基于 `cad015bc`，brief `tmp/paper-iteration/sonnet-font-variant-shear-brief.md`）。T2b 与 T2a 同改 profile/typeset，须在 T2a 合入后再派。
+- **暂停（2026-09-24 21:47，第三次 429，重置于 2026-09-25 02:12:08）**：按用户规则暂停，不换模型。
+  - T2a 刚读完资料即中止，树 `font-variant-shear` 无改动 → 恢复时以同一 brief 重新派发。
+  - T1 在跑下游 pipeline 测试时同额度耗尽（红/绿日志已有：`sonnet-font-traits-parse/{red,green}-tests.log`，before-*.txt 已有，after 未产出）；未提交改动快照 `sonnet-font-traits-parse/partial-ratelimit.diff` + `font_traits.rs`/`font_traits_dump.rs` 副本 → 恢复时新 sonnet 会话先审阅已有改动再续做（after 对比、下游测试、clippy/fmt、回报）。
+  - 恢复顺序：T1 续做 + atom/link RCA 并行 → T1 完成后派 T2a → T2a 合入后 T2b。
+  - **已恢复（2026-09-25，用户确认额度重置）**：T1 续做（brief 末尾追加续做说明）与 atom/link RCA 已并行派出。
+  - T1 完成：主控审 diff（新模块 `syncpdf-pdf/src/font_traits.rs`，Flags→度量→名字三层融合，名字只补全；家族表分 hjfy 证据/通用补充），pdf+pipeline 467 测试全绿、clippy/fmt 通过；三篇 before/after 无可疑误判（Palladio/CM/Times/CharisSIL→serif，LMMono/Courier/Inconsolata→mono，DejaVuSans/Arial 保持非 mono/非 serif）。分支提交 `d56d0adc`，**暂不合入主树**（等 T2b 等宽链）。T2a 已重新派出（同一 brief，树 `font-variant-shear` 基于 `cad015bc`）。
+  - atom/link RCA 完成（报告 `tmp/paper-iteration/sonnet-atom-link-rca/report.md`，主控核对 link_text.rs:263-289 与 contextual 属实）：24/24 同一引擎侧类别——链接 Rect 覆盖"Table 15/Figure 6"整串，类别词被正常翻译后整串字面消失，裸链接重定位 candidates=0 整段回退；翻译侧 0。atom_source_unplaced 为 run.rs 误标（实际坏在链接侧）。修复已派 sonnet（树 `link-label-relocate` 基于 `cad015bc`，brief `tmp/paper-iteration/sonnet-link-label-relocate-brief.md`）：锚点身份=类别+编号，按编号+类别语境重定位，保留 fail-closed 选择规则。
+- **用户手动停止（2026-09-25）**：T2a 与链接重定位两个 sonnet 均被用户停止，原因未说明，暂不重派，等用户指示。**用户已续额度并要求继续（2026-09-25）**：T2a 续做（brief 追加续做说明）与链接重定位（树无改动，原 brief）重新派出。
+- T2a 完成并合入：主控审 diff（`FontVariant`/`VariantFace`/`VariantSlots`、`resolve_variant` 以 `LoadedFont::italic` 证实真斜体面，`PlacedGlyph.shear_x` → 写回 `Tm` c 分量，正体字节不变），workspace 868 测试全绿、clippy/fmt 通过；DeepSeek p8/p23 裁图可见 CJK 斜体右倾、粗体保持、拉丁用 Inter/PTSerif 真斜体面。分支 `76b773f5`，合入 `127c46be`。剪切角 10° 待用户看图定（常量 `SYNTHETIC_ITALIC_SHEAR_DEGREES`，裁图 `tmp/paper-iteration/sonnet-font-variant-shear/p8-title-bolditalic-*.png`、`p23-terms-italic-*.png`）。
+- 链接重定位首轮交付被主控退回：①分解出的编号候选经"仅数量相等"兜底可无类别语境被选中（违反反例要求，理由是 fake:cjk）②同尾跨标签按阅读顺序配对属猜测 ③§符号路径仅 fake 需要（YAGNI）。已 SendMessage 让原 sonnet 会话按此修改；验收以真实译文重放 24/24 为准。
+- T2b 已派 sonnet：树 `font-role-mono`（基于 `127c46be` 并已由主控合入 T1 `d56d0adc` → `4554bfb2`），brief `tmp/paper-iteration/sonnet-font-role-mono-brief.md`；等宽字体包放主树 `engine/vendor/fonts/`（不入 git），须记录来源/许可/校验和。T1 随 T2b 一起合入主树。T2a 树 `font-variant-shear` 有未完成改动（ir.rs/writer.rs/layout.rs/shaper.rs），快照 `sonnet-font-variant-shear/partial-stopped.diff`；链接树 `link-label-relocate` 快照 `sonnet-link-label-relocate/partial-stopped.diff`。
+- 09-24 恢复：T2b 首次被 429 中断（树无改动），已续派同一会话。链接修复二轮交付（删宽松兜底/同尾配对/§ 路径，strict 分解，真实重放 24/24）；主控三审退回：`follows_category_slot` 要求类别词与编号间有空格，会拒真实常见的「表15」，且与 strict `contextual` 重复；`foreign_category_before` 冗余；补无空格与同号跨类别正例。
+- 链接修复三轮通过：删 `follows_category_slot`/`foreign_category_before`，补「表15」无空格与同号跨类别换序正例；真实重放 24/24。分支 `221df2c6` 合入主树 `89b08fe2`，主树 pipeline 296 测试全绿。2604 v3 真实跑等 T2b 合入后一次进行（复用 2604-v2 缓存视情况）。
+- 09-24 用户偏好：小修主控直接做，只有较大任务才派 sonnet；委派策略（验收可被正确实现满足、真实译文重放、精简必读、单任务窄、克隆 target 免冷编译）已固化到 `docs/guide/delegation.md`（`c6d83a0c`）。
+- 09-24 11:45 PDT T2b 第二次 429（重置 2026-09-25 03:42 UTC+8 ≈ 09-24 12:42 PDT），按规则暂停。已完成：JetBrains Mono 四面 + OFL + resources.json 放主树 `engine/vendor/fonts/mono/`；代码零改动（会话一直在探索）。恢复时按新委派策略收窄：直接实现，只跑 DeepSeek p8/p29，2604 回归由主控做。
+- 09-24 12:30 用户误删 T2b 工作树，旧会话改动丢失。重建：`font-role-mono` 改分支 `zcyisiee/font-role-mono-2`（含 T1+链接修复），target 由主树 `cp -cR` 克隆（93s，CoW），新会话按精简 brief `tmp/paper-iteration/sonnet-font-role-mono-2-brief.md` 派出。同时主控重编主树 release（`c6d83a0c`）并启动 TRC 真实翻译 `trc-v2`（`trc-v2-run.sh`）。视觉排版校验可派 haiku（sonnet 无视觉）。
+- TRC v2 实跑（`c6d83a0c`，500s）：输出校验失败 `links_check` 254 条——根因 `syncpdf-pdf/src/links.rs::named_dest_exists` 只看名字树根节点平铺 `/Names`，不走 `/Kids`（TRC 302 名分 10 个子节点）也不认 PDF 1.1 catalog `/Dests`；主控直接修复+4 测试，提交 `98cb5c51`。另发现 p2 等正文被切成逐行段落并夹 1pt 高碎片段、整行源文被擦（`translate_empty` 89 段集中 p1–3/p23–24，截图 `trc-v2/audit/p2-{src,tr}.png`），派 sonnet RCA+修复（树 `trc-line-split`，brief `sonnet-trc-line-split-brief.md`）。其余：typeset_overflow 38、link_target_unplaced 17、protected_source_overlap 12、coverage_gap p1/p21。
+- TRC 逐行碎裂根因：`bind.rs::bind_glyphs` 取 pdfium `unscaled_font_size`（Tf 原值），违反 `Glyph.size` 含 Tm/CTM 缩放的契约；TRC 正文 `7.97 cm` + `Tf 1` → 全部 1pt → 段落逐行、1pt 碎段。修复改取 scaled `font_size`，advance/Tc/Tw 同比折算（擦除补偿比值不变）。主控审 diff、workspace 891 测试全绿、看图 p2 正文多行段正常；提交 `a5a7dcfd`，合入 `3c1b78e4`。随后启动 `trc-v3`（复用 v2 翻译缓存）。
+- TRC v3（414s）：typeset 193、fallback 20（链接 14 + 译侧 invalid_markup 6）；overflow 25 全被 refinement 救回。`--cache-only --cache-dir` 回放 12s 复现、零模型调用。委派：`sonnet-trc-links-brief.md`（`A1` 附录编号尾、引文链接标签粒度，worktree `trc-links`）；排队 `sonnet-trc-inline-formula-brief.md`（p9/p14 叠放上下标行内公式 protected_source_overlap + 高公式行拆段）。已启动 ALNS v1 实跑。
+- ALNS v1（197s，`alns-v1/`）：typeset 141、fallback 35；link_target_unplaced 34（作者-年份引文链接为主，已作为第二形态补给 trc-links 代理）；links_check 9 为源 PDF 自身悬空命名目标 `s0120`→主控修 `links_check` 只报输出造成的回归（`e8ac8ade`）；P03-030 protected_source_overlap 同行内上标公式类（补入 formula brief）；p3 Algorithm 2 标题未被 layout 覆盖（coverage_gap，模型漏检，暂不修）；CJK 两端对齐只在拉丁空格处拉伸（"Webster    and"），待 T2b 合入后另派 typeset 任务。
+- T2b 合入（`bdd64487`→merge `7d3e3ff6`）：正文宋体、Title/ParagraphTitle 黑体、等宽 JetBrains Mono（CJK 回退黑体）；DeepSeek p8/p29 主控目检通过。已派 `sonnet-trc-inline-formula-brief.md`（worktree `trc-inline-formula`）。
+- VNS v1（226s，`vns-v1/`，引擎 e8ac8ade）：typeset 165、fallback 5（link_target_unplaced 4、P05-025 protected_source_overlap 同公式类）；p3 coverage_gap；Algorithm 标题保留英文。
+- CJK 两端对齐根因：断行用空格 stretch `4w` ≈ 字距 `0.05em` 的 20 倍，放置时 slack 被空格吞掉。修复 `e79d399b`：含 CJK 字距的行把 slack 均分到空格与字距（断行不变），无 CJK 字距行不变；VNS p5 回放目检 OK（`justify-check/`）。
+
+## 2026-09-24 接管：编译侧去过度开发（历史方案，执行优先级以上节为准）
+
+- 用户把主导权交给新主控，指出 Astra 存在过度开发和不说人话的问题。本轮要求：找出过度开发的地方并制定修复方案；只改编译侧，翻译侧/模型问题不在范围内；pipeline 要有通用性，不能靠层层严格限制只翻得了少数文本；优化断行；修复数学字形回退和行内公式两侧的大空格。
+- 方案已写成 [14-编译侧去过度开发与通用化方案](14-编译侧去过度开发与通用化方案.md)，**尚未实施**。下一位 Agent 按其中 P0→P6 的顺序执行，每阶段先写红色测试再修复，并单独提交。
+- 基线：mini.pdf 真实运行 `tmp/explanation/run/`：20 个候选段，写入 18，送译前拦下 1（P01-016），溢出 1（P01-022），另有 1 段跨栏；截图在 `tmp/compile-audit/2026-09-24-mini-baseline/`。TRC 在源绑定门禁处整份中止。
+- 下方"TRC 源绑定只读 RCA、不得放宽安全门禁"的旧计划并入方案 O4：不删未证明字形这条不变，失败范围从整份文档缩小到段落/页。
+- 用户已决定：链接无法定位时保留原区域；脚注不翻译；横向加宽只限本栏。
+- 实测结论：layout 的 inline_formula 已在用（mini 上有 11 个），但 0.4 阈值丢掉了 `p`（0.11）和 `t̂`（0.13）。P2 改为"低分候选 + 字体确认"。OCR 本轮不引入：历史回退原因里没有识字错误，OCR 也提供不了删除原文所需的绑定。
+- 用户要求保留作者/机构保护。现有规则不通用（mini 的作者行 `A. Sample` 被翻成"A. 示例"），P1 改为"首页信息带"位置规则（方案 B5）。
+- 待定：O7 其余模块是否按对照数据决定去留（P6 前确认）；按模板路由的工程化方向（方案 §10，只是提案）。
+
+## 最新用户范围澄清（历史，2026-09-24 接管前）
 
 ### 本次恢复与执行计划
 - 用户要求继续，主控仅负责方向、拆解、亲审与简洁验收命令；RCA/测试/开发委派fresh `devin-swe2`，沿用Orca隔离树。每个验收阶段立即中文commit，无需批准自动进入下一篇。
 - 阶段A已完成：亲审9文件diff后，仅撤出Agent自有未提交的review-feedback/提示候选；完整patch及新增测试移存`tmp/paper-iteration/deferred-translation/`。已恢复HEAD编译源码，用户AGENTS.md/TRANSLATE.md/untitled.md/cache原样保留。主控独立translate148通过/2ignored，Python入口49通过。后续必须重建release，旧二进制含已撤出候选；旧v18–20规则hash不可移植，复排优先v17同规则缓存，源身份变化走真实补译，不伪造hash。
 - 阶段B已完成并提交825bef82：冒号followup run3c247166虽在硬限超时，但资产完整且进程已退出；主控亲审后独立验证、整合并真实v22验收（详见下方）。完整超时diff/status及脚本日志保留，不resume旧会话。
 - **阶段C已完成：DeepSeek v22编译侧验收通过**。主控独立复跑修正坐标后的链接自测/整篇审计，49目录翻译+9空白差异+2墨迹全覆盖，两个括号solid/faint/overhang均0；未改产品。51页/13张联系图全部目视，另放大6/9/14/20/48/50页及dual第29页，未见明显裁切/叠字/公式破损。manifest的PDF SHA256、页1–51恰好各一次及全部图片尺寸独立核验通过。源锚定留白、紧凑列表间距及纯模型措辞不作额外优化；不声称全篇逐字语义验收。材料已归档主树`tmp/paper-iteration/deepseek-v22-final-visual/`，最终链接证据`link-ink-final-{selftest.log,v22/}`；经验见lessons/pdf-binding-and-render-evidence.md。
-- 最终证据叶子4516b453已complete/停写；下一步立即真实TRC首轮（新目录`tmp/paper-iteration/trc-v1`，agy指定模型，Text宋体、1.0/1.5、dual，无DeepSeek专用词表/旧缓存），然后按失败证据RCA。ALNS/VNS/2604.03136v6尚未开始。以下旧进度仅作历史，不覆盖本节验收结论。
+- 最终证据叶子4516b453已complete/停写；DeepSeek收尾提交c31dd9b9。TRC首轮`tmp/paper-iteration/trc-v1`已实跑，2.273秒在source_analysis失败：`page 22 replacement rejected: unsafe binding statistics`，581 text_ops、566 matched、13 space_collapsed、2 degraded/2 unbound_glyphs。尚未请求模型、未生成PDF（0保存），不是agy断联，不改翻译设置。**当前阻断是源绑定，不得放宽安全门禁**。
+- 新Orca树`../iterate-devin-trc-binding`（c31dd9b9干净基线），私有target=`tmp/paper-iteration/trc-target`已由主树APFS clone且touch本树Rust源码；PDFium/ORT只读用主树绝对路径。先委派fresh Devin只读RCA，允许tmp诊断和独立新诊断测试，不改产品：定位page22实际页码、两次降级/未绑定的OpKey/字符/字形/几何及全篇同类分布，给最小修复和真假回归方案。brief=`tmp/paper-iteration/devin-trc-binding-rca.md`。ALNS/VNS/2604.03136v6尚未开始。以下旧进度仅作历史，不覆盖本节验收结论。
 
 - Goal 模式已关闭。用户本次要求汇报，并明确：**本轮目标是完善编译侧；纯翻译侧问题无需修改。** 不再为漏译主句、跨块语序、倍数措辞或术语漂移开发提示词/人工语义补译功能，也不以这些纯翻译缺陷代替编译问题。
 - 仍须修源解析/公式与正文边界、字形和原子保护、排版、链接及PDF写回；保留所有数字/KEEP/覆盖/碰撞门禁，模型违规只记录，不靠放宽校验求通过。
@@ -193,3 +256,8 @@ cargo build --manifest-path engine/Cargo.toml --release -p syncpdf-cli
 上面仅缓存复排；新真实翻译去掉`--cached-from`。ORT只读库仍在 `../repair-r1-layout/tmp/backend-repair/ortlib`，不能删该树。开发日志 `tmp/backend-repair/inline-{tests,protocol-tests,pytest,clippy,build5,docs}.log`；审计脚本 `inline-audit.py`。
 
 历史：R4–R7从6e61bb19后按逻辑提交。旧 `ccs3764-final` 为154写入/3回退，另40送译前冲突和1覆盖缺口；此前报告误导已纠正。历史样张/失败保留，详见累计验收与issue。不能把旧“3回退”当成整篇仅3段未译。
+- 行内公式合入（`bb8701f2`→merge `d42efbe9`）：公式墨迹裁剪排除空白字形、同行锚点接受非空白正文字形、高行后分段阈值加前行超高量。TRC P14-016/021、P09-018/019（合并）、ALNS P03-030 变可译；源文变化致旧缓存未命中，需实跑验证。VNS P05-025 仍保护：嵌套 Formula 区（P05-026⊂P05-027）+ 未映射 PUA 字形 `\u{e23a}`，另一类，暂记。`agy::tool_calls_fail_immediately…` 并行负载下 5s 超时偶发失败，单跑 3/3 通过，非本改动。
+- 链接修复合入（trc-links 提交→merge）：附录编号尾 `A1/B.2/S3`、标签取链接自身字形原文（保留标点，`decompose` 忽略外围标点——主控补丁）、换行拆开的同目标相邻链接合并。回放 TRC 14→6、ALNS 16→9；剩余：重叠重复注解（P01-006、ALNS P01-007）、脚注矩形盖正文（P17-013/015，bind 层）、"Electronic Appendix"无尾号、译侧全角括号/改写。已启动 TRC v4、ALNS v2 实跑（种子缓存来自 v3/v1）。
+- TRC v4 实跑（77s，`trc-v4/`）：typeset 212、fallback 8（全为 link_target_unplaced）；p9/p14/p25 目检：合并段与行内公式正常、附录链接 A1 就位。ALNS v2（155s）：typeset 151、fallback 26（链接 25 + P08-027 真溢出）；p3 P03-030 公式段已译。注意：`fallback` 事件是中间态，统计按段最终状态。已派 `sonnet-alns-links-brief.md`（worktree `alns-links`，base b08767b7）；2604 v3 实跑中（种子缓存 v2）。
+- 2604 v3 实跑（69s，引擎 b08767b7）：typeset 112→136、fallback 30→6（链接、atom_source_unplaced 全清）。剩余：P06-006/P08-009/010 环绕浮动体的窄栏段被切成窄段+通栏尾两个单元（窄段溢出回退、尾段半句独译）→ 已派 `sonnet-float-wrap-brief.md`（worktree `float-wrap`，RCA 优先）；P10-003 满页无空间、P23-008 图内标题——可接受回退；P17-009 译侧。2602.15763v2 v1 实跑已启动。
+- 2602.15763v2：v1 被 agy `status=ERROR` 中断（非 429），v2（种子缓存，351s，40 页）完成：typeset 308、fallback 18（link 4 + 未救回溢出 14）。溢出多为密排页通栏正文（p2/p23/p24/p31），页面无空余——1.5 行距下 CJK 译文高于源；`FitOptions.line_height_steps` 默认 `[1.0]`（不放宽行距）是既定策略，是否允许溢出时逐级收紧行距待用户决定。另：译侧半角标点（". 标有"）不在范围。
