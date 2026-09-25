@@ -40,8 +40,8 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      // electron-vite 产物为 ESM（package type:module → out/preload/index.mjs）
-      preload: join(__dirname, '../preload/index.mjs'),
+      // sandbox 下 preload 必须是 CJS（见 electron.vite.config.ts）
+      preload: join(__dirname, '../preload/index.cjs'),
       spellcheck: false,
     },
   });

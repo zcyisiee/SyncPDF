@@ -257,6 +257,9 @@ export class Library {
           .run(id, seq, JSON.stringify(record));
         return false;
       }
+      case 'page_ready':
+        // 译文文件已落盘：卡片的 translatedPath 从 null 变为可用
+        return true;
       case 'document_finished':
         this.db
           .prepare('UPDATE docs SET fallbacks = ?, updated_at = ? WHERE id = ?')

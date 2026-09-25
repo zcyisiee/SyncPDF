@@ -1,88 +1,79 @@
 /**
- * 面板（§12.1）：底部 allotment 分栏——问题（issue 列表）/ 输出（引擎日志）。
+ * 圆角面板外框 + 可选的 tab 头。所有区域（左栏 / 编辑区 / 右栏 / 底部面板）共用。
  */
-import { useUiStore } from '../store/uiStore';
-import type { PanelTab } from '../store/uiStore';
-import { IssuesView } from '../views/IssuesView';
-import { OutputView } from '../views/OutputView';
+import type { ReactNode } from 'react';
 
-const TABS: ReadonlyArray<{ id: PanelTab; label: string }> = [
-  { id: 'issues', label: '问题' },
-  { id: 'output', label: '输出' },
-];
+export interface PanelTab<T extends string> {
+  id: T;
+  label: string;
+  badge?: number;
+}
 
-export function Panel(): JSX.Element {
-  const panelTab = useUiStore((state) => state.panelTab);
-  const setPanelTab = useUiStore((state) => state.setPanelTab);
-  const setLayout = useUiStore((state) => state.setLayout);
-
+export function Panel({ children, className }: { children: ReactNode; className?: string }): JSX.Element {
   return (
-    <section
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        minWidth: 0,
-        background: 'var(--vscode-panel-background)',
-        borderTop: '1px solid var(--vscode-panel-border)',
-      }}
-    >
-      <div
-        role="tablist"
-        style={{
-          flex: '0 0 28px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          paddingLeft: 8,
-          fontSize: 11,
-          textTransform: 'uppercase',
-          letterSpacing: 0.5,
-        }}
-      >
-        {TABS.map((tab) => {
-          const active = tab.id === panelTab;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => setPanelTab(tab.id)}
-              style={{
-                border: 'none',
-                background: active ? 'var(--vscode-list-activeSelectionBackground)' : 'transparent',
-                color: active
-                  ? 'var(--vscode-list-activeSelectionForeground)'
-                  : 'inherit',
-                padding: '3px 10px',
-                cursor: 'pointer',
-              }}
-            >
-              {tab.label}
-            </button>
-          );
-        })}
+    <div className="sp-slot">
+      <section className={`sp-panel ${className ?? ''}`}>{children}</section>
+    </div>
+  );
+}
+
+export function PanelTabs<T extends string>({
+  tabs,
+  active,
+  onSelect,
+  actions,
+}: {
+  tabs: PanelTab<T>[];
+  active: T;
+  onSelect: (id: T) => void;
+  actions?: ReactNode;
+}): JSX.Element {
+  return (
+    <header className="sp-panel-header" role="tablist">
+      {tabs.map((tab) => (
         <button
+          key={tab.id}
           type="button"
-          title="关闭面板"
-          aria-label="关闭面板"
-          onClick={() => setLayout({ panelVisible: false })}
-          style={{
-            marginLeft: 'auto',
-            border: 'none',
-            background: 'transparent',
-            color: 'inherit',
-            cursor: 'pointer',
-            padding: '2px 8px',
-          }}
+          role="tab"
+          aria-selected={tab.id === active}
+          className={`sp-tab ${tab.id === active ? 'is-active' : ''}`}
+          onClick={() => onSelect(tab.id)}
         >
-          <span className="codicon codicon-chrome-close" />
+          {tab.label}
+          {tab.badge !== undefined && tab.badge > 0 && <span className="sp-count">{tab.badge}</span>}
         </button>
-      </div>
-      <div style={{ flex: 1, minHeight: 0 }}>
-        {panelTab === 'issues' ? <IssuesView /> : <OutputView />}
-      </div>
-    </section>
+      ))}
+      <span className="sp-spacer" />
+      {actions}
+    </header>
+  );
+}
+
+/** 只有图标的按钮（工具栏 / 标题栏）。 */
+export function IconButton({
+  icon,
+  title,
+  onClick,
+  active = false,
+  disabled = false,
+}: {
+  icon: string;
+  title: string;
+  onClick: () => void;
+  active?: boolean;
+  disabled?: boolean;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className={`sp-icon-button ${active ? 'is-active' : ''}`}
+      title={title}
+      aria-label={title}
+      aria-pressed={active}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      <i className={`codicon codicon-${icon}`} />
+    </button>
   );
 }

@@ -1,5 +1,5 @@
 /**
- * 段落框坐标变换（规约 #6：PDF 用户空间 → 画布像素的换算只在这里做一次）。
+ * 版面 / 段落框坐标变换（PDF 用户空间 → 画布像素的换算只在这里做一次）。
  *
  * pdf.js 6 起 `PageViewport.convertToViewportRectangle` 已移除，因此这里直接用
  * `page.getViewport({ scale }).transform`（6 元仿射矩阵 `[a,b,c,d,e,f]`）做换算：
@@ -11,15 +11,15 @@
  *
  * rotation=0 的普通页里 `d = -scale`，即 **y 轴在这一步被翻转**
  * （PDF 用户空间左下原点、y 向上；画布左上原点、y 向下），
- * 所以 `coord_system === 'pdf_native'` 的框不需要我们再手工翻 y——
+ * 所以 `coord_system === 'pdf_user'` 的框不需要我们再手工翻 y——
  * 交给 transform，旋转页（90/180/270）才能一并正确。
  *
- * `coord_system === 'pdf_topleft'` 的框是"页左上原点、y 向下"，先按 viewBox
+ * `coord_system === 'image_top_left'` 的框是"页左上原点、y 向下"，先按 viewBox
  * 折回用户空间再走同一条 transform 路径。
  *
  * 本模块是纯函数（不 import pdfjs），可在 vitest 里直接喂矩阵做单测。
  */
-import type { Box, CoordSystem } from '@shared/protocol';
+import type { CoordSystem, Rect } from '@shared/protocol';
 
 /** pdf.js 的 6 元仿射矩阵。 */
 export type Matrix = readonly [number, number, number, number, number, number];
@@ -61,51 +61,33 @@ export function applyTransform(x: number, y: number, matrix: Matrix): [number, n
   return [a * x + c * y + e, b * x + d * y + f];
 }
 
-/** 把任意方向的 bbox 归一成 `[minX, minY, maxX, maxY]`。 */
-export function normalizeBox(box: Box): Box {
-  const [x0, y0, x1, y1] = box;
-  return [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)];
-}
-
 /**
- * `pdf_topleft` → `pdf_native`。
+ * `image_top_left` → `pdf_user`。
  * 页左上角在用户空间是 `(viewBox[0], viewBox[3])`，y 向下为正，故
- * `x_native = xMin + x`，`y_native = yMax - y`。
+ * `x_user = xMin + x`，`y_user = yMax - y`。
  */
-export function topLeftToNative(box: Box, viewBox: readonly number[]): Box {
+export function topLeftToUser(rect: Rect, viewBox: readonly number[]): Rect {
   const xMin = viewBox[0] ?? 0;
   const yMax = viewBox[3] ?? 0;
-  const [x0, y0, x1, y1] = box;
-  return [xMin + x0, yMax - y0, xMin + x1, yMax - y1];
-}
-
-/** 框是否可用（4 个有限数）。 */
-export function isValidBox(box: readonly number[] | null | undefined): box is Box {
-  return (
-    Array.isArray(box) &&
-    box.length === 4 &&
-    box.every((value) => typeof value === 'number' && Number.isFinite(value))
-  );
+  return { x0: xMin + rect.x0, y0: yMax - rect.y0, x1: xMin + rect.x1, y1: yMax - rect.y1 };
 }
 
 /**
- * 段落框（协议坐标系）→ 视口矩形（CSS px，左上原点）。
- * 返回的 width/height 恒为非负。
+ * 协议框 → 视口矩形（CSS px，左上原点）。
+ * 返回的 width/height 恒为非负（框方向颠倒也成立）。
  */
-export function boxToViewRect(
-  box: Box,
+export function rectToViewRect(
+  rect: Rect,
   coordSystem: CoordSystem,
   viewport: ViewportLike,
 ): ViewRect {
-  const native = coordSystem === 'pdf_topleft' ? topLeftToNative(box, viewport.viewBox) : box;
+  const user = coordSystem === 'image_top_left' ? topLeftToUser(rect, viewport.viewBox) : rect;
   const matrix = toMatrix(viewport.transform);
-  const [ax, ay] = applyTransform(native[0], native[1], matrix);
-  const [bx, by] = applyTransform(native[2], native[3], matrix);
-  const left = Math.min(ax, bx);
-  const top = Math.min(ay, by);
+  const [ax, ay] = applyTransform(user.x0, user.y0, matrix);
+  const [bx, by] = applyTransform(user.x1, user.y1, matrix);
   return {
-    left,
-    top,
+    left: Math.min(ax, bx),
+    top: Math.min(ay, by),
     width: Math.abs(bx - ax),
     height: Math.abs(by - ay),
   };

@@ -161,8 +161,13 @@ export function PageCanvas({
     };
   }, [visible, page, viewport, renderKey, revision]);
 
-  const cssWidth = viewport?.width ?? Math.max(80, containerWidth - gutter);
-  const cssHeight = viewport?.height ?? cssWidth * 1.414;
+  // 重载期间（换 doc 对象）沿用上次的页面尺寸，避免整栏高度跳变把滚动位置夹走
+  const [lastSize, setLastSize] = useState<{ width: number; height: number } | null>(null);
+  if (viewport !== null && (lastSize?.width !== viewport.width || lastSize.height !== viewport.height)) {
+    setLastSize({ width: viewport.width, height: viewport.height });
+  }
+  const cssWidth = viewport?.width ?? lastSize?.width ?? Math.max(80, containerWidth - gutter);
+  const cssHeight = viewport?.height ?? lastSize?.height ?? cssWidth * 1.414;
 
   return (
     <div

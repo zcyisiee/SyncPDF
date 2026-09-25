@@ -57,7 +57,15 @@ export function usePdfDocument(path: string | null, revision = 0): PdfDocumentHa
         if (!cancelled) setState({ key, path, doc, error: null });
       })
       .catch((error: unknown) => {
-        if (!cancelled) setState({ key, path, doc: null, error: describeError(error) });
+        // 同一路径重载失败（引擎正在改写）时保留上一份可用的 doc
+        if (!cancelled) {
+          setState((prev) => ({
+            key,
+            path,
+            doc: prev.path === path ? prev.doc : null,
+            error: describeError(error),
+          }));
+        }
       });
     return () => {
       cancelled = true;

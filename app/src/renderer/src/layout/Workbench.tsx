@@ -1,81 +1,96 @@
 /**
- * 工作台骨架（M2-05）：标题栏 / 活动栏 / 侧栏 / 编辑器区 / 面板 / 状态栏。
- * allotment 分栏（VSCode 式嵌套 + 持久化），尺寸存 localStorage（uiStore.layout）。
- *
- * 尺寸策略：
- * - 侧栏：allotment `preferredSize`（px）直接绑定 uiStore.layout.sidebarWidth；
- * - 编辑器三栏：defaultSizes 百分比（源 / 译文 / 段落编辑），onDragEnd 写回；
- * - 面板高度：preferredSize px 绑定 uiStore.layout.panelHeight。
- * visible=false 的 Pane 由 allotment 折叠（snap），开关在 uiStore。
+ * 工作台骨架：标题栏 / [左栏 | 编辑区 + 底部面板 | 右栏] / 状态栏。
+ * 分栏用 allotment，拖动结束时把尺寸存进 workbench store（持久化）。
+ * 快捷键：⌘B 左栏、⌘J 底部面板、⌥⌘B 右栏。整个窗口可拖入 PDF。
  */
-import { useCallback } from 'react';
+import { useEffect, useState, type DragEvent } from 'react';
 import { Allotment } from 'allotment';
-import 'allotment/dist/style.css';
-
-const Pane = Allotment.Pane;
-import { TitleBar } from './TitleBar';
-import { Toolbar } from './Toolbar';
-import { ActivityBar } from './ActivityBar';
-import { SideBar } from './SideBar';
+import { useWorkbench } from '@/store/workbench';
+import { addDroppedFiles } from '@/library/actions';
+import { LibraryBar } from '@/library/LibraryBar';
+import { Inspector } from '@/inspector/Inspector';
+import { BottomPanel } from '@/panel/BottomPanel';
 import { EditorArea } from './EditorArea';
-import { Panel } from './Panel';
 import { StatusBar } from './StatusBar';
-import { useUiStore } from '../store/uiStore';
+import { TitleBar } from './TitleBar';
+
+const hasFiles = (event: DragEvent): boolean => event.dataTransfer.types.includes('Files');
 
 export function Workbench(): JSX.Element {
-  const layout = useUiStore((state) => state.layout);
-  const setLayout = useUiStore((state) => state.setLayout);
+  const leftVisible = useWorkbench((s) => s.leftVisible);
+  const rightVisible = useWorkbench((s) => s.rightVisible);
+  const panelVisible = useWorkbench((s) => s.panelVisible);
+  // 只在首次挂载时读取持久化尺寸（allotment 的 defaultSizes 不响应后续变化）
+  const [columnSizes] = useState(() => useWorkbench.getState().columnSizes ?? undefined);
+  const [rowSizes] = useState(() => useWorkbench.getState().rowSizes ?? undefined);
+  const [dragging, setDragging] = useState(0);
 
-  /** 编辑器三栏百分比（source / target / paragraph）。 */
-  const editorSizes = [layout.editorSourceWidth, layout.editorTargetWidth];
-
-  const onEditorSizesChange = useCallback(
-    (sizes: number[]) => {
-      if (sizes.length === 3) {
-        setLayout({ editorSourceWidth: sizes[0], editorTargetWidth: sizes[1] });
-      }
-    },
-    [setLayout],
-  );
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (!event.metaKey || event.shiftKey || event.ctrlKey) return;
+      const state = useWorkbench.getState();
+      if (event.code === 'KeyB' && event.altKey) state.toggleRight();
+      else if (event.code === 'KeyB') state.toggleLeft();
+      else if (event.code === 'KeyJ' && !event.altKey) state.togglePanel();
+      else return;
+      event.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return (
     <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100vh',
-        background: 'var(--vscode-editor-background)',
-        color: 'var(--vscode-editor-foreground)',
+      className="sp-workbench"
+      onDragEnter={(event) => hasFiles(event) && setDragging((n) => n + 1)}
+      onDragLeave={(event) => hasFiles(event) && setDragging((n) => Math.max(0, n - 1))}
+      onDragOver={(event) => {
+        if (!hasFiles(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+      }}
+      onDrop={(event) => {
+        if (!hasFiles(event)) return;
+        event.preventDefault();
+        setDragging(0);
+        void addDroppedFiles(event.dataTransfer.files);
       }}
     >
       <TitleBar />
-      <Toolbar />
-      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        <ActivityBar />
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          <Allotment proportionalLayout={false}>
-            <Pane visible={layout.sidebarVisible} preferredSize={layout.sidebarWidth} minSize={180}>
-              <SideBar />
-            </Pane>
-            <Pane minSize={200}>
-              <Allotment vertical proportionalLayout={false}>
-                <Pane minSize={200}>
-                  <EditorArea sizes={editorSizes} onSizesChange={onEditorSizesChange} />
-                </Pane>
-                <Pane
-                  visible={layout.panelVisible}
-                  preferredSize={layout.panelHeight}
-                  minSize={120}
-                  maxSize={600}
-                >
-                  <Panel />
-                </Pane>
-              </Allotment>
-            </Pane>
-          </Allotment>
-        </div>
-      </div>
+      <main className="sp-main">
+        <Allotment
+          defaultSizes={columnSizes}
+          onDragEnd={(sizes) => useWorkbench.getState().setColumnSizes(sizes)}
+        >
+          <Allotment.Pane minSize={220} preferredSize={280} visible={leftVisible}>
+            <LibraryBar />
+          </Allotment.Pane>
+          <Allotment.Pane minSize={360}>
+            <Allotment
+              vertical
+              defaultSizes={rowSizes}
+              onDragEnd={(sizes) => useWorkbench.getState().setRowSizes(sizes)}
+            >
+              <Allotment.Pane minSize={200}>
+                <EditorArea />
+              </Allotment.Pane>
+              <Allotment.Pane minSize={120} preferredSize={220} visible={panelVisible}>
+                <BottomPanel />
+              </Allotment.Pane>
+            </Allotment>
+          </Allotment.Pane>
+          <Allotment.Pane minSize={260} preferredSize={340} visible={rightVisible}>
+            <Inspector />
+          </Allotment.Pane>
+        </Allotment>
+      </main>
       <StatusBar />
+      {dragging > 0 && (
+        <div className="sp-drop-overlay">
+          <i className="codicon codicon-file-pdf" />
+          松开以加入论文库
+        </div>
+      )}
     </div>
   );
 }
