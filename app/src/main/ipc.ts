@@ -6,7 +6,7 @@
 import { BrowserWindow, Menu, dialog, ipcMain, shell } from 'electron';
 import type { DocEngineEvent, LibraryDoc, MetaSource } from '../shared/library';
 import type { AllowedRoots } from './protocol-handler';
-import type { EngineQueue } from './engine';
+import { requireEdits, type EngineQueue } from './engine';
 import type { Library } from './library';
 import { readAllowedFileBytes } from './file-bytes';
 
@@ -128,6 +128,9 @@ export function registerIpc({ library, queue, roots }: IpcDeps): void {
   });
 
   ipcMain.handle('engine:enqueue', (_e, id: unknown) => queue.enqueue(requireId(id)));
+  ipcMain.handle('engine:edit', (_e, id: unknown, requests: unknown) =>
+    queue.edit(requireId(id), requireEdits(requests)),
+  );
   ipcMain.handle('engine:cancel', (_e, id: unknown) => queue.cancel(requireId(id)));
 
   // 渲染进程读 PDF 字节（pdf.js `getDocument({ data })`）。白名单校验在 file-bytes.ts。

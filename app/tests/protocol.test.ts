@@ -82,8 +82,16 @@ describe('isRequest', () => {
       configureRequest({ provider: 'pi', translator: { kind: 'pi', program: 'pi', model: 'm', thinking: 'low' } }),
       runRequest('d'),
       runRequest('d', { pages: [0, 2], terminology: '/t.json', mode: 'bilingual' }),
-      { type: 'retranslate', doc_id: 'd', paragraph_ids: ['P01-001', 'P02-003'] },
-      { type: 'apply_edit', doc_id: 'd', paragraph_id: 'P01-001', translated_html: '<p>x</p>', base_revision: 3 },
+      { type: 'retranslate', doc_id: 'd', store: '/s.db', paragraph_ids: ['P01-001', 'P02-003'] },
+      { type: 'apply_edit', doc_id: 'd', store: null, paragraph_id: 'P01-001', translated_html: '<p>x</p>', style: {} },
+      {
+        type: 'apply_edit',
+        doc_id: 'd',
+        store: '/s.db',
+        paragraph_id: 'P01-001',
+        translated_html: null,
+        style: { font_scale: 0.9, line_height: 1.4, font_family: 'sans', align: 'justify' },
+      },
       { type: 'export', doc_id: 'd', output: '/o.pdf', mode: 'bilingual' },
       { type: 'cancel' },
     ];
@@ -99,8 +107,12 @@ describe('isRequest', () => {
     expect(isRequest({ ...configureRequest(), provider: 'openai_compatible' })).toBe(false);
     expect(isRequest({ ...configureRequest(), concurrency: 0.5 })).toBe(false);
     expect(isRequest({ ...configureRequest(), translator: { kind: 'agy' } })).toBe(false);
-    expect(isRequest({ type: 'retranslate', doc_id: 'd', paragraph_ids: 'P01-001' })).toBe(false);
-    expect(isRequest({ type: 'apply_edit', doc_id: 'd', paragraph_id: 'p', translated_html: 'x', base_revision: 3 })).toBe(false);
+    expect(isRequest({ type: 'retranslate', doc_id: 'd', store: null, paragraph_ids: 'P01-001' })).toBe(false);
+    const edit = { type: 'apply_edit', doc_id: 'd', store: null, paragraph_id: 'P01-001', translated_html: 'x', style: {} };
+    expect(isRequest({ ...edit, paragraph_id: 'p' })).toBe(false);
+    expect(isRequest({ ...edit, style: { font_family: 'mono' } })).toBe(false);
+    expect(isRequest({ ...edit, style: { allow_extend: true } })).toBe(false);
+    expect(isRequest({ ...edit, style: undefined })).toBe(false);
     expect(isRequest({ type: 'unknown' })).toBe(false);
     expect(isRequest(null)).toBe(false);
   });

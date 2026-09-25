@@ -1,7 +1,14 @@
 /**
  * 论文库的主进程 ↔ 渲染进程共享类型。数据落在 `~/.sp/library.db`（主进程 `library.ts`）。
  */
-import type { EngineEvent, EventOf, LayoutRegion } from './protocol';
+import type {
+  ApplyEditRequest,
+  BlockEditState,
+  EngineEvent,
+  EventOf,
+  LayoutRegion,
+  RetranslateRequest,
+} from './protocol';
 
 /** new = 已加入未翻译；queued/running 在串行队列里；其余为上次运行的结局。 */
 export type DocStatus = 'new' | 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
@@ -48,7 +55,14 @@ export interface DocSnapshot {
   layout: Record<number, LayoutRegion[]>;
   paragraphs: ParagraphRecord[];
   issues: IssueRecord[];
+  /** 最近一次 run 报告的单块覆盖。 */
+  edits: BlockEditState[];
 }
+
+/** 渲染进程提交的单块编辑（doc_id / store 由主进程补上）。 */
+export type BlockEditRequest =
+  | Pick<ApplyEditRequest, 'type' | 'paragraph_id' | 'translated_html' | 'style'>
+  | Pick<RetranslateRequest, 'type' | 'paragraph_ids'>;
 
 /** 主进程推给渲染进程的引擎事件：`docId` 为当前任务（任务外的事件为 null）。 */
 export interface DocEngineEvent {

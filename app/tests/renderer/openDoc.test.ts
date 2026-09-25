@@ -36,6 +36,7 @@ const snapshot: DocSnapshot = {
   layout: { 1: [{ kind: 'figure', inline: false, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } }] },
   paragraphs: [(({ seq: _s, ts: _t, type: _y, ...rest }) => rest)(paragraph('P01-001', '<p>旧</p>'))],
   issues: [],
+  edits: [{ paragraph_id: 'P01-001', manual: true, style: {} }],
 };
 
 describe('reduceOpenDoc', () => {
@@ -62,6 +63,22 @@ describe('mergeSnapshot', () => {
     expect(merged.loading).toBe(false);
     expect(merged.paragraphs['P01-001'].translated_html).toBe('<p>新</p>');
     expect(merged.layout[1]).toHaveLength(1);
+    expect(merged.edits?.['P01-001']?.manual).toBe(true);
+  });
+
+  it('单块覆盖：本次会话的 block_edits 覆盖快照，新一轮 run_started 不清空', () => {
+    let open = reduceOpenDoc(emptyOpenDoc('d'), {
+      seq: 1,
+      ts: 0,
+      type: 'block_edits',
+      edits: [{ paragraph_id: 'P01-002', manual: false, style: { font_scale: 0.9 } }],
+    });
+    open = mergeSnapshot(open, snapshot);
+    expect(Object.keys(open.edits ?? {})).toEqual(['P01-002']);
+    open = reduceOpenDoc(open, runStarted);
+    expect(open.edits?.['P01-002']?.style.font_scale).toBe(0.9);
+    open = reduceOpenDoc(open, { seq: 2, ts: 0, type: 'block_edits', edits: [] });
+    expect(open.edits).toEqual({});
   });
 
   it('加载期间开始了新一轮 run：丢弃过时快照', () => {

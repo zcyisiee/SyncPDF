@@ -52,6 +52,8 @@ export function describeEvent(event: EngineEvent): EventLine {
       return line('layout', 'muted', `识别 ${event.regions.length} 个版面区域`, event.page);
     case 'doc_meta':
       return line('book', 'muted', `标题：${event.title ?? '未识别'}${event.authors === null ? '' : ` · 作者：${event.authors}`}`);
+    case 'block_edits':
+      return line('edit', 'muted', `应用 ${event.edits.length} 处单块编辑`);
     case 'paragraph':
       return {
         icon: 'symbol-text',

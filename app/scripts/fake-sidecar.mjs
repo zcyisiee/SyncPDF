@@ -9,7 +9,8 @@
  *   每页末尾 page_ready → document_finished → run_finished；
  * - `cancel` 取消当前 run（发 `run_finished{ok:false}`），队列继续；
  * - stdin EOF：取消当前 run，排队中的 run 也以 `ok:false` 收尾，然后退出码 0；
- * - retranslate / apply_edit / export：与真引擎一致，回 `error{code:"unsupported_request"}`。
+ * - retranslate / apply_edit：静默接受（真引擎写本篇库，随后的 run 应用；假引擎无库）；
+ * - export：与真引擎一致，回 `error{code:"unsupported_request"}`。
  *
  * 环境变量 `FAKE_SIDECAR_TICK_MS` 控制每段间隔（默认 200ms）。
  */
@@ -171,6 +172,9 @@ function handle(request) {
     case 'run':
       queue.push(request);
       if (current === null && queue.length === 1) void drain();
+      return;
+    case 'retranslate':
+    case 'apply_edit':
       return;
     default:
       emit({

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EngineQueue } from '../src/main/engine';
+import { EngineQueue, requireEdits } from '../src/main/engine';
 import { Library } from '../src/main/library';
 import type { DocEngineEvent } from '../src/shared/library';
 import type { EngineEvent, EngineEventBody, Request } from '../src/shared/protocol';
@@ -123,5 +123,42 @@ describe('EngineQueue', () => {
     queue.enqueue(a);
     await flush();
     expect(library.get(a)?.error).toBeNull();
+  });
+
+  it('编辑：请求补上 doc_id / store，紧贴在该篇下一次 run 之前；正在跑时排在其后', async () => {
+    const a = addDoc('a.pdf');
+    queue.enqueue(a);
+    await flush();
+    queue.edit(a, [{ type: 'apply_edit', paragraph_id: 'P01-001', translated_html: '<p>改</p>', style: {} }]);
+    queue.edit(a, [{ type: 'retranslate', paragraph_ids: ['P01-002'] }]);
+    await flush();
+    expect(runs()).toEqual([a]); // 当前这次不受影响，编辑不插进正在跑的 run
+    expect(library.get(a)?.status).toBe('running');
+
+    queue.handleEvent(ev({ type: 'run_finished', ok: true, elapsed_ms: 1 }));
+    await flush();
+    const store = library.storePath(a);
+    expect(sent.slice(2).map((r) => r.type)).toEqual(['apply_edit', 'retranslate', 'run']);
+    expect(sent[2]).toMatchObject({ doc_id: a, store, paragraph_id: 'P01-001' });
+    expect(sent[3]).toMatchObject({ doc_id: a, store, paragraph_ids: ['P01-002'] });
+
+    queue.handleEvent(ev({ type: 'run_finished', ok: true, elapsed_ms: 1 }));
+    queue.enqueue(a);
+    await flush();
+    expect(sent.slice(5).map((r) => r.type)).toEqual(['run']); // 已发出的编辑不重发
+  });
+});
+
+describe('requireEdits', () => {
+  it('只放行合法编辑并剥掉多余字段', () => {
+    expect(
+      requireEdits([
+        { type: 'apply_edit', paragraph_id: 'P01-001', translated_html: null, style: { align: 'center' }, doc_id: 'x', extra: 1 },
+      ]),
+    ).toEqual([{ type: 'apply_edit', paragraph_id: 'P01-001', translated_html: null, style: { align: 'center' } }]);
+    expect(() => requireEdits([])).toThrow();
+    expect(() => requireEdits([{ type: 'run' }])).toThrow();
+    expect(() => requireEdits([{ type: 'cancel' }])).toThrow();
+    expect(() => requireEdits([{ type: 'retranslate', paragraph_ids: ['bad'] }])).toThrow();
   });
 });

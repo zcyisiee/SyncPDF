@@ -86,18 +86,41 @@ export interface RunRequest {
   store: string | null;
 }
 
+/** 标记待重译：写本篇库，随后的 run 对这些段绕过翻译缓存。 */
 export interface RetranslateRequest {
   type: 'retranslate';
   doc_id: string;
+  store: string | null;
   paragraph_ids: ParagraphId[];
 }
 
+export type FontFamily = 'serif' | 'sans';
+export type BlockAlign = 'left' | 'center' | 'right' | 'justify';
+
+/** 单块排版覆盖；缺省字段沿用整篇设置。 */
+export interface BlockStyle {
+  font_scale?: number;
+  line_height?: number;
+  font_family?: FontFamily;
+  align?: BlockAlign;
+}
+
+/** 一段的覆盖状态：`manual` = 译文为手改。 */
+export interface BlockEditState {
+  paragraph_id: ParagraphId;
+  manual: boolean;
+  style: BlockStyle;
+}
+
+/** 整体替换一段的覆盖（手改译文 + 单块排版），随后的 run 应用。 */
 export interface ApplyEditRequest {
   type: 'apply_edit';
   doc_id: string;
+  store: string | null;
   paragraph_id: ParagraphId;
-  translated_html: string;
-  base_revision: number;
+  /** null = 用模型译文。 */
+  translated_html: string | null;
+  style: BlockStyle;
 }
 
 export interface ExportRequest {
@@ -167,6 +190,8 @@ export type EngineEventBody =
   | { type: 'progress'; stage: Stage; done: number; total: number }
   | { type: 'layout'; page: number; regions: LayoutRegion[] }
   | { type: 'doc_meta'; title: string | null; authors: string | null }
+  /** 本篇生效的单块覆盖（每次 run 整表发一次）。 */
+  | { type: 'block_edits'; edits: BlockEditState[] }
   | {
       type: 'paragraph';
       paragraph_id: ParagraphId;
@@ -237,6 +262,21 @@ const isStatus = (v: unknown): v is ParagraphStatus =>
 const isLayoutRegion = (v: unknown): v is LayoutRegion =>
   isObj(v) && isRegionKind(v.kind) && isBool(v.inline) && isRect(v.bbox);
 
+const BLOCK_STYLE_FIELDS: Record<keyof BlockStyle, (v: unknown) => boolean> = {
+  font_scale: (v) => typeof v === 'number' && Number.isFinite(v),
+  line_height: (v) => typeof v === 'number' && Number.isFinite(v),
+  font_family: (v) => v === 'serif' || v === 'sans',
+  align: (v) => v === 'left' || v === 'center' || v === 'right' || v === 'justify',
+};
+const isBlockStyle = (v: unknown): v is BlockStyle =>
+  isObj(v) &&
+  Object.entries(v).every(([key, value]) => {
+    const guard = (BLOCK_STYLE_FIELDS as Record<string, (v: unknown) => boolean>)[key];
+    return guard !== undefined && (value === undefined || guard(value));
+  });
+const isBlockEditState = (v: unknown): v is BlockEditState =>
+  isObj(v) && isParagraphId(v.paragraph_id) && isBool(v.manual) && isBlockStyle(v.style);
+
 /** 每种事件的字段守卫（除 seq/ts/type）。 */
 const EVENT_FIELDS: Record<EngineEventType, Record<string, (v: unknown) => boolean>> = {
   run_started: {
@@ -250,6 +290,7 @@ const EVENT_FIELDS: Record<EngineEventType, Record<string, (v: unknown) => boole
   progress: { stage: isStage, done: isUint, total: isUint },
   layout: { page: isUint, regions: arrayOf(isLayoutRegion) },
   doc_meta: { title: orNull(isStr), authors: orNull(isStr) },
+  block_edits: { edits: arrayOf(isBlockEditState) },
   paragraph: {
     paragraph_id: isParagraphId,
     page: isUint,
@@ -325,12 +366,13 @@ const REQUEST_FIELDS: Record<Request['type'], Record<string, (v: unknown) => boo
     mode: isMode,
     store: orNull(isStr),
   },
-  retranslate: { doc_id: isStr, paragraph_ids: arrayOf(isParagraphId) },
+  retranslate: { doc_id: isStr, store: orNull(isStr), paragraph_ids: arrayOf(isParagraphId) },
   apply_edit: {
     doc_id: isStr,
+    store: orNull(isStr),
     paragraph_id: isParagraphId,
-    translated_html: isStr,
-    base_revision: isUint,
+    translated_html: orNull(isStr),
+    style: isBlockStyle,
   },
   export: { doc_id: isStr, output: isStr, mode: isMode },
   cancel: {},

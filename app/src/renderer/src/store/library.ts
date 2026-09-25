@@ -9,7 +9,7 @@
  */
 import { create } from 'zustand';
 import type { DocSnapshot, IssueRecord, LibraryDoc, ParagraphRecord } from '@shared/library';
-import type { EngineEvent, LayoutRegion, ParagraphId } from '@shared/protocol';
+import type { BlockEditState, EngineEvent, LayoutRegion, ParagraphId } from '@shared/protocol';
 
 export interface OpenDoc {
   id: string;
@@ -19,6 +19,8 @@ export interface OpenDoc {
   layout: Record<number, LayoutRegion[]>;
   paragraphs: Record<ParagraphId, ParagraphRecord>;
   issues: IssueRecord[];
+  /** 单块覆盖（段 ID → 状态）；null = 快照与本次会话都还没给出。 */
+  edits: Record<ParagraphId, BlockEditState> | null;
   /** 译文 PDF 修订号：引擎每回写一页 +1，译文栏据此重载。 */
   revision: number;
   /** 加载期间收到了新一轮 run_started：快照已过时，丢弃。 */
@@ -36,7 +38,7 @@ const TIMELINE_LIMIT = 5000;
 const LOG_LIMIT = 2000;
 
 export function emptyOpenDoc(id: string): OpenDoc {
-  return { id, loading: true, layout: {}, paragraphs: {}, issues: [], revision: 0, restarted: false };
+  return { id, loading: true, layout: {}, paragraphs: {}, issues: [], edits: null, revision: 0, restarted: false };
 }
 
 /** 引擎事件归约到当前论文。未涉及的事件原样返回同一对象。 */
@@ -46,6 +48,8 @@ export function reduceOpenDoc(open: OpenDoc, event: EngineEvent): OpenDoc {
       return { ...open, layout: {}, paragraphs: {}, issues: [], restarted: open.loading };
     case 'layout':
       return { ...open, layout: { ...open.layout, [event.page]: event.regions } };
+    case 'block_edits':
+      return { ...open, edits: editsById(event.edits) };
     case 'paragraph': {
       const { seq: _seq, ts: _ts, type: _type, ...record } = event;
       return { ...open, paragraphs: { ...open.paragraphs, [event.paragraph_id]: record } };
@@ -62,15 +66,20 @@ export function reduceOpenDoc(open: OpenDoc, event: EngineEvent): OpenDoc {
   }
 }
 
+const editsById = (edits: BlockEditState[]): Record<ParagraphId, BlockEditState> =>
+  Object.fromEntries(edits.map((edit) => [edit.paragraph_id, edit]));
+
 /** 快照到达：快照为底，加载期间已到的事件覆盖其上。 */
 export function mergeSnapshot(open: OpenDoc, snapshot: DocSnapshot): OpenDoc {
-  if (open.restarted) return { ...open, loading: false, restarted: false };
+  const edits = open.edits ?? editsById(snapshot.edits);
+  if (open.restarted) return { ...open, loading: false, restarted: false, edits };
   const paragraphs: Record<ParagraphId, ParagraphRecord> = {};
   for (const p of snapshot.paragraphs) paragraphs[p.paragraph_id] = p;
   const seen = new Set(snapshot.issues.map((issue) => JSON.stringify(issue)));
   return {
     ...open,
     loading: false,
+    edits,
     layout: { ...snapshot.layout, ...open.layout },
     paragraphs: { ...paragraphs, ...open.paragraphs },
     issues: [...snapshot.issues, ...open.issues.filter((issue) => !seen.has(JSON.stringify(issue)))],
@@ -140,8 +149,8 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
           }
           if (s.open !== null && s.open.id === docId) {
             const open = reduceOpenDoc(s.open, event);
+            // 选中保留：同一篇重跑（编辑后）段 ID 不变，块详情待新事件到达后恢复
             if (open !== s.open) patch.open = open;
-            if (event.type === 'run_started') patch.selected = null;
           }
           return patch;
         }),

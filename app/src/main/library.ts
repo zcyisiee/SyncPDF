@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, copyFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { isEngineEvent, type EngineEvent, type LayoutRegion } from '../shared/protocol';
+import { isEngineEvent, type BlockEditState, type EngineEvent, type LayoutRegion } from '../shared/protocol';
 import {
   META_SOURCES,
   type DocSnapshot,
@@ -54,6 +54,10 @@ CREATE TABLE IF NOT EXISTS doc_paragraphs (
   paragraph_id TEXT NOT NULL,
   data TEXT NOT NULL,
   PRIMARY KEY (doc_id, paragraph_id)
+);
+CREATE TABLE IF NOT EXISTS doc_edits (
+  doc_id TEXT PRIMARY KEY,
+  edits TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS doc_issues (
   doc_id TEXT NOT NULL,
@@ -168,7 +172,7 @@ export class Library {
   remove(id: string): void {
     const doc = this.get(id);
     if (doc === null) return;
-    for (const table of ['doc_layout', 'doc_paragraphs', 'doc_issues']) {
+    for (const table of ['doc_layout', 'doc_paragraphs', 'doc_issues', 'doc_edits']) {
       this.db.prepare(`DELETE FROM ${table} WHERE doc_id = ?`).run(id);
     }
     this.db.prepare('DELETE FROM docs WHERE id = ?').run(id);
@@ -283,6 +287,12 @@ export class Library {
         const retracted = this.retractLayoutMeta(id, event);
         return this.updateMeta(id, { title: event.title, authors: event.authors }, 'layout') || retracted;
       }
+      case 'block_edits':
+        // 引擎本篇库是真源，这里只缓存最近一次 run 报告的整表
+        this.db
+          .prepare('INSERT OR REPLACE INTO doc_edits (doc_id, edits) VALUES (?, ?)')
+          .run(id, JSON.stringify(event.edits));
+        return false;
       case 'paragraph': {
         const { seq: _seq, ts: _ts, type: _type, ...record } = event;
         this.db
@@ -349,7 +359,11 @@ export class Library {
         .prepare('SELECT data FROM doc_issues WHERE doc_id = ? ORDER BY seq')
         .all(id) as unknown as Array<{ data: string }>
     ).map((row) => JSON.parse(row.data) as IssueRecord);
-    return { layout, paragraphs, issues };
+    const editsRow = this.db.prepare('SELECT edits FROM doc_edits WHERE doc_id = ?').get(id) as
+      | { edits: string }
+      | undefined;
+    const edits = editsRow === undefined ? [] : (JSON.parse(editsRow.edits) as BlockEditState[]);
+    return { layout, paragraphs, issues, edits };
   }
 
   private toDoc(row: DocRow): LibraryDoc {

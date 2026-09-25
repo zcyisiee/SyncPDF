@@ -99,8 +99,12 @@ describe('fake-sidecar', () => {
     expect(result.events.at(-1)).toMatchObject({ ok: false });
   });
 
-  it('尚未实现的请求回 unsupported_request，不影响会话', async () => {
-    const result = await session([{ type: 'retranslate', doc_id: 'd', paragraph_ids: ['P01-001'] }]);
+  it('编辑请求静默接受；尚未实现的请求回 unsupported_request，不影响会话', async () => {
+    const result = await session([
+      { type: 'retranslate', doc_id: 'd', store: null, paragraph_ids: ['P01-001'] },
+      { type: 'apply_edit', doc_id: 'd', store: null, paragraph_id: 'P01-001', translated_html: null, style: {} },
+      { type: 'export', doc_id: 'd', output: '/o.pdf', mode: 'full' },
+    ]);
     expect(result.code).toBe(0);
     expect(result.events).toMatchObject([{ type: 'error', fatal: false, code: 'unsupported_request' }]);
   });

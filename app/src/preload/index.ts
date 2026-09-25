@@ -3,7 +3,7 @@
  * 推送（engine:event / library:changed / library:removed / engine:log）用 `on*` 订阅，返回取消函数。
  */
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import type { DocEngineEvent, DocSnapshot, LibraryDoc } from '../shared/library';
+import type { BlockEditRequest, DocEngineEvent, DocSnapshot, LibraryDoc } from '../shared/library';
 
 function subscribe<T>(channel: string, listener: (payload: T) => void): () => void {
   const handler = (_event: Electron.IpcRendererEvent, payload: T): void => listener(payload);
@@ -37,6 +37,9 @@ const api = {
   engine: {
     enqueue: (id: string): Promise<void> => ipcRenderer.invoke('engine:enqueue', id),
     cancel: (id: string): Promise<void> => ipcRenderer.invoke('engine:cancel', id),
+    /** 保存单块编辑并排一次走缓存的重跑。 */
+    edit: (id: string, requests: BlockEditRequest[]): Promise<void> =>
+      ipcRenderer.invoke('engine:edit', id, requests),
     onEvent: (listener: (event: DocEngineEvent) => void) => subscribe('engine:event', listener),
     onLog: (listener: (line: string) => void) => subscribe('engine:log', listener),
   },

@@ -1,5 +1,5 @@
 /**
- * 右栏检查器：块详情（选中段落的原文 / 译文，只读）与论文信息。
+ * 右栏检查器：块详情（原文、译文编辑与单块排版）与论文信息。
  */
 import { useState } from 'react';
 import type { LibraryDoc } from '@shared/library';
@@ -8,6 +8,7 @@ import { useWorkbench, type InspectorTab } from '@/store/workbench';
 import { IconButton, Panel, PanelHeader, type PanelView } from '@/layout/Panel';
 import { REGION_STYLE } from '@/pdf/regionKinds';
 import { StatusBadge } from '@/library/StatusBadge';
+import { BlockEditor } from './BlockEditor';
 
 const VIEWS: PanelView<InspectorTab>[] = [
   { id: 'block', title: '块详情', icon: 'inspect' },
@@ -50,6 +51,8 @@ export function Inspector(): JSX.Element {
 function BlockDetails(): JSX.Element {
   const selected = useLibrary((s) => s.selected);
   const paragraph = useLibrary((s) => (s.selected === null ? undefined : s.open?.paragraphs[s.selected]));
+  const edit = useLibrary((s) => (s.selected === null ? undefined : s.open?.edits?.[s.selected]));
+  const docId = useLibrary((s) => s.openId);
   if (selected === null || paragraph === undefined) {
     return <p className="sp-hint">在 PDF 上点击一个块查看原文与译文。</p>;
   }
@@ -67,19 +70,16 @@ function BlockDetails(): JSX.Element {
       </div>
       <h3>原文</h3>
       <p className="sp-text sp-selectable">{paragraph.source_text}</p>
-      <h3>译文</h3>
-      {paragraph.translated_html === null ? (
-        <p className="sp-hint">暂无译文</p>
-      ) : (
-        <p className="sp-text sp-selectable">{htmlToText(paragraph.translated_html)}</p>
-      )}
+      <BlockEditor
+        key={`${paragraph.paragraph_id}\n${paragraph.translated_html ?? ''}\n${JSON.stringify(edit ?? null)}`}
+        paragraph={paragraph}
+        edit={edit}
+        onSubmit={(requests) => {
+          if (docId !== null) void window.syncpdf.engine.edit(docId, requests);
+        }}
+      />
     </div>
   );
-}
-
-/** 译文 HTML → 纯文本（只读展示；编辑器在 M3）。 */
-export function htmlToText(html: string): string {
-  return new DOMParser().parseFromString(html, 'text/html').body.textContent ?? '';
 }
 
 function DocActions({ doc }: { doc: LibraryDoc }): JSX.Element {

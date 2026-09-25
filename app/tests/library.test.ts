@@ -92,6 +92,8 @@ describe('Library.ingest / snapshot', () => {
     library.ingest(id, ev({ ...paragraph, status: 'typeset', translated_html: '<p>你好</p>' }));
     library.ingest(id, ev({ type: 'issue', severity: 'warning', code: 'fallback', paragraph_id: 'P01-001', page: 1, message: 'm' }));
     library.ingest(id, ev({ type: 'progress', stage: 'translating', done: 1, total: 4 }));
+    const edits = [{ paragraph_id: 'P01-001', manual: true, style: { font_family: 'sans' as const } }];
+    library.ingest(id, ev({ type: 'block_edits', edits }));
     expect(library.get(id)).toMatchObject({ pages: 3, progress: 0.25, title: 'Real Title', status: 'running' });
     library.ingest(id, ev({ type: 'document_finished', output: 'o', stats: { fonts: 1, expansion_ratio: 1, fallbacks: 2 } }));
     library.ingest(id, ev({ type: 'run_finished', ok: true, elapsed_ms: 1234 }));
@@ -102,15 +104,16 @@ describe('Library.ingest / snapshot', () => {
     expect(snapshot.paragraphs).toHaveLength(1);
     expect(snapshot.paragraphs[0]).toMatchObject({ status: 'typeset', translated_html: '<p>你好</p>' });
     expect(snapshot.issues).toMatchObject([{ code: 'fallback' }]);
+    expect(snapshot.edits).toEqual(edits);
 
     // 旧版引擎缓存的段落记录缺 source_bbox：快照丢弃，不交给渲染端
     const { source_bbox: _box, ...legacy } = paragraph;
     library.ingest(id, ev({ ...legacy, paragraph_id: 'P01-002' } as never));
     expect(library.snapshot(id).paragraphs.map((p) => p.paragraph_id)).toEqual(['P01-001']);
 
-    // 下一轮 run_started 清空上一轮数据
+    // 下一轮 run_started 清空上一轮数据；单块覆盖等新一轮 block_edits 整表替换
     library.ingest(id, ev({ type: 'run_started', protocol_version: 1, engine_version: 'x', doc_id: id, pages: 3 }));
-    expect(library.snapshot(id)).toEqual({ layout: {}, paragraphs: [], issues: [] });
+    expect(library.snapshot(id)).toEqual({ layout: {}, paragraphs: [], issues: [], edits });
   });
 
   it('run_finished ok:false：用户已取消记 cancelled，否则记 failed 并保留致命错误', () => {

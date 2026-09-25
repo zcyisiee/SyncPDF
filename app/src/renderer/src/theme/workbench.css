@@ -712,6 +712,81 @@
   white-space: pre-wrap;
 }
 
+.sp-block-editor-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 16px 0 6px;
+}
+.sp-block .sp-block-editor-head h3 {
+  margin: 0;
+}
+
+.sp-translation-editor {
+  min-height: 3.2em;
+  user-select: text;
+  cursor: text;
+}
+.sp-translation-editor:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  border-color: var(--vscode-focusBorder);
+}
+
+/* 原文样式段：浅底，可编辑 */
+.sp-styled {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--vscode-badge-background) 10%, transparent);
+}
+
+/* 受保护原子：不可改写的胶囊 */
+.sp-capsule {
+  display: inline-block;
+  margin: 0 2px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--vscode-badge-background) 22%, transparent);
+  color: var(--vscode-badge-background);
+  font: 600 10px/16px var(--vscode-editor-font-family, ui-monospace, monospace);
+  vertical-align: 1px;
+  user-select: all;
+  cursor: grab;
+}
+.sp-capsule::before {
+  content: 'ƒ ';
+  opacity: 0.7;
+}
+
+.sp-style-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 10px;
+}
+.sp-style-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.sp-style-grid label > span {
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+.sp-style-grid input,
+.sp-style-grid select {
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 5px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  font: inherit;
+}
+.sp-style-grid input:focus,
+.sp-style-grid select:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+  border-color: var(--vscode-focusBorder);
+}
+
 .sp-para-status {
   font-size: 11px;
   color: var(--vscode-descriptionForeground);

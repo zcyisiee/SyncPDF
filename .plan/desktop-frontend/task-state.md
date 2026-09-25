@@ -19,7 +19,8 @@
 - [x] M1 前端：外壳+论文库+PDF/bbox（575f32e4）；真实验收修复 29164222 / 77e1794b / edeb4165：两篇 agy 真实翻译均完成（StoryScope 94.5s·12 段回退，SoL-Pi 15 页），截图 `tmp/desktop-frontend/real-*.png`
 - [x] M2：事件流/问题/日志、块详情只读、串行队列（M1 已含）；阶段缓存按论文落 `~/.sp/docs/<id>/store.db`（215c2575，run 请求新增可选 `store`）
 - [x] 用户反馈修复：bbox 按侧、按段（paragraph 事件新增 `source_bbox`；原文侧用源框，译文侧用译文行框并集，行内公式只画原文侧）；两端对齐判定容忍首行缩进、末行短行与字符突出（容差 max(1pt, 0.35em)），摘要等非 Text 段落恢复 Knuth 两端对齐。StoryScope 截图 `tmp/desktop-frontend/fix-2*.png`
-- [ ] M3 编辑/重译/单块覆盖
+- [x] 用户反馈 UI 打磨：Claude Cream token 逐项对齐；面板头改 VSCode 式图标视图排 + 标题行图标操作（无下划线、无文字按钮）；卡片常驻圆角边框；触控板双指缩放（ctrl+wheel，光标锚点）；app 图标 `app/build/icon.{svg,png}`。截图 `tmp/desktop-frontend/ui-*.png`、`pinch-in.png`
+- [x] M3 编辑/重译/单块覆盖：引擎 c2e8d322（apply_edit/retranslate 写本篇 `block_edits`，随后缓存 run 应用；新事件 `block_edits`）；前端块编辑器（胶囊、恢复/重译/应用、单块字号/行距/字体/对齐）。StoryScope P05-004 实测手改+0.85 字号→缓存重跑 8.6s→恢复保留字号，截图 `tmp/m3-ui/`。取舍：去掉 base_revision（单窗口+串行队列无冲突）、allow_extend（refinement 已自动扩展）；版面模型懒加载推迟
 - [ ] M4 设置页+HTTP translator+user_instructions
 - [ ] M5 整篇排版+存储管理+文档
 
@@ -34,10 +35,13 @@
 - 引擎会话长驻：重编 release 后必须重启 app，否则仍跑旧二进制。
 - `syncpdf-cli inspect --input <pdf> [--page N]` 可直接看每段 kind/align/缩进，排查排版判定先用它。
 - 旧引擎缓存的段落记录（缺新字段）在 `snapshot` 按协议守卫丢弃，需重新翻译补齐。
+- 界面偏好：按钮一律 codicon 图标（VSCode action-label：16px 图标 / 22px 框 / 圆角悬停底色），选中态用圆角底色不用下划线；配色以 claude-cream 主题 JSON 为准。VSCode 参考 CSS 在 `tmp/vscode-ref/`。
+- CDP 模拟 pinch：`tmp/desktop-frontend/pinch.mjs`（mouseWheel + modifiers=2）。
 - 流水线大段同步计算不让出执行权：会话的取消只能由 stdin 读线程直接触发令牌。
 
 ## 当前问题 / 下一步
 
-- 下一步 M3：引擎 `apply_edit` / `retranslate`（会话目前对二者回 unsupported_request）+ 单块覆盖；前端块详情编辑。
+- 下一步 M4：设置页 + OpenAI 兼容 HTTP translator + `user_instructions`（计入缓存键）。
 - 待用户知悉（不在本任务修）：StoryScope 曾因 agy `incomplete response (status=ERROR)` 460s 失败（重跑成功）；bind 诊断 "form depth limit" 单篇 12,944 条，属后端 bind-degraded 工作流，已汇总进问题、明细进引擎日志。
+- 已知：编辑后重跑完成时译文页会短暂只见框、画布稍后补齐（重渲染延迟，非重载缺陷）。
 - 已知：页面首批渲染要等字体加载数秒，之后跳页 ~100ms。
