@@ -125,6 +125,68 @@ ps eww "$(pgrep -f 'bdt serve')" | tr ' ' '\n' | grep -c MINERU_API_TOKEN   # 0 
 
 `bdt serve --root <目录> --migrate` 会先导入旧 workdir 再启动服务；`--cleanup` 会先清理过期可丢弃文件再启动服务，都不是执行后立即退出的独立管理命令。清理范围见 [管线与数据](../reference/pipeline.md)。
 
+<a id="云端版"></a>
+
+## 云端版
+
+`bdt cloud` 与工作台是两套服务，数据根默认 `~/.bdt-cloud`，接口见 [云端版接口](../reference/cloud-api.md)。
+
+```bash
+bdt cloud invite --name 张三 --quota 5          # 打印 {"ok":true,"data":{"code":"YJ-…",…}}
+bdt cloud serve --port 8790                      # 只有 /api；引擎默认仓库内 engine/target/release/syncpdf-cli
+# 本地开发：前端 dev server 把 /api 代理到 8790
+(cd cloud-web && pnpm install && pnpm dev)
+```
+
+服务进程的环境会传给引擎：需要引擎运行库路径（`LD_LIBRARY_PATH`、`PDFIUM_DYNAMIC_LIB_PATH` 等，见 `engine/vendor/README.md`；vendor 不入库，按 `engine/vendor/sync.sh` 在目标机器准备 fonts/models/pdfium）和 `pi` 通道的 `DEEPSEEK_API_KEY`。
+
+前端验收：`cd cloud-web && pnpm typecheck && pnpm build && pnpm e2e`。e2e 启动真实 `bdt cloud serve` 和假引擎 `e2e/fake-engine.py`，不调用模型。`cloud-web/pnpm-workspace.yaml` 让它独立于仓库其它 pnpm 包安装。
+
+### 部署（zcy：106.55.34.117）
+
+当前线上：`http://106.55.34.117:1515/`。nginx 在 80 上托管着其它站点（`default_server`），云端版只占 1515，不改动已有站点。
+
+| 组成 | 位置 |
+|---|---|
+| 代码 | `~/bdt-cloud/repo`：`git archive` 导出的受控副本（非 git 检出）；`.venv`、`engine/target`、`engine/vendor` 只在服务器上 |
+| 数据 | `~/.bdt-cloud`（`app.db`、sources、translations、preview、dual） |
+| 前端 | `cloud-web/dist` → `/var/www/synctranslate` |
+| 服务 | `/etc/systemd/system/bdt-cloud.service`，监听 `127.0.0.1:8790` |
+| 反代 | nginx 站点 `listen 1515`：`/` 静态文件（`try_files $uri /index.html`，`/assets/` 长缓存）；`/api/` → 8790，`client_max_body_size 55m`、`proxy_request_buffering off`、`proxy_buffering off`（SSE）、`proxy_read_timeout 1h`、`X-Real-IP`（登录限速按它计） |
+
+systemd 单元要点：
+
+```ini
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/bdt-cloud/repo
+EnvironmentFile=/home/ubuntu/bdt-cloud/engine.env
+EnvironmentFile=/home/ubuntu/bdt-cloud/secrets.systemd.env
+ExecStart=/home/ubuntu/bdt-cloud/repo/.venv/bin/python -m babeldoc_tools cloud serve --root /home/ubuntu/.bdt-cloud --host 127.0.0.1 --port 8790
+KillMode=mixed
+TimeoutStopSec=20
+Restart=on-failure
+MemoryMax=3G
+```
+
+- **`KillMode=mixed` 不能改回 `control-group`**：control-group 在停服时同时给引擎发 SIGTERM，引擎先死，运行中的翻译会被记为失败。mixed 只给主进程发 SIGTERM；服务最多等 SSE 连接 3 秒，再在 lifespan 里终止引擎，把翻译留作 running，重启后排回队首；主进程退出后，剩余进程统一 SIGKILL。回归测试：`tests/cloud/test_jobs.py::test_service_stop_mid_run_requeues_instead_of_failing`。
+- `EnvironmentFile` 只接受 `KEY=value`，不展开 `$VAR`，也不认 `export `。从 shell 脚本生成时，先去掉 `export ` 并展开成绝对路径。含密钥的文件用 `umask 077` 生成（权限 600），检查时只打印键名：`sed -E 's/=.*/=…/' <file>`。
+
+更新代码（在本机仓库根目录执行）。`--delete` 会删掉服务器上不在副本里的文件，所以必须先检查副本非空，并排除只在服务器上的目录：
+
+```bash
+set -eo pipefail
+ST=tmp/deploy-stage/repo; rm -rf tmp/deploy-stage && mkdir -p $ST
+git archive HEAD babeldoc babeldoc_tools engine scripts skills LICENSE pyproject.toml README.md TRANSLATE.md | tar -x -C $ST
+git describe --tags --always > $ST/REVISION
+test "$(find $ST -type f | wc -l)" -gt 500 && test -f $ST/babeldoc_tools/cloud/app.py
+rsync -a --delete --exclude /.venv --exclude /engine/target --exclude /engine/vendor --exclude /uv.lock $ST/ zcy:bdt-cloud/repo/
+ssh zcy 'sudo systemctl restart bdt-cloud'   # 引擎源码有改动时先在服务器 cargo build --release
+(cd cloud-web && pnpm build) && rsync -a --delete cloud-web/dist/ zcy:/var/www/synctranslate/
+```
+
+引擎二进制的 sha256 是缓存键的一部分：重新构建引擎后，已有译文不会再被命中。
+
 ## 验证与交付
 
 不要把下面的本地 pytest 与真实模型翻译验收混为一谈。功能改动运行相关测试；完整回归必须让测试找到可用的 `bdt`（本机是 conda env `bdt`，检出内是 `.venv`；测试通过 `python -m babeldoc_tools` 调用，不依赖具体路径）：
