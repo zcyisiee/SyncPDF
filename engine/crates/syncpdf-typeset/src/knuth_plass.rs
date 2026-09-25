@@ -321,13 +321,16 @@ pub(crate) fn solve_aligned(
                     continue;
                 }
                 let fitness = fitness_class(ratio);
-                // Ragged final lines also pay for unused width, so a solitary
-                // trailing word cannot beat a balanced paragraph ending.
-                let badness_ratio = if !justify && !point.mandatory || single_word_ragged {
-                    (target - body_width) / target
-                } else {
-                    ratio.abs()
-                };
+                // Ragged nonfinal lines pay for unused width. The final line's
+                // shortfall is the paragraph's natural end: charging it would
+                // rebalance every earlier line short. Stranded letters are
+                // excluded by the caller's break penalties instead.
+                let badness_ratio =
+                    if !justify && !point.mandatory && !is_terminal || single_word_ragged {
+                        (target - body_width) / target
+                    } else {
+                        ratio.abs()
+                    };
                 let badness = 100.0 * badness_ratio.powi(3);
                 let base = 10.0 + badness;
                 let penalty = if point.mandatory {

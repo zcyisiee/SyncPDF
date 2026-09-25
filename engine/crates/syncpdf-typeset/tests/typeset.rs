@@ -104,6 +104,35 @@ fn mixed_script_captions_do_not_choose_unnecessary_short_middle_lines() {
 }
 
 #[test]
+fn ragged_lines_fill_the_measure_instead_of_balancing_toward_the_last_line() {
+    let lines = |lang: Lang, width: f32, text: &str| {
+        let mut s = spec(Rect::new(0.0, 0.0, width, 100.0), 10.0, 1.3, Align::Left);
+        s.lang = lang;
+        let r = typeset_default().layout(pid(), &s, &[text_inline(text)], &Obstacles::default());
+        assert!(!r.paragraph.overflow);
+        r.paragraph
+            .lines
+            .iter()
+            .map(|l| l.glyphs.iter().map(|g| g.text.as_str()).collect::<String>())
+            .collect::<Vec<_>>()
+    };
+    // A shorter final line is the paragraph's natural end, not unused width
+    // worth rebalancing every earlier line for.
+    assert_eq!(
+        lines(
+            Lang::Zh,
+            100.0,
+            "甲乙丙丁戊己庚辛壬癸甲乙丙丁戊己庚辛壬癸子丑寅卯辰"
+        ),
+        ["甲乙丙丁戊己庚辛壬癸", "甲乙丙丁戊己庚辛壬癸", "子丑寅卯辰"]
+    );
+    assert_eq!(
+        lines(Lang::En, 40.0, "aa bb cc dd ee ff gg hh"),
+        ["aa bb cc", "dd ee ff", "gg hh"]
+    );
+}
+
+#[test]
 fn automatic_break_does_not_strand_one_cjk_letter_but_hard_break_can() {
     let mut s = spec(Rect::new(0.0, 0.0, 50.0, 100.0), 10.0, 1.3, Align::Left);
     s.lang = Lang::Zh;

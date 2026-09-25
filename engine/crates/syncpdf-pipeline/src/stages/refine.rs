@@ -2,7 +2,7 @@
 //! No raster redetection, cross-page move, or fit-driven font shrinking.
 use super::frame::LayoutFrame;
 use std::collections::{BTreeMap, BTreeSet};
-use syncpdf_core::ir::{DisplayItem, PageIR, Paragraph, TypesetParagraph};
+use syncpdf_core::ir::{PageIR, Paragraph, TypesetParagraph};
 use syncpdf_core::{GlyphId, OpKey, ParagraphId, Rect};
 use syncpdf_typeset::Shaper;
 
@@ -48,32 +48,12 @@ pub(crate) fn obstacles(
         .filter_map(|a| a.source)
         .collect();
     obstacles.extend(
-        ir.items
-            .iter()
-            .filter_map(|i| match i {
-                DisplayItem::Image { bbox } | DisplayItem::InlineImage { bbox } => Some(*bbox),
-                DisplayItem::Path {
-                    bbox,
-                    is_fill,
-                    is_stroke,
-                    stroke,
-                    ..
-                } if *is_fill || *is_stroke => {
-                    // Only an owner that already holds its underline anchor may
-                    // set its own source line aside; every other line is paint.
-                    if stroke.is_some_and(|s| own_ops.contains(&s.op)) {
-                        return None;
-                    }
-                    let pad = if *is_stroke { 0.5 } else { 0.0 };
-                    Some(Rect::new(
-                        bbox.x0 - pad,
-                        bbox.y0 - pad,
-                        bbox.x1 + pad,
-                        bbox.y1 + pad,
-                    ))
-                }
-                _ => None,
-            })
+        super::frame::paint(ir, moving)
+            .into_iter()
+            // Only an owner that already holds its underline anchor may set
+            // its own source line aside; every other line is paint.
+            .filter(|(_, op)| !op.is_some_and(|o| own_ops.contains(&o)))
+            .map(|(b, _)| b)
             .filter(|b| {
                 !moved_atoms.iter().any(|s| {
                     s.bbox.x0 <= b.x0 && b.x1 <= s.bbox.x1 && s.bbox.y0 <= b.y0 && b.y1 <= s.bbox.y1

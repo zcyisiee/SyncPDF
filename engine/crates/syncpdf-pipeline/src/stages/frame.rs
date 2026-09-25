@@ -46,6 +46,77 @@ fn heading_container(ir: &PageIR, regions: &[Region], para: &Paragraph) -> Optio
     ))
 }
 
+/// Retained source paint as layout obstacles for the text of `owners`, each
+/// paired with its paint op so a paragraph can set aside only the stroke it
+/// certainly owns. A fill painted beneath an owner's own text is that text's
+/// backdrop (figure background, shaded panel): its interior is where the text
+/// lives, so only its outline bounds the layout, and an edge the source text
+/// already crosses bounds nothing.
+pub(crate) fn paint(ir: &PageIR, owners: &[&Paragraph]) -> Vec<(Rect, Option<OpKey>)> {
+    let own: BTreeSet<GlyphId> = owners
+        .iter()
+        .flat_map(|p| p.glyphs.iter().copied())
+        .collect();
+    // Owned visible glyph boxes with the index of the item that paints them.
+    let text: Vec<(usize, Rect)> = ir
+        .items
+        .iter()
+        .enumerate()
+        .flat_map(|(i, item)| {
+            match item {
+                DisplayItem::Text { glyphs } => glyphs.as_slice(),
+                _ => &[],
+            }
+            .iter()
+            .filter(|g| {
+                own.contains(&g.id)
+                    && !g.flags.invisible
+                    && !g.flags.outside_clip
+                    && (g.unicode.is_empty() || g.unicode.iter().any(|c| !c.is_whitespace()))
+            })
+            .map(move |g| (i, g.bbox))
+        })
+        .collect();
+    let mut out = Vec::new();
+    for (i, item) in ir.items.iter().enumerate() {
+        match item {
+            DisplayItem::Image { bbox } | DisplayItem::InlineImage { bbox } => {
+                out.push((*bbox, None))
+            }
+            DisplayItem::Path {
+                bbox: b,
+                is_fill,
+                is_stroke,
+                stroke,
+            } if *is_fill || *is_stroke => {
+                if *is_fill && text.iter().any(|(j, g)| *j > i && b.contains(g.center())) {
+                    let edges = [
+                        Rect::new(b.x0, b.y0 - 0.5, b.x1, b.y0),
+                        Rect::new(b.x0, b.y1, b.x1, b.y1 + 0.5),
+                        Rect::new(b.x0 - 0.5, b.y0, b.x0, b.y1),
+                        Rect::new(b.x1, b.y0, b.x1 + 0.5, b.y1),
+                    ];
+                    out.extend(
+                        edges
+                            .into_iter()
+                            .filter(|e| !text.iter().any(|(_, g)| e.intersects(g)))
+                            .map(|e| (e, None)),
+                    );
+                    continue;
+                }
+                // A stroked rule can have zero geometric height/width.
+                let pad = if *is_stroke { 0.5 } else { 0.0 };
+                out.push((
+                    Rect::new(b.x0 - pad, b.y0 - pad, b.x1 + pad, b.y1 + pad),
+                    stroke.map(|s| s.op),
+                ));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// Allocate disjoint neighboring text frames using midpoints of measured blank gaps.
 /// The first source baseline stays fixed; there is no cross-page or cross-column move.
 pub fn page_frames(
@@ -56,29 +127,6 @@ pub fn page_frames(
     let glyphs: Vec<_> = ir
         .glyphs()
         .filter(|g| !g.flags.invisible && !g.flags.outside_clip)
-        .collect();
-    // Paint is paired with its paint op so a paragraph can set aside only the
-    // stroke it certainly owns; every other source line stays an obstacle.
-    let paint: Vec<(Rect, Option<OpKey>)> = ir
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            DisplayItem::Image { bbox } | DisplayItem::InlineImage { bbox } => Some((*bbox, None)),
-            DisplayItem::Path {
-                bbox,
-                is_fill,
-                is_stroke,
-                stroke,
-            } if *is_fill || *is_stroke => {
-                // A stroked rule can have zero geometric height/width.
-                let pad = if *is_stroke { 0.5 } else { 0.0 };
-                Some((
-                    Rect::new(bbox.x0 - pad, bbox.y0 - pad, bbox.x1 + pad, bbox.y1 + pad),
-                    stroke.map(|s| s.op),
-                ))
-            }
-            _ => None,
-        })
         .collect();
     let mut out = BTreeMap::new();
     for para in paras
@@ -125,6 +173,7 @@ pub fn page_frames(
             bbox.x1 = container.x1;
         }
         let own_ops: BTreeSet<OpKey> = super::source_decoration::owned_ops(para).collect();
+        let paint = paint(ir, &[para]);
         let obstacles: Vec<Rect> = glyphs
             .iter()
             .filter(|g| {
@@ -284,6 +333,56 @@ mod tests {
         assert_eq!(frames[&paras[0].id].bbox.y0, 110.0);
         assert_eq!(frames[&paras[1].id].bbox.y1, 110.0);
         assert_eq!(frames[&paras[0].id].first_baseline, 123.5);
+    }
+    #[test]
+    fn fill_beneath_own_text_is_a_backdrop_bounded_only_by_uncrossed_edges() {
+        let fill = |bbox| DisplayItem::Path {
+            bbox,
+            is_fill: true,
+            is_stroke: false,
+            stroke: None,
+        };
+        // A figure background under its caption, then a neighbor outside it.
+        let caption = glyph(0, Rect::new(20.0, 110.0, 80.0, 120.0), 112.0);
+        let below = glyph(1, Rect::new(20.0, 60.0, 80.0, 70.0), 62.0);
+        let backdrop = Rect::new(10.0, 100.0, 190.0, 180.0);
+        let paras = [paragraph(&caption), paragraph(&below)];
+        let mut ir = page(vec![caption.clone(), below.clone()]);
+        ir.items.insert(0, fill(backdrop));
+        let frames = page_frames(&ir, &[], &paras);
+        let line = |bbox| LineBox {
+            bbox,
+            baseline_y: 112.0,
+            glyphs: vec![],
+            kept_atoms: vec![],
+            placed_atoms: Vec::new(),
+            underlines: Vec::new(),
+        };
+        let own = &frames[&paras[0].id];
+        assert!(!collides(
+            own,
+            &[line(Rect::new(20.0, 101.0, 180.0, 130.0))]
+        ));
+        assert!(collides(own, &[line(Rect::new(20.0, 95.0, 80.0, 105.0))]));
+        // For text that is not drawn on it, the same fill is solid paint.
+        assert!(frames[&paras[1].id].bbox.y1 <= 85.0);
+        assert!(paint(&ir, &[&paras[1]]).contains(&(backdrop, None)));
+
+        // A shaded panel whose source text already crosses its left edge.
+        let crossing = glyph(2, Rect::new(45.0, 110.0, 65.0, 120.0), 112.0);
+        let panel = Rect::new(50.0, 100.0, 150.0, 180.0);
+        let para = paragraph(&crossing);
+        let mut ir = page(vec![crossing]);
+        ir.items.insert(0, fill(panel));
+        let edges = paint(&ir, &[&para]);
+        assert_eq!(edges.len(), 3);
+        assert!(edges.iter().all(|(e, _)| !e.intersects(&para.bbox)));
+        assert!(edges.iter().all(|(e, _)| !e.intersects(&panel)));
+
+        // Paint laid over the text afterwards covers it: still an obstacle.
+        let mut ir = page(vec![glyph(2, Rect::new(45.0, 110.0, 65.0, 120.0), 112.0)]);
+        ir.items.push(fill(panel));
+        assert_eq!(paint(&ir, &[&para]), [(panel, None)]);
     }
     #[test]
     fn wide_model_region_cannot_invade_neighbor_column_or_retained_paint() {
