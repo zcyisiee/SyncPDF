@@ -200,6 +200,31 @@ export class Library {
     return changed;
   }
 
+  /**
+   * 每轮运行重新识别版面元数据：本轮没识别出的字段，撤回上一轮来自 layout 的旧值，
+   * 回落到文件名来源（打开论文时再由 PDF Info 补上）。
+   */
+  private retractLayoutMeta(id: string, meta: { title: string | null; authors: string | null }): boolean {
+    const doc = this.get(id);
+    if (doc === null) return false;
+    const now = Date.now();
+    let changed = false;
+    if (!meta.title?.trim() && doc.titleSource === 'layout') {
+      const row = this.db.prepare('SELECT file_name FROM docs WHERE id = ?').get(id) as { file_name: string };
+      this.db
+        .prepare("UPDATE docs SET title = ?, title_source = 'filename', updated_at = ? WHERE id = ?")
+        .run(titleFromFileName(row.file_name), now, id);
+      changed = true;
+    }
+    if (!meta.authors?.trim() && doc.authorsSource === 'layout') {
+      this.db
+        .prepare("UPDATE docs SET authors = NULL, authors_source = 'filename', updated_at = ? WHERE id = ?")
+        .run(now, id);
+      changed = true;
+    }
+    return changed;
+  }
+
   /** 设置状态；`error` 显式给出（含 null）时覆盖，未给出时保留。 */
   setStatus(id: string, status: DocStatus, fields: { error?: string | null; model?: string } = {}): void {
     const doc = this.get(id);
@@ -249,8 +274,10 @@ export class Library {
             .prepare('UPDATE docs SET pages = ? WHERE id = ? AND (pages IS NULL OR pages < ?)')
             .run(event.page, id, event.page).changes > 0
         );
-      case 'doc_meta':
-        return this.updateMeta(id, { title: event.title, authors: event.authors }, 'layout');
+      case 'doc_meta': {
+        const retracted = this.retractLayoutMeta(id, event);
+        return this.updateMeta(id, { title: event.title, authors: event.authors }, 'layout') || retracted;
+      }
       case 'paragraph': {
         const { seq: _seq, ts: _ts, type: _type, ...record } = event;
         this.db

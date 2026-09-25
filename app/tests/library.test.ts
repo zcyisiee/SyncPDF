@@ -152,6 +152,22 @@ describe('Library.ingest / snapshot', () => {
     expect(library.get(id)?.pages).toBe(2);
   });
 
+  // 回归：引擎不再把机构 / 邮箱行认作作者后，上一轮存下的错误作者仍挂在卡片上
+  it('doc_meta 未识别的字段撤回上一轮 layout 值，回落文件名来源；非 layout 来源不动', () => {
+    const { id } = library.addFile(pdf('2604.03136v6.pdf')).doc;
+    library.ingest(id, ev({ type: 'doc_meta', title: 'StoryScope', authors: 'University of Maryland' }));
+    expect(library.ingest(id, ev({ type: 'doc_meta', title: 'StoryScope', authors: null }))).toBe(true);
+    expect(library.get(id)).toMatchObject({ title: 'StoryScope', authors: null, authorsSource: 'filename' });
+    library.updateMeta(id, { authors: 'Jenna Russell' }, 'pdf_info');
+    library.ingest(id, ev({ type: 'doc_meta', title: null, authors: null }));
+    expect(library.get(id)).toMatchObject({
+      title: '2604.03136v6',
+      titleSource: 'filename',
+      authors: 'Jenna Russell',
+      authorsSource: 'pdf_info',
+    });
+  });
+
   it('setStatus：显式 error:null 清空旧错误，不给 error 则保留', () => {
     const { id } = library.addFile(pdf('a.pdf')).doc;
     library.setStatus(id, 'failed', { error: 'boom' });
