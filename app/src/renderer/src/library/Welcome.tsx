@@ -1,6 +1,7 @@
 /**
  * 欢迎页：大号添加区 + 最近打开的论文。
  */
+import logoUrl from '../../../../build/icon.svg';
 import { useLibrary } from '@/store/library';
 import { pickFiles } from './actions';
 import { StatusBadge } from './StatusBadge';
@@ -14,6 +15,7 @@ export function Welcome(): JSX.Element {
     .slice(0, RECENT_LIMIT);
   return (
     <div className="sp-welcome">
+      <img className="sp-welcome-logo" src={logoUrl} alt="" />
       <h1>SyncPDF</h1>
       <p className="sp-muted">保留原版式的论文翻译</p>
       <button type="button" className="sp-dropzone" onClick={() => void pickFiles()}>

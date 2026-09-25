@@ -164,6 +164,7 @@ export function PageCanvas({
     <div
       ref={wrapperRef}
       data-page={pageNumber}
+      data-scale={viewport === null ? undefined : scale}
       data-rendered={rendered >= 0 ? 'true' : 'false'}
       style={{
         position: 'relative',

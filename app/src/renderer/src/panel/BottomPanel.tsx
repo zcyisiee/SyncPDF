@@ -6,7 +6,7 @@ import type { IssueRecord } from '@shared/library';
 import type { EngineEvent } from '@shared/protocol';
 import { useLibrary } from '@/store/library';
 import { useWorkbench, type PanelTab } from '@/store/workbench';
-import { Panel, PanelTabs } from '@/layout/Panel';
+import { IconButton, Panel, PanelHeader } from '@/layout/Panel';
 import { describeEvent, type EventLine } from './describeEvent';
 
 const EMPTY_EVENTS: EngineEvent[] = [];
@@ -19,24 +19,16 @@ export function BottomPanel(): JSX.Element {
   const issueCount = useLibrary((s) => s.open?.issues.length ?? 0);
   return (
     <Panel className="sp-bottom">
-      <PanelTabs
-        tabs={[
-          { id: 'events' as PanelTab, label: '事件流' },
-          { id: 'issues' as PanelTab, label: '问题', badge: issueCount },
-          { id: 'logs' as PanelTab, label: '引擎日志' },
+      <PanelHeader
+        inline
+        views={[
+          { id: 'events' as PanelTab, title: '事件流', icon: 'pulse' },
+          { id: 'issues' as PanelTab, title: '问题', icon: 'warning', badge: issueCount },
+          { id: 'logs' as PanelTab, title: '引擎日志', icon: 'output' },
         ]}
         active={tab}
         onSelect={setTab}
-        actions={
-          <button
-            type="button"
-            className="sp-icon-button"
-            title="关闭面板 (⌘J)"
-            onClick={() => useWorkbench.getState().togglePanel()}
-          >
-            <i className="codicon codicon-close" />
-          </button>
-        }
+        actions={<IconButton icon="close" title="关闭面板 (⌘J)" onClick={() => useWorkbench.getState().togglePanel()} />}
       />
       {tab === 'events' && <EventStream />}
       {tab === 'issues' && <Issues />}

@@ -96,81 +96,123 @@
   background: var(--vscode-editor-background);
 }
 
+.sp-panel.sp-bottom {
+  background: var(--vscode-panel-background);
+}
+
 .sp-panel-header {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   flex: 0 0 auto;
-  height: 34px;
-  padding: 0 6px;
-  border-bottom: 1px solid var(--vscode-panel-border);
+  height: 35px;
+  padding: 0 8px 0 12px;
+}
+
+/* 视图切换：VSCode 侧栏顶部的图标排，选中 = 圆角底色 */
+.sp-viewbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: -6px;
+}
+
+.sp-panel-header .sp-viewbar + .sp-panel-title {
+  margin-left: 6px;
+}
+
+.sp-view-tab {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--vscode-icon-foreground);
+  cursor: pointer;
+}
+
+.sp-view-tab:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+  color: var(--vscode-foreground);
+}
+
+.sp-view-tab.is-active {
+  background: var(--vscode-toolbar-activeBackground);
+  color: var(--vscode-sideBarTitle-foreground);
+}
+
+.sp-view-badge {
+  position: absolute;
+  right: -2px;
+  bottom: 0;
+  min-width: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+}
+
+.sp-panel-title {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vscode-sideBarTitle-foreground);
 }
 
 .sp-panel-body {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 10px 12px;
+  padding: 4px 12px 10px;
 }
 
-.sp-tab {
-  display: inline-flex;
+/* 图标操作：16px codicon + 3px 内边距，圆角悬停底色（VSCode action-label） */
+.sp-actionbar {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 10px;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--vscode-tab-inactiveForeground);
-  cursor: pointer;
-}
-
-.sp-tab:hover {
-  background: var(--vscode-toolbar-hoverBackground);
-}
-
-.sp-tab.is-active {
-  background: var(--vscode-tab-activeBackground);
-  color: var(--vscode-tab-activeForeground);
-  box-shadow: inset 0 -2px 0 var(--vscode-tab-activeBorderTop);
-}
-
-.sp-count {
-  display: inline-block;
-  min-width: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  background: var(--vscode-button-secondaryBackground);
-  color: var(--vscode-descriptionForeground);
-  font-size: 11px;
-  line-height: 16px;
-  text-align: center;
+  gap: 2px;
 }
 
 .sp-icon-button {
   display: inline-grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: none;
   border-radius: 5px;
   background: transparent;
-  color: var(--vscode-foreground);
+  color: var(--vscode-icon-foreground);
   cursor: pointer;
+}
+
+.sp-icon-button .codicon {
+  font-size: 16px;
 }
 
 .sp-icon-button:hover:not(:disabled) {
   background: var(--vscode-toolbar-hoverBackground);
+  color: var(--vscode-foreground);
 }
 
 .sp-icon-button.is-active {
-  color: var(--vscode-focusBorder);
+  background: var(--vscode-toolbar-activeBackground);
+  color: var(--vscode-sideBarTitle-foreground);
 }
 
 .sp-icon-button:disabled {
-  opacity: 0.4;
+  opacity: 0.6;
   cursor: default;
 }
 
@@ -225,88 +267,50 @@
 }
 
 /* ---------- 左栏：论文库 ---------- */
-.sp-library {
-  padding-top: 6px;
-}
-
-.sp-section-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px 6px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--vscode-sideBarSectionHeader-foreground);
-}
-
-.sp-start {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 10px 6px;
-  padding: 10px 12px;
-  border: 1px dashed var(--vscode-input-border);
-  border-radius: 6px;
-  background: var(--vscode-editor-background);
-  text-align: left;
-  cursor: pointer;
-}
-
-.sp-start:hover {
-  border-color: var(--vscode-focusBorder);
-}
-
-.sp-start .codicon {
-  font-size: 18px;
-  color: var(--vscode-focusBorder);
-}
-
-.sp-start span {
-  display: flex;
-  flex-direction: column;
-}
-
-.sp-start small {
-  color: var(--vscode-descriptionForeground);
-}
-
 .sp-cards {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  gap: 6px;
   min-height: 0;
   overflow: auto;
   margin: 0;
-  padding: 0 8px 8px;
+  padding: 2px 10px 10px;
   list-style: none;
 }
 
-.sp-cards .sp-empty {
-  padding: 8px 6px;
+.sp-cards .sp-hint {
+  margin: 4px 2px;
 }
 
+/* 卡片常驻圆角边框；悬停加深边框，选中用列表选中色 */
 .sp-card {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
   width: 100%;
-  margin-bottom: 4px;
-  padding: 9px 10px;
+  padding: 9px 11px;
   overflow: hidden;
-  border: 1px solid transparent;
+  border: 1px solid var(--vscode-panel-border);
   border-radius: 6px;
-  background: transparent;
+  background: var(--vscode-editor-background);
   text-align: left;
   cursor: pointer;
 }
 
 .sp-card:hover {
-  background: var(--vscode-list-hoverBackground);
+  border-color: color-mix(in srgb, var(--vscode-descriptionForeground) 45%, var(--vscode-panel-border));
 }
 
 .sp-card.is-active {
-  border-color: var(--vscode-panel-border);
-  background: var(--vscode-list-activeSelectionBackground);
+  border-color: color-mix(in srgb, var(--vscode-focusBorder) 55%, var(--vscode-panel-border));
+  background: var(--vscode-list-inactiveSelectionBackground);
+}
+
+.sp-card:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
 }
 
 .sp-card-title {
@@ -379,6 +383,12 @@
   height: 100%;
   overflow: auto;
   padding: 12vh 24px 24px;
+}
+
+.sp-welcome-logo {
+  width: 96px;
+  height: 96px;
+  margin-bottom: 8px;
 }
 
 .sp-welcome h1 {
@@ -493,54 +503,17 @@
   align-items: center;
   gap: 2px;
   flex: 0 0 auto;
-  height: 38px;
+  height: 35px;
   padding: 0 8px;
   border-bottom: 1px solid var(--vscode-panel-border);
-  background: var(--vscode-editorGroupHeader-tabsBackground);
+  background: var(--vscode-editor-background);
 }
 
 .sp-toolbar-sep {
   width: 1px;
-  height: 18px;
+  height: 16px;
   margin: 0 6px;
   background: var(--vscode-panel-border);
-}
-
-.sp-segmented {
-  display: inline-flex;
-  padding: 2px;
-  border-radius: 6px;
-  background: var(--vscode-button-secondaryBackground);
-}
-
-.sp-segmented button {
-  height: 24px;
-  padding: 0 12px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--vscode-descriptionForeground);
-  cursor: pointer;
-}
-
-.sp-segmented button.is-active {
-  background: var(--vscode-editor-background);
-  color: var(--vscode-foreground);
-  box-shadow: 0 1px 2px rgba(64, 61, 54, 0.18);
-}
-
-.sp-zoom-label {
-  min-width: 64px;
-  height: 26px;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.sp-zoom-label:hover {
-  background: var(--vscode-toolbar-hoverBackground);
 }
 
 .sp-popover-anchor {
@@ -549,7 +522,7 @@
 
 .sp-popover {
   position: absolute;
-  top: 30px;
+  top: 28px;
   right: 0;
   z-index: 5;
   padding: 8px;

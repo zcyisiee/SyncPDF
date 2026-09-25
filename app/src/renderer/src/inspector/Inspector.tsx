@@ -5,13 +5,13 @@ import { useState } from 'react';
 import type { LibraryDoc } from '@shared/library';
 import { useLibrary, useOpenDocMeta } from '@/store/library';
 import { useWorkbench, type InspectorTab } from '@/store/workbench';
-import { Panel, PanelTabs } from '@/layout/Panel';
+import { IconButton, Panel, PanelHeader, type PanelView } from '@/layout/Panel';
 import { REGION_STYLE } from '@/pdf/regionKinds';
 import { StatusBadge } from '@/library/StatusBadge';
 
-const TABS: Array<{ id: InspectorTab; label: string }> = [
-  { id: 'block', label: '块详情' },
-  { id: 'info', label: '论文信息' },
+const VIEWS: PanelView<InspectorTab>[] = [
+  { id: 'block', title: '块详情', icon: 'inspect' },
+  { id: 'info', title: '论文信息', icon: 'info' },
 ];
 
 const PARAGRAPH_STATUS: Record<string, string> = {
@@ -28,7 +28,12 @@ export function Inspector(): JSX.Element {
   const doc = useOpenDocMeta();
   return (
     <Panel className="sp-inspector">
-      <PanelTabs tabs={TABS} active={tab} onSelect={setTab} />
+      <PanelHeader
+        views={VIEWS}
+        active={tab}
+        onSelect={setTab}
+        actions={tab === 'info' && doc !== null ? <DocActions doc={doc} /> : undefined}
+      />
       <div className="sp-panel-body">
         {doc === null ? (
           <p className="sp-hint">打开一篇论文后在这里查看详情。</p>
@@ -77,8 +82,25 @@ export function htmlToText(html: string): string {
   return new DOMParser().parseFromString(html, 'text/html').body.textContent ?? '';
 }
 
-function DocInfo({ doc }: { doc: LibraryDoc }): JSX.Element {
+function DocActions({ doc }: { doc: LibraryDoc }): JSX.Element {
   const busy = doc.status === 'queued' || doc.status === 'running';
+  return (
+    <>
+      {busy ? (
+        <IconButton icon="debug-stop" title="取消翻译" onClick={() => void window.syncpdf.engine.cancel(doc.id)} />
+      ) : (
+        <IconButton
+          icon={doc.status === 'done' ? 'refresh' : 'play'}
+          title={doc.status === 'done' ? '重新翻译' : '开始翻译'}
+          onClick={() => void window.syncpdf.engine.enqueue(doc.id)}
+        />
+      )}
+      <IconButton icon="folder-opened" title="在 Finder 中显示" onClick={() => void window.syncpdf.library.reveal(doc.id)} />
+    </>
+  );
+}
+
+function DocInfo({ doc }: { doc: LibraryDoc }): JSX.Element {
   return (
     <div className="sp-info">
       <MetaField label="标题" value={doc.title} onCommit={(title) => updateMeta(doc.id, { title })} multiline />
@@ -109,20 +131,6 @@ function DocInfo({ doc }: { doc: LibraryDoc }): JSX.Element {
         <dt>加入于</dt>
         <dd>{new Date(doc.addedAt).toLocaleString()}</dd>
       </dl>
-      <div className="sp-actions">
-        {busy ? (
-          <button type="button" className="sp-button secondary" onClick={() => void window.syncpdf.engine.cancel(doc.id)}>
-            取消翻译
-          </button>
-        ) : (
-          <button type="button" className="sp-button" onClick={() => void window.syncpdf.engine.enqueue(doc.id)}>
-            {doc.status === 'done' ? '重新翻译' : '开始翻译'}
-          </button>
-        )}
-        <button type="button" className="sp-button secondary" onClick={() => void window.syncpdf.library.reveal(doc.id)}>
-          在 Finder 中显示
-        </button>
-      </div>
     </div>
   );
 }

@@ -1,9 +1,9 @@
 /**
- * 左栏：「开始」区（添加 PDF）+ 论文卡片列表。单击打开，右键原生菜单。
+ * 左栏：论文库标题行（添加论文）+ 论文卡片列表。单击打开，右键原生菜单；PDF 可拖入整个窗口。
  */
 import type { LibraryDoc } from '@shared/library';
 import { useLibrary } from '@/store/library';
-import { Panel } from '@/layout/Panel';
+import { IconButton, Panel, PanelHeader } from '@/layout/Panel';
 import { pickFiles } from './actions';
 import { StatusBadge } from './StatusBadge';
 
@@ -13,22 +13,16 @@ export function LibraryBar(): JSX.Element {
   const list = Object.values(docs).sort((a, b) => b.addedAt - a.addedAt);
   return (
     <Panel className="sp-library">
-      <div className="sp-section-title">开始</div>
-      <button type="button" className="sp-start" onClick={() => void pickFiles()}>
-        <i className="codicon codicon-add" />
-        <span>
-          <strong>添加论文</strong>
-          <small>选择或拖入 PDF</small>
-        </span>
-      </button>
-      <div className="sp-section-title">
-        论文 <span className="sp-count">{list.length}</span>
-      </div>
+      <PanelHeader
+        views={[{ id: 'library', title: `论文库 · ${list.length}`, icon: 'library' }]}
+        active="library"
+        actions={<IconButton icon="add" title="添加论文" onClick={() => void pickFiles()} />}
+      />
       <ul className="sp-cards" aria-label="论文列表">
         {list.map((doc) => (
           <DocCard key={doc.id} doc={doc} active={doc.id === openId} />
         ))}
-        {list.length === 0 && <li className="sp-empty">还没有论文</li>}
+        {list.length === 0 && <li className="sp-hint">还没有论文。点击 + 选择 PDF，或把 PDF 拖进窗口。</li>}
       </ul>
     </Panel>
   );

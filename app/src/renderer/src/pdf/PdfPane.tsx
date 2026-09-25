@@ -2,7 +2,7 @@
  * 一栏 PDF（原文或译文）：懒渲染页面 + 叠加框；双栏同步滚动（按滚动比例）；
  * 响应跳转请求（滚到某页 / 某段）。原文栏负责上报当前页与总页数。
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ParagraphId } from '@shared/protocol';
 import { useLibrary } from '@/store/library';
 import { useWorkbench } from '@/store/workbench';
@@ -10,6 +10,7 @@ import { BoxOverlay } from './BoxOverlay';
 import type { OverlayItem } from './overlay';
 import { PageCanvas } from './PageCanvas';
 import type { PageViewport } from './pdfjs';
+import { captureAnchor, pinchScale, renderedScale, restoreAnchor, type ZoomAnchor } from './pinchZoom';
 import {
   applyScrollRatio,
   publishScroll,
@@ -49,6 +50,45 @@ export function PdfPane({ side, path, revision, itemsByPage }: PdfPaneProps): JS
   useEffect(() => {
     if (side === 'source' && doc !== null) useLibrary.getState().setPageCount(doc.numPages);
   }, [side, doc]);
+
+  // 双指缩放：必须是非 passive 监听才能 preventDefault；一帧合并一次，避免每个事件都重排全部页面
+  const pinchAnchor = useRef<ZoomAnchor | null>(null);
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (node === null) return;
+    let frame = 0;
+    let delta = 0;
+    let anchor: ZoomAnchor | null = null;
+    const onWheel = (event: WheelEvent): void => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      delta += event.deltaY;
+      anchor ??= captureAnchor(node, event.clientX, event.clientY);
+      if (frame !== 0) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const current = renderedScale(node);
+        const next = current === null ? null : pinchScale(current, delta);
+        if (next !== null && next !== current) {
+          pinchAnchor.current = anchor;
+          useWorkbench.getState().setZoom(side, next);
+        }
+        delta = 0;
+        anchor = null;
+      });
+    };
+    node.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      node.removeEventListener('wheel', onWheel);
+      cancelAnimationFrame(frame);
+    };
+  }, [side]);
+
+  useLayoutEffect(() => {
+    const node = scrollRef.current;
+    if (node !== null && pinchAnchor.current !== null) restoreAnchor(node, pinchAnchor.current);
+    pinchAnchor.current = null;
+  }, [zoom]);
 
   useEffect(
     () =>

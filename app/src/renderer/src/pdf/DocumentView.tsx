@@ -13,10 +13,10 @@ import { PdfPane } from './PdfPane';
 import { REGION_STYLE } from './regionKinds';
 import { usePdfDocument } from './usePdfDocument';
 
-const MODES: Array<{ id: ViewMode; label: string }> = [
-  { id: 'source', label: '原文' },
-  { id: 'target', label: '译文' },
-  { id: 'dual', label: '双栏' },
+const MODES: Array<{ id: ViewMode; title: string; icon: string }> = [
+  { id: 'source', title: '原文', icon: 'file-pdf' },
+  { id: 'target', title: '译文', icon: 'globe' },
+  { id: 'dual', title: '双栏对照', icon: 'split-horizontal' },
 ];
 
 export function DocumentView(): JSX.Element | null {
@@ -86,26 +86,27 @@ function Toolbar(): JSX.Element {
   const current = zoom.source;
   return (
     <div className="sp-toolbar">
-      <div className="sp-segmented" role="radiogroup" aria-label="视图">
+      <div className="sp-actionbar" role="radiogroup" aria-label="视图">
         {MODES.map((mode) => (
-          <button
+          <IconButton
             key={mode.id}
-            type="button"
             role="radio"
-            aria-checked={viewMode === mode.id}
-            className={viewMode === mode.id ? 'is-active' : ''}
+            icon={mode.icon}
+            title={mode.title}
+            active={viewMode === mode.id}
             onClick={() => setViewMode(mode.id)}
-          >
-            {mode.label}
-          </button>
+          />
         ))}
       </div>
       <span className="sp-toolbar-sep" />
       <IconButton icon="zoom-out" title="缩小" onClick={() => zoomAll(stepZoom(current, -1))} />
-      <button type="button" className="sp-zoom-label" title="适合宽度" onClick={() => zoomAll('fit-width')}>
-        {current === 'fit-width' ? '适合宽度' : `${Math.round(current * 100)}%`}
-      </button>
       <IconButton icon="zoom-in" title="放大" onClick={() => zoomAll(stepZoom(current, 1))} />
+      <IconButton
+        icon="arrow-both"
+        title="适合宽度"
+        active={current === 'fit-width'}
+        onClick={() => zoomAll('fit-width')}
+      />
       {viewMode === 'dual' && (
         <IconButton icon="link" title="同步滚动与缩放" active={sync} onClick={() => setSync(!sync)} />
       )}

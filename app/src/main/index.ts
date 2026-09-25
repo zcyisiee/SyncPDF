@@ -128,6 +128,8 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
+    // 打包后由 electron-builder 用 build/icon.png 生成应用图标；开发时 Dock 默认是 Electron 图标
+    if (isDev) app.dock?.setIcon(join(__dirname, '../../build/icon.png'));
     library = new Library(dataRoot());
     // 渲染进程只读论文库内的文件（原文 blob、译文）
     const roots = new AllowedRoots();

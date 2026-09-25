@@ -18,15 +18,17 @@
   --vscode-sideBar-background: #f0eee6;
   --vscode-sideBar-foreground: #403d36;
   --vscode-sideBarSectionHeader-foreground: #6d675b;
-  --vscode-panel-background: #f0eee6;
+  --vscode-sideBarTitle-foreground: #29271d;
+  --vscode-icon-foreground: #6d675b;
+  --vscode-panel-background: #f8f7f2;
   --vscode-panel-border: #d8d2c3;
   --vscode-titleBar-activeBackground: #e5e0d4;
-  --vscode-titleBar-activeForeground: #403d36;
+  --vscode-titleBar-activeForeground: #29271d;
   --vscode-statusBar-background: #e5e0d4;
-  --vscode-statusBar-foreground: #6d675b;
-  --vscode-editorGroupHeader-tabsBackground: #f0eee6;
+  --vscode-statusBar-foreground: #302e28;
+  --vscode-editorGroupHeader-tabsBackground: #f8f7f2;
   --vscode-tab-activeBackground: #f8f7f2;
-  --vscode-tab-activeForeground: #403d36;
+  --vscode-tab-activeForeground: #29271d;
   --vscode-tab-inactiveForeground: #6d675b;
   --vscode-tab-activeBorderTop: #b7791f;
 
@@ -34,15 +36,15 @@
   --vscode-button-hoverBackground: #9f6819;
   --vscode-button-foreground: #fff8f3;
   --vscode-button-secondaryBackground: #e5e0d4;
-  --vscode-button-secondaryHoverBackground: #dfd2b8;
+  --vscode-button-secondaryHoverBackground: #d8d2c3;
   --vscode-button-secondaryForeground: #403d36;
   --vscode-toolbar-hoverBackground: #e5e0d4;
-  --vscode-toolbar-activeBackground: #dfd2b8;
+  --vscode-toolbar-activeBackground: #e8e2d5;
 
-  --vscode-input-background: #fffdf8;
-  --vscode-input-foreground: #403d36;
+  --vscode-input-background: #ffffff;
+  --vscode-input-foreground: #302e28;
   --vscode-input-border: #d8d2c3;
-  --vscode-input-placeholderForeground: #a39c8d;
+  --vscode-input-placeholderForeground: #8d8575;
 
   --vscode-badge-background: #b7791f;
   --vscode-badge-foreground: #fff8f3;
@@ -51,10 +53,12 @@
   --vscode-list-activeSelectionBackground: #dfd2b8;
   --vscode-list-activeSelectionForeground: #403d36;
   --vscode-list-hoverBackground: #e5e0d4;
+  --vscode-list-inactiveSelectionBackground: #e8e2d5;
+  --vscode-list-focusBackground: #eadfc8;
 
   --vscode-scrollbarSlider-background: #8d857533;
-  --vscode-scrollbarSlider-hoverBackground: #8d857555;
-  --vscode-scrollbarSlider-activeBackground: #8d857577;
+  --vscode-scrollbarSlider-hoverBackground: #8d85754d;
+  --vscode-scrollbarSlider-activeBackground: #6d675b66;
 
   --vscode-editorError-foreground: #7c1b13;
   --vscode-editorWarning-foreground: #8a5e16;
