@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
@@ -9,6 +10,7 @@ import signal
 import sqlite3
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from babeldoc_tools import glossary
@@ -30,6 +32,20 @@ def _progress(event: dict) -> None:
         page = event.get("page")
         if isinstance(page, int):
             sys.stderr.write(f"rust-translate: page {page} ready\n")
+
+
+def terminate(process: subprocess.Popen) -> None:
+    """Stop the engine's whole process group (it owns a pi child): SIGTERM, then SIGKILL after 5s."""
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
 
 
 def translate_pdf(**kwargs: object) -> dict:
@@ -56,8 +72,14 @@ def _translate_pdf(
     dual: bool = False,
     translator: str = "pi",
     glossaries: str | None = None,
+    on_event: Callable[[dict], None] | None = None,
+    on_spawn: Callable[[subprocess.Popen], None] | None = None,
 ) -> dict:
-    """Run the Rust CLI once, retaining its events and incomplete-result semantics."""
+    """Run the Rust CLI once, retaining its events and incomplete-result semantics.
+
+    ``on_spawn`` receives the engine process right after launch (callers may
+    cancel it with :func:`terminate`); ``on_event`` receives each parsed event.
+    """
     for name, value in (("font_scale", font_scale), ("line_height", line_height)):
         if value is not None and (not math.isfinite(value) or value <= 0):
             return _error("invalid_typography", f"{name} 必须是有限正数倍数")
@@ -179,6 +201,8 @@ def _translate_pdf(
             else:
                 assert process.stdout is not None
                 try:
+                    if on_spawn is not None:
+                        on_spawn(process)
                     for line in process.stdout:
                         events.write(line)
                         events.flush()
@@ -191,6 +215,8 @@ def _translate_pdf(
                             event_error = True
                             continue
                         _progress(event)
+                        if on_event is not None:
+                            on_event(event)
                         kind = event.get("type")
                         if kind == "paragraph":
                             paragraph_id = event.get("paragraph_id")
@@ -211,14 +237,9 @@ def _translate_pdf(
                                 coverage_gap_pages.add(event["page"])
                         elif kind == "run_finished":
                             finished = event.get("ok") if isinstance(event.get("ok"), bool) else None
-                except (KeyboardInterrupt, OSError):
-                    # The sidecar owns a pi child; interrupt the whole isolated job.
-                    os.killpg(process.pid, signal.SIGTERM)
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        os.killpg(process.pid, signal.SIGKILL)
-                        process.wait()
+                except BaseException:
+                    # Interrupts, I/O and callback failures stop the whole isolated job.
+                    terminate(process)
                     raise
                 exit_code = process.wait()
     except FileExistsError:

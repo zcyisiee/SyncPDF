@@ -7,6 +7,8 @@ import os
 import sqlite3
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -457,3 +459,57 @@ def test_empty_glossary_still_terminates_with_empty_sidecar(
     args = json.loads((workdir / "invocation.json").read_text())["args"]
     sidecar = Path(args[args.index("--terminology") + 1])
     assert json.loads(sidecar.read_text(encoding="utf-8")) == []
+
+
+def test_callbacks_see_spawn_then_events_and_cancel_kills_process_group(tmp_path: Path) -> None:
+    """cloud 取消：on_spawn 先于任何事件拿到进程；终止整组（含 pi 子进程）后返回未完成信封。"""
+    from babeldoc_tools import rust_backend
+
+    engine = tmp_path / "syncpdf-cli"
+    engine.write_text(
+        "#!" + sys.executable + "\n"
+        "import json, pathlib, subprocess, sys, time\n"
+        "args = sys.argv[1:]\n"
+        "out = pathlib.Path(args[args.index('--output') + 1])\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        "(out.parent / 'child.pid').write_text(str(child.pid))\n"
+        "for event in ({'type': 'stage_started', 'stage': 'translating'}, {'type': 'page_ready', 'page': 1}):\n"
+        "    print(json.dumps(event), flush=True)\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    engine.chmod(0o755)
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-input")
+    workdir = tmp_path / "run"
+    calls: list[object] = []
+    spawned: list[subprocess.Popen] = []
+
+    def on_spawn(process: subprocess.Popen) -> None:
+        calls.append("spawn")
+        spawned.append(process)
+
+    def on_event(event: dict) -> None:
+        calls.append(event["type"])
+        if event["type"] == "page_ready":
+            threading.Thread(target=rust_backend.terminate, args=(spawned[0],)).start()
+
+    result = rust_backend._translate_pdf(
+        pdf=str(pdf), workdir=str(workdir), pages=None, model=None, thinking=None,
+        source_lang="auto", target_lang="zh-CN", layout_device="cpu", engine=str(engine),
+        translator="fake:slow:500", on_event=on_event, on_spawn=on_spawn,
+    )
+    assert calls == ["spawn", "stage_started", "page_ready"]
+    assert result["ok"] is False
+    assert result["error"]["code"] == "engine_result_missing"
+    assert result["error"]["saved_pages"] == 1
+    assert spawned[0].returncode is not None
+    child = int((workdir / "child.pid").read_text())
+    for _ in range(50):
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.1)
+    else:
+        pytest.fail("pi 子进程应随进程组一起结束")
