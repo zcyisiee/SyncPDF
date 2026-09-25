@@ -1,6 +1,6 @@
 # Rust PDF 后端修复 · 唯一 Task state
 
-> 更新：2026-09-24；仅用户和主 Agent 可修改。主树 `feat/desktop-develop`。当前任务：五篇真实论文顺序验证 Rust 编译后端，**进行中**。此前CCS验收属于历史，不是本轮成功证据。
+> 更新：2026-09-25；仅用户和主 Agent 可修改。主树 `feat/desktop-develop`。当前任务：五篇真实论文顺序验证 Rust 编译后端，**进行中**。此前CCS验收属于历史，不是本轮成功证据。
 
 ## 最新执行约定（覆盖下方旧顺序与预先重构计划）
 
@@ -53,6 +53,11 @@
 - VNS v1（226s，`vns-v1/`，引擎 e8ac8ade）：typeset 165、fallback 5（link_target_unplaced 4、P05-025 protected_source_overlap 同公式类）；p3 coverage_gap；Algorithm 标题保留英文。
 - CJK 两端对齐根因：断行用空格 stretch `4w` ≈ 字距 `0.05em` 的 20 倍，放置时 slack 被空格吞掉。修复 `e79d399b`：含 CJK 字距的行把 slack 均分到空格与字距（断行不变），无 CJK 字距行不变；VNS p5 回放目检 OK（`justify-check/`）。
 - 用户决策（09-24 验收轮）：①行距若降必须全局统一；优先"先借同栏盈余，不够再全局统一降行距"（方向4，未开始）②链接放不回时保留整段译文、隐藏该链接并记录原因（已实现，`prepare` 严格失败后逐链接保留可放回者，其余 `dropped`+F Hidden 位，事件 `link_dropped`）③换行连字符规则同意。回放 `tmp/paper-iteration/review-20260924-links/` 对比 `review-20260924/`：回退 TRC 8→0、ALNS 18→1、2602 18→14、VNS 3→3（P04-003/025 为 KEEP 原子定位失败，非链接，待查）、2604 6→6。遗留：ALNS/VNS dual 校验 `unresolved named destination`（`dual/navigation.rs:26`）待查；绕排段落 PP-DocLayoutV3 mask 按实例且限于各自框、无检测跨两部分→多边形不能解决，须检测后合并（方案 A 待用户看 `tmp/paper-iteration/layout-viz/2604-layout.pdf` 后决定）；CJK 10° 斜体切变未确认。
+
+- 用户指令（09-25）：①排不下由主控直接做，页内借位（同栏/左右栏，可横跨一栏），不跨页 ②绕排按方案 A 由主控做 ③之后查 dual PDF 生成失败 ④链接样式标记方案（`<a data-link>`）已答复，待①–③后再做。
+- 排不下一轮已提交（`0f9b0733`..`53a1036d`，5 提交）：视觉字号含 Form 的 Do CTM + 页空间基线方向（旋转文字按方向判定保留原文）；正文列表项悬挂续行合段；模型回声源文=not_replaced 不计回退；整栈重排失败时短源行段按实际障碍加宽重试。回放 `tmp/paper-iteration/fixes-v4/`（缓存按页内内容重映射到新段落 ID：`remap/`，内容变化段真实补译：`replay-live.sh`）：TRC 0、ALNS 0、2604 0、2602 1（P31-015）、VNS 2（P04-003/025 link_target_unplaced）。
+- 2602 P31-015 根因：Body 拉丁字体 PT Serif 比源 Times 宽约 10%，整页单栏已满、无可借空间；换 Times 度量拉丁字体属设计决策，**待用户决定**，不擅改。
+- 下一步：方案 A 绕排合段（真值：2604 P06-006+P06-009、P08-010+P08-013 各为一段，P08-009 独立）→ dual `unresolved named destination`（`dual/navigation.rs:26`，ALNS/VNS）→ VNS P04-003/025。
 
 ## 2026-09-24 接管：编译侧去过度开发（历史方案，执行优先级以上节为准）
 
