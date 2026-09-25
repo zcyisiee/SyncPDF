@@ -11,6 +11,15 @@
 //! selection rules are unchanged: per-destination grouping, exact counts,
 //! otherwise the paragraph keeps its source text.
 //!
+//! The label is the exact text of the link's own glyphs — whitespace trimmed,
+//! punctuation kept ("(1)", "2018)", "Jeong et al.,") for the literal match;
+//! the category/number structure (`decompose`) ignores surrounding punctuation.
+//! Appendix-numbered tails ("A1", "B.2", "S3") decompose like numeric tails.
+//! A line-wrapped citation split into several same-destination links is one
+//! label: fragments contiguous in reading order (joined across whitespace
+//! only) match their merged literal once, and the anchor is split between
+//! them.
+//!
 //! Click geometry is ink-based: a whitespace glyph carries no ink, so it must not
 //! veto the rest of its label (CFF fonts report no bounds for a space, unlike
 //! TrueType's empty box). Any other glyph without ink evidence still fails closed.
@@ -195,10 +204,11 @@ impl RefKind {
     }
 
     /// Whether a word of this category sits right before the number, possibly
-    /// with an enumeration list ("表 18、19、20") in between.
+    /// with an enumeration list ("表 18、19、20") or an appendix letter prefix
+    /// ("表 A1") in between.
     fn precedes_number(self, prefix: &str) -> bool {
         regex::Regex::new(&format!(
-            r"{}\s*\(?\s*(?:[0-9.]+\s*[,、和及]\s*(?:and\s*)?)*$",
+            r"{}\s*\(?\s*(?:[A-Za-z]{{1,2}}\s*)?(?:[0-9.]+\s*[,、和及]\s*(?:and\s*)?)*$",
             self.word_pattern()
         ))
         .expect("category prefix regex")
@@ -207,21 +217,44 @@ impl RefKind {
 }
 
 /// Split a bare label into cross-reference structure: a leading category word
-/// plus a numeric ("15", "4.2") or single-letter ("B") tail. Labels without
-/// that structure (pure numbers, footnotes, "§I") keep the literal-only path.
+/// plus a numeric ("15", "4.2"), single-letter ("B"), or appendix-numbered
+/// ("A1", "B.2", "S3") tail — a letter prefix followed by digits/dots. Labels
+/// without that structure (pure numbers, footnotes, "§I", stray "1A") keep the
+/// literal-only path.
 fn decompose(label: &str) -> Option<(RefKind, &str)> {
-    let label = label.trim_start();
+    // Structure ignores the link's surrounding punctuation ("(Fig. 3)",
+    // "Section 3.", "Table 2,"); the literal path keeps it.
+    let label = label.trim_matches(|c: char| c.is_whitespace() || "[](),.;:".contains(c));
     let word_end = label
         .find(|c: char| !c.is_ascii_alphabetic() && c != '.')
         .unwrap_or(label.len());
     let kind = RefKind::from_label_word(&label[..word_end])?;
     let tail = label[word_end..].trim_start();
-    let numeric = tail.chars().any(|c| c.is_ascii_digit())
-        && tail.chars().all(|c| c.is_ascii_digit() || c == '.')
-        && !tail.starts_with('.')
-        && !tail.ends_with('.');
+    let digits = |t: &str| {
+        t.chars().any(|c| c.is_ascii_digit())
+            && t.chars().all(|c| c.is_ascii_digit() || c == '.')
+            && !t.starts_with('.')
+            && !t.ends_with('.')
+    };
+    let numeric = digits(tail);
     let letter = tail.len() == 1 && tail.chars().all(|c| c.is_ascii_alphabetic());
-    (numeric || letter).then_some((kind, tail))
+    // Appendix/supplementary numbering: one or two uppercase letters then a
+    // digit/dot tail ("A1", "B.2"). Trailing letters ("1A") or repeated dots
+    // ("A..1") are not that structure.
+    let appendix = {
+        let letters: String = tail
+            .chars()
+            .take_while(|c| c.is_ascii_uppercase())
+            .collect();
+        let rest = &tail[letters.len()..];
+        !letters.is_empty()
+            && letters.len() <= 2
+            && rest.chars().any(|c| c.is_ascii_digit())
+            && rest.chars().all(|c| c.is_ascii_digit() || c == '.')
+            && !rest.ends_with('.')
+            && !rest.contains("..")
+    };
+    (numeric || letter || appendix).then_some((kind, tail))
 }
 
 /// Fail-closed selection per destination group: context-matched candidates
@@ -304,7 +337,12 @@ fn prepare_labeled(
         return None;
     }
     let mut ranges: Vec<(usize, usize, ObjectId)> = Vec::new();
-    let mut bare: BTreeMap<String, Vec<(ObjectId, String)>> = BTreeMap::new();
+    // Bare-path annotations: (id, destination, owned glyph indices, label byte
+    // range in `source`, label). A line-wrapped citation is split by the PDF
+    // producer into adjacent Links to one destination; such fragments form one
+    // run whose label is the joined text, not either ambiguous fragment.
+    #[allow(clippy::type_complexity)]
+    let mut annotations: Vec<(ObjectId, String, Vec<u32>, (usize, usize), String)> = Vec::new();
     for o in annots {
         let d = object(doc, o)?.as_dict().ok()?;
         let r = rect(doc, d.get(b"Rect").ok()?)?;
@@ -336,8 +374,11 @@ fn prepare_labeled(
             .collect();
         let start = selected.first()?.0;
         let end = selected.last()?.1;
-        let label =
-            source[start..end].trim_matches(|c: char| c.is_whitespace() || "[],().".contains(c));
+        // The label is the exact text of the link's own glyphs: trim
+        // whitespace only, keep punctuation ("(1)", "2018)", "Jeong et al.,").
+        // A paren-stripped form would be ambiguous whenever the same bare
+        // number occurs elsewhere in the paragraph.
+        let label = source[start..end].trim_matches(|c: char| c.is_whitespace());
         if label.is_empty() {
             return None;
         }
@@ -376,10 +417,83 @@ fn prepare_labeled(
                 .and_then(|o| o.as_str().ok().or_else(|| o.as_name().ok()))
                 .map(|v| String::from_utf8_lossy(v).into_owned())
                 .unwrap_or_else(|| format!("{:?}", d.get(b"A").ok().and_then(|o| object(doc, o))));
-            bare.entry(label.into())
-                .or_default()
-                .push((id, destination));
+            annotations.push((id, destination, owned, (start, end), label.into()));
         }
+    }
+    // Partition same-destination annotations into runs: fragments whose owned
+    // glyph indices are contiguous in reading order (adjacent or joined only
+    // by separator spans) are one line-wrapped label. Others are rival
+    // occurrences and keep the fail-closed literal path.
+    let mut runs: Vec<Vec<usize>> = Vec::new();
+    {
+        let mut by_dest: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+        for (i, (_, destination, _, _, _)) in annotations.iter().enumerate() {
+            by_dest.entry(destination).or_default().push(i);
+        }
+        for (_, mut indices) in by_dest {
+            if indices.len() < 2 {
+                runs.push(indices);
+                continue;
+            }
+            indices.sort_by_key(|&i| annotations[i].2.first().copied().unwrap_or(u32::MAX));
+            let mut run: Vec<usize> = Vec::new();
+            for &i in &indices {
+                let adjacent = run.last().is_some_and(|&j| {
+                    // The glyphs between the two fragments must all be
+                    // whitespace (the line-wrap separator): anything with ink
+                    // between them means these are not one wrapped label.
+                    let prev_last = annotations[j].2.last().copied().unwrap_or(u32::MAX);
+                    let next_first = annotations[i].2.first().copied().unwrap_or(u32::MAX);
+                    if next_first <= prev_last {
+                        return false;
+                    }
+                    (prev_last + 1..next_first).all(|k| {
+                        para.glyphs
+                            .get(k as usize)
+                            .and_then(|id| glyphs.get(id))
+                            .is_some_and(|g| {
+                                !g.unicode.is_empty()
+                                    && g.unicode.iter().all(|c: &char| c.is_whitespace())
+                            })
+                    })
+                });
+                if adjacent {
+                    run.push(i);
+                } else {
+                    if !run.is_empty() {
+                        runs.push(std::mem::take(&mut run));
+                    }
+                    run.push(i);
+                }
+            }
+            runs.push(run);
+        }
+    }
+    let mut bare: BTreeMap<String, Vec<(ObjectId, String)>> = BTreeMap::new();
+    let mut merged_labels: Vec<(String, Vec<ObjectId>, Vec<usize>)> = Vec::new();
+    for run in &runs {
+        if run.len() == 1 {
+            let (id, destination, _, _, label) = &annotations[run[0]];
+            bare.entry(label.clone())
+                .or_default()
+                .push((*id, destination.clone()));
+            continue;
+        }
+        // One label: the joined text of every fragment's owned spans.
+        let first = run.iter().map(|&i| annotations[i].3 .0).min().unwrap();
+        let last = run.iter().map(|&i| annotations[i].3 .1).max().unwrap();
+        let joined = &source[first..last];
+        let label = joined.trim_matches(|c: char| c.is_whitespace());
+        if label.is_empty() {
+            return None;
+        }
+        let ids: Vec<ObjectId> = run.iter().map(|&i| annotations[i].0).collect();
+        // Fragment weights for partitioning the matched translated range.
+        let weights: Vec<usize> = run
+            .iter()
+            .map(|&i| annotations[i].4.chars().count())
+            .collect();
+        merged_labels.push((label.to_string(), ids, weights));
     }
     for (label, group) in bare {
         let literal: Vec<_> = matches(&text, &label)
@@ -428,6 +542,64 @@ fn prepare_labeled(
                 select_by_destination(&all, &text, &destinations, multiple, true, |_| Some(kind));
         }
         ranges.extend(selected?.into_iter().map(|((s, e), id)| (s, e, id)));
+    }
+    // Place each merged label once and partition the matched range between its
+    // annotations by fragment weight: `tag` styles only the first active range
+    // at any cursor, so annotations that share a range would silently lose
+    // their anchors. A merged label must match exactly once — it is a whole
+    // citation, so any second occurrence means ambiguity.
+    for (label, ids, weights) in merged_labels {
+        let literal: Vec<_> = matches(&text, &label)
+            .into_iter()
+            .filter(|(s, e)| !atoms.values().any(|(a, b)| *s < *b && *a < *e))
+            .collect();
+        if literal.len() != 1 {
+            return None;
+        }
+        let (s, e) = literal[0];
+        let chars: Vec<(usize, usize)> = {
+            let mut v = Vec::new();
+            let mut a = s;
+            for c in text[s..e].chars() {
+                v.push((a, a + c.len_utf8()));
+                a += c.len_utf8();
+            }
+            v
+        };
+        let total: usize = weights.iter().sum();
+        let count = chars.len();
+        // Each annotation needs at least one character of the anchor.
+        if ids.len() > count || count < 1 {
+            return None;
+        }
+        // Weighted split at char boundaries: each annotation gets its share of
+        // the matched range, so the pieces cover it exactly. Bounds stay in
+        // 0..count and strictly increase even when a fragment's weight exceeds
+        // the whole matched range (a compressed translation).
+        let mut bounds: Vec<usize> = Vec::with_capacity(ids.len() + 1);
+        bounds.push(0);
+        let mut acc = 0;
+        for (k, weight) in weights.iter().enumerate() {
+            acc += weight;
+            if k + 1 == weights.len() {
+                bounds.push(count);
+            } else {
+                let b = ((acc * count) / total).min(count - 1);
+                bounds.push(b.max(bounds[k] + 1).min(count - 1));
+            }
+        }
+        let mut cursor = e;
+        for (k, id) in ids.iter().enumerate() {
+            let start = chars[bounds[k]].0;
+            let end = if k + 1 == ids.len() {
+                e
+            } else {
+                chars[bounds[k + 1]].0
+            };
+            ranges.push((start, end, *id));
+            cursor = end;
+        }
+        debug_assert_eq!(cursor, e);
     }
     ranges.sort_by_key(|r| r.0);
     if ranges.windows(2).any(|w| w[0].1 > w[1].0) {
@@ -738,8 +910,25 @@ mod tests {
         assert_eq!(decompose("Appendix B"), Some((RefKind::Appendix, "B")));
         assert_eq!(decompose("Section 4.2"), Some((RefKind::Section, "4.2")));
         assert_eq!(decompose("Fig. 6"), Some((RefKind::Figure, "6")));
+        // 附录/补充材料的编号结构：字母前缀 + 数字/点尾（A1、B.2、S3）。
+        assert_eq!(decompose("Fig. A1"), Some((RefKind::Figure, "A1")));
+        assert_eq!(decompose("Table B.2"), Some((RefKind::Table, "B.2")));
+        assert_eq!(decompose("Appendix S3"), Some((RefKind::Appendix, "S3")));
+        assert_eq!(decompose("(Fig. 3)"), Some((RefKind::Figure, "3")));
+        assert_eq!(decompose("Section 3."), Some((RefKind::Section, "3")));
+        assert_eq!(decompose("Table A1,"), Some((RefKind::Table, "A1")));
         // 无类别结构的标签不分解，保持纯字面路径。
-        for bare in ["15", "8", "B", "§I", "NarraBench"] {
+        for bare in [
+            "15",
+            "8",
+            "B",
+            "§I",
+            "NarraBench",
+            "A1",
+            "1A",
+            "A.1.",
+            "A..1",
+        ] {
             assert_eq!(decompose(bare), None, "{bare} 不应分解");
         }
         // 类别语境只看编号前是否紧邻本类别词，与空格无关：真实模型常写
@@ -1598,5 +1787,192 @@ mod tests {
             "「图 4」的链接必须锚在译文中更靠前的「4」上"
         );
         assert!(ann.iter().all(|(_, t)| t == "4"));
+    }
+
+    // ── 附录字母数字尾（Fig. A1 → 「图 A1」） ─────────────────────────
+
+    #[test]
+    fn appendix_letter_digit_tails_relocate() {
+        // 附录编号是「字母前缀 + 数字/点」的结构（A1、B.2）；类别词被译掉后
+        // 尾部必须仍能按类别+编号重定位。非 hyperref 目的地（f0075 这类），
+        // 类别证据只来自源标签自身的类别词。
+        for (source, label, dest, translated, anchored) in [
+            (
+                "as shown in Fig. A1",
+                "Fig. A1",
+                "f0075",
+                "如图 A1 所示",
+                "A1",
+            ),
+            ("see Table B.2", "Table B.2", "t0045", "见表 B.2。", "B.2"),
+            (
+                "in Appendix S3",
+                "Appendix S3",
+                "sec.S3",
+                "在附录 S3 中",
+                "S3",
+            ),
+        ] {
+            let at = source.find(label).unwrap();
+            let (para, ir, doc, parsed, placed) = ref_case(
+                "P01-026",
+                source,
+                &[(at, at + label.len(), dest)],
+                translated,
+            );
+            let target = prepare(&para, &ir, &doc, &parsed)
+                .unwrap_or_else(|| panic!("{label} 必须能按类别+字母数字尾重定位"));
+            let ann = annotated_texts(&target);
+            assert_eq!(ann.len(), 1);
+            assert_eq!(ann[0].0, placed[0].0);
+            assert_eq!(ann[0].1, anchored);
+        }
+    }
+
+    #[test]
+    fn stray_letter_digit_tail_without_category_falls_back() {
+        // 译文里只有孤立 A1（无类别词）且数量恰等：不得因数量巧合认领。
+        let text = "as shown in Fig. A1";
+        let at = text.find("Fig. A1").unwrap();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-027",
+            text,
+            &[(at, at + "Fig. A1".len(), "f0075")],
+            "特征 A1 与模式 A1 的对比。",
+        );
+        assert!(
+            prepare(&para, &ir, &doc, &parsed).is_none(),
+            "无类别语境的孤立字母数字尾即使数量恰等也必须回退"
+        );
+    }
+
+    #[test]
+    fn mismatched_category_for_letter_digit_tail_falls_back() {
+        // 源标签是 Fig. A1，译文却写成「表 A1」：类别不符，不得借用。
+        let text = "as shown in Fig. A1";
+        let at = text.find("Fig. A1").unwrap();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-028",
+            text,
+            &[(at, at + "Fig. A1".len(), "f0075")],
+            "如表 A1 所示。",
+        );
+        assert!(
+            prepare(&para, &ir, &doc, &parsed).is_none(),
+            "类别词与源类别不符必须回退"
+        );
+    }
+
+    // ── 标签取链接自身字形的精确文本（保留括号等标点） ─────────────────
+
+    #[test]
+    fn owned_punctuation_label_relocates() {
+        // 链接只盖住 "(1)"：标签必须精确取被盖住字形的文本，括号不再被剥掉；
+        // 译文「式(1)」中 "(1)" 唯一出现，字面路径即成立。
+        let text = "the objective in (1) is minimized.";
+        let at = text.find("(1)").unwrap();
+        let (para, ir, doc, parsed, placed) = ref_case(
+            "P01-029",
+            text,
+            &[(at, at + "(1)".len(), "e0005")],
+            "式(1) 中的目标函数被最小化。",
+        );
+        let target = prepare(&para, &ir, &doc, &parsed).expect("精确标签含括号");
+        let ann = annotated_texts(&target);
+        assert_eq!(ann.len(), 1);
+        assert_eq!(ann[0].0, placed[0].0);
+        assert_eq!(ann[0].1, "(1)");
+    }
+
+    #[test]
+    fn owned_punctuation_label_ambiguous_falls_back() {
+        // 同一精确标签 "(1)" 在译文中出现两次而链接只有一条：无法唯一定位，回退。
+        let text = "the objective in (1) is minimized.";
+        let at = text.find("(1)").unwrap();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-030",
+            text,
+            &[(at, at + "(1)".len(), "e0005")],
+            "式(1) 与式(1) 一致，二者均为枚举。",
+        );
+        assert!(
+            prepare(&para, &ir, &doc, &parsed).is_none(),
+            "精确标签多次出现且无类别语境时必须回退"
+        );
+    }
+
+    // ── 跨行折断的同目的地链接合并（一条引文被折成两条注释） ─────────────
+
+    #[test]
+    fn contiguous_same_destination_links_merge() {
+        // 一条 "Ropke and" + "Pisinger, 2006a)" 引文被行折断成两条同目的地
+        // 注释；被盖住的字形在阅读顺序上连续（中间只有空白），合并后的
+        // 完整标签在译文中逐字存在：两条注释都锚定到这一处。
+        let text = "compare (Ropke and Pisinger, 2006a) here.";
+        let a = text.find("Ropke and").unwrap();
+        let b = a + "Ropke and".len();
+        let c = b + " ".len();
+        let d = text.find("2006a)").unwrap() + "2006a)".len();
+        let (para, ir, doc, parsed, placed) = ref_case(
+            "P01-031",
+            text,
+            &[(a, b, "b1170"), (c, d, "b1170")],
+            "比较 (Ropke and Pisinger, 2006a) 这里。",
+        );
+        let target = prepare(&para, &ir, &doc, &parsed).expect("折断引文按合并标签重定位");
+        let ann = annotated_texts(&target);
+        assert_eq!(ann.len(), 2, "两条注释都要有锚点");
+        let mut ids: Vec<_> = ann.iter().map(|(o, _)| *o).collect();
+        ids.sort();
+        let mut wanted: Vec<_> = placed.iter().map(|(o, _)| *o).collect();
+        wanted.sort();
+        assert_eq!(ids, wanted, "两条注释都要有锚点");
+        // 两个锚点共同覆盖合并标签的完整文本（按片段权重切分）。
+        let joined: String = {
+            let mut v: Vec<&(ObjectId, String)> = ann.iter().collect();
+            v.sort_by_key(|(o, _)| placed.iter().position(|(p, _)| p == o).unwrap());
+            v.iter().map(|(_, t)| t.as_str()).collect()
+        };
+        assert_eq!(joined, "Ropke and Pisinger, 2006a)");
+    }
+
+    #[test]
+    fn noncontiguous_same_destination_links_do_not_merge() {
+        // 同目的地两条链接之间隔着其他文字：不属于同一条折断引文，不合并；
+        // 各自的标签在译文中无法唯一定位时必须回退。
+        let text = "see Ropke and also 2006a again.";
+        let a = text.find("Ropke and").unwrap();
+        let b = a + "Ropke and".len();
+        let c = text.find("2006a").unwrap();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-032",
+            text,
+            &[(a, b, "b1170"), (c, c + "2006a".len(), "b1170")],
+            "参见 Ropke 和另见 2006a 再说。",
+        );
+        assert!(
+            prepare(&para, &ir, &doc, &parsed).is_none(),
+            "不连续的同目的地链接不得合并"
+        );
+    }
+
+    #[test]
+    fn merged_label_absent_from_translation_falls_back() {
+        // 折断引文合并后，其合并文本被译文改写（不再逐字出现）：回退。
+        let text = "compare (Ropke and Pisinger, 2006a) here.";
+        let a = text.find("Ropke and").unwrap();
+        let b = a + "Ropke and".len();
+        let c = b + " ".len();
+        let d = text.find("2006a)").unwrap() + "2006a)".len();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-033",
+            text,
+            &[(a, b, "b1170"), (c, d, "b1170")],
+            "比较 (Ropke 与 Pisinger，2006a) 这里。",
+        );
+        assert!(
+            prepare(&para, &ir, &doc, &parsed).is_none(),
+            "合并标签不在译文中逐字存在时必须回退"
+        );
     }
 }
