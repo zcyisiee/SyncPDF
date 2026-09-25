@@ -125,3 +125,77 @@ fn mismatched_pages_and_alias_output_do_not_overwrite_files() {
     assert!(export(&a, &b, &a).is_err());
     assert_eq!(std::fs::read(&a).unwrap(), before);
 }
+
+fn with_extra_link(mut doc: Document, rect: Vec<Object>, dest: &str) -> Document {
+    let page = doc.get_pages()[&1];
+    let link = doc.add_object(dictionary! {
+        "Type"=>"Annot","Subtype"=>"Link","Rect"=>rect,"Dest"=>Object::string_literal(dest),
+    });
+    let dict = doc.get_object_mut(page).unwrap().as_dict_mut().unwrap();
+    let mut annots = dict.get(b"Annots").unwrap().as_array().unwrap().clone();
+    annots.push(Object::Reference(link));
+    dict.set("Annots", annots);
+    doc
+}
+
+#[test]
+fn source_navigation_flaws_are_carried_over_instead_of_failing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (source, mono, dual) = (
+        dir.path().join("s.pdf"),
+        dir.path().join("m.pdf"),
+        dir.path().join("d.pdf"),
+    );
+    // 零宽框 + 悬空名称（原文自带），以及倒置框 + 可解析名称。
+    let flawed = |text| {
+        let doc = fixture(text, &[0]);
+        let doc = with_extra_link(
+            doc,
+            vec![50.into(), 100.into(), 50.into(), 110.into()],
+            "missing",
+        );
+        with_extra_link(
+            doc,
+            vec![90.into(), 130.into(), 70.into(), 120.into()],
+            "section",
+        )
+    };
+    flawed("ORIGINAL").save(&source).unwrap();
+    flawed("TRANSLATED").save(&mono).unwrap();
+    export(&source, &mono, &dual).unwrap();
+    let out = Document::load(&dual).unwrap();
+    let annotations = out.get_page_annotations(out.get_pages()[&1]).unwrap();
+    assert_eq!(annotations.len(), 8);
+    for side in [0, 4] {
+        let zero =
+            navigation::annotation_rect(annotations[side + 2].get(b"Rect").unwrap()).unwrap();
+        assert!((zero[2] - zero[0]).abs() < 0.001 && zero[3] > zero[1]);
+        assert_eq!(
+            annotations[side + 2]
+                .get(b"Dest")
+                .unwrap()
+                .as_str()
+                .unwrap(),
+            b"missing"
+        );
+        let inverted = annotations[side + 3]
+            .get(b"Rect")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        let v: Vec<f32> = inverted.iter().map(|o| o.as_float().unwrap()).collect();
+        assert!(v[2] > v[0] && v[3] > v[1]);
+        // 左侧沿用原文名称树保留字符串；右侧已解析成显式目标。
+        let dest = annotations[side + 3].get(b"Dest").unwrap();
+        assert_eq!(dest.as_array().is_ok(), side == 4);
+    }
+    // 反例：非数值注释框仍拒绝。
+    let mut bad = with_extra_link(
+        fixture("X", &[0]),
+        vec![0.into(), "a".into(), 1.into(), 1.into()],
+        "section",
+    );
+    bad.save(&source).unwrap();
+    fixture("Y", &[0]).save(&mono).unwrap();
+    assert!(export(&source, &mono, &dual).is_err());
+}

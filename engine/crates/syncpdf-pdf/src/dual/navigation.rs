@@ -20,11 +20,11 @@ pub(super) fn resolve_named_links(doc: &mut Document) -> Result<()> {
                 } else {
                     b"Dest".as_slice()
                 };
+                // 原文自身的悬空名称保持原样：合并后同样查不到，行为与原文一致（死链）。
                 if let Ok(Object::Name(n) | Object::String(n, _)) = d.get(key) {
-                    let value = names
-                        .get(n)
-                        .ok_or_else(|| DualError::Invalid("unresolved named destination".into()))?;
-                    d.set(key, value.clone());
+                    if let Some(value) = names.get(n) {
+                        d.set(key, value.clone());
+                    }
                 }
                 for (_, value) in d.iter_mut() {
                     replace(value, names)?;
@@ -202,11 +202,32 @@ fn transformed_destination(a: &[Object], p: Placement) -> Result<Vec<Object>> {
     Ok(out)
 }
 
+/// 注释框按规范由阅读器归一化，零面积合法（不可点击）；只拒绝非数值。
+pub(super) fn annotation_rect(object: &Object) -> Result<[f32; 4]> {
+    let values = object.as_array()?;
+    if values.len() != 4 {
+        return Err(DualError::Invalid("invalid rectangle".into()));
+    }
+    let mut r = [0.; 4];
+    for (slot, value) in r.iter_mut().zip(values) {
+        *slot = value.as_float()?;
+    }
+    if r.iter().any(|v| !v.is_finite()) {
+        return Err(DualError::Invalid("invalid rectangle dimensions".into()));
+    }
+    Ok([
+        r[0].min(r[2]),
+        r[1].min(r[3]),
+        r[0].max(r[2]),
+        r[1].max(r[3]),
+    ])
+}
+
 pub(super) fn annotations(doc: &Document, id: ObjectId, p: Placement) -> Result<Vec<Dictionary>> {
     let mut out = Vec::new();
     for annotation in doc.get_page_annotations(id)? {
         let mut annotation = annotation.clone();
-        let rect = rectangle(resolve(doc, annotation.get(b"Rect")?)?)?;
+        let rect = annotation_rect(resolve(doc, annotation.get(b"Rect")?)?)?;
         annotation.set("Rect", numbers(p.rect(rect)));
         annotation.set("P", Object::Reference(p.page));
         for key in [b"QuadPoints".as_slice(), b"Vertices", b"L"] {
