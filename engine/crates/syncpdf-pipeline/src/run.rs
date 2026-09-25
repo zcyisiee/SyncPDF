@@ -1022,7 +1022,17 @@ fn handle_block(
         let bound = state.bound.get(&(id.page - 1))?;
         stages::link_text::prepare(&para, &bound.ir, &state.doc, parsed)
     });
-    if parsed_result.is_ok() && block.status.is_ok() && prepared.is_none() {
+    // 模型原样回显原文（空白差异除外）：原文字形就是忠实结果，保留不替换，
+    // 不进排版，也不算回退——排不下的回显不该报成失败。
+    let echoed = block.status.is_ok()
+        && parsed_result.as_ref().is_ok_and(|parsed| {
+            parsed
+                .text()
+                .split_whitespace()
+                .eq(para.text.split_whitespace())
+        });
+    if echoed {
+    } else if parsed_result.is_ok() && block.status.is_ok() && prepared.is_none() {
         // 按实际失败接缝归因：原子能在译文中重定位（resolve_text 通过）而
         // prepare 失败，坏在链接侧；原子解析失败才是原子侧。
         let atoms_placed = parsed_result.as_ref().is_ok_and(|parsed| {
@@ -1161,6 +1171,18 @@ fn handle_block(
     }
 
     match out {
+        None if echoed => {
+            state.src_chars += src_len;
+            state.tgt_chars += src_len;
+            sink.emit(Event::Paragraph {
+                paragraph_id: id.clone(),
+                page: id.page,
+                status: ParagraphStatus::NotReplaced,
+                boxes: Some(vec![para.bbox]),
+                coord_system: syncpdf_core::CoordSystem::PdfUser,
+                translated_html: None,
+            });
+        }
         Some((html, boxes)) => sink.emit(Event::Paragraph {
             paragraph_id: id.clone(),
             page: id.page,
@@ -1698,8 +1720,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn oversized_translation_preserves_source_and_reports_fixed_size_failure() {
+    /// 一段 20×12 固定框、另一段未到达的单段运行态：观察单块落定结果。
+    fn fixed_frame_state(text: &str, tag: &str) -> (RunState, ParagraphId) {
         use syncpdf_core::ir::{Align, RegionKind, StyleRun};
         use syncpdf_core::{Color, PageId, Rect, StyleId};
         let id = ParagraphId { page: 1, seq: 1 };
@@ -1726,7 +1748,7 @@ mod tests {
             }],
             decorations: Vec::new(),
             atoms: Vec::new(),
-            text: "Source".into(),
+            text: text.into(),
             align: Align::Left,
             first_indent: 0.0,
             line_height: 12.0,
@@ -1741,10 +1763,10 @@ mod tests {
                 .into_iter()
                 .map(|id| (1, id)),
         );
-        let dir = tmp_path("oversized-fixture");
+        let dir = tmp_path(tag);
         std::fs::create_dir_all(&dir).unwrap();
         let (fixture, _) = transaction_tests::state(&dir);
-        let mut state = RunState {
+        let state = RunState {
             doc: fixture.doc,
             bound: fixture.bound,
             targets: BTreeMap::new(),
@@ -1777,6 +1799,12 @@ mod tests {
             callback_error: None,
             blocks: Vec::new(),
         };
+        (state, id)
+    }
+
+    #[test]
+    fn oversized_translation_preserves_source_and_reports_fixed_size_failure() {
+        let (mut state, id) = fixed_frame_state("Source", "oversized-fixture");
         let log = Arc::new(Mutex::new(Vec::new()));
         let sink = SharedSink::new(RunRecorder::new(log.clone()));
         handle_block(
@@ -1814,6 +1842,58 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn echoed_translation_keeps_source_glyphs_without_counting_a_fallback() {
+        // 原文排不进 20×12 的框；模型原样回显（仅空白不同）时，原文字形就是忠实结果。
+        let source = "Alice Smith, Bob Jones,\nCarol White and Dan Brown";
+        for (html, echoed) in [
+            ("Alice Smith, Bob Jones, Carol White and Dan Brown", true),
+            (
+                "Alice  Smith,\tBob Jones, Carol   White and Dan Brown ",
+                true,
+            ),
+            // 反例：哪怕只改一个字，也必须照常排版并如实报告溢出。
+            ("Alice Smith, Bob Jones, Carol White und Dan Brown", false),
+        ] {
+            let (mut state, id) = fixed_frame_state(source, "echo-fixture");
+            let log = Arc::new(Mutex::new(Vec::new()));
+            let sink = SharedSink::new(RunRecorder::new(log.clone()));
+            handle_block(
+                &mut state,
+                &sink,
+                syncpdf_translate::TranslatedBlock {
+                    id: id.clone(),
+                    html: format!("<p id=\"{id}\">{html}</p>"),
+                    status: syncpdf_translate::BlockStatus::Ok,
+                    from_cache: false,
+                },
+                2,
+            )
+            .unwrap();
+            assert!(state.typeset_by_page.is_empty(), "{html}");
+            assert!(state.settled_ids.contains(&id));
+            assert_eq!(state.fallbacks, u32::from(!echoed), "{html}");
+            let log = log.lock().unwrap();
+            let status = if echoed {
+                ParagraphStatus::NotReplaced
+            } else {
+                ParagraphStatus::Fallback
+            };
+            assert!(
+                log.iter().any(|(_, event)| matches!(event,
+                    Event::Paragraph { paragraph_id, status: s, translated_html: None, .. }
+                    if paragraph_id == &id && *s == status)),
+                "{html}"
+            );
+            assert_eq!(
+                log.iter().any(|(_, event)| matches!(event,
+                    Event::Issue { code, .. } if code == "typeset_overflow")),
+                !echoed,
+                "{html}"
+            );
+        }
     }
 
     fn write_terms(dir: &tempfile::TempDir, json: &str) -> PathBuf {
