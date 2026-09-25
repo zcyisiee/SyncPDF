@@ -62,6 +62,8 @@ export function describeEvent(event: EngineEvent): EventLine {
         page: event.page,
         paragraphId: event.paragraph_id,
       };
+    case 'page_reopened':
+      return line('refresh', 'accent', `第 ${event.page} 页按编辑单页重编`, event.page);
     case 'page_ready':
       return line('file', 'ok', `第 ${event.page} 页译文已写入`, event.page);
     case 'issue':

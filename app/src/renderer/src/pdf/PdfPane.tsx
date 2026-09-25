@@ -24,12 +24,17 @@ import { usePdfDocument } from './usePdfDocument';
 export interface PdfPaneProps {
   side: ScrollOrigin;
   path: string;
+  /** 文件修订号：变化即重载文件。 */
   revision: number;
+  /** 1 基页号 → 该页内容修订号；只重画变了的页。 */
+  pageRevisions?: Record<number, number>;
+  /** 左上角提示"待动态编译"的页（1 基）。 */
+  pendingPages?: ReadonlySet<number>;
   itemsByPage: Map<number, OverlayItem[]>;
 }
 
-export function PdfPane({ side, path, revision, itemsByPage }: PdfPaneProps): JSX.Element {
-  const { doc, error, loading } = usePdfDocument(path, revision);
+export function PdfPane({ side, path, revision, pageRevisions, pendingPages, itemsByPage }: PdfPaneProps): JSX.Element {
+  const { doc, revision: docRevision, error, loading } = usePdfDocument(path, revision);
   const zoom = useWorkbench((s) => s.zoom[side]);
   const showBoxes = useWorkbench((s) => s.showBoxes);
   const selected = useLibrary((s) => s.selected);
@@ -123,10 +128,16 @@ export function PdfPane({ side, path, revision, itemsByPage }: PdfPaneProps): JS
     (pageNumber: number) =>
       function Overlay(viewport: PageViewport) {
         const items = itemsByPage.get(pageNumber);
-        if (!showBoxes || items === undefined) return null;
-        return <BoxOverlay items={items} viewport={viewport} selected={selected} onSelect={onSelect} />;
+        return (
+          <>
+            {showBoxes && items !== undefined && (
+              <BoxOverlay items={items} viewport={viewport} selected={selected} onSelect={onSelect} />
+            )}
+            {pendingPages?.has(pageNumber) === true && <div className="sp-page-badge">待动态编译</div>}
+          </>
+        );
       },
-    [itemsByPage, showBoxes, selected, onSelect],
+    [itemsByPage, showBoxes, selected, onSelect, pendingPages],
   );
 
   return (
@@ -155,7 +166,8 @@ export function PdfPane({ side, path, revision, itemsByPage }: PdfPaneProps): JS
             pageNumber={pageNumber}
             zoom={zoom}
             containerWidth={width}
-            revision={revision}
+            revision={pageRevisions?.[pageNumber] ?? 0}
+            docRevision={docRevision}
             renderOverlay={renderOverlay(pageNumber)}
           />
         ))}

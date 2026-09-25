@@ -72,6 +72,31 @@ describe('PageCanvas', () => {
     expect(rendered(container)).toBe('true');
   });
 
+  // 回归：任一页回写都会重载译文文件（doc 换新），其它页不能跟着整篇重画
+  it('换新 doc 但本页修订号不变：不重画；本页修订号变了且新 doc 就位才重画', async () => {
+    const first = fakeDoc();
+    const { rerender } = render(<PageCanvas doc={first.doc} pageNumber={1} zoom={1} containerWidth={800} />);
+    await waitFor(() => expect(first.renders()).toBe(1));
+    await act(async () => first.finish());
+
+    const second = fakeDoc();
+    await act(async () => {
+      rerender(<PageCanvas doc={second.doc} pageNumber={1} zoom={1} containerWidth={800} docRevision={1} />);
+    });
+    expect(second.renders()).toBe(0);
+
+    // 本页回写：新文件还没加载（docRevision 落后）时不用旧文件抢画
+    await act(async () => {
+      rerender(<PageCanvas doc={second.doc} pageNumber={1} zoom={1} containerWidth={800} revision={2} docRevision={1} />);
+    });
+    expect(second.renders()).toBe(0);
+    const third = fakeDoc();
+    await act(async () => {
+      rerender(<PageCanvas doc={third.doc} pageNumber={1} zoom={1} containerWidth={800} revision={2} docRevision={2} />);
+    });
+    await waitFor(() => expect(third.renders()).toBe(1));
+  });
+
   it('尺寸与修订号都没变时不重复渲染', async () => {
     const { doc, renders, finish } = fakeDoc();
     const { container, rerender } = render(<PageCanvas doc={doc} pageNumber={1} zoom={1} containerWidth={800} />);

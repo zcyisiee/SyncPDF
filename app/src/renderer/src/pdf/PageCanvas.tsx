@@ -4,7 +4,8 @@
  * - devicePixelRatio：画布位图尺寸 = CSS 尺寸 × DPR（上限见 `canvasPixelSize`），
  *   再把 DPR 作为 `transform` 传给 pdf.js，保证高倍屏不糊；
  * - 懒渲染：IntersectionObserver（rootMargin 让上下各预渲染一屏）；
- * - `revision` 变化 → 重新渲染本页（译文栏 `page_ready` 增量刷新走这条路）；
+ * - `revision` 是本页内容修订号：只有它变了才重画本页。译文 PDF 任一页回写都会重载
+ *   整个文件（`doc` 换新），但其它页内容没变，保留已画好的位图，不整篇闪烁；
  * - 卸载 / 参数变更时 `RenderTask.cancel()`，避免并发写同一画布。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -19,8 +20,10 @@ export interface PageCanvasProps {
   zoom: number | 'fit-width';
   /** 可用宽度（CSS px），fit-width 时用。 */
   containerWidth: number;
-  /** 内容修订号：变化即重渲染本页。 */
+  /** 本页内容修订号：变化即重渲染本页。 */
   revision?: number;
+  /** `doc` 反映到的修订号；低于 `revision` 说明新文件还没加载好，先不画。 */
+  docRevision?: number;
   /** 视口就绪回调（叠加层要用同一个 viewport 做换算）。 */
   onViewport?: (pageNumber: number, viewport: PageViewport | null) => void;
   /** 画布之上的叠加层（段落框）。 */
@@ -38,6 +41,7 @@ export function PageCanvas({
   zoom,
   containerWidth,
   revision = 0,
+  docRevision = 0,
   onViewport,
   renderOverlay,
   gutter = 24,
@@ -51,6 +55,8 @@ export function PageCanvas({
   const [visible, setVisible] = useState(() => typeof IntersectionObserver === 'undefined');
   const [rendered, setRendered] = useState(-1);
   const [failure, setFailure] = useState<string | null>(null);
+  /** 画布上已完成的内容：修订号 + CSS 尺寸。 */
+  const drawnRef = useRef<{ revision: number; width: number; height: number } | null>(null);
 
   // 取页对象（一次），卸载时释放
   useEffect(() => {
@@ -110,10 +116,13 @@ export function PageCanvas({
   }, []);
 
   // 渲染：可见 + 视口就绪；页面 / 视口（按 scale 记忆）/ revision 变了就重渲染。
-  // 不另设"已渲染"去重：cleanup 取消了在途任务，重跑必须重新渲染，否则页面停在空白。
+  // 去重只认**已完成**的渲染：cleanup 取消了在途任务时 drawn 没记上，重跑必须重新渲染，否则页面停在空白。
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!visible || page === null || viewport === null || canvas === null) return;
+    if (docRevision < revision) return;
+    const drawn = drawnRef.current;
+    if (drawn?.revision === revision && drawn.width === viewport.width && drawn.height === viewport.height) return;
 
     taskRef.current?.cancel();
     const { width, height, ratio } = canvasPixelSize(
@@ -140,6 +149,7 @@ export function PageCanvas({
     taskRef.current = task;
     task.promise
       .then(() => {
+        drawnRef.current = { revision, width: viewport.width, height: viewport.height };
         setFailure(null);
         setRendered(revision);
       })
@@ -150,7 +160,7 @@ export function PageCanvas({
     return () => {
       task.cancel();
     };
-  }, [visible, page, viewport, revision]);
+  }, [visible, page, viewport, revision, docRevision]);
 
   // 重载期间（换 doc 对象）沿用上次的页面尺寸，避免整栏高度跳变把滚动位置夹走
   const [lastSize, setLastSize] = useState<{ width: number; height: number } | null>(null);

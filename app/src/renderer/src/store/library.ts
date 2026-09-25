@@ -21,8 +21,10 @@ export interface OpenDoc {
   issues: IssueRecord[];
   /** 单块覆盖（段 ID → 状态）；null = 快照与本次会话都还没给出。 */
   edits: Record<ParagraphId, BlockEditState> | null;
-  /** 译文 PDF 修订号：引擎每回写一页 +1，译文栏据此重载。 */
+  /** 译文 PDF 修订号：引擎每回写一页 +1，译文栏据此重载文件。 */
   revision: number;
+  /** 1 基页号 → 该页最近一次回写时的 `revision`；只有这些页需要重画。 */
+  pageRevisions: Record<number, number>;
   /** 加载期间收到了新一轮 run_started：快照已过时，丢弃。 */
   restarted: boolean;
 }
@@ -38,7 +40,7 @@ const TIMELINE_LIMIT = 5000;
 const LOG_LIMIT = 2000;
 
 export function emptyOpenDoc(id: string): OpenDoc {
-  return { id, loading: true, layout: {}, paragraphs: {}, issues: [], edits: null, revision: 0, restarted: false };
+  return { id, loading: true, layout: {}, paragraphs: {}, issues: [], edits: null, revision: 0, pageRevisions: {}, restarted: false };
 }
 
 /** 引擎事件归约到当前论文。未涉及的事件原样返回同一对象。 */
@@ -58,12 +60,32 @@ export function reduceOpenDoc(open: OpenDoc, event: EngineEvent): OpenDoc {
       const { seq: _seq, ts: _ts, type: _type, ...record } = event;
       return { ...open, issues: [...open.issues, record] };
     }
-    case 'page_ready':
+    case 'page_reopened':
+      return { ...open, issues: open.issues.filter((issue) => issue.page !== event.page) };
+    case 'page_ready': {
+      const revision = open.revision + 1;
+      return { ...open, revision, pageRevisions: { ...open.pageRevisions, [event.page]: revision } };
+    }
     case 'run_finished':
+      // 发布可能重写文件（压缩等）但不改页面内容：只重载文件，不重画页
       return { ...open, revision: open.revision + 1 };
     default:
       return open;
   }
+}
+
+/**
+ * 因排版溢出暂时回退的段所在页（1 基）。这些段在翻译收尾时会进入动态编译
+ * （全文降行距、局部扩框）；翻译校验类回退不会，不算在内。
+ */
+export function relayoutPendingPages(open: OpenDoc): Set<number> {
+  const pages = new Set<number>();
+  for (const issue of open.issues) {
+    if (issue.code !== 'typeset_overflow' || issue.paragraph_id === null) continue;
+    const paragraph = open.paragraphs[issue.paragraph_id];
+    if (paragraph?.status === 'fallback') pages.add(paragraph.page);
+  }
+  return pages;
 }
 
 const editsById = (edits: BlockEditState[]): Record<ParagraphId, BlockEditState> =>

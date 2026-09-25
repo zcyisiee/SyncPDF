@@ -1,7 +1,8 @@
 /**
  * 块详情的译文编辑器：contentEditable，受保护原子（`{{KEEP_n}}`）渲染为不可改的胶囊，
- * 原文样式段（`data-style`）保留为浅色底。应用 / 恢复 / 重译都经主进程排一次走缓存的重跑，
- * 译文 PDF 随 `page_ready` / `run_finished` 重载。
+ * 原文样式段（`data-style`）只携带样式号、外观与普通文字相同。
+ * 头部三个按钮：撤回 / 重新翻译此块 / 单独编译此块。后两者经主进程排一次 run，
+ * 引擎只重编该块所在页（`page_reopened` → `page_ready`），译文栏只重画这一页。
  */
 import { useEffect, useRef, useState } from 'react';
 import type { BlockAlign, BlockEditState, BlockStyle, FontFamily } from '@shared/protocol';
@@ -129,11 +130,13 @@ export function BlockEditor({ paragraph, edit, onSubmit }: BlockEditorProps): JS
       },
     ]);
   };
-  const restore = (): void => {
-    if (manual) {
+  /** 撤回：有未编译的改动先丢弃改动；否则把已编译的手改恢复为模型译文。 */
+  const undo = (): void => {
+    if (!textDirty && !styleDirty && manual) {
       onSubmit([{ type: 'apply_edit', paragraph_id: paragraph.paragraph_id, translated_html: null, style: baseStyle }]);
     }
     resetDraft();
+    setStyle(baseStyle);
   };
   const retranslate = (): void => {
     onSubmit([{ type: 'retranslate', paragraph_ids: [paragraph.paragraph_id] }]);
@@ -146,12 +149,17 @@ export function BlockEditor({ paragraph, edit, onSubmit }: BlockEditorProps): JS
         <span className="sp-spacer" />
         <IconButton
           icon="discard"
-          title={manual ? '恢复模型译文' : '撤销未应用的修改'}
-          disabled={!manual && !textDirty}
-          onClick={restore}
+          title={textDirty || styleDirty ? '撤回未编译的修改' : '撤回手改，恢复模型译文'}
+          disabled={!manual && !textDirty && !styleDirty}
+          onClick={undo}
         />
-        <IconButton icon="sync" title="重译此块（绕过缓存重新请求模型）" onClick={retranslate} />
-        <IconButton icon="check" title="应用" disabled={!(textDirty || styleDirty) || !valid} onClick={apply} />
+        <IconButton icon="sparkle" title="重新翻译此块（绕过缓存重新请求模型）" onClick={retranslate} />
+        <IconButton
+          icon="play"
+          title="单独编译此块（只重排所在页）"
+          disabled={!(textDirty || styleDirty) || !valid}
+          onClick={apply}
+        />
       </div>
       {unit === null ? (
         <p className="sp-hint">{html === null ? '暂无译文，可重译此块。' : '译文格式无法编辑，可重译此块。'}</p>

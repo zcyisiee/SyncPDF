@@ -201,6 +201,12 @@
   font-size: 16px;
 }
 
+.sp-glyph-icon {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+
 .sp-icon-button:hover:not(:disabled) {
   background: var(--vscode-toolbar-hoverBackground);
   color: var(--vscode-foreground);
@@ -582,8 +588,12 @@
   min-width: 0;
 }
 
-.sp-pane + .sp-pane {
-  border-left: 1px solid var(--vscode-panel-border);
+/* 双栏同步滚动：只留右栏滚动条，中间不画分隔线 */
+.sp-panes.mode-dual .sp-pane:first-child .sp-pdf-scroll {
+  scrollbar-width: none;
+}
+.sp-panes.mode-dual .sp-pane:first-child .sp-pdf-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .sp-pane-label {
@@ -605,6 +615,21 @@
   min-height: 0;
   overflow: auto;
   padding: 12px 0;
+}
+
+/* 页左上角：本页有排版溢出暂时回退的段，收尾时会动态编译 */
+.sp-page-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 3;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #e3effb;
+  color: #2f6fae;
+  font-size: 11px;
+  line-height: 16px;
+  pointer-events: none;
 }
 
 .sp-pdf-scroll [data-page] {
@@ -750,11 +775,7 @@
   border-color: var(--vscode-focusBorder);
 }
 
-/* 原文样式段：浅底，可编辑 */
-.sp-styled {
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--vscode-badge-background) 10%, transparent);
-}
+/* 原文样式段只携带样式号，外观与普通文字一致；只有受保护原子是胶囊 */
 
 /* 受保护原子：不可改写的胶囊 */
 .sp-capsule {

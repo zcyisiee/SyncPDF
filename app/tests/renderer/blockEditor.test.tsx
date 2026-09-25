@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  *
  * 块译文编辑器：单元 HTML ↔ 片段 ↔ DOM 往返；受保护原子只能整体增删；
- * 应用 / 恢复 / 重译发出的请求。
+ * 单独编译 / 撤回 / 重新翻译发出的请求。
  */
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -74,7 +74,7 @@ describe('BlockEditor', () => {
   const setup = (html: string | null, edit?: Parameters<typeof BlockEditor>[0]['edit']) => {
     const onSubmit = vi.fn();
     render(<BlockEditor paragraph={paragraph(html)} edit={edit} onSubmit={onSubmit} />);
-    return { onSubmit, editor: screen.queryByRole('textbox'), apply: screen.getByLabelText('应用') };
+    return { onSubmit, editor: screen.queryByRole('textbox'), apply: screen.getByLabelText('单独编译此块（只重排所在页）') };
   };
 
   it('改文字后应用：发出手改译文，原子与样式段保留', () => {
@@ -130,18 +130,29 @@ describe('BlockEditor', () => {
     const { onSubmit, apply } = setup(HTML, { paragraph_id: 'P02-007', manual: true, style: { line_height: 1.5 } });
     fireEvent.change(screen.getByLabelText('字号比例'), { target: { value: '9' } });
     expect(apply).toHaveProperty('disabled', true);
-    fireEvent.click(screen.getByLabelText('恢复模型译文'));
-    fireEvent.click(screen.getByLabelText('重译此块（绕过缓存重新请求模型）'));
+    fireEvent.click(screen.getByLabelText('撤回手改，恢复模型译文'));
+    fireEvent.click(screen.getByLabelText('重新翻译此块（绕过缓存重新请求模型）'));
     expect(onSubmit.mock.calls).toEqual([
       [[{ type: 'apply_edit', paragraph_id: 'P02-007', translated_html: null, style: { line_height: 1.5 } }]],
       [[{ type: 'retranslate', paragraph_ids: ['P02-007'] }]],
     ]);
   });
 
+  it('撤回：有未编译的改动时只在本地丢弃，不动已编译的手改', () => {
+    const { onSubmit, editor, apply } = setup(HTML, { paragraph_id: 'P02-007', manual: true, style: {} });
+    const text = Array.from(editor!.childNodes).find((n) => n.textContent === '训练 ')!;
+    text.textContent = '训练了 ';
+    fireEvent.input(editor!);
+    fireEvent.click(screen.getByLabelText('撤回未编译的修改'));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(editor!.textContent).toContain('训练 ');
+    expect(apply).toHaveProperty('disabled', true);
+  });
+
   it('无译文：不渲染编辑器，仍可重译', () => {
     const { editor, onSubmit } = setup(null);
     expect(editor).toBeNull();
-    fireEvent.click(screen.getByLabelText('重译此块（绕过缓存重新请求模型）'));
+    fireEvent.click(screen.getByLabelText('重新翻译此块（绕过缓存重新请求模型）'));
     expect(onSubmit).toHaveBeenCalledOnce();
   });
 });

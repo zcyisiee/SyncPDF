@@ -10,6 +10,7 @@
 - 若结论改变长期约束或当前实现说明，同时更新 `AGENTS.md`、`ARCHITECTURE.md` 或对应参考文档；此处只保留理由与证据链接。
 - task state 保留完成摘要和升格链接，不将整个任务 state 原样搬入此目录。
 
+- [可编辑数据必须与校验处于同一表示空间](edit-roundtrip-space.md)：事件译文 HTML 与手改校验空间不一致导致含原子段手改必回退。
 - [PDF 绑定与渲染必须分别举证](pdf-binding-and-render-evidence.md)：已完成的绑定审查与真实画面反例，涵盖不可变输入、过期绑定、CID/GID和主树复验。
 
 当前 Rust 后端整体修复尚未完成，阶段完成不等于全篇质量通过；过程状态见 [task-state.md](../reports/2026-09-22-rust-electron-rewrite/task-state.md)。

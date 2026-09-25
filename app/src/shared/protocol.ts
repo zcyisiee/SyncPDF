@@ -206,6 +206,8 @@ export type EngineEventBody =
       /** 源段落外接框（pdf_user）；`boxes` 在译文发布后是译文行框。 */
       source_bbox: Rect;
     }
+  /** 编辑后单页重编开始：该页的问题与段落状态由随后的事件重新给出（不发 run_started）。 */
+  | { type: 'page_reopened'; page: number }
   | { type: 'page_ready'; page: number; preview_path: string | null; revision: number }
   | {
       type: 'issue';
@@ -302,6 +304,7 @@ const EVENT_FIELDS: Record<EngineEventType, Record<string, (v: unknown) => boole
     source_text: isStr,
     source_bbox: isRect,
   },
+  page_reopened: { page: isUint },
   page_ready: { page: isUint, preview_path: orNull(isStr), revision: isUint },
   issue: {
     severity: isSeverity,

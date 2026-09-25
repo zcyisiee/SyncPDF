@@ -78,9 +78,13 @@ export function PanelHeader<T extends string>({
   );
 }
 
-/** 只有图标的按钮（面板头 / 工具栏 / 标题栏）。`active` 表示开关或单选的选中态。 */
+/**
+ * 只有图标的按钮（面板头 / 工具栏 / 标题栏）。`active` 表示开关或单选的选中态。
+ * `glyph`：codicon 里没有贴切图标的概念（原文 / 译文）直接用一个字作图标。
+ */
 export function IconButton({
   icon,
+  glyph,
   title,
   onClick,
   active,
@@ -88,6 +92,7 @@ export function IconButton({
   role,
 }: {
   icon: string;
+  glyph?: string;
   title: string;
   onClick: () => void;
   active?: boolean;
@@ -106,7 +111,7 @@ export function IconButton({
       disabled={disabled}
       onClick={onClick}
     >
-      <i className={`codicon codicon-${icon}`} />
+      {glyph === undefined ? <i className={`codicon codicon-${icon}`} /> : <span className="sp-glyph-icon">{glyph}</span>}
     </button>
   );
 }

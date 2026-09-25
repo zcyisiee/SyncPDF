@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { LibraryDoc, ParagraphRecord } from '@shared/library';
 import { REGION_KINDS } from '@shared/protocol';
-import { useLibrary, useOpenDocMeta, type OpenDoc } from '@/store/library';
+import { relayoutPendingPages, useLibrary, useOpenDocMeta, type OpenDoc } from '@/store/library';
 import { stepZoom, useWorkbench, type ViewMode } from '@/store/workbench';
 import { IconButton } from '@/layout/Panel';
 import { overlayItems, type OverlayItem, type OverlaySide } from './overlay';
@@ -14,10 +14,10 @@ import { PdfPane } from './PdfPane';
 import { REGION_STYLE } from './regionKinds';
 import { usePdfDocument } from './usePdfDocument';
 
-const MODES: Array<{ id: ViewMode; title: string; icon: string }> = [
-  { id: 'source', title: '原文', icon: 'file-pdf' },
-  { id: 'target', title: '译文', icon: 'globe' },
-  { id: 'dual', title: '双栏对照', icon: 'split-horizontal' },
+const MODES: Array<{ id: ViewMode; title: string; icon: string; glyph?: string }> = [
+  { id: 'source', title: '原文', icon: 'file', glyph: '原' },
+  { id: 'target', title: '译文', icon: 'file', glyph: '译' },
+  { id: 'dual', title: '双栏对照', icon: 'diff-sidebyside' },
 ];
 
 export function DocumentView(): JSX.Element | null {
@@ -29,6 +29,11 @@ export function DocumentView(): JSX.Element | null {
 
   const sourceItems = useMemo(() => groupItems('source', open, hiddenKinds), [open, hiddenKinds]);
   const targetItems = useMemo(() => groupItems('target', open, hiddenKinds), [open, hiddenKinds]);
+  const running = meta?.status === 'running';
+  const pendingPages = useMemo(
+    () => (running && open !== null ? relayoutPendingPages(open) : undefined),
+    [running, open],
+  );
   if (meta === null || open === null) return null;
 
   const source = <PdfPane side="source" path={meta.sourcePath} revision={0} itemsByPage={sourceItems} />;
@@ -36,7 +41,14 @@ export function DocumentView(): JSX.Element | null {
     meta.translatedPath === null ? (
       <TargetPlaceholder doc={meta} />
     ) : (
-      <PdfPane side="target" path={meta.translatedPath} revision={open.revision} itemsByPage={targetItems} />
+      <PdfPane
+        side="target"
+        path={meta.translatedPath}
+        revision={open.revision}
+        pageRevisions={open.pageRevisions}
+        pendingPages={pendingPages}
+        itemsByPage={targetItems}
+      />
     );
   return (
     <div className="sp-document">
@@ -94,6 +106,7 @@ function Toolbar(): JSX.Element {
             key={mode.id}
             role="radio"
             icon={mode.icon}
+            glyph={mode.glyph}
             title={mode.title}
             active={viewMode === mode.id}
             onClick={() => setViewMode(mode.id)}

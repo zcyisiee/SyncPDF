@@ -21,6 +21,7 @@
 - [x] 用户反馈修复：bbox 按侧、按段（paragraph 事件新增 `source_bbox`；原文侧用源框，译文侧用译文行框并集，行内公式只画原文侧）；两端对齐判定容忍首行缩进、末行短行与字符突出（容差 max(1pt, 0.35em)），摘要等非 Text 段落恢复 Knuth 两端对齐。StoryScope 截图 `tmp/desktop-frontend/fix-2*.png`
 - [x] 用户反馈 UI 打磨：Claude Cream token 逐项对齐；面板头改 VSCode 式图标视图排 + 标题行图标操作（无下划线、无文字按钮）；卡片常驻圆角边框；触控板双指缩放（ctrl+wheel，光标锚点）；app 图标 `app/build/icon.{svg,png}`。截图 `tmp/desktop-frontend/ui-*.png`、`pinch-in.png`
 - [x] M3 编辑/重译/单块覆盖：引擎 c2e8d322（apply_edit/retranslate 写本篇 `block_edits`，随后缓存 run 应用；新事件 `block_edits`）；前端块编辑器（胶囊、恢复/重译/应用、单块字号/行距/字体/对齐）。StoryScope P05-004 实测手改+0.85 字号→缓存重跑 8.6s→恢复保留字号，截图 `tmp/m3-ui/`。取舍：去掉 base_revision（单窗口+串行队列无冲突）、allow_extend（refinement 已自动扩展）；版面模型懒加载推迟
+- [x] 用户反馈（编辑后全篇重译 + 7 项 UI）：引擎 c3fb2367（共享剥文字 Form、每页压缩一次：全篇缓存重编 88s→17.6s）、f9b8f362（会话内单页重编 `page_reopened`；段落事件改模型空间 HTML，修含原子段手改必回退；回退/落定计数改派生）。前端：`page_reopened` 只清该页问题；按页修订号只重画回写页；样式段去底色；块头 撤回/重新翻译此块/单独编译此块；视图图标 原/译/对照；双栏去分隔线与左栏滚动条；排版溢出回退页左上角"待动态编译"。实测 Similarity P02-003：会话首次编辑全篇 19.3s（无保留状态），之后 1.1–2.1s 单页，第 1 页画布未重画。截图 `tmp/desktop-frontend/shot3.png`
 - [ ] M4 设置页+HTTP translator+user_instructions
 - [ ] M5 整篇排版+存储管理+文档
 
@@ -28,7 +29,6 @@
 
 - `node:sqlite` 在系统 Node 24 与 Electron 44（Node 24.21）均可用 → 论文库不引入原生模块。
 - 引擎 release：`engine/target/release/syncpdf-cli`。
-- 已有失败（非本任务引入，8dd2b8ec 起）：`run::refinement::tests::stack_widens_a_short_source_line…` 在 `refinement.rs:234` `tgt_chars` 减法溢出。
 - 教训：别用 `CARGO_TARGET_DIR` 让临时 worktree 共用 `engine/target`——`fixtures::dir()` 等编译期路径会串到临时目录，测试静默 skip / 旧协议产物残留。
 - 引擎 `run_finished.ok` = 零回退/零保护冲突/零覆盖缺口；已发布译文看 `document_finished`，前端以 `ok || 已发布` 判完成。
 - CDP 验收脚本在 `tmp/desktop-frontend/`（cdp/wheel/key/console.mjs）；wheel 坐标用 CSS px，不是截图像素。
@@ -43,5 +43,5 @@
 
 - 下一步 M4：设置页 + OpenAI 兼容 HTTP translator + `user_instructions`（计入缓存键）。
 - 待用户知悉（不在本任务修）：StoryScope 曾因 agy `incomplete response (status=ERROR)` 460s 失败（重跑成功）；bind 诊断 "form depth limit" 单篇 12,944 条，属后端 bind-degraded 工作流，已汇总进问题、明细进引擎日志。
-- 已知：编辑后重跑完成时译文页会短暂只见框、画布稍后补齐（重渲染延迟，非重载缺陷）。
+- 已知：会话内首次编辑仍走全篇（引擎刚启动无保留状态，缓存全命中 ~20s）；pdf.js 渐进渲染，CJK 字体加载时截图可能只见上半页。
 - 已知：页面首批渲染要等字体加载数秒，之后跳页 ~100ms。

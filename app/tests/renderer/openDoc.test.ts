@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DocSnapshot } from '@shared/library';
 import type { EngineEvent, EventOf } from '@shared/protocol';
-import { emptyOpenDoc, mergeSnapshot, reduceOpenDoc } from '@/store/library';
+import { emptyOpenDoc, mergeSnapshot, reduceOpenDoc, relayoutPendingPages } from '@/store/library';
 
 const paragraph = (id: string, html: string | null): EventOf<'paragraph'> => ({
   seq: 1,
@@ -48,6 +48,44 @@ describe('reduceOpenDoc', () => {
     open = reduceOpenDoc(open, { seq: 3, ts: 0, type: 'run_finished', ok: true, elapsed_ms: 1 });
     expect(open.paragraphs['P01-001'].translated_html).toBe('<p>二</p>');
     expect(open.revision).toBe(2);
+  });
+
+  it('page_ready 只记本页修订号；run_finished 只重载文件不标脏页', () => {
+    let open = emptyOpenDoc('d');
+    const ready = (page: number): EngineEvent => ({ seq: 1, ts: 0, type: 'page_ready', page, preview_path: null, revision: 0 });
+    open = reduceOpenDoc(open, ready(1));
+    open = reduceOpenDoc(open, ready(2));
+    open = reduceOpenDoc(open, { seq: 3, ts: 0, type: 'run_finished', ok: true, elapsed_ms: 1 });
+    expect(open.pageRevisions).toEqual({ 1: 1, 2: 2 });
+    expect(open.revision).toBe(3);
+  });
+
+  it('page_reopened：只清该页问题，不像 run_started 那样清空段落与版面', () => {
+    const issue = (page: number): EngineEvent => ({
+      seq: 1, ts: 0, type: 'issue', severity: 'warning', code: 'c', paragraph_id: null, page, message: String(page),
+    });
+    let open = reduceOpenDoc(emptyOpenDoc('d'), paragraph('P01-001', '<p>一</p>'));
+    open = reduceOpenDoc(open, issue(1));
+    open = reduceOpenDoc(open, issue(2));
+    open = reduceOpenDoc(open, { seq: 2, ts: 0, type: 'page_reopened', page: 1 });
+    expect(open.issues.map((i) => i.page)).toEqual([2]);
+    expect(Object.keys(open.paragraphs)).toEqual(['P01-001']);
+  });
+
+  it('待动态编译页：只算排版溢出且仍回退的段；翻译校验回退与已被重排救回的段不算', () => {
+    const overflow = (id: string): EngineEvent => ({
+      seq: 1, ts: 0, type: 'issue', severity: 'warning', code: 'typeset_overflow', paragraph_id: id, page: 1, message: 'm',
+    });
+    const onPage = (id: string, page: number, html: string | null) => ({ ...paragraph(id, html), page });
+    let open = emptyOpenDoc('d');
+    open = reduceOpenDoc(open, onPage('P01-001', 1, null));
+    open = reduceOpenDoc(open, overflow('P01-001'));
+    open = reduceOpenDoc(open, onPage('P02-001', 2, null));
+    open = reduceOpenDoc(open, { ...overflow('P02-001'), code: 'translate_fallback' } as EngineEvent);
+    open = reduceOpenDoc(open, onPage('P03-001', 3, null));
+    open = reduceOpenDoc(open, overflow('P03-001'));
+    open = reduceOpenDoc(open, onPage('P03-001', 3, '<p>救回</p>'));
+    expect([...relayoutPendingPages(open)]).toEqual([1]);
   });
 
   it('无关事件返回同一对象', () => {

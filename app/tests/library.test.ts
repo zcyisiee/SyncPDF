@@ -116,6 +116,21 @@ describe('Library.ingest / snapshot', () => {
     expect(library.snapshot(id)).toEqual({ layout: {}, paragraphs: [], issues: [], edits });
   });
 
+  it('page_reopened 只清该页问题，保留版面、段落与其它页问题', () => {
+    const { id } = library.addFile(pdf('reopen.pdf')).doc;
+    const issue = (page: number | null) =>
+      ev({ type: 'issue', severity: 'warning', code: 'c', paragraph_id: null, page, message: `p${page}` });
+    library.ingest(id, ev({ type: 'run_started', protocol_version: 1, engine_version: 'x', doc_id: id, pages: 2 }));
+    library.ingest(id, ev({ type: 'layout', page: 2, regions: [] }));
+    library.ingest(id, issue(1));
+    library.ingest(id, issue(2));
+    library.ingest(id, issue(null));
+    library.ingest(id, ev({ type: 'page_reopened', page: 2 }));
+    const snapshot = library.snapshot(id);
+    expect(snapshot.issues.map((i) => i.message)).toEqual(['p1', 'pnull']);
+    expect(Object.keys(snapshot.layout)).toEqual(['2']);
+  });
+
   it('run_finished ok:false：用户已取消记 cancelled，否则记 failed 并保留致命错误', () => {
     const a = library.addFile(pdf('a.pdf')).doc.id;
     const b = library.addFile(pdf('b.pdf')).doc.id;

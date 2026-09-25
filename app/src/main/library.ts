@@ -250,7 +250,7 @@ export class Library {
 
   /**
    * 落库一个属于 `id` 的引擎事件。返回论文卡片字段是否变化（调用方据此广播）。
-   * 新一轮 `run_started` 清空上一轮的版面 / 段落 / 问题。
+   * 新一轮 `run_started` 清空上一轮的版面 / 段落 / 问题；`page_reopened` 只清该页问题。
    */
   ingest(id: string, event: EngineEvent): boolean {
     const now = Date.now();
@@ -307,6 +307,12 @@ export class Library {
           .run(id, seq, JSON.stringify(record));
         return false;
       }
+      case 'page_reopened':
+        // 单页重编：这一页的问题由随后的事件重新给出
+        this.db
+          .prepare("DELETE FROM doc_issues WHERE doc_id = ? AND json_extract(data, '$.page') = ?")
+          .run(id, event.page);
+        return false;
       case 'page_ready':
         // 译文文件已落盘：卡片的 translatedPath 从 null 变为可用
         return true;
