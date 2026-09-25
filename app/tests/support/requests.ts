@@ -29,6 +29,7 @@ export function runRequest(docId: string, overrides: Partial<RunRequest> = {}): 
     font_profile: null,
     terminology: null,
     mode: 'full',
+    store: null,
     ...overrides,
   };
 }

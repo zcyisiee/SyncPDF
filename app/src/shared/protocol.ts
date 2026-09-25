@@ -82,6 +82,8 @@ export interface RunRequest {
   /** 规范化术语对 JSON 文件路径（`[["source","target"],...]`）。 */
   terminology: string | null;
   mode: Mode;
+  /** 本篇阶段缓存库路径；null = 引擎默认的共享临时库。 */
+  store: string | null;
 }
 
 export interface RetranslateRequest {
@@ -318,6 +320,7 @@ const REQUEST_FIELDS: Record<Request['type'], Record<string, (v: unknown) => boo
     font_profile: orNull(isStr),
     terminology: orNull(isStr),
     mode: isMode,
+    store: orNull(isStr),
   },
   retranslate: { doc_id: isStr, paragraph_ids: arrayOf(isParagraphId) },
   apply_edit: {

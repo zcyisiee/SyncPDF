@@ -121,6 +121,11 @@ export class Library {
     return join(this.docDir(id), 'translated.pdf');
   }
 
+  /** 本篇阶段缓存库（引擎写入；删除论文时随工作目录一起清掉）。 */
+  storePath(id: string): string {
+    return join(this.docDir(id), 'store.db');
+  }
+
   list(): LibraryDoc[] {
     const rows = this.db.prepare('SELECT * FROM docs ORDER BY added_at DESC').all() as unknown as DocRow[];
     return rows.map((row) => this.toDoc(row));

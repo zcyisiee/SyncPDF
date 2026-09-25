@@ -109,6 +109,8 @@ pub enum Request {
         font_profile: Option<String>,
         terminology: Option<PathBuf>,
         mode: Mode,
+        /// 本篇阶段缓存库路径（桌面端：`~/.sp/docs/<id>/store.db`）；`None` = 引擎默认的共享临时库。
+        store: Option<PathBuf>,
     },
     /// 局部重译。
     Retranslate {
@@ -220,6 +222,7 @@ mod tests {
             font_profile: Some("serif".into()),
             terminology: Some("/terms.csv".into()),
             mode: Mode::Bilingual,
+            store: Some("/docs/doc-1/store.db".into()),
         });
         roundtrip(Request::Run {
             doc_id: "doc-2".into(),
@@ -231,6 +234,7 @@ mod tests {
             font_profile: None,
             terminology: None,
             mode: Mode::Full,
+            store: None,
         });
     }
 

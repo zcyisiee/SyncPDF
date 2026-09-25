@@ -353,6 +353,7 @@ async fn cmd_translate(
         font_profile: None,
         terminology,
         mode: Mode::Full,
+        store: None,
     };
     let mut cfg = RunConfig::new(configure, run)?;
     cfg.cache_only = cache_only;

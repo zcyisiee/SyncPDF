@@ -92,6 +92,7 @@ fn run_emits_run_started_first_and_run_finished_last() {
         font_profile: None,
         terminology: None,
         mode: syncpdf_protocol::Mode::Full,
+        store: None,
     };
     let stdin = format!(
         "{}\n{}\n",
@@ -142,6 +143,7 @@ fn run_before_configure_reports_protocol_error() {
         font_profile: None,
         terminology: None,
         mode: syncpdf_protocol::Mode::Full,
+        store: None,
     };
     let stdin = format!("{}\n", syncpdf_protocol::encode_line(&run));
     let (stdout, _stderr, code) = run_with_stdin(&["run"], &stdin);
@@ -383,6 +385,7 @@ fn configure_plus_run_stdin(
         font_profile: None,
         terminology: None,
         mode: syncpdf_protocol::Mode::Full,
+        store: None,
     };
     format!(
         "{}\n{}\n",

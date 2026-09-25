@@ -64,6 +64,9 @@ describe('EngineQueue', () => {
     await flush();
     expect(sent.map((r) => r.type)).toEqual(['configure', 'run']);
     expect(runs()).toEqual([a]);
+    // 每篇论文的阶段缓存落在自己的工作目录
+    expect(sent[1]).toMatchObject({ store: library.storePath(a) });
+    expect(library.storePath(a)).toBe(join(library.docDir(a), 'store.db'));
     expect(library.get(a)?.status).toBe('running');
     expect(library.get(b)?.status).toBe('queued');
 

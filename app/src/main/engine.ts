@@ -145,6 +145,7 @@ export class EngineQueue {
       font_profile: null,
       terminology: null,
       mode: 'full',
+      store: this.options.library.storePath(doc.id),
     };
   }
 

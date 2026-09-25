@@ -106,6 +106,7 @@ impl RunConfig {
             font_profile: None,
             terminology: None,
             mode: syncpdf_protocol::Mode::Full,
+            store: None,
         };
         Self::new(cfg, run)
     }
@@ -123,6 +124,7 @@ impl RunConfig {
                 font_profile,
                 terminology,
                 mode,
+                store,
             } => Some(RunFields {
                 doc_id,
                 input,
@@ -133,6 +135,7 @@ impl RunConfig {
                 font_profile: font_profile.as_deref(),
                 terminology: terminology.as_deref(),
                 mode: *mode,
+                store: store.as_deref(),
             }),
             _ => None,
         }
@@ -167,6 +170,8 @@ pub struct RunFields<'a> {
     pub font_profile: Option<&'a str>,
     pub terminology: Option<&'a Path>,
     pub mode: syncpdf_protocol::Mode,
+    /// 本篇阶段缓存库；`None` 用 `Pipeline::store_path`。
+    pub store: Option<&'a Path>,
 }
 
 /// run 结束时的汇总（对应 `run_finished` 与 `document_finished`）。
@@ -325,7 +330,7 @@ impl Pipeline {
         let t = Instant::now();
         check_cancelled(cancel)?;
         let main_doc = load_lopdf(fields.input)?;
-        let store = open_store(&self.store_path)?;
+        let store = open_store(fields.store.unwrap_or(&self.store_path))?;
         let bound_pages =
             stages::source_analysis(worker, pf.doc, &main_doc, selected, cancel, |d, n| {
                 tracing::debug!(done = d, total = n, "source_analysis 进度");
@@ -1571,6 +1576,9 @@ fn load_lopdf(path: &Path) -> Result<lopdf::Document, PipelineError> {
 
 /// 打开阶段缓存库。
 fn open_store(path: &Path) -> Result<Store, PipelineError> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| PipelineError::Store(e.to_string()))?;
+    }
     Store::open(path).map_err(|e| PipelineError::Store(e.to_string()))
 }
 
@@ -1804,6 +1812,30 @@ mod tests {
             self.seq += 1;
             self.log.lock().expect("测试锁").push((self.seq, event));
         }
+    }
+
+    /// run 请求带 `store` 时阶段缓存落到该文件（父目录按需创建），不碰 Pipeline 默认库。
+    #[tokio::test]
+    async fn run_request_store_overrides_pipeline_store() {
+        if env_ready().is_none() {
+            return;
+        }
+        let input = require_fixture!("ci-test.pdf");
+        let dir = tempfile::tempdir().unwrap();
+        let doc_store = dir.path().join("docs").join("doc-a").join("store.db");
+        let default_store = dir.path().join("default.db");
+        let mut cfg = RunConfig::with_fake("cjk", input, dir.path().join("out.pdf")).unwrap();
+        match &mut cfg.run {
+            Request::Run { store, .. } => *store = Some(doc_store.clone()),
+            _ => unreachable!(),
+        }
+        let sink = SharedSink::new(RunRecorder::new(Arc::new(Mutex::new(Vec::new()))));
+        let result = pipeline(default_store.clone())
+            .run(&cfg, sink, CancellationToken::new())
+            .await;
+        assert!(result.is_ok(), "{result:?}");
+        assert!(doc_store.is_file(), "本篇缓存库应被创建：{doc_store:?}");
+        assert!(!default_store.exists(), "默认库不应被使用");
     }
 
     /// 端到端跑一次 ci-test：事件序列合法 + 输出存在 + 每页一次 `page_ready`。
