@@ -73,7 +73,12 @@ export function describeEvent(event: EngineEvent): EventLine {
     case 'document_finished':
       return line('check-all', 'ok', `译文完成 · ${event.stats.fallbacks} 段回退 · 扩展比 ${event.stats.expansion_ratio.toFixed(2)}`);
     case 'run_finished':
-      return line(event.ok ? 'pass' : 'error', event.ok ? 'ok' : 'error', `${event.ok ? '运行结束' : '运行未完成'} · ${(event.elapsed_ms / 1000).toFixed(1)} 秒`);
+      // ok 还要求零质量问题；失败本身另有致命 error 事件，这里只说明检查未全部通过
+      return line(
+        event.ok ? 'pass' : 'warning',
+        event.ok ? 'ok' : 'warning',
+        `${event.ok ? '运行结束' : '运行结束 · 质量检查未全部通过'} · ${(event.elapsed_ms / 1000).toFixed(1)} 秒`,
+      );
     case 'error':
       return line('error', event.fatal ? 'error' : 'warning', `${event.code}：${event.message}`);
   }
