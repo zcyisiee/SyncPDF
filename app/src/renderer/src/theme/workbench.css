@@ -611,6 +611,24 @@
   box-shadow: var(--syncpdf-page-shadow) !important;
 }
 
+.sp-failure-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 8px 6px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--vscode-errorForeground) 35%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--vscode-errorForeground) 8%, transparent);
+  color: var(--vscode-errorForeground);
+}
+
+.sp-failure-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .sp-pane-message {
   display: flex;
   flex-direction: column;

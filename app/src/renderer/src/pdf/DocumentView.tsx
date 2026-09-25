@@ -9,6 +9,7 @@ import { useLibrary, useOpenDocMeta, type OpenDoc } from '@/store/library';
 import { stepZoom, useWorkbench, type ViewMode } from '@/store/workbench';
 import { IconButton } from '@/layout/Panel';
 import { overlayItems, type OverlayItem, type OverlaySide } from './overlay';
+import { FailureBanner } from './FailureBanner';
 import { PdfPane } from './PdfPane';
 import { REGION_STYLE } from './regionKinds';
 import { usePdfDocument } from './usePdfDocument';
@@ -40,6 +41,7 @@ export function DocumentView(): JSX.Element | null {
   return (
     <div className="sp-document">
       <Toolbar />
+      <FailureBanner doc={meta} />
       <div className={`sp-panes mode-${viewMode}`}>
         {viewMode !== 'target' && (
           <section className="sp-pane">
@@ -154,10 +156,12 @@ function TargetPlaceholder({ doc }: { doc: LibraryDoc }): JSX.Element {
         <span>{doc.status === 'queued' ? '排队中，稍后开始翻译…' : '正在分析版面，第一页译好后显示…'}</span>
       ) : (
         <>
-          <span>{doc.status === 'failed' ? `翻译失败：${doc.error ?? '未知错误'}` : '尚未翻译'}</span>
-          <button type="button" className="sp-button" onClick={() => void window.syncpdf.engine.enqueue(doc.id)}>
-            开始翻译
-          </button>
+          <span>尚无译文</span>
+          {doc.status !== 'failed' && (
+            <button type="button" className="sp-button" onClick={() => void window.syncpdf.engine.enqueue(doc.id)}>
+              开始翻译
+            </button>
+          )}
         </>
       )}
     </div>
