@@ -646,3 +646,92 @@ fn session_saves_edits_and_reports_invalid_ones() {
     assert_eq!(errors[0]["fatal"], false);
     assert!(store.is_file(), "合法编辑应写入本篇库");
 }
+
+/// `dual` 由原文 + 已发布译文生成 A3 横向对照版：一页原文对应一张 A3，
+/// 两个输入字节不变；页数不一致时非零退出，且不留下输出或临时文件。
+#[test]
+fn dual_exports_a3_sheets_without_touching_inputs() {
+    let source = syncpdf_core::require_fixture!("ci-test.pdf");
+    let dir = tempfile::tempdir().unwrap();
+    let translated = dir.path().join("translated.pdf");
+    let out = Command::new(BIN)
+        .arg("translate")
+        .arg("--input")
+        .arg(&source)
+        .arg("--output")
+        .arg(&translated)
+        .arg("--cache-dir")
+        .arg(dir.path().join("cache"))
+        .arg("--translator")
+        .arg("fake:cjk")
+        .output()
+        .unwrap();
+    assert!(
+        translated.is_file(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let before = (
+        std::fs::read(&source).unwrap(),
+        std::fs::read(&translated).unwrap(),
+    );
+
+    let dual = dir.path().join("dual.pdf");
+    let out = Command::new(BIN)
+        .arg("dual")
+        .arg("--source")
+        .arg(&source)
+        .arg("--translated")
+        .arg(&translated)
+        .arg("--output")
+        .arg(&dual)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        (
+            std::fs::read(&source).unwrap(),
+            std::fs::read(&translated).unwrap()
+        ),
+        before
+    );
+    let pages = lopdf::Document::load(&source).unwrap().get_pages().len();
+    let doc = lopdf::Document::load(&dual).unwrap();
+    assert_eq!(doc.get_pages().len(), pages);
+    for id in doc.get_pages().values() {
+        let media = doc.get_dictionary(*id).unwrap().get(b"MediaBox").unwrap();
+        let values: Vec<f32> = media
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_float().unwrap())
+            .collect();
+        assert!((values[2] - 420.0 * 72.0 / 25.4).abs() < 0.5, "{values:?}");
+        assert!((values[3] - 297.0 * 72.0 / 25.4).abs() < 0.5, "{values:?}");
+    }
+
+    let other = syncpdf_core::require_fixture!("up-vns.pdf");
+    let mismatched = dir.path().join("mismatched.pdf");
+    let out = Command::new(BIN)
+        .arg("dual")
+        .arg("--source")
+        .arg(&other)
+        .arg("--translated")
+        .arg(&translated)
+        .arg("--output")
+        .arg(&mismatched)
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(!mismatched.exists());
+    let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".partial"))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+}

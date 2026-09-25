@@ -5,6 +5,7 @@
 //!   `cancel` 取消当前任务；stdin EOF 取消当前任务并退出。
 //! - `translate`：便捷入口，内部构造同样的 configure+run 请求。
 //! - `inspect`：调试用，打印 preflight 信息与每页几何（阶段 1）。
+//! - `dual`：由原文与已有译文 PDF 生成中英对照版（不重新翻译）。
 //! - `version`：打印版本。
 //!
 //! 约定：**stdout 只出 JSONL 事件**，任何人类可读信息都走 stderr。
@@ -105,6 +106,19 @@ enum Command {
         #[arg(long)]
         paragraphs: bool,
     },
+    /// 由原文与已发布的译文 PDF 生成 A3 横向中英对照版（左原文、右译文）；
+    /// 两个输入都不修改，自检通过后才原子改名到 `--output`。
+    Dual {
+        /// 原文 PDF。
+        #[arg(long)]
+        source: PathBuf,
+        /// 译文 PDF（页数须与原文一致）。
+        #[arg(long)]
+        translated: PathBuf,
+        /// 输出的对照版 PDF。
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// 打印版本与构建信息。
     Version,
 }
@@ -176,7 +190,39 @@ fn main() -> anyhow::Result<()> {
             model,
             paragraphs,
         } => cmd_inspect(input, page, model, paragraphs),
+        Command::Dual {
+            source,
+            translated,
+            output,
+        } => cmd_dual(&source, &translated, &output),
     }
+}
+
+/// `dual`：先写同目录临时文件并做结构自检，通过后原子改名；失败不留半成品。
+/// 自检不要求 CJK 页（译文可能是部分完成），告警走 stderr。
+fn cmd_dual(
+    source: &std::path::Path,
+    translated: &std::path::Path,
+    output: &std::path::Path,
+) -> anyhow::Result<()> {
+    let name = output
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("--output 必须是文件路径"))?;
+    let partial = output.with_file_name(format!(".{}.partial", name.to_string_lossy()));
+    let result = (|| {
+        syncpdf_pdf::dual::export(source, translated, &partial)?;
+        let report = syncpdf_pdf::self_check(&partial, &[])?;
+        for warning in &report.warnings {
+            eprintln!("syncpdf-cli: dual 自检告警：{warning}");
+        }
+        anyhow::ensure!(report.ok, "对照版自检失败：{}", report.problems.join("; "));
+        std::fs::rename(&partial, output)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    result
 }
 
 /// tracing 到 stderr（`RUST_LOG` 控制级别）；stdout 留给事件 JSONL。
