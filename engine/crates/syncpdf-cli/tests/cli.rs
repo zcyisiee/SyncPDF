@@ -548,3 +548,59 @@ fn stdio_probe_child(mode: &str) {
         .write_all(b"NATIVE_AFTER_FINISH\n")
         .and_then(|()| raw.flush());
 }
+
+/// 长驻会话：一次 configure 后连发两个 run，第二个在第一个运行中到达，
+/// 应排队等第一个的 `run_finished` 之后再开始；两者都成功，空闲时 EOF 正常退出。
+#[test]
+fn run_session_queues_runs_serially() {
+    let Some(input) = syncpdf_core::fixtures::path("ci-test.pdf") else {
+        eprintln!("SKIP: fixture ci-test.pdf 缺失");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let first = configure_plus_run_stdin(&input, &dir.path().join("a.pdf"), "echo", Some(vec![0]));
+    let second = configure_plus_run_stdin(&input, &dir.path().join("b.pdf"), "echo", Some(vec![0]));
+    let second_run = second.lines().nth(1).unwrap();
+
+    let mut child = Command::new(BIN)
+        .args(["run", "--protocol", "1"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("启动 syncpdf-cli 失败");
+    let mut stdin = child.stdin.take().unwrap();
+    stdin
+        .write_all(format!("{first}{second_run}\n").as_bytes())
+        .unwrap();
+    stdin.flush().unwrap();
+
+    let mut kinds = Vec::new();
+    let mut oks = Vec::new();
+    for line in BufReader::new(child.stdout.take().unwrap()).lines() {
+        let line = line.unwrap();
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        kinds.push(kind_of(&line));
+        if kinds.last().unwrap() == "run_finished" {
+            oks.push(v["ok"].as_bool().unwrap());
+            if oks.len() == 2 {
+                break;
+            }
+        }
+    }
+    assert_eq!(oks, [true, true], "{kinds:?}");
+    let starts: Vec<usize> = (0..kinds.len())
+        .filter(|&i| kinds[i] == "run_started")
+        .collect();
+    let ends: Vec<usize> = (0..kinds.len())
+        .filter(|&i| kinds[i] == "run_finished")
+        .collect();
+    assert_eq!(starts.len(), 2, "{kinds:?}");
+    assert!(
+        ends[0] < starts[1],
+        "第二个任务必须在第一个结束后才开始：{kinds:?}"
+    );
+
+    drop(stdin);
+    assert!(child.wait().unwrap().success(), "空闲时 EOF 应正常退出");
+}

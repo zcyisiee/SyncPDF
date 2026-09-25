@@ -1,8 +1,8 @@
 //! SyncPDF 引擎命令行入口（sidecar）。
 //!
-//! - `run`：读 stdin 的 JSONL 请求（首条 `configure`、随后 `run`），事件打到
-//!   stdout（每行一个 `Envelope`）；日志走 stderr。stdin EOF 或 `cancel`
-//!   请求都会立刻取消当前任务。
+//! - `run`：长驻会话，读 stdin 的 JSONL 请求（先 `configure`，随后任意多次
+//!   `run`，排队串行执行），事件打到 stdout（每行一个 `Envelope`）；日志走 stderr。
+//!   `cancel` 取消当前任务；stdin EOF 取消当前任务并退出。
 //! - `translate`：便捷入口，内部构造同样的 configure+run 请求。
 //! - `inspect`：调试用，打印 preflight 信息与每页几何（阶段 1）。
 //! - `version`：打印版本。
@@ -13,6 +13,7 @@
 
 use std::io::BufRead;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use clap::{Parser, Subcommand};
 use syncpdf_pipeline::cancel::CancellationToken;
@@ -186,13 +187,27 @@ fn init_tracing() {
         .try_init();
 }
 
-/// `run`：stdin JSONL → configure/run → Pipeline；EOF 或 cancel 都触发取消。
-async fn cmd_run(sink: SharedSink) -> anyhow::Result<()> {
-    let cancel = CancellationToken::new();
+/// `run` 会话中读线程与主循环共享的状态。
+#[derive(Default)]
+struct Session {
+    /// 当前任务的取消令牌；`None` = 空闲。
+    running: Option<CancellationToken>,
+    /// stdin 已 EOF：此后开始的任务一律带着已取消的令牌启动。
+    eof: bool,
+}
 
-    // stdin 的所有权交给读线程（`Stdin` 是 Send），读到的行经 channel 送回。
-    let (tx, rx) = std::sync::mpsc::channel::<String>();
-    let cancel_reader = cancel.clone();
+/// `run`：长驻会话。stdin JSONL → `configure`（可重复，后者覆盖前者）→ 任意多次
+/// `run`，按到达顺序串行执行（运行中到达的请求排队）；`cancel` 只取消当前任务，
+/// stdin EOF 取消当前与排队中的任务并退出。
+///
+/// 取消由读线程直接处理：流水线大段同步计算期间不让出执行权，主循环无法及时
+/// 看到新请求。
+async fn cmd_run(sink: SharedSink) -> anyhow::Result<()> {
+    let session = Arc::new(Mutex::new(Session::default()));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Request>();
+    let reader_session = session.clone();
+    let reader_sink = sink.clone();
+    // stdin 的所有权交给读线程（`Stdin` 是 Send）；读线程结束（EOF）即 channel 关闭。
     std::thread::spawn(move || {
         let stdin = std::io::stdin();
         for line in stdin.lock().lines() {
@@ -200,67 +215,93 @@ async fn cmd_run(sink: SharedSink) -> anyhow::Result<()> {
             if line.trim().is_empty() {
                 continue;
             }
-            if tx.send(line).is_err() {
-                // 主流程已结束。
-                return;
+            match decode_request(&line) {
+                Ok(Request::Cancel) => {
+                    if let Some(token) = &reader_session.lock().expect("session 锁").running {
+                        token.cancel();
+                    }
+                }
+                Ok(req) => {
+                    if tx.send(req).is_err() {
+                        return;
+                    }
+                }
+                Err(e) => emit_error(
+                    &reader_sink,
+                    "protocol",
+                    &format!("请求解析失败：{e}"),
+                    false,
+                ),
             }
         }
-        // EOF：主进程走了或输入结束，取消任务。
-        cancel_reader.cancel();
+        // EOF：主进程走了，取消当前任务。
+        let mut state = reader_session.lock().expect("session 锁");
+        state.eof = true;
+        if let Some(token) = &state.running {
+            token.cancel();
+        }
     });
 
     let mut configure: Option<Request> = None;
-    let (configure, run_req) = loop {
-        let Ok(line) = rx.recv() else {
-            // 读线程结束（EOF）且还没收到 run：无事可做。
-            return Ok(());
-        };
-        let req = match decode_request(&line) {
-            Ok(r) => r,
-            Err(e) => {
-                emit_error(&sink, "protocol", &format!("请求解析失败：{e}"), false);
+    let mut failed = false;
+    while let Some(req) = rx.recv().await {
+        let run_req = match req {
+            req @ Request::Configure { .. } => {
+                configure = Some(req);
+                continue;
+            }
+            req @ Request::Run { .. } => req,
+            other => {
+                emit_error(
+                    &sink,
+                    "unsupported_request",
+                    &format!("暂不支持的请求：{}", tag_of(&other)),
+                    false,
+                );
                 continue;
             }
         };
-        match req {
-            req @ Request::Configure { .. } => configure = Some(req),
-            req @ Request::Run { .. } => {
-                let Some(cfg) = configure.take() else {
-                    emit_error(&sink, "protocol", "run 之前必须先给 configure", true);
-                    continue;
-                };
-                break (cfg, req);
+        let cfg = match configure.clone() {
+            None => Err("run 之前必须先给 configure".to_string()),
+            Some(cfg) => RunConfig::new(cfg, run_req).map_err(|e| e.to_string()),
+        };
+        let cfg = match cfg {
+            Ok(cfg) => cfg,
+            Err(message) => {
+                emit_error(&sink, "protocol", &message, false);
+                continue;
             }
-            Request::Cancel => {
+        };
+        let cancel = CancellationToken::new();
+        {
+            // EOF 之前到达的任务照常走完事件序列（run_started … run_finished{ok:false}）。
+            let mut state = session.lock().expect("session 锁");
+            if state.eof {
                 cancel.cancel();
-                return Ok(());
             }
-            other => emit_error(
-                &sink,
-                "unsupported_request",
-                &format!("阶段 1 不支持的请求：{}", tag_of(&other)),
-                false,
-            ),
+            state.running = Some(cancel.clone());
         }
-    };
-
-    let cfg = RunConfig::new(configure, run_req)?;
-    let pipeline = Pipeline::default();
-    let result = pipeline.run(&cfg, sink.clone(), cancel.clone()).await;
-    if cancel.is_cancelled() {
-        eprintln!("syncpdf-cli: 任务已取消");
-    }
-    match result {
-        Ok(s) => {
-            print_summary(&s);
-            anyhow::ensure!(s.ok, "已保存部分结果，但翻译未完整完成；详见 issue 事件");
-            Ok(())
+        let result = Pipeline::default()
+            .run(&cfg, sink.clone(), cancel.clone())
+            .await;
+        session.lock().expect("session 锁").running = None;
+        if cancel.is_cancelled() {
+            eprintln!("syncpdf-cli: 任务已取消");
         }
-        Err(e) => {
+        match result {
+            Ok(s) => {
+                print_summary(&s);
+                failed |= !s.ok;
+            }
             // `run` 内部已经发过 error/run_finished，这里只在 stderr 留痕。
-            Err(e.into())
+            Err(e) => {
+                eprintln!("syncpdf-cli: {e}");
+                failed = true;
+            }
         }
     }
+    anyhow::ensure!(!failed, "有任务未完整完成；详见 issue/error 事件");
+    Ok(())
 }
 
 /// `translate`：用同样的事件通道跑一遍（内部构造 configure+run）。
