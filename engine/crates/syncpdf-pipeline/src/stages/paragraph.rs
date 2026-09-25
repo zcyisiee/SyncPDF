@@ -26,8 +26,11 @@ use syncpdf_layout::group_lines;
 const PARAGRAPH_GAP_RATIO: f32 = 1.8;
 /// 首行缩进判定：首字形 x 前移超过字号该倍数。
 const INDENT_RATIO: f32 = 1.5;
-/// 对齐判定容差（pt）。
+/// 对齐判定容差下限（pt）。
 const ALIGN_TOL: f32 = 1.0;
+/// 行端对齐容差（字号倍数）：字符突出（microtype protrusion）会把行尾连字符、
+/// 标点推出版心，幅度约为该字符宽度（连字符约 0.33em），行端因此不在同一 x 上。
+const EDGE_TOL_EM: f32 = 0.35;
 /// 居中的最小左右边距（pt）：小于它就只能算左对齐。
 const CENTER_MIN_MARGIN: f32 = 3.0;
 /// 「太短」阈值：去掉原子后有效字符数低于它不可译。
@@ -377,7 +380,7 @@ fn build_paragraph(
     let atoms = detect_atoms(&reading.text, &reading.char_map);
     let bbox = rows.iter().fold(rows[0].bbox, |acc, r| acc.union(&r.bbox));
     let size = dominant_size(&rows, glyphs);
-    let align = detect_align(&rows, region, &ir.crop_box);
+    let align = detect_align(&rows, region, &ir.crop_box, size);
     let first_indent = if align == Align::Center {
         0.0
     } else {
@@ -732,9 +735,10 @@ fn is_cjk(c: char) -> bool {
 ///
 /// 边距相对**区域框**度量（行相对区域左右两侧的留白）：
 /// - 居中：每行左右边距都 > 3pt，且同一行的左右边距差 < 2pt；
-/// - 两端对齐：各行左端（±1pt）与右端（±1pt）都齐；
+/// - 两端对齐：除首行（允许缩进）外左端齐，除末行（允许短行）外右端齐，且末行之前
+///   至少两行；行端容差 `max(1pt, 0.35em)`，容纳字符突出；
 /// - 单行标题：源左右边距相对页面对称时居中；其余单行保持 Left。
-fn detect_align(rows: &[Row], region: &Region, crop: &Rect) -> Align {
+fn detect_align(rows: &[Row], region: &Region, crop: &Rect, size: f32) -> Align {
     if rows.len() == 1 {
         let bbox = rows[0].bbox;
         if region.kind == RegionKind::Caption
@@ -770,16 +774,21 @@ fn detect_align(rows: &[Row], region: &Region, crop: &Rect) -> Align {
         }
     }
     let region = &region.bbox;
-    let left_aligned = rows
-        .iter()
-        .all(|r| (r.bbox.x0 - rows[0].bbox.x0).abs() <= ALIGN_TOL);
-    let max_right = rows
+    // 两端对齐段落的首行可缩进、末行可短：左端看首行之后的行，右端看末行之前的行。
+    // 右端至少要两行齐平才算证据，两行段落因此不会仅凭首行判为 Justify。
+    let tol = ALIGN_TOL.max(size * EDGE_TOL_EM);
+    let (first, body) = rows.split_first().unwrap();
+    let min_left = body.iter().map(|r| r.bbox.x0).fold(f32::INFINITY, f32::min);
+    let left_aligned =
+        first.bbox.x0 >= min_left - tol && body.iter().all(|r| r.bbox.x0 - min_left <= tol);
+    let (last, full) = rows.split_last().unwrap();
+    let max_right = full
         .iter()
         .map(|r| r.bbox.x1)
         .fold(f32::NEG_INFINITY, f32::max);
-    let right_aligned = rows
-        .iter()
-        .all(|r| (max_right - r.bbox.x1).abs() <= ALIGN_TOL);
+    let right_aligned = full.len() >= 2
+        && last.bbox.x1 <= max_right + tol
+        && full.iter().all(|r| max_right - r.bbox.x1 <= tol);
 
     let centered = rows.iter().all(|r| {
         let ml = r.bbox.x0 - region.x0;

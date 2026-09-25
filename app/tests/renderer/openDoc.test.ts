@@ -19,6 +19,7 @@ const paragraph = (id: string, html: string | null): EventOf<'paragraph'> => ({
   translated_html: html,
   kind: 'text',
   source_text: 'src',
+  source_bbox: { x0: 0, y0: 0, x1: 10, y1: 10 },
 });
 
 const runStarted: EngineEvent = {

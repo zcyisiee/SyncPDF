@@ -1423,6 +1423,7 @@ pub(crate) fn paragraph_event(
         translated_html,
         kind: p.kind,
         source_text: p.text.clone(),
+        source_bbox: p.bbox,
     }
 }
 

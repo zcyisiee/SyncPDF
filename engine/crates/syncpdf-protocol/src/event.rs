@@ -105,6 +105,9 @@ pub enum Event {
         kind: RegionKind,
         /// 源文本（阅读顺序）。
         source_text: String,
+        /// 源段落外接框（原文侧几何；`boxes` 在译文发布后是译文行框）。
+        #[schemars(with = "crate::schema::RectSchema")]
+        source_bbox: Rect,
     },
     /// 一页完成（可选增量预览）。
     PageReady {
@@ -210,6 +213,7 @@ mod tests {
             translated_html: Some("<p id=\"P12-169\">你好</p>".into()),
             kind: RegionKind::Text,
             source_text: "Hello".into(),
+            source_bbox: Rect::new(0.0, 0.0, 1.0, 1.0),
         });
         // Some([]) = 识别了但无框 → JSON []
         let json = serde_json::to_string(&Event::Paragraph {
@@ -221,6 +225,7 @@ mod tests {
             translated_html: None,
             kind: RegionKind::Text,
             source_text: String::new(),
+            source_bbox: Rect::new(0.0, 0.0, 1.0, 1.0),
         })
         .unwrap();
         assert!(json.contains("\"boxes\":[]"), "{json}");
@@ -234,6 +239,7 @@ mod tests {
             translated_html: None,
             kind: RegionKind::Text,
             source_text: String::new(),
+            source_bbox: Rect::new(0.0, 0.0, 1.0, 1.0),
         });
     }
 
@@ -394,6 +400,7 @@ mod tests {
             translated_html: None,
             kind: RegionKind::Text,
             source_text: String::new(),
+            source_bbox: Rect::new(0.0, 0.0, 1.0, 1.0),
         })
         .unwrap();
         assert!(null_boxes.contains("\"boxes\":null"), "{null_boxes}");
@@ -407,6 +414,7 @@ mod tests {
             translated_html: None,
             kind: RegionKind::Text,
             source_text: String::new(),
+            source_bbox: Rect::new(0.0, 0.0, 1.0, 1.0),
         })
         .unwrap();
         assert!(empty_boxes.contains("\"boxes\":[]"), "{empty_boxes}");

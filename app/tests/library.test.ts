@@ -83,6 +83,7 @@ describe('Library.ingest / snapshot', () => {
       translated_html: null,
       kind: 'text' as const,
       source_text: 'Hello',
+      source_bbox: rect,
     };
     library.ingest(id, ev({ type: 'run_started', protocol_version: 1, engine_version: 'x', doc_id: id, pages: 3 }));
     library.ingest(id, ev({ type: 'layout', page: 1, regions: [{ kind: 'text', inline: false, bbox: rect }] }));
@@ -101,6 +102,11 @@ describe('Library.ingest / snapshot', () => {
     expect(snapshot.paragraphs).toHaveLength(1);
     expect(snapshot.paragraphs[0]).toMatchObject({ status: 'typeset', translated_html: '<p>你好</p>' });
     expect(snapshot.issues).toMatchObject([{ code: 'fallback' }]);
+
+    // 旧版引擎缓存的段落记录缺 source_bbox：快照丢弃，不交给渲染端
+    const { source_bbox: _box, ...legacy } = paragraph;
+    library.ingest(id, ev({ ...legacy, paragraph_id: 'P01-002' } as never));
+    expect(library.snapshot(id).paragraphs.map((p) => p.paragraph_id)).toEqual(['P01-001']);
 
     // 下一轮 run_started 清空上一轮数据
     library.ingest(id, ev({ type: 'run_started', protocol_version: 1, engine_version: 'x', doc_id: id, pages: 3 }));

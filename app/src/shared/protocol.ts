@@ -178,6 +178,8 @@ export type EngineEventBody =
       translated_html: string | null;
       kind: RegionKind;
       source_text: string;
+      /** 源段落外接框（pdf_user）；`boxes` 在译文发布后是译文行框。 */
+      source_bbox: Rect;
     }
   | { type: 'page_ready'; page: number; preview_path: string | null; revision: number }
   | {
@@ -257,6 +259,7 @@ const EVENT_FIELDS: Record<EngineEventType, Record<string, (v: unknown) => boole
     translated_html: orNull(isStr),
     kind: isRegionKind,
     source_text: isStr,
+    source_bbox: isRect,
   },
   page_ready: { page: isUint, preview_path: orNull(isStr), revision: isUint },
   issue: {

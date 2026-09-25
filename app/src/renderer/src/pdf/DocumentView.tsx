@@ -8,7 +8,7 @@ import { REGION_KINDS } from '@shared/protocol';
 import { useLibrary, useOpenDocMeta, type OpenDoc } from '@/store/library';
 import { stepZoom, useWorkbench, type ViewMode } from '@/store/workbench';
 import { IconButton } from '@/layout/Panel';
-import { overlayItems, type OverlayItem } from './overlay';
+import { overlayItems, type OverlayItem, type OverlaySide } from './overlay';
 import { PdfPane } from './PdfPane';
 import { REGION_STYLE } from './regionKinds';
 import { usePdfDocument } from './usePdfDocument';
@@ -26,15 +26,16 @@ export function DocumentView(): JSX.Element | null {
   const hiddenKinds = useWorkbench((s) => s.hiddenKinds);
   usePdfInfoMeta(meta);
 
-  const itemsByPage = useMemo(() => groupItems(open, hiddenKinds), [open, hiddenKinds]);
+  const sourceItems = useMemo(() => groupItems('source', open, hiddenKinds), [open, hiddenKinds]);
+  const targetItems = useMemo(() => groupItems('target', open, hiddenKinds), [open, hiddenKinds]);
   if (meta === null || open === null) return null;
 
-  const source = <PdfPane side="source" path={meta.sourcePath} revision={0} itemsByPage={itemsByPage} />;
+  const source = <PdfPane side="source" path={meta.sourcePath} revision={0} itemsByPage={sourceItems} />;
   const target =
     meta.translatedPath === null ? (
       <TargetPlaceholder doc={meta} />
     ) : (
-      <PdfPane side="target" path={meta.translatedPath} revision={open.revision} itemsByPage={itemsByPage} />
+      <PdfPane side="target" path={meta.translatedPath} revision={open.revision} itemsByPage={targetItems} />
     );
   return (
     <div className="sp-document">
@@ -57,7 +58,9 @@ export function DocumentView(): JSX.Element | null {
   );
 }
 
-function groupItems(open: OpenDoc | null, hiddenKinds: readonly (typeof REGION_KINDS)[number][]): Map<number, OverlayItem[]> {
+function groupItems(
+  side: OverlaySide,
+  open: OpenDoc | null, hiddenKinds: readonly (typeof REGION_KINDS)[number][]): Map<number, OverlayItem[]> {
   const result = new Map<number, OverlayItem[]>();
   if (open === null) return result;
   const paragraphsByPage = new Map<number, ParagraphRecord[]>();
@@ -68,7 +71,7 @@ function groupItems(open: OpenDoc | null, hiddenKinds: readonly (typeof REGION_K
   }
   const pages = new Set([...Object.keys(open.layout).map(Number), ...paragraphsByPage.keys()]);
   for (const page of pages) {
-    result.set(page, overlayItems(open.layout[page] ?? [], paragraphsByPage.get(page) ?? [], hiddenKinds));
+    result.set(page, overlayItems(side, open.layout[page] ?? [], paragraphsByPage.get(page) ?? [], hiddenKinds));
   }
   return result;
 }

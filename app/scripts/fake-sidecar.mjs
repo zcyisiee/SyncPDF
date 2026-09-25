@@ -121,6 +121,7 @@ async function executeRun(request, token) {
             translated_html: fallback ? null : `<p>译文段落 ${id}</p>`,
             kind: block.kind,
             source_text: `Source paragraph ${id}.`,
+            source_bbox: rect(block),
           });
           if (fallback) {
             emit({

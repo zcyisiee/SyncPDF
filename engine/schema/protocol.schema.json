@@ -192,6 +192,10 @@
             "paragraph_id": {
               "$ref": "#/$defs/ParagraphIdSchema"
             },
+            "source_bbox": {
+              "$ref": "#/$defs/RectSchema",
+              "description": "源段落外接框（原文侧几何；`boxes` 在译文发布后是译文行框）。"
+            },
             "source_text": {
               "description": "源文本（阅读顺序）。",
               "type": "string"
@@ -217,7 +221,8 @@
             "status",
             "coord_system",
             "kind",
-            "source_text"
+            "source_text",
+            "source_bbox"
           ],
           "type": "object"
         },

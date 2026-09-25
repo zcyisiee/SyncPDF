@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, copyFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { EngineEvent, LayoutRegion } from '../shared/protocol';
+import { isEngineEvent, type EngineEvent, type LayoutRegion } from '../shared/protocol';
 import {
   META_SOURCES,
   type DocSnapshot,
@@ -340,7 +340,10 @@ export class Library {
       this.db
         .prepare('SELECT data FROM doc_paragraphs WHERE doc_id = ? ORDER BY paragraph_id')
         .all(id) as unknown as Array<{ data: string }>
-    ).map((row) => JSON.parse(row.data) as ParagraphRecord);
+    )
+      .map((row) => JSON.parse(row.data) as unknown)
+      // 旧版引擎写入的记录缺新字段：丢弃，重新翻译后再补齐，不让渲染端读到残缺记录
+      .filter((data): data is ParagraphRecord => isEngineEvent({ ...(data as object), seq: 0, ts: 0, type: 'paragraph' }));
     const issues = (
       this.db
         .prepare('SELECT data FROM doc_issues WHERE doc_id = ? ORDER BY seq')

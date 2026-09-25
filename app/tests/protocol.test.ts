@@ -18,6 +18,7 @@ const paragraph: EventOf<'paragraph'> = {
   translated_html: '<p>x</p>',
   kind: 'text',
   source_text: 'x',
+  source_bbox: rect,
 };
 
 describe('isEngineEvent', () => {
@@ -62,6 +63,8 @@ describe('isEngineEvent', () => {
     expect(isEngineEvent({ ...paragraph, kind: 'figure_caption_x' })).toBe(false);
     const { source_text: _drop, ...noSource } = paragraph;
     expect(isEngineEvent(noSource)).toBe(false);
+    const { source_bbox: _box, ...noSourceBox } = paragraph;
+    expect(isEngineEvent(noSourceBox)).toBe(false);
     expect(isEngineEvent({ seq: 1, ts: 1, type: 'page_ready', page: 1, preview_path: null })).toBe(false);
     expect(
       isEngineEvent({ seq: 1, ts: 1, type: 'document_finished', output: 'o', stats: { fonts: 1, expansion_ratio: 1, fallback_count: 0 } }),
