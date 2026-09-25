@@ -1,5 +1,8 @@
 //! Visible control-code glyphs have no usable text identity. Preserve their
 //! evidenced source drawing; never guess a Unicode replacement or silently erase.
+//! A leading list bullet has text identity, but its look belongs to the source
+//! font (a CJK face draws U+2022 as a small centered dot), so it keeps its
+//! source drawing too when that drawing is proven.
 use std::collections::BTreeMap;
 use syncpdf_core::ir::{
     Atom, AtomKind, DisplayItem, Glyph, PageIR, Paragraph, SourceAtom, Translatable,
@@ -75,6 +78,7 @@ fn drawing(p: &Paragraph, index: u32, g: &Glyph, ir: &PageIR) -> Option<SourceAt
     Some(SourceAtom {
         bbox: ink,
         baseline: line.baseline_y,
+        advance: None,
     })
 }
 
@@ -137,6 +141,47 @@ pub(crate) fn protect(paragraphs: &mut [Paragraph], ir: &PageIR) {
             p.atoms.extend(additions);
             p.atoms.sort_by_key(|a| a.glyph_range.0);
         }
+    }
+}
+
+/// Keep a translatable paragraph's leading bullet as a source-drawn symbol.
+/// Unproven drawings leave the bullet as ordinary text (current shaping).
+pub(crate) fn keep_list_bullets(paragraphs: &mut [Paragraph], ir: &PageIR) {
+    let glyphs: BTreeMap<_, _> = ir.glyphs().map(|g| (g.id, g)).collect();
+    let mut owners = BTreeMap::new();
+    for p in paragraphs.iter() {
+        for id in &p.glyphs {
+            *owners.entry(*id).or_insert(0_usize) += 1;
+        }
+    }
+    for p in paragraphs {
+        let Some(g) = p.glyphs.first().and_then(|id| glyphs.get(id)) else {
+            continue;
+        };
+        if p.translatable != Translatable::Yes
+            || !matches!(g.unicode.as_slice(), [c] if crate::stages::paragraph::is_list_bullet(*c))
+            || !p.text.chars().skip(1).any(char::is_alphanumeric)
+            || p.atoms.iter().any(|a| a.glyph_range.0 == 0)
+            || owners.get(&g.id) != Some(&1)
+        {
+            continue;
+        }
+        let Some(mut source) = drawing(p, 0, g, ir) else {
+            continue;
+        };
+        // The label column runs to the body's first glyph on the same line.
+        let body = p.lines[0].glyphs.get(1).and_then(|id| glyphs.get(id));
+        source.advance = body
+            .map(|b| b.bbox.x0 - source.bbox.x0)
+            .filter(|w| *w > source.bbox.width());
+        p.atoms.push(Atom {
+            id: AtomId(p.atoms.iter().map(|a| a.id.0).max().unwrap_or(0) + 1),
+            kind: AtomKind::Symbol,
+            glyph_range: (0, 1),
+            text: g.unicode.iter().collect(),
+            source: Some(source),
+        });
+        p.atoms.sort_by_key(|a| a.glyph_range.0);
     }
 }
 
@@ -307,12 +352,73 @@ mod tests {
                 source: Some(SourceAtom {
                     bbox: g.ink.unwrap(),
                     baseline: 20.0,
+                    advance: None,
                 }),
             });
         }
         let before = ps.clone();
         protect(&mut ps, &ir);
         assert_eq!(ps, before);
+    }
+
+    fn text_fixture(text: &str) -> (Vec<Paragraph>, PageIR) {
+        let (mut ps, mut ir) = fixture();
+        let chars: Vec<char> = text.chars().collect();
+        if let DisplayItem::Text { glyphs } = &mut ir.items[0] {
+            for (g, c) in glyphs.iter_mut().zip(&chars) {
+                g.unicode = vec![*c].into();
+            }
+        }
+        for (span, c) in ps[0].text_spans.iter_mut().zip(&chars) {
+            span.text = c.to_string();
+        }
+        ps[0].text = text.into();
+        (ps, ir)
+    }
+
+    #[test]
+    fn leading_list_bullets_keep_their_source_drawing() {
+        for bullet in ['\u{2022}', '\u{25CF}', '\u{F0B7}', '\u{2013}'] {
+            let (mut ps, ir) = text_fixture(&format!("{bullet}abc"));
+            keep_list_bullets(&mut ps, &ir);
+            assert_eq!(ps[0].translatable, Translatable::Yes);
+            let [a] = ps[0].atoms.as_slice() else {
+                panic!("{bullet:?}: {:?}", ps[0].atoms)
+            };
+            assert_eq!((a.kind, a.glyph_range), (AtomKind::Symbol, (0, 1)));
+            assert_eq!(
+                a.source.unwrap().bbox,
+                ir.glyphs().next().unwrap().ink.unwrap()
+            );
+            // Label column: bullet ink left edge (10.5) to the body origin (16).
+            assert_eq!(a.source.unwrap().advance, Some(5.5));
+            let unit = syncpdf_translate::build_unit(&ps[0], |id| {
+                ir.glyphs()
+                    .find(|g| g.id == id)
+                    .map(|g| g.unicode.iter().collect())
+            });
+            assert!(unit.html.contains("{{KEEP_1}}abc"), "{}", unit.html);
+        }
+    }
+
+    #[test]
+    fn non_leading_or_unproven_bullets_stay_ordinary_text() {
+        for (case, text) in [
+            ("letter first", "xabc"),
+            ("bullet inside", "a\u{2022}bc"),
+            ("bullet only", "\u{2022}  -"),
+            ("neighbor ink", "\u{2022}abc"),
+        ] {
+            let (mut ps, mut ir) = text_fixture(text);
+            if case == "neighbor ink" {
+                if let DisplayItem::Text { glyphs } = &mut ir.items[0] {
+                    glyphs[1].ink = glyphs[0].ink;
+                }
+            }
+            keep_list_bullets(&mut ps, &ir);
+            assert!(ps[0].atoms.is_empty(), "{case}");
+            assert_eq!(ps[0].translatable, Translatable::Yes, "{case}");
+        }
     }
 
     #[test]

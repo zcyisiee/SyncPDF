@@ -222,6 +222,10 @@ pub struct Atom {
 pub struct SourceAtom {
     pub bbox: Rect,
     pub baseline: f32,
+    /// In-line advance when wider than the ink (a list label keeps the source
+    /// gap to its body); `None` means the ink width.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advance: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

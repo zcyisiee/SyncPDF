@@ -761,6 +761,7 @@ mod tests {
             source: Some(syncpdf_core::ir::SourceAtom {
                 bbox: Rect::new(99.0, 398.0, 111.0, 409.0),
                 baseline: 402.0,
+                advance: None,
             }),
         });
         assert_eq!(claim(&ir, &mut [p]), 0);

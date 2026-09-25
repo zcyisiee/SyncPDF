@@ -306,6 +306,19 @@ fn numbered_heading_body_x(row: &Row, glyphs: &[&syncpdf_core::ir::Glyph]) -> Op
     label_body_x(row, glyphs, label)
 }
 
+/// Bullet-like list markers: general-punctuation bullets and dashes, the
+/// Geometric Shapes and Dingbats blocks, and the private-use area where
+/// Symbol/Wingdings-style fonts place their bullets.
+const BULLET_CLASS: &str =
+    r"\x{2022}\x{2023}\x{2043}\x{2219}\x{2013}\x{25A0}-\x{25FF}\x{2700}-\x{27BF}\x{E000}-\x{F8FF}";
+
+pub(crate) fn is_list_bullet(c: char) -> bool {
+    static BULLET: OnceLock<Regex> = OnceLock::new();
+    BULLET
+        .get_or_init(|| Regex::new(&format!("^[{BULLET_CLASS}]$")).unwrap())
+        .is_match(c.encode_utf8(&mut [0; 4]))
+}
+
 /// Where the body starts after a list marker: `(ii)`, `12.`, `b)`, a bullet.
 /// Unlike a heading number, a bare word never counts as a marker here.
 fn list_body_x(row: &Row, glyphs: &[&syncpdf_core::ir::Glyph]) -> Option<f32> {
@@ -313,7 +326,7 @@ fn list_body_x(row: &Row, glyphs: &[&syncpdf_core::ir::Glyph]) -> Option<f32> {
     let label = LABEL.get_or_init(|| {
         let ordinal = r"(?:[0-9]+|[A-Za-z]|[ivxlcdm]+|[IVXLCDM]+)";
         Regex::new(&format!(
-            r"^(?:\({ordinal}\)|{ordinal}[.)]|[\u{{2022}}\u{{25E6}}\u{{25AA}}\u{{2023}}\u{{2219}}\u{{2013}}])\s*(\S)"
+            r"^(?:\({ordinal}\)|{ordinal}[.)]|[{BULLET_CLASS}])\s*(\S)"
         ))
         .unwrap()
     });

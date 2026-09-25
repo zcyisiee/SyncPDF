@@ -158,6 +158,7 @@ fn side_bearing_nudge_moves_source_atoms_with_text_without_resizing() {
     let source = syncpdf_core::ir::SourceAtom {
         bbox: Rect::new(10.0, 20.0, 100.0, 23.0),
         baseline: 20.0,
+        advance: None,
     };
     let result = layout(&[
         text("g"),
@@ -193,6 +194,34 @@ fn side_bearing_nudge_moves_source_atoms_with_text_without_resizing() {
         text("gs"),
     ]);
     assert!(unfit.paragraph.overflow);
+}
+
+#[test]
+fn source_atom_advance_keeps_its_label_gap_before_following_text() {
+    let origin = |advance| {
+        let source = syncpdf_core::ir::SourceAtom {
+            bbox: Rect::new(10.0, 20.0, 14.0, 24.0),
+            baseline: 20.0,
+            advance,
+        };
+        let result = layout(&[
+            Inline::SourceAtom {
+                id: AtomId(1),
+                source,
+            },
+            text("s"),
+        ]);
+        let line = &result.paragraph.lines[0];
+        (
+            line.glyphs[0].x - line.placed_atoms[0].bbox.x0,
+            line.placed_atoms[0].bbox.x0,
+        )
+    };
+    let (ink, ink_x) = origin(None);
+    let (label, label_x) = origin(Some(9.0));
+    assert!((ink - 4.0).abs() < 0.001, "{ink}");
+    assert!((label - 9.0).abs() < 0.001, "{label}");
+    assert_eq!(ink_x, label_x);
 }
 
 #[test]
@@ -244,6 +273,7 @@ fn source_formula_retains_geometry_and_gets_only_necessary_leading() {
     let source = syncpdf_core::ir::SourceAtom {
         bbox: Rect::new(5.0, 17.0, 15.0, 30.0),
         baseline: 20.0,
+        advance: None,
     };
     let result = layout(&[
         Inline::SourceAtom {

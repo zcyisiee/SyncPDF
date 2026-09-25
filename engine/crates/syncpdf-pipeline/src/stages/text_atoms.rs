@@ -471,6 +471,7 @@ mod tests {
             source: Some(syncpdf_core::ir::SourceAtom {
                 bbox: Rect::new(20.0, 10.0, 24.0, 20.0),
                 baseline: 12.0,
+                advance: None,
             }),
             id: AtomId(1),
             glyph_range: (1, 2),

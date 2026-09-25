@@ -184,6 +184,7 @@ pub(super) fn sources(ir: &PageIR, regions: &[&Region]) -> Vec<Formula> {
                 source: SourceAtom {
                     bbox: clip,
                     baseline: neighbor.matrix.f,
+                    advance: None,
                 },
                 row: neighbor.bbox,
             });
@@ -992,6 +993,7 @@ fn radical_sources(ir: &PageIR, regions: &[&Region], glyphs: &[&Glyph], out: &mu
             source: SourceAtom {
                 bbox: clip,
                 baseline: line,
+                advance: None,
             },
             row,
         });

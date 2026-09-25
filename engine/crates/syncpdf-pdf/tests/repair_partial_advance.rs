@@ -291,6 +291,7 @@ fn source_formula_moves_once_without_copying_nested_figure_text() {
     let source = SourceAtom {
         bbox: a.bbox,
         baseline: a.matrix.f,
+        advance: None,
     };
     let para = Paragraph {
         id: "P01-001".parse().unwrap(),

@@ -121,7 +121,7 @@ fn segments(shaper: &dyn Shaper, input: &LayoutInput<'_>, inlines: &[Inline]) ->
                 seg.items.push(Item::Atom {
                     id: *id,
                     source: Some(*source),
-                    width: source.bbox.width(),
+                    width: source.advance.unwrap_or(source.bbox.width()),
                     height: source.bbox.height(),
                     start,
                     end: seg.text.len(),

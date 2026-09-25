@@ -356,6 +356,7 @@ fn link_inside_source_formula_moves_with_the_original_glyphs() {
         source: Some(syncpdf_core::ir::SourceAtom {
             bbox,
             baseline: glyphs[6].matrix.f,
+            advance: None,
         }),
     });
     let action = s

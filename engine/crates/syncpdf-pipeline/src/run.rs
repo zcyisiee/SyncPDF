@@ -500,6 +500,7 @@ impl Pipeline {
             }
             stages::source_policy::protect_front_matter(ir, regions, &mut paragraphs);
             stages::source_opaque::protect(&mut paragraphs, ir);
+            stages::source_opaque::keep_list_bullets(&mut paragraphs, ir);
             stages::source_decoration::claim(ir, &mut paragraphs);
             stages::source_decoration::mark_styles(ir, &mut paragraphs);
             stages::source_citations::protect(&mut paragraphs, ir, &main_doc);

@@ -32,6 +32,8 @@ PDFium 去重后缺少字符的对象，仅在严格匹配的单 code `Tj`、自
 
 可见非空白控制码字形不作为普通Unicode重新排字：独占归属、tight ink、源span及行基线可靠且无邻字/路径/图片冲突时，保留为源绘制`Symbol` KEEP，不猜替代字符。无法证明时发`unmapped_source_glyph`、保留源段并计入未完成；已有源绘制原子不重复认领。下游`text_atoms::resolve_text`同时接受具有源绘制及精确源span的`Formula`/`Symbol`，保留KEEP直至原尺寸重放，不扩展到无source的Symbol或任意Other；非法范围、缺样式或文本不符仍拒绝。回归覆盖保护→解析→prepare接缝及真实缓存复排。此保护不是通用字体编码修复。
 
+可译段落首字形若是项目符号类字符（通用标点里的 bullet/破折号、Geometric Shapes、Dingbats 及 Symbol/Wingdings 类字体所在的私用区，与列表续行判定共用同一字符类），且源绘制按上述条件可证，同样保留为源绘制`Symbol` KEEP：符号外观属于源字体（CJK 字体把 U+2022 画成小居中点），不交给目标字体。其`SourceAtom.advance`取符号墨迹左缘到同行正文首字形原点的距离，排版按此占位以保留原标签栏间距；其余源原子`advance`为空，仍按墨迹宽度占位。不可证时按普通文本排，段落不降级。
+
 `Glyph.ink`保存PDFium tight bounds，不替代用于布局/归属的loose bbox；簇中任一字符缺墨迹证据时整个簇为None。旧IR缺字段可读取但仍保守使用loose盒，生产重新绑定页面提取新证据。公式擦除/重放clip与碰撞检查使用同一墨迹及已归属路径范围，不能用tight通过碰撞后再按更大的loose盒擦除。安全侧承平移可连同SourceAtom目标框刚性移动，源框和原尺寸保持。
 
 Writer 为每个字体按原 GID 首次出现顺序分配 CID，内容流使用 CID。finalize 在同一次子集化后把 CID→原 GID 转成显式 CID→子集 GID；Encoding、宽度表与 ToUnicode 均以内容 CID 索引。字号只写入 `Tf`，`Tm` 保留无量纲横向缩放，避免字号平方。合成斜体的水平剪切量写入 `Tm` 的 c 分量（tan 值，正 = 向右倾斜），不改变字形前进宽度与换行；正体与真斜体面剪切为 0，`Tm` 与旧格式字节一致。字体 Type0 字典搬入预留资源槽后，删除其临时尾对象时同步回收该最高对象号，保证表式 xref 的 Size 一致。
