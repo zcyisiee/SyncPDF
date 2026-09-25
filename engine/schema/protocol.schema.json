@@ -557,6 +557,13 @@
             "source_lang": {
               "type": "string"
             },
+            "store": {
+              "description": "本篇阶段缓存库路径（桌面端：`~/.sp/docs/<id>/store.db`）；`None` = 引擎默认的共享临时库。",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "target_lang": {
               "type": "string"
             },
