@@ -58,6 +58,7 @@
 - 排不下一轮已提交（`0f9b0733`..`53a1036d`，5 提交）：视觉字号含 Form 的 Do CTM + 页空间基线方向（旋转文字按方向判定保留原文）；正文列表项悬挂续行合段；模型回声源文=not_replaced 不计回退；整栈重排失败时短源行段按实际障碍加宽重试。回放 `tmp/paper-iteration/fixes-v4/`（缓存按页内内容重映射到新段落 ID：`remap/`，内容变化段真实补译：`replay-live.sh`）：TRC 0、ALNS 0、2604 0、2602 1（P31-015）、VNS 2（P04-003/025 link_target_unplaced）。
 - 2602 P31-015 根因：Body 拉丁字体 PT Serif 比源 Times 宽约 10%，整页单栏已满、无可借空间；换 Times 度量拉丁字体属设计决策，**待用户决定**，不擅改。
 - 用户决定（09-25）：绕排暂缓，只记录（[issue](../../issues/rust-float-wrap-paragraph.md)）。下一步：dual `unresolved named destination`（`dual/navigation.rs:26`，ALNS/VNS）→ TRC 项目符号比原文小（用户截图 p?「3.1 假设」列表）→ VNS P04-003/025。
+- 09-25 完成：①dual 失败根因=原文自身导航瑕疵（ALNS 悬空命名目标 `s0120`，VNS 236 个零宽链接框）被当致命错误；改为悬空名保持原样、注释框按规范归一化且允许零面积，页面框仍严格（`5cd6d892`）。②项目符号小：CJK 字体把 U+2022 画成小居中点；行首项目符号类字形可证时保留为源绘制 Symbol 原子，`SourceAtom.advance` 保留标签栏间距（`87ba2882`）。回放 `tmp/paper-iteration/fixes-v6/`：5 篇 dual 全出；回退 TRC0/ALNS0/2604 0/2602 1(P31-015 PT Serif 偏宽)/VNS2(P04-003/025)；TRC/ALNS/VNS/2602 全部行首符号保持源字体。下一步：VNS P04-003/025 → 链接样式标记（#1）。
 
 ## 2026-09-24 接管：编译侧去过度开发（历史方案，执行优先级以上节为准）
 
