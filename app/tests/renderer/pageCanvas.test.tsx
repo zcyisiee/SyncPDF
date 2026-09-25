@@ -16,12 +16,15 @@ beforeAll(() => {
 afterEach(() => vi.clearAllMocks());
 
 /** 假页面：render 返回可取消的任务；取消时以 RenderingCancelledException 拒绝，`finish()` 完成全部在途任务。 */
-function fakeDoc(): { doc: PDFDocumentProxy; renders: () => number; finish: () => void } {
+function fakeDoc(): { doc: PDFDocumentProxy; renders: () => number; finish: () => void; destroy: () => void } {
   let count = 0;
+  let destroyed = false;
   const pending = new Set<() => void>();
   const page = {
     getViewport: ({ scale }: { scale: number }) => ({ width: 600 * scale, height: 800 * scale, scale }),
     render: () => {
+      // 与 pdf.js 一致：文档销毁后 render 同步抛错（messageHandler 已为 null）
+      if (destroyed) throw new TypeError("Cannot read properties of null (reading 'sendWithPromise')");
       count += 1;
       let cancel = (): void => {};
       const promise = new Promise<void>((resolve, reject) => {
@@ -40,7 +43,7 @@ function fakeDoc(): { doc: PDFDocumentProxy; renders: () => number; finish: () =
     for (const resolve of pending) resolve();
     pending.clear();
   };
-  return { doc, renders: () => count, finish };
+  return { doc, renders: () => count, finish, destroy: () => (destroyed = true) };
 }
 
 const rendered = (container: HTMLElement): string | null | undefined =>
@@ -90,11 +93,22 @@ describe('PageCanvas', () => {
       rerender(<PageCanvas doc={second.doc} pageNumber={1} zoom={1} containerWidth={800} revision={2} docRevision={1} />);
     });
     expect(second.renders()).toBe(0);
+    // 回归（白屏）：loader 在新 doc 就位时销毁旧 doc；换 doc 的那次提交不能再用旧 doc 的页对象去画
+    second.destroy();
     const third = fakeDoc();
     await act(async () => {
       rerender(<PageCanvas doc={third.doc} pageNumber={1} zoom={1} containerWidth={800} revision={2} docRevision={2} />);
     });
     await waitFor(() => expect(third.renders()).toBe(1));
+    expect(second.renders()).toBe(0);
+  });
+
+  it('render 同步抛错只显示本页失败，不卸载组件树', async () => {
+    const { doc, destroy } = fakeDoc();
+    destroy();
+    const { container } = render(<PageCanvas doc={doc} pageNumber={3} zoom={1} containerWidth={800} />);
+    await waitFor(() => expect(container.textContent).toContain('第 3 页渲染失败'));
+    expect(container.querySelector('canvas')).not.toBeNull();
   });
 
   it('尺寸与修订号都没变时不重复渲染', async () => {

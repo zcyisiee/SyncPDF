@@ -22,6 +22,7 @@
 - [x] 用户反馈 UI 打磨：Claude Cream token 逐项对齐；面板头改 VSCode 式图标视图排 + 标题行图标操作（无下划线、无文字按钮）；卡片常驻圆角边框；触控板双指缩放（ctrl+wheel，光标锚点）；app 图标 `app/build/icon.{svg,png}`。截图 `tmp/desktop-frontend/ui-*.png`、`pinch-in.png`
 - [x] M3 编辑/重译/单块覆盖：引擎 c2e8d322（apply_edit/retranslate 写本篇 `block_edits`，随后缓存 run 应用；新事件 `block_edits`）；前端块编辑器（胶囊、恢复/重译/应用、单块字号/行距/字体/对齐）。StoryScope P05-004 实测手改+0.85 字号→缓存重跑 8.6s→恢复保留字号，截图 `tmp/m3-ui/`。取舍：去掉 base_revision（单窗口+串行队列无冲突）、allow_extend（refinement 已自动扩展）；版面模型懒加载推迟
 - [x] 用户反馈（编辑后全篇重译 + 7 项 UI）：引擎 c3fb2367（共享剥文字 Form、每页压缩一次：全篇缓存重编 88s→17.6s）、f9b8f362（会话内单页重编 `page_reopened`；段落事件改模型空间 HTML，修含原子段手改必回退；回退/落定计数改派生）。前端：`page_reopened` 只清该页问题；按页修订号只重画回写页；样式段去底色；块头 撤回/重新翻译此块/单独编译此块；视图图标 原/译/对照；双栏去分隔线与左栏滚动条；排版溢出回退页左上角"待动态编译"。实测 Similarity P02-003：会话首次编辑全篇 19.3s（无保留状态），之后 1.1–2.1s 单页，第 1 页画布未重画。截图 `tmp/desktop-frontend/shot3.png`
+- [x] 重新翻译中白屏：loader 在新 doc 就位时销毁旧 doc，PageCanvas 换 doc 的那次提交仍用旧页对象 `render()` → 同步抛错、effect 异常卸载整树。修：页对象连同所属 doc 记录，换 doc 即失效；`render()` 同步抛错转本页失败。回归测试 `pageCanvas.test.tsx`（旧代码复现同一 TypeError）；StoryScope 重新翻译 30 页（缓存 8.6s）无异常
 - [ ] M4 设置页+HTTP translator+user_instructions
 - [ ] M5 整篇排版+存储管理+文档
 

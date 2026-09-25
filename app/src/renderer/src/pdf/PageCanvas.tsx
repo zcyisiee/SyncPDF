@@ -48,9 +48,11 @@ export function PageCanvas({
 }: PageCanvasProps): JSX.Element {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pageRef = useRef<PDFPageProxy | null>(null);
   const taskRef = useRef<RenderTask | null>(null);
-  const [page, setPage] = useState<PDFPageProxy | null>(null);
+  // 页对象连同所属 doc 一起记：doc 换新的那次渲染里旧页对象立即失效。
+  // 否则 effect 仍拿着旧页去画，而旧 doc 已被 loader 销毁 → render 同步抛错、整树卸载白屏。
+  const [loaded, setLoaded] = useState<{ doc: PDFDocumentProxy; page: PDFPageProxy } | null>(null);
+  const page = loaded?.doc === doc ? loaded.page : null;
   // 无 IntersectionObserver（jsdom / 老环境）时退化为"全部立即渲染"
   const [visible, setVisible] = useState(() => typeof IntersectionObserver === 'undefined');
   const [rendered, setRendered] = useState(-1);
@@ -68,16 +70,13 @@ export function PageCanvas({
           value.cleanup();
           return;
         }
-        pageRef.current = value;
-        setPage(value);
+        setLoaded({ doc, page: value });
       })
       .catch((error: unknown) => {
         if (!cancelled) setFailure(describe(error));
       });
     return () => {
       cancelled = true;
-      pageRef.current = null;
-      setPage(null);
     };
   }, [doc, pageNumber]);
 
@@ -139,15 +138,23 @@ export function PageCanvas({
       setFailure('无法获取 2d 上下文');
       return;
     }
-    const task = page.render({
-      canvas,
-      canvasContext: context,
-      viewport,
-      // DPR 缩放：viewport 用 CSS 尺寸，位图放大 ratio 倍
-      transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0],
-    });
+    let task: RenderTask | null = null;
+    let done: Promise<void>;
+    try {
+      task = page.render({
+        canvas,
+        canvasContext: context,
+        viewport,
+        // DPR 缩放：viewport 用 CSS 尺寸，位图放大 ratio 倍
+        transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0],
+      });
+      done = task.promise;
+    } catch (error: unknown) {
+      // 同步抛错（如 doc 已在 React 换上新 doc 之前被销毁）只记为本页失败，不能冒泡卸载整棵树
+      done = Promise.reject(error);
+    }
     taskRef.current = task;
-    task.promise
+    done
       .then(() => {
         drawnRef.current = { revision, width: viewport.width, height: viewport.height };
         setFailure(null);
@@ -158,7 +165,7 @@ export function PageCanvas({
         if (!isCancellation(error)) setFailure(describe(error));
       });
     return () => {
-      task.cancel();
+      task?.cancel();
     };
   }, [visible, page, viewport, revision, docRevision]);
 
