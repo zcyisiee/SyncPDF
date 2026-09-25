@@ -558,6 +558,9 @@ impl Pipeline {
         }
 
         // ── 4. translating + typesetting（流式）────────────────────────
+        // 行距下调会重放已落定段落；同一问题只报一次。
+        let mut distinct = SharedSink::new(descent::Distinct::new(sink.clone()));
+        let sink = &mut distinct;
         emit_stage_started(sink, Stage::Translating);
         let t = Instant::now();
 
@@ -589,6 +592,11 @@ impl Pipeline {
             }
         }
 
+        let origin = descent::Origin {
+            doc: main_doc.clone(),
+            frames: frames.clone(),
+            schedule: schedule.clone(),
+        };
         let state = Arc::new(Mutex::new(RunState {
             doc: main_doc,
             bound,
@@ -614,6 +622,7 @@ impl Pipeline {
             revision: 0,
             font_stats: None,
             callback_error: None,
+            blocks: Vec::new(),
         }));
 
         // 无段落的选定页（含只有不可译段落的页）先转就绪并回写。
@@ -657,6 +666,7 @@ impl Pipeline {
                 if s.callback_error.is_some() {
                     return;
                 }
+                s.blocks.push(block.clone());
                 if let Err(error) = handle_block(&mut s, &sink, block, total) {
                     s.callback_error = Some(error);
                     callback_failed.cancel();
@@ -721,48 +731,13 @@ impl Pipeline {
         let t = Instant::now();
         {
             let mut s = lock_state(&state);
-            // 漏译（引擎没吐、或回调里被取消跳过）的段落补发 fallback。
-            let missing: Vec<ParagraphId> = translatable
-                .iter()
-                .map(|p| p.id.clone())
-                .filter(|id| !s.settled_ids.contains(id))
-                .collect();
-            for id in missing {
-                if let Some(p) = s.pars.get(&id).cloned() {
-                    s.fallbacks += 1;
-                    let n = p.text.chars().count() as u64;
-                    s.src_chars += n;
-                    s.tgt_chars += n;
-                    s.settled += 1;
-                    s.settled_ids.insert(id.clone());
-                    sink.emit(Event::Issue {
-                        severity: Severity::Warning,
-                        code: "translate_missing".into(),
-                        paragraph_id: Some(id.clone()),
-                        page: Some(id.page),
-                        message: "翻译未交付该段，回退原文".into(),
-                    });
-                    sink.emit(Event::Paragraph {
-                        paragraph_id: id.clone(),
-                        page: id.page,
-                        status: ParagraphStatus::Fallback,
-                        boxes: Some(vec![p.bbox]),
-                        coord_system: syncpdf_core::CoordSystem::PdfUser,
-                        translated_html: None,
-                    });
-                }
-                if let Some(page) = s.schedule.mark(&id) {
-                    writeback_page(&mut s, page - 1, sink)?;
-                }
-            }
-            let rest = s.schedule.force_ready_rest();
-            for p in rest {
-                writeback_page(&mut s, p - 1, sink)?;
-            }
-            let expected: BTreeSet<u32> = selected.iter().copied().collect();
-            if s.ready.iter().copied().collect::<BTreeSet<_>>() != expected {
-                return Err(PipelineError::Protocol("部分选定页尚未成功保存".into()));
-            }
+            let translatable_ids: Vec<ParagraphId> =
+                translatable.iter().map(|p| p.id.clone()).collect();
+            let settle = |s: &mut RunState, sink: &SharedSink| {
+                settle_rest(s, &translatable_ids, selected, sink)
+            };
+            settle(&mut s, sink)?;
+            descent::descend(&mut s, &origin, total, sink, settle)?;
         }
         emit_stage_finished(sink, Stage::Typesetting, t);
 
@@ -902,6 +877,8 @@ struct RunState {
     font_stats: Option<FontStats>,
     /// 流式回调的首个回写错误；跨回调传播到主任务，后续块停止处理。
     callback_error: Option<PipelineError>,
+    /// 按到达顺序保留的译文块：全文行距下调时据此重排，不再调用模型。
+    blocks: Vec<syncpdf_translate::TranslatedBlock>,
 }
 
 impl RunState {
@@ -1234,7 +1211,60 @@ fn handle_block(
     Ok(())
 }
 
+mod descent;
 mod refinement;
+
+/// 翻译结束后的落定：漏译段补发 fallback，未凑齐的页强制就绪并回写。
+fn settle_rest(
+    s: &mut RunState,
+    translatable: &[ParagraphId],
+    selected: &[u32],
+    sink: &SharedSink,
+) -> Result<(), PipelineError> {
+    // 漏译（引擎没吐、或回调里被取消跳过）的段落补发 fallback。
+    let missing: Vec<ParagraphId> = translatable
+        .iter()
+        .filter(|id| !s.settled_ids.contains(*id))
+        .cloned()
+        .collect();
+    for id in missing {
+        if let Some(p) = s.pars.get(&id).cloned() {
+            s.fallbacks += 1;
+            let n = p.text.chars().count() as u64;
+            s.src_chars += n;
+            s.tgt_chars += n;
+            s.settled += 1;
+            s.settled_ids.insert(id.clone());
+            sink.emit(Event::Issue {
+                severity: Severity::Warning,
+                code: "translate_missing".into(),
+                paragraph_id: Some(id.clone()),
+                page: Some(id.page),
+                message: "翻译未交付该段，回退原文".into(),
+            });
+            sink.emit(Event::Paragraph {
+                paragraph_id: id.clone(),
+                page: id.page,
+                status: ParagraphStatus::Fallback,
+                boxes: Some(vec![p.bbox]),
+                coord_system: syncpdf_core::CoordSystem::PdfUser,
+                translated_html: None,
+            });
+        }
+        if let Some(page) = s.schedule.mark(&id) {
+            writeback_page(s, page - 1, sink)?;
+        }
+    }
+    let rest = s.schedule.force_ready_rest();
+    for p in rest {
+        writeback_page(s, p - 1, sink)?;
+    }
+    let expected: BTreeSet<u32> = selected.iter().copied().collect();
+    if s.ready.iter().copied().collect::<BTreeSet<_>>() != expected {
+        return Err(PipelineError::Protocol("部分选定页尚未成功保存".into()));
+    }
+    Ok(())
+}
 
 /// 页就绪回写：删除该页成功段落的原字形，然后重放全部就绪页 → 快照 → 事件。
 fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) -> Result<(), PipelineError> {
@@ -1745,6 +1775,7 @@ mod tests {
             revision: 0,
             font_stats: None,
             callback_error: None,
+            blocks: Vec::new(),
         };
         let log = Arc::new(Mutex::new(Vec::new()));
         let sink = SharedSink::new(RunRecorder::new(log.clone()));

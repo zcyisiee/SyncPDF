@@ -91,6 +91,7 @@ pub(super) fn refine_page(state: &mut RunState, page: u32, sink: &SharedSink) {
             if placed.iter().any(|p| p.id == *id) {
                 continue;
             }
+            let bound = &state.bound[&page];
             let target = &state.targets[id];
             let shaper = StoreShaper::new(&state.font_store, &state.font_profile)
                 .with_role(stages::typeset::role_for_region(target.para.kind));
@@ -99,7 +100,7 @@ pub(super) fn refine_page(state: &mut RunState, page: u32, sink: &SharedSink) {
                 continue;
             };
             let obstacles =
-                stages::refine::obstacles(&bound.ir, para, &state.pars, placed, &shaper, &[]);
+                stages::refine::obstacles(&bound.ir, &[para], &state.pars, placed, &shaper, &[]);
             let wider = stages::refine::wider_measure(para, initial, text_area, &obstacles);
             let mut accepted = Vec::new();
             for measure in std::iter::once(initial).chain(wider.as_ref()) {
@@ -119,111 +120,300 @@ pub(super) fn refine_page(state: &mut RunState, page: u32, sink: &SharedSink) {
                 }
             }
             if accepted.is_empty() {
-                // Grow the contiguous same-column group only while needed.
-                // The page's finite accepted paragraphs bound this search; fixed
-                // source content still prevents a group from crossing an obstacle.
-                let mut neighbors: Vec<_> = placed
-                    .iter()
-                    .filter(|p| {
-                        let other = &state.pars[&p.id];
-                        other.bbox.y1 <= para.bbox.y0
-                            && (other.bbox.x0 - para.bbox.x0).abs() <= 4.0
-                            && (other.bbox.x1.min(para.bbox.x1) - other.bbox.x0.max(para.bbox.x0))
-                                > 0.8 * other.bbox.width().min(para.bbox.width())
-                    })
-                    .collect();
-                neighbors.sort_by(|a, b| {
-                    state.pars[&b.id]
-                        .bbox
-                        .y1
-                        .total_cmp(&state.pars[&a.id].bbox.y1)
-                });
-                if let Some(measured) = probe(target, initial, crop, &shaper, state.typography) {
-                    let mut group = vec![(para, initial, measured.used_bbox)];
-                    let mut displaced = Vec::new();
-                    for neighbor in neighbors {
-                        let Some(frame) = state.frames.get(&neighbor.id) else {
-                            break;
-                        };
-                        if !state.targets.contains_key(&neighbor.id) {
-                            break;
-                        }
-                        group.push((&state.pars[&neighbor.id], frame, neighbor.used_bbox));
-                        displaced.push(&neighbor.id);
-                        let obstacles = stages::refine::obstacles(
-                            &bound.ir,
-                            para,
-                            &state.pars,
-                            placed,
-                            &shaper,
-                            &displaced,
-                        );
-                        for frames in stages::refine::group_frames(&group, crop, &obstacles) {
-                            let results: Option<Vec<_>> = group
-                                .iter()
-                                .zip(frames)
-                                .map(|((p, _, _), frame)| {
-                                    fit(&state.targets[&p.id], &frame, &shaper, state.typography)
-                                        .map(|laid| (frame, laid))
-                                })
-                                .collect();
-                            let Some(results) = results else {
-                                continue;
-                            };
-                            if results
-                                .windows(2)
-                                .any(|p| p[0].1.used_bbox.y0 - p[1].1.used_bbox.y1 < 0.24)
-                            {
-                                continue;
-                            }
-                            accepted = results;
-                            break;
-                        }
-                        if !accepted.is_empty() {
-                            break;
-                        }
-                    }
-                }
+                accepted = reflow_column(state, bound, id, placed, crop, &shaper);
             }
             if accepted.is_empty() {
                 continue;
             }
-            let group_size = accepted.len();
-            for (frame, paragraph) in accepted {
-                let changed_id = paragraph.id.clone();
-                let old = &state.frames[&changed_id];
-                let boxes = paragraph.lines.iter().map(|l| l.bbox).collect();
-                let placements = state.typeset_by_page.entry(page).or_default();
-                placements.retain(|p| p.id != changed_id);
-                placements.push(paragraph);
-                sink.emit(Event::Issue {
-                    severity: Severity::Info,
-                    code: "layout_refined".into(),
-                    paragraph_id: Some(changed_id.clone()), page: Some(page + 1),
-                    message: format!(
-                        "局部动态bbox第{round}轮（联排段数={group_size}）：{:?} → {:?}，首基线 {:.3} → {:.3}；字号/行距不变",
-                        old.bbox, frame.bbox, old.first_baseline, frame.first_baseline
-                    ),
-                });
-                sink.emit(Event::Paragraph {
-                    paragraph_id: changed_id.clone(),
-                    page: page + 1,
-                    status: ParagraphStatus::Typeset,
-                    boxes: Some(boxes),
-                    coord_system: syncpdf_core::CoordSystem::PdfUser,
-                    translated_html: Some(state.targets[&changed_id].html.clone()),
-                });
-                state.frames.insert(changed_id, frame);
-            }
-            state.fallbacks -= 1;
-            state.tgt_chars = state.tgt_chars - para.text.chars().count() as u64
-                + target.parsed.text().chars().count() as u64;
+            commit(state, page, round, accepted, sink);
             improved = true;
         }
         if !improved {
             break;
         }
     }
+    restore_separation(state, page, sink);
+}
+
+/// A placement can spend half of a source gap, which at a looser target line
+/// pitch leaves adjacent paragraphs no more apart than their own lines. Repack
+/// any same-column stack whose members are closer than their paragraph
+/// separation; a stack that cannot be repacked keeps its current layout.
+fn restore_separation(state: &mut RunState, page: u32, sink: &SharedSink) {
+    let Some(crop) = state.bound.get(&page).map(|b| b.ir.crop_box) else {
+        return;
+    };
+    let mut done = BTreeSet::new();
+    let ids: Vec<ParagraphId> = state
+        .typeset_by_page
+        .get(&page)
+        .map(|v| v.iter().map(|p| p.id.clone()).collect())
+        .unwrap_or_default();
+    for id in ids {
+        if done.contains(&id) {
+            continue;
+        }
+        let placed: &[TypesetParagraph] =
+            state.typeset_by_page.get(&page).map_or(&[], Vec::as_slice);
+        let Some(laid) = placed.iter().find(|p| p.id == id) else {
+            continue;
+        };
+        let para = &state.pars[&id];
+        // The nearest placed paragraph below in the same column.
+        let below = placed
+            .iter()
+            .filter(|o| {
+                let other = &state.pars[&o.id];
+                other.bbox.y1 <= para.bbox.y0 + 0.5
+                    && (other.bbox.x0 - para.bbox.x0).abs() <= 4.0
+                    && (other.bbox.x1.min(para.bbox.x1) - other.bbox.x0.max(para.bbox.x0))
+                        > 0.8 * other.bbox.width().min(para.bbox.width())
+            })
+            .max_by(|a, b| {
+                state.pars[&a.id]
+                    .bbox
+                    .y1
+                    .total_cmp(&state.pars[&b.id].bbox.y1)
+            });
+        let Some(next) = below else {
+            continue;
+        };
+        let other = &state.pars[&next.id];
+        let required = stages::refine::separation(
+            para.bbox.y0 - other.bbox.y1,
+            laid.line_height - para.line_height,
+            next.line_height - other.line_height,
+        );
+        if laid.used_bbox.y0 - next.used_bbox.y1 >= required - 0.01 {
+            continue;
+        }
+        let shaper = StoreShaper::new(&state.font_store, &state.font_profile)
+            .with_role(stages::typeset::role_for_region(para.kind));
+        let accepted = reflow_column(state, &state.bound[&page], &id, placed, crop, &shaper);
+        if accepted.is_empty() {
+            continue;
+        }
+        done.extend(accepted.iter().map(|(_, p)| p.id.clone()));
+        commit(state, page, 0, accepted, sink);
+    }
+}
+
+/// Publish one accepted group: replace members' placements and frames, and
+/// count every member that had no placement as a recovered fallback.
+fn commit(
+    state: &mut RunState,
+    page: u32,
+    round: u32,
+    accepted: Vec<(LayoutFrame, TypesetParagraph)>,
+    sink: &SharedSink,
+) {
+    let group_size = accepted.len();
+    for (frame, paragraph) in accepted {
+        let changed_id = paragraph.id.clone();
+        // Every member that had no placement is a recovered fallback.
+        let recovered = !state
+            .typeset_by_page
+            .get(&page)
+            .is_some_and(|v| v.iter().any(|p| p.id == changed_id));
+        if recovered {
+            state.fallbacks -= 1;
+            state.tgt_chars = state.tgt_chars - state.pars[&changed_id].text.chars().count() as u64
+                + state.targets[&changed_id].parsed.text().chars().count() as u64;
+        }
+        let old = &state.frames[&changed_id];
+        let boxes = paragraph.lines.iter().map(|l| l.bbox).collect();
+        let placements = state.typeset_by_page.entry(page).or_default();
+        placements.retain(|p| p.id != changed_id);
+        placements.push(paragraph);
+        sink.emit(Event::Issue {
+            severity: Severity::Info,
+            code: "layout_refined".into(),
+            paragraph_id: Some(changed_id.clone()), page: Some(page + 1),
+            message: format!(
+                "局部动态bbox第{round}轮（联排段数={group_size}）：{:?} → {:?}，首基线 {:.3} → {:.3}；字号/行距不变",
+                old.bbox, frame.bbox, old.first_baseline, frame.first_baseline
+            ),
+        });
+        sink.emit(Event::Paragraph {
+            paragraph_id: changed_id.clone(),
+            page: page + 1,
+            status: ParagraphStatus::Typeset,
+            boxes: Some(boxes),
+            coord_system: syncpdf_core::CoordSystem::PdfUser,
+            translated_html: Some(state.targets[&changed_id].html.clone()),
+        });
+        state.frames.insert(changed_id, frame);
+    }
+}
+
+/// Repack the whole same-column stack around `id` as one flow. The stack runs
+/// through translated paragraphs (placed or not) until retained content or a
+/// fixed obstacle; every internal gap is re-read against the target leading,
+/// and the stack keeps its source clearance to content above and below. Only
+/// an open side may grow, and only to the page's body extent: a stack never
+/// takes the page margin, and a page that is simply too dense stays a fallback
+/// for the document-wide line-height decision.
+fn reflow_column(
+    state: &RunState,
+    bound: &BoundPage,
+    id: &ParagraphId,
+    placed: &[TypesetParagraph],
+    crop: Rect,
+    shaper: &StoreShaper<'_>,
+) -> Vec<(LayoutFrame, TypesetParagraph)> {
+    let para = &state.pars[id];
+    let same_column = |other: &Paragraph| {
+        (other.bbox.x0 - para.bbox.x0).abs() <= 4.0
+            && (other.bbox.x1.min(para.bbox.x1) - other.bbox.x0.max(para.bbox.x0))
+                > 0.8 * other.bbox.width().min(para.bbox.width())
+    };
+    // A member's current frame and ink (its accepted placement, or a probe of
+    // its translation in the initial frame), and how much looser its target
+    // line pitch is than the source's.
+    let member = |pid: &ParagraphId| -> Option<(&LayoutFrame, Rect, f32)> {
+        let frame = state.frames.get(pid)?;
+        let target = state.targets.get(pid)?;
+        let source_pitch = state.pars[pid].line_height;
+        if let Some(laid) = placed.iter().find(|p| p.id == *pid) {
+            return Some((frame, laid.used_bbox, laid.line_height - source_pitch));
+        }
+        let shaper = StoreShaper::new(&state.font_store, &state.font_profile)
+            .with_role(stages::typeset::role_for_region(target.para.kind));
+        probe(target, frame, crop, &shaper, state.typography)
+            .map(|p| (frame, p.used_bbox, p.line_height - source_pitch))
+    };
+    let page_paras: Vec<&Paragraph> = state
+        .pars
+        .values()
+        .filter(|p| p.page == para.page)
+        .collect();
+    let mut column: Vec<&Paragraph> = page_paras
+        .iter()
+        .filter(|p| same_column(p))
+        .copied()
+        .collect();
+    column.sort_by(|a, b| b.bbox.y1.total_cmp(&a.bbox.y1));
+    let Some(at) = column.iter().position(|p| p.id == *id) else {
+        return Vec::new();
+    };
+    // Vertically chained neighbors only: an overlapping one is not a stack.
+    let chained = |upper: &Paragraph, lower: &Paragraph| upper.bbox.y0 >= lower.bbox.y1 - 0.5;
+    let mut first = at;
+    while first > 0
+        && chained(column[first - 1], column[first])
+        && state.targets.contains_key(&column[first - 1].id)
+    {
+        first -= 1;
+    }
+    let mut last = at;
+    while last + 1 < column.len()
+        && chained(column[last], column[last + 1])
+        && state.targets.contains_key(&column[last + 1].id)
+    {
+        last += 1;
+    }
+    let mut stack = column[first..=last].to_vec();
+    let mut obstacles = {
+        let displaced: Vec<&ParagraphId> = stack.iter().map(|p| &p.id).collect();
+        stages::refine::obstacles(&bound.ir, &stack, &state.pars, placed, shaper, &displaced)
+    };
+    let x_range = |b: &Rect, members: &[&Paragraph]| {
+        members.iter().any(|p| b.x1 > p.bbox.x0 && b.x0 < p.bbox.x1)
+    };
+    // Cut the stack at fixed content between two members.
+    let cuts: Vec<usize> = (1..stack.len())
+        .filter(|&i| {
+            let (upper, lower) = (stack[i - 1], stack[i]);
+            obstacles.iter().any(|b| {
+                let y = (b.y0 + b.y1) / 2.0;
+                x_range(b, &[upper, lower]) && y < upper.bbox.y0 && y > lower.bbox.y1
+            })
+        })
+        .collect();
+    if !cuts.is_empty() {
+        let pos = stack.iter().position(|p| p.id == *id).unwrap_or(0);
+        let lo = cuts
+            .iter()
+            .copied()
+            .filter(|&c| c <= pos)
+            .max()
+            .unwrap_or(0);
+        let hi = cuts
+            .iter()
+            .copied()
+            .find(|&c| c > pos)
+            .unwrap_or(stack.len());
+        stack = stack[lo..hi].to_vec();
+        let displaced: Vec<&ParagraphId> = stack.iter().map(|p| &p.id).collect();
+        obstacles =
+            stages::refine::obstacles(&bound.ir, &stack, &state.pars, placed, shaper, &displaced);
+    }
+    if stack.len() < 2 {
+        return Vec::new();
+    }
+    let mut group = Vec::new();
+    let mut leading = Vec::new();
+    for p in &stack {
+        let Some((frame, used, lead)) = member(&p.id) else {
+            return Vec::new();
+        };
+        group.push((*p, frame, used));
+        leading.push(lead);
+    }
+    // Vertical limits: the source edge where content lies beyond it, else the
+    // body extent of the page (translatable paragraphs), never the margin.
+    let top = stack[0].bbox.y1;
+    let bottom = stack[stack.len() - 1].bbox.y0;
+    let body_top = page_paras
+        .iter()
+        .filter(|p| p.translatable == syncpdf_core::ir::Translatable::Yes)
+        .map(|p| p.bbox.y1)
+        .fold(top, f32::max);
+    let body_bottom = page_paras
+        .iter()
+        .filter(|p| p.translatable == syncpdf_core::ir::Translatable::Yes)
+        .map(|p| p.bbox.y0)
+        .fold(bottom, f32::min);
+    let ceiling = if obstacles
+        .iter()
+        .any(|b| x_range(b, &stack) && b.y0 >= top - 0.5)
+    {
+        top
+    } else {
+        body_top
+    };
+    let floor = if obstacles
+        .iter()
+        .any(|b| x_range(b, &stack) && b.y1 <= bottom + 0.5)
+    {
+        bottom
+    } else {
+        body_bottom
+    };
+    let limits = Rect::new(crop.x0, floor.max(crop.y0), crop.x1, ceiling.min(crop.y1));
+    for frames in stages::refine::group_frames(&group, &leading, limits, &obstacles) {
+        let results: Option<Vec<_>> = group
+            .iter()
+            .zip(frames)
+            .map(|((p, _, _), frame)| {
+                let target = &state.targets[&p.id];
+                let shaper = StoreShaper::new(&state.font_store, &state.font_profile)
+                    .with_role(stages::typeset::role_for_region(target.para.kind));
+                fit(target, &frame, &shaper, state.typography).map(|laid| (frame, laid))
+            })
+            .collect();
+        let Some(results) = results else {
+            continue;
+        };
+        if results
+            .windows(2)
+            .any(|p| p[0].1.used_bbox.y0 - p[1].1.used_bbox.y1 < 0.24)
+        {
+            continue;
+        }
+        return results;
+    }
+    Vec::new()
 }
 
 #[cfg(test)]
@@ -321,6 +511,72 @@ mod tests {
         assert_eq!(state.frames[&before[0].id].first_baseline, baseline);
         assert_eq!(state.fallbacks, 1);
         assert_eq!(state.tgt_chars, 100);
+    }
+
+    /// Both paragraphs placed, the lower one's ink 0.5pt under the upper one's
+    /// although their source boxes are 4pt apart.
+    fn touching_state(dir: &Path, block_below: bool) -> RunState {
+        let mut state = pair_state(dir, block_below);
+        let a: ParagraphId = "P01-001".parse().unwrap();
+        let b: ParagraphId = "P01-002".parse().unwrap();
+        let crop = state.bound[&0].ir.crop_box;
+        let shaper = StoreShaper::new(&state.font_store, &state.font_profile);
+        let first = probe(
+            &state.targets[&a],
+            &state.frames[&a],
+            crop,
+            &shaper,
+            state.typography,
+        )
+        .unwrap();
+        let mut frame = state.frames[&b].clone();
+        let next = probe(&state.targets[&b], &frame, crop, &shaper, state.typography).unwrap();
+        frame.first_baseline += first.used_bbox.y0 - 0.5 - next.used_bbox.y1;
+        let next = probe(&state.targets[&b], &frame, crop, &shaper, state.typography).unwrap();
+        state.frames.insert(b, frame);
+        if block_below {
+            let ir = &mut state.bound.get_mut(&0).unwrap().ir;
+            ir.items.pop();
+            ir.items.push(DisplayItem::Image {
+                bbox: Rect::new(0., 0., 300., next.used_bbox.y0 - 0.25),
+            });
+        }
+        state.typeset_by_page.insert(0, vec![first, next]);
+        state.fallbacks = 0;
+        state
+    }
+
+    fn ink_gap(state: &RunState) -> f32 {
+        let laid = &state.typeset_by_page[&0];
+        let find = |id: &str| laid.iter().find(|p| p.id.to_string() == id).unwrap();
+        find("P01-001").used_bbox.y0 - find("P01-002").used_bbox.y1
+    }
+
+    #[test]
+    fn touching_stack_is_repacked_to_its_paragraph_separation() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = touching_state(dir.path(), false);
+        assert!(ink_gap(&state) < 1.);
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let sink = SharedSink::new(super::super::tests::RunRecorder::new(log.clone()));
+        restore_separation(&mut state, 0, &sink);
+        assert!(ink_gap(&state) >= 4. - 0.01, "{}", ink_gap(&state));
+        assert_eq!(state.fallbacks, 0);
+        assert_eq!(state.typeset_by_page[&0].len(), 2);
+        assert!(log.lock().unwrap().iter().any(|(_, e)| matches!(e,
+            Event::Issue { code, .. } if code == "layout_refined")));
+    }
+
+    #[test]
+    fn touching_stack_without_room_keeps_its_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = touching_state(dir.path(), true);
+        let before = state.typeset_by_page[&0].clone();
+        let sink = SharedSink::new(super::super::tests::RunRecorder::new(Arc::new(Mutex::new(
+            Vec::new(),
+        ))));
+        restore_separation(&mut state, 0, &sink);
+        assert_eq!(state.typeset_by_page[&0], before);
     }
 
     #[test]

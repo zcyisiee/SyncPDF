@@ -116,6 +116,7 @@ pub(super) fn state(dir: &Path) -> (RunState, PathBuf) {
             revision: 0,
             font_stats: None,
             callback_error: None,
+            blocks: Vec::new(),
         },
         input,
     )
@@ -429,4 +430,104 @@ fn missing_safe_frame_preserves_source_and_reports_reason() {
         .iter()
         .any(|(_, e)| matches!(e, Event::Issue { code, .. } if code == "layout_frame_missing")));
     assert_eq!(s.fallbacks, 1);
+}
+
+/// A page whose paragraph cannot move: retained content fills the page above
+/// and below its source box, so only the document leading decides whether the
+/// translation fits.
+fn fixed_page(dir: &Path, chars: usize) -> (RunState, descent::Origin, TranslatedBlock) {
+    let (mut s, _) = state(dir);
+    let id = ParagraphId { page: 1, seq: 1 };
+    s.schedule = PageSchedule::new([(1, id.clone())].into_iter());
+    let ir = &mut s.bound.get_mut(&0).unwrap().ir;
+    ir.items.push(syncpdf_core::ir::DisplayItem::Image {
+        bbox: Rect::new(0., 731., 612., 792.),
+    });
+    ir.items.push(syncpdf_core::ir::DisplayItem::Image {
+        bbox: Rect::new(0., 0., 612., 649.),
+    });
+    s.typography = stages::typeset::Typography::new(1.0, Some(2.0)).unwrap();
+    let origin = descent::Origin {
+        doc: s.doc.clone(),
+        frames: s.frames.clone(),
+        schedule: s.schedule.clone(),
+    };
+    let block = TranslatedBlock {
+        html: format!("<p id=\"{id}\">{}</p>", "译".repeat(chars)),
+        id,
+        status: BlockStatus::Ok,
+        from_cache: false,
+    };
+    (s, origin, block)
+}
+
+fn first_pass(s: &mut RunState, block: TranslatedBlock, sink: &SharedSink) {
+    s.blocks.push(block.clone());
+    handle_block(s, sink, block, 1).unwrap();
+    settle_rest(s, &[ParagraphId { page: 1, seq: 1 }], &[0], sink).unwrap();
+}
+
+fn settle(s: &mut RunState, sink: &SharedSink) -> Result<(), PipelineError> {
+    settle_rest(s, &[ParagraphId { page: 1, seq: 1 }], &[0], sink)
+}
+
+#[test]
+fn document_leading_descends_until_the_overflowing_paragraph_fits() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut s, origin, block) = fixed_page(dir.path(), 60);
+    let (sink, log) = recorder();
+    first_pass(&mut s, block, &sink);
+    assert_eq!(s.fallbacks, 1, "2.0 倍行距下必须溢出，否则本测试无意义");
+    descent::descend(&mut s, &origin, 1, &sink, settle).unwrap();
+    assert_eq!(s.fallbacks, 0);
+    let leading = s.typography.describe();
+    assert!(
+        leading.as_str() < "2.00" && leading.as_str() >= "1.20",
+        "{leading}"
+    );
+    assert_eq!(s.typeset_by_page[&0].len(), 1);
+    assert_eq!(s.output, dir.path().join("output.pdf"));
+    assert!(text(&s.output, 0).contains('译'));
+    assert!(!dir.path().join("output.leading.pdf").exists());
+    let events = log.lock().unwrap();
+    assert!(events.iter().any(|(_, e)| matches!(e,
+        Event::Issue { code, .. } if code == "line_height_lowered")));
+    assert!(events.iter().any(|(_, e)| matches!(
+        e,
+        Event::Paragraph {
+            status: ParagraphStatus::Typeset,
+            ..
+        }
+    )));
+    assert!(!events.iter().any(|(_, e)| matches!(e,
+        Event::Progress { done, .. } if *done > 1)));
+}
+
+#[test]
+fn document_leading_is_kept_when_no_lower_leading_recovers_anything() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut s, origin, block) = fixed_page(dir.path(), 400);
+    let (sink, log) = recorder();
+    first_pass(&mut s, block, &sink);
+    assert_eq!(s.fallbacks, 1);
+    let output = std::fs::read(&s.output).unwrap();
+    descent::descend(&mut s, &origin, 1, &sink, settle).unwrap();
+    assert_eq!(s.fallbacks, 1);
+    assert_eq!(s.typography.describe(), "2.00");
+    assert_eq!(std::fs::read(&s.output).unwrap(), output);
+    assert!(!dir.path().join("output.leading.pdf").exists());
+    assert!(!log.lock().unwrap().iter().any(|(_, e)| matches!(e,
+        Event::Issue { code, .. } if code == "line_height_lowered")));
+}
+
+#[test]
+fn source_leading_is_never_descended() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut s, origin, block) = fixed_page(dir.path(), 400);
+    s.typography = stages::typeset::Typography::default();
+    let (sink, _) = recorder();
+    first_pass(&mut s, block, &sink);
+    let revision = s.revision;
+    descent::descend(&mut s, &origin, 1, &sink, settle).unwrap();
+    assert_eq!(s.revision, revision);
 }

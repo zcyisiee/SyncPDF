@@ -16,6 +16,10 @@ use syncpdf_typeset::{
 
 use super::PipelineError;
 
+/// Lowest document leading the descent may choose, and its step.
+const MIN_LEADING: f32 = 1.2;
+const LEADING_STEP: f32 = 0.1;
+
 /// Explicit target typography; never mutates source IR or translation cache keys.
 /// Leading is a dimensionless multiplier of the scaled paragraph font size.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -49,6 +53,23 @@ impl Typography {
             font_scale,
             line_height,
         })
+    }
+
+    /// The next document-wide leading to try when the requested one leaves
+    /// paragraphs without room: one step lower, never below the readable
+    /// floor. Source leading (no explicit multiplier) is never altered.
+    pub fn lowered(self) -> Option<Self> {
+        let current = self.line_height?;
+        let next = ((current - LEADING_STEP) / LEADING_STEP).round() * LEADING_STEP;
+        (current > MIN_LEADING + 1e-3).then_some(Self {
+            line_height: Some(next.max(MIN_LEADING)),
+            ..self
+        })
+    }
+
+    pub fn describe(self) -> String {
+        self.line_height
+            .map_or_else(|| "原文".into(), |v| format!("{v:.2}"))
     }
 
     fn apply(self, spec: &mut ParagraphSpec) {

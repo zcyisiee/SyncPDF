@@ -8,13 +8,17 @@ use syncpdf_typeset::Shaper;
 
 pub(crate) fn obstacles(
     ir: &PageIR,
-    para: &Paragraph,
+    moving: &[&Paragraph],
     paragraphs: &BTreeMap<ParagraphId, Paragraph>,
     placed: &[TypesetParagraph],
     shaper: &dyn Shaper,
     displaced: &[&ParagraphId],
 ) -> Vec<Rect> {
-    let mut removed: BTreeSet<GlyphId> = para.glyphs.iter().copied().collect();
+    // Moving paragraphs (placed or not) release their source ink to the layout.
+    let mut removed: BTreeSet<GlyphId> = moving
+        .iter()
+        .flat_map(|p| p.glyphs.iter().copied())
+        .collect();
     for laid in placed {
         if let Some(p) = paragraphs.get(&laid.id) {
             removed.extend(p.glyphs.iter().copied());
@@ -30,11 +34,15 @@ pub(crate) fn obstacles(
         })
         .map(|g| g.bbox)
         .collect();
-    let own_ops: BTreeSet<OpKey> = std::iter::once(para)
+    let own_ops: BTreeSet<OpKey> = moving
+        .iter()
+        .copied()
         .chain(placed.iter().filter_map(|p| paragraphs.get(&p.id)))
         .flat_map(super::source_decoration::owned_ops)
         .collect();
-    let moved_atoms: Vec<_> = std::iter::once(para)
+    let moved_atoms: Vec<_> = moving
+        .iter()
+        .copied()
         .chain(placed.iter().filter_map(|p| paragraphs.get(&p.id)))
         .flat_map(|p| &p.atoms)
         .filter_map(|a| a.source)
@@ -172,22 +180,41 @@ pub(crate) fn wider_measure(
     Some(frame)
 }
 
+/// Target ink gap between two stacked paragraphs: the source gap, widened by
+/// how much looser the target line pitch is than the source's (`upper`/`lower`).
+pub(crate) fn separation(source_gap: f32, upper: f32, lower: f32) -> f32 {
+    source_gap.max(0.25) + upper.max(lower).max(0.0)
+}
+
 /// Repack a contiguous group in its existing column. Retain each measure,
-/// source paragraph gap and reading order, and never jump across a fixed obstacle.
+/// paragraph separation and reading order, and never jump across a fixed obstacle.
+///
+/// `leading[i]` is how much member `i`'s target line pitch exceeds its source
+/// pitch. A source paragraph gap is read relative to the source leading, so the
+/// repacked ink gap grows by the same amount; otherwise a looser target line
+/// pitch makes the paragraph break indistinguishable from a line break.
 pub(crate) fn group_frames(
     group: &[(&Paragraph, &LayoutFrame, Rect)],
+    leading: &[f32],
     crop: Rect,
     obstacles: &[Rect],
 ) -> Vec<Vec<LayoutFrame>> {
     let Some(&(para, initial, used)) = group.first() else {
         return Vec::new();
     };
+    let gap = |index: usize| {
+        separation(
+            group[index - 1].0.bbox.y0 - group[index].0.bbox.y1,
+            leading.get(index - 1).copied().unwrap_or(0.0),
+            leading.get(index).copied().unwrap_or(0.0),
+        )
+    };
     let mut measure = initial.clone();
     let mut height = used.height();
-    for (index, (p, frame, ink)) in group.iter().enumerate().skip(1) {
+    for (index, (_, frame, ink)) in group.iter().enumerate().skip(1) {
         measure.bbox.x0 = measure.bbox.x0.min(frame.bbox.x0);
         measure.bbox.x1 = measure.bbox.x1.max(frame.bbox.x1);
-        height += (group[index - 1].0.bbox.y0 - p.bbox.y1).max(0.25) + ink.height();
+        height += gap(index) + ink.height();
     }
     let combined = Rect::new(measure.bbox.x0, used.y1 - height, measure.bbox.x1, used.y1);
     free_frames(para, &measure, combined, crop, obstacles)
@@ -202,9 +229,9 @@ pub(crate) fn group_frames(
             group
                 .iter()
                 .enumerate()
-                .map(|(index, (p, frame, ink))| {
+                .map(|(index, (_, frame, ink))| {
                     if index > 0 {
-                        top -= (group[index - 1].0.bbox.y0 - p.bbox.y1).max(0.25);
+                        top -= gap(index);
                     }
                     let mut placed = space.clone();
                     placed.bbox.x0 = frame.bbox.x0;
@@ -311,6 +338,7 @@ mod tests {
         let next_used = Rect::new(20., 45., 80., 70.);
         let pairs = group_frames(
             &[(&para, &initial, used), (&neighbor, &next, next_used)],
+            &[],
             crop,
             &obstacles,
         );
@@ -330,6 +358,7 @@ mod tests {
         blocked.push(Rect::new(20., 75., 80., 75.5));
         assert!(group_frames(
             &[(&para, &initial, used), (&neighbor, &next, next_used)],
+            &[],
             crop,
             &blocked
         )
@@ -337,6 +366,7 @@ mod tests {
         // Insufficient total clearance also fails without changing either input.
         assert!(group_frames(
             &[(&para, &initial, used), (&neighbor, &next, next_used)],
+            &[],
             Rect::new(0., 50., 200., 200.),
             &obstacles
         )
@@ -346,10 +376,38 @@ mod tests {
         // paragraph from below that separator into the preceding section.
         assert!(group_frames(
             &[(&para, &initial, used), (&neighbor, &next, next_used)],
+            &[],
             Rect::new(0., 0., 200., 500.),
             &[Rect::new(20., 75., 80., 75.5)],
         )
         .is_empty());
+    }
+
+    #[test]
+    fn looser_target_leading_widens_paragraph_gap_and_tighter_never_narrows_it() {
+        let (para, initial) = fixture();
+        let mut neighbor = para.clone();
+        neighbor.bbox = Rect::new(20., 30., 80., 70.);
+        let next = LayoutFrame {
+            first_baseline: 65.,
+            ..initial.clone()
+        };
+        let crop = Rect::new(0., 0., 200., 200.);
+        let obstacles = [Rect::new(20., 120., 80., 130.), Rect::new(20., 0., 80., 5.)];
+        let used = Rect::new(20., 60., 80., 119.);
+        let next_used = Rect::new(20., 45., 80., 70.);
+        let group = [(&para, &initial, used), (&neighbor, &next, next_used)];
+        let ink_gap = |leading: &[f32]| {
+            let frames = group_frames(&group, leading, crop, &obstacles);
+            let (a, b) = (&frames[0][0], &frames[0][1]);
+            let top = used.y0 + a.first_baseline - initial.first_baseline;
+            top - (next_used.y1 + b.first_baseline - next.first_baseline)
+        };
+        // Source gap 10pt; the lower paragraph's lines are 3pt looser.
+        assert_eq!(ink_gap(&[0., 3.]), 13.);
+        assert_eq!(ink_gap(&[3., -2.]), 13.);
+        assert_eq!(ink_gap(&[-2., -2.]), 10.);
+        assert_eq!(separation(-1., 0., 0.), 0.25);
     }
 
     #[test]
@@ -378,9 +436,10 @@ mod tests {
         ];
         let mut occupied = fixed.to_vec();
         occupied.push(Rect::new(20., 22., 80., 32.));
-        assert!(group_frames(&first_two, crop, &occupied).is_empty());
+        assert!(group_frames(&first_two, &[], crop, &occupied).is_empty());
         let frames = group_frames(
             &[first_two[0], first_two[1], (&last, &last_frame, last_used)],
+            &[],
             crop,
             &fixed,
         );
