@@ -15,6 +15,7 @@
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
     "src/shared/**/*.ts",
-    "tests/*.ts"
+    "tests/*.ts",
+    "tests/support/*.ts"
   ]
 }
