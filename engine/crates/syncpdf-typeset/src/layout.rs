@@ -532,23 +532,31 @@ fn place(
         } else {
             0.0
         };
-    // Justification stretches advances; serif ink can extend past those advances.
-    // Spend less added glue when natural ink already fits, preserving every glyph
-    // size and the chosen breaks. Never compress below natural spacing here.
-    if input.align == Align::Justify
-        && !row.last
-        && row.ratio > 0.0
-        && placed.line.bbox.width() > available
-    {
-        let mut adjusted = row.clone();
-        adjusted.ratio = 0.0;
-        let natural = place_row(shaper, input, &adjusted, bbox, baseline, scale);
-        let width = natural.line.bbox.width();
-        if width <= available {
-            adjusted.ratio = row.ratio
-                * ((available - width - 0.001) / (placed.line.bbox.width() - width))
-                    .clamp(0.0, 1.0);
-            return place_row(shaper, input, &adjusted, bbox, baseline, scale);
+    // Justification positions advances; serif ink and side bearings can extend
+    // past them. Spend only as much less glue as the ink needs, preserving every
+    // glyph size and the chosen breaks: first give back added stretch, then use
+    // the breaker's own shrink allowance (never beyond its limit, ratio -1).
+    if input.align == Align::Justify && !row.last && placed.line.bbox.width() > available {
+        let at = |ratio: f32| {
+            let mut adjusted = row.clone();
+            adjusted.ratio = ratio;
+            place_row(shaper, input, &adjusted, bbox, baseline, scale)
+        };
+        let mut high = (row.ratio, placed.line.bbox.width());
+        for low in [0.0, -1.0] {
+            if low >= high.0 {
+                continue;
+            }
+            let width = at(low).line.bbox.width();
+            if width <= available {
+                let t = if high.1 > width {
+                    ((available - width - 0.001) / (high.1 - width)).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                return at(low + (high.0 - low) * t);
+            }
+            high = (low, width);
         }
     }
     placed

@@ -331,3 +331,55 @@ fn justified_serif_ink_uses_less_added_glue_without_shrinking_glyphs() {
     );
     assert!(rejected.paragraph.overflow, "unfit natural ink still fails");
 }
+
+#[test]
+fn shrunk_justified_line_spends_more_of_its_shrink_when_ink_overhangs() {
+    let spec = ParagraphSpec {
+        bbox: Rect::new(0., 0., 64.5, 100.),
+        first_baseline: Some(90.),
+        font_size: 10.,
+        line_height: 1.5,
+        align: Align::Justify,
+        first_indent: 0.,
+        is_rtl: false,
+        color: Color::BLACK,
+        styles: vec![],
+        lang: Lang::En,
+    };
+    let run = |spec: &ParagraphSpec, t: &str| {
+        Typeset::new(&SerifOverhang, FitOptions::default()).layout(
+            "P01-001".parse().unwrap(),
+            spec,
+            &[text(t)],
+            &Obstacles::default(),
+        )
+    };
+    // "aaaa bbbb cccc" is 65pt of advances: the breaker shrinks its spaces by 0.5pt,
+    // and the last glyph's serif then reaches past the measure.
+    let out = run(&spec, "aaaa bbbb cccc dddd");
+    assert!(!out.paragraph.overflow);
+    let first = &out.paragraph.lines[0];
+    assert_eq!(
+        first
+            .glyphs
+            .iter()
+            .map(|g| g.text.as_str())
+            .collect::<String>(),
+        "aaaa bbbb cccc"
+    );
+    assert!(
+        first.bbox.x0 >= 0. && first.bbox.x1 <= 64.5,
+        "{:?}",
+        first.bbox
+    );
+    assert!(out
+        .paragraph
+        .lines
+        .iter()
+        .flat_map(|l| &l.glyphs)
+        .all(|g| g.size == 10. && g.scale_x == 1.));
+    // A line without any glue has no shrink to spend: it still fails.
+    let mut solid = spec;
+    solid.bbox.x1 = 40.;
+    assert!(run(&solid, "aaaaaaaa").paragraph.overflow);
+}

@@ -222,6 +222,8 @@ async fn up_vns_first_three_pages_preserve_unfit_blocks() {
     let sink = SharedSink::new(Recorder::new(log.clone()));
     let mut cfg = RunConfig::with_fake("cjk", input.clone(), out.clone()).unwrap();
     select_pages(&mut cfg, vec![0, 1, 2]);
+    // 源字号下假译文已能全部容纳；放大目标字号以稳定制造排不下的块。
+    cfg.typography = syncpdf_pipeline::stages::typeset::Typography::new(1.3, None).unwrap();
     let summary = pipeline("upvns")
         .run(&cfg, sink, CancellationToken::new())
         .await
