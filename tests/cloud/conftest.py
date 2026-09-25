@@ -18,7 +18,8 @@ from babeldoc_tools.cloud.auth import create_invite  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 #: 假引擎：``translate`` 按 FAKE_MODE 发事件并把原文复制为译文；``dual`` 复制原文为对照版。
-#: FAKE_GATE：发完第一页后等这个文件出现再继续（让测试在「运行中」稳定地取消）。
+#: FAKE_GATE：发完第一页后等这个文件出现再继续（让测试在「运行中」稳定地取消）；
+#: FAKE_PID：把引擎进程号写进这个文件。
 FAKE_ENGINE = r'''
 import json, os, pathlib, shutil, sys, time
 args = sys.argv[1:]
@@ -30,6 +31,8 @@ if log:
 if args[0] == "dual":
     shutil.copyfile(arg("--source"), arg("--output"))
     sys.exit(0)
+if os.environ.get("FAKE_PID"):
+    pathlib.Path(os.environ["FAKE_PID"]).write_text(str(os.getpid()))
 mode = os.environ.get("FAKE_MODE", "success")
 pages = int(os.environ.get("FAKE_PAGES", "2"))
 out = pathlib.Path(arg("--output"))

@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+import json
+import os
+import signal
+import subprocess
+import sys
 import threading
+import time
+from pathlib import Path
 
 import pytest
 from babeldoc_tools.cloud import uploads
+from babeldoc_tools.cloud.db import Database
 from conftest import Cloud
+from conftest import make_pdf
 from conftest import parse_sse
 from conftest import wait_for
+
+REPO = Path(__file__).resolve().parents[2]
 
 
 def _events(client, job_id: str, after: int = 0) -> list[dict]:
@@ -248,6 +259,79 @@ def test_restart_puts_running_translation_back_at_queue_front(cloud, fake_engine
         assert page_revs[-1].startswith("2.")  # 新一轮的预览 rev 不会撞上旧缓存
     finally:
         restarted.close()
+
+
+def _serve(root, engine, log, env):
+    """真实 ``bdt cloud serve`` 子进程；返回 ``(进程, API 地址)``。"""
+    process = subprocess.Popen(  # noqa: S603 - argv 由测试构造
+        [sys.executable, "-m", "babeldoc_tools", "cloud", "serve", "--root", str(root), "--port", "0",
+         "--engine", str(engine), "--translator", "fake:echo"],
+        cwd=REPO, env=env, stdout=subprocess.PIPE, stderr=log, text=True,
+    )
+    return process, json.loads(process.stdout.readline())["data"]["api"]
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def test_service_stop_mid_run_requeues_instead_of_failing(tmp_path, fake_engine):
+    """回归：停服（systemd 只给服务进程发 SIGTERM）时，运行中的翻译不能记成失败。
+
+    有 SSE 连接挂着时服务也要及时退出；由服务自己终止引擎并把翻译留给下次启动重排。
+    """
+    import httpx
+
+    root, gate, pid_file = tmp_path / "root", tmp_path / "gate", tmp_path / "engine.pid"
+    env = {**os.environ, "FAKE_GATE": str(gate), "FAKE_PID": str(pid_file), "FAKE_PAGES": "2"}
+    code = json.loads(subprocess.run(  # noqa: S603 - argv 由测试构造
+        [sys.executable, "-m", "babeldoc_tools", "cloud", "invite", "--root", str(root), "--name", "t"],
+        cwd=REPO, capture_output=True, text=True, check=True,
+    ).stdout)["data"]["code"]
+    pdf = make_pdf(tmp_path / "paper.pdf")
+    with (tmp_path / "serve.log").open("w") as log:
+        process, api = _serve(root, fake_engine, log, env)
+        try:
+            client = httpx.Client(base_url=api.removesuffix("/api"), timeout=10)
+            assert client.post("/api/login", json={"code": code}).status_code == 200
+            with pdf.open("rb") as handle:
+                job = client.post("/api/jobs", files={"file": ("paper.pdf", handle)},
+                                  data={"model": "deepseek/deepseek-flash", "thinking": "low"}).json()
+            wait_for(lambda: pid_file.exists() and client.get(f"/api/jobs/{job['id']}").json()["status"] == "running")
+            engine_pid = int(pid_file.read_text())
+            # 有人正看着进度：SSE 长连接不能拖住停服
+            watcher = threading.Thread(target=lambda: client.get(f"/api/jobs/{job['id']}/events", timeout=60), daemon=True)
+            watcher.start()
+            time.sleep(0.3)
+            process.send_signal(signal.SIGTERM)
+            process.wait(timeout=15)
+            wait_for(lambda: not _alive(engine_pid), timeout=10)
+        finally:
+            if process.poll() is None:
+                process.kill()
+
+        gate.touch()
+        process, api = _serve(root, fake_engine, log, env)
+        try:
+            client = httpx.Client(base_url=api.removesuffix("/api"), timeout=10)
+            assert client.post("/api/login", json={"code": code}).status_code == 200
+            wait_for(lambda: client.get(f"/api/jobs/{job['id']}").json()["status"] not in ("queued", "running"))
+            assert client.get(f"/api/jobs/{job['id']}").json()["status"] == "done"
+        finally:
+            process.terminate()
+            process.wait(timeout=15)
+    db = Database(root / "app.db")
+    try:
+        rows = db.all("SELECT kind, payload FROM job_events WHERE job_id = ? ORDER BY seq", (job["id"],))
+    finally:
+        db.close()
+    statuses = [json.loads(r["payload"])["status"] for r in rows if r["kind"] == "status"]
+    assert "failed" not in statuses
+    assert "服务已重启，任务将重新开始" in [json.loads(r["payload"]).get("text") for r in rows]
 
 
 def test_soft_delete_hides_only_own_record(cloud):

@@ -102,7 +102,10 @@ def _serve(args: argparse.Namespace) -> int:
             "pid": os.getpid(),
         },
     })
-    server = uvicorn.Server(uvicorn.Config(app, log_level="info", log_config=_LOG_CONFIG))
+    # SSE 长连接不会自己结束：停服最多等它们 3 秒，随后 lifespan 终止引擎、把运行中的翻译留给重启重排
+    server = uvicorn.Server(
+        uvicorn.Config(app, log_level="info", log_config=_LOG_CONFIG, timeout_graceful_shutdown=3)
+    )
     try:
         server.run(sockets=[sock])
     finally:
