@@ -52,6 +52,7 @@
 - T2b 合入（`bdd64487`→merge `7d3e3ff6`）：正文宋体、Title/ParagraphTitle 黑体、等宽 JetBrains Mono（CJK 回退黑体）；DeepSeek p8/p29 主控目检通过。已派 `sonnet-trc-inline-formula-brief.md`（worktree `trc-inline-formula`）。
 - VNS v1（226s，`vns-v1/`，引擎 e8ac8ade）：typeset 165、fallback 5（link_target_unplaced 4、P05-025 protected_source_overlap 同公式类）；p3 coverage_gap；Algorithm 标题保留英文。
 - CJK 两端对齐根因：断行用空格 stretch `4w` ≈ 字距 `0.05em` 的 20 倍，放置时 slack 被空格吞掉。修复 `e79d399b`：含 CJK 字距的行把 slack 均分到空格与字距（断行不变），无 CJK 字距行不变；VNS p5 回放目检 OK（`justify-check/`）。
+- 用户决策（09-24 验收轮）：①行距若降必须全局统一；优先"先借同栏盈余，不够再全局统一降行距"（方向4，未开始）②链接放不回时保留整段译文、隐藏该链接并记录原因（已实现，`prepare` 严格失败后逐链接保留可放回者，其余 `dropped`+F Hidden 位，事件 `link_dropped`）③换行连字符规则同意。回放 `tmp/paper-iteration/review-20260924-links/` 对比 `review-20260924/`：回退 TRC 8→0、ALNS 18→1、2602 18→14、VNS 3→3（P04-003/025 为 KEEP 原子定位失败，非链接，待查）、2604 6→6。遗留：ALNS/VNS dual 校验 `unresolved named destination`（`dual/navigation.rs:26`）待查；绕排段落 PP-DocLayoutV3 mask 按实例且限于各自框、无检测跨两部分→多边形不能解决，须检测后合并（方案 A 待用户看 `tmp/paper-iteration/layout-viz/2604-layout.pdf` 后决定）；CJK 10° 斜体切变未确认。
 
 ## 2026-09-24 接管：编译侧去过度开发（历史方案，执行优先级以上节为准）
 
