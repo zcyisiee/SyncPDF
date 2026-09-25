@@ -57,7 +57,7 @@
 - 用户指令（09-25）：①排不下由主控直接做，页内借位（同栏/左右栏，可横跨一栏），不跨页 ②绕排按方案 A 由主控做 ③之后查 dual PDF 生成失败 ④链接样式标记方案（`<a data-link>`）已答复，待①–③后再做。
 - 排不下一轮已提交（`0f9b0733`..`53a1036d`，5 提交）：视觉字号含 Form 的 Do CTM + 页空间基线方向（旋转文字按方向判定保留原文）；正文列表项悬挂续行合段；模型回声源文=not_replaced 不计回退；整栈重排失败时短源行段按实际障碍加宽重试。回放 `tmp/paper-iteration/fixes-v4/`（缓存按页内内容重映射到新段落 ID：`remap/`，内容变化段真实补译：`replay-live.sh`）：TRC 0、ALNS 0、2604 0、2602 1（P31-015）、VNS 2（P04-003/025 link_target_unplaced）。
 - 2602 P31-015 根因：Body 拉丁字体 PT Serif 比源 Times 宽约 10%，整页单栏已满、无可借空间；换 Times 度量拉丁字体属设计决策，**待用户决定**，不擅改。
-- 下一步：方案 A 绕排合段（真值：2604 P06-006+P06-009、P08-010+P08-013 各为一段，P08-009 独立）→ dual `unresolved named destination`（`dual/navigation.rs:26`，ALNS/VNS）→ VNS P04-003/025。
+- 用户决定（09-25）：绕排暂缓，只记录（[issue](../../issues/rust-float-wrap-paragraph.md)）。下一步：dual `unresolved named destination`（`dual/navigation.rs:26`，ALNS/VNS）→ TRC 项目符号比原文小（用户截图 p?「3.1 假设」列表）→ VNS P04-003/025。
 
 ## 2026-09-24 接管：编译侧去过度开发（历史方案，执行优先级以上节为准）
 
