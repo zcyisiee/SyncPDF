@@ -2103,7 +2103,10 @@ fn bind_glyphs(
                             .map(|r| r.0.origin)
                             .or_else(|| geom.map(|c| c.origin))
                             .unwrap_or(Point::new(bbox.x0, bbox.y0));
-                        let matrix = Matrix::translate(origin.x, origin.y);
+                        // 线性部分只保留页空间基线方向（pdfium 字符角已含 Tm、CTM
+                        // 与各层 Form 矩阵，按顺时针计）；无字符证据时按水平处理。
+                        let (sin, cos) = geom.map_or(0.0, |c| -c.angle.to_radians()).sin_cos();
+                        let matrix = Matrix::new(cos, sin, -sin, cos, origin.x, origin.y);
                         let is_space = unicode.first().is_some_and(|c: &char| c.is_whitespace());
                         let (fill, render_mode) = (obj.fill, obj.render_mode);
                         // 有效字号（视觉字号，已含 Tm/CTM 缩放）优先。`Glyph.size`

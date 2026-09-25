@@ -163,7 +163,7 @@ pub struct TextChar {
     pub origin: Point,
     /// 推进宽度的近似值，等于 `bbox.width()`。
     pub width: f32,
-    /// 字符旋转角，度；水平文本为 0。
+    /// 字符旋转角，度，页空间内按顺时针计；水平文本为 0。
     pub angle: f32,
     /// 是否为 pdfium 补出来的字符（空格、换行等），原始内容流里并不存在。
     pub is_generated: bool,
@@ -185,6 +185,18 @@ fn reliable_matrix(m: Matrix) -> Option<Matrix> {
 
 fn core_matrix(m: pdfium_render::prelude::PdfMatrix) -> Option<Matrix> {
     reliable_matrix(Matrix::new(m.a(), m.b(), m.c(), m.d(), m.e(), m.f()))
+}
+
+/// `Tf` scaled to page space: the length of text space's unit vertical vector
+/// under the object's matrix composed with every enclosing form's `Do` CTM.
+/// PDFium's `scaled_font_size` stops at the enclosing form and reads only `d`
+/// (zero for text turned a quarter).
+fn visual_font_size(object: &PdfPageTextObject<'_>, ancestors: Option<Matrix>) -> f32 {
+    let full = ancestors.and_then(|a| Some(core_matrix(object.matrix().ok()?)?.then(&a)));
+    match full {
+        Some(m) => object.unscaled_font_size().value * m.c.hypot(m.d),
+        None => object.scaled_font_size().value,
+    }
 }
 
 fn object_bounds(
@@ -645,7 +657,7 @@ fn build_text_object(
         index,
         form_path: form_path.to_vec(),
         font_name,
-        font_size: object.scaled_font_size().value,
+        font_size: visual_font_size(object, ancestors),
         unscaled_font_size: object.unscaled_font_size().value,
         is_embedded,
         font_flags,

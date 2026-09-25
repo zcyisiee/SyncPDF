@@ -48,7 +48,8 @@ pub struct Glyph {
     pub font: u32,
     /// 字号（已含文本矩阵与 CTM 的缩放）。
     pub size: f32,
-    /// 最终文本矩阵（含 CTM）。
+    /// 字形原点（`e`/`f`）+ 页空间基线方向的单位旋转（含 Tm、CTM 与 Form 矩阵）；
+    /// 不含字号缩放，视觉字号见 [`Glyph::size`]。
     pub matrix: Matrix,
     /// PDF 用户空间外接框。
     pub bbox: Rect,
