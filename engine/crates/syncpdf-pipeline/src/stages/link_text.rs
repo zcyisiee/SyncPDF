@@ -18,7 +18,13 @@
 //! A line-wrapped citation split into several same-destination links is one
 //! label: fragments contiguous in reading order (joined across whitespace
 //! only) match their merged literal once, and the anchor is split between
-//! them.
+//! them. A repeated label — bare or merged — pairs by source-occurrence
+//! ordinal when it occurs equally often in source and translation and every
+//! annotation covers a distinct occurrence; count mismatches and duplicate
+//! claims on one occurrence keep falling back. A line-end hyphen at a
+//! fragment boundary whose continuation starts lowercase is a typesetting
+//! artifact of the wrap; the de-hyphenated spelling is a fallback label,
+//! tried only after the joined label itself fails to place.
 //!
 //! Click geometry is ink-based: a whitespace glyph carries no ink, so it must not
 //! veto the rest of its label (CFF fonts report no bounds for a space, unlike
@@ -30,7 +36,7 @@
 //! match. Partial coverage, a rival link, or a glyph outside the paragraph keeps the
 //! literal-anchored path and its fail-closed fallback.
 use lopdf::{Document, Object, ObjectId};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use syncpdf_core::ir::{Glyph, PageIR, Paragraph, TypesetParagraph};
 use syncpdf_core::{AtomId, Rect, StyleId};
 use syncpdf_translate::{ParsedUnit, Segment};
@@ -291,6 +297,117 @@ fn select_by_destination(
     Some(out)
 }
 
+/// One line-wrapped label: its joined text, the de-hyphenated fallback for a
+/// line-end wrap hyphen, the participating annotations, their fragment
+/// weights, and the label's byte range in the source text (the identity its
+/// source-occurrence ordinal is measured against).
+struct MergedLabel {
+    label: String,
+    dehyphenated: Option<String>,
+    ids: Vec<ObjectId>,
+    destinations: BTreeSet<String>,
+    weights: Vec<usize>,
+    source_range: (usize, usize),
+}
+
+/// Repeated-label fallback: pair the k-th source occurrence of the label with
+/// the k-th translated occurrence. Valid only when the label occurs exactly as
+/// often in the translation as in the source and every annotation claims a
+/// distinct source occurrence — the ordinal is evidenced by the annotation's
+/// own source range, not by a count coincidence. A translation may reorder
+/// clauses, so the pairing is only order-invariant when every annotation in
+/// the group shares one destination: distinct destinations under reordering
+/// would silently swap links, so they fail closed. Anything else returns None.
+fn pair_by_occurrence(
+    label: &str,
+    group: &[(ObjectId, String, (usize, usize))],
+    literal: &[(usize, usize)],
+    source: &str,
+) -> Option<Vec<((usize, usize), ObjectId)>> {
+    if literal.is_empty() {
+        return None;
+    }
+    // Order-invariance gate: one shared destination for the whole group.
+    if group.windows(2).any(|w| w[0].1 != w[1].1) {
+        return None;
+    }
+    let occurrences: Vec<_> = matches(source, label);
+    if occurrences.len() != literal.len() {
+        return None;
+    }
+    let mut claimed = vec![false; occurrences.len()];
+    let mut out = Vec::with_capacity(group.len());
+    for (id, _, range) in group {
+        // The annotation's trimmed label range must be exactly one source
+        // occurrence; a duplicate claim on the same occurrence is ambiguous.
+        let ord = occurrences
+            .iter()
+            .position(|&(s, e)| (s, e) == *range)
+            .filter(|&o| !claimed[o]);
+        let ord = ord?;
+        claimed[ord] = true;
+        out.push((literal[ord], *id));
+    }
+    Some(out)
+}
+
+/// Partition a matched translated range between one merged label's
+/// annotations by fragment weight. Each annotation needs at least one
+/// character of the anchor, so an unsplittable range fails closed. Returns
+/// whether the split succeeded (appending to `ranges` on success).
+fn split_anchor(
+    text: &str,
+    (s, e): (usize, usize),
+    ids: &[ObjectId],
+    weights: &[usize],
+    ranges: &mut Vec<(usize, usize, ObjectId)>,
+) -> bool {
+    let chars: Vec<(usize, usize)> = {
+        let mut v = Vec::new();
+        let mut a = s;
+        for c in text[s..e].chars() {
+            v.push((a, a + c.len_utf8()));
+            a += c.len_utf8();
+        }
+        v
+    };
+    let total: usize = weights.iter().sum();
+    let count = chars.len();
+    // Each annotation needs at least one character of the anchor.
+    if ids.len() > count || count < 1 {
+        return false;
+    }
+    // Weighted split at char boundaries: each annotation gets its share of
+    // the matched range, so the pieces cover it exactly. Bounds stay in
+    // 0..count and strictly increase even when a fragment's weight exceeds
+    // the whole matched range (a compressed translation).
+    let mut bounds: Vec<usize> = Vec::with_capacity(ids.len() + 1);
+    bounds.push(0);
+    let mut acc = 0;
+    for (k, weight) in weights.iter().enumerate() {
+        acc += weight;
+        if k + 1 == weights.len() {
+            bounds.push(count);
+        } else {
+            let b = ((acc * count) / total).min(count - 1);
+            bounds.push(b.max(bounds[k] + 1).min(count - 1));
+        }
+    }
+    let mut cursor = e;
+    for (k, id) in ids.iter().enumerate() {
+        let start = chars[bounds[k]].0;
+        let end = if k + 1 == ids.len() {
+            e
+        } else {
+            chars[bounds[k + 1]].0
+        };
+        ranges.push((start, end, *id));
+        cursor = end;
+    }
+    debug_assert_eq!(cursor, e);
+    true
+}
+
 pub(crate) fn prepare(
     para: &Paragraph,
     ir: &PageIR,
@@ -469,14 +586,16 @@ fn prepare_labeled(
             runs.push(run);
         }
     }
-    let mut bare: BTreeMap<String, Vec<(ObjectId, String)>> = BTreeMap::new();
-    let mut merged_labels: Vec<(String, Vec<ObjectId>, Vec<usize>)> = Vec::new();
+    /// A bare label's annotation: object id, destination, trimmed source range.
+    type BareAnnotation = (ObjectId, String, (usize, usize));
+    let mut bare: BTreeMap<String, Vec<BareAnnotation>> = BTreeMap::new();
+    let mut merged_labels: Vec<MergedLabel> = Vec::new();
     for run in &runs {
         if run.len() == 1 {
-            let (id, destination, _, _, label) = &annotations[run[0]];
+            let (id, destination, _, range, label) = &annotations[run[0]];
             bare.entry(label.clone())
                 .or_default()
-                .push((*id, destination.clone()));
+                .push((*id, destination.clone(), *range));
             continue;
         }
         // One label: the joined text of every fragment's owned spans.
@@ -487,13 +606,50 @@ fn prepare_labeled(
         if label.is_empty() {
             return None;
         }
+        // A line-end hyphen at a fragment boundary whose continuation starts
+        // lowercase is a wrap artifact ("Sac-" + "ramento"): the de-hyphenated
+        // spelling is the label's fallback form. Uppercase continuations are
+        // real compound words ("X-" + "Ray") and keep the hyphen.
+        let mut dehyphenated: Option<String> = None;
+        let mut removed = 0usize;
+        for w in run.windows(2) {
+            let a_end = annotations[w[0]].3 .1;
+            let next = &source[annotations[w[1]].3 .0..annotations[w[1]].3 .1];
+            let wraps_word = next.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+                && a_end > first
+                && source.as_bytes()[a_end - 1] == b'-';
+            if wraps_word {
+                // '-' is ASCII, so the byte position is a char boundary.
+                let pos = a_end - 1 - first - removed;
+                dehyphenated
+                    .get_or_insert_with(|| joined.to_string())
+                    .remove(pos);
+                removed += 1;
+            }
+        }
+        let dehyphenated = dehyphenated
+            .map(|v| v.trim_matches(|c: char| c.is_whitespace()).to_string())
+            .filter(|v| !v.is_empty() && v != label);
+        // The label's own byte range in the source: the identity its
+        // source-occurrence ordinal is measured against.
+        let lead = joined.find(label)?;
+        let source_range = (first + lead, first + lead + label.len());
         let ids: Vec<ObjectId> = run.iter().map(|&i| annotations[i].0).collect();
+        let destinations: BTreeSet<String> =
+            run.iter().map(|&i| annotations[i].1.clone()).collect();
         // Fragment weights for partitioning the matched translated range.
         let weights: Vec<usize> = run
             .iter()
             .map(|&i| annotations[i].4.chars().count())
             .collect();
-        merged_labels.push((label.to_string(), ids, weights));
+        merged_labels.push(MergedLabel {
+            label: label.to_string(),
+            dehyphenated,
+            ids,
+            destinations,
+            weights,
+            source_range,
+        });
     }
     for (label, group) in bare {
         let literal: Vec<_> = matches(&text, &label)
@@ -501,7 +657,7 @@ fn prepare_labeled(
             .filter(|(s, e)| !atoms.values().any(|(a, b)| *s < *b && *a < *e))
             .collect();
         let mut destinations: BTreeMap<String, Vec<ObjectId>> = BTreeMap::new();
-        for (id, destination) in &group {
+        for (id, destination, _) in &group {
             destinations
                 .entry(destination.clone())
                 .or_default()
@@ -526,80 +682,105 @@ fn prepare_labeled(
             let decomposed = decompose(&label).filter(|(kind, _)| {
                 group
                     .iter()
-                    .all(|(_, dest)| RefKind::from_dest(dest).is_none_or(|d| d == *kind))
+                    .all(|(_, dest, _)| RefKind::from_dest(dest).is_none_or(|d| d == *kind))
             });
-            let (kind, number) = decomposed?;
-            let tail: Vec<_> = matches(&text, number)
-                .into_iter()
-                .filter(|(s, e)| !atoms.values().any(|(a, b)| *s < *b && *a < *e))
-                .filter(|r| !literal.contains(r))
-                .collect();
-            let mut all = literal.clone();
-            all.extend(tail);
-            all.sort_unstable();
-            all.dedup();
-            selected =
-                select_by_destination(&all, &text, &destinations, multiple, true, |_| Some(kind));
+            if let Some((kind, number)) = decomposed {
+                let tail: Vec<_> = matches(&text, number)
+                    .into_iter()
+                    .filter(|(s, e)| !atoms.values().any(|(a, b)| *s < *b && *a < *e))
+                    .filter(|r| !literal.contains(r))
+                    .collect();
+                let mut all = literal.clone();
+                all.extend(tail);
+                all.sort_unstable();
+                all.dedup();
+                selected =
+                    select_by_destination(&all, &text, &destinations, multiple, true, |_| {
+                        Some(kind)
+                    });
+            }
+        }
+        if selected.is_none() {
+            // A repeated bare label pairs by source-occurrence ordinal: the
+            // label occurs exactly as often in the translation as in the
+            // source, and every annotation covers a distinct source
+            // occurrence — the k-th source occurrence anchors the k-th
+            // translated occurrence. Count mismatches and duplicate claims on
+            // one occurrence keep failing closed.
+            selected = pair_by_occurrence(&label, &group, &literal, &source);
         }
         ranges.extend(selected?.into_iter().map(|((s, e), id)| (s, e, id)));
     }
-    // Place each merged label once and partition the matched range between its
-    // annotations by fragment weight: `tag` styles only the first active range
-    // at any cursor, so annotations that share a range would silently lose
-    // their anchors. A merged label must match exactly once — it is a whole
-    // citation, so any second occurrence means ambiguity.
-    for (label, ids, weights) in merged_labels {
+    // Place each merged label and partition its matched range between the
+    // label's annotations by fragment weight: `tag` styles only the first
+    // active range at any cursor, so annotations that share a range would
+    // silently lose their anchors. A merged label that is unique in the
+    // translation anchors there (a whole citation matching twice is
+    // ambiguous); a repeated one pairs by source-occurrence ordinal like the
+    // bare path, and a line-end hyphen falls back to the de-hyphenated
+    // spelling when the joined label itself fails to place.
+    let mut merged_groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    for (i, m) in merged_labels.iter().enumerate() {
+        merged_groups.entry(m.label.clone()).or_default().push(i);
+    }
+    for (label, idxs) in merged_groups {
         let literal: Vec<_> = matches(&text, &label)
             .into_iter()
             .filter(|(s, e)| !atoms.values().any(|(a, b)| *s < *b && *a < *e))
             .collect();
-        if literal.len() != 1 {
-            return None;
+        let mut anchors: Option<Vec<(usize, usize)>> = None;
+        if idxs.len() == 1 && literal.len() == 1 {
+            anchors = Some(vec![literal[0]]);
         }
-        let (s, e) = literal[0];
-        let chars: Vec<(usize, usize)> = {
-            let mut v = Vec::new();
-            let mut a = s;
-            for c in text[s..e].chars() {
-                v.push((a, a + c.len_utf8()));
-                a += c.len_utf8();
-            }
-            v
-        };
-        let total: usize = weights.iter().sum();
-        let count = chars.len();
-        // Each annotation needs at least one character of the anchor.
-        if ids.len() > count || count < 1 {
-            return None;
-        }
-        // Weighted split at char boundaries: each annotation gets its share of
-        // the matched range, so the pieces cover it exactly. Bounds stay in
-        // 0..count and strictly increase even when a fragment's weight exceeds
-        // the whole matched range (a compressed translation).
-        let mut bounds: Vec<usize> = Vec::with_capacity(ids.len() + 1);
-        bounds.push(0);
-        let mut acc = 0;
-        for (k, weight) in weights.iter().enumerate() {
-            acc += weight;
-            if k + 1 == weights.len() {
-                bounds.push(count);
-            } else {
-                let b = ((acc * count) / total).min(count - 1);
-                bounds.push(b.max(bounds[k] + 1).min(count - 1));
+        if anchors.is_none() && idxs.len() == 1 {
+            if let Some(v) = merged_labels[idxs[0]].dehyphenated.clone() {
+                let dehyphenated: Vec<_> = matches(&text, &v)
+                    .into_iter()
+                    .filter(|(s, e)| !atoms.values().any(|(a, b)| *s < *b && *a < *e))
+                    .collect();
+                if dehyphenated.len() == 1 {
+                    anchors = Some(vec![dehyphenated[0]]);
+                }
             }
         }
-        let mut cursor = e;
-        for (k, id) in ids.iter().enumerate() {
-            let start = chars[bounds[k]].0;
-            let end = if k + 1 == ids.len() {
-                e
-            } else {
-                chars[bounds[k + 1]].0
-            };
-            ranges.push((start, end, *id));
-            cursor = end;
+        if anchors.is_none() {
+            // Repeated merged label: pair by source-occurrence ordinal. The
+            // label occurs equally often in source and translation and every
+            // merged entry covers a distinct source occurrence; anything else
+            // stays ambiguous and fails closed. Reordering safety mirrors the
+            // bare path: every merged entry must carry the same destination
+            // set, else a reordered translation would swap links.
+            let occurrences: Vec<_> = matches(&source, &label);
+            let same_destinations = idxs
+                .windows(2)
+                .all(|w| merged_labels[w[0]].destinations == merged_labels[w[1]].destinations);
+            if same_destinations && !literal.is_empty() && literal.len() == occurrences.len() {
+                let mut claimed = vec![false; occurrences.len()];
+                let mut per_entry = Vec::with_capacity(idxs.len());
+                for &i in &idxs {
+                    let ord = occurrences
+                        .iter()
+                        .position(|&(s, e)| (s, e) == merged_labels[i].source_range)
+                        .filter(|&o| !claimed[o]);
+                    if let Some(o) = ord {
+                        claimed[o] = true;
+                        per_entry.push(Some(literal[o]));
+                    } else {
+                        per_entry.push(None);
+                    }
+                }
+                if per_entry.iter().all(|a| a.is_some()) {
+                    anchors = Some(per_entry.into_iter().map(|a| a.unwrap()).collect());
+                }
+            }
         }
-        debug_assert_eq!(cursor, e);
+        let anchors = anchors?;
+        for (&i, &(s, e)) in idxs.iter().zip(&anchors) {
+            let m = &merged_labels[i];
+            if !split_anchor(&text, (s, e), &m.ids, &m.weights, &mut ranges) {
+                return None;
+            }
+        }
     }
     ranges.sort_by_key(|r| r.0);
     if ranges.windows(2).any(|w| w[0].1 > w[1].0) {
@@ -1958,7 +2139,7 @@ mod tests {
 
     #[test]
     fn merged_label_absent_from_translation_falls_back() {
-        // 折断引文合并后，其合并文本被译文改写（不再逐字出现）：回退。
+        // 折断引文合并后，其合并文本被译文改写（不再逐字存在）：回退。
         let text = "compare (Ropke and Pisinger, 2006a) here.";
         let a = text.find("Ropke and").unwrap();
         let b = a + "Ropke and".len();
@@ -1973,6 +2154,243 @@ mod tests {
         assert!(
             prepare(&para, &ir, &doc, &parsed).is_none(),
             "合并标签不在译文中逐字存在时必须回退"
+        );
+    }
+
+    // ── 同标签多次出现：按源文与译文的阅读顺序配对 ───────────────────
+
+    /// 第 occurrence 条注释（按 `ref_case` 的 links 顺序）锚定的译文范围，
+    /// 无法锚定时为 None。位置断言用：相同文本无法区分时看字节范围。
+    fn anchored_range_at(
+        target: &Target,
+        placed: &[(ObjectId, String)],
+        occurrence: usize,
+    ) -> Option<(usize, usize)> {
+        // Walk the tagged segments in the same order `tag` did and record each
+        // styled span's byte range in the reconstructed translated text.
+        let mut spans: Vec<(StyleId, usize, usize)> = Vec::new();
+        fn walk(
+            segs: &[Segment],
+            style: Option<StyleId>,
+            cursor: &mut usize,
+            out: &mut Vec<(StyleId, usize, usize)>,
+        ) {
+            for s in segs {
+                match s {
+                    Segment::Text(t) => {
+                        if let Some(id) = style {
+                            let start = *cursor;
+                            out.push((id, start, start + t.len()));
+                        }
+                        *cursor += t.len();
+                    }
+                    Segment::Style { id, inner } => walk(inner, Some(*id), cursor, out),
+                    _ => {}
+                }
+            }
+        }
+        let mut cursor = 0;
+        walk(&target.parsed.segments, None, &mut cursor, &mut spans);
+        let (_ann, tags) = target
+            .links
+            .iter()
+            .find(|(a, _)| placed[occurrence].0 == *a)?;
+        let range = spans.iter().find(|(id, ..)| tags.contains(id))?;
+        Some((range.1, range.2))
+    }
+
+    #[test]
+    fn repeated_label_pairs_by_source_occurrence_ordinal() {
+        // 同一引文标签在源文出现两次、译文也逐字出现两次：两条注释按各自
+        // 覆盖的源文出现序号配对同序号的译文出现——序号证据来自注释覆盖
+        // 的源文范围本身，不是数量巧合。
+        let text = "First (Santini et al., 2018) then again (Santini et al., 2018) end.";
+        let label = "Santini et al., 2018";
+        let tr = "首次引用 (Santini et al., 2018) 之后又引用 (Santini et al., 2018) 结束。";
+        let a1 = text.find(label).unwrap();
+        let a2 = text.rfind(label).unwrap();
+        let (para, ir, doc, parsed, placed) = ref_case(
+            "P01-034",
+            text,
+            &[
+                (a1, a1 + label.len(), "b1205"),
+                (a2, a2 + label.len(), "b1205"),
+            ],
+            tr,
+        );
+        let target = prepare(&para, &ir, &doc, &parsed).expect("同数出现按序号配对");
+        let first = anchored_range_at(&target, &placed, 0).expect("第一条注释有锚点");
+        assert_eq!(first.0, tr.find(label).unwrap(), "第一条注释锚定第一次出现");
+        let second = anchored_range_at(&target, &placed, 1).expect("第二条注释有锚点");
+        assert_eq!(
+            second.0,
+            tr.rfind(label).unwrap(),
+            "第二条注释锚定第二次出现"
+        );
+    }
+
+    #[test]
+    fn repeated_label_count_mismatch_falls_back() {
+        // 反例：源文出现两次、译文只出现一次：无法一一对应，回退。
+        let text = "First (Santini et al., 2018) then again (Santini et al., 2018) end.";
+        let label = "Santini et al., 2018";
+        let a1 = text.find(label).unwrap();
+        let a2 = text.rfind(label).unwrap();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-035",
+            text,
+            &[
+                (a1, a1 + label.len(), "b1205"),
+                (a2, a2 + label.len(), "b1205"),
+            ],
+            "首次引用 (Santini et al., 2018) 之后又引用一次，结束。",
+        );
+        assert!(
+            prepare(&para, &ir, &doc, &parsed).is_none(),
+            "出现次数不一致时必须回退"
+        );
+    }
+
+    #[test]
+    fn repeated_label_duplicate_annotation_on_same_occurrence_falls_back() {
+        // 反例：两条注释覆盖源文的同一次出现（重叠重复注，如 P01-007 的
+        // 脚注星标）：字面出现数不等于注释数，序号配对中第二条注释无处
+        // 认领，回退。
+        let text = "First (Santini et al., 2018) then again (Santini et al., 2018) end.";
+        let label = "Santini et al., 2018";
+        let a1 = text.find(label).unwrap();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-036",
+            text,
+            &[
+                (a1, a1 + label.len(), "b1205"),
+                (a1, a1 + label.len(), "b1205"),
+            ],
+            "首次引用 (Santini et al., 2018)，结束。",
+        );
+        assert!(
+            prepare(&para, &ir, &doc, &parsed).is_none(),
+            "同一源文出现上的重复注释无法按序号配对，必须回退"
+        );
+    }
+
+    #[test]
+    fn wrapped_label_repeated_pairs_by_occurrence_ordinal() {
+        // 折断成两条同目的地注释的引文标签在源文出现两次（共 4 条注释、
+        // 两个合并 run），译文逐字出现两次：每个 run 按其源文出现序号
+        // 锚定同序号的译文出现，run 内仍按片段权重切分。
+        let text = "A (Ropke and Pisinger, 2006a) and B (Ropke and Pisinger, 2006a) done.";
+        let label = "Ropke and Pisinger, 2006a";
+        let tr = "甲 (Ropke and Pisinger, 2006a) 与乙 (Ropke and Pisinger, 2006a) 完成。";
+        let o1 = text.find(label).unwrap();
+        let o2 = text.rfind(label).unwrap();
+        let split = o1 + "Ropke and".len();
+        let split2 = o2 + "Ropke and".len();
+        let (para, ir, doc, parsed, placed) = ref_case(
+            "P01-037",
+            text,
+            &[
+                (o1, split, "b1170"),
+                (split + 1, o1 + label.len(), "b1170"),
+                (o2, split2, "b1170"),
+                (split2 + 1, o2 + label.len(), "b1170"),
+            ],
+            tr,
+        );
+        let target = prepare(&para, &ir, &doc, &parsed).expect("重复折断引文按序号配对");
+        let r0 = anchored_range_at(&target, &placed, 0).expect("第一个链接有锚点");
+        let w1 = tr.find(label).unwrap();
+        assert!(
+            r0.0 >= w1 && r0.0 < w1 + label.len(),
+            "第一个 run 锚定译文的第一次出现"
+        );
+        let r2 = anchored_range_at(&target, &placed, 2).expect("第三个链接有锚点");
+        let w2 = tr.rfind(label).unwrap();
+        assert!(
+            r2.0 >= w2 && r2.0 < w2 + label.len(),
+            "第二个 run 锚定译文的第二次出现"
+        );
+    }
+
+    #[test]
+    fn wrapped_label_repeated_count_mismatch_falls_back() {
+        // 反例：折断引文出现两次但译文只出现一次：回退。
+        let text = "A (Ropke and Pisinger, 2006a) and B (Ropke and Pisinger, 2006a) done.";
+        let label = "Ropke and Pisinger, 2006a";
+        let o1 = text.find(label).unwrap();
+        let o2 = text.rfind(label).unwrap();
+        let split = o1 + "Ropke and".len();
+        let split2 = o2 + "Ropke and".len();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-038",
+            text,
+            &[
+                (o1, split, "b1170"),
+                (split + 1, o1 + label.len(), "b1170"),
+                (o2, split2, "b1170"),
+                (split2 + 1, o2 + label.len(), "b1170"),
+            ],
+            "甲 (Ropke and Pisinger, 2006a) 与乙的引用完成。",
+        );
+        assert!(
+            prepare(&para, &ir, &doc, &parsed).is_none(),
+            "折断引文出现数不一致时必须回退"
+        );
+    }
+
+    // ── 片段边界上的软连字符（行末断词） ─────────────────────────────
+
+    #[test]
+    fn soft_hyphen_at_fragment_boundary_relocates() {
+        // 行末断词："Sac-" + "ramento et al., 2019" 两片字节相邻，软连字符
+        // 只是排版产物；译文里完整拼写 "Sacramento et al., 2019" 存在时，
+        // 按去连字符变体重定位，两片注释仍分摊锚点。
+        let text = "cited in (Sac-ramento et al., 2019) before.";
+        let hyphen = text.find("Sac-").unwrap();
+        let rest = hyphen + "Sac-".len();
+        let end = rest + "ramento et al., 2019".len();
+        let (para, ir, doc, parsed, placed) = ref_case(
+            "P01-039",
+            text,
+            &[(hyphen, rest, "b0305"), (rest, end, "b0305")],
+            "引用 (Sacramento et al., 2019) 于前文。",
+        );
+        let target = prepare(&para, &ir, &doc, &parsed).expect("软连字符按去连字符变体重定位");
+        let ann = annotated_texts(&target);
+        assert_eq!(ann.len(), 2, "两条注释都要有锚点");
+        let mut ids: Vec<_> = ann.iter().map(|(o, _)| *o).collect();
+        ids.sort();
+        let mut wanted: Vec<_> = placed.iter().map(|(o, _)| *o).collect();
+        wanted.sort();
+        assert_eq!(ids, wanted);
+        let joined: String = {
+            let mut v: Vec<&(ObjectId, String)> = ann.iter().collect();
+            v.sort_by_key(|(o, _)| placed.iter().position(|(p, _)| p == o).unwrap());
+            v.iter().map(|(_, t)| t.as_str()).collect()
+        };
+        assert_eq!(joined, "Sacramento et al., 2019");
+    }
+
+    #[test]
+    fn hard_hyphenated_word_keeps_hyphen() {
+        // 反例：片段边界的连字符后继片段以大写字母开头（真复合词的折断
+        // 形态，如 "X-Ray" 折成 "X-" + "Ray"）：不构造去连字符变体，按原
+        // 标签逐字匹配，失败则回退。
+        let text = "cited in (Con-Tardo et al., 2012) before.";
+        let hyphen = text.find("Con-").unwrap();
+        let rest = hyphen + "Con-".len();
+        let end = rest + "Tardo et al., 2012".len();
+        let (para, ir, doc, parsed, _) = ref_case(
+            "P01-040",
+            text,
+            &[(hyphen, rest, "b0310"), (rest, end, "b0310")],
+            "引用 (ConTardo et al., 2012) 于前文。",
+        );
+        // 译文中既无逐字 "Con-Tardo"（字面路径失败）也无 "Contardo"
+        // （大写后继不构造变体）：必须回退。
+        assert!(
+            prepare(&para, &ir, &doc, &parsed).is_none(),
+            "连字符后为大写字母时不得构造去连字符变体"
         );
     }
 }
