@@ -109,15 +109,11 @@ export function PageCanvas({
     return () => observer.disconnect();
   }, []);
 
-  // 渲染：可见 + 视口就绪 + （首次 / revision 或 scale 变了）
-  const renderKey = `${revision}:${viewport?.width.toFixed(2) ?? ''}x${viewport?.height.toFixed(2) ?? ''}`;
-  const renderKeyRef = useRef<string>('');
-
+  // 渲染：可见 + 视口就绪；页面 / 视口（按 scale 记忆）/ revision 变了就重渲染。
+  // 不另设"已渲染"去重：cleanup 取消了在途任务，重跑必须重新渲染，否则页面停在空白。
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!visible || page === null || viewport === null || canvas === null) return;
-    if (renderKeyRef.current === renderKey) return;
-    renderKeyRef.current = renderKey;
 
     taskRef.current?.cancel();
     const { width, height, ratio } = canvasPixelSize(
@@ -148,18 +144,13 @@ export function PageCanvas({
         setRendered(revision);
       })
       .catch((error: unknown) => {
-        // 取消是正常路径（快速滚动 / 参数变更）
-        if (isCancellation(error)) {
-          renderKeyRef.current = '';
-          return;
-        }
-        renderKeyRef.current = '';
-        setFailure(describe(error));
+        // 取消是正常路径（快速滚动 / 参数变更），接替的渲染由重跑的 effect 发起
+        if (!isCancellation(error)) setFailure(describe(error));
       });
     return () => {
       task.cancel();
     };
-  }, [visible, page, viewport, renderKey, revision]);
+  }, [visible, page, viewport, revision]);
 
   // 重载期间（换 doc 对象）沿用上次的页面尺寸，避免整栏高度跳变把滚动位置夹走
   const [lastSize, setLastSize] = useState<{ width: number; height: number } | null>(null);

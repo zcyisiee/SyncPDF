@@ -120,6 +120,38 @@ describe('Library.ingest / snapshot', () => {
     expect(library.get(b)).toMatchObject({ status: 'failed', error: 'boom' });
   });
 
+  // 回归：引擎 ok 还要求无质量问题；译文已发布却 ok:false 的论文曾被标成失败
+  it('已发布译文（有 document_finished）即完成，即使 ok:false；未发布的 ok:false 仍失败', () => {
+    const published = library.addFile(pdf('a.pdf')).doc.id;
+    const unpublished = library.addFile(pdf('b.pdf')).doc.id;
+    for (const id of [published, unpublished]) {
+      library.setStatus(id, 'running');
+      library.ingest(id, ev({ type: 'run_started', protocol_version: 1, engine_version: 'x', doc_id: id, pages: 1 }));
+    }
+    library.ingest(published, ev({ type: 'issue', severity: 'warning', code: 'coverage_gap', paragraph_id: null, page: 1, message: 'm' }));
+    library.ingest(published, ev({ type: 'document_finished', output: 'o', stats: { fonts: 1, expansion_ratio: 1, fallbacks: 0 } }));
+    library.ingest(published, ev({ type: 'run_finished', ok: false, elapsed_ms: 1 }));
+    library.ingest(unpublished, ev({ type: 'run_finished', ok: false, elapsed_ms: 1 }));
+    expect(library.get(published)).toMatchObject({ status: 'done', progress: 1 });
+    expect(library.get(unpublished)?.status).toBe('failed');
+
+    // 上一轮的发布标记不带到下一轮
+    library.ingest(published, ev({ type: 'run_started', protocol_version: 1, engine_version: 'x', doc_id: published, pages: 1 }));
+    library.ingest(published, ev({ type: 'run_finished', ok: false, elapsed_ms: 1 }));
+    expect(library.get(published)?.status).toBe('failed');
+  });
+
+  // 回归：全篇运行的 run_started 报 0 页，卡片一直显示"0 页"
+  it('页数未知时记空，由 layout 事件的页号补齐；只在变大时广播', () => {
+    const { id } = library.addFile(pdf('a.pdf')).doc;
+    const rect = { x0: 0, y0: 0, x1: 1, y1: 1 };
+    library.ingest(id, ev({ type: 'run_started', protocol_version: 1, engine_version: 'x', doc_id: id, pages: 0 }));
+    expect(library.get(id)?.pages).toBeNull();
+    expect(library.ingest(id, ev({ type: 'layout', page: 2, regions: [{ kind: 'text', inline: false, bbox: rect }] }))).toBe(true);
+    expect(library.ingest(id, ev({ type: 'layout', page: 1, regions: [] }))).toBe(false);
+    expect(library.get(id)?.pages).toBe(2);
+  });
+
   it('setStatus：显式 error:null 清空旧错误，不给 error 则保留', () => {
     const { id } = library.addFile(pdf('a.pdf')).doc;
     library.setStatus(id, 'failed', { error: 'boom' });

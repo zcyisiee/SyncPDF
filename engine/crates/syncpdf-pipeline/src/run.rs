@@ -1377,7 +1377,8 @@ fn layout_regions(regions: &[Region]) -> Vec<syncpdf_protocol::LayoutRegion> {
         .collect()
 }
 
-/// 首页元数据：最上方的 Title 段落为标题，首页信息带识别出的最上方作者行为作者。
+/// 首页元数据：最上方的 Title 段落为标题；首页信息带中最上方的非机构 / 邮箱 / 地址行为作者。
+/// 信息带只剩元数据锚点行时不猜，交给 PDF Info。
 fn doc_meta(paras: &[Paragraph], author_ids: &[ParagraphId]) -> Event {
     let first_page = |p: &&Paragraph| p.id.page == 1;
     let top = |a: &&Paragraph, b: &&Paragraph| a.bbox.y1.total_cmp(&b.bbox.y1);
@@ -1395,6 +1396,7 @@ fn doc_meta(paras: &[Paragraph], author_ids: &[ParagraphId]) -> Event {
         .iter()
         .filter(first_page)
         .filter(|p| author_ids.contains(&p.id))
+        .filter(|p| !stages::source_policy::metadata_anchor(&p.text))
         .max_by(top)
         .and_then(text);
     Event::DocMeta { title, authors }
@@ -1419,28 +1421,60 @@ pub(crate) fn paragraph_event(
     }
 }
 
-/// bind 阶段的问题转 `issue`；操作级不可证明墨迹、页级不可信、对象数不符各报。
+/// 每页每类诊断在 `issue` 里最多举几例；全部明细写引擎日志。
+const BIND_ISSUE_EXAMPLES: usize = 3;
+
+/// 同一页同一类诊断汇总成一条消息：条数 + 前几例。
+/// 逐条发会随内容流 / 操作数无界增长（一篇论文可达上万条），淹没问题列表。
+fn summarize_diagnostics(what: &str, messages: &[String]) -> String {
+    let examples = messages
+        .iter()
+        .take(BIND_ISSUE_EXAMPLES)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join("; ");
+    let more = messages.len().saturating_sub(BIND_ISSUE_EXAMPLES);
+    if more == 0 {
+        format!("{} {what}: {examples}", messages.len())
+    } else {
+        format!(
+            "{} {what}: {examples}; … (+{more}，明细见引擎日志)",
+            messages.len()
+        )
+    }
+}
+
+/// bind 阶段的问题转 `issue`：绑定诊断、不可证明墨迹各汇总成每页一条；
+/// 页级不可信、对象数不符各报。
 fn emit_bind_issues(sink: &mut SharedSink, bound: &BoundPage) {
     let page = bound.ir.page.number();
-    for msg in &bound.issues {
+    let unproven: Vec<String> = bound
+        .unproven_source_ops()
+        .iter()
+        .map(|u| format!("{:?}: {}", u.ink, u.note))
+        .collect();
+    let groups = [
+        ("bind diagnostics", &bound.issues),
+        (
+            "unprovable source op ink kept (overlapping paragraphs stay source)",
+            &unproven,
+        ),
+    ];
+    for (what, messages) in groups {
+        if messages.is_empty() {
+            continue;
+        }
+        if messages.len() > BIND_ISSUE_EXAMPLES {
+            for msg in messages {
+                tracing::warn!(page, "{what}: {msg}");
+            }
+        }
         sink.emit(Event::Issue {
             severity: Severity::Warning,
             code: "bind_degraded".into(),
             paragraph_id: None,
             page: Some(page),
-            message: msg.clone(),
-        });
-    }
-    for u in bound.unproven_source_ops() {
-        sink.emit(Event::Issue {
-            severity: Severity::Warning,
-            code: "bind_degraded".into(),
-            paragraph_id: None,
-            page: Some(page),
-            message: format!(
-                "unprovable source op ink kept (paragraphs overlapping {:?} stay source): {}",
-                u.ink, u.note
-            ),
+            message: summarize_diagnostics(what, messages),
         });
     }
     if bound.reliability.is_unreliable() {
@@ -1690,6 +1724,36 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+        // 回归：名字行不在信息带里时，机构 / 邮箱行曾被当成作者 → 跳过锚点行；只剩锚点则 None。
+        let band = [
+            meta_para(
+                0,
+                5,
+                RegionKind::Text,
+                "University of Maryland, {ada, alan}@umd.edu",
+                650.0,
+            ),
+            meta_para(
+                0,
+                6,
+                RegionKind::Text,
+                "Department of Physics, Some University",
+                630.0,
+            ),
+        ];
+        let ids: Vec<_> = band.iter().map(|p| p.id.clone()).collect();
+        match doc_meta(&band, &ids) {
+            Event::DocMeta { authors, .. } => assert!(authors.is_none(), "{authors:?}"),
+            other => panic!("{other:?}"),
+        }
+        let mixed = [band[0].clone(), band[1].clone(), paras[2].clone()];
+        let ids: Vec<_> = mixed.iter().map(|p| p.id.clone()).collect();
+        match doc_meta(&mixed, &ids) {
+            Event::DocMeta { authors, .. } => {
+                assert_eq!(authors.as_deref(), Some("Ada Lovelace, Alan Turing"))
+            }
+            other => panic!("{other:?}"),
+        }
         // 无 Title、无作者证据 → 都是 None，不猜。
         match doc_meta(&paras[2..4], &[]) {
             Event::DocMeta { title, authors } => {
@@ -1812,6 +1876,20 @@ mod tests {
             .collect();
         assert_eq!(ready.len() as u32, summary.pages, "每页恰发一次 page_ready");
         assert_eq!(ready, vec![1], "ci-test 只有 1 页");
+    }
+
+    /// 回归：绑定诊断逐条发 issue，一篇论文上万条淹没问题列表。
+    #[test]
+    fn bind_diagnostics_summarize_count_and_examples() {
+        let few: Vec<String> = vec!["a".into(), "b".into()];
+        assert_eq!(summarize_diagnostics("diag", &few), "2 diag: a; b");
+        let many: Vec<String> = (0..10).map(|i| format!("m{i}")).collect();
+        let summary = summarize_diagnostics("diag", &many);
+        assert!(
+            summary.starts_with("10 diag: m0; m1; m2; … (+7"),
+            "{summary}"
+        );
+        assert!(!summary.contains("m3"), "{summary}");
     }
 
     /// 取消：`fake:slow` + 立刻取消 → `run_finished{ok:false}`，且有 cancelled 事件。

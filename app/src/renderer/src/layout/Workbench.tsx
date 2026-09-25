@@ -1,10 +1,11 @@
 /**
  * 工作台骨架：标题栏 / [左栏 | 编辑区 + 底部面板 | 右栏] / 状态栏。
  * 分栏用 allotment，拖动结束时把尺寸存进 workbench store（持久化）。
+ * 同 VSCode：窗口尺寸变化优先由编辑区吸收，侧栏与底部面板保持用户拖定的大小。
  * 快捷键：⌘B 左栏、⌘J 底部面板、⌥⌘B 右栏。整个窗口可拖入 PDF。
  */
 import { useEffect, useState, type DragEvent } from 'react';
-import { Allotment } from 'allotment';
+import { Allotment, LayoutPriority } from 'allotment';
 import { useWorkbench } from '@/store/workbench';
 import { addDroppedFiles } from '@/library/actions';
 import { LibraryBar } from '@/library/LibraryBar';
@@ -62,24 +63,24 @@ export function Workbench(): JSX.Element {
           defaultSizes={columnSizes}
           onDragEnd={(sizes) => useWorkbench.getState().setColumnSizes(sizes)}
         >
-          <Allotment.Pane minSize={220} preferredSize={280} visible={leftVisible}>
+          <Allotment.Pane minSize={220} preferredSize={280} priority={LayoutPriority.Low} visible={leftVisible}>
             <LibraryBar />
           </Allotment.Pane>
-          <Allotment.Pane minSize={360}>
+          <Allotment.Pane minSize={360} priority={LayoutPriority.High}>
             <Allotment
               vertical
               defaultSizes={rowSizes}
               onDragEnd={(sizes) => useWorkbench.getState().setRowSizes(sizes)}
             >
-              <Allotment.Pane minSize={200}>
+              <Allotment.Pane minSize={200} priority={LayoutPriority.High}>
                 <EditorArea />
               </Allotment.Pane>
-              <Allotment.Pane minSize={120} preferredSize={220} visible={panelVisible}>
+              <Allotment.Pane minSize={120} preferredSize={220} priority={LayoutPriority.Low} visible={panelVisible}>
                 <BottomPanel />
               </Allotment.Pane>
             </Allotment>
           </Allotment.Pane>
-          <Allotment.Pane minSize={260} preferredSize={340} visible={rightVisible}>
+          <Allotment.Pane minSize={260} preferredSize={340} priority={LayoutPriority.Low} visible={rightVisible}>
             <Inspector />
           </Allotment.Pane>
         </Allotment>

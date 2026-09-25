@@ -201,8 +201,9 @@ fn rotated(
     })
 }
 
+/// 含邮箱地址；分组写法 `{a, b}@x.edu` 的 `}` 留在本地部分里。
 fn email(text: &str) -> bool {
-    text.split(|c: char| c.is_whitespace() || ",;{}<>".contains(c))
+    text.split(|c: char| c.is_whitespace() || ",;{<>".contains(c))
         .any(|part| {
             part.split_once('@').is_some_and(|(local, domain)| {
                 !local.is_empty() && domain.contains('.') && !domain.ends_with('.')
@@ -234,6 +235,11 @@ fn affiliation(text: &str) -> bool {
         ]
         .iter()
         .any(|word| lower.contains(word))
+}
+
+/// 信息带里的机构 / 邮箱 / 地址行（作者名行之外的元数据锚点）。
+pub(crate) fn metadata_anchor(text: &str) -> bool {
+    email(text) || affiliation(text) || address(text)
 }
 
 fn address(text: &str) -> bool {
@@ -272,6 +278,17 @@ fn name_or_marked(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn email_accepts_plain_and_brace_grouped_addresses() {
+        assert!(email("ada@umd.edu"));
+        assert!(email("<ada@umd.edu>, alan@cs.ox.ac.uk"));
+        // 回归：分组写法曾因按 `}` 切分而漏判
+        assert!(email("{jennarus, miyyer}@umd.edu"));
+        assert!(email("University of Maryland {ada,alan}@umd.edu"));
+        assert!(!email("see @mention or user@localhost"));
+        assert!(!email("{a, b}@ and x@y."));
+    }
     use syncpdf_core::ir::{Align, DisplayItem, Line};
     use syncpdf_core::{ObjRef, OpKey, PageId, Rect};
 

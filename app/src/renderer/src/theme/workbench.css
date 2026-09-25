@@ -211,6 +211,11 @@
   line-height: 1.6;
 }
 
+/* 行列表（sp-list）不带内边距，空提示自己补齐 */
+.sp-list > .sp-hint {
+  margin: 8px 12px;
+}
+
 .sp-selectable {
   user-select: text;
 }

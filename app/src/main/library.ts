@@ -93,6 +93,8 @@ export function titleFromFileName(fileName: string): string {
 export class Library {
   readonly root: string;
   private readonly db: DatabaseSync;
+  /** 本轮已发布译文（收到 document_finished）的论文：run_finished 据此判完成。 */
+  private readonly published = new Set<string>();
 
   constructor(root: string) {
     this.root = root;
@@ -228,7 +230,9 @@ export class Library {
             // 状态由队列维护（可能已被取消），这里不动
             'UPDATE docs SET pages = ?, progress = 0, error = NULL, updated_at = ? WHERE id = ?',
           )
-          .run(event.pages, now, id);
+          // 全篇运行时引擎 preflight 前不知道页数（报 0），由之后的 layout 事件补上
+          .run(event.pages > 0 ? event.pages : null, now, id);
+        this.published.delete(id);
         return true;
       case 'progress':
         if (event.stage !== 'translating' || event.total === 0) return false;
@@ -240,7 +244,11 @@ export class Library {
         this.db
           .prepare('INSERT OR REPLACE INTO doc_layout (doc_id, page, regions) VALUES (?, ?, ?)')
           .run(id, event.page, JSON.stringify(event.regions));
-        return false;
+        return (
+          this.db
+            .prepare('UPDATE docs SET pages = ? WHERE id = ? AND (pages IS NULL OR pages < ?)')
+            .run(event.page, id, event.page).changes > 0
+        );
       case 'doc_meta':
         return this.updateMeta(id, { title: event.title, authors: event.authors }, 'layout');
       case 'paragraph': {
@@ -264,20 +272,25 @@ export class Library {
         this.db
           .prepare('UPDATE docs SET fallbacks = ?, updated_at = ? WHERE id = ?')
           .run(event.stats.fallbacks, now, id);
+        this.published.add(id);
         return true;
       case 'error':
         if (!event.fatal) return false;
         this.db.prepare('UPDATE docs SET error = ?, updated_at = ? WHERE id = ?').run(event.message, now, id);
         return true;
       case 'run_finished': {
+        // 引擎的 ok 还要求"无质量问题"（回退、源区域冲突、覆盖缺口）；译文已发布
+        // （本轮有 document_finished）就是完成，质量问题在问题列表里看。
+        // 引擎 ok 还要求零质量问题；译文已发布（document_finished）同样算完成
+        const done = this.published.delete(id) || event.ok;
         const doc = this.get(id);
-        const status: DocStatus = event.ok ? 'done' : doc?.status === 'cancelled' ? 'cancelled' : 'failed';
+        const status: DocStatus = done ? 'done' : doc?.status === 'cancelled' ? 'cancelled' : 'failed';
         this.db
           .prepare(
             `UPDATE docs SET status = ?, elapsed_ms = ?, progress = CASE WHEN ? THEN 1 ELSE progress END,
                updated_at = ? WHERE id = ?`,
           )
-          .run(status, event.elapsed_ms, event.ok ? 1 : 0, now, id);
+          .run(status, event.elapsed_ms, done ? 1 : 0, now, id);
         return true;
       }
       default:
