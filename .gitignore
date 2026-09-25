@@ -78,6 +78,7 @@ temp.jpg
 /hjfy-architecture
 # SyncPDF engine
 engine/target/
+engine/target-*/
 engine/fixtures/*.pdf
 engine/models/*
 !engine/models/README.md
