@@ -3,8 +3,8 @@
 use crate::breaks::{break_opportunities, is_forbidden_line_end, is_forbidden_line_start, Lang};
 use crate::fit::Inline;
 use crate::knuth_plass::{self, Node};
-use crate::shaper::{is_cjk_char, ShapedGlyph, Shaper, StyleSpec};
-use syncpdf_core::ir::{Align, LineBox, PlacedGlyph, TypesetParagraph};
+use crate::shaper::{is_cjk_char, ShapedGlyph, Shaper, StyleSpec, UnderlineStyle};
+use syncpdf_core::ir::{Align, LineBox, PlacedGlyph, TypesetParagraph, Underline};
 use syncpdf_core::{AtomId, Color, ParagraphId, Rect, StyleId};
 use unicode_bidi::BidiInfo;
 
@@ -121,7 +121,7 @@ fn segments(shaper: &dyn Shaper, input: &LayoutInput<'_>, inlines: &[Inline]) ->
                 seg.items.push(Item::Atom {
                     id: *id,
                     source: Some(*source),
-                    width: source.bbox.width(),
+                    width: source.advance.unwrap_or(source.bbox.width()),
                     height: source.bbox.height(),
                     start,
                     end: seg.text.len(),
@@ -156,7 +156,7 @@ fn segments(shaper: &dyn Shaper, input: &LayoutInput<'_>, inlines: &[Inline]) ->
                 runs.sort_by_key(|(range, _)| range.start);
                 for (range, rtl) in runs {
                     let part = &text[range.clone()];
-                    let glyphs = shaper.shape(font, part, size, rtl);
+                    let glyphs = shaper.shape_styled(font, &s, part, size, rtl);
                     let mut groups: std::collections::BTreeMap<(usize, usize), Vec<ShapedGlyph>> =
                         std::collections::BTreeMap::new();
                     for glyph in glyphs {
@@ -250,12 +250,30 @@ fn rows(
             continue;
         }
         let opps = break_opportunities(&seg.text, input.lang);
+        // Do not strand one CJK letter (plus closing punctuation) on the last
+        // line. Explicit hard breaks remain authoritative.
+        let mut letters = seg
+            .text
+            .char_indices()
+            .rev()
+            .filter(|(_, c)| c.is_alphanumeric());
+        let lone_tail = letters
+            .next()
+            .filter(|(_, c)| is_cjk_char(*c))
+            .map(|(last, _)| (letters.next().map(|(previous, _)| previous), last));
         let starts: std::collections::HashSet<usize> = seg.items.iter().map(Item::start).collect();
         let ends: std::collections::HashSet<usize> = seg.items.iter().map(Item::end).collect();
         let mut at: std::collections::HashMap<usize, (bool, bool)> =
             std::collections::HashMap::new();
         for opp in opps {
             let byte = opp.byte as usize;
+            if !opp.mandatory
+                && lone_tail.is_some_and(|(previous, last)| {
+                    previous.is_some_and(|previous| previous < byte) && byte <= last
+                })
+            {
+                continue;
+            }
             if byte < seg.text.len() && ends.contains(&byte) && starts.contains(&byte) {
                 let entry = at.entry(byte).or_insert((false, false));
                 entry.0 |= opp.mandatory;
@@ -315,7 +333,8 @@ fn rows(
                             let font = glyphs
                                 .last()
                                 .map_or_else(|| shaper.font_for(&spec(input, *style)), |g| g.font);
-                            let hy = shaper.shape(font, "-", *size, false);
+                            let hy =
+                                shaper.shape_styled(font, &spec(input, *style), "-", *size, false);
                             if !hy.is_empty() {
                                 let w = hy.iter().map(|g| g.x_advance).sum();
                                 hyphens.insert(
@@ -375,7 +394,7 @@ fn rows(
             };
         let widths = [measure, width];
         let solution = if measure > 0.0 && width > 0.0 {
-            knuth_plass::solve(&nodes, &widths, 10.0).ok()
+            knuth_plass::solve_aligned(&nodes, &widths, 10.0, input.align == Align::Justify).ok()
         } else {
             None
         };
@@ -506,6 +525,51 @@ fn place(
     baseline: f32,
     scale: f32,
 ) -> PlacedLine {
+    let placed = place_row(shaper, input, row, bbox, baseline, scale);
+    let available = bbox.width()
+        - if row.first {
+            input.first_indent.max(0.0)
+        } else {
+            0.0
+        };
+    // Justification positions advances; serif ink and side bearings can extend
+    // past them. Spend only as much less glue as the ink needs, preserving every
+    // glyph size and the chosen breaks: first give back added stretch, then use
+    // the breaker's own shrink allowance (never beyond its limit, ratio -1).
+    if input.align == Align::Justify && !row.last && placed.line.bbox.width() > available {
+        let at = |ratio: f32| {
+            let mut adjusted = row.clone();
+            adjusted.ratio = ratio;
+            place_row(shaper, input, &adjusted, bbox, baseline, scale)
+        };
+        let mut high = (row.ratio, placed.line.bbox.width());
+        for low in [0.0, -1.0] {
+            if low >= high.0 {
+                continue;
+            }
+            let width = at(low).line.bbox.width();
+            if width <= available {
+                let t = if high.1 > width {
+                    ((available - width - 0.001) / (high.1 - width)).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                return at(low + (high.0 - low) * t);
+            }
+            high = (low, width);
+        }
+    }
+    placed
+}
+
+fn place_row(
+    shaper: &dyn Shaper,
+    input: &LayoutInput<'_>,
+    row: &Row,
+    bbox: &Rect,
+    baseline: f32,
+    scale: f32,
+) -> PlacedLine {
     let items = visual_items(row, input.is_rtl);
     let indent = if row.first {
         input.first_indent.max(0.0)
@@ -525,8 +589,24 @@ fn place(
     let mut atoms = Vec::new();
     let mut placed_atoms = Vec::new();
     let mut ink_boxes = Vec::new();
+    // Parallel to `ink_boxes`: the source-evidenced underline style, if any, so
+    // the decoration is drawn from the translated glyphs' real ink.
+    let mut underline_for: Vec<Option<UnderlineStyle>> = Vec::new();
     let mut bounds: Option<Rect> = None;
     let adjust = input.align == Align::Justify && !row.last;
+    // In a row with CJK tracking, interword spaces and CJK gaps are equal
+    // justification opportunities: the breaker's stretch is kept for choosing
+    // breaks, but the resulting slack is spread evenly so a few Latin spaces
+    // do not absorb it (a space's stretch is ~80x one CJK gap's).
+    let even_stretch = (adjust && row.ratio > 0.0 && !row.cjk_glue.is_empty()).then(|| {
+        let spaces: f32 = items
+            .iter()
+            .filter(|i| row.space_glue.contains(&i.end()))
+            .map(|i| i.width().max(1.0) * 4.0)
+            .sum();
+        let total = spaces + row.cjk_glue.len() as f32 * input.font_size * scale * 0.05;
+        row.ratio * total / (row.space_glue.len() + row.cjk_glue.len()) as f32
+    });
 
     for item in items.iter().chain(row.hyphen.iter()) {
         match item {
@@ -547,28 +627,33 @@ fn place(
                         y: baseline + g.y_offset,
                         size: *size,
                         scale_x: 1.0,
+                        // 合成斜体按片段携带；剪切不改变 advance/断行（见模块文档）。
+                        shear_x: g.shear_x,
                         style: *style,
                         color: spec(input, *style).color,
                     };
                     first = false;
-                    if !text.chars().all(char::is_whitespace) {
+                    if text.is_empty() || !text.chars().all(char::is_whitespace) {
                         let rect = ink(shaper, &placed, g.x_advance);
                         ink_boxes.push(rect);
+                        underline_for.push(spec(input, *style).underline);
                         bounds = Some(bounds.map_or(rect, |b| b.union(&rect)));
                     }
                     glyphs.push(placed);
                     x += g.x_advance;
                 }
                 if adjust && row.space_glue.contains(&item.end()) {
-                    x += row.ratio
-                        * if row.ratio >= 0.0 {
-                            item.width().max(1.0) * 4.0
-                        } else {
-                            item.width()
-                        };
+                    x += even_stretch.unwrap_or_else(|| {
+                        row.ratio
+                            * if row.ratio >= 0.0 {
+                                item.width().max(1.0) * 4.0
+                            } else {
+                                item.width()
+                            }
+                    });
                 }
                 if adjust && row.cjk_glue.contains(&item.end()) {
-                    x += row.ratio * input.font_size * scale * 0.05;
+                    x += even_stretch.unwrap_or(row.ratio * input.font_size * scale * 0.05);
                 }
             }
             Item::Atom {
@@ -588,18 +673,25 @@ fn place(
                     });
                 }
                 ink_boxes.push(rect);
+                // Atoms keep their own source drawing; they carry no underline.
+                underline_for.push(None);
                 bounds = Some(bounds.map_or(rect, |b| b.union(&rect)));
                 atoms.push(*id);
                 x += *width;
             }
         }
     }
-    // Negative side bearings are ink, not overflow: place the ink origin inside
-    // the requested left edge. Never shrink, clip, or relax collision tolerances.
-    if matches!(input.align, Align::Left | Align::Justify) && atoms.is_empty() {
+    // Side bearings are ink, not advance: translate a line that fits in full back
+    // inside either edge. Never shrink, clip, or relax collision tolerances.
+    if matches!(input.align, Align::Left | Align::Justify) && atoms.len() == placed_atoms.len() {
         if let Some(b) = bounds {
-            let dx = (bbox.x0 + indent - b.x0).max(0.0);
-            if dx > 0.0 && b.x1 + dx <= bbox.x1 {
+            let left = bbox.x0 + indent;
+            let dx = if b.x0 < left {
+                left - b.x0
+            } else {
+                (bbox.x1 - b.x1).min(0.0)
+            };
+            if dx != 0.0 && b.x0 + dx >= left && b.x1 + dx <= bbox.x1 {
                 for g in &mut glyphs {
                     g.x += dx;
                 }
@@ -607,9 +699,20 @@ fn place(
                     ink.x0 += dx;
                     ink.x1 += dx;
                 }
+                // Source drawings move rigidly with their line; the immutable
+                // source rectangle and original dimensions are unchanged.
+                for atom in &mut placed_atoms {
+                    atom.bbox.x0 += dx;
+                    atom.bbox.x1 += dx;
+                }
                 bounds = Some(Rect::new(b.x0 + dx, b.y0, b.x1 + dx, b.y1));
             }
         }
+    }
+    let underlines = underlines(baseline, &ink_boxes, &underline_for);
+    for underline in &underlines {
+        ink_boxes.push(underline.bbox);
+        bounds = Some(bounds.map_or(underline.bbox, |b| b.union(&underline.bbox)));
     }
     PlacedLine {
         line: LineBox {
@@ -623,8 +726,54 @@ fn place(
             glyphs,
             kept_atoms: atoms,
             placed_atoms,
+            underlines,
         },
         ink: ink_boxes,
+    }
+}
+
+/// Group consecutive decorated ink into underline segments under their baseline.
+///
+/// Geometry comes from the *translated* ink boxes, so wraps produce one segment
+/// per line and a run that spans a line break draws on both lines. Width, offset
+/// and color are the claimed source values; nothing is inferred.
+fn underlines(baseline: f32, ink: &[Rect], styles: &[Option<UnderlineStyle>]) -> Vec<Underline> {
+    let mut out: Vec<Underline> = Vec::new();
+    let mut group: Option<(UnderlineStyle, Rect)> = None;
+    for (box_, style) in ink.iter().zip(styles) {
+        match (style, group) {
+            (Some(style), Some((current, span))) if current == *style => {
+                group = Some((current, span.union(box_)));
+            }
+            (Some(style), existing) => {
+                if let Some((current, span)) = existing {
+                    out.push(segment(current, span, baseline));
+                }
+                group = Some((*style, *box_));
+            }
+            (None, Some((current, span))) => {
+                out.push(segment(current, span, baseline));
+                group = None;
+            }
+            (None, None) => {}
+        }
+    }
+    if let Some((current, span)) = group {
+        out.push(segment(current, span, baseline));
+    }
+    out.retain(|u| u.bbox.width() > 0.0);
+    out
+}
+
+/// One underline segment: it spans the decorated ink and sits at the claimed
+/// offset below the line's baseline.
+fn segment(style: UnderlineStyle, span: Rect, baseline: f32) -> Underline {
+    let y = baseline - style.offset;
+    let half = (style.width * 0.5).max(0.01);
+    Underline {
+        bbox: Rect::new(span.x0, y - half, span.x1, y + half),
+        color: style.color,
+        width: style.width,
     }
 }
 

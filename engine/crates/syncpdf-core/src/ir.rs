@@ -1,7 +1,7 @@
 //! 跨阶段中间表示（IR）。设计基准：02-技术路径与架构.md §4。
 //! 所有引用只用 id；全部可 serde。
 
-use crate::{AtomId, Color, GlyphId, Matrix, PageId, ParagraphId, Rect, StyleId};
+use crate::{AtomId, Color, GlyphId, Matrix, OpKey, PageId, ParagraphId, Rect, StyleId};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
@@ -48,10 +48,19 @@ pub struct Glyph {
     pub font: u32,
     /// 字号（已含文本矩阵与 CTM 的缩放）。
     pub size: f32,
-    /// 最终文本矩阵（含 CTM）。
+    /// 字形原点（`e`/`f`）+ 页空间基线方向的单位旋转（含 Tm、CTM 与 Form 矩阵）；
+    /// 不含字号缩放，视觉字号见 [`Glyph::size`]。
     pub matrix: Matrix,
     /// PDF 用户空间外接框。
     pub bbox: Rect,
+    /// pdfium tight char box：真实墨迹，不含字体上下沿。仅当 pdfium 给出非退化
+    /// 几何时才有值；无证据为 `None`，此时调用方必须沿用 [`Glyph::bbox`] 的
+    /// 保守语义，不得当作「无碰撞」。
+    ///
+    /// 旧 IR 缺少此字段时读为 None 并保守使用 loose 盒；生产运行每次重新
+    /// bind_page 提取证据，不复用持久化的 source_analysis 作为绑定结果。
+    #[serde(default)]
+    pub ink: Option<Rect>,
     pub advance: f32,
     pub fill: Color,
     pub render_mode: u8,
@@ -75,6 +84,11 @@ pub enum DisplayItem {
         bbox: Rect,
         is_fill: bool,
         is_stroke: bool,
+        /// Source paint binding for a plain stroked line (`S`/`s`). Absent when
+        /// the paint is composite (`B`, fill+stroke), clipped, or its style is
+        /// unknown, so such a path can never be treated as text decoration.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stroke: Option<PathStroke>,
     },
     FormBegin {
         name: String,
@@ -174,11 +188,16 @@ pub struct StyleRun {
     pub serif: bool,
     #[serde(default)]
     pub mono: bool,
+    /// This run was underlined in the source and must be redrawn underlined.
+    #[serde(default)]
+    pub underline: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AtomKind {
+    /// An exact source span owned by an explicit local citation link.
+    Citation,
     Formula,
     Code,
     Url,
@@ -203,6 +222,10 @@ pub struct Atom {
 pub struct SourceAtom {
     pub bbox: Rect,
     pub baseline: f32,
+    /// In-line advance when wider than the ink (a list label keeps the source
+    /// gap to its body); `None` means the ink width.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advance: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -229,6 +252,32 @@ pub enum Translatable {
     No { reason: String },
 }
 
+/// Identifies one plain stroked source line by its paint operator plus the
+/// stroke style it inherits, so a decoration can be erased and re-drawn with
+/// the original width and color instead of a guessed default.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PathStroke {
+    pub op: OpKey,
+    /// `/w` line width in PDF user space.
+    pub width: f32,
+    /// Stroke color resolved at paint time.
+    pub color: Color,
+}
+
+/// A source underline claimed by exactly one paragraph. `glyph_range` is a
+/// half-open range over the paragraph's reading-order glyphs (same indexing as
+/// [`StyleRun::glyph_range`]), so redrawing can follow the translated glyphs
+/// that correspond to the underlined source words.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SourceDecoration {
+    pub stroke: PathStroke,
+    pub bbox: Rect,
+    pub glyph_range: (u32, u32),
+    /// Distance below the owning line's baseline, measured from the source glyph
+    /// ink and the claimed rule. Recorded here so redraw needs no re-derivation.
+    pub offset: f32,
+}
+
 /// 阅读序文本与真实源字形的映射，范围是段内字形索引的半开区间。
 /// 零长度范围表示由几何证据生成的空格/换行，不对应可删除的源字节。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -251,6 +300,9 @@ pub struct Paragraph {
     pub text_spans: Vec<SourceTextSpan>,
     pub style_runs: Vec<StyleRun>,
     pub atoms: Vec<Atom>,
+    /// Source underlines owned by this paragraph. Empty in older IR.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub decorations: Vec<SourceDecoration>,
     /// 逻辑源文本；旧数据可能含原子占位，优先使用 text_spans 映射。
     pub text: String,
     pub align: Align,
@@ -273,10 +325,18 @@ pub struct PlacedGlyph {
     pub y: f32,
     pub size: f32,
     pub scale_x: f32,
+    /// 合成斜体的水平剪切量（tan 值，正值 = 向右倾斜），施加在写回文本矩阵
+    /// 的 c 分量；正体与真斜体面为 0。
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub shear_x: f32,
     pub style: StyleId,
     /// Per-run color; absent in older IR means the paragraph color.
     #[serde(default)]
     pub color: Option<Color>,
+}
+
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -288,6 +348,18 @@ pub struct LineBox {
     pub kept_atoms: Vec<AtomId>,
     #[serde(default)]
     pub placed_atoms: Vec<PlacedAtom>,
+    /// Source underlines redrawn under this line's translated glyphs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub underlines: Vec<Underline>,
+}
+
+/// One redrawn underline segment, positioned from the translated ink.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Underline {
+    pub bbox: Rect,
+    pub color: Color,
+    /// Original source line width, never a guessed default.
+    pub width: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -329,6 +401,7 @@ mod tests {
             glyphs: vec![],
             text_spans: Vec::new(),
             style_runs: vec![],
+            decorations: Vec::new(),
             atoms: vec![Atom {
                 source: None,
                 id: AtomId(1),

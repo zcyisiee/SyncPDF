@@ -42,6 +42,7 @@ impl Shaper for StoreShaper<'_> {
                 x_advance: g.x_advance,
                 x_offset: g.x_offset,
                 y_offset: g.y_offset,
+                shear_x: 0.0,
             })
             .collect()
     }
@@ -509,6 +510,7 @@ fn placed_glyph_fields_contract() {
         y: 0.0,
         size: 10.0,
         scale_x: 1.0,
+        shear_x: 0.0,
         style: StyleId(1),
         color: None,
     };

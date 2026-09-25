@@ -31,6 +31,7 @@ struct Cli {
 }
 
 #[derive(Subcommand, Debug)]
+#[allow(clippy::large_enum_variant)] // clap 子命令枚举按值持有参数结构是常态
 enum Command {
     /// 读 stdin JSONL 请求（configure → run）并输出事件 JSONL。
     Run {
@@ -46,10 +47,13 @@ enum Command {
         /// 输出 PDF。
         #[arg(long)]
         output: PathBuf,
-        /// 翻译器：`fake:echo` / `fake:cjk` / `fake:slow:500` / `pi`。
+        /// 额外输出 A3 横向双语 PDF（左原文、右译文）。
+        #[arg(long)]
+        dual_output: Option<PathBuf>,
+        /// 翻译器：`fake:echo` / `fake:cjk` / `fake:slow:500` / `pi` / `agy`。
         #[arg(long, default_value = "fake:echo")]
         translator: String,
-        /// 模型名（`pi` 通道用）。
+        /// 模型名（`pi` / `agy` 通道用）。
         #[arg(long)]
         model: Option<String>,
         /// thinking 档位（`pi` 通道用）。
@@ -76,6 +80,10 @@ enum Command {
         /// 行距/译文段落字号的倍数，如 1.3（非 pt）；缺省保留源比例。
         #[arg(long)]
         line_height: Option<f32>,
+        /// 内部参数：规范化术语对表 JSON（`[["source","target"],...]`），由
+        /// `bdt rust-translate --glossaries` 生成在工作目录下。
+        #[arg(long)]
+        terminology: Option<PathBuf>,
     },
     /// 打印 preflight 信息、每页几何与段落摘要（调试用）。
     Inspect {
@@ -109,11 +117,14 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Run { protocol } => {
+            // 在任何原生组件加载前隔离 stdout：事件 JSONL 走 dup 出的专用 fd，
+            // 原生 fd1 重定向到 stderr 目标（见 `StdoutSink::isolated`）。
+            let sink = SharedSink::new(StdoutSink::isolated()?);
             // 前端启动命令是 `syncpdf-cli run --protocol 1`。协议版本不对时只能
             // 说「这条连接用不了」：发一条致命 error 事件（前端按 JSONL 解析），
             // 然后以退出码 2 结束，不做任何后续工作。
             if protocol != 1 {
-                SharedSink::new(StdoutSink::new()).emit(Event::Error {
+                sink.emit(Event::Error {
                     fatal: true,
                     code: "protocol_unsupported".to_string(),
                     message: format!("不支持的协议版本 {protocol}（本引擎只支持 --protocol 1）"),
@@ -121,11 +132,12 @@ fn main() -> anyhow::Result<()> {
                 eprintln!("syncpdf-cli: 不支持的协议版本 {protocol}（只支持 1）");
                 std::process::exit(2);
             }
-            rt.block_on(cmd_run())
+            rt.block_on(cmd_run(sink))
         }
         Command::Translate {
             input,
             output,
+            dual_output,
             translator,
             model,
             thinking,
@@ -136,9 +148,12 @@ fn main() -> anyhow::Result<()> {
             cache_only,
             font_scale,
             line_height,
+            terminology,
         } => rt.block_on(cmd_translate(
+            SharedSink::new(StdoutSink::isolated()?),
             input,
             output,
+            dual_output,
             translator,
             model,
             thinking,
@@ -149,6 +164,7 @@ fn main() -> anyhow::Result<()> {
             cache_only,
             font_scale,
             line_height,
+            terminology,
         )),
         Command::Inspect {
             input,
@@ -171,8 +187,7 @@ fn init_tracing() {
 }
 
 /// `run`：stdin JSONL → configure/run → Pipeline；EOF 或 cancel 都触发取消。
-async fn cmd_run() -> anyhow::Result<()> {
-    let sink = SharedSink::new(StdoutSink::new());
+async fn cmd_run(sink: SharedSink) -> anyhow::Result<()> {
     let cancel = CancellationToken::new();
 
     // stdin 的所有权交给读线程（`Stdin` 是 Send），读到的行经 channel 送回。
@@ -251,8 +266,10 @@ async fn cmd_run() -> anyhow::Result<()> {
 /// `translate`：用同样的事件通道跑一遍（内部构造 configure+run）。
 #[allow(clippy::too_many_arguments)]
 async fn cmd_translate(
+    sink: SharedSink,
     input: PathBuf,
     output: PathBuf,
+    dual_output: Option<PathBuf>,
     translator: String,
     model: Option<String>,
     thinking: Option<String>,
@@ -263,6 +280,7 @@ async fn cmd_translate(
     cache_only: bool,
     font_scale: f32,
     line_height: Option<f32>,
+    terminology: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let typography = syncpdf_pipeline::stages::typeset::Typography::new(font_scale, line_height)?;
     let pages = match pages.as_deref() {
@@ -274,6 +292,7 @@ async fn cmd_translate(
     let configure = Request::Configure {
         provider: match kind {
             TranslatorKind::Pi { .. } => TranslateProvider::Pi,
+            TranslatorKind::Agy { .. } => TranslateProvider::Agy,
             _ => TranslateProvider::Http,
         },
         base_url: None,
@@ -291,13 +310,13 @@ async fn cmd_translate(
         target_lang,
         pages,
         font_profile: None,
-        terminology: None,
+        terminology,
         mode: Mode::Full,
     };
     let mut cfg = RunConfig::new(configure, run)?;
     cfg.cache_only = cache_only;
     cfg.typography = typography;
-    let sink = SharedSink::new(StdoutSink::new());
+    cfg.dual_output = dual_output;
     let pipeline = Pipeline::default();
     match pipeline.run(&cfg, sink, CancellationToken::new()).await {
         Ok(s) => {
@@ -494,7 +513,7 @@ fn parse_pages(spec: &str) -> anyhow::Result<Vec<u32>> {
     Ok(out)
 }
 
-/// `--translator` 解析：`pi` / `fake:<name>`。
+/// `--translator` 解析：`pi` / `agy` / `fake:<name>`。
 fn translator_kind(
     spec: &str,
     model: Option<String>,
@@ -506,11 +525,23 @@ fn translator_kind(
             model: model.unwrap_or_else(|| "deepseek/deepseek-flash".into()),
             thinking: thinking.unwrap_or_else(|| "low".into()),
         }),
+        // agy 的模型名自带档位（`gemini-3.8-flash-low`），没有独立 thinking 参数。
+        "agy" => {
+            if thinking.is_some() {
+                anyhow::bail!(
+                    "agy 通道不支持 --thinking：请用带档位的模型名，如 gemini-3.8-flash-low"
+                );
+            }
+            Ok(TranslatorKind::Agy {
+                program: PathBuf::from("agy"),
+                model: model.unwrap_or_else(|| "gemini-3.8-flash-low".into()),
+            })
+        }
         other => {
             let name = other.strip_prefix("fake:").unwrap_or(other);
             if syncpdf_pipeline::stages::fake_from_name(name).is_none() {
                 anyhow::bail!(
-                    "未知翻译器 {other:?}；可用：pi, fake:echo, fake:cjk, fake:stretch:1.4, \
+                    "未知翻译器 {other:?}；可用：pi, agy, fake:echo, fake:cjk, fake:stretch:1.4, \
                      fake:shrink:0.6, fake:fail-every:3, fake:slow:500"
                 );
             }
@@ -558,3 +589,52 @@ fn print_summary(s: &RunSummary) {
 
 /// 供测试断言用的协议版本导出。
 pub const CLI_PROTOCOL_VERSION: u32 = PROTOCOL_VERSION;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn translator_kind_defaults_per_channel_and_rejects_bad_input() {
+        // pi 默认不变。
+        assert_eq!(
+            translator_kind("pi", None, None).unwrap(),
+            TranslatorKind::Pi {
+                program: PathBuf::from("pi"),
+                model: "deepseek/deepseek-flash".into(),
+                thinking: "low".into(),
+            }
+        );
+        assert_eq!(
+            translator_kind("pi", Some("m".into()), Some("high".into())).unwrap(),
+            TranslatorKind::Pi {
+                program: PathBuf::from("pi"),
+                model: "m".into(),
+                thinking: "high".into(),
+            }
+        );
+        // agy 缺省模型就是用户指定的 gemini 档位；agy 没有独立 thinking。
+        assert_eq!(
+            translator_kind("agy", None, None).unwrap(),
+            TranslatorKind::Agy {
+                program: PathBuf::from("agy"),
+                model: "gemini-3.8-flash-low".into(),
+            }
+        );
+        assert_eq!(
+            translator_kind("agy", Some("gemini-3.7-flash-low".into()), None).unwrap(),
+            TranslatorKind::Agy {
+                program: PathBuf::from("agy"),
+                model: "gemini-3.7-flash-low".into(),
+            }
+        );
+        let err = translator_kind("agy", None, Some("low".into())).unwrap_err();
+        assert!(err.to_string().contains("thinking"), "{err}");
+        // 未知翻译器仍报错，fake 前缀行为不变。
+        assert!(translator_kind("nope", None, None).is_err());
+        assert_eq!(
+            translator_kind("fake:cjk", None, None).unwrap(),
+            TranslatorKind::Fake { name: "cjk".into() }
+        );
+    }
+}

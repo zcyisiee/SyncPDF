@@ -2,9 +2,10 @@
 //!
 //! 设计基准：02-技术路径与架构.md §3（layout_analysis 行）与 §6。
 //! 门禁：未被任何区域覆盖的非白字形比例 > `coverage_limit`（默认 0.5%）时，
-//! 只拆出能够证明属于同一正文物理行的遗漏续行；无法归属的字形仍报告缺口。
+//! 只做两类有证据的归属修复——面版继承同一源绘图的图内文字、拆分同一正文物理行的
+//! 遗漏续行；无法归属的字形仍报告缺口。
 
-use syncpdf_core::ir::{PageIR, Region, RegionKind};
+use syncpdf_core::ir::{DisplayItem, Glyph, PageIR, Region, RegionKind};
 use syncpdf_core::{PageId, Rect};
 use syncpdf_layout::{
     coverage, px_to_user_space, xy_cut_order, DetectOpts, Detection, LayoutModel, RawImage,
@@ -126,6 +127,7 @@ pub fn apply_coverage_fallback(
     if report.ratio <= limit {
         return report;
     }
+    recover_form_panel_ink(regions, page_ir);
     repair_boundary_lines(regions, &glyph_boxes);
     let repaired: Vec<Rect> = regions.iter().map(|r| r.bbox).collect();
     coverage(&glyph_boxes, &repaired)
@@ -214,6 +216,206 @@ fn recover_subcaptions(regions: &mut Vec<Region>, ir: &PageIR) {
             });
         }
     }
+}
+
+/// 一个已绘制字形，连同它被绘制时所在的源绘图路径。
+struct DrawnGlyph<'a> {
+    glyph: &'a Glyph,
+    /// 外层到内层的 `FormBegin` 下标；空 = 直接画在页内容流里。
+    /// 用**下标**而非 Form 资源名，才能区分同名 Form 的多次实例。
+    drawing: Vec<u32>,
+}
+
+/// 一张非文字绘制，连同它所在的源绘图路径。
+struct DrawnPaint {
+    bbox: Rect,
+    drawing: Vec<u32>,
+}
+
+fn starts_with(path: &[u32], prefix: &[u32]) -> bool {
+    path.len() >= prefix.len() && path[..prefix.len()] == *prefix
+}
+
+/// 两个框的垂直间隙；纵向重叠时为 0。
+fn vertical_gap(a: Rect, b: Rect) -> f32 {
+    if a.y0 > b.y1 {
+        a.y0 - b.y1
+    } else if b.y0 > a.y1 {
+        b.y0 - a.y1
+    } else {
+        0.0
+    }
+}
+
+/// `indices` 所指字形框高度的中位数；没有可用高度返回 `None`。
+fn median_glyph_height(glyphs: &[DrawnGlyph<'_>], indices: &[usize]) -> Option<f32> {
+    let mut heights: Vec<f32> = indices
+        .iter()
+        .map(|&i| glyphs[i].glyph.bbox.height())
+        .filter(|h| h.is_finite() && *h > 0.0)
+        .collect();
+    if heights.is_empty() {
+        return None;
+    }
+    heights.sort_by(f32::total_cmp);
+    Some(heights[heights.len() / 2])
+}
+
+/// 面版继承同一源绘图内的图内文字。
+///
+/// 检测出的 `Figure` 框有时裁掉面版自己的标题或坐标图例，因为那些字紧贴在绘图边缘。
+/// 它们是图的一部分、不是漏掉的正文；但留在框外会触发覆盖门禁。
+/// 只有同时满足下列证据才扩框：未覆盖文字与框内已覆盖文字**同属一个源绘图实例**，
+/// 未覆盖文字是同一条贴着框的窄文字带，且不会顺带吃进其它区域、字形或绘制。
+/// 返回实际扩框的 Figure 个数。
+fn recover_form_panel_ink(regions: &mut [Region], ir: &PageIR) -> usize {
+    // 距图框边缘的距离上限、以及所采纳文字带的厚度上限，单位是面版字形高度中位数
+    // （PDF 用户空间绝对值不跨文档通用）。
+    const MARGIN: f32 = 2.5;
+    const CLUSTER: f32 = 2.0;
+
+    let mut glyphs: Vec<DrawnGlyph<'_>> = Vec::new();
+    let mut paint: Vec<DrawnPaint> = Vec::new();
+    let mut stack: Vec<u32> = Vec::new();
+    for (index, item) in ir.items.iter().enumerate() {
+        match item {
+            DisplayItem::FormBegin { .. } => stack.push(index as u32),
+            // FormBegin/FormEnd 由 bind 成对产生；不成对时按空栈收尾，不猜身份。
+            DisplayItem::FormEnd => {
+                stack.pop();
+            }
+            DisplayItem::Text { glyphs: painted } => glyphs.extend(
+                painted
+                    .iter()
+                    .filter(|g| !is_white_glyph(g))
+                    .map(|g| DrawnGlyph {
+                        glyph: g,
+                        drawing: stack.clone(),
+                    }),
+            ),
+            DisplayItem::Image { bbox } | DisplayItem::InlineImage { bbox } => {
+                paint.push(DrawnPaint {
+                    bbox: *bbox,
+                    drawing: stack.clone(),
+                });
+            }
+            DisplayItem::Path { bbox, .. } => paint.push(DrawnPaint {
+                bbox: *bbox,
+                drawing: stack.clone(),
+            }),
+        }
+    }
+    if glyphs.is_empty() {
+        return 0;
+    }
+
+    let mut changed = 0;
+    for figure in 0..regions.len() {
+        if regions[figure].kind != RegionKind::Figure {
+            continue;
+        }
+        let frame = regions[figure].bbox;
+        let covered: Vec<usize> = glyphs
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| frame.contains(g.glyph.bbox.center()))
+            .map(|(i, _)| i)
+            .collect();
+        if covered.len() < 2 {
+            continue;
+        }
+        // 已覆盖文字只能属于这一个 Figure，否则两个面版可能都想认领同一批字。
+        let exclusive = covered.iter().all(|&i| {
+            let center = glyphs[i].glyph.bbox.center();
+            let mut owners = regions
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r.bbox.contains(center));
+            owners.next().is_some_and(|(j, _)| j == figure) && owners.next().is_none()
+        });
+        if !exclusive {
+            continue;
+        }
+        // 框内文字必须一致地来自同一个绘图实例：取其绘图路径的最长公共前缀。
+        let mut shared = glyphs[covered[0]].drawing.clone();
+        for &i in &covered[1..] {
+            let other = &glyphs[i].drawing;
+            let keep = shared.iter().zip(other).take_while(|(a, b)| a == b).count();
+            shared.truncate(keep);
+        }
+        if shared.is_empty() {
+            continue;
+        }
+        let Some(height) = median_glyph_height(&glyphs, &covered) else {
+            continue;
+        };
+        let adopted: Vec<usize> = glyphs
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| {
+                let center = g.glyph.bbox.center();
+                let bbox = g.glyph.bbox;
+                !regions.iter().any(|r| r.bbox.contains(center))
+                    && starts_with(&g.drawing, &shared)
+                    && frame.x0 <= bbox.x0
+                    && bbox.x1 <= frame.x1
+                    && vertical_gap(bbox, frame) <= height * MARGIN
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if adopted.is_empty() {
+            continue;
+        }
+        let adopted_set: std::collections::BTreeSet<usize> = adopted.iter().copied().collect();
+        // A shared Form can wrap an entire page. Instance identity is evidence
+        // of panel ownership only if that instance has no other visible text
+        // outside this panel and the proposed narrow band.
+        if glyphs.iter().enumerate().any(|(i, g)| {
+            starts_with(&g.drawing, &shared)
+                && !frame.contains(g.glyph.bbox.center())
+                && !adopted_set.contains(&i)
+        }) {
+            continue;
+        }
+        let band = adopted
+            .iter()
+            .skip(1)
+            .fold(glyphs[adopted[0]].glyph.bbox, |acc, &i| {
+                acc.union(&glyphs[i].glyph.bbox)
+            });
+        if band.height() > height * CLUSTER {
+            continue;
+        }
+        let expanded = frame.union(&band);
+        if regions
+            .iter()
+            .enumerate()
+            .any(|(i, r)| i != figure && expanded.intersects(&r.bbox))
+        {
+            continue;
+        }
+        // 扩框不得顺带吃进任何别的字形（含它原本不属于本图的正文）。
+        let steals = glyphs.iter().enumerate().any(|(i, g)| {
+            !adopted_set.contains(&i)
+                && !frame.contains(g.glyph.bbox.center())
+                && expanded.contains(g.glyph.bbox.center())
+        });
+        if steals {
+            continue;
+        }
+        // 也不得吃进别的绘图：新增带里的非文字绘制必须与框内文字同源，或本就在框内。
+        let foreign_paint = paint.iter().any(|p| {
+            expanded.intersects(&p.bbox)
+                && !frame.contains(p.bbox.center())
+                && !starts_with(&p.drawing, &shared)
+        });
+        if foreign_paint {
+            continue;
+        }
+        regions[figure].bbox = expanded;
+        changed += 1;
+    }
+    changed
 }
 
 fn repair_boundary_lines(regions: &mut Vec<Region>, glyphs: &[(Rect, bool)]) {
@@ -554,6 +756,7 @@ mod tests {
             size: h,
             matrix: Matrix::new(1.0, 0.0, 0.0, 1.0, 0.0, 0.0),
             bbox: Rect::new(x, y, x + w, y + h),
+            ink: None,
             advance: w,
             fill: Default::default(),
             render_mode: 0,
@@ -574,6 +777,89 @@ mod tests {
             rotation: 0,
             fonts: vec![],
             items: vec![DisplayItem::Text { glyphs }],
+        }
+    }
+
+    /// 页面内容流：若干 `FormBegin(name)` 绘图、页级文字、以及可选的非文字绘制。
+    struct FormPage {
+        items: Vec<DisplayItem>,
+    }
+
+    impl FormPage {
+        fn new() -> Self {
+            Self { items: Vec::new() }
+        }
+
+        /// 在一次 Form 实例里画一批文字；同名 Form 可开多次，各自是独立实例。
+        fn form(mut self, name: &str, glyphs: Vec<Glyph>) -> Self {
+            self.items.push(DisplayItem::FormBegin {
+                name: name.into(),
+                ctm: Matrix::IDENTITY,
+            });
+            self.items.push(DisplayItem::Text { glyphs });
+            self.items.push(DisplayItem::FormEnd);
+            self
+        }
+
+        fn form_with_paint(mut self, name: &str, glyphs: Vec<Glyph>, paint: Rect) -> Self {
+            self.items.push(DisplayItem::FormBegin {
+                name: name.into(),
+                ctm: Matrix::IDENTITY,
+            });
+            self.items.push(DisplayItem::Text { glyphs });
+            self.items.push(DisplayItem::Path {
+                bbox: paint,
+                is_fill: true,
+                is_stroke: false,
+                stroke: None,
+            });
+            self.items.push(DisplayItem::FormEnd);
+            self
+        }
+
+        fn page_text(mut self, glyphs: Vec<Glyph>) -> Self {
+            self.items.push(DisplayItem::Text { glyphs });
+            self
+        }
+
+        fn build(self) -> PageIR {
+            PageIR {
+                page: PageId(0),
+                media_box: Rect::new(0.0, 0.0, 612.0, 792.0),
+                crop_box: Rect::new(0.0, 0.0, 612.0, 792.0),
+                rotation: 0,
+                fonts: vec![],
+                items: self.items,
+            }
+        }
+    }
+
+    /// 一行等宽字形，起点 (x,y)，字高 h。
+    fn glyph_row(ordinal: u16, text: &str, x: f32, y: f32, w: f32, h: f32) -> Vec<Glyph> {
+        text.chars()
+            .enumerate()
+            .map(|(i, c)| {
+                mk_glyph(
+                    ordinal + i as u16,
+                    &c.to_string(),
+                    x + i as f32 * w,
+                    y,
+                    w,
+                    h,
+                    GlyphFlags::default(),
+                )
+            })
+            .collect()
+    }
+
+    fn figure_region(index: u32, bbox: Rect) -> Region {
+        Region {
+            page: PageId(0),
+            index,
+            kind: RegionKind::Figure,
+            bbox,
+            score: 0.9,
+            order: index,
         }
     }
 
@@ -601,6 +887,385 @@ mod tests {
         assert_eq!(report.uncovered, 2);
         assert!((report.ratio - 1.0).abs() < 1e-6);
         assert_eq!(regions.len(), 1, "真正遗漏不能用大框掩盖");
+    }
+
+    #[test]
+    fn figure_panel_title_in_the_same_form_is_adopted() {
+        // 检测框收在图内标题下方：标题与图内其它文字同属一次 Form 实例 → 扩框收纳。
+        let title = glyph_row(0, "Panel Title", 120.0, 410.0, 5.0, 8.0);
+        let mut body = glyph_row(20, "axis labels", 100.0, 300.0, 5.0, 8.0);
+        body.extend(glyph_row(40, "more ink", 100.0, 320.0, 5.0, 8.0));
+        let ir = FormPage::new()
+            .form_with_paint(
+                "Im12",
+                {
+                    let mut g = title.clone();
+                    g.extend(body.clone());
+                    g
+                },
+                Rect::new(95.0, 295.0, 210.0, 405.0),
+            )
+            .build();
+        let mut regions = vec![figure_region(0, Rect::new(95.0, 295.0, 210.0, 405.0))];
+        let report = apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
+        assert_eq!(report.ratio, 0.0, "图内标题不应留在框外触发门禁");
+        assert_eq!(regions.len(), 1, "只扩框，不追加区域");
+        assert_eq!(regions[0].kind, RegionKind::Figure, "归属仍是图，不改种类");
+        assert_eq!(regions[0].bbox, Rect::new(95.0, 295.0, 210.0, 418.0));
+    }
+
+    #[test]
+    fn whole_page_form_does_not_prove_panel_ownership() {
+        let mut text = glyph_row(0, "Panel title", 120.0, 410.0, 5.0, 8.0);
+        text.extend(glyph_row(20, "axis labels", 100.0, 300.0, 5.0, 8.0));
+        text.extend(glyph_row(40, "Ordinary body text", 100.0, 100.0, 5.0, 8.0));
+        let ir = FormPage::new().form("WholePage", text).build();
+        let mut regions = vec![figure_region(0, Rect::new(95.0, 295.0, 210.0, 405.0))];
+        let before = regions.clone();
+        assert_eq!(recover_form_panel_ink(&mut regions, &ir), 0);
+        assert_eq!(regions, before);
+    }
+
+    #[test]
+    fn panel_ink_from_a_different_form_is_not_adopted() {
+        // 同名 Form 的第二次实例：框内文字与框外标题不在同一个实例里 → 不扩框。
+        let inside = glyph_row(0, "axis labels", 100.0, 300.0, 5.0, 8.0);
+        let mut inside = inside;
+        inside.extend(glyph_row(20, "more ink", 100.0, 320.0, 5.0, 8.0));
+        let legend = glyph_row(40, "Panel Title", 120.0, 410.0, 5.0, 8.0);
+        let ir = FormPage::new()
+            .form("Im12", inside)
+            .form("Im12", legend)
+            .build();
+        let mut regions = vec![figure_region(0, Rect::new(95.0, 295.0, 210.0, 405.0))];
+        let report = apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
+        assert!(
+            report.ratio > 0.005,
+            "无实例证据时必须保留缺口，实际 {}",
+            report.ratio
+        );
+        assert_eq!(regions[0].bbox, Rect::new(95.0, 295.0, 210.0, 405.0));
+    }
+
+    #[test]
+    fn page_level_ink_is_not_adopted_into_a_figure() {
+        // 正文画在页内容流、图在 Form 里：没有共同绘图，不能当成图内文字。
+        let mut inside = glyph_row(0, "axis labels", 100.0, 300.0, 5.0, 8.0);
+        inside.extend(glyph_row(20, "more ink", 100.0, 320.0, 5.0, 8.0));
+        let prose = glyph_row(40, "Body prose", 120.0, 410.0, 5.0, 8.0);
+        let ir = FormPage::new()
+            .form("Im12", inside)
+            .page_text(prose)
+            .build();
+        let mut regions = vec![figure_region(0, Rect::new(95.0, 295.0, 210.0, 405.0))];
+        let report = apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
+        assert!(report.ratio > 0.005, "页级正文不得被图框吞掉");
+        assert_eq!(regions[0].bbox, Rect::new(95.0, 295.0, 210.0, 405.0));
+    }
+
+    #[test]
+    fn panel_expansion_rejects_ink_owned_by_another_region() {
+        // 扩框会覆到正文区域上 → 不扩，缺口保留。
+        let mut inside = glyph_row(0, "axis labels", 100.0, 300.0, 5.0, 8.0);
+        inside.extend(glyph_row(20, "more ink", 100.0, 320.0, 5.0, 8.0));
+        let mut all = inside.clone();
+        all.extend(glyph_row(40, "Panel Title", 120.0, 410.0, 5.0, 8.0));
+        let ir = FormPage::new()
+            .form_with_paint("Im12", all, Rect::new(95.0, 295.0, 210.0, 405.0))
+            .build();
+        let mut regions = vec![
+            figure_region(0, Rect::new(95.0, 295.0, 210.0, 405.0)),
+            region(1, Rect::new(110.0, 406.0, 300.0, 430.0)),
+        ];
+        apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
+        assert_eq!(regions[0].bbox, Rect::new(95.0, 295.0, 210.0, 405.0));
+        assert_eq!(regions[1].bbox, Rect::new(110.0, 406.0, 300.0, 430.0));
+    }
+
+    #[test]
+    fn panel_ink_owned_by_two_regions_is_ambiguous() {
+        // 框内文字同时被另一个区域覆盖 → 归属不唯一，不擅自扩框。
+        let mut inside = glyph_row(0, "axis labels", 100.0, 300.0, 5.0, 8.0);
+        inside.extend(glyph_row(20, "more ink", 100.0, 320.0, 5.0, 8.0));
+        let mut all = inside.clone();
+        all.extend(glyph_row(40, "Panel Title", 120.0, 410.0, 5.0, 8.0));
+        let figure = Rect::new(95.0, 295.0, 210.0, 405.0);
+        let ir = FormPage::new()
+            .form_with_paint("Im12", all, Rect::new(95.0, 295.0, 210.0, 405.0))
+            .build();
+        // 第二个区域也盖住框内的字。
+        let mut regions = vec![
+            figure_region(0, figure),
+            region(1, Rect::new(90.0, 290.0, 215.0, 330.0)),
+        ];
+        apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
+        assert_eq!(regions[0].bbox, figure);
+    }
+
+    #[test]
+    fn panel_adoption_stops_at_a_thick_ink_band() {
+        // 框外文字离框太远（超过面版字形高度的 2.5 倍） → 不是贴边标题，不扩框。
+        let mut inside = glyph_row(0, "axis labels", 100.0, 300.0, 5.0, 8.0);
+        inside.extend(glyph_row(20, "more ink", 100.0, 320.0, 5.0, 8.0));
+        let mut all = inside.clone();
+        all.extend(glyph_row(40, "Far away", 120.0, 500.0, 5.0, 8.0));
+        let figure = Rect::new(95.0, 295.0, 210.0, 405.0);
+        let ir = FormPage::new()
+            .form_with_paint("Im12", all, Rect::new(95.0, 295.0, 210.0, 405.0))
+            .build();
+        let mut regions = vec![figure_region(0, figure)];
+        apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
+        assert_eq!(regions[0].bbox, figure, "远处文字必须留给正文/缺口判定");
+    }
+
+    #[test]
+    fn panel_adoption_requires_a_horizontal_fit() {
+        // 框外文字横向超出面版宽度（侧栏注记/邻栏正文） → 不扩框。
+        let mut inside = glyph_row(0, "axis labels", 100.0, 300.0, 5.0, 8.0);
+        inside.extend(glyph_row(20, "more ink", 100.0, 320.0, 5.0, 8.0));
+        let mut all = inside.clone();
+        all.extend(glyph_row(40, "Wide aside", 80.0, 410.0, 20.0, 8.0));
+        let figure = Rect::new(95.0, 295.0, 210.0, 405.0);
+        let ir = FormPage::new()
+            .form_with_paint("Im12", all, Rect::new(95.0, 295.0, 210.0, 405.0))
+            .build();
+        let mut regions = vec![figure_region(0, figure)];
+        apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
+        assert_eq!(regions[0].bbox, figure);
+    }
+
+    #[test]
+    fn panel_adoption_rejects_foreign_paint_in_the_added_band() {
+        // 新增带里有别的绘图（另一个 Form 的图） → 不扩框，避免吞邻图。
+        let mut inside = glyph_row(0, "axis labels", 100.0, 300.0, 5.0, 8.0);
+        inside.extend(glyph_row(20, "more ink", 100.0, 320.0, 5.0, 8.0));
+        let mut all = inside.clone();
+        all.extend(glyph_row(40, "Panel Title", 120.0, 410.0, 5.0, 8.0));
+        let figure = Rect::new(95.0, 295.0, 210.0, 405.0);
+        let ir = FormPage::new()
+            .form_with_paint("Im12", all, Rect::new(95.0, 295.0, 210.0, 405.0))
+            .form_with_paint("Im13", vec![], Rect::new(100.0, 407.0, 200.0, 415.0))
+            .build();
+        let mut regions = vec![figure_region(0, figure)];
+        apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
+        assert_eq!(regions[0].bbox, figure);
+    }
+
+    #[test]
+    fn panel_recovery_keeps_unattributable_ink_reported() {
+        // 门禁的对外语义不变：没有证据归属时，比例仍超限且区域一字不改。
+        let mut inside = glyph_row(0, "axis labels", 100.0, 300.0, 5.0, 8.0);
+        inside.extend(glyph_row(20, "more ink", 100.0, 320.0, 5.0, 8.0));
+        let figure = Rect::new(95.0, 295.0, 210.0, 405.0);
+        let ir = FormPage::new()
+            .form_with_paint("Im12", inside, Rect::new(95.0, 295.0, 210.0, 405.0))
+            .page_text(glyph_row(40, "Unproven", 120.0, 410.0, 5.0, 8.0))
+            .build();
+        let mut regions = vec![figure_region(0, figure)];
+        let report = apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
+        assert!(report.ratio > 0.005, "{} 应超过门禁", report.ratio);
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].bbox, figure);
+    }
+
+    /// 真实首轮全文页：`tmp/paper-iteration/deepseek-inventory-v1`。
+    /// 36/50 页的图内标题/图例被检测框切掉，应恢复归属而不是报覆盖缺口；
+    /// 其余页面不得变更。
+    #[test]
+    #[ignore = "manual: set SYNCPDF_FIGURE_INVENTORY to the immutable inventory directory"]
+    fn deepseek_panel_boundary_recovery_on_real_inventory() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("SYNCPDF_FIGURE_INVENTORY").expect("SYNCPDF_FIGURE_INVENTORY"),
+        );
+        let mut pages: Vec<PageIR> =
+            serde_json::from_slice(&std::fs::read(root.join("source.json")).unwrap()).unwrap();
+        pages.sort_by_key(|ir| ir.page.0);
+        let mut recovered = Vec::new();
+        let mut touched = Vec::new();
+        let mut gaps = Vec::new();
+        for ir in &pages {
+            let name = format!("regions-{}.json", ir.page.0);
+            let cached: Vec<Region> =
+                serde_json::from_slice(&std::fs::read(root.join(&name)).unwrap()).unwrap();
+            // 缓存里的检测结果直接来自真实运行；这里只跑覆盖率阶段，不重跑模型。
+            let mut work = cached.clone();
+            let before_uncovered = uncovered_count(ir, &cached);
+            let report = apply_coverage_fallback(&mut work, ir, ir.page.0, 0.005);
+            assert_eq!(
+                work.iter().filter(|r| r.kind == RegionKind::Figure).count(),
+                cached
+                    .iter()
+                    .filter(|r| r.kind == RegionKind::Figure)
+                    .count(),
+                "第 {} 页：只改图框几何，不改区域数量",
+                ir.page.number()
+            );
+            let moved: Vec<u32> = cached
+                .iter()
+                .zip(&work)
+                .filter(|(a, b)| a.bbox != b.bbox)
+                .map(|(a, _)| a.index)
+                .collect();
+            if !moved.is_empty() {
+                touched.push((ir.page.number(), moved));
+            }
+            // 图内文字不得变成可译正文，也不得改变任何字形的可译归属。
+            let before = crate::stages::analyze_page(ir, &cached);
+            let after = crate::stages::analyze_page(ir, &work);
+            let translatable =
+                |ps: &[syncpdf_core::ir::Paragraph]| -> std::collections::BTreeSet<_> {
+                    ps.iter()
+                        .filter(|p| matches!(p.translatable, syncpdf_core::ir::Translatable::Yes))
+                        .flat_map(|p| p.glyphs.iter().copied())
+                        .collect()
+                };
+            assert_eq!(
+                translatable(&before),
+                translatable(&after),
+                "第 {} 页：可译字形集合不得变化（图内文字不进正文）",
+                ir.page.number()
+            );
+            assert_eq!(
+                before.len(),
+                after.len(),
+                "第 {} 页：段落数量不得变化",
+                ir.page.number()
+            );
+            if before_uncovered > 0 {
+                recovered.push((
+                    ir.page.number(),
+                    before_uncovered,
+                    uncovered_count(ir, &work),
+                ));
+                // 被恢复的字形必须落在 Figure 区域内（即保持保护），不是被当成正文收走。
+                for g in ir
+                    .glyphs()
+                    .filter(|g| !g.flags.invisible && !g.flags.outside_clip && !is_white_glyph(g))
+                {
+                    let center = g.bbox.center();
+                    let was_open = !cached.iter().any(|r| r.bbox.contains(center));
+                    let now_covered = work.iter().any(|r| r.bbox.contains(center));
+                    if was_open && now_covered {
+                        assert!(
+                            work.iter().any(|r| {
+                                r.kind == RegionKind::Figure && r.bbox.contains(center)
+                            }),
+                            "第 {} 页：恢复的图内文字必须归属 Figure，不得变成可译正文",
+                            ir.page.number()
+                        );
+                    }
+                }
+                if report.ratio > 0.005 {
+                    gaps.push(ir.page.number());
+                }
+            }
+        }
+        eprintln!("recovered={recovered:?} touched={touched:?} remaining_gaps={gaps:?}");
+        assert_eq!(
+            recovered,
+            vec![(35, 1, 1), (36, 33, 0), (50, 24, 0)],
+            "两处图内标题/图例应被唯一归属；第 35 页单个游离字形仍留在缺口统计里"
+        );
+        assert_eq!(
+            touched,
+            vec![(36, vec![0]), (50, vec![0])],
+            "只有 36/50 页的 Figure 框被扩，其余页面不得变更"
+        );
+        assert!(gaps.is_empty(), "恢复后不应再报覆盖缺口：{gaps:?}");
+    }
+
+    /// 任意真实 inventory 上的通用不变量：面版归属规则只可能把 Figure 框扩大，
+    /// 不新增/删除区域、不改可译段落、不制造新的未覆盖字形。
+    /// 用于在第二篇真实论文上证明本规则不会因图纸差异误扩。
+    #[test]
+    #[ignore = "manual: set SYNCPDF_FIGURE_INVENTORY to the immutable inventory directory"]
+    fn panel_recovery_invariants_on_any_real_inventory() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("SYNCPDF_FIGURE_INVENTORY").expect("SYNCPDF_FIGURE_INVENTORY"),
+        );
+        let pages: Vec<PageIR> =
+            serde_json::from_slice(&std::fs::read(root.join("source.json")).unwrap()).unwrap();
+        let mut expanded = Vec::new();
+        for ir in &pages {
+            let regions: Vec<Region> = serde_json::from_slice(
+                &std::fs::read(root.join(format!("regions-{}.json", ir.page.0))).unwrap(),
+            )
+            .unwrap();
+            // 只跑本规则，与既有 Caption/续行修复解耦，不把它们的旧行为算进来。
+            let mut work = regions.clone();
+            let changed = recover_form_panel_ink(&mut work, ir);
+            assert_eq!(
+                work.iter().map(|r| r.index).collect::<Vec<_>>(),
+                regions.iter().map(|r| r.index).collect::<Vec<_>>(),
+                "第 {} 页：不得新增/删除区域",
+                ir.page.number()
+            );
+            let before = crate::stages::analyze_page(ir, &regions);
+            let after = crate::stages::analyze_page(ir, &work);
+            assert_eq!(
+                before.len(),
+                after.len(),
+                "第 {} 页：段落数量不得变化",
+                ir.page.number()
+            );
+            let translatable = |ps: &[syncpdf_core::ir::Paragraph]| {
+                let mut ids: Vec<_> = ps
+                    .iter()
+                    .filter(|p| matches!(p.translatable, syncpdf_core::ir::Translatable::Yes))
+                    .flat_map(|p| p.glyphs.iter().copied())
+                    .collect();
+                ids.sort();
+                ids
+            };
+            assert_eq!(
+                translatable(&before),
+                translatable(&after),
+                "第 {} 页：可译字形集合不得变化",
+                ir.page.number()
+            );
+            assert!(
+                uncovered_count(ir, &work) <= uncovered_count(ir, &regions),
+                "第 {} 页：恢复不得制造新的未覆盖字形",
+                ir.page.number()
+            );
+            let mut count = 0;
+            for (old, new) in regions.iter().zip(&work) {
+                if old.bbox == new.bbox {
+                    continue;
+                }
+                assert_eq!(
+                    old.kind,
+                    RegionKind::Figure,
+                    "第 {} 页：只能改 Figure",
+                    ir.page.number()
+                );
+                assert!(
+                    new.bbox.x0 <= old.bbox.x0
+                        && new.bbox.y0 <= old.bbox.y0
+                        && new.bbox.x1 >= old.bbox.x1
+                        && new.bbox.y1 >= old.bbox.y1,
+                    "第 {} 页：Figure 框只可扩大，不可缩小或平移",
+                    ir.page.number()
+                );
+                count += 1;
+            }
+            assert_eq!(count, changed, "报告数应与实际改动一致");
+            if count > 0 {
+                expanded.push(ir.page.number());
+            }
+        }
+        eprintln!("expanded_figures_on_pages={expanded:?}");
+    }
+
+    /// 某页未被任何区域覆盖的非白字形数（与覆盖率门禁同口径）。
+    fn uncovered_count(ir: &PageIR, regions: &[Region]) -> u32 {
+        let boxes: Vec<Rect> = regions.iter().map(|r| r.bbox).collect();
+        let glyph_boxes: Vec<(Rect, bool)> = ir
+            .glyphs()
+            .filter(|g| !g.flags.invisible && !g.flags.outside_clip)
+            .map(|g| (g.bbox, is_white_glyph(g)))
+            .collect();
+        coverage(&glyph_boxes, &boxes).uncovered
     }
 
     #[test]

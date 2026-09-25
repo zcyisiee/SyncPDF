@@ -19,6 +19,9 @@ pub struct ShapedGlyph {
     pub x_advance: f32,
     pub x_offset: f32,
     pub y_offset: f32,
+    /// 合成斜体的水平剪切量（tan 值，正值 = 向右倾斜）。真斜体面与正体为 0。
+    #[serde(default)]
+    pub shear_x: f32,
 }
 
 /// 字体度量，以 1pt 字号为单位的比例（ascent 向上为正，descent 向下为正）。
@@ -45,6 +48,20 @@ pub struct StyleSpec {
     /// Explicit font override, used by backend edits after validation.
     #[serde(default)]
     pub font: Option<u32>,
+    /// Source-evidenced underline for this run. `None` means no redraw: the
+    /// style carries no attributed source line, so nothing is guessed.
+    #[serde(default)]
+    pub underline: Option<UnderlineStyle>,
+}
+
+/// Redraw parameters taken from the claimed source underline itself.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct UnderlineStyle {
+    /// Original `/w` line width in pt.
+    pub width: f32,
+    /// Distance below the text baseline, measured from the source glyphs' ink.
+    pub offset: f32,
+    pub color: syncpdf_core::Color,
 }
 
 /// 塑形器抽象：真实实现由字体 crate 适配（harfrust）。
@@ -52,6 +69,20 @@ pub trait Shaper {
     /// 塑形一段纯文本。`size` 为字号（pt）；`rtl` 提示段落方向。
     /// 返回按视觉顺序排列的字形（cluster 值为文本内字节偏移）。
     fn shape(&self, font: u32, text: &str, size: f32, rtl: bool) -> Vec<ShapedGlyph>;
+
+    /// 按样式塑形：与 [`Shaper::shape`] 相同，但允许实现按样式调整
+    /// （斜体 run 的变体感知回退与合成剪切量 `shear_x`）。
+    /// 默认实现与 [`Shaper::shape`] 等价（无剪切）。
+    fn shape_styled(
+        &self,
+        font: u32,
+        _style: &StyleSpec,
+        text: &str,
+        size: f32,
+        rtl: bool,
+    ) -> Vec<ShapedGlyph> {
+        self.shape(font, text, size, rtl)
+    }
 
     /// Actual unhinted ink bounds relative to baseline, in pt.
     /// None uses conservative global metrics. Whitespace can return an empty rect.
@@ -130,6 +161,7 @@ impl Shaper for MonoShaper {
                 x_advance: Self::em(c) * size,
                 x_offset: 0.0,
                 y_offset: 0.0,
+                shear_x: 0.0,
             });
         }
         out

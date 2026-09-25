@@ -621,6 +621,7 @@ pub(crate) mod tests {
             text_spans: Vec::new(),
             style_runs: vec![],
             atoms: vec![],
+            decorations: Vec::new(),
             text: chars.concat(),
             align: Align::Left,
             first_indent: 0.0,
@@ -641,6 +642,7 @@ pub(crate) mod tests {
             italic: false,
             serif: false,
             mono: false,
+            underline: false,
         }
     }
 

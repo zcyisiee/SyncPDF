@@ -113,6 +113,16 @@ fn duplicate(code: &str, dx: f32) -> Vec<u8> {
     )
     .into_bytes()
 }
+/// 与 `duplicate` 相同的双重绘制，但第二个 op 用 `[-250 (…)] TJ`：TJ 数字 n
+/// 使笔位移动 `-n/1000*size`（-250 → +4），所以 Tm x 需左移 4 才回到 20。
+fn duplicate_tj_shifted(code: &str, size: f32, pen_shift: f32) -> Vec<u8> {
+    format!(
+        "BT /F {size} Tf 1 0 0 1 20 40 Tm ({code_char}) Tj ET BT /F {size} Tf 1 0 0 1 {} 40 Tm [-250 ({code_char})] TJ ET",
+        20.0 - pen_shift,
+        code_char = char::from_u32(u32::from_str_radix(code, 16).unwrap()).unwrap(),
+    )
+    .into_bytes()
+}
 fn differences(name: &str) -> Object {
     Object::Dictionary(
         dictionary! {"Type" => "Encoding", "Differences" => vec![7.into(), Object::Name(name.as_bytes().to_vec()), Object::Name(b"five".to_vec())]},
@@ -175,6 +185,96 @@ fn duplicate_and_nearby_use_their_own_object_bounds() {
     }
 }
 
+/// 单串单码 `TJ`（含前置数字位移）/ `'` 与单码 `Tj` 字形身份等价，
+/// 同样应进入对象几何恢复，而不是按操作符字面挡在门外。
+#[test]
+fn single_string_single_code_tj_quote_forms_recover() {
+    // `[-250 (1)] TJ`：数字 -250 使笔位 +4（-250/1000*16），Tm x=16 才与
+    // 第一个对象的 '1' 同位（double-draw，pdfium 把字符归第一个对象）。
+    let shifted = duplicate_tj_shifted("31", 16.0, 4.0);
+    let (mut b, objects) = fixture(
+        "tj-leading-shift",
+        &shifted,
+        false,
+        "WinAnsiEncoding".into(),
+        None,
+        false,
+    );
+    assert_eq!(objects.len(), 2);
+    assert!(objects[1].chars.iter().all(|c| c.is_generated));
+    assert_eq!(b.stats.object_geometry_bound_ops, 1, "{:?}", b.issues);
+    assert_eq!(b.stats.matched, 1);
+    b.check_replacement().unwrap();
+    let e = &b.object_geometry_evidence()[0];
+    assert_eq!(e.object_index, 1);
+    assert_eq!(e.unicode, vec!['1']);
+    assert_eq!(
+        e.unicode_source,
+        ObjectUnicodeSource::Encoding("WinAnsiEncoding".into())
+    );
+    assert_eq!(e.byte_range, (0, 1));
+    let o = e.object_bounds.origin;
+    near(o.x, 20.0);
+    near(o.y, 40.0);
+    let glyphs: Vec<_> = b.ir.glyphs().collect();
+    assert_ne!(glyphs[0].id.op, glyphs[1].id.op);
+    // 撤销恢复计数后，门禁必须重新拒绝（统计等式不再成立）。
+    b.stats.object_geometry_bound_ops = 0;
+    b.stats.matched += 1;
+    assert!(b.check_replacement().is_err());
+
+    // `[<31>] TJ` + ToUnicode：位移数组无数字元素，字符串在数组下标 0。
+    let cm = cmap("1 beginbfchar <31> <0031> endbfchar");
+    let array = String::from_utf8(duplicate("31", 0.0))
+        .unwrap()
+        .replace("<31> Tj", "[<31>] TJ")
+        .into_bytes();
+    let (mut b, objects) = fixture(
+        "tj-tounicode",
+        &array,
+        false,
+        "WinAnsiEncoding".into(),
+        Some(&cm),
+        false,
+    );
+    assert!(objects[1].chars.iter().all(|c| c.is_generated));
+    assert_eq!(b.stats.object_geometry_bound_ops, 1, "{:?}", b.issues);
+    b.check_replacement().unwrap();
+    assert_eq!(b.object_geometry_evidence()[0].unicode, vec!['1']);
+    assert_eq!(
+        b.object_geometry_evidence()[0].unicode_source,
+        ObjectUnicodeSource::ToUnicode
+    );
+    let glyphs: Vec<_> = b.ir.glyphs().collect();
+    assert_eq!(glyphs[1].source.string_operand_range, (0, 1));
+    assert_eq!(glyphs[1].source.element_index, 0);
+    b.stats.object_geometry_bound_ops = 0;
+    b.stats.matched += 1;
+    assert!(b.check_replacement().is_err());
+
+    // `(1) '`：引号形式与 Tj 单码等价（同位重复绘制）。
+    // `'` = T* + Tj：先 0 TL 使行距为 0，`Td` 回到同一行，T* 不改变 y。
+    let quoted =
+        b"BT /F 16 Tf 0 TL 1 0 0 1 20 40 Tm (1) Tj ET BT /F 16 Tf 0 TL 1 0 0 1 20 40 Tm (1) ' ET"
+            .to_vec();
+    let (mut b, objects) = fixture(
+        "quote-next-line",
+        &quoted,
+        false,
+        "WinAnsiEncoding".into(),
+        None,
+        false,
+    );
+    assert_eq!(objects.len(), 2);
+    assert!(objects[1].chars.iter().all(|c| c.is_generated));
+    assert_eq!(b.stats.object_geometry_bound_ops, 1, "{:?}", b.issues);
+    b.check_replacement().unwrap();
+    assert_eq!(b.object_geometry_evidence()[0].unicode, vec!['1']);
+    b.stats.object_geometry_bound_ops = 0;
+    b.stats.matched += 1;
+    assert!(b.check_replacement().is_err());
+}
+
 #[test]
 fn type3_differences_and_tounicode_are_explicit_sources() {
     for (code, name) in [("07", "four"), ("08", "five")] {
@@ -222,9 +322,16 @@ fn type3_differences_and_tounicode_are_explicit_sources() {
     assert!(b.check_replacement().is_err());
 }
 
+/// 一个门禁用例：名称、是否 Type3、字体 Encoding、可选 CMap 流、内容流字节。
+type GateCase = (&'static str, bool, Object, Option<Vec<u8>>, Vec<u8>);
+
+/// O4：不可证明操作按「几何可取与否」分流——取得到几何的成为操作级不可删除
+/// 墨迹（门禁放行该页其余内容），取不到的仍按页级 fail-closed 拒绝。
 #[test]
-fn unknown_empty_conflicting_and_multicode_stay_closed() {
-    let cases = [
+fn unprovable_ops_split_into_page_closed_and_undeletable_ink() {
+    // 页级 fail-closed：pdfium 侧取不到可用的对象几何，无从记录墨迹。
+    let closed: [GateCase; 3] = [
+        // 差异表指向不存在的字形名 → 对象本身不可解码。
         (
             "unknown-name",
             true,
@@ -232,6 +339,32 @@ fn unknown_empty_conflicting_and_multicode_stay_closed() {
             None,
             duplicate("07", 0.0),
         ),
+        // Type3 CharProc 缺失 → 同上。
+        (
+            "missing-charproc",
+            true,
+            differences("six"),
+            None,
+            duplicate("07", 0.0),
+        ),
+        // 对象边界退化（零宽/零高）→ 墨迹矩形无意义。
+        (
+            "degenerate",
+            false,
+            "WinAnsiEncoding".into(),
+            None,
+            b"BT /F 16 Tf 0 0 0 0 20 40 Tm (A) Tj ET".to_vec(),
+        ),
+    ];
+    for (name, t3, enc, cm, text) in closed {
+        let (b, _) = fixture(name, &text, t3, enc, cm.as_deref(), false);
+        assert!(b.check_replacement().is_err(), "{name}: {:?}", b.stats);
+        assert!(b.object_geometry_evidence().is_empty(), "{name}");
+        assert!(b.unproven_source_ops().is_empty(), "{name}");
+    }
+
+    // 操作级：pdfium 对象边界可取 → 记为不可删除源墨迹，门禁不再拒绝整页。
+    let op_level = [
         (
             "unknown-encoding",
             false,
@@ -260,15 +393,38 @@ fn unknown_empty_conflicting_and_multicode_stay_closed() {
             Some(cmap("2 beginbfchar <41> <0041> <41> <0042> endbfchar")),
             duplicate("41", 0.0),
         ),
+        // 多串 TJ：结构条件（单字符串）不满足，不走恢复；对象 2 的字符
+        // 被同位的对象 1 抢走（double-draw），两个 code 全部 unbound → degraded。
         (
-            "tj-array",
+            "tj-multi-string",
             false,
             "WinAnsiEncoding".into(),
             None,
-            String::from_utf8(duplicate("41", 0.0))
-                .unwrap()
-                .replace("<41> Tj", "[<41>] TJ")
-                .into_bytes(),
+            b"BT /F 16 Tf 1 0 0 1 20 40 Tm (15) Tj ET BT /F 16 Tf 1 0 0 1 20 40 Tm [(1) -50 (5)] TJ ET".to_vec(),
+        ),
+        // 单串多码 TJ：codes==2，不满足单码结构条件 → degraded。
+        (
+            "tj-multi-code",
+            false,
+            "WinAnsiEncoding".into(),
+            None,
+            b"BT /F 16 Tf 1 0 0 1 20 40 Tm (15) Tj ET BT /F 16 Tf 1 0 0 1 20 40 Tm [<3135>] TJ ET".to_vec(),
+        ),
+        // 单串单码 TJ 但无编码证据：object_unicode 无名编码分支 → None → degraded。
+        (
+            "tj-no-encoding",
+            false,
+            Object::Null,
+            None,
+            b"BT /F 16 Tf 1 0 0 1 20 40 Tm (A) Tj ET BT /F 16 Tf 1 0 0 1 20 40 Tm [(A)] TJ ET".to_vec(),
+        ),
+        // 单串单码 TJ 但 ToUnicode 冲突（同 code 双映射）→ degraded。
+        (
+            "tj-conflict-unicode",
+            false,
+            "WinAnsiEncoding".into(),
+            Some(cmap("2 beginbfchar <41> <0041> <41> <0042> endbfchar")),
+            b"BT /F 16 Tf 1 0 0 1 20 40 Tm (A) Tj ET BT /F 16 Tf 1 0 0 1 20 40 Tm [(A)] TJ ET".to_vec(),
         ),
         (
             "no-encoding",
@@ -276,13 +432,6 @@ fn unknown_empty_conflicting_and_multicode_stay_closed() {
             Object::Null,
             None,
             duplicate("41", 0.0),
-        ),
-        (
-            "missing-charproc",
-            true,
-            differences("six"),
-            None,
-            duplicate("07", 0.0),
         ),
         (
             "conflicting-differences",
@@ -300,19 +449,57 @@ fn unknown_empty_conflicting_and_multicode_stay_closed() {
             None,
             duplicate("4142", 0.0),
         ),
-        (
-            "degenerate",
-            false,
-            "WinAnsiEncoding".into(),
-            None,
-            b"BT /F 16 Tf 0 0 0 0 20 40 Tm (A) Tj ET".to_vec(),
-        ),
     ];
-    for (name, t3, enc, cm, text) in cases {
+    for (name, t3, enc, cm, text) in op_level {
         let (b, _) = fixture(name, &text, t3, enc, cm.as_deref(), false);
-        assert!(b.check_replacement().is_err(), "{name}: {:?}", b.stats);
+        b.check_replacement()
+            .unwrap_or_else(|e| panic!("{name}: 操作级降级不应拒绝整页：{e}"));
         assert!(b.object_geometry_evidence().is_empty(), "{name}");
+        let ink = b.unproven_source_ops();
+        assert_eq!(
+            ink.len() as u32,
+            b.stats.degraded,
+            "{name}: 每个降级操作都应有墨迹记录：{:?}",
+            b.stats
+        );
+        assert!(
+            ink.iter()
+                .all(|u| u.ink.width() > 0.0 && u.ink.height() > 0.0),
+            "{name}: 墨迹几何非退化"
+        );
     }
+}
+
+/// 真实样本门禁探针：`TJ_RECOVERY_PDF` + `TJ_RECOVERY_PAGE`（1 基）。
+/// 打印该页 BindStats、issues 与 object_geometry_evidence，验证修复后
+/// 单串单码 TJ/'/" 能进入对象几何恢复。
+#[test]
+#[ignore = "manual real-sample probe; set TJ_RECOVERY_PDF and TJ_RECOVERY_PAGE"]
+fn tj_recovery_real_sample_gate() {
+    let path = std::env::var("TJ_RECOVERY_PDF").expect("TJ_RECOVERY_PDF");
+    let page: u32 = std::env::var("TJ_RECOVERY_PAGE")
+        .expect("TJ_RECOVERY_PAGE")
+        .parse()
+        .unwrap();
+    let worker = PdfiumWorker::spawn().unwrap();
+    let doc = worker.open(std::path::Path::new(&path)).unwrap();
+    let lo = Document::load(&path).unwrap();
+    let b = bind_page(&worker, doc, &lo, page).unwrap();
+    println!(
+        "pdf={:?} page={page} stats={:?} gate={:?}",
+        std::path::Path::new(&path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned()),
+        b.stats,
+        b.check_replacement()
+    );
+    for issue in &b.issues {
+        println!("issue: {issue}");
+    }
+    for e in b.object_geometry_evidence() {
+        println!("evidence: {e:?}");
+    }
+    worker.close(doc);
 }
 
 #[test]
@@ -399,6 +586,8 @@ fn type0_requires_complete_identity_h_source_code() {
     let cm = String::from_utf8(cmap("1 beginbfchar <0041> <0041> endbfchar"))
         .unwrap()
         .replace("<00> <FF>", "<0000> <FFFF>");
+    // accepted = 走对象几何绑定；otherwise 操作级降级（O4：记墨迹放行）或
+    // 页级拒绝（码不完整时 pdfium 解不出对象几何）。
     for (name, encoding, code, accepted) in [
         ("identity-h", "Identity-H", "0041", true),
         ("identity-v", "Identity-V", "0041", false),
@@ -417,9 +606,17 @@ fn type0_requires_complete_identity_h_source_code() {
             assert!(objects[1].chars.is_empty());
             assert_eq!(b.stats.object_geometry_bound_ops, 1);
             b.check_replacement().unwrap();
-        } else {
-            assert!(b.object_geometry_evidence().is_empty(), "{name}");
+        } else if name == "partial-identity-h" {
+            // 码不完整 → 无对象几何可记 → 页级 fail-closed。
             assert!(b.check_replacement().is_err(), "{name}: {:?}", b.stats);
+            assert!(b.unproven_source_ops().is_empty(), "{name}");
+        } else {
+            // Identity-V / 未知 CMap：不按对象几何绑定，但对象边界可取 →
+            // 操作级不可删除墨迹，门禁放行。
+            assert!(b.object_geometry_evidence().is_empty(), "{name}");
+            assert_eq!(b.unproven_source_ops().len(), 1, "{name}: {:?}", b.stats);
+            b.check_replacement()
+                .unwrap_or_else(|e| panic!("{name}: 操作级降级不应拒绝整页：{e}"));
         }
     }
 }

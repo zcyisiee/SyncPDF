@@ -1,8 +1,8 @@
 //! Deterministic same-page layout frames, allocated before streaming translation.
 //! Glyph identities define ownership; neighbors and retained drawing constrain space.
 use std::collections::{BTreeMap, BTreeSet};
-use syncpdf_core::ir::{DisplayItem, PageIR, Paragraph, Region, Translatable};
-use syncpdf_core::{GlyphId, ParagraphId, Rect};
+use syncpdf_core::ir::{Align, DisplayItem, PageIR, Paragraph, Region, RegionKind, Translatable};
+use syncpdf_core::{GlyphId, OpKey, ParagraphId, Rect};
 
 #[derive(Debug, Clone)]
 pub struct LayoutFrame {
@@ -10,6 +10,111 @@ pub struct LayoutFrame {
     pub first_baseline: f32,
     /// Visible source content outside this paragraph plus nontext paint.
     pub obstacles: Vec<Rect>,
+}
+
+/// Source text bounds locate a heading; the surrounding text column supplies its
+/// target measure. Only a page-centered document title may span the page's columns.
+fn heading_container(ir: &PageIR, regions: &[Region], para: &Paragraph) -> Option<Rect> {
+    if !matches!(para.kind, RegionKind::Title | RegionKind::ParagraphTitle) {
+        return None;
+    }
+    let body: Vec<_> = regions
+        .iter()
+        .filter(|r| {
+            r.page == ir.page
+                && matches!(r.kind, RegionKind::Text | RegionKind::Abstract)
+                && r.bbox.y1 <= para.bbox.y0
+        })
+        .collect();
+    let bounds = if para.kind == RegionKind::Title
+        && para.align == Align::Center
+        && (para.bbox.center().x - ir.crop_box.center().x).abs() < 2.0
+    {
+        body.iter().map(|r| r.bbox).reduce(|a, b| a.union(&b))
+    } else {
+        body.iter()
+            .filter(|r| (r.bbox.x0 - para.bbox.x0).abs() <= 4.0 && r.bbox.x1 >= para.bbox.x1)
+            .max_by(|a, b| a.bbox.y1.total_cmp(&b.bbox.y1))
+            .map(|r| r.bbox)
+    }
+    .or_else(|| super::source_toc::heading_measure(ir, regions, para))?;
+    Some(Rect::new(
+        bounds.x0.min(para.bbox.x0).max(ir.crop_box.x0),
+        para.bbox.y0,
+        bounds.x1.max(para.bbox.x1).min(ir.crop_box.x1),
+        para.bbox.y1,
+    ))
+}
+
+/// Retained source paint as layout obstacles for the text of `owners`, each
+/// paired with its paint op so a paragraph can set aside only the stroke it
+/// certainly owns. A fill painted beneath an owner's own text is that text's
+/// backdrop (figure background, shaded panel): its interior is where the text
+/// lives, so only its outline bounds the layout, and an edge the source text
+/// already crosses bounds nothing.
+pub(crate) fn paint(ir: &PageIR, owners: &[&Paragraph]) -> Vec<(Rect, Option<OpKey>)> {
+    let own: BTreeSet<GlyphId> = owners
+        .iter()
+        .flat_map(|p| p.glyphs.iter().copied())
+        .collect();
+    // Owned visible glyph boxes with the index of the item that paints them.
+    let text: Vec<(usize, Rect)> = ir
+        .items
+        .iter()
+        .enumerate()
+        .flat_map(|(i, item)| {
+            match item {
+                DisplayItem::Text { glyphs } => glyphs.as_slice(),
+                _ => &[],
+            }
+            .iter()
+            .filter(|g| {
+                own.contains(&g.id)
+                    && !g.flags.invisible
+                    && !g.flags.outside_clip
+                    && (g.unicode.is_empty() || g.unicode.iter().any(|c| !c.is_whitespace()))
+            })
+            .map(move |g| (i, g.bbox))
+        })
+        .collect();
+    let mut out = Vec::new();
+    for (i, item) in ir.items.iter().enumerate() {
+        match item {
+            DisplayItem::Image { bbox } | DisplayItem::InlineImage { bbox } => {
+                out.push((*bbox, None))
+            }
+            DisplayItem::Path {
+                bbox: b,
+                is_fill,
+                is_stroke,
+                stroke,
+            } if *is_fill || *is_stroke => {
+                if *is_fill && text.iter().any(|(j, g)| *j > i && b.contains(g.center())) {
+                    let edges = [
+                        Rect::new(b.x0, b.y0 - 0.5, b.x1, b.y0),
+                        Rect::new(b.x0, b.y1, b.x1, b.y1 + 0.5),
+                        Rect::new(b.x0 - 0.5, b.y0, b.x0, b.y1),
+                        Rect::new(b.x1, b.y0, b.x1 + 0.5, b.y1),
+                    ];
+                    out.extend(
+                        edges
+                            .into_iter()
+                            .filter(|e| !text.iter().any(|(_, g)| e.intersects(g)))
+                            .map(|e| (e, None)),
+                    );
+                    continue;
+                }
+                // A stroked rule can have zero geometric height/width.
+                let pad = if *is_stroke { 0.5 } else { 0.0 };
+                out.push((
+                    Rect::new(b.x0 - pad, b.y0 - pad, b.x1 + pad, b.y1 + pad),
+                    stroke.map(|s| s.op),
+                ));
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Allocate disjoint neighboring text frames using midpoints of measured blank gaps.
@@ -22,28 +127,6 @@ pub fn page_frames(
     let glyphs: Vec<_> = ir
         .glyphs()
         .filter(|g| !g.flags.invisible && !g.flags.outside_clip)
-        .collect();
-    let paint: Vec<Rect> = ir
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            DisplayItem::Image { bbox } | DisplayItem::InlineImage { bbox } => Some(*bbox),
-            DisplayItem::Path {
-                bbox,
-                is_fill,
-                is_stroke,
-            } if *is_fill || *is_stroke => {
-                // A stroked rule can have zero geometric height/width.
-                let pad = if *is_stroke { 0.5 } else { 0.0 };
-                Some(Rect::new(
-                    bbox.x0 - pad,
-                    bbox.y0 - pad,
-                    bbox.x1 + pad,
-                    bbox.y1 + pad,
-                ))
-            }
-            _ => None,
-        })
         .collect();
     let mut out = BTreeMap::new();
     for para in paras
@@ -82,6 +165,15 @@ pub fn page_frames(
         }
         .max(ir.crop_box.x0);
         bbox.x1 = bbox.x1.min(ir.crop_box.x1);
+        let container = heading_container(ir, regions, para);
+        if let Some(container) = container {
+            if para.align == Align::Center {
+                bbox.x0 = container.x0;
+            }
+            bbox.x1 = container.x1;
+        }
+        let own_ops: BTreeSet<OpKey> = super::source_decoration::owned_ops(para).collect();
+        let paint = paint(ir, &[para]);
         let obstacles: Vec<Rect> = glyphs
             .iter()
             .filter(|g| {
@@ -89,22 +181,31 @@ pub fn page_frames(
                     && (g.unicode.is_empty() || g.unicode.iter().any(|c| !c.is_whitespace()))
             })
             .map(|g| g.bbox)
-            .chain(paint.iter().copied().filter(|b| {
-                !para.atoms.iter().filter_map(|a| a.source).any(|s| {
-                    s.bbox.x0 <= b.x0 && b.x1 <= s.bbox.x1 && s.bbox.y0 <= b.y0 && b.y1 <= s.bbox.y1
-                })
-            }))
+            .chain(
+                paint
+                    .iter()
+                    .filter(|(b, op)| {
+                        !op.is_some_and(|o| own_ops.contains(&o))
+                            && !para.atoms.iter().filter_map(|a| a.source).any(|s| {
+                                s.bbox.x0 <= b.x0
+                                    && b.x1 <= s.bbox.x1
+                                    && s.bbox.y0 <= b.y0
+                                    && b.y1 <= s.bbox.y1
+                            })
+                    })
+                    .map(|(b, _)| *b),
+            )
             .collect();
         // A neighboring column can start on a different row. Horizontal ownership
         // therefore cannot depend on overlap with this paragraph's source y range.
         // This conservative bound spends only the blank gap between source extents.
         for other in &obstacles {
-            if para.kind == syncpdf_core::ir::RegionKind::Caption
-                && para.align == syncpdf_core::ir::Align::Center
+            if (container.is_some()
+                || (para.kind == RegionKind::Caption && para.align == Align::Center))
                 && (other.y1 <= source.y0 || other.y0 >= source.y1)
             {
-                // The detected panel proves horizontal ownership. Its table cells
-                // and plot labels on other rows do not constrain caption width.
+                // A detected text column or panel supplies horizontal ownership.
+                // Glyphs on its other rows do not narrow the heading/caption.
                 continue;
             }
             if other.x1 <= source.x0 {
@@ -176,6 +277,7 @@ mod tests {
             size: 10.0,
             matrix: Matrix::new(1.0, 0.0, 0.0, 1.0, bbox.x0, baseline),
             bbox,
+            ink: None,
             advance: bbox.width(),
             fill: Color::BLACK,
             render_mode: 0,
@@ -203,6 +305,7 @@ mod tests {
             text_spans: vec![],
             style_runs: vec![],
             atoms: vec![],
+            decorations: Vec::new(),
             text: "x".into(),
             align: Align::Left,
             first_indent: 0.0,
@@ -232,6 +335,56 @@ mod tests {
         assert_eq!(frames[&paras[0].id].first_baseline, 123.5);
     }
     #[test]
+    fn fill_beneath_own_text_is_a_backdrop_bounded_only_by_uncrossed_edges() {
+        let fill = |bbox| DisplayItem::Path {
+            bbox,
+            is_fill: true,
+            is_stroke: false,
+            stroke: None,
+        };
+        // A figure background under its caption, then a neighbor outside it.
+        let caption = glyph(0, Rect::new(20.0, 110.0, 80.0, 120.0), 112.0);
+        let below = glyph(1, Rect::new(20.0, 60.0, 80.0, 70.0), 62.0);
+        let backdrop = Rect::new(10.0, 100.0, 190.0, 180.0);
+        let paras = [paragraph(&caption), paragraph(&below)];
+        let mut ir = page(vec![caption.clone(), below.clone()]);
+        ir.items.insert(0, fill(backdrop));
+        let frames = page_frames(&ir, &[], &paras);
+        let line = |bbox| LineBox {
+            bbox,
+            baseline_y: 112.0,
+            glyphs: vec![],
+            kept_atoms: vec![],
+            placed_atoms: Vec::new(),
+            underlines: Vec::new(),
+        };
+        let own = &frames[&paras[0].id];
+        assert!(!collides(
+            own,
+            &[line(Rect::new(20.0, 101.0, 180.0, 130.0))]
+        ));
+        assert!(collides(own, &[line(Rect::new(20.0, 95.0, 80.0, 105.0))]));
+        // For text that is not drawn on it, the same fill is solid paint.
+        assert!(frames[&paras[1].id].bbox.y1 <= 85.0);
+        assert!(paint(&ir, &[&paras[1]]).contains(&(backdrop, None)));
+
+        // A shaded panel whose source text already crosses its left edge.
+        let crossing = glyph(2, Rect::new(45.0, 110.0, 65.0, 120.0), 112.0);
+        let panel = Rect::new(50.0, 100.0, 150.0, 180.0);
+        let para = paragraph(&crossing);
+        let mut ir = page(vec![crossing]);
+        ir.items.insert(0, fill(panel));
+        let edges = paint(&ir, &[&para]);
+        assert_eq!(edges.len(), 3);
+        assert!(edges.iter().all(|(e, _)| !e.intersects(&para.bbox)));
+        assert!(edges.iter().all(|(e, _)| !e.intersects(&panel)));
+
+        // Paint laid over the text afterwards covers it: still an obstacle.
+        let mut ir = page(vec![glyph(2, Rect::new(45.0, 110.0, 65.0, 120.0), 112.0)]);
+        ir.items.push(fill(panel));
+        assert_eq!(paint(&ir, &[&para]), [(panel, None)]);
+    }
+    #[test]
     fn wide_model_region_cannot_invade_neighbor_column_or_retained_paint() {
         let a = glyph(0, Rect::new(20.0, 120.0, 80.0, 130.0), 123.5);
         let b = glyph(1, Rect::new(120.0, 120.0, 180.0, 130.0), 123.5);
@@ -244,6 +397,7 @@ mod tests {
             bbox: Rect::new(10.0, 150.0, 90.0, 150.0),
             is_fill: false,
             is_stroke: true,
+            stroke: None,
         });
         let regions = [Region {
             page: PageId(0),
@@ -264,10 +418,124 @@ mod tests {
             glyphs: vec![],
             kept_atoms: vec![],
             placed_atoms: Vec::new(),
+            underlines: Vec::new(),
         };
         assert!(collides(f, &[line(Rect::new(20.0, 99.0, 30.0, 115.0))]));
         assert!(!collides(f, &[line(Rect::new(20.0, 120.0, 80.0, 130.0))]));
     }
+    #[test]
+    fn title_uses_body_container_and_reflows_at_requested_size() {
+        let a = glyph(0, Rect::new(80.0, 160.0, 120.0, 170.0), 163.5);
+        let mut para = paragraph(&a);
+        para.kind = RegionKind::Title;
+        para.align = Align::Center;
+        let ir = page(vec![a]);
+        let regions = [
+            region(1, RegionKind::Text, Rect::new(20.0, 20.0, 90.0, 100.0)),
+            region(2, RegionKind::Text, Rect::new(110.0, 20.0, 180.0, 100.0)),
+        ];
+        let frames = page_frames(&ir, &regions, std::slice::from_ref(&para));
+        let frame = &frames[&para.id];
+        assert_eq!((frame.bbox.x0, frame.bbox.x1), (20.0, 180.0));
+        assert_eq!(frame.first_baseline, 163.5);
+        assert_eq!(para.bbox, Rect::new(80.0, 160.0, 120.0, 170.0));
+        for (count, font_scale, one_line) in [(10, 1.0, true), (35, 1.0, false), (10, 2.0, false)] {
+            let parsed = syncpdf_translate::parse_unit_html(&format!(
+                "<p id=\"{}\">{}</p>",
+                para.id,
+                "中".repeat(count)
+            ))
+            .unwrap();
+            let result = crate::stages::typeset::typeset_with_typography(
+                &syncpdf_typeset::shaper::MonoShaper,
+                &para,
+                &parsed,
+                &syncpdf_typeset::Obstacles::default(),
+                Some(frame),
+                crate::stages::typeset::Typography::new(font_scale, Some(1.3)).unwrap(),
+            );
+            assert!(!result.paragraph.overflow);
+            assert_eq!(result.scale, 1.0);
+            assert_eq!(result.paragraph.lines.len() == 1, one_line);
+            for line in &result.paragraph.lines {
+                assert!(line.bbox.x0 >= 19.99 && line.bbox.x1 <= 180.01);
+                assert!((line.bbox.center().x - 100.0).abs() < 0.01);
+                assert!(line
+                    .glyphs
+                    .iter()
+                    .all(|g| g.size
+                        == crate::stages::typeset::dominant_font_size(&para) * font_scale));
+            }
+        }
+        let fallback = page_frames(&ir, &[], std::slice::from_ref(&para));
+        assert_eq!(fallback[&para.id].bbox.width(), 40.0);
+    }
+
+    fn region(index: u32, kind: RegionKind, bbox: Rect) -> Region {
+        Region {
+            page: PageId(0),
+            index,
+            kind,
+            bbox,
+            score: 1.0,
+            order: index,
+        }
+    }
+
+    #[test]
+    fn section_heading_stays_in_column_and_respects_retained_neighbor() {
+        let a = glyph(0, Rect::new(20.0, 150.0, 50.0, 160.0), 153.5);
+        let b = glyph(1, Rect::new(110.0, 100.0, 180.0, 110.0), 103.5);
+        let mut para = paragraph(&a);
+        para.kind = RegionKind::ParagraphTitle;
+        let mut ir = page(vec![a, b]);
+        let regions = [
+            region(2, RegionKind::Text, Rect::new(20.0, 80.0, 90.0, 140.0)),
+            region(3, RegionKind::Text, Rect::new(110.0, 80.0, 180.0, 110.0)),
+        ];
+        let frames = page_frames(&ir, &regions, std::slice::from_ref(&para));
+        assert_eq!(
+            (frames[&para.id].bbox.x0, frames[&para.id].bbox.x1),
+            (20.0, 90.0)
+        );
+        ir.items.push(DisplayItem::Image {
+            bbox: Rect::new(70.0, 150.0, 100.0, 170.0),
+        });
+        let frames = page_frames(&ir, &regions, std::slice::from_ref(&para));
+        assert_eq!(frames[&para.id].bbox.x1, 60.0);
+    }
+
+    #[test]
+    fn toc_heading_uses_blank_label_measure_without_claiming_the_page_number() {
+        let a = glyph(0, Rect::new(20., 120., 60., 130.), 123.);
+        let mut page_number = glyph(1, Rect::new(180., 120., 190., 130.), 123.);
+        page_number.unicode = vec!['9'].into();
+        let other_row = glyph(2, Rect::new(65., 90., 160., 100.), 93.);
+        let mut p = paragraph(&a);
+        p.kind = RegionKind::ParagraphTitle;
+        let ir = page(vec![a, page_number, other_row]);
+        let mut regions = vec![
+            region(
+                0,
+                RegionKind::ParagraphTitle,
+                Rect::new(20., 120., 180., 130.),
+            ),
+            region(1, RegionKind::Other, Rect::new(180., 120., 190., 130.)),
+        ];
+        let frames = page_frames(&ir, &regions, std::slice::from_ref(&p));
+        // Nearby indented rows no longer cap the heading to 42.5 pt. The protected
+        // page column still limits the expanded measure to half the blank gap.
+        assert_eq!(frames[&p.id].bbox.x1, 120.);
+        assert_eq!(p.bbox.x1, 60.);
+        regions[1].kind = RegionKind::Text;
+        assert_eq!(
+            page_frames(&ir, &regions, std::slice::from_ref(&p))[&p.id]
+                .bbox
+                .x1,
+            62.5
+        );
+    }
+
     #[test]
     fn missing_source_baseline_never_invents_a_frame() {
         let a = glyph(0, Rect::new(20.0, 120.0, 80.0, 130.0), f32::NAN);

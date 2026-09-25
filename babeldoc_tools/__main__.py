@@ -444,16 +444,35 @@ def _build_parser() -> argparse.ArgumentParser:
     p_model.add_argument("--model-profile", required=True)
     p_run.add_argument("--skip-ai-review", action="store_true", help="Skip optional AI review; keep local checks")
 
-    p_rust = sub.add_parser("rust-translate", help="用 Rust 后端和 pi 翻译 PDF")
+    p_rust = sub.add_parser("rust-translate", help="用 Rust 后端和 pi/agy 翻译 PDF")
     p_rust.add_argument("pdf", help="源 PDF 路径")
     p_rust.add_argument("--workdir", required=True, help="本次运行的全新产物目录")
     p_rust.add_argument("--pages", help="页子集，如 1-3 或 1,3,5")
-    p_rust.add_argument("--model", default="deepseek/deepseek-flash")
-    p_rust.add_argument("--thinking", default="low")
+    p_rust.add_argument(
+        "--translator",
+        choices=("pi", "agy"),
+        default="pi",
+        help="翻译通道：pi（默认）或 agy（gemini，print + stream-json）",
+    )
+    p_rust.add_argument(
+        "--model",
+        default=None,
+        help="模型名；缺省按通道选（pi=deepseek/deepseek-flash，agy=gemini-3.8-flash-low）",
+    )
+    p_rust.add_argument("--thinking", default=None, help="pi 的思考档位；agy 不支持（模型名自带档位）")
     p_rust.add_argument("--source-lang", default="auto")
     p_rust.add_argument("--target-lang", default="zh-CN")
     p_rust.add_argument("--layout-device", choices=("auto", "cpu", "coreml"), default="auto")
     p_rust.add_argument("--cached-from", help="仅重编译已有运行目录的译文缓存，不调用模型")
+    p_rust.add_argument(
+        "--glossaries",
+        default=None,
+        help=(
+            "术语表 CSV 路径（列 source,target[,note]，note 暂不支持）："
+            "规范化后经内部 sidecar 注入主/补救提示词并隔离翻译缓存。缺省 = 不用词表"
+        ),
+    )
+    p_rust.add_argument("--dual", action="store_true", help="额外导出 A3 横向 dual.pdf，左原文、右译文")
     p_rust.add_argument("--font-scale", type=float, default=1.0, help="译文字号相对源字号的倍数，默认1；保持样式层级")
     p_rust.add_argument("--line-height", type=float, help="行距/译文段落字号的倍数，如1.3（不是pt）；默认保留源比例")
     p_rust.add_argument("--engine", help="syncpdf-cli 可执行文件；默认本仓库 release 构建")
@@ -524,13 +543,16 @@ def _dispatch(args: argparse.Namespace) -> dict:
             pages=args.pages,
             model=args.model,
             thinking=args.thinking,
+            translator=args.translator,
             source_lang=args.source_lang,
             target_lang=args.target_lang,
             layout_device=args.layout_device,
             engine=args.engine,
             cached_from=args.cached_from,
+            dual=args.dual,
             font_scale=args.font_scale,
             line_height=args.line_height,
+            glossaries=args.glossaries,
         )
     if command == "parse":
         return _invoke_with_debug(

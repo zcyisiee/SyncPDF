@@ -155,3 +155,173 @@ source tmp/backend-repair/codex-r1-integration/env.sh
 相关core/pdf/typeset/translate/pipeline共528项通过、0失败、8 ignored；随后协议补译改动重新跑translate：115通过、0失败、2 ignored。包含公式原字号/行间碰撞、源字形唯一归属、图片嵌套Form不重复提取、公式引用点击框、流式坏块补译及截断失败等守卫。CLI/单入口36 pytest通过。五crate全target严格Clippy、release构建、fmt、Ruff、diff-check通过。未额外运行全workspace或未改动的前端测试。
 
 日志：`tmp/backend-repair/inline-{tests,protocol-tests,pytest,clippy,build5,docs}.log`。严格文档构建仍有既存HTTP参考的中文锚点警告，不能记为通过。实现边界见[后端参考](../../reference/rust-pdf-backend.md)，经验见[源公式归属](../../lessons/pdf-binding-and-render-evidence.md#inline-formula-ownership)。
+
+
+<a id="caption-line-breaks"></a>
+
+## 表18/19中英混排断行修复（2026-09-23）
+
+用户复核指出表18/19说明段断行不自然。最终产物更新为 `tmp/backend-repair/caption-break-v3/translated.pdf`；先前inline-full-v5仍作为覆盖修复基线保留。
+
+**原因已用原缓存和实际行框证实：** P20-001/017译文没有换行/br。断行器对没有可伸缩glue的英文片段给了过低的ragged代价，使其主动选择能继续放字却提前换行的方案。表18识别为Caption/Left，但选断点仍用justify代价；表19识别为Text并按justify绘制，同样受短行兜底影响。末行未计入ragged余量代价又让表18留下“击。”孤行。
+
+修复：按实际对齐选择评分，左/中/右对齐考虑包含末行的自然宽度余量；无glue短行只在后续合法断点无法容纳时兜底。自动断行避免单个CJK字加标点成为末行，显式硬换行保持。新断行暴露P14-118右侧墨迹越界0.031pt；在整行实际墨迹可容纳时利用左侧空隙平移纠正，字号/行距/碰撞容差不改。
+
+| 实测 | 表18 | 表19 |
+|---|---|---|
+| 说明段行数 | 9 → 8 | 7 → 6 |
+| 最短中间行占栏宽 | 40.9% → 78.0% | 14.3% → 97.8% |
+| 原异常 | 数据集列表多次提前断行，末行“击。” | “CIFAR10、”独占一行 |
+
+v1复排为192/1（上述侧承问题），v2恢复193/0但末行仍仅“攻击。”，v3将ragged末行余量纳入评分后收尾均匀。失败及中间样张保留。新增孤字测试最初写死“戊己。”，均衡末行后实际为“丁戊己。”；改为验证至少保留两字而不限定唯一断点，另保留显式硬换行允许“己。”的断言。
+
+最终21页、193写入/0回退/0源冲突/0覆盖缺口，28.095秒，exit0；193缓存命中，0模型请求。193块target HTML与旧样张完全相同，保存PDF的非空白字符多重集相同。94公式/53,384参考墨迹像素缺失0，36,327保留字符变化0，第3页图片像素相同；319链接目标/点击标签、28书签、180命名目标保留，qpdf通过。
+
+排版+pipeline单元/集成234通过、0失败、5 ignored；最后加入末行余量评分后typeset重新65通过。严格Clippy、fmt、release、diff-check通过；未重跑未改动Python/UI测试。严格文档构建仍仅有既存HTTP参考锚点警告。
+
+证据：`caption-break-v3/{audit.json,caption-comparison.json,captions.png,page-20.png,result.json,events.jsonl,qpdf.log}`；脚本 `caption-break-audit/compare.py` 与 `inline-audit.py`；日志 `caption-break-{final-tests,balanced-tests2,final-clippy,build3}.log`，均位于仓库tmp/backend-repair。经验见[断行代价](../../lessons/pdf-binding-and-render-evidence.md#mixed-script-break-cost)。
+
+
+<a id="heading-adaptive-layout"></a>
+
+## 标题语义合段与自适应行宽（2026-09-23）
+
+用户要求提交上一轮更新，并解决短标题被迫换行。前轮断行代码/文档已提交6245d0f5和8dbb6836；本轮最新样张为 `tmp/backend-repair/title-adapt-v2/translated.pdf`。
+
+### 原因与实现
+
+首页源标题在同一个Title区域内，却因短续行“Merging”左缘右移约206pt而触发正文首行缩进规则，被拆成两个翻译单元。第一块已有479.8pt宽，扩大bbox无法将两个独立译文合回完整标题。附录A和A.2也因编号后悬挂缩进拆段，分别留下孤立的“Succeeds”和“adapted to merging”。
+
+同标题区先核对字号和行距；共用中心轴的居中续行，或与编号后正文起点对齐且没有新编号的悬挂续行，合为完整语义单元。居中标题根据行中心识别对齐并取消错误首行缩进。源bbox、字形身份及删除依据保持独立；目标Frame在有下方Text/Abstract证据时取页/栏宽度。主标题可使用页正文整体宽度，章节标题只使用左缘匹配的邻近正文栏；同排文字/图片和垂直/实际墨迹碰撞继续限制空间，无证据时使用原规则。没有自动缩字号或放松碰撞容差。
+
+| 标题 | 原翻译单元 | 新翻译单元 / 实际行数 | 目标宽度 |
+|---|---|---|---|
+| 首页完整标题 | 2块 | 1块 / 1行 | 510.8pt |
+| 附录A | 2块 | 1块 / 2行 | 242.2pt |
+| 附录A.2 | 2块 | 1块 / 1行 | 234.1pt |
+
+附录A真实译文较长，两个输出行的墨迹宽度之和约258pt，超过242.2pt栏宽，因此正常重排为两行。最初审计脚本将三处都断言为一行，实测失败后纠正了该错误验收预期，没有修改译文或缩字强行通过。三处初始基线及请求字号不变；短译文、长译文和增大字号的单元测试同时保留。
+
+### 实跑与保存后验收
+
+v1先修首页：21页192/0、179缓存+13真实补译，1主请求/0补救、60.823秒，保护/公式/链接/qpdf通过。随后逐标题审查发现附录两处误切；v2再次真实补译，最终21页190/0、176缓存+14真实补译，1主请求/0补救、56.255秒。两次均只读备份上次真实缓存，未修改缓存行或ID；新源单元未命中时实际请求模型。来源分别保存于运行目录的`cache-provenance.json`。
+
+- 190块全部写入，0回退、0送译前冲突、0覆盖缺口，576策略保留实体；RunFinished=true、bdt exit0。
+- 与前轮193块相比，3对标题各合成1块；66,916个参与翻译的源字形身份/数量完全相同且各归属一次，减少块数不代表漏译。
+- 重新翻译涉及第1/14/15页；其余18页156块target HTML和保存PDF非空白字符多重集均与前轮一致。
+- 94处源公式、53,384参考墨迹像素缺失0；36,327保护字符位置/字号/颜色变化0；第3页图片像素相同。
+- 319链接目标/标签、28书签、180命名目标保留；314点击框移动且标签正确。qpdf通过，无KEEP残留。匿名样本的作者保护仍由已有前置信息行为测试覆盖。
+- 主控目视首页及附录A/A.2截图；保留源段落锚定仍可能形成留白，不宣称整页重新流式排版或任意文档认证。
+
+最终PDF SHA-256：`eca2839a19847df8585a2e4b115820f76cc22382ffc79bbb10747c05da33ca98`。
+
+pipeline单元/集成167通过、0失败、4 ignored；最后加强新编号不误合断言后专项1通过。另运行真实缓存inventory审计1项通过。严格Clippy、fmt、release、diff-check通过；未重跑未修改的Python/UI。严格文档构建仍有既存HTTP参考中文锚点警告，不计为通过。
+
+证据：`title-adapt-v2/{audit.json,title-comparison.json,title-p*-before.png,title-p*-after.png,result.json,events.jsonl,qpdf.log}`；脚本`title-adapt-audit/compare.py`和`inline-audit.py`；新inventory在`title-adapt-audit-v2/atom-inventory.json`；日志`title-adapt-{tests2,hanging-test,clippy2,build2,inventory2,comparison,audit2,docs}.log`，均位于仓库tmp/backend-repair。经验见[标题语义与容器](../../lessons/pdf-binding-and-render-evidence.md#heading-semantic-container)。
+
+
+<a id="a3-dual-export"></a>
+
+## A3横向双语导出（2026-09-23）
+
+用户要求可选导出每页A3、左原文右译文。新增`bdt rust-translate --dual`，仍从唯一bdt入口调用Rust；输出额外`dual.pdf`并保留`translated.pdf`。不传选项时行为不变。内部为RunConfig可选导出路径及publishing阶段，未扩展UI或尚未实现的编辑/Export协议。
+
+### 实现和边界
+
+- `syncpdf-pdf::dual`将两份PDF同页各封装为Form，保留文字/字体/图片/透明度Group；先重编号再合并资源，不截图。源文件和单语文件均只读。
+- A3固定420×297mm；每页可见CropBox与继承MediaBox/Resources、0/90/180/270度旋转共同决定等比适配，左右半页分别居中。这是整页展示缩放，不改翻译段落字号或重新断行。
+- 链接Rect/QuadPoints与目的地分别按所在页和目标页的矩阵变换。右侧同名目标先解析成显式目标，左侧目录和命名目标保留，URI不变。Fit系列按半页视区或变换后的锚点处理。
+- 保存使用临时文件+rename；页数不一致、无效几何、内容流解码失败等明确报错。双语PDF自检通过后才发`dual_exported`和完成事件；桥接对请求产物缺失另报`dual_output_missing`。部分翻译仍保留非零退出语义。
+- `--pages`限定翻译页，导出一一配对完整单语文件，未选页右侧仍为原文。普通论文内容和链接已验证；任意表单/交互批注外观/标签阅读树未认证。
+
+### 用户样本验证
+
+最终：`tmp/backend-repair/dual-v2/dual.pdf`。使用CCS 3764和title-adapt-v2真实译文缓存，190缓存命中，0模型/补救请求；31.510秒，21页190块全部写入，0回退/送译前冲突/覆盖缺口，exit0。v1首轮真实导出同样通过；补充发布阶段自检及严格流解码后，v2再次从产品命令完整验证，两次dual文件SHA-256完全相同。
+
+| 保存后检查 | 结果 |
+|---|---|
+| 页面 | 21页，每页420×297mm A3横向，原文左/译文右 |
+| 可选择文字 | 左101,080、右61,110个非空白字符；每页每侧分别与原PDF/单语PDF的字符多重集相同 |
+| 链接 | 638个；两侧各319个，全部点击框、目标页及变换后目的地坐标/URI一致 |
+| 导航 | 原28书签、180命名目标保留，命名目标页/坐标正确 |
+| PDF结构 | qpdf通过；生产保存后自检通过 |
+| 目视 | 首页、第2页公式、第20页表18/19左右配对正确，文字清晰、公式与图表可见 |
+
+审计最初直接比较了命名/显式链接的kind与坐标，因右侧命名链接转换为显式链接而失败。两者可能使用不同的坐标口径，已统一到页面坐标再检查实际目标；没有因此修改目标或放宽坐标阈值。
+
+PDF SHA-256：`d932f9b2b0cd3028d5165e3435658daa0ff0c0f38ae0465fa954254d8f52a576`。证据：`dual-v2/{dual-audit.json,dual-page-*.png,qpdf-dual.log,events.jsonl,result.json}`；审计脚本`dual-audit/check.py`，均位于tmp/backend-repair。
+
+### 工程验证
+
+相关pdf+pipeline共281通过、0失败、4ignored；随后新增发布自检门禁专项1通过，严格流读取后dual专项2通过。测试覆盖四种旋转、继承裁剪框/资源、矢量文本配对、命名内部链接及URI、页数不匹配、输出覆盖保护。CLI/单入口39 pytest通过，包括默认不开启、显式转发并报告两份产物、缺双语文件不能假成功和既有产物不覆盖。严格Clippy、fmt、Ruff、release、diff-check通过。未运行未修改的UI或全workspace。
+
+严格文档构建仍有既存HTTP参考中文锚点警告，不计通过。日志`dual-{related-tests,publish-test,tests-final,pytest,ruff,clippy-final,build-final,docs}.log`在tmp/backend-repair。经验见[拼页导航几何](../../lessons/pdf-binding-and-render-evidence.md#dual-page-geometry)。
+
+
+<a id="typography-local-float"></a>
+
+## 原字号、1.5倍行距与局部浮动空间（2026-09-23）
+
+用户认为行距过紧，要求至少1.5倍，并追问浮动bbox是否能使原字号容纳。先用同一份title-adapt-v2真实缓存试排，无模型调用，未改默认参数：
+
+| 参数 / 实现 | 写入 / 回退 | 未完成块 |
+|---|---|---|
+| 0.9字号 / 1.3行距，历史dual-v2 | 190 / 0 | 无 |
+| 0.9字号 / 1.5行距，原实现 | 190 / 0 | 无 |
+| 0.95字号 / 1.5行距，原实现 | 189 / 1 | P09-017，图4说明 |
+| 1.0字号 / 1.5行距，原实现 | 188 / 2 | P09-017及P14-114附录标题 |
+| **1.0字号 / 1.5行距，修复后v3** | **190 / 0** | **无** |
+
+正文常用字号由0.9档的约8.07pt恢复为约8.97pt；1.5倍行距按目标主字号计算基线间距，公式仍原尺寸，必要处额外避让。`typography-comparison`保留修复前的三档摘要对照；不是新版验收图。
+
+### 根因和修复
+
+旧Python后端具有同栏/跨栏浮动及条件跨页搬移；此前Rust仅尝试同栏垂直回收，并固定已排成功段的位置。不能将旧后端能力当作Rust已实现功能，也不能凭两块回退直接认定需缩字号。
+
+1. **图4说明：** 原242.523pt宽度下断行器无可行方案；诊断放开高度仍失败，加宽16pt则能按6行容纳。Rust原来完全不尝试改变横向宽度。本次保持左锚点，允许至右侧实际障碍前的空隙，横向扩大后重新核对全高净空；实际加宽21.662pt，首基线下移0.298pt。
+2. **附录标题：** 原栏宽下两行译文需要28.426pt高，邻近已译文间净空不足。新逻辑允许与紧邻下方同栏已译段作为一组排版，保持顺序、原段间距及各自宽度；两段均通过容纳与链接几何检查才更新。实际标题下移1.617pt、正文下移6.459pt，标题仍两行，段后空白被合理使用。
+3. 源障碍仍来自不可变源页减实际替换字形、加当前译文墨迹。原图/表格/框线/其它保留内容始终阻挡；联排失败保持邻段位置和统计不变。测量阶段允许越过旧页底，最终放置必须回到有效净空，不把可通过上移解决的溢出提前拒绝。
+
+v1已190/0，但目视发现标题扩到纸张右边缘，拒绝作为交付；v2增加原页可见文字右边界约束，才得到上述两段联排。最后修正测量阶段的垂直溢出门禁并补测试，v3再次全篇复排，单语与dual文件SHA均与v2相同。仍不支持跨页迁移、任意多段连锁重流或整页重分页；本样本无需这些能力。没有缩字、压行距、扩大碰撞容差或改译文缓存。
+
+### 最终保存后验收
+
+**交付：`tmp/backend-repair/typography-float-v3/{translated.pdf,dual.pdf}`。** 21页、190/0，0送译前冲突/覆盖缺口，576正常保护实体；190真实缓存命中、0主/补救请求、32.113秒，exit0。
+
+- 单语36,327保护字符位置/字号/颜色变化0；94公式、53,384参考墨迹像素缺失0；第3页图片像素相同。无KEEP残留。
+- 单语319链接、314点击区域移动，逐行实际链接标签与目标正确；28书签、180命名目标保留。
+- A3双语21页420×297mm；左右逐页101,080/61,110个非空白字符与输入相同；638链接坐标/目标、目录和命名目标全部通过。两份PDF均通过qpdf和保存后自检。
+- 原链接审计只读联合Rect，错误地将首页跨两行DOI的矩形内部邻文计入链接。已检查保存的两个QuadPoints区域仅含`https://doi.org/`和后半URL，更新审计为逐行实际点击区域并验证其被Rect包含；目标不变，没有放宽字符匹配。旧误报留在v2/audit.json，逐行证据在v2/wrapped-link-audit.json，最终v3/audit.json为0错误标签。
+- 目视第9页图4说明、第14页标题/相邻正文，外侧页边距及顺序正常。全篇公式/原文保护审计不等于所有措辞或任意论文已认证。
+
+pipeline单元172项与集成7项通过，合计179通过、0失败、5ignored；含新增横向避障、相邻联排/保护框线、事务失败保持邻段与计数、测量越页底后回移守卫。严格Clippy、fmt、release通过；未重跑未修改的Python/UI。严格文档构建仍有既存HTTP参考中文锚点警告，不计通过。
+
+PDF SHA-256：单语`09c64167437d2451c71456e5b801c4ce02f7ed0d559bba30798c07a4478eddc6`，dual`7746c660d873ba6f8515fa7704d86cd60974dfe4f26bc8b710ecfa5ce86dd791`。证据包括`typography-float-v3/{audit.json,dual-audit.json,result.json,events.jsonl,qpdf*.log,page-*.png,dual-page-*.png}`，脚本`inline-audit-quads.py`与`dual-audit/check.py`，日志`typography-float-{tests-final,integration,clippy,fmt,build-final,docs-final}.log`，均在tmp/backend-repair。经验见[局部净空与联合排版](../../lessons/pdf-binding-and-render-evidence.md#local-float-and-leading)。
+
+
+<a id="text-serif-font"></a>
+
+## Text正文改用思源宋体（2026-09-23）
+
+用户要求仅`Text`区域改为思源宋体，其余字体样式不变。`stages::typeset::spec_for`只在目标spec给Text选择serif，zh-CN实际字体为`NotoSerifCJKsc-Regular/Bold`；未标记样式的StyleId(0)也生效。保留源粗斜体、字号、颜色及mono优先级，不修改源IR、全局Body字体链或真实译文缓存。Title/ParagraphTitle/Abstract/Caption/List等其它区域不切换字体。
+
+### 真实换字体后暴露的容纳问题
+
+首轮v1为187写入/3回退。P05-047/P11-024两端对齐时根据advance增加字距，宋体墨迹比advance稍宽；旧平移只能处理完整墨迹能放下的行，不能解决两端都已撑满的情况。修正为：自然墨迹可容纳时，只减少新增glue拉伸，再按原容差核对；保持断点、字号、字形宽度及行距，也不压到自然字距以下。守卫同时验证自然墨迹本来放不下时仍失败。
+
+P14-114附录标题虽仍用黑体，下方正文换宋体后由6行变7行，旧“两段联排”仍不足。现按源顺序逐段纳入同栏连续已译段，找到可容纳组即停，全部通过才提交位置；保留各自宽度、顺序和原段间距。每个源框须与共同净空带相交，不能将隔着图片/规则线的另一段拖到障碍上方。真实第14页P14-114至117四段联排，首基线分别下移约1.617、6.474、11.499、11.246pt；没有跨页或缩字。
+
+v2为189/1，且CoreML在stdout追加一条`Unable to load MPSGraphExecutable`原生日志，CLI正确报告`engine_events_invalid`；此既存风险未在字体任务扩修，也未当成成功。v3正常完成全部流程，无事件污染。
+
+### 最终样张和验证
+
+**交付：`tmp/backend-repair/text-serif-v3/{translated.pdf,dual.pdf}`。** CCS21页190写入/0回退/0送译前冲突/0覆盖缺口；576正常保护实体；190真实缓存命中、0模型/补救请求，32.257秒，exit0。字号仍1.0倍、行距1.5倍。
+
+- 保存后逐块字体审计：117个Text中的23,123个Noto字符（Regular 21,841、Bold 1,282）仅字体族从Sans变为Serif；字符/字号/颜色和粗细身份完全匹配。73个非Text块的Noto字体、字符、字号和颜色多重集均与typography-float-v3相同，无未归属字体字符。审计按字符推进框与实际行墨迹的相交关系定位，避免标点侧承使字形原点/中心落在墨迹外造成误报；未放宽字体/样式比对。
+- 36,327保护字符变化0；94公式、53,384参考墨迹像素缺失0；第3页图像像素相同；无KEEP残留。
+- 单语319链接、314移动区域，逐行标签与目标正确；双语638链接坐标/目标正确。28书签、180命名目标保留，双语21页420×297mm，左右101,080/61,110个非空白字符逐页与输入相同。两份PDF均通过qpdf及生产自检。
+- 目视第2页正文宋体与黑体标题、第14页连续联排；保护参考文献/算法保持原样。依旧可能有源段锚定留白，不将本样本推及任意文档。
+
+相关typeset/pipeline共248通过、0失败、5ignored；覆盖语义区域字体、未标记样式、粗斜体/颜色/等宽保持、衬线对齐墨迹、连续联排及固定障碍。Clippy/fmt/release/diff-check通过。strict docs仍有既存HTTP参考中文锚点警告；未测试未修改的Python/UI。
+
+SHA-256：单语`eca7ce1dcd7ea44fdb21323e2c09667c735ea68c5fbacd80bd9a8afd7dbec229`，dual`eb26b0046e48afd716fd0c43262098e90c69b6587ddd0e09593a6c5065605167`。证据`text-serif-v3/{font-audit.json,audit.json,dual-audit.json,events.jsonl,result.json,qpdf*.log,serif-page-*.png}`；脚本`text-serif-font-audit.py`，日志`text-serif-{final-tests,final-clippy,final-fmt,build3,docs}.log`均位于tmp/backend-repair。经验见[字体语义范围与墨迹](../../lessons/pdf-binding-and-render-evidence.md#semantic-font-and-ink)。

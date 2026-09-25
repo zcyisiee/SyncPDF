@@ -13,7 +13,8 @@
 //! maximum absolute glue adjustment ratio; shrinking is additionally bounded
 //! by -1. A nonfinal, nonmandatory line with no adjustable glue is feasible only
 //! at its exact natural width, except a selected penalty may leave ragged space
-//! when both stretch and shrink are zero (e.g. a hyphenated single word). Its
+//! when both stretch and shrink are zero and the next legal break cannot fit
+//! (e.g. a hyphenated single word). Its
 //! badness uses fractional unused width. Final and mandatory lines are ragged left with
 //! ratio zero and must fit at natural width, without shrinking boxes or glue.
 //!
@@ -97,6 +98,17 @@ struct State {
 /// A nonempty paragraph with no drawable box, or one that cannot fit without
 /// violating its fixed box widths, returns [`BreakError::NoSolution`].
 pub fn solve(nodes: &[Node], widths: &[f32], tolerance: f32) -> Result<Solution, BreakError> {
+    solve_aligned(nodes, widths, tolerance, true)
+}
+
+/// Left/center/right alignment scores unused width, since its glue is not stretched
+/// when rendered. Justified lines score the actual requested glue adjustment.
+pub(crate) fn solve_aligned(
+    nodes: &[Node],
+    widths: &[f32],
+    tolerance: f32,
+    justify: bool,
+) -> Result<Solution, BreakError> {
     validate(nodes, widths, tolerance)?;
     if nodes.is_empty() {
         return Ok(Solution {
@@ -215,7 +227,10 @@ pub fn solve(nodes: &[Node], widths: &[f32], tolerance: f32) -> Result<Solution,
             box_count[n] == box_count[point.next] && forced_count[n] == forced_count[point.next];
         // A nonterminal glue break also needs enough material even at maximum
         // allowed stretch. Penalties may be ragged, so they keep the full window.
-        let upper = if !terminal_line && matches!(nodes.get(point.at), Some(Node::Glue { .. })) {
+        let upper = if justify
+            && !terminal_line
+            && matches!(nodes.get(point.at), Some(Node::Glue { .. }))
+        {
             let max_start = max_prefix[end] - min_width;
             breaks[..bi].partition_point(|p| max_prefix[next_box[p.next]] <= max_start + 1e-9)
         } else {
@@ -257,13 +272,30 @@ pub fn solve(nodes: &[Node], widths: &[f32], tolerance: f32) -> Result<Solution,
                 let body_width = natural[end] - natural[start] + point.append_width;
                 let is_terminal = box_count[n] == box_count[point.next]
                     && forced_count[n] == forced_count[point.next];
-                let single_word_ragged = !point.mandatory
+                let single_word_ragged = justify
+                    && !point.mandatory
                     && !is_terminal
                     && matches!(nodes.get(point.at), Some(Node::Penalty { .. }))
                     && stretch[end] == stretch[start]
                     && shrink[end] == shrink[start]
                     && body_width <= target;
-                let ragged = point.mandatory || is_terminal || single_word_ragged;
+                if single_word_ragged {
+                    // This is an emergency for an unstretchable line, not a cheap
+                    // alternative to ordinary mixed-script justification. A short
+                    // Latin list must keep taking content while a later break fits.
+                    let can_continue = breaks[bi + 1..].iter().any(|next| {
+                        let Some(next_last) = last_box[next.at] else {
+                            return false;
+                        };
+                        next_last > last
+                            && forced_count[next.at] == forced_count[from]
+                            && natural[next_last + 1] - natural[start] + next.append_width <= target
+                    });
+                    if can_continue {
+                        continue;
+                    }
+                }
+                let ragged = !justify || point.mandatory || is_terminal || single_word_ragged;
                 let ratio = if ragged {
                     if body_width > target {
                         continue;
@@ -289,11 +321,16 @@ pub fn solve(nodes: &[Node], widths: &[f32], tolerance: f32) -> Result<Solution,
                     continue;
                 }
                 let fitness = fitness_class(ratio);
-                let badness_ratio = if single_word_ragged {
-                    (target - body_width) / target
-                } else {
-                    ratio.abs()
-                };
+                // Ragged nonfinal lines pay for unused width. The final line's
+                // shortfall is the paragraph's natural end: charging it would
+                // rebalance every earlier line short. Stranded letters are
+                // excluded by the caller's break penalties instead.
+                let badness_ratio =
+                    if !justify && !point.mandatory && !is_terminal || single_word_ragged {
+                        (target - body_width) / target
+                    } else {
+                        ratio.abs()
+                    };
                 let badness = 100.0 * badness_ratio.powi(3);
                 let base = 10.0 + badness;
                 let penalty = if point.mandatory {

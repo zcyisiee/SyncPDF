@@ -6,6 +6,7 @@
 //!   首行 `run_started`、末行 `run_finished`，且 `seq` 单调递增。
 
 use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -243,6 +244,31 @@ fn run_protocol_2_exits_nonzero() {
 
 /// `translate` 没有 `--protocol` 参数：传了应被 clap 拒绝（非 0 退出）。
 #[test]
+fn translate_agy_rejects_thinking_before_running_anything() {
+    // agy 的档位在模型名里；传 --thinking 必须在启动任何进程前报错，
+    // 否则会默默丢掉档位设置。
+    let out = Command::new(BIN)
+        .args([
+            "translate",
+            "--input",
+            "/nonexistent.pdf",
+            "--output",
+            "/tmp/never.pdf",
+            "--translator",
+            "agy",
+            "--thinking",
+            "low",
+        ])
+        .output()
+        .expect("运行 translate 失败");
+    assert!(!out.status.success(), "agy + --thinking 应报错退出");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("agy"), "stderr: {stderr}");
+    assert!(stderr.contains("thinking"), "stderr: {stderr}");
+    assert!(!Path::new("/tmp/never.pdf").exists());
+}
+
+#[test]
 fn translate_rejects_unknown_flag() {
     let out = Command::new(BIN)
         .args([
@@ -417,4 +443,108 @@ fn translate_save_failure_exits_nonzero_and_does_not_publish_success() {
     assert!(!events
         .iter()
         .any(|e| e["type"] == "page_ready" || e["type"] == "document_finished"));
+}
+
+/// 子进程级回归（Unix）：原生组件绕过 tracing 直接写 fd1 时，事件 JSONL
+/// 仍独占原 stdout，原生输出全部落 stderr——包括 `run_finished` 之后的
+/// 滞后日志。隔离发生在子进程内，父测试进程不改任何 fd，不影响并行测试。
+#[cfg(unix)]
+#[test]
+fn jsonl_events_stay_isolated_from_native_stdout() {
+    if let Ok(mode) = std::env::var("SYNCPDF_STDIO_CHILD") {
+        stdio_probe_child(&mode);
+        return;
+    }
+    // 见证缺陷：不隔离时原生噪声确实混进 stdout（说明下面的断言有效）。
+    let (legacy_stdout, _, _) = stdio_probe("legacy");
+    assert!(
+        legacy_stdout.contains("NATIVE_STDOUT_NOISE"),
+        "未隔离时原生输出应混入 stdout：{legacy_stdout:?}"
+    );
+
+    let (stdout, stderr, code) = stdio_probe("isolated");
+    assert_eq!(code, 0, "隔离子进程应正常退出；stderr:\n{stderr}");
+    assert!(
+        !stdout.contains("NATIVE"),
+        "stdout 不得混入原生输出：{stdout}"
+    );
+    // 隔离在测试函数体内生效，之前的 libtest 横幅行（`running …`/`test …`）
+    // 仍可能出现在 stdout；除此之外每行必须是合法事件 JSONL。
+    let mut events = Vec::new();
+    for (i, line) in stdout.lines().filter(|l| !l.trim().is_empty()).enumerate() {
+        match serde_json::from_str::<serde_json::Value>(line) {
+            Ok(v) => {
+                assert!(v.get("type").is_some(), "第 {} 行缺 type：{line}", i + 1);
+                assert!(v.get("seq").is_some(), "第 {} 行缺 seq：{line}", i + 1);
+                events.push(v);
+            }
+            Err(_) => assert!(
+                line.starts_with("running ") || line.starts_with("test "),
+                "stdout 混入非事件、非测试框架行：{line}"
+            ),
+        }
+    }
+    assert_eq!(events.len(), 2, "应恰好 2 条事件：{events:?}");
+    assert_eq!(events[0]["type"], "run_started");
+    assert_eq!(events[0]["seq"], 1);
+    assert_eq!(events[1]["type"], "run_finished");
+    assert_eq!(events[1]["seq"], 2);
+    assert!(
+        stderr.contains("NATIVE_STDOUT_NOISE"),
+        "原生日志应落 stderr：{stderr}"
+    );
+    assert!(
+        stderr.contains("NATIVE_AFTER_FINISH"),
+        "run_finished 之后的滞后原生日志也应落 stderr：{stderr}"
+    );
+}
+
+/// 用子进程重跑本测试（改 fd 只在子进程内发生），返回 (stdout, stderr, code)。
+#[cfg(unix)]
+fn stdio_probe(mode: &str) -> (String, String, i32) {
+    let exe = std::env::current_exe().expect("当前测试二进制路径");
+    let out = Command::new(exe)
+        .arg("jsonl_events_stay_isolated_from_native_stdout")
+        .arg("--exact")
+        .env("SYNCPDF_STDIO_CHILD", mode)
+        .output()
+        .expect("启动隔离子进程失败");
+    (
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+        out.status.code().unwrap_or(-1),
+    )
+}
+
+/// 子进程内：`isolated` 走生产隔离路径，`legacy` 用原始 `StdoutSink::new()`
+/// 作未隔离对照。写 fd1 的 `NATIVE_*` 行模拟原生库绕过 tracing 的输出。
+#[cfg(unix)]
+fn stdio_probe_child(mode: &str) {
+    use std::io::Write as _;
+    use syncpdf_pipeline::events::{SharedSink, StdoutSink};
+    use syncpdf_protocol::Event;
+
+    let sink = match mode {
+        "legacy" => StdoutSink::new(),
+        _ => StdoutSink::isolated().expect("stdout 隔离失败必须向上传播"),
+    };
+    let sink = SharedSink::new(sink);
+    sink.emit(Event::RunStarted {
+        protocol_version: syncpdf_protocol::PROTOCOL_VERSION,
+        engine_version: "stdio-test".into(),
+        doc_id: "stdio".into(),
+        pages: 1,
+    });
+    let mut raw = std::io::stdout();
+    let _ = raw
+        .write_all(b"NATIVE_STDOUT_NOISE\n")
+        .and_then(|()| raw.flush());
+    sink.emit(Event::RunFinished {
+        ok: true,
+        elapsed_ms: 0,
+    });
+    // run_finished 之后（含析构阶段）的滞后原生日志同样必须被隔离。
+    let _ = raw
+        .write_all(b"NATIVE_AFTER_FINISH\n")
+        .and_then(|()| raw.flush());
 }

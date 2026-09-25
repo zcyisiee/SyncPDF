@@ -291,6 +291,7 @@ fn source_formula_moves_once_without_copying_nested_figure_text() {
     let source = SourceAtom {
         bbox: a.bbox,
         baseline: a.matrix.f,
+        advance: None,
     };
     let para = Paragraph {
         id: "P01-001".parse().unwrap(),
@@ -302,6 +303,7 @@ fn source_formula_moves_once_without_copying_nested_figure_text() {
         glyphs: vec![a.id],
         text_spans: vec![],
         style_runs: vec![],
+        decorations: vec![],
         atoms: vec![Atom {
             id: AtomId(1),
             glyph_range: (0, 1),
@@ -334,6 +336,7 @@ fn source_formula_moves_once_without_copying_nested_figure_text() {
             baseline_y: 170.0,
             glyphs: vec![],
             kept_atoms: vec![AtomId(1)],
+            underlines: Vec::new(),
             placed_atoms: vec![PlacedAtom {
                 id: AtomId(1),
                 source: a.bbox,

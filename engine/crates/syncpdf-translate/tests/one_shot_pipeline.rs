@@ -31,6 +31,7 @@ fn paragraph(id: &str, text: &str) -> Paragraph {
         text_spans: Vec::new(),
         style_runs: vec![],
         atoms: vec![],
+        decorations: Vec::new(),
         text: text.into(),
         align: Align::Left,
         first_indent: 0.0,
@@ -60,6 +61,7 @@ fn rich_paragraph(id: &str) -> Paragraph {
         italic: false,
         serif: false,
         mono: false,
+        underline: false,
     }];
     p.atoms = vec![Atom {
         source: None,

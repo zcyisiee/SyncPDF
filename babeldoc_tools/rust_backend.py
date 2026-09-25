@@ -11,7 +11,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-_ARTIFACTS = ("translated.pdf", "events.jsonl", "stderr.log", "result.json")
+from babeldoc_tools import glossary
+from babeldoc_tools.common import ToolError
+
+_ARTIFACTS = ("translated.pdf", "dual.pdf", "events.jsonl", "stderr.log", "result.json")
 _ENGINE = Path(__file__).resolve().parents[1] / "engine/target/release/syncpdf-cli"
 
 
@@ -41,8 +44,8 @@ def _translate_pdf(
     pdf: str,
     workdir: str,
     pages: str | None,
-    model: str,
-    thinking: str,
+    model: str | None,
+    thinking: str | None,
     source_lang: str,
     target_lang: str,
     layout_device: str,
@@ -50,6 +53,9 @@ def _translate_pdf(
     cached_from: str | None = None,
     font_scale: float = 1.0,
     line_height: float | None = None,
+    dual: bool = False,
+    translator: str = "pi",
+    glossaries: str | None = None,
 ) -> dict:
     """Run the Rust CLI once, retaining its events and incomplete-result semantics."""
     for name, value in (("font_scale", font_scale), ("line_height", line_height)):
@@ -59,13 +65,14 @@ def _translate_pdf(
     destination = Path(workdir).expanduser().resolve()
     binary = Path(engine).expanduser().resolve() if engine else _ENGINE
     output = destination / "translated.pdf"
+    dual_output = destination / "dual.pdf"
 
     if not source.is_file():
         return _error("input_missing", f"输入 PDF 不存在：{source}")
     if source.suffix.lower() != ".pdf":
         return _error("input_not_pdf", f"输入文件不是 PDF：{source}")
-    if source == output.resolve():
-        return _error("input_output_conflict", "输入 PDF 不能是 workdir/translated.pdf")
+    if source in (output.resolve(), dual_output.resolve()):
+        return _error("input_output_conflict", "输入 PDF 不能是 workdir/translated.pdf 或 dual.pdf")
     if not binary.is_file() or not os.access(binary, os.X_OK):
         return _error(
             "engine_missing",
@@ -79,16 +86,38 @@ def _translate_pdf(
         return _error("translation_cache_missing", f"找不到已保存译文缓存：{cached_db}")
     if cached_db is not None and cached_db == (destination / "cache/translate.db").resolve():
         return _error("cache_output_conflict", "缓存来源与本次运行目录不能相同")
+
+    # 词表在创建运行产物之前装载校验：失效文件/内容必须在任何模型调用前明确失败。
+    terminology: list[list[str]] | None = None
+    if glossaries is not None:
+        try:
+            entries = glossary.load_entries(glossaries)
+        except ToolError as exc:
+            return _error(exc.code, exc.message, **exc.extra)
+        # Rust 提示词协议只有 source→target 二元映射；带 note 会静默丢备注，明确拒绝。
+        if any(entry.note for entry in entries):
+            return _error(
+                "glossary_note_unsupported",
+                "rust-translate 的词表提示只携带 source→target 映射，带 note 的条目"
+                "会丢备注；请改用无 note 列内容的词表",
+            )
+        terminology = [[entry.source, entry.target] for entry in entries]
+
     destination.mkdir(parents=True, exist_ok=True)
     temporary = destination / "tmp"
     temporary.mkdir(exist_ok=True)
-    paths = {name: str(destination / name) for name in _ARTIFACTS}
+    paths = {name: str(destination / name) for name in _ARTIFACTS if name != "dual.pdf" or dual}
     command = [
         str(binary), "translate", "--input", str(source), "--output", str(output),
-        "--translator", "pi", "--model", model, "--thinking", thinking,
+        "--translator", translator,
         "--source-lang", source_lang, "--target-lang", target_lang,
         "--cache-dir", str(destination / "cache"),
     ]
+    # 模型/档位缺省交给 Rust 按通道选；只有显式给了才转发。
+    if model is not None:
+        command.extend(("--model", model))
+    if thinking is not None:
+        command.extend(("--thinking", thinking))
     if cached_db is not None:
         if (destination / "cache/translate.db").exists():
             return _error("workdir_used", "本次运行目录已有译文缓存，请指定新的目录")
@@ -106,6 +135,15 @@ def _translate_pdf(
         command.extend(("--font-scale", str(font_scale)))
     if line_height is not None:
         command.extend(("--line-height", str(line_height)))
+    if dual:
+        command.extend(("--dual-output", str(dual_output)))
+    if terminology is not None:
+        # 内部 sidecar：规范化对表 JSON（[["source","target"],...]），CSV 仍是唯一对外格式。
+        sidecar = temporary / "terminology.json"
+        sidecar.write_text(
+            json.dumps(terminology, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        command.extend(("--terminology", str(sidecar)))
     child_env = os.environ.copy()
     child_env["SYNCPDF_LAYOUT_DEVICE"] = layout_device
     child_env["TMPDIR"] = str(temporary)
@@ -166,6 +204,7 @@ def _translate_pdf(
                         elif kind == "issue":
                             if event.get("code") in {
                                 "protected_source_overlap", "translatable_region_overlap", "rotated_source_text",
+                                "unmapped_source_glyph", "bind_page_unreliable",
                             } and isinstance(event.get("paragraph_id"), str):
                                 blocked_ids.add(event["paragraph_id"])
                             if event.get("code") == "coverage_gap" and isinstance(event.get("page"), int):
@@ -194,6 +233,7 @@ def _translate_pdf(
     unsuccessful = sum(status != "not_replaced" for status in status_by_id.values()) - successful + blocked
     data = {
         "typography": {"font_scale": font_scale, "line_height": line_height},
+        "translator": translator,
         "successful_blocks": successful,
         "typeset_blocks": prepared,
         "saved_pages": len(ready_pages),
@@ -205,6 +245,8 @@ def _translate_pdf(
         "run_finished_ok": finished,
         "artifacts": paths,
         "output_exists": output.is_file(),
+        "dual_requested": dual,
+        "dual_output_exists": dual_output.is_file() if dual else False,
     }
     if launch_error:
         code, message = "engine_launch_failed", "Rust 引擎启动失败；详见 stderr.log"
@@ -216,6 +258,8 @@ def _translate_pdf(
         code, message = "engine_incomplete", "Rust 引擎未完整翻译；部分结果和事件已保留"
     elif not output.is_file():
         code, message = "output_missing", "Rust 引擎报告成功，但译文 PDF 不存在"
+    elif dual and not dual_output.is_file():
+        code, message = "dual_output_missing", "Rust 引擎报告成功，但双语 PDF 不存在"
     else:
         code, message = "", ""
     result = {"ok": not code, "data": data} if not code else _error(code, message, **data)

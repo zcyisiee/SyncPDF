@@ -552,18 +552,27 @@ async fn retry_only_settles_missing_blocks_without_redelivery() {
     );
 }
 
+/// 通道成功但尾部半块（结构损坏）：不再直接 fatal。已闭合的第一块保留；
+/// 未闭合的第二块不交付、不入缓存，而是交给既有的一轮有界补译（此脚本
+/// 不给补译响应 → 用尽后回退原文）。损坏之后的任何后缀都不采纳。
 #[tokio::test]
-async fn malformed_tail_keeps_prior_closed_block_but_fails_the_document() {
+async fn malformed_tail_keeps_prior_closed_block_and_repairs_the_missing_one() {
     let us = vec![unit(1), unit(2)];
     let script = Script::ok(vec![
         format!("{}\n", wire(1)),
         "<!-- syncpdf:block P01-002 -->\nhalf".into(),
     ]);
     let cache = Cache::open_in_memory().unwrap();
-    let (result, seen, _, _, calls) = run_scripted(vec![script], &us, Some(&cache), None).await;
-    assert!(matches!(result, Err(TranslateError::Transport(_))));
-    assert_eq!(ids(&seen), vec![pid(1)]);
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let (result, seen, _, _, calls) = run_scripted(vec![script], &us, Some(&cache), Some(1)).await;
+    let r = result.expect("成功通道的半块可由既有有界补译处理，不该 fatal");
+    assert_eq!(r.stats.retry_rounds, 1);
+    // 第一块严格交付；半块从未作为译文交付，第二块只能以回退原文落定。
+    assert_eq!(seen[0].id, pid(1));
+    assert_eq!(seen[0].status, syncpdf_translate::BlockStatus::Ok);
+    assert_eq!(ids(&seen), vec![pid(1), pid(2)]);
+    assert_eq!(seen[1].html, us[1].html);
+    assert_eq!(r.fallback_ids, vec![pid(2)]);
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "补译真的又发了一次请求");
     assert!(cache.get("en", "en", &us[0].html).unwrap().is_some());
     assert!(cache.get("en", "en", &us[1].html).unwrap().is_none());
 }

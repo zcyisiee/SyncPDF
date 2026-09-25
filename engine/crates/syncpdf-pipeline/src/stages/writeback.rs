@@ -28,6 +28,7 @@ use std::path::Path;
 
 use lopdf::Document;
 use syncpdf_core::ir::{Paragraph, TypesetParagraph};
+use syncpdf_core::OpKey;
 use syncpdf_font::FontStore;
 use syncpdf_pdf::bind::BoundPage;
 use syncpdf_pdf::patch::{PatchSet, PatchStats};
@@ -52,11 +53,23 @@ pub fn delete_translated(
         .iter()
         .flat_map(|para| para.glyphs.iter().copied())
         .collect();
-    if ids.is_empty() {
+    // A claimed source underline is erased only together with the words it
+    // decorates: the caller passes exactly the paragraphs whose translation and
+    // link geometry succeeded, so a paragraph that fell back keeps its own line.
+    let ops: Vec<OpKey> = paras
+        .iter()
+        .flat_map(|para| super::source_decoration::owned_ops(para))
+        .collect();
+    if ids.is_empty() && ops.is_empty() {
         return Ok(PatchStats::default());
     }
     let mut ps = PatchSet::new();
-    ps.delete_glyphs(bound, &ids).map_err(patch_error)?;
+    if !ids.is_empty() {
+        ps.delete_glyphs(bound, &ids).map_err(patch_error)?;
+    }
+    if !ops.is_empty() {
+        ps.delete_paths(bound, &ops).map_err(patch_error)?;
+    }
     let page = bound.ir.page.number();
     ps.apply(doc, page).map_err(patch_error)
 }
@@ -207,8 +220,10 @@ mod tests {
                 italic: false,
                 serif: false,
                 mono: false,
+                underline: false,
             }],
             atoms: Vec::new(),
+            decorations: Vec::new(),
             text: "original".into(),
             align: syncpdf_core::ir::Align::Left,
             first_indent: 0.0,

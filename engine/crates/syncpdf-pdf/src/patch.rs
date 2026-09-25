@@ -48,6 +48,8 @@ pub enum PatchError {
     UnsafeBinding(#[from] ReplacementError),
     #[error("unknown or cross-page glyph: {0}")]
     UnknownGlyph(GlyphId),
+    #[error("unproven source glyph {0:?}: its operation lacks proof, deletion forbidden")]
+    UnprovenGlyph(GlyphId),
     #[error("patch target does not match bound page")]
     PageIdentity,
 
@@ -83,6 +85,8 @@ pub struct PatchSet {
     deleted: BTreeMap<OpKey, BTreeSet<u16>>,
     /// `OpKey` → 该操作的字形快照（序号 → advance/size）。
     snaps: BTreeMap<OpKey, Vec<GlyphSnap>>,
+    /// `OpKey` → 待清空的描边绘制算子，apply 时替换为 `n`（移除该次绘制）。
+    paths: BTreeSet<OpKey>,
     /// 当前页的 Form `Do` 记录（由已校验绑定注入）。
     forms: Vec<FormDo>,
     page: Option<(u32, ObjectId)>,
@@ -114,12 +118,66 @@ impl PatchSet {
             if !known.contains(id) {
                 return Err(PatchError::UnknownGlyph(*id));
             }
+            // §7：操作级不可证明的字形永不删除（门禁放行该页其余字形）。
+            if bound.is_unproven_op(&id.op) {
+                return Err(PatchError::UnprovenGlyph(*id));
+            }
         }
         self.page = Some(page);
         self.source_snapshot = Some(bound.source_snapshot().clone());
         self.forms = bound.form_dos.clone();
         self.enqueue_glyphs(&bound.ir, ids);
         Ok(())
+    }
+
+    /// Validate and enqueue removal of this page's own stroke paint operations.
+    ///
+    /// Only ops that `bind_page` recorded as a plain page-level `S`/`s` stroke can
+    /// be cleared, and only one page may be patched per set. The op is replaced by
+    /// `n`: preceding path construction and every following op stay untouched, so
+    /// graphics state and stream order are preserved. Ambiguity fails closed.
+    pub fn delete_paths(&mut self, bound: &BoundPage, ops: &[OpKey]) -> Result<()> {
+        bound.check_replacement()?;
+        let page = (bound.ir.page.number(), bound.page_id);
+        if self.page.is_some_and(|existing| existing != page) {
+            return Err(PatchError::PageIdentity);
+        }
+        if self
+            .source_snapshot
+            .as_ref()
+            .is_some_and(|old| old != bound.source_snapshot())
+        {
+            return Err(PatchError::UnsupportedPath("mixed source snapshots"));
+        }
+        let known: BTreeSet<OpKey> = bound
+            .ir
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                DisplayItem::Path {
+                    is_fill: false,
+                    is_stroke: true,
+                    stroke: Some(stroke),
+                    ..
+                } => Some(stroke.op),
+                _ => None,
+            })
+            .collect();
+        for op in ops {
+            if !known.contains(op) {
+                return Err(PatchError::UnsupportedPath("not a bound page-level stroke"));
+            }
+        }
+        self.page = Some(page);
+        self.source_snapshot = Some(bound.source_snapshot().clone());
+        self.forms = bound.form_dos.clone();
+        self.paths.extend(ops.iter().copied());
+        Ok(())
+    }
+
+    /// 是否有任何删除。
+    pub fn is_empty(&self) -> bool {
+        self.deleted.values().all(BTreeSet::is_empty) && self.paths.is_empty()
     }
 
     // Private rewrite helper; production callers must pass the bound-page gate.
@@ -135,11 +193,6 @@ impl PatchSet {
                 record_snaps(glyphs, &want, &mut self.snaps, &mut self.deleted);
             }
         }
-    }
-
-    /// 是否有任何删除。
-    pub fn is_empty(&self) -> bool {
-        self.deleted.values().all(BTreeSet::is_empty)
     }
 
     /// 应用补丁到文档第 `page`（1 基）页。
@@ -173,6 +226,13 @@ impl PatchSet {
                 .entry(key.stream)
                 .or_default()
                 .insert(key.op_index, ords.clone());
+        }
+        for key in &self.paths {
+            by_stream
+                .entry(key.stream)
+                .or_default()
+                .entry(key.op_index)
+                .or_default();
         }
 
         if by_stream.is_empty() {
@@ -281,6 +341,21 @@ impl PatchSet {
                 let Some(op) = ops.get_mut(*op_index as usize) else {
                     continue;
                 };
+                if self.paths.contains(&OpKey::new(*sref, *op_index)) {
+                    // Clear only this paint: `n` keeps the construction ops that
+                    // built the path and leaves later ops and state intact.
+                    if !matches!(op.operator.as_str(), "S" | "s") {
+                        return Err(PatchError::UnsupportedPath(
+                            "stale stroke binding is not a plain stroke paint",
+                        ));
+                    }
+                    op.operator = "n".into();
+                    op.operands.clear();
+                    op.mark_dirty();
+                    touched = true;
+                    stats.ops_deleted += 1;
+                    continue;
+                }
                 let snaps = self
                     .snaps
                     .get(&OpKey::new(*sref, *op_index))
@@ -613,6 +688,7 @@ mod tests {
             size,
             matrix: Matrix::IDENTITY,
             bbox: Rect::default(),
+            ink: None,
             advance,
             fill: Color::BLACK,
             render_mode: 0,

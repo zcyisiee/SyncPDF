@@ -641,7 +641,7 @@
       "type": "object"
     },
     "TranslateProvider": {
-      "description": "LLM 提供方。当前两种通道：OpenAI 兼容 HTTP、pi CLI（本地子进程）。",
+      "description": "LLM 提供方。当前三种通道：OpenAI 兼容 HTTP、pi CLI、agy CLI（均为本地子进程）。",
       "oneOf": [
         {
           "const": "http",
@@ -651,6 +651,11 @@
         {
           "const": "pi",
           "description": "pi CLI 子进程（`TranslatorKind::Pi`）。",
+          "type": "string"
+        },
+        {
+          "const": "agy",
+          "description": "agy CLI 子进程（`TranslatorKind::Agy`）。",
           "type": "string"
         }
       ]
@@ -680,6 +685,28 @@
             "program",
             "model",
             "thinking"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "agy CLI：print + stream-json；`program` 可执行路径（默认 `agy`）、模型。",
+          "properties": {
+            "kind": {
+              "const": "agy",
+              "type": "string"
+            },
+            "model": {
+              "description": "模型名本身已带档位（如 `gemini-3.8-flash-low`）。",
+              "type": "string"
+            },
+            "program": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "program",
+            "model"
           ],
           "type": "object"
         },

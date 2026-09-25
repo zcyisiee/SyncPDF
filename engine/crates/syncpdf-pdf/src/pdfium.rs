@@ -157,11 +157,13 @@ pub struct TextChar {
     /// 字形外接框。优先取 pdfium 的 loose char box（含字体上下沿），
     /// 失败时回退到 tight char box（仅墨迹）。
     pub bbox: Rect,
+    /// pdfium tight char box（仅墨迹）；退化或不可用时为 `None`。
+    pub ink: Option<Rect>,
     /// 字符原点（基线起点）。
     pub origin: Point,
     /// 推进宽度的近似值，等于 `bbox.width()`。
     pub width: f32,
-    /// 字符旋转角，度；水平文本为 0。
+    /// 字符旋转角，度，页空间内按顺时针计；水平文本为 0。
     pub angle: f32,
     /// 是否为 pdfium 补出来的字符（空格、换行等），原始内容流里并不存在。
     pub is_generated: bool,
@@ -183,6 +185,18 @@ fn reliable_matrix(m: Matrix) -> Option<Matrix> {
 
 fn core_matrix(m: pdfium_render::prelude::PdfMatrix) -> Option<Matrix> {
     reliable_matrix(Matrix::new(m.a(), m.b(), m.c(), m.d(), m.e(), m.f()))
+}
+
+/// `Tf` scaled to page space: the length of text space's unit vertical vector
+/// under the object's matrix composed with every enclosing form's `Do` CTM.
+/// PDFium's `scaled_font_size` stops at the enclosing form and reads only `d`
+/// (zero for text turned a quarter).
+fn visual_font_size(object: &PdfPageTextObject<'_>, ancestors: Option<Matrix>) -> f32 {
+    let full = ancestors.and_then(|a| Some(core_matrix(object.matrix().ok()?)?.then(&a)));
+    match full {
+        Some(m) => object.unscaled_font_size().value * m.c.hypot(m.d),
+        None => object.scaled_font_size().value,
+    }
 }
 
 fn object_bounds(
@@ -617,11 +631,13 @@ fn build_text_object(
     let mut collected = Vec::with_capacity(chars.len());
     for i in 0..chars.len() {
         let ch = chars.get(i)?;
-        let bbox = ch
-            .loose_bounds()
-            .or_else(|_| ch.tight_bounds())
-            .map(to_rect)
-            .unwrap_or_default();
+        let loose = ch.loose_bounds().ok().map(to_rect);
+        let tight = ch.tight_bounds().ok().map(to_rect);
+        let bbox = loose.or(tight).unwrap_or_default();
+        // 只有非退化几何才算墨迹证据；空格与 pdfium 算不出的字符没有可靠 ink。
+        let ink = tight.filter(|r| {
+            r.width().is_finite() && r.height().is_finite() && r.width() > 0.0 && r.height() > 0.0
+        });
         let origin = ch
             .origin()
             .map(|(x, y)| Point::new(x.value, y.value))
@@ -629,6 +645,7 @@ fn build_text_object(
         collected.push(TextChar {
             unicode: ch.unicode_string(),
             bbox,
+            ink,
             origin,
             width: bbox.width(),
             angle: ch.angle_degrees().unwrap_or(0.0),
@@ -640,7 +657,7 @@ fn build_text_object(
         index,
         form_path: form_path.to_vec(),
         font_name,
-        font_size: object.scaled_font_size().value,
+        font_size: visual_font_size(object, ancestors),
         unscaled_font_size: object.unscaled_font_size().value,
         is_embedded,
         font_flags,

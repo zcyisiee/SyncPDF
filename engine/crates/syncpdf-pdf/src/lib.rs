@@ -3,10 +3,12 @@
 #![warn(missing_debug_implementations, rust_2018_idioms)]
 
 pub mod content;
+pub mod dual;
 pub mod pdfium;
 
 pub mod bind;
 pub mod embed;
+pub mod font_traits;
 pub mod links;
 pub mod patch;
 pub mod source_atom;

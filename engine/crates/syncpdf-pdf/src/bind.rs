@@ -43,6 +43,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lopdf::{Dictionary, Document, Object, ObjectId};
 use smallvec::{smallvec, SmallVec};
+use syncpdf_core::ir::PathStroke;
 use syncpdf_core::ir::{DisplayItem, FontRef, Glyph, GlyphFlags, GlyphSource, PageIR};
 use syncpdf_core::{Color, GlyphId, Matrix, ObjRef, OpKey, PageId, Point, Rect};
 
@@ -112,10 +113,49 @@ pub struct ObjectGeometryEvidence {
     /// Font resolved in the source operation's resource scope, including generation.
     pub font_id: ObjRef,
     pub byte_range: (u32, u32),
+    /// 该字符串操作数在 TJ 数组里的元素下标（Tj/'/" 恒为 0）。
+    pub element_index: u32,
     /// Derived from this object's rotated bounds transformed through ancestor Forms.
     pub object_bounds: ObjectBounds,
     pub unicode: Vec<char>,
     pub unicode_source: ObjectUnicodeSource,
+}
+
+/// 一个操作级不可证明的源操作及其不可删除的页面墨迹。
+///
+/// 来源：`bind_glyphs` 的降级分支（对齐不可解释 / unbound 字形），且该操作
+/// 的 pdfium 对象边界可取（经 Form/CTM 变换到页面坐标）。该操作的字形**永不
+/// 删除**（§7 不变量）；与之相交的段落不送译、保留原文（原因码
+/// `unmapped_source_glyph`）。取不到几何的降级操作不进本结构，而是留在
+/// `issues` 里让门禁按页级拒绝。
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnprovenSourceOp {
+    /// 不可证明的源操作（其字形永不删除）。
+    pub op: OpKey,
+    /// 页面坐标下的 pdfium 对象边界：不可删除源墨迹。
+    pub ink: Rect,
+    /// 降级原因（诊断字符串，进事件）。
+    pub note: String,
+}
+
+/// 页级绑定可靠性：`check_replacement` 拒绝（结构错误）时整页保留原文。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PageReliability {
+    /// 门禁通过（可能带操作级 [`UnprovenSourceOp`] 记录，按段落粒度处理）。
+    #[default]
+    Reliable,
+    /// 页级结构错误：该页不删除任何字形、全部段落保留原文。
+    Unreliable,
+}
+
+impl PageReliability {
+    pub fn is_reliable(&self) -> bool {
+        matches!(self, Self::Reliable)
+    }
+
+    pub fn is_unreliable(&self) -> bool {
+        matches!(self, Self::Unreliable)
+    }
 }
 
 /// 绑定结果。
@@ -130,9 +170,12 @@ pub struct BoundPage {
     pub form_dos: Vec<FormDo>,
     /// 页对象 id。
     pub page_id: ObjectId,
+    /// 页级可靠性（source 阶段在 `check_replacement` 拒绝后标记）。
+    pub reliability: PageReliability,
     // Expected code/byte coverage from parsed source operations, independent of IR assembly.
     source_spans: Vec<(OpKey, u32, u32)>,
     object_geometry_evidence: Vec<ObjectGeometryEvidence>,
+    unproven_ops: Vec<UnprovenSourceOp>,
     source_snapshot: SourceSnapshot,
 }
 
@@ -187,8 +230,32 @@ impl BoundPage {
         &self.object_geometry_evidence
     }
 
+    /// 操作级不可证明（且有几何记录）的源操作墨迹。
+    pub fn unproven_source_ops(&self) -> &[UnprovenSourceOp] {
+        &self.unproven_ops
+    }
+
+    /// 该操作是否操作级不可证明（其字形永不删除）。
+    pub fn is_unproven_op(&self, op: &OpKey) -> bool {
+        self.unproven_ops.iter().any(|u| &u.op == op)
+    }
+
+    /// source 阶段在 `check_replacement` 拒绝后调用：整页保留原文。
+    ///
+    /// 拒绝原因进 `issues`（随事件上报），之后该页不删除任何字形、
+    /// 全部段落保留原文（原因码 `bind_page_unreliable`）。
+    pub fn mark_page_unreliable(&mut self, reason: String) {
+        self.reliability = PageReliability::Unreliable;
+        self.issues.push(reason);
+    }
+
     /// Fail closed on reported anomalies and ambiguous/missing source identities.
     /// This only rejects known unsafe bindings; it does not certify the aligner.
+    ///
+    /// 操作级降级（有 [`UnprovenSourceOp`] 几何记录）不算失败：这些操作的
+    /// 字形永不删除、相交段落保留原文，页面其余部分照常替换。任何没有几何
+    /// 记录的降级操作（无 pdfium 对象、对象边界不可取）都会在这里 fail
+    /// closed，按页级拒绝——不猜。
     pub fn check_replacement(&self) -> Result<(), ReplacementError> {
         let mut source_ops = BTreeSet::new();
         for &(op, _, _) in &self.source_spans {
@@ -197,14 +264,17 @@ impl BoundPage {
             }
         }
         let s = self.stats;
-        if s.degraded != 0
-            || s.unbound_glyphs != 0
-            || s.text_objects != s.text_ops
+        // `degraded` 计入恒等式；且每个降级操作都必须有几何记录。
+        // `unbound_glyphs` 只住在降级操作里：降级为 0 而未绑定字形非 0 即矛盾。
+        if s.text_objects != s.text_ops
             || u64::from(s.matched)
                 + u64::from(s.space_collapsed)
                 + u64::from(s.object_geometry_bound_ops)
+                + u64::from(s.degraded)
                 != u64::from(s.text_ops)
             || s.object_geometry_bound_ops as usize != self.object_geometry_evidence.len()
+            || s.degraded as usize != self.unproven_ops.len()
+            || (s.degraded == 0 && s.unbound_glyphs != 0)
         {
             return Err(ReplacementError::Statistics(s));
         }
@@ -221,7 +291,7 @@ impl BoundPage {
                 || e.byte_range.0 != 0
                 || g.is_none_or(|g| {
                     g.code != e.code
-                        || g.source.element_index != 0
+                        || g.source.element_index != e.element_index
                         || g.source.string_operand_range != e.byte_range
                         || g.bbox != e.object_bounds.bbox
                         || g.matrix
@@ -304,6 +374,14 @@ struct Ctx {
     /// q/Q can span consecutive page Contents streams. Text-state parameters
     /// are part of the saved graphics state; source geometry still comes from PDFium.
     saved: Vec<SavedTextState>,
+    /// Stroke color inherited by the next paint op. `None` means the color space
+    /// is unknown (e.g. a pattern), so the line can never be a faithful decoration.
+    stroke_color: Option<Color>,
+    line_width: f32,
+    stroke_plain: bool,
+    /// A `W`/`W*` in this graphics-state scope means later paint may be clip
+    /// construction rather than visible ink; such lines are never decorations.
+    clipped: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -315,6 +393,10 @@ struct SavedTextState {
     h_scale: f32,
     font_name: String,
     font_size: f32,
+    stroke_color: Option<Color>,
+    line_width: f32,
+    stroke_plain: bool,
+    clipped: bool,
 }
 
 impl Ctx {
@@ -329,6 +411,10 @@ impl Ctx {
             h_scale: 1.0,
             font_name: String::new(),
             font_size: 0.0,
+            stroke_color: Some(Color::BLACK),
+            line_width: 1.0,
+            stroke_plain: true,
+            clipped: false,
             resources,
             saved: Vec::new(),
         }
@@ -338,7 +424,6 @@ impl Ctx {
 /// 一条扁平化的 text-show 操作（未配对前）。
 #[derive(Debug, Clone)]
 struct FlatTextOp {
-    is_tj: bool,
     form_path: Vec<u32>,
     key: OpKey,
     /// 显示操作携带的字符串（`TJ` 为数组里的全部字符串，按出现次序）。
@@ -827,45 +912,35 @@ fn to_unicode_of(doc: &Document, font_id: ObjectId) -> ToUnicodeMap {
 }
 
 /// 由 `/FontDescriptor` 与名字推断字体特征：`(serif, fixed_pitch, italic, bold)`。
+///
+/// 只做 FontDescriptor 度量与名字的提取；判定逻辑（hjfy 的
+/// Flags → 度量 → 名字三层融合，见任务 T1）在 [`crate::font_traits`]。
 fn font_traits(doc: &Document, d: &Dictionary, base_font: &str) -> (bool, bool, bool, bool) {
-    let (mut serif, mut fixed, mut italic, mut bold) = (false, false, false, false);
-    if let Some(fd) = dict_ref(d, b"FontDescriptor").and_then(|id| deref_dict(doc, id)) {
-        if let Ok(flags) = fd.get(b"Flags").and_then(|o| o.as_i64()) {
-            serif = flags & 2 != 0;
-            fixed = flags & 1 != 0;
-            italic = flags & 64 != 0;
-            bold = flags & (1 << 18) != 0;
-        }
-        if let Ok(v) = fd.get(b"StemV").and_then(|o| o.as_float()) {
-            if v > 120.0 {
-                bold = true;
-            }
-        }
-        if let Ok(v) = fd.get(b"ItalicAngle").and_then(|o| o.as_float()) {
-            if v.abs() > 0.01 {
-                italic = true;
-            }
-        }
-        if let Ok(o) = fd.get(b"FontName") {
-            if let Some(n) = name_of(o) {
-                let flat = n.rsplit('+').next().unwrap_or(&n).to_ascii_lowercase();
-                if flat.contains("bold") {
-                    bold = true;
-                }
-                if flat.contains("italic") || flat.contains("oblique") {
-                    italic = true;
-                }
-            }
-        }
-    }
-    let lower = base_font.to_ascii_lowercase();
-    if lower.contains("bold") {
-        bold = true;
-    }
-    if lower.contains("italic") || lower.contains("oblique") {
-        italic = true;
-    }
-    (serif, fixed, italic, bold)
+    use crate::font_traits::{infer, Metrics};
+
+    let Some(fd) = dict_ref(d, b"FontDescriptor").and_then(|id| deref_dict(doc, id)) else {
+        let t = infer(Metrics::default(), &[base_font]);
+        return (t.serif, t.fixed_pitch, t.italic, t.bold);
+    };
+    let num = |key: &[u8]| {
+        fd.get(key)
+            .ok()
+            .and_then(|o| o.as_float().ok())
+            .map(f64::from)
+    };
+    let metrics = Metrics {
+        flags: fd.get(b"Flags").ok().and_then(|o| o.as_i64().ok()),
+        font_weight: num(b"FontWeight"),
+        italic_angle: num(b"ItalicAngle"),
+        stem_v: num(b"StemV"),
+    };
+    let descriptor_name = fd.get(b"FontName").ok().and_then(name_of);
+    let names: Vec<&str> = match &descriptor_name {
+        Some(n) => vec![base_font, n.as_str()],
+        None => vec![base_font],
+    };
+    let t = infer(metrics, &names);
+    (t.serif, t.fixed_pitch, t.italic, t.bold)
 }
 
 // ---------------------------------------------------------------------------
@@ -1004,6 +1079,10 @@ fn walk_stream(
                 h_scale: ctx.h_scale,
                 font_name: ctx.font_name.clone(),
                 font_size: ctx.font_size,
+                stroke_color: ctx.stroke_color,
+                line_width: ctx.line_width,
+                clipped: ctx.clipped,
+                stroke_plain: ctx.stroke_plain,
             }),
             "Q" => {
                 if let Some(saved) = ctx.saved.pop() {
@@ -1014,8 +1093,34 @@ fn walk_stream(
                     ctx.h_scale = saved.h_scale;
                     ctx.font_name = saved.font_name;
                     ctx.font_size = saved.font_size;
+                    ctx.stroke_color = saved.stroke_color;
+                    ctx.line_width = saved.line_width;
+                    ctx.clipped = saved.clipped;
+                    ctx.stroke_plain = saved.stroke_plain;
                 }
             }
+            "w" => {
+                if let Some(v) = op.operands.first().and_then(Operand::as_f64) {
+                    ctx.line_width = v as f32;
+                }
+            }
+            // Device color only: a pattern/ICC space cannot be reproduced as a
+            // solid decoration, so the color becomes unknown and stays rejected.
+            // Stroke color only. Fill-only ops (`g`/`rg`/`k`) leave the stroke
+            // color untouched; unknown color spaces make it unknown (rejected).
+            // Unsupported pen effects cannot be represented by width + RGB.
+            // Keep the refusal until Q restores a known enclosing state.
+            "gs" => ctx.stroke_plain = false,
+            "J" | "j" => {
+                ctx.stroke_plain &= op.operands.first().and_then(Operand::as_f64) == Some(0.0);
+            }
+            "d" => {
+                ctx.stroke_plain &=
+                    matches!(op.operands.first(), Some(Operand::Array(a)) if a.is_empty());
+            }
+            "G" => ctx.stroke_color = gray(&op.operands),
+            "RG" => ctx.stroke_color = rgb(&op.operands),
+            "K" | "CS" | "SC" | "SCN" => ctx.stroke_color = None,
             "cm" => {
                 if let Some(m) = matrix_from_array(&op.operands) {
                     ctx.ctm = m.then(&ctx.ctm);
@@ -1112,17 +1217,56 @@ fn walk_stream(
             }
             // End-path without painting also consumes clipping paths (W/W* n).
             // Otherwise the next painted path inherits a phantom page-sized bbox.
-            "n" => path_pts.clear(),
+            "n" => path_pts.clear(), // Ends the path, NOT the active clipping scope.
+            "W" | "W*" => ctx.clipped = true,
             "f" | "F" | "f*" | "B" | "B*" | "b" | "b*" | "S" | "s" => {
                 if !path_pts.is_empty() {
                     let bbox = points_bbox(&path_pts, &ctx.ctm);
                     let o = op.operator.as_str();
                     let is_fill = matches!(o, "f" | "F" | "f*" | "B" | "B*" | "b" | "b*");
                     let is_stroke = matches!(o, "B" | "B*" | "b" | "b*" | "S" | "s");
+                    // Only a plain `S`/`s` over a single unclipped two-point segment
+                    // can be a text underline. Composite fill+stroke paths, multi-
+                    // segment paths, clip construction, unknown colors and Form-
+                    // internal lines are left unbound and keep being opaque artwork.
+                    let m = ctx.ctm;
+                    let scale = m.a.hypot(m.b);
+                    let conformal = scale.is_finite()
+                        && scale > 0.0
+                        && (scale - m.c.hypot(m.d)).abs() <= 1e-5 * scale
+                        && (m.a * m.c + m.b * m.d).abs() <= 1e-5 * scale * scale;
+                    let width = ctx.line_width * scale;
+                    let simple = matches!(o, "S" | "s")
+                        && path_pts.len() == 2
+                        && op_index >= 2
+                        && ops[op_index - 2].operator == "m"
+                        && ops[op_index - 1].operator == "l"
+                        && conformal
+                        && width.is_finite()
+                        && width > 0.0
+                        && ctx.stroke_plain
+                        && !ctx.clipped
+                        && ctx.stroke_color.is_some()
+                        && form_path.is_empty()
+                        && [bbox.x0, bbox.y0, bbox.x1, bbox.y1]
+                            .iter()
+                            .all(|v| v.is_finite())
+                        && bbox.width() > 0.0
+                        && bbox.height() <= 0.01;
+                    let stroke = simple.then(|| PathStroke {
+                        op: key,
+                        width,
+                        color: ctx.stroke_color.unwrap_or_default(),
+                    });
+                    let stroke = match (stroke, ctx.stroke_color) {
+                        (Some(s), Some(_)) => Some(s),
+                        _ => None,
+                    };
                     out.items.push(DisplayItem::Path {
                         bbox,
                         is_fill,
                         is_stroke,
+                        stroke,
                     });
                     path_pts.clear();
                 }
@@ -1136,7 +1280,6 @@ fn walk_stream(
                     let strings: Vec<Vec<u8>> =
                         op.text_strings().into_iter().map(|s| s.to_vec()).collect();
                     out.flat_text.push(FlatTextOp {
-                        is_tj: op.operator == "Tj",
                         form_path: form_path.to_vec(),
                         key,
                         strings,
@@ -1260,6 +1403,23 @@ fn handle_do(
         }
     }
     out.items.push(DisplayItem::FormEnd);
+}
+
+/// Device gray stroke (`G`); a non-finite operand is unknown, not black.
+fn gray(operands: &[Operand]) -> Option<Color> {
+    let v = operands.first().and_then(Operand::as_f64)? as f32;
+    v.is_finite().then(|| Color::rgb(v, v, v))
+}
+
+/// Device RGB stroke (`RG`); anything else leaves the stroke color unknown.
+fn rgb(operands: &[Operand]) -> Option<Color> {
+    let c: Vec<f32> = operands
+        .iter()
+        .take(3)
+        .filter_map(|o| o.as_f64())
+        .map(|v| v as f32)
+        .collect();
+    (c.len() == 3 && c.iter().all(|v| v.is_finite())).then(|| Color::rgb(c[0], c[1], c[2]))
 }
 
 fn form_clip(dict: &Dictionary, ctm: &Matrix) -> Option<Rect> {
@@ -1463,6 +1623,15 @@ fn cluster_by_origin<'c>(real: &'c [&'c TextChar]) -> Vec<&'c [&'c TextChar]> {
         }
     }
     out
+}
+
+/// A partial set of character boxes is not evidence for the whole glyph.
+fn cluster_ink(cluster: &[&TextChar]) -> Option<Rect> {
+    let first = cluster.first()?.ink?;
+    cluster
+        .iter()
+        .skip(1)
+        .try_fold(first, |bbox, c| Some(bbox.union(&c.ink?)))
 }
 
 /// 簇的 Unicode 拼接（无映射字符贡献空串）。
@@ -1805,6 +1974,7 @@ fn bind_glyphs(
     stats: &mut BindStats,
     issues: &mut Vec<String>,
     evidence: &mut Vec<ObjectGeometryEvidence>,
+    unproven: &mut Vec<UnprovenSourceOp>,
 ) -> GlyphGroups {
     let mut out = GlyphGroups::new();
     for (path, ops) in ops_by_group {
@@ -1836,8 +2006,9 @@ fn bind_glyphs(
                     let real: Vec<&TextChar> =
                         obj.chars.iter().filter(|c| !c.is_generated).collect();
                     stats.generated_chars += (obj.chars.len() - real.len()) as u32;
+                    // 单字符串、单 code、串长恰为 code 宽度：Tj/TJ/'/" 在
+                    // 字形身份上等价，统一按结构性质准入（不看操作符字面）。
                     let recovery = if real.is_empty()
-                        && fop.is_tj
                         && codes.len() == 1
                         && fop.strings.len() == 1
                         && fop.strings[0].len() == w
@@ -1917,31 +2088,58 @@ fn bind_glyphs(
                             .map(|r| r.0.bbox)
                             .or_else(|| geom.map(|c| c.bbox))
                             .unwrap_or_default();
+                        // 墨迹证据：本 code 消费的簇里所有字符 tight box 的并集。
+                        // 无簇证据 / 全部退化时为 `None`，调用方沿用 `bbox` 保守语义。
+                        let ink = step
+                            .cluster
+                            .or(if step.collapsed {
+                                last_ws_cluster
+                            } else {
+                                None
+                            })
+                            .and_then(|ki| cluster_ink(clusters[ki]));
                         let origin = recovery
                             .as_ref()
                             .map(|r| r.0.origin)
                             .or_else(|| geom.map(|c| c.origin))
                             .unwrap_or(Point::new(bbox.x0, bbox.y0));
-                        let advance = match &enc.widths {
-                            Some(w) => w.advance_pt(*code, fop.font_size),
-                            None => f32::NAN,
-                        };
-                        let advance = advance
-                            + fop.char_spacing
-                            + if matches!(enc.kind, EncodingKind::Single) && *code == 32 {
-                                fop.word_spacing
-                            } else {
-                                0.0
-                            };
-                        let matrix = Matrix::translate(origin.x, origin.y);
+                        // 线性部分只保留页空间基线方向（pdfium 字符角已含 Tm、CTM
+                        // 与各层 Form 矩阵，按顺时针计）；无字符证据时按水平处理。
+                        let (sin, cos) = geom.map_or(0.0, |c| -c.angle.to_radians()).sin_cos();
+                        let matrix = Matrix::new(cos, sin, -sin, cos, origin.x, origin.y);
                         let is_space = unicode.first().is_some_and(|c: &char| c.is_whitespace());
                         let (fill, render_mode) = (obj.fill, obj.render_mode);
-                        // pdfium 的正式字号（Tf 原值）优先；快照字号兜底。
-                        let size = if obj.unscaled_font_size > 0.0 {
+                        // 有效字号（视觉字号，已含 Tm/CTM 缩放）优先。`Glyph.size`
+                        // 的契约是「已含文本矩阵与 CTM 的缩放」；Tf 原值与快照字号
+                        // 只是 pdfium 缺席时的兜底。字号藏在 CTM 里（`Tf 1` + `cm`
+                        // 缩放）的文档按 Tf 原值绑定会把整段正文当 1pt 字号。
+                        let size = if obj.font_size > 0.0 {
+                            obj.font_size
+                        } else if obj.unscaled_font_size > 0.0 {
                             obj.unscaled_font_size
                         } else {
                             fop.font_size
                         };
+                        // 字宽按同一有效字号折算：`advance_pt` 的尺寸参数必须与
+                        // `size` 同一语义（视觉 pt），否则 Tz/CTM 缩放文档的宽度
+                        // 与字号不同度量。Tc/Tw 是文本空间常量，同步乘上
+                        // `size / fop.font_size`（pdfium 对象缺席时为 1）。
+                        let size_scale = if fop.font_size > 0.0 {
+                            size / fop.font_size
+                        } else {
+                            1.0
+                        };
+                        let advance = match &enc.widths {
+                            Some(w) => w.advance_pt(*code, fop.font_size) * size_scale,
+                            None => f32::NAN,
+                        };
+                        let advance = advance
+                            + fop.char_spacing * size_scale
+                            + if matches!(enc.kind, EncodingKind::Single) && *code == 32 {
+                                fop.word_spacing * size_scale
+                            } else {
+                                0.0
+                            };
                         if step.cluster.is_none() && recovery.is_none() {
                             if step.collapsed {
                                 n_collapsed += 1;
@@ -1964,6 +2162,7 @@ fn bind_glyphs(
                             size,
                             matrix,
                             bbox,
+                            ink,
                             advance,
                             fill,
                             render_mode,
@@ -1997,6 +2196,7 @@ fn bind_glyphs(
                             code: codes[0].0,
                             font_id,
                             byte_range: codes[0].2,
+                            element_index: codes[0].1,
                             object_bounds,
                             unicode,
                             unicode_source,
@@ -2010,7 +2210,7 @@ fn bind_glyphs(
                     } else {
                         stats.degraded += 1;
                         stats.unbound_glyphs += n_unbound;
-                        issues.push(format!(
+                        let note = format!(
                             "align op={} stream={} codes={} clusters={} collapsed={} unbound={} leftover={} to_unicode_mismatch={}",
                             fop.key.op_index,
                             fop.key.stream.obj,
@@ -2020,12 +2220,23 @@ fn bind_glyphs(
                             n_unbound,
                             leftovers,
                             n_mismatch
-                        ));
+                        );
+                        // 操作级降级：几何可取 → 记录不可删除墨迹（段落按此排除）；
+                        // 几何不可取 → 保持 fail-closed（issues 非空 → 门禁按页级拒绝）。
+                        match obj.object_bounds {
+                            Some(bounds) => unproven.push(UnprovenSourceOp {
+                                op: fop.key,
+                                ink: bounds.bbox,
+                                note,
+                            }),
+                            None => issues.push(format!("{note}; no object bounds")),
+                        }
                     }
                     glyphs
                 }
                 None => {
                     // 降级：无 pdfium 对象，自行解码计数，无 unicode / 空 bbox。
+                    // 无对象即无几何 → 页级 fail-closed（不进 unproven 记录）。
                     stats.degraded += 1;
                     stats.unbound_glyphs += codes.len() as u32;
                     issues.push(format!(
@@ -2052,6 +2263,8 @@ fn bind_glyphs(
                             size: fop.font_size,
                             matrix: Matrix::IDENTITY,
                             bbox: Rect::default(),
+                            // 无 pdfium 对象：没有墨迹证据。
+                            ink: None,
                             advance,
                             fill: Color::BLACK,
                             render_mode: 0,
@@ -2182,6 +2395,7 @@ pub fn bind_page(worker: &PdfiumWorker, doc: DocId, lo: &Document, page: u32) ->
     }
 
     let mut object_geometry_evidence = Vec::new();
+    let mut unproven_ops = Vec::new();
     let groups = bind_glyphs(
         lo,
         &ops_by_group,
@@ -2190,6 +2404,7 @@ pub fn bind_page(worker: &PdfiumWorker, doc: DocId, lo: &Document, page: u32) ->
         &mut stats,
         &mut out.issues,
         &mut object_geometry_evidence,
+        &mut unproven_ops,
     );
     let keys: Vec<_> = out.flat_text.iter().map(|op| op.key).collect();
     assign_glyphs(&mut out.items, &keys, groups, &mut out.issues);
@@ -2231,8 +2446,10 @@ pub fn bind_page(worker: &PdfiumWorker, doc: DocId, lo: &Document, page: u32) ->
         issues: out.issues,
         form_dos: out.form_dos,
         page_id,
+        reliability: PageReliability::Reliable,
         source_spans,
         object_geometry_evidence,
+        unproven_ops,
         source_snapshot: SourceSnapshot {
             contents,
             streams: out.stream_bytes,
@@ -2317,6 +2534,7 @@ mod tests {
             bbox: Rect::new(0.0, 0.0, 1200.0, 800.0),
             is_fill: true,
             is_stroke: false,
+            stroke: None,
         };
         assert!(
             matches!(clip_paint(item,clip),Some(DisplayItem::Path{bbox,..}) if bbox==Rect::new(300.0,500.0,400.0,700.0))
@@ -2350,7 +2568,7 @@ mod tests {
         );
         assert_eq!(out.items.len(), 1);
         assert!(
-            matches!(out.items[0], DisplayItem::Path { bbox, is_fill: true, is_stroke: false } if bbox == Rect::new(400.0,500.0,410.0,520.0))
+            matches!(out.items[0], DisplayItem::Path { bbox, is_fill: true, is_stroke: false, .. } if bbox == Rect::new(400.0,500.0,410.0,520.0))
         );
     }
 
@@ -2363,6 +2581,7 @@ mod tests {
             .map(|(unicode, x)| TextChar {
                 unicode: unicode.map(str::to_string),
                 bbox: Rect::default(),
+                ink: None,
                 origin: Point::new(*x, 700.0),
                 width: 12.0,
                 angle: 0.0,
@@ -2373,6 +2592,26 @@ mod tests {
         let clusters = cluster_by_origin(&real);
         let codes: Vec<_> = source.iter().map(|c| (*c, 0, (0, 2))).collect();
         align_codes_to_clusters(&codes, EncodingKind::Double, &map, &clusters)
+    }
+
+    #[test]
+    fn incomplete_cluster_ink_is_unknown_not_a_partial_box() {
+        let mut a = TextChar {
+            unicode: Some("f".into()),
+            bbox: Rect::new(0., 0., 12., 12.),
+            ink: Some(Rect::new(1., 1., 5., 10.)),
+            origin: Point::new(0., 0.),
+            width: 12.,
+            angle: 0.,
+            is_generated: false,
+        };
+        let mut b = a.clone();
+        b.ink = Some(Rect::new(5., 1., 10., 10.));
+        assert_eq!(cluster_ink(&[&a, &b]), Some(Rect::new(1., 1., 10., 10.)));
+        a.ink = None;
+        assert_eq!(cluster_ink(&[&a, &b]), None);
+        assert_eq!(cluster_ink(&[&b, &a]), None);
+        assert_eq!(cluster_ink(&[]), None);
     }
 
     #[test]
@@ -2684,6 +2923,152 @@ endcmap";
         assert_eq!(strip_subset_prefix("Helvetica"), "Helvetica");
         assert_eq!(strip_subset_prefix("abc+NotBold"), "abc+NotBold");
         assert_eq!(strip_subset_prefix("BOLD+No"), "BOLD+No");
+    }
+
+    /// 构造「字体字典 → FontDescriptor 引用」的自造夹具，返回 font_traits 四维判定。
+    fn traits_of(descriptor: Dictionary, base_font: &str) -> (bool, bool, bool, bool) {
+        let mut doc = Document::new();
+        let fd_id = doc.add_object(descriptor);
+        let font_id = doc.add_object(lopdf::dictionary! { "FontDescriptor" => fd_id });
+        let d = doc.get_object(font_id).unwrap().as_dict().unwrap();
+        font_traits(&doc, d, base_font)
+    }
+
+    #[test]
+    fn font_traits_tex_flags4_palladio_boldital_is_serif_bold_italic() {
+        // DeepSeek p8 实例：TeX 系 Flags=4（仅 Symbolic），四维只能靠度量与名字层。
+        let fd = lopdf::dictionary! {
+            "Flags" => 4,
+            "ItalicAngle" => -9.0,
+            "FontName" => Object::Name(b"ABCDEF+URWPalladioL-BoldItal".to_vec())
+        };
+        assert_eq!(
+            traits_of(fd, "ABCDEF+URWPalladioL-BoldItal"),
+            (true, false, true, true)
+        );
+    }
+
+    #[test]
+    fn font_traits_tex_flags4_lmmono_is_fixed_pitch() {
+        // DeepSeek p29 实例：LMMono10 Flags=4，名字层需救回等宽。
+        let fd = lopdf::dictionary! {
+            "Flags" => 4,
+            "FontName" => Object::Name(b"LMMono10-Regular".to_vec())
+        };
+        assert_eq!(
+            traits_of(fd, "LMMono10-Regular"),
+            (false, true, false, false)
+        );
+    }
+
+    #[test]
+    fn font_traits_cm_short_names() {
+        // hjfy 的 CM 短名特判：cmtt→mono、cmbx→serif+bold、cmti→serif+italic。
+        let fd = Dictionary::new();
+        assert_eq!(traits_of(fd.clone(), "CMTT10"), (false, true, false, false));
+        let fd = Dictionary::new();
+        assert_eq!(traits_of(fd.clone(), "CMBX12"), (true, false, false, true));
+        let fd = Dictionary::new();
+        assert_eq!(traits_of(fd, "CMTI10"), (true, false, true, false));
+    }
+
+    #[test]
+    fn font_traits_weight_700_implies_bold_without_name_clue() {
+        let fd = lopdf::dictionary! {
+            "FontWeight" => 700.0,
+            "FontName" => Object::Name(b"XYZQuux-Regular".to_vec())
+        };
+        assert_eq!(
+            traits_of(fd, "XYZQuux-Regular"),
+            (false, false, false, true)
+        );
+    }
+
+    #[test]
+    fn font_traits_times_italic_with_proper_flags_does_not_regress() {
+        // Word 系 Flags 位正确：serif(bit2)/italic(bit7) 保持，不依赖名字层。
+        let fd = lopdf::dictionary! {
+            "Flags" => 2 | 64,
+            "FontName" => Object::Name(b"TimesNewRomanPS-ItalicMT".to_vec())
+        };
+        assert_eq!(
+            traits_of(fd, "TimesNewRomanPS-ItalicMT"),
+            (true, false, true, false)
+        );
+    }
+
+    #[test]
+    fn font_traits_sans_families_are_not_serif() {
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd.clone(), "Helvetica-Bold"),
+            (false, false, false, true)
+        );
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd.clone(), "ArialMT"),
+            (false, false, false, false)
+        );
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd, "LMSans10-Regular"),
+            (false, false, false, false)
+        );
+    }
+
+    #[test]
+    fn font_traits_ordinary_fonts_are_not_mono() {
+        // Times 是衬线家族（名字层判 serif 正确），但不是 mono；Helvetica 全 false。
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd.clone(), "TimesNewRomanPSMT"),
+            (true, false, false, false)
+        );
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(traits_of(fd, "Helvetica"), (false, false, false, false));
+    }
+
+    #[test]
+    fn font_traits_unknown_family_keeps_flags() {
+        // 未知家族 + Flags=4：四维全 false；Flags 显式 serif/fixed 的位保持。
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd.clone(), "XYZFoo-Regular"),
+            (false, false, false, false)
+        );
+        let fd = lopdf::dictionary! { "Flags" => 2 | 1 };
+        assert_eq!(traits_of(fd, "XYZBar"), (true, true, false, false));
+    }
+
+    #[test]
+    fn font_traits_real_sample_shapes() {
+        // 2604/TRC 的真实形态：URW 的 roma 正体记号、Courier 关键词、STIX 家族。
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd.clone(), "URXHTJ+URWPalladioL-Roma"),
+            (true, false, false, false)
+        );
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd.clone(), "CourierNewPS-ItalicMT"),
+            (false, true, true, false)
+        );
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(traits_of(fd, "STIX-Regular"), (true, false, false, false));
+    }
+
+    #[test]
+    fn font_traits_style_words_bold_and_slanted() {
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd.clone(), "SomeFont-Black"),
+            (false, false, false, true)
+        );
+        let fd = lopdf::dictionary! { "Flags" => 4 };
+        assert_eq!(
+            traits_of(fd, "SomeFont-Slanted"),
+            (false, false, true, false)
+        );
     }
 
     #[test]

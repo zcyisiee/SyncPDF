@@ -8,7 +8,8 @@
 //! - [`shape`]：harfrust 塑形（输出单位 pt）；
 //! - [`subset`]：subsetter 子集化（gid 重映射，见模块注释）；
 //! - [`embed`]：pdf-writer 生成 Type0/CIDFontType2 + 自定义 CMap + ToUnicode + /W；
-//! - [`profile`]：角色 → 字体链（Body/DocTitle/ParagraphTitle/Mono/Raster）。
+//! - [`profile`]：角色 × 变体槽（Body/DocTitle/ParagraphTitle/Mono/Raster ×
+//!   regular/bold/italic/bold-italic），缺真斜体面时标记合成剪切。
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations, rust_2018_idioms)]
 
@@ -22,7 +23,10 @@ pub mod subset;
 pub use embed::{embed_font, encode_gids, EmbeddedFont};
 pub use loader::{FontId, FontQuery, FontStore, LoadedFont};
 pub use metrics::{advance, gid_for, has_char, metrics, Metrics};
-pub use profile::{default_profile, FontProfile, Role};
+pub use profile::{
+    default_profile, lang_script, resolve_variant, synthetic_italic_shear, FontProfile,
+    FontVariant, Role, VariantFace, SYNTHETIC_ITALIC_SHEAR_DEGREES,
+};
 pub use shape::{shape, shape_runs, shape_runs_directional, ShapedGlyph};
 pub use subset::{subset, SubsetResult};
 

@@ -63,7 +63,7 @@ bdt check --workdir tmp/paper --strict
 
 ## Rust 后端试用入口
 
-`bdt rust-translate` 使用现有 `syncpdf-cli translate --translator pi` 翻译一份 PDF。先自行构建 `engine/target/release/syncpdf-cli`，或用 `--engine` 指向已有可执行文件；本命令不会构建引擎、安装模型或修改 pi 提供方配置。pi 及所选模型需要在运行环境中预先可用。动态链接的ONNX Runtime/PDFium也须可被当前引擎找到；本机开发验收环境可先执行 `source tmp/backend-repair/codex-r1-integration/env.sh`（配置库路径，未安装依赖）。
+`bdt rust-translate` 调用现有Rust sidecar翻译一份PDF，默认`--translator pi`，也支持`--translator agy --model gemini-3.8-flash-low`。先自行构建引擎，或用`--engine`指向已有可执行文件；隔离worktree验证必须使用各自私有Cargo target，不能误用其它树二进制。本命令不会构建引擎、安装模型或修改提供方配置；对应CLI/模型以及ONNX Runtime/PDFium须预先可用。本轮本机验收环境为`source tmp/paper-iteration/env.sh`（再覆盖为当前树的私有`CARGO_TARGET_DIR`）；历史env含已删除worktree路径，不直接复用。
 
 ```bash
 # 在本仓库根目录运行；每次使用新的 workdir
@@ -74,6 +74,8 @@ bdt check --workdir tmp/paper --strict
 
 省略 `--pages` 会处理全文；`--source-lang` 默认 `auto`，`--target-lang` 默认 `zh-CN`，`--layout-device` 可选 `auto`、`cpu`、`coreml`。命令将 Rust 事件逐条保存到 `<workdir>/events.jsonl`，引擎日志保存到 `stderr.log`，运行结果保存到 `result.json`；译文可用时还会有 `translated.pdf`。stdout 仍只有一行 JSON，简短阶段和页面进度走 stderr。`result.json` 记录已保存页中的成功块、已排版块、已保存页数、未成功块、送译前冲突块数（`blocked_before_translation`）、覆盖缺口页（`coverage_gap_pages`）、未替换块及产物路径；typeset完成但所在页尚未保存的不计入成功块。`run_finished.ok=false`、引擎非零退出、缺最终事件或缺 PDF 均返回失败，即使已有部分译文 PDF。已有运行日志/产物时拒绝复用目录；请指定新 workdir。输入 PDF 不能是该目录的 `translated.pdf`。
 
+可追加`--glossaries terms.csv`统一术语。CSV必须含`source,target`列，共享loader负责去空白、重复源词后者覆盖及排序；`note`列可空，非空备注目前明确拒绝。词表进入主请求和补救请求，整个规范化词表参与翻译缓存身份；修改词表或从无表改为有表不会误用旧译文。内部JSON sidecar由bdt生成，无需用户维护。提示约束不等于语义已验收，仍需人工核对。
+
 仅调整排版代码后，可用已有真实译文重新编译，无模型请求；未命中或校验失败的块保留原文并列为未完成：
 
 ```bash
@@ -82,9 +84,19 @@ bdt check --workdir tmp/paper --strict
   --layout-device coreml
 ```
 
-`--cached-from` 只读复制原运行目录的译文数据库到新目录，仍按源文本、语言与协议版本核对并校验内容；不要改变目标语言后假定旧缓存仍命中。它是缓存重编译入口，尚未提供逐块字体/字号编辑接口。
+`--cached-from` 只读复制原运行目录的译文数据库到新目录，仍按源文本、语言、协议、学术规则及术语表核对并校验内容；须传入与原运行相同的`--glossaries`（如原运行用了词表），不要改变上述身份后假定旧缓存仍命中。它是缓存重编译入口，尚未提供逐块字体/字号编辑接口。
 
-全局调整译文字号与相对行距：追加`--font-scale 0.9 --line-height 1.3`。前者将每个译文样式字号乘0.9，保持标题/正文/小字的相对层级；后者指定**基线间距=缩放后的段落主字号×1.3**，是无量纲倍数，不是pt或额外空隙。源公式保留原尺寸；若其上下标/分式会撞相邻行，仅增加该处必需的行距。默认font-scale=1、line-height不覆盖（沿用源行距/字号比例）；只改字号时行距也按原比例联动。两值须为有限正数，实际设置记录在`result.json`的`typography`中。源IR、译文缓存键和保护原文不改；无法容纳不会再自动降低字号/行距，仍为部分结果。页保存前现会按已接受译文墨迹重算同栏垂直净空，最多3轮；不跨栏、不扩大表格单元格，也不再次调用布局模型。
+追加 `--dual` 会同时生成 `translated.pdf` 和 `dual.pdf`。双语 PDF 每页为 **420×297 mm 的 A3 横向**，左侧原文、右侧对应译文；各页按可见裁剪框和旋转方向等比例适配半页并居中，不裁切内容。文字/图形保留为 PDF 矢量内容，可选择文字；链接点击框及本地跳转位置随拼页转换，右侧内部链接仍跳到右侧。书签沿用原文目录。`--pages` 只限定翻译页，双语文件与单语文件一样保留完整页数，未选页右侧仍是原文。
+
+```bash
+~/miniconda3/envs/bdt/bin/python -m babeldoc_tools rust-translate paper.pdf \
+  --workdir tmp/rust-paper-dual --cached-from tmp/rust-paper-001 \
+  --font-scale 1.0 --line-height 1.5 --layout-device coreml --dual
+```
+
+双语文件在单语输出校验后由 Rust 生成并自检；请求导出却生成失败或缺文件时不能报告成功。`result.json` 增加 `dual_requested`、`dual_output_exists`；请求双语时 `artifacts` 中包含 `dual.pdf`。部分翻译仍保持原有非零退出状态，双语文件不代表漏译已补齐。不传 `--dual` 时只生成单语文件；已有运行目录不能覆盖，使用新 workdir。
+
+全局调整译文字号与相对行距：追加`--font-scale 0.9 --line-height 1.3`。前者将每个译文样式字号乘0.9，保持标题/正文/小字的相对层级；后者指定**基线间距=缩放后的段落主字号×1.3**，是无量纲倍数，不是pt或额外空隙。源公式保留原尺寸；若其上下标/分式会撞相邻行，仅增加该处必需的行距。默认font-scale=1、line-height不覆盖（沿用源行距/字号比例）；只改字号时行距也按原比例联动。两值须为有限正数，实际设置记录在`result.json`的`typography`中。源IR、译文缓存键和保护原文不改；不会自动缩小字号；显式`--line-height`下若仍有排不下的段，翻译结束后用已得译文整篇降一档行距（每步0.1，下限1.2）重排，回退段减少才采用，事件`line_height_lowered`记录实际行距，全文行距保持一致，不再调用模型。页保存前最多3轮按已接受译文墨迹回收上下净空、利用至右侧实际障碍前的空隙；必要时把同栏连续已译段整栈重排，保持顺序、字号/行距，段间距按原段距加行距放宽量，只在本页正文范围内移动，全栈都通过才移动，并且不能跨越固定内容；相邻段墨迹过近也按此整栈重排。横向受原页文字边界限制；不跨页、不扩大表格单元格，也不再次调用布局模型。选字按区域角色：正文（含Caption/Abstract/List 等一切非标题区域）用思源宋体（Noto Serif CJK SC），文档/段落标题用黑体（Noto Sans CJK SC）；保留粗斜体、颜色和相对字号，代码等等宽 run 用内置 JetBrains Mono（CJK 字形回退黑体）。CCS样本已验证`--font-scale 1.0 --line-height 1.5`全文190块完整写入，见[浮动排版验收](../reports/2026-09-22-rust-electron-rewrite/12-MVP真实翻译验收.md#typography-local-float)。
 
 ## Web 工作台
 

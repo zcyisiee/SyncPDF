@@ -74,6 +74,9 @@ crossbeam-channel = "0.5"
 # cli
 clap = { version = "4", features = ["derive"] }
 
+# unix fd（stdout 隔离）
+rustix = { version = "1.1", features = ["stdio"] }
+
 # dev
 tempfile = "3"
 insta = { version = "1", features = ["json"] }

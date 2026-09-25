@@ -2,7 +2,7 @@
 use lopdf::{dictionary, Document, Object, Stream};
 use syncpdf_core::ir::{Align, Paragraph, RegionKind, Translatable};
 use syncpdf_core::{GlyphId, ParagraphId};
-use syncpdf_pdf::bind::{bind_page, BoundPage, ReplacementError};
+use syncpdf_pdf::bind::{bind_page, BoundPage};
 use syncpdf_pdf::patch::{PatchError, PatchSet};
 use syncpdf_pdf::pdfium::PdfiumWorker;
 use syncpdf_pipeline::cancel::CancellationToken;
@@ -55,6 +55,7 @@ fn paragraph(bound: &BoundPage, ids: Vec<GlyphId>) -> Paragraph {
         text_spans: Vec::new(),
         style_runs: vec![],
         atoms: vec![],
+        decorations: Vec::new(),
         text: "source".into(),
         align: Align::Left,
         first_indent: 0.0,
@@ -64,8 +65,10 @@ fn paragraph(bound: &BoundPage, ids: Vec<GlyphId>) -> Paragraph {
     }
 }
 
+/// 空 ToUnicode 映射的操作：操作级不可证明（有几何），不再中止整份文档；
+/// 其字形成为不可删除墨迹，删除请求仍被整批拒绝。
 #[test]
-fn empty_mapping_source_rejects_before_returning_translation_input() {
+fn empty_mapping_becomes_undeletable_ink_instead_of_document_abort() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("unsafe.pdf");
     document(true).save(&path).unwrap();
@@ -76,24 +79,25 @@ fn empty_mapping_source_rejects_before_returning_translation_input() {
     let bound = bind_page(&worker, doc, &lo, 1).unwrap();
     assert_eq!(bound.stats.degraded, 1);
     assert_eq!(bound.stats.unbound_glyphs, 1);
-    assert!(matches!(
-        bound.check_replacement(),
-        Err(ReplacementError::Statistics(_))
-    ));
+    // O4：操作级降级（几何可取）不再让门禁拒绝整页。
+    bound.check_replacement().expect("操作级降级不应再拒绝整页");
+    let ink = bound.unproven_source_ops();
+    assert_eq!(ink.len(), 1, "降级操作应有墨迹记录：{:?}", bound.issues);
+    assert!(ink[0].ink.width() > 0.0 && ink[0].ink.height() > 0.0);
+    // source_analysis 不再中止，两页都返回且可靠。
     let mut progress = 0;
-    let result = source_analysis(
+    let bounds = source_analysis(
         &worker,
         doc,
         &lo,
         &[0, 1],
         &CancellationToken::new(),
         |_, _| progress += 1,
-    );
-    assert!(
-        matches!(result, Err(PipelineError::Protocol(ref msg)) if msg.contains("page 1 replacement rejected") && msg.contains("degraded: 1"))
-    );
-    assert_eq!(progress, 0);
-    assert_eq!(std::fs::read(&path).unwrap(), before);
+    )
+    .expect("操作级降级不应中止 source_analysis");
+    assert_eq!(progress, 2);
+    assert!(bounds.iter().all(|b| b.reliability.is_reliable()));
+    // 删除请求含该操作字形 → 整批拒绝，文档不动（§7：未证明字形永不删除）。
     let mut output = lo.clone();
     let before_objects = format!("{:?}", output.objects);
     let para = paragraph(&bound, bound.ir.glyphs().map(|g| g.id).collect());
@@ -102,6 +106,7 @@ fn empty_mapping_source_rejects_before_returning_translation_input() {
         Err(PipelineError::Protocol(_))
     ));
     assert_eq!(format!("{:?}", output.objects), before_objects);
+    assert_eq!(std::fs::read(&path).unwrap(), before);
     worker.close(doc);
 }
 

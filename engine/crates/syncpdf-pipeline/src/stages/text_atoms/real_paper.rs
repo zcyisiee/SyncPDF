@@ -31,11 +31,17 @@ fn cached_paper_atom_inventory_and_fixed_size_fit() {
     let hash = Sha256Hash::of(std::fs::read(&input).unwrap());
     let pages: Vec<PageIR> = store.get_stage(&hash, "source_analysis").unwrap().unwrap();
     assert!(!pages.is_empty());
+    std::fs::write(
+        output.join("source.json"),
+        serde_json::to_vec(&pages).unwrap(),
+    )
+    .unwrap();
     let doc = lopdf::Document::load(&input).unwrap();
     let (fonts, profile) =
         stages::load_fonts(&syncpdf_core::fixtures::fonts_dir().unwrap(), "zh-CN").unwrap();
     let shaper = stages::StoreShaper::new(&fonts, &profile);
     let mut records = Vec::new();
+    let mut all_paragraphs = Vec::new();
     for ir in pages {
         let key = format!(
             "layout-v3:fe3bc78476c982401caf389a8e8e928cb94cc0dbb89be73a363838f19fcaf271:CoreMl:150:0.4:{}",
@@ -48,8 +54,18 @@ fn cached_paper_atom_inventory_and_fixed_size_fit() {
             ir.page.0,
             stages::LayoutOpts::default().coverage_limit,
         );
+        std::fs::write(
+            output.join(format!("regions-{}.json", ir.page.0)),
+            serde_json::to_vec(&regions).unwrap(),
+        )
+        .unwrap();
+        stages::source_toc::refine(&mut regions, &ir, &doc);
         let mut paras = stages::analyze_page(&ir, &regions);
         stages::source_policy::protect_front_matter(&ir, &regions, &mut paras);
+        stages::source_decoration::claim(&ir, &mut paras);
+        stages::source_decoration::mark_styles(&ir, &mut paras);
+        stages::source_citations::protect(&mut paras, &ir, &doc);
+        all_paragraphs.extend(paras.iter().cloned());
         let frames = stages::frame::page_frames(&ir, &regions, &paras);
         for para in paras {
             if !matches!(para.translatable, Translatable::Yes) {
@@ -133,6 +149,11 @@ fn cached_paper_atom_inventory_and_fixed_size_fit() {
     std::fs::write(
         output.join("atom-inventory.json"),
         serde_json::to_vec_pretty(&records).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        output.join("all-paragraphs.json"),
+        serde_json::to_vec(&all_paragraphs).unwrap(),
     )
     .unwrap();
     println!("inventoried {} translatable paragraphs", records.len());

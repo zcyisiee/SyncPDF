@@ -29,7 +29,7 @@ use syncpdf_core::ir::{
     PageIR, Paragraph, ParagraphStatus, Region, Translatable, TypesetParagraph,
 };
 use syncpdf_core::ParagraphId;
-use syncpdf_font::{FontProfile, FontStore, Role};
+use syncpdf_font::{FontProfile, FontStore};
 use syncpdf_pdf::bind::BoundPage;
 use syncpdf_pdf::writer::FontStats;
 use syncpdf_protocol::{Event, Request, Severity, Stage, Stats, PROTOCOL_VERSION};
@@ -61,6 +61,8 @@ pub struct RunConfig {
     pub cache_only: bool,
     /// Explicit target-only scale/relative leading (source typography by default).
     pub typography: stages::typeset::Typography,
+    /// Optional additional A3 comparison export, produced after mono validation.
+    pub dual_output: Option<PathBuf>,
 }
 
 impl RunConfig {
@@ -77,6 +79,7 @@ impl RunConfig {
             run,
             cache_only: false,
             typography: stages::typeset::Typography::default(),
+            dual_output: None,
         })
     }
 
@@ -227,6 +230,15 @@ impl Pipeline {
         let fields = cfg
             .run_fields()
             .ok_or_else(|| PipelineError::Protocol("缺少 run 请求".into()))?;
+        if cfg
+            .dual_output
+            .as_deref()
+            .is_some_and(|path| path == fields.input || path == fields.output)
+        {
+            return Err(PipelineError::Protocol(
+                "双语输出不能覆盖原文或单语译文".into(),
+            ));
+        }
 
         // ── 0. 打开文档（preflight）────────────────────────────────────
         let worker = match syncpdf_pdf::pdfium::PdfiumWorker::spawn() {
@@ -456,6 +468,7 @@ impl Pipeline {
                 done: i as u32 + 1,
                 total: pages_ir.len() as u32,
             });
+            stages::source_toc::refine(&mut regions, page_ir, &main_doc);
             per_page_regions.push((page, regions));
         }
         if let Some(profile) = model
@@ -477,9 +490,23 @@ impl Pipeline {
                 .find(|p| p.page.0 == *page)
                 .ok_or_else(|| PipelineError::Protocol("区域所属页缺少 IR".into()))?;
             let mut paragraphs = analyze_page(ir, regions);
+            if let Some(b) = bound_pages.iter().find(|b| b.ir.page.0 == *page) {
+                // 不可证明源墨迹/页级不可信 → 段落保留原文（单一接入点）。
+                stages::source_unproven::protect(
+                    &mut paragraphs,
+                    b.reliability,
+                    b.unproven_source_ops(),
+                );
+            }
             stages::source_policy::protect_front_matter(ir, regions, &mut paragraphs);
+            stages::source_opaque::protect(&mut paragraphs, ir);
+            stages::source_opaque::keep_list_bullets(&mut paragraphs, ir);
+            stages::source_decoration::claim(ir, &mut paragraphs);
+            stages::source_decoration::mark_styles(ir, &mut paragraphs);
+            stages::source_citations::protect(&mut paragraphs, ir, &main_doc);
             all_paras.extend(paragraphs);
         }
+        stages::source_policy::protect_author_lists(&mut all_paras);
         for p in &all_paras {
             sink.emit(Event::Paragraph {
                 paragraph_id: p.id.clone(),
@@ -498,18 +525,28 @@ impl Pipeline {
             .cloned()
             .partition(|p| matches!(p.translatable, Translatable::Yes));
         for p in &not_replaced {
-            if matches!(&p.translatable, Translatable::No { reason } if matches!(reason.as_str(), "protected_source_overlap" | "rotated_source_text" | "translatable_region_overlap"))
-            {
-                sink.emit(Event::Issue {
-                    severity: Severity::Warning,
-                    code: match &p.translatable {
-                        Translatable::No { reason } => reason.clone(),
-                        _ => unreachable!(),
-                    },
-                    paragraph_id: Some(p.id.clone()),
-                    page: Some(p.id.page),
-                    message: "源段落的重叠归属或旋转方向尚未可靠处理，已保留原文".into(),
-                });
+            if let Translatable::No { reason } = &p.translatable {
+                let message = match reason.as_str() {
+                    "protected_source_overlap"
+                    | "rotated_source_text"
+                    | "translatable_region_overlap"
+                    | "unmapped_source_glyph" => {
+                        Some("源段落的重叠归属、旋转方向或未映射字形尚未可靠处理，已保留原文")
+                    }
+                    "bind_page_unreliable" => {
+                        Some("源绑定结构错误，整页保留原文，不删除该页任何字形")
+                    }
+                    _ => None,
+                };
+                if let Some(message) = message {
+                    sink.emit(Event::Issue {
+                        severity: Severity::Warning,
+                        code: reason.clone(),
+                        paragraph_id: Some(p.id.clone()),
+                        page: Some(p.id.page),
+                        message: message.into(),
+                    });
+                }
             }
             sink.emit(Event::Paragraph {
                 paragraph_id: p.id.clone(),
@@ -522,6 +559,9 @@ impl Pipeline {
         }
 
         // ── 4. translating + typesetting（流式）────────────────────────
+        // 行距下调会重放已落定段落；同一问题只报一次。
+        let mut distinct = SharedSink::new(descent::Distinct::new(sink.clone()));
+        let sink = &mut distinct;
         emit_stage_started(sink, Stage::Translating);
         let t = Instant::now();
 
@@ -553,6 +593,11 @@ impl Pipeline {
             }
         }
 
+        let origin = descent::Origin {
+            doc: main_doc.clone(),
+            frames: frames.clone(),
+            schedule: schedule.clone(),
+        };
         let state = Arc::new(Mutex::new(RunState {
             doc: main_doc,
             bound,
@@ -578,6 +623,7 @@ impl Pipeline {
             revision: 0,
             font_stats: None,
             callback_error: None,
+            blocks: Vec::new(),
         }));
 
         // 无段落的选定页（含只有不可译段落的页）先转就绪并回写。
@@ -594,9 +640,17 @@ impl Pipeline {
             }
         }
 
-        let cache = open_cache(cfg.cache_dir());
+        let mut cache = open_cache(cfg.cache_dir());
         let total = translatable.len() as u32;
-        let spec = syncpdf_translate::PromptSpec::new(fields.source_lang, fields.target_lang);
+        let mut spec = syncpdf_translate::PromptSpec::new(fields.source_lang, fields.target_lang);
+        // 内部术语 sidecar（`bdt rust-translate --glossaries` 生成的规范化
+        // [[source,target],...] JSON）。装载失败在任何模型调用之前明确报错。
+        if let Some(path) = fields.terminology {
+            spec.terminology = load_terminology(path)?;
+        }
+        if let Some(c) = cache.as_mut() {
+            c.set_terminology(&spec.terminology);
+        }
         let lookup = stages::glyph_text_lookup(&pages_ir);
 
         let callback_failed = CancellationToken::new();
@@ -613,6 +667,7 @@ impl Pipeline {
                 if s.callback_error.is_some() {
                     return;
                 }
+                s.blocks.push(block.clone());
                 if let Err(error) = handle_block(&mut s, &sink, block, total) {
                     s.callback_error = Some(error);
                     callback_failed.cancel();
@@ -677,48 +732,13 @@ impl Pipeline {
         let t = Instant::now();
         {
             let mut s = lock_state(&state);
-            // 漏译（引擎没吐、或回调里被取消跳过）的段落补发 fallback。
-            let missing: Vec<ParagraphId> = translatable
-                .iter()
-                .map(|p| p.id.clone())
-                .filter(|id| !s.settled_ids.contains(id))
-                .collect();
-            for id in missing {
-                if let Some(p) = s.pars.get(&id).cloned() {
-                    s.fallbacks += 1;
-                    let n = p.text.chars().count() as u64;
-                    s.src_chars += n;
-                    s.tgt_chars += n;
-                    s.settled += 1;
-                    s.settled_ids.insert(id.clone());
-                    sink.emit(Event::Issue {
-                        severity: Severity::Warning,
-                        code: "translate_missing".into(),
-                        paragraph_id: Some(id.clone()),
-                        page: Some(id.page),
-                        message: "翻译未交付该段，回退原文".into(),
-                    });
-                    sink.emit(Event::Paragraph {
-                        paragraph_id: id.clone(),
-                        page: id.page,
-                        status: ParagraphStatus::Fallback,
-                        boxes: Some(vec![p.bbox]),
-                        coord_system: syncpdf_core::CoordSystem::PdfUser,
-                        translated_html: None,
-                    });
-                }
-                if let Some(page) = s.schedule.mark(&id) {
-                    writeback_page(&mut s, page - 1, sink)?;
-                }
-            }
-            let rest = s.schedule.force_ready_rest();
-            for p in rest {
-                writeback_page(&mut s, p - 1, sink)?;
-            }
-            let expected: BTreeSet<u32> = selected.iter().copied().collect();
-            if s.ready.iter().copied().collect::<BTreeSet<_>>() != expected {
-                return Err(PipelineError::Protocol("部分选定页尚未成功保存".into()));
-            }
+            let translatable_ids: Vec<ParagraphId> =
+                translatable.iter().map(|p| p.id.clone()).collect();
+            let settle = |s: &mut RunState, sink: &SharedSink| {
+                settle_rest(s, &translatable_ids, selected, sink)
+            };
+            settle(&mut s, sink)?;
+            descent::descend(&mut s, &origin, total, sink, settle)?;
         }
         emit_stage_finished(sink, Stage::Typesetting, t);
 
@@ -738,7 +758,7 @@ impl Pipeline {
         };
         // 按策略保留的 reference/脚注等不是回退；保护冲突阻断的可译内容则未完成。
         let protected = not_replaced.iter().filter(|p| {
-            matches!(&p.translatable, Translatable::No { reason } if matches!(reason.as_str(), "protected_source_overlap" | "rotated_source_text" | "translatable_region_overlap"))
+            matches!(&p.translatable, Translatable::No { reason } if matches!(reason.as_str(), "protected_source_overlap" | "rotated_source_text" | "translatable_region_overlap" | "unmapped_source_glyph" | "bind_page_unreliable"))
         }).count();
         let ok = summary_stats.fallbacks == 0
             && protected == 0
@@ -751,6 +771,32 @@ impl Pipeline {
                 paragraph_id: None,
                 page: None,
                 message: format!("已保存部分结果：{} 段回退、{protected} 段源区域冲突、{coverage_gaps} 页覆盖缺口", summary_stats.fallbacks),
+            });
+        }
+        if let Some(output) = &cfg.dual_output {
+            check_cancelled(cancel)?;
+            syncpdf_pdf::dual::export(fields.input, fields.output, output)
+                .map_err(|e| PipelineError::Validation(e.to_string()))?;
+            let report = syncpdf_pdf::self_check(output, &cjk_pages)
+                .map_err(|e| PipelineError::Validation(e.to_string()))?;
+            if !report.ok {
+                return Err(PipelineError::Validation(report.problems.join("; ")));
+            }
+            for message in report.warnings {
+                sink.emit(Event::Issue {
+                    severity: Severity::Warning,
+                    code: "dual_self_check".into(),
+                    paragraph_id: None,
+                    page: None,
+                    message,
+                });
+            }
+            sink.emit(Event::Issue {
+                severity: Severity::Info,
+                code: "dual_exported".into(),
+                paragraph_id: None,
+                page: None,
+                message: format!("A3 横向双语 PDF（左原文、右译文）：{}", output.display()),
             });
         }
         sink.emit(Event::DocumentFinished {
@@ -832,6 +878,8 @@ struct RunState {
     font_stats: Option<FontStats>,
     /// 流式回调的首个回写错误；跨回调传播到主任务，后续块停止处理。
     callback_error: Option<PipelineError>,
+    /// 按到达顺序保留的译文块：全文行距下调时据此重排，不再调用模型。
+    blocks: Vec<syncpdf_translate::TranslatedBlock>,
 }
 
 impl RunState {
@@ -887,6 +935,48 @@ async fn cancel_watch(cancel: &CancellationToken) {
     }
 }
 
+/// 装载内部术语 sidecar：`bdt` 把规范化后的「源词 → 译名」对写成
+/// `workdir/tmp/terminology.json`（JSON 数组，元素为 `[source, target]`），
+/// `Request::Run.terminology` 携带其路径。这里只装载与校验，不做词条推断。
+///
+/// 文件不可读 → `Io`；JSON 形状不对、空字段或同一 source 对应多个 target
+/// → `Protocol`（在任何模型调用之前明确失败）。返回按 source 排序去重的表，
+/// 保证同一映射的缓存键可复现。
+fn load_terminology(path: &Path) -> Result<Vec<(String, String)>, PipelineError> {
+    let text = std::fs::read_to_string(path).map_err(|source| PipelineError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let raw: Vec<(String, String)> = serde_json::from_str(&text).map_err(|e| {
+        PipelineError::Protocol(format!(
+            "术语文件不是 [[\"source\",\"target\"],...] JSON：{}：{e}",
+            path.display()
+        ))
+    })?;
+    for (source, target) in &raw {
+        if source.trim().is_empty() || target.trim().is_empty() {
+            return Err(PipelineError::Protocol(format!(
+                "术语文件 {} 含空 source/target 条目",
+                path.display()
+            )));
+        }
+    }
+    let mut terms = raw;
+    terms.sort();
+    terms.dedup();
+    if let Some(dup) = terms
+        .windows(2)
+        .find(|w| w[0].0 == w[1].0)
+        .map(|w| w[0].0.clone())
+    {
+        return Err(PipelineError::Protocol(format!(
+            "术语文件 {} 中同一 source 对应多个 target：{dup}",
+            path.display()
+        )));
+    }
+    Ok(terms)
+}
+
 /// 打开翻译缓存（`cache_dir/translate.db`）；失败只记日志，按无缓存继续。
 fn open_cache(dir: Option<&Path>) -> Option<syncpdf_translate::Cache> {
     let dir = dir?;
@@ -933,15 +1023,44 @@ fn handle_block(
         let bound = state.bound.get(&(id.page - 1))?;
         stages::link_text::prepare(&para, &bound.ir, &state.doc, parsed)
     });
-    if parsed_result.is_ok() && block.status.is_ok() && prepared.is_none() {
+    // 模型原样回显原文（空白差异除外）：原文字形就是忠实结果，保留不替换，
+    // 不进排版，也不算回退——排不下的回显不该报成失败。
+    let echoed = block.status.is_ok()
+        && parsed_result.as_ref().is_ok_and(|parsed| {
+            parsed
+                .text()
+                .split_whitespace()
+                .eq(para.text.split_whitespace())
+        });
+    if echoed {
+    } else if parsed_result.is_ok() && block.status.is_ok() && prepared.is_none() {
+        // 按实际失败接缝归因：原子能在译文中重定位（resolve_text 通过）而
+        // prepare 失败，坏在链接侧；原子解析失败才是原子侧。
+        let atoms_placed = parsed_result.as_ref().is_ok_and(|parsed| {
+            state
+                .bound
+                .get(&(id.page - 1))
+                // 段落必来自已绑定页；bound 缺失属于协议异常，不改变归因。
+                .is_none_or(|_| stages::text_atoms::resolve_text(&para, parsed).is_some())
+        });
         fallback = Some((
-            if para.atoms.is_empty() {
+            if atoms_placed {
                 "link_target_unplaced"
             } else {
                 "atom_source_unplaced"
             },
             None,
             "原子或链接目标无法唯一定位，保留原文".into(),
+        ));
+    } else if block.status.is_ok()
+        && prepared.as_ref().is_some_and(|target| {
+            !stages::source_decoration::anchored(&target.para, &target.parsed)
+        })
+    {
+        fallback = Some((
+            "source_decoration_unanchored",
+            None,
+            "译文缺少原文下划线的非空样式锚点，保留原文及其装饰".into(),
         ));
     } else if !state.frames.contains_key(&id) {
         fallback = Some((
@@ -960,8 +1079,8 @@ fn handle_block(
                     )));
                 }
                 state.targets.insert(id.clone(), target.clone());
-                let shaper =
-                    StoreShaper::new(&state.font_store, &state.font_profile).with_role(Role::Body);
+                let shaper = StoreShaper::new(&state.font_store, &state.font_profile)
+                    .with_role(stages::typeset::role_for_region(target.para.kind));
                 let result = stages::typeset::typeset_with_typography(
                     &shaper,
                     &target.para,
@@ -1006,6 +1125,21 @@ fn handle_block(
                         .push(result.paragraph);
                     state.src_chars += src_len;
                     state.tgt_chars += target.parsed.text().chars().count() as u64;
+                    if !target.dropped.is_empty() {
+                        let reasons: Vec<&str> =
+                            target.dropped.iter().map(|(_, r)| r.as_str()).collect();
+                        sink.emit(Event::Issue {
+                            severity: Severity::Warning,
+                            code: "link_dropped".into(),
+                            paragraph_id: Some(id.clone()),
+                            page: Some(id.page),
+                            message: format!(
+                                "保留译文，移除 {} 个无法定位的链接：{}",
+                                reasons.len(),
+                                reasons.join("；")
+                            ),
+                        });
+                    }
                     out = Some((target.html, boxes));
                 }
             }
@@ -1038,6 +1172,18 @@ fn handle_block(
     }
 
     match out {
+        None if echoed => {
+            state.src_chars += src_len;
+            state.tgt_chars += src_len;
+            sink.emit(Event::Paragraph {
+                paragraph_id: id.clone(),
+                page: id.page,
+                status: ParagraphStatus::NotReplaced,
+                boxes: Some(vec![para.bbox]),
+                coord_system: syncpdf_core::CoordSystem::PdfUser,
+                translated_html: None,
+            });
+        }
         Some((html, boxes)) => sink.emit(Event::Paragraph {
             paragraph_id: id.clone(),
             page: id.page,
@@ -1088,7 +1234,60 @@ fn handle_block(
     Ok(())
 }
 
+mod descent;
 mod refinement;
+
+/// 翻译结束后的落定：漏译段补发 fallback，未凑齐的页强制就绪并回写。
+fn settle_rest(
+    s: &mut RunState,
+    translatable: &[ParagraphId],
+    selected: &[u32],
+    sink: &SharedSink,
+) -> Result<(), PipelineError> {
+    // 漏译（引擎没吐、或回调里被取消跳过）的段落补发 fallback。
+    let missing: Vec<ParagraphId> = translatable
+        .iter()
+        .filter(|id| !s.settled_ids.contains(*id))
+        .cloned()
+        .collect();
+    for id in missing {
+        if let Some(p) = s.pars.get(&id).cloned() {
+            s.fallbacks += 1;
+            let n = p.text.chars().count() as u64;
+            s.src_chars += n;
+            s.tgt_chars += n;
+            s.settled += 1;
+            s.settled_ids.insert(id.clone());
+            sink.emit(Event::Issue {
+                severity: Severity::Warning,
+                code: "translate_missing".into(),
+                paragraph_id: Some(id.clone()),
+                page: Some(id.page),
+                message: "翻译未交付该段，回退原文".into(),
+            });
+            sink.emit(Event::Paragraph {
+                paragraph_id: id.clone(),
+                page: id.page,
+                status: ParagraphStatus::Fallback,
+                boxes: Some(vec![p.bbox]),
+                coord_system: syncpdf_core::CoordSystem::PdfUser,
+                translated_html: None,
+            });
+        }
+        if let Some(page) = s.schedule.mark(&id) {
+            writeback_page(s, page - 1, sink)?;
+        }
+    }
+    let rest = s.schedule.force_ready_rest();
+    for p in rest {
+        writeback_page(s, p - 1, sink)?;
+    }
+    let expected: BTreeSet<u32> = selected.iter().copied().collect();
+    if s.ready.iter().copied().collect::<BTreeSet<_>>() != expected {
+        return Err(PipelineError::Protocol("部分选定页尚未成功保存".into()));
+    }
+    Ok(())
+}
 
 /// 页就绪回写：删除该页成功段落的原字形，然后重放全部就绪页 → 快照 → 事件。
 fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) -> Result<(), PipelineError> {
@@ -1136,6 +1335,7 @@ fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) -> Result<
             let plans = stages::link_text::geometry(target, laid, &shaper)
                 .ok_or_else(|| PipelineError::Validation("链接缺少目标几何".into()))?;
             stages::link_text::apply(&mut candidate, &plans)?;
+            stages::link_text::hide_dropped(&mut candidate, target)?;
         }
     }
     let published: BTreeMap<_, _> = typeset_by_page
@@ -1157,7 +1357,7 @@ fn writeback_page(state: &mut RunState, page: u32, sink: &SharedSink) -> Result<
     Ok(())
 }
 
-/// bind 阶段的问题转 `issue`；文本对象数与 text-show 操作数不符另报一条。
+/// bind 阶段的问题转 `issue`；操作级不可证明墨迹、页级不可信、对象数不符各报。
 fn emit_bind_issues(sink: &mut SharedSink, bound: &BoundPage) {
     let page = bound.ir.page.number();
     for msg in &bound.issues {
@@ -1167,6 +1367,27 @@ fn emit_bind_issues(sink: &mut SharedSink, bound: &BoundPage) {
             paragraph_id: None,
             page: Some(page),
             message: msg.clone(),
+        });
+    }
+    for u in bound.unproven_source_ops() {
+        sink.emit(Event::Issue {
+            severity: Severity::Warning,
+            code: "bind_degraded".into(),
+            paragraph_id: None,
+            page: Some(page),
+            message: format!(
+                "unprovable source op ink kept (paragraphs overlapping {:?} stay source): {}",
+                u.ink, u.note
+            ),
+        });
+    }
+    if bound.reliability.is_unreliable() {
+        sink.emit(Event::Issue {
+            severity: Severity::Warning,
+            code: "bind_page_unreliable".into(),
+            paragraph_id: None,
+            page: Some(page),
+            message: "源绑定结构错误，整页保留原文".into(),
         });
     }
     if bound.stats.text_objects != bound.stats.text_ops {
@@ -1366,11 +1587,22 @@ mod tests {
         let out = tmp_path("pdf");
         let log: Arc<Mutex<Vec<(u64, Event)>>> = Arc::new(Mutex::new(Vec::new()));
         let shared = SharedSink::new(RunRecorder::new(log.clone()));
-        let cfg = RunConfig::with_fake("cjk", input, out.clone()).unwrap();
+        let mut cfg = RunConfig::with_fake("cjk", input, out.clone()).unwrap();
+        let dual = tmp_path("pdf");
+        cfg.dual_output = Some(dual.clone());
         let p = pipeline(tmp_path("db"));
         let result = p.run(&cfg, shared.clone(), CancellationToken::new()).await;
         assert!(result.is_ok(), "端到端应成功：{result:?}");
         assert!(out.exists(), "输出文件应存在：{out:?}");
+        assert!(dual.exists(), "请求的双语文件应在完成事件前保存");
+        let doc = lopdf::Document::load(&dual).unwrap();
+        let page = doc.get_dictionary(doc.get_pages()[&1]).unwrap();
+        assert_eq!(
+            page.get(b"MediaBox").unwrap().as_array().unwrap()[2]
+                .as_float()
+                .unwrap(),
+            syncpdf_pdf::dual::A3_WIDTH
+        );
 
         let events = log.lock().unwrap().clone();
         assert!(!events.is_empty(), "至少要有事件");
@@ -1489,8 +1721,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn oversized_translation_preserves_source_and_reports_fixed_size_failure() {
+    /// 一段 20×12 固定框、另一段未到达的单段运行态：观察单块落定结果。
+    fn fixed_frame_state(text: &str, tag: &str) -> (RunState, ParagraphId) {
         use syncpdf_core::ir::{Align, RegionKind, StyleRun};
         use syncpdf_core::{Color, PageId, Rect, StyleId};
         let id = ParagraphId { page: 1, seq: 1 };
@@ -1513,9 +1745,11 @@ mod tests {
                 italic: false,
                 serif: false,
                 mono: false,
+                underline: false,
             }],
+            decorations: Vec::new(),
             atoms: Vec::new(),
-            text: "Source".into(),
+            text: text.into(),
             align: Align::Left,
             first_indent: 0.0,
             line_height: 12.0,
@@ -1530,10 +1764,10 @@ mod tests {
                 .into_iter()
                 .map(|id| (1, id)),
         );
-        let dir = tmp_path("oversized-fixture");
+        let dir = tmp_path(tag);
         std::fs::create_dir_all(&dir).unwrap();
         let (fixture, _) = transaction_tests::state(&dir);
-        let mut state = RunState {
+        let state = RunState {
             doc: fixture.doc,
             bound: fixture.bound,
             targets: BTreeMap::new(),
@@ -1564,7 +1798,14 @@ mod tests {
             revision: 0,
             font_stats: None,
             callback_error: None,
+            blocks: Vec::new(),
         };
+        (state, id)
+    }
+
+    #[test]
+    fn oversized_translation_preserves_source_and_reports_fixed_size_failure() {
+        let (mut state, id) = fixed_frame_state("Source", "oversized-fixture");
         let log = Arc::new(Mutex::new(Vec::new()));
         let sink = SharedSink::new(RunRecorder::new(log.clone()));
         handle_block(
@@ -1602,6 +1843,138 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn echoed_translation_keeps_source_glyphs_without_counting_a_fallback() {
+        // 原文排不进 20×12 的框；模型原样回显（仅空白不同）时，原文字形就是忠实结果。
+        let source = "Alice Smith, Bob Jones,\nCarol White and Dan Brown";
+        for (html, echoed) in [
+            ("Alice Smith, Bob Jones, Carol White and Dan Brown", true),
+            (
+                "Alice  Smith,\tBob Jones, Carol   White and Dan Brown ",
+                true,
+            ),
+            // 反例：哪怕只改一个字，也必须照常排版并如实报告溢出。
+            ("Alice Smith, Bob Jones, Carol White und Dan Brown", false),
+        ] {
+            let (mut state, id) = fixed_frame_state(source, "echo-fixture");
+            let log = Arc::new(Mutex::new(Vec::new()));
+            let sink = SharedSink::new(RunRecorder::new(log.clone()));
+            handle_block(
+                &mut state,
+                &sink,
+                syncpdf_translate::TranslatedBlock {
+                    id: id.clone(),
+                    html: format!("<p id=\"{id}\">{html}</p>"),
+                    status: syncpdf_translate::BlockStatus::Ok,
+                    from_cache: false,
+                },
+                2,
+            )
+            .unwrap();
+            assert!(state.typeset_by_page.is_empty(), "{html}");
+            assert!(state.settled_ids.contains(&id));
+            assert_eq!(state.fallbacks, u32::from(!echoed), "{html}");
+            let log = log.lock().unwrap();
+            let status = if echoed {
+                ParagraphStatus::NotReplaced
+            } else {
+                ParagraphStatus::Fallback
+            };
+            assert!(
+                log.iter().any(|(_, event)| matches!(event,
+                    Event::Paragraph { paragraph_id, status: s, translated_html: None, .. }
+                    if paragraph_id == &id && *s == status)),
+                "{html}"
+            );
+            assert_eq!(
+                log.iter().any(|(_, event)| matches!(event,
+                    Event::Issue { code, .. } if code == "typeset_overflow")),
+                !echoed,
+                "{html}"
+            );
+        }
+    }
+
+    fn write_terms(dir: &tempfile::TempDir, json: &str) -> PathBuf {
+        let path = dir.path().join("terminology.json");
+        std::fs::write(&path, json).unwrap();
+        path
+    }
+
+    #[test]
+    fn terminology_sidecar_loads_sorted_unique_pairs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_terms(&dir, r#"[["beta","乙"],["alpha","甲"],["beta","乙"]]"#);
+        assert_eq!(
+            load_terminology(&path).unwrap(),
+            vec![
+                ("alpha".to_string(), "甲".to_string()),
+                ("beta".to_string(), "乙".to_string()),
+            ]
+        );
+        let empty = write_terms(&dir, "[]");
+        assert_eq!(load_terminology(&empty).unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn terminology_sidecar_rejects_bad_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("none.json");
+        assert!(matches!(
+            load_terminology(&missing),
+            Err(PipelineError::Io { .. })
+        ));
+        for bad in [
+            "not json",
+            r#"{"alpha":"甲"}"#,
+            r#"[["alpha"]]"#,
+            r#"[["","甲"]]"#,
+            r#"[["alpha","  "]]"#,
+            r#"[["a","甲"],["a","乙"]]"#,
+        ] {
+            let path = write_terms(&dir, bad);
+            assert!(
+                matches!(load_terminology(&path), Err(PipelineError::Protocol(_))),
+                "应拒绝：{bad}"
+            );
+        }
+    }
+
+    /// 术语文件经 `load_terminology` 进 `PromptSpec` 后，主请求与补救请求
+    /// 的提示词都带同一词表段（RecordingTranslator 捕获实际发送文本）。
+    #[tokio::test]
+    async fn terminology_reaches_primary_and_repair_prompts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_terms(&dir, r#"[["model-in-the-loop","模型在回路"]]"#);
+        let mut spec = syncpdf_translate::PromptSpec::new("en", "zh-CN");
+        spec.terminology = load_terminology(&path).unwrap();
+        let unit = |id: &str| syncpdf_translate::Unit {
+            id: id.parse().unwrap(),
+            html: format!("<p id=\"{id}\">text of {id}</p>"),
+            styles: 0,
+            atoms: vec![],
+            breaks: 0,
+        };
+        let units = vec![unit("P01-001"), unit("P01-002")];
+        let ctx = syncpdf_translate::ContextMap::from_units(&units);
+        // 首个请求只回一块：另一块进入有界补译，产生第二个提示词。
+        let engine = syncpdf_translate::Engine::new(syncpdf_translate::RecordingTranslator::new(
+            syncpdf_translate::FakeTranslator::Truncate(1),
+        ));
+        let result = engine
+            .translate_document(&spec, units, ctx, None, |_| {})
+            .await
+            .unwrap();
+        assert_eq!(result.stats.primary_prompts, 1);
+        assert!(result.stats.retry_prompts >= 1, "漏译块应触发补救请求");
+        let seen = engine.translator().recorded();
+        assert!(seen.len() >= 2, "主请求与补译都应实际发出：{seen:?}");
+        for text in &seen {
+            assert!(text.contains("TERMINOLOGY:"), "提示词缺术语段：{text}");
+            assert!(text.contains("- model-in-the-loop => 模型在回路"));
+        }
     }
 }
 

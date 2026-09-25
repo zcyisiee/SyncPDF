@@ -70,6 +70,109 @@ fn english_exact_fit_scale_1() {
 }
 
 #[test]
+fn mixed_script_captions_do_not_choose_unnecessary_short_middle_lines() {
+    let captions = [
+        (Align::Left, "表 18： MergeGuard 对后门任务数量的敏感性，固定 6 任务池：Cars、MNIST、RESISC45、SUN397、CIFAR100 和 EuroSAT。子表（a）：仅 Cars 被植入后门。子表（b）：Cars、MNIST 和 RESISC45 被植入后门。子表（c）：Cars、MNIST、RESISC45、SUN397 和 CIFAR100 被植入后门。红色上标星号∗ 标记后门任务。子表（a）仅报告 BadMerging，因为 MergeBackdoor 被设计为仅当至少两个后门模型参与合并过程时才激活；其他子表报告两种攻击。"),
+        (Align::Justify, "表19： MergeGuard 对总任务数的敏感性。子表(a)合并四个任务（RESISC45和SUN397被植入后门；CIFAR100和EuroSAT干净）。子表(b)和(c)合并从Cars、MNIST、RESISC45、SUN397、CIFAR10、SVHN、GTSRB、DTD中选取的八个任务：在(b)中，四个被植入后门（CIFAR10、MNIST、RESISC45、SUN397）；在(c)中，又增加了一个（Cars）。"),
+    ];
+    for (align, text) in captions {
+        let mut s = spec(Rect::new(0.0, 0.0, 244.0, 200.0), 8.0, 1.3, align);
+        s.lang = Lang::Zh;
+        let r = typeset_default().layout(pid(), &s, &[text_inline(text)], &Obstacles::default());
+        assert!(!r.paragraph.overflow, "{align:?}: {:?}", r.issues);
+        for line in &r.paragraph.lines[..r.paragraph.lines.len() - 1] {
+            let words: String = line.glyphs.iter().map(|g| g.text.as_str()).collect();
+            assert!(
+                line.bbox.width() > s.bbox.width() * 0.7,
+                "unnecessary short line: {words}"
+            );
+            assert!(line.glyphs.iter().all(|g| g.size == 8.0));
+        }
+        let actual: String = r
+            .paragraph
+            .lines
+            .iter()
+            .flat_map(|l| &l.glyphs)
+            .map(|g| g.text.as_str())
+            .collect();
+        if align == Align::Left {
+            assert!(r.paragraph.lines.last().unwrap().bbox.width() > s.bbox.width() * 0.3);
+        }
+        let compact = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+        assert_eq!(compact(&actual), compact(text));
+    }
+}
+
+#[test]
+fn ragged_lines_fill_the_measure_instead_of_balancing_toward_the_last_line() {
+    let lines = |lang: Lang, width: f32, text: &str| {
+        let mut s = spec(Rect::new(0.0, 0.0, width, 100.0), 10.0, 1.3, Align::Left);
+        s.lang = lang;
+        let r = typeset_default().layout(pid(), &s, &[text_inline(text)], &Obstacles::default());
+        assert!(!r.paragraph.overflow);
+        r.paragraph
+            .lines
+            .iter()
+            .map(|l| l.glyphs.iter().map(|g| g.text.as_str()).collect::<String>())
+            .collect::<Vec<_>>()
+    };
+    // A shorter final line is the paragraph's natural end, not unused width
+    // worth rebalancing every earlier line for.
+    assert_eq!(
+        lines(
+            Lang::Zh,
+            100.0,
+            "甲乙丙丁戊己庚辛壬癸甲乙丙丁戊己庚辛壬癸子丑寅卯辰"
+        ),
+        ["甲乙丙丁戊己庚辛壬癸", "甲乙丙丁戊己庚辛壬癸", "子丑寅卯辰"]
+    );
+    assert_eq!(
+        lines(Lang::En, 40.0, "aa bb cc dd ee ff gg hh"),
+        ["aa bb cc", "dd ee ff", "gg hh"]
+    );
+}
+
+#[test]
+fn automatic_break_does_not_strand_one_cjk_letter_but_hard_break_can() {
+    let mut s = spec(Rect::new(0.0, 0.0, 50.0, 100.0), 10.0, 1.3, Align::Left);
+    s.lang = Lang::Zh;
+    let r = typeset_default().layout(
+        pid(),
+        &s,
+        &[text_inline("甲乙丙丁戊己。")],
+        &Obstacles::default(),
+    );
+    assert!(!r.paragraph.overflow);
+    let last: String = r
+        .paragraph
+        .lines
+        .last()
+        .unwrap()
+        .glyphs
+        .iter()
+        .map(|g| g.text.as_str())
+        .collect();
+    assert!(last.ends_with("戊己。"), "last line: {last}");
+    let explicit = typeset_default().layout(
+        pid(),
+        &s,
+        &[text_inline("甲乙丙丁戊"), Inline::Br, text_inline("己。")],
+        &Obstacles::default(),
+    );
+    assert_eq!(explicit.paragraph.lines.len(), 2);
+    let last: String = explicit
+        .paragraph
+        .lines
+        .last()
+        .unwrap()
+        .glyphs
+        .iter()
+        .map(|g| g.text.as_str())
+        .collect();
+    assert_eq!(last, "己。");
+}
+
+#[test]
 fn text_growth_preserves_requested_size_and_reports_overflow() {
     let bbox = Rect::new(0.0, 0.0, 100.0, 12.0);
     let s = spec(bbox, 10.0, 1.0, Align::Left);
@@ -459,4 +562,71 @@ fn empty_paragraph_produces_no_lines() {
     let r = t.layout(pid(), &s, &[], &Obstacles::default());
     assert!(r.paragraph.lines.is_empty());
     assert!((r.scale - 1.0).abs() < 1e-6);
+}
+
+#[test]
+fn cjk_justify_spreads_slack_evenly_across_spaces_and_cjk_gaps() {
+    // 中英混排行：两个西文空格与 CJK 字距是等价的两端对齐点，
+    // slack 不能被空格吞掉（空格断行 stretch ≈ 字距的 20 倍）。
+    let bbox = Rect::new(0.0, 0.0, 107.0, 60.0);
+    let mut s = spec(bbox, 10.0, 1.2, Align::Justify);
+    s.lang = Lang::Zh;
+    let t = typeset_default();
+    let text = "一二三四 ab 五六七八九十一二三四五六七八";
+    let r = t.layout(pid(), &s, &[text_inline(text)], &Obstacles::default());
+    assert!(r.paragraph.lines.len() >= 2);
+    let l0 = &r.paragraph.lines[0];
+    let at = |c: &str| l0.glyphs.iter().position(|g| g.text == c).unwrap();
+    let (si, ai, wi) = (at("四"), at("a"), at("五"));
+    let cjk_extra = l0.glyphs[1].x - l0.glyphs[0].x - 10.0;
+    assert!(cjk_extra > 0.2, "cjk gaps must take slack: {cjk_extra}");
+    // 空格 2.5pt、"ab" 10pt：空格处的额外距离与字距额外量相同。
+    let space_extra = l0.glyphs[ai].x - l0.glyphs[si].x - 10.0 - 2.5;
+    let space2_extra = l0.glyphs[wi].x - l0.glyphs[ai].x - 10.0 - 2.5;
+    assert!(
+        (space_extra - cjk_extra).abs() < 0.1,
+        "space={space_extra} cjk={cjk_extra}"
+    );
+    assert!(
+        (space2_extra - cjk_extra).abs() < 0.1,
+        "space={space2_extra} cjk={cjk_extra}"
+    );
+    let last = l0.glyphs.last().unwrap();
+    assert!(
+        (last.x + 10.0 - bbox.x1).abs() < 1.0,
+        "right={}",
+        last.x + 10.0
+    );
+}
+
+#[test]
+fn latin_justify_without_cjk_gaps_keeps_space_stretch() {
+    // 无 CJK 字距的行：slack 只落在空格上，行为不变。
+    let bbox = Rect::new(0.0, 0.0, 60.0, 60.0);
+    let mut s = spec(bbox, 10.0, 1.2, Align::Justify);
+    s.lang = Lang::Zh;
+    let t = typeset_default();
+    let r = t.layout(
+        pid(),
+        &s,
+        &[text_inline("aaa bbb ccc ddd eee fff ggg")],
+        &Obstacles::default(),
+    );
+    let l0 = &r.paragraph.lines[0];
+    let last = l0
+        .glyphs
+        .iter()
+        .rev()
+        .find(|g| !g.text.trim().is_empty())
+        .unwrap();
+    assert!(
+        (last.x + 5.0 - bbox.x1).abs() < 1.0,
+        "right={}",
+        last.x + 5.0
+    );
+    let a = l0.glyphs.iter().position(|g| g.text == "a").unwrap();
+    assert!(
+        (l0.glyphs[a + 1].x - l0.glyphs[a].x - 5.0).abs() < 1e-3,
+        "letters keep natural advance"
+    );
 }

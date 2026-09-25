@@ -829,3 +829,69 @@ fn identity_form_numbering_across_contents() {
     );
     assert_identity(&bound, &objects, &[("F", forms[0], 3), ("G", forms[1], 3)]);
 }
+
+// ---------------------------------------------------------------------------
+// 有效字号（CTM 缩放）：`Glyph.size` 契约是「已含文本矩阵与 CTM 的缩放」。
+// ---------------------------------------------------------------------------
+
+/// 构造一页两条 body 行：正文以 `cm` 缩放 + `Tf 1` 绘制（字号在 CTM 里），
+/// 两行基线差 10.45pt（TRC 的典型行距）。
+fn ctm_scaled_body_doc() -> LDoc {
+    let content = b"q 7.9701 0 0 7.9701 42 700 cm \
+        BT /F1 1 Tf 1 0 0 1 0 0 Tm (under limited urban) Tj ET Q \
+        q 7.9701 0 0 7.9701 42 689.55 cm \
+        BT /F1 1 Tf 1 0 0 1 0 0 Tm (road supply is insufficient) Tj ET Q\n";
+    simple_font_doc(content)
+}
+
+#[test]
+fn ctm_scaled_text_binds_effective_glyph_size() {
+    let Some(_w) = worker() else { return };
+    let path = write_pdf(ctm_scaled_body_doc(), "ctm-scaled-body.pdf");
+    let (_, _docid, _, bound) = bind(&path);
+    assert_eq!(bound.stats.degraded, 0, "issues: {:?}", bound.issues);
+    let items = text_items(&bound);
+    assert_eq!(items.len(), 2, "两条 body 行");
+    for (i, glyphs) in items.iter().enumerate() {
+        assert!(!glyphs.is_empty(), "行 {i} 无字形");
+        for g in glyphs.iter() {
+            assert!(
+                (g.size - 7.9701).abs() < 0.05,
+                "行 {i} 字形字号 {}：字号在 CTM 里（Tf=1），必须绑定有效字号 7.9701",
+                g.size
+            );
+        }
+        // 宽度也应按有效字号折算（glyph 宽度 ≈ 600/1000 × 7.9701 ≈ 4.78pt）。
+        let a = &glyphs[0];
+        assert!(
+            (a.advance - 600.0 / 1000.0 * 7.9701).abs() < 0.05,
+            "行 {i} advance {}：必须按有效字号折算",
+            a.advance
+        );
+    }
+}
+
+#[test]
+fn normal_tf_sized_text_keeps_unscaled_binding() {
+    // 反例：普通 `Tf 10` + 纯平移 Tm，视觉字号 = Tf 原值，绑定不变。
+    let Some(_w) = worker() else { return };
+    let doc = simple_font_doc(bt_text("F1", 10.0, 50.0, 700.0, "(Hello World) Tj").as_bytes());
+    let path = write_pdf(doc, "normal-tf-size.pdf");
+    let (_, _, _, bound) = bind(&path);
+    assert_eq!(bound.stats.degraded, 0, "issues: {:?}", bound.issues);
+    let items = text_items(&bound);
+    let glyphs = items[0];
+    for g in glyphs.iter() {
+        assert!(
+            (g.size - 10.0).abs() < 0.01,
+            "普通 Tf 字号绑定应仍为 10：{}",
+            g.size
+        );
+    }
+    let a = &glyphs[0]; // 'H' = 722/1000 em
+    assert!(
+        (a.advance - 600.0 / 1000.0 * 10.0).abs() < 0.05,
+        "advance 应按 Tf 字号折算：{}",
+        a.advance
+    );
+}

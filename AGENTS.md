@@ -6,6 +6,12 @@
 
 - **Follow YAGNI (You Aren't Gonna Need It)**：只实现当前明确需要的最小改动，不为假设中的未来需求增加抽象、配置或基础设施，不顺手扩大范围。
 - **先实测、后优化**：完成要求后立即用用户指定样本验证，先证实或证伪猜想，再按实际失败证据做针对性优化；不要用额外开发或重复全量检查推迟真实测试。
+- When fixing bugs: do root cause analysis first, fix the bug class rather than the instance, never special-case or hardcode around errors, and always add a regression test.
+- **禁止过拟合修复（Overfitting Patch，也叫打地鼠式修复 / Whack-a-mole）**：修复只让当前样本通过，换一个同类输入又要再补一条，这是严重错误，不是工程化。**判断方法**：条件分支必须按一个**通用概念**分类，比如字体类别、几何位置、墨迹、区域类型、文档模板；不能依赖当前样本的**巧合特征**，比如某个标点、某个关键词列表、某个坐标或阈值。提交前自问三个问题：
+  1. 同类的下一篇论文要不要再加一条？
+  2. 测试里有没有至少一个不同形态的正例和一个反例？
+  3. 能不能说出这个 bug 属于哪一类、根因在哪一层？
+  任何一问答不上，就不是合格的修复。反例：`825bef82`/`cdf81bfe`/`ae020978` 为冒号、右括号、逗号各写了一条证据链。
 
 ## 任务状态（开始与恢复时必读）
 
@@ -18,15 +24,17 @@
 
 ## 文档导航
 
-| 文件 | 回答的问题 |
-|---|---|
-| [docs/index.md](docs/index.md) | 从哪里读、如何维护文档 |
-| [docs/guide/cli.md](docs/guide/cli.md) | 怎样运行、验证与排查 |
-| [docs/guide/delegation.md](docs/guide/delegation.md) | 子代理约束、harness 命令、brief 与主控验收 |
-| [docs/reference/pipeline.md](docs/reference/pipeline.md) | 阶段产物、协议、续跑与存储归谁负责 |
-| [docs/reference/http-api.md](docs/reference/http-api.md) | 上传、进度、编辑、编译的接口约定 |
-| [docs/design/online-translation.md](docs/design/online-translation.md) | 在线部署目标、存储约束与待决策项 |
-| [docs/issues/](docs/issues/index.md) | 已核实的重大缺陷：现象、证据、根因与候选方案 |
+
+| 文件                                                                     | 回答的问题                        |
+| ---------------------------------------------------------------------- | ---------------------------- |
+| [docs/index.md](docs/index.md)                                         | 从哪里读、如何维护文档                  |
+| [docs/guide/cli.md](docs/guide/cli.md)                                 | 怎样运行、验证与排查                   |
+| [docs/guide/delegation.md](docs/guide/delegation.md)                   | 子代理约束、harness 命令、brief 与主控验收 |
+| [docs/reference/pipeline.md](docs/reference/pipeline.md)               | 阶段产物、协议、续跑与存储归谁负责            |
+| [docs/reference/http-api.md](docs/reference/http-api.md)               | 上传、进度、编辑、编译的接口约定             |
+| [docs/design/online-translation.md](docs/design/online-translation.md) | 在线部署目标、存储约束与待决策项             |
+| [docs/issues/](docs/issues/index.md)                                   | 已核实的重大缺陷：现象、证据、根因与候选方案       |
+
 
 ## 代码地图
 
@@ -57,3 +65,4 @@ $PY -m pytest --basetemp="tmp/pytest-$(date +%Y%m%d-%H%M%S)"
 ~/miniconda3/envs/bdt/bin/ruff check <files>
 git diff --check
 ```
+
