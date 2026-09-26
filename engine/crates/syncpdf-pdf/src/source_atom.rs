@@ -82,10 +82,23 @@ pub fn install(
             .map(|f| f.target)
             .filter(|s| !keep_streams.contains(s))
             .collect();
+        // Unproven source ops are never deleted (§7). Ink outside the atom is
+        // clipped by the Form BBox, so such ops may stay in this copy; ink inside
+        // it would move with the formula, so that deletion is still refused.
+        let clipped_unproven: BTreeSet<_> = bound
+            .unproven_source_ops()
+            .iter()
+            .filter(|u| !u.ink.intersects(&geometry.bbox))
+            .map(|u| u.op)
+            .collect();
         let remove: Vec<_> = bound
             .ir
             .glyphs()
-            .filter(|g| !keep.contains(&g.id) && !unrelated_forms.contains(&g.id.op.stream))
+            .filter(|g| {
+                !keep.contains(&g.id)
+                    && !unrelated_forms.contains(&g.id.op.stream)
+                    && !clipped_unproven.contains(&g.id.op)
+            })
             .map(|g| g.id)
             .collect();
         // Strip unrelated source text, rather than relying on clipping to hide it

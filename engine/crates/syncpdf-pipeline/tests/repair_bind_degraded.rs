@@ -339,6 +339,63 @@ fn op_level_unproven_glyphs_are_never_deleted() {
     worker.close(doc);
 }
 
+/// 公式原子隔离副本：页上别处的降级墨迹被 Form BBox 裁掉，可留在副本里
+/// （不再请求删除、不再中止整份文档）；落进原子框的降级墨迹会随公式移动，
+/// 仍拒绝。
+#[test]
+fn formula_atom_isolation_keeps_clipped_unproven_ink() {
+    let Some(worker) = worker() else { return };
+    for overlay in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("atom.pdf");
+        document(&[PageSpec::Mixed { overlay }])
+            .save(&path)
+            .unwrap();
+        let source = Document::load(&path).unwrap();
+        let doc = worker.open(&path).unwrap();
+        let bound = bind_page(&worker, doc, &source, 1).unwrap();
+        assert_eq!(bound.unproven_source_ops().len(), 1);
+        let ids: Vec<GlyphId> = bound
+            .ir
+            .glyphs()
+            .filter(|g| !bound.is_unproven_op(&g.id.op))
+            .map(|g| g.id)
+            .collect();
+        let a = bound.ir.glyphs().find(|g| g.id == ids[0]).unwrap();
+        assert_eq!(a.unicode.as_slice(), ['A']);
+        let mut para = unsafe_paragraph_with(&bound, &ids);
+        para.atoms = vec![syncpdf_core::ir::Atom {
+            id: syncpdf_core::AtomId(1),
+            glyph_range: (0, 1),
+            kind: syncpdf_core::ir::AtomKind::Formula,
+            text: "A".into(),
+            source: Some(syncpdf_core::ir::SourceAtom {
+                bbox: a.bbox,
+                baseline: a.matrix.f,
+                advance: None,
+            }),
+        }];
+        let mut candidate = source.clone();
+        delete_translated(&mut candidate, &bound, &[&para]).unwrap();
+        let installed =
+            syncpdf_pdf::source_atom::install(&mut candidate, &source, &bound, &[&para]);
+        if overlay {
+            assert!(
+                matches!(installed, Err(syncpdf_pdf::PatchError::UnprovenGlyph(_))),
+                "原子框内的降级墨迹不得随公式移动：{installed:?}"
+            );
+        } else {
+            installed.expect("原子框外的降级墨迹由 BBox 裁掉，不应中止");
+            let content = candidate.get_page_content(bound.page_id);
+            assert!(
+                content.windows(10).any(|w| w == b"<00010002>"),
+                "主页面的降级操作字节必须保留"
+            );
+        }
+        worker.close(doc);
+    }
+}
+
 /// 手工构造只含指定字形的段落（模拟段落归属降级字形的情况）。
 fn unsafe_paragraph_with(bound: &BoundPage, ids: &[GlyphId]) -> Paragraph {
     Paragraph {
