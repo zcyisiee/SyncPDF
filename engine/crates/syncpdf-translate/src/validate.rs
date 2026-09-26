@@ -268,7 +268,7 @@ pub fn validate(
     let mut tgt_lit = number_literals(&tgt_text);
     src_lit.sort();
     tgt_lit.sort();
-    if src_lit != tgt_lit {
+    if src_lit != tgt_lit && !same_quantities(&src_text, &tgt_text) {
         v.insert(Violation::ProtectedLiteralCount);
     }
 
@@ -444,6 +444,14 @@ pub(crate) fn unit_number_literals(unit: &Unit) -> Vec<String> {
 /// 受保护字面量：数字串（允许内部 `.`/`,` 分隔）。
 fn number_literals(text: &str) -> Vec<String> {
     let c: Vec<char> = text.chars().collect();
+    number_spans(&c)
+        .into_iter()
+        .map(|(a, b)| c[a..b].iter().collect())
+        .collect()
+}
+
+/// 数字串在字符数组中的 `[start, end)` 区间，规则同 [`number_literals`]。
+fn number_spans(c: &[char]) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < c.len() {
@@ -461,9 +469,99 @@ fn number_literals(text: &str) -> Vec<String> {
                 break;
             }
         }
-        out.push(c[start..i].iter().collect());
+        out.push((start, i));
     }
     out
+}
+
+/// 数字串逐字不等时的数值复核：带量级写法的数字按精确数值比较。
+/// 中文/日文以万、亿计数，`2 billion` 必然写成 `20 亿`；换算精确才算保留，
+/// 换错数值仍是违规。
+fn same_quantities(src: &str, tgt: &str) -> bool {
+    let mut a = quantity_keys(src);
+    let mut b = quantity_keys(tgt);
+    a.sort();
+    b.sort();
+    a == b
+}
+
+/// 每个数字的比较键：后接量级写法时为精确数值的十进制串，否则为数字串原文。
+fn quantity_keys(text: &str) -> Vec<String> {
+    let c: Vec<char> = text.chars().collect();
+    number_spans(&c)
+        .into_iter()
+        .map(|(a, b)| {
+            let lit: String = c[a..b].iter().collect();
+            match magnitude_after(&c, b) {
+                Some(exp) => scaled_decimal(&lit, exp),
+                None => lit,
+            }
+        })
+        .collect()
+}
+
+/// 数字后紧跟的量级写法对应的十的幂：英文量级词（可隔空格）、紧贴的
+/// `K/M/B/T`，或以万/亿收尾的中日量级链（`万`、`千万`、`百亿`、`万亿`）。
+/// 单独的十/百/千不算（`千克`、`千米` 是单位词头）。
+fn magnitude_after(c: &[char], end: usize) -> Option<u32> {
+    let mut j = end;
+    while j < c.len() && matches!(c[j], ' ' | '\u{00A0}' | '\u{2009}' | '\u{202F}') {
+        j += 1;
+    }
+    let word_end = (j..c.len())
+        .find(|&k| !c[k].is_ascii_alphabetic())
+        .unwrap_or(c.len());
+    let word: String = c[j..word_end].iter().collect();
+    match word.to_ascii_lowercase().as_str() {
+        "thousand" => return Some(3),
+        "million" => return Some(6),
+        "billion" => return Some(9),
+        "trillion" => return Some(12),
+        _ => {}
+    }
+    if j == end && word_end == end + 1 {
+        match c[end] {
+            'K' | 'k' => return Some(3),
+            'M' => return Some(6),
+            'B' => return Some(9),
+            'T' => return Some(12),
+            _ => {}
+        }
+    }
+    let mut exp = 0;
+    let mut last_myriad = None;
+    for &ch in &c[j..] {
+        exp += match ch {
+            '十' => 1,
+            '百' => 2,
+            '千' => 3,
+            '万' | '萬' => 4,
+            '亿' | '億' => 8,
+            _ => break,
+        };
+        last_myriad = Some(matches!(ch, '万' | '萬' | '亿' | '億'));
+    }
+    (last_myriad == Some(true)).then_some(exp)
+}
+
+/// `lit × 10^exp` 的规范十进制串（去千分位逗号、去多余前后零）。
+fn scaled_decimal(lit: &str, exp: u32) -> String {
+    let plain: String = lit.chars().filter(|&ch| ch != ',').collect();
+    let (int, frac) = plain.split_once('.').unwrap_or((&plain, ""));
+    let mut digits = format!("{int}{frac}");
+    let point = int.len() + exp as usize;
+    while digits.len() < point {
+        digits.push('0');
+    }
+    let (i, f) = digits.split_at(point);
+    let i = i.trim_start_matches('0');
+    let f = f.trim_end_matches('0');
+    let i = if i.is_empty() { "0" } else { i };
+    if f.is_empty() {
+        i.to_owned()
+    } else {
+        format!("{i}.{f}")
+    }
 }
 
 #[cfg(test)]
@@ -772,6 +870,34 @@ mod tests {
             r#"<p id="P01-001">We trained for 300 epochs with batch size 64</p>"#
         ))
         .contains(&"protected_literal_count"));
+    }
+
+    /// 量级词换算成目标语言计数单位：数值精确即保留，换错或丢量级词仍违规。
+    #[test]
+    fn protected_literal_count_accepts_exact_magnitude_conversion() {
+        let ok = |src: &str, tgt: &str| {
+            let u = src_unit("P01-001", src);
+            validate(&ctx(&u, "zh-CN"), &format!("<p id=\"P01-001\">{tgt}</p>")).is_ok()
+        };
+        // 正例：英文量级词、紧贴缩写、小数、复合万亿，以及写成纯数字。
+        assert!(ok(
+            "scaling VAR to 2 billion parameters with Pearson −0.998",
+            "将 VAR 扩展到 20 亿参数，皮尔逊系数 −0.998"
+        ));
+        assert!(ok(
+            "a 7B model trained on 1.5 trillion tokens",
+            "一个 70 亿参数模型，在 1.5 万亿词元上训练"
+        ));
+        assert!(ok(
+            "100.6 million images and 3 thousand labels",
+            "1.006 亿张图像和 3000 个标签"
+        ));
+        assert!(ok("35 million users", "3500 万用户"));
+        // 反例：数值换错、丢了量级词、千克/千米这类单位词头不算量级。
+        assert!(!ok("scaling to 2 billion parameters", "扩展到 200 亿参数"));
+        assert!(!ok("scaling to 2 billion parameters", "扩展到 20 参数"));
+        assert!(!ok("a mass of 1000 grams", "质量为 1 千克"));
+        assert!(!ok("10000 metres", "10 千米"));
     }
 
     // ── excessive_target_expansion ──────────────────────────────────────
