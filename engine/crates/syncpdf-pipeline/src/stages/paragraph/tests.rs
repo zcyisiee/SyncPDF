@@ -1407,6 +1407,47 @@ fn centered_title_does_not_merge_distinct_size_gap_or_region() {
     }
 }
 
+/// A wrapped caption centered under its figure: the shorter row starts further
+/// right because it is centered, not because it is a new indented paragraph.
+fn two_rows(kind: RegionKind, first: (&str, f32), second: (&str, f32, f32)) -> Vec<Paragraph> {
+    let mut g = line(0, first.0, first.1, 700.0, 10.0, 0);
+    g.extend(line(60, second.0, second.1, 688.0, second.2, 0));
+    let ir = page_ir(g, vec![mk_font("F1", false, false)]);
+    analyze_page(&ir, &full_region(kind))
+}
+
+#[test]
+fn centered_caption_continuation_stays_one_paragraph() {
+    let full = "photo of a bear wearing a suit in a river";
+    let short = "says bear it";
+    let full_x = 300.0 - full.len() as f32 * 3.0;
+    let short_x = 300.0 - short.len() as f32 * 3.0;
+    for (first, second) in [
+        ((full, full_x), (short, short_x)),
+        ((short, short_x), (full, full_x)),
+    ] {
+        let paras = two_rows(RegionKind::Caption, first, (second.0, second.1, 10.0));
+        assert_eq!(paras.len(), 1, "{first:?} {second:?}");
+        assert_eq!(paras[0].text, format!("{} {}", first.0, second.0));
+        assert_eq!(paras[0].align, Align::Center);
+    }
+    // Not continuations: an indented new paragraph, a smaller centered credit row,
+    // and a centered short row in body text.
+    let indented = two_rows(RegionKind::Caption, (full, 50.0), (full, 65.0, 10.0));
+    assert_eq!(indented.len(), 2);
+    let smaller = two_rows(
+        RegionKind::Caption,
+        (full, full_x),
+        (short, 300.0 - 12.0 * 2.4, 8.0),
+    );
+    assert_eq!(smaller.len(), 2);
+    let body = two_rows(RegionKind::Text, (full, full_x), (short, short_x, 10.0));
+    assert_eq!(body.len(), 2);
+    // Equal-width caption rows on the page axis are justified, not centered.
+    let rows: [(&str, f32); 3] = [("aaaaa", 291.0), ("bbbbb", 291.0), ("cc", 291.0)];
+    assert_eq!(align_of(&rows, RegionKind::Caption), Align::Justify);
+}
+
 #[test]
 fn numbered_title_hanging_continuation_is_not_a_new_paragraph() {
     for label in ["A", "A.2", "2.1"] {

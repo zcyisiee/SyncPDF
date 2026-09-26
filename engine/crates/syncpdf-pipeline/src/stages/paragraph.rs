@@ -273,11 +273,6 @@ fn same_paragraph(
         if (previous_size - size).abs() > size * 0.1 {
             return false;
         }
-        // A centered continuation has a different left edge because it is shorter,
-        // not because it starts a new paragraph. Preserve the whole semantic title.
-        if (prev.bbox.center().x - cur.bbox.center().x).abs() < 2.0 {
-            return true;
-        }
         // Numbered headings often hang continuation rows at the first word after
         // the section label. That is one title, not a new indented paragraph.
         if numbered_heading_body_x(prev, glyphs).is_some_and(|x| (cur.bbox.x0 - x).abs() < 2.0)
@@ -285,6 +280,14 @@ fn same_paragraph(
         {
             return true;
         }
+    }
+    // Titles and captions are set centered: a centered continuation has a different
+    // left edge because it is shorter, not because it starts a new paragraph.
+    if is_centered_kind(kind)
+        && (row_size(prev, glyphs) - size).abs() <= size * 0.1
+        && (prev.bbox.center().x - cur.bbox.center().x).abs() < 2.0
+    {
+        return true;
     }
     // A list item hangs its marker: continuation rows align with the first
     // word after it. A row that itself starts with a marker is the next item.
@@ -731,6 +734,14 @@ fn is_cjk(c: char) -> bool {
             | 0xFF00..=0xFF60)
 }
 
+/// 行按惯例居中排版的区域类型（标题、图注）。
+fn is_centered_kind(kind: RegionKind) -> bool {
+    matches!(
+        kind,
+        RegionKind::Title | RegionKind::ParagraphTitle | RegionKind::Caption
+    )
+}
+
 /// 对齐判定：居中 / 两端对齐 / 左对齐。
 ///
 /// 边距相对**区域框**度量（行相对区域左右两侧的留白）：
@@ -758,7 +769,7 @@ fn detect_align(rows: &[Row], region: &Region, crop: &Rect, size: f32) -> Align 
         }
         return Align::Left;
     }
-    if matches!(region.kind, RegionKind::Title | RegionKind::ParagraphTitle) {
+    if is_centered_kind(region.kind) {
         let widest = rows
             .iter()
             .max_by(|a, b| a.bbox.width().total_cmp(&b.bbox.width()))
@@ -769,7 +780,11 @@ fn detect_align(rows: &[Row], region: &Region, crop: &Rect, size: f32) -> Align 
         let varied_width = rows
             .iter()
             .any(|r| widest.bbox.width() - r.bbox.width() > CENTER_MIN_MARGIN * 2.0);
-        if centered && (varied_width || (widest.bbox.center().x - crop.center().x).abs() < 2.0) {
+        // Equal-width rows are also a justified block; only a title on the page axis
+        // is centered without a shorter row as evidence.
+        let title_on_axis = region.kind != RegionKind::Caption
+            && (widest.bbox.center().x - crop.center().x).abs() < 2.0;
+        if centered && (varied_width || title_on_axis) {
             return Align::Center;
         }
     }
