@@ -20,7 +20,8 @@
 //!   只计入 `BindStats::generated_chars`。它们是“文本提取需要的空格”，不是可删字形。
 //! - **连字/一对多映射**（如 Type1 字形 `fi`、Type0 ToUnicode 多码点映射）：一个
 //!   code 产生 N 个字符，pdfium 把同一字形的 origin/bbox 复制给每个字符。按
-//!   **完全相同的 origin 分簇**后，一簇就是一个 code 的证据。
+//!   **完全相同的 origin + bbox 分簇**后，一簇就是一个 code 的证据（零推进的
+//!   叠印字形与下一字形同 origin、不同 bbox，仍是两簇）。
 //! - **空格折叠**：内容流里连续的空格 code 在 pdfium 文本页里合并成一个字符
 //!   （实测 `A␣␣B` 只出一个空格字符）。这些 code 有真实字节、可删除，只是没有
 //!   独立字符证据；绑定保留它们（unicode 为空格、几何取折叠簇的共享证据）。
@@ -1621,13 +1622,18 @@ fn is_space_code(code: u32, kind: EncodingKind) -> bool {
     }
 }
 
-/// 按完全相同的 origin 把非生成字符分簇：pdfium 对一对多映射（连字等）会把
-/// 同一字形的 origin/bbox 复制给每个 Unicode 字符，一簇即一个 code 的证据。
+/// 按完全相同的 origin + bbox 把非生成字符分簇：pdfium 对一对多映射（连字等）
+/// 会把同一字形的 origin/bbox 复制给每个 Unicode 字符，一簇即一个 code 的证据。
+/// 零推进字形（TeX `\mapstochar`、`\not` 等叠印组合符号）与下一字形同 origin，
+/// 但 bbox 不同——是两个 code，不能并成一簇。
 fn cluster_by_origin<'c>(real: &'c [&'c TextChar]) -> Vec<&'c [&'c TextChar]> {
     let mut out: Vec<&[&TextChar]> = Vec::new();
     let mut start = 0usize;
     for i in 1..=real.len() {
-        if i == real.len() || real[i].origin != real[i - 1].origin {
+        if i == real.len()
+            || real[i].origin != real[i - 1].origin
+            || real[i].bbox != real[i - 1].bbox
+        {
             out.push(&real[start..i]);
             start = i;
         }

@@ -355,6 +355,70 @@ fn type0_ligature_single_glyph_no_shift() {
     assert_eq!((b0, b1), (2, 4));
 }
 
+/// 零推进叠印字形（TeX `\\not\\in`、`\\mapsto` 的 `\\mapstochar`）与下一字形同
+/// origin、不同 bbox：两个 code 各自绑定，不因共享 origin 并成一簇而降级。
+/// 反例（同 origin 同 bbox 的连字）见 `type0_ligature_single_glyph_no_shift`。
+#[test]
+fn zero_advance_overstrike_binds_each_code() {
+    let Some(_w) = worker() else { return };
+    // 单字节 code 0x37（宽 0）+ 0x21。第二例同 CMSY10：叠印符号不在 ToUnicode 里。
+    let cases: [&[(u8, &str)]; 2] = [&[(0x37, "\u{338}"), (0x21, "→")], &[(0x21, "→")]];
+    for (i, to_uni) in cases.into_iter().enumerate() {
+        let mut doc = simple_font_doc(bt_text("F1", 12.0, 72.0, 700.0, "(7!) Tj").as_bytes());
+        let mut cmap = String::from(
+            "/CIDInit /ProcSet findresource begin 12 dict begin begincmap \
+             /CMapName /Test-UCS def /CMapType 2 def \
+             1 begincodespacerange <00> <FF> endcodespacerange\n",
+        );
+        cmap.push_str(&format!("{} beginbfchar\n", to_uni.len()));
+        for (code, text) in to_uni {
+            let dst: String = text.encode_utf16().map(|u| format!("{u:04X}")).collect();
+            cmap.push_str(&format!("<{code:02X}> <{dst}>\n"));
+        }
+        cmap.push_str("endbfchar endcmap CMapName currentdict /CMap defineresource pop end end\n");
+        let to_uni_id = doc.add_object(Stream::new(LDict::new(), cmap.into_bytes()));
+        let font = doc
+            .objects
+            .values_mut()
+            .filter_map(|o| o.as_dict_mut().ok())
+            .find(|d| d.get(b"BaseFont").is_ok())
+            .unwrap();
+        let mut widths = vec![LObj::Real(600.0); 256];
+        widths[0x37] = LObj::Integer(0);
+        font.set("Widths", widths);
+        font.set("ToUnicode", LObj::Reference(to_uni_id));
+        let path = write_pdf(doc, &format!("zero-advance-{i}.pdf"));
+        let (worker, docid, _, bound) = bind(&path);
+        let chars: Vec<_> = worker.page_text_objects(docid, 0).unwrap()[0]
+            .chars
+            .iter()
+            .filter(|c| !c.is_generated)
+            .cloned()
+            .collect();
+        assert_eq!(chars.len(), 2, "case {i}: {chars:?}");
+        assert_eq!(
+            chars[0].origin, chars[1].origin,
+            "case {i}: 夹具须共享 origin"
+        );
+        let glyphs = text_items(&bound)[0];
+        assert_eq!(glyphs.len(), 2);
+        assert_eq!(glyph_text(&glyphs[1]), "→", "case {i}");
+        if to_uni.len() == 2 {
+            assert_eq!(glyph_text(&glyphs[0]), "\u{338}", "case {i}");
+        }
+        assert_eq!(
+            bound.stats.degraded, 0,
+            "case {i}: {:?} issues={:?}",
+            bound.stats, bound.issues
+        );
+        assert!(bound.unproven_source_ops().is_empty(), "case {i}");
+        assert_eq!(
+            glyphs[1].bbox, chars[1].bbox,
+            "case {i}: 第二个 code 用自己的几何"
+        );
+    }
+}
+
 #[test]
 fn type0_scalar_bfrange_supplementary_geometry() {
     let mut doc = type0_font_doc(&[], b"BT /T1 12 Tf 1 0 0 1 72 700 Tm <00010002> Tj ET\n");
