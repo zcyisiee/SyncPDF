@@ -151,6 +151,63 @@ fn inline_formula_is_owned_once_and_prose_is_translatable() {
     assert_eq!(atom.glyph_range.1 - atom.glyph_range.0, 1);
 }
 
+/// 数学扩展字体（cmex10）的 loose 盒来自约 3em 的 FontBBox，会从本行一直伸到下一行。
+/// 有墨迹证据时按墨迹定位，两行不会被并成一行交错；loose 盒不超过 2em 的字形、
+/// 以及没有墨迹证据的字形，仍按 loose 盒定位。
+fn tall_loose_rows(height_em: f32, ink: bool) -> Paragraph {
+    let mut glyphs = line(0, "Based on S then", 50.0, 700.0, 10.0, 0);
+    glyphs.extend(line(20, "for vanilla now", 50.0, 688.0, 10.0, 0));
+    let sum = &mut glyphs[9];
+    sum.bbox.y0 = sum.bbox.y1 - 10.0 * height_em;
+    sum.ink = ink.then(|| Rect::new(sum.bbox.x0 + 0.5, 700.0, sum.bbox.x1 - 0.5, 709.0));
+    let ir = page_ir(glyphs, vec![mk_font("F1", false, false)]);
+    let mut paragraphs = analyze_page(&ir, &full_region(RegionKind::Text));
+    assert_eq!(paragraphs.len(), 1);
+    paragraphs.remove(0)
+}
+
+#[test]
+fn extension_font_glyph_rows_are_placed_by_ink() {
+    let p = tall_loose_rows(3.0, true);
+    assert_eq!(p.lines.len(), 2);
+    assert!(p.text.starts_with("Based on S then"), "{}", p.text);
+    assert!(p.text.ends_with("for vanilla now"), "{}", p.text);
+    // 负例：没有墨迹证据时保守沿用 loose 盒，两行照旧被桥接成一行。
+    assert_eq!(tall_loose_rows(3.0, false).lines.len(), 1);
+}
+
+#[test]
+fn extension_font_glyph_joins_the_formula_that_owns_its_ink() {
+    for (height_em, ink, owned) in [(3.0, true, true), (1.8, true, false), (3.0, false, false)] {
+        let mut glyphs = line(0, "Value S then", 50.0, 700.0, 10.0, 0);
+        let sum = &mut glyphs[6];
+        sum.bbox.y0 = sum.bbox.y1 - 10.0 * height_em;
+        sum.ink = ink.then(|| Rect::new(sum.bbox.x0 + 0.5, 700.0, sum.bbox.x1 - 0.5, 709.0));
+        // 检测框只盖住墨迹中心，不盖住 loose 中心。
+        let formula_box = Rect::new(sum.bbox.x0 - 0.5, 702.0, sum.bbox.x1 + 0.5, 711.0);
+        let ir = page_ir(glyphs, vec![mk_font("F1", false, false)]);
+        let mut regions = full_region(RegionKind::Text);
+        let mut formula = text_region(1, formula_box, 1);
+        formula.kind = RegionKind::Formula;
+        regions.push(formula);
+        let paragraphs = analyze_page(&ir, &regions);
+        let p = paragraphs
+            .iter()
+            .find(|p| p.kind == RegionKind::Text)
+            .unwrap();
+        assert!(
+            matches!(p.translatable, Translatable::Yes),
+            "{height_em} {ink}"
+        );
+        let atom = p.atoms.iter().find(|a| a.kind == AtomKind::Formula);
+        assert_eq!(
+            atom.map(|a| (a.text.as_str(), a.source.is_some())),
+            owned.then_some(("S", true)),
+            "{height_em} {ink}"
+        );
+    }
+}
+
 /// The detected Formula box ends just below the formula's top ink (a radical's
 /// overbar at the top of the `√` ink). The bar belongs to the formula; a rule
 /// crossing the whole row at the same height does not.

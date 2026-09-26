@@ -1,4 +1,5 @@
 //! Formula regions are atomic source drawings inside prose, not a reason to skip it.
+use super::placement_box;
 use std::collections::BTreeSet;
 use syncpdf_core::ir::{
     Atom, AtomKind, DisplayItem, Glyph, PageIR, Paragraph, Region, RegionKind, SourceAtom,
@@ -27,7 +28,7 @@ pub(super) fn sources(ir: &PageIR, regions: &[&Region]) -> Vec<Formula> {
         let owned: Vec<_> = glyphs
             .iter()
             .copied()
-            .filter(|g| r.bbox.contains(g.bbox.center()))
+            .filter(|g| r.bbox.contains(placement_box(g).center()))
             .collect();
         if owned.is_empty() {
             continue;
@@ -36,7 +37,11 @@ pub(super) fn sources(ir: &PageIR, regions: &[&Region]) -> Vec<Formula> {
         let Some(parent) = regions
             .iter()
             .filter(|p| p.kind.translatable())
-            .filter(|p| owned.iter().all(|g| p.bbox.contains(g.bbox.center())))
+            .filter(|p| {
+                owned
+                    .iter()
+                    .all(|g| p.bbox.contains(placement_box(g).center()))
+            })
             .min_by(|a, b| {
                 (a.bbox.width() * a.bbox.height()).total_cmp(&(b.bbox.width() * b.bbox.height()))
             })
@@ -47,7 +52,7 @@ pub(super) fn sources(ir: &PageIR, regions: &[&Region]) -> Vec<Formula> {
             regions.iter().any(|p| {
                 !p.kind.translatable()
                     && p.kind != RegionKind::Formula
-                    && p.bbox.contains(g.bbox.center())
+                    && p.bbox.contains(placement_box(g).center())
             })
         }) {
             continue;
@@ -83,7 +88,9 @@ pub(super) fn sources(ir: &PageIR, regions: &[&Region]) -> Vec<Formula> {
                 break;
             };
             let ids: BTreeSet<_> = kept.iter().map(|g| g.id).collect();
-            let bbox = kept.iter().fold(seed.bbox, |b, g| b.union(&g.bbox));
+            let bbox = kept
+                .iter()
+                .fold(placement_box(seed), |b, g| b.union(&placement_box(g)));
             // 每个字形必须有完整墨迹证据，否则该字形退回保守 loose 盒。
             // 空白字形除外：它没有墨迹可擦、也没有墨迹可撞，loose 盒只描述
             // 间距；把间距算进碰撞裁剪会伸入邻字真实墨迹，误判 blocked。
@@ -100,20 +107,20 @@ pub(super) fn sources(ir: &PageIR, regions: &[&Region]) -> Vec<Formula> {
                 .iter()
                 .filter(|g| {
                     !ids.contains(&g.id)
-                        && parent.bbox.contains(g.bbox.center())
+                        && parent.bbox.contains(placement_box(g).center())
                         && !regions.iter().any(|r| {
-                            r.kind == RegionKind::Formula && r.bbox.contains(g.bbox.center())
+                            r.kind == RegionKind::Formula && r.bbox.contains(placement_box(g).center())
                         })
                         // 锚点证明的是「公式与正文同行」：父区域归属 + 同行
                         // 几何。句读也是正文；只认字母会错杀行首/行末公式，
                         // 但空白的字号不可靠，仍须排除。
                         && !g.unicode.iter().all(|c| c.is_whitespace())
-                        && (g.bbox.center().y - bbox.center().y).abs() < g.size
+                        && (placement_box(g).center().y - bbox.center().y).abs() < g.size
                 })
                 .min_by(|a, b| {
                     let distance = |g: &&&Glyph| {
-                        (g.bbox.center().y - bbox.center().y).abs() * 20.0
-                            + (g.bbox.center().x - bbox.center().x).abs()
+                        (placement_box(g).center().y - bbox.center().y).abs() * 20.0
+                            + (placement_box(g).center().x - bbox.center().x).abs()
                     };
                     distance(a).total_cmp(&distance(b))
                 })
@@ -1020,7 +1027,7 @@ pub(super) fn line_box(g: &Glyph, formulas: &[Formula]) -> Rect {
     formulas
         .iter()
         .find(|f| f.ids.contains(&g.id))
-        .map_or(g.bbox, |f| {
+        .map_or(placement_box(g), |f| {
             Rect::new(g.bbox.x0, f.row.y0, g.bbox.x1, f.row.y1)
         })
 }

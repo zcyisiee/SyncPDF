@@ -35,6 +35,19 @@ const EDGE_TOL_EM: f32 = 0.35;
 const CENTER_MIN_MARGIN: f32 = 3.0;
 /// 「太短」阈值：去掉原子后有效字符数低于它不可译。
 const MIN_TEXT_CHARS: usize = 2;
+/// loose 盒高于字号该倍数时不再代表字形位置。loose 盒取自字体级 FontBBox：
+/// 正文与常见数学字体实测 ≤ 2em，数学扩展字体（cmex10 的求和号、伸缩括号/竖线
+/// 分段）约 3em，远大于字形真实所在的那一行。
+const PLACEMENT_LOOSE_MAX_EM: f32 = 2.0;
+
+/// 判断字形属于哪个区域、哪一行所用的几何：通常是 loose 盒；loose 盒高得与
+/// 字号不符且有墨迹证据时改用墨迹盒，没有墨迹证据时保守沿用 loose。
+fn placement_box(g: &syncpdf_core::ir::Glyph) -> Rect {
+    match g.ink {
+        Some(ink) if g.bbox.height() > g.size * PLACEMENT_LOOSE_MAX_EM => ink,
+        _ => g.bbox,
+    }
+}
 
 /// 分析一页：逐区域产出段落。
 pub fn analyze_page(ir: &PageIR, regions: &[Region]) -> Vec<Paragraph> {
@@ -48,7 +61,7 @@ pub fn analyze_page(ir: &PageIR, regions: &[Region]) -> Vec<Paragraph> {
         .filter(|g| {
             regions
                 .iter()
-                .any(|r| !r.kind.translatable() && r.bbox.contains(g.bbox.center()))
+                .any(|r| !r.kind.translatable() && r.bbox.contains(placement_box(g).center()))
         })
         .map(|g| g.id)
         .collect();
@@ -61,7 +74,7 @@ pub fn analyze_page(ir: &PageIR, regions: &[Region]) -> Vec<Paragraph> {
             .iter()
             .filter(|g| !g.flags.invisible && !g.flags.outside_clip)
             .filter(|g| {
-                let c = g.bbox.center();
+                let c = placement_box(g).center();
                 c.x >= region.bbox.x0
                     && c.x <= region.bbox.x1
                     && c.y >= region.bbox.y0
@@ -72,7 +85,7 @@ pub fn analyze_page(ir: &PageIR, regions: &[Region]) -> Vec<Paragraph> {
                     || !regions.iter().any(|other| {
                         other.kind.translatable()
                             && other.index != region.index
-                            && other.bbox.contains(g.bbox.center())
+                            && other.bbox.contains(placement_box(g).center())
                             && (other.bbox.width() * other.bbox.height(), other.index)
                                 < (region.bbox.width() * region.bbox.height(), region.index)
                     })
@@ -201,12 +214,11 @@ fn merge_lines(
                 return None;
             }
             gs.sort_by(|a, b| {
-                glyphs[*a as usize]
-                    .bbox
+                placement_box(glyphs[*a as usize])
                     .x0
-                    .total_cmp(&glyphs[*b as usize].bbox.x0)
+                    .total_cmp(&placement_box(glyphs[*b as usize]).x0)
             });
-            let mut bbox = glyphs[gs[0] as usize].bbox;
+            let mut bbox = placement_box(glyphs[gs[0] as usize]);
             let mut baselines: Vec<f32> = gs
                 .iter()
                 .map(|i| glyphs[*i as usize].matrix.f)
@@ -218,8 +230,7 @@ fn merge_lines(
                 .copied()
                 .unwrap_or(bbox.y0);
             for &g in &gs[1..] {
-                let gl = glyphs[g as usize];
-                bbox = bbox.union(&gl.bbox);
+                bbox = bbox.union(&placement_box(glyphs[g as usize]));
             }
             Some(Row {
                 glyphs: gs,
