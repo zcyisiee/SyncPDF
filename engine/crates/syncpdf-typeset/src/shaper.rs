@@ -52,6 +52,9 @@ pub struct StyleSpec {
     /// style carries no attributed source line, so nothing is guessed.
     #[serde(default)]
     pub underline: Option<UnderlineStyle>,
+    /// Superscript (+) / subscript (−) baseline offset, in units of this run's size.
+    #[serde(default)]
+    pub rise: f32,
 }
 
 /// Redraw parameters taken from the claimed source underline itself.

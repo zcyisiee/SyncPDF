@@ -643,6 +643,7 @@ pub(crate) mod tests {
             serif: false,
             mono: false,
             underline: false,
+            rise: 0.0,
         }
     }
 

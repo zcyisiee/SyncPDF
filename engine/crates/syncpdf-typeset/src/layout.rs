@@ -618,13 +618,14 @@ fn place_row(
                 ..
             } => {
                 let mut first = true;
+                let rise = spec(input, *style).rise * *size;
                 for g in shaped {
                     let placed = PlacedGlyph {
                         font: g.font,
                         gid: g.gid,
                         text: if first { text.clone() } else { String::new() },
                         x: x + g.x_offset,
-                        y: baseline + g.y_offset,
+                        y: baseline + rise + g.y_offset,
                         size: *size,
                         scale_x: 1.0,
                         // 合成斜体按片段携带；剪切不改变 advance/断行（见模块文档）。

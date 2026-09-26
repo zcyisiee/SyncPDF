@@ -63,6 +63,7 @@ pub(super) fn state(dir: &Path) -> (RunState, PathBuf) {
                 serif: false,
                 mono: false,
                 underline: false,
+                rise: 0.0,
             }],
             atoms: vec![],
             decorations: Vec::new(),

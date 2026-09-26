@@ -427,6 +427,7 @@ pub fn spec_for(para: &Paragraph) -> ParagraphSpec {
                     size: Some(r.size),
                     color: Some(r.color),
                     font: None,
+                    rise: r.rise,
                     // Geometry comes from the claimed source line, so a run is
                     // decorated only when that line was really attributed to it.
                     underline: para
@@ -606,6 +607,7 @@ mod tests {
                 mono: false,
 
                 underline: false,
+                rise: 0.0,
             }],
             atoms: vec![],
             text: text.into(),
@@ -1252,6 +1254,7 @@ mod tests {
                 mono: false,
 
                 underline: false,
+                rise: 0.0,
             },
             StyleRun {
                 id: StyleId(2),
@@ -1265,6 +1268,7 @@ mod tests {
                 mono: false,
 
                 underline: false,
+                rise: 0.0,
             },
         ];
         let spec = spec_for(&para);

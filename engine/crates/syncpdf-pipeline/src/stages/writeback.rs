@@ -221,6 +221,7 @@ mod tests {
                 serif: false,
                 mono: false,
                 underline: false,
+                rise: 0.0,
             }],
             atoms: Vec::new(),
             decorations: Vec::new(),

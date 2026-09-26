@@ -254,6 +254,7 @@ mod tests {
                 serif: true,
                 mono: false,
                 underline: false,
+                rise: 0.0,
             }],
             atoms: vec![],
             decorations: vec![],

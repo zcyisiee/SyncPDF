@@ -203,6 +203,51 @@ fn run_size_color_offset_and_actual_font_survive() {
 }
 
 #[test]
+fn script_runs_sit_on_their_source_baseline_offset_and_atoms_do_not_move() {
+    let mut s = spec(Rect::new(0.0, 0.0, 80.0, 30.0));
+    for (id, rise) in [(2, 0.5), (3, -0.3), (4, 0.0)] {
+        s.styles.push((
+            StyleId(id),
+            StyleSpec {
+                size: Some(6.0),
+                rise,
+                ..StyleSpec::default()
+            },
+        ));
+    }
+    let atom_source = syncpdf_core::ir::SourceAtom {
+        bbox: Rect::new(0.0, -1.0, 4.0, 5.0),
+        baseline: 0.0,
+        advance: None,
+    };
+    let r = run(
+        &s,
+        &[
+            text("a", 1),
+            text("b", 2),
+            text("c", 3),
+            text("d", 4),
+            Inline::SourceAtom {
+                id: syncpdf_core::AtomId(1),
+                source: atom_source,
+            },
+        ],
+    );
+    assert!(!overflow(&r), "{:?}", r.issues);
+    let line = &r.paragraph.lines[0];
+    let y = |t: &str| line.glyphs.iter().find(|g| g.text == t).unwrap().y;
+    assert!((y("a") - line.baseline_y).abs() < 1e-4);
+    assert!(
+        (y("b") - (line.baseline_y + 3.0)).abs() < 1e-4,
+        "superscript"
+    );
+    assert!((y("c") - (line.baseline_y - 1.8)).abs() < 1e-4, "subscript");
+    // 反例：缩小字号但同基线（小型大写等）不抬高；公式原子按源几何放置，不吃 rise。
+    assert!((y("d") - line.baseline_y).abs() < 1e-4);
+    assert!((line.placed_atoms[0].bbox.y0 - (line.baseline_y - 1.0)).abs() < 1e-4);
+}
+
+#[test]
 fn advance_too_wide_never_reports_success() {
     let r = run(&spec(Rect::new(0.0, 0.0, 8.0, 40.0)), &[text("ab", 1)]);
     assert!(overflow(&r));

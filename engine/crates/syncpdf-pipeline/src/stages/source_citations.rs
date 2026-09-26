@@ -220,6 +220,7 @@ mod tests {
                 italic: false,
                 serif: true,
                 mono: false,
+                rise: 0.0,
             }],
             atoms: vec![],
             text: "2026 2026".into(),

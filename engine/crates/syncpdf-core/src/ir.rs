@@ -191,6 +191,10 @@ pub struct StyleRun {
     /// This run was underlined in the source and must be redrawn underlined.
     #[serde(default)]
     pub underline: bool,
+    /// 上下标：本 run 基线相对所在行主基线的偏移，以本 run 字号为单位
+    /// （正为上标、负为下标，0 为同基线）。
+    #[serde(default)]
+    pub rise: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

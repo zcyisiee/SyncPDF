@@ -167,6 +167,41 @@ fn tall_loose_rows(height_em: f32, ink: bool) -> Paragraph {
 }
 
 #[test]
+fn text_font_scripts_carry_their_baseline_offset_in_style_runs() {
+    // 「size 256² pixels xᵢ」+ 同基线小字号 + 同字号基线抖动。
+    let mut glyphs = line(0, "size 256", 50.0, 700.0, 10.0, 0);
+    glyphs.push(mk_glyph(20, '2', 98.0, 703.5, 7.0, 0));
+    glyphs.extend(line(30, " pixels x", 102.2, 700.0, 10.0, 0));
+    glyphs.push(mk_glyph(50, 'i', 156.2, 698.0, 7.0, 0));
+    glyphs.extend(line(60, " small", 160.4, 700.0, 7.0, 0));
+    glyphs.extend(line(70, " jit", 185.6, 701.5, 10.0, 0));
+    let ir = page_ir(glyphs, vec![mk_font("F1", false, false)]);
+    let paragraphs = analyze_page(&ir, &full_region(RegionKind::Text));
+    assert_eq!(paragraphs.len(), 1);
+    let p = &paragraphs[0];
+    assert_eq!(p.lines.len(), 1);
+    let scripts: Vec<_> = p
+        .style_runs
+        .iter()
+        .filter(|r| r.rise != 0.0)
+        .map(|r| (r.glyph_range.1 - r.glyph_range.0, r.rise))
+        .collect();
+    // 上标 (703.5-700)/7=0.5；下标 (698-700)/7≈-0.29。
+    assert_eq!(scripts, vec![(1, 0.5), (1, -0.29)], "{:?}", p.style_runs);
+    // 反例：同基线的小字号与同字号的基线抖动都不是上下标。
+    let small = p
+        .style_runs
+        .iter()
+        .filter(|r| r.size == 7.0 && r.rise == 0.0);
+    assert_eq!(
+        small
+            .map(|r| r.glyph_range.1 - r.glyph_range.0)
+            .sum::<u32>(),
+        6
+    );
+}
+
+#[test]
 fn extension_font_glyph_rows_are_placed_by_ink() {
     let p = tall_loose_rows(3.0, true);
     assert_eq!(p.lines.len(), 2);

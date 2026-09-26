@@ -39,6 +39,25 @@ const MIN_TEXT_CHARS: usize = 2;
 /// 正文与常见数学字体实测 ≤ 2em，数学扩展字体（cmex10 的求和号、伸缩括号/竖线
 /// 分段）约 3em，远大于字形真实所在的那一行。
 const PLACEMENT_LOOSE_MAX_EM: f32 = 2.0;
+/// 上下标判定：字号不超过行主字号该倍数（排版上的上下标都缩小字号，
+/// 同字号的基线抖动如扫描倾斜不算）……
+const SCRIPT_MAX_SIZE_RATIO: f32 = 0.9;
+/// ……且基线偏离行主基线至少本字号该倍数（上标约 0.3–0.5em、下标约 0.2em）。
+const SCRIPT_MIN_RISE_EM: f32 = 0.1;
+
+/// 字形相对所在行的上下标偏移（本字号为单位）；不是上下标时为 0。
+fn script_rise(g: &syncpdf_core::ir::Glyph, row_baseline: f32, row_size: f32) -> f32 {
+    if !(g.size > 0.0 && g.size <= row_size * SCRIPT_MAX_SIZE_RATIO) {
+        return 0.0;
+    }
+    let rise = (g.matrix.f - row_baseline) / g.size;
+    if rise.is_finite() && rise.abs() >= SCRIPT_MIN_RISE_EM {
+        // 同一上下标的字形共用基线；取两位小数让它们落在同一个 run。
+        (rise * 100.0).round() / 100.0
+    } else {
+        0.0
+    }
+}
 
 /// 判断字形属于哪个区域、哪一行所用的几何：通常是 loose 盒；loose 盒高得与
 /// 字号不符且有墨迹证据时改用墨迹盒，没有墨迹证据时保守沿用 loose。
@@ -563,7 +582,7 @@ fn glyph_total(map: &[u32], nchars: usize) -> u32 {
     map[nchars..].iter().copied().max().unwrap_or(0)
 }
 
-/// 按 (font, exact size, bold, italic, color) 切样式 run，`StyleId` 从 1 编。
+/// 按 (font, exact size, bold, italic, color, 上下标偏移) 切样式 run，`StyleId` 从 1 编。
 ///
 /// 粗斜体取自 `PageIR::fonts[glyph.font]`（`FontRef::is_bold` / `is_italic`），
 /// 字形本身只存字体下标。
@@ -579,9 +598,10 @@ fn style_runs(
         bold: bool,
         italic: bool,
         color: [u32; 3],
+        rise_bits: u32,
     }
 
-    let key_of = |i: u32| -> Key {
+    let key_of = |(i, rise): (u32, f32)| -> Key {
         let g = glyphs[i as usize];
         let (bold, italic) = font_flags(fonts, g.font);
         Key {
@@ -590,10 +610,19 @@ fn style_runs(
             bold,
             italic,
             color: [g.fill.r.to_bits(), g.fill.g.to_bits(), g.fill.b.to_bits()],
+            rise_bits: rise.to_bits(),
         }
     };
 
-    let flat: Vec<u32> = rows.iter().flat_map(|r| r.glyphs.iter().copied()).collect();
+    let flat: Vec<(u32, f32)> = rows
+        .iter()
+        .flat_map(|r| {
+            let size = row_size(r, glyphs);
+            r.glyphs
+                .iter()
+                .map(move |&i| (i, script_rise(glyphs[i as usize], r.baseline_y, size)))
+        })
+        .collect();
     let mut runs: Vec<StyleRun> = Vec::new();
     let mut next_id: u32 = 1;
     let mut start = 0usize;
@@ -603,19 +632,20 @@ fn style_runs(
         while end < flat.len() && key_of(flat[end]) == k {
             end += 1;
         }
-        let (bold, italic) = font_flags(fonts, glyphs[flat[start] as usize].font);
+        let (bold, italic) = font_flags(fonts, glyphs[flat[start].0 as usize].font);
         runs.push(StyleRun {
             id: StyleId(next_id),
             glyph_range: (start as u32, end as u32),
             font: k.font,
             size: f32::from_bits(k.size_bits),
-            color: glyphs[flat[start] as usize].fill,
+            color: glyphs[flat[start].0 as usize].fill,
             bold,
             italic,
             serif: fonts.get(k.font as usize).is_some_and(|f| f.is_serif),
             mono: fonts.get(k.font as usize).is_some_and(|f| f.is_fixed_pitch),
             // Underline is decided later from claimed source decorations.
             underline: false,
+            rise: flat[start].1,
         });
         next_id += 1;
         start = end;

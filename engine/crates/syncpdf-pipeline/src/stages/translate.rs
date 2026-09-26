@@ -488,6 +488,7 @@ mod tests {
             serif: false,
             mono: false,
             underline: false,
+            rise: 0.0,
         }];
         let unit = build_unit(&p, |_| None);
         assert!(unit.html.contains("{{KEEP_1}}"), "{}", unit.html);

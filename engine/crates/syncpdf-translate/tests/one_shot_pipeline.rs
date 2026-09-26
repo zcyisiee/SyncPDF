@@ -62,6 +62,7 @@ fn rich_paragraph(id: &str) -> Paragraph {
         serif: false,
         mono: false,
         underline: false,
+        rise: 0.0,
     }];
     p.atoms = vec![Atom {
         source: None,
