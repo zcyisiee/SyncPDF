@@ -171,7 +171,7 @@ MemoryMax=3G
 ```
 
 - **`KillMode=mixed` 不能改回 `control-group`**：control-group 在停服时同时给引擎发 SIGTERM，引擎先死，运行中的翻译会被记为失败。mixed 只给主进程发 SIGTERM；服务最多等 SSE 连接 3 秒，再在 lifespan 里终止引擎，把翻译留作 running，重启后排回队首；主进程退出后，剩余进程统一 SIGKILL。回归测试：`tests/cloud/test_jobs.py::test_service_stop_mid_run_requeues_instead_of_failing`。
-- `EnvironmentFile` 只接受 `KEY=value`，不展开 `$VAR`，也不认 `export `。从 shell 脚本生成时，先去掉 `export ` 并展开成绝对路径。含密钥的文件用 `umask 077` 生成（权限 600），检查时只打印键名：`sed -E 's/=.*/=…/' <file>`。代理文件由 shell 用的 `proxy.env` 生成：`(umask 077; sed 's/^export //' proxy.env > proxy.systemd.env)`；agy 缺代理时连不上模型服务。
+- `EnvironmentFile` 每行只接受一个 `KEY=value`，不展开 `$VAR`，也不认 `export `；`export a=1 b=2` 这种一行多赋值会被读成一个值。从 shell 脚本生成时不要用文本替换，而是让 shell 求值后导出：`(umask 077; env -i bash -c 'set -a; . ./proxy.env; env' | grep -iE '^(http|https|all|no)_proxy=' > proxy.systemd.env)`。含密钥的文件权限 600，检查时只打印键名：`sed -E 's/=.*/=…/' <file>`，并确认值里没有空格。agy 缺 `https_proxy` 时会直连 Google 并卡到超时（agy 日志 `~/.gemini/antigravity-cli/log/cli-*.log` 里是 `dial tcp …:443: i/o timeout`）。
 
 更新代码（在本机仓库根目录执行）。`--delete` 会删掉服务器上不在副本里的文件，所以必须先检查副本非空，并排除只在服务器上的目录：
 
