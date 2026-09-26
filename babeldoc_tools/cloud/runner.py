@@ -339,13 +339,17 @@ class Runner:
             if out:
                 self.service.emit(tid, out)
 
+        # agy 没有 --thinking：思考强度是模型名后缀（gemini-3.8-flash-low）
+        model, thinking = tr["model"], tr["thinking"]
+        if self.translator == "agy":
+            model, thinking = f"{model}-{thinking}", None
         try:
             result = rust_backend.translate_pdf(
                 pdf=str(source),
                 workdir=str(work),
                 pages=None,
-                model=tr["model"],
-                thinking=tr["thinking"],
+                model=model,
+                thinking=thinking,
                 source_lang="auto",
                 target_lang="zh-CN",
                 layout_device=self.layout_device,

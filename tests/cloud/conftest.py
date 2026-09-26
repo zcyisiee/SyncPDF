@@ -147,7 +147,7 @@ class Cloud:
             return client.post(
                 "/api/jobs",
                 files={"file": (name or pdf.name, handle, "application/pdf")},
-                data={"model": "deepseek/deepseek-flash", "thinking": thinking},
+                data={"model": "gemini-3.8-flash", "thinking": thinking},
             )
 
     def pdf(self, name: str, pages: int = 2, text: str | None = None) -> Path:

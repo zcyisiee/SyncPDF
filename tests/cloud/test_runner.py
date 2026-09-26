@@ -149,9 +149,30 @@ def test_runner_passes_cloud_typesetting_options_to_engine(cloud):
     calls = [json.loads(line) for line in (cloud.tmp / "engine-calls.jsonl").read_text().splitlines()]
     args = calls[-1]
     pairs = {args[i]: args[i + 1] for i in range(1, len(args) - 1) if args[i].startswith("--")}
-    assert pairs["--model"] == "deepseek/deepseek-flash" and pairs["--thinking"] == "low"
+    assert pairs["--model"] == "gemini-3.8-flash" and pairs["--thinking"] == "low"
     assert pairs["--line-height"] == "1.5" and pairs["--target-lang"] == "zh-CN"
     assert "--dual-output" not in args and "--font-scale" not in args
+
+
+@pytest.mark.parametrize("thinking", ["low", "medium", "high"])
+@pytest.mark.parametrize(
+    ("translator", "model", "passes_thinking"),
+    [("agy", "gemini-3.8-flash-{t}", False), ("pi", "gemini-3.8-flash", True)],
+)
+def test_runner_maps_thinking_per_translator(cloud, translator, model, passes_thinking, thinking):
+    """agy 拒绝 --thinking，强度并入模型名后缀；pi 仍单独传 --thinking。"""
+    cloud.runner.translator = translator
+    client = cloud.client()
+    cloud.upload(client, cloud.pdf("map.pdf"), thinking=thinking)
+    assert cloud.runner.run_once()
+    args = json.loads((cloud.tmp / "engine-calls.jsonl").read_text().splitlines()[-1])
+    assert args[args.index("--translator") + 1] == translator
+    assert args[args.index("--model") + 1] == model.format(t=thinking)
+    assert ("--thinking" in args) is passes_thinking
+    if passes_thinking:
+        assert args[args.index("--thinking") + 1] == thinking
+    # 缓存键仍按界面上的（模型, 强度）记录
+    assert tuple(cloud.service.db.one("SELECT model, thinking FROM translations")) == ("gemini-3.8-flash", thinking)
 
 
 @pytest.mark.skipif(
@@ -174,7 +195,7 @@ def test_real_engine_translates_and_exports_dual(tmp_path):
             job = client.post(
                 "/api/jobs",
                 files={"file": ("ci-test.pdf", handle, "application/pdf")},
-                data={"model": "deepseek/deepseek-flash", "thinking": "low"},
+                data={"model": "gemini-3.8-flash", "thinking": "low"},
             ).json()
         assert app.state.runner.run_once()
         view = client.get(f"/api/jobs/{job['id']}").json()

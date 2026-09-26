@@ -37,7 +37,7 @@ __all__ = [
     "Service",
 ]
 
-MODELS = ("deepseek/deepseek-flash",)
+MODELS = ("gemini-3.8-flash",)
 THINKING = ("low", "medium", "high")
 ACTIVE = ("queued", "running")
 #: 有可下载译文的终态（缓存命中只认这两种）。

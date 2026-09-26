@@ -4,7 +4,7 @@ import { upload, type ApiError, type Job, type JobItem } from '../api';
 import { size } from '../format';
 import { Icon } from './Topbar';
 
-export const MODELS = ['deepseek/deepseek-flash'];
+export const MODELS = ['gemini-3.8-flash'];
 export const THINKING = ['low', 'medium', 'high'] as const;
 const MAX_BYTES = 50 << 20;
 
