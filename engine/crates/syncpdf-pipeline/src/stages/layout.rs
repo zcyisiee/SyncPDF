@@ -117,6 +117,7 @@ pub fn apply_coverage_fallback(
 ) -> syncpdf_layout::CoverageReport {
     super::ruled_code::refine_ruled_code_sidebars(regions, page_ir);
     recover_subcaptions(regions, page_ir);
+    recover_caption_edge_rows(regions, page_ir);
     let glyph_boxes: Vec<(Rect, bool)> = page_ir
         .glyphs()
         .filter(|g| !g.flags.invisible && !g.flags.outside_clip)
@@ -214,6 +215,73 @@ fn recover_subcaptions(regions: &mut Vec<Region>, ir: &PageIR) {
                 score: 1.0,
                 order: next,
             });
+        }
+    }
+}
+
+/// 检测框截掉图注首/末行时，把紧邻的续行归回该图注。
+///
+/// 证据：遗漏行与图注边缘行同字号、相距不超过一个行距、左端或中轴对齐，且落在图注框
+/// 水平范围内。只纵向扩框，新增带内只能有这一行的字形；多个图注都符合时归属不明，保留缺口。
+fn recover_caption_edge_rows(regions: &mut [Region], ir: &PageIR) {
+    let glyphs: Vec<&Glyph> = ir.glyphs().filter(|g| !is_white_glyph(g)).collect();
+    let boxes = |keep: &dyn Fn(&Glyph) -> bool| -> Vec<(syncpdf_core::GlyphId, Rect)> {
+        glyphs
+            .iter()
+            .filter(|g| keep(g))
+            .map(|g| (g.id, g.bbox))
+            .collect()
+    };
+    let row_of = |ids: &[syncpdf_core::GlyphId]| -> Option<(Rect, f32)> {
+        let row: Vec<&&Glyph> = glyphs.iter().filter(|g| ids.contains(&g.id)).collect();
+        let first = row.first()?;
+        let bbox = row.iter().fold(first.bbox, |b, g| b.union(&g.bbox));
+        let mut sizes: Vec<f32> = row.iter().map(|g| g.size).collect();
+        sizes.sort_by(f32::total_cmp);
+        Some((bbox, sizes[sizes.len() / 2]))
+    };
+    let missed = boxes(&|g| !regions.iter().any(|r| r.bbox.contains(g.bbox.center())));
+    for ids in syncpdf_layout::group_lines(&missed, &ir.crop_box) {
+        let Some((row, size)) = row_of(&ids) else {
+            continue;
+        };
+        let tol = size * 0.5;
+        let owners: Vec<(usize, Rect)> = regions
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.kind == RegionKind::Caption)
+            .filter(|(_, r)| r.bbox.x0 - tol <= row.x0 && row.x1 <= r.bbox.x1 + tol)
+            .filter_map(|(i, r)| {
+                let inside = boxes(&|g| r.bbox.contains(g.bbox.center()));
+                let (edge, edge_size) = syncpdf_layout::group_lines(&inside, &r.bbox)
+                    .iter()
+                    .filter_map(|l| row_of(l))
+                    .min_by(|a, b| {
+                        let d = |e: &Rect| (e.center().y - row.center().y).abs();
+                        d(&a.0).total_cmp(&d(&b.0))
+                    })?;
+                let pitch = (edge.center().y - row.center().y).abs();
+                let aligned = (edge.x0 - row.x0).abs() <= tol
+                    || (edge.center().x - row.center().x).abs() <= tol;
+                let continues = (edge_size - size).abs() <= size * 0.1
+                    && pitch > size * 0.5
+                    && pitch <= size * 1.6
+                    && aligned;
+                let grown = Rect::new(
+                    r.bbox.x0,
+                    r.bbox.y0.min(row.y0),
+                    r.bbox.x1,
+                    r.bbox.y1.max(row.y1),
+                );
+                let band_is_row = glyphs.iter().all(|g| {
+                    let c = g.bbox.center();
+                    !grown.contains(c) || r.bbox.contains(c) || ids.contains(&g.id)
+                });
+                (continues && band_is_row).then_some((i, grown))
+            })
+            .collect();
+        if let [(i, grown)] = owners.as_slice() {
+            regions[*i].bbox = *grown;
         }
     }
 }
@@ -1484,6 +1552,69 @@ mod tests {
         assert_eq!(regions[1].kind, RegionKind::Caption);
         assert_eq!(regions[1].bbox, caption.bbox);
         assert_eq!(regions.len(), 2);
+    }
+
+    /// 一行 6pt 图注（x 100..179，中轴 139.5）被检测框只框住这一行，外加遗漏行 `extra`。
+    fn caption_edge_case(extra: Vec<Glyph>, more: Vec<Region>) -> (u32, Vec<Region>) {
+        let mut glyphs = glyph_row(0, "aaaaaaaaaa", 100.0, 100.0, 7.9, 6.0);
+        glyphs.extend(extra);
+        let ir = page_ir(glyphs);
+        let mut caption = region(0, Rect::new(98.0, 99.0, 181.0, 107.0));
+        caption.kind = RegionKind::Caption;
+        let mut regions = vec![caption];
+        regions.extend(more);
+        let report = apply_coverage_fallback(&mut regions, &ir, 0, 0.005);
+        (report.uncovered, regions)
+    }
+
+    #[test]
+    fn cut_off_caption_rows_are_adopted_by_alignment() {
+        // 居中的短末行在下方。
+        let (uncovered, regions) =
+            caption_edge_case(glyph_row(20, "bbb", 127.65, 93.0, 7.9, 6.0), vec![]);
+        assert_eq!(uncovered, 0);
+        assert_eq!(regions[0].bbox, Rect::new(98.0, 93.0, 181.0, 107.0));
+        // 左对齐的首行在上方（检测框截掉的是开头一行）。
+        let (uncovered, regions) = caption_edge_case(
+            glyph_row(20, "bbbbbbbbbbbb", 100.0, 107.2, 6.6, 6.0),
+            vec![],
+        );
+        assert_eq!(uncovered, 0);
+        assert_eq!(regions[0].bbox, Rect::new(98.0, 99.0, 181.0, 113.2));
+    }
+
+    #[test]
+    fn caption_edge_rows_without_continuation_evidence_stay_uncovered() {
+        let original = Rect::new(98.0, 99.0, 181.0, 107.0);
+        let cases = [
+            ("字号不同", glyph_row(20, "bbb", 127.65, 92.0, 7.9, 4.0)),
+            ("超过一个行距", glyph_row(20, "bbb", 127.65, 88.0, 7.9, 6.0)),
+            (
+                "既不左齐也不居中",
+                glyph_row(20, "bbb", 150.0, 93.0, 7.9, 6.0),
+            ),
+        ];
+        for (name, extra) in cases {
+            let (uncovered, regions) = caption_edge_case(extra, vec![]);
+            assert_eq!(uncovered, 3, "{name}");
+            assert_eq!(regions[0].bbox, original, "{name}");
+        }
+        // 两个图注都能接这一行：归属不明。
+        let mut other = region(1, Rect::new(98.0, 79.0, 181.0, 92.5));
+        other.kind = RegionKind::Caption;
+        let mut extra = glyph_row(20, "bbb", 127.65, 93.0, 7.9, 6.0);
+        extra.extend(glyph_row(30, "cc", 131.6, 86.0, 7.9, 6.0));
+        let (_, regions) = caption_edge_case(extra, vec![other.clone()]);
+        assert_eq!(regions[0].bbox, original);
+        assert_eq!(regions[1].bbox, other.bbox);
+        // 扩框带里还有别的区域的字形，不能一并吞进。
+        let mut extra = glyph_row(20, "bbb", 127.65, 93.0, 7.9, 6.0);
+        extra.extend(glyph_row(30, "c", 165.0, 91.0, 7.9, 6.0));
+        let neighbor = region(1, Rect::new(160.0, 90.0, 175.0, 98.5));
+        let (uncovered, regions) = caption_edge_case(extra, vec![neighbor.clone()]);
+        assert_eq!(uncovered, 3);
+        assert_eq!(regions[0].bbox, original);
+        assert_eq!(regions[1].bbox, neighbor.bbox);
     }
 
     fn continuation_fixture(extra_row: bool) -> PageIR {
