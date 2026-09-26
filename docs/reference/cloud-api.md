@@ -25,7 +25,7 @@
 
 ## 上传、缓存与额度
 
-- 校验顺序：大小 ≤ 50MB（`file_too_large`）→ `%PDF-` 魔数（`not_pdf`）→ pymupdf 可打开、未加密、≤ 60 页、有文字层（`pdf_unreadable`/`pdf_encrypted`/`too_many_pages`/`no_text_layer`）。模型目前只有 `gemini-3.8-flash`，思考强度 `low|medium|high`。
+- 校验顺序：大小 ≤ 50MB（`file_too_large`）→ `%PDF-` 魔数（`not_pdf`）→ pymupdf 可打开、未加密、≤ 60 页、有文字层（`pdf_unreadable`/`pdf_encrypted`/`too_many_pages`/`no_text_layer`）。模型目前只有 `deepseek/deepseek-flash`（`pi` 通道），思考强度 `low|medium|high`。
 - 原文按 sha256 去重存入 `sources/`。**缓存键 = 原文 sha256 + 模型 + 思考强度 + 引擎版本**，引擎版本取 `syncpdf-cli` 二进制的 sha256（重新构建引擎即视为新版本）。
   - 键已有 `done/partial` 译文：直接建一条同状态、`cache_hit=true` 的 job，事件为“这篇论文已有译文，已直接加载 ⚡”，不扣额度。
   - 键正在排队/运行：新 job 挂到同一次翻译上，复制已有进度事件，不重复排队。
@@ -35,7 +35,7 @@
 ## 任务状态与执行
 
 - job 状态：`queued → running → done | partial | failed`，或随时 `canceled`。`partial` 表示有译文、但引擎报告未完整完成（有段落保留原文或内容未识别），前端显示黄色；`failed` 表示没有产出。
-- 单个 runner 线程一次只跑一篇（按 `queued_at` 取最早的 translation），调用 `rust_backend` 驱动 `syncpdf-cli translate`（默认 `--translator agy --model <模型>-<档>`：agy 不接受 `--thinking`，强度并入模型名，如 `gemini-3.8-flash-low`；`pi` 通道仍是 `--model <模型> --thinking <档>`；其余参数 `--font-scale 1.0 --line-height 1.5 --layout-device cpu`）。运行 workdir 是 `work/<translation_id>/`，结束后把 `translated.pdf` 移入 `translations/<tid>/`、事件 gzip 保存，删除 workdir。
+- 单个 runner 线程一次只跑一篇（按 `queued_at` 取最早的 translation），调用 `rust_backend` 驱动 `syncpdf-cli translate`（`--translator` 由 `bdt cloud serve --translator` 决定，服务器现用 `pi`：`--model <模型> --thinking <档>`；agy 通道则是 `--model <模型>-<档>`，agy 不接受 `--thinking`，强度并入模型名；其余参数 `--font-scale 1.0 --line-height 1.5 --layout-device cpu`）。运行 workdir 是 `work/<translation_id>/`，结束后把 `translated.pdf` 移入 `translations/<tid>/`、事件 gzip 保存，删除 workdir。
 - 取消：排队中的直接结束；运行中的只有当这次翻译的**所有** job 都取消后才终止引擎进程组（SIGTERM，5 秒后 SIGKILL），然后下一篇开始。
 - 重启恢复：启动时把 `running` 的 translation 放回队首、名下 job 回到 `queued`，追加事件“服务已重启，任务将重新开始”，并清掉残留 workdir；翻译从头重跑（`attempt` 加一）。停服（SIGTERM）时，uvicorn 最多等 SSE 长连接 3 秒；随后 lifespan 终止引擎，并把翻译留作 `running` 等重启重排，不记失败。因此 systemd 必须用 `KillMode=mixed`：只给主进程发 SIGTERM，主进程退出后剩余进程统一 SIGKILL。用 `control-group` 时引擎会先收到 SIGTERM，翻译被记为失败（见 [部署](../guide/cli.md#云端版)）。
 - ETA：`queue = {ahead, eta_seconds}`，`ahead` 含正在跑的那篇，`eta_seconds = ahead × 最近 10 篇平均耗时`（没有记录时按 300 秒）。

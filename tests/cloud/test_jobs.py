@@ -300,7 +300,7 @@ def test_service_stop_mid_run_requeues_instead_of_failing(tmp_path, fake_engine)
             assert client.post("/api/login", json={"code": code}).status_code == 200
             with pdf.open("rb") as handle:
                 job = client.post("/api/jobs", files={"file": ("paper.pdf", handle)},
-                                  data={"model": "gemini-3.8-flash", "thinking": "low"}).json()
+                                  data={"model": "deepseek/deepseek-flash", "thinking": "low"}).json()
             wait_for(lambda: pid_file.exists() and client.get(f"/api/jobs/{job['id']}").json()["status"] == "running")
             engine_pid = int(pid_file.read_text())
             # 有人正看着进度：SSE 长连接不能拖住停服

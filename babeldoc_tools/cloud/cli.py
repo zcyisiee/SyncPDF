@@ -35,7 +35,7 @@ def add_parser(subparsers) -> argparse.ArgumentParser:
     serve.add_argument("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1，由 nginx 反代）")
     serve.add_argument("--port", type=int, default=8790, help="监听端口（默认 8790）")
     serve.add_argument("--engine", help="syncpdf-cli 路径（默认仓库内 release 构建）")
-    serve.add_argument("--translator", default="agy", help="翻译通道（默认 agy；测试用 fake:*）")
+    serve.add_argument("--translator", default="pi", help="翻译通道（默认 pi=DeepSeek；测试用 fake:*）")
     serve.add_argument("--layout-device", default="cpu", help="版面模型设备（默认 cpu）")
     invite = actions.add_parser("invite", help="新建账户并打印其邀请码")
     invite.add_argument("--root", default=str(DEFAULT_ROOT), help=f"数据根目录（默认 {DEFAULT_ROOT}）")

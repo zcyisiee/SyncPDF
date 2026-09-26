@@ -138,7 +138,7 @@ bdt cloud serve --port 8790                      # 只有 /api；引擎默认仓
 (cd cloud-web && pnpm install && pnpm dev)
 ```
 
-服务进程的环境会传给引擎：需要引擎运行库路径（`LD_LIBRARY_PATH`、`PDFIUM_DYNAMIC_LIB_PATH` 等，见 `engine/vendor/README.md`；vendor 不入库，按 `engine/vendor/sync.sh` 在目标机器准备 fonts/models/pdfium）和翻译通道的前提：默认 `agy` 通道要求服务用户下已认证的 `agy`（`~/.local/bin/agy`、`~/.gemini`），并且**必须走代理**（`HTTPS_PROXY` 等）；`--translator pi` 时需要 `DEEPSEEK_API_KEY`。
+服务进程的环境会传给引擎：需要引擎运行库路径（`LD_LIBRARY_PATH`、`PDFIUM_DYNAMIC_LIB_PATH` 等，见 `engine/vendor/README.md`；vendor 不入库，按 `engine/vendor/sync.sh` 在目标机器准备 fonts/models/pdfium）和翻译通道的前提：`agy` 通道要求服务用户下已认证的 `agy`（`~/.local/bin/agy`、`~/.gemini`），并且**必须走代理**（`HTTPS_PROXY` 等）；`--translator pi`（默认值，走 DeepSeek）需要 `DEEPSEEK_API_KEY`。
 
 前端验收：`cd cloud-web && pnpm typecheck && pnpm build && pnpm e2e`。e2e 启动真实 `bdt cloud serve` 和假引擎 `e2e/fake-engine.py`，不调用模型。`cloud-web/pnpm-workspace.yaml` 让它独立于仓库其它 pnpm 包安装。
 
