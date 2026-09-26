@@ -79,6 +79,15 @@ fn is_reserved(ch: char) -> bool {
     )
 }
 
+/// A literal backslash is always `\\`, so a lone backslash before punctuation or
+/// a symbol can only be an escape. Models carry the escape rule over to
+/// target-language punctuation (`\。`, `\，`); that is the same literal. Letters,
+/// digits and whitespace stay rejected: `\alpha` may be intended as TeX source.
+fn is_escapable(ch: char) -> bool {
+    ch.is_ascii_punctuation()
+        || !(ch.is_ascii() || ch.is_alphanumeric() || ch.is_whitespace() || ch.is_control())
+}
+
 /// Parse exactly one block; surrounding whitespace is allowed.
 pub fn parse(input: &str) -> Result<ParsedUnit, MarkdownError> {
     let mut stream = MarkdownStream::new();
@@ -273,7 +282,7 @@ fn parse_segments(body: &str, base: usize, in_style: bool) -> Result<Vec<Segment
             let Some(ch) = escaped.chars().next() else {
                 return Err(MarkdownError::at(base + pos, "trailing escape"));
             };
-            if !ch.is_ascii_punctuation() {
+            if !is_escapable(ch) {
                 return Err(MarkdownError::at(base + pos, "unknown escape"));
             }
             text.push(ch);

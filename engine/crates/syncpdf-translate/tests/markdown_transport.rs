@@ -122,6 +122,31 @@ fn rejects_mismatch_unknown_markers_nested_styles_and_attributes() {
 }
 
 #[test]
+fn escaped_non_ascii_punctuation_is_that_literal() {
+    // Models apply the escape rule to target-language punctuation too.
+    let parsed = parse(
+        "<!-- syncpdf:block P01-001 -->\n[附录]{style=1} [C\\.2]{style=2}[\\）\\。随后\\，«x»\\—\\≤]{style=3}\n<!-- syncpdf:end P01-001 -->",
+    )
+    .unwrap();
+    assert_eq!(
+        parsed.segments.last().unwrap(),
+        &Segment::Style {
+            id: StyleId(3),
+            inner: vec![Segment::Text("）。随后，«x»—≤".into())],
+        }
+    );
+    // Letters, digits and whitespace are not escapes (`\alpha` may be TeX).
+    for body in ["\\alpha", "\\中", "\\１", "\\\u{3000}x", "\\é"] {
+        let input = format!("<!-- syncpdf:block P01-001 -->\n{body}\n<!-- syncpdf:end P01-001 -->");
+        let err = parse(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown escape"),
+            "{body:?}: {err}"
+        );
+    }
+}
+
+#[test]
 fn ordinary_physical_newline_does_not_merge_words() {
     let parsed =
         parse("<!-- syncpdf:block P01-001 -->\none\ntwo\n<!-- syncpdf:end P01-001 -->").unwrap();
