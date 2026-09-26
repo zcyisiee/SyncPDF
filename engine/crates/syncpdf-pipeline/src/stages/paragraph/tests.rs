@@ -151,6 +151,49 @@ fn inline_formula_is_owned_once_and_prose_is_translatable() {
     assert_eq!(atom.glyph_range.1 - atom.glyph_range.0, 1);
 }
 
+/// The detected Formula box ends just below the formula's top ink (a radical's
+/// overbar at the top of the `√` ink). The bar belongs to the formula; a rule
+/// crossing the whole row at the same height does not.
+#[test]
+fn formula_bar_inside_own_ink_extent_but_outside_detected_box() {
+    for (bar, owned) in [
+        (Rect::new(91.5, 711.95, 98.3, 711.95), true),
+        (Rect::new(50.0, 711.95, 150.0, 711.95), false),
+    ] {
+        let mut glyphs = line(0, "Value rn then", 50.0, 700.0, 10.0, 0);
+        glyphs[6].ink = Some(Rect::new(86.2, 699.0, 91.8, 712.0));
+        glyphs[7].ink = Some(Rect::new(92.2, 700.5, 97.8, 708.0));
+        let mut ir = page_ir(glyphs, vec![mk_font("F1", false, false)]);
+        ir.items.push(bar_item(bar, 1));
+        let mut regions = full_region(RegionKind::Text);
+        let mut formula = text_region(1, Rect::new(86.0, 699.0, 98.5, 711.9), 1);
+        formula.kind = RegionKind::Formula;
+        regions.push(formula);
+        let paragraphs = analyze_page(&ir, &regions);
+        let p = paragraphs
+            .iter()
+            .find(|p| p.kind == RegionKind::Text)
+            .unwrap();
+        if owned {
+            assert!(matches!(p.translatable, Translatable::Yes), "{bar:?}");
+            let atom = p
+                .atoms
+                .iter()
+                .find(|a| a.kind == AtomKind::Formula)
+                .unwrap();
+            assert_eq!(atom.text, "rn");
+            let source = atom.source.unwrap();
+            assert!(source.bbox.x1 >= bar.x1 && source.bbox.y1 >= bar.y1);
+        } else {
+            assert!(
+                matches!(&p.translatable, Translatable::No { reason } if reason == "protected_source_overlap"),
+                "{bar:?}: {:?}",
+                p.translatable
+            );
+        }
+    }
+}
+
 #[test]
 #[ignore = "requires local source/layout evidence and writes an audit inventory"]
 fn inline_formula_document_inventory() {

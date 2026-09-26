@@ -125,6 +125,9 @@ pub(super) fn sources(ir: &PageIR, regions: &[&Region]) -> Vec<Formula> {
             // tighter collision box does not intersect it.
             let mut clip = formula_ink;
             // Include fraction bars and other local vector ink, never a crossing rule/image.
+            // The detected box is approximate; the formula's own glyph ink is evidence
+            // of its extent too (a radical's overbar sits at the top of its ink).
+            let extent = r.bbox.union(&formula_ink);
             for item in &ir.items {
                 if let DisplayItem::Path {
                     bbox,
@@ -134,7 +137,7 @@ pub(super) fn sources(ir: &PageIR, regions: &[&Region]) -> Vec<Formula> {
                 } = item
                 {
                     if (*is_fill || *is_stroke)
-                        && r.bbox.contains(bbox.center())
+                        && extent.contains(bbox.center())
                         && bbox.width() <= r.bbox.width() + 1.0
                         && bbox.height() <= r.bbox.height() + 1.0
                     {
