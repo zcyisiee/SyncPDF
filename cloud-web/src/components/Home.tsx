@@ -2,24 +2,29 @@ import { useRef, useState, type DragEvent } from 'react';
 
 import { upload, type ApiError, type Job, type JobItem } from '../api';
 import { size } from '../format';
-import { Icon } from './Topbar';
 
-export const MODELS = ['deepseek/deepseek-flash'];
+export const MODELS = ['deepseek/deepseek-flash', 'uuapi-gemini/gemini-3.8-flash'] as const;
+export const MODEL_LABELS: Record<string, string> = {
+  'deepseek/deepseek-flash': 'DeepSeek Flash',
+  'uuapi-gemini/gemini-3.8-flash': 'Gemini 3.8 Flash',
+};
 export const THINKING = ['low', 'medium', 'high'] as const;
 const MAX_BYTES = 50 << 20;
 
 interface Props {
   running: JobItem | null;
   file: File | null;
+  model: string;
   thinking: string;
   onFile: (file: File | null) => void;
+  onModel: (value: string) => void;
   onThinking: (value: string) => void;
   onResume: (id: string) => void;
   onStarted: (job: Job, file: File) => void;
   toast: (message: string) => void;
 }
 
-export function Home({ running, file, thinking, onFile, onThinking, onResume, onStarted, toast }: Props) {
+export function Home({ running, file, model, thinking, onFile, onModel, onThinking, onResume, onStarted, toast }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const [drag, setDrag] = useState(false);
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
@@ -36,7 +41,7 @@ export function Home({ running, file, thinking, onFile, onThinking, onResume, on
   const start = async () => {
     if (!file) return;
     setProgress({ loaded: 0, total: file.size });
-    const task = upload(file, { model: MODELS[0], thinking }, (loaded, total) => setProgress({ loaded, total }));
+    const task = upload(file, { model, thinking }, (loaded, total) => setProgress({ loaded, total }));
     abort.current = task.abort;
     try {
       const job = await task.promise;
@@ -132,10 +137,13 @@ export function Home({ running, file, thinking, onFile, onThinking, onResume, on
       <div className={`options${uploading ? ' locked' : ''}`}>
         <div className="opt">
           <label>模型</label>
-          <button className="select" title="目前仅此一个模型">
-            {MODELS[0]}
-            <Icon id="down" />
-          </button>
+          <div className="seg">
+            {MODELS.map((id) => (
+              <button key={id} className={id === model ? 'on' : ''} onClick={() => onModel(id)}>
+                {MODEL_LABELS[id] ?? id}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="opt">
           <label>思考强度</label>

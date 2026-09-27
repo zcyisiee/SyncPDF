@@ -25,7 +25,7 @@
 
 ## 上传、缓存与额度
 
-- 校验顺序：大小 ≤ 50MB（`file_too_large`）→ `%PDF-` 魔数（`not_pdf`）→ pymupdf 可打开、未加密、≤ 60 页、有文字层（`pdf_unreadable`/`pdf_encrypted`/`too_many_pages`/`no_text_layer`）。模型目前只有 `deepseek/deepseek-flash`（`pi` 通道），思考强度 `low|medium|high`。
+- 校验顺序：大小 ≤ 50MB（`file_too_large`）→ `%PDF-` 魔数（`not_pdf`）→ pymupdf 可打开、未加密、≤ 60 页、有文字层（`pdf_unreadable`/`pdf_encrypted`/`too_many_pages`/`no_text_layer`）。模型为 `deepseek/deepseek-flash` 与 `uuapi-gemini/gemini-3.8-flash`（均 `pi` 通道，后者前端显示为 Gemini 3.8 Flash），思考强度 `low|medium|high`。
 - 原文按 sha256 去重存入 `sources/`。**缓存键 = 原文 sha256 + 模型 + 思考强度 + 引擎版本**，引擎版本取 `syncpdf-cli` 二进制的 sha256（重新构建引擎即视为新版本）。
   - 键已有 `done/partial` 译文：直接建一条同状态、`cache_hit=true` 的 job，事件为“这篇论文已有译文，已直接加载 ⚡”，不扣额度。
   - 键正在排队/运行：新 job 挂到同一次翻译上，复制已有进度事件，不重复排队。

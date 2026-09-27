@@ -32,6 +32,7 @@ export function App() {
   const [drawer, setDrawer] = useState(false);
   const [items, setItems] = useState<JobItem[]>([]);
   const [file, setFile] = useState<File | null>(null);
+  const [model, setModel] = useState('deepseek/deepseek-flash');
   const [thinking, setThinking] = useState('low');
   // 本次会话上传过的文件：缓存命中后「换个思考强度」直接回到已选文件
   const files = useRef(new Map<string, File>());
@@ -97,8 +98,10 @@ export function App() {
         <Home
           running={items.find((i) => ACTIVE.includes(i.status)) ?? null}
           file={file}
+          model={model}
           thinking={thinking}
           onFile={setFile}
+          onModel={setModel}
           onThinking={setThinking}
           onResume={openJob}
           toast={toast}
