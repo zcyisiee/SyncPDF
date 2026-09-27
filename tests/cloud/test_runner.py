@@ -151,7 +151,7 @@ def test_runner_passes_cloud_typesetting_options_to_engine(cloud):
     pairs = {args[i]: args[i + 1] for i in range(1, len(args) - 1) if args[i].startswith("--")}
     assert pairs["--model"] == "deepseek/deepseek-flash" and pairs["--thinking"] == "low"
     assert pairs["--line-height"] == "1.5" and pairs["--target-lang"] == "zh-CN"
-    assert "--dual-output" not in args and "--font-scale" not in args
+    assert pairs["--font-scale"] == "0.9" and "--dual-output" not in args
 
 
 @pytest.mark.parametrize("thinking", ["low", "medium", "high"])

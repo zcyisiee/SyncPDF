@@ -354,7 +354,8 @@ class Runner:
                 target_lang="zh-CN",
                 layout_device=self.layout_device,
                 engine=self.engine,
-                font_scale=1.0,
+                # 同字号汉字满字身、视觉大于拉丁正文；0.9 让 1.5 行距少被整篇下调
+                font_scale=0.9,
                 line_height=1.5,
                 translator=self.translator,
                 on_event=on_event,
