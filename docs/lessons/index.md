@@ -13,5 +13,6 @@
 - [可编辑数据必须与校验处于同一表示空间](edit-roundtrip-space.md)：事件译文 HTML 与手改校验空间不一致导致含原子段手改必回退。
 - [停服信号要先到服务，再由服务收子进程](service-stop-and-child-processes.md)：`KillMode=control-group` 让引擎先死、SSE 长连接挡住优雅关闭，运行中的翻译在重启时被记成失败。
 - [PDF 绑定与渲染必须分别举证](pdf-binding-and-render-evidence.md)：已完成的绑定审查与真实画面反例，涵盖不可变输入、过期绑定、CID/GID和主树复验。
+- [两端对齐：断行评分与绘制必须用同一组 glue](justify-glue-single-model.md)：评分与绘制两套分配规则加上过宽伸缩量，让 DP 接受 11pt 空格和 0.84em 字距。
 
 当前 Rust 后端整体修复尚未完成，阶段完成不等于全篇质量通过；过程状态见 [task-state.md](../reports/2026-09-22-rust-electron-rewrite/task-state.md)。

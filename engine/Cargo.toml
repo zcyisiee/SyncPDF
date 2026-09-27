@@ -45,6 +45,7 @@ subsetter = "0.2"
 fontdb = "0.24"
 unicode-bidi = "0.3"
 unicode-script = "0.5"
+unicode-properties = { version = "0.1", default-features = false, features = ["general-category"] }
 
 # text
 icu_segmenter = "2"

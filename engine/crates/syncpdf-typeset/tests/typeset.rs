@@ -565,9 +565,10 @@ fn empty_paragraph_produces_no_lines() {
 }
 
 #[test]
-fn cjk_justify_spreads_slack_evenly_across_spaces_and_cjk_gaps() {
-    // 中英混排行：两个西文空格与 CJK 字距是等价的两端对齐点，
-    // slack 不能被空格吞掉（空格断行 stretch ≈ 字距的 20 倍）。
+fn justify_executes_each_glue_as_declared_to_the_breaker() {
+    // 中英混排行：每处 glue 的实际增量 = ratio × 它向断行器声明的 stretch，
+    // 没有第二套分配规则。MonoShaper：空格 2.5pt（stretch 0.5w = 1.25），
+    // CJK 字距 stretch 0.1em = 1.0，二者之比恒为 1.25。
     let bbox = Rect::new(0.0, 0.0, 107.0, 60.0);
     let mut s = spec(bbox, 10.0, 1.2, Align::Justify);
     s.lang = Lang::Zh;
@@ -580,23 +581,105 @@ fn cjk_justify_spreads_slack_evenly_across_spaces_and_cjk_gaps() {
     let (si, ai, wi) = (at("四"), at("a"), at("五"));
     let cjk_extra = l0.glyphs[1].x - l0.glyphs[0].x - 10.0;
     assert!(cjk_extra > 0.2, "cjk gaps must take slack: {cjk_extra}");
-    // 空格 2.5pt、"ab" 10pt：空格处的额外距离与字距额外量相同。
+    let ratio = cjk_extra / 1.0;
     let space_extra = l0.glyphs[ai].x - l0.glyphs[si].x - 10.0 - 2.5;
     let space2_extra = l0.glyphs[wi].x - l0.glyphs[ai].x - 10.0 - 2.5;
-    assert!(
-        (space_extra - cjk_extra).abs() < 0.1,
-        "space={space_extra} cjk={cjk_extra}"
-    );
-    assert!(
-        (space2_extra - cjk_extra).abs() < 0.1,
-        "space={space2_extra} cjk={cjk_extra}"
-    );
+    for extra in [space_extra, space2_extra] {
+        assert!(
+            (extra - ratio * 1.25).abs() < 0.02,
+            "space={extra} expected={}",
+            ratio * 1.25
+        );
+    }
     let last = l0.glyphs.last().unwrap();
     assert!(
-        (last.x + 10.0 - bbox.x1).abs() < 1.0,
+        (last.x + 10.0 - bbox.x1).abs() < 0.05,
         "right={}",
         last.x + 10.0
     );
+}
+
+#[test]
+fn shrinking_row_compresses_spaces_only_never_cjk_tracking() {
+    // 负 ratio 行：只有声明了 shrink 的空格被压缩（至多 w/3），CJK 字距保持
+    // 自然 advance。首行「一二 aa 三四」自然宽 55pt，框宽 54pt。
+    let bbox = Rect::new(0.0, 0.0, 54.0, 60.0);
+    let mut s = spec(bbox, 10.0, 1.2, Align::Justify);
+    s.lang = Lang::Zh;
+    let t = typeset_default();
+    let r = t.layout(
+        pid(),
+        &s,
+        &[text_inline("一二 aa 三四五六七八九十一二")],
+        &Obstacles::default(),
+    );
+    let l0 = &r.paragraph.lines[0];
+    let text: String = l0.glyphs.iter().map(|g| g.text.as_str()).collect();
+    assert_eq!(text, "一二 aa 三四", "breaker should take the tight line");
+    let x = |c: &str| l0.glyphs.iter().find(|g| g.text == c).unwrap().x;
+    assert!((x("二") - x("一") - 10.0).abs() < 1e-3, "CJK gap shrunk");
+    assert!((x("四") - x("三") - 10.0).abs() < 1e-3, "CJK gap shrunk");
+    let space = x("a") - x("二") - 10.0;
+    assert!(
+        (2.5 * (2.0 / 3.0) - 1e-3..2.5).contains(&space),
+        "space={space}"
+    );
+    assert!((x("四") + 10.0 - bbox.x1).abs() < 0.05, "right edge");
+}
+
+#[test]
+fn breaker_prefers_hyphenation_over_a_very_loose_latin_line() {
+    // 纯拉丁：首行「aaaa bbbb cccc dddd」自然宽 87.5pt，框宽 105pt。整词挪走
+    // 长词要把 3 个 2.5pt 空格各拉宽约 5.8pt；伸缩量有界时这种行 badness 很高，
+    // 断行器应改在音节处断词（「ex-」与「traordinarily eeee fff」都恰好填满），
+    // 空格保持自然宽度。
+    let bbox = Rect::new(0.0, 0.0, 105.0, 80.0);
+    let s = spec(bbox, 10.0, 1.2, Align::Justify);
+    let t = typeset_default();
+    let r = t.layout(
+        pid(),
+        &s,
+        &[text_inline(
+            "aaaa bbbb cccc dddd extraordinarily eeee fff gggg hhhh",
+        )],
+        &Obstacles::default(),
+    );
+    let lines = &r.paragraph.lines;
+    let l0: String = lines[0].glyphs.iter().map(|g| g.text.as_str()).collect();
+    assert!(l0.ends_with('-'), "expected hyphenated first line: {l0:?}");
+    for line in &lines[..lines.len() - 1] {
+        for pair in line.glyphs.windows(2) {
+            if pair[0].text == " " {
+                let gap = pair[1].x - pair[0].x;
+                assert!(gap <= 2.5 * 2.0, "space drawn {gap}pt");
+            }
+        }
+    }
+}
+
+#[test]
+fn mixed_script_spaces_stay_bounded_across_a_paragraph() {
+    // 中文段落夹作者-年份引文（2405 p3 同类形态）：每个非末行里空格增量都按
+    // 声明比例随 CJK 字距一起分摊，空格绘制宽度不超过自然宽度的 2 倍。
+    let bbox = Rect::new(0.0, 0.0, 143.0, 200.0);
+    let mut s = spec(bbox, 10.0, 1.2, Align::Justify);
+    s.lang = Lang::Zh;
+    let t = typeset_default();
+    let text = "近期研究揭示了对比学习模型的脆弱性（Carlini and Terzis, 2022; Chen et al., 2023）以及多模态编码器中的后门风险（Jia et al., 2022）";
+    let r = t.layout(pid(), &s, &[text_inline(text)], &Obstacles::default());
+    let lines = &r.paragraph.lines;
+    assert!(lines.len() >= 3);
+    for line in &lines[..lines.len() - 1] {
+        for pair in line.glyphs.windows(2) {
+            if pair[0].text == " " {
+                let gap = pair[1].x - pair[0].x;
+                assert!(
+                    (2.5 * (2.0 / 3.0) - 1e-3..=5.0).contains(&gap),
+                    "space drawn {gap}pt"
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -629,4 +712,72 @@ fn latin_justify_without_cjk_gaps_keeps_space_stretch() {
         (l0.glyphs[a + 1].x - l0.glyphs[a].x - 5.0).abs() < 1e-3,
         "letters keep natural advance"
     );
+}
+
+/// 行内最后一个字形 `c` 右端（x + advance）到下一个非空白字形左端的距离。
+fn gap_after(line: &syncpdf_core::ir::LineBox, c: &str, advance: f32) -> f32 {
+    let i = line.glyphs.iter().rposition(|g| g.text == c).unwrap();
+    let next = line.glyphs[i + 1..]
+        .iter()
+        .find(|g| !g.text.trim().is_empty())
+        .unwrap();
+    next.x - line.glyphs[i].x - advance
+}
+
+#[test]
+fn space_beside_fullwidth_punctuation_draws_no_extra_blank() {
+    // 全角标点自带半字空白（clreq），相邻空格不再叠加：「，」「；」之后、
+    // 「）」之前的空格绘制宽度为 0，文本层仍保留空格。左对齐排除拉伸干扰。
+    let bbox = Rect::new(0.0, 0.0, 400.0, 40.0);
+    let mut s = spec(bbox, 10.0, 1.2, Align::Left);
+    s.lang = Lang::Zh;
+    let t = typeset_default();
+    let r = t.layout(
+        pid(),
+        &s,
+        &[text_inline("（Chen et al.， 2023； Jia et al. ）研究")],
+        &Obstacles::default(),
+    );
+    let l0 = &r.paragraph.lines[0];
+    assert!((gap_after(l0, "，", 10.0)).abs() < 1e-3, "after ，");
+    assert!((gap_after(l0, "；", 10.0)).abs() < 1e-3, "after ；");
+    assert!((gap_after(l0, ".", 5.0)).abs() < 1e-3, "before ）");
+    let text: String = l0.glyphs.iter().map(|g| g.text.as_str()).collect();
+    assert_eq!(text, "（Chen et al.， 2023； Jia et al. ）研究");
+    // 反例：拉丁词间与半角标点后的空格保持自然宽度。
+    let r = t.layout(
+        pid(),
+        &s,
+        &[text_inline("Chen et al., 2023; Jia")],
+        &Obstacles::default(),
+    );
+    let l0 = &r.paragraph.lines[0];
+    assert!((gap_after(l0, ",", 5.0) - 2.5).abs() < 1e-3, "after ,");
+    assert!((gap_after(l0, ";", 5.0) - 2.5).abs() < 1e-3, "after ;");
+}
+
+#[test]
+fn cjk_latin_boundary_takes_tracking_slack() {
+    // 汉字与拉丁词直接相接（无空格）的合法断点是与 CJK 字距同参数的可伸 glue：
+    // 两端对齐时它与字距分到相同增量，而不是只让汉字之间变松。
+    // MonoShaper：汉字 10pt、拉丁 5pt；首行「一二CLIP三四」自然宽 60pt。
+    let bbox = Rect::new(0.0, 0.0, 64.0, 60.0);
+    let mut s = spec(bbox, 10.0, 1.2, Align::Justify);
+    s.lang = Lang::Zh;
+    let t = typeset_default();
+    let r = t.layout(
+        pid(),
+        &s,
+        &[text_inline("一二CLIP三四五六七八九十")],
+        &Obstacles::default(),
+    );
+    let l0 = &r.paragraph.lines[0];
+    let text: String = l0.glyphs.iter().map(|g| g.text.as_str()).collect();
+    assert_eq!(text, "一二CLIP三四");
+    let cjk = gap_after(l0, "一", 10.0);
+    assert!(cjk > 0.2, "cjk={cjk}");
+    assert!((gap_after(l0, "二", 10.0) - cjk).abs() < 1e-3, "CJK→Latin");
+    assert!((gap_after(l0, "P", 5.0) - cjk).abs() < 1e-3, "Latin→CJK");
+    // 拉丁词内部没有 glue。
+    assert!(gap_after(l0, "C", 5.0).abs() < 1e-3);
 }

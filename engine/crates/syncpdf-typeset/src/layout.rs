@@ -7,6 +7,7 @@ use crate::shaper::{is_cjk_char, ShapedGlyph, Shaper, StyleSpec, UnderlineStyle}
 use syncpdf_core::ir::{Align, LineBox, PlacedGlyph, TypesetParagraph, Underline};
 use syncpdf_core::{AtomId, Color, ParagraphId, Rect, StyleId};
 use unicode_bidi::BidiInfo;
+use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 
 pub(crate) struct LayoutInput<'a> {
     pub id: ParagraphId,
@@ -187,6 +188,21 @@ fn segments(shaper: &dyn Shaper, input: &LayoutInput<'_>, inlines: &[Inline]) ->
             Inline::Br => unreachable!(),
         }
     }
+    // A space beside full-width punctuation draws zero-width: the punctuation's
+    // own blank is the separation. The text layer keeps the space.
+    for seg in &mut result {
+        let collapsed: Vec<usize> = (0..seg.items.len())
+            .filter(|&i| seg.items[i].space() && beside_fullwidth_punct(&seg.items, i))
+            .collect();
+        for i in collapsed {
+            if let Item::Cluster { glyphs, width, .. } = &mut seg.items[i] {
+                *width = 0.0;
+                for g in glyphs {
+                    g.x_advance = 0.0;
+                }
+            }
+        }
+    }
     result
 }
 
@@ -219,8 +235,61 @@ struct Row {
     hyphen: Option<Item>,
     first: bool,
     last: bool,
-    cjk_glue: Vec<usize>,
-    space_glue: Vec<usize>,
+    /// Adjustable glue drawn inside this row, exactly as the breaker scored it.
+    glue: Vec<Glue>,
+}
+
+/// A glue's source position (the end byte of the item it follows) and its
+/// declared adjustability. The breaker scores lines with these values and the
+/// renderer executes `ratio * stretch` (or `ratio * shrink`) at each one, so
+/// the two can never disagree about where slack goes.
+#[derive(Clone, Copy)]
+struct Glue {
+    at: usize,
+    stretch: f32,
+    shrink: f32,
+}
+
+/// Interword space adjustability as fractions of its natural width, in the
+/// proportions of TeX text fonts (stretch w/2, shrink w/3). Bounded values keep
+/// badness meaningful: an over-wide space is expensive, so the breaker avoids it.
+const SPACE_STRETCH: f32 = 0.5;
+const SPACE_SHRINK: f32 = 1.0 / 3.0;
+/// CJK inter-character stretch in em. Comparable in size to a space's stretch,
+/// so a mixed line spreads slack over both kinds of glue by declaration alone.
+/// CJK spacing never shrinks: full-width glyphs would collide.
+const CJK_STRETCH_EM: f32 = 0.1;
+
+/// Full-width punctuation already carries about half an em of blank inside its
+/// advance (clreq). A space beside it would stack a second blank on top.
+fn is_fullwidth_punct(c: char) -> bool {
+    is_cjk_char(c) && c.general_category_group() == GeneralCategoryGroup::Punctuation
+}
+
+fn first_char(item: &Item) -> Option<char> {
+    match item {
+        Item::Cluster { text, .. } => text.chars().next(),
+        Item::Atom { .. } => None,
+    }
+}
+
+fn last_char(item: &Item) -> Option<char> {
+    match item {
+        Item::Cluster { text, .. } => text.chars().next_back(),
+        Item::Atom { .. } => None,
+    }
+}
+
+/// Whether the space at `i` touches full-width punctuation on either side.
+fn beside_fullwidth_punct(items: &[Item], i: usize) -> bool {
+    i.checked_sub(1)
+        .and_then(|j| items.get(j))
+        .and_then(last_char)
+        .is_some_and(is_fullwidth_punct)
+        || items
+            .get(i + 1)
+            .and_then(first_char)
+            .is_some_and(is_fullwidth_punct)
 }
 
 fn rows(
@@ -243,8 +312,7 @@ fn rows(
                     hyphen: None,
                     first: out.is_empty(),
                     last: true,
-                    cjk_glue: Vec::new(),
-                    space_glue: Vec::new(),
+                    glue: Vec::new(),
                 });
             }
             continue;
@@ -283,8 +351,8 @@ fn rows(
         let mut nodes = Vec::new();
         let mut mapping = Vec::new();
         let mut hyphens: std::collections::HashMap<usize, Item> = std::collections::HashMap::new();
-        let mut cjk_glue = Vec::new();
-        let mut space_glue = Vec::new();
+        let mut glue = Vec::new();
+        let cjk_stretch = input.font_size * scale * CJK_STRETCH_EM;
         for (i, item) in seg.items.iter().enumerate() {
             let next = seg.items.get(i + 1);
             if item.space() && at.contains_key(&item.end()) && i > 0 && !seg.items[i - 1].space() {
@@ -298,16 +366,27 @@ fn rows(
             }
             if item.space() && at.contains_key(&item.end()) {
                 let w = item.width().max(0.0);
-                nodes.push(Node::Glue {
-                    width: w,
-                    stretch: w.max(1.0) * 4.0,
+                // A collapsed space adjusts like the CJK boundary it stands in for.
+                let collapsed = input.lang.is_cjk() && beside_fullwidth_punct(&seg.items, i);
+                let space = Glue {
+                    at: item.end(),
+                    stretch: if collapsed {
+                        cjk_stretch
+                    } else {
+                        w * SPACE_STRETCH
+                    },
                     shrink: if input.align == Align::Justify {
-                        w
+                        w * SPACE_SHRINK
                     } else {
                         0.0
                     },
+                };
+                nodes.push(Node::Glue {
+                    width: w,
+                    stretch: space.stretch,
+                    shrink: space.shrink,
                 });
-                space_glue.push(item.end());
+                glue.push(space);
             } else {
                 nodes.push(Node::Box {
                     width: item.width().max(0.0),
@@ -365,16 +444,27 @@ fn rows(
                         });
                         mapping.push(None);
                     } else if input.lang.is_cjk()
-                        && matches!((item, next), (Item::Cluster { text: a, .. }, Item::Cluster { text: b, .. }) if a.chars().any(is_cjk_char) && b.chars().any(is_cjk_char) && !a.chars().any(is_forbidden_line_end) && !b.chars().any(is_forbidden_line_start))
+                        && !next.space()
+                        && (last_char(item).is_some_and(is_cjk_char)
+                            || first_char(next).is_some_and(is_cjk_char))
+                        && !last_char(item).is_some_and(is_forbidden_line_end)
+                        && !first_char(next).is_some_and(is_forbidden_line_start)
                     {
-                        // Legal CJK tracking is adjustable glue, never a split through a cluster.
+                        // A legal break beside a CJK character (to CJK, Latin or a
+                        // formula) is adjustable tracking, never a split through a
+                        // cluster. Latin-internal breaks (after a hyphen) stay rigid.
+                        let tracking = Glue {
+                            at: item.end(),
+                            stretch: cjk_stretch,
+                            shrink: 0.0,
+                        };
                         nodes.push(Node::Glue {
                             width: 0.0,
-                            stretch: input.font_size * scale * 0.05,
-                            shrink: 0.0,
+                            stretch: tracking.stretch,
+                            shrink: tracking.shrink,
                         });
                         mapping.push(None);
-                        cjk_glue.push(item.end());
+                        glue.push(tracking);
                     } else {
                         nodes.push(Node::Penalty {
                             width: 0.0,
@@ -406,15 +496,10 @@ fn rows(
                     .collect();
                 let first = items.first().map_or(0, Item::start);
                 let end = items.last().map_or(0, Item::end);
-                let cjk = cjk_glue
+                let row_glue = glue
                     .iter()
                     .copied()
-                    .filter(|b| *b > first && *b < end)
-                    .collect();
-                let spaces = space_glue
-                    .iter()
-                    .copied()
-                    .filter(|b| *b > first && *b < end)
+                    .filter(|g| g.at > first && g.at < end)
                     .collect();
                 out.push(Row {
                     items,
@@ -422,8 +507,7 @@ fn rows(
                     hyphen: hyphens.get(&line.break_at).cloned(),
                     first: out.is_empty(),
                     last: li + 1 == n,
-                    cjk_glue: cjk,
-                    space_glue: spaces,
+                    glue: row_glue,
                 });
             }
         } else {
@@ -434,8 +518,7 @@ fn rows(
                 hyphen: None,
                 first: out.is_empty(),
                 last: true,
-                cjk_glue: Vec::new(),
-                space_glue: Vec::new(),
+                glue: Vec::new(),
             });
         }
     }
@@ -523,9 +606,8 @@ fn place(
     row: &Row,
     bbox: &Rect,
     baseline: f32,
-    scale: f32,
 ) -> PlacedLine {
-    let placed = place_row(shaper, input, row, bbox, baseline, scale);
+    let placed = place_row(shaper, input, row, bbox, baseline);
     let available = bbox.width()
         - if row.first {
             input.first_indent.max(0.0)
@@ -540,7 +622,7 @@ fn place(
         let at = |ratio: f32| {
             let mut adjusted = row.clone();
             adjusted.ratio = ratio;
-            place_row(shaper, input, &adjusted, bbox, baseline, scale)
+            place_row(shaper, input, &adjusted, bbox, baseline)
         };
         let mut high = (row.ratio, placed.line.bbox.width());
         for low in [0.0, -1.0] {
@@ -568,7 +650,6 @@ fn place_row(
     row: &Row,
     bbox: &Rect,
     baseline: f32,
-    scale: f32,
 ) -> PlacedLine {
     let items = visual_items(row, input.is_rtl);
     let indent = if row.first {
@@ -594,19 +675,6 @@ fn place_row(
     let mut underline_for: Vec<Option<UnderlineStyle>> = Vec::new();
     let mut bounds: Option<Rect> = None;
     let adjust = input.align == Align::Justify && !row.last;
-    // In a row with CJK tracking, interword spaces and CJK gaps are equal
-    // justification opportunities: the breaker's stretch is kept for choosing
-    // breaks, but the resulting slack is spread evenly so a few Latin spaces
-    // do not absorb it (a space's stretch is ~80x one CJK gap's).
-    let even_stretch = (adjust && row.ratio > 0.0 && !row.cjk_glue.is_empty()).then(|| {
-        let spaces: f32 = items
-            .iter()
-            .filter(|i| row.space_glue.contains(&i.end()))
-            .map(|i| i.width().max(1.0) * 4.0)
-            .sum();
-        let total = spaces + row.cjk_glue.len() as f32 * input.font_size * scale * 0.05;
-        row.ratio * total / (row.space_glue.len() + row.cjk_glue.len()) as f32
-    });
 
     for item in items.iter().chain(row.hyphen.iter()) {
         match item {
@@ -643,18 +711,15 @@ fn place_row(
                     glyphs.push(placed);
                     x += g.x_advance;
                 }
-                if adjust && row.space_glue.contains(&item.end()) {
-                    x += even_stretch.unwrap_or_else(|| {
-                        row.ratio
+                if adjust {
+                    if let Some(glue) = row.glue.iter().find(|g| g.at == item.end()) {
+                        x += row.ratio
                             * if row.ratio >= 0.0 {
-                                item.width().max(1.0) * 4.0
+                                glue.stretch
                             } else {
-                                item.width()
-                            }
-                    });
-                }
-                if adjust && row.cjk_glue.contains(&item.end()) {
-                    x += even_stretch.unwrap_or(row.ratio * input.font_size * scale * 0.05);
+                                glue.shrink
+                            };
+                    }
                 }
             }
             Item::Atom {
@@ -833,7 +898,7 @@ pub(crate) fn layout(
     let mut overflow = !valid || failed || (rows.is_empty() && !inlines.is_empty());
     let first_top = rows
         .first()
-        .map(|row| place(shaper, input, row, bbox, 0.0, scale).line.bbox.y1)
+        .map(|row| place(shaper, input, row, bbox, 0.0).line.bbox.y1)
         .unwrap_or(0.0);
     let first_baseline = input.first_baseline.unwrap_or(bbox.y1 - first_top);
     for row in &rows {
@@ -854,7 +919,7 @@ pub(crate) fn layout(
         let mut baseline = lines
             .last()
             .map_or(first_baseline, |l| l.line.baseline_y - line_h);
-        let mut line = place(shaper, input, row, bbox, baseline, scale);
+        let mut line = place(shaper, input, row, bbox, baseline);
         // Source formulas retain their full superscript/subscript ink. The requested
         // leading is a minimum: spend only the extra space their actual ink needs.
         let extra = lines
@@ -872,7 +937,7 @@ pub(crate) fn layout(
             .fold(0.0_f32, f32::max);
         if extra > 0.0 {
             baseline -= extra;
-            line = place(shaper, input, row, bbox, baseline, scale);
+            line = place(shaper, input, row, bbox, baseline);
         }
         let b = line.line.bbox;
         if b.x0 < bbox.x0 - 0.01
