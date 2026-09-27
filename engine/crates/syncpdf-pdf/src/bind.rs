@@ -48,7 +48,7 @@ use syncpdf_core::ir::PathStroke;
 use syncpdf_core::ir::{DisplayItem, FontRef, Glyph, GlyphFlags, GlyphSource, PageIR};
 use syncpdf_core::{Color, GlyphId, Matrix, ObjRef, OpKey, PageId, Point, Rect};
 
-use crate::content::{parse_content, Op, Operand};
+use crate::content::{parse_content, parse_page_streams, Op, Operand};
 use crate::pdfium::{DocId, ObjectBounds, PdfiumWorker, TextChar, TextObject};
 use unicode_normalization::UnicodeNormalization;
 
@@ -1063,18 +1063,51 @@ fn walk_stream(
     form_seq: &mut u32,
     out: &mut WalkOut,
 ) {
+    walk_ops(
+        doc,
+        stream_id,
+        bytes,
+        None,
+        ctx,
+        form_path,
+        depth,
+        form_seq,
+        out,
+    );
+}
+
+/// 与 [`walk_stream`] 相同，但使用调用方预解析的操作序列（页级多流拼接，
+/// 见 [`parse_page_streams`]）。`ops` 与 `bytes` 必须来自同一流。
+fn walk_ops(
+    doc: &Document,
+    stream_id: ObjectId,
+    bytes: &[u8],
+    pre_parsed: Option<Vec<Op>>,
+    ctx: &mut Ctx,
+    form_path: &[u32],
+    depth: usize,
+    form_seq: &mut u32,
+    out: &mut WalkOut,
+) {
     out.stream_bytes.insert(stream_id, bytes.to_vec());
     if depth > MAX_FORM_DEPTH {
         out.issues
             .push(format!("form depth limit at stream {}", stream_id.0));
         return;
     }
-    let ops = match parse_content(bytes) {
-        Ok(ops) => ops,
-        Err(e) => {
-            out.issues
-                .push(format!("parse stream {}: {e}", stream_id.0));
-            return;
+    let parsed_ops;
+    let ops: &[Op] = match &pre_parsed {
+        Some(ops) => ops,
+        None => {
+            parsed_ops = match parse_content(bytes) {
+                Ok(ops) => ops,
+                Err(e) => {
+                    out.issues
+                        .push(format!("parse stream {}: {e}", stream_id.0));
+                    return;
+                }
+            };
+            &parsed_ops
         }
     };
     let sref = ObjRef::new(stream_id.0, stream_id.1);
@@ -2389,21 +2422,37 @@ pub fn bind_page(worker: &PdfiumWorker, doc: DocId, lo: &Document, page: u32) ->
     let mut ctx = Ctx::new(resources.clone());
     let mut form_seq = 0;
     let contents = lo.get_page_contents(page_id);
+    // PDF §7.7.3.3：页 Contents 多条流概念上拼接为单一流，操作数可跨流携带。
+    let mut stream_bodies: Vec<(ObjectId, Vec<u8>)> = Vec::with_capacity(contents.len());
     for &stream_id in &contents {
-        let bytes = match lo.get_object(stream_id) {
-            Ok(Object::Stream(s)) => s
-                .decompressed_content()
-                .unwrap_or_else(|_| s.content.clone()),
-            _ => {
-                out.issues
-                    .push(format!("stream {} unreadable", stream_id.0));
-                continue;
-            }
-        };
-        walk_stream(
+        match lo.get_object(stream_id) {
+            Ok(Object::Stream(s)) => stream_bodies.push((
+                stream_id,
+                s.decompressed_content()
+                    .unwrap_or_else(|_| s.content.clone()),
+            )),
+            _ => out
+                .issues
+                .push(format!("stream {} unreadable", stream_id.0)),
+        }
+    }
+    let slices: Vec<&[u8]> = stream_bodies.iter().map(|(_, b)| b.as_slice()).collect();
+    let parsed_streams = match parse_page_streams(&slices) {
+        Ok(v) => v,
+        Err(e) => {
+            // 拼接解析硬失败（未终止内联图像等）：退回逐流独立解析，保持
+            // 旧的容错语义——失败只降级涉及的流，不整页跳过。
+            out.issues.push(format!("parse page contents (joined): {e}"));
+            Vec::new()
+        }
+    };
+    let fallback = parsed_streams.len() != stream_bodies.len();
+    for (i, (stream_id, bytes)) in stream_bodies.iter().enumerate() {
+        walk_ops(
             lo,
-            stream_id,
-            &bytes,
+            *stream_id,
+            bytes,
+            (!fallback).then(|| parsed_streams[i].ops.clone()),
             &mut ctx,
             &[],
             0,

@@ -26,7 +26,7 @@ use syncpdf_core::ir::{DisplayItem, Glyph, PageIR};
 use syncpdf_core::{GlyphId, ObjRef, OpKey};
 
 use crate::bind::{BoundPage, FormDo, ReplacementError, SourceSnapshot};
-use crate::content::{parse_content, write_content, Op, Operand};
+use crate::content::{parse_content, parse_page_streams, write_content, Op, Operand};
 
 /// 补丁统计。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -302,6 +302,44 @@ impl PatchSet {
         // Form 流需要克隆：先决定哪些 stream 是 Form。
         let mut form_clones: BTreeMap<ObjRef, ObjectId> = BTreeMap::new();
 
+        // 页 Contents 多流拼接解析（PDF §7.7.3.3）：OpKey 的 op_index 与
+        // bind 侧一致，均以携带链为准；改写携带操作时上一流同步截除尾字节。
+        let mut page_slices: Vec<Vec<u8>> = Vec::with_capacity(contents.len());
+        for id in &contents {
+            let bytes = stream_bytes(doc_candidate, *id)?;
+            page_slices.push(bytes);
+        }
+        let slice_refs: Vec<&[u8]> = page_slices.iter().map(|b| b.as_slice()).collect();
+        let parsed_streams = parse_page_streams(&slice_refs).map_err(|e| PatchError::Parse {
+            stream: contents.first().map(|id| id.0).unwrap_or(0),
+            msg: e.to_string(),
+        })?;
+        // 预扫描：哪些页级流要改写 carried 操作 → 其上一流的残留尾字节
+        // 必须截除（操作数已随改写在携带流内重新序列化）。截除点用原始流
+        // 坐标，必须作用于写回前的原始字节，不能事后剪切已改写的流。
+        let mut truncations: BTreeMap<ObjectId, usize> = BTreeMap::new();
+        for (sref, ops_map) in &by_stream {
+            let stream_id = (sref.obj, sref.gen);
+            if is_form_stream(doc_candidate, stream_id) {
+                continue;
+            }
+            let Some(pos) = contents.iter().position(|id| *id == stream_id) else {
+                continue;
+            };
+            let Some(prev_start) = pos
+                .checked_sub(1)
+                .and_then(|p| parsed_streams[p].leftover_start)
+            else {
+                continue;
+            };
+            if ops_map
+                .keys()
+                .any(|idx| parsed_streams[pos].ops.get(*idx as usize).is_some_and(|o| o.carried))
+            {
+                truncations.insert(contents[pos - 1], prev_start);
+            }
+        }
+
         for (sref, ops_map) in &by_stream {
             let doc = &mut *doc_candidate;
             let stream_id = (sref.obj, sref.gen);
@@ -324,18 +362,35 @@ impl PatchSet {
                 content_clones[&stream_id]
             };
 
-            let bytes = match doc.get_object(target_id) {
+            let mut bytes = match doc.get_object(target_id) {
                 Ok(Object::Stream(s)) => s
                     .decompressed_content()
                     .unwrap_or_else(|_| s.content.clone()),
                 _ => continue,
             };
-            let mut ops = parse_content(&bytes).map_err(|e| PatchError::Parse {
-                stream: sref.obj,
-                msg: e.to_string(),
-            })?;
+            // 本流是某条携带操作的借出方：先把被借走的尾字节从原始字节里
+            // 截除，再继续写回。截除点之前所有 op 的 span 都有效（残留操作
+            // 数不属于任何 op，位于最后一个 op 之后）。
+            let mut truncated = false;
+            if let Some(&cut) = truncations.get(&stream_id) {
+                let cut = cut.min(bytes.len());
+                bytes.truncate(cut);
+                truncated = true;
+            }
+            // 页级流使用携带链解析结果（op_index 与 bind 一致）；Form 流独立解析。
+            let mut ops: Vec<Op> = if is_form {
+                parse_content(&bytes).map_err(|e| PatchError::Parse {
+                    stream: sref.obj,
+                    msg: e.to_string(),
+                })?
+            } else {
+                let Some(pos) = contents.iter().position(|id| *id == stream_id) else {
+                    continue;
+                };
+                parsed_streams[pos].ops.clone()
+            };
 
-            let mut touched = false;
+            let mut touched = truncated;
             let mut prefixes = BTreeMap::<usize, Vec<Op>>::new();
             for (op_index, ords) in ops_map {
                 let Some(op) = ops.get_mut(*op_index as usize) else {
@@ -443,6 +498,22 @@ impl PatchSet {
                 op.operands[0] = Operand::Name(new_name);
                 op.mark_dirty();
                 write_stream_content(doc, sid, write_content(&bytes, &ops))?;
+            }
+        }
+
+        // 纯借出方：自身没有改写操作，不会出现在上面的循环里，但被借走的
+        // 尾字节仍需截除，否则残留操作数会在拼接流中被再次消费。
+        for (orig_id, cut) in &truncations {
+            if by_stream.keys().any(|s| (s.obj, s.gen) == *orig_id) {
+                continue;
+            }
+            let target_id = content_clones[orig_id];
+            let mut bytes = stream_bytes(doc_candidate, target_id)?;
+            let cut = (*cut).min(bytes.len());
+            if cut < bytes.len() {
+                bytes.truncate(cut);
+                write_stream_content(doc_candidate, target_id, bytes)?;
+                stats.streams_touched += 1;
             }
         }
 

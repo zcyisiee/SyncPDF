@@ -192,6 +192,9 @@ pub struct Op {
     pub inline_image: Option<InlineImage>,
     /// 标脏后 [`write_content`] 不再拷贝源字节，改用 [`serialize_op`]。
     pub dirty: bool,
+    /// 操作数部分或全部来自上一条内容流的携带（PDF §7.7.3.3 拼接语义）。
+    /// `span` 因此只覆盖本流内的部分；改写时上一流的被借字节必须同步截除。
+    pub carried: bool,
 }
 
 impl Op {
@@ -203,6 +206,7 @@ impl Op {
             span: 0..0,
             inline_image: None,
             dirty: true,
+            carried: false,
         }
     }
 
@@ -589,16 +593,106 @@ fn parse_number(raw: &[u8]) -> Token {
 
 // ---------------------------------------------------------------------------
 // 语法分析
-// ---------------------------------------------------------------------------
-
 /// 把内容流字节解析为 [`Op`] 序列。
 ///
 /// 容错策略：
 /// - 未知操作符照收，其全部前置操作数都归给它；
 /// - 已知定长操作符若操作数过多，多余的旧操作数在操作符生效前被丢弃并记 warning；
 /// - 孤立的 `)`、`]`、`>>` 等被忽略；
-/// - 流尾未被消费的操作数被丢弃并记 warning。
+/// - 流尾未被消费的操作数被丢弃并记 warning（页级多流拼接见
+///   [`parse_page_streams`]）。
 pub fn parse_content(bytes: &[u8]) -> Result<Vec<Op>, ContentError> {
+    let (ops, _leftover) = parse_content_inner(bytes)?;
+    Ok(ops)
+}
+
+/// 页 Contents 多条流的拼接解析（PDF §7.7.3.3：多条流概念上是一条流）。
+/// 把全部流字节拼接后整体解析，再把每条操作按其操作符归属到所在流：
+/// 跨流边界拆开的操作（如生成器把 TJ 的数组留在上一流、裸 `TJ` 关键字
+/// 放下一流开头）归属操作符所在的流，其操作数部分来自之前的流。
+///
+/// 每条流的 `leftover_start`：该流被后续流的操作借走的尾部字节起点；改写
+/// 下一条流中 `carried` 的操作时，本流需同步截除 `leftover_start..`。
+///
+/// Form XObject 只有一条内容流，不适用本函数。
+pub fn parse_page_streams(streams: &[&[u8]]) -> Result<Vec<PageStreamOps>, ContentError> {
+    // 拼接 + 逐流边界表。流之间补一个换行，保证相邻 token 不粘连。
+    let mut joined: Vec<u8> = Vec::new();
+    let mut bounds: Vec<usize> = Vec::with_capacity(streams.len() + 1);
+    for bytes in streams {
+        bounds.push(joined.len());
+        joined.extend_from_slice(bytes);
+        if !joined.last().is_some_and(|b| is_white(*b)) {
+            joined.push(b'\n');
+        }
+    }
+    bounds.push(joined.len());
+    let (ops, leftover_start) = parse_content_inner(&joined)?;
+
+    let mut out: Vec<PageStreamOps> = streams
+        .iter()
+        .map(|_| PageStreamOps {
+            ops: Vec::new(),
+            leftover_start: None,
+        })
+        .collect();
+    // offset 属于第几条流：bounds[s] <= at < bounds[s+1]。
+    let stream_of = |at: usize| -> usize {
+        (0..streams.len())
+            .rev()
+            .find(|&s| at >= bounds[s])
+            .unwrap_or(0)
+    };
+    for mut op in ops {
+        // 操作符关键字在 span 末尾：按操作符所在流归属（PDF 语义里操作符
+        // 决定操作何时生效）。
+        let owner = stream_of(op.span.end.saturating_sub(1));
+        let origin = op.span.start;
+        let carried = origin < bounds[owner];
+        if carried {
+            // 被借走的尾部从操作数起点一直延伸到 owner 流开头；每个被借的
+            // 流记录截除点（局部坐标）。
+            let first = stream_of(origin);
+            for s in first..owner {
+                let cut = origin.max(bounds[s]);
+                let want = cut - bounds[s];
+                if out[s]
+                    .leftover_start
+                    .is_none_or(|old| old > want)
+                {
+                    out[s].leftover_start = Some(want);
+                }
+            }
+        }
+        // 局部 span：只保留本流内的字节；carried 操作数不在本流里。
+        let start = origin.max(bounds[owner]) - bounds[owner];
+        let end = op.span.end.min(bounds[owner + 1]) - bounds[owner];
+        op.span = start..end;
+        op.carried = carried;
+        out[owner].ops.push(op);
+    }
+    // 真正的流尾残留（没有任何后续操作消费）：同样记录截除点，供保守截除。
+    if let Some(start) = leftover_start {
+        let s = stream_of(start);
+        let want = start - bounds[s];
+        if out[s].leftover_start.is_none_or(|old| old > want) {
+            out[s].leftover_start = Some(want);
+        }
+    }
+    Ok(out)
+}
+
+/// [`parse_page_streams`] 输出的单条流结果。
+#[derive(Debug, Clone)]
+pub struct PageStreamOps {
+    pub ops: Vec<Op>,
+    /// 本流被后续流的操作借走的尾部字节起点；下一流改写 carried 操作时
+    /// 本流需截除 `leftover_start..`。
+    pub leftover_start: Option<usize>,
+}
+
+/// 单缓冲解析：返回操作序列与流尾未消费操作数的起点。
+fn parse_content_inner(bytes: &[u8]) -> Result<(Vec<Op>, Option<usize>), ContentError> {
     let mut lex = Lexer::new(bytes);
     let mut ops: Vec<Op> = Vec::new();
     // 操作数连同它在源里的起点，起点用于算 span。
@@ -639,6 +733,7 @@ pub fn parse_content(bytes: &[u8]) -> Result<Vec<Op>, ContentError> {
                         span: start..lex.pos,
                         inline_image: Some(image),
                         dirty: false,
+                        carried: false,
                     });
                 }
                 _ => ops.push(finish_op(k, &mut stack, start, lex.pos)),
@@ -658,8 +753,10 @@ pub fn parse_content(bytes: &[u8]) -> Result<Vec<Op>, ContentError> {
             "content: 流尾存在未被操作符消费的操作数，已丢弃"
         );
     }
-    Ok(ops)
+    let leftover_start = stack.first().map(|(_, s)| *s);
+    Ok((ops, leftover_start))
 }
+
 
 fn finish_op(
     operator: String,
@@ -686,6 +783,7 @@ fn finish_op(
         span: start..end,
         inline_image: None,
         dirty: false,
+        carried: false,
     }
 }
 
@@ -1248,6 +1346,61 @@ mod tests {
         assert_eq!(op.operands, vec![Operand::Name(String::new())]);
     }
 
+    // --- 页级多流拼接（PDF §7.7.3.3）---
+
+    #[test]
+    fn carry_chain_rejoins_split_tj_across_streams() {
+        // InDesign 拆分形态：数组悬在前一流尾部，操作符裸露在后一流开头。
+        let prev = b"BT /F1 1 Tf [(a)(b)] ";
+        let next = b"TJ\nET\n";
+        let streams = vec![&prev[..], &next[..]];
+        let parsed = parse_page_streams(&streams).unwrap();
+        // 前一流只有 BT 与 Tf；悬挂数组随 TJ 归后一流，不单独产出操作。
+        assert_eq!(parsed[0].ops.len(), 2, "悬挂数组不产出操作");
+        assert!(parsed[0].ops[0].operator == "BT");
+        assert!(parsed[0].ops[1].is_text_state());
+        assert_eq!(parsed[1].ops.len(), 2);
+        let tj = &parsed[1].ops[0];
+        assert_eq!(tj.operator, "TJ");
+        assert!(tj.carried);
+        assert_eq!(tj.text_strings(), vec![b"a".to_vec(), b"b".to_vec()]);
+        assert_eq!(tj.span, 0..2, "span 只覆盖本流的 TJ 关键字");
+        // 前一流的截除点 = 悬挂数组起点（`[` 的偏移）。
+        assert_eq!(parsed[0].leftover_start, Some(12));
+        assert_eq!(parsed[1].leftover_start, None);
+    }
+
+    #[test]
+    fn carry_chain_stops_when_no_leftover() {
+        let prev = b"0 0 m ET";
+        let next = b"[(x)]TJ";
+        let parsed = parse_page_streams(&[&prev[..], &next[..]]).unwrap();
+        assert!(parsed[0].leftover_start.is_none());
+        let tj = &parsed[1].ops[0];
+        assert!(!tj.carried);
+        assert_eq!(tj.operator, "TJ");
+    }
+
+    #[test]
+    fn carry_chain_forward_leftover_to_third_stream() {
+        let s0 = b"BT [(a) ";
+        let s1 = b"(b)] ";
+        let s2 = b"TJ ET";
+        let parsed = parse_page_streams(&[&s0[..], &s1[..], &s2[..]]).unwrap();
+        // s0 残留一个数组操作数，s1 借走后又追加一个字符串残留，s2 完成操作。
+        assert!(parsed[2].ops[0].carried);
+        assert_eq!(parsed[2].ops[0].text_strings(), vec![b"a".to_vec(), b"b".to_vec()]);
+    }
+
+    #[test]
+    fn single_stream_parse_unchanged_by_carry() {
+        let src = b"BT /F1 1 Tf (hi) Tj ET";
+        let a = ops("BT /F1 1 Tf (hi) Tj ET");
+        let parsed = parse_page_streams(&[&src[..]]).unwrap();
+        assert_eq!(parsed[0].ops, a);
+        assert!(parsed[0].leftover_start.is_none());
+    }
+
     // --- 词法：字面串 ---
 
     #[test]
@@ -1764,6 +1917,7 @@ mod tests {
             span: 100..200,
             inline_image: None,
             dirty: false,
+            carried: false,
         };
         let out = write_content(src, &[bogus]);
         assert_eq!(String::from_utf8_lossy(&out), "Q\nq");
