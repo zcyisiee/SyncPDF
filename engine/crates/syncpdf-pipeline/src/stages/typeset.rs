@@ -475,7 +475,13 @@ pub fn spec_for(para: &Paragraph) -> ParagraphSpec {
 
 /// 段落语言：含 CJK 字符 → `Zh`（译文是中文），否则 `En`。
 fn lang_of(para: &Paragraph) -> Lang {
-    if para.text.chars().any(is_cjk) {
+    translation_lang(&para.text)
+}
+
+/// 译文语言：含 CJK 字符 → `Zh`，否则 `En`。断行与间距策略完全由译文
+/// 文本决定，与源段语言无关。
+fn translation_lang(text: &str) -> Lang {
+    if text.chars().any(is_cjk) {
         Lang::Zh
     } else {
         Lang::En
@@ -540,10 +546,11 @@ pub fn typeset_with_typography(
         spec.bbox = frame.bbox;
         spec.first_baseline = Some(frame.first_baseline);
     }
-    // Break and spacing policy follows translated text, not the source language.
-    if parsed.text().chars().any(is_cjk) {
-        spec.lang = Lang::Zh;
-    }
+    // Break and spacing policy follows the translated text alone: the source
+    // paragraph language is irrelevant here. CJK in the translation → Zh,
+    // otherwise En. This overrides spec_for's source-based guess in both
+    // directions (Chinese source with non-CJK translation and vice versa).
+    spec.lang = translation_lang(&parsed.text());
     let inlines = inlines_from_parsed(parsed, para);
     let typeset = Typeset::new(shaper, FitOptions::default());
     let mut result = typeset.layout(para.id.clone(), &spec, &inlines, obstacles);
@@ -1284,6 +1291,32 @@ mod tests {
     fn spec_for_detects_cjk_language() {
         let para = paragraph("P01-001", "这是一段中文", Rect::new(0.0, 0.0, 100.0, 20.0));
         assert_eq!(spec_for(&para).lang, Lang::Zh);
+    }
+
+    #[test]
+    fn typeset_lang_follows_translation_not_source() {
+        // 断行与间距策略完全由译文决定，源段语言不参与：
+        // 源中文、译文纯英文 → En；源英文、译文中文 → Zh。
+        let zh_source = paragraph(
+            "P01-001",
+            "这是中文源段落",
+            Rect::new(0.0, 0.0, 200.0, 40.0),
+        );
+        assert_eq!(spec_for(&zh_source).lang, Lang::Zh);
+        let parsed =
+            parse_unit_html(r#"<p id="P01-001">The model resists backdoor attacks.</p>"#).unwrap();
+        assert_eq!(translation_lang(&parsed.text()), Lang::En);
+
+        let en_source = paragraph(
+            "P01-002",
+            "English source",
+            Rect::new(0.0, 0.0, 200.0, 40.0),
+        );
+        assert_eq!(spec_for(&en_source).lang, Lang::En);
+        let parsed =
+            parse_unit_html(r#"<p id="P01-002">这是一段中文译文，用于验证语言反向覆盖。</p>"#)
+                .unwrap();
+        assert_eq!(translation_lang(&parsed.text()), Lang::Zh);
     }
 
     #[test]

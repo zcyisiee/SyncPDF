@@ -48,7 +48,7 @@ ActualText/ToUnicode 的文本检查不能证明实际字形正确；内置 Noto
 
 断行代价必须与实际对齐一致：左/中/右对齐按自然宽度及非末行的行尾余量评分；末行余量是段落自然结尾，不计分，否则会把前面各行均摊变短，两端对齐按可拉伸间距评分。无可拉伸间距的片段只在后续合法断点确实放不下时允许短行兜底，避免英文数据集名被低代价单独甩到短行。自动断行不把单个CJK字及末尾标点留作末行，显式硬换行保留；不修改模型译文或依赖人工插入换行。
 
-两端对齐的伸缩按统一glue模型：断行器评分用的每个glue的(stretch, shrink)随行保存，绘制时逐glue执行 `ratio×stretch`（ratio≥0）或 `ratio×shrink`（ratio<0），没有第二套分配规则。拉丁空格 stretch 0.5w、shrink w/3（TeX文本字体比例）；CJK字距及CJK↔拉丁交界的合法断点是零宽glue，stretch 0.1em、shrink 0，负ratio只压空格、不压CJK字距。全角标点（CJK且Unicode标点类）相邻的空格按clreq不叠加空白：宽度与伸缩为0，断点和文本层空格保留。tolerance为10（ratio上限），过松行由badness（100·|r|³）回避。
+两端对齐的伸缩按统一glue模型：断行器评分用的每个glue的(stretch, shrink)随行保存，绘制时逐glue执行 `ratio×stretch`（ratio≥0）或 `ratio×shrink`（ratio<0），没有第二套分配规则。拉丁空格 stretch 0.5w、shrink w/3（TeX文本字体比例）；CJK字距及CJK↔拉丁交界的合法断点是零宽glue，stretch 0.1em、shrink 0，负ratio只压空格、不压CJK字距。全角标点（CJK且Unicode标点类）相邻的空格按clreq不叠加空白：宽度与伸缩为0，断点和文本层空格保留。tolerance为10（ratio上限），过松行由badness（100·|r|³）回避。排版语言由译文决定（含CJK→Zh，否则En），与源段语言无关；中文段内纯ASCII字母词（去掉首尾标点后≥8字节）也用英文hypher补软断点，含数字或内部符号的token（`ResNet50x4`、URL）不断。
 
 数学字符由内嵌STIX Two Math（OFL，许可证随字体保存）回退，不依赖系统字体或TeX，不将数学斜体Unicode换成普通字母。左右侧承造成的越界，仅在整行实际墨迹可完全容纳时利用另一侧余量平移纠正，不裁字、不缩字、不扩大容差。源路径`n`会清空未绘制路径，Form子绘图受其入口CTM下的BBox限制；这些是障碍几何修正，不修改源图。先于某段自身文字绘制、且覆盖其字形中心的填充是该段的衬底（图背景、底色面板），不是障碍：内部可自由排版，只以外框为界，源文已越过的边不作边界（`frame::paint`，初始frame与refine共用）。
 
