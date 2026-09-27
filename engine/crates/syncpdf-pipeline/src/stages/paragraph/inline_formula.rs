@@ -160,7 +160,7 @@ pub(super) fn sources(ir: &PageIR, regions: &[&Region]) -> Vec<Formula> {
             let blocked = glyphs.iter().any(|g| {
                 !ids.contains(&g.id)
                     && !g.unicode.iter().all(|c| c.is_whitespace())
-                    && overlaps(clip, ink_or_box(g))
+                    && ink_collides(clip, g)
             }) || ir.items.iter().any(|item| match item {
                 DisplayItem::Image { bbox } | DisplayItem::InlineImage { bbox } => {
                     overlaps(clip, *bbox)
@@ -962,7 +962,7 @@ fn radical_sources(ir: &PageIR, regions: &[&Region], glyphs: &[&Glyph], out: &mu
         if glyphs.iter().any(|g| {
             !ids.contains(&g.id)
                 && (g.unicode.is_empty() || !g.unicode.iter().all(|c| c.is_whitespace()))
-                && overlaps(clip, ink_or_box(g))
+                && ink_collides(clip, g)
         }) {
             continue;
         }
@@ -1012,6 +1012,22 @@ fn radical_sources(ir: &PageIR, regions: &[&Region], glyphs: &[&Glyph], out: &mu
 
 fn overlaps(a: Rect, b: Rect) -> bool {
     a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1
+}
+
+/// 墨迹接触深度不超过该字形字号的这一比例时不算碰撞。上标顶与上一行括号、
+/// 降部底常以零点几磅相接；这远细于正文字体最细的笔画（约 0.04em），裁剪框
+/// 至多切到不可见的发丝。
+const INK_CONTACT_EM: f32 = 0.02;
+
+/// 外来字形是否撞上公式的擦除/重放裁剪框：有 tight 墨迹证据时，两个方向的
+/// 交叠深度都须超过发丝接触；没有证据时按 loose 盒严格相交判定。
+fn ink_collides(clip: Rect, g: &Glyph) -> bool {
+    let Some(ink) = g.ink else {
+        return overlaps(clip, g.bbox);
+    };
+    let contact = g.size.max(0.0) * INK_CONTACT_EM;
+    clip.x1.min(ink.x1) - clip.x0.max(ink.x0) > contact
+        && clip.y1.min(ink.y1) - clip.y0.max(ink.y0) > contact
 }
 
 /// 邻接判定用的实际墨迹：pdfium tight box 有值就用它，否则退回 loose bbox。
