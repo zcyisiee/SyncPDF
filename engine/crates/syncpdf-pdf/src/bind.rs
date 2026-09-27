@@ -50,6 +50,7 @@ use syncpdf_core::{Color, GlyphId, Matrix, ObjRef, OpKey, PageId, Point, Rect};
 
 use crate::content::{parse_content, Op, Operand};
 use crate::pdfium::{DocId, ObjectBounds, PdfiumWorker, TextChar, TextObject};
+use unicode_normalization::UnicodeNormalization;
 
 /// Form XObject 递归深度上限，防止病态文件爆栈。
 const MAX_FORM_DEPTH: usize = 8;
@@ -1658,6 +1659,19 @@ fn cluster_chars(cluster: &[&TextChar]) -> SmallVec<[char; 2]> {
         .collect()
 }
 
+/// 簇证据与 ToUnicode 预期是否同一身份：逐字符相等，或 NFKD 规范化等价
+/// （pdfium 对 Type1 简单字体把连字 U+FB01 分解成 `f`+`i` 两个同 origin 字符，
+/// 与 ToUnicode 的单码点连字是同一字形的两种报告形态）。
+fn chars_match(cu: &[char], expected: &[char]) -> bool {
+    cu == expected
+        || (cu.len() != expected.len()
+            && cu
+                .iter()
+                .copied()
+                .nfkd()
+                .eq(expected.iter().copied().nfkd()))
+}
+
 /// 簇是否是纯空白（至少一个字符且全部空白）。
 fn cluster_is_whitespace(cluster: &[&TextChar]) -> bool {
     !cluster.is_empty()
@@ -1717,7 +1731,7 @@ fn align_with_empty_mappings(
             && clusters[j].len() == 1
             && chars[j].as_slice() == [char::from_u32(code).unwrap()];
         match to_uni.get(code) {
-            Some(exp) if !exp.is_empty() => chars[j].as_slice() == exp || raw_control,
+            Some(exp) if !exp.is_empty() => chars_match(chars[j].as_slice(), exp) || raw_control,
             Some(_) => raw_control,
             None => false,
         }
@@ -1796,7 +1810,7 @@ fn align_codes_to_clusters(
                 // Unicode（如星面字符的 UTF-16 代理对两半、无映射回退到
                 // 原码点）。证据仍属于本 code，身份用 ToUnicode，几何用簇。
                 let cu_unmapped = cluster_unmapped(clusters[ki]);
-                if cu.as_slice() == exp || cu_unmapped {
+                if cu_unmapped || chars_match(&cu, exp) {
                     step.cluster = Some(ki);
                     ki += 1;
                 } else if exp_ws {
@@ -2619,6 +2633,39 @@ mod tests {
         let clusters = cluster_by_origin(&real);
         let codes: Vec<_> = source.iter().map(|c| (*c, 0, (0, 2))).collect();
         align_codes_to_clusters(&codes, EncodingKind::Double, &map, &clusters)
+    }
+
+    #[test]
+    fn ligature_to_unicode_matches_pdfium_decomposed_cluster() {
+        // InDesign AdvOT 连字子集字体：ToUnicode <01> → U+FB01 单码点，
+        // pdfium 对 Type1 简单字体按规范化分解报告 'f'+'i' 两字符同 origin 簇。
+        let mut map = ToUnicodeMap::default();
+        map.insert(1, vec!['\u{FB01}']);
+        let fi = TextChar {
+            unicode: Some("f".into()),
+            bbox: Rect::new(0., 0., 12., 12.),
+            ink: Some(Rect::new(0., 0., 12., 10.)),
+            origin: Point::new(0., 0.),
+            width: 12.,
+            angle: 0.,
+            is_generated: false,
+        };
+        let mut i = fi.clone();
+        i.unicode = Some("i".into());
+        let pair = [&fi, &i];
+        let clusters = vec![&pair[..]];
+        let codes = vec![(1u32, 0u32, (0u32, 2u32))];
+        let steps = align_codes_to_clusters(&codes, EncodingKind::Single, &map, &clusters);
+        assert_eq!(steps[0].cluster, Some(0));
+        assert!(!steps[0].mismatch);
+
+        // 反例：簇字符不是预期的规范化分解时仍拒绝。
+        let mut x = fi.clone();
+        x.unicode = Some("x".into());
+        let single = [&x];
+        let clusters = vec![&single[..]];
+        let steps = align_codes_to_clusters(&codes, EncodingKind::Single, &map, &clusters);
+        assert!(steps[0].mismatch);
     }
 
     #[test]
