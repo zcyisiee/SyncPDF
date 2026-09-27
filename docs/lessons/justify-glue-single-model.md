@@ -11,6 +11,12 @@ Knuth–Plass 选出的断点只在「绘制按评分所用的 (stretch, shrink)
 - 结果（`tmp/linebreak/measure_gaps.py`，全文两端对齐非末行）：2405 最大空格 p95 0.753→0.659em、max 1.971→1.554em；CJK 字距增量 max 1.715→0.75em。5 篇回归（TRC/ALNS/VNS/2604/2602 cache-only 回放）回退段数与基线完全一致，同一行对比空格 p95/max 不变。
 - 回归测试：`syncpdf-typeset/tests/typeset.rs` 中 `justify_executes_each_glue_as_declared_to_the_breaker`、`shrinking_row_compresses_spaces_only_never_cjk_tracking`、`breaker_prefers_hyphenation_over_a_very_loose_latin_line`、`mixed_script_spaces_stay_bounded_across_a_paragraph`、`space_beside_fullwidth_punctuation_draws_no_extra_blank`、`cjk_latin_boundary_takes_tracking_slack`。
 
+## 关联 bug：越界判据必须与门禁一致（同任务修复）
+
+`place()` 原按「行墨迹宽度 > 可用宽度」决定是否回收拉伸，而溢出门禁按「墨迹越过 bbox 左右边界」判定。左侧承把整行墨迹右移时，宽度仍合规、右边界已越界，回收逻辑不触发 → 该段回退。表现为**非单调**：TRC p5 P05-025 在 0.9 回退，0.85/0.95/1.0 通过。改为按边界判定（`max(x1-bbox.x1, bbox.x0-x0)`）后消失；5 篇 0.9 回放的 `typeset_overflow` 归零。测试 `tests/ink_collision.rs::justified_line_watches_the_box_edge_not_only_its_ink_width`（正例：墨迹整体右移 0.4pt、宽度刚好合规；反例：无 glue 的行仍判溢出）。
+
+教训：同一约束在「评估/回收」与「门禁」两处实现时，判据必须逐字一致，否则出现只在特定字号下暴露的非单调回退。
+
 ## 以后如何做
 
 - 调伸缩效果只改声明量（节点与 `Row.glue` 同一处产生），不要在绘制侧再加分配规则或常量。

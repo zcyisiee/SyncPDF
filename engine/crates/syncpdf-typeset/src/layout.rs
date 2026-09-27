@@ -608,37 +608,35 @@ fn place(
     baseline: f32,
 ) -> PlacedLine {
     let placed = place_row(shaper, input, row, bbox, baseline);
-    let available = bbox.width()
-        - if row.first {
-            input.first_indent.max(0.0)
-        } else {
-            0.0
-        };
     // Justification positions advances; serif ink and side bearings can extend
-    // past them. Spend only as much less glue as the ink needs, preserving every
-    // glyph size and the chosen breaks: first give back added stretch, then use
-    // the breaker's own shrink allowance (never beyond its limit, ratio -1).
-    if input.align == Align::Justify && !row.last && placed.line.bbox.width() > available {
+    // past them. The overflow gate is the box edge, so measure against the edge
+    // too: a line whose ink merely fits the width can still start past `x0`
+    // (left side bearing) and end past `x1`. Spend only as much less glue as the
+    // ink needs, preserving every glyph size and the chosen breaks: first give
+    // back added stretch, then use the breaker's own shrink allowance (never
+    // beyond its limit, ratio -1).
+    let over = |line: &Rect| (line.x1 - bbox.x1).max(bbox.x0 - line.x0);
+    if input.align == Align::Justify && !row.last && over(&placed.line.bbox) > 0.0 {
         let at = |ratio: f32| {
             let mut adjusted = row.clone();
             adjusted.ratio = ratio;
             place_row(shaper, input, &adjusted, bbox, baseline)
         };
-        let mut high = (row.ratio, placed.line.bbox.width());
+        let mut high = (row.ratio, over(&placed.line.bbox));
         for low in [0.0, -1.0] {
             if low >= high.0 {
                 continue;
             }
-            let width = at(low).line.bbox.width();
-            if width <= available {
-                let t = if high.1 > width {
-                    ((available - width - 0.001) / (high.1 - width)).clamp(0.0, 1.0)
+            let excess = over(&at(low).line.bbox);
+            if excess <= 0.0 {
+                let t = if high.1 > excess {
+                    ((-excess - 0.001) / (high.1 - excess)).clamp(0.0, 1.0)
                 } else {
                     0.0
                 };
                 return at(low + (high.0 - low) * t);
             }
-            high = (low, width);
+            high = (low, excess);
         }
     }
     placed

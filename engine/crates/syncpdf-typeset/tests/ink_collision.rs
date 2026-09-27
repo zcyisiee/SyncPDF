@@ -413,3 +413,77 @@ fn shrunk_justified_line_spends_more_of_its_shrink_when_ink_overhangs() {
     solid.bbox.x1 = 40.;
     assert!(run(&solid, "aaaaaaaa").paragraph.overflow);
 }
+
+/// Ink can be shifted right as a whole: a left side bearing moves `x0` in and
+/// the trailing serif moves `x1` out by the same amount, so the line's *width*
+/// still fits while its right edge crosses the measure. The overflow gate is the
+/// edge, so the glue adjustment must watch the edge too.
+struct ShiftedInk;
+impl Shaper for ShiftedInk {
+    fn shape(&self, font: u32, text: &str, size: f32, rtl: bool) -> Vec<ShapedGlyph> {
+        MonoShaper.shape(font, text, size, rtl)
+    }
+    fn glyph_bounds(&self, _: u32, _: u16, size: f32) -> Option<Rect> {
+        // Whole ink box sits 0.4pt right of the origin, same width as the advance.
+        Some(Rect::new(0.4, 0., size * 0.5 + 0.4, size * 0.8))
+    }
+    fn metrics(&self, font: u32) -> FontMetrics {
+        MonoShaper.metrics(font)
+    }
+    fn font_for(&self, _: &StyleSpec) -> u32 {
+        0
+    }
+}
+
+#[test]
+fn justified_line_watches_the_box_edge_not_only_its_ink_width() {
+    let spec = ParagraphSpec {
+        bbox: Rect::new(0., 0., 65., 100.),
+        first_baseline: Some(90.),
+        font_size: 10.,
+        line_height: 1.5,
+        align: Align::Justify,
+        first_indent: 0.,
+        is_rtl: false,
+        color: Color::BLACK,
+        styles: vec![],
+        lang: Lang::En,
+    };
+    let run = |spec: &ParagraphSpec, t: &str| {
+        Typeset::new(&ShiftedInk, FitOptions::default()).layout(
+            "P01-001".parse().unwrap(),
+            spec,
+            &[text(t)],
+            &Obstacles::default(),
+        )
+    };
+    // "aaaa bbbb cccc" is exactly 65pt of advances; ink is that same width but
+    // shifted 0.4pt right, so x1 = 65.4 > 65 while x1 - x0 = 65 fits.
+    let out = run(&spec, "aaaa bbbb cccc dddd");
+    let first = &out.paragraph.lines[0];
+    assert_eq!(
+        first
+            .glyphs
+            .iter()
+            .map(|g| g.text.as_str())
+            .collect::<String>(),
+        "aaaa bbbb cccc"
+    );
+    assert!(
+        first.bbox.x0 >= -0.01 && first.bbox.x1 <= 65.01,
+        "ink crosses the box edge: {:?}",
+        first.bbox
+    );
+    assert!(!out.paragraph.overflow);
+    assert!(out
+        .paragraph
+        .lines
+        .iter()
+        .flat_map(|l| &l.glyphs)
+        .all(|g| g.size == 10. && g.scale_x == 1.));
+    // Negative case: a line with no glue cannot give anything back, so the same
+    // overhang is still an overflow (no silent clipping or resizing).
+    let mut solid = spec;
+    solid.bbox.x1 = 40.;
+    assert!(run(&solid, "aaaaaaaa").paragraph.overflow);
+}
