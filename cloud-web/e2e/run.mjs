@@ -1,6 +1,6 @@
 // 端到端验收：真实 `bdt cloud serve` + 假引擎（e2e/fake-engine.py）+ vite preview 代理，
 // 在 1440×900 与 390×844 下走完登录、上传、逐页预览、完成/部分完成/失败、排队、取消、
-// 缓存命中、历史抽屉删除与退出，逐步断言并截图。产物写到仓库 tmp/cloud-web/e2e-<时间>/。
+// 重新编译/重新翻译（含失败回滚）、缓存命中、历史抽屉删除与退出，逐步断言并截图。产物写到仓库 tmp/cloud-web/e2e-<时间>/。
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -18,6 +18,7 @@ const stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
 const out = path.join(repo, 'tmp/cloud-web', `e2e-${stamp}`);
 const shots = path.join(out, 'shots');
 const hold = path.join(out, 'hold');
+const failFlag = path.join(out, 'fail');
 fs.mkdirSync(shots, { recursive: true });
 
 const children = [];
@@ -82,7 +83,7 @@ async function startBackend(root) {
   const child = spawn(
     PY,
     ['-m', 'babeldoc_tools', 'cloud', 'serve', '--root', root, '--port', '0', '--engine', engine, '--translator', 'fake:echo'],
-    { cwd: repo, env: { ...process.env, FAKE_HOLD: hold, FAKE_PAGE_DELAY: '0.8' }, stdio: ['ignore', 'pipe', 'pipe'] },
+    { cwd: repo, env: { ...process.env, FAKE_HOLD: hold, FAKE_FAIL: failFlag, FAKE_PAGE_DELAY: '0.8' }, stdio: ['ignore', 'pipe', 'pipe'] },
   );
   children.push(child);
   child.stderr.pipe(fs.createWriteStream(path.join(out, 'backend.log')));
@@ -219,6 +220,36 @@ async function scenario(browser, base, root, tag, viewport) {
     await shot(a, `done-${mode === '原文' ? 'orig' : 'dual'}`);
   }
   await a.locator('.pv-head .seg button', { hasText: '译文' }).click();
+
+  // 重新编译：沿用已存译文重排，进度从这一轮重新开始，不占额度
+  const firstEvent = (p) => p.locator('.events .ev').first();
+  await a.getByRole('button', { name: '重新编译', exact: true }).click();
+  await firstEvent(a).filter({ hasText: '用已保存的译文重新编译' }).waitFor();
+  await shot(a, 'recompiling', true);
+  await chip(a).filter({ hasText: '已完成' }).waitFor({ timeout: 60000 });
+  await expectQuota(a, 4, '重新编译不占额度');
+
+  // 重新翻译：二次确认后从头翻一遍，同样不占额度
+  await a.getByRole('button', { name: '重新翻译', exact: true }).click();
+  await a.locator('.rerun', { hasText: '确定从头重新翻译？' }).waitFor();
+  await shot(a, 'retranslate-confirm');
+  await a.locator('.rerun').getByRole('button', { name: '重新翻译', exact: true }).click();
+  await firstEvent(a).filter({ hasText: '从头完整重新翻译' }).waitFor();
+  await chip(a).filter({ hasText: '已完成' }).waitFor({ timeout: 60000 });
+  await expectQuota(a, 4, '重新翻译不占额度');
+
+  // 重跑失败：回滚成原来的译文，仍是已完成、可下载，阶段条不停在出错那一步
+  fs.writeFileSync(failFlag, '');
+  await a.getByRole('button', { name: '重新翻译', exact: true }).click();
+  await a.locator('.rerun').getByRole('button', { name: '重新翻译', exact: true }).click();
+  await a.locator('.events .ev', { hasText: '已保留原来的译文' }).waitFor({ timeout: 60000 });
+  fs.rmSync(failFlag);
+  await chip(a).filter({ hasText: '已完成' }).waitFor();
+  await a.getByRole('link', { name: '下载译文' }).waitFor();
+  assert((await a.locator('.stepper .step.fail').count()) === 0, '回滚后阶段条不显示出错');
+  await a.locator('.sheet.trans img.zh').first().waitFor();
+  await shot(a, 'rerun-rolled-back');
+  await expectQuota(a, 4, '重跑失败不占额度');
 
   // 部分完成：黄色提醒、第 2 页回退框
   await home(a);

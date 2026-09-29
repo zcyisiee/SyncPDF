@@ -6,6 +6,7 @@
     sources/<sha256>.pdf                原文（按内容去重）
     translations/<tid>/translated.pdf   译文
     translations/<tid>/events.jsonl.gz  原始引擎事件（保留 7 天）
+    translations/<tid>/cache/translate.db  块级译文缓存（重新编译用，随译文长期保留）
     work/<tid>/                         运行中的引擎 workdir，结束即删
     preview/<key>/<page>.webp           预览缓存（可重建，有总量上限）
     dual/<tid>.pdf                      中英对照短期缓存
@@ -54,6 +55,8 @@ CREATE TABLE IF NOT EXISTS translations(
     engine_sha TEXT NOT NULL,
     status TEXT NOT NULL,
     attempt INTEGER NOT NULL DEFAULT 0,
+    rerun_action TEXT,
+    rerun_prev TEXT,
     translated_sha TEXT,
     result_json TEXT,
     stats TEXT,
@@ -72,6 +75,7 @@ CREATE TABLE IF NOT EXISTS jobs(
     filename TEXT NOT NULL,
     status TEXT NOT NULL,
     cache_hit INTEGER NOT NULL DEFAULT 0,
+    rerun INTEGER NOT NULL DEFAULT 0,
     created_at REAL NOT NULL,
     started_at REAL,
     finished_at REAL,
@@ -131,6 +135,9 @@ class Paths:
     def translated(self, tid: str) -> Path:
         return self.translations / tid / "translated.pdf"
 
+    def translate_cache(self, tid: str) -> Path:
+        return self.translations / tid / "cache/translate.db"
+
     def ensure(self) -> Paths:
         for path in (self.sources, self.translations, self.work, self.preview, self.dual, self.tmp):
             path.mkdir(parents=True, exist_ok=True)
@@ -148,6 +155,20 @@ class Database:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(SCHEMA)
+            self._migrate()
+
+    def _migrate(self) -> None:
+        """既有库的轻量迁移：缺列补列（ALTER TABLE ADD COLUMN 幂等处理已存在）。"""
+        job_columns = {row[1] for row in self._conn.execute("PRAGMA table_info(jobs)")}
+        if "rerun" not in job_columns:
+            self._conn.execute("ALTER TABLE jobs ADD COLUMN rerun INTEGER NOT NULL DEFAULT 0")
+        translation_columns = {
+            row[1] for row in self._conn.execute("PRAGMA table_info(translations)")
+        }
+        if "rerun_action" not in translation_columns:
+            self._conn.execute("ALTER TABLE translations ADD COLUMN rerun_action TEXT")
+        if "rerun_prev" not in translation_columns:
+            self._conn.execute("ALTER TABLE translations ADD COLUMN rerun_prev TEXT")
 
     @contextlib.contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:

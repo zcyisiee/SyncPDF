@@ -1,6 +1,6 @@
 # 云端版接口（`bdt cloud`）
 
-适用于 `bdt cloud serve`（镜译 SyncTranslate 云端版），核对日期：2026-09-25。行为以 `babeldoc_tools/cloud/`（路由 `app.py`，业务 `jobs.py`，翻译 `runner.py`）和 `tests/cloud/` 为准；与本机工作台 `bdt serve` 的 [HTTP 参考](http-api.md) 是两套独立接口，互不共用数据库与文件。
+适用于 `bdt cloud serve`（镜译 SyncTranslate 云端版），核对日期：2026-09-29。行为以 `babeldoc_tools/cloud/`（路由 `app.py`，业务 `jobs.py`，翻译 `runner.py`）和 `tests/cloud/` 为准；与本机工作台 `bdt serve` 的 [HTTP 参考](http-api.md) 是两套独立接口，互不共用数据库与文件。
 
 ## 公共约定
 
@@ -16,8 +16,9 @@
 | `POST /api/login`、`POST /api/logout`、`GET /api/me` | 邀请码登录、退出；`me` 返回名字、打码邀请码、`daily_quota/used/remaining` |
 | `GET /api/jobs` | 本人历史（含进行中），新到旧；每项带 `warnings` 数 |
 | `POST /api/jobs` | multipart：`file` + `model` + `thinking`；返回 job 视图（201） |
-| `GET /api/jobs/{id}` | job 视图：状态、页数与每页尺寸、`stats`（完成后）、`final_rev`、排队时的 `queue` |
+| `GET /api/jobs/{id}` | job 视图：状态、页数与每页尺寸、`stats`（完成后）、`final_rev`、排队时的 `queue`、`rerun`（是否重跑过） |
 | `POST /api/jobs/{id}/cancel` | 取消排队中/翻译中的 job；否则 409 `job_not_active` |
+| `POST /api/jobs/{id}/rerun` | `{action: recompile\|retranslate}`：对已完成的 job 重新编译或从头重新翻译，返回 job 视图，见下文 |
 | `DELETE /api/jobs/{id}` | 软删除（只打 `deleted_at`）；进行中 409 `job_active` |
 | `GET /api/jobs/{id}/events` | SSE：先回放、再推实时，见下文 |
 | `GET /api/jobs/{id}/pages/{n}.webp?v=src\|tr&rev=` | 预览图 |
@@ -30,14 +31,18 @@
   - 键已有 `done/partial` 译文：直接建一条同状态、`cache_hit=true` 的 job，事件为“这篇论文已有译文，已直接加载 ⚡”，不扣额度。
   - 键正在排队/运行：新 job 挂到同一次翻译上，复制已有进度事件，不重复排队。
   - 键上次失败或被取消：同一键重新排队。
-- 额度按北京时间自然日统计：非缓存命中、且状态不是 `canceled/failed` 的 job 数。排队和运行中的 job 已占额度，取消或失败即退回；挂靠到别人正在跑的翻译上也占额度。
+- 额度按北京时间自然日统计：当天创建的、非缓存命中、且状态不是 `canceled/failed` 的 job 数。排队和运行中的 job 已占额度，取消或失败即退回；挂靠到别人正在跑的翻译上也占额度。重跑沿用原 job 记录，不另占额度（缓存命中的 job 重跑后 `cache_hit` 变为 false，若是当天创建的就开始计入）。
 
 ## 任务状态与执行
 
-- job 状态：`queued → running → done | partial | failed`，或随时 `canceled`。`partial` 表示有译文、但引擎报告未完整完成（有段落保留原文或内容未识别），前端显示黄色；`failed` 表示没有产出。
+- job 状态：`queued → running → done | partial | failed`，或随时 `canceled`；重新编译排队时是 `recompile`（与 `queued` 同队列，领取后也进入 `running`）。`partial` 表示有译文、但引擎报告未完整完成（有段落保留原文或内容未识别），前端显示黄色；`failed` 表示没有产出。
 - 单个 runner 线程一次只跑一篇（按 `queued_at` 取最早的 translation），调用 `rust_backend` 驱动 `syncpdf-cli translate`（`--translator` 由 `bdt cloud serve --translator` 决定，服务器现用 `pi`：`--model <模型> --thinking <档>`；agy 通道则是 `--model <模型>-<档>`，agy 不接受 `--thinking`，强度并入模型名；其余参数 `--font-scale 0.9 --line-height 1.5 --layout-device cpu`）。运行 workdir 是 `work/<translation_id>/`，结束后把 `translated.pdf` 移入 `translations/<tid>/`、事件 gzip 保存，删除 workdir。
 - 取消：排队中的直接结束；运行中的只有当这次翻译的**所有** job 都取消后才终止引擎进程组（SIGTERM，5 秒后 SIGKILL），然后下一篇开始。
 - 重启恢复：启动时把 `running` 的 translation 放回队首、名下 job 回到 `queued`，追加事件“服务已重启，任务将重新开始”，并清掉残留 workdir；翻译从头重跑（`attempt` 加一）。停服（SIGTERM）时，uvicorn 最多等 SSE 长连接 3 秒；随后 lifespan 终止引擎，并把翻译留作 `running` 等重启重排，不记失败。因此 systemd 必须用 `KillMode=mixed`：只给主进程发 SIGTERM，主进程退出后剩余进程统一 SIGKILL。用 `control-group` 时引擎会先收到 SIGTERM，翻译被记为失败（见 [部署](../guide/cli.md#云端版)）。
+- 重跑（`POST /api/jobs/{id}/rerun`）：只接受 `done/partial` 的 job（否则 409 `job_not_rerunnable`），同一翻译上有 job 在排队或运行时 409 `job_active`。动作作用于整条共享的 translation，排到队尾，job 回到进行中，事件流先推 `status` 再推里程碑“用已保存的译文重新编译”/“从头完整重新翻译”。
+  - `recompile`：用 `translations/<tid>/cache/translate.db` 块级译文缓存以 `--cache-only` 重新排版，不调用模型；缓存不存在时 409 `cache_missing`。服务重启后仍按重新编译续跑。
+  - `retranslate`：新 workdir 从头翻译，不复用块缓存；今日额度已用完时 429。
+  - 成功才替换译文、统计和块缓存；失败或（所有 job 都）取消时回滚到重跑前的译文与状态，事件追加“重新处理没有完成，已保留原来的译文”/“已取消，保留原来的译文”。运行失败的块缓存不会覆盖已保存的那份。
 - ETA：`queue = {ahead, eta_seconds}`，`ahead` 含正在跑的那篇，`eta_seconds = ahead × 最近 10 篇平均耗时`（没有记录时按 300 秒）。
 
 ## SSE 事件
@@ -63,4 +68,4 @@
 
 ## 数据根与清理
 
-`--root`（默认 `~/.bdt-cloud`）的布局见 `db.py` 文档字符串：`app.db`（SQLite WAL，只存元数据）、`sources/`、`translations/<tid>/`、`work/`、`preview/`、`dual/`、`tmp/`。启动时与每小时清理一次（`cleanup.py::LIMITS`）：引擎事件 7 天、对照版 24 小时或总量 2GB、预览总量 5GB（按 mtime 淘汰）、上传临时文件 1 天。原文与译文从不自动删除；无人引用超过 30 天的原文只计数。
+`--root`（默认 `~/.bdt-cloud`）的布局见 `db.py` 文档字符串：`app.db`（SQLite WAL，只存元数据）、`sources/`、`translations/<tid>/`（译文、事件、`cache/translate.db` 块级译文缓存）、`work/`、`preview/`、`dual/`、`tmp/`。启动时与每小时清理一次（`cleanup.py::LIMITS`）：引擎事件 7 天、对照版 24 小时或总量 2GB、预览总量 5GB（按 mtime 淘汰）、上传临时文件 1 天。原文、译文与块级译文缓存从不自动删除；无人引用超过 30 天的原文只计数。

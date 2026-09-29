@@ -2,11 +2,13 @@
 
 - 结局由原文 PDF 的 subject 元数据决定：``fake:success`` / ``fake:partial`` / ``fake:fail``；
 - ``FAKE_PAGE_DELAY``：每页耗时（秒，默认 1.2）；
-- ``FAKE_HOLD``：该文件存在时，发完第一页就停住（给排队、取消留出稳定窗口）。
+- ``FAKE_HOLD``：该文件存在时，发完第一页就停住（给排队、取消留出稳定窗口）；
+- ``FAKE_FAIL``：该文件存在时，不论元数据都按 ``fail`` 结局走（重跑失败回滚）。
 """
 
 import json
 import os
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -37,10 +39,19 @@ if args[0] == "dual":
 
 source = pymupdf.open(arg("--input"))
 mode = (source.metadata.get("subject") or "fake:success").removeprefix("fake:")
+fail = os.environ.get("FAKE_FAIL")
+if fail and Path(fail).exists():
+    mode = "fail"
 pages = source.page_count
 output = arg("--output")
 delay = float(os.environ.get("FAKE_PAGE_DELAY", "1.2"))
 hold = os.environ.get("FAKE_HOLD")
+
+# 块级译文缓存：重新编译（--cache-only）要求它存在且是合法 SQLite
+cache_dir = Path(arg("--cache-dir"))
+cache_dir.mkdir(parents=True, exist_ok=True)
+with sqlite3.connect(cache_dir / "translate.db") as conn:
+    conn.execute("CREATE TABLE IF NOT EXISTS translations(source_html TEXT, translated_html TEXT)")
 
 
 def publish(done):

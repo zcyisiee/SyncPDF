@@ -65,6 +65,8 @@ _STATUS = {
     "invalid_model": 400,
     "invalid_thinking": 400,
     "invalid_request": 400,
+    "job_not_rerunnable": 409,
+    "cache_missing": 409,
     "dual_failed": 500,
 }
 _REV = re.compile(r"^\d+\.\d+$")
@@ -86,6 +88,10 @@ def engine_sha(engine: str | None) -> str:
 
 class LoginBody(BaseModel):
     code: str
+
+
+class RerunBody(BaseModel):
+    action: str
 
 
 def _current_user(request: Request) -> sqlite3.Row:
@@ -223,6 +229,10 @@ def create_app(
         service.cancel_job(user["id"], job_id)
         return service.job_view(owned(user, job_id))
 
+    @app.post("/api/jobs/{job_id}/rerun")
+    def rerun_job(user: User, job_id: str, body: RerunBody) -> dict:
+        return service.rerun_job(user["id"], job_id, body.action)
+
     @app.delete("/api/jobs/{job_id}", status_code=204)
     def delete_job(user: User, job_id: str) -> Response:
         service.delete_job(user["id"], job_id)
@@ -250,7 +260,11 @@ def create_app(
                     job = service.get_job(user["id"], job_id)
                     if job is None:
                         return
-                    queue = service.queue_info(job["translation_id"]) if job["status"] == "queued" else None
+                    queue = (
+                        service.queue_info(job["translation_id"])
+                        if job["status"] in ("queued", "recompile")
+                        else None
+                    )
                     # 离开排队由 status 事件表达；queue 只在仍排队时推变化
                     if queue is not None and queue != queue_sent:
                         queue_sent = queue

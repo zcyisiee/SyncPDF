@@ -8,7 +8,7 @@
 
 把 PDF 解析为带段落身份、样式和公式锚点的可译文本，调用模型翻译，再重建译文 PDF，并允许用户查看进度、修改局部译文和重新编译。输入是 PDF、语言与布局配置、翻译/审查提供方；输出包括单语 PDF、可选双语 PDF、工作目录和质量报告。保真程度由检查与人工复核判断。
 
-当前产品由本地 CLI、单机 Web 工作台和云端版组成。工作台（`bdt serve` + `web/`）已有上传、实时事件、草稿、段落编译与导出，无用户认证。云端版（`bdt cloud` + `cloud-web/`）是面向多人的只读翻译站：邀请码登录、上传、排队、逐页预览、取消、下载译文/中英对照、跨用户共享缓存，调用 Rust 引擎，不提供段落编辑；单机单进程，没有跨机器队列或远端对象存储。
+当前产品由本地 CLI、单机 Web 工作台和云端版组成。工作台（`bdt serve` + `web/`）已有上传、实时事件、草稿、段落编译与导出，无用户认证。云端版（`bdt cloud` + `cloud-web/`）是面向多人的只读翻译站：邀请码登录、上传、排队、逐页预览、取消、重新编译/重新翻译、下载译文/中英对照、跨用户共享缓存，调用 Rust 引擎，不提供段落编辑；单机单进程，没有跨机器队列或远端对象存储。
 
 ## 2. 入口
 
@@ -76,13 +76,14 @@ bdt run → parse → translate → apply → build → check → review → rep
        ← SSE（job_events 回放 + 实时）← EventMapper（引擎事件 → 阶段/里程碑/页/提醒）
 ```
 
-与工作台完全分开：独立子包 `babeldoc_tools/cloud/`、独立数据根 `~/.bdt-cloud`，不 import `babeldoc_tools/serve/`，也不走 Python 翻译管线。用户的历史记录是 `jobs`；同一缓存键（原文 sha256 + 模型 + 思考强度 + 引擎二进制 sha256）只对应一条 `translations`，多个用户的 job 共用它的译文和运行。runner 通过 `rust_backend._translate_pdf(on_event=, on_spawn=)` 逐行拿引擎事件并持有进程以便取消；`page_ready` 表示 `translated.pdf` 已按页原子落盘，预览按 `attempt.revision` 从 workdir 渲染。只长期保存原文和译文；预览 WebP、中英对照（`syncpdf-cli dual` 按需生成）和 gzip 事件都是有期限或有上限的缓存。
+与工作台完全分开：独立子包 `babeldoc_tools/cloud/`、独立数据根 `~/.bdt-cloud`，不 import `babeldoc_tools/serve/`，也不走 Python 翻译管线。用户的历史记录是 `jobs`；同一缓存键（原文 sha256 + 模型 + 思考强度 + 引擎二进制 sha256）只对应一条 `translations`，多个用户的 job 共用它的译文和运行。runner 通过 `rust_backend._translate_pdf(on_event=, on_spawn=)` 逐行拿引擎事件并持有进程以便取消；`page_ready` 表示 `translated.pdf` 已按页原子落盘，预览按 `attempt.revision` 从 workdir 渲染。只长期保存原文、译文和块级译文缓存（重新编译用）；预览 WebP、中英对照（`syncpdf-cli dual` 按需生成）和 gzip 事件都是有期限或有上限的缓存。
 
 | 位置（`~/.bdt-cloud/`） | 职责 |
 |---|---|
 | `app.db` | SQLite（WAL，单连接加锁）：users、sessions、sources、translations、jobs、job_events（只存面向用户的事件） |
 | `sources/<sha256>.pdf`、`translations/<tid>/translated.pdf` | 原文（按内容去重）与译文；不自动删除 |
 | `translations/<tid>/events.jsonl.gz` | 原始引擎事件，7 天 |
+| `translations/<tid>/cache/translate.db` | 块级译文缓存：重新编译时 `--cache-only` 复用；成功运行后替换，不自动删除 |
 | `work/<tid>/` | 运行中的引擎 workdir，结束或重启即删 |
 | `preview/`、`dual/`、`tmp/` | 预览（5GB 上限）、对照版（24h/2GB）、上传临时文件（1 天） |
 

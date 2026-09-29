@@ -334,6 +334,167 @@ def test_service_stop_mid_run_requeues_instead_of_failing(tmp_path, fake_engine)
     assert "服务已重启，任务将重新开始" in [json.loads(r["payload"]).get("text") for r in rows]
 
 
+def test_rerun_recompile_uses_saved_cache_without_model_calls(cloud):
+    """重新编译：--cache-only 重排、不占额度；缓存随译文保存。"""
+    client = cloud.client()
+    job = cloud.upload(client, cloud.pdf("rc.pdf")).json()
+    assert cloud.runner.run_once()
+    tid = cloud.service.db.one("SELECT translation_id FROM jobs WHERE id = ?", (job["id"],))[0]
+    cache = cloud.paths.translate_cache(tid)
+    assert cache.is_file(), "块级译文缓存应随译文保存"
+
+    calls_before = len((cloud.tmp / "engine-calls.jsonl").read_text().splitlines())
+    response = client.post(f"/api/jobs/{job['id']}/rerun", json={"action": "recompile"})
+    assert response.status_code == 200
+    view = response.json()
+    assert view["status"] == "recompile" and view["rerun"]
+    assert cloud.runner.run_once()
+
+    calls = [json.loads(l) for l in (cloud.tmp / "engine-calls.jsonl").read_text().splitlines()]
+    assert "--cache-only" in calls[-1], "重新编译必须走缓存，不调模型"
+    assert client.get(f"/api/jobs/{job['id']}").json()["status"] == "done"
+    # 重新编译不占额度
+    assert client.get("/api/me").json()["used"] == 1
+
+
+def test_rerun_recompile_without_cache_is_rejected(cloud):
+    client = cloud.client()
+    job = cloud.upload(client, cloud.pdf("nocache.pdf")).json()
+    cloud.runner.run_once()
+    tid = cloud.service.db.one("SELECT translation_id FROM jobs WHERE id = ?", (job["id"],))[0]
+    cloud.paths.translate_cache(tid).unlink()
+    response = client.post(f"/api/jobs/{job['id']}/rerun", json={"action": "recompile"})
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "cache_missing"
+
+
+def test_rerun_retranslate_runs_from_scratch_and_replaces_cache(cloud):
+    client = cloud.client()
+    job = cloud.upload(client, cloud.pdf("rt.pdf")).json()
+    assert cloud.runner.run_once()
+    tid = cloud.service.db.one("SELECT translation_id FROM jobs WHERE id = ?", (job["id"],))[0]
+    cache = cloud.paths.translate_cache(tid)
+    assert cache.is_file()
+    cache.write_bytes(cache.read_bytes())  # 触摸一下；下面靠 inode 变化确认被新一轮替换
+    old_inode = cache.stat().st_ino
+
+    response = client.post(f"/api/jobs/{job['id']}/rerun", json={"action": "retranslate"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "queued"
+    assert cache.is_file(), "旧缓存留到新一轮成功后才替换"
+    assert cloud.runner.run_once()
+    calls = [json.loads(line) for line in (cloud.tmp / "engine-calls.jsonl").read_text().splitlines()]
+    assert "--cache-only" not in calls[-1], "完整重翻不能走缓存"
+    final = client.get(f"/api/jobs/{job['id']}").json()
+    assert final["status"] == "done" and final["rerun"]
+    assert cache.is_file() and cache.stat().st_ino != old_inode
+    attempt = cloud.service.db.one("SELECT attempt FROM translations WHERE id = ?", (tid,))[0]
+    assert attempt == 2
+    # 重新开始（重编译/重翻）复用同一条 job 记录，不额外占当日额度
+    assert client.get("/api/me").json()["used"] == 1
+    # 事件流里新一轮的 status 在 milestone 之前（前端在 status 处丢弃上一轮进度）
+    kinds = [(e["kind"], e.get("status") or e.get("text")) for e in cloud.service.events_after(job["id"], 0)]
+    at = kinds.index(("status", "queued"), kinds.index(("status", "done")))
+    assert kinds[at + 1] == ("milestone", "从头完整重新翻译")
+
+
+def test_rerun_rejects_active_and_failed_jobs(cloud, monkeypatch):
+    client = cloud.client()
+    queued = cloud.upload(client, cloud.pdf("q.pdf")).json()
+    assert client.post(f"/api/jobs/{queued['id']}/rerun", json={"action": "recompile"}).json()["error"]["code"] == "job_active"
+
+    monkeypatch.setenv("FAKE_MODE", "fail")
+    failed = cloud.upload(client, cloud.pdf("f.pdf")).json()
+    cloud.runner.run_once()  # 先跑掉还在排队的 q.pdf
+    cloud.runner.run_once()  # 再跑 f.pdf（失败）
+    assert client.get(f"/api/jobs/{failed['id']}").json()["status"] == "failed"
+    assert client.post(f"/api/jobs/{failed['id']}/rerun", json={"action": "retranslate"}).json()["error"]["code"] == "job_not_rerunnable"
+
+    # 完成后同键有其他用户在跑：拒绝
+    monkeypatch.delenv("FAKE_MODE")
+    other = cloud.client("bob")
+    done = cloud.upload(client, cloud.pdf("busy.pdf")).json()
+    # bob 上传同键挂到同一 translation（仍在排队）
+    bob_job = cloud.upload(other, cloud.pdf("busy.pdf")).json()
+    assert bob_job["status"] == "queued"
+    assert client.post(f"/api/jobs/{done['id']}/rerun", json={"action": "retranslate"}).json()["error"]["code"] == "job_active"
+    cloud.runner.run_once()
+
+
+def _translation_row(cloud, job_id):
+    return cloud.service.db.one(
+        "SELECT t.status, t.translated_sha, t.stats, t.rerun_action, t.rerun_prev "
+        "FROM translations t JOIN jobs j ON j.translation_id = t.id WHERE j.id = ?",
+        (job_id,),
+    )
+
+
+def test_failed_rerun_rolls_back_to_previous_translation(cloud, monkeypatch):
+    """回归：重跑失败不能毁掉原来的译文（含其他用户共享的同一份）。"""
+    alice, bob = cloud.client("alice"), cloud.client("bob")
+    paper = cloud.pdf("rb.pdf")
+    mine = cloud.upload(alice, paper).json()
+    cloud.runner.run_once()
+    shared = cloud.upload(bob, paper).json()  # bob 命中 alice 的译文
+    assert shared["cache_hit"]
+    before = tuple(_translation_row(cloud, mine["id"]))
+    downloaded = alice.get(f"/api/jobs/{mine['id']}/download").content
+    cache_bytes = cloud.paths.translate_cache(cloud.service.db.one(
+        "SELECT translation_id FROM jobs WHERE id = ?", (mine["id"],))[0]).read_bytes()
+
+    for action in ("retranslate", "recompile"):
+        monkeypatch.setenv("FAKE_MODE", "fail")
+        assert alice.post(f"/api/jobs/{mine['id']}/rerun", json={"action": action}).status_code == 200
+        assert cloud.runner.run_once()
+        view = alice.get(f"/api/jobs/{mine['id']}").json()
+        assert view["status"] == "done" and not view["rerun"], f"{action} 失败应整体回滚"
+        assert tuple(_translation_row(cloud, mine["id"])) == (before[0], before[1], before[2], None, None)
+        assert alice.get(f"/api/jobs/{mine['id']}/download").content == downloaded
+        assert bob.get(f"/api/jobs/{shared['id']}/download").content == downloaded
+        assert bob.get(f"/api/jobs/{shared['id']}").json()["cache_hit"]
+        texts = _texts(_events(alice, mine["id"]))
+        assert "重新处理没有完成，已保留原来的译文" in texts
+    tid = cloud.service.db.one("SELECT translation_id FROM jobs WHERE id = ?", (mine["id"],))[0]
+    assert cloud.paths.translate_cache(tid).read_bytes() == cache_bytes, "失败一轮不能覆盖旧缓存"
+
+    # 回滚后仍可再次重跑，并且这次能成功
+    monkeypatch.delenv("FAKE_MODE")
+    assert alice.post(f"/api/jobs/{mine['id']}/rerun", json={"action": "recompile"}).status_code == 200
+    assert cloud.runner.run_once()
+    assert alice.get(f"/api/jobs/{mine['id']}").json()["status"] == "done"
+
+
+def test_cancel_rerun_restores_previous_translation_but_cancel_original_still_cancels(cloud):
+    client = cloud.client()
+    job = cloud.upload(client, cloud.pdf("cr.pdf")).json()
+    cloud.runner.run_once()
+    before = tuple(_translation_row(cloud, job["id"]))
+
+    client.post(f"/api/jobs/{job['id']}/rerun", json={"action": "retranslate"})
+    assert client.post(f"/api/jobs/{job['id']}/cancel").json()["status"] == "done"
+    assert tuple(_translation_row(cloud, job["id"])) == (before[0], before[1], before[2], None, None)
+    assert client.get(f"/api/jobs/{job['id']}/download").status_code == 200
+    assert not cloud.runner.run_once(), "取消后队列里不该还留着这一篇"
+
+    # 没有重跑快照的普通排队任务，取消仍是取消
+    other = cloud.upload(client, cloud.pdf("plain.pdf")).json()
+    assert client.post(f"/api/jobs/{other['id']}/cancel").json()["status"] == "canceled"
+
+
+def test_restart_during_recompile_stays_a_recompile(cloud):
+    """回归：重编译被重启打断后仍走 --cache-only，不能悄悄变成调模型的完整翻译。"""
+    client = cloud.client()
+    job = cloud.upload(client, cloud.pdf("rr.pdf")).json()
+    cloud.runner.run_once()
+    client.post(f"/api/jobs/{job['id']}/rerun", json={"action": "recompile"})
+    cloud.service.claim_next()  # 模拟：领取后进程被杀，translation 停在 running
+    cloud.service.recover()
+    assert cloud.runner.run_once()
+    calls = [json.loads(line) for line in (cloud.tmp / "engine-calls.jsonl").read_text().splitlines()]
+    assert "--cache-only" in calls[-1]
+    assert client.get(f"/api/jobs/{job['id']}").json()["status"] == "done"
+
+
 def test_soft_delete_hides_only_own_record(cloud):
     alice, bob = cloud.client("alice"), cloud.client("bob")
     paper = cloud.pdf("shared.pdf")

@@ -74,7 +74,7 @@ export function Home({ running, file, model, thinking, onFile, onModel, onThinki
         <div className="running">
           <span className="dot" />
           <div className="t">
-            <b>{running.filename}</b> <span>{running.status === 'queued' ? '排队中' : '正在翻译'}</span>
+            <b>{running.filename}</b> <span>{running.status === 'queued' || running.status === 'recompile' ? '排队中' : '正在翻译'}</span>
           </div>
           <button className="btn btn-secondary sm" onClick={() => onResume(running.id)}>
             查看进度

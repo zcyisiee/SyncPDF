@@ -1,7 +1,7 @@
 // 一条任务的进度：job 视图 + SSE 事件归并成界面状态。
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
-import { ACTIVE, api, eventsUrl, type ApiError, type Box, type Job, type JobStatus, type Queue } from './api';
+import { ACTIVE, api, eventsUrl, FINISHED, type ApiError, type Box, type Job, type JobStatus, type Queue } from './api';
 import { clock } from './format';
 
 export interface Item {
@@ -59,8 +59,20 @@ function reduce(state: RunState, action: Action): RunState {
     { key, kind, time: clock(data.ts), text: String(text), sub: sub ? String(sub) : undefined },
   ];
   switch (action.type) {
-    case 'status':
-      return { ...state, status: data.status as JobStatus, queue: data.status === 'queued' ? state.queue : null };
+    case 'status': {
+      const status = data.status as JobStatus;
+      // 已完成的任务被「重新编译/重新翻译」：丢掉上一轮的进度，只留新一轮
+      if (state.status && FINISHED.includes(state.status) && (status === 'queued' || status === 'recompile')) {
+        return { ...initial, status };
+      }
+      return {
+        ...state,
+        status,
+        // 重跑失败会回滚成已完成：不再显示「出错」那一步
+        fail: FINISHED.includes(status) ? false : state.fail,
+        queue: status === 'queued' || status === 'recompile' ? state.queue : null,
+      };
+    }
     case 'step':
       return { ...state, step: Number(data.step), fail: Boolean(data.fail) };
     case 'queue':
@@ -102,6 +114,9 @@ export function useJob(id: string | null, onFinished: () => void) {
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [run, dispatch] = useReducer(reduce, initial);
+  // 重新开始后事件流已结束：换个 generation 重新回放并追新事件
+  const [generation, setGeneration] = useState(0);
+  const openedId = useRef<string | null>(null);
   const finished = useRef(onFinished);
   finished.current = onFinished;
 
@@ -115,7 +130,9 @@ export function useJob(id: string | null, onFinished: () => void) {
   }, [id]);
 
   useEffect(() => {
-    setJob(null);
+    // 只在换了一篇时清空视图；同一篇重新开始时保留预览，避免整页闪一下
+    if (openedId.current !== id) setJob(null);
+    openedId.current = id;
     setError(null);
     dispatch({ type: 'reset' });
     if (!id) return;
@@ -149,8 +166,13 @@ export function useJob(id: string | null, onFinished: () => void) {
       closed = true;
       source.close();
     };
-  }, [id, refresh]);
+  }, [id, refresh, generation]);
+
+  const restart = useCallback((next: Job) => {
+    setJob(next);
+    setGeneration((g) => g + 1);
+  }, []);
 
   const status = run.status ?? job?.status ?? null;
-  return { job, error, run, status, refresh };
+  return { job, error, run, status, refresh, restart };
 }

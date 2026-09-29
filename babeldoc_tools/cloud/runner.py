@@ -343,6 +343,20 @@ class Runner:
         model, thinking = tr["model"], tr["thinking"]
         if self.translator == "agy":
             model, thinking = f"{model}-{thinking}", None
+        # 重新编译：用上次保存的块级译文缓存 --cache-only 重排，不调模型。
+        # cached_from 传目录：rust_backend 会自己拼上 cache/translate.db。
+        cache_dir = (
+            self.paths.translations / tid
+            if "rerun_action" in tr.keys() and tr["rerun_action"] == "recompile"
+            else None
+        )
+        if cache_dir is not None and not self.paths.translate_cache(tid).is_file():
+            self.service.finish(
+                tid, "failed",
+                events=[("error", {"text": "没有可用的译文缓存", "sub": "无法重新编译，请完整重新翻译"})],
+                result={"ok": False, "code": "cache_missing", "message": "译文缓存不存在"},
+            )
+            return
         try:
             result = rust_backend.translate_pdf(
                 pdf=str(source),
@@ -354,6 +368,7 @@ class Runner:
                 target_lang="zh-CN",
                 layout_device=self.layout_device,
                 engine=self.engine,
+                cached_from=str(cache_dir) if cache_dir else None,
                 # 同字号汉字满字身、视觉大于拉丁正文；0.9 让 1.5 行距少被整篇下调
                 font_scale=0.9,
                 line_height=1.5,
@@ -391,6 +406,16 @@ class Runner:
         if status != "failed":
             translated_sha = _sha256(output)
             output.replace(self.paths.translated(tid))
+        # 块级译文缓存随译文长期保留：重新编译（--cache-only 重排）要靠它。
+        # 失败的一轮不覆盖：重跑失败会回滚，旧缓存要继续可用。
+        cached_db = work / "cache/translate.db"
+        if status != "failed" and cached_db.is_file():
+            target = self.paths.translate_cache(tid)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                cached_db.replace(target)
+            except OSError:
+                shutil.copy2(cached_db, target)
         raw = work / "events.jsonl"
         if raw.is_file():
             with raw.open("rb") as src, gzip.open(keep / "events.jsonl.gz", "wb") as dst:

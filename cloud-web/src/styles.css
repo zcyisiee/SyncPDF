@@ -292,7 +292,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .foot-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .foot-row .t { color: var(--ink-2); font-size: 12.5px; }
 .foot-row .t b { color: var(--ink); }
+.foot-row > :last-child { flex: none; } /* 窄栏里让说明文字换行，按钮保持一排 */
 .foot-links { margin-top: 12px; text-align: center; }
+.rerun { margin-top: 10px; }
+.rerun-hint { margin-top: 6px; text-align: center; color: var(--ink-2); font-size: 12px; }
 
 /* ---------- 历史抽屉 ---------- */
 .scrim { position: fixed; inset: 0; background: rgba(20, 20, 19, .18); z-index: 45; opacity: 0; pointer-events: none; transition: opacity .2s; }

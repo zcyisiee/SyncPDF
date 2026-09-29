@@ -1,7 +1,7 @@
 // `bdt cloud` 接口的薄封装；约定见 docs/reference/cloud-api.md。
 
-export type JobStatus = 'queued' | 'running' | 'done' | 'partial' | 'failed' | 'canceled';
-export const ACTIVE: JobStatus[] = ['queued', 'running'];
+export type JobStatus = 'queued' | 'running' | 'recompile' | 'done' | 'partial' | 'failed' | 'canceled';
+export const ACTIVE: JobStatus[] = ['queued', 'running', 'recompile'];
 export const FINISHED: JobStatus[] = ['done', 'partial'];
 
 /** 页面比例 [left, top, width, height]，相对可见页面。 */
@@ -45,6 +45,7 @@ export interface Job {
   stats: Stats | null;
   final_rev: string | null;
   queue: Queue | null;
+  rerun: boolean;
 }
 
 export interface JobItem {
@@ -103,6 +104,8 @@ export const api = {
   jobs: () => request<{ items: JobItem[] }>('GET', '/api/jobs').then((r) => r.items),
   job: (id: string) => request<Job>('GET', `/api/jobs/${id}`),
   cancel: (id: string) => request<Job>('POST', `/api/jobs/${id}/cancel`),
+  rerun: (id: string, action: 'recompile' | 'retranslate') =>
+    request<Job>('POST', `/api/jobs/${id}/rerun`, { action }),
   remove: (id: string) => request<void>('DELETE', `/api/jobs/${id}`),
 };
 

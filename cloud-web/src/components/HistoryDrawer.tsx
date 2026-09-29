@@ -7,6 +7,7 @@ import { Icon, useDismiss } from './Topbar';
 const LABEL: Record<JobStatus, [string, string]> = {
   queued: ['排队中', 'run'],
   running: ['翻译中', 'run'],
+  recompile: ['排队中', 'run'],
   done: ['已完成', 'ok'],
   partial: ['有提醒', 'warn'],
   failed: ['未完成', 'err'],

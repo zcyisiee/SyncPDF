@@ -76,7 +76,7 @@ export function Preview({ job, run, status }: Props) {
         <>
           <div className="pv-progress">
             <span>
-              {status === 'queued' ? (
+              {status === 'queued' || status === 'recompile' ? (
                 '排队中，尚未开始翻译'
               ) : status === 'canceled' ? (
                 '已取消'

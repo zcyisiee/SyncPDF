@@ -36,6 +36,14 @@ if os.environ.get("FAKE_PID"):
 mode = os.environ.get("FAKE_MODE", "success")
 pages = int(os.environ.get("FAKE_PAGES", "2"))
 out = pathlib.Path(arg("--output"))
+# 引擎会建块级翻译缓存；重新编译（--cache-only）依赖它存在且是合法 SQLite
+# （rust_backend 用 backup 复制，垃圾字节会被 translation_cache_invalid 拒绝）。
+cache_dir = pathlib.Path(arg("--cache-dir"))
+cache_dir.mkdir(parents=True, exist_ok=True)
+import sqlite3
+with sqlite3.connect(cache_dir / "translate.db") as conn:
+    conn.execute("CREATE TABLE IF NOT EXISTS translations(source_html TEXT, translated_html TEXT)")
+    conn.execute("INSERT INTO translations VALUES ('hello', '你好')")
 def emit(**event):
     print(json.dumps(event), flush=True)
 emit(type="run_started", pages=0)

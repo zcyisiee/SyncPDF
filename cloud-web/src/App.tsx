@@ -160,7 +160,7 @@ interface WorkspaceProps {
 }
 
 function Workspace({ id, onChanged, onHome, onRetry, toast }: WorkspaceProps) {
-  const { job, error, run, status } = useJob(id, onChanged);
+  const { job, error, run, status, restart } = useJob(id, onChanged);
 
   useEffect(() => {
     if (error && error.status !== 401) {
@@ -180,6 +180,14 @@ function Workspace({ id, onChanged, onHome, onRetry, toast }: WorkspaceProps) {
         status={status}
         onHome={onHome}
         onRetry={onRetry}
+        onRerun={async (action) => {
+          try {
+            restart(await api.rerun(id, action));
+            onChanged();
+          } catch (e) {
+            toast((e as ApiError).message);
+          }
+        }}
         onCancel={async () => {
           try {
             await api.cancel(id);

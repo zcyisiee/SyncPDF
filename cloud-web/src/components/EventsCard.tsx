@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { downloadUrl, FINISHED, type Job, type JobStatus } from '../api';
+import { ACTIVE, downloadUrl, FINISHED, type Job, type JobStatus } from '../api';
 import { duration, pageList } from '../format';
 import type { RunState } from '../run';
 
@@ -11,6 +11,7 @@ interface Props {
   run: RunState;
   status: JobStatus;
   onCancel: () => Promise<void>;
+  onRerun: (action: 'recompile' | 'retranslate') => Promise<void>;
   onHome: () => void;
   onRetry: () => void;
 }
@@ -21,6 +22,8 @@ function chip(status: JobStatus, warnings: number): [string, string] {
       return ['run', '排队中'];
     case 'running':
       return ['run', '翻译中'];
+    case 'recompile':
+      return ['run', '重新编译中'];
     case 'done':
       return ['ok', '已完成'];
     case 'partial':
@@ -32,9 +35,10 @@ function chip(status: JobStatus, warnings: number): [string, string] {
   }
 }
 
-export function EventsCard({ job, run, status, onCancel, onHome, onRetry }: Props) {
+export function EventsCard({ job, run, status, onCancel, onRerun, onHome, onRetry }: Props) {
   const list = useRef<HTMLDivElement>(null);
   const [confirm, setConfirm] = useState(false);
+  const [askRetranslate, setAskRetranslate] = useState(false);
   const [busy, setBusy] = useState(false);
   const finished = FINISHED.includes(status);
   const stats = job.stats ?? {};
@@ -44,16 +48,25 @@ export function EventsCard({ job, run, status, onCancel, onHome, onRetry }: Prop
     const el = list.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [run.items.length]);
-  useEffect(() => setConfirm(false), [status]);
+  useEffect(() => {
+    setConfirm(false);
+    setAskRetranslate(false);
+  }, [status]);
+
+  const rerun = async (action: 'recompile' | 'retranslate') => {
+    setBusy(true);
+    setAskRetranslate(false);
+    await onRerun(action).finally(() => setBusy(false));
+  };
 
   // 完成后阶段全亮；失败停在出错那一步
   const active = finished ? STEPS.length : status === 'queued' ? -1 : run.step;
   const failAt = run.fail ? run.step : -1;
   const [tone, label] = chip(status, warnings);
-  const queue = status === 'queued' ? (run.queue ?? job.queue) : null;
+  const queue = status === 'queued' || status === 'recompile' ? (run.queue ?? job.queue) : null;
 
   let foot: React.ReactNode = null;
-  if (status === 'queued' || status === 'running') {
+  if (ACTIVE.includes(status)) {
     foot = confirm ? (
       <div className="foot-row">
         <span className="t">
@@ -118,6 +131,45 @@ export function EventsCard({ job, run, status, onCancel, onHome, onRetry }: Prop
           <a className="btn btn-secondary" href={downloadUrl(job.id, 'dual')} download>
             下载中英对照
           </a>
+        </div>
+        <div className="rerun">
+          {askRetranslate ? (
+            <div className="foot-row">
+              <span className="t">
+                <b>确定从头重新翻译？</b>会替换现有译文
+              </span>
+              <span>
+                <button className="btn btn-secondary sm" onClick={() => setAskRetranslate(false)}>
+                  先不了
+                </button>{' '}
+                <button className="btn btn-danger sm" disabled={busy} onClick={() => void rerun('retranslate')}>
+                  重新翻译
+                </button>
+              </span>
+            </div>
+          ) : (
+            <>
+              <div className="dl">
+                <button
+                  className="btn btn-secondary sm"
+                  disabled={busy}
+                  title="沿用已有译文，重新排版并生成文件，不再调用模型"
+                  onClick={() => void rerun('recompile')}
+                >
+                  重新编译
+                </button>
+                <button
+                  className="btn btn-secondary sm"
+                  disabled={busy}
+                  title="丢掉现有译文，从头完整翻译一遍"
+                  onClick={() => setAskRetranslate(true)}
+                >
+                  重新翻译
+                </button>
+              </div>
+              <div className="rerun-hint">重新编译沿用已有译文重新排版；重新翻译从头来过</div>
+            </>
+          )}
         </div>
         {job.cache_hit && (
           <div className="foot-links">

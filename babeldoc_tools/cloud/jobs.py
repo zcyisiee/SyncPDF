@@ -39,9 +39,22 @@ __all__ = [
 
 MODELS = ("deepseek/deepseek-flash", "uuapi-gemini/gemini-3.8-flash")
 THINKING = ("low", "medium", "high")
-ACTIVE = ("queued", "running")
+ACTIVE = ("queued", "running", "recompile")
+#: ACTIVE 状态过滤的 SQL 片段与整句（常量，无插值）。
+_JOBS_OF_TRANSLATION = (
+    "SELECT id FROM jobs WHERE translation_id = ? AND status IN (?,?,?)"
+)
+_JOBS_SIBLING = (
+    "SELECT id FROM jobs WHERE translation_id = ? AND id != ? "
+    "AND status IN (?,?,?) ORDER BY created_at LIMIT 1"
+)
+_WAITING_COUNT = (
+    "SELECT COUNT(*) FROM jobs WHERE translation_id = ? AND status IN (?,?,?)"
+)
 #: 有可下载译文的终态（缓存命中只认这两种）。
 FINISHED = ("done", "partial")
+#: rerun 动作。
+RERUN_ACTIONS = ("recompile", "retranslate")
 #: 「每天 0 点恢复」按北京时间。
 QUOTA_TZ = ZoneInfo("Asia/Shanghai")
 #: 没有历史耗时时，排队预计按每篇 5 分钟。
@@ -111,7 +124,7 @@ class Service:
         """把 translation 的事件追加到它名下所有仍在进行的 job。"""
         with self.db.transaction() as conn:
             jobs = conn.execute(
-                "SELECT id FROM jobs WHERE translation_id = ? AND status IN (?, ?)", (tid, *ACTIVE)
+                _JOBS_OF_TRANSLATION, (tid, *ACTIVE)
             ).fetchall()
             for job in jobs:
                 for kind, payload in events:
@@ -188,9 +201,7 @@ class Service:
                 if tr is not None and tr["status"] in ACTIVE:
                     insert(tr["id"], tr["status"], 0, tr["started_at"])
                     sibling = conn.execute(
-                        "SELECT id FROM jobs WHERE translation_id = ? AND id != ? AND status IN (?, ?) "
-                        "ORDER BY created_at LIMIT 1",
-                        (tr["id"], job_id, *ACTIVE),
+                        _JOBS_SIBLING, (tr["id"], job_id, *ACTIVE),
                     ).fetchone()
                     if sibling is not None:
                         for event in conn.execute(
@@ -239,11 +250,11 @@ class Service:
     def queue_info(self, tid: str) -> dict | None:
         """排队中的 translation：前面还有几篇（含正在跑的）与预计开始秒数。"""
         tr = self.db.one("SELECT status, queued_at FROM translations WHERE id = ?", (tid,))
-        if tr is None or tr["status"] != "queued":
+        if tr is None or tr["status"] not in ("queued", "recompile"):
             return None
         ahead = self.db.one(
             "SELECT COUNT(*) FROM translations WHERE status = 'running' "
-            "OR (status = 'queued' AND queued_at < ?)",
+            "OR (status IN ('queued', 'recompile') AND queued_at < ?)",
             (tr["queued_at"],),
         )[0]
         recent = self.db.all(
@@ -260,6 +271,7 @@ class Service:
             "filename": job["filename"],
             "status": job["status"],
             "cache_hit": bool(job["cache_hit"]),
+            "rerun": bool(job["rerun"]) if "rerun" in job.keys() else False,
             "model": job["model"],
             "thinking": job["thinking"],
             "size": job["size"],
@@ -271,7 +283,7 @@ class Service:
             "stats": stats if job["status"] in FINISHED + ("failed",) else None,
             # 完成后译文预览按译文 sha 缓存；翻译中用页事件里的 rev。
             "final_rev": job["translated_sha"][:16] if job["status"] in FINISHED else None,
-            "queue": self.queue_info(job["translation_id"]) if job["status"] == "queued" else None,
+            "queue": self.queue_info(job["translation_id"]) if job["status"] in ("queued", "recompile") else None,
         }
 
     def list_jobs(self, user_id: int) -> list[dict]:
@@ -311,15 +323,16 @@ class Service:
             self._append(conn, job_id, "status", {"status": "canceled"}, "job")
             tid = job["translation_id"]
             waiting = conn.execute(
-                "SELECT COUNT(*) FROM jobs WHERE translation_id = ? AND status IN (?, ?)", (tid, *ACTIVE)
+                _WAITING_COUNT, (tid, *ACTIVE)
             ).fetchone()[0]
             if not waiting:
                 status = conn.execute("SELECT status FROM translations WHERE id = ?", (tid,)).fetchone()[0]
-                if status == "queued":
-                    conn.execute(
-                        "UPDATE translations SET status = 'canceled', finished_at = ? WHERE id = ?",
-                        (now(), tid),
-                    )
+                if status in ("queued", "recompile"):
+                    if not self._restore_rerun(conn, tid, "已取消重新开始，保留原来的译文"):
+                        conn.execute(
+                            "UPDATE translations SET status = 'canceled', finished_at = ? WHERE id = ?",
+                            (now(), tid),
+                        )
                 elif status == "running":
                     kill = tid
         self.hub.notify()
@@ -334,6 +347,88 @@ class Service:
             if job["status"] in ACTIVE:
                 raise ToolError("job_active", "进行中的任务请先取消再删除")
             conn.execute("UPDATE jobs SET deleted_at = ? WHERE id = ?", (now(), job_id))
+
+    def rerun_job(self, user_id: int, job_id: str, action: str) -> dict:
+        """对已完成的 job 重新编译或完整重翻。
+
+        - ``recompile``：用已保存的块级译文缓存 ``--cache-only`` 重排，不调模型。
+        - ``retranslate``：从头完整重翻（调模型；旧缓存留到新一轮成功后才被替换）。
+
+        job 与 translation 原地回到运行态；重新开始失败或被取消时整体回滚到重跑前的
+        状态（:meth:`_restore_rerun`），不会因为一次失败的重跑丢掉原来的译文。
+        """
+        if action not in RERUN_ACTIONS:
+            raise ToolError("invalid_request", "action 只能是 recompile 或 retranslate")
+        with self.db.transaction() as conn:
+            job = self.get_job(user_id, job_id)
+            if job is None:
+                raise ToolError("job_not_found", "找不到这条记录")
+            tid = job["translation_id"]
+            if job["status"] in ACTIVE:
+                raise ToolError("job_active", "任务还在进行中，不能重新开始")
+            if job["status"] not in FINISHED:
+                raise ToolError("job_not_rerunnable", "只有已完成或部分完成的任务可以重新开始")
+            # 其它用户可能挂着同一 translation 的 job：在跑就拒绝。
+            if conn.execute(_JOBS_SIBLING, (tid, job_id, *ACTIVE)).fetchone() is not None:
+                raise ToolError("job_active", "这篇论文正在被其他用户处理，请稍后再试")
+            if action == "recompile" and not self.paths.translate_cache(tid).is_file():
+                raise ToolError("cache_missing", "这篇论文没有已保存的译文缓存，请完整重新翻译")
+            if action == "retranslate":
+                quota = conn.execute("SELECT daily_quota FROM users WHERE id = ?", (user_id,)).fetchone()
+                if quota is not None and self.quota_used(user_id) >= quota[0]:
+                    raise ToolError("quota_exceeded", "今日额度已用完，明天 0 点恢复")
+            at = now()
+            new_status = "recompile" if action == "recompile" else "queued"
+            snapshot = {
+                "tr": dict(conn.execute(
+                    "SELECT status, stats, result_json, translated_sha, finished_at "
+                    "FROM translations WHERE id = ?", (tid,),
+                ).fetchone()),
+                "job": {"id": job_id, "cache_hit": job["cache_hit"], "rerun": job["rerun"]},
+            }
+            conn.execute(
+                "UPDATE translations SET status = ?, queued_at = ?, started_at = NULL, "
+                "finished_at = NULL, rerun_action = ?, rerun_prev = ? WHERE id = ?",
+                (new_status, at, action, json.dumps(snapshot), tid),
+            )
+            conn.execute(
+                "UPDATE jobs SET status = ?, rerun = 1, started_at = ?, finished_at = NULL, "
+                "cache_hit = 0 WHERE id = ?",
+                (new_status, at, job_id),
+            )
+            # 先 status 后 milestone：前端在 status 事件处丢掉上一轮的进度，里程碑属于新一轮。
+            self._append(conn, job_id, "status", {"status": new_status}, "job")
+            text = "用已保存的译文重新编译" if action == "recompile" else "从头完整重新翻译"
+            self._append(conn, job_id, "milestone", {"text": text}, "job")
+        self.hub.notify()
+        self.on_enqueue()
+        return self.job_view(self.get_job(user_id, job_id))
+
+    def _restore_rerun(self, conn: sqlite3.Connection, tid: str, note: str) -> bool:
+        """把重跑中途失败或被取消的 translation 回滚到重跑前；没有重跑快照返回 ``False``。"""
+        row = conn.execute("SELECT rerun_prev FROM translations WHERE id = ?", (tid,)).fetchone()
+        if row is None or not row[0]:
+            return False
+        prev = json.loads(row[0])
+        tr, owner = prev["tr"], prev["job"]
+        at = now()
+        waiting = [r["id"] for r in conn.execute(_JOBS_OF_TRANSLATION, (tid, *ACTIVE)).fetchall()]
+        conn.execute(
+            "UPDATE translations SET status = ?, stats = ?, result_json = ?, translated_sha = ?, "
+            "finished_at = ?, rerun_action = NULL, rerun_prev = NULL WHERE id = ?",
+            (tr["status"], tr["stats"], tr["result_json"], tr["translated_sha"], tr["finished_at"], tid),
+        )
+        conn.execute(
+            "UPDATE jobs SET cache_hit = ?, rerun = ? WHERE id = ?",
+            (owner["cache_hit"], owner["rerun"], owner["id"]),
+        )
+        for job_id in dict.fromkeys([owner["id"], *waiting]):
+            conn.execute(
+                "UPDATE jobs SET status = ?, finished_at = ? WHERE id = ?", (tr["status"], at, job_id)
+            )
+            self._append(conn, job_id, "milestone", {"text": note}, "tr")
+            self._append(conn, job_id, "status", {"status": tr["status"]}, "tr")
+        return True
 
     # ---- runner 使用 --------------------------------------------------------- #
     def recover(self) -> list[str]:
@@ -360,7 +455,8 @@ class Service:
         """取最早排队的 translation 标为 running；没有则 ``None``。"""
         with self.db.transaction() as conn:
             tr = conn.execute(
-                "SELECT id FROM translations WHERE status = 'queued' ORDER BY queued_at LIMIT 1"
+                "SELECT id FROM translations WHERE status IN ('queued', 'recompile') "
+                "ORDER BY queued_at LIMIT 1"
             ).fetchone()
             if tr is None:
                 return None
@@ -372,7 +468,7 @@ class Service:
             )
             conn.execute(
                 "UPDATE jobs SET status = 'running', started_at = ? WHERE translation_id = ? "
-                "AND status = 'queued'",
+                "AND status IN ('queued', 'recompile')",
                 (at, tr["id"]),
             )
             row = conn.execute(
@@ -384,7 +480,7 @@ class Service:
 
     def has_waiting_jobs(self, tid: str) -> bool:
         return bool(self.db.one(
-            "SELECT COUNT(*) FROM jobs WHERE translation_id = ? AND status IN (?, ?)", (tid, *ACTIVE)
+            _WAITING_COUNT, (tid, *ACTIVE)
         )[0])
 
     def finish(
@@ -397,10 +493,23 @@ class Service:
         result: dict | None = None,
         translated_sha: str | None = None,
     ) -> None:
-        """translation 终态（或 ``queued`` 重新排队）：先发收尾事件，再同步 job 状态。"""
+        """translation 终态（或 ``queued`` 重新排队）：先发收尾事件，再同步 job 状态。
+
+        重跑（重新编译/重翻）以 ``failed``/``canceled`` 收场时不落终态，回滚到重跑前。
+        """
         at = now()
         final = status != "queued"
         with self.db.transaction() as conn:
+            waiting = conn.execute(_JOBS_OF_TRANSLATION, (tid, *ACTIVE)).fetchall()
+            if status in ("failed", "canceled"):
+                for job in waiting:
+                    for kind, payload in events:
+                        self._append(conn, job["id"], kind, payload, "tr")
+                note = "重新处理没有完成，已保留原来的译文" if status == "failed" else "已取消，保留原来的译文"
+                if self._restore_rerun(conn, tid, note):
+                    self.hub.notify()
+                    return
+                events = []  # 已按上面追加过，下面只同步状态
             conn.execute(
                 "UPDATE translations SET status = ?, stats = ?, result_json = ?, translated_sha = ?, "
                 "finished_at = ?, queued_at = CASE WHEN ? THEN queued_at ELSE ? END WHERE id = ?",
@@ -415,10 +524,11 @@ class Service:
                     tid,
                 ),
             )
-            jobs = conn.execute(
-                "SELECT id FROM jobs WHERE translation_id = ? AND status IN (?, ?)", (tid, *ACTIVE)
-            ).fetchall()
-            for job in jobs:
+            if final:
+                conn.execute(
+                    "UPDATE translations SET rerun_action = NULL, rerun_prev = NULL WHERE id = ?", (tid,)
+                )
+            for job in waiting:
                 for kind, payload in events:
                     self._append(conn, job["id"], kind, payload, "tr")
                 self._append(conn, job["id"], "status", {"status": status}, "tr")
