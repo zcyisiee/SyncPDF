@@ -14,9 +14,10 @@
 | 方法与路径 | 责任 |
 |---|---|
 | `POST /api/login`、`POST /api/logout`、`GET /api/me` | 邀请码登录、退出；`me` 返回名字、打码邀请码、`daily_quota/used/remaining` |
-| `GET /api/jobs` | 本人历史（含进行中），新到旧；每项带 `warnings` 数 |
-| `POST /api/jobs` | multipart：`file` + `model` + `thinking`；返回 job 视图（201） |
-| `GET /api/jobs/{id}` | job 视图：状态、页数与每页尺寸、`stats`（完成后）、`final_rev`、排队时的 `queue`、`rerun`（是否重跑过） |
+| `GET /api/models` | 可选模型，按展示顺序、第一个为默认：`{key, label, harness, provider, model_id, efforts}` |
+| `GET /api/jobs` | 本人历史（含进行中），新到旧；每项带 `warnings` 数、`model_label`、`thinking` |
+| `POST /api/jobs` | multipart：`file` + `model`（模型 `key`）+ `thinking`；返回 job 视图（201） |
+| `GET /api/jobs/{id}` | job 视图：状态、页数与每页尺寸、本次配置（`model` 即 key、`model_label/harness/provider/model_id/thinking`）、`stats`（完成后）、`final_rev`、排队时的 `queue`、`rerun`（是否重跑过） |
 | `POST /api/jobs/{id}/cancel` | 取消排队中/翻译中的 job；否则 409 `job_not_active` |
 | `POST /api/jobs/{id}/rerun` | `{action: recompile\|retranslate}`：对已完成的 job 重新编译或从头重新翻译，返回 job 视图，见下文 |
 | `DELETE /api/jobs/{id}` | 软删除（只打 `deleted_at`）；进行中 409 `job_active` |
@@ -26,7 +27,14 @@
 
 ## 上传、缓存与额度
 
-- 校验顺序：大小 ≤ 50MB（`file_too_large`）→ `%PDF-` 魔数（`not_pdf`）→ pymupdf 可打开、未加密、≤ 60 页、有文字层（`pdf_unreadable`/`pdf_encrypted`/`too_many_pages`/`no_text_layer`）。模型为 `deepseek/deepseek-flash` 与 `uuapi-gemini/gemini-3.8-flash`（均 `pi` 通道，后者前端显示为 Gemini 3.8 Flash），思考强度 `low|medium|high`。
+- 校验顺序：大小 ≤ 50MB（`file_too_large`）→ `%PDF-` 魔数（`not_pdf`）→ pymupdf 可打开、未加密、≤ 60 页、有文字层（`pdf_unreadable`/`pdf_encrypted`/`too_many_pages`/`no_text_layer`）。之后校验模型与思考强度（`invalid_model`/`invalid_thinking`，422）。
+- 可选模型是 `jobs.py::MODELS` 目录，`key = provider/model_id`，每个模型固定一个翻译通道（harness），并声明它支持的思考强度：
+
+  | key | 界面名 | harness | 思考强度 |
+  |---|---|---|---|
+  | `deepseek/deepseek-flash` | DeepSeek Flash | `pi` | `low\|medium\|high` |
+  | `uuapi-gemini/gemini-3.8-flash` | Gemini 3.8 Flash（uuapi） | `pi` | `low\|medium\|high` |
+  | `gemini/gemini-3.8-flash-low` | Gemini 3.8 Flash（官方） | `agy` | 仅 `low`（档位已写在模型名里） |
 - 原文按 sha256 去重存入 `sources/`。**缓存键 = 原文 sha256 + 模型 + 思考强度 + 引擎版本**，引擎版本取 `syncpdf-cli` 二进制的 sha256（重新构建引擎即视为新版本）。
   - 键已有 `done/partial` 译文：直接建一条同状态、`cache_hit=true` 的 job，事件为“这篇论文已有译文，已直接加载 ⚡”，不扣额度。
   - 键正在排队/运行：新 job 挂到同一次翻译上，复制已有进度事件，不重复排队。
@@ -36,7 +44,7 @@
 ## 任务状态与执行
 
 - job 状态：`queued → running → done | partial | failed`，或随时 `canceled`；重新编译排队时是 `recompile`（与 `queued` 同队列，领取后也进入 `running`）。`partial` 表示有译文、但引擎报告未完整完成（有段落保留原文或内容未识别），前端显示黄色；`failed` 表示没有产出。
-- 单个 runner 线程一次只跑一篇（按 `queued_at` 取最早的 translation），调用 `rust_backend` 驱动 `syncpdf-cli translate`（`--translator` 由 `bdt cloud serve --translator` 决定，服务器现用 `pi`：`--model <模型> --thinking <档>`；agy 通道则是 `--model <模型>-<档>`，agy 不接受 `--thinking`，强度并入模型名；其余参数 `--font-scale 0.9 --line-height 1.5 --layout-device cpu`）。运行 workdir 是 `work/<translation_id>/`，结束后把 `translated.pdf` 移入 `translations/<tid>/`、事件 gzip 保存，删除 workdir。
+- 单个 runner 线程一次只跑一篇（按 `queued_at` 取最早的 translation），调用 `rust_backend` 驱动 `syncpdf-cli translate`（`--translator` 取该模型的 harness：`pi` 传 `--model <provider/model_id> --thinking <档>`；`agy` 只传 `--model <model_id>`，agy 不接受 `--thinking`，档位在模型名里。`bdt cloud serve --translator` 给定时覆盖所有模型的通道，仅供测试用 `fake:*`。其余参数 `--font-scale 0.9 --line-height 1.5 --layout-device cpu`）。运行 workdir 是 `work/<translation_id>/`，结束后把 `translated.pdf` 移入 `translations/<tid>/`、事件 gzip 保存，删除 workdir。
 - 取消：排队中的直接结束；运行中的只有当这次翻译的**所有** job 都取消后才终止引擎进程组（SIGTERM，5 秒后 SIGKILL），然后下一篇开始。
 - 重启恢复：启动时把 `running` 的 translation 放回队首、名下 job 回到 `queued`，追加事件“服务已重启，任务将重新开始”，并清掉残留 workdir；翻译从头重跑（`attempt` 加一）。停服（SIGTERM）时，uvicorn 最多等 SSE 长连接 3 秒；随后 lifespan 终止引擎，并把翻译留作 `running` 等重启重排，不记失败。因此 systemd 必须用 `KillMode=mixed`：只给主进程发 SIGTERM，主进程退出后剩余进程统一 SIGKILL。用 `control-group` 时引擎会先收到 SIGTERM，翻译被记为失败（见 [部署](../guide/cli.md#云端版)）。
 - 重跑（`POST /api/jobs/{id}/rerun`）：只接受 `done/partial` 的 job（否则 409 `job_not_rerunnable`），同一翻译上有 job 在排队或运行时 409 `job_active`。动作作用于整条共享的 translation，排到队尾，job 回到进行中，事件流先推 `status` 再推里程碑“用已保存的译文重新编译”/“从头完整重新翻译”。

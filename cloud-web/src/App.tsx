@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { ACTIVE, api, setUnauthorizedHandler, type ApiError, type Job, type JobItem, type Me } from './api';
+import { ACTIVE, api, setUnauthorizedHandler, type ApiError, type Job, type JobItem, type Me, type Model } from './api';
 import { EventsCard } from './components/EventsCard';
 import { HistoryDrawer } from './components/HistoryDrawer';
 import { Home } from './components/Home';
@@ -31,8 +31,9 @@ export function App() {
   const [jobId, setJobId] = useState(routeJob);
   const [drawer, setDrawer] = useState(false);
   const [items, setItems] = useState<JobItem[]>([]);
+  const [models, setModels] = useState<Model[]>([]);
   const [file, setFile] = useState<File | null>(null);
-  const [model, setModel] = useState('deepseek/deepseek-flash');
+  const [model, setModel] = useState('');
   const [thinking, setThinking] = useState('low');
   // 本次会话上传过的文件：缓存命中后「换个思考强度」直接回到已选文件
   const files = useRef(new Map<string, File>());
@@ -42,6 +43,19 @@ export function App() {
     api.me().then(setMe, () => {});
     api.jobs().then(setItems, () => {});
   }, []);
+
+  // 模型目录登录后才能取；默认选第一个
+  useEffect(() => {
+    if (me && !models.length) api.models().then(setModels, () => {});
+  }, [me, models.length]);
+  useEffect(() => {
+    if (models.length && !models.some((m) => m.key === model)) setModel(models[0].key);
+  }, [models, model]);
+  const chooseModel = (key: string) => {
+    setModel(key);
+    const efforts = models.find((m) => m.key === key)?.efforts ?? [];
+    if (!efforts.includes(thinking)) setThinking(efforts[0]);
+  };
 
   useEffect(() => {
     setUnauthorizedHandler(() => setMe(null));
@@ -64,8 +78,8 @@ export function App() {
     document.body.classList.toggle('drawer-open', drawer && view !== 'login');
   }, [view, drawer]);
   useEffect(() => {
-    if (drawer) api.jobs().then(setItems, () => {});
-  }, [drawer]);
+    if (drawer || view === 'home') api.jobs().then(setItems, () => {});
+  }, [drawer, view]);
 
   const openJob = (id: string) => {
     setDrawer(false);
@@ -74,7 +88,7 @@ export function App() {
   const goHome = () => {
     setDrawer(false);
     const current = items.find((i) => i.id === jobId);
-    if (jobId && current && ACTIVE.includes(current.status)) toast('翻译仍在进行，点左上角图标可在「历史翻译」查看');
+    if (jobId && current && ACTIVE.includes(current.status)) toast('翻译仍在进行，可在首页「最近翻译」查看进度');
     if (location.hash) history.pushState(null, '', location.pathname);
     setJobId(null);
   };
@@ -96,14 +110,17 @@ export function App() {
       {view === 'login' && <Login onLoggedIn={refresh} />}
       {view === 'home' && (
         <Home
-          running={items.find((i) => ACTIVE.includes(i.status)) ?? null}
+          models={models}
+          items={items}
+          remaining={me?.remaining ?? 0}
           file={file}
           model={model}
           thinking={thinking}
           onFile={setFile}
-          onModel={setModel}
+          onModel={chooseModel}
           onThinking={setThinking}
-          onResume={openJob}
+          onOpen={openJob}
+          onHistory={() => setDrawer(true)}
           toast={toast}
           onStarted={(job: Job, picked: File) => {
             files.current.set(job.id, picked);

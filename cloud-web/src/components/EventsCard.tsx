@@ -148,36 +148,32 @@ export function EventsCard({ job, run, status, onCancel, onRerun, onHome, onRetr
               </span>
             </div>
           ) : (
-            <>
-              <div className="dl">
-                <button
-                  className="btn btn-secondary sm"
-                  disabled={busy}
-                  title="沿用已有译文，重新排版并生成文件，不再调用模型"
-                  onClick={() => void rerun('recompile')}
-                >
+            <div className="dl">
+              <div className="opt">
+                <button className="btn btn-secondary sm" disabled={busy} onClick={() => void rerun('recompile')}>
                   重新编译
                 </button>
-                <button
-                  className="btn btn-secondary sm"
-                  disabled={busy}
-                  title="丢掉现有译文，从头完整翻译一遍"
-                  onClick={() => setAskRetranslate(true)}
-                >
+                <span className="cap">沿用已有译文，只重新排版</span>
+              </div>
+              <div className="opt">
+                <button className="btn btn-secondary sm" disabled={busy} onClick={() => setAskRetranslate(true)}>
                   重新翻译
                 </button>
+                <span className="cap">从头再调用模型翻一遍</span>
               </div>
-              <div className="rerun-hint">重新编译沿用已有译文重新排版；重新翻译从头来过</div>
-            </>
+            </div>
           )}
         </div>
-        {job.cache_hit && (
-          <div className="foot-links">
+        <div className="foot-links">
+          {job.cache_hit && (
             <button className="link" onClick={onRetry}>
               想要不同效果？换个思考强度重新翻译
             </button>
-          </div>
-        )}
+          )}
+          <button className="link" onClick={onHome}>
+            翻译另一篇论文
+          </button>
+        </div>
       </>
     );
   }

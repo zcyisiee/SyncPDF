@@ -3,7 +3,8 @@
 两层实体：
 
 - **translation**：一次按缓存键（原文 sha256 + 模型 + 思考强度 + 引擎 sha）的翻译，
-  跨用户共享；状态 ``queued|running|done|partial|failed|canceled``。
+  跨用户共享；状态 ``queued|running|done|partial|failed|canceled``。模型取自
+  :data:`MODELS`，各自决定走哪个翻译通道（pi / agy）。
 - **job**：某个用户的一条历史记录，指向一个 translation；多出 ``canceled``，删除只打
   ``deleted_at``。translation 的状态变化同步到它名下所有仍在进行的 job。
 
@@ -19,6 +20,7 @@ import json
 import secrets
 import sqlite3
 import threading
+from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
 from babeldoc_tools.cloud.db import Database
@@ -32,13 +34,55 @@ __all__ = [
     "FINISHED",
     "MODELS",
     "QUOTA_TZ",
+    "Model",
     "THINKING",
     "Hub",
     "Service",
 ]
 
-MODELS = ("deepseek/deepseek-flash", "uuapi-gemini/gemini-3.8-flash")
 THINKING = ("low", "medium", "high")
+
+
+@dataclass(frozen=True)
+class Model:
+    """可选模型：翻译通道（harness）、服务商、模型 ID 与它支持的思考强度。
+
+    ``key``（``服务商/模型 ID``）是表单与缓存键里的 ``model``。
+    """
+
+    label: str
+    harness: str
+    provider: str
+    model_id: str
+    efforts: tuple[str, ...] = THINKING
+
+    @property
+    def key(self) -> str:
+        return f"{self.provider}/{self.model_id}"
+
+    def engine_args(self, effort: str) -> tuple[str, str | None]:
+        """传给引擎的 ``(--model, --thinking)``：agy 的档位写在模型名里，不单独传。"""
+        if self.harness == "agy":
+            return self.model_id, None
+        return self.key, effort
+
+    def view(self) -> dict:
+        return {
+            "key": self.key,
+            "label": self.label,
+            "harness": self.harness,
+            "provider": self.provider,
+            "model_id": self.model_id,
+            "efforts": list(self.efforts),
+        }
+
+
+#: 界面上可选的模型，按展示顺序；第一个是默认。
+MODELS = {m.key: m for m in (
+    Model("DeepSeek Flash", "pi", "deepseek", "deepseek-flash"),
+    Model("Gemini 3.8 Flash（uuapi）", "pi", "uuapi-gemini", "gemini-3.8-flash"),
+    Model("Gemini 3.8 Flash（官方）", "agy", "gemini", "gemini-3.8-flash-low", ("low",)),
+)}
 ACTIVE = ("queued", "running", "recompile")
 #: ACTIVE 状态过滤的 SQL 片段与整句（常量，无插值）。
 _JOBS_OF_TRANSLATION = (
@@ -163,8 +207,9 @@ class Service:
     def check_options(model: str, thinking: str) -> None:
         if model not in MODELS:
             raise ToolError("invalid_model", f"不支持的模型：{model}")
-        if thinking not in THINKING:
-            raise ToolError("invalid_thinking", f"思考强度只能是 {'/'.join(THINKING)}")
+        efforts = MODELS[model].efforts
+        if thinking not in efforts:
+            raise ToolError("invalid_thinking", f"{MODELS[model].label} 的思考强度只能是 {'/'.join(efforts)}")
 
     def create_job(self, user: sqlite3.Row, filename: str, sha: str, model: str, thinking: str) -> str:
         self.check_options(model, thinking)
@@ -266,6 +311,7 @@ class Service:
 
     def job_view(self, job: sqlite3.Row) -> dict:
         stats = json.loads(job["stats"]) if job["stats"] else None
+        model = MODELS[job["model"]]
         return {
             "id": job["id"],
             "filename": job["filename"],
@@ -273,6 +319,10 @@ class Service:
             "cache_hit": bool(job["cache_hit"]),
             "rerun": bool(job["rerun"]) if "rerun" in job.keys() else False,
             "model": job["model"],
+            "model_label": model.label,
+            "harness": model.harness,
+            "provider": model.provider,
+            "model_id": model.model_id,
             "thinking": job["thinking"],
             "size": job["size"],
             "pages": job["pages"],
@@ -289,7 +339,8 @@ class Service:
     def list_jobs(self, user_id: int) -> list[dict]:
         rows = self.db.all(
             "SELECT jobs.id, jobs.filename, jobs.status, jobs.cache_hit, jobs.created_at, "
-            "jobs.finished_at, t.stats FROM jobs JOIN translations t ON t.id = jobs.translation_id "
+            "jobs.finished_at, t.stats, t.model, t.thinking FROM jobs "
+            "JOIN translations t ON t.id = jobs.translation_id "
             "WHERE jobs.user_id = ? AND jobs.deleted_at IS NULL ORDER BY jobs.created_at DESC",
             (user_id,),
         )
@@ -304,6 +355,8 @@ class Service:
                 "created_at": r["created_at"],
                 "finished_at": r["finished_at"],
                 "warnings": stats.get("warnings", 0),
+                "model_label": MODELS[r["model"]].label,
+                "thinking": r["thinking"],
             })
         return items
 

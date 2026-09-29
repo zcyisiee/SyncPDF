@@ -187,6 +187,28 @@ async function scenario(browser, base, root, tag, viewport) {
   await expectQuota(a, 5, '初始额度');
   await shot(a, 'idle');
 
+  // 模型：显示 harness / provider / model id / reasoning_effort；agy 只支持 low
+  const spec = async (p, scope) =>
+    Object.fromEntries(
+      await p.locator(`${scope} .spec > div`).evaluateAll((rows) =>
+        rows.map((r) => [r.querySelector('dt').textContent, r.querySelector('dd').textContent]),
+      ),
+    );
+  const specOf = (s) => `${s.harness}/${s.provider}/${s['model id']}/${s.reasoning_effort}`;
+  const effort = (p, level) => p.locator('.effort .seg button', { hasText: level });
+  await effort(a, 'high').click();
+  let shown = specOf(await spec(a, '.new-card'));
+  assert(shown === 'pi/deepseek/deepseek-flash/high', `默认模型配置，实际 ${shown}`);
+  await a.getByRole('radio', { name: /Gemini 3.8 Flash（官方）/ }).click();
+  shown = specOf(await spec(a, '.new-card'));
+  assert(shown === 'agy/gemini/gemini-3.8-flash-low/low', `agy 模型配置，实际 ${shown}`);
+  assert(await effort(a, 'medium').isDisabled(), 'agy 不能选 medium');
+  assert(await effort(a, 'high').isDisabled(), 'agy 不能选 high');
+  await shot(a, 'model-agy');
+  await a.getByRole('radio', { name: /DeepSeek Flash/ }).click();
+  assert(!(await effort(a, 'high').isDisabled()), '换回 pi 模型后可选 high');
+  assert((await effort(a, 'low').getAttribute('class')) === 'on', '换到 agy 时思考强度退回 low，换回后保持 low');
+
   // 扫描件：服务端拒绝并提示
   await a.locator('input[type=file]').setInputFiles(file('scanned'));
   await a.getByRole('button', { name: '开始翻译' }).click();
@@ -206,6 +228,8 @@ async function scenario(browser, base, root, tag, viewport) {
   await a.waitForTimeout(1300); // 最后一页的扫过动画
   await shot(a, 'done');
   await expectQuota(a, 4, '完成一篇扣 1 篇额度');
+  shown = specOf(await spec(a, '.pv-title'));
+  assert(shown === 'pi/deepseek/deepseek-flash/low', `工作区显示本次配置，实际 ${shown}`);
   const width = await a.locator('.sheet.trans img.zh').first().evaluate((img) => img.naturalWidth);
   assert(width === 1600, `译文预览宽 1600，实际 ${width}`);
   for (const [name, suffix] of [['下载译文', '-中文.pdf'], ['下载中英对照', '-中英对照.pdf']]) {
@@ -257,7 +281,7 @@ async function scenario(browser, base, root, tag, viewport) {
   await chip(a).filter({ hasText: '处提醒' }).waitFor({ timeout: 60000 });
   assert((await a.locator('.fb-box').count()) >= 1, '部分完成页上有回退框');
   await a.locator('.page-row[data-page="2"]').scrollIntoViewIfNeeded();
-  await a.locator('.pill.fb', { hasText: '等待动态编译' }).first().waitFor();
+  await a.locator('.pill.fb', { hasText: '保留原文' }).first().waitFor();
   await shot(a, 'partial');
 
   // 失败：红色，不扣额度
@@ -283,10 +307,10 @@ async function scenario(browser, base, root, tag, viewport) {
   await b.locator('.queue .q1', { hasText: '前面还有 1 篇' }).waitFor();
   await shot(b, 'queued');
 
-  // 甲回首页：后台继续；抽屉里有进行中条目，点它回到工作区
+  // 甲回首页：后台继续；「最近翻译」与抽屉里都有进行中条目，点它回到工作区
   await home(a);
   await a.locator('.toast.show', { hasText: '翻译仍在进行' }).waitFor();
-  await a.locator('.running', { hasText: 'long-paper' }).waitFor();
+  await a.locator('.recent .rc-item.active', { hasText: 'long-paper' }).filter({ hasText: '查看进度' }).waitFor();
   await shot(a, 'home-running');
   await a.locator('.logo-btn').click();
   await a.locator('.drawer .hi', { hasText: 'long-paper' }).waitFor();

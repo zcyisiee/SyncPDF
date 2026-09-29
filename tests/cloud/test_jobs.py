@@ -62,6 +62,36 @@ def test_upload_rejects_non_pdf_scans_and_oversize(cloud, monkeypatch):
     assert client.get("/api/jobs").json() == {"items": []}
 
 
+def test_models_carry_harness_and_limit_efforts_per_model(cloud):
+    """模型目录带 harness/provider/model_id；思考强度按各模型支持的档位校验，任务与历史都回显。"""
+    client = cloud.client()
+    assert cloud.anonymous().get("/api/models").status_code == 401
+    items = {m["key"]: m for m in client.get("/api/models").json()["items"]}
+    assert items["deepseek/deepseek-flash"] == {
+        "key": "deepseek/deepseek-flash", "label": "DeepSeek Flash", "harness": "pi",
+        "provider": "deepseek", "model_id": "deepseek-flash", "efforts": ["low", "medium", "high"],
+    }
+    agy = items["gemini/gemini-3.8-flash-low"]
+    assert (agy["harness"], agy["provider"], agy["efforts"]) == ("agy", "gemini", ["low"])
+
+    paper = cloud.pdf("paper.pdf")
+    # agy 的档位固定在模型 ID 里：别的强度拒绝；同一强度在 pi 模型上可用
+    response = cloud.upload(client, paper, thinking="high", model="gemini/gemini-3.8-flash-low")
+    assert response.status_code == 400 and response.json()["error"]["code"] == "invalid_thinking"
+    assert cloud.upload(client, paper, thinking="high").status_code == 201
+    response = cloud.upload(client, paper, model="nobody/unknown")
+    assert response.status_code == 400 and response.json()["error"]["code"] == "invalid_model"
+
+    job = cloud.upload(client, paper, model="gemini/gemini-3.8-flash-low").json()
+    assert (job["model_label"], job["harness"], job["provider"], job["model_id"], job["thinking"]) == (
+        "Gemini 3.8 Flash（官方）", "agy", "gemini", "gemini-3.8-flash-low", "low",
+    )
+    # 同一篇论文换通道是另一条译文，不会误命中 pi 模型的缓存
+    assert not job["cache_hit"] and cloud.service.db.one("SELECT COUNT(*) FROM translations")[0] == 2
+    latest = client.get("/api/jobs").json()["items"][0]
+    assert (latest["model_label"], latest["thinking"]) == ("Gemini 3.8 Flash（官方）", "low")
+
+
 def test_quota_counts_translations_but_not_cache_hits_cancels_or_failures(cloud, monkeypatch):
     client = cloud.client(quota=2)
     paper = cloud.pdf("a.pdf")

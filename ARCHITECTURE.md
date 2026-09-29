@@ -76,7 +76,7 @@ bdt run → parse → translate → apply → build → check → review → rep
        ← SSE（job_events 回放 + 实时）← EventMapper（引擎事件 → 阶段/里程碑/页/提醒）
 ```
 
-与工作台完全分开：独立子包 `babeldoc_tools/cloud/`、独立数据根 `~/.bdt-cloud`，不 import `babeldoc_tools/serve/`，也不走 Python 翻译管线。用户的历史记录是 `jobs`；同一缓存键（原文 sha256 + 模型 + 思考强度 + 引擎二进制 sha256）只对应一条 `translations`，多个用户的 job 共用它的译文和运行。runner 通过 `rust_backend._translate_pdf(on_event=, on_spawn=)` 逐行拿引擎事件并持有进程以便取消；`page_ready` 表示 `translated.pdf` 已按页原子落盘，预览按 `attempt.revision` 从 workdir 渲染。只长期保存原文、译文和块级译文缓存（重新编译用）；预览 WebP、中英对照（`syncpdf-cli dual` 按需生成）和 gzip 事件都是有期限或有上限的缓存。
+与工作台完全分开：独立子包 `babeldoc_tools/cloud/`、独立数据根 `~/.bdt-cloud`，不 import `babeldoc_tools/serve/`，也不走 Python 翻译管线。用户的历史记录是 `jobs`；同一缓存键（原文 sha256 + 模型 + 思考强度 + 引擎二进制 sha256）只对应一条 `translations`，多个用户的 job 共用它的译文和运行。可选模型是 `jobs.py::MODELS` 目录，每个模型固定翻译通道（`pi`/`agy`）与支持的思考强度，runner 按 translation 的模型选通道。runner 通过 `rust_backend._translate_pdf(on_event=, on_spawn=)` 逐行拿引擎事件并持有进程以便取消；`page_ready` 表示 `translated.pdf` 已按页原子落盘，预览按 `attempt.revision` 从 workdir 渲染。只长期保存原文、译文和块级译文缓存（重新编译用）；预览 WebP、中英对照（`syncpdf-cli dual` 按需生成）和 gzip 事件都是有期限或有上限的缓存。
 
 | 位置（`~/.bdt-cloud/`） | 职责 |
 |---|---|

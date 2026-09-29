@@ -64,6 +64,9 @@ export function HistoryDrawer({ items, current, onClose, onOpen, onNew, onDelete
                     <div className="s">
                       <span className={`s ${tone}`}>{text}</span> · {label}
                     </div>
+                    <div className="m">
+                      {item.model_label} · {item.thinking}
+                    </div>
                   </div>
                   {!active && (
                     <ItemMenu

@@ -29,12 +29,26 @@ export interface Stats {
   error?: string;
 }
 
+/** 可选模型：翻译通道（harness）+ 服务商 + 模型 ID + 支持的思考强度（reasoning_effort）。 */
+export interface Model {
+  key: string;
+  label: string;
+  harness: string;
+  provider: string;
+  model_id: string;
+  efforts: string[];
+}
+
 export interface Job {
   id: string;
   filename: string;
   status: JobStatus;
   cache_hit: boolean;
   model: string;
+  model_label: string;
+  harness: string;
+  provider: string;
+  model_id: string;
   thinking: string;
   size: number;
   pages: number;
@@ -56,6 +70,8 @@ export interface JobItem {
   created_at: number;
   finished_at: number | null;
   warnings: number;
+  model_label: string;
+  thinking: string;
 }
 
 export class ApiError extends Error {
@@ -101,6 +117,7 @@ export const api = {
   me: () => request<Me>('GET', '/api/me'),
   login: (code: string) => request<{ ok: true }>('POST', '/api/login', { code }),
   logout: () => request<{ ok: true }>('POST', '/api/logout'),
+  models: () => request<{ items: Model[] }>('GET', '/api/models').then((r) => r.items),
   jobs: () => request<{ items: JobItem[] }>('GET', '/api/jobs').then((r) => r.items),
   job: (id: string) => request<Job>('GET', `/api/jobs/${id}`),
   cancel: (id: string) => request<Job>('POST', `/api/jobs/${id}/cancel`),

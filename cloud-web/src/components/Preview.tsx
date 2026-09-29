@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FINISHED, pageUrl, type Box, type Job, type JobStatus } from '../api';
 import { size } from '../format';
 import type { RunState } from '../run';
+import { Spec } from './Home';
 
 type Mode = 'orig' | 'trans' | 'dual';
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -51,8 +52,9 @@ export function Preview({ job, run, status }: Props) {
         <div className="pv-title">
           <div className="name">{job.filename}</div>
           <div className="sub">
-            {size(job.size)} · {total} 页 · {job.model.replace(/^.*\//, '')} · {job.thinking}
+            {size(job.size)} · {total} 页 · {job.model_label}
           </div>
+          <Spec harness={job.harness} provider={job.provider} modelId={job.model_id} effort={job.thinking} />
         </div>
         {!failed && (
           <div className="seg">
@@ -236,8 +238,8 @@ function Page({ n, root, ar, en, zh, boxes, anim, duration, pill }: PageProps) {
           />
         ))}
         {boxes.length > 0 && (
-          <span className="pill fb" title="这些段落暂时保留原文，稍后通过动态编译补上译文">
-            等待动态编译 · {boxes.length} 段
+          <span className="pill fb" title="这几段暂未替换成译文，已用虚线框标出">
+            保留原文 · {boxes.length} 段
           </span>
         )}
         {pill && <span className={`pill st${pill === 'run' ? ' run' : ''}`}>{pill === 'run' ? '正在翻译' : '等待翻译'}</span>}

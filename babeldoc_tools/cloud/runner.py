@@ -26,6 +26,7 @@ from pathlib import Path
 
 from babeldoc_tools import rust_backend
 from babeldoc_tools.cloud.db import Paths
+from babeldoc_tools.cloud.jobs import MODELS
 from babeldoc_tools.cloud.jobs import Service
 
 __all__ = ["STEPS", "EventMapper", "Runner", "page_geometry"]
@@ -239,12 +240,13 @@ class Runner:
         paths: Paths,
         *,
         engine: str | None,
-        translator: str,
+        translator: str | None,
         layout_device: str,
     ) -> None:
         self.service = service
         self.paths = paths
         self.engine = engine
+        #: 非空时覆盖所有模型各自的翻译通道（测试用 ``fake:*``）。
         self.translator = translator
         self.layout_device = layout_device
         self._wake = threading.Event()
@@ -339,10 +341,8 @@ class Runner:
             if out:
                 self.service.emit(tid, out)
 
-        # agy 没有 --thinking：思考强度是模型名后缀（gemini-3.8-flash-low）
-        model, thinking = tr["model"], tr["thinking"]
-        if self.translator == "agy":
-            model, thinking = f"{model}-{thinking}", None
+        spec = MODELS[tr["model"]]
+        model, thinking = spec.engine_args(tr["thinking"])
         # 重新编译：用上次保存的块级译文缓存 --cache-only 重排，不调模型。
         # cached_from 传目录：rust_backend 会自己拼上 cache/translate.db。
         cache_dir = (
@@ -372,7 +372,7 @@ class Runner:
                 # 同字号汉字满字身、视觉大于拉丁正文；0.9 让 1.5 行距少被整篇下调
                 font_scale=0.9,
                 line_height=1.5,
-                translator=self.translator,
+                translator=self.translator or spec.harness,
                 on_event=on_event,
                 on_spawn=lambda process: self._on_spawn(tid, process),
             )

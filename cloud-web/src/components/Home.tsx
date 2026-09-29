@@ -1,35 +1,59 @@
 import { useRef, useState, type DragEvent } from 'react';
 
-import { upload, type ApiError, type Job, type JobItem } from '../api';
-import { size } from '../format';
+import { ACTIVE, upload, type ApiError, type Job, type JobItem, type Model } from '../api';
+import { size, when } from '../format';
+import { statusLabel } from './HistoryDrawer';
 
-export const MODELS = ['deepseek/deepseek-flash', 'uuapi-gemini/gemini-3.8-flash'] as const;
-export const MODEL_LABELS: Record<string, string> = {
-  'deepseek/deepseek-flash': 'DeepSeek Flash',
-  'uuapi-gemini/gemini-3.8-flash': 'Gemini 3.8 Flash',
-};
 export const THINKING = ['low', 'medium', 'high'] as const;
+const EFFORT_LABEL: Record<string, string> = { low: '快速', medium: '均衡', high: '细致' };
 const MAX_BYTES = 50 << 20;
+const RECENT = 4;
+
+/** 一次翻译用的配置：harness / provider / model id / reasoning_effort。 */
+export function Spec({ harness, provider, modelId, effort }: { harness: string; provider: string; modelId: string; effort: string }) {
+  const rows: [string, string][] = [
+    ['harness', harness],
+    ['provider', provider],
+    ['model id', modelId],
+    ['reasoning_effort', effort],
+  ];
+  return (
+    <dl className="spec">
+      {rows.map(([k, v]) => (
+        <div key={k}>
+          <dt>{k}</dt>
+          <dd>{v}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
 
 interface Props {
-  running: JobItem | null;
+  models: Model[];
+  items: JobItem[];
+  remaining: number;
   file: File | null;
   model: string;
   thinking: string;
   onFile: (file: File | null) => void;
   onModel: (value: string) => void;
   onThinking: (value: string) => void;
-  onResume: (id: string) => void;
+  onOpen: (id: string) => void;
+  onHistory: () => void;
   onStarted: (job: Job, file: File) => void;
   toast: (message: string) => void;
 }
 
-export function Home({ running, file, model, thinking, onFile, onModel, onThinking, onResume, onStarted, toast }: Props) {
+export function Home(props: Props) {
+  const { models, items, remaining, file, model, thinking, onFile, onModel, onThinking, onOpen, onHistory, onStarted, toast } =
+    props;
   const input = useRef<HTMLInputElement>(null);
   const [drag, setDrag] = useState(false);
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
   const abort = useRef<(() => void) | null>(null);
   const uploading = progress !== null;
+  const spec = models.find((m) => m.key === model);
 
   const pick = (picked: File | undefined) => {
     if (!picked) return;
@@ -70,97 +94,145 @@ export function Home({ running, file, model, thinking, onFile, onModel, onThinki
         </h1>
         <p>无损翻译学术论文，公式、排版、链接原样保留</p>
       </div>
-      {running && (
-        <div className="running">
-          <span className="dot" />
-          <div className="t">
-            <b>{running.filename}</b> <span>{running.status === 'queued' || running.status === 'recompile' ? '排队中' : '正在翻译'}</span>
-          </div>
-          <button className="btn btn-secondary sm" onClick={() => onResume(running.id)}>
-            查看进度
-          </button>
-        </div>
-      )}
-      <div className="upload-card">
-        <input
-          ref={input}
-          type="file"
-          accept="application/pdf,.pdf"
-          hidden
-          onChange={(e) => {
-            pick(e.target.files?.[0]);
-            e.target.value = '';
-          }}
-        />
-        {!file ? (
-          <div
-            className={`dropzone${drag ? ' drag' : ''}`}
-            onDragEnter={(e) => (e.preventDefault(), setDrag(true))}
-            onDragOver={(e) => (e.preventDefault(), setDrag(true))}
-            onDragLeave={(e) => (e.preventDefault(), setDrag(false))}
-            onDrop={onDrop}
-          >
-            <span className="t1">把 PDF 拖到这里</span>
-            <button className="btn btn-secondary" onClick={() => input.current?.click()}>
-              选择文件
-            </button>
-            <span className="t2">仅支持文字版 PDF · 单篇不超过 50 MB · 不超过 60 页</span>
-          </div>
-        ) : (
-          <div className="picked">
-            <div className="file-row">
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="name">{file.name}</div>
-                <div className="sub">
-                  {!uploading
-                    ? size(file.size)
-                    : fraction < 1
-                      ? `正在上传 · ${size(progress.loaded)} / ${size(file.size)}`
-                      : '上传完成，正在检查文件'}
-                </div>
-              </div>
-              <button
-                className="btn btn-ghost"
-                onClick={() => (uploading ? abort.current?.() : input.current?.click())}
-              >
-                {uploading ? '取消' : '更换'}
+      <section className="new-card">
+        <div className="nc-step">
+          <h2>
+            <span className="num">1</span>选择论文
+          </h2>
+          <input
+            ref={input}
+            type="file"
+            accept="application/pdf,.pdf"
+            hidden
+            onChange={(e) => {
+              pick(e.target.files?.[0]);
+              e.target.value = '';
+            }}
+          />
+          {!file ? (
+            <div
+              className={`dropzone${drag ? ' drag' : ''}`}
+              onDragEnter={(e) => (e.preventDefault(), setDrag(true))}
+              onDragOver={(e) => (e.preventDefault(), setDrag(true))}
+              onDragLeave={(e) => (e.preventDefault(), setDrag(false))}
+              onDrop={onDrop}
+            >
+              <span className="t1">把 PDF 拖到这里，或</span>
+              <button className="btn btn-secondary" onClick={() => input.current?.click()}>
+                选择文件
               </button>
+              <span className="t2">仅支持文字版 PDF · 单篇不超过 50 MB · 不超过 60 页</span>
             </div>
-            {uploading && (
-              <div className="bar">
-                <i style={{ width: `${fraction * 100}%` }} />
+          ) : (
+            <div className="picked">
+              <div className="file-row">
+                <span className="ext">PDF</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="name">{file.name}</div>
+                  <div className="sub">
+                    {!uploading
+                      ? size(file.size)
+                      : fraction < 1
+                        ? `正在上传 · ${size(progress.loaded)} / ${size(file.size)}`
+                        : '上传完成，正在检查文件'}
+                  </div>
+                </div>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => (uploading ? abort.current?.() : input.current?.click())}
+                >
+                  {uploading ? '取消' : '更换'}
+                </button>
               </div>
+              {uploading && (
+                <div className="bar">
+                  <i style={{ width: `${fraction * 100}%` }} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className={`nc-step${uploading ? ' locked' : ''}`}>
+          <h2>
+            <span className="num">2</span>选择翻译模型
+          </h2>
+          <div className="models" role="radiogroup" aria-label="模型">
+            {models.map((m) => (
+              <button
+                key={m.key}
+                role="radio"
+                aria-checked={m.key === model}
+                className={`model${m.key === model ? ' on' : ''}`}
+                onClick={() => onModel(m.key)}
+              >
+                <span className="ml">{m.label}</span>
+                <span className="ms">
+                  {m.harness} · {m.provider}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="effort">
+            <span className="lbl">思考强度</span>
+            <div className="seg">
+              {THINKING.map((level) => (
+                <button
+                  key={level}
+                  className={level === thinking ? 'on' : ''}
+                  disabled={!spec?.efforts.includes(level)}
+                  onClick={() => onThinking(level)}
+                >
+                  {EFFORT_LABEL[level]} <small>{level}</small>
+                </button>
+              ))}
+            </div>
+            <span className="note">
+              {spec && spec.efforts.length === 1
+                ? `该模型的思考强度固定为 ${spec.efforts[0]}`
+                : '越细致译文越讲究，耗时也越长'}
+            </span>
+          </div>
+          {spec && <Spec harness={spec.harness} provider={spec.provider} modelId={spec.model_id} effort={thinking} />}
+        </div>
+
+        <div className="nc-foot">
+          <button className="btn btn-primary start" disabled={!file || uploading || !spec} onClick={start}>
+            开始翻译
+          </button>
+          <div className="nc-hint">
+            {file ? `今日还可翻译 ${remaining} 篇 · 已有相同译文时直接加载，不占额度` : '先在第 1 步选择一篇 PDF'}
+          </div>
+        </div>
+      </section>
+
+      {items.length > 0 && (
+        <section className="recent">
+          <div className="rc-head">
+            <h2>最近翻译</h2>
+            {items.length > RECENT && (
+              <button className="link" onClick={onHistory}>
+                全部 {items.length} 篇
+              </button>
             )}
           </div>
-        )}
-      </div>
-      <div className={`options${uploading ? ' locked' : ''}`}>
-        <div className="opt">
-          <label>模型</label>
-          <div className="seg">
-            {MODELS.map((id) => (
-              <button key={id} className={id === model ? 'on' : ''} onClick={() => onModel(id)}>
-                {MODEL_LABELS[id] ?? id}
+          {items.slice(0, RECENT).map((item) => {
+            const [text, tone] = statusLabel(item);
+            const active = ACTIVE.includes(item.status);
+            return (
+              <button key={item.id} className={`rc-item${active ? ' active' : ''}`} onClick={() => onOpen(item.id)}>
+                <span className="b">
+                  <span className="n">{item.filename}</span>
+                  <span className="s">
+                    <span className={`s ${tone}`}>{text}</span> · {item.model_label} · {item.thinking} ·{' '}
+                    <span className="t">{when(item.finished_at ?? item.created_at).label}</span>
+                  </span>
+                </span>
+                <span className={active ? 'btn btn-secondary sm' : 'go'}>{active ? '查看进度' : '打开'}</span>
               </button>
-            ))}
-          </div>
-        </div>
-        <div className="opt">
-          <label>思考强度</label>
-          <div className="seg">
-            {THINKING.map((level) => (
-              <button key={level} className={level === thinking ? 'on' : ''} onClick={() => onThinking(level)}>
-                {level}
-              </button>
-            ))}
-          </div>
-          <div className="note">越高译文越细致，耗时也越长</div>
-        </div>
-      </div>
-      {file && !uploading && (
-        <button className="btn btn-primary start" onClick={start}>
-          开始翻译
-        </button>
+            );
+          })}
+        </section>
       )}
     </main>
   );

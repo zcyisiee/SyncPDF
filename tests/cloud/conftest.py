@@ -150,12 +150,19 @@ class Cloud:
     def anonymous(self) -> TestClient:
         return TestClient(self.app)
 
-    def upload(self, client: TestClient, pdf: Path, thinking: str = "low", name: str | None = None):
+    def upload(
+        self,
+        client: TestClient,
+        pdf: Path,
+        thinking: str = "low",
+        name: str | None = None,
+        model: str = "deepseek/deepseek-flash",
+    ):
         with pdf.open("rb") as handle:
             return client.post(
                 "/api/jobs",
                 files={"file": (name or pdf.name, handle, "application/pdf")},
-                data={"model": "deepseek/deepseek-flash", "thinking": thinking},
+                data={"model": model, "thinking": thinking},
             )
 
     def pdf(self, name: str, pages: int = 2, text: str | None = None) -> Path:

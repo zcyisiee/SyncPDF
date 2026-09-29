@@ -154,25 +154,37 @@ def test_runner_passes_cloud_typesetting_options_to_engine(cloud):
     assert pairs["--font-scale"] == "0.9" and "--dual-output" not in args
 
 
-@pytest.mark.parametrize("thinking", ["low", "medium", "high"])
 @pytest.mark.parametrize(
-    ("translator", "model", "passes_thinking"),
-    [("agy", "deepseek/deepseek-flash-{t}", False), ("pi", "deepseek/deepseek-flash", True)],
+    ("model", "thinking", "harness", "engine_model", "engine_thinking"),
+    [
+        ("deepseek/deepseek-flash", "high", "pi", "deepseek/deepseek-flash", "high"),
+        ("uuapi-gemini/gemini-3.8-flash", "medium", "pi", "uuapi-gemini/gemini-3.8-flash", "medium"),
+        # agy 拒绝 --thinking：档位写在模型 ID 里
+        ("gemini/gemini-3.8-flash-low", "low", "agy", "gemini-3.8-flash-low", None),
+    ],
 )
-def test_runner_maps_thinking_per_translator(cloud, translator, model, passes_thinking, thinking):
-    """agy 拒绝 --thinking，强度并入模型名后缀；pi 仍单独传 --thinking。"""
-    cloud.runner.translator = translator
+def test_runner_uses_each_models_own_harness(cloud, model, thinking, harness, engine_model, engine_thinking):
+    """不覆盖通道时，每篇按所选模型的 harness 调引擎；同一服务里 pi 与 agy 可以并存。"""
+    cloud.runner.translator = None
     client = cloud.client()
-    cloud.upload(client, cloud.pdf("map.pdf"), thinking=thinking)
+    assert cloud.upload(client, cloud.pdf("map.pdf"), thinking=thinking, model=model).status_code == 201
     assert cloud.runner.run_once()
     args = json.loads((cloud.tmp / "engine-calls.jsonl").read_text().splitlines()[-1])
-    assert args[args.index("--translator") + 1] == translator
-    assert args[args.index("--model") + 1] == model.format(t=thinking)
-    assert ("--thinking" in args) is passes_thinking
-    if passes_thinking:
-        assert args[args.index("--thinking") + 1] == thinking
+    assert args[args.index("--translator") + 1] == harness
+    assert args[args.index("--model") + 1] == engine_model
+    assert (args[args.index("--thinking") + 1] if "--thinking" in args else None) == engine_thinking
     # 缓存键仍按界面上的（模型, 强度）记录
-    assert tuple(cloud.service.db.one("SELECT model, thinking FROM translations")) == ("deepseek/deepseek-flash", thinking)
+    assert tuple(cloud.service.db.one("SELECT model, thinking FROM translations")) == (model, thinking)
+
+
+def test_translator_override_replaces_every_models_harness(cloud):
+    """``--translator fake:*`` 覆盖所有模型（e2e/测试用），模型参数照常按目录传。"""
+    client = cloud.client()
+    cloud.upload(client, cloud.pdf("agy.pdf"), model="gemini/gemini-3.8-flash-low")
+    assert cloud.runner.run_once()
+    args = json.loads((cloud.tmp / "engine-calls.jsonl").read_text().splitlines()[-1])
+    assert args[args.index("--translator") + 1] == "fake:echo"
+    assert args[args.index("--model") + 1] == "gemini-3.8-flash-low" and "--thinking" not in args
 
 
 @pytest.mark.skipif(

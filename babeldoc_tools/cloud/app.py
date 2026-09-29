@@ -38,6 +38,7 @@ from babeldoc_tools.cloud.files import Duals
 from babeldoc_tools.cloud.files import Previews
 from babeldoc_tools.cloud.jobs import ACTIVE
 from babeldoc_tools.cloud.jobs import FINISHED
+from babeldoc_tools.cloud.jobs import MODELS
 from babeldoc_tools.cloud.jobs import Service
 from babeldoc_tools.cloud.runner import Runner
 from babeldoc_tools.cloud.uploads import save_source
@@ -113,7 +114,7 @@ def create_app(
     root: Path,
     *,
     engine: str | None = None,
-    translator: str = "pi",
+    translator: str | None = None,
     layout_device: str = "cpu",
     run_worker: bool = True,
 ) -> FastAPI:
@@ -200,6 +201,10 @@ def create_app(
             "used": used,
             "remaining": max(0, user["daily_quota"] - used),
         }
+
+    @app.get("/api/models")
+    def models(_user: User) -> dict:
+        return {"items": [m.view() for m in MODELS.values()]}
 
     # ---- 任务 -------------------------------------------------------------- #
     @app.get("/api/jobs")
