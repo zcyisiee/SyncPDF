@@ -1880,8 +1880,10 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        // 回归：名字行不在信息带里时，机构 / 邮箱行曾被当成作者 → 跳过锚点行；只剩锚点则 None。
+        // 回归：名字行不在信息带里时，机构 / 邮箱 / 「字段名: 值」行曾被当成作者 → 跳过锚点行；
+        // 只剩锚点则 None。
         let band = [
+            meta_para(0, 7, RegionKind::Text, "Received: 30 October 2024", 670.0),
             meta_para(
                 0,
                 5,
@@ -1902,7 +1904,12 @@ mod tests {
             Event::DocMeta { authors, .. } => assert!(authors.is_none(), "{authors:?}"),
             other => panic!("{other:?}"),
         }
-        let mixed = [band[0].clone(), band[1].clone(), paras[2].clone()];
+        let mixed = [
+            band[0].clone(),
+            band[1].clone(),
+            band[2].clone(),
+            paras[2].clone(),
+        ];
         let ids: Vec<_> = mixed.iter().map(|p| p.id.clone()).collect();
         match doc_meta(&mixed, &ids) {
             Event::DocMeta { authors, .. } => {

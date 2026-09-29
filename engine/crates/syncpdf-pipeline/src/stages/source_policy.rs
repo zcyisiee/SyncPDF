@@ -1,10 +1,12 @@
-//! Conservative first-page author and affiliation protection.
+//! First-page front-matter protection.
 //!
-//! This pure policy needs a detected title and an abstract heading/body below it.
-//! Only short, horizontal, roughly centered text in the intervening band is eligible.
-//! An email or explicit affiliation is required as an anchor; nearby name/marked
-//! lines are included only when they form a tight vertical cluster with that anchor.
-//! Unusual journal layouts, missing region labels, and ambiguous prose are left for
+//! On a scholarly first page, the band between the title and the abstract holds
+//! document metadata (authors, affiliations, emails, dates, publisher badges),
+//! never prose. The policy is positional: it needs a detected title and an
+//! abstract heading/body below it, and then every horizontal `Text` paragraph lying
+//! wholly inside that band is kept in the source language, whatever its wording,
+//! alignment, or length. Captions, titles, and other region kinds are unaffected. Pages
+//! without both boundaries, or with an implausibly tall band, are left for
 //! translation rather than guessed to be metadata.
 
 use std::collections::HashSet;
@@ -62,52 +64,21 @@ pub fn protect_front_matter(
     }
 
     let glyphs: std::collections::HashMap<GlyphId, _> = ir.glyphs().map(|g| (g.id, g)).collect();
-    let page_center = ir.crop_box.center().x;
-    let page_width = ir.crop_box.width();
-    let mut candidates: Vec<(usize, bool)> = paragraphs
+    // Body text that merely starts beside the abstract extends below its top edge,
+    // so only paragraphs wholly inside the band qualify.
+    let selected: HashSet<usize> = paragraphs
         .iter()
         .enumerate()
-        .filter_map(|(i, p)| {
-            if p.page != ir.page
-                || p.kind != RegionKind::Text
-                || p.bbox.y0 <= lower + 1.0
-                || p.bbox.y1 >= upper - 1.0
-                || p.bbox.width() > page_width * 0.75
-                || (p.bbox.center().x - page_center).abs() > page_width * 0.16
-                || p.lines.is_empty()
-                || p.lines.len() > 2
-                || p.text.chars().count() > 160
-                || rotated(p, &glyphs)
-            {
-                return None;
-            }
-            let text = p.text.trim();
-            let anchor = email(text) || affiliation(text);
-            (anchor || name_or_marked(text) || address(text)).then_some((i, anchor))
+        .filter(|(_, p)| {
+            p.page == ir.page
+                && p.kind == RegionKind::Text
+                && p.bbox.y0 > lower + 1.0
+                && p.bbox.y1 < upper - 1.0
+                && !p.lines.is_empty()
+                && !rotated(p, &glyphs)
         })
+        .map(|(i, _)| i)
         .collect();
-    if !candidates.iter().any(|(_, anchor)| *anchor) {
-        return Vec::new();
-    }
-    candidates.sort_by(|a, b| paragraphs[b.0].bbox.y0.total_cmp(&paragraphs[a.0].bbox.y0));
-
-    // Connected components of near-touching metadata lines. A name is never
-    // protected without an email/affiliation in its own component.
-    let mut selected = HashSet::new();
-    let mut start = 0;
-    while start < candidates.len() {
-        let mut end = start + 1;
-        while end < candidates.len()
-            && paragraphs[candidates[end - 1].0].bbox.y0 - paragraphs[candidates[end].0].bbox.y1
-                <= 24.0
-        {
-            end += 1;
-        }
-        if candidates[start..end].iter().any(|(_, anchor)| *anchor) {
-            selected.extend(candidates[start..end].iter().map(|(i, _)| *i));
-        }
-        start = end;
-    }
     let source_glyphs: HashSet<GlyphId> = selected
         .iter()
         .flat_map(|&i| paragraphs[i].glyphs.iter().copied())
@@ -237,9 +208,20 @@ fn affiliation(text: &str) -> bool {
         .any(|word| lower.contains(word))
 }
 
-/// 信息带里的机构 / 邮箱 / 地址行（作者名行之外的元数据锚点）。
+/// 信息带里作者名行之外的元数据：机构 / 邮箱 / 地址，或 `Received: …` 这类「字段名: 值」行。
 pub(crate) fn metadata_anchor(text: &str) -> bool {
-    email(text) || affiliation(text) || address(text)
+    email(text) || affiliation(text) || address(text) || labeled_field(text)
+}
+
+/// 行首是一至三个词的字段名紧跟冒号；作者名单不以字段名开头。
+fn labeled_field(text: &str) -> bool {
+    text.split_once(':').is_some_and(|(label, _)| {
+        let words = label.split_whitespace().count();
+        (1..=3).contains(&words)
+            && label
+                .chars()
+                .all(|c| c.is_alphabetic() || c.is_whitespace())
+    })
 }
 
 fn address(text: &str) -> bool {
@@ -258,21 +240,6 @@ fn address(text: &str) -> bool {
         ]
         .iter()
         .any(|part| lower.contains(part))
-}
-
-fn name_or_marked(text: &str) -> bool {
-    let words: Vec<&str> = text
-        .split(|c: char| c.is_whitespace() || ",;†‡*".contains(c))
-        .filter(|word| !word.is_empty())
-        .collect();
-    (2..=12).contains(&words.len())
-        && !text.contains(['.', '!', '?', ':'])
-        && words.iter().all(|word| {
-            word.chars().next().is_some_and(char::is_uppercase)
-                && word
-                    .chars()
-                    .all(|c| c.is_alphabetic() || c == '-' || c == '\'')
-        })
 }
 
 #[cfg(test)]
@@ -383,18 +350,19 @@ mod tests {
                 Rect::new(108.0, 320.0, 504.0, 365.0),
             ),
         ];
-        let regions = paragraphs
-            .iter()
-            .map(|p| Region {
-                page: p.page,
-                index: p.region,
-                kind: p.kind,
-                bbox: p.bbox,
-                score: 0.9,
-                order: p.region,
-            })
-            .collect();
+        let regions = paragraphs.iter().map(region_of).collect();
         (page, regions, paragraphs)
+    }
+
+    fn region_of(p: &Paragraph) -> Region {
+        Region {
+            page: p.page,
+            index: p.region,
+            kind: p.kind,
+            bbox: p.bbox,
+            score: 0.9,
+            order: p.region,
+        }
     }
 
     #[test]
@@ -482,6 +450,115 @@ mod tests {
         let (_, regions, mut paragraphs) = fixture();
         ir.page = PageId(1);
         assert!(protect_front_matter(&ir, &regions, &mut paragraphs).is_empty());
+        // 标题离摘要过远（信息带超过页高 28%）：边界不可信，整页不猜。
+        let (ir, regions, mut paragraphs) = fixture();
+        paragraphs[0].bbox = Rect::new(120.0, 780.0, 490.0, 790.0);
+        assert!(protect_front_matter(&ir, &regions, &mut paragraphs).is_empty());
+    }
+
+    /// A4 期刊首页：日期左侧栏、三行作者名单既无邮箱也无机构关键词（机构在页脚注）、
+    /// 出版社徽标。与居中作者块的 fixture 版式不同，只靠标题—摘要信息带的位置识别；
+    /// 带内图注、与摘要并排起头的正文、摘要下方正文照常翻译。
+    #[test]
+    fn side_column_dates_and_long_author_list_are_band_metadata() {
+        let page = PageIR {
+            page: PageId(0),
+            media_box: Rect::new(0.0, 0.0, 595.0, 842.0),
+            crop_box: Rect::new(0.0, 0.0, 595.0, 842.0),
+            rotation: 0,
+            fonts: Vec::new(),
+            items: vec![DisplayItem::Text { glyphs: Vec::new() }],
+        };
+        let mut authors = paragraph(
+            4,
+            RegionKind::Text,
+            "Dengji Li 1,8, Pengshan Xie1,8, Yuekun Yang 2,3, Yunfan Wang1, Changyong Lan 4, \
+             Yiyang Wei 1, Chun-Yuen Wong 5 & Johnny C. Ho 1,6,7",
+            Rect::new(217.0, 604.0, 554.0, 666.0),
+        );
+        authors.lines = vec![authors.lines[0].clone(); 3];
+        authors.align = Align::Left;
+        let mut paragraphs = vec![
+            paragraph(
+                1,
+                RegionKind::Title,
+                "In-material physical computing",
+                Rect::new(40.0, 690.0, 545.0, 780.0),
+            ),
+            paragraph(
+                2,
+                RegionKind::Text,
+                "Received: 30 October 2024",
+                Rect::new(40.0, 655.0, 149.0, 663.0),
+            ),
+            paragraph(
+                3,
+                RegionKind::Text,
+                "Accepted: 22 May 2025",
+                Rect::new(40.0, 635.0, 133.0, 643.0),
+            ),
+            authors,
+            paragraph(
+                5,
+                RegionKind::Text,
+                "Check for updates",
+                Rect::new(52.0, 596.0, 120.0, 603.0),
+            ),
+            paragraph(
+                6,
+                RegionKind::Caption,
+                "Fig. 1 | Overview of the device.",
+                Rect::new(300.0, 585.0, 550.0, 595.0),
+            ),
+            paragraph(
+                7,
+                RegionKind::Abstract,
+                "Conventional computer systems rely on silicon transistors.",
+                Rect::new(217.0, 372.0, 562.0, 577.0),
+            ),
+            paragraph(
+                8,
+                RegionKind::Text,
+                "Beside the abstract, the left column already starts the introduction.",
+                Rect::new(40.0, 380.0, 200.0, 590.0),
+            ),
+            paragraph(
+                9,
+                RegionKind::Text,
+                "Conventional computing hardware is increasingly challenged.",
+                Rect::new(40.0, 248.0, 295.0, 342.0),
+            ),
+        ];
+        let regions: Vec<Region> = paragraphs.iter().map(region_of).collect();
+        let changed = protect_front_matter(&page, &regions, &mut paragraphs);
+        assert_eq!(
+            changed,
+            [2, 3, 4, 5].map(|n| ParagraphId::new(PageId(0), n))
+        );
+        for p in &paragraphs[5..] {
+            assert_eq!(p.translatable, Translatable::Yes, "{}", p.text);
+        }
+    }
+
+    #[test]
+    fn metadata_anchor_separates_fields_from_author_names() {
+        for text in [
+            "ada@example.edu",
+            "Department of Physics, Some University",
+            "123 Main Street",
+            "Received: 30 October 2024",
+            "Correspondence to: A. Lovelace",
+        ] {
+            assert!(metadata_anchor(text), "{text}");
+        }
+        for text in [
+            "Ada Lovelace, Grace Hopper",
+            "Dengji Li 1,8, Pengshan Xie1,8 & Johnny C. Ho 1,5",
+            "we work with Example University",
+            "Section 2: the method",
+        ] {
+            assert!(!metadata_anchor(text), "{text}");
+        }
     }
 
     #[test]
@@ -510,14 +587,7 @@ mod tests {
             Rect::new(300.0, 580.0, 311.0, 630.0),
         );
         rotated.glyphs.push(source);
-        regions.extend([&duplicate, &rotated].map(|p| Region {
-            page: p.page,
-            index: p.region,
-            kind: p.kind,
-            bbox: p.bbox,
-            score: 0.9,
-            order: p.region,
-        }));
+        regions.extend([&duplicate, &rotated].map(region_of));
         paragraphs.extend([duplicate, rotated]);
         let changed = protect_front_matter(&ir, &regions, &mut paragraphs);
         assert!(changed.contains(&ParagraphId::new(PageId(0), 10)));
@@ -529,40 +599,5 @@ mod tests {
             }
         );
         assert_eq!(paragraphs[10].translatable, Translatable::Yes);
-    }
-
-    #[test]
-    fn address_needs_metadata_anchor_and_prose_is_not_affiliation() {
-        let (ir, regions, mut paragraphs) = fixture();
-        paragraphs[3].text = "123 Main Street".into();
-        paragraphs[4].text = "some ordinary wording".into();
-        assert!(address(&paragraphs[3].text));
-        assert!(!affiliation("we work with Example University"));
-        let changed = protect_front_matter(&ir, &regions, &mut paragraphs);
-        assert!(changed.contains(&ParagraphId::new(PageId(0), 4)));
-        assert!(!changed.contains(&ParagraphId::new(PageId(0), 5)));
-
-        let (ir, regions, mut paragraphs) = fixture();
-        paragraphs[2].text = "ordinary fragment".into();
-        paragraphs[4].text = "ordinary fragment".into();
-        assert!(protect_front_matter(&ir, &regions, &mut paragraphs).is_empty());
-    }
-
-    #[test]
-    fn existing_no_affiliation_still_anchors_author() {
-        let (ir, regions, mut paragraphs) = fixture();
-        paragraphs[2].translatable = Translatable::No {
-            reason: "existing_policy".into(),
-        };
-        paragraphs[4].text = "ordinary fragment".into();
-        let changed = protect_front_matter(&ir, &regions, &mut paragraphs);
-        assert!(changed.contains(&ParagraphId::new(PageId(0), 2)));
-        assert!(!changed.contains(&ParagraphId::new(PageId(0), 3)));
-        assert_eq!(
-            paragraphs[2].translatable,
-            Translatable::No {
-                reason: "existing_policy".into()
-            }
-        );
     }
 }

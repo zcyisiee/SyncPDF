@@ -125,6 +125,7 @@ job 子进程由 serve 以 `sys.executable -m babeldoc_tools` 起，serve 会把
 | 边界 | 代码与检查出口 |
 |---|---|
 | 新能力仍由 `bdt` 暴露，无第二个 CLI/工具包 | `pyproject.toml`、`tests/test_single_entry.py` |
+| 翻译范围：只译论述内容。作者、机构、地址、邮箱、日期等首页前置信息，脚注，页眉页脚，参考文献，以及图片和表格内的文字都保持原文。它们是正常的 `not_replaced`，不算回退，不导致 partial，界面不显示为异常 | `syncpdf-core/src/ir.rs::RegionKind::translatable`、`stages/source_policy.rs`（标题—摘要信息带）、`TRANSLATE.md` |
 | 段落身份与样式/公式占位符受协议保护；修复与原文回退必须可观察 | `markdown_view.py`、`protocol.py`、`tests/test_markdown_format.py`、`test_agent_protocol.py` |
 | 续跑检查阶段依赖与记录哈希；过期输入不能静默复用 | `run.py::STAGE_INPUTS`、`tests/test_run_pipeline.py` |
 | 编译成功、预览可用、质量通过是不同状态；失败不得把旧产物标成当前 revision | `compile.py`、`block_compile.py`、`tests/test_serve_compile.py`、`test_serve_local_export.py` |

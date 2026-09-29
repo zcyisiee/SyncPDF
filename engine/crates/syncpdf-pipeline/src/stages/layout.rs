@@ -645,9 +645,19 @@ fn repair_one_line(regions: &mut Vec<Region>, glyphs: &[(Rect, bool)], line: &[R
     regions.push(new_region);
 }
 
-/// 白字形判定：纯空白（空格）或不可见渲染模式、裁掉的字形。
+/// 白字形判定：纯空白（空格）、不可见渲染模式、裁掉的字形，或在白纸上不留墨迹的字形。
 pub fn is_white_glyph(g: &syncpdf_core::ir::Glyph) -> bool {
-    g.flags.is_space || g.flags.invisible || g.flags.outside_clip || g.unicode.is_empty()
+    g.flags.is_space
+        || g.flags.invisible
+        || g.flags.outside_clip
+        || g.unicode.is_empty()
+        || paper_white(g)
+}
+
+/// 只填充不描边（Tr 0/4）且填充色与白纸底色无法区分：出版社嵌入的隐藏检索文字即此类。
+/// 描边模式的描边色不在 IR 里，不据填充色推断可见性。
+fn paper_white(g: &syncpdf_core::ir::Glyph) -> bool {
+    matches!(g.render_mode, 0 | 4) && g.fill.r.min(g.fill.g).min(g.fill.b) >= 0.98
 }
 
 #[cfg(test)]
@@ -655,7 +665,7 @@ mod tests {
     use super::*;
     use syncpdf_core::ir::{DisplayItem, Glyph, GlyphFlags, GlyphSource};
     use syncpdf_core::require_fixture;
-    use syncpdf_core::{Matrix, PageId};
+    use syncpdf_core::{Color, Matrix, PageId};
 
     #[test]
     #[ignore = "manual 23-page probe: set SYNCPDF_TARGET_PDF"]
@@ -1429,6 +1439,42 @@ mod tests {
         assert_eq!(report.uncovered, 0);
         assert_eq!(report.ratio, 0.0);
         assert_eq!(regions.len(), 1, "白字形不触发兜底");
+    }
+
+    #[test]
+    fn paper_white_fill_is_not_ink_but_visible_colors_are() {
+        // 区域外的一串字：白色填充（隐藏检索文字）不计入覆盖；浅灰、黑色、白填充但描边的都是墨迹。
+        let mut glyphs = Vec::new();
+        for (i, (fill, mode)) in [
+            (Color::WHITE, 0),
+            (Color::rgb(0.99, 1.0, 0.99), 4),
+            (Color::gray(0.85), 0),
+            (Color::BLACK, 0),
+            (Color::WHITE, 2),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut g = mk_glyph(
+                i as u16,
+                "x",
+                500.0,
+                700.0,
+                3.0,
+                10.0,
+                GlyphFlags::default(),
+            );
+            g.fill = fill;
+            g.render_mode = mode;
+            glyphs.push(g);
+        }
+        let white: Vec<bool> = glyphs.iter().map(is_white_glyph).collect();
+        assert_eq!(white, [true, true, false, false, false]);
+        let ir = page_ir(glyphs);
+        let mut regions = vec![region(0, Rect::new(0.0, 0.0, 100.0, 100.0))];
+        let report = apply_coverage_fallback(&mut regions, &ir, 0, 1.0);
+        assert_eq!(report.white_excluded, 2);
+        assert_eq!(report.uncovered, 3);
     }
 
     #[test]

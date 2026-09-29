@@ -46,6 +46,7 @@
 
 ## 必守边界与验收
 
+- **翻译范围（用户的产品要求）**：只翻译论述内容（正文、标题、摘要、图表题注等）。**作者、机构、地址、邮箱、投稿日期等首页前置信息，脚注，页眉页脚，参考文献，图片和表格内部的文字，一律不翻译。** 不翻译它们是正常行为：引擎记为 `not_replaced`，不算回退，不导致 `partial`/`ok=false`，前端也不得显示为警告、虚线框或“保留原文”。如果这类内容出现异常，要修引擎的分类层（`RegionKind::translatable`、`source_policy.rs`），不在前端隐藏。细节见 [Rust PDF 后端](docs/reference/rust-pdf-backend.md#源文本与-markdown-传输)。
 - 对外入口只有 `bdt`；新增能力只能是其子命令或参数，不增加并行入口或第二个工具包。见 `tests/test_single_entry.py`。
 - 翻译测试、截图、日志和验证产物保留在本仓库 `tmp/`（已忽略），每次 pytest 使用新的 `--basetemp`。
 - 改架构同步更新 `ARCHITECTURE.md`；改行为同步更新对应参考文档与必要的行为测试。

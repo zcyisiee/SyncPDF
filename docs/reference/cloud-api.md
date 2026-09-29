@@ -43,7 +43,7 @@
 
 ## 任务状态与执行
 
-- job 状态：`queued → running → done | partial | failed`，或随时 `canceled`；重新编译排队时是 `recompile`（与 `queued` 同队列，领取后也进入 `running`）。`partial` 表示有译文、但引擎报告未完整完成（有段落保留原文或内容未识别），前端显示黄色；`failed` 表示没有产出。
+- job 状态：`queued → running → done | partial | failed`，或随时 `canceled`；重新编译排队时是 `recompile`（与 `queued` 同队列，领取后也进入 `running`）。`partial` 表示有译文、但引擎报告未完整完成（有段落保留原文或内容未识别），前端显示黄色；`failed` 表示没有产出。按规则不翻译的内容不算保留原文，也不会导致 `partial`：作者、机构、地址、邮箱、日期等前置信息，脚注，页眉页脚，参考文献，以及图片和表格内的文字，都是正常的 `not_replaced`，前端不提示也不画框。
 - 单个 runner 线程一次只跑一篇（按 `queued_at` 取最早的 translation），调用 `rust_backend` 驱动 `syncpdf-cli translate`（`--translator` 取该模型的 harness：`pi` 传 `--model <provider/model_id> --thinking <档>`；`agy` 只传 `--model <model_id>`，agy 不接受 `--thinking`，档位在模型名里。`bdt cloud serve --translator` 给定时覆盖所有模型的通道，仅供测试用 `fake:*`。其余参数 `--font-scale 0.9 --line-height 1.5 --layout-device cpu`）。运行 workdir 是 `work/<translation_id>/`，结束后把 `translated.pdf` 移入 `translations/<tid>/`、事件 gzip 保存，删除 workdir。
 - 取消：排队中的直接结束；运行中的只有当这次翻译的**所有** job 都取消后才终止引擎进程组（SIGTERM，5 秒后 SIGKILL），然后下一篇开始。
 - 重启恢复：启动时把 `running` 的 translation 放回队首、名下 job 回到 `queued`，追加事件“服务已重启，任务将重新开始”，并清掉残留 workdir；翻译从头重跑（`attempt` 加一）。停服（SIGTERM）时，uvicorn 最多等 SSE 长连接 3 秒；随后 lifespan 终止引擎，并把翻译留作 `running` 等重启重排，不记失败。因此 systemd 必须用 `KillMode=mixed`：只给主进程发 SIGTERM，主进程退出后剩余进程统一 SIGKILL。用 `control-group` 时引擎会先收到 SIGTERM，翻译被记为失败（见 [部署](../guide/cli.md#云端版)）。
